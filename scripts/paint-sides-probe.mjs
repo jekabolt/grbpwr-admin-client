@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // PAINT THE PARTS · Ф1 — the wearer's left/right checked on the drawing (front/back centroids, the
 // side view's flank from where its front faces) and the `opening` group that never paints.
-// f3 — a "binding" / "band" wider than BAND_MAX_WIDTH of the silhouette leaves its group (`fixBands`).
+// f3/f4 — a "binding" that is not a strip (area / width² < BAND_MIN_ELONGATION, wider than the
+// BAND_MAX_WIDTH floor) leaves its group (`fixBands`); a "band" (rib, hem, neck, turtleneck) never.
 //   node scripts/paint-sides-probe.mjs
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -158,6 +159,60 @@ ck(
   ck(!m.transferable('opening') && m.transferable('back body'), 'an opening name does not travel');
 }
 
+/* c9 · corrected joins re-suggest: the ask key and held parts follow the join list's rev */
+{
+  ck(m.PARTS_ALGO_REV === 'regions.v4+parts.f4', 'parts rev is f4', m.PARTS_ALGO_REV);
+  const sides = [
+    { view: 'front', baseMediaId: 5 },
+    { view: 'back', baseMediaId: 6 },
+  ];
+  ck(m.partsAskKey(sides, 3) !== m.partsAskKey(sides, 4), 'another joins rev → another ask');
+  ck(m.partsAskKey(sides, 3) === m.partsAskKey([...sides].reverse(), 3), 'ask key ignores order');
+  ck(
+    m.heldPartsFresh({ keyed: true }, 3, 3) && !m.heldPartsFresh({ keyed: true }, 3, 4),
+    'held parts are stale once the list moves',
+  );
+  ck(!m.heldPartsFresh({ keyed: true }, undefined, 0), 'parts of unknown list are not fresh');
+}
+
+/* D1 · a crossed strap keeps its side: its centroid sits opposite its neck point */
+{
+  // Back view, 100×60: two diagonal strips crossing at the centre. Strap A rises from the bottom
+  // right to the top LEFT (its neck point picture-left = the wearer's left on a back) but most of
+  // its pixels sit picture-right; strap B the mirror.
+  const XW = 100;
+  const XH = 60;
+  const lab = new Int32Array(XW * XH);
+  for (let y = 0; y < XH; y++)
+    for (let x = 0; x < XW; x++) {
+      const a = Math.abs(x - (10 + (y * 80) / XH)) < 4; // top-left → bottom-right
+      const b = Math.abs(x - (90 - (y * 80) / XH)) < 4; // top-right → bottom-left
+      // Lean each strap's mass to the far side: only the lower 2/3 of each strip is drawn above
+      // the crossing, so the centroid sits on the side opposite its neck point.
+      lab[y * XW + x] = a && y > 12 ? 1 : b && y > 12 ? 2 : 3;
+    }
+  const xf = { w: XW, h: XH, labels: lab, count: 3 };
+  const p = m.partsOf(
+    { parts: [g('left strap', [1]), g('right strap', [2]), g('back body', [3])], splitNeeded: [] },
+    xf,
+    new Int32Array([-1, 30 * XW + 50, 30 * XW + 50, 2 * XW + 50]),
+    'back',
+  );
+  const k3 = new Map([
+    ['left strap', 'left-strap'],
+    ['right strap', 'right-strap'],
+  ]);
+  ck(m.fixSides('back', p, xf, k3) === p, 'back: crossed straps keep the answer’s sides');
+  // The same pair named panels (no strap word) is still kept: each reaches over the centre line.
+  const q = m.partsOf(
+    { parts: [g('left panel', [1]), g('right panel', [2]), g('back body', [3])], splitNeeded: [] },
+    xf,
+    new Int32Array([-1, 30 * XW + 50, 30 * XW + 50, 2 * XW + 50]),
+    'back',
+  );
+  ck(m.fixSides('back', q, xf, keys) === q, 'back: a part over the centre line is not judged');
+}
+
 /* f3 · a band is a thin strip (`fixBands`) */
 {
   // Synthetic: a 100-px-wide silhouette at x 10..109, y 10..59; region 1 = the body around region 2,
@@ -202,6 +257,29 @@ ck(
   );
   const strap = ans(wideIn, 'waistband');
   ck(m.fixBands(strap, wideIn) === strap, '"waistband" / "strap" are no band words');
+  // f4 · a band is never checked; a binding that is a strip stays, however wide.
+  const hem = mk(10, 109, 44, 59); // 16 px = 16 % tall, the whole hem, on the outline (6.3 × long)
+  const sh = m.bandShape(hem);
+  ck(sh.elongation[2] >= 4, 'a hem strip reads elongated', sh.elongation[2].toFixed(2));
+  for (const name of ['hem band', 'rib hem band', 'hem binding']) {
+    const h = ans(hem, name);
+    ck(m.fixBands(h, hem) === h, `wide "${name}" on the outline stays`);
+  }
+  // A folded turtleneck: a block on top of the body, as wide as tall twice over (the neck tube).
+  const turtle = mk(40, 79, 10, 29); // 40 × 20 px, on the outline, elongation ≈ 2
+  const tn = ans(turtle, 'turtleneck band');
+  ck(m.fixBands(tn, turtle) === tn, 'a turtleneck band (blob-shaped) is never touched');
+  const nb = ans(turtle, 'neck band');
+  ck(m.fixBands(nb, turtle) === nb, 'a wide neck band is never touched');
+  ck(
+    m.bandShape(wideIn).elongation[2] < m.BAND_MIN_ELONGATION,
+    'a square reads below the strip threshold',
+    m.bandShape(wideIn).elongation[2].toFixed(2),
+  );
+  // A short square piece of a narrow binding (cut by a crossing line) is under the width floor.
+  const chip = mk(50, 54, 25, 29); // 5 px = 5 %, square
+  const cp = ans(chip, 'neck binding');
+  ck(m.fixBands(cp, chip) === cp, 'a short piece of a narrow binding stays');
   // Order (use-paint `laid`): fixSides first, so the inside takes the owner's corrected name/key.
   {
     const SW2 = 120;
@@ -285,6 +363,13 @@ ck(
   // triangles come out as 3 = picture-right, 4 = picture-left, the live answer's 3 / 4 the other way.
   const back = run('38', 'back', 'c38-back-541r', (r) => (r === 3 ? 4 : r === 4 ? 3 : r));
   if (back) {
+    const sh = m.bandShape(back.f);
+    const el = (r) => sh.elongation[r];
+    ck(
+      el(3) < m.BAND_MIN_ELONGATION && el(4) < m.BAND_MIN_ELONGATION && el(1) >= 4,
+      'c38 back: triangles are no strips, the strap is',
+      [1, 2, 3, 4, 5].map((r) => `${r}:${el(r).toFixed(1)}`).join(' '),
+    );
     const after = names(back.fixed);
     ck(
       back.f.count === 7 &&
@@ -297,6 +382,37 @@ ck(
       'c38 back: the two "armhole binding" triangles → opening, the rest kept',
       after,
     );
+    // D1 · the live f3 answer through the client's L/R check: the straps keep their sides.
+    const sided = m.fixSides(
+      'back',
+      back.p,
+      back.f,
+      new Map(live['38'].views.back.map((x) => [x.label, x.partKey])),
+    );
+    ck(
+      names(sided).includes('right strap[right-strap]:1') &&
+        names(sided).includes('left strap[left-strap]:2,5'),
+      'c38 back: fixSides keeps the crossed straps as answered',
+      names(sided),
+    );
+    // D2 · paint carried over the whole back never stands on its openings (the two triangles).
+    {
+      const lab = new Uint32Array(back.f.labels.length);
+      for (let i = 0; i < lab.length; i++) if (back.f.labels[i] > 0) lab[i] = 0xff0000;
+      const inOpen = (i) => back.f.labels[i] === 3 || back.f.labels[i] === 4;
+      const cleared = m.clearOpenings(lab, back.f, back.fixed);
+      let left = 0;
+      let kept = 0;
+      for (let i = 0; i < lab.length; i++) {
+        if (inOpen(i) && lab[i]) left++;
+        if (!inOpen(i) && back.f.labels[i] > 0 && lab[i]) kept++;
+      }
+      ck(
+        cleared > 0 && left === 0 && kept > 0,
+        'c38 back: carried paint is cleared off the openings, kept elsewhere',
+        `cleared ${cleared} · left ${left} · kept ${kept}`,
+      );
+    }
     // A strap named a binding is a thin strip (5.6 %): it stays.
     const rows = live['38'].views.back.map((x) =>
       x.partKey === 'right-strap' ? { ...x, label: 'right strap binding' } : x,

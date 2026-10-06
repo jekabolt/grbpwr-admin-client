@@ -351,6 +351,115 @@ if (!chromium) {
   }
 }
 
+console.log('\nreview majors 06.10 · join replay, mood fingerprint, run ledger');
+{
+  const row = (id, text) => ({ id, kind: 'binding', from: 'NP_R', to: 'NP_L', text });
+  const base = { rev: 3, items: [row('neck', 'old'), row('arm', 'x')], absences: ['no pocket'] };
+  const e = M.editItem('neck', { text: 'mine' });
+  // Only the rev moved: the replay carries the edit.
+  const r1 = M.replayEdit(e, base, { ...base, rev: 4 });
+  ck(r1?.items[0].text === 'mine', 'M4 a replay over an unmoved row carries the edit');
+  // The row is gone on the fresh list: no silent no-op.
+  ck(
+    M.replayEdit(e, base, { ...base, rev: 4, items: [row('arm', 'x')] }) === null,
+    'M4 a replay whose row is gone does not save (editor stays)',
+  );
+  // The same row was rewritten elsewhere: the replay must not overwrite it.
+  ck(
+    M.replayEdit(e, base, { ...base, rev: 4, items: [row('neck', 'theirs'), row('arm', 'x')] }) ===
+      null,
+    'c5 a replay over a row changed elsewhere does not overwrite it',
+  );
+  // Another row changed: this edit still replays.
+  ck(
+    M.replayEdit(e, base, { ...base, rev: 4, items: [row('neck', 'old'), row('arm', 'y')] })
+      ?.items[0].text === 'mine',
+    'c5 a change to ANOTHER row does not block the replay',
+  );
+  ck(
+    M.replayEdit(M.editAbsence('no pocket', 'no pockets'), base, {
+      ...base,
+      rev: 4,
+      absences: [],
+    }) === null,
+    'M4 an absence edit whose absence is gone does not save',
+  );
+  ck(
+    M.replayEdit(M.dropItem('arm'), base, { ...base, rev: 4, items: [row('neck', 'old')] }) ===
+      null,
+    'M4 a drop of a row already gone is said, not done silently',
+  );
+
+  const kb = { ...base, consistency: { consistent: false, groups: [], keepMediaIds: [1, 2] } };
+  ck(
+    M.replayEdit(M.keepPhotos([3]), kb, {
+      ...kb,
+      rev: 4,
+      consistency: { ...kb.consistency, keepMediaIds: [2] },
+    }) === null,
+    'c5 a photo pick replayed over another pick does not overwrite it',
+  );
+
+  // straps refused as stale: one quiet line
+  const err = Object.assign(new Error('FailedPrecondition: joins_unconfirmed'), {
+    status: 400,
+    details: [
+      {
+        '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+        reason: 'joins_unconfirmed',
+        metadata: { reason: 'stale', joins_rev: '7' },
+      },
+    ],
+  });
+  const rf = M.refusalFromError(err, 'x');
+  ck(
+    M.flatRefusalWords(rf.reason, rf.meta) === 'photos changed — confirm joins again' &&
+      M.flatRefusalWords('joins_unconfirmed') === 'confirm the joins first',
+    'stale confirmation → «photos changed — confirm joins again»',
+  );
+
+  // c2 · a mood picture is part of the intent.
+  const band = {
+    references: [
+      { mediaId: 11, role: 'front', ordinal: 1, note: '' },
+      { mediaId: 12, role: 'detail', ordinal: 2, note: '' },
+    ],
+    joins: { rev: 1, confirmed: false },
+  };
+  const now = (moodRole) => ({
+    garmentDescription: 'tank',
+    fit: '',
+    callouts: [],
+    moodboardMedia: [
+      { mediaId: 11, kind: 'x', role: '' },
+      { mediaId: 12, kind: 'x', role: moodRole },
+    ],
+  });
+  ck(
+    [...M.moodPictureIds(now('mood').moodboardMedia)].join() === '12',
+    'c2 the mood pictures are the board pictures whose role is mood',
+  );
+  ck(
+    JSON.stringify(M.flatSnapshot(band, now('mood'), [], 'photos')) !==
+      JSON.stringify(M.flatSnapshot(band, now('detail'), [], 'photos')),
+    'c2 turning a picture into mood changes the fingerprint',
+  );
+
+  // c7 · a started run's request id is kept until the band shows the run.
+  const key = '7:probe';
+  M.runLedger.set(key, 'req-1');
+  M.awaitRun(key, 7, 900, 'req-1');
+  M.settleRunLedger(7, { runs: [{ id: 899 }] });
+  ck(M.ledgerIdOf(key) === 'req-1', 'c7 a band without the run keeps the id (a retry replays it)');
+  M.settleRunLedger(8, { runs: [{ id: 900 }] });
+  ck(M.ledgerIdOf(key) === 'req-1', 'c7 another card’s band does not release it');
+  M.settleRunLedger(7, { runs: [{ id: 900 }] });
+  ck(M.ledgerIdOf(key) === undefined, 'c7 the band showing the run releases the id');
+  M.runLedger.set('7:none', 'req-2');
+  M.awaitRun('7:none', 7, 0, 'req-2');
+  ck(M.ledgerIdOf('7:none') === undefined, 'c7 a start naming no run releases at once');
+}
+
 if (mut && !hit) {
   console.log('mutation did not reach the bundle');
   process.exit(2);

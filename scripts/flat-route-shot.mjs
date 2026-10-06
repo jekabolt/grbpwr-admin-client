@@ -70,6 +70,14 @@ const stubNetwork = {
           if (name === 'GetDesignBand') return clone(window.__bands[card] ?? { bench: [], runs: [] });
           if (name === 'GenerateDesignJoins') {
             await wait(1500);
+            if (window.__failNextRead) {
+              // the read failed for the client, but a list landed on the server meanwhile
+              window.__failNextRead = false;
+              window.__bands[card].joins = { ...clone(window.__joinsAuto), rev: 9 };
+              const e = new Error('Unavailable: upstream');
+              e.status = 503;
+              throw e;
+            }
             const joins = { ...clone(window.__joinsAuto), rev: 1 };
             window.__bands[card].joins = joins;
             return { joins, cached: false };
@@ -86,6 +94,10 @@ const stubNetwork = {
             if (window.__sets === 1) {
               // somebody else saved a second ago
               band.joins = { ...band.joins, rev: (band.joins?.rev ?? 0) + 1 };
+              if (window.__staleMutate) {
+                band.joins = window.__staleMutate(clone(band.joins));
+                window.__staleMutate = null;
+              }
               const e = new Error('Aborted: joins_rev_mismatch');
               e.status = 409;
               throw e;
@@ -112,7 +124,7 @@ const stubNetwork = {
               window.__startRefusal = null;
               const e = new Error(r.words ?? 'refused');
               e.status = r.status ?? 400;
-              e.details = [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: r.reason }];
+              e.details = [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: r.reason, ...(r.meta ? { metadata: r.meta } : {}) }];
               throw e;
             }
             const n = (window.__runs = (window.__runs ?? 0) + 1);
@@ -373,6 +385,29 @@ try {
     .locator(`${U} [data-flat-joins]`)
     .screenshot({ path: resolve(SHOTS, 'route-joins-auto.png') });
 
+  // c6 · a failed read whose list landed meanwhile: retry re-reads the band, then reads non-force
+  {
+    await page.evaluate(() => {
+      window.__failNextRead = true;
+    });
+    const n0 = (await calls(page, 'GenerateDesignJoins')).length;
+    await page.click(`${U} [data-joins-rejoin]`);
+    await page.waitForSelector(`${U} [data-joins-retry]`, { timeout: 10000 });
+    await page.click(`${U} [data-joins-retry]`);
+    await page.waitForFunction(
+      (n) => window.__calls.filter((c) => c.name === 'GenerateDesignJoins').length > n + 1,
+      n0,
+      { timeout: 10000 },
+    );
+    const reads = (await calls(page, 'GenerateDesignJoins')).slice(n0);
+    check(
+      'T1 retry after a landed list reads the non-force way',
+      reads.length === 2 && reads[0].body.force === true && reads[1].body.force === false,
+      JSON.stringify(reads.map((r) => r.body.force)),
+    );
+    await page.waitForTimeout(1800);
+  }
+
   // edit a row: double-click, change the note, Enter — the first write is stale, the edit is re-applied
   const first = page.locator(`${J} [data-join-row^="item:"] span[role="button"]`).first();
   const before = await first.getAttribute('title');
@@ -430,6 +465,58 @@ try {
     'E6 Enter again saves it',
     (await input.count()) === 0 && (await first.getAttribute('title')).includes('kept on failure'),
   );
+
+  // M4/c5 · the stale replay checks its row: rewritten elsewhere → the editor stays, one line
+  await page.evaluate(() => {
+    window.__sets = 0;
+    window.__staleMutate = (j) => ({
+      ...j,
+      items: j.items.map((it, i) => (i === 0 ? { ...it, text: 'changed by someone else' } : it)),
+    });
+  });
+  const setsE7 = (await calls(page, 'SetDesignJoins')).length;
+  await first.dblclick();
+  await input.waitFor();
+  const typedE7 = (await input.inputValue()).replace(/ — .*/, '') + ' — mine over a stale row';
+  await input.fill(typedE7);
+  await input.press('Enter');
+  await page.waitForTimeout(800);
+  check(
+    'E7 a replay over a row changed elsewhere does not save: editor stays, one line',
+    (await calls(page, 'SetDesignJoins')).length === setsE7 + 1 &&
+      (await input.count()) === 1 &&
+      (await input.inputValue()) === typedE7 &&
+      (await page.locator(`${J} .text-error`).first().textContent()).trim() ===
+        'list changed — check again',
+  );
+  check(
+    'E7b the other change stands',
+    (await page.evaluate(() => window.__bands[38].joins.items[0].text)) ===
+      'changed by someone else',
+  );
+  await input.press('Escape');
+  // the row is gone on the fresh list: the editor stays (under the rows), nothing silent
+  const goneId = await page.evaluate(() => window.__bands[38].joins.items[1].id);
+  await page.evaluate((id) => {
+    window.__sets = 0;
+    window.__staleMutate = (j) => ({ ...j, items: j.items.filter((it) => it.id !== id) });
+  }, goneId);
+  const second = page.locator(`${J} [data-join-row="item:${goneId}"] span[role="button"]`);
+  await second.dblclick();
+  await input.waitFor();
+  const typedE8 = (await input.inputValue()).replace(/ — .*/, '') + ' — row gone meanwhile';
+  await input.fill(typedE8);
+  await input.press('Enter');
+  await page.waitForTimeout(800);
+  check(
+    'E8 a replay whose row is gone keeps the editor with the typed line',
+    (await page.locator(`${J} [data-joins-orphan] input`).count()) === 1 &&
+      (await page.locator(`${J} [data-joins-orphan] input`).inputValue()) === typedE8 &&
+      (await page.locator(`${J} [data-joins-orphan]`).textContent()).includes(
+        'list changed — check again',
+      ),
+  );
+  await page.locator(`${J} [data-joins-orphan] input`).press('Escape');
 
   // add an absence through + join; a refused line says why
   await page.click(`${J} [data-joins-add]`);
@@ -617,6 +704,31 @@ try {
     (await page.locator(`${M} [data-joins-confirm]`).count()) === 0,
   );
 
+  // c1 · a JOINS line typed and not saved holds GENERATE, one quiet word
+  {
+    const row = page.locator(`${M} [data-join-row^="item:"] span[role="button"]`).first();
+    await row.dblclick();
+    const ed = page.locator(`${M} input[aria-label="edit join"]`);
+    await ed.waitFor();
+    await ed.fill((await ed.inputValue()) + ' typed');
+    await page.waitForTimeout(200);
+    check(
+      'H1 an unsaved join line holds GENERATE',
+      !(await generateLive()) &&
+        (await page.locator(`${M} [data-flat-unsaved]`).textContent()).trim() === 'unsaved',
+    );
+    const before = await nStarts();
+    await page.click(generate, { force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+    check('H1b no run starts', (await nStarts()) === before);
+    await ed.press('Escape');
+    await page.waitForTimeout(200);
+    check(
+      'H1c Esc frees it',
+      (await generateLive()) && (await page.locator(`${M} [data-flat-unsaved]`).count()) === 0,
+    );
+  }
+
   // open custom: the mode switch
   await page.click(`${M} [aria-expanded]:has-text("custom")`);
   const modeRadio = (name) =>
@@ -801,6 +913,25 @@ try {
     (await page.locator(`${M} [data-flat-refusal="joins_unconfirmed"]`).textContent()).includes(
       'confirm the joins first',
     ),
+  );
+  await page.locator(`${M} [data-flat-refusal] button:has-text("dismiss")`).click();
+  // confirmed against other photos (server: reason=stale) → one quiet line, the pill drops
+  await page.evaluate(() => {
+    window.__startRefusal = {
+      status: 400,
+      reason: 'joins_unconfirmed',
+      words: 'FailedPrecondition: joins_unconfirmed',
+      meta: { reason: 'stale', joins_rev: String(window.__bands[60].joins.rev) },
+    };
+  });
+  await press();
+  check(
+    'S8b stale confirmation → «photos changed — confirm joins again», pill dropped',
+    (await page.locator(`${M} [data-flat-refusal="joins_unconfirmed"]`).textContent()).includes(
+      'photos changed — confirm joins again',
+    ) &&
+      (await page.locator(`${M} [data-joins-confirmed]`).count()) === 0 &&
+      (await page.locator(`${M} [data-joins-confirm]`).count()) === 1,
   );
   await page.locator(`${M} [data-flat-refusal] button:has-text("dismiss")`).click();
 

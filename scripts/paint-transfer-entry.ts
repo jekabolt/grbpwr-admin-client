@@ -4,6 +4,7 @@ export {
   transferPoints,
   mapDrawBox,
   inkBox,
+  carryOutcome,
 } from 'components/managers/tech-card/components/design/paint/transfer';
 export { analyseFlat } from 'components/managers/tech-card/components/design/paint/regions';
 export {

@@ -53,7 +53,10 @@ import {
 } from './map-model';
 import {
   concatIndices,
+  clearOpenings,
   dropOpenings,
+  heldPartsFresh,
+  partsAskKey,
   fixBands,
   fixSides,
   gestureLive,
@@ -87,7 +90,14 @@ import {
 import { remainderCloth } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 import { dec, num, strayMarks, type StrayMark } from './artworks';
-import { inkBox, mapDrawBox, transferMap, transferPoints, type FracBox } from './transfer';
+import {
+  carryOutcome,
+  inkBox,
+  mapDrawBox,
+  transferMap,
+  transferPoints,
+  type FracBox,
+} from './transfer';
 import { viewLabel } from '../views';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -112,6 +122,13 @@ export type PaintView = {
   parts: ViewParts | null;
   /** The suggestion row `parts` came from (re-read only when it changes). */
   partsSig: string;
+  /**
+   * D2 · the pixels hold paint carried from a replaced flat: a DRAFT — never saved by opening the
+   * page; the person's next gesture on the side saves it. Openings are cleared as parts arrive.
+   */
+  carried?: boolean;
+  /** The join list's rev `parts` were named under (c9): another rev now → asked again. */
+  partsJoinsRev?: number;
 };
 
 /** One thing to paint with: a slot's bound cloth or a free colour. */
@@ -493,6 +510,7 @@ export class PaintSession {
         changed = true;
       }
     if (changed) this.prune();
+    if (this.dropStaleParts()) changed = true;
     for (const v of this.views.values()) if (this.takeParts(v)) changed = true;
     if (this.hovered && !this.views.get(this.hovered.view)?.parts) {
       this.hovered = null;
@@ -537,10 +555,20 @@ export class PaintSession {
     return parts && fixBands(fixSides(view, parts, flat, keys), flat);
   }
 
-  /** The side has the card-level answer (Ф2.1 topology); an older side-by-side one is stale. */
+  /** The rev of the card's join list now (0 = none): the labeller reads the list (c9). */
+  private joinsRev(): number {
+    return this.band?.joins?.rev ?? 0;
+  }
+
+  /**
+   * The side has the card-level answer (Ф2.1 topology) for TODAY's join list; an older side-by-side
+   * one is stale. The band shows only rows named under the list's current rev (server
+   * `designPartsCurrentRows`); parts held in memory count only while the list has not moved since.
+   */
   private partsFresh(v: PaintView): boolean {
     const row = this.bandParts(v);
-    return (!!row && keyedSuggestion(row)) || !!v.parts?.keyed;
+    if (row && keyedSuggestion(row)) return true;
+    return heldPartsFresh(v.parts, v.partsJoinsRev, this.joinsRev());
   }
 
   /**
@@ -556,8 +584,38 @@ export class PaintSession {
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
     v.parts = this.laid(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view, this.bandKeys());
+    v.partsJoinsRev = this.joinsRev();
     this.partsGen += 1;
+    this.clearCarriedOpenings(v);
     return true;
+  }
+
+  /** D2 · carried paint never stands on an opening. Saved only if the person already kept it. */
+  private clearCarriedOpenings(v: PaintView) {
+    if (!v.carried || !v.labels || !v.flat || clearOpenings(v.labels, v.flat, v.parts) === 0)
+      return;
+    v.rev += 1;
+    this.undoStack = this.undoStack.filter((g) => !g.some((st) => st.view === v.view));
+    this.redoStack = this.redoStack.filter((g) => !g.some((st) => st.view === v.view));
+    if (v.dirty) this.schedule();
+  }
+
+  /**
+   * c9 · parts named under another join list are dropped (not painted through) the moment the
+   * list moves: the band shows only rows of the current list, and a new answer is asked for.
+   */
+  private dropStaleParts(): boolean {
+    const rev = this.joinsRev();
+    let changed = false;
+    for (const v of this.views.values())
+      if (v.parts && v.partsJoinsRev !== undefined && v.partsJoinsRev !== rev) {
+        v.parts = null;
+        v.partsSig = '';
+        v.partsJoinsRev = undefined;
+        this.partsGen += 1;
+        changed = true;
+      }
+    return changed;
   }
 
   /**
@@ -573,16 +631,15 @@ export class PaintSession {
       (v): v is PaintView & { flat: FlatRegions } => v.status === 'ready' && this.namable(v),
     );
     if (sides.length === 0 || (!force && sides.every((v) => this.partsFresh(v)))) return;
-    const key = `${sides
-      .map((v) => `${v.view}:${v.baseMediaId}`)
-      .sort()
-      .join('|')}|${PARTS_ALGO_REV}`;
+    const joinsRev = this.joinsRev();
+    const key = partsAskKey(sides, joinsRev);
     if (this.asked.has(key) && !again) return;
     this.asked.add(key);
     this.partsFailed = '';
     this.naming = true;
     this.bump();
     const current = () => sides.every((v) => this.views.get(v.view) === v);
+    let listMoved = false;
     void (async () => {
       try {
         const seeds = sides.map((v) => v.parts?.seeds ?? markPoints(v.flat));
@@ -606,6 +663,11 @@ export class PaintSession {
             regionCount: v.flat.count,
           })),
         });
+        // The list moved while the model named: this answer is for the old one (asked anew).
+        if (this.joinsRev() !== joinsRev) {
+          listMoved = true;
+          return;
+        }
         let got = 0;
         const keys = labelKeys(res.suggestions ?? []);
         for (const s of res.suggestions ?? []) {
@@ -619,7 +681,9 @@ export class PaintSession {
           if (!parts) continue;
           v.parts = parts;
           v.partsSig = JSON.stringify([s.parts, s.splitNeeded]);
+          v.partsJoinsRev = joinsRev;
           this.partsGen += 1;
+          this.clearCarriedOpenings(v);
           got += 1;
         }
         if (got === 0) {
@@ -633,6 +697,7 @@ export class PaintSession {
       } finally {
         this.naming = false;
         this.bump();
+        if (listMoved) this.suggestCard();
       }
     })();
   }
@@ -861,11 +926,14 @@ export class PaintSession {
         v.labels = labels;
         v.status = 'ready';
         v.rev += 1;
-        // The carried paint saves like any gesture — once. Nothing carried: the saved map is kept
-        // (a passing read failure must not delete somebody's paint) unless it is confirmed gone;
-        // the side's next own gesture replaces it.
+        // D2 · the carried paint is a DRAFT: opening the page never writes paint. It is saved with
+        // the side's next own gesture (it then stands in `labels`, which the save writes whole).
+        // Nothing carried: the saved map is kept (a passing read failure must not delete
+        // somebody's paint) unless it is confirmed gone; the side's next own gesture replaces it.
         if (carry) {
-          if (moved || saved?.gone) v.dirty = true;
+          const out = carryOutcome(moved, !!saved?.gone);
+          v.carried = out.draft;
+          v.dirty = out.dirty;
           const key = `${view}:${saved?.mediaId ?? 0}:${saved?.baseMediaId ?? 0}>${baseMediaId}`;
           if (!this.carried.has(key)) {
             this.carried.add(key);
@@ -914,8 +982,10 @@ export class PaintSession {
     // One phrase per side: what moved, then what is left to the person. Sides saying the same
     // thing share it: «front, back: flats changed · paint and artwork moved».
     const phrase = (t: { paint: boolean | null; art: number; artLeft: number }) => {
-      const went = [t.paint === true ? 'paint' : '', t.art > 0 ? 'artwork' : ''].filter(Boolean);
+      const went = [t.art > 0 ? 'artwork' : ''].filter(Boolean);
       return [
+        // D2 · carried paint is a draft until the person paints the side.
+        t.paint === true ? 'paint draft' : '',
         went.length > 0 ? `${went.join(' and ')} moved` : '',
         t.paint === false ? 'repaint' : '',
         t.artLeft > 0 ? 'place artwork again' : '',

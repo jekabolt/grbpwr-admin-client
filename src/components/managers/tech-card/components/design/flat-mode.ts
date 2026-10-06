@@ -147,6 +147,30 @@ export const FLAT_REFUSAL_WORDS: Record<string, string> = {
   role_reserved: 'that role is reserved for flats',
 };
 
-export function flatRefusalWords(reason: string | undefined): string | null {
+export function flatRefusalWords(
+  reason: string | undefined,
+  meta?: Record<string, string>,
+): string | null {
+  // The confirmation was made against other photos or another garment note (server `stale`).
+  if (reason === 'joins_unconfirmed' && meta?.reason === 'stale')
+    return 'photos changed — confirm joins again';
   return reason ? FLAT_REFUSAL_WORDS[reason] ?? null : null;
+}
+
+/**
+ * THE MOOD PICTURES — the card's moodboard pictures whose role is `mood`: a flat run's reference on
+ * one of them travels as `mood` («a DIFFERENT garment; style mood only»), whatever reference role it
+ * carries (server `designFlatMoodRoles`). The first non-empty role per picture counts, as the
+ * server's `designBoardRoles` reads it.
+ */
+export function moodPictureIds(
+  board: readonly { mediaId?: number; role?: string }[] | null | undefined,
+): Set<number> {
+  const role = new Map<number, string>();
+  for (const m of board ?? []) {
+    const id = m?.mediaId ?? 0;
+    const r = (m?.role ?? '').trim();
+    if (id > 0 && r && !role.has(id)) role.set(id, r);
+  }
+  return new Set([...role].filter(([, r]) => r === 'mood').map(([id]) => id));
 }

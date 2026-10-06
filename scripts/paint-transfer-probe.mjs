@@ -317,9 +317,25 @@ if (existsSync(FLAT)) {
   // Live case 2: the artwork was placed again by hand on the new back flat (mark 4) → mark 1 stays.
   const again = mk(flatPic(112, 'back', 0, 1112));
   again.assetPlacements.push({ id: 4, assetId: 27, pictureId: 161, annotation: { points: [] } });
-  ck(viewsOf(again) === '', 'stray mark whose artwork is already on the target flat stays', viewsOf(again));
+  ck(
+    viewsOf(again) === '',
+    'stray mark whose artwork is already on the target flat stays',
+    viewsOf(again),
+  );
   const none = mk(undefined);
   ck(viewsOf(none) === '', 'stray mark without its picture is left alone', viewsOf(none));
+}
+
+/* D2 · opening a page never writes paint: a carry is a draft, saved only by the next gesture */
+{
+  const a = m.carryOutcome(true, false);
+  const b = m.carryOutcome(true, true);
+  const c = m.carryOutcome(false, false);
+  const ok = a.draft && !a.dirty && b.draft && !b.dirty && !c.draft && !c.dirty;
+  if (!ok) bad++;
+  console.log(
+    `${ok ? '  ok  ' : '  FAIL'} D2 carried paint is a draft, never saved on open — ${JSON.stringify({ a, b, c })}`,
+  );
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');

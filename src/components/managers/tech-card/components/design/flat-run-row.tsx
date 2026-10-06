@@ -29,7 +29,13 @@ import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import { FlatCustom } from './flat-custom';
-import { joinsSavesSettled } from './flat-joins';
+import {
+  confirmedNow,
+  joinsSavesSettled,
+  joinsUnsaved,
+  markConfirmStale,
+  useJoinsUnsaved,
+} from './flat-joins';
 import {
   flatChoiceSummary,
   flatDraftOf,
@@ -50,8 +56,8 @@ import {
   autoStructure,
   flatParamsFor,
   flatRefusalWords,
-  joinsConfirmed,
   liveStructure,
+  moodPictureIds,
   pickStructure,
   suggestsStraps,
   type FlatMode,
@@ -159,7 +165,7 @@ const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
  *     другой запрос.
  * Полоса — СВЕЖЕЕ чтение (`freshBand` в `submit`, ревью раунда 4, MAJ-1), а не кэш экрана.
  */
-function flatSnapshot(
+export function flatSnapshot(
   band: GetDesignBandResponse | undefined,
   now: TechCardFormData,
   detailSlotIds: readonly number[],
@@ -176,6 +182,15 @@ function flatSnapshot(
     ])
     .sort((a, b) => (a[0] as number) - (b[0] as number));
   const roled = new Set(refs.map((r) => r[0] as number));
+  // The mood pictures among the references: they travel as `mood`, so turning a picture into mood
+  // (or back) on the board is a new intent even when the references block did not move (c2).
+  const moodIds = moodPictureIds(now.moodboardMedia as { mediaId?: number; role?: string }[]);
+  const mood = (band?.references ?? [])
+    .filter((r) => moodIds.has(r.mediaId ?? 0))
+    .map((r) => [r.mediaId ?? 0, (r.role ?? '').trim(), r.ordinal ?? 0, (r.note ?? '').trim()])
+    .sort((a, b) => (a[0] as number) - (b[0] as number));
+  // A role-less reference on a mood picture travels too (as mood), with its callouts.
+  for (const m of mood) roled.add(m[0] as number);
   const callouts = ((now.callouts ?? []) as CalloutLike[]).filter((c) =>
     roled.has(c?.mediaId ?? 0),
   );
@@ -189,6 +204,7 @@ function flatSnapshot(
     words: ((now.garmentDescription ?? '') as string).trim(),
     fit: now.fit ?? '',
     refs,
+    mood,
     callouts,
     details,
     // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
@@ -485,9 +501,13 @@ export function FlatRunRow({
      снимает роли — промпт в этот момент наполовину старый. */
   const choiceOff = writesOff || busy || input.clearing;
   const noViews = ticked.length === 0;
-  const joinsOk = joinsConfirmed(band.joins);
-  const modeGate =
-    mode === 'photos'
+  const joinsOk = confirmedNow(techCardId, band.joins);
+  /* A JOINS line typed and not saved: the run would read the list without it (photos and straps
+     read the list; «from my flat» does not). */
+  const joinsHeld = useJoinsUnsaved(techCardId) && mode !== 'hand_flat';
+  const modeGate = joinsHeld
+    ? 'unsaved'
+    : mode === 'photos'
       ? null
       : tickedDetails.length > 0
         ? 'this mode draws views, not details'
@@ -530,6 +550,7 @@ export function FlatRunRow({
     // Занятость — из хранилища В МОМЕНТ щелчка, а не из снимка отрисовки: два щелчка в одном кадре
     // и щелчок по ряду, вернувшемуся к идущему запросу, отказываются одинаково.
     if (flatInputBusy(readFlatInput(card))) return;
+    if (mode !== 'hand_flat' && joinsUnsaved(card)) return;
     /* АВТОСЕЙВ БЫЛ ЖИВ НА ЩЕЛЧКЕ? (ревью раунда 3, m3). Выключенный или уничтоженный автосейв (уход со
        страницы посреди flush, утверждение) отвечает `off`, а `off` пропускает прогон — и для записи, у
        которой автосейва нет вовсе, так и надо. Но если на щелчке он был ЖИВ, `off` после ожидания
@@ -659,7 +680,7 @@ export function FlatRunRow({
           return;
         }
       }
-      if (mode === 'straps' && !joinsConfirmed(freshBand.joins)) {
+      if (mode === 'straps' && !confirmedNow(card, freshBand.joins)) {
         refusal = localRefusal('joins_unconfirmed');
         return;
       }
@@ -674,6 +695,9 @@ export function FlatRunRow({
       });
       // The list may have moved (edited elsewhere): the band is re-read so the door shows it.
       if (refusal?.reason === 'joins_unconfirmed') {
+        // Stale: confirmed against other photos or another note — the pill drops here at once.
+        if (refusal.meta?.reason === 'stale')
+          markConfirmStale(card, Number(refusal.meta.joins_rev) || (freshBand.joins?.rev ?? 0));
         void qc.invalidateQueries({ queryKey: designKeys.band(card) });
       }
     } finally {
@@ -724,7 +748,15 @@ export function FlatRunRow({
                 <>
                   {/* STRAPS & OPENINGS WAITS FOR THE CONFIRMED LIST — one quiet word; the door
                       is in the JOINS header right above. */}
-                  {mode === 'straps' && !joinsOk && (
+                  {joinsHeld && (
+                    <span
+                      data-flat-unsaved=''
+                      title='a join line is open — Enter saves, Esc cancels'
+                    >
+                      <Pill tone='mut'>unsaved</Pill>
+                    </span>
+                  )}
+                  {!joinsHeld && mode === 'straps' && !joinsOk && (
                     <span data-flat-unconfirmed='' title='confirm the joins first'>
                       <Pill tone='mut'>unconfirmed</Pill>
                     </span>
@@ -990,7 +1022,7 @@ export function FlatRunRow({
               : { serverRefusal: null },
           );
         /* A MODE REFUSAL IS ONE PLAIN LINE in short words — all of them are free (nothing booked). */
-        const short = flatRefusalWords(input.serverRefusal?.reason);
+        const short = flatRefusalWords(input.serverRefusal?.reason, input.serverRefusal?.meta);
         return short ? (
           <CalloutBox tone='error'>
             <div

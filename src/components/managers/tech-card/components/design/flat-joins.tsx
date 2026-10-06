@@ -32,12 +32,14 @@ import {
   editAbsence,
   editItem,
   editLayer,
+  hasAbsence,
   isNeckItem,
   joinLine,
   joinStructure,
   keepPhotos,
   layersOf,
   parseJoinLine,
+  replayEdit,
   visibilityOf,
   type JoinsEdit,
   uniqueAbsences,
@@ -63,7 +65,13 @@ import { cardOnScreen, designKeys, rereadBandNow } from './use-design-band';
 /* ─── the read: per card, outliving the step (a read takes ~50 s) ─── */
 const asked = new Set<number>();
 const reading = new Set<number>();
-const failed = new Map<number, { why: string; force: boolean }>();
+/** `rev` — the list's rev when the failed read started: a retry that finds another one has it. */
+const failed = new Map<number, { why: string; force: boolean; rev: number }>();
+/**
+ * The read's own request, until IT answers — past the client's wait too: a timed-out read may still
+ * run (and land) on the server, so no second read (and no forced one) starts beside it.
+ */
+const inflight = new Set<number>();
 const unsupported = new Set<number>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -87,6 +95,34 @@ const markSaving = (card: number, delta: number) => {
   bump();
 };
 
+/* ─── a row editor holding typed, unsaved text, per card: GENERATE waits (the run reads the SAVED list) ─── */
+const unsaved = new Set<number>();
+const markUnsaved = (card: number, on: boolean) => {
+  if (on === unsaved.has(card)) return;
+  if (on) unsaved.add(card);
+  else unsaved.delete(card);
+  bump();
+};
+
+/** A JOINS row editor of this card holds text that is not saved (Enter saves, Esc cancels). */
+export function useJoinsUnsaved(card: number): boolean {
+  useSyncExternalStore(subscribe, () => version);
+  return unsaved.has(card);
+}
+export const joinsUnsaved = (card: number): boolean => unsaved.has(card);
+
+/* ─── a confirmation the server refused as stale (other photos / note since): per card, at its rev ─── */
+const staleConfirm = new Map<number, number>();
+/** The server said this rev's confirmation is stale: the pill drops until the list is confirmed again. */
+export function markConfirmStale(card: number, rev: number): void {
+  staleConfirm.set(card, rev);
+  bump();
+}
+/** The list is confirmed and its confirmation is not known stale. */
+export function confirmedNow(card: number, joins: common_DesignJoins | null | undefined): boolean {
+  return joinsConfirmed(joins) && staleConfirm.get(card) !== (joins?.rev ?? 0);
+}
+
 /** Every joins save of this card has answered (or `ms` passed: false). */
 export function joinsSavesSettled(card: number, ms: number): Promise<boolean> {
   if (!savingCount.get(card)) return Promise.resolve(true);
@@ -104,10 +140,12 @@ export function joinsSavesSettled(card: number, ms: number): Promise<boolean> {
 const statusOf = (e: unknown) => (e as { status?: number } | null)?.status ?? 0;
 const messageOf = (e: unknown) => (e instanceof Error && e.message) || 'the join list did not load';
 /** The read takes ~50 s; past these the wait ends and says so (the request may still land). */
-const READ_TIMEOUT_MS = 120_000;
+const READ_TIMEOUT_MS = 300_000;
 const SAVE_TIMEOUT_MS = 20_000;
 class TimedOut extends Error {}
 class ChangedElsewhere extends Error {}
+/** The one line a lost race says: the editor stays, with what was typed. */
+const CHANGED = 'list changed — check again';
 function timed<T>(ms: number, call: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new TimedOut('timed out')), ms);
@@ -134,27 +172,67 @@ function putJoins(qc: QueryClient, card: number, joins: common_DesignJoins | und
 }
 
 async function readJoins(qc: QueryClient, card: number, force: boolean): Promise<void> {
-  if (reading.has(card)) return;
+  if (reading.has(card) || inflight.has(card)) return;
   reading.add(card);
+  inflight.add(card);
   failed.delete(card);
   bump();
+  const rev = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card))?.joins?.rev ?? 0;
+  const call = adminService.GenerateDesignJoins({ techCardId: card, force });
+  // The request's own end — after a timeout too: a late answer lands, and only then is a retry free.
+  void call.then(
+    (r) => {
+      inflight.delete(card);
+      if (!reading.has(card)) {
+        putJoins(qc, card, r.joins);
+        failed.delete(card);
+      }
+      bump();
+    },
+    () => {
+      inflight.delete(card);
+      bump();
+    },
+  );
   try {
-    const r = await timed(READ_TIMEOUT_MS, () =>
-      adminService.GenerateDesignJoins({ techCardId: card, force }),
-    );
+    const r = await timed(READ_TIMEOUT_MS, () => call);
     putJoins(qc, card, r.joins);
   } catch (e) {
     const s = statusOf(e);
     if (s === 404 || s === 501) unsupported.add(card);
     else if (e instanceof TimedOut) {
-      failed.set(card, { why: 'the read took too long', force });
+      failed.set(card, { why: 'the read took too long', force, rev });
       // It may still land: the next band read shows it.
       void qc.invalidateQueries({ queryKey: designKeys.band(card) });
-    } else failed.set(card, { why: messageOf(e), force });
+    } else failed.set(card, { why: messageOf(e), force, rev });
   } finally {
     reading.delete(card);
     bump();
   }
+}
+
+/**
+ * `joins · retry` after a failed read: re-read the band first — a list that arrived meanwhile (a
+ * timed-out read that landed late) is read the non-force way (a free cache hit, never a second
+ * paid read over it); otherwise the read is asked again as it was.
+ */
+async function retryRead(qc: QueryClient, card: number): Promise<void> {
+  const f = failed.get(card);
+  if (!f || inflight.has(card) || reading.has(card)) return;
+  // Locked (`reading…`) from the press: nothing is edited between the band read and the read.
+  reading.add(card);
+  bump();
+  let force = f.force;
+  try {
+    const fresh = await rereadBandNow(qc, card);
+    if (fresh.joins && (fresh.joins.rev ?? 0) !== f.rev) force = false;
+  } catch {
+    // The band could not be read: a forced read would replace a list nobody has looked at.
+    force = false;
+  } finally {
+    reading.delete(card);
+  }
+  await readJoins(qc, card, force);
 }
 
 /** `was` — the text the editor opened with: a blur closes it only when nothing was typed. */
@@ -178,6 +256,8 @@ export function FlatJoins({
   useSyncExternalStore(subscribe, () => version);
   const card = techCardId;
   const isReading = reading.has(card);
+  /** A read of this card still runs on the server (maybe past our wait): no second one. */
+  const readRunning = inflight.has(card);
   const failure = failed.get(card);
 
   const [draft, setDraft] = useState<common_DesignJoins | null>(null);
@@ -199,7 +279,14 @@ export function FlatJoins({
   );
   const joins = draft ?? band.joins;
   const writesOff = !!disabled || !speaks;
-  const locked = writesOff || saving || isReading;
+  const locked = writesOff || saving || isReading || readRunning;
+
+  /* An open editor with typed text holds GENERATE (`useJoinsUnsaved`); unmounting drops the text. */
+  const dirty = !!editing && editing.value.trim() !== editing.was.trim();
+  useEffect(() => {
+    markUnsaved(card, dirty);
+  }, [card, dirty]);
+  useEffect(() => () => markUnsaved(card, false), [card]);
 
   /* The first visit with photos and no list reads it — once per card per session. */
   useEffect(() => {
@@ -211,9 +298,11 @@ export function FlatJoins({
   if (unsupported.has(card)) return null;
 
   /**
-   * One edit, written under CAS; a stale rev re-reads the band and applies the SAME edit once more.
-   * `confirm` (the `confirm joins` door) marks the saved rev confirmed — and is NEVER retried on a
-   * stale rev: the fresh list is one the designer has not looked at, so it is not theirs to confirm.
+   * One edit, written under CAS; a stale rev re-reads the band and applies the SAME edit once more —
+   * only when its row reads on the fresh list as it did (`replayEdit`): a row gone, rewritten
+   * elsewhere, or an edit that would change nothing keeps the editor open: «list changed — check
+   * again». `confirm` (the `confirm joins` door) marks the saved rev confirmed — and is NEVER retried
+   * on a stale rev: the fresh list is one the designer has not looked at, so it is not theirs to confirm.
    */
   const apply = async (edit: JoinsEdit, quiet = false, confirm = false): Promise<string | null> => {
     const base = band.joins ?? EMPTY_JOINS;
@@ -236,9 +325,10 @@ export function FlatJoins({
         ).joins;
       } catch (e) {
         if (!isStale(e)) throw e;
-        if (confirm) throw new ChangedElsewhere('the list changed — look at it again');
+        if (confirm) throw new ChangedElsewhere(CHANGED);
         const fresh = (await rereadBandNow(qc, card)).joins ?? EMPTY_JOINS;
-        const again = edit(fresh);
+        const again = replayEdit(edit, base, fresh);
+        if (!again) throw new ChangedElsewhere(CHANGED);
         setDraft(again);
         saved = (
           await timed(SAVE_TIMEOUT_MS, () =>
@@ -260,7 +350,7 @@ export function FlatJoins({
         e instanceof TimedOut
           ? 'not saved — the save took too long'
           : e instanceof ChangedElsewhere
-            ? `not confirmed — ${e.message}`
+            ? e.message
             : isStale(e)
               ? 'not saved — the list changed elsewhere twice'
               : `not saved — ${messageOf(e)}`;
@@ -280,15 +370,30 @@ export function FlatJoins({
     const save = (edit: JoinsEdit) =>
       void apply(edit, true).then((why) => setEditing(why ? { key, value, was, why } : null));
     const refuse = (why: string) => setEditing({ key, value, was, why });
-    if (key.startsWith('abs:')) {
+    // A row gone from the stored list (a lost race): its typed line is added as a new one on Enter.
+    if (
+      key.startsWith('layer:') &&
+      !layersOf(band.joins).some((l) => `layer:${l.index ?? 0}` === key)
+    )
+      return refuse(CHANGED);
+    if (key.startsWith('abs:') && hasAbsence(band.joins, key.slice(4))) {
       const old = key.slice(4);
       if (!text) return save(dropAbsence(old));
       if (!/^(no|not|none|nothing|without|never|zero)\b/i.test(text))
         return refuse('an absence starts with “no”');
       return save(editAbsence(old, text));
     }
-    if (key.startsWith('layer:')) return save(editLayer(Number(key.slice(6)), { name: text }));
+    if (key.startsWith('layer:')) {
+      const index = Number(key.slice(6));
+      const name = layersOf(band.joins).find((l) => (l.index ?? 0) === index)?.name ?? '';
+      if (name !== was) return setEditing({ key, value, was: name, why: CHANGED });
+      return save(editLayer(index, { name: text }));
+    }
     if (item) {
+      // The row was rewritten elsewhere while the editor was open (a band refetch landed): the typed
+      // line was made against the old one — say so, once; Enter again saves it over the new row.
+      if (joinLine(item) !== was)
+        return setEditing({ key, value, was: joinLine(item), why: CHANGED });
       // The structure left as it was: only the note changed (also how an opening is edited).
       const head = joinStructure(item);
       if (text === head || text.startsWith(`${head} — `)) {
@@ -502,6 +607,13 @@ export function FlatJoins({
 
   const absences = uniqueAbsences(joins?.absences);
   const uncertain = joins?.uncertain ?? [];
+  /** An open editor whose row is no longer on the list: it stays, under the rows, with its line. */
+  const orphan =
+    !!editing &&
+    editing.key !== 'new' &&
+    !items.some((it) => `item:${it.id ?? ''}` === editing.key) &&
+    !absences.some((a) => `abs:${a}` === editing.key) &&
+    !(layered && layers.some((l) => `layer:${l.index ?? 0}` === editing.key));
   const anyRows = items.length + absences.length + (questionsOpen ? uncertain.length : 0) > 0;
 
   /* ─── photos disagree · pick ─── */
@@ -610,11 +722,13 @@ export function FlatJoins({
         <button
           type='button'
           title={failure.why}
-          disabled={writesOff}
-          onClick={() => void readJoins(qc, card, failure.force)}
+          disabled={writesOff || readRunning}
+          onClick={() => void retryRead(qc, card)}
           data-joins-retry=''
         >
-          <Pill tone='warn'>joins · retry</Pill>
+          <Pill tone={readRunning ? 'mut' : 'warn'}>
+            {readRunning ? 'still reading' : 'joins · retry'}
+          </Pill>
         </button>
       ) : null}
       {uncertain.length > 0 && (
@@ -646,7 +760,7 @@ export function FlatJoins({
       {strapsMode &&
         !!joins &&
         !isReading &&
-        (joinsConfirmed(joins) ? (
+        (confirmedNow(card, joins) ? (
           <span data-joins-confirmed=''>
             <Pill tone='ok'>confirmed</Pill>
           </span>
@@ -730,9 +844,12 @@ export function FlatJoins({
         )}
       </div>
       {!writesOff &&
-        (editing?.key === 'new' ? (
-          <div className={cn('flex min-w-0 items-baseline gap-2 py-1', anyRows && 'mt-4')}>
-            {editor('new')}
+        (editing && (editing.key === 'new' || orphan) ? (
+          <div
+            data-joins-orphan={orphan ? '' : undefined}
+            className={cn('flex min-w-0 items-baseline gap-2 py-1', anyRows && 'mt-4')}
+          >
+            {editor(editing.key)}
           </div>
         ) : (
           <button

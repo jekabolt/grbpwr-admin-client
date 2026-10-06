@@ -223,7 +223,39 @@ export function layersOf(j: common_DesignJoins | undefined): common_DesignJoinLa
 
 /* ─── edits: each is a function of the list, so a stale write re-applies it to the fresh one ─── */
 
-export type JoinsEdit = (j: common_DesignJoins) => common_DesignJoins;
+/**
+ * An edit of the list. `target` reads the row it changes off a list (null = not there): a replay
+ * after a stale rev goes on only when the fresh list's row reads as it did when the edit was made.
+ */
+export type JoinsEdit = ((j: common_DesignJoins) => common_DesignJoins) & {
+  target?: (j: common_DesignJoins) => string | null;
+};
+
+const targeted = (
+  edit: (j: common_DesignJoins) => common_DesignJoins,
+  target: (j: common_DesignJoins) => string | null,
+): JoinsEdit => Object.assign(edit, { target });
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The edit made on `base`, re-applied to `fresh` after `joins_rev_mismatch` — or null when it may
+ * not be: its row changed elsewhere (gone, or another text), or it would change nothing on the fresh
+ * list though it did change `base` (a silent no-op would close the editor on a lost line).
+ */
+export function replayEdit(
+  edit: JoinsEdit,
+  base: common_DesignJoins,
+  fresh: common_DesignJoins,
+): common_DesignJoins | null {
+  if (edit.target) {
+    const was = edit.target(base);
+    if (was === null || was !== edit.target(fresh)) return null;
+  }
+  const again = edit(fresh);
+  if (same(again, fresh) && !same(edit(base), base)) return null;
+  return again;
+}
 
 export const EMPTY_JOINS: common_DesignJoins = {
   rev: 0,
@@ -242,13 +274,20 @@ export const EMPTY_JOINS: common_DesignJoins = {
 
 const items = (j: common_DesignJoins) => j.items ?? [];
 
-export const editItem =
-  (id: string, patch: Partial<common_DesignJoinItem>): JoinsEdit =>
-  (j) => ({ ...j, items: items(j).map((it) => (it.id === id ? { ...it, ...patch } : it)) });
+/** A row as it reads: its whole stored shape. */
+const itemTarget = (id: string) => (j: common_DesignJoins) => {
+  const it = items(j).find((x) => x.id === id);
+  return it ? JSON.stringify(it) : null;
+};
 
-export const dropItem =
-  (id: string): JoinsEdit =>
-  (j) => ({ ...j, items: items(j).filter((it) => it.id !== id) });
+export const editItem = (id: string, patch: Partial<common_DesignJoinItem>): JoinsEdit =>
+  targeted(
+    (j) => ({ ...j, items: items(j).map((it) => (it.id === id ? { ...it, ...patch } : it)) }),
+    itemTarget(id),
+  );
+
+export const dropItem = (id: string): JoinsEdit =>
+  targeted((j) => ({ ...j, items: items(j).filter((it) => it.id !== id) }), itemTarget(id));
 
 export const addItem =
   (patch: Partial<common_DesignJoinItem>, layer = 0): JoinsEdit =>
@@ -300,14 +339,19 @@ export function uniqueAbsences(list: readonly string[] | undefined): string[] {
   return out;
 }
 
-export const editAbsence =
-  (was: string, next: string): JoinsEdit =>
-  (j) => ({
-    ...j,
-    absences: uniqueAbsences(
-      (j.absences ?? []).map((a) => (absenceKey(a) === absenceKey(was) ? next : a)),
-    ),
-  });
+export const hasAbsence = (j: common_DesignJoins | undefined, was: string): boolean =>
+  (j?.absences ?? []).some((a) => absenceKey(a) === absenceKey(was));
+
+export const editAbsence = (was: string, next: string): JoinsEdit =>
+  targeted(
+    (j) => ({
+      ...j,
+      absences: uniqueAbsences(
+        (j.absences ?? []).map((a) => (absenceKey(a) === absenceKey(was) ? next : a)),
+      ),
+    }),
+    (j) => (hasAbsence(j, was) ? absenceKey(was) : null),
+  );
 
 export const dropAbsence =
   (was: string): JoinsEdit =>
@@ -324,21 +368,29 @@ export const dropUncertain =
   (was: string): JoinsEdit =>
   (j) => ({ ...j, uncertain: (j.uncertain ?? []).filter((u) => u !== was) });
 
-export const editLayer =
-  (index: number, patch: Partial<common_DesignJoinLayer>): JoinsEdit =>
-  (j) => ({
-    ...j,
-    layers: (j.layers ?? []).map((l) => ((l.index ?? 0) === index ? { ...l, ...patch } : l)),
-  });
-
-export const keepPhotos =
-  (ids: number[]): JoinsEdit =>
-  (j) => ({
-    ...j,
-    consistency: {
-      consistent: j.consistency?.consistent ?? false,
-      note: j.consistency?.note ?? '',
-      groups: j.consistency?.groups ?? [],
-      keepMediaIds: ids,
+export const editLayer = (index: number, patch: Partial<common_DesignJoinLayer>): JoinsEdit =>
+  targeted(
+    (j) => ({
+      ...j,
+      layers: (j.layers ?? []).map((l) => ((l.index ?? 0) === index ? { ...l, ...patch } : l)),
+    }),
+    (j) => {
+      const l = (j.layers ?? []).find((x) => (x.index ?? 0) === index);
+      return l ? JSON.stringify(l) : null;
     },
-  });
+  );
+
+export const keepPhotos = (ids: number[]): JoinsEdit =>
+  targeted(
+    (j) => ({
+      ...j,
+      consistency: {
+        consistent: j.consistency?.consistent ?? false,
+        note: j.consistency?.note ?? '',
+        groups: j.consistency?.groups ?? [],
+        keepMediaIds: ids,
+      },
+    }),
+    // The pick as it read: another designer's pick in between is not overwritten by a replay.
+    (j) => JSON.stringify(j.consistency?.keepMediaIds ?? []),
+  );

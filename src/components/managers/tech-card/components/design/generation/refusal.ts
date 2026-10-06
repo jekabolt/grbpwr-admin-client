@@ -28,6 +28,8 @@ export type RunRefusal = {
   clientRequestId: string;
   /** `ErrorInfo.reason` when the refusal carries one — the machine word a screen may translate. */
   reason?: string;
+  /** `ErrorInfo.metadata` (e.g. `joins_unconfirmed` with `reason: stale`). */
+  meta?: Record<string, string>;
 };
 
 /** grpc-gateway maps `codes.Aborted` onto HTTP 409 — somebody else moved first. */
@@ -60,7 +62,28 @@ export function refusalFromError(error: unknown, clientRequestId: string): RunRe
   if (isAborted(error)) return null;
   const words = (error as Error | null | undefined)?.message?.trim() || 'the run did not start';
   const reason = errorInfoReason(error);
-  return { words, status: statusOf(error), clientRequestId, ...(reason ? { reason } : {}) };
+  const meta = errorInfoMeta(error);
+  return {
+    words,
+    status: statusOf(error),
+    clientRequestId,
+    ...(reason ? { reason } : {}),
+    ...(meta ? { meta } : {}),
+  };
+}
+
+/** `ErrorInfo.metadata` of a google.rpc.Status refusal, or undefined. */
+export function errorInfoMeta(error: unknown): Record<string, string> | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const m = (d as { metadata?: unknown }).metadata;
+    if (m && typeof m === 'object') return m as Record<string, string>;
+  }
+  return undefined;
 }
 
 /**

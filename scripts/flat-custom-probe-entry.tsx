@@ -25,3 +25,24 @@ export function render(open: boolean, modified: boolean): string {
     </FlatCustom>,
   );
 }
+
+// Review majors 06.10 (M4/c5, c2, c7): the join replay, the mood fingerprint, the run ledger.
+export {
+  dropItem,
+  editAbsence,
+  editItem,
+  keepPhotos,
+  replayEdit,
+} from '../src/components/managers/tech-card/components/design/joins-model';
+export {
+  flatRefusalWords,
+  moodPictureIds,
+} from '../src/components/managers/tech-card/components/design/flat-mode';
+export { refusalFromError } from '../src/components/managers/tech-card/components/design/generation/refusal';
+export { flatSnapshot } from '../src/components/managers/tech-card/components/design/flat-run-row';
+export {
+  awaitRun,
+  ledgerIdOf,
+  runLedger,
+  settleRunLedger,
+} from '../src/components/managers/tech-card/components/design/generation/run-ledger';

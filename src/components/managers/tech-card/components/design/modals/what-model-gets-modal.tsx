@@ -17,6 +17,7 @@ import {
 import { useTechCardAutosave } from '../autosave-contract';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
+import { moodPictureIds } from '../flat-mode';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 import { useShownWords } from '../words-seed';
@@ -112,13 +113,19 @@ export function WhatModelGetsModal({
   const garment = useShownWords(techCardId, control, !readOnly && autosave.status !== 'off');
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
+  /* A reference on a MOOD picture travels as `mood` (a different garment, style only), whatever role
+     it carries in the references block — the server names it so (`designFlatMoodRoles`). */
+  const moodIds = useMemo(() => moodPictureIds(items), [items]);
   const roleOf = useMemo(() => {
     const map = new Map<number, string>();
     for (const r of band.references ?? []) {
-      if (r.mediaId != null && (r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
+      if (r.mediaId == null) continue;
+      // A reference on a mood picture travels as mood even without a role of its own.
+      if (moodIds.has(r.mediaId)) map.set(r.mediaId, 'mood');
+      else if ((r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
     }
     return map;
-  }, [band.references]);
+  }, [band.references, moodIds]);
 
   // The reference's note lives on `DesignReference.note`, beside the role, because it is a
   // statement about the INPUT and not about the picture. Reading the board row's `caption` would
@@ -234,10 +241,11 @@ export function WhatModelGetsModal({
       kindWord='flat'
       intro={
         <>
-          <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed
-          below — each with its role, its note and the callouts drawn on it — and the words under
-          them. Nothing on the moodboard travels, and neither does anything absent from this list.
-          The same inventory is what a studio outside would need to be handed.
+          <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed below
+          — each with its role, its note and the callouts drawn on it — and the words under them. A
+          picture marked <b>mood</b> travels as mood: a different garment, style only. Nothing
+          absent from this list travels. The same inventory is what a studio outside would need to
+          be handed.
         </>
       }
     >
@@ -296,7 +304,7 @@ export function WhatModelGetsModal({
         items={[
           {
             label: `moodboard · ${moodCount}`,
-            reason: 'mood is for the human — it is never instruction',
+            reason: 'board pictures that are not references stay on the board',
           },
           /* ⚠ ONLY THE CALLOUTS ON PICTURES OUTSIDE THE PROMPT. The ones on a picture with a role
              DO travel (see `Line.callouts`) and are listed with their picture above; saying «the

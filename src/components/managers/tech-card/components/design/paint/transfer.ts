@@ -187,3 +187,14 @@ export function transferMap(
   }
   return { labels: out, painted };
 }
+
+/**
+ * D2 · what opening a side whose saved map stands on a replaced flat does with the result of the
+ * carry: carried paint is a DRAFT (`draft`) shown but NEVER saved by the opening itself — only the
+ * person's next gesture on the side saves it; a map confirmed gone is cleared (`dirty`: nothing
+ * painted is written). Nothing carried: nothing changes.
+ */
+export function carryOutcome(moved: boolean, gone: boolean): { draft: boolean; dirty: boolean } {
+  if (moved) return { draft: true, dirty: false };
+  return { draft: false, dirty: gone };
+}

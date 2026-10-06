@@ -6,6 +6,7 @@ import type {
   common_DesignBatch,
   common_DesignRun,
   common_DesignRunParams,
+  StartDesignRunResponse,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +21,7 @@ import {
 import { clearBenchChoice, unstickPin } from './bench-store';
 import { refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
+import { awaitRun, runLedger } from './run-ledger';
 
 /**
  * THE GENERATIVE HALF OF THE BAND'S SEAM.
@@ -215,7 +217,6 @@ export type StartRunState = {
  * they put in `params`; the money, the idempotency and the invalidation are one mechanism, and a
  * second copy of it is precisely where two screens start disagreeing about what a retry means.
  */
-const runLedger = new Map<string, string>();
 
 /**
  * A SHORT, STABLE DIGEST of a JSON-able value (cyrb53: two 32-bit lanes, 53 bits out). It keeps the
@@ -262,8 +263,9 @@ export function useStartRun(techCardId?: number): StartRunState {
         clientRequestId = newClientRequestId();
         runLedger.set(key, clientRequestId);
       }
+      let started: StartDesignRunResponse | undefined;
       try {
-        await startRun.mutateAsync({ ...input, clientRequestId });
+        started = await startRun.mutateAsync({ ...input, clientRequestId });
       } catch (error) {
         // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
         // seconds, the refusal stays on the screen until read (CONTRACT §E) — in the CALLER's
@@ -272,7 +274,8 @@ export function useStartRun(techCardId?: number): StartRunState {
         // same id.
         return refusalFromError(error, clientRequestId);
       }
-      if (runLedger.get(key) === clientRequestId) runLedger.delete(key);
+      // Kept until the band shows the run (`run-ledger.ts`): a press before that replays this id.
+      awaitRun(key, card, started?.run?.id ?? 0, clientRequestId);
       // The run comes back PENDING, not done: the pictures arrive when the provider answers.
       // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
       // while the card is on screen, whether or not the row that pressed is still mounted. WHERE

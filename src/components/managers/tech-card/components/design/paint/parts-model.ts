@@ -44,8 +44,30 @@ const PAL: [number, number, number][] = [
  * Ф1 (`parts.f1`): openings / seen-through inside / no invented pieces / flank from the drawing.
  * `parts.f2`: the labeller reads the card's join list and a closed part vocabulary built from it.
  * `parts.f3`: the labeller's prompt of backend dba6c9a; the client checks a band is thin (`fixBands`).
+ * `parts.f4`: the card's join list rev is part of the cache key (corrected joins re-suggest); only a
+ * non-elongated `binding` leaves its group.
  */
-export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f3`;
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f4`;
+
+/**
+ * c9 · the key one card-level ask is made under (once per key per session): the sides with their
+ * flats, the cut + labeller rev, and the join list's rev — a corrected list is asked again.
+ */
+export const partsAskKey = (
+  sides: readonly { view: string; baseMediaId: number }[],
+  joinsRev: number,
+): string =>
+  `${sides
+    .map((v) => `${v.view}:${v.baseMediaId}`)
+    .sort()
+    .join('|')}|${PARTS_ALGO_REV}|j${joinsRev}`;
+
+/** c9 · parts held in memory answer only for the join list they were named under. */
+export const heldPartsFresh = (
+  parts: Pick<ViewParts, 'keyed'> | null | undefined,
+  namedUnder: number | undefined,
+  joinsRev: number,
+): boolean => !!parts?.keyed && namedUnder === joinsRev;
 
 /** Regions the model is asked to name: fewer is nothing to group, more is unreadable. */
 export const PARTS_REGIONS_MIN = 2;
@@ -221,6 +243,25 @@ export function dropOpenings(
   return out;
 }
 
+/**
+ * D2 · paint carried from a replaced flat never stands on an opening: every pixel of an opening
+ * region is cleared. Returns how many pixels were cleared (0 = untouched).
+ */
+export function clearOpenings(
+  labels: Uint32Array,
+  flat: Pick<FlatRegions, 'labels'>,
+  parts: ViewParts | null | undefined,
+): number {
+  if (!parts || !parts.groups.some(isOpening)) return 0;
+  let n = 0;
+  for (let i = 0; i < labels.length; i += 1)
+    if (labels[i] && openingRegion(parts, flat.labels[i])) {
+      labels[i] = 0;
+      n += 1;
+    }
+  return n;
+}
+
 /** The wearer's side a side view shows (R16: the left side view shows the left parts). */
 const SIDE_OF: Record<string, string> = { side_l: 'left', side_r: 'right' };
 
@@ -312,6 +353,8 @@ function groupXs(flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>, parts: ViewP
   const { labels, count, w } = flat;
   const sum = new Float64Array(count + 1);
   const n = new Float64Array(count + 1);
+  const lo = new Float64Array(count + 1).fill(Infinity);
+  const hi = new Float64Array(count + 1).fill(-Infinity);
   let x0 = Infinity;
   let x1 = -Infinity;
   for (let i = 0; i < labels.length; i += 1) {
@@ -320,6 +363,8 @@ function groupXs(flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>, parts: ViewP
     const x = i % w;
     sum[r] += x;
     n[r] += 1;
+    if (x < lo[r]) lo[r] = x;
+    if (x > hi[r]) hi[r] = x;
     if (x < x0) x0 = x;
     if (x > x1) x1 = x;
   }
@@ -327,7 +372,12 @@ function groupXs(flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>, parts: ViewP
   const xs = parts.groups.map((g, i) =>
     px[i] > 0 ? g.regions.reduce((a, r) => a + sum[r], 0) / px[i] : NaN,
   );
-  return { xs, px, mid: (x0 + x1) / 2, width: Math.max(1, x1 - x0) };
+  /** Per group its pixels' x extent: [min, max] (Infinity / -Infinity = no pixel). */
+  const span = parts.groups.map((g) => [
+    g.regions.reduce((a, r) => Math.min(a, lo[r]), Infinity),
+    g.regions.reduce((a, r) => Math.max(a, hi[r]), -Infinity),
+  ]);
+  return { xs, px, span, mid: (x0 + x1) / 2, width: Math.max(1, x1 - x0) };
 }
 
 const relabel = (g: PartGroup, label: string, key: string): PartGroup => ({
@@ -346,7 +396,9 @@ const relabel = (g: PartGroup, label: string, key: string): PartGroup => ({
  *          that reads clearly and most sided parts say the other flank, each of those takes its
  *          twin's name and key (`keys`: the card's label → part_key); a twin with no key stays.
  * Openings and the inside of a part (seen through an opening, it may be the far side) are never
- * moved. Returns the same object when nothing changes.
+ * moved; on front/back neither is a strap nor a part whose pixels reach over the centre line (D1:
+ * a crossed strap's centroid sits opposite its neck point). Returns the same object when nothing
+ * changes.
  */
 export function fixSides(
   view: string,
@@ -355,7 +407,7 @@ export function fixSides(
   keys: ReadonlyMap<string, string>,
 ): ViewParts {
   const movable = (g: PartGroup) => !isOpening(g) && !g.label.endsWith(INSIDE_SUFFIX);
-  const { xs, px, mid, width } = groupXs(flat, parts);
+  const { xs, px, span, mid, width } = groupXs(flat, parts);
   const groups = parts.groups.slice();
   let changed = false;
 
@@ -366,6 +418,8 @@ export function fixSides(
       const d = xs[i] - mid;
       return Number.isNaN(d) || Math.abs(d) < width * LR_DEAD ? 0 : Math.sign(d);
     };
+    const crossing = (i: number) => span[i][0] < mid && span[i][1] > mid;
+    const strapLike = (g: PartGroup) => /strap/i.test(g.label) || /strap/i.test(g.key);
     const done = new Set<number>();
     parts.groups.forEach((g, i) => {
       // «· inside» groups sit where the far side shows through an opening: their picture side is
@@ -378,6 +432,9 @@ export function fixSides(
       if (j < 0) return;
       done.add(i);
       done.add(j);
+      // D1 · a crossed strap (or any part reaching over the centre line) has its centroid on the
+      // side OPPOSITE its neck point: the centroid says nothing of its side — the answer stands.
+      if (crossing(i) || crossing(j) || strapLike(g) || strapLike(parts.groups[j])) return;
       if (at(i) === -leftAt && at(j) === leftAt) {
         groups[i] = relabel(parts.groups[i], parts.groups[j].label, parts.groups[j].key);
         groups[j] = relabel(parts.groups[j], parts.groups[i].label, parts.groups[i].key);
@@ -420,30 +477,61 @@ export function fixSides(
 
 /* ─────────────────────────── f3 · a band is a thin strip, checked on the drawing ─────────────────────────── */
 
-/** A name that says a strip: a binding, a band (a strap is not checked). */
-const BAND = /\b(binding|band)\b/;
+/**
+ * A name that says a binding — a strip finishing an edge. Only `binding`: a band (rib, hem, neck,
+ * turtleneck, waist) may legitimately be wide and sit on the outline, so it is never checked.
+ */
+const BINDING = /\bbinding\b/;
 export const isBand = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
   !isOpening(g) &&
   !g.label.endsWith(INSIDE_SUFFIX) &&
-  (BAND.test(partKey(g.label)) || BAND.test(g.key.toLowerCase()));
+  (BINDING.test(partKey(g.label)) || BINDING.test(g.key.toLowerCase()));
 
 /**
- * The widest a band may be: the diameter of the largest disc inscribed in its region, as a share
- * of the silhouette's width. Measured (06.10, regions.v4): card 38 front neck binding 4.0 %, its
- * hems 3.3–3.4 %, the back straps 5.6 %; the two triangles on card 38's back the labeller calls
- * "armhole binding" 17.9 / 18.1 %. 10 % sits ≈ 1.8× above the widest strip and below the triangles.
- * The line's own stroke is no scale here: it reads 2 px on every flat of the QA set (quantised).
+ * A binding is long and thin: its area over the square of its width (the diameter of the largest
+ * inscribed disc) is its length in widths. A strip reads ≳ 4; a triangle ≈ 1.3, a square 1, a disc
+ * 0.8. Measured (06.10, regions.v4, + 1 px edge row): card 38's two back "armhole binding"
+ * triangles 2.4 / 2.5 (their ragged edges add area), its straps 8.7–26. A region below 3 is no strip.
  */
-export const BAND_MAX_WIDTH = 0.1;
+export const BAND_MIN_ELONGATION = 3;
+/**
+ * A floor on the width, so a short piece of a narrow binding (cut by a crossing line, near-square)
+ * is never taken for a blob: card 38's widest real strip is 5.6 % of the silhouette's width, its
+ * triangles 17.9 / 18.1 %. Only a region wider than this AND not elongated leaves the binding.
+ */
+export const BAND_MAX_WIDTH = 0.07;
 /** A region borders the outside (or an opening) along at least this share of its edge. */
 const BAND_CONTACT = 0.05;
+
+/** The width of a region from its inscribed radius² (edge pixels are 0, so + 1 for the edge row). */
+const bandWidth = (r2: number) => (r2 >= 0 ? 2 * Math.sqrt(r2) + 1 : 0);
+
+/** Per region of a flat: its width (px) and length in widths — what `fixBands` judges. */
+export function bandShape(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'>): {
+  width: Float64Array;
+  elongation: Float64Array;
+} {
+  const { r2 } = inscribed(flat);
+  const area = new Float64Array(flat.count + 1);
+  for (let i = 0; i < flat.labels.length; i += 1) {
+    const v = flat.labels[i];
+    if (v > 0 && v <= flat.count) area[v] += 1;
+  }
+  const width = new Float64Array(flat.count + 1);
+  const elongation = new Float64Array(flat.count + 1);
+  for (let r = 1; r <= flat.count; r += 1) {
+    width[r] = bandWidth(r2[r]);
+    elongation[r] = width[r] > 0 ? area[r] / (width[r] * width[r]) : 0;
+  }
+  return { width, elongation };
+}
 
 const bodyName = (label: string) => /\bbody\b/.test(partKey(label));
 
 /**
- * f3 · the labeller may call a wide region a "binding" (card 38 back: the triangle between a strap
- * and the armhole edge). After the answer is laid, every region of a band-named group that is not
- * thin (`BAND_MAX_WIDTH`) leaves it:
+ * f3 · the labeller may call a blob a "binding" (card 38 back: the triangle between a strap and the
+ * armhole edge). After the answer is laid, every region of a binding-named group that is not a strip
+ * (`BAND_MIN_ELONGATION`, above the `BAND_MAX_WIDTH` floor) leaves it:
  *   - it borders the outside of the garment, or an opening, along `BAND_CONTACT` of its edge
  *     (looking across the line, as far as two closing radii) → `opening`;
  *   - else → "<part> · inside" of the part it borders most (a body first; none bordering → the
@@ -468,11 +556,18 @@ export function fixBands(
   const silW = x1 - x0 + 1;
   if (silW <= 0) return parts;
   const { r2 } = inscribed(flat);
+  const area = new Float64Array(count + 1);
+  for (let i = 0; i < n; i += 1) {
+    const v = labels[i];
+    if (v > 0 && v <= count) area[v] += 1;
+  }
   const wide: number[] = [];
   parts.groups.forEach((g) => {
     if (!isBand(g)) return;
-    for (const r of g.regions)
-      if (2 * Math.sqrt(Math.max(0, r2[r])) > BAND_MAX_WIDTH * silW) wide.push(r);
+    for (const r of g.regions) {
+      const d = bandWidth(r2[r]);
+      if (d > BAND_MAX_WIDTH * silW && area[r] / (d * d) < BAND_MIN_ELONGATION) wide.push(r);
+    }
   });
   if (wide.length === 0) return parts;
 
