@@ -766,7 +766,10 @@ export function MoodBoard({
   const [open, setOpen] = useState(true);
   // 96-PICTURE-QUESTIONS: вопрос квиза про картинку доски — обводка, остальные приглушены.
   const anchorScope = useRef<HTMLDivElement>(null);
-  const { anchored, onFocusPicture } = usePictureAnchor(anchorScope, open);
+  const { anchored, spots, hotSpot, onHotSpot, onFocusPicture } = usePictureAnchor(
+    anchorScope,
+    open,
+  );
   const pictureOf = useCallback(
     (mediaId: number): QuizPicture | null => {
       const at = items.findIndex((i) => i.mediaId === mediaId);
@@ -1078,6 +1081,9 @@ export function MoodBoard({
               }
               tileBadge={(view) => roleOf.get(view.mediaId) || null}
               anchoredMediaId={anchored}
+              anchoredSpots={spots}
+              hotSpot={hotSpot}
+              onHotSpot={onHotSpot}
               tileCorners={(view, i) =>
                 view.full
                   ? {
@@ -1156,6 +1162,8 @@ export function MoodBoard({
               conceptMax={CONCEPT_MAX}
               pictureOf={pictureOf}
               onFocusPicture={onFocusPicture}
+              hotSpot={hotSpot}
+              onHotSpot={onHotSpot}
               unmarked={unmarked}
               onSetRole={setRoleOf}
             />

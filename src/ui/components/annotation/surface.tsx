@@ -387,6 +387,12 @@ export type AnnotationSurfaceProps = {
   halo?: boolean;
   /** Id картинки кадра: под ним замер кадра уходит в `frame-aspect` (подгонка зоны артворка). */
   frameId?: number;
+  /**
+   * СЛОЙ ПОВЕРХ СНИМКА ВНУТРИ КАДРА (99-SPOTS): рисуется по замеру кадра (`size`, px), в той же
+   * коробке, что снимок и указания, — то есть доли кадра совпадают с долями картинки. Кольца мест
+   * вопроса квиза живут здесь; указатель слой ловит сам, только где ему надо.
+   */
+  overlay?: (size: { w: number; h: number }) => ReactNode;
   cornerSlot?: ReactNode;
   /**
    * ДВОЙНОЙ КЛИК ПО САМОЙ КАРТИНКЕ ОТКРЫВАЕТ УВЕЛИЧЕННЫЙ ВИД (T12). Угловой кнопки `zoom` больше
@@ -663,6 +669,7 @@ export function AnnotationSurface({
   hideCallouts = false,
   halo = false,
   frameId,
+  overlay,
   cornerSlot,
   onOpenLarge,
   cornerSlotBottom,
@@ -2910,6 +2917,7 @@ export function AnnotationSurface({
                 плашкой не схватить. Экранно-постоянные: ручка, растущая с зумом, перекрыла бы саму
                 фигуру ровно тогда, когда её приблизили, чтобы поправить точнее. */}
             {!handlesUnderInsets && handlesEl}
+            {overlay && size.w > 0 && overlay(size)}
           </div>
 
           {zoom && scale > 1 && (

@@ -530,6 +530,17 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   }
 }
 
+/* Quiz spot rings (99-SPOTS §2): the same 150ms opacity ease as the board's dimming; the
+   ring layer carries `motion-reduce:animate-none`. */
+@keyframes spotIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Selected callout (annotation surface, R43): no thicker stroke, no frame; a soft halo that
    breathes. `.callout-breathe` is an SVG halo group under the shape's own path;
    `.callout-breathe-box` puts the same halo on a pin, plate or inset through ::after, so the

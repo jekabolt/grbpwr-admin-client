@@ -24,6 +24,7 @@ import { Button } from './button';
 import { Chip, ChipRow } from './chip';
 import { Pill } from './pill';
 import { PLACEHOLDER_SURFACE } from './placeholder';
+import { SpotRings, type SpotRing } from './spot-rings';
 import Text from './text';
 import { TILE_CORNER, TILE_QUIET } from './tile-skin';
 import { Toolbar, ToolbarSpacer } from './toolbar';
@@ -223,6 +224,13 @@ export type FocusedAnnotatorProps = {
    * `null`/absent — every tile as usual.
    */
   anchoredMediaId?: number | null;
+  /**
+   * 99-SPOTS: places on the anchored picture the question is about — numbered rings inside its
+   * frame (`SpotRings`). `hotSpot` — the number under the pointer here or on the question's word.
+   */
+  anchoredSpots?: SpotRing[];
+  hotSpot?: number | null;
+  onHotSpot?: (n: number | null) => void;
   tileCorners?: (
     view: FocusedView,
     positionInViews: number,
@@ -462,6 +470,9 @@ export function FocusedAnnotator({
   tileFlag,
   tileBadge,
   anchoredMediaId = null,
+  anchoredSpots,
+  hotSpot = null,
+  onHotSpot,
   tileCorners,
   removeLabel,
   carouselLabel,
@@ -945,6 +956,18 @@ export function FocusedAnnotator({
                     // ФИЛМСТРИП: высота кадра общая, ширину считает пропорция, вбок листается сам
                     // ряд — панораму в нём не укорачивают.
                     frameStyle={rowMode ? { height: gridRowHeight } : undefined}
+                    overlay={
+                      anchoredSpots?.length && v.mediaId === anchoredMediaId
+                        ? (size) => (
+                            <SpotRings
+                              spots={anchoredSpots}
+                              size={size}
+                              hot={hotSpot}
+                              onHot={onHotSpot}
+                            />
+                          )
+                        : undefined
+                    }
                     callouts={calloutsFor(v.mediaId)}
                     frozen={readOnly}
                     tool={tool}

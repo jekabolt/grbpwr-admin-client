@@ -851,10 +851,23 @@ if (!chromium) {
         () => !document.querySelector('[data-flat-generate] [aria-busy="true"]'),
       );
     };
-    const options = () =>
-      page.$$eval('[data-flat-target] option', (els) =>
-        els.map((e) => `${e.textContent.trim()}${e.disabled ? '(x)' : ''}`),
+    // T69: target ▾ — общий Radix-список, а не <select>: пункты есть только у открытого.
+    const options = async () => {
+      await page.click('[data-flat-target] button');
+      await page.waitForSelector('[role="option"]');
+      const list = await page.$$eval('[role="option"]', (els) =>
+        els.map((e) => `${e.textContent.trim()}${e.hasAttribute('data-disabled') ? '(x)' : ''}`),
       );
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.querySelector('[role="option"]'));
+      return list;
+    };
+    const pickTarget = async (label) => {
+      await page.click('[data-flat-target] button');
+      await page.click(`[role="option"]:has-text("${label}")`);
+      await page.waitForFunction(() => !document.querySelector('[role="option"]'));
+    };
+    const targetValue = () => page.getAttribute('[data-flat-target]', 'data-flat-target');
 
     console.log('\n82 · ряд (DOM): нетронутый GENERATE — четыре вида одним листом');
     ck(
@@ -893,14 +906,14 @@ if (!chromium) {
     await page.evaluate(() => window.__probe.setCard(32));
     await page.waitForSelector('[data-probe-state="ready"][data-card="32"] [data-flat-run]');
     await page.waitForFunction(() =>
-      document.querySelector('[data-flat-target] option')?.textContent?.includes('again'),
+      document.querySelector('[data-flat-target]')?.textContent?.includes('again'),
     );
     ck(
       (await options()).join('|') === 'views again|detail · collar',
       'FRONT + BACK filled → `views again`, the detail open',
       (await options()).join('|'),
     );
-    await page.selectOption('[data-flat-target]', 'd:21');
+    await pickTarget('detail · collar');
     ck((await page.textContent('[data-flat-route-pill]')).includes('detail'), 'route pill: detail');
     await generate(2);
     const p1 = (await starts())[1]?.params ?? {};
@@ -920,27 +933,27 @@ if (!chromium) {
     await page.evaluate(() => window.__probe.setCard(33));
     await page.waitForSelector('[data-probe-state="ready"][data-card="33"] [data-flat-run]');
     ck(
-      (await page.inputValue('[data-flat-target]')) === 'views',
+      (await targetValue()) === 'views',
       'card 33 (same slot ids) on the same row: views, not 32’s detail',
     );
     await page.evaluate(() => window.__probe.setCard(31));
     await page.waitForSelector('[data-probe-state="ready"][data-card="31"] [data-flat-run]');
     await page.waitForFunction(
-      () => !document.querySelector('[data-flat-target] option')?.textContent?.includes('again'),
+      () => !document.querySelector('[data-flat-target]')?.textContent?.includes('again'),
     );
-    ck(
-      (await page.inputValue('[data-flat-target]')) === 'views',
-      'card 31 on the same row: back to views',
-    );
+    ck((await targetValue()) === 'views', 'card 31 on the same row: back to views');
     await page.evaluate(() => window.__probe.setCard(32));
     await page.waitForSelector('[data-probe-state="ready"][data-card="32"] [data-flat-run]');
-    await page.waitForFunction(() =>
-      document.querySelector('[data-flat-target] option')?.textContent?.includes('again'),
-    );
-    ck(
-      (await page.inputValue('[data-flat-target]')) === 'd:21',
-      'card 32 again: its detail is remembered (tab memory)',
-    );
+    // Триггер показывает только выбранное — ждём саму цель, а не «again» в списке.
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelector('[data-flat-target]')?.getAttribute('data-flat-target') === 'd:21',
+        null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
+    ck((await targetValue()) === 'd:21', 'card 32 again: its detail is remembered (tab memory)');
   } finally {
     await browser.close();
   }
