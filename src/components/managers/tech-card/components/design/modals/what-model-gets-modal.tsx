@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -94,12 +94,13 @@ export function WhatModelGetsModal({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
-  const mediaById = useMediaMap();
 
   // READ-ONLY SUBSCRIPTIONS. `useWatch`, never `useFieldArray`: the studio already holds ONE field
   // array over `callouts` and a second instance over the same name does not synchronise with it in
   // react-hook-form 7.62 — a defect this band has already paid for once.
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
+  // Every board / input id, not only the newest 500 library files (live bug 06.10).
+  const mediaById = useResolvedMedia(items.map((i) => i.mediaId));
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
   // `garment_description` (W-3), NOT `concept`. The two are different documents: `concept` is
   // prose printed for the factory, `garment_description` is the sentence the operator writes FOR

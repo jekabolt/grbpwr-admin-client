@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
@@ -2788,7 +2788,8 @@ function DraftInventoryModal({
   decided: readonly string[];
   boardDirty: boolean;
 }): JSX.Element {
-  const mediaById = useMediaMap();
+  // Every board id, not only the newest 500 library files (live bug 06.10: old frames fell out).
+  const mediaById = useResolvedMedia(items.map((i) => i.mediaId));
   // WHAT THE CARD ALREADY SAYS, IN THE SERVER'S OWN THREE LISTS (`designCardAlreadySays`): aspects
   // with both a key and a text; TABLE callouts only — one pinned to a board picture already went as a
   // note in the group above, and sending it twice would tell the model not to speak of what it must

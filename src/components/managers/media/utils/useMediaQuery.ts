@@ -68,6 +68,114 @@ export function useMediaMap(limit = 500) {
   }, [data]);
 }
 
+/** Library window `useMediaMap` / `useResolvedMedia` read first (the newest N items). */
+export const MEDIA_WINDOW = 500;
+/** Deep pages walked past the window for ids it misses: 20 × 500 = the 10 000 newest items. */
+const DEEP_MAX_PAGES = 20;
+
+/** Same request + cache key as `useMedia(limit, offset)`, so a walked page is shared with it. */
+function libraryPageQuery(offset: number) {
+  return {
+    queryKey: mediaKeys.list({ limit: MEDIA_WINDOW, offset }),
+    queryFn: async () => {
+      const response = await adminService.ListObjectsPaged({
+        limit: MEDIA_WINDOW,
+        offset,
+        orderFactor: 'ORDER_FACTOR_DESC' as const,
+      });
+      return response.list || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  };
+}
+
+const EMPTY_KNOWN: ReadonlyMap<number, common_MediaFull> = new Map();
+
+/**
+ * id → MediaFull for EVERY id asked for, not only the newest 500 (live bug 06.10: card 38's
+ * August references, ids 124–126, fell out of the `useMediaMap` window once beta passed id 722 and
+ * drew «media #N not resolved»).
+ *
+ * Layers: the library window (one cached request, shared with `useMediaMap`) → for the ids that
+ * neither the window nor `known` resolves, the library pages PAST the window are walked
+ * (offset 500, 1000, …; each page cached under the same key as `useMedia`) until every missing id
+ * is found, a short page says the library ended, or the cap is hit. There is no by-ids media RPC
+ * (`GetMediaUsage` answers refs, not files), so paging is the by-id path.
+ *
+ * `known` — what the caller already resolves itself (the card's `resolved*Media`, band pictures,
+ * picks of this session): those ids are NOT fetched. The returned map holds the library window
+ * plus the deep finds; the caller still layers `known` over it as before.
+ *
+ * Nothing walks while the window is loading, and nothing walks when the window came back short
+ * (the whole library is in it — a missing id was deleted).
+ */
+export function useResolvedMediaQuery(
+  ids: Iterable<number | null | undefined>,
+  known: ReadonlyMap<number, unknown> = EMPTY_KNOWN,
+): { byId: ReadonlyMap<number, common_MediaFull>; isPending: boolean; isError: boolean } {
+  const queryClient = useQueryClient();
+  const head = useMedia(MEDIA_WINDOW, 0);
+  const library = useMediaMap(MEDIA_WINDOW);
+  const windowFull = (head.data?.length ?? 0) >= MEDIA_WINDOW;
+
+  const missing: number[] = [];
+  if (head.isSuccess && windowFull) {
+    const seen = new Set<number>();
+    for (const raw of ids) {
+      const id = Number(raw ?? 0);
+      if (!(id > 0) || seen.has(id)) continue;
+      seen.add(id);
+      if (!library.has(id) && !known.has(id)) missing.push(id);
+    }
+    missing.sort((a, b) => a - b);
+  }
+  const missingKey = missing.join(',');
+
+  const deep = useQuery({
+    queryKey: [...mediaKeys.all, 'byIds', missingKey] as const,
+    queryFn: async () => {
+      const want = new Set(missingKey.split(',').map(Number));
+      const found: common_MediaFull[] = [];
+      for (let page = 1; page <= DEEP_MAX_PAGES && want.size > 0; page++) {
+        const list = await queryClient.fetchQuery(libraryPageQuery(page * MEDIA_WINDOW));
+        for (const item of list) {
+          if (item?.id != null && want.has(item.id)) {
+            found.push(item);
+            want.delete(item.id);
+          }
+        }
+        if (list.length < MEDIA_WINDOW) break;
+      }
+      return found;
+    },
+    enabled: missingKey !== '',
+    staleTime: 5 * 60 * 1000,
+    // A new missing id changes the key: keep the earlier finds on screen while the walk reruns.
+    placeholderData: (prev) => prev,
+  });
+
+  const byId = useMemo(() => {
+    if (!deep.data?.length) return library;
+    const m = new Map(library);
+    for (const item of deep.data) if (item.id != null && !m.has(item.id)) m.set(item.id, item);
+    return m;
+  }, [library, deep.data]);
+
+  return {
+    byId,
+    isPending: head.isPending || (missingKey !== '' && (deep.isPending || deep.isPlaceholderData)),
+    isError: head.isError || deep.isError,
+  };
+}
+
+/** `useResolvedMediaQuery(...).byId` — the drop-in for `useMediaMap()` when the ids are known. */
+export function useResolvedMedia(
+  ids: Iterable<number | null | undefined>,
+  known?: ReadonlyMap<number, unknown>,
+): ReadonlyMap<number, common_MediaFull> {
+  return useResolvedMediaQuery(ids, known).byId;
+}
+
 /**
  * Ширина корзины, которой кэшируется занятость.
  *
@@ -104,9 +212,7 @@ const usageBucketOf = (id: number) => Math.floor((id - 1) / USAGE_BUCKET);
  * `useFilter` не срабатывала бы ни разу — ровно та же беда, от которой список медиа собирают
  * один раз на ответ (см. `media` в index.tsx).
  */
-function combineUsage(
-  results: { data?: MediaUsage[]; isPending: boolean; isError: boolean }[],
-) {
+function combineUsage(results: { data?: MediaUsage[]; isPending: boolean; isError: boolean }[]) {
   const usage: MediaUsageMap = new Map();
   for (const result of results) {
     for (const u of result.data ?? []) {

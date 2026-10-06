@@ -120,7 +120,7 @@ import {
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMediaQuery } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
@@ -914,11 +914,20 @@ export function TechPackDocument({
   }, [tc?.pieces]);
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
-  const libraryMap = useMediaMap();
-  // Тот же запрос, что внутри useMediaMap (react-query отдаёт его из кэша) — но со статусом:
-  // useMediaMap возвращает голую Map, а гейту печати нужно знать, приехала ли медиатека. Без
-  // неё referenced-картинки деталей просто не появятся в DOM, и ждать их decode будет нечего.
-  const { isLoading: mediaLoading, isError: mediaError } = useMedia(500, 0);
+  // Label mockups are not listed: `resolvedLabelMedia` resolves every saved one on the read.
+  const libraryIds = useMemo(
+    () => (tc?.details ?? []).flatMap((d) => d.mediaIds ?? []),
+    [tc?.details],
+  );
+  // Every referenced id, not only the newest 500 library files (live bug 06.10): the library window
+  // plus the pages past it for the ids neither it nor the card resolves. The status (window + walk)
+  // gates the print: without it the detail images would simply be absent from the DOM, with nothing
+  // to wait a decode on.
+  const {
+    byId: libraryMap,
+    isPending: mediaLoading,
+    isError: mediaError,
+  } = useResolvedMediaQuery(libraryIds, mediaById);
   const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
   // Size/measurement grading chart (task: point-of-measure table never printed). Walk the stored

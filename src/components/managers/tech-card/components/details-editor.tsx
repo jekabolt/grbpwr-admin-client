@@ -1,7 +1,7 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
@@ -154,9 +154,13 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     return m;
   }, [techCard?.resolvedTechnicalMedia, techCard?.resolvedMoodboardMedia]);
   // The resolved sketch maps carry only the sketch media; detail reference images are plain
-  // library media ids, so resolve them from the media library too (otherwise they show as
-  // "#id" after a reload).
-  const libraryMap = useMediaMap();
+  // library media ids, so resolve them from the media library too (otherwise they show as "#id"
+  // after a reload) — every one of them, not only the newest 500 library files:
+  // `useResolvedMedia` reads past that window (live bug 06.10).
+  const libraryMap = useResolvedMedia(
+    details.flatMap((d) => d.mediaIds ?? []),
+    mediaById,
+  );
 
   const detailByKey = (key: string) => details.find((d) => d.key === key);
 

@@ -1,6 +1,7 @@
 import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -515,16 +516,27 @@ export function MoodBoard({
   // Свежевыбранные медиа разрешаются локально: без этого только что добавленную картинку нельзя
   // разметить до сохранения и перезагрузки.
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
-  // БИБЛИОТЕКА, А НЕ `resolvedMoodboardMedia`. Подпись органа даёт только `techCardId`, карточки у
-  // него нет, и это намеренно: доска не должна знать про полосу. Цена названа честно — картинка
-  // старше последних пятисот файлов библиотеки не разрешится, и кадр останется в ряду пустым,
-  // сохранив свои указания (`FocusedAnnotator` рисует неразрешённый кадр, а не выбрасывает его).
-  const libraryMap = useMediaMap();
-  const mediaById = useMemo(() => {
-    const m = new Map<number, common_MediaFull>(libraryMap);
+  // КАРТОЧКА + БИБЛИОТЕКА. Сохранённые кадры разрешает сама карточка (`resolvedMoodboardMedia`,
+  // чтение по `techCardId` из того же кэша, что у страницы; про полосу доска по-прежнему не знает),
+  // выбранное в этой сессии — `picked`, остальное — библиотека, и не только окно последних пятисот:
+  // `useResolvedMedia` дочитывает страницы за окном (живой баг 06.10 — старые кадры выпадали).
+  const { data: savedCard } = useTechCard(techCardId > 0 ? techCardId : undefined);
+  const known = useMemo(() => {
+    const m = new Map<number, common_MediaFull>();
+    for (const rm of savedCard?.resolvedMoodboardMedia ?? [])
+      if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [libraryMap, picked]);
+  }, [savedCard?.resolvedMoodboardMedia, picked]);
+  const libraryMap = useResolvedMedia(
+    items.map((i) => i.mediaId),
+    known,
+  );
+  const mediaById = useMemo(() => {
+    const m = new Map<number, common_MediaFull>(libraryMap);
+    for (const [id, media] of known) m.set(id, media);
+    return m;
+  }, [libraryMap, known]);
 
   const moodMediaIds = useMemo(
     () => new Set(items.map((i) => i.mediaId).filter((id): id is number => !!id)),

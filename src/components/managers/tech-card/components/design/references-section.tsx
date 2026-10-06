@@ -4,7 +4,8 @@ import {
   common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useState, type ChangeEvent } from 'react';
@@ -214,13 +215,22 @@ export function ReferencesSection({
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const rows = useMemo(() => all.filter(isInputRow), [all]);
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
-  const libraryMap = useMediaMap();
-  const mediaById = useMemo(() => {
-    const m = new Map<number, common_MediaFull>(libraryMap);
-    // МЕДИА КАРТИНОК ПОЛОСЫ — вторым слоем: кропы сплита (и вообще всё, что родилось в полосе)
-    // появляются в библиотечной карте только после её перечтения, а строка входа на них уже
-    // стоит. Без этого слоя свежий кроп рисовался бы как «media #N not resolved» — данные целы,
-    // не хватает лишь разрешения id в файл, и полоса его уже привезла.
+  // РАЗРЕШЁННОЕ САМОЙ КАРТОЧКОЙ — первым слоем (живой баг 06.10, карточка 38): сервер разрешает
+  // каждый id мудборда/технички на чтении, а библиотечное окно — лишь последние 500 файлов, и
+  // августовские референсы (124–126) из него выпали. То, чего нет ни в карточке, ни в полосе, ни в
+  // окне, `useResolvedMedia` дочитывает страницами библиотеки за окном.
+  const { data: savedCard } = useTechCard(techCardId > 0 ? techCardId : undefined);
+  const known = useMemo(() => {
+    const m = new Map<number, common_MediaFull>();
+    for (const rm of [
+      ...(savedCard?.resolvedTechnicalMedia ?? []),
+      ...(savedCard?.resolvedMoodboardMedia ?? []),
+    ])
+      if (rm.media?.id != null) m.set(rm.media.id, rm.media);
+    // МЕДИА КАРТИНОК ПОЛОСЫ: кропы сплита (и вообще всё, что родилось в полосе) появляются в
+    // библиотечной карте только после её перечтения, а строка входа на них уже стоит. Без этого
+    // слоя свежий кроп рисовался бы как «media #N not resolved» — данные целы, не хватает лишь
+    // разрешения id в файл, и полоса его уже привезла.
     for (const batch of band.batches ?? [])
       for (const p of batch.pictures ?? []) {
         if (p.media?.id != null && !m.has(p.media.id)) m.set(p.media.id, p.media);
@@ -231,7 +241,22 @@ export function ReferencesSection({
       }
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [libraryMap, picked, band.batches, band.runs]);
+  }, [
+    savedCard?.resolvedTechnicalMedia,
+    savedCard?.resolvedMoodboardMedia,
+    picked,
+    band.batches,
+    band.runs,
+  ]);
+  const libraryMap = useResolvedMedia(
+    all.map((i) => i.mediaId),
+    known,
+  );
+  const mediaById = useMemo(() => {
+    const m = new Map<number, common_MediaFull>(libraryMap);
+    for (const [id, media] of known) m.set(id, media);
+    return m;
+  }, [libraryMap, known]);
 
   /**
    * ═══ ЧТО ПОДСКАЗКА РЕЗА ЗНАЕТ ОБ ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18 → r3 п.4 → item 25) ═══════════
