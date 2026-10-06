@@ -191,10 +191,10 @@ const shots = [];
 try {
   // `preset` — до бандла: сохранённые ответы, задержки по имени вызова, отказ чтения ответов.
   // `reuse` — та же вкладка (sessionStorage живёт): «перезагрузка» для W-C3.
-  const open = async (width, height, preset = {}, reuse = null) => {
+  const open = async (width, height, preset = {}, reuse = null, ctxOpts = {}) => {
     const ctx =
       reuse?.ctx ??
-      (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 }));
+      (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, ...ctxOpts }));
     const page = reuse?.page ?? (await ctx.newPage());
     if (!reuse) {
       page.on('pageerror', (e) => errors.push(`[${width}] pageerror: ${e.message}`));
@@ -1069,6 +1069,202 @@ try {
         ids.includes('clarify_edges'),
       `forget of edge_finish_main forgets its legacy clarify_ child (sent ${ids.join(',')}, left ${left.join(',')})`,
     );
+    await ctx.close();
+  }
+  // 96-PICTURE-QUESTIONS: вопрос про картинку доски — без пиктограммы, превью картинки + роль;
+  // на ленте эта плитка обведена (2px ink, offset 2px), остальные приглушены до .25.
+  const board = [
+    { id: 101, role: 'target', shade: '#d9d9d9' },
+    { id: 102, role: 'detail', shade: '#bfbfbf' },
+    { id: 103, role: 'material', shade: '#e6e6e6' },
+    { id: 104, role: 'mood', shade: '#cccccc' },
+  ];
+  const pq = (id, mediaId, question, options) => ({
+    id,
+    category: 'design',
+    part: 'whole',
+    family: 'jacket',
+    view: 'front',
+    kind: 'single',
+    question,
+    options,
+    contradicts: options.map(() => false),
+    visualEvidence: '',
+    clarifyQuestion: '',
+    clarifyOptions: [],
+    decisionKey: mediaId ? `pic_${mediaId}_${id}` : `${id}_key`,
+    ...(mediaId ? { mediaId } : {}),
+  });
+  const picQuiz = {
+    family: 'jacket',
+    model: 'stub',
+    questions: [
+      pq('pic_target', 101, 'What of this coat do we keep exactly?', [
+        'silhouette and length',
+        'only the collar',
+        'fabric look',
+      ]),
+      pq('pic_detail', 102, 'Which detail from this picture, and where?', [
+        'the patch pocket, on the hip',
+        'the stitched cuff tab',
+      ]),
+      pq('pic_material', 103, 'What do we take from this fabric?', [
+        'heavy brushed twill',
+        'the washed black colour',
+      ]),
+      pq('pic_mood', 104, 'What does this picture translate into?', [
+        'the colour only',
+        'the slouched attitude',
+        'nothing concrete',
+      ]),
+      pq('season', 0, 'Which season is it for?', ['spring and autumn', 'winter']),
+    ],
+  };
+  const tiles = (page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[data-rail-view]')].map((t) => {
+        const cs = getComputedStyle(t);
+        return {
+          id: Number(t.getAttribute('data-rail-view')),
+          anchored: t.getAttribute('data-anchored'),
+          opacity: Number(cs.opacity),
+          outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineOffset}`,
+          transition: cs.transitionProperty,
+        };
+      }),
+    );
+  const anchoredOn = async (page, id, what) => {
+    await page.waitForTimeout(350); // 150 ms opacity transition settles
+    const t = await tiles(page);
+    const on = t.find((x) => x.id === id);
+    const rest = t.filter((x) => x.id !== id);
+    check(
+      on?.anchored === 'on' &&
+        on.opacity === 1 &&
+        on.outline === 'solid 2px 2px' &&
+        rest.length === 3 &&
+        rest.every((x) => x.anchored === 'off' && x.opacity === 0.25),
+      `${what}: tile ${id} outlined, others at .25 (${JSON.stringify(t.map((x) => [x.id, x.opacity, x.outline]))})`,
+    );
+  };
+  const noAnchor = async (page, what) => {
+    await page.waitForTimeout(350);
+    const t = await tiles(page);
+    check(
+      t.length === 4 && t.every((x) => x.anchored === null && x.opacity === 1),
+      `${what}: no tile anchored, all at full opacity`,
+    );
+  };
+  const pictureQuestion = async (page, id, role, n) => {
+    const eyebrow = (await page.locator('[data-quiz] p').first().textContent()).trim();
+    check(
+      (await page.locator('[data-quiz] [role="img"]').count()) === 0 &&
+        (await page.locator(`[data-quiz] [data-quiz-picture="${id}"] img`).count()) === 1 &&
+        eyebrow.startsWith(`${role} · picture ${n}`),
+      `picture question ${id}: no pictogram, thumbnail shown, eyebrow "${eyebrow}"`,
+    );
+  };
+  {
+    const { ctx, page } = await open(1440, 900, { quiz: picQuiz, board, pictures: 4 });
+    await noAnchor(page, 'idle board');
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    await pictureQuestion(page, 101, 'target', 1);
+    await anchoredOn(page, 101, 'target question');
+    // `later` закрывает вопрос — якорь снят; `resume` возвращает его.
+    await btn(page, 'later').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    await noAnchor(page, 'later');
+    await btn(page, 'resume 5').click();
+    await page.waitForSelector('[data-quiz]');
+    await anchoredOn(page, 101, 'resumed target question');
+    await btn(page, 'silhouette and length').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 5'),
+    );
+    await pictureQuestion(page, 102, 'detail', 2);
+    await anchoredOn(page, 102, 'detail question');
+    await btn(page, 'the patch pocket, on the hip').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 5'),
+    );
+    await pictureQuestion(page, 103, 'material', 3);
+    await anchoredOn(page, 103, 'material question');
+    await shoot(page, 'quiz-1440-picture.png');
+    await btn(page, 'heavy brushed twill').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('4 / 5'),
+    );
+    await pictureQuestion(page, 104, 'mood', 4);
+    await anchoredOn(page, 104, 'mood question');
+    await btn(page, 'the colour only').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('5 / 5'),
+    );
+    check(
+      (await page.locator('[data-quiz] [data-quiz-picture]').count()) === 0,
+      'plain question after picture questions has no thumbnail',
+    );
+    await noAnchor(page, 'plain question');
+    await btn(page, 'winter').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    const saved = await page.evaluate(() => window.__answers);
+    check(
+      saved.map((a) => `${a.question.id}:${a.question.mediaId ?? 0}`).join(',') ===
+        'pic_target:101,pic_detail:102,pic_material:103,pic_mood:104,season:0',
+      'saved answers echo question.mediaId',
+    );
+    // the answers list opens on its own under the cursor — park the mouse off it first
+    await page.mouse.move(5, 5);
+    await noAnchor(page, 'quiz done');
+    // список ответов: строка про картинку несёт превью; наведение якорит доску.
+    if ((await btn(page, 'answers').getAttribute('aria-expanded')) !== 'true')
+      await btn(page, 'answers').click();
+    const row = page.locator(`${quiz} li`, { hasText: 'What do we take from this fabric?' });
+    check(
+      (await row.locator('[data-quiz-picture="103"] img').count()) === 1 &&
+        (await row.textContent()).includes('material · picture 3'),
+      'picture answer row shows the thumbnail and role',
+    );
+    await row.locator('button').first().hover();
+    await anchoredOn(page, 103, 'hovering the material answer');
+    await shoot(page, 'quiz-1440-picture-answers.png');
+    await page.mouse.move(5, 5);
+    await noAnchor(page, 'hover left the row');
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(390, 844, { quiz: picQuiz, board, pictures: 4 }, null, {
+      reducedMotion: 'reduce',
+    });
+    {
+      await btn(page, 'ASK ME').click();
+      await page.waitForSelector('[data-quiz]');
+      await btn(page, 'silhouette and length').click();
+      await page.waitForFunction(() =>
+        document.querySelector('[data-quiz]')?.textContent?.includes('2 / 5'),
+      );
+      await btn(page, 'the patch pocket, on the hip').click();
+      await page.waitForFunction(() =>
+        document.querySelector('[data-quiz]')?.textContent?.includes('3 / 5'),
+      );
+      await anchoredOn(page, 103, '390 material question');
+      const t = await tiles(page);
+      check(
+        t.every((x) => x.transition === 'none'),
+        'reduced motion: tiles carry no opacity transition',
+      );
+      const inView = await page.evaluate(() => {
+        const tile = document.querySelector('[data-rail-view="103"]');
+        const strip = tile.parentElement;
+        const a = tile.getBoundingClientRect();
+        const b = strip.getBoundingClientRect();
+        return a.left >= b.left - 1 && a.right <= b.right + 1;
+      });
+      check(inView, 'the anchored tile is scrolled into the strip');
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await shoot(page, 'quiz-390-picture.png');
+    }
     await ctx.close();
   }
   {

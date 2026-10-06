@@ -17881,6 +17881,9 @@ export type DesignQuizQuestion = {
   // "" = none. A saved answer closes its key for later quizzes; saving an answer whose key matches a
   // different saved question id forgets that older row (latest wins). Clients echo it on save.
   decisionKey: string | undefined;
+  // media_id — the moodboard picture this question is about (the board's media id); 0/absent = not a
+  // picture question. When set the client shows that picture instead of a pictogram.
+  mediaId?: number | undefined;
 };
 
 export type GenerateDesignQuizRequest = {

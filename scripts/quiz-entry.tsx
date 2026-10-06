@@ -9,7 +9,7 @@
 // `window.__preset` (ставит `quiz-shot.mjs` до бандла): сохранённые ответы, открытый прогон
 // сервера (`session`, E2), задержка/отказ чтения.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -17,6 +17,10 @@ import { DesignCapabilityProvider } from 'components/managers/tech-card/componen
 import { wordsBriefSource } from 'components/managers/tech-card/components/design/core/card-facts';
 import { useCardFacts } from 'components/managers/tech-card/components/design/head/card-facts-form';
 import { MoodQuiz } from 'components/managers/tech-card/components/design/mood-quiz';
+import {
+  usePictureAnchor,
+  type QuizPicture,
+} from 'components/managers/tech-card/components/design/quiz-anchor';
 import {
   clarifyOf,
   decisionLines,
@@ -27,6 +31,7 @@ import { seamOf, swatchOf } from 'components/managers/tech-card/components/desig
 import { requestBrief } from 'components/managers/tech-card/components/design/words-brief';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { enhanceText } from 'ui/components/ai-enhance';
+import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { Section } from 'ui/components/section';
 
 const q = (
@@ -111,7 +116,11 @@ const defaultQuiz = {
   ],
 };
 // 70-SEAMS: `quiz` — свой набор вопросов вместо фикстуры, `seamClass` — класс шва карточки в форме.
+// 96-PICTURE-QUESTIONS: `board` — настоящая лента `FocusedAnnotator` с картинками вместо заглушки,
+// якорь через тот же `usePictureAnchor`, что у доски.
+type BoardPic = { id: number; role: string; shade: string };
 type Preset = {
+  board?: BoardPic[];
   answers?: unknown[];
   pictures?: number;
   session?: unknown;
@@ -131,6 +140,62 @@ w.__answers = w.__preset?.answers ?? [];
 // E2: открытый прогон на «сервере» — `{ questions, family }` или null.
 w.__session = w.__preset?.session ?? null;
 w.__model = { clarifyOf, decisionLines, insertClarify, QUIZ_MAX, seamOf, swatchOf };
+
+// Картинка-заглушка: серый кадр с крупной цифрой — монохром, как у доски.
+const picUrl = (n: number, shade: string, w: number, h: number) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'><rect width='100%' height='100%' fill='${shade}'/><text x='50%' y='55%' font-family='monospace' font-size='${h / 3}' text-anchor='middle' fill='#000'>${n}</text></svg>`,
+  )}`;
+
+function Board({ pics, quiz }: { pics: BoardPic[]; quiz: (p: QuizProps) => React.ReactNode }) {
+  const scope = useRef<HTMLDivElement>(null);
+  const { anchored, onFocusPicture } = usePictureAnchor(scope, true);
+  const views: FocusedView[] = pics.map((p, i) => {
+    const w = i % 2 ? 300 : 240;
+    const url = picUrl(i + 1, p.shade, w, 320);
+    const size = { mediaUrl: url, width: w, height: 320 };
+    return {
+      key: String(p.id),
+      mediaId: p.id,
+      full: { id: p.id, media: { fullSize: size, thumbnail: size } } as never,
+    };
+  });
+  const pictureOf = useCallback(
+    (id: number): QuizPicture | null => {
+      const at = pics.findIndex((p) => p.id === id);
+      if (at < 0) return null;
+      return { n: at + 1, role: pics[at].role, url: picUrl(at + 1, pics[at].shade, 240, 320) };
+    },
+    [pics],
+  );
+  return (
+    <div ref={scope} className='space-y-stack'>
+      <FocusedAnnotator
+        layout='grid'
+        gridRowHeight={220}
+        readOnly
+        views={views}
+        calloutsFor={() => []}
+        onAddCallout={() => undefined}
+        onMoveCallout={() => undefined}
+        onRemoveCallout={() => undefined}
+        onPickMedia={() => []}
+        onRemoveMedia={() => undefined}
+        addLabel='+ picture'
+        purpose='moodboard reference'
+        emptyLabel='nothing on the board yet'
+        mediaLabel={(v, i) => `moodboard picture ${i + 1}`}
+        tileBadge={(v) => pics.find((p) => p.id === v.mediaId)?.role || null}
+        anchoredMediaId={anchored}
+      />
+      {quiz({ pictureOf, onFocusPicture })}
+    </div>
+  );
+}
+type QuizProps = {
+  pictureOf?: (id: number) => QuizPicture | null;
+  onFocusPicture?: (id: number | null) => void;
+};
 
 const always = () => true;
 function BriefProbe() {
@@ -193,23 +258,39 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                   <BriefProbe />
                   <div data-probe='quiz' style={{ padding: 24, maxWidth: 1000 }}>
                     <Section id='mb-board' title='moodboard'>
-                      <div className='space-y-stack'>
-                        <div
-                          style={{
-                            height: 120,
-                            background:
-                              'repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/24px 24px',
-                          }}
-                          aria-label='board strip stand-in'
+                      {w.__preset?.board ? (
+                        <Board
+                          pics={w.__preset.board}
+                          quiz={(extra) => (
+                            <MoodQuiz
+                              techCardId={1}
+                              readOnly={false}
+                              pictures={w.__preset?.board?.length ?? 0}
+                              concept=''
+                              conceptMax={2000}
+                              {...extra}
+                            />
+                          )}
                         />
-                        <MoodQuiz
-                          techCardId={1}
-                          readOnly={false}
-                          pictures={w.__preset?.pictures ?? 3}
-                          concept=''
-                          conceptMax={2000}
-                        />
-                      </div>
+                      ) : (
+                        <div className='space-y-stack'>
+                          <div
+                            style={{
+                              height: 120,
+                              background:
+                                'repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/24px 24px',
+                            }}
+                            aria-label='board strip stand-in'
+                          />
+                          <MoodQuiz
+                            techCardId={1}
+                            readOnly={false}
+                            pictures={w.__preset?.pictures ?? 3}
+                            concept=''
+                            conceptMax={2000}
+                          />
+                        </div>
+                      )}
                     </Section>
                     <Concept />
                   </div>

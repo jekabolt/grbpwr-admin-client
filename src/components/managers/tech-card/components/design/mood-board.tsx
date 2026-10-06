@@ -5,7 +5,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
 import { noteArrowsOf } from 'ui/components/annotation/surface';
@@ -40,6 +40,7 @@ import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
 import { MoodQuiz } from './mood-quiz';
+import { usePictureAnchor, type QuizPicture } from './quiz-anchor';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
@@ -763,6 +764,22 @@ export function MoodBoard({
   // серую оговорку рядом с именем блока: свёрнутый блок, который не говорит, сколько в нём лежит,
   // отвечает на вопрос «стоит ли разворачивать» молчанием.
   const [open, setOpen] = useState(true);
+  // 96-PICTURE-QUESTIONS: вопрос квиза про картинку доски — обводка, остальные приглушены.
+  const anchorScope = useRef<HTMLDivElement>(null);
+  const { anchored, onFocusPicture } = usePictureAnchor(anchorScope, open);
+  const pictureOf = useCallback(
+    (mediaId: number): QuizPicture | null => {
+      const at = items.findIndex((i) => i.mediaId === mediaId);
+      if (at < 0) return null;
+      const media = mediaById.get(mediaId)?.media;
+      return {
+        n: at + 1,
+        role: items[at].role ?? '',
+        url: media?.thumbnail?.mediaUrl || media?.fullSize?.mediaUrl || '',
+      };
+    },
+    [items, mediaById],
+  );
   /**
    * СВЁРНУТАЯ ДОСКА РАЗВОРАЧИВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (фиксап раунда 2, MIN-6). Дверь
    * рельса `description ›` и отказ по полю (`revealField`) шлют `FIELD_REVEAL_EVENT` НА ЯКОРЬ поля,
@@ -959,7 +976,7 @@ export function MoodBoard({
             </>
           }
         >
-          <div id={bodyId} className={open ? 'space-y-stack' : 'hidden'}>
+          <div id={bodyId} ref={anchorScope} className={open ? 'space-y-stack' : 'hidden'}>
             {/* ПОЛОСА ВЗВОДА. Стоит НАД доской, а не под ней: она объясняет, почему плитки вдруг
                 обведены пунктиром, и объяснение обязано попасться на глаза раньше следствия. */}
             {picking && (
@@ -1052,6 +1069,7 @@ export function MoodBoard({
                 inputIds.has(view.mediaId) ? { word: 'in the input', tone: 'ink' } : null
               }
               tileBadge={(view) => roleOf.get(view.mediaId) || null}
+              anchoredMediaId={anchored}
               tileCorners={(view, i) =>
                 view.full
                   ? {
@@ -1145,6 +1163,8 @@ export function MoodBoard({
               pictures={items.length}
               concept={conceptValue}
               conceptMax={CONCEPT_MAX}
+              pictureOf={pictureOf}
+              onFocusPicture={onFocusPicture}
             />
           </div>
 

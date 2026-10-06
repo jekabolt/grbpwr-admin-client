@@ -27,6 +27,7 @@ import { isPaletteKey, SeamIcon, seamClassOf, seamOf, swatchOf, type SeamKind } 
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
+import type { QuizPicture } from './quiz-anchor';
 import { setQuizLive } from './quiz-live';
 import {
   answerText,
@@ -104,6 +105,8 @@ export function MoodQuiz({
   pictures,
   concept,
   conceptMax,
+  pictureOf,
+  onFocusPicture,
 }: {
   techCardId?: number;
   readOnly: boolean;
@@ -111,6 +114,13 @@ export function MoodQuiz({
   pictures: number;
   concept: string;
   conceptMax: number;
+  /**
+   * 96-PICTURE-QUESTIONS: картинка доски по id медиа — номер, роль, превью; `null` — её на доске нет
+   * (снята после прогона). Без пропа вопрос про картинку показывает пустую рамку.
+   */
+  pictureOf?: (mediaId: number) => QuizPicture | null;
+  /** Вопрос на экране (или строка списка под курсором) — про эту картинку; `null` — ни про какую. */
+  onFocusPicture?: (mediaId: number | null) => void;
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
@@ -138,8 +148,19 @@ export function MoodQuiz({
   const [applying, setApplying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
+  const [hoverPic, setHoverPic] = useState<number | null>(null);
   const shownCard = useRef(card);
   shownCard.current = card;
+
+  // 96: якорь доски — вопрос на экране про картинку, иначе строка открытого списка под курсором.
+  const q = live ? live.queue[live.at] : undefined;
+  const anchor = (live ? q?.mediaId : listOpen ? hoverPic : null) || null;
+  const focusPicture = useRef(onFocusPicture);
+  focusPicture.current = onFocusPicture;
+  useEffect(() => {
+    focusPicture.current?.(anchor);
+  }, [anchor]);
+  useEffect(() => () => focusPicture.current?.(null), []);
 
   // Другая карточка — своя сохранённая очередь (или никакой).
   useEffect(() => {
@@ -420,13 +441,13 @@ export function MoodQuiz({
 
   if (!card || unimplemented) return null;
 
-  const q = live ? live.queue[live.at] : undefined;
   if (live && q) {
     const prior = answers.find((a) => a.question?.id === q.id);
     return (
       <QuestionView
         key={`${live.mode}:${q.id}`}
         question={q}
+        picture={q.mediaId ? pictureOf?.(q.mediaId) ?? null : undefined}
         family={q.family || family}
         position={live.mode === 'edit' ? null : { n: live.at + 1, of: live.queue.length }}
         prior={prior}
@@ -546,7 +567,13 @@ export function MoodQuiz({
               key={a.question?.id}
               className='group col-span-2 grid grid-cols-subgrid items-baseline border-b border-hairline'
             >
-              <AnswerLine answer={a} readOnly={readOnly} onOpen={() => reopen(a)} />
+              <AnswerLine
+                answer={a}
+                picture={a.question?.mediaId ? pictureOf?.(a.question.mediaId) ?? null : undefined}
+                readOnly={readOnly}
+                onOpen={() => reopen(a)}
+                onHover={(on) => setHoverPic(on && a.question?.mediaId ? a.question.mediaId : null)}
+              />
               <span className='flex items-baseline justify-end gap-3'>
                 {a.stale && !a.skipped && (
                   <>
@@ -586,29 +613,85 @@ export function MoodQuiz({
   );
 }
 
+/** Слово над вопросом про картинку: роль картинки на доске (`target`, `material`…) или `picture`. */
+const pictureWords = (p: QuizPicture | null) =>
+  p ? `${p.role || 'picture'} · picture ${p.n}` : 'picture · off the board';
+
+/**
+ * 96: вопрос про картинку доски несёт саму картинку на месте пиктограммы — тот же слот, кадр
+ * `object-cover` в чернильной рамке 1px. Картинку сняли с доски — пустая рамка со словом.
+ */
+function PictureThumb({
+  mediaId,
+  picture,
+  className,
+}: {
+  mediaId: number;
+  picture: QuizPicture | null;
+  className: string;
+}): JSX.Element {
+  return (
+    <span
+      data-quiz-picture={mediaId}
+      className={cn('block overflow-hidden border border-textColor bg-bgZebra', className)}
+    >
+      {picture?.url ? (
+        <img
+          src={picture.url}
+          alt={`moodboard picture ${picture.n}`}
+          draggable={false}
+          className='size-full object-cover'
+        />
+      ) : null}
+    </span>
+  );
+}
+
 function AnswerLine({
   answer,
+  picture,
   readOnly,
   onOpen,
+  onHover,
 }: {
   answer: DesignQuizAnswer;
+  /** `undefined` — не вопрос про картинку; `null` — картинки на доске уже нет. */
+  picture?: QuizPicture | null;
   readOnly: boolean;
   onOpen: () => void;
+  onHover: (on: boolean) => void;
 }): JSX.Element {
   const q = answer.question;
   const text = answerText(answer);
+  const mediaId = q?.mediaId ?? 0;
   return (
     <button
       type='button'
       disabled={readOnly}
       onClick={onOpen}
+      onPointerEnter={() => onHover(true)}
+      onPointerLeave={() => onHover(false)}
+      onFocus={() => onHover(true)}
+      onBlur={() => onHover(false)}
       className='grid w-full grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-3 py-1 text-left enabled:cursor-pointer enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
     >
-      <Pill tone='mut' className='justify-self-start'>
-        {q?.category || 'design'}
-      </Pill>
+      {mediaId > 0 ? (
+        <PictureThumb
+          mediaId={mediaId}
+          picture={picture ?? null}
+          className='h-6 w-4 self-center justify-self-start'
+        />
+      ) : (
+        <Pill tone='mut' className='justify-self-start'>
+          {q?.category || 'design'}
+        </Pill>
+      )}
       <Text size='micro' variant='label' component='span' className='truncate' title={q?.question}>
-        {q?.part && q.part !== 'whole' ? `${partWords(q.part)} · ` : ''}
+        {mediaId > 0
+          ? `${pictureWords(picture ?? null)} · `
+          : q?.part && q.part !== 'whole'
+            ? `${partWords(q.part)} · `
+            : ''}
         {q?.question}
       </Text>
       <Text
@@ -625,6 +708,7 @@ function AnswerLine({
 
 function QuestionView({
   question,
+  picture,
   family,
   position,
   prior,
@@ -635,6 +719,8 @@ function QuestionView({
   onLater,
 }: {
   question: DesignQuizQuestion;
+  /** 96: `undefined` — обычный вопрос (пиктограмма); иначе картинка доски (`null` — её сняли). */
+  picture?: QuizPicture | null;
   family: string;
   /** Номер в прогоне; `null` — вопрос открыт из списка ответов. */
   position: { n: number; of: number } | null;
@@ -725,17 +811,21 @@ function QuestionView({
 
   return (
     <div className='grid grid-cols-[64px_minmax(0,1fr)] items-start gap-4 py-1' data-quiz=''>
-      <div className='h-24 w-16 text-textColor'>
-        <PartPictogram
-          family={family}
-          part={question.part || 'whole'}
-          category={question.category}
-          className='h-24 w-16'
-        />
-      </div>
+      {question.mediaId ? (
+        <PictureThumb mediaId={question.mediaId} picture={picture ?? null} className='h-24 w-16' />
+      ) : (
+        <div className='h-24 w-16 text-textColor'>
+          <PartPictogram
+            family={family}
+            part={question.part || 'whole'}
+            category={question.category}
+            className='h-24 w-16'
+          />
+        </div>
+      )}
       <div className='min-w-0 space-y-2'>
         <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
-          {question.category || 'design'}
+          {question.mediaId ? pictureWords(picture ?? null) : question.category || 'design'}
           {position ? ` · ${position.n} / ${position.of}` : ''}
         </Text>
         <Text component='p' className='text-pretty'>

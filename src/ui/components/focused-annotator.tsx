@@ -217,6 +217,12 @@ export type FocusedAnnotatorProps = {
   tileFlag?: (view: FocusedView, positionInViews: number) => FocusedTileFlag | null | undefined;
   /** Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер. */
   tileBadge?: (view: FocusedView, positionInViews: number) => string | null | undefined;
+  /**
+   * 96-PICTURE-QUESTIONS: the picture a quiz question is about. While set (grid only) that tile wears
+   * a 2px ink outline and every other tile drops to 25% — the question points at one picture.
+   * `null`/absent — every tile as usual.
+   */
+  anchoredMediaId?: number | null;
   tileCorners?: (
     view: FocusedView,
     positionInViews: number,
@@ -455,6 +461,7 @@ export function FocusedAnnotator({
   mediaLabel,
   tileFlag,
   tileBadge,
+  anchoredMediaId = null,
   tileCorners,
   removeLabel,
   carouselLabel,
@@ -883,6 +890,13 @@ export function FocusedAnnotator({
                 <div
                   key={v.key}
                   data-rail-view={v.mediaId}
+                  data-anchored={
+                    anchoredMediaId == null
+                      ? undefined
+                      : v.mediaId === anchoredMediaId
+                        ? 'on'
+                        : 'off'
+                  }
                   ref={canOrder ? reorder.registerTile(i) : undefined}
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
@@ -891,6 +905,13 @@ export function FocusedAnnotator({
                     'group relative shrink-0 space-y-1',
                     !wrap && 'snap-start',
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
+                    // 96: the anchored picture keeps full ink, the rest step back. Before the
+                    // reorder outline below so a live drag target still wins the outline.
+                    'transition-opacity duration-150 ease-out motion-reduce:transition-none',
+                    anchoredMediaId != null &&
+                      (v.mediaId === anchoredMediaId
+                        ? 'scroll-mx-1 outline outline-2 outline-offset-2 outline-textColor'
+                        : 'opacity-25'),
                     // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ. У ленты
                     // контейнер выше несёт `overflow-x-auto`, и широкая плитка листается в ней; у
                     // переноса по строкам (`railWrap`) контейнер его не несёт, и плитка не шире
