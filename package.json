@@ -20,7 +20,7 @@
     "paint:sides": "node scripts/paint-sides-probe.mjs",
     "autosplit": "node scripts/autosplit-probe.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
-    "flat:custom": "node scripts/flat-custom-probe.mjs",
+    "flat:ask": "node scripts/flat-ask-probe.mjs",
     "media:resolved": "node scripts/resolved-media-probe.mjs",
     "mood:description": "node scripts/mood-description-probe.mjs",
     "mood:describe": "node scripts/mood-describe-probe.mjs",

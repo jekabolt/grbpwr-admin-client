@@ -15391,6 +15391,22 @@ export type common_DesignBenchSlot = {
   // the page-bound lookup is still the only answer available. A client must not read the silence of
   // an old server as «this plate has no revision».
   runRrev: number | undefined;
+  // ═══ STALE DETAIL AND ITS «KEEP» (82-INPUT-REDESIGN §5, owner 06.10) ═══
+  // Computed by GetDesignBand (and SetDesignDetailKept) on FLAT DETAIL slots only; false / 0 / empty
+  // everywhere else, including slots returned by SetDesignBenchSlot / RegisterDesignBatch.
+  // stale: the detail's plate came out of a run older (lower design_run id) than the run of the
+  // card's current FRONT flat plate — BACK when the front slot is empty. An uploaded detail (no run)
+  // or uploaded views (no run) are never stale. RAW: true even when kept.
+  stale: boolean | undefined;
+  // kept: a person marked this stale detail kept against the CURRENT views run and the CURRENT
+  // plate. The mark clears by itself when the views run or the detail plate changes. Show the stale
+  // pill when stale && !kept.
+  kept: boolean | undefined;
+  // The views run this detail is compared with (the run of the front / back plate); 0 = none. Send
+  // it back as SetDesignDetailKeptRequest.against_run_id.
+  staleAgainstRunId: number | undefined;
+  keptBy: string | undefined;
+  keptAt: wellKnownTimestamp | undefined;
 };
 
 // DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
@@ -17923,10 +17939,12 @@ export type DesignQuizAnswer = {
   // fit, gender, details, BOM names/compositions, base-size measurements) changed since this answer
   // was saved. Downstream prompts treat it as unconfirmed; re-saving the same answer makes it fresh.
   stale: boolean | undefined;
-  // stale_changes — OUTPUT ONLY, ignored on save (98-STALE): what changed in the answer's topic since it
-  // was saved, one human line per fact ("main fabric: cotton twill → wool flannel"), max 4 then
-  // "+N more". Empty when not stale.
-  staleChanges?: string[] | undefined;
+  // stale_changes — OUTPUT ONLY, ignored on save (98-STALE §3): what changed since the answer was given,
+  // one line per changed fact of the answer's topic ("main fabric: cotton twill → wool flannel",
+  // "lining: — → viscose twill", "detail: hood: … → —", "picture 3: removed from the board",
+  // "picture 2 role: mood → material"); at most 4 lines, then "+N more". A row saved before per-topic
+  // tracking says "the card changed (answered before per-topic tracking)". Empty when not stale.
+  staleChanges: string[] | undefined;
 };
 
 export type GetDesignQuizAnswersRequest = {
@@ -18009,6 +18027,18 @@ export type SetDesignJoinsRequest = {
 
 export type SetDesignJoinsResponse = {
   joins: common_DesignJoins | undefined;
+};
+
+export type SetDesignDetailKeptRequest = {
+  techCardId: number | undefined;
+  slotId: number | undefined;
+  keep: boolean | undefined;
+  // The views run the client saw as stale_against_run_id (CAS); 0 = no check.
+  againstRunId: number | undefined;
+};
+
+export type SetDesignDetailKeptResponse = {
+  slot: common_DesignBenchSlot | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -19739,6 +19769,18 @@ export interface AdminService {
   // absences kept only when they are negations, counts and lengths capped. Aborted
   // (joins_rev_mismatch) on a stale rev.
   SetDesignJoins(request: SetDesignJoinsRequest): Promise<SetDesignJoinsResponse>;
+  // SetDesignDetailKept marks a STALE flat detail as kept (keep = true) or takes the mark off (keep =
+  // false) — 82-INPUT-REDESIGN §5, owner 06.10: «keep» is stored on the server, everyone sees it.
+  // A detail is stale when its plate came out of a run OLDER than the run of the card's current
+  // FRONT flat plate (BACK when front is empty) — see common.DesignBenchSlot.stale. The mark is
+  // stored against that views run AND the detail's plate, so it clears by itself the moment either
+  // changes (new views, another detail picture). `discard` is not this verb: it is
+  // SetDesignBenchSlot with picture_id = 0 (the slot is emptied and kept, the picture stays in history).
+  // against_run_id = the stale_against_run_id the client saw (CAS); 0 = do not check.
+  // FailedPrecondition: not_a_flat_detail | detail_empty | detail_not_stale (keep only).
+  // Aborted: views_changed (against_run_id is not the current views run). NotFound: no such slot on
+  // this card. Unkeep of an unmarked slot is a no-op.
+  SetDesignDetailKept(request: SetDesignDetailKeptRequest): Promise<SetDesignDetailKeptResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order, plus the open
   // session's questions not yet saved (pending).
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
@@ -26452,6 +26494,29 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignJoins",
       }) as Promise<SetDesignJoinsResponse>;
+    },
+    SetDesignDetailKept(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.slotId) {
+        throw new Error("missing required field request.slot_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/bench/${request.slotId}/kept`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignDetailKept",
+      }) as Promise<SetDesignDetailKeptResponse>;
     },
     GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

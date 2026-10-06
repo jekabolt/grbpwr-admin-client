@@ -377,6 +377,7 @@ export function MoodQuiz({
       skipped,
       answeredAt: undefined,
       stale: undefined,
+      staleChanges: undefined,
     };
     // W-C11: уточнение — и в правке; родитель ушёл от противоречия (или пропущен) — его прежнее
     // уточнение забывается и снимается с очереди.

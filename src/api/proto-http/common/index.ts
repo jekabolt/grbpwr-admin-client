@@ -6037,6 +6037,22 @@ export type DesignBenchSlot = {
   // the page-bound lookup is still the only answer available. A client must not read the silence of
   // an old server as «this plate has no revision».
   runRrev: number | undefined;
+  // ═══ STALE DETAIL AND ITS «KEEP» (82-INPUT-REDESIGN §5, owner 06.10) ═══
+  // Computed by GetDesignBand (and SetDesignDetailKept) on FLAT DETAIL slots only; false / 0 / empty
+  // everywhere else, including slots returned by SetDesignBenchSlot / RegisterDesignBatch.
+  // stale: the detail's plate came out of a run older (lower design_run id) than the run of the
+  // card's current FRONT flat plate — BACK when the front slot is empty. An uploaded detail (no run)
+  // or uploaded views (no run) are never stale. RAW: true even when kept.
+  stale: boolean | undefined;
+  // kept: a person marked this stale detail kept against the CURRENT views run and the CURRENT
+  // plate. The mark clears by itself when the views run or the detail plate changes. Show the stale
+  // pill when stale && !kept.
+  kept: boolean | undefined;
+  // The views run this detail is compared with (the run of the front / back plate); 0 = none. Send
+  // it back as SetDesignDetailKeptRequest.against_run_id.
+  staleAgainstRunId: number | undefined;
+  keptBy: string | undefined;
+  keptAt: wellKnownTimestamp | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
