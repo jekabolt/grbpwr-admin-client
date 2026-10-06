@@ -107,6 +107,15 @@ export function useGenerationWrites(techCardId?: number) {
         // rather than left unset — one spelling for one meaning.
         rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
+    /* A REFUSAL IS AN ANSWER, NOT A HICCUP (M8, 07.10). The app retries every mutation once; a 4xx
+       refusal repeated a second later is the same refusal — and while the tab is hidden the retry is
+       held until it shows again, so `flat_run_in_flight` («another tab is drawing») could come back
+       minutes later as a paid start the person was never told about. Only a lost answer (no status,
+       5xx) is retried: the same client_request_id makes that replay safe. */
+    retry: (failures, error) => {
+      const status = (error as { status?: number } | null)?.status ?? 0;
+      return failures < 1 && (status === 0 || status >= 500);
+    },
     onMutate,
     onSuccess: invalidateWritten,
     onError,
