@@ -70,6 +70,7 @@ import { useStartRun } from './generation/use-generation';
 import { pendingQuestions } from './joins-questions';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, type BoardItem } from './mood-board';
+import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import type { CalloutLike } from './render/what-model-gets';
 import { staleShown } from './stale-details';
@@ -111,9 +112,6 @@ export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX }
 const READING = 'reading the construction';
 
 /** The native select of the row, styled as the neck-shape select of the joins list. */
-const SELECT_QUIET =
-  'shrink-0 cursor-pointer appearance-none border-0 bg-transparent px-0 text-micro uppercase tracking-label text-textColor underline hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:text-labelColor disabled:no-underline';
-
 const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
   { role: 'front_flat', label: 'front' },
   { role: 'back_flat', label: 'back' },
@@ -696,26 +694,23 @@ export function FlatRunRow({
           onGenerate={() => void submit()}
           trailing={
             <>
-              <span className='relative inline-flex items-center text-micro uppercase tracking-label'>
-                <select
-                  data-flat-target={target}
-                  aria-label='what to draw'
-                  title={selectTitle}
+              {/* T69 (06.10): «дропдаун не системный а с нашим дизайном и в размер кнопки генерейт» —
+                  общий Radix-список (`ui/components/select`), коробка ровно с GENERATE по высоте. */}
+              <span className='inline-flex shrink-0' data-flat-target={target} title={selectTitle}>
+                <Select
+                  name='flat-target'
+                  placeholder='what to draw'
+                  items={targetItems.map((t) => ({
+                    value: t.value,
+                    label: t.label,
+                    disabled: t.disabled,
+                  }))}
                   value={target}
                   disabled={choiceOff}
-                  onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-                  className={SELECT_QUIET}
-                  style={ROW_CONTROL_STYLE}
-                >
-                  {targetItems.map((t) => (
-                    <option key={t.value} value={t.value} disabled={t.disabled} title={t.title}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-                <span aria-hidden className='pointer-events-none pl-0.5 text-labelColor'>
-                  ▾
-                </span>
+                  onValueChange={(v: string) => setDraft({ ...draft, target: v })}
+                  className='!min-h-0 h-[26px] min-w-[9rem] !py-0 text-micro uppercase tracking-label'
+                  itemClassName='text-micro uppercase tracking-label'
+                />
               </span>
               {myFlatOffered && (
                 <Chip
