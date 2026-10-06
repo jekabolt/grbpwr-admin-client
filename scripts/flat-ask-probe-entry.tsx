@@ -46,6 +46,11 @@ export {
 } from '../src/components/managers/tech-card/components/design/generation/candidate-quiz-model';
 export { candidatesOf } from '../src/components/managers/tech-card/components/design/generation/candidates';
 export { autoApplies } from '../src/components/managers/tech-card/components/design/generation/apply-flat-slots';
+export {
+  detailPlacementOf,
+  detailPlacements,
+  detailRunSlot,
+} from '../src/components/managers/tech-card/components/design/generation/detail-auto-place';
 
 export function render(open: boolean, modified: boolean): string {
   return renderToStaticMarkup(
@@ -73,7 +78,10 @@ export {
   moodPictureIds,
 } from '../src/components/managers/tech-card/components/design/flat-mode';
 export { refusalFromError } from '../src/components/managers/tech-card/components/design/generation/refusal';
-export { flatSnapshot } from '../src/components/managers/tech-card/components/design/flat-run-row';
+export {
+  flatRunInFlight,
+  flatSnapshot,
+} from '../src/components/managers/tech-card/components/design/flat-run-row';
 export {
   awaitRun,
   ledgerIdOf,

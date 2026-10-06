@@ -12,6 +12,8 @@
 //   node scripts/flat-ask-probe.mjs --mutate=stale      kept не гасит пилюлю — красное
 //   node scripts/flat-ask-probe.mjs --mutate=quiz       «none» не останавливает квиз — красное
 //   node scripts/flat-ask-probe.mjs --mutate=draft      ряд не пересеивает цель при смене карточки
+//   node scripts/flat-ask-probe.mjs --mutate=place      деталь ложится поверх правки человека — красное
+//   node scripts/flat-ask-probe.mjs --mutate=inflight   GENERATE не ждёт идущий прогон — красное
 //
 // DOM-часть: настоящий `FlatRunRow` в chromium (`flat-ask-dom-entry.tsx`). Playwright не в
 // зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
@@ -49,6 +51,16 @@ const MUTATIONS = {
     file: /design\/generation\/candidate-quiz-model\.ts$/,
     from: "return state.step === 'side' || state.step === 'others' ? { step: 'none' } : state;",
     to: 'return state;',
+  },
+  place: {
+    file: /design\/generation\/detail-auto-place\.ts$/,
+    from: '  if (Number.isFinite(touched) && touched > asked) return null;',
+    to: '',
+  },
+  inflight: {
+    file: /design\/flat-run-row\.tsx$/,
+    from: "=== 'flat' && isRunLive(r),",
+    to: "=== 'flat' && false,",
   },
   draft: {
     file: /design\/flat-run-row\.tsx$/,
@@ -480,6 +492,190 @@ console.log('\n82 · квиз кандидатов (без авто-судьи)'
   ck(
     !M.autoApplies({ id: 90, completedAt: '2026-01-01T00:00:00Z' }, pieces),
     'an old run is never applied behind the person’s back',
+  );
+}
+
+console.log('\n91 · D1: деталь сама ложится в свой слот (detailPlacementOf)');
+{
+  const now = Date.parse('2026-10-06T19:30:00Z');
+  const asked = '2026-10-06T19:20:00Z';
+  const done = '2026-10-06T19:23:00Z';
+  const drun = (id, slotId, extra = {}) => ({
+    id,
+    kind: 'flat',
+    status: 'done',
+    createdAt: asked,
+    completedAt: done,
+    params: { views: ['detail'], detailSlotIds: [slotId] },
+    pictures: [{ id: id * 10, runId: id, kind: 'flat' }],
+    ...extra,
+  });
+  const dslot = (id, pictureId = 0, extra = {}) => ({
+    id,
+    viewKey: 'detail',
+    kind: 'flat',
+    detailName: 'Crossed back straps',
+    pictureId,
+    slotRev: 3,
+    setAt: '2026-10-06T19:00:00Z',
+    ...extra,
+  });
+  const band = (runs, bench) => ({ runs, bench });
+  const r161 = drun(161, 125);
+  const p = M.detailPlacementOf(band([r161], [dslot(125)]), r161, now);
+  ck(
+    !!p && p.slotId === 125 && p.pictureId === 1610 && p.slotRev === 3 && p.runId === 161,
+    'run 161 (detail 125, empty slot) → placed into slot 125 with its rev',
+  );
+  ck(
+    M.detailRunSlot({ params: { views: ['front', 'back', 'side_l', 'side_r'] } }) === 0,
+    'a views run is not a detail run',
+  );
+  ck(
+    M.detailRunSlot({ params: { views: ['detail'], detailSlotIds: [1, 2] } }) === 0,
+    'two detail slots → no single target, nothing placed',
+  );
+  ck(
+    M.detailPlacementOf(band([r161], [dslot(125)]), { ...r161, status: 'running' }, now) === null,
+    'a run still drawing places nothing',
+  );
+  ck(
+    M.detailPlacementOf(band([r161], [dslot(125)]), r161, Date.parse('2026-10-07T19:30:00Z')) ===
+      null,
+    'an old run opened later is never placed',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161, drun(170, 125, { status: 'failed', pictures: [] })], [dslot(125)]),
+      r161,
+      now,
+    ) === null,
+    'a newer run for the same slot owns it (even a failed one)',
+  );
+  ck(
+    !!M.detailPlacementOf(band([r161, drun(170, 126)], [dslot(125), dslot(126)]), r161, now),
+    'a newer run for ANOTHER slot does not block this one',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125, 999, { setAt: '2026-10-06T19:25:00Z' })]),
+      r161,
+      now,
+    ) === null,
+    'the person placed something after the press → left alone',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125, 0, { setAt: '2026-10-06T19:25:00Z' })]),
+      r161,
+      now,
+    ) === null,
+    'emptied (discard) after the press → never re-placed',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125, 999, { setAt: '', picture: { id: 999, runId: 100 } })]),
+      r161,
+      now,
+    ) === null,
+    'a filled slot with no write time cannot be proven untouched → left alone',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125, 999, { picture: { id: 999, runId: 200 } })]),
+      r161,
+      now,
+    ) === null,
+    'an occupant from a newer run → left alone',
+  );
+  const stale = M.detailPlacementOf(
+    band([r161], [dslot(125, 900, { picture: { id: 900, runId: 90 }, stale: true })]),
+    r161,
+    now,
+  );
+  ck(
+    !!stale && stale.pictureId === 1610,
+    'a stale occupant set before the press is replaced (the press asked for it)',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125), { id: 7, viewKey: 'front', kind: 'flat', pictureId: 1610 }]),
+      r161,
+      now,
+    ) === null,
+    'the picture already stands in a slot → nothing',
+  );
+  ck(
+    M.detailPlacementOf(band([r161], [dslot(125, 1610)]), r161, now) === null,
+    'already placed (a second tab) → nothing, never twice',
+  );
+  const edited = { ...r161, pictures: [...r161.pictures, { id: 1611, runId: 161, kind: 'flat' }] };
+  ck(
+    M.detailPlacementOf(band([edited], [dslot(125)]), edited, now) === null,
+    'two pictures (an edit made) → the door, no auto-place',
+  );
+  ck(M.detailPlacementOf(band([r161], []), r161, now) === null, 'the slot was deleted → nothing');
+  ck(
+    M.detailPlacementOf(
+      band(
+        [r161, drun(171, 125, { status: 'failed', pictures: [], archivedAt: done })],
+        [dslot(125)],
+      ),
+      r161,
+      now,
+    ) === null,
+    'an ARCHIVED newer run for the slot still owns it',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([r161], [dslot(125, 900, { picture: { id: 900, runId: 90 }, stale: true, kept: true })]),
+      r161,
+      now,
+    ) === null,
+    'a stale occupant kept while the run drew → left alone',
+  );
+  ck(
+    M.detailPlacementOf(
+      band([{ ...r161, archivedAt: '2026-10-06T19:29:00Z' }], [dslot(125)]),
+      { ...r161, archivedAt: '2026-10-06T19:29:00Z' },
+      now,
+    ) === null,
+    'an archived run → nothing',
+  );
+  const both = M.detailPlacements(
+    band(
+      [drun(160, 0, { params: { views: ['front', 'back', 'side_l', 'side_r'] } }), r161],
+      [dslot(125)],
+    ),
+    now,
+  );
+  ck(
+    both.length === 1 && both[0].runId === 161,
+    'over the band: only the detail run is placed, the views run is not',
+  );
+
+  console.log('\n91 · D5: GENERATE ждёт, пока рисует флэт-прогон');
+  ck(
+    M.flatRunInFlight({ runs: [{ id: 1, kind: 'flat', status: 'running' }] }),
+    'a running flat run holds GENERATE',
+  );
+  ck(
+    M.flatRunInFlight({ runs: [{ id: 1, kind: 'flat', status: 'pending' }] }),
+    'a pending flat run holds GENERATE',
+  );
+  ck(
+    !M.flatRunInFlight({ runs: [{ id: 1, kind: 'flat', status: 'done' }] }),
+    'a finished run does not',
+  );
+  ck(
+    !M.flatRunInFlight({ runs: [{ id: 1, kind: 'render', status: 'running' }] }),
+    'a render run does not',
+  );
+  ck(
+    M.flatRunInFlight({
+      runs: [{ id: 1, kind: 'flat', status: 'running', archivedAt: '2026-10-06T19:00:00Z' }],
+    }),
+    'an archived live run still holds it (archiving is presentational)',
   );
 }
 

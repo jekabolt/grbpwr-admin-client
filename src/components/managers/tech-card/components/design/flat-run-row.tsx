@@ -66,6 +66,7 @@ import {
   type FlatRoute,
 } from './flat-route';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
+import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { pendingQuestions } from './joins-questions';
 import { WhatModelGetsModal } from './modals';
@@ -210,6 +211,17 @@ export function flatSnapshot(
   };
 }
 
+/**
+ * A FLAT RUN OF THIS CARD IS IN FLIGHT (91-LIVE D5, 82 §2 S4): GENERATE says so and waits — a second
+ * press would book a second paid run. Any flat run counts, the views or a detail.
+ */
+export function flatRunInFlight(band: Pick<GetDesignBandResponse, 'runs'> | undefined): boolean {
+  return (band?.runs ?? []).some(
+    // Archived too: archiving is presentational, a live archived run is still being paid for.
+    (r) => (r.kind ?? '').trim().toLowerCase() === 'flat' && isRunLive(r),
+  );
+}
+
 /** Сколько GENERATE ждёт незавершённых записей входа, прежде чем отказать (финальная сверка). */
 const BAND_WRITES_WAIT_MS = 15_000;
 
@@ -352,6 +364,8 @@ export function FlatRunRow({
   const autosave = useTechCardAutosave();
   const input = useFlatInput(techCardId);
   const busy = input.run !== null;
+  /** A flat run of this card is drawing (D5): GENERATE pending until it ends. */
+  const inFlight = flatRunInFlight(band);
   const refused = input.refused;
   useEffect(() => {
     if (autosave.status === 'saved' || autosave.status === 'idle') {
@@ -484,7 +498,7 @@ export function FlatRunRow({
     const card = techCardId;
     // `generate without it ›` passes the list lock only — never another one.
     const bypass = !!opts.withoutList && gateReason === READING;
-    if ((gateReason && !bypass) || !mood.ok || card <= 0) return;
+    if ((gateReason && !bypass) || !mood.ok || card <= 0 || inFlight) return;
     if (flatInputBusy(readFlatInput(card))) return;
     const wasOn = autosave.status !== 'off';
     const ask: FlatAsk = { target, fromMyFlat, structure: [...structureNow] };
@@ -539,6 +553,13 @@ export function FlatRunRow({
       } catch {
         if (cardOnScreen(card)) {
           showMessage('could not re-read the input — nothing was started; try again', 'error');
+        }
+        return;
+      }
+      // D5: a flat run started meanwhile (another tab, or this press's band not re-read yet).
+      if (flatRunInFlight(freshBand)) {
+        if (cardOnScreen(card)) {
+          showMessage('a flat run is already drawing — nothing was started', 'error');
         }
         return;
       }
@@ -620,6 +641,13 @@ export function FlatRunRow({
         // THE MODE (81-FINAL-MODES). Photos and a detail send nothing: an absent block is photos.
         flat: mode ? flatParamsFor(mode, structureNow) : undefined,
       };
+      // D5, last look: every re-read above (the straps confirmation re-reads too) is checked here.
+      if (flatRunInFlight(freshBand)) {
+        if (cardOnScreen(card)) {
+          showMessage('a flat run is already drawing — nothing was started', 'error');
+        }
+        return;
+      }
       patchFlatInput(card, { run: 'starting' });
       refusal = await startRun.start({
         kind: 'flat',
@@ -692,7 +720,8 @@ export function FlatRunRow({
       <div data-flat-generate=''>
         <GenerateRow
           gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
-          pending={busy || recovering}
+          pending={busy || recovering || inFlight}
+          pendingLabel={inFlight && !busy ? 'drawing…' : undefined}
           onGenerate={() => void submit()}
           trailing={
             <>
@@ -819,7 +848,7 @@ export function FlatRunRow({
               variant='underline'
               size='xs'
               data-flat-without-list=''
-              disabled={busy}
+              disabled={busy || inFlight}
               onClick={() => void submit({ withoutList: true })}
             >
               generate without it ›

@@ -39,6 +39,7 @@ import {
 import { ApplyFlatSlots } from './apply-flat-slots';
 import { CandidateQuiz, resetCandidateQuiz } from './candidate-quiz';
 import { candidatesOf, clearCandidatePick, usePicks } from './candidates';
+import { useDetailAutoPlace } from './detail-auto-place-hook';
 import { InlineSplit, useKeptWhole } from './inline-split';
 import {
   benchPlan,
@@ -578,6 +579,9 @@ export function LatestGeneration({
    * (`apply splitted`, owner E-6) is one quiet line under the tiles (`PutPiecesIntoSides`, W4).
    */
   const writesOff = disabled || !speaks;
+  /* 91-LIVE D1 (82 §8): a finished detail run's picture lands in the detail slot it was drawn for,
+     once per run — whatever run the workbench shows (`detail-auto-place.ts`). */
+  useDetailAutoPlace(band, techCardId, kind !== 'flat' || writesOff);
   /** W6: pictures the person kept as one picture — tiles again, the split corner on them. */
   const keptWhole = useKeptWhole(techCardId);
   const inlineSheets = useMemo(() => {
