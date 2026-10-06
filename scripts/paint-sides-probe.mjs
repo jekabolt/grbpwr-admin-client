@@ -3,6 +3,9 @@
 // side view's flank from where its front faces) and the `opening` group that never paints.
 // f3/f4 — a "binding" that is not a strip (area / width² < BAND_MIN_ELONGATION, wider than the
 // BAND_MAX_WIDTH floor) leaves its group (`fixBands`); a "band" (rib, hem, neck, turtleneck) never.
+// f6 (M5) — such a blob is never «the inside» of a part: an opening, the card's inner layer, or
+// UNASSIGNED (an error the canvas shows); a side of one region is named; the answers recorded under
+// the regions.v4 cut (paint-qa f3, shots/final f4/f5) number regions the v5 cut does not — skipped.
 //   node scripts/paint-sides-probe.mjs
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -55,10 +58,11 @@ const keys = new Map([
 const names = (p) => p.groups.map((x) => `${x.label}[${x.key}]:${x.regions.join(',')}`).join(' | ');
 
 ck(
-  m.PARTS_ALGO_REV.length <= 32 && m.PARTS_ALGO_REV.startsWith('regions.v4+'),
-  'parts rev fits the server cap',
+  m.PARTS_ALGO_REV.length <= 32 - '@s3.j99999'.length && m.PARTS_ALGO_REV.startsWith('regions.v5+'),
+  'parts rev fits the server cap (with the server tag)',
   m.PARTS_ALGO_REV,
 );
+ck(m.PARTS_REGIONS_MIN === 1, 'f6: a side cut into one region is named, not «pen only»');
 
 /* front: the wearer's left is the picture's RIGHT */
 {
@@ -161,7 +165,7 @@ ck(
 
 /* c9 · corrected joins re-suggest: the ask key and held parts follow the join list's rev */
 {
-  ck(m.PARTS_ALGO_REV === 'regions.v4+parts.f5', 'parts rev is f5', m.PARTS_ALGO_REV);
+  ck(m.PARTS_ALGO_REV === 'regions.v5+parts.f6', 'parts rev is v5 + f6', m.PARTS_ALGO_REV);
   const sides = [
     { view: 'front', baseMediaId: 5 },
     { view: 'back', baseMediaId: 6 },
@@ -275,11 +279,30 @@ ck(
     );
   const wideIn = mk(50, 69, 25, 44); // 20 px = 20 % of the silhouette, no border with the outside
   const p = ans(wideIn, 'waist binding');
+  const pin = m.fixBands(p, wideIn);
   ck(
-    names(m.fixBands(p, wideIn)) === 'back body[back-body]:1 | back body · inside[back-body]:2',
-    'wide band inside the garment → the body’s inside',
-    names(m.fixBands(p, wideIn)),
+    names(pin) === 'back body[back-body]:1' &&
+      m.unassignedRegion(pin, 2) &&
+      !m.unassignedRegion(pin, 1),
+    'f6: a wide "binding" inside the garment is UNASSIGNED (an error), never the body’s inside',
+    names(pin),
   );
+  // f6 · the labeller's leftovers are unassigned too; an opening is not.
+  const left = lay('back', [
+    g('back body', [1]),
+    g('unnamed', [2], 'unnamed-back'),
+    g('opening', [3], 'opening'),
+  ]);
+  ck(
+    m.unassignedRegion(left, 2) && !m.unassignedRegion(left, 3) && !m.unassignedRegion(left, 1),
+    'f6: the unnamed leftovers are unassigned, an opening is not',
+  );
+  const none = lay('back', [g('back body', [1])]);
+  ck(
+    m.unassignedRegion(none, 2) && m.unassignedRegion(none, 3),
+    'f6: a region in no group is unassigned',
+  );
+  ck(!m.unassignedRegion(null, 2), 'f6: no parts yet, no error');
   const thin = mk(30, 89, 33, 36); // 4 px = 4 %
   const q = ans(thin, 'waist band');
   ck(m.fixBands(q, thin) === q, 'thin band untouched');
@@ -342,16 +365,21 @@ ck(
       new Int32Array([-1, 30 * SW2 + 30, 30 * SW2 + 70, 35 * SW2 + 90]),
       'front',
     );
-    const out = names(m.fixBands(m.fixSides('front', p, f, k2), f));
+    const fixed = m.fixBands(m.fixSides('front', p, f, k2), f);
+    const out = names(fixed);
     ck(
-      out.includes('left panel · inside[left-panel]:3') && out.includes('left panel[left-panel]:2'),
-      'inside follows the owner after the L/R swap',
+      out === 'right panel[right-panel]:1 | left panel[left-panel]:2' &&
+        m.unassignedRegion(fixed, 3),
+      'f6: the L/R swap stands, the blob is unassigned (no «· inside» of either panel)',
       out,
     );
   }
 }
-/* f3 · the live labels (tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json) on real flats */
-{
+/* f3 · the live labels (tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json) on real flats —
+   recorded under the regions.v4 cut: their region numbers mean nothing on the v5 cut. */
+if (m.REGIONS_ALGO_REV !== 'regions.v4') {
+  console.log('  skip  f3 live labels (recorded under the regions.v4 cut)');
+} else {
   const QA = resolve(REPO, '../tmp/plans/flat-consistency/in/paint-qa');
   const LIVE = resolve(REPO, '../tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json');
   const cut = (name) => {
@@ -464,8 +492,10 @@ ck(
 
 /* f5 · card 38's three live f4 answers (shots/final/c38-parts-run1..3.json) on the live flats
    (in/paint-qa/c38-*-646..649.png, the bases the rows were named on): the straps, the V layer and the
-   back triangles come out the same every time. */
-{
+   back triangles come out the same every time. Recorded under the regions.v4 cut: skipped on v5. */
+if (m.REGIONS_ALGO_REV !== 'regions.v4') {
+  console.log('  skip  c38 live runs (recorded under the regions.v4 cut)');
+} else {
   const QA = resolve(REPO, '../tmp/plans/flat-consistency/in/paint-qa');
   const RUNS = resolve(REPO, '../tmp/plans/flat-consistency/shots/final');
   const files = {
@@ -581,23 +611,23 @@ ck(
       m.fixBands(p1, flats.front) === p1,
       'c38 front: with no inner layer on the card the binding is left as answered',
     );
-    // Card 49 (no layer): nothing of the card-level answer moves.
-    ck(
-      m.innerLayerPart(
-        [{ parts: [{ label: 'front body', partKey: 'front-body', regions: [1] }] }],
-        [],
-      ) === null,
-      'no layer on the card: none found',
-    );
-    ck(
-      m.innerLayerPart(
-        [{ parts: [{ label: 'left front panel', partKey: 'left-front-panel', regions: [1] }] }],
-        [],
-      ) === null,
-      'an outer "panel" is no inner layer',
-    );
   }
 }
+// Card 49 (no layer): nothing of the card-level answer moves.
+ck(
+  m.innerLayerPart(
+    [{ parts: [{ label: 'front body', partKey: 'front-body', regions: [1] }] }],
+    [],
+  ) === null,
+  'no layer on the card: none found',
+);
+ck(
+  m.innerLayerPart(
+    [{ parts: [{ label: 'left front panel', partKey: 'left-front-panel', regions: [1] }] }],
+    [],
+  ) === null,
+  'an outer "panel" is no inner layer',
+);
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);

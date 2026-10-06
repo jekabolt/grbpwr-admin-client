@@ -372,19 +372,23 @@ export function displayLabels(
  * of a region, and every pixel under a line whose nearest neighbour is in a region — minus the
  * outline's outer fringe (the light pixels between the outer line and the paper, reached from
  * outside within a few px without crossing ink), so the outline stands on paper (cached per flat).
+ * v5 · minus the side's OPENINGS: a hole is never cloth, not even the remainder's.
  */
 const CLOTH = new WeakMap<Int32Array, Uint8Array>();
 export function clothMask(
-  flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h'> & { ink?: Uint8Array },
+  flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h' | 'openings'> & {
+    ink?: Uint8Array;
+  },
 ): Uint8Array {
   const hit = CLOTH.get(flat.labels);
   if (hit) return hit;
-  const { w, h, silhouette, ink } = flat;
+  const { w, h, silhouette, ink, openings } = flat;
   const n = w * h;
   const out = new Uint8Array(n);
-  for (let i = 0; i < n; i += 1) if (flat.labels[i]) out[i] = 1;
+  const cloth = (r: number) => r > 0 && !openings?.[r];
+  for (let i = 0; i < n; i += 1) if (cloth(flat.labels[i])) out[i] = 1;
   const { idx, near } = underLines(flat);
-  for (let k = 0; k < idx.length; k += 1) if (flat.labels[near[k]]) out[idx[k]] = 1;
+  for (let k = 0; k < idx.length; k += 1) if (cloth(flat.labels[near[k]])) out[idx[k]] = 1;
   if (ink) {
     const reach = Math.max(2, Math.round((3 * Math.max(w, h)) / 1024));
     const step = new Int16Array(n).fill(-1);

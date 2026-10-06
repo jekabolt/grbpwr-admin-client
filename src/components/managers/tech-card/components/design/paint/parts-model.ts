@@ -48,8 +48,11 @@ const PAL: [number, number, number][] = [
  * non-elongated `binding` leaves its group.
  * `parts.f5`: the client decides a strap's side by its top end (`fixSides`) and gives a binding's
  * blob / stacked strip to the card's inner layer (`fixBands`); the server retries an unusable answer.
+ * `parts.f6` (M5, owner 06.10): an opening is never cloth — the labeller no longer gives a hole to
+ * the part «seen through» it, `fixBands` never makes a «· inside»; a side cut into ONE region is
+ * named too; a region the labeller left out is shown as an error (`unassignedRegion`).
  */
-export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f5`;
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f6`;
 
 /**
  * c9 · the key one card-level ask is made under (once per key per session): the sides with their
@@ -71,8 +74,11 @@ export const heldPartsFresh = (
   joinsRev: number,
 ): boolean => !!parts?.keyed && namedUnder === joinsRev;
 
-/** Regions the model is asked to name: fewer is nothing to group, more is unreadable. */
-export const PARTS_REGIONS_MIN = 2;
+/**
+ * Regions the model is asked to name: none is a failed cut, more is unreadable. f6: ONE region is
+ * named too (the owner's front of fine bindings was «pen only» for being one region).
+ */
+export const PARTS_REGIONS_MIN = 1;
 export const PARTS_REGIONS_MAX = 60;
 
 /**
@@ -215,10 +221,15 @@ export const isOpening = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
 /** Ф1 · the inside of a part seen through an opening: "front body · inside" (same `part_key`). */
 export const INSIDE_SUFFIX = ' · inside';
 
+/** The group of the regions the labeller left out (backend `unnamed`, key `unnamed-<view>`). */
+export const UNNAMED = 'unnamed';
+export const isUnnamed = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
+  partKey(g.label) === UNNAMED || g.key === UNNAMED || g.key.startsWith(`${UNNAMED}-`);
+
 /** A part a name can travel by (R9): a real name, not the model's leftovers. */
 export const transferable = (label: string): boolean => {
   const k = partKey(label);
-  return k !== '' && k !== 'unnamed' && k !== OPENING;
+  return k !== '' && k !== UNNAMED && k !== OPENING;
 };
 
 /** Is `region` (1..count) an opening on this side. */
@@ -226,6 +237,16 @@ export const openingRegion = (parts: ViewParts | null | undefined, region: numbe
   if (!parts || region <= 0) return false;
   const g = parts.groups[parts.regionGroup[region] ?? -1];
   return !!g && isOpening(g);
+};
+
+/**
+ * f6 · a region that is neither a named part nor an opening: in no group, or in the labeller's
+ * leftovers. An ERROR, never silent paper — the canvas marks it until it is painted.
+ */
+export const unassignedRegion = (parts: ViewParts | null | undefined, region: number): boolean => {
+  if (!parts || region <= 0) return false;
+  const g = parts.groups[parts.regionGroup[region] ?? -1];
+  return !g || isUnnamed(g);
 };
 
 /** `idx` without the pixels of the side's openings (the pen and a click never paint them). */
@@ -607,8 +628,6 @@ export function bandShape(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'
   return { width, elongation };
 }
 
-const bodyName = (label: string) => /\bbody\b/.test(partKey(label));
-
 /**
  * f5 · the card's inner layer as a part (layer 2 of `fixBands`): its label and key. Found, in order:
  * a part of the answer with the key of a `joins.layers` layer of index > 0 (the backend names it by
@@ -678,8 +697,9 @@ const STACK_FREE = 0.05;
  *   - it borders the outside of the garment, or an opening, along `BAND_CONTACT` of its edge
  *     (looking across the line, as far as two closing radii) → `opening`;
  *   - f5 · else, the card has an inner layer (`layer`) → that layer part;
- *   - else → "<part> · inside" of the part it borders most (a body first; none bordering → the
- *     nearest by centroid), with that part's key.
+ *   - f6 · else it is UNASSIGNED (no group: the canvas shows it as an error) — no longer the
+ *     «<part> · inside» of a part beside it: a hole is never cloth, and a guess is never shown as
+ *     an answer.
  * f5 · with an inner layer, a binding group of several regions also gives up a strip that runs
  * along the group's other strips (`STACK_CONTACT`) and finishes no cloth (`STACK_FREE`): a binding
  * borders the panel it finishes; that strip is the layer showing past it (card 38 front: the V
@@ -737,17 +757,8 @@ export function fixBands(
     if (isOpening(g)) for (const r of g.regions) opening.add(r);
   });
   const out: Map<number, string | PartGroup | LayerPart> = new Map();
-  const sum = new Float64Array(count + 1);
-  const cx = new Float64Array(count + 1);
-  const cy = new Float64Array(count + 1);
-  for (let i = 0; i < n; i += 1) {
-    const v = labels[i];
-    if (v > 0 && v <= count) {
-      sum[v] += 1;
-      cx[v] += i % w;
-      cy[v] += (i / w) | 0;
-    }
-  }
+  /** f6 · the regions that leave their binding for no group (an error on the canvas). */
+  const UNASSIGNED = '';
   const wideSet = new Set(wide);
   const scan = new Set([...wide, ...stacked]);
   const edge = new Map<number, number>();
@@ -798,13 +809,6 @@ export function fixBands(
     for (const u of seen) t.set(u, (t.get(u) ?? 0) + 1);
   }
 
-  // The parts an inside may belong to: no opening, no inside, no band; a body first.
-  const owners = parts.groups
-    .map((g, i) => ({ g, i }))
-    .filter(({ g }) => !isOpening(g) && !g.label.endsWith(INSIDE_SUFFIX) && !isBand(g));
-  const bodies = owners.filter(({ g }) => bodyName(g.label));
-  const pool = bodies.length ? bodies : owners;
-
   for (const r of wide) {
     const e = Math.max(1, edge.get(r) ?? 0);
     const t = touch.get(r)!;
@@ -814,35 +818,7 @@ export function fixBands(
       out.set(r, OPENING);
       continue;
     }
-    if (layer) {
-      out.set(r, layer);
-      continue;
-    }
-    if (pool.length === 0) {
-      out.set(r, OPENING);
-      continue;
-    }
-    let best = -1;
-    let bestScore = -1;
-    let bestD = Infinity;
-    for (const { g, i } of pool) {
-      let c = 0;
-      let d = Infinity;
-      for (const u of g.regions) {
-        c += t.get(u) ?? 0;
-        if (sum[u] > 0 && sum[r] > 0)
-          d = Math.min(
-            d,
-            Math.hypot(cx[u] / sum[u] - cx[r] / sum[r], cy[u] / sum[u] - cy[r] / sum[r]),
-          );
-      }
-      if (c > bestScore || (c === bestScore && d < bestD)) {
-        best = i;
-        bestScore = c;
-        bestD = d;
-      }
-    }
-    out.set(r, parts.groups[best]);
+    out.set(r, layer ?? UNASSIGNED);
   }
 
   // f5 · stacked strips: a binding and the layer showing past it run along each other. Over one
@@ -893,7 +869,7 @@ export function fixBands(
   }
   if (out.size === 0) return parts;
 
-  // Rebuild the groups: the wide regions leave their band, join the opening / the part's inside.
+  // Rebuild the groups: the wide regions leave their band, join the opening / the layer / none.
   const groups: PartGroup[] = parts.groups.map((g) => ({
     ...g,
     regions: g.regions.filter((r) => !moved.has(r)),
@@ -909,14 +885,13 @@ export function fixBands(
     return g;
   };
   for (const [r, to] of out) {
+    if (to === UNASSIGNED) continue;
     const g =
       to === OPENING
         ? findOrAdd(OPENING, OPENING)
         : to === layer
           ? findOrAdd(layer.label, layer.key)
-          : isBand(to as PartGroup)
-            ? findOrAdd((to as PartGroup).label, (to as PartGroup).key)
-            : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
+          : findOrAdd((to as PartGroup).label, (to as PartGroup).key);
     g.regions.push(r);
   }
   const kept = groups.filter((g) => g.regions.length > 0);

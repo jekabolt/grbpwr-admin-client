@@ -55,6 +55,7 @@ import {
   concatIndices,
   clearOpenings,
   dropOpenings,
+  openingRegion,
   heldPartsFresh,
   partsAskKey,
   fixBands,
@@ -89,7 +90,7 @@ import {
   type ViewScale,
 } from './mockup';
 import { remainderCloth } from './plan-run';
-import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
+import { analyseFlat, REGIONS_ALGO_REV, withOpenings, type FlatRegions } from './regions';
 import { dec, num, strayMarks, type StrayMark } from './artworks';
 import {
   carryOutcome,
@@ -108,7 +109,13 @@ export type PaintView = {
   view: string;
   baseMediaId: number;
   status: 'loading' | 'ready' | 'error';
+  /**
+   * The flat's regions as painting sees them: the cut (`cut`), grown again once the side's parts
+   * are known so that only cloth takes the strip the closing ate — never an opening (v5).
+   */
   flat: FlatRegions | null;
+  /** v5 · the flat's regions as cut, before any parts: what the labeller is shown. */
+  cut: FlatRegions | null;
   /** The flat's own pixels at canvas size — the paper under the paint. */
   pixels: ImageData | null;
   /** Natural size of the flat (aspect while loading). */
@@ -594,7 +601,7 @@ export class PaintSession {
    * (no `part_key`) still names the parts until the card-level answer comes, never over it.
    */
   private takeParts(v: PaintView): boolean {
-    if (v.status !== 'ready' || !v.flat) return false;
+    if (v.status !== 'ready' || !v.cut) return false;
     const row = this.bandParts(v);
     if (!row) return false;
     if (v.parts?.keyed && !keyedSuggestion(row)) return false;
@@ -602,11 +609,24 @@ export class PaintSession {
     const sig = this.partsSigOf(row, rows);
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
-    v.parts = this.laid(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view, rows);
+    this.lay(v, this.laid(row, v.cut, v.parts?.seeds ?? markPoints(v.cut), v.view, rows));
     v.partsJoinsRev = this.joinsRev();
     this.partsGen += 1;
     this.clearCarriedOpenings(v);
     return true;
+  }
+
+  /**
+   * The side's parts (null = none) and, v5, its regions grown again around them: only cloth takes
+   * the strip the closing ate, an opening keeps only its own pixels (`withOpenings`).
+   */
+  private lay(v: PaintView, parts: ViewParts | null) {
+    v.parts = parts;
+    const flat = v.cut && parts ? withOpenings(v.cut, (r) => openingRegion(parts, r)) : v.cut;
+    if (flat !== v.flat) {
+      v.flat = flat;
+      v.rev += 1;
+    }
   }
 
   /** D2 · carried paint never stands on an opening. Saved only if the person already kept it. */
@@ -628,7 +648,7 @@ export class PaintSession {
     let changed = false;
     for (const v of this.views.values())
       if (v.parts && v.partsJoinsRev !== undefined && v.partsJoinsRev !== rev) {
-        v.parts = null;
+        this.lay(v, null);
         v.partsSig = '';
         v.partsJoinsRev = undefined;
         this.partsGen += 1;
@@ -647,7 +667,8 @@ export class PaintSession {
     const all = [...this.views.values()];
     if (all.some((v) => v.status === 'loading')) return;
     const sides = all.filter(
-      (v): v is PaintView & { flat: FlatRegions } => v.status === 'ready' && this.namable(v),
+      (v): v is PaintView & { cut: FlatRegions } =>
+        v.status === 'ready' && !!v.cut && this.namable(v),
     );
     if (sides.length === 0 || (!force && sides.every((v) => this.partsFresh(v)))) return;
     const joinsRev = this.joinsRev();
@@ -661,9 +682,9 @@ export class PaintSession {
     let listMoved = false;
     void (async () => {
       try {
-        const seeds = sides.map((v) => v.parts?.seeds ?? markPoints(v.flat));
+        const seeds = sides.map((v) => v.parts?.seeds ?? markPoints(v.cut));
         const media = await Promise.all(
-          sides.map((v, i) => uploadRaster(marksPng(v.flat, seeds[i]))),
+          sides.map((v, i) => uploadRaster(marksPng(v.cut, seeds[i]))),
         );
         // The uploads took a while: a side changed (its own sync asks anew) or the answer came.
         if (!current()) return;
@@ -679,7 +700,7 @@ export class PaintSession {
             view: v.view,
             baseMediaId: v.baseMediaId,
             marksMediaId: media[i].id ?? 0,
-            regionCount: v.flat.count,
+            regionCount: v.cut.count,
           })),
         });
         // The list moved while the model named: this answer is for the old one (asked anew).
@@ -695,9 +716,9 @@ export class PaintSession {
           // flat or algo rev would paint unrelated regions.
           if (!v || this.views.get(v.view) !== v) continue;
           if ((s.baseMediaId ?? 0) !== v.baseMediaId || s.algoRev !== PARTS_ALGO_REV) continue;
-          const parts = this.laid(s, v.flat, seeds[i], v.view, res.suggestions ?? []);
+          const parts = this.laid(s, v.cut, seeds[i], v.view, res.suggestions ?? []);
           if (!parts) continue;
-          v.parts = parts;
+          this.lay(v, parts);
           v.partsSig = this.partsSigOf(s, res.suggestions ?? []);
           v.partsJoinsRev = joinsRev;
           this.partsGen += 1;
@@ -720,9 +741,17 @@ export class PaintSession {
     })();
   }
 
-  /** QW5 · a side the model can name: cut into 2..60 regions. Others are the pen's only. */
+  /**
+   * QW5 · a side the model can name: cut into 1..60 regions (f6: one region is named too). Others
+   * are the pen's only.
+   */
   namable(v: PaintView): boolean {
-    return !!v.flat && v.flat.count >= PARTS_REGIONS_MIN && v.flat.count <= PARTS_REGIONS_MAX;
+    return !!v.cut && v.cut.count >= PARTS_REGIONS_MIN && v.cut.count <= PARTS_REGIONS_MAX;
+  }
+
+  /** f6 · the cutter found no region at all on a loaded side: said as it is, not «pen only». */
+  cutFailed(v: PaintView): boolean {
+    return v.status === 'ready' && !!v.cut && v.cut.count === 0;
   }
 
   /** `parts · retry` (one for the block). */
@@ -876,6 +905,7 @@ export class PaintSession {
       baseMediaId,
       status: 'loading',
       flat: null,
+      cut: null,
       pixels: null,
       aspect,
       labels: null,
@@ -940,6 +970,7 @@ export class PaintSession {
         }
         if (this.views.get(view) !== v) return;
         v.flat = flat;
+        v.cut = flat;
         v.pixels = img;
         v.aspect = img.width / img.height;
         v.labels = labels;

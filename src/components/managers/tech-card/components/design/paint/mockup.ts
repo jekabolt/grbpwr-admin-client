@@ -27,8 +27,11 @@ export const GARMENT_WIDTH_MM = 600;
 /** A cloth picture with no stated repeat shows this much cloth across, in mm. */
 export const SWATCH_MM = 100;
 
-/** Bumped whenever the mockup's drawing changes: a cached mockup of an older drawing is not reused. */
-export const MOCKUP_REV = 'mockup.v2';
+/**
+ * Bumped whenever the mockup's drawing changes: a cached mockup of an older drawing is not reused.
+ * v3 · the remainder never fills an opening.
+ */
+export const MOCKUP_REV = 'mockup.v3';
 
 /** What the card's size chart says about the garment (0 = not said), in mm. */
 export type Garment = { chestMm: number; lengthMm: number };
@@ -173,7 +176,7 @@ function skinSampler(skin: MockupSkin) {
  * the unpainted inside of the silhouette (QW1); without it, and for a label without a skin, paper.
  */
 export function mockupPixels(
-  flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h'> & { ink?: Uint8Array },
+  flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h' | 'openings'> & { ink?: Uint8Array },
   labels: Uint32Array,
   flatRgba: Uint8ClampedArray,
   skins: ReadonlyMap<number, MockupSkin>,

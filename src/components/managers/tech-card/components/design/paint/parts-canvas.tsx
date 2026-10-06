@@ -52,7 +52,13 @@ import {
   type Quad,
 } from './artworks';
 import { tileSampler } from './mockup';
-import { concatIndices, openingRegion, partIndices } from './parts-model';
+import {
+  concatIndices,
+  isUnnamed,
+  openingRegion,
+  partIndices,
+  unassignedRegion,
+} from './parts-model';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -63,8 +69,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *   click  fills the part under the pointer: the model's named part when the side has auto parts
  *          (and the same-named part on the other sides, R9), else the region between the lines;
  *          ⇧-click this side only (QW6); ⌥-click fills one region only (cuts a part). A side the
- *          model cannot name (cut into fewer than 2 or more than 60 regions — a sketch, a photo)
- *          is `pen only`: CLICK draws the pen there (QW5)
+ *          model cannot name (more than 60 regions) is `pen only`, one the cutter found no region
+ *          on is `cut failed` (f6): CLICK draws the pen there (QW5). f6 · a region the model left
+ *          out (no part, no opening) is hatched red until painted, the caption says `unassigned`
  *   pen    a polygon of the armed material, clipped to the garment — closes open outlines; it is
  *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
  *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
@@ -117,6 +124,13 @@ const REMAINDER_SHARE = 0.6;
 /** QW9 · a region spanning two parts: a 1 px diagonal every HATCH px, at this ink share. */
 const HATCH = 7;
 const HATCH_SHARE = 0.3;
+/**
+ * f6 · a region the labeller left UNASSIGNED (no part, no opening), while unpainted: the error red
+ * (#ff0000, DESIGN.md `red`) as a 1 px diagonal every LOST_HATCH px at this share — never silent
+ * paper. With the caption's worded `unassigned` pill, so it is not carried by colour alone.
+ */
+const LOST_HATCH = 5;
+const LOST_SHARE = 0.55;
 
 /**
  * A material's pixel on a side: its picture laid `tilePx` wide (QW2 — the mockup's own rule,
@@ -553,6 +567,10 @@ function PaintSide({
   const ready = view.status === 'ready' && !!flat && !!labels && !!pixels;
   /* QW5 · a side the model cannot name is the pen's: CLICK draws the pen over it. */
   const penOnly = ready && !session.namable(view);
+  /* f6 · no region at all: the cut failed, said as it is. */
+  const cutFailed = ready && session.cutFailed(view);
+  /* f6 · unassigned regions still unpainted (an error the caption names). */
+  const [lost, setLost] = useState(0);
   const tool = penOnly && session.tool === 'click' ? 'pen' : session.tool;
   const remainder = session.remainder();
   const split = view.parts?.split;
@@ -579,6 +597,12 @@ function PaintSide({
     const rest = remainder ? lookOf(remainder).s : null;
     const cloth = rest ? clothMask(flat) : null;
     const tmp = new Uint8ClampedArray(4);
+    // f6 · the regions the labeller left unassigned, and which of them still show unpainted.
+    const parts = view.parts;
+    const unassigned = new Uint8Array(flat.count + 1);
+    if (parts)
+      for (let r = 1; r <= flat.count; r += 1) unassigned[r] = unassignedRegion(parts, r) ? 1 : 0;
+    const open = new Set<number>();
     for (let i = 0, p = 0; i < shown.length; i += 1, p += 4) {
       // The flat's own pixel over white paper.
       const a = d[p + 3] / 255;
@@ -590,8 +614,19 @@ function PaintSide({
       const x = i % w;
       const y = (i / w) | 0;
       if (!v) {
+        const region = flat.labels[i];
+        // f6 · an unassigned region: the error hatch, never silent paper.
+        if (unassigned[region]) {
+          open.add(region);
+          if ((x + y) % LOST_HATCH === 0) {
+            d[p] = 255 * LOST_SHARE + fr * (1 - LOST_SHARE);
+            d[p + 1] = fg * (1 - LOST_SHARE);
+            d[p + 2] = fb * (1 - LOST_SHARE);
+            continue;
+          }
+        }
         // QW9 · a region the model could not split: a thin hatch over the unpainted.
-        if (split?.size && split.has(flat.labels[i]) && (x + y) % HATCH === 0) {
+        if (split?.size && split.has(region) && (x + y) % HATCH === 0) {
           fr *= 1 - HATCH_SHARE;
           fg *= 1 - HATCH_SHARE;
           fb *= 1 - HATCH_SHARE;
@@ -628,8 +663,9 @@ function PaintSide({
       }
     }
     ctx.putImageData(out, 0, 0);
+    setLost(open.size);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, view.rev, w, h, flat, remainder, split]);
+  }, [ready, view.rev, w, h, flat, remainder, split, view.parts]);
 
   /** The hover canvas shows another side's part (R17), not one under this side's pointer. */
   const echoShown = useRef(false);
@@ -646,12 +682,16 @@ function PaintSide({
     if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
   };
 
-  /** The part's group under (x, y): -1 = no parts here, or ⌥ asks for one region. */
+  /**
+   * The part's group under (x, y): -1 = no parts here, ⌥ asks for one region, or (f6) the region
+   * is unassigned — the labeller's leftovers are no part: a click fills that one region.
+   */
   const groupAt = (px: number, py: number, alt: boolean): number => {
     const parts = view.parts;
     if (alt || !parts || !flat || tool === 'pen') return -1;
     const region = flat.labels[py * w + px];
-    return region ? parts.regionGroup[region] : -1;
+    const g = region ? parts.regionGroup[region] : -1;
+    return g >= 0 && !isUnnamed(parts.groups[g]) ? g : -1;
   };
 
   // Labels or the armed material changed under a held hover: drop it.
@@ -769,7 +809,12 @@ function PaintSide({
         : componentAt(labels, flat.labels, w, h, px, py);
     st.group = group;
     st.region = region;
-    const label = parts && group >= 0 ? parts.groups[group].label : '';
+    const label =
+      parts && group >= 0
+        ? parts.groups[group].label
+        : !alt && tool !== 'pen' && unassignedRegion(parts, region)
+          ? 'unassigned'
+          : '';
     setPartName(label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label);
     session.setHover(view.view, group, only);
     echoShown.current = false;
@@ -1066,7 +1111,21 @@ function PaintSide({
             <Pill tone='attention'>!</Pill>
           </span>
         )}
-        {penOnly && <Pill tone='mut'>pen only</Pill>}
+        {cutFailed ? (
+          <span title='The drawing gave no region to fill; the pen still works'>
+            <Pill tone='warn'>cut failed</Pill>
+          </span>
+        ) : (
+          penOnly && <Pill tone='mut'>pen only</Pill>
+        )}
+        {lost > 0 && (
+          <span
+            title={`${lost} ${lost === 1 ? 'region is' : 'regions are'} no part and no opening: paint or rename parts`}
+            data-paint-unassigned={lost}
+          >
+            <Pill tone='warn'>unassigned</Pill>
+          </span>
+        )}
         {partName && (
           <Text size='micro' tracking='label' component='span' className='truncate uppercase'>
             {partName}

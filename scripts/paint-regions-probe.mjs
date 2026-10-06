@@ -2,6 +2,9 @@
 // PAINT THE PARTS · T1 — the client port of the Ф0 region cutter against the Ф0 flats.
 // Compares the region count at r = 3 with the Python probe (`f0/out/<flat>/report.txt`); ±20 % or
 // ±2 regions passes (the probe resamples with LANCZOS and dilates with cv2's ellipse — near, not equal).
+// v5 (M5): the count is INFO only — v5 joins band fragments and no longer folds channels into the
+// body, so it departs from Ф0 by design; a cut of 0 or > 60 regions on a Ф0 flat still fails. The
+// E5 rules themselves are gated by `paint-cut-probe.mjs`.
 //
 //   node scripts/paint-regions-probe.mjs [flats dir]
 import { build as esbuild } from 'esbuild';
@@ -75,11 +78,13 @@ for (const file of readdirSync(FLATS).sort()) {
   const py = existsSync(rep)
     ? Number(/regions r=3: (\d+) parts/.exec(readFileSync(rep, 'utf8'))?.[1])
     : NaN;
-  const ok = Number.isNaN(py) || Math.abs(r.count - py) <= Math.max(2, py * 0.2);
-  // v3 ≡ v2 where the flat holds no dashed line: the same regions, numbered the same.
+  const near = Number.isNaN(py) || Math.abs(r.count - py) <= Math.max(2, py * 0.2);
+  const ok = r.count >= 1 && r.count <= 60;
+  // v3 ≡ v2 where the flat holds no FREE dashed line: the same cut, numbered the same (v5: the
+  // stitching still stops the growth, so the cut — `raw` — is compared, not the grown labels).
   const v2 = m.analyseFlat(data, w, h, { r: 3, dashes: false });
   let same = v2.count === r.count;
-  for (let i = 0; same && i < v2.labels.length; i += 1) same = v2.labels[i] === r.labels[i];
+  for (let i = 0; same && i < v2.raw.length; i += 1) same = v2.raw[i] === r.raw[i];
   const v2ok = (r.dashes ?? 0) > 0 || same;
   if (!v2ok) bad += 1;
   console.log(
@@ -87,7 +92,7 @@ for (const file of readdirSync(FLATS).sort()) {
   );
   if (!ok) bad += 1;
   console.log(
-    `${ok ? '  ok  ' : '  FAIL'} ${name.padEnd(16)} ${w}x${h}  ts ${String(r.count).padStart(3)}  py ${String(py).padStart(3)}  ${ms} ms`,
+    `${ok ? (near ? '  ok  ' : '  info') : '  FAIL'} ${name.padEnd(16)} ${w}x${h}  ts ${String(r.count).padStart(3)}  py ${String(py).padStart(3)}  ${ms} ms`,
   );
 }
 // Speed at the canvas ceiling (1600 long side) on the busiest flat.
