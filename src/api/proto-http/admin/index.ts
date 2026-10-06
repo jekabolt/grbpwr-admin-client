@@ -17884,6 +17884,23 @@ export type DesignQuizQuestion = {
   // media_id — the moodboard picture this question is about (the board's media id); 0/absent = not a
   // picture question. When set the client shows that picture instead of a pictogram.
   mediaId?: number | undefined;
+  // spots — 1 to 3 places IN the media_id picture the question is about (99-SPOTS); only when
+  // media_id ≠ 0. Clients echo them on save.
+  spots?: DesignQuizSpot[] | undefined;
+};
+
+// DesignQuizSpot — one place on a moodboard picture a quiz question is about (99-SPOTS).
+export type DesignQuizSpot = {
+  // the place in the question's own words, 1–4 words
+  label?: string | undefined;
+  // 0..1000 across the picture's width, from the left (viewer's left)
+  x?: number | undefined;
+  // 0..1000 down the picture's height, from the top
+  y?: number | undefined;
+  // zone|detail
+  scale?: string | undefined;
+  // byte offset of label inside question text, -1 = not found (server-computed, output only)
+  at?: number | undefined;
 };
 
 export type GenerateDesignQuizRequest = {

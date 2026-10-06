@@ -21,6 +21,7 @@ import { CornerMenu } from 'components/managers/tech-card/components/design/pict
 import {
   roleMenu,
   usePictureAnchor,
+  type QuizAnchor,
   type QuizPicture,
 } from 'components/managers/tech-card/components/design/quiz-anchor';
 import {
@@ -121,7 +122,16 @@ const defaultQuiz = {
 // 70-SEAMS: `quiz` — свой набор вопросов вместо фикстуры, `seamClass` — класс шва карточки в форме.
 // 96-PICTURE-QUESTIONS: `board` — настоящая лента `FocusedAnnotator` с картинками вместо заглушки,
 // якорь через тот же `usePictureAnchor`, что у доски.
-type BoardPic = { id: number; role: string; shade: string };
+// 99-SPOTS: `w`/`h` — свой размер картинки (альбом проверяет отображение мест в кадре), `marks` —
+// точки 0..1000, нарисованные на картинке: снимок показывает, легло ли кольцо на своё место.
+type BoardPic = {
+  id: number;
+  role: string;
+  shade: string;
+  w?: number;
+  h?: number;
+  marks?: [number, number][];
+};
 type Preset = {
   board?: BoardPic[];
   answers?: unknown[];
@@ -145,9 +155,14 @@ w.__session = w.__preset?.session ?? null;
 w.__model = { applyRows, clarifyOf, decisionLines, insertClarify, QUIZ_MAX, seamOf, swatchOf };
 
 // Картинка-заглушка: серый кадр с крупной цифрой — монохром, как у доски.
-const picUrl = (n: number, shade: string, w: number, h: number) =>
+const picUrl = (n: number, shade: string, w: number, h: number, marks: [number, number][] = []) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'><rect width='100%' height='100%' fill='${shade}'/><text x='50%' y='55%' font-family='monospace' font-size='${h / 3}' text-anchor='middle' fill='#000'>${n}</text></svg>`,
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'><rect width='100%' height='100%' fill='${shade}'/><text x='50%' y='55%' font-family='monospace' font-size='${h / 3}' text-anchor='middle' fill='#000'>${n}</text>${marks
+      .map(
+        ([x, y]) =>
+          `<circle cx='${(x / 1000) * w}' cy='${(y / 1000) * h}' r='${h / 80}' fill='#000'/>`,
+      )
+      .join('')}</svg>`,
   )}`;
 
 function Board({
@@ -166,11 +181,12 @@ function Board({
   );
   const unmarked = useMemo(() => pics.filter((p) => !p.role).map((p) => p.id), [pics]);
   const scope = useRef<HTMLDivElement>(null);
-  const { anchored, onFocusPicture } = usePictureAnchor(scope, true);
+  const { anchored, spots, hotSpot, onHotSpot, onFocusPicture } = usePictureAnchor(scope, true);
   const views: FocusedView[] = pics.map((p, i) => {
-    const w = i % 2 ? 300 : 240;
-    const url = picUrl(i + 1, p.shade, w, 320);
-    const size = { mediaUrl: url, width: w, height: 320 };
+    const w = p.w ?? (i % 2 ? 300 : 240);
+    const h = p.h ?? 320;
+    const url = picUrl(i + 1, p.shade, w, h, p.marks);
+    const size = { mediaUrl: url, width: w, height: h };
     return {
       key: String(p.id),
       mediaId: p.id,
@@ -211,14 +227,19 @@ function Board({
           ),
         })}
         anchoredMediaId={anchored}
+        anchoredSpots={spots}
+        hotSpot={hotSpot}
+        onHotSpot={onHotSpot}
       />
-      {quiz({ pictureOf, onFocusPicture, unmarked, onSetRole })}
+      {quiz({ pictureOf, onFocusPicture, hotSpot, onHotSpot, unmarked, onSetRole })}
     </div>
   );
 }
 type QuizProps = {
   pictureOf?: (id: number) => QuizPicture | null;
-  onFocusPicture?: (id: number | null) => void;
+  onFocusPicture?: (a: QuizAnchor | null) => void;
+  hotSpot?: number | null;
+  onHotSpot?: (n: number | null) => void;
   unmarked?: number[];
   onSetRole?: (id: number, role: string) => void;
 };

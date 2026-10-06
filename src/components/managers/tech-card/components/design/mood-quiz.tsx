@@ -1,4 +1,4 @@
-import type { DesignQuizAnswer, DesignQuizQuestion } from 'api/proto-http/admin';
+import type { DesignQuizAnswer, DesignQuizQuestion, DesignQuizSpot } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
@@ -31,7 +31,12 @@ import {
   isRoleQuestion,
   MOOD_ROLES,
   ROLE_HINT,
+  readSpotsHidden,
   roleQuestion,
+  spotsOf,
+  spotWords,
+  writeSpotsHidden,
+  type QuizAnchor,
   type QuizPicture,
 } from './quiz-anchor';
 import { setQuizLive } from './quiz-live';
@@ -122,6 +127,8 @@ export function MoodQuiz({
   conceptMax,
   pictureOf,
   onFocusPicture,
+  hotSpot = null,
+  onHotSpot,
   unmarked = [],
   onSetRole,
 }: {
@@ -137,7 +144,10 @@ export function MoodQuiz({
    */
   pictureOf?: (mediaId: number) => QuizPicture | null;
   /** Вопрос на экране (или строка списка под курсором) — про эту картинку; `null` — ни про какую. */
-  onFocusPicture?: (mediaId: number | null) => void;
+  onFocusPicture?: (anchor: QuizAnchor | null) => void;
+  /** 99-SPOTS: номер места под курсором — общий с кольцами на доске. */
+  hotSpot?: number | null;
+  onHotSpot?: (n: number | null) => void;
   /** 97-ROLE-FIRST: картинки доски без роли, в порядке доски — о них квиз спрашивает первым. */
   unmarked?: number[];
   /** Роль картинке — та же запись, что у угол-меню плитки (`setBoardRole`). */
@@ -169,18 +179,36 @@ export function MoodQuiz({
   const [applying, setApplying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
-  const [hoverPic, setHoverPic] = useState<number | null>(null);
+  const [hoverPic, setHoverPic] = useState<QuizAnchor | null>(null);
+  // 99 §1.5: «hide spots» — помнится в браузере; скрытые места не идут ни на доску, ни в вопрос.
+  const [spotsHidden, setSpotsHidden] = useState(readSpotsHidden);
+  const toggleSpots = () => {
+    writeSpotsHidden(!spotsHidden);
+    setSpotsHidden(!spotsHidden);
+  };
+  const shownSpots = (question: DesignQuizQuestion | undefined) =>
+    spotsHidden ? [] : spotsOf(question);
   const shownCard = useRef(card);
   shownCard.current = card;
 
   // 96: якорь доски — вопрос на экране про картинку, иначе строка открытого списка под курсором.
+  // 99: вместе с id — места вопроса. Объект новый на каждый рендер, поэтому эффект ведёт ключ.
   const q = live ? live.queue[live.at] : undefined;
-  const anchor = (live ? q?.mediaId : listOpen ? hoverPic : null) || null;
+  const anchor: QuizAnchor | null = live
+    ? q?.mediaId
+      ? { mediaId: q.mediaId, spots: shownSpots(q) }
+      : null
+    : listOpen
+      ? hoverPic
+      : null;
+  const anchorKey = JSON.stringify(anchor);
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
   const focusPicture = useRef(onFocusPicture);
   focusPicture.current = onFocusPicture;
   useEffect(() => {
-    focusPicture.current?.(anchor);
-  }, [anchor]);
+    focusPicture.current?.(anchorRef.current);
+  }, [anchorKey]);
   useEffect(() => () => focusPicture.current?.(null), []);
 
   // Другая карточка — своя сохранённая очередь (или никакой).
@@ -541,6 +569,13 @@ export function MoodQuiz({
         question={q}
         picture={q.mediaId ? pictureOf?.(q.mediaId) ?? null : undefined}
         family={q.family || family}
+        spots={{
+          shown: shownSpots(q),
+          has: spotsOf(q).length > 0,
+          hot: hotSpot,
+          onHot: onHotSpot,
+          onToggle: toggleSpots,
+        }}
         position={live.mode === 'edit' ? null : { n: live.at + 1, of: live.queue.length }}
         prior={prior}
         busy={save.isPending || !ready}
@@ -680,7 +715,11 @@ export function MoodQuiz({
                   readOnly={readOnly}
                   onOpen={() => reopen(a)}
                   onHover={(on) =>
-                    setHoverPic(on && a.question?.mediaId ? a.question.mediaId : null)
+                    setHoverPic(
+                      on && a.question?.mediaId
+                        ? { mediaId: a.question.mediaId, spots: shownSpots(a.question) }
+                        : null,
+                    )
                   }
                 />
                 <span className='flex items-baseline justify-end gap-3'>
@@ -859,6 +898,7 @@ function QuestionView({
   question,
   picture,
   family,
+  spots,
   position,
   prior,
   busy,
@@ -872,6 +912,17 @@ function QuestionView({
   /** 96: `undefined` — обычный вопрос (пиктограмма); иначе картинка доски (`null` — её сняли). */
   picture?: QuizPicture | null;
   family: string;
+  /**
+   * 99-SPOTS: места вопроса на картинке — `shown` (пусто, когда скрыты), `has` — есть ли они вообще
+   * (тогда в ряду действий `hide spots` / `show spots`), `hot` — номер под курсором.
+   */
+  spots?: {
+    shown: DesignQuizSpot[];
+    has: boolean;
+    hot: number | null;
+    onHot?: (n: number | null) => void;
+    onToggle: () => void;
+  };
   /** Номер в прогоне; `null` — вопрос открыт из списка ответов. */
   position: { n: number; of: number } | null;
   prior?: DesignQuizAnswer;
@@ -1019,9 +1070,10 @@ function QuestionView({
               : question.category || 'design'}
           {position ? ` · ${position.n} / ${position.of}` : ''}
         </Text>
-        <Text component='p' className='text-pretty'>
-          {question.question}
+        <Text component='p' className='text-pretty' data-quiz-question=''>
+          <SpotText text={question.question ?? ''} spots={spots} />
         </Text>
+        {spots?.has && <SpotLegend spots={spots} text={question.question ?? ''} />}
         {stale && stale.changes.length > 0 && <StaleChanges changes={stale.changes} />}
         <div
           onPointerDownCapture={() => {
@@ -1152,5 +1204,84 @@ function QuestionView({
         </div>
       </div>
     </div>
+  );
+}
+
+type SpotsProp = NonNullable<Parameters<typeof QuestionView>[0]['spots']>;
+
+/** Номер места верхним индексом — те же цифры, что в коробке у кольца на доске. */
+function SpotSup({ n }: { n: number }): JSX.Element {
+  return (
+    <sup className='ml-px align-super text-nano leading-none tabular-nums' data-spot-sup={n}>
+      {n}
+    </sup>
+  );
+}
+
+/**
+ * 99 §2: вопрос с номерами мест на словах — «inner strap¹». Наведение на слово зажигает кольцо на
+ * доске, наведение на кольцо подчёркивает слово.
+ */
+function SpotText({ text, spots }: { text: string; spots?: SpotsProp }): JSX.Element {
+  if (!spots?.shown.length) return <>{text}</>;
+  const { pieces } = spotWords(text, spots.shown);
+  return (
+    <>
+      {pieces.map((p, i) =>
+        p.n == null ? (
+          <span key={i}>{p.text}</span>
+        ) : (
+          <span
+            key={i}
+            data-spot-word={p.n}
+            onPointerEnter={() => spots.onHot?.(p.n ?? null)}
+            onPointerLeave={() => spots.onHot?.(null)}
+            className={cn('decoration-1 underline-offset-2', spots.hot === p.n && 'underline')}
+          >
+            {p.text}
+            <SpotSup n={p.n} />
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * Строка мест под вопросом: места, чьих слов в вопросе нет («³ hem tape»), и `hide spots` /
+ * `show spots` (99 §1.5). В ряду ответа переключатель не живёт: на 390 он сжимал поле своего слова.
+ */
+function SpotLegend({ text, spots }: { text: string; spots: SpotsProp }): JSX.Element {
+  const { unmatched } = spots.shown.length ? spotWords(text, spots.shown) : { unmatched: [] };
+  return (
+    <p className='flex flex-wrap items-baseline gap-x-3 gap-y-1' data-spot-legend=''>
+      {unmatched.map((u) => (
+        <Text
+          key={u.n}
+          size='micro'
+          variant='label'
+          component='span'
+          data-spot-chip={u.n}
+          onPointerEnter={() => spots.onHot?.(u.n)}
+          onPointerLeave={() => spots.onHot?.(null)}
+          className={cn(
+            'decoration-1 underline-offset-2',
+            spots.hot === u.n && 'underline text-textColor',
+          )}
+        >
+          <SpotSup n={u.n} /> {u.label}
+        </Text>
+      ))}
+      <Button
+        variant='underline'
+        size='xs'
+        className='text-labelColor hover:text-textColor'
+        data-quiz-spots-toggle=''
+        aria-pressed={spots.shown.length === 0}
+        onClick={spots.onToggle}
+      >
+        {spots.shown.length ? 'hide spots' : 'show spots'}
+      </Button>
+    </p>
   );
 }

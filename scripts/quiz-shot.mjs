@@ -1612,6 +1612,253 @@ try {
     }
     await ctx.close();
   }
+  // 99-SPOTS: места вопроса — нумерованные кольца в кадре якорной картинки, номера верхним индексом
+  // на словах вопроса, легенда для слов, которых в вопросе нет, `hide spots` помнится в браузере.
+  const spotTarget = [
+    { label: 'inner strap edge', x: 300, y: 450, scale: 'zone', at: -1 },
+    { label: 'back neckline', x: 640, y: 160, scale: 'detail', at: -1 },
+    { label: 'hem tape', x: 500, y: 880, scale: 'detail', at: -1 },
+  ];
+  const cuffText = 'Where does the cuff tab from this picture go on our sleeve?';
+  // `at` — байтовое смещение подписи, как считает сервер.
+  const cuffAt = Buffer.byteLength(cuffText.slice(0, cuffText.indexOf('cuff tab')));
+  const spotDetail = [
+    { label: 'cuff tab', x: 970, y: 520, scale: 'detail', at: cuffAt },
+    { label: 'sleeve', x: 420, y: 40, scale: 'zone', at: -1 },
+  ];
+  const marksOf = (spots) => spots.map((p) => [p.x, p.y]);
+  const spotBoard = [
+    { id: 401, role: 'target', shade: '#d9d9d9', w: 300, h: 400, marks: marksOf(spotTarget) },
+    // альбом: кадр шире высоты — доли x и y меряются каждая по своей стороне
+    { id: 402, role: 'detail', shade: '#bfbfbf', w: 480, h: 300, marks: marksOf(spotDetail) },
+    { id: 403, role: 'material', shade: '#e6e6e6' },
+  ];
+  const spotQuiz = {
+    family: 'top',
+    model: 'stub',
+    questions: [
+      pq('pic_spots', 401, 'How are the inner strap and back edges finished?', [
+        'clean turned edge',
+        'bound with self bias',
+        'raw, laser cut',
+      ]),
+      pq('pic_cuff', 402, cuffText, ['on the cuff, as pictured', 'on the hem instead']),
+      pq('pic_fabric', 403, 'What do we take from this fabric?', ['the rib', 'the colour']),
+    ],
+  };
+  spotQuiz.questions[0].spots = spotTarget;
+  spotQuiz.questions[1].spots = spotDetail;
+  // Кольца плитки: центр и радиус в координатах экрана против ожидаемых по кадру картинки.
+  const ringsOn = (page, id) =>
+    page.evaluate((id) => {
+      const tile = document.querySelector(`[data-rail-view="${id}"]`);
+      const img = tile.querySelector('[data-annot-frame] img').getBoundingClientRect();
+      return {
+        img: { l: img.left, t: img.top, w: img.width, h: img.height },
+        rings: [...tile.querySelectorAll('[data-spot]')].map((g) => {
+          const c = g.querySelector('circle:nth-of-type(2)').getBoundingClientRect();
+          const box = tile
+            .querySelector(`[data-spot-number="${g.getAttribute('data-spot')}"]`)
+            .getBoundingClientRect();
+          return {
+            n: Number(g.getAttribute('data-spot')),
+            cx: c.left + c.width / 2,
+            cy: c.top + c.height / 2,
+            r: c.width / 2,
+            box: { l: box.left, r: box.right, t: box.top, b: box.bottom },
+            boxBg: getComputedStyle(
+              tile.querySelector(`[data-spot-number="${g.getAttribute('data-spot')}"]`),
+            ).backgroundColor,
+          };
+        }),
+        layerAnim: (() => {
+          const l = tile.querySelector('[data-spots]');
+          return l ? getComputedStyle(l).animationName : null;
+        })(),
+      };
+    }, id);
+  const ringsPlaced = async (page, id, spots, what) => {
+    const { img, rings } = await ringsOn(page, id);
+    const long = Math.max(img.w, img.h);
+    const bad = spots
+      .map((s, i) => {
+        const r = rings.find((x) => x.n === i + 1);
+        if (!r) return `#${i + 1} missing`;
+        const ex = img.l + (s.x / 1000) * img.w;
+        const ey = img.t + (s.y / 1000) * img.h;
+        const er = Math.min(40, Math.max(14, (s.scale === 'detail' ? 0.05 : 0.09) * long));
+        const dx = Math.abs(r.cx - ex) / img.w;
+        const dy = Math.abs(r.cy - ey) / img.h;
+        return dx <= 0.01 && dy <= 0.01 && Math.abs(r.r - er) <= 1
+          ? null
+          : `#${i + 1} off by ${(dx * 100).toFixed(2)}%/${(dy * 100).toFixed(2)}% r ${r.r.toFixed(1)} vs ${er.toFixed(1)}`;
+      })
+      .filter(Boolean);
+    check(
+      rings.length === spots.length && bad.length === 0,
+      `${what}: ${rings.length} rings on tile ${id}, each within 1% of its place in the picture frame ${bad.join('; ')}`,
+    );
+    return rings;
+  };
+  const supText = (page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[data-quiz] [data-spot-word]')].map((w) => [
+        Number(w.getAttribute('data-spot-word')),
+        w.firstChild.textContent,
+        w.querySelector('[data-spot-sup]')?.textContent,
+      ]),
+    );
+  const ringCount = (page) => page.locator('[data-rail-view] [data-spot]').count();
+  for (const [width, height, name, opts] of [
+    [1440, 900, 'quiz-1440-spots.png', {}],
+    [390, 844, 'quiz-390-spots.png', { reducedMotion: 'reduce' }],
+  ]) {
+    const { ctx, page } = await open(
+      width,
+      height,
+      { quiz: spotQuiz, board: spotBoard, pictures: 3 },
+      null,
+      { deviceScaleFactor: 2, ...opts },
+    );
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    await anchoredOn(page, 401, `[${width}] spots target question`, 3);
+    await page.waitForTimeout(700); // scroll settle
+    const rings = await ringsPlaced(page, 401, spotTarget, `[${width}] target`);
+    const sups = await supText(page);
+    check(
+      JSON.stringify(sups) ===
+        JSON.stringify([
+          [1, 'inner strap', '1'],
+          [2, 'back', '2'],
+        ]),
+      `[${width}] superscripts on the matched words ${JSON.stringify(sups)}`,
+    );
+    const legend = (await page.locator('[data-quiz] [data-spot-chip]').allTextContents()).map((t) =>
+      t.trim(),
+    );
+    check(
+      legend.length === 1 && legend[0] === '3 hem tape',
+      `[${width}] unmatched label as a legend chip ${JSON.stringify(legend)}`,
+    );
+    check(
+      (await page.locator('[data-quiz] [data-quiz-picture] [data-spot]').count()) === 0,
+      `[${width}] no rings on the quiz thumbnail`,
+    );
+    if (width === 390) {
+      const { layerAnim } = await ringsOn(page, 401);
+      check(
+        layerAnim === 'none',
+        `[390] reduced motion: rings appear without a fade (${layerAnim})`,
+      );
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await shoot(page, name);
+      await ctx.close();
+      continue;
+    }
+    // наведение на слово зажигает номер кольца; на кольцо — подчёркивает слово
+    await page.locator('[data-quiz] [data-spot-word="1"]').hover();
+    const hotBg = (await ringsOn(page, 401)).rings.find((r) => r.n === 1).boxBg;
+    check(hotBg === 'rgb(0, 0, 0)', `hover on word 1 inks ring 1's number (${hotBg})`);
+    const r2 = rings.find((r) => r.n === 2);
+    await page.mouse.move((r2.box.l + r2.box.r) / 2, (r2.box.t + r2.box.b) / 2);
+    const under = await page
+      .locator('[data-quiz] [data-spot-word="2"]')
+      .evaluate((el) => getComputedStyle(el).textDecorationLine);
+    check(under === 'underline', `hover on ring 2 underlines its word (${under})`);
+    await page.mouse.move(5, 5);
+    // скриншот — до hide: кольца, номера, верхние индексы и легенда
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shoot(page, name);
+    // hide spots — колец нет, индексов нет, ключ в localStorage; перезагрузка помнит
+    await btn(page, 'hide spots').click();
+    await page.waitForTimeout(200);
+    check(
+      (await ringCount(page)) === 0 &&
+        (await page.locator('[data-quiz] [data-spot-sup]').count()) === 0 &&
+        (await page.evaluate(() => localStorage.getItem('quiz.spots'))) === 'off',
+      'hide spots: no rings, no superscripts, remembered as quiz.spots=off',
+    );
+    await anchoredOn(page, 401, 'hide spots keeps the picture anchor', 3);
+    await btn(page, 'later').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    await open(
+      width,
+      height,
+      {
+        quiz: spotQuiz,
+        board: spotBoard,
+        pictures: 3,
+        session: { questions: spotQuiz.questions, family: 'top' },
+      },
+      { ctx, page },
+    );
+    await btn(page, 'resume').click();
+    await page.waitForSelector('[data-quiz]');
+    await page.waitForTimeout(300);
+    check(
+      (await ringCount(page)) === 0 &&
+        (await page.locator('[data-quiz] [data-quiz-spots-toggle]').textContent()).trim() ===
+          'show spots',
+      'hide spots survives a reload',
+    );
+    await btn(page, 'show spots').click();
+    await page.waitForTimeout(300);
+    check((await ringCount(page)) === 3, 'show spots brings the 3 rings back');
+    // второй вопрос: `at` сервера (байты), альбомный кадр, номер у края перекинут внутрь
+    await btn(page, 'clean turned edge').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
+    );
+    await anchoredOn(page, 402, 'spots detail question', 3);
+    await page.waitForTimeout(700);
+    const dr = await ringsPlaced(page, 402, spotDetail, 'landscape detail');
+    const sups2 = await supText(page);
+    check(
+      JSON.stringify(sups2) ===
+        JSON.stringify([
+          [1, 'cuff tab', '1'],
+          [2, 'sleeve', '2'],
+        ]),
+      `server byte offset places superscript 1 ${JSON.stringify(sups2)}`,
+    );
+    const c1 = dr.find((r) => r.n === 1);
+    const c2 = dr.find((r) => r.n === 2);
+    check(
+      c1 && c1.box.r <= c1.cx && c2 && c2.box.t >= c2.cy,
+      'numbers flip inside at the right and top edges of the frame',
+    );
+    // третий вопрос без мест — колец нет
+    await btn(page, 'on the cuff, as pictured').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
+    );
+    await anchoredOn(page, 403, 'question without spots', 3);
+    check(
+      (await ringCount(page)) === 0 &&
+        (await page.locator('[data-quiz] [data-quiz-spots-toggle]').count()) === 0,
+      'a picture question without spots: no rings, no toggle',
+    );
+    await btn(page, 'later').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    // список ответов: наведение на ответ с местами снова показывает его кольца
+    await btn(page, 'answers ▾').click();
+    const line = page.locator('[data-probe="quiz"] li button', {
+      hasText: 'inner strap and back edges',
+    });
+    await line.hover();
+    await anchoredOn(page, 401, 'answers-list hover', 3);
+    await ringsPlaced(page, 401, spotTarget, 'answers-list hover');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(200);
+    check((await ringCount(page)) === 0, 'leaving the answer clears the rings');
+    check(
+      (await page.evaluate(() => window.__answers)).find((a) => a.question?.id === 'pic_spots')
+        ?.question?.spots?.length === 3,
+      'saved answer echoes the question spots',
+    );
+    await ctx.close();
+  }
   {
     const { ctx, page } = await open(390, 844);
     await btn(page, 'ASK ME').click();
