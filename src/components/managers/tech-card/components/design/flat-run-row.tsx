@@ -1090,6 +1090,7 @@ export function FlatRunRow({
         band={band}
         techCardId={techCardId}
         readOnly={!!disabled}
+        detailSlotId={detailId}
       />
     </div>
   );
