@@ -903,14 +903,18 @@ export function FocusedAnnotator({
                     // `group` — хозяин тихих углов (`TILE_QUIET`): ✕, crop, edit проявляются на
                     // наведении или фокусе внутри ЭТОЙ плитки, как у каждой плитки админки.
                     'group relative shrink-0 space-y-1',
-                    !wrap && 'snap-start',
+                    // Q26: якорная плитка щёлкает ЦЕНТРОМ — иначе снап откатил бы ленту к её началу.
+                    !wrap && (v.mediaId === anchoredMediaId ? 'snap-center' : 'snap-start'),
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
-                    // 96: the anchored picture keeps full ink, the rest step back. Before the
-                    // reorder outline below so a live drag target still wins the outline.
+                    // 96: the anchored picture keeps full ink, the rest step back.
+                    // Q26 (owner, «чуть тоньше», «без белой линии»): the frame sits on the PICTURE
+                    // box (`data-annot-frame`), not the taller tile, so no empty band under the
+                    // photo; 1px ink at -1px lies exactly over the frame's grey 1px border — no gap.
+                    // (1.5px was tried: Chromium floors it to 1px even at DPR 2.)
                     'transition-opacity duration-150 ease-out motion-reduce:transition-none',
                     anchoredMediaId != null &&
                       (v.mediaId === anchoredMediaId
-                        ? 'scroll-mx-1 outline outline-2 outline-offset-2 outline-textColor'
+                        ? '[&_[data-annot-frame]]:outline [&_[data-annot-frame]]:-outline-offset-1 [&_[data-annot-frame]]:outline-textColor'
                         : 'opacity-25'),
                     // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ. У ленты
                     // контейнер выше несёт `overflow-x-auto`, и широкая плитка листается в ней; у

@@ -27,7 +27,13 @@ import { isPaletteKey, SeamIcon, seamClassOf, seamOf, swatchOf, type SeamKind } 
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
-import type { QuizPicture } from './quiz-anchor';
+import {
+  isRoleQuestion,
+  MOOD_ROLES,
+  ROLE_HINT,
+  roleQuestion,
+  type QuizPicture,
+} from './quiz-anchor';
 import { setQuizLive } from './quiz-live';
 import {
   answerText,
@@ -70,8 +76,13 @@ import { newClientRequestId, useDesignQuizAnswers, useDesignQuizWrites } from '.
 type Live = {
   queue: DesignQuizQuestion[];
   at: number;
-  /** `edit` — один вопрос, открытый из списка ответов; после ответа экран возвращается к списку. */
-  mode: 'run' | 'edit';
+  /**
+   * `edit` — один вопрос, открытый из списка ответов; после ответа экран возвращается к списку.
+   * `role` — 97-ROLE-FIRST: шаг ролей неразмеченных картинок, локальный; за ним `then`.
+   */
+  mode: 'run' | 'edit' | 'role';
+  /** Только у `role`: что идёт после шага — платный прогон или продолжение прежней очереди. */
+  then?: 'generate' | 'resume';
 };
 
 type OptionCloseup =
@@ -107,6 +118,8 @@ export function MoodQuiz({
   conceptMax,
   pictureOf,
   onFocusPicture,
+  unmarked = [],
+  onSetRole,
 }: {
   techCardId?: number;
   readOnly: boolean;
@@ -121,6 +134,10 @@ export function MoodQuiz({
   pictureOf?: (mediaId: number) => QuizPicture | null;
   /** Вопрос на экране (или строка списка под курсором) — про эту картинку; `null` — ни про какую. */
   onFocusPicture?: (mediaId: number | null) => void;
+  /** 97-ROLE-FIRST: картинки доски без роли, в порядке доски — о них квиз спрашивает первым. */
+  unmarked?: number[];
+  /** Роль картинке — та же запись, что у угол-меню плитки (`setBoardRole`). */
+  onSetRole?: (mediaId: number, role: string) => void;
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
@@ -231,7 +248,25 @@ export function MoodQuiz({
       ? { ok: true }
       : { ok: false, reason: moodGateSentence(minimum) };
 
-  const ask = async () => {
+  /**
+   * 97-ROLE-FIRST: есть неразмеченные картинки — сперва шаг ролей (локально, бесплатно), и только
+   * после него `then`. Роли пишутся в форму по ходу шага; `generateRun` делает flush автосейва ДО
+   * `GenerateDesignQuiz`, поэтому сервер читает карточку уже с ролями.
+   */
+  const rolesFirst = (then: 'generate' | 'resume') => {
+    if (readOnly || !onSetRole || !unmarked.length) return false;
+    setRefusal(null);
+    setNothingLeft(false);
+    setListOpen(false);
+    setLive({ queue: unmarked.map(roleQuestion), at: 0, mode: 'role', then });
+    return true;
+  };
+  const ask = () => {
+    if (readOnly || asking || !card || !ready) return;
+    if (!rolesFirst('generate')) void generateRun();
+  };
+
+  const generateRun = async () => {
     if (readOnly || asking || !card || !ready) return;
     setRefusal(null);
     setNothingLeft(false);
@@ -288,6 +323,21 @@ export function MoodQuiz({
     skipped: boolean,
   ) => {
     if (!live || !ready) return;
+    if (live.mode === 'role') {
+      // Роль живёт на картинке, не в ответах квиза; `skip` оставляет картинку неразмеченной.
+      const role = skipped ? '' : selected[0] ?? '';
+      if (q.mediaId && (MOOD_ROLES as readonly string[]).includes(role))
+        onSetRole?.(q.mediaId, role);
+      const next = live.at + 1;
+      if (next < live.queue.length) {
+        setLive({ ...live, at: next });
+        return;
+      }
+      setLive(null);
+      if (live.then === 'resume') resumeQueue();
+      else void generateRun();
+      return;
+    }
     const answer: DesignQuizAnswer = {
       question: q,
       selected: skipped ? [] : selected,
@@ -344,9 +394,9 @@ export function MoodQuiz({
 
   /** W-C4: прошлый вопрос с его сохранённым ответом. */
   const back = () => {
-    if (!live || live.mode !== 'run' || live.at === 0) return;
+    if (!live || live.mode === 'edit' || live.at === 0) return;
     setLive({ ...live, at: live.at - 1 });
-    persist(live.queue, live.at - 1, family);
+    if (live.mode === 'run') persist(live.queue, live.at - 1, family);
   };
 
   /** `later`: вопрос закрывается, очередь стоит в сессии — ряд предложит `resume N`. */
@@ -357,6 +407,10 @@ export function MoodQuiz({
   };
 
   const resume = () => {
+    if (!remaining.length || readOnly) return;
+    if (!rolesFirst('resume')) resumeQueue();
+  };
+  const resumeQueue = () => {
     if (!remaining.length || readOnly) return;
     const fam = pendingFamily || session?.family || '';
     setFamily(fam);
@@ -454,8 +508,8 @@ export function MoodQuiz({
         busy={save.isPending || !ready}
         onCommit={(selected, text) => commit(q, selected, text, false)}
         onSkip={() => commit(q, [], '', true)}
-        onBack={live.mode === 'run' && live.at > 0 ? back : null}
-        onLater={live.mode === 'run' ? later : null}
+        onBack={live.mode !== 'edit' && live.at > 0 ? back : null}
+        onLater={live.mode !== 'edit' ? later : null}
       />
     );
   }
@@ -616,6 +670,8 @@ export function MoodQuiz({
 /** Слово над вопросом про картинку: роль картинки на доске (`target`, `material`…) или `picture`. */
 const pictureWords = (p: QuizPicture | null) =>
   p ? `${p.role || 'picture'} · picture ${p.n}` : 'picture · off the board';
+/** 97: над вопросом роли — `role · picture N`, а не нынешняя роль (её и спрашивают). */
+const roleWords = (p: QuizPicture | null) => (p ? `role · picture ${p.n}` : 'role');
 
 /**
  * 96: вопрос про картинку доски несёт саму картинку на месте пиктограммы — тот же слот, кадр
@@ -751,6 +807,8 @@ function QuestionView({
   }
   const showOptionCloseups = comparedKinds.size >= 2;
   const multi = question.kind === 'multi';
+  // 97: вопрос роли — выбор из четырёх; своё слово положить некуда (роль живёт на картинке).
+  const roleStep = isRoleQuestion(question);
   const [selected, setSelected] = useState<string[]>(() =>
     prior && !prior.skipped ? (prior.selected ?? []).filter((s) => options.includes(s)) : [],
   );
@@ -825,7 +883,11 @@ function QuestionView({
       )}
       <div className='min-w-0 space-y-2'>
         <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
-          {question.mediaId ? pictureWords(picture ?? null) : question.category || 'design'}
+          {roleStep
+            ? roleWords(picture ?? null)
+            : question.mediaId
+              ? pictureWords(picture ?? null)
+              : question.category || 'design'}
           {position ? ` · ${position.n} / ${position.of}` : ''}
         </Text>
         <Text component='p' className='text-pretty'>
@@ -846,6 +908,7 @@ function QuestionView({
                   pressed={multi ? selected.includes(o) : undefined}
                   disabled={busy}
                   onClick={() => pick(o)}
+                  title={roleStep ? ROLE_HINT[o as keyof typeof ROLE_HINT] : undefined}
                   className='whitespace-normal text-left'
                 >
                   {showOptionCloseups && closeup ? (
@@ -873,23 +936,25 @@ function QuestionView({
           </ChipRow>
         </div>
         <div className='flex items-start gap-2'>
-          <Textarea
-            name={ownName}
-            aria-label='own answer'
-            placeholder='own answer'
-            autoGrow={false}
-            rows={1}
-            maxLength={500}
-            value={text}
-            disabled={busy}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value)}
-            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
-              e.preventDefault();
-              send();
-            }}
-            className='max-h-40 min-h-0 flex-1 resize-none [field-sizing:content]'
-          />
+          {!roleStep && (
+            <Textarea
+              name={ownName}
+              aria-label='own answer'
+              placeholder='own answer'
+              autoGrow={false}
+              rows={1}
+              maxLength={500}
+              value={text}
+              disabled={busy}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                send();
+              }}
+              className='max-h-40 min-h-0 flex-1 resize-none [field-sizing:content]'
+            />
+          )}
           {(multi || held || text.trim() !== '') && canSend && (
             <Button variant='underline' size='xs' className='mt-1' disabled={busy} onClick={send}>
               next ›

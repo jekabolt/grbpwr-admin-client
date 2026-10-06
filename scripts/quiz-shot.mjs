@@ -1124,16 +1124,19 @@ try {
     page.evaluate(() =>
       [...document.querySelectorAll('[data-rail-view]')].map((t) => {
         const cs = getComputedStyle(t);
+        // Q26: the frame lies on the picture box (`data-annot-frame`), not on the taller tile.
+        const fs = getComputedStyle(t.querySelector('[data-annot-frame]'));
         return {
           id: Number(t.getAttribute('data-rail-view')),
           anchored: t.getAttribute('data-anchored'),
           opacity: Number(cs.opacity),
-          outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineOffset}`,
+          tileOutline: cs.outlineStyle,
+          outline: `${fs.outlineStyle} ${fs.outlineWidth} ${fs.outlineOffset}`,
           transition: cs.transitionProperty,
         };
       }),
     );
-  const anchoredOn = async (page, id, what) => {
+  const anchoredOn = async (page, id, what, total = 4) => {
     await page.waitForTimeout(350); // 150 ms opacity transition settles
     const t = await tiles(page);
     const on = t.find((x) => x.id === id);
@@ -1141,8 +1144,9 @@ try {
     check(
       on?.anchored === 'on' &&
         on.opacity === 1 &&
-        on.outline === 'solid 2px 2px' &&
-        rest.length === 3 &&
+        on.outline === 'solid 1px -1px' &&
+        on.tileOutline === 'none' &&
+        rest.length === total - 1 &&
         rest.every((x) => x.anchored === 'off' && x.opacity === 0.25),
       `${what}: tile ${id} outlined, others at .25 (${JSON.stringify(t.map((x) => [x.id, x.opacity, x.outline]))})`,
     );
@@ -1151,7 +1155,7 @@ try {
     await page.waitForTimeout(350);
     const t = await tiles(page);
     check(
-      t.length === 4 && t.every((x) => x.anchored === null && x.opacity === 1),
+      t.every((x) => x.anchored === null && x.opacity === 1),
       `${what}: no tile anchored, all at full opacity`,
     );
   };
@@ -1169,6 +1173,10 @@ try {
     await noAnchor(page, 'idle board');
     await btn(page, 'ASK ME').click();
     await page.waitForSelector('[data-quiz]');
+    check(
+      (await page.evaluate(() => window.__calls)).some((c) => c.name === 'GenerateDesignQuiz'),
+      '97: no unmarked pictures — ASK ME goes straight to generation',
+    );
     await pictureQuestion(page, 101, 'target', 1);
     await anchoredOn(page, 101, 'target question');
     // `later` закрывает вопрос — якорь снят; `resume` возвращает его.
@@ -1231,6 +1239,147 @@ try {
     await shoot(page, 'quiz-1440-picture-answers.png');
     await page.mouse.move(5, 5);
     await noAnchor(page, 'hover left the row');
+    await ctx.close();
+  }
+  // 97-ROLE-FIRST (Q25) + Q27: неразмеченные картинки спрашиваются первыми, локально; роль сразу
+  // видна на ярлыке, в угол-меню и в строке следующих вопросов про эту картинку.
+  {
+    const roleBoard = [
+      { id: 201, role: 'target', shade: '#d9d9d9' },
+      { id: 202, role: '', shade: '#bfbfbf' },
+      { id: 203, role: 'mood', shade: '#e6e6e6' },
+      { id: 204, role: '', shade: '#cccccc' },
+    ];
+    const roleQuiz = {
+      family: 'jacket',
+      model: 'stub',
+      questions: [
+        pq('pic_m', 202, 'What do we take from this fabric?', ['the twill', 'the colour']),
+        pq('season', 0, 'Which season is it for?', ['spring and autumn', 'winter']),
+      ],
+    };
+    const generated = async (page) =>
+      (await page.evaluate(() => window.__calls)).filter((c) => c.name === 'GenerateDesignQuiz')
+        .length;
+    const eyebrow = async (page) =>
+      (await page.locator('[data-quiz] p').first().textContent()).trim();
+    const { ctx, page } = await open(1440, 900, {
+      quiz: roleQuiz,
+      board: roleBoard,
+      pictures: 4,
+    });
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    const e1 = await eyebrow(page);
+    check(
+      e1.startsWith('role · picture 2 · 1 / 2') &&
+        (await page.locator('[data-quiz] [data-quiz-picture="202"] img').count()) === 1 &&
+        (await page.locator('[data-quiz] textarea').count()) === 0,
+      `97: first question is the role of picture 2, anchored thumbnail, no own-answer box ("${e1}")`,
+    );
+    await anchoredOn(page, 202, '97 role question 1');
+    check((await generated(page)) === 0, '97: no GenerateDesignQuiz while the role step runs');
+    const chips = await page
+      .locator('[data-quiz] button')
+      .evaluateAll((b) => b.map((x) => [x.textContent.trim(), x.title]));
+    check(
+      ['target', 'detail', 'material', 'mood'].every((r) =>
+        chips.some(([t, title]) => t === r && title),
+      ),
+      '97: four role chips, each with a hint title',
+    );
+    await btn(page, 'material').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 2'),
+    );
+    // Q27 (a) ярлык номера, (b) слово угла — сразу после ответа.
+    const badge = (
+      await page.locator('[data-rail-view="202"] [data-tile-badge]').textContent()
+    ).trim();
+    const menuWord = (await page.locator('[data-menu="role:202"]').textContent()).trim();
+    check(badge === '2 · material', `Q27a: tile label reads "2 · material" ("${badge}")`);
+    check(/^material/.test(menuWord), `Q27b: corner menu shows the role word ("${menuWord}")`);
+    const e2 = await eyebrow(page);
+    check(
+      e2.startsWith('role · picture 4 · 2 / 2'),
+      `97: second role question is picture 4 ("${e2}")`,
+    );
+    await anchoredOn(page, 204, '97 role question 2');
+    await shoot(page, 'quiz-1440-role.png');
+    check((await generated(page)) === 0, '97: still no GenerateDesignQuiz before the step ends');
+    // skip — картинка 4 остаётся неразмеченной; шаг кончился → платный прогон.
+    await btn(page, 'skip').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('1 / 2'),
+    );
+    check((await generated(page)) === 1, '97: generation fires once, after the role step');
+    const e3 = await eyebrow(page);
+    // Q27 (c): следующий вопрос про картинку 2 несёт новую роль.
+    check(
+      e3.startsWith('material · picture 2'),
+      `Q27c: later question shows the new role ("${e3}")`,
+    );
+    const label4 = (
+      await page.locator('[data-rail-view="204"] [data-tile-badge]').textContent()
+    ).trim();
+    check(label4 === '4', `97: skipped picture stays unmarked ("${label4}")`);
+    check(
+      !(await page.evaluate(() => window.__answers)).some((a) =>
+        String(a.question?.id).startsWith('role:'),
+      ),
+      '97: role answers are not stored as quiz answers',
+    );
+    await ctx.close();
+  }
+  // Q26: якорная картинка — в центре ленты, рамка 1px по самой картинке.
+  {
+    const wide = Array.from({ length: 9 }, (_, i) => ({
+      id: 301 + i,
+      role: 'mood',
+      shade: i % 2 ? '#cccccc' : '#e0e0e0',
+    }));
+    const centreQuiz = {
+      family: 'jacket',
+      model: 'stub',
+      questions: [pq('pic_c', 305, 'What does this picture translate into?', ['colour', 'cut'])],
+    };
+    const { ctx, page } = await open(
+      1440,
+      900,
+      { quiz: centreQuiz, board: wide, pictures: wide.length },
+      null,
+      { deviceScaleFactor: 2 },
+    );
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    await anchoredOn(page, 305, 'Q26 picture 5', wide.length);
+    await page.waitForTimeout(900); // smooth scroll + snap settle
+    const off = await page.evaluate(() => {
+      const tile = document.querySelector('[data-rail-view="305"]');
+      const a = tile.getBoundingClientRect();
+      const b = tile.parentElement.getBoundingClientRect();
+      return a.left + a.width / 2 - (b.left + b.width / 2);
+    });
+    check(
+      Math.abs(off) <= 4,
+      `Q26: anchored tile centred in the strip (off by ${off.toFixed(1)} px)`,
+    );
+    const hug = await page.evaluate(() => {
+      const tile = document.querySelector('[data-rail-view="305"]');
+      const f = tile.querySelector('[data-annot-frame]').getBoundingClientRect();
+      const img = tile.querySelector('[data-annot-frame] img').getBoundingClientRect();
+      return Math.max(
+        Math.abs(f.left - img.left),
+        Math.abs(f.right - img.right),
+        Math.abs(f.top - img.top),
+        Math.abs(f.bottom - img.bottom),
+      );
+    });
+    check(
+      hug <= 1.01,
+      `Q26: the outlined box is the picture itself (edge gap ${hug.toFixed(1)} px)`,
+    );
+    await shoot(page, 'quiz-1440-anchor-centre.png');
     await ctx.close();
   }
   {

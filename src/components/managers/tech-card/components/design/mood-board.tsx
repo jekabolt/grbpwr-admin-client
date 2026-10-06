@@ -40,7 +40,7 @@ import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
 import { MoodQuiz } from './mood-quiz';
-import { usePictureAnchor, type QuizPicture } from './quiz-anchor';
+import { MOOD_ROLES, roleMenu, usePictureAnchor, type QuizPicture } from './quiz-anchor';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
@@ -466,7 +466,7 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
  * атмосфера. '' — не назначена (промпты читают как mood, на плитке ничего). Ставится из угла-меню
  * плитки, видна словом в ярлыке рядом с номером (`2 · target`) — тот же приём, что вид на эскизе.
  */
-export const MOOD_ROLES = ['target', 'detail', 'material', 'mood'] as const;
+export { MOOD_ROLES };
 
 /** Пишет роль в строку ДОСКИ этого медиа; строку входа с тем же id не трогает. */
 export function setBoardRole(live: BoardItem[], mediaId: number, role: string): BoardItem[] {
@@ -780,6 +780,14 @@ export function MoodBoard({
     },
     [items, mediaById],
   );
+  // 97-ROLE-FIRST: картинки без роли — в порядке доски; квиз спрашивает о них первыми и пишет роль
+  // той же записью, что угол-меню плитки (автосейв несёт её на сервер; `ask` делает flush до прогона).
+  const unmarked = useMemo(
+    () => items.filter((i) => !i.role && i.mediaId).map((i) => i.mediaId),
+    [items],
+  );
+  const setRoleOf = (mediaId: number, role: string) =>
+    writeItems(setBoardRole((getValues('moodboardMedia') ?? []) as BoardItem[], mediaId, role));
   /**
    * СВЁРНУТАЯ ДОСКА РАЗВОРАЧИВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (фиксап раунда 2, MIN-6). Дверь
    * рельса `description ›` и отказ по полю (`revealField`) шлют `FIELD_REVEAL_EVENT` НА ЯКОРЬ поля,
@@ -1097,29 +1105,12 @@ export function MoodBoard({
                           {!readOnly && (
                             <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
                               <CornerMenu
-                                menu={{
-                                  label: roleOf.get(view.mediaId) || 'role',
-                                  ariaLabel: `role of moodboard picture ${i + 1}`,
-                                  items: [
-                                    ...MOOD_ROLES.map((r) => ({
-                                      value: r,
-                                      label: r,
-                                      current: roleOf.get(view.mediaId) === r,
-                                    })),
-                                    ...(roleOf.get(view.mediaId)
-                                      ? [{ value: '', label: 'none' }]
-                                      : []),
-                                  ],
-                                  onPick: (role) =>
-                                    writeItems(
-                                      setBoardRole(
-                                        (getValues('moodboardMedia') ?? []) as BoardItem[],
-                                        view.mediaId,
-                                        role,
-                                      ),
-                                    ),
-                                  'data-menu': `role:${view.mediaId}`,
-                                }}
+                                menu={roleMenu(
+                                  view.mediaId,
+                                  i + 1,
+                                  roleOf.get(view.mediaId) ?? '',
+                                  (role) => setRoleOf(view.mediaId, role),
+                                )}
                               />
                             </span>
                           )}
@@ -1165,6 +1156,8 @@ export function MoodBoard({
               conceptMax={CONCEPT_MAX}
               pictureOf={pictureOf}
               onFocusPicture={onFocusPicture}
+              unmarked={unmarked}
+              onSetRole={setRoleOf}
             />
           </div>
 

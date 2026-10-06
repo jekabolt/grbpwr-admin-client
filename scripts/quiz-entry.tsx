@@ -17,7 +17,9 @@ import { DesignCapabilityProvider } from 'components/managers/tech-card/componen
 import { wordsBriefSource } from 'components/managers/tech-card/components/design/core/card-facts';
 import { useCardFacts } from 'components/managers/tech-card/components/design/head/card-facts-form';
 import { MoodQuiz } from 'components/managers/tech-card/components/design/mood-quiz';
+import { CornerMenu } from 'components/managers/tech-card/components/design/picture-tile';
 import {
+  roleMenu,
   usePictureAnchor,
   type QuizPicture,
 } from 'components/managers/tech-card/components/design/quiz-anchor';
@@ -147,7 +149,21 @@ const picUrl = (n: number, shade: string, w: number, h: number) =>
     `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'><rect width='100%' height='100%' fill='${shade}'/><text x='50%' y='55%' font-family='monospace' font-size='${h / 3}' text-anchor='middle' fill='#000'>${n}</text></svg>`,
   )}`;
 
-function Board({ pics, quiz }: { pics: BoardPic[]; quiz: (p: QuizProps) => React.ReactNode }) {
+function Board({
+  pics: initial,
+  quiz,
+}: {
+  pics: BoardPic[];
+  quiz: (p: QuizProps) => React.ReactNode;
+}) {
+  // 97: роли живут в состоянии ленты — ответ на вопрос роли и угол-меню пишут одно и то же.
+  const [pics, setPics] = useState(initial);
+  const onSetRole = useCallback(
+    (id: number, role: string) =>
+      setPics((list) => list.map((p) => (p.id === id ? { ...p, role } : p))),
+    [],
+  );
+  const unmarked = useMemo(() => pics.filter((p) => !p.role).map((p) => p.id), [pics]);
   const scope = useRef<HTMLDivElement>(null);
   const { anchored, onFocusPicture } = usePictureAnchor(scope, true);
   const views: FocusedView[] = pics.map((p, i) => {
@@ -186,15 +202,24 @@ function Board({ pics, quiz }: { pics: BoardPic[]; quiz: (p: QuizProps) => React
         emptyLabel='nothing on the board yet'
         mediaLabel={(v, i) => `moodboard picture ${i + 1}`}
         tileBadge={(v) => pics.find((p) => p.id === v.mediaId)?.role || null}
+        tileCorners={(v, i) => ({
+          right: (
+            <CornerMenu
+              menu={roleMenu(v.mediaId, i + 1, pics[i]?.role ?? '', (r) => onSetRole(v.mediaId, r))}
+            />
+          ),
+        })}
         anchoredMediaId={anchored}
       />
-      {quiz({ pictureOf, onFocusPicture })}
+      {quiz({ pictureOf, onFocusPicture, unmarked, onSetRole })}
     </div>
   );
 }
 type QuizProps = {
   pictureOf?: (id: number) => QuizPicture | null;
   onFocusPicture?: (id: number | null) => void;
+  unmarked?: number[];
+  onSetRole?: (id: number, role: string) => void;
 };
 
 const always = () => true;
