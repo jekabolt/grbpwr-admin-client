@@ -44,6 +44,7 @@ import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
+import { rememberRefChoice, useRefChoices } from './ref-ask-model';
 import { pictureOffersSplit } from './render/model';
 import { offersSplit, readSplit } from './generation/composite';
 import { useSplitToInput } from './split-to-input';
@@ -144,8 +145,12 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
 
 type RoleItem = { value: string; label: string; disabled?: boolean };
 
+/** T70: no role, but sent — the model works out what the picture shows (`ref-ask-model.ts`). */
+const FIGURE_ITEM = '__figure';
+
 const ROLE_ITEMS: RoleItem[] = [
   { value: '', label: 'not sent' },
+  { value: FIGURE_ITEM, label: 'figure it out ✦' },
   // ЧЕТЫРЕ СТОРОНЫ И ДЕТАЛЬ (`views.ts`, `ACTIVE_VIEWS`): 3/4 сняты владельцем (D-18) и больше не
   // предлагаются. Слов макета «silhouette / stitching / hardware» на проводе НЕТ — список
   // остаётся продуктовым.
@@ -401,14 +406,24 @@ export function ReferencesSection({
    * дырки «1, 3, 4» не бывает по построению. Хранимый номер потребовал бы N записей на каждое
    * снятие роли и разъезжался бы при первой же гонке двух вкладок.
    */
+  const refChoices = useRefChoices(techCardId);
+  /** T70: a role-less input picture the person left to the model — it travels after the roled ones. */
+  const figures = useMemo(
+    () => new Set(members.filter((id) => !refOf.has(id) && refChoices[id] === 'figure')),
+    [members, refOf, refChoices],
+  );
   const promptNumber = useMemo(() => {
     const m = new Map<number, number>();
     let n = 0;
     for (const mediaId of members) {
       if (refOf.has(mediaId)) m.set(mediaId, ++n);
     }
+    // The server appends `extra_input_media_ids` after the card's references.
+    for (const mediaId of members) {
+      if (figures.has(mediaId)) m.set(mediaId, ++n);
+    }
     return m;
-  }, [members, refOf]);
+  }, [members, refOf, figures]);
 
   const inPrompt = promptNumber.size;
 
@@ -483,6 +498,13 @@ export function ReferencesSection({
   }
 
   function setRole(mediaId: number, role: string) {
+    /* T70: `figure it out ✦` and `not sent` are remembered choices, so GENERATE does not ask about
+       the picture; both leave it role-less (a role, if any, is taken off). */
+    if (role === FIGURE_ITEM || role === '') {
+      rememberRefChoice(techCardId, mediaId, role === FIGURE_ITEM ? 'figure' : 'out');
+      if (refOf.has(mediaId)) writeRef(mediaId, '');
+      return;
+    }
     /* ─── РОЛЬ `detail` ЗАВОДИТ СЛОТ, А НЕ ТОЛЬКО ПОДПИСЫВАЕТ КАРТИНКУ (V-1) ───
      * Форма генерации предлагает ровно слоты (`bench.details` → `detail_slot_ids`), поэтому выбор
      * `detail` заводит ПУСТОЙ именованный слот на верстаке (плиту — чертёж детали — вернёт прогон;
@@ -830,6 +852,7 @@ export function ReferencesSection({
               mediaId={mediaId}
               full={mediaById.get(mediaId)}
               role={refOf.get(mediaId)?.role ?? ''}
+              figure={figures.has(mediaId)}
               number={promptNumber.get(mediaId)}
               /* J-9: УКАЗАТЕЛЬ И РАЗРЕШЁННОЕ ПО НЕМУ ИМЯ — ДВА РАЗНЫХ ФАКТА, и ячейке нужны оба.
                  По имени она печатает `detail · collar`; по указателю РАЗЛИЧАЕТ два молчания —
@@ -1207,6 +1230,7 @@ function ReferenceCell({
   mediaId,
   full,
   role,
+  figure,
   number,
   detailSlotId,
   detailName,
@@ -1223,6 +1247,8 @@ function ReferenceCell({
   mediaId: number;
   full?: common_MediaFull;
   role: string;
+  /** T70: no role, sent anyway — the model works out what it shows. */
+  figure?: boolean;
   number?: number;
   /** `design_bench_slot(id)` этой детали, 0 = не сказано (строка старше поля или слот удалён). */
   detailSlotId: number;
@@ -1286,13 +1312,18 @@ function ReferenceCell({
   const menu = readOnly
     ? undefined
     : {
-        label: current ? viewLabel(current) || current : 'not sent',
+        label: current ? viewLabel(current) || current : figure ? 'figure it out ✦' : 'not sent',
         ariaLabel: `role of ${label}`,
         title: isDetail ? detailWord : undefined,
         disabled: locked,
         'data-menu': `role:${mediaId}`,
         items: roleItemsFor(role).map((item) => {
-          const here = item.value === DETAIL_VIEW ? isDetail : !isDetail && item.value === current;
+          const here =
+            item.value === FIGURE_ITEM
+              ? !current && !!figure
+              : item.value === DETAIL_VIEW
+                ? isDetail
+                : !isDetail && item.value === current && !(figure && !current);
           return {
             value: item.value,
             disabled: item.disabled,
@@ -1313,7 +1344,16 @@ function ReferenceCell({
         }),
         onPick: (value: string) => {
           if (value === DETAIL_VIEW && unnamedDetail) return onNameDetail();
-          if (value === DETAIL_VIEW ? isDetail : !isDetail && value === current) return;
+          // `not sent` on a role-less picture is still a choice: remembered, GENERATE stops asking.
+          if (value === '' && !current) return onRole('');
+          if (
+            value === FIGURE_ITEM
+              ? !current && figure
+              : value === DETAIL_VIEW
+                ? isDetail
+                : !isDetail && value === current && !(figure && !current)
+          )
+            return;
           onRole(value);
         },
       };
@@ -1327,7 +1367,12 @@ function ReferenceCell({
       ? `detail · ${detailName}`
       : 'detail'
     : viewLabel(current) || current;
-  const badge = number != null && current ? `#${number} · ${roleWord}` : undefined;
+  const badge =
+    number != null && current
+      ? `#${number} · ${roleWord}`
+      : number != null && figure
+        ? `#${number} · ✦`
+        : undefined;
   const flag = unnamedDetail
     ? {
         word: 'name it',
@@ -1363,7 +1408,7 @@ function ReferenceCell({
         badge={badge}
         flag={flag}
         menu={menu}
-        dim={!role}
+        dim={!role && !figure}
         gallery={
           url && full
             ? // `meta` НЕСЁТ ID МЕДИА: без него дверь «сохранить как новую картинку» отказывает.

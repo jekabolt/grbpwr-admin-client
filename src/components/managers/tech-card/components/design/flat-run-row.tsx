@@ -14,6 +14,7 @@ import { flattenFieldErrors, revealField } from 'utils/field-errors';
 import type { TechCardFormData } from '../schema';
 
 import { AskConstruction, finishAsk, useAskBusy } from './ask-construction';
+import { AskReferences } from './ask-references';
 import {
   flushAllowsRun,
   flushRefusalSentence,
@@ -70,7 +71,15 @@ import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { pendingQuestions } from './joins-questions';
 import { WhatModelGetsModal } from './modals';
-import { isBoardRow, type BoardItem } from './mood-board';
+import { isBoardRow, isInputRow, type BoardItem } from './mood-board';
+import {
+  figureIds,
+  inputIdsOf,
+  picturesToAsk,
+  readRefChoices,
+  unmarkedInputIds,
+  useRefChoices,
+} from './ref-ask-model';
 import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import type { CalloutLike } from './render/what-model-gets';
@@ -155,7 +164,13 @@ export function flatSnapshot(
    * THE TARGET AND THE ROUTE (82-INPUT-REDESIGN §3.1): a different target or route is a different
    * intent; a detail run's FRONT/BACK slots travel with their pictures (owner 06.10, answer 3).
    */
-  intent?: { target: string; route: string; flatSlotIds?: readonly number[] },
+  intent?: {
+    target: string;
+    route: string;
+    flatSlotIds?: readonly number[];
+    /** T70: the role-less pictures sent `figure it out ✦` (`extra_input_media_ids`). */
+    extras?: readonly number[];
+  },
 ): unknown {
   const refs = (band?.references ?? [])
     .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
@@ -204,6 +219,8 @@ export function flatSnapshot(
             id,
             (band?.bench ?? []).find((b) => (b.id ?? 0) === id)?.pictureId ?? 0,
           ]),
+          // Only when there are some: a fingerprint without extras stays byte-for-byte the old one.
+          ...(intent.extras?.length ? { extras: [...intent.extras].sort((a, b) => a - b) } : {}),
         }
       : {}),
   };
@@ -425,6 +442,32 @@ export function FlatRunRow({
       });
   };
 
+  /* ═══ ASK · REFERENCES (T70): input pictures with no role are asked about on GENERATE. ═══ */
+  const boardRows = useWatch({ control: form.control, name: 'moodboardMedia' }) as
+    | BoardItem[]
+    | undefined;
+  const inputIds = useMemo(() => inputIdsOf(boardRows, isInputRow), [boardRows]);
+  const refChoices = useRefChoices(techCardId);
+  const toAsk = useMemo(
+    () =>
+      picturesToAsk(
+        unmarkedInputIds(
+          inputIds,
+          band.references,
+          moodPictureIds(boardRows as { mediaId?: number; role?: string }[] | undefined),
+        ),
+        refChoices,
+      ),
+    [inputIds, band.references, boardRows, refChoices],
+  );
+  /** The quiz is open: its queue (frozen at the press), for this card, and how GENERATE was pressed. */
+  const [refAsk, setRefAsk] = useState<{
+    card: number;
+    ids: number[];
+    opts: { withoutList?: boolean };
+  } | null>(null);
+  const refAskHere = refAsk && refAsk.card === techCardId ? refAsk : null;
+
   /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
   const route = routeOf({
     target,
@@ -612,6 +655,17 @@ export function FlatRunRow({
         return;
       }
       const mode = modeOfRoute(freshRoute);
+      /* T70 · `figure it out ✦`: the role-less input pictures the person left to the model travel as
+         named extras — the server folds them into the refs with an EMPTY role («reference image»). */
+      const nowBoard = (now.moodboardMedia ?? []) as BoardItem[];
+      const extras = figureIds(
+        unmarkedInputIds(
+          inputIdsOf(nowBoard, isInputRow),
+          freshBand.references,
+          moodPictureIds(nowBoard as { mediaId?: number; role?: string }[]),
+        ),
+        readRefChoices(card),
+      );
       const params: common_DesignRunParams = {
         views: slotId > 0 ? ['detail'] : [...VIEWS_ORDER],
         detailSlotIds: slotId > 0 ? [slotId] : [],
@@ -631,7 +685,7 @@ export function FlatRunRow({
            list with the flag on would mean «every filled slot». */
         useFlatSlots: false,
         flatSlotIds: [],
-        extraInputMediaIds: [],
+        extraInputMediaIds: extras,
         image: undefined,
         inpaint: undefined,
         extend: undefined,
@@ -656,7 +710,7 @@ export function FlatRunRow({
           now,
           params.detailSlotIds ?? [],
           (mode ?? 'photos') as FlatMode,
-          { target, route: freshRoute, flatSlotIds },
+          { target, route: freshRoute, flatSlotIds, extras },
         ),
       });
       if (refusal?.reason === 'joins_unconfirmed') {
@@ -692,6 +746,32 @@ export function FlatRunRow({
     if (cardNow.current === card) void submit({ recovered: true });
   };
 
+  /**
+   * GENERATE PRESSED (T70): the pictures with no role are asked about first — the quiz opens above
+   * the row and nothing is sent; its last answer calls `submit` with the same options.
+   */
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const press = (opts: { withoutList?: boolean } = {}) => {
+    const bypass = !!opts.withoutList && gateReason === READING;
+    if ((gateReason && !bypass) || !mood.ok || techCardId <= 0 || inFlight) return;
+    if (flatInputBusy(readFlatInput(techCardId)) || refAskHere) return;
+    if (toAsk.length > 0) {
+      setRefAsk({ card: techCardId, ids: [...toAsk], opts });
+      return;
+    }
+    void submit(opts);
+  };
+  const refAskDone = () => {
+    const opts = refAskHere?.opts ?? {};
+    setRefAsk(null);
+    // Next tick: the last role write released the input hold; the row reads it live.
+    window.setTimeout(() => {
+      if (cardNow.current === techCardId) void submitRef.current(opts);
+    }, 0);
+  };
+  const ordinalOf = (mediaId: number) => Math.max(1, inputIds.indexOf(mediaId) + 1);
+
   const skipAll = () => {
     if (!band.joins || askBusy) return;
     void finishAsk(qc, techCardId, band.joins, questions);
@@ -714,13 +794,33 @@ export function FlatRunRow({
         <AskConstruction techCardId={techCardId} joins={band.joins} questions={questions} />
       )}
 
+      {/* Z2' · ASK · REFERENCES (T70) — the pictures with no role, opened by GENERATE. */}
+      {refAskHere && !writesOff && (
+        <AskReferences
+          key={`${refAskHere.card}:${refAskHere.ids.join(',')}`}
+          techCardId={techCardId}
+          ids={refAskHere.ids}
+          thumbOf={thumbOf}
+          ordinalOf={ordinalOf}
+          disabled={busy || inFlight}
+          onDone={refAskDone}
+          onCancel={() => setRefAsk(null)}
+        />
+      )}
+
       {/* Z3 · THE RUN ROW. `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
-          gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
+          gate={
+            gateReason
+              ? { ok: false, reason: gateReason }
+              : refAskHere
+                ? { ok: false, reason: 'say what each picture is first' }
+                : { ok: true }
+          }
           pending={busy || recovering || inFlight}
           pendingLabel={inFlight && !busy ? 'drawing…' : undefined}
-          onGenerate={() => void submit()}
+          onGenerate={() => press()}
           trailing={
             <>
               {/* T69 (06.10): «дропдаун не системный а с нашим дизайном и в размер кнопки генерейт» —
@@ -844,7 +944,7 @@ export function FlatRunRow({
               size='xs'
               data-flat-without-list=''
               disabled={busy || inFlight}
-              onClick={() => void submit({ withoutList: true })}
+              onClick={() => press({ withoutList: true })}
             >
               generate without it ›
             </Button>
