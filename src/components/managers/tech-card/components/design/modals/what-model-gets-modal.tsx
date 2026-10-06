@@ -372,14 +372,14 @@ export function WhatModelGetsModal({
       />
 
       {/* THE CONSTRUCTION (82-INPUT-REDESIGN §1, owner 06.10 answer 5): the join list the run
-          freezes, READ-ONLY — it is edited only by answering the questions above GENERATE. */}
+          freezes, READ-ONLY; since wave 10 it is not sent to the image model (server switch) — it is edited only by answering the questions above GENERATE. */}
       {band.joins && (
         <div data-wmg-construction=''>
           <FlatJoins
             techCardId={techCardId}
             band={band}
             disabled
-            title='construction'
+            title='construction · not sent to the image model'
             thumbOf={(id) => thumbOf(mediaById.get(id))}
           />
         </div>
