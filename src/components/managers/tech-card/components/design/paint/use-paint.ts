@@ -612,7 +612,7 @@ export class PaintSession {
     this.lay(v, this.laid(row, v.cut, v.parts?.seeds ?? markPoints(v.cut), v.view, rows));
     v.partsJoinsRev = this.joinsRev();
     this.partsGen += 1;
-    this.clearCarriedOpenings(v);
+    this.clearOpenPaint(v);
     return true;
   }
 
@@ -629,13 +629,17 @@ export class PaintSession {
     }
   }
 
-  /** D2 · carried paint never stands on an opening. Saved only if the person already kept it. */
-  private clearCarriedOpenings(v: PaintView) {
-    if (!v.carried || !v.labels || !v.flat || clearOpenings(v.labels, v.flat, v.parts) === 0)
-      return;
+  /**
+   * D2 · paint never stands on an opening (M5: a hole is never cloth) — carried paint, and a map
+   * saved before the hole was known (or painted while it was being named). Carried paint is saved
+   * only if the person already kept it; their own map is saved again without the hole.
+   */
+  private clearOpenPaint(v: PaintView) {
+    if (!v.labels || !v.flat || clearOpenings(v.labels, v.flat, v.parts) === 0) return;
     v.rev += 1;
     this.undoStack = this.undoStack.filter((g) => !g.some((st) => st.view === v.view));
     this.redoStack = this.redoStack.filter((g) => !g.some((st) => st.view === v.view));
+    if (!v.carried) v.dirty = true;
     if (v.dirty) this.schedule();
   }
 
@@ -722,7 +726,7 @@ export class PaintSession {
           v.partsSig = this.partsSigOf(s, res.suggestions ?? []);
           v.partsJoinsRev = joinsRev;
           this.partsGen += 1;
-          this.clearCarriedOpenings(v);
+          this.clearOpenPaint(v);
           got += 1;
         }
         if (got === 0) {
@@ -1507,11 +1511,14 @@ export class PaintSession {
       REGIONS_ALGO_REV,
       look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0)),
       maps.map((m) => {
+        // M5 · the remainder never fills an opening: the side's holes are part of the drawing.
+        const holes = this.views.get(m.view ?? '')?.flat?.openings;
         return [
           m.view,
           m.mediaId,
           m.baseMediaId,
           scales.get(m.view ?? '') ?? 0,
+          holes ? [...holes].flatMap((o, r) => (o ? [r] : [])) : [],
           (m.palette ?? []).map((sw) => {
             const hex = (sw.hex ?? '').toLowerCase();
             return [hex, ...look(useOf(hex))];
@@ -1850,6 +1857,8 @@ export function useMapLooks(
   open: boolean,
 ): Map<string, { map: string; mockup: string; scale: string }> {
   const [drawn, setDrawn] = useState<Map<string, string>>(() => new Map());
+  // M5 · named parts move the openings, and with them the drawing.
+  const partsGen = session.partsGen;
   useEffect(() => {
     if (!open || !maps || maps.length === 0) return;
     let live = true;
@@ -1859,7 +1868,7 @@ export function useMapLooks(
     return () => {
       live = false;
     };
-  }, [open, maps, uses, session]);
+  }, [open, maps, uses, session, partsGen]);
   const version = session.getVersion();
   return useMemo(() => {
     const out = new Map<string, { map: string; mockup: string; scale: string }>();
