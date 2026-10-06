@@ -2,8 +2,8 @@
 // СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10) — `scripts/flat-route-stand-entry.tsx`: ряд
 // `GENERATE · target ▾ · (from my flat) · route · what the model gets ▸`, ASK · construction (Q1 три
 // позиции, один SetDesignJoins с confirm, CAS-повтор), чтение списка из ряда (`generate without it ›`),
-// авто-восстановление stale, `from my flat`, construction только для чтения, квиз кандидатов (бок →
-// спинка → перед, «none of these»), авто-раскладка разреза в слоты, `stale · discard` в FLAT SLOTS,
+// авто-восстановление stale, `from my flat`, construction только для чтения, один лист → авто-разрез
+// и авто-раскладка в слоты (квиз кандидатов снят, волна 10), `stale · discard` в FLAT SLOTS,
 // `timed out · retry`, `taking too long`, повтор `hand_flat`.
 // Снимки tmp/plans/flat-consistency/shots/redesign/*.png.
 //
@@ -565,50 +565,13 @@ try {
     (await page.locator(`${M} [data-flat-structure]`).count()) === 0,
   );
 
-  // ── CANDIDATES: THE QUIZ ──
+  // ── ONE SHEET (wave 10: the candidate quiz is gone) ──
   const C = '[data-probe="bench-50"]';
-  await page.waitForSelector(`${C} [data-candidate-quiz="side"]`, { timeout: 20000 });
-  check(
-    'C1 candidates never stand on the bench',
-    (await page.$$(`${C} [data-picture]`)).length === 0 &&
-      !(await page.$(`${C} [data-inline-split]`)),
-  );
-  check(
-    'C2 tap 1: four sheets side by side',
-    (await page.$$(`${C} [data-quiz-sheet]`)).length === 4,
-  );
-  await page.waitForTimeout(1500);
-  await shot(C, 'quiz-1-sides.png');
-  await page.click(`${C} [data-quiz-sheet="302"]`);
-  await page.waitForSelector(`${C} [data-quiz-view="back"]`);
-  check(
-    'C3 tap 2: the chosen sheet’s back, ok / not ok',
-    (await page.$$(`${C} [data-quiz-sheet]`)).length === 1 &&
-      (await page.locator(`${C} [data-quiz-ok]`).count()) === 1,
-  );
-  await page.waitForTimeout(600);
-  await shot(C, 'quiz-2-back.png');
-  await page.click(`${C} [data-quiz-not-ok]`);
-  check('C4 not ok → the other backs', (await page.$$(`${C} [data-quiz-sheet]`)).length === 3);
-  await page.waitForTimeout(600);
-  await shot(C, 'quiz-2b-other-backs.png');
-  await page.click(`${C} [data-quiz-sheet="301"]`);
-  await page.waitForSelector(`${C} [data-quiz-view="front"]`);
-  check(
-    'C5 a back picked there → that sheet’s front',
-    (await page.getAttribute(`${C} [data-quiz-sheet]`, 'data-quiz-sheet')) === '301',
-  );
-  await page.waitForTimeout(600);
-  await shot(C, 'quiz-3-front.png');
-  await page.click(`${C} [data-quiz-ok]`);
-  await page.waitForSelector(`${C} [data-inline-split="301"], ${C} [data-picture]`, {
-    timeout: 10000,
+  await page.waitForSelector(`${C} [data-inline-split="300"], ${C} [data-picture]`, {
+    timeout: 20000,
   });
-  check(
-    'C6 the pick: only that sheet is cut',
-    (await page.$$(`${C} [data-inline-split]`)).every(async () => true),
-  );
-  const confirm = page.locator(`${C} [data-split-confirm="301"]`);
+  check('C1 no quiz anywhere', (await page.locator('[data-candidate-quiz]').count()) === 0);
+  const confirm = page.locator(`${C} [data-split-confirm="300"]`);
   await page.waitForTimeout(2500);
   if (
     (await page.locator(`${C} [data-picture]`).count()) === 0 &&
@@ -625,42 +588,28 @@ try {
     .catch(() => {});
   const splits = await calls(page, 'SplitDesignPicture');
   check(
-    'C7 no other candidate is cut',
-    splits.length >= 1 && splits.every((s) => s.body.pictureId === 301),
+    'C2 the one sheet is cut',
+    splits.length >= 1 && splits.every((s) => s.body.pictureId === 300),
     splits.map((s) => s.body.pictureId).join(','),
   );
   const placed = (await calls(page, 'SetDesignBenchSlot')).filter((c) => c.body.techCardId === 50);
   check(
-    'C8 the four pieces go into the four slots by themselves',
+    'C3 the four pieces go into the four slots by themselves',
     placed.length === 4 &&
       placed.map((c) => c.body.slot?.viewKey).join() === 'front,back,side_l,side_r',
     JSON.stringify(placed.map((c) => [c.body.slot?.viewKey, c.body.pictureId])),
   );
-  await shot(C, 'quiz-4-picked-applied.png');
+  await shot(C, 'one-sheet-applied.png');
 
-  // «none of these»
+  // a legacy four-candidate run: every sheet stands, nothing cut or applied by itself
   const N = '[data-probe="bench-54"]';
-  await page.waitForSelector(`${N} [data-candidate-quiz="side"]`, { timeout: 10000 });
-  await page.click(`${N} [data-quiz-none]`);
-  await page.waitForSelector(`${N} [data-candidates-none]`);
+  await page.waitForSelector(`${N} [data-inline-split]`, { timeout: 10000 });
+  await page.waitForTimeout(2500);
   check(
-    'N1 «none of these» stops at once, nothing cut',
-    !(await page.$(`${N} [data-inline-split]`)) &&
-      (await page.$$(`${N} [data-picture]`)).length === 0,
-  );
-  await shot(N, 'quiz-none.png');
-  await page.click(`${N} [data-candidates-again]`);
-  check(
-    'N2 `choose again ›` reopens the quiz',
-    !!(await page.waitForSelector(`${N} [data-candidate-quiz="side"]`, { timeout: 5000 })),
-  );
-
-  // a candidate cut on the server is the pick; no quiz
-  const K = '[data-probe="bench-53"]';
-  await page.waitForSelector(`${K} [data-picture="320"]`, { timeout: 20000 });
-  check(
-    'K1 server-cut candidate wins: no quiz, no editor',
-    !(await page.$(`${K} [data-candidate-quiz]`)) && !(await page.$(`${K} [data-inline-split]`)),
+    'N1 legacy candidates: no quiz, no auto cut, no auto apply',
+    (await page.locator(`${N} [data-candidate-quiz]`).count()) === 0 &&
+      (await calls(page, 'SplitDesignPicture')).every((s) => s.body.pictureId === 300) &&
+      (await calls(page, 'SetDesignBenchSlot')).every((c) => c.body.techCardId !== 54),
   );
 
   // ── STALE DETAIL ──

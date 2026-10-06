@@ -5,9 +5,9 @@
 //                ждёт со строкой `generate without it ›`;
 //   · modes     (карточка 60) — список A (лямки): ASK · construction (Q1 три позиции, Q2, Q3), один
 //                SetDesignJoins с confirm; `from my flat`; маршрут в пилюле; авто-восстановление stale;
-//   · bench-50  — 4 кандидата: квиз (бок → спинка → перед), плиток кандидатов нет;
-//   · bench-54  — те же кандидаты: «none of these» → строка и `choose again ›`;
-//   · bench-53  — кандидат, разрезанный на сервере, — выбор; квиза нет;
+//   · bench-50  — один лист (волна 10, квиза кандидатов нет): сам режется и сам ложится в 4 слота;
+//   · bench-54  — старый прогон с 4 кандидатами: все листы стоят редакторами, ничего не режется
+//                 и не раскладывается само;
 //   · bench-51/52/62 — `timed out · retry`, `taking too long`, повтор `hand_flat` с `params.flat`;
 //   · slots-55  — FLAT SLOTS: деталь старше видов (`stale` с сервера) → `keep` (SetDesignDetailKept) · `discard`.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -53,15 +53,15 @@ const CAP = { imageRunCapSeconds: 360, cappedRunKinds: ['flat', 'render'] };
 const emptySides = () =>
   VIEWS.map((viewKey, i) => ({ id: i + 1, viewKey, kind: 'flat', pictureId: 0, slotRev: 1 }));
 
-const candidateRun = (runId: number) => ({
+const candidateRun = (runId: number, sheets = 4) => ({
   id: runId,
   kind: 'flat',
   status: 'done',
-  requestedOutputs: 4,
+  requestedOutputs: sheets,
   params: { layout: 'one', views: VIEWS },
   createdAt: minutesAgo(3),
   completedAt: minutesAgo(2),
-  pictures: win.__sheets.map(
+  pictures: win.__sheets.slice(0, sheets).map(
     (s, i) =>
       ({
         id: 300 + i,
@@ -74,48 +74,17 @@ const candidateRun = (runId: number) => ({
   ),
 });
 
-// cards 50 and 54: four candidate sheets, nothing picked
+// card 50: ONE sheet (wave 10) — cut and applied by itself
 win.__bands[50] = {
   ...CAP,
   bench: emptySides(),
-  runs: [candidateRun(90)],
+  runs: [candidateRun(90, 1)],
 } as unknown as GetDesignBandResponse;
+// card 54: a LEGACY four-candidate run — every sheet stands, nothing is cut or applied by itself
 win.__bands[54] = {
   ...CAP,
   bench: emptySides(),
   runs: [candidateRun(94)],
-} as unknown as GetDesignBandResponse;
-
-// card 53: the SECOND candidate already cut on the server — it is the pick, no quiz
-try {
-  window.localStorage.setItem('grbpwr.design.flat.pick.53', JSON.stringify({ '93': 302 }));
-} catch {
-  /* no storage */
-}
-const cut = candidateRun(93);
-win.__bands[53] = {
-  ...CAP,
-  bench: emptySides(),
-  runs: [
-    {
-      ...cut,
-      pictures: [
-        ...cut.pictures,
-        ...['front', 'back'].map(
-          (v, k) =>
-            ({
-              id: 320 + k,
-              runId: 93,
-              kind: 'flat',
-              derivation: 'crop',
-              derivedFrom: 301,
-              ghostView: v,
-              media: media(720 + k, win.__sheets[1].url, 400, 400),
-            }) as unknown as common_DesignPicture,
-        ),
-      ],
-    },
-  ],
 } as unknown as GetDesignBandResponse;
 
 // card 51: the newest run timed out
@@ -294,7 +263,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                 <div data-probe='modes'>
                   <RowFor card={60} technical />
                 </div>
-                {[50, 54, 53, 51, 52, 62].map((card) => (
+                {[50, 54, 51, 52, 62].map((card) => (
                   <div key={card} data-probe={`bench-${card}`}>
                     <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
                       <LatestBench card={card} />

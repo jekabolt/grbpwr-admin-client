@@ -10,11 +10,11 @@ import type {
  * ═══ THE THREE FLAT MODES (flat-consistency 81-FINAL-MODES, 06.10) ═════════════════════════════
  *
  *   photos     — the default: the kept reference photos (+ the join list in words when there is
- *                one); two candidate sheets. GENERATE runs it with no decision asked.
+ *                one); one sheet. GENERATE runs it with no decision asked.
  *   hand_flat  — «from my flat»: the card's own TECHNICAL flats are redrawn cleanly, the photos only
- *                give the fit; no join list. Two sheets. One flat per role, front_flat / back_flat.
- *   straps     — «straps & openings»: the photos route with the designer-CONFIRMED join list; four
- *                sheets. The server refuses it (free) until the list is confirmed at its current rev.
+ *                give the fit; no join list. One sheet. One flat per role, front_flat / back_flat.
+ *   straps     — «straps & openings»: the photos route with the designer-CONFIRMED join list; one
+ *                sheet. The server refuses it (free) until the list is confirmed at its current rev.
  *
  * The server owns the count (`requested_outputs`) and every refusal — the client never assumes a
  * number of sheets. Absent `params.flat` IS photos, so photos sends nothing: the wire stays as it was

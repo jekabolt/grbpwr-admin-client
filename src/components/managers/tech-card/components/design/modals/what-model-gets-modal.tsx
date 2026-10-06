@@ -115,16 +115,16 @@ export function WhatModelGetsModal({
   const garment = useShownWords(techCardId, control, !readOnly && autosave.status !== 'off');
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
-  /* A reference on a MOOD picture travels as `mood` (a different garment, style only), whatever role
-     it carries in the references block — the server names it so (`designFlatMoodRoles`). */
+  /* A MOOD picture never travels with a flat (owner 06.10, wave 10: «картинки из мудборда не
+     передаём»), whatever role it carries in the references block, and neither does a reference
+     without a role — the server drops both (`designFlatOnlyRoledPhotos`). */
   const moodIds = useMemo(() => moodPictureIds(items), [items]);
   const roleOf = useMemo(() => {
     const map = new Map<number, string>();
     for (const r of band.references ?? []) {
       if (r.mediaId == null) continue;
-      // A reference on a mood picture travels as mood even without a role of its own.
-      if (moodIds.has(r.mediaId)) map.set(r.mediaId, 'mood');
-      else if ((r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
+      if (moodIds.has(r.mediaId) || (r.role ?? '').trim() === 'mood') continue;
+      if ((r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
     }
     return map;
   }, [band.references, moodIds]);
@@ -229,11 +229,11 @@ export function WhatModelGetsModal({
     () =>
       [
         `garment: ${garment.trim() || '—'}`,
-        `fit: ${fit.trim() || '—'} (from the card)`,
+        `fit: not sent (a flat draws construction only)`,
         `references in the prompt: ${lines.inPrompt.length} of ${total}`,
         `callouts in the prompt: ${sentCallouts} (drawn on those pictures)`,
       ].join('\n'),
-    [garment, fit, lines, total, sentCallouts],
+    [garment, lines, total, sentCallouts],
   );
 
   return (
@@ -245,9 +245,9 @@ export function WhatModelGetsModal({
         <>
           <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed below
           — each with its role, its note and the callouts drawn on it — and the words under them. A
-          picture marked <b>mood</b> travels as mood: a different garment, style only. Nothing
-          absent from this list travels. The same inventory is what a studio outside would need to
-          be handed.
+          picture marked <b>mood</b> does not travel: a flat is drawn from the garment’s own photos.
+          Nothing absent from this list travels. The same inventory is what a studio outside would
+          need to be handed.
         </>
       }
     >
@@ -268,7 +268,11 @@ export function WhatModelGetsModal({
         )}
       </WmgGroup>
 
-      <WmgGroup label='words' aside='read from the card at dispatch'>
+      <WmgGroup
+        label='words'
+        aside='read from the card at dispatch'
+        note='construction only: material, colour, lining, inside, hidden finishing and fit words are dropped at dispatch, and so are the quiz answers'
+      >
         <InventoryLine
           name='garment'
           origin='linked'
@@ -280,7 +284,11 @@ export function WhatModelGetsModal({
             )
           }
         />
-        <InventoryLine name='fit' origin='linked' text={`${fit.trim() || '—'} (from the card)`} />
+        <InventoryLine
+          name='fit'
+          origin='linked'
+          text={`not sent — ${fit.trim() || '—'} on the card; a flat draws construction only`}
+        />
       </WmgGroup>
 
       <WmgGroup

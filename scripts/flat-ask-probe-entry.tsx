@@ -37,14 +37,6 @@ export {
   KEEP_REFUSAL_WORDS,
   staleShown,
 } from '../src/components/managers/tech-card/components/design/stale-details';
-export {
-  QUIZ_START,
-  quizChoices,
-  quizStep,
-  quizView,
-  viewIndex,
-} from '../src/components/managers/tech-card/components/design/generation/candidate-quiz-model';
-export { candidatesOf } from '../src/components/managers/tech-card/components/design/generation/candidates';
 export { autoApplies } from '../src/components/managers/tech-card/components/design/generation/apply-flat-slots';
 export {
   detailPlacementOf,

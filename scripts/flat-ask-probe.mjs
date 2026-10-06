@@ -2,15 +2,14 @@
 // FLAT: ОДИН GENERATE, БЕЗ НАСТРОЕК (82-INPUT-REDESIGN, владелец 06.10).
 //
 // Чистые модели нового ряда: `target ▾` (views / views again, затем ненарисованные детали — заперты
-// до видов), маршрут в коде (`routeOf`), вопросы ASK · construction (Q1 — три позиции лямки), квиз
-// кандидатов (бок → спинка → перед, ранний стоп на «none»), правило stale, авто-раскладка в слоты.
+// до видов), маршрут в коде (`routeOf`), вопросы ASK · construction (Q1 — три позиции лямки), правило
+// stale, авто-раскладка единственного листа в слоты (квиз кандидатов снят, волна 10).
 // Плюс дверь `custom` (её держит FABRICS AND HARDWARE) и мажоры ревью 06.10.
 //
 //   node scripts/flat-ask-probe.mjs                     прогон
 //   node scripts/flat-ask-probe.mjs --mutate=route      «from my flat» не побеждает лямки — красное
 //   node scripts/flat-ask-probe.mjs --mutate=cap        вопросов больше трёх — красное
 //   node scripts/flat-ask-probe.mjs --mutate=stale      kept не гасит пилюлю — красное
-//   node scripts/flat-ask-probe.mjs --mutate=quiz       «none» не останавливает квиз — красное
 //   node scripts/flat-ask-probe.mjs --mutate=draft      ряд не пересеивает цель при смене карточки
 //   node scripts/flat-ask-probe.mjs --mutate=place      деталь ложится поверх правки человека — красное
 //   node scripts/flat-ask-probe.mjs --mutate=inflight   GENERATE не ждёт идущий прогон — красное
@@ -46,11 +45,6 @@ const MUTATIONS = {
     file: /design\/stale-details\.ts$/,
     from: '!!slot.stale && !slot.kept',
     to: '!!slot.stale',
-  },
-  quiz: {
-    file: /design\/generation\/candidate-quiz-model\.ts$/,
-    from: "return state.step === 'side' || state.step === 'others' ? { step: 'none' } : state;",
-    to: 'return state;',
   },
   place: {
     file: /design\/generation\/detail-auto-place\.ts$/,
@@ -425,66 +419,8 @@ console.log('\n82 · stale (серверная правда: stale && !kept)');
   ck(!!M.KEEP_REFUSAL_WORDS.views_changed, '`views_changed` has words (and re-reads the band)');
 }
 
-console.log('\n82 · квиз кандидатов (без авто-судьи)');
+console.log('\n82 · один лист → авто-раскладка (квиза кандидатов нет, волна 10)');
 {
-  const ids = [301, 302, 303];
-  let s = M.QUIZ_START;
-  ck(
-    M.quizView(s) === 'side' && M.quizChoices(s, ids).join() === '301,302,303',
-    'tap 1: the sides of every sheet',
-  );
-  s = M.quizStep(s, { type: 'pick', sheet: 302 }, ids);
-  ck(s.step === 'check' && s.view === 'back' && s.sheet === 302, 'tap 2: the chosen sheet’s back');
-  ck(M.quizStep(s, { type: 'none' }, ids) === s, '«none» is not offered on an ok / not ok step');
-  const notOk = M.quizStep(s, { type: 'not-ok' }, ids);
-  ck(
-    notOk.step === 'others' && M.quizChoices(notOk, ids).join() === '301,303',
-    'back not ok → the other sheets’ backs',
-  );
-  const moved = M.quizStep(notOk, { type: 'pick', sheet: 303 }, ids);
-  ck(
-    moved.step === 'check' && moved.view === 'front' && moved.sheet === 303,
-    'a back picked there makes its sheet the chosen one → its front',
-  );
-  s = M.quizStep(s, { type: 'ok' }, ids);
-  ck(s.step === 'check' && s.view === 'front' && s.sheet === 302, 'back ok → tap 3: the front');
-  const done = M.quizStep(s, { type: 'ok' }, ids);
-  ck(done.step === 'done' && done.sheet === 302, 'front ok → picked');
-  const fo = M.quizStep(M.quizStep(s, { type: 'not-ok' }, ids), { type: 'pick', sheet: 301 }, ids);
-  ck(fo.step === 'done' && fo.sheet === 301, 'front not ok → another front ends on its sheet');
-  ck(
-    M.quizStep(M.QUIZ_START, { type: 'none' }, ids).step === 'none',
-    '«none of these» at tap 1 stops at once',
-  );
-  ck(
-    M.quizStep(notOk, { type: 'none' }, ids).step === 'none',
-    '«none» among the other backs stops',
-  );
-  ck(
-    M.quizStep({ step: 'check', view: 'back', sheet: 301 }, { type: 'not-ok' }, [301]).step ===
-      'none',
-    'one sheet and not ok → none',
-  );
-  ck(
-    M.viewIndex(['front', 'back', 'side_l', 'side_r'], 'side_l') === 2,
-    'the crop of a view is its place on the sheet',
-  );
-  const run = {
-    id: 90,
-    kind: 'flat',
-    requestedOutputs: 2,
-    params: { layout: 'one' },
-    pictures: [],
-  };
-  const drawn = {
-    cards: [
-      { picture: { id: 1 }, members: [] },
-      { picture: { id: 2 }, members: [] },
-    ],
-  };
-  const rej = M.candidatesOf(run, drawn, { 90: -1 });
-  ck(rej.picked === 0 && rej.rejected, '«none» is remembered: no pick, rejected');
-  ck(!M.candidatesOf(run, drawn, { 90: 0 }).rejected, '«choose again» clears it');
   const pieces = ['front', 'back', 'side_l', 'side_r'].map((view) => ({ view, picture: {} }));
   const fresh = { id: 90, completedAt: new Date().toISOString() };
   ck(M.autoApplies(fresh, pieces), 'the newest cut covering four sides applies itself');

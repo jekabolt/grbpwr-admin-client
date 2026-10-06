@@ -37,8 +37,6 @@ import {
   useBenchChoice,
 } from './bench-store';
 import { ApplyFlatSlots } from './apply-flat-slots';
-import { CandidateQuiz, resetCandidateQuiz } from './candidate-quiz';
-import { candidatesOf, clearCandidatePick, usePicks } from './candidates';
 import { useDetailAutoPlace } from './detail-auto-place-hook';
 import { InlineSplit, useKeptWhole } from './inline-split';
 import {
@@ -549,24 +547,12 @@ export function LatestGeneration({
   // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
   // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸`; the bulk placement is
   // a line under the tiles (`PutPiecesIntoSides`, W4).
-  /* FLAT CANDIDATES (flat route, 05.10, `candidates.ts`): a sheet run that bought several candidates
-     is cut only once the designer picked one — and only that one, never the other sheets. */
-  const picks = usePicks(techCardId);
-  const candidates = useMemo(
-    () => (kind === 'flat' && run && !isRunLive(run) ? candidatesOf(run, drawnPlan, picks) : null),
-    [kind, run, drawnPlan, picks],
-  );
-  /* ONLY THE FINAL RESULT ON THE BENCH (owner 05.10): once a candidate is picked (or cut on the
-     server) the other sheets leave the workbench — they stay in the run's history. Until then the
-     candidates stand side by side, each with `pick`. */
-  const benchDrawn = useMemo(() => {
-    if (!drawnPlan || !candidates?.picked) return drawnPlan;
-    const family = new Set(candidates.family);
-    return {
-      ...drawnPlan,
-      cards: drawnPlan.cards.filter((c) => family.has(c.picture.id ?? 0)),
-    };
-  }, [drawnPlan, candidates]);
+  /* ONE SHEET PER PRESS (owner 06.10, wave 10: «убрать тиндер-фичу»): a views run buys ONE sheet,
+     the bench cuts it by itself and the cut lands in the four slots by itself — nobody picks. A
+     legacy run that bought several candidate sheets shows them all, cut by hand only. */
+  const benchDrawn = drawnPlan;
+  /** The run carries one garment sheet: only then does the bench cut and apply without a press. */
+  const oneSheet = (run?.requestedOutputs ?? 1) <= 1;
   const plan = useMemo(() => (benchDrawn ? piecesInPlace(benchDrawn) : null), [benchDrawn]);
   /**
    * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
@@ -591,12 +577,11 @@ export function LatestGeneration({
     for (const card of plan.cards) {
       if (card.members.length || (card.picture.id ?? 0) <= 0) continue;
       if (keptWhole.has(card.picture.id ?? 0)) continue;
-      if (candidates && card.picture.id !== candidates.picked) continue;
       const views = splitViewsOf(band, card.picture, pictures, run, writesOff);
       if (views) out.push({ picture: card.picture, views });
     }
     return out;
-  }, [run, plan, band, writesOff, keptWhole, candidates]);
+  }, [run, plan, band, writesOff, keptWhole]);
   /** The row's tiles: the plan without the sheets drawn as inline editors. */
   const tilePlan = useMemo(() => {
     if (!plan || !inlineSheets.length) return plan;
@@ -719,11 +704,8 @@ export function LatestGeneration({
   const flatPieces = useMemo(() => {
     const rootOf = tilePlan?.rootOf;
     if (kind !== 'flat' || bare || !rootOf?.size) return [];
-    return (tilePlan?.cards ?? [])
-      .map((c) => c.picture)
-      .filter((p) => rootOf.has(p.id ?? 0))
-      .filter((p) => !candidates?.picked || rootOf.get(p.id ?? 0) === candidates.picked);
-  }, [kind, bare, tilePlan, candidates]);
+    return (tilePlan?.cards ?? []).map((c) => c.picture).filter((p) => rootOf.has(p.id ?? 0));
+  }, [kind, bare, tilePlan]);
   const broughtCuts = broughtRun && brought ? cutSheets(broughtPlan, brought.plan) : [];
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
@@ -861,36 +843,6 @@ export function LatestGeneration({
       plan={tilePlan ?? undefined}
     />
   );
-  /* ═══ WHICH SHEET (82-INPUT-REDESIGN §4): a candidate run with no pick draws the quiz, never the
-     sheets — or, after «none of these», one line and the door back into the quiz. */
-  const choosing = kind === 'flat' && !bare && !!candidates && !candidates.picked;
-  const chooser =
-    choosing &&
-    candidates &&
-    run &&
-    (candidates.rejected ? (
-      <span className='flex flex-wrap items-center gap-1.5' data-candidates-none={runId}>
-        <Text size='micro' variant='label' component='span'>
-          none of the {candidates.ids.length} sheets fit · generate the views again, or
-        </Text>
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className='text-labelColor hover:text-textColor'
-          data-candidates-again=''
-          disabled={writesOff}
-          onClick={() => {
-            resetCandidateQuiz(runId);
-            clearCandidatePick(techCardId, runId);
-          }}
-        >
-          choose again ›
-        </Button>
-      </span>
-    ) : (
-      <CandidateQuiz techCardId={techCardId} run={run} ids={candidates.ids} disabled={writesOff} />
-    ));
   /** Every picture of the row went into an inline editor: no empty grid under them. */
   const tilesLeft = isRunLive(run) || (tilePlan?.cards.length ?? 0) > 0;
   const inline = inlineSheets.map(({ picture, views }) => (
@@ -900,7 +852,7 @@ export function LatestGeneration({
       picture={picture}
       views={views}
       runId={runId}
-      auto
+      auto={oneSheet}
     />
   ));
 
@@ -947,6 +899,7 @@ export function LatestGeneration({
                     runId === newestId &&
                     !bare &&
                     !writesOff &&
+                    oneSheet &&
                     (run.params?.views ?? []).length >= 4
                       ? run
                       : null
@@ -991,9 +944,7 @@ export function LatestGeneration({
               {!bare && tilesLeft && outputs}
               {broughtBlock}
             </>
-          ) : bare ? null : choosing ? (
-            chooser
-          ) : (
+          ) : bare ? null : (
             <>
               {inline}
               {tilesLeft && outputs}

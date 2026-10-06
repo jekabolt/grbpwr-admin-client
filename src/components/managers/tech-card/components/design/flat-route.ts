@@ -104,7 +104,7 @@ export const ROUTE_WORD: Record<FlatRoute, string> = {
 export const ROUTE_WHY: Record<FlatRoute, string> = {
   photos: 'drawn from the reference photos',
   hand_flat: 'your flats carry the construction; the list is not read',
-  straps: 'a strap or an opening runs on — drawn with the construction list, four candidates',
+  straps: 'a strap or an opening runs on — drawn with the construction list',
   detail: 'one sketch of the detail, agreeing with the front and back flats',
 };
 
