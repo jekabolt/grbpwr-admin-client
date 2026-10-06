@@ -146,14 +146,15 @@ export function AskReferences({
 
   const skipAll = () => {
     if (busy) return;
-    for (const rest of ids.slice(at)) rememberRefChoice(card, rest, 'figure');
+    for (const rest of ids.slice(at)) rememberRefChoice(card, rest, 'out');
     onDone();
   };
 
   const options: { value: string; label: string; view?: ActiveView }[] = [
     ...SIDES.map((v) => ({ value: v as string, label: viewLabel(v), view: v })),
     { value: DETAIL_VIEW, label: viewLabel(DETAIL_VIEW) },
-    { value: FIGURE, label: 'figure it out ✦' },
+    // T73 (06.10): «выбрать из списка или скипнуть и оно не попадет в промпт» — `figure it out ✦`
+    // снят: картинка без роли модели не уходит, выбор — роль или `skip`.
   ];
 
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -291,10 +292,10 @@ export function AskReferences({
               className='text-labelColor hover:text-textColor'
               data-ask-ref-out=''
               disabled={busy}
-              title='not sent to the model — not asked again'
+              title='skip — not in the prompt, not asked again'
               onClick={leaveOut}
             >
-              leave out
+              skip
             </Button>
             {ids.length - at > 1 && (
               <Button
@@ -303,7 +304,7 @@ export function AskReferences({
                 className='text-labelColor hover:text-textColor'
                 data-ask-ref-skip-all=''
                 disabled={busy}
-                title='the model works out every picture left'
+                title='skip every picture left — none of them goes into the prompt'
                 onClick={skipAll}
               >
                 skip all ›
