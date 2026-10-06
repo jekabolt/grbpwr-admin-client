@@ -397,6 +397,7 @@ export function RenderStudio({
     if (!base.ok) return base;
     /* PAINT THE PARTS: the run never races the autosave, and every painted label must be claimed. */
     if (paint.busy()) return { ok: false, reason: 'saving the parts…' };
+    if (paint.movingArt()) return { ok: false, reason: 'moving the artwork…' };
     if (paint.save === 'unsaved' || paint.save === 'error')
       return { ok: false, reason: `parts not saved · ${paint.saveError || 'retry'}` };
     if (painted.kind === 'refuse') return { ok: false, reason: painted.reason };

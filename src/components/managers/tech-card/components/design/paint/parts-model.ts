@@ -46,8 +46,10 @@ const PAL: [number, number, number][] = [
  * `parts.f3`: the labeller's prompt of backend dba6c9a; the client checks a band is thin (`fixBands`).
  * `parts.f4`: the card's join list rev is part of the cache key (corrected joins re-suggest); only a
  * non-elongated `binding` leaves its group.
+ * `parts.f5`: the client decides a strap's side by its top end (`fixSides`) and gives a binding's
+ * blob / stacked strip to the card's inner layer (`fixBands`); the server retries an unusable answer.
  */
-export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f4`;
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f5`;
 
 /**
  * c9 · the key one card-level ask is made under (once per key per session): the sides with their
@@ -380,6 +382,50 @@ function groupXs(flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>, parts: ViewP
   return { xs, px, span, mid: (x0 + x1) / 2, width: Math.max(1, x1 - x0) };
 }
 
+/** A strap by its name or key (D1: named by the neck point it starts at). */
+export const strapLike = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
+  /strap/i.test(g.label) || /strap/i.test(g.key);
+
+/** Rows from a group's topmost pixel that still count as its top end. */
+const TOP_END_ROWS = 3;
+
+/**
+ * f5 · per group the x of its TOP END: the mean x of its pixels in the topmost `TOP_END_ROWS` rows
+ * of its regions (NaN = no pixel). A strap's top end sits at the neck point it starts at.
+ */
+export function topEndXs(
+  flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>,
+  groups: readonly Pick<PartGroup, 'regions'>[],
+): number[] {
+  const { labels, count, w } = flat;
+  const top = new Float64Array(count + 1).fill(Infinity);
+  for (let i = 0; i < labels.length; i += 1) {
+    const r = labels[i];
+    if (r > 0 && r <= count) {
+      const y = (i / w) | 0;
+      if (y < top[r]) top[r] = y;
+    }
+  }
+  return groups.map((g) => {
+    const y0 = g.regions.reduce((a, r) => Math.min(a, top[r] ?? Infinity), Infinity);
+    if (!Number.isFinite(y0)) return NaN;
+    const mine = new Set(g.regions);
+    let sum = 0;
+    let n = 0;
+    const end = Math.min(labels.length, (y0 + TOP_END_ROWS) * w);
+    for (let i = y0 * w; i < end; i += 1)
+      if (mine.has(labels[i])) {
+        sum += i % w;
+        n += 1;
+      }
+    return n > 0 ? sum / n : NaN;
+  });
+}
+
+/** The same key on the wearer's other side ("left-strap" → "right-strap"). */
+const twinKey = (key: string): string =>
+  key.replace(/\b(left|right)\b/gi, (w) => (w.toLowerCase() === 'left' ? 'right' : 'left'));
+
 const relabel = (g: PartGroup, label: string, key: string): PartGroup => ({
   ...g,
   label,
@@ -419,8 +465,43 @@ export function fixSides(
       return Number.isNaN(d) || Math.abs(d) < width * LR_DEAD ? 0 : Math.sign(d);
     };
     const crossing = (i: number) => span[i][0] < mid && span[i][1] > mid;
-    const strapLike = (g: PartGroup) => /strap/i.test(g.label) || /strap/i.test(g.key);
     const done = new Set<number>();
+
+    // f5 · D1 · a strap's side is its TOP END's (the neck point it starts at), never its centroid
+    // nor the model's word: back — top end picture-left = the wearer's LEFT; front — picture-right.
+    // Two straps never share a side: they are told apart by which top end is picture-left.
+    const straps = parts.groups.flatMap((g, i) =>
+      movable(g) && strapLike(g) && sideOf(g.label) ? [i] : [],
+    );
+    if (straps.length > 0) {
+      const tops = topEndXs(
+        flat,
+        straps.map((i) => parts.groups[i]),
+      );
+      const want: ('L' | 'R' | '')[] = tops.map((x) => {
+        const d = x - mid;
+        if (Number.isNaN(d) || Math.abs(d) < width * LR_DEAD) return '';
+        return Math.sign(d) === leftAt ? 'L' : 'R';
+      });
+      if (straps.length === 2 && tops.every((x) => !Number.isNaN(x)) && tops[0] !== tops[1]) {
+        // The pair: the picture-left top end takes the picture-left side, the other the other one.
+        const pl: 'L' | 'R' = leftAt === -1 ? 'L' : 'R';
+        const pr: 'L' | 'R' = pl === 'L' ? 'R' : 'L';
+        const first = tops[0] < tops[1] ? 0 : 1;
+        want[first] = pl;
+        want[1 - first] = pr;
+      }
+      straps.forEach((i, k) => {
+        done.add(i);
+        const g = parts.groups[i];
+        if (!want[k] || sideOf(g.label) === want[k]) return;
+        const label = twinName(g.label);
+        const key = g.key ? keys.get(label) || twinKey(g.key) : '';
+        groups[i] = relabel(g, label, key);
+        changed = true;
+      });
+    }
+
     parts.groups.forEach((g, i) => {
       // «· inside» groups sit where the far side shows through an opening: their picture side is
       // the far side's, so they never vote here (nor do openings).
@@ -529,18 +610,86 @@ export function bandShape(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'
 const bodyName = (label: string) => /\bbody\b/.test(partKey(label));
 
 /**
+ * f5 · the card's inner layer as a part (layer 2 of `fixBands`): its label and key. Found, in order:
+ * a part of the answer with the key of a `joins.layers` layer of index > 0 (the backend names it by
+ * `designPartsLayerName`, keyed by `designPartsSlug`); a part whose name says a layer ("layer",
+ * "lining", "v-panel", an "inner … panel"); else the list's layer itself. null = the card has none.
+ */
+export type LayerPart = { label: string; key: string };
+
+const LAYER_WORDS = /\b(layer|lining|v-panel)\b|\binner\b.*\bpanel\b/;
+
+/** Backend `designPartsLayerName`: the name up to "/(,;", lowercase, at most 3 words. */
+export const layerName = (l: { index?: number; name?: string }): string => {
+  let n = l.name ?? '';
+  const cut = n.search(/[/(,;]/);
+  if (cut >= 0) n = n.slice(0, cut);
+  const words = n.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 3);
+  return words.length ? words.join(' ') : `inner layer ${l.index ?? 0}`;
+};
+
+/** Backend `designPartsSlug`: letters and digits, every other run as one "-". */
+export const partSlug = (label: string): string => {
+  const out = label
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return out || 'part';
+};
+
+const ownLabel = (label: string): string =>
+  partKey(label.endsWith(INSIDE_SUFFIX) ? label.slice(0, -INSIDE_SUFFIX.length) : label);
+
+export function innerLayerPart(
+  rows: readonly Pick<DesignPartsSuggestion, 'parts'>[],
+  layers: readonly { index?: number; name?: string }[] | undefined,
+): LayerPart | null {
+  const all = rows.flatMap((r) => r.parts ?? []);
+  const inner = (layers ?? []).filter((l) => (l.index ?? 0) > 0);
+  for (const l of inner) {
+    const key = partSlug(layerName(l));
+    const g = all.find((x) => (x.partKey ?? '').trim() === key);
+    if (g) return { label: ownLabel(g.label ?? ''), key };
+  }
+  for (const g of all) {
+    const label = ownLabel(g.label ?? '');
+    if (!LAYER_WORDS.test(label) || /\bbody\b/.test(label)) continue;
+    return { label, key: (g.partKey ?? '').trim() || partSlug(label) };
+  }
+  if (inner.length > 0) {
+    const label = layerName(inner[0]);
+    return { label, key: partSlug(label) };
+  }
+  return null;
+}
+
+/**
+ * f5 · a strip of a binding group that runs ALONG another strip of the same group (it borders the
+ * group's other regions along at least this share of its edge) …
+ */
+const STACK_CONTACT = 0.15;
+/** … and borders no other cloth (a part outside the group, not an opening) along this share. */
+const STACK_FREE = 0.05;
+
+/**
  * f3 · the labeller may call a blob a "binding" (card 38 back: the triangle between a strap and the
  * armhole edge). After the answer is laid, every region of a binding-named group that is not a strip
  * (`BAND_MIN_ELONGATION`, above the `BAND_MAX_WIDTH` floor) leaves it:
  *   - it borders the outside of the garment, or an opening, along `BAND_CONTACT` of its edge
  *     (looking across the line, as far as two closing radii) → `opening`;
+ *   - f5 · else, the card has an inner layer (`layer`) → that layer part;
  *   - else → "<part> · inside" of the part it borders most (a body first; none bordering → the
  *     nearest by centroid), with that part's key.
+ * f5 · with an inner layer, a binding group of several regions also gives up a strip that runs
+ * along the group's other strips (`STACK_CONTACT`) and finishes no cloth (`STACK_FREE`): a binding
+ * borders the panel it finishes; that strip is the layer showing past it (card 38 front: the V
+ * layer's crescent above the neck binding). The group always keeps a region.
  * A group left with no region is dropped. Returns the same object when nothing changes.
  */
 export function fixBands(
   parts: ViewParts,
   flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h' | 'silhouette'>,
+  layer: LayerPart | null = null,
 ): ViewParts {
   if (!parts.groups.some(isBand)) return parts;
   const { labels, count, w, h, silhouette } = flat;
@@ -562,14 +711,17 @@ export function fixBands(
     if (v > 0 && v <= count) area[v] += 1;
   }
   const wide: number[] = [];
+  /** Regions of a several-region binding group that are strips: the stacked candidates. */
+  const stacked: number[] = [];
   parts.groups.forEach((g) => {
     if (!isBand(g)) return;
     for (const r of g.regions) {
       const d = bandWidth(r2[r]);
       if (d > BAND_MAX_WIDTH * silW && area[r] / (d * d) < BAND_MIN_ELONGATION) wide.push(r);
+      else if (layer && g.regions.length > 1) stacked.push(r);
     }
   });
-  if (wide.length === 0) return parts;
+  if (wide.length === 0 && stacked.length === 0) return parts;
 
   // Across the line: from each edge pixel of a wide region walk the 4 directions over the ink
   // (label 0 inside the silhouette) up to `reach` px; tally what is landed on.
@@ -578,7 +730,7 @@ export function fixBands(
   parts.groups.forEach((g) => {
     if (isOpening(g)) for (const r of g.regions) opening.add(r);
   });
-  const out: Map<number, string | PartGroup> = new Map();
+  const out: Map<number, string | PartGroup | LayerPart> = new Map();
   const sum = new Float64Array(count + 1);
   const cx = new Float64Array(count + 1);
   const cy = new Float64Array(count + 1);
@@ -591,14 +743,15 @@ export function fixBands(
     }
   }
   const wideSet = new Set(wide);
+  const scan = new Set([...wide, ...stacked]);
   const edge = new Map<number, number>();
   const outside = new Map<number, number>();
   const touch = new Map<number, Map<number, number>>();
-  for (const r of wide) touch.set(r, new Map());
+  for (const r of scan) touch.set(r, new Map());
   const steps = [-1, 1, -w, w];
   for (let i = 0; i < n; i += 1) {
     const v = labels[i];
-    if (!wideSet.has(v)) continue;
+    if (!scan.has(v)) continue;
     const x = i % w;
     const y = (i / w) | 0;
     let isEdge = false;
@@ -651,7 +804,15 @@ export function fixBands(
     const t = touch.get(r)!;
     let toOpening = 0;
     for (const [u, c] of t) if (opening.has(u)) toOpening += c;
-    if (((outside.get(r) ?? 0) + toOpening) / e >= BAND_CONTACT || pool.length === 0) {
+    if (((outside.get(r) ?? 0) + toOpening) / e >= BAND_CONTACT) {
+      out.set(r, OPENING);
+      continue;
+    }
+    if (layer) {
+      out.set(r, layer);
+      continue;
+    }
+    if (pool.length === 0) {
       out.set(r, OPENING);
       continue;
     }
@@ -678,6 +839,27 @@ export function fixBands(
     out.set(r, parts.groups[best]);
   }
 
+  // f5 · stacked strips: one that runs along its group's other strips and finishes no cloth.
+  if (layer) {
+    const groupOf = (r: number) => parts.regionGroup[r] ?? -1;
+    for (const r of stacked) {
+      const gi = groupOf(r);
+      const e = Math.max(1, edge.get(r) ?? 0);
+      let along = 0;
+      let cloth = 0;
+      for (const [u, c] of touch.get(r)!) {
+        if (groupOf(u) === gi) along += c;
+        else if (!opening.has(u)) cloth += c;
+      }
+      if (along / e < STACK_CONTACT || cloth / e >= STACK_FREE) continue;
+      // The group keeps at least one region: it is still the binding.
+      if (parts.groups[gi].regions.filter((x) => !wideSet.has(x)).length <= 1) continue;
+      out.set(r, layer);
+      wideSet.add(r);
+    }
+  }
+  if (out.size === 0) return parts;
+
   // Rebuild the groups: the wide regions leave their band, join the opening / the part's inside.
   const groups: PartGroup[] = parts.groups
     .map((g) => (isBand(g) ? { ...g, regions: g.regions.filter((r) => !wideSet.has(r)) } : g))
@@ -692,12 +874,13 @@ export function fixBands(
     }
     return g;
   };
-  for (const r of wide) {
-    const to = out.get(r)!;
+  for (const [r, to] of out) {
     const g =
       to === OPENING
         ? findOrAdd(OPENING, OPENING)
-        : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
+        : to === layer
+          ? findOrAdd(layer.label, layer.key)
+          : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
     g.regions.push(r);
   }
   const kept = groups.filter((g) => g.regions.length > 0);

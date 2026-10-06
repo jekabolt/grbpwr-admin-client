@@ -161,7 +161,7 @@ ck(
 
 /* c9 · corrected joins re-suggest: the ask key and held parts follow the join list's rev */
 {
-  ck(m.PARTS_ALGO_REV === 'regions.v4+parts.f4', 'parts rev is f4', m.PARTS_ALGO_REV);
+  ck(m.PARTS_ALGO_REV === 'regions.v4+parts.f5', 'parts rev is f5', m.PARTS_ALGO_REV);
   const sides = [
     { view: 'front', baseMediaId: 5 },
     { view: 'back', baseMediaId: 6 },
@@ -203,6 +203,41 @@ ck(
     ['right strap', 'right-strap'],
   ]);
   ck(m.fixSides('back', p, xf, k3) === p, 'back: crossed straps keep the answer’s sides');
+  // f5 · the side comes from the top end, not the answer: the same straps named the other way round
+  // are swapped back (label and key), on the back and — mirrored — on the front.
+  const seeds3 = new Int32Array([-1, 30 * XW + 50, 30 * XW + 50, 2 * XW + 50]);
+  const wrong = m.partsOf(
+    { parts: [g('right strap', [1]), g('left strap', [2]), g('back body', [3])], splitNeeded: [] },
+    xf,
+    seeds3,
+    'back',
+  );
+  ck(
+    names(m.fixSides('back', wrong, xf, k3)) ===
+      'left strap[left-strap]:1 | right strap[right-strap]:2 | back body[back-body]:3',
+    'back: straps take their side from the top end',
+    names(m.fixSides('back', wrong, xf, k3)),
+  );
+  ck(
+    m.fixSides('front', wrong, xf, k3) === wrong,
+    'front: top end picture-left = the wearer’s right',
+  );
+  // Both answered "left": the pair still comes out one left, one right.
+  const same = m.partsOf(
+    {
+      parts: [g('left strap', [1]), g('left strap', [2], 'left-strap'), g('back body', [3])],
+      splitNeeded: [],
+    },
+    xf,
+    seeds3,
+    'back',
+  );
+  const sm = m.fixSides('back', same, xf, k3);
+  ck(
+    names(sm) === 'left strap[left-strap]:1 | right strap[right-strap]:2 | back body[back-body]:3',
+    'back: two straps of one side are told apart',
+    names(sm),
+  );
   // The same pair named panels (no strap word) is still kept: each reaches over the centre line.
   const q = m.partsOf(
     { parts: [g('left panel', [1]), g('right panel', [2]), g('back body', [3])], splitNeeded: [] },
@@ -423,6 +458,109 @@ ck(
       fx.groups.some((x) => x.label === 'right strap binding' && x.regions.join() === '1'),
       'c38 back: a strap binding (thin) stays',
       names(fx),
+    );
+  }
+}
+
+/* f5 · card 38's three live f4 answers (shots/final/c38-parts-run1..3.json) on the live flats
+   (in/paint-qa/c38-*-646..649.png, the bases the rows were named on): the straps, the V layer and the
+   back triangles come out the same every time. */
+{
+  const QA = resolve(REPO, '../tmp/plans/flat-consistency/in/paint-qa');
+  const RUNS = resolve(REPO, '../tmp/plans/flat-consistency/shots/final');
+  const files = {
+    front: 'c38-front-646.png',
+    back: 'c38-back-647.png',
+    side_l: 'c38-side_l-648.png',
+    side_r: 'c38-side_r-649.png',
+  };
+  const runs = [1, 2, 3].map((k) => resolve(RUNS, `c38-parts-run${k}.json`));
+  if (!Object.values(files).every((f) => existsSync(resolve(QA, f))) || !runs.every(existsSync)) {
+    console.log('  skip  c38 live runs');
+  } else {
+    const flats = {};
+    for (const [view, f] of Object.entries(files)) {
+      const png = m.decodePng(readFileSync(resolve(QA, f)));
+      const { width: w, height: h, channels: c, data } = png;
+      const rgba = new Uint8ClampedArray(w * h * 4);
+      for (let p = 0; p < w * h; p++) {
+        const at = (k) => (c >= 3 ? data[p * c + k] : data[p * c]);
+        rgba[p * 4] = at(0);
+        rgba[p * 4 + 1] = at(1);
+        rgba[p * 4 + 2] = at(2);
+        rgba[p * 4 + 3] = c === 4 || c === 2 ? data[p * c + c - 1] : 255;
+      }
+      flats[view] = m.analyseFlat(rgba, w, h);
+    }
+    // joins rev 11 of card 38: layer 1 is the inner V.
+    const layers = [
+      { index: 0, name: 'outer shell (front panel, back panel, st' },
+      { index: 1, name: 'inner front V-panel / modesty layer' },
+    ];
+    const of = (out, region) => {
+      const x = out.groups[out.regionGroup[region]];
+      return x ? `${x.label}[${x.key}]` : '-';
+    };
+    const seen = [];
+    runs.forEach((file, k) => {
+      const rows = JSON.parse(readFileSync(file, 'utf8'));
+      const layer = m.innerLayerPart(rows, layers);
+      const keys = m.labelKeys(rows);
+      const laid = {};
+      for (const r of rows) {
+        const f = flats[r.view];
+        const p = m.partsOf(r, f, undefined, r.view);
+        laid[r.view] = m.fixBands(m.fixSides(r.view, p, f, keys), f, layer);
+      }
+      const b = laid.back;
+      const fr = laid.front;
+      const sig = [
+        `back 1,7: ${of(b, 1)}/${of(b, 7)}`,
+        `back 2: ${of(b, 2)}`,
+        `back 5,6: ${of(b, 5)}/${of(b, 6)}`,
+        `front 1: ${of(fr, 1)}`,
+        `front 2: ${of(fr, 2)}`,
+        `side_l 1: ${of(laid.side_l, 1)}`,
+        `side_r 1: ${of(laid.side_r, 1)}`,
+      ].join(' · ');
+      seen.push(sig);
+      ck(
+        sig ===
+          'back 1,7: left strap[left-strap]/left strap[left-strap] · back 2: right strap[right-strap] · ' +
+            'back 5,6: opening[opening]/opening[opening] · front 1: inner front v-panel[inner-front-v-panel] · ' +
+            'front 2: front neck binding[front-neck-binding] · side_l 1: left strap[left-strap] · ' +
+            'side_r 1: right strap[right-strap]',
+        `c38 live run ${k + 1}: straps by the top end, the V layer off the neck binding, triangles open`,
+        sig,
+      );
+    });
+    ck(
+      new Set(seen).size === 1,
+      'c38 live: the three runs come out identical',
+      `${new Set(seen).size}`,
+    );
+    // The V layer is no binding region on the front: the binding keeps region 2 only.
+    const rows1 = JSON.parse(readFileSync(runs[0], 'utf8'));
+    const fr1 = rows1.find((r) => r.view === 'front');
+    const p1 = m.partsOf(fr1, flats.front, undefined, 'front');
+    ck(
+      m.fixBands(p1, flats.front) === p1,
+      'c38 front: with no inner layer on the card the binding is left as answered',
+    );
+    // Card 49 (no layer): nothing of the card-level answer moves.
+    ck(
+      m.innerLayerPart(
+        [{ parts: [{ label: 'front body', partKey: 'front-body', regions: [1] }] }],
+        [],
+      ) === null,
+      'no layer on the card: none found',
+    );
+    ck(
+      m.innerLayerPart(
+        [{ parts: [{ label: 'left front panel', partKey: 'left-front-panel', regions: [1] }] }],
+        [],
+      ) === null,
+      'an outer "panel" is no inner layer',
     );
   }
 }

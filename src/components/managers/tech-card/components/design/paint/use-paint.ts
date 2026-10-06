@@ -59,6 +59,7 @@ import {
   partsAskKey,
   fixBands,
   fixSides,
+  innerLayerPart,
   gestureLive,
   keyedSuggestion,
   labelKeys,
@@ -329,6 +330,8 @@ export class PaintSession {
    * one (`transfer.ts`). Such a side stays `loading` — not paintable — until the paint lands.
    */
   private moving = new Set<PaintView>();
+  /** Sides whose artwork marks are moving to a new flat (T29). */
+  private artMoving = new Set<PaintView>();
   /**
    * The carries of this round, for ONE line once the last one lands: view → paint moved (null = no
    * paint was carried), artwork marks moved, marks that could not be moved.
@@ -395,11 +398,10 @@ export class PaintSession {
 
   canUndo = () => this.undoStack.length > 0;
   canRedo = () => this.redoStack.length > 0;
-  busy = () =>
-    this.save === 'pending' ||
-    this.save === 'saving' ||
-    this.timer !== null ||
-    this.moving.size > 0;
+  /** A save is actually in flight or due (never only the flats loading: nothing is written then). */
+  busy = () => this.save === 'pending' || this.save === 'saving' || this.timer !== null;
+  /** Artwork marks of a replaced flat are moving (they are written as they land). */
+  movingArt = () => this.artMoving.size > 0;
 
   /* ─────────────────────────── sync with the band ─────────────────────────── */
 
@@ -532,27 +534,43 @@ export class PaintSession {
     );
   }
 
-  /** label → part_key over the band's rows of this cutter and labeller (the L/R check's twins). */
-  private bandKeys(): Map<string, string> {
-    return labelKeys(
-      (this.band?.partsSuggestions ?? []).filter((s) => (s.algoRev ?? '') === PARTS_ALGO_REV),
-    );
+  /**
+   * What a side's laid parts depend on: its own row, and (f5) the card's whole answer and the join
+   * list's layers — the L/R twins' keys and the inner layer come from them. Keys `namesCache` too.
+   */
+  private partsSigOf(
+    row: Parameters<typeof partsOf>[0],
+    rows: readonly Parameters<typeof partsOf>[0][],
+  ): string {
+    return JSON.stringify([
+      row.parts,
+      row.splitNeeded,
+      [...labelKeys(rows)],
+      innerLayerPart(rows, this.band?.joins?.layers),
+    ]);
+  }
+
+  /** The band's rows of this cutter and labeller. */
+  private bandRows() {
+    return (this.band?.partsSuggestions ?? []).filter((s) => (s.algoRev ?? '') === PARTS_ALGO_REV);
   }
 
   /**
    * A row laid over the flat, then the Ф1 L/R check on the drawing (`fixSides`), then the f3 band
    * check (`fixBands`: a wide "binding" is an opening or a part's inside) — last, so an inside takes
-   * its owner's name and key after the L/R swap (fixSides never moves an inside).
+   * its owner's name and key after the L/R swap (fixSides never moves an inside). f5: `rows` are the
+   * card's whole answer — its inner layer part (or the join list's layer) takes a binding's blob.
    */
   private laid(
     row: Parameters<typeof partsOf>[0],
     flat: FlatRegions,
     seeds: Int32Array,
     view: string,
-    keys: ReadonlyMap<string, string>,
+    rows: readonly Parameters<typeof partsOf>[0][],
   ): ViewParts | null {
     const parts = partsOf(row, flat, seeds, view);
-    return parts && fixBands(fixSides(view, parts, flat, keys), flat);
+    const layer = innerLayerPart(rows, this.band?.joins?.layers);
+    return parts && fixBands(fixSides(view, parts, flat, labelKeys(rows)), flat, layer);
   }
 
   /** The rev of the card's join list now (0 = none): the labeller reads the list (c9). */
@@ -580,10 +598,11 @@ export class PaintSession {
     const row = this.bandParts(v);
     if (!row) return false;
     if (v.parts?.keyed && !keyedSuggestion(row)) return false;
-    const sig = JSON.stringify([row.parts, row.splitNeeded]);
+    const rows = this.bandRows();
+    const sig = this.partsSigOf(row, rows);
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
-    v.parts = this.laid(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view, this.bandKeys());
+    v.parts = this.laid(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view, rows);
     v.partsJoinsRev = this.joinsRev();
     this.partsGen += 1;
     this.clearCarriedOpenings(v);
@@ -669,7 +688,6 @@ export class PaintSession {
           return;
         }
         let got = 0;
-        const keys = labelKeys(res.suggestions ?? []);
         for (const s of res.suggestions ?? []) {
           const i = sides.findIndex((v) => v.view === s.view);
           const v = sides[i];
@@ -677,10 +695,10 @@ export class PaintSession {
           // flat or algo rev would paint unrelated regions.
           if (!v || this.views.get(v.view) !== v) continue;
           if ((s.baseMediaId ?? 0) !== v.baseMediaId || s.algoRev !== PARTS_ALGO_REV) continue;
-          const parts = this.laid(s, v.flat, seeds[i], v.view, keys);
+          const parts = this.laid(s, v.flat, seeds[i], v.view, res.suggestions ?? []);
           if (!parts) continue;
           v.parts = parts;
-          v.partsSig = JSON.stringify([s.parts, s.splitNeeded]);
+          v.partsSig = this.partsSigOf(s, res.suggestions ?? []);
           v.partsJoinsRev = joinsRev;
           this.partsGen += 1;
           this.clearCarriedOpenings(v);
@@ -878,6 +896,7 @@ export class PaintSession {
     for (const m of marks) this.carried.add(markKey(m, pictureId));
     const round = carry || marks.length > 0;
     if (round) this.moving.add(v);
+    if (marks.length > 0) this.artMoving.add(v);
     void (async () => {
       try {
         const img = await pixelsOf(url);
@@ -961,6 +980,7 @@ export class PaintSession {
         // save a blank over somebody's work.
         if (this.views.get(view) === v) v.status = 'error';
       } finally {
+        this.artMoving.delete(v);
         if (round) this.landed(v);
       }
       this.bump();
