@@ -11,7 +11,7 @@
 import type { DesignPartsSuggestion } from 'api/proto-http/admin';
 
 import { componentAt, paintIndices, type PaintDiff } from './map-model';
-import { distanceTransform, REGIONS_ALGO_REV, type FlatRegions } from './regions';
+import { distanceTransform, REGIONS_ALGO_REV, scaledRadius, type FlatRegions } from './regions';
 
 /** The probe's palette (`probe.py PAL`), tinted 75 % over white. */
 const PAL: [number, number, number][] = [
@@ -43,8 +43,9 @@ const PAL: [number, number, number][] = [
  * `designPartsCardSystemPrompt`): rows of the old rules are then neither applied nor reused.
  * Ф1 (`parts.f1`): openings / seen-through inside / no invented pieces / flank from the drawing.
  * `parts.f2`: the labeller reads the card's join list and a closed part vocabulary built from it.
+ * `parts.f3`: the labeller's prompt of backend dba6c9a; the client checks a band is thin (`fixBands`).
  */
-export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f2`;
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f3`;
 
 /** Regions the model is asked to name: fewer is nothing to group, more is unreadable. */
 export const PARTS_REGIONS_MIN = 2;
@@ -55,6 +56,17 @@ export const PARTS_REGIONS_MAX = 60;
  * number is written, and the seed a part click fills the region from. -1 = no pixel.
  */
 export function markPoints(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'>): Int32Array {
+  return inscribed(flat).at;
+}
+
+/**
+ * Per region its deepest pixel (`at`, -1 = none) and the squared radius of the largest disc
+ * inscribed in it (`r2`: the distance from that pixel to the region's edge).
+ */
+function inscribed(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'>): {
+  at: Int32Array;
+  r2: Float64Array;
+} {
   const { labels, count, w, h } = flat;
   const n = w * h;
   // Seeds: every pixel that is not inside a region's interior (another label next to it, ink,
@@ -89,7 +101,7 @@ export function markPoints(flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h
       at[v] = i;
     }
   }
-  return at;
+  return { at, r2: best };
 }
 
 /** The tinted regions + the drawing (RGBA) — the marks picture before its numbers. */
@@ -404,6 +416,201 @@ export function fixSides(
     }
   }
   return changed ? { ...parts, groups } : parts;
+}
+
+/* ─────────────────────────── f3 · a band is a thin strip, checked on the drawing ─────────────────────────── */
+
+/** A name that says a strip: a binding, a band (a strap is not checked). */
+const BAND = /\b(binding|band)\b/;
+export const isBand = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
+  !isOpening(g) &&
+  !g.label.endsWith(INSIDE_SUFFIX) &&
+  (BAND.test(partKey(g.label)) || BAND.test(g.key.toLowerCase()));
+
+/**
+ * The widest a band may be: the diameter of the largest disc inscribed in its region, as a share
+ * of the silhouette's width. Measured (06.10, regions.v4): card 38 front neck binding 4.0 %, its
+ * hems 3.3–3.4 %, the back straps 5.6 %; the two triangles on card 38's back the labeller calls
+ * "armhole binding" 17.9 / 18.1 %. 10 % sits ≈ 1.8× above the widest strip and below the triangles.
+ * The line's own stroke is no scale here: it reads 2 px on every flat of the QA set (quantised).
+ */
+export const BAND_MAX_WIDTH = 0.1;
+/** A region borders the outside (or an opening) along at least this share of its edge. */
+const BAND_CONTACT = 0.05;
+
+const bodyName = (label: string) => /\bbody\b/.test(partKey(label));
+
+/**
+ * f3 · the labeller may call a wide region a "binding" (card 38 back: the triangle between a strap
+ * and the armhole edge). After the answer is laid, every region of a band-named group that is not
+ * thin (`BAND_MAX_WIDTH`) leaves it:
+ *   - it borders the outside of the garment, or an opening, along `BAND_CONTACT` of its edge
+ *     (looking across the line, as far as two closing radii) → `opening`;
+ *   - else → "<part> · inside" of the part it borders most (a body first; none bordering → the
+ *     nearest by centroid), with that part's key.
+ * A group left with no region is dropped. Returns the same object when nothing changes.
+ */
+export function fixBands(
+  parts: ViewParts,
+  flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h' | 'silhouette'>,
+): ViewParts {
+  if (!parts.groups.some(isBand)) return parts;
+  const { labels, count, w, h, silhouette } = flat;
+  const n = w * h;
+  let x0 = w;
+  let x1 = -1;
+  for (let i = 0; i < n; i += 1)
+    if (silhouette[i]) {
+      const x = i % w;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+    }
+  const silW = x1 - x0 + 1;
+  if (silW <= 0) return parts;
+  const { r2 } = inscribed(flat);
+  const wide: number[] = [];
+  parts.groups.forEach((g) => {
+    if (!isBand(g)) return;
+    for (const r of g.regions)
+      if (2 * Math.sqrt(Math.max(0, r2[r])) > BAND_MAX_WIDTH * silW) wide.push(r);
+  });
+  if (wide.length === 0) return parts;
+
+  // Across the line: from each edge pixel of a wide region walk the 4 directions over the ink
+  // (label 0 inside the silhouette) up to `reach` px; tally what is landed on.
+  const reach = 2 * scaledRadius(w, h, 3);
+  const opening = new Set<number>();
+  parts.groups.forEach((g) => {
+    if (isOpening(g)) for (const r of g.regions) opening.add(r);
+  });
+  const out: Map<number, string | PartGroup> = new Map();
+  const sum = new Float64Array(count + 1);
+  const cx = new Float64Array(count + 1);
+  const cy = new Float64Array(count + 1);
+  for (let i = 0; i < n; i += 1) {
+    const v = labels[i];
+    if (v > 0 && v <= count) {
+      sum[v] += 1;
+      cx[v] += i % w;
+      cy[v] += (i / w) | 0;
+    }
+  }
+  const wideSet = new Set(wide);
+  const edge = new Map<number, number>();
+  const outside = new Map<number, number>();
+  const touch = new Map<number, Map<number, number>>();
+  for (const r of wide) touch.set(r, new Map());
+  const steps = [-1, 1, -w, w];
+  for (let i = 0; i < n; i += 1) {
+    const v = labels[i];
+    if (!wideSet.has(v)) continue;
+    const x = i % w;
+    const y = (i / w) | 0;
+    let isEdge = false;
+    let out_ = false;
+    const seen = new Set<number>();
+    for (let d = 0; d < 4; d += 1) {
+      let j = i;
+      let xx = x;
+      let yy = y;
+      for (let k = 1; k <= reach; k += 1) {
+        j += steps[d];
+        if (d === 0) xx -= 1;
+        else if (d === 1) xx += 1;
+        else if (d === 2) yy -= 1;
+        else yy += 1;
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) {
+          if (k === 1) isEdge = true;
+          out_ = true;
+          break;
+        }
+        const u = labels[j];
+        if (u === v) break;
+        if (k === 1) isEdge = true;
+        if (!silhouette[j]) {
+          out_ = true;
+          break;
+        }
+        if (u) {
+          seen.add(u);
+          break;
+        }
+      }
+    }
+    if (!isEdge) continue;
+    edge.set(v, (edge.get(v) ?? 0) + 1);
+    if (out_) outside.set(v, (outside.get(v) ?? 0) + 1);
+    const t = touch.get(v)!;
+    for (const u of seen) t.set(u, (t.get(u) ?? 0) + 1);
+  }
+
+  // The parts an inside may belong to: no opening, no inside, no band; a body first.
+  const owners = parts.groups
+    .map((g, i) => ({ g, i }))
+    .filter(({ g }) => !isOpening(g) && !g.label.endsWith(INSIDE_SUFFIX) && !isBand(g));
+  const bodies = owners.filter(({ g }) => bodyName(g.label));
+  const pool = bodies.length ? bodies : owners;
+
+  for (const r of wide) {
+    const e = Math.max(1, edge.get(r) ?? 0);
+    const t = touch.get(r)!;
+    let toOpening = 0;
+    for (const [u, c] of t) if (opening.has(u)) toOpening += c;
+    if (((outside.get(r) ?? 0) + toOpening) / e >= BAND_CONTACT || pool.length === 0) {
+      out.set(r, OPENING);
+      continue;
+    }
+    let best = -1;
+    let bestScore = -1;
+    let bestD = Infinity;
+    for (const { g, i } of pool) {
+      let c = 0;
+      let d = Infinity;
+      for (const u of g.regions) {
+        c += t.get(u) ?? 0;
+        if (sum[u] > 0 && sum[r] > 0)
+          d = Math.min(
+            d,
+            Math.hypot(cx[u] / sum[u] - cx[r] / sum[r], cy[u] / sum[u] - cy[r] / sum[r]),
+          );
+      }
+      if (c > bestScore || (c === bestScore && d < bestD)) {
+        best = i;
+        bestScore = c;
+        bestD = d;
+      }
+    }
+    out.set(r, parts.groups[best]);
+  }
+
+  // Rebuild the groups: the wide regions leave their band, join the opening / the part's inside.
+  const groups: PartGroup[] = parts.groups
+    .map((g) => (isBand(g) ? { ...g, regions: g.regions.filter((r) => !wideSet.has(r)) } : g))
+    .map((g) => ({ ...g, regions: g.regions.slice() }));
+  const findOrAdd = (label: string, key: string): PartGroup => {
+    let g = groups.find((o) =>
+      label === OPENING ? isOpening(o) : o.label === label && o.key === key,
+    );
+    if (!g) {
+      g = { label, regions: [], key, words: nameWords(label) };
+      groups.push(g);
+    }
+    return g;
+  };
+  for (const r of wide) {
+    const to = out.get(r)!;
+    const g =
+      to === OPENING
+        ? findOrAdd(OPENING, OPENING)
+        : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
+    g.regions.push(r);
+  }
+  const kept = groups.filter((g) => g.regions.length > 0);
+  const regionGroup = new Int32Array(parts.regionGroup.length).fill(-1);
+  kept.forEach((g, i) => {
+    for (const r of g.regions) regionGroup[r] = i;
+  });
+  return { ...parts, groups: kept, regionGroup, keyed: kept.every((g) => g.key !== '') };
 }
 
 /** A suggestion row from the card-level call (its groups carry `part_key`). */

@@ -54,6 +54,7 @@ import {
 import {
   concatIndices,
   dropOpenings,
+  fixBands,
   fixSides,
   gestureLive,
   keyedSuggestion,
@@ -520,7 +521,10 @@ export class PaintSession {
     );
   }
 
-  /** A row laid over the flat, then the Ф1 L/R check on the drawing (`fixSides`). */
+  /**
+   * A row laid over the flat, then the f3 band check (`fixBands`: a wide "binding" is an opening or
+   * a part's inside) and the Ф1 L/R check on the drawing (`fixSides`).
+   */
   private laid(
     row: Parameters<typeof partsOf>[0],
     flat: FlatRegions,
@@ -529,7 +533,7 @@ export class PaintSession {
     keys: ReadonlyMap<string, string>,
   ): ViewParts | null {
     const parts = partsOf(row, flat, seeds, view);
-    return parts && fixSides(view, parts, flat, keys);
+    return parts && fixSides(view, fixBands(parts, flat), flat, keys);
   }
 
   /** The side has the card-level answer (Ф2.1 topology); an older side-by-side one is stale. */

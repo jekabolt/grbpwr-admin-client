@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // PAINT THE PARTS · Ф1 — the wearer's left/right checked on the drawing (front/back centroids, the
 // side view's flank from where its front faces) and the `opening` group that never paints.
+// f3 — a "binding" / "band" wider than BAND_MAX_WIDTH of the silhouette leaves its group (`fixBands`).
 //   node scripts/paint-sides-probe.mjs
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -154,6 +156,125 @@ ck(
     JSON.stringify(m.partAcross(sides, 'back', 0)),
   );
   ck(!m.transferable('opening') && m.transferable('back body'), 'an opening name does not travel');
+}
+
+/* f3 · a band is a thin strip (`fixBands`) */
+{
+  // Synthetic: a 100-px-wide silhouette at x 10..109, y 10..59; region 1 = the body around region 2,
+  // a 1-px line between them.
+  const SW = 120;
+  const SH = 70;
+  const mk = (x0, x1, y0, y1) => {
+    const lab = new Int32Array(SW * SH);
+    const sil = new Uint8Array(SW * SH);
+    for (let y = 10; y < 60; y++)
+      for (let x = 10; x < 110; x++) {
+        sil[y * SW + x] = 1;
+        const inner = x >= x0 && x <= x1 && y >= y0 && y <= y1;
+        const line = x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1;
+        lab[y * SW + x] = inner ? 2 : line ? 0 : 1;
+      }
+    return { w: SW, h: SH, labels: lab, silhouette: sil, count: 2 };
+  };
+  const ans = (f, band) =>
+    m.partsOf(
+      { parts: [g('back body', [1]), g(band, [2])], splitNeeded: [] },
+      f,
+      new Int32Array([-1, 15 * SW + 15, 35 * SW + 60]),
+      'back',
+    );
+  const wideIn = mk(50, 69, 25, 44); // 20 px = 20 % of the silhouette, no border with the outside
+  const p = ans(wideIn, 'waist binding');
+  ck(
+    names(m.fixBands(p, wideIn)) === 'back body[back-body]:1 | back body · inside[back-body]:2',
+    'wide band inside the garment → the body’s inside',
+    names(m.fixBands(p, wideIn)),
+  );
+  const thin = mk(30, 89, 33, 36); // 4 px = 4 %
+  const q = ans(thin, 'waist band');
+  ck(m.fixBands(q, thin) === q, 'thin band untouched');
+  const wideOut = mk(10, 29, 25, 44); // 20 px, on the outline
+  const o = ans(wideOut, 'side binding');
+  ck(
+    names(m.fixBands(o, wideOut)) === 'back body[back-body]:1 | opening[opening]:2',
+    'wide band on the outline → opening',
+    names(m.fixBands(o, wideOut)),
+  );
+  const strap = ans(wideIn, 'waistband');
+  ck(m.fixBands(strap, wideIn) === strap, '"waistband" / "strap" are no band words');
+}
+/* f3 · the live labels (tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json) on real flats */
+{
+  const QA = resolve(REPO, '../tmp/plans/flat-consistency/in/paint-qa');
+  const LIVE = resolve(REPO, '../tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json');
+  const cut = (name) => {
+    const file = resolve(QA, `${name}.png`);
+    if (!existsSync(file)) return null;
+    const png = m.decodePng(readFileSync(file));
+    const { width: w, height: h, channels: c, data } = png;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    for (let p = 0; p < w * h; p++) {
+      const at = (k) => (c >= 3 ? data[p * c + k] : data[p * c]);
+      rgba[p * 4] = at(0);
+      rgba[p * 4 + 1] = at(1);
+      rgba[p * 4 + 2] = at(2);
+      rgba[p * 4 + 3] = c === 4 || c === 2 ? data[p * c + c - 1] : 255;
+    }
+    return m.analyseFlat(rgba, w, h);
+  };
+  const live = existsSync(LIVE) ? JSON.parse(readFileSync(LIVE, 'utf8')).cards : null;
+  const run = (card, view, name, remap = (r) => r) => {
+    const f = cut(name);
+    const rows = live?.[card]?.views?.[view];
+    if (!f || !rows) return console.log(`  skip  ${name}`), null;
+    const p = m.partsOf(
+      { parts: rows.map((x) => ({ ...x, regions: x.regions.map(remap) })), splitNeeded: [] },
+      f,
+      undefined,
+      view,
+    );
+    return { f, p, fixed: m.fixBands(p, f) };
+  };
+  // Card 38 front: the neck binding (region 2, 4.0 % wide) is a real thin binding.
+  const front = run('38', 'front', 'c38-front-537');
+  if (front) ck(front.fixed === front.p, 'c38 front: the neck binding stays', names(front.fixed));
+  // Card 49 sides: cuffs / placket / collar — no band word, nothing moves.
+  for (const [view, name] of [
+    ['side_l', 'c49-side_l-517'],
+    ['side_r', 'c49-side_r-518'],
+  ]) {
+    const r = run('49', view, name);
+    if (r) ck(r.fixed === r.p, `c49 ${view}: untouched`);
+  }
+  // Card 38 back (base 541). Its flat is not in the QA set: c38-back-541r.png is the drawing's black
+  // ink kept from shots/paint-qa/c38-back-after.png (825 px, same cut: 7 regions); there the two
+  // triangles come out as 3 = picture-right, 4 = picture-left, the live answer's 3 / 4 the other way.
+  const back = run('38', 'back', 'c38-back-541r', (r) => (r === 3 ? 4 : r === 4 ? 3 : r));
+  if (back) {
+    const after = names(back.fixed);
+    ck(
+      back.f.count === 7 &&
+        after.includes('opening[opening]:3,4') &&
+        !/binding/.test(after) &&
+        after.includes('right strap[right-strap]:1') &&
+        after.includes('left strap[left-strap]:2,5') &&
+        after.includes('back body[back-body]:7') &&
+        after.includes('front body · inside[front-body]:6'),
+      'c38 back: the two "armhole binding" triangles → opening, the rest kept',
+      after,
+    );
+    // A strap named a binding is a thin strip (5.6 %): it stays.
+    const rows = live['38'].views.back.map((x) =>
+      x.partKey === 'right-strap' ? { ...x, label: 'right strap binding' } : x,
+    );
+    const p = m.partsOf({ parts: rows, splitNeeded: [] }, back.f, undefined, 'back');
+    const fx = m.fixBands(p, back.f);
+    ck(
+      fx.groups.some((x) => x.label === 'right strap binding' && x.regions.join() === '1'),
+      'c38 back: a strap binding (thin) stays',
+      names(fx),
+    );
+  }
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
