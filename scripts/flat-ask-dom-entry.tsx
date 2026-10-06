@@ -94,8 +94,9 @@ function CardForm() {
   );
 }
 
+// Mutations retry once, as in the app (`src/index.tsx`): a refusal must not be retried (M8).
 const qc = new QueryClient({
-  defaultOptions: { queries: { retry: false, staleTime: 60_000 }, mutations: { retry: false } },
+  defaultOptions: { queries: { retry: false, staleTime: 60_000 }, mutations: { retry: 1 } },
 });
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>

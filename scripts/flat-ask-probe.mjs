@@ -11,6 +11,7 @@
 //   node scripts/flat-ask-probe.mjs                     прогон
 //   node scripts/flat-ask-probe.mjs --mutate=inflight-words  отказ M8 без слов — красное
 //   node scripts/flat-ask-probe.mjs --mutate=reread     фоновое чтение списка повторяется — красное
+//   node scripts/flat-ask-probe.mjs --mutate=refusal-retry  отказ сервера повторяется — красное
 //   node scripts/flat-ask-probe.mjs --mutate=stale      kept не гасит пилюлю — красное
 //   node scripts/flat-ask-probe.mjs --mutate=draft      ряд не пересеивает цель при смене карточки
 //   node scripts/flat-ask-probe.mjs --mutate=place      деталь ложится поверх правки человека — красное
@@ -58,6 +59,11 @@ const MUTATIONS = {
     file: /design\/generation\/detail-auto-place\.ts$/,
     from: '  if (Number.isFinite(touched) && touched > asked) return null;',
     to: '',
+  },
+  'refusal-retry': {
+    file: /design\/generation\/use-generation\.ts$/,
+    from: '      return failures < 1 && (status === 0 || status >= 500);',
+    to: '      return failures < 1;',
   },
   inflight: {
     file: /design\/flat-run-row\.tsx$/,
@@ -834,6 +840,12 @@ if (!chromium) {
       (await page.evaluate(() => window.__calls.filter((c) => c.name === 'GetDesignBand').length)) >
         bandReadsBefore,
       'M8 … and the band is read again (the other tab’s run shows as drawing)',
+    );
+    await page.waitForTimeout(1500);
+    ck(
+      (await starts()).length === 3,
+      'M8 … and the refusal is not retried (mutations retry once in the app; a 4xx is an answer)',
+      String((await starts()).length),
     );
   } finally {
     await browser.close();
