@@ -172,20 +172,16 @@ export function MoodQuiz({
   const [applying, setApplying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
-  const [hoverPic, setHoverPic] = useState<QuizAnchor | null>(null);
   const shownCard = useRef(card);
   shownCard.current = card;
 
   // 96: якорь доски — вопрос на экране про картинку, иначе строка открытого списка под курсором.
   // 99: вместе с id — места вопроса. Объект новый на каждый рендер, поэтому эффект ведёт ключ.
   const q = live ? live.queue[live.at] : undefined;
-  const anchor: QuizAnchor | null = live
-    ? q?.mediaId
-      ? { mediaId: q.mediaId, spots: spotsOf(q) }
-      : null
-    : listOpen
-      ? hoverPic
-      : null;
+  // T71 (06.10): «когда ховеришь на ответы с картинкой не нужно анкорить только на клик» — строка
+  // списка доску больше не двигает; щелчок открывает вопрос, и якорь ставит уже он.
+  const anchor: QuizAnchor | null =
+    live && q?.mediaId ? { mediaId: q.mediaId, spots: spotsOf(q) } : null;
   const anchorKey = JSON.stringify(anchor);
   const anchorRef = useRef(anchor);
   anchorRef.current = anchor;
@@ -693,13 +689,6 @@ export function MoodQuiz({
                   }
                   readOnly={readOnly}
                   onOpen={() => reopen(a)}
-                  onHover={(on) =>
-                    setHoverPic(
-                      on && a.question?.mediaId
-                        ? { mediaId: a.question.mediaId, spots: spotsOf(a.question) }
-                        : null,
-                    )
-                  }
                 />
                 <span className='flex items-baseline justify-end gap-3'>
                   {a.stale && !a.skipped && (
@@ -822,14 +811,12 @@ function AnswerLine({
   picture,
   readOnly,
   onOpen,
-  onHover,
 }: {
   answer: DesignQuizAnswer;
   /** `undefined` — не вопрос про картинку; `null` — картинки на доске уже нет. */
   picture?: QuizPicture | null;
   readOnly: boolean;
   onOpen: () => void;
-  onHover: (on: boolean) => void;
 }): JSX.Element {
   const q = answer.question;
   const text = answerText(answer);
@@ -839,10 +826,6 @@ function AnswerLine({
       type='button'
       disabled={readOnly}
       onClick={onOpen}
-      onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => onHover(false)}
-      onFocus={() => onHover(true)}
-      onBlur={() => onHover(false)}
       className='grid w-full grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-3 py-1 text-left enabled:cursor-pointer enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
     >
       {mediaId > 0 ? (

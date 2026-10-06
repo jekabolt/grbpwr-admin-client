@@ -1432,11 +1432,12 @@ try {
         (await row.textContent()).includes('material · picture 3'),
       'picture answer row shows the thumbnail and role',
     );
+    // T71: наведение на ответ доску НЕ двигает — якорь только по щелчку (он открывает вопрос).
     await row.locator('button').first().hover();
-    await anchoredOn(page, 103, 'hovering the material answer');
+    await page.waitForTimeout(200);
+    await noAnchor(page, 'hovering the material answer anchors nothing (T71)');
     await shoot(page, 'quiz-1440-picture-answers.png');
     await page.mouse.move(5, 5);
-    await noAnchor(page, 'hover left the row');
     await ctx.close();
   }
   // 97-ROLE-FIRST (Q25) + Q27: неразмеченные картинки спрашиваются первыми, локально; роль сразу
@@ -1892,15 +1893,13 @@ try {
       (await btn(page, 'resume').textContent()).trim() === 'resume 1',
       'header later keeps the queue: resume 1',
     );
-    // список ответов: наведение на ответ с местами снова показывает его кольца
+    // список ответов: T71 — наведение на ответ с местами колец НЕ ставит (только щелчок)
     await btn(page, 'answers ▾').click();
     const line = page.locator('[data-probe="quiz"] li button', { hasText: 'take from picture 2' });
     await line.hover();
-    await anchoredOn(page, 402, 'answers-list hover', 3);
-    await ringsPlaced(page, 402, spotDetail, 'answers-list hover');
-    await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
-    check((await ringCount(page)) === 0, 'leaving the answer clears the rings');
+    check((await ringCount(page)) === 0, 'hovering an answer places no rings (T71)');
+    await page.mouse.move(5, 5);
     check(
       (await page.evaluate(() => window.__answers)).find((a) => a.question?.id === 'pic_take')
         ?.question?.spots?.length === 2,
