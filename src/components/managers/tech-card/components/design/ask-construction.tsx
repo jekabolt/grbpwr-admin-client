@@ -133,11 +133,14 @@ export async function finishAsk(
     }
     const fresh = first.changed;
     if (fresh?.confirmed) {
-      // Confirmed elsewhere (another tab) — nothing is left to ask.
+      // Confirmed elsewhere meanwhile: nothing is asked any more, and these answers are not laid
+      // over another person's confirmed list — said, not dropped silently.
+      lastWhy.set(card, 'confirmed elsewhere meanwhile — your answers were not applied');
       writeSession(card, null);
-      return true;
+      return false;
     }
     if (fresh && questionsKey(allQuestions(fresh)) === questionsKey(questions)) {
+      // The same questions over the same rows: the answers stand as given.
       const again = replayEdit(mapped.edit, base, fresh);
       if (again) {
         const second = await saveJoinsConfirmed(qc, card, again, fresh.rev ?? 0);
@@ -145,8 +148,13 @@ export async function finishAsk(
           writeSession(card, null);
           return true;
         }
+        // Not saved: the answers stay; the last question is shown again with the reason.
+        lastWhy.set(card, second.why);
+        writeSession(card, { ...session, at: Math.max(0, questions.length - 1) });
+        return false;
       }
     }
+    // Other questions, or the same ones over changed rows: asked again on the fresh list.
     lastWhy.set(card, fresh ? 'the list changed — asked again' : first.why);
     writeSession(card, fresh ? null : { ...session, at: Math.max(0, questions.length - 1) });
     return false;

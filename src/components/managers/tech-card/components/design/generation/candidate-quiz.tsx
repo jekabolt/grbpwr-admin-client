@@ -193,9 +193,12 @@ export function CandidateQuiz({
 }): JSX.Element {
   useSyncExternalStore(subscribe, () => version);
   const runId = run.id ?? 0;
-  const state = states.get(runId) ?? QUIZ_START;
   const byId = new Map((run.pictures ?? []).map((p) => [p.id ?? 0, p] as const));
   const sheets = ids.filter((id) => byId.has(id));
+  /* A sheet the quiz stands on that is no longer a candidate (an edit replaced it): the quiz starts
+     over — a tap is never carried to a picture the person did not look at (Codex critical 3). */
+  const held = states.get(runId) ?? QUIZ_START;
+  const state: QuizState = 'sheet' in held && !sheets.includes(held.sheet) ? QUIZ_START : held;
   const send = (event: QuizEvent) => {
     if (disabled) return;
     const next = quizStep(state, event, sheets);

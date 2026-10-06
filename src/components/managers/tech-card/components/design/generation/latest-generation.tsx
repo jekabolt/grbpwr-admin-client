@@ -419,6 +419,17 @@ export function LatestGeneration({
 
   const newest = useMemo(() => latestRunOf(band, kind), [band, kind]);
   const newestId = newest?.run.id ?? 0;
+  /** The highest run of the kind, failed or empty included — auto-apply only ever follows it. */
+  const newestFlatId = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...(band.runs ?? [])
+          .filter((r) => isRunOfKind(r, kind) && !isRunArchived(r))
+          .map((r) => r.id ?? 0),
+      ),
+    [band.runs, kind],
+  );
 
   /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
      The pinned run is read from the band while the band's first page holds it, so a split's pieces

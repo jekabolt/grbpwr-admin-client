@@ -387,6 +387,15 @@ console.log('\n82 · ASK · construction (вопросы)');
     M.questionsKey(M.allQuestions(j)) === M.questionsKey(M.allQuestions({ ...j, rev: 9 })),
     'the same list asks the same ids (the CAS check)',
   );
+  const moved = {
+    ...j,
+    rev: 9,
+    items: j.items.map((i) => (i.id === 'strap_l' ? { ...i, to: 'BSH_L' } : i)),
+  };
+  ck(
+    M.questionsKey(M.allQuestions(moved)) !== M.questionsKey(M.allQuestions(j)),
+    'the same ids over a changed row are NOT the same questions (no confirm over it)',
+  );
   ck(M.sideOf('NP_L..SP_L:0.3') === 'L' && M.sideOf('CBN') === '', 'sides of ruler points');
 }
 

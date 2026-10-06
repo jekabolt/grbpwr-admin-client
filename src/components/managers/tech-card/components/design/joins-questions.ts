@@ -48,6 +48,12 @@ export type QuestionOption = {
 export type ConstructionQuestion = {
   /** Stable by content: the same list asks the same ids. */
   id: string;
+  /**
+   * WHAT THE QUESTION READ — the rows / absences / doubt it is about, as they stand. Two lists ask
+   * «the same questions» only when ids AND sources match: an answer (even `yes` / `skip`, which edit
+   * nothing) is never confirmed over a row another person changed meanwhile (Codex critical 1).
+   */
+  source: string;
   topic: 'strap start' | 'cross' | 'back neckline' | 'opening' | 'doubt';
   /** The pictogram part (`garment-manifest.json` part keys). */
   part: string;
@@ -104,6 +110,7 @@ function strapStartQuestion(items: common_DesignJoinItem[]): ConstructionQuestio
     );
   return {
     id: `strap-start:${straps.map((s) => s.id ?? '').join(',')}`,
+    source: JSON.stringify(straps),
     topic: 'strap start',
     part: 'strap',
     question: straps.length > 1 ? 'Where do the straps start?' : 'Where does the strap start?',
@@ -131,6 +138,7 @@ function crossQuestion(items: common_DesignJoinItem[]): ConstructionQuestion | n
   );
   return {
     id: `cross:${lr.id ?? ''},${rl.id ?? ''}`,
+    source: JSON.stringify([lr, rl]),
     topic: 'cross',
     part: 'back',
     question: 'Do the straps cross on the back?',
@@ -152,6 +160,7 @@ function backNecklineQuestion(j: common_DesignJoins): ConstructionQuestion | nul
   const said = (j.absences ?? []).find((a) => /back neck/i.test(a));
   return {
     id: 'back-neckline',
+    source: JSON.stringify(said ?? ''),
     topic: 'back neckline',
     part: 'neckline',
     question: 'Is there a back neckline?',
@@ -178,6 +187,7 @@ function openingQuestion(items: common_DesignJoinItem[]): ConstructionQuestion |
   const where = (op.view ?? '').trim() || 'back';
   return {
     id: `opening:${op.id ?? ''}`,
+    source: JSON.stringify(op),
     topic: 'opening',
     part: 'back',
     question:
@@ -194,6 +204,7 @@ function openingQuestion(items: common_DesignJoinItem[]): ConstructionQuestion |
 function doubtQuestion(u: string): ConstructionQuestion {
   return {
     id: `doubt:${u}`,
+    source: u,
     topic: 'doubt',
     part: 'whole',
     question: u,
@@ -294,5 +305,6 @@ export function answersEdit(
   return { edit: chainEdits(...edits) };
 }
 
-/** The ids asked, as one key — two lists that ask the same questions read the same. */
-export const questionsKey = (qs: readonly ConstructionQuestion[]) => qs.map((q) => q.id).join('|');
+/** The questions asked and what each read, as one key — equal only for the same questions over the same rows. */
+export const questionsKey = (qs: readonly ConstructionQuestion[]) =>
+  JSON.stringify(qs.map((q) => [q.id, q.source]));

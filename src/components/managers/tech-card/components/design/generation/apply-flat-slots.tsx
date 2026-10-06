@@ -63,8 +63,12 @@ export function flatSlotSteps(band: GetDesignBandResponse, pieces: SplitPiece[])
 const AUTO_KEY = 'grbpwr.design.flat.autoapply';
 const AUTO_APPLY_MS = 30 * 60_000;
 
+/** Claimed in this tab — first, before storage: a failing storage never lets a run apply twice. */
+const claimed = new Set<number>();
+
 function claimAutoApply(runId: number): boolean {
-  if (runId <= 0) return false;
+  if (runId <= 0 || claimed.has(runId)) return false;
+  claimed.add(runId);
   let ids: number[] = [];
   try {
     const v = JSON.parse(window.localStorage.getItem(AUTO_KEY) || '[]') as unknown;
