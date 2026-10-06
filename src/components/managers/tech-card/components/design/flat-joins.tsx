@@ -17,7 +17,6 @@ import Text from 'ui/components/text';
 
 import { serverSpeaksDesign } from './capability';
 import { GROUP_GAP } from './core';
-import { useFlatModeDraft } from './flat-input';
 import { joinsConfirmed } from './flat-mode';
 import {
   EMPTY_JOINS,
@@ -49,8 +48,9 @@ import { cardOnScreen, designKeys, rereadBandNow } from './use-design-band';
 /**
  * ═══ JOINS — THE CONSTRUCTION THE FLAT IS CHECKED AGAINST (flat route, 05.10) ═══════════════════
  *
- * A group of the INPUT — REFERENCES block, right above the flat's GENERATE: the run freezes this
- * list into its prompt. One compact row per join (`binding NARROW · NP_R → CFN → NP_L · front`, the
+ * Since 82-INPUT-REDESIGN (06.10) a READ-ONLY section `construction` of `what the model gets ▸`:
+ * the run freezes this list into its prompt, and the designer edits it only by answering the
+ * questions under the run row (`ask-construction.tsx`). One compact row per join (`binding NARROW · NP_R → CFN → NP_L · front`, the
  * model's note in its tooltip), the absences as one row of chips, the model's doubts folded behind
  * `? N` in the header. Double-click edits a row (Enter saves, Esc cancels), ✕ drops it, `+ join` adds one.
  * A garment with several layers groups its rows under one line per layer (name, sheer) and gives
@@ -235,6 +235,105 @@ async function retryRead(qc: QueryClient, card: number): Promise<void> {
   await readJoins(qc, card, force);
 }
 
+/**
+ * ═══ THE READ, FROM THE RUN ROW (82-INPUT-REDESIGN §1, T4) ══════════════════════════════════════
+ * The JOINS group left the screen (it is a read-only section of `what the model gets ▸`), so the
+ * first read starts from the run row: the first visit with roled photos and no list reads it — once
+ * per card per session. The row reads the state to lock GENERATE while the list is built (S1) and
+ * to offer `retry ›` after a failed read (S1f).
+ */
+export function useJoinsRead(
+  card: number,
+  band: GetDesignBandResponse,
+  writesOff: boolean,
+): {
+  reading: boolean;
+  failed: string | null;
+  unsupported: boolean;
+  retry: () => void;
+} {
+  const qc = useQueryClient();
+  useSyncExternalStore(subscribe, () => version);
+  const photos = (band.references ?? []).filter(
+    (r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim(),
+  ).length;
+  useEffect(() => {
+    if (writesOff || band.joins || photos === 0 || asked.has(card)) return;
+    asked.add(card);
+    void readJoins(qc, card, false);
+  }, [writesOff, band.joins, photos, card, qc]);
+  return {
+    reading: reading.has(card) || (inflight.has(card) && !band.joins),
+    failed: failed.get(card)?.why ?? null,
+    unsupported: unsupported.has(card),
+    retry: () => void retryRead(qc, card),
+  };
+}
+
+/**
+ * THE STALE CONFIRMATION, RECOVERED WITHOUT A BUTTON (§3.3). The server refused straps because the
+ * list was confirmed against other photos or another note. The list is asked for again the free way
+ * (`force = false`): a cache hit hands back the same rev — `same` (the caller re-saves it confirmed
+ * and retries once); a miss lands a fresh list at a new rev — `new` (its questions are asked).
+ */
+export async function rereadForStale(
+  qc: QueryClient,
+  card: number,
+): Promise<'same' | 'new' | 'failed'> {
+  const before = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card))?.joins?.rev ?? 0;
+  if (reading.has(card) || inflight.has(card)) return 'failed';
+  await readJoins(qc, card, false);
+  if (failed.has(card)) return 'failed';
+  const after = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card))?.joins?.rev ?? 0;
+  return after === before ? 'same' : 'new';
+}
+
+/**
+ * ONE SAVE OF THE LIST, CONFIRMED (the last answer, `skip all`, a straps press on a list that asks
+ * nothing, the stale recovery). `expectedRev` is the rev the person answered on; a mismatch is
+ * returned as `changed` with the fresh list — the caller decides whether the same questions stand.
+ * Counted in the saves GENERATE waits for.
+ */
+export async function saveJoinsConfirmed(
+  qc: QueryClient,
+  card: number,
+  joins: common_DesignJoins,
+  expectedRev: number,
+): Promise<{ ok: true } | { ok: false; changed: common_DesignJoins | null; why: string }> {
+  markSaving(card, 1);
+  try {
+    const saved = (
+      await timed(SAVE_TIMEOUT_MS, () =>
+        adminService.SetDesignJoins({ techCardId: card, joins, expectedRev, confirm: true }),
+      )
+    ).joins;
+    putJoins(qc, card, saved);
+    staleConfirm.delete(card);
+    void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    return { ok: true };
+  } catch (e) {
+    if (isStale(e)) {
+      try {
+        const fresh = (await rereadBandNow(qc, card)).joins ?? null;
+        return { ok: false, changed: fresh, why: CHANGED };
+      } catch {
+        return { ok: false, changed: null, why: CHANGED };
+      }
+    }
+    void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    return {
+      ok: false,
+      changed: null,
+      why:
+        e instanceof TimedOut
+          ? 'not saved — the save took too long'
+          : `not saved — ${messageOf(e)}`,
+    };
+  } finally {
+    markSaving(card, -1);
+  }
+}
+
 /** `was` — the text the editor opened with: a blur closes it only when nothing was typed. */
 type Editing = { key: string; value: string; was: string; why?: string } | null;
 
@@ -243,10 +342,13 @@ export function FlatJoins({
   band,
   disabled,
   thumbOf,
+  title = 'joins',
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
+  /** Read-only (82, owner 06.10 answer 5: the list is edited only through the questions). */
   disabled?: boolean;
+  title?: string;
   /** The picture of a reference by its media id (the input's own map). */
   thumbOf: (mediaId: number) => string;
 }): JSX.Element | null {
@@ -266,8 +368,6 @@ export function FlatJoins({
   const [picking, setPicking] = useState<Set<number> | null>(null);
   const [askRejoin, setAskRejoin] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
-  /** «straps & openings» is chosen in the run row: the list must be confirmed before it runs. */
-  const strapsMode = useFlatModeDraft(card) === 'straps';
 
   /** The photos the read is given: references that carry a prompt role. */
   const photos = useMemo(
@@ -287,13 +387,6 @@ export function FlatJoins({
     markUnsaved(card, dirty);
   }, [card, dirty]);
   useEffect(() => () => markUnsaved(card, false), [card]);
-
-  /* The first visit with photos and no list reads it — once per card per session. */
-  useEffect(() => {
-    if (writesOff || band.joins || photos.length === 0 || asked.has(card)) return;
-    asked.add(card);
-    void readJoins(qc, card, false);
-  }, [writesOff, band.joins, photos.length, card, qc]);
 
   if (unsupported.has(card)) return null;
 
@@ -756,29 +849,11 @@ export function FlatJoins({
           </Pill>
         </button>
       )}
-      {/* STRAPS & OPENINGS RUNS ONLY ON A CONFIRMED LIST — the door saves it as is, confirmed. */}
-      {strapsMode &&
-        !!joins &&
-        !isReading &&
-        (confirmedNow(card, joins) ? (
-          <span data-joins-confirmed=''>
-            <Pill tone='ok'>confirmed</Pill>
-          </span>
-        ) : (
-          !writesOff &&
-          items.length + absences.length > 0 && (
-            <button
-              type='button'
-              data-joins-confirm=''
-              /* An open editor holds an unsaved line: the list on screen is not the one stored. */
-              disabled={locked || editing !== null}
-              title='the list is right — straps & openings may run on it'
-              onClick={() => void apply((j) => j, false, true)}
-            >
-              <Pill tone='attention'>confirm joins</Pill>
-            </button>
-          )
-        ))}
+      {joins?.confirmed && (
+        <span data-joins-confirmed=''>
+          <Pill tone='ok'>confirmed</Pill>
+        </span>
+      )}
       {!writesOff && !isReading && (photos.length > 0 || !!joins) && (
         <button
           type='button'
@@ -796,7 +871,7 @@ export function FlatJoins({
   return (
     <div data-flat-joins='' data-joins-rev={joins?.rev ?? 0}>
       <GroupLabel flush className={GROUP_GAP} action={status}>
-        joins
+        {title}
       </GroupLabel>
       {picker}
       <div className='divide-y divide-hairline'>

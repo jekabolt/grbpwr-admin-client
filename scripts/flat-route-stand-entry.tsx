@@ -1,21 +1,22 @@
-// СТЕНД ФЛЭТ-МАРШРУТА (05.10): настоящие `FlatJoins` и `LatestGeneration` над поддельной полосой.
-//   · joins     (карточка 38) — список A из tmp/plans/flat-consistency/out/layers/joins-A.json:
-//                3 слоя, отсутствия, вопросы, фото не согласны; первая запись SetDesignJoins
-//                отвечает 409 (CAS) — правка повторяется на свежей полосе;
-//   · auto      (карточка 49) — полосы без списка: GenerateDesignJoins уходит сам, `reading…`;
-//   · cands     (карточка 50) — прогон флэта на 4 кандидата, второй с меткой `grey`; ни один не режется,
-//                пока не выбран; `pick` → режется только выбранный;
-//   · failed    (карточка 51) — `timed_out`, без картинок: `timed out · retry`;
-//   · late      (карточка 52) — живой прогон 7 минут: `taking too long`, `cancel` на виду.
-//   · modes     (карточка 60) — настоящие `FlatJoins` + `FlatRunRow` над формой: три режима флэта,
-//                технические флэты, `confirm joins`, отказы сервера, подсказка `straps & openings?`;
-//   · rerun     (карточка 62) — упавший прогон `hand_flat`: `retry` несёт `params.flat` родителя.
+// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10): настоящие `FlatRunRow`, `FlatJoins` (только
+// чтение), `LatestGeneration` и `Bench` над поддельной полосой.
+//   · construction (карточка 38) — список A, только чтение: ни правки, ни `+ join`, ни `confirm`;
+//   · auto      (карточка 49) — полоса без списка: GenerateDesignJoins уходит сам из ряда, GENERATE
+//                ждёт со строкой `generate without it ›`;
+//   · modes     (карточка 60) — список A (лямки): ASK · construction (Q1 три позиции, Q2, Q3), один
+//                SetDesignJoins с confirm; `from my flat`; маршрут в пилюле; авто-восстановление stale;
+//   · bench-50  — 4 кандидата: квиз (бок → спинка → перед), плиток кандидатов нет;
+//   · bench-54  — те же кандидаты: «none of these» → строка и `choose again ›`;
+//   · bench-53  — кандидат, разрезанный на сервере, — выбор; квиза нет;
+//   · bench-51/52/62 — `timed out · retry`, `taking too long`, повтор `hand_flat` с `params.flat`;
+//   · slots-55  — FLAT SLOTS: деталь старше видов (`stale` с сервера) → `keep` (SetDesignDetailKept) · `discard`.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter } from 'react-router-dom';
 import { TooltipProvider } from 'ui/components/tooltip';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { FlatRunRow } from 'components/managers/tech-card/components/design/flat-run-row';
 import {
   flatParamsFor,
@@ -25,6 +26,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { FlatJoins } from 'components/managers/tech-card/components/design/flat-joins';
+import { Bench } from 'components/managers/tech-card/components/design/bench';
 import { LatestGeneration } from 'components/managers/tech-card/components/design/generation/latest-generation';
 import { useDesignBand } from 'components/managers/tech-card/components/design/use-design-band';
 
@@ -47,78 +49,58 @@ const media = (id: number, url: string, w: number, h: number) => ({
 
 const VIEWS = ['front', 'back', 'side_l', 'side_r'];
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
-
-// card 50: four candidate sheets
 const CAP = { imageRunCapSeconds: 360, cappedRunKinds: ['flat', 'render'] };
+const emptySides = () =>
+  VIEWS.map((viewKey, i) => ({ id: i + 1, viewKey, kind: 'flat', pictureId: 0, slotRev: 1 }));
+
+const candidateRun = (runId: number) => ({
+  id: runId,
+  kind: 'flat',
+  status: 'done',
+  requestedOutputs: 4,
+  params: { layout: 'one', views: VIEWS },
+  createdAt: minutesAgo(3),
+  completedAt: minutesAgo(2),
+  pictures: win.__sheets.map(
+    (s, i) =>
+      ({
+        id: 300 + i,
+        runId,
+        kind: 'flat',
+        ordinal: i,
+        compositeViews: VIEWS,
+        media: media(700 + i, s.url, s.w, s.h),
+      }) as unknown as common_DesignPicture,
+  ),
+});
+
+// cards 50 and 54: four candidate sheets, nothing picked
 win.__bands[50] = {
   ...CAP,
-  bench: VIEWS.map((viewKey, i) => ({
-    id: i + 1,
-    viewKey,
-    kind: 'flat',
-    pictureId: 0,
-    slotRev: 1,
-  })),
-  runs: [
-    {
-      id: 90,
-      kind: 'flat',
-      status: 'done',
-      requestedOutputs: 4,
-      params: { layout: 'one', views: VIEWS },
-      createdAt: minutesAgo(3),
-      pictures: win.__sheets.map(
-        (s, i) =>
-          ({
-            id: 300 + i,
-            runId: 90,
-            kind: 'flat',
-            ordinal: i,
-            compositeViews: VIEWS,
-            flags: i === 1 ? ['grey'] : [],
-            media: media(700 + i, s.url, s.w, s.h),
-          }) as unknown as common_DesignPicture,
-      ),
-    },
-  ],
+  bench: emptySides(),
+  runs: [candidateRun(90)],
+} as unknown as GetDesignBandResponse;
+win.__bands[54] = {
+  ...CAP,
+  bench: emptySides(),
+  runs: [candidateRun(94)],
 } as unknown as GetDesignBandResponse;
 
-// card 53: the same four candidates, the SECOND already cut on the server (two pieces), while this
-// browser remembers the THIRD as picked — the cut one is the pick, nothing else is cut.
+// card 53: the SECOND candidate already cut on the server — it is the pick, no quiz
 try {
   window.localStorage.setItem('grbpwr.design.flat.pick.53', JSON.stringify({ '93': 302 }));
 } catch {
   /* no storage */
 }
+const cut = candidateRun(93);
 win.__bands[53] = {
   ...CAP,
-  bench: VIEWS.map((viewKey, i) => ({
-    id: i + 1,
-    viewKey,
-    kind: 'flat',
-    pictureId: 0,
-    slotRev: 1,
-  })),
+  bench: emptySides(),
   runs: [
     {
-      id: 93,
-      kind: 'flat',
-      status: 'done',
-      requestedOutputs: 4,
-      params: { layout: 'one', views: VIEWS },
-      createdAt: minutesAgo(3),
+      ...cut,
       pictures: [
-        ...win.__sheets.map(
-          (s, i) =>
-            ({
-              id: 300 + i,
-              runId: 93,
-              kind: 'flat',
-              ordinal: i,
-              compositeViews: VIEWS,
-              media: media(700 + i, s.url, s.w, s.h),
-            }) as unknown as common_DesignPicture,
-        ),
+        ...cut.pictures,
         ...['front', 'back'].map(
           (v, k) =>
             ({
@@ -202,92 +184,133 @@ win.__bands[62] = {
   ],
 } as unknown as GetDesignBandResponse;
 
+// card 55: FRONT and BACK from run 120, the detail `collar` from run 100 — stale
+const plate = (id: number, runId: number, view: string, k: number) =>
+  ({
+    id,
+    runId,
+    kind: 'flat',
+    ghostView: view,
+    media: media(740 + k, win.__sheets[k % win.__sheets.length].url, 400, 400),
+  }) as unknown as common_DesignPicture;
+win.__bands[55] = {
+  ...CAP,
+  runs: [],
+  bench: [
+    ...VIEWS.map((viewKey, i) => ({
+      id: 61 + i,
+      viewKey,
+      kind: 'flat',
+      pictureId: i < 2 ? 401 + i : 0,
+      picture: i < 2 ? plate(401 + i, 120, viewKey, i) : undefined,
+      slotRev: 3,
+    })),
+    {
+      id: 71,
+      viewKey: 'detail',
+      detailName: 'collar',
+      kind: 'flat',
+      pictureId: 411,
+      picture: plate(411, 100, 'detail', 2),
+      slotRev: 2,
+      // server truth (GetDesignBand, 0400)
+      stale: true,
+      kept: false,
+      staleAgainstRunId: 120,
+    },
+  ],
+} as unknown as GetDesignBandResponse;
+
 (window as unknown as { __flatMode: unknown }).__flatMode = { flatParamsFor, flatParamsForFix };
 
-function ModesRow() {
-  const card = 60;
+const thumb = (id: number) => win.__sheets[id % win.__sheets.length]?.url ?? '';
+
+function RowFor({ card, technical }: { card: number; technical: boolean }) {
   const { band } = useDesignBand(card);
   const form = useForm({
     defaultValues: {
       concept: 'a strappy top',
       categoryId: 1,
       moodboardMedia: [],
-      technicalMedia: [801, 802, 803].map((mediaId) => ({
-        mediaId,
-        kind: '',
-        caption: '',
-        role: '',
-      })),
+      technicalMedia: technical
+        ? [801, 802, 803].map((mediaId) => ({ mediaId, kind: '', caption: '', role: '' }))
+        : [],
     },
   });
-  (window as unknown as { __modesForm: unknown }).__modesForm = form;
   if (!band.references) return null;
   return (
     <FormProvider {...form}>
       <Section title='input — references' question='— what this run is given'>
-        <FlatJoins
-          techCardId={card}
-          band={band}
-          thumbOf={(id) => win.__sheets[id % win.__sheets.length]?.url ?? ''}
-        />
-        <FlatRunRow
-          band={band}
-          techCardId={card}
-          thumbOf={(id) => win.__sheets[id % win.__sheets.length]?.url ?? ''}
-        />
+        <FlatRunRow band={band} techCardId={card} thumbOf={thumb} />
       </Section>
     </FormProvider>
   );
 }
 
-function Joins({ card }: { card: number }) {
+function Construction({ card }: { card: number }) {
   const { band } = useDesignBand(card);
   if (!band.references) return null;
   return (
-    <Section title='input — references' question='— what this run is given'>
-      <FlatJoins
-        techCardId={card}
-        band={band}
-        thumbOf={(id) => win.__sheets[id % win.__sheets.length]?.url ?? ''}
-      />
+    <Section title='what the model gets' question='— the construction section, read-only'>
+      <FlatJoins techCardId={card} band={band} disabled title='construction' thumbOf={thumb} />
     </Section>
   );
 }
 
-function Bench({ card }: { card: number }) {
+function LatestBench({ card }: { card: number }) {
   const { band } = useDesignBand(card);
   if (!band.runs?.length) return null;
   return <LatestGeneration band={band} techCardId={card} />;
 }
 
+function Slots({ card }: { card: number }) {
+  const { band } = useDesignBand(card);
+  const form = useForm({ defaultValues: { concept: 'a top', categoryId: 1, moodboardMedia: [] } });
+  if (!band.bench?.length) return null;
+  return (
+    <FormProvider {...form}>
+      <Section title='flat slots' question='— stale details'>
+        <Bench band={band} techCardId={card} />
+      </Section>
+    </FormProvider>
+  );
+}
+
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
-    <BrowserRouter>
-      <TooltipProvider>
-        <DesignCapabilityProvider value>
-          <div style={{ width: 1100, padding: 24, background: '#f2f2f2' }}>
-            <SectionStack>
-              <div data-probe='joins'>
-                <Joins card={38} />
-              </div>
-              <div data-probe='auto'>
-                <Joins card={49} />
-              </div>
-              <div data-probe='modes'>
-                <ModesRow />
-              </div>
-              {[50, 53, 51, 52, 62].map((card) => (
-                <div key={card} data-probe={`bench-${card}`}>
-                  <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
-                    <Bench card={card} />
+    <DictionaryProvider>
+      <BrowserRouter>
+        <TooltipProvider>
+          <DesignCapabilityProvider value>
+            <div style={{ width: 1100, padding: 24, background: '#f2f2f2' }}>
+              <SectionStack>
+                <div data-probe='construction'>
+                  <Construction card={38} />
+                </div>
+                <div data-probe='auto'>
+                  <RowFor card={49} technical={false} />
+                </div>
+                <div data-probe='modes'>
+                  <RowFor card={60} technical />
+                </div>
+                {[50, 54, 53, 51, 52, 62].map((card) => (
+                  <div key={card} data-probe={`bench-${card}`}>
+                    <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
+                      <LatestBench card={card} />
+                    </PictureGalleryProvider>
+                  </div>
+                ))}
+                <div data-probe='slots-55'>
+                  <PictureGalleryProvider techCardId={55} band={win.__bands[55]}>
+                    <Slots card={55} />
                   </PictureGalleryProvider>
                 </div>
-              ))}
-            </SectionStack>
-          </div>
-        </DesignCapabilityProvider>
-      </TooltipProvider>
-    </BrowserRouter>
+              </SectionStack>
+            </div>
+          </DesignCapabilityProvider>
+        </TooltipProvider>
+      </BrowserRouter>
+    </DictionaryProvider>
   </QueryClientProvider>,
 );

@@ -38,6 +38,8 @@ import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
+import { staleShown } from './stale-details';
+import { useKeepStale } from './stale-details-hook';
 import { uploadItem } from './upload-item';
 import { uploadPlacement } from './bench-mint';
 import { normaliseViewKey } from './views';
@@ -230,6 +232,8 @@ export function Bench({
   const [mintingDetail, setMintingDetail] = useState(false);
 
   const bench = useMemo(() => readBench(band, FLAT_BENCH), [band]);
+  /** 82 §5: a detail drawn before the views it should agree with — `keep` is stored on the server. */
+  const keepStale = useKeepStale(techCardId);
   const candidates = useMemo(() => pickableFlats(band), [band]);
   /** Семейство силуэта по категории карточки (D-22): пиктограмма на полосах пустой стороны. */
   const family = useCardGarmentFamily();
@@ -653,6 +657,16 @@ export function Bench({
                 onCancelPick={pick.cancel}
                 onUnmark={() => unmark(ref, rev, picture?.id ?? 0, name)}
                 undo={picture ? undefined : removals.undoFor(ref, rev)}
+                stale={
+                  picture && staleShown(slot)
+                    ? {
+                        onKeep: keepStale.busy.has(slotId)
+                          ? undefined
+                          : () => void keepStale.keep(slot),
+                        onDiscard: () => unmark(ref, rev, picture.id ?? 0, name),
+                      }
+                    : null
+                }
                 onRename={(next) => {
                   /* ИМЯ ДЕТАЛИ ЕДЕТ В ПРОМПТ ФЛЭТА (ревью раунда 4, MIN-2): посреди GENERATE или
                      CLEAR оно не меняется, а пока переименование пишется, вход удержан — GENERATE

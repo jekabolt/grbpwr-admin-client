@@ -503,6 +503,12 @@ export type BenchSlotProps = {
    * и силуэт ей ничего не подсказывает. Готовый узел (`PictogramBackdrop` со `view` этого слота).
    */
   backdrop?: React.ReactNode;
+  /**
+   * Details only (82-INPUT-REDESIGN §5, owner 9): the views were drawn again after this detail —
+   * `stale` with `keep` (stored on the server) · `discard` (the slot empties; the picture stays in
+   * the history and the detail returns to the run row's `target ▾`). `onKeep` absent = no door.
+   */
+  stale?: { onKeep?: () => void; onDiscard: () => void } | null;
 };
 
 /**
@@ -898,6 +904,7 @@ export function BenchSlot(props: BenchSlotProps) {
     onDelete,
     backdrop,
     undo,
+    stale: staleDoor,
   } = props;
 
   const provenance = picture ? slotProvenance({ picture }) : null;
@@ -1083,6 +1090,9 @@ export function BenchSlot(props: BenchSlotProps) {
       {/* ДВЕРЬ СЛОТА ДЕТАЛИ — видна всегда, тихая, под именем (moodboard-flats-1003, T05 + T10).
           Предложенный пустой слот отвечает здесь же `keep` / `dismiss`; принятый — `remove` в два
           шага. Другой глагол, чем ✕ плиты: крестик очищает слот, эта дверь сносит сам слот. */}
+      {detail && staleDoor && url && picture && (
+        <StaleDetailDoor label={label} disabled={disabled || saving} door={staleDoor} />
+      )}
       {!disabled && detail && onDelete && (
         <DetailSlotDoor
           label={label}
@@ -1449,6 +1459,53 @@ export function DetailSlotDoor({
           onClick={() => setPhase('armed')}
         >
           remove
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ═══ STALE · KEEP · DISCARD (82-INPUT-REDESIGN §5) ═══════════════════════════════════════════════
+ * One line above the detail door: the blue `stale` pill (mid-flight, needs a human) and two quiet
+ * words. A read-only card shows the pill alone.
+ */
+export function StaleDetailDoor({
+  label,
+  disabled,
+  door,
+}: {
+  label: string;
+  disabled?: boolean;
+  door: { onKeep?: () => void; onDiscard: () => void };
+}) {
+  return (
+    <div data-detail-stale='' className='flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1.5'>
+      <span title='the views were drawn again after this detail'>
+        <Pill tone='attention'>stale</Pill>
+      </span>
+      {!disabled && door.onKeep && (
+        <button
+          type='button'
+          data-detail-stale-keep=''
+          aria-label={`keep stale detail ${label}`}
+          title='it still agrees with the views — keep it'
+          className={DOOR_QUIET}
+          onClick={door.onKeep}
+        >
+          keep
+        </button>
+      )}
+      {!disabled && (
+        <button
+          type='button'
+          data-detail-stale-discard=''
+          aria-label={`discard stale detail ${label}`}
+          title='empty the slot — the picture stays in the history, the detail can be drawn again'
+          className={DOOR_QUIET}
+          onClick={door.onDiscard}
+        >
+          discard
         </button>
       )}
     </div>

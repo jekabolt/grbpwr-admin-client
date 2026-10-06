@@ -17,6 +17,7 @@ import {
 import { useTechCardAutosave } from '../autosave-contract';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
+import { FlatJoins } from '../flat-joins';
 import { moodPictureIds } from '../flat-mode';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
@@ -361,6 +362,20 @@ export function WhatModelGetsModal({
           },
         ]}
       />
+
+      {/* THE CONSTRUCTION (82-INPUT-REDESIGN §1, owner 06.10 answer 5): the join list the run
+          freezes, READ-ONLY — it is edited only by answering the questions above GENERATE. */}
+      {band.joins && (
+        <div data-wmg-construction=''>
+          <FlatJoins
+            techCardId={techCardId}
+            band={band}
+            disabled
+            title='construction'
+            thumbOf={(id) => thumbOf(mediaById.get(id))}
+          />
+        </div>
+      )}
 
       <WordsAsSent
         run={lastRun}

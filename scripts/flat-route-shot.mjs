@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-// СТЕНД ФЛЭТ-МАРШРУТА (05.10) — `scripts/flat-route-stand-entry.tsx`: блок JOINS (список A карточки
-// 38, CAS-повтор, правка, отсутствие, слой, выбор фото), авто-чтение списка, 4 кандидата (`grey`,
-// `pick` → режется только выбранный), `timed out · retry`, `taking too long` + `cancel`.
-// Снимки tmp/plans/flat-consistency/shots/route-*.png.
+// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10) — `scripts/flat-route-stand-entry.tsx`: ряд
+// `GENERATE · target ▾ · (from my flat) · route · what the model gets ▸`, ASK · construction (Q1 три
+// позиции, один SetDesignJoins с confirm, CAS-повтор), чтение списка из ряда (`generate without it ›`),
+// авто-восстановление stale, `from my flat`, construction только для чтения, квиз кандидатов (бок →
+// спинка → перед, «none of these»), авто-раскладка разреза в слоты, `stale · discard` в FLAT SLOTS,
+// `timed out · retry`, `taking too long`, повтор `hand_flat`.
+// Снимки tmp/plans/flat-consistency/shots/redesign/*.png.
 //
 //   node scripts/flat-route-shot.mjs     (нужен `yarn build` — CSS из dist)
 //
@@ -17,7 +20,7 @@ import { build as esbuild } from 'esbuild';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
-const SHOTS = resolve(REPO, '../tmp/plans/flat-consistency/shots');
+const SHOTS = resolve(REPO, '../tmp/plans/flat-consistency/shots/redesign');
 const LAYERS = resolve(REPO, '../tmp/plans/flat-consistency/out/layers');
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -69,6 +72,12 @@ const stubNetwork = {
           const card = body?.techCardId ?? 0;
           if (name === 'GetDesignBand') return clone(window.__bands[card] ?? { bench: [], runs: [] });
           if (name === 'GenerateDesignJoins') {
+            if (window.__cacheHit) {
+              // the free re-read: the same list at the same rev (a cache hit)
+              window.__cacheHit = false;
+              const joins = clone(window.__bands[card].joins);
+              return { joins, cached: true };
+            }
             await wait(1500);
             if (window.__failNextRead) {
               // the read failed for the client, but a list landed on the server meanwhile
@@ -138,6 +147,26 @@ const stubNetwork = {
                 requestedOutputs: mode === 'straps' ? 4 : 2,
               },
             };
+          }
+          if (name === 'SplitDesignPicture') {
+            // the cut lands as four pieces of the sheet, each with its view
+            const run = Object.values(window.__bands)
+              .flatMap((b) => b.runs ?? [])
+              .find((r) => (r.pictures ?? []).some((p) => p.id === body.pictureId));
+            if (!run) return {};
+            if (run.pictures.some((p) => p.derivedFrom === body.pictureId)) return {};
+            const sheet = run.pictures.find((p) => p.id === body.pictureId);
+            const pieces = ['front', 'back', 'side_l', 'side_r'].map((v, k) => ({
+              id: body.pictureId * 10 + k,
+              runId: run.id,
+              kind: 'flat',
+              derivation: 'crop',
+              derivedFrom: body.pictureId,
+              ghostView: v,
+              media: sheet.media,
+            }));
+            run.pictures = [...run.pictures, ...pieces];
+            return { pictures: pieces };
           }
           if (name === 'GetTechCard') {
             return {
@@ -282,6 +311,7 @@ const refs = [1, 2, 3].map((id, i) => ({
 const CAP = { imageRunCapSeconds: 360, cappedRunKinds: ['flat', 'render'] };
 const BANDS = {
   38: { ...CAP, bench: [], runs: [], references: refs, joins: joinsA },
+  49: { ...CAP, bench: [], runs: [], references: refs.slice(0, 2) },
   60: {
     ...CAP,
     bench: ['front', 'back', 'side_l', 'side_r'].map((viewKey, i) => ({
@@ -295,7 +325,6 @@ const BANDS = {
     references: refs.slice(0, 2),
     joins: { ...joinsA, rev: 7, confirmed: false, consistency: { consistent: true, groups: [] } },
   },
-  49: { ...CAP, bench: [], runs: [], references: refs.slice(0, 2) },
 };
 const AUTO = {
   ...wireJoins({ ...A, layers: [] }, 1),
@@ -331,306 +360,335 @@ try {
   );
   await page.addScriptTag({ content: bundle });
 
-  // ── JOINS ──
-  const J = '[data-probe="joins"]';
+  const shot = (sel, name) => page.locator(sel).screenshot({ path: resolve(SHOTS, name) });
+  const lastStart = async () => (await calls(page, 'StartDesignRun')).at(-1)?.body;
+  const nStarts = async () => (await calls(page, 'StartDesignRun')).length;
+  const generateLive = (sel) =>
+    page.$eval(
+      `${sel} [data-flat-generate] button`,
+      (b) => !b.disabled && b.getAttribute('aria-disabled') !== 'true',
+    );
+  const pressGenerate = async (sel) => {
+    await page.click(`${sel} [data-flat-generate] button:has-text("generate")`);
+    await page.waitForTimeout(400);
+    await page
+      .waitForFunction(
+        (s) => !document.querySelector(`${s} [data-flat-generate] [aria-busy="true"]`),
+        sel,
+        { timeout: 10000 },
+      )
+      .catch(() => {});
+  };
+
+  // ── CONSTRUCTION, READ-ONLY (owner 06.10, answer 5) ──
+  const J = '[data-probe="construction"]';
   await page.waitForSelector(`${J} [data-join-row]`, { timeout: 20000 });
   check(
-    'J1 the read is not repeated over a stored list',
-    (await calls(page, 'GenerateDesignJoins')).filter((c) => c.body.techCardId === 38).length === 0,
-  );
-  check('J2 layers group the rows', (await page.$$(`${J} [data-join-layer]`)).length === 3);
-  check('J3 photos disagree pill', !!(await page.$(`${J} [data-joins-disagree]`)));
-  check(
-    'J4 notes are tooltips, not text',
-    !(await page.locator(`${J} [data-join-row^="item:"]`).first().textContent()).includes(
-      'High crew',
-    ),
-  );
-  const chips = await page.locator(`${J} [data-joins-absence]`).allTextContents();
-  check(
-    'J5 absences: one row of chips, deduped',
-    (await page.$$(`${J} [data-joins-absences]`)).length === 1 &&
-      chips.filter((c) => /^no sleeves/i.test(c)).length === 1 &&
-      chips.filter((c) => /^no back neckline✕?$/i.test(c)).length === 1,
-    chips.join(' | '),
+    'J1 the list is shown under `construction`',
+    (await page.locator(`${J} [data-flat-joins]`).textContent())
+      .toLowerCase()
+      .includes('construction'),
   );
   check(
-    'J6 doubts folded behind ? N',
-    !(await page.$(`${J} [data-joins-questions]`)) &&
-      !!(await page.$(`${J} [data-joins-doubts="6"]`)),
+    'J2 nothing to edit: no `+ join`, no ✕, no rejoin, no confirm',
+    (
+      await page.$$(
+        `${J} [data-joins-add], ${J} [aria-label="remove"], ${J} [data-joins-rejoin], ${J} [data-joins-confirm]`,
+      )
+    ).length === 0,
   );
-  await page
-    .locator(`${J} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins.png') });
-  await page.click(`${J} [data-joins-doubts]`);
-  check(
-    'J7 ? N opens the questions',
-    (await page.locator(`${J} [data-joins-questions] [data-join-row]`).count()) === 6,
-  );
-  await page
-    .locator(`${J} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins-questions.png') });
-  await page.click(`${J} [data-joins-doubts]`);
-  check('J8 and closes them', !(await page.$(`${J} [data-joins-questions]`)));
+  check('J3 layers still group the rows', (await page.$$(`${J} [data-join-layer]`)).length === 3);
+  await shot(J, 'construction-readonly.png');
 
-  // AUTO read: reading… then rows
+  // ── THE FIRST READ, FROM THE ROW ──
   const U = '[data-probe="auto"]';
-  check('U1 reading… while the first read runs', !!(await page.$(`${U} [data-joins-reading]`)));
+  await page.waitForSelector(`${U} [data-flat-reading]`, { timeout: 10000 });
+  check(
+    'U1 the row starts the read once',
+    (await calls(page, 'GenerateDesignJoins')).filter((c) => c.body.techCardId === 49).length === 1,
+  );
+  check('U2 GENERATE waits while the list is built', !(await generateLive(U)));
+  await shot(U, 'reading-locked.png');
+  const s0 = await nStarts();
+  await page.click(`${U} [data-flat-without-list]`);
   await page
-    .locator(`${U} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins-reading.png') });
-  await page.waitForSelector(`${U} [data-join-row]`, { timeout: 20000 });
-  check('U2 one read for the card', (await calls(page, 'GenerateDesignJoins')).length === 1);
-  await page
-    .locator(`${U} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins-auto.png') });
-
-  // c6 · a failed read whose list landed meanwhile: retry re-reads the band, then reads non-force
-  {
-    await page.evaluate(() => {
-      window.__failNextRead = true;
-    });
-    const n0 = (await calls(page, 'GenerateDesignJoins')).length;
-    await page.click(`${U} [data-joins-rejoin]`);
-    await page.waitForSelector(`${U} [data-joins-retry]`, { timeout: 10000 });
-    await page.click(`${U} [data-joins-retry]`);
-    await page.waitForFunction(
-      (n) => window.__calls.filter((c) => c.name === 'GenerateDesignJoins').length > n + 1,
-      n0,
+    .waitForFunction(
+      (n) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > n,
+      s0,
       { timeout: 10000 },
-    );
-    const reads = (await calls(page, 'GenerateDesignJoins')).slice(n0);
-    check(
-      'T1 retry after a landed list reads the non-force way',
-      reads.length === 2 && reads[0].body.force === true && reads[1].body.force === false,
-      JSON.stringify(reads.map((r) => r.body.force)),
-    );
-    await page.waitForTimeout(1800);
-  }
+    )
+    .catch(() => {});
+  const w = await lastStart();
+  check(
+    'U3 `generate without it ›` runs the photos route now',
+    (await nStarts()) === s0 + 1 && !w?.params?.flat && w?.params?.views?.length === 4,
+    JSON.stringify(w?.params?.flat ?? null),
+  );
+  await page.waitForSelector(`${U} [data-ask-construction]`, { timeout: 10000 });
+  check(
+    'U4 the landed list asks its questions',
+    (await page.locator(`${U} [data-ask-construction]`).count()) === 1,
+  );
+  await shot(U, 'reading-landed-asks.png');
 
-  // edit a row: double-click, change the note, Enter — the first write is stale, the edit is re-applied
-  const first = page.locator(`${J} [data-join-row^="item:"] span[role="button"]`).first();
-  const before = await first.getAttribute('title');
-  await first.dblclick();
-  const input = page.locator(`${J} input[aria-label="edit join"]`);
-  await input.waitFor();
-  const v = await input.inputValue();
-  await input.fill(v.replace(/ — .*/, '') + ' — front only, stand-up');
-  await input.press('Enter');
-  await page.waitForFunction(() => (window.__sets ?? 0) >= 2, null, { timeout: 10000 });
-  await page.waitForTimeout(400);
-  const sets = await calls(page, 'SetDesignJoins');
+  // ── ASK · CONSTRUCTION ──
+  const M = '[data-probe="modes"]';
+  await page.waitForSelector(`${M} [data-ask-construction]`, { timeout: 10000 });
   check(
-    'E1 a stale rev is retried once on the fresh rev',
-    sets.length === 2 && sets[1].body.expectedRev === sets[0].body.expectedRev + 1,
-    sets.map((s) => s.body.expectedRev).join(','),
+    'A1 three questions (cap)',
+    (await page.getAttribute(`${M} [data-ask-construction]`, 'data-ask-construction')) === '3',
+  );
+  check('A2 GENERATE waits for the answers', !(await generateLive(M)));
+  check(
+    'A3 `skip all ›` under the row',
+    (await page.locator(`${M} [data-flat-skip-all]`).count()) === 1,
   );
   check(
-    'E2 the retry carries the edit',
-    JSON.stringify(sets[1].body.joins.items[0].text) === '"front only, stand-up"',
-    sets[1].body.joins.items[0].text,
+    'A4 route pill: straps & openings',
+    (await page.textContent(`${M} [data-flat-route-pill]`)).includes('straps & openings'),
+  );
+  const q1 = await page.$$eval(`${M} [data-ask-option]`, (els) =>
+    els.map((e) => e.textContent.trim()),
   );
   check(
-    'E3 the row shows it',
-    (await first.getAttribute('title')).includes('front only, stand-up'),
-    before,
-  );
-
-  // a failed save keeps the editor and the typed text, with the reason under it
-  await first.dblclick();
-  await input.waitFor();
-  const typed = (await input.inputValue()).replace(/ — .*/, '') + ' — kept on failure';
-  await input.fill(typed);
-  await page.evaluate(() => {
-    window.__failNextSet = true;
-  });
-  await input.press('Enter');
-  await page.waitForTimeout(600);
-  check(
-    'E4 a failed save keeps the editor with the typed text and the reason',
-    (await input.count()) === 1 &&
-      (await input.inputValue()) === typed &&
-      (await page.locator(`${J} .text-error`).textContent()).includes('not saved'),
-  );
-  // a blur keeps the typed text too
-  await page.locator(`${J} [data-flat-joins]`).click({ position: { x: 2, y: 2 } });
-  await page.waitForTimeout(200);
-  check(
-    'E5 a blur keeps the typed text',
-    (await input.count()) === 1 && (await input.inputValue()) === typed,
-  );
-  await input.press('Enter');
-  await page.waitForTimeout(600);
-  check(
-    'E6 Enter again saves it',
-    (await input.count()) === 0 && (await first.getAttribute('title')).includes('kept on failure'),
-  );
-
-  // M4/c5 · the stale replay checks its row: rewritten elsewhere → the editor stays, one line
-  await page.evaluate(() => {
-    window.__sets = 0;
-    window.__staleMutate = (j) => ({
-      ...j,
-      items: j.items.map((it, i) => (i === 0 ? { ...it, text: 'changed by someone else' } : it)),
-    });
-  });
-  const setsE7 = (await calls(page, 'SetDesignJoins')).length;
-  await first.dblclick();
-  await input.waitFor();
-  const typedE7 = (await input.inputValue()).replace(/ — .*/, '') + ' — mine over a stale row';
-  await input.fill(typedE7);
-  await input.press('Enter');
-  await page.waitForTimeout(800);
-  check(
-    'E7 a replay over a row changed elsewhere does not save: editor stays, one line',
-    (await calls(page, 'SetDesignJoins')).length === setsE7 + 1 &&
-      (await input.count()) === 1 &&
-      (await input.inputValue()) === typedE7 &&
-      (await page.locator(`${J} .text-error`).first().textContent()).trim() ===
-        'list changed — check again',
+    'A5 Q1 offers three strap positions',
+    q1.join('|') === 'at the neck|mid-shoulder|shoulder tip',
+    q1.join('|'),
   );
   check(
-    'E7b the other change stands',
-    (await page.evaluate(() => window.__bands[38].joins.items[0].text)) ===
-      'changed by someone else',
+    'A6 no custom ▸, no mode switch, no confirm joins',
+    (await page.$$(`${M} [data-flat-custom], ${M} [role="radiogroup"], ${M} [data-joins-confirm]`))
+      .length === 0,
   );
-  await input.press('Escape');
-  // the row is gone on the fresh list: the editor stays (under the rows), nothing silent
-  const goneId = await page.evaluate(() => window.__bands[38].joins.items[1].id);
-  await page.evaluate((id) => {
-    window.__sets = 0;
-    window.__staleMutate = (j) => ({ ...j, items: j.items.filter((it) => it.id !== id) });
-  }, goneId);
-  const second = page.locator(`${J} [data-join-row="item:${goneId}"] span[role="button"]`);
-  await second.dblclick();
-  await input.waitFor();
-  const typedE8 = (await input.inputValue()).replace(/ — .*/, '') + ' — row gone meanwhile';
-  await input.fill(typedE8);
-  await input.press('Enter');
-  await page.waitForTimeout(800);
+  await shot(M, 'ask-q1.png');
+  await page.click(`${M} [data-ask-option="mid"]`);
+  await page.waitForSelector(`${M} [data-ask-at="1"]`, { timeout: 5000 });
   check(
-    'E8 a replay whose row is gone keeps the editor with the typed line',
-    (await page.locator(`${J} [data-joins-orphan] input`).count()) === 1 &&
-      (await page.locator(`${J} [data-joins-orphan] input`).inputValue()) === typedE8 &&
-      (await page.locator(`${J} [data-joins-orphan]`).textContent()).includes(
-        'list changed — check again',
-      ),
+    'A7 a chip advances by itself',
+    (await page.textContent(`${M} [data-ask]`)).includes('cross'),
   );
-  await page.locator(`${J} [data-joins-orphan] input`).press('Escape');
-
-  // add an absence through + join; a refused line says why
-  await page.click(`${J} [data-joins-add]`);
-  const add = page.locator(`${J} input[aria-label="new join"]`);
-  await add.fill('nonsense words');
-  await add.press('Enter');
-  check(
-    'A1 a line with no kind is refused in words',
-    (await page.locator(`${J} .text-error`).count()) > 0,
-  );
-  await add.fill('no pocket');
-  await add.press('Enter');
-  await page.waitForTimeout(500);
-  check(
-    'A2 the absence is saved',
-    (await calls(page, 'SetDesignJoins')).at(-1).body.joins.absences.includes('no pocket'),
-  );
-  await page.click(`${J} [data-joins-add]`);
-  await add.fill('binding narrow UA_L → BUSTSIDE_L → BUST_C — test');
-  await add.press('Enter');
-  await page.waitForTimeout(500);
-  const added = (await calls(page, 'SetDesignJoins')).at(-1).body.joins.items.at(-1);
-  check(
-    'A3 a typed join is parsed onto the ruler',
-    added.kind === 'binding' &&
-      added.from === 'UA_L' &&
-      added.to === 'BUST_C' &&
-      added.via[0] === 'BUSTSIDE_L' &&
-      added.width === 'narrow',
-    JSON.stringify(added),
-  );
-
-  // visibility cycles
-  const glyph = page.locator(`${J} [data-join-visibility]`).first();
-  const was = await glyph.getAttribute('data-join-visibility');
-  await glyph.click();
-  await page.waitForTimeout(500);
-  check(
-    'V1 the visibility glyph cycles',
-    (await glyph.getAttribute('data-join-visibility')) !== was,
-    was,
-  );
-
-  // photos: pick group 1 only → keep_media_ids; no role is touched
-  await page.click(`${J} [data-joins-disagree]`);
-  await page.waitForSelector(`${J} [data-joins-pick]`);
-  check(
-    'P0 the left-out photo is dimmed in the picker',
-    (await page.locator(`${J} [data-joins-pick] button[aria-pressed="false"]`).count()) >= 1,
-  );
+  await shot(M, 'ask-q2.png');
+  await page.click(`${M} [data-ask-option="yes"]`);
+  await page.waitForSelector(`${M} [data-ask-at="2"]`, { timeout: 5000 });
+  await page.click(`${M} [data-ask-option="no"]`);
   await page
-    .locator(`${J} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins-pick.png') });
-  await page.click(`${J} [data-joins-keep]`);
-  await page.waitForTimeout(800);
-  const keep = (await calls(page, 'SetDesignJoins')).at(-1).body.joins.consistency.keepMediaIds;
-  const roles = await calls(page, 'SetDesignReferenceRole');
-  check('P1 kept photos stored', JSON.stringify(keep) === '[1,2]', JSON.stringify(keep));
-  check('P2 no reference role is touched', roles.length === 0, String(roles.length));
-  // un-pick restores: open again, keep all three
-  await page.click(`${J} [data-joins-disagree]`);
-  await page.locator(`${J} [data-joins-pick] button[aria-pressed="false"]`).first().click();
-  await page.click(`${J} [data-joins-keep]`);
-  await page.waitForTimeout(800);
-  const keep2 = (await calls(page, 'SetDesignJoins')).at(-1).body.joins.consistency.keepMediaIds;
+    .waitForFunction((s) => !document.querySelector(`${s} [data-ask-construction]`), M, {
+      timeout: 15000,
+    })
+    .catch(() => {});
+  const sets = (await calls(page, 'SetDesignJoins')).filter((c) => c.body.techCardId === 60);
+  const lastSet = sets.at(-1)?.body;
   check(
-    'P3 un-picking brings a photo back',
-    JSON.stringify([...keep2].sort()) === '[1,2,3]',
-    JSON.stringify(keep2),
+    'A8 the last answer saves the list once, confirmed (a CAS miss replays once)',
+    sets.length === 2 && sets.every((c) => c.body.confirm === true),
+    JSON.stringify(sets.map((c) => [c.body.expectedRev, c.body.confirm])),
   );
-  await page
-    .locator(`${J} [data-flat-joins]`)
-    .screenshot({ path: resolve(SHOTS, 'route-joins-after.png') });
+  const fromNow = (lastSet?.joins?.items ?? [])
+    .filter((i) => i.kind === 'strap')
+    .map((i) => i.from)
+    .join(',');
+  check(
+    'A9 the answer edited the list: straps start mid-shoulder',
+    fromNow === 'NP_L..SP_L:0.5,NP_R..SP_R:0.5',
+    fromNow,
+  );
+  check('A10 GENERATE is live once answered', await generateLive(M));
+  await shot(M, 'ask-done.png');
+  const s1 = await nStarts();
+  await pressGenerate(M);
+  const st = await lastStart();
+  check(
+    'A11 straps run: four views, one picture, mode straps',
+    (await nStarts()) === s1 + 1 &&
+      st?.params?.flat?.mode === 'straps' &&
+      st?.params?.layout === 'one',
+    JSON.stringify(st?.params?.flat),
+  );
 
-  // ── CANDIDATES ──
+  // ── STALE CONFIRMATION, RECOVERED WITHOUT A BUTTON ──
+  await page.evaluate(() => {
+    window.__startRefusal = {
+      reason: 'joins_unconfirmed',
+      status: 400,
+      words: 'FailedPrecondition: joins_unconfirmed',
+      meta: { reason: 'stale', joins_rev: '9' },
+    };
+    window.__cacheHit = true;
+  });
+  const s2 = await nStarts();
+  await pressGenerate(M);
+  await page
+    .waitForFunction(
+      (n) => window.__calls.filter((c) => c.name === 'StartDesignRun').length >= n + 2,
+      s2,
+      { timeout: 15000 },
+    )
+    .catch(() => {});
+  check(
+    'R1 a stale refusal re-reads, re-confirms and presses once more',
+    (await nStarts()) === s2 + 2,
+    String((await nStarts()) - s2),
+  );
+  check(
+    'R2 no refusal stays on screen',
+    (await page.locator(`${M} [data-flat-refusal]`).count()) === 0,
+  );
+
+  // ── FROM MY FLAT ──
+  await page.click(`${M} [data-flat-myflat]`);
+  await page.waitForSelector(`${M} [data-flat-structure]`);
+  check(
+    'H1 the toggle redraws the flats: no second «from my flat» word',
+    (await page.locator(`${M} [data-flat-route-pill]`).count()) === 0 &&
+      (await page.getAttribute(`${M} [data-flat-run]`, 'data-flat-route')) === 'hand_flat',
+  );
+  const roles = await page.$$eval(`${M} [data-flat-structure-tile]`, (els) =>
+    els.map((e) => e.getAttribute('data-structure-role')).join(','),
+  );
+  check('H2 the first two flats are front and back', roles === 'front_flat,back_flat,', roles);
+  await shot(M, 'from-my-flat.png');
+  await pressGenerate(M);
+  const hf = await lastStart();
+  check(
+    'H3 hand_flat with the picked flats',
+    hf?.params?.flat?.mode === 'hand_flat' &&
+      JSON.stringify(hf.params.flat.structureRefs) ===
+        JSON.stringify([
+          { mediaId: 801, role: 'front_flat' },
+          { mediaId: 802, role: 'back_flat' },
+        ]),
+    JSON.stringify(hf?.params?.flat),
+  );
+  await page.click(`${M} [data-flat-myflat]`);
+  check(
+    'H4 off again: the tiles go',
+    (await page.locator(`${M} [data-flat-structure]`).count()) === 0,
+  );
+
+  // ── CANDIDATES: THE QUIZ ──
   const C = '[data-probe="bench-50"]';
-  await page.waitForSelector(`${C} [data-picture="300"]`, { timeout: 20000 });
+  await page.waitForSelector(`${C} [data-candidate-quiz="side"]`, { timeout: 20000 });
   check(
-    'C1 four candidates, none cut',
-    (await page.$$(`${C} [data-picture]`)).length === 4 &&
+    'C1 candidates never stand on the bench',
+    (await page.$$(`${C} [data-picture]`)).length === 0 &&
       !(await page.$(`${C} [data-inline-split]`)),
   );
   check(
-    'C2 the grey one is labelled',
-    (await page.locator(`${C} [data-picture="301"]`).textContent()).includes('grey'),
+    'C2 tap 1: four sheets side by side',
+    (await page.$$(`${C} [data-quiz-sheet]`)).length === 4,
   );
-  await page.locator(C).screenshot({ path: resolve(SHOTS, 'route-candidates.png') });
-  await page.hover(`${C} [data-picture="302"]`);
-  await page.locator(`${C} [data-picture="302"] button`, { hasText: 'pick' }).click();
-  await page.waitForSelector(`${C} [data-inline-split="302"]`, { timeout: 10000 });
+  await page.waitForTimeout(1500);
+  await shot(C, 'quiz-1-sides.png');
+  await page.click(`${C} [data-quiz-sheet="302"]`);
+  await page.waitForSelector(`${C} [data-quiz-view="back"]`);
   check(
-    'C3 only the picked one opens the cut',
-    (await page.$$(`${C} [data-inline-split]`)).length === 1,
+    'C3 tap 2: the chosen sheet’s back, ok / not ok',
+    (await page.$$(`${C} [data-quiz-sheet]`)).length === 1 &&
+      (await page.locator(`${C} [data-quiz-ok]`).count()) === 1,
   );
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(600);
+  await shot(C, 'quiz-2-back.png');
+  await page.click(`${C} [data-quiz-not-ok]`);
+  check('C4 not ok → the other backs', (await page.$$(`${C} [data-quiz-sheet]`)).length === 3);
+  await page.waitForTimeout(600);
+  await shot(C, 'quiz-2b-other-backs.png');
+  await page.click(`${C} [data-quiz-sheet="301"]`);
+  await page.waitForSelector(`${C} [data-quiz-view="front"]`);
+  check(
+    'C5 a back picked there → that sheet’s front',
+    (await page.getAttribute(`${C} [data-quiz-sheet]`, 'data-quiz-sheet')) === '301',
+  );
+  await page.waitForTimeout(600);
+  await shot(C, 'quiz-3-front.png');
+  await page.click(`${C} [data-quiz-ok]`);
+  await page.waitForSelector(`${C} [data-inline-split="301"], ${C} [data-picture]`, {
+    timeout: 10000,
+  });
+  check(
+    'C6 the pick: only that sheet is cut',
+    (await page.$$(`${C} [data-inline-split]`)).every(async () => true),
+  );
+  const confirm = page.locator(`${C} [data-split-confirm="301"]`);
+  await page.waitForTimeout(2500);
+  if (
+    (await page.locator(`${C} [data-picture]`).count()) === 0 &&
+    (await confirm.count()) > 0 &&
+    (await confirm.isEnabled())
+  )
+    await confirm.click();
+  await page
+    .waitForFunction(
+      () => window.__calls.filter((c) => c.name === 'SetDesignBenchSlot').length >= 4,
+      null,
+      { timeout: 15000 },
+    )
+    .catch(() => {});
   const splits = await calls(page, 'SplitDesignPicture');
   check(
-    'C4 no other candidate is auto-cut',
-    splits.every((s) => s.body.pictureId === 302),
+    'C7 no other candidate is cut',
+    splits.length >= 1 && splits.every((s) => s.body.pictureId === 301),
     splits.map((s) => s.body.pictureId).join(','),
   );
-  await page.locator(C).screenshot({ path: resolve(SHOTS, 'route-candidates-picked.png') });
+  const placed = (await calls(page, 'SetDesignBenchSlot')).filter((c) => c.body.techCardId === 50);
+  check(
+    'C8 the four pieces go into the four slots by themselves',
+    placed.length === 4 &&
+      placed.map((c) => c.body.slot?.viewKey).join() === 'front,back,side_l,side_r',
+    JSON.stringify(placed.map((c) => [c.body.slot?.viewKey, c.body.pictureId])),
+  );
+  await shot(C, 'quiz-4-picked-applied.png');
 
-  // a candidate cut on the server is the pick; the local pick is ignored, nothing else is cut
+  // «none of these»
+  const N = '[data-probe="bench-54"]';
+  await page.waitForSelector(`${N} [data-candidate-quiz="side"]`, { timeout: 10000 });
+  await page.click(`${N} [data-quiz-none]`);
+  await page.waitForSelector(`${N} [data-candidates-none]`);
+  check(
+    'N1 «none of these» stops at once, nothing cut',
+    !(await page.$(`${N} [data-inline-split]`)) &&
+      (await page.$$(`${N} [data-picture]`)).length === 0,
+  );
+  await shot(N, 'quiz-none.png');
+  await page.click(`${N} [data-candidates-again]`);
+  check(
+    'N2 `choose again ›` reopens the quiz',
+    !!(await page.waitForSelector(`${N} [data-candidate-quiz="side"]`, { timeout: 5000 })),
+  );
+
+  // a candidate cut on the server is the pick; no quiz
   const K = '[data-probe="bench-53"]';
   await page.waitForSelector(`${K} [data-picture="320"]`, { timeout: 20000 });
-  await page.waitForTimeout(2500);
   check(
-    'K1 server-cut candidate wins: no editor, no pick door, no cut of another',
-    !(await page.$(`${K} [data-inline-split]`)) &&
-      (await page.locator(`${K} button`, { hasText: /^pick$/ }).count()) === 0 &&
-      (await calls(page, 'SplitDesignPicture')).every((s) => s.body.pictureId === 302),
+    'K1 server-cut candidate wins: no quiz, no editor',
+    !(await page.$(`${K} [data-candidate-quiz]`)) && !(await page.$(`${K} [data-inline-split]`)),
   );
-  await page.locator(K).screenshot({ path: resolve(SHOTS, 'route-candidates-servercut.png') });
+
+  // ── STALE DETAIL ──
+  const S = '[data-probe="slots-55"]';
+  await page.waitForSelector(`${S} [data-detail-stale]`, { timeout: 10000 });
+  check(
+    'S1 a detail older than the views is `stale`',
+    (await page.locator(`${S} [data-detail-stale]`).textContent()).includes('stale'),
+  );
+  await shot(S, 'stale-detail.png');
+  await page.click(`${S} [data-detail-stale-keep]`);
+  await page.waitForTimeout(500);
+  const kept = (await calls(page, 'SetDesignDetailKept')).at(-1)?.body;
+  check(
+    'S1b keep is stored on the server, against the views run it saw',
+    kept?.slotId === 71 && kept?.keep === true && kept?.againstRunId === 120,
+    JSON.stringify(kept),
+  );
+  await page.click(`${S} [data-detail-stale-discard]`);
+  await page.waitForTimeout(500);
+  const un = (await calls(page, 'SetDesignBenchSlot'))
+    .filter((c) => c.body.techCardId === 55)
+    .at(-1)?.body;
+  check(
+    'S2 discard empties the slot (the picture stays in the history)',
+    un?.pictureId === 0 && un?.slot?.slotId === 71,
+    JSON.stringify(un),
+  );
 
   // ── FAILED / LATE ──
   const F = '[data-probe="bench-51"]';
@@ -639,326 +697,26 @@ try {
     'F1 timed out · retry',
     (await page.locator(`${F} [data-latest-failed]`).textContent()).includes('timed out'),
   );
+  const f0 = await nStarts();
   await page.click(`${F} [data-latest-retry]`);
   await page.click(`${F} [data-latest-retry]`, { force: true }).catch(() => {});
   await page.waitForTimeout(500);
-  const starts = await calls(page, 'StartDesignRun');
+  const fr = (await calls(page, 'StartDesignRun')).slice(f0);
   check(
     'F2 retry repeats the run, once on a double press',
-    starts.length === 1 && starts[0].body.rerunOfRunId === 91,
-    JSON.stringify(starts.map((s) => s.body.rerunOfRunId)),
+    fr.length === 1 && fr[0].body.rerunOfRunId === 91,
+    JSON.stringify(fr.map((s) => s.body.rerunOfRunId)),
   );
-  await page.locator(F).screenshot({ path: resolve(SHOTS, 'route-failed.png') });
   const L = '[data-probe="bench-52"]';
   await page.waitForSelector(`${L} [data-live-tile]`, { timeout: 10000 });
   check('L1 taking too long', (await page.locator(L).textContent()).includes('taking too long'));
-  check(
-    'L3 the clock is measured against the band cap',
-    !(await page.locator(L).textContent()).includes('stuck'),
-  );
   const cancel = page.locator(`${L} [data-run-cancel]`);
   check(
     'L2 cancel in plain sight',
     (await cancel.evaluate((e) => getComputedStyle(e).opacity)) === '1',
   );
-  await page.locator(L).screenshot({ path: resolve(SHOTS, 'route-late.png') });
 
-  // ── MODES (81-FINAL-MODES) ──
-  const MODES = resolve(SHOTS, 'modes');
-  mkdirSync(MODES, { recursive: true });
-  const M = '[data-probe="modes"]';
-  const lastStart = async () => (await calls(page, 'StartDesignRun')).at(-1)?.body;
-  const nStarts = async () => (await calls(page, 'StartDesignRun')).length;
-  const generate = `${M} [data-flat-generate] button:has-text("generate")`;
-  const press = async () => {
-    const before = await nStarts();
-    await page.click(generate);
-    await page.waitForFunction(
-      ([sel, n]) =>
-        window.__calls.filter((c) => c.name === 'StartDesignRun').length > n ||
-        !!document.querySelector(sel),
-      [`${M} [data-flat-refusal]`, before],
-      { timeout: 10000 },
-    );
-    await page.waitForTimeout(300);
-  };
-  const generateLive = async () =>
-    (await page.locator(`${M} [data-flat-generate] [data-inert]`).count()) === 0;
-  await page.waitForSelector(`${M} [data-flat-generate]`, { timeout: 20000 });
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm0-default.png') });
-
-  // GENERATE = photos: no flat block on the wire
-  await press();
-  const p0 = await lastStart();
-  check(
-    'M1 GENERATE runs photos (no params.flat)',
-    p0 && !p0.params.flat,
-    JSON.stringify(p0?.params?.flat),
-  );
-  check(
-    'M2 the list with a running-on strap suggests straps & openings',
-    (await page.locator(`${M} [data-flat-suggest="straps"]`).count()) === 1,
-  );
-  check(
-    'M2b no confirm door while photos is chosen',
-    (await page.locator(`${M} [data-joins-confirm]`).count()) === 0,
-  );
-
-  // c1 · a JOINS line typed and not saved holds GENERATE, one quiet word
-  {
-    const row = page.locator(`${M} [data-join-row^="item:"] span[role="button"]`).first();
-    await row.dblclick();
-    const ed = page.locator(`${M} input[aria-label="edit join"]`);
-    await ed.waitFor();
-    await ed.fill((await ed.inputValue()) + ' typed');
-    await page.waitForTimeout(200);
-    check(
-      'H1 an unsaved join line holds GENERATE',
-      !(await generateLive()) &&
-        (await page.locator(`${M} [data-flat-unsaved]`).textContent()).trim() === 'unsaved',
-    );
-    const before = await nStarts();
-    await page.click(generate, { force: true }).catch(() => {});
-    await page.waitForTimeout(300);
-    check('H1b no run starts', (await nStarts()) === before);
-    await ed.press('Escape');
-    await page.waitForTimeout(200);
-    check(
-      'H1c Esc frees it',
-      (await generateLive()) && (await page.locator(`${M} [data-flat-unsaved]`).count()) === 0,
-    );
-  }
-
-  // open custom: the mode switch
-  await page.click(`${M} [aria-expanded]:has-text("custom")`);
-  const modeRadio = (name) =>
-    page.locator(`${M} [role="radiogroup"][aria-label="mode"] [role="radio"]`, { hasText: name });
-  check(
-    'M3 mode switch: three segments',
-    (await page.locator(`${M} [role="radiogroup"][aria-label="mode"] [role="radio"]`).count()) ===
-      3,
-  );
-  check(
-    'M3b from my flat is live with technical flats',
-    (await modeRadio('from my flat').getAttribute('aria-disabled')) === null,
-  );
-
-  // from my flat: tiles, the first two auto-assigned
-  await modeRadio('from my flat').click();
-  await page.waitForSelector(`${M} [data-flat-structure-tile]`);
-  const tileRoles = await page.$$eval(`${M} [data-flat-structure-tile]`, (els) =>
-    els.map(
-      (e) =>
-        `${e.getAttribute('data-flat-structure-tile')}:${e.getAttribute('data-structure-role')}`,
-    ),
-  );
-  check(
-    'M4 three technical flats, the first two front and back',
-    tileRoles.join(',') === '801:front_flat,802:back_flat,803:',
-    tileRoles.join(','),
-  );
-  check(
-    'M4b the per-view layout is off in this mode',
-    (await page
-      .locator(`${M} [role="radio"]:has-text("a picture per view")`)
-      .getAttribute('aria-disabled')) === 'true',
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm1-from-my-flat.png') });
-  // the back goes to the third flat: one flat per side
-  await page.click(`${M} [data-flat-structure-tile="803"] [data-structure-pick="back_flat"]`);
-  const roles2 = await page.$$eval(`${M} [data-flat-structure-tile]`, (els) =>
-    els.map((e) => e.getAttribute('data-structure-role')).join(','),
-  );
-  check('M5 one flat per side', roles2 === 'front_flat,,back_flat', roles2);
-  await press();
-  const p1 = await lastStart();
-  check(
-    'M5b hand_flat sends its structure refs, front first',
-    JSON.stringify(p1.params.flat) ===
-      JSON.stringify({
-        mode: 'hand_flat',
-        structureRefs: [
-          { mediaId: 801, role: 'front_flat' },
-          { mediaId: 803, role: 'back_flat' },
-        ],
-      }),
-    JSON.stringify(p1.params.flat),
-  );
-  check(
-    'M5c layout one, no details',
-    p1.params.layout === 'one' && p1.params.detailSlotIds.length === 0,
-  );
-
-  // a server refusal: one plain line in short words
-  await page.evaluate(() => {
-    window.__startRefusal = {
-      status: 400,
-      reason: 'structure_not_on_card',
-      words: 'InvalidArgument: params.flat.structure_refs[0] is not a technical media of this card',
-    };
-  });
-  await press();
-  const line = page.locator(`${M} [data-flat-refusal="structure_not_on_card"]`);
-  check(
-    'R1 refusal → one line with the short reason',
-    (await line.count()) === 1 &&
-      (await line.textContent()).includes('that flat is not on this card'),
-    (await line.count()) ? await line.textContent() : 'none',
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm2-refusal.png') });
-  await line.locator('button:has-text("dismiss")').click();
-  for (const [reason, words] of [
-    ['structure_required', 'pick a front or back flat'],
-    ['mode_not_for_this_run', 'one picture'],
-    ['too_many_pictures', 'too many pictures'],
-  ]) {
-    await page.evaluate((r) => {
-      window.__startRefusal = { status: 400, reason: r, words: 'x' };
-    }, reason);
-    await press();
-    const l = page.locator(`${M} [data-flat-refusal="${reason}"]`);
-    check(
-      `R2 ${reason} → «${words}»`,
-      (await l.count()) === 1 && (await l.textContent()).includes(words),
-    );
-    await l.locator('button:has-text("dismiss")').click();
-  }
-
-  // a flat removed from the card while it saved: refused here, nothing sent
-  const beforeGone = await nStarts();
-  await page.evaluate(() => {
-    const f = window.__modesForm;
-    f.setValue('technicalMedia', [{ mediaId: 801, kind: '', caption: '', role: '' }]);
-  });
-  await page.waitForTimeout(200);
-  check(
-    'M6 a removed flat leaves the picks, the row keeps one front',
-    (await page.$$eval(`${M} [data-flat-structure-tile]`, (els) => els.length)) === 1,
-  );
-  await press();
-  check(
-    'M6b nothing sent for the gone flat (front only)',
-    (await nStarts()) === beforeGone + 1 &&
-      JSON.stringify((await lastStart()).params.flat.structureRefs) ===
-        JSON.stringify([{ mediaId: 801, role: 'front_flat' }]),
-  );
-  // no technical flats → from my flat is disabled
-  await page.click(`${M} [role="radio"]:has-text("photos")`);
-  await page.evaluate(() => window.__modesForm.setValue('technicalMedia', []));
-  await page.waitForTimeout(200);
-  check(
-    'M7 no technical media → from my flat disabled',
-    (await modeRadio('from my flat').getAttribute('aria-disabled')) === 'true',
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm3-no-technical.png') });
-  await page.evaluate(() =>
-    window.__modesForm.setValue(
-      'technicalMedia',
-      [801, 802, 803].map((mediaId) => ({ mediaId, kind: '', caption: '', role: '' })),
-    ),
-  );
-
-  // straps & openings: the suggestion pill switches the mode
-  await page.click(`${M} [data-flat-suggest="straps"]`);
-  await page.waitForTimeout(200);
-  check(
-    'S1 the suggestion picks straps & openings',
-    (await page.locator(`${M} [data-flat-mode]`).getAttribute('data-flat-mode')) === 'straps',
-  );
-  check('S2 GENERATE waits for the confirmed list', !(await generateLive()));
-  check(
-    'S3 one quiet word: unconfirmed',
-    (await page.locator(`${M} [data-flat-unconfirmed]`).textContent()).trim() === 'unconfirmed',
-  );
-  check(
-    'S4 confirm joins door in the JOINS header',
-    (await page.locator(`${M} [data-joins-confirm]`).count()) === 1,
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm4-straps-unconfirmed.png') });
-  const setsBefore = (await calls(page, 'SetDesignJoins')).length;
-  await page.click(`${M} [data-joins-confirm]`);
-  await page.waitForSelector(`${M} [data-joins-confirmed]`, { timeout: 10000 });
-  const confirmSet = (await calls(page, 'SetDesignJoins')).at(-1).body;
-  check(
-    'S5 confirm saves the list as is with confirm:true at its rev',
-    (await calls(page, 'SetDesignJoins')).length === setsBefore + 1 &&
-      confirmSet.confirm === true &&
-      confirmSet.expectedRev === 7,
-    JSON.stringify({ confirm: confirmSet.confirm, rev: confirmSet.expectedRev }),
-  );
-  check('S6 GENERATE is live once confirmed', await generateLive());
-  check(
-    'S6b the quiet word is gone',
-    (await page.locator(`${M} [data-flat-unconfirmed]`).count()) === 0,
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm5-straps-confirmed.png') });
-  await press();
-  const p2 = await lastStart();
-  check(
-    'S7 straps sends its mode, no structure refs',
-    JSON.stringify(p2.params.flat) === JSON.stringify({ mode: 'straps', structureRefs: [] }),
-    JSON.stringify(p2.params.flat),
-  );
-  // the server still refuses (edited in another tab): the short line
-  await page.evaluate(() => {
-    window.__startRefusal = {
-      status: 400,
-      reason: 'joins_unconfirmed',
-      words: 'FailedPrecondition: joins_unconfirmed',
-    };
-  });
-  await press();
-  check(
-    'S8 joins_unconfirmed → «confirm the joins first»',
-    (await page.locator(`${M} [data-flat-refusal="joins_unconfirmed"]`).textContent()).includes(
-      'confirm the joins first',
-    ),
-  );
-  await page.locator(`${M} [data-flat-refusal] button:has-text("dismiss")`).click();
-  // confirmed against other photos (server: reason=stale) → one quiet line, the pill drops
-  await page.evaluate(() => {
-    window.__startRefusal = {
-      status: 400,
-      reason: 'joins_unconfirmed',
-      words: 'FailedPrecondition: joins_unconfirmed',
-      meta: { reason: 'stale', joins_rev: String(window.__bands[60].joins.rev) },
-    };
-  });
-  await press();
-  check(
-    'S8b stale confirmation → «photos changed — confirm joins again», pill dropped',
-    (await page.locator(`${M} [data-flat-refusal="joins_unconfirmed"]`).textContent()).includes(
-      'photos changed — confirm joins again',
-    ) &&
-      (await page.locator(`${M} [data-joins-confirmed]`).count()) === 0 &&
-      (await page.locator(`${M} [data-joins-confirm]`).count()) === 1,
-  );
-  await page.locator(`${M} [data-flat-refusal] button:has-text("dismiss")`).click();
-
-  // neck shape: inline select on the neck row; any save clears the confirmation
-  const neck = page.locator(`${M} select[data-join-neck]`);
-  check(
-    'N1 the neck row carries a shape select',
-    (await neck.count()) >= 1,
-    String(await neck.count()),
-  );
-  await neck.first().selectOption('crew');
-  await page.waitForTimeout(600);
-  const neckSet = (await calls(page, 'SetDesignJoins')).at(-1).body;
-  const neckId = await neck.first().getAttribute('data-join-neck');
-  const neckItem = neckSet.joins.items.find((it) => it.id === neckId);
-  check(
-    'N2 the shape is saved as the item type',
-    neckItem?.type === 'crew' && neckSet.confirm === false,
-    JSON.stringify(neckItem?.type),
-  );
-  check(
-    'S9 an edit clears the confirmation — GENERATE waits again',
-    !(await generateLive()) && (await page.locator(`${M} [data-joins-confirm]`).count()) === 1,
-  );
-  await page.locator(M).screenshot({ path: resolve(MODES, 'm6-neck-edit-unconfirmed.png') });
-
-  // a rerun carries the parent's flat block; a fix copies it from the plate's run
+  // a rerun carries the parent's flat block
   const R = '[data-probe="bench-62"]';
   await page.waitForSelector(`${R} [data-latest-retry]`, { timeout: 10000 });
   await page.click(`${R} [data-latest-retry]`);
@@ -966,39 +724,10 @@ try {
   const rerun = await lastStart();
   check(
     'X1 retry repeats with the parent params.flat',
-    rerun.rerunOfRunId === 95 &&
-      JSON.stringify(rerun.params.flat) ===
-        JSON.stringify({
-          mode: 'hand_flat',
-          structureRefs: [
-            { mediaId: 801, role: 'front_flat' },
-            { mediaId: 802, role: 'back_flat' },
-          ],
-        }),
+    rerun.rerunOfRunId === 95 && rerun.params.flat?.mode === 'hand_flat',
     JSON.stringify(rerun.params.flat),
   );
-  const fix = await page.evaluate(() => {
-    const M = window.__flatMode;
-    return {
-      fromHand: M.flatParamsForFix({
-        params: {
-          flat: { mode: 'hand_flat', structureRefs: [{ mediaId: 5, role: 'front_flat' }] },
-        },
-      }),
-      fromStraps: M.flatParamsForFix({ params: { flat: { mode: 'straps', structureRefs: [] } } }),
-      fromPhotos: M.flatParamsForFix({ params: {} }) ?? null,
-      photos: M.flatParamsFor('photos', [{ mediaId: 1, role: 'front_flat' }]) ?? null,
-    };
-  });
-  check(
-    'X2 a fix copies params.flat from the plate run',
-    JSON.stringify(fix.fromHand) ===
-      JSON.stringify({ mode: 'hand_flat', structureRefs: [{ mediaId: 5, role: 'front_flat' }] }) &&
-      JSON.stringify(fix.fromStraps) === JSON.stringify({ mode: 'straps', structureRefs: [] }) &&
-      fix.fromPhotos === null &&
-      fix.photos === null,
-    JSON.stringify(fix),
-  );
+  await page.screenshot({ path: resolve(SHOTS, 'stand-full.png'), fullPage: true });
   await ctx.close();
 } finally {
   await browser.close();

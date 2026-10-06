@@ -13,6 +13,8 @@ import type { OutputPlan } from './run-gallery';
  *
  * The pick is the designer's per run, kept in this browser (localStorage, best effort): it writes
  * nothing. A sheet already cut on the server is the pick, always — the local one is then ignored.
+ * Since 82-INPUT-REDESIGN the pick is made by a three-tap quiz (`candidate-quiz.tsx`), and the
+ * candidates never stand on the bench as tiles; «none of these» is remembered as a rejection.
  */
 
 export type FlatCandidates = {
@@ -20,6 +22,8 @@ export type FlatCandidates = {
   ids: number[];
   /** The picked one; 0 = none yet. */
   picked: number;
+  /** The quiz ended on «none of these» (this browser): no sheet is picked, none is cut. */
+  rejected: boolean;
   /** The pick is a cut sheet (server truth): it cannot be changed here. */
   cut: boolean;
   /** The bench cards of the picked candidate's family (its edits, its «save as new» siblings) —
@@ -81,8 +85,24 @@ function readPicks(card: number): Record<string, number> {
   return picks;
 }
 
+/** «none of these» is stored as -1; `clearCandidatePick` asks again. */
+const NONE_PICKED = -1;
+
+export function rejectCandidates(card: number, runId: number): void {
+  writePick(card, runId, NONE_PICKED);
+}
+
+export function clearCandidatePick(card: number, runId: number): void {
+  writePick(card, runId, 0);
+}
+
 export function pickCandidate(card: number, runId: number, pictureId: number): void {
-  if (card <= 0 || runId <= 0 || pictureId <= 0) return;
+  if (pictureId <= 0) return;
+  writePick(card, runId, pictureId);
+}
+
+function writePick(card: number, runId: number, pictureId: number): void {
+  if (card <= 0 || runId <= 0) return;
   const next = { ...readPicks(card), [String(runId)]: pictureId };
   cache.set(card, next);
   try {
@@ -122,15 +142,16 @@ export function candidatesOf(
   const origin = originsOf(run?.pictures ?? []);
   const familyOf = (picked: number) => ids.filter((id) => origin(id) === origin(picked));
   const cut = drawn.cards.find((c) => c.members.length > 0)?.picture.id ?? 0;
-  if (cut > 0) return { ids, picked: cut, cut: true, family: familyOf(cut) };
+  if (cut > 0) return { ids, picked: cut, cut: true, rejected: false, family: familyOf(cut) };
   // The stored pick may since have been edited (a head now stands in its place) or got a «save as
   // new» sibling: it is resolved through its family, never lost.
   const stored = picks[String(run?.id ?? 0)] ?? 0;
-  if (stored <= 0) return { ids, picked: 0, cut: false, family: [] };
+  if (stored <= 0)
+    return { ids, picked: 0, cut: false, rejected: stored === NONE_PICKED, family: [] };
   const picked = ids.includes(stored)
     ? stored
     : ids.find((id) => origin(id) === origin(stored)) ?? 0;
-  return { ids, picked, cut: false, family: picked ? familyOf(picked) : [] };
+  return { ids, picked, cut: false, rejected: false, family: picked ? familyOf(picked) : [] };
 }
 
 export function isGrey(picture: common_DesignPicture): boolean {

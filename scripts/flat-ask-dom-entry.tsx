@@ -1,10 +1,11 @@
-// DOM-стенд `flat-custom-probe.mjs` (гейт волны 3, W1 / W8): НАСТОЯЩИЙ `FlatRunRow` над настоящим
+// DOM-стенд `flat-ask-probe.mjs` (82-INPUT-REDESIGN, 06.10): НАСТОЯЩИЙ `FlatRunRow` над настоящим
 // `useDesignBand`, сеть подменена одним слоем (`api/api` → `window.__api[метод]`, вызовы пишутся в
 // `window.__calls`). Форма карточки несёт минимум доски (описание + категория), автосейва нет
 // (`AUTOSAVE_OFF` → flush `off`, прогон пропускается) — GENERATE доходит до `StartDesignRun`.
-//
-// `window.__probe.setCard(n)` меняет карточку у ЖИВОГО ряда (без перемонтирования), как страница,
-// которая держит ряд и меняет ему `techCardId`.
+//   · карточка 31 — пустые стороны, деталь `pocket` (заперта до видов);
+//   · карточка 32 — FRONT и BACK заполнены, деталь `collar` пуста → `views again` + деталь открыта;
+//   · карточка 33 — тот же верстак, те же id: ряд без пересева унёс бы сюда деталь карточки 32.
+// `window.__probe.setCard(n)` меняет карточку у ЖИВОГО ряда (без перемонтирования).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
@@ -23,17 +24,46 @@ declare global {
   }
 }
 
-const bench = ['front', 'back', 'side_l', 'side_r'].map((viewKey, i) => ({
-  id: i + 1,
-  viewKey,
-  kind: 'flat',
-  pictureId: 0,
-  slotRev: 1,
-}));
-const band = { bench, runs: [], totalRuns: 0 } as unknown as GetDesignBandResponse;
+const SIDES = ['front', 'back', 'side_l', 'side_r'];
+const pic = (id: number, runId: number) => ({ id, runId, kind: 'flat', media: { id: id + 1000 } });
+
+const bands: Record<number, GetDesignBandResponse> = {
+  31: {
+    bench: [
+      ...SIDES.map((viewKey, i) => ({
+        id: i + 1,
+        viewKey,
+        kind: 'flat',
+        pictureId: 0,
+        slotRev: 1,
+      })),
+      { id: 11, viewKey: 'detail', detailName: 'pocket', kind: 'flat', pictureId: 0, slotRev: 1 },
+    ],
+    runs: [],
+    totalRuns: 0,
+  } as unknown as GetDesignBandResponse,
+  32: {
+    bench: [
+      ...SIDES.map((viewKey, i) => ({
+        id: 101 + i,
+        viewKey,
+        kind: 'flat',
+        pictureId: i < 2 ? 501 + i : 0,
+        picture: i < 2 ? pic(501 + i, 77) : undefined,
+        slotRev: 2,
+      })),
+      { id: 21, viewKey: 'detail', detailName: 'collar', kind: 'flat', pictureId: 0, slotRev: 1 },
+    ],
+    runs: [],
+    totalRuns: 0,
+  } as unknown as GetDesignBandResponse,
+};
+
+// card 33: the same bench as 32 (same slot ids) — a row that does not reseed would carry 32's detail.
+bands[33] = structuredClone(bands[32]);
 
 window.__api = {
-  GetDesignBand: () => structuredClone(band),
+  GetDesignBand: (req) => structuredClone(bands[(req as { techCardId: number }).techCardId]),
   StartDesignRun: (req) => ({
     run: { id: 900, kind: 'flat', status: 'pending', params: (req as { params?: unknown }).params },
   }),
@@ -43,7 +73,6 @@ function Row() {
   const [card, setCard] = useState(31);
   window.__probe = { setCard };
   const { band: current, serverSpeaks, isLoading } = useDesignBand(card);
-  // Ряд НЕ снимается на время чтения полосы новой карточки: смена карточки — у живого ряда.
   return (
     <DesignCapabilityProvider value={serverSpeaks}>
       <div data-probe-state={isLoading ? 'loading' : 'ready'} data-card={card}>

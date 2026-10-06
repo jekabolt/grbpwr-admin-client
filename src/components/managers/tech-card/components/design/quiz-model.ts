@@ -186,7 +186,7 @@ export function clarifyOf(
     // Уточнение — не своё решение: ключа нет, оно никого не вытесняет (E1).
     decisionKey: '',
     // 96: уточнение вопроса про картинку — про ту же картинку (рамка на доске не гаснет).
-    ...(q.mediaId ? { mediaId: q.mediaId } : {}),
+    mediaId: q.mediaId || undefined,
   };
 }
 
@@ -212,6 +212,7 @@ function edgeExceptionsOf(q: DesignQuizQuestion): DesignQuizQuestion {
     clarifyQuestion: '',
     clarifyOptions: [],
     decisionKey: EDGE_EXCEPTIONS_KEY,
+    mediaId: undefined,
   };
 }
 
@@ -256,6 +257,7 @@ export function forgetRow(q: DesignQuizQuestion): DesignQuizAnswer {
     skipped: false,
     answeredAt: undefined,
     stale: undefined,
+    staleChanges: undefined,
   };
 }
 

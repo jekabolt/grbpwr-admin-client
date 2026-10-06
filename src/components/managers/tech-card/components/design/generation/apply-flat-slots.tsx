@@ -1,13 +1,17 @@
-import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignPicture,
+  common_DesignRun,
+} from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 
 import { AskModal } from '../core';
 import { applyPlan, type SplitPiece } from '../render/apply-split';
 import { benchSides } from '../render/model';
 import { designKeys, useDesignWrites } from '../use-design-band';
-import { isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../views';
+import { ACTIVE_VIEWS, isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../views';
 import { isPictureHidden } from '../visibility';
 
 /**
@@ -48,17 +52,61 @@ export function flatSlotSteps(band: GetDesignBandResponse, pieces: SplitPiece[])
   return applyPlan(benchSides(band, 'flat'), pieces).filter((s) => s.act === 'place');
 }
 
+/**
+ * ═══ THE CUT GOES INTO THE SLOTS BY ITSELF (82-INPUT-REDESIGN §4.1) ═════════════════════════════
+ * `views again` asks for the four slots to be drawn again, so the newest flat run's cut is applied
+ * without a press — once per run (localStorage, best effort: a reload or a second tab does not do
+ * it twice), only when its pieces cover all four sides, and only for a run that finished within
+ * `AUTO_APPLY_MS` (an old run opened later is never written behind the person's back). A filled
+ * side is overwritten; a refusal leaves the door `apply flat slots` as it always was.
+ */
+const AUTO_KEY = 'grbpwr.design.flat.autoapply';
+const AUTO_APPLY_MS = 30 * 60_000;
+
+function claimAutoApply(runId: number): boolean {
+  if (runId <= 0) return false;
+  let ids: number[] = [];
+  try {
+    const v = JSON.parse(window.localStorage.getItem(AUTO_KEY) || '[]') as unknown;
+    if (Array.isArray(v)) ids = v.map(Number).filter((n) => n > 0);
+  } catch {
+    /* no storage — the press below still happens once in this mount */
+  }
+  if (ids.includes(runId)) return false;
+  try {
+    window.localStorage.setItem(AUTO_KEY, JSON.stringify([...ids, runId].slice(-200)));
+  } catch {
+    /* best effort */
+  }
+  return true;
+}
+
+export function autoApplies(
+  run: Pick<common_DesignRun, 'id' | 'createdAt' | 'completedAt'> | null | undefined,
+  usable: readonly SplitPiece[],
+  now = Date.now(),
+): boolean {
+  if (!run || (run.id ?? 0) <= 0) return false;
+  const views = new Set(usable.map((p) => p.view));
+  if (!ACTIVE_VIEWS.every((v) => views.has(v))) return false;
+  const at = Date.parse(run.completedAt || run.createdAt || '');
+  return Number.isFinite(at) && now - at <= AUTO_APPLY_MS;
+}
+
 export function ApplyFlatSlots({
   band,
   techCardId,
   pieces,
   disabled,
+  autoRun = null,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   /** The cut pieces standing on the bench, in the row's order. */
   pieces: readonly common_DesignPicture[];
   disabled?: boolean;
+  /** The newest flat views run these pieces were cut from — applied once without a press. */
+  autoRun?: common_DesignRun | null;
 }): JSX.Element | null {
   const qc = useQueryClient();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -67,9 +115,6 @@ export function ApplyFlatSlots({
 
   const usable = useMemo(() => flatPiecesOf(pieces), [pieces]);
   const steps = useMemo(() => flatSlotSteps(band, usable), [band, usable]);
-
-  // Hidden while nothing would be written — but never mid-gesture, so the pending state stays seen.
-  if (!steps.length && !busy) return null;
 
   /**
    * `approved` — WHAT THE PERSON AGREED TO LOSE, per side: the occupant's id (0 = an empty side) as
@@ -110,6 +155,18 @@ export function ApplyFlatSlots({
     if (reask) setAsking(true);
   };
   const approve = () => new Map(steps.map((s) => [s.view, s.displaces?.id ?? 0] as const));
+
+  const autoId = autoRun?.id ?? 0;
+  const autoNow = !disabled && !busy && steps.length > 0 && autoApplies(autoRun, usable);
+  useEffect(() => {
+    if (!autoNow || !claimAutoApply(autoId)) return;
+    void run(approve());
+    // `run` and `approve` read this render's steps; the claim makes it once per run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNow, autoId]);
+
+  // Hidden while nothing would be written — but never mid-gesture, so the pending state stays seen.
+  if (!steps.length && !busy) return null;
 
   const losing = steps.filter((s) => s.displaces);
   const words = (list: typeof steps) => list.map((s) => viewLabel(s.view)).join(', ');

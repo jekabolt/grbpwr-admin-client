@@ -37,7 +37,8 @@ import {
   useBenchChoice,
 } from './bench-store';
 import { ApplyFlatSlots } from './apply-flat-slots';
-import { candidatesOf, pickCandidate, usePicks } from './candidates';
+import { CandidateQuiz, resetCandidateQuiz } from './candidate-quiz';
+import { candidatesOf, clearCandidatePick, usePicks } from './candidates';
 import { InlineSplit, useKeptWhole } from './inline-split';
 import {
   benchPlan,
@@ -843,16 +844,38 @@ export function LatestGeneration({
       onSplit={onSplit}
       workbench
       plan={tilePlan ?? undefined}
-      candidates={
-        candidates && !candidates.picked && !writesOff
-          ? {
-              ...candidates,
-              onPick: (pictureId: number) => pickCandidate(techCardId, runId, pictureId),
-            }
-          : undefined
-      }
     />
   );
+  /* ═══ WHICH SHEET (82-INPUT-REDESIGN §4): a candidate run with no pick draws the quiz, never the
+     sheets — or, after «none of these», one line and the door back into the quiz. */
+  const choosing = kind === 'flat' && !bare && !!candidates && !candidates.picked;
+  const chooser =
+    choosing &&
+    candidates &&
+    run &&
+    (candidates.rejected ? (
+      <span className='flex flex-wrap items-center gap-1.5' data-candidates-none={runId}>
+        <Text size='micro' variant='label' component='span'>
+          none of the {candidates.ids.length} sheets fit · generate the views again, or
+        </Text>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          data-candidates-again=''
+          disabled={writesOff}
+          onClick={() => {
+            resetCandidateQuiz(runId);
+            clearCandidatePick(techCardId, runId);
+          }}
+        >
+          choose again ›
+        </Button>
+      </span>
+    ) : (
+      <CandidateQuiz techCardId={techCardId} run={run} ids={candidates.ids} disabled={writesOff} />
+    ));
   /** Every picture of the row went into an inline editor: no empty grid under them. */
   const tilesLeft = isRunLive(run) || (tilePlan?.cards.length ?? 0) > 0;
   const inline = inlineSheets.map(({ picture, views }) => (
@@ -904,6 +927,15 @@ export function LatestGeneration({
                   techCardId={techCardId}
                   pieces={flatPieces}
                   disabled={writesOff}
+                  /* 82 §4.1: the newest flat run's cut lands in the four slots by itself, once. */
+                  autoRun={
+                    runId === newestId &&
+                    !bare &&
+                    !writesOff &&
+                    (run.params?.views ?? []).length >= 4
+                      ? run
+                      : null
+                  }
                 />
               )}
               {headerCut && !isRunLive(run) && <PutPiecesIntoSides sheet={headerCut} />}
@@ -944,7 +976,9 @@ export function LatestGeneration({
               {!bare && tilesLeft && outputs}
               {broughtBlock}
             </>
-          ) : bare ? null : (
+          ) : bare ? null : choosing ? (
+            chooser
+          ) : (
             <>
               {inline}
               {tilesLeft && outputs}

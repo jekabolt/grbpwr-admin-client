@@ -112,7 +112,7 @@ export function liveStructure(
 
 /**
  * THE LIST ASKS FOR «STRAPS & OPENINGS»: a strap or an opening that continues into another part of
- * the garment (a strap running over the shoulder into the back edge). Only a suggestion — a pill.
+ * the garment (a strap running over the shoulder into the back edge). Since 82 it picks the route.
  */
 export function suggestsStraps(joins: common_DesignJoins | null | undefined): boolean {
   const items = joins?.items ?? [];
@@ -141,7 +141,8 @@ export const FLAT_REFUSAL_WORDS: Record<string, string> = {
   structure_malformed: 'one flat per side',
   structure_not_on_card: 'that flat is not on this card',
   structure_gone: 'that flat was removed',
-  joins_unconfirmed: 'confirm the joins first',
+  joins_unconfirmed: 'answer the construction questions first',
+  views_first: 'generate the views first',
   mode_not_for_this_run: 'this mode draws all the views on one picture only',
   too_many_pictures: 'too many pictures for one run',
   role_reserved: 'that role is reserved for flats',
@@ -153,7 +154,7 @@ export function flatRefusalWords(
 ): string | null {
   // The confirmation was made against other photos or another garment note (server `stale`).
   if (reason === 'joins_unconfirmed' && meta?.reason === 'stale')
-    return 'photos changed — confirm joins again';
+    return 'the photos changed — one more look';
   return reason ? FLAT_REFUSAL_WORDS[reason] ?? null : null;
 }
 

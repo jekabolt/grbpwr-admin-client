@@ -3,18 +3,17 @@ import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-ht
 import { useSnackBarStore } from 'lib/stores/store';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
-import { Pill } from 'ui/components/pill';
+import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
-import { ViewSwitch } from 'ui/components/view-switch';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
 
+import { AskConstruction, finishAsk, useAskBusy } from './ask-construction';
 import {
   flushAllowsRun,
   flushRefusalSentence,
@@ -24,113 +23,96 @@ import {
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
 import { useMoodMinimumGate } from './chain-rail';
-import { ControlLabel, GROUP_GAP } from './core';
+import { ControlLabel } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
-import { FlatCustom } from './flat-custom';
 import {
   confirmedNow,
   joinsSavesSettled,
-  joinsUnsaved,
-  markConfirmStale,
-  useJoinsUnsaved,
+  rereadForStale,
+  saveJoinsConfirmed,
+  useJoinsRead,
 } from './flat-joins';
 import {
-  flatChoiceSummary,
   flatDraftOf,
   flatInputBusy,
-  isDefaultFlatChoice,
   patchFlatInput,
   readFlatInput,
-  setFlatModeDraft,
-  tickDetail,
-  tickView,
+  rememberFlatDraft,
   useFlatInput,
   type FlatAsk,
-  type FlatLayout,
 } from './flat-input';
 import {
-  DEFAULT_FLAT_MODE,
-  FLAT_MODE_WORD,
   autoStructure,
   flatParamsFor,
   flatRefusalWords,
   liveStructure,
   moodPictureIds,
   pickStructure,
-  suggestsStraps,
   type FlatMode,
-  type StructurePick,
   type StructureRole,
 } from './flat-mode';
+import {
+  ROUTE_WHY,
+  ROUTE_WORD,
+  VIEWS_ORDER,
+  detailFlatSlotIds,
+  flatTargets,
+  modeOfRoute,
+  routeOf,
+  settleTarget,
+  targetSlotId,
+  type FlatRoute,
+} from './flat-route';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { useStartRun } from './generation/use-generation';
+import { pendingQuestions } from './joins-questions';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, type BoardItem } from './mood-board';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
-import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
 import type { CalloutLike } from './render/what-model-gets';
-import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
+import { staleShown } from './stale-details';
+import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
 import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
 /**
- * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
+ * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (82-INPUT-REDESIGN, 06.10) ═══════════════════════════
  *
- *   GENERATE · WHAT THE MODEL GETS ▸
+ *   GENERATE · target ▾ · (from my flat) · route · what the model gets ▸
  *
- * Здесь стояла ОТДЕЛЬНАЯ секция `generation — flat`, потом — подвал `the flat run` с линейкой
- * группы, чипами видов, переключателем раскладки и рядом. Макет (`_step-flat.js`, SPEC п.7) знает
- * один блок и один ряд: то, что модели дают, и то, что у неё просят, — один запрос.
+ * Owner request 8: «always 4 views; first press = the views sheet; drop one picture / per view; drop
+ * FRONT/BACK/SIDE toggles; a dropdown by GENERATE: views again first, then un-generated details; no
+ * mode switch — route automatic, from-my-flat explicit; JOINS off the screen, 1–3 questions only
+ * when unsure / straps; no confirm button».
+ *   · `target ▾` (`flatTargets`): `views` / `views again`, then each detail not drawn yet (or stale
+ *     and not kept) — disabled until FRONT and BACK hold a picture;
+ *   · `from my flat` — a quiet toggle, drawn only when the card has technical flats and the target
+ *     is the views; never automatic. On: the structure tiles under the row (front / back per flat);
+ *   · the route pill — not a button: `photos` · `straps & openings` · `from my flat` · `detail`,
+ *     chosen by `routeOf`, with the reason in its title;
+ *   · above the row, while the list asks something: ASK · construction (`ask-construction.tsx`);
+ *     GENERATE waits for it, with `skip all ›`; while the list is being read GENERATE waits with
+ *     `generate without it ›`.
  *
- * ПОЧЕМУ ОТДЕЛЬНЫЙ КОМПОНЕНТ, А НЕ ВСТАВКА В `ReferencesSection`. Секция референсов уже несёт
- * два десятка хуков и приёмник рекола (`RecalledRunPrompt`), который при размонтировании стирает
- * выбор из реестра; всякий условный хук в её теле — риск сдвинуть их порядок. Органы прогона
- * живут своим состоянием и монтируются ВНУТРИ той же `Section`.
- *
- * ⚠ РЯД ВИДОВ — ПРОДУКТОВЫЙ, У МАКЕТА ЕГО НЕТ. Прототипный прогон флэта возвращает «до двух
- * свободных флэтов с видом» из фикстур; продуктовый `StartDesignRun` требует `params.views[]` —
- * какие стороны рисовать — и `layout`. Спрятать выбор и слать всегда `front, back` значило бы
- * решать за человека, за что он платит. С волны 03.10 (T18/T19) выбор
- * стоит за тихой дверью `custom` рядом с GENERATE (`flat-custom.tsx`), а умолчание — четыре
- * стороны одним листом (`DEFAULT_FLAT_*`, `flat-input.ts`).
- *
- * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35). Здесь стояла строка «US$… · last flat run · priced by the
- * server when the run starts» — цена ПОСЛЕДНЕГО прогона под видом цены следующего. Владелец:
- * «убрать полностью». Цена прогона живёт в истории, по факту; ряд запуска о деньгах молчит.
+ * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35): цена прогона живёт в истории, по факту.
  */
 
 /**
- * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ ОБОИХ РЯДОВ — VIEWS И ЗАПУСКА (r3 п.5) ═══════════════════════════
- *
- * Владелец, дословно: «после WORDS очень много кнопок разного размера с минимальными отступами …
- * сделать по уму». «Разного размера» — это измеримо и это была правда: `Button size='sm'` (рамка +
- * `py-1` + `leading-4`) ростом 26px стояла вплотную к `Chip` и к сегменту `ViewSwitch` ростом 19px,
- * и тогдашние три ряда органов читались как три разных класса вещей. Средний ряд (источники) снят
- * волной 25.09 (T24, D-20), рядов два: VIEWS и запуск.
- *
- * ЭТАЛОН ВЫБРАН НЕ ГОЛОСОВАНИЕМ: 26px — рост `GENERATE`, а её разметку держит общий ряд
- * (`render/generate-row.tsx`, зона G1), то есть подогнать надо было ВСЁ ОСТАЛЬНОЕ к ней, а не
- * наоборот. Число живёт здесь одно, и ленты берут его отсюда.
- *
- * ⚠ ИНЛАЙНОМ, А НЕ КЛАССОМ, И ЭТО НЕ НЕБРЕЖНОСТЬ. Класса на 26px в tailwind нет (`h-6` = 24), а
- * произвольного (`h-[26px]`) НЕТ В СОБРАННОМ CSS, если его не было в дереве на момент сборки —
- * стенд читает именно собранный CSS и намерил бы неправильную геометрию, показав зелёное там, где
- * у человека разъехалось (память `probe-served-a-stale-bundle`).
+ * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ РЯДА (r3 п.5) ═══════════════════════════════════════════════════════
+ * 26px — рост `GENERATE` (`render/generate-row.tsx`); остальное подгоняется к ней. Инлайном, а не
+ * классом: произвольного класса нет в собранном CSS, если его не было в дереве при сборке.
  */
 export const ROW_CONTROL_PX = 26;
 export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
 
-const LAYOUT_OPTIONS = [
-  { value: 'one' as const, label: 'one picture', hint: 'all the ticked views drawn into one file' },
-  {
-    value: 'per_view' as const,
-    label: 'a picture per view',
-    hint: 'each ticked view comes back on its own',
-  },
-];
-type Layout = FlatLayout;
+/** The lock while the first list is read — the one `generate without it ›` passes. */
+const READING = 'reading the construction';
+
+/** The native select of the row, styled as the neck-shape select of the joins list. */
+const SELECT_QUIET =
+  'shrink-0 cursor-pointer appearance-none border-0 bg-transparent px-0 text-micro uppercase tracking-label text-textColor underline hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:text-labelColor disabled:no-underline';
 
 const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
   { role: 'front_flat', label: 'front' },
@@ -170,6 +152,11 @@ export function flatSnapshot(
   now: TechCardFormData,
   detailSlotIds: readonly number[],
   mode: FlatMode,
+  /**
+   * THE TARGET AND THE ROUTE (82-INPUT-REDESIGN §3.1): a different target or route is a different
+   * intent; a detail run's FRONT/BACK slots travel with their pictures (owner 06.10, answer 3).
+   */
+  intent?: { target: string; route: string; flatSlotIds?: readonly number[] },
 ): unknown {
   const refs = (band?.references ?? [])
     .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
@@ -210,6 +197,16 @@ export function flatSnapshot(
     // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
     // «from my flat» reads no list: a background read moving the rev is not a new intent there.
     joins: mode === 'hand_flat' ? null : [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
+    ...(intent
+      ? {
+          target: intent.target,
+          route: intent.route,
+          flatSlots: (intent.flatSlotIds ?? []).map((id) => [
+            id,
+            (band?.bench ?? []).find((b) => (b.id ?? 0) === id)?.pictureId ?? 0,
+          ]),
+        }
+      : {}),
   };
 }
 
@@ -304,54 +301,38 @@ export function FlatRunRow({
   const qc = useQueryClient();
   const startRun = useStartRun(techCardId);
   const { showMessage } = useSnackBarStore();
-  /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
-     рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
-     выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
-  const [initialDraft] = useState(() => flatDraftOf(techCardId));
-  const [views, setViews] = useState<Record<string, boolean>>(initialDraft.views);
-  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(initialDraft.detailTicks);
-  /** Виды или детали, не вместе (T07): одна галка снимает другую сторону. */
-  const applyTicks = (next: {
-    views: Record<string, boolean>;
-    detailTicks: Record<number, boolean>;
-  }) => {
-    setViews(next.views);
-    setDetailTicks(next.detailTicks);
-  };
-  /** «one picture» по умолчанию (T23, D-19; T19): виды приходят одним листом и режутся сами (`autoSplit`). */
-  const [layout, setLayout] = useState<Layout>(initialDraft.layout);
-  /** The flat mode (`flat-mode.ts`): photos by default; the others behind `custom`. */
-  const [mode, setMode] = useState<FlatMode>(initialDraft.mode);
-  /** «from my flat»: which technical flat is the front, which the back. */
-  const [structure, setStructure] = useState<StructurePick[]>(initialDraft.structure);
-  /** Дверь `custom` у GENERATE (T18): закрыта при каждом монтировании — умолчание не просит решений. */
-  const [customOpen, setCustomOpen] = useState(false);
-  /* ЧЕРНОВИК ПРИНАДЛЕЖИТ КАРТОЧКЕ (гейт волны 3, W1): ряд, не перемонтированный при смене
-     карточки, пересеивает выбор с новой карточки (её запрос в полёте или умолчание) прямо в
-     отрисовке — иначе `per picture` одной карточки уходил бы платным прогоном другой. */
+
+  /* ЧЕРНОВИК — С ЗАПРОСА В ПОЛЁТЕ, ИНАЧЕ ПАМЯТЬ ВКЛАДКИ (ревью раунда 3, m2; гейт волны 3, W1): ряд,
+     вернувшийся после смены шага, рисует то, за что уже платят; ряд, не перемонтированный при смене
+     карточки, пересеивает выбор с новой карточки прямо в отрисовке. */
+  const [draft, setDraftState] = useState<FlatAsk>(() => flatDraftOf(techCardId));
   const [draftCard, setDraftCard] = useState(techCardId);
   if (draftCard !== techCardId) {
-    const seed = flatDraftOf(techCardId);
     setDraftCard(techCardId);
-    setViews(seed.views);
-    setDetailTicks(seed.detailTicks);
-    setLayout(seed.layout);
-    setMode(seed.mode);
-    setStructure(seed.structure);
-    setCustomOpen(false);
+    setDraftState(flatDraftOf(techCardId));
   }
-  /* The JOINS group reads the mode (its `confirm joins` door stands only for straps & openings). */
-  useEffect(() => {
-    setFlatModeDraft(techCardId, mode);
-  }, [techCardId, mode]);
-  useEffect(() => () => setFlatModeDraft(techCardId, DEFAULT_FLAT_MODE), [techCardId]);
-  const customChoice = !isDefaultFlatChoice({ views, detailTicks, layout, mode, structure });
-  const bench = useMemo(() => readBench(band, 'flat'), [band]);
+  const setDraft = (next: FlatAsk) => {
+    setDraftState(next);
+    rememberFlatDraft(techCardId, next);
+  };
 
-  const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
-  const tickedDetails = bench.details.filter((d) => (d.id ?? 0) > 0 && detailTicks[d.id ?? 0]);
-  const ticked: string[] = [...tickedSides, ...tickedDetails.map(() => DETAIL_VIEW)];
-  const tickedDetailIds: number[] = tickedDetails.map((d) => d.id ?? 0);
+  const bench = useMemo(() => readBench(band, 'flat'), [band]);
+  const drafted = useDrafted();
+
+  /* ═══ TARGET ▾ (§1.1) — views first, then the details not drawn yet. */
+  const targets = useMemo(
+    () =>
+      flatTargets({
+        sides: bench.sides,
+        details: bench.details,
+        nameOf: (d) => displayDetailName(bench.details, d),
+        proposed: (id) => drafted.slotProposed(id),
+        stale: staleShown,
+      }),
+    [bench, drafted],
+  );
+  const target = settleTarget(draft.target, targets);
+  const detailId = targetSlotId(target);
 
   const wholeBench = useMemo(
     () => ({
@@ -362,65 +343,21 @@ export function FlatRunRow({
   );
   const marked = useMemo(() => markedPlatesOf(band, wholeBench), [band, wholeBench]);
 
-  /**
-   * ═══ МИНИМУМ МУДБОРДА — ТА ЖЕ ФРАЗА, ЧТО ЗАПИРАЕТ FLAT НА РЕЛЬСЕ (D-10, контракт `mood-gate`) ══
-   *
-   * Флэт, нарисованный с пустой доски и без категории, — флэт НИЧЕГО. Правило ОДНО и живёт в
-   * `core/mood-gate.ts` (что считается минимумом — картинка на доске, описание, категория — решает
-   * только оно; строки входа REFERENCE доской не считаются). Читает его ОДИН хук рельса
-   * (`useMoodMinimumGate`, заведён под эту кнопку), поэтому фраза отказа дословно та, что запирает
-   * FLAT на рельсе, и кнопка с рельсом не могут разойтись в «почему». Двери — туда, где отказ
-   * чинится: к доске, к описанию, к категории в CARD DETAILS. Открываются `openGateDoor`
-   * (`openStepOf`), а не `revealField`: это не ошибка поля, и красная пульсация после «отведи меня
-   * туда» читалась бы как «там что-то сломано».
-   *
-   * ГЕЙТ ЧИТАЮТ ДВАЖДЫ — в `gateReason` (кнопка и строка под ней) и в `submit` ПОСЛЕ ожидания
-   * сохранения: пока шёл `flush`, доска могла опустеть (правка отменена, другая вкладка сохранила
-   * раньше), и старт сверяется с гейтом, каким он стал. Второе чтение — из ФОРМЫ (`getValues`), а
-   * не из снимка отрисовки: ряд к тому моменту может быть размонтирован сменой шага, и снимок
-   * застыл бы на том, что было при щелчке (ревью раунда 2, MAJOR B).
-   *
-   * ДВЕРИ — ГЕЙТА, ПО ОДНОЙ НА НЕДОСТАЮЩУЮ ЧАСТЬ (`doors`, `core/chain.ts`): слова и адреса живут
-   * там же, где у рельса, и копии здесь больше нет (ревью m6).
-   */
+  /** МИНИМУМ МУДБОРДА — та же фраза, что запирает FLAT на рельсе (D-10, `core/mood-gate.ts`). */
   const mood = useMoodMinimumGate();
   const moodReason = mood.ok ? null : mood.reason;
   const moodDoors = mood.ok ? [] : mood.doors;
 
-  /**
-   * ═══ СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05) ══════════════
-   *
-   * Прогон читает СОХРАНЁННУЮ карточку: WORDS, засеянные секунду назад, и роль, выбранная только
-   * что, на сервер ещё не уехали, и модель получила бы вчерашний запрос за сегодняшние деньги.
-   * Поэтому GENERATE сначала ждёт `flush` и стартует только при `ok`/`nothing`/`off`; иначе —
-   * фраза контракта (`flushRefusalSentence`) стойкой строкой под рядом, не всплывашкой.
-   */
+  /** СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05). */
   const autosave = useTechCardAutosave();
-  /**
-   * Занятость и отказ — из модульного хранилища карточки (см. `FlatInputState`): вернувшийся после
-   * смены шага ряд видит `starting…` над идущим запросом и не пускает второй щелчок. `busy` держит
-   * GENERATE занятым от щелчка до ответа сервера одним куском — между «сохраняю» и «запускаю» нет
-   * ни кадра живой кнопки (ревью m1).
-   */
   const input = useFlatInput(techCardId);
   const busy = input.run !== null;
-  /**
-   * ИСХОД отказавшего сохранения, а не готовая фраза: фраза собирается при отрисовке, и число полей
-   * в ней — ТЕКУЩЕЕ (`errorsCount` после flush), а не снятое на щелчке, когда провал ещё не был
-   * известен (ревью m2).
-   */
   const refused = input.refused;
-  /* Отказ снимается сам, как только карточка сохранилась: поправленное поле — это и есть ответ на
-     него, и строка отказа («fix 1 field first …») над сохранённой карточкой была бы неправдой. */
   useEffect(() => {
     if (autosave.status === 'saved' || autosave.status === 'idle') {
       patchFlatInput(techCardId, { refused: null });
     }
   }, [autosave.status, techCardId]);
-  /* КАРТОЧКА, КОТОРАЯ БОЛЬШЕ НЕ СОХРАНЯЕТСЯ (утверждена, только для чтения, автосейв выключен), не
-     сохранится и дальше — строка «до следующего сохранения» стояла бы вечно. Почему GENERATE молчит,
-     говорит замок ряда (`gateReason`: «this card is read-only»), второй строки не нужно (ревью раунда 3,
-     m7). Не рисуется с того же кадра, а снимается эффектом — без вспышки. */
   const saveless = !!disabled || autosave.status === 'off';
   useEffect(() => {
     if (saveless && refused !== null) patchFlatInput(techCardId, { refused: null });
@@ -436,18 +373,9 @@ export function FlatRunRow({
             'the card is not saved yet'
           : null;
 
-  /**
-   * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ (ревью m3). `invalid` — к первому полю с ошибкой: проверка громкая
-   * (человек сам попросил показать), путь — первый из `flattenFieldErrors`, показ — `revealField`
-   * (шаг студии он приносит сам). Поле, которого эта вкладка не рисует, и прочие исходы — к чипу
-   * сохранения в шапке (`save-status-chip.tsx`, зона CL-A): его поповер говорит причину целиком.
-   * Сохранять там нечем (O-60, D-59): упавшая запись повторяется сама, а решения — подтвердить
-   * перевод в auxiliary, решить конфликт — ведёт слово чипа рядом с `▾`.
-   */
   const form = useFormContext<TechCardFormData>();
 
-  /* ═══ THE CARD'S TECHNICAL FLATS — what «from my flat» redraws (the server accepts only these). The
-     form is what the next save writes, and GENERATE saves first, so the run sees this same list. */
+  /* ═══ THE CARD'S TECHNICAL FLATS — what «from my flat» redraws (the server accepts only these). */
   const techRows = useWatch({ control: form.control, name: 'technicalMedia' });
   const techIds = useMemo(
     () =>
@@ -466,15 +394,71 @@ export function FlatRunRow({
     }
     return m;
   }, [techCard?.resolvedTechnicalMedia]);
-  const structureNow = mode === 'hand_flat' ? liveStructure(structure, techIds) : [];
-  const chooseMode = (next: FlatMode) => {
-    setMode(next);
-    // The two modes draw all the views on ONE picture; a detail sketch runs photos.
-    if (next !== 'photos') setLayout('one');
-    if (next === 'hand_flat' && liveStructure(structure, techIds).length === 0) {
-      setStructure(autoStructure(techIds));
-    }
+  /** The toggle stands only for the views, and only when the card has a technical flat. */
+  const myFlatOffered = techIds.length > 0 && detailId === 0;
+  const fromMyFlat = myFlatOffered && draft.fromMyFlat;
+  const structureNow = fromMyFlat ? liveStructure(draft.structure, techIds) : [];
+  /** The toggle was on and the card's flats are gone: said, and the route falls back. */
+  const myFlatGone = draft.fromMyFlat && detailId === 0 && techIds.length === 0;
+  const toggleMyFlat = () => {
+    if (fromMyFlat) setDraft({ ...draft, fromMyFlat: false, structure: [] });
+    else
+      setDraft({
+        ...draft,
+        fromMyFlat: true,
+        structure:
+          liveStructure(draft.structure, techIds).length > 0
+            ? liveStructure(draft.structure, techIds)
+            : autoStructure(techIds),
+      });
   };
+
+  /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
+  const route = routeOf({
+    target,
+    fromMyFlat,
+    structure: structureNow.length,
+    joins: band.joins,
+  });
+
+  const writesOff = !!disabled || !speaks;
+  /* ═══ THE LIST: read from the row (the JOINS group left the screen) ═══ */
+  const joinsRead = useJoinsRead(techCardId, band, writesOff);
+  const readsList = route === 'photos' || route === 'straps';
+  const listBuilding = readsList && !band.joins && joinsRead.reading;
+  const questions = useMemo(
+    () => (readsList && !joinsRead.reading ? pendingQuestions(band.joins, route) : []),
+    [readsList, joinsRead.reading, band.joins, route],
+  );
+  const askBusy = useAskBusy(techCardId);
+  /** The stale confirmation is being recovered (§3.3): «the photos changed — one more look». */
+  const [recovering, setRecovering] = useState(false);
+
+  /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте (ревью MAJOR), и пока CLEAR. */
+  const choiceOff = writesOff || busy || input.clearing || recovering;
+  const gateReason = !speaks
+    ? 'this server does not speak the design band yet — nothing can be generated here'
+    : disabled
+      ? 'this card is read-only'
+      : input.clearing || input.rewriting > 0
+        ? 'the prompt is being changed — generate once it is done'
+        : moodReason
+          ? moodReason
+          : recovering
+            ? 'the photos changed — one more look'
+            : listBuilding
+              ? READING
+              : questions.length > 0
+                ? `answer ${questions.length === 1 ? 'the question' : `${questions.length} questions`} first`
+                : askBusy
+                  ? 'saving the answers'
+                  : fromMyFlat && structureNow.length === 0
+                    ? 'pick a front or back flat'
+                    : null;
+
+  /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
+  const cardNow = useRef(techCardId);
+  cardNow.current = techCardId;
 
   const openSaveDoor = async () => {
     if (refused === 'invalid') {
@@ -491,125 +475,31 @@ export function FlatRunRow({
     chip.querySelector<HTMLElement>('[aria-haspopup]')?.click();
   };
 
-  /* ЧИПЫ ДЕТАЛЕЙ, КОТОРЫЕ ПРЕДЛОЖИЛ ЧЕРНОВИК (26.09, O-34): синие, пока слот не принят, — по тому же
-     журналу, что и слот на бенче (`slotProposed`); своего состояния у ряда нет. */
-  const drafted = useDrafted();
-
-  const writesOff = !!disabled || !speaks;
-  /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте: `submit` берёт виды и раскладку
-     на щелчке, и открытые чипы дали бы прогону не то, что на экране (ревью MAJOR). И пока CLEAR
-     снимает роли — промпт в этот момент наполовину старый. */
-  const choiceOff = writesOff || busy || input.clearing;
-  const noViews = ticked.length === 0;
-  const joinsOk = confirmedNow(techCardId, band.joins);
-  /* A JOINS line typed and not saved: the run would read the list without it (photos and straps
-     read the list; «from my flat» does not). */
-  const joinsHeld = useJoinsUnsaved(techCardId) && mode !== 'hand_flat';
-  const modeGate = joinsHeld
-    ? 'unsaved'
-    : mode === 'photos'
-      ? null
-      : tickedDetails.length > 0
-        ? 'this mode draws views, not details'
-        : layout === 'per_view'
-          ? 'this mode draws one picture'
-          : mode === 'hand_flat'
-            ? techIds.length === 0
-              ? 'no technical flat on this card'
-              : structureNow.length === 0
-                ? 'pick a front or back flat'
-                : null
-            : !band.joins
-              ? 'no join list yet'
-              : !joinsOk
-                ? 'confirm the joins first'
-                : null;
-  const strapsSuggested =
-    mode !== 'straps' && !choiceOff && tickedDetails.length === 0 && suggestsStraps(band.joins);
-  /* Ряд (`GenerateRow`) сам спрашивает `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку;
-     ветка ниже остаётся ЗАМКОМ ПРОВОДА: `submit` заперт этой же переменной. */
-  const gateReason = !speaks
-    ? 'this server does not speak the design band yet — nothing can be generated here'
-    : disabled
-      ? 'this card is read-only'
-      : input.clearing || input.rewriting > 0
-        ? 'the prompt is being changed — generate once it is done'
-        : moodReason
-          ? moodReason
-          : noViews
-            ? 'no views ticked — tick at least one'
-            : modeGate;
-
-  /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
-  const cardNow = useRef(techCardId);
-  cardNow.current = techCardId;
-
-  const submit = async () => {
+  /**
+   * GENERATE. `withoutList` — `generate without it ›` while the list is still being read: the photos
+   * route, now. `recovered` — the one automatic retry after a stale confirmation was re-saved (§3.3);
+   * never a second.
+   */
+  const submit = async (opts: { withoutList?: boolean; recovered?: boolean } = {}) => {
     const card = techCardId;
-    if (gateReason || !mood.ok || card <= 0) return;
-    // Занятость — из хранилища В МОМЕНТ щелчка, а не из снимка отрисовки: два щелчка в одном кадре
-    // и щелчок по ряду, вернувшемуся к идущему запросу, отказываются одинаково.
+    // `generate without it ›` passes the list lock only — never another one.
+    const bypass = !!opts.withoutList && gateReason === READING;
+    if ((gateReason && !bypass) || !mood.ok || card <= 0) return;
     if (flatInputBusy(readFlatInput(card))) return;
-    if (mode !== 'hand_flat' && joinsUnsaved(card)) return;
-    /* АВТОСЕЙВ БЫЛ ЖИВ НА ЩЕЛЧКЕ? (ревью раунда 3, m3). Выключенный или уничтоженный автосейв (уход со
-       страницы посреди flush, утверждение) отвечает `off`, а `off` пропускает прогон — и для записи, у
-       которой автосейва нет вовсе, так и надо. Но если на щелчке он был ЖИВ, `off` после ожидания
-       значит «сохранение остановилось»: прогон по несохранённой карточке не стартует. */
     const wasOn = autosave.status !== 'off';
-    // Запрос — то, что на экране В МОМЕНТ щелчка; на время ожидания выбор заперт (`choiceOff`), а
-    // сам выбор лежит в хранилище карточки: ряд, вернувшийся после смены шага, рисует его (m2).
-    const ask: FlatAsk = {
-      views: { ...views },
-      detailTicks: { ...detailTicks },
-      layout,
-      mode,
-      structure: [...structureNow],
-    };
-    const params: common_DesignRunParams = {
-      views: [...ticked],
-      detailSlotIds: [...tickedDetailIds],
-      layout,
-      colorwayId: 0,
-      colour: undefined,
-      threed: undefined,
-      fixTarget: '',
-      fixTargets: [],
-      fixSlotIds: [],
-      autoSplit: layout === 'one' && ticked.length >= 2,
-      pattern: undefined,
-      // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
-      // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
-      freeform: undefined,
-      /* ПЛИТЫ ВЕРСТАКА В ПРОГОН ФЛЭТА НЕ ЕДУТ (T24, D-20): дверь `also send the flat slots` снята
-         владельцем вместе с лентой плит. `false` — СКАЗАНО, а не опущено: пустой `flat_slot_ids`
-         при включённом флаге значил бы «все» (`design.proto`), и старый флаг из хранилища вкладки
-         не должен дожить до платного запроса. */
-      useFlatSlots: false,
-      flatSlotIds: [],
-      extraInputMediaIds: [],
-      image: undefined,
-      inpaint: undefined,
-      extend: undefined,
-      video: undefined,
-      // THE MODE (81-FINAL-MODES). Photos sends nothing: an absent block is photos.
-      flat: flatParamsFor(mode, structureNow),
-    };
+    const ask: FlatAsk = { target, fromMyFlat, structure: [...structureNow] };
     patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
     let refusal: ServerRefusal | null = null;
+    let retryStale = false;
     try {
-      /* R2: бриф WORDS в пути — засева ещё нет, и прогон ушёл бы с пустыми WORDS. Ждём его (кнопка
-         занята `saving`), потом перепроверяем карточку; набранные руками WORDS засев не тронет. */
       const brief = await settleSeedBrief(card);
       if (brief === 'busy') return;
       if (brief === 'waited' && (cardNow.current !== card || !cardOnScreen(card))) return;
-      // D-20'''': засев, показанный в пустом поле, уходит в форму «грязным» ДО flush — эта запись его
-      // и понесёт, прогон прочтёт его из сохранённой карточки.
       materializeWords(card, form, wasOn && !disabled);
       let saved: FlushResult;
       try {
         saved = await autosave.flush('flat');
       } catch {
-        // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
         saved = 'error';
       }
       if (saved === 'off' && wasOn) {
@@ -622,13 +512,6 @@ export function FlatRunRow({
         patchFlatInput(card, { refused: saved });
         return;
       }
-      /* ПОСЛЕ ОЖИДАНИЯ — ТОЛЬКО СВЕЖИЕ ЧТЕНИЯ (ревью раунда 2, MAJOR B). Ряд мог быть размонтирован
-         сменой шага: форма живёт в `index.tsx` и отвечает сейчас, снимки отрисовки — нет.
-         · Утверждение, пришедшее во время flush, выключает автосейв, и flush отвечает `off` —
-           `flushAllowsRun` его пропускает; прогон по замороженной карточке не стартует.
-         · Сервер полосы — из кэша её чтения (`serverSpeaksNow`): контекст возможностей — хук, и
-           после `await` его не спросить.
-         · Минимум доски — тем же правилом, что у рельса, по значениям формы. */
       const now = form.getValues();
       if (now.approvalState === RELEASED) {
         patchFlatInput(card, { refused: 'released' });
@@ -640,14 +523,7 @@ export function FlatRunRow({
         concept: now.concept,
         categoryId: now.categoryId,
       });
-      // Отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
       if (!gateNow.ok) return;
-      /* РОЛИ ДЛЯ ОТПЕЧАТКА — СВЕЖИМ ЧТЕНИЕМ (ревью раунда 4, MAJ-1). Кэш полосы отстаёт от каждой
-         записи роли на одно перечитывание: `mutateAsync` отвечает раньше, чем перечитывание приходит.
-         GENERATE, нажатый в это окно, взял бы в отпечаток СТАРЫЕ роли, а сервер заморозил бы НОВЫЕ; и
-         после потерянного ответа повтор (кэш уже свежий) получил бы другой id — второй платный
-         прогон за то же. Поэтому: дождаться записей полосы этой карточки, перечитать полосу и брать
-         роли из этого чтения. */
       if (
         !(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS)) ||
         !(await joinsSavesSettled(card, BAND_WRITES_WAIT_MS))
@@ -657,7 +533,7 @@ export function FlatRunRow({
         }
         return;
       }
-      let freshBand: GetDesignBandResponse | undefined;
+      let freshBand: GetDesignBandResponse;
       try {
         freshBand = await rereadBand(qc, card);
       } catch {
@@ -666,57 +542,140 @@ export function FlatRunRow({
         }
         return;
       }
-      /* THE MODE'S OWN PRECONDITIONS, ON THE SAVED CARD AND THE FRESH BAND — refused here for free
-         rather than sent to be refused: a flat removed from the card while it saved, a list edited
-         (and so unconfirmed) in another tab. */
-      if (mode === 'hand_flat') {
+      /* THE ROUTE ON THE FRESH BAND: the list may have landed or moved while the card saved. A press
+         made without the list stays on photos. */
+      const fresh = readBench(freshBand, 'flat');
+      const freshRoute: FlatRoute = opts.withoutList
+        ? 'photos'
+        : routeOf({ target, fromMyFlat, structure: structureNow.length, joins: freshBand.joins });
+      if (freshRoute === 'hand_flat') {
         const onCard = new Set(
           ((form.getValues('technicalMedia') ?? []) as { mediaId?: number }[]).map(
             (r) => r?.mediaId ?? 0,
           ),
         );
-        if ((params.flat?.structureRefs ?? []).some((r) => !onCard.has(r.mediaId ?? 0))) {
+        if (structureNow.some((r) => !onCard.has(r.mediaId))) {
           refusal = localRefusal('structure_gone');
           return;
         }
       }
-      if (mode === 'straps' && !confirmedNow(card, freshBand.joins)) {
-        refusal = localRefusal('joins_unconfirmed');
+      if (
+        !opts.withoutList &&
+        (freshRoute === 'photos' || freshRoute === 'straps') &&
+        pendingQuestions(freshBand.joins, freshRoute).length > 0
+      ) {
+        // The fresh list asks something: the questions stand above the row; nothing is sent.
         return;
       }
+      /* STRAPS RUNS ON A CONFIRMED LIST (the server gate stays, the button went): a list that asks
+         nothing is saved confirmed as it stands — the same save `skip all ›` makes. */
+      if (freshRoute === 'straps' && freshBand.joins && !confirmedNow(card, freshBand.joins)) {
+        const r = await saveJoinsConfirmed(qc, card, freshBand.joins, freshBand.joins.rev ?? 0);
+        if (!r.ok) {
+          if (cardOnScreen(card)) showMessage(`${r.why} — nothing was started`, 'error');
+          return;
+        }
+        try {
+          freshBand = await rereadBand(qc, card);
+        } catch {
+          if (cardOnScreen(card)) {
+            showMessage('could not re-read the input — nothing was started; try again', 'error');
+          }
+          return;
+        }
+      }
+      const slotId = targetSlotId(target);
+      /* The FRONT and BACK a detail agrees with: the server attaches their plates itself (T8); here
+         they only gate the press and travel in the fingerprint (other views = another intent). */
+      const flatSlotIds = slotId > 0 ? detailFlatSlotIds(fresh.sides) : [];
+      if (slotId > 0 && flatSlotIds.length < 2) {
+        refusal = localRefusal('views_first');
+        return;
+      }
+      const mode = modeOfRoute(freshRoute);
+      const params: common_DesignRunParams = {
+        views: slotId > 0 ? ['detail'] : [...VIEWS_ORDER],
+        detailSlotIds: slotId > 0 ? [slotId] : [],
+        layout: 'one',
+        colorwayId: 0,
+        colour: undefined,
+        threed: undefined,
+        fixTarget: '',
+        fixTargets: [],
+        fixSlotIds: [],
+        autoSplit: slotId === 0,
+        pattern: undefined,
+        // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform (`freeform_forbidden`).
+        freeform: undefined,
+        /* A DETAIL READS THE FINISHED FRONT AND BACK (owner 06.10, answer 3) — attached by the SERVER
+           on a detail run (T8); the client sends no slots on any flat run. `false` is SAID: an empty
+           list with the flag on would mean «every filled slot». */
+        useFlatSlots: false,
+        flatSlotIds: [],
+        extraInputMediaIds: [],
+        image: undefined,
+        inpaint: undefined,
+        extend: undefined,
+        video: undefined,
+        // THE MODE (81-FINAL-MODES). Photos and a detail send nothing: an absent block is photos.
+        flat: mode ? flatParamsFor(mode, structureNow) : undefined,
+      };
       patchFlatInput(card, { run: 'starting' });
-      // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
-      // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
       refusal = await startRun.start({
         kind: 'flat',
         ask: '',
         params,
-        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? [], mode),
+        snapshot: flatSnapshot(
+          freshBand,
+          now,
+          params.detailSlotIds ?? [],
+          (mode ?? 'photos') as FlatMode,
+          { target, route: freshRoute, flatSlotIds },
+        ),
       });
-      // The list may have moved (edited elsewhere): the band is re-read so the door shows it.
       if (refusal?.reason === 'joins_unconfirmed') {
-        // Stale: confirmed against other photos or another note — the pill drops here at once.
-        if (refusal.meta?.reason === 'stale')
-          markConfirmStale(card, Number(refusal.meta.joins_rev) || (freshBand.joins?.rev ?? 0));
         void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+        // STALE (other photos or another note since the confirmation): recovered without a pill.
+        if (refusal.meta?.reason === 'stale' && !opts.recovered) {
+          refusal = null;
+          retryStale = true;
+        }
       }
     } finally {
-      // Отказ сервера — в хранилище карточки, до прочтения или следующего GENERATE; с ним остаются
-      // чипы отказанного запроса. Без отказа запрос отпущен.
       patchFlatInput(card, { run: null, serverRefusal: refusal, ask: refusal ? ask : null });
     }
+    if (retryStale) void recoverStale(card);
   };
 
+  /**
+   * §3.3: the list is asked for again the free way. Same rev (a cache hit) → it is re-saved
+   * confirmed and GENERATE is pressed once more; a new rev → its questions are asked.
+   */
+  const recoverStale = async (card: number) => {
+    setRecovering(true);
+    try {
+      const got = await rereadForStale(qc, card);
+      if (got !== 'same') return;
+      const joins = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card))?.joins;
+      if (!joins) return;
+      const r = await saveJoinsConfirmed(qc, card, joins, joins.rev ?? 0);
+      if (!r.ok) return;
+    } finally {
+      setRecovering(false);
+    }
+    if (cardNow.current === card) void submit({ recovered: true });
+  };
+
+  const skipAll = () => {
+    if (!band.joins || askBusy) return;
+    void finishAsk(qc, techCardId, band.joins, questions);
+  };
+
+  const targetItems = targets;
+  const selectTitle = targetItems.find((t) => t.value === target)?.title ?? '';
+
   return (
-    /* ═══ ДВА РЯДА, ОДИН ЗАЗОР, ОДИН РОСТ ОРГАНОВ (r3 п.5; ряд источников снят D-20) ══════════
-       Владелец: «сделать по уму … три спокойных ряда … дай больше спейсинга». Ряды идут в его
-       порядке: виды → запуск (средний ряд источников снят владельцем в волне 25.09). Зазор —
-       12px, ТОТ ЖЕ ШАГ, что `GROUP_GAP` («линейка группы → содержимое», `core/organs.tsx`):
-       между полосами одного решения он обязан быть тем же, что между подписью и её содержимым,
-       и меньше шва между блоками (16px у секции).
-       Классом `GROUP_GAP` его не выразить — тот margin-bottom на подписи, а здесь нужен ритм
-       между рядами; поэтому шаг один, а написаний два, и оба названы здесь. */
-    <div data-flat-run='' className='space-y-3'>
+    <div data-flat-run='' data-flat-route={route} className='space-y-3'>
       {!speaks && (
         <CalloutBox tone='note'>
           this server does not speak the design band yet — the controls are here, but nothing can be
@@ -724,247 +683,200 @@ export function FlatRunRow({
         </CalloutBox>
       )}
 
-      {/* ═══ РЯД 2 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
-          названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
-          хвост здесь свой — только дверь описи рядом с GENERATE (O-37: строки денег нет).
-          `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
+      {/* Z2 · ASK — the questions the list raises, above the row whose GENERATE waits for them. */}
+      {questions.length > 0 && band.joins && !writesOff && (
+        <AskConstruction techCardId={techCardId} joins={band.joins} questions={questions} />
+      )}
+
+      {/* Z3 · THE RUN ROW. `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
           gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
-          pending={busy}
+          pending={busy || recovering}
           onGenerate={() => void submit()}
           trailing={
-            <FlatCustom
-              /* Ни одной галки — GENERATE заперт словами «tick at least one», и чипы обязаны быть
-                 видны: закрытая панель здесь была бы тупиком. */
-              open={customOpen || noViews || (mode === 'hand_flat' && structureNow.length === 0)}
-              onToggle={() => setCustomOpen((v) => !v)}
-              modified={customChoice}
-              summary={flatChoiceSummary(
-                { views, detailTicks, layout, mode, structure: structureNow },
-                tickedDetails.map((d) => displayDetailName(bench.details, d)),
-              )}
-              after={
-                <>
-                  {/* STRAPS & OPENINGS WAITS FOR THE CONFIRMED LIST — one quiet word; the door
-                      is in the JOINS header right above. */}
-                  {joinsHeld && (
-                    <span
-                      data-flat-unsaved=''
-                      title='a join line is open — Enter saves, Esc cancels'
-                    >
-                      <Pill tone='mut'>unsaved</Pill>
-                    </span>
-                  )}
-                  {!joinsHeld && mode === 'straps' && !joinsOk && (
-                    <span data-flat-unconfirmed='' title='confirm the joins first'>
-                      <Pill tone='mut'>unconfirmed</Pill>
-                    </span>
-                  )}
-                  {/* THE LIST HAS A STRAP OR AN OPENING THAT RUNS ON — the mode is suggested. */}
-                  {strapsSuggested && (
-                    <button
-                      type='button'
-                      data-flat-suggest='straps'
-                      title='a strap or an opening runs on into another part — draw it with the confirmed joins'
-                      onClick={() => {
-                        chooseMode('straps');
-                        setCustomOpen(true);
-                      }}
-                    >
-                      <Pill tone='attention'>straps & openings?</Pill>
-                    </button>
-                  )}
-                  {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
-                  до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке).
-                  ⚠ ЭТА ДВЕРЬ СТОИТ РЯДОМ С GENERATE, А НЕ У ПРАВОГО КРАЯ (R2 п.20), слово
-                  владельца: «WHAT THE MODEL GETS ▸ помести рядом с GENERATE». Прежний `ml-auto`
-                  разносил две двери одного решения по краям ряда, и глаз шёл через всю ширину
-                  блока за ответом на вопрос «а что именно уедет». Правило макета («дверь описи у
-                  правого края») остаётся у остальных четырёх рядов — они этот хвост не рисуют. */}
-                  <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
-                    <ControlLabel>what the model gets ▸</ControlLabel>
-                  </Button>
-                </>
-              }
-            >
-              {/* ═══ ПАНЕЛЬ `custom` (T18): раскладка, затем стороны и детали — в порядке слов
-                  владельца («one picture или per picture и так же FRONT / BACK / SIDE LEFT / SIDE
-                  RIGHT»). Ярлыка нет: чипы говорят сами. Раскладка имеет смысл от двух видов; при
-                  одном она ничего не меняет и молчит (`title`), а не пропадает. Детали — здесь же,
-                  рядом с видами: галка детали снимает виды (T07), и это видно в одном месте. */}
-              {/* THE MODE — first in the panel: what the sheet is drawn from. */}
-              <span className='flex' style={ROW_CONTROL_STYLE} data-flat-mode={mode}>
-                <ViewSwitch
-                  label='mode'
-                  value={mode}
+            <>
+              <span className='relative inline-flex items-center text-micro uppercase tracking-label'>
+                <select
+                  data-flat-target={target}
+                  aria-label='what to draw'
+                  title={selectTitle}
+                  value={target}
                   disabled={choiceOff}
-                  onChange={chooseMode}
-                  className='h-full'
-                  options={[
-                    { value: 'photos', label: FLAT_MODE_WORD.photos, hint: 'the reference photos' },
-                    {
-                      value: 'hand_flat',
-                      label: FLAT_MODE_WORD.hand_flat,
-                      hint:
-                        techIds.length === 0
-                          ? 'no technical flat on this card'
-                          : tickedDetails.length > 0
-                            ? 'a detail sketch runs from photos'
-                            : 'your technical flats, redrawn clean',
-                      disabled: techIds.length === 0 || tickedDetails.length > 0,
-                    },
-                    {
-                      value: 'straps',
-                      label: FLAT_MODE_WORD.straps,
-                      hint:
-                        tickedDetails.length > 0
-                          ? 'a detail sketch runs from photos'
-                          : 'the photos and the confirmed joins',
-                      disabled: tickedDetails.length > 0,
-                    },
-                  ]}
-                />
+                  onChange={(e) => setDraft({ ...draft, target: e.target.value })}
+                  className={SELECT_QUIET}
+                  style={ROW_CONTROL_STYLE}
+                >
+                  {targetItems.map((t) => (
+                    <option key={t.value} value={t.value} disabled={t.disabled} title={t.title}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                <span aria-hidden className='pointer-events-none pl-0.5 text-labelColor'>
+                  ▾
+                </span>
               </span>
-              <span
-                className='flex'
-                style={ROW_CONTROL_STYLE}
-                title={
-                  ticked.length <= 1
-                    ? 'one view is asked — both layouts return one picture, so this changes nothing here'
-                    : undefined
-                }
-              >
-                <ViewSwitch
-                  label='layout'
-                  value={layout}
-                  options={
-                    mode === 'photos'
-                      ? LAYOUT_OPTIONS
-                      : LAYOUT_OPTIONS.map((o) =>
-                          o.value === 'per_view'
-                            ? { ...o, disabled: true, hint: 'this mode draws one picture' }
-                            : o,
-                        )
+              {myFlatOffered && (
+                <Chip
+                  data-flat-myflat={fromMyFlat ? 'on' : 'off'}
+                  selected={fromMyFlat}
+                  pressed={fromMyFlat}
+                  disabled={choiceOff}
+                  style={ROW_CONTROL_STYLE}
+                  title={
+                    fromMyFlat
+                      ? 'your technical flats are redrawn clean · click: draw from the photos'
+                      : 'redraw your own technical flats clean instead of reading the photos'
                   }
-                  disabled={choiceOff}
-                  onChange={setLayout}
-                  className='h-full'
-                />
-              </span>
-              <ChipRow>
-                {ACTIVE_VIEWS.map((view) => {
-                  const on = !!views[view];
-                  const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
-                  const slotFilled = (slot?.pictureId ?? 0) > 0;
-                  return (
-                    <Chip
-                      key={view}
-                      selected={on}
-                      pressed={on}
-                      disabled={choiceOff}
-                      style={ROW_CONTROL_STYLE}
-                      title={
-                        slotFilled
-                          ? 'its flat slot below is already filled'
-                          : 'its flat slot below is empty'
-                      }
-                      onClick={() => applyTicks(tickView(views, detailTicks, view))}
-                    >
-                      {viewLabel(view)}
-                    </Chip>
-                  );
-                })}
-                {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
-                {bench.details.map((d) => {
-                  const id = d.id ?? 0;
-                  if (id <= 0) return null;
-                  const on = !!detailTicks[id];
-                  const proposed = drafted.slotProposed(id);
-                  return (
-                    <Chip
-                      key={`d:${id}`}
-                      selected={on}
-                      pressed={on}
-                      disabled={choiceOff || mode !== 'photos'}
-                      tone={proposed ? 'attention' : undefined}
-                      data-proposed={proposed || undefined}
-                      style={ROW_CONTROL_STYLE}
-                      title={
-                        proposed
-                          ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
-                          : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
-                      }
-                      onClick={() => applyTicks(tickDetail(views, detailTicks, id))}
-                    >
-                      detail · {displayDetailName(bench.details, d)}
-                    </Chip>
-                  );
-                })}
-              </ChipRow>
-              {/* «FROM MY FLAT»: the card's technical flats, each one front or back (one per side). */}
-              {mode === 'hand_flat' && techIds.length > 0 && (
-                <div data-flat-structure='' className='flex basis-full flex-wrap items-start gap-3'>
-                  {techIds.map((id) => {
-                    const role = structureNow.find((p) => p.mediaId === id)?.role ?? '';
-                    const url = techThumb.get(id) || thumbOf?.(id) || '';
-                    return (
-                      <div
-                        key={id}
-                        data-flat-structure-tile={id}
-                        data-structure-role={role}
-                        className='flex flex-col items-center gap-1'
-                      >
-                        <div
-                          className={cn(
-                            'flex size-16 items-center justify-center border bg-bgColor',
-                            role ? 'border-textColor' : 'border-borderColor',
-                          )}
-                        >
-                          {url ? (
-                            <img src={url} alt='' className='size-full object-contain' />
-                          ) : (
-                            <Text size='micro' variant='label' component='span'>
-                              #{id}
-                            </Text>
-                          )}
-                        </div>
-                        <span className='flex gap-2'>
-                          {STRUCTURE_ROLES.map(({ role: r, label }) => (
-                            <button
-                              key={r}
-                              type='button'
-                              data-structure-pick={r}
-                              aria-pressed={role === r}
-                              disabled={choiceOff}
-                              title={
-                                role === r ? `the ${label} · click: neither` : `use as the ${label}`
-                              }
-                              onClick={() => setStructure(pickStructure(structureNow, id, r))}
-                              className={cn(
-                                'text-nano uppercase tracking-label',
-                                role === r
-                                  ? 'text-textColor'
-                                  : 'text-labelColor underline hover:text-textColor',
-                              )}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                  onClick={toggleMyFlat}
+                >
+                  from my flat
+                </Chip>
               )}
-            </FlatCustom>
+              {/* THE ROUTE — a word, not a button; «from my flat» says itself on the toggle. */}
+              {route !== 'hand_flat' && (
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='uppercase tracking-label'
+                  data-flat-route-pill={route}
+                  title={ROUTE_WHY[route]}
+                >
+                  · {ROUTE_WORD[route]}
+                </Text>
+              )}
+              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — рядом с GENERATE (R2 п.20); с 06.10 там же и конструкция. */}
+              <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
+                <ControlLabel>what the model gets ▸</ControlLabel>
+              </Button>
+            </>
           }
         />
+        {/* «FROM MY FLAT»: the card's technical flats, each one front or back (one per side). */}
+        {fromMyFlat && (
+          <div data-flat-structure='' className='flex flex-wrap items-start gap-3 pt-1'>
+            {techIds.map((id) => {
+              const role = structureNow.find((p) => p.mediaId === id)?.role ?? '';
+              const url = techThumb.get(id) || thumbOf?.(id) || '';
+              return (
+                <div
+                  key={id}
+                  data-flat-structure-tile={id}
+                  data-structure-role={role}
+                  className='flex flex-col items-center gap-1'
+                >
+                  <div
+                    className={cn(
+                      'flex size-16 items-center justify-center border bg-bgColor',
+                      role ? 'border-textColor' : 'border-borderColor',
+                    )}
+                  >
+                    {url ? (
+                      <img src={url} alt='' className='size-full object-contain' />
+                    ) : (
+                      <Text size='micro' variant='label' component='span'>
+                        #{id}
+                      </Text>
+                    )}
+                  </div>
+                  <span className='flex gap-2'>
+                    {STRUCTURE_ROLES.map(({ role: r, label }) => (
+                      <button
+                        key={r}
+                        type='button'
+                        data-structure-pick={r}
+                        aria-pressed={role === r}
+                        disabled={choiceOff}
+                        title={role === r ? `the ${label} · click: neither` : `use as the ${label}`}
+                        onClick={() =>
+                          setDraft({ ...draft, structure: pickStructure(structureNow, id, r) })
+                        }
+                        className={cn(
+                          'text-nano uppercase tracking-label',
+                          role === r
+                            ? 'text-textColor'
+                            : 'text-labelColor underline hover:text-textColor',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* ОТКАЗ МИНИМУМА МУДБОРДА — СЛОВАМИ И С ДВЕРЬЮ, А НЕ ТОЛЬКО ПОГАШЕННОЙ КНОПКОЙ. Погашенный
-          GENERATE держит повод в `title`, то есть по наведению; здесь он же стоит строкой, и рядом —
-          дверь туда, где он чинится. Только на карточке, которую можно писать. */}
+      {/* Z4 · ONE LINE UNDER THE ROW: why GENERATE waits, and the one door that moves it on. */}
+      {speaks && !disabled && !moodReason && listBuilding && (
+        <div data-flat-reading=''>
+          <LockBar reason='reading the construction from the photos'>
+            <Button
+              variant='underline'
+              size='xs'
+              data-flat-without-list=''
+              disabled={busy}
+              onClick={() => void submit({ withoutList: true })}
+            >
+              generate without it ›
+            </Button>
+          </LockBar>
+        </div>
+      )}
+      {speaks &&
+        !disabled &&
+        readsList &&
+        !band.joins &&
+        !joinsRead.reading &&
+        joinsRead.failed && (
+          <div data-flat-read-failed=''>
+            <LockBar reason='the construction could not be read'>
+              <Button
+                variant='underline'
+                size='xs'
+                data-flat-read-retry=''
+                title={joinsRead.failed}
+                onClick={joinsRead.retry}
+              >
+                retry ›
+              </Button>
+            </LockBar>
+          </div>
+        )}
+      {speaks && !disabled && !moodReason && questions.length > 0 && (
+        <div data-flat-asking={questions.length}>
+          <LockBar
+            reason={`answer ${questions.length === 1 ? 'the question' : `${questions.length} questions`} first`}
+          >
+            <Button
+              variant='underline'
+              size='xs'
+              data-flat-skip-all=''
+              disabled={askBusy}
+              title='the construction as the model read it'
+              onClick={skipAll}
+            >
+              skip all ›
+            </Button>
+          </LockBar>
+        </div>
+      )}
+      {recovering && (
+        <div data-flat-recovering=''>
+          <LockBar reason='the photos changed — one more look' />
+        </div>
+      )}
+      {myFlatGone && (
+        <div data-flat-myflat-gone=''>
+          <LockBar reason='your flat was removed — drawing from photos' />
+        </div>
+      )}
+
+      {/* ОТКАЗ МИНИМУМА МУДБОРДА — СЛОВАМИ И С ДВЕРЬЮ. */}
       {moodReason && speaks && !disabled && (
         <div data-flat-mood-gate=''>
           <LockBar reason={moodReason}>
@@ -982,12 +894,10 @@ export function FlatRunRow({
           </LockBar>
         </div>
       )}
-      {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). Стойкая строка до следующей
-          попытки: исправление («поправь поле») — не новое нажатие, и всплывашка ушла бы раньше. */}
+      {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). */}
       {refusalSentence && (
         <div data-flat-flush-refusal=''>
           <LockBar reason={`${refusalSentence} — nothing was started, nothing was charged`}>
-            {/* Утверждённой карточке чинить нечего — двери нет. */}
             {refused !== 'released' && (
               <Button
                 variant='secondary'
@@ -1001,7 +911,6 @@ export function FlatRunRow({
           </LockBar>
         </div>
       )}
-      {/* МЕТКИ НЕ ЕДУТ, И СКАЗАНО ЭТО ТАМ, ГДЕ ТРАТЯТСЯ ДЕНЬГИ. Рисуется только пока метки есть. */}
       {marked.length > 0 && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
@@ -1011,8 +920,7 @@ export function FlatRunRow({
           </Text>
         </CalloutBox>
       )}
-      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), тот же орган, что у FABRIC RENDER
-          и 3D: слова сервера дословно, «nothing was charged» только когда сервер ОТВЕТИЛ. */}
+      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E). */}
       {(() => {
         const dismiss = () =>
           patchFlatInput(
@@ -1021,7 +929,6 @@ export function FlatRunRow({
               ? { serverRefusal: null, ask: null }
               : { serverRefusal: null },
           );
-        /* A MODE REFUSAL IS ONE PLAIN LINE in short words — all of them are free (nothing booked). */
         const short = flatRefusalWords(input.serverRefusal?.reason, input.serverRefusal?.meta);
         return short ? (
           <CalloutBox tone='error'>
