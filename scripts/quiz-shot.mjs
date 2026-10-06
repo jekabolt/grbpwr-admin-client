@@ -577,7 +577,7 @@ try {
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('3 / 8'),
     );
-    await btn(page, 'back').click();
+    await page.click('[data-quiz] [data-quiz-back]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('2 / 8'),
     );
@@ -598,22 +598,22 @@ try {
       're-answer after back replaces in place',
     );
     await btn(page, 'inside zip pocket').click();
-    await page.click('[data-quiz] button:has-text("next ›")');
+    await page.click('[data-quiz] [data-quiz-send]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('4 / 8'),
     );
-    // W-C5: поле в фокусе → чип не продвигает, `next ›` стоит.
+    // W-C5: поле в фокусе → чип не продвигает, встаёт `confirm`.
     await page.focus('[data-quiz] textarea');
     await btn(page, 'mid thigh').click();
     await page.waitForTimeout(400);
     check(
       (await page.textContent('[data-quiz]')).includes('4 / 8') &&
-        (await page.locator('[data-quiz] button', { hasText: 'next ›' }).count()) === 1,
-      'chip with the own-answer field focused does not advance; next › shows',
+        (await page.locator('[data-quiz] [data-quiz-send]').count()) === 1,
+      'chip with the own-answer field focused does not advance; confirm shows',
     );
     await page.fill('[data-quiz] textarea', 'with side splits');
     await shoot(page, 'quiz-1440-chip-then-words.png');
-    await page.click('[data-quiz] button:has-text("next ›")');
+    await page.click('[data-quiz] [data-quiz-send]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('5 / 8'),
     );
@@ -846,7 +846,9 @@ try {
     const selectedChips = await card
       .locator('button')
       .evaluateAll((els) =>
-        els.filter((b) => b.className.includes('bg-textColor')).map((b) => b.textContent.trim()),
+        els
+          .filter((b) => b.className.split(/\s+/).includes('bg-textColor'))
+          .map((b) => b.textContent.trim()),
       );
     check(
       selectedChips.length === 1 && selectedChips[0] === 'stiff stand, 3 cm',
@@ -1194,7 +1196,7 @@ try {
       await btn(page, 'neckline: rib band').click();
       await btn(page, 'pocket openings: piped edge (piping)').click();
     } else await btn(page, 'none — all the same').click();
-    await btn(page, 'next ›').click();
+    await page.click('[data-quiz] [data-quiz-send]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
     );
@@ -1613,42 +1615,47 @@ try {
     await ctx.close();
   }
   // 99-SPOTS-EVAL: detail-шкала выключена (SPOT_DETAIL=false) — фикстуры на zone.
-  // 99-SPOTS: места вопроса — нумерованные кольца в кадре якорной картинки, номера верхним индексом
-  // на словах вопроса, легенда для слов, которых в вопросе нет, `hide spots` помнится в браузере.
-  const spotTarget = [
-    { label: 'inner strap edge', x: 300, y: 450, scale: 'zone', at: -1 },
-    { label: 'back neckline', x: 640, y: 160, scale: 'zone', at: -1 },
-    { label: 'hem tape', x: 500, y: 880, scale: 'zone', at: -1 },
-  ];
-  const cuffText = 'Where does the cuff tab from this picture go on our sleeve?';
-  // `at` — байтовое смещение подписи, как считает сервер.
-  const cuffAt = Buffer.byteLength(cuffText.slice(0, cuffText.indexOf('cuff tab')));
+  // 102-QUICKWIN: мест у TARGET нет (сервер B3); у target «что меняем» — multi, первым вариантом
+  // сервер ставит «match as shown — no changes» (исключающий, C2). Кольца с номерами — только на
+  // DETAIL-картинке; в тексте вопроса ни индексов, ни легенды, ни `hide spots` (C1). Одна обведённая
+  // кнопка `confirm` той же высоты, что поле своего слова; `‹` и `later` — в строке заголовка (C3).
+  const MATCH = 'match as shown — no changes';
   const spotDetail = [
-    { label: 'cuff tab', x: 970, y: 520, scale: 'zone', at: cuffAt },
+    { label: 'cuff tab', x: 970, y: 520, scale: 'zone', at: -1 },
     { label: 'sleeve', x: 420, y: 40, scale: 'zone', at: -1 },
   ];
   const marksOf = (spots) => spots.map((p) => [p.x, p.y]);
   const spotBoard = [
-    { id: 401, role: 'target', shade: '#d9d9d9', w: 300, h: 400, marks: marksOf(spotTarget) },
+    { id: 401, role: 'target', shade: '#d9d9d9', w: 300, h: 400 },
     // альбом: кадр шире высоты — доли x и y меряются каждая по своей стороне
     { id: 402, role: 'detail', shade: '#bfbfbf', w: 480, h: 300, marks: marksOf(spotDetail) },
     { id: 403, role: 'material', shade: '#e6e6e6' },
   ];
+  const multiPq = (...a) => ({ ...pq(...a), kind: 'multi' });
   const spotQuiz = {
     family: 'top',
     model: 'stub',
     questions: [
-      pq('pic_spots', 401, 'How are the inner strap and back edges finished?', [
-        'clean turned edge',
-        'bound with self bias',
-        'raw, laser cut',
-      ]),
-      pq('pic_cuff', 402, cuffText, ['on the cuff, as pictured', 'on the hem instead']),
+      {
+        ...multiPq('pic_change', 401, 'What do we change from picture 1?', [
+          MATCH,
+          'narrower straps',
+          'lower crossing point',
+          'shallower open back',
+        ]),
+        decisionKey: 'pic_change',
+      },
+      {
+        ...multiPq('pic_take', 402, 'What do we take from picture 2?', [
+          'the cuff tab, on our sleeve',
+          'the sleeve volume',
+        ]),
+        decisionKey: 'pic_take',
+        spots: spotDetail,
+      },
       pq('pic_fabric', 403, 'What do we take from this fabric?', ['the rib', 'the colour']),
     ],
   };
-  spotQuiz.questions[0].spots = spotTarget;
-  spotQuiz.questions[1].spots = spotDetail;
   // Кольца плитки: центр и радиус в координатах экрана против ожидаемых по кадру картинки.
   const ringsOn = (page, id) =>
     page.evaluate((id) => {
@@ -1701,18 +1708,39 @@ try {
     );
     return rings;
   };
-  const supText = (page) =>
-    page.evaluate(() =>
-      [...document.querySelectorAll('[data-quiz] [data-spot-word]')].map((w) => [
-        Number(w.getAttribute('data-spot-word')),
-        w.firstChild.textContent,
-        w.querySelector('[data-spot-sup]')?.textContent,
-      ]),
-    );
   const ringCount = (page) => page.locator('[data-rail-view] [data-spot]').count();
-  for (const [width, height, name, opts] of [
-    [1440, 900, 'quiz-1440-spots.png', {}],
-    [390, 844, 'quiz-390-spots.png', { reducedMotion: 'reduce' }],
+  // C1: ничего от прежней разметки мест в карточке вопроса.
+  const noSpotText = async (page, what) =>
+    check(
+      (await page
+        .locator(
+          '[data-quiz] [data-spot-sup], [data-quiz] [data-spot-word], [data-quiz] [data-spot-legend], [data-quiz] [data-quiz-spots-toggle]',
+        )
+        .count()) === 0 && !/hide spots|show spots/.test(await page.textContent('[data-quiz]')),
+      `${what}: no superscripts, legend or hide toggle`,
+    );
+  // C3: одна обведённая кнопка, высота = высота поля своего слова, низ и верх вровень.
+  const confirmRow = (page) =>
+    page.evaluate(() => {
+      const ta = document.querySelector('[data-quiz] textarea').getBoundingClientRect();
+      const b = document.querySelector('[data-quiz] [data-quiz-send]');
+      const r = b.getBoundingClientRect();
+      return {
+        ta: [ta.top, ta.height],
+        btn: [r.top, r.height],
+        disabled: b.disabled,
+        text: b.textContent.trim(),
+        shadow: getComputedStyle(b).boxShadow,
+        underlined: [...document.querySelectorAll('[data-quiz] button')]
+          .filter((x) => getComputedStyle(x).textDecorationLine === 'underline')
+          .map((x) => x.textContent.trim()),
+      };
+    });
+  const chipOn = async (page, text) =>
+    (await btn(page, text).getAttribute('aria-pressed')) === 'true';
+  for (const [width, height, name, quick, opts] of [
+    [1440, 900, 'quiz-1440-spots.png', 'quiz-1440-quickwin.png', {}],
+    [390, 844, 'quiz-390-spots.png', 'quiz-390-quickwin.png', { reducedMotion: 'reduce' }],
   ]) {
     const { ctx, page } = await open(
       width,
@@ -1723,140 +1751,164 @@ try {
     );
     await btn(page, 'ASK ME').click();
     await page.waitForSelector('[data-quiz]');
-    await anchoredOn(page, 401, `[${width}] spots target question`, 3);
-    await page.waitForTimeout(700); // scroll settle
-    const rings = await ringsPlaced(page, 401, spotTarget, `[${width}] target`);
-    const sups = await supText(page);
+    // 1 · target «что меняем»: колец нет, «match as shown» первым, confirm выключен до выбора
+    await anchoredOn(page, 401, `[${width}] target change question`, 3);
+    await page.waitForTimeout(500);
+    check((await ringCount(page)) === 0, `[${width}] target question: no rings`);
+    await noSpotText(page, `[${width}] target`);
+    const head = (await page.locator('[data-quiz] [data-quiz-head]').textContent()).trim();
     check(
-      JSON.stringify(sups) ===
-        JSON.stringify([
-          [1, 'inner strap', '1'],
-          [2, 'back', '2'],
-        ]),
-      `[${width}] superscripts on the matched words ${JSON.stringify(sups)}`,
+      head === 'target · picture 1 · 1 / 3 · later' &&
+        (await page.locator('[data-quiz] [data-quiz-back]').count()) === 0,
+      `[${width}] header carries later; no back on the first question ("${head}")`,
     );
-    const legend = (await page.locator('[data-quiz] [data-spot-chip]').allTextContents()).map((t) =>
-      t.trim(),
+    let row = await confirmRow(page);
+    check(
+      row.disabled && row.text === 'confirm' && row.shadow === 'none',
+      `[${width}] confirm shows disabled until something is picked`,
     );
     check(
-      legend.length === 1 && legend[0] === '3 hem tape',
-      `[${width}] unmatched label as a legend chip ${JSON.stringify(legend)}`,
+      Math.abs(row.ta[1] - row.btn[1]) <= 0.5 && Math.abs(row.ta[0] - row.btn[0]) <= 0.5,
+      `[${width}] confirm is the textarea's height and top (${row.ta} vs ${row.btn})`,
     );
+    check(
+      JSON.stringify(row.underlined) === '["skip"]',
+      `[${width}] skip is the only underline ${JSON.stringify(row.underlined)}`,
+    );
+    // C2: исключающий вариант
+    await btn(page, 'narrower straps').click();
+    await btn(page, 'lower crossing point').click();
+    check(!(await confirmRow(page)).disabled, `[${width}] a pick enables confirm`);
+    await btn(page, MATCH).click();
+    check(
+      (await chipOn(page, MATCH)) &&
+        !(await chipOn(page, 'narrower straps')) &&
+        !(await chipOn(page, 'lower crossing point')),
+      `[${width}] picking «match as shown» clears the others`,
+    );
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shoot(page, quick);
+    await btn(page, 'shallower open back').click();
+    check(
+      !(await chipOn(page, MATCH)) && (await chipOn(page, 'shallower open back')),
+      `[${width}] picking another option clears «match as shown»`,
+    );
+    await btn(page, 'shallower open back').click();
+    check((await confirmRow(page)).disabled, `[${width}] nothing picked: confirm off again`);
+    await page.fill('[data-quiz] textarea', 'keep the bow');
+    check(!(await confirmRow(page)).disabled, `[${width}] typed words enable confirm`);
+    await page.fill('[data-quiz] textarea', '');
+    await btn(page, MATCH).click();
+    // клавиатура: цифры по-прежнему выбирают, Enter в поле — та же кнопка
+    await page.keyboard.press('2');
+    check(
+      (await chipOn(page, 'narrower straps')) && !(await chipOn(page, MATCH)),
+      `[${width}] digit 2 picks option 2 and clears «match as shown»`,
+    );
+    await page.keyboard.press('1');
+    check(
+      (await chipOn(page, MATCH)) && !(await chipOn(page, 'narrower straps')),
+      `[${width}] digit 1 picks «match as shown» alone`,
+    );
+    await page.press('[data-quiz] textarea', 'Enter');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
+    );
+    const saved = (await page.evaluate(() => window.__answers)).find(
+      (a) => a.question?.id === 'pic_change',
+    );
+    check(
+      JSON.stringify(saved?.selected) === JSON.stringify([MATCH]),
+      `[${width}] saved «match as shown» alone ${JSON.stringify(saved?.selected)}`,
+    );
+    // 2 · detail «что берём»: кольца на плитке, номера только на кольцах
+    await anchoredOn(page, 402, `[${width}] detail take question`, 3);
+    await page.waitForTimeout(700);
+    const dr = await ringsPlaced(page, 402, spotDetail, `[${width}] landscape detail`);
+    await noSpotText(page, `[${width}] detail`);
     check(
       (await page.locator('[data-quiz] [data-quiz-picture] [data-spot]').count()) === 0,
       `[${width}] no rings on the quiz thumbnail`,
     );
+    check(
+      (await page.locator('[data-quiz] [data-quiz-back]').count()) === 1,
+      `[${width}] back sits in the header from question 2`,
+    );
+    const c1 = dr.find((r) => r.n === 1);
+    const c2 = dr.find((r) => r.n === 2);
+    check(
+      c1 && c1.box.r <= c1.cx && c2 && c2.box.t >= c2.cy,
+      `[${width}] numbers flip inside at the right and top edges of the frame`,
+    );
     if (width === 390) {
-      const { layerAnim } = await ringsOn(page, 401);
+      const { layerAnim } = await ringsOn(page, 402);
       check(
         layerAnim === 'none',
         `[390] reduced motion: rings appear without a fade (${layerAnim})`,
+      );
+      row = await confirmRow(page);
+      check(
+        Math.abs(row.ta[1] - row.btn[1]) <= 0.5,
+        `[390] confirm is the textarea's height (${row.ta} vs ${row.btn})`,
       );
       await page.evaluate(() => window.scrollTo(0, 0));
       await shoot(page, name);
       await ctx.close();
       continue;
     }
-    // наведение на слово зажигает номер кольца; на кольцо — подчёркивает слово
-    await page.locator('[data-quiz] [data-spot-word="1"]').hover();
-    const hotBg = (await ringsOn(page, 401)).rings.find((r) => r.n === 1).boxBg;
-    check(hotBg === 'rgb(0, 0, 0)', `hover on word 1 inks ring 1's number (${hotBg})`);
-    const r2 = rings.find((r) => r.n === 2);
-    await page.mouse.move((r2.box.l + r2.box.r) / 2, (r2.box.t + r2.box.b) / 2);
-    const under = await page
-      .locator('[data-quiz] [data-spot-word="2"]')
-      .evaluate((el) => getComputedStyle(el).textDecorationLine);
-    check(under === 'underline', `hover on ring 2 underlines its word (${under})`);
+    // наведение на кольцо зажигает его номер
+    await page.mouse.move((c1.box.l + c1.box.r) / 2, (c1.box.t + c1.box.b) / 2);
+    const hotBg = (await ringsOn(page, 402)).rings.find((r) => r.n === 1).boxBg;
+    check(hotBg === 'rgb(0, 0, 0)', `hover on ring 1 inks its number (${hotBg})`);
     await page.mouse.move(5, 5);
-    // скриншот — до hide: кольца, номера, верхние индексы и легенда
+    await btn(page, 'the cuff tab, on our sleeve').click();
     await page.evaluate(() => window.scrollTo(0, 0));
     await shoot(page, name);
-    // hide spots — колец нет, индексов нет, ключ в localStorage; перезагрузка помнит
-    await btn(page, 'hide spots').click();
-    await page.waitForTimeout(200);
-    check(
-      (await ringCount(page)) === 0 &&
-        (await page.locator('[data-quiz] [data-spot-sup]').count()) === 0 &&
-        (await page.evaluate(() => localStorage.getItem('quiz.spots'))) === 'off',
-      'hide spots: no rings, no superscripts, remembered as quiz.spots=off',
+    // back из заголовка — прежний вопрос с его ответом
+    await page.click('[data-quiz] [data-quiz-back]');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('1 / 3'),
     );
-    await anchoredOn(page, 401, 'hide spots keeps the picture anchor', 3);
-    await btn(page, 'later').click();
-    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
-    await open(
-      width,
-      height,
-      {
-        quiz: spotQuiz,
-        board: spotBoard,
-        pictures: 3,
-        session: { questions: spotQuiz.questions, family: 'top' },
-      },
-      { ctx, page },
-    );
-    await btn(page, 'resume').click();
-    await page.waitForSelector('[data-quiz]');
-    await page.waitForTimeout(300);
-    check(
-      (await ringCount(page)) === 0 &&
-        (await page.locator('[data-quiz] [data-quiz-spots-toggle]').textContent()).trim() ===
-          'show spots',
-      'hide spots survives a reload',
-    );
-    await btn(page, 'show spots').click();
-    await page.waitForTimeout(300);
-    check((await ringCount(page)) === 3, 'show spots brings the 3 rings back');
-    // второй вопрос: `at` сервера (байты), альбомный кадр, номер у края перекинут внутрь
-    await btn(page, 'clean turned edge').click();
+    check(await chipOn(page, MATCH), 'header back reopens the change question with its answer');
+    await page.click('[data-quiz] [data-quiz-send]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
     );
-    await anchoredOn(page, 402, 'spots detail question', 3);
-    await page.waitForTimeout(700);
-    const dr = await ringsPlaced(page, 402, spotDetail, 'landscape detail');
-    const sups2 = await supText(page);
-    check(
-      JSON.stringify(sups2) ===
-        JSON.stringify([
-          [1, 'cuff tab', '1'],
-          [2, 'sleeve', '2'],
-        ]),
-      `server byte offset places superscript 1 ${JSON.stringify(sups2)}`,
-    );
-    const c1 = dr.find((r) => r.n === 1);
-    const c2 = dr.find((r) => r.n === 2);
-    check(
-      c1 && c1.box.r <= c1.cx && c2 && c2.box.t >= c2.cy,
-      'numbers flip inside at the right and top edges of the frame',
-    );
-    // третий вопрос без мест — колец нет
-    await btn(page, 'on the cuff, as pictured').click();
+    await btn(page, 'the cuff tab, on our sleeve').click();
+    await page.click('[data-quiz] [data-quiz-send]');
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
     );
+    // третий вопрос (single, без мест) — колец нет, кнопки нет, чип продвигает сам
     await anchoredOn(page, 403, 'question without spots', 3);
     check(
       (await ringCount(page)) === 0 &&
-        (await page.locator('[data-quiz] [data-quiz-spots-toggle]').count()) === 0,
-      'a picture question without spots: no rings, no toggle',
+        (await page.locator('[data-quiz] [data-quiz-send]').count()) === 0,
+      'single question without spots: no rings, no confirm button',
     );
     await btn(page, 'later').click();
     await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    check(
+      (await btn(page, 'resume').textContent()).trim() === 'resume 1',
+      'header later keeps the queue: resume 1',
+    );
     // список ответов: наведение на ответ с местами снова показывает его кольца
     await btn(page, 'answers ▾').click();
-    const line = page.locator('[data-probe="quiz"] li button', {
-      hasText: 'inner strap and back edges',
-    });
+    const line = page.locator('[data-probe="quiz"] li button', { hasText: 'take from picture 2' });
     await line.hover();
-    await anchoredOn(page, 401, 'answers-list hover', 3);
-    await ringsPlaced(page, 401, spotTarget, 'answers-list hover');
+    await anchoredOn(page, 402, 'answers-list hover', 3);
+    await ringsPlaced(page, 402, spotDetail, 'answers-list hover');
     await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
     check((await ringCount(page)) === 0, 'leaving the answer clears the rings');
     check(
-      (await page.evaluate(() => window.__answers)).find((a) => a.question?.id === 'pic_spots')
-        ?.question?.spots?.length === 3,
+      (await page.evaluate(() => window.__answers)).find((a) => a.question?.id === 'pic_take')
+        ?.question?.spots?.length === 2,
       'saved answer echoes the question spots',
+    );
+    check(
+      (await page.evaluate(() => localStorage.getItem('quiz.spots'))) === null,
+      'no quiz.spots key in localStorage',
     );
     await ctx.close();
   }

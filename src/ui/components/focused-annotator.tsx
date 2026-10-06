@@ -226,7 +226,7 @@ export type FocusedAnnotatorProps = {
   anchoredMediaId?: number | null;
   /**
    * 99-SPOTS: places on the anchored picture the question is about — numbered rings inside its
-   * frame (`SpotRings`). `hotSpot` — the number under the pointer here or on the question's word.
+   * frame (`SpotRings`). `hotSpot` — the ring number under the pointer.
    */
   anchoredSpots?: SpotRing[];
   hotSpot?: number | null;

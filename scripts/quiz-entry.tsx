@@ -231,15 +231,13 @@ function Board({
         hotSpot={hotSpot}
         onHotSpot={onHotSpot}
       />
-      {quiz({ pictureOf, onFocusPicture, hotSpot, onHotSpot, unmarked, onSetRole })}
+      {quiz({ pictureOf, onFocusPicture, unmarked, onSetRole })}
     </div>
   );
 }
 type QuizProps = {
   pictureOf?: (id: number) => QuizPicture | null;
   onFocusPicture?: (a: QuizAnchor | null) => void;
-  hotSpot?: number | null;
-  onHotSpot?: (n: number | null) => void;
   unmarked?: number[];
   onSetRole?: (id: number, role: string) => void;
 };

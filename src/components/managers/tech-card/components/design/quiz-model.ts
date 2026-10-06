@@ -77,6 +77,22 @@ export const EDGE_MAIN_KEY = 'edge_finish_main';
 export const EDGE_EXCEPTIONS_KEY = 'edge_exceptions';
 export const EDGE_NONE = 'none — all the same';
 
+/**
+ * 102-QUICKWIN B2/C2: у вопроса «что меняем с картинки N» (target, multi) сервер первым ставит этот
+ * вариант — слово в слово. В multi он ИСКЛЮЧАЮЩИЙ: выбрать его — снять остальные, выбрать другой —
+ * снять его. Сравнение без регистра и по краям без пробелов.
+ */
+export const MATCH_AS_SHOWN = 'match as shown — no changes';
+export const isMatchAsShown = (option?: string | null) =>
+  clean(option).toLowerCase() === MATCH_AS_SHOWN;
+
+/** Щелчок по чипу multi: переключить вариант, «match as shown» исключает остальные (C2). */
+export function toggleMulti(selected: readonly string[], option: string): string[] {
+  if (selected.includes(option)) return selected.filter((x) => x !== option);
+  if (isMatchAsShown(option)) return [option];
+  return [...selected.filter((x) => !isMatchAsShown(x)), option];
+}
+
 /** Вставной вопрос-продолжение (уточнение O2 или исключения краёв): не базовый, сервер его не знает. */
 export const isFollowUpId = (id?: string | null) =>
   (id ?? '').startsWith('clarify_') || (id ?? '').startsWith('edge_exceptions_');

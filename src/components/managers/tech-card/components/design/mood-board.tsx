@@ -1162,8 +1162,6 @@ export function MoodBoard({
               conceptMax={CONCEPT_MAX}
               pictureOf={pictureOf}
               onFocusPicture={onFocusPicture}
-              hotSpot={hotSpot}
-              onHotSpot={onHotSpot}
               unmarked={unmarked}
               onSetRole={setRoleOf}
             />
