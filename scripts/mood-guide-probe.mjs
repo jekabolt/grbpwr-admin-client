@@ -184,6 +184,29 @@ try {
         draftButtons: buttons('[data-c19-draft]'),
         askMore: seen('[data-quiz-ask-more]'),
         apply: text.includes('apply to description'),
+        // every visible black primary on the step (Button variant='main' paints bg-textColor)
+        primaries: [...document.querySelectorAll('[data-step-screen="mood"] button')]
+          .filter(
+            (b) => b.checkVisibility() && getComputedStyle(b).backgroundColor === 'rgb(0, 0, 0)',
+          )
+          .map((b) => b.textContent?.replace(/\s+/g, ' ').trim()),
+        nextRight: (() => {
+          const row = document.querySelector('[data-c19-draft-next]');
+          const btn = [...(row?.querySelectorAll('button') ?? [])].find(
+            (b) => b.textContent?.trim() === 'next ✦',
+          );
+          const sec = document.querySelector('[data-c19-draft]')?.closest('section') ?? row;
+          if (!row || !btn || !sec) return null;
+          const br = btn.getBoundingClientRect();
+          const rr = row.getBoundingClientRect();
+          const inspect = row.querySelector('[data-c19-draft-inspect]')?.getBoundingClientRect();
+          return {
+            gapRight: Math.round(rr.right - br.right),
+            inspectLeft: !!inspect && inspect.right < br.left,
+            last: [...row.querySelectorAll('button')].pop() === btn,
+          };
+        })(),
+        askMeQuiet: !!document.querySelector('[data-quiz-quiet]'),
       };
     });
 
@@ -220,8 +243,18 @@ try {
   ck(
     v.draftButtons.some((t) => /^next ✦$/i.test(t ?? '')) &&
       !v.draftButtons.some((t) => /^generate$/i.test(t ?? '')),
-    'its door reads `next ✦` in the GenerateRow slot',
+    'its door reads `next ✦`, no GENERATE',
     JSON.stringify(v.draftButtons),
+  );
+  ck(
+    !!v.nextRight && v.nextRight.gapRight <= 1 && v.nextRight.last && v.nextRight.inspectLeft,
+    '`next ✦` sits bottom right of DESCRIPTION, `what the model gets ▸` to its left',
+    JSON.stringify(v.nextRight),
+  );
+  ck(
+    v.askMeQuiet && v.primaries.length === 1 && v.primaries[0] === 'next ✦',
+    'ONE black primary on the face (`next ✦`); ASK ME steps down',
+    JSON.stringify(v.primaries),
   );
   ck(v.blocksHidden && !v.footer, 'blocks and footer still hidden');
 
@@ -232,6 +265,10 @@ try {
   ck(!v.blocksHidden && v.blocksSeen && v.slots, 'every lower block shown (MATERIAL SLOTS)');
   ck(v.footer, '`go to flats ›` footer present');
   ck(v.oldTile && !v.firstTile, 'the old first-tile copy');
+  ck(
+    !v.askMeQuiet && v.nextRight === null,
+    'ASK ME row and GENERATE row as before (no quiet row, no guided next row)',
+  );
   ck(
     v.draftButtons.some((t) => /^generate$/i.test(t ?? '')),
     'the draft door reads GENERATE',

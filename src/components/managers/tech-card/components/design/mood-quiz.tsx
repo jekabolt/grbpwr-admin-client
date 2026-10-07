@@ -10,6 +10,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { TechCardFormData } from '../schema';
+import { InertDoor } from './bench-slot';
 import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { Counter } from './core';
 import { openStepOf } from './core/chain';
@@ -162,8 +163,10 @@ export function MoodQuiz({
    * `ask more ✦` — in this same row. `waiting`: the card has answers and no description yet, so
    * the pair stands without a batch having just ended (a reload, a second tab). `onReveal` opens
    * DESCRIPTION when it already has words (Q5: `next` on a written description writes nothing).
+   * `quiet`: the described face — DESCRIPTION's `next ✦` is the step's one primary, so ASK ME is a
+   * secondary door and no pair is offered (the description it would write is already there).
    */
-  guide?: { waiting: boolean; onReveal: () => void };
+  guide?: { waiting: boolean; quiet: boolean; onReveal: () => void };
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
@@ -628,8 +631,101 @@ export function MoodQuiz({
   // door to it — the pair's `next ✦` (S5).
   const canApply = !guide && !readOnly && answered > 0;
   // S5: the batch-end pair takes the row's door — never while a batch is still open or being asked.
+  const quiet = !!guide?.quiet;
   const pair =
-    !!guide && !readOnly && !asking && remaining.length === 0 && (batchDone || guide.waiting);
+    !!guide &&
+    !quiet &&
+    !readOnly &&
+    !asking &&
+    remaining.length === 0 &&
+    (batchDone || guide.waiting);
+
+  const trailingRow = (
+    <>
+      {pair && (
+        <Button
+          variant='underline'
+          size='xs'
+          data-quiz-ask-more=''
+          disabled={applying}
+          onClick={() => {
+            setBatchDone(false);
+            ask();
+          }}
+        >
+          ask more ✦
+        </Button>
+      )}
+      {answersFailed && (
+        <Button
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          onClick={() => void refetch()}
+        >
+          retry
+        </Button>
+      )}
+      {!asking && !readOnly && remaining.length > 0 && (
+        <>
+          <Button variant='underline' size='xs' data-quiz-resume='' onClick={resume}>
+            resume {remaining.length}
+          </Button>
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            data-quiz-discard=''
+            onClick={() => void discard()}
+          >
+            discard
+          </Button>
+        </>
+      )}
+      {nothingLeft && (
+        <Text size='micro' variant='label' component='span'>
+          nothing left to ask
+        </Text>
+      )}
+      {answers.length > 0 && (
+        <>
+          <Counter n={answered} noun='answer' />
+          {staleCount > 0 && (
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-warning'
+              data-quiz-stale-count={staleCount}
+              disabled={readOnly}
+              onClick={review}
+            >
+              {staleCount} stale
+            </Button>
+          )}
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            aria-expanded={listOpen}
+            onClick={() => setListOpen(!listOpen)}
+          >
+            {listOpen ? 'answers ▴' : 'answers ▾'}
+          </Button>
+        </>
+      )}
+      {canApply && (
+        <Button
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          disabled={applying}
+          onClick={apply}
+        >
+          {applying ? 'writing…' : 'apply to description ✦'}
+        </Button>
+      )}
+    </>
+  );
 
   return (
     <div>
@@ -666,102 +762,44 @@ export function MoodQuiz({
           }
         />
       )}
-      <GenerateRow
-        gate={pair && ready ? { ok: true } : gate}
-        pending={pair ? applying : asking}
-        disabled={readOnly}
-        onGenerate={pair ? () => void next() : ask}
-        label={pair ? 'next ✦' : 'ASK ME'}
-        pendingLabel={
-          pair ? 'writing…' : elapsed > 0 ? `reading the board… ${elapsed} s` : 'reading the board…'
-        }
-        trailing={
-          <>
-            {pair && (
-              <Button
-                variant='underline'
-                size='xs'
-                data-quiz-ask-more=''
-                disabled={applying}
-                onClick={() => {
-                  setBatchDone(false);
-                  ask();
-                }}
-              >
-                ask more ✦
-              </Button>
-            )}
-            {answersFailed && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                onClick={() => void refetch()}
-              >
-                retry
-              </Button>
-            )}
-            {!asking && !readOnly && remaining.length > 0 && (
-              <>
-                <Button variant='underline' size='xs' data-quiz-resume='' onClick={resume}>
-                  resume {remaining.length}
-                </Button>
-                <Button
-                  variant='underline'
-                  size='xs'
-                  className='text-labelColor hover:text-textColor'
-                  data-quiz-discard=''
-                  onClick={() => void discard()}
-                >
-                  discard
-                </Button>
-              </>
-            )}
-            {nothingLeft && (
-              <Text size='micro' variant='label' component='span'>
-                nothing left to ask
-              </Text>
-            )}
-            {answers.length > 0 && (
-              <>
-                <Counter n={answered} noun='answer' />
-                {staleCount > 0 && (
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    className='text-warning'
-                    data-quiz-stale-count={staleCount}
-                    disabled={readOnly}
-                    onClick={review}
-                  >
-                    {staleCount} stale
-                  </Button>
-                )}
-                <Button
-                  variant='underline'
-                  size='xs'
-                  className='text-labelColor hover:text-textColor'
-                  aria-expanded={listOpen}
-                  onClick={() => setListOpen(!listOpen)}
-                >
-                  {listOpen ? 'answers ▴' : 'answers ▾'}
-                </Button>
-              </>
-            )}
-            {canApply && (
-              <Button
-                variant='underline'
-                size='xs'
-                className='text-labelColor hover:text-textColor'
-                disabled={applying}
-                onClick={apply}
-              >
-                {applying ? 'writing…' : 'apply to description ✦'}
-              </Button>
-            )}
-          </>
-        }
-      />
+      {quiet ? (
+        /* S5: on the described face DESCRIPTION's `next ✦` is the one black primary; ASK ME
+           steps down to the secondary door of the same row. */
+        <div className='flex flex-wrap items-center gap-2 py-1' data-quiz-quiet=''>
+          {gate.ok && !readOnly ? (
+            <Button variant='secondary' size='sm' onClick={ask} disabled={asking}>
+              {asking
+                ? elapsed > 0
+                  ? `reading the board… ${elapsed} s`
+                  : 'reading the board…'
+                : 'ASK ME'}
+            </Button>
+          ) : (
+            <InertDoor
+              label='ASK ME'
+              reason={readOnly ? 'read-only' : gate.ok ? '' : gate.reason}
+              size='sm'
+            />
+          )}
+          {trailingRow}
+        </div>
+      ) : (
+        <GenerateRow
+          gate={pair && ready ? { ok: true } : gate}
+          pending={pair ? applying : asking}
+          disabled={readOnly}
+          onGenerate={pair ? () => void next() : ask}
+          label={pair ? 'next ✦' : 'ASK ME'}
+          pendingLabel={
+            pair
+              ? 'writing…'
+              : elapsed > 0
+                ? `reading the board… ${elapsed} s`
+                : 'reading the board…'
+          }
+          trailing={trailingRow}
+        />
+      )}
       {listOpen && answers.length > 0 && (
         <ul className='mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t border-hairline'>
           {answers.map((a) => {

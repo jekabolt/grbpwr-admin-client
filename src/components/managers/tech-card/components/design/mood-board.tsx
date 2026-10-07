@@ -1275,6 +1275,7 @@ export function MoodBoard({
               guide={
                 guide && {
                   waiting: guide.stage === 'asked',
+                  quiet: guide.show.description && !guide.show.blocks,
                   onReveal: () => guide.reveal('description'),
                 }
               }
