@@ -673,7 +673,7 @@ export function Bench({
                      ждёт, и прогон не снимет наполовину переименованный вход. */
                   if (!rowsWritable(readFlatInput(techCardId))) {
                     showMessage(
-                      'the flat input is busy — a run is being saved or started, or the prompt is being cleared; the detail was not renamed',
+                      'the flat input is busy — a run is being saved or started, the prompt is being cleared, or an emptied detail is being tidied; the detail was not renamed',
                       'error',
                     );
                     return;

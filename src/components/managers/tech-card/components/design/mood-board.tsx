@@ -45,7 +45,14 @@ import { draftedKey, useDrafted } from './drafted-contract';
 import { useCardFacts } from './head/card-facts-form';
 import { ConstructionDraft } from './head/construction-draft';
 import { useAcceptOnEdit } from './head/drafted-provider';
-import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat-input';
+import {
+  holdBoardTidy,
+  holdFlatInput,
+  readFlatInput,
+  rowsBusySay,
+  rowsWritable,
+  useFlatInput,
+} from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
@@ -70,6 +77,7 @@ import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 import {
+  cardOnScreen,
   designKeys,
   newClientRequestId,
   rereadBandNow,
@@ -556,7 +564,7 @@ export function MoodBoard({
   const flatInput = useFlatInput(techCardId);
   const boardBusy = () => {
     if (!flatInput.run && rowsWritable(readFlatInput(techCardId))) return false;
-    showMessage('a flat run is being started — change the board once it has started', 'error');
+    showMessage(rowsBusySay(readFlatInput(techCardId), 'change the board'), 'error');
     return true;
   };
 
@@ -849,47 +857,101 @@ export function MoodBoard({
      or that holds a plate, is never touched. */
   async function dropModelDetailAfterRemoval(mediaId: number, slotId: number) {
     const card = techCardId;
-    let saved: FlushResult;
+    // LOCKED for the whole cleanup (Codex re-review 07.10): no board row, purpose, label or detail
+    // name of this card is edited in this tab until the release — the decision cannot go stale here.
+    const release = holdBoardTidy(card);
     try {
-      saved = await autosave.flush('moodboard: a picture off the board');
-    } catch {
-      saved = 'error';
-    }
-    if (saved !== 'ok' && saved !== 'nothing') return;
-    const board = new Set(
-      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow).map((i) => i.mediaId),
-    );
-    // Put back meanwhile (undo, a drop of the same picture): the slot is its again.
-    if (board.has(mediaId)) return;
-    let fresh: GetDesignBandResponse;
-    try {
-      fresh = await rereadBandNow(qc, card);
-    } catch {
-      return;
-    }
-    const slot = photoDetailSlots(fresh.bench).find((s) => (s.id ?? 0) === slotId);
-    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
-    const pointing = (fresh.references ?? []).filter(
-      (r) => (r.role ?? '').trim() === 'detail' && (r.detailSlotId ?? 0) === slotId,
-    );
-    if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;
-    const orphans = pointing.filter((r) => !board.has(r.mediaId ?? 0) && isPersonLabel(r));
-    if (orphans.length) {
-      const release = holdFlatInput(card);
+      let saved: FlushResult;
       try {
-        for (const r of orphans)
-          await setReferenceRole
-            .mutateAsync({
-              mediaId: r.mediaId ?? 0,
-              role: '',
-              ordinal: Math.max(1, r.ordinal ?? 1),
-            })
-            .catch(() => {});
-      } finally {
-        release();
+        saved = await autosave.flush('moodboard: a picture off the board');
+      } catch {
+        saved = 'error';
       }
+      if (saved !== 'ok' && saved !== 'nothing') return;
+      const onBoard = () =>
+        new Set(
+          ((getValues('moodboardMedia') ?? []) as BoardItem[])
+            .filter(isBoardRow)
+            .map((i) => i.mediaId),
+        );
+      // Put back meanwhile (undo, a drop of the same picture): the slot is its again.
+      if (onBoard().has(mediaId)) return;
+      /** What the decision saw — every write re-checks the LIVE state against it. */
+      const labelSig = (r: common_DesignReference | undefined) =>
+        r
+          ? [r.role, r.detailSlotId, r.labelSource, r.labelState, r.ordinal, r.setAt]
+              .map((v) => String(v ?? ''))
+              .join('|')
+          : '';
+      type Decision = { slotName: string; orphans: Map<number, string> };
+      /** The orphaned person labels, or null when the slot is not an emptied, untouched model detail. */
+      const decide = (band: GetDesignBandResponse): Decision | null => {
+        const slot = photoDetailSlots(band.bench).find((s) => (s.id ?? 0) === slotId);
+        if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return null;
+        const board = onBoard();
+        const pointing = (band.references ?? []).filter(
+          (r) => (r.role ?? '').trim() === 'detail' && (r.detailSlotId ?? 0) === slotId,
+        );
+        if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return null;
+        const orphans = new Map<number, string>();
+        for (const r of pointing)
+          if (!board.has(r.mediaId ?? 0) && isPersonLabel(r))
+            orphans.set(r.mediaId ?? 0, labelSig(r));
+        return { slotName: (slot.detailName ?? '').trim(), orphans };
+      };
+      let first: Decision | null;
+      try {
+        first = decide(await rereadBandNow(qc, card));
+      } catch {
+        return;
+      }
+      if (!first) return;
+      for (const [orphanId, sig] of first.orphans) {
+        // Never a write for a card no longer on screen (another card's board took this tab).
+        if (!cardOnScreen(card)) return;
+        // RE-VALIDATED ON LIVE STATE before EACH write (another tab, a late answer): the picture is
+        // still off the live board, the slot is still the same untouched model detail, and its label
+        // is the very label the decision saw. Anything else — no write, and the cleanup stops.
+        let band: GetDesignBandResponse;
+        try {
+          band = await rereadBandNow(qc, card);
+        } catch {
+          return;
+        }
+        const slotNow = photoDetailSlots(band.bench).find((s) => (s.id ?? 0) === slotId);
+        // the slot: still the model's, unnamed by a person, no plate, the same name
+        if (!slotNow?.madeByModel || (slotNow.pictureId ?? 0) > 0) return;
+        if ((slotNow.detailName ?? '').trim() !== first.slotName) return;
+        // the board: the picture is still off it, and no picture on it points at the slot
+        const boardNow = onBoard();
+        if (boardNow.has(orphanId)) return;
+        if (
+          (band.references ?? []).some(
+            (r) =>
+              (r.role ?? '').trim() === 'detail' &&
+              (r.detailSlotId ?? 0) === slotId &&
+              boardNow.has(r.mediaId ?? 0) &&
+              !isHeldLabel(r),
+          )
+        )
+          return;
+        // the label: the very one the decision saw
+        const live = (band.references ?? []).find((r) => (r.mediaId ?? 0) === orphanId);
+        if (labelSig(live) !== sig) return;
+        try {
+          await setReferenceRole.mutateAsync({
+            mediaId: orphanId,
+            role: '',
+            ordinal: Math.max(1, live?.ordinal ?? 1),
+          });
+        } catch {
+          return;
+        }
+      }
+      followSlotGone(qc, card, slotId);
+    } finally {
+      release();
     }
-    followSlotGone(qc, card, slotId);
   }
 
   function confirmRemove() {

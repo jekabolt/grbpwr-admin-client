@@ -7,7 +7,13 @@ import type { TechCardFormData } from '../schema';
 import { takeProposals, type BoardMenuPick } from './board-labels';
 import { isBoardRow } from './core/mood-gate';
 import { DetailNamingModal } from './detail-naming-modal';
-import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat-input';
+import {
+  holdFlatInput,
+  readFlatInput,
+  rowsBusySay,
+  rowsWritable,
+  useFlatInput,
+} from './flat-input';
 import { forgetInputRemovalOf } from './removal-undo';
 import { useDesignWrites } from './use-design-band';
 import { DETAIL_VIEW } from './views';
@@ -52,7 +58,7 @@ export function useBoardPick(techCardId: number, readOnly: boolean) {
   const busy = useCallback(
     (what: string) => {
       if (!flatInput.run && rowsWritable(readFlatInput(techCardId))) return false;
-      showMessage(`a flat run is being started — ${what} once it has started`, 'error');
+      showMessage(rowsBusySay(readFlatInput(techCardId), what), 'error');
       return true;
     },
     [flatInput.run, techCardId, showMessage],
@@ -207,7 +213,7 @@ export function usePutBack(techCardId: number) {
     async (mediaId: number): Promise<boolean> => {
       const card = techCardId;
       if (!rowsWritable(readFlatInput(card))) {
-        showMessage('a flat run is being started — send it again once it has started', 'error');
+        showMessage(rowsBusySay(readFlatInput(card), 'send it again'), 'error');
         return false;
       }
       const release = holdFlatInput(card);
