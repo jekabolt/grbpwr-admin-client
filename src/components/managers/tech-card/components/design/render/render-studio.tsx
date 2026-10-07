@@ -368,8 +368,12 @@ export function RenderStudio({
   const hardware = useMemo(
     () =>
       painted.kind === 'maps'
-        ? { labels: painted.hardwareLabels, views: painted.hardwareViews }
-        : { labels: new Map<string, number>(), views: [] as string[] },
+        ? {
+            labels: painted.hardwareLabels,
+            views: painted.hardwareViews,
+            remainder: painted.remainder,
+          }
+        : { labels: new Map<string, number>(), views: [] as string[], remainder: -1 },
     [painted],
   );
   const wire = useMemo(
@@ -489,7 +493,13 @@ export function RenderStudio({
         const mocked = colourMaps.filter((m) => keep.has(m.view ?? ''));
         const { ids, error } =
           mocked.length > 0
-            ? await paint.mockups(mocked, wire.fabrics ?? [], scales, hardware.labels)
+            ? await paint.mockups(
+                mocked,
+                wire.fabrics ?? [],
+                scales,
+                hardware.labels,
+                hardware.remainder,
+              )
             : { ids: new Map<string, number>(), error: '' };
         /* R9 · a map that carries hardware goes out EXPORTED: its hardware pixels in the cloth
            around them (a hardware hex on the model's map tints the button), its own media. */

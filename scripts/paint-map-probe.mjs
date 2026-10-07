@@ -1231,6 +1231,136 @@ ck(
       onlyHw.fabrics.filter((f) => f.kind !== 'hardware').length === 2,
     'R9 only buttons painted: the whole pack travels, no remainder made up',
   );
+  // Fix 3 · the REMAINDER travels as an explicit index, never «the first use without a mapHex».
+  ck(
+    run.remainder === 1 &&
+      run.fabrics[1].assetId === 202 &&
+      m.remainderUse(run.fabrics, run.remainder) === run.fabrics[1],
+    'R9 fix 3: the run names its REMAINDER by index (the unpainted pack cloth)',
+  );
+  ck(
+    onlyHw.remainder === -1 && m.remainderUse(onlyHw.fabrics, onlyHw.remainder) === undefined,
+    'R9 fix 3: only hardware painted over two cloths — no remainder (placement-only mockup)',
+    `remainder ${onlyHw.remainder}`,
+  );
+  const oneHw = m.paintRun({
+    band,
+    plan: planOf([L.get(31)]),
+    slots: [cloth[0]],
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  ck(
+    oneHw.kind === 'maps' && oneHw.remainder === 0 && oneHw.fabrics[0].assetId === 201,
+    'R9 fix 3: only hardware painted over ONE cloth — that cloth is the whole garment',
+  );
+  const isHwHex = (hex) => [31, 32, 33].some((id) => L.get(id) === hex);
+  ck(
+    m.remainderCloth({
+      band,
+      slots: cloth,
+      colorwayId: 11,
+      painted: new Set([L.get(31)]),
+      isHardware: isHwHex,
+    }) === null &&
+      m.remainderCloth({
+        band,
+        slots: [cloth[0]],
+        colorwayId: 11,
+        painted: new Set([L.get(31)]),
+        isHardware: isHwHex,
+      })?.assetId === 201 &&
+      m.remainderCloth({
+        band,
+        slots: cloth,
+        colorwayId: 11,
+        painted: new Set([L.get(1), L.get(31)]),
+        isHardware: isHwHex,
+      })?.assetId === 202,
+    'R9 fix 3: the canvas remainder keeps the same rule (hardware divides no cloth)',
+  );
+  // The placement-only mockup: no remainder → the flat stands wherever no label is skinned.
+  {
+    const fw = 4;
+    const flat4 = {
+      w: fw,
+      h: 1,
+      labels: new Int32Array(fw).fill(1),
+      silhouette: new Uint8Array(fw).fill(1),
+    };
+    const px4 = new Uint8ClampedArray(fw * 4).map((_, k) => (k % 4 === 3 ? 255 : 200));
+    const mk4 = m.mockupPixels(flat4, new Uint32Array(fw), px4, new Map(), null, []);
+    const skinned = m.mockupPixels(
+      flat4,
+      new Uint32Array(fw),
+      px4,
+      new Map(),
+      { kind: 'colour', hex: '#ff0000' },
+      [],
+    );
+    ck(
+      [...mk4.slice(0, 3)].join() === '200,200,200' &&
+        [...skinned.slice(0, 3)].join() !== '200,200,200',
+      'R9 fix 3: a placement-only mockup invents no garment skin',
+    );
+  }
+
+  // Fix 2 · no cloth bound in this colourway (the cloth stated in words): a painted button still
+  // travels — the run augments the base recipe with its use and the hardware view's map only.
+  const bandWords = { ...band, assetBindings: band.assetBindings.filter((b) => b.bomItemId > 30) };
+  const plan2 = planOf([L.get(31)]);
+  plan2.maps.push({
+    mediaId: 901,
+    view: 'back',
+    baseMediaId: 102,
+    palette: [],
+    url: '',
+    gone: false,
+  });
+  bandWords.bench = [
+    ...band.bench,
+    {
+      id: 2,
+      viewKey: 'back',
+      kind: 'flat',
+      pictureId: 2,
+      slotRev: 1,
+      picture: { id: 2, media: media(102) },
+    },
+  ];
+  const wordsOnly = m.paintRun({
+    band: bandWords,
+    plan: plan2,
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  ck(
+    wordsOnly.kind === 'maps' &&
+      wordsOnly.fabrics.length === 1 &&
+      wordsOnly.fabrics[0].kind === 'hardware' &&
+      wordsOnly.fabrics[0].name === 'FRONT BUTTON' &&
+      wordsOnly.remainder === -1 &&
+      wordsOnly.fabricMediaId === 0 &&
+      wordsOnly.colourMaps.map((x) => x.view).join() === 'front' &&
+      wordsOnly.colourMaps[0].palette.length === 0,
+    'R9 fix 2: no cloth bound + a painted button — the hardware travels (never dropped)',
+    JSON.stringify(wordsOnly.kind === 'maps' ? wordsOnly.colourMaps.map((x) => x.view) : wordsOnly),
+  );
+  ck(
+    m.paintRun({
+      band: bandWords,
+      plan: planOf([]),
+      slots: cloth,
+      colorwayId: 11,
+      colorwayLabel: '',
+      hardware: hwSlots,
+    }).kind === 'none',
+    'R9 (control) no cloth bound and nothing painted: the base recipe alone',
+  );
+
   // Three painted hardware slots: the first two send a picture, the third goes in words.
   const three = m.paintRun({
     band,

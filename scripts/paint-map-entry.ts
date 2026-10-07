@@ -10,6 +10,7 @@ export {
   MAX_RENDER_HARDWARE,
   paintRun,
   remainderCloth,
+  remainderUse,
 } from 'components/managers/tech-card/components/design/paint/plan-run';
 export { isPaintableHardware } from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
 export * from 'components/managers/tech-card/components/design/paint/ceiling';

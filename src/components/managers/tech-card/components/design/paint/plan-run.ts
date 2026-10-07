@@ -59,7 +59,23 @@ export type PaintRun =
       hardwareViews: string[];
       /** R9 · hardware label hex → its use's index in `fabrics`. */
       hardwareLabels: Map<string, number>;
+      /**
+       * R9 fix 3 · the index in `fabrics` of the cloth that covers every unpainted part (the
+       * mockup skins the unpainted garment with it), or -1: none — the mockup then shows the flat
+       * itself there (a placement-only mockup when no cloth is painted). Never inferred from a
+       * missing `mapHex`: with only hardware painted, every cloth lacks one.
+       */
+      remainder: number;
     };
+
+/** R9 fix 3 · the REMAINDER use by its explicit index (`paintRun`); a hardware use never is one. */
+export function remainderUse(
+  uses: readonly common_DesignFabricUse[],
+  remainder: number,
+): common_DesignFabricUse | undefined {
+  const u = remainder >= 0 ? uses[remainder] : undefined;
+  return u && !isHardwareUse(u) && !(u.mapHex ?? '').trim() ? u : undefined;
+}
 
 /** R9 · the words of a hardware slot: what the BOM line says of it, past its name. */
 const hardwareWords = (slot: ClothSlot): string =>
@@ -170,7 +186,7 @@ export function paintRun({
   }
   const pack = boundClothsOf(band, colorwayId, list);
   const fabrics: common_DesignFabricUse[] = [];
-  let remainder = false;
+  let remainder = -1;
   // R9 · only hardware painted: the cloths travel exactly as the pack (nobody divided them).
   const clothPainted = painted.some((hex) => !hwByLabel.has(hex));
   for (const c of pack) {
@@ -189,13 +205,16 @@ export function paintRun({
             mapHex: labelOf.get(sl.bomItemId) ?? '',
           }),
         );
-    } else if (!remainder) {
-      remainder = true;
+    } else if (remainder < 0) {
+      remainder = fabrics.length;
       fabrics.push(fabricUseOf(band, c.assetId, { parts: '' }));
     }
   }
   fabrics.push(...colourUses);
   const cloths = fabrics.length;
+  // R9 fix 3 · only hardware painted: ONE cloth is the whole garment, so it skins it; several are
+  // divided by nobody here, so none does (the mockup shows the flat with the hardware on it).
+  if (!clothPainted && cloths === 1) remainder = 0;
 
   // R9 · one use per painted hardware slot, in pack order; the first MAX_RENDER_HARDWARE with a
   // picture send it. No mapHex: the label stays off the model's map.
@@ -222,15 +241,20 @@ export function paintRun({
     });
   }
 
-  if (cloths === 0 || (cloths < 2 && hardwareLabels.size === 0)) return { kind: 'none' };
+  // R9 fix 2 · painted hardware always travels. With no cloth bound (the cloth stated in words or
+  // colour) the pack is empty, so these uses AUGMENT the base recipe: its words and colour stay.
+  if (hardwareLabels.size === 0 && cloths < 2) return { kind: 'none' };
   const hardwareViews = maps
     .filter((m) => m.palette.some((sw) => hwByLabel.has(sw.hex)))
     .map((m) => m.view);
+  // Only hardware painted: a map without hardware labels nothing, so only the hardware views go.
+  const going = clothPainted ? maps : maps.filter((m) => hardwareViews.includes(m.view));
   return {
     kind: 'maps',
     fabrics,
     fabricMediaId: fabrics.find((f) => !isHardwareUse(f) && (f.mediaId ?? 0) > 0)?.mediaId ?? 0,
-    colourMaps: maps.map((m) => {
+    remainder,
+    colourMaps: going.map((m) => {
       const w = writeMap(m);
       return { ...w, palette: (w.palette ?? []).filter((sw) => !hwByLabel.has(sw.hex ?? '')) };
     }),
@@ -293,13 +317,17 @@ export function remainderCloth({
   slots,
   colorwayId,
   painted,
+  isHardware,
 }: {
   band: GetDesignBandResponse;
   slots: readonly ClothSlot[] | undefined;
   colorwayId: number;
   painted: ReadonlySet<string>;
+  /** R9 fix 3 · a hardware label divides no cloth (the rule `paintRun` keeps). */
+  isHardware?: (hex: string) => boolean;
 }): { assetId: number; label: string } | null {
   if (painted.size === 0) return null;
+  const clothPainted = [...painted].some((hex) => !isHardware?.(hex));
   const list = (slots ?? []).filter((s) => s.bomItemId > 0);
   const labelOf = slotLabels(list.map((s) => s.bomItemId));
   const byAsset = new Map<number, ClothSlot[]>();
@@ -307,7 +335,10 @@ export function remainderCloth({
     const id = asset.id ?? 0;
     if (id > 0) byAsset.set(id, [...(byAsset.get(id) ?? []), slot]);
   }
-  for (const c of boundClothsOf(band, colorwayId, list)) {
+  const pack = boundClothsOf(band, colorwayId, list);
+  // Only hardware painted: one cloth is the whole garment; several are divided by nobody.
+  if (!clothPainted && pack.length !== 1) return null;
+  for (const c of pack) {
     const own = byAsset.get(c.assetId) ?? [];
     if (own.some((sl) => painted.has(labelOf.get(sl.bomItemId) ?? ''))) continue;
     return { assetId: c.assetId, label: labelOf.get(own[0]?.bomItemId ?? 0) ?? '' };

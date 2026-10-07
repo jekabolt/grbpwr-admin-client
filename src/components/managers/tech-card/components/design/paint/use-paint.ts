@@ -99,7 +99,7 @@ import {
   type Picture,
   type ViewScale,
 } from './mockup';
-import { hardwarePartsText, isHardwareUse, remainderCloth } from './plan-run';
+import { hardwarePartsText, remainderCloth, remainderUse } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, withOpenings, type FlatRegions } from './regions';
 import { dec, num, strayMarks, type StrayMark } from './artworks';
 import {
@@ -997,6 +997,7 @@ export class PaintSession {
       slots: this.lastSlots,
       colorwayId: this.lastColorway,
       painted,
+      isHardware: (hex) => this.isHardware(packHex(hex)),
     });
     this.remainderAt = { key, label: r?.label ?? '' };
     return this.remainderAt.label;
@@ -1768,6 +1769,7 @@ export class PaintSession {
     uses: readonly common_DesignFabricUse[],
     scales: ReadonlyMap<string, number>,
     hardware: ReadonlyMap<string, number>,
+    remainder: number,
   ): string {
     const assets = new Map((this.band?.assets ?? []).map((a) => [a.id ?? 0, a]));
     const look = (u: common_DesignFabricUse | undefined) => {
@@ -1783,7 +1785,7 @@ export class PaintSession {
     return JSON.stringify([
       MOCKUP_REV,
       REGIONS_ALGO_REV,
-      look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0 && !isHardwareUse(u))),
+      look(remainderUse(uses, remainder)),
       // R9 · each hardware label with the picture its use sends (its place is in the map's raster).
       [...hardware].map(([hex, k]) => [hex, uses[k]?.assetId ?? 0, uses[k]?.mediaId ?? 0]),
       maps.map((m) => {
@@ -1817,6 +1819,7 @@ export class PaintSession {
     scales: ReadonlyMap<string, number>,
     sig: string,
     hardware: ReadonlyMap<string, number>,
+    remainder: number,
   ): Promise<Map<string, string>> {
     const hit = this.mockDrawn.get(sig);
     if (hit) return hit;
@@ -1844,9 +1847,10 @@ export class PaintSession {
       const c = (use.colourHex ?? '').trim();
       return c ? ({ kind: 'colour', hex: c } as MockupSkin) : null;
     };
-    const rest = uses.find(
-      (u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0 && !isHardwareUse(u),
-    );
+    // R9 fix 3 · the REMAINDER by its index from `paintRun`, never «the first use without a
+    // mapHex»: with only hardware painted every cloth lacks one, and the first would skin the
+    // whole garment (a satin lapel included). -1 → the flat itself stands there.
+    const rest = remainderUse(uses, remainder);
     // R9 · a hardware use's picture (only when its use sends one), fitted into each instance.
     const pictureOf = async (use: common_DesignFabricUse | undefined): Promise<Picture | null> => {
       const asset = use && (use.mediaId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
@@ -1912,6 +1916,7 @@ export class PaintSession {
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
     hardware: ReadonlyMap<string, number> = new Map(),
+    remainder = -1,
   ): Promise<Map<string, string>> {
     try {
       const scales = this.scaleSnapshot(maps);
@@ -1919,8 +1924,9 @@ export class PaintSession {
         maps,
         uses,
         scales,
-        this.mockSig(maps, uses, scales, hardware),
+        this.mockSig(maps, uses, scales, hardware, remainder),
         hardware,
+        remainder,
       );
     } catch {
       return new Map();
@@ -1939,12 +1945,13 @@ export class PaintSession {
     uses: readonly common_DesignFabricUse[],
     scales: ReadonlyMap<string, number> = this.scaleSnapshot(maps),
     hardware: ReadonlyMap<string, number> = new Map(),
+    remainder = -1,
   ): Promise<{ ids: Map<string, number>; error: string }> {
-    const sig = this.mockSig(maps, uses, scales, hardware);
+    const sig = this.mockSig(maps, uses, scales, hardware, remainder);
     const hit = this.mockCache.get(sig);
     if (hit) return { ids: hit, error: '' };
     try {
-      const drawn = await this.drawMockups(maps, uses, scales, sig, hardware);
+      const drawn = await this.drawMockups(maps, uses, scales, sig, hardware, remainder);
       const ids = new Map<string, number>();
       for (const m of maps) {
         const view = m.view ?? '';
@@ -2261,7 +2268,7 @@ export function useMapLooks(
   uses: readonly common_DesignFabricUse[] | undefined,
   open: boolean,
   /** R9 · hardware label → its use's index (`paintRun`), and the views whose map is exported. */
-  hardware?: { labels: ReadonlyMap<string, number>; views: readonly string[] },
+  hardware?: { labels: ReadonlyMap<string, number>; views: readonly string[]; remainder: number },
 ): Map<string, { map: string; mockup: string; scale: string }> {
   const [drawn, setDrawn] = useState<Map<string, string>>(() => new Map());
   const [exported, setExported] = useState<Map<string, string>>(() => new Map());
@@ -2270,9 +2277,11 @@ export function useMapLooks(
   useEffect(() => {
     if (!open || !maps || maps.length === 0) return;
     let live = true;
-    void session.mockupPreviews(maps, uses ?? [], hardware?.labels).then((m) => {
-      if (live) setDrawn(m);
-    });
+    void session
+      .mockupPreviews(maps, uses ?? [], hardware?.labels, hardware?.remainder ?? -1)
+      .then((m) => {
+        if (live) setDrawn(m);
+      });
     const views = new Set(hardware?.views ?? []);
     const out = maps.filter((m) => views.has(m.view ?? ''));
     if (out.length > 0)
