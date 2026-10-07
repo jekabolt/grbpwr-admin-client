@@ -66,6 +66,36 @@ export function flatHumanWords(human: string): string {
 }
 
 /**
+ * THE PERSON'S LINES A FLAT RUN WAS GIVEN — what `recall ▸` puts back into FLAT › WORDS (`flatWords`).
+ *
+ * A flat run freezes `garmentNote` = the «garment: class» line, then the person's own lines (M14). Only
+ * those lines come back: the class line follows the card's category and is never typed. '' for:
+ *   · another kind — a render run's note IS the description, model-written prose that must not land
+ *     in a field whose every line travels as the person's word;
+ *   · a flat run older than M14 on beta (FLAT_WORDS_SINCE) — its lines after the class line were the
+ *     description's clauses (before 06.10) or nothing;
+ *   · a rerun — it rides its parent's frozen snapshot, which may be older than M14 (recall the
+ *     parent for its words).
+ */
+export const FLAT_WORDS_SINCE = Date.parse('2026-10-07T10:56:13Z');
+
+export function runFlatWords(run: {
+  kind?: string;
+  createdAt?: string;
+  rerunOf?: number;
+  inputs?: { garmentNote?: string };
+}): string {
+  if ((run.kind ?? '') !== 'flat' || (run.rerunOf ?? 0) > 0) return '';
+  const at = Date.parse(run.createdAt ?? '');
+  if (!(at >= FLAT_WORDS_SINCE)) return '';
+  const lines = (run.inputs?.garmentNote ?? '').split('\n');
+  const first = lines.findIndex((l) => l.trim() !== '');
+  const rest =
+    first >= 0 && /^garment\s*:/i.test(lines[first].trim()) ? lines.slice(first + 1) : lines;
+  return flatHumanWords(rest.join('\n'));
+}
+
+/**
  * THE CEILING OF THE FLAT WORDS (the server refuses a flat run above it: designMaxFlatWordsRunes) — a
  * few lines under the class line, not a second description.
  */

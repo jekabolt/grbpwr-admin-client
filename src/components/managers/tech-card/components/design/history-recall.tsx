@@ -24,7 +24,6 @@ import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
-import { useTechCardAutosave } from './autosave-contract';
 import { flatInputBusy, holdFlatInput, readFlatInput } from './flat-input';
 import { GapPill } from './generation/run-panel';
 import { isRunLive } from './generation/run-state';
@@ -37,7 +36,7 @@ import { pictureIsModel } from './threed/media';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
 import { DETAIL_VIEW, isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
-import { settleWords, shownWords } from './words-seed';
+import { flatHumanWords, runFlatWords } from './flat-route';
 
 /**
  * RECALL — ЖЕСТ «СОБЕРИ ЭТОТ ПРОГОН ЗАНОВО», И ОН РАЗРУШИТЕЛЕН, ПОЭТОМУ СПРАШИВАЕТ.
@@ -449,7 +448,8 @@ function planFlat(input: {
   mode: RecallMode;
   rows: BoardItem[];
   otherListIds: number[];
-  description: string;
+  /** The flat's own words now (`flatWords`) — what the run's lines would replace. */
+  flatWords: string;
 }) {
   const { alive, gone } = input.mode === 'results' ? keptResults(input.run) : keptRefs(input.run);
   /**
@@ -470,8 +470,11 @@ function planFlat(input: {
   const add = fresh.slice(0, room);
   const refused = fresh.length - add.length;
 
-  const words = input.mode === 'input' ? (input.run.inputs?.garmentNote ?? '').trim() : '';
-  const description = input.description.trim();
+  /* THE RUN'S WORDS GO BACK WHERE THEY CAME FROM (M15): a flat run was given «garment: class» + the
+     person's flat words, so only those lines return — into FLAT › WORDS, never into the description
+     (the class line follows the category; a render run's note is model-written prose). */
+  const words = input.mode === 'input' ? runFlatWords(input.run) : '';
+  const current = flatHumanWords(input.flatWords);
 
   return {
     add,
@@ -479,10 +482,10 @@ function planFlat(input: {
     refused,
     gone,
     words,
-    /** Текст, который слова прогона заменят. Пусто — заменять нечего, и вопрос об этом не стоит. */
-    replaces: words && words !== description ? description : '',
+    /** Строки WORDS, которые слова прогона заменят. Пусто — заменять нечего, и вопрос об этом не стоит. */
+    replaces: words && words !== current ? current : '',
     /** Жест, который ничего не сделает, называется так вслух, а не рисуется дверью. */
-    empty: !add.length && !(words && words !== description),
+    empty: !add.length && !(words && words !== current),
   };
 }
 
@@ -655,9 +658,6 @@ export function RecallDoors({
   disabled?: boolean;
 }) {
   const form = useFormContext<TechCardFormData>();
-  // Слова на экране — с предложением WORDS только там, где его видно (MIN-4 c).
-  const autosaveStatus = useTechCardAutosave().status;
-  const wordsLive = !disabled && autosaveStatus !== 'off';
   const answerable = useRecallAnswerable(techCardId);
   const canSwitch = useStudioSwitchAvailable(techCardId);
   const [asking, setAsking] = useState<RecallMode | null>(null);
@@ -695,7 +695,7 @@ export function RecallDoors({
           )
         : inputTarget === 'render'
           ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
-          : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
+          : (run.inputs?.refs ?? []).length > 0 || !!runFlatWords(run);
   /**
    * ═══ ПРОГОН 3D ДВЕРИ РЕЗУЛЬТАТА НЕ ИМЕЕТ ВОВСЕ (J-11) ═══════════════════════════════════════
    *
@@ -743,9 +743,7 @@ export function RecallDoors({
       mode: asking,
       rows,
       otherListIds: ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
-      // D-20'''': СЛОВА НА ЭКРАНЕ — засев WORDS в форму не пишется, пока человек не подействовал, и
-      // вопрос «описание будет заменено» обязан видеть то, что человек видит в поле.
-      description: shownWords(techCardId, form, wordsLive),
+      flatWords: (form.getValues('flatWords') as string | null | undefined) ?? '',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asking, run, band, form]);
@@ -896,8 +894,8 @@ function FlatQuestion({
 
       {plan.replaces && (
         <Text size='control' component='p'>
-          The garment description is replaced with the words {handle} was given. The text you have
-          now is not kept anywhere — copy it first if you need it.
+          The flat’s words are replaced with the lines {handle} was given. The lines you have now
+          are not kept anywhere — copy them first if you need them.
         </Text>
       )}
 
@@ -1001,8 +999,6 @@ export function RecalledRunPrompt({
   const form = useFormContext<TechCardFormData>();
   const { setReferenceRole } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
-  const autosaveStatus = useTechCardAutosave().status;
-  const wordsLive = !disabled && autosaveStatus !== 'off';
 
   /**
    * Какой жест этот приёмник уже взял — прогон И дверь: один прогон законно вспоминают дважды,
@@ -1053,8 +1049,7 @@ export function RecalledRunPrompt({
       mode,
       rows,
       otherListIds,
-      // D-20'''': слова на экране (см. вопрос у двери).
-      description: shownWords(techCardId, form, wordsLive),
+      flatWords: (form.getValues('flatWords') as string | null | undefined) ?? '',
     });
 
     if (plan.empty) {
@@ -1114,9 +1109,7 @@ export function RecalledRunPrompt({
         /* ── слова ──
            Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется. */
         if (plan.words) {
-          form.setValue('garmentDescription', plan.words, { shouldDirty: true });
-          // Слова пришли из прогона и стоят в форме (D-20'''').
-          settleWords(techCardId, plan.words);
+          form.setValue('flatWords', plan.words, { shouldDirty: true });
         }
 
         /* ── ярлыки принятых картинок ──
@@ -1164,7 +1157,7 @@ export function RecalledRunPrompt({
           said.push(
             `${roleFailed} could not be given ${roleFailed === 1 ? 'its view' : 'their views'} — set ${roleFailed === 1 ? 'it' : 'them'} on the tile`,
           );
-        if (plan.words) said.push('the description was taken from the run');
+        if (plan.words) said.push('the flat’s words were taken from the run');
         // Итог — только над карточкой, которая на экране (ревью раунда 4, MIN-5).
         if (cardOnScreen(card)) {
           showMessage(said.join(' · '), roleFailed || result.refusal ? 'error' : 'success');
