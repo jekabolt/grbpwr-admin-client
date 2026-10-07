@@ -56,6 +56,7 @@ import {
   clearOpenings,
   dropOpenings,
   openingRegion,
+  adoptEdges,
   heldPartsFresh,
   partsAskKey,
   fixBands,
@@ -577,7 +578,9 @@ export class PaintSession {
   ): ViewParts | null {
     const parts = partsOf(row, flat, seeds, view);
     const layer = innerLayerPart(rows, this.band?.joins?.layers);
-    return parts && fixBands(fixSides(view, parts, flat, labelKeys(rows)), flat, layer);
+    return (
+      parts && adoptEdges(fixBands(fixSides(view, parts, flat, labelKeys(rows)), flat, layer), flat)
+    );
   }
 
   /** The rev of the card's join list now (0 = none): the labeller reads the list (c9). */

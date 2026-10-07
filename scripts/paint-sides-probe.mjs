@@ -252,6 +252,77 @@ ck(m.PARTS_REGIONS_MIN === 1, 'f6: a side cut into one region is named, not «pe
   ck(m.fixSides('back', q, xf, keys) === q, 'back: a part over the centre line is not judged');
 }
 
+/* M5 · an unnamed strip along ONE part is that part's edge (`adoptEdges`) */
+{
+  // Synthetic: silhouette x 10..109, y 10..59. Body above a 1-px line at y 53; a 5-px strip
+  // y 54..58 under it (the hem the labeller called «hem» → unnamed).
+  const SW = 120;
+  const SH = 70;
+  const mk = (split, blob) => {
+    const lab = new Int32Array(SW * SH);
+    const sil = new Uint8Array(SW * SH);
+    for (let y = 10; y < 60; y++)
+      for (let x = 10; x < 110; x++) {
+        sil[y * SW + x] = 1;
+        let v = y >= 54 ? 2 : y === 53 ? 0 : 1;
+        if (split && v === 1 && x === 60) v = 0;
+        if (split && v === 1 && x > 60) v = 3;
+        if (blob && x >= 40 && x <= 59 && y >= 20 && y <= 39) v = 4;
+        if (blob && v === 1 && (x === 39 || x === 60) && y >= 19 && y <= 40) v = 0;
+        if (blob && v === 1 && (y === 19 || y === 40) && x >= 39 && x <= 60) v = 0;
+        lab[y * SW + x] = v;
+      }
+    return { w: SW, h: SH, labels: lab, silhouette: sil, count: blob ? 4 : split ? 3 : 2 };
+  };
+  const seedsOf = (f) => {
+    const out = new Int32Array(f.count + 1).fill(-1);
+    for (let i = 0; i < f.labels.length; i++)
+      if (f.labels[i] > 0 && out[f.labels[i]] < 0) out[f.labels[i]] = i;
+    return out;
+  };
+  const one = mk(false, false);
+  const p1 = m.partsOf(
+    { parts: [g('back body', [1]), g('unnamed', [2], 'unnamed-back')], splitNeeded: [] },
+    one,
+    seedsOf(one),
+    'back',
+  );
+  const a1 = m.adoptEdges(p1, one);
+  ck(
+    names(a1) === 'back body[back-body]:1,2' && !m.unassignedRegion(a1, 2),
+    'M5: an unnamed hem strip along one panel is that panel',
+    names(a1),
+  );
+  const two = mk(true, false);
+  const p2 = m.partsOf(
+    {
+      parts: [g('left body', [1]), g('right body', [3]), g('unnamed', [2], 'unnamed-back')],
+      splitNeeded: [],
+    },
+    two,
+    seedsOf(two),
+    'back',
+  );
+  ck(
+    m.adoptEdges(p2, two) === p2 && m.unassignedRegion(p2, 2),
+    'M5: a strip along two parts stays unassigned (an error)',
+  );
+  const blob = mk(false, true);
+  const p3 = m.partsOf(
+    {
+      parts: [g('back body', [1]), g('hem', [2], 'hem'), g('unnamed', [4], 'unnamed-back')],
+      splitNeeded: [],
+    },
+    blob,
+    seedsOf(blob),
+    'back',
+  );
+  ck(
+    m.adoptEdges(p3, blob) === p3 && m.unassignedRegion(p3, 4),
+    'M5: an unnamed blob stays unassigned (an error)',
+  );
+}
+
 /* f3 · a band is a thin strip (`fixBands`) */
 {
   // Synthetic: a 100-px-wide silhouette at x 10..109, y 10..59; region 1 = the body around region 2,

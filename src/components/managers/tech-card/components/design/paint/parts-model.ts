@@ -903,6 +903,115 @@ export function fixBands(
   return { ...parts, groups: kept, regionGroup, keyed: kept.every((g) => g.key !== '') };
 }
 
+/** M5 · an unnamed strip borders the part it finishes along at least this share of its edge … */
+const ADOPT_SHARE = 0.1;
+/** … and every other cloth part along at most this share of that. */
+const ADOPT_RIVAL = 0.5;
+
+/**
+ * M5 (live, card 38) · a STRIP the labeller left unnamed — it called it «hem» or «hem band»: an
+ * edge, or a name the construction does not have — that runs along ONE named cloth part is that
+ * part's edge, the panel it finishes (the labeller's own rule: «a thin strip along an edge is the
+ * binding or band the construction lists, or else the panel whose edge it finishes»). Thin
+ * (`BAND_MAX_WIDTH` of the silhouette) and long (`BAND_MIN_ELONGATION` widths); across its lines
+ * (as far as two closing radii) it borders that part along `ADOPT_SHARE` of its edge and any other
+ * cloth part along at most `ADOPT_RIVAL` of that. A blob, or a strip between two parts, stays
+ * unassigned (an error on the canvas). Returns the same object when nothing changes.
+ */
+export function adoptEdges(
+  parts: ViewParts,
+  flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h' | 'silhouette'>,
+): ViewParts {
+  const { labels, count, w, h, silhouette } = flat;
+  const lost: number[] = [];
+  for (let r = 1; r <= count; r += 1) if (unassignedRegion(parts, r)) lost.push(r);
+  if (lost.length === 0) return parts;
+  const n = w * h;
+  let x0 = w;
+  let x1 = -1;
+  for (let i = 0; i < n; i += 1)
+    if (silhouette[i]) {
+      const x = i % w;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+    }
+  const silW = x1 - x0 + 1;
+  if (silW <= 0) return parts;
+  const { width, elongation } = bandShape(flat);
+  const strips = new Set(
+    lost.filter((r) => width[r] <= BAND_MAX_WIDTH * silW && elongation[r] >= BAND_MIN_ELONGATION),
+  );
+  if (strips.size === 0) return parts;
+  const cloth = (u: number) => {
+    const g = parts.groups[parts.regionGroup[u] ?? -1];
+    return g && !isOpening(g) && !isUnnamed(g) ? parts.regionGroup[u] ?? -1 : -1;
+  };
+  const reach = 2 * scaledRadius(w, h, 3);
+  const steps = [-1, 1, -w, w];
+  const edge = new Map<number, number>();
+  const touch = new Map<number, Map<number, number>>();
+  for (let i = 0; i < n; i += 1) {
+    const v = labels[i];
+    if (!strips.has(v)) continue;
+    const x = i % w;
+    const y = (i / w) | 0;
+    let isEdge = false;
+    const seen = new Set<number>();
+    for (let d = 0; d < 4; d += 1) {
+      let j = i;
+      let xx = x;
+      let yy = y;
+      for (let k = 1; k <= reach; k += 1) {
+        j += steps[d];
+        if (d === 0) xx -= 1;
+        else if (d === 1) xx += 1;
+        else if (d === 2) yy -= 1;
+        else yy += 1;
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) {
+          if (k === 1) isEdge = true;
+          break;
+        }
+        const u = labels[j];
+        if (u === v) break;
+        if (k === 1) isEdge = true;
+        if (!silhouette[j]) break;
+        if (u) {
+          const gi = cloth(u);
+          if (gi >= 0) seen.add(gi);
+          break;
+        }
+      }
+    }
+    if (!isEdge) continue;
+    edge.set(v, (edge.get(v) ?? 0) + 1);
+    let t = touch.get(v);
+    if (!t) touch.set(v, (t = new Map()));
+    for (const gi of seen) t.set(gi, (t.get(gi) ?? 0) + 1);
+  }
+  const to = new Map<number, number>();
+  for (const r of strips) {
+    const e = Math.max(1, edge.get(r) ?? 0);
+    const ranked = [...(touch.get(r) ?? [])].sort((a, b) => b[1] - a[1]);
+    if (ranked.length === 0 || ranked[0][1] / e < ADOPT_SHARE) continue;
+    if (ranked.length > 1 && ranked[1][1] > ADOPT_RIVAL * ranked[0][1]) continue;
+    to.set(r, ranked[0][0]);
+  }
+  if (to.size === 0) return parts;
+  const groups: PartGroup[] = parts.groups.map((g, gi) => ({
+    ...g,
+    regions: [
+      ...g.regions.filter((r) => !to.has(r)),
+      ...[...to].filter(([, t]) => t === gi).map(([r]) => r),
+    ].sort((a, b) => a - b),
+  }));
+  const kept = groups.filter((g) => g.regions.length > 0);
+  const regionGroup = new Int32Array(parts.regionGroup.length).fill(-1);
+  kept.forEach((g, i) => {
+    for (const r of g.regions) regionGroup[r] = i;
+  });
+  return { ...parts, groups: kept, regionGroup, keyed: kept.every((g) => g.key !== '') };
+}
+
 /** A suggestion row from the card-level call (its groups carry `part_key`). */
 export const keyedSuggestion = (s: Pick<DesignPartsSuggestion, 'parts'>): boolean =>
   (s.parts ?? []).length > 0 && (s.parts ?? []).every((g) => !!(g.partKey ?? '').trim());

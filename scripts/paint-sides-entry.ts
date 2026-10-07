@@ -1,5 +1,6 @@
 // PAINT THE PARTS · Ф1 — the L/R check on the drawing and the openings, bundled by `paint-sides-probe.mjs`.
 export {
+  adoptEdges,
   BAND_MAX_WIDTH,
   BAND_MIN_ELONGATION,
   bandShape,
