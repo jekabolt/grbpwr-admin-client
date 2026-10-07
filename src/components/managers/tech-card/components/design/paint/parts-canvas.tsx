@@ -544,6 +544,15 @@ function PaintSide({
 }): JSX.Element {
   const mock = useRef<HTMLCanvasElement>(null);
   const hover = useRef<HTMLCanvasElement>(null);
+  /* R9 fix 5 · the hardware hover's frame: the latest pointer waits for the next frame. */
+  const hoverFrame = useRef<{
+    frame: number;
+    want: { x: number; y: number; alt: boolean; only: boolean } | null;
+  }>({ frame: 0, want: null });
+  const dropHoverFrame = () => {
+    cancelAnimationFrame(hoverFrame.current.frame);
+    hoverFrame.current = { frame: 0, want: null };
+  };
   const hoverState = useRef<{
     idx: Int32Array | null;
     mask: Uint8Array | null;
@@ -893,6 +902,10 @@ function PaintSide({
     st.mask = tint(idx) ?? null;
   };
 
+  // The frame calls the hover of the latest render (its tool, labels and armed tile).
+  const hoverNow = useRef(showHover);
+  hoverNow.current = showHover;
+
   /** The flat's ink cost field — built on first use, only for the side being drawn on. */
   const fieldOf = (): InkField | null => (flat ? inkField(flat) : null);
 
@@ -1011,6 +1024,20 @@ function PaintSide({
       if (penRef.current.anchors.length > 0 && !st.frame) st.frame = requestAnimationFrame(pump);
       return;
     }
+    if (hardwareClick) {
+      // R9 fix 5 · with a hardware tile armed the hover is one per frame (the latest pointer),
+      // and the fill itself a memo lookup (`hardwareAt`).
+      const hf = hoverFrame.current;
+      hf.want = { x, y, alt: e.altKey, only: e.shiftKey };
+      if (!hf.frame)
+        hf.frame = requestAnimationFrame(() => {
+          hf.frame = 0;
+          const want = hf.want;
+          hf.want = null;
+          if (want) hoverNow.current(want.x, want.y, want.alt, want.only);
+        });
+      return;
+    }
     showHover(x, y, e.altKey, e.shiftKey);
   };
 
@@ -1092,6 +1119,7 @@ function PaintSide({
   useEffect(
     () => () => {
       cancelAnimationFrame(wire.current.frame);
+      cancelAnimationFrame(hoverFrame.current.frame);
       releaseInk();
     },
     [],
@@ -1129,6 +1157,7 @@ function PaintSide({
           if (at >= 0 && at < w * h && !flat.silhouette[at]) onFocus();
         }}
         onPointerLeave={() => {
+          dropHoverFrame();
           clearHover();
           stopPreview();
           if (session.hovered?.view === view.view) session.setHover(null);

@@ -973,6 +973,31 @@ ck(
     'R9 card 51: a click fills each closure button (not the body)',
     `${b1?.idx?.length} / ${b2?.idx?.length} px`,
   );
+  // Fix 5 · a hover is a memo lookup: the same button answers the same fill object, a refused
+  // (open) body answers from the memo too, and 2 000 hovers over the jacket stay cheap.
+  {
+    const again = m.hardwareAt(jacket.ink, jacket.w, jacket.h, 389, 359);
+    const body1 = m.hardwareAt(jacket.ink, jacket.w, jacket.h, 300, 300);
+    const t0 = performance.now();
+    let opens = 0;
+    for (let k = 0; k < 2000; k += 1) {
+      const p = m.hardwareAt(
+        jacket.ink,
+        jacket.w,
+        jacket.h,
+        200 + (k % 400),
+        200 + ((k * 7) % 400),
+      );
+      if (p?.open) opens += 1;
+    }
+    const ms = performance.now() - t0;
+    const body2 = m.hardwareAt(jacket.ink, jacket.w, jacket.h, 310, 305);
+    ck(
+      again === b1 && body1?.open && body2 === body1 && ms < 250,
+      'R9 fix 5: hover fills are memoised (closed and refused), no flood per pointer event',
+      `2000 hovers ${ms.toFixed(0)} ms, ${opens} open`,
+    );
+  }
 
   // Instances: two buttons (pockets joined to their button), a speck dropped.
   const HW = m.packHex('#2fa84f');

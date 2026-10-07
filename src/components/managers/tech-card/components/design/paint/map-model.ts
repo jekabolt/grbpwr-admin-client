@@ -287,8 +287,11 @@ export function hardwareAt(
 ): HardwarePick | null {
   if (x < 0 || y < 0 || x >= w || y >= h) return null;
   const max = Math.max(1, Math.floor(w * h * share));
+  const memo = hardwareMemo(ink, w, h, max);
   const at = y * w + x;
-  if (!ink[at]) return floodButton(ink, w, h, at, max);
+  if (!ink[at]) return memo.fill(at);
+  const hit = memo.onInk.get(at);
+  if (hit) return hit;
   // On ink: the nearest non-ink pixels first; a ring is clicked from inside or out, so the first
   // seed whose fill closes wins (the outside of a button is the body: open).
   const seeds: { i: number; d: number }[] = [];
@@ -301,120 +304,147 @@ export function hardwareAt(
       if (xx < 0 || yy < 0 || xx >= w || yy >= h || d > r * r) continue;
       if (!ink[yy * w + xx]) seeds.push({ i: yy * w + xx, d });
     }
-  if (seeds.length === 0) return inkBlobAt(ink, w, h, at, max);
-  seeds.sort((a, b) => a.d - b.d);
-  const tried = new Set<number>();
-  for (const { i } of seeds) {
-    if (tried.has(i)) continue;
-    const pick = floodButton(ink, w, h, i, max, tried);
-    if (!pick.open) return pick;
-  }
-  return { idx: null, open: true };
-}
-
-/** One hardware fill from a non-ink seed (`hardwareAt`); every pixel it reached goes in `tried`. */
-function floodButton(
-  ink: Uint8Array,
-  w: number,
-  h: number,
-  seed: number,
-  max: number,
-  tried?: Set<number>,
-): HardwarePick {
-  const n = w * h;
-  const mark = new Uint8Array(n);
-  const fill: number[] = [];
-  const stack: number[] = [seed];
-  mark[seed] = 1;
-  let x0 = w;
-  let y0 = h;
-  let x1 = -1;
-  let y1 = -1;
-  while (stack.length > 0) {
-    const i = stack.pop() as number;
-    fill.push(i);
-    tried?.add(i);
-    if (fill.length > max) return { idx: null, open: true };
-    const cx = i % w;
-    const cy = (i / w) | 0;
-    if (cx < x0) x0 = cx;
-    if (cx > x1) x1 = cx;
-    if (cy < y0) y0 = cy;
-    if (cy > y1) y1 = cy;
-    const visit = (j: number) => {
-      if (!mark[j] && !ink[j]) {
-        mark[j] = 1;
-        stack.push(j);
+  let pick: HardwarePick = OPEN;
+  if (seeds.length === 0) pick = memo.blob(at);
+  else {
+    seeds.sort((a, b) => a.d - b.d);
+    for (const { i } of seeds) {
+      const p = memo.fill(i);
+      if (!p.open) {
+        pick = p;
+        break;
       }
-    };
-    if (cx > 0) visit(i - 1);
-    if (cx < w - 1) visit(i + 1);
-    if (i >= w) visit(i - w);
-    if (i + w < n) visit(i + w);
-  }
-  // The pockets: non-ink islands met inside the fill's box that never leave it (a flood that
-  // steps out of the box stops there — it is the cloth around the button).
-  const inBox = (i: number) => {
-    const cx = i % w;
-    const cy = (i / w) | 0;
-    return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
-  };
-  for (let cy = y0; cy <= y1; cy += 1)
-    for (let cx = x0; cx <= x1; cx += 1) {
-      const s = cy * w + cx;
-      if (mark[s] || ink[s]) continue;
-      const island: number[] = [];
-      let inside = true;
-      const st: number[] = [s];
-      mark[s] = 2;
-      while (st.length > 0) {
-        const i = st.pop() as number;
-        if (!inBox(i)) {
-          inside = false;
-          continue;
-        }
-        island.push(i);
-        const ix = i % w;
-        const visit = (j: number) => {
-          if (!mark[j] && !ink[j]) {
-            mark[j] = 2;
-            st.push(j);
-          }
-        };
-        if (ix > 0) visit(i - 1);
-        if (ix < w - 1) visit(i + 1);
-        if (i >= w) visit(i - w);
-        if (i + w < n) visit(i + w);
-      }
-      if (inside) for (const i of island) fill.push(i);
     }
-  if (fill.length > max) return { idx: null, open: true };
-  return { idx: Int32Array.from(fill), open: false };
+  }
+  memo.onInk.set(at, pick);
+  return pick;
 }
 
-/** The 8-connected ink blob at `seed`, or `open` past `max` (a line of the drawing, not a dot). */
-function inkBlobAt(ink: Uint8Array, w: number, h: number, seed: number, max: number): HardwarePick {
+const OPEN: HardwarePick = { idx: null, open: true };
+
+/**
+ * R9 fix 5 · THE HARDWARE MEMO OF ONE FLAT. A fill is a function of the 4-connected non-ink
+ * component it starts in (every seed in it floods the same pixels), and a blob of the 8-connected
+ * ink component; so both rasters are labelled ONCE per flat (lazily, per `max`), and each
+ * component's answer — closed or refused (open) — is kept. A hover then costs a lookup, not a
+ * flood, and allocates nothing.
+ */
+type HardwareMemo = {
+  fill: (seed: number) => HardwarePick;
+  blob: (seed: number) => HardwarePick;
+  onInk: Map<number, HardwarePick>;
+};
+const HARDWARE_MEMOS = new WeakMap<Uint8Array, Map<number, HardwareMemo>>();
+
+/** Components of the pixels where `inSet` holds: id per pixel (-1 outside), size and box per id. */
+function componentsOf(w: number, h: number, inSet: (i: number) => boolean, eight: boolean) {
   const n = w * h;
-  const seen = new Uint8Array(n);
-  const out: number[] = [];
-  const stack = [seed];
-  seen[seed] = 1;
-  while (stack.length > 0) {
-    const i = stack.pop() as number;
-    out.push(i);
-    if (out.length > max) return { idx: null, open: true };
-    const cx = i % w;
-    for (let dy = -1; dy <= 1; dy += 1)
-      for (let dx = -1; dx <= 1; dx += 1) {
-        if (!dx && !dy) continue;
-        const xx = cx + dx;
-        const j = i + dy * w + dx;
-        if (xx < 0 || xx >= w || j < 0 || j >= n || seen[j] || !ink[j]) continue;
-        seen[j] = 1;
-        stack.push(j);
-      }
+  const comp = new Int32Array(n).fill(-1);
+  const size: number[] = [];
+  const box: number[] = [];
+  const stack: number[] = [];
+  for (let s = 0; s < n; s += 1) {
+    if (comp[s] >= 0 || !inSet(s)) continue;
+    const id = size.length;
+    let count = 0;
+    let x0 = w;
+    let y0 = h;
+    let x1 = -1;
+    let y1 = -1;
+    comp[s] = id;
+    stack.push(s);
+    while (stack.length > 0) {
+      const i = stack.pop() as number;
+      count += 1;
+      const cx = i % w;
+      const cy = (i / w) | 0;
+      if (cx < x0) x0 = cx;
+      if (cx > x1) x1 = cx;
+      if (cy < y0) y0 = cy;
+      if (cy > y1) y1 = cy;
+      for (let dy = -1; dy <= 1; dy += 1)
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if ((!dx && !dy) || (!eight && dx && dy)) continue;
+          const xx = cx + dx;
+          const yy = cy + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          const j = yy * w + xx;
+          if (comp[j] >= 0 || !inSet(j)) continue;
+          comp[j] = id;
+          stack.push(j);
+        }
+    }
+    size.push(count);
+    box.push(x0, y0, x1, y1);
   }
-  return { idx: Int32Array.from(out), open: false };
+  return { comp, size, box };
+}
+
+function hardwareMemo(ink: Uint8Array, w: number, h: number, max: number): HardwareMemo {
+  let byMax = HARDWARE_MEMOS.get(ink);
+  if (!byMax) {
+    byMax = new Map();
+    HARDWARE_MEMOS.set(ink, byMax);
+  }
+  const hit = byMax.get(max);
+  if (hit) return hit;
+  let paper: ReturnType<typeof componentsOf> | null = null;
+  let lines: ReturnType<typeof componentsOf> | null = null;
+  const fills = new Map<number, HardwarePick>();
+  const blobs = new Map<number, HardwarePick>();
+  // The pixels of component `id` (inside its box).
+  const pixelsOf = (c: ReturnType<typeof componentsOf>, id: number, out: number[]) => {
+    const [x0, y0, x1, y1] = c.box.slice(id * 4, id * 4 + 4);
+    for (let y = y0; y <= y1; y += 1)
+      for (let x = x0; x <= x1; x += 1) if (c.comp[y * w + x] === id) out.push(y * w + x);
+  };
+  const memo: HardwareMemo = {
+    onInk: new Map(),
+    fill(seed) {
+      paper ??= componentsOf(w, h, (i) => !ink[i], false);
+      const c = paper;
+      const id = c.comp[seed];
+      const known = fills.get(id);
+      if (known) return known;
+      let pick: HardwarePick = OPEN;
+      if (c.size[id] <= max) {
+        const fill: number[] = [];
+        pixelsOf(c, id, fill);
+        // The pockets: the non-ink components met inside the fill's box that never leave it (one
+        // that steps out of the box is the cloth around the button).
+        const [x0, y0, x1, y1] = c.box.slice(id * 4, id * 4 + 4);
+        const met = new Set<number>();
+        for (let y = y0; y <= y1; y += 1)
+          for (let x = x0; x <= x1; x += 1) {
+            const k = c.comp[y * w + x];
+            if (k < 0 || k === id || met.has(k)) continue;
+            met.add(k);
+            const [a0, b0, a1, b1] = c.box.slice(k * 4, k * 4 + 4);
+            if (a0 >= x0 && a1 <= x1 && b0 >= y0 && b1 <= y1) pixelsOf(c, k, fill);
+          }
+        if (fill.length <= max) pick = { idx: Int32Array.from(fill), open: false };
+      }
+      fills.set(id, pick);
+      return pick;
+    },
+    blob(seed) {
+      lines ??= componentsOf(w, h, (i) => !!ink[i], true);
+      const c = lines;
+      const id = c.comp[seed];
+      const known = blobs.get(id);
+      if (known) return known;
+      let pick: HardwarePick = OPEN;
+      if (c.size[id] <= max) {
+        const out: number[] = [];
+        pixelsOf(c, id, out);
+        pick = { idx: Int32Array.from(out), open: false };
+      }
+      blobs.set(id, pick);
+      return pick;
+    },
+  };
+  byMax.set(max, memo);
+  return memo;
 }
 
 /** One hardware instance: its pixels and box (inclusive). */
