@@ -475,6 +475,28 @@ export function useLabelPoll(
   }, [waiting, techCardId, speaks, qc]);
 }
 
+/**
+ * Q3 · A MODEL'S DETAIL GOES WITH ITS LAST PHOTO — ALSO WHEN THE PHOTO LEAVES THE BOARD (owner 07.10,
+ * card 38 «back hem»). The server drops the slot in the background sync the board save kicks
+ * (`DropBoardLabels` → `dropOrphanModelSlots`), after the band was last read: nothing re-read it, so
+ * FLAT SLOTS and the run selector kept the empty detail until a reload. The band is re-read until the
+ * slot is gone (≤ SLOT_GONE_TRIES × SLOT_GONE_MS). Module scope, not a hook: the board is unmounted
+ * as soon as the person steps to FLAT, where the slot is seen.
+ */
+const SLOT_GONE_MS = 1_500;
+const SLOT_GONE_TRIES = 16;
+function followSlotGone(qc: ReturnType<typeof useQueryClient>, card: number, slotId: number) {
+  let tries = 0;
+  const tick = () => {
+    tries += 1;
+    const band = qc.getQueryData<{ bench?: { id?: number }[] }>(designKeys.band(card));
+    if (band && !(band.bench ?? []).some((s) => (s.id ?? 0) === slotId)) return;
+    void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    if (tries < SLOT_GONE_TRIES) window.setTimeout(tick, SLOT_GONE_MS);
+  };
+  window.setTimeout(tick, SLOT_GONE_MS);
+}
+
 /** The edit is drawn over the whole picture: its frame in the original is the original (T59). */
 const WHOLE_FRAME: CropFrame = { x: 0, y: 0, w: 1, h: 1, rotation: 0 };
 
@@ -621,6 +643,7 @@ export function MoodBoard({
   // `planBoardCrop`. Ярлык ЧЕЛОВЕКА (вид, деталь) переезжает на кроп; ярлык модели — нет: кроп она
   // прочтёт заново, как любую новую картинку (101 Ф3).
   const { setReferenceRole } = useDesignWrites(techCardId);
+  const qc = useQueryClient();
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
   );
@@ -800,6 +823,36 @@ export function MoodBoard({
   const pendingCallouts = pendingRemove == null ? 0 : callouts.countOn(pendingRemove);
   const pendingAlsoInInput = pendingRemove != null && inputIds.has(pendingRemove);
 
+  /* Q3 (109 §8): the picture leaving the board was the last photo of a model's detail that no person
+     named (`made_by_model`, no plate). A MODEL's label is dropped by the server's sync after the
+     save — the band is followed until the slot is gone. A PERSON's label (a guess accepted, a detail
+     picked) is never dropped by the server and would keep the slot alive («named by 1 reference»),
+     and ride into other runs from the library: it is written back to the person's empty label —
+     the same cure as the cut-out's undo — and that write drops the orphan slot in its transaction. */
+  function lastPhotoOfModelDetail(mediaId: number) {
+    const ref = labelsNow.current.get(mediaId);
+    const slotId = (ref?.role ?? '').trim() === 'detail' ? ref?.detailSlotId ?? 0 : 0;
+    if (!(slotId > 0) || isHeldLabel(ref)) return;
+    const slot = detailSlots.find((s) => (s.id ?? 0) === slotId);
+    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
+    const others = [...labelsNow.current.values()].some(
+      (r) =>
+        (r.mediaId ?? 0) !== mediaId &&
+        (r.role ?? '').trim() === 'detail' &&
+        (r.detailSlotId ?? 0) === slotId &&
+        !isHeldLabel(r),
+    );
+    if (others) return;
+    if (isPersonLabel(ref)) {
+      const release = holdFlatInput(techCardId);
+      void setReferenceRole
+        .mutateAsync({ mediaId, role: '', ordinal: Math.max(1, ref?.ordinal ?? 1) })
+        .catch(() => {})
+        .finally(release);
+    }
+    followSlotGone(qc, techCardId, slotId);
+  }
+
   function confirmRemove() {
     const mediaId = pendingRemove;
     setPendingRemove(null);
@@ -808,6 +861,7 @@ export function MoodBoard({
     // снимке, номера у мудбордного указания нет, и открепившееся оно не показывается нигде — то
     // есть «сохранили» означало бы «оставили сиротой в payload». Поэтому ✕ и обязан назвать число.
     callouts.removeOn(mediaId);
+    lastPhotoOfModelDetail(mediaId);
     // Снимается ТОЛЬКО строка доски. Запись входа на тот же `media_id` — отдельная сущность со
     // своей ролью и своей запиской, и её сносит собственный ✕ в блоке референсов, который тоже
     // называет свою цену. Одна дверь, уносящая две вещи в разных блоках, — это дверь, о цене
