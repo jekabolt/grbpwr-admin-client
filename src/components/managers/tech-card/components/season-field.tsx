@@ -1,3 +1,4 @@
+import type { common_SkuSeason } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -7,6 +8,8 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
+
+import { parseSeasonToSku } from './season-util';
 
 type SeasonType = { code: string; label: string; short: boolean };
 
@@ -36,6 +39,9 @@ function buildSeason(t: SeasonType, year: number): string {
 export function SeasonField({
   name = 'season',
   pickHint,
+  open: openProp,
+  onOpenChange,
+  onPicked,
 }: {
   name?: string;
   /**
@@ -45,6 +51,15 @@ export function SeasonField({
    * уже существующих расцветок была бы враньём.
    */
   pickHint?: string;
+  /**
+   * The picker's open state, when the owner needs to open it from elsewhere (CARD DETAILS: SUGGEST
+   * with no season opens this picker, then suggests with the season it commits). Unset = the field
+   * keeps it itself, as before.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Fired after a commit wrote the season, with the season it wrote — only when it parses. */
+  onPicked?: (sku: common_SkuSeason) => void;
 }) {
   const { setValue } = useFormContext();
   const value = (useWatch({ name }) as string) || '';
@@ -53,7 +68,12 @@ export function SeasonField({
   // schema rejects would block the save with nothing on screen to explain it.
   const { errors } = useFormState({ name });
   const error = (errors as Record<string, { message?: string } | undefined>)[name];
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const setOpen = (o: boolean) => {
+    if (openProp === undefined) setOwnOpen(o);
+    onOpenChange?.(o);
+  };
   const [type, setType] = useState<SeasonType | null>(null);
   const [manual, setManual] = useState('');
 
@@ -66,6 +86,10 @@ export function SeasonField({
   };
   const commit = (v: string) => {
     setValue(name, v.trim(), { shouldDirty: true });
+    // Before the close: the owner may tie its follow-up to the close (CARD DETAILS forgets a
+    // pending SUGGEST when the picker closes without a season).
+    const sku = parseSeasonToSku(v);
+    if (sku) onPicked?.(sku);
     setOpen(false);
     reset();
   };

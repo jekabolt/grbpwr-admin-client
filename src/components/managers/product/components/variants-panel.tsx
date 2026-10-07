@@ -7,7 +7,7 @@ import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { permittedSizeSystems } from 'utils/size-systems';
+import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { formatSizeName } from '../utility/sizes';
 
 // R2: variants are first-class now (Create/Archive; archive-not-delete). A colourway's sellable sizes
@@ -58,15 +58,13 @@ export function VariantsPanel({
   const archivedVariants = variants.filter((v) => v.status === 'VARIANT_LIFECYCLE_STATUS_ARCHIVED');
 
   // Sizes not already attached as a variant AND permitted by the style's category (S10/WS5).
-  // permittedSizeSystems returns undefined when the category maps to nothing — then show all sizes.
+  // permittedSizeSystems returns undefined without a category (all sizes) and [] for a category that
+  // maps nothing — then `os` only, the server's own rule (`sizeInSystems`).
   const availableSizes = useMemo(() => {
     const taken = new Set(variants.map((v) => v.sizeId));
-    const allow = allowedSizeSystems?.length ? new Set(allowedSizeSystems) : undefined;
-    return (dictionary?.sizes ?? []).filter((s) => {
-      if (s.id == null || taken.has(s.id)) return false;
-      if (!allow) return true;
-      return allow.has(s.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN');
-    });
+    return (dictionary?.sizes ?? []).filter(
+      (s) => s.id != null && !taken.has(s.id) && sizeInSystems(s, allowedSizeSystems),
+    );
   }, [dictionary?.sizes, variants, allowedSizeSystems]);
 
   async function addVariant() {
