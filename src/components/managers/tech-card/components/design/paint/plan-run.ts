@@ -269,6 +269,9 @@ const VIEW_WORD: Record<string, string> = {
   back: 'back',
   side_l: 'left side',
   side_r: 'right side',
+  // R9 fix 7 · designgen `viewWord` spells the three-quarter views so; the prompt matches them.
+  three_quarter_l: 'three-quarter from the left',
+  three_quarter_r: 'three-quarter from the right',
 };
 
 /**

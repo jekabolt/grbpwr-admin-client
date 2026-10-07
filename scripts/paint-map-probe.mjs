@@ -1485,6 +1485,11 @@ ck(
     ) === 'left front body · 2 on the front, 1 on the left side',
     'R9 parts text: places once, counts per view in the prompt’s view words',
   );
+  ck(
+    m.hardwarePartsText(['cuff'], [{ view: 'three_quarter_l', n: 1 }]) ===
+      'cuff · 1 on the three-quarter from the left',
+    'R9 fix 7: a three-quarter view in the server’s view words',
+  );
 }
 
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
