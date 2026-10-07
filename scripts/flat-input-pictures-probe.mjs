@@ -36,6 +36,9 @@
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noreadword → «no purpose» посреди чтения: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=serverblind → GENERATE не ждёт чтения сервера: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nofix      → у VIEWS/DETAIL нет угла ▾: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nodeadline → зависший запрос держит GENERATE: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=noretry    → отменённое чтение полосы рвёт ожидание: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=leftexplicit → пропавшая картинка без слова: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
 //   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
@@ -98,6 +101,30 @@ const MUTATIONS = {
       file: PICTURES,
       from: 'corners={corners ? (v, i) => corners(v.mediaId, i + 1) : undefined}',
       to: 'corners={undefined}',
+    },
+  ],
+  // Codex 07.10 #1: the wait's requests run without the deadline.
+  nodeadline: [
+    {
+      file: RUNROW,
+      from: 'function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {\n',
+      to: 'function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {\n  if (until) return p;\n',
+    },
+  ],
+  // Codex 07.10 #1: a cancelled / failed band read ends the wait at once.
+  noretry: [
+    {
+      file: RUNROW,
+      from: '      if (Date.now() >= until) return { waited: ids, left: lastLeft };\n',
+      to: '      return { waited: ids, left: lastLeft };\n',
+    },
+  ],
+  // Codex 07.10 #2: the left-out count reads only explicit `pending` / `unmarked` rows.
+  leftexplicit: [
+    {
+      file: RUNROW,
+      from: '              purposeNow.has(id) &&\n              !sent.has(id) &&\n',
+      to: '              purposeNow.has(id) &&\n              heldOf.has(id) &&\n              !sent.has(id) &&\n',
     },
   ],
   // 07.10 D1: GENERATE's wait reads the band alone, not the press's preview.
@@ -213,7 +240,7 @@ const stubNetwork = {
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         // M17 pulled the playground registry into the board: its Ideas read the abortable service.
-        export const abortableAdminService = adminService;
+        export const abortableAdminService = () => adminService;
         export default { adminService, authService, frontendService };
       `,
       loader: 'js',
@@ -1211,6 +1238,81 @@ try {
     'its ▾ is the board’s menu; «side R» writes the person’s label',
     JSON.stringify({ menu809, d2 }),
   );
+
+  console.log(
+    '\nCodex 07.10 · a stalled wait still goes at 15 s; a picture the preview never names is counted',
+  );
+  // 811: settled on the band, but the press's preview neither sends nor holds it — still read.
+  await addOne([811]);
+  await page.evaluate(async () => {
+    await window.__label(811, {
+      role: 'front',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(800);
+  const before4 = (await calls('StartDesignRun')).length;
+  // Every preview ask made in the next 14 s never answers (a stalled band read is cancelled and
+  // read again; the ask has nothing else to rescue it but the deadline).
+  await page.evaluate(() => {
+    const until = Date.now() + 14_000;
+    for (const n of ['PreviewDesignRunInputs']) {
+      const f = window.__api[n];
+      window.__api[n] = (b) => (Date.now() < until ? new Promise(() => {}) : f(b));
+    }
+  });
+  const t4 = Date.now();
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before4,
+      { timeout: 22000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  const went4 = (await calls('StartDesignRun')).length > before4;
+  ck(
+    went4 && Date.now() - t4 < 21000,
+    'stalled requests: GENERATE still goes once the 15 s are up',
+    `${went4} after ${Date.now() - t4} ms | ${await page.evaluate(() => document.querySelector('[data-flat-generate] button')?.textContent ?? '')}`,
+  );
+  const left4 = await page.evaluate(
+    () => document.querySelector('[data-flat-left-out]')?.textContent ?? '',
+  );
+  ck(
+    /1 picture was still being read · not in this run/i.test(left4),
+    'the picture the preview neither sends nor holds is said as left out',
+    left4,
+  );
+
+  // A band read that hangs (and is cancelled by the page's own refetches) does not end the wait.
+  const before5 = (await calls('StartDesignRun')).length;
+  await page.evaluate(() => {
+    const until = Date.now() + 14_000;
+    const f = window.__api.GetDesignBand;
+    window.__api.GetDesignBand = (b) => (Date.now() < until ? new Promise(() => {}) : f(b));
+  });
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page.waitForTimeout(6000);
+  const label5 = await page.evaluate(
+    () => document.querySelector('[data-flat-generate] button')?.textContent ?? '',
+  );
+  ck(
+    /reading…/i.test(label5) && (await calls('StartDesignRun')).length === before5,
+    'a hung band read: GENERATE keeps reading (≤15 s), not «gone» at the first cancelled read',
+    label5,
+  );
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before5,
+      { timeout: 16000 },
+    )
+    .catch(() => {});
+  ck((await calls('StartDesignRun')).length > before5, '… and goes when the 15 s are up');
 
   console.log('\nM15 · recall puts a flat run’s words back into WORDS');
   const recall = await page.evaluate(() =>
