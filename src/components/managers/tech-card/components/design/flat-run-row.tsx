@@ -55,6 +55,7 @@ import {
   VIEWS_ORDER,
   detailFlatSlotIds,
   flatTargets,
+  followCategory,
   modeOfRoute,
   routeOf,
   settleTarget,
@@ -77,6 +78,7 @@ import {
   serverSpeaksNow,
   type WriteContext,
 } from './use-design-band';
+import { useGarmentClass } from './head/card-facts-form';
 import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
@@ -457,6 +459,8 @@ export function FlatRunRow({
           : null;
 
   const form = useFormContext<TechCardFormData>();
+  /* M10: the one line of words a flat sends — «garment: <class>» — names the card's category NOW. */
+  const garmentClass = useGarmentClass();
 
   /* ═══ THE CARD'S TECHNICAL FLATS — what «from my flat» redraws (the server accepts only these). */
   const techRows = useWatch({ control: form.control, name: 'technicalMedia' });
@@ -547,6 +551,15 @@ export function FlatRunRow({
       if (brief === 'busy') return;
       if (brief === 'waited' && (cardNow.current !== card || !cardOnScreen(card))) return;
       materializeWords(card, form, wasOn && !disabled);
+      // M10: a seeded class line left behind by a category change goes with this save, so the run
+      // (which reads the SAVED card) names the category on screen; a written class stays. The
+      // category is read NOW, not at the click: the brief above may have waited (Codex M10).
+      if (wasOn && !disabled) {
+        const was = (form.getValues('garmentDescription') ?? '') as string;
+        const cls = garmentClass.classOf(Number(form.getValues('categoryId') ?? 0));
+        const next = followCategory(was, cls, garmentClass.seeded);
+        if (next !== was) form.setValue('garmentDescription', next, { shouldDirty: true });
+      }
       let saved: FlushResult;
       try {
         saved = await autosave.flush('flat');

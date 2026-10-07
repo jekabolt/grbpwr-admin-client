@@ -13,6 +13,8 @@ import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
 import { permittedSizeSystems } from 'utils/size-systems';
+import { followCategory } from './design/flat-route';
+import { garmentClassOf, useGarmentClass } from './design/head/card-facts-form';
 import { TechCardFormData } from './schema';
 
 const UNSET = { value: 0, label: '— unset —' };
@@ -113,11 +115,12 @@ function BrowserColumn({
 // был и остаётся верен: колонки браузера подписаны «sub · optional» / «type · optional», и она
 // повторяла их третий раз.
 export function CategoryBrowser() {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const cats = useMemo(() => dictionary?.categories ?? [], [dictionary?.categories]);
+  const { seeded } = useGarmentClass();
 
   const [open, setOpen] = useState(false);
   // A category change that would move the size run's goalposts is confirmed first (see below).
@@ -184,7 +187,14 @@ export function CategoryBrowser() {
     ).length;
   };
 
-  const applyLeaf = (id: number) => setValue('categoryId', id || 0, { shouldDirty: true });
+  // M10: WORDS were seeded with the old category's «garment: <class>» — the one line a flat sends.
+  // It moves with the category in the same save; a class the designer wrote stays (`followCategory`).
+  const applyLeaf = (id: number) => {
+    setValue('categoryId', id || 0, { shouldDirty: true });
+    const words = (getValues('garmentDescription') ?? '') as string;
+    const next = followCategory(words, garmentClassOf(cats, id), seeded);
+    if (next !== words) setValue('garmentDescription', next, { shouldDirty: true });
+  };
 
   // Category drives the permitted size systems AND the measurement columns of the size chart, so a
   // change under a filled size run is confirmed the same way removing a size is. Refining deeper

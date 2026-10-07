@@ -1223,6 +1223,118 @@ try {
     await ctx.close();
   }
   {
+    // M10 · a read that moves an UNTOUCHED list (new flats; nothing edited, so the server replaces
+    // it) is followed by the row, folded or open, and is never called «unsaved»; an edited draft
+    // stays (and is unsaved) until saved or cancelled, and cancel follows the server again.
+    const { ctx, page } = await open(1440, 1000, 'f7m6');
+    const block = async (name) => {
+      const box = await page.locator('[data-paint-parts]').boundingBox();
+      await page.screenshot({
+        path: resolve(OUT, name),
+        clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: 120 },
+      });
+      shots.push(resolve(OUT, name));
+    };
+    await page
+      .waitForFunction(() => window.__paint.views.get('front')?.parts?.keyed, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[m10] ASSERT: front never named'));
+    await page.waitForSelector('[data-paint-pieces-toggle]', { timeout: 8000 }).catch(() => {
+      errors.push('[m10] ASSERT: no rename parts once the list is read');
+    });
+    const moveList = (names) =>
+      page.evaluate((names) => {
+        const p = window.__band.partsPieces;
+        window.__band.partsPieces = {
+          ...p,
+          rev: p.rev + 1,
+          edited: false,
+          pieces: names.map((name) => ({ name, views: [] })),
+        };
+        return window.__paint.qc.invalidateQueries();
+      }, names);
+    const chips = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-paint-piece]')].map((c) =>
+          c.getAttribute('data-paint-piece'),
+        ),
+      );
+    const pill = () => page.locator('[data-paint-pieces-toggle]').innerText();
+    const first = await page.evaluate(() => window.__band.partsPieces.pieces.map((x) => x.name));
+    // folded: the row is mounted (hidden) while the read lands
+    await moveList([...first, 'left side panel']);
+    await page.waitForTimeout(700);
+    const folded = await pill();
+    if (/unsaved/i.test(folded))
+      errors.push(`[m10] ASSERT: a read under a folded, untouched row says «${folded}»`);
+    await page.click('[data-paint-pieces-toggle]');
+    await page.waitForSelector('[data-paint-pieces]');
+    let now = await chips();
+    if (JSON.stringify(now) !== JSON.stringify([...first, 'left side panel']))
+      errors.push(`[m10] ASSERT: the folded row stayed on the old list ${JSON.stringify(now)}`);
+    if (await page.locator('[data-paint-pieces-save]').count())
+      errors.push('[m10] ASSERT: save pieces offered with nothing edited');
+    // open: a second read
+    await moveList(['collar', 'back yoke']);
+    await page.waitForTimeout(700);
+    now = await chips();
+    if (JSON.stringify(now) !== JSON.stringify(['collar', 'back yoke']))
+      errors.push(`[m10] ASSERT: the open row stayed on the old list ${JSON.stringify(now)}`);
+    if (/unsaved/i.test(await pill())) errors.push('[m10] ASSERT: «unsaved» after a read');
+    // a name being typed is an edit (Codex M10): a read under the open input leaves the row as it
+    // was; Enter renames THAT row's name and saves on the old rev (refused, never blind)
+    await page.click('[data-paint-piece="back yoke"]');
+    await page.fill('[data-paint-piece-input]', 'rear yoke');
+    const revTyped = await page.evaluate(() => window.__band.partsPieces.rev);
+    await moveList(['collar', 'sleeve']);
+    await page.waitForTimeout(700);
+    await page.keyboard.press('Enter');
+    now = await chips();
+    if (JSON.stringify(now) !== JSON.stringify(['collar', 'rear yoke']))
+      errors.push(`[m10] ASSERT: a read under an open input moved the row ${JSON.stringify(now)}`);
+    await page.click('[data-paint-pieces-save]');
+    await page.waitForTimeout(600);
+    const typedSave = await page.evaluate(
+      () => window.__calls.filter((x) => x.name === 'SetDesignPartsPieces').pop()?.body,
+    );
+    if (typedSave?.expectedRev !== revTyped)
+      errors.push(
+        `[m10] ASSERT: a name typed under a read was saved blind on rev ${typedSave?.expectedRev} (typed on ${revTyped})`,
+      );
+    const cancelTyped = page.getByRole('button', { name: 'cancel' });
+    if (await cancelTyped.count()) await cancelTyped.click();
+    else await moveList(['collar', 'sleeve']);
+    await page.waitForTimeout(300);
+    now = await chips();
+    if (JSON.stringify(now) !== JSON.stringify(['collar', 'sleeve']))
+      errors.push(`[m10] ASSERT: cancel did not take up the server list ${JSON.stringify(now)}`);
+    // an edit, then a read: the draft is kept and unsaved
+    await page.click('[data-paint-piece-add]');
+    await page.fill('[data-paint-piece-input]', 'hem band');
+    await page.keyboard.press('Enter');
+    await moveList(['collar', 'belt']);
+    await page.waitForTimeout(700);
+    now = await chips();
+    if (!now.includes('hem band') || now.includes('belt'))
+      errors.push(`[m10] ASSERT: a read overwrote the designer's draft ${JSON.stringify(now)}`);
+    if (!/unsaved/i.test(await pill())) errors.push('[m10] ASSERT: an edited draft is not unsaved');
+    if (!(await page.locator('[data-paint-pieces-save]').count()))
+      errors.push('[m10] ASSERT: no save pieces for an edited draft');
+    await block('m10-pieces-edited-after-read.png');
+    // cancel: the row is the server's list again, and follows the next read
+    await page.getByRole('button', { name: 'cancel' }).click();
+    await moveList(['collar', 'belt', 'cuff']);
+    await page.waitForTimeout(700);
+    now = await chips();
+    if (JSON.stringify(now) !== JSON.stringify(['collar', 'belt', 'cuff']))
+      errors.push(`[m10] ASSERT: after cancel the row does not follow ${JSON.stringify(now)}`);
+    if (/unsaved/i.test(await pill())) errors.push('[m10] ASSERT: «unsaved» after cancel');
+    console.log(`m10 pieces: ${JSON.stringify(now)}`);
+    await block('m10-pieces-followed.png');
+    await ctx.close();
+  }
+  {
     // Ф2: a refused SuggestDesignParts shows `parts · retry`.
     const { ctx, page } = await open(1440, 1000, 'f2fail');
     await page

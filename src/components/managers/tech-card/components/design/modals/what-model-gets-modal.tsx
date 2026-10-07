@@ -24,7 +24,8 @@ import {
 import { useTechCardAutosave } from '../autosave-contract';
 import { viewWord } from '../board-labels';
 import { openDoor } from '../doors';
-import { flatWordsSent } from '../flat-route';
+import { flatWordsSent, followCategory } from '../flat-route';
+import { useGarmentClass } from '../head/card-facts-form';
 import { FIT_WHERE } from '../render/what-model-gets';
 import { useFlatPreview } from '../use-design-band';
 import { useShownWords } from '../words-seed';
@@ -119,9 +120,15 @@ export function WhatModelGetsModal({
   const heldIds = useMemo(() => held.map((h) => h.mediaId ?? 0).filter((id) => id > 0), [held]);
   const library = useResolvedMedia(heldIds);
 
-  const garment = useShownWords(techCardId, control, !readOnly && autosave.status !== 'off');
+  const live = !readOnly && autosave.status !== 'off';
+  const garment = useShownWords(techCardId, control, live);
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
-  const sentWords = flatWordsSent(garment);
+  // M10: GENERATE moves a seeded class line to the card's category before it saves (flat-run-row),
+  // so the line shown is the one that will travel — only where GENERATE can write.
+  const garmentClass = useGarmentClass();
+  const sentWords = flatWordsSent(
+    live ? followCategory(garment, garmentClass.current, garmentClass.seeded) : garment,
+  );
   const sentCallouts = refs.reduce((n, r) => n + (r.callouts ?? []).length, 0);
   const pictures = refs.length + slots.length;
 

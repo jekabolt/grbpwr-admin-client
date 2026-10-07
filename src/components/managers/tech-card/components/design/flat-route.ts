@@ -44,6 +44,34 @@ export function flatWordsSent(words: string): string {
   return '';
 }
 
+/**
+ * THE CLASS LINE FOLLOWS THE CATEGORY (M10). WORDS are seeded once with «garment: <the category's
+ * name>» (`composeWords`), and a later category change left that line behind: card 38 moved from
+ * `short sleeve shirt` to `tank top` and every flat still told the model «short sleeve shirt». The
+ * first class line (the one `flatWordsSent` / the server's `FlatConstructionNote` read) is swapped for
+ * `current` when it names some OTHER category of the dictionary (`seeded` — the set of every
+ * category's name, `garmentNameOf`); a class the designer wrote themselves is kept, and WORDS with
+ * no class line are left alone. Returns `words` unchanged when nothing moves.
+ */
+export function followCategory(
+  words: string,
+  current: string,
+  seeded: ReadonlySet<string>,
+): string {
+  const now = current.trim();
+  if (!now) return words;
+  const lines = words.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*(?:- )?garment\s*:\s*)(.*)$/i.exec(lines[i]);
+    const cls = m ? m[2].trim() : '';
+    if (!m || !cls) continue;
+    if (cls.toLowerCase() === now.toLowerCase() || !seeded.has(cls.toLowerCase())) return words;
+    lines[i] = `${m[1]}${now}`;
+    return lines.join('\n');
+  }
+  return words;
+}
+
 export type TargetItem = {
   value: FlatTarget;
   label: string;

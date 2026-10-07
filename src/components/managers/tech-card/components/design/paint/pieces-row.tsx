@@ -127,20 +127,30 @@ export function PiecesRow({
   const saved = useMemo(() => namesOf(pieces), [pieces]);
   const rev = pieces.rev ?? 0;
   const [draft, setDraft] = useState<string[]>(saved);
+  /** The server's names the draft was made from: «edited» is measured against THEM, not the list now. */
+  const [madeFrom, setMadeFrom] = useState<string[]>(saved);
   /** The rev the draft was made on; null = after a refused save, the designer saves over the list now. */
   const [base, setBase] = useState<number | null>(rev);
   const [editing, setEditing] = useState(-1); // index being renamed; draft.length = the new one
   const [busy, setBusy] = useState(false);
-  const dirty = draft.join('\n') !== saved.join('\n');
+  const key = (names: readonly string[]) => names.join('\n');
+  // M10: a read that moves the list under an untouched row is not an edit. Measured against the list
+  // now, the old names looked edited, so the row stayed on them under a false «unsaved» (and its save
+  // would have been refused, then written back over the new read).
+  const edited = key(draft) !== key(madeFrom);
+  const dirty = edited && key(draft) !== key(saved);
 
-  // The server's list moved (a save, a read, another tab): an untouched draft follows it and is
-  // made on the new rev; an edited draft keeps its own rev, so its save is refused, never blind.
+  // The server's list moved (a save, a read, another tab): an untouched draft — or one that now says
+  // exactly what the server says (its own save landed) — follows it and is made on the new rev; an
+  // edited draft keeps its own rev, so its save is refused, never blind. A name being typed is an edit
+  // too (Codex M10): the list stays put under an open input, and is taken up once it closes untouched.
   useEffect(() => {
-    if (dirty) return;
+    if ((edited || editing !== -1) && key(draft) !== key(saved)) return;
     setDraft(saved);
+    setMadeFrom(saved);
     setBase(rev);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved.join('\n'), rev]);
+  }, [key(saved), rev, key(draft), editing]);
   useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
 
   const proposal = pieces.proposal;
@@ -247,6 +257,7 @@ export function PiecesRow({
                 className='text-labelColor hover:text-textColor'
                 onClick={() => {
                   setDraft(saved);
+                  setMadeFrom(saved);
                   setBase(rev);
                   setEditing(-1);
                 }}

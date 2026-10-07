@@ -1,13 +1,13 @@
 import type { common_Category } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 
 import type { TechCardFormData } from '../../schema';
 import { detailKeyLabel } from '../../tech-card-options';
-import type { CardFacts } from '../core/card-facts';
+import { garmentNameOf, type CardFacts } from '../core/card-facts';
 import { categoryChain, fitLabel, fitsForTopCategory, topCategoryName } from '../fit-vocabulary';
 import { useQuizLive } from '../quiz-live';
 import { decisionLines } from '../quiz-model';
@@ -39,6 +39,44 @@ export function categoryPathOf(
 ): string[] {
   if (!leafId || leafId <= 0) return [];
   return categoryChain(categories, leafId).map((c) => (c.name ?? '').trim() || `#${c.id}`);
+}
+
+/** The class word of a category (`garment: <this>`), the name `composeWords` seeds WORDS with. */
+export function garmentClassOf(
+  categories: readonly common_Category[] | undefined,
+  categoryId: number | null | undefined,
+): string {
+  return garmentNameOf(categoryPathOf(categories, categoryId).join(' › '));
+}
+
+/**
+ * M10 · the card's class word now and every class word the dictionary can seed — what
+ * `followCategory` (`../flat-route.ts`) needs to move a seeded «garment:» line and keep a written one.
+ */
+export function useGarmentClass(): {
+  current: string;
+  seeded: ReadonlySet<string>;
+  /** The class of a category id read at the moment of use (after an await, not at render). */
+  classOf: (categoryId: number | null | undefined) => string;
+} {
+  const { control } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+  const categories = dictionary?.categories;
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const seeded = useMemo(() => {
+    const out = new Set<string>();
+    for (const c of categories ?? []) {
+      const name = garmentClassOf(categories, c.id).toLowerCase();
+      if (name) out.add(name);
+    }
+    return out;
+  }, [categories]);
+  const current = useMemo(() => garmentClassOf(categories, categoryId), [categories, categoryId]);
+  const classOf = useCallback(
+    (id: number | null | undefined) => garmentClassOf(categories, id),
+    [categories],
+  );
+  return { current, seeded, classOf };
 }
 
 /**
