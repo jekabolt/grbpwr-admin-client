@@ -110,6 +110,10 @@ const s2 = states(weak);
 is('moodboard is next', s2.mood, 'next');
 is('flat is later, not blocked', s2.flat, 'later');
 is('render is later', s2.render, 'later');
+// Review M2: MATERIALS is optional, but on a guided card `later` outranks it — no live door that
+// skips the moodboard and the flats.
+is('materials is later on a guided card', s2.pattern, 'later');
+is('later materials is not a door (div)', cells(M.railMarkup(weak)).pattern, 'div:later');
 is(
   'the flat keeps its reason on the cell',
   /data-step="flat"[^>]*data-locked="[^"]+"/.test(M.railMarkup(weak)),
@@ -118,9 +122,10 @@ is(
 
 console.log('\n3 · legacy card (guided=false): the same states, every cell still a door');
 const legacy = { ...fresh, guided: false };
-is('same states as the guided card', states(legacy), s1);
+is('same states as the guided card, MATERIALS aside', { ...states(legacy), pattern: 'later' }, s1);
 const r3 = cells(M.railMarkup(legacy));
 is('later render opens (button)', r3.render, 'button:later');
+is('legacy MATERIALS keeps its optional door', r3.pattern, 'button:optional');
 
 console.log('\n4 · flats done, render next: nothing after it on the five-link rail');
 const flats = ctxOf({

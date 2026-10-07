@@ -2411,8 +2411,16 @@ export function TechCardForm({
           sku
         ) {
           resuggested = true;
+          // Codex 2: only over the number that was SENT. One the person changed while the create
+          // was on the wire is theirs — not overwritten, and the refusal is not about it: their own
+          // commit (blur, SUGGEST) tries again.
+          const untouched = () =>
+            form.getValues('styleNumber') === data?.styleNumber &&
+            form.getValues('styleNumberSource') === data?.styleNumberSource;
+          if (!untouched()) return undefined;
           try {
             const next = (await adminService.SuggestStyleNumber({ skuSeason: sku })).styleNumber;
+            if (!untouched()) return undefined;
             if (next?.trim()) {
               form.setValue('styleNumber', next.trim(), { shouldDirty: true });
               form.setValue('styleNumberSource', 'STYLE_NUMBER_SOURCE_GENERATED', {
@@ -2442,22 +2450,38 @@ export function TechCardForm({
     const minted = newId;
     flushSync(() => setCreatedId(minted));
     const outcome = await staging.commitAll();
-    if (outcome.failed) {
-      // The card exists; what failed stays staged and the autosave carries it through the UPDATE
-      // path once the card's address is open.
-      setStagingError(
-        `the card is created — «${outcome.failed.change.label}» failed: ${techCardErrorMessage(outcome.failed.error, 'unknown error')}. It is still staged and is saved again with the next change.`,
-      );
-    }
+    // The card exists; what failed stays staged and the autosave carries it through the UPDATE path
+    // once the card's address is open.
+    const stagedNote = outcome.failed
+      ? `the card is created — «${outcome.failed.change.label}» failed: ${techCardErrorMessage(outcome.failed.error, 'unknown error')}. It is still staged and is saved again with the next change.`
+      : null;
+    if (stagedNote) setStagingError(stagedNote);
     // The forced read: the version every later write claims is the server's, not mount-time zero.
+    // Codex 3: there is no going on without it. Opening the card cold would remount the form and drop
+    // what was typed during the create; opening it warm would arm the autosave on version zero. So
+    // the form stays as it is, the autosave stays off (the address is still /add-tech-card), and the
+    // read is retried with a growing pause until it answers — said once, on the page's banner.
     let fresh: common_TechCard | undefined;
-    for (let attempt = 0; attempt < 3 && !fresh; attempt++) {
+    let said = false;
+    for (let attempt = 0; !fresh; attempt++) {
+      if (!pageMounted.current) return newId;
       try {
         fresh = (await adminService.GetTechCard({ id: newId, vatCountryCode: undefined })).techCard;
       } catch {
         fresh = undefined;
       }
+      if (fresh) break;
+      if (attempt >= 2 && !said) {
+        said = true;
+        setStagingError(
+          stagedNote
+            ? `${stagedNote} Reading the card back failed — retrying.`
+            : 'the card is created, but reading it back failed — retrying',
+        );
+      }
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** attempt, 10_000)));
     }
+    if (said) setStagingError(stagedNote);
     if (!pageMounted.current) return newId;
     // The studio opens on the step asked for; a create pressed from another tab (the labels prompt,
     // the fullscreen save) stays on that tab.
@@ -2465,12 +2489,6 @@ export function TechCardForm({
       activeTab === 'studio'
         ? `${ROUTES.techCards}/${newId}?tab=studio&step=${land}`
         : `${ROUTES.techCards}/${newId}?tab=${activeTab}`;
-    if (!fresh) {
-      // Nothing to stand on: open the card COLD — the page reads it and seeds the form from it.
-      showMessage('the card is created — opening it', 'success');
-      navigate(address, { replace: true });
-      return newId;
-    }
     adopt(fresh);
     queryClient.setQueryData(techCardKeys.detail(newId), fresh);
     const server = mapTechCardToForm(fresh);
@@ -2501,8 +2519,15 @@ export function TechCardForm({
   const [commitTick, setCommitTick] = useState(0);
   useEffect(() => {
     if (!guidedCreate) return;
-    const sub = form.watch((_v, { name }) => {
-      if (name === 'categoryId' || name === 'season' || name === 'styleNumberSource')
+    const sub = form.watch((_v, { name, type }) => {
+      // A typed style number is NOT a commit: its keystrokes arrive as `change` events (and the
+      // first one flips `styleNumberSource` to MANUAL — not watched for that reason, review M1); it
+      // commits on blur. A style number WRITTEN by SUGGEST (`setValue`, no event type) is a commit.
+      if (
+        name === 'categoryId' ||
+        name === 'season' ||
+        (name === 'styleNumber' && type !== 'change')
+      )
         setCommitTick((t) => t + 1);
     });
     return () => sub.unsubscribe();

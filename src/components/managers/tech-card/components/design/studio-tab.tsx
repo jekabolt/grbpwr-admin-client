@@ -128,8 +128,8 @@ export function StudioTab({
   /**
    * Creates the card that does not exist yet and resolves to its id (`undefined` = not created —
    * refused, or a field error is on screen). The owner of the form (`components/index.tsx`) holds
-   * the CREATE path, so it arrives as a prop, like `navTo`. Absent: the CARD DETAILS footer of an
-   * unsaved card stays dead with its reason — nothing here creates a card on its own.
+   * the CREATE path, so it arrives as a prop, like `navTo`. Absent: an unsaved card gets NO footer
+   * (its `add` is the one door) — nothing here creates a card on its own.
    */
   onCreate?: () => Promise<number | undefined>;
   /**
@@ -416,6 +416,9 @@ export function StudioTab({
   let footer: ReactNode = null;
   switch (decided) {
     case 'card': {
+      // A new card off the guided path is created by `add` at the top, and by nothing else: no
+      // footer at all — a dead second door would promise what the four fields do not do (review M3).
+      if (!techCardId && !onCreate) break;
       if (techCardId) {
         footer = (
           <StepFooter
@@ -438,13 +441,7 @@ export function StudioTab({
           step='card'
           label='next · moodboard ›'
           pendingLabel='creating…'
-          gate={
-            !ready.ok
-              ? ready
-              : onCreate
-                ? { ok: true }
-                : { ok: false, reason: 'add the card first' }
-          }
+          gate={ready.ok ? { ok: true } : ready}
           /* The create lands on MOODBOARD by itself (`onCreate` navigates to the new card's
              address with `step=mood`): a `goStep` from here would carry the OLD address (C-note). */
           onGo={() => onCreate?.()}

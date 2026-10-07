@@ -735,9 +735,14 @@ export function stepState(id: StepId, ctx: ChainCtx): StepState {
   if (ctx.now === id) return 'now';
   if (stepDone(id, ctx)) return 'done';
   const step = ALL_STEPS.find((s) => s.id === id);
-  if (step?.optional) return 'optional';
   const next = nextUp(ctx);
-  if (isLater(id, next ?? ctx.now, ctx)) return 'later';
+  // On a GUIDED card `later` outranks `optional` (review M2): MATERIALS between two dimmed links
+  // must not stand as a live door that skips the moodboard and the flats. A legacy card keeps its
+  // `optional` pill exactly as before.
+  const later = isLater(id, next ?? ctx.now, ctx);
+  if (later && ctx.guided) return 'later';
+  if (step?.optional) return 'optional';
+  if (later) return 'later';
   const g = chainGate(id, ctx);
   if (!g.ok && !g.own) return 'blocked';
   return next === id ? 'next' : 'ready';

@@ -462,15 +462,11 @@ function LinkedProducts({
   const ids = colorwayIds(colorways);
   const productMap = useProductsByIds(ids);
 
-  if (!techCardId) {
-    return (
-      <Text size='micro' variant='label' data-linked-products='unsaved'>
-        save this tech card first — linked products are its colourways, created from the colourways
-        tab.
-      </Text>
-    );
-  }
-  if (ids.length === 0) {
+  /* A card that does not exist yet has no colourways either: the same quiet line as an empty one
+     (review M4). «save this tech card first» was struck by the owner beside RESPONSIBLE ROLES, and the
+     roles' own line («once the card exists») already says it for the whole row — a second caption
+     here would say it twice. */
+  if (!techCardId || ids.length === 0) {
     /* Тихий текст без двери — дверь одна и она в линейке группы (см. шапку органа). */
     return <EmptyState>no colourways yet</EmptyState>;
   }

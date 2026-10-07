@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const root = resolve(HERE, '..');
 
-const EXPECTED = 32;
+const EXPECTED = 44;
 let bad = 0;
 let total = 0;
 const ck = (ok, what, detail = '') => {
@@ -167,6 +167,25 @@ try {
       GetCurrentAccount: () => ({ account: { isSuper: true } }),
       CreateTechCard: (b) => {
         S.creates.push({ key: b.clientRequestId, guided: b.guided, name: b.techCard?.name });
+        if (window.__takenOnce) {
+          // The generated number was taken meanwhile: the gateway's field violation.
+          window.__takenOnce = false;
+          const err = Object.assign(new Error('already used'), {
+            status: 400,
+            details: [
+              {
+                '@type': 'type.googleapis.com/google.rpc.BadRequest',
+                fieldViolations: [
+                  {
+                    field: 'tech_card.style_number',
+                    description: 'this style number is already used by another style',
+                  },
+                ],
+              },
+            ],
+          });
+          return new Promise((_, rej) => setTimeout(() => rej(err), window.__createDelay));
+        }
         let id = S.byKey[b.clientRequestId];
         if (!id) {
           id = S.seq++;
@@ -181,9 +200,18 @@ try {
         }
         return new Promise((r) => setTimeout(() => r({ id }), window.__createDelay));
       },
+      SuggestStyleNumber: () => {
+        S.suggests = (S.suggests ?? 0) + 1;
+        return { styleNumber: 'FW26-099' };
+      },
       GetTechCard: ({ id }) => {
         const c = S.cards[id];
         if (!c) return fail(404, 'not found');
+        if ((window.__readFails ?? 0) > 0) {
+          window.__readFails -= 1;
+          S.readFailures = (S.readFailures ?? 0) + 1;
+          return fail(503, 'unavailable');
+        }
         const out = { techCard: structuredClone(c) };
         return new Promise((r) => setTimeout(() => r(out), window.__readDelay ?? 0));
       },
@@ -241,7 +269,10 @@ try {
         assign: [...document.querySelectorAll('button')].some(
           (b) => /assign/i.test(b.textContent ?? '') && b.checkVisibility(),
         ),
+        footer: !!foot,
+        saveFirst: text.includes('save this tech card first'),
         footerDead: !!foot?.querySelector('[data-inert]'),
+        styleNumber: document.querySelector('[data-field="styleNumber"] input')?.value,
         footerReason: foot?.querySelector('[data-step-footer-reason]')?.textContent ?? '',
         exitDoor: !!document.querySelector('[data-exit-guide]'),
         loading: text.includes('loading tech card'),
@@ -258,6 +289,8 @@ try {
   const hist0 = v.hist;
   ck(!v.add, 'no `add` on the guided path');
   ck(v.rolesNote, 'roles say «once the card exists» before the id');
+  // Review M4: one quiet line for the row — no «save this tech card first» beside it.
+  ck(!v.saveFirst, 'no «save this tech card first» on CARD DETAILS');
   if (process.env.DEBUG) {
     console.log(
       await page.evaluate(() =>
@@ -440,11 +473,8 @@ try {
     'a blur never creates',
     String(v.srv.creates.length - before2),
   );
-  ck(
-    v.footerDead && /add the card first/.test(v.footerReason),
-    'the card footer is dead: «add the card first»',
-    v.footerReason,
-  );
+  // Review M3: off the guided path `add` is the one door — no card footer at all.
+  ck(!v.footer, 'no card footer (add is the one door)', v.footerReason);
   ck(v.path === '/add-tech-card', 'stays on /add-tech-card', v.path);
 
   // ── F ─────────────────────────────────────────────────────────────────────────────────────
@@ -480,6 +510,109 @@ try {
     JSON.stringify(v.srv.styles),
   );
   ck(v.srv.creates.length === before3 + 1, 'the retry did not mint a second card');
+
+  // ── G ─────────────────────────────────────────────────────────────────────────────────────
+  console.log('\nG · a style number typed by hand is not a commit until blur (review M1)');
+  const before4 = (await look()).srv.creates.length;
+  await mount('/add-tech-card?guided=1', { ...three, styleNumber: '', name: 'typed coat' });
+  await page.click('[data-field="styleNumber"] input');
+  await page.keyboard.type('FW26-123', { delay: 30 });
+  await page.waitForTimeout(600);
+  v = await look();
+  ck(
+    v.srv.creates.length === before4,
+    'typing the number creates nothing',
+    String(v.srv.creates.length - before4),
+  );
+  ck(v.path.startsWith('/add-tech-card'), 'still on /add-tech-card while typing', v.path);
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-field="styleNumber"] input')
+      .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+  );
+  await page
+    .waitForFunction(() => location.pathname.startsWith('/tech-cards/'), null, { timeout: 8000 })
+    .catch(() => {});
+  v = await look();
+  ck(
+    v.srv.creates.length === before4 + 1 && v.srv.creates.at(-1)?.name === 'typed coat',
+    'the blur creates, once',
+    String(v.srv.creates.length - before4),
+  );
+
+  // ── H ─────────────────────────────────────────────────────────────────────────────────────
+  console.log('\nH · the number taken while the person retyped it: their value stays (Codex 2)');
+  await page.evaluate(() => {
+    window.__takenOnce = true;
+    window.__createDelay = 400;
+    window.__srv.suggests = 0;
+  });
+  const before5 = (await look()).srv.creates.length;
+  await mount('/add-tech-card?guided=1', three);
+  await page.fill('[data-field="name"] input', 'clash coat');
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-field="name"] input')
+      .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+  );
+  await page.waitForTimeout(80);
+  await page.fill('[data-field="styleNumber"] input', 'MY-OWN-7');
+  await page.waitForTimeout(900);
+  v = await look();
+  ck(v.styleNumber === 'MY-OWN-7', 'the typed number is not overwritten', String(v.styleNumber));
+  ck((v.srv.suggests ?? 0) === 0, 'no re-suggestion over it', String(v.srv.suggests));
+  ck(
+    v.srv.creates.length === before5 + 1 && v.path.startsWith('/add-tech-card'),
+    'no second create, still new',
+    `${v.srv.creates.length - before5} ${v.path}`,
+  );
+  await page.evaluate(() => (window.__createDelay = 0));
+
+  // ── I ─────────────────────────────────────────────────────────────────────────────────────
+  console.log('\nI · the read after create fails 3× — the form stays, then lands (Codex 3)');
+  await page.evaluate(() => {
+    window.__readFails = 3;
+    window.__srv.readFailures = 0;
+  });
+  await mount('/add-tech-card?guided=1', { ...three, styleNumber: 'FW26-555' });
+  await page.evaluate(
+    () => (window.__nameNode = document.querySelector('[data-field="name"] input')),
+  );
+  await page.fill('[data-field="name"] input', 'slow coat');
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-field="name"] input')
+      .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+  );
+  await page
+    .waitForFunction(() => (window.__srv.readFailures ?? 0) >= 3, null, { timeout: 8000 })
+    .catch(() => {});
+  v = await look();
+  const mid = await page.evaluate(() => document.body.innerText.includes('reading it back failed'));
+  ck(v.path.startsWith('/add-tech-card'), 'no cold navigation while the read fails', v.path);
+  ck(mid, 'said once on the page: «reading it back failed — retrying»');
+  await page.fill('[data-field="notes"] textarea', 'typed while retrying');
+  await page
+    .waitForFunction(() => location.pathname.startsWith('/tech-cards/'), null, { timeout: 15000 })
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  v = await look();
+  ck(
+    /^\/tech-cards\/\d+\?tab=studio&step=card$/.test(v.path),
+    'lands once the read answers',
+    v.path,
+  );
+  ck(
+    (await page.evaluate(
+      () => document.querySelector('[data-field="name"] input') === window.__nameNode,
+    )) && v.notes === 'typed while retrying',
+    'the same form, the note typed meanwhile kept',
+    String(v.notes),
+  );
+  ck(
+    !(await page.evaluate(() => document.body.innerText.includes('reading it back failed'))),
+    'the banner goes once read',
+  );
 
   if (errors.length) console.log('page errors:', errors.slice(0, 5).join(' | ').slice(0, 800));
 } finally {
