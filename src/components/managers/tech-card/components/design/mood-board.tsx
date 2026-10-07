@@ -60,6 +60,7 @@ import {
   type BoardMenuPick,
 } from './board-labels';
 import { useBoardPick, useBoardProposals, usePutBack } from './board-pick';
+import type { GuideFace } from './guide-face';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
@@ -481,9 +482,15 @@ const WHOLE_FRAME: CropFrame = { x: 0, y: 0, w: 1, h: 1, rotation: 0 };
 export function MoodBoard({
   techCardId,
   disabled,
+  guide,
 }: {
   techCardId: number;
   disabled?: boolean;
+  /**
+   * The guided face of the step (onboarding S5, `guide-face.tsx`) — only on a card still on its
+   * guide. Absent: the board is what it always was.
+   */
+  guide?: GuideFace;
 }): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -1135,7 +1142,11 @@ export function MoodBoard({
               addLabel='+ picture'
               purpose='moodboard reference'
               carouselLabel='moodboard'
-              emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
+              emptyLabel={
+                guide
+                  ? 'upload your moodboard here — pictures, sketches, references. drop, paste with ⌘V, or browse'
+                  : 'nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
+              }
               mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
               // АНАТОМИЯ ПЛИТКИ — ТА ЖЕ, ЧТО У ВСЕХ ПЛИТОК АДМИНКИ (T17, 20-TILE-SPEC §3): номер и
               // флаг `in the input` — факты, верх слева, видны всегда; ✕ — «с доски», верх справа;
@@ -1261,6 +1272,12 @@ export function MoodBoard({
               onSetRole={setRoleOf}
               labelQuestions={labelQuestions}
               onLabel={onLabelAnswer}
+              guide={
+                guide && {
+                  waiting: guide.stage === 'asked',
+                  onReveal: () => guide.reveal('description'),
+                }
+              }
             />
           </div>
 
@@ -1336,7 +1353,8 @@ export function MoodBoard({
 
         <CalloutsPanel
           panel={calloutsShell}
-          hidden={!open}
+          // A guided board with nothing on it has nothing to pin notes on (S5, face `empty`).
+          hidden={!open || (!!guide && !guide.show.callouts)}
           tag='mb'
           where='on the board'
           note={
@@ -1389,7 +1407,14 @@ export function MoodBoard({
         </CalloutsPanel>
       </SectionStack>
 
-      <div ref={foldBody} hidden={!open} className='contents' data-mb-fold-body=''>
+      {/* A guided card shows DESCRIPTION once it has words (S5) — the quiz's `next ✦` writes them;
+          hidden, not unmounted, as the fold does it, and for the same reason. */}
+      <div
+        ref={foldBody}
+        hidden={!open || (!!guide && !guide.show.description)}
+        className='contents'
+        data-mb-fold-body=''
+      >
         {/* ОДНА ЗАПИСКА НА ДОСКУ — И ЭТО `concept` (V-16), СВОИМ БЛОКОМ `DESCRIPTION`. Текст
             печатается в тех-паке и входит в подпись DESIGN. Это по-прежнему НЕ описание изделия для
             генерации: то — `garment description` блока референсов, уходит в каждый прогон; этот
@@ -1401,6 +1426,12 @@ export function MoodBoard({
           disabled={readOnly}
           conceptMax={CONCEPT_MAX}
           boardPictures={items.length}
+          guide={
+            guide && {
+              next: !guide.show.blocks,
+              onLanded: () => guide.reveal('blocks'),
+            }
+          }
         >
           {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
               ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь

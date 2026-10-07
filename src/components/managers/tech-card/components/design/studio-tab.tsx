@@ -37,6 +37,7 @@ import { RENDER_MIN_VIEWS, benchSides, type Gate } from './render/model';
 import { StepFooter } from './step-footer';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
+import { useGuideFace } from './guide-face';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import {
@@ -386,6 +387,10 @@ export function StudioTab({
     name: ['name', 'categoryId', 'season', 'styleNumber'],
   });
   const moodMinimum = useMoodMinimumGate();
+  /* THE GUIDED FACE OF STEP 1 (onboarding S5): one reading for the whole step — the board, its quiz
+     and DESCRIPTION get it as a prop, the lower blocks and the footer are hidden by it here. A viewer
+     or a frozen card cannot walk the guide, so it gets the whole step, as a legacy card does. */
+  const guide = useGuideFace(techCardId, guided && canWriteCard && !readOnly);
   const flatsMissing = bandless
     ? [...RENDER_MIN_VIEWS]
     : benchSides(band)
@@ -438,6 +443,9 @@ export function StudioTab({
       break;
     }
     case 'mood':
+      // A guided card earns its `go to flats ›` with the blocks (the owner: «дальше наш обычный
+      // флоу где уже видны все блоки и снизу справа кнопка go to flats»).
+      if (!guide.show.blocks) break;
       footer = (
         <StepFooter
           step='mood'
@@ -652,8 +660,19 @@ export function StudioTab({
                       (EnhanceText and DraftDesignIdea need tech_cards:write), so the board locks on
                       the grant as GENERAL INFORMATION does — one rule per door on every surface
                       (seam review, S-m2). */}
-                  <MoodBoard techCardId={techCardId} disabled={readOnly || !canWriteCard} />
-                  {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
+                  <MoodBoard
+                    techCardId={techCardId}
+                    disabled={readOnly || !canWriteCard}
+                    guide={guide.active ? guide : undefined}
+                  />
+                  {/* THE LOWER BLOCKS WAIT FOR THE DRAFT ON A GUIDED CARD (S5) — hidden, NOT
+                      unmounted: GENERAL INFORMATION, the aspects and MATERIAL SLOTS keep their
+                      `useFieldArray`s and their `data-field` anchors, so a refusal on
+                      `bomItems.2.name` still finds the field and opens the face (`useGuideFace`).
+                      `display: contents` — open, the blocks stay direct children of the stack and
+                      keep its gutter; hidden, they leave no gap. */}
+                  <div hidden={!guide.show.blocks} className='contents' data-guide-blocks=''>
+                    {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
                       `ConstructionGeneralInfo` рисует `general information · what this style is`
                       с рядом `FROM THE MOODBOARD · N OF M DRAFTED FIELDS · MOODBOARD MOVED ON` в
                       правом углу линейки, `DetailsEditor` — `construction · described aspect by
@@ -663,30 +682,31 @@ export function StudioTab({
                       → слоты» выражается соседством в стеке. Слот аспектов может быть пуст
                       (владелец шапки отдаёт сюда свой единственный `DetailsEditor`); пустой он не
                       рисует ни секции, ни отступа. */}
-                  <ConstructionGeneralInfo
-                    isAux={isAux}
-                    readOnly={readOnly || !canWriteCard}
-                    frozen={readOnly}
-                  />
-                  {constructionAspects}
-                  {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
+                    <ConstructionGeneralInfo
+                      isAux={isAux}
+                      readOnly={readOnly || !canWriteCard}
+                      frozen={readOnly}
+                    />
+                    {constructionAspects}
+                    {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
                       ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
                       именно её пустота зовёт нажать «draft the construction» выше. `Section` у
                       блока СВОЯ: у него собственный `action` — чипы рождения слота. `navTo` — его
                       дверь `›` в редактор ЭТОЙ строки на вкладке BOM. */}
-                  <MaterialSlots
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                    onGoTab={navTo}
-                  />
-                  {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
+                    <MaterialSlots
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                      onGoTab={navTo}
+                    />
+                    {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
                       макете нет; стоит сразу под таблицей слотов и читается её продолжением: «вот
                       слоты; вот чем их красят». Блока НЕТ ВОВСЕ, пока черновик ничего не предложил —
                       условие знает только орган (модульный стор), поэтому обёртка у него своя. */}
-                  <ColourwayProposals
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                  />
+                    <ColourwayProposals
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                    />
+                  </div>
                 </>
               )}
               {step !== 'mood' &&
