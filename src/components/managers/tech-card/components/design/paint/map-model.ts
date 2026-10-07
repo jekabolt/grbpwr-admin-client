@@ -45,9 +45,27 @@ export const slotHex = (bomItemId: number, step = 0): string =>
   );
 
 /**
- * Labels of every slot of the card, collisions stepped apart in id order. R9 · `after` (the
- * hardware slots) takes the steps left once every id of `bomItemIds` (the cloths) has its label:
- * appending hardware never re-steps a cloth label, so no saved map is orphaned by it.
+ * R9 · THE HARDWARE NAMESPACE. A hardware slot's label is a function of its id ALONE — never of
+ * which other slots the card holds — so deleting or adding a slot never moves another slot's label
+ * and no saved map is orphaned or inherits pixels. The namespace is near-grey (chroma ≤ 31 of 255):
+ * every cloth label (`slotHex`, S 0.62 · L 0.2–0.8 → chroma ≥ 63) and every free-colour label
+ * (`freeColourLabel`, chroma ≥ 92) lies outside it, black and white too. Injective for ids below
+ * `HARDWARE_ID_SPAN` (128 greys × 32 × 32 offsets); beyond it the ids wrap.
+ */
+export const HARDWARE_ID_SPAN = 128 * 32 * 32;
+export function hardwareHex(bomItemId: number): string {
+  const n =
+    (((Math.trunc(bomItemId) - 1) % HARDWARE_ID_SPAN) + HARDWARE_ID_SPAN) % HARDWARE_ID_SPAN;
+  const base = 64 + (n % 128);
+  const dg = (Math.floor(n / 128) % 32) - 16;
+  const db = Math.floor(n / 4096) - 16;
+  const ch = (v: number) => v.toString(16).padStart(2, '0');
+  return `#${ch(base)}${ch(base + dg)}${ch(base + db)}`;
+}
+
+/**
+ * Labels of every slot of the card: the cloths' collisions stepped apart in id order; R9 · `after`
+ * (the hardware slots) take `hardwareHex` — their own namespace, stable under any change of the set.
  */
 export function slotLabels(
   bomItemIds: readonly number[],
@@ -57,17 +75,14 @@ export function slotLabels(
   const taken = new Set<string>();
   const sorted = (ids: readonly number[]) =>
     [...new Set(ids)].filter((x) => x > 0 && !out.has(x)).sort((a, b) => a - b);
-  const place = (ids: readonly number[]) => {
-    for (const id of sorted(ids)) {
-      let step = 0;
-      let hex = slotHex(id, step);
-      while ((taken.has(hex) || !isMapInk(hex)) && step < 12) hex = slotHex(id, ++step);
-      taken.add(hex);
-      out.set(id, hex);
-    }
-  };
-  place(bomItemIds);
-  place(after);
+  for (const id of sorted(bomItemIds)) {
+    let step = 0;
+    let hex = slotHex(id, step);
+    while ((taken.has(hex) || !isMapInk(hex)) && step < 12) hex = slotHex(id, ++step);
+    taken.add(hex);
+    out.set(id, hex);
+  }
+  for (const id of sorted(after)) out.set(id, hardwareHex(id));
   return out;
 }
 

@@ -834,6 +834,50 @@ ck(
     'R9 slotLabels: still independent of the order within each list',
   );
 
+  // Finding 1 · a hardware label is a function of its id alone. Ids 2 and 612 share the base hex
+  // (#9139d0): the old rule stepped 612, and deleting 2 then moved 612 back onto 2's pixels.
+  ck(m.slotHex(2) === m.slotHex(612), 'R9 (control) ids 2 and 612 share a base slotHex');
+  const fabNo612 = fab.filter((id) => id !== 612);
+  const withTwo = m.slotLabels(fabNo612, [2, 612, 31]);
+  const deleted = m.slotLabels(fabNo612, [612, 31]);
+  const added = m.slotLabels([...fabNo612, 2], [612, 31]);
+  ck(
+    deleted.get(612) === withTwo.get(612) &&
+      deleted.get(31) === withTwo.get(31) &&
+      added.get(612) === withTwo.get(612) &&
+      ![...deleted.values()].includes(withTwo.get(2)),
+    "R9 delete slot 2 and reload: 612 keeps its label, nothing inherits 2's pixels",
+    `${withTwo.get(2)} / ${withTwo.get(612)}`,
+  );
+  // The namespace is disjoint from every cloth and free-colour label and injective.
+  const chroma = (hex) => {
+    const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return Math.max(...v) - Math.min(...v);
+  };
+  let minCloth = 255;
+  for (let id = 1; id < 5000; id += 1)
+    for (let step = 0; step < 13; step += 1)
+      minCloth = Math.min(minCloth, chroma(m.slotHex(id, step)));
+  const taken = [];
+  for (let k = 0; k < 64; k += 1) taken.push(m.freeColourLabel(taken));
+  const minFree = Math.min(...taken.map(chroma));
+  const hwHex = new Set();
+  let maxHw = 0;
+  for (let id = 1; id <= m.HARDWARE_ID_SPAN; id += 1) {
+    const h = m.hardwareHex(id);
+    hwHex.add(h);
+    maxHw = Math.max(maxHw, chroma(h));
+  }
+  ck(
+    hwHex.size === m.HARDWARE_ID_SPAN &&
+      maxHw < minCloth &&
+      maxHw < minFree &&
+      !hwHex.has('#000000') &&
+      !hwHex.has('#ffffff'),
+    'R9 hardware namespace: injective over the span, disjoint from cloth and colour labels',
+    `hw chroma ≤ ${maxHw}, cloth ≥ ${minCloth}, colour ≥ ${minFree}`,
+  );
+
   // Synthetic sheet: a button (ring r 10, 2 px) with four hole rings (r 2, 1 px) on 200×200
   // (1 % of the sheet = 400 px, the disc ≈ 250).
   const W = 200,
