@@ -31,8 +31,9 @@ import {
   useTechCardAutosave,
   type FlushResult,
 } from '../autosave-contract';
-import { readBench } from '../bench-slot';
+import { InertDoor, readBench } from '../bench-slot';
 import { proposedColourways, savedColourwayIdentity } from '../colourway-proposals-model';
+import { serverSpeaksDesign } from '../capability';
 import { ControlLabel } from '../core';
 import { draftReadGate, openGateDoor } from '../core/chain';
 import {
@@ -1743,6 +1744,14 @@ export function ConstructionDraft({
       </Button>
     ) : null;
 
+  /** The guided `next ✦` (S5) refuses as GenerateRow does: read-only, no band, slots minting, the gate. */
+  const nextGate: Gate = readOnly
+    ? { ok: false, reason: 'this card is read-only for you' }
+    : !serverSpeaksDesign()
+      ? { ok: false, reason: 'this server does not serve the design band' }
+      : minting > 0
+        ? { ok: false, reason: 'the detail slots the draft named are being added — a moment' }
+        : gate;
   /* ЧТО ПРОЧИТАЛ ПРОГОН — В ТОТ ЖЕ РЯД, ЧТО И КНОПКА (`trailing` общего `GenerateRow`). Два ряда
      читались как два органа, хотя это одно: что я запускаю и на чём. */
   const runState =
@@ -1861,36 +1870,76 @@ export function ConstructionDraft({
         )}
         {/* ОДНА ДВЕРЬ НА ВСЕ ЭКРАНЫ — общий `GenerateRow`: `GENERATE`, дверь описи, строка про
             деньги. Состояние прогона вшито в её ряд по шву `trailing`. */}
-        <GenerateRow
-          gate={
-            minting > 0
-              ? { ok: false, reason: 'the detail slots the draft named are being added — a moment' }
-              : gate
-          }
-          label={guide?.next ? 'next ✦' : 'GENERATE'}
-          pending={run.phase !== null}
-          disabled={readOnly}
-          onGenerate={() => {
-            if (guide?.next) drafted.acceptKey(draftedKey.concept);
-            void askForDraft();
-          }}
-          /* ДВЕРЬ ОПИСИ — РЯДОМ С GENERATE, КАК У ФЛЭТА (T33): `secondary sm` + `ControlLabel`,
-             не `xs` у правого края. Состояние прогона — следом. */
-          trailing={
-            <>
+        {guide?.next ? (
+          /* S5 · A GUIDED CARD'S `next ✦` STANDS BOTTOM RIGHT OF DESCRIPTION — the owner: «справа
+             снизу в блоке DESCRIPTION будет кнопка далее», the StepFooter grammar (one primary at
+             the right edge, quiet words to its left). The same run as GENERATE; pressing it accepts
+             the drafted description (Q5). Legacy and opened faces keep the GenerateRow below. */
+          <div
+            className='flex flex-wrap items-center justify-end gap-x-4 gap-y-2 py-1'
+            data-c19-draft-next=''
+          >
+            <div className='mr-auto flex flex-wrap items-center gap-2'>
               <Button
                 type='button'
-                variant='secondary'
-                size='sm'
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
                 onClick={() => setInspecting(true)}
                 data-c19-draft-inspect=''
               >
-                <ControlLabel>what the model gets ▸</ControlLabel>
+                what the model gets ▸
               </Button>
               {runState}
-            </>
-          }
-        />
+            </div>
+            {nextGate.ok ? (
+              <Button
+                variant='main'
+                size='sm'
+                disabled={run.phase !== null}
+                onClick={() => {
+                  drafted.acceptKey(draftedKey.concept);
+                  void askForDraft();
+                }}
+              >
+                {run.phase !== null ? 'starting…' : 'next ✦'}
+              </Button>
+            ) : (
+              <InertDoor label='next ✦' reason={nextGate.reason} size='sm' />
+            )}
+          </div>
+        ) : (
+          <GenerateRow
+            gate={
+              minting > 0
+                ? {
+                    ok: false,
+                    reason: 'the detail slots the draft named are being added — a moment',
+                  }
+                : gate
+            }
+            label='GENERATE'
+            pending={run.phase !== null}
+            disabled={readOnly}
+            onGenerate={() => void askForDraft()}
+            /* ДВЕРЬ ОПИСИ — РЯДОМ С GENERATE, КАК У ФЛЭТА (T33): `secondary sm` + `ControlLabel`,
+               не `xs` у правого края. Состояние прогона — следом. */
+            trailing={
+              <>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => setInspecting(true)}
+                  data-c19-draft-inspect=''
+                >
+                  <ControlLabel>what the model gets ▸</ControlLabel>
+                </Button>
+                {runState}
+              </>
+            }
+          />
+        )}
         <DraftInventoryModal
           open={inspecting}
           onOpenChange={setInspecting}
