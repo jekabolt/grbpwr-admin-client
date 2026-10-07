@@ -241,6 +241,14 @@ try {
   if (n !== 2 || !/FRONT BUTTON · 2/i.test(cap))
     errors.push(`ASSERT: FRONT BUTTON count ${n}, cap «${cap}»`);
   else console.log(`assert ok: two clicks → ${n} instances, cap «${cap.trim()}»`);
+  // Fix 6 · every hardware caption reads whole: wrapped, never clipped.
+  const clipped = await page.$$eval('[data-paint-hardware-cap]', (els) =>
+    els
+      .filter((e) => e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth + 1)
+      .map((e) => e.textContent),
+  );
+  if (clipped.length) errors.push(`ASSERT: clipped hardware captions ${JSON.stringify(clipped)}`);
+  else console.log('assert ok: hardware captions whole (wrapped, not clipped)');
   // Precedence: a cloth gesture over the whole front leaves the buttons.
   const kept = await page.evaluate((label) => {
     const p = window.__paint;
@@ -280,6 +288,13 @@ try {
   const full = resolve(OUT, 'r9-f1-parts.png');
   await page.screenshot({ path: full, fullPage: true });
   shots.push(full);
+  // A close-up of the palette tiles (the captions read whole).
+  const pal = await page.$('[data-paint-palette]');
+  if (pal) {
+    const tiles = resolve(OUT, 'r9-f1-tiles.png');
+    await pal.screenshot({ path: tiles });
+    shots.push(tiles);
+  }
   // A close-up of the two buttons on the canvas.
   const a = await at('front', 330 / 770, 300 / 770);
   const b = await at('front', 450 / 770, 520 / 770);

@@ -230,32 +230,24 @@ function HardwareTile({
           <TrimPictogram kind={m.pictogram ?? 'generic'} className='size-full opacity-60' />
         </span>
       )}
-      {/* The name gives way, the count never does: `FRONT BUTT… · 2`. */}
-      <span className='flex w-full min-w-0'>
-        <Text
-          size='micro'
-          variant={armed ? 'default' : 'label'}
-          tracking='label'
-          component='span'
-          className='min-w-0 truncate uppercase'
-        >
-          {m.name}
-        </Text>
-        {count > 0 && (
-          <Text
-            size='micro'
-            variant={armed ? 'default' : 'label'}
-            tracking='label'
-            component='span'
-            className='shrink-0 whitespace-pre uppercase'
-          >
-            {` · ${count}`}
-          </Text>
-        )}
-      </span>
+      {/* R9 fix 6 · the whole name, wrapped to two lines under the tile, the count on its tail. */}
+      <Text
+        size='micro'
+        variant={armed ? 'default' : 'label'}
+        tracking='label'
+        component='span'
+        className={TILE_CAP}
+        data-paint-hardware-cap=''
+      >
+        {m.name}
+        {count > 0 && <span className='whitespace-nowrap'>{` · ${count}`}</span>}
+      </Text>
     </button>
   );
 }
+
+/** R9 fix 6 · a palette tile's caption: the full name on up to two lines (cloth and hardware alike). */
+const TILE_CAP = 'line-clamp-2 w-full break-words uppercase';
 
 const TILE_BTN =
   'group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
@@ -323,7 +315,7 @@ function PaintPalette({
                   variant={armed ? 'default' : 'label'}
                   tracking='label'
                   component='span'
-                  className='w-full truncate uppercase'
+                  className={TILE_CAP}
                 >
                   {m.name}
                 </Text>
