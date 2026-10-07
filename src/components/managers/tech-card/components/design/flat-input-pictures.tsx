@@ -26,6 +26,8 @@ import { useTechCardAutosave } from './autosave-contract';
 import { CapName, displayDetailName, readBench } from './bench-slot';
 import {
   boardMenu,
+  INPUT_OWN_WORDS,
+  inputStillReading,
   labelsByMedia,
   photoDetailSlots,
   tileWord,
@@ -302,26 +304,6 @@ function useInputHold(techCardId: number) {
 /** A picture added in this input, this session — in the tray until a press sends it. */
 type Added = { mediaId: number; full: common_MediaFull };
 
-/**
- * STILL READING, NOT AN ANSWER (owner, 07.10: «no purpose» flashed on a picture mid-reading). The
- * server's preview is asked by a stamp and lags the board by a beat: a picture whose label or
- * purpose just landed on the client is still held there as `unmarked` (no purpose yet) or `pending`
- * (label being read). Neither is a final word — the next preview drops them — so the tray reads them
- * as `…`: the tile shows the reading sweep, and GENERATE keeps waiting for it (`setFlatReading`).
- */
-const TRAY_READING_REASONS = new Set(['unmarked', 'pending']);
-
-/** Words that already say why the tray picture waits; a settled label word asks the server why. */
-const TRAY_OWN_WORDS = new Set([
-  '…',
-  'view ?',
-  'detail ?',
-  'mood',
-  'material',
-  'render',
-  'no view',
-]);
-
 export function FlatInputPictures({
   techCardId,
   band,
@@ -475,12 +457,12 @@ export function FlatInputPictures({
   const trayWord = useCallback(
     (id: number): string => {
       if (outputs.has(id)) return 'render';
-      const w = tileWord(purposeOf.get(id) ?? '', labels.get(id), detailSlots);
-      // Без назначения: модель его предложит, назначение встанет само.
-      if (w === null) return '…';
-      if (TRAY_OWN_WORDS.has(w)) return w;
+      const purpose = purposeOf.get(id) ?? '';
       const reason = viewsHeld.get(id);
-      if (!reason || TRAY_READING_REASONS.has(reason)) return '…';
+      // Still being read (the one rule GENERATE waits by): the tile sweeps.
+      if (inputStillReading(purpose, labels.get(id), detailSlots, reason)) return '…';
+      const w = tileWord(purpose, labels.get(id), detailSlots) ?? '';
+      if (INPUT_OWN_WORDS.has(w) || !reason) return w;
       return HELD_WORD[reason] ?? reason.replace(/_/g, ' ');
     },
     [outputs, purposeOf, labels, detailSlots, viewsHeld],

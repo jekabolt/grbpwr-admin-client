@@ -1,6 +1,7 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
+  PreviewDesignRunInputsResponse,
   common_DesignInputSnapshot,
   common_DesignRunParams,
 } from 'api/proto-http/admin';
@@ -41,7 +42,7 @@ import {
   useFlatInput,
   type FlatAsk,
 } from './flat-input';
-import { labelWaiting, labelsByMedia, takeProposals } from './board-labels';
+import { inputStillReading, labelsByMedia, photoDetailSlots, takeProposals } from './board-labels';
 import {
   autoStructure,
   flatParamsFor,
@@ -339,12 +340,20 @@ const READING_POLL_MS = 1_500;
  * saved, so the server's next read settles it. Returns the pictures it waited for and those still
  * being read when it went (what is actually left out is said by the press's own preview, Codex M15),
  * or `null` when the save of a proposal failed (nothing is started).
+ *
+ * «Still being read» is the tray's own rule (`inputStillReading`, owner 07.10): every round asks the
+ * press's OWN preview (`ask`), and a picture it does not send while holding it as `pending` /
+ * `unmarked` — or not naming it at all — is still waited for, even when the band's label already
+ * looks settled (the cheap model's proposal landed, the strong detail read has not). Before, the wait
+ * read the band alone, went at ~4 s, and the run left the picture out. No preview route (404/501) or
+ * a failed ask — the band's label word alone.
  */
 async function waitForReading(opts: {
   qc: QueryClient;
   card: number;
   form: ReturnType<typeof useFormContext<TechCardFormData>>;
   flush: () => Promise<FlushResult>;
+  ask: () => Promise<PreviewDesignRunInputsResponse>;
 }): Promise<{ waited: number[]; left: number[] } | null> {
   const { qc, card, form } = opts;
   const ids = readFlatReading(card);
@@ -382,8 +391,27 @@ async function waitForReading(opts: {
     }
     const now = ((form.getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow);
     const purposeOf = new Map(now.map((i) => [i.mediaId, (i.role ?? '').trim()]));
+    let server: { sent: Set<number>; held: Map<number, string> } | null = null;
+    try {
+      const answer = await opts.ask();
+      server = {
+        sent: new Set((answer.inputs?.refs ?? []).map((r) => r.mediaId ?? 0)),
+        held: new Map((answer.held ?? []).map((h) => [h.mediaId ?? 0, (h.reason ?? '').trim()])),
+      };
+    } catch {
+      server = null;
+    }
+    const slots = photoDetailSlots(band.bench);
     const left = ids.filter(
-      (id) => purposeOf.has(id) && labelWaiting(purposeOf.get(id) ?? '', labels.get(id)),
+      (id) =>
+        purposeOf.has(id) &&
+        !server?.sent.has(id) &&
+        inputStillReading(
+          purposeOf.get(id) ?? '',
+          labels.get(id),
+          slots,
+          server ? server.held.get(id) : null,
+        ),
     );
     if (!left.length || Date.now() >= until) return { waited: ids, left };
     await new Promise((r) => window.setTimeout(r, READING_POLL_MS));
@@ -704,11 +732,23 @@ export function FlatRunRow({
       }
       /* M15 Q2: pictures just dropped into the input are given ≤15 s to be read; what is still
          being read after that stays out of this run, and the row says so. */
+      // The params this press will send (the same as below): the wait asks ITS preview.
+      const waitParams = flatRunParams(
+        targetSlotId(target),
+        modeOfRoute(routeOf({ target, fromMyFlat, structure: structureNow.length })),
+        structureNow,
+      );
       const reading = await waitForReading({
         qc,
         card,
         form,
         flush: () => autosave.flush('flat'),
+        ask: () =>
+          adminService.PreviewDesignRunInputs({
+            techCardId: card,
+            kind: 'flat',
+            params: waitParams,
+          }),
       });
       if (reading === null) {
         patchFlatInput(card, { refused: 'error' });

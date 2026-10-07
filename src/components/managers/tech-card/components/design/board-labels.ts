@@ -131,6 +131,48 @@ export function tileWord(
   return slot ? detailName(slot) : 'detail ?';
 }
 
+/**
+ * ═══ STILL BEING READ — ONE RULE FOR THE FLAT INPUT'S TRAY AND FOR GENERATE (owner, 07.10) ═══════
+ *
+ * The tray sweeps a picture (`PictureBusy` `read`) and GENERATE waits for it (≤15 s, Q2) by the SAME
+ * rule, so a picture the person sees being read is waited for:
+ *   · the client has no answer yet: no purpose and no proposal taken (tileWord null), or the label
+ *     is pending / a model's label that does not fit the purpose (tileWord `…`);
+ *   · or the client has an answer the SERVER does not have yet: the server preview holds it as
+ *     `pending` (its label is being read, e.g. the strong detail read after the cheap proposal) or
+ *     `unmarked` (the purpose has not reached it), or — in the tray, asked by the views press —
+ *     does not say anything about it yet.
+ * Final, never reading: `view ?`, `detail ?`, `mood`, `material`, `render`, `no view`, and every
+ * other held reason (older, held, other_detail…).
+ *
+ * `held`: the server preview's reason for this picture — `undefined` when the preview names none,
+ * `null` when there is no preview to ask (a server without the route): then the label's own word
+ * is the answer.
+ */
+export const READING_HELD: ReadonlySet<string> = new Set(['pending', 'unmarked']);
+
+/** Words that already say why a flat input picture waits: final, whatever the server holds. */
+export const INPUT_OWN_WORDS: ReadonlySet<string> = new Set([
+  'view ?',
+  'detail ?',
+  'mood',
+  'material',
+  'render',
+  'no view',
+]);
+
+export function inputStillReading(
+  purpose: string,
+  ref: common_DesignReference | undefined,
+  slots: readonly common_DesignBenchSlot[],
+  held: string | undefined | null,
+): boolean {
+  const w = tileWord(purpose, ref, slots);
+  if (w === null || w === '…') return true;
+  if (INPUT_OWN_WORDS.has(w) || held === null) return false;
+  return !held || READING_HELD.has(held);
+}
+
 /** Ярлык ещё читается моделью — плитке есть чего ждать, полоса перечитывается. */
 export function labelWaiting(purpose: string, ref: common_DesignReference | undefined): boolean {
   if (purpose === 'mood' || purpose === 'material') return false;

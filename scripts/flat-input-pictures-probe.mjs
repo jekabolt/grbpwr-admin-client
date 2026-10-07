@@ -34,6 +34,7 @@
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noarm      → касание снимает сразу: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nowait     → GENERATE не ждёт чтения: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noreadword → «no purpose» посреди чтения: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=serverblind → GENERATE не ждёт чтения сервера: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
 //   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
@@ -54,6 +55,7 @@ const PICTURES = /design\/flat-input-pictures\.tsx$/;
 const WORDS = /design\/flat-words-field\.tsx$/;
 const ANNOTATOR = /ui\/components\/focused-annotator\.tsx$/;
 const RUNROW = /design\/flat-run-row\.tsx$/;
+const LABELS = /design\/board-labels\.ts$/;
 const MUTATIONS = {
   // M15: the add decides the purpose itself (the M14 per-group door) — the server no longer decides.
   purpose: [
@@ -84,10 +86,14 @@ const MUTATIONS = {
   // 07.10: a lagging preview's `unmarked` is said as «no purpose» mid-reading.
   noreadword: [
     {
-      file: PICTURES,
-      from: 'if (!reason || TRAY_READING_REASONS.has(reason)) return',
-      to: 'if (!reason) return',
+      file: LABELS,
+      from: 'return !held || READING_HELD.has(held);',
+      to: "return !held || held === 'pending';",
     },
+  ],
+  // 07.10 D1: GENERATE's wait reads the band alone, not the press's preview.
+  serverblind: [
+    { file: RUNROW, from: 'server ? server.held.get(id) : null', to: 'null' },
   ],
   // M15: the tray keeps a picture a press already sends.
   nosent: [{ file: PICTURES, from: '!sent.has(a.mediaId) && ', to: '' }],
@@ -1101,6 +1107,57 @@ try {
     delete window.__added.held[809];
     await window.__qc.invalidateQueries();
   });
+
+  console.log('\n07.10 D1 · GENERATE waits while the server still reads what the band calls settled');
+  await page.evaluate(async () => {
+    await window.__label(806, {
+      role: 'back',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+    window.__added.views.push(806, 809);
+    await window.__qc.invalidateQueries();
+  });
+  await addOne([810]);
+  await page.evaluate(async () => {
+    window.__added.held[810] = 'pending';
+    await window.__label(810, {
+      role: 'side_r',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(800);
+  const before3 = (await calls('StartDesignRun')).length;
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page.waitForTimeout(4500);
+  const label3 = await page.evaluate(
+    () => document.querySelector('[data-flat-generate] button')?.textContent ?? '',
+  );
+  ck(
+    /reading…/i.test(label3) && (await calls('StartDesignRun')).length === before3,
+    'the band label settled, the press preview still holds it «pending»: GENERATE keeps waiting',
+    `${label3} | starts ${before3}→${(await calls('StartDesignRun')).length} | tray ${JSON.stringify(await tray())}`,
+  );
+  await page.evaluate(() => {
+    delete window.__added.held[810];
+    window.__added.views.push(810);
+  });
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before3,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  ck(
+    (await calls('StartDesignRun')).length > before3 && !(await page.$('[data-flat-left-out]')),
+    'the server answers: the press goes with it, nothing left out',
+    `starts ${before3}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-left-out]')?.textContent ?? '')}`,
+  );
 
   console.log('\nM15 · recall puts a flat run’s words back into WORDS');
   const recall = await page.evaluate(() =>
