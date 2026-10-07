@@ -15311,7 +15311,7 @@ export type GetDesignBandResponse = {
   imageRunCapSeconds: number | undefined;
   cappedRunKinds: string[] | undefined;
   // PARTS · the card's pieces list (M6): the closed names the parts labeller uses; parts_suggestions
-  // carries only the rows named under its current rev. Absent = none read yet.
+  // carries only the rows named under its current names. Absent = none read yet.
   partsPieces: common_DesignPartsPieces | undefined;
 };
 
@@ -16980,6 +16980,8 @@ export type common_DesignJoinsFit = {
 // edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
 // generation.
 export type common_DesignPartsPieces = {
+  // CAS revision: every write + 1, a proposal's too (a settle is tied to the proposal seen). The
+  // labeller's answers are keyed on what the list TELLS it (names, openings, edited), not on rev.
   rev: number | undefined;
   pieces: common_DesignPartsPiece[] | undefined;
   openings: string[] | undefined;
@@ -18098,8 +18100,9 @@ export type SuggestDesignPartsCardRequest = {
 export type SuggestDesignPartsCardResponse = {
   suggestions: DesignPartsSuggestion[] | undefined;
   cached: boolean | undefined;
-  // The card's pieces list the answer was named under (M6): its rev is the one the answer's rows are
-  // keyed on. Absent = the card has no FRONT/BACK flat to read pieces from (labels were free).
+  // The card's pieces list the answer was named under (M6); the server may have read it (or a
+  // proposal) during this very call. Absent = the card has no FRONT/BACK flat to read pieces from
+  // (labels were free).
   pieces: common_DesignPartsPieces | undefined;
 };
 
@@ -19885,10 +19888,10 @@ export interface AdminService {
   // SetDesignPartsPieces saves the designer's PIECES LIST for PARTS (M6, flat-consistency 107) — the
   // closed list of names the parts labeller may use (CAS: expected_rev must be the stored rev; 0 = no
   // list yet). Names are cleaned (lowercase, ≤ 40 characters, unique, not "opening"/"unnamed", ≤ 30);
-  // the list is marked edited, so a later read of changed flats only PROPOSES. settle_proposal = true
-  // also drops the pending proposal (the names sent are the designer's answer to it: its names = take,
-  // the list's own = keep). Aborted (parts_pieces_rev_mismatch) on a stale rev. Spends no key; the
-  // next SuggestDesignPartsCard names the parts again under the new rev.
+  // the list is marked edited, so a later read of changed flats only PROPOSES (rev + 1, names kept).
+  // settle_proposal = true also drops the pending proposal (the names sent are the designer's answer
+  // to it: its names = take, the list's own = keep). Aborted (parts_pieces_rev_mismatch) on a stale
+  // rev. Spends no key; the next SuggestDesignPartsCard names the parts again under the new names.
   SetDesignPartsPieces(request: SetDesignPartsPiecesRequest): Promise<SetDesignPartsPiecesResponse>;
   // SetDesignDetailKept marks a STALE flat detail as kept (keep = true) or takes the mark off (keep =
   // false) — 82-INPUT-REDESIGN §5, owner 06.10: «keep» is stored on the server, everyone sees it.

@@ -6434,6 +6434,8 @@ export type DesignJoinsFit = {
 // edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
 // generation.
 export type DesignPartsPieces = {
+  // CAS revision: every write + 1, a proposal's too (a settle is tied to the proposal seen). The
+  // labeller's answers are keyed on what the list TELLS it (names, openings, edited), not on rev.
   rev: number | undefined;
   pieces: DesignPartsPiece[] | undefined;
   openings: string[] | undefined;
