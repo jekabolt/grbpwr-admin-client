@@ -201,6 +201,7 @@ export function PlaceOrDrawCell({
   cap,
   instead,
   backdrop,
+  corner,
   quietDoor,
   topAligned,
   onPick,
@@ -251,6 +252,12 @@ export function PlaceOrDrawCell({
    */
   backdrop?: React.ReactNode;
   /**
+   * T75 · THE TOP-RIGHT CORNER OF THE FRAME (tile anatomy, 20-TILE-SPEC: top-right ✕ = take out of
+   * this block). Drawn over the stripes, inside the box, above the doors; the caller gives a quiet
+   * corner button (`TILE_CORNER + TILE_QUIET`), which shows on hover / focus and always on touch.
+   */
+  corner?: React.ReactNode;
+  /**
    * Door face without the photo glyph, its word at the bottom of the frame — for a backdrop
    * pictogram that would otherwise collide with the glyph in the centre (MATERIALS slots).
    */
@@ -297,7 +304,7 @@ export function PlaceOrDrawCell({
         style={{
           ...PLACEHOLDER_SURFACE,
           minHeight: 0,
-          ...(backdrop ? { position: 'relative' as const } : null),
+          ...(backdrop || corner ? { position: 'relative' as const } : null),
           ...(aspect ? { aspectRatio: aspect } : { flex: '1 1 auto' }),
           /* Слово состояния — единственное, что центрируется флексом: у него нет своей ширины и
              отнимать её не у чего. Дверям кадр отдаётся дорожками грида — разбор у `slotFrame`. */
@@ -308,6 +315,7 @@ export function PlaceOrDrawCell({
         className={cn(instead && 'flex items-center justify-center px-2 text-center')}
       >
         {backdrop}
+        {corner && <div className='absolute right-1 top-1 z-20 flex'>{corner}</div>}
         {instead ?? (
           <>
             {/* ⚠ ОБЁРТКА С НУЛЕВЫМ МИНИМУМОМ НЕСУЩАЯ, А НЕ УБОРКА — см. разбор у `slotFrame`. */}

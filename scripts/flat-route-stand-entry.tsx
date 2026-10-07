@@ -162,7 +162,19 @@ const plate = (id: number, runId: number, view: string, k: number) =>
   }) as unknown as common_DesignPicture;
 win.__bands[55] = {
   ...CAP,
-  runs: [],
+  // T75: run 130 asked for the detail `pocket` (73) — deleting it asks first; `cuff vent
+  // construction` (72) has nothing pointing at it — its ✕ deletes at once.
+  runs: [
+    {
+      id: 130,
+      kind: 'flat',
+      status: 'done',
+      requestedOutputs: 1,
+      params: { views: ['detail'], detailSlotIds: [73] },
+      createdAt: minutesAgo(30),
+      pictures: [],
+    },
+  ],
   bench: [
     ...VIEWS.map((viewKey, i) => ({
       id: 61 + i,
@@ -178,13 +190,23 @@ win.__bands[55] = {
       detailName: 'collar',
       kind: 'flat',
       pictureId: 411,
-      picture: plate(411, 100, 'detail', 2),
+      // T75: a mixed-input plate — the old «from mixed input» caption must not print
+      picture: { ...plate(411, 100, 'detail', 2), mixedInput: true } as common_DesignPicture,
       slotRev: 2,
       // server truth (GetDesignBand, 0400)
       stale: true,
       kept: false,
       staleAgainstRunId: 120,
     },
+    {
+      id: 72,
+      viewKey: 'detail',
+      detailName: 'cuff vent construction',
+      kind: 'flat',
+      pictureId: 0,
+      slotRev: 2,
+    },
+    { id: 73, viewKey: 'detail', detailName: 'pocket', kind: 'flat', pictureId: 0, slotRev: 1 },
   ],
 } as unknown as GetDesignBandResponse;
 

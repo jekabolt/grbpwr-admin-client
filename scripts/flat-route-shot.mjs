@@ -514,6 +514,43 @@ try {
     (await page.locator(`${S} [data-detail-stale]`).textContent()).includes('stale'),
   );
   await shot(S, 'stale-detail.png');
+  // ── T75 · at rest, while `collar` still holds its (mixed-input) plate ──
+  const D = `${S} [data-flat-details]`;
+  const rest = await page.evaluate((d) => {
+    const row = document.querySelector(d);
+    return {
+      inputs: row.querySelectorAll('input:not([type="file"])').length,
+      mixed: /from mixed input/i.test(row.innerText),
+      remove: [...row.querySelectorAll('button')].filter((b) =>
+        /^remove$/i.test(b.innerText.trim()),
+      ).length,
+      caps: [...row.querySelectorAll('[data-detail-name]')].map((n) =>
+        n.getAttribute('data-detail-name'),
+      ),
+    };
+  }, D);
+  check(
+    'T75a no name field, no «from mixed input», no REMOVE under the detail cells',
+    rest.inputs === 0 && !rest.mixed && rest.remove === 0,
+    JSON.stringify(rest),
+  );
+  check(
+    'T75b every detail name is a rename button in its cap',
+    ['collar', 'cuff vent construction', 'pocket'].every((n) => rest.caps.includes(n)),
+    JSON.stringify(rest.caps),
+  );
+  check(
+    'T75h the filled detail has no delete ✕ (its ✕ takes the picture off) — and its tile ✕ is there',
+    (await page.locator(`${D} [data-bench-slot="collar"] [data-detail-delete]`).count()) === 0 &&
+      (await page
+        .locator(`${D} [data-bench-slot="collar"] [aria-label="unmark collar"]`)
+        .count()) === 1,
+  );
+  // the owner's reference: a filled detail beside an empty one with its ✕ (hovered)
+  await page.hover(`${D} [data-bench-slot="cuff vent construction"]`);
+  await page
+    .locator(D)
+    .screenshot({ path: process.env.T75_SHOT || resolve(SHOTS, 't75-details.png') });
   await page.click(`${S} [data-detail-stale-keep]`);
   await page.waitForTimeout(500);
   const kept = (await calls(page, 'SetDesignDetailKept')).at(-1)?.body;
@@ -531,6 +568,110 @@ try {
     'S2 discard empties the slot (the picture stays in the history)',
     un?.pictureId === 0 && un?.slot?.slotId === 71,
     JSON.stringify(un),
+  );
+
+  // ── T75 · DETAIL CELLS: name in the cap only, rename by click, ✕ in the empty frame ──
+  const cuff = `${D} [data-bench-slot="cuff vent construction"]`;
+  const setsBefore = (await calls(page, 'SetDesignBenchSlot')).length;
+  await page.click(`${cuff} [data-detail-name]`);
+  const capH = await page.$eval(
+    `${cuff} [data-bench-cap]`,
+    (n) => n.getBoundingClientRect().height,
+  );
+  await page.waitForSelector(`${cuff} [data-detail-rename]`);
+  const capEditH = await page.$eval(
+    `${cuff} [data-bench-cap]`,
+    (n) => n.getBoundingClientRect().height,
+  );
+  await page.keyboard.type('xx');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  const afterEsc = (await calls(page, 'SetDesignBenchSlot')).length;
+  check(
+    'T75c Esc cancels the rename — no write, the field closes',
+    afterEsc === setsBefore && (await page.locator(`${cuff} [data-detail-rename]`).count()) === 0,
+  );
+  await page.click(`${cuff} [data-detail-name]`);
+  await page.fill(`${cuff} [data-detail-rename]`, 'cuff vent');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  const renamed = (await calls(page, 'SetDesignBenchSlot')).at(-1)?.body;
+  check(
+    'T75d Enter renames through SetDesignBenchSlot, echoing the (empty) plate',
+    renamed?.slot?.slotId === 72 &&
+      renamed?.newDetailName === 'cuff vent' &&
+      renamed?.pictureId === 0,
+    JSON.stringify(renamed),
+  );
+  check(
+    'T75e the cap keeps its height while editing',
+    Math.abs(capEditH - capH) < 1,
+    `${capH} → ${capEditH}`,
+  );
+  await page.click(`${cuff} [data-detail-name]`);
+  await page.fill(`${cuff} [data-detail-rename]`, '   ');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  check(
+    'T75f an empty name keeps the old one — no write',
+    (await calls(page, 'SetDesignBenchSlot')).length === afterEsc + 1,
+  );
+  // the ✕ lives inside the empty frame, clear of FROM MEDIA / DRAW, and the filled cell has none
+  await page.hover(cuff);
+  const geo = await page.evaluate((c) => {
+    const cell = document.querySelector(c);
+    const x = cell.querySelector('[data-detail-delete]');
+    const box = cell.querySelector('[data-place-or-draw]').getBoundingClientRect();
+    const xr = x.getBoundingClientRect();
+    const words = [...cell.querySelectorAll('[data-place-or-draw] *')]
+      .filter((n) => n.children.length === 0 && /^(from media|draw)$/i.test(n.textContent.trim()))
+      .map((n) => n.getBoundingClientRect());
+    const hit = (a, b) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    return {
+      inside:
+        xr.left >= box.left &&
+        xr.right <= box.right &&
+        xr.top >= box.top &&
+        xr.bottom <= box.bottom,
+      words: words.length,
+      overlap: words.some((w) => hit(w, xr)),
+      label: x.getAttribute('aria-label'),
+      opacity: getComputedStyle(x).opacity,
+    };
+  }, cuff);
+  check(
+    'T75g the empty detail has a ✕ inside its frame, clear of FROM MEDIA / DRAW, shown on hover',
+    geo.inside &&
+      geo.words === 2 &&
+      !geo.overlap &&
+      geo.opacity === '1' &&
+      /^delete detail /.test(geo.label),
+    JSON.stringify(geo),
+  );
+  await page.click(`${cuff} [data-detail-delete]`);
+  await page.waitForTimeout(400);
+  const del1 = await calls(page, 'DeleteDesignDetailSlot');
+  check(
+    'T75i a detail nothing points at is deleted by its ✕ at once',
+    del1.length === 1 &&
+      del1[0].body.slotId === 72 &&
+      (await page.locator('[role="dialog"]').count()) === 0,
+    JSON.stringify(del1.map((c) => c.body)),
+  );
+  const pocket = `${D} [data-bench-slot="pocket"]`;
+  await page.hover(pocket);
+  await page.click(`${pocket} [data-detail-delete]`);
+  await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+  const ask = await page.locator('[role="dialog"]').innerText();
+  const del2 = (await calls(page, 'DeleteDesignDetailSlot')).length;
+  await page.getByRole('button', { name: /^delete detail$/i }).click();
+  await page.waitForTimeout(400);
+  const del3 = await calls(page, 'DeleteDesignDetailSlot');
+  check(
+    'T75j a detail a run asked for asks first, then deletes',
+    del2 === 1 && /1 run/.test(ask) && del3.length === 2 && del3[1].body.slotId === 73,
+    JSON.stringify({ ask: ask.replace(/\s+/g, ' '), n: del3.length }),
   );
 
   // ── FAILED / LATE ──

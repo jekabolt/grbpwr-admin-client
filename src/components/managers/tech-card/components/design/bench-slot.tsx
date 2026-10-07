@@ -10,7 +10,8 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
-import { PlaceOrDrawCell, Reason } from './core';
+import { AskModal, PlaceOrDrawCell, Reason } from './core';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -620,8 +621,17 @@ export function SlotCap({
   quiet,
   wrap,
   chosen,
+  rename,
 }: {
   label: string;
+  /**
+   * T75 · THE NAME IS EDITED WHERE IT IS PRINTED (owner 07.10: «2 раза дублируется название детали
+   * в карточке и в текстбоксе снизу — оставим только то что в карточке и эдит по клику»). A click on
+   * the name turns it into a field of the same line height; Enter / blur saves, Esc cancels, an
+   * empty field keeps the old name. `value` is the raw stored name (the printed `label` may carry a
+   * disambiguating suffix).
+   */
+  rename?: { value: string; onCommit: (next: string) => void };
   required?: boolean;
   requiredNote?: string;
   title?: string;
@@ -650,19 +660,23 @@ export function SlotCap({
       title={title || undefined}
       data-bench-cap={label}
     >
-      <Text
-        size='micro'
-        variant={chosen ? 'selected' : 'uppercase'}
-        tracking='label'
-        component='span'
-        className={cn(
-          wrap ? 'line-clamp-2 min-w-0 flex-1 break-words' : 'min-w-0 truncate',
-          strong && 'font-bold',
-          quiet && !strong && !chosen && 'text-labelColor group-hover:text-textColor',
-        )}
-      >
-        {label}
-      </Text>
+      {rename ? (
+        <CapName label={label} rename={rename} />
+      ) : (
+        <Text
+          size='micro'
+          variant={chosen ? 'selected' : 'uppercase'}
+          tracking='label'
+          component='span'
+          className={cn(
+            wrap ? 'line-clamp-2 min-w-0 flex-1 break-words' : 'min-w-0 truncate',
+            strong && 'font-bold',
+            quiet && !strong && !chosen && 'text-labelColor group-hover:text-textColor',
+          )}
+        >
+          {label}
+        </Text>
+      )}
       {required && (
         <Text size='micro' component='span' className='text-error' title={requiredNote}>
           *
@@ -670,6 +684,90 @@ export function SlotCap({
       )}
       {trailing}
     </div>
+  );
+}
+
+/**
+ * T75 · THE CAP'S NAME, RENAMEABLE IN PLACE. At rest it is the printed name with a text cursor and
+ * an underline on hover (`title='rename'`); a click swaps it for a bare input in the same type and
+ * line, so the cap does not grow. Only the name is the target: the cap's `undo` and pills beside it
+ * stay their own buttons.
+ */
+function CapName({
+  label,
+  rename,
+}: {
+  label: string;
+  rename: { value: string; onCommit: (next: string) => void };
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(rename.value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Esc and Enter both end the edit; the blur that follows must not commit a second time.
+  const done = useRef(false);
+  const refocus = useRef(false);
+
+  useEffect(() => {
+    if (!editing) {
+      if (refocus.current) buttonRef.current?.focus();
+      refocus.current = false;
+      return;
+    }
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  const close = (commit: boolean, focusBack = false) => {
+    if (done.current) return;
+    done.current = true;
+    refocus.current = focusBack;
+    const next = draft.trim();
+    if (commit && next && next !== rename.value) rename.onCommit(next);
+    setEditing(false);
+  };
+
+  if (editing)
+    return (
+      <input
+        ref={inputRef}
+        data-detail-rename=''
+        aria-label={`rename ${label}`}
+        value={draft}
+        maxLength={120}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => close(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            close(true, true);
+          } else if (e.key === 'Escape') {
+            // The studio listens for Esc (pick mode, viewers): this one belongs to the field.
+            e.preventDefault();
+            e.stopPropagation();
+            close(false, true);
+          }
+        }}
+        className='m-0 h-[1lh] min-w-0 flex-1 border-0 bg-transparent p-0 text-micro uppercase tracking-label text-textColor underline decoration-textColor underline-offset-2 outline-none'
+      />
+    );
+
+  return (
+    <button
+      ref={buttonRef}
+      type='button'
+      data-detail-name={label}
+      title='rename'
+      aria-label={`rename detail ${label}`}
+      onClick={() => {
+        done.current = false;
+        setDraft(rename.value);
+        setEditing(true);
+      }}
+      className='min-w-0 cursor-text truncate text-left text-micro uppercase tracking-label text-textColor decoration-labelColor underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none'
+    >
+      {label}
+    </button>
   );
 }
 
@@ -788,11 +886,17 @@ function EmptyCell({
   onPlaceMedia,
   onDraw,
   undo,
+  rename,
+  corner,
 }: {
   label: string;
   required?: boolean;
   requiredNote?: string;
   purpose: string;
+  /** T75 · details: the cap's name renames in place. */
+  rename?: { value: string; onCommit: (next: string) => void };
+  /** T75 · details: the frame's top-right ✕ that deletes the detail itself. */
+  corner?: React.ReactNode;
   /** T49 · the quiet `undo` of the last removal from this slot, on the cap's right. */
   undo?: React.ReactNode;
   disabled?: boolean;
@@ -849,10 +953,12 @@ function EmptyCell({
         ) : undefined
       }
       backdrop={backdrop}
+      corner={disabled ? undefined : corner}
       className={cn(picking && 'border-textColor', proposed && 'border-solid border-warning')}
       cap={
         <SlotCap
           label={label}
+          rename={disabled ? undefined : rename}
           required={required}
           requiredNote={requiredNote}
           trailing={
@@ -876,6 +982,23 @@ function EmptyCell({
       }
     />
   );
+}
+
+/**
+ * T75 · WHAT POINTS AT A DETAIL SLOT — runs that asked for its output (`params.detail_slot_ids`) and
+ * references labelled with it (`detail_slot_id`). Null when nothing does: then the detail is only a
+ * name, and the ✕ deletes it without a question.
+ */
+export function detailHistory(band: GetDesignBandResponse, slotId: number): string | null {
+  const runs = (band.runs ?? []).filter((r) =>
+    (r.params?.detailSlotIds ?? []).includes(slotId),
+  ).length;
+  const refs = (band.references ?? []).filter((r) => (r.detailSlotId ?? 0) === slotId).length;
+  const parts = [
+    runs ? `${runs} run${runs === 1 ? '' : 's'}` : '',
+    refs ? `${refs} reference${refs === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' and ') : null;
 }
 
 export function BenchSlot(props: BenchSlotProps) {
@@ -948,8 +1071,66 @@ export function BenchSlot(props: BenchSlotProps) {
       ? 'edit marks sit on a layer over this plate — a run reads the plate alone until «save as picture» presses them in'
       : null;
 
+  /* T75 · «from mixed input» is no longer printed under the cell (owner 07.10: «не нужный текст
+     вообще убрать»); the fact rides in the cap's hover title with the rest of the provenance. */
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
-  const footnote = picture ? slotFootnote(band, picture, shelfOrdinals) : '';
+  const footnote = picture
+    ? [slotFootnote(band, picture, shelfOrdinals), mixedNote].filter(Boolean).join(' · ')
+    : '';
+
+  /* T75 · THE NAME LIVES IN THE CAP ONLY — click to rename, no second field under the cell. */
+  const rename =
+    detail && onRename && !disabled
+      ? {
+          value: (slot?.detailName ?? '').trim(),
+          onCommit: (next: string) => {
+            accept();
+            onRename(next);
+          },
+        }
+      : undefined;
+
+  /* T75 · DELETING THE DETAIL MOVED INTO THE CELL: the empty cell's top-right ✕ deletes the slot
+     itself. There is no write that re-creates an EMPTY detail slot (a mint needs a picture), so an
+     `undo` cannot be offered; the question is asked only when something points at the detail —
+     runs that asked for it or references labelled with it. Otherwise the ✕ deletes at once. */
+  const [askDelete, setAskDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const history = detail && slotId > 0 ? detailHistory(band, slotId) : null;
+  const runDelete = () => {
+    if (!onDelete || deleting) return;
+    setAskDelete(false);
+    setDeleting(true);
+    removeThenSettle(onDelete, accept)
+      .catch(() => {
+        // The refusal is said by the mutation's seam; the slot stays.
+      })
+      .finally(() => setDeleting(false));
+  };
+  const deleteCorner =
+    detail && onDelete && !disabled && !proposed ? (
+      <button
+        type='button'
+        data-detail-delete={label}
+        aria-label={`delete detail ${label}`}
+        title={`delete detail «${label}»`}
+        aria-busy={deleting || undefined}
+        disabled={deleting || saving}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (history) setAskDelete(true);
+          else runDelete();
+        }}
+        className={cn(
+          'z-20 py-0.5 leading-none',
+          TILE_CORNER,
+          TILE_QUIET,
+          deleting && 'opacity-100',
+        )}
+      >
+        {deleting ? '…' : '✕'}
+      </button>
+    ) : undefined;
 
   /* THE EDIT PROPAGATES, AND WALKS BACK (04.10, owner item 28, T28): the editor over a filled slot
      overwrites its picture (the server moves this slot onto the edit, and the bench above draws the
@@ -1013,6 +1194,7 @@ export function BenchSlot(props: BenchSlotProps) {
               у пустой ветки, — этим и держится «одна коробка». */}
           <SlotCap
             label={label}
+            rename={rename}
             required={required}
             requiredNote={requiredNote}
             title={footnote}
@@ -1035,6 +1217,8 @@ export function BenchSlot(props: BenchSlotProps) {
           picking={picking}
           proposed={proposed}
           backdrop={backdrop}
+          rename={rename}
+          corner={deleteCorner}
           undo={
             undo && !disabled ? (
               <UndoRemoval label={label} pending={undo.pending} onClick={undo.onClick} />
@@ -1076,24 +1260,15 @@ export function BenchSlot(props: BenchSlotProps) {
         </div>
       )}
 
-      {detail && onRename && (
-        <DetailNameField
-          name={(slot?.detailName ?? '').trim()}
-          disabled={disabled}
-          onRename={(next) => {
-            accept();
-            onRename(next);
-          }}
-        />
-      )}
-
       {/* ДВЕРЬ СЛОТА ДЕТАЛИ — видна всегда, тихая, под именем (moodboard-flats-1003, T05 + T10).
           Предложенный пустой слот отвечает здесь же `keep` / `dismiss`; принятый — `remove` в два
           шага. Другой глагол, чем ✕ плиты: крестик очищает слот, эта дверь сносит сам слот. */}
       {detail && staleDoor && url && picture && (
         <StaleDetailDoor label={label} disabled={disabled || saving} door={staleDoor} />
       )}
-      {!disabled && detail && onDelete && (
+      {/* T75 · only the PROPOSED detail keeps a line under the cell (`keep` / `dismiss`); an accepted
+          one is deleted by the ✕ in its empty frame, and its name is renamed in the cap. */}
+      {!disabled && detail && onDelete && proposed && (
         <DetailSlotDoor
           label={label}
           proposed={proposed}
@@ -1138,12 +1313,22 @@ export function BenchSlot(props: BenchSlotProps) {
         )
       )}
 
-      {/* Оговорки — только когда они есть: в покое под ячейкой ничего не стоит (макет). */}
-      {mixedNote && (
-        <Text size='nano' variant='label' component='span'>
-          {mixedNote}
-        </Text>
+      {history && (
+        <AskModal
+          open={askDelete}
+          title='delete detail'
+          sentence={
+            <>
+              «{label}» is named by {history}. Deleting the detail unhooks them from it.
+            </>
+          }
+          verb='delete detail'
+          onDo={runDelete}
+          onClose={() => setAskDelete(false)}
+        />
       )}
+
+      {/* Оговорки — только когда они есть: в покое под ячейкой ничего не стоит (макет). */}
       {stale && (
         <Text size='nano' component='span' className='text-warning'>
           {stale}
@@ -1232,48 +1417,6 @@ export function LegacySlotCell({
         />
       </div>
     </div>
-  );
-}
-
-/**
- * The detail's name field. Renaming goes through `SetDesignBenchSlot` with the slot's CURRENT
- * picture echoed back — the RPC's `picture_id` is not optional and 0 means UNMARK, so a rename that
- * forgot to carry the plate would silently empty the slot it was renaming.
- */
-function DetailNameField({
-  name,
-  disabled,
-  onRename,
-}: {
-  name: string;
-  disabled?: boolean;
-  onRename: (name: string) => void;
-}) {
-  const [value, setValue] = useState(name);
-  // The server's name wins whenever it changes underneath — somebody else may have renamed it.
-  useEffect(() => setValue(name), [name]);
-  const commit = () => {
-    const next = value.trim();
-    if (!next || next === name) {
-      setValue(name);
-      return;
-    }
-    onRename(next);
-  };
-  return (
-    <Input
-      value={value}
-      disabled={disabled}
-      aria-label='detail name'
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          commit();
-        }
-      }}
-    />
   );
 }
 
