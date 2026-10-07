@@ -308,14 +308,51 @@ export function useTechCardFittings(techCardId?: number) {
   });
 }
 
+// CreateTechCard's extras (0407): `clientRequestId` is a key minted once per create attempt — a
+// repeat under it returns the card the first call made (a lost response or a doubled effect is one
+// card); `guided` creates the card in the guided studio flow.
+export type CreateTechCardArgs = {
+  techCard: common_TechCardInsert;
+  clientRequestId?: string;
+  guided?: boolean;
+};
+
+// A bare insert is the pre-0407 call shape (plain create: no key, not guided), kept while the
+// existing caller moves to CreateTechCardArgs.
+function isCreateTechCardArgs(
+  v: CreateTechCardArgs | common_TechCardInsert,
+): v is CreateTechCardArgs {
+  return 'techCard' in v && v.techCard !== undefined;
+}
+
 export function useCreateTechCard() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (techCard: common_TechCardInsert) => adminService.CreateTechCard({ techCard }),
+    mutationFn: (args: CreateTechCardArgs | common_TechCardInsert) => {
+      const { techCard, clientRequestId, guided } = isCreateTechCardArgs(args)
+        ? args
+        : { techCard: args, clientRequestId: undefined, guided: undefined };
+      return adminService.CreateTechCard({ techCard, clientRequestId, guided });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       // The pipeline board is a separate key — a create/stage-change/delete must move the
       // card between columns, not leave it parked for the 5-min staleTime.
+      queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
+    },
+  });
+}
+
+// ExitTechCardGuide (0407): leaves the guided studio flow. Idempotent on the server and does not
+// bump lock_version, so the open form keeps its version; the card and the list rows (guided/setup)
+// are refetched.
+export function useExitTechCardGuide(id: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminService.ExitTechCardGuide({ techCardId: id! }),
+    onSuccess: () => {
+      if (id) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
     },
   });

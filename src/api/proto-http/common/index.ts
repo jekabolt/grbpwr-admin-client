@@ -4096,6 +4096,10 @@ export type TechCard = {
   // them into pictures only through its media-library page, which holds just the latest files.
   // Ignored on write.
   resolvedLabelMedia: TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (0407): the card was created through the guided studio flow
+  // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
+  // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
+  guided: boolean | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -4655,6 +4659,11 @@ export type TechCardListItem = {
   // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
   // this build cannot map; never a stand-in for ADULT.
   ageGroup: AgeGroupEnum | undefined;
+  // Mirrors TechCard.guided (0407).
+  guided: boolean | undefined;
+  // The card is still being set up: guided, no moodboard picture (reference rows do not count) and
+  // no concept text. Derived server-side, the same rule for ListTechCards and GetStylePipeline.
+  setup: boolean | undefined;
 };
 
 // DesignRun is one row of the band's history: a generation job, its money, its inputs and its

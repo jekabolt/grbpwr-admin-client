@@ -7904,6 +7904,11 @@ export type RunTierBackfillResponse = {
 
 export type CreateTechCardRequest = {
   techCard: common_TechCardInsert | undefined;
+  // Client-minted key (≤64 chars, trimmed; "" = none). A repeat under the same key returns the card
+  // the first call created instead of a second one — a lost response or a doubled effect is one card.
+  clientRequestId: string | undefined;
+  // Create the card in the guided studio flow (TechCard.guided).
+  guided: boolean | undefined;
 };
 
 export type common_TechCardInsert = {
@@ -10214,6 +10219,13 @@ export type RemoveTechCardRoleAssignmentRequest = {
 export type RemoveTechCardRoleAssignmentResponse = {
 };
 
+export type ExitTechCardGuideRequest = {
+  techCardId: number | undefined;
+};
+
+export type ExitTechCardGuideResponse = {
+};
+
 export type ListTechCardRoleAssignmentsRequest = {
   techCardId: number | undefined;
 };
@@ -10351,6 +10363,10 @@ export type common_TechCard = {
   // them into pictures only through its media-library page, which holds just the latest files.
   // Ignored on write.
   resolvedLabelMedia: common_TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (0407): the card was created through the guided studio flow
+  // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
+  // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
+  guided: boolean | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -11349,6 +11365,11 @@ export type common_TechCardListItem = {
   // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
   // this build cannot map; never a stand-in for ADULT.
   ageGroup: common_AgeGroupEnum | undefined;
+  // Mirrors TechCard.guided (0407).
+  guided: boolean | undefined;
+  // The card is still being set up: guided, no moodboard picture (reference rows do not count) and
+  // no concept text. Derived server-side, the same rule for ListTechCards and GetStylePipeline.
+  setup: boolean | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -19143,6 +19164,9 @@ export interface AdminService {
   AssignTechCardRole(request: AssignTechCardRoleRequest): Promise<AssignTechCardRoleResponse>;
   // RemoveTechCardRoleAssignment removes one role assignment by id.
   RemoveTechCardRoleAssignment(request: RemoveTechCardRoleAssignmentRequest): Promise<RemoveTechCardRoleAssignmentResponse>;
+  // ExitTechCardGuide leaves the guided studio flow for a card (clears TechCard.guided). Idempotent;
+  // does not bump lock_version, so an open card form gets no conflict.
+  ExitTechCardGuide(request: ExitTechCardGuideRequest): Promise<ExitTechCardGuideResponse>;
   // ListTechCardRoleAssignments lists a card's role assignments with resolved usernames (Q5).
   ListTechCardRoleAssignments(request: ListTechCardRoleAssignmentsRequest): Promise<ListTechCardRoleAssignmentsResponse>;
   // ListAdmins is the panel-wide people picker: id, username, self-declared specialties and the
@@ -24480,6 +24504,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "RemoveTechCardRoleAssignment",
       }) as Promise<RemoveTechCardRoleAssignmentResponse>;
+    },
+    ExitTechCardGuide(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/guide/exit`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExitTechCardGuide",
+      }) as Promise<ExitTechCardGuideResponse>;
     },
     ListTechCardRoleAssignments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
