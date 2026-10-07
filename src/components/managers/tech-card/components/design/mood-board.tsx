@@ -70,9 +70,9 @@ import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 import {
+  cardOnScreen,
   designKeys,
   newClientRequestId,
-  rereadBandNow,
   useDesignBand,
   useDesignWrites,
 } from './use-design-band';
@@ -489,18 +489,28 @@ export function useLabelPoll(
 
 /**
  * Q3 · A MODEL'S DETAIL GOES WITH ITS LAST PHOTO — ALSO WHEN THE PHOTO LEAVES THE BOARD (owner 07.10,
- * card 38 «back hem»). The server drops the slot in the background sync the board save kicks
- * (`DropBoardLabels` → `dropOrphanModelSlots`), after the band was last read: nothing re-read it, so
- * FLAT SLOTS and the run selector kept the empty detail until a reload. The band is re-read until the
- * slot is gone (≤ SLOT_GONE_TRIES × SLOT_GONE_MS). Module scope, not a hook: the board is unmounted
- * as soon as the person steps to FLAT, where the slot is seen.
+ * card 38 «back hem»). The SERVER does it: the save kicks its background label sync, which drops the
+ * model rows of pictures off the board and then the model slots left with nothing
+ * (`DropBoardLabels` → `dropOrphanModelSlots`) — after the band was last read here, so FLAT SLOTS and
+ * the run selector kept the empty detail until a reload. The client only READS: the band is re-read
+ * until the slot is gone (≤ SLOT_GONE_TRIES × SLOT_GONE_MS), and stops early when `wanted()` says the
+ * follow no longer matters (the picture is back, the card left the screen). No write, no lock (Codex
+ * round 3, orchestrator): a detail whose photo carries a PERSON's label stays — the server never
+ * drops a person's row — and the person takes it off with its ✕. Module scope, not a hook: the board
+ * unmounts as soon as the person steps to FLAT, where the slot is seen.
  */
 const SLOT_GONE_MS = 1_500;
 const SLOT_GONE_TRIES = 16;
-function followSlotGone(qc: ReturnType<typeof useQueryClient>, card: number, slotId: number) {
+function followSlotGone(
+  qc: ReturnType<typeof useQueryClient>,
+  card: number,
+  slotId: number,
+  wanted: () => boolean,
+) {
   let tries = 0;
   const tick = () => {
     tries += 1;
+    if (!wanted()) return;
     const band = qc.getQueryData<{ bench?: { id?: number }[] }>(designKeys.band(card));
     if (band && !(band.bench ?? []).some((s) => (s.id ?? 0) === slotId)) return;
     void qc.invalidateQueries({ queryKey: designKeys.band(card) });
@@ -835,19 +845,12 @@ export function MoodBoard({
   const pendingCallouts = pendingRemove == null ? 0 : callouts.countOn(pendingRemove);
   const pendingAlsoInInput = pendingRemove != null && inputIds.has(pendingRemove);
 
-  /* Q3 (109 §8): a model's detail that no person named (`made_by_model`, no plate) goes when no
-     picture ON THE BOARD points at it any more. A MODEL's label of a picture off the board is dropped
-     by the server's own sync after the save (`DropBoardLabels`); a PERSON's label (a guess accepted,
-     a detail picked) never is — it keeps the slot alive («named by 1 reference») and would ride into
-     other runs from the library, so it is written back to the person's empty label (the cut-out
-     undo's cure; that write drops the orphan slot in its transaction).
-     ORDER (Codex review 07.10): the removal is SAVED first (`flush` → ok / nothing; anything else —
-     the server still has the picture on the board — and nothing is touched), the band is re-read,
-     and the decision is made against it and the CURRENT board: the photos that remain are the board's
-     rows, not every reference (a photo taken off earlier with a person's label is not a «remaining»
-     photo — it is an orphan too, and is cleared with the last one). A slot a person named or renamed,
-     or that holds a plate, is never touched. */
-  async function dropModelDetailAfterRemoval(mediaId: number, slotId: number) {
+  /* Q3 (109 §8), READ ONLY: once «take it off» is SAVED (`flush` → ok / nothing; otherwise the server
+     still has the picture and nothing changes there), the band is followed until the server's sync
+     has dropped the emptied model detail — only when it will: the slot is the model's, unnamed by a
+     person, with no plate, and no other label keeps it (no picture on the board points at it, and no
+     PERSON's label anywhere does — the server never drops those). Never a write. */
+  async function followModelDetailAfterRemoval(mediaId: number, slotId: number) {
     const card = techCardId;
     let saved: FlushResult;
     try {
@@ -856,40 +859,26 @@ export function MoodBoard({
       saved = 'error';
     }
     if (saved !== 'ok' && saved !== 'nothing') return;
+    const onBoard = () =>
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).some(
+        (i) => isBoardRow(i) && i.mediaId === mediaId,
+      );
+    if (onBoard()) return;
+    const band = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
+    const slot = photoDetailSlots(band?.bench).find((s) => (s.id ?? 0) === slotId);
+    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
     const board = new Set(
       ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow).map((i) => i.mediaId),
     );
-    // Put back meanwhile (undo, a drop of the same picture): the slot is its again.
-    if (board.has(mediaId)) return;
-    let fresh: GetDesignBandResponse;
-    try {
-      fresh = await rereadBandNow(qc, card);
-    } catch {
-      return;
-    }
-    const slot = photoDetailSlots(fresh.bench).find((s) => (s.id ?? 0) === slotId);
-    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
-    const pointing = (fresh.references ?? []).filter(
-      (r) => (r.role ?? '').trim() === 'detail' && (r.detailSlotId ?? 0) === slotId,
+    const kept = (band?.references ?? []).some(
+      (r) =>
+        (r.role ?? '').trim() === 'detail' &&
+        (r.detailSlotId ?? 0) === slotId &&
+        !isHeldLabel(r) &&
+        (board.has(r.mediaId ?? 0) || isPersonLabel(r)),
     );
-    if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;
-    const orphans = pointing.filter((r) => !board.has(r.mediaId ?? 0) && isPersonLabel(r));
-    if (orphans.length) {
-      const release = holdFlatInput(card);
-      try {
-        for (const r of orphans)
-          await setReferenceRole
-            .mutateAsync({
-              mediaId: r.mediaId ?? 0,
-              role: '',
-              ordinal: Math.max(1, r.ordinal ?? 1),
-            })
-            .catch(() => {});
-      } finally {
-        release();
-      }
-    }
-    followSlotGone(qc, card, slotId);
+    if (kept) return;
+    followSlotGone(qc, card, slotId, () => cardOnScreen(card) && !onBoard());
   }
 
   function confirmRemove() {
@@ -900,7 +889,7 @@ export function MoodBoard({
     // снимке, номера у мудбордного указания нет, и открепившееся оно не показывается нигде — то
     // есть «сохранили» означало бы «оставили сиротой в payload». Поэтому ✕ и обязан назвать число.
     callouts.removeOn(mediaId);
-    // Q3: the detail this picture pointed at, read BEFORE the row goes; decided after the save.
+    // Q3: the detail this picture pointed at, read BEFORE the row goes; followed after the save.
     const was = labelsNow.current.get(mediaId);
     const slotOfRemoved = (was?.role ?? '').trim() === 'detail' ? was?.detailSlotId ?? 0 : 0;
     // Снимается ТОЛЬКО строка доски. Запись входа на тот же `media_id` — отдельная сущность со
@@ -912,7 +901,7 @@ export function MoodBoard({
         (i) => !(i.mediaId === mediaId && isBoardRow(i)),
       ),
     );
-    if (slotOfRemoved > 0) void dropModelDetailAfterRemoval(mediaId, slotOfRemoved);
+    if (slotOfRemoved > 0) void followModelDetailAfterRemoval(mediaId, slotOfRemoved);
   }
 
   // ── легаси-записка → описание (V-16) ────────────────────────────────────────────────────────

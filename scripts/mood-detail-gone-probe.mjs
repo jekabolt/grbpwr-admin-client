@@ -1,19 +1,15 @@
 #!/usr/bin/env node
-// 07.10 D3 · Q3: ДЕТАЛЬ МОДЕЛИ УХОДИТ С ПОСЛЕДНИМ ФОТО — И КОГДА ФОТО СНЯЛИ С ДОСКИ. НАСТОЯЩИЙ
-// `MoodBoard` (`scripts/mood-detail-gone-entry.tsx`) в chromium над заглушенной сетью и собранным CSS
-// (`dist/assets/*.css`, нужен `yarn build`). Проверки:
-//   · ярлык ЧЕЛОВЕКА на детали модели: снятие с доски пишет пустой ярлык человека, деталь уходит,
-//     кэш полосы без неё (FLAT SLOTS и селектор прогона — без перезагрузки);
-//   · ярлык МОДЕЛИ: записи нет; фоновый синк сервера сносит деталь — полоса перечитывается сама;
-//   · деталь, названная человеком, остаётся, записи нет.
+// 07.10 D3 · Q3: ДЕТАЛЬ МОДЕЛИ УХОДИТ С ПОСЛЕДНИМ ФОТО — ЕЁ СНОСИТ СЕРВЕР, КЛИЕНТ ТОЛЬКО ЧИТАЕТ.
+// НАСТОЯЩИЙ `MoodBoard` (`scripts/mood-detail-gone-entry.tsx`) в chromium над заглушенной сетью и
+// собранным CSS (`dist/assets/*.css`, нужен `yarn build`). Проверки:
+//   · «take it off» НИКОГДА не пишет ярлык (SetDesignReferenceRole) — ни на ярлыке человека, ни модели;
+//     деталь модели с фото человека остаётся (её снимает ✕ человека);
+//   · ярлык МОДЕЛИ: после сохранения снятия полоса перечитывается, и деталь, которую снёс фоновый синк
+//     сервера, уходит без перезагрузки.
 //
-//   node scripts/mood-detail-gone-probe.mjs               → зелёный
-//   · (Codex 07.10) сохранение снятия не прошло — ничего не пишется, деталь стоит; запись идёт ПОСЛЕ
-//     flush; деталь из двух фото: снятие первого — ничего, снятие второго чистит ярлыки обоих.
-//
-//   node scripts/mood-detail-gone-probe.mjs --mutate=noq3        → снятие не трогает деталь: КРАСНЫЙ
-//   node scripts/mood-detail-gone-probe.mjs --mutate=noflushgate → чистка до сохранения: КРАСНЫЙ
-//   node scripts/mood-detail-gone-probe.mjs --mutate=allrefs     → «остальные фото» по всем ярлыкам: КРАСНЫЙ
+//   node scripts/mood-detail-gone-probe.mjs                  → зелёный
+//   node scripts/mood-detail-gone-probe.mjs --mutate=writeback → снятие пишет ярлык: КРАСНЫЙ
+//   node scripts/mood-detail-gone-probe.mjs --mutate=noq3      → полоса не перечитывается: КРАСНЫЙ
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -27,27 +23,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const root = resolve(HERE, '..');
 
 const MUTATIONS = {
+  // «take it off» writes a label back (the destructive cleanup this file once had).
+  writeback: [
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: '    if (slotOfRemoved > 0) void followModelDetailAfterRemoval(mediaId, slotOfRemoved);\n',
+      to: "    void setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 1 }).catch(() => {});\n    if (slotOfRemoved > 0) void followModelDetailAfterRemoval(mediaId, slotOfRemoved);\n",
+    },
+  ],
+  // the band is not followed after the removal is saved.
   noq3: [
     {
       file: /design\/mood-board\.tsx$/,
-      from: '    if (slotOfRemoved > 0) void dropModelDetailAfterRemoval(mediaId, slotOfRemoved);\n',
+      from: '    if (slotOfRemoved > 0) void followModelDetailAfterRemoval(mediaId, slotOfRemoved);\n',
       to: '',
-    },
-  ],
-  // Codex 07.10 #3: the cleanup does not wait for the board save.
-  noflushgate: [
-    {
-      file: /design\/mood-board\.tsx$/,
-      from: "    if (saved !== 'ok' && saved !== 'nothing') return;\n",
-      to: '',
-    },
-  ],
-  // Codex 07.10 #4: «remaining photos» read from every reference, not the board.
-  allrefs: [
-    {
-      file: /design\/mood-board\.tsx$/,
-      from: 'if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;',
-      to: 'if (pointing.some((r) => (r.mediaId ?? 0) !== mediaId && !isHeldLabel(r))) return;',
     },
   ],
 };
@@ -229,86 +218,31 @@ try {
     return b;
   };
 
-  const log = () => page.evaluate(() => (window.__bodies ?? []).map((c) => c.name));
-  const writesSince = async (k) => (await roleWrites()).slice(k);
-
-  console.log('\nCodex #3 · the removal did not save: nothing is touched');
+  console.log('\nQ3 · a model’s label: the server’s sync drops the detail, the band follows');
   ck(
     JSON.stringify(await page.evaluate(() => window.__cachedBench())) === '[77,78,79,80,81]',
     'five details to begin with',
   );
-  await page.evaluate(() => (window.__flushAnswer = 'error'));
-  await takeOff(206);
-  await page.waitForTimeout(2500);
-  ck(
-    (await roleWrites()).length === 0 &&
-      (await page.evaluate(() => window.__cachedBench()))?.includes(81),
-    'save failed: no label is cleared, «pocket» stays',
-    JSON.stringify({ w: await roleWrites(), b: await page.evaluate(() => window.__cachedBench()) }),
-  );
-  await page.evaluate(() => (window.__flushAnswer = 'ok'));
-
-  console.log('\nQ3 · a person’s label on a model’s detail');
-  const k1 = (await roleWrites()).length;
-  await takeOff(201);
-  await page.waitForTimeout(600);
-  const w1 = await writesSince(k1);
-  const order1 = await log();
-  ck(
-    w1.length === 1 &&
-      w1[0].mediaId === 201 &&
-      w1[0].role === '' &&
-      order1.lastIndexOf('flush') < order1.lastIndexOf('SetDesignReferenceRole'),
-    'its last photo off the board: saved first, then the person’s empty label',
-    JSON.stringify({ w1, order: order1.slice(-6) }),
-  );
-  const b1 = await benchWithin(4000, (b) => !b?.includes(77));
-  ck(!b1?.includes(77), '«back hem» is gone from the band, no reload', JSON.stringify(b1));
-
-  console.log('\nCodex #4 · a two-photo detail, both with a person’s label');
-  const k2 = (await roleWrites()).length;
-  await takeOff(204);
-  await page.waitForTimeout(1500);
-  ck(
-    (await writesSince(k2)).length === 0 &&
-      (await page.evaluate(() => window.__cachedBench()))?.includes(80),
-    'the first photo off: 205 is still on the board — nothing is cleared',
-    JSON.stringify(await writesSince(k2)),
-  );
-  await takeOff(205);
-  await page.waitForTimeout(800);
-  const w2 = (await writesSince(k2)).map((w) => `${w.mediaId}:${w.role}`).sort();
-  ck(
-    JSON.stringify(w2) === '["204:","205:"]',
-    'the last photo off: both off-board person labels are cleared',
-    JSON.stringify(w2),
-  );
-  const b2a = await benchWithin(4000, (b) => !b?.includes(80));
-  ck(!b2a?.includes(80), '«strap» is gone', JSON.stringify(b2a));
-
-  console.log('\nQ3 · a model’s label on a model’s detail');
-  const k3 = (await roleWrites()).length;
   await takeOff(202);
-  await page.waitForTimeout(600);
-  ck((await writesSince(k3)).length === 0, 'no write: the server’s sync drops a model’s row');
   await page.waitForTimeout(800);
-  await page.evaluate(() => window.__sync([203]));
-  const b2 = await benchWithin(5000, (b) => !b?.includes(78));
-  ck(
-    !b2?.includes(78),
-    '«cuff» is gone once the sync lands: the band is re-read',
-    JSON.stringify(b2),
-  );
+  // The save kicks the server's background sync; it lands after the band was last read.
+  await page.evaluate(() => window.__sync([201, 203, 204, 205, 206]));
+  const b1 = await benchWithin(5000, (b) => !b?.includes(78));
+  ck(!b1?.includes(78), '«cuff» is gone once the sync lands, no reload', JSON.stringify(b1));
 
-  console.log('\nQ3 · a person’s detail stays');
-  const k4 = (await roleWrites()).length;
-  await takeOff(203);
+  console.log('\nQ3 · «take it off» never writes a label');
+  for (const id of [201, 204, 205, 203]) await takeOff(id);
   await page.waitForTimeout(2500);
+  const bench = await page.evaluate(() => window.__cachedBench());
   ck(
-    (await writesSince(k4)).length === 0 &&
-      (await page.evaluate(() => window.__cachedBench()))?.includes(79),
-    '«collar» (named by a person) stays; nothing is written',
-    JSON.stringify(await page.evaluate(() => window.__cachedBench())),
+    (await roleWrites()).length === 0,
+    'no SetDesignReferenceRole for any picture taken off (a person’s or a model’s label)',
+    JSON.stringify(await roleWrites()),
+  );
+  ck(
+    [77, 79, 80].every((id) => bench?.includes(id)),
+    'details whose photos carry a person’s label stay (the person ✕ them)',
+    JSON.stringify(bench),
   );
   ck(errors.length === 0, 'no page errors', errors.join(' | ').slice(0, 300));
 } finally {
