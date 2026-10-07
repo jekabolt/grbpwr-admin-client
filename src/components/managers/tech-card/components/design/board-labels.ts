@@ -35,12 +35,16 @@ const VIEW_WORD: Record<string, string> = {
 /** Слово вида на плитке и в меню. */
 export const viewWord = (role: string): string => VIEW_WORD[role] ?? role.replace(/_/g, ' ');
 
-export type LabelState = 'pending' | 'ok' | 'unsure' | 'failed';
+/**
+ * `output` (M16): картинка — выход прогона дизайна (рендер, 3D, флэт…). Модель её не читает, во флэт
+ * она не уходит никогда; плитка говорит `render`.
+ */
+export type LabelState = 'pending' | 'ok' | 'unsure' | 'failed' | 'output';
 
 /** Состояние ярлыка; пустое (строка старше колонки) читается как ok. */
 export function labelState(ref: common_DesignReference | undefined): LabelState {
   const s = (ref?.labelState ?? '').trim();
-  return s === 'pending' || s === 'unsure' || s === 'failed' ? s : 'ok';
+  return s === 'pending' || s === 'unsure' || s === 'failed' || s === 'output' ? s : 'ok';
 }
 
 /** Ярлык картинки: строка `design_reference` по `mediaId` (одна на карточку). */
@@ -106,6 +110,7 @@ function needsPerson(purpose: string, ref: common_DesignReference | undefined): 
  *     человек сказал «не вид» — `no view`;
  *   · detail — имя детали; `…` / `detail ?` по тем же правилам;
  *   · mood / material — само назначение;
+ *   · выход прогона (`output`, M16) — `render`;
  *   · без назначения — ничего (модель его предложит, `proposedPurpose`).
  */
 export function tileWord(
@@ -114,6 +119,9 @@ export function tileWord(
   slots: readonly common_DesignBenchSlot[],
 ): string | null {
   if (purpose === 'mood' || purpose === 'material') return purpose;
+  // Выход прогона (M16): сервер его не читает и во флэт не шлёт — на любом назначении, кроме
+  // mood / material, слово одно.
+  if (labelState(ref) === 'output') return 'render';
   if (purpose !== 'target' && purpose !== 'detail') return null;
   if (needsPerson(purpose, ref)) return purpose === 'target' ? 'view ?' : 'detail ?';
   if (labelWaiting(purpose, ref) || !ref) return '…';

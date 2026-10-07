@@ -54,6 +54,7 @@ export const HELD_WORD: Record<string, string> = {
   older: 'older',
   detail: 'a detail',
   other_detail: 'another detail',
+  render: 'render',
 };
 
 /** Why, in a few words — the line beside the held picture. */
@@ -67,6 +68,7 @@ const HELD_WHY: Record<string, string> = {
   older: 'the two newest pictures of its view go',
   detail: 'it goes with a run of its detail',
   other_detail: 'a picture of another detail',
+  render: 'a generated picture; a flat is drawn from the garment’s own photos',
 };
 
 const thumbOf = (media?: common_MediaFull): string => {
