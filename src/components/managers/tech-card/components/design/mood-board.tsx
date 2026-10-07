@@ -43,6 +43,7 @@ import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
+import { CutoutCorner, useBoardCutout, type CutLanding } from './mood-cutout';
 import { MoodQuiz } from './mood-quiz';
 import { MOOD_ROLES, usePictureAnchor, type QuizPicture } from './quiz-anchor';
 import {
@@ -625,9 +626,17 @@ export function MoodBoard({
     null,
   );
 
-  function placeCropped(originalId: number, full: common_MediaFull, frame?: CropFrame) {
+  // The labels as the band has them NOW: `undo` of a remove bg runs from a toast made renders ago.
+  const labelsNow = useRef(labels);
+  labelsNow.current = labels;
+
+  function placeCropped(
+    originalId: number,
+    full: common_MediaFull,
+    frame?: CropFrame,
+  ): 'replace' | 'next-to' | 'refused' | null {
     const toId = full.id;
-    if (toId == null || boardBusy()) return;
+    if (toId == null || boardBusy()) return null;
     const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
     const liveCallouts = (getValues('callouts') ?? []) as MoodCallout[];
     const plan = planBoardCrop({
@@ -645,7 +654,7 @@ export function MoodBoard({
         'the board is full — the crop is in the library; the original keeps its place and notes',
         'error',
       );
-      return;
+      return plan.mode;
     }
     setPicked((prev) => [...prev, full]);
     writeItems(plan.items);
@@ -657,9 +666,9 @@ export function MoodBoard({
         'the crop is on the board, right after the original — the original keeps its notes',
         'success',
       );
-    if (plan.mode !== 'replace') return;
-    const carried = labels.get(originalId);
-    if (!isPersonLabel(carried) || toId === originalId) return;
+    if (plan.mode !== 'replace') return plan.mode;
+    const carried = labelsNow.current.get(originalId);
+    if (!isPersonLabel(carried) || toId === originalId) return plan.mode;
     const release = holdFlatInput(techCardId);
     void setReferenceRole
       .mutateAsync({
@@ -672,9 +681,54 @@ export function MoodBoard({
       // Отказ сказан швом записи (`onError` мутации).
       .catch(() => {})
       .finally(release);
+    return plan.mode;
   }
 
   const readOnly = !!disabled;
+
+  // ── remove bg (M17): the cut-out takes the tile the way a crop does (`./mood-cutout`) ──────────
+  const onBoard = (mediaId: number) =>
+    ((getValues('moodboardMedia') ?? []) as BoardItem[]).some(
+      (i) => isBoardRow(i) && i.mediaId === mediaId,
+    );
+  function landCutout(original: common_MediaFull, cut: common_MediaFull): CutLanding {
+    const originalId = original.id ?? 0;
+    if (!onBoard(originalId)) return 'gone';
+    // Checked before `placeCropped`, whose own check would say it in a toast on every retry.
+    if (flatInput.run || !rowsWritable(readFlatInput(techCardId))) return 'wait';
+    const mode = placeCropped(originalId, cut, WHOLE_FRAME);
+    if (mode == null) return 'wait';
+    // The whole frame keeps every callout, so this is a replace; any other plan said its own words.
+    if (mode === 'replace')
+      showMessage('background removed — the original stays in the library', 'success', {
+        label: 'undo',
+        onClick: () => undoCutout.current(original, cut.id ?? 0),
+      });
+    return 'placed';
+  }
+  /** One tap back: the original takes its place again; the cut-out's carried label stops riding. */
+  const undoCutout = useRef((_original: common_MediaFull, _cutId: number) => {});
+  undoCutout.current = (original, cutId) => {
+    if (!(cutId > 0) || !onBoard(cutId)) {
+      showMessage('the cut-out is no longer on the board — nothing to undo', 'error');
+      return;
+    }
+    const carried = labelsNow.current.get(cutId);
+    if (placeCropped(cutId, original, WHOLE_FRAME) !== 'replace' || !isPersonLabel(carried)) return;
+    // Its person label would ride into the other runs from the library (they read a person's label
+    // wherever the picture is); an empty role is the person's «no view», which never travels.
+    const release = holdFlatInput(techCardId);
+    void setReferenceRole
+      .mutateAsync({ mediaId: cutId, role: '', ordinal: Math.max(1, carried?.ordinal ?? 1) })
+      .catch(() => {})
+      .finally(release);
+  };
+  const cutout = useBoardCutout({
+    techCardId,
+    band,
+    enabled: !readOnly && speaks,
+    land: landCutout,
+  });
 
   // ── угол плитки и вопрос под доской: назначение (форма) и ярлык (сервер) ─────────────────────
   const ordinalOf = (mediaId: number) =>
@@ -1131,23 +1185,34 @@ export function MoodBoard({
                 view.full
                   ? {
                       left: !readOnly && (
-                        <button
-                          type='button'
-                          data-mood-crop={view.mediaId}
-                          aria-label={`crop moodboard picture ${i + 1}`}
-                          onClick={() =>
-                            setCropping({
-                              mediaId: view.mediaId,
-                              full: view.full as common_MediaFull,
-                            })
-                          }
-                          // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
-                          // постановки — тот же довод, что у `FrameButton` поверхности.
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
-                        >
-                          crop
-                        </button>
+                        <>
+                          <button
+                            type='button'
+                            data-mood-crop={view.mediaId}
+                            aria-label={`crop moodboard picture ${i + 1}`}
+                            onClick={() =>
+                              setCropping({
+                                mediaId: view.mediaId,
+                                full: view.full as common_MediaFull,
+                              })
+                            }
+                            // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
+                            // постановки — тот же довод, что у `FrameButton` поверхности.
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
+                          >
+                            crop
+                          </button>
+                          {/* M17: `remove bg` — right next to crop, the same quiet verb. */}
+                          {cutout.can(view.full) && (
+                            <CutoutCorner
+                              mediaId={view.mediaId}
+                              n={i + 1}
+                              cut={cutout.stateOf(view.mediaId)}
+                              onPress={() => cutout.start(view.full as common_MediaFull)}
+                            />
+                          )}
+                        </>
                       ),
                       right: (!readOnly || canEdit) && (
                         <>

@@ -132,6 +132,12 @@ export type StartRunCallbacks = {
    * whose answer then arrives late is a rejected mutation: its `onAccepted` fires, this does not.
    */
   onStarted?: () => void;
+  /**
+   * THE SENTENCE OF THE ACCEPTED PRESS, when the kind's own one names the wrong place (M17): the
+   * moodboard's `remove bg` lands its cut-out ON THE TILE, not in the history. `''` says nothing —
+   * the tile's own «…» already does. Absent = the kind's sentence (`STARTED_BY_KIND`).
+   */
+  startedSay?: string;
 };
 
 export type StartRunState = {
@@ -280,7 +286,8 @@ export function useStartDesignRun(
     if (shownCard.current === input.techCardId) setRefusal(null);
     // The run comes back PENDING, not done: the picture arrives in the feed when the provider
     // answers. Saying so is the difference between «nothing happened» and «it was booked».
-    showMessage(STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT, 'success');
+    const say = input.startedSay ?? STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT;
+    if (say) showMessage(say, 'success');
     // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
     // left by earlier work stops holding the run it kept. Not a release — an editor opened while
     // this answer travelled keeps its run until it closes. A run put on the bench from the history
@@ -383,6 +390,7 @@ export function useStartDesignRun(
         onAccepted: opts?.onAccepted,
         onRefused: opts?.onRefused,
         provesUnbooked: opts?.provesUnbooked,
+        startedSay: opts?.startedSay,
       };
       // `onStarted` is the per-call one, and it fires after `accepted` ran for THIS press — so it
       // reads the gate `accepted` wrote rather than the bare fact that the call resolved. The
@@ -480,6 +488,8 @@ type SentRun = {
   onAccepted?: (clientRequestId: string) => void;
   onRefused?: (error: unknown) => void;
   provesUnbooked?: (error: unknown) => boolean;
+  /** `StartRunCallbacks.startedSay`. */
+  startedSay?: string;
   /**
    * WRITTEN BY `accepted`, READ BY THE PER-CALL `onStarted`: the door's answer to this press came
    * while the ledger still held its key — the answer is this press's own. Never set for a late
