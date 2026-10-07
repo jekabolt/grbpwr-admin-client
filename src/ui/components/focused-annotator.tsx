@@ -225,6 +225,11 @@ export type FocusedAnnotatorProps = {
    */
   numberFrom?: number;
   /**
+   * M14: false — the badge carries the word alone (`tileBadge`), no number. The flat input draws a
+   * picture just added and not yet sent: it has no place in the prompt's order. Default true.
+   */
+  numbered?: boolean;
+  /**
    * 96-PICTURE-QUESTIONS: the picture a quiz question is about. While set (grid only) that tile wears
    * a 2px ink outline and every other tile drops to 25% — the question points at one picture.
    * `null`/absent — every tile as usual.
@@ -476,6 +481,7 @@ export function FocusedAnnotator({
   tileFlag,
   tileBadge,
   numberFrom = 1,
+  numbered = true,
   anchoredMediaId = null,
   anchoredSpots,
   hotSpot = null,
@@ -1042,13 +1048,15 @@ export function FocusedAnnotator({
                       readOnly ? 'max-w-full' : 'max-w-[calc(100%-32px)]',
                     )}
                   >
-                    <span
-                      className='bg-textColor px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor'
-                      data-tile-badge=''
-                    >
-                      {numberFrom + i}
-                      {badgeNote ? ` · ${badgeNote}` : null}
-                    </span>
+                    {(numbered || !!badgeNote) && (
+                      <span
+                        className='bg-textColor px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor'
+                        data-tile-badge=''
+                      >
+                        {numbered ? numberFrom + i : null}
+                        {badgeNote ? `${numbered ? ' · ' : ''}${badgeNote}` : null}
+                      </span>
+                    )}
                     {flag && (
                       <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
                         <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>

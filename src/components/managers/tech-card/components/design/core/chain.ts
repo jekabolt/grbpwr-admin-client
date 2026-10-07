@@ -272,6 +272,8 @@ const FIELD_STEP: Record<string, StepId> = {
   colorways: 'mood',
   // the flat step: the prompt's words, and the bench doors (`design.bench.*`, `doors.ts`)
   garmentDescription: 'flat',
+  // M14: the person's own flat words — the WORDS box of the flat step
+  flatWords: 'flat',
 };
 
 export function stepOfField(path: string): StepId | null {

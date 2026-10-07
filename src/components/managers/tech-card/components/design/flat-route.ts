@@ -31,18 +31,45 @@ export function targetSlotId(target: FlatTarget): number {
 }
 
 /**
- * THE WORDS A FLAT RUN SENDS (wave 10): only the card's «garment: <class>» line — the description is
- * model-seeded as often as human-written and nothing records which, so the server sends none of it
- * (designgen.FlatWordsCarryDescription). Mirror of FlatConstructionNote: the first «garment:» line
- * with a class, or ''.
+ * THE WORDS A FLAT RUN SENDS (wave 10 → M14). The card's «garment: <class>» line — the first
+ * «garment:» line of the description with a class (the description itself is model-seeded as often
+ * as human-written and nothing records which, so none of its prose is sent:
+ * designgen.FlatWordsCarryDescription) — then the person's own flat words (`flatWords`, typed in
+ * FLAT › WORDS and written by nothing else) as typed: each line trimmed, blank lines dropped. Mirror
+ * of designgen.FlatGarmentNote, byte for byte (the same cases stand in both repos' tests). '' when
+ * there is neither.
  */
-export function flatWordsSent(words: string): string {
-  for (const line of words.split('\n')) {
-    const m = /^\s*(?:- )?garment\s*:\s*(.*)$/i.exec(line);
-    if (m && m[1].trim()) return `garment: ${m[1].trim()}`;
+export function flatWordsSent(description: string, human = ''): string {
+  let cls = '';
+  for (const raw of description.split('\n')) {
+    // as the server reads a line: trimmed, a list dash dropped, trimmed again (a CRLF line too)
+    let line = raw.trim();
+    if (line.startsWith('- ')) line = line.slice(2).trim();
+    const m = /^garment\s*:\s*(.*)$/i.exec(line);
+    if (m && m[1].trim()) {
+      cls = `garment: ${m[1].trim()}`;
+      break;
+    }
   }
-  return '';
+  const words = flatHumanWords(human);
+  if (!words) return cls;
+  return cls ? `${cls}\n${words}` : words;
 }
+
+/** The person's flat words as they travel (designgen.FlatHumanWords): lines trimmed, blanks dropped. */
+export function flatHumanWords(human: string): string {
+  return human
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * THE CEILING OF THE FLAT WORDS (the server refuses a flat run above it: designMaxFlatWordsRunes) — a
+ * few lines under the class line, not a second description.
+ */
+export const FLAT_WORDS_MAX = 1000;
 
 /**
  * THE CLASS LINE FOLLOWS THE CATEGORY (M10). WORDS are seeded once with «garment: <the category's

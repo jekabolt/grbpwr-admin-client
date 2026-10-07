@@ -7972,6 +7972,15 @@ export type common_TechCardInsert = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   garmentDescription?: string;
+  // THE PERSON'S OWN WORDS FOR A FLAT (flat-consistency M14, owner 07.10: «показывай в WORDS только
+  // то, что уходит»). Typed by a person in FLAT › WORDS, under the class line, and by nothing else:
+  // no model writes it (no ai ✦ on that box, no seeding, no brief), so it is human by construction —
+  // the provenance garment_description lacks (it is seeded by a model brief and edited by people,
+  // one string with no author). A flat run sends «garment: <class>» (from garment_description) and
+  // then these lines as typed; the description's other words never travel to a flat.
+  // Read by flat runs only; frozen into DesignInputSnapshot.garment_note. Not in any section digest.
+  // OPTIONAL for the same reason as garment_description: absent = keep, "" = clear, value = set.
+  flatWords?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.

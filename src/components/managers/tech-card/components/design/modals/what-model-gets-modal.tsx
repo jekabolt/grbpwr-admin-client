@@ -24,11 +24,9 @@ import {
 import { useTechCardAutosave } from '../autosave-contract';
 import { viewWord } from '../board-labels';
 import { openDoor } from '../doors';
-import { flatWordsSent, followCategory } from '../flat-route';
-import { useGarmentClass } from '../head/card-facts-form';
+import { useFlatWords } from '../flat-words-field';
 import { FIT_WHERE } from '../render/what-model-gets';
 import { useFlatPreview } from '../use-design-band';
-import { useShownWords } from '../words-seed';
 
 /**
  * WHAT THE MODEL GETS — THE FLAT ARM, READ FROM THE SERVER (101 Ф3).
@@ -46,7 +44,7 @@ import { useShownWords } from '../words-seed';
  */
 
 /** One word per held reason (the server's `designHeld*`). */
-const HELD_WORD: Record<string, string> = {
+export const HELD_WORD: Record<string, string> = {
   mood: 'mood',
   material: 'material',
   unmarked: 'no purpose',
@@ -120,15 +118,11 @@ export function WhatModelGetsModal({
   const heldIds = useMemo(() => held.map((h) => h.mediaId ?? 0).filter((id) => id > 0), [held]);
   const library = useResolvedMedia(heldIds);
 
-  const live = !readOnly && autosave.status !== 'off';
-  const garment = useShownWords(techCardId, control, live);
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
-  // M10: GENERATE moves a seeded class line to the card's category before it saves (flat-run-row),
-  // so the line shown is the one that will travel — only where GENERATE can write.
-  const garmentClass = useGarmentClass();
-  const sentWords = flatWordsSent(
-    live ? followCategory(garment, garmentClass.current, garmentClass.seeded) : garment,
-  );
+  // M14: the words a flat sends — the class line (following the category the way GENERATE does) and
+  // the person's own lines from WORDS; the same hook draws the WORDS box.
+  const flatWords = useFlatWords(techCardId, readOnly);
+  const sentWords = flatWords.sent;
   const sentCallouts = refs.reduce((n, r) => n + (r.callouts ?? []).length, 0);
   const pictures = refs.length + slots.length;
 
@@ -217,19 +211,28 @@ export function WhatModelGetsModal({
       <WmgGroup
         label='words'
         aside='read from the card at dispatch'
-        note='only the garment class line is sent: the rest of WORDS (and the quiz answers) can be model-written, and the card does not record which'
+        note='the class line and the lines typed in WORDS; nothing a model wrote is sent'
+        data-wmg-server-words={preview.data?.inputs?.garmentNote ?? ''}
       >
         <InventoryLine
           name='garment'
           origin='linked'
           text={
-            sentWords || (
+            flatWords.classLine || (
               <span className='text-error'>
                 the card names no garment class; the pictures go in unexplained
               </span>
             )
           }
         />
+        {flatWords.human && (
+          <InventoryLine
+            name='words'
+            origin='typed'
+            data-wmg-words=''
+            text={<span className='whitespace-pre-line'>{flatWords.human}</span>}
+          />
+        )}
         <InventoryLine
           name='fit'
           origin='linked'
@@ -256,9 +259,8 @@ export function WhatModelGetsModal({
         say={showMessage}
         doors={[
           {
-            label: 'edit the description ▸',
-            onClick: () =>
-              openDoor('garmentDescription', 'the words are in INPUT, on STUDIO', showMessage),
+            label: 'edit the words ▸',
+            onClick: () => openDoor('flatWords', 'the words are in INPUT, on FLAT', showMessage),
           },
           {
             label: 'edit the fit ▸',

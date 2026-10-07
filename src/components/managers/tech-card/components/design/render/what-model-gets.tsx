@@ -24,7 +24,7 @@ import {
   WordsAsSent,
   latestRunOfKind,
 } from '../core';
-import { openDoor, openDoorAcrossKind } from '../doors';
+import { openDoor } from '../doors';
 import { viewLabel } from '../views';
 import { MAX_RENDER_ARTWORKS } from '../paint/artworks';
 import { PictureTile } from '../picture-tile';
@@ -352,21 +352,8 @@ export function WhatModelGetsRenderModal({
         words={words}
         say={showMessage}
         doors={[
-          {
-            label: 'edit the description ▸',
-            onClick: () =>
-              /* ЧЕРЕЗ ВИД, А НЕ НА МЕСТЕ. Панель открыта со стороны FABRIC RENDER или 3D, а
-                 описание изделия живёт в INPUT — REFERENCES, то есть на FLAT: отсюда блок
-                 размонтирован, и `openDoor` честно ответил бы «не на этой вкладке», оставив
-                 переход человеку. Дверь закрывает панель, переводит студию и ждёт монтажа. */
-              openDoorAcrossKind(
-                'garmentDescription',
-                'flat',
-                'the garment description is in INPUT — REFERENCES, on FLAT',
-                showMessage,
-                () => onOpenChange(false),
-              ),
-          },
+          /* M14: the card's description is no longer edited on FLAT (its WORDS show only what a flat
+             sends), so there is no door to it from here; it is written from the moodboard. */
           {
             label: 'edit the fit ▸',
             onClick: () => openDoor('fit', FIT_WHERE, showMessage),

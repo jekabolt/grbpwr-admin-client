@@ -19,7 +19,13 @@ import {
   type AutosaveApi,
 } from 'components/managers/tech-card/components/design/autosave-contract';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
+import { patchFlatInput } from 'components/managers/tech-card/components/design/flat-input';
 import { FlatInputPictures } from 'components/managers/tech-card/components/design/flat-input-pictures';
+import { flatWordsSent } from 'components/managers/tech-card/components/design/flat-route';
+import {
+  FlatWordsField,
+  useFlatWords,
+} from 'components/managers/tech-card/components/design/flat-words-field';
 import {
   FlatRunRow,
   type FlatSelection,
@@ -43,6 +49,15 @@ declare global {
     /** Mount / unmount the input's pictures (the step switch to MOODBOARD and back). */
     __mountPictures: (on: boolean) => void;
     __previewAnswer: (req: PreviewDesignRunInputsRequest) => PreviewDesignRunInputsResponse;
+    /** M14: what the stubbed `+ picture` slot hands over on its next click. */
+    __pick: { id: number }[];
+    __img: typeof img;
+    /** M14: the saved board as the server reads it — pictures added through the input. */
+    __added: { views: number[]; held: Record<number, string>; detail: number[] };
+    __patchFlatInput: typeof patchFlatInput;
+    __flatWordsSent: typeof flatWordsSent;
+    /** M14: the card cannot be written — the input shows no add slot. */
+    __disablePictures: (on: boolean) => void;
   }
 }
 
@@ -154,6 +169,7 @@ const band = {
    its photos, then the accepted BACK and FRONT plates, then the asked slot with no picture. */
 const ref = (mediaId: number, role: string) => ({ mediaId, role, media: img(mediaId) });
 window.__server = { mood300: false };
+window.__added = { views: [], held: {}, detail: [] };
 window.__previewAnswer = (req) => {
   const ids = req.params?.detailSlotIds ?? [];
   if (!ids.length) {
@@ -161,13 +177,23 @@ window.__previewAnswer = (req) => {
     const fronts = window.__server.mood300 ? [301, 124] : [301, 300];
     return {
       inputs: {
-        refs: [...fronts.map((id) => ref(id, 'front')), ref(126, 'back'), ref(125, 'side_l')],
+        refs: [
+          ...fronts.map((id) => ref(id, 'front')),
+          ref(126, 'back'),
+          ref(125, 'side_l'),
+          ...window.__added.views.map((id) => ref(id, 'side_r')),
+        ],
         slots: [],
       },
       held: [
         { mediaId: 124, reason: 'older', role: 'front' },
         { mediaId: 211, reason: 'detail', role: 'detail' },
         { mediaId: 916, reason: 'mood', role: '' },
+        ...Object.entries(window.__added.held).map(([id, reason]) => ({
+          mediaId: Number(id),
+          reason,
+          role: '',
+        })),
       ],
     } as unknown as PreviewDesignRunInputsResponse;
   }
@@ -175,7 +201,10 @@ window.__previewAnswer = (req) => {
   const detail = band.bench?.find((b) => b.id === slot);
   return {
     inputs: {
-      refs: slot === 126 ? [ref(211, 'detail')] : [],
+      refs:
+        slot === 126
+          ? [ref(211, 'detail'), ...window.__added.detail.map((id) => ref(id, 'detail'))]
+          : [],
       slots: [
         { viewKey: 'back', slotId: 0, mediaId: 956, media: img(956, 700, 700) },
         { viewKey: 'front', slotId: 0, mediaId: 955, media: img(955, 700, 700) },
@@ -186,7 +215,17 @@ window.__previewAnswer = (req) => {
   } as unknown as PreviewDesignRunInputsResponse;
 };
 
+window.__pick = [];
+window.__img = img;
+window.__patchFlatInput = patchFlatInput;
+window.__flatWordsSent = flatWordsSent;
 window.__api = {
+  // M14: card 38's server keeps the flat words; card 39's (an older binary) does not know the field.
+  GetTechCard: (req) =>
+    (req as { id?: number }).id === 38
+      ? { techCard: { id: 38, techCard: { flatWords: '' } } }
+      : { techCard: { id: 39, techCard: {} } },
+  SetDesignReferenceRole: (req) => ({ reference: req }),
   GetDesignBand: () => structuredClone(band),
   PreviewDesignRunInputs: (req) => window.__previewAnswer(req as PreviewDesignRunInputsRequest),
   StartDesignRun: (req) => ({
@@ -200,6 +239,8 @@ function Input() {
   const [selection, setSelection] = useState<FlatSelection | null>(null);
   const [mounted, setMounted] = useState(true);
   window.__mountPictures = setMounted;
+  const [off, setOff] = useState(false);
+  window.__disablePictures = setOff;
   const [saving, setSaving] = useState<{ status: AutosaveApi['status']; lastSavedAt?: number }>({
     status: 'saved',
     lastSavedAt: 1,
@@ -214,12 +255,32 @@ function Input() {
     <AutosaveContext.Provider value={autosave}>
       <DesignCapabilityProvider value={serverSpeaks}>
         <div data-probe-state={isLoading ? 'loading' : 'ready'} className='space-y-4'>
-          {mounted && <FlatInputPictures techCardId={CARD} band={current} selection={selection} />}
+          {mounted && (
+            <FlatInputPictures
+              techCardId={CARD}
+              band={current}
+              selection={selection}
+              disabled={off}
+            />
+          )}
+          <div data-probe-words='38'>
+            <FlatWordsField techCardId={CARD} />
+          </div>
+          <div data-probe-words='39'>
+            <FlatWordsField techCardId={39} />
+          </div>
+          <Sent />
           <FlatRunRow band={current} techCardId={CARD} onSelection={setSelection} />
         </div>
       </DesignCapabilityProvider>
     </AutosaveContext.Provider>
   );
+}
+
+/** What the flat sends in words, as «what the model gets» reads it (the same hook). */
+function Sent() {
+  const { sent } = useFlatWords(CARD, false);
+  return <pre data-probe-sent={sent} />;
 }
 
 const board = (mediaId: number, role: string) => ({
@@ -234,7 +295,10 @@ function CardForm() {
     defaultValues: {
       concept: 'a two-layer tank',
       categoryId: 1,
-      garmentDescription: 'garment: tank top',
+      garmentDescription:
+        'garment: tank top\nfit: slim\nTwo-layer sleeveless top, slim body-hugging silhouette.',
+      flatWords: '',
+      technicalMedia: [{ mediaId: 990, kind: 'TECH_CARD_MEDIA_KIND_FRONT', caption: '' }],
       moodboardMedia: [
         board(211, 'detail'),
         board(126, 'target'),

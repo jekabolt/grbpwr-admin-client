@@ -55,6 +55,7 @@ import {
   VIEWS_ORDER,
   VIEWS_TARGET,
   detailFlatSlotIds,
+  flatHumanWords,
   flatTargets,
   followCategory,
   modeOfRoute,
@@ -219,8 +220,9 @@ export function flatSnapshot(
           .sort((a, b) => (a[0] as number) - (b[0] as number))
       : [];
     return {
-      words: ((now.garmentDescription ?? '') as string).trim(),
-      fit: now.fit ?? '',
+      // M14 (Codex): the words are the server's own note below — the class line and the person's
+      // flat words as they travel. The description's prose and the fit are not sent to a flat, so an
+      // edit of them is the same request.
       preview: {
         refs: (p.refs ?? []).map((r) => [
           r.mediaId ?? 0,
@@ -271,6 +273,7 @@ export function flatSnapshot(
     : [];
   return {
     words: ((now.garmentDescription ?? '') as string).trim(),
+    human: flatHumanWords((now.flatWords ?? '') as string),
     fit: now.fit ?? '',
     refs,
     mood,

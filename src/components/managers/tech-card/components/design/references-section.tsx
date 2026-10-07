@@ -2,24 +2,22 @@ import { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { useId, useMemo, useState, type ChangeEvent } from 'react';
-import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { useMemo, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
-import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { type BoardItem } from './mood-board';
-import { flatInputBusy, useFlatInput, wordsLocked } from './flat-input';
+import { useFlatInput, wordsLocked } from './flat-input';
 import { FlatInputPictures } from './flat-input-pictures';
 import { FlatRunRow, type FlatSelection } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { useStepAddress } from './playground/address';
 import { GROUP_GAP } from './core';
+import { FlatWordsField } from './flat-words-field';
 import { useWordsSeeding } from './use-words-seeding';
-import { WordsField } from './words-field';
-import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from './words-seed';
 
 /**
  * ═══ ВХОД ФЛЭТА — С МУДБОРДА (101-MOODBOARD-ROLES, волна 11) ═══════════════════════════════════
@@ -35,9 +33,13 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
  *     детали) из того же ответа сервера (`./flat-input-pictures.tsx`); дверь `moodboard ›` к доске
  *     — в шапке блока, рядом с `clear the words ✕` (прежняя строка `from the moodboard · N pictures`
  *     осталась только словами — если сервер не ответил);
- *   · WORDS — один текст на весь промпт (`garmentDescription`), засев фактами карточки (D-20'''');
+ *   · WORDS (M14, владелец 07.10: «показывай в WORDS только то, что уходит») — ровно слова прогона:
+ *     строка «garment: <класс>» (идёт за категорией) и под ней строки ЧЕЛОВЕКА (`flatWords`), которые
+ *     уходят как напечатаны (`./flat-words-field.tsx`). Описание карточки (`garmentDescription`,
+ *     засев брифом модели) здесь больше не показывается и во флэт не уходит; оно живёт для рендера и
+ *     3D, его засев и догон идут как прежде (`useWordsSeeding` зовётся и здесь — GENERATE отдаёт
+ *     засев в форму, и строка класса уезжает с ним);
  *   · ряд GENERATE (`./flat-run-row.tsx`) и приёмник рекола (`RecalledRunPrompt`).
- * `clear the words ✕` в шапке чистит ТОЛЬКО слова: картинки и их ярлыки живут на доске.
  *
  * Легаси-строки `kind = REFERENCE` (старый вход) здесь не рисуются: миграция данных Ф4 переносит их
  * на доску с назначением по ярлыку.
@@ -55,7 +57,7 @@ export function ReferencesSection({
   band: GetDesignBandResponse;
   disabled?: boolean;
 }): JSX.Element {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control } = useFormContext<TechCardFormData>();
   const readOnly = !!disabled;
   const goStep = useStepAddress();
   /** На чём стоит ряд GENERATE (target ▾) — картинки входа подсвечивают его группу (M13). */
@@ -96,115 +98,51 @@ export function ReferencesSection({
   const thumbOf = (id: number) => thumbUrl(known.get(id) ?? libraryMap.get(id));
 
   /* ВХОД ЗАНЯТ — из модульного хранилища карточки (`useFlatInput`): GENERATE ждёт сохранения или
-     ответа, рекол пишет слова — поле и `clear` заперты. */
+     ответа — поле слов заперто. */
   const flatInput = useFlatInput(techCardId);
-  const inputBusy = flatInputBusy(flatInput);
   const wordsBusy = wordsLocked(flatInput);
 
-  const garment = useController({ control, name: 'garmentDescription' });
-  const garmentId = useId();
-  const { wordsLive, factsContext, rewrite, rewriting } = useWordsSeeding(
-    techCardId,
-    band,
-    readOnly,
-  );
-  const seed = useWordsSeed(techCardId);
-  const shown = pickShownWords(seed, garment.field.value, wordsLive);
-  const garmentChars = shown.trim().length;
-  const omittedShown = omittedOf(seed, shown);
-
-  const [clearAsk, setClearAsk] = useState(false);
-  function clearWords() {
-    setClearAsk(false);
-    setValue('garmentDescription', '', { shouldDirty: true });
-    dropWords(techCardId);
-  }
+  /* Засев и догон ОПИСАНИЯ карточки (для рендера и 3D, и строка класса, которую GENERATE сохраняет
+     с ним) идут как прежде; на экране флэта описания больше нет (M14). */
+  useWordsSeeding(techCardId, band, readOnly);
 
   return (
     <Section
       title='input'
       action={
-        <span className='flex items-baseline gap-4'>
-          {/* ОДНА ДВЕРЬ К ДОСКЕ (M13): картинки входа и их слова правятся там. */}
-          <Button
-            variant='underline'
-            size='xs'
-            className='text-labelColor hover:text-textColor'
-            data-input-door=''
-            onClick={() => goStep('mood')}
-          >
-            moodboard ›
-          </Button>
-          {!readOnly && (
-            <Button
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              data-clear-prompt=''
-              disabled={inputBusy || wordsBusy || garmentChars === 0}
-              onClick={() => setClearAsk(true)}
-            >
-              clear the words ✕
-            </Button>
-          )}
-        </span>
+        /* ОДНА ДВЕРЬ К ДОСКЕ (M13): картинки входа и их ярлыки правятся там. */
+        <Button
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          data-input-door=''
+          onClick={() => goStep('mood')}
+        >
+          moodboard ›
+        </Button>
       }
       className='space-y-block'
     >
       {/* M13 · КАРТИНКИ, КОТОРЫЕ УЙДУТ В ПРОМПТ — плитками доски, по нажатиям (виды, детали), из
           ответа сервера; выбранная цель target ▾ — в полный тон. Дверь к доске — в шапке блока. */}
-      <FlatInputPictures techCardId={techCardId} band={band} selection={selection} />
+      <FlatInputPictures
+        techCardId={techCardId}
+        band={band}
+        selection={selection}
+        disabled={readOnly}
+      />
 
       <div>
-        {/* T56: мудборд сменился, а WORDS правлены руками — тихая ссылка переписать. */}
-        {rewrite ? (
-          <div className={cn('flex items-baseline justify-between gap-2', GROUP_GAP)}>
-            <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-              words
-            </Text>
-            <Button
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              data-words-rewrite=''
-              disabled={rewriting}
-              title='the moodboard changed since these words were written — rewrite them from it'
-              onClick={rewrite}
-            >
-              {rewriting ? 'rewriting…' : 'moodboard changed · rewrite ✦'}
-            </Button>
-          </div>
-        ) : (
-          <Text
-            size='nano'
-            variant='label'
-            component='span'
-            className={cn('block uppercase tracking-label', GROUP_GAP)}
-          >
-            words
-          </Text>
-        )}
-        <WordsField
-          {...garment.field}
-          data-field='garmentDescription'
-          id={garmentId}
-          label='words for the model'
-          disabled={readOnly}
-          readOnly={wordsBusy}
-          value={shown}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-            garment.field.onChange(event);
-            settleWords(techCardId, event.target.value);
-          }}
-          placeholder='what this flat has to show'
-          omitted={omittedShown}
-          aiContext={factsContext}
-          aiDisabled={readOnly || wordsBusy}
-          onApply={(text) => {
-            setValue('garmentDescription', text, { shouldDirty: true });
-            settleWords(techCardId, text);
-          }}
-        />
+        <Text
+          size='nano'
+          variant='label'
+          component='span'
+          className={cn('block uppercase tracking-label', GROUP_GAP)}
+        >
+          words
+        </Text>
+        {/* M14: ровно то, что уйдёт — строка класса и строки человека. */}
+        <FlatWordsField techCardId={techCardId} disabled={readOnly} readOnly={wordsBusy} />
       </div>
 
       {/* ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ: ниже смонтирован приёмник рекола `RecalledRunPrompt`, при
@@ -223,21 +161,6 @@ export function ReferencesSection({
         disabled={disabled}
         onAccepted={(media) => setPicked((prev) => [...prev, ...media])}
       />
-
-      <ConfirmationModal
-        open={clearAsk}
-        onOpenChange={(open) => !open && setClearAsk(false)}
-        onConfirm={clearWords}
-        onCancel={() => setClearAsk(false)}
-        title='clear the words'
-        confirmLabel='clear the words'
-        width='sm'
-      >
-        <Text size='control' data-clear-scope={`${garmentChars}:0`}>
-          Clears the words ({garmentChars} characters); they leave the card with its next save. The
-          moodboard is not touched.
-        </Text>
-      </ConfirmationModal>
     </Section>
   );
 }

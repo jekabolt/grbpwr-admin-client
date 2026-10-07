@@ -2091,6 +2091,11 @@ const techCardObject = z.object({
   // (отсутствует = сохрани хранимое, `''` = сотри, значение = поставь), и пустая строка отсюда
   // была бы КОМАНДОЙ, а не молчанием.
   garmentDescription: z.string().nullish(),
+  // СЛОВА ЧЕЛОВЕКА ДЛЯ ФЛЭТА (M14, владелец 07.10: «показывай в WORDS только то, что уходит»). Пишет
+  // только человек в FLAT › WORDS под строкой класса (`design/flat-words-field.tsx`): ни засева, ни
+  // `ai ✦`, ни рекола — автор известен по построению, и флэт шлёт их как напечатаны. Та же дисциплина
+  // отсутствия, что у описания: `undefined` — сервер про поле не знает (ключ не уезжает).
+  flatWords: z.string().nullish(),
   // children
   sizeIds: z.array(z.number()).default([]),
   // NO sizeQuantities. Типовой калькуляционный тираж («size run») удалён из формы целиком:
@@ -2525,6 +2530,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // строкой выше: `?? undefined`, а не `|| ''`, иначе первый же сейв карточки, прочитанной без
     // описания, стёр бы описание.
     garmentDescription: insert?.garmentDescription ?? undefined,
+    // M14: тот же протокол — сервер без поля его не шлёт, и ключ не уезжает назад.
+    flatWords: insert?.flatWords ?? undefined,
     sizeIds: insert?.sizeIds ?? [],
     // size_quantities НЕ читается в форму — типовой тираж больше не существует как понятие в UI.
     patterns: (insert?.patterns ?? []).map((p) => ({
@@ -3187,6 +3194,9 @@ export function mapFormToTechCardInsert(
       data.garmentDescription === undefined || data.garmentDescription === null
         ? undefined
         : data.garmentDescription.trim(),
+    // M14: слова человека для флэта — та же дисциплина ключа (и тот же гейт возможностей на выходе).
+    flatWords:
+      data.flatWords === undefined || data.flatWords === null ? undefined : data.flatWords.trim(),
     // Схема их объявила и читатель их читает, но провод ими молчит, пока не подключён гейт
     // возможностей (`design/payload-gate.ts`): гейтвей собран с `DiscardUnknown: false`, поэтому
     // незнакомое поле — это 400 на ВЕСЬ документ, а не тишина, и бандл, начавший их слать раньше

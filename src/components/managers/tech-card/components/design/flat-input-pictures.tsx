@@ -3,10 +3,13 @@ import type {
   common_DesignBenchSlot,
   common_DesignInputSlot,
   common_DesignRunParams,
+  common_MediaFull,
 } from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import Text from 'ui/components/text';
@@ -16,10 +19,24 @@ import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { labelsByMedia, viewWord } from './board-labels';
 import { serverSpeaksDesign } from './capability';
+import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { flatRunParams, type FlatSelection } from './flat-run-row';
 import { targetSlotId } from './flat-route';
-import { isBoardRow, useLabelPoll, type BoardItem } from './mood-board';
-import { designKeys, isUnimplemented, useFlatPreviewTiles } from './use-design-band';
+import { HELD_WORD } from './modals/what-model-gets-modal';
+import {
+  appendBoardPictures,
+  isBoardRow,
+  MOOD_MAX,
+  useLabelPoll,
+  type BoardItem,
+} from './mood-board';
+import {
+  designKeys,
+  isUnimplemented,
+  useDesignWrites,
+  useFlatPreviewTiles,
+} from './use-design-band';
+import { DETAIL_VIEW } from './views';
 
 /**
  * ═══ ВХОД ФЛЭТА — КАРТИНКИ, КОТОРЫЕ УЙДУТ В ПРОМПТ (M13, владелец 07.10) ═══════════════════════════
@@ -41,6 +58,14 @@ import { designKeys, isUnimplemented, useFlatPreviewTiles } from './use-design-b
  *
  * ЧТЕНИЕ БЕСПЛАТНО (сухой прогон сборки входа: ни модели, ни денег) и не на каждое сохранение: ключ —
  * то, что сборка читает (сохранённая доска, ярлыки, флэтовый верстак, `previewStamp`).
+ *
+ * M14 (владелец 07.10: «в инпутс должна быть возможность так же добавить медиа»): у каждой группы —
+ * тот же слот `+ picture`, что первым стоит в ленте доски (`MediaSlot`: библиотека, бросок, ⌘V).
+ * Картинка ложится НА ДОСКУ — других мест у неё нет (101): в VIEWS — с назначением `target`, вид ей
+ * ставит разметчик доски (M4); в DETAIL · имя — с назначением `detail` и ярлыком ЧЕЛОВЕКА на слот этой
+ * детали (модель его не трогает). Пока сервер не сказал, уйдёт ли она, она стоит в группе бледной
+ * плиткой без номера: `…` — читается или ещё не сохранена; слово причины (`view ?`, `older`…) —
+ * удержана, и модалка «what the model gets» говорит почему. Ушла в превью — стала обычной плиткой.
  */
 
 /** Рост ленты фото и ленты приложенных флэтов, px. Доска стоит в 380 — вход это сводка, не рабочее место. */
@@ -121,15 +146,122 @@ export function usePreviewStamp(band: GetDesignBandResponse): string {
   return `${bandSig}|${boardSig}|${round}`;
 }
 
+/** Where a picture added in the input goes: the views press, or one detail's slot. */
+export type InputAddTarget = { kind: 'views' } | { kind: 'detail'; slotId: number };
+
+/**
+ * M14 · КАРТИНКА, ДОБАВЛЕННАЯ ВО ВХОДЕ, — НА ДОСКУ (чистая: форма снаружи). Новая встаёт строкой доски
+ * с назначением группы (`target` / `detail`) тем же приёмом, что «+ picture» доски
+ * (`appendBoardPictures`: дубль в ящике невозможен, потолок доски, слова отказа). Уже лежащая на доске
+ * получает назначение группы — человек показал её ЗДЕСЬ. Картинку из технического списка карточки
+ * доска не берёт (медиа не стоит в двух списках). `placed` — что теперь стоит на доске с назначением
+ * группы, в порядке выбора.
+ */
+export function planInputAdd(input: {
+  live: BoardItem[];
+  otherListIds: number[];
+  added: common_MediaFull[];
+  target: InputAddTarget;
+  max: number;
+}): { next: BoardItem[]; placed: number[]; refusal: string | null } {
+  const purpose = input.target.kind === 'views' ? 'target' : 'detail';
+  const onBoard = new Set(input.live.filter(isBoardRow).map((i) => i.mediaId));
+  const elsewhere = new Set(input.otherListIds);
+  const ids = input.added.map((m) => m.id ?? 0).filter((id) => id > 0);
+  const again = ids.filter((id) => onBoard.has(id));
+  const result = appendBoardPictures({
+    live: input.live,
+    inScope: isBoardRow,
+    otherListIds: input.otherListIds,
+    added: input.added.filter((m) => !onBoard.has(m.id ?? 0)),
+    kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD',
+    max: input.max,
+    scopeLabel: 'board',
+  });
+  const accepted = new Set(result.accepted.map((m) => m.id ?? 0));
+  const moved = new Set([...again, ...accepted]);
+  const next = result.next.map((i) =>
+    isBoardRow(i) && moved.has(i.mediaId) && (i.role ?? '') !== purpose
+      ? { ...i, role: purpose }
+      : i,
+  );
+  const refusal =
+    result.refusal ??
+    (ids.some((id) => elsewhere.has(id) && !onBoard.has(id))
+      ? 'that picture is one of the card’s own flats — it goes with «from my flat»'
+      : null);
+  return { next, placed: ids.filter((id) => moved.has(id)), refusal };
+}
+
+/**
+ * The input's add gesture: the plan above into the form (the autosave carries it), and for a detail
+ * a PERSON's label on its slot — written first, so the model never reads it as some other detail.
+ * Refused while a flat run is being started (the run would take a board half before, half after).
+ */
+function useInputAdd(techCardId: number) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const { showMessage } = useSnackBarStore();
+  const { setReferenceRole } = useDesignWrites(techCardId);
+  return useCallback(
+    (added: common_MediaFull[], target: InputAddTarget): number[] => {
+      const card = techCardId;
+      if (!rowsWritable(readFlatInput(card))) {
+        showMessage('a flat run is being started — add the picture once it has started', 'error');
+        return [];
+      }
+      const plan = planInputAdd({
+        live: (getValues('moodboardMedia') ?? []) as BoardItem[],
+        otherListIds: ((getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
+        added,
+        target,
+        max: MOOD_MAX,
+      });
+      if (plan.refusal) showMessage(plan.refusal, 'error');
+      if (!plan.placed.length) return [];
+      /* VIEWS: a picture moved here from a detail keeps its label row — a model's is read again by
+         the server (the purpose changed under it), a person's asks «which view is this?» under the
+         moodboard (an empty role would be a person's «no view», Codex M14). */
+      if (target.kind === 'detail') {
+        const order = plan.next.filter(isBoardRow).map((i) => i.mediaId);
+        const release = holdFlatInput(card);
+        void Promise.all(
+          plan.placed.map((mediaId) =>
+            setReferenceRole.mutateAsync({
+              mediaId,
+              role: DETAIL_VIEW,
+              ordinal: Math.max(1, order.indexOf(mediaId) + 1),
+              detailSlotId: target.slotId,
+            }),
+          ),
+        )
+          // A refusal is said by the write's own seam (`onError`).
+          .catch(() => {})
+          .finally(release);
+      }
+      setValue('moodboardMedia', plan.next as TechCardFormData['moodboardMedia'], {
+        shouldDirty: true,
+      });
+      return plan.placed;
+    },
+    [techCardId, getValues, setValue, showMessage, setReferenceRole],
+  );
+}
+
+/** A picture added in this input, this session — shown pale until the server says it is sent. */
+type Added = { mediaId: number; full: common_MediaFull; group: string };
+
 export function FlatInputPictures({
   techCardId,
   band,
   selection,
+  disabled = false,
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
   /** What the run row stands on (`FlatRunRow` → `onSelection`); null until it has said. */
   selection: FlatSelection | null;
+  /** The card cannot be written: no add slot. */
+  disabled?: boolean;
 }): JSX.Element | null {
   const speaks = serverSpeaksDesign();
   const stamp = usePreviewStamp(band);
@@ -145,6 +277,32 @@ export function FlatInputPictures({
   const labels = useMemo(() => labelsByMedia(band.references), [band.references]);
   useLabelPoll(techCardId, items, labels, speaks);
 
+  /* M14 · добавленное во входе — по карточке, на сессию: бледная плитка, пока сервер не ответил. Снятое
+     с доски уходит и отсюда. */
+  const [addedAll, setAdded] = useState<{ card: number; list: Added[] }>({ card: 0, list: [] });
+  const added = useMemo(() => {
+    if (addedAll.card !== techCardId) return [];
+    const onBoard = new Set(items.map((i) => i.mediaId));
+    return addedAll.list.filter((a) => onBoard.has(a.mediaId));
+  }, [addedAll, techCardId, items]);
+  const addTo = useInputAdd(techCardId);
+  const canAdd = !disabled && speaks && techCardId > 0;
+  const onAdd = (group: string, target: InputAddTarget) => (media: common_MediaFull[]) => {
+    const placed = addTo(media, target);
+    if (!placed.length) return;
+    const byId = new Map(media.map((m) => [m.id ?? 0, m]));
+    setAdded((prev) => {
+      const list = prev.card === techCardId ? prev.list : [];
+      const kept = list.filter((a) => !placed.includes(a.mediaId));
+      const fresh = placed.map((id) => ({
+        mediaId: id,
+        full: byId.get(id) as common_MediaFull,
+        group,
+      }));
+      return { card: techCardId, list: [...kept, ...fresh] };
+    });
+  };
+
   const selectedDetail = selection ? targetSlotId(selection.target) : 0;
   /* ДЕТАЛИ, ЧЬИ НАЖАТИЯ НЕСУТ СВОИ ФОТО: фото детали едет только со строкой ярлыка этой детали
      (сервер: роль `detail` + слот) — без такой строки у её нажатия одни флэты, и спрашивать незачем.
@@ -155,11 +313,13 @@ export function FlatInputPictures({
         .filter((r) => (r.role ?? '').trim() === 'detail')
         .map((r) => r.detailSlotId ?? 0),
     );
+    // M14: a detail a picture was just added to stays drawn while the server reads it.
+    for (const a of added) if (a.group.startsWith('d:')) withPhotos.add(Number(a.group.slice(2)));
     return bench.details.filter((d) => {
       const id = d.id ?? 0;
       return id > 0 && (withPhotos.has(id) || id === selectedDetail);
     });
-  }, [band.references, bench.details, selectedDetail]);
+  }, [band.references, bench.details, selectedDetail, added]);
 
   /* Нажатие «views» спрашивается и здесь — тем же ключом, что у его группы (один запрос в кэше):
      сервер не ответил (старый бинарь, сбой) — вход говорит по-старому, словами. */
@@ -201,6 +361,8 @@ export function FlatInputPictures({
         stamp={stamp}
         on={viewsOn}
         always
+        added={added.filter((a) => a.group === 'views')}
+        onAdd={canAdd ? onAdd('views', { kind: 'views' }) : undefined}
       />
       {details.map((d) => (
         <DetailGroup
@@ -210,6 +372,10 @@ export function FlatInputPictures({
           name={displayDetailName(bench.details, d)}
           stamp={stamp}
           on={(d.id ?? 0) === selectedDetail}
+          added={added.filter((a) => a.group === `d:${d.id ?? 0}`)}
+          onAdd={
+            canAdd ? onAdd(`d:${d.id ?? 0}`, { kind: 'detail', slotId: d.id ?? 0 }) : undefined
+          }
         />
       ))}
     </div>
@@ -222,12 +388,16 @@ function DetailGroup({
   name,
   stamp,
   on,
+  added,
+  onAdd,
 }: {
   techCardId: number;
   slot: common_DesignBenchSlot;
   name: string;
   stamp: string;
   on: boolean;
+  added: Added[];
+  onAdd?: (media: common_MediaFull[]) => void;
 }) {
   const id = slot.id ?? 0;
   // Нажатие детали — ровно как у GENERATE: `flatRunParams(slotId, null, [])`.
@@ -241,7 +411,9 @@ function DetailGroup({
       params={params}
       stamp={stamp}
       on={on}
-      always={on}
+      always={on || added.length > 0}
+      added={added}
+      onAdd={onAdd}
     />
   );
 }
@@ -259,6 +431,8 @@ function PressGroup({
   stamp,
   on,
   always = false,
+  added = NO_ADDED,
+  onAdd,
 }: {
   techCardId: number;
   groupKey: string;
@@ -269,6 +443,10 @@ function PressGroup({
   on: boolean;
   /** Draw the group even when the press sends nothing of its own (the views; the selected detail). */
   always?: boolean;
+  /** M14: pictures added here this session — pale, unnumbered, until the server sends them. */
+  added?: Added[];
+  /** M14: the add slot's gesture; absent — no slot (read-only card). */
+  onAdd?: (media: common_MediaFull[]) => void;
 }) {
   const preview = useFlatPreviewTiles(techCardId, params, stamp);
 
@@ -298,6 +476,22 @@ function PressGroup({
     for (const s of plates) m.set(s.mediaId ?? 0, plateWord(s));
     return m;
   }, [plates]);
+  /* ДОБАВЛЕННОЕ, ЕЩЁ НЕ УШЕДШЕЕ: в ответе нет среди фото — бледной плиткой; слово — причина удержания
+     из того же ответа, иначе `…` (читается / ещё не сохранено). */
+  const pending = useMemo(() => {
+    const sent = new Set(refs.map((r) => r.mediaId ?? 0));
+    return added.filter((a) => !sent.has(a.mediaId));
+  }, [added, refs]);
+  const pendingViews = useMemo<FocusedView[]>(
+    () => pending.map((a) => ({ key: `a${a.mediaId}`, mediaId: a.mediaId, full: a.full })),
+    [pending],
+  );
+  const heldWord = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const h of preview.data?.held ?? [])
+      m.set(h.mediaId ?? 0, HELD_WORD[(h.reason ?? '').trim()] ?? (h.reason ?? '').trim());
+    return m;
+  }, [preview.data]);
 
   // A detail the server would not answer for stays off the input; the views say so above.
   if (preview.isError) return null;
@@ -305,6 +499,22 @@ function PressGroup({
   // Деталь без своих фото рисуется, только когда выбрана (тогда видно: её нажатие пошлёт флэты).
   if (answered && refs.length === 0 && !always) return null;
   if (!answered && !always) return null;
+
+  /* M14 · СЛОТ «+ picture» — тот же, что первым стоит в ленте доски (O-62), ростом ленты входа. */
+  const addSlot = onAdd ? (
+    <MediaSlot
+      aspectRatio={['Custom']}
+      frameAspect='3/4'
+      heightPx={PHOTO_ROW_PX}
+      label='+ picture'
+      purpose='moodboard reference'
+      allowMultiple
+      showVideos={false}
+      onSelect={onAdd}
+      sizeClassName='w-fit'
+      className='shrink-0'
+    />
+  ) : null;
 
   return (
     <div
@@ -332,12 +542,13 @@ function PressGroup({
       {!answered ? (
         // Первый ответ ещё в пути: место ленты держится, WORDS под ней не прыгают.
         <div style={{ height: PHOTO_ROW_PX + 8 }} aria-busy='true' />
-      ) : refs.length === 0 && plates.length === 0 ? (
+      ) : refs.length === 0 && plates.length === 0 && pending.length === 0 && !addSlot ? (
         <Text size='nano' variant='label' component='p' className='uppercase tracking-label'>
           nothing goes yet
         </Text>
       ) : (
         <div className='flex min-w-0 items-start gap-2'>
+          {addSlot && <div className='py-1'>{addSlot}</div>}
           {photoViews.length > 0 && (
             <Strip
               views={photoViews}
@@ -346,6 +557,21 @@ function PressGroup({
               word={(v) => wordOfRef.get(v.mediaId) ?? ''}
               label={label}
             />
+          )}
+          {pendingViews.length > 0 && (
+            <div
+              className='opacity-50'
+              data-flat-pictures-pending={pending.map((a) => a.mediaId).join(' ')}
+            >
+              <Strip
+                views={pendingViews}
+                rowPx={PHOTO_ROW_PX}
+                numberFrom={1}
+                numbered={false}
+                word={(v) => heldWord.get(v.mediaId) ?? '…'}
+                label={`${label} · not sent yet`}
+              />
+            </div>
           )}
           {plateViews.length > 0 && (
             <Strip
@@ -363,6 +589,7 @@ function PressGroup({
 }
 
 const NO_PARAMS: common_DesignRunParams = flatRunParams(0, null, []);
+const NO_ADDED: Added[] = [];
 const NO_CALLOUTS = () => [];
 const noop = () => {};
 const noPick = () => [];
@@ -372,12 +599,15 @@ function Strip({
   views,
   rowPx,
   numberFrom,
+  numbered = true,
   word,
   label,
 }: {
   views: FocusedView[];
   rowPx: number;
   numberFrom: number;
+  /** A picture not in the prompt has no place in its order: the word alone. */
+  numbered?: boolean;
   word: (v: FocusedView) => string;
   label: string;
 }) {
@@ -389,6 +619,7 @@ function Strip({
         views={views}
         gridRowHeight={rowPx}
         numberFrom={numberFrom}
+        numbered={numbered}
         preferNaturalAspect
         zoomable={false}
         railArrows={false}
@@ -403,7 +634,9 @@ function Strip({
         purpose='flat input'
         emptyLabel=''
         carouselLabel={label}
-        mediaLabel={(v, i) => `${label} · ${numberFrom + i} · ${word(v)}`}
+        mediaLabel={(v, i) =>
+          numbered ? `${label} · ${numberFrom + i} · ${word(v)}` : `${label} · ${word(v)}`
+        }
         tileBadge={(v) => word(v)}
       />
     </div>
