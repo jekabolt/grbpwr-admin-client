@@ -102,56 +102,73 @@ function PieceInput({
 
 export function PiecesRow({
   pieces,
+  hidden,
   disabled,
   naming,
   onSave,
   onNameAgain,
   canNameAgain,
+  onDirty,
 }: {
   pieces: common_DesignPartsPieces;
+  /** Folded away by `rename parts`: still mounted, so an unsaved draft survives the fold. */
+  hidden?: boolean;
   disabled?: boolean;
   /** The labeller is answering: a save now would be named after it. */
   naming?: boolean;
-  onSave: (names: string[], settle?: boolean) => Promise<void>;
+  /** Saves the whole list on `expectedRev` — the rev the draft was made on (CAS). */
+  onSave: (names: string[], expectedRev: number, settle?: boolean) => Promise<void>;
   onNameAgain: () => void;
   canNameAgain: boolean;
+  /** The draft differs from the saved list (the header says `unsaved`). */
+  onDirty?: (dirty: boolean) => void;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
   const saved = useMemo(() => namesOf(pieces), [pieces]);
+  const rev = pieces.rev ?? 0;
   const [draft, setDraft] = useState<string[]>(saved);
+  /** The rev the draft was made on; null = after a refused save, the designer saves over the list now. */
+  const [base, setBase] = useState<number | null>(rev);
   const [editing, setEditing] = useState(-1); // index being renamed; draft.length = the new one
   const [busy, setBusy] = useState(false);
   const dirty = draft.join('\n') !== saved.join('\n');
 
-  // The server's list moved (a save, a read): an untouched draft follows it.
+  // The server's list moved (a save, a read, another tab): an untouched draft follows it and is
+  // made on the new rev; an edited draft keeps its own rev, so its save is refused, never blind.
   useEffect(() => {
-    if (!dirty) setDraft(saved);
+    if (dirty) return;
+    setDraft(saved);
+    setBase(rev);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved.join('\n')]);
+  }, [saved.join('\n'), rev]);
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
 
   const proposal = pieces.proposal;
   const read = namesOf(proposal);
   const diff = proposal ? proposalDiff(saved, read) : null;
   const off = disabled || busy;
 
-  const save = async (names: string[], settle = false) => {
+  /* A failed save keeps the draft (only `cancel` drops it). A refused rev re-reads the list: the
+     designer sees theirs against the new one and saves again over it, or cancels. */
+  const save = async (names: string[], expectedRev: number, settle = false) => {
     if (names.length === 0) {
       showMessage('keep at least one piece', 'error');
       return;
     }
     setBusy(true);
     try {
-      await onSave(names, settle);
+      await onSave(names, expectedRev, settle);
       setEditing(-1);
     } catch (e) {
       const msg = (e instanceof Error && e.message) || 'the pieces were not saved';
+      const moved = /rev_mismatch|aborted/i.test(msg);
+      if (moved && !settle) setBase(null);
       showMessage(
-        /rev_mismatch|aborted/i.test(msg)
-          ? 'the pieces changed in another tab; this list was reloaded'
+        moved
+          ? 'the pieces changed meanwhile (another tab or a new read); your edit is kept: save again to replace them, or cancel'
           : msg,
         'error',
       );
-      setDraft(saved);
     } finally {
       setBusy(false);
     }
@@ -163,7 +180,7 @@ export function PiecesRow({
   };
 
   return (
-    <div className='space-y-1 pb-2' data-paint-pieces=''>
+    <div className='space-y-1 pb-2' data-paint-pieces='' hidden={hidden}>
       <div className={LINE}>
         <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
           pieces
@@ -217,7 +234,7 @@ export function PiecesRow({
               <Button
                 variant='underline'
                 size='xs'
-                onClick={() => void save(draft)}
+                onClick={() => void save(draft, base ?? rev)}
                 disabled={off || naming}
                 title={naming ? 'the parts are being named; save when they land' : undefined}
                 data-paint-pieces-save=''
@@ -230,6 +247,7 @@ export function PiecesRow({
                 className='text-labelColor hover:text-textColor'
                 onClick={() => {
                   setDraft(saved);
+                  setBase(rev);
                   setEditing(-1);
                 }}
                 disabled={busy}
@@ -285,7 +303,7 @@ export function PiecesRow({
             <Button
               variant='underline'
               size='xs'
-              onClick={() => void save(read, true)}
+              onClick={() => void save(read, rev, true)}
               disabled={off || dirty}
               title={
                 dirty ? 'save or cancel your edit first' : 'use the pieces read from the new flats'
@@ -298,7 +316,7 @@ export function PiecesRow({
               variant='underline'
               size='xs'
               className='text-labelColor hover:text-textColor'
-              onClick={() => void save(saved, true)}
+              onClick={() => void save(saved, rev, true)}
               disabled={off || dirty}
               title={
                 dirty

@@ -618,19 +618,24 @@ export class PaintSession {
   }
 
   /**
-   * M6 · the designer's list (`rename parts`): saved whole under the rev it was edited on; the parts
-   * are named again under the new rev. `settle` answers a pending read of changed flats (its names =
-   * take, the list's own = keep). Throws the server's refusal (a stale tab: Aborted).
+   * M6 · the designer's list (`rename parts`): saved whole under `expectedRev` — the rev the draft
+   * was made on (CAS); the parts are named again under the new rev. `settle` answers a pending read
+   * of changed flats (its names = take, the list's own = keep). Throws the server's refusal (a list
+   * that moved under the draft: Aborted).
    */
-  async savePieces(names: string[], settle = false): Promise<void> {
-    const res = await adminService.SetDesignPartsPieces({
-      techCardId: this.techCardId,
-      expectedRev: this.piecesRev(),
-      names,
-      settleProposal: settle,
-    });
-    this.putPieces(res.pieces);
-    void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
+  async savePieces(names: string[], expectedRev: number, settle = false): Promise<void> {
+    try {
+      const res = await adminService.SetDesignPartsPieces({
+        techCardId: this.techCardId,
+        expectedRev,
+        names,
+        settleProposal: settle,
+      });
+      this.putPieces(res.pieces);
+    } finally {
+      // A refused rev: the list moved under the draft — read it again so the row shows the new one.
+      void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
+    }
   }
 
   /**
@@ -764,6 +769,10 @@ export class PaintSession {
           listMoved = true;
           return;
         }
+        // The list the answer was named under, even if nothing of it can be laid (Codex M6): the
+        // designer must be able to correct the names that failed. Laid below in this same tick, so
+        // the sides carry `namedRev` before the band re-syncs.
+        this.putPieces(res.pieces);
         let got = 0;
         for (const s of res.suggestions ?? []) {
           const i = sides.findIndex((v) => v.view === s.view);
@@ -785,7 +794,6 @@ export class PaintSession {
           if (!current()) return;
           throw new Error('the assistant answered nothing usable');
         }
-        this.putPieces(res.pieces);
         void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
       } catch (e) {
         if (!current()) return;

@@ -1160,10 +1160,11 @@ export function PartsCanvas({
   /* M6 · the card's pieces list (the closed names of PARTS): opened by `rename parts`; a read of
      changed flats waiting on the designer keeps it open until it is taken or kept. */
   const pieces = session.pieces();
-  const pieceCount = pieces?.pieces?.length ?? 0;
   const proposal = !!pieces?.proposal;
   const [piecesOpen, setPiecesOpen] = useState(false);
-  const showPieces = pieceCount > 0 && (piecesOpen || proposal);
+  const [piecesDirty, setPiecesDirty] = useState(false);
+  /* Folding the row while a draft is unsaved keeps it (the row stays mounted, hidden). */
+  const showPieces = !!pieces && (piecesOpen || proposal);
 
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
   const writes = useAssetWrites(session.techCardId);
@@ -1441,7 +1442,9 @@ export function PartsCanvas({
         >
           <Pill tone='warn'>parts · retry</Pill>
         </button>
-      ) : pieceCount > 0 ? (
+      ) : null}
+      {/* Beside naming / retry, never instead of it: a failed naming is fixed by the names. */}
+      {pieces && (
         <button
           type='button'
           onClick={() => setPiecesOpen((o) => !o)}
@@ -1450,11 +1453,15 @@ export function PartsCanvas({
           title='the pieces the parts are named from'
           data-paint-pieces-toggle=''
         >
-          <Pill tone={proposal ? 'attention' : showPieces ? 'ink' : 'mut'}>
-            {proposal ? 'rename parts · new read' : 'rename parts'}
+          <Pill tone={proposal || piecesDirty ? 'attention' : showPieces ? 'ink' : 'mut'}>
+            {proposal
+              ? 'rename parts · new read'
+              : piecesDirty
+                ? 'rename parts · unsaved'
+                : 'rename parts'}
           </Pill>
         </button>
-      ) : null}
+      )}
       {TOOLS.map((t) => (
         <Chip
           key={t}
@@ -1517,12 +1524,14 @@ export function PartsCanvas({
       <GroupLabel flush className={GROUP_GAP} action={tools}>
         parts
       </GroupLabel>
-      {showPieces && pieces && (
+      {pieces && (
         <PiecesRow
           pieces={pieces}
+          hidden={!showPieces}
+          onDirty={setPiecesDirty}
           disabled={disabled}
           naming={session.naming}
-          onSave={(names, settle) => session.savePieces(names, settle)}
+          onSave={(names, expectedRev, settle) => session.savePieces(names, expectedRev, settle)}
           onNameAgain={() => session.nameAgain()}
           canNameAgain={session.canNameAgain()}
         />

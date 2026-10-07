@@ -1085,8 +1085,8 @@ try {
     await page.waitForSelector('[data-paint-pieces-toggle]', { timeout: 8000 }).catch(() => {
       errors.push('[m6] ASSERT: no rename parts once the list is read');
     });
-    const closed = await page.locator('[data-paint-pieces]').count();
-    if (closed !== 0) errors.push('[m6] ASSERT: the pieces row is open before it is asked for');
+    const closed = await page.locator('[data-paint-pieces]').isVisible();
+    if (closed) errors.push('[m6] ASSERT: the pieces row is open before it is asked for');
     await page.click('[data-paint-pieces-toggle]');
     await page.waitForSelector('[data-paint-pieces]');
     await block('m6-pieces-open.png');
@@ -1136,10 +1136,57 @@ try {
         timeout: 8000,
       })
       .catch(() => errors.push('[m6] ASSERT: front not named again'));
-    // A read of changed flats arrives: it is a proposal — the list stays, the pill turns blue.
+    // Another tab saves first (rev 3) while this draft is open: the save is refused, the draft is
+    // kept, the list is read again; saving again replaces theirs on purpose (rev 3 → 4).
+    await page
+      .waitForFunction(() => !document.querySelector('[data-paint-naming]'), null, {
+        timeout: 8000,
+      })
+      .catch(() => {});
+    await page.click('[data-paint-piece-add]');
+    await page.fill('[data-paint-piece-input]', 'hem band');
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => {
+      const p = window.__band.partsPieces;
+      window.__band.partsPieces = { ...p, rev: p.rev + 1, pieces: [...p.pieces, { name: 'belt' }] };
+    });
+    await page.click('[data-paint-pieces-save]');
+    await page.waitForTimeout(600);
+    const conflict = await page.evaluate(() => ({
+      calls: window.__calls
+        .filter((x) => x.name === 'SetDesignPartsPieces')
+        .map((x) => x.body.expectedRev),
+      kept: !!document.querySelector('[data-paint-piece="hem band"]'),
+      theirs: !!document.querySelector('[data-paint-piece="belt"]'),
+    }));
+    console.log(`m6 conflict: ${JSON.stringify(conflict)}`);
+    if (!conflict.kept || JSON.stringify(conflict.calls) !== '[1,2]')
+      errors.push(
+        `[m6] ASSERT: a refused save lost the draft or was not refused ${JSON.stringify(conflict)}`,
+      );
+    await page.click('[data-paint-pieces-save]');
+    await page.waitForTimeout(600);
+    const over = await page.evaluate(
+      () => window.__calls.filter((x) => x.name === 'SetDesignPartsPieces').pop()?.body,
+    );
+    if (
+      !over ||
+      over.expectedRev !== 3 ||
+      !over.names.includes('hem band') ||
+      over.names.includes('belt')
+    )
+      errors.push(`[m6] ASSERT: saving again did not replace theirs ${JSON.stringify(over)}`);
+    await page
+      .waitForFunction(() => window.__paint.views.get('front')?.parts?.keyed, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[m6] ASSERT: front not named again after the replace'));
+    // A read of changed flats arrives: it is a proposal — the list stays, the rev moves (a settle is
+    // tied to it), the pill turns blue.
     await page.evaluate(() => {
       window.__band.partsPieces = {
         ...window.__band.partsPieces,
+        rev: window.__band.partsPieces.rev + 1,
         proposal: {
           pieces: [{ name: 'collar' }, { name: 'left front body' }, { name: 'back yoke' }],
           openings: [],
@@ -1167,8 +1214,8 @@ try {
     if (
       !kept ||
       !kept.settleProposal ||
-      kept.expectedRev !== 2 ||
-      JSON.stringify(kept.names) !== JSON.stringify(saved?.names) ||
+      kept.expectedRev !== 5 ||
+      JSON.stringify(kept.names) !== JSON.stringify(over?.names) ||
       kept.names.includes('collar')
     )
       errors.push(`[m6] ASSERT: keep mine sent ${JSON.stringify(kept)}`);
