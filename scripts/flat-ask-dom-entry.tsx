@@ -10,6 +10,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { FlatRunRow } from 'components/managers/tech-card/components/design/flat-run-row';
 import { useDesignBand } from 'components/managers/tech-card/components/design/use-design-band';
 import { useState } from 'react';
@@ -101,11 +102,14 @@ const qc = new QueryClient({
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
     <BrowserRouter>
-      <TooltipProvider>
-        <div style={{ width: 900, padding: 40 }}>
-          <CardForm />
-        </div>
-      </TooltipProvider>
+      {/* M10: the row reads the card's category class (`useGarmentClass` → dictionary). */}
+      <DictionaryProvider>
+        <TooltipProvider>
+          <div style={{ width: 900, padding: 40 }}>
+            <CardForm />
+          </div>
+        </TooltipProvider>
+      </DictionaryProvider>
     </BrowserRouter>
   </QueryClientProvider>,
 );

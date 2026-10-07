@@ -1,4 +1,8 @@
-import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
+import {
+  common_DesignPicture,
+  common_DesignReference,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -440,6 +444,37 @@ export function setBoardRole(live: BoardItem[], mediaId: number, role: string): 
   return live.map((i) => (isBoardRow(i) && i.mediaId === mediaId ? { ...i, role } : i));
 }
 
+/**
+ * ЯРЛЫК ЧИТАЕТСЯ — ПОЛОСА ПЕРЕЧИТЫВАЕТСЯ: каждые 3 с, не дольше полутора минут на одно ожидание
+ * (модель отвечает за секунды; дольше — сервер долечит лениво при следующем открытии). Один на доску
+ * и на вход флэта (M13): картинки входа ждут того же ярлыка, а доска на шаге FLAT не смонтирована.
+ */
+export function useLabelPoll(
+  techCardId: number,
+  items: readonly BoardItem[],
+  labels: ReadonlyMap<number, common_DesignReference>,
+  speaks: boolean,
+) {
+  const qc = useQueryClient();
+  const waiting = items
+    .filter((i) => labelWaiting(i.role ?? '', labels.get(i.mediaId)))
+    .map((i) => i.mediaId)
+    .join(',');
+  useEffect(() => {
+    if (!waiting || !(techCardId > 0) || !speaks) return;
+    let ticks = 0;
+    const timer = window.setInterval(() => {
+      ticks += 1;
+      if (ticks > LABEL_POLL_TICKS) {
+        window.clearInterval(timer);
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+    }, LABEL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [waiting, techCardId, speaks, qc]);
+}
+
 /** The edit is drawn over the whole picture: its frame in the original is the original (T59). */
 const WHOLE_FRAME: CropFrame = { x: 0, y: 0, w: 1, h: 1, rotation: 0 };
 
@@ -734,26 +769,7 @@ export function MoodBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, items, readOnly, techCardId, flatInput.run]);
 
-  // ЯРЛЫК ЧИТАЕТСЯ — ПОЛОСА ПЕРЕЧИТЫВАЕТСЯ: каждые 3 с, не дольше полутора минут на одно ожидание
-  // (модель отвечает за секунды; дольше — сервер долечит лениво при следующем открытии).
-  const qc = useQueryClient();
-  const waiting = items
-    .filter((i) => labelWaiting(i.role ?? '', labels.get(i.mediaId)))
-    .map((i) => i.mediaId)
-    .join(',');
-  useEffect(() => {
-    if (!waiting || !(techCardId > 0) || !speaks) return;
-    let ticks = 0;
-    const timer = window.setInterval(() => {
-      ticks += 1;
-      if (ticks > LABEL_POLL_TICKS) {
-        window.clearInterval(timer);
-        return;
-      }
-      void qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
-    }, LABEL_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [waiting, techCardId, speaks, qc]);
+  useLabelPoll(techCardId, items, labels, speaks);
 
   // ── ✕ плитки: цитата перед уничтожением ─────────────────────────────────────────────────────
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);

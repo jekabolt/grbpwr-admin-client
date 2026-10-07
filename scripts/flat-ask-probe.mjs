@@ -704,23 +704,14 @@ if (!chromium) {
       'FRONT + BACK filled → `views again`, the detail open',
       (await options()).join('|'),
     );
-    await page
-      .waitForFunction(
-        () =>
-          window.__calls.some((c) => c.name === 'GenerateDesignJoins' && c.body.techCardId === 32),
-        null,
-        { timeout: 5000 },
-      )
-      .catch(() => {});
+    // M6: PARTS reads its own pieces list from the accepted FRONT/BACK on the server — the row no
+    // longer reads the join list in the background (M7 still did).
+    await page.waitForTimeout(500);
     ck(
-      (
-        await page.evaluate(() =>
-          window.__calls.filter((c) => c.name === 'GenerateDesignJoins').map((c) => c.body),
-        )
-      )
-        .map((b) => `${b.techCardId}:${!!b.force}`)
-        .join() === '32:false',
-      'M7 the list is still read in the background for PARTS (card with roled photos, not forced)',
+      (await page.evaluate(
+        () => window.__calls.filter((c) => c.name === 'GenerateDesignJoins').length,
+      )) === 0,
+      'M6 the row reads no join list in the background (PARTS reads its pieces on the server)',
     );
     ck(
       (await page.locator('[data-flat-generate] [aria-busy="true"]').count()) === 0,
@@ -773,8 +764,8 @@ if (!chromium) {
     ck(
       (await page.evaluate(
         () => window.__calls.filter((c) => c.name === 'GenerateDesignJoins').length,
-      )) === 1,
-      'M7 the background read runs once per card per session (not again on coming back)',
+      )) === 0,
+      'M6 … nor on coming back to the card',
     );
 
     console.log('\nM8 · ряд (DOM): сервер отказал второму флэт-прогону карточки');

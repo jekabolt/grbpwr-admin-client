@@ -10,12 +10,13 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
-import { isBoardRow, type BoardItem } from './mood-board';
+import { type BoardItem } from './mood-board';
 import { flatInputBusy, useFlatInput, wordsLocked } from './flat-input';
-import { FlatRunRow } from './flat-run-row';
+import { FlatInputPictures } from './flat-input-pictures';
+import { FlatRunRow, type FlatSelection } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
-import { GROUP_GAP } from './core';
 import { useStepAddress } from './playground/address';
+import { GROUP_GAP } from './core';
 import { useWordsSeeding } from './use-words-seeding';
 import { WordsField } from './words-field';
 import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from './words-seed';
@@ -30,7 +31,10 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
  * «what the model gets ▸» (`PreviewDesignRunInputs`).
  *
  * В блоке остались:
- *   · строка-дверь `from the moodboard · N pictures ›` — к доске, где картинки и их слова;
+ *   · M13 (владелец 07.10): картинки, которые уйдут в промпт, — плитками доски по нажатиям (виды,
+ *     детали) из того же ответа сервера (`./flat-input-pictures.tsx`); дверь `moodboard ›` к доске
+ *     — в шапке блока, рядом с `clear the words ✕` (прежняя строка `from the moodboard · N pictures`
+ *     осталась только словами — если сервер не ответил);
  *   · WORDS — один текст на весь промпт (`garmentDescription`), засев фактами карточки (D-20'''');
  *   · ряд GENERATE (`./flat-run-row.tsx`) и приёмник рекола (`RecalledRunPrompt`).
  * `clear the words ✕` в шапке чистит ТОЛЬКО слова: картинки и их ярлыки живут на доске.
@@ -54,16 +58,10 @@ export function ReferencesSection({
   const { control, setValue } = useFormContext<TechCardFormData>();
   const readOnly = !!disabled;
   const goStep = useStepAddress();
+  /** На чём стоит ряд GENERATE (target ▾) — картинки входа подсвечивают его группу (M13). */
+  const [selection, setSelection] = useState<FlatSelection | null>(null);
 
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
-  /** Картинки доски, из которых флэт выбирает: назначение `target` или `detail`. */
-  const sources = useMemo(
-    () =>
-      all.filter(
-        (i) => isBoardRow(i) && (i.role === 'target' || i.role === 'detail') && i.mediaId > 0,
-      ).length,
-    [all],
-  );
 
   // Миниатюры для вопросов ряда GENERATE (`thumbOf`): карточка, затем картинки полосы, затем
   // библиотека за окном (`useResolvedMedia`), как у доски.
@@ -126,39 +124,36 @@ export function ReferencesSection({
     <Section
       title='input'
       action={
-        !readOnly && (
+        <span className='flex items-baseline gap-4'>
+          {/* ОДНА ДВЕРЬ К ДОСКЕ (M13): картинки входа и их слова правятся там. */}
           <Button
             variant='underline'
             size='xs'
             className='text-labelColor hover:text-textColor'
-            data-clear-prompt=''
-            disabled={inputBusy || wordsBusy || garmentChars === 0}
-            onClick={() => setClearAsk(true)}
+            data-input-door=''
+            onClick={() => goStep('mood')}
           >
-            clear the words ✕
+            moodboard ›
           </Button>
-        )
+          {!readOnly && (
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              data-clear-prompt=''
+              disabled={inputBusy || wordsBusy || garmentChars === 0}
+              onClick={() => setClearAsk(true)}
+            >
+              clear the words ✕
+            </Button>
+          )}
+        </span>
       }
       className='space-y-block'
     >
-      {/* ДВЕРЬ К ДОСКЕ — одна строка: картинки флэта живут там, со своими словами (101 §2.9). */}
-      <button
-        type='button'
-        data-input-door=''
-        onClick={() => goStep('mood')}
-        className='group flex cursor-pointer items-baseline gap-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-      >
-        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          from the moodboard
-        </Text>
-        <Text
-          size='nano'
-          component='span'
-          className='uppercase tracking-label underline-offset-2 group-hover:underline'
-        >
-          {sources} picture{sources === 1 ? '' : 's'} ›
-        </Text>
-      </button>
+      {/* M13 · КАРТИНКИ, КОТОРЫЕ УЙДУТ В ПРОМПТ — плитками доски, по нажатиям (виды, детали), из
+          ответа сервера; выбранная цель target ▾ — в полный тон. Дверь к доске — в шапке блока. */}
+      <FlatInputPictures techCardId={techCardId} band={band} selection={selection} />
 
       <div>
         {/* T56: мудборд сменился, а WORDS правлены руками — тихая ссылка переписать. */}
@@ -214,7 +209,13 @@ export function ReferencesSection({
 
       {/* ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ: ниже смонтирован приёмник рекола `RecalledRunPrompt`, при
           размонтировании реестр стирает выбор, и жест теряется молча. */}
-      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} thumbOf={thumbOf} />
+      <FlatRunRow
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        thumbOf={thumbOf}
+        onSelection={setSelection}
+      />
 
       <RecalledRunPrompt
         techCardId={techCardId}

@@ -734,6 +734,31 @@ export function useFlatPreview(
     retry: false,
   });
 }
+
+/**
+ * THE INPUT'S PICTURES OF ONE FLAT PRESS (M13) — the same server answer as the modal and the run,
+ * for one target. Always on while the FLAT input is drawn, so it is keyed on WHAT IT READS (`stamp`:
+ * the saved board, the labels, the flat bench), not on every save: WORDS typed into the card do not
+ * re-ask. Each mount asks again (staleTime 0 — an answer cached before a save made elsewhere is never
+ * trusted); a changed stamp keeps the old tiles on screen until the new answer (no blink); another
+ * card never shows this one's. Free: a dry run of the input assembly — no model, no money (server).
+ */
+export function useFlatPreviewTiles(
+  techCardId: number,
+  params: common_DesignRunParams,
+  stamp: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...designKeys.all, 'preview-tiles', techCardId, params, stamp] as const,
+    queryFn: () => adminService.PreviewDesignRunInputs({ techCardId, kind: 'flat', params }),
+    enabled: enabled && techCardId > 0,
+    staleTime: 0,
+    retry: false,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === techCardId ? previous : undefined,
+  });
+}
 /**
  * СЕССИЯ ПРОГОНА НА СЕРВЕРЕ (E2): чтение несёт и `pending` — вопросы открытого прогона без
  * сохранённой строки, в порядке модели. Это источник `resume N` с любой вкладки и устройства;

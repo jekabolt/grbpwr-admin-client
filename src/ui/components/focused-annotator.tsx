@@ -219,6 +219,12 @@ export type FocusedAnnotatorProps = {
   /** Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер. */
   tileBadge?: (view: FocusedView, positionInViews: number) => string | null | undefined;
   /**
+   * С КАКОГО ЧИСЛА СЧИТАЕТ ЯРЛЫК (умолчание 1). M13: вход флэта рисует то, что уйдёт в промпт, двумя
+   * лентами разной высоты (фото и приложенные флэты) — номер второй продолжает первую, как строки
+   * «what the model gets». Только `layout='grid'`.
+   */
+  numberFrom?: number;
+  /**
    * 96-PICTURE-QUESTIONS: the picture a quiz question is about. While set (grid only) that tile wears
    * a 2px ink outline and every other tile drops to 25% — the question points at one picture.
    * `null`/absent — every tile as usual.
@@ -469,6 +475,7 @@ export function FocusedAnnotator({
   mediaLabel,
   tileFlag,
   tileBadge,
+  numberFrom = 1,
   anchoredMediaId = null,
   anchoredSpots,
   hotSpot = null,
@@ -826,7 +833,10 @@ export function FocusedAnnotator({
 
   return (
     <div className='space-y-2.5' {...regionHandlers}>
+      {/* ПУСТАЯ ПОЛОСА НЕ РИСУЕТСЯ (M13): на поверхности только для чтения без подсказки и без
+          читательских органов в ней нечего держать — рамка с пустотой внутри была бы шумом. */}
       {hasMedia &&
+        (!readOnly || !!hint || !!viewControls) &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
           // in a bar above the grid and apply to every cell at once.
@@ -1025,12 +1035,18 @@ export function FocusedAnnotator({
                       и «pinned to» адресуют картинку по нему), под ним флаг состояния. Оба видны
                       всегда и прозрачны для указателя; флаг — на непрозрачной подложке, под ним
                       снимок. */}
-                  <div className='pointer-events-none absolute left-0 top-0 z-20 flex max-w-[calc(100%-32px)] flex-col items-start gap-0.5'>
+                  {/* 32px справа — место ✕; у плитки только для чтения ✕ нет, и ярлык берёт всю ширину. */}
+                  <div
+                    className={cn(
+                      'pointer-events-none absolute left-0 top-0 z-20 flex flex-col items-start gap-0.5',
+                      readOnly ? 'max-w-full' : 'max-w-[calc(100%-32px)]',
+                    )}
+                  >
                     <span
                       className='bg-textColor px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor'
                       data-tile-badge=''
                     >
-                      {i + 1}
+                      {numberFrom + i}
                       {badgeNote ? ` · ${badgeNote}` : null}
                     </span>
                     {flag && (

@@ -8,7 +8,7 @@ import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -53,6 +53,7 @@ import {
 } from './flat-mode';
 import {
   VIEWS_ORDER,
+  VIEWS_TARGET,
   detailFlatSlotIds,
   flatTargets,
   followCategory,
@@ -61,6 +62,7 @@ import {
   settleTarget,
   targetSlotId,
   type FlatRoute,
+  type FlatTarget,
 } from './flat-route';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { isRunLive } from './generation/run-state';
@@ -152,6 +154,13 @@ export function flatRunParams(
     flat: mode ? flatParamsFor(mode, [...structure]) : undefined,
   };
 }
+
+/**
+ * WHAT THE ROW STANDS ON, FOR THE INPUT'S PICTURES (M13): the target ▾ and the params a VIEWS press
+ * would send (the «from my flat» choice applies to the views only). A detail press sends
+ * `flatRunParams(slotId, null, [])` — the input's pictures build it themselves.
+ */
+export type FlatSelection = { target: FlatTarget; views: common_DesignRunParams };
 
 /** A local stop that reads like the server's refusal of the same thing (nothing was sent). */
 const localRefusal = (reason: string): ServerRefusal => ({
@@ -372,12 +381,15 @@ export function FlatRunRow({
   techCardId,
   disabled,
   thumbOf,
+  onSelection,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /** The picture of a media id as the input already resolves it (library + band). */
   thumbOf?: (mediaId: number) => string;
+  /** M13: told the target ▾ and the views params whenever they change (the INPUT's pictures). */
+  onSelection?: (selection: FlatSelection) => void;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
@@ -502,6 +514,30 @@ export function FlatRunRow({
 
   /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
   const route = routeOf({ target, fromMyFlat, structure: structureNow.length });
+
+  /* M13 · THE INPUT'S PICTURES ARE THE SERVER'S ANSWER FOR THESE VERY PARAMS. The views press as it
+     would go with `views` on the target ▾ — the same builder as GENERATE and the modal, so on the
+     views target it IS the press. Told before paint: the tiles never show the other target. */
+  const viewsFromMyFlat = techIds.length > 0 && draft.fromMyFlat;
+  const viewsStructure = viewsFromMyFlat ? liveStructure(draft.structure, techIds) : [];
+  const viewsParams = flatRunParams(
+    0,
+    modeOfRoute(
+      routeOf({
+        target: VIEWS_TARGET,
+        fromMyFlat: viewsFromMyFlat,
+        structure: viewsStructure.length,
+      }),
+    ),
+    viewsStructure,
+  );
+  const selectionKey = JSON.stringify([target, viewsParams]);
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
+  useLayoutEffect(() => {
+    const [t, views] = JSON.parse(selectionKey) as [FlatTarget, common_DesignRunParams];
+    onSelectionRef.current?.({ target: t, views });
+  }, [selectionKey]);
 
   const writesOff = !!disabled || !speaks;
   /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте (ревью MAJOR), и пока CLEAR. */
