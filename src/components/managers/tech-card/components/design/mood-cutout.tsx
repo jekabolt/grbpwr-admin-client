@@ -29,8 +29,10 @@ import { selectVisiblePictures } from './visibility';
  *
  * ONE PRESS PER PICTURE. The press is held per card and picture OUTSIDE the component: the board is
  * unmounted on other steps, and the result lands the next time it is open (not across a reload — the
- * run and its picture then stay in the playground history). While it runs the tile says `…`; a
- * refusal or a failed run leaves one word, `failed`, and the corner presses again.
+ * run and its picture then stay in the playground history). While it runs the corner says `…` and
+ * the picture itself shows a transparency checker wiping across it (`PictureBusy` kind `cut`, owner
+ * 07.10: «какую-то анимацию показывать на картинке, что фон удаляется»); a refusal or a failed run
+ * leaves one word, `failed`, and the corner presses again.
  */
 
 export const BOARD_CUTOUT_SCOPE = 'moodboard:cutout';
@@ -46,6 +48,9 @@ export type BoardCut = {
   /** Why it failed, as the server said it (the corner's title). */
   why: string;
 };
+
+/** The press is on its way or running — the tile shows the background going. */
+export const isCutBusy = (cut: BoardCut | null | undefined) => !!cut && cut.state !== 'failed';
 
 const cuts = new Map<number, Map<number, BoardCut>>();
 const listeners = new Set<() => void>();
@@ -240,7 +245,7 @@ export function CutoutCorner({
   cut: BoardCut | null;
   onPress: () => void;
 }): JSX.Element {
-  const busy = !!cut && cut.state !== 'failed';
+  const busy = isCutBusy(cut);
   const failed = cut?.state === 'failed';
   return (
     <button

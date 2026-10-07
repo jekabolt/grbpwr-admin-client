@@ -43,7 +43,7 @@ import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
-import { CutoutCorner, useBoardCutout, type CutLanding } from './mood-cutout';
+import { CutoutCorner, isCutBusy, useBoardCutout, type CutLanding } from './mood-cutout';
 import { MoodQuiz } from './mood-quiz';
 import { MOOD_ROLES, usePictureAnchor, type QuizPicture } from './quiz-anchor';
 import {
@@ -1159,6 +1159,8 @@ export function MoodBoard({
               tileBadge={(view) =>
                 tileWord(roleOf.get(view.mediaId) ?? '', labels.get(view.mediaId), detailSlots)
               }
+              // M17 · `remove bg` running: the picture itself shows the background going.
+              tileBusy={(view) => (isCutBusy(cutout.stateOf(view.mediaId)) ? 'cut' : null)}
               anchoredMediaId={anchored}
               anchoredSpots={spots}
               hotSpot={hotSpot}
