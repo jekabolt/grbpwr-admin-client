@@ -257,6 +257,18 @@ export function isLabelSlot(slot: MaterialSlot): boolean {
   return slot.section === 'TECH_CARD_BOM_SECTION_LABEL';
 }
 
+/**
+ * R9 · a hardware slot PARTS can paint (buttons, snaps, zips…): the hardware family, not a label
+ * (sewn inside, never on the flat) and not an artwork (placed as a box, R7).
+ */
+export function isPaintableHardware(slot: Pick<MaterialSlot, 'family' | 'section'>): boolean {
+  return (
+    slot.family === 'hardware' &&
+    slot.section !== 'TECH_CARD_BOM_SECTION_LABEL' &&
+    !isArtworkSlot(slot)
+  );
+}
+
 /* ─────────────────────────── artwork slots (round 7) ─────────────────────────── */
 
 /** The BOM section an artwork (print, embroidery, patch…) lives in. */

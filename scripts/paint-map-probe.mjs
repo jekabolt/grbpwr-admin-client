@@ -800,5 +800,457 @@ ck(
   );
 }
 
+// ─── R9 Ф1 · hardware as parts ───
+{
+  // slotLabels: cloths first — appending hardware ids never re-steps a cloth label.
+  const fab = Array.from({ length: 40 }, (_, i) => i * 3 + 600);
+  // A hardware id whose base hex collides with a cloth's, with a LOWER id (the old id-order rule
+  // would have stepped the cloth's label off).
+  let clash = 0;
+  for (let id = 1; id < 600 && !clash; id += 1)
+    if (fab.some((f) => m.slotHex(f) === m.slotHex(id))) clash = id;
+  const hw = [7, 11, 13, ...(clash ? [clash] : [])];
+  const alone = m.slotLabels(fab);
+  const both = m.slotLabels(fab, hw);
+  ck(
+    fab.every((id) => both.get(id) === alone.get(id)),
+    'R9 slotLabels: cloth labels unchanged with hardware ids appended',
+    clash ? `colliding hardware id ${clash}` : 'no base collision in range',
+  );
+  const all = [...both.values()];
+  ck(
+    new Set(all).size === all.length && hw.every((id) => both.has(id)),
+    'R9 slotLabels: hardware ids take their own distinct labels',
+  );
+  if (clash) {
+    const old = m.slotLabels([...fab, clash]);
+    ck(
+      fab.some((id) => old.get(id) !== alone.get(id)),
+      'R9 (control) the id-order rule alone WOULD re-step a cloth label',
+    );
+  }
+  ck(
+    m.slotLabels([...fab].reverse(), [...hw].reverse()).get(clash || 7) === both.get(clash || 7),
+    'R9 slotLabels: still independent of the order within each list',
+  );
+
+  // Synthetic sheet: a button (ring r 10, 2 px) with four hole rings (r 2, 1 px) on 200×200
+  // (1 % of the sheet = 400 px, the disc ≈ 250).
+  const W = 200,
+    H = 200;
+  const ink = new Uint8Array(W * H);
+  const ring = (cx, cy, r0, r1) => {
+    for (let y = 0; y < H; y += 1)
+      for (let x = 0; x < W; x += 1) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d >= r0 && d < r1) ink[y * W + x] = 1;
+      }
+  };
+  ring(50, 50, 9, 11);
+  const holes = [
+    [46, 46],
+    [54, 46],
+    [46, 54],
+    [54, 54],
+  ];
+  for (const [hx, hy] of holes) ring(hx, hy, 1.5, 2.6);
+  const pick = m.hardwareAt(ink, W, H, 50, 50);
+  const inFill = new Set(pick?.idx ?? []);
+  ck(
+    pick && !pick.open && holes.every(([hx, hy]) => inFill.has(hy * W + hx)),
+    'R9 click on a disc with holes: the fill takes the hole pockets',
+    `${pick?.idx?.length ?? 0} px`,
+  );
+  ck(
+    [...inFill].every((i) => !ink[i]) &&
+      [...inFill].every((i) => Math.hypot((i % W) - 50, ((i / W) | 0) - 50) < 9),
+    'R9 the fill is bounded by the ink: nothing of the ring, nothing outside it',
+  );
+  const onRing = m.hardwareAt(ink, W, H, 50, 40);
+  ck(
+    onRing && !onRing.open && onRing.idx.length === pick.idx.length,
+    'R9 a click ON the ring snaps inside (the outside would not close)',
+    `${onRing?.idx?.length ?? 0} px`,
+  );
+  // A solid dot (a rivet): no non-ink within 3 px → the ink blob itself.
+  const DW = 120;
+  const dot = new Uint8Array(DW * DW);
+  for (let y = 0; y < DW; y += 1)
+    for (let x = 0; x < DW; x += 1) if (Math.hypot(x - 20, y - 20) <= 4.5) dot[y * DW + x] = 1;
+  const blob = m.hardwareAt(dot, DW, DW, 20, 20);
+  const dots = dot.reduce((a, v) => a + v, 0);
+  ck(
+    blob && !blob.open && blob.idx.length === dots && [...blob.idx].every((i) => dot[i]),
+    'R9 a click on a solid blob paints the 8-connected ink blob',
+    `${blob?.idx?.length} of ${dots}`,
+  );
+  // An open outline (a C): the fill runs out past 1 % of the sheet → open, nothing painted.
+  const c = new Uint8Array(W * H);
+  for (let y = 0; y < H; y += 1)
+    for (let x = 0; x < W; x += 1) {
+      const d = Math.hypot(x - 50, y - 50);
+      if (d >= 9 && d < 11 && !(x > 55 && Math.abs(y - 50) < 3)) c[y * W + x] = 1;
+    }
+  const open = m.hardwareAt(c, W, H, 50, 50);
+  ck(open && open.open && open.idx === null, 'R9 an open outline guard: open, nothing painted');
+  ck(
+    m.hardwareAt(c, W, H, 50, 50, 0.05)?.open === true,
+    'R9 open at 5 % too (the C leaks to paper)',
+  );
+
+  // The owner's jacket (card 51 front, 770 px): both closure buttons are closed fills (Ф0: 218/217).
+  const jacket = (() => {
+    const p = m.decodePng(
+      readFileSync(resolve(REPO, '../tmp/plans/fabrics-hardware/r9-f0/flats/c51-front.png')),
+    );
+    const px = new Uint8ClampedArray(p.width * p.height * 4);
+    for (let i = 0; i < p.width * p.height; i++) {
+      const g = (k) => p.data[i * p.channels + k];
+      px.set(
+        p.channels >= 3
+          ? [g(0), g(1), g(2), p.channels === 4 ? g(3) : 255]
+          : [g(0), g(0), g(0), 255],
+        i * 4,
+      );
+    }
+    return m.analyseFlat(px, p.width, p.height);
+  })();
+  const b1 = m.hardwareAt(jacket.ink, jacket.w, jacket.h, 387, 358);
+  const b2 = m.hardwareAt(jacket.ink, jacket.w, jacket.h, 387, 469);
+  ck(
+    b1 &&
+      !b1.open &&
+      b1.idx.length > 150 &&
+      b1.idx.length < 400 &&
+      b2 &&
+      !b2.open &&
+      b2.idx.length > 150 &&
+      b2.idx.length < 400,
+    'R9 card 51: a click fills each closure button (not the body)',
+    `${b1?.idx?.length} / ${b2?.idx?.length} px`,
+  );
+
+  // Instances: two buttons (pockets joined to their button), a speck dropped.
+  const HW = m.packHex('#2fa84f');
+  const CL = m.packHex('#3a7bd5');
+  const lab = new Uint32Array(W * H);
+  for (let i = 0; i < W * H; i += 1) if (!ink[i]) lab[i] = CL;
+  for (const i of pick.idx) lab[i] = HW;
+  const one = m.hardwareInstances(lab, HW, W, H);
+  ck(
+    one.length === 1 && one[0].idx.length === pick.idx.length,
+    'R9 instances: a button with its hole pockets is ONE instance',
+    `${one.length} instance(s), ${one[0]?.idx.length} px`,
+  );
+  const speck = lab.slice();
+  speck[5 * W + 5] = HW;
+  speck[5 * W + 6] = HW;
+  ck(
+    m.hardwareInstances(speck, HW, W, H).length === 1,
+    'R9 instances: a component under 12 px is none',
+  );
+  const twin = new Uint32Array(W * H);
+  for (const i of pick.idx) {
+    twin[i] = HW;
+    const x = (i % W) - 25;
+    if (x >= 0) twin[((i / W) | 0) * W + x] = HW;
+  }
+  ck(m.hardwareInstances(twin, HW, W, H).length === 2, 'R9 instances: two buttons count 2');
+
+  // Export: the button's pixels take the cloth around them; the palette names no hardware hex.
+  const isHw = (v) => v === HW;
+  const exp = m.exportLabels(lab, ink, W, H, isHw);
+  ck(
+    [...pick.idx].every((i) => exp[i] === CL) &&
+      exp.every((v, i) => (lab[i] === HW ? v === CL : v === lab[i])),
+    'R9 map export rewrites hardware pixels to the surrounding cloth label',
+  );
+  const { palette: pal } = m.mapPixels(exp, ink, W, H);
+  ck(
+    pal.length === 1 && pal[0].hex === '#3a7bd5',
+    'R9 the exported palette carries the cloth only',
+    JSON.stringify(pal),
+  );
+  const paper = new Uint32Array(W * H);
+  for (const i of pick.idx) paper[i] = HW;
+  ck(
+    m.exportLabels(paper, ink, W, H, isHw).every((v) => v === 0),
+    'R9 a button on unpainted paper exports as paper',
+  );
+  // The saved map keeps a rivet (all ink) over the ink; it reads back.
+  const rivet = new Uint32Array(DW * DW);
+  for (const i of blob.idx) rivet[i] = HW;
+  const saved = m.mapPixels(rivet, dot, DW, DW, isHw);
+  const back = m.labelsFromMap(
+    saved.rgba,
+    DW,
+    DW,
+    DW,
+    DW,
+    saved.palette.map((s) => s.hex),
+  );
+  ck(
+    [...blob.idx].every((i) => back[i] === HW) &&
+      m.mapPixels(rivet, dot, DW, DW).palette.length === 0,
+    'R9 the saved map keeps hardware over ink (a rivet survives the read); the plain map does not',
+  );
+
+  // Mockup: the slot picture fitted into the instance, the ink on top; no picture → mid grey.
+  const flatW = {
+    w: W,
+    h: H,
+    labels: new Int32Array(W * H).fill(1),
+    silhouette: new Uint8Array(W * H).fill(1),
+  };
+  const flatRgba = new Uint8ClampedArray(W * H * 4).fill(255);
+  for (let i = 0; i < W * H; i += 1) if (ink[i]) flatRgba.set([0, 0, 0, 255], i * 4);
+  const red = {
+    rgba: new Uint8ClampedArray(16 * 16 * 4).map((_, k) => (k % 4 === 0 || k % 4 === 3 ? 255 : 0)),
+    w: 16,
+    h: 16,
+  };
+  const inst = m.hardwareInstances(lab, HW, W, H)[0];
+  const skins = new Map([[CL, { kind: 'colour', hex: '#3a7bd5' }]]);
+  const mk = m.mockupPixels(flatW, exp, flatRgba, skins, null, [{ instance: inst, picture: red }]);
+  const at = (x, y) => [...mk.slice((y * W + x) * 4, (y * W + x) * 4 + 3)];
+  ck(
+    JSON.stringify(at(50, 50)) === '[255,0,0]' &&
+      JSON.stringify(at(5, 5)) === '[58,123,213]' &&
+      JSON.stringify(at(50, 40)) === '[0,0,0]',
+    'R9 mockup: the picture in the button, the cloth around, the ink on top',
+    `${at(50, 50)} | ${at(5, 5)} | ${at(50, 40)}`,
+  );
+  const mg = m.mockupPixels(flatW, exp, flatRgba, skins, null, [{ instance: inst, picture: null }]);
+  ck(mg[(50 * W + 50) * 4] === 0x80, 'R9 mockup: no picture → the neutral tint');
+
+  // fitMockups: a view with hardware gives way after every other view.
+  const views4 = ['front', 'back', 'side_l', 'side_r'];
+  const maps4 = views4.map((view, i) => ({ view, mediaId: 300 + i }));
+  const inputs = [100, 101, 102, 103, 200, 201, 202, 400, 401, 401, 0];
+  const keepHw = m.fitMockups(inputs, maps4, 14, 0, new Set(['back']));
+  ck(
+    JSON.stringify(keepHw.dropped) === '["side_r","side_l","front"]' && keepHw.keep.has('back'),
+    'R9 fitMockups keeps the hardware view (trims the others first, in order)',
+    JSON.stringify(keepHw.dropped),
+  );
+  ck(
+    JSON.stringify(m.fitMockups(inputs, maps4, 13, 0, new Set(['back'])).dropped) ===
+      '["side_r","side_l","front","back"]',
+    'R9 …and gives it way last when nothing else fits',
+  );
+
+  // The run: a painted button travels as hardware (no mapHex), the map palette without it.
+  const media = (id) => ({ id, media: { fullSize: { mediaUrl: `m${id}` } } });
+  const asset = (id, kind = 'fabric', note = '') => ({
+    id,
+    kind,
+    name: `a${id}`,
+    mediaId: 500 + id,
+    note,
+  });
+  const band = {
+    assets: [
+      asset(201),
+      asset(202),
+      asset(301, 'hardware', 'horn, black · 20L'),
+      asset(302, 'hardware'),
+      asset(303, 'hardware'),
+    ],
+    assetBindings: [
+      { colorwayId: 11, bomItemId: 1, assetId: 201 },
+      { colorwayId: 11, bomItemId: 2, assetId: 202 },
+      { colorwayId: 11, bomItemId: 31, assetId: 301 },
+      { colorwayId: 11, bomItemId: 32, assetId: 302 },
+      { colorwayId: 11, bomItemId: 33, assetId: 303 },
+    ],
+    bench: [
+      {
+        id: 1,
+        viewKey: 'front',
+        kind: 'flat',
+        pictureId: 1,
+        slotRev: 1,
+        picture: { id: 1, media: media(101) },
+      },
+    ],
+    runs: [],
+  };
+  const slot = (bomItemId, name, section, family = 'fabric') => ({
+    bomItemId,
+    lineKey: `l${bomItemId}`,
+    name,
+    purpose: '',
+    purposeLabel: family === 'hardware' ? 'button' : '',
+    section,
+    detail: family === 'hardware' ? 'horn · 20L' : '',
+    words: name,
+    family,
+    kind: family === 'hardware' ? 'TECH_CARD_BOM_KIND_BUTTON' : '',
+  });
+  const cloth = [
+    slot(1, 'MAIN', 'TECH_CARD_BOM_SECTION_FABRIC'),
+    slot(2, 'LINING', 'TECH_CARD_BOM_SECTION_FABRIC'),
+  ];
+  const hwSlots = [
+    slot(31, 'FRONT BUTTON', 'TECH_CARD_BOM_SECTION_TRIM', 'hardware'),
+    slot(32, 'CUFF BUTTON', 'TECH_CARD_BOM_SECTION_TRIM', 'hardware'),
+    slot(33, 'SNAP', 'TECH_CARD_BOM_SECTION_TRIM', 'hardware'),
+  ];
+  ck(
+    m.isPaintableHardware(hwSlots[0]) &&
+      !m.isPaintableHardware({ family: 'hardware', section: 'TECH_CARD_BOM_SECTION_LABEL' }) &&
+      !m.isPaintableHardware({ family: 'hardware', section: 'TECH_CARD_BOM_SECTION_DECORATION' }) &&
+      !m.isPaintableHardware(cloth[0]),
+    'R9 isPaintableHardware: hardware, not a label, not an artwork',
+  );
+  const L = m.slotLabels([1, 2], [31, 32, 33]);
+  const planOf = (hexes) => ({
+    rev: 1,
+    maps: [
+      {
+        mediaId: 900,
+        view: 'front',
+        baseMediaId: 101,
+        palette: hexes.map((hex) => ({ hex, px: 10 })),
+        url: '',
+        gone: false,
+      },
+    ],
+    cloths: [],
+  });
+  const parts = new Map([[L.get(31), 'left front body · 2 on the front']]);
+  const run = m.paintRun({
+    band,
+    plan: planOf([L.get(1), L.get(31)]),
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: 'ROSSO',
+    hardware: hwSlots,
+    hardwareParts: parts,
+  });
+  const hwUse = run.fabrics?.find((f) => f.kind === 'hardware');
+  ck(
+    run.kind === 'maps' &&
+      hwUse &&
+      hwUse.mapHex === '' &&
+      hwUse.mediaId === 801 &&
+      hwUse.assetId === 301 &&
+      hwUse.name === 'FRONT BUTTON' &&
+      hwUse.words === 'horn, black · 20L' &&
+      hwUse.parts === 'left front body · 2 on the front' &&
+      run.fabrics
+        .filter((f) => f.kind !== 'hardware')
+        .map((f) => `${f.assetId}${f.mapHex ? '@' : ''}`)
+        .join() === '201@,202' &&
+      run.colourMaps[0].palette.map((s) => s.hex).join() === L.get(1) &&
+      run.hardwareViews.join() === 'front' &&
+      run.fabricMediaId === 701,
+    'R9 run: one hardware use (no mapHex, picture, words, parts); the map palette without it; never the REMAINDER',
+    JSON.stringify(run.fabrics?.map((f) => [f.assetId, f.kind, f.mapHex, f.mediaId])),
+  );
+  // One cloth + a button: the maps travel (the mockup carries it); hardware never counts as a cloth.
+  const one1 = m.paintRun({
+    band,
+    plan: planOf([L.get(1), L.get(31)]),
+    slots: [cloth[0]],
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  ck(
+    one1.kind === 'maps' && one1.fabrics.length === 2 && one1.fabrics[0].assetId === 201,
+    'R9 one cloth + painted hardware: maps travel (cloth + hardware)',
+  );
+  ck(
+    m.paintRun({
+      band,
+      plan: planOf([L.get(1)]),
+      slots: [cloth[0]],
+      colorwayId: 11,
+      colorwayLabel: '',
+      hardware: hwSlots,
+    }).kind === 'none',
+    'R9 (control) one cloth alone: no maps, as before',
+  );
+  // Only hardware painted: the cloths travel as the pack (nobody divided them).
+  const onlyHw = m.paintRun({
+    band,
+    plan: planOf([L.get(31)]),
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  ck(
+    onlyHw.kind === 'maps' &&
+      onlyHw.fabrics.filter((f) => f.kind !== 'hardware').every((f) => !f.mapHex) &&
+      onlyHw.fabrics.filter((f) => f.kind !== 'hardware').length === 2,
+    'R9 only buttons painted: the whole pack travels, no remainder made up',
+  );
+  // Three painted hardware slots: the first two send a picture, the third goes in words.
+  const three = m.paintRun({
+    band,
+    plan: planOf([L.get(1), L.get(31), L.get(32), L.get(33)]),
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  ck(
+    m.MAX_RENDER_HARDWARE === 2 &&
+      three.fabrics
+        .filter((f) => f.kind === 'hardware')
+        .map((f) => f.mediaId > 0)
+        .join() === 'true,true,false',
+    'R9 MAX_RENDER_HARDWARE: the first two in pack order send a picture, the rest words',
+  );
+  // An unbound hardware slot is still a use, in words.
+  const bandNo = { ...band, assetBindings: band.assetBindings.filter((b) => b.bomItemId !== 31) };
+  const words = m.paintRun({
+    band: bandNo,
+    plan: planOf([L.get(1), L.get(31)]),
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots,
+  });
+  const wu = words.fabrics?.find((f) => f.kind === 'hardware');
+  ck(
+    wu && wu.mediaId === 0 && wu.assetId === 0 && wu.words === 'button · horn · 20L',
+    'R9 a hardware slot with no picture in this colourway: a words-only use',
+    JSON.stringify(wu),
+  );
+  // A painted hardware label whose slot is gone: the existing refusal.
+  const gone = m.paintRun({
+    band,
+    plan: planOf([L.get(1), L.get(31)]),
+    slots: cloth,
+    colorwayId: 11,
+    colorwayLabel: '',
+    hardware: hwSlots.slice(1),
+  });
+  ck(
+    gone.kind === 'refuse' && /lost its material · repaint it/.test(gone.reason),
+    'R9 a painted hardware label whose slot is gone: «repaint it»',
+  );
+  ck(
+    JSON.stringify(m.hardwareModelLines(run.fabrics)) ===
+      '["front button · left front body · 2 on the front · picture"]' &&
+      m.hardwareModelLines(words.fabrics)[0].endsWith('· words'),
+    'R9 WHAT THE MODEL GETS: one line per hardware use',
+    JSON.stringify(m.hardwareModelLines(run.fabrics)),
+  );
+  ck(
+    m.hardwarePartsText(
+      ['left front body', 'left front body'],
+      [
+        { view: 'front', n: 2 },
+        { view: 'side_l', n: 1 },
+      ],
+    ) === 'left front body · 2 on the front, 1 on the left side',
+    'R9 parts text: places once, counts per view in the prompt’s view words',
+  );
+}
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);

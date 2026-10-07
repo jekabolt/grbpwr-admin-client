@@ -18,7 +18,7 @@
  */
 import type { common_MeasurementName, common_StyleSizeChart } from 'api/proto-http/admin';
 
-import { clothMask, displayLabels, underLines } from './map-model';
+import { clothMask, displayLabels, underLines, type HardwareInstance } from './map-model';
 import type { FlatRegions } from './regions';
 
 /** The garment's width a silhouette stands for when the size chart says nothing, in mm. */
@@ -29,9 +29,12 @@ export const SWATCH_MM = 100;
 
 /**
  * Bumped whenever the mockup's drawing changes: a cached mockup of an older drawing is not reused.
- * v3 · the remainder never fills an opening.
+ * v3 · the remainder never fills an opening. v4 · R9 hardware: the slot's picture in each instance.
  */
-export const MOCKUP_REV = 'mockup.v3';
+export const MOCKUP_REV = 'mockup.v4';
+
+/** R9 · a hardware instance with no picture in this colourway: a neutral mid grey, the ink on top. */
+export const HARDWARE_TINT = '#808080';
 
 /** What the card's size chart says about the garment (0 = not said), in mm. */
 export type Garment = { chestMm: number; lengthMm: number };
@@ -170,10 +173,94 @@ function skinSampler(skin: MockupSkin) {
   };
 }
 
+/** A picture's RGBA. */
+export type Picture = { rgba: Uint8ClampedArray; w: number; h: number };
+
+/** Lighter than this on every channel (or nearly transparent) is the shot's white ground. */
+const GROUND = 235;
+const CONTENT = new WeakMap<
+  Uint8ClampedArray,
+  { x0: number; y0: number; x1: number; y1: number }
+>();
+
+/** The box of a white-ground shot's item: its pixels that are not ground (the whole picture if none). */
+function contentBox(pic: Picture) {
+  const hit = CONTENT.get(pic.rgba);
+  if (hit) return hit;
+  let x0 = pic.w;
+  let y0 = pic.h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < pic.h; y += 1)
+    for (let x = 0; x < pic.w; x += 1) {
+      const q = (y * pic.w + x) * 4;
+      const d = pic.rgba;
+      if (d[q + 3] < 16 || (d[q] >= GROUND && d[q + 1] >= GROUND && d[q + 2] >= GROUND)) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  const box = x1 < 0 ? { x0: 0, y0: 0, x1: pic.w - 1, y1: pic.h - 1 } : { x0, y0, x1, y1 };
+  CONTENT.set(pic.rgba, box);
+  return box;
+}
+
+/**
+ * R9 · a picture fitted into a box (contain, centred): the item of the white shot (its ground
+ * cropped off, as Ф0 composited it) laid into the box, the pixel at (x, y) as the mean of the
+ * picture's pixels under it (a box filter — a 256 px shot into a 20 px disc keeps its holes), over
+ * white where the picture is transparent. False outside the fitted item.
+ */
+export function fitSampler(pic: Picture, box: { x0: number; y0: number; x1: number; y1: number }) {
+  const c = contentBox(pic);
+  const cw = c.x1 - c.x0 + 1;
+  const chh = c.y1 - c.y0 + 1;
+  const bw = box.x1 - box.x0 + 1;
+  const bh = box.y1 - box.y0 + 1;
+  const s = Math.min(bw / cw, bh / chh);
+  const ox = box.x0 + (bw - cw * s) / 2;
+  const oy = box.y0 + (bh - chh * s) / 2;
+  return (x: number, y: number, out: Uint8ClampedArray | number[], p: number): boolean => {
+    const u0 = (x - ox) / s;
+    const v0 = (y - oy) / s;
+    const u1 = (x + 1 - ox) / s;
+    const v1 = (y + 1 - oy) / s;
+    if (u1 <= 0 || v1 <= 0 || u0 >= cw || v0 >= chh) return false;
+    const a0 = c.x0 + Math.max(0, Math.floor(u0));
+    const b0 = c.y0 + Math.max(0, Math.floor(v0));
+    const a1 = Math.min(c.x1 + 1, Math.max(a0 + 1, c.x0 + Math.ceil(u1)));
+    const b1 = Math.min(c.y1 + 1, Math.max(b0 + 1, c.y0 + Math.ceil(v1)));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let k = 0;
+    for (let v = b0; v < b1; v += 1)
+      for (let u = a0; u < a1; u += 1) {
+        const q = (v * pic.w + u) * 4;
+        const a = pic.rgba[q + 3] / 255;
+        r += pic.rgba[q] * a + 255 * (1 - a);
+        g += pic.rgba[q + 1] * a + 255 * (1 - a);
+        b += pic.rgba[q + 2] * a + 255 * (1 - a);
+        k += 1;
+      }
+    out[p] = r / k;
+    out[p + 1] = g / k;
+    out[p + 2] = b / k;
+    return true;
+  };
+}
+
+/** R9 · one hardware instance on a mockup: where it is and the slot's picture (null = the tint). */
+export type MockupHardware = { instance: HardwareInstance; picture: Picture | null };
+
 /**
  * The mockup RGBA of one side: `labels` (packed #rrggbb per pixel, 0 = unpainted) over `flat`,
  * `flatRgba` the flat's own pixels at the same size, `skins` by packed label. `remainder` fills
  * the unpainted inside of the silhouette (QW1); without it, and for a label without a skin, paper.
+ * R9 · `hardware`: per instance the slot's picture fitted to its box over the cloth skin (or the
+ * neutral tint), the flat's ink multiplied on top as for cloth. `labels` then carry the cloth AROUND
+ * each instance (`exportLabels`), so the cloth runs under the button.
  */
 export function mockupPixels(
   flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h' | 'openings'> & { ink?: Uint8Array },
@@ -181,6 +268,7 @@ export function mockupPixels(
   flatRgba: Uint8ClampedArray,
   skins: ReadonlyMap<number, MockupSkin>,
   remainder?: MockupSkin | null,
+  hardware: readonly MockupHardware[] = [],
 ): Uint8ClampedArray {
   const { w } = flat;
   const shown = displayLabels(labels, underLines(flat));
@@ -189,6 +277,13 @@ export function mockupPixels(
   const rest = remainder ? skinSampler(remainder) : null;
   const cloth = rest ? clothMask(flat) : null;
   const px = [255, 255, 255];
+  // R9 · pixel → its hardware instance (-1 = none).
+  const hwAt = hardware.length > 0 ? new Int32Array(shown.length).fill(-1) : null;
+  const hwFit = hardware.map((hw, k) => {
+    for (const i of hw.instance.idx) if (hwAt) hwAt[i] = k;
+    return hw.picture ? fitSampler(hw.picture, hw.instance) : null;
+  });
+  const tint = rgbOf(HARDWARE_TINT);
   for (let i = 0, p = 0; i < shown.length; i += 1, p += 4) {
     // The flat's line over white paper: the multiplier.
     const a = flatRgba[p + 3] / 255;
@@ -203,8 +298,19 @@ export function mockupPixels(
       samplers.set(v, s);
     }
     if (!s && !v && rest && cloth?.[i]) s = rest;
-    if (s) s(i % w, (i / w) | 0, px, 0);
+    const x = i % w;
+    const y = (i / w) | 0;
+    if (s) s(x, y, px, 0);
     else px[0] = px[1] = px[2] = 255;
+    const k = hwAt ? hwAt[i] : -1;
+    if (k >= 0) {
+      const fit = hwFit[k];
+      if (!fit) {
+        px[0] = tint[0];
+        px[1] = tint[1];
+        px[2] = tint[2];
+      } else fit(x, y, px, 0);
+    }
     out[p] = px[0] * lr;
     out[p + 1] = px[1] * lg;
     out[p + 2] = px[2] * lb;

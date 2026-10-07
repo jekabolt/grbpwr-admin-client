@@ -98,7 +98,9 @@ export type MockupFit = {
 
 /**
  * Which maps take a mockup so the call fits `ceiling`. `inputIds` may repeat and hold zeros (a set
- * is taken); `maps` are the outgoing maps (each wants a mockup).
+ * is taken); `maps` are the outgoing maps (each wants a mockup). R9 · a mockup that carries hardware
+ * is where the model reads the button's place and size: the views in `hardwareViews` give way only
+ * after every other view, each group in `MOCKUP_DROP_ORDER`.
  */
 export function fitMockups(
   inputIds: readonly number[],
@@ -107,6 +109,7 @@ export function fitMockups(
   /** Placement guides wanted (artworkGuideCount): room is made for them first, but they are
    *  optional — a run without them is not over the ceiling. */
   guides = 0,
+  hardwareViews: ReadonlySet<string> = new Set(),
 ): MockupFit {
   const inputs = new Set(inputIds.filter((id) => id > 0)).size;
   const sent = maps.filter((m) => (m.mediaId ?? 0) > 0);
@@ -116,7 +119,8 @@ export function fitMockups(
   if (ceiling > 0) {
     const rank = (v: string) => {
       const i = MOCKUP_DROP_ORDER.indexOf(v);
-      return i < 0 ? -1 : i; // an unknown view gives way before side_r
+      // An unknown view gives way before side_r; a view with hardware after every other one.
+      return (i < 0 ? -1 : i) + (hardwareViews.has(v) ? MOCKUP_DROP_ORDER.length + 1 : 0);
     };
     const order = [...keep].sort((a, b) => rank(a) - rank(b));
     for (const v of order) {

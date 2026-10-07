@@ -44,17 +44,30 @@ export const slotHex = (bomItemId: number, step = 0): string =>
     Math.max(0.2, Math.min(0.8, 0.52 + step * 0.07 * (step % 2 ? 1 : -1))),
   );
 
-/** Labels of every slot of the card, collisions stepped apart in id order. */
-export function slotLabels(bomItemIds: readonly number[]): Map<number, string> {
+/**
+ * Labels of every slot of the card, collisions stepped apart in id order. R9 · `after` (the
+ * hardware slots) takes the steps left once every id of `bomItemIds` (the cloths) has its label:
+ * appending hardware never re-steps a cloth label, so no saved map is orphaned by it.
+ */
+export function slotLabels(
+  bomItemIds: readonly number[],
+  after: readonly number[] = [],
+): Map<number, string> {
   const out = new Map<number, string>();
   const taken = new Set<string>();
-  for (const id of [...new Set(bomItemIds)].filter((x) => x > 0).sort((a, b) => a - b)) {
-    let step = 0;
-    let hex = slotHex(id, step);
-    while ((taken.has(hex) || !isMapInk(hex)) && step < 12) hex = slotHex(id, ++step);
-    taken.add(hex);
-    out.set(id, hex);
-  }
+  const sorted = (ids: readonly number[]) =>
+    [...new Set(ids)].filter((x) => x > 0 && !out.has(x)).sort((a, b) => a - b);
+  const place = (ids: readonly number[]) => {
+    for (const id of sorted(ids)) {
+      let step = 0;
+      let hex = slotHex(id, step);
+      while ((taken.has(hex) || !isMapInk(hex)) && step < 12) hex = slotHex(id, ++step);
+      taken.add(hex);
+      out.set(id, hex);
+    }
+  };
+  place(bomItemIds);
+  place(after);
   return out;
 }
 
@@ -230,6 +243,304 @@ export function polygonIndices(
   return Int32Array.from(out);
 }
 
+/* ─────────────────────────── R9 · hardware as parts ─────────────────────────── */
+
+/** A hardware click: the pixels to paint, or `open` (the fill ran past the share — paint nothing). */
+export type HardwarePick = { idx: Int32Array; open: false } | { idx: null; open: true };
+
+/** Past this share of the sheet a hardware fill is an open outline, not a button. */
+export const HARDWARE_OPEN_SHARE = 0.01;
+/** A click on ink looks this far (px) for the button's inside. */
+const HARDWARE_SNAP_PX = 3;
+
+/**
+ * R9 · what a click with a hardware tile armed paints (a NEW gesture: the cutter folds a button's
+ * disc into the body region, so regions cannot say where it is). The non-ink pixels flooded from
+ * the click (4-connected, bounded by the ink as drawn — no closing), plus every non-ink island whose
+ * box lies inside the fill's box: the pockets enclosed between a button's holes. A click on ink
+ * takes the nearest non-ink pixel within `HARDWARE_SNAP_PX`; with none (a solid snap or rivet drawn
+ * as one dot) the 8-connected ink blob under the pointer is painted instead. A fill or a blob past
+ * `HARDWARE_OPEN_SHARE` of the sheet is an open outline: `open`, nothing painted.
+ */
+export function hardwareAt(
+  ink: Uint8Array,
+  w: number,
+  h: number,
+  x: number,
+  y: number,
+  share = HARDWARE_OPEN_SHARE,
+): HardwarePick | null {
+  if (x < 0 || y < 0 || x >= w || y >= h) return null;
+  const max = Math.max(1, Math.floor(w * h * share));
+  const at = y * w + x;
+  if (!ink[at]) return floodButton(ink, w, h, at, max);
+  // On ink: the nearest non-ink pixels first; a ring is clicked from inside or out, so the first
+  // seed whose fill closes wins (the outside of a button is the body: open).
+  const seeds: { i: number; d: number }[] = [];
+  const r = HARDWARE_SNAP_PX;
+  for (let dy = -r; dy <= r; dy += 1)
+    for (let dx = -r; dx <= r; dx += 1) {
+      const xx = x + dx;
+      const yy = y + dy;
+      const d = dx * dx + dy * dy;
+      if (xx < 0 || yy < 0 || xx >= w || yy >= h || d > r * r) continue;
+      if (!ink[yy * w + xx]) seeds.push({ i: yy * w + xx, d });
+    }
+  if (seeds.length === 0) return inkBlobAt(ink, w, h, at, max);
+  seeds.sort((a, b) => a.d - b.d);
+  const tried = new Set<number>();
+  for (const { i } of seeds) {
+    if (tried.has(i)) continue;
+    const pick = floodButton(ink, w, h, i, max, tried);
+    if (!pick.open) return pick;
+  }
+  return { idx: null, open: true };
+}
+
+/** One hardware fill from a non-ink seed (`hardwareAt`); every pixel it reached goes in `tried`. */
+function floodButton(
+  ink: Uint8Array,
+  w: number,
+  h: number,
+  seed: number,
+  max: number,
+  tried?: Set<number>,
+): HardwarePick {
+  const n = w * h;
+  const mark = new Uint8Array(n);
+  const fill: number[] = [];
+  const stack: number[] = [seed];
+  mark[seed] = 1;
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  while (stack.length > 0) {
+    const i = stack.pop() as number;
+    fill.push(i);
+    tried?.add(i);
+    if (fill.length > max) return { idx: null, open: true };
+    const cx = i % w;
+    const cy = (i / w) | 0;
+    if (cx < x0) x0 = cx;
+    if (cx > x1) x1 = cx;
+    if (cy < y0) y0 = cy;
+    if (cy > y1) y1 = cy;
+    const visit = (j: number) => {
+      if (!mark[j] && !ink[j]) {
+        mark[j] = 1;
+        stack.push(j);
+      }
+    };
+    if (cx > 0) visit(i - 1);
+    if (cx < w - 1) visit(i + 1);
+    if (i >= w) visit(i - w);
+    if (i + w < n) visit(i + w);
+  }
+  // The pockets: non-ink islands met inside the fill's box that never leave it (a flood that
+  // steps out of the box stops there — it is the cloth around the button).
+  const inBox = (i: number) => {
+    const cx = i % w;
+    const cy = (i / w) | 0;
+    return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
+  };
+  for (let cy = y0; cy <= y1; cy += 1)
+    for (let cx = x0; cx <= x1; cx += 1) {
+      const s = cy * w + cx;
+      if (mark[s] || ink[s]) continue;
+      const island: number[] = [];
+      let inside = true;
+      const st: number[] = [s];
+      mark[s] = 2;
+      while (st.length > 0) {
+        const i = st.pop() as number;
+        if (!inBox(i)) {
+          inside = false;
+          continue;
+        }
+        island.push(i);
+        const ix = i % w;
+        const visit = (j: number) => {
+          if (!mark[j] && !ink[j]) {
+            mark[j] = 2;
+            st.push(j);
+          }
+        };
+        if (ix > 0) visit(i - 1);
+        if (ix < w - 1) visit(i + 1);
+        if (i >= w) visit(i - w);
+        if (i + w < n) visit(i + w);
+      }
+      if (inside) for (const i of island) fill.push(i);
+    }
+  if (fill.length > max) return { idx: null, open: true };
+  return { idx: Int32Array.from(fill), open: false };
+}
+
+/** The 8-connected ink blob at `seed`, or `open` past `max` (a line of the drawing, not a dot). */
+function inkBlobAt(ink: Uint8Array, w: number, h: number, seed: number, max: number): HardwarePick {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  const out: number[] = [];
+  const stack = [seed];
+  seen[seed] = 1;
+  while (stack.length > 0) {
+    const i = stack.pop() as number;
+    out.push(i);
+    if (out.length > max) return { idx: null, open: true };
+    const cx = i % w;
+    for (let dy = -1; dy <= 1; dy += 1)
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (!dx && !dy) continue;
+        const xx = cx + dx;
+        const j = i + dy * w + dx;
+        if (xx < 0 || xx >= w || j < 0 || j >= n || seen[j] || !ink[j]) continue;
+        seen[j] = 1;
+        stack.push(j);
+      }
+  }
+  return { idx: Int32Array.from(out), open: false };
+}
+
+/** One hardware instance: its pixels and box (inclusive). */
+export type HardwareInstance = {
+  idx: Int32Array;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+};
+
+/** A component under this many px (at the working resolution) is not an instance. */
+export const HARDWARE_MIN_PX = 12;
+
+/**
+ * R9 · the instances of one hardware label on a side: its 8-connected components, a component whose
+ * box lies inside another's joined to it (a button's hole pockets are the button), then the ones
+ * under `HARDWARE_MIN_PX` dropped. Derived at use time, never stored.
+ */
+export function hardwareInstances(
+  labels: Uint32Array,
+  value: number,
+  w: number,
+  h: number,
+  minPx = HARDWARE_MIN_PX,
+): HardwareInstance[] {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  const comps: { idx: number[]; x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (let s = 0; s < n; s += 1) {
+    if (seen[s] || labels[s] !== value) continue;
+    const c = { idx: [] as number[], x0: w, y0: h, x1: -1, y1: -1 };
+    const stack = [s];
+    seen[s] = 1;
+    while (stack.length > 0) {
+      const i = stack.pop() as number;
+      c.idx.push(i);
+      const cx = i % w;
+      const cy = (i / w) | 0;
+      if (cx < c.x0) c.x0 = cx;
+      if (cx > c.x1) c.x1 = cx;
+      if (cy < c.y0) c.y0 = cy;
+      if (cy > c.y1) c.y1 = cy;
+      for (let dy = -1; dy <= 1; dy += 1)
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (!dx && !dy) continue;
+          const xx = cx + dx;
+          const j = i + dy * w + dx;
+          if (xx < 0 || xx >= w || j < 0 || j >= n || seen[j] || labels[j] !== value) continue;
+          seen[j] = 1;
+          stack.push(j);
+        }
+    }
+    comps.push(c);
+  }
+  // Biggest first: a pocket finds the button it sits in.
+  comps.sort((a, b) => b.idx.length - a.idx.length);
+  const kept: typeof comps = [];
+  for (const c of comps) {
+    const host = kept.find((k) => c.x0 >= k.x0 && c.x1 <= k.x1 && c.y0 >= k.y0 && c.y1 <= k.y1);
+    if (host) for (const i of c.idx) host.idx.push(i);
+    else kept.push(c);
+  }
+  return kept
+    .filter((c) => c.idx.length >= minPx)
+    .map((c) => ({ idx: Int32Array.from(c.idx), x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }));
+}
+
+/** How far (px) the export looks past a component's own ink for the cloth around it. */
+const AROUND_PX = 8;
+
+/**
+ * R9 · the labels as the outgoing colour map carries them: every pixel of a hardware label takes
+ * the label of the cloth around its component — the majority of the first ring of pixels outside
+ * it that are neither ink nor hardware (paper counts: 0). A hardware hex never reaches the model's
+ * map (a flooded hex leaked its colour into the button, Ф0 run 197); the saved plan keeps it.
+ */
+export function exportLabels(
+  labels: Uint32Array,
+  ink: Uint8Array,
+  w: number,
+  h: number,
+  isHardware: (v: number) => boolean,
+): Uint32Array {
+  const out = labels.slice();
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  for (let s = 0; s < n; s += 1) {
+    const value = labels[s];
+    if (seen[s] || !value || !isHardware(value)) continue;
+    // The component (8-connected, one label).
+    const comp: number[] = [];
+    const stack = [s];
+    seen[s] = 1;
+    while (stack.length > 0) {
+      const i = stack.pop() as number;
+      comp.push(i);
+      const cx = i % w;
+      for (let dy = -1; dy <= 1; dy += 1)
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (!dx && !dy) continue;
+          const xx = cx + dx;
+          const j = i + dy * w + dx;
+          if (xx < 0 || xx >= w || j < 0 || j >= n || seen[j] || labels[j] !== value) continue;
+          seen[j] = 1;
+          stack.push(j);
+        }
+    }
+    // Rings outward through ink and hardware until a ring meets cloth or paper.
+    const reached = new Set<number>(comp);
+    let front = comp;
+    const votes = new Map<number, number>();
+    for (let step = 0; step < AROUND_PX && votes.size === 0 && front.length > 0; step += 1) {
+      const next: number[] = [];
+      for (const i of front) {
+        const cx = i % w;
+        const nb = [cx > 0 ? i - 1 : -1, cx < w - 1 ? i + 1 : -1, i - w, i + w];
+        for (const j of nb) {
+          if (j < 0 || j >= n || reached.has(j)) continue;
+          reached.add(j);
+          const v = labels[j];
+          if (ink[j] || (v && isHardware(v))) next.push(j);
+          else votes.set(v, (votes.get(v) ?? 0) + 1);
+        }
+      }
+      front = next;
+    }
+    let to = 0;
+    let most = -1;
+    for (const [v, c] of votes) {
+      // A tie goes to a cloth over paper.
+      if (c > most || (c === most && v !== 0 && to === 0)) {
+        to = v;
+        most = c;
+      }
+    }
+    for (const i of comp) out[i] = to;
+  }
+  return out;
+}
+
 export const undoDiff = (labels: Uint32Array, d: PaintDiff): void => {
   for (let k = 0; k < d.idx.length; k += 1) labels[d.idx[k]] = d.before[k];
 };
@@ -242,19 +553,22 @@ export const redoDiff = (labels: Uint32Array, d: PaintDiff): void => {
 /**
  * The colour map as pixels: white paper, labels, the flat's ink black on top. The palette is the
  * exact count of label pixels that survive the ink — the closed set the prompt may name.
+ * R9 · `onInk`: labels kept OVER the ink (the saved plan's hardware: a rivet drawn as a solid dot
+ * is all ink, and black there would lose it on the next read).
  */
 export function mapPixels(
   labels: Uint32Array,
   ink: Uint8Array,
   w: number,
   h: number,
+  onInk?: (v: number) => boolean,
 ): { rgba: Uint8ClampedArray; palette: PlanSwatch[] } {
   const rgba = new Uint8ClampedArray(w * h * 4);
   const counts = new Map<number, number>();
   for (let i = 0, p = 0; i < w * h; i += 1, p += 4) {
     rgba[p + 3] = 255;
-    if (ink[i]) continue; // black
     const v = labels[i];
+    if (ink[i] && !(v && onInk?.(v))) continue; // black
     if (!v) {
       rgba[p] = 255;
       rgba[p + 1] = 255;
