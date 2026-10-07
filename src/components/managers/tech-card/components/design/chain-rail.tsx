@@ -3,6 +3,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -306,11 +307,17 @@ export function useMoodMinimumGate(): MoodMinimum {
 export function ChainRail({
   ctx,
   onStepChange,
+  onExitGuide,
 }: {
   /** What the chain reads, `now` filled in — see `useChainCtx`. */
   ctx: ChainCtx;
   /** A cell was pressed. The composer holds the step (`S.step` of the prototype) and switches. */
   onStepChange: (id: StepId) => void;
+  /**
+   * The way out of the guide (onboarding S4, owner Q4): `show all blocks ›`, an underlined word beside
+   * the counter — the one extra organ of this header, drawn only while the card walks the guide.
+   */
+  onExitGuide?: () => void;
 }): JSX.Element {
   // Every cell opens its step; the one on display is drawn as a place, not a control (`StepCell`).
   function open(step: Step): () => void {
@@ -343,7 +350,24 @@ export function ChainRail({
     <Section
       title='the chain'
       question='· where this card stands'
-      action={<StepsCounter n={doneCount(ctx)} total={steps.length} />}
+      action={
+        ctx.guided && onExitGuide ? (
+          <span className='flex items-center gap-3'>
+            <StepsCounter n={doneCount(ctx)} total={steps.length} />
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={onExitGuide}
+              data-exit-guide=''
+            >
+              show all blocks ›
+            </Button>
+          </span>
+        ) : (
+          <StepsCounter n={doneCount(ctx)} total={steps.length} />
+        )
+      }
     >
       <TooltipProvider>
         {/* THE LINKS IN ONE OUTLINED ROW, RULED BY HAIRLINES. The cells share the width (`flex-1` —

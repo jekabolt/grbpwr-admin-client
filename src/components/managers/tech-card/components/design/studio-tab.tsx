@@ -116,6 +116,7 @@ export function StudioTab({
   labelMedia,
   guided = false,
   onCreate,
+  onExitGuide,
 }: {
   techCardId?: number;
   /**
@@ -131,6 +132,12 @@ export function StudioTab({
    * unsaved card stays dead with its reason — nothing here creates a card on its own.
    */
   onCreate?: () => Promise<number | undefined>;
+  /**
+   * Leaves the guide (`ExitTechCardGuide`): the rail's `show all blocks ›`, drawn only while the
+   * card is guided. After it the card reads `guided: false` and is an ordinary card — every cell a
+   * door, every block of the moodboard on screen.
+   */
+  onExitGuide?: () => void;
   disabled?: boolean;
   /** The card's resolved label media (`resolvedLabelMedia`): the composition label's logo. */
   labelMedia?: common_TechCard['resolvedLabelMedia'];
@@ -314,10 +321,14 @@ export function StudioTab({
      click away at any moment (and that click writes the address, which then wins). */
   /* `params` / `setParams` взяты выше — у чтения `?colorway=`: адрес один, и читатель его один. */
   const urlStep = params.get('step');
+  /* WHO WALKS THE GUIDE: a guided card in the hands of someone who can write it. A viewer or a frozen
+     card gets the ordinary studio — every cell a door, every block on screen (S6). */
+  const walking = guided && canWriteCard && !readOnly;
   const chain = useChainCtx({
     band,
     bandless,
     colorway: { id: colorway.colorwayId, label: colorway.label, archived: colorway.archived },
+    guided: walking,
   });
   const opened = useRef<{ id: number | undefined; step: StepId | null }>({
     id: techCardId,
@@ -390,7 +401,7 @@ export function StudioTab({
   /* THE GUIDED FACE OF STEP 1 (onboarding S5): one reading for the whole step — the board, its quiz
      and DESCRIPTION get it as a prop, the lower blocks and the footer are hidden by it here. A viewer
      or a frozen card cannot walk the guide, so it gets the whole step, as a legacy card does. */
-  const guide = useGuideFace(techCardId, guided && canWriteCard && !readOnly);
+  const guide = useGuideFace(techCardId, walking);
   const flatsMissing = bandless
     ? [...RENDER_MIN_VIEWS]
     : benchSides(band)
@@ -434,10 +445,9 @@ export function StudioTab({
                 ? { ok: true }
                 : { ok: false, reason: 'add the card first' }
           }
-          onGo={async () => {
-            const id = await onCreate?.();
-            if (id) goStep('mood');
-          }}
+          /* The create lands on MOODBOARD by itself (`onCreate` navigates to the new card's
+             address with `step=mood`): a `goStep` from here would carry the OLD address (C-note). */
+          onGo={() => onCreate?.()}
         />
       );
       break;
@@ -590,7 +600,9 @@ export function StudioTab({
      ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Ось показывают общие плиточные полосы MATERIALS
      и FABRIC RENDER, селект в ряду GENERATE у 3D и чипы PAINT on-model. Состояние по-прежнему
      ОДНО (`useColorwayChoice` выше) и раздаётся вниз пропами. */
-  const rail = <ChainRail ctx={ctx} onStepChange={goStep} />;
+  const rail = (
+    <ChainRail ctx={ctx} onStepChange={goStep} onExitGuide={walking ? onExitGuide : undefined} />
+  );
 
   /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
      The header used to be drawn inside each of three returns — same element, different parents —

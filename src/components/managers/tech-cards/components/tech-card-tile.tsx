@@ -168,11 +168,17 @@ export function TechCardTile({
         onClick={() => navigate(`/tech-cards/${id}`)}
         className='h-full w-full'
       >
+        {/* `setup` (onboarding Q2): a CREATE NEW card nobody has taken past its first fields — no
+            board picture, no description. Leads the row; removed by hand like any other card. */}
         {compact ? (
-          <AuxBadge purpose={card.purpose} className='mt-1' />
+          <div className='mt-1 flex flex-wrap items-center gap-1'>
+            {card.setup && <Pill tone='mut'>setup</Pill>}
+            <AuxBadge purpose={card.purpose} />
+          </div>
         ) : (
           <>
             <div className='mt-1 flex flex-wrap items-center gap-1'>
+              {card.setup && <Pill tone='mut'>setup</Pill>}
               <Pill tone='mut'>{stageLabel(card.stage)}</Pill>
               {tone && <Pill tone={tone}>{approvalStateLabel(card.approvalState)}</Pill>}
               <AuxBadge purpose={card.purpose} />

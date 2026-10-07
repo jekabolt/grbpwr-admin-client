@@ -120,7 +120,9 @@ function RoleRow({
               key={a.id}
               title={a.assignedBy ? `assigned by ${a.assignedBy}` : undefined}
               onRemove={canEdit && techCardId ? () => drop(a.id) : undefined}
-              aria-label={canEdit ? `remove ${a.adminUsername || `#${a.adminId}`} from ${label}` : undefined}
+              aria-label={
+                canEdit ? `remove ${a.adminUsername || `#${a.adminId}`} from ${label}` : undefined
+              }
             >
               {a.adminUsername || `#${a.adminId}`}
             </Chip>
@@ -234,8 +236,7 @@ export function RolesField({
       ))}
       {!techCardId && (
         <Text size='micro' variant='label'>
-          save this tech card first — people are assigned to a saved card, and the assignment
-          is written the moment it is made.
+          people are assigned once the card exists — name, category, season and style number first
         </Text>
       )}
     </div>

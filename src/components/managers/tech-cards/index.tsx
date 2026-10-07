@@ -85,7 +85,8 @@ export function TechCards() {
               <Link to={ROUTES.techCardImport}>import</Link>
             </Button>
             <Button size='sm' variant='main' asChild>
-              <Link to={ROUTES.addTechCard}>create new</Link>
+              {/* The guided create (onboarding S4): created by its four fields, then the studio's guide. */}
+              <Link to={`${ROUTES.addTechCard}?guided=1`}>create new</Link>
             </Button>
           </>
         )}

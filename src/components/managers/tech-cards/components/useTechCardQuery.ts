@@ -317,23 +317,11 @@ export type CreateTechCardArgs = {
   guided?: boolean;
 };
 
-// A bare insert is the pre-0407 call shape (plain create: no key, not guided), kept while the
-// existing caller moves to CreateTechCardArgs.
-function isCreateTechCardArgs(
-  v: CreateTechCardArgs | common_TechCardInsert,
-): v is CreateTechCardArgs {
-  return 'techCard' in v && v.techCard !== undefined;
-}
-
 export function useCreateTechCard() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (args: CreateTechCardArgs | common_TechCardInsert) => {
-      const { techCard, clientRequestId, guided } = isCreateTechCardArgs(args)
-        ? args
-        : { techCard: args, clientRequestId: undefined, guided: undefined };
-      return adminService.CreateTechCard({ techCard, clientRequestId, guided });
-    },
+    mutationFn: ({ techCard, clientRequestId, guided }: CreateTechCardArgs) =>
+      adminService.CreateTechCard({ techCard, clientRequestId, guided }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       // The pipeline board is a separate key — a create/stage-change/delete must move the
