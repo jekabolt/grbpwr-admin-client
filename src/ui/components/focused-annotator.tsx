@@ -22,6 +22,7 @@ import { AnnotationToolbar } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
+import { PictureBusy, type PictureBusyKind } from './picture-busy';
 import { Pill } from './pill';
 import { PLACEHOLDER_SURFACE } from './placeholder';
 import { SpotRings, type SpotRing } from './spot-rings';
@@ -261,6 +262,12 @@ export type FocusedAnnotatorProps = {
     positionInViews: number,
   ) => { left?: ReactNode; right?: ReactNode } | null | undefined;
   removeLabel?: (view: FocusedView, positionInViews: number) => string;
+  /**
+   * The picture is being worked on (owner, 07.10): `read` — its label is being read, `cut` — its
+   * background is being removed. Drawn ON the picture (`PictureBusy`), under the action veil, the
+   * number and the corners. Only `layout='grid'`.
+   */
+  tileBusy?: (view: FocusedView, positionInViews: number) => PictureBusyKind | null | undefined;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
   /**
@@ -521,6 +528,7 @@ export function FocusedAnnotator({
   onHotSpot,
   tileCorners,
   removeLabel,
+  tileBusy,
   carouselLabel,
   gridRowHeight,
   calloutKinds,
@@ -968,6 +976,8 @@ export function FocusedAnnotator({
               const badgeNote = badge?.word ?? '';
               const action = isGrid ? tileAction?.(v, i) : null;
               const corners = tileCorners?.(v, i);
+              const busy = isGrid ? tileBusy?.(v, i) : null;
+              const busyEl = busy ? <PictureBusy kind={busy} /> : null;
               /* M15 · ГЛАГОЛ НА ВЕСЬ КАДР (`tileAction`) — слоем ВНУТРИ кадра (`overlay` поверхности),
                  ровно по снимку; ярлык плитки (z-20) — номер и плашка — остаётся над затемнением. */
               const actionEl =
@@ -1061,6 +1071,7 @@ export function FocusedAnnotator({
                       anchoredSpots?.length && v.mediaId === anchoredMediaId
                         ? (size) => (
                             <>
+                              {busyEl}
                               <SpotRings
                                 spots={anchoredSpots}
                                 size={size}
@@ -1070,8 +1081,13 @@ export function FocusedAnnotator({
                               {actionEl}
                             </>
                           )
-                        : actionEl
-                          ? () => actionEl
+                        : actionEl || busyEl
+                          ? () => (
+                              <>
+                                {busyEl}
+                                {actionEl}
+                              </>
+                            )
                           : undefined
                     }
                     callouts={calloutsFor(v.mediaId)}

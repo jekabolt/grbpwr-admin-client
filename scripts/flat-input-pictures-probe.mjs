@@ -33,6 +33,7 @@
 //   node scripts/flat-input-pictures-probe.mjs --mutate=notone     → догадка модели чернилами: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noarm      → касание снимает сразу: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nowait     → GENERATE не ждёт чтения: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=noreadword → «no purpose» посреди чтения: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
 //   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
@@ -78,6 +79,14 @@ const MUTATIONS = {
       file: RUNROW,
       from: '  const ids = readFlatReading(card);\n',
       to: '  const ids: number[] = [];\n',
+    },
+  ],
+  // 07.10: a lagging preview's `unmarked` is said as «no purpose» mid-reading.
+  noreadword: [
+    {
+      file: PICTURES,
+      from: 'if (!reason || TRAY_READING_REASONS.has(reason)) return',
+      to: 'if (!reason) return',
     },
   ],
   // M15: the tray keeps a picture a press already sends.
@@ -659,9 +668,13 @@ try {
       const box = document.querySelector('[data-flat-pictures-tray]');
       return {
         ids: box?.getAttribute('data-flat-pictures-tray') ?? '',
-        badges: [...(box?.querySelectorAll('[data-tile-badge]') ?? [])].map((b) =>
-          (b.textContent ?? '').trim().toLowerCase(),
-        ),
+        // 07.10: a picture being read carries no word — the reading is drawn on it
+        // (`[data-picture-busy="read"]`); the probe reads that as «…», and a word beside it as a defect.
+        badges: [...(box?.querySelectorAll('[data-rail-view]') ?? [])].map((t) => {
+          const word = (t.querySelector('[data-tile-badge]')?.textContent ?? '').trim().toLowerCase();
+          const busy = !!t.querySelector('[data-picture-busy="read"]');
+          return busy ? (word ? `… + ${word}` : '…') : word;
+        }),
         opacity: box ? Number(getComputedStyle(box.firstElementChild ?? box).opacity) : 1,
       };
     });
@@ -1045,6 +1058,49 @@ try {
     'never answered: after ≤15 s the press goes, and says what was left out',
     `${left} | starts ${before2}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-generate] button')?.textContent ?? '')} | tray ${(await tray()).ids}`,
   );
+
+  console.log('\n07.10 · reading is drawn on the picture, never said as «no purpose»');
+  await addOne([809]);
+  // The label lands on the client while the server's preview still holds it as `unmarked`.
+  await page.evaluate(async () => {
+    window.__added.held[809] = 'unmarked';
+    await window.__label(809, {
+      role: 'front',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(600);
+  const at809 = async () => {
+    const t = await tray();
+    return t.badges[t.ids.split(' ').indexOf('809')];
+  };
+  const reading = await page.evaluate(() => {
+    const t = document.querySelector('[data-flat-pictures-tray] [data-rail-view="809"]');
+    const busy = t?.querySelector('[data-picture-busy="read"]');
+    return {
+      busy: !!busy,
+      anim: busy ? getComputedStyle(busy.firstElementChild).animationName : '',
+      text: (t?.textContent ?? '').toLowerCase(),
+    };
+  });
+  ck(
+    (await at809()) === '…' && reading.busy && !/no purpose/.test(reading.text),
+    'a lagging «unmarked» while the label lands: the tile sweeps, no «no purpose»',
+    JSON.stringify({ word: await at809(), ...reading }),
+  );
+  ck(reading.anim === 'pictureBusyScan', 'the sweep is the scan animation', reading.anim);
+  await page.evaluate(async () => {
+    window.__added.held[809] = 'older';
+    await window.__qc.invalidateQueries();
+  });
+  await page.waitForTimeout(600);
+  ck((await at809()) === 'older', 'a final held reason is still a word, no sweep', await at809());
+  await page.evaluate(async () => {
+    delete window.__added.held[809];
+    await window.__qc.invalidateQueries();
+  });
 
   console.log('\nM15 · recall puts a flat run’s words back into WORDS');
   const recall = await page.evaluate(() =>

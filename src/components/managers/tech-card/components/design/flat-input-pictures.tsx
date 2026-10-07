@@ -18,6 +18,7 @@ import {
   type FocusedTileBadge,
   type FocusedView,
 } from 'ui/components/focused-annotator';
+import type { PictureBusyKind } from 'ui/components/picture-busy';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
@@ -301,6 +302,15 @@ function useInputHold(techCardId: number) {
 /** A picture added in this input, this session — in the tray until a press sends it. */
 type Added = { mediaId: number; full: common_MediaFull };
 
+/**
+ * STILL READING, NOT AN ANSWER (owner, 07.10: «no purpose» flashed on a picture mid-reading). The
+ * server's preview is asked by a stamp and lags the board by a beat: a picture whose label or
+ * purpose just landed on the client is still held there as `unmarked` (no purpose yet) or `pending`
+ * (label being read). Neither is a final word — the next preview drops them — so the tray reads them
+ * as `…`: the tile shows the reading sweep, and GENERATE keeps waiting for it (`setFlatReading`).
+ */
+const TRAY_READING_REASONS = new Set(['unmarked', 'pending']);
+
 /** Words that already say why the tray picture waits; a settled label word asks the server why. */
 const TRAY_OWN_WORDS = new Set([
   '…',
@@ -470,7 +480,8 @@ export function FlatInputPictures({
       if (w === null) return '…';
       if (TRAY_OWN_WORDS.has(w)) return w;
       const reason = viewsHeld.get(id);
-      return reason ? HELD_WORD[reason] ?? reason.replace(/_/g, ' ') : '…';
+      if (!reason || TRAY_READING_REASONS.has(reason)) return '…';
+      return HELD_WORD[reason] ?? reason.replace(/_/g, ' ');
     },
     [outputs, purposeOf, labels, detailSlots, viewsHeld],
   );
@@ -580,7 +591,12 @@ export function FlatInputPictures({
                   numberFrom={1}
                   numbered={false}
                   pale
-                  badge={(v) => trayWord(v.mediaId)}
+                  // Reading is drawn on the picture (`PictureBusy`), not said with `…`.
+                  badge={(v) => {
+                    const w = trayWord(v.mediaId);
+                    return w === '…' ? '' : w;
+                  }}
+                  busy={(v) => (trayWord(v.mediaId) === '…' ? 'read' : null)}
                   label='input · not sent yet'
                   corners={
                     canWrite
@@ -1001,6 +1017,7 @@ function Strip({
   numbered = true,
   pale = false,
   badge,
+  busy,
   action,
   corners,
   label,
@@ -1013,13 +1030,15 @@ function Strip({
   /** The tray: pale until hovered or focused (its corner ▾ is a real control). */
   pale?: boolean;
   badge: (v: FocusedView) => string | FocusedTileBadge;
+  /** The picture is being worked on — drawn on it; its accessible word is `reading`. */
+  busy?: (v: FocusedView) => PictureBusyKind | null;
   action?: (v: FocusedView) => FocusedTileAction;
   corners?: (v: FocusedView, i: number) => { left?: ReactNode; right?: ReactNode } | null;
   label: string;
 }) {
   const wordOf = (v: FocusedView) => {
     const b = badge(v);
-    return typeof b === 'string' ? b : b.word;
+    return (typeof b === 'string' ? b : b.word) || (busy?.(v) ? 'reading' : '');
   };
   return (
     <div
@@ -1054,6 +1073,7 @@ function Strip({
           numbered ? `${label} · ${numberFrom + i} · ${wordOf(v)}` : `${label} · ${wordOf(v)}`
         }
         tileBadge={(v) => badge(v)}
+        tileBusy={busy}
         tileAction={action}
         tileCorners={corners}
       />
