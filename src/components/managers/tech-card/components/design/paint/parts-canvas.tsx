@@ -59,6 +59,7 @@ import {
   partIndices,
   unassignedRegion,
 } from './parts-model';
+import { PiecesRow } from './pieces-row';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -1156,6 +1157,14 @@ export function PartsCanvas({
   const disabled = disabledProp || session.frozen;
   const views = [...session.views.values()];
 
+  /* M6 · the card's pieces list (the closed names of PARTS): opened by `rename parts`; a read of
+     changed flats waiting on the designer keeps it open until it is taken or kept. */
+  const pieces = session.pieces();
+  const pieceCount = pieces?.pieces?.length ?? 0;
+  const proposal = !!pieces?.proposal;
+  const [piecesOpen, setPiecesOpen] = useState(false);
+  const showPieces = pieceCount > 0 && (piecesOpen || proposal);
+
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
   const writes = useAssetWrites(session.techCardId);
   const { showMessage } = useSnackBarStore();
@@ -1416,7 +1425,9 @@ export function PartsCanvas({
         </button>
       ) : null}
       {/* ONE place for the model's naming: `naming…` while asked (QW5), `parts · retry` when
-          refused, `rename parts` once answered (QW7 — asks every side again, past the cache). */}
+          refused, `rename parts` once the card has its pieces list (M6 — opens the list the parts
+          are named from; `name again` inside it asks every side again, past the cache). A read of
+          changed flats waiting on the designer turns it blue: `rename parts · new read`. */}
       {session.naming ? (
         <span data-paint-naming=''>
           <Pill tone='mut'>naming…</Pill>
@@ -1430,15 +1441,18 @@ export function PartsCanvas({
         >
           <Pill tone='warn'>parts · retry</Pill>
         </button>
-      ) : session.canRename() ? (
+      ) : pieceCount > 0 ? (
         <button
           type='button'
-          onClick={() => session.renameParts()}
+          onClick={() => setPiecesOpen((o) => !o)}
           disabled={disabled}
-          title='ask the model to name the parts of every side again'
-          data-paint-parts-rename=''
+          aria-expanded={showPieces}
+          title='the pieces the parts are named from'
+          data-paint-pieces-toggle=''
         >
-          <Pill tone='mut'>rename parts</Pill>
+          <Pill tone={proposal ? 'attention' : showPieces ? 'ink' : 'mut'}>
+            {proposal ? 'rename parts · new read' : 'rename parts'}
+          </Pill>
         </button>
       ) : null}
       {TOOLS.map((t) => (
@@ -1503,6 +1517,16 @@ export function PartsCanvas({
       <GroupLabel flush className={GROUP_GAP} action={tools}>
         parts
       </GroupLabel>
+      {showPieces && pieces && (
+        <PiecesRow
+          pieces={pieces}
+          disabled={disabled}
+          naming={session.naming}
+          onSave={(names, settle) => session.savePieces(names, settle)}
+          onNameAgain={() => session.nameAgain()}
+          canNameAgain={session.canNameAgain()}
+        />
+      )}
       <div
         ref={row}
         aria-label='sides'

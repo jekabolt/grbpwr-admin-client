@@ -111,7 +111,28 @@ const stubNetwork = {
               ...(window.__band.partsSuggestions || []).filter((x) => !asked.has(x.view)),
               ...out,
             ];
-            return { suggestions: clone(out), cached: false };
+            // M6 · the server reads the card's pieces list from the FRONT/BACK flats on the first
+            // naming (here: the fake card's own labels) and answers the list it named under.
+            if (!window.__band.partsPieces) {
+              const names = [...new Set(out.flatMap((x) => x.parts.map((g) => g.label)))]
+                .filter((n) => n !== 'opening' && n !== 'unnamed');
+              window.__band.partsPieces = { rev: 1, pieces: names.map((name) => ({ name, views: [] })), openings: [], edited: false };
+            }
+            return { suggestions: clone(out), cached: false, pieces: clone(window.__band.partsPieces) };
+          }
+          if (name === 'SetDesignPartsPieces') {
+            const was = window.__band.partsPieces;
+            if ((was?.rev ?? 0) !== body.expectedRev) {
+              const e = new Error('design: parts_pieces_rev_mismatch'); e.status = 409; throw e;
+            }
+            window.__band.partsPieces = {
+              ...was, rev: (was?.rev ?? 0) + 1, edited: true,
+              pieces: body.names.map((name) => ({ name, views: [] })),
+              proposal: body.settleProposal ? undefined : was?.proposal,
+            };
+            // The band shows only rows named under the list's current rev.
+            window.__band.partsSuggestions = [];
+            return { pieces: clone(window.__band.partsPieces) };
           }
           if (name === 'SuggestDesignParts') {
             if (window.__stand === 'f2fail') throw new Error('design: the assistant is not answering');
@@ -890,7 +911,7 @@ try {
     await page.waitForTimeout(300);
     const after = await page.evaluate(() => ({
       naming: !!document.querySelector('[data-paint-naming]'),
-      rename: !!document.querySelector('[data-paint-parts-rename]'),
+      rename: !!document.querySelector('[data-paint-pieces-toggle]'),
       penOnly: document.querySelector('[data-paint-caption="side_r"]')?.textContent ?? '',
       split: document.querySelector('[data-paint-caption="front"] [data-paint-split]') ? 1 : 0,
       sent: window.__calls
@@ -1036,6 +1057,122 @@ try {
         `f7 wmg line: ${(await page.locator('[data-sent-colour-maps]').innerText()).replace(/\n/g, ' ')}`,
       );
     }
+    await ctx.close();
+  }
+  {
+    // M6 · `rename parts` opens the card's PIECES list (the closed names of PARTS): a rename and an
+    // added piece are saved whole under the rev they were edited on, and the parts are named again;
+    // a read of changed flats waits as `new read` (take / keep mine) and never replaces the list.
+    const { ctx, page } = await open(1440, 1000, 'f7m6');
+    const block = async (name) => {
+      const box = await page.locator('[data-paint-parts]').boundingBox();
+      await page.screenshot({
+        path: resolve(OUT, name),
+        clip: {
+          x: box.x - 8,
+          y: box.y - 8,
+          width: box.width + 16,
+          height: Math.min(box.height, 260) + 16,
+        },
+      });
+      shots.push(resolve(OUT, name));
+    };
+    await page
+      .waitForFunction(() => window.__paint.views.get('front')?.parts?.keyed, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[m6] ASSERT: front never named'));
+    await page.waitForSelector('[data-paint-pieces-toggle]', { timeout: 8000 }).catch(() => {
+      errors.push('[m6] ASSERT: no rename parts once the list is read');
+    });
+    const closed = await page.locator('[data-paint-pieces]').count();
+    if (closed !== 0) errors.push('[m6] ASSERT: the pieces row is open before it is asked for');
+    await page.click('[data-paint-pieces-toggle]');
+    await page.waitForSelector('[data-paint-pieces]');
+    await block('m6-pieces-open.png');
+    const asks = () =>
+      page.evaluate(() => window.__calls.filter((c) => c.name === 'SuggestDesignPartsCard').length);
+    const before = await asks();
+    await page.click('[data-paint-piece="collar"]');
+    await page.fill('[data-paint-piece-input]', 'Collar  Stand');
+    await page.keyboard.press('Enter');
+    await page.click('[data-paint-piece-add]');
+    await page.fill('[data-paint-piece-input]', 'patch pocket');
+    await page.keyboard.press('Enter');
+    // a reserved name is refused in place (red box), and Esc leaves it
+    await page.click('[data-paint-piece-add]');
+    await page.fill('[data-paint-piece-input]', 'opening');
+    const invalid = await page.locator('[data-paint-piece-input][aria-invalid="true"]').count();
+    if (invalid !== 1) errors.push('[m6] ASSERT: «opening» not refused as a piece');
+    await page.keyboard.press('Escape');
+    await block('m6-pieces-draft.png');
+    await page.click('[data-paint-pieces-save]');
+    await page
+      .waitForFunction(
+        (n) => window.__calls.filter((c) => c.name === 'SuggestDesignPartsCard').length > n,
+        before,
+        {
+          timeout: 8000,
+        },
+      )
+      .catch(() => errors.push('[m6] ASSERT: the parts were not named again after the save'));
+    const saved = await page.evaluate(() => {
+      const c = window.__calls.find((x) => x.name === 'SetDesignPartsPieces');
+      return c ? c.body : null;
+    });
+    console.log(`m6 save: ${JSON.stringify(saved)}`);
+    if (
+      !saved ||
+      saved.expectedRev !== 1 ||
+      saved.settleProposal ||
+      !saved.names.includes('collar stand') ||
+      !saved.names.includes('patch pocket') ||
+      saved.names.includes('collar') ||
+      saved.names.includes('opening')
+    )
+      errors.push(`[m6] ASSERT: the save body ${JSON.stringify(saved)}`);
+    await page
+      .waitForFunction(() => window.__paint.views.get('front')?.parts?.keyed, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[m6] ASSERT: front not named again'));
+    // A read of changed flats arrives: it is a proposal — the list stays, the pill turns blue.
+    await page.evaluate(() => {
+      window.__band.partsPieces = {
+        ...window.__band.partsPieces,
+        proposal: {
+          pieces: [{ name: 'collar' }, { name: 'left front body' }, { name: 'back yoke' }],
+          openings: [],
+          model: 'anthropic/claude-sonnet-5.5',
+        },
+      };
+      return window.__paint.qc.invalidateQueries();
+    });
+    await page.waitForSelector('[data-paint-pieces-proposal]', { timeout: 8000 }).catch(() => {
+      errors.push('[m6] ASSERT: the new read is not shown');
+    });
+    const pill = await page.locator('[data-paint-pieces-toggle]').innerText();
+    if (!/new read/i.test(pill)) errors.push(`[m6] ASSERT: the pill says «${pill}»`);
+    await block('m6-pieces-new-read.png');
+    await page.click('[data-paint-pieces-keep]');
+    await page
+      .waitForFunction(() => !document.querySelector('[data-paint-pieces-proposal]'), null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[m6] ASSERT: keep mine left the new read'));
+    const kept = await page.evaluate(
+      () => window.__calls.filter((x) => x.name === 'SetDesignPartsPieces').pop()?.body,
+    );
+    console.log(`m6 keep: ${JSON.stringify(kept)}`);
+    if (
+      !kept ||
+      !kept.settleProposal ||
+      kept.expectedRev !== 2 ||
+      JSON.stringify(kept.names) !== JSON.stringify(saved?.names) ||
+      kept.names.includes('collar')
+    )
+      errors.push(`[m6] ASSERT: keep mine sent ${JSON.stringify(kept)}`);
+    await block('m6-pieces-kept.png');
     await ctx.close();
   }
   {

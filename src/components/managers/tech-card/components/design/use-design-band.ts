@@ -145,6 +145,8 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   // The image-run cap (05.10): absent = the client's default (`run-state.ts`).
   imageRunCapSeconds: undefined,
   cappedRunKinds: undefined,
+  // M6 · the PARTS pieces list: `undefined` = not read yet (or an older server).
+  partsPieces: undefined,
 };
 
 export type DesignBandState = {

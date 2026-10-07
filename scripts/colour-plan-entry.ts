@@ -155,6 +155,7 @@ export function makeBand(input: {
     joins: undefined,
     imageRunCapSeconds: undefined,
     cappedRunKinds: undefined,
+    partsPieces: undefined,
   };
 }
 

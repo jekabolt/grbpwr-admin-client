@@ -15310,6 +15310,9 @@ export type GetDesignBandResponse = {
   // error_code (timed_out | landing_failed | …) and a human last_error.
   imageRunCapSeconds: number | undefined;
   cappedRunKinds: string[] | undefined;
+  // PARTS · the card's pieces list (M6): the closed names the parts labeller uses; parts_suggestions
+  // carries only the rows named under its current rev. Absent = none read yet.
+  partsPieces: common_DesignPartsPieces | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -16970,6 +16973,47 @@ export type common_DesignJoinsFit = {
   waist: string | undefined;
 };
 
+// DesignPartsPieces — the card's PIECES LIST for PARTS (M6, flat-consistency 107): the closed list of
+// part names the parts labeller may use. Read by a model from the ACCEPTED FRONT/BACK flats (the
+// plates of the FLAT bench slots — never the photos, never the join list) from a fixed garment
+// vocabulary, then edited by the designer. A re-read never writes over a designer's edits: once
+// edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
+// generation.
+export type common_DesignPartsPieces = {
+  rev: number | undefined;
+  pieces: common_DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  // The bench plates the list (as read) came from; 0 = that side had none.
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  // A newer read of changed FRONT/BACK flats, held because the designer edited the list; absent =
+  // none. SetDesignPartsPieces with settle_proposal = true takes it (send its names) or keeps the
+  // list (send the list's names) and drops it.
+  proposal: common_DesignPartsPiecesProposal | undefined;
+  // The FRONT/BACK flats on the bench now differ from the ones the list (or its proposal) was read
+  // from: the next parts naming reads them again.
+  stale: boolean | undefined;
+};
+
+// DesignPartsPiece — one cut piece of the garment.
+export type common_DesignPartsPiece = {
+  name: string | undefined;
+  views: string[] | undefined;
+};
+
+// DesignPartsPiecesProposal — a newer read waiting on the designer.
+export type common_DesignPartsPiecesProposal = {
+  pieces: common_DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  readAt: wellKnownTimestamp | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -18054,6 +18098,9 @@ export type SuggestDesignPartsCardRequest = {
 export type SuggestDesignPartsCardResponse = {
   suggestions: DesignPartsSuggestion[] | undefined;
   cached: boolean | undefined;
+  // The card's pieces list the answer was named under (M6): its rev is the one the answer's rows are
+  // keyed on. Absent = the card has no FRONT/BACK flat to read pieces from (labels were free).
+  pieces: common_DesignPartsPieces | undefined;
 };
 
 export type GenerateDesignJoinsRequest = {
@@ -18077,6 +18124,17 @@ export type SetDesignJoinsRequest = {
 
 export type SetDesignJoinsResponse = {
   joins: common_DesignJoins | undefined;
+};
+
+export type SetDesignPartsPiecesRequest = {
+  techCardId: number | undefined;
+  expectedRev: number | undefined;
+  names: string[] | undefined;
+  settleProposal: boolean | undefined;
+};
+
+export type SetDesignPartsPiecesResponse = {
+  pieces: common_DesignPartsPieces | undefined;
 };
 
 export type SetDesignDetailKeptRequest = {
@@ -19824,6 +19882,14 @@ export interface AdminService {
   // absences kept only when they are negations, counts and lengths capped. Aborted
   // (joins_rev_mismatch) on a stale rev.
   SetDesignJoins(request: SetDesignJoinsRequest): Promise<SetDesignJoinsResponse>;
+  // SetDesignPartsPieces saves the designer's PIECES LIST for PARTS (M6, flat-consistency 107) — the
+  // closed list of names the parts labeller may use (CAS: expected_rev must be the stored rev; 0 = no
+  // list yet). Names are cleaned (lowercase, ≤ 40 characters, unique, not "opening"/"unnamed", ≤ 30);
+  // the list is marked edited, so a later read of changed flats only PROPOSES. settle_proposal = true
+  // also drops the pending proposal (the names sent are the designer's answer to it: its names = take,
+  // the list's own = keep). Aborted (parts_pieces_rev_mismatch) on a stale rev. Spends no key; the
+  // next SuggestDesignPartsCard names the parts again under the new rev.
+  SetDesignPartsPieces(request: SetDesignPartsPiecesRequest): Promise<SetDesignPartsPiecesResponse>;
   // SetDesignDetailKept marks a STALE flat detail as kept (keep = true) or takes the mark off (keep =
   // false) — 82-INPUT-REDESIGN §5, owner 06.10: «keep» is stored on the server, everyone sees it.
   // A detail is stale when its plate came out of a run OLDER than the run of the card's current
@@ -26569,6 +26635,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignJoins",
       }) as Promise<SetDesignJoinsResponse>;
+    },
+    SetDesignPartsPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts/pieces`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignPartsPieces",
+      }) as Promise<SetDesignPartsPiecesResponse>;
     },
     SetDesignDetailKept(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

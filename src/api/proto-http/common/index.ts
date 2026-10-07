@@ -6427,6 +6427,47 @@ export type DesignJoinsFit = {
   waist: string | undefined;
 };
 
+// DesignPartsPieces — the card's PIECES LIST for PARTS (M6, flat-consistency 107): the closed list of
+// part names the parts labeller may use. Read by a model from the ACCEPTED FRONT/BACK flats (the
+// plates of the FLAT bench slots — never the photos, never the join list) from a fixed garment
+// vocabulary, then edited by the designer. A re-read never writes over a designer's edits: once
+// edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
+// generation.
+export type DesignPartsPieces = {
+  rev: number | undefined;
+  pieces: DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  // The bench plates the list (as read) came from; 0 = that side had none.
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  // A newer read of changed FRONT/BACK flats, held because the designer edited the list; absent =
+  // none. SetDesignPartsPieces with settle_proposal = true takes it (send its names) or keeps the
+  // list (send the list's names) and drops it.
+  proposal: DesignPartsPiecesProposal | undefined;
+  // The FRONT/BACK flats on the bench now differ from the ones the list (or its proposal) was read
+  // from: the next parts naming reads them again.
+  stale: boolean | undefined;
+};
+
+// DesignPartsPiece — one cut piece of the garment.
+export type DesignPartsPiece = {
+  name: string | undefined;
+  views: string[] | undefined;
+};
+
+// DesignPartsPiecesProposal — a newer read waiting on the designer.
+export type DesignPartsPiecesProposal = {
+  pieces: DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  readAt: wellKnownTimestamp | undefined;
+};
+
 export type OrderFactor =
   | "ORDER_FACTOR_UNKNOWN"
   | "ORDER_FACTOR_ASC"

@@ -15,6 +15,7 @@ import type {
   GetDesignBandResponse,
   common_DesignColourMap,
   common_DesignFabricUse,
+  common_DesignPartsPieces,
 } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
@@ -136,8 +137,8 @@ export type PaintView = {
    * page; the person's next gesture on the side saves it. Openings are cleared as parts arrive.
    */
   carried?: boolean;
-  /** The join list's rev `parts` were named under (c9): another rev now → asked again. */
-  partsJoinsRev?: number;
+  /** The pieces list's rev `parts` were named under (c9, M6): another rev now → asked again. */
+  partsPiecesRev?: number;
 };
 
 /** One thing to paint with: a slot's bound cloth or a free colour. */
@@ -414,10 +415,13 @@ export class PaintSession {
   /* ─────────────────────────── sync with the band ─────────────────────────── */
 
   sync(band: GetDesignBandResponse, slots: readonly ClothSlot[] | undefined, colorwayId: number) {
+    // M6 · the pieces list is drawn off the session (`pieces()`): a new list or a new read waiting
+    // on the designer redraws the block even when nothing else moved.
+    const piecesWas = JSON.stringify(this.band?.partsPieces ?? null);
     this.band = band;
     this.lastSlots = slots;
     this.lastColorway = colorwayId;
-    let changed = false;
+    let changed = piecesWas !== JSON.stringify(band.partsPieces ?? null);
     const list = (slots ?? []).filter((s) => s.bomItemId > 0);
     this.slotLabel = slotLabels(list.map((s) => s.bomItemId));
 
@@ -554,7 +558,7 @@ export class PaintSession {
       row.parts,
       row.splitNeeded,
       [...labelKeys(rows)],
-      innerLayerPart(rows, this.band?.joins?.layers),
+      innerLayerPart(rows, undefined),
     ]);
   }
 
@@ -577,15 +581,56 @@ export class PaintSession {
     rows: readonly Parameters<typeof partsOf>[0][],
   ): ViewParts | null {
     const parts = partsOf(row, flat, seeds, view);
-    const layer = innerLayerPart(rows, this.band?.joins?.layers);
+    // M6: PARTS reads nothing of the join list — the inner layer is a part the labeller named.
+    const layer = innerLayerPart(rows, undefined);
     return (
       parts && adoptEdges(fixBands(fixSides(view, parts, flat, labelKeys(rows)), flat, layer), flat)
     );
   }
 
-  /** The rev of the card's join list now (0 = none): the labeller reads the list (c9). */
-  private joinsRev(): number {
-    return this.band?.joins?.rev ?? 0;
+  /**
+   * M6 · the rev of the card's PIECES list now (0 = none): the labeller names only from it, so parts
+   * answer for the rev they were named under (c9).
+   */
+  private piecesRev(): number {
+    return this.band?.partsPieces?.rev ?? 0;
+  }
+
+  /** M6 · the card's pieces list (the closed names of PARTS), or undefined before the first read. */
+  pieces(): common_DesignPartsPieces | undefined {
+    return this.band?.partsPieces;
+  }
+
+  /**
+   * M6 · the list as the server answered it, into the cached band. A new rev drops the band's rows
+   * (they were named under the old one) until the band is read again — they would otherwise be laid
+   * as answers for the new list.
+   */
+  private putPieces(p: common_DesignPartsPieces | undefined) {
+    if (!p) return;
+    this.qc.setQueryData<GetDesignBandResponse>(designKeys.band(this.techCardId), (old) => {
+      if (!old) return old;
+      const was = old.partsPieces;
+      if (was && (was.rev ?? 0) > (p.rev ?? 0)) return old;
+      const same = (was?.rev ?? 0) === (p.rev ?? 0);
+      return { ...old, partsPieces: p, partsSuggestions: same ? old.partsSuggestions : [] };
+    });
+  }
+
+  /**
+   * M6 · the designer's list (`rename parts`): saved whole under the rev it was edited on; the parts
+   * are named again under the new rev. `settle` answers a pending read of changed flats (its names =
+   * take, the list's own = keep). Throws the server's refusal (a stale tab: Aborted).
+   */
+  async savePieces(names: string[], settle = false): Promise<void> {
+    const res = await adminService.SetDesignPartsPieces({
+      techCardId: this.techCardId,
+      expectedRev: this.piecesRev(),
+      names,
+      settleProposal: settle,
+    });
+    this.putPieces(res.pieces);
+    void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
   }
 
   /**
@@ -596,7 +641,7 @@ export class PaintSession {
   private partsFresh(v: PaintView): boolean {
     const row = this.bandParts(v);
     if (row && keyedSuggestion(row)) return true;
-    return heldPartsFresh(v.parts, v.partsJoinsRev, this.joinsRev());
+    return heldPartsFresh(v.parts, v.partsPiecesRev, this.piecesRev());
   }
 
   /**
@@ -613,7 +658,7 @@ export class PaintSession {
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
     this.lay(v, this.laid(row, v.cut, v.parts?.seeds ?? markPoints(v.cut), v.view, rows));
-    v.partsJoinsRev = this.joinsRev();
+    v.partsPiecesRev = this.piecesRev();
     this.partsGen += 1;
     this.clearOpenPaint(v);
     return true;
@@ -647,17 +692,17 @@ export class PaintSession {
   }
 
   /**
-   * c9 · parts named under another join list are dropped (not painted through) the moment the
-   * list moves: the band shows only rows of the current list, and a new answer is asked for.
+   * c9 · parts named under another pieces list (M6) are dropped (not painted through) the moment
+   * the list moves: the band shows only rows of the current list, and a new answer is asked for.
    */
   private dropStaleParts(): boolean {
-    const rev = this.joinsRev();
+    const rev = this.piecesRev();
     let changed = false;
     for (const v of this.views.values())
-      if (v.parts && v.partsJoinsRev !== undefined && v.partsJoinsRev !== rev) {
+      if (v.parts && v.partsPiecesRev !== undefined && v.partsPiecesRev !== rev) {
         this.lay(v, null);
         v.partsSig = '';
-        v.partsJoinsRev = undefined;
+        v.partsPiecesRev = undefined;
         this.partsGen += 1;
         changed = true;
       }
@@ -678,8 +723,8 @@ export class PaintSession {
         v.status === 'ready' && !!v.cut && this.namable(v),
     );
     if (sides.length === 0 || (!force && sides.every((v) => this.partsFresh(v)))) return;
-    const joinsRev = this.joinsRev();
-    const key = partsAskKey(sides, joinsRev);
+    const askRev = this.piecesRev();
+    const key = partsAskKey(sides, askRev);
     if (this.asked.has(key) && !again) return;
     this.asked.add(key);
     this.partsFailed = '';
@@ -710,8 +755,12 @@ export class PaintSession {
             regionCount: v.cut.count,
           })),
         });
-        // The list moved while the model named: this answer is for the old one (asked anew).
-        if (this.joinsRev() !== joinsRev) {
+        // M6 · the answer is named under the pieces list it carries — the server may have read
+        // the list right now (a new card, new flats). The list moved under us otherwise (a save in
+        // this or another tab while the model named): this answer is for the old one (asked anew).
+        const namedRev = res.pieces?.rev ?? 0;
+        const now = this.piecesRev();
+        if (now !== askRev && now !== namedRev) {
           listMoved = true;
           return;
         }
@@ -727,7 +776,7 @@ export class PaintSession {
           if (!parts) continue;
           this.lay(v, parts);
           v.partsSig = this.partsSigOf(s, res.suggestions ?? []);
-          v.partsJoinsRev = joinsRev;
+          v.partsPiecesRev = namedRev;
           this.partsGen += 1;
           this.clearOpenPaint(v);
           got += 1;
@@ -736,6 +785,7 @@ export class PaintSession {
           if (!current()) return;
           throw new Error('the assistant answered nothing usable');
         }
+        this.putPieces(res.pieces);
         void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
       } catch (e) {
         if (!current()) return;
@@ -769,16 +819,16 @@ export class PaintSession {
     this.suggestCard(true);
   }
 
-  /** QW7 · `rename parts`: the model is asked again for every side, past its cache. */
-  canRename(): boolean {
+  /** QW7 · `name again` (M6: inside `rename parts`): the model is asked again for every side, past its cache. */
+  canNameAgain(): boolean {
     return (
       !this.naming &&
       !this.partsFailed &&
       [...this.views.values()].some((v) => v.status === 'ready' && this.namable(v) && !!v.parts)
     );
   }
-  renameParts() {
-    if (!this.canRename()) return;
+  nameAgain() {
+    if (!this.canNameAgain()) return;
     this.suggestCard(true, true);
   }
 

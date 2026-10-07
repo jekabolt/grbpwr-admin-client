@@ -31,7 +31,6 @@ import { ControlLabel } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
-import { useJoinsRead } from './flat-joins';
 import {
   flatDraftOf,
   flatInputBusy,
@@ -95,7 +94,8 @@ import { materializeWords } from './words-seed';
  *     is the views; never automatic. On: the structure tiles under the row (front / back per flat).
  * M7 (owner 07.10, 100-CONSTRUCTION-DEADEND): no construction on the row any more — no ASK ·
  * construction questions, no route pill, no `straps & openings`, no «reading the construction» lock.
- * The join list is still read silently in the background for PARTS (`useJoinsRead`).
+ * M6: nor is the join list read in the background any more — PARTS reads its own pieces list
+ * from the accepted FRONT/BACK flats on the server.
  *
  * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35): цена прогона живёт в истории, по факту.
  */
@@ -500,9 +500,6 @@ export function FlatRunRow({
   const route = routeOf({ target, fromMyFlat, structure: structureNow.length });
 
   const writesOff = !!disabled || !speaks;
-  /* THE LIST, SILENTLY: read once per card in the background for PARTS (M7) — it gates nothing. */
-  useJoinsRead(techCardId, band, writesOff);
-
   /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте (ревью MAJOR), и пока CLEAR. */
   const choiceOff = writesOff || busy || input.clearing;
   const gateReason = !speaks

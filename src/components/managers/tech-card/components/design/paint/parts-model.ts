@@ -52,28 +52,31 @@ const PAL: [number, number, number][] = [
  * the part «seen through» it, `fixBands` never makes a «· inside»; a side cut into ONE region is
  * named too; a region the labeller left out is shown as an error (`unassignedRegion`).
  * (regions.v6 renumbers the regions: the f6 rows of v5 are neither applied nor reused.)
+ * M6 (no client bump): the labeller names only from the card's PIECES list, read from the accepted
+ * front/back flats — the server tags its rows with its own prompt rev and the list's rev.
  */
 export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f6`;
 
 /**
  * c9 · the key one card-level ask is made under (once per key per session): the sides with their
- * flats, the cut + labeller rev, and the join list's rev — a corrected list is asked again.
+ * flats, the cut + labeller rev, and the PIECES list's rev (M6; it was the join list's) — an edited
+ * list is asked again.
  */
 export const partsAskKey = (
   sides: readonly { view: string; baseMediaId: number }[],
-  joinsRev: number,
+  piecesRev: number,
 ): string =>
   `${sides
     .map((v) => `${v.view}:${v.baseMediaId}`)
     .sort()
-    .join('|')}|${PARTS_ALGO_REV}|j${joinsRev}`;
+    .join('|')}|${PARTS_ALGO_REV}|p${piecesRev}`;
 
-/** c9 · parts held in memory answer only for the join list they were named under. */
+/** c9 · parts held in memory answer only for the pieces list they were named under (M6). */
 export const heldPartsFresh = (
   parts: Pick<ViewParts, 'keyed'> | null | undefined,
   namedUnder: number | undefined,
-  joinsRev: number,
-): boolean => !!parts?.keyed && namedUnder === joinsRev;
+  piecesRev: number,
+): boolean => !!parts?.keyed && namedUnder === piecesRev;
 
 /**
  * Regions the model is asked to name: none is a failed cut, more is unreadable. f6: ONE region is
