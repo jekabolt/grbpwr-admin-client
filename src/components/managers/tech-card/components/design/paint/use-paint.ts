@@ -45,7 +45,7 @@ import {
   anyPainted,
   exportLabels,
   freeColourLabel,
-  hardwareInstances,
+  hardwareInstancesAll,
   hexOf,
   labelsFromMap,
   mapPixels,
@@ -136,6 +136,12 @@ export type PaintView = {
   mapBase: number;
   /** Bumped on every pixel change — the canvas redraws off it. */
   rev: number;
+  /**
+   * R9 fix 4 · bumped only when the LABEL RASTER (or what reads as hardware on it, or the ink the
+   * export looks through) changes — never on a texture, a colour or a scale. The hardware caches
+   * (instances, export) key on it.
+   */
+  labelRev: number;
   /** The model's parts over this flat's regions (auto parts); null = regions only (Ф1). */
   parts: ViewParts | null;
   /** The suggestion row `parts` came from (re-read only when it changes). */
@@ -312,7 +318,7 @@ export class PaintSession {
   /** R9 · hardware label (packed) → its slot. */
   private hardwareSlots = new Map<number, MaterialSlot>();
   /** R9 · instances per side and label, keyed by the side's rev. */
-  private instances = new Map<string, { rev: number; list: HardwareInstance[] }>();
+  private instances = new Map<string, { rev: number; all: Map<number, HardwareInstance[]> }>();
   /** R9 · the labels as the model's map carries them, per side (keyed by its rev). */
   private exported = new Map<string, { rev: number; labels: Uint32Array }>();
   /** R9 · the exported colour maps of one exact set of maps → their media (one press, one id). */
@@ -484,7 +490,10 @@ export class PaintSession {
       if (hex) this.hardwareSlots.set(packHex(hex), s);
     }
     if (hwWas !== [...this.hardwareSlots.keys()].join(',')) {
-      for (const v of this.views.values()) v.rev += 1;
+      for (const v of this.views.values()) {
+        v.rev += 1;
+        v.labelRev += 1;
+      }
       changed = true;
     }
 
@@ -768,6 +777,7 @@ export class PaintSession {
     if (flat !== v.flat) {
       v.flat = flat;
       v.rev += 1;
+      v.labelRev += 1;
     }
   }
 
@@ -779,6 +789,7 @@ export class PaintSession {
   private clearOpenPaint(v: PaintView) {
     if (!v.labels || !v.flat || clearOpenings(v.labels, v.flat, v.parts) === 0) return;
     v.rev += 1;
+    v.labelRev += 1;
     this.undoStack = this.undoStack.filter((g) => !g.some((st) => st.view === v.view));
     this.redoStack = this.redoStack.filter((g) => !g.some((st) => st.view === v.view));
     if (!v.carried) v.dirty = true;
@@ -1031,15 +1042,19 @@ export class PaintSession {
     return this.hardwareSlots.get(packHex(hex))?.name ?? '';
   }
 
-  /** The hardware instances of `hex` on a side (cached per side's rev). */
+  /**
+   * The hardware instances of `hex` on a side. R9 fix 4 · every hardware label of the side comes
+   * out of ONE pass (`hardwareInstancesAll`), cached per side on its `labelRev`; a label absent
+   * from the side answers from the map.
+   */
   instancesOf(v: PaintView, hex: string): HardwareInstance[] {
-    if (!v.labels || !v.flat || !this.isHardware(packHex(hex))) return [];
-    const key = `${v.view}|${hex}`;
-    const hit = this.instances.get(key);
-    if (hit?.rev === v.rev) return hit.list;
-    const list = hardwareInstances(v.labels, packHex(hex), v.flat.w, v.flat.h);
-    this.instances.set(key, { rev: v.rev, list });
-    return list;
+    const packed = packHex(hex);
+    if (!v.labels || !v.flat || !this.isHardware(packed)) return [];
+    const hit = this.instances.get(v.view);
+    if (hit?.rev === v.labelRev) return hit.all.get(packed) ?? [];
+    const all = hardwareInstancesAll(v.labels, this.isHardware, v.flat.w, v.flat.h);
+    this.instances.set(v.view, { rev: v.labelRev, all });
+    return all.get(packed) ?? [];
   }
 
   /** The painted count of a hardware label on every loaded side (the tile's ` · N`). */
@@ -1057,12 +1072,12 @@ export class PaintSession {
   exportOf(v: PaintView): Uint32Array | null {
     if (!v.labels || !v.flat) return null;
     const hit = this.exported.get(v.view);
-    if (hit?.rev === v.rev) return hit.labels;
+    if (hit?.rev === v.labelRev) return hit.labels;
     const any = [...this.labelsOn(v)].some((hex) => this.isHardware(packHex(hex)));
     const labels = any
       ? exportLabels(v.labels, v.flat.ink, v.flat.w, v.flat.h, this.isHardware)
       : v.labels;
-    this.exported.set(v.view, { rev: v.rev, labels });
+    this.exported.set(v.view, { rev: v.labelRev, labels });
     return labels;
   }
 
@@ -1172,6 +1187,7 @@ export class PaintSession {
       dirty: false,
       mapBase: 0,
       rev: 0,
+      labelRev: 0,
       parts: null,
       partsSig: '',
     };
@@ -1236,6 +1252,7 @@ export class PaintSession {
         v.labels = labels;
         v.status = 'ready';
         v.rev += 1;
+        v.labelRev += 1;
         // D2 · the carried paint is a DRAFT: opening the page never writes paint. It is saved with
         // the side's next own gesture (it then stands in `labels`, which the save writes whole).
         // Nothing carried: the saved map is kept (a passing read failure must not delete
@@ -1567,6 +1584,7 @@ export class PaintSession {
       if (!v) continue;
       v.dirty = true;
       v.rev += 1;
+      v.labelRev += 1;
     }
     this.schedule();
     this.bump();
@@ -1590,6 +1608,7 @@ export class PaintSession {
       else redoDiff(v.labels, s.diff);
       v.dirty = true;
       v.rev += 1;
+      v.labelRev += 1;
     }
     this.schedule();
     this.bump();
@@ -1682,6 +1701,7 @@ export class PaintSession {
           if (hit) {
             v.dirty = true;
             v.rev += 1;
+            v.labelRev += 1;
           }
         }
         // Old diffs name the old labels.

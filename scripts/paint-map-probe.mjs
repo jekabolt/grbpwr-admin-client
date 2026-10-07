@@ -1001,6 +1001,42 @@ ck(
   }
   ck(m.hardwareInstances(twin, HW, W, H).length === 2, 'R9 instances: two buttons count 2');
 
+  // Fix 4 · every hardware label of a side in ONE pass: the same instances as one label at a time,
+  // a label absent from the side is no key, `isHardware` asked once per distinct value.
+  {
+    const HW2 = m.packHex('#808080');
+    const mix = twin.slice();
+    for (let i = 0; i < W * H; i += 1) if (!mix[i] && !ink[i]) mix[i] = CL;
+    for (const i of pick.idx) {
+      const y = ((i / W) | 0) + 60;
+      if (y < H) mix[y * W + (i % W)] = HW2;
+    }
+    let asked = 0;
+    const all = m.hardwareInstancesAll(
+      mix,
+      (v) => {
+        asked += 1;
+        return v === HW || v === HW2 || v === m.packHex('#123456');
+      },
+      W,
+      H,
+    );
+    const same = (a, b) =>
+      a.length === b.length &&
+      a.every((x, k) => x.idx.length === b[k].idx.length && x.x0 === b[k].x0 && x.y0 === b[k].y0);
+    ck(
+      same(all.get(HW) ?? [], m.hardwareInstances(mix, HW, W, H)) &&
+        same(all.get(HW2) ?? [], m.hardwareInstances(mix, HW2, W, H)) &&
+        (all.get(HW) ?? []).length === 2 &&
+        (all.get(HW2) ?? []).length === 1 &&
+        !all.has(m.packHex('#123456')) &&
+        !all.has(CL) &&
+        asked === 3,
+      'R9 fix 4: one pass gives every hardware label its instances (absent labels none)',
+      `asked ${asked}, keys ${all.size}`,
+    );
+  }
+
   // Export: the button's pixels take the cloth around them; the palette names no hardware hex.
   const isHw = (v) => v === HW;
   const exp = m.exportLabels(lab, ink, W, H, isHw);

@@ -441,13 +441,41 @@ export function hardwareInstances(
   h: number,
   minPx = HARDWARE_MIN_PX,
 ): HardwareInstance[] {
+  return hardwareInstancesAll(labels, (v) => v === value, w, h, minPx).get(value) ?? [];
+}
+
+/**
+ * R9 fix 4 · the instances of EVERY hardware label of a side in ONE pass over the raster (one
+ * `seen`, each pixel visited once): label (packed) → its instances. A label absent from the side
+ * is simply not a key. `isHardware` is asked once per distinct label value.
+ */
+export function hardwareInstancesAll(
+  labels: Uint32Array,
+  isHardware: (value: number) => boolean,
+  w: number,
+  h: number,
+  minPx = HARDWARE_MIN_PX,
+): Map<number, HardwareInstance[]> {
   const n = w * h;
-  const seen = new Uint8Array(n);
-  const comps: { idx: number[]; x0: number; y0: number; x1: number; y1: number }[] = [];
+  const asked = new Map<number, boolean>();
+  const hw = (v: number) => {
+    let yes = asked.get(v);
+    if (yes === undefined) {
+      yes = v !== 0 && isHardware(v);
+      asked.set(v, yes);
+    }
+    return yes;
+  };
+  type Comp = { idx: number[]; x0: number; y0: number; x1: number; y1: number };
+  const byValue = new Map<number, Comp[]>();
+  let seen: Uint8Array | null = null;
+  const stack: number[] = [];
   for (let s = 0; s < n; s += 1) {
-    if (seen[s] || labels[s] !== value) continue;
-    const c = { idx: [] as number[], x0: w, y0: h, x1: -1, y1: -1 };
-    const stack = [s];
+    const value = labels[s];
+    if (value === 0 || (seen && seen[s]) || !hw(value)) continue;
+    if (!seen) seen = new Uint8Array(n);
+    const c: Comp = { idx: [], x0: w, y0: h, x1: -1, y1: -1 };
+    stack.push(s);
     seen[s] = 1;
     while (stack.length > 0) {
       const i = stack.pop() as number;
@@ -468,19 +496,26 @@ export function hardwareInstances(
           stack.push(j);
         }
     }
-    comps.push(c);
+    const list = byValue.get(value);
+    if (list) list.push(c);
+    else byValue.set(value, [c]);
   }
-  // Biggest first: a pocket finds the button it sits in.
-  comps.sort((a, b) => b.idx.length - a.idx.length);
-  const kept: typeof comps = [];
-  for (const c of comps) {
-    const host = kept.find((k) => c.x0 >= k.x0 && c.x1 <= k.x1 && c.y0 >= k.y0 && c.y1 <= k.y1);
-    if (host) for (const i of c.idx) host.idx.push(i);
-    else kept.push(c);
+  const out = new Map<number, HardwareInstance[]>();
+  for (const [value, comps] of byValue) {
+    // Biggest first: a pocket finds the button it sits in.
+    comps.sort((a, b) => b.idx.length - a.idx.length);
+    const kept: Comp[] = [];
+    for (const c of comps) {
+      const host = kept.find((k) => c.x0 >= k.x0 && c.x1 <= k.x1 && c.y0 >= k.y0 && c.y1 <= k.y1);
+      if (host) for (const i of c.idx) host.idx.push(i);
+      else kept.push(c);
+    }
+    const list = kept
+      .filter((c) => c.idx.length >= minPx)
+      .map((c) => ({ idx: Int32Array.from(c.idx), x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }));
+    if (list.length > 0) out.set(value, list);
   }
-  return kept
-    .filter((c) => c.idx.length >= minPx)
-    .map((c) => ({ idx: Int32Array.from(c.idx), x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }));
+  return out;
 }
 
 /** How far (px) the export looks past a component's own ink for the cloth around it. */
