@@ -2,6 +2,7 @@ import {
   common_DesignPicture,
   common_DesignReference,
   common_MediaFull,
+  GetDesignBandResponse,
 } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
@@ -31,7 +32,12 @@ import { CalloutRail, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
-import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
+import {
+  flushAllowsRun,
+  flushRefusalSentence,
+  useTechCardAutosave,
+  type FlushResult,
+} from './autosave-contract';
 import { DraftedField } from './core/drafted-field';
 import { useGenerationWrites } from './generation/use-generation';
 import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
@@ -43,7 +49,7 @@ import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
-import { CutoutCorner, useBoardCutout, type CutLanding } from './mood-cutout';
+import { CutoutCorner, isCutBusy, useBoardCutout, type CutLanding } from './mood-cutout';
 import { MoodQuiz } from './mood-quiz';
 import { MOOD_ROLES, usePictureAnchor, type QuizPicture } from './quiz-anchor';
 import {
@@ -64,7 +70,13 @@ import type { GuideFace } from './guide-face';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
-import { designKeys, newClientRequestId, useDesignBand, useDesignWrites } from './use-design-band';
+import {
+  cardOnScreen,
+  designKeys,
+  newClientRequestId,
+  useDesignBand,
+  useDesignWrites,
+} from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -476,6 +488,38 @@ export function useLabelPoll(
   }, [waiting, techCardId, speaks, qc]);
 }
 
+/**
+ * Q3 · A MODEL'S DETAIL GOES WITH ITS LAST PHOTO — ALSO WHEN THE PHOTO LEAVES THE BOARD (owner 07.10,
+ * card 38 «back hem»). The SERVER does it: the save kicks its background label sync, which drops the
+ * model rows of pictures off the board and then the model slots left with nothing
+ * (`DropBoardLabels` → `dropOrphanModelSlots`) — after the band was last read here, so FLAT SLOTS and
+ * the run selector kept the empty detail until a reload. The client only READS: the band is re-read
+ * until the slot is gone (≤ SLOT_GONE_TRIES × SLOT_GONE_MS), and stops early when `wanted()` says the
+ * follow no longer matters (the picture is back, the card left the screen). No write, no lock (Codex
+ * round 3, orchestrator): a detail whose photo carries a PERSON's label stays — the server never
+ * drops a person's row — and the person takes it off with its ✕. Module scope, not a hook: the board
+ * unmounts as soon as the person steps to FLAT, where the slot is seen.
+ */
+const SLOT_GONE_MS = 1_500;
+const SLOT_GONE_TRIES = 16;
+function followSlotGone(
+  qc: ReturnType<typeof useQueryClient>,
+  card: number,
+  slotId: number,
+  wanted: () => boolean,
+) {
+  let tries = 0;
+  const tick = () => {
+    tries += 1;
+    if (!wanted()) return;
+    const band = qc.getQueryData<{ bench?: { id?: number }[] }>(designKeys.band(card));
+    if (band && !(band.bench ?? []).some((s) => (s.id ?? 0) === slotId)) return;
+    void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    if (tries < SLOT_GONE_TRIES) window.setTimeout(tick, SLOT_GONE_MS);
+  };
+  window.setTimeout(tick, SLOT_GONE_MS);
+}
+
 /** The edit is drawn over the whole picture: its frame in the original is the original (T59). */
 const WHOLE_FRAME: CropFrame = { x: 0, y: 0, w: 1, h: 1, rotation: 0 };
 
@@ -628,6 +672,7 @@ export function MoodBoard({
   // `planBoardCrop`. Ярлык ЧЕЛОВЕКА (вид, деталь) переезжает на кроп; ярлык модели — нет: кроп она
   // прочтёт заново, как любую новую картинку (101 Ф3).
   const { setReferenceRole } = useDesignWrites(techCardId);
+  const qc = useQueryClient();
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
   );
@@ -807,6 +852,42 @@ export function MoodBoard({
   const pendingCallouts = pendingRemove == null ? 0 : callouts.countOn(pendingRemove);
   const pendingAlsoInInput = pendingRemove != null && inputIds.has(pendingRemove);
 
+  /* Q3 (109 §8), READ ONLY: once «take it off» is SAVED (`flush` → ok / nothing; otherwise the server
+     still has the picture and nothing changes there), the band is followed until the server's sync
+     has dropped the emptied model detail — only when it will: the slot is the model's, unnamed by a
+     person, with no plate, and no other label keeps it (no picture on the board points at it, and no
+     PERSON's label anywhere does — the server never drops those). Never a write. */
+  async function followModelDetailAfterRemoval(mediaId: number, slotId: number) {
+    const card = techCardId;
+    let saved: FlushResult;
+    try {
+      saved = await autosave.flush('moodboard: a picture off the board');
+    } catch {
+      saved = 'error';
+    }
+    if (saved !== 'ok' && saved !== 'nothing') return;
+    const onBoard = () =>
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).some(
+        (i) => isBoardRow(i) && i.mediaId === mediaId,
+      );
+    if (onBoard()) return;
+    const band = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
+    const slot = photoDetailSlots(band?.bench).find((s) => (s.id ?? 0) === slotId);
+    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
+    const board = new Set(
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow).map((i) => i.mediaId),
+    );
+    const kept = (band?.references ?? []).some(
+      (r) =>
+        (r.role ?? '').trim() === 'detail' &&
+        (r.detailSlotId ?? 0) === slotId &&
+        !isHeldLabel(r) &&
+        (board.has(r.mediaId ?? 0) || isPersonLabel(r)),
+    );
+    if (kept) return;
+    followSlotGone(qc, card, slotId, () => cardOnScreen(card) && !onBoard());
+  }
+
   function confirmRemove() {
     const mediaId = pendingRemove;
     setPendingRemove(null);
@@ -815,6 +896,9 @@ export function MoodBoard({
     // снимке, номера у мудбордного указания нет, и открепившееся оно не показывается нигде — то
     // есть «сохранили» означало бы «оставили сиротой в payload». Поэтому ✕ и обязан назвать число.
     callouts.removeOn(mediaId);
+    // Q3: the detail this picture pointed at, read BEFORE the row goes; followed after the save.
+    const was = labelsNow.current.get(mediaId);
+    const slotOfRemoved = (was?.role ?? '').trim() === 'detail' ? was?.detailSlotId ?? 0 : 0;
     // Снимается ТОЛЬКО строка доски. Запись входа на тот же `media_id` — отдельная сущность со
     // своей ролью и своей запиской, и её сносит собственный ✕ в блоке референсов, который тоже
     // называет свою цену. Одна дверь, уносящая две вещи в разных блоках, — это дверь, о цене
@@ -824,6 +908,7 @@ export function MoodBoard({
         (i) => !(i.mediaId === mediaId && isBoardRow(i)),
       ),
     );
+    if (slotOfRemoved > 0) void followModelDetailAfterRemoval(mediaId, slotOfRemoved);
   }
 
   // ── легаси-записка → описание (V-16) ────────────────────────────────────────────────────────
@@ -1170,6 +1255,8 @@ export function MoodBoard({
               tileBadge={(view) =>
                 tileWord(roleOf.get(view.mediaId) ?? '', labels.get(view.mediaId), detailSlots)
               }
+              // M17 · `remove bg` running: the picture itself shows the background going.
+              tileBusy={(view) => (isCutBusy(cutout.stateOf(view.mediaId)) ? 'cut' : null)}
               anchoredMediaId={anchored}
               anchoredSpots={spots}
               hotSpot={hotSpot}

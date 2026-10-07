@@ -18,6 +18,7 @@ import {
   type FocusedTileBadge,
   type FocusedView,
 } from 'ui/components/focused-annotator';
+import type { PictureBusyKind } from 'ui/components/picture-busy';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
@@ -25,6 +26,8 @@ import { useTechCardAutosave } from './autosave-contract';
 import { CapName, displayDetailName, readBench } from './bench-slot';
 import {
   boardMenu,
+  INPUT_OWN_WORDS,
+  inputStillReading,
   labelsByMedia,
   photoDetailSlots,
   tileWord,
@@ -301,17 +304,6 @@ function useInputHold(techCardId: number) {
 /** A picture added in this input, this session — in the tray until a press sends it. */
 type Added = { mediaId: number; full: common_MediaFull };
 
-/** Words that already say why the tray picture waits; a settled label word asks the server why. */
-const TRAY_OWN_WORDS = new Set([
-  '…',
-  'view ?',
-  'detail ?',
-  'mood',
-  'material',
-  'render',
-  'no view',
-]);
-
 export function FlatInputPictures({
   techCardId,
   band,
@@ -465,12 +457,13 @@ export function FlatInputPictures({
   const trayWord = useCallback(
     (id: number): string => {
       if (outputs.has(id)) return 'render';
-      const w = tileWord(purposeOf.get(id) ?? '', labels.get(id), detailSlots);
-      // Без назначения: модель его предложит, назначение встанет само.
-      if (w === null) return '…';
-      if (TRAY_OWN_WORDS.has(w)) return w;
+      const purpose = purposeOf.get(id) ?? '';
       const reason = viewsHeld.get(id);
-      return reason ? HELD_WORD[reason] ?? reason.replace(/_/g, ' ') : '…';
+      // Still being read (the one rule GENERATE waits by): the tile sweeps.
+      if (inputStillReading(purpose, labels.get(id), detailSlots, reason)) return '…';
+      const w = tileWord(purpose, labels.get(id), detailSlots) ?? '';
+      if (INPUT_OWN_WORDS.has(w) || !reason) return w;
+      return HELD_WORD[reason] ?? reason.replace(/_/g, ' ');
     },
     [outputs, purposeOf, labels, detailSlots, viewsHeld],
   );
@@ -512,7 +505,37 @@ export function FlatInputPictures({
     );
   }
 
+  /* THE CORNER ▾ — the board's own menu (purpose; views for target; details + new detail… for
+     detail) and the same pick (`useBoardPick`): a person's pick is a human label, final, the model
+     never overrides it. On the tray and, 109 §2.2 («поправить = угол ▾ плитки»), on every BOARD
+     picture in VIEWS / DETAIL — a tech flat is not a board picture and has none. */
+  const cornerFor = (mediaId: number, n: number, render: boolean) => {
+    const menu = boardMenu({
+      mediaId,
+      n,
+      purpose: purposeOf.get(mediaId) ?? '',
+      ref: labels.get(mediaId),
+      slots: detailSlots,
+      onPick: (p: BoardMenuPick) => pick.onPick(mediaId, p),
+    });
+    // Выход прогона — не вид и не деталь: только mood / material / none.
+    const items = render
+      ? menu.items.filter((it) => ['mood', 'material', ''].includes(it.value))
+      : menu.items;
+    return {
+      right: (
+        <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
+          <CornerMenu menu={{ ...menu, items }} />
+        </span>
+      ),
+    };
+  };
+
   const groupProps = {
+    corners: canWrite
+      ? (mediaId: number, n: number) =>
+          purposeOf.has(mediaId) ? cornerFor(mediaId, n, outputs.has(mediaId)) : null
+      : undefined,
     techCardId,
     stamp,
     labels,
@@ -580,35 +603,16 @@ export function FlatInputPictures({
                   numberFrom={1}
                   numbered={false}
                   pale
-                  badge={(v) => trayWord(v.mediaId)}
+                  // Reading is drawn on the picture (`PictureBusy`), not said with `…`.
+                  badge={(v) => {
+                    const w = trayWord(v.mediaId);
+                    return w === '…' ? '' : w;
+                  }}
+                  busy={(v) => (trayWord(v.mediaId) === '…' ? 'read' : null)}
                   label='input · not sent yet'
                   corners={
                     canWrite
-                      ? (v, i) => {
-                          const word = trayWord(v.mediaId);
-                          const menu = boardMenu({
-                            mediaId: v.mediaId,
-                            n: i + 1,
-                            purpose: purposeOf.get(v.mediaId) ?? '',
-                            ref: labels.get(v.mediaId),
-                            slots: detailSlots,
-                            onPick: (p: BoardMenuPick) => pick.onPick(v.mediaId, p),
-                          });
-                          // Выход прогона — не вид и не деталь: только mood / material / none.
-                          const items =
-                            word === 'render'
-                              ? menu.items.filter((it) =>
-                                  ['mood', 'material', ''].includes(it.value),
-                                )
-                              : menu.items;
-                          return {
-                            right: (
-                              <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
-                                <CornerMenu menu={{ ...menu, items }} />
-                              </span>
-                            ),
-                          };
-                        }
+                      ? (v, i) => cornerFor(v.mediaId, i + 1, trayWord(v.mediaId) === 'render')
                       : undefined
                   }
                 />
@@ -662,6 +666,8 @@ type GroupShared = {
   onUndo: (removal: InputRemoval) => void;
   removalOf: (group: string) => InputRemoval | null;
   onSent: (group: string, mediaIds: number[]) => void;
+  /** The corner ▾ of a board picture (none for a picture not on the board). */
+  corners?: (mediaId: number, n: number) => { right: ReactNode } | null;
 };
 
 function DetailGroup({
@@ -757,6 +763,7 @@ function PressGroup({
   onUndo,
   removalOf,
   onSent,
+  corners,
 }: GroupShared & {
   groupKey: string;
   label: string;
@@ -920,6 +927,7 @@ function PressGroup({
               numberFrom={1}
               badge={photoBadge}
               action={removeAction}
+              corners={corners ? (v, i) => corners(v.mediaId, i + 1) : undefined}
               label={label}
             />
           )}
@@ -1001,6 +1009,7 @@ function Strip({
   numbered = true,
   pale = false,
   badge,
+  busy,
   action,
   corners,
   label,
@@ -1013,13 +1022,15 @@ function Strip({
   /** The tray: pale until hovered or focused (its corner ▾ is a real control). */
   pale?: boolean;
   badge: (v: FocusedView) => string | FocusedTileBadge;
+  /** The picture is being worked on — drawn on it; its accessible word is `reading`. */
+  busy?: (v: FocusedView) => PictureBusyKind | null;
   action?: (v: FocusedView) => FocusedTileAction;
   corners?: (v: FocusedView, i: number) => { left?: ReactNode; right?: ReactNode } | null;
   label: string;
 }) {
   const wordOf = (v: FocusedView) => {
     const b = badge(v);
-    return typeof b === 'string' ? b : b.word;
+    return (typeof b === 'string' ? b : b.word) || (busy?.(v) ? 'reading' : '');
   };
   return (
     <div
@@ -1054,6 +1065,7 @@ function Strip({
           numbered ? `${label} · ${numberFrom + i} · ${wordOf(v)}` : `${label} · ${wordOf(v)}`
         }
         tileBadge={(v) => badge(v)}
+        tileBusy={busy}
         tileAction={action}
         tileCorners={corners}
       />

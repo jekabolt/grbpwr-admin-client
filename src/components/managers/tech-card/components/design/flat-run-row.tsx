@@ -1,10 +1,11 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
+  PreviewDesignRunInputsResponse,
   common_DesignInputSnapshot,
   common_DesignRunParams,
 } from 'api/proto-http/admin';
-import { adminService } from 'api/api';
+import { abortableAdminService, adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
@@ -41,7 +42,7 @@ import {
   useFlatInput,
   type FlatAsk,
 } from './flat-input';
-import { labelWaiting, labelsByMedia, takeProposals } from './board-labels';
+import { inputStillReading, labelsByMedia, photoDetailSlots, takeProposals } from './board-labels';
 import {
   autoStructure,
   flatParamsFor,
@@ -339,24 +340,47 @@ const READING_POLL_MS = 1_500;
  * saved, so the server's next read settles it. Returns the pictures it waited for and those still
  * being read when it went (what is actually left out is said by the press's own preview, Codex M15),
  * or `null` when the save of a proposal failed (nothing is started).
+ *
+ * «Still being read» is the tray's own rule (`inputStillReading`, owner 07.10): every round asks the
+ * press's OWN preview (`ask`), and a picture it does not send while holding it as `pending` /
+ * `unmarked` — or not naming it at all — is still waited for, even when the band's label already
+ * looks settled (the cheap model's proposal landed, the strong detail read has not). Before, the wait
+ * read the band alone, went at ~4 s, and the run left the picture out. No preview route (404/501) or
+ * a failed ask — the band's label word alone.
+ *
+ * THE 15 s ARE A DEADLINE, NOT A CHECK BETWEEN REQUESTS (Codex review, 07.10): every band read and
+ * every preview ask inside the wait runs against what is left of it. A stalled band read is
+ * cancelled (`cancelQueries`) and the wait goes with what it last knew; a stalled ask is aborted
+ * (its connection closed) and the round reads the band's word. GENERATE never sits on «reading…»
+ * past the deadline.
  */
 async function waitForReading(opts: {
   qc: QueryClient;
   card: number;
   form: ReturnType<typeof useFormContext<TechCardFormData>>;
   flush: () => Promise<FlushResult>;
+  ask: (signal: AbortSignal) => Promise<PreviewDesignRunInputsResponse>;
 }): Promise<{ waited: number[]; left: number[] } | null> {
   const { qc, card, form } = opts;
   const ids = readFlatReading(card);
   if (!ids.length) return { waited: [], left: [] };
   patchFlatInput(card, { run: 'reading' });
   const until = Date.now() + READING_WAIT_MS;
+  let lastLeft = ids;
   for (;;) {
     let band: GetDesignBandResponse;
     try {
-      band = await rereadBand(qc, card);
+      band = await beforeDeadline(rereadBand(qc, card), until, () => {
+        void qc.cancelQueries({ queryKey: designKeys.band(card) });
+      });
     } catch {
-      return { waited: ids, left: ids };
+      // A read cancelled by the page's own refetch, or failed: the next round reads again — the
+      // wait is over only at the deadline, not at the first hiccup.
+      if (Date.now() >= until) return { waited: ids, left: lastLeft };
+      await new Promise((r) =>
+        window.setTimeout(r, Math.max(0, Math.min(READING_POLL_MS, until - Date.now()))),
+      );
+      continue;
     }
     const labels = labelsByMedia(band.references);
     const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
@@ -382,12 +406,58 @@ async function waitForReading(opts: {
     }
     const now = ((form.getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow);
     const purposeOf = new Map(now.map((i) => [i.mediaId, (i.role ?? '').trim()]));
+    let server: { sent: Set<number>; held: Map<number, string> } | null = null;
+    const abort = new AbortController();
+    try {
+      const answer = await beforeDeadline(opts.ask(abort.signal), until, () => abort.abort());
+      server = {
+        sent: new Set((answer.inputs?.refs ?? []).map((r) => r.mediaId ?? 0)),
+        held: new Map((answer.held ?? []).map((h) => [h.mediaId ?? 0, (h.reason ?? '').trim()])),
+      };
+    } catch {
+      server = null;
+    }
+    const slots = photoDetailSlots(band.bench);
     const left = ids.filter(
-      (id) => purposeOf.has(id) && labelWaiting(purposeOf.get(id) ?? '', labels.get(id)),
+      (id) =>
+        purposeOf.has(id) &&
+        !server?.sent.has(id) &&
+        inputStillReading(
+          purposeOf.get(id) ?? '',
+          labels.get(id),
+          slots,
+          server ? server.held.get(id) : null,
+        ),
     );
+    lastLeft = left;
     if (!left.length || Date.now() >= until) return { waited: ids, left };
-    await new Promise((r) => window.setTimeout(r, READING_POLL_MS));
+    await new Promise((r) =>
+      window.setTimeout(r, Math.max(0, Math.min(READING_POLL_MS, until - Date.now()))),
+    );
   }
+}
+
+/** `p`, or a rejection once `until` passes (`onExpire` cancels the request behind it). */
+function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => {
+        onExpire();
+        reject(new Error('the reading wait ran out'));
+      },
+      Math.max(0, until - Date.now()),
+    );
+    p.then(
+      (v) => {
+        window.clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 /**
@@ -439,6 +509,8 @@ async function rereadBand(qc: QueryClient, card: number): Promise<GetDesignBandR
   const queryKey = designKeys.band(card);
   const queryFn = qc.getQueryCache().find({ queryKey, exact: true })?.options.queryFn;
   if (typeof queryFn !== 'function') throw new Error('the band is not read on this page');
+  // A fetch already in flight is not joined: it may be one that never answers (Codex 07.10).
+  await qc.cancelQueries({ queryKey, exact: true });
   return qc.fetchQuery({
     queryKey,
     queryFn: queryFn as QueryFunction<GetDesignBandResponse>,
@@ -704,11 +776,23 @@ export function FlatRunRow({
       }
       /* M15 Q2: pictures just dropped into the input are given ≤15 s to be read; what is still
          being read after that stays out of this run, and the row says so. */
+      // The params this press will send (the same as below): the wait asks ITS preview.
+      const waitParams = flatRunParams(
+        targetSlotId(target),
+        modeOfRoute(routeOf({ target, fromMyFlat, structure: structureNow.length })),
+        structureNow,
+      );
       const reading = await waitForReading({
         qc,
         card,
         form,
         flush: () => autosave.flush('flat'),
+        ask: (signal) =>
+          abortableAdminService(signal).PreviewDesignRunInputs({
+            techCardId: card,
+            kind: 'flat',
+            params: waitParams,
+          }),
       });
       if (reading === null) {
         patchFlatInput(card, { refused: 'error' });
@@ -768,14 +852,32 @@ export function FlatRunRow({
         /* WHAT IS LEFT OUT IS THE SERVER'S WORD (Codex M15): of the pictures the press waited for,
            those this very snapshot does not send and holds as still being read (or with no purpose
            yet) — a label that settled after the wait is not «left out». */
+        /* By the SAME rule the wait used (`inputStillReading`, Codex review 07.10): a picture this
+           snapshot neither sends nor names in `held` is still being read too — counting only the
+           explicit `pending` / `unmarked` rows let it go missing with no word. */
         const sent = new Set((preview?.refs ?? []).map((r) => r.mediaId ?? 0));
-        const stillRead = new Set(
-          (answer.held ?? [])
-            .filter((h) => ['pending', 'unmarked'].includes((h.reason ?? '').trim()))
-            .map((h) => h.mediaId ?? 0),
+        const heldOf = new Map(
+          (answer.held ?? []).map((h) => [h.mediaId ?? 0, (h.reason ?? '').trim()]),
+        );
+        const labelsNow = labelsByMedia(freshBand.references);
+        const slotsNow = photoDetailSlots(freshBand.bench);
+        const purposeNow = new Map(
+          ((form.getValues('moodboardMedia') ?? []) as BoardItem[])
+            .filter(isBoardRow)
+            .map((i) => [i.mediaId, (i.role ?? '').trim()]),
         );
         patchFlatInput(card, {
-          leftOut: reading.waited.filter((id) => !sent.has(id) && stillRead.has(id)).length,
+          leftOut: reading.waited.filter(
+            (id) =>
+              purposeNow.has(id) &&
+              !sent.has(id) &&
+              inputStillReading(
+                purposeNow.get(id) ?? '',
+                labelsNow.get(id),
+                slotsNow,
+                heldOf.get(id),
+              ),
+          ).length,
         });
       } catch (e) {
         if (!isUnimplemented(e)) {

@@ -33,6 +33,12 @@
 //   node scripts/flat-input-pictures-probe.mjs --mutate=notone     → догадка модели чернилами: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noarm      → касание снимает сразу: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nowait     → GENERATE не ждёт чтения: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=noreadword → «no purpose» посреди чтения: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=serverblind → GENERATE не ждёт чтения сервера: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nofix      → у VIEWS/DETAIL нет угла ▾: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nodeadline → зависший запрос держит GENERATE: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=noretry    → отменённое чтение полосы рвёт ожидание: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=leftexplicit → пропавшая картинка без слова: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
 //   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
@@ -53,6 +59,7 @@ const PICTURES = /design\/flat-input-pictures\.tsx$/;
 const WORDS = /design\/flat-words-field\.tsx$/;
 const ANNOTATOR = /ui\/components\/focused-annotator\.tsx$/;
 const RUNROW = /design\/flat-run-row\.tsx$/;
+const LABELS = /design\/board-labels\.ts$/;
 const MUTATIONS = {
   // M15: the add decides the purpose itself (the M14 per-group door) — the server no longer decides.
   purpose: [
@@ -80,6 +87,48 @@ const MUTATIONS = {
       to: '  const ids: number[] = [];\n',
     },
   ],
+  // 07.10: a lagging preview's `unmarked` is said as «no purpose» mid-reading.
+  noreadword: [
+    {
+      file: LABELS,
+      from: 'return !held || READING_HELD.has(held);',
+      to: "return !held || held === 'pending';",
+    },
+  ],
+  // 07.10 D2: a landed picture has no corner ▾.
+  nofix: [
+    {
+      file: PICTURES,
+      from: 'corners={corners ? (v, i) => corners(v.mediaId, i + 1) : undefined}',
+      to: 'corners={undefined}',
+    },
+  ],
+  // Codex 07.10 #1: the wait's requests run without the deadline.
+  nodeadline: [
+    {
+      file: RUNROW,
+      from: 'function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {\n',
+      to: 'function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {\n  if (until) return p;\n',
+    },
+  ],
+  // Codex 07.10 #1: a cancelled / failed band read ends the wait at once.
+  noretry: [
+    {
+      file: RUNROW,
+      from: '      if (Date.now() >= until) return { waited: ids, left: lastLeft };\n',
+      to: '      return { waited: ids, left: lastLeft };\n',
+    },
+  ],
+  // Codex 07.10 #2: the left-out count reads only explicit `pending` / `unmarked` rows.
+  leftexplicit: [
+    {
+      file: RUNROW,
+      from: '              purposeNow.has(id) &&\n              !sent.has(id) &&\n',
+      to: '              purposeNow.has(id) &&\n              heldOf.has(id) &&\n              !sent.has(id) &&\n',
+    },
+  ],
+  // 07.10 D1: GENERATE's wait reads the band alone, not the press's preview.
+  serverblind: [{ file: RUNROW, from: 'server ? server.held.get(id) : null', to: 'null' }],
   // M15: the tray keeps a picture a press already sends.
   nosent: [{ file: PICTURES, from: '!sent.has(a.mediaId) && ', to: '' }],
   nohuman: [
@@ -191,7 +240,7 @@ const stubNetwork = {
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         // M17 pulled the playground registry into the board: its Ideas read the abortable service.
-        export const abortableAdminService = adminService;
+        export const abortableAdminService = () => adminService;
         export default { adminService, authService, frontendService };
       `,
       loader: 'js',
@@ -659,9 +708,15 @@ try {
       const box = document.querySelector('[data-flat-pictures-tray]');
       return {
         ids: box?.getAttribute('data-flat-pictures-tray') ?? '',
-        badges: [...(box?.querySelectorAll('[data-tile-badge]') ?? [])].map((b) =>
-          (b.textContent ?? '').trim().toLowerCase(),
-        ),
+        // 07.10: a picture being read carries no word — the reading is drawn on it
+        // (`[data-picture-busy="read"]`); the probe reads that as «…», and a word beside it as a defect.
+        badges: [...(box?.querySelectorAll('[data-rail-view]') ?? [])].map((t) => {
+          const word = (t.querySelector('[data-tile-badge]')?.textContent ?? '')
+            .trim()
+            .toLowerCase();
+          const busy = !!t.querySelector('[data-picture-busy="read"]');
+          return busy ? (word ? `… + ${word}` : '…') : word;
+        }),
         opacity: box ? Number(getComputedStyle(box.firstElementChild ?? box).opacity) : 1,
       };
     });
@@ -1045,6 +1100,219 @@ try {
     'never answered: after ≤15 s the press goes, and says what was left out',
     `${left} | starts ${before2}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-generate] button')?.textContent ?? '')} | tray ${(await tray()).ids}`,
   );
+
+  console.log('\n07.10 · reading is drawn on the picture, never said as «no purpose»');
+  await addOne([809]);
+  // The label lands on the client while the server's preview still holds it as `unmarked`.
+  await page.evaluate(async () => {
+    window.__added.held[809] = 'unmarked';
+    await window.__label(809, {
+      role: 'front',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(600);
+  const at809 = async () => {
+    const t = await tray();
+    return t.badges[t.ids.split(' ').indexOf('809')];
+  };
+  const reading = await page.evaluate(() => {
+    const t = document.querySelector('[data-flat-pictures-tray] [data-rail-view="809"]');
+    const busy = t?.querySelector('[data-picture-busy="read"]');
+    return {
+      busy: !!busy,
+      anim: busy ? getComputedStyle(busy.firstElementChild).animationName : '',
+      text: (t?.textContent ?? '').toLowerCase(),
+    };
+  });
+  ck(
+    (await at809()) === '…' && reading.busy && !/no purpose/.test(reading.text),
+    'a lagging «unmarked» while the label lands: the tile sweeps, no «no purpose»',
+    JSON.stringify({ word: await at809(), ...reading }),
+  );
+  ck(reading.anim === 'pictureBusyScan', 'the sweep is the scan animation', reading.anim);
+  await page.evaluate(async () => {
+    window.__added.held[809] = 'older';
+    await window.__qc.invalidateQueries();
+  });
+  await page.waitForTimeout(600);
+  ck((await at809()) === 'older', 'a final held reason is still a word, no sweep', await at809());
+  await page.evaluate(async () => {
+    delete window.__added.held[809];
+    await window.__qc.invalidateQueries();
+  });
+
+  console.log(
+    '\n07.10 D1 · GENERATE waits while the server still reads what the band calls settled',
+  );
+  await page.evaluate(async () => {
+    await window.__label(806, {
+      role: 'back',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+    window.__added.views.push(806, 809);
+    await window.__qc.invalidateQueries();
+  });
+  await addOne([810]);
+  await page.evaluate(async () => {
+    window.__added.held[810] = 'pending';
+    await window.__label(810, {
+      role: 'side_r',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(800);
+  const before3 = (await calls('StartDesignRun')).length;
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page.waitForTimeout(4500);
+  const label3 = await page.evaluate(
+    () => document.querySelector('[data-flat-generate] button')?.textContent ?? '',
+  );
+  ck(
+    /reading…/i.test(label3) && (await calls('StartDesignRun')).length === before3,
+    'the band label settled, the press preview still holds it «pending»: GENERATE keeps waiting',
+    `${label3} | starts ${before3}→${(await calls('StartDesignRun')).length} | tray ${JSON.stringify(await tray())}`,
+  );
+  await page.evaluate(() => {
+    delete window.__added.held[810];
+    window.__added.views.push(810);
+  });
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before3,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  ck(
+    (await calls('StartDesignRun')).length > before3 && !(await page.$('[data-flat-left-out]')),
+    'the server answers: the press goes with it, nothing left out',
+    `starts ${before3}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-left-out]')?.textContent ?? '')}`,
+  );
+
+  console.log('\n07.10 D2 · a landed picture is corrected from its own corner ▾');
+  const cornerAt = (group, id) =>
+    page.evaluate(
+      ([g, m]) =>
+        !!document.querySelector(
+          `[data-flat-pictures-group="${g}"] [data-rail-view="${m}"] [data-menu]`,
+        ),
+      [group, id],
+    );
+  ck(
+    (await cornerAt('views', 809)) &&
+      (await cornerAt('d:140', 802)) &&
+      !(await cornerAt('d:140', 955)) &&
+      !(await cornerAt('d:140', 956)),
+    'VIEWS and DETAIL board pictures carry the ▾; the tech flats do not',
+    JSON.stringify([
+      await cornerAt('views', 809),
+      await cornerAt('d:140', 802),
+      await cornerAt('d:140', 955),
+    ]),
+  );
+  const roleCallsD2 = (await calls('SetDesignReferenceRole')).length;
+  const heldCallsD2 = (await calls('SetDesignReferenceHeld')).length;
+  await page.hover('[data-flat-pictures-group="views"] [data-rail-view="809"]');
+  await page.click('[data-flat-pictures-group="views"] [data-rail-view="809"] [data-menu]');
+  const menu809 = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-menu-item]')].map((n) => n.getAttribute('data-menu-item')),
+  );
+  await page.click('[data-menu-item="v:side_r"]').catch(() => {});
+  await page.waitForTimeout(600);
+  const d2 = (await calls('SetDesignReferenceRole')).slice(roleCallsD2);
+  ck(
+    menu809.includes('v:side_r') &&
+      menu809.includes('detail') &&
+      d2.length === 1 &&
+      d2[0].mediaId === 809 &&
+      d2[0].role === 'side_r' &&
+      (await calls('SetDesignReferenceHeld')).length === heldCallsD2,
+    'its ▾ is the board’s menu; «side R» writes the person’s label',
+    JSON.stringify({ menu809, d2 }),
+  );
+
+  console.log(
+    '\nCodex 07.10 · a stalled wait still goes at 15 s; a picture the preview never names is counted',
+  );
+  // 811: settled on the band, but the press's preview neither sends nor holds it — still read.
+  await addOne([811]);
+  await page.evaluate(async () => {
+    await window.__label(811, {
+      role: 'front',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+  });
+  await page.waitForTimeout(800);
+  const before4 = (await calls('StartDesignRun')).length;
+  // Every preview ask made in the next 14 s never answers (a stalled band read is cancelled and
+  // read again; the ask has nothing else to rescue it but the deadline).
+  await page.evaluate(() => {
+    const until = Date.now() + 14_000;
+    for (const n of ['PreviewDesignRunInputs']) {
+      const f = window.__api[n];
+      window.__api[n] = (b) => (Date.now() < until ? new Promise(() => {}) : f(b));
+    }
+  });
+  const t4 = Date.now();
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before4,
+      { timeout: 22000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  const went4 = (await calls('StartDesignRun')).length > before4;
+  ck(
+    went4 && Date.now() - t4 < 21000,
+    'stalled requests: GENERATE still goes once the 15 s are up',
+    `${went4} after ${Date.now() - t4} ms | ${await page.evaluate(() => document.querySelector('[data-flat-generate] button')?.textContent ?? '')}`,
+  );
+  const left4 = await page.evaluate(
+    () => document.querySelector('[data-flat-left-out]')?.textContent ?? '',
+  );
+  ck(
+    /1 picture was still being read · not in this run/i.test(left4),
+    'the picture the preview neither sends nor holds is said as left out',
+    left4,
+  );
+
+  // A band read that hangs (and is cancelled by the page's own refetches) does not end the wait.
+  const before5 = (await calls('StartDesignRun')).length;
+  await page.evaluate(() => {
+    const until = Date.now() + 14_000;
+    const f = window.__api.GetDesignBand;
+    window.__api.GetDesignBand = (b) => (Date.now() < until ? new Promise(() => {}) : f(b));
+  });
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page.waitForTimeout(6000);
+  const label5 = await page.evaluate(
+    () => document.querySelector('[data-flat-generate] button')?.textContent ?? '',
+  );
+  ck(
+    /reading…/i.test(label5) && (await calls('StartDesignRun')).length === before5,
+    'a hung band read: GENERATE keeps reading (≤15 s), not «gone» at the first cancelled read',
+    label5,
+  );
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before5,
+      { timeout: 16000 },
+    )
+    .catch(() => {});
+  ck((await calls('StartDesignRun')).length > before5, '… and goes when the 15 s are up');
 
   console.log('\nM15 · recall puts a flat run’s words back into WORDS');
   const recall = await page.evaluate(() =>
