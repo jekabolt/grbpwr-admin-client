@@ -630,11 +630,18 @@ export function MoodBoard({
   const labelsNow = useRef(labels);
   labelsNow.current = labels;
 
+  /** What a placement did: the plan, and the person label carried onto the copy with its write. */
+  type Placed = {
+    mode: 'replace' | 'next-to' | 'refused';
+    carried: common_DesignReference | null;
+    carry: Promise<unknown> | null;
+  };
+
   function placeCropped(
     originalId: number,
     full: common_MediaFull,
     frame?: CropFrame,
-  ): 'replace' | 'next-to' | 'refused' | null {
+  ): Placed | null {
     const toId = full.id;
     if (toId == null || boardBusy()) return null;
     const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
@@ -649,12 +656,13 @@ export function MoodBoard({
       moveInput: false,
       boardMax: MOOD_MAX,
     });
+    const placed: Placed = { mode: plan.mode, carried: null, carry: null };
     if (plan.mode === 'refused') {
       showMessage(
         'the board is full — the crop is in the library; the original keeps its place and notes',
         'error',
       );
-      return plan.mode;
+      return placed;
     }
     setPicked((prev) => [...prev, full]);
     writeItems(plan.items);
@@ -666,11 +674,12 @@ export function MoodBoard({
         'the crop is on the board, right after the original — the original keeps its notes',
         'success',
       );
-    if (plan.mode !== 'replace') return plan.mode;
+    if (plan.mode !== 'replace') return placed;
     const carried = labelsNow.current.get(originalId);
-    if (!isPersonLabel(carried) || toId === originalId) return plan.mode;
+    if (!isPersonLabel(carried) || toId === originalId) return placed;
     const release = holdFlatInput(techCardId);
-    void setReferenceRole
+    placed.carried = carried ?? null;
+    placed.carry = setReferenceRole
       .mutateAsync({
         mediaId: toId,
         role: (carried?.role ?? '').trim(),
@@ -681,12 +690,22 @@ export function MoodBoard({
       // Отказ сказан швом записи (`onError` мутации).
       .catch(() => {})
       .finally(release);
-    return plan.mode;
+    return placed;
   }
 
   const readOnly = !!disabled;
 
   // ── remove bg (M17): the cut-out takes the tile the way a crop does (`./mood-cutout`) ──────────
+  //
+  // `undo` lives in a toast, which outlives this board: it acts only while THIS board (this card's
+  // form) is mounted, and it waits for the label carried at the landing before clearing it.
+  const alive = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const onBoard = (mediaId: number) =>
     ((getValues('moodboardMedia') ?? []) as BoardItem[]).some(
       (i) => isBoardRow(i) && i.mediaId === mediaId,
@@ -696,30 +715,50 @@ export function MoodBoard({
     if (!onBoard(originalId)) return 'gone';
     // Checked before `placeCropped`, whose own check would say it in a toast on every retry.
     if (flatInput.run || !rowsWritable(readFlatInput(techCardId))) return 'wait';
-    const mode = placeCropped(originalId, cut, WHOLE_FRAME);
-    if (mode == null) return 'wait';
+    const n = ordinalOf(originalId);
+    const placed = placeCropped(originalId, cut, WHOLE_FRAME);
+    if (placed == null) return 'wait';
     // The whole frame keeps every callout, so this is a replace; any other plan said its own words.
-    if (mode === 'replace')
-      showMessage('background removed — the original stays in the library', 'success', {
-        label: 'undo',
-        onClick: () => undoCutout.current(original, cut.id ?? 0),
-      });
+    // The picture's number keeps two landings' toasts (and their undo) apart.
+    if (placed.mode === 'replace')
+      showMessage(
+        `picture ${n}: background removed — the original stays in the library`,
+        'success',
+        {
+          label: 'undo',
+          onClick: () => undoCutout.current(original, cut.id ?? 0, placed),
+        },
+      );
     return 'placed';
   }
   /** One tap back: the original takes its place again; the cut-out's carried label stops riding. */
-  const undoCutout = useRef((_original: common_MediaFull, _cutId: number) => {});
-  undoCutout.current = (original, cutId) => {
+  const undoCutout = useRef((_original: common_MediaFull, _cutId: number, _landed: Placed) => {});
+  undoCutout.current = (original, cutId, landed) => {
+    if (!alive.current) {
+      showMessage('the moodboard was closed — nothing was undone', 'error');
+      return;
+    }
     if (!(cutId > 0) || !onBoard(cutId)) {
       showMessage('the cut-out is no longer on the board — nothing to undo', 'error');
       return;
     }
-    const carried = labelsNow.current.get(cutId);
-    if (placeCropped(cutId, original, WHOLE_FRAME) !== 'replace' || !isPersonLabel(carried)) return;
-    // Its person label would ride into the other runs from the library (they read a person's label
-    // wherever the picture is); an empty role is the person's «no view», which never travels.
+    const now = labelsNow.current.get(cutId);
+    const back = placeCropped(cutId, original, WHOLE_FRAME);
+    if (back?.mode !== 'replace') return;
+    const label = isPersonLabel(now) ? now : landed.carried;
+    if (!label) return;
+    // The cut-out's person label would ride into the other runs from the library (they read a
+    // person's label wherever the picture is); an empty role is the person's «no view», which never
+    // travels. Written AFTER the landing's own carry, which may still be on its way.
     const release = holdFlatInput(techCardId);
-    void setReferenceRole
-      .mutateAsync({ mediaId: cutId, role: '', ordinal: Math.max(1, carried?.ordinal ?? 1) })
+    void Promise.resolve(landed.carry)
+      .then(() =>
+        setReferenceRole.mutateAsync({
+          mediaId: cutId,
+          role: '',
+          ordinal: Math.max(1, label.ordinal ?? 1),
+        }),
+      )
       .catch(() => {})
       .finally(release);
   };
