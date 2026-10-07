@@ -17,8 +17,6 @@ export {
   VIEWS_TARGET,
   detailFlatSlotIds,
   detailTarget,
-  flatRefFate,
-  flatSentRefs,
   flatWordsSent,
   flatTargets,
   modeOfRoute,

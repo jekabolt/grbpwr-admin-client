@@ -603,6 +603,8 @@ export interface PictureTileMenuItem {
   /** `danger` — необратимое (`delete…`), красным. */
   tone?: 'default' | 'danger';
   title?: string;
+  /** A hairline above the row: a second group in the same corner (purpose, then the view — 101). */
+  divider?: boolean;
 }
 
 export interface PictureTileMenu {
@@ -957,6 +959,7 @@ export function CornerMenu({ menu }: { menu: PictureTileMenu }) {
               PICKER_ROW,
               'disabled:pointer-events-none disabled:opacity-30',
               item.tone === 'danger' && 'text-error',
+              item.divider && 'border-t border-hairline',
             )}
           >
             <Text

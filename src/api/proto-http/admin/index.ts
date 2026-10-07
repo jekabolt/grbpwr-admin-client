@@ -15407,6 +15407,10 @@ export type common_DesignBenchSlot = {
   staleAgainstRunId: number | undefined;
   keptBy: string | undefined;
   keptAt: wellKnownTimestamp | undefined;
+  // A detail slot a model minted from a detail photo on the moodboard (101 §2.5). Only such a slot
+  // does the server delete by itself — when it is empty and its last photo left the board; a person
+  // renaming it clears the flag.
+  madeByModel: boolean | undefined;
 };
 
 // DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
@@ -15629,6 +15633,23 @@ export type common_DesignReference = {
   // rather than inventing a name it does not have. On any role other than `detail` it is always 0,
   // and the store enforces that.
   detailSlotId: number | undefined;
+  // ═══ BOARD LABEL (101-MOODBOARD-ROLES, wave 11) ═══
+  // The row is the server's label on a moodboard picture: which view it shows, or which detail slot it
+  // belongs to. A cheap model labels a new board picture, a strong one takes the unclear ones, and what
+  // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
+  // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
+  labelSource: string | undefined;
+  // pending | ok | unsure | failed; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»).
+  labelState: string | undefined;
+  // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
+  // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
+  proposedPurpose: string | undefined;
+  // What the model read (the reason it was unsure, a phrase about a detail). NEVER sent to a prompt —
+  // shown greyed as «model read · not sent» in «what the model gets» only.
+  modelCaption: string | undefined;
+  labelModel: string | undefined;
+  labelledAt: wellKnownTimestamp | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
@@ -17585,6 +17606,32 @@ export type SetDesignReferenceRoleResponse = {
   reference: common_DesignReference | undefined;
 };
 
+export type PreviewDesignRunInputsRequest = {
+  techCardId: number | undefined;
+  kind: string | undefined;
+  params: common_DesignRunParams | undefined;
+};
+
+// DesignInputHeld — a moodboard picture that does NOT go to this run, and why.
+export type DesignInputHeld = {
+  mediaId: number | undefined;
+  // mood | material | unmarked (no purpose) | pending (the label is being read) | view_unknown
+  // (unsure / failed — answer the question card or tap the tile) | not_a_view (a person's «no view»)
+  // | older (beyond the two newest of its view) | other_detail (a detail of another slot) | detail
+  // (a detail picture on a views run) | over_cap
+  reason: string | undefined;
+  role: string | undefined;
+  modelCaption: string | undefined;
+};
+
+export type PreviewDesignRunInputsResponse = {
+  // Exactly what designAssembleInputs would freeze into design_run.inputs — refs in prompt order with
+  // their media resolved, the bench plates, the words.
+  inputs: common_DesignInputSnapshot | undefined;
+  // The board pictures that stay home, in board order.
+  held: DesignInputHeld[] | undefined;
+};
+
 // UpsertDesignAssetRequest writes one shelf row of the card (V-11).
 // EVERY FIELD IS SENT ON EVERY CALL — this is a replace, not a patch, and the screen holds the
 // whole tile in a form. A patch would need a presence flag per field for no gain: there is no
@@ -17897,25 +17944,28 @@ export type DesignQuizQuestion = {
   // "" = none. A saved answer closes its key for later quizzes; saving an answer whose key matches a
   // different saved question id forgets that older row (latest wins). Clients echo it on save.
   decisionKey: string | undefined;
-  // media_id — the moodboard picture this question is about (the board's media id); 0/absent = not a
-  // picture question. When set the client shows that picture instead of a pictogram.
+  // media_id — the moodboard picture (tech card media id, as attached to the board) this question
+  // is about; 0 = not a picture question. When set, part is "whole" and family/view are ignored by
+  // clients (no pictogram: the board anchors to the picture instead). Clients echo it on save.
   mediaId?: number | undefined;
-  // spots — 1 to 3 places IN the media_id picture the question is about (99-SPOTS); only when
-  // media_id ≠ 0. Clients echo them on save.
+  // spots — the 1–3 places IN the anchored picture the question is about (99-SPOTS), drawn as
+  // numbered rings on the board tile. Only when media_id ≠ 0 and the picture is a target or detail
+  // reference; empty for whole-picture questions. Clients echo it on save (like media_id).
   spots?: DesignQuizSpot[] | undefined;
 };
 
-// DesignQuizSpot — one place on a moodboard picture a quiz question is about (99-SPOTS).
+// DesignQuizSpot — one place on a quiz question's picture (99-SPOTS).
 export type DesignQuizSpot = {
-  // the place in the question's own words, 1–4 words
+  // label — the place in the question's own words, 1–4 words ("inner strap edge").
   label?: string | undefined;
-  // 0..1000 across the picture's width, from the left (viewer's left)
+  // x — 0..1000 across the picture's width, from the left edge as the viewer sees it.
   x?: number | undefined;
-  // 0..1000 down the picture's height, from the top
+  // y — 0..1000 down the picture's height, from the top.
   y?: number | undefined;
-  // zone|detail
+  // scale — "zone" (a part: sleeve, yoke, the run of a hem) or "detail" (a stitch line, a button).
   scale?: string | undefined;
-  // byte offset of label inside question text, -1 = not found (server-computed, output only)
+  // at — output only, server-computed: where label sits inside the question text, as a UTF-16 code
+  // unit offset (a JS string index), matched case-insensitively; -1 = not found. Ignored on save.
   at?: number | undefined;
 };
 
@@ -19565,6 +19615,11 @@ export interface AdminService {
   // and saving one must not stale a sign-off.
   // InvalidArgument: an unknown role, or a media_id the card does not hold.
   SetDesignReferenceRole(request: SetDesignReferenceRoleRequest): Promise<SetDesignReferenceRoleResponse>;
+  // PreviewDesignRunInputs is a DRY RUN of StartDesignRun's input assembly (101 §2.8): the snapshot a
+  // run of this kind and params would freeze right now — the same function, the same sources, no
+  // reservation, no money, no model. «what the model gets» draws this answer instead of re-deriving
+  // the rule on the client, plus the board pictures that stay home and why.
+  PreviewDesignRunInputs(request: PreviewDesignRunInputsRequest): Promise<PreviewDesignRunInputsResponse>;
   // DeleteDesignDetailSlot removes an EMPTY detail slot.
   // FailedPrecondition: slot_filled.
   DeleteDesignDetailSlot(request: DeleteDesignDetailSlotRequest): Promise<DeleteDesignDetailSlotResponse>;
@@ -26122,6 +26177,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignReferenceRole",
       }) as Promise<SetDesignReferenceRoleResponse>;
+    },
+    PreviewDesignRunInputs(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/runs/preview`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PreviewDesignRunInputs",
+      }) as Promise<PreviewDesignRunInputsResponse>;
     },
     DeleteDesignDetailSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.slotId) {

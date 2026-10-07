@@ -5,6 +5,8 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
+import { useQueryClient } from '@tanstack/react-query';
+import type { DesignQuizQuestion } from 'api/proto-http/admin';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
@@ -19,7 +21,6 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { FoldCaret } from 'ui/components/fold-caret';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
-import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
 import { CalloutRail, type CalloutRailRow } from './callout-rail';
@@ -27,7 +28,6 @@ import { serverSpeaksDesign } from './capability';
 import { GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
-import { carryReferenceRole } from './carry-reference';
 import { DraftedField } from './core/drafted-field';
 import { useGenerationWrites } from './generation/use-generation';
 import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
@@ -35,21 +35,31 @@ import { draftedKey, useDrafted } from './drafted-contract';
 import { useCardFacts } from './head/card-facts-form';
 import { ConstructionDraft } from './head/construction-draft';
 import { useAcceptOnEdit } from './head/drafted-provider';
-import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
+import { holdFlatInput, readFlatInput, rowsWritable, useFlatInput } from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
 import { MoodQuiz } from './mood-quiz';
-import { MOOD_ROLES, roleMenu, usePictureAnchor, type QuizPicture } from './quiz-anchor';
+import { MOOD_ROLES, usePictureAnchor, type QuizPicture } from './quiz-anchor';
+import {
+  boardMenu,
+  isPersonLabel,
+  labelAnswer,
+  labelQuestion,
+  labelsByMedia,
+  labelWaiting,
+  photoDetailSlots,
+  takeProposals,
+  tileWord,
+  unsureOnBoard,
+  type BoardMenuPick,
+} from './board-labels';
+import { DetailNamingModal } from './detail-naming-modal';
+import { DETAIL_VIEW } from './views';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
-import {
-  cardOnScreen,
-  newClientRequestId,
-  useDesignBand,
-  useDesignWrites,
-} from './use-design-band';
+import { designKeys, newClientRequestId, useDesignBand, useDesignWrites } from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -65,13 +75,12 @@ import {
  * (`B2`). Оговорка стоит прямо в подписи блока, потому что «картинки, которые я собрал» и «картинки,
  * которые увидит модель» — два разных предмета, и второй живёт в блоке референсов ниже.
  *
- * ДОСКА И ВХОД — ДВА СПИСКА, А НЕ ОДИН СПИСОК С ЯРЛЫКОМ (U-5). Один массив `moodboardMedia` держит
- * обе половины, но РАЗДЕЛЬНЫМИ СТРОКАМИ: строка со `kind = REFERENCE` принадлежит входу и на доске
- * не рисуется НИКОГДА, всё остальное — доска. Раньше это был один ярлык на одной строке, и смена
- * ярлыка уносила картинку с доски вместе с её указаниями: они адресуются по `media_id`, но рисуются
- * только на кадре, а кадра больше не было. Теперь плитку берут во вход ЖЕСТОМ (см. `takeIntoInput`),
- * который заводит ВТОРУЮ строку на тот же `media_id`: доска сохраняет и плитку, и указания, а вход
- * получает собственную запись со своей ролью и своей запиской.
+ * ДОСКА — ЕДИНСТВЕННЫЙ ИСТОЧНИК ВХОДА ФЛЭТА (101, волна 11). Отдельного списка «вход» больше нет:
+ * картинка доски несёт назначение (`role` строки формы: target / detail / mood / material) и ЯРЛЫК
+ * сервера (`design_reference`: вид или деталь), и флэт берёт из доски сам (`designFlatPickFromBoard`).
+ * Плитка показывает одно слово ярлыка (`tileWord`), угол-меню правит и назначение, и ярлык
+ * (`boardMenu`). Легаси-строки `kind = REFERENCE` здесь не рисуются (`isBoardRow`) — их переносит на
+ * доску миграция данных Ф4.
  *
  * ✕ ПЛИТКИ — ЕДИНСТВЕННАЯ НЕВОЗВРАТНАЯ ДВЕРЬ ВО ВСЕЙ ПОЛОСЕ, поэтому она называет цену вслух
  * (Г1/R7): сколько указаний умрёт вместе с плиткой — они не живут больше нигде. Молчащий ✕ уже
@@ -102,16 +111,14 @@ export const CONCEPT_MAX = 2000;
 /**
  * Потолок доски (счёта в шапке нет с item 35). Дверь добавления существует ВСЕГДА и при
  * полной доске честно отказывает словами, а не исчезает (Д19): исчезнувшая дверь читается как
- * «добавлять сюда нельзя вообще», и человек идёт искать её в другом месте.
+ * «добавлять сюда нельзя вообще», и человек идёт искать её в другом месте. 24, а не 12 (101 Ф3):
+ * доска приняла бывший вход флэта со своим потолком 12.
  */
-export const MOOD_MAX = 12;
+export const MOOD_MAX = 24;
 
-/**
- * Потолок ВХОДА — свой, а не общий с доской. Общий потолок означал, что двенадцатая картинка на
- * доске запрещала тринадцатую в промпте и наоборот: два разных предмета делили одно число, и
- * отказ говорил про доску там, где человек наполнял вход. Число то же, счёт раздельный.
- */
-export const INPUT_MAX = 12;
+/** Перечитывание полосы, пока ярлык читается моделью: шаг и предел (3 с × 30 = 90 с). */
+const LABEL_POLL_MS = 3000;
+const LABEL_POLL_TICKS = 30;
 
 /** Одна строка `moodboardMedia` как её видит форма. Мудборд и референсы правят ОДИН этот список. */
 export type BoardItem = NonNullable<TechCardFormData['moodboardMedia']>[number];
@@ -122,24 +129,6 @@ export type BoardItem = NonNullable<TechCardFormData['moodboardMedia']>[number];
  * импорт отсюда завёл бы цикл. Здесь — реэкспорт для прежних читателей, второго написания нет.
  */
 export { isBoardRow, isInputRow, REFERENCE_KIND };
-
-/**
- * ВЗВЕДЁННЫЙ ВЫБОР ПЛИТКИ — единственное состояние, которое делят два соседних блока: ссылку
- * «or from the moodboard» жмут в РЕФЕРЕНСАХ, а выбирают на ДОСКЕ. Ни один из блоков не может им
- * владеть — доска не знает про вход, вход не рисует плиток доски, — а общего родителя править
- * нельзя (`studio-tab.tsx` принадлежит другой задаче). Поэтому состояние живёт здесь, вне обоих
- * деревьев, ровно как соседний `pick-mode.tsx` для верстака.
- *
- * Не в форме и не в React Query: это не свойство карточки, и оно ОБЯЗАНО умирать на Esc и при
- * уходе со страницы. Взвод, переживший перезагрузку, — это карточка, которая выглядит сломанной
- * по причине, которую не объясняет ни одно поле.
- */
-type InputPickState = { armed: boolean; arm: () => void; disarm: () => void };
-export const useInputPick = create<InputPickState>((set) => ({
-  armed: false,
-  arm: () => set({ armed: true }),
-  disarm: () => set({ armed: false }),
-}));
 
 /**
  * Приём картинок в ОДИН из двух ящиков карточки — общая функция на обе двери («+ picture» здесь и
@@ -192,28 +181,6 @@ export function appendBoardPictures(input: {
         ? `only ${accepted.length} of ${fresh.length} fit — the ${input.scopeLabel} holds ${input.max}`
         : null,
   };
-}
-
-/**
- * Плитка доски заводит СВОЮ запись во входе: строка новая, `media_id` тот же, плитка остаётся на
- * месте вместе со всеми своими указаниями. Второй записи на тот же `media_id` во входе не бывает —
- * роль хранится в полосе по `media_id`, и двум записям её было бы нечем различить.
- */
-export function takeIntoInput(
-  live: BoardItem[],
-  mediaId: number,
-): { next: BoardItem[]; refusal: string | null } {
-  const input = live.filter(isInputRow);
-  if (input.some((i) => i.mediaId === mediaId)) {
-    return { next: live, refusal: 'this picture is already in the input' };
-  }
-  if (input.length >= INPUT_MAX) {
-    return {
-      next: live,
-      refusal: `the input is full — ${INPUT_MAX} of ${INPUT_MAX}; remove a reference first`,
-    };
-  }
-  return { next: [...live, { mediaId, kind: REFERENCE_KIND, caption: '' }], refusal: null };
 }
 
 /**
@@ -514,6 +481,16 @@ export function MoodBoard({
   const writeItems = (next: BoardItem[]) =>
     setValue('moodboardMedia', next as TechCardFormData['moodboardMedia'], { shouldDirty: true });
 
+  /* ДОСКА — ВХОД ФЛЭТА (101 Ф3, Codex): пока GENERATE сохраняет карточку и запускает прогон, состав
+     доски, назначения и ярлыки не меняются — прогон взял бы смесь «до» и «после». Окно — секунды;
+     отказ говорится словами. */
+  const flatInput = useFlatInput(techCardId);
+  const boardBusy = () => {
+    if (!flatInput.run && rowsWritable(readFlatInput(techCardId))) return false;
+    showMessage('a flat run is being started — change the board once it has started', 'error');
+    return true;
+  };
+
   // Свежевыбранные медиа разрешаются локально: без этого только что добавленную картинку нельзя
   // разметить до сохранения и перезагрузки.
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
@@ -552,6 +529,9 @@ export function MoodBoard({
   // же, что у студии, — второго чтения полосы не возникает.
   const speaks = serverSpeaksDesign();
   const { band } = useDesignBand(techCardId);
+  // ЯРЛЫКИ ДОСКИ (101 Ф3): вид или деталь каждой картинки — строка сервера по `media_id`.
+  const labels = useMemo(() => labelsByMedia(band.references), [band.references]);
+  const detailSlots = useMemo(() => photoDetailSlots(band.bench), [band.bench]);
   const [editing, setEditing] = useState<{ mediaId: number; full: common_MediaFull } | null>(null);
 
   const views: FocusedView[] = items.map((i) => ({
@@ -580,6 +560,7 @@ export function MoodBoard({
 
   // ── дверь добавления ────────────────────────────────────────────────────────────────────────
   function handleAddMedia(added: common_MediaFull[]): number[] {
+    if (boardBusy()) return [];
     const result = appendBoardPictures({
       live: (getValues('moodboardMedia') ?? []) as BoardItem[],
       inScope: isBoardRow,
@@ -600,31 +581,28 @@ export function MoodBoard({
 
   // ── кроп плитки (T01; 03.10, gate FX2) ──────────────────────────────────────────────────────
   //
-  // Копия встаёт на место оригинала — на доске и во входе, роль на сервере переезжает за ней;
-  // указания переносятся в рамку кропа, а если хоть одно не помещается — оригинал остаётся со
-  // всеми указаниями, кроп встаёт за ним. Все ветви — `planBoardCrop`.
-  const { setReferenceRole } = useDesignWrites(techCardId);
+  // Копия встаёт на место оригинала; указания переносятся в рамку кропа, а если хоть одно не
+  // помещается — оригинал остаётся со всеми указаниями, кроп встаёт за ним. Все ветви —
+  // `planBoardCrop`. Ярлык ЧЕЛОВЕКА (вид, деталь) переезжает на кроп; ярлык модели — нет: кроп она
+  // прочтёт заново, как любую новую картинку (101 Ф3).
+  const { setReferenceRole, setBenchSlot } = useDesignWrites(techCardId);
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
   );
 
   function placeCropped(originalId: number, full: common_MediaFull, frame?: CropFrame) {
     const toId = full.id;
-    if (toId == null) return;
-    const card = techCardId;
+    if (toId == null || boardBusy()) return;
     const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
     const liveCallouts = (getValues('callouts') ?? []) as MoodCallout[];
-    const inInput = live.some((i) => isInputRow(i) && i.mediaId === originalId);
-    // Посреди GENERATE или CLEAR вход не трогается: прогон уже снимает его (тот же замок, что у
-    // кропа во входе).
-    const inputFree = rowsWritable(readFlatInput(card));
     const plan = planBoardCrop({
       live,
       callouts: liveCallouts,
       fromId: originalId,
       toId,
       frame,
-      moveInput: inInput && inputFree,
+      // Входа флэта больше нет (101): легаси-строка REFERENCE остаётся на оригинале до миграции Ф4.
+      moveInput: false,
       boardMax: MOOD_MAX,
     });
     if (plan.mode === 'refused') {
@@ -644,72 +622,138 @@ export function MoodBoard({
         'the crop is on the board, right after the original — the original keeps its notes',
         'success',
       );
-    if (inInput && !inputFree && cardOnScreen(card))
-      showMessage(
-        'the input is busy — a run is being saved or started; the input keeps the original',
-        'error',
-      );
-
-    // РОЛЬ ВХОДА — ЗА СТРОКОЙ (J-8): сначала новому медиа, потом снять со старого.
-    const carried = (band.references ?? []).find(
-      (r) => r.mediaId === originalId && (r.role ?? '').trim(),
-    );
-    if (!plan.inputMoved || !carried) return;
-    const ordinal = Math.max(
-      1,
-      live.filter(isInputRow).findIndex((i) => i.mediaId === originalId) + 1,
-    );
-    const release = holdFlatInput(card);
-    void carryReferenceRole(
-      setReferenceRole.mutateAsync,
-      {
-        role: (carried.role ?? '').trim(),
-        note: carried.note ?? '',
-        detailSlotId: carried.detailSlotId ?? 0,
-      },
-      originalId,
-      toId,
-      ordinal,
-    )
+    if (plan.mode !== 'replace') return;
+    const carried = labels.get(originalId);
+    if (!isPersonLabel(carried) || toId === originalId) return;
+    const release = holdFlatInput(techCardId);
+    void setReferenceRole
+      .mutateAsync({
+        mediaId: toId,
+        role: (carried?.role ?? '').trim(),
+        ordinal: Math.max(1, carried?.ordinal ?? 1),
+        note: carried?.note ?? '',
+        detailSlotId: carried?.detailSlotId ?? 0,
+      })
       // Отказ сказан швом записи (`onError` мутации).
       .catch(() => {})
       .finally(release);
   }
 
-  // ── взведённый выбор: плитка доски заводит запись во входе ──────────────────────────────────
-  const pick = useInputPick();
   const readOnly = !!disabled;
-  const picking = pick.armed && !readOnly;
 
-  // Esc снимает взвод. Полоса обещает это словами, поэтому обещание должно исполняться и тогда,
-  // когда фокус нигде в частности, — отсюда слушатель на документе, а не на баннере.
-  useEffect(() => {
-    if (!picking) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        pick.disarm();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [picking, pick]);
-
-  // Взвод не переживает уход с экрана: он не свойство карточки.
-  useEffect(() => () => useInputPick.getState().disarm(), []);
-
-  function pickIntoInput(mediaId: number) {
-    const result = takeIntoInput((getValues('moodboardMedia') ?? []) as BoardItem[], mediaId);
-    if (result.refusal) {
-      showMessage(result.refusal, 'error');
+  // ── угол плитки и вопрос под доской: назначение (форма) и ярлык (сервер) ─────────────────────
+  const ordinalOf = (mediaId: number) =>
+    Math.max(1, items.findIndex((i) => i.mediaId === mediaId) + 1);
+  /* ЯРЛЫК — ЧАСТЬ ВХОДА ФЛЭТА (Codex Ф3): посреди GENERATE (сохранение, превью, запуск) он не
+     пишется, а пока пишется — GENERATE ждёт (`holdFlatInput`), как ждал роль старого входа.
+     Отказ записи сказан швом (`onError` мутации); ярлык на плитке остаётся прежним. */
+  const writeLabel = async (mediaId: number, role: string, detailSlotId = 0) => {
+    const card = techCardId;
+    if (!rowsWritable(readFlatInput(card))) {
+      showMessage('a flat run is being started — set the label once it has started', 'error');
       return;
     }
-    writeItems(result.next);
-    // Один жест — одна запись. Взвод снимается сразу: он назывался «pick a picture», в
-    // единственном числе, и оставленный взведённым он читался бы как «жду ещё».
-    pick.disarm();
-    showMessage('the picture is in the input — give it a role there', 'success');
+    const release = holdFlatInput(card);
+    try {
+      await setReferenceRole.mutateAsync({
+        mediaId,
+        role,
+        ordinal: ordinalOf(mediaId),
+        detailSlotId,
+      });
+    } catch {
+      /* сказано швом */
+    } finally {
+      release();
+    }
+  };
+  const [namingFor, setNamingFor] = useState<number | null>(null);
+
+  function onBoardPick(mediaId: number, pick: BoardMenuPick) {
+    if (readOnly) return;
+    if (pick.kind === 'purpose') setRoleOf(mediaId, pick.purpose);
+    else if (pick.kind === 'view') void writeLabel(mediaId, pick.view);
+    else if (pick.kind === 'detail') void writeLabel(mediaId, DETAIL_VIEW, pick.slotId);
+    else setNamingFor(mediaId);
   }
+
+  /** `new detail…`: слот флэтового верстака заводится ПЕРВЫМ, его id едет с ярлыком (J-9). */
+  async function addDetail(mediaId: number, name: string) {
+    const card = techCardId;
+    if (!rowsWritable(readFlatInput(card))) {
+      showMessage(`a flat run is being started — detail “${name}” was not added`, 'error');
+      return;
+    }
+    // Слот и ярлык — один жест: GENERATE ждёт до последней записи.
+    const release = holdFlatInput(card);
+    try {
+      const created = await setBenchSlot.mutateAsync({
+        slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
+        pictureId: 0,
+        expectedSlotRev: 0,
+        newDetailName: name,
+      });
+      const slotId = created?.slot?.id ?? 0;
+      if (slotId > 0)
+        await setReferenceRole.mutateAsync({
+          mediaId,
+          role: DETAIL_VIEW,
+          ordinal: ordinalOf(mediaId),
+          detailSlotId: slotId,
+        });
+    } catch {
+      /* сказано швом записи */
+    } finally {
+      release();
+    }
+  }
+
+  const labelQuestions = useMemo(
+    () =>
+      readOnly
+        ? []
+        : unsureOnBoard(items, labels).map((u) => labelQuestion(u.mediaId, u.purpose, detailSlots)),
+    [readOnly, items, labels, detailSlots],
+  );
+  const onLabelAnswer = (q: DesignQuizQuestion, option: string) => {
+    const pick = labelAnswer(q, option, detailSlots);
+    if (pick && q.mediaId) onBoardPick(q.mediaId, pick);
+  };
+
+  // ПРЕДЛОЖЕНИЕ НАЗНАЧЕНИЯ (101 §2.4): модель прочла картинку без роли — роль встаёт в форму, только
+  // если она там ПУСТА, и только один раз на картинку; автосейв уносит её на сервер.
+  useEffect(() => {
+    if (readOnly || !(techCardId > 0) || !labels.size || flatInput.run) return;
+    const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
+    const take = takeProposals(techCardId, live.filter(isBoardRow), labels);
+    if (!take.length) return;
+    let next = live;
+    for (const t of take) next = setBoardRole(next, t.mediaId, t.purpose);
+    writeItems(next);
+    // `items` — форма могла дочитаться позже полосы.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labels, items, readOnly, techCardId, flatInput.run]);
+
+  // ЯРЛЫК ЧИТАЕТСЯ — ПОЛОСА ПЕРЕЧИТЫВАЕТСЯ: каждые 3 с, не дольше полутора минут на одно ожидание
+  // (модель отвечает за секунды; дольше — сервер долечит лениво при следующем открытии).
+  const qc = useQueryClient();
+  const waiting = items
+    .filter((i) => labelWaiting(i.role ?? '', labels.get(i.mediaId)))
+    .map((i) => i.mediaId)
+    .join(',');
+  useEffect(() => {
+    if (!waiting || !(techCardId > 0) || !speaks) return;
+    let ticks = 0;
+    const timer = window.setInterval(() => {
+      ticks += 1;
+      if (ticks > LABEL_POLL_TICKS) {
+        window.clearInterval(timer);
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+    }, LABEL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [waiting, techCardId, speaks, qc]);
 
   // ── ✕ плитки: цитата перед уничтожением ─────────────────────────────────────────────────────
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
@@ -719,7 +763,7 @@ export function MoodBoard({
   function confirmRemove() {
     const mediaId = pendingRemove;
     setPendingRemove(null);
-    if (mediaId == null) return;
+    if (mediaId == null || boardBusy()) return;
     // УКАЗАНИЯ УМИРАЮТ ВМЕСТЕ С ПЛИТКОЙ, а не открепляются. Доли кадра осмысленны только на СВОЁМ
     // снимке, номера у мудбордного указания нет, и открепившееся оно не показывается нигде — то
     // есть «сохранили» означало бы «оставили сиротой в payload». Поэтому ✕ и обязан назвать число.
@@ -789,8 +833,10 @@ export function MoodBoard({
     () => items.filter((i) => !i.role && i.mediaId).map((i) => i.mediaId),
     [items],
   );
-  const setRoleOf = (mediaId: number, role: string) =>
+  const setRoleOf = (mediaId: number, role: string) => {
+    if (boardBusy()) return;
     writeItems(setBoardRole((getValues('moodboardMedia') ?? []) as BoardItem[], mediaId, role));
+  };
   /**
    * СВЁРНУТАЯ ДОСКА РАЗВОРАЧИВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (фиксап раунда 2, MIN-6). Дверь
    * рельса `description ›` и отказ по полю (`revealField`) шлют `FIELD_REVEAL_EVENT` НА ЯКОРЬ поля,
@@ -988,19 +1034,6 @@ export function MoodBoard({
           }
         >
           <div id={bodyId} ref={anchorScope} className={open ? 'space-y-stack' : 'hidden'}>
-            {/* ПОЛОСА ВЗВОДА. Стоит НАД доской, а не под ней: она объясняет, почему плитки вдруг
-                обведены пунктиром, и объяснение обязано попасться на глаза раньше следствия. */}
-            {picking && (
-              <div className='flex flex-wrap items-center gap-2 border border-textColor px-2.5 py-1.5'>
-                <Text size='micro' variant='label' component='span'>
-                  pick a moodboard picture — it becomes a reference too, the tile stays here
-                </Text>
-                <Chip onClick={() => pick.disarm()} className='ml-auto'>
-                  esc to cancel
-                </Chip>
-              </div>
-            )}
-
             <FocusedAnnotator
               layout='grid'
               // U-4: ВЫСОТА ОДНА НА ВСЕ КАДРЫ — лента фиксированной высоты. Переноса по строкам нет
@@ -1044,13 +1077,6 @@ export function MoodBoard({
               hoveredKey={hoverIndex == null ? null : callouts.keyOf(hoverIndex)}
               addingKey={addingKey}
               onAddingChange={setAddingKey}
-              tilePick={{
-                active: picking,
-                onPick: (view) => pickIntoInput(view.mediaId),
-                taken: (mediaId) => inputIds.has(mediaId),
-                label: (view, i) => `take picture ${i + 1} into the input`,
-                takenLabel: 'in the input',
-              }}
               views={views}
               // ПОДЛОЖКА ПОД ЛИНИЯМИ УКАЗАНИЙ — ЭТО ФОТОГРАФИИ. Чернильная линия на пёстром снимке
               // тонет, и указание перестаёт быть видно ровно там, где его поставили.
@@ -1076,10 +1102,11 @@ export function MoodBoard({
               // `crop` — низ слева, `edit` — низ справа. Глаголы тихие (`TILE_QUIET`), места назначает
               // поверхность (`cornerSlotBottom`), `group` — сама плитка галереи.
               removeLabel={(view, i) => `take moodboard picture ${i + 1} off the board`}
-              tileFlag={(view) =>
-                inputIds.has(view.mediaId) ? { word: 'in the input', tone: 'ink' } : null
+              // СЛОВО ПЛИТКИ — ЯРЛЫК (101 Ф3): вид (`front`, `side L`), имя детали, `mood` / `material`;
+              // `…` — модель ещё читает, `view ?` — ждёт человека (вопрос под доской).
+              tileBadge={(view) =>
+                tileWord(roleOf.get(view.mediaId) ?? '', labels.get(view.mediaId), detailSlots)
               }
-              tileBadge={(view) => roleOf.get(view.mediaId) || null}
               anchoredMediaId={anchored}
               anchoredSpots={spots}
               hotSpot={hotSpot}
@@ -1111,12 +1138,14 @@ export function MoodBoard({
                           {!readOnly && (
                             <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
                               <CornerMenu
-                                menu={roleMenu(
-                                  view.mediaId,
-                                  i + 1,
-                                  roleOf.get(view.mediaId) ?? '',
-                                  (role) => setRoleOf(view.mediaId, role),
-                                )}
+                                menu={boardMenu({
+                                  mediaId: view.mediaId,
+                                  n: i + 1,
+                                  purpose: roleOf.get(view.mediaId) ?? '',
+                                  ref: labels.get(view.mediaId),
+                                  slots: detailSlots,
+                                  onPick: (pick) => onBoardPick(view.mediaId, pick),
+                                })}
                               />
                             </span>
                           )}
@@ -1164,6 +1193,8 @@ export function MoodBoard({
               onFocusPicture={onFocusPicture}
               unmarked={unmarked}
               onSetRole={setRoleOf}
+              labelQuestions={labelQuestions}
+              onLabel={onLabelAnswer}
             />
           </div>
 
@@ -1196,6 +1227,16 @@ export function MoodBoard({
               )}
             </div>
           </ConfirmationModal>
+
+          <DetailNamingModal
+            open={namingFor != null}
+            onCancel={() => setNamingFor(null)}
+            onConfirm={(name) => {
+              const mediaId = namingFor;
+              setNamingFor(null);
+              if (mediaId != null) void addDetail(mediaId, name);
+            }}
+          />
 
           <MediaRecropDialog
             media={cropping?.full}

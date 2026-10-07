@@ -46,11 +46,6 @@ const MUTATIONS = {
     'const carried = remapped && remapped.dropped === 0 ? remapped.next : null;',
     'const carried = remapped ? remapped.next : null;',
   ],
-  order: [
-    /design\/carry-reference\.ts$/,
-    '  await write({\n    mediaId: toId,',
-    "  await write({ mediaId: fromId, role: '', ordinal: 0, note: '' });\n  await write({\n    mediaId: toId,",
-  ],
 };
 
 function mutationPlugin() {
@@ -362,42 +357,6 @@ const fullFramed = m.planBoardCrop({
 ck(
   fullFramed.mode === 'replace' && fullFramed.items[1].mediaId === 99,
   'полная доска с рамкой: замена проходит',
-);
-
-const writes = [];
-await m.carryReferenceRole(
-  async (w) => void writes.push(w),
-  { role: 'front', note: 'n', detailSlotId: 0 },
-  2,
-  9,
-  1,
-);
-ck(
-  writes.length === 2 &&
-    writes[0].mediaId === 9 &&
-    writes[0].role === 'front' &&
-    writes[1].mediaId === 2 &&
-    writes[1].role === '',
-  'роль: сначала новому медиа, потом снять со старого',
-  JSON.stringify(writes),
-);
-const failed = [];
-await m
-  .carryReferenceRole(
-    async (w) => {
-      failed.push(w);
-      throw new Error('refused');
-    },
-    { role: 'front', note: '', detailSlotId: 0 },
-    2,
-    9,
-    1,
-  )
-  .catch(() => {});
-ck(
-  failed.length === 1 && failed[0].mediaId === 9,
-  'отказ первой записи — со старого не снимается',
-  JSON.stringify(failed),
 );
 
 console.log(`\n${total - bad} / ${total}, провалов ${bad}${MUTATE ? '  (MUTATE)' : ''}`);

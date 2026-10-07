@@ -7,6 +7,7 @@ import {
   DesignSplitFrame,
   DesignUploadItem,
   GetDesignBandResponse,
+  common_DesignRunParams,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -45,7 +46,7 @@ export const designKeys = {
  * against an old binary is a 400 on the WHOLE UpdateTechCard document, i.e. nobody saves any tech
  * card at all (`DiscardUnknown: false`, internal/api/http/http.go).
  */
-function isUnimplemented(error: unknown): boolean {
+export function isUnimplemented(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
   return status === 404 || status === 501;
 }
@@ -709,6 +710,28 @@ export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number)
 const NO_ANSWERS: DesignQuizAnswer[] = [];
 const NO_PENDING: DesignQuizQuestion[] = [];
 
+/**
+ * «WHAT THE MODEL GETS» OF A FLAT PRESS (101 Ф2/Ф3): the snapshot the server would freeze for THESE
+ * params now (`PreviewDesignRunInputs` — the same `designAssembleInputs` as StartDesignRun), plus why
+ * each other board picture stays home. Read only while the modal is open; re-read on every band
+ * change and after every save (`stamp`), because it reads the SAVED card.
+ */
+export function useFlatPreview(
+  techCardId: number,
+  params: common_DesignRunParams,
+  enabled: boolean,
+  stamp: string,
+) {
+  const qc = useQueryClient();
+  const bandAt = qc.getQueryState(designKeys.band(techCardId))?.dataUpdatedAt ?? 0;
+  return useQuery({
+    queryKey: [...designKeys.all, 'preview', techCardId, params, bandAt, stamp] as const,
+    queryFn: () => adminService.PreviewDesignRunInputs({ techCardId, kind: 'flat', params }),
+    enabled: enabled && techCardId > 0,
+    staleTime: 0,
+    retry: false,
+  });
+}
 /**
  * СЕССИЯ ПРОГОНА НА СЕРВЕРЕ (E2): чтение несёт и `pending` — вопросы открытого прогона без
  * сохранённой строки, в порядке модели. Это источник `resume N` с любой вкладки и устройства;

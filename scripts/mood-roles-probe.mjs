@@ -194,7 +194,9 @@ try {
       })),
     );
   const roles = () =>
-    page.evaluate(() => window.__rolesForm().moodboardMedia.map((i) => `${i.mediaId}:${i.role ?? ''}`));
+    page.evaluate(() =>
+      window.__rolesForm().moodboardMedia.map((i) => `${i.mediaId}:${i.role ?? ''}`),
+    );
 
   console.log('\nE3 · покой');
   const b0 = await badges();
@@ -204,7 +206,12 @@ try {
     'unset role: the badge is the number alone',
     JSON.stringify(b0),
   );
-  ck(b0[1]?.badge === '2 · detail', 'set role: the badge reads «2 · detail»', b0[1]?.badge);
+  // 101 Ф3: the badge is the server's LABEL word; with no band here it is still being read («…»).
+  ck(
+    b0[1]?.badge === '2 · …',
+    'set role: the badge reads the label word («2 · …» while read)',
+    b0[1]?.badge,
+  );
   ck(
     b0[0]?.menu === 'role ▾' && b0[1]?.menu === 'detail ▾',
     'the menu corner word: role ▾ / detail ▾',
@@ -249,7 +256,11 @@ try {
   await page.click('[role="listbox"] [data-menu-item="target"]');
   await page.waitForTimeout(150);
   const b1 = await badges();
-  ck(b1[0]?.badge === '1 · target', 'after the pick the badge reads «1 · target»', b1[0]?.badge);
+  ck(
+    b1[0]?.badge === '1 · …',
+    'after the pick the badge reads the label word («1 · …» while read)',
+    b1[0]?.badge,
+  );
   const r1 = await roles();
   ck(
     JSON.stringify(r1) === JSON.stringify(['101:target', '102:detail', '103:']),

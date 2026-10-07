@@ -5956,6 +5956,23 @@ export type DesignReference = {
   // rather than inventing a name it does not have. On any role other than `detail` it is always 0,
   // and the store enforces that.
   detailSlotId: number | undefined;
+  // ═══ BOARD LABEL (101-MOODBOARD-ROLES, wave 11) ═══
+  // The row is the server's label on a moodboard picture: which view it shows, or which detail slot it
+  // belongs to. A cheap model labels a new board picture, a strong one takes the unclear ones, and what
+  // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
+  // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
+  labelSource: string | undefined;
+  // pending | ok | unsure | failed; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»).
+  labelState: string | undefined;
+  // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
+  // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
+  proposedPurpose: string | undefined;
+  // What the model read (the reason it was unsure, a phrase about a detail). NEVER sent to a prompt —
+  // shown greyed as «model read · not sent» in «what the model gets» only.
+  modelCaption: string | undefined;
+  labelModel: string | undefined;
+  labelledAt: wellKnownTimestamp | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -6053,6 +6070,10 @@ export type DesignBenchSlot = {
   staleAgainstRunId: number | undefined;
   keptBy: string | undefined;
   keptAt: wellKnownTimestamp | undefined;
+  // A detail slot a model minted from a detail photo on the moodboard (101 §2.5). Only such a slot
+  // does the server delete by itself — when it is empty and its last photo left the board; a person
+  // renaming it clears the flag.
+  madeByModel: boolean | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.

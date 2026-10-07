@@ -4,4 +4,3 @@ export {
   remapCalloutsIntoCrop,
   swapBoardPicture,
 } from 'components/managers/tech-card/components/design/mood-board';
-export { carryReferenceRole } from 'components/managers/tech-card/components/design/carry-reference';

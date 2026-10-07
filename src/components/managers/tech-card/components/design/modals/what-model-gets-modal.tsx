@@ -1,4 +1,11 @@
-import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  DesignInputHeld,
+  GetDesignBandResponse,
+  common_DesignInputRef,
+  common_DesignInputSlot,
+  common_DesignRunParams,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo } from 'react';
@@ -15,68 +22,62 @@ import {
   latestRunOfKind,
 } from '../core';
 import { useTechCardAutosave } from '../autosave-contract';
+import { viewWord } from '../board-labels';
 import { openDoor } from '../doors';
-import type { BoardItem } from '../mood-board';
-import { moodPictureIds } from '../flat-mode';
-import { flatRefFate, flatSentRefs, flatWordsSent } from '../flat-route';
-import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
-import { viewLabel } from '../views';
+import { flatWordsSent } from '../flat-route';
+import { FIT_WHERE } from '../render/what-model-gets';
+import { useFlatPreview } from '../use-design-band';
 import { useShownWords } from '../words-seed';
 
 /**
- * WHAT THE MODEL GETS — THE FLAT ARM: a reader of the FORM.
+ * WHAT THE MODEL GETS — THE FLAT ARM, READ FROM THE SERVER (101 Ф3).
  *
- * THE MARKUP IS NOT HERE. It is `core/wmg.tsx`, one for every step (contract §B); this file is the
- * SUPPLIER — it knows which form fields make up the flat dispatch and in what order, and it hands
- * the parts to the shared lines. The render / 3D / recolour arms live in `render/what-model-gets`
- * and read the BAND; the two files stay apart because their dependency sets have nothing in common,
- * not because their panels may look different.
+ * The pictures are NOT assembled here any more. The server answers `PreviewDesignRunInputs` with the
+ * snapshot the next run would freeze for exactly the params GENERATE would send (`flatRunParams`) —
+ * the same `designAssembleInputs` that StartDesignRun runs — and every other board picture with the
+ * reason it stays home (`held`). One rule, on the server; this file only draws it.
  *
- * EVERY LINE OF IT IS A REAL, LIVE FACT ABOUT THIS CARD and there is nowhere else that assembles
- * them: which reference pictures carry a role and in what order, which sit on the card carrying
- * none, which pictures the prompt would never see whatever happens (a moodboard tile is mood, not
- * instruction), and the words the card states about the garment. A technologist handing this style
- * to a studio outside reads exactly this list.
+ * `model read · not sent`: the model's own words about a picture (`modelCaption`) are shown greyed
+ * beside a held picture and NEVER travel (101 §2.7).
  *
- * NOTHING HERE IS EDITABLE, AND THAT IS THE DESIGN. Edits happen at the field's home; a second
- * writer for a role or a note would be a second opinion about the same row. Where an address exists
- * the line is a DOOR (`openDoor` walks to the rendered field and pulses it); where the block carries
- * no `data-field` the panel names the block in words instead of drawing a button that cannot lead
- * anywhere.
- *
- * THE PROMPT NUMBERS ARE DENSE AND DERIVED, exactly as the references block computes them: a scan
- * in board order, skipping the roleless. A stored number would need N writes every time a role is
- * cleared and would disagree with the block next to it after the first race.
- *
- * AND THE SENT TEXT ITSELF — `run.prompt` of the latest flat run — CLOSES THE OWNER'S CLAIM «if
- * there are comments/example prompts I wrote, why weren't they added». His paragraphs WERE in every
- * dispatch; nothing on any screen showed the words, so the inventory above read as the whole story.
- * The worker stores the composed base instruction at dispatch (never rebuilt on read), and this
- * panel shows that text verbatim. The inventory answers «which pictures travelled», the text
- * answers «in what words».
+ * The markup is `core/wmg.tsx`, one for every step. NOTHING HERE IS EDITABLE: a picture's purpose and
+ * view are set on its moodboard tile.
  */
 
-const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
-
-type Line = {
-  mediaId: number;
-  role: string;
-  note: string;
-  /**
-   * THE CALLOUTS DRAWN ON THIS PICTURE, AS WORDS. They travel: `designAssembleInputs` pins
-   * `Callouts: callouts[r.MediaId]` to every reference in the prompt, and `designgen/snapshot.go`
-   * (`refEntryCaption`) unfolds them into the picture's caption. Printed in the shape the server
-   * prints them (`TechCardCalloutPrintedLine`): «part, part: description (dimensions)» — every part
-   * of the callout (`PartList`), not the first alone.
-   */
-  callouts: string[];
-  number?: number;
+/** One word per held reason (the server's `designHeld*`). */
+const HELD_WORD: Record<string, string> = {
+  mood: 'mood',
+  material: 'material',
+  unmarked: 'no purpose',
+  pending: 'reading…',
+  view_unknown: 'view ?',
+  not_a_view: 'no view',
+  older: 'older',
+  detail: 'a detail',
+  other_detail: 'another detail',
 };
 
-function thumbOf(media?: common_MediaFull): string {
+/** Why, in a few words — the line beside the held picture. */
+const HELD_WHY: Record<string, string> = {
+  mood: 'a flat is drawn from the garment’s own photos',
+  material: 'a material is not a view of the garment',
+  unmarked: 'give it a purpose on its tile',
+  pending: 'the model is still reading which view it is',
+  view_unknown: 'answer «which view is this?» under the moodboard',
+  not_a_view: 'marked as no view',
+  older: 'the two newest pictures of its view go',
+  detail: 'it goes with a run of its detail',
+  other_detail: 'a picture of another detail',
+};
+
+const thumbOf = (media?: common_MediaFull): string => {
   const m = media?.media;
   return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
-}
+};
+
+/** The prompt's word for a reference: a view (`side L`), a hand flat (`front flat`), a detail. */
+const refWord = (role: string): string =>
+  role === 'front_flat' ? 'front flat' : role === 'back_flat' ? 'back flat' : viewWord(role);
 
 export function WhatModelGetsModal({
   open,
@@ -84,9 +85,8 @@ export function WhatModelGetsModal({
   band,
   techCardId = 0,
   readOnly = false,
-  detailSlotId = 0,
-  structure = [],
-  plates = [],
+  detail = false,
+  params,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,194 +95,54 @@ export function WhatModelGetsModal({
   techCardId?: number;
   /** Карточку нельзя писать — предложения WORDS не видно, слова = значение формы (MIN-4 c). */
   readOnly?: boolean;
-  /** The `target ▾` detail slot (`d:<id>`); 0 = the views run. A detail run sends only the
-   * references tied to that detail (T74, `designFlatDetailOnlyItsRefs`). */
-  detailSlotId?: number;
-  /** A «from my flat» press: the designer's own flats travel FIRST (front_flat, then back_flat), as the
-   *  server records them (designFlatStructureRefs). Empty on any other route. */
-  structure?: readonly { mediaId: number; role: string }[];
-  /** A detail press: the accepted FRONT / BACK flats the server attaches as bench plates (T8). */
-  plates?: readonly { mediaId: number; role: string }[];
+  /** The `target ▾` is a detail. */
+  detail?: boolean;
+  /** Exactly what GENERATE would send (`flatRunParams`). */
+  params: common_DesignRunParams;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
-
-  // READ-ONLY SUBSCRIPTIONS. `useWatch`, never `useFieldArray`: the studio already holds ONE field
-  // array over `callouts` and a second instance over the same name does not synchronise with it in
-  // react-hook-form 7.62 — a defect this band has already paid for once.
-  const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
-  // Every board / input id, not only the newest 500 library files (live bug 06.10).
-  const mediaById = useResolvedMedia(items.map((i) => i.mediaId));
-  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
-  // `garment_description` (W-3), NOT `concept`. The two are different documents: `concept` is
-  // prose printed for the factory, `garment_description` is the sentence the operator writes FOR
-  // THE MODEL and which goes into every run. Showing one under the other's name made this panel
-  // state, next to a price, that the model receives words it does not receive.
-  // D-20'''': СЛОВА НА ЭКРАНЕ, а не одно значение формы. Засев WORDS в форму не пишется, пока человек
-  // не подействовал, и GENERATE флэта отдаёт его перед сохранением (`materializeWords`) — то есть
-  // модель получит ровно то, что стоит в поле. Опись, читавшая одну форму, показала бы пустые слова
-  // рядом с ценой прогона, который их получит.
   const autosave = useTechCardAutosave();
+  const preview = useFlatPreview(techCardId, params, open, autosave.status);
+
+  const refs = useMemo(
+    () => (preview.data?.inputs?.refs ?? []).filter((r) => (r.mediaId ?? 0) > 0),
+    [preview.data],
+  );
+  const slots = useMemo(
+    () => (preview.data?.inputs?.slots ?? []).filter((s) => (s.mediaId ?? 0) > 0),
+    [preview.data],
+  );
+  const held = useMemo(() => preview.data?.held ?? [], [preview.data]);
+
+  // Thumbnails: the snapshot carries its media; a held picture is resolved through the library.
+  const heldIds = useMemo(() => held.map((h) => h.mediaId ?? 0).filter((id) => id > 0), [held]);
+  const library = useResolvedMedia(heldIds);
+
   const garment = useShownWords(techCardId, control, !readOnly && autosave.status !== 'off');
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
+  const sentWords = flatWordsSent(garment);
+  const sentCallouts = refs.reduce((n, r) => n + (r.callouts ?? []).length, 0);
+  const pictures = refs.length + slots.length;
 
-  /* A MOOD picture never travels with a flat (owner 06.10, wave 10: «картинки из мудборда не
-     передаём»), whatever role it carries in the references block, and neither does a reference
-     without a role — the server drops both (`designFlatOnlyRoledPhotos`). */
-  const moodIds = useMemo(() => moodPictureIds(items), [items]);
-  const isDetail = detailSlotId > 0;
-  /* T74 (owner 06.10): on a detail target only the references tied to THAT detail travel; every
-     other roled reference is held here and listed under «not sent». */
-  const { roleOf, otherIds } = useMemo(() => {
-    const map = new Map<number, string>();
-    const other = new Set<number>();
-    for (const r of band.references ?? []) {
-      if (r.mediaId == null) continue;
-      const fate = flatRefFate(r, moodIds, detailSlotId);
-      if (fate === 'not_this_detail') other.add(r.mediaId);
-      if (fate === 'sent') map.set(r.mediaId, (r.role as string).trim());
-    }
-    return { roleOf: map, otherIds: other };
-  }, [band.references, moodIds, detailSlotId]);
-
-  // The reference's note lives on `DesignReference.note`, beside the role, because it is a
-  // statement about the INPUT and not about the picture. Reading the board row's `caption` would
-  // show every note as blank — the quietest possible way for this panel to under-report.
-  const noteOf = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const r of band.references ?? []) {
-      if (r.mediaId != null && (r.note ?? '').trim()) map.set(r.mediaId, (r.note as string).trim());
-    }
-    return map;
-  }, [band.references]);
-
-  /**
-   * THE CALLOUTS BY PICTURE, IN WORDS. A callout travels ONLY with its picture: the server keys
-   * them by the media_id of a reference already in the prompt (`designAssembleInputs`), so a mark
-   * on a moodboard tile or on a roleless picture goes nowhere. Wordless callouts are dropped here
-   * exactly as the server drops them.
-   */
-  const calloutsOf = useMemo(() => {
-    const map = new Map<number, string[]>();
-    for (const c of callouts) {
-      const id = c.mediaId ?? 0;
-      if (!id) continue;
-      const words = calloutWords(c);
-      if (!words) continue;
-      const list = map.get(id) ?? [];
-      list.push(words);
-      map.set(id, list);
-    }
-    return map;
-  }, [callouts]);
-
-  /**
-   * Membership is the UNION of the two halves, the same rule the references block applies: a
-   * picture with a role belongs to the input even if its `kind` has drifted, because a role is the
-   * stronger statement and hiding its carrier would leave a record visible on no screen at all.
-   */
-  const lines = useMemo(() => {
-    const inPrompt: Line[] = [];
-    const onCardOnly: Line[] = [];
-    let n = 0;
-    /* WAVE 10: the sent list IS the server's (`flatSentRefs`: references by ordinal, each media
-       once) — the board carries a reference twice (its MOODBOARD row and its REFERENCE row), and
-       walking the board listed every photo twice. */
-    const seen = new Set<number>();
-    const flats = [...structure].sort((a, b) =>
-      a.role === b.role ? 0 : a.role === 'front_flat' ? -1 : 1,
-    );
-    for (const f of flats) {
-      if (f.mediaId <= 0 || seen.has(f.mediaId)) continue;
-      seen.add(f.mediaId);
-      inPrompt.push({ mediaId: f.mediaId, role: f.role, note: '', callouts: [], number: ++n });
-    }
-    for (const r of flatSentRefs(band.references ?? [], moodIds, detailSlotId)) {
-      if (seen.has(r.mediaId ?? 0)) continue;
-      const mediaId = r.mediaId ?? 0;
-      seen.add(mediaId);
-      inPrompt.push({
-        mediaId,
-        role: roleOf.get(mediaId) ?? (r.role ?? '').trim(),
-        note: noteOf.get(mediaId) ?? '',
-        callouts: calloutsOf.get(mediaId) ?? [],
-        number: ++n,
-      });
-    }
-    for (const p of plates) {
-      if (p.mediaId <= 0 || seen.has(p.mediaId)) continue;
-      seen.add(p.mediaId);
-      inPrompt.push({ mediaId: p.mediaId, role: p.role, note: '', callouts: [], number: ++n });
-    }
-    for (const item of items) {
-      if (seen.has(item.mediaId) || otherIds.has(item.mediaId)) continue;
-      if (item.kind !== REFERENCE_KIND) continue;
-      seen.add(item.mediaId);
-      onCardOnly.push({
-        mediaId: item.mediaId,
-        role: '',
-        note: noteOf.get(item.mediaId) ?? '',
-        callouts: calloutsOf.get(item.mediaId) ?? [],
-      });
-    }
-    return { inPrompt, onCardOnly };
-  }, [
-    items,
-    band.references,
-    moodIds,
-    detailSlotId,
-    structure,
-    plates,
-    roleOf,
-    otherIds,
-    noteOf,
-    calloutsOf,
-  ]);
-
-  const moodCount = new Set(
-    items
-      .filter(
-        (i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId) && !otherIds.has(i.mediaId),
-      )
-      .map((i) => i.mediaId),
-  ).size;
-  const total = lines.inPrompt.length + lines.onCardOnly.length + otherIds.size;
-  /** Callouts that travel — the ones drawn on pictures in the prompt. */
-  const sentCallouts = lines.inPrompt.reduce((acc, l) => acc + l.callouts.length, 0);
-  /** Callouts that stay — drawn on pictures the prompt never sees (mood tiles, roleless pictures). */
-  const strandedCallouts = useMemo(() => {
-    const inPromptIds = new Set(lines.inPrompt.map((l) => l.mediaId));
-    let n = 0;
-    for (const [id, list] of calloutsOf) if (!inPromptIds.has(id)) n += list.length;
-    return n;
-  }, [lines, calloutsOf]);
-
-  /**
-   * THE LATEST FLAT RUN — the newest row of THIS door's kind. A render's or a vector's text under
-   * this title would answer a question nobody asked here.
-   */
   const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
-  /**
-   * The contract's own deviation notes, spoken beside the text so nobody reads «base» as
-   * «transcript»: on `per_view` each paid call got «view: …» appended, and only the single-call
-   * flat route is byte-for-byte what the provider received.
-   */
   const sentCaveat =
     (lastRun?.params?.layout ?? '').trim() === 'per_view'
       ? 'the base instruction — each view’s paid call also received its own «view: …» line appended'
       : 'stored at dispatch — this is the text the provider received';
 
-  /** What the server sends of WORDS: the class line only (wave 10). */
-  const sentWords = flatWordsSent(garment);
   const words = useMemo(
     () =>
       [
         sentWords || 'garment: —',
         `fit: not sent (a flat draws construction only)`,
-        `references in the prompt: ${lines.inPrompt.length} of ${total}`,
-        `callouts in the prompt: ${sentCallouts} (drawn on those pictures)`,
+        ...refs.map((r, i) => `${i + 1}. ${refWord((r.role ?? '').trim())}`),
+        ...slots.map(
+          (s, i) => `${refs.length + i + 1}. accepted ${viewWord(s.viewKey ?? '')} flat`,
+        ),
+        `callouts in the prompt: ${sentCallouts}`,
       ].join('\n'),
-    [sentWords, lines, total, sentCallouts],
+    [sentWords, refs, slots, sentCallouts],
   );
 
   return (
@@ -292,41 +152,60 @@ export function WhatModelGetsModal({
       kindWord='flat'
       intro={
         <>
-          <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed below
-          — each with its role, its note and the callouts drawn on it — and the words under them. A
-          picture marked <b>mood</b> does not travel: a flat is drawn from the garment’s own photos.
-          {isDetail && (
-            <>
-              {' '}
-              <b>This is a detail run:</b> only the pictures marked as this detail travel, with the
-              accepted FRONT and BACK flats beside them for the silhouette.
-            </>
-          )}{' '}
-          Nothing absent from this list travels. The same inventory is what a studio outside would
-          need to be handed.
+          <b>this is what the model is given</b>, as the server would send it now: the moodboard
+          pictures marked <b>target</b>, the two newest of each view
+          {detail
+            ? ', or the four newest photos of this detail with the accepted FRONT and BACK'
+            : ''}
+          , and the words under them. Nothing absent from this list travels.
         </>
       }
     >
       <WmgGroup
         flush
         label='pictures'
-        aside={`${lines.inPrompt.length} of ${total} on the card · ${sentCallouts} callout${
-          sentCallouts === 1 ? '' : 's'
-        }`}
-        note='a callout travels with its picture, in words, as part of that picture’s caption'
+        aside={
+          preview.isFetching && !preview.data
+            ? 'asking the server…'
+            : `${pictures} sent · ${sentCallouts} callout${sentCallouts === 1 ? '' : 's'}`
+        }
+        note='in prompt order; a callout travels with its picture, in words'
+        data-wmg-sent={pictures}
       >
-        {lines.inPrompt.length === 0 ? (
+        {preview.isError ? (
+          <Empty>the server did not answer — close and open again.</Empty>
+        ) : !preview.data ? (
+          <Empty>asking the server…</Empty>
+        ) : pictures === 0 ? (
           <Empty>
-            {isDetail
-              ? 'no picture is marked as this detail — the run goes with the accepted FRONT and BACK flats only.'
-              : 'no picture on this card carries a role, so none of them would be shown.'}
+            {detail
+              ? 'no photo of this detail is on the moodboard.'
+              : 'no moodboard picture is marked target with a known view.'}
           </Empty>
         ) : (
-          lines.inPrompt.map((line) => (
-            <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
-          ))
+          <>
+            {refs.map((r, i) => (
+              <RefLine key={`r${r.mediaId}`} n={i + 1} r={r} />
+            ))}
+            {slots.map((s, i) => (
+              <SlotLine key={`s${s.mediaId}`} n={refs.length + i + 1} s={s} />
+            ))}
+          </>
         )}
       </WmgGroup>
+
+      {held.length > 0 && (
+        <WmgGroup
+          label='on the moodboard, not sent'
+          aside={`${held.length}`}
+          note='the model’s own reading of a picture is shown greyed and never sent'
+          data-wmg-held={held.length}
+        >
+          {held.map((h) => (
+            <HeldLine key={h.mediaId} h={h} media={library.get(h.mediaId ?? 0)} />
+          ))}
+        </WmgGroup>
+      )}
 
       <WmgGroup
         label='words'
@@ -351,61 +230,8 @@ export function WhatModelGetsModal({
         />
       </WmgGroup>
 
-      <WmgGroup
-        label='on the card, not in the prompt'
-        aside={`${lines.onCardOnly.length} · on the card only`}
-        note={
-          <>
-            a role is given in the <b>input — references</b> block on STUDIO; clearing one takes the
-            picture out of the prompt and leaves it on the card
-          </>
-        }
-      >
-        {lines.onCardOnly.length === 0 ? (
-          <Empty>every picture in the input carries a role.</Empty>
-        ) : (
-          lines.onCardOnly.map((line) => (
-            <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
-          ))
-        )}
-      </WmgGroup>
-
       <NotSent
         items={[
-          ...(otherIds.size > 0
-            ? [
-                {
-                  label: `other references · ${otherIds.size}`,
-                  reason:
-                    'a detail run sends only the pictures marked as this detail — side photos and other details stay out',
-                },
-              ]
-            : []),
-          {
-            label: `moodboard · ${moodCount}`,
-            reason: 'board pictures that are not references stay on the board',
-          },
-          /* ⚠ ONLY THE CALLOUTS ON PICTURES OUTSIDE THE PROMPT. The ones on a picture with a role
-             DO travel (see `Line.callouts`) and are listed with their picture above; saying «the
-             flat run never reads them» here was the panel under-reporting what it charges for. */
-          ...(strandedCallouts > 0
-            ? [
-                {
-                  label: `callouts · ${strandedCallouts} on other pictures`,
-                  reason:
-                    'a callout travels only with its picture; these are drawn on pictures the prompt does not see — a moodboard tile or a picture without a role',
-                  door: () =>
-                    openDoor(
-                      'callouts.0.description',
-                      'the callouts are on ARTIFACTS, beside the sheet',
-                      showMessage,
-                    ),
-                },
-              ]
-            : []),
-          /* The `notes` item is gone with its field: U-9 removed the notes editor from the band, so
-             a door here led to a block that no longer exists. The field itself still round-trips;
-             it is simply not authored here and never was sent to the model. */
           {
             label: 'BOM',
             reason:
@@ -425,16 +251,10 @@ export function WhatModelGetsModal({
           {
             label: 'edit the description ▸',
             onClick: () =>
-              openDoor(
-                'garmentDescription',
-                'the garment description is in INPUT — REFERENCES, on STUDIO',
-                showMessage,
-              ),
+              openDoor('garmentDescription', 'the words are in INPUT, on STUDIO', showMessage),
           },
           {
             label: 'edit the fit ▸',
-            /* THE ADDRESS IS GENERAL INFORMATION ON STUDIO — the block `ERROR_TAB` in
-               `components/index.tsx` already routes `fit` there. «HEADER» was the field's old home. */
             onClick: () => openDoor('fit', FIT_WHERE, showMessage),
           },
         ]}
@@ -455,30 +275,64 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <InventoryLine name='—' text={<span className='text-labelColor'>{children}</span>} />;
 }
 
-/**
- * One picture of the input: its note, then the callouts drawn on it.
- *
- * A MISSING NOTE IS NOT AN ERROR HERE. The note's editor was taken off the band (SPEC п.10); a red
- * «missing» beside a field the operator has no door to write would be a status nothing on the
- * screen can clear. The wire still carries the note, so it is printed when it stands and stated as
- * a plain «no note» when it does not.
- */
-function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }) {
+function RefLine({ n, r }: { n: number; r: common_DesignInputRef }) {
+  const callouts = (r.callouts ?? []).map((c) => (c.text ?? '').trim()).filter(Boolean);
+  const note = (r.note ?? '').trim();
   return (
     <InventoryLine
-      name={line.role ? viewLabel(line.role) : <span className='text-labelColor'>no role</span>}
-      number={line.number ?? null}
-      thumb={thumbOf(media)}
-      origin={line.role ? 'linked' : undefined}
+      data-wmg-ref={r.mediaId}
+      name={refWord((r.role ?? '').trim())}
+      number={n}
+      thumb={thumbOf(r.media)}
+      origin='linked'
       text={
-        <>
-          {line.note ? line.note : <span className='text-labelColor'>no note</span>}
-          {line.callouts.length > 0 && (
-            <span className='block text-labelColor' data-wmg-callouts={line.callouts.length}>
-              callouts · {line.callouts.join(' · ')}
+        note || callouts.length ? (
+          <>
+            {note}
+            {callouts.length > 0 && (
+              <span className='block text-labelColor' data-wmg-callouts={callouts.length}>
+                callouts · {callouts.join(' · ')}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className='text-labelColor'>moodboard picture</span>
+        )
+      }
+    />
+  );
+}
+
+function SlotLine({ n, s }: { n: number; s: common_DesignInputSlot }) {
+  return (
+    <InventoryLine
+      data-wmg-slot={s.mediaId}
+      name={`accepted ${viewWord((s.viewKey ?? '').trim())}`}
+      number={n}
+      thumb={thumbOf(s.media)}
+      origin='linked'
+      text={<span className='text-labelColor'>the flat on the bench, for the silhouette</span>}
+    />
+  );
+}
+
+function HeldLine({ h, media }: { h: DesignInputHeld; media?: common_MediaFull }) {
+  const reason = (h.reason ?? '').trim();
+  const caption = (h.modelCaption ?? '').trim();
+  return (
+    <InventoryLine
+      data-wmg-held-line={reason}
+      name={<span className='text-labelColor'>{HELD_WORD[reason] ?? reason}</span>}
+      thumb={thumbOf(media)}
+      text={
+        <span className='text-labelColor'>
+          {HELD_WHY[reason] ?? ''}
+          {caption && (
+            <span className='block text-textInactiveColor' data-wmg-model-read=''>
+              model read · not sent — {caption}
             </span>
           )}
-        </>
+        </span>
       }
     />
   );

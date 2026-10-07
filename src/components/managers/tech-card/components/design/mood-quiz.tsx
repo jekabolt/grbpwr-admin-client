@@ -36,6 +36,7 @@ import {
   type QuizAnchor,
   type QuizPicture,
 } from './quiz-anchor';
+import { labelKindOf } from './board-labels';
 import { setQuizLive } from './quiz-live';
 import {
   answerText,
@@ -127,6 +128,8 @@ export function MoodQuiz({
   onFocusPicture,
   unmarked = [],
   onSetRole,
+  labelQuestions = [],
+  onLabel,
 }: {
   techCardId?: number;
   readOnly: boolean;
@@ -145,6 +148,12 @@ export function MoodQuiz({
   unmarked?: number[];
   /** Роль картинке — та же запись, что у угол-меню плитки (`setBoardRole`). */
   onSetRole?: (mediaId: number, role: string) => void;
+  /**
+   * 101 Ф3: ярлыки доски, которые ждут человека («which view is this?»), в порядке доски. Над ASK ME
+   * стоит первый из них, пока квиз не на экране; ответ — `onLabel`, в ответы квиза не пишется.
+   */
+  labelQuestions?: DesignQuizQuestion[];
+  onLabel?: (question: DesignQuizQuestion, option: string) => void;
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
@@ -172,6 +181,8 @@ export function MoodQuiz({
   const [applying, setApplying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
+  // Вопросы ярлыков, отвеченные или пропущенные в этом сеансе: карточка не ждёт перечитанной полосы.
+  const [labelsDone, setLabelsDone] = useState<ReadonlySet<string>>(() => new Set());
   const shownCard = useRef(card);
   shownCard.current = card;
 
@@ -196,6 +207,7 @@ export function MoodQuiz({
   useEffect(() => {
     setSession(readQuizSession(card));
     setLive(null);
+    setLabelsDone(new Set());
   }, [card]);
 
   // W-C2: пока вопрос на экране, бриф WORDS не догоняет каждый ответ.
@@ -571,6 +583,10 @@ export function MoodQuiz({
     );
   }
 
+  const labelQ = readOnly ? undefined : labelQuestions.find((x) => !labelsDone.has(x.id ?? ''));
+  const closeLabel = (x: DesignQuizQuestion) =>
+    setLabelsDone((done) => new Set(done).add(x.id ?? ''));
+
   const answered = answers.filter((a) => !a.skipped).length;
   const staleCount = answers.filter((a) => a.stale && !a.skipped).length;
   // D3: описание пишется и без картинок доски — достаточно одного ответа.
@@ -578,6 +594,24 @@ export function MoodQuiz({
 
   return (
     <div>
+      {labelQ && (
+        <QuestionView
+          key={`label:${labelQ.id}`}
+          question={labelQ}
+          picture={labelQ.mediaId ? pictureOf?.(labelQ.mediaId) ?? null : undefined}
+          family={family}
+          position={null}
+          busy={false}
+          hotkeys={false}
+          onCommit={(selected) => {
+            closeLabel(labelQ);
+            if (selected[0]) onLabel?.(labelQ, selected[0]);
+          }}
+          onSkip={() => closeLabel(labelQ)}
+          onBack={null}
+          onLater={null}
+        />
+      )}
       {refusal && (
         <LockedBar
           reason={refusal}
@@ -871,6 +905,7 @@ function QuestionView({
   onBack,
   onLater,
   stale,
+  hotkeys = true,
 }: {
   question: DesignQuizQuestion;
   /** 96: `undefined` — обычный вопрос (пиктограмма); иначе картинка доски (`null` — её сняли). */
@@ -891,6 +926,11 @@ function QuestionView({
    * `keep` (K) пересохраняет прежний ответ, `forget` (F) снимает его; правка + Enter — `change ›`.
    */
   stale?: { changes: string[]; onKeep: () => void; onForget: () => void } | null;
+  /**
+   * Цифры 1–6 на окне выбирают вариант. Карточка ярлыка стоит под доской ПОСТОЯННО, поэтому
+   * клавиши ей не даются: цифра, нажатая где-то на странице, не должна ставить вид картинке.
+   */
+  hotkeys?: boolean;
 }): JSX.Element {
   const options = question.options ?? [];
   const colourQuestion = isColourQuestion(question);
@@ -912,6 +952,9 @@ function QuestionView({
   const multi = question.kind === 'multi';
   // 97: вопрос роли — выбор из четырёх; своё слово положить некуда (роль живёт на картинке).
   const roleStep = isRoleQuestion(question);
+  // 101: вопрос ярлыка — тоже только выбор: вид или деталь из списка, своего слова нет.
+  const labelKind = labelKindOf(question);
+  const pickOnly = roleStep || labelKind !== null;
   const [initialSelected] = useState<string[]>(() =>
     prior && !prior.skipped ? (prior.selected ?? []).filter((s) => options.includes(s)) : [],
   );
@@ -978,6 +1021,7 @@ function QuestionView({
   // Цифры 1–6 — варианты (вне поля ввода). 98: в проходе `N stale` ещё K — keep, F — forget,
   // Enter — подтвердить что выбрано (не тронуто — тот же keep).
   useEffect(() => {
+    if (!hotkeys) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
       const t = e.target as HTMLElement | null;
@@ -1003,7 +1047,7 @@ function QuestionView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [options, pick, stale, busy]);
+  }, [options, pick, stale, busy, hotkeys]);
 
   return (
     <div className='grid grid-cols-[64px_minmax(0,1fr)] items-start gap-4 py-1' data-quiz=''>
@@ -1043,9 +1087,11 @@ function QuestionView({
           <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
             {roleStep
               ? roleWords(picture ?? null)
-              : question.mediaId
-                ? pictureWords(picture ?? null)
-                : question.category || 'design'}
+              : labelKind
+                ? `${labelKind}${picture ? ` · picture ${picture.n}` : ''}`
+                : question.mediaId
+                  ? pictureWords(picture ?? null)
+                  : question.category || 'design'}
             {position ? ` · ${position.n} / ${position.of}` : ''}
             {onLater && (
               <>
@@ -1111,7 +1157,7 @@ function QuestionView({
         {/* C3: ОДНА обведённая кнопка в ряду своего слова, той же высоты, что поле (ряд тянет
             их вровень); `skip` — единственное подчёркнутое слово. */}
         <div className='flex items-stretch gap-2'>
-          {!roleStep && (
+          {!pickOnly && (
             <Textarea
               name={ownName}
               aria-label='own answer'

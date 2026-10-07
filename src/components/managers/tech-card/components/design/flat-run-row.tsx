@@ -1,5 +1,10 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
-import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignInputSnapshot,
+  common_DesignRunParams,
+} from 'api/proto-http/admin';
+import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
@@ -13,7 +18,6 @@ import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
 
-import { AskReferences } from './ask-references';
 import {
   flushAllowsRun,
   flushRefusalSentence,
@@ -44,6 +48,8 @@ import {
   liveStructure,
   moodPictureIds,
   pickStructure,
+  type FlatMode,
+  type StructurePick,
   type StructureRole,
 } from './flat-mode';
 import {
@@ -60,20 +66,18 @@ import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
-import { isBoardRow, isInputRow, type BoardItem } from './mood-board';
-import {
-  figureIds,
-  inputIdsOf,
-  picturesToAsk,
-  readRefChoices,
-  unmarkedInputIds,
-  useRefChoices,
-} from './ref-ask-model';
+import { isBoardRow, type BoardItem } from './mood-board';
 import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import type { CalloutLike } from './render/what-model-gets';
 import { staleShown } from './stale-details';
-import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
+import {
+  cardOnScreen,
+  designKeys,
+  isUnimplemented,
+  serverSpeaksNow,
+  type WriteContext,
+} from './use-design-band';
 import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
@@ -109,6 +113,43 @@ const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
   { role: 'front_flat', label: 'front' },
   { role: 'back_flat', label: 'back' },
 ];
+
+/**
+ * THE PARAMS OF A FLAT PRESS — one builder for GENERATE and for «what the model gets» (101 Ф3): the
+ * modal asks the server about EXACTLY the request the button would send.
+ */
+export function flatRunParams(
+  slotId: number,
+  mode: FlatMode | null,
+  structure: readonly StructurePick[],
+): common_DesignRunParams {
+  return {
+    views: slotId > 0 ? ['detail'] : [...VIEWS_ORDER],
+    detailSlotIds: slotId > 0 ? [slotId] : [],
+    layout: 'one',
+    colorwayId: 0,
+    colour: undefined,
+    threed: undefined,
+    fixTarget: '',
+    fixTargets: [],
+    fixSlotIds: [],
+    autoSplit: slotId === 0,
+    pattern: undefined,
+    freeform: undefined,
+    /* A DETAIL READS THE FINISHED FRONT AND BACK (owner 06.10, answer 3) — attached by the SERVER on
+       a detail run (T8); the client sends no slots on any flat run. `false` is SAID: an empty list
+       with the flag on would mean «every filled slot». */
+    useFlatSlots: false,
+    flatSlotIds: [],
+    // The moodboard is the input (101): nothing travels beside it.
+    extraInputMediaIds: [],
+    image: undefined,
+    inpaint: undefined,
+    extend: undefined,
+    video: undefined,
+    flat: mode ? flatParamsFor(mode, [...structure]) : undefined,
+  };
+}
 
 /** A local stop that reads like the server's refusal of the same thing (nothing was sent). */
 const localRefusal = (reason: string): ServerRefusal => ({
@@ -150,10 +191,44 @@ export function flatSnapshot(
     target: string;
     route: string;
     flatSlotIds?: readonly number[];
-    /** T70: the role-less pictures sent `figure it out ✦` (`extra_input_media_ids`). */
-    extras?: readonly number[];
+    /**
+     * 101 Ф3: WHAT THE SERVER SAID IT WOULD SEND (`PreviewDesignRunInputs`, same params). When it
+     * answered, the pictures of the intent are ITS list — refs in prompt order with their view, and
+     * the attached plates; a model label landing on a picture that stays home is not a new intent.
+     */
+    preview?: common_DesignInputSnapshot | null;
   },
 ): unknown {
+  if (intent?.preview) {
+    const p = intent.preview;
+    const details = band
+      ? readBench(band, 'flat')
+          .details.filter((d) => detailSlotIds.includes(d.id ?? 0))
+          .map((d) => [d.id ?? 0, (d.detailName ?? '').trim()])
+          .sort((a, b) => (a[0] as number) - (b[0] as number))
+      : [];
+    return {
+      words: ((now.garmentDescription ?? '') as string).trim(),
+      fit: now.fit ?? '',
+      preview: {
+        refs: (p.refs ?? []).map((r) => [
+          r.mediaId ?? 0,
+          (r.role ?? '').trim(),
+          (r.note ?? '').trim(),
+          (r.callouts ?? []).map((c) => (c.text ?? '').trim()),
+        ]),
+        slots: (p.slots ?? []).map((x) => [
+          (x.viewKey ?? '').trim(),
+          x.slotId ?? 0,
+          x.mediaId ?? 0,
+        ]),
+        note: (p.garmentNote ?? '').trim(),
+      },
+      details,
+      target: intent.target,
+      route: intent.route,
+    };
+  }
   const refs = (band?.references ?? [])
     .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
     .map((r) => [
@@ -200,8 +275,6 @@ export function flatSnapshot(
             id,
             (band?.bench ?? []).find((b) => (b.id ?? 0) === id)?.pictureId ?? 0,
           ]),
-          // Only when there are some: a fingerprint without extras stays byte-for-byte the old one.
-          ...(intent.extras?.length ? { extras: [...intent.extras].sort((a, b) => a - b) } : {}),
         }
       : {}),
   };
@@ -423,28 +496,6 @@ export function FlatRunRow({
       });
   };
 
-  /* ═══ ASK · REFERENCES (T70): input pictures with no role are asked about on GENERATE. ═══ */
-  const boardRows = useWatch({ control: form.control, name: 'moodboardMedia' }) as
-    | BoardItem[]
-    | undefined;
-  const inputIds = useMemo(() => inputIdsOf(boardRows, isInputRow), [boardRows]);
-  const refChoices = useRefChoices(techCardId);
-  const toAsk = useMemo(
-    () =>
-      picturesToAsk(
-        unmarkedInputIds(
-          inputIds,
-          band.references,
-          moodPictureIds(boardRows as { mediaId?: number; role?: string }[] | undefined),
-        ),
-        refChoices,
-      ),
-    [inputIds, band.references, boardRows, refChoices],
-  );
-  /** The quiz is open: its queue (frozen at the press), for this card. */
-  const [refAsk, setRefAsk] = useState<{ card: number; ids: number[] } | null>(null);
-  const refAskHere = refAsk && refAsk.card === techCardId ? refAsk : null;
-
   /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
   const route = routeOf({ target, fromMyFlat, structure: structureNow.length });
 
@@ -570,46 +621,31 @@ export function FlatRunRow({
         refusal = localRefusal('views_first');
         return;
       }
-      const mode = modeOfRoute(freshRoute);
-      /* T70 · `figure it out ✦`: the role-less input pictures the person left to the model travel as
-         named extras — the server folds them into the refs with an EMPTY role («reference image»). */
-      const nowBoard = (now.moodboardMedia ?? []) as BoardItem[];
-      const extras = figureIds(
-        unmarkedInputIds(
-          inputIdsOf(nowBoard, isInputRow),
-          freshBand.references,
-          moodPictureIds(nowBoard as { mediaId?: number; role?: string }[]),
-        ),
-        readRefChoices(card),
-      );
-      const params: common_DesignRunParams = {
-        views: slotId > 0 ? ['detail'] : [...VIEWS_ORDER],
-        detailSlotIds: slotId > 0 ? [slotId] : [],
-        layout: 'one',
-        colorwayId: 0,
-        colour: undefined,
-        threed: undefined,
-        fixTarget: '',
-        fixTargets: [],
-        fixSlotIds: [],
-        autoSplit: slotId === 0,
-        pattern: undefined,
-        // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform (`freeform_forbidden`).
-        freeform: undefined,
-        /* A DETAIL READS THE FINISHED FRONT AND BACK (owner 06.10, answer 3) — attached by the SERVER
-           on a detail run (T8); the client sends no slots on any flat run. `false` is SAID: an empty
-           list with the flag on would mean «every filled slot». */
-        useFlatSlots: false,
-        flatSlotIds: [],
-        extraInputMediaIds: extras,
-        image: undefined,
-        inpaint: undefined,
-        extend: undefined,
-        video: undefined,
-        // THE MODE (81-FINAL-MODES). Photos and a detail send nothing: an absent block is photos.
-        flat: mode ? flatParamsFor(mode, structureNow) : undefined,
-      };
-      // D5, last look on the fresh band (the server refuses a second one too: flat_run_in_flight).
+      const params = flatRunParams(slotId, modeOfRoute(freshRoute), structureNow);
+      /* THE FINGERPRINT IS THE SERVER'S LIST (101 Ф3): what this very request would freeze. A server
+         without the route (404/501) — the band's labels stand in, as before the preview existed; any
+         other failure stops the press: nothing was started (Codex Ф3). */
+      let preview: common_DesignInputSnapshot | null = null;
+      try {
+        preview =
+          (
+            await adminService.PreviewDesignRunInputs({
+              techCardId: card,
+              kind: 'flat',
+              params,
+            })
+          ).inputs ?? null;
+      } catch (e) {
+        if (!isUnimplemented(e)) {
+          if (cardOnScreen(card)) {
+            showMessage(
+              'could not read what the model gets — nothing was started; try again',
+              'error',
+            );
+          }
+          return;
+        }
+      }
       if (flatRunInFlight(freshBand)) {
         if (cardOnScreen(card)) {
           showMessage('a flat run is already drawing — nothing was started', 'error');
@@ -625,7 +661,7 @@ export function FlatRunRow({
           target,
           route: freshRoute,
           flatSlotIds,
-          extras,
+          preview,
         }),
       });
       // M8: another tab started a flat run of this card — re-read, so GENERATE shows it drawing.
@@ -641,25 +677,11 @@ export function FlatRunRow({
    * GENERATE PRESSED (T70): the pictures with no role are asked about first — the quiz opens above
    * the row and nothing is sent; its last answer calls `submit` with the same options.
    */
-  const submitRef = useRef(submit);
-  submitRef.current = submit;
   const press = () => {
     if (gateReason || !mood.ok || techCardId <= 0 || inFlight) return;
-    if (flatInputBusy(readFlatInput(techCardId)) || refAskHere) return;
-    if (toAsk.length > 0) {
-      setRefAsk({ card: techCardId, ids: [...toAsk] });
-      return;
-    }
+    if (flatInputBusy(readFlatInput(techCardId))) return;
     void submit();
   };
-  const refAskDone = () => {
-    setRefAsk(null);
-    // Next tick: the last role write released the input hold; the row reads it live.
-    window.setTimeout(() => {
-      if (cardNow.current === techCardId) void submitRef.current();
-    }, 0);
-  };
-  const ordinalOf = (mediaId: number) => Math.max(1, inputIds.indexOf(mediaId) + 1);
 
   const targetItems = targets;
   const selectTitle = targetItems.find((t) => t.value === target)?.title ?? '';
@@ -673,30 +695,10 @@ export function FlatRunRow({
         </CalloutBox>
       )}
 
-      {/* Z2' · ASK · REFERENCES (T70) — the pictures with no role, opened by GENERATE. */}
-      {refAskHere && !writesOff && (
-        <AskReferences
-          key={`${refAskHere.card}:${refAskHere.ids.join(',')}`}
-          techCardId={techCardId}
-          ids={refAskHere.ids}
-          thumbOf={thumbOf}
-          ordinalOf={ordinalOf}
-          disabled={busy || inFlight}
-          onDone={refAskDone}
-          onCancel={() => setRefAsk(null)}
-        />
-      )}
-
       {/* Z3 · THE RUN ROW. `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
-          gate={
-            gateReason
-              ? { ok: false, reason: gateReason }
-              : refAskHere
-                ? { ok: false, reason: 'say what each picture is first' }
-                : { ok: true }
-          }
+          gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
           pending={busy || inFlight}
           pendingLabel={inFlight && !busy ? 'drawing…' : undefined}
           onGenerate={() => press()}
@@ -892,16 +894,8 @@ export function FlatRunRow({
         band={band}
         techCardId={techCardId}
         readOnly={!!disabled}
-        detailSlotId={detailId}
-        structure={route === 'hand_flat' ? structureNow : []}
-        plates={
-          detailId > 0
-            ? (['front', 'back'] as const).flatMap((v) => {
-                const id = bench.sides.find((x) => x.view === v)?.slot?.picture?.media?.id ?? 0;
-                return id > 0 ? [{ mediaId: id, role: `accepted ${v} flat` }] : [];
-              })
-            : []
-        }
+        detail={detailId > 0}
+        params={flatRunParams(detailId, modeOfRoute(route), structureNow)}
       />
     </div>
   );

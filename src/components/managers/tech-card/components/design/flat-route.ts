@@ -31,31 +31,6 @@ export function targetSlotId(target: FlatTarget): number {
 }
 
 /**
- * WHERE ONE REFERENCE GOES ON A FLAT RUN — the client half of the server's two filters, so «what the
- * model gets ▸» lists exactly what is sent:
- *   · `designFlatOnlyRoledPhotos` — a mood picture, a `mood` role and a roleless picture never travel;
- *   · `designFlatDetailOnlyItsRefs` (T74, owner 06.10 «если генерим деталь — только картинки этой
- *     детали»): on a detail target only a `detail` reference tied to THAT slot travels; the
- *     accepted FRONT/BACK flats go with it as bench plates, not as references.
- * `detailSlotId` 0 = the views run.
- */
-export type FlatRefFate = 'sent' | 'mood' | 'roleless' | 'not_this_detail';
-
-export function flatRefFate(
-  ref: { mediaId?: number; role?: string; detailSlotId?: number },
-  moodIds: Set<number>,
-  detailSlotId: number,
-): FlatRefFate {
-  const role = (ref.role ?? '').trim();
-  if ((ref.mediaId != null && moodIds.has(ref.mediaId)) || role === 'mood') return 'mood';
-  if (!role) return 'roleless';
-  if (detailSlotId > 0 && (role !== 'detail' || (ref.detailSlotId ?? 0) !== detailSlotId)) {
-    return 'not_this_detail';
-  }
-  return 'sent';
-}
-
-/**
  * THE WORDS A FLAT RUN SENDS (wave 10): only the card's «garment: <class>» line — the description is
  * model-seeded as often as human-written and nothing records which, so the server sends none of it
  * (designgen.FlatWordsCarryDescription). Mirror of FlatConstructionNote: the first «garment:» line
@@ -67,25 +42,6 @@ export function flatWordsSent(words: string): string {
     if (m && m[1].trim()) return `garment: ${m[1].trim()}`;
   }
   return '';
-}
-
-/**
- * THE PICTURES A FLAT RUN SENDS, IN THE SERVER'S ORDER (wave 10): the card's references by ordinal,
- * each media once, kept by `flatRefFate` = 'sent' — the mirror of designAssembleInputs →
- * designFlatOnlyRoledPhotos → designFlatDetailOnlyItsRefs. «what the model gets» lists exactly these.
- */
-export function flatSentRefs<
-  R extends { mediaId?: number; role?: string; detailSlotId?: number; ordinal?: number },
->(references: readonly R[], moodIds: Set<number>, detailSlotId: number): R[] {
-  const seen = new Set<number>();
-  return [...references]
-    .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-    .filter((r) => {
-      const id = r.mediaId ?? 0;
-      if (id <= 0 || seen.has(id)) return false;
-      seen.add(id);
-      return flatRefFate(r, moodIds, detailSlotId) === 'sent';
-    });
 }
 
 export type TargetItem = {
