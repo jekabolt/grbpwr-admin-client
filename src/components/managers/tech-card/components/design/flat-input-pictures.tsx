@@ -505,7 +505,37 @@ export function FlatInputPictures({
     );
   }
 
+  /* THE CORNER ▾ — the board's own menu (purpose; views for target; details + new detail… for
+     detail) and the same pick (`useBoardPick`): a person's pick is a human label, final, the model
+     never overrides it. On the tray and, 109 §2.2 («поправить = угол ▾ плитки»), on every BOARD
+     picture in VIEWS / DETAIL — a tech flat is not a board picture and has none. */
+  const cornerFor = (mediaId: number, n: number, render: boolean) => {
+    const menu = boardMenu({
+      mediaId,
+      n,
+      purpose: purposeOf.get(mediaId) ?? '',
+      ref: labels.get(mediaId),
+      slots: detailSlots,
+      onPick: (p: BoardMenuPick) => pick.onPick(mediaId, p),
+    });
+    // Выход прогона — не вид и не деталь: только mood / material / none.
+    const items = render
+      ? menu.items.filter((it) => ['mood', 'material', ''].includes(it.value))
+      : menu.items;
+    return {
+      right: (
+        <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
+          <CornerMenu menu={{ ...menu, items }} />
+        </span>
+      ),
+    };
+  };
+
   const groupProps = {
+    corners: canWrite
+      ? (mediaId: number, n: number) =>
+          purposeOf.has(mediaId) ? cornerFor(mediaId, n, outputs.has(mediaId)) : null
+      : undefined,
     techCardId,
     stamp,
     labels,
@@ -582,31 +612,7 @@ export function FlatInputPictures({
                   label='input · not sent yet'
                   corners={
                     canWrite
-                      ? (v, i) => {
-                          const word = trayWord(v.mediaId);
-                          const menu = boardMenu({
-                            mediaId: v.mediaId,
-                            n: i + 1,
-                            purpose: purposeOf.get(v.mediaId) ?? '',
-                            ref: labels.get(v.mediaId),
-                            slots: detailSlots,
-                            onPick: (p: BoardMenuPick) => pick.onPick(v.mediaId, p),
-                          });
-                          // Выход прогона — не вид и не деталь: только mood / material / none.
-                          const items =
-                            word === 'render'
-                              ? menu.items.filter((it) =>
-                                  ['mood', 'material', ''].includes(it.value),
-                                )
-                              : menu.items;
-                          return {
-                            right: (
-                              <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
-                                <CornerMenu menu={{ ...menu, items }} />
-                              </span>
-                            ),
-                          };
-                        }
+                      ? (v, i) => cornerFor(v.mediaId, i + 1, trayWord(v.mediaId) === 'render')
                       : undefined
                   }
                 />
@@ -660,6 +666,8 @@ type GroupShared = {
   onUndo: (removal: InputRemoval) => void;
   removalOf: (group: string) => InputRemoval | null;
   onSent: (group: string, mediaIds: number[]) => void;
+  /** The corner ▾ of a board picture (none for a picture not on the board). */
+  corners?: (mediaId: number, n: number) => { right: ReactNode } | null;
 };
 
 function DetailGroup({
@@ -755,6 +763,7 @@ function PressGroup({
   onUndo,
   removalOf,
   onSent,
+  corners,
 }: GroupShared & {
   groupKey: string;
   label: string;
@@ -918,6 +927,7 @@ function PressGroup({
               numberFrom={1}
               badge={photoBadge}
               action={removeAction}
+              corners={corners ? (v, i) => corners(v.mediaId, i + 1) : undefined}
               label={label}
             />
           )}

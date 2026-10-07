@@ -35,6 +35,7 @@
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nowait     → GENERATE не ждёт чтения: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=noreadword → «no purpose» посреди чтения: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=serverblind → GENERATE не ждёт чтения сервера: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nofix      → у VIEWS/DETAIL нет угла ▾: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
 //   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
@@ -91,10 +92,16 @@ const MUTATIONS = {
       to: "return !held || held === 'pending';",
     },
   ],
-  // 07.10 D1: GENERATE's wait reads the band alone, not the press's preview.
-  serverblind: [
-    { file: RUNROW, from: 'server ? server.held.get(id) : null', to: 'null' },
+  // 07.10 D2: a landed picture has no corner ▾.
+  nofix: [
+    {
+      file: PICTURES,
+      from: 'corners={corners ? (v, i) => corners(v.mediaId, i + 1) : undefined}',
+      to: 'corners={undefined}',
+    },
   ],
+  // 07.10 D1: GENERATE's wait reads the band alone, not the press's preview.
+  serverblind: [{ file: RUNROW, from: 'server ? server.held.get(id) : null', to: 'null' }],
   // M15: the tray keeps a picture a press already sends.
   nosent: [{ file: PICTURES, from: '!sent.has(a.mediaId) && ', to: '' }],
   nohuman: [
@@ -677,7 +684,9 @@ try {
         // 07.10: a picture being read carries no word — the reading is drawn on it
         // (`[data-picture-busy="read"]`); the probe reads that as «…», and a word beside it as a defect.
         badges: [...(box?.querySelectorAll('[data-rail-view]') ?? [])].map((t) => {
-          const word = (t.querySelector('[data-tile-badge]')?.textContent ?? '').trim().toLowerCase();
+          const word = (t.querySelector('[data-tile-badge]')?.textContent ?? '')
+            .trim()
+            .toLowerCase();
           const busy = !!t.querySelector('[data-picture-busy="read"]');
           return busy ? (word ? `… + ${word}` : '…') : word;
         }),
@@ -1108,7 +1117,9 @@ try {
     await window.__qc.invalidateQueries();
   });
 
-  console.log('\n07.10 D1 · GENERATE waits while the server still reads what the band calls settled');
+  console.log(
+    '\n07.10 D1 · GENERATE waits while the server still reads what the band calls settled',
+  );
   await page.evaluate(async () => {
     await window.__label(806, {
       role: 'back',
@@ -1157,6 +1168,48 @@ try {
     (await calls('StartDesignRun')).length > before3 && !(await page.$('[data-flat-left-out]')),
     'the server answers: the press goes with it, nothing left out',
     `starts ${before3}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-left-out]')?.textContent ?? '')}`,
+  );
+
+  console.log('\n07.10 D2 · a landed picture is corrected from its own corner ▾');
+  const cornerAt = (group, id) =>
+    page.evaluate(
+      ([g, m]) =>
+        !!document.querySelector(
+          `[data-flat-pictures-group="${g}"] [data-rail-view="${m}"] [data-menu]`,
+        ),
+      [group, id],
+    );
+  ck(
+    (await cornerAt('views', 809)) &&
+      (await cornerAt('d:140', 802)) &&
+      !(await cornerAt('d:140', 955)) &&
+      !(await cornerAt('d:140', 956)),
+    'VIEWS and DETAIL board pictures carry the ▾; the tech flats do not',
+    JSON.stringify([
+      await cornerAt('views', 809),
+      await cornerAt('d:140', 802),
+      await cornerAt('d:140', 955),
+    ]),
+  );
+  const roleCallsD2 = (await calls('SetDesignReferenceRole')).length;
+  const heldCallsD2 = (await calls('SetDesignReferenceHeld')).length;
+  await page.hover('[data-flat-pictures-group="views"] [data-rail-view="809"]');
+  await page.click('[data-flat-pictures-group="views"] [data-rail-view="809"] [data-menu]');
+  const menu809 = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-menu-item]')].map((n) => n.getAttribute('data-menu-item')),
+  );
+  await page.click('[data-menu-item="v:side_r"]').catch(() => {});
+  await page.waitForTimeout(600);
+  const d2 = (await calls('SetDesignReferenceRole')).slice(roleCallsD2);
+  ck(
+    menu809.includes('v:side_r') &&
+      menu809.includes('detail') &&
+      d2.length === 1 &&
+      d2[0].mediaId === 809 &&
+      d2[0].role === 'side_r' &&
+      (await calls('SetDesignReferenceHeld')).length === heldCallsD2,
+    'its ▾ is the board’s menu; «side R» writes the person’s label',
+    JSON.stringify({ menu809, d2 }),
   );
 
   console.log('\nM15 · recall puts a flat run’s words back into WORDS');
