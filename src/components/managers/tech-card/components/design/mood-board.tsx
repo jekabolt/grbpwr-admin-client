@@ -2,6 +2,7 @@ import {
   common_DesignPicture,
   common_DesignReference,
   common_MediaFull,
+  GetDesignBandResponse,
 } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
@@ -31,7 +32,12 @@ import { CalloutRail, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
-import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
+import {
+  flushAllowsRun,
+  flushRefusalSentence,
+  useTechCardAutosave,
+  type FlushResult,
+} from './autosave-contract';
 import { DraftedField } from './core/drafted-field';
 import { useGenerationWrites } from './generation/use-generation';
 import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
@@ -63,7 +69,13 @@ import { useBoardPick, useBoardProposals, usePutBack } from './board-pick';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
-import { designKeys, newClientRequestId, useDesignBand, useDesignWrites } from './use-design-band';
+import {
+  designKeys,
+  newClientRequestId,
+  rereadBandNow,
+  useDesignBand,
+  useDesignWrites,
+} from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -823,34 +835,61 @@ export function MoodBoard({
   const pendingCallouts = pendingRemove == null ? 0 : callouts.countOn(pendingRemove);
   const pendingAlsoInInput = pendingRemove != null && inputIds.has(pendingRemove);
 
-  /* Q3 (109 §8): the picture leaving the board was the last photo of a model's detail that no person
-     named (`made_by_model`, no plate). A MODEL's label is dropped by the server's sync after the
-     save — the band is followed until the slot is gone. A PERSON's label (a guess accepted, a detail
-     picked) is never dropped by the server and would keep the slot alive («named by 1 reference»),
-     and ride into other runs from the library: it is written back to the person's empty label —
-     the same cure as the cut-out's undo — and that write drops the orphan slot in its transaction. */
-  function lastPhotoOfModelDetail(mediaId: number) {
-    const ref = labelsNow.current.get(mediaId);
-    const slotId = (ref?.role ?? '').trim() === 'detail' ? ref?.detailSlotId ?? 0 : 0;
-    if (!(slotId > 0) || isHeldLabel(ref)) return;
-    const slot = detailSlots.find((s) => (s.id ?? 0) === slotId);
-    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
-    const others = [...labelsNow.current.values()].some(
-      (r) =>
-        (r.mediaId ?? 0) !== mediaId &&
-        (r.role ?? '').trim() === 'detail' &&
-        (r.detailSlotId ?? 0) === slotId &&
-        !isHeldLabel(r),
-    );
-    if (others) return;
-    if (isPersonLabel(ref)) {
-      const release = holdFlatInput(techCardId);
-      void setReferenceRole
-        .mutateAsync({ mediaId, role: '', ordinal: Math.max(1, ref?.ordinal ?? 1) })
-        .catch(() => {})
-        .finally(release);
+  /* Q3 (109 §8): a model's detail that no person named (`made_by_model`, no plate) goes when no
+     picture ON THE BOARD points at it any more. A MODEL's label of a picture off the board is dropped
+     by the server's own sync after the save (`DropBoardLabels`); a PERSON's label (a guess accepted,
+     a detail picked) never is — it keeps the slot alive («named by 1 reference») and would ride into
+     other runs from the library, so it is written back to the person's empty label (the cut-out
+     undo's cure; that write drops the orphan slot in its transaction).
+     ORDER (Codex review 07.10): the removal is SAVED first (`flush` → ok / nothing; anything else —
+     the server still has the picture on the board — and nothing is touched), the band is re-read,
+     and the decision is made against it and the CURRENT board: the photos that remain are the board's
+     rows, not every reference (a photo taken off earlier with a person's label is not a «remaining»
+     photo — it is an orphan too, and is cleared with the last one). A slot a person named or renamed,
+     or that holds a plate, is never touched. */
+  async function dropModelDetailAfterRemoval(mediaId: number, slotId: number) {
+    const card = techCardId;
+    let saved: FlushResult;
+    try {
+      saved = await autosave.flush('moodboard: a picture off the board');
+    } catch {
+      saved = 'error';
     }
-    followSlotGone(qc, techCardId, slotId);
+    if (saved !== 'ok' && saved !== 'nothing') return;
+    const board = new Set(
+      ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow).map((i) => i.mediaId),
+    );
+    // Put back meanwhile (undo, a drop of the same picture): the slot is its again.
+    if (board.has(mediaId)) return;
+    let fresh: GetDesignBandResponse;
+    try {
+      fresh = await rereadBandNow(qc, card);
+    } catch {
+      return;
+    }
+    const slot = photoDetailSlots(fresh.bench).find((s) => (s.id ?? 0) === slotId);
+    if (!slot?.madeByModel || (slot.pictureId ?? 0) > 0) return;
+    const pointing = (fresh.references ?? []).filter(
+      (r) => (r.role ?? '').trim() === 'detail' && (r.detailSlotId ?? 0) === slotId,
+    );
+    if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;
+    const orphans = pointing.filter((r) => !board.has(r.mediaId ?? 0) && isPersonLabel(r));
+    if (orphans.length) {
+      const release = holdFlatInput(card);
+      try {
+        for (const r of orphans)
+          await setReferenceRole
+            .mutateAsync({
+              mediaId: r.mediaId ?? 0,
+              role: '',
+              ordinal: Math.max(1, r.ordinal ?? 1),
+            })
+            .catch(() => {});
+      } finally {
+        release();
+      }
+    }
+    followSlotGone(qc, card, slotId);
   }
 
   function confirmRemove() {
@@ -861,7 +900,9 @@ export function MoodBoard({
     // снимке, номера у мудбордного указания нет, и открепившееся оно не показывается нигде — то
     // есть «сохранили» означало бы «оставили сиротой в payload». Поэтому ✕ и обязан назвать число.
     callouts.removeOn(mediaId);
-    lastPhotoOfModelDetail(mediaId);
+    // Q3: the detail this picture pointed at, read BEFORE the row goes; decided after the save.
+    const was = labelsNow.current.get(mediaId);
+    const slotOfRemoved = (was?.role ?? '').trim() === 'detail' ? was?.detailSlotId ?? 0 : 0;
     // Снимается ТОЛЬКО строка доски. Запись входа на тот же `media_id` — отдельная сущность со
     // своей ролью и своей запиской, и её сносит собственный ✕ в блоке референсов, который тоже
     // называет свою цену. Одна дверь, уносящая две вещи в разных блоках, — это дверь, о цене
@@ -871,6 +912,7 @@ export function MoodBoard({
         (i) => !(i.mediaId === mediaId && isBoardRow(i)),
       ),
     );
+    if (slotOfRemoved > 0) void dropModelDetailAfterRemoval(mediaId, slotOfRemoved);
   }
 
   // ── легаси-записка → описание (V-16) ────────────────────────────────────────────────────────

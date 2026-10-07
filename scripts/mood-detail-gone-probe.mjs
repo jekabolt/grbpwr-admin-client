@@ -8,7 +8,12 @@
 //   · деталь, названная человеком, остаётся, записи нет.
 //
 //   node scripts/mood-detail-gone-probe.mjs               → зелёный
-//   node scripts/mood-detail-gone-probe.mjs --mutate=noq3 → снятие не трогает деталь: КРАСНЫЙ
+//   · (Codex 07.10) сохранение снятия не прошло — ничего не пишется, деталь стоит; запись идёт ПОСЛЕ
+//     flush; деталь из двух фото: снятие первого — ничего, снятие второго чистит ярлыки обоих.
+//
+//   node scripts/mood-detail-gone-probe.mjs --mutate=noq3        → снятие не трогает деталь: КРАСНЫЙ
+//   node scripts/mood-detail-gone-probe.mjs --mutate=noflushgate → чистка до сохранения: КРАСНЫЙ
+//   node scripts/mood-detail-gone-probe.mjs --mutate=allrefs     → «остальные фото» по всем ярлыкам: КРАСНЫЙ
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -25,8 +30,24 @@ const MUTATIONS = {
   noq3: [
     {
       file: /design\/mood-board\.tsx$/,
-      from: '    lastPhotoOfModelDetail(mediaId);\n',
+      from: '    if (slotOfRemoved > 0) void dropModelDetailAfterRemoval(mediaId, slotOfRemoved);\n',
       to: '',
+    },
+  ],
+  // Codex 07.10 #3: the cleanup does not wait for the board save.
+  noflushgate: [
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: "    if (saved !== 'ok' && saved !== 'nothing') return;\n",
+      to: '',
+    },
+  ],
+  // Codex 07.10 #4: «remaining photos» read from every reference, not the board.
+  allrefs: [
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: 'if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;',
+      to: 'if (pointing.some((r) => (r.mediaId ?? 0) !== mediaId && !isHeldLabel(r))) return;',
     },
   ],
 };
@@ -162,7 +183,15 @@ try {
   await page.route('http://probe.local/**', (r) => {
     const m = /\/img\/(\d+)\.svg$/.exec(r.request().url());
     if (m) {
-      const c = { 201: '#c9c2b8', 202: '#8a8f96', 203: '#4b4a48' }[m[1]] ?? '#999';
+      const c =
+        {
+          201: '#c9c2b8',
+          202: '#8a8f96',
+          203: '#4b4a48',
+          204: '#b0a89c',
+          205: '#6f6a64',
+          206: '#9a9590',
+        }[m[1]] ?? '#999';
       return r.fulfill({
         status: 200,
         contentType: 'image/svg+xml',
@@ -200,27 +229,68 @@ try {
     return b;
   };
 
-  console.log('\nQ3 · a person’s label on a model’s detail');
+  const log = () => page.evaluate(() => (window.__bodies ?? []).map((c) => c.name));
+  const writesSince = async (k) => (await roleWrites()).slice(k);
+
+  console.log('\nCodex #3 · the removal did not save: nothing is touched');
   ck(
-    JSON.stringify(await page.evaluate(() => window.__cachedBench())) === '[77,78,79]',
-    'three details to begin with',
+    JSON.stringify(await page.evaluate(() => window.__cachedBench())) === '[77,78,79,80,81]',
+    'five details to begin with',
   );
-  await takeOff(201);
-  await page.waitForTimeout(400);
-  const w1 = await roleWrites();
+  await page.evaluate(() => (window.__flushAnswer = 'error'));
+  await takeOff(206);
+  await page.waitForTimeout(2500);
   ck(
-    w1.length === 1 && w1[0].mediaId === 201 && w1[0].role === '',
-    'taking its last photo off the board writes the person’s empty label',
-    JSON.stringify(w1),
+    (await roleWrites()).length === 0 &&
+      (await page.evaluate(() => window.__cachedBench()))?.includes(81),
+    'save failed: no label is cleared, «pocket» stays',
+    JSON.stringify({ w: await roleWrites(), b: await page.evaluate(() => window.__cachedBench()) }),
+  );
+  await page.evaluate(() => (window.__flushAnswer = 'ok'));
+
+  console.log('\nQ3 · a person’s label on a model’s detail');
+  const k1 = (await roleWrites()).length;
+  await takeOff(201);
+  await page.waitForTimeout(600);
+  const w1 = await writesSince(k1);
+  const order1 = await log();
+  ck(
+    w1.length === 1 &&
+      w1[0].mediaId === 201 &&
+      w1[0].role === '' &&
+      order1.lastIndexOf('flush') < order1.lastIndexOf('SetDesignReferenceRole'),
+    'its last photo off the board: saved first, then the person’s empty label',
+    JSON.stringify({ w1, order: order1.slice(-6) }),
   );
   const b1 = await benchWithin(4000, (b) => !b?.includes(77));
   ck(!b1?.includes(77), '«back hem» is gone from the band, no reload', JSON.stringify(b1));
 
+  console.log('\nCodex #4 · a two-photo detail, both with a person’s label');
+  const k2 = (await roleWrites()).length;
+  await takeOff(204);
+  await page.waitForTimeout(1500);
+  ck(
+    (await writesSince(k2)).length === 0 &&
+      (await page.evaluate(() => window.__cachedBench()))?.includes(80),
+    'the first photo off: 205 is still on the board — nothing is cleared',
+    JSON.stringify(await writesSince(k2)),
+  );
+  await takeOff(205);
+  await page.waitForTimeout(800);
+  const w2 = (await writesSince(k2)).map((w) => `${w.mediaId}:${w.role}`).sort();
+  ck(
+    JSON.stringify(w2) === '["204:","205:"]',
+    'the last photo off: both off-board person labels are cleared',
+    JSON.stringify(w2),
+  );
+  const b2a = await benchWithin(4000, (b) => !b?.includes(80));
+  ck(!b2a?.includes(80), '«strap» is gone', JSON.stringify(b2a));
+
   console.log('\nQ3 · a model’s label on a model’s detail');
+  const k3 = (await roleWrites()).length;
   await takeOff(202);
-  await page.waitForTimeout(400);
-  ck((await roleWrites()).length === 1, 'no write: the server’s sync drops a model’s row');
-  // The save kicks the background sync; it lands after the band was read.
+  await page.waitForTimeout(600);
+  ck((await writesSince(k3)).length === 0, 'no write: the server’s sync drops a model’s row');
   await page.waitForTimeout(800);
   await page.evaluate(() => window.__sync([203]));
   const b2 = await benchWithin(5000, (b) => !b?.includes(78));
@@ -231,10 +301,11 @@ try {
   );
 
   console.log('\nQ3 · a person’s detail stays');
+  const k4 = (await roleWrites()).length;
   await takeOff(203);
   await page.waitForTimeout(2500);
   ck(
-    (await roleWrites()).length === 1 &&
+    (await writesSince(k4)).length === 0 &&
       (await page.evaluate(() => window.__cachedBench()))?.includes(79),
     '«collar» (named by a person) stays; nothing is written',
     JSON.stringify(await page.evaluate(() => window.__cachedBench())),

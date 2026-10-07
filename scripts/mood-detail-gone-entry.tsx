@@ -1,12 +1,21 @@
 // DOM-стенд `mood-detail-gone-probe.mjs` (07.10 D3, Q3): НАСТОЯЩИЙ `MoodBoard` над заглушенной сетью.
-// Три фото деталей на доске: 201 — ярлык ЧЕЛОВЕКА на детали модели 77 «back hem», 202 — ярлык МОДЕЛИ
-// на детали модели 78 «cuff», 203 — ярлык человека на детали человека 79 «collar». Заглушка сервера
-// ведёт себя как store: запись роли и фоновый синк (`window.__sync`) сносят деталь модели без фото.
+// Фото деталей на доске: 201 — ярлык ЧЕЛОВЕКА на детали модели 77 «back hem», 202 — ярлык МОДЕЛИ
+// на детали модели 78 «cuff», 203 — ярлык человека на детали человека 79 «collar», 204 + 205 — два
+// фото человека на детали модели 80 «strap», 206 — на детали модели 81 «pocket» (сохранение падает).
+// Заглушка сервера ведёт себя как store: запись роли и фоновый синк (`window.__sync`) сносят деталь
+// модели без фото. Автосейв — заглушка: `window.__flushAnswer` решает исход flush, каждый flush
+// пишется в `__bodies`.
 import { zodResolver } from '@hookform/resolvers/zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { common_MediaFull, GetDesignBandResponse } from 'api/proto-http/admin';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { DraftedProvider } from 'components/managers/tech-card/components/design/head/drafted-provider';
+import {
+  AUTOSAVE_OFF,
+  AutosaveContext,
+  type AutosaveApi,
+  type FlushResult,
+} from 'components/managers/tech-card/components/design/autosave-contract';
 import { MoodBoard } from 'components/managers/tech-card/components/design/mood-board';
 import { PickModeProvider } from 'components/managers/tech-card/components/design/pick-mode';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
@@ -30,7 +39,7 @@ declare global {
   }
 }
 
-const IDS = [201, 202, 203];
+const IDS = [201, 202, 203, 204, 205, 206];
 
 const media = (id: number): common_MediaFull =>
   ({
@@ -60,7 +69,13 @@ const slot = (id: number, name: string, madeByModel: boolean) => ({
   madeByModel,
 });
 const band = {
-  bench: [slot(77, 'back hem', true), slot(78, 'cuff', true), slot(79, 'collar', false)],
+  bench: [
+    slot(77, 'back hem', true),
+    slot(78, 'cuff', true),
+    slot(79, 'collar', false),
+    slot(80, 'strap', true),
+    slot(81, 'pocket', true),
+  ],
   runs: [],
   totalRuns: 0,
   references: [
@@ -87,6 +102,30 @@ const band = {
       labelState: 'ok',
       labelSource: 'human',
       ordinal: 3,
+    },
+    {
+      mediaId: 204,
+      role: 'detail',
+      detailSlotId: 80,
+      labelState: 'ok',
+      labelSource: 'human',
+      ordinal: 4,
+    },
+    {
+      mediaId: 205,
+      role: 'detail',
+      detailSlotId: 80,
+      labelState: 'ok',
+      labelSource: 'human',
+      ordinal: 5,
+    },
+    {
+      mediaId: 206,
+      role: 'detail',
+      detailSlotId: 81,
+      labelState: 'ok',
+      labelSource: 'human',
+      ordinal: 6,
     },
   ] as Ref[],
 };
@@ -123,6 +162,18 @@ window.__sync = (board) => {
   dropOrphans();
 };
 
+/** The card's autosave: the probe says how the next flush ends; every flush is logged in order. */
+(window as unknown as { __flushAnswer: string }).__flushAnswer = 'ok';
+const autosave: AutosaveApi = {
+  ...AUTOSAVE_OFF,
+  status: 'idle',
+  flush: async () => {
+    const w = window as unknown as { __bodies?: unknown[]; __flushAnswer: string };
+    (w.__bodies = w.__bodies ?? []).push({ name: 'flush', body: w.__flushAnswer });
+    return w.__flushAnswer as FlushResult;
+  },
+};
+
 function Card() {
   const form = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
@@ -141,9 +192,11 @@ function Card() {
     <FormProvider {...form}>
       <form>
         <fieldset>
-          <DraftedProvider techCardId={7}>
-            <MoodBoard techCardId={7} />
-          </DraftedProvider>
+          <AutosaveContext.Provider value={autosave}>
+            <DraftedProvider techCardId={7}>
+              <MoodBoard techCardId={7} />
+            </DraftedProvider>
+          </AutosaveContext.Provider>
         </fieldset>
       </form>
     </FormProvider>
