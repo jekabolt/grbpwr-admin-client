@@ -216,8 +216,22 @@ export type FocusedAnnotatorProps = {
    * Только `layout='grid'`.
    */
   tileFlag?: (view: FocusedView, positionInViews: number) => FocusedTileFlag | null | undefined;
-  /** Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер. */
-  tileBadge?: (view: FocusedView, positionInViews: number) => string | null | undefined;
+  /**
+   * Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер.
+   * M15: объект — ещё и ТОН (`guess` — догадка модели, серым) и нажатие по слову (принять догадку).
+   */
+  tileBadge?: (
+    view: FocusedView,
+    positionInViews: number,
+  ) => string | FocusedTileBadge | null | undefined;
+  /**
+   * M15 (109 §4.2) · ОДИН ГЛАГОЛ НА ВЕСЬ КАДР — «remove from prompt» на плитке входа флэта. Мышью:
+   * ховер затемняет кадр (чернила 60 %) и пишет глагол по центру, клик — исполнение. Касанием:
+   * первый тап взводит накладку, второй исполняет, тап мимо — сбрасывает. С клавиатуры: накладка —
+   * кнопка, фокус её показывает, Enter/Space исполняет. Номер и плашка остаются над накладкой.
+   * Только `layout='grid'`.
+   */
+  tileAction?: (view: FocusedView, positionInViews: number) => FocusedTileAction | null | undefined;
   /**
    * С КАКОГО ЧИСЛА СЧИТАЕТ ЯРЛЫК (умолчание 1). M13: вход флэта рисует то, что уйдёт в промпт, двумя
    * лентами разной высоты (фото и приложенные флэты) — номер второй продолжает первую, как строки
@@ -442,6 +456,24 @@ export type FocusedAnnotatorProps = {
   tilePick?: TilePick;
 };
 
+/** M15 · ярлык плитки как объект: тон и нажатие по слову. */
+export type FocusedTileBadge = {
+  word: string;
+  /** `guess` — догадка модели (серым), `ink` — слово человека или факт (умолчание). */
+  tone?: 'ink' | 'guess';
+  /** Нажатие по слову (принять догадку). Нет — ярлык прозрачен для указателя, как раньше. */
+  onPress?: () => void;
+  pressLabel?: string;
+};
+
+/** M15 · глагол на весь кадр — см. `tileAction`. */
+export type FocusedTileAction = {
+  /** Слово на накладке (`remove from prompt`). */
+  label: string;
+  ariaLabel: string;
+  onAction: () => void;
+};
+
 /** Флаг плитки — та же форма, что у `PictureTile` (`PictureTileFlag`). */
 export type FocusedTileFlag = {
   word: string;
@@ -480,6 +512,7 @@ export function FocusedAnnotator({
   mediaLabel,
   tileFlag,
   tileBadge,
+  tileAction,
   numberFrom = 1,
   numbered = true,
   anchoredMediaId = null,
@@ -620,6 +653,18 @@ export function FocusedAnnotator({
   }, [picking]);
   /** Порядок правится только там, где вообще правят, и только когда есть что переставлять. */
   const canOrder = isGrid && !readOnly && !!onReorderMedia && views.length > 1;
+  /* M15 · ВЗВЕДЁННАЯ НАКЛАДКА (`tileAction`) на устройстве без ховера: первый тап показывает глагол,
+     второй исполняет. Тап мимо любой накладки — сброс. */
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (armedKey == null) return;
+    const off = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.(`[data-tile-action="${CSS.escape(armedKey)}"]`)) setArmedKey(null);
+    };
+    document.addEventListener('pointerdown', off, true);
+    return () => document.removeEventListener('pointerdown', off, true);
+  }, [armedKey]);
   const reorder = useReorder((from, to) => onReorderMedia?.(from, to));
   const hasMedia = views.length > 0;
   const focused = views.find((v) => v.mediaId === focusedId) ?? views[0];
@@ -911,8 +956,48 @@ export function FocusedAnnotator({
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
               const flag = tileFlag?.(v, i);
-              const badgeNote = tileBadge?.(v, i);
+              const badgeRaw = tileBadge?.(v, i);
+              const badge: FocusedTileBadge | null =
+                badgeRaw == null || badgeRaw === ''
+                  ? null
+                  : typeof badgeRaw === 'string'
+                    ? { word: badgeRaw }
+                    : badgeRaw.word
+                      ? badgeRaw
+                      : null;
+              const badgeNote = badge?.word ?? '';
+              const action = isGrid ? tileAction?.(v, i) : null;
               const corners = tileCorners?.(v, i);
+              /* M15 · ГЛАГОЛ НА ВЕСЬ КАДР (`tileAction`) — слоем ВНУТРИ кадра (`overlay` поверхности),
+                 ровно по снимку; ярлык плитки (z-20) — номер и плашка — остаётся над затемнением. */
+              const actionEl =
+                action && !picking ? (
+                  <button
+                    type='button'
+                    data-tile-action={v.key}
+                    data-armed={armedKey === v.key ? '' : undefined}
+                    aria-label={action.ariaLabel}
+                    onClick={() => {
+                      const touch = window.matchMedia?.('(hover: none)').matches;
+                      if (touch && armedKey !== v.key) {
+                        setArmedKey(v.key);
+                        return;
+                      }
+                      setArmedKey(null);
+                      action.onAction();
+                    }}
+                    className={cn(
+                      'absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-textColor/60 px-2',
+                      'opacity-0 transition-opacity duration-150 ease-out motion-reduce:transition-none',
+                      '[@media(hover:hover)]:hover:opacity-100 focus-visible:opacity-100 data-[armed]:opacity-100',
+                      'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+                    )}
+                  >
+                    <span className='text-center text-nano uppercase leading-tight tracking-label text-bgColor'>
+                      {action.label}
+                    </span>
+                  </button>
+                ) : null;
               return (
                 <div
                   key={v.key}
@@ -975,14 +1060,19 @@ export function FocusedAnnotator({
                     overlay={
                       anchoredSpots?.length && v.mediaId === anchoredMediaId
                         ? (size) => (
-                            <SpotRings
-                              spots={anchoredSpots}
-                              size={size}
-                              hot={hotSpot}
-                              onHot={onHotSpot}
-                            />
+                            <>
+                              <SpotRings
+                                spots={anchoredSpots}
+                                size={size}
+                                hot={hotSpot}
+                                onHot={onHotSpot}
+                              />
+                              {actionEl}
+                            </>
                           )
-                        : undefined
+                        : actionEl
+                          ? () => actionEl
+                          : undefined
                     }
                     callouts={calloutsFor(v.mediaId)}
                     frozen={readOnly}
@@ -1048,15 +1138,45 @@ export function FocusedAnnotator({
                       readOnly ? 'max-w-full' : 'max-w-[calc(100%-32px)]',
                     )}
                   >
-                    {(numbered || !!badgeNote) && (
-                      <span
-                        className='bg-textColor px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor'
-                        data-tile-badge=''
-                      >
-                        {numbered ? numberFrom + i : null}
-                        {badgeNote ? `${numbered ? ' · ' : ''}${badgeNote}` : null}
-                      </span>
-                    )}
+                    {(numbered || !!badgeNote) &&
+                      (() => {
+                        const text = (
+                          <>
+                            {numbered ? numberFrom + i : null}
+                            {badgeNote ? `${numbered ? ' · ' : ''}${badgeNote}` : null}
+                          </>
+                        );
+                        // Догадка модели — серым (109 §2.2): одно слово, один тон, без «?».
+                        const tone = cn(
+                          'px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor',
+                          badge?.tone === 'guess' ? 'bg-labelColor' : 'bg-textColor',
+                        );
+                        return badge?.onPress ? (
+                          <button
+                            type='button'
+                            data-tile-badge=''
+                            data-tone={badge.tone ?? 'ink'}
+                            aria-label={badge.pressLabel ?? badgeNote}
+                            title={badge.pressLabel}
+                            onClick={badge.onPress}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={cn(
+                              tone,
+                              'pointer-events-auto cursor-pointer hover:bg-textColor focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
+                            )}
+                          >
+                            {text}
+                          </button>
+                        ) : (
+                          <span
+                            className={tone}
+                            data-tile-badge=''
+                            data-tone={badge?.tone ?? 'ink'}
+                          >
+                            {text}
+                          </span>
+                        );
+                      })()}
                     {flag && (
                       <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
                         <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>

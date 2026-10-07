@@ -118,6 +118,8 @@ const stubNetwork = {
         export const requestHandler = () => Promise.resolve({});
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
+        // M17 pulled the playground registry into the board: its Ideas read the abortable service.
+        export const abortableAdminService = adminService;
         export default { adminService, authService, frontendService };
       `,
       loader: 'js',
@@ -231,6 +233,28 @@ try {
     () => getComputedStyle(document.querySelector('[data-menu="role:101"]')).opacity,
   );
   ck(quiet === '0', 'the menu corner is quiet at rest (TILE_QUIET)', quiet);
+
+  console.log('\nM15 · taken out of the prompt');
+  const flag103 = await page.evaluate(
+    () =>
+      document.querySelector('[data-rail-view="103"] [data-flag]')?.getAttribute('data-flag') ?? '',
+  );
+  ck(flag103 === 'not sent', 'a held picture stays on the board, flagged «not sent»', flag103);
+  await page.hover('[data-rail-view="103"]');
+  await page.click('[data-menu="role:103"]');
+  await page.waitForSelector('[role="listbox"] [data-menu-item="send:back"]', { timeout: 5000 });
+  const firstItem = await page.evaluate(() =>
+    document.querySelector('[role="listbox"] [data-menu-item]')?.getAttribute('data-menu-item'),
+  );
+  ck(firstItem === 'send:back', 'its corner ▾ opens with «send to the flat»', String(firstItem));
+  await page.click('[role="listbox"] [data-menu-item="send:back"]');
+  await page.waitForTimeout(600);
+  ck(
+    (await page.evaluate(() => window.__calls.includes('SetDesignReferenceHeld'))) &&
+      !(await page.$('[data-rail-view="103"] [data-flag="not sent"]')),
+    '«send to the flat» puts it back: the write, and the flag is gone',
+  );
+  await page.mouse.move(5, 5);
 
   console.log('\nE3 · выбор');
   await page.hover('[data-rail-view="101"]');

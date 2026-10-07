@@ -69,13 +69,16 @@ export function rememberFlatDraft(card: number, ask: FlatAsk): void {
 }
 
 export type FlatInputState = {
-  run: 'saving' | 'starting' | null;
+  /** `reading` (M15): GENERATE waits ≤15 s for pictures just added to the input to be read. */
+  run: 'saving' | 'reading' | 'starting' | null;
   refused: FlushResult | 'released' | 'stopped' | null;
   clearing: boolean;
   rewriting: number;
   wordsHeld: number;
   serverRefusal: RunRefusal | null;
   ask: FlatAsk | null;
+  /** M15: pictures still being read when the last GENERATE went — not in that run (one line). */
+  leftOut: number;
 };
 
 const FLAT_INPUT_IDLE: FlatInputState = {
@@ -86,6 +89,7 @@ const FLAT_INPUT_IDLE: FlatInputState = {
   wordsHeld: 0,
   serverRefusal: null,
   ask: null,
+  leftOut: 0,
 };
 const flatInput = new Map<number, FlatInputState>();
 const flatInputListeners = new Set<() => void>();
@@ -123,7 +127,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.rewriting === prev.rewriting &&
     next.wordsHeld === prev.wordsHeld &&
     next.serverRefusal === prev.serverRefusal &&
-    next.ask === prev.ask
+    next.ask === prev.ask &&
+    next.leftOut === prev.leftOut
   ) {
     return;
   }
@@ -134,7 +139,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.rewriting === 0 &&
     next.wordsHeld === 0 &&
     next.serverRefusal === null &&
-    next.ask === null
+    next.ask === null &&
+    next.leftOut === 0
   ) {
     flatInput.delete(card);
   } else {
@@ -183,4 +189,23 @@ export function holdFlatInput(card: number, opts?: { words?: boolean }): () => v
       ...(words ? { wordsHeld: Math.max(0, now.wordsHeld - 1) } : {}),
     });
   };
+}
+
+/**
+ * ═══ ЧИТАЕТСЯ ВО ВХОДЕ (M15, 109 §5, Q2) ═════════════════════════════════════════════════════
+ *
+ * Картинки, брошенные во вход в этой сессии, чей ярлык ещё читается (плитка `…` в лотке). Вход
+ * публикует их здесь, GENERATE читает: ждёт ≤15 с (`reading…`), потом идёт с готовым и говорит,
+ * что не вошло. Память модуля, по карточке.
+ */
+const reading = new Map<number, number[]>();
+
+export function setFlatReading(card: number, mediaIds: number[]): void {
+  if (card <= 0) return;
+  if (mediaIds.length) reading.set(card, [...mediaIds]);
+  else reading.delete(card);
+}
+
+export function readFlatReading(card: number): number[] {
+  return reading.get(card) ?? [];
 }

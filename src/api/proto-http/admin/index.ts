@@ -15651,8 +15651,10 @@ export type common_DesignReference = {
   // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
   // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
   labelSource: string | undefined;
-  // pending | ok | unsure | failed; "" reads as ok. Only `ok` with a role travels to a run; a
-  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»).
+  // pending | ok | unsure | failed | held; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»). `held` = a
+  // person took the picture out of the prompt (SetDesignReferenceHeld): the role and slot stay, the
+  // picture does not ride (109 §4).
   labelState: string | undefined;
   // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
   // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
@@ -17661,6 +17663,16 @@ export type SetDesignReferenceRoleResponse = {
   reference: common_DesignReference | undefined;
 };
 
+export type SetDesignReferenceHeldRequest = {
+  techCardId: number | undefined;
+  mediaId: number | undefined;
+  held: boolean | undefined;
+};
+
+export type SetDesignReferenceHeldResponse = {
+  reference: common_DesignReference | undefined;
+};
+
 export type PreviewDesignRunInputsRequest = {
   techCardId: number | undefined;
   kind: string | undefined;
@@ -17673,7 +17685,8 @@ export type DesignInputHeld = {
   // mood | material | unmarked (no purpose) | pending (the label is being read) | view_unknown
   // (unsure / failed — answer the question card or tap the tile) | not_a_view (a person's «no view»)
   // | older (beyond the two newest of its view) | other_detail (a detail of another slot) | detail
-  // (a detail picture on a views run) | over_cap
+  // (a detail picture on a views run) | over_cap | render (a design run's output: never a flat's
+  // input, M16) | held (a person took it out of the prompt — SetDesignReferenceHeld, 109 §4)
   reason: string | undefined;
   role: string | undefined;
   modelCaption: string | undefined;
@@ -19685,6 +19698,16 @@ export interface AdminService {
   // and saving one must not stale a sign-off.
   // InvalidArgument: an unknown role, or a media_id the card does not hold.
   SetDesignReferenceRole(request: SetDesignReferenceRoleRequest): Promise<SetDesignReferenceRoleResponse>;
+  // SetDesignReferenceHeld takes a labelled board picture OUT OF THE PROMPT, or puts it back
+  // (109 §4, «remove from prompt»). The label (view / detail slot) and the picture on the board stay;
+  // only label_state moves between ok and held, and a held picture rides no run. A model's detail
+  // whose every photo is held loses its slot; putting such a photo back reads it again (the label
+  // goes pending and the sync mints or joins a slot). The label source never changes. Enters no
+  // digest, like the role.
+  // FailedPrecondition nothing_to_hold: the picture has no settled label (no row, no role, still
+  // being read, waiting for a person) — it is not in the prompt. Putting back a picture that is not
+  // held is a no-op.
+  SetDesignReferenceHeld(request: SetDesignReferenceHeldRequest): Promise<SetDesignReferenceHeldResponse>;
   // PreviewDesignRunInputs is a DRY RUN of StartDesignRun's input assembly (101 §2.8): the snapshot a
   // run of this kind and params would freeze right now — the same function, the same sources, no
   // reservation, no money, no model. «what the model gets» draws this answer instead of re-deriving
@@ -26255,6 +26278,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignReferenceRole",
       }) as Promise<SetDesignReferenceRoleResponse>;
+    },
+    SetDesignReferenceHeld(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/reference-held`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignReferenceHeld",
+      }) as Promise<SetDesignReferenceHeldResponse>;
     },
     PreviewDesignRunInputs(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

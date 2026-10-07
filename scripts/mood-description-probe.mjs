@@ -182,6 +182,8 @@ const stubNetwork = {
         export const requestHandler = () => Promise.resolve({});
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
+        // M17 pulled the playground registry into the board: its Ideas read the abortable service.
+        export const abortableAdminService = adminService;
         export default { adminService, authService, frontendService };
       `,
       loader: 'js',

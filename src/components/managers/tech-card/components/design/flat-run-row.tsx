@@ -36,10 +36,12 @@ import {
   flatInputBusy,
   patchFlatInput,
   readFlatInput,
+  readFlatReading,
   rememberFlatDraft,
   useFlatInput,
   type FlatAsk,
 } from './flat-input';
+import { labelWaiting, labelsByMedia, takeProposals } from './board-labels';
 import {
   autoStructure,
   flatParamsFor,
@@ -69,7 +71,7 @@ import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
-import { isBoardRow, type BoardItem } from './mood-board';
+import { isBoardRow, setBoardRole, type BoardItem } from './mood-board';
 import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import type { CalloutLike } from './render/what-model-gets';
@@ -318,7 +320,73 @@ const BAND_WRITES_WAIT_MS = 15_000;
 function isDigestWrite(variables: unknown): boolean {
   if (!variables || typeof variables !== 'object') return false;
   const v = variables as Record<string, unknown>;
-  return ('mediaId' in v && 'role' in v) || ('slot' in v && v.newDetailName !== undefined);
+  // M15: «remove from prompt» (`{ mediaId, held }`) moves what a flat sends exactly as a role does.
+  return (
+    ('mediaId' in v && ('role' in v || 'held' in v)) ||
+    ('slot' in v && v.newDetailName !== undefined)
+  );
+}
+
+/** M15 (109 §5, Q2): how long GENERATE waits for pictures just dropped into the input to be read. */
+const READING_WAIT_MS = 15_000;
+const READING_POLL_MS = 1_500;
+
+/**
+ * GENERATE AT PICTURES STILL BEING READ (109 §5, owner Q2): not forever, and not silently without the
+ * picture the person just put in. The press waits ≤ READING_WAIT_MS (`reading…`) for the pictures the
+ * input published (`readFlatReading`), re-reading the band; a model's proposal for a picture with no
+ * purpose is applied on the way (the board, which applies it elsewhere, is not mounted here) and
+ * saved, so the server's next read settles it. Returns how many were still being read when it went,
+ * or `null` when the save of a proposal failed (nothing is started).
+ */
+async function waitForReading(opts: {
+  qc: QueryClient;
+  card: number;
+  form: ReturnType<typeof useFormContext<TechCardFormData>>;
+  flush: () => Promise<FlushResult>;
+}): Promise<number | null> {
+  const { qc, card, form } = opts;
+  const ids = readFlatReading(card);
+  if (!ids.length) return 0;
+  patchFlatInput(card, { run: 'reading' });
+  const until = Date.now() + READING_WAIT_MS;
+  for (;;) {
+    let band: GetDesignBandResponse;
+    try {
+      band = await rereadBand(qc, card);
+    } catch {
+      return ids.length;
+    }
+    const labels = labelsByMedia(band.references);
+    const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
+    const board = live.filter(isBoardRow);
+    const take = takeProposals(
+      card,
+      board.filter((i) => ids.includes(i.mediaId)),
+      labels,
+    );
+    if (take.length) {
+      let next = live;
+      for (const t of take) next = setBoardRole(next, t.mediaId, t.purpose);
+      form.setValue('moodboardMedia', next as TechCardFormData['moodboardMedia'], {
+        shouldDirty: true,
+      });
+      let saved: FlushResult;
+      try {
+        saved = await opts.flush();
+      } catch {
+        saved = 'error';
+      }
+      if (!flushAllowsRun(saved)) return null;
+    }
+    const now = ((form.getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow);
+    const purposeOf = new Map(now.map((i) => [i.mediaId, (i.role ?? '').trim()]));
+    const left = ids.filter(
+      (id) => purposeOf.has(id) && labelWaiting(purposeOf.get(id) ?? '', labels.get(id)),
+    );
+    if (!left.length || Date.now() >= until) return left.length;
+    await new Promise((r) => window.setTimeout(r, READING_POLL_MS));
+  }
 }
 
 /**
@@ -583,7 +651,7 @@ export function FlatRunRow({
     if (flatInputBusy(readFlatInput(card))) return;
     const wasOn = autosave.status !== 'off';
     const ask: FlatAsk = { target, fromMyFlat, structure: [...structureNow] };
-    patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
+    patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask, leftOut: 0 });
     let refusal: ServerRefusal | null = null;
     try {
       const brief = await settleSeedBrief(card);
@@ -633,6 +701,20 @@ export function FlatRunRow({
         }
         return;
       }
+      /* M15 Q2: pictures just dropped into the input are given ≤15 s to be read; what is still
+         being read after that stays out of this run, and the row says so. */
+      const leftOut = await waitForReading({
+        qc,
+        card,
+        form,
+        flush: () => autosave.flush('flat'),
+      });
+      if (leftOut === null) {
+        patchFlatInput(card, { refused: 'error' });
+        return;
+      }
+      patchFlatInput(card, { run: 'saving', leftOut });
+      if (cardNow.current !== card || !cardOnScreen(card)) return;
       let freshBand: GetDesignBandResponse;
       try {
         freshBand = await rereadBand(qc, card);
@@ -749,7 +831,9 @@ export function FlatRunRow({
         <GenerateRow
           gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
           pending={busy || inFlight}
-          pendingLabel={inFlight && !busy ? 'drawing…' : undefined}
+          pendingLabel={
+            inFlight && !busy ? 'drawing…' : input.run === 'reading' ? 'reading…' : undefined
+          }
           onGenerate={() => press()}
           trailing={
             <>
@@ -853,6 +937,19 @@ export function FlatRunRow({
       </div>
 
       {/* Z4 · ONE LINE UNDER THE ROW: why GENERATE waits, and the one door that moves it on. */}
+      {input.leftOut > 0 && !busy && (
+        <Text
+          size='nano'
+          variant='label'
+          component='p'
+          className='uppercase tracking-label'
+          data-flat-left-out={input.leftOut}
+        >
+          {input.leftOut === 1
+            ? '1 picture was still being read · not in this run'
+            : `${input.leftOut} pictures were still being read · not in this run`}
+        </Text>
+      )}
       {myFlatGone && (
         <div data-flat-myflat-gone=''>
           <LockBar reason='your flat was removed — drawing from photos' />

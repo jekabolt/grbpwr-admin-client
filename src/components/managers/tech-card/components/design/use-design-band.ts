@@ -621,6 +621,23 @@ export function useDesignWrites(techCardId?: number) {
     onError,
   });
 
+  /**
+   * «REMOVE FROM PROMPT» (M15, 109 §4): the label stays, the picture stays on the board, only its
+   * state moves between `ok` and `held` — a held picture rides no run. `held: false` puts it back.
+   * The caller speaks its own refusal (`silent`): the tile it hid comes back with one line.
+   */
+  const setReferenceHeld = useMutation({
+    mutationFn: (input: { mediaId: number; held: boolean; silent?: boolean }) =>
+      adminService.SetDesignReferenceHeld({
+        techCardId: techCardId ?? 0,
+        mediaId: input.mediaId,
+        held: input.held,
+      }),
+    onMutate,
+    onSuccess: invalidateWritten,
+    onError,
+  });
+
   return useMemo(
     () => ({
       registerUpload,
@@ -631,6 +648,7 @@ export function useDesignWrites(techCardId?: number) {
       setPictureSelected,
       splitPicture,
       setReferenceRole,
+      setReferenceHeld,
       invalidate,
     }),
     [
@@ -642,6 +660,7 @@ export function useDesignWrites(techCardId?: number) {
       setPictureSelected,
       splitPicture,
       setReferenceRole,
+      setReferenceHeld,
       invalidate,
     ],
   );

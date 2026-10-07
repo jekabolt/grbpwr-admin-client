@@ -693,12 +693,15 @@ export function SlotCap({
  * line, so the cap does not grow. Only the name is the target: the cap's `undo` and pills beside it
  * stay their own buttons.
  */
-function CapName({
+export function CapName({
   label,
   rename,
+  muted = false,
 }: {
   label: string;
   rename: { value: string; onCommit: (next: string) => void };
+  /** M15: a name the model gave (`made_by_model`) is grey until a person renames it. */
+  muted?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(rename.value);
@@ -764,7 +767,10 @@ function CapName({
         setDraft(rename.value);
         setEditing(true);
       }}
-      className='min-w-0 cursor-text truncate text-left text-micro uppercase tracking-label text-textColor decoration-labelColor underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none'
+      className={cn(
+        'min-w-0 cursor-text truncate text-left text-micro uppercase tracking-label decoration-labelColor underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none',
+        muted ? 'text-labelColor' : 'text-textColor',
+      )}
     >
       {label}
     </button>

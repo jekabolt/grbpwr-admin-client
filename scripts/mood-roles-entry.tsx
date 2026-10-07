@@ -52,9 +52,23 @@ const media = (id: number, n: number): common_MediaFull =>
   IDS.map((id, n) => [id, COLORS[n]]),
 );
 
-const band = { bench: [], runs: [], totalRuns: 0 } as unknown as GetDesignBandResponse;
+// M15: 103 was taken out of the prompt (label_state held) — the board keeps it, flagged «not sent».
+const band = {
+  bench: [],
+  runs: [],
+  totalRuns: 0,
+  references: [
+    { mediaId: 103, role: 'back', labelState: 'held', labelSource: 'model_cheap', ordinal: 3 },
+  ],
+} as unknown as GetDesignBandResponse;
 window.__api = {
   GetDesignBand: () => structuredClone(band),
+  SetDesignReferenceHeld: (req) => {
+    const r = req as { mediaId: number; held: boolean };
+    const ref = (band.references ?? []).find((x) => x.mediaId === r.mediaId);
+    if (ref) ref.labelState = r.held ? 'held' : 'ok';
+    return { reference: ref };
+  },
   ListObjectsPaged: () => ({ list: IDS.map(media) }),
 };
 

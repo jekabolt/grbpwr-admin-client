@@ -13,21 +13,30 @@
 //   · WORDS = строка класса + строки человека, и ровно это уходит (тот же хук, что у модалки); те же
 //     случаи, что у сервера (designgen TestFlatGarmentNote); описание модели в поле не стоит;
 //     сервер без поля — поле заперто;
-//   · у каждой группы слот «+ picture» (MediaSlot доски, здесь — заглушка с тем же onSelect):
-//     VIEWS → доска `target`; DETAIL → доска `detail` + ярлык человека на слот; бледная плитка без
-//     номера `…` / причина удержания, пока превью не пошлёт; уже лежащая на доске — переназначена;
-//     технический флэт — отказ; во время старта прогона — отказ; карточка только для чтения — без слота.
+// M15 (109-UNIFIED-INPUT):
+//   · ОДИН «+ picture» на весь вход (MediaSlot доски, здесь — заглушка с тем же onSelect): картинки на
+//     доску БЕЗ назначения; лоток — бледные «…» без номера; предложение модели встаёт в назначение на
+//     FLAT; вид → VIEWS (серая плашка догадки, тап = принять → чернила); деталь → DETAIL · имя серым;
+//     mood остаётся в лотке со словом; рендер — «render» сразу, ▾ без видов;
+//   · remove from prompt: ховер-накладка, плитка уходит сразу, запись held, «undo»; отказ — плитка
+//     вернулась; касание — первый тап взводит; модалка «not sent · send again ›»;
+//   · GENERATE при «…» — «reading…», предложение применено и сохранено, params = превью; не дождался
+//     ≤15 с — пошёл и сказал «1 picture was still being read · not in this run»;
+//   · recall: слова флэт-прогона → WORDS (runFlatWords), технический флэт — отказ, старт прогона — отказ.
 //
 //   node scripts/flat-input-pictures-probe.mjs                     → зелёный
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohl       → все группы в полный тон: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=wrongpress → деталь спрашивает нажатие видов: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=wordskey   → ключ превью на каждом слове: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=mountsave  → монтирование съедает «сохранение»: КРАСНЫЙ
-//   node scripts/flat-input-pictures-probe.mjs --mutate=addmood    → VIEWS кладёт не target: КРАСНЫЙ
-//   node scripts/flat-input-pictures-probe.mjs --mutate=nolabel    → деталь без ярлыка слота: КРАСНЫЙ
-//   node scripts/flat-input-pictures-probe.mjs --mutate=numbered   → бледная плитка с номером: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=purpose    → вход сам ставит назначение: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=notone     → догадка модели чернилами: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=noarm      → касание снимает сразу: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nowait     → GENERATE не ждёт чтения: КРАСНЫЙ
+//   node scripts/flat-input-pictures-probe.mjs --mutate=nosent     → лоток держит отправленное: КРАСНЫЙ
 //   node scripts/flat-input-pictures-probe.mjs --mutate=nohuman    → слова человека не уходят: КРАСНЫЙ
-//   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — M14.
+//   SHOT=<path.png> — снимок на видах; SHOT2=<path.png> — на выбранной детали; SHOT3 — накладка
+//   remove from prompt; SHOT4 — лоток (M15).
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -42,22 +51,37 @@ const root = resolve(HERE, '..');
 
 const PICTURES = /design\/flat-input-pictures\.tsx$/;
 const WORDS = /design\/flat-words-field\.tsx$/;
+const ANNOTATOR = /ui\/components\/focused-annotator\.tsx$/;
+const RUNROW = /design\/flat-run-row\.tsx$/;
 const MUTATIONS = {
-  addmood: [
+  // M15: the add decides the purpose itself (the M14 per-group door) — the server no longer decides.
+  purpose: [
     {
       file: PICTURES,
-      from: "const purpose = input.target.kind === 'views' ? 'target' : 'detail';",
-      to: "const purpose = input.target.kind === 'views' ? 'mood' : 'detail';",
+      from: '    next: result.next,\n',
+      to: "    next: result.next.map((i) => (result.accepted.some((m) => m.id === i.mediaId) ? { ...i, role: 'target' } : i)),\n",
     },
   ],
-  nolabel: [
+  // M15: the model's guess wears the person's ink.
+  notone: [
     {
-      file: PICTURES,
-      from: "      if (target.kind === 'detail') {\n        const order",
-      to: '      if (false) {\n        const order',
+      file: ANNOTATOR,
+      from: "badge?.tone === 'guess' ? 'bg-labelColor'",
+      to: "false ? 'bg-labelColor'",
     },
   ],
-  numbered: [{ file: PICTURES, from: 'numbered={false}', to: 'numbered={true}' }],
+  // M15: a touch screen's first tap removes at once (nothing to arm).
+  noarm: [{ file: ANNOTATOR, from: 'if (touch && armedKey !== v.key) {', to: 'if (false) {' }],
+  // M15: GENERATE does not wait for pictures being read.
+  nowait: [
+    {
+      file: RUNROW,
+      from: '  const ids = readFlatReading(card);\n',
+      to: '  const ids: number[] = [];\n',
+    },
+  ],
+  // M15: the tray keeps a picture a press already sends.
+  nosent: [{ file: PICTURES, from: '!sent.has(a.mediaId) && ', to: '' }],
   nohuman: [
     {
       file: WORDS,
@@ -166,6 +190,8 @@ const stubNetwork = {
         export const requestHandler = () => Promise.resolve({});
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
+        // M17 pulled the playground registry into the board: its Ideas read the abortable service.
+        export const abortableAdminService = adminService;
         export default { adminService, authService, frontendService };
       `,
       loader: 'js',
@@ -613,137 +639,454 @@ try {
   );
   await page.fill('[data-probe-words="38"] textarea', '');
 
-  console.log('\nM14 · + picture in the input');
+  console.log('\nM15 · one + picture, the tray, the server proposes');
   await pickTarget('views again');
-  const addIn = async (key, ids) => {
+  const addOne = async (ids) => {
     await page.evaluate((x) => (window.__pick = x.map((id) => window.__img(id))), ids);
-    await page.click(`[data-flat-pictures-group="${key}"] [data-probe-add]`);
+    await page.click('[data-flat-add] [data-probe-add]');
     await page.waitForTimeout(300);
   };
-  const boardRole = (id) =>
+  const boardRow = (id) =>
     page.evaluate(
       (m) =>
         window.__picturesForm
           .getValues('moodboardMedia')
-          .find((r) => r.mediaId === m && r.kind === 'TECH_CARD_MEDIA_KIND_MOODBOARD')?.role ??
-        null,
+          .find((r) => r.mediaId === m && r.kind === 'TECH_CARD_MEDIA_KIND_MOODBOARD') ?? null,
       id,
     );
-  const pendingOf = async (key) =>
-    page.evaluate((k) => {
-      const g = document.querySelector(`[data-flat-pictures-group="${k}"]`);
-      const box = g?.querySelector('[data-flat-pictures-pending]');
+  const tray = () =>
+    page.evaluate(() => {
+      const box = document.querySelector('[data-flat-pictures-tray]');
       return {
-        ids: box?.getAttribute('data-flat-pictures-pending') ?? '',
+        ids: box?.getAttribute('data-flat-pictures-tray') ?? '',
         badges: [...(box?.querySelectorAll('[data-tile-badge]') ?? [])].map((b) =>
           (b.textContent ?? '').trim().toLowerCase(),
         ),
-        opacity: box ? Number(getComputedStyle(box).opacity) : 1,
+        opacity: box ? Number(getComputedStyle(box.firstElementChild ?? box).opacity) : 1,
       };
-    }, key);
-  g = await groups();
+    });
+  const badgeOf = (key, id) =>
+    page.evaluate(
+      ([k, m]) => {
+        const t = document.querySelector(
+          `[data-flat-pictures-group="${k}"] [data-rail-view="${m}"] [data-tile-badge]`,
+        );
+        return t
+          ? {
+              text: (t.textContent ?? '').trim().toLowerCase(),
+              tone: t.getAttribute('data-tone'),
+              bg: getComputedStyle(t).backgroundColor,
+              button: t.tagName === 'BUTTON',
+            }
+          : null;
+      },
+      [key, id],
+    );
+  const settle = async (at) => {
+    await save(at);
+    await page.waitForTimeout(400);
+    await save(at + 1);
+    await page.waitForTimeout(700);
+  };
+
   ck(
-    (await page.$$('[data-flat-pictures-group] [data-probe-add]')).length === g.length &&
-      g.length >= 2,
-    'every group has the moodboard’s + picture slot',
-    `${(await page.$$('[data-probe-add]')).length} slots / ${g.length} groups`,
+    (await page.$$('[data-probe-add]')).length === 1 &&
+      !!(await page.$('[data-flat-pictures-add] [data-probe-add]')),
+    'ONE + picture for the whole input, first in the row (no slot in any group)',
+    `${(await page.$$('[data-probe-add]')).length} slots`,
   );
   const roleCalls0 = (await calls('SetDesignReferenceRole')).length;
-  await addIn('views', [777]);
+  await addOne([801, 802, 803]);
+  let tr = await tray();
   ck(
-    (await boardRole(777)) === 'target',
-    'VIEWS: the picture lands on the moodboard as target',
-    String(await boardRole(777)),
+    tr.ids === '801 802 803' && JSON.stringify(tr.badges) === '["…","…","…"]',
+    'three pictures dropped: three pale «…» in the tray, no number',
+    JSON.stringify(tr),
   );
-  let pnd = await pendingOf('views');
+  ck(tr.opacity < 0.6, 'the tray is pale', String(tr.opacity));
+  const r801 = await boardRow(801);
   ck(
-    pnd.ids === '777' && JSON.stringify(pnd.badges) === '["…"]' && pnd.opacity < 0.6,
-    'until the server sends it: a pale tile, no number, «…»',
-    JSON.stringify(pnd),
+    !!r801 && !(r801.role ?? '') && !!(await boardRow(803)),
+    'they land on the moodboard with NO purpose — the server decides',
+    JSON.stringify(r801),
   );
   ck(
     (await calls('SetDesignReferenceRole')).length === roleCalls0,
-    'VIEWS writes no label — the moodboard’s labeller reads the view',
+    'the add writes no label (the model proposes, the person decides)',
   );
-  await page.evaluate(() => window.__added.views.push(777));
-  await save(7);
-  await page.waitForTimeout(400);
-  await save(8);
-  await page.waitForTimeout(800);
-  const vt = (await group('views'))?.tiles ?? [];
+
+  // The ladder answers: 801 a front view, 802 a detail of a NEW part, 803 a mood picture.
+  await page.evaluate(() => window.__mint({ id: 140, detailName: 'cuff vent', madeByModel: true }));
+  await page.evaluate(async () => {
+    await window.__label(801, {
+      role: 'front',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+    await window.__label(802, {
+      role: 'detail',
+      detailSlotId: 140,
+      labelState: 'ok',
+      labelSource: 'model_strong',
+      proposedPurpose: 'detail',
+    });
+    await window.__label(803, {
+      role: '',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'mood',
+    });
+  });
+  await page.waitForTimeout(500);
   ck(
-    vt.some((t) => t.id === 777 && /^\d+ · side r$/.test(t.badge)) &&
-      (await pendingOf('views')).ids === '',
-    'once the server sends it: a numbered tile with its view; the pale one is gone',
-    JSON.stringify(vt.map((t) => t.badge)),
+    (await boardRow(801))?.role === 'target' &&
+      (await boardRow(802))?.role === 'detail' &&
+      (await boardRow(803))?.role === 'mood',
+    'the model’s proposals become the empty purposes on FLAT (the board is not mounted)',
+    JSON.stringify([
+      (await boardRow(801))?.role,
+      (await boardRow(802))?.role,
+      (await boardRow(803))?.role,
+    ]),
+  );
+  await page.evaluate(() => window.__added.views.push(801, 802));
+  await settle(20);
+  tr = await tray();
+  const v801 = await badgeOf('views', 801);
+  ck(
+    !!v801 && /^\d+ · front$/.test(v801.text) && !tr.ids.split(' ').includes('801'),
+    'front: the picture leaves the tray and stands in VIEWS, numbered',
+    JSON.stringify({ v801, tr }),
+  );
+  ck(
+    v801?.tone === 'guess' && v801.bg === 'rgb(102, 102, 102)',
+    'a model’s label is a grey badge',
+    JSON.stringify(v801),
+  );
+  const d140 = await group('d:140');
+  const nameColor = await page.evaluate(
+    () =>
+      getComputedStyle(
+        document.querySelector('[data-flat-pictures-group="d:140"] [data-detail-name]'),
+      ).color,
+  );
+  ck(
+    !!d140 && d140.tiles.some((t) => t.id === 802) && nameColor === 'rgb(102, 102, 102)',
+    'a detail: DETAIL · its name, grey (the model named it), the photo in it',
+    JSON.stringify({ d140: d140?.tiles, nameColor }),
+  );
+  ck(
+    tr.ids === '803' && JSON.stringify(tr.badges) === '["mood"]',
+    'mood stays in the tray with its word',
+    JSON.stringify(tr),
+  );
+
+  // A run's output: «render» at once, no reading; its corner offers no view.
+  await addOne([804, 807]);
+  tr = await tray();
+  ck(
+    tr.ids.split(' ').includes('804') &&
+      tr.badges[tr.ids.split(' ').indexOf('804')] === 'render' &&
+      tr.badges[tr.ids.split(' ').indexOf('807')] === '…',
+    'a render of this card says «render» at once; a cutout is read like a photo',
+    JSON.stringify(tr),
+  );
+  await page.hover('[data-flat-pictures-tray] [data-rail-view="804"]');
+  await page.click('[data-flat-pictures-tray] [data-rail-view="804"] [data-menu]');
+  const menu804 = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-menu-item]')].map((n) => (n.textContent ?? '').trim()),
+  );
+  await page.keyboard.press('Escape');
+  ck(
+    menu804.length > 0 && !menu804.some((t) => /front|side|detail|target/.test(t)),
+    'the render’s ▾: only mood / material / none',
+    JSON.stringify(menu804),
+  );
+
+  if (process.env.SHOT4) {
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
+    await page.screenshot({
+      path: process.env.SHOT4,
+      clip: { x: 0, y: 0, width: 1180, height: 420 },
+    });
+    console.log(`shot: ${process.env.SHOT4}`);
+  }
+  // The cutout is read like any photo: a back view.
+  await page.evaluate(async () => {
+    await window.__label(807, {
+      role: 'back',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+    window.__added.views.push(807);
+  });
+  await settle(30);
+
+  console.log('\nM15 · accept, remove from prompt, undo');
+  const heldCalls0 = (await calls('SetDesignReferenceHeld')).length;
+  await page.click('[data-flat-pictures-group="views"] [data-rail-view="801"] [data-tile-badge]');
+  await page.waitForTimeout(600);
+  const acc = (await calls('SetDesignReferenceRole')).slice(roleCalls0);
+  const v801b = await badgeOf('views', 801);
+  ck(
+    acc.length === 1 && acc[0].mediaId === 801 && acc[0].role === 'front' && v801b?.tone === 'ink',
+    'tap the grey word: the same label as a person’s — the badge turns ink',
+    JSON.stringify({ acc, v801b }),
+  );
+  const tile = '[data-flat-pictures-group="views"] [data-rail-view="125"]';
+  await page.hover(tile);
+  await page.waitForTimeout(250);
+  const ov = await page.evaluate((t) => {
+    const b = document.querySelector(`${t} [data-tile-action]`);
+    return b ? { op: getComputedStyle(b).opacity, text: (b.textContent ?? '').trim() } : null;
+  }, tile);
+  ck(
+    ov?.op === '1' && /remove from prompt/i.test(ov.text),
+    'hover darkens the tile and says REMOVE FROM PROMPT',
+    JSON.stringify(ov),
   );
   if (process.env.SHOT3) {
-    await addIn('views', [779]);
     await page.screenshot({
       path: process.env.SHOT3,
-      clip: { x: 0, y: 0, width: 1180, height: 620 },
+      clip: { x: 0, y: 0, width: 1180, height: 420 },
     });
     console.log(`shot: ${process.env.SHOT3}`);
-  } else await addIn('views', [779]);
-  await page.evaluate(() => (window.__added.held[779] = 'view_unknown'));
-  await save(9);
-  await page.waitForTimeout(400);
-  await save(10);
+  }
+  await page.click(`${tile} [data-tile-action]`);
+  await page.waitForTimeout(50);
+  ck(!(await page.$(tile)), 'the tile leaves the input at once');
+  await page.waitForTimeout(700);
+  const hc = (await calls('SetDesignReferenceHeld')).slice(heldCalls0);
+  ck(
+    hc.length === 1 && hc[0].mediaId === 125 && hc[0].held === true,
+    'the write: SetDesignReferenceHeld(125, held)',
+    JSON.stringify(hc),
+  );
+  ck(
+    !(await viewsIds()).includes(125) && !!(await page.$('[data-flat-removed-undo="views"]')),
+    'the preview no longer sends it; «1 removed from the prompt · undo» under VIEWS',
+    JSON.stringify(await viewsIds()),
+  );
+  // «what the model gets»: the held picture says «not sent» and has «send again ›».
+  await page.click('button:has-text("what the model gets")');
+  await page.waitForSelector('[data-wmg-held-line="held"]', { timeout: 5000 }).catch(() => {});
+  const heldLine = await page.evaluate(() => {
+    const l = document.querySelector('[data-wmg-held-line="held"]');
+    return l ? (l.textContent ?? '').toLowerCase() : '';
+  });
+  ck(
+    /not sent/.test(heldLine) && /send again/.test(heldLine),
+    'the modal: «not sent» with «send again ›»',
+    heldLine.slice(0, 120),
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  await page.click('[data-flat-removed-undo="views"]');
+  await page.waitForTimeout(900);
+  const hc2 = (await calls('SetDesignReferenceHeld')).slice(heldCalls0);
+  ck(
+    hc2.length === 2 && hc2[1].held === false && (await viewsIds()).includes(125),
+    'undo puts it back into the prompt',
+    JSON.stringify({ hc2, ids: await viewsIds() }),
+  );
+  // A failed hold: the tile comes back.
+  await page.evaluate(() => (window.__holdFails = true));
+  await page.hover(tile);
+  await page.click(`${tile} [data-tile-action]`);
   await page.waitForTimeout(800);
-  pnd = await pendingOf('views');
+  await page.evaluate(() => (window.__holdFails = false));
+  ck(!!(await page.$(tile)), 'a refused hold: the tile comes back');
+  // Touch: the first tap arms, the second removes.
+  await page.evaluate(() => {
+    const real = window.matchMedia.bind(window);
+    window.matchMedia = (q) =>
+      q === '(hover: none)'
+        ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} }
+        : real(q);
+  });
+  const heldCalls1 = (await calls('SetDesignReferenceHeld')).length;
+  await page.click(`${tile} [data-tile-action]`);
+  await page.waitForTimeout(200);
+  const armed = await page.evaluate(
+    (t) => document.querySelector(`${t} [data-tile-action]`)?.hasAttribute('data-armed'),
+    tile,
+  );
   ck(
-    pnd.ids === '779' && JSON.stringify(pnd.badges) === '["view ?"]',
-    'held: the pale tile says why («view ?»)',
-    JSON.stringify(pnd),
+    armed && (await calls('SetDesignReferenceHeld')).length === heldCalls1,
+    'on a touch screen the first tap arms the overlay and writes nothing',
+  );
+  await page.click(`${tile} [data-tile-action]`);
+  await page.waitForTimeout(700);
+  ck(
+    (await calls('SetDesignReferenceHeld')).length === heldCalls1 + 1,
+    '… the second tap removes it',
+  );
+  await page.waitForTimeout(500);
+  await page.click('button:has-text("what the model gets")');
+  await page.waitForSelector('[data-wmg-send-again]', { timeout: 5000 }).catch(() => {});
+  await page.click('[data-wmg-send-again]');
+  await page.waitForTimeout(900);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const back = (await calls('SetDesignReferenceHeld')).slice(heldCalls1);
+  ck(
+    back.length === 2 &&
+      back[1].held === false &&
+      (await viewsIds()).includes(125) &&
+      !(await page.$('[data-flat-removed-undo="views"]')),
+    '«send again ›» puts it back; the undo row is gone with it',
+    JSON.stringify({ back, ids: await viewsIds() }),
   );
 
-  const roleCalls1 = (await calls('SetDesignReferenceRole')).length;
-  await addIn('d:126', [778]);
-  const lab = (await calls('SetDesignReferenceRole')).slice(roleCalls1);
-  ck(
-    (await boardRole(778)) === 'detail',
-    'DETAIL: the picture lands on the moodboard as detail',
-    String(await boardRole(778)),
-  );
-  ck(
-    lab.length === 1 &&
-      lab[0].mediaId === 778 &&
-      lab[0].role === 'detail' &&
-      lab[0].detailSlotId === 126,
-    '… with a person’s label on this detail’s slot',
-    JSON.stringify(lab),
-  );
-  ck(
-    (await pendingOf('d:126')).ids === '778',
-    '… pale in its detail until sent',
-    JSON.stringify(await pendingOf('d:126')),
-  );
-
-  await addIn('views', [916]);
-  ck(
-    (await boardRole(916)) === 'target',
-    'a picture already on the board (mood) is moved to the views',
-    String(await boardRole(916)),
-  );
+  console.log('\nM15 · the same picture again, refusals');
   const rows0 = (await page.evaluate(() => window.__picturesForm.getValues('moodboardMedia')))
     .length;
-  await addIn('views', [990]);
+  await addOne([990]);
   ck(
     (await page.evaluate(() => window.__picturesForm.getValues('moodboardMedia'))).length ===
-      rows0 && (await boardRole(990)) === null,
+      rows0 && !(await boardRow(990)),
     'a picture of the card’s own flats is refused (one list per picture)',
   );
-  await page.evaluate(() => window.__patchFlatInput(38, { run: 'saving' }));
-  await addIn('views', [781]);
-  ck(
-    (await boardRole(781)) === null,
-    'while a flat run is being started: refused',
-    String(await boardRole(781)),
-  );
+  await page.evaluate(() => window.__patchFlatInput(38, { run: 'starting' }));
+  await addOne([781]);
+  ck(!(await boardRow(781)), 'while a flat run is being started: refused');
   await page.evaluate(() => window.__patchFlatInput(38, { run: null }));
+
+  console.log('\nM15 · GENERATE while a picture is being read');
+  await addOne([805]);
+  ck((await tray()).ids.includes('805'), 'a new picture is being read («…»)');
+  const before = (await calls('StartDesignRun')).length;
+  const flushes0 = await page.evaluate(() => window.__flushes ?? 0);
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page.waitForTimeout(700);
+  const label = await page.evaluate(
+    () => document.querySelector('[data-flat-generate] button')?.textContent ?? '',
+  );
+  ck(/reading…/i.test(label), 'GENERATE says «reading…» and waits', label);
+  await page.evaluate(async () => {
+    await window.__label(805, {
+      role: 'side_l',
+      labelState: 'ok',
+      labelSource: 'model_cheap',
+      proposedPurpose: 'target',
+    });
+    window.__added.views.push(805);
+  });
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+  const all = await page.evaluate(() => window.__calls.map((c) => ({ ...c })));
+  const startAt = all.map((c) => c.name).lastIndexOf('StartDesignRun');
+  const pre = all
+    .slice(0, startAt)
+    .filter((c) => c.name === 'PreviewDesignRunInputs')
+    .pop();
+  ck(
+    startAt >= 0 &&
+      (await calls('StartDesignRun')).length > before &&
+      JSON.stringify(all[startAt].body.params) === JSON.stringify(pre?.body.params) &&
+      (await boardRow(805))?.role === 'target' &&
+      (await page.evaluate(() => window.__flushes ?? 0)) > flushes0,
+    'the label lands: its proposal is applied and saved, then the press goes (params = its preview)',
+    JSON.stringify({ startAt, role: (await boardRow(805))?.role }),
+  );
+  ck(!(await page.$('[data-flat-left-out]')), 'nothing was left out');
+  await addOne([806]);
+  const before2 = (await calls('StartDesignRun')).length;
+  await page.click('[data-flat-generate] button:has-text("generate")');
+  await page
+    .waitForFunction(
+      (k) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > k,
+      before2,
+      { timeout: 20000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(
+    () => document.querySelector('[data-flat-left-out]')?.textContent ?? '',
+  );
+  ck(
+    (await calls('StartDesignRun')).length > before2 &&
+      /1 picture was still being read · not in this run/i.test(left),
+    'never answered: after ≤15 s the press goes, and says what was left out',
+    `${left} | starts ${before2}→${(await calls('StartDesignRun')).length} | ${await page.evaluate(() => document.querySelector('[data-flat-generate] button')?.textContent ?? '')} | tray ${(await tray()).ids}`,
+  );
+
+  console.log('\nM15 · recall puts a flat run’s words back into WORDS');
+  const recall = await page.evaluate(() =>
+    [
+      [
+        {
+          kind: 'flat',
+          createdAt: '2026-10-07T12:00:00Z',
+          inputs: { garmentNote: 'garment: tank top\nthe straps cross once' },
+        },
+        'the straps cross once',
+      ],
+      [
+        {
+          kind: 'flat',
+          createdAt: '2026-10-07T12:00:00Z',
+          inputs: { garmentNote: 'garment: tank top' },
+        },
+        '',
+      ],
+      [
+        {
+          kind: 'flat',
+          createdAt: '2026-10-06T12:00:00Z',
+          inputs: { garmentNote: 'garment: tank top\nslim body' },
+        },
+        '',
+      ],
+      [
+        {
+          kind: 'render',
+          createdAt: '2026-10-07T12:00:00Z',
+          inputs: { garmentNote: 'garment: tank top\nslim body' },
+        },
+        '',
+      ],
+      [
+        {
+          kind: 'flat',
+          rerunOf: 5,
+          createdAt: '2026-10-07T12:00:00Z',
+          inputs: { garmentNote: 'garment: tank top\nx' },
+        },
+        '',
+      ],
+      [
+        {
+          kind: 'flat',
+          createdAt: '2026-10-07T12:00:00Z',
+          inputs: { garmentNote: 'a line\n\n b ' },
+        },
+        'a line\nb',
+      ],
+    ]
+      .filter(([run, want]) => window.__runFlatWords(run) !== want)
+      .map(([run]) => JSON.stringify(run).slice(0, 80)),
+  );
+  ck(
+    recall.length === 0,
+    'only a flat run’s own lines, only since M14, never a rerun’s or a render’s',
+    recall.join(' | '),
+  );
+
   await page.evaluate(() => window.__disablePictures(true));
   await page.waitForTimeout(300);
-  ck((await page.$$('[data-probe-add]')).length === 0, 'a read-only card: no add slot');
+  ck(
+    (await page.$$('[data-probe-add]')).length === 0 && !(await page.$('[data-tile-action]')),
+    'a read-only card: no add slot, no removal',
+  );
   await page.evaluate(() => window.__disablePictures(false));
 
   ck(errors.length === 0, 'no page errors', errors.join(' | ').slice(0, 300));

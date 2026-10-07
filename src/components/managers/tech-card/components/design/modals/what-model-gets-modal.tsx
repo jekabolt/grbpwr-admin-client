@@ -8,7 +8,7 @@ import type {
 } from 'api/proto-http/admin';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
@@ -23,6 +23,7 @@ import {
 } from '../core';
 import { useTechCardAutosave } from '../autosave-contract';
 import { viewWord } from '../board-labels';
+import { usePutBack } from '../board-pick';
 import { openDoor } from '../doors';
 import { useFlatWords } from '../flat-words-field';
 import { FIT_WHERE } from '../render/what-model-gets';
@@ -55,6 +56,7 @@ export const HELD_WORD: Record<string, string> = {
   detail: 'a detail',
   other_detail: 'another detail',
   render: 'render',
+  held: 'not sent',
 };
 
 /** Why, in a few words — the line beside the held picture. */
@@ -69,6 +71,7 @@ const HELD_WHY: Record<string, string> = {
   detail: 'it goes with a run of its detail',
   other_detail: 'a picture of another detail',
   render: 'a generated picture; a flat is drawn from the garment’s own photos',
+  held: 'taken out of the prompt; it stays on the moodboard with its label',
 };
 
 const thumbOf = (media?: common_MediaFull): string => {
@@ -115,6 +118,7 @@ export function WhatModelGetsModal({
     [preview.data],
   );
   const held = useMemo(() => preview.data?.held ?? [], [preview.data]);
+  const putBack = usePutBack(techCardId);
 
   // Thumbnails: the snapshot carries its media; a held picture is resolved through the library.
   const heldIds = useMemo(() => held.map((h) => h.mediaId ?? 0).filter((id) => id > 0), [held]);
@@ -205,7 +209,12 @@ export function WhatModelGetsModal({
           data-wmg-held={held.length}
         >
           {held.map((h) => (
-            <HeldLine key={h.mediaId} h={h} media={library.get(h.mediaId ?? 0)} />
+            <HeldLine
+              key={h.mediaId}
+              h={h}
+              media={library.get(h.mediaId ?? 0)}
+              onSendAgain={readOnly ? undefined : putBack}
+            />
           ))}
         </WmgGroup>
       )}
@@ -327,9 +336,19 @@ function SlotLine({ n, s }: { n: number; s: common_DesignInputSlot }) {
   );
 }
 
-function HeldLine({ h, media }: { h: DesignInputHeld; media?: common_MediaFull }) {
+function HeldLine({
+  h,
+  media,
+  onSendAgain,
+}: {
+  h: DesignInputHeld;
+  media?: common_MediaFull;
+  /** M15: a picture a person took out of the prompt goes back with one tap. */
+  onSendAgain?: (mediaId: number) => Promise<boolean>;
+}) {
   const reason = (h.reason ?? '').trim();
   const caption = (h.modelCaption ?? '').trim();
+  const [sending, setSending] = useState(false);
   return (
     <InventoryLine
       data-wmg-held-line={reason}
@@ -338,6 +357,23 @@ function HeldLine({ h, media }: { h: DesignInputHeld; media?: common_MediaFull }
       text={
         <span className='text-labelColor'>
           {HELD_WHY[reason] ?? ''}
+          {reason === 'held' && onSendAgain && (
+            <>
+              {' '}
+              <button
+                type='button'
+                data-wmg-send-again={h.mediaId}
+                disabled={sending}
+                onClick={() => {
+                  setSending(true);
+                  void onSendAgain(h.mediaId ?? 0).finally(() => setSending(false));
+                }}
+                className='text-textColor underline underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:text-labelColor'
+              >
+                {sending ? 'sending…' : 'send again ›'}
+              </button>
+            </>
+          )}
           {caption && (
             <span className='block text-textInactiveColor' data-wmg-model-read=''>
               model read · not sent — {caption}

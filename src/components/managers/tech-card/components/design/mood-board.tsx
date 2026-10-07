@@ -53,14 +53,13 @@ import {
   labelQuestion,
   labelsByMedia,
   labelWaiting,
+  isHeldLabel,
   photoDetailSlots,
-  takeProposals,
   tileWord,
   unsureOnBoard,
   type BoardMenuPick,
 } from './board-labels';
-import { DetailNamingModal } from './detail-naming-modal';
-import { DETAIL_VIEW } from './views';
+import { useBoardPick, useBoardProposals, usePutBack } from './board-pick';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
@@ -621,7 +620,7 @@ export function MoodBoard({
   // помещается — оригинал остаётся со всеми указаниями, кроп встаёт за ним. Все ветви —
   // `planBoardCrop`. Ярлык ЧЕЛОВЕКА (вид, деталь) переезжает на кроп; ярлык модели — нет: кроп она
   // прочтёт заново, как любую новую картинку (101 Ф3).
-  const { setReferenceRole, setBenchSlot } = useDesignWrites(techCardId);
+  const { setReferenceRole } = useDesignWrites(techCardId);
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
   );
@@ -772,69 +771,12 @@ export function MoodBoard({
   // ── угол плитки и вопрос под доской: назначение (форма) и ярлык (сервер) ─────────────────────
   const ordinalOf = (mediaId: number) =>
     Math.max(1, items.findIndex((i) => i.mediaId === mediaId) + 1);
-  /* ЯРЛЫК — ЧАСТЬ ВХОДА ФЛЭТА (Codex Ф3): посреди GENERATE (сохранение, превью, запуск) он не
-     пишется, а пока пишется — GENERATE ждёт (`holdFlatInput`), как ждал роль старого входа.
-     Отказ записи сказан швом (`onError` мутации); ярлык на плитке остаётся прежним. */
-  const writeLabel = async (mediaId: number, role: string, detailSlotId = 0) => {
-    const card = techCardId;
-    if (!rowsWritable(readFlatInput(card))) {
-      showMessage('a flat run is being started — set the label once it has started', 'error');
-      return;
-    }
-    const release = holdFlatInput(card);
-    try {
-      await setReferenceRole.mutateAsync({
-        mediaId,
-        role,
-        ordinal: ordinalOf(mediaId),
-        detailSlotId,
-      });
-    } catch {
-      /* сказано швом */
-    } finally {
-      release();
-    }
-  };
-  const [namingFor, setNamingFor] = useState<number | null>(null);
-
-  function onBoardPick(mediaId: number, pick: BoardMenuPick) {
-    if (readOnly) return;
-    if (pick.kind === 'purpose') setRoleOf(mediaId, pick.purpose);
-    else if (pick.kind === 'view') void writeLabel(mediaId, pick.view);
-    else if (pick.kind === 'detail') void writeLabel(mediaId, DETAIL_VIEW, pick.slotId);
-    else setNamingFor(mediaId);
-  }
-
-  /** `new detail…`: слот флэтового верстака заводится ПЕРВЫМ, его id едет с ярлыком (J-9). */
-  async function addDetail(mediaId: number, name: string) {
-    const card = techCardId;
-    if (!rowsWritable(readFlatInput(card))) {
-      showMessage(`a flat run is being started — detail “${name}” was not added`, 'error');
-      return;
-    }
-    // Слот и ярлык — один жест: GENERATE ждёт до последней записи.
-    const release = holdFlatInput(card);
-    try {
-      const created = await setBenchSlot.mutateAsync({
-        slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
-        pictureId: 0,
-        expectedSlotRev: 0,
-        newDetailName: name,
-      });
-      const slotId = created?.slot?.id ?? 0;
-      if (slotId > 0)
-        await setReferenceRole.mutateAsync({
-          mediaId,
-          role: DETAIL_VIEW,
-          ordinal: ordinalOf(mediaId),
-          detailSlotId: slotId,
-        });
-    } catch {
-      /* сказано швом записи */
-    } finally {
-      release();
-    }
-  }
+  /* M15 (109 §2.2): ОДНА логика пика на доску и на вход флэта (`useBoardPick`) — назначение в форму,
+     вид и деталь ярлыком человека (GENERATE ждёт запись), `new detail…` заводит слот первым. */
+  const pick = useBoardPick(techCardId, readOnly);
+  const onBoardPick = (mediaId: number, p: BoardMenuPick) => pick.onPick(mediaId, p);
+  // M15: «send to the flat» — a picture taken out of the prompt goes back with its label.
+  const putBack = usePutBack(techCardId);
 
   const labelQuestions = useMemo(
     () =>
@@ -848,19 +790,8 @@ export function MoodBoard({
     if (pick && q.mediaId) onBoardPick(q.mediaId, pick);
   };
 
-  // ПРЕДЛОЖЕНИЕ НАЗНАЧЕНИЯ (101 §2.4): модель прочла картинку без роли — роль встаёт в форму, только
-  // если она там ПУСТА, и только один раз на картинку; автосейв уносит её на сервер.
-  useEffect(() => {
-    if (readOnly || !(techCardId > 0) || !labels.size || flatInput.run) return;
-    const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
-    const take = takeProposals(techCardId, live.filter(isBoardRow), labels);
-    if (!take.length) return;
-    let next = live;
-    for (const t of take) next = setBoardRole(next, t.mediaId, t.purpose);
-    writeItems(next);
-    // `items` — форма могла дочитаться позже полосы.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, items, readOnly, techCardId, flatInput.run]);
+  // ПРЕДЛОЖЕНИЕ НАЗНАЧЕНИЯ (101 §2.4): на ПУСТОЕ назначение, один раз — тот же хук, что у входа FLAT.
+  useBoardProposals(techCardId, items, labels, readOnly);
 
   useLabelPoll(techCardId, items, labels, speaks);
 
@@ -1211,6 +1142,18 @@ export function MoodBoard({
               // `crop` — низ слева, `edit` — низ справа. Глаголы тихие (`TILE_QUIET`), места назначает
               // поверхность (`cornerSlotBottom`), `group` — сама плитка галереи.
               removeLabel={(view, i) => `take moodboard picture ${i + 1} off the board`}
+              // M15 (109 §4): taken out of the prompt — still here, with its label; the corner ▾
+              // has «send to the flat».
+              tileFlag={(view) =>
+                isHeldLabel(labels.get(view.mediaId))
+                  ? {
+                      word: 'not sent',
+                      tone: 'mut',
+                      title:
+                        'taken out of the prompt — «send to the flat» in the corner puts it back',
+                    }
+                  : null
+              }
               // СЛОВО ПЛИТКИ — ЯРЛЫК (101 Ф3): вид (`front`, `side L`), имя детали, `mood` / `material`;
               // `…` — модель ещё читает, `view ?` — ждёт человека (вопрос под доской).
               tileBadge={(view) =>
@@ -1264,7 +1207,10 @@ export function MoodBoard({
                                   purpose: roleOf.get(view.mediaId) ?? '',
                                   ref: labels.get(view.mediaId),
                                   slots: detailSlots,
-                                  onPick: (pick) => onBoardPick(view.mediaId, pick),
+                                  onPick: (p) => onBoardPick(view.mediaId, p),
+                                  onSendBack: isHeldLabel(labels.get(view.mediaId))
+                                    ? () => void putBack(view.mediaId)
+                                    : undefined,
                                 })}
                               />
                             </span>
@@ -1348,15 +1294,7 @@ export function MoodBoard({
             </div>
           </ConfirmationModal>
 
-          <DetailNamingModal
-            open={namingFor != null}
-            onCancel={() => setNamingFor(null)}
-            onConfirm={(name) => {
-              const mediaId = namingFor;
-              setNamingFor(null);
-              if (mediaId != null) void addDetail(mediaId, name);
-            }}
-          />
+          {pick.naming}
 
           <MediaRecropDialog
             media={cropping?.full}

@@ -21,7 +21,10 @@ import {
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { patchFlatInput } from 'components/managers/tech-card/components/design/flat-input';
 import { FlatInputPictures } from 'components/managers/tech-card/components/design/flat-input-pictures';
-import { flatWordsSent } from 'components/managers/tech-card/components/design/flat-route';
+import {
+  flatWordsSent,
+  runFlatWords,
+} from 'components/managers/tech-card/components/design/flat-route';
 import {
   FlatWordsField,
   useFlatWords,
@@ -58,6 +61,16 @@ declare global {
     __flatWordsSent: typeof flatWordsSent;
     /** M14: the card cannot be written — the input shows no add slot. */
     __disablePictures: (on: boolean) => void;
+    /** M15: the server's label on a picture (null — no row), then the band is read again. */
+    __label: (mediaId: number, patch: Record<string, unknown> | null) => Promise<void>;
+    /** M15: a slot the model minted. */
+    __mint: (slot: Record<string, unknown>) => void;
+    __qc: QueryClient;
+    __runFlatWords: typeof runFlatWords;
+    /** M15: the next hold write fails (the tile must come back). */
+    __holdFails: boolean;
+    /** M15: the press's autosave flushes (a proposal applied while GENERATE reads). */
+    __flushes: number;
   }
 }
 
@@ -160,8 +173,22 @@ const band = {
       labelSource: 'model_strong',
     },
   ],
-  runs: [],
-  totalRuns: 0,
+  // M15: a render of this card (its picture is never a flat's input) and a cutout (it may be).
+  runs: [
+    {
+      id: 640,
+      kind: 'render',
+      status: 'succeeded',
+      pictures: [{ id: 6401, runId: 640, kind: 'render', media: img(804) }],
+    },
+    {
+      id: 641,
+      kind: 'cutout',
+      status: 'succeeded',
+      pictures: [{ id: 6411, runId: 641, kind: 'cutout', media: img(807) }],
+    },
+  ],
+  totalRuns: 2,
 } as unknown as GetDesignBandResponse;
 
 /* THE SERVER'S RULE, AS THE STAND KNOWS IT: a views press — the two newest of each view (front 301
@@ -175,17 +202,26 @@ window.__previewAnswer = (req) => {
   if (!ids.length) {
     // 300 saved as mood: the two newest fronts are 301 and 124.
     const fronts = window.__server.mood300 ? [301, 124] : [301, 300];
+    const roleOf = (id: number) =>
+      (band.references ?? []).find((r) => r.mediaId === id)?.role || 'side_r';
+    const isHeld = (id: number) =>
+      (band.references ?? []).some((r) => r.mediaId === id && r.labelState === 'held');
     return {
       inputs: {
         refs: [
           ...fronts.map((id) => ref(id, 'front')),
           ref(126, 'back'),
           ref(125, 'side_l'),
-          ...window.__added.views.map((id) => ref(id, 'side_r')),
-        ],
+          ...window.__added.views
+            .filter((id) => roleOf(id) !== 'detail')
+            .map((id) => ref(id, roleOf(id))),
+        ].filter((r) => !isHeld(r.mediaId)),
         slots: [],
       },
       held: [
+        ...(band.references ?? [])
+          .filter((r) => r.labelState === 'held')
+          .map((r) => ({ mediaId: r.mediaId, reason: 'held', role: r.role })),
         { mediaId: 124, reason: 'older', role: 'front' },
         { mediaId: 211, reason: 'detail', role: 'detail' },
         { mediaId: 916, reason: 'mood', role: '' },
@@ -199,12 +235,23 @@ window.__previewAnswer = (req) => {
   }
   const slot = ids[0];
   const detail = band.bench?.find((b) => b.id === slot);
+  const heldNow = (id: number) =>
+    (band.references ?? []).some((r) => r.mediaId === id && r.labelState === 'held');
   return {
     inputs: {
       refs:
         slot === 126
           ? [ref(211, 'detail'), ...window.__added.detail.map((id) => ref(id, 'detail'))]
-          : [],
+          : (band.references ?? [])
+              .filter(
+                (r) =>
+                  r.role === 'detail' &&
+                  r.detailSlotId === slot &&
+                  r.labelState === 'ok' &&
+                  window.__added.views.concat(window.__added.detail).includes(r.mediaId ?? 0),
+              )
+              .map((r) => ref(r.mediaId ?? 0, 'detail'))
+              .filter((r) => !heldNow(r.mediaId)),
       slots: [
         { viewKey: 'back', slotId: 0, mediaId: 956, media: img(956, 700, 700) },
         { viewKey: 'front', slotId: 0, mediaId: 955, media: img(955, 700, 700) },
@@ -217,6 +264,36 @@ window.__previewAnswer = (req) => {
 
 window.__pick = [];
 window.__img = img;
+window.__runFlatWords = runFlatWords;
+window.__mint = (slot) => {
+  (band.bench as unknown[]).push({
+    kind: 'flat',
+    viewKey: 'detail',
+    pictureId: 0,
+    slotRev: 1,
+    ...slot,
+  });
+};
+window.__label = async (mediaId, patch) => {
+  const refs = (band.references ?? []) as Record<string, unknown>[];
+  const at = refs.findIndex((r) => r.mediaId === mediaId);
+  if (patch === null) {
+    if (at >= 0) refs.splice(at, 1);
+  } else if (at >= 0) refs[at] = { ...refs[at], ...patch };
+  else refs.push({ techCardId: CARD, mediaId, ordinal: 20, ...patch });
+  await window.__qc.invalidateQueries();
+};
+/* The server's two label writes, as the store answers them (109 §4): a role is a person's (human,
+   ok — lifts a hold); a hold moves only the state. */
+const setRef = (req: Record<string, unknown>) => {
+  const refs = (band.references ?? []) as Record<string, unknown>[];
+  const at = refs.findIndex((r) => r.mediaId === req.mediaId);
+  const prev = at >= 0 ? refs[at] : { techCardId: CARD, mediaId: req.mediaId };
+  const next = { ...prev, ...req };
+  if (at >= 0) refs[at] = next;
+  else refs.push(next);
+  return next;
+};
 window.__patchFlatInput = patchFlatInput;
 window.__flatWordsSent = flatWordsSent;
 window.__api = {
@@ -225,7 +302,23 @@ window.__api = {
     (req as { id?: number }).id === 38
       ? { techCard: { id: 38, techCard: { flatWords: '' } } }
       : { techCard: { id: 39, techCard: {} } },
-  SetDesignReferenceRole: (req) => ({ reference: req }),
+  SetDesignReferenceRole: (req) => {
+    const r = req as { mediaId: number; role: string; detailSlotId?: number; ordinal?: number };
+    return {
+      reference: setRef({
+        mediaId: r.mediaId,
+        role: r.role,
+        detailSlotId: r.role === 'detail' ? r.detailSlotId : 0,
+        labelSource: 'human',
+        labelState: 'ok',
+      }),
+    };
+  },
+  SetDesignReferenceHeld: (req) => {
+    const r = req as { mediaId: number; held: boolean };
+    if (window.__holdFails) throw new Error('nothing_to_hold');
+    return { reference: setRef({ mediaId: r.mediaId, labelState: r.held ? 'held' : 'ok' }) };
+  },
   GetDesignBand: () => structuredClone(band),
   PreviewDesignRunInputs: (req) => window.__previewAnswer(req as PreviewDesignRunInputsRequest),
   StartDesignRun: (req) => ({
@@ -249,7 +342,10 @@ function Input() {
   const autosave: AutosaveApi = {
     ...saving,
     request: () => {},
-    flush: async () => 'nothing',
+    flush: async () => {
+      window.__flushes = (window.__flushes ?? 0) + 1;
+      return 'nothing';
+    },
   };
   return (
     <AutosaveContext.Provider value={autosave}>
@@ -319,8 +415,9 @@ function CardForm() {
 }
 
 const qc = new QueryClient({
-  defaultOptions: { queries: { retry: false, staleTime: 60_000 }, mutations: { retry: 1 } },
+  defaultOptions: { queries: { retry: false, staleTime: 60_000 }, mutations: { retry: 0 } },
 });
+window.__qc = qc;
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
     <BrowserRouter>

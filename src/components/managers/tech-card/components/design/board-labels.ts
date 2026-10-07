@@ -145,6 +145,12 @@ export function labelWaiting(purpose: string, ref: common_DesignReference | unde
 const V = 'v:';
 const D = 'd:';
 export const NEW_DETAIL = `${D}new`;
+/** M15: the corner row that puts a held picture back into the prompt. */
+const SEND_BACK = 'send:back';
+
+/** M15 (109 §4): the person took this picture out of the prompt; `labelState` folds it into `ok`. */
+export const isHeldLabel = (ref: common_DesignReference | undefined) =>
+  (ref?.labelState ?? '').trim() === 'held';
 
 export type BoardMenuPick =
   | { kind: 'purpose'; purpose: string }
@@ -176,11 +182,22 @@ export function boardMenu(input: {
   ref: common_DesignReference | undefined;
   slots: readonly common_DesignBenchSlot[];
   onPick: (pick: BoardMenuPick) => void;
+  /** M15: the picture was taken out of the prompt (`held`) — the first row puts it back. */
+  onSendBack?: () => void;
 }): PictureTileMenu {
   const { mediaId, n, purpose, ref, slots } = input;
   const role = (ref?.role ?? '').trim();
   const settled = labelState(ref) === 'ok';
   const items: PictureTileMenuItem[] = [
+    ...(input.onSendBack
+      ? [
+          {
+            value: SEND_BACK,
+            label: 'send to the flat',
+            title: 'it was taken out of the prompt — put it back, with its label',
+          },
+        ]
+      : []),
     ...MOOD_ROLES.map((r) => ({
       value: r,
       label: r,
@@ -216,6 +233,10 @@ export function boardMenu(input: {
     ariaLabel: `role of moodboard picture ${n}`,
     items,
     onPick: (value) => {
+      if (value === SEND_BACK) {
+        input.onSendBack?.();
+        return;
+      }
       const pick = parseBoardPick(value);
       if (pick) input.onPick(pick);
     },

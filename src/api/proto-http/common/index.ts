@@ -5971,8 +5971,10 @@ export type DesignReference = {
   // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
   // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
   labelSource: string | undefined;
-  // pending | ok | unsure | failed; "" reads as ok. Only `ok` with a role travels to a run; a
-  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»).
+  // pending | ok | unsure | failed | held; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»). `held` = a
+  // person took the picture out of the prompt (SetDesignReferenceHeld): the role and slot stay, the
+  // picture does not ride (109 §4).
   labelState: string | undefined;
   // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
   // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
