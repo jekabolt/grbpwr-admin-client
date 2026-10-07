@@ -25,7 +25,7 @@ import { garmentOfChart } from '../paint/mockup';
 import { PartsCanvas } from '../paint/parts-canvas';
 import { paintRun } from '../paint/plan-run';
 import { useMapLooks, usePaint } from '../paint/use-paint';
-import type { ClothSlot } from '../pattern/slot-fabrics';
+import { isPaintableHardware, type ClothSlot, type MaterialSlot } from '../pattern/slot-fabrics';
 import { packOf, useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
@@ -176,8 +176,9 @@ export function RenderStudio({
    * R7 · ARTWORK — the card's MATERIALS slots (the composer's same `materialSlots` read); only the
    * DECORATION lines are taken (`artworksOf`). Their colourway pictures arm the `artwork` tool of
    * PARTS and are listed by «what the model gets». Absent = no artworks on this screen.
+   * R9 · the same read gives PARTS its hardware tiles (`isPaintableHardware`).
    */
-  artworkSlots?: readonly ClothSlot[];
+  artworkSlots?: readonly MaterialSlot[];
   /**
    * Go to another step of the studio. The step lives in ONE place (`StudioTab`); a screen that kept
    * its own would desynchronise the rail from its own content.
@@ -210,8 +211,13 @@ export function RenderStudio({
   const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId, slots);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
+  /* R9 · the hardware slots PARTS paints (buttons, snaps, zips — not labels, not artworks). */
+  const hardwareSlots = useMemo(
+    () => (artworkSlots ?? []).filter(isPaintableHardware),
+    [artworkSlots],
+  );
   /* PAINT THE PARTS: the card's painting session (maps are the card's, cloths the colourway's). */
-  const paint = usePaint(techCardId, band, slots, colorwayId);
+  const paint = usePaint(techCardId, band, slots, colorwayId, hardwareSlots);
   /* R7 · the artworks of this colourway, and where they stand on the flats (for the inventory). */
   const artworks = useMemo(
     () => artworksOf(band, colorwayId, artworkSlots),
@@ -351,9 +357,20 @@ export function RenderStudio({
         colorwayId,
         colorwayLabel,
         partNames: paint.partNames(),
+        hardware: hardwareSlots,
+        hardwareParts: paint.hardwareParts(),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [band, paint, paintVersion, slots, colorwayId, colorwayLabel],
+    [band, paint, paintVersion, slots, colorwayId, colorwayLabel, hardwareSlots],
+  );
+  /* R9 · what the hardware of this run needs at GENERATE: its labels (the mockups draw them) and
+     the views whose map goes out exported (the hardware pixels in the cloth around them). */
+  const hardware = useMemo(
+    () =>
+      painted.kind === 'maps'
+        ? { labels: painted.hardwareLabels, views: painted.hardwareViews }
+        : { labels: new Map<string, number>(), views: [] as string[] },
+    [painted],
   );
   const wire = useMemo(
     () =>
@@ -381,9 +398,11 @@ export function RenderStudio({
       wire.colourMaps ?? [],
       engine?.maxReferences ?? 0,
       artworkGuideCount(band, artworks),
+      // R9 · the mockup is where the model reads a button's place: those views give way last.
+      new Set(hardware.views),
     );
     return { ...fit, label: (engine?.label ?? '').trim() || (engine?.slug ?? '') };
-  }, [band, colorwayId, wire, artworks]);
+  }, [band, colorwayId, wire, artworks, hardware]);
 
   const gate: Gate = useMemo(() => {
     /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
@@ -470,19 +489,41 @@ export function RenderStudio({
         const mocked = colourMaps.filter((m) => keep.has(m.view ?? ''));
         const { ids, error } =
           mocked.length > 0
-            ? await paint.mockups(mocked, wire.fabrics ?? [], scales)
+            ? await paint.mockups(mocked, wire.fabrics ?? [], scales, hardware.labels)
             : { ids: new Map<string, number>(), error: '' };
+        /* R9 · a map that carries hardware goes out EXPORTED: its hardware pixels in the cloth
+           around them (a hardware hex on the model's map tints the button), its own media. */
+        const hwViews = new Set(hardware.views);
+        const toExport = colourMaps.filter((m) => hwViews.has(m.view ?? ''));
+        const exported =
+          toExport.length > 0
+            ? await paint.exportMaps(toExport)
+            : {
+                maps: new Map<
+                  string,
+                  { mediaId: number; palette: (typeof colourMaps)[number]['palette'] }
+                >(),
+                error: '',
+              };
         // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
         if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
         if (error || mocked.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
           setMockFailed(error || 'mockup failed');
           return;
         }
+        if (exported.error || toExport.some((m) => !exported.maps.has(m.view ?? ''))) {
+          setMockFailed(exported.error || 'map export failed');
+          return;
+        }
         setMockFailed('');
-        colourMaps = colourMaps.map((m) => ({
-          ...m,
-          mockupMediaId: keep.has(m.view ?? '') ? ids.get(m.view ?? '') ?? 0 : 0,
-        }));
+        colourMaps = colourMaps.map((m) => {
+          const out = exported.maps.get(m.view ?? '');
+          return {
+            ...m,
+            ...(out ? { mediaId: out.mediaId, palette: out.palette } : {}),
+            mockupMediaId: keep.has(m.view ?? '') ? ids.get(m.view ?? '') ?? 0 : 0,
+          };
+        });
       } finally {
         paint.setFrozen(false);
         setMocking(false);
@@ -585,7 +626,7 @@ export function RenderStudio({
      при этом осталась — она висит на `onInspect`, а не на `shape` (разбор там же). */
 
   /* QW10 · WHAT THE MODEL GETS shows each outgoing map and the mockup it would take. */
-  const mapLooks = useMapLooks(paint, wire.colourMaps, wire.fabrics, inspecting);
+  const mapLooks = useMapLooks(paint, wire.colourMaps, wire.fabrics, inspecting, hardware);
 
   /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
      bench; the archived colourway → `for:` IN THIS VERY ROW (the rail has no select any more —

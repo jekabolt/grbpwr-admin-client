@@ -37,12 +37,15 @@ import {
   type PlanMap,
 } from '../colour-plan/model';
 import { uploadRaster } from '../modals/use-edit-layer';
-import { bindingsOf, type ClothSlot } from '../pattern/slot-fabrics';
+import { bindingsOf, boundAsset, type ClothSlot, type MaterialSlot } from '../pattern/slot-fabrics';
+import { trimPictogramKind, type TrimPictogramKind } from '../pattern/trim-pictograms';
 import { benchSides, renderSheetViews } from '../render/model';
 import { designKeys } from '../use-design-band';
 import {
   anyPainted,
+  exportLabels,
   freeColourLabel,
+  hardwareInstances,
   hexOf,
   labelsFromMap,
   mapPixels,
@@ -51,6 +54,7 @@ import {
   redoDiff,
   slotLabels,
   undoDiff,
+  type HardwareInstance,
 } from './map-model';
 import {
   concatIndices,
@@ -64,6 +68,7 @@ import {
   fixSides,
   innerLayerPart,
   gestureLive,
+  isUnnamed,
   keyedSuggestion,
   labelKeys,
   markFontPx,
@@ -83,15 +88,18 @@ import {
 } from './parts-model';
 import {
   clothTilePx,
+  HARDWARE_TINT,
   MOCKUP_REV,
   mockupPixels,
   NO_GARMENT,
   viewScale,
   type Garment,
+  type MockupHardware,
   type MockupSkin,
+  type Picture,
   type ViewScale,
 } from './mockup';
-import { remainderCloth } from './plan-run';
+import { hardwarePartsText, isHardwareUse, remainderCloth } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, withOpenings, type FlatRegions } from './regions';
 import { dec, num, strayMarks, type StrayMark } from './artworks';
 import {
@@ -141,10 +149,15 @@ export type PaintView = {
   partsPiecesRev?: number;
 };
 
-/** One thing to paint with: a slot's bound cloth or a free colour. */
+/**
+ * One thing to paint with: a slot's bound cloth, a free colour, or (R9) a hardware slot — its
+ * colourway picture or none (then the slot's pictogram on the tile, words in the run).
+ */
 export type PaintMaterial = {
   label: string;
   kind: 'slot' | 'colour';
+  /** R9 · `hardware` paints over cloth and is never painted over by it. */
+  family: 'cloth' | 'hardware';
   name: string;
   bomItemId: number;
   /** Texture picture (slot) or ''. */
@@ -153,12 +166,22 @@ export type PaintMaterial = {
   colourHex: string;
   /** The cloth's repeat in mm (0 = a swatch picture). */
   repeatMm: number;
+  /** R9 · the hardware slot's pictogram (the tile's face without a picture). */
+  pictogram?: TrimPictogramKind;
 };
 
 export type PaintSaveState = 'idle' | 'pending' | 'saving' | 'unsaved' | 'error';
 
-/** A material's look on the canvas: its picture (aspect kept) laid at its repeat, or a colour. */
-export type PaintSkin = { tile: ImageData | null; hex: string; repeatMm?: number };
+/**
+ * A material's look on the canvas: its picture (aspect kept) laid at its repeat, or a colour.
+ * R9 · `hardware`: the picture is fitted to each instance's box instead (or the neutral tint).
+ */
+export type PaintSkin = {
+  tile: ImageData | null;
+  hex: string;
+  repeatMm?: number;
+  hardware?: boolean;
+};
 
 const DEBOUNCE_MS = 1200;
 /** The canvas's copy of a cloth picture: its long side, px (the mockup reads it at 1024). */
@@ -284,7 +307,24 @@ export class PaintSession {
   /** Colour labels created or changed here since the last successful save — the only rows we own. */
   private dirtyColours = new Set<string>();
   private lastSlots: readonly ClothSlot[] | undefined;
+  private lastHardware: readonly MaterialSlot[] | undefined;
   private lastColorway = 0;
+  /** R9 · hardware label (packed) → its slot. */
+  private hardwareSlots = new Map<number, MaterialSlot>();
+  /** R9 · instances per side and label, keyed by the side's rev. */
+  private instances = new Map<string, { rev: number; list: HardwareInstance[] }>();
+  /** R9 · the labels as the model's map carries them, per side (keyed by its rev). */
+  private exported = new Map<string, { rev: number; labels: Uint32Array }>();
+  /** R9 · the exported colour maps of one exact set of maps → their media (one press, one id). */
+  private exportCache = new Map<
+    string,
+    Map<string, { mediaId: number; palette: common_DesignColourMap['palette'] }>
+  >();
+  /** R9 · the drawn exported maps (PNG data URLs by view) of one signature. */
+  private exportDrawn = new Map<
+    string,
+    Promise<Map<string, { png: string; palette: PlanMap['palette'] }>>
+  >();
   armed = '';
   tool: PaintTool = 'click';
   /** R7 · the artwork asset a drag on a side places (0 = none armed). */
@@ -414,16 +454,39 @@ export class PaintSession {
 
   /* ─────────────────────────── sync with the band ─────────────────────────── */
 
-  sync(band: GetDesignBandResponse, slots: readonly ClothSlot[] | undefined, colorwayId: number) {
+  sync(
+    band: GetDesignBandResponse,
+    slots: readonly ClothSlot[] | undefined,
+    colorwayId: number,
+    hardware?: readonly MaterialSlot[],
+  ) {
     // M6 · the pieces list is drawn off the session (`pieces()`): a new list or a new read waiting
     // on the designer redraws the block even when nothing else moved.
     const piecesWas = JSON.stringify(this.band?.partsPieces ?? null);
     this.band = band;
     this.lastSlots = slots;
+    this.lastHardware = hardware;
     this.lastColorway = colorwayId;
     let changed = piecesWas !== JSON.stringify(band.partsPieces ?? null);
     const list = (slots ?? []).filter((s) => s.bomItemId > 0);
-    this.slotLabel = slotLabels(list.map((s) => s.bomItemId));
+    const hw = (hardware ?? []).filter(
+      (s) => s.bomItemId > 0 && !list.some((c) => c.bomItemId === s.bomItemId),
+    );
+    // R9 · cloths first: appending hardware never re-steps a cloth label (saved maps hold).
+    this.slotLabel = slotLabels(
+      list.map((s) => s.bomItemId),
+      hw.map((s) => s.bomItemId),
+    );
+    const hwWas = [...this.hardwareSlots.keys()].join(',');
+    this.hardwareSlots = new Map();
+    for (const s of hw) {
+      const hex = this.slotLabel.get(s.bomItemId);
+      if (hex) this.hardwareSlots.set(packHex(hex), s);
+    }
+    if (hwWas !== [...this.hardwareSlots.keys()].join(',')) {
+      for (const v of this.views.values()) v.rev += 1;
+      changed = true;
+    }
 
     // Free colours: the plan's colour rows, plus colours added here and not yet painted.
     const plan = this.plan();
@@ -449,6 +512,7 @@ export class PaintSession {
       materials.push({
         label,
         kind: 'slot',
+        family: 'cloth',
         name: slot.name,
         bomItemId: slot.bomItemId,
         url: assetThumb(asset),
@@ -460,14 +524,33 @@ export class PaintSession {
       materials.push({
         label: c.label,
         kind: 'colour',
+        family: 'cloth',
         name: c.colourHex,
         bomItemId: 0,
         url: '',
         colourHex: c.colourHex,
         repeatMm: 0,
       });
+    // R9 · the hardware slots after the cloths, bound or not: a slot with no picture in this
+    // colourway is armable too (the run sends it in words).
+    for (const slot of hw) {
+      const label = this.slotLabel.get(slot.bomItemId);
+      if (!label) continue;
+      const asset = boundAsset(band, colorwayId, slot.bomItemId);
+      materials.push({
+        label,
+        kind: 'slot',
+        family: 'hardware',
+        name: slot.name,
+        bomItemId: slot.bomItemId,
+        url: asset ? assetThumb(asset) : '',
+        colourHex: '',
+        repeatMm: 0,
+        pictogram: trimPictogramKind(slot),
+      });
+    }
     const sig = (m: PaintMaterial[]) =>
-      m.map((x) => `${x.label}${x.url}${x.colourHex}${x.repeatMm}`).join('|');
+      m.map((x) => `${x.label}${x.family}${x.url}${x.colourHex}${x.repeatMm}`).join('|');
     if (sig(materials) !== sig(this.materials)) {
       this.materials = materials;
       changed = true;
@@ -480,9 +563,15 @@ export class PaintSession {
       }
     }
     for (const m of this.materials) this.loadSkin(m);
-    // Unbound painted slots still show: in their label colour.
+    // Unbound painted slots still show: in their label colour (hardware: the neutral tint).
     for (const [, label] of this.slotLabel)
-      if (!this.skins.has(label)) this.skins.set(label, { tile: null, hex: label });
+      if (!this.skins.has(label))
+        this.skins.set(
+          label,
+          this.isHardware(packHex(label))
+            ? { tile: null, hex: HARDWARE_TINT, hardware: true }
+            : { tile: null, hex: label },
+        );
 
     // Views: every side holding a flat.
     const seen = new Set<string>();
@@ -931,23 +1020,128 @@ export class PaintSession {
     return { groups: hit.groups, label: v.parts.groups[hit.groups[0]]?.label ?? '' };
   }
 
+  /* ─────────────────────────── R9 · hardware as parts ─────────────────────────── */
+
+  /** A label (packed) of a hardware slot of this card. */
+  isHardware = (v: number): boolean => this.hardwareSlots.has(v);
+
+  /** The hardware slot's name of a label hex ('' = not hardware). */
+  hardwareName(hex: string): string {
+    return this.hardwareSlots.get(packHex(hex))?.name ?? '';
+  }
+
+  /** The hardware instances of `hex` on a side (cached per side's rev). */
+  instancesOf(v: PaintView, hex: string): HardwareInstance[] {
+    if (!v.labels || !v.flat || !this.isHardware(packHex(hex))) return [];
+    const key = `${v.view}|${hex}`;
+    const hit = this.instances.get(key);
+    if (hit?.rev === v.rev) return hit.list;
+    const list = hardwareInstances(v.labels, packHex(hex), v.flat.w, v.flat.h);
+    this.instances.set(key, { rev: v.rev, list });
+    return list;
+  }
+
+  /** The painted count of a hardware label on every loaded side (the tile's ` · N`). */
+  hardwareCount(hex: string): number {
+    let n = 0;
+    for (const v of this.views.values())
+      if (v.status === 'ready') n += this.instancesOf(v, hex).length;
+    return n;
+  }
+
+  /**
+   * The labels as the model's map carries them: every hardware component takes the cloth around
+   * it (`exportLabels`). The side's own labels when it holds no hardware (cached per rev).
+   */
+  exportOf(v: PaintView): Uint32Array | null {
+    if (!v.labels || !v.flat) return null;
+    const hit = this.exported.get(v.view);
+    if (hit?.rev === v.rev) return hit.labels;
+    const any = [...this.labelsOn(v)].some((hex) => this.isHardware(packHex(hex)));
+    const labels = any
+      ? exportLabels(v.labels, v.flat.ink, v.flat.w, v.flat.h, this.isHardware)
+      : v.labels;
+    this.exported.set(v.view, { rev: v.rev, labels });
+    return labels;
+  }
+
+  /** The armed material is a hardware slot (a click then floods the button, `hardwareAt`). */
+  armedHardware(): boolean {
+    return !!this.armed && this.isHardware(packHex(this.armed));
+  }
+
+  /**
+   * The hardware of a side as the canvas draws it: every instance with its slot's picture as the
+   * palette holds it (null = the neutral tint).
+   */
+  hardwareLayer(v: PaintView): MockupHardware[] {
+    const out: MockupHardware[] = [];
+    if (!v.labels) return out;
+    for (const hex of this.labelsOn(v)) {
+      if (!this.isHardware(packHex(hex))) continue;
+      const tile = this.skins.get(hex)?.tile ?? null;
+      const picture = tile ? { rgba: tile.data, w: tile.width, h: tile.height } : null;
+      for (const instance of this.instancesOf(v, hex)) out.push({ instance, picture });
+    }
+    return out;
+  }
+
+  /**
+   * Label hex → the `parts` of its hardware use: the named parts its instances sit on, then the
+   * count on each side (sheet order). Only labels painted somewhere.
+   */
+  hardwareParts(): Map<string, string> {
+    const out = new Map<string, string>();
+    if (!this.band) return out;
+    const order = renderSheetViews(this.band);
+    const sides = [...this.views.values()]
+      .filter((v) => v.status === 'ready' && !!v.flat)
+      .sort((a, b) => order.indexOf(a.view) - order.indexOf(b.view));
+    for (const [packed] of this.hardwareSlots) {
+      const hex = hexOf(packed);
+      const places: string[] = [];
+      const counts: { view: string; n: number }[] = [];
+      for (const v of sides) {
+        const list = this.instancesOf(v, hex);
+        if (list.length === 0) continue;
+        counts.push({ view: v.view, n: list.length });
+        for (const inst of list) {
+          const region = v.flat?.labels[inst.idx[0]] ?? 0;
+          const g = region && v.parts ? v.parts.regionGroup[region] : -1;
+          const label = g >= 0 ? v.parts?.groups[g]?.label ?? '' : '';
+          if (label && !isUnnamed({ key: '', label })) places.push(label);
+        }
+      }
+      if (counts.length > 0) out.set(hex, hardwarePartsText(places, counts));
+    }
+    return out;
+  }
+
   private loadSkin(m: PaintMaterial) {
     const key = `${m.label}|${m.url}|${m.colourHex}|${m.repeatMm}`;
+    const hardware = m.family === 'hardware';
     if (m.kind === 'colour' || !m.url) {
-      this.skins.set(m.label, { tile: null, hex: m.colourHex || m.label });
+      this.skins.set(
+        m.label,
+        hardware
+          ? { tile: null, hex: HARDWARE_TINT, hardware }
+          : { tile: null, hex: m.colourHex || m.label },
+      );
       return;
     }
     if (this.skinLoading.has(key)) return;
     this.skinLoading.add(key);
     const had = this.skins.get(m.label);
+    const hex = hardware ? HARDWARE_TINT : m.colourHex || '#dddddd';
     this.skins.set(m.label, {
       tile: had?.tile ?? null,
-      hex: m.colourHex || '#dddddd',
+      hex,
       repeatMm: m.repeatMm,
+      hardware,
     });
     tileOf(m.url)
       .then((tile) => {
-        this.skins.set(m.label, { tile, hex: m.colourHex || '#dddddd', repeatMm: m.repeatMm });
+        this.skins.set(m.label, { tile, hex, repeatMm: m.repeatMm, hardware });
         for (const v of this.views.values()) v.rev += 1;
         this.bump();
       })
@@ -1234,10 +1428,22 @@ export class PaintSession {
     if (!label) return '';
     this.colours.push({ label, colourHex });
     this.dirtyColours.add(label);
-    this.materials = [
-      ...this.materials,
-      { label, kind: 'colour', name: colourHex, bomItemId: 0, url: '', colourHex, repeatMm: 0 },
-    ];
+    // With the cloths, before the hardware (the order `sync` lays).
+    const colour: PaintMaterial = {
+      label,
+      kind: 'colour',
+      family: 'cloth',
+      name: colourHex,
+      bomItemId: 0,
+      url: '',
+      colourHex,
+      repeatMm: 0,
+    };
+    const cut = this.materials.findIndex((m) => m.family === 'hardware');
+    this.materials =
+      cut < 0
+        ? [...this.materials, colour]
+        : [...this.materials.slice(0, cut), colour, ...this.materials.slice(cut)];
     this.skins.set(label, { tile: null, hex: colourHex });
     this.armed = label;
     if (this.tool === 'erase' || this.tool === 'artwork') this.tool = 'click';
@@ -1336,12 +1542,18 @@ export class PaintSession {
     if (this.frozen) return [];
     const value = paint ?? (this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0);
     if (paint === undefined && this.tool !== 'erase' && !value) return [];
+    // R9 · one precedence, here only: a cloth or free-colour gesture skips hardware pixels; a
+    // hardware gesture overwrites anything; erase and clear (value 0) remove anything.
+    const keepHardware = value !== 0 && !this.isHardware(value);
     const ready = targets.flatMap((t) => {
       const v = this.views.get(t.view);
       if (!v || v.status !== 'ready' || !v.labels) return [];
+      const labels = v.labels;
       // Ф1 · an opening has no cloth: paint never lands on it (erase still clears it).
-      const idx = value && v.flat ? dropOpenings(t.idx, v.flat, v.parts) : t.idx;
-      return idx.length > 0 ? [{ view: t.view, base: v.baseMediaId, labels: v.labels, idx }] : [];
+      let idx = value && v.flat ? dropOpenings(t.idx, v.flat, v.parts) : t.idx;
+      if (keepHardware && this.hardwareSlots.size > 0)
+        idx = idx.filter((i) => !this.isHardware(labels[i]));
+      return idx.length > 0 ? [{ view: t.view, base: v.baseMediaId, labels, idx }] : [];
     });
     const gesture = paintGesture(ready, value);
     if (gesture.length === 0) return [];
@@ -1477,7 +1689,7 @@ export class PaintSession {
         this.materials = [];
       }
       // Colours of ours that the fresh plan rewrote but we never touched follow the plan.
-      this.sync(band, this.lastSlots, this.lastColorway);
+      this.sync(band, this.lastSlots, this.lastColorway, this.lastHardware);
     }
     this.save = 'pending';
     void this.flush();
@@ -1555,6 +1767,7 @@ export class PaintSession {
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
     scales: ReadonlyMap<string, number>,
+    hardware: ReadonlyMap<string, number>,
   ): string {
     const assets = new Map((this.band?.assets ?? []).map((a) => [a.id ?? 0, a]));
     const look = (u: common_DesignFabricUse | undefined) => {
@@ -1570,7 +1783,9 @@ export class PaintSession {
     return JSON.stringify([
       MOCKUP_REV,
       REGIONS_ALGO_REV,
-      look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0)),
+      look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0 && !isHardwareUse(u))),
+      // R9 · each hardware label with the picture its use sends (its place is in the map's raster).
+      [...hardware].map(([hex, k]) => [hex, uses[k]?.assetId ?? 0, uses[k]?.mediaId ?? 0]),
       maps.map((m) => {
         // M5 · the remainder never fills an opening: the side's holes are part of the drawing.
         const holes = this.views.get(m.view ?? '')?.flat?.openings;
@@ -1601,6 +1816,7 @@ export class PaintSession {
     uses: readonly common_DesignFabricUse[],
     scales: ReadonlyMap<string, number>,
     sig: string,
+    hardware: ReadonlyMap<string, number>,
   ): Promise<Map<string, string>> {
     const hit = this.mockDrawn.get(sig);
     if (hit) return hit;
@@ -1628,7 +1844,22 @@ export class PaintSession {
       const c = (use.colourHex ?? '').trim();
       return c ? ({ kind: 'colour', hex: c } as MockupSkin) : null;
     };
-    const rest = uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0);
+    const rest = uses.find(
+      (u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0 && !isHardwareUse(u),
+    );
+    // R9 · a hardware use's picture (only when its use sends one), fitted into each instance.
+    const pictureOf = async (use: common_DesignFabricUse | undefined): Promise<Picture | null> => {
+      const asset = use && (use.mediaId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
+      const url = asset ? assetFull(asset) : '';
+      if (!url) return null;
+      let pic = pictures.get(url);
+      if (!pic) {
+        pic = clothPixels(url);
+        pictures.set(url, pic);
+      }
+      const img = await pic;
+      return { rgba: img.data, w: img.width, h: img.height };
+    };
     const job = (async () => {
       if (!band) throw new Error('no band');
       const out = new Map<string, string>();
@@ -1639,9 +1870,14 @@ export class PaintSession {
           throw new Error(`${view} is not drawn as saved`);
         if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
           throw new Error(`${view} stands on another map`);
-        // A copy: the drawing below spans awaits, and nothing it reads may move under it.
+        // A copy: the drawing below spans awaits, and nothing it reads may move under it. R9 · the
+        // labels with every hardware instance given the cloth around it (the button sits on it).
         const flat = v.flat;
-        const labels = v.labels.slice();
+        const labels = (this.exportOf(v) ?? v.labels).slice();
+        const instances = [...hardware].map(([hex, k]) => ({
+          list: this.instancesOf(v, hex),
+          use: uses[k],
+        }));
         const pixels = v.pixels.data.slice();
         const mmPerPx = scales.get(view) ?? 1;
         const skins = new Map<number, MockupSkin>();
@@ -1652,7 +1888,13 @@ export class PaintSession {
           if (skin) skins.set(packHex(hex), skin);
         }
         const remainder = rest ? await skinOf(rest, mmPerPx) : null;
-        const rgba = mockupPixels(flat, labels, pixels, skins, remainder);
+        const layer: MockupHardware[] = [];
+        for (const { list, use } of instances) {
+          if (list.length === 0) continue;
+          const picture = await pictureOf(use);
+          for (const instance of list) layer.push({ instance, picture });
+        }
+        const rgba = mockupPixels(flat, labels, pixels, skins, remainder, layer);
         out.set(view, pngOf(rgba, flat.w, flat.h));
       }
       return out;
@@ -1669,10 +1911,17 @@ export class PaintSession {
   async mockupPreviews(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
+    hardware: ReadonlyMap<string, number> = new Map(),
   ): Promise<Map<string, string>> {
     try {
       const scales = this.scaleSnapshot(maps);
-      return await this.drawMockups(maps, uses, scales, this.mockSig(maps, uses, scales));
+      return await this.drawMockups(
+        maps,
+        uses,
+        scales,
+        this.mockSig(maps, uses, scales, hardware),
+        hardware,
+      );
     } catch {
       return new Map();
     }
@@ -1689,12 +1938,13 @@ export class PaintSession {
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
     scales: ReadonlyMap<string, number> = this.scaleSnapshot(maps),
+    hardware: ReadonlyMap<string, number> = new Map(),
   ): Promise<{ ids: Map<string, number>; error: string }> {
-    const sig = this.mockSig(maps, uses, scales);
+    const sig = this.mockSig(maps, uses, scales, hardware);
     const hit = this.mockCache.get(sig);
     if (hit) return { ids: hit, error: '' };
     try {
-      const drawn = await this.drawMockups(maps, uses, scales, sig);
+      const drawn = await this.drawMockups(maps, uses, scales, sig, hardware);
       const ids = new Map<string, number>();
       for (const m of maps) {
         const view = m.view ?? '';
@@ -1711,6 +1961,91 @@ export class PaintSession {
       return { ids, error: '' };
     } catch (e) {
       return { ids: new Map(), error: (e instanceof Error && e.message) || 'mockup failed' };
+    }
+  }
+
+  /**
+   * R9 · the colour maps as the model gets them (drawn, not uploaded): every hardware pixel of the
+   * saved map given the cloth around it (`exportLabels`), the ink black, a palette of the cloths
+   * only. Per signature (the saved maps' media), so the preview and the press share one drawing.
+   */
+  private drawExports(
+    maps: readonly common_DesignColourMap[],
+  ): Promise<Map<string, { png: string; palette: PlanMap['palette'] }>> {
+    const sig = JSON.stringify([
+      REGIONS_ALGO_REV,
+      [...this.hardwareSlots.keys()],
+      maps.map((m) => [m.view, m.mediaId, m.baseMediaId]),
+    ]);
+    const hit = this.exportDrawn.get(sig);
+    if (hit) return hit;
+    const job = (async () => {
+      const out = new Map<string, { png: string; palette: PlanMap['palette'] }>();
+      for (const m of maps) {
+        const view = m.view ?? '';
+        const v = this.views.get(view);
+        if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat)
+          throw new Error(`${view} is not drawn as saved`);
+        if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
+          throw new Error(`${view} stands on another map`);
+        const labels = this.exportOf(v) ?? v.labels;
+        const { rgba, palette } = mapPixels(labels, v.flat.ink, v.flat.w, v.flat.h);
+        out.set(view, { png: pngOf(rgba, v.flat.w, v.flat.h), palette });
+      }
+      return out;
+    })();
+    this.exportDrawn.set(sig, job);
+    job.catch(() => {
+      if (this.exportDrawn.get(sig) === job) this.exportDrawn.delete(sig);
+    });
+    return job;
+  }
+
+  /** R9 · the exported maps' previews (WHAT THE MODEL GETS), view → PNG data URL. */
+  async exportPreviews(maps: readonly common_DesignColourMap[]): Promise<Map<string, string>> {
+    try {
+      const drawn = await this.drawExports(maps);
+      return new Map([...drawn].map(([view, d]) => [view, d.png]));
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
+   * R9 · at GENERATE (frozen, after the save settled): the maps that carry hardware, exported and
+   * uploaded — view → the media and palette the run sends instead of the saved map. A full answer
+   * is kept per maps (the same press again: the same ids, the same idempotency key); a failure is
+   * never kept, and the run does not start (as a failed mockup).
+   */
+  async exportMaps(maps: readonly common_DesignColourMap[]): Promise<{
+    maps: Map<string, { mediaId: number; palette: common_DesignColourMap['palette'] }>;
+    error: string;
+  }> {
+    const sig = JSON.stringify(maps.map((m) => [m.view, m.mediaId, m.baseMediaId]));
+    const hit = this.exportCache.get(sig);
+    if (hit) return { maps: hit, error: '' };
+    try {
+      const drawn = await this.drawExports(maps);
+      const out = new Map<
+        string,
+        { mediaId: number; palette: common_DesignColourMap['palette'] }
+      >();
+      for (const m of maps) {
+        const view = m.view ?? '';
+        const d = drawn.get(view);
+        if (!d) throw new Error(`${view} has no map`);
+        const media = await uploadRaster(d.png);
+        const id = media.id ?? 0;
+        if (id <= 0) throw new Error('the colour map did not upload');
+        out.set(view, {
+          mediaId: id,
+          palette: d.palette.map((sw) => ({ hex: sw.hex, px: sw.px })),
+        });
+      }
+      this.exportCache.set(sig, out);
+      return { maps: out, error: '' };
+    } catch (e) {
+      return { maps: new Map(), error: (e instanceof Error && e.message) || 'map export failed' };
     }
   }
 
@@ -1743,7 +2078,14 @@ export class PaintSession {
           fresh.push({ view: v.view, map: null });
           continue;
         }
-        const { rgba, palette } = mapPixels(v.labels, v.flat.ink, v.flat.w, v.flat.h);
+        // R9 · the saved map keeps hardware over the ink (a rivet drawn as one dot is all ink).
+        const { rgba, palette } = mapPixels(
+          v.labels,
+          v.flat.ink,
+          v.flat.w,
+          v.flat.h,
+          this.isHardware,
+        );
         if (palette.length > PLAN_PALETTE_MAX)
           throw new Error(`a view carries at most ${PLAN_PALETTE_MAX} materials`);
         const media = await uploadRaster(pngOf(rgba, v.flat.w, v.flat.h));
@@ -1896,13 +2238,15 @@ export function usePaint(
   band: GetDesignBandResponse,
   slots: readonly ClothSlot[] | undefined,
   colorwayId: number,
+  /** R9 · the card's paintable hardware slots (`isPaintableHardware`), in pack order. */
+  hardware?: readonly MaterialSlot[],
 ): PaintSession {
   const qc = useQueryClient();
   const session = useMemo(() => new PaintSession(techCardId, qc), [techCardId, qc]);
   useEffect(() => () => session.dispose(), [session]);
   useEffect(() => {
-    session.sync(band, slots, colorwayId);
-  }, [session, band, slots, colorwayId]);
+    session.sync(band, slots, colorwayId, hardware);
+  }, [session, band, slots, colorwayId, hardware]);
   useSyncExternalStore(session.subscribe, session.getVersion, session.getVersion);
   return session;
 }
@@ -1916,20 +2260,29 @@ export function useMapLooks(
   maps: readonly common_DesignColourMap[] | undefined,
   uses: readonly common_DesignFabricUse[] | undefined,
   open: boolean,
+  /** R9 · hardware label → its use's index (`paintRun`), and the views whose map is exported. */
+  hardware?: { labels: ReadonlyMap<string, number>; views: readonly string[] },
 ): Map<string, { map: string; mockup: string; scale: string }> {
   const [drawn, setDrawn] = useState<Map<string, string>>(() => new Map());
+  const [exported, setExported] = useState<Map<string, string>>(() => new Map());
   // M5 · named parts move the openings, and with them the drawing.
   const partsGen = session.partsGen;
   useEffect(() => {
     if (!open || !maps || maps.length === 0) return;
     let live = true;
-    void session.mockupPreviews(maps, uses ?? []).then((m) => {
+    void session.mockupPreviews(maps, uses ?? [], hardware?.labels).then((m) => {
       if (live) setDrawn(m);
     });
+    const views = new Set(hardware?.views ?? []);
+    const out = maps.filter((m) => views.has(m.view ?? ''));
+    if (out.length > 0)
+      void session.exportPreviews(out).then((m) => {
+        if (live) setExported(m);
+      });
     return () => {
       live = false;
     };
-  }, [open, maps, uses, session, partsGen]);
+  }, [open, maps, uses, session, partsGen, hardware]);
   const version = session.getVersion();
   return useMemo(() => {
     const out = new Map<string, { map: string; mockup: string; scale: string }>();
@@ -1939,12 +2292,13 @@ export function useMapLooks(
       const v = session.views.get(view);
       const scale = v ? session.scaleOf(v) : null;
       out.set(view, {
-        map: plan?.maps.find((x) => x.mediaId === m.mediaId)?.url ?? '',
+        // R9 · a map with hardware goes out exported (its buttons in the cloth around them).
+        map: exported.get(view) ?? plan?.maps.find((x) => x.mediaId === m.mediaId)?.url ?? '',
         mockup: session.mockUrls.get(m.mockupMediaId ?? 0) ?? drawn.get(view) ?? '',
         scale: scale?.estimated ? `scale ≈ ${scale.acrossMm} mm (est.)` : '',
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, maps, version, drawn]);
+  }, [session, maps, version, drawn, exported]);
 }

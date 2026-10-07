@@ -9,8 +9,9 @@ import { GROUP_GAP } from '../core';
 import { ColourPicker } from '../assets/colour-picker';
 import { assetLabel, assetThumb } from '../assets/model';
 import type { CanvasArtwork } from '../paint/artworks';
-import type { PaintSession } from '../paint/use-paint';
+import type { PaintMaterial, PaintSession } from '../paint/use-paint';
 import type { ClothSlot } from '../pattern/slot-fabrics';
+import { TrimPictogram } from '../pattern/trim-pictograms';
 import { PictureTile } from '../picture-tile';
 import { boundClothsOf } from './drafts';
 
@@ -179,6 +180,83 @@ function ArtworkTile({
   );
 }
 
+/**
+ * R9 · one hardware slot of PARTS: its colourway picture, else its pictogram on the paper (as the
+ * bench's empty cell); cap = the slot name, ` · N` once painted (instances on the sides — shown,
+ * never written to the BOM).
+ */
+function HardwareTile({
+  m,
+  count,
+  armed,
+  disabled,
+  onArm,
+}: {
+  m: PaintMaterial;
+  count: number;
+  armed: boolean;
+  disabled?: boolean;
+  onArm: () => void;
+}): JSX.Element {
+  const cap = count > 0 ? `${m.name} · ${count}` : m.name;
+  return (
+    <button
+      type='button'
+      aria-pressed={armed}
+      disabled={disabled}
+      onClick={onArm}
+      data-paint-material={m.bomItemId}
+      data-paint-hardware={count}
+      title={cap}
+      className={TILE_BTN}
+    >
+      {m.url ? (
+        <PictureTile
+          url={m.url}
+          alt={m.name}
+          aspect='1/1'
+          fit='contain'
+          selected={armed}
+          className='pointer-events-none w-full'
+        />
+      ) : (
+        <span
+          aria-hidden
+          className={cn(
+            'flex size-[72px] items-center justify-center border border-borderColor bg-bgColor p-2 text-textColor group-hover:border-textColor',
+            armed && 'border-2 border-textColor',
+          )}
+        >
+          <TrimPictogram kind={m.pictogram ?? 'generic'} className='size-full opacity-60' />
+        </span>
+      )}
+      {/* The name gives way, the count never does: `FRONT BUTT… · 2`. */}
+      <span className='flex w-full min-w-0'>
+        <Text
+          size='micro'
+          variant={armed ? 'default' : 'label'}
+          tracking='label'
+          component='span'
+          className='min-w-0 truncate uppercase'
+        >
+          {m.name}
+        </Text>
+        {count > 0 && (
+          <Text
+            size='micro'
+            variant={armed ? 'default' : 'label'}
+            tracking='label'
+            component='span'
+            className='shrink-0 whitespace-pre uppercase'
+          >
+            {` · ${count}`}
+          </Text>
+        )}
+      </span>
+    </button>
+  );
+}
+
 const TILE_BTN =
   'group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
@@ -197,57 +275,61 @@ function PaintPalette({
   /* `+`: the first pick of an open picker makes the colour, the next picks change it. */
   const adding = useRef('');
   const addingHex = paint.colours.find((c) => c.label === adding.current)?.colourHex ?? '';
+  /* R9 · the hardware slots after the cloths, across a seam: armed and painted like a cloth. */
+  const hardware = paint.materials.filter((m) => m.family === 'hardware');
   return (
     <div data-materials-pack={paint.materials.length} data-paint-palette=''>
       <GroupLabel flush className={GROUP_GAP} action={door}>
         materials
       </GroupLabel>
       <div className='flex flex-wrap items-start gap-2'>
-        {paint.materials.map((m) => {
-          const armed =
-            paint.armed === m.label && paint.tool !== 'erase' && paint.tool !== 'artwork';
-          return (
-            <button
-              key={m.label}
-              type='button'
-              aria-pressed={armed}
-              disabled={disabled}
-              onClick={() => paint.arm(m.label)}
-              data-paint-material={m.kind === 'slot' ? m.bomItemId : m.colourHex}
-              title={m.name}
-              className={TILE_BTN}
-            >
-              {m.kind === 'slot' ? (
-                <PictureTile
-                  url={m.url}
-                  alt={m.name}
-                  aspect='1/1'
-                  fit='cover'
-                  selected={armed}
-                  className='pointer-events-none w-full'
-                />
-              ) : (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'size-[72px] border border-borderColor group-hover:border-textColor',
-                    armed && 'border-2 border-textColor',
-                  )}
-                  style={{ background: m.colourHex }}
-                />
-              )}
-              <Text
-                size='micro'
-                variant={armed ? 'default' : 'label'}
-                tracking='label'
-                component='span'
-                className='w-full truncate uppercase'
+        {paint.materials
+          .filter((m) => m.family !== 'hardware')
+          .map((m) => {
+            const armed =
+              paint.armed === m.label && paint.tool !== 'erase' && paint.tool !== 'artwork';
+            return (
+              <button
+                key={m.label}
+                type='button'
+                aria-pressed={armed}
+                disabled={disabled}
+                onClick={() => paint.arm(m.label)}
+                data-paint-material={m.kind === 'slot' ? m.bomItemId : m.colourHex}
+                title={m.name}
+                className={TILE_BTN}
               >
-                {m.name}
-              </Text>
-            </button>
-          );
-        })}
+                {m.kind === 'slot' ? (
+                  <PictureTile
+                    url={m.url}
+                    alt={m.name}
+                    aspect='1/1'
+                    fit='cover'
+                    selected={armed}
+                    className='pointer-events-none w-full'
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'size-[72px] border border-borderColor group-hover:border-textColor',
+                      armed && 'border-2 border-textColor',
+                    )}
+                    style={{ background: m.colourHex }}
+                  />
+                )}
+                <Text
+                  size='micro'
+                  variant={armed ? 'default' : 'label'}
+                  tracking='label'
+                  component='span'
+                  className='w-full truncate uppercase'
+                >
+                  {m.name}
+                </Text>
+              </button>
+            );
+          })}
         <div
           className='w-[72px] shrink-0'
           onPointerDownCapture={() => {
@@ -286,6 +368,17 @@ function PaintPalette({
             }
           />
         </div>
+        {hardware.length > 0 && <PackSeam />}
+        {hardware.map((m) => (
+          <HardwareTile
+            key={m.label}
+            m={m}
+            count={paint.hardwareCount(m.label)}
+            armed={paint.armed === m.label && paint.tool !== 'erase' && paint.tool !== 'artwork'}
+            disabled={disabled}
+            onArm={() => paint.arm(m.label)}
+          />
+        ))}
         {artworks.length > 0 && <PackSeam />}
         {artworks.map((a) => {
           const armed = paint.tool === 'artwork' && paint.armedArtwork === a.assetId;

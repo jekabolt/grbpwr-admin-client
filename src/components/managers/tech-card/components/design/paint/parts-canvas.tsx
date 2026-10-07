@@ -32,7 +32,15 @@ import {
   type InkField,
   type Pt,
 } from './livewire';
-import { clothMask, componentAt, displayLabels, polygonIndices, underLines } from './map-model';
+import {
+  clothMask,
+  componentAt,
+  displayLabels,
+  hardwareAt,
+  hexOf,
+  polygonIndices,
+  underLines,
+} from './map-model';
 import {
   annotationOfQuad,
   boxQuad,
@@ -51,7 +59,7 @@ import {
   type CanvasArtwork,
   type Quad,
 } from './artworks';
-import { tileSampler } from './mockup';
+import { fitSampler, HARDWARE_TINT, tileSampler } from './mockup';
 import {
   concatIndices,
   isUnnamed,
@@ -76,6 +84,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *   pen    a polygon of the armed material, clipped to the garment — closes open outlines; it is
  *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
  *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
+ *          R9 · with a HARDWARE tile armed a click floods the button under the pointer instead
+ *          (`hardwareAt`: bounded by the ink, its hole pockets in; an open outline paints nothing
+ *          and says so) — on a pen-only side too
  *   erase  click back to paper
  *   artwork (R7) the armed artwork tile: drag on a side = a new box; a selected box moves (drag
  *          inside), its 4 corners move alone (free perspective; ⇧ = uniform scale), the handle
@@ -185,6 +196,8 @@ type SideArtwork = {
 };
 
 const FULL_REASON = `at most ${MAX_RENDER_ARTWORKS} artworks per render`;
+/** R9 · a hardware click whose fill ran past the share: the outline is open. */
+const OPEN_REASON = 'outline is open · use pen';
 
 const HANDLE = 8;
 const ROT_OFF = 22;
@@ -572,7 +585,9 @@ function PaintSide({
   const cutFailed = ready && session.cutFailed(view);
   /* f6 · unassigned regions still unpainted (an error the caption names). */
   const [lost, setLost] = useState(0);
-  const tool = penOnly && session.tool === 'click' ? 'pen' : session.tool;
+  /* R9 · a hardware tile armed: CLICK floods the button (no regions needed, so pen-only sides too). */
+  const hardwareClick = session.tool === 'click' && session.armedHardware();
+  const tool = penOnly && session.tool === 'click' && !hardwareClick ? 'pen' : session.tool;
   const remainder = session.remainder();
   const split = view.parts?.split;
 
@@ -586,7 +601,8 @@ function PaintSide({
     c.height = h;
     const ctx = c.getContext('2d');
     if (!ctx) return;
-    const shown = displayLabels(labels, underLines(flat));
+    // R9 · the cloth runs under the hardware (the export's labels); the buttons are laid after.
+    const shown = displayLabels(session.exportOf(view) ?? labels, underLines(flat));
     const out = new ImageData(new Uint8ClampedArray(pixels.data), w, h);
     const d = out.data;
     const looks = new Map<number, { s: ReturnType<typeof sampler>; dark: boolean }>();
@@ -661,6 +677,29 @@ function PaintSide({
         d[p] = (tmp[0] * fr) / 255;
         d[p + 1] = (tmp[1] * fg) / 255;
         d[p + 2] = (tmp[2] * fb) / 255;
+      }
+    }
+    // R9 · each hardware instance: its picture fitted to its box (or the neutral tint), the flat's
+    // own pixel multiplied on top as for cloth — as the mockup draws it.
+    const tint = [
+      parseInt(HARDWARE_TINT.slice(1, 3), 16),
+      parseInt(HARDWARE_TINT.slice(3, 5), 16),
+      parseInt(HARDWARE_TINT.slice(5, 7), 16),
+    ];
+    for (const hw of session.hardwareLayer(view)) {
+      const fit = hw.picture ? fitSampler(hw.picture, hw.instance) : null;
+      for (const i of hw.instance.idx) {
+        const p = i * 4;
+        if (!fit || !fit(i % w, (i / w) | 0, tmp, 0)) {
+          if (fit) continue; // outside the fitted picture: the cloth stays
+          tmp[0] = tint[0];
+          tmp[1] = tint[1];
+          tmp[2] = tint[2];
+        }
+        const a = pixels.data[p + 3] / 255;
+        d[p] = (tmp[0] * (pixels.data[p] * a + 255 * (1 - a))) / 255;
+        d[p + 1] = (tmp[1] * (pixels.data[p + 1] * a + 255 * (1 - a))) / 255;
+        d[p + 2] = (tmp[2] * (pixels.data[p + 2] * a + 255 * (1 - a))) / 255;
       }
     }
     ctx.putImageData(out, 0, 0);
@@ -749,7 +788,16 @@ function PaintSide({
     const bh = y1 - y0 + 1;
     const out = ctx.createImageData(bw, bh);
     const erase = tool === 'erase';
-    const s = sampler(session.skins.get(session.armed), session.tilePx(session.armed, view));
+    const skin = session.skins.get(session.armed);
+    const s = sampler(skin, session.tilePx(session.armed, view));
+    // R9 · a hardware tile tints with its picture fitted to the button (or the neutral tint).
+    const fit =
+      skin?.hardware && skin.tile
+        ? fitSampler(
+            { rgba: skin.tile.data, w: skin.tile.width, h: skin.tile.height },
+            { x0, y0, x1, y1 },
+          )
+        : null;
     const tmp = new Uint8ClampedArray(4);
     for (const i of idx) {
       const ix = i % w;
@@ -761,7 +809,9 @@ function PaintSide({
         out.data[p + 2] = 255;
         out.data[p + 3] = 200;
       } else {
-        s(ix, iy, tmp, 0);
+        if (skin?.hardware) {
+          if (!fit || !fit(ix, iy, tmp, 0)) s(ix, iy, tmp, 0);
+        } else s(ix, iy, tmp, 0);
         out.data[p] = tmp[0];
         out.data[p + 1] = tmp[1];
         out.data[p + 2] = tmp[2];
@@ -797,26 +847,44 @@ function PaintSide({
       st.mask[at] &&
       st.rev === view.rev &&
       st.armed === session.armed &&
-      st.group === group &&
+      st.group === (hardwareClick ? -2 : group) &&
       st.region === region &&
       session.hovered?.only === only
     )
       return;
     const parts = view.parts;
-    const idx = shut
-      ? null
-      : parts && group >= 0
-        ? partIndices(labels, flat, parts, group, { x: px, y: py })
-        : componentAt(labels, flat.labels, w, h, px, py);
-    st.group = group;
+    const pick = hardwareClick ? hardwareAt(flat.ink, w, h, px, py) : null;
+    const idx = hardwareClick
+      ? pick?.idx ?? null
+      : shut
+        ? null
+        : parts && group >= 0
+          ? partIndices(labels, flat, parts, group, { x: px, y: py })
+          : componentAt(labels, flat.labels, w, h, px, py);
+    st.group = hardwareClick ? -2 : group;
     st.region = region;
-    const label =
-      parts && group >= 0
+    // R9 · a painted hardware instance under the pointer is named by its slot — within 2 px, so
+    // the ink of a button's holes and rim names it too.
+    let hardware = '';
+    for (let r = 0; r <= 2 && !hardware; r += 1)
+      for (let dy = -r; dy <= r && !hardware; dy += 1)
+        for (let dx = -r; dx <= r && !hardware; dx += 1) {
+          const xx = px + dx;
+          const yy = py + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          const v = labels[yy * w + xx];
+          if (v) hardware = session.hardwareName(hexOf(v));
+        }
+    const label = hardware
+      ? hardware
+      : parts && group >= 0
         ? parts.groups[group].label
         : !alt && tool !== 'pen' && unassignedRegion(parts, region)
           ? 'unassigned'
           : '';
-    setPartName(label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label);
+    setPartName(
+      !hardware && label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label,
+    );
     session.setHover(view.view, group, only);
     echoShown.current = false;
     st.idx = idx;
@@ -976,6 +1044,16 @@ function PaintSide({
     if (!flat.silhouette[py * w + px]) return;
     const inOpening = openingRegion(view.parts, flat.labels[py * w + px]);
     if (tool !== 'erase' && inOpening) return;
+    if (hardwareClick) {
+      const pick = hardwareAt(flat.ink, w, h, px, py);
+      if (!pick) return;
+      if (pick.open) {
+        useSnackBarStore.getState().showMessage(OPEN_REASON, 'error');
+        return;
+      }
+      session.apply(view.view, pick.idx);
+      return;
+    }
     // An opening is no part: the eraser takes the paint under the cursor as a plain region.
     const group = inOpening ? -1 : groupAt(px, py, e.altKey);
     if (group >= 0) {

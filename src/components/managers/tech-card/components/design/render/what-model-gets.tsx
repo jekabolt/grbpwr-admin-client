@@ -27,6 +27,7 @@ import {
 import { openDoor } from '../doors';
 import { viewLabel } from '../views';
 import { MAX_RENDER_ARTWORKS } from '../paint/artworks';
+import { hardwareModelLines, isHardwareUse } from '../paint/plan-run';
 import { PictureTile } from '../picture-tile';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
@@ -403,8 +404,10 @@ function RenderBody({
 }): JSX.Element {
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
-  /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. */
-  const cloths = recipe?.fabrics ?? [];
+  /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. R9 · without
+   *  the hardware uses: they are no cloth, and the server lists them apart (HARDWARE). */
+  const cloths = (recipe?.fabrics ?? []).filter((f) => !isHardwareUse(f));
+  const hardware = hardwareModelLines(recipe?.fabrics);
   /** The sheet's own left-to-right order — the same list the run sends and the splitter labels. */
   const views = useMemo(() => renderSheetViews(band), [band]);
   const stated = fabricStatement(recipe);
@@ -540,6 +543,16 @@ function RenderBody({
             covers which part»); прочитанная под общей подписью референса, она была бы чертежом
             вещи в неправдоподобных цветах. Строка рисуется только когда карты есть: пустая
             говорила бы про прогон то, чего в нём нет. */}
+        {/* R9 · HARDWARE PAINTED ON PARTS — one line per use: where, how many, picture or words. */}
+        {hardware.map((line, i) => (
+          <InventoryLine
+            key={`hw${i}`}
+            data-sent-hardware={i}
+            name='hardware'
+            origin='recipe'
+            text={line}
+          />
+        ))}
         {/* R7 · ARTWORKS PLACED ON THE FLATS — each travels as its own image with its box. */}
         {artworks.length > 0 && (
           <InventoryLine
@@ -1173,6 +1186,7 @@ function plainText({
       // входов, в котором этой строки нет, там просто неверен.
       `cloths: ${
         (recipe?.fabrics ?? [])
+          .filter((f) => !isHardwareUse(f))
           .map(
             (f) =>
               // ⚠ МЕТКА ПЕЧАТАЕТСЯ И ЗДЕСЬ. Текст уезжает в буфер и живёт дальше без экрана; список
@@ -1191,6 +1205,7 @@ function plainText({
           )
           .join(', ') || '—'
       }`,
+      ...hardwareModelLines(recipe?.fabrics).map((line) => `hardware · ${line}`),
       `artworks: ${artworks.length > 0 ? `${artworks.length} of ${MAX_RENDER_ARTWORKS} · ${artworks.join(', ')}` : '—'}`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
       `picked colour: ${colourLabel(recipe, resolved.colors)}`,
