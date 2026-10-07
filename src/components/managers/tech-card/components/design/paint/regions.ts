@@ -64,8 +64,10 @@ export type FlatRegions = {
 /**
  * The cutter's revision: the numbers of the regions (and so a cached auto-parts answer) hold only
  * for the same algorithm on the same flat. Bump on ANY change to how `analyseFlat` numbers regions.
+ * v6 (M5 live, card 38's sides): two band fragments join end to end only when they run beside one
+ * region — the hems of two panels meeting at a seam stay two.
  */
-export const REGIONS_ALGO_REV = 'regions.v5';
+export const REGIONS_ALGO_REV = 'regions.v6';
 
 const INF = 1e20;
 
@@ -434,8 +436,10 @@ function mergeBands(
   for (const [k, c] of touch)
     if (c >= CORRIDOR_MIN) join(Math.floor(k / (total + 1)), k % (total + 1));
 
-  // End to end across a line: from each edge pixel the first other region within reach.
+  // End to end across a line: from each edge pixel the first other region within reach. The wide
+  // regions met on the way are each fragment's NEIGHBOURS across its lines.
   const meet = new Map<number, number>();
+  const wideMeet = new Map<number, number>();
   const DX = [1, -1, 0, 0, 1, 1, -1, -1];
   const DY = [0, 0, 1, -1, 1, -1, 1, -1];
   for (let i = 0; i < n; i += 1) {
@@ -456,6 +460,7 @@ function mergeBands(
     )
       continue;
     const seen = new Set<number>();
+    const wide = new Set<number>();
     for (let k = 0; k < 8; k += 1) {
       for (let s = 1; s * (k < 4 ? 1 : Math.SQRT2) <= reach; s += 1) {
         const xx = x + DX[k] * s;
@@ -465,6 +470,7 @@ function mergeBands(
         if (o === id) break;
         if (!o) continue;
         if (like(id, o)) seen.add(o);
+        else if (!isThin[o]) wide.add(o);
         break;
       }
     }
@@ -473,13 +479,36 @@ function mergeBands(
       const k = id * (total + 1) + o;
       meet.set(k, (meet.get(k) ?? 0) + 1);
     }
+    for (const o of wide) {
+      const k = id * (total + 1) + o;
+      wideMeet.set(k, (wideMeet.get(k) ?? 0) + 1);
+    }
   }
+  // A fragment's wide neighbours: those it borders over at least its own width.
+  const sides = new Map<number, Set<number>>();
+  for (const [k, c] of wideMeet) {
+    const a = Math.floor(k / (total + 1));
+    if (c < 2 * Math.max(1, radius[a])) continue;
+    const set = sides.get(a) ?? new Set<number>();
+    set.add(k % (total + 1));
+    sides.set(a, set);
+  }
+  // Two fragments end to end are one band only when they run beside one region (a ring round its
+  // hole, a strip along its body): the hems of two panels meeting at the side seam border two
+  // panels — each is its own panel's edge (card 38's side: the back's hem went to the front).
+  const beside = (a: number, b: number) => {
+    const sa = sides.get(a);
+    const sb = sides.get(b);
+    if (!sa || !sb) return true;
+    for (const o of sa) if (sb.has(o)) return true;
+    return false;
+  };
   for (const [k, c] of meet) {
     const a = Math.floor(k / (total + 1));
     const b = k % (total + 1);
     const back = meet.get(b * (total + 1) + a) ?? 0;
     const width = 2 * Math.max(radius[a], radius[b]);
-    if (Math.max(c, back) <= END_TO_END * width) join(a, b);
+    if (Math.max(c, back) <= END_TO_END * width && beside(a, b)) join(a, b);
   }
   for (let i = 0; i < n; i += 1) if (lab[i]) lab[i] = find(lab[i]);
   return thinCount;

@@ -9,6 +9,7 @@
 //      is left unlabelled;
 //   D  a BAND is one region: a strip cut in pieces by seams across it, a ring round a hole, joins
 //      up — never into the body or the hole beside it; two strips side by side along a line stay two;
+//      two panels' hems meeting at a seam stay two (v6);
 //   E  STITCHING is no wall: a dashed stitch line down a band keeps the band a region; a FREE
 //      dashed line (a layer's edge, a V) across the body still cuts it; a twin-needle hem set back
 //      from its edge is stitching too — no ladder of rungs chops the strip under it.
@@ -65,7 +66,7 @@ const share = (f, id) => {
   return n / Math.max(1, all);
 };
 
-ck(m.REGIONS_ALGO_REV === 'regions.v5', 'the cutter is regions.v5', m.REGIONS_ALGO_REV);
+ck(m.REGIONS_ALGO_REV === 'regions.v6', 'the cutter is regions.v6', m.REGIONS_ALGO_REV);
 
 /* A · the owner's front */
 {
@@ -247,6 +248,22 @@ const cut = (s) => {
     ring.every((v) => v > 0 && v === ring[0]) && id(400, 400) !== ring[0] && id(80, 80) !== ring[0],
     'D3 a ring round a hole, cut by seams, is one region — not the hole, not the body',
     `ring ${ring.join('/')} · hole ${id(400, 400)} · body ${id(80, 80)}`,
+  );
+}
+// D4 · two panels side by side (a seam down the middle) over one hem strip: the strip's halves
+// border two panels — each is its own panel's hem, never joined across the seam.
+{
+  const s = sheet();
+  s.outline();
+  s.seg(400, 40, 400, 760, 1);
+  s.seg(40, 738, 760, 738, 1);
+  const { id } = cut(s);
+  const l = id(200, 749);
+  const r = id(600, 749);
+  ck(
+    l > 0 && r > 0 && l !== r && l !== id(200, 400) && r !== id(600, 400),
+    'D4 the hems of two panels meeting at a seam stay two',
+    `hem ${l} / ${r} · panels ${id(200, 400)} / ${id(600, 400)}`,
   );
 }
 // E1 · a dashed stitch line down a band: the band stays a region (no ladder of rungs).

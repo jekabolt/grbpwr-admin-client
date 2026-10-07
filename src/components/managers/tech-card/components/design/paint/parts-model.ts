@@ -51,6 +51,7 @@ const PAL: [number, number, number][] = [
  * `parts.f6` (M5, owner 06.10): an opening is never cloth — the labeller no longer gives a hole to
  * the part «seen through» it, `fixBands` never makes a «· inside»; a side cut into ONE region is
  * named too; a region the labeller left out is shown as an error (`unassignedRegion`).
+ * (regions.v6 renumbers the regions: the f6 rows of v5 are neither applied nor reused.)
  */
 export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f6`;
 

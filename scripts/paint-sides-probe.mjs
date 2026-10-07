@@ -58,7 +58,7 @@ const keys = new Map([
 const names = (p) => p.groups.map((x) => `${x.label}[${x.key}]:${x.regions.join(',')}`).join(' | ');
 
 ck(
-  m.PARTS_ALGO_REV.length <= 32 - '@s3.j99999'.length && m.PARTS_ALGO_REV.startsWith('regions.v5+'),
+  m.PARTS_ALGO_REV.length <= 32 - '@s3.j99999'.length && m.PARTS_ALGO_REV.startsWith('regions.v6+'),
   'parts rev fits the server cap (with the server tag)',
   m.PARTS_ALGO_REV,
 );
@@ -165,7 +165,7 @@ ck(m.PARTS_REGIONS_MIN === 1, 'f6: a side cut into one region is named, not «pe
 
 /* c9 · corrected joins re-suggest: the ask key and held parts follow the join list's rev */
 {
-  ck(m.PARTS_ALGO_REV === 'regions.v5+parts.f6', 'parts rev is v5 + f6', m.PARTS_ALGO_REV);
+  ck(m.PARTS_ALGO_REV === 'regions.v6+parts.f6', 'parts rev is v6 + f6', m.PARTS_ALGO_REV);
   const sides = [
     { view: 'front', baseMediaId: 5 },
     { view: 'back', baseMediaId: 6 },
