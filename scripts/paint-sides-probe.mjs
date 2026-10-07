@@ -307,6 +307,30 @@ ck(m.PARTS_REGIONS_MIN === 1, 'f6: a side cut into one region is named, not «pe
     m.adoptEdges(p2, two) === p2 && m.unassignedRegion(p2, 2),
     'M5: a strip along two parts stays unassigned (an error)',
   );
+  // A strip enclosed by the body (a slit, a strip round a hole) is never adopted.
+  const slit = (() => {
+    const f = mk(false, false);
+    for (let x = 30; x <= 89; x++) {
+      for (let y = 30; y <= 33; y++) f.labels[y * SW + x] = 2;
+      f.labels[29 * SW + x] = 0;
+      f.labels[34 * SW + x] = 0;
+    }
+    for (let y = 54; y < 60; y++) for (let x = 10; x < 110; x++) f.labels[y * SW + x] = 1;
+    f.labels.forEach((v, i) => {
+      if (Math.floor(i / SW) === 53 && i % SW >= 10 && i % SW < 110) f.labels[i] = 1;
+    });
+    return f;
+  })();
+  const p4 = m.partsOf(
+    { parts: [g('back body', [1]), g('unnamed', [2], 'unnamed-back')], splitNeeded: [] },
+    slit,
+    seedsOf(slit),
+    'back',
+  );
+  ck(
+    m.adoptEdges(p4, slit) === p4 && m.unassignedRegion(p4, 2),
+    'M5: an unnamed strip enclosed by the body (a slit) stays unassigned',
+  );
   const blob = mk(false, true);
   const p3 = m.partsOf(
     {

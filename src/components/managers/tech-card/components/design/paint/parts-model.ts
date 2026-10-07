@@ -915,8 +915,10 @@ const ADOPT_RIVAL = 0.5;
  * binding or band the construction lists, or else the panel whose edge it finishes»). Thin
  * (`BAND_MAX_WIDTH` of the silhouette) and long (`BAND_MIN_ELONGATION` widths); across its lines
  * (as far as two closing radii) it borders that part along `ADOPT_SHARE` of its edge and any other
- * cloth part along at most `ADOPT_RIVAL` of that. A blob, or a strip between two parts, stays
- * unassigned (an error on the canvas). Returns the same object when nothing changes.
+ * cloth part along at most `ADOPT_RIVAL` of that, and it lies on the garment's OUTER edge (borders
+ * the outside along `BAND_CONTACT`: a hem, never a slit or a strip round a hole — those may be a
+ * hole or a piece of their own). Anything else stays unassigned (an error on the canvas). Returns
+ * the same object when nothing changes.
  */
 export function adoptEdges(
   parts: ViewParts,
@@ -949,6 +951,7 @@ export function adoptEdges(
   const reach = 2 * scaledRadius(w, h, 3);
   const steps = [-1, 1, -w, w];
   const edge = new Map<number, number>();
+  const outside = new Map<number, number>();
   const touch = new Map<number, Map<number, number>>();
   for (let i = 0; i < n; i += 1) {
     const v = labels[i];
@@ -956,6 +959,7 @@ export function adoptEdges(
     const x = i % w;
     const y = (i / w) | 0;
     let isEdge = false;
+    let out = false;
     const seen = new Set<number>();
     for (let d = 0; d < 4; d += 1) {
       let j = i;
@@ -969,12 +973,16 @@ export function adoptEdges(
         else yy += 1;
         if (xx < 0 || xx >= w || yy < 0 || yy >= h) {
           if (k === 1) isEdge = true;
+          out = true;
           break;
         }
         const u = labels[j];
         if (u === v) break;
         if (k === 1) isEdge = true;
-        if (!silhouette[j]) break;
+        if (!silhouette[j]) {
+          out = true;
+          break;
+        }
         if (u) {
           const gi = cloth(u);
           if (gi >= 0) seen.add(gi);
@@ -984,6 +992,7 @@ export function adoptEdges(
     }
     if (!isEdge) continue;
     edge.set(v, (edge.get(v) ?? 0) + 1);
+    if (out) outside.set(v, (outside.get(v) ?? 0) + 1);
     let t = touch.get(v);
     if (!t) touch.set(v, (t = new Map()));
     for (const gi of seen) t.set(gi, (t.get(gi) ?? 0) + 1);
@@ -991,6 +1000,7 @@ export function adoptEdges(
   const to = new Map<number, number>();
   for (const r of strips) {
     const e = Math.max(1, edge.get(r) ?? 0);
+    if ((outside.get(r) ?? 0) / e < BAND_CONTACT) continue;
     const ranked = [...(touch.get(r) ?? [])].sort((a, b) => b[1] - a[1]);
     if (ranked.length === 0 || ranked[0][1] / e < ADOPT_SHARE) continue;
     if (ranked.length > 1 && ranked[1][1] > ADOPT_RIVAL * ranked[0][1]) continue;
