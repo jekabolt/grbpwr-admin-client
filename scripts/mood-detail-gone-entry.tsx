@@ -29,7 +29,6 @@ import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter } from 'react-router-dom';
-import { SnackBar } from 'ui/components/snackbar';
 import { TooltipProvider } from 'ui/components/tooltip';
 
 declare global {
@@ -40,7 +39,7 @@ declare global {
   }
 }
 
-const IDS = [201, 202, 203, 204, 205, 206, 207, 208, 209, 210];
+const IDS = [201, 202, 203, 204, 205, 206];
 
 const media = (id: number): common_MediaFull =>
   ({
@@ -54,7 +53,6 @@ const media = (id: number): common_MediaFull =>
   }) as unknown as common_MediaFull;
 
 type Ref = {
-  setAt?: string;
   mediaId: number;
   role: string;
   detailSlotId?: number;
@@ -77,10 +75,6 @@ const band = {
     slot(79, 'collar', false),
     slot(80, 'strap', true),
     slot(81, 'pocket', true),
-    slot(82, 'yoke', true),
-    slot(83, 'tab', true),
-    slot(84, 'loop', true),
-    slot(85, 'vent', true),
   ],
   runs: [],
   totalRuns: 0,
@@ -133,27 +127,9 @@ const band = {
       labelSource: 'human',
       ordinal: 6,
     },
-    ...[207, 208, 209, 210].map((mediaId, n) => ({
-      mediaId,
-      role: 'detail',
-      detailSlotId: 82 + n,
-      labelState: 'ok',
-      labelSource: 'human',
-      ordinal: 7 + n,
-    })),
   ] as Ref[],
 };
 const refs = () => band.references;
-/** The stand's controls (see the probe). */
-const w = window as unknown as {
-  __bodies?: unknown[];
-  __flushAnswer: string;
-  __flushHold?: Promise<void> | null;
-  __raceArm?: ((b: typeof band) => void) | null;
-  __raceOnce?: ((b: typeof band) => void) | null;
-  __raceAt: number;
-  __form?: unknown;
-};
 /** The store's `dropOrphanModelSlots`: a model's detail with no plate and no travelling label goes. */
 const dropOrphans = () => {
   band.bench = band.bench.filter(
@@ -161,16 +137,7 @@ const dropOrphans = () => {
   );
 };
 window.__api = {
-  // A race armed at the flush (`__raceArm`) lands on the SECOND band read after it: the cleanup's
-  // decision (the first) sees the old state, its re-check before the write (the second) the new one.
-  GetDesignBand: () => {
-    const race = w.__raceOnce;
-    if (race && --w.__raceAt === 0) {
-      w.__raceOnce = null;
-      race(band);
-    }
-    return structuredClone(band) as unknown as GetDesignBandResponse;
-  },
+  GetDesignBand: () => structuredClone(band) as unknown as GetDesignBandResponse,
   SetDesignReferenceRole: (req) => {
     const r = req as { mediaId: number; role: string; detailSlotId?: number; ordinal: number };
     const at = refs().findIndex((x) => x.mediaId === r.mediaId);
@@ -196,19 +163,13 @@ window.__sync = (board) => {
 };
 
 /** The card's autosave: the probe says how the next flush ends; every flush is logged in order. */
-w.__flushAnswer = 'ok';
+(window as unknown as { __flushAnswer: string }).__flushAnswer = 'ok';
 const autosave: AutosaveApi = {
   ...AUTOSAVE_OFF,
   status: 'idle',
   flush: async () => {
+    const w = window as unknown as { __bodies?: unknown[]; __flushAnswer: string };
     (w.__bodies = w.__bodies ?? []).push({ name: 'flush', body: w.__flushAnswer });
-    if (w.__raceArm) {
-      w.__raceOnce = w.__raceArm;
-      w.__raceAt = 2;
-      w.__raceArm = null;
-    }
-    // `__flushHold`: the probe keeps the save (and so the cleanup's lock) open until it resolves.
-    if (w.__flushHold) await w.__flushHold;
     return w.__flushAnswer as FlushResult;
   },
 };
@@ -227,7 +188,6 @@ function Card() {
       })),
     } as never,
   });
-  w.__form = form;
   return (
     <FormProvider {...form}>
       <form>
@@ -269,7 +229,6 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                   <div data-probe-ready='' style={{ width: 1100, padding: 32 }}>
                     <Card />
                   </div>
-                  <SnackBar />
                 </PickModeProvider>
               </PictureGalleryProvider>
             </DesignCapabilityProvider>

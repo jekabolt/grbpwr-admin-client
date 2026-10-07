@@ -74,13 +74,6 @@ export type FlatInputState = {
   refused: FlushResult | 'released' | 'stopped' | null;
   clearing: boolean;
   rewriting: number;
-  /**
-   * Q3 (Codex 07.10): the moodboard is tidying a model's detail its last photo just left — it checks
-   * the board and the band and clears the orphaned person labels. Board rows, purposes, labels and
-   * detail names are not edited meanwhile (`rowsWritable`), so the cleanup never clears a label a
-   * person has just set.
-   */
-  tidying: number;
   wordsHeld: number;
   serverRefusal: RunRefusal | null;
   ask: FlatAsk | null;
@@ -93,7 +86,6 @@ const FLAT_INPUT_IDLE: FlatInputState = {
   refused: null,
   clearing: false,
   rewriting: 0,
-  tidying: 0,
   wordsHeld: 0,
   serverRefusal: null,
   ask: null,
@@ -109,7 +101,7 @@ export function readFlatInput(card: number): FlatInputState {
 
 /** Вход занят: идёт GENERATE, CLEAR или вход переписывается. GENERATE ждёт, CLEAR и рекол отказываются. */
 export function flatInputBusy(state: FlatInputState): boolean {
-  return state.run !== null || state.clearing || state.rewriting > 0 || state.tidying > 0;
+  return state.run !== null || state.clearing || state.rewriting > 0;
 }
 
 /**
@@ -117,28 +109,7 @@ export function flatInputBusy(state: FlatInputState): boolean {
  * Другое удержание строк — не помеха: две правки ролей подряд не спорят, спорят правка и прогон.
  */
 export function rowsWritable(state: FlatInputState): boolean {
-  return state.run === null && !state.clearing && state.tidying === 0;
-}
-
-/**
- * The refusal of a board / input edit while rows are not writable, in one place: a run being started
- * or cleared says so; a detail being tidied (Q3) says to try again in a moment. `what` — the edit.
- */
-export function rowsBusySay(state: FlatInputState, what: string): string {
-  if (state.run === null && !state.clearing && state.tidying > 0)
-    return `an emptied detail is being tidied — ${what} in a moment`;
-  return `a flat run is being started — ${what} once it has started`;
-}
-
-/** Q3 · the board tidies an emptied model detail: rows are not writable until the release. */
-export function holdBoardTidy(card: number): () => void {
-  patchFlatInput(card, { tidying: readFlatInput(card).tidying + 1 });
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    patchFlatInput(card, { tidying: Math.max(0, readFlatInput(card).tidying - 1) });
-  };
+  return state.run === null && !state.clearing;
 }
 
 /** Слова заперты: прогон, CLEAR или рекол, который пишет слова (ревью раунда 4, MIN-1). */
@@ -154,7 +125,6 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.refused === prev.refused &&
     next.clearing === prev.clearing &&
     next.rewriting === prev.rewriting &&
-    next.tidying === prev.tidying &&
     next.wordsHeld === prev.wordsHeld &&
     next.serverRefusal === prev.serverRefusal &&
     next.ask === prev.ask &&
@@ -167,7 +137,6 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.refused === null &&
     !next.clearing &&
     next.rewriting === 0 &&
-    next.tidying === 0 &&
     next.wordsHeld === 0 &&
     next.serverRefusal === null &&
     next.ask === null &&

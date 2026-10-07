@@ -36,13 +36,7 @@ import {
 } from './board-labels';
 import { useBoardPick, useBoardProposals } from './board-pick';
 import { serverSpeaksDesign } from './capability';
-import {
-  holdFlatInput,
-  readFlatInput,
-  rowsBusySay,
-  rowsWritable,
-  setFlatReading,
-} from './flat-input';
+import { holdFlatInput, readFlatInput, rowsWritable, setFlatReading } from './flat-input';
 import { flatRunParams, type FlatSelection } from './flat-run-row';
 import { targetSlotId } from './flat-route';
 import { HELD_WORD } from './modals/what-model-gets-modal';
@@ -249,7 +243,7 @@ function useInputHold(techCardId: number) {
     async (mediaIds: number[], held: boolean): Promise<number[]> => {
       const card = techCardId;
       if (!rowsWritable(readFlatInput(card))) {
-        showMessage(rowsBusySay(readFlatInput(card), 'change the input'), 'error');
+        showMessage('a flat run is being started — change the input once it has started', 'error');
         return [];
       }
       const release = holdFlatInput(card);
@@ -372,7 +366,7 @@ export function FlatInputPictures({
   const onAdd = (media: common_MediaFull[]) => {
     const card = techCardId;
     if (!rowsWritable(readFlatInput(card))) {
-      showMessage(rowsBusySay(readFlatInput(card), 'add the picture'), 'error');
+      showMessage('a flat run is being started — add the picture once it has started', 'error');
       return;
     }
     const plan = planUnifiedAdd({
@@ -701,7 +695,10 @@ function DetailGroup({
         onCommit: (next: string) => {
           const card = shared.techCardId;
           if (!rowsWritable(readFlatInput(card))) {
-            showMessage(rowsBusySay(readFlatInput(card), 'rename the detail'), 'error');
+            showMessage(
+              'a flat run is being started — rename the detail once it has started',
+              'error',
+            );
             return;
           }
           const release = holdFlatInput(card);

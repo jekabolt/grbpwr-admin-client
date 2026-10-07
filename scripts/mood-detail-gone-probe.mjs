@@ -13,13 +13,6 @@
 //
 //   node scripts/mood-detail-gone-probe.mjs --mutate=noq3        → снятие не трогает деталь: КРАСНЫЙ
 //   node scripts/mood-detail-gone-probe.mjs --mutate=noflushgate → чистка до сохранения: КРАСНЫЙ
-//   · (Codex re-review) пока идёт чистка, доска заперта (выбор роли — отказ словами); перед КАЖДОЙ
-//     записью — сверка с живым: фото вернули на доску, деталь переименовали, ярлык сменился — записи нет.
-//
-//   node scripts/mood-detail-gone-probe.mjs --mutate=nolock        → доска не заперта: КРАСНЫЙ
-//   node scripts/mood-detail-gone-probe.mjs --mutate=noboardcheck  → вернули на доску — затёрто: КРАСНЫЙ
-//   node scripts/mood-detail-gone-probe.mjs --mutate=norenamecheck → переименовали — затёрто: КРАСНЫЙ
-//   node scripts/mood-detail-gone-probe.mjs --mutate=nolabelcheck  → ярлык сменился — затёрт: КРАСНЫЙ
 //   node scripts/mood-detail-gone-probe.mjs --mutate=allrefs     → «остальные фото» по всем ярлыкам: КРАСНЫЙ
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -34,38 +27,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const root = resolve(HERE, '..');
 
 const MUTATIONS = {
-  // Codex re-review 07.10: the cleanup does not lock board edits.
-  nolock: [
-    {
-      file: /design\/flat-input\.ts$/,
-      from: '  return state.run === null && !state.clearing && state.tidying === 0;',
-      to: '  return state.run === null && !state.clearing;',
-    },
-  ],
-  // … the write does not re-check that the picture is still off the LIVE board.
-  noboardcheck: [
-    {
-      file: /design\/mood-board\.tsx$/,
-      from: '        const boardNow = onBoard();\n',
-      to: '        const boardNow = new Set<number>();\n',
-    },
-  ],
-  // … nor that the slot is still the same unnamed model detail.
-  norenamecheck: [
-    {
-      file: /design\/mood-board\.tsx$/,
-      from: "        if (!slotNow?.madeByModel || (slotNow.pictureId ?? 0) > 0) return;\n        if ((slotNow.detailName ?? '').trim() !== first.slotName) return;\n",
-      to: '',
-    },
-  ],
-  // … nor that the label is the very one the decision saw.
-  nolabelcheck: [
-    {
-      file: /design\/mood-board\.tsx$/,
-      from: '        if (labelSig(live) !== sig) return;\n',
-      to: '',
-    },
-  ],
   noq3: [
     {
       file: /design\/mood-board\.tsx$/,
@@ -85,8 +46,8 @@ const MUTATIONS = {
   allrefs: [
     {
       file: /design\/mood-board\.tsx$/,
-      from: 'if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return null;',
-      to: 'if (pointing.some((r) => (r.mediaId ?? 0) !== mediaId && !isHeldLabel(r))) return null;',
+      from: 'if (pointing.some((r) => board.has(r.mediaId ?? 0) && !isHeldLabel(r))) return;',
+      to: 'if (pointing.some((r) => (r.mediaId ?? 0) !== mediaId && !isHeldLabel(r))) return;',
     },
   ],
 };
@@ -273,9 +234,8 @@ try {
 
   console.log('\nCodex #3 · the removal did not save: nothing is touched');
   ck(
-    JSON.stringify(await page.evaluate(() => window.__cachedBench())) ===
-      '[77,78,79,80,81,82,83,84,85]',
-    'nine details to begin with',
+    JSON.stringify(await page.evaluate(() => window.__cachedBench())) === '[77,78,79,80,81]',
+    'five details to begin with',
   );
   await page.evaluate(() => (window.__flushAnswer = 'error'));
   await takeOff(206);
@@ -338,83 +298,6 @@ try {
     !b2?.includes(78),
     '«cuff» is gone once the sync lands: the band is re-read',
     JSON.stringify(b2),
-  );
-
-  console.log('\nCodex re-review · the board is locked while the cleanup runs');
-  const formRole = (id) =>
-    page.evaluate(
-      (m) => window.__form.getValues('moodboardMedia').find((i) => i.mediaId === m)?.role ?? null,
-      id,
-    );
-  await page.evaluate(() => {
-    window.__flushHold = new Promise((r) => (window.__releaseFlush = r));
-  });
-  const k5 = (await roleWrites()).length;
-  await takeOff(210);
-  await page.waitForTimeout(300);
-  await page.hover('[data-rail-view="203"]');
-  await page.click('[data-menu="role:203"]');
-  await page.click('[role="listbox"] [data-menu-item="material"]').catch(() => {});
-  await page.waitForTimeout(300);
-  const said = await page.evaluate(() =>
-    document.body.innerText.includes('an emptied detail is being tidied'),
-  );
-  ck(
-    (await formRole(203)) === 'detail' && said,
-    'a pick on another tile during the cleanup is refused, in words',
-    JSON.stringify({ role: await formRole(203), said }),
-  );
-  await page.keyboard.press('Escape');
-  await page.mouse.move(5, 5);
-  await page.evaluate(() => {
-    window.__flushHold = null;
-    window.__releaseFlush();
-  });
-  const b5 = await benchWithin(4000, (b) => !b?.includes(85));
-  ck(
-    !b5?.includes(85) && (await writesSince(k5)).some((w) => w.mediaId === 210),
-    '… and the cleanup finishes once the save answers',
-    JSON.stringify(b5),
-  );
-
-  console.log('\nCodex re-review · each write re-checks the live state');
-  const raced = async (id, src) => {
-    const k = (await roleWrites()).length;
-    await page.evaluate((code) => {
-      window.__raceArm = new Function('band', code);
-    }, src);
-    await takeOff(id);
-    await page.waitForTimeout(1500);
-    return (await writesSince(k)).filter((w) => w.mediaId === id);
-  };
-  const putBack = await raced(
-    207,
-    `const f = window.__form;
-     f.setValue('moodboardMedia', [...f.getValues('moodboardMedia'),
-       { mediaId: 207, kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD', caption: '', role: 'detail' }]);`,
-  );
-  ck(
-    putBack.length === 0,
-    'put back on the board during the cleanup: its label is not cleared',
-    JSON.stringify(putBack),
-  );
-  const renamed = await raced(
-    208,
-    `const s = band.bench.find((x) => x.id === 83); s.detailName = 'tab strap'; s.madeByModel = false;`,
-  );
-  ck(
-    renamed.length === 0,
-    'the detail renamed by a person meanwhile: its label is not cleared',
-    JSON.stringify(renamed),
-  );
-  const relabelled = await raced(
-    209,
-    `const r = band.references.find((x) => x.mediaId === 209); r.setAt = '2026-10-07T12:00:00Z';`,
-  );
-  ck(
-    relabelled.length === 0,
-    'the label set again meanwhile: the newer label is not cleared',
-    JSON.stringify(relabelled),
   );
 
   console.log('\nQ3 · a person’s detail stays');
