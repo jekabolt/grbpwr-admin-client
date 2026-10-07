@@ -1,4 +1,9 @@
-import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  useIsMutating,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -306,6 +311,15 @@ export function useStartDesignRun(
         START_RUN_DEADLINE_MS,
         () => accepted(input),
       ),
+    /* A REFUSAL IS AN ANSWER, NOT A HICCUP (M7b, 07.10 — the rule FLAT's `useStartRun` took in M8).
+       The app retries every mutation once (`src/index.tsx`), and while the tab is hidden react-query
+       holds that retry until the tab shows again: a 4xx refusal — a missing input, a busy card, the
+       day's money spent — could come back minutes later as a PAID start the person was never told
+       about, from a tab nobody was looking at. A definitive refusal is never retried; an answer that
+       may not have been one (`isDefinitiveRefusal` false: no status, the deadline, 408, 499, 5xx)
+       keeps the app's own policy (once) — it carries the same client_request_id, so the server hands
+       back the run if it was booked. */
+    retry: (failures, error) => !isDefinitiveRefusal(error) && appRetries(qc, failures, error),
     onSuccess: (_answer: unknown, input) => accepted(input),
     onError: (error: unknown, input) => {
       const definitive = isDefinitiveRefusal(error);
@@ -396,6 +410,18 @@ export function useStartDesignRun(
     refusal,
     dismissRefusal,
   };
+}
+
+/**
+ * The app's own retry policy for mutations (`src/index.tsx`: once), asked for one failure — what the
+ * start would do without a `retry` of its own. A number is a count, a function is asked, `true` is
+ * react-query's «for ever», anything else none.
+ */
+function appRetries(qc: QueryClient, failures: number, error: unknown): boolean {
+  const policy = qc.getDefaultOptions().mutations?.retry;
+  if (typeof policy === 'function') return policy(failures, error as Error);
+  if (typeof policy === 'number') return failures < policy;
+  return policy === true;
 }
 
 /**
