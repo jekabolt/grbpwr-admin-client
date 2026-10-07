@@ -941,6 +941,33 @@ try {
     JSON.stringify({ back, ids: await viewsIds() }),
   );
 
+  // «✕ not a detail» holds EVERY photo of the model's detail, not only the ones its press sends.
+  await page.evaluate(async () => {
+    await window.__label(808, {
+      role: 'detail',
+      detailSlotId: 140,
+      labelState: 'ok',
+      labelSource: 'model_strong',
+    });
+  });
+  await page.waitForTimeout(400);
+  const heldCalls2 = (await calls('SetDesignReferenceHeld')).length;
+  await page.hover('[data-flat-pictures-group="d:140"]');
+  await page.click('[data-not-a-detail="d:140"]');
+  await page.waitForTimeout(900);
+  const nd = (await calls('SetDesignReferenceHeld')).slice(heldCalls2);
+  ck(
+    JSON.stringify(nd.map((c) => c.mediaId).sort()) === '[802,808]' && nd.every((c) => c.held),
+    '«✕ not a detail» takes every photo of the model’s detail out of the prompt',
+    JSON.stringify(nd),
+  );
+  ck(
+    !!(await page.$('[data-flat-removed-group="d:140"] [data-flat-removed-undo]')),
+    '… with its undo',
+  );
+  await page.click('[data-flat-removed-group="d:140"] [data-flat-removed-undo]');
+  await page.waitForTimeout(900);
+
   console.log('\nM15 · the same picture again, refusals');
   const rows0 = (await page.evaluate(() => window.__picturesForm.getValues('moodboardMedia')))
     .length;
@@ -1044,7 +1071,7 @@ try {
           createdAt: '2026-10-06T12:00:00Z',
           inputs: { garmentNote: 'garment: tank top\nslim body' },
         },
-        '',
+        null,
       ],
       [
         {
@@ -1052,7 +1079,7 @@ try {
           createdAt: '2026-10-07T12:00:00Z',
           inputs: { garmentNote: 'garment: tank top\nslim body' },
         },
-        '',
+        null,
       ],
       [
         {
@@ -1061,7 +1088,7 @@ try {
           createdAt: '2026-10-07T12:00:00Z',
           inputs: { garmentNote: 'garment: tank top\nx' },
         },
-        '',
+        null,
       ],
       [
         {
@@ -1077,7 +1104,7 @@ try {
   );
   ck(
     recall.length === 0,
-    'only a flat run’s own lines, only since M14, never a rerun’s or a render’s',
+    'only a flat run’s own lines (none → clear), only since M14; a rerun’s or a render’s say nothing',
     recall.join(' | '),
   );
 

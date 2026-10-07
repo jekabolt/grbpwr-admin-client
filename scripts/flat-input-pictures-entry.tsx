@@ -222,6 +222,23 @@ window.__previewAnswer = (req) => {
         ...(band.references ?? [])
           .filter((r) => r.labelState === 'held')
           .map((r) => ({ mediaId: r.mediaId, reason: 'held', role: r.role })),
+        // A picture just dropped and not yet labelled: the server is still reading it (or it has no
+        // purpose yet).
+        ...(
+          (window.__picturesForm?.getValues('moodboardMedia') ?? []) as {
+            mediaId: number;
+            role?: string;
+          }[]
+        )
+          .filter(
+            (row) =>
+              row.mediaId >= 800 && !(band.references ?? []).some((r) => r.mediaId === row.mediaId),
+          )
+          .map((row) => ({
+            mediaId: row.mediaId,
+            reason: row.role ? 'pending' : 'unmarked',
+            role: '',
+          })),
         { mediaId: 124, reason: 'older', role: 'front' },
         { mediaId: 211, reason: 'detail', role: 'detail' },
         { mediaId: 916, reason: 'mood', role: '' },

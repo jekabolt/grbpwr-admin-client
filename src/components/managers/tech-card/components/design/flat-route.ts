@@ -69,7 +69,9 @@ export function flatHumanWords(human: string): string {
  * THE PERSON'S LINES A FLAT RUN WAS GIVEN — what `recall ▸` puts back into FLAT › WORDS (`flatWords`).
  *
  * A flat run freezes `garmentNote` = the «garment: class» line, then the person's own lines (M14). Only
- * those lines come back: the class line follows the card's category and is never typed. '' for:
+ * those lines come back: the class line follows the card's category and is never typed. '' — the run
+ * was given no lines of the person's (recall then clears WORDS, Codex M15). null — the run says
+ * nothing about WORDS:
  *   · another kind — a render run's note IS the description, model-written prose that must not land
  *     in a field whose every line travels as the person's word;
  *   · a flat run older than M14 on beta (FLAT_WORDS_SINCE) — its lines after the class line were the
@@ -84,10 +86,10 @@ export function runFlatWords(run: {
   createdAt?: string;
   rerunOf?: number;
   inputs?: { garmentNote?: string };
-}): string {
-  if ((run.kind ?? '') !== 'flat' || (run.rerunOf ?? 0) > 0) return '';
+}): string | null {
+  if ((run.kind ?? '') !== 'flat' || (run.rerunOf ?? 0) > 0) return null;
   const at = Date.parse(run.createdAt ?? '');
-  if (!(at >= FLAT_WORDS_SINCE)) return '';
+  if (!(at >= FLAT_WORDS_SINCE)) return null;
   const lines = (run.inputs?.garmentNote ?? '').split('\n');
   const first = lines.findIndex((l) => l.trim() !== '');
   const rest =

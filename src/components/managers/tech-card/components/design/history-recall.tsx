@@ -473,8 +473,10 @@ function planFlat(input: {
   /* THE RUN'S WORDS GO BACK WHERE THEY CAME FROM (M15): a flat run was given «garment: class» + the
      person's flat words, so only those lines return — into FLAT › WORDS, never into the description
      (the class line follows the category; a render run's note is model-written prose). */
-  const words = input.mode === 'input' ? runFlatWords(input.run) : '';
+  const words = input.mode === 'input' ? runFlatWords(input.run) : null;
   const current = flatHumanWords(input.flatWords);
+  // The run's lines differ from WORDS now — including «it was given none» over typed lines.
+  const wordsChange = words !== null && words !== current;
 
   return {
     add,
@@ -482,10 +484,11 @@ function planFlat(input: {
     refused,
     gone,
     words,
+    wordsChange,
     /** Строки WORDS, которые слова прогона заменят. Пусто — заменять нечего, и вопрос об этом не стоит. */
-    replaces: words && words !== current ? current : '',
+    replaces: wordsChange ? current : '',
     /** Жест, который ничего не сделает, называется так вслух, а не рисуется дверью. */
-    empty: !add.length && !(words && words !== current),
+    empty: !add.length && !wordsChange,
   };
 }
 
@@ -695,7 +698,7 @@ export function RecallDoors({
           )
         : inputTarget === 'render'
           ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
-          : (run.inputs?.refs ?? []).length > 0 || !!runFlatWords(run);
+          : (run.inputs?.refs ?? []).length > 0 || runFlatWords(run) !== null;
   /**
    * ═══ ПРОГОН 3D ДВЕРИ РЕЗУЛЬТАТА НЕ ИМЕЕТ ВОВСЕ (J-11) ═══════════════════════════════════════
    *
@@ -894,8 +897,10 @@ function FlatQuestion({
 
       {plan.replaces && (
         <Text size='control' component='p'>
-          The flat’s words are replaced with the lines {handle} was given. The lines you have now
-          are not kept anywhere — copy them first if you need them.
+          {plan.words
+            ? `The flat’s words are replaced with the lines ${handle} was given.`
+            : `The flat’s words are cleared — ${handle} was given none.`}{' '}
+          The lines you have now are not kept anywhere — copy them first if you need them.
         </Text>
       )}
 
@@ -1067,7 +1072,7 @@ export function RecalledRunPrompt({
     /* ПОД УДЕРЖАНИЕМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): ярлыки ставятся по одной, и GENERATE, нажатый
        посреди, взял бы доску наполовину. Слова запираются, только если рекол их пишет (MIN-1). */
     const card = techCardId;
-    const release = holdFlatInput(card, { words: !!plan.words });
+    const release = holdFlatInput(card, { words: plan.wordsChange });
     void (async () => {
       try {
         const said: string[] = [];
@@ -1108,8 +1113,8 @@ export function RecalledRunPrompt({
 
         /* ── слова ──
            Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется. */
-        if (plan.words) {
-          form.setValue('flatWords', plan.words, { shouldDirty: true });
+        if (plan.wordsChange) {
+          form.setValue('flatWords', plan.words ?? '', { shouldDirty: true });
         }
 
         /* ── ярлыки принятых картинок ──
@@ -1157,7 +1162,12 @@ export function RecalledRunPrompt({
           said.push(
             `${roleFailed} could not be given ${roleFailed === 1 ? 'its view' : 'their views'} — set ${roleFailed === 1 ? 'it' : 'them'} on the tile`,
           );
-        if (plan.words) said.push('the flat’s words were taken from the run');
+        if (plan.wordsChange)
+          said.push(
+            plan.words
+              ? 'the flat’s words were taken from the run'
+              : 'the flat’s words were cleared — the run was given none',
+          );
         // Итог — только над карточкой, которая на экране (ревью раунда 4, MIN-5).
         if (cardOnScreen(card)) {
           showMessage(said.join(' · '), roleFailed || result.refusal ? 'error' : 'success');

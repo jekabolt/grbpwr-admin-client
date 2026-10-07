@@ -725,7 +725,7 @@ function DetailGroup({
           )}
         </span>
       }
-      notADetail={byModelSlot}
+      notADetail={byModelSlot ? id : 0}
       detailName={name}
       params={params}
       on={on}
@@ -743,7 +743,7 @@ function PressGroup({
   groupKey,
   label,
   heading,
-  notADetail = false,
+  notADetail = 0,
   detailName = 'detail',
   params,
   stamp,
@@ -762,8 +762,11 @@ function PressGroup({
   label: string;
   /** The group's name when it is more than a word (a detail's renameable name). */
   heading?: ReactNode;
-  /** A model's detail: `✕ not a detail` on hover takes all its photos out of the prompt. */
-  notADetail?: boolean;
+  /**
+   * A model's detail (its slot id): `✕ not a detail` on hover takes ALL its photos out of the prompt —
+   * every labelled one, not only the newest four the press sends (Codex M15), so the slot goes.
+   */
+  notADetail?: number;
   detailName?: string;
   params: common_DesignRunParams;
   on: boolean;
@@ -871,7 +874,7 @@ function PressGroup({
         </Text>
         {/* ✕ У ИМЕНИ ДЕТАЛИ МОДЕЛИ (109 §3): «не деталь» — все её фото снимаются из промпта, слот
             уходит сам (Q3). Тихий: на ховер группы и на фокус. */}
-        {notADetail && canWrite && refs.length > 0 && (
+        {notADetail > 0 && canWrite && refs.length > 0 && (
           <button
             type='button'
             data-not-a-detail={groupKey}
@@ -880,7 +883,15 @@ function PressGroup({
             onClick={() =>
               onTake(
                 groupKey,
-                refs.map((r) => r.mediaId ?? 0),
+                [...labels.values()]
+                  .filter(
+                    (r) =>
+                      (r.role ?? '').trim() === 'detail' &&
+                      (r.detailSlotId ?? 0) === notADetail &&
+                      !isHeld(r) &&
+                      (r.mediaId ?? 0) > 0,
+                  )
+                  .map((r) => r.mediaId as number),
               )
             }
             className={cn(

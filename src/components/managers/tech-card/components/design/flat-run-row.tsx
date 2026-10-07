@@ -336,7 +336,8 @@ const READING_POLL_MS = 1_500;
  * picture the person just put in. The press waits ≤ READING_WAIT_MS (`reading…`) for the pictures the
  * input published (`readFlatReading`), re-reading the band; a model's proposal for a picture with no
  * purpose is applied on the way (the board, which applies it elsewhere, is not mounted here) and
- * saved, so the server's next read settles it. Returns how many were still being read when it went,
+ * saved, so the server's next read settles it. Returns the pictures it waited for and those still
+ * being read when it went (what is actually left out is said by the press's own preview, Codex M15),
  * or `null` when the save of a proposal failed (nothing is started).
  */
 async function waitForReading(opts: {
@@ -344,10 +345,10 @@ async function waitForReading(opts: {
   card: number;
   form: ReturnType<typeof useFormContext<TechCardFormData>>;
   flush: () => Promise<FlushResult>;
-}): Promise<number | null> {
+}): Promise<{ waited: number[]; left: number[] } | null> {
   const { qc, card, form } = opts;
   const ids = readFlatReading(card);
-  if (!ids.length) return 0;
+  if (!ids.length) return { waited: [], left: [] };
   patchFlatInput(card, { run: 'reading' });
   const until = Date.now() + READING_WAIT_MS;
   for (;;) {
@@ -355,7 +356,7 @@ async function waitForReading(opts: {
     try {
       band = await rereadBand(qc, card);
     } catch {
-      return ids.length;
+      return { waited: ids, left: ids };
     }
     const labels = labelsByMedia(band.references);
     const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
@@ -384,7 +385,7 @@ async function waitForReading(opts: {
     const left = ids.filter(
       (id) => purposeOf.has(id) && labelWaiting(purposeOf.get(id) ?? '', labels.get(id)),
     );
-    if (!left.length || Date.now() >= until) return left.length;
+    if (!left.length || Date.now() >= until) return { waited: ids, left };
     await new Promise((r) => window.setTimeout(r, READING_POLL_MS));
   }
 }
@@ -703,17 +704,17 @@ export function FlatRunRow({
       }
       /* M15 Q2: pictures just dropped into the input are given ≤15 s to be read; what is still
          being read after that stays out of this run, and the row says so. */
-      const leftOut = await waitForReading({
+      const reading = await waitForReading({
         qc,
         card,
         form,
         flush: () => autosave.flush('flat'),
       });
-      if (leftOut === null) {
+      if (reading === null) {
         patchFlatInput(card, { refused: 'error' });
         return;
       }
-      patchFlatInput(card, { run: 'saving', leftOut });
+      patchFlatInput(card, { run: 'saving' });
       if (cardNow.current !== card || !cardOnScreen(card)) return;
       let freshBand: GetDesignBandResponse;
       try {
@@ -758,14 +759,24 @@ export function FlatRunRow({
          other failure stops the press: nothing was started (Codex Ф3). */
       let preview: common_DesignInputSnapshot | null = null;
       try {
-        preview =
-          (
-            await adminService.PreviewDesignRunInputs({
-              techCardId: card,
-              kind: 'flat',
-              params,
-            })
-          ).inputs ?? null;
+        const answer = await adminService.PreviewDesignRunInputs({
+          techCardId: card,
+          kind: 'flat',
+          params,
+        });
+        preview = answer.inputs ?? null;
+        /* WHAT IS LEFT OUT IS THE SERVER'S WORD (Codex M15): of the pictures the press waited for,
+           those this very snapshot does not send and holds as still being read (or with no purpose
+           yet) — a label that settled after the wait is not «left out». */
+        const sent = new Set((preview?.refs ?? []).map((r) => r.mediaId ?? 0));
+        const stillRead = new Set(
+          (answer.held ?? [])
+            .filter((h) => ['pending', 'unmarked'].includes((h.reason ?? '').trim()))
+            .map((h) => h.mediaId ?? 0),
+        );
+        patchFlatInput(card, {
+          leftOut: reading.waited.filter((id) => !sent.has(id) && stillRead.has(id)).length,
+        });
       } catch (e) {
         if (!isUnimplemented(e)) {
           if (cardOnScreen(card)) {
@@ -776,6 +787,8 @@ export function FlatRunRow({
           }
           return;
         }
+        // A server without the preview: the wait's own count.
+        patchFlatInput(card, { leftOut: reading.left.length });
       }
       if (flatRunInFlight(freshBand)) {
         if (cardOnScreen(card)) {
