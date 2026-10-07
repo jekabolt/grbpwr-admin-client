@@ -246,8 +246,8 @@ function HardwareTile({
   );
 }
 
-/** R9 fix 6 · a palette tile's caption: the full name on up to two lines (cloth and hardware alike). */
-const TILE_CAP = 'line-clamp-2 w-full break-words uppercase';
+/** R9 fix 6 · a palette tile's caption: the full name and its count, on as many lines as the name needs (a clamp hid `· 2` behind «FRONT CLOSURE BUTTON»). */
+const TILE_CAP = 'w-full break-words uppercase';
 
 const TILE_BTN =
   'group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
