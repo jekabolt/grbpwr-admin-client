@@ -6,31 +6,38 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
+import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
 import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
+import { createReady } from '../create-ready';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
 import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { Workbench } from './generation';
 import type { DesignKind } from './bench-kinds';
-import { ChainRail, useChainCtx } from './chain-rail';
+import { ChainRail, useChainCtx, useMoodMinimumGate } from './chain-rail';
 import {
   PLAYGROUND_WF_PARAM,
   addressedStep,
   defaultStep,
   kindOfStep,
   legacyStep,
+  openGateDoor,
+  stepDone,
   stepOfField,
   stepOfKind,
   threedStepRetired,
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
+import { RENDER_MIN_VIEWS, benchSides, type Gate } from './render/model';
+import { StepFooter } from './step-footer';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
+import { useGuideFace } from './guide-face';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import {
@@ -107,8 +114,23 @@ export function StudioTab({
   constructionAspects,
   navTo,
   labelMedia,
+  guided = false,
+  onCreate,
 }: {
   techCardId?: number;
+  /**
+   * A card born from CREATE NEW and still on its guide (server flag `guided`, onboarding Q4). The
+   * footer of FLAT then offers `skip → fabric render ›` beside `go to materials ›` (Q6). Legacy
+   * cards: `false`, and the studio is exactly what it was, footers aside.
+   */
+  guided?: boolean;
+  /**
+   * Creates the card that does not exist yet and resolves to its id (`undefined` = not created —
+   * refused, or a field error is on screen). The owner of the form (`components/index.tsx`) holds
+   * the CREATE path, so it arrives as a prop, like `navTo`. Absent: the CARD DETAILS footer of an
+   * unsaved card stays dead with its reason — nothing here creates a card on its own.
+   */
+  onCreate?: () => Promise<number | undefined>;
   disabled?: boolean;
   /** The card's resolved label media (`resolvedLabelMedia`): the composition label's logo. */
   labelMedia?: common_TechCard['resolvedLabelMedia'];
@@ -351,6 +373,160 @@ export function StudioTab({
      стоит только на генеративных), так что читателей у пустой записи нет. */
   useStudioKindSwitch(kind ? techCardId ?? 0 : 0, kind ?? 'flat', goKind);
 
+  /* ═══ THE STEP FOOTER — ONE FORWARD DOOR PER STEP, DECIDED HERE (onboarding S3) ═══════════════
+     The composer knows the step and owns `goStep`, so the footer of every step is chosen in this one
+     place and drawn as the last child of that step's screen (`step-footer.tsx`). Each door is the
+     owner's: CARD DETAILS → moodboard, MOODBOARD → flats, FLAT → materials, MATERIALS → fabric
+     render, FABRIC RENDER → image to 3D, where the guide ends (Q7) — 3D and the playground keep
+     their own doors and get no footer. Each gate is the one the next step is opened by: the
+     moodboard minimum (the same sentence the flat's GENERATE refuses with), front and back on the
+     flat bench (what a fabric render is coloured over, `RENDER_MIN_VIEWS`), a render on the bench
+     (`stepDone('render')`, what 3D is built from). MATERIALS is optional and never holds anyone. */
+  const [newName, newCategoryId, newSeason, newStyleNumber] = useWatch({
+    control,
+    name: ['name', 'categoryId', 'season', 'styleNumber'],
+  });
+  const moodMinimum = useMoodMinimumGate();
+  /* THE GUIDED FACE OF STEP 1 (onboarding S5): one reading for the whole step — the board, its quiz
+     and DESCRIPTION get it as a prop, the lower blocks and the footer are hidden by it here. A viewer
+     or a frozen card cannot walk the guide, so it gets the whole step, as a legacy card does. */
+  const guide = useGuideFace(techCardId, guided && canWriteCard && !readOnly);
+  const flatsMissing = bandless
+    ? [...RENDER_MIN_VIEWS]
+    : benchSides(band)
+        .filter((s) => RENDER_MIN_VIEWS.includes(s.view) && !s.picture)
+        .map((s) => s.view);
+  const flatGate: Gate = flatsMissing.length
+    ? {
+        ok: false,
+        reason: `${flatsMissing.join(' and ')} flat${flatsMissing.length > 1 ? 's' : ''} first`,
+      }
+    : { ok: true };
+  let footer: ReactNode = null;
+  switch (decided) {
+    case 'card': {
+      if (techCardId) {
+        footer = (
+          <StepFooter
+            step='card'
+            label='next · moodboard ›'
+            gate={{ ok: true }}
+            onGo={() => goStep('mood')}
+          />
+        );
+        break;
+      }
+      const ready = createReady({
+        name: newName,
+        categoryId: newCategoryId,
+        season: newSeason,
+        styleNumber: newStyleNumber,
+      });
+      footer = (
+        <StepFooter
+          step='card'
+          label='next · moodboard ›'
+          pendingLabel='creating…'
+          gate={
+            !ready.ok
+              ? ready
+              : onCreate
+                ? { ok: true }
+                : { ok: false, reason: 'add the card first' }
+          }
+          onGo={async () => {
+            const id = await onCreate?.();
+            if (id) goStep('mood');
+          }}
+        />
+      );
+      break;
+    }
+    case 'mood':
+      // A guided card earns its `go to flats ›` with the blocks (the owner: «дальше наш обычный
+      // флоу где уже видны все блоки и снизу справа кнопка go to flats»).
+      if (!guide.show.blocks) break;
+      footer = (
+        <StepFooter
+          step='mood'
+          label='go to flats ›'
+          gate={moodMinimum}
+          /* Only the doors that lead OFF this screen (the category, on CARD DETAILS): the board and
+             DESCRIPTION are blocks of this very step, and three doors beside one dead primary
+             would be the clutter the footer exists to avoid. */
+          doors={
+            !moodMinimum.ok &&
+            moodMinimum.doors
+              .filter((d) => d.step !== 'mood')
+              .map((d) => (
+                <Button
+                  key={d.field}
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => openGateDoor(d)}
+                  data-gate-door={d.field}
+                >
+                  {d.label}
+                </Button>
+              ))
+          }
+          onGo={() => goStep('flat')}
+        />
+      );
+      break;
+    case 'flat':
+      footer = (
+        <StepFooter
+          step='flat'
+          label='go to materials ›'
+          gate={flatGate}
+          aside={
+            guided &&
+            flatGate.ok && (
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                data-step-skip='render'
+                onClick={() => {
+                  goStep('render');
+                  window.scrollTo({ top: 0 });
+                }}
+              >
+                skip → fabric render ›
+              </Button>
+            )
+          }
+          onGo={() => goStep('pattern')}
+        />
+      );
+      break;
+    case 'pattern':
+      footer = (
+        <StepFooter
+          step='pattern'
+          label='go to fabric render ›'
+          gate={{ ok: true }}
+          onGo={() => goStep('render')}
+        />
+      );
+      break;
+    case 'render':
+      footer = (
+        <StepFooter
+          step='render'
+          label='image to 3d ›'
+          gate={
+            stepDone('render', ctx)
+              ? { ok: true }
+              : { ok: false, reason: 'a fabric render on the bench first' }
+          }
+          onGo={() => goKind('threed')}
+        />
+      );
+      break;
+  }
+
   /* ═══ A REFUSAL AIMED AT A FIELD OF ANOTHER STEP SWITCHES TO THAT STEP ═════════════════════════
      One step is on screen at a time, so `revealField` (utils/field-errors) finds NO anchor for a
      field of a step that is not open — a Save refused over `fit` while the flat is on, a server
@@ -438,6 +614,7 @@ export function StudioTab({
     screen = cardDetails ? (
       <div data-step-screen='card' className='contents'>
         {cardDetails}
+        {footer}
       </div>
     ) : null;
   } else if (!techCardId) {
@@ -483,8 +660,19 @@ export function StudioTab({
                       (EnhanceText and DraftDesignIdea need tech_cards:write), so the board locks on
                       the grant as GENERAL INFORMATION does — one rule per door on every surface
                       (seam review, S-m2). */}
-                  <MoodBoard techCardId={techCardId} disabled={readOnly || !canWriteCard} />
-                  {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
+                  <MoodBoard
+                    techCardId={techCardId}
+                    disabled={readOnly || !canWriteCard}
+                    guide={guide.active ? guide : undefined}
+                  />
+                  {/* THE LOWER BLOCKS WAIT FOR THE DRAFT ON A GUIDED CARD (S5) — hidden, NOT
+                      unmounted: GENERAL INFORMATION, the aspects and MATERIAL SLOTS keep their
+                      `useFieldArray`s and their `data-field` anchors, so a refusal on
+                      `bomItems.2.name` still finds the field and opens the face (`useGuideFace`).
+                      `display: contents` — open, the blocks stay direct children of the stack and
+                      keep its gutter; hidden, they leave no gap. */}
+                  <div hidden={!guide.show.blocks} className='contents' data-guide-blocks=''>
+                    {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
                       `ConstructionGeneralInfo` рисует `general information · what this style is`
                       с рядом `FROM THE MOODBOARD · N OF M DRAFTED FIELDS · MOODBOARD MOVED ON` в
                       правом углу линейки, `DetailsEditor` — `construction · described aspect by
@@ -494,30 +682,31 @@ export function StudioTab({
                       → слоты» выражается соседством в стеке. Слот аспектов может быть пуст
                       (владелец шапки отдаёт сюда свой единственный `DetailsEditor`); пустой он не
                       рисует ни секции, ни отступа. */}
-                  <ConstructionGeneralInfo
-                    isAux={isAux}
-                    readOnly={readOnly || !canWriteCard}
-                    frozen={readOnly}
-                  />
-                  {constructionAspects}
-                  {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
+                    <ConstructionGeneralInfo
+                      isAux={isAux}
+                      readOnly={readOnly || !canWriteCard}
+                      frozen={readOnly}
+                    />
+                    {constructionAspects}
+                    {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
                       ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
                       именно её пустота зовёт нажать «draft the construction» выше. `Section` у
                       блока СВОЯ: у него собственный `action` — чипы рождения слота. `navTo` — его
                       дверь `›` в редактор ЭТОЙ строки на вкладке BOM. */}
-                  <MaterialSlots
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                    onGoTab={navTo}
-                  />
-                  {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
+                    <MaterialSlots
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                      onGoTab={navTo}
+                    />
+                    {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
                       макете нет; стоит сразу под таблицей слотов и читается её продолжением: «вот
                       слоты; вот чем их красят». Блока НЕТ ВОВСЕ, пока черновик ничего не предложил —
                       условие знает только орган (модульный стор), поэтому обёртка у него своя. */}
-                  <ColourwayProposals
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                  />
+                    <ColourwayProposals
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                    />
+                  </div>
                 </>
               )}
               {step !== 'mood' &&
@@ -701,6 +890,8 @@ export function StudioTab({
                     )}
                   </>
                 ))}
+              {/* THE STEP'S ONE FORWARD DOOR — always its last child, chosen above. */}
+              {footer}
             </div>
           </PickModeProvider>
         </PictureGalleryProvider>

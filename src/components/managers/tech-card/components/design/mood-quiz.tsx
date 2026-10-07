@@ -12,6 +12,7 @@ import Textarea from 'ui/components/text-area';
 import type { TechCardFormData } from '../schema';
 import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { Counter } from './core';
+import { openStepOf } from './core/chain';
 import { moodboardGate, moodGateSentence } from './core/mood-gate';
 import { PartPictogram } from './garment-parts';
 import { useGenerationWrites } from './generation/use-generation';
@@ -130,6 +131,7 @@ export function MoodQuiz({
   onSetRole,
   labelQuestions = [],
   onLabel,
+  guide,
 }: {
   techCardId?: number;
   readOnly: boolean;
@@ -154,6 +156,14 @@ export function MoodQuiz({
    */
   labelQuestions?: DesignQuizQuestion[];
   onLabel?: (question: DesignQuizQuestion, option: string) => void;
+  /**
+   * A guided card (onboarding S5): ASK ME waits for a picture on the board, and the end of a batch
+   * offers the owner's pair — `next ✦` (the description from the board and the answers) and
+   * `ask more ✦` — in this same row. `waiting`: the card has answers and no description yet, so
+   * the pair stands without a batch having just ended (a reload, a second tab). `onReveal` opens
+   * DESCRIPTION when it already has words (Q5: `next` on a written description writes nothing).
+   */
+  guide?: { waiting: boolean; onReveal: () => void };
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
@@ -179,6 +189,8 @@ export function MoodQuiz({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [applying, setApplying] = useState(false);
+  /** S5: the last batch was answered through on a guided card — the row offers `next ✦ / ask more ✦`. */
+  const [batchDone, setBatchDone] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
   // Вопросы ярлыков, отвеченные или пропущенные в этом сеансе: карточка не ждёт перечитанной полосы.
@@ -207,6 +219,7 @@ export function MoodQuiz({
   useEffect(() => {
     setSession(readQuizSession(card));
     setLive(null);
+    setBatchDone(false);
     setLabelsDone(new Set());
   }, [card]);
 
@@ -262,16 +275,19 @@ export function MoodQuiz({
   };
 
   // Минимум сервера (O8): картинка на доске ИЛИ слова описания. Категория не нужна — без неё просто
-  // нет пиктограммы.
+  // нет пиктограммы. Guided card (S5): the board comes first — one picture, the description alone
+  // does not open ASK ME.
   const minimum = moodboardGate({ boardPictures: pictures, concept, categoryId: 1 });
   const gate: Gate = !ready
     ? {
         ok: false,
         reason: answersFailed ? 'the saved answers did not load' : 'reading the saved answers',
       }
-    : minimum.ok
-      ? { ok: true }
-      : { ok: false, reason: moodGateSentence(minimum) };
+    : guide && pictures === 0
+      ? { ok: false, reason: 'put a picture on the moodboard' }
+      : minimum.ok
+        ? { ok: true }
+        : { ok: false, reason: moodGateSentence(minimum) };
 
   /**
    * 97-ROLE-FIRST: есть неразмеченные картинки — сперва шаг ролей (локально, бесплатно), и только
@@ -406,7 +422,9 @@ export function MoodQuiz({
     if (next >= queue.length) {
       setLive(null);
       if (live.mode === 'run') dropSession();
-      setListOpen(true);
+      // S5: a guided card's batch ends on the pair, not on the list of what was just answered.
+      if (guide && live.mode === 'run') setBatchDone(true);
+      else setListOpen(true);
       return;
     }
     setLive({ queue, at: next, mode: live.mode });
@@ -550,6 +568,23 @@ export function MoodQuiz({
     }
   };
 
+  /**
+   * `next ✦` of a guided card (S5, Q5): no description yet → the same run as `apply to description ✦`
+   * (the blue drafted frame, accepted by editing it or by DESCRIPTION's own `next ✦`); words already
+   * there → nothing is written, DESCRIPTION is opened. Either way the page goes to it.
+   */
+  const next = async () => {
+    if (readOnly || applying || !card) return;
+    if (!concept.trim()) {
+      await apply();
+      if (shownCard.current !== card) return;
+      if (!((getValues('concept') as string | null | undefined) ?? '').trim()) return;
+    }
+    setBatchDone(false);
+    guide?.onReveal();
+    openStepOf('concept');
+  };
+
   if (!card || unimplemented) return null;
 
   if (live && q) {
@@ -589,8 +624,12 @@ export function MoodQuiz({
 
   const answered = answers.filter((a) => !a.skipped).length;
   const staleCount = answers.filter((a) => a.stale && !a.skipped).length;
-  // D3: описание пишется и без картинок доски — достаточно одного ответа.
-  const canApply = !readOnly && answered > 0;
+  // D3: описание пишется и без картинок доски — достаточно одного ответа. A guided card has ONE
+  // door to it — the pair's `next ✦` (S5).
+  const canApply = !guide && !readOnly && answered > 0;
+  // S5: the batch-end pair takes the row's door — never while a batch is still open or being asked.
+  const pair =
+    !!guide && !readOnly && !asking && remaining.length === 0 && (batchDone || guide.waiting);
 
   return (
     <div>
@@ -628,14 +667,30 @@ export function MoodQuiz({
         />
       )}
       <GenerateRow
-        gate={gate}
-        pending={asking}
+        gate={pair && ready ? { ok: true } : gate}
+        pending={pair ? applying : asking}
         disabled={readOnly}
-        onGenerate={ask}
-        label='ASK ME'
-        pendingLabel={elapsed > 0 ? `reading the board… ${elapsed} s` : 'reading the board…'}
+        onGenerate={pair ? () => void next() : ask}
+        label={pair ? 'next ✦' : 'ASK ME'}
+        pendingLabel={
+          pair ? 'writing…' : elapsed > 0 ? `reading the board… ${elapsed} s` : 'reading the board…'
+        }
         trailing={
           <>
+            {pair && (
+              <Button
+                variant='underline'
+                size='xs'
+                data-quiz-ask-more=''
+                disabled={applying}
+                onClick={() => {
+                  setBatchDone(false);
+                  ask();
+                }}
+              >
+                ask more ✦
+              </Button>
+            )}
             {answersFailed && (
               <Button
                 variant='underline'

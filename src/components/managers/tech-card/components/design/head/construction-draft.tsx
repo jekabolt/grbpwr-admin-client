@@ -41,7 +41,7 @@ import {
   moodGateSentence,
   type MoodGateInput,
 } from '../core/mood-gate';
-import { useDrafted } from '../drafted-contract';
+import { draftedKey, useDrafted } from '../drafted-contract';
 import {
   EmptyState,
   GROUP_GAP,
@@ -354,10 +354,19 @@ export function ConstructionDraft({
   disabled,
   conceptMax,
   boardPictures,
+  guide,
   children,
 }: {
   techCardId: number;
   disabled?: boolean;
+  /**
+   * A guided card (onboarding S5): while the lower blocks are still waiting, this row's door reads
+   * `next ✦` — the same run as GENERATE, which writes GENERAL INFORMATION, CONSTRUCTION, MATERIAL
+   * SLOTS and COLOURWAYS from the board, the answers and the description. Pressing it accepts the
+   * drafted description first (Q5: no separate accept). `onLanded` opens the blocks once an answer
+   * has landed here, even one that wrote nothing.
+   */
+  guide?: { next: boolean; onLanded: () => void };
   /**
    * ПОЛЯ DESCRIPTION — первыми в том же блоке (T33). Их рисует и держит доска (`mood-board.tsx`):
    * поле `concept`, его `ai ✦` и легаси-записка. Орган отдаёт им верх своей `Section`, сам встаёт
@@ -1295,6 +1304,8 @@ export function ConstructionDraft({
    * при человеке. Функция — через ref: эффект зовёт писателей ЭТОГО рендера.
    */
   const parked = run.parked;
+  const landedRef = useRef(guide?.onLanded);
+  landedRef.current = guide?.onLanded;
   const applyRef = useRef(applyParked);
   applyRef.current = applyParked;
   useEffect(() => {
@@ -1312,6 +1323,8 @@ export function ConstructionDraft({
     }
     setPrice(runPrice(p.run ?? undefined));
     setLastRun(p.run);
+    // S5: an answer came back — the guided face opens the blocks it writes into.
+    landedRef.current?.();
     if (!p.draft) {
       // ПУСТОЙ ОТВЕТ — НЕ ЧЕРНОВИК. Строка в реестре есть, деньги списаны, а предлагать нечего:
       // сказать это прямо честнее, чем нарисовать пустую рамку «черновика».
@@ -1854,10 +1867,13 @@ export function ConstructionDraft({
               ? { ok: false, reason: 'the detail slots the draft named are being added — a moment' }
               : gate
           }
-          label='GENERATE'
+          label={guide?.next ? 'next ✦' : 'GENERATE'}
           pending={run.phase !== null}
           disabled={readOnly}
-          onGenerate={() => void askForDraft()}
+          onGenerate={() => {
+            if (guide?.next) drafted.acceptKey(draftedKey.concept);
+            void askForDraft();
+          }}
           /* ДВЕРЬ ОПИСИ — РЯДОМ С GENERATE, КАК У ФЛЭТА (T33): `secondary sm` + `ControlLabel`,
              не `xs` у правого края. Состояние прогона — следом. */
           trailing={

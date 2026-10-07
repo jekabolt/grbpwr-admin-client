@@ -1,6 +1,7 @@
 import { common_Size, common_SizeSkuSystem } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useCallback, useMemo } from 'react';
+import { sizeInSystems } from 'utils/size-systems';
 import {
   SIZE_CATEGORY_ORDER,
   SizeCategoryKey,
@@ -48,6 +49,39 @@ export type SizeSystems = {
 };
 
 /**
+ * The pure core of `useSizeSystems` — exported for the size-resolver probe; components call the hook.
+ *
+ * `allowedSizeSystems` is `permittedSizeSystems`' answer as is: unset = no category, every size;
+ * EMPTY = a category with no mapping, only the size named `os` (the server's OS-fallback); else the
+ * listed systems (`sizeInSystems`). A selected size is never hidden, whatever the answer.
+ */
+export function sizeSystemsOf(
+  sizes: common_Size[],
+  {
+    gender,
+    allowedSizeSystems,
+    selectedIds,
+  }: { gender?: string; allowedSizeSystems?: common_SizeSkuSystem[]; selectedIds?: number[] },
+): SizeSystems {
+  const selected = new Set(selectedIds ?? []);
+  const inSystem = (s: common_Size) =>
+    sizeInSystems(s, allowedSizeSystems) || selected.has(s.id ?? 0);
+
+  const other = allowedSizeSystems
+    ? groupSizes(
+        sizes.filter((s) => !inSystem(s)),
+        gender,
+        selected,
+      )
+    : [];
+  return {
+    permitted: groupSizes(sizes.filter(inSystem), gender, selected),
+    other,
+    narrowed: other.length > 0,
+  };
+}
+
+/**
  * The single answer to "which sizes may this thing use". Two callers used to derive it
  * independently — the inline grid in the tech card and the picker overlay — and a filter that
  * disagrees with itself offers a size in one place and hides it in the other.
@@ -64,35 +98,31 @@ export function useSizeSystems({
   selectedIds,
 }: {
   gender?: string;
-  /** Unset = the category maps nothing, so every system is permitted and `other` is empty. */
+  /** Unset = no category, so every system is permitted and `other` is empty. Empty = a category
+   *  that maps nothing: `os` only (the server's rule, `permittedSizeSystems`). */
   allowedSizeSystems?: common_SizeSkuSystem[];
   selectedIds?: number[];
 }): SizeSystems {
   const { dictionary } = useDictionary();
-  // Callers rebuild these arrays every render, so key the memo on content, not identity.
+  // Callers rebuild these arrays every render, so key the memo on content, not identity. `null`
+  // keeps «no category» apart from «a category that maps nothing» (`''`).
   const selectedKey = (selectedIds ?? []).join(',');
-  const allowKey = (allowedSizeSystems ?? []).join(',');
+  const allowKey = allowedSizeSystems ? allowedSizeSystems.join(',') : null;
 
-  return useMemo(() => {
-    const sizes = dictionary?.sizes ?? [];
-    const allow = allowKey ? new Set(allowKey.split(',') as common_SizeSkuSystem[]) : undefined;
-    const selected = new Set(selectedKey ? selectedKey.split(',').map(Number) : []);
-    const inSystem = (s: common_Size) =>
-      !allow || allow.has(s.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN') || selected.has(s.id ?? 0);
-
-    const other = allow
-      ? groupSizes(
-          sizes.filter((s) => !inSystem(s)),
-          gender,
-          selected,
-        )
-      : [];
-    return {
-      permitted: groupSizes(sizes.filter(inSystem), gender, selected),
-      other,
-      narrowed: other.length > 0,
-    };
-  }, [dictionary?.sizes, allowKey, selectedKey, gender]);
+  return useMemo(
+    () =>
+      sizeSystemsOf(dictionary?.sizes ?? [], {
+        gender,
+        allowedSizeSystems:
+          allowKey == null
+            ? undefined
+            : allowKey
+              ? (allowKey.split(',') as common_SizeSkuSystem[])
+              : [],
+        selectedIds: selectedKey ? selectedKey.split(',').map(Number) : [],
+      }),
+    [dictionary?.sizes, allowKey, selectedKey, gender],
+  );
 }
 
 /** id → dictionary name. Every size-shaped field needs this map; none of them should build it. */

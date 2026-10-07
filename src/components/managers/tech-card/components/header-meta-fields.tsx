@@ -1,4 +1,5 @@
 import { common_Category, common_SizeSkuSystem } from 'api/proto-http/admin';
+import { useSizeSystems } from 'components/managers/model/components/use-size-systems';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -12,7 +13,7 @@ import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
-import { permittedSizeSystems } from 'utils/size-systems';
+import { permittedSizeSystems, sizeInSystems } from 'utils/size-systems';
 import { followCategory } from './design/flat-route';
 import { garmentClassOf, useGarmentClass } from './design/head/card-facts-form';
 import { TechCardFormData } from './schema';
@@ -171,8 +172,11 @@ export function CategoryBrowser() {
 
   const systemsOf = (id: number) =>
     permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, id);
+  // «No category» (undefined, every size) and «a category that maps nothing» ([], `os` only) are
+  // two different goalposts — the key keeps them apart.
+  const systemsKey = (a?: common_SizeSkuSystem[]) => (a ? [...a].sort().join(',') : '*');
   const sameSystems = (a?: common_SizeSkuSystem[], b?: common_SizeSkuSystem[]) =>
-    [...(a ?? [])].sort().join(',') === [...(b ?? [])].sort().join(',');
+    systemsKey(a) === systemsKey(b);
 
   // Sizes already in the run that the candidate category would no longer offer. `useSizeSystems`
   // never hides an already-selected size, so nothing is silently dropped — but the run stops
@@ -180,11 +184,11 @@ export function CategoryBrowser() {
   const outsideCount = (candidate: number) => {
     const allow = systemsOf(candidate);
     if (!allow) return 0;
-    const permitted = new Set(allow);
     const sizeById = new Map((dictionary?.sizes ?? []).map((s) => [s.id ?? 0, s] as const));
-    return sizeIds.filter(
-      (id) => !permitted.has(sizeById.get(id)?.skuSystem ?? 'SIZE_SKU_SYSTEM_UNKNOWN'),
-    ).length;
+    return sizeIds.filter((id) => {
+      const size = sizeById.get(id);
+      return !size || !sizeInSystems(size, allow);
+    }).length;
   };
 
   // M10: WORDS were seeded with the old category's «garment: <class>» — the one line a flat sends.
@@ -319,12 +323,28 @@ export function CategoryBrowser() {
 // растянутый на всю её ширину, читался бы как поле ввода абзаца. Ряды равноправны: модель — это
 // «на ком построено», размер — «на чём считается себестоимость»; ни одно не следствие другого.
 // base_sample_size_id is restricted to the card's size range (cross-validated server-side).
+//
+// ОНБОРДИНГ (П2): «когда мы заполнили все до BASE SAMPLE SIZE, мы знаем какие размеры бывают у вещи
+// в категории — в дропдауне выбрать из этого». Пока диапазон пуст, список — это размеры, которые
+// категория разрешает (`useSizeSystems`, тот же ответ, что у пикера диапазона, с полом карточки),
+// по группам; без категории поле закрыто. Выбор на пустом диапазоне засевает `sizeIds` всей группой
+// выбранного размера — сервер требует base ∈ range, и группа разрешённой системы есть ровно то, что
+// он примет. Непустой диапазон — прежнее правило: список = диапазон.
 export function BaseModelFields() {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { data: models, isLoading: modelsLoading } = useAllModels();
 
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
+  const gender = useWatch({ control, name: 'targetGender' }) as string | undefined;
+  const allowedSizeSystems = useMemo(
+    () => permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, categoryId),
+    [dictionary?.categories, dictionary?.categorySizeSystems, categoryId],
+  );
+  const { permitted } = useSizeSystems({ gender, allowedSizeSystems, selectedIds: [] });
+  const seeding = sizeIds.length === 0 && categoryId > 0;
+  const noCategory = sizeIds.length === 0 && !(categoryId > 0);
 
   const sizeById = useMemo(() => {
     const m = new Map<number, string>();
@@ -343,10 +363,41 @@ export function BaseModelFields() {
     [models],
   );
 
-  const sampleSizeOptions = [
-    UNSET,
-    ...sizeIds.map((id) => ({ value: id, label: formatSizeName(sizeById.get(id) ?? `#${id}`) })),
-  ];
+  const grouped = permitted.length > 1;
+  const sampleSizeOptions: { value: number; label: string; group?: string }[] = noCategory
+    ? [{ value: 0, label: '— pick a category first —' }]
+    : seeding
+      ? [
+          UNSET,
+          ...permitted.flatMap((g) =>
+            g.sizes.map((sz) => ({
+              value: sz.id ?? 0,
+              label: formatSizeName(sz.name ?? `#${sz.id}`),
+              group: grouped ? g.label : undefined,
+            })),
+          ),
+        ]
+      : [
+          UNSET,
+          ...sizeIds.map((id) => ({
+            value: id,
+            label: formatSizeName(sizeById.get(id) ?? `#${id}`),
+          })),
+        ];
+
+  // The range is seeded by the same pick: the whole permitted group of the chosen size, in grade
+  // order (`groupSizes` sorts by the dictionary's ordinal).
+  const seedRange = (picked: string | number | undefined) => {
+    const id = Number(picked ?? 0);
+    if (!seeding || !(id > 0)) return;
+    const group = permitted.find((g) => g.sizes.some((sz) => sz.id === id));
+    if (!group) return;
+    setValue(
+      'sizeIds',
+      group.sizes.map((sz) => sz.id ?? 0).filter((x) => x > 0),
+      { shouldDirty: true },
+    );
+  };
 
   return (
     <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-b27-base=''>
@@ -372,6 +423,9 @@ export function BaseModelFields() {
         label='base sample size'
         items={sampleSizeOptions}
         valueAsNumber
+        disabled={noCategory}
+        className={noCategory ? 'bg-bgZebra text-labelColor' : undefined}
+        onAfterChange={seedRange}
       />
     </div>
   );
