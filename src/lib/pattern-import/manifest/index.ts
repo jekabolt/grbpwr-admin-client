@@ -38,6 +38,12 @@ import {
   PATIMPORT,
   type ConversionManifest,
   type EmbedManifestFn,
+  type GateCheck,
+  type GateReport,
+  type ManifestBlock,
+  type ManifestPiece,
+  type ManifestSize,
+  type ManifestSource,
   type ReadManifestFn,
   type TrustedSheet,
 } from '../types';
@@ -80,6 +86,20 @@ export type ManifestLineForm = 'v1' | 'v1z';
 
 /** Inflated JSON larger than this is refused as `corrupt` (a real manifest is well under 1 MB). */
 export const MANIFEST_MAX_JSON_BYTES = 4 * 1024 * 1024;
+/** Base64 of the largest payload either form may carry (a v1 payload is the JSON itself). */
+const MANIFEST_MAX_B64 = 4 * Math.ceil(MANIFEST_MAX_JSON_BYTES / 3);
+/**
+ * Codex C6: the most chunk lines a manifest can need — `i/n` beyond this is refused before anything
+ * is allocated or looped over (`1/999999…` must not walk a million-entry «missing» list).
+ */
+export const MANIFEST_MAX_CHUNKS = Math.ceil(MANIFEST_MAX_B64 / PATIMPORT.manifestLineMax);
+/**
+ * Codex C6: bytes of leading 999 comments `readManifestBytes` walks — the largest manifest prologue
+ * (every chunk line plus its `999` code line) with room for foreign leading comments. A sheet is
+ * never decoded whole to find its manifest.
+ */
+export const MANIFEST_MAX_PROLOGUE_BYTES =
+  MANIFEST_MAX_CHUNKS * (PATIMPORT.manifestLineMax + 48) + 64 * 1024;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = '';
@@ -209,6 +229,175 @@ function fail(path: string, what: string): never {
   throw new ManifestError('shape', `${path}: ${what}`);
 }
 
+// Codex C8: bounds for the free-form parts (source, gate report). A real manifest is far inside them;
+// they exist so a hostile one cannot carry megabytes of strings into the card's UI.
+const MAX_STR = 64 * 1024;
+const MAX_LIST = 10_000;
+const isBoundedStr = (x: unknown, max = MAX_STR): x is string => isStr(x) && x.length <= max;
+const SOURCE_KINDS = new Set(['pdf', 'dxf', 'raster', 'hpgl', 'svg', 'ai']);
+const SCALE_METHODS = new Set(['test-square', 'grid', 'declared', 'manual', 'none']);
+const SHEET_METHODS = new Set(['recurrence', 'edge-stitch', 'grid-label', 'manual', 'single']);
+const SIZE_ENCODINGS = new Set([
+  'ocg',
+  'declared-dash',
+  'subpath-dash',
+  'separate-dash',
+  'color',
+  'file-per-size',
+  'text-label',
+  'dxf-block',
+  'single',
+]);
+const GATE_CHECK_IDS = new Set([
+  'G1-roundtrip',
+  'G2-square',
+  'G3-coverage',
+  'G4-hausdorff',
+  'G5-features',
+  'G6-offset',
+  'G7-overview',
+  'G8-monotone',
+  'G9-sizes',
+  'G10-uni',
+  'G11-grammar',
+  'G12-pair',
+  'G13-manifest',
+  'G14-prologue',
+  // F14b (pi/f14b): the derived-edge audit — accepted here before that lane lands
+  'G15-derived',
+]);
+// F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
+const DERIVED_KINDS = new Set(['bridge', 'auto-bridge', 'operator-bridge', 'band-cut']);
+const isPair = (v: unknown): v is [number, number] =>
+  Array.isArray(v) && v.length === 2 && v.every(isNum);
+const numOrNull = (x: unknown): x is number | null => x === null || isNum(x);
+
+function validateSource(x: unknown): ManifestSource {
+  if (!isObj(x)) fail('source', 'not an object');
+  if (!Array.isArray(x.files) || x.files.length > MAX_LIST) fail('source.files', 'not a list');
+  const files: ManifestSource['files'] = x.files.map((f, i) => {
+    const p = `source.files[${i}]`;
+    if (!isObj(f)) fail(p, 'not an object');
+    if (!isBoundedStr(f.name, 1024)) fail(`${p}.name`, 'not a string');
+    if (!isBoundedStr(f.sha256, 128)) fail(`${p}.sha256`, 'not a string');
+    if (!isNum(f.bytes) || f.bytes < 0) fail(`${p}.bytes`, 'not a non-negative number');
+    if (!isStr(f.kind) || !SOURCE_KINDS.has(f.kind)) fail(`${p}.kind`, 'unknown kind');
+    if (!isInt(f.pages) || f.pages < 0) fail(`${p}.pages`, 'not a non-negative integer');
+    return {
+      name: f.name,
+      sha256: f.sha256,
+      bytes: f.bytes,
+      kind: f.kind as ManifestSource['files'][number]['kind'],
+      pages: f.pages,
+    };
+  });
+  const sc = x.scale;
+  if (
+    !isObj(sc) ||
+    !isStr(sc.method) ||
+    !SCALE_METHODS.has(sc.method) ||
+    !isNum(sc.factor) ||
+    !numOrNull(sc.measuredMm) ||
+    !numOrNull(sc.declaredMm)
+  )
+    fail('source.scale', 'needs method, factor, measuredMm|null, declaredMm|null');
+  const sh = x.sheet;
+  if (
+    !isObj(sh) ||
+    !isInt(sh.pages) ||
+    sh.pages < 0 ||
+    !isStr(sh.method) ||
+    !SHEET_METHODS.has(sh.method) ||
+    !isNum(sh.maxResidualMm)
+  )
+    fail('source.sheet', 'needs pages, method, maxResidualMm');
+  if (!isStr(x.sizeEncoding) || !SIZE_ENCODINGS.has(x.sizeEncoding))
+    fail('source.sizeEncoding', 'unknown encoding');
+  if (!(x.variant === null || isBoundedStr(x.variant, 1024)))
+    fail('source.variant', 'neither null nor a string');
+  return {
+    files,
+    scale: {
+      method: sc.method as ManifestSource['scale']['method'],
+      factor: sc.factor,
+      measuredMm: sc.measuredMm,
+      declaredMm: sc.declaredMm,
+    },
+    sheet: {
+      pages: sh.pages,
+      method: sh.method as ManifestSource['sheet']['method'],
+      maxResidualMm: sh.maxResidualMm,
+    },
+    sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
+    variant: x.variant,
+  };
+}
+
+function validateGate(x: unknown): GateReport | null {
+  if (x === null) return null;
+  if (!isObj(x)) fail('gate', 'neither null nor a gate report');
+  if (!isBool(x.passed)) fail('gate.passed', 'not a boolean');
+  if (!isNum(x.durationMs) || x.durationMs < 0)
+    fail('gate.durationMs', 'not a non-negative number');
+  if (!Array.isArray(x.checks) || x.checks.length > 64) fail('gate.checks', 'not a list');
+  const checks: GateCheck[] = x.checks.map((c, i) => {
+    const p = `gate.checks[${i}]`;
+    if (!isObj(c)) fail(p, 'not an object');
+    if (!isStr(c.id) || !GATE_CHECK_IDS.has(c.id)) fail(`${p}.id`, 'unknown check');
+    if (!isBool(c.ok)) fail(`${p}.ok`, 'not a boolean');
+    if (c.severity !== 'block' && c.severity !== 'warn') fail(`${p}.severity`, 'not block|warn');
+    for (const k of ['value', 'threshold'] as const) {
+      const v = c[k];
+      if (!(v === null || isNum(v) || isBoundedStr(v, 1024)))
+        fail(`${p}.${k}`, 'not a finite number, a short string or null');
+    }
+    if (
+      !Array.isArray(c.blocks) ||
+      c.blocks.length > MAX_LIST ||
+      !c.blocks.every((b) => isBoundedStr(b, 512))
+    )
+      fail(`${p}.blocks`, 'not a bounded string list');
+    if (!isBoundedStr(c.note)) fail(`${p}.note`, 'not a bounded string');
+    return {
+      id: c.id as GateCheck['id'],
+      ok: c.ok,
+      severity: c.severity,
+      value: c.value as GateCheck['value'],
+      threshold: c.threshold as GateCheck['threshold'],
+      blocks: [...(c.blocks as string[])],
+      note: c.note,
+    };
+  });
+  // «passed» must agree with the checks it reports — a forged true over a blocking failure is a lie
+  if (x.passed && checks.some((c) => !c.ok && c.severity === 'block'))
+    fail('gate.passed', 'true over a failed blocking check');
+  // F14b: the derived edges G15 accepted (optional; absent when there are none)
+  let derived: Record<string, unknown>[] | undefined;
+  if (x.derived !== undefined) {
+    if (!Array.isArray(x.derived) || x.derived.length > MAX_LIST)
+      fail('gate.derived', 'not a bounded list');
+    derived = x.derived.map((d, i) => {
+      const p = `gate.derived[${i}]`;
+      if (!isObj(d)) fail(p, 'not an object');
+      if (!isBoundedStr(d.block, 512) || !d.block.trim()) fail(`${p}.block`, 'not a block name');
+      if (!isStr(d.kind) || !DERIVED_KINDS.has(d.kind)) fail(`${p}.kind`, 'unknown kind');
+      if (!isNum(d.lengthMm) || d.lengthMm < 0) fail(`${p}.lengthMm`, 'not a non-negative number');
+      if (!isNum(d.offSourceMm) || d.offSourceMm < 0)
+        fail(`${p}.offSourceMm`, 'not a non-negative number');
+      if (!isPair(d.a) || !isPair(d.b)) fail(`${p}.a|b`, 'not two finite [x, y] points');
+      return {
+        block: d.block,
+        kind: d.kind,
+        lengthMm: d.lengthMm,
+        offSourceMm: d.offSourceMm,
+        a: [d.a[0], d.a[1]],
+        b: [d.b[0], d.b[1]],
+      };
+    });
+  }
+  return { passed: x.passed, checks, durationMs: x.durationMs, ...(derived ? { derived } : {}) };
+}
+
 /**
  * Throws `ManifestError` unless `x` is a complete, self-consistent v1 manifest. Exported for the writer
  * (embedding an invalid manifest is a writer bug and must fail loudly) and for tests.
@@ -237,7 +426,7 @@ export function validateManifest(x: unknown): ConversionManifest {
 
   if (!Array.isArray(x.sizes)) fail('sizes', 'not an array');
   const sizeTokens = new Set<string>();
-  x.sizes.forEach((s, i) => {
+  const sizes: ManifestSize[] = x.sizes.map((s, i) => {
     const p = `sizes[${i}]`;
     if (!isObj(s)) fail(p, 'not an object');
     if (!isStr(s.token) || !s.token.trim()) fail(`${p}.token`, 'empty');
@@ -248,11 +437,18 @@ export function validateManifest(x: unknown): ConversionManifest {
     const t = s.token.trim().toLowerCase();
     if (sizeTokens.has(t)) fail(`${p}.token`, `duplicate "${s.token}"`);
     sizeTokens.add(t);
+    return {
+      token: s.token,
+      sizeId: s.sizeId,
+      name: s.name,
+      sourceLabel: s.sourceLabel,
+      rank: s.rank,
+    };
   });
 
   if (!Array.isArray(x.pieces)) fail('pieces', 'not an array');
   const pieceByIdentity = new Map<string, Record<string, unknown>>();
-  x.pieces.forEach((pc, i) => {
+  const pieces: ManifestPiece[] = x.pieces.map((pc, i) => {
     const p = `pieces[${i}]`;
     if (!isObj(pc)) fail(p, 'not an object');
     if (!isStr(pc.identity) || !pc.identity.trim()) fail(`${p}.identity`, 'empty');
@@ -280,6 +476,23 @@ export function validateManifest(x: unknown): ConversionManifest {
     const ci = pc.identity.trim().toLowerCase();
     if (pieceByIdentity.has(ci)) fail(`${p}.identity`, `duplicate "${pc.identity}"`);
     pieceByIdentity.set(ci, pc);
+    const out: ManifestPiece = {
+      identity: pc.identity,
+      code: pc.code,
+      mods: [...pc.mods],
+      displayName: pc.displayName,
+      pairHand: pc.pairHand as ManifestPiece['pairHand'],
+      pairOf: pc.pairOf as string | null,
+      unfoldedFold: pc.unfoldedFold,
+      piecesPerGarment: pc.piecesPerGarment,
+      fabrics: [...pc.fabrics],
+      fused: pc.fused,
+      ungraded: pc.ungraded,
+      allowanceMm: pc.allowanceMm,
+      nameOrigin: pc.nameOrigin as ManifestPiece['nameOrigin'],
+    };
+    if (pc.aiConfidence !== undefined) out.aiConfidence = pc.aiConfidence as number;
+    return out;
   });
   // A pair is two identities naming each other, one per hand. Anything else is not a pair the card
   // can bind as one piece.
@@ -300,7 +513,7 @@ export function validateManifest(x: unknown): ConversionManifest {
 
   if (!Array.isArray(x.blocks)) fail('blocks', 'not an array');
   const blockNames = new Set<string>();
-  x.blocks.forEach((b, i) => {
+  const blocks: ManifestBlock[] = x.blocks.map((b, i) => {
     const p = `blocks[${i}]`;
     if (!isObj(b)) fail(p, 'not an object');
     if (!isStr(b.block) || !b.block.trim()) fail(`${p}.block`, 'empty');
@@ -325,15 +538,42 @@ export function validateManifest(x: unknown): ConversionManifest {
     if (!piece.ungraded && !sizeTokens.has(b.sizeToken.trim().toLowerCase())) {
       fail(`${p}.sizeToken`, `"${b.sizeToken}" is not a size of this manifest`);
     }
+    const [x0, y0, x1, y1] = b.bboxMm as number[];
+    return {
+      block: b.block,
+      identity: b.identity,
+      sizeToken: b.sizeToken,
+      sizeId: b.sizeId,
+      bboxMm: [x0, y0, x1, y1],
+      areaMm2: b.areaMm2,
+      hasGrain: b.hasGrain,
+      notches: b.notches as number,
+      drills: b.drills as number,
+      internal: b.internal as number,
+      hasSeam: b.hasSeam,
+    };
   });
 
-  if (!isObj(x.source)) fail('source', 'not an object');
-  if (
-    !(x.gate === null || (isObj(x.gate) && isBool(x.gate.passed) && Array.isArray(x.gate.checks)))
-  ) {
-    fail('gate', 'neither null nor a gate report');
-  }
-  return x as unknown as ConversionManifest;
+  // Codex C8: every nested part checked and rebuilt — the result is built from validated fields
+  // only, never the input object cast to the type.
+  const source = validateSource(x.source);
+  const gate = validateGate(x.gate);
+  return {
+    v: MANIFEST_VERSION,
+    generator: x.generator,
+    createdAt: x.createdAt,
+    techCardId: x.techCardId,
+    scope: { fabricPurpose: x.scope.fabricPurpose, bomLineKey: x.scope.bomLineKey },
+    units: 'mm',
+    layers: { ...LAYERS },
+    cutLayerIsFinal: true,
+    allowanceMm: x.allowanceMm,
+    sizes,
+    pieces,
+    blocks,
+    source,
+    gate,
+  };
 }
 
 // ── public API ──────────────────────────────────────────────────────────────────────────────────
@@ -427,8 +667,16 @@ export const readManifest: ReadManifestFn = (dxfText) => {
       throw new ManifestError('corrupt', 'compressed and plain manifest lines are mixed');
     const i = Number(iStr);
     const n = Number(nStr);
-    if (!(n >= 1) || !(i >= 1) || i > n)
-      throw new ManifestError('corrupt', `chunk ${i}/${n} is out of range`);
+    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(i) || n < 1 || i < 1 || i > n)
+      throw new ManifestError(
+        'corrupt',
+        `chunk ${iStr.slice(0, 12)}/${nStr.slice(0, 12)} is out of range`,
+      );
+    if (n > MANIFEST_MAX_CHUNKS)
+      throw new ManifestError(
+        'corrupt',
+        `${n} chunks is more than any manifest needs (${MANIFEST_MAX_CHUNKS})`,
+      );
     if (total < 0) total = n;
     else if (total !== n)
       throw new ManifestError('partial', `chunk counts disagree (${total} and ${n})`);
@@ -436,12 +684,20 @@ export const readManifest: ReadManifestFn = (dxfText) => {
     chunks.set(i, chunk);
   }
   if (chunks.size !== total) {
-    const missing: number[] = [];
-    for (let i = 1; i <= total; i++) if (!chunks.has(i)) missing.push(i);
-    throw new ManifestError('partial', `missing chunk(s) ${missing.join(', ')} of ${total}`);
+    // count + the first few — `total` is bounded above, but a list of thousands helps nobody
+    const first: number[] = [];
+    for (let i = 1; i <= total && first.length < 5; i++) if (!chunks.has(i)) first.push(i);
+    throw new ManifestError(
+      'partial',
+      `${total - chunks.size} of ${total} chunk(s) missing (first: ${first.join(', ')})`,
+    );
   }
   let payload = '';
-  for (let i = 1; i <= total; i++) payload += chunks.get(i)!;
+  for (let i = 1; i <= total; i++) {
+    payload += chunks.get(i)!;
+    if (payload.length > MANIFEST_MAX_B64)
+      throw new ManifestError('corrupt', `payload is larger than ${MANIFEST_MAX_B64} characters`);
+  }
   const json = fromBase64(payload, form ?? 'v1');
   let parsed: unknown;
   try {
@@ -463,8 +719,49 @@ export function readManifestBytes(buf: ArrayBuffer): ConversionManifest | null {
   if (head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) i = 3;
   while (i < head.length && (head[i] === 0x20 || head[i] === 0x09)) i++;
   if (!(head[i] === 0x39 && head[i + 1] === 0x39 && head[i + 2] === 0x39)) return null;
-  const text = new TextDecoder('latin1').decode(buf);
-  return readManifest(text.charCodeAt(0) === 0xef ? text.slice(3) : text);
+  // Codex C6: only the leading 999 prologue is decoded — walked as byte lines, bounded by
+  // MANIFEST_MAX_PROLOGUE_BYTES — never the whole sheet.
+  const bytes = new Uint8Array(buf);
+  const start = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  const limit = Math.min(bytes.length, start + MANIFEST_MAX_PROLOGUE_BYTES);
+  const lineEnd = (from: number) => {
+    const nl = bytes.indexOf(0x0a, from);
+    return nl < 0 || nl >= limit ? -1 : nl;
+  };
+  const isCode999 = (from: number, to: number) => {
+    let a = from;
+    let b = to;
+    while (a < b && (bytes[a] === 0x20 || bytes[a] === 0x09)) a++;
+    while (b > a && (bytes[b - 1] === 0x0d || bytes[b - 1] === 0x20 || bytes[b - 1] === 0x09)) b--;
+    return b - a === 3 && bytes[a] === 0x39 && bytes[a + 1] === 0x39 && bytes[a + 2] === 0x39;
+  };
+  let pos = start;
+  let truncated = false;
+  for (;;) {
+    const codeEnd = lineEnd(pos);
+    if (codeEnd < 0) {
+      truncated = limit < bytes.length;
+      break;
+    }
+    if (!isCode999(pos, codeEnd)) break;
+    const valueEnd = lineEnd(codeEnd + 1);
+    if (valueEnd < 0) {
+      truncated = limit < bytes.length;
+      break;
+    }
+    pos = valueEnd + 1;
+  }
+  const window = new TextDecoder('latin1').decode(bytes.subarray(start, truncated ? limit : pos));
+  if (truncated) {
+    // A prologue past the bound: a foreign file with huge comments is still foreign; one that
+    // carries our tag cannot be a manifest this reader would ever have written.
+    if (!window.includes(MANIFEST_TAG)) return null;
+    throw new ManifestError(
+      'corrupt',
+      `the leading comment block is longer than ${MANIFEST_MAX_PROLOGUE_BYTES} bytes`,
+    );
+  }
+  return readManifest(window);
 }
 
 /** What the card may trust about one parsed file (types §12). */

@@ -14,6 +14,7 @@ import {
   MANIFEST_MAX_JSON_BYTES,
   readManifest,
   readManifestBytes,
+  MANIFEST_MAX_PROLOGUE_BYTES,
   trustedSheetOf,
   ManifestError,
 } from 'lib/pattern-import/manifest';
@@ -445,6 +446,162 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       false,
       throwsCode(() => readManifest(raw(brokenPair)), 'shape'),
     );
+    // ── Codex C6: chunk headers bounded, no hang; prologue scanned, not the whole sheet ──────────
+    {
+      const fast = (fn: () => unknown, code: string) => {
+        const t0 = Date.now();
+        const ok = throwsCode(fn, code);
+        return { ok: ok && Date.now() - t0 < 200, ms: Date.now() - t0 };
+      };
+      const huge = fast(
+        () => readManifest(`999\nGRBPWR-MANIFEST v1 1/1${'0'.repeat(300)} ${b64(m)}\n${legacy}`),
+        'corrupt',
+      );
+      check('manifest (C6): total = 1e300 → fast typed error (corrupt)', false, huge.ok, huge);
+      const million = fast(
+        () => readManifest(`999\nGRBPWR-MANIFEST v1 1/999999 ${b64(m)}\n${legacy}`),
+        'corrupt',
+      );
+      check(
+        'manifest (C6): total = 999999 → fast typed error (corrupt)',
+        false,
+        million.ok,
+        million,
+      );
+      let partialMsg = '';
+      const few = fast(() => {
+        try {
+          readManifest(`999\nGRBPWR-MANIFEST v1 1/3000 ${b64(m)}\n${legacy}`);
+        } catch (e) {
+          partialMsg = e instanceof Error ? e.message : '';
+          throw e;
+        }
+      }, 'partial');
+      check(
+        'manifest (C6): 2999 missing chunks → partial, reported as a count + the first few',
+        false,
+        few.ok && /2999 of 3000 chunk\(s\) missing \(first: 2, 3, 4, 5, 6\)/.test(partialMsg),
+        partialMsg,
+      );
+      check(
+        'manifest (C6 control): a manifest still reads after the bounds',
+        false,
+        isDeepStrictEqual(readManifest(embedManifest(legacy, m)), m),
+      );
+      // a 40 MB sheet behind the manifest: only the prologue is decoded
+      const big = embedManifest(legacy, m) + `999\n${'x'.repeat(40 * 1024 * 1024)}\n`;
+      const bigBuf = enc(big).slice().buffer as ArrayBuffer;
+      const t0 = Date.now();
+      const got = readManifestBytes(bigBuf);
+      check(
+        'manifest (C6): readManifestBytes on a 40 MB sheet reads the prologue only (< 100 ms)',
+        false,
+        isDeepStrictEqual(got, m) && Date.now() - t0 < 100,
+        { ms: Date.now() - t0 },
+      );
+      // a foreign file whose leading comments exceed the bound is still foreign; ours is refused
+      const pad = `999\n${'c'.repeat(150)}\n`.repeat(
+        Math.ceil(MANIFEST_MAX_PROLOGUE_BYTES / 150) + 10,
+      );
+      check(
+        'manifest (C6): an oversized foreign comment prologue → null (not a manifest)',
+        false,
+        readManifestBytes(enc(pad + legacy).slice().buffer as ArrayBuffer) === null,
+      );
+      check(
+        'manifest (C6): an oversized prologue carrying our tag → corrupt',
+        false,
+        throwsCode(
+          () =>
+            readManifestBytes(
+              enc(embedManifest(legacy, m).replace(/\n0\nSECTION/, `\n${pad}0\nSECTION`)).slice()
+                .buffer as ArrayBuffer,
+            ),
+          'corrupt',
+        ),
+      );
+    }
+    // ── Codex C8: nested source and gate fully validated ───────────────────────────────────────
+    {
+      const shape = (o: unknown) => throwsCode(() => readManifest(raw(o)), 'shape');
+      const gate0 = {
+        passed: true,
+        durationMs: 1,
+        checks: [
+          {
+            id: 'G1-roundtrip',
+            ok: true,
+            severity: 'block',
+            value: 3,
+            threshold: null,
+            blocks: [],
+            note: 'ok',
+          },
+        ],
+      };
+      check('manifest (C8): source: {} → shape', false, shape({ ...m, source: {} }));
+      check(
+        'manifest (C8): source.files[0].sha256 not a string → shape',
+        false,
+        shape({ ...m, source: { ...m.source, files: [{ ...m.source.files[0], sha256: 5 }] } }),
+      );
+      check(
+        'manifest (C8): source.scale.factor not finite (null) → shape',
+        false,
+        shape({ ...m, source: { ...m.source, scale: { ...m.source.scale, factor: null } } }),
+      );
+      check(
+        'manifest (C8): unknown source kind → shape',
+        false,
+        shape({ ...m, source: { ...m.source, files: [{ ...m.source.files[0], kind: 'exe' }] } }),
+      );
+      check(
+        'manifest (C8): gate check with an unknown id → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], id: 'G99' }] } }),
+      );
+      check(
+        'manifest (C8): gate check with a 100 KB note → shape',
+        false,
+        shape({
+          ...m,
+          gate: { ...gate0, checks: [{ ...gate0.checks[0], note: 'n'.repeat(100_000) }] },
+        }),
+      );
+      check(
+        'manifest (C8): gate passed=true over a failed blocking check → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], ok: false }] } }),
+      );
+      const der = {
+        block: 'FP_L_M',
+        kind: 'operator-bridge',
+        lengthMm: 4.7,
+        offSourceMm: 4.7,
+        a: [1, 2],
+        b: [3, 4],
+      };
+      const okDerived = readManifest(raw({ ...m, gate: { ...gate0, derived: [der] } }));
+      check(
+        'manifest (C8 control): a valid gate report with F14b G15/derived is accepted and kept',
+        false,
+        isDeepStrictEqual((okDerived?.gate as unknown as { derived: unknown[] })?.derived, [der]) &&
+          !!readManifest(
+            raw({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], id: 'G15-derived' }] } }),
+          ),
+      );
+      check(
+        'manifest (C8): derived entry with an unknown kind / non-finite end → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, derived: [{ ...der, kind: 'glue' }] } }) &&
+          shape({ ...m, gate: { ...gate0, derived: [{ ...der, a: [1, null] }] } }),
+      );
+      check(
+        'manifest (C8): extra unknown fields are not carried into the result',
+        false,
+        !('evil' in (readManifest(raw({ ...m, evil: 'x'.repeat(10) })) ?? {})),
+      );
+    }
     const strayBlock = {
       ...m,
       blocks: [...m.blocks, { ...m.blocks[0], block: 'ZZ_M', identity: 'ZZ' }],

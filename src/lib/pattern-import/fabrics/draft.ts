@@ -141,7 +141,7 @@ export function scopeFileName(
   scope: Pick<DraftScope, 'target' | 'dxfText' | 'manifest'>,
   styleLabel: string,
 ) {
-  const src = scope.manifest.source.files[0]?.name.replace(/\.[^.]+$/, '') ?? '';
+  const src = (scope.manifest.source?.files?.[0]?.name ?? '').replace(/\.[^.]+$/, '');
   const base = slug(styleLabel) || slug(src) || 'pattern';
   const word = purposeWord(scope.target);
   const fp = fingerprint(bareOf(scope.dxfText, scope.manifest.createdAt));
@@ -267,9 +267,7 @@ export function buildDraft(
     const key = existing?.lineKey ?? mint();
     taken.add(key);
     const force = g.pair ? 'pair' : g.unfolded ? 'unfolded' : undefined;
-    const symmetry = existing
-      ? importedCutSymmetry(existing.cutSymmetry, ppg, force)
-      : IDENTICAL;
+    const symmetry = existing ? importedCutSymmetry(existing.cutSymmetry, ppg, force) : IDENTICAL;
     pieces.push({
       lineKey: key,
       name: existing?.name ?? g.name,
@@ -361,13 +359,18 @@ export function replaceTargetOf(
     (p) => p.scopeKey === sc.target.scopeKey && !!p.manifest && !!(p.lineKey ?? '').trim(),
   );
   if (!rows.length) return null;
-  const sha = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.sha256)));
-  const src = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.name)));
+  // Codex C8: a manifest from the card's read is validated, but these rows also come from callers
+  // and older reads — a missing `source.files` must cost the match, not the apply.
+  const filesOf = (m: ConversionManifest | null | undefined) =>
+    Array.isArray(m?.source?.files) ? m.source.files : [];
+  const strs = (xs: unknown[]) => xs.filter((v): v is string => typeof v === 'string');
+  const sha = new Set(nonEmpty(strs(filesOf(sc.manifest).map((f) => f?.sha256))));
+  const src = new Set(nonEmpty(strs(filesOf(sc.manifest).map((f) => f?.name))));
   const score = (p: (typeof rows)[number]): [number, DraftReplaceTarget['matchedBy']] => {
-    const files = p.manifest!.source.files;
-    if (sha.size && nonEmpty(files.map((f) => f.sha256)).some((h) => sha.has(h)))
+    const files = filesOf(p.manifest);
+    if (sha.size && nonEmpty(strs(files.map((f) => f?.sha256))).some((h) => sha.has(h)))
       return [2, 'sha256'];
-    if (src.size && nonEmpty(files.map((f) => f.name)).some((n) => src.has(n)))
+    if (src.size && nonEmpty(strs(files.map((f) => f?.name))).some((n) => src.has(n)))
       return [1, 'source'];
     return [0, 'scope'];
   };

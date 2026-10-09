@@ -108,7 +108,7 @@ const ImportFollowUpRunner = lazy(() =>
 /** «converted» badge tooltip: what the importer wrote into the sheet (MF-C, M10). */
 function convertedTitle(m: ConversionManifest): string {
   const src =
-    m.source.files
+    (m.source?.files ?? [])
       .map((f) => f.name)
       .filter(Boolean)
       .join(', ') || 'unknown source';
