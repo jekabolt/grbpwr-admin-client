@@ -386,11 +386,13 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   };
   const pool: Item[] = [...freeBeads];
   const chainOfMark = new Map<Item, WChain>();
+  const markOfChain = new Map<WChain, Item>();
   for (const ch of chains) {
     if (ch.dead || !(isTiny(ch) || isShortLone(ch))) continue;
     const m = markOf(ch);
     pool.push(m);
     chainOfMark.set(m, ch);
+    markOfChain.set(ch, m);
   }
   const rows = chainBeads(pool).filter((row) => {
     // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
@@ -439,7 +441,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
       alive.push(ch);
       continue;
     }
-    const m = [...chainOfMark.entries()].find(([, c]) => c === ch)?.[0] ?? markOf(ch);
+    const m = markOfChain.get(ch) ?? markOf(ch);
     const bi = nearestHost(m.c!, m.dir ?? null, 30);
     if (bi >= 0) {
       for (const l of ch.items)

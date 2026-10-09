@@ -167,7 +167,9 @@ async function zoom(id: string, args: string[]) {
   const strokes = sheet.paths.map((p) => ({
     pts: p.pts,
     // RGB=1: the drawing's own colours (leonie) instead of a palette per style
-    color: process.env.RGB ? rgbHex(sheet.styles[p.style] as never) : PALETTE[p.style % PALETTE.length],
+    color: process.env.RGB
+      ? rgbHex(sheet.styles[p.style] as never)
+      : PALETTE[p.style % PALETTE.length],
     width: 1,
   }));
   const labels = sheet.texts.map((t) => ({ at: t.anchor, text: t.text, color: '#000', size: 10 }));
@@ -294,7 +296,10 @@ async function sizesMode(id: string, args: string[]) {
           const a = c.pts[i];
           const b = c.pts[i + 1];
           const L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1e-12;
-          const t = Math.max(0, Math.min(1, ((P.x - a.x) * (b.x - a.x) + (P.y - a.y) * (b.y - a.y)) / L2));
+          const t = Math.max(
+            0,
+            Math.min(1, ((P.x - a.x) * (b.x - a.x) + (P.y - a.y) * (b.y - a.y)) / L2),
+          );
           m = Math.min(m, Math.hypot(a.x + t * (b.x - a.x) - P.x, a.y + t * (b.y - a.y) - P.y));
         }
         return m;
@@ -435,10 +440,20 @@ export async function main(argv: string[]): Promise<number> {
     const { sheet } = await sheetOf(s);
     const [x0, y0, w, h] = rest.slice(1).map(Number);
     const b = sheet.bbox;
-    const box = { minX: b.minX + x0, maxX: b.minX + x0 + w, minY: b.maxY - y0 - h, maxY: b.maxY - y0 };
+    const box = {
+      minX: b.minX + x0,
+      maxX: b.minX + x0 + w,
+      minY: b.maxY - y0 - h,
+      maxY: b.maxY - y0,
+    };
     const st = new Map<number, { n: number; len: number; y: number[] }>();
     for (const p of sheet.paths) {
-      if (!p.pts.every((q) => q.x >= box.minX && q.x <= box.maxX && q.y >= box.minY && q.y <= box.maxY)) continue;
+      if (
+        !p.pts.every(
+          (q) => q.x >= box.minX && q.x <= box.maxX && q.y >= box.minY && q.y <= box.maxY,
+        )
+      )
+        continue;
       let L = 0;
       for (let i = 1; i < p.pts.length; i++)
         L += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
@@ -783,10 +798,13 @@ function summarise(
       set,
       // FP_REACH='{"reef":31.8}' replays a reach (comparing against an older build without diag)
       (JSON.parse(process.env.FP_REACH ?? '{}') as Record<string, number>)[id] ??
-      Math.min(
-        35,
-        Math.max(12, 2.5 * ((recover.diag.laneSpacing as { median?: number } | undefined)?.median ?? 0)),
-      ),
+        Math.min(
+          35,
+          Math.max(
+            12,
+            2.5 * ((recover.diag.laneSpacing as { median?: number } | undefined)?.median ?? 0),
+          ),
+        ),
     ),
     landings: recover.diag.landings,
     bridges: recover.diag.bridges,
@@ -847,14 +865,20 @@ export async function reportMode(ids: string[]) {
   }
   // zooms the reviewer looks at
   const zooms: [string, number, number, number, number, number][] = [
-    ['palto', 0, 1000, 1190, 285, 1.6],
-    ['palto', 960, 980, 230, 180, 5],
-    ['viola', 520, 540, 220, 220, 4],
+    // F3b: coordinates on the F2 sheets (top-left origin, mm)
+    ['palto', 0, 950, 1190, 335, 1.6],
+    ['palto', 820, 960, 160, 160, 5],
+    ['viola', 380, 1240, 300, 180, 3],
+    ['viola', 840, 1120, 140, 50, 6],
     ['kombinezon', 0, 840, 950, 600, 1.5],
     ['r4454', 300, 0, 500, 330, 2],
     ['robe', 300, 250, 500, 350, 2],
-    ['reef', 300, 300, 600, 500, 1.5],
-    ['leonie', 0, 0, 503, 900, 1.5],
+    ['reef', 0, 640, 400, 380, 2],
+    ['reef', 600, 1170, 190, 110, 6],
+    ['reef', 100, 30, 90, 70, 10],
+    ['zhaket', 0, 380, 620, 420, 1.6],
+    ['leonie', 0, 1150, 595, 1300, 0.9],
+    ['leonie', 0, 1330, 90, 120, 8],
   ];
   for (const [id, x0, y0, w, h, px] of zooms) {
     if (!ids.includes(id)) continue;
@@ -924,6 +948,11 @@ export async function reportMode(ids: string[]) {
   out.samples = summaries;
   out.negatives = negatives;
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  writeFileSync(resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`), JSON.stringify(out, null, 2));
-  console.log(`report: ${resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`)}; shots: ${shots}`);
+  writeFileSync(
+    resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`),
+    JSON.stringify(out, null, 2),
+  );
+  console.log(
+    `report: ${resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`)}; shots: ${shots}`,
+  );
 }

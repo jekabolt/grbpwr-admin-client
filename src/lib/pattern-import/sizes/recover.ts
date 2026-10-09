@@ -531,7 +531,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     }
   }
   const nUnits = unitNames.length;
-  if (process.env.F3_DEBUG)
+  if (debugFlag('F3_DEBUG'))
     diag.allLooks = Array.from({ length: nLooks }, (_, l) => l)
       .filter((l) => lookLen[l] > 200)
       .map(
@@ -1624,7 +1624,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         relaxed.set(key, (relaxed.get(key) ?? 0) + 1);
       }
     }
-    if (g.lanes.length !== n) continue;
+    // a size the legend shows but the sheet draws on another size's line (viola 34 on 36) has no
+    // lane of its own: a full group has n − |absent| lanes and the absent rank takes the line it
+    // is drawn on (its nearest present neighbour)
+    if (g.lanes.length !== n - noVote.size) continue;
     const byRank = new Array<number>(n).fill(-1);
     let ok = true;
     for (const k of g.lanes) {
@@ -1641,6 +1644,14 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       }
       byRank[r] = best;
     }
+    if (ok)
+      for (const r of noVote) {
+        let best = -1;
+        for (let d = 1; d < n && best < 0; d++)
+          for (const q of [r + d, r - d])
+            if (best < 0 && q >= 0 && q < n && !noVote.has(q) && byRank[q] >= 0) best = byRank[q];
+        byRank[r] = best;
+      }
     if (!ok || byRank.some((c) => c < 0)) continue;
     const offs = g.lanes.map((k) => g.x.offsets[k]);
     const sp = Math.abs(offs[offs.length - 1] - offs[0]) / Math.max(1, offs.length - 1);
@@ -1781,7 +1792,7 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
       });
   }
   cands.sort((a, b) => a.score - b.score);
-  if (process.env.F3_LEGEND)
+  if (debugFlag('F3_LEGEND'))
     for (const c of cands)
       console.log(`legend cand ${c.label} c${c.chain} d=${c.d.toFixed(2)} s=${c.score.toFixed(2)}`);
   const usedText = new Set<IRText>();
@@ -1902,6 +1913,11 @@ function longestMonotone(r: number[]): Set<number> {
     if (seq.length > best.length) best = seq;
   }
   return new Set(best);
+}
+
+/** Probe-only diagnostics (node); the browser worker has no `process`. */
+function debugFlag(k: string): boolean {
+  return typeof process !== 'undefined' && !!process.env?.[k];
 }
 
 function identityEncoding(e: SizeEncoding): boolean {

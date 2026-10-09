@@ -199,13 +199,17 @@ function vecOf(s: VecParts, scale = 1): Float64Array {
   return V;
 }
 
-/** Best shapeCosine of `a` re-drawn at scales 0.8…1.25 against `b` (legend samples). */
-export function shapeCosineScaled(a: Signature, b: Float64Array): number {
+/** `a`'s vector re-drawn at scales 0.8…1.25 (a legend printed at another scale than the sheet). */
+export function scaledVecs(a: Signature): Float64Array[] {
+  const out: Float64Array[] = [];
+  for (let f = 0.8; f <= 1.251; f += 0.025) out.push(vecOf({ ...a, innerPieces: a.pieces }, f));
+  return out;
+}
+
+/** Best shapeCosine of any of `as` (scaledVecs of a sample) against `b`. */
+export function shapeCosineBest(as: Float64Array[], b: Float64Array): number {
   let best = 0;
-  for (let f = 0.8; f <= 1.251; f += 0.025) {
-    const v = vecOf({ ...a, innerPieces: a.pieces }, f);
-    best = Math.max(best, shapeCosine(v, b));
-  }
+  for (const v of as) best = Math.max(best, shapeCosine(v, b));
   return best;
 }
 

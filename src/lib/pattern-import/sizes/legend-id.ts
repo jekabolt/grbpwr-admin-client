@@ -10,7 +10,7 @@
 import type { Chain, Style } from 'lib/pattern-import/types';
 
 import { normDash } from '../chains/link';
-import { sameDashShape, sameStroke, shapeCosineScaled, type Signature } from '../chains/motif';
+import { sameDashShape, sameStroke, scaledVecs, shapeCosineBest, type Signature } from '../chains/motif';
 
 export type LegendHit = { label: string; chain: number };
 
@@ -66,7 +66,13 @@ export function legendIdentity(
     if (d) {
       let g = groups.find((x) => x.dash && sameDashShape(x.dash, d));
       if (!g) {
-        g = { name: `dash ${d.map((v) => v.toFixed(2)).join('/')}`, members: [], len: 0, dash: d, vec: null };
+        g = {
+          name: `dash ${d.map((v) => v.toFixed(2)).join('/')}`,
+          members: [],
+          len: 0,
+          dash: d,
+          vec: null,
+        };
         groups.push(g);
       }
       g.members.push(i);
@@ -106,11 +112,12 @@ export function legendIdentity(
     return false;
   };
 
+  const scaled = new Map(samples.map((h) => [h.chain, scaledVecs(sigs[h.chain])]));
   const score = (h: LegendHit, g: G) => {
     const sd = declOf(h.chain);
     if (sd && g.dash) return sameDashShape(g.dash, sd) ? 1 : 0;
     const sv = sigs[h.chain].vec;
-    const c = shapeCosineScaled(sigs[h.chain], g.vec!) + 0.02 * sameStroke(sv, g.vec!);
+    const c = shapeCosineBest(scaled.get(h.chain)!, g.vec!) + 0.02 * sameStroke(sv, g.vec!);
     // a declared sample has no beads to compare (viola's 46 is a 0/0.89 dash with round caps)
     return !sd && g.decor && decorClash(sigs[h.chain].decorPer10, g.decor) ? c / 2 : c;
   };
@@ -127,7 +134,11 @@ export function legendIdentity(
     const ranked = [...per.entries()].sort((a, b) => b[1] - a[1]);
     const [bk, bs] = ranked[0] ?? [-1, 0];
     const second = ranked[1]?.[1] ?? 0;
-    return { k: bk, s: bs, ok: bk >= 0 && bs >= LEGEND_ID.minScore && bs - second >= LEGEND_ID.minMargin };
+    return {
+      k: bk,
+      s: bs,
+      ok: bk >= 0 && bs >= LEGEND_ID.minScore && bs - second >= LEGEND_ID.minMargin,
+    };
   };
   const tally = new Map<string, { idx: number; group: string; lengthMm: number; score: number }>();
   for (const g of groups) {
@@ -143,7 +154,12 @@ export function legendIdentity(
         for (const i of g.members) label[i] = gd.k;
         matched[gd.k].push({ idx: gd.k, group: g.name, lengthMm: g.len, score: +gd.s.toFixed(3) });
       } else if (g.len >= 3 * LEGEND_ID.minGroupMm)
-        unmatched.push({ group: g.name, lengthMm: g.len, best: gd.k >= 0 ? key[gd.k] : '-', score: +gd.s.toFixed(3) });
+        unmatched.push({
+          group: g.name,
+          lengthMm: g.len,
+          best: gd.k >= 0 ? key[gd.k] : '-',
+          score: +gd.s.toFixed(3),
+        });
       continue;
     }
     // a look may hold two sizes drawn alike enough to cluster (reef: zigzag with small dots = M,
@@ -151,23 +167,38 @@ export function legendIdentity(
     let left = 0;
     for (const i of g.members) {
       const one = { ...g, vec: sigs[i].vec, dash: null, decor: sigs[i].decorPer10 };
-      const cd = sigs[i].reliable && chains[i].lengthMm >= 20 ? decide((si) => score(samples[si], one)) : null;
+      const cd =
+        sigs[i].reliable && chains[i].lengthMm >= 20
+          ? decide((si) => score(samples[si], one))
+          : null;
       const pick = cd?.ok ? cd : gd.ok ? gd : null;
       if (!pick) {
         left += chains[i].lengthMm;
         continue;
       }
       label[i] = pick.k;
-      const t = tally.get(`${pick.k}|${g.name}`) ?? { idx: pick.k, group: g.name, lengthMm: 0, score: 0 };
-      t.score = (t.score * t.lengthMm + pick.s * chains[i].lengthMm) / (t.lengthMm + chains[i].lengthMm);
+      const t = tally.get(`${pick.k}|${g.name}`) ?? {
+        idx: pick.k,
+        group: g.name,
+        lengthMm: 0,
+        score: 0,
+      };
+      t.score =
+        (t.score * t.lengthMm + pick.s * chains[i].lengthMm) / (t.lengthMm + chains[i].lengthMm);
       t.lengthMm += chains[i].lengthMm;
       tally.set(`${pick.k}|${g.name}`, t);
     }
     if (left >= 3 * LEGEND_ID.minGroupMm)
-      unmatched.push({ group: g.name, lengthMm: left, best: gd.k >= 0 ? key[gd.k] : '-', score: +gd.s.toFixed(3) });
+      unmatched.push({
+        group: g.name,
+        lengthMm: left,
+        best: gd.k >= 0 ? key[gd.k] : '-',
+        score: +gd.s.toFixed(3),
+      });
   }
   for (const t of tally.values())
-    if (t.lengthMm >= LEGEND_ID.minGroupMm / 2) matched[t.idx].push({ ...t, score: +t.score.toFixed(3) });
+    if (t.lengthMm >= LEGEND_ID.minGroupMm / 2)
+      matched[t.idx].push({ ...t, score: +t.score.toFixed(3) });
   const absent = key
     .map((_, k) => k)
     .filter((k) => samples.some((h) => idxOf.get(h.label) === k) && !matched[k].length);
