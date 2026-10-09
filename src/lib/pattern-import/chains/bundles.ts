@@ -86,7 +86,11 @@ function castRay(
 /**
  * Neighbour pairs among `cand` chains. Every chain in `blockers` (candidates included) stops rays.
  */
-export function neighbourPairs(chains: Chain[], cand: boolean[], blockers: boolean[]): Map<string, PairStat> {
+export function neighbourPairs(
+  chains: Chain[],
+  cand: boolean[],
+  blockers: boolean[],
+): Map<string, PairStat> {
   const polys = chains.map((c) => c.pts);
   const grid = new SegGrid(6);
   chains.forEach((c, i) => {
@@ -114,7 +118,17 @@ export function neighbourPairs(chains: Chain[], cand: boolean[], blockers: boole
         const k = `${lo}|${hi}`;
         let ps = pairs.get(k);
         if (!ps) {
-          ps = { i: lo, j: hi, votesI: 0, votesJ: 0, offIJ: 0, same: 1, sumOff: 0, sumSame: 0, n: 0 };
+          ps = {
+            i: lo,
+            j: hi,
+            votesI: 0,
+            votesJ: 0,
+            offIJ: 0,
+            same: 1,
+            sumOff: 0,
+            sumSame: 0,
+            n: 0,
+          };
           pairs.set(k, ps);
         }
         if (i === lo) {
@@ -133,7 +147,14 @@ export function neighbourPairs(chains: Chain[], cand: boolean[], blockers: boole
     const overlap = Math.max(ps.votesI, ps.votesJ) * BUNDLE.stepMm;
     if (overlap < Math.min(BUNDLE.minOverlapMm, 0.5 * shorter)) continue;
     if (ps.n === 0) continue; // seen only from the longer side: the offset is measured from i
-    out.set(k, { i: ps.i, j: ps.j, votesI: ps.votesI, votesJ: ps.votesJ, offIJ: ps.sumOff / ps.n, same: ps.sumSame >= 0 ? 1 : -1 });
+    out.set(k, {
+      i: ps.i,
+      j: ps.j,
+      votesI: ps.votesI,
+      votesJ: ps.votesJ,
+      offIJ: ps.sumOff / ps.n,
+      same: ps.sumSame >= 0 ? 1 : -1,
+    });
   }
   return out;
 }
@@ -288,7 +309,15 @@ export const XSEC = { stepMm: 5, rayMm: 70, turnSpanMm: 20 };
 
 type RayHit = { j: number; u: number; dot: number };
 
-function castAll(grid: SegGrid, polys: PtMm[][], self: number, p: PtMm, n: PtMm, t: PtMm, maxLen: number): RayHit[] {
+function castAll(
+  grid: SegGrid,
+  polys: PtMm[][],
+  self: number,
+  p: PtMm,
+  n: PtMm,
+  t: PtMm,
+  maxLen: number,
+): RayHit[] {
   const hits = new Map<number, RayHit>();
   const seen = new Set<number>();
   const stepQ = 6;
@@ -406,7 +435,14 @@ export function crossSections(
       }
       if (lanes.length < 2) continue;
       if (lanes.length >= 3) wide[i]++;
-      out.push({ from: i, at: s.p, turn: localTurn(c.pts, s.s, XSEC.turnSpanMm), lanes, offsets, orient });
+      out.push({
+        from: i,
+        at: s.p,
+        turn: localTurn(c.pts, s.s, XSEC.turnSpanMm),
+        lanes,
+        offsets,
+        orient,
+      });
     }
   });
   return { sections: out, samples, wide };
@@ -416,7 +452,11 @@ export function crossSections(
  * Cut a cross-section into groups of ≤ n lanes (same costs as splitLanes: exactly n preferred,
  * cuts at wide spacing, no repeated unit inside a group).
  */
-export function splitSection(x: CrossSection, n: number, unitOfLane: (lane: number[]) => number): number[][] {
+export function splitSection(
+  x: CrossSection,
+  n: number,
+  unitOfLane: (lane: number[]) => number,
+): number[][] {
   const fake: RawBundle = {
     members: [],
     lanes: x.lanes.map((chains, k) => ({ chains, offset: x.offsets[k], length: 1 })),

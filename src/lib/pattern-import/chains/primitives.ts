@@ -73,7 +73,16 @@ function principal(pts: PtMm[]) {
     if (b < b0) b0 = b;
     if (b > b1) b1 = b;
   }
-  return { c: { x: cx, y: cy }, u: { x: ux, y: uy }, major: a1 - a0, minor: b1 - b0, a0, a1, b0, b1 };
+  return {
+    c: { x: cx, y: cy },
+    u: { x: ux, y: uy },
+    major: a1 - a0,
+    minor: b1 - b0,
+    a0,
+    a1,
+    b0,
+    b1,
+  };
 }
 
 export const ITEM = {
@@ -98,11 +107,36 @@ export function itemOf(p: IRPath, style: Style): Item | null {
     if (!p.closed && p.pts.length < 3) return null;
     const pr = principal(p.pts);
     if (pr.major <= ITEM.fillDotMaxMm && pr.minor <= ITEM.fillDotMaxMm)
-      return { kind: 'bead', bead: 'dot', path: p.id, pts: p.pts, edges, len: 0, style: style.id, c: pr.c, dir: null, op, sub: p.src.sub };
-    if (pr.minor <= ITEM.fillDashMaxWidthMm && pr.major >= ITEM.fillDashMinMm && pr.major >= 2.5 * pr.minor) {
+      return {
+        kind: 'bead',
+        bead: 'dot',
+        path: p.id,
+        pts: p.pts,
+        edges,
+        len: 0,
+        style: style.id,
+        c: pr.c,
+        dir: null,
+        op,
+        sub: p.src.sub,
+      };
+    if (
+      pr.minor <= ITEM.fillDashMaxWidthMm &&
+      pr.major >= ITEM.fillDashMinMm &&
+      pr.major >= 2.5 * pr.minor
+    ) {
       const a = { x: pr.c.x + pr.u.x * pr.a0, y: pr.c.y + pr.u.y * pr.a0 };
       const b = { x: pr.c.x + pr.u.x * pr.a1, y: pr.c.y + pr.u.y * pr.a1 };
-      return { kind: 'fill-dash', path: p.id, pts: [a, b], edges, len: pr.major, style: style.id, op, sub: p.src.sub };
+      return {
+        kind: 'fill-dash',
+        path: p.id,
+        pts: [a, b],
+        edges,
+        len: pr.major,
+        style: style.id,
+        op,
+        sub: p.src.sub,
+      };
     }
     return null;
   }
@@ -112,7 +146,20 @@ export function itemOf(p: IRPath, style: Style): Item | null {
   const diag = Math.hypot(bb.maxX - bb.minX, bb.maxY - bb.minY);
   if (p.closed && diag <= ITEM.ringMaxMm) {
     const pr = principal(p.pts);
-    return { kind: 'bead', bead: 'ring', size: diag, path: p.id, pts: p.pts, edges, len, style: style.id, c: pr.c, dir: null, op, sub: p.src.sub };
+    return {
+      kind: 'bead',
+      bead: 'ring',
+      size: diag,
+      path: p.id,
+      pts: p.pts,
+      edges,
+      len,
+      style: style.id,
+      c: pr.c,
+      dir: null,
+      op,
+      sub: p.src.sub,
+    };
   }
   if (len <= ITEM.beadMaxMm) {
     const a = p.pts[0];
@@ -132,5 +179,14 @@ export function itemOf(p: IRPath, style: Style): Item | null {
       sub: p.src.sub,
     };
   }
-  return { kind: 'stroke', path: p.id, pts: p.closed ? [...p.pts, p.pts[0]] : p.pts, edges, len, style: style.id, op, sub: p.src.sub };
+  return {
+    kind: 'stroke',
+    path: p.id,
+    pts: p.closed ? [...p.pts, p.pts[0]] : p.pts,
+    edges,
+    len,
+    style: style.id,
+    op,
+    sub: p.src.sub,
+  };
 }

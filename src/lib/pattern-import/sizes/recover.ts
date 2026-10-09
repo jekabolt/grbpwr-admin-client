@@ -79,7 +79,6 @@ export type RecoverOut = {
   diag: Record<string, unknown>;
 };
 
-
 function lenOf(chains: Chain[], ids: Iterable<number>) {
   let L = 0;
   for (const i of ids) L += chains[i].lengthMm;
@@ -133,7 +132,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const N0 = chains.length;
   const cand = chains.map((c, i) => !furniture[i] && c.lengthMm >= 8);
   const blockers = chains.map((_, i) => !furniture[i]);
-  const totalCand = lenOf(chains, chains.map((_, i) => i).filter((i) => cand[i]));
+  const totalCand = lenOf(
+    chains,
+    chains.map((_, i) => i).filter((i) => cand[i]),
+  );
 
   // ── looks and a first bundle pass over every line ───────────────────────────────────────────
   const looks = clusterLooks(chains, sigs, cand);
@@ -172,14 +174,20 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     const layer = styles.get(c.style)?.layer;
     if (layer) layerLen.set(layer, (layerLen.get(layer) ?? 0) + c.lengthMm);
   });
-  const sizeLayers = [...layerLen.entries()].filter(([name, L]) => parseSizeToken(name, true) && L >= 0.02 * totalCand);
+  const sizeLayers = [...layerLen.entries()].filter(
+    ([name, L]) => parseSizeToken(name, true) && L >= 0.02 * totalCand,
+  );
   const bigFiles = [...fileLen.entries()].filter(([, L]) => L >= 0.05 * totalCand);
   // declared dashes among candidates
   const dashed = chains
     .map((c, i) => ({ i, st: styles.get(c.style) }))
     .filter(({ i, st }) => cand[i] && st?.dash && st.dash.some((v) => v > 0.01));
-  const dclAll = dashCluster(dashed.map(({ i, st }) => ({ dash: st!.dash!, len: chains[i].lengthMm })));
-  diag.dashClusters = dclAll.map((c) => `${c.rep.map((v) => v.toFixed(2)).join('/')}:${(c.len / 1000).toFixed(2)}m`);
+  const dclAll = dashCluster(
+    dashed.map(({ i, st }) => ({ dash: st!.dash!, len: chains[i].lengthMm })),
+  );
+  diag.dashClusters = dclAll.map(
+    (c) => `${c.rep.map((v) => v.toFixed(2)).join('/')}:${(c.len / 1000).toFixed(2)}m`,
+  );
   const dclusters = dclAll.filter((c) => c.len >= Math.max(600, 0.015 * totalCand));
   const allTexts = sheet.texts;
   const hits0 = tokenHits(allTexts, chains, cand, 6);
@@ -190,13 +198,44 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   let hits = onLine.filter((h) => hitRun.has(h.label));
   {
     // labels along lines are spread over the sheet; a cluster in one corner is a table or legend
-    const cells = new Set(hits.map((h) => `${Math.floor(h.text.anchor.x / 150)},${Math.floor(h.text.anchor.y / 150)}`));
+    const cells = new Set(
+      hits.map((h) => `${Math.floor(h.text.anchor.x / 150)},${Math.floor(h.text.anchor.y / 150)}`),
+    );
     if (cells.size < 3) hits = [];
   }
   const legendRun = labelRun(legendHits0, 1);
   const legendHits = legendHits0.filter((h) => legendRun.has(h.label));
   const hitLabels = new Map<string, number>();
   for (const h of hits) hitLabels.set(h.label, (hitLabels.get(h.label) ?? 0) + 1);
+
+  // colour groups among line work: saturated colours (and at most one dark ink) each carrying
+  // ≥ 3 % of the candidate length
+  const colourLen = new Map<string, { rgb: [number, number, number]; len: number }>();
+  chains.forEach((c, i) => {
+    if (!cand[i]) return;
+    const rgb = styles.get(c.style)?.strokeRgb;
+    if (!rgb) return;
+    const k = colourKey(rgb);
+    const e = colourLen.get(k) ?? { rgb: rgb as [number, number, number], len: 0 };
+    e.len += c.lengthMm;
+    colourLen.set(k, e);
+  });
+  const colourGroups: { rgb: [number, number, number]; members: Set<string>; len: number }[] = [];
+  for (const [k, e] of [...colourLen].sort((a, b) => b[1].len - a[1].len)) {
+    const g = colourGroups.find((x) => rgbDist(x.rgb, e.rgb) < 36);
+    if (g) {
+      g.members.add(k);
+      g.len += e.len;
+    } else colourGroups.push({ rgb: e.rgb, members: new Set([k]), len: e.len });
+  }
+  {
+    const big = colourGroups.filter((g) => g.len >= 0.03 * totalCand);
+    const saturated = big.filter((g) => Math.max(...g.rgb) - Math.min(...g.rgb) >= 60);
+    colourGroups.length = 0;
+    if (saturated.length >= 2)
+      colourGroups.push(...big.filter((g) => saturated.includes(g) || Math.max(...g.rgb) < 110));
+  }
+  diag.colours = colourGroups.map((g) => `${g.rgb.join(',')}:${(g.len / 1000).toFixed(1)}m`);
 
   let encoding: SizeEncoding;
   // unit per chain: the identity hint the alignment works with
@@ -207,7 +246,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   if (bigFiles.length >= 2) {
     encoding = 'file-per-size';
     unitNames = bigFiles.map(([f]) => f);
-    unitEvidence = bigFiles.map(([f]) => [{ kind: 'file', file: f, label: inp.fileNames?.get(f) ?? f }]);
+    unitEvidence = bigFiles.map(([f]) => [
+      { kind: 'file', file: f, label: inp.fileNames?.get(f) ?? f },
+    ]);
     chains.forEach((c, i) => {
       if (!cand[i]) return;
       unit[i] = unitNames.indexOf(pathFile.get(c.ranges[0]?.path ?? -1) ?? '');
@@ -222,6 +263,18 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       unit[i] = unitNames.indexOf(styles.get(c.style)?.layer ?? '');
     });
     labelOrderKnown = true;
+  } else if (colourGroups.length >= 3) {
+    // line colour per size (leonie). Colour is NOT identity: one size may borrow another's colour
+    // on some tiles and black carries text too — ranks still come from nesting, colour is the hint.
+    encoding = 'color';
+    unitNames = colourGroups.map((g) => `rgb(${g.rgb.join(',')})`);
+    unitEvidence = colourGroups.map((g) => [{ kind: 'color', rgb: g.rgb }]);
+    chains.forEach((c, i) => {
+      if (!cand[i]) return;
+      const rgb = styles.get(c.style)?.strokeRgb;
+      if (!rgb) return;
+      unit[i] = colourGroups.findIndex((g) => g.members.has(colourKey(rgb)));
+    });
   } else if (dclusters.length >= 2) {
     encoding = 'declared-dash';
     unitNames = dclusters.map((c) => `dash ${c.rep.map((v) => v.toFixed(2)).join('/')}`);
@@ -247,7 +300,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
 
   // size-coded looks (for rhythm / text-label, and to admit an undeclared solid size in declared)
   const sizeLook = new Array(nLooks).fill(false);
-  for (let l = 0; l < nLooks; l++) sizeLook[l] = lookLen[l] >= 300 && lookBundled[l] / lookLen[l] >= 0.35;
+  for (let l = 0; l < nLooks; l++)
+    sizeLook[l] = lookLen[l] >= 300 && lookBundled[l] / lookLen[l] >= 0.35;
   if (encoding === 'subpath-dash' || encoding === 'separate-dash' || encoding === 'text-label') {
     unitNames = [];
     unitEvidence = [];
@@ -270,6 +324,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     // a look that is not a declared dash but runs beside declared size lines is one more size
     // (robe: 5 dashes + 1 solid; reef: 4 dashes + chevrons, zigzag-with-rings, dots … drawn as geometry)
     const declaredSet = new Set(chains.map((_, i) => i).filter((i) => unit[i] >= 0));
+    const declaredWidths = [
+      ...new Set(
+        [...declaredSet].map((i) => +(styles.get(chains[i].style)?.widthMm ?? 0).toFixed(2)),
+      ),
+    ];
     const share: string[] = [];
     for (let l = 0; l < nLooks; l++) {
       const members = chains.map((_, i) => i).filter((i) => looks.look[i] === l && unit[i] < 0);
@@ -288,9 +347,20 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const sh = samples ? declaredNeighbours / samples : 0;
       share.push(`${lookDesc(l)}:${sh.toFixed(2)}/${samples}`);
       if (declaredNeighbours < 10 || sh < 0.2) continue;
+      // a plain solid beside the sizes is a size only when drawn with the size lines' pen (robe:
+      // 46 = solid 0.42 like the dashes; the 0.35 outline next to it is the common edge)
+      const sig0 = sigs[members[0]];
+      if (sig0?.solid && !Object.values(sig0.decorPer10).some((v) => v > 0.3)) {
+        const w = sig0.backbone?.widthMm ?? 0;
+        if (!declaredWidths.some((dw) => Math.abs(dw - w) <= 0.03)) continue;
+      }
       const u = unitNames.length;
       unitNames.push(lookDesc(l));
-      unitEvidence.push(sigs[members[0]]?.motif ? [{ kind: 'recovered-motif', motif: sigs[members[0]].motif! }] : []);
+      unitEvidence.push(
+        sigs[members[0]]?.motif
+          ? [{ kind: 'recovered-motif', motif: sigs[members[0]].motif! }]
+          : [],
+      );
       for (const i of members) if (cand[i]) unit[i] = u;
     }
     diag.besideDeclared = share;
@@ -299,11 +369,16 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   if (process.env.F3_DEBUG)
     diag.allLooks = Array.from({ length: nLooks }, (_, l) => l)
       .filter((l) => lookLen[l] > 200)
-      .map((l) => `${lookDesc(l)} L=${(lookLen[l] / 1000).toFixed(1)} b=${(lookBundled[l] / Math.max(1, lookLen[l])).toFixed(2)}${sizeLook[l] ? ' SIZE' : ''}`);
+      .map(
+        (l) =>
+          `${lookDesc(l)} L=${(lookLen[l] / 1000).toFixed(1)} b=${(lookBundled[l] / Math.max(1, lookLen[l])).toFixed(2)}${sizeLook[l] ? ' SIZE' : ''}`,
+      );
 
   // ── cross-sections over size candidates; every other line blocks ────────────────────────────
   const sizeCand = chains.map((_, i) => cand[i] && unit[i] >= 0);
-  if (encoding === 'text-label') for (let i = 0; i < chains.length; i++) if (cand[i] && looks.look[i] >= 0 && sizeLook[looks.look[i]]) sizeCand[i] = true;
+  if (encoding === 'text-label')
+    for (let i = 0; i < chains.length; i++)
+      if (cand[i] && looks.look[i] >= 0 && sizeLook[looks.look[i]]) sizeCand[i] = true;
   const xsB = crossSections(chains, sizeCand, blockers).sections;
   const laneUnit = (lane: number[]) => majorityUnit(lane, unit, chains);
   const laneHist = new Map<number, number>();
@@ -317,7 +392,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     let cov = 0;
     for (const x of xsB) {
       if (x.lanes.length < nn) continue;
-      for (const g of x.lanes.length > nn ? splitSection(x, nn, laneUnit) : [x.lanes.map((_, k) => k)]) {
+      for (const g of x.lanes.length > nn
+        ? splitSection(x, nn, laneUnit)
+        : [x.lanes.map((_, k) => k)]) {
         if (g.length !== nn) continue;
         const us = g.map((k) => laneUnit(x.lanes[k])).filter((u) => u >= 0);
         if (new Set(us).size === us.length) cov += nn;
@@ -330,7 +407,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   if (inp.sizeCount) {
     n = inp.sizeCount;
     nWhy = 'given';
-  } else if (encoding === 'ocg' || encoding === 'file-per-size' || encoding === 'declared-dash') {
+  } else if (
+    encoding === 'ocg' ||
+    encoding === 'file-per-size' ||
+    encoding === 'declared-dash' ||
+    encoding === 'color'
+  ) {
     n = nUnits;
     nWhy = `${nUnits} ${encoding} classes`;
   } else if (encoding === 'text-label') {
@@ -354,14 +436,26 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       distinctHist.set(best, (distinctHist.get(best) ?? 0) + 1);
     }
     const modeFreq = Math.max(...[...distinctHist].filter(([k]) => k >= 3).map(([, v]) => v), 0);
-    const widths = [...distinctHist].filter(([k, v]) => k >= 3 && v >= 0.15 * modeFreq).map(([k]) => k);
+    const widths = [...distinctHist]
+      .filter(([k, v]) => k >= 3 && v >= 0.15 * modeFreq)
+      .map(([k]) => k);
     const scores: [number, number][] = [];
     for (let nn = 3; nn <= 12; nn++) scores.push([nn, coverage(nn)]);
     scores.sort((a, b) => b[1] - a[1]);
     n = widths.length ? Math.max(...widths) : scores[0][1] > 0 ? scores[0][0] : Math.max(2, nUnits);
-    nWhy = `widest look-distinct lane run (${[...distinctHist].sort((a, b) => a[0] - b[0]).map(([k, v]) => `${k}:${v}`).join(' ')})`;
-    diag.coverage = scores.slice(0, 4).map(([k, v]) => `${k}:${v}`).join(' ');
-    const runN = new Set(runs.filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend')).map((r) => r.labels.length));
+    nWhy = `widest look-distinct lane run (${[...distinctHist]
+      .sort((a, b) => a[0] - b[0])
+      .map(([k, v]) => `${k}:${v}`)
+      .join(' ')})`;
+    diag.coverage = scores
+      .slice(0, 4)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(' ');
+    const runN = new Set(
+      runs
+        .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
+        .map((r) => r.labels.length),
+    );
     if (legendRun.size >= 3) runN.add(legendRun.size);
     if (runN.size && !runN.has(n)) {
       // a printed legend / "sizes 72, 76, 80, 84, 88" outranks geometry when geometry supports it at all
@@ -382,7 +476,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   }
   diag.n = { n, why: nWhy };
   {
-    const said = new Set(runs.filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend')).map((r) => r.labels.length));
+    const said = new Set(
+      runs
+        .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
+        .map((r) => r.labels.length),
+    );
     if (said.size && !said.has(n))
       ambiguities.push({
         kind: 'size-count',
@@ -408,10 +506,18 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (p.length < 2) continue;
       // only the group holding the section's own chain: other groups are seen from their own chains
       if (!p.some((k) => x.lanes[k].includes(x.from))) continue;
-      groups.push({ x, lanes: p, group: { units: p.map((k) => laneUnit(x.lanes[k])), weights: p.map(() => 1), flip: false } });
+      groups.push({
+        x,
+        lanes: p,
+        group: { units: p.map((k) => laneUnit(x.lanes[k])), weights: p.map(() => 1), flip: false },
+      });
     }
   }
-  diag.groups = { total: groups.length, full: groups.filter((g) => g.lanes.length === n).length, superSplit };
+  diag.groups = {
+    total: groups.length,
+    full: groups.filter((g) => g.lanes.length === n).length,
+    superSplit,
+  };
 
   // ── positions ───────────────────────────────────────────────────────────────────────────────
   const rankOf = new Map<number, number>();
@@ -424,7 +530,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     else hitByChain.set(h.chain, [h.label]);
   }
   let labels: (string | null)[] = new Array(n).fill(null);
-  const labelEvidence: ClassEvidence[][] = Array.from({ length: n }, () => []);
+  let labelEvidence: ClassEvidence[][] = Array.from({ length: n }, () => []);
   // votes[chain] = weight per rank
   const votes = new Map<number, number[]>();
   const vote = (c: number, r: number, w: number) => {
@@ -454,7 +560,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   if (encoding === 'ocg' || (encoding === 'file-per-size' && labelOrderKnown)) {
     const tok = unitNames.map((u, k) => ({
       k,
-      t: parseSizeToken(encoding === 'ocg' ? u : fileSizeLabel(inp.fileNames?.get(u) ?? '') ?? '', true),
+      t: parseSizeToken(
+        encoding === 'ocg' ? u : fileSizeLabel(inp.fileNames?.get(u) ?? '') ?? '',
+        true,
+      ),
     }));
     tok.sort((a, b) => (a.t?.value ?? 0) - (b.t?.value ?? 0));
     tok.forEach(({ k, t }, r) => {
@@ -471,7 +580,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     for (const g of groups) {
       const A = closureArea(chains[g.x.from].pts);
       if (Math.abs(A) < 100) continue;
-      const rs = g.lanes.map((k) => (unit[g.x.lanes[k][0]] >= 0 ? unitRank[unit[g.x.lanes[k][0]]] : -1));
+      const rs = g.lanes.map((k) =>
+        unit[g.x.lanes[k][0]] >= 0 ? unitRank[unit[g.x.lanes[k][0]]] : -1,
+      );
       for (let k = 1; k < rs.length; k++) {
         if (rs[k] < 0 || rs[k - 1] < 0 || rs[k] === rs[k - 1]) continue;
         // lanes run toward +normal (left); A > 0 = interior on the left = ranks should fall there
@@ -482,12 +593,16 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     }
     diag.nestingCheck = { agree, against };
   } else if (encoding === 'text-label') {
-    const order = [...hitLabels.keys()].map((l) => parseSizeToken(l, true)!).sort((a, b) => a.value - b.value);
+    const order = [...hitLabels.keys()]
+      .map((l) => parseSizeToken(l, true)!)
+      .sort((a, b) => a.value - b.value);
     labels = order.map((t) => t.label);
     const rankOfLabel = new Map(order.map((t, r) => [t.label, r]));
     const laneLabel = (lane: number[]) => {
       const m = new Map<number, number>();
-      for (const c of lane) for (const l of hitByChain.get(c) ?? []) m.set(rankOfLabel.get(l)!, (m.get(rankOfLabel.get(l)!) ?? 0) + 1);
+      for (const c of lane)
+        for (const l of hitByChain.get(c) ?? [])
+          m.set(rankOfLabel.get(l)!, (m.get(rankOfLabel.get(l)!) ?? 0) + 1);
       let best = -1;
       let bn = 0;
       for (const [r, k] of m)
@@ -516,7 +631,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         }
       g.lanes.forEach((k, idx) => {
         const own = lr[idx];
-        const fit = bestFit && (known >= 2 || g.lanes.length === n) ? bestFit.base + bestFit.dir * idx : -1;
+        const fit =
+          bestFit && (known >= 2 || g.lanes.length === n) ? bestFit.base + bestFit.dir * idx : -1;
         for (const c of g.x.lanes[k]) {
           if (fit >= 0) vote(c, fit, 1);
           else if (own >= 0) vote(c, own, 0.5);
@@ -532,26 +648,34 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       for (const g of groups) {
         const lr = g.lanes.map((k) => {
           const m = new Map<number, number>();
-          for (const c of g.x.lanes[k]) if (rankOf.has(c)) m.set(rankOf.get(c)!, (m.get(rankOf.get(c)!) ?? 0) + 1);
+          for (const c of g.x.lanes[k])
+            if (rankOf.has(c)) m.set(rankOf.get(c)!, (m.get(rankOf.get(c)!) ?? 0) + 1);
           return m.size === 1 ? [...m.keys()][0] : -1;
         });
         const known = lr.map((r, k) => ({ r, k })).filter((e) => e.r >= 0);
         if (known.length === g.lanes.length) continue;
         let dir = 0;
-        for (let a = 0; a < known.length; a++) for (let b = a + 1; b < known.length; b++) dir += Math.sign(known[b].r - known[a].r) * Math.sign(known[b].k - known[a].k);
+        for (let a = 0; a < known.length; a++)
+          for (let b = a + 1; b < known.length; b++)
+            dir += Math.sign(known[b].r - known[a].r) * Math.sign(known[b].k - known[a].k);
         if (dir === 0) {
           const A = closureArea(chains[g.x.from].pts);
           if (Math.abs(A) < 100) continue;
           dir = A > 0 ? -1 : 1; // interior at +normal (higher lane index) → ranks fall that way
         }
         const step = dir > 0 ? 1 : -1;
-        const anchors = known.length ? known : g.lanes.length === n ? [{ r: step > 0 ? 0 : n - 1, k: 0 }] : [];
+        const anchors = known.length
+          ? known
+          : g.lanes.length === n
+            ? [{ r: step > 0 ? 0 : n - 1, k: 0 }]
+            : [];
         if (!anchors.length) continue;
         g.lanes.forEach((k, idx) => {
           if (lr[idx] >= 0) return;
           const a = anchors.reduce((x, y) => (Math.abs(y.k - idx) < Math.abs(x.k - idx) ? y : x));
           const r = a.r + step * (idx - a.k);
-          if (r >= 0 && r < n) for (const c of g.x.lanes[k]) vote(c, r, known.length >= 2 ? 1 : 0.5);
+          if (r >= 0 && r < n)
+            for (const c of g.x.lanes[k]) vote(c, r, known.length >= 2 ? 1 : 0.5);
         });
       }
       const before = rankOf.size;
@@ -559,7 +683,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       added = rankOf.size - before;
       if (!added) break;
     }
-    labels.forEach((l, r) => l && labelEvidence[r].push({ kind: 'text-label', text: l, distanceMm: medianDist(hits, l) }));
+    labels.forEach(
+      (l, r) =>
+        l &&
+        labelEvidence[r].push({ kind: 'text-label', text: l, distanceMm: medianDist(hits, l) }),
+    );
   } else {
     // nesting order (declared-dash, file without labels, rhythm): seriate the units over every
     // group, orient the axis by the inside vote, cut it into n ranks
@@ -592,7 +720,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     for (const g of groups) {
       const A = signedArea(g.x.from);
       if (Math.abs(A) < 100) continue;
-      const known = g.group.units.map((u, k) => ({ k, p: u >= 0 ? ser.p[u] : NaN })).filter((e) => Number.isFinite(e.p));
+      const known = g.group.units
+        .map((u, k) => ({ k, p: u >= 0 ? ser.p[u] : NaN }))
+        .filter((e) => Number.isFinite(e.p));
       if (known.length < 2) continue;
       const mk = known.reduce((a, e) => a + e.k, 0) / known.length;
       const mp = known.reduce((a, e) => a + e.p, 0) / known.length;
@@ -621,9 +751,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       });
     const identityUnits = encoding === 'declared-dash' || encoding === 'file-per-size';
     let ur: number[];
-    if (identityUnits && nUnits === n) {
+    if ((identityUnits || encoding === 'color') && nUnits === n) {
       // each unit IS a size: its rank is its place on the axis (coordinates compress, order holds)
-      const order = ser.p.map((x, u) => ({ u, x: Number.isFinite(x) ? x : Infinity })).sort((a, b) => a.x - b.x);
+      const order = ser.p
+        .map((x, u) => ({ u, x: Number.isFinite(x) ? x : Infinity }))
+        .sort((a, b) => a.x - b.x);
       ur = new Array(nUnits).fill(-1);
       order.forEach((e, r) => {
         if (Number.isFinite(e.x)) ur[e.u] = r;
@@ -633,32 +765,39 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       unitRank[u] = ur[u];
       unitPurity[u] = ser.support[u] ? 1 - ser.selfRepeat[u] / ser.support[u] : 0;
     }
-    diag.seriation = { stress: +ser.stress.toFixed(2), p: ser.p.map((x) => (Number.isFinite(x) ? +x.toFixed(1) : null)) };
+    diag.seriation = {
+      stress: +ser.stress.toFixed(2),
+      p: ser.p.map((x) => (Number.isFinite(x) ? +x.toFixed(1) : null)),
+    };
     const pure = (u: number) => u >= 0 && unitRank[u] >= 0 && unitPurity[u] >= 0.8;
     for (const g of groups) {
       const r = g.group.units.map((u) => (pure(u) ? unitRank[u] : -1));
       // direction of rank along the lanes, from the known lanes
       let dir = 0;
-      for (let a = 0; a < r.length; a++) for (let b = a + 1; b < r.length; b++) if (r[a] >= 0 && r[b] >= 0) dir += Math.sign(r[b] - r[a]);
-      g.lanes.forEach((k, idx) => {
-        let rk = r[idx];
-        let w = 1;
-        if (rk < 0 && dir !== 0) {
-          // an unknown or ambiguous lane between / next to known ones
-          const step = dir > 0 ? 1 : -1;
-          const prev = idx > 0 ? r[idx - 1] : -1;
-          const next = idx + 1 < r.length ? r[idx + 1] : -1;
-          if (prev >= 0 && next >= 0 && Math.abs(next - prev) === 2) rk = (prev + next) / 2;
-          else if (prev >= 0) rk = prev + step;
-          else if (next >= 0) rk = next - step;
-          w = 0.7;
+      for (let a = 0; a < r.length; a++)
+        for (let b = a + 1; b < r.length; b++)
+          if (r[a] >= 0 && r[b] >= 0) dir += Math.sign(r[b] - r[a]);
+      // fill unknown lanes outward from the known ones, one step per lane, both directions
+      const filled = r.slice();
+      if (dir !== 0) {
+        const step = dir > 0 ? 1 : -1;
+        for (let pass = 0; pass < 2; pass++) {
+          for (let idx = 1; idx < filled.length; idx++)
+            if (filled[idx] < 0 && filled[idx - 1] >= 0) filled[idx] = filled[idx - 1] + step;
+          for (let idx = filled.length - 2; idx >= 0; idx--)
+            if (filled[idx] < 0 && filled[idx + 1] >= 0) filled[idx] = filled[idx + 1] - step;
         }
+      }
+      g.lanes.forEach((k, idx) => {
+        const rk = filled[idx];
+        const w = r[idx] >= 0 ? 1 : 0.7;
         if (rk >= 0 && rk < n) for (const c of g.x.lanes[k]) vote(c, rk, w);
       });
     }
     chains.forEach((_, i) => {
       const u = unit[i];
-      if (identityUnits && u >= 0 && unitRank[u] >= 0) rankOf.set(i, unitRank[u]); // identity wins
+      if (identityUnits && u >= 0 && unitRank[u] >= 0)
+        rankOf.set(i, unitRank[u]); // identity wins
       else if (pure(u) && sizeCand[i]) vote(i, unitRank[u], 4);
     });
     settle(0.45);
@@ -668,7 +807,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
           kind: 'class-merge',
           message: `look "${unitNames[u]}" appears twice side by side in ${(100 * (1 - unitPurity[u])).toFixed(0)} % of its sections: two sizes may be drawn alike; its chains are ranked by their neighbours`,
           classes: [],
-          chains: chains.map((_, i) => i).filter((i) => unit[i] === u).slice(0, 50),
+          chains: chains
+            .map((_, i) => i)
+            .filter((i) => unit[i] === u)
+            .slice(0, 50),
           at: null,
         });
     if (encoding === 'file-per-size') labels = labels.map(() => null);
@@ -676,7 +818,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
 
   // ── legend: sample strokes with a size token beside them name the units directly ────────────
   diag.legendHits = legendHits.map((h) => `${h.label}:c${h.chain}`);
-  if (legendHits.length >= 3 && encoding !== 'ocg' && encoding !== 'text-label' && !(encoding === 'file-per-size' && labelOrderKnown)) {
+  if (
+    legendHits.length >= 3 &&
+    encoding !== 'ocg' &&
+    encoding !== 'text-label' &&
+    !(encoding === 'file-per-size' && labelOrderKnown)
+  ) {
     // a legend sample is short: give it the unit whose chains look most like it
     const cent: (Float64Array | null)[] = Array.from({ length: nUnits }, () => null);
     const cw = new Array(nUnits).fill(0);
@@ -722,14 +869,17 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       let against = 0;
       for (let a = 0; a < pairs.length; a++)
         for (let b = a + 1; b < pairs.length; b++) {
-          const s1 = Math.sign(pairs[a].r - pairs[b].r) * Math.sign(pairs[a].value - pairs[b].value);
+          const s1 =
+            Math.sign(pairs[a].r - pairs[b].r) * Math.sign(pairs[a].value - pairs[b].value);
           if (s1 > 0) agree++;
           else if (s1 < 0) against++;
         }
       diag.legend = { pairs: pairs.map((p) => `r${p.r}=${p.label}`), agree, against };
       // the legend's labels form a run: label index = rank. Map the seriated ranks onto it with a
       // flip and/or a shift (a size that never shows as its own lane leaves a hole at one end).
-      const legendLabels = [...legendRun].map((l) => parseSizeToken(l, true)!).sort((x, y) => x.value - y.value);
+      const legendLabels = [...legendRun]
+        .map((l) => parseSizeToken(l, true)!)
+        .sort((x, y) => x.value - y.value);
       const idxOf = new Map(legendLabels.map((t, k) => [t.label, k]));
       if (legendLabels.length === n) {
         let bestMap: { sgn: 1 | -1; t: number; hit: number } | null = null;
@@ -747,7 +897,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
             chains: [],
             at: legendHits[0].text.anchor,
           });
-        if (bestMap && bestMap.hit >= Math.max(2, Math.ceil(pairs.length / 2)) && (bestMap.sgn !== 1 || bestMap.t !== 0)) {
+        if (
+          bestMap &&
+          bestMap.hit >= Math.max(2, Math.ceil(pairs.length / 2)) &&
+          (bestMap.sgn !== 1 || bestMap.t !== 0)
+        ) {
           const f = (r: number) => bestMap!.sgn * r + bestMap!.t;
           for (const [c, r] of [...rankOf]) {
             const nr = f(r);
@@ -756,18 +910,67 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
           }
           for (let u = 0; u < nUnits; u++) if (unitRank[u] >= 0) unitRank[u] = f(unitRank[u]);
           for (const p of pairs) p.r = f(p.r);
-          diag.legendRemap = { sgn: bestMap.sgn, shift: bestMap.t, hit: bestMap.hit, of: pairs.length };
+          diag.legendRemap = {
+            sgn: bestMap.sgn,
+            shift: bestMap.t,
+            hit: bestMap.hit,
+            of: pairs.length,
+          };
           agree = pairs.length;
           against = 0;
           for (let a2 = 0; a2 < pairs.length; a2++)
-            for (let b2 = a2 + 1; b2 < pairs.length; b2++) if (Math.sign(pairs[a2].r - pairs[b2].r) !== Math.sign(pairs[a2].value - pairs[b2].value)) against++;
+            for (let b2 = a2 + 1; b2 < pairs.length; b2++)
+              if (
+                Math.sign(pairs[a2].r - pairs[b2].r) !==
+                Math.sign(pairs[a2].value - pairs[b2].value)
+              )
+                against++;
           if (against) agree = 0;
           // every legend label sits on its index now
           legendLabels.forEach((t, k) => {
             labels[k] = t.label;
-            labelEvidence[k].push({ kind: 'text-label', text: `legend ${t.label}`, distanceMm: medianDist(legendHits, t.label) });
+            labelEvidence[k].push({
+              kind: 'text-label',
+              text: `legend ${t.label}`,
+              distanceMm: medianDist(legendHits, t.label),
+            });
           });
         }
+      } else if (legendLabels.length > n && pairs.length >= 3 && Math.min(agree, against) === 0) {
+        // the key names more sizes than distinct lines were found (reef: 9 named, 8 drawn apart):
+        // ranks move to the key's index; ranks between two anchors are spread between them
+        const sgn = against > agree ? -1 : 1;
+        const anchors = pairs
+          .map((p) => ({ old: sgn > 0 ? p.r : n - 1 - p.r, idx: idxOf.get(p.label)! }))
+          .sort((a, b) => a.old - b.old);
+        const newN = legendLabels.length;
+        const mapRank = (r0: number) => {
+          const r = sgn > 0 ? r0 : n - 1 - r0;
+          const hit = anchors.find((a) => a.old === r);
+          if (hit) return hit.idx;
+          const lo = [...anchors].reverse().find((a) => a.old < r);
+          const hi = anchors.find((a) => a.old > r);
+          if (lo && hi)
+            return Math.round(lo.idx + ((r - lo.old) * (hi.idx - lo.idx)) / (hi.old - lo.old));
+          if (lo) return Math.min(newN - 1, lo.idx + (r - lo.old));
+          if (hi) return Math.max(0, hi.idx - (hi.old - r));
+          return r;
+        };
+        for (const [c, r] of [...rankOf]) rankOf.set(c, mapRank(r));
+        for (let u = 0; u < nUnits; u++) if (unitRank[u] >= 0) unitRank[u] = mapRank(unitRank[u]);
+        diag.legendExpand = { from: n, to: newN, anchors: anchors.map((a) => `${a.old}→${a.idx}`) };
+        n = newN;
+        labels = legendLabels.map((t) => t.label);
+        labelEvidence = labels.map((l) => [
+          {
+            kind: 'text-label' as const,
+            text: `legend ${l}`,
+            distanceMm: medianDist(legendHits, l!),
+          },
+        ]);
+        agree = 1;
+        against = 0;
+        for (const p of pairs) p.r = idxOf.get(p.label)!;
       } else if (against > agree) {
         for (const [c, r] of rankOf) rankOf.set(c, n - 1 - r);
         for (let u = 0; u < nUnits; u++) if (unitRank[u] >= 0) unitRank[u] = n - 1 - unitRank[u];
@@ -780,7 +983,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         for (const p of pairs) {
           if (labels[p.r] === p.label) continue;
           labels[p.r] = p.label;
-          labelEvidence[p.r].push({ kind: 'text-label', text: `legend ${p.label}`, distanceMm: medianDist(legendHits, p.label) });
+          labelEvidence[p.r].push({
+            kind: 'text-label',
+            text: `legend ${p.label}`,
+            distanceMm: medianDist(legendHits, p.label),
+          });
         }
       } else
         ambiguities.push({
@@ -796,7 +1003,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   // ── labels from a text size run with the same count ─────────────────────────────────────────
   const runEvidence = runs.map((r) => `${r.source} → ${r.labels.join(',')}`);
   if (labels.some((l) => !l)) {
-    const exact = runs.filter((r) => r.labels.length === n);
+    // when the file SAYS its size run (a key, "Size: 36-46") and the count differs, a coincidental
+    // row of numbers with the right count must not name the sizes
+    const said = runs.filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'));
+    const exact = runs.filter(
+      (r) => r.labels.length === n && (!said.length || r.keyword || r.kind === 'legend'),
+    );
     // a legend ("размер 72", "SIZE XS") first, then a run said with the word "size", then the rest
     let pick =
       exact.find((r) => r.kind === 'legend') ??
@@ -820,7 +1032,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     }
     if (pick && fits(pick)) {
       labels = pick.labels.slice();
-      labels.forEach((l, r) => l && labelEvidence[r].push({ kind: 'text-label', text: pick.source, distanceMm: Infinity }));
+      labels.forEach(
+        (l, r) =>
+          l &&
+          labelEvidence[r].push({ kind: 'text-label', text: pick.source, distanceMm: Infinity }),
+      );
     } else
       ambiguities.push({
         kind: 'labels-missing',
@@ -856,7 +1072,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     chains.map((_, i) => i < N0 && !furniture[i] && !joined.has(i) && chains[i].lengthMm >= 3),
   );
   const sectioned = new Set<number>();
-  for (const x of xsB) if (x.lanes.length >= 2) for (const l of x.lanes) for (const c of l) sectioned.add(c);
+  for (const x of xsB)
+    if (x.lanes.length >= 2) for (const l of x.lanes) for (const c of l) sectioned.add(c);
   splitShared(chains, rankOf, sharedFrom, landings, sectioned);
   diag.bridges = joined.size;
   diag.landings = landings.length;
@@ -864,7 +1081,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   // ── classify the rest ───────────────────────────────────────────────────────────────────────
   const common: number[] = [...ocgCommon];
   const internal: number[] = [];
-  const ignore: { id: number; why: string }[] = [...ocgDropped, ...[...joined].map(([id, host]) => ({ id, why: `joined into chain ${host}` }))];
+  const ignore: { id: number; why: string }[] = [
+    ...ocgDropped,
+    ...[...joined].map(([id, host]) => ({ id, why: `joined into chain ${host}` })),
+  ];
   const orphans: number[] = [];
   const decided = new Set([...ocgCommon, ...ocgDropped.map((d) => d.id), ...joined.keys()]);
   const contourWidth = medianWidth(chains, rankOf, styles);
@@ -890,7 +1110,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         const q1 = chains[j].pts[si + 1];
         if (!q0 || !q1 || segNearest(p, q0, q1).d > 1) return;
         const sl = dist(q0, q1) || 1;
-        if (Math.abs((t.x * (q1.x - q0.x) + t.y * (q1.y - q0.y)) / sl) < Math.cos(Math.PI / 4)) steep = true;
+        if (Math.abs((t.x * (q1.x - q0.x) + t.y * (q1.y - q0.y)) / sl) < Math.cos(Math.PI / 4))
+          steep = true;
       });
     }
     return steep;
@@ -938,7 +1159,13 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       return;
     }
     // same weight as size lines = outline (common); thinner = internal (grain, darts, placement)
-    if (st && contourWidth > 0 && st.widthMm >= contourWidth * 0.85 && !(st.fill && st.widthMm === 0)) common.push(i);
+    if (
+      st &&
+      contourWidth > 0 &&
+      st.widthMm >= contourWidth * 0.85 &&
+      !(st.fill && st.widthMm === 0)
+    )
+      common.push(i);
     else internal.push(i);
   });
 
@@ -947,7 +1174,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   for (let r = 0; r < n; r++) {
     const ids = [...rankOf.entries()].filter(([, rr]) => rr === r).map(([c]) => c);
     const us = new Map<number, number>();
-    for (const c of ids) if (unit[c] >= 0) us.set(unit[c], (us.get(unit[c]) ?? 0) + chains[c].lengthMm);
+    for (const c of ids)
+      if (unit[c] >= 0) us.set(unit[c], (us.get(unit[c]) ?? 0) + chains[c].lengthMm);
     const ev: ClassEvidence[] = [];
     const lk: string[] = [];
     [...us.entries()]
@@ -969,9 +1197,22 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       conf = (encoding === 'declared-dash' ? 0.6 : 0.45) + 0.35 * p;
     }
     if (!labels[r]) conf *= 0.85;
-    sizes.push({ rank: r, label: labels[r] ?? null, chains: ids, evidence: ev, confidence: +conf.toFixed(2), looks: lk });
+    sizes.push({
+      rank: r,
+      label: labels[r] ?? null,
+      chains: ids,
+      evidence: ev,
+      confidence: +conf.toFixed(2),
+      looks: lk,
+    });
     if (!ids.length)
-      ambiguities.push({ kind: 'size-empty', message: `no line found for rank ${r}${labels[r] ? ` (${labels[r]})` : ''}`, classes: [], chains: [], at: null });
+      ambiguities.push({
+        kind: 'size-empty',
+        message: `no line found for rank ${r}${labels[r] ? ` (${labels[r]})` : ''}`,
+        classes: [],
+        chains: [],
+        at: null,
+      });
   }
   // a unit split over several ranks / several units in one rank are informational
   for (const s of sizes)
@@ -991,13 +1232,33 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       message: `${orphans.length} size-line chains (${(L / 1000).toFixed(1)} m, ${((100 * L) / Math.max(1, sizeL)).toFixed(1)} %) have no rank`,
       classes: [],
       chains: orphans.slice(0, 200),
-      at: chains[orphans.reduce((a, b) => (chains[a].lengthMm >= chains[b].lengthMm ? a : b))].pts[0],
+      at: chains[orphans.reduce((a, b) => (chains[a].lengthMm >= chains[b].lengthMm ? a : b))]
+        .pts[0],
     });
   }
 
   // ── bundles: full groups whose lanes map to n distinct ranks, keyed by their chain tuple ──────
   const tuples = new Map<string, { chains: number[]; support: number; spacing: number }>();
+  // ranks that exist at all: when a size never shows as its own line (viola 34), bundles of the
+  // others are counted too (diagnostic only — a contract Bundle has one chain per rank)
+  const present = new Set(rankOf.values());
+  const relaxed = new Map<string, number>();
   for (const g of groups) {
+    if (present.size < n && g.lanes.length === present.size) {
+      const rs = g.lanes.map((k) => {
+        const ids = g.x.lanes[k].filter((c) => rankOf.has(c));
+        return ids.length
+          ? rankOf.get(ids.reduce((a, b) => (chains[a].lengthMm >= chains[b].lengthMm ? a : b)))!
+          : -1;
+      });
+      if (rs.every((r) => r >= 0) && new Set(rs).size === present.size) {
+        const key = g.lanes
+          .map((k) => g.x.lanes[k].filter((c) => rankOf.has(c)).sort((a, b) => a - b)[0])
+          .sort((a, b) => a - b)
+          .join(',');
+        relaxed.set(key, (relaxed.get(key) ?? 0) + 1);
+      }
+    }
     if (g.lanes.length !== n) continue;
     const byRank = new Array<number>(n).fill(-1);
     let ok = true;
@@ -1035,8 +1296,17 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       endsOn: [endsOn(chains, t.chains[0], 0, common), endsOn(chains, t.chains[0], 1, common)],
     });
   }
+  diag.presentRanks = present.size;
+  diag.bundlesOfPresentRanks = [...relaxed.values()].filter((v) => v >= 3).length;
   diag.bundleSupport = bundles.map((b) => tuples.get(b.chains.join(','))!.support);
-  if (encoding !== 'ocg' && encoding !== 'file-per-size' && encoding !== 'text-label' && nUnits && n && nUnits !== n)
+  if (
+    encoding !== 'ocg' &&
+    encoding !== 'file-per-size' &&
+    encoding !== 'text-label' &&
+    nUnits &&
+    n &&
+    nUnits !== n
+  )
     diag.unitsVsSizes = `${nUnits} looks/classes for ${n} sizes`;
   diag.looks = unitNames;
   diag.unitRank = unitRank;
@@ -1157,12 +1427,25 @@ function labelRun(hits: { label: string; value: number }[], minCount: number): S
     for (const step of steps)
       for (let i = 0; i < vals.length; i++) {
         const run = [vals[i]];
-        for (let j = i + 1; j < vals.length; j++) if (vals[j][1].value === run[run.length - 1][1].value + step) run.push(vals[j]);
+        for (let j = i + 1; j < vals.length; j++)
+          if (vals[j][1].value === run[run.length - 1][1].value + step) run.push(vals[j]);
         const ns = run.map(([, e]) => e.n);
-        if (run.length >= 3 && Math.min(...ns) >= 0.25 * Math.max(...ns) && run.length > best.length) best = run.map(([l]) => l);
+        if (
+          run.length >= 3 &&
+          Math.min(...ns) >= 0.25 * Math.max(...ns) &&
+          run.length > best.length
+        )
+          best = run.map(([l]) => l);
       }
   }
   return new Set(best);
+}
+
+function colourKey(rgb: number[]): string {
+  return rgb.map((v) => Math.round(v / 8)).join(',');
+}
+function rgbDist(a: number[], b: number[]): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
 function closureArea(pts: PtMm[]): number {
@@ -1189,11 +1472,18 @@ function majorityUnit(ids: number[], unit: number[], chains: Chain[]): number {
 }
 
 function medianDist(hits: { label: string; d: number }[], label: string): number {
-  const ds = hits.filter((h) => h.label === label).map((h) => h.d).sort((a, b) => a - b);
+  const ds = hits
+    .filter((h) => h.label === label)
+    .map((h) => h.d)
+    .sort((a, b) => a - b);
   return ds.length ? +ds[ds.length >> 1].toFixed(2) : Infinity;
 }
 
-function medianWidth(chains: Chain[], rankOf: Map<number, number>, styles: Map<number, Style>): number {
+function medianWidth(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  styles: Map<number, Style>,
+): number {
   const ws: number[] = [];
   for (const c of rankOf.keys()) {
     const st = styles.get(chains[c].style);
@@ -1209,7 +1499,8 @@ export function fileSizeLabel(name: string): string | null {
   const parts = base.split(/[\s_\-.]+/).filter(Boolean);
   for (let k = parts.length - 1; k >= 0; k--) {
     const t = parseSizeToken(parts[k], true);
-    if (t && (t.kind === 'letter' || (t.value >= 20 && t.value <= 70) || parts.length === 1)) return t.label;
+    if (t && (t.kind === 'letter' || (t.value >= 20 && t.value <= 70) || parts.length === 1))
+      return t.label;
   }
   return null;
 }
@@ -1337,7 +1628,11 @@ function splitShared(
       const nearLanding = (s: number) => land.some((x) => Math.abs(x - s) <= 10);
       const atStart = a <= step;
       const atEnd = b >= total - step - 0.5;
-      return (nearLanding(a) || atStart) && (nearLanding(b) || atEnd) && (nearLanding(a) || nearLanding(b));
+      return (
+        (nearLanding(a) || atStart) &&
+        (nearLanding(b) || atEnd) &&
+        (nearLanding(a) || nearLanding(b))
+      );
     });
     if (!shared.length) continue;
     // cut: keep size parts, emit shared parts as new chains
@@ -1350,7 +1645,10 @@ function splitShared(
     }
     if (cur < total - 1) cuts.push({ a: cur, b: total, shared: false });
     const sizeParts = cuts.filter((x) => !x.shared);
-    const sizeKeep = sizeParts.reduce((best, x) => (!best || x.b - x.a > best.b - best.a ? x : best), null as null | { a: number; b: number });
+    const sizeKeep = sizeParts.reduce(
+      (best, x) => (!best || x.b - x.a > best.b - best.a ? x : best),
+      null as null | { a: number; b: number },
+    );
     const original = { ...c };
     for (const part of cuts) {
       const pts = sliceByArc(original.pts, part.a, part.b);
@@ -1395,7 +1693,11 @@ function sliceByArc(pts: PtMm[], a: number, b: number): PtMm[] {
 }
 
 /** OCG: chains of different size layers that coincide (≤ 0.2 mm everywhere) → [keep, drop[]]. */
-function duplicatesAcrossRanks(chains: Chain[], rankOf: Map<number, number>, n: number): [number, number[]][] {
+function duplicatesAcrossRanks(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  n: number,
+): [number, number[]][] {
   const ids = [...rankOf.keys()];
   const grid = new SegGrid(8);
   for (const i of ids) grid.addPolyline(i, chains[i].pts);
@@ -1416,7 +1718,11 @@ function duplicatesAcrossRanks(chains: Chain[], rankOf: Map<number, number>, n: 
       });
     }
     const dups = [...matches.entries()]
-      .filter(([j, k]) => k >= 0.9 * smp.length && Math.abs(chains[j].lengthMm - chains[i].lengthMm) < 0.1 * chains[i].lengthMm + 2)
+      .filter(
+        ([j, k]) =>
+          k >= 0.9 * smp.length &&
+          Math.abs(chains[j].lengthMm - chains[i].lengthMm) < 0.1 * chains[i].lengthMm + 2,
+      )
       .map(([j]) => j);
     const ranks = new Set([rankOf.get(i)!, ...dups.map((j) => rankOf.get(j)!)]);
     if (ranks.size >= Math.max(2, Math.ceil(n / 2))) {

@@ -66,9 +66,13 @@ export function buildChainsDetailed(
   return { set, recover: rec };
 }
 
-export const buildChains: BuildChainsFn = (sheet, opts, progress) => buildChainsDetailed(sheet, opts, {}, progress).set;
+export const buildChains: BuildChainsFn = (sheet, opts, progress) =>
+  buildChainsDetailed(sheet, opts, {}, progress).set;
 
-function toChainSet(rec: RecoverOut, stats: { items: number; freeBeads: number; ignoredPaths: number }): ChainSet {
+function toChainSet(
+  rec: RecoverOut,
+  stats: { items: number; freeBeads: number; ignoredPaths: number },
+): ChainSet {
   const chains: Chain[] = rec.chains;
   const classes: LineClass[] = [];
   const total = (ids: number[]) => ids.reduce((a, i) => a + chains[i].lengthMm, 0);
@@ -86,7 +90,15 @@ function toChainSet(rec: RecoverOut, stats: { items: number; freeBeads: number; 
   const plainCommon = rec.common.filter((i) => !rec.sharedFrom.has(i));
   const shared = rec.common.filter((i) => rec.sharedFrom.has(i));
   if (plainCommon.length)
-    classes.push({ id: classes.length, role: 'common', sizeLabel: null, chains: plainCommon, totalLengthMm: total(plainCommon), evidence: [], confidence: 0.7 });
+    classes.push({
+      id: classes.length,
+      role: 'common',
+      sizeLabel: null,
+      chains: plainCommon,
+      totalLengthMm: total(plainCommon),
+      evidence: [],
+      confidence: 0.7,
+    });
   if (shared.length) {
     // one row per size whose style drew the shared stretch: the operator sees "drawn as 88, used by all"
     const byRank = new Map<number, number[]>();
@@ -98,13 +110,37 @@ function toChainSet(rec: RecoverOut, stats: { items: number; freeBeads: number; 
     }
     for (const [r, ids] of [...byRank].sort((a, b) => a[0] - b[0])) {
       const ev: ClassEvidence[] = [{ kind: 'nesting-order', rank: r }];
-      classes.push({ id: classes.length, role: 'common', sizeLabel: null, chains: ids, totalLengthMm: total(ids), evidence: ev, confidence: 0.6 });
+      classes.push({
+        id: classes.length,
+        role: 'common',
+        sizeLabel: null,
+        chains: ids,
+        totalLengthMm: total(ids),
+        evidence: ev,
+        confidence: 0.6,
+      });
     }
   }
   if (rec.notches.length)
-    classes.push({ id: classes.length, role: 'notch', sizeLabel: null, chains: rec.notches, totalLengthMm: total(rec.notches), evidence: [], confidence: 0.5 });
+    classes.push({
+      id: classes.length,
+      role: 'notch',
+      sizeLabel: null,
+      chains: rec.notches,
+      totalLengthMm: total(rec.notches),
+      evidence: [],
+      confidence: 0.5,
+    });
   if (rec.internal.length)
-    classes.push({ id: classes.length, role: 'internal', sizeLabel: null, chains: rec.internal, totalLengthMm: total(rec.internal), evidence: [], confidence: 0.5 });
+    classes.push({
+      id: classes.length,
+      role: 'internal',
+      sizeLabel: null,
+      chains: rec.internal,
+      totalLengthMm: total(rec.internal),
+      evidence: [],
+      confidence: 0.5,
+    });
   const byWhy = new Map<string, number[]>();
   for (const { id, why } of rec.ignore) {
     const key = why.replace(/\d+/g, '#');
@@ -113,12 +149,27 @@ function toChainSet(rec: RecoverOut, stats: { items: number; freeBeads: number; 
     else byWhy.set(key, [id]);
   }
   for (const [, ids] of byWhy)
-    classes.push({ id: classes.length, role: 'ignore', sizeLabel: null, chains: ids, totalLengthMm: total(ids), evidence: [], confidence: 0.8 });
+    classes.push({
+      id: classes.length,
+      role: 'ignore',
+      sizeLabel: null,
+      chains: ids,
+      totalLengthMm: total(ids),
+      evidence: [],
+      confidence: 0.8,
+    });
   const warnings = [
     `chains ${chains.length} from ${stats.items} items (${stats.ignoredPaths} paths not line work, ${stats.freeBeads} loose beads)`,
     `size encoding ${rec.encoding}, ${rec.n} sizes`,
   ];
-  return { chains, classes, bundles: rec.bundles, orphans: rec.orphans, ambiguities: rec.ambiguities, warnings };
+  return {
+    chains,
+    classes,
+    bundles: rec.bundles,
+    orphans: rec.orphans,
+    ambiguities: rec.ambiguities,
+    warnings,
+  };
 }
 
 /** Rank of a size class (its nesting-order evidence), or null for non-size classes. */

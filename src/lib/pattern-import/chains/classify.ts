@@ -82,12 +82,17 @@ export function furniture(chains: Chain[], styles: Map<number, Style>): (string 
     }
   });
   for (const a of rects.values()) if (a.length >= 3) for (const i of a) out[i] = 'tile frame';
-  for (const a of lines.values()) if (a.length >= 3) for (const i of a) out[i] = 'tile frame / cut mark';
+  for (const a of lines.values())
+    if (a.length >= 3) for (const i of a) out[i] = 'tile frame / cut mark';
   return out;
 }
 
 /** Greedy cosine clustering, longest reliable chains first. Returns look per chain (-1 = none). */
-export function clusterLooks(chains: Chain[], sigs: Signature[], include: boolean[]): { look: number[]; centroids: Float64Array[]; weight: number[] } {
+export function clusterLooks(
+  chains: Chain[],
+  sigs: Signature[],
+  include: boolean[],
+): { look: number[]; centroids: Float64Array[]; weight: number[] } {
   const look = new Array(chains.length).fill(-1);
   const centroids: Float64Array[] = [];
   const weight: number[] = [];
@@ -144,7 +149,11 @@ export function clusterLooks(chains: Chain[], sigs: Signature[], include: boolea
 export function classifyChains(chains: Chain[]): LineClass[] {
   const groups = new Map<string, Chain[]>();
   for (const c of chains) {
-    const m = c.motif ? c.motif.map((v) => (Math.round(v / PATIMPORT.motifQuantMm) * PATIMPORT.motifQuantMm).toFixed(2)).join('/') : 'solid';
+    const m = c.motif
+      ? c.motif
+          .map((v) => (Math.round(v / PATIMPORT.motifQuantMm) * PATIMPORT.motifQuantMm).toFixed(2))
+          .join('/')
+      : 'solid';
     const k = `${c.style}|${m}`;
     const g = groups.get(k);
     if (g) g.push(c);
@@ -153,7 +162,9 @@ export function classifyChains(chains: Chain[]): LineClass[] {
   let id = 0;
   return [...groups.values()]
     .map((g) => {
-      const ev: ClassEvidence[] = g[0].motif ? [{ kind: 'recovered-motif', motif: g[0].motif }] : [];
+      const ev: ClassEvidence[] = g[0].motif
+        ? [{ kind: 'recovered-motif', motif: g[0].motif }]
+        : [];
       return {
         id: id++,
         role: 'internal' as const,
@@ -168,12 +179,18 @@ export function classifyChains(chains: Chain[]): LineClass[] {
 }
 
 /** Declared dash clusters (3 % tolerance, Ф0: reef 4.88/4.89/4.90 are one style). */
-export function dashCluster(dashes: { dash: number[]; len: number }[]): { rep: number[]; members: number[]; len: number }[] {
+export function dashCluster(
+  dashes: { dash: number[]; len: number }[],
+): { rep: number[]; members: number[]; len: number }[] {
   const out: { rep: number[]; members: number[]; len: number }[] = [];
   const order = dashes.map((_, i) => i).sort((a, b) => dashes[b].len - dashes[a].len);
   for (const i of order) {
     const d = normDash(dashes[i].dash);
-    const hit = out.find((c) => c.rep.length === d.length && c.rep.every((v, k) => Math.abs(v - d[k]) <= Math.max(0.06, 0.03 * Math.max(v, d[k]))));
+    const hit = out.find(
+      (c) =>
+        c.rep.length === d.length &&
+        c.rep.every((v, k) => Math.abs(v - d[k]) <= Math.max(0.06, 0.03 * Math.max(v, d[k]))),
+    );
     if (hit) {
       hit.members.push(i);
       hit.len += dashes[i].len;

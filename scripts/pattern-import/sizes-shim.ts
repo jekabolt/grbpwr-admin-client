@@ -27,7 +27,7 @@ export type ShimLayout =
   | { kind: 'recurrence'; pages: [number, number]; cols?: number }
   | { kind: 'grid'; pages: [number, number]; cols: number; dx: number; dy: number }
   | { kind: 'cells'; dx: number; dy: number; cells: [page: number, row: number, col: number][] }
-  | { kind: 'stitch'; pages: [number, number]; cols: number }
+  | { kind: 'stitch'; pages: [number, number]; cols: number; rows?: number[] }
   | { kind: 'mosaic'; pages?: [number, number] };
 
 type PageRef = { doc: number; page: number };
@@ -36,7 +36,8 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 
 function pathLen(pts: { x: number; y: number }[]): number {
   let L = 0;
-  for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  for (let i = 1; i < pts.length; i++)
+    L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
   return L;
 }
 
@@ -172,7 +173,8 @@ function recurrenceOffsets(doc: SourceDoc, from: number, to: number, colsHint?: 
  * edge of p+1 vote for dx (step 0.1); p against p+cols for dy. The global mode wins.
  */
 function stitchPitch(doc: SourceDoc, from: number, to: number, cols: number) {
-  const pts = (p: number) => (doc.pages[p]?.paths ?? []).filter((q) => q.pts.length >= 2).flatMap((q) => q.pts);
+  const pts = (p: number) =>
+    (doc.pages[p]?.paths ?? []).filter((q) => q.pts.length >= 2).flatMap((q) => q.pts);
   const vote = (a: number, b: number, axis: 'x' | 'y', votes: Map<string, number>) => {
     const A = doc.pages[a];
     const B = doc.pages[b];
@@ -192,7 +194,7 @@ function stitchPitch(doc: SourceDoc, from: number, to: number, cols: number) {
       const k = Math.round((axis === 'x' ? q.y : q.x) / 0.12);
       for (const kk of [k - 1, k, k + 1])
         for (const r of idx.get(kk) ?? []) {
-          if (Math.abs((axis === 'x' ? q.y - r.y : q.x - r.x)) > 0.12) continue;
+          if (Math.abs(axis === 'x' ? q.y - r.y : q.x - r.x) > 0.12) continue;
           const d = axis === 'x' ? q.x - r.x : r.y - q.y;
           if (d < size - band || d > size + 1) continue;
           const key = (Math.round(d * 10) / 10).toFixed(1);
@@ -207,7 +209,8 @@ function stitchPitch(doc: SourceDoc, from: number, to: number, cols: number) {
     if (i % cols !== cols - 1 && p + 1 <= to) vote(p, p + 1, 'x', vx);
     if (p + cols <= to) vote(p, p + cols, 'y', vy);
   }
-  const top = (m: Map<string, number>) => Number([...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0);
+  const top = (m: Map<string, number>) =>
+    Number([...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0);
   return { dx: top(vx), dy: top(vy) };
 }
 
@@ -231,7 +234,14 @@ export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
         offs.set(p, { x: (i % L.cols) * L.dx, y: -Math.floor(i / L.cols) * L.dy });
     } else if (L.kind === 'stitch') {
       const { dx, dy } = stitchPitch(doc, from, to, L.cols);
-      for (let p = from, i = 0; p <= to; p++, i++) offs.set(p, { x: (i % L.cols) * dx, y: -Math.floor(i / L.cols) * dy });
+      if (L.rows) {
+        let p = from;
+        L.rows.forEach((len, r) => {
+          for (let c = 0; c < len && p <= to; c++, p++) offs.set(p, { x: c * dx, y: -r * dy });
+        });
+      } else
+        for (let p = from, i = 0; p <= to; p++, i++)
+          offs.set(p, { x: (i % L.cols) * dx, y: -Math.floor(i / L.cols) * dy });
     } else if (L.kind === 'cells') {
       for (const [p, row, col] of L.cells) offs.set(p, { x: col * L.dx, y: -row * L.dy });
     } else {
@@ -261,6 +271,8 @@ export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
         file: doc.file.id,
         page: p,
         toSheet: { a: 1, b: 0, c: 0, d: 1, e: ox, f: oy },
+        widthMm: pg.widthMm,
+        heightMm: pg.heightMm,
         residualMm: 0,
       });
       const local = new Map<StyleId, StyleId>();
@@ -284,7 +296,13 @@ export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
           seen.add(key);
         }
         subs.forEach((s, k) => {
-          paths.push({ id: paths.length, pts: tr[k], closed: s.closed, style: local.get(s.style)!, src: s.src });
+          paths.push({
+            id: paths.length,
+            pts: tr[k],
+            closed: s.closed,
+            style: local.get(s.style)!,
+            src: s.src,
+          });
         });
       }
       for (const t of pg.texts) {
@@ -292,7 +310,12 @@ export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
           ...t,
           id: texts.length,
           anchor: { x: t.anchor.x + ox, y: t.anchor.y + oy },
-          bbox: { minX: t.bbox.minX + ox, minY: t.bbox.minY + oy, maxX: t.bbox.maxX + ox, maxY: t.bbox.maxY + oy },
+          bbox: {
+            minX: t.bbox.minX + ox,
+            minY: t.bbox.minY + oy,
+            maxX: t.bbox.maxX + ox,
+            maxY: t.bbox.maxY + oy,
+          },
         });
       }
     }

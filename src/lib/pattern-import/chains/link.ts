@@ -41,14 +41,20 @@ export const LINK = {
 export function styleKey(s: Style): string {
   const rgb = s.strokeRgb ? s.strokeRgb.map((v) => Math.round(v / 24)).join(',') : '-';
   const w = (Math.round(s.widthMm * 20) / 20).toFixed(2);
-  const dash = s.dash && s.dash.some((v) => v > 0.01) ? normDash(s.dash).map((v) => v.toFixed(1)).join('/') : '-';
+  const dash =
+    s.dash && s.dash.some((v) => v > 0.01)
+      ? normDash(s.dash)
+          .map((v) => v.toFixed(1))
+          .join('/')
+      : '-';
   return `${s.layer ?? ''}|${rgb}|${s.fill && s.widthMm === 0 ? 'F' : w}|${dash}`;
 }
 
 /** Drop zero-length trailing pairs (robe writes "7.76/1.06/0/0/0/0") and fold a repeated period. */
 export function normDash(d: number[]): number[] {
   const a = d.slice();
-  while (a.length >= 2 && a[a.length - 1] < 0.005 && a[a.length - 2] < 0.005) a.splice(a.length - 2, 2);
+  while (a.length >= 2 && a[a.length - 1] < 0.005 && a[a.length - 2] < 0.005)
+    a.splice(a.length - 2, 2);
   if (a.length % 2 === 1) a.push(...a); // odd arrays repeat (PDF rule)
   // fold a period that repeats exactly: [a,b,a,b] → [a,b]
   for (let p = 2; p < a.length; p += 2) {
@@ -121,7 +127,12 @@ function reversed(items: Link[]): Link[] {
     .map((l) => ({ it: l.it, rev: !l.rev }));
 }
 
-export type LinkResult = { chains: WChain[]; items: number; freeBeads: number; ignoredPaths: number };
+export type LinkResult = {
+  chains: WChain[];
+  items: number;
+  freeBeads: number;
+  ignoredPaths: number;
+};
 
 export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   const styles = new Map(sheet.styles.map((s) => [s.id, s]));
@@ -206,7 +217,15 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     }
     return '';
   };
-  type End = { ch: number; end: 0 | 1; p: PtMm; t: PtMm; key: string; solidLong: boolean; dashed: boolean };
+  type End = {
+    ch: number;
+    end: 0 | 1;
+    p: PtMm;
+    t: PtMm;
+    key: string;
+    solidLong: boolean;
+    dashed: boolean;
+  };
   for (let round = 0; round < LINK.maxRounds; round++) {
     const ends: End[] = [];
     const grid = new PtGrid(Math.max(4, opts.joinGapMm * 2));
@@ -254,7 +273,9 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
         const lat = Math.abs(dx * my - dy * mx);
         if (along < -0.2) return;
         const latTol =
-          g <= LINK.seamGapMm ? Math.max(LINK.seamLateralMm, opts.joinLateralMm) : opts.joinLateralMm + 0.03 * g;
+          g <= LINK.seamGapMm
+            ? Math.max(LINK.seamLateralMm, opts.joinLateralMm)
+            : opts.joinLateralMm + 0.03 * g;
         if (lat > latTol) return;
         cands.push({ i, j, cost: g + 4 * lat + 2 * (1 - align) });
       });
@@ -288,7 +309,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   // ── pass 3: decorations ─────────────────────────────────────────────────────────────────────
   // Tiny one-piece chains that CROSS a longer line ("////" ticks, "x" marks drawn as 1.4 mm
   // strokes) are that line's decoration, like beads.
-  const isTiny = (ch: WChain) => ch.items.length <= 2 && ch.items.reduce((a, l) => a + l.it.len, 0) <= LINK.tinyMm;
+  const isTiny = (ch: WChain) =>
+    ch.items.length <= 2 && ch.items.reduce((a, l) => a + l.it.len, 0) <= LINK.tinyMm;
   const hosts = chains.filter((c) => !c.dead && !isTiny(c));
   const grid = new SegGrid(4);
   const ptsOf = hosts.map((ch) => ch.items.flatMap(linkPts));
@@ -334,10 +356,18 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     const dir = L > 0.05 ? { x: (b.x - a.x) / L, y: (b.y - a.y) / L } : null;
     const bi = nearestHost(c, dir, 30);
     if (bi >= 0) {
-      for (const l of ch.items) hosts[bi].decor.push({ ...l.it, kind: 'bead', bead: 'tick', c, dir });
+      for (const l of ch.items)
+        hosts[bi].decor.push({ ...l.it, kind: 'bead', bead: 'tick', c, dir });
     } else {
       // a free tiny mark: maybe one element of a line of marks (reef: «∠∠∠», «^^o^^o»)
-      const rep: Item = { ...ch.items[0].it, kind: 'bead', bead: 'tick', c, dir, extra: ch.items.slice(1).map((l) => l.it) };
+      const rep: Item = {
+        ...ch.items[0].it,
+        kind: 'bead',
+        bead: 'tick',
+        c,
+        dir,
+        extra: ch.items.slice(1).map((l) => l.it),
+      };
       loose.push(rep);
       tinyLeft.set(rep, ch);
     }
@@ -348,7 +378,13 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   const used = new Set<Item>();
   for (const dc of dotChains) {
     for (const l of dc.items) used.add(l.it);
-    dc.items = dc.items.flatMap((l) => [l, ...(l.it.extra ?? []).map((it) => ({ it: { ...it, kind: 'bead' as const, bead: 'tick' as const, c: l.it.c }, rev: false }))]);
+    dc.items = dc.items.flatMap((l) => [
+      l,
+      ...(l.it.extra ?? []).map((it) => ({
+        it: { ...it, kind: 'bead' as const, bead: 'tick' as const, c: l.it.c },
+        rev: false,
+      })),
+    ]);
   }
   alive.push(...dotChains);
   for (const [rep, ch] of tinyLeft) if (!used.has(rep)) alive.push(ch);
@@ -405,7 +441,8 @@ function chainBeads(beads: Item[]): WChain[] {
   for (const i of order) {
     if (seen[i] || !adj[i].length) continue;
     const path = walk(i);
-    if (path.length >= LINK.minDots) out.push({ items: path.map((k) => ({ it: beads[k], rev: false })), decor: [], dead: false });
+    if (path.length >= LINK.minDots)
+      out.push({ items: path.map((k) => ({ it: beads[k], rev: false })), decor: [], dead: false });
   }
   return out;
 }

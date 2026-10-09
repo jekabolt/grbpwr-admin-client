@@ -4,12 +4,30 @@ import { writeFileSync } from 'node:fs';
 
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 
-export type Stroke = { pts: PtMm[]; color: string; width?: number; dash?: string; closed?: boolean };
+export type Stroke = {
+  pts: PtMm[];
+  color: string;
+  width?: number;
+  dash?: string;
+  closed?: boolean;
+};
 export type Label = { at: PtMm; text: string; color: string; size?: number };
 
 export const PALETTE = [
-  '#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#17becf',
-  '#bcbd22', '#1b9e77', '#7570b3', '#e7298a', '#66a61e', '#e6ab02',
+  '#e41a1c',
+  '#377eb8',
+  '#4daf4a',
+  '#984ea3',
+  '#ff7f00',
+  '#a65628',
+  '#f781bf',
+  '#17becf',
+  '#bcbd22',
+  '#1b9e77',
+  '#7570b3',
+  '#e7298a',
+  '#66a61e',
+  '#e6ab02',
 ];
 
 export function renderPng(
@@ -28,10 +46,14 @@ export function renderPng(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="100%" height="100%" fill="white"/>`,
   ];
   const inBox = (pts: PtMm[]) =>
-    pts.some((p) => p.x >= box.minX - 5 && p.x <= box.maxX + 5 && p.y >= box.minY - 5 && p.y <= box.maxY + 5);
+    pts.some(
+      (p) =>
+        p.x >= box.minX - 5 && p.x <= box.maxX + 5 && p.y >= box.minY - 5 && p.y <= box.maxY + 5,
+    );
   for (const s of strokes) {
     if (s.pts.length < 2 || !inBox(s.pts)) continue;
-    const d = s.pts.map((p, k) => `${k ? 'L' : 'M'}${X(p.x)} ${Y(p.y)}`).join('') + (s.closed ? 'Z' : '');
+    const d =
+      s.pts.map((p, k) => `${k ? 'L' : 'M'}${X(p.x)} ${Y(p.y)}`).join('') + (s.closed ? 'Z' : '');
     parts.push(
       `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width ?? 1}"${s.dash ? ` stroke-dasharray="${s.dash}"` : ''} stroke-linecap="round"/>`,
     );

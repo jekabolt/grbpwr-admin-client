@@ -19,7 +19,9 @@ export type Seriation = {
 };
 
 export function seriate(groups: SerGroup[], nUnits: number, maxSpan: number): Seriation {
-  const diffs: number[][][] = Array.from({ length: nUnits }, () => Array.from({ length: nUnits }, () => [] as number[]));
+  const diffs: number[][][] = Array.from({ length: nUnits }, () =>
+    Array.from({ length: nUnits }, () => [] as number[]),
+  );
   const selfRepeat = new Array(nUnits).fill(0);
   const support = new Array(nUnits).fill(0);
   for (const g of groups) {
@@ -34,7 +36,9 @@ export function seriate(groups: SerGroup[], nUnits: number, maxSpan: number): Se
       support[u]++;
       if (ks.length > 1) selfRepeat[u]++;
     }
-    const us = [...seen.entries()].filter(([, ks]) => ks.length === 1).map(([u, ks]) => [u, ks[0]] as const);
+    const us = [...seen.entries()]
+      .filter(([, ks]) => ks.length === 1)
+      .map(([u, ks]) => [u, ks[0]] as const);
     for (let a = 0; a < us.length; a++)
       for (let b = a + 1; b < us.length; b++) {
         const d = Math.abs(us[a][1] - us[b][1]);
@@ -69,7 +73,8 @@ export function seriate(groups: SerGroup[], nUnits: number, maxSpan: number): Se
   const placed = new Set([anchor]);
   const cost = (u: number, x: number) => {
     let c = 0;
-    for (const v of placed) if (v !== u && W[u][v]) c += W[u][v] * (Math.abs(x - p[v]) - D[u][v]) ** 2;
+    for (const v of placed)
+      if (v !== u && W[u][v]) c += W[u][v] * (Math.abs(x - p[v]) - D[u][v]) ** 2;
     return c;
   };
   const bestX = (u: number) => {

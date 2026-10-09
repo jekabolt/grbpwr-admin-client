@@ -37,7 +37,8 @@ function scoreOf(M: number[][], g: Group, n: number, flip: boolean, shift = 0): 
 export function alignGroups(groups: Group[], nUnits: number, n: number): Alignment {
   const full = groups.filter((g) => g.units.length === n);
   const M = Array.from({ length: nUnits }, () => new Array(n).fill(0));
-  if (!full.length) return { M, pos: new Array(nUnits).fill(-1), purity: new Array(nUnits).fill(0), iterations: 0 };
+  if (!full.length)
+    return { M, pos: new Array(nUnits).fill(-1), purity: new Array(nUnits).fill(0), iterations: 0 };
   const distinct = (g: Group) => new Set(g.units.filter((u) => u >= 0)).size;
   const seed = full.reduce((a, b) => {
     const da = distinct(a);
@@ -89,12 +90,17 @@ export function alignGroups(groups: Group[], nUnits: number, n: number): Alignme
  * Place a partial group (fewer lanes than n) on positions: best shift and direction against M.
  * Returns the position per lane, or null when nothing in the group is known.
  */
-export function placePartial(M: number[][], g: Group, n: number): { positions: number[]; score: number; margin: number } | null {
+export function placePartial(
+  M: number[][],
+  g: Group,
+  n: number,
+): { positions: number[]; score: number; margin: number } | null {
   const L = g.units.length;
   if (!g.units.some((u) => u >= 0)) return null;
   const cands: { flip: boolean; shift: number; s: number }[] = [];
   for (const flip of [false, true])
-    for (let shift = 0; shift + L <= n; shift++) cands.push({ flip, shift, s: scoreOf(M, g, n, flip, shift) });
+    for (let shift = 0; shift + L <= n; shift++)
+      cands.push({ flip, shift, s: scoreOf(M, g, n, flip, shift) });
   cands.sort((a, b) => b.s - a.s);
   const best = cands[0];
   if (!best || best.s <= 0) return null;

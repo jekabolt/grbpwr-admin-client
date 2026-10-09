@@ -398,8 +398,11 @@ export type ChainSet = {
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */
   orphans: ChainId[];
-  /** Open questions for the operator (legend step); empty when everything was decided. */
-  ambiguities: ChainAmbiguity[];
+  /**
+   * Open questions for the operator (legend step); empty when everything was decided. Optional so
+   * ChainSets built without size recovery (a CLO DXF read by blocks) need not invent an empty list.
+   */
+  ambiguities?: ChainAmbiguity[];
   warnings: string[];
 };
 

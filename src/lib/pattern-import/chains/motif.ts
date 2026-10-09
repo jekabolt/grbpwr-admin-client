@@ -85,7 +85,8 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   const items = ch.items;
   // backbone = the style carrying most drawn length
   const byStyle = new Map<number, number>();
-  for (const l of items) if (l.it.kind !== 'bead') byStyle.set(l.it.style, (byStyle.get(l.it.style) ?? 0) + l.it.len);
+  for (const l of items)
+    if (l.it.kind !== 'bead') byStyle.set(l.it.style, (byStyle.get(l.it.style) ?? 0) + l.it.len);
   let bk: number | null = null;
   let bl = -1;
   for (const [s, L] of byStyle)
@@ -94,7 +95,8 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
       bk = s;
     }
   const backbone = bk === null ? null : styles.get(bk) ?? null;
-  const declared = backbone?.dash && backbone.dash.some((v) => v > 0.01) ? normDash(backbone.dash) : null;
+  const declared =
+    backbone?.dash && backbone.dash.some((v) => v > 0.01) ? normDash(backbone.dash) : null;
 
   // piece lengths and gaps along the chain (oriented end → start of the next)
   let prevEnd = null as null | { x: number; y: number };
@@ -102,7 +104,8 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   for (let k = 0; k < items.length; k++) {
     const pts = linkPts(items[k]);
     const len = items[k].it.kind === 'bead' ? items[k].it.len : items[k].it.len;
-    if (prevEnd) rawGaps.push(dist(prevEnd, pts[0]) - (items[k].it.kind === 'bead' ? items[k].it.len / 2 : 0));
+    if (prevEnd)
+      rawGaps.push(dist(prevEnd, pts[0]) - (items[k].it.kind === 'bead' ? items[k].it.len / 2 : 0));
     prevEnd = pts[pts.length - 1];
     if (k > 0 && k < items.length - 1) pieces.push(len);
   }
@@ -126,7 +129,9 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   const decorPer10 = { tick: 0, ring: 0, ringL: 0, dot: 0 };
   // beads inside the chain itself (palto's dots are subpaths) count as pieces; free beads as decor
   const kindOf = (it: { bead?: string; size?: number }) =>
-    (it.bead === 'ring' && (it.size ?? 0) >= 1.6 ? 'ringL' : it.bead ?? 'dot') as (typeof DECOR_KINDS)[number];
+    (it.bead === 'ring' && (it.size ?? 0) >= 1.6
+      ? 'ringL'
+      : it.bead ?? 'dot') as (typeof DECOR_KINDS)[number];
   for (const d of ch.decor) decorPer10[kindOf(d)] += 1;
   for (const l of items) if (l.it.kind === 'bead') decorPer10[kindOf(l.it)] += 1;
   for (const k of DECOR_KINDS) decorPer10[k] = lengthMm > 0 ? (10 * decorPer10[k]) / lengthMm : 0;
@@ -156,9 +161,24 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   normBlock(V, offG, 2 * NB, 1);
   normBlock(V, offD, offD + DECOR_KINDS.length, 0.8);
   normBlock(V, offW, offW + NW + 1, 0.6);
-  const reliable = !!declared || (solid ? lengthMm >= 15 : innerPieces.length >= 3 && lengthMm >= 12);
-  const motif = declared ? declared.map(q) : solid ? null : recoverMotif(merged.slice(1), gaps.slice(1));
-  return { vec: V, pieces: innerPieces, gaps, decorPer10, solid, declared, reliable, motif, backbone };
+  const reliable =
+    !!declared || (solid ? lengthMm >= 15 : innerPieces.length >= 3 && lengthMm >= 12);
+  const motif = declared
+    ? declared.map(q)
+    : solid
+      ? null
+      : recoverMotif(merged.slice(1), gaps.slice(1));
+  return {
+    vec: V,
+    pieces: innerPieces,
+    gaps,
+    decorPer10,
+    solid,
+    declared,
+    reliable,
+    motif,
+    backbone,
+  };
 }
 
 export function cosine(a: Float64Array, b: Float64Array): number {
@@ -175,11 +195,21 @@ export function cosine(a: Float64Array, b: Float64Array): number {
 
 /** Short human description of a motif for the legend ("3.0 1.5 0.5 1.5", "solid w0.35"). */
 export function describeSig(s: Signature): string {
-  const w = s.backbone ? (s.backbone.fill && s.backbone.widthMm === 0 ? 'fill' : `w${s.backbone.widthMm.toFixed(2)}`) : '';
+  const w = s.backbone
+    ? s.backbone.fill && s.backbone.widthMm === 0
+      ? 'fill'
+      : `w${s.backbone.widthMm.toFixed(2)}`
+    : '';
   const dec = Object.entries(s.decorPer10)
     .filter(([, v]) => v > 0.3)
     .map(([k, v]) => `${k}/${(10 / v).toFixed(1)}mm`)
     .join(' ');
-  const m = s.declared ? `dash ${s.declared.map((v) => v.toFixed(2)).join('/')}` : s.solid ? 'solid' : s.motif ? `rhythm ${s.motif.map((v) => v.toFixed(2)).join('/')}` : 'irregular';
+  const m = s.declared
+    ? `dash ${s.declared.map((v) => v.toFixed(2)).join('/')}`
+    : s.solid
+      ? 'solid'
+      : s.motif
+        ? `rhythm ${s.motif.map((v) => v.toFixed(2)).join('/')}`
+        : 'irregular';
   return [m, w, dec].filter(Boolean).join(' ');
 }

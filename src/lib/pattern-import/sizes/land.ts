@@ -49,7 +49,8 @@ export function bridgeSameRank(chains: Chain[], rankOf: Map<number, number>): Ma
         const latB = Math.abs(dx * B.t.y - dy * B.t.x);
         const alA = dx * A.t.x + dy * A.t.y;
         const alB = -(dx * B.t.x + dy * B.t.y);
-        if (alA < -0.3 || alB < -0.3 || latA > LAND.bridgeLateralMm || latB > LAND.bridgeLateralMm) return;
+        if (alA < -0.3 || alB < -0.3 || latA > LAND.bridgeLateralMm || latB > LAND.bridgeLateralMm)
+          return;
         cands.push({ i, j, cost: g + 3 * (latA + latB) });
       });
     });
@@ -67,7 +68,12 @@ export function bridgeSameRank(chains: Chain[], rankOf: Map<number, number>): Ma
       const aPts = A.end === 1 ? a.pts : a.pts.slice().reverse();
       const bPts = B.end === 0 ? b.pts : b.pts.slice().reverse();
       const pts = aPts.concat(bPts);
-      chains[A.c] = { ...a, pts, lengthMm: a.lengthMm + b.lengthMm + dist(A.p, B.p), ranges: a.ranges.concat(b.ranges) };
+      chains[A.c] = {
+        ...a,
+        pts,
+        lengthMm: a.lengthMm + b.lengthMm + dist(A.p, B.p),
+        ranges: a.ranges.concat(b.ranges),
+      };
       joined.set(B.c, A.c);
       rankOf.delete(B.c);
       merged++;
@@ -78,7 +84,11 @@ export function bridgeSameRank(chains: Chain[], rankOf: Map<number, number>): Ma
 }
 
 /** Extend size-line ends onto the first line ahead (≤ landMm). `targets` = lines that can be met. */
-export function landEnds(chains: Chain[], rankOf: Map<number, number>, targets: boolean[]): Landing[] {
+export function landEnds(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  targets: boolean[],
+): Landing[] {
   const grid = new SegGrid(6);
   const poly = chains.map((c) => c.pts);
   chains.forEach((c, i) => {

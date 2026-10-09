@@ -27,7 +27,8 @@ export function isZigzag(ch: WChain): boolean {
     const t = ch.items[k].it.pts;
     const ae = a[a.length - 1];
     const bs = b[0];
-    const d = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y);
+    const d = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+      Math.hypot(p.x - q.x, p.y - q.y);
     const t0 = t[0];
     const t1 = t[t.length - 1];
     if ((d(ae, t0) < 0.05 && d(t1, bs) < 0.05) || (d(ae, t1) < 0.05 && d(t0, bs) < 0.05)) glued++;
@@ -65,7 +66,9 @@ export function makeChains(sheet: Sheet, opts: ChainOpts): ChainBuild {
       : isZigzag(ch)
         ? zigzagPts(strokes)
         : strokes.flatMap(linkPts);
-    const dedup = raw.filter((p, i) => i === 0 || Math.abs(p.x - raw[i - 1].x) + Math.abs(p.y - raw[i - 1].y) > 1e-6);
+    const dedup = raw.filter(
+      (p, i) => i === 0 || Math.abs(p.x - raw[i - 1].x) + Math.abs(p.y - raw[i - 1].y) > 1e-6,
+    );
     if (dedup.length < 2) continue;
     const pts = simplify(dedup, SIMPLIFY_MM);
     const lengthMm = polyLen(pts);
@@ -86,5 +89,10 @@ export function makeChains(sheet: Sheet, opts: ChainOpts): ChainBuild {
     sigs.push(sig);
     work.push(ch);
   }
-  return { chains, sigs, work, stats: { items: res.items, freeBeads: res.freeBeads, ignoredPaths: res.ignoredPaths } };
+  return {
+    chains,
+    sigs,
+    work,
+    stats: { items: res.items, freeBeads: res.freeBeads, ignoredPaths: res.ignoredPaths },
+  };
 }
