@@ -13327,6 +13327,80 @@ export type PutTechCardPatternSizeIndexResponse = {
   resolvedSizeCount: number | undefined;
 };
 
+// PatternPieceEvidence is what the client measured and read on one marked piece.
+export type PatternPieceEvidence = {
+  mark: number | undefined;
+  textInside: string[] | undefined;
+  quantityText: string | undefined;
+  areaCm2: number | undefined;
+  bboxWMm: number | undefined;
+  bboxHMm: number | undefined;
+  isSymmetricHint: boolean | undefined;
+  hasFoldLineHint: boolean | undefined;
+};
+
+// PatternPieceCrop is a close-up picture of one marked piece.
+export type PatternPieceCrop = {
+  mark: number | undefined;
+  mediaId: number | undefined;
+};
+
+// PatternPiecesContext is what the card and the pattern's own pages say around the pieces.
+export type PatternPiecesContext = {
+  sizeNames: string[] | undefined;
+  fabricPurposesInBom: string[] | undefined;
+  existingCardPieceNames: string[] | undefined;
+  instructionsTextExcerpt: string | undefined;
+  languageHint: string | undefined;
+};
+
+// PatternPieceCodeOption is one allowed code prefix and its English name.
+export type PatternPieceCodeOption = {
+  code: string | undefined;
+  name: string | undefined;
+};
+
+export type SuggestPatternPiecesRequest = {
+  techCardId: number | undefined;
+  overviewMediaId: number | undefined;
+  crops: PatternPieceCrop[] | undefined;
+  pieces: PatternPieceEvidence[] | undefined;
+  context: PatternPiecesContext | undefined;
+  // allowed_codes — the code prefixes the answer may use; empty = the server's default vocabulary
+  // (FP BP SL CLR CUF PLK WB PCK YK FAC LIN SP FL GST BLT WS).
+  allowedCodes: PatternPieceCodeOption[] | undefined;
+  // allowed_modifiers — the letter/symbol modifiers a code may carry; empty = L R F B #. A part
+  // number 1..20 is always allowed.
+  allowedModifiers: string[] | undefined;
+  force: boolean | undefined;
+};
+
+// PatternPieceSuggestion is the model's proposal for one marked piece, validated by the server.
+export type PatternPieceSuggestion = {
+  mark: number | undefined;
+  // code — PREFIX[_L|_R][_F|_B][_n][_#], uppercase, no size tail; "" when the model's code was
+  // refused (the reason is in warnings) or the model gave none.
+  code: string | undefined;
+  humanNameEn: string | undefined;
+  fabricPurposes: string[] | undefined;
+  cutQuantity: number | undefined;
+  fold: boolean | undefined;
+  pair: boolean | undefined;
+  variant: string | undefined;
+  confidence: number | undefined;
+  evidence: string[] | undefined;
+};
+
+export type SuggestPatternPiecesResponse = {
+  suggestions: PatternPieceSuggestion[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  warnings: string[] | undefined;
+  cached: boolean | undefined;
+};
+
 export type SaveTechCardPieceAreasRequest = {
   techCardId: number | undefined;
   // The fabric scope: назначение (0265) when the card has been sorted, else the BOM line's line_key —
@@ -19541,6 +19615,21 @@ export interface AdminService {
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
   PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
+  // SuggestPatternPieces (pattern import, F9) — ONE sync vision+JSON call (chat.pattern_pieces) that
+  // NAMES the pieces of an imported sewing pattern. The client finds the pieces itself (geometry is
+  // deterministic and never comes from the model), renders the assembled sheet with a number on
+  // every piece (Set-of-Mark, overview_media_id), optionally crops of single pieces, and sends its
+  // own evidence per mark (text inside the contour, quantity note, area, bbox, symmetry and fold
+  // hints) plus the card's context. The model proposes, per mark: a piece code of the card's grammar
+  // (PREFIX[_modifiers], uppercase, NO size tail), an English name, fabric purposes, cut quantity,
+  // fold, pair, a variant label, a confidence and short evidence quotes. The server validates the
+  // answer: unknown marks are dropped, the confidence is clamped to 0..1, the code is normalised to
+  // the grammar and refused (code "", a warning) when its prefix is not allowed or it carries a size
+  // tail or an unknown modifier. Nothing is stored; an identical request within an hour is answered
+  // from process memory (cached) unless force. tech_card_id is optional (0 = no card yet).
+  // InvalidArgument: no overview, 0 or more than 80 pieces, more than 12 crops, a duplicate mark, a
+  // crop of a mark not in pieces. FailedPrecondition: an image is not a picture.
+  SuggestPatternPieces(request: SuggestPatternPiecesRequest): Promise<SuggestPatternPiecesResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
   // type one.
@@ -25961,6 +26050,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "PutTechCardPatternSizeIndex",
       }) as Promise<PutTechCardPatternSizeIndexResponse>;
+    },
+    SuggestPatternPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/pattern-import/pieces:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPatternPieces",
+      }) as Promise<SuggestPatternPiecesResponse>;
     },
     SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

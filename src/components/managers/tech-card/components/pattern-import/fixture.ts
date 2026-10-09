@@ -938,9 +938,13 @@ export function fixtureMarks(families: PieceFamily[]): SomMark[] {
       areaMm2: c.areaMm2,
       textInside: p?.text ? [p.text] : [],
       textNear: [],
+      quantityText: p?.cutQty ? `cut ${p.cutQty}` : '',
       cutQtyHint: p?.cutQty ?? null,
+      foldHint: !!p?.fold,
+      symmetricHint: false,
       sizeCount: f.candidates.length,
       mirrorTwinMark: null,
+      variant: p?.variant ?? null,
     };
   });
 }
@@ -968,6 +972,7 @@ export function fixtureNames(families: PieceFamily[], seeds: Seed[]): NameDecisi
             evidence: p.text ? [`text inside: “${p.text}”`] : ['shape only'],
           }
         : null,
+      source: p?.nameOrigin === 'text' ? 'text' : 'ai',
       evidence:
         p?.text && p.nameOrigin === 'text'
           ? [{ kind: 'text-synonym', text: p.text, code: p.code, weight: 0.5 }]

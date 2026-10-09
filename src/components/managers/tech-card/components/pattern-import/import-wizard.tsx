@@ -22,6 +22,7 @@ import type {
   ImportClient,
   NameSuggester,
 } from './client';
+import { createAiNamer } from './ai-namer';
 import { ApplyStep } from './steps/apply';
 import { CheckStep } from './steps/check';
 import { DetailsStep } from './steps/details';
@@ -67,14 +68,19 @@ export function ImportWizard({
   // (React may drop a memo; fast refresh re-runs one).
   const [client] = useState(() => clientProp ?? createStubClient());
   const latest = useRef<ImportSession | null>(null);
+  // The real AI namer (F10) needs real renders, so it rides with the real worker; the stub client's
+  // render-som draws nothing and keeps the fixture namer. VITE_PATTERN_IMPORT_AI=stub forces the
+  // stub namer on the worker too (no paid calls while the pipeline is being tuned).
   const namer = useMemo(
     () =>
       namerProp ??
-      createStubNamer(
-        () => latest.current?.pieces?.seeds ?? [],
-        () => latest.current?.pieces?.families ?? [],
-      ),
-    [namerProp],
+      (client.kind === 'worker' && import.meta.env.VITE_PATTERN_IMPORT_AI !== 'stub'
+        ? createAiNamer()
+        : createStubNamer(
+            () => latest.current?.pieces?.seeds ?? [],
+            () => latest.current?.pieces?.families ?? [],
+          )),
+    [namerProp, client],
   );
   const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
   latest.current = api.session;

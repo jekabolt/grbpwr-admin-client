@@ -984,44 +984,73 @@ export type RoundTrip = {
 // 10. AI naming (F10 client ↔ F9 backend `SuggestPatternPieces`)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** One numbered region on the Set-of-Mark render. */
+/**
+ * One numbered region on the Set-of-Mark render, with the deterministic evidence the client measured
+ * and read for it (F9 `PatternPieceEvidence` is a projection of this; `ai/wire.ts` maps it).
+ */
 export type SomMark = {
   mark: number;
   seed: SeedId;
+  /** minX, minY, maxX, maxY of the piece's outer (largest) outline, sheet mm. */
   bboxMm: [Mm, Mm, Mm, Mm];
   areaMm2: Mm2;
+  /** Texts whose glyph box centre lies inside the outline. */
   textInside: string[];
+  /** Texts just outside (≤ 25 mm) that belong to no other piece. */
   textNear: string[];
-  /** "2 дет." / "cut 2" parsed from text, if any. */
+  /** The quantity note as printed ("cut 2", "2 дет.", "Cut 1 on fold"); '' = none found. */
+  quantityText: string;
+  /** "2 дет." / "cut 2" / "cut x1 pair" (= 2) parsed from `quantityText`, if any. */
   cutQtyHint: number | null;
+  /** A fold is drawn (FoldFeature) or written ("on fold", "im Bruch", "сгиб") on or at the piece. */
+  foldHint: boolean;
+  /** The outline is mirror-symmetric about one axis (a piece drawn whole, a collar). */
+  symmetricHint: boolean;
   sizeCount: number;
   /** Chirality hint from geometry when a mirrored twin exists on the sheet. */
   mirrorTwinMark: number | null;
+  /** The seed's variant (Mod. 125 / Style A); null = all. */
+  variant: string | null;
 };
 
+/** One allowed base code for the model, with its English name (F9 `allowed_codes`). */
+export type AllowedCode = { code: string; name: string };
+
 export type SuggestPatternPiecesInput = {
+  /** 0 = no card yet (the server only logs it). */
   techCardId: number;
-  /** Media ids of the uploaded renders: the whole sheet with marks and one crop per mark. */
-  sheetMediaId: number;
+  /** Media id of the uploaded SoM render of the whole sheet. */
+  overviewMediaId: number;
+  /** Close-ups of single pieces (≤ 12), media ids. */
   crops: { mark: number; mediaId: number }[];
   marks: SomMark[];
-  sizeRun: string[];
-  bomFabrics: { purpose: FabricPurposeKey; name: string }[];
-  /** Languages seen in the text ('ru','de','en',…) — prompt hint only. */
-  languages: string[];
-  variantLabels: string[];
-  algoRev: string;
+  /** The card's size tokens in rank order — a code may never end in one (FP_M). */
+  sizeTokens: string[];
+  /** BOM fabric purposes of the card (FabricPurposeKey). */
+  bomPurposes: FabricPurposeKey[];
+  /** Cut pieces the card already lists (Codex C10: never bound by name alone). */
+  existingPieceNames: string[];
+  /** Sheet text that belongs to no piece (piece list, legend), ≤ 4000 characters. */
+  instructionsExcerpt: string;
+  /** 'ru', 'de', … — prompt hint only; '' = unknown. */
+  languageHint: string;
+  allowedCodes: AllowedCode[];
+  allowedModifiers: string[];
   force: boolean;
 };
 
 export type PieceSuggestion = {
   mark: number;
+  /** Code words joined (`LIN_FP`); '' when the server refused the model's code. */
   code: string;
+  /** Modifiers in grammar order (L/R, F/B, n, #). */
   mods: string[];
   displayName: string;
   fabrics: FabricPurposeKey[];
+  /** Pieces per garment, both halves of a pair counted; null = the model did not say. */
   cutQty: number | null;
   onFold: boolean;
+  /** One mark cut twice as a mirrored left + right (no L/R in the code). */
   pair: boolean;
   variant: string | null;
   /** Model's own 0..1. */
@@ -1033,23 +1062,40 @@ export type PieceSuggestion = {
 export type SuggestPatternPiecesOutput = {
   suggestions: PieceSuggestion[];
   cached: boolean;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  /** As the server reports it ("" = the provider reported no cost). */
+  costUsd: string;
+  warnings: string[];
 };
 
 /** Deterministic evidence the client computes and combines with the model (Codex C10). */
 export type NameEvidence =
   | { kind: 'text-synonym'; text: string; code: string; weight: number }
+  /** Printed text names ANOTHER piece than the model says: never auto-accepted. */
+  | { kind: 'text-conflict'; text: string; code: string; weight: number }
   | { kind: 'cut-qty'; qty: number; weight: number }
-  | { kind: 'chirality'; hand: PairHand; weight: number }
+  /** The pair/fold call agrees with the geometry (hand = the declared L/R, null for pair/fold). */
+  | { kind: 'chirality'; hand: PairHand | null; weight: number }
   | { kind: 'cut-layout'; fabric: FabricPurposeKey; weight: number }
   | { kind: 'grammar-ok'; weight: number }
   | { kind: 'unique'; weight: number }
+  /** A modifier the sheet does not back (side no text states, hand without a twin, odd numbering). */
+  | { kind: 'unconfirmed'; part: 'side' | 'hand' | 'number'; weight: number }
   | { kind: 'collides-existing'; name: string; weight: number };
 
 export type NameDecision = {
   seed: SeedId;
   suggestion: PieceSuggestion | null;
+  /**
+   * Where the NAME came from: 'text' = read off the sheet by the deterministic reader alone (no
+   * model); 'ai' = the model's answer (text evidence may back it). nameOrigin derives from this +
+   * autoAccepted, so an auto-accepted AI row stays flagged 'ai-auto' even when the sheet agrees.
+   */
+  source: 'text' | 'ai';
   evidence: NameEvidence[];
-  /** Combined confidence, 0..1 (see 08-CONTRACT §9). */
+  /** Combined confidence, 0..1: 0.5·model + 0.5·clamp(Σ evidence weights) (08-CONTRACT §6). */
   confidence: number;
   /** Auto-accepted rows are still shown, flagged. */
   autoAccepted: boolean;
@@ -1061,7 +1107,16 @@ export type NameDecision = {
 export type CombineNamesFn = (
   suggestions: PieceSuggestion[],
   marks: SomMark[],
-  ctx: { existingPieceNames: string[]; threshold: number },
+  ctx: {
+    existingPieceNames: string[];
+    threshold: number;
+    /** Card size tokens: an identity may not end in one (G11). */
+    sizeTokens?: string[];
+    /** BOM purposes, for the cut-layout evidence. */
+    bomPurposes?: FabricPurposeKey[];
+    /** Dictionary membership (dictionary/ isKnownCode); the AI may only auto-accept known codes. */
+    isKnownCode?: (word: string) => boolean;
+  },
 ) => NameDecision[];
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1124,7 +1179,14 @@ export type StageIO = {
   fabrics: { in: { bom: DraftScopeTarget[] }; out: FabricAssignment };
   'render-som': {
     in: { seeds: SeedId[]; dpi: number };
-    out: { sheetPng: Blob; crops: { seed: SeedId; mark: number; png: Blob }[]; marks: SomMark[] };
+    out: {
+      /** The overview render (PNG, or JPEG when the PNG is over the byte cap). */
+      sheetPng: Blob;
+      crops: { seed: SeedId; mark: number; png: Blob }[];
+      marks: SomMark[];
+      /** Sheet-level text for the prompt: what belongs to no piece, and the language it is in. */
+      context?: { instructionsExcerpt: string; languageHint: string };
+    };
   };
   write: {
     in: {

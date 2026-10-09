@@ -26,6 +26,7 @@
     "patimport:assemble": "node scripts/pattern-import/assemble.mjs all",
     "patimport:f6b": "node scripts/pattern-import/f6b.mjs",
     "patimport:f15": "node scripts/pattern-import/f15.mjs",
+    "patimport:ai": "node scripts/pattern-import/ai.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:ask": "node scripts/flat-ask-probe.mjs",
     "flat:pictures": "node scripts/flat-input-pictures-probe.mjs",

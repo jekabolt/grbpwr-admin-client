@@ -58,7 +58,7 @@ export function PieceLegend() {
       ))}
 
       <Text size='micro' variant='label' className='mt-1.5'>
-        {'codes combine: FP_R_1 · PCK_f · BP_L<M>'}
+        {'codes combine: FP_R_1 · PCK_F · SL_R_B_1_# · BP_L_M (size last)'}
       </Text>
     </Accordion>
   );
