@@ -20,6 +20,10 @@ export type StitchOpts = {
   /** Largest misalignment across the seam (row not perfectly straight), mm. */
   maxShearMm: number;
   minVotes: number;
+  /** Vote bin, mm (see STEP). Traced raster pages: 0.2 — their vertices are resampled. */
+  binMm?: number;
+  /** Tolerance of the refinement around the peak, mm. */
+  refineTolMm?: number;
 };
 
 export const DEFAULT_STITCH: StitchOpts = {
@@ -29,20 +33,35 @@ export const DEFAULT_STITCH: StitchOpts = {
   minVotes: 3,
 };
 
+/** Pages traced from a raster (F11, `IRPage.calibration` set): coarse bins, tolerant refine. */
+export const TRACED_STITCH: StitchOpts = {
+  ...DEFAULT_STITCH,
+  maxShearMm: 2,
+  binMm: 0.2,
+  refineTolMm: 0.4,
+};
+
 /**
  * Vote bin. Tiles are cut from one drawing, so a vertex printed on both sides of a seam is the SAME
  * number on both pages up to float noise — a 0.01 mm bin (3×3 neighbourhood = ±0.015) keeps the
  * true peak whole while random coincidences of dense regions (letters drawn as curves, dashes)
  * spread over ~10⁵ bins. A 0.1 mm bin drowns reef's seams in that noise (measured).
  */
-const STEP = 0.01;
+const DEFAULT_STEP = 0.01;
 
 /** Bucket B's points by integer cell for neighbourhood queries. */
-function grid(xs: Float64Array, ys: Float64Array, keep: (i: number) => boolean, cell: number) {
+function grid(
+  xs: Float64Array,
+  ys: Float64Array,
+  ox: number,
+  oy: number,
+  keep: (i: number) => boolean,
+  cell: number,
+) {
   const m = new Map<number, number[]>();
   for (let i = 0; i < xs.length; i++) {
     if (!keep(i)) continue;
-    const k = Math.floor(xs[i] / cell) * 1_000_003 + Math.floor(ys[i] / cell);
+    const k = Math.floor((xs[i] + ox) / cell) * 1_000_003 + Math.floor((ys[i] + oy) / cell);
     const l = m.get(k);
     if (l) l.push(i);
     else m.set(k, [i]);
@@ -93,6 +112,7 @@ export function stitchFree(
   set: VertexSet = 'content',
 ): RawLink | null {
   const w = window(A, B, rel, o);
+  const STEP = o.binMm ?? DEFAULT_STEP;
   const { X: AX, Y: AY } = verts(A, set);
   const { X: BX, Y: BY } = verts(B, set);
   // Vertices of A that can coincide with something of B: inside B's rect moved by the window.
@@ -177,7 +197,7 @@ export function stitchFree(
   let n2 = 0;
   for (const e of sums)
     if (Math.hypot((e.ix - bx) * STEP, (e.iy - by) * STEP) >= 1) n2 = Math.max(n2, e.s);
-  const ref = refine(A, B, { dx: bx * STEP, dy: by * STEP }, 0.05, set);
+  const ref = refine(A, B, { dx: bx * STEP, dy: by * STEP }, o.refineTolMm ?? 0.05, set);
   return {
     a: A,
     b: B,
@@ -213,8 +233,10 @@ export function refine(
   if (ox0 > ox1 || oy0 > oy1) return { n: 0, dx: d.dx, dy: d.dy, spread: 0 };
   const cell = Math.max(0.5, tol * 2);
   const g = grid(
-    BX.map((x) => x + d.dx),
-    BY.map((y) => y + d.dy),
+    BX,
+    BY,
+    d.dx,
+    d.dy,
     (i) => {
       const x = BX[i] + d.dx;
       const y = BY[i] + d.dy;

@@ -130,7 +130,7 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
         pageIdx,
         path,
         pts: path.pts.map((q) => apply(pose, q)),
-        look: lookOf(style),
+        look: `${path.src.file}|${lookOf(style)}`,
         style,
         pose,
         inside: path.pts.length ? inside / path.pts.length : 0,
@@ -171,22 +171,33 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
           used[j] = true;
           cls.push(g[j]);
         }
-      // Per page, every copy stays (legit repeats on one page); across pages, the best page wins.
-      const byPage = new Map<number, Cand[]>();
+      // Per page, every copy stays (legit repeats on one page); across pages OF ONE FILE, the
+      // best page wins. Files never dedupe against each other: in a file-per-size set a line
+      // shared by two sizes belongs to both.
+      const byFile = new Map<string, Cand[]>();
       for (const c of cls) {
-        const l = byPage.get(c.pageIdx);
+        const l = byFile.get(c.path.src.file);
         if (l) l.push(c);
-        else byPage.set(c.pageIdx, [c]);
+        else byFile.set(c.path.src.file, [c]);
       }
-      let bestPage = -1;
-      let bestInside = -1;
-      for (const [pi, l] of byPage) {
-        const v = Math.max(...l.map((c) => c.inside));
-        if (v > bestInside || (v === bestInside && pi < bestPage)) [bestPage, bestInside] = [pi, v];
-      }
-      for (const [pi, l] of byPage) {
-        if (pi === bestPage) survivors.push(...l);
-        else wholeDuplicates += l.length;
+      for (const fileCands of byFile.values()) {
+        const byPage = new Map<number, Cand[]>();
+        for (const c of fileCands) {
+          const l = byPage.get(c.pageIdx);
+          if (l) l.push(c);
+          else byPage.set(c.pageIdx, [c]);
+        }
+        let bestPage = -1;
+        let bestInside = -1;
+        for (const [pi, l] of byPage) {
+          const v = Math.max(...l.map((c) => c.inside));
+          if (v > bestInside || (v === bestInside && pi < bestPage))
+            [bestPage, bestInside] = [pi, v];
+        }
+        for (const [pi, l] of byPage) {
+          if (pi === bestPage) survivors.push(...l);
+          else wholeDuplicates += l.length;
+        }
       }
     }
   }
@@ -285,7 +296,7 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
   placed.forEach(({ page, pose }, pageIdx) => {
     for (const t of page.texts) {
       const anchor = apply(pose, t.anchor);
-      const key = `${t.text}|${Math.round(anchor.x / 0.3)}|${Math.round(anchor.y / 0.3)}`;
+      const key = `${t.src.file}|${t.text}|${Math.round(anchor.x / 0.3)}|${Math.round(anchor.y / 0.3)}`;
       const prev = seenText.get(key);
       if (prev !== undefined && prev !== pageIdx) {
         textsDropped++;

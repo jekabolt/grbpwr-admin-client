@@ -87,7 +87,9 @@ function bestRun(lines: Line[], minSpacing: number): Line[] {
  * each span most of the grid. `aspect` (cell w/h expected, from the sheet pitch) breaks ties.
  */
 export function detectLattice(page: IRPage, aspect?: number): Lattice | null {
-  const strokes = page.paths.filter((p) => !(page.styles[p.style]?.fill && !page.styles[p.style]?.widthMm));
+  const strokes = page.paths.filter(
+    (p) => !(page.styles[p.style]?.fill && !page.styles[p.style]?.widthMm),
+  );
   const { v, h } = axisLines(strokes, 5);
   // Grid lines are the long ones; keeping only lines ≥ 15 % of the longest span keeps the run
   // search small on a 26 000-stroke overview (palto p2).
@@ -135,7 +137,10 @@ export function drawingBox(paths: IRPath[], minLenMm: number, within?: BoxMm): B
       len += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
     if (len < minLenMm) continue;
     for (const v of p.pts) {
-      if (within && (v.x < within.minX || v.x > within.maxX || v.y < within.minY || v.y > within.maxY))
+      if (
+        within &&
+        (v.x < within.minX || v.x > within.maxX || v.y < within.minY || v.y > within.maxY)
+      )
         continue;
       if (!b) b = { minX: v.x, minY: v.y, maxX: v.x, maxY: v.y };
       else {

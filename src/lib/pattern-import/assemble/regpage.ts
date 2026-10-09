@@ -115,6 +115,21 @@ export function furnitureOf(pages: IRPage[]): Set<string> {
   return out;
 }
 
+/**
+ * The tile's printed area. A page traced from a raster (F11) is tiled by its IMAGE, not by the
+ * paper: leonie's images abut exactly (A1 ends at x 200.8 where A2 starts at x 9.0) while the
+ * A4 page around them is margin. Vector pages: the page rectangle.
+ */
+export function tileRectOf(src: IRPage): BoxMm {
+  if (src.calibration && src.rasters.length) {
+    let best = src.rasters[0];
+    const area = (r: typeof best) => (r.bbox.maxX - r.bbox.minX) * (r.bbox.maxY - r.bbox.minY);
+    for (const r of src.rasters) if (area(r) > area(best)) best = r;
+    return { ...best.bbox };
+  }
+  return { minX: 0, minY: 0, maxX: src.widthMm, maxY: src.heightMm };
+}
+
 export function buildRegPage(
   src: IRPage,
   idx: number,
@@ -170,7 +185,8 @@ export function buildRegPage(
     let count = 0;
     for (const s of subs) {
       count += s.length;
-      for (let i = 1; i < s.length; i++) len += Math.hypot(s[i].x - s[i - 1].x, s[i].y - s[i - 1].y);
+      for (let i = 1; i < s.length; i++)
+        len += Math.hypot(s[i].x - s[i - 1].x, s[i].y - s[i - 1].y);
     }
     if (count < 6 || len < minShapeMm) continue;
     shapes.push({ op, pts: subs.flat(), lengthMm: len });
@@ -181,7 +197,7 @@ export function buildRegPage(
     page: src.page,
     idx,
     rot,
-    rect: rotBox({ minX: 0, minY: 0, maxX: src.widthMm, maxY: src.heightMm }, rot),
+    rect: rotBox(tileRectOf(src), rot),
     xs,
     ys,
     axs,

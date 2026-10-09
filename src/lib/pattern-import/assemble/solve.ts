@@ -65,7 +65,7 @@ function solveLinear(A: Float64Array[], b: Float64Array): Float64Array {
   return x;
 }
 
-type Node = { key: string; file: string; page: number; rot: Rot };
+type Node = { key: string; file: string; page: number; rot: Rot; w: number; h: number };
 
 function components(nodes: Node[], pairs: PairTransform[]): number[] {
   const idx = new Map(nodes.map((n, i) => [n.key, i]));
@@ -127,24 +127,28 @@ function lsq(nodes: Node[], pairs: PairTransform[], seeds: Map<string, { x: numb
 export function solvePosesDetailed(
   pairs: PairTransform[],
   seeds: Map<string, { x: number; y: number }> = new Map(),
-  extraNodes: { file: string; page: number }[] = [],
+  /** Pages to include even without pairs; their sizes fill PagePose.widthMm/heightMm. */
+  extraNodes: { file: string; page: number; widthMm?: number; heightMm?: number }[] = [],
 ): SolveResult {
   const nodes: Node[] = [];
   const byKey = new Map<string, Node>();
-  const add = (file: string, page: number) => {
+  const add = (file: string, page: number, w = 0, h = 0) => {
     const key = pageKey(file, page);
     if (!byKey.has(key)) {
-      const nd: Node = { key, file, page, rot: 0 };
+      const nd: Node = { key, file, page, rot: 0, w, h };
       byKey.set(key, nd);
       nodes.push(nd);
     }
-    return byKey.get(key) as Node;
+    const nd = byKey.get(key) as Node;
+    if (w) nd.w = w;
+    if (h) nd.h = h;
+    return nd;
   };
   for (const p of pairs) {
     add(p.from.file, p.from.page);
     add(p.to.file, p.to.page);
   }
-  for (const e of extraNodes) add(e.file, e.page);
+  for (const e of extraNodes) add(e.file, e.page, e.widthMm, e.heightMm);
   // Rotations by BFS over the pairs.
   const assigned = new Set<string>();
   for (const root of nodes) {
@@ -158,12 +162,12 @@ export function solvePosesDetailed(
         const t = pageKey(p.to.file, p.to.page);
         if (f === cur.key && !assigned.has(t)) {
           const nd = byKey.get(t) as Node;
-          nd.rot = (((cur.rot + p.rotDeg) % 360) + 360) % 360 as Rot;
+          nd.rot = ((((cur.rot + p.rotDeg) % 360) + 360) % 360) as Rot;
           assigned.add(t);
           queue.push(nd);
         } else if (t === cur.key && !assigned.has(f)) {
           const nd = byKey.get(f) as Node;
-          nd.rot = (((cur.rot - p.rotDeg) % 360) + 360) % 360 as Rot;
+          nd.rot = ((((cur.rot - p.rotDeg) % 360) + 360) % 360) as Rot;
           assigned.add(f);
           queue.push(nd);
         }
@@ -229,6 +233,9 @@ export function solvePosesDetailed(
       file: nd.file,
       page: nd.page,
       toSheet: rotAffine(nd.rot, sol.x[i], sol.y[i]),
+      // Unknown to the bare contract call (pairs carry no sizes): 0 until the caller fills it.
+      widthMm: nd.w,
+      heightMm: nd.h,
       residualMm: r,
     };
   });

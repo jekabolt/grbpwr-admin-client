@@ -115,8 +115,7 @@ export function indexLabels(pages: IRPage[]): (number | null)[] | null {
   const [gx, gy, gf] = bestK.split(',').map(Number);
   const vals = cand.map((list) => {
     const hit = list.find(
-      (c) =>
-        Math.abs(c.x / 6 - gx) <= 1 && Math.abs(c.y / 6 - gy) <= 1 && Math.round(c.fs) === gf,
+      (c) => Math.abs(c.x / 6 - gx) <= 1 && Math.abs(c.y / 6 - gy) <= 1 && Math.round(c.fs) === gf,
     );
     return hit ? hit.v : null;
   });

@@ -20,10 +20,22 @@ import { bestLayout, type Flow, type Layout, type Order } from './layout';
 import { median, recurrenceLinks, type RawLink } from './recurrence';
 import { buildRegPage, furnitureOf, pageKey, type RegPage, type Rot } from './regpage';
 import { solvePosesDetailed } from './solve';
-import { DEFAULT_STITCH, accepted, refine, stitchFree, type Rel } from './stitch';
+import {
+  DEFAULT_STITCH,
+  TRACED_STITCH,
+  accepted,
+  refine,
+  stitchFree,
+  type Rel,
+  type StitchOpts,
+} from './stitch';
 
 export type Vec = { dx: number; dy: number };
-export type Pitch = { right: Vec; below: Vec; from: 'recurrence' | 'edge-votes' | 'page-size' };
+export type Pitch = {
+  right: Vec;
+  below: Vec;
+  from: 'recurrence' | 'edge-votes' | 'raster-frame' | 'page-size';
+};
 
 export type GroupResult = {
   file: string;
@@ -36,9 +48,11 @@ export type GroupResult = {
   /** Pitch re-fitted to the solved poses (null with < 3 geometric pages). */
   fitted: { right: Vec; below: Vec } | null;
   layout: Layout;
-  layoutFrom: 'labels' | 'votes' | 'manual';
+  layoutFrom: 'labels' | 'recurrence' | 'votes' | 'manual';
   /** Max |pose − ideal lattice position|, mm, over pages placed by geometry. */
   latticeMaxMm: number;
+  /** Most vertices beyond the page edge (windows onto the drawing: Burda, kombinezon, blazer). */
+  windowed: boolean;
   /** Pages placed by the grid alone (no geometric seam evidence). */
   unverified: number[];
   warnings: string[];
@@ -101,7 +115,12 @@ function stepOf(groups: Cand[], axis: 'x' | 'y', minShare = 0.2): Cand[] {
   return out;
 }
 
-export function estimatePitch(regs: RegPage[], recs: RawLink[]): Pitch {
+export function estimatePitch(
+  regs: RegPage[],
+  recs: RawLink[],
+  st: StitchOpts = DEFAULT_STITCH,
+  supportTolMm = 0.05,
+): Pitch {
   const W = median(regs.map((r) => r.rect.maxX - r.rect.minX));
   const H = median(regs.map((r) => r.rect.maxY - r.rect.minY));
   const n = regs.length;
@@ -109,12 +128,12 @@ export function estimatePitch(regs: RegPage[], recs: RawLink[]): Pitch {
   for (let i = 0; i < Math.min(6, n - 1); i++)
     for (let k = 1; k <= Math.min(12, n - 1 - i); k++) sample.push([i, i + k]);
   const support = (c: Vec) =>
-    sample.reduce((s, [i, j]) => s + refine(regs[i], regs[j], c, 0.05, 'all').n, 0);
+    sample.reduce((s, [i, j]) => s + refine(regs[i], regs[j], c, supportTolMm, 'all').n, 0);
   const edge = (rel: Rel): Cand[] => {
     const vs: { v: Vec; w: number }[] = [];
     for (const [i, j] of sample) {
-      const l = stitchFree(regs[i], regs[j], rel, DEFAULT_STITCH, 'all');
-      if (accepted(l)) vs.push({ v: l, w: l.n });
+      const l = stitchFree(regs[i], regs[j], rel, st, 'all');
+      if (accepted(l, st)) vs.push({ v: l, w: l.n });
     }
     return stepOf(clustersOf(vs, rel === 'right' ? 'x' : 'y'), rel === 'right' ? 'x' : 'y');
   };
@@ -153,7 +172,11 @@ export function estimatePitch(regs: RegPage[], recs: RawLink[]): Pitch {
   }
   const B = choose(stepOf(clustersOf(vert, 'y'), 'y', 0.5), 'below');
   const from: Pitch['from'] =
-    !R.v || !B.v ? 'page-size' : R.from === 'recurrence' && B.from === 'recurrence' ? 'recurrence' : 'edge-votes';
+    !R.v || !B.v
+      ? 'page-size'
+      : R.from === 'recurrence' && B.from === 'recurrence'
+        ? 'recurrence'
+        : 'edge-votes';
   return {
     right: R.v ? { dx: R.v.dx, dy: R.v.dy } : { dx: W, dy: 0 },
     below: B.v ? { dx: B.v.dx, dy: B.v.dy } : { dx: 0, dy: -H },
@@ -209,7 +232,30 @@ export function assembleGroup(
   const keepTurned = (r: RegPage) => r.rot === 0 || turnChoice.get(r.key) === r.rot;
   // 3. Pitch, then drop recurrence links that are not a lattice step: an identical shape printed
   // at two different places (blazer's TACHYS logo on every piece) pairs DIFFERENT instances.
-  const pitch = estimatePitch(regs, recAll.filter((l) => keepTurned(l.a) && keepTurned(l.b)));
+  // Pages traced from a raster (F11) carry resampled vertices: a seam agrees to ~0.3 mm, not 0.01.
+  const traced = pages.some((p) => !!p.calibration);
+  const st = traced ? TRACED_STITCH : DEFAULT_STITCH;
+  const fineTol = traced ? 0.3 : 0.05;
+  // Traced pages: the images abut, so the pitch is image edge to image edge (the commonest left /
+  // right / top / bottom edges: the first and last tile of a row are cut on their outer side).
+  const pitch: Pitch = traced
+    ? {
+        right: {
+          dx: median(regs.map((r) => r.rect.maxX)) - median(regs.map((r) => r.rect.minX)),
+          dy: 0,
+        },
+        below: {
+          dx: 0,
+          dy: median(regs.map((r) => r.rect.minY)) - median(regs.map((r) => r.rect.maxY)),
+        },
+        from: 'raster-frame',
+      }
+    : estimatePitch(
+        regs,
+        recAll.filter((l) => keepTurned(l.a) && keepTurned(l.b)),
+        st,
+        fineTol,
+      );
   if (pitch.from === 'page-size')
     warnings.push('no seam evidence for the tile pitch — assumed page size (check the seams)');
   const onLattice = (l: RawLink) => {
@@ -251,7 +297,7 @@ export function assembleGroup(
   };
   const windowed = median(main.map(outShare)) > 0.3;
   const voteMargin = windowed ? 40 : 2;
-  const voteTol = windowed ? 0.05 : PATIMPORT.snapMm;
+  const voteTol = traced ? 0.6 : windowed ? 0.05 : PATIMPORT.snapMm;
   const contentMemo = new Map<string, number>();
   const contentVotes = (i: number, j: number, rel: Rel) => {
     const k = `${i}|${j}|${rel}`;
@@ -278,10 +324,21 @@ export function assembleGroup(
   const uniq = new Set(labels.filter(Boolean).map((c) => `${c?.row},${c?.col}`)).size;
   let layout: Layout;
   let layoutFrom: GroupResult['layoutFrom'];
+  const turnedCells = new Map<string, { row: number; col: number }>();
+  const turnedChosen = turnedRegs.filter((r) => turnChoice.get(r.key) === r.rot);
+  const fromRec =
+    pitch.from === 'recurrence' ? layoutFromRecurrence(regs, turnedChosen, rec, pitch) : null;
   if (regs.length && labelled === regs.length && uniq === regs.length) {
     const cells = labels.map((c) => ({ row: c?.row ?? 0, col: c?.col ?? 0 }));
     layout = { order: 'row-major', flow: 'down', lines: [], cells, score: 0 };
     layoutFrom = 'labels';
+  } else if (fromRec) {
+    // Windowed tiles: the recurrence poses ARE the layout (a gap or a turned page in the reading
+    // order cannot shift it); pages without recurrence fill the empty cells in reading order.
+    layout = fromRec.layout;
+    layoutFrom = 'recurrence';
+    for (const [k, c] of fromRec.turned) turnedCells.set(k, c);
+    if (fromRec.note) warnings.push(fromRec.note);
   } else {
     if (labelled)
       warnings.push(`cell labels on ${labelled}/${regs.length} pages only — layout from seams`);
@@ -317,12 +374,12 @@ export function assembleGroup(
       let geometric = false;
       if (cv >= opts.minSeamVotes) {
         const c1 = refine(regs[i], regs[j], e, voteTol, 'content', voteMargin);
-        const c2 = refine(regs[i], regs[j], c1, 0.05, 'content', voteMargin);
+        const c2 = refine(regs[i], regs[j], c1, fineTol, 'content', voteMargin);
         m = c2.n >= opts.minSeamVotes ? c2 : c1;
         geometric = true;
       } else {
         const a1 = refine(regs[i], regs[j], e, PATIMPORT.snapMm, 'all');
-        const a2 = a1.n ? refine(regs[i], regs[j], a1, 0.05, 'all') : a1;
+        const a2 = a1.n ? refine(regs[i], regs[j], a1, fineTol, 'all') : a1;
         if (a2.n >= 4) m = a2;
       }
       if (!geometric) weakSeams.push(`${regs[i].page + 1}→${regs[j].page + 1}`);
@@ -384,7 +441,7 @@ export function assembleGroup(
   const solved = solvePosesDetailed(
     pairs,
     new Map(),
-    regs.map((r) => ({ file: r.file, page: r.page })),
+    pages.map((p) => ({ file: p.file, page: p.page, widthMm: p.widthMm, heightMm: p.heightMm })),
   );
   warnings.push(...solved.warnings);
   const poseOf = new Map(solved.poses.map((p) => [pageKey(p.file, p.page), p]));
@@ -394,6 +451,13 @@ export function assembleGroup(
     pose.row = layout.cells[i].row;
     pose.col = layout.cells[i].col;
   });
+  for (const [k, c] of turnedCells) {
+    const pose = poseOf.get(k);
+    if (pose) {
+      pose.row = c.row;
+      pose.col = c.col;
+    }
+  }
   // 7. Lattice regularity: fit t = t0 + col·R + row·B to the pages placed by geometry and report
   // each one's deviation (a seam measured on the wrong feature shows up here even when the pair
   // graph has no cycle through it).
@@ -442,6 +506,7 @@ export function assembleGroup(
     layout,
     layoutFrom,
     latticeMaxMm: latticeMax,
+    windowed,
     unverified,
     warnings,
     ms: Date.now() - t0,
@@ -490,4 +555,161 @@ export function fitLattice(
   const sx = solve3(M, bx);
   const sy = solve3(M, by);
   return { x0: sx[0], y0: sy[0], rx: sx[1], ry: sy[1], bx: sx[2], by: sy[2] };
+}
+
+/**
+ * Layout from recurrence (windowed tiles): solve the recurrence pairs alone, read each linked
+ * page's cell off its pose (page-centre on the pitch lattice), learn the reading order from the
+ * linked pages, and give the unlinked pages the empty cells between their linked neighbours in
+ * that order. null when recurrence links too few pages or cells collide.
+ */
+function layoutFromRecurrence(
+  regs: RegPage[],
+  turned: RegPage[],
+  rec: RawLink[],
+  pitch: Pitch,
+): { layout: Layout; turned: Map<string, { row: number; col: number }>; note?: string } | null {
+  if (!rec.length) return null;
+  const all = [...regs, ...turned];
+  const sol = solvePosesDetailed(
+    rec.map((l) => toPair(l, l.a.rot, l.b.rot)),
+    new Map(),
+    all.map((r) => ({ file: r.file, page: r.page })),
+  );
+  // Largest component = the pages the recurrence pairs reach from the first linked page.
+  const adj = new Map<string, string[]>();
+  for (const l of rec) {
+    adj.set(l.a.key, [...(adj.get(l.a.key) ?? []), l.b.key]);
+    adj.set(l.b.key, [...(adj.get(l.b.key) ?? []), l.a.key]);
+  }
+  let comp = new Set<string>();
+  for (const start of adj.keys()) {
+    if (comp.has(start)) continue;
+    const seen = new Set([start]);
+    const q = [start];
+    while (q.length)
+      for (const n of adj.get(q.shift() as string) ?? []) if (!seen.has(n)) seen.add(n), q.push(n);
+    if (seen.size > comp.size) comp = seen;
+  }
+  if (comp.size < Math.max(2, 0.5 * regs.length)) return null;
+  const pose = new Map(sol.poses.map((p) => [pageKey(p.file, p.page), p]));
+  const det = pitch.right.dx * pitch.below.dy - pitch.right.dy * pitch.below.dx;
+  if (!det) return null;
+  const centre = (r: RegPage) => {
+    const pp = pose.get(r.key);
+    if (!pp) return null;
+    const cx = r.src.widthMm / 2;
+    const cy = r.src.heightMm / 2;
+    const m = pp.toSheet;
+    return { x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f };
+  };
+  const linked = all.filter((r) => comp.has(r.key));
+  const c0 = centre(linked[0]);
+  if (!c0) return null;
+  const cellAt = (r: RegPage) => {
+    const c = centre(r) as { x: number; y: number };
+    const dx = c.x - c0.x;
+    const dy = c.y - c0.y;
+    // (dx, dy) = col·R + row·B ; rows grow DOWN the sheet (B points down, y-up frame).
+    const col = Math.round((dx * pitch.below.dy - dy * pitch.below.dx) / det);
+    const row = Math.round((pitch.right.dx * dy - pitch.right.dy * dx) / det);
+    return { row, col };
+  };
+  const cell = new Map<string, { row: number; col: number }>();
+  const used = new Set<string>();
+  for (const r of linked) {
+    const c = cellAt(r);
+    const k = `${c.row},${c.col}`;
+    if (used.has(k)) return null; // two tiles in one cell: not a lattice
+    used.add(k);
+    cell.set(r.key, c);
+  }
+  // Reading order of the linked pages: which of row-major ↓, row-major ↑, col-major → fits.
+  const byPage = [...all].sort((a, b) => a.page - b.page);
+  const orders: { order: Order; flow: Flow; key: (c: { row: number; col: number }) => number }[] = [
+    { order: 'row-major', flow: 'down', key: (c) => c.row * 1000 + c.col },
+    { order: 'row-major', flow: 'up', key: (c) => -c.row * 1000 + c.col },
+    { order: 'col-major', flow: 'right', key: (c) => c.col * 1000 + c.row },
+  ];
+  let best = orders[0];
+  let bestOk = -1;
+  for (const o of orders) {
+    let ok = 0;
+    let prev: number | null = null;
+    for (const r of byPage) {
+      const c = cell.get(r.key);
+      if (!c) continue;
+      const v = o.key(c);
+      if (prev !== null && v > prev) ok++;
+      prev = v;
+    }
+    if (ok > bestOk) [best, bestOk] = [o, ok];
+  }
+  // The lattice's cells in reading order (bounding box of the linked cells).
+  const rows = [...cell.values()].map((c) => c.row);
+  const cols = [...cell.values()].map((c) => c.col);
+  const r0 = Math.min(...rows);
+  const r1 = Math.max(...rows);
+  const q0 = Math.min(...cols);
+  const q1 = Math.max(...cols);
+  const lattice: { row: number; col: number }[] = [];
+  for (let r = r0; r <= r1; r++) for (let c = q0; c <= q1; c++) lattice.push({ row: r, col: c });
+  lattice.sort((a, b) => best.key(a) - best.key(b));
+  const pos = new Map(lattice.map((c, i) => [`${c.row},${c.col}`, i]));
+  // Unlinked pages: between the linked neighbours in reading order, the empty cells in order.
+  let unplaced = 0;
+  for (let i = 0; i < byPage.length; i++) {
+    const r = byPage[i];
+    if (cell.has(r.key)) continue;
+    let a = i - 1;
+    while (a >= 0 && !cell.has(byPage[a].key)) a--;
+    let b = i + 1;
+    while (b < byPage.length && !cell.has(byPage[b].key)) b++;
+    const lo =
+      a >= 0
+        ? pos.get(`${cell.get(byPage[a].key)?.row},${cell.get(byPage[a].key)?.col}`) ?? -1
+        : -1;
+    const hi =
+      b < byPage.length
+        ? pos.get(`${cell.get(byPage[b].key)?.row},${cell.get(byPage[b].key)?.col}`) ??
+          lattice.length
+        : lattice.length;
+    let placed = false;
+    for (let k = lo + 1; k < hi && k < lattice.length; k++) {
+      const c = lattice[k];
+      const key = `${c.row},${c.col}`;
+      if (used.has(key)) continue;
+      used.add(key);
+      cell.set(r.key, c);
+      placed = true;
+      break;
+    }
+    if (!placed) unplaced++;
+  }
+  if (unplaced) return null;
+  const minR = Math.min(...[...cell.values()].map((c) => c.row));
+  const minC = Math.min(...[...cell.values()].map((c) => c.col));
+  const norm = (c: { row: number; col: number }) => ({ row: c.row - minR, col: c.col - minC });
+  const cells = regs.map((r) => norm(cell.get(r.key) as { row: number; col: number }));
+  const turnedCells = new Map(
+    turned.map((r) => [r.key, norm(cell.get(r.key) as { row: number; col: number })]),
+  );
+  const lineOf = (c: { row: number; col: number }) => (best.order === 'row-major' ? c.row : c.col);
+  const lines = new Map<number, number>();
+  for (const c of [...cells, ...turnedCells.values()])
+    lines.set(lineOf(c), (lines.get(lineOf(c)) ?? 0) + 1);
+  return {
+    layout: {
+      order: best.order,
+      flow: best.flow,
+      lines: [...lines.entries()].sort((x, y) => x[0] - y[0]).map((e) => e[1]),
+      cells,
+      score: comp.size,
+    },
+    turned: turnedCells,
+    note:
+      comp.size < all.length
+        ? `${all.length - comp.size} page(s) placed into empty cells by reading order`
+        : undefined,
+  };
 }

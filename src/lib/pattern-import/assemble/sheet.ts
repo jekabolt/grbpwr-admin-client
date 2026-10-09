@@ -28,7 +28,13 @@ import { furnitureOf, pageKey } from './regpage';
 export type SheetReport = {
   groups: GroupResult[];
   /** File-to-file alignment for file-per-size sets. */
-  alignment: { file: string; dxMm: number; dyMm: number; method: string; votes: number }[];
+  alignment: {
+    file: string;
+    dxMm: number;
+    dyMm: number;
+    method: string;
+    medianToPrevMm: number | null;
+  }[];
   overview: {
     page: number;
     file: string;
@@ -50,7 +56,10 @@ export type SheetReport = {
 const compose = (m: Affine, tx: number, ty: number): Affine => ({ ...m, e: m.e + tx, f: m.f + ty });
 
 /** GridOverride → poses (method 'manual'): reading order from originPage, rows go down. */
-export function manualPoses(pages: IRPage[], o: GridOverride): { poses: PagePose[]; pairs: PairTransform[] } {
+export function manualPoses(
+  pages: IRPage[],
+  o: GridOverride,
+): { poses: PagePose[]; pairs: PairTransform[] } {
   const start = Math.max(
     0,
     pages.findIndex((p) => p.file === o.originPage.file && p.page === o.originPage.page),
@@ -66,6 +75,8 @@ export function manualPoses(pages: IRPage[], o: GridOverride): { poses: PagePose
       file: p.file,
       page: p.page,
       toSheet: { a: 1, b: 0, c: 0, d: 1, e: col * o.stepXMm, f: -row * o.stepYMm },
+      widthMm: p.widthMm,
+      heightMm: p.heightMm,
       row,
       col,
       residualMm: 0,
@@ -106,6 +117,67 @@ function tileBox(pages: IRPage[], poses: Map<string, PagePose>): BoxMm {
   return b;
 }
 
+/**
+ * Median distance (mm) from file A's drawing to file B's, both already in the sheet frame:
+ * graded sizes of one layout lie a few mm apart; two different layouts tens of mm. Rulings and
+ * filled letters are left out (the 1 cm grid would always be 0 mm away).
+ */
+function chamferMedian(A: IRPage[], B: IRPage[], poses: Map<string, PagePose>): number {
+  const pts = (pages: IRPage[]) => {
+    const out: { x: number; y: number }[] = [];
+    const furniture = furnitureOf(pages);
+    for (const pg of pages) {
+      const pose = poses.get(pageKey(pg.file, pg.page));
+      if (!pose) continue;
+      for (const path of pg.paths) {
+        const st = pg.styles[path.style];
+        if (st?.fill && !st.widthMm) continue;
+        // Rulings (grid, frames): straight and axis-parallel, whatever their vertex count.
+        const p0 = path.pts[0];
+        if (
+          path.pts.every((v) => Math.abs(v.x - p0.x) < 0.05) ||
+          path.pts.every((v) => Math.abs(v.y - p0.y) < 0.05)
+        )
+          continue;
+        for (const v of path.pts)
+          if (!furniture.has(`${Math.round(v.x * 10)},${Math.round(v.y * 10)}`))
+            out.push(apply(pose.toSheet, v));
+      }
+    }
+    return out;
+  };
+  const a = pts(A);
+  const b = pts(B);
+  if (!a.length || !b.length) return Infinity;
+  const CELL = 5;
+  const grid = new Map<number, { x: number; y: number }[]>();
+  for (const v of b) {
+    const k = Math.floor(v.x / CELL) * 100_003 + Math.floor(v.y / CELL);
+    const l = grid.get(k);
+    if (l) l.push(v);
+    else grid.set(k, [v]);
+  }
+  const ds: number[] = [];
+  const step = Math.max(1, Math.floor(a.length / 600));
+  for (let i = 0; i < a.length; i += step) {
+    const v = a[i];
+    const cx = Math.floor(v.x / CELL);
+    const cy = Math.floor(v.y / CELL);
+    let best = 60;
+    for (let r = 0; r <= 12 && best > r * CELL - CELL; r++)
+      for (let u = -r; u <= r; u++)
+        for (const w of Math.abs(u) === r ? range(-r, r) : [-r, r]) {
+          for (const q of grid.get((cx + u) * 100_003 + (cy + w)) ?? [])
+            best = Math.min(best, Math.hypot(q.x - v.x, q.y - v.y));
+        }
+    ds.push(best);
+  }
+  ds.sort((x, y) => x - y);
+  return ds[ds.length >> 1];
+}
+
+const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+
 /** Empty lattice cells that drawing runs into (lines ending on the seam facing them). */
 function missingCells(
   g: GroupResult,
@@ -113,7 +185,8 @@ function missingCells(
   poses: Map<string, PagePose>,
 ): { row: number; col: number; evidence: number }[] {
   const cells = new Map<string, PagePose>();
-  for (const p of g.poses) if (p.row !== undefined && p.col !== undefined) cells.set(`${p.row},${p.col}`, p);
+  for (const p of g.poses)
+    if (p.row !== undefined && p.col !== undefined) cells.set(`${p.row},${p.col}`, p);
   if (!cells.size) return [];
   const rows = [...cells.values()].map((p) => p.row as number);
   const cols = [...cells.values()].map((p) => p.col as number);
@@ -160,7 +233,31 @@ function missingCells(
           }
         }
       }
-      void poses;
+      // Windowed tiles: their out-of-page drawing reaching INTO the empty cell is the evidence.
+      const nb0 = [...cells.values()][0];
+      const pg0 = byKey.get(pageKey(nb0.file, nb0.page));
+      const ref = g.poses.find((p) => p.row !== undefined && p.col !== undefined);
+      if (g.windowed && pg0 && ref && ref.row !== undefined && ref.col !== undefined) {
+        const pr = g.fitted?.right ?? g.pitch.right;
+        const pb = g.fitted?.below ?? g.pitch.below;
+        const ox = ref.toSheet.e + (c - ref.col) * pr.dx + (r - ref.row) * pb.dx;
+        const oy = ref.toSheet.f + (c - ref.col) * pr.dy + (r - ref.row) * pb.dy;
+        const inset = 5;
+        let inside = 0;
+        for (const nb of cells.values()) {
+          const pg = byKey.get(pageKey(nb.file, nb.page));
+          const pose = poses.get(pageKey(nb.file, nb.page));
+          if (!pg || !pose) continue;
+          for (const path of pg.paths)
+            for (const v of path.pts) {
+              const sx = pose.toSheet.a * v.x + pose.toSheet.c * v.y + pose.toSheet.e - ox;
+              const sy = pose.toSheet.b * v.x + pose.toSheet.d * v.y + pose.toSheet.f - oy;
+              if (sx > inset && sy > inset && sx < pg0.widthMm - inset && sy < pg0.heightMm - inset)
+                inside++;
+            }
+        }
+        if (inside >= 20) evidence += inside;
+      }
       if (evidence >= 3) out.push({ row: r, col: c, evidence });
     }
   return out;
@@ -197,13 +294,17 @@ export function assembleSheetDetailed(
       const m = manualPoses(pages, override);
       for (const p of m.poses) allPoses.set(pageKey(p.file, p.page), p);
       allPairs.push(...m.pairs);
-      warnings.push(`file ${file}: placed by the operator's grid (${override.rows}×${override.cols})`);
+      warnings.push(
+        `file ${file}: placed by the operator's grid (${override.rows}×${override.cols})`,
+      );
     } else if (pages.length === 1) {
       const p = pages[0];
       allPoses.set(pageKey(p.file, p.page), {
         file: p.file,
         page: p.page,
         toSheet: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 },
+        widthMm: p.widthMm,
+        heightMm: p.heightMm,
         row: 0,
         col: 0,
         residualMm: 0,
@@ -218,7 +319,7 @@ export function assembleSheetDetailed(
         missing.push({ row: m.row, col: m.col });
         warnings.push(
           `${byFile.size > 1 ? `file ${file}: ` : ''}tile row ${m.row + 1} col ${m.col + 1} missing — ` +
-            `${m.evidence} line ends run into it`,
+            `${m.evidence} line ends / vertices of the neighbours run into it`,
         );
       }
     }
@@ -227,12 +328,55 @@ export function assembleSheetDetailed(
     fileOffsets.set(file, { dx: -box.minX, dy: -box.maxY });
     done++;
   }
-  // File-per-size: every file's top-left at the same point (the shared print frame).
-  for (const [file, off] of fileOffsets) {
+  // File-per-size: every file's top-left at the same point (the shared print frame) — IF the
+  // drawings then nest. wm XS…XXXL do (graded around one origin, same 3×5 grid; measured median
+  // 0.3 mm); Redcafe 44…54 do not (each size is its own layout, rows differ; pieces drift up to
+  // 13 mm between neighbouring sizes and more across the run). Test: median distance from each
+  // file's drawing to the previous one's ≤ 8 mm; otherwise the files go side by side, 50 mm
+  // apart, so no size's lines cross another size's pieces.
+  for (const [file, off] of fileOffsets)
     for (const p of allPoses.values())
       if (p.file === file) p.toSheet = compose(p.toSheet, off.dx, off.dy);
-    if (byFile.size > 1)
-      alignment.push({ file, dxMm: off.dx, dyMm: off.dy, method: 'top-left tile', votes: 0 });
+  if (byFile.size > 1) {
+    const files = [...byFile.keys()];
+    const dists: number[] = [];
+    for (let k = 1; k < files.length; k++)
+      dists.push(
+        chamferMedian(byFile.get(files[k - 1]) ?? [], byFile.get(files[k]) ?? [], allPoses),
+      );
+    const shared = dists.every((d) => d <= 8);
+    let x = 0;
+    for (const [fi, file] of files.entries()) {
+      const off = fileOffsets.get(file) ?? { dx: 0, dy: 0 };
+      if (!shared) {
+        const box = tileBox(byFile.get(file) ?? [], allPoses);
+        const shift = x - box.minX;
+        for (const p of allPoses.values())
+          if (p.file === file) p.toSheet = compose(p.toSheet, shift, 0);
+        x += box.maxX - box.minX + 50;
+        alignment.push({
+          file,
+          dxMm: off.dx + shift,
+          dyMm: off.dy,
+          method: 'side by side',
+          medianToPrevMm: fi ? dists[fi - 1] : null,
+        });
+      } else
+        alignment.push({
+          file,
+          dxMm: off.dx,
+          dyMm: off.dy,
+          method: 'top-left tile',
+          medianToPrevMm: fi ? dists[fi - 1] : null,
+        });
+    }
+    warnings.push(
+      shared
+        ? `files share one frame (top-left tiles aligned; drawing-to-drawing median ` +
+            `${Math.max(...dists).toFixed(1)} mm)`
+        : `files do not share a frame (drawing-to-drawing median up to ` +
+            `${Math.max(...dists).toFixed(0)} mm) — placed side by side, one region per file`,
+    );
   }
   // Frame: tile area lower-left at the origin (y-up).
   const allPages = [...byFile.values()].flat();

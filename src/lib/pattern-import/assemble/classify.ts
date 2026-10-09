@@ -15,7 +15,7 @@ import { cellLabelOf, indexLabels } from './labels';
 import { detectLattice } from './overview';
 import { recurrenceLinks } from './recurrence';
 import { buildRegPage, furnitureOf } from './regpage';
-import { accepted, stitchFree } from './stitch';
+import { DEFAULT_STITCH, TRACED_STITCH, accepted, stitchFree } from './stitch';
 
 export type PageFeatures = {
   file: string;
@@ -32,6 +32,7 @@ export type PageFeatures = {
   outShare: number;
   cellLabel: string | null;
   format: string;
+  traced: boolean;
 };
 
 export function pageFeatures(p: IRPage): PageFeatures {
@@ -66,7 +67,9 @@ export function pageFeatures(p: IRPage): PageFeatures {
     fills,
     texts: p.texts.length,
     chars: p.texts.reduce((s, t) => s + t.text.length, 0),
-    rasterCover: Math.max(0, ...p.rasters.map((r) => r.pageCover)),
+    // A traced raster page (F11) is drawing, not a picture: its raster IS the source of its lines.
+    rasterCover: p.calibration ? 0 : Math.max(0, ...p.rasters.map((r) => r.pageCover)),
+    traced: !!p.calibration,
     outShare: tot ? out / tot : 0,
     cellLabel: cl ? cl.text : null,
     format: `${a}x${b}`,
@@ -114,8 +117,9 @@ function linkedPages(run: IRPage[]): Set<number> {
   for (let i = 0; i + 1 < regs.length; i++) {
     if (linked.has(regs[i].page) && linked.has(regs[i + 1].page)) continue;
     for (const rel of ['right', 'below'] as const) {
-      const l = stitchFree(regs[i], regs[i + 1], rel);
-      if (accepted(l)) {
+      const st = run[i].calibration ? TRACED_STITCH : DEFAULT_STITCH;
+      const l = stitchFree(regs[i], regs[i + 1], rel, st);
+      if (accepted(l, st)) {
         linked.add(regs[i].page);
         linked.add(regs[i + 1].page);
         break;
@@ -198,7 +202,15 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
     for (const c of cands) {
       // Evidence first, then trim non-tiles off the run's ends.
       const linked = c.length > 1 ? linkedPages(c) : new Set<number>();
-      const isTile = c.map((p) => linked.has(p.page) || !!F(p).cellLabel);
+      // Traced raster pages register poorly in the quick check (resampled vertices): every
+      // drawing page of a traced run counts as a tile.
+      const tracedRun = c.every((p) => F(p).traced);
+      const isTile = c.map(
+        (p) =>
+          linked.has(p.page) ||
+          !!F(p).cellLabel ||
+          (tracedRun && F(p).strokeLenM >= 0.2 && !textHeavy(F(p))),
+      );
       const first = isTile.indexOf(true);
       const last = isTile.lastIndexOf(true);
       const tiles: IRPage[] = [];
@@ -210,10 +222,12 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
             file: p.file,
             page: p.page,
             cls: 'tile',
-            confidence: linked.has(p.page) ? 0.95 : 0.85,
+            confidence: linked.has(p.page) ? 0.95 : f.cellLabel ? 0.85 : 0.6,
             why: linked.has(p.page)
               ? 'tile format; registers with a neighbour'
-              : `tile format; cell label "${f.cellLabel}"`,
+              : f.cellLabel
+                ? `tile format; cell label "${f.cellLabel}"`
+                : 'traced raster page of the tile format with drawing',
           });
         } else if (
           first >= 0 &&
@@ -236,7 +250,8 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
       // p32: 16 strokes, nothing crosses its seams) is still a tile when it carries real drawing
       // and is not text; its index label, when the run has one, must continue the sequence.
       const idxAll = indexLabels(c);
-      const labelledRun = c.filter((p, i) => isTile[i] && F(p).cellLabel).length > 0.5 * (last - first + 1);
+      const labelledRun =
+        c.filter((p, i) => isTile[i] && F(p).cellLabel).length > 0.5 * (last - first + 1);
       c.forEach((p, i) => {
         if (cls.has(p.page) || first < 0 || (i > first && i < last)) return;
         const f = F(p);
@@ -251,9 +266,11 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
         } else {
           // A drawing page: metres of line, little text, no picture (wm: 11–16 m, no text at all;
           // its col-major seams are too sparse for the cheap consecutive-page check).
-          const drawing = f.strokeLenM >= 3 && !textHeavy(f) && f.rasterCover < 0.2;
+          const drawing =
+            f.strokeLenM >= (f.traced ? 0.5 : 3) && !textHeavy(f) && f.rasterCover < 0.2;
           if (labelledRun || !drawing) return;
-        }        tiles.push(p);
+        }
+        tiles.push(p);
         cls.set(p.page, {
           file: p.file,
           page: p.page,
@@ -288,7 +305,12 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
       const f = F(p);
       const base = { file: p.file, page: p.page };
       if (isScan(f))
-        cls.set(p.page, { ...base, cls: 'unknown', confidence: 0.5, why: 'raster scan — trace it first (F11)' });
+        cls.set(p.page, {
+          ...base,
+          cls: 'unknown',
+          confidence: 0.5,
+          why: 'raster scan — trace it first (F11)',
+        });
       else if (f.strokeLenM >= 2 && overviewLattice(p, tileDims[0] / tileDims[1]))
         cls.set(p.page, {
           ...base,
@@ -306,9 +328,19 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
           why: f.rasterCover >= 0.3 ? 'picture page before the tiles' : 'first page, little text',
         });
       else if (f.texts >= 10)
-        cls.set(p.page, { ...base, cls: 'instructions', confidence: 0.8, why: `${f.texts} text items, no tile evidence` });
+        cls.set(p.page, {
+          ...base,
+          cls: 'instructions',
+          confidence: 0.8,
+          why: `${f.texts} text items, no tile evidence`,
+        });
       else
-        cls.set(p.page, { ...base, cls: 'unknown', confidence: 0.3, why: 'no tile evidence, little text' });
+        cls.set(p.page, {
+          ...base,
+          cls: 'unknown',
+          confidence: 0.3,
+          why: 'no tile evidence, little text',
+        });
     }
     runsAll.push(...runs);
     perDoc.push({ doc, cls, runs });
