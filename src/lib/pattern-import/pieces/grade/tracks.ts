@@ -36,9 +36,25 @@ export type Track = {
   closed: boolean;
 };
 
-export type TrackOpts = { gapMm: number; angleDeg: number; lateralMm: number; junctionMm: number };
+export type TrackOpts = {
+  gapMm: number;
+  angleDeg: number;
+  lateralMm: number;
+  junctionMm: number;
+  /** a line cut at a junction continues within this angle (the two halves of one drawn line) */
+  junctionAngleDeg: number;
+  /** a pairing whose rival is within this many degrees is not trusted (the stub stays alone) */
+  junctionMarginDeg: number;
+};
 
-export const TRACK_OPTS: TrackOpts = { gapMm: 3, angleDeg: 22, lateralMm: 0.5, junctionMm: 0.6 };
+export const TRACK_OPTS: TrackOpts = {
+  gapMm: 3,
+  angleDeg: 22,
+  lateralMm: 0.5,
+  junctionMm: 0.6,
+  junctionAngleDeg: 10,
+  junctionMarginDeg: 4,
+};
 
 class PointGrid {
   cells = new Map<string, number[]>();
@@ -171,24 +187,35 @@ export function buildTracks(els: readonly Element[], o: TrackOpts = TRACK_OPTS):
     else clusters.set(r, [i]);
   });
   const inTight = new Uint8Array(ends.length);
+  const cosJ = Math.cos((o.junctionAngleDeg * Math.PI) / 180);
+  const deg = (c: number) => (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
   const greedyIn = (members: number[]) => {
-    const pairs: { a: number; b: number; c: number }[] = [];
+    const all: { a: number; b: number; c: number }[] = [];
     for (let x = 0; x < members.length; x++)
       for (let y = x + 1; y < members.length; y++) {
         const a = members[x];
         const b = members[y];
         if (ends[a].el === ends[b].el) continue;
-        const c = straight(a, b);
-        if (c >= cosMax) pairs.push({ a, b, c });
+        all.push({ a, b, c: straight(a, b) });
       }
-    pairs.sort((p, q) => q.c - p.c);
-    for (const p of pairs) if (mate[p.a] < 0 && mate[p.b] < 0) pairUp(p.a, p.b);
+    const pairs = all.filter((p) => p.c >= cosJ).sort((p, q) => q.c - p.c);
+    for (const p of pairs) {
+      if (mate[p.a] >= 0 || mate[p.b] >= 0) continue;
+      // a rival continuation of either end almost as straight: which line goes on is not
+      // readable from the drawing — neither chains
+      const ang = deg(p.c);
+      const rival = all.some(
+        (q) => q !== p && (q.a === p.a || q.b === p.a || q.a === p.b || q.b === p.b) && deg(q.c) - ang < o.junctionMarginDeg,
+      );
+      if (rival) continue;
+      pairUp(p.a, p.b);
+    }
   };
   for (const [, members] of clusters) {
     if (members.length < 2) continue;
     for (const i of members) inTight[i] = 1;
     if (members.length === 2) {
-      if (straight(members[0], members[1]) >= cosMax && ends[members[0]].el !== ends[members[1]].el)
+      if (straight(members[0], members[1]) >= cosJ && ends[members[0]].el !== ends[members[1]].el)
         pairUp(members[0], members[1]);
       continue;
     }
@@ -216,7 +243,7 @@ export function buildTracks(els: readonly Element[], o: TrackOpts = TRACK_OPTS):
         B.sort((i, j) => ang(i, -1) - ang(j, -1));
         let ok = true;
         for (let k = 0; k < A.length && ok; k++)
-          if (straight(A[k], B[k]) < cosMax || ends[A[k]].el === ends[B[k]].el) ok = false;
+          if (straight(A[k], B[k]) < cosJ || ends[A[k]].el === ends[B[k]].el) ok = false;
         if (ok) {
           for (let k = 0; k < A.length; k++) pairUp(A[k], B[k]);
           done = true;

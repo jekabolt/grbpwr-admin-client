@@ -20,6 +20,8 @@ export type Combo = {
   monotone: boolean;
   cv: number;
   score: number;
+  /** nesting excess (see nestExcess); 0 when not measured */
+  nest?: number;
 };
 
 export type SeedSolve = {
@@ -108,16 +110,83 @@ export function fillRank(
   return { closed: true, area: a, cutArea: c * g.cell * g.cell, knifeIncomplete: incomplete };
 }
 
+/** Rank regions (masks) of one combination. */
+export function rankMasks(box: BoxMm, cellMm: number, ps: readonly PortionPts[], n: number, seed: PtMm) {
+  const g = new Grid(box, cellMm);
+  const k0 = g.iy(seed.y) * g.W + g.ix(seed.x);
+  const masks: (Uint8Array | null)[] = [];
+  const areas: number[] = [];
+  for (let r = 0; r < n; r++) {
+    const wall = new Uint8Array(g.W * g.H);
+    for (const p of ps) if (p.ranks.includes(r)) drawPolyline(g, wall, p.pts);
+    const ext = exterior(g, wall);
+    if (wall[k0] || ext[k0]) {
+      masks.push(null);
+      areas.push(-1);
+      continue;
+    }
+    const { mask, area } = regionOf(g, ext, k0);
+    masks.push(mask);
+    areas.push(area * g.cell * g.cell);
+  }
+  return { masks, areas };
+}
+
+/**
+ * Nesting: a size's region lies inside the next size's, except for slivers where their lines
+ * cross. excess = Σ |R_r ∖ R_r+1| over Σ |R_r+1 ∖ R_r| (consecutive closed ranks); a component
+ * whose rank direction is flipped puts a whole edge of the small size outside the big one.
+ */
+export function nestPairs(masks: readonly (Uint8Array | null)[]): { r: number; excess: number; growth: number }[] {
+  const out: { r: number; excess: number; growth: number }[] = [];
+  let prev: Uint8Array | null = null;
+  let pr = -1;
+  masks.forEach((m, r) => {
+    if (!m) return;
+    if (prev) {
+      let excess = 0;
+      let growth = 0;
+      for (let j = 0; j < m.length; j++) {
+        if (prev[j] && !m[j]) excess++;
+        else if (m[j] && !prev[j]) growth++;
+      }
+      out.push({ r: pr, excess, growth });
+    }
+    prev = m;
+    pr = r;
+  });
+  return out;
+}
+
+export function nestExcess(masks: readonly (Uint8Array | null)[]): number {
+  let excess = 0;
+  let growth = 0;
+  let prev: Uint8Array | null = null;
+  for (const m of masks) {
+    if (!m) continue;
+    if (prev) {
+      for (let j = 0; j < m.length; j++) {
+        if (prev[j] && !m[j]) excess++;
+        else if (m[j] && !prev[j]) growth++;
+      }
+    }
+    prev = m;
+  }
+  return growth ? excess / growth : excess ? 9 : 0;
+}
+
 function evalCombo(M: GradeModel, bits: number[], box: BoxMm, seed: PtMm, inBox: Set<number>, cellMm: number): Combo {
   const n = M.n;
   const ps = portionPts(M, bits, inBox);
-  const areas: number[] = [];
-  for (let r = 0; r < n; r++) {
-    const f = fillRank(box, cellMm, ps, r, seed);
-    areas.push(f.closed ? f.area : -1);
-  }
-  return scoreAreas(bits, areas, n);
+  const { masks, areas } = rankMasks(box, cellMm, ps, n, seed);
+  const c = scoreAreas(bits, areas, n);
+  c.nest = nestExcess(masks);
+  c.score -= NEST_WEIGHT * Math.min(c.nest, 2);
+  return c;
 }
+
+/** Score penalty per unit of nesting excess (see nestExcess). */
+export const NEST_WEIGHT = 0;
 
 export function scoreAreas(bits: number[], areas: number[], n: number): Combo {
   let closed = 0;

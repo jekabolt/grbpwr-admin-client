@@ -31,11 +31,14 @@ import {
   type PortionPts,
   type SeedSolve,
 } from './choose';
-import { buildModel, trackPortions, type GradeModel } from './model';
+import { buildModel, maskOrderConflicts, trackPortions, type GradeModel } from './model';
 import { chainSpans } from './tracks';
 import { bboxOfPts, growBox, median, unionBox } from './vec';
 
 export { detectUnencodedGrading, type GuardOpts } from './guard';
+
+/** Module-level switches (probes flip them to measure each guard; production keeps the defaults). */
+export const GRADE_TUNING = { orderCheck: false };
 
 export type GradeRefusal = NonNullable<PieceCandidate['gradeRefusal']>;
 
@@ -56,6 +59,7 @@ export type GradeAlternative = {
   stepCv: number;
   score: number;
   areasMm2: number[];
+  nest?: number;
 };
 
 export type GradeSeedResult = {
@@ -109,6 +113,8 @@ export type GradeOpts = {
   keepModel?: boolean;
   /** the variant's cutting lines (F4 knives): the final region is cut along them */
   knives?: PtMm[][];
+  /** mask cross-sections that contradict the grade order (default on) */
+  orderCheck?: boolean;
 };
 
 /**
@@ -142,6 +148,7 @@ const alt = (c: Combo): GradeAlternative => ({
   stepCv: c.cv,
   score: c.score,
   areasMm2: c.areas,
+  nest: c.nest,
 });
 
 /**
@@ -285,6 +292,9 @@ export function gradeRanks(
     }
     if (!moved) break;
   }
+  // no wall where a cross-section contradicts the grade order under the chosen bits
+  const conflicts = (opts.orderCheck ?? GRADE_TUNING.orderCheck) ? maskOrderConflicts(M, bits) : 0;
+  log(`  order conflicts: ${conflicts} lane samples masked`);
   const results: GradeSeedResult[] = [];
   const ambiguities: ChainAmbiguity[] = [];
   const knives = opts.knives ?? [];
@@ -314,7 +324,8 @@ export function gradeRanks(
     const fills = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps, r, sd.at, knives));
     const areas = fills.map((f) => f.area);
     const best = S.top[0];
-    const same = best.areas.every((x, r) => Math.abs(x - areas[r]) <= 0.001 * Math.max(1, Math.abs(x)));
+    const g0 = scoreUnder(S, bits).areas; // before the order mask: the seed's own choice?
+    const same = best.areas.every((x, r) => Math.abs(x - g0[r]) <= 0.001 * Math.max(1, Math.abs(x)));
     const fam = familyCheck(areas);
     let reason = S.reason;
     let refusal: GradeRefusal | null = null;
