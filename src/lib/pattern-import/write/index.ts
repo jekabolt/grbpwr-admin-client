@@ -21,7 +21,7 @@ import type {
 } from '../types';
 import { isAsciiDxf } from './format';
 import { buildManifest } from './manifest-build';
-import { embedManifestLocal } from './manifest-local';
+import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';

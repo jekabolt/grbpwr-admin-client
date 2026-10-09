@@ -35,7 +35,7 @@ import {
   reflection,
   applyAffine,
 } from 'lib/pattern-import/write/geom';
-import { embedManifestLocal, readManifestLocal } from 'lib/pattern-import/write/manifest-local';
+import { embedManifest as embedManifestLocal, readManifest as readManifestLocal } from 'lib/pattern-import/manifest';
 import {
   type CardBlockRules,
   createRunGate,
@@ -1087,8 +1087,15 @@ export async function main(opts: { plans: string }): Promise<number> {
       sizes: bpSpec().sizes.map((s) => ({ ...s, fold: null })),
     };
     const specs = [graded, pckSpec()];
-    const r = (await writeAndGate(job(MAIN, specs), gateCtx(specs))).report;
-    await neg('PCK graded + PCK_UNI in one file', 'G10-uni', r);
+    // Since the shared manifest/ module landed (F6b), a duplicate identity inside one file is
+    // refused already when the manifest is embedded — earlier than G10. Either refusal is correct.
+    try {
+      const r = (await writeAndGate(job(MAIN, specs), gateCtx(specs))).report;
+      await neg('PCK graded + PCK_UNI in one file', 'G10-uni', r);
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      ck(code === 'shape', 'PCK graded + PCK_UNI in one file → manifest refuses the duplicate identity', String(e));
+    }
   }
   {
     const sl = slSpec('SL_L'); // looks like a left hand but is no pair: "L" is a size of the run

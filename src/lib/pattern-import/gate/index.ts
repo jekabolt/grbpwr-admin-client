@@ -24,7 +24,7 @@ import type {
 import { PATIMPORT } from '../types';
 import { applyAffine, bboxOf } from '../write/geom';
 import { type WriteDetail, writeDxfDetailed } from '../write';
-import { embedManifestLocal, readManifestLocal } from '../write/manifest-local';
+import { embedManifest as embedManifestLocal, readManifest as readManifestLocal } from '../manifest';
 import { LAYERS } from '../write/manifest-build';
 import {
   buildCtx,
