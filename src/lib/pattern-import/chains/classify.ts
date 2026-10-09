@@ -3,7 +3,14 @@
 // A look is NOT a size: palto's 5 sizes show up as more looks (one style fragments when dash phase
 // or decorations differ) and two sizes can share a look; viola draws 8 sizes in ~8 looks of 3
 // line weights. Looks are evidence; sizes are decided in sizes/recover.ts with bundles.
-import type { Chain, ClassEvidence, LineClass, PtMm, Style } from 'lib/pattern-import/types';
+import type {
+  Chain,
+  ClassEvidence,
+  LineClass,
+  PagePose,
+  PtMm,
+  Style,
+} from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { bboxOf, dist } from './geom';
@@ -33,8 +40,13 @@ function straightAxis(c: Chain): { axis: 'x' | 'y' | null; straight: boolean } {
  * frames (axis-aligned rectangles or straight lines repeated ≥ 3 times with the same size — every
  * tile prints one), dashed guides (long axis-aligned dashed lines, thin).
  */
-export function furniture(chains: Chain[], styles: Map<number, Style>): (string | null)[] {
+export function furniture(
+  chains: Chain[],
+  styles: Map<number, Style>,
+  poses: PagePose[] = [],
+): (string | null)[] {
   const out: (string | null)[] = chains.map(() => null);
+  pageMarginLines(chains, poses, out);
   const rects = new Map<string, number[]>();
   const lines = new Map<string, number[]>();
   chains.forEach((c, i) => {
@@ -85,6 +97,85 @@ export function furniture(chains: Chain[], styles: Map<number, Style>): (string 
   for (const a of lines.values())
     if (a.length >= 3) for (const i of a) out[i] = 'tile frame / cut mark';
   return out;
+}
+
+/** A page's rectangle in sheet frame (bbox of its transformed corners). */
+function pageRect(p: PagePose): { minX: number; minY: number; maxX: number; maxY: number } {
+  const t = p.toSheet;
+  const cs = [
+    [0, 0],
+    [p.widthMm, 0],
+    [0, p.heightMm],
+    [p.widthMm, p.heightMm],
+  ].map(([x, y]) => ({ x: t.a * x + t.c * y + t.e, y: t.b * x + t.d * y + t.f }));
+  return bboxOf(cs);
+}
+
+/**
+ * Page margin lines (Redcafe: a 589 mm rule 12 mm inside every page row, with a 15 mm glue hook,
+ * drawn in the size pen so F3 took it for size 44). A thin axis-aligned band (≤ 2.5 mm across,
+ * ≥ 100 mm along) whose ends both stop at page edges, lying within 15 mm inside a parallel page
+ * edge, at a page-relative offset that ≥ 3 such chains share (every page / file prints one). Garment lines are not repeated at one
+ * page-relative offset, so they never collect 3 votes.
+ */
+function pageMarginLines(chains: Chain[], poses: PagePose[], out: (string | null)[]): void {
+  if (!poses.length) return;
+  const rects = poses.map(pageRect);
+  const byKey = new Map<string, Set<number>>();
+  chains.forEach((c, i) => {
+    if (out[i]) return;
+    const bb = bboxOf(c.pts);
+    const w = bb.maxX - bb.minX;
+    const h = bb.maxY - bb.minY;
+    const axis = h <= 2.5 && w >= 100 ? 'x' : w <= 2.5 && h >= 100 ? 'y' : null;
+    if (!axis) return;
+    // the band's own coordinate: where most of its length lies (the long run, not the hook)
+    let best = 0;
+    let at = 0;
+    for (let k = 1; k < c.pts.length; k++) {
+      const a = c.pts[k - 1];
+      const b = c.pts[k];
+      const L = axis === 'x' ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y);
+      if (L > best) {
+        best = L;
+        at = axis === 'x' ? (a.y + b.y) / 2 : (a.x + b.x) / 2;
+      }
+    }
+    // both ends of the band stop at page edges (a margin rule runs page edge to page edge; a
+    // garment edge parked on the margin — wm's fold lines at x = 12 — ends mid-page)
+    const a0 = axis === 'x' ? bb.minX : bb.minY;
+    const a1 = axis === 'x' ? bb.maxX : bb.maxY;
+    const atEdge = (v: number) =>
+      rects.some((r) =>
+        (axis === 'x' ? [r.minX, r.maxX] : [r.minY, r.maxY]).some((e) => Math.abs(v - e) <= 15),
+      );
+    if (!atEdge(a0) || !atEdge(a1)) return;
+    for (const r of rects) {
+      const lo = axis === 'x' ? Math.max(bb.minX, r.minX) : Math.max(bb.minY, r.minY);
+      const hi = axis === 'x' ? Math.min(bb.maxX, r.maxX) : Math.min(bb.maxY, r.maxY);
+      if (hi - lo < 50) continue;
+      const e0 = axis === 'x' ? r.minY : r.minX;
+      const e1 = axis === 'x' ? r.maxY : r.maxX;
+      for (const off of [at - e0, e1 - at]) {
+        if (off < -0.5 || off > 15) continue;
+        const k = `${axis}|${Math.round(off * 2) / 2}`;
+        const s = byKey.get(k);
+        if (s) s.add(i);
+        else byKey.set(k, new Set([i]));
+      }
+    }
+  });
+  for (const s of byKey.values())
+    if (s.size >= 3) for (const i of s) out[i] = out[i] ?? 'page margin line';
+}
+
+/** Chain ids that are page margin lines (pieces/ keeps them out of rescued walls). */
+export function pageMarginIds(chains: Chain[], poses: PagePose[]): Set<number> {
+  const out: (string | null)[] = chains.map(() => null);
+  pageMarginLines(chains, poses, out);
+  const ids = new Set<number>();
+  out.forEach((w, i) => w && ids.add(chains[i].id));
+  return ids;
 }
 
 /** Greedy cosine clustering, longest reliable chains first. Returns look per chain (-1 = none). */

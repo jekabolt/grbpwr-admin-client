@@ -45,7 +45,7 @@ export function buildChainsDetailed(
   const mk = makeChains(sheet, opts);
   progress?.(1, 3, 'classes');
   const styles = new Map<number, Style>(sheet.styles.map((s) => [s.id, s]));
-  const furn = furniture(mk.chains, styles);
+  const furn = furniture(mk.chains, styles, sheet.poses);
   const opLinked = mk.work.map((w) => {
     const ops = new Set(w.items.map((l) => l.it.op));
     return w.items.length >= 3 && ops.size < w.items.length / 2;

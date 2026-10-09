@@ -530,6 +530,13 @@ export type PieceCandidate = {
    * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
    */
   rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single';
+  /**
+   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
+   * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
+   * operator drew; 'band-cut' = a band drawn at the largest length cut at this rank's end tick;
+   * 'shared-rank' = this rank is drawn on another rank's line (legend says so) and reuses it.
+   */
+  derived?: { kind: 'bridge' | 'operator-bridge' | 'band-cut' | 'shared-rank'; pts: PtMm[] }[];
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
@@ -548,6 +555,8 @@ export type FillOpts = {
   snapMm: Mm;
   /** Only this variant's seeds; null = all seeds. */
   variant: string | null;
+  /** F4b: longest wall gap closed by a derived bridge, mm. Default 3; 0 = never. */
+  autoBridgeMm?: Mm;
 };
 
 export type ProposeSeedsFn = (sheet: Sheet, set: ChainSet) => Seed[];

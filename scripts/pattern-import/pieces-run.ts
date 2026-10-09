@@ -1,5 +1,6 @@
 // PATTERN-IMPORT · F4 probe — run modes (look / run / all). Probe-only, not a module API.
 import { rankOfClass } from 'lib/pattern-import/chains/build';
+import { pageMarginIds } from 'lib/pattern-import/chains/classify';
 import {
   fillPiecesDetailed,
   proposeSeeds,
@@ -11,6 +12,7 @@ import {
   landingPlugs,
   lonePortions,
   rescuedIgnored,
+  sheetModule,
   wallModel,
 } from 'lib/pattern-import/pieces/walls';
 import type { BoxMm, ChainSet, PieceFamily, PtMm, Seed } from 'lib/pattern-import/types';
@@ -130,7 +132,7 @@ export function printRun(sr: SampleRun) {
     const closed = c.filter((x) => x.outcome === 'closed');
     const big = closed[closed.length - 1];
     console.log(
-      `  ${(seedLabel(s) ?? s.origin).padEnd(5)} ${c.map((x) => OC[x.outcome] + (x.rankFrom === 'innerPlug' ? '+' : x.rankFrom === 'bundleRank' ? '*' : '')).join('')} ${f.monotone ? 'mono' : 'NOT-MONO'} areas ${c.map((x) => (x.areaMm2 / 100).toFixed(0)).join('/')} cm² cov≥${closed.length ? Math.min(...closed.map((x) => x.sourceCoverage)).toFixed(3) : '-'} p95≤${closed.length ? Math.max(...closed.map((x) => x.p95Mm)).toFixed(2) : '-'} bbox ${big ? `${(big.bbox.maxX - big.bbox.minX).toFixed(0)}×${(big.bbox.maxY - big.bbox.minY).toFixed(0)}` : '-'}${c
+      `  ${(seedLabel(s) ?? s.origin).padEnd(5)} ${c.map((x) => OC[x.outcome] + (x.rankFrom === 'innerPlug' ? '+' : x.rankFrom === 'bundleRank' ? '*' : '') + (x.derived?.length ? '~' : '')).join('')} ${f.monotone ? 'mono' : 'NOT-MONO'} areas ${c.map((x) => (x.areaMm2 / 100).toFixed(0)).join('/')} cm² cov≥${closed.length ? Math.min(...closed.map((x) => x.sourceCoverage)).toFixed(3) : '-'} p95≤${closed.length ? Math.max(...closed.map((x) => x.p95Mm)).toFixed(2) : '-'} bbox ${big ? `${(big.bbox.maxX - big.bbox.minX).toFixed(0)}×${(big.bbox.maxY - big.bbox.minY).toFixed(0)}` : '-'}${c
         .filter((x) => x.leakAt)
         .map((x) => ` leak r${x.rank}@${x.leakAt!.x.toFixed(0)},${x.leakAt!.y.toFixed(0)}`)
         .join('')}`,
@@ -146,6 +148,8 @@ export function renderRun(sr: SampleRun, file: string, box?: BoxMm, px = 0.6) {
     const col = PALETTE[i % PALETTE.length];
     const s = seeds.find((x) => x.id === f.seed)!;
     for (const c of f.candidates) {
+      if (process.env.RANK && c.rank !== +process.env.RANK) continue;
+      for (const d of c.derived ?? []) strokes.push({ pts: d.pts, color: '#000', width: 3 });
       if (c.outcome === 'leak') {
         if (c.leakAt) {
           labels.push({
@@ -222,7 +226,13 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
       const p = await prepare(s);
       const sr = fillSample(p, clickSeeds(cf, s.id), process.env.VARIANT ?? null);
       printRun(sr);
-      renderRun(sr, `${OUT}/${s.id}-click.png`);
+      const bx = process.env.BOX?.split(',').map(Number);
+      renderRun(
+        sr,
+        `${OUT}/${s.id}-click.png`,
+        bx ? { minX: bx[0], minY: bx[1], maxX: bx[0] + bx[2], maxY: bx[1] + bx[3] } : undefined,
+        bx ? bx[4] ?? 1 : undefined,
+      );
     }
     return 0;
   }
@@ -248,13 +258,120 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     }
     return 0;
   }
+  if (mode === 'why') {
+    // why <sample> [chainIds…]: F3 ignore reasons (fresh build on the cached sheet)
+    const [id, ...ids] = rest;
+    const p = await prepare(pick([id])[0]);
+    const { buildChainsDetailed } = await import('lib/pattern-import/chains/build');
+    const { recover } = buildChainsDetailed(
+      p.sheet,
+      {
+        joinGapMm: PATIMPORT.joinGapMm,
+        joinAngleDeg: PATIMPORT.joinAngleDeg,
+        joinLateralMm: PATIMPORT.joinLateralMm,
+      },
+      { extraTexts: p.docTexts, fileNames: new Map(p.files.map((f) => [f.id, f.name])) },
+    );
+    const by = new Map<string, number>();
+    for (const g of recover.ignore)
+      by.set(g.why.replace(/\d+/g, '#'), (by.get(g.why.replace(/\d+/g, '#')) ?? 0) + 1);
+    console.log([...by].sort((a, b) => b[1] - a[1]).slice(0, 20));
+    if (process.env.WHY)
+      for (const g of recover.ignore.filter((g) => g.why.includes(process.env.WHY!))) {
+        const ch = recover.chains[g.id];
+        const xs = ch.pts.map((q) => q.x);
+        const ys = ch.pts.map((q) => q.y);
+        console.log(
+          `  ${g.id} ${ch.lengthMm.toFixed(0)}mm st${ch.style} x ${Math.min(...xs).toFixed(0)}..${Math.max(...xs).toFixed(0)} y ${Math.min(...ys).toFixed(0)}..${Math.max(...ys).toFixed(0)}`,
+        );
+      }
+    for (const c of ids.map(Number)) {
+      const w = recover.ignore.find((g) => g.id === c);
+      const ch = recover.chains[c];
+      console.log(
+        c,
+        w?.why ?? '(not ignored)',
+        ch
+          ? `${ch.lengthMm.toFixed(0)}mm style ${ch.style} ${JSON.stringify(p.sheet.styles[ch.style])}`
+          : '',
+      );
+    }
+    return 0;
+  }
+  if (mode === 'neck') {
+    // neck <sample> <rank> ax ay bx by: where two seeds' region joins — the narrowest clearance on
+    // the shortest pixel path from A to B through non-wall pixels (pass-A walls)
+    const [id, rs, ...ns] = rest;
+    const [ax, ay, bx, by] = ns.map(Number);
+    const p = await prepare(pick([id])[0]);
+    const m = wallModel(p.set, p.run);
+    const lone = lonePortions(p.set, m);
+    const resc = rescuedIgnored(
+      p.set,
+      m,
+      1.5,
+      15,
+      sheetModule(p.sheet),
+      pageMarginIds(p.set.chains, p.sheet.poses),
+    );
+    const { itemsOf } = await import('lib/pattern-import/pieces/walls');
+    const { Grid, drawPolyline } = await import('lib/pattern-import/pieces/raster');
+    const items = [...itemsOf(p.set, [...m.common, ...(m.byRank[+rs] ?? []), ...resc]), ...lone];
+    const b = p.sheet.bbox;
+    const g = new Grid(
+      { minX: b.minX - 15, minY: b.minY - 15, maxX: b.maxX + 15, maxY: b.maxY + 15 },
+      0.5,
+    );
+    const wall = new Uint8Array(g.W * g.H);
+    for (const it of items) drawPolyline(g, wall, it.pts, it.closed);
+    const ka = g.iy(ay) * g.W + g.ix(ax);
+    const kb = g.iy(by) * g.W + g.ix(bx);
+    const prev = new Int32Array(g.W * g.H).fill(-2);
+    prev[ka] = -1;
+    const q = [ka];
+    for (let h = 0; h < q.length && prev[kb] === -2; h++) {
+      const k = q[h];
+      for (const n of [k - 1, k + 1, k - g.W, k + g.W])
+        if (n >= 0 && n < wall.length && prev[n] === -2 && !wall[n]) {
+          prev[n] = k;
+          q.push(n);
+        }
+    }
+    if (prev[kb] === -2) {
+      console.log('not connected');
+      return 0;
+    }
+    let worst = { k: -1, c: Infinity };
+    for (let k = kb; k >= 0; k = prev[k]) {
+      const y = (k / g.W) | 0;
+      const x = k - y * g.W;
+      let c = Infinity;
+      for (let dy = -12; dy <= 12; dy++)
+        for (let dx = -12; dx <= 12; dx++)
+          if (wall[(y + dy) * g.W + x + dx]) c = Math.min(c, Math.hypot(dx, dy));
+      if (c < worst.c) worst = { k, c };
+    }
+    const y = (worst.k / g.W) | 0;
+    const at = g.centre(worst.k - y * g.W, y);
+    console.log(
+      `neck at ${at.x.toFixed(1)},${at.y.toFixed(1)} clearance ${(worst.c * 0.5).toFixed(1)} mm`,
+    );
+    return 0;
+  }
   if (mode === 'ascii') {
     // ascii <sample> <rank> x y [half]: wall/exterior raster around a point (rank's pass-A walls)
     const [id, rs, xs, ys, hs] = rest;
     const p = await prepare(pick([id])[0]);
     const m = wallModel(p.set, p.run);
     const lone = lonePortions(p.set, m);
-    const resc = rescuedIgnored(p.set, m);
+    const resc = rescuedIgnored(
+      p.set,
+      m,
+      1.5,
+      15,
+      sheetModule(p.sheet),
+      pageMarginIds(p.set.chains, p.sheet.poses),
+    );
     const { itemsOf } = await import('lib/pattern-import/pieces/walls');
     const { Grid, drawPolyline, exterior } = await import('lib/pattern-import/pieces/raster');
     const items = [...itemsOf(p.set, [...m.common, ...(m.byRank[+rs] ?? []), ...resc]), ...lone];
@@ -294,7 +411,14 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     const r = +rs;
     const m = wallModel(p.set, p.run);
     const lone = lonePortions(p.set, m);
-    const resc = rescuedIgnored(p.set, m);
+    const resc = rescuedIgnored(
+      p.set,
+      m,
+      1.5,
+      15,
+      sheetModule(p.sheet),
+      pageMarginIds(p.set.chains, p.sheet.poses),
+    );
     const plugs = landingPlugs(p.set, m, r, lone);
     const [x0, y0, w, h, px] = a.map(Number);
     const box = { minX: x0, minY: y0, maxX: x0 + w, maxY: y0 + h };
@@ -316,6 +440,15 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
       .map((c) => ({ at: c.pts[c.pts.length >> 1], text: `${c.id}`, color: '#888', size: 9 }));
     renderPng(`${OUT}/${id}-walls-r${r}.png`, box, strokes, labels, px || 2);
     console.log(`${OUT}/${id}-walls-r${r}.png lone=${lone.length}`);
+    if (process.env.RESC)
+      for (const id2 of resc) {
+        const c = p.set.chains[id2];
+        const b = c.pts[0];
+        if (b.x >= box.minX && b.x <= box.maxX && b.y >= box.minY && b.y <= box.maxY)
+          console.log(
+            `  rescued ${id2} ${c.lengthMm.toFixed(0)}mm st${c.style} ${b.x.toFixed(0)},${b.y.toFixed(0)}`,
+          );
+      }
     return 0;
   }
   if (mode === 'look') {

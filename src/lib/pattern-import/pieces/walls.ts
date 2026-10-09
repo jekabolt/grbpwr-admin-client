@@ -339,6 +339,8 @@ export function rescuedIgnored(
   m: WallModel,
   reachMm = 1.5,
   minLenMm = 15,
+  module: number[] = [],
+  never: ReadonlySet<ChainId> = new Set(),
 ): ChainId[] {
   const ignore = set.classes.filter((c) => c.role === 'ignore').flatMap((c) => c.chains);
   if (!ignore.length) return [];
@@ -361,7 +363,10 @@ export function rescuedIgnored(
   const cand: ChainId[] = [];
   for (const id of ignore) {
     const c = set.chains[id];
-    if (!c || c.closed || c.pts.length < 2 || c.lengthMm < minLenMm) continue;
+    if (!c || c.closed || c.pts.length < 2 || c.lengthMm < minLenMm || never.has(id)) continue;
+    // a page-module rule (Redcafe's 1116 mm = 6 × 186 tile pitch grid line) is furniture even
+    // when both its ends happen to touch a garment edge
+    if (module.length && frameLike(c.pts, 60, module)) continue;
     if (onWall(c.pts[0]) && onWall(c.pts[c.pts.length - 1])) cand.push(id);
   }
   // a GRID (Redcafe's 1 cm grid ending on its page frames) is not an outline: straight frame-like
@@ -397,7 +402,8 @@ export function frameLike(pts: readonly PtMm[], minRunMm = 60, module: number[] 
     !module.length ||
     module.some((P) => {
       const k = Math.round(L / P);
-      return k >= 1 && Math.abs(L - k * P) <= Math.max(2, 0.02 * L);
+      // printed rules are exact; a garment hem of 294 mm is not a 297 mm page edge
+      return k >= 1 && Math.abs(L - k * P) <= Math.max(1, 0.002 * L);
     });
   const flush = () => {
     if (runLen >= minRunMm && onModule(runLen)) framed += runLen;
