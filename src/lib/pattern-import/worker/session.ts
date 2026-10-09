@@ -56,12 +56,32 @@ import {
 import { assembleSheetDetailed, classifyPages } from '../assemble';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
-import { buildPieceSpecsDetailed } from '../semantics';
-import { applyOperatorMap, proposeSizeMap } from '../sizes/map';
+import { applyLegend, buildChainsDetailed } from '../chains';
+import { detectSizeRun } from '../sizes';
+import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
+import { applyPieceEdits, fillPiecesDetailed, proposeSeeds } from '../pieces';
+import {
+  allowanceFromTexts,
+  buildPieceSpecsDetailed,
+  detectAllowance,
+  type SemanticsDetail,
+} from '../semantics';
 import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
-import { previewOf } from './preview';
+import { isWallEdit, mergeSameSize, withOperatorLines } from './operator-lines';
+import { chainPreviewOf, previewOf } from './preview';
+import { wallsUsedBy } from './walls-used';
+
+/**
+ * Card size spellings come from the CARD side (`CardSize.spellings`, read there by block-code
+ * `sizeTokensOf` off the dictionary name), so the map agrees with the card's own reader; a size
+ * without them falls back to the default reader of sizes/map.ts.
+ */
+const proposeCardSizeMap = createProposeSizeMap({
+  tokensOf: (c) =>
+    c.spellings?.length ? [...new Set([c.token, ...c.spellings])] : defaultTokensOf(c),
+});
 
 /** Stage order (08-CONTRACT §4.1); render-som is a side stage and invalidates nothing. */
 const ORDER: StageName[] = [
@@ -123,15 +143,23 @@ export class Session {
   private fast: DxfFastPath | null = null;
   // assemble
   private sheet: Sheet | null = null;
-  // later stages (filled by their modules as they land)
+  /** Every page's text and the file names, kept past the docs: the legend reads size runs there. */
+  private docTexts: string[] = [];
+  private fileNames = new Map<string, string>();
+  // chains (legend applied) → sizes → pieces → semantics
+  /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
+  /** The set the fill ran on: `chains` + the operator's bridges − ignored lines. */
+  private wallSet: ChainSet | null = null;
   private run: SizeRun | null = null;
+  private sizeMap: SizeMap | null = null;
+  /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
+  private textSeeds: Seed[] | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
-  private sizeMap: SizeMap | null = null;
   private semantics: SemanticsOutput | null = null;
-  /** Source walls per written identity × rank (F5 `buildPieceSpecsDetailed`) — the gate's G3/G4. */
-  private wallsOf: ((identity: string, rank: number) => PtMm[][] | undefined) | null = null;
+  /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
+  private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -186,7 +214,10 @@ export class Session {
       this.fast = null;
     }
     if (at < ORDER.indexOf('assemble')) this.sheet = null;
-    if (at < ORDER.indexOf('chains')) this.chains = null;
+    if (at < ORDER.indexOf('chains')) {
+      this.chains = null;
+      this.textSeeds = null;
+    }
     if (at < ORDER.indexOf('sizes')) {
       this.run = null;
       this.sizeMap = null;
@@ -194,6 +225,7 @@ export class Session {
     if (at < ORDER.indexOf('pieces')) {
       this.seeds = null;
       this.families = null;
+      this.wallSet = null;
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
@@ -216,17 +248,17 @@ export class Session {
         case 'assemble':
           return this.assemble(input as StageIO['assemble']['in'], ctx);
         case 'chains':
-          return this.chainsStage();
+          return this.chainsStage(input as StageIO['chains']['in'], ctx);
+        case 'sizes':
+          return this.sizesStage(input as StageIO['sizes']['in']);
         case 'pieces':
-          return this.piecesStage(input as StageIO['pieces']['in']);
+          return this.piecesStage(input as StageIO['pieces']['in'], ctx);
+        case 'semantics':
+          return this.semanticsStage(input as StageIO['semantics']['in'], ctx);
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
         case 'write':
           return this.write(input as StageIO['write']['in'], ctx);
-        case 'sizes':
-          return this.sizesStage(input as StageIO['sizes']['in']);
-        case 'semantics':
-          return this.semanticsStage(input as StageIO['semantics']['in']);
         case 'fabrics':
           return this.fabricsStage(input as StageIO['fabrics']['in']);
         default:
@@ -461,6 +493,9 @@ export class Session {
           'assemble',
         );
       ctx.checkCancel();
+      // Instruction pages carry the size run and the legend; keep their text past the docs.
+      this.docTexts = docs.flatMap((d) => d.pages.flatMap((p) => p.texts.map((t) => t.text)));
+      this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
       }).sheet;
@@ -472,45 +507,143 @@ export class Session {
     return { sheet: sheetOnly(sheet), previewPaths: previewOf(sheet.paths, sheet.styles, ext) };
   }
 
-  // ── chains / pieces: the DXF fast path today, F3 / F4 when they land ─────────────────────
+  // ── chains + sizes (F3 / F5; the DXF fast path answers from its segmentation) ─────────
 
-  private chainsStage(): StageIO['chains']['out'] {
-    if (!this.sheet) throw new ImportError('out-of-order', 'assemble the sheet first', 'chains');
-    if (!this.fast) throw stageUnavailable('chains');
-    const set = this.fast.chains;
+  private extentOf(sheet: Sheet) {
+    return Math.max(sheet.bbox.maxX - sheet.bbox.minX, sheet.bbox.maxY - sheet.bbox.minY);
+  }
+
+  private chainsStage(input: StageIO['chains']['in'], ctx: StageCtx): StageIO['chains']['out'] {
+    const sheet = this.sheet;
+    if (!sheet) throw new ImportError('out-of-order', 'assemble the sheet first', 'chains');
+    let set: ChainSet;
+    if (this.fast) {
+      set = this.fast.chains;
+    } else {
+      ctx.checkCancel();
+      set = buildChainsDetailed(
+        sheet,
+        { ...input.opts },
+        { extraTexts: this.docTexts, fileNames: this.fileNames },
+        (d, t, n) => {
+          ctx.checkCancel();
+          ctx.progress(d, t, n);
+        },
+      ).set;
+      // The operator's legend: role / size label per class; two size rows given one label are one
+      // size (a size drawn in two looks).
+      if (input.legend?.length) set = mergeSameSize(applyLegend(set, input.legend));
+    }
     this.chains = set;
-    const ext = Math.max(
-      this.sheet.bbox.maxX - this.sheet.bbox.minX,
-      this.sheet.bbox.maxY - this.sheet.bbox.minY,
-    );
     return {
       classes: set.classes,
       bundles: set.bundles,
       orphans: set.orphans,
-      chainPreview: previewOf(set.chains, this.sheet.styles, ext),
+      chainPreview: chainPreviewOf(set.chains, this.extentOf(sheet)),
       warnings: set.warnings,
+      ambiguities: set.ambiguities ?? [],
     };
   }
 
-  private piecesStage(input: StageIO['pieces']['in']): StageIO['pieces']['out'] {
-    if (!this.sheet) throw new ImportError('out-of-order', 'assemble the sheet first', 'pieces');
-    if (!this.fast || input.edits.length || input.seeds?.some((s) => s.origin === 'click'))
-      throw stageUnavailable('pieces');
-    // F8 keeps the DXF's own features on `dxf.features`; the contract field is
-    // `PieceCandidate.features` — copy them across so every reader finds them in one place.
-    const families = this.fast.families.map((f) => ({
-      ...f,
-      candidates: f.candidates.map((c) => {
-        const dx = (
-          c as typeof c & { dxf?: { features?: PieceFamily['candidates'][number]['features'] } }
-        ).dxf;
-        return dx?.features && !c.features ? { ...c, features: dx.features } : c;
-      }),
-    }));
-    this.seeds = this.fast.seeds;
+  private sizesStage(input: StageIO['sizes']['in']): StageIO['sizes']['out'] {
+    if (!this.sheet || !this.chains)
+      throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
+    const run = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
+    let map = proposeCardSizeMap(run, input.card);
+    if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
+    this.run = run;
+    this.sizeMap = map;
+    return { run, map };
+  }
+
+  // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
+
+  private piecesStage(input: StageIO['pieces']['in'], ctx: StageCtx): StageIO['pieces']['out'] {
+    const sheet = this.sheet;
+    if (!sheet) throw new ImportError('out-of-order', 'assemble the sheet first', 'pieces');
+    if (this.fast) {
+      if (input.edits.length || input.seeds?.some((s) => s.origin === 'click'))
+        throw new ImportError(
+          'out-of-order',
+          'the pieces of a DXF are its blocks — they are not re-seeded or edited here',
+          'pieces',
+        );
+      // F8 keeps the DXF's own features on `dxf.features`; the contract field is
+      // `PieceCandidate.features` — copy them across so every reader finds them in one place.
+      const families = this.fast.families.map((f) => ({
+        ...f,
+        candidates: f.candidates.map((c) => {
+          const dx = (
+            c as typeof c & { dxf?: { features?: PieceFamily['candidates'][number]['features'] } }
+          ).dxf;
+          return dx?.features && !c.features ? { ...c, features: dx.features } : c;
+        }),
+      }));
+      this.seeds = this.fast.seeds;
+      this.families = families;
+      this.run = this.run ?? this.fast.run;
+      this.wallSet = this.fast.chains;
+      return { seeds: this.fast.seeds, families };
+    }
+    const base = this.chains;
+    if (!base) throw new ImportError('out-of-order', 'trace the lines first', 'pieces');
+    const run = this.run ?? detectSizeRun(sheet, base, this.files);
+    this.run = run;
+    const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
+    const lines = withOperatorLines(base, run, input.edits);
+    const set = lines.set;
+    ctx.checkCancel();
+    let families = fillPiecesDetailed(sheet, set, run, seeds, input.opts, (d, t, n) => {
+      ctx.checkCancel();
+      ctx.progress(d, t, n);
+    }).families;
+    const edits = input.edits.filter((e) => !isWallEdit(e));
+    if (edits.length)
+      families = applyPieceEdits(families, edits, { sheet, set, run, opts: input.opts });
+    this.wallSet = set;
+    this.seeds = seeds;
     this.families = families;
-    this.run = this.fast.run;
-    return { seeds: this.fast.seeds, families };
+    return { seeds, families };
+  }
+
+  // ── semantics (F5) ────────────────────────────────────────────────────────────────────────
+
+  private semanticsStage(
+    input: StageIO['semantics']['in'],
+    ctx: StageCtx,
+  ): StageIO['semantics']['out'] {
+    const sheet = this.sheet;
+    const set = this.wallSet ?? this.chains;
+    if (!sheet || !set || !this.families || !this.run)
+      throw new ImportError('out-of-order', 'find the pieces first', 'semantics');
+    if (!this.sizeMap)
+      throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
+    // Nobody decided the file's allowance yet: what the sheet says (text in 9 languages, or the gap
+    // between two nested loops) beats the owner default. The decision rides on every spec.
+    const fileAllowance =
+      input.fileAllowance.origin === 'default'
+        ? (() => {
+            const found = detectAllowance(sheet, this.families!, set);
+            if (found.origin !== 'default') return found;
+            // the statement is often on an instruction page, not on the sheet itself
+            return allowanceFromTexts(this.docTexts).decision ?? input.fileAllowance;
+          })()
+        : input.fileAllowance;
+    const detail = buildPieceSpecsDetailed(
+      {
+        sheet,
+        set,
+        run: this.run,
+        sizeMap: this.sizeMap,
+        families: this.families,
+        ...input,
+        fileAllowance,
+      },
+      (d, t, n) => ctx.progress(d, t, n),
+    );
+    this.semantics = detail.output;
+    this.wallsOf = detail.wallsOf;
+    return detail.output;
   }
 
   // ── render-som (F10) ──────────────────────────────────────────────────────────────────────
@@ -525,47 +658,6 @@ export class Session {
     });
     this.blobs.set('som:sheet', out.sheetPng);
     return out;
-  }
-
-  // ── sizes (F5 proposeSizeMap) — the DXF fast path knows its run; F3b brings the PDF one ──
-
-  private sizesStage(input: StageIO['sizes']['in']): StageIO['sizes']['out'] {
-    const run = this.fast?.run ?? this.run;
-    if (!run) throw stageUnavailable('sizes');
-    const auto = proposeSizeMap(run, input.card);
-    const map = input.operatorMap?.length
-      ? applyOperatorMap(auto, input.operatorMap, input.card)
-      : auto;
-    this.run = run;
-    this.sizeMap = map;
-    return { run, map };
-  }
-
-  // ── semantics (F5) ────────────────────────────────────────────────────────────────────────
-
-  private semanticsStage(input: StageIO['semantics']['in']): StageIO['semantics']['out'] {
-    if (!this.sheet || !this.families)
-      throw new ImportError('out-of-order', 'find the pieces first', 'semantics');
-    if (!this.run || !this.sizeMap)
-      throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
-    const set: ChainSet = this.chains ?? {
-      chains: [],
-      classes: [],
-      bundles: [],
-      orphans: [],
-      warnings: [],
-    };
-    const d = buildPieceSpecsDetailed({
-      ...input,
-      sheet: this.sheet,
-      set,
-      run: this.run,
-      sizeMap: this.sizeMap,
-      families: this.families,
-    });
-    this.semantics = d.output;
-    this.wallsOf = d.wallsOf;
-    return d.output;
   }
 
   // ── fabrics (F7) ──────────────────────────────────────────────────────────────────────────
@@ -624,7 +716,21 @@ export class Session {
     const plan = planScopes(sem.pieces, input.assignment, input.scopes);
     if (plan.problems.length)
       throw new ImportError('out-of-order', plan.problems[0].message, 'write');
-    const walls = this.wallsOf;
+    // The walls each WRITTEN identity × rank came from, in its own frame (F5): a closed wall keeps
+    // its closing edge, an unfolded piece and a derived `_R` get their mirrored walls. G3 asks how
+    // much of the walls the written line follows; a PDF wall chain runs on past the piece, so each
+    // is cut to the stretch this piece uses (walls-used.ts). A DXF's walls are its own blocks.
+    const rawWalls = this.wallsOf;
+    const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
+    const walls = rawWalls
+      ? (identity: string, rank: number): PtMm[][] | undefined => {
+          const w = rawWalls(identity, rank);
+          const spec = specOf.get(identity);
+          const size = spec?.sizes.find((z) => z.rank === rank) ?? spec?.sizes[0];
+          if (!w || !spec || !size || this.fast) return w;
+          return wallsUsedBy(w, spec.allowance.meaning === 'seam' ? size.seam : size.cut);
+        }
+      : null;
     const sizeTokens = new Set(input.sizes.map((s) => s.token.toLowerCase()));
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};

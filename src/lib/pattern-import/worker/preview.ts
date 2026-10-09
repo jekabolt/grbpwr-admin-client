@@ -72,3 +72,33 @@ export function previewOf(
 
 export const buffersOf = (arrays: readonly Float32Array[]): ArrayBuffer[] =>
   arrays.map((a) => a.buffer as ArrayBuffer);
+
+/**
+ * Chains → one preview polyline PER CHAIN, index = ChainId (an empty array where a chain is not
+ * drawn), so the legend can light a class's lines and the pieces step can pick a line by click.
+ * Same tolerance ladder as `previewOf`; lines are never dropped, only simplified harder.
+ */
+export function chainPreviewOf(
+  chains: readonly Pick<IRPath, 'pts' | 'closed'>[],
+  extentMm: number,
+): Float32Array[] {
+  let eps = Math.max(0.05, extentMm / 4000);
+  let out: Float32Array[] = [];
+  for (let round = 0; round < 8; round++) {
+    out = [];
+    let total = 0;
+    for (const c of chains) {
+      if (c.pts.length < 2) {
+        out.push(new Float32Array(0));
+        continue;
+      }
+      const s = c.pts.length > 2 ? simplify(c.pts, c.closed, eps) : c.pts;
+      const keep = s.length >= 2 ? s : [c.pts[0], c.pts[c.pts.length - 1]];
+      total += keep.length;
+      out.push(pack(keep, c.closed && keep.length > 2));
+    }
+    if (total <= POINT_BUDGET) return out;
+    eps *= 2.5;
+  }
+  return out;
+}

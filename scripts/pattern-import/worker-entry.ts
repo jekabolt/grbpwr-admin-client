@@ -1,6 +1,7 @@
-// PATTERN-IMPORT · F13b probe — the worker SESSION (lib/pattern-import/worker/session.ts) driven
-// stage by stage in node, exactly as the worker entry drives it: open → extract → scale →
-// assemble (+ the DXF fast path: chains, pieces), the honest placeholders, refusals, cancel, and
+// PATTERN-IMPORT · F13b/F13c probe — the worker SESSION (lib/pattern-import/worker/session.ts)
+// driven stage by stage in node, exactly as the worker entry drives it: open → extract → scale →
+// assemble → chains → sizes → pieces (+ the operator's bridge / ignore-line) → semantics → write +
+// gate, on PDFs and on the DXF fast path; the honest placeholder (fabrics), refusals, cancel, and
 // memory (RSS / heap after each stage; docs dropped after assembly).
 //   node scripts/pattern-import/worker.mjs            (bundled by worker.mjs, like the other probes)
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +10,13 @@ import { pathToFileURL } from 'node:url';
 
 import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
-import type { StageIO, StageName } from 'lib/pattern-import/types';
+import type {
+  CardSize,
+  DraftScopeTarget,
+  PieceEdit,
+  StageIO,
+  StageName,
+} from 'lib/pattern-import/types';
 import { ImportError, toWireError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 
@@ -119,13 +126,13 @@ async function vectorCase(
     pointsOf(as.previewPaths) <= 250_000,
     `${as.previewPaths.length} lines, ${pointsOf(as.previewPaths)} pts`,
   );
+  const t3 = Date.now();
+  const ch = await run('chains', { opts: CHAIN_OPTS });
   check(
     name,
-    'chains = placeholder',
-    (await errCode(
-      run('chains', { opts: { joinGapMm: 3, joinAngleDeg: 15, joinLateralMm: 0.15 } }),
-    )) === 'stage-unavailable',
-    'stage-unavailable',
+    'chains traced, preview one line per chain',
+    ch.classes.length > 0,
+    `${ch.classes.length} classes, ${ch.chainPreview.length} chains, ${ch.ambiguities?.length ?? 0} flags, ${Date.now() - t3} ms`,
   );
   // A second sheet / a hand grid re-reads the dropped docs.
   if (sheets.size > 1) {
@@ -155,6 +162,20 @@ async function vectorCase(
 
 export async function main(): Promise<number> {
   const perf: unknown[] = [];
+  if (!process.env.PI_SKIP_E2E) {
+    await pipelineCase('robe', ['pdf/robe.pdf'], {
+      sizes: ['36', '38', '40', '42', '44', '46'],
+      variant: null,
+      mustPass: true,
+    });
+    await pipelineCase('palto', ['pdf/palto.pdf'], {
+      sizes: ['72', '76', '80', '84', '88'],
+      variant: 'Mod. 125',
+      // palto BP_3 at 84 runs 0.3–1 mm off its wall for a stretch: G3 blocks it, honestly
+      mustPass: false,
+    });
+  }
+  if (process.env.PI_E2E_ONLY) return report([]);
   perf.push(await vectorCase('kombinezon', ['pdf/kombinezon.pdf'], { tiles: 44 }));
   perf.push(await vectorCase('palto', ['pdf/palto.pdf'], { tiles: 35 }));
   perf.push(await vectorCase('reef', ['pdf/reef.pdf'], { tiles: 32 }));
@@ -339,15 +360,35 @@ export async function main(): Promise<number> {
     );
     check(
       'allsizes.dxf',
-      'pieces edits = placeholder (F4)',
+      'pieces of a DXF are not edited',
       (await errCode(
         run('pieces', {
           edits: [{ kind: 'not-a-piece', seed: 0 }],
           opts: { cellMm: 0.5, snapMm: 0.3, variant: null },
         }),
-      )) === 'stage-unavailable',
-      'stage-unavailable',
+      )) === 'out-of-order',
+      'out-of-order',
     );
+    await run('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } });
+    const szM = await run('sizes', { card: card(['S', 'M', 'L']) });
+    check(
+      'allsizes.dxf',
+      'size map: M → card M',
+      szM.map.entries.length === 1 && szM.map.entries[0].card?.token === 'M',
+      szM.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    await run('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } });
+    const semM = await run('semantics', {
+      ...SEM_DEFAULT,
+      fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+    });
+    check(
+      'allsizes.dxf',
+      'semantics: every piece specced',
+      semM.pieces.length >= 9 && !semM.blocked.length,
+      `${semM.pieces.length} specs, ${semM.blocked.length} blocked`,
+    );
+    await writeCase('allsizes.dxf', run, semM, szM.map);
     s.close();
   }
 
@@ -356,9 +397,9 @@ export async function main(): Promise<number> {
     const s = new Session(1, [fileOf('pdf/reef.pdf')]);
     check(
       'reef',
-      'sizes = placeholder (the PDF size run is F3b)',
-      (await errCode(s.runStage('sizes', {} as never, ctx()))) === 'stage-unavailable',
-      'stage-unavailable',
+      'sizes before the lines are traced',
+      (await errCode(s.runStage('sizes', { card: [] }, ctx()))) === 'out-of-order',
+      'out-of-order',
     );
     // F7: the fabrics stage exists; before the pieces it says what is missing
     check(
@@ -419,9 +460,214 @@ export async function main(): Promise<number> {
     'unsupported-format',
   );
 
+  return report(perf);
+}
+
+function report(perf: unknown[]): number {
   const failed = rows.filter((r) => !r.ok);
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  writeFileSync(resolve(REPORTS, `F13b-${date}.json`), JSON.stringify({ rows, perf }, null, 1));
+  writeFileSync(resolve(REPORTS, `F13c-${date}.json`), JSON.stringify({ rows, perf }, null, 1));
   console.log(`\n${rows.length - failed.length}/${rows.length} PASS`);
   return failed.length ? 1 : 0;
+}
+
+// ── F13c: the whole core through the session ──────────────────────────────────────────────
+
+const CHAIN_OPTS = { joinGapMm: 3, joinAngleDeg: 15, joinLateralMm: 0.15 };
+const FILL = { cellMm: 0.5, snapMm: 0.3 };
+const SEM_DEFAULT: StageIO['semantics']['in'] = {
+  fileAllowance: { meaning: 'seam', allowanceMm: 10, origin: 'default', evidence: [] },
+  pieceOverrides: {},
+  operatorGrain: {},
+};
+const card = (tokens: string[]): CardSize[] =>
+  tokens.map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i, spellings: [t] }));
+const MAIN: DraftScopeTarget = {
+  scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  bomLineKey: '',
+  label: 'main',
+  isInterlining: false,
+};
+
+type Run = <S extends StageName>(st: S, input: StageIO[S]['in']) => Promise<StageIO[S]['out']>;
+
+async function writeCase(
+  name: string,
+  run: Run,
+  sem: StageIO['semantics']['out'],
+  map: StageIO['sizes']['out']['map'],
+  opt: { mustPass?: boolean } = { mustPass: true },
+) {
+  const seeds = [...new Set(sem.pieces.map((p) => p.seed))];
+  const w = await run('write', {
+    scopes: [MAIN],
+    assignment: { byPurpose: { [MAIN.scopeKey]: seeds }, interliningInBom: false, proposals: [] },
+    sizes: map.entries.flatMap((e) =>
+      e.card
+        ? [
+            {
+              token: e.card.token,
+              sizeId: e.card.sizeId,
+              name: e.card.name,
+              sourceLabel: e.source.label,
+              rank: e.source.rank,
+            },
+          ]
+        : [],
+    ),
+    dialect: 'r12',
+    generator: 'probe',
+  });
+  const g = w.gate[MAIN.scopeKey];
+  const blocking = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
+  check(
+    name,
+    opt.mustPass ? 'write + gate: no blocking check' : 'write + gate: a real report',
+    !!g && w.scopes.length === 1 && (!opt.mustPass || !blocking.length),
+    g
+      ? `${w.scopes[0]?.identities.length} identities · ${g.checks.filter((c) => c.ok).length}/${g.checks.length} ok${blocking.length ? ` · BLOCK ${blocking.map((c) => `${c.id}[${c.blocks.slice(0, 4).join(',')}] ${c.note ?? ''}`).join(' | ')}` : ''}`
+      : 'no report',
+  );
+  const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
+  check(name, 'G4 against the semantics walls (closing edge kept)', !!g4?.ok, g4?.note ?? '—');
+  const g1 = g?.checks.find((c) => c.id === 'G1-roundtrip');
+  check(name, 'G1 the card parser reads it back', !!g1?.ok, g1?.note ?? '—');
+  return w;
+}
+
+async function pipelineCase(
+  name: string,
+  files: string[],
+  o: { sizes: string[]; variant: string | null; mustPass: boolean },
+) {
+  const s = new Session(1, files.map(fileOf));
+  const run: Run = (st, input) => s.runStage(st, input, ctx());
+  const t0 = Date.now();
+  const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  await run('scale', {
+    decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
+  });
+  await run('assemble', { sheet: 0 });
+  const ch = await run('chains', { opts: CHAIN_OPTS });
+  const sizeRows = ch.classes.filter((c) => c.role === 'size');
+  check(
+    name,
+    'legend: size rows',
+    sizeRows.length === o.sizes.length,
+    `${sizeRows.map((c) => c.sizeLabel).join(' ')} · ${ch.ambiguities?.length ?? 0} flags`,
+  );
+  const cardSizes = card(o.sizes);
+  const sz = await run('sizes', { card: cardSizes });
+  check(
+    name,
+    'size map: every source size → its card size',
+    sz.map.entries.every((e) => e.card && e.card.token === e.source.label),
+    sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+  );
+  // operator remap round-trips
+  const remap = await run('sizes', {
+    card: cardSizes,
+    operatorMap: [{ ...sz.map.entries[0], card: null, origin: 'operator' }],
+  });
+  check(
+    name,
+    'operator map: first size unmapped',
+    remap.map.entries[0].card === null && remap.map.unmapped.length === 1,
+    remap.map.unmapped.map((c) => c.token).join(','),
+  );
+  await run('sizes', { card: cardSizes });
+  const opts = { ...FILL, variant: o.variant };
+  const pc = await run('pieces', { edits: [], opts });
+  const closed = (f: (typeof pc.families)[number]) =>
+    f.candidates.every((c) => c.outcome === 'closed');
+  const full = pc.families.filter(closed);
+  check(
+    name,
+    'pieces from text seeds',
+    full.length > 0,
+    `${pc.seeds.length} seeds, ${pc.families.length} families, ${full.length} fully closed`,
+  );
+  // ignore-line → the piece leaks; bridges along the same line → it closes again.
+  const f = full[0];
+  const c = f.candidates[f.candidates.length - 1];
+  const fam = pc.families;
+  // the longest own wall of that candidate (by chain length on the preview)
+  const wall = [...c.walls].sort(
+    (a, b) => (ch.chainPreview[b]?.length ?? 0) - (ch.chainPreview[a]?.length ?? 0),
+  )[0];
+  const ignore: PieceEdit = { kind: 'ignore-line', chain: wall };
+  const leak = await run('pieces', { seeds: pc.seeds, edits: [ignore], opts });
+  const lf = leak.families.find((x) => x.seed === f.seed)!;
+  check(
+    name,
+    'ignore-line opens the piece',
+    lf.candidates.some((x) => x.outcome !== 'closed'),
+    `wall ${wall}: ${lf.candidates.map((x) => x.outcome[0]).join('')}${lf.candidates.find((x) => x.leakAt)?.leakAt ? ` leak@${lf.candidates.find((x) => x.leakAt)!.leakAt!.x.toFixed(0)},${lf.candidates.find((x) => x.leakAt)!.leakAt!.y.toFixed(0)}` : ''}`,
+  );
+  const a = ch.chainPreview[wall];
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < a.length; i += 2) pts.push({ x: a[i], y: a[i + 1] });
+  const step = Math.max(1, Math.floor(pts.length / 40));
+  const bridges: PieceEdit[] = [];
+  for (let i = 0; i + step < pts.length + step - 1; i += step) {
+    const j = Math.min(pts.length - 1, i + step);
+    if (j === i) break;
+    bridges.push({ kind: 'bridge', seed: f.seed, rank: null, from: pts[i], to: pts[j] });
+    if (j === pts.length - 1) break;
+  }
+  const back = await run('pieces', { seeds: pc.seeds, edits: [ignore, ...bridges], opts });
+  const bf = back.families.find((x) => x.seed === f.seed)!;
+  check(
+    name,
+    'bridges along the line close it again',
+    closed(bf),
+    `${bridges.length} bridges: ${bf.candidates.map((x) => x.outcome[0]).join('')} area ${(bf.candidates[bf.candidates.length - 1].areaMm2 / 100).toFixed(0)} vs ${(c.areaMm2 / 100).toFixed(0)} cm²`,
+  );
+  // the export: only fully closed families, named by the operator
+  const drop: PieceEdit[] = fam
+    .filter((x) => !closed(x))
+    .map((x) => ({ kind: 'not-a-piece', seed: x.seed }));
+  const fin = await run('pieces', { seeds: pc.seeds, edits: drop, opts });
+  const names = Object.fromEntries(
+    fin.families.map((x, i) => [
+      x.seed,
+      {
+        code: 'BP',
+        mods: [String(i + 1)],
+        displayName: `piece ${i + 1}`,
+        nameOrigin: 'operator' as const,
+      },
+    ]),
+  );
+  const sem = await run('semantics', { ...SEM_DEFAULT, pieceOverrides: names });
+  const reasons = [...new Set(sem.blocked.map((b) => b.reason))];
+  check(
+    name,
+    'semantics: specs built',
+    sem.pieces.length > 0,
+    `${sem.pieces.length} specs, ${sem.blocked.length} blocked (${reasons.join(', ')})`,
+  );
+  // grain by two clicks for the pieces without one
+  const grain: StageIO['semantics']['in']['operatorGrain'] = {};
+  for (const b of sem.blocked.filter((x) => x.reason === 'no-grain')) {
+    const ff = fin.families.find((x) => x.seed === b.seed)!;
+    const bb = ff.candidates[0].bbox;
+    const cx = (bb.minX + bb.maxX) / 2;
+    grain[b.seed] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
+  }
+  const sem2 = await run('semantics', {
+    ...SEM_DEFAULT,
+    pieceOverrides: names,
+    operatorGrain: grain,
+  });
+  check(
+    name,
+    'semantics: grain clicks unblock',
+    !sem2.blocked.some((b) => b.reason === 'no-grain'),
+    `${sem2.pieces.length} specs, ${sem2.blocked.length} blocked (${[...new Set(sem2.blocked.map((b) => b.reason))].join(', ')})`,
+  );
+  await writeCase(name, run, sem2, sz.map, { mustPass: o.mustPass });
+  console.log(`      ${name}: pipeline ${Date.now() - t0} ms`);
+  s.close();
 }

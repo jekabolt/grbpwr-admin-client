@@ -113,11 +113,12 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {report.checks.map((c) => {
+                  {/* the gate may report one id twice (G9: the block check + the card-split warning) */}
+                  {report.checks.map((c, i) => {
                     const meta = CHECK[c.id];
                     return (
                       <tr
-                        key={c.id}
+                        key={`${c.id}-${i}`}
                         className={!c.ok && c.severity === 'block' ? 'bg-error/5' : undefined}
                       >
                         <td className='whitespace-nowrap'>{c.id.split('-')[0]}</td>

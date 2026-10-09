@@ -456,7 +456,19 @@ export type SizeRun = {
 };
 
 /** A size of the card, as the form knows it. */
-export type CardSize = { sizeId: number; name: string; token: string; rank: number };
+export type CardSize = {
+  sizeId: number;
+  name: string;
+  token: string;
+  rank: number;
+  /**
+   * Every spelling the card itself reads off the size's dictionary name (block-code
+   * `sizeTokensOf('xs_44ta_m')` → xs, 44), filled on the card side (F13c): `proposeSizeMap` in the
+   * worker matches against these, so the map agrees with the card's own reader. Absent = the
+   * default reader of `sizes/map.ts`.
+   */
+  spellings?: string[];
+};
 
 export type SizeMapEntry = {
   source: SourceSize;
@@ -565,7 +577,15 @@ export type PieceEdit =
   | { kind: 'split'; seed: SeedId; lassoMm: PtMm[] }
   | { kind: 'not-a-piece'; seed: SeedId }
   | { kind: 'reseed'; seed: SeedId; at: PtMm }
-  | { kind: 'wall-override'; seed: SeedId; rank: number; use: ChainId; instead: ChainId };
+  | { kind: 'wall-override'; seed: SeedId; rank: number; use: ChainId; instead: ChainId }
+  /**
+   * The operator's "close gap" (F13c): a straight wall from `from` to `to` (both snapped to the
+   * nearest drawn line), for one size rank or — `rank: null` — for every size. `seed` = the region
+   * it was drawn for (informational; the wall serves every seed it touches).
+   */
+  | { kind: 'bridge'; seed: SeedId | null; rank: number | null; from: PtMm; to: PtMm }
+  /** The operator's "ignore this line": the chain is never a wall (a frame, a watermark, a label box). */
+  | { kind: 'ignore-line'; chain: ChainId };
 
 export type ApplyPieceEditsFn = (
   families: PieceFamily[],
@@ -1245,8 +1265,11 @@ export type StageIO = {
       classes: LineClass[];
       bundles: Bundle[];
       orphans: ChainId[];
+      /** One polyline per chain, index = ChainId (an empty array for a chain not drawn). */
       chainPreview: Float32Array[];
       warnings: string[];
+      /** What the legend could not decide alone (F3 `ChainSet.ambiguities`), shown as flags. */
+      ambiguities?: ChainAmbiguity[];
     };
   };
   sizes: {
