@@ -124,7 +124,12 @@ export type GradeOpts = {
    * grain / internal classes; the hook adds the operator's "ignore line").
    */
   exclude?: readonly ChainId[];
+  /** called inside every long loop (combinations, ranks, the second reading): may throw to cancel */
+  tick?: () => void;
 };
+
+/** Raster cells one seed's region may cover (box / cell²); larger → refused, never half-checked. */
+export const MAX_REGION_CELLS = 12_000_000;
 
 /**
  * A graded family is trusted when its closed ranks (≥ 2, and at most two missing) grow strictly
@@ -235,10 +240,17 @@ const inside = (a: BoxMm, b: BoxMm, tol = 1) =>
   a.minX >= b.minX - tol && a.minY >= b.minY - tol && a.maxX <= b.maxX + tol && a.maxY <= b.maxY + tol;
 
 /** Seed region = its envelope + a margin; solved once there. */
-function growSolve(M: GradeModel, seed: Seed, o: Required<Pick<GradeOpts, 'cellMm' | 'maxFree'>>, sheetBox: BoxMm): SeedSolve | null {
+function growSolve(
+  M: GradeModel,
+  seed: Seed,
+  o: { cellMm: number; maxFree: number; tick?: () => void },
+  sheetBox: BoxMm,
+): SeedSolve | 'too-large' | null {
   const env = envelopeBox(M, seed, o.cellMm, sheetBox);
   if (!env) return null;
-  return solveSeed(M, seed, growBox(env, 8 + 2 * M.step0), { cellMm: o.cellMm, maxFree: o.maxFree });
+  const box = growBox(env, 8 + 2 * M.step0);
+  if (((box.maxX - box.minX) * (box.maxY - box.minY)) / (o.cellMm * o.cellMm) > MAX_REGION_CELLS) return 'too-large';
+  return solveSeed(M, seed, box, o);
 }
 
 /** The reading the walls come from. */
@@ -271,7 +283,10 @@ export function gradeRanks(
   const t0 = Date.now();
   const base = gradeOnce(sheet, set, seeds, n, opts, BASE_READING, progress);
   if (!(opts.twoReadings ?? GRADE_TUNING.twoReadings) || base.diag.bandMode !== n) return base;
-  const alt = gradeOnce(sheet, set, seeds, n, { ...opts, keepModel: false }, ALT_READING);
+  // the second reading only re-checks what the first accepted (a refused seed stays refused)
+  const live = new Set(base.seeds.filter((s) => s.accepted && s.rankOk.some(Boolean)).map((s) => s.seed));
+  if (!live.size) return base;
+  const alt = gradeOnce(sheet, set, seeds.filter((s) => live.has(s.id)), n, { ...opts, keepModel: false }, ALT_READING);
   const other = new Map(alt.seeds.map((x) => [x.seed, x]));
   for (const s of base.seeds) {
     if (!s.accepted) continue;
@@ -352,12 +367,15 @@ function gradeOnce(
       ...(opts.keepModel ? { model: M } : {}),
     };
   }
-  const o = { cellMm: opts.cellMm, maxFree: opts.maxFree ?? 8 };
+  const o = { cellMm: opts.cellMm, maxFree: opts.maxFree ?? 8, tick: opts.tick };
   const solves: (SeedSolve | null)[] = [];
+  const tooLarge = new Set<number>();
   seeds.forEach((sd, i) => {
     progress?.(i, seeds.length, `grade ${i + 1}/${seeds.length}`);
     const fixed = opts.region?.(sd) ?? null;
-    solves.push(fixed ? solveSeed(M, sd, fixed, o) : growSolve(M, sd, o, sheet.bbox));
+    const S = fixed ? solveSeed(M, sd, fixed, o) : growSolve(M, sd, o, sheet.bbox);
+    if (S === 'too-large') tooLarge.add(i);
+    solves.push(S === 'too-large' ? null : S);
   });
   // one bit per component: the seed holding most of its length decides
   const bits = new Array(M.nComps).fill(0);
@@ -411,18 +429,21 @@ function gradeOnce(
         finalAreasMm2: none,
         rankOk: new Array(n).fill(false),
         box: { minX: sd.at.x, minY: sd.at.y, maxX: sd.at.x, maxY: sd.at.y },
-        reason: 'no region around the seed',
+        reason: tooLarge.has(i) ? 'the region around the seed is too large to check' : 'no region around the seed',
       });
       return;
     }
     // the seed's family under the GLOBAL bits (a component shared with another piece may have been
     // decided there): it must be what this seed would choose itself
     const ps = portionPts(M, bits, S.inBox);
-    const fills = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps, r, sd.at, knives, carriers));
+    const fills = Array.from({ length: n }, (_, r) => {
+      opts.tick?.();
+      return fillRank(S.box, opts.cellMm, ps, r, sd.at, knives, carriers);
+    });
     const areas = fills.map((f) => f.area);
     const best = S.top[0];
-    const g0 = scoreUnder(S, bits).areas; // before the order mask: the seed's own choice?
-    const same = best.areas.every((x, r) => Math.abs(x - g0[r]) <= 0.001 * Math.max(1, Math.abs(x)));
+    // the family under the global bits must be the seed's own best layout, region for region
+    const same = fills.every((f, r) => f.hash === best.hashes[r]);
     const fam = familyCheck(areas);
     let reason = S.reason;
     let refusal: GradeRefusal | null = null;
@@ -456,6 +477,28 @@ function gradeOnce(
           }
         }
         if (hit) reason += `${reason ? '; ' : ''}${hit} rank(s) hang on weakly evidenced component ${c} (${M.compSupport[c]} cross-sections)`;
+      }
+    }
+    // components beyond the search (more than maxFree around the seed) kept their global bit
+    // unsearched: flipping one must not move any trusted rank, else the layout was never proven
+    if (refusal == null) {
+      const free = new Set(S.free);
+      for (const c of S.comps) {
+        if (free.has(c)) continue;
+        const flipped = bits.slice();
+        flipped[c] ^= 1;
+        const ps2 = portionPts(M, flipped, S.inBox);
+        const moves = rankOk.some((ok, r) => {
+          if (!ok) return false;
+          opts.tick?.();
+          return fillRank(S.box, opts.cellMm, ps2, r, sd.at).hash !== fills[r].hash;
+        });
+        if (moves) {
+          refusal = 'grade-ambiguous';
+          reason = `${S.comps.length} line groups around the piece, ${S.free.length} searched: group ${c} was not, and it changes the outline`;
+          for (let r = 0; r < n; r++) rankOk[r] = false;
+          break;
+        }
       }
     }
     // forks: flip one sub-component (a side of a fork) alone. If that layout is ALSO an even,

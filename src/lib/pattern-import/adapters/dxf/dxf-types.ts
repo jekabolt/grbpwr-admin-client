@@ -191,6 +191,22 @@ export type DxfContour = {
   layer: string;
 };
 
+/**
+ * A block that draws more than one outline of the same look, one inside the other — the outlines of
+ * several sizes stacked in ONE block (a grade nest), or a line nothing tells apart from them. The
+ * block-per-size encoding is then not proven: the fast path refuses the block instead of taking the
+ * largest loop as the size the block claims.
+ */
+export type DxfNestedOutlines = {
+  /** Which line of the block is nested (both when both are). */
+  line: 'cut' | 'seam' | 'both';
+  layer: string;
+  /** Outlines counted, the outer one included (≥ 2). */
+  outlines: number;
+  /** Area of each nested outline / the outer one, largest first (the outer one excluded). */
+  areaRatios: number[];
+};
+
 export type DxfBlockPiece = {
   group: number;
   block: string;
@@ -220,6 +236,8 @@ export type DxfBlockPiece = {
   gradePoints: { turn: number; curve: number };
   pointNumbers: number;
   annotations: TextId[];
+  /** Several same-look nested outlines in this block (sizes in one block) — refused downstream. */
+  nested: DxfNestedOutlines | null;
 };
 
 export type DxfIdentity = {

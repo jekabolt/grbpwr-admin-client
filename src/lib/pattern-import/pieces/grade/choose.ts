@@ -5,6 +5,8 @@
 // rank (walls = the portions carrying r, raster `cellMm`), and scored by closure, strict area
 // growth and the regularity of the area steps. Two DISTINCT best combinations within 0.5 points,
 // both closed and monotone → ambiguous (the operator / the judge decides, never the code).
+// "Distinct" = different REGIONS (a hash of every rank's mask), over EVERY combination searched —
+// two layouts with equal areas but other outlines are two answers, not one.
 import type { BoxMm, PtMm, Seed } from 'lib/pattern-import/types';
 
 import { drawPolyline, exterior, flood, Grid, regionOf } from '../raster';
@@ -22,7 +24,23 @@ export type Combo = {
   score: number;
   /** nesting excess (see nestExcess); 0 when not measured */
   nest?: number;
+  /** per rank: hash of the region mask (0 = leak) — two combos are the same layout iff all equal */
+  hashes: number[];
 };
+
+/** FNV-1a over the indices of a mask's set pixels (with the grid size): region identity. */
+export function maskHash(mask: Uint8Array, W: number): number {
+  let h = 0x811c9dc5 ^ W;
+  for (let j = 0; j < mask.length; j++)
+    if (mask[j]) {
+      h ^= j;
+      h = Math.imul(h, 0x01000193);
+    }
+  return (h >>> 0) || 1;
+}
+
+export const sameLayout = (a: { hashes: number[] }, b: { hashes: number[] }) =>
+  a.hashes.length === b.hashes.length && a.hashes.every((x, i) => x === b.hashes[i]);
 
 export type SeedSolve = {
   seed: Seed;
@@ -72,9 +90,11 @@ export type FillRes = {
   cutArea: number;
   /** a knife crosses the region but does not separate it (the cut is not drawn for this rank) */
   knifeIncomplete: boolean;
+  /** maskHash of the region before the knives (0 = leak) */
+  hash: number;
 };
 
-const LEAK: FillRes = { closed: false, area: -1, cutArea: -1, knifeIncomplete: false };
+const LEAK: FillRes = { closed: false, area: -1, cutArea: -1, knifeIncomplete: false, hash: 0 };
 
 /** Fill rank r of a seed inside box with the given wall portions (and the variant's knives). */
 export function fillRank(
@@ -95,7 +115,8 @@ export function fillRank(
   if (ext[k0]) return LEAK;
   const { mask, area } = regionOf(g, ext, k0);
   const a = area * g.cell * g.cell;
-  if (!knives.length) return { closed: true, area: a, cutArea: a, knifeIncomplete: false };
+  const hash = maskHash(mask, g.W);
+  if (!knives.length) return { closed: true, area: a, cutArea: a, knifeIncomplete: false, hash };
   const cutBy = (lines: readonly PtMm[][]) => {
     const kn = new Uint8Array(mask.length);
     for (const k of lines) drawPolyline(g, kn, k);
@@ -118,29 +139,56 @@ export function fillRank(
     const k2 = cutBy([...knives, ...carriers]);
     if (k2.onSeed || (k2.cuts && (!k1.cuts || Math.abs(k2.count - k1.count) > 0.002 * area))) incomplete = true;
   }
-  return { closed: true, area: a, cutArea: k1.cuts ? k1.count * g.cell * g.cell : a, knifeIncomplete: incomplete };
+  return { closed: true, area: a, cutArea: k1.cuts ? k1.count * g.cell * g.cell : a, knifeIncomplete: incomplete, hash };
 }
 
 /** Rank regions (masks) of one combination. */
-export function rankMasks(box: BoxMm, cellMm: number, ps: readonly PortionPts[], n: number, seed: PtMm) {
+export function rankMasks(
+  box: BoxMm,
+  cellMm: number,
+  ps: readonly PortionPts[],
+  n: number,
+  seed: PtMm,
+  memo?: Map<string, { area: number; hash: number }>,
+  tick?: () => void,
+  keepMasks = true,
+) {
   const g = new Grid(box, cellMm);
   const k0 = g.iy(seed.y) * g.W + g.ix(seed.x);
   const masks: (Uint8Array | null)[] = [];
   const areas: number[] = [];
+  const hashes: number[] = [];
   for (let r = 0; r < n; r++) {
+    tick?.();
+    // the same walls give the same region: a combination that does not touch rank r's walls
+    // reuses the region another one already filled
+    const mine = ps.filter((p) => p.ranks.includes(r));
+    const key = memo ? mine.map((p) => { const e = p.pts[p.pts.length - 1]; return `${p.track}:${p.pts.length}:${p.pts[0].x.toFixed(2)},${p.pts[0].y.toFixed(2)}:${e.x.toFixed(2)},${e.y.toFixed(2)}`; }).join('|') : '';
+    const hit = memo?.get(key);
+    if (hit) {
+      masks.push(null);
+      areas.push(hit.area);
+      hashes.push(hit.hash);
+      continue;
+    }
     const wall = new Uint8Array(g.W * g.H);
-    for (const p of ps) if (p.ranks.includes(r)) drawPolyline(g, wall, p.pts);
+    for (const p of mine) drawPolyline(g, wall, p.pts);
     const ext = exterior(g, wall);
     if (wall[k0] || ext[k0]) {
       masks.push(null);
       areas.push(-1);
+      hashes.push(0);
+      memo?.set(key, { area: -1, hash: 0 });
       continue;
     }
     const { mask, area } = regionOf(g, ext, k0);
-    masks.push(mask);
+    const h = maskHash(mask, g.W);
+    masks.push(keepMasks ? mask : null);
     areas.push(area * g.cell * g.cell);
+    hashes.push(h);
+    memo?.set(key, { area: area * g.cell * g.cell, hash: h });
   }
-  return { masks, areas };
+  return { masks, areas, hashes };
 }
 
 /**
@@ -186,20 +234,26 @@ export function nestExcess(masks: readonly (Uint8Array | null)[]): number {
   return growth ? excess / growth : excess ? 9 : 0;
 }
 
-function evalCombo(M: GradeModel, bits: number[], box: BoxMm, seed: PtMm, inBox: Set<number>, cellMm: number): Combo {
+function evalCombo(
+  M: GradeModel,
+  bits: number[],
+  box: BoxMm,
+  seed: PtMm,
+  inBox: Set<number>,
+  cellMm: number,
+  memo: Map<string, { area: number; hash: number }>,
+  tick?: () => void,
+): Combo {
   const n = M.n;
   const ps = portionPts(M, bits, inBox);
-  const { masks, areas } = rankMasks(box, cellMm, ps, n, seed);
-  const c = scoreAreas(bits, areas, n);
-  c.nest = nestExcess(masks);
-  c.score -= NEST_WEIGHT * Math.min(c.nest, 2);
-  return c;
+  const { areas, hashes } = rankMasks(box, cellMm, ps, n, seed, memo, tick, false);
+  return scoreAreas(bits, areas, n, hashes);
 }
 
 /** Score penalty per unit of nesting excess (see nestExcess). */
 export const NEST_WEIGHT = 0;
 
-export function scoreAreas(bits: number[], areas: number[], n: number): Combo {
+export function scoreAreas(bits: number[], areas: number[], n: number, hashes: number[] = []): Combo {
   let closed = 0;
   for (const a of areas) if (a >= 0) closed++;
   let monotone = closed === n;
@@ -214,7 +268,7 @@ export function scoreAreas(bits: number[], areas: number[], n: number): Combo {
   const up = steps.filter((s) => s > 0).length;
   const down = steps.filter((s) => s < 0).length;
   const score = closed * 10 + (monotone ? 5 : 0) + 2 * (up - down) - Math.min(cv, 3);
-  return { bits, closed, areas, monotone, cv, score };
+  return { bits, closed, areas, monotone, cv, score, hashes };
 }
 
 /** Tracks whose bbox meets the box, and the components they carry. */
@@ -272,35 +326,46 @@ function dropFramesAround(M: GradeModel, seed: Seed, box: BoxMm, inBox: Set<numb
   }
 }
 
-export type ChooseOpts = { cellMm: number; maxFree: number };
+export type ChooseOpts = {
+  cellMm: number;
+  maxFree: number;
+  /** called inside the combination loop (cancellation / progress) */
+  tick?: () => void;
+};
 
 export function solveSeed(M: GradeModel, seed: Seed, box: BoxMm, o: ChooseOpts): SeedSolve {
   const { inBox, comps, compLen } = tracksIn(M, box);
   dropFramesAround(M, seed, box, inBox, o.cellMm);
   const compList = [...comps].sort((a, b) => (compLen.get(b) ?? 0) - (compLen.get(a) ?? 0));
+  // every component is searched up to maxFree; the rest stay at bit 0 here and gradeOnce refuses
+  // the seed when flipping one of them moves a trusted rank (it was never searched)
   const free = compList.slice(0, o.maxFree);
   const combos: Combo[] = [];
+  const memo = new Map<string, { area: number; hash: number }>();
   for (let m = 0; m < 1 << free.length; m++) {
+    o.tick?.();
     const bits = new Array(M.nComps).fill(0);
     free.forEach((c, i) => (bits[c] = (m >> i) & 1));
-    combos.push(evalCombo(M, bits, box, seed.at, inBox, o.cellMm));
+    combos.push(evalCombo(M, bits, box, seed.at, inBox, o.cellMm, memo, o.tick));
   }
   const all = combos.slice();
   combos.sort((a, b) => b.score - a.score);
-  const top = combos.slice(0, 4);
+  // distinct layouts by region, over every combination (not a truncated top list)
+  const distinct: Combo[] = [];
+  for (const c of combos) if (!distinct.some((d) => sameLayout(c, d))) distinct.push(c);
+  const top = distinct.slice(0, 4);
   const best = top[0];
   let ambiguous = false;
   let reason = '';
   if (!best) reason = 'no combos';
   else if (best.closed < M.n) reason = `only ${best.closed}/${M.n} closed`;
   else if (!best.monotone) reason = 'not monotone';
-  const sameAreas = (a: Combo, c: Combo) =>
-    a.areas.every((x, i) => Math.abs(x - c.areas[i]) <= 0.001 * Math.max(1, Math.abs(x)));
-  const distinct = top.filter((c, i) => top.slice(0, i).every((d) => !sameAreas(c, d)));
-  const second = distinct[1];
-  if (best && second && second.closed === M.n && second.monotone && second.score >= best.score - 0.5) {
+  const rival = best
+    ? distinct.find((c) => c !== best && c.closed === M.n && c.monotone && c.score >= best.score - 0.5)
+    : undefined;
+  if (best && rival) {
     ambiguous = true;
-    reason = `top-2 close (${best.score.toFixed(2)} vs ${second.score.toFixed(2)})`;
+    reason = `two layouts fit (${best.score.toFixed(2)} vs ${rival.score.toFixed(2)})`;
   }
   return { seed, box, inBox, comps: compList, free, compLen, top, all, ambiguous, reason };
 }

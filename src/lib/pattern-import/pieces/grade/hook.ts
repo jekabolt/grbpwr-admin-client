@@ -272,12 +272,22 @@ export function gradeHook(
   if (!cache) solved.set(set, (cache = new Map()));
   let G = cache.get(key);
   if (!G) {
+    // cancellation reaches the solver's inner loops through the fill's progress (the worker's
+    // progress checks the cancel flag); throttled so the loops do not flood the wizard
+    let last = 0;
+    let note = 0;
+    const tick = () => {
+      const t = Date.now();
+      if (t - last < 150) return;
+      last = t;
+      progress?.(note++ % 100, 100, 'telling the sizes apart');
+    };
     G = gradeRanks(
       sheet,
       set,
       seeds,
       n,
-      { cellMm: cell, knives, knifeCarriers: knifeCarriers(set, kIds), exclude: [...blocked] },
+      { cellMm: cell, knives, knifeCarriers: knifeCarriers(set, kIds), exclude: [...blocked], tick },
       progress,
     );
     cache.set(key, G);

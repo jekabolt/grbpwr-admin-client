@@ -3,7 +3,7 @@
 // 10-CLO-DXF-FORMAT §2 (dialect, cut-line mode, grain arrow, POINT notches, notch twins, labels,
 // sizes, pairs, ungraded layer 1).
 
-import type { AllowanceDecision, IRPath, IRText, PathId, PtMm } from '../../types';
+import type { AllowanceDecision, IRPath, IRText, PathId, PtMm, Style } from '../../types';
 import { PATIMPORT } from '../../types';
 import type {
   CutMode,
@@ -13,6 +13,7 @@ import type {
   DxfGroup,
   DxfIdentity,
   DxfLabels,
+  DxfNestedOutlines,
   DxfNotch,
   DxfPair,
   DxfRead,
@@ -260,6 +261,98 @@ const unit = (v: PtMm): PtMm => {
   return { x: v.x / L, y: v.y / L };
 };
 
+// ── nested outlines (several sizes in one block) ────────────────────────────────────────────
+
+/**
+ * The fast path reads one block = one piece × one size, and takes the largest loop of the cut
+ * (seam) layer as the outline. A block that stacks the outlines of several sizes — drawn alike,
+ * one inside the other, as a CLO-like "all sizes in one block" export does — would then hand
+ * downstream the LARGEST size labelled as whatever size the block claims: a plausible, closed,
+ * wrong contour. This guard finds such outlines so the block is refused instead.
+ *
+ * What a size of the same piece looks like next to the outer outline, and why the legitimate
+ * inner loops of a block do not qualify:
+ *  - same layer, colour and line type (a size nest is drawn alike; a sew line or a mark drawn in
+ *    another look is told apart by that look);
+ *  - area ≥ 50 % of the outer one: a grade nest steps a few % of area per size, so even 8 sizes
+ *    keep the smallest well above half the largest, while a pocket cut-out, a buttonhole, a drill
+ *    square, a label box or a dart is a small fraction of the piece (corpus: no closed cut-layer
+ *    loop besides the outline at all);
+ *  - every bbox side ≥ 60 % of the outer one, ≥ 95 % of its vertices inside (or on) the outer one,
+ *    and the two outlines within 15 % of √area of each other all round (p95 both ways): a near
+ *    copy of the outline, not some other shape inside the piece;
+ *  - not the same contour drawn twice (≤ 0.5 mm apart everywhere: harmless, the same line);
+ *  - not a uniform offset (distance spread ≤ max(1 mm, 10 % of the median), median ≥ 2 mm): that
+ *    is the sew line drawn alike at one allowance; a size step is never a uniform offset (grading
+ *    moves each point by its own rule, and stacked sizes touch at the grade anchor).
+ * Anything else that passes — two sizes, or a cut line with a sew line of mixed allowances in the
+ * same look — cannot be proven to be one size, and goes to the operator.
+ */
+const NEST = {
+  minAreaRatio: 0.5,
+  minSideRatio: 0.6,
+  inside: 0.95,
+  closeness: 0.15,
+  dupMm: 0.5,
+  uniformMm: 1,
+  uniformShare: 0.1,
+  minOffsetMm: 2,
+  rgbTol: 8,
+  dashTolMm: 0.1,
+};
+
+function sameLook(a: Style | undefined, b: Style | undefined): boolean {
+  if (!a || !b) return a === b;
+  if ((a.layer ?? '') !== (b.layer ?? '')) return false;
+  const ra = a.strokeRgb;
+  const rb = b.strokeRgb;
+  if (!ra !== !rb) return false;
+  if (ra && rb && ra.some((v, i) => Math.abs(v - rb[i]) > NEST.rgbTol)) return false;
+  const da = a.dash ?? [];
+  const db = b.dash ?? [];
+  return da.length === db.length && da.every((v, i) => Math.abs(v - db[i]) <= NEST.dashTolMm);
+}
+
+function quantile(xs: number[], q: number): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : 0;
+}
+
+/** The loops (largest first, `loops[0]` = the outline) that are other sizes of the same piece. */
+function nestedSizeLoops(
+  loops: DxfContour[],
+  lookOf: (c: DxfContour) => Style | undefined,
+): DxfContour[] {
+  if (loops.length < 2) return [];
+  const [outer, ...rest] = loops;
+  const look = lookOf(outer);
+  const ow = outer.bbox.maxX - outer.bbox.minX;
+  const oh = outer.bbox.maxY - outer.bbox.minY;
+  const near = NEST.closeness * Math.sqrt(outer.areaMm2);
+  return rest.filter((c) => {
+    if (outer.areaMm2 <= 0 || c.areaMm2 < NEST.minAreaRatio * outer.areaMm2) return false;
+    if (!sameLook(lookOf(c), look)) return false;
+    const w = c.bbox.maxX - c.bbox.minX;
+    const h = c.bbox.maxY - c.bbox.minY;
+    if (w < NEST.minSideRatio * ow || h < NEST.minSideRatio * oh) return false;
+    const toOuter = sampleDistances(c, outer);
+    if (Math.max(...toOuter) <= NEST.dupMm) return false;
+    const step = Math.max(1, Math.floor(c.pts.length / 400));
+    let n = 0;
+    let inside = 0;
+    for (let i = 0; i < c.pts.length; i += step, n++)
+      if (pointInPolygon(c.pts[i], outer.pts) || toOuter[n] <= PATIMPORT.snapMm) inside++;
+    if (inside < NEST.inside * n) return false;
+    if (quantile(toOuter, 0.95) > near || quantile(sampleDistances(outer, c), 0.95) > near)
+      return false;
+    const med = quantile(toOuter, 0.5);
+    const spread = quantile(toOuter, 0.9) - quantile(toOuter, 0.1);
+    if (med >= NEST.minOffsetMm && spread <= Math.max(NEST.uniformMm, NEST.uniformShare * med))
+      return false;
+    return true;
+  });
+}
+
 // ── per block ───────────────────────────────────────────────────────────────────────────────
 
 type RawNotch = DxfNotch & { twinOf?: number; dupOf?: number };
@@ -429,7 +522,7 @@ function blockPiece(
   const pickOuter = (
     ps: IRPath[],
     layerName: string,
-  ): { outer: DxfContour | null; rest: IRPath[] } => {
+  ): { outer: DxfContour | null; rest: IRPath[]; loops: DxfContour[] } => {
     const closed = ps.filter((p) => p.closed && p.pts.length >= 3);
     const open = ps.filter((p) => !p.closed && p.pts.length >= 2);
     const loops: DxfContour[] = closed.map((p) => contourOf([p], layerName));
@@ -446,11 +539,15 @@ function blockPiece(
         });
       }
     }
-    if (!loops.length) return { outer: null, rest: ps };
+    if (!loops.length) return { outer: null, rest: ps, loops };
     loops.sort((a, b) => b.areaMm2 - a.areaMm2);
     const outer = loops[0];
     const usedIds = new Set(outer.paths);
-    return { outer, rest: ps.filter((p) => !usedIds.has(p.id)) };
+    return { outer, rest: ps.filter((p) => !usedIds.has(p.id)), loops };
+  };
+  const lookOf = (c: DxfContour) => {
+    const p = pathById.get(c.paths[0]);
+    return p ? page.styles[p.style] : undefined;
   };
   const cutPick = pickOuter(
     cutLayerPaths,
@@ -468,6 +565,22 @@ function blockPiece(
   let seam = seamPick.outer;
   let seamSource: DxfBlockPiece['seamSource'] = seam ? 'L14' : null;
   for (const p of seamPick.rest) roles[p.id] = p.closed ? 'seam-extra' : 'other';
+
+  // several outlines of one look nested in this block: the sizes are not one per block here
+  let nested: DxfNestedOutlines | null = null;
+  {
+    const onCut = cut ? nestedSizeLoops(cutPick.loops, lookOf) : [];
+    const onSeam = seamPick.outer ? nestedSizeLoops(seamPick.loops, lookOf) : [];
+    const [list, outer] = onCut.length >= onSeam.length ? [onCut, cut] : [onSeam, seamPick.outer];
+    if (list.length && outer) {
+      nested = {
+        line: onCut.length && onSeam.length ? 'both' : onCut.length ? 'cut' : 'seam',
+        layer: outer.layer,
+        outlines: list.length + 1,
+        areaRatios: list.map((c) => Math.round((c.areaMm2 / outer.areaMm2) * 1e4) / 1e4),
+      };
+    }
+  }
 
   // L1 == L14 → mode B: the seam lives on layer 8
   let cutEqualsSeam = false;
@@ -668,6 +781,7 @@ function blockPiece(
     gradePoints: { turn, curve },
     pointNumbers,
     annotations,
+    nested,
   };
   return { piece, raw };
 }
@@ -946,6 +1060,11 @@ export function segmentDxf(read: DxfRead): DxfSegmentation {
   }
   const work = inserts.map((g) => blockPiece(g, read, pathById, textById));
   const pieces = work.map((w) => w.piece);
+  const nestedBlocks = pieces.filter((p) => p.nested).map((p) => p.block);
+  if (nestedBlocks.length)
+    warnings.push(
+      `${nestedBlocks.length} block(s) draw several outlines of one look, one inside the other (${nestedBlocks.slice(0, 6).join(', ')}${nestedBlocks.length > 6 ? '…' : ''}) — several sizes in one block cannot be told apart: refused for the operator (export one size per block, or trace them)`,
+    );
 
   // identity + size
   const tails = sizeTailsByName(pieces.map((p) => p.block));
@@ -1071,7 +1190,12 @@ export function segmentDxf(read: DxfRead): DxfSegmentation {
   let allowance: AllowanceDecision | null = null;
   {
     const fromBlocks = (filter: (p: DxfBlockPiece) => boolean) =>
-      median(pieces.filter((p) => filter(p) && p.seamToCutMm != null).map((p) => p.seamToCutMm!));
+      median(
+        // a nested block's lines are not proven to be one size: they do not measure the allowance
+        pieces
+          .filter((p) => filter(p) && !p.nested && p.seamToCutMm != null)
+          .map((p) => p.seamToCutMm!),
+      );
     const sample = sampleSize?.token;
     const a =
       mode === 'A'

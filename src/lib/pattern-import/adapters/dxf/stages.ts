@@ -258,7 +258,8 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
     const candidates: DxfPieceCandidate[] = ps.map((p) =>
       candidateOf(p, k, id.mode === 'A', seg, chainOf, range, read, pathById),
     );
-    const areas = candidates.map((c) => c.areaMm2);
+    // a refused size has no area: growth is judged over the outlines that are given
+    const areas = candidates.filter((c) => c.outcome !== 'refused').map((c) => c.areaMm2);
     families.push({
       seed: k,
       candidates,
@@ -308,6 +309,8 @@ function candidateOf(
   read: DxfRead,
   pathById: Map<PathId, IRPath>,
 ): DxfPieceCandidate {
+  const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
+  if (p.nested) return refusedNested(p, seed, Math.max(0, rank));
   const outer = (outerIsSeam ? p.seam ?? p.cut : p.cut ?? p.seam) ?? null;
   const group = read.meta.groups[p.group];
   const wallIds = new Set(outer?.paths ?? []);
@@ -386,7 +389,6 @@ function candidateOf(
       } satisfies FoldFeature);
     }
   }
-  const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
   const area = outer?.areaMm2 ?? 0;
   return {
     seed,
@@ -411,6 +413,46 @@ function candidateOf(
       size: p.size,
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
+    },
+  };
+}
+
+/**
+ * A block that stacks several outlines of one look (segment.ts `nestedSizeLoops`): which of them
+ * is the size the block claims cannot be proven, so the candidate is refused — no outline, no
+ * walls, no features (notches and drills placed against the largest loop would be wrong too) —
+ * with the pieces/grade (H1) contract the semantics stage already blocks on and words it.
+ */
+function refusedNested(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCandidate {
+  const n = p.nested!;
+  const ratios = n.areaRatios.map((r) => `${Math.round(r * 100)} %`).join(', ');
+  const what = n.line === 'both' ? 'cut- and seam-line outlines' : `${n.line}-line outlines`;
+  return {
+    seed,
+    rank,
+    outer: [],
+    walls: [],
+    inside: [],
+    textsInside: [],
+    outcome: 'refused',
+    areaMm2: 0,
+    // where the block is, so the operator can find it; there is no outline
+    bbox: (p.cut ?? p.seam)?.bbox ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    sourceCoverage: 0,
+    p95Mm: 0,
+    gradeRefusal: 'sizes-not-distinguished',
+    gradeDetail:
+      `block ${p.block} draws ${n.outlines} ${what} alike on layer ${n.layer}, one inside the ` +
+      `other (inner ones ${ratios} of the outer area) — several sizes in one block, or a line ` +
+      `nothing tells apart from them; which one is ${p.size ? `size ${p.size}` : 'this size'} ` +
+      `cannot be proven. Export one size per block, or trace the outline.`,
+    dxf: {
+      block: p.block,
+      group: p.group,
+      identity: p.identity,
+      size: p.size,
+      features: [],
+      outerIsSeam: false,
     },
   };
 }

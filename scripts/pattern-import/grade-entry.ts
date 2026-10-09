@@ -21,7 +21,8 @@ import { nestPairs, portionPts, rankMasks, tracksIn } from 'lib/pattern-import/p
 import { HOOK_DEBUG } from 'lib/pattern-import/pieces/grade/hook';
 import { ranksAt } from 'lib/pattern-import/pieces/grade/model';
 import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
-import type { BoxMm, ChainSet, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
+import type { BoxMm, CardSize, ChainSet, ExpectedSizes, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
+import { expectedSizes } from 'lib/pattern-import/pieces/grade/expected';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
@@ -75,14 +76,14 @@ const mk = (d: string) => {
 const loadBench = (id: string, level: Level) =>
   JSON.parse(readFileSync(resolve(BENCH, `${id}-${level}.json`), 'utf8')) as Bench;
 
-function chainsOf(b: Bench, n: number): { set: ChainSet; run: SizeRun } {
+/** The wizard's path: chains WITHOUT a size count (the wizard passes none), then the size run. */
+function chainsOf(b: Bench, _n?: number): { set: ChainSet; run: SizeRun } {
   const { set } = buildChainsDetailed(
     b.sheet,
     {
       joinGapMm: PATIMPORT.joinGapMm,
       joinAngleDeg: PATIMPORT.joinAngleDeg,
       joinLateralMm: PATIMPORT.joinLateralMm,
-      sizeCount: n,
     },
     { extraTexts: [] },
   );
@@ -94,11 +95,9 @@ function chainsOf(b: Bench, n: number): { set: ChainSet; run: SizeRun } {
   return { set, run };
 }
 
-/** A run with n sizes (negative controls: the stripped sheet's run says b.n). */
-function runWith(run: SizeRun, n: number): SizeRun {
-  const sizes = Array.from({ length: n }, (_, r) => run.sizes[r] ?? { label: `x${r}`, rank: r, classId: null, file: null });
-  return { ...run, sizes: sizes.map((s, r) => ({ ...s, rank: r })) };
-}
+/** A card run of n sizes (the converter runs inside the card; the bench's card has b.n sizes). */
+const cardOf = (n: number): CardSize[] =>
+  Array.from({ length: n }, (_, r) => ({ sizeId: 100 + r, name: `S${r}`, token: `s${r}`, rank: r }));
 
 type Got = { label: string; rank: number; outer: PtMm[]; outcome: string; refusal?: string };
 
@@ -114,10 +113,15 @@ function gotOf(b: Bench, families: PieceFamily[]): Got[] {
 
 type Score = {
   perPiece: Record<string, string>;
+  /** every produced candidate (all ranks the fill produced, not only the truth's b.n) */
+  produced: number;
   closed: number;
   correct: number;
   wrong: number;
+  /** matches the truth contour, but < OWN_MIN of it lies on its own size's / common lines */
+  provenance: string[];
   unknown: number;
+  refused: number;
   leaks: number;
   /** (piece, rank) with truth, noise pieces excluded */
   withTruth: number;
@@ -126,18 +130,119 @@ type Score = {
   wrongList: string[];
   /** closed contours that differ from truth-noise entries (not counted as wrong; listed) */
   noiseWrong: string[];
-  /** closed contours running < 90 % on their own size's (or common) source lines — wrong by line truth */
-  offLines: string[];
-  /** contour differs from a truth contour that runs ≥ 20 points less on its own size's lines than ours (ours ≥ 90 %) */
-  truthOffLines: string[];
+  /** audited overrides judged by provenance (correct at ≥ OWN_AUDIT, else wrong) */
+  audited: string[];
   /** own-line share of every closed contour, for the report */
   ownShares: number[];
 };
 
+/**
+ * Audited truth overrides: the bench's truth contour for these (piece, rank) is KNOWN wrong, checked
+ * by eye on the named overlay — our contour is then judged by provenance alone (≥ OWN_AUDIT of it on
+ * its own size's / common source lines), never dropped from the count.
+ */
+const AUDITED: Record<string, { pieces: Record<string, number[]>; why: string; image: string }> = {
+  'kombinezon-L2': {
+    pieces: { '2': [0, 1, 2, 3, 4, 6, 7] },
+    why:
+      "the truth contours of piece 2 run 28–54 % on OTHER sizes' crotch lines (F3 on the encoded " +
+      "original classed a crotch curve 'common', so F4 cut every size with it); the r0 truth contour " +
+      'leaves the red r0 crotch curve for the sixth curve',
+    image: 'hard-sizes/h1/kombinezon-L2-truth-2-zoom.png',
+  },
+};
+const auditedOf = (b: Bench, label: string, r: number) =>
+  AUDITED[`${b.sample}-${b.level}`]?.pieces[label]?.includes(r) ?? false;
 
+/**
+ * Every produced candidate is scored. C = closed, p95 ≤ 1 mm to the truth AND ≥ 90 % on its own
+ * size's lines · P = matches the truth but not on its own lines (not correct; listed) · A = audited
+ * override, on its own lines · W = closed and wrong (also: closed where the truth has no such size)
+ * · n = differs from a known-noise truth · ? = closed, the piece has no truth at all · r = refused ·
+ * L/M/t/- = not closed.
+ */
+function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: number) => number = (_, r) => r): Score {
+  const sc: Score = { perPiece: {}, produced: 0, closed: 0, correct: 0, wrong: 0, provenance: [], unknown: 0, refused: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [], noiseWrong: [], audited: [], ownShares: [] };
+  const labels = [...new Set(b.seeds.map((s) => seedLabel(s) ?? String(s.id)))];
+  for (const label of labels) {
+    let row = '';
+    const ranks = new Set<number>(Array.from({ length: b.n }, (_, r) => r));
+    for (const g of got) if (g.label === label) ranks.add(g.rank);
+    for (const r of [...ranks].sort((x, y) => x - y)) {
+      const g = got.find((x) => x.label === label && x.rank === r);
+      const t = r < b.n ? b.cands.find((x) => x.label === label && x.rank === truthRank(label, r)) : undefined;
+      const audited = auditedOf(b, label, r);
+      const counted = (!!t || audited) && !isNoise(b.sample, label, r);
+      if (counted) sc.withTruth++;
+      if (g) sc.produced++;
+      if (!g || g.outcome !== 'closed') {
+        row += g ? (g.outcome === 'refused' ? 'r' : g.outcome === 'leak' ? 'L' : g.outcome === 'merged' ? 'M' : 't') : '-';
+        if (g?.outcome === 'refused') sc.refused++;
+        else sc.leaks++;
+        continue;
+      }
+      sc.closed++;
+      const own = ownShare(b, g.outer, r < b.n ? truthRank(label, r) : -1);
+      sc.ownShares.push(own);
+      const id = `${label}/r${r}`;
+      if (audited && !isNoise(b.sample, label, r)) {
+        sc.audited.push(`${id} own ${(own * 100).toFixed(0)}%`);
+        if (own >= OWN_AUDIT) {
+          row += 'A';
+          sc.correct++;
+          sc.correctAcc++;
+        } else {
+          row += 'W';
+          sc.wrong++;
+          sc.wrongAcc++;
+          sc.wrongList.push(id);
+        }
+        continue;
+      }
+      if (!t) {
+        if (r >= b.n) {
+          // a size the drawing does not have (n+1 control): closing it is inventing a contour
+          row += 'W';
+          sc.wrong++;
+          sc.wrongList.push(id);
+        } else {
+          row += '?';
+          sc.unknown++;
+          if (own < OWN_MIN) sc.provenance.push(`${id} (no truth) own ${(own * 100).toFixed(0)}%`);
+        }
+        continue;
+      }
+      if (process.env.DIST && (process.env.DIST === '1' || process.env.DIST === label))
+        console.log(`      dist ${id}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} own ${(own * 100).toFixed(0)}% truth own ${(ownShare(b, t.outer, truthRank(label, r)) * 100).toFixed(0)}%`);
+      const match = hausdorffP95(g.outer, t.outer) <= 1.0;
+      if (!counted) {
+        row += match ? 'c' : 'n';
+        if (!match) sc.noiseWrong.push(id);
+        continue;
+      }
+      if (match && own >= OWN_MIN) {
+        row += 'C';
+        sc.correct++;
+        sc.correctAcc++;
+      } else if (match) {
+        row += 'P';
+        sc.provenance.push(`${id} own ${(own * 100).toFixed(0)}%`);
+      } else {
+        row += 'W';
+        sc.wrong++;
+        sc.wrongAcc++;
+        sc.wrongList.push(id);
+      }
+    }
+    sc.perPiece[label] = row;
+  }
+  return sc;
+}
+
+/** A closed contour is CORRECT only when it matches the truth contour AND runs on its own size's lines. */
 const OWN_MIN = 0.9;
-/** truth contour judged noise when it runs on its own size's lines this much less than ours */
-const OWN_MARGIN = 0.2;
+/** An audited truth override judges our contour by provenance alone, at this stricter share. */
+const OWN_AUDIT = 0.95;
 const pathGrids = new WeakMap<Bench, SegGrid>();
 /**
  * Share of a contour (sampled every quarter segment) lying ≤ 0.3 mm from a source line whose
@@ -171,78 +276,6 @@ function ownShare(b: Bench, o: PtMm[], rank: number, miss?: PtMm[]): number {
       else miss?.push(q);
     }
   return tot ? own / tot : 0;
-}
-
-/** C = closed and p95 ≤ 1 mm to the truth contour · W = closed, off · ? = closed, no truth · L/M/t/- = not closed. */
-function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: number) => number = (_, r) => r): Score {
-  const sc: Score = { perPiece: {}, closed: 0, correct: 0, wrong: 0, unknown: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [], noiseWrong: [], offLines: [], truthOffLines: [], ownShares: [] };
-  const labels = [...new Set(b.seeds.map((s) => seedLabel(s) ?? String(s.id)))];
-  for (const label of labels) {
-    let row = '';
-    for (let r = 0; r < b.n; r++) {
-      const g = got.find((x) => x.label === label && x.rank === r);
-      const t = b.cands.find((x) => x.label === label && x.rank === truthRank(label, r));
-      const counted = !!t && !isNoise(b.sample, label, r);
-      if (counted) sc.withTruth++;
-      if (!g || g.outcome !== 'closed') {
-        row += g ? (g.outcome === 'leak' ? (g.refusal ? 'r' : 'L') : g.outcome === 'merged' ? 'M' : 't') : '-';
-        sc.leaks++;
-        continue;
-      }
-      sc.closed++;
-      const own = ownShare(b, g.outer, truthRank(label, r));
-      sc.ownShares.push(own);
-      if (own < OWN_MIN) sc.offLines.push(`${label}/r${r}`);
-      if (!t) {
-        row += '?';
-        sc.unknown++;
-        continue;
-      }
-      if (process.env.DIST && (process.env.DIST === '1' || process.env.DIST === label)) {
-        const area = (o: PtMm[]) => Math.abs(o.reduce((a, p, i) => { const q = o[(i + 1) % o.length]; return a + p.x * q.y - q.x * p.y; }, 0) / 2);
-        const bb = (o: PtMm[]) => { const xs = o.map((p) => p.x); const ys = o.map((p) => p.y); return `[${Math.min(...xs).toFixed(0)},${Math.min(...ys).toFixed(0)}..${Math.max(...xs).toFixed(0)},${Math.max(...ys).toFixed(0)}]`; };
-        const tg = new SegGrid(4);
-        const tl = [...t.outer, t.outer[0]];
-        tg.addPolyline(0, tl);
-        const far: PtMm[] = [];
-        for (const q of g.outer) {
-          let d = Infinity;
-          tg.near(q, 3, (_, j) => {
-            d = Math.min(d, segNearest(q, tl[j], tl[j + 1]).d);
-          });
-          if (d > 1.5) far.push(q);
-        }
-        if (far.length) {
-          const fx = far.map((q) => q.x);
-          const fy = far.map((q) => q.y);
-          console.log(`      far (>1.5 mm) ${far.length}/${g.outer.length} pts in [${Math.min(...fx).toFixed(0)},${Math.min(...fy).toFixed(0)}..${Math.max(...fx).toFixed(0)},${Math.max(...fy).toFixed(0)}]`);
-        }
-        const miss: PtMm[] = [];
-        const og = ownShare(b, g.outer, truthRank(label, r), miss);
-        console.log(`      lines under ${label}/r${r}: got own ${(100 * og).toFixed(0)}% truth own ${(100 * ownShare(b, t.outer, truthRank(label, r))).toFixed(0)}%${miss.length ? ` got misses in ${JSON.stringify(bboxOfPts(miss))}` : ''}`);
-        console.log(`      dist ${label}/r${r}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} got ${(area(g.outer) / 100).toFixed(1)} cm² ${bb(g.outer)} truth ${(t.areaMm2 / 100).toFixed(1)} cm² ${bb(t.outer)}`);
-      }
-      if (hausdorffP95(g.outer, t.outer) <= 1.0) {
-        row += 'C';
-        sc.correct++;
-        if (counted) sc.correctAcc++;
-      } else if (counted && own >= OWN_MIN && ownShare(b, t.outer, truthRank(label, r)) <= own - OWN_MARGIN) {
-        row += 'n'; // ours runs on its own size's lines, the truth contour on other sizes'
-        sc.truthOffLines.push(`${label}/r${r}`);
-        sc.withTruth--;
-      } else if (counted) {
-        row += 'W';
-        sc.wrong++;
-        sc.wrongList.push(`${label}/r${r}`);
-        sc.wrongAcc++;
-      } else {
-        row += 'n'; // closed, differs from a truth known to be wrong
-        sc.noiseWrong.push(`${label}/r${r}`);
-      }
-    }
-    sc.perPiece[label] = row;
-  }
-  return sc;
 }
 
 /** Rank metrics by length of the TRUE size lines: right / wrong / unresolved (02-DESIGN §4). */
@@ -290,12 +323,12 @@ function rankMetrics(b: Bench, G: GradeResult) {
   return { rankAcc: ok / sizeLen, rankWrong: wrong / sizeLen, rankUnresolved: Math.max(0, 1 - (ok + wrong) / sizeLen) };
 }
 
-const fillOpts = (variant: string | null, grade: FillOpts['grade'], sizeCount?: number): FillOpts => ({
+const fillOpts = (variant: string | null, grade: FillOpts['grade'], expected?: ExpectedSizes): FillOpts => ({
   cellMm: PATIMPORT.fillCellMm,
   snapMm: PATIMPORT.snapMm,
   variant,
   grade,
-  ...(sizeCount ? { sizeCount } : {}),
+  ...(expected ? { expectedSizes: expected } : {}),
 });
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
@@ -315,12 +348,16 @@ type RunRow = {
   ms: number;
 };
 
-function runFill(b: Bench, mode: FillOpts['grade'], nOverride?: number) {
+/**
+ * The worker's path: the size run from the chains, the expected size count from the source, else
+ * the card (`cardN` sizes; 0 = an empty card run, nobody answered → expected unknown).
+ */
+function runFill(b: Bench, mode: FillOpts['grade'], cardN: number = b.n) {
   const t0 = Date.now();
-  const { set, run } = chainsOf(b, nOverride ?? b.n);
-  const r2 = nOverride ? runWith(run, nOverride) : run;
-  const { families, diag } = fillPiecesDetailed(b.sheet, set, r2, b.seeds, fillOpts(VARIANT[b.sample] ?? null, mode));
-  return { set, run: r2, families, diag, ms: Date.now() - t0 };
+  const { set, run } = chainsOf(b);
+  const expected = expectedSizes(run, cardOf(cardN), null) ?? undefined;
+  const { families, diag } = fillPiecesDetailed(b.sheet, set, run, b.seeds, fillOpts(VARIANT[b.sample] ?? null, mode, expected));
+  return { set, run, families, diag, ms: Date.now() - t0, expected };
 }
 
 function summarize(b: Bench, mode: string, families: PieceFamily[], diag: FillDiag, ms: number, n: number): RunRow {
@@ -354,7 +391,7 @@ function summarize(b: Bench, mode: string, families: PieceFamily[], diag: FillDi
 function printRow(r: RunRow) {
   const s = r.score;
   console.log(
-    `${r.sample.padEnd(10)} ${r.level} ${r.mode.padEnd(8)} n=${r.n} closed=${s.closed} correct=${s.correct} WRONG=${s.wrong} unknown=${s.unknown} leaks=${s.leaks} | acc ${s.correctAcc}/${s.withTruth} = ${pct(s.withTruth ? s.correctAcc / s.withTruth : 0)}` +
+    `${r.sample.padEnd(10)} ${r.level} ${r.mode.padEnd(8)} n=${r.n} produced=${s.produced} closed=${s.closed} correct=${s.correct} WRONG=${s.wrong} prov=${s.provenance.length} unknown=${s.unknown} refused=${s.refused} leaks=${s.leaks} | acc ${s.correctAcc}/${s.withTruth} = ${pct(s.withTruth ? s.correctAcc / s.withTruth : 0)}` +
       (r.ranks ? ` | rankAcc ${pct(r.ranks.rankAcc)} wrong ${pct(r.ranks.rankWrong)} unresolved ${pct(r.ranks.rankUnresolved)}` : '') +
       ` | refused ${JSON.stringify(r.refused)} amb ${r.ambiguities}${r.sizeCountAmb ? ' size-count' : ''} | ${(r.ms / 1000).toFixed(1)} s`,
   );
@@ -362,9 +399,8 @@ function printRow(r: RunRow) {
   for (const [k, v] of Object.entries(s.perPiece)) console.log(`      ${k.padEnd(6)} ${v.padEnd(10)} ${r.reasons[k] ?? ''}`);
   if (s.wrongList.length) console.log(`      wrong: ${s.wrongList.join(' ')}`);
   if (s.noiseWrong.length) console.log(`      differs from truth-noise: ${s.noiseWrong.join(' ')}`);
-  if (s.truthOffLines.length) console.log(`      truth contour off its own lines (ours on them): ${s.truthOffLines.join(' ')}`);
-  const sh = [...s.ownShares].sort((a, b) => a - b);
-  console.log(`      line check: ${s.offLines.length} closed contour(s) < ${OWN_MIN * 100}% on own lines${s.offLines.length ? ` (${s.offLines.join(' ')})` : ''}; own share min ${sh.length ? pct(sh[0]) : '-'} p10 ${sh.length ? pct(sh[Math.floor(sh.length * 0.1)]) : '-'}`);
+  if (s.audited.length) console.log(`      audited truth overrides (judged by own lines ≥ ${OWN_AUDIT * 100}%): ${s.audited.join(' · ')}`);
+  if (s.provenance.length) console.log(`      provenance below ${OWN_MIN * 100}% (not correct): ${s.provenance.join(' · ')}`);
 }
 
 // ── overlays ─────────────────────────────────────────────────────────────────────────────────
@@ -803,7 +839,7 @@ export async function main(argv: string[]) {
       if (!ACCEPT_SAMPLES.includes(r.sample)) continue;
       const acc = r.score.withTruth ? r.score.correctAcc / r.score.withTruth : 0;
       const target = r.level === 'L1' ? 0.9 : 0.75;
-      console.log(`H1 accuracy ${r.sample.padEnd(10)} ${r.level}: ${r.score.correctAcc}/${r.score.withTruth} = ${pct(acc)} (target ${pct(target)}) ${acc >= target ? 'met' : 'NOT MET'}${r.score.truthOffLines.length ? ` · truth off its lines: ${r.score.truthOffLines.join(' ')}` : ''}`);
+      console.log(`H1 accuracy ${r.sample.padEnd(10)} ${r.level}: ${r.score.correctAcc}/${r.score.withTruth} = ${pct(acc)} (target ${pct(target)}) ${acc >= target ? 'met' : 'NOT MET'}`);
     }
     return safe ? 0 : 1;
   } else {
