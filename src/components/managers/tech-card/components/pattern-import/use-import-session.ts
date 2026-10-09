@@ -40,6 +40,7 @@ import type {
   NameSuggester,
 } from './client';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
   { id: 'files', label: 'files' },
@@ -422,7 +423,7 @@ export function useImportSession(deps: {
           // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
           // but is a PieceSpec field: hand it to semantics as an override and re-run when it moved,
           // so the manifest, the draft and the card read the same flag.
-          const fused = fusedSeedsOf(a);
+          const fused = fusedSeeds(a, card.scopes);
           if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
             const overrides = { ...iRef.current.overrides };
             for (const sd of new Set(sem.pieces.map((p) => p.seed)))
@@ -532,7 +533,8 @@ export function useImportSession(deps: {
     patch({ sheet });
     const chains = await run('chains', { opts: chainOpts() });
     patch({ chains });
-    // The DXF's sizes (block names) still go onto the CARD's run before anything is written.
+    // The DXF knows its sizes (block names); they are mapped to the card's run here, before any
+    // block name is written (owner decision 6). Going back to "sizes" edits this map.
     const sizes = await run('sizes', {
       card: card.sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
@@ -635,13 +637,13 @@ export function useImportSession(deps: {
           return;
         case 'meaning': {
           setNotice(null);
-          let out: FabricAssignment;
-          try {
-            out = await run('fabrics', { bom: card.scopes });
-          } catch (e) {
-            if (importErrorCode(e) !== 'stage-unavailable') throw e;
-            out = interimAssignment(card, sRef.current.semantics);
-          }
+          // The AI's fabric calls ride along; the worker uses them only where the sheet is silent.
+          const aiHints = s.names.flatMap((n) =>
+            n.suggestion?.fabrics.length
+              ? [{ seed: n.seed, fabrics: n.suggestion.fabrics, confidence: n.confidence }]
+              : [],
+          );
+          const out = await run('fabrics', { bom: card.scopes, aiHints });
           // An assignment the operator already edited survives a round trip through `back`.
           const a = iRef.current.assignment ?? out;
           patch({ fabrics: a, step: 'fabrics' });
@@ -771,13 +773,10 @@ export function useImportSession(deps: {
       case 'fabrics': {
         const a = s.fabrics;
         if (!a) return 'fabrics are not proposed yet';
-        const seeds = new Set((s.semantics?.pieces ?? []).map((p) => p.seed));
-        const covered = new Set(Object.values(a.byPurpose).flat());
-        const orphan = [...seeds].filter((sd) => !covered.has(sd));
-        if (orphan.length)
-          return `${orphan.length} ${orphan.length === 1 ? 'piece has' : 'pieces have'} no fabric`;
-        if (!card.scopes.length) return 'the BOM has no fabric lines';
-        return null;
+        if (!card.scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
+        // The same planner the write stage cuts the files with: what blocks here blocks there.
+        const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
+        return problem ? problem.message : null;
       }
       case 'check': {
         const failing = Object.values(s.gate).flatMap((g) =>
@@ -909,13 +908,6 @@ export function nameOriginOf(
   return n.autoAccepted ? 'ai-auto' : 'ai';
 }
 
-/** The interlining proposal's seeds when interlining is NOT in the BOM: they carry `fused`. */
-const INTERLINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
-export function fusedSeedsOf(a: FabricAssignment): Set<SeedId> {
-  if (a.interliningInBom) return new Set();
-  return new Set(a.proposals.find((p) => p.purpose === INTERLINING_PURPOSE)?.seeds ?? []);
-}
-
 /** Auto matches below the confirm line (F5: < 0.9) that the operator has not answered. */
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
   entries.filter((e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9);
@@ -928,30 +920,6 @@ const sizeMapOpen = (map: SizeMap) =>
 export function exportedRanks(map: SizeMap | undefined): Set<number> | null {
   if (!map) return null;
   return new Set(map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
-}
-
-/**
- * Until the fabrics stage lands (F7): every piece goes to the card's FIRST scope (the main fabric,
- * as `buildCardContext` orders them). The proposal says so; the fabrics step shows it as found.
- */
-function interimAssignment(card: CardContext, sem: ImportSession['semantics']): FabricAssignment {
-  const main = card.scopes.find((s) => !s.isInterlining) ?? card.scopes[0];
-  const seeds = [...new Set((sem?.pieces ?? []).map((p) => p.seed))];
-  return {
-    byPurpose: main ? { [main.scopeKey]: seeds } : {},
-    interliningInBom: card.scopes.some((s) => s.isInterlining),
-    proposals: main
-      ? [
-          {
-            label: `${main.label} (every piece — fabric reading not built yet)`,
-            purpose: main.fabricPurpose,
-            seeds,
-            evidence: [],
-            confidence: 0,
-          },
-        ]
-      : [],
-  };
 }
 
 /** A name decision seeded from what semantics read off the sheet (or empty: the operator types). */

@@ -240,12 +240,6 @@ export async function main(): Promise<number> {
     );
     check(
       'allsizes.dxf',
-      'semantics needs the size map',
-      (await errCode(run('semantics', SEM_DEFAULT))) === 'out-of-order',
-      'out-of-order',
-    );
-    check(
-      'allsizes.dxf',
       'write needs semantics',
       (await errCode(
         run('write', {
@@ -257,6 +251,112 @@ export async function main(): Promise<number> {
         }),
       )) === 'out-of-order',
       'out-of-order',
+    );
+    // F7: sizes → semantics → fabrics → write through the session itself (the wizard's DXF path)
+    check(
+      'allsizes.dxf',
+      'semantics before the size map',
+      (await errCode(
+        run('semantics', {
+          fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+          pieceOverrides: {},
+          operatorGrain: {},
+        }),
+      )) === 'out-of-order',
+      'out-of-order',
+    );
+    const CARD = ['xs', 's', 'm', 'l', 'xl'].map((n, rank) => ({
+      sizeId: 500 + rank,
+      name: `${n}_${44 + rank * 2}ta_m`,
+      token: n.toUpperCase(),
+      rank,
+    }));
+    const sz = await run('sizes', { card: CARD });
+    check(
+      'allsizes.dxf',
+      'sizes mapped (fast path run)',
+      sz.map.entries.some((e) => e.card),
+      sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    await run('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } });
+    const sem = await run('semantics', {
+      fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+      pieceOverrides: {},
+      operatorGrain: {},
+    });
+    check(
+      'allsizes.dxf',
+      'semantics: 9 pieces',
+      sem.pieces.length === 9,
+      `${sem.pieces.length} pieces, ${sem.blocked.length} blocked`,
+    );
+    const bom = [
+      {
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        bomLineKey: 'L1',
+        label: 'main',
+        isInterlining: false,
+        sections: ['TECH_CARD_BOM_SECTION_FABRIC'],
+      },
+      {
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_LINING',
+        fabricPurpose: 'TECH_CARD_BOM_PURPOSE_LINING',
+        bomLineKey: 'L2',
+        label: 'lining',
+        isInterlining: false,
+        sections: ['TECH_CARD_BOM_SECTION_LINING'],
+      },
+    ];
+    const fab = await run('fabrics', { bom });
+    check(
+      'allsizes.dxf',
+      'fabrics: every piece main (no fabric named)',
+      (fab.byPurpose['TECH_CARD_BOM_PURPOSE_MAIN'] ?? []).length === 9,
+      JSON.stringify(
+        Object.fromEntries(Object.entries(fab.byPurpose).map(([k, v]) => [k, v.length])),
+      ),
+    );
+    const fronts = sem.pieces.filter((p) => p.identity.startsWith('FP')).map((p) => p.seed);
+    const wr = await run('write', {
+      scopes: bom,
+      assignment: { ...fab, byPurpose: { ...fab.byPurpose, TECH_CARD_BOM_PURPOSE_LINING: fronts } },
+      sizes: sz.map.entries.flatMap((e) =>
+        e.card
+          ? [
+              {
+                token: e.card.token,
+                sizeId: e.card.sizeId,
+                name: e.card.name,
+                sourceLabel: e.source.label,
+                rank: e.source.rank,
+              },
+            ]
+          : [],
+      ),
+      dialect: 'r12',
+      generator: 'probe',
+    });
+    check(
+      'allsizes.dxf',
+      'write: main + lining files, gate passes (F5 walls)',
+      wr.scopes.length === 2 &&
+        Object.values(wr.gate).every((g) => g.passed) &&
+        wr.scopes[1].identities.every((i) => i.startsWith('LIN_')),
+      wr.scopes
+        .map(
+          (x) =>
+            `${x.target.label}: ${x.identities.join(',')} gate ${
+              wr.gate[x.target.scopeKey].passed
+                ? '✓'
+                : '✗ ' +
+                  wr.gate[x.target.scopeKey].checks
+                    .filter((c) => !c.ok && c.severity === 'block')
+                    .map((c) => c.id)
+                    .join(' ')
+            }`,
+        )
+        .join(' · '),
     );
     check(
       'allsizes.dxf',
@@ -270,38 +370,44 @@ export async function main(): Promise<number> {
       'out-of-order',
     );
     await run('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } });
-    const sz = await run('sizes', { card: card(['S', 'M', 'L']) });
+    const szM = await run('sizes', { card: card(['S', 'M', 'L']) });
     check(
       'allsizes.dxf',
       'size map: M → card M',
-      sz.map.entries.length === 1 && sz.map.entries[0].card?.token === 'M',
-      sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+      szM.map.entries.length === 1 && szM.map.entries[0].card?.token === 'M',
+      szM.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
     );
     await run('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } });
-    const sem = await run('semantics', {
+    const semM = await run('semantics', {
       ...SEM_DEFAULT,
       fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
     });
     check(
       'allsizes.dxf',
       'semantics: every piece specced',
-      sem.pieces.length >= 9 && !sem.blocked.length,
-      `${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
+      semM.pieces.length >= 9 && !semM.blocked.length,
+      `${semM.pieces.length} specs, ${semM.blocked.length} blocked`,
     );
-    await writeCase('allsizes.dxf', run, sem, sz.map);
+    await writeCase('allsizes.dxf', run, semM, szM.map);
     s.close();
   }
 
   // Placeholders on a vector source
   {
     const s = new Session(1, [fileOf('pdf/reef.pdf')]);
-    for (const st of ['fabrics'] as const)
-      check(
-        'reef',
-        `${st} = placeholder`,
-        (await errCode(s.runStage(st, {} as never, ctx()))) === 'stage-unavailable',
-        'stage-unavailable',
-      );
+    check(
+      'reef',
+      'sizes before the lines are traced',
+      (await errCode(s.runStage('sizes', { card: [] }, ctx()))) === 'out-of-order',
+      'out-of-order',
+    );
+    // F7: the fabrics stage exists; before the pieces it says what is missing
+    check(
+      'reef',
+      'fabrics before the pieces',
+      (await errCode(s.runStage('fabrics', { bom: [] }, ctx()))) === 'out-of-order',
+      'out-of-order',
+    );
     check(
       'reef',
       'assemble before scale',

@@ -23,6 +23,7 @@ import type {
   NameSuggester,
 } from './client';
 import { createAiNamer } from './ai-namer';
+import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
 import { CheckStep } from './steps/check';
 import { DetailsStep } from './steps/details';
@@ -81,13 +82,21 @@ export function ImportWizard(props: WizardProps) {
 /** Names when there is no AI to ask (VITE_PATTERN_IMPORT_AI=stub on real data): none, honestly. */
 const noNames: NameSuggester = async () => [];
 
+/** The real worker opened without a card form behind it (a stand, a test): apply refuses honestly. */
+const noCardApply: ApplyDraftFn = async (draft) => ({
+  ok: false,
+  failedScope: draft.scopes[0]?.target.label ?? '—',
+  message: 'this import was opened without a card form — download the files instead',
+  uploaded: [],
+});
+
 function WizardBody({
   card,
   onClose,
   client: clientProp,
   namer: namerProp,
-  buildDraft = stubBuildDraft,
-  applyDraft = stubApplyDraft,
+  buildDraft: buildDraftProp,
+  applyDraft: applyDraftProp,
   stub,
   onToggleStub,
 }: WizardProps & { stub: boolean; onToggleStub?: () => void }) {
@@ -96,6 +105,10 @@ function WizardBody({
   const [client] = useState<ImportClient>(
     () => clientProp ?? (stub ? createStubClient() : new ImportWorkerClient()),
   );
+  // Fixture mode keeps the fixture draft and the simulated apply (it writes nothing); the real
+  // worker gets F7's draft and the card's apply (patterns-field passes it with the form inside).
+  const buildDraft = buildDraftProp ?? (client.kind === 'stub' ? stubBuildDraft : cardBuildDraft);
+  const applyDraft = client.kind === 'stub' ? stubApplyDraft : applyDraftProp ?? noCardApply;
   const latest = useRef<ImportSession | null>(null);
   // The real AI namer (F10) needs real renders, so it rides with the real worker; the stub client's
   // render-som draws nothing and keeps the fixture namer. VITE_PATTERN_IMPORT_AI=stub turns the AI

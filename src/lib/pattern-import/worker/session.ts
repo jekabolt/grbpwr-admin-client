@@ -9,16 +9,15 @@
 import type {
   ChainSet,
   DraftScope,
-  DraftScopeTarget,
   ExtractOpts,
   FileId,
   GateReport,
   IRPage,
+  IRText,
   ManifestSource,
   PageClassification,
   PageIndex,
   PieceFamily,
-  PieceSpec,
   Progress,
   PtMm,
   RasterCalibration,
@@ -56,7 +55,6 @@ import {
 } from '../adapters/sniff';
 import { assembleSheetDetailed, classifyPages } from '../assemble';
 import { renderSom } from '../ai/som';
-import { pieceInScope } from '../write';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed } from '../chains';
 import { detectSizeRun } from '../sizes';
@@ -68,6 +66,7 @@ import {
   detectAllowance,
   type SemanticsDetail,
 } from '../semantics';
+import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
 import { isWallEdit, mergeSameSize, withOperatorLines } from './operator-lines';
@@ -161,6 +160,8 @@ export class Session {
   private semantics: SemanticsOutput | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
+  /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
+  private pageTexts: IRText[] = [];
 
   constructor(id: number, files: { name: string; bytes: ArrayBuffer }[]) {
     this.id = id;
@@ -259,7 +260,7 @@ export class Session {
         case 'write':
           return this.write(input as StageIO['write']['in'], ctx);
         case 'fabrics':
-          throw stageUnavailable(stage);
+          return this.fabricsStage(input as StageIO['fabrics']['in']);
         default:
           throw new ImportError('internal', `unknown stage ${String(stage)}`);
       }
@@ -401,6 +402,14 @@ export class Session {
       ];
     this.scaleCands = scale;
     this.extractWarnings = warnings;
+    // Cut layouts live on the instruction pages, which the sheet drops (F7 reads them): keep only
+    // their text, a few kB, before the docs go.
+    const tilePage = new Set(
+      this.pages.filter((p) => p.cls === 'tile').map((p) => `${p.file}:${p.page}`),
+    );
+    this.pageTexts = docs.flatMap((d) =>
+      d.pages.filter((p) => !tilePage.has(`${d.file.id}:${p.page}`)).flatMap((p) => p.texts),
+    );
     return {
       files: this.files,
       pages: this.pages,
@@ -651,6 +660,22 @@ export class Session {
     return out;
   }
 
+  // ── fabrics (F7) ──────────────────────────────────────────────────────────────────────────
+
+  private fabricsStage(input: StageIO['fabrics']['in']): StageIO['fabrics']['out'] {
+    if (!this.sheet || !this.families)
+      throw new ImportError('out-of-order', 'find the pieces first', 'fabrics');
+    return proposeFabricsDetailed({
+      texts: this.sheet.texts,
+      families: this.families,
+      seeds: this.seeds ?? undefined,
+      bom: input.bom,
+      pageTexts: this.pageTexts,
+      aiHints: input.aiHints,
+      identities: this.semantics?.pieces.map((p) => ({ seed: p.seed, identity: p.identity })),
+    }).assignment;
+  }
+
   // ── write + gate (F6) ─────────────────────────────────────────────────────────────────────
 
   private async write(
@@ -685,41 +710,40 @@ export class Session {
       sizeEncoding: this.run?.encoding ?? 'single',
       variant: sem.pieces.find((p) => p.variant)?.variant ?? null,
     };
+    // One file per fabric scope (F7 `planScopes`): lining copies renamed LIN_…, `fabrics` = the
+    // scope. Walls come from F5's own map (unfolded halves mirrored, a derived `_R` mirrored) — the
+    // write stage's earlier chain lookup dropped the closing edge of closed walls (F5 report).
+    const plan = planScopes(sem.pieces, input.assignment, input.scopes);
+    if (plan.problems.length)
+      throw new ImportError('out-of-order', plan.problems[0].message, 'write');
     // The walls each WRITTEN identity × rank came from, in its own frame (F5): a closed wall keeps
-    // its closing edge, an unfolded piece and a derived `_R` get their mirrored walls.
-    // G3 asks how much of the walls the written line follows; a PDF wall chain runs on past the
-    // piece, so each is cut to the stretch this piece uses (walls-used.ts).
-    const rawWalls = this.wallsOf ?? (() => undefined);
+    // its closing edge, an unfolded piece and a derived `_R` get their mirrored walls. G3 asks how
+    // much of the walls the written line follows; a PDF wall chain runs on past the piece, so each
+    // is cut to the stretch this piece uses (walls-used.ts). A DXF's walls are its own blocks.
+    const rawWalls = this.wallsOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
-    const wallsOf = (identity: string, rank: number): PtMm[][] | undefined => {
-      const w = rawWalls(identity, rank);
-      const spec = specOf.get(identity);
-      const size = spec?.sizes.find((z) => z.rank === rank) ?? spec?.sizes[0];
-      if (!w || !spec || !size || this.fast) return w;
-      return wallsUsedBy(w, spec.allowance.meaning === 'seam' ? size.seam : size.cut);
-    };
+    const walls = rawWalls
+      ? (identity: string, rank: number): PtMm[][] | undefined => {
+          const w = rawWalls(identity, rank);
+          const spec = specOf.get(identity);
+          const size = spec?.sizes.find((z) => z.rank === rank) ?? spec?.sizes[0];
+          if (!w || !spec || !size || this.fast) return w;
+          return wallsUsedBy(w, spec.allowance.meaning === 'seam' ? size.seam : size.cut);
+        }
+      : null;
     const sizeTokens = new Set(input.sizes.map((s) => s.token.toLowerCase()));
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
-    // FabricAssignment.byPurpose is keyed by the scope key (purpose literal or BOM lineKey, F13).
-    const assigned = (scope: DraftScopeTarget, p: PieceSpec) =>
-      input.assignment.byPurpose[scope.scopeKey]?.includes(p.seed) ?? pieceInScope(p, scope);
     let k = 0;
-    for (const scope of input.scopes) {
-      ctx.progress(k++, input.scopes.length, scope.label);
-      // The piece is cut from this scope: say so on the spec, which the writer and the manifest
-      // read (`fabrics`); F7's scope specs replace this when they land.
-      const pieces = sem.pieces
-        .filter((p) => assigned(scope, p))
-        .map((p) =>
-          pieceInScope(p, scope) ? p : { ...p, fabrics: [...p.fabrics, scope.scopeKey] },
-        );
-      if (!pieces.length) continue;
+    for (const sp of plan.scopes) {
+      ctx.checkCancel();
+      const scope = sp.target;
+      ctx.progress(k++, plan.scopes.length, scope.label);
       const res = await writeAndGate(
         {
           techCardId: 0,
           scope,
-          pieces,
+          pieces: sp.specs,
           sizes: input.sizes,
           source,
           generator: input.generator,
@@ -728,14 +752,14 @@ export class Session {
         {
           rules: cardRules,
           sizeTokens,
-          wallsOf,
+          wallsOf: walls ? (id, rank) => walls(sp.sourceOf[id] ?? id, rank) : undefined,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );
       const base = (this.files[0]?.name ?? 'pattern').replace(/\.[^.]+$/, '');
       scopes.push({
         target: scope,
-        filename: `${base}-${scope.label.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}.dxf`,
+        filename: `${base}-${purposeWord(scope)}.dxf`,
         name: '',
         dxfText: res.dxfText,
         manifest: res.detail.manifest,
@@ -743,7 +767,7 @@ export class Session {
       });
       gate[scope.scopeKey] = res.report;
     }
-    ctx.progress(input.scopes.length, input.scopes.length);
+    ctx.progress(plan.scopes.length, plan.scopes.length);
     return { scopes, gate };
   }
 }

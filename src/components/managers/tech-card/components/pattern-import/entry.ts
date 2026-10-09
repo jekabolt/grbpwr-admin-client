@@ -28,7 +28,18 @@ export function buildCardContext(args: {
     binding: { fabricPurpose: string; bomLineKey: string };
     sections: string[];
   }[];
-  pieces: { lineKey?: string; name?: string; cutSymmetry?: string }[];
+  pieces: {
+    lineKey?: string;
+    name?: string;
+    cutSymmetry?: string;
+    piecesPerGarment?: number;
+    fused?: boolean;
+    fusingMode?: string;
+  }[];
+  /** Live block → piece links, scope key already resolved (bom-purpose `aliasScopeKey`). */
+  aliases?: { scopeKey: string; blockName?: string; pieceLineKey?: string }[];
+  /** Live pattern rows, scope key already resolved (`fabricScopeKey`). */
+  patterns?: { scopeKey: string; filename?: string; url?: string }[];
   styleLabel: string;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
@@ -51,6 +62,7 @@ export function buildCardContext(args: {
     isInterlining: s.byPurpose
       ? s.key === INTERLINING_PURPOSE
       : s.sections.includes(INTERLINING_SECTION),
+    sections: [...new Set(s.sections)],
   }));
   return {
     techCardId: args.techCardId,
@@ -58,7 +70,24 @@ export function buildCardContext(args: {
     scopes,
     existingPieces: args.pieces
       .filter((p) => p.lineKey && p.name)
-      .map((p) => ({ lineKey: p.lineKey!, name: p.name!, cutSymmetry: p.cutSymmetry ?? '' })),
+      .map((p) => ({
+        lineKey: p.lineKey!,
+        name: p.name!,
+        cutSymmetry: p.cutSymmetry ?? '',
+        piecesPerGarment: p.piecesPerGarment ?? 1,
+        fused: !!p.fused,
+        fusingMode: p.fusingMode ?? '',
+      })),
+    existingAliases: (args.aliases ?? []).flatMap((a) =>
+      a.scopeKey && a.blockName && a.pieceLineKey
+        ? [{ scopeKey: a.scopeKey, blockName: a.blockName, pieceLineKey: a.pieceLineKey }]
+        : [],
+    ),
+    existingPatterns: (args.patterns ?? []).flatMap((p) =>
+      p.scopeKey && p.filename
+        ? [{ scopeKey: p.scopeKey, filename: p.filename, url: p.url ?? '' }]
+        : [],
+    ),
     styleLabel: args.styleLabel,
   };
 }

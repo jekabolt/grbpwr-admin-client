@@ -805,6 +805,8 @@ export type FabricProposal = {
   seeds: SeedId[];
   evidence: FabricEvidence[];
   confidence: number;
+  /** The card scope this fabric goes to (F7); null = the BOM has none (refused, or `fused`). */
+  scopeKey?: string | null;
 };
 
 /** A card scope the draft writes a DXF into. Mirrors FabricScope from bom-purpose.ts by key only. */
@@ -816,6 +818,11 @@ export type DraftScopeTarget = {
   label: string;
   /** True when the scope is interlining present in BOM (owner decision 14). */
   isInterlining: boolean;
+  /**
+   * BOM sections of the scope's lines (F7): an UNSORTED line (no purpose, scope = its lineKey) is
+   * told apart by its section — lining, interlining, fabric — when the sheet's fabrics are mapped.
+   */
+  sections?: string[];
 };
 
 export type FabricAssignment = {
@@ -824,6 +831,12 @@ export type FabricAssignment = {
   /** Interlining exists in BOM → its own DXF; else these seeds get `fused`. */
   interliningInBom: boolean;
   proposals: FabricProposal[];
+  /**
+   * Fabrics the sheet names that have no live BOM scope (F7): no DXF is written for them and their
+   * seeds are listed here with the reason, never dropped silently. Interlining without a BOM line is
+   * NOT refused — its seeds get `fused` (decision 14).
+   */
+  refused?: { label: string; purpose: FabricPurposeKey; seeds: SeedId[]; reason: string }[];
 };
 
 export type ProposeFabricsFn = (
@@ -841,6 +854,11 @@ export type DraftScope = {
   manifest: ConversionManifest;
   /** Identities written into THIS file. */
   identities: PieceKey[];
+  /**
+   * F7: the very same file (same content fingerprint in its name) is already a pattern row of this
+   * scope — no upload, no new row; re-applying an import changes nothing.
+   */
+  alreadyOnCard?: { url: string; filename: string } | null;
 };
 
 export type DraftPiece = {
@@ -854,6 +872,14 @@ export type DraftPiece = {
   fused: boolean;
   /** Reuse of an existing card piece instead of creating one. */
   existingLineKey: string | null;
+  /** F7: one contour for every size (`PieceSpec.ungraded`). */
+  ungraded?: boolean;
+  /** F7: `TECH_CARD_PIECE_FUSING_MODE_*` — FULL when the whole piece is cut from interlining. */
+  fusingMode?: string;
+  /** F7: why this existing piece was chosen ('alias' = already bound to this block; 'name'). */
+  basis?: 'alias' | 'name' | 'new';
+  /** F7: the scope keys this piece is cut in (one alias set per scope). */
+  scopeKeys?: string[];
 };
 
 export type DraftAlias = {
@@ -870,6 +896,10 @@ export type DraftPieceUpdate = {
   cutSymmetry: string;
   /** Shown to the operator: why an explicit MIRRORED/FOLD became IDENTICAL. */
   reason: string;
+  /** F7: point writes beside the symmetry — only fields the import changes. */
+  piecesPerGarment?: number;
+  fused?: boolean;
+  fusingMode?: string;
 };
 
 /** Everything the wizard hands the card — applied in ONE commit or not at all. */
@@ -883,9 +913,17 @@ export type CardDraft = {
   downloads: { filename: string; dxfText: string }[];
 };
 
+export type ApplyUploaded = { scopeKey: string; url: string; filename: string; sizeBytes: number };
+
+/**
+ * F7: a failure writes NOTHING to the form; `uploaded` then lists the files that did land before it
+ * (orphans in object storage — acceptable, named so the operator knows). `reused` = scopes whose
+ * identical file was already on the card; `writes` = form writes made (0 on a re-apply); `save` = the
+ * card save's answer (autosave `flush`), when the host passed one.
+ */
 export type ApplyResult =
-  | { ok: true; uploaded: { scopeKey: string; url: string; filename: string; sizeBytes: number }[] }
-  | { ok: false; failedScope: string; message: string; uploaded: [] };
+  | { ok: true; uploaded: ApplyUploaded[]; reused?: string[]; writes?: number; save?: string }
+  | { ok: false; failedScope: string; message: string; uploaded: ApplyUploaded[] };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 9. Writer and manifest (F6) — the format the card trusts
@@ -1246,7 +1284,14 @@ export type StageIO = {
     in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families'>;
     out: SemanticsOutput;
   };
-  fabrics: { in: { bom: DraftScopeTarget[] }; out: FabricAssignment };
+  fabrics: {
+    in: {
+      bom: DraftScopeTarget[];
+      /** F7: the AI's `fabrics` per seed (F10 suggestions) — used where the sheet itself is silent. */
+      aiHints?: { seed: SeedId; fabrics: FabricPurposeKey[]; confidence: number }[];
+    };
+    out: FabricAssignment;
+  };
   'render-som': {
     in: { seeds: SeedId[]; dpi: number };
     out: {

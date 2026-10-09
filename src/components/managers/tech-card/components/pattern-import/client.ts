@@ -50,7 +50,18 @@ export type CardContext = {
   /** One target per fabric scope of the BOM (bindingForScope), main fabric first. */
   scopes: DraftScopeTarget[];
   /** Existing cut pieces — the AI may not bind to one by name alone (Codex C10). */
-  existingPieces: { lineKey: string; name: string; cutSymmetry: string }[];
+  existingPieces: {
+    lineKey: string;
+    name: string;
+    cutSymmetry: string;
+    piecesPerGarment?: number;
+    fused?: boolean;
+    fusingMode?: string;
+  }[];
+  /** Block → piece links the card already has, by scope key (F7: re-apply binds to the same piece). */
+  existingAliases?: { scopeKey: string; blockName: string; pieceLineKey: string }[];
+  /** Pattern rows the card already has, by scope key (F7: the same file is not uploaded twice). */
+  existingPatterns?: { scopeKey: string; filename: string; url: string }[];
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
 };
