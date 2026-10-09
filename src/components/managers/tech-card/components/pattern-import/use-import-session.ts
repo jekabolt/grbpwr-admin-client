@@ -23,6 +23,8 @@ import type {
   WizardEvent,
   WizardStep,
 } from 'lib/pattern-import/types';
+import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
+import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import type {
   ApplyDraftFn,
@@ -485,9 +487,7 @@ export function useImportSession(deps: {
           patch({
             busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' },
           });
-          const names = mergeNames(
-            await namer(som, { card, threshold: PATIMPORT.aiAutoAcceptInitial }),
-          );
+          const names = mergeNames(await namer(som, { card, threshold: AI_AUTO_ACCEPT_T }));
           patch({ busy: null, names });
           const overrides = overridesFromNames(names, iRef.current.overrides);
           patchInputs({ overrides });
@@ -586,8 +586,14 @@ export function useImportSession(deps: {
         // The identities the writer will spell (both hands of a declared pair), checked with the
         // gate's own rule — a declared `_L`/`_R` is exempt from "ends in a size token".
         const isSizeToken = sizeTokenTest(sizeTokens);
+        const edited = new Set(inputs.editedNames);
         for (const n of s.names) {
           if (!exportedSeed(n.seed)) continue;
+          // The dictionary binds the MODEL (D2: SL not SLV, the D2 codes; F9 enforces the same list
+          // server-side); a code the operator typed is theirs — base codes are suggestions, not a
+          // closed list.
+          const origin = nameOriginOf(n, edited.has(n.seed));
+          const known = origin === 'ai' || origin === 'ai-auto' ? isKnownCode : undefined;
           const hand =
             inputs.overrides[n.seed]?.pairHand !== undefined
               ? inputs.overrides[n.seed]!.pairHand!
@@ -596,6 +602,7 @@ export function useImportSession(deps: {
             const why = identityProblem(w.identity, {
               isSizeToken,
               pair: { hand: w.pairHand, of: w.pairOf },
+              isKnownCode: known,
             });
             if (why) return `${w.identity || 'a code'}: ${why}`;
           }
@@ -706,7 +713,9 @@ export function nameOriginOf(
   typed: boolean,
 ): NonNullable<PieceOverride['nameOrigin']> {
   if (typed) return 'operator';
-  if (n.evidence.some((e) => e.kind === 'text-synonym')) return 'text';
+  // 'text' = the deterministic reader named it, no model involved. An AI answer the sheet text
+  // agrees with is still the AI's: auto-accepted it stays flagged 'ai-auto' (owner decision 11).
+  if (n.source === 'text') return 'text';
   return n.autoAccepted ? 'ai-auto' : 'ai';
 }
 

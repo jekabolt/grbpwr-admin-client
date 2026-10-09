@@ -29,6 +29,7 @@ import {
   identityProblem,
   sizeTokenTest,
 } from 'lib/pattern-import/manifest';
+import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
@@ -220,6 +221,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                         hand={pair}
                         blocks={specs.map((s) => s.identity).join(' + ')}
                         sizeTokens={api.sizeTokens}
+                        aiName={!!n && n.source === 'ai' && !inputs.editedNames.includes(seed)}
                         onCommit={(v) => setName(seed, splitCode(v))}
                       />
                     </td>
@@ -511,12 +513,15 @@ function CodeCell({
   hand,
   blocks,
   sizeTokens,
+  aiName,
   onCommit,
 }: {
   value: string;
   hand: 'L' | 'R' | null;
   blocks: string;
   sizeTokens: ReadonlySet<string>;
+  /** The model's code, untouched: it must be a dictionary code (D2). A typed code is the operator's. */
+  aiName: boolean;
   onCommit: (v: string) => void;
 }) {
   const [text, setText] = useState(value);
@@ -532,7 +537,11 @@ function CodeCell({
   const why = text.trim()
     ? identitiesOf(code, mods, hand)
         .map((w) =>
-          identityProblem(w.identity, { isSizeToken, pair: { hand: w.pairHand, of: w.pairOf } }),
+          identityProblem(w.identity, {
+            isSizeToken,
+            pair: { hand: w.pairHand, of: w.pairOf },
+            isKnownCode: aiName && text === value ? isKnownCode : undefined,
+          }),
         )
         .find((x) => x) ?? null
     : 'empty code';
@@ -580,7 +589,7 @@ function NameSource({
   onConfirm: () => void;
 }) {
   if (!n) return <span className='text-labelColor'>—</span>;
-  const text = n.evidence.some((e) => e.kind === 'text-synonym');
+  const text = n.source === 'text';
   if (text && !confirmed) return <Pill tone='mut'>sheet text</Pill>;
   if (confirmed) return <Pill tone='ink'>you</Pill>;
   if (n.autoAccepted)

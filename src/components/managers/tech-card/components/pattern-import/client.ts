@@ -53,6 +53,9 @@ export type CardContext = {
 /**
  * Main-thread AI naming (F10): render-som output → upload → SuggestPatternPieces → combineNames.
  * Returns one decision per seed; auto-accepted rows come back flagged, never hidden.
+ *
+ * Real: `createAiNamer()` (ai-namer.ts → lib/pattern-import/ai/name.ts `suggestNames`), used with
+ * the real worker. Stub: `createStubNamer` (stub-client.ts), fixture names, for the stub client/dev.
  */
 export type NameSuggester = (
   input: StageIO['render-som']['out'],

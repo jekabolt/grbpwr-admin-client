@@ -24,6 +24,7 @@
     "autosplit": "node scripts/autosplit-probe.mjs",
     "patimport:pdf": "node scripts/pattern-import/pdf.mjs all",
     "patimport:f6b": "node scripts/pattern-import/f6b.mjs",
+    "patimport:ai": "node scripts/pattern-import/ai.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:ask": "node scripts/flat-ask-probe.mjs",
     "flat:pictures": "node scripts/flat-input-pictures-probe.mjs",
