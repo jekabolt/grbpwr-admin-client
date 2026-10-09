@@ -55,6 +55,7 @@ import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './
 import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
+import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
 import { TechCardFormData } from './schema';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -74,6 +75,11 @@ const PieceMatchModal = lazy(() =>
 // результат тем же листом, что и просмотр.
 const MergeSizesModal = lazy(() =>
   import('./nesting/merge-sizes-modal').then((m) => ({ default: m.MergeSizesModal })),
+);
+// Импорт выкройки любого формата (F13) — свой ленивый чанк: мастер с воркером и фикстурой не
+// грузится, пока его не открыли.
+const ImportWizard = lazy(() =>
+  import('./pattern-import/import-wizard').then((m) => ({ default: m.ImportWizard })),
 );
 // Замер площадей деталей — тот же ленивый чанк по той же причине: он тянет разбор геометрии и
 // офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
@@ -258,6 +264,12 @@ export function PatternsField({
   const { isSubmitting } = useFormState({ control });
   // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
   const season = (useWatch({ control, name: 'season' }) ?? '') as string;
+  // Детали кроя карточки — мастеру импорта, чтобы ИИ не привязал имя к чужой детали (Codex C10).
+  const cardPieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
+    lineKey?: string;
+    name?: string;
+    cutSymmetry?: string;
+  }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
   const sizeById = useSizeNames();
@@ -292,6 +304,8 @@ export function PatternsField({
   // Открыта склейка по-размерных выгрузок. Готовый файл она отдаёт в ту же модалку названия и
   // материала, что и обычная загрузка: склейка отвечает за ЧЕРТЁЖ, а не за то, куда он ляжет.
   const [merging, setMerging] = useState(false);
+  // Открыт мастер «import pattern» (F13).
+  const [importing, setImporting] = useState(false);
   // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
   // this state and split into the two viewers at the bottom.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
@@ -1498,6 +1512,20 @@ export function PatternsField({
               >
                 merge sizes
               </Button>
+              {/* Импорт выкройки ЛЮБОГО формата — третий вход рядом с загрузкой и склейкой: не
+                  «положить готовый DXF», а «сделать его» из PDF, чужого DXF, PLT, SVG или скана. */}
+              {PATTERN_IMPORT_ENABLED && !!techCardId && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
+                  onClick={() => setImporting(true)}
+                  title='convert a pattern in any format (PDF, foreign DXF, PLT, SVG, scan) into a DXF with named pieces and the card sizes'
+                >
+                  import pattern
+                </Button>
+              )}
               <PatternUploadButton
                 label='+ DXF'
                 dxfOnly
@@ -1634,6 +1662,29 @@ export function PatternsField({
         and the pocketing are two different BOM lines). the colourway does not affect the file — the
         pattern pieces are shared — but the article and its width are substituted per colourway.
       </Text>
+
+      {importing && techCardId && (
+        <Suspense fallback={null}>
+          <ImportWizard
+            card={buildCardContext({
+              techCardId,
+              orderedSizeIds: orderSizes(sizeIds),
+              sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+              rawSizeName: (id) => sizeById.get(id),
+              scopes: scopes.map((sc) => ({
+                key: sc.key,
+                byPurpose: sc.byPurpose,
+                label: scopeLabel(sc),
+                binding: bindingForScope(sc),
+                sections: sc.lines.map((l) => l.section),
+              })),
+              pieces: cardPieces,
+              styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+            })}
+            onClose={() => setImporting(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
           материала — грузится он как любая другая выкройка, потому что после склейки он и есть
