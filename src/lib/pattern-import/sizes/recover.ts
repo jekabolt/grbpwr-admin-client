@@ -872,6 +872,47 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       nUnits,
       n,
     );
+    {
+      // where all n sizes stand side by side in distinct looks/colours, the lane order IS the size
+      // order (up to direction): one permutation dominating those cross-sections overrides the
+      // seriation coordinates (leonie: 358 of 364 full sections read grey·purple·yellow·green·pink·blue)
+      const perm = new Map<string, number>();
+      let fullDistinct = 0;
+      for (const g of groups) {
+        const us = g.group.units;
+        if (us.length !== n || us.some((u) => u < 0) || new Set(us).size !== n) continue;
+        fullDistinct++;
+        const seq = us[0] < us[us.length - 1] ? us : us.slice().reverse();
+        const k = seq.join(',');
+        perm.set(k, (perm.get(k) ?? 0) + 1);
+      }
+      const top = [...perm].sort((a, b) => b[1] - a[1]);
+      diag.permutations = {
+        fullDistinct,
+        top: top.slice(0, 4).map(([k, v]) => `${k}:${v}`),
+      };
+      if (!legendId && top.length && top[0][1] >= 30 && top[0][1] >= 0.6 * fullDistinct) {
+        const order = top[0][0].split(',').map(Number);
+        const supp = ser.support.slice().sort((a, b) => a - b);
+        const med = supp[supp.length >> 1] ?? 0;
+        const outside = ser.support
+          .map((sp, u) => ({ u, sp }))
+          .filter((e) => !order.includes(e.u) && e.sp >= 0.1 * med);
+        if (!outside.length) {
+          const p0 = ser.p;
+          // a minor look outside the permutation sits where its seriation coordinate is nearest
+          ser.p = p0.map((x, u) => {
+            if (order.includes(u)) return order.indexOf(u);
+            if (!Number.isFinite(x)) return x;
+            let bk = 0;
+            for (let k = 1; k < order.length; k++)
+              if (Math.abs(p0[order[k]] - x) < Math.abs(p0[order[bk]] - x)) bk = k;
+            return bk;
+          });
+          diag.permutationOrder = order.map((u) => unitNames[u]);
+        }
+      }
+    }
     // inside vote: the chain a section was cast from, closed by its chord, encloses the piece on
     // its left when its signed area is positive. Big closures (most of a piece outline) dominate;
     // local curvature is not used — princess seams (viola) curve both ways.
@@ -952,6 +993,13 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     const pure = (u: number) => u >= 0 && unitRank[u] >= 0 && unitPurity[u] >= 0.8;
     for (const g of groups) {
       const r = g.group.units.map((u) => (pure(u) ? unitRank[u] : -1));
+      if (encoding === 'color') {
+        // a lane whose colour breaks the order of the others is that look borrowed by another
+        // size (leonie: 38 drawn in 44's purple on three tiles): keep the longest monotone run of
+        // known ranks, the rest are filled from their neighbours like unknown lanes
+        const keep = longestMonotone(r);
+        for (let k = 0; k < r.length; k++) if (r[k] >= 0 && !keep.has(k)) r[k] = -1;
+      }
       // direction of rank along the lanes, from the known lanes
       let dir = 0;
       for (let a = 0; a < r.length; a++)
@@ -978,7 +1026,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const u = unit[i];
       if (identityUnits && u >= 0 && unitRank[u] >= 0)
         rankOf.set(i, unitRank[u]); // identity wins
-      else if (pure(u) && sizeCand[i]) vote(i, unitRank[u], 4);
+      // colour is a hint, not identity: one vote, the cross-sections outvote it where they disagree
+      else if (pure(u) && sizeCand[i]) vote(i, unitRank[u], encoding === 'color' ? 1 : 4);
     });
     settle(0.45);
     for (let u = 0; u < nUnits; u++)
@@ -1294,6 +1343,18 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const sectioned = new Set<number>();
   for (const x of xsB)
     if (x.lanes.length >= 2) for (const l of x.lanes) for (const c of l) sectioned.add(c);
+  // which unranked size candidates actually run beside graded lines (a ranked neighbour lane), and
+  // the widest section each sits in: drawn letters, grain arrows and notch stacks drawn in the size
+  // pen bundle only with themselves
+  const besideRanked = new Set<number>();
+  const widest = new Map<number, number>();
+  for (const x of xsB) {
+    x.lanes.forEach((ln, k) => {
+      for (const c of ln) widest.set(c, Math.max(widest.get(c) ?? 0, x.lanes.length));
+      const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean).flat();
+      if (nb.some((c) => rankOf.has(c))) for (const c of ln) besideRanked.add(c);
+    });
+  }
   splitShared(chains, rankOf, sharedFrom, landings, sectioned);
   diag.bridges = joined.size;
   diag.landings = landings.length;
@@ -1323,7 +1384,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     if (L < 0.9 * c.lengthMm) return false;
     const t = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
     let steep = false;
-    for (const p of [a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]) {
+    // ends, middle, and every mm between: a graded notch stack crosses the size lines it marks
+    const probes = [a, b];
+    for (let t = 0; t <= L; t += 1) probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
+    for (const p of probes) {
       touchGrid.near(p, 1, (j, si) => {
         if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j))) return;
         const q0 = chains[j].pts[si];
@@ -1370,7 +1434,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (!sectioned.has(i)) {
         if (touchesOthers(i)) common.push(i);
         else internal.push(i);
-      } else orphans.push(i);
+      } else if (
+        besideRanked.has(i) ||
+        ((widest.get(i) ?? 0) >= Math.max(3, n - 1) && c.lengthMm >= 15)
+      )
+        orphans.push(i);
+      else internal.push(i);
       return;
     }
     const st = styles.get(c.style);
@@ -1717,6 +1786,28 @@ function labelRun(
         )
           best = run.map(([l]) => l);
       }
+  }
+  return new Set(best);
+}
+
+/** Lane indices of the longest strictly monotone (either direction) run of known ranks (≥ 0). */
+function longestMonotone(r: number[]): Set<number> {
+  const idx = r.map((v, k) => ({ v, k })).filter((e) => e.v >= 0);
+  let best: number[] = [];
+  for (const sgn of [1, -1]) {
+    const L = idx.map(() => 1);
+    const prev = idx.map(() => -1);
+    for (let a = 0; a < idx.length; a++)
+      for (let b = 0; b < a; b++)
+        if (sgn * (idx[a].v - idx[b].v) > 0 && L[b] + 1 > L[a]) {
+          L[a] = L[b] + 1;
+          prev[a] = b;
+        }
+    let end = -1;
+    for (let a = 0; a < idx.length; a++) if (end < 0 || L[a] > L[end]) end = a;
+    const seq: number[] = [];
+    for (let a = end; a >= 0; a = prev[a]) seq.push(idx[a].k);
+    if (seq.length > best.length) best = seq;
   }
   return new Set(best);
 }

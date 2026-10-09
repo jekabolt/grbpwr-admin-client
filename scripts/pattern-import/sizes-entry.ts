@@ -159,9 +159,14 @@ async function zoom(id: string, args: string[]) {
   const box = process.env.ABS
     ? { minX: x0, minY: y0, maxX: x0 + w, maxY: y0 + h }
     : { minX: b.minX + x0, minY: b.maxY - y0 - h, maxX: b.minX + x0 + w, maxY: b.maxY - y0 };
+  const rgbHex = (st: { strokeRgb?: number[] | null; fillRgb?: number[] | null }) => {
+    const c = st.strokeRgb ?? st.fillRgb;
+    return c ? '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('') : '#000';
+  };
   const strokes = sheet.paths.map((p) => ({
     pts: p.pts,
-    color: PALETTE[p.style % PALETTE.length],
+    // RGB=1: the drawing's own colours (leonie) instead of a palette per style
+    color: process.env.RGB ? rgbHex(sheet.styles[p.style] as never) : PALETTE[p.style % PALETTE.length],
     width: 1,
   }));
   const labels = sheet.texts.map((t) => ({ at: t.anchor, text: t.text, color: '#000', size: 10 }));
