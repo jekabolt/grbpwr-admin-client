@@ -27,11 +27,13 @@ import type {
 
 import { BUNDLE, crossSections, splitSection, type CrossSection } from '../chains/bundles';
 import { clusterLooks, dashCluster } from '../chains/classify';
+import { normDash } from '../chains/link';
 import { dist, endTangent, PtGrid, resample, SegGrid, segNearest } from '../chains/geom';
 import { cosine, describeSig, type Signature } from '../chains/motif';
 import { type Group } from './align';
 import { ranksFromCoords, seriate } from './seriate';
 import { bridgeSameRank, landEnds, type Landing } from './land';
+import { legendIdentity, type LegendIdentity } from './legend-id';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
 
 export type RecoverInput = {
@@ -193,7 +195,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const hits0 = tokenHits(allTexts, chains, cand, 6);
   // labels ALONG long lines (r4454) vs labels next to short sample strokes (a legend: viola p29)
   const onLine = hits0.filter((h) => chains[h.chain].lengthMm >= 150);
-  const legendHits0 = legendEndHits(allTexts, chains, cand);
+  const legendHits0 = alignedLegend(legendEndHits(allTexts, chains, cand), chains);
   const hitRun = labelRun(onLine, 2);
   let hits = onLine.filter((h) => hitRun.has(h.label));
   {
@@ -203,7 +205,29 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     );
     if (cells.size < 3) hits = [];
   }
-  const legendRun = labelRun(legendHits0, 1);
+  const texts = [...allTexts.map((t) => t.text), ...(inp.extraTexts ?? [])];
+  const runs: TextRun[] = [...runsInText(texts), ...runsInTokens(allTexts.map((t) => t.text))];
+  // the legend's labels: a run among the sample labels — or, when some samples are not chains
+  // (reef draws S and 3XL as loose marks), the size run the file states that holds them all
+  let legendRun = labelRun(legendHits0, 1, 2);
+  {
+    // compare by value: the key spells "2XL", the run "XS to 5XL" expands to "XXL"
+    const spelling = new Map<string, string>();
+    for (const h of legendHits0)
+      spelling.set(`${parseSizeToken(h.label, true)?.kind}${h.value}`, h.label);
+    const keyOf = (l: string) => {
+      const t = parseSizeToken(l, true);
+      return t ? `${t.kind}${t.value}` : l;
+    };
+    const stated = runs
+      .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
+      .filter((r) => {
+        const inRun = r.labels.filter((l) => spelling.has(keyOf(l))).length;
+        return inRun >= 3 && inRun > legendRun.size && inRun >= spelling.size - 2;
+      })
+      .sort((a, b) => b.labels.length - a.labels.length)[0];
+    if (stated) legendRun = new Set(stated.labels.map((l) => spelling.get(keyOf(l)) ?? l));
+  }
   const legendHits = legendHits0.filter((h) => legendRun.has(h.label));
   const hitLabels = new Map<string, number>();
   for (const h of hits) hitLabels.set(h.label, (hitLabels.get(h.label) ?? 0) + 1);
@@ -300,6 +324,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
 
   // size-coded looks (for rhythm / text-label, and to admit an undeclared solid size in declared)
   const sizeLook = new Array(nLooks).fill(false);
+  const notSize = new Set<number>();
   for (let l = 0; l < nLooks; l++)
     sizeLook[l] = lookLen[l] >= 300 && lookBundled[l] / lookLen[l] >= 0.35;
   if (encoding === 'subpath-dash' || encoding === 'separate-dash' || encoding === 'text-label') {
@@ -365,8 +390,148 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     }
     diag.besideDeclared = share;
   }
+  if (encoding === 'subpath-dash' || encoding === 'separate-dash') {
+    // a look that sits right beside ITSELF wherever it is bundled is not a size: grain arrows
+    // (shaft + barbs), quilting / topstitch rows, double fold marks (palto, zhaket: w0.25)
+    const pre = crossSections(
+      chains,
+      chains.map((_, i) => cand[i] && unit[i] >= 0),
+      blockers,
+    ).sections;
+    const selfAdj = new Array(unitNames.length).fill(0);
+    const otherAdj = new Array(unitNames.length).fill(0);
+    const seen = new Array(unitNames.length).fill(0);
+    for (const x of pre) {
+      const u = unit[x.from];
+      if (u < 0) continue;
+      const k = x.lanes.findIndex((ln) => ln.includes(x.from));
+      seen[u]++;
+      const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean);
+      const nu = nb.map((ln) => majorityUnit(ln, unit, chains));
+      if (nu.includes(u)) selfAdj[u]++;
+      if (nu.some((v) => v >= 0 && v !== u)) otherAdj[u]++;
+    }
+    // …and never beside another size look (two sizes drawn alike still meet the others)
+    const keep = unitNames.map(
+      (_, u) => !(seen[u] >= 20 && selfAdj[u] / seen[u] >= 0.8 && otherAdj[u] / seen[u] < 0.1),
+    );
+    diag.selfAdjacency = unitNames.map(
+      (nm, u) =>
+        `${nm}:${(selfAdj[u] / Math.max(1, seen[u])).toFixed(2)}/${(otherAdj[u] / Math.max(1, seen[u])).toFixed(2)}/${seen[u]}`,
+    );
+    if (keep.some((k) => !k)) {
+      diag.selfBundledLooks = unitNames
+        .map((nm, u) => (keep[u] ? '' : `${nm}:${(selfAdj[u] / seen[u]).toFixed(2)}`))
+        .filter(Boolean);
+      const remap = new Map<number, number>();
+      const names: string[] = [];
+      const evs: ClassEvidence[][] = [];
+      unitNames.forEach((nm, u) => {
+        if (!keep[u]) return;
+        remap.set(u, names.length);
+        names.push(nm);
+        evs.push(unitEvidence[u]);
+      });
+      for (let i = 0; i < unit.length; i++)
+        if (unit[i] >= 0) {
+          const v = remap.get(unit[i]);
+          unit[i] = v === undefined ? -1 : v;
+          if (v === undefined) notSize.add(i);
+        }
+      unitNames = names;
+      unitEvidence = evs;
+    }
+  }
+  // ── legend identity: the drawing's own key names the line groups ─────────────────────────────
+  const legendKey = [...legendRun]
+    .map((l) => parseSizeToken(l, true)!)
+    .sort((a, b) => a.value - b.value)
+    .map((t) => t.label);
+  let legendId: LegendIdentity | null = null;
+  const unranked = new Set<number>(); // size lines the key does not name: ranked by neighbours
+  if (
+    (encoding === 'declared-dash' || encoding === 'subpath-dash' || encoding === 'separate-dash') &&
+    legendKey.length >= 3 &&
+    legendHits.length >= 3
+  ) {
+    // only lines that could be size lines: the units found so far, declared dashes, bundled looks
+    const eligible = chains.map(
+      (c, i) =>
+        cand[i] &&
+        !notSize.has(i) &&
+        (unit[i] >= 0 ||
+          !!styles.get(c.style)?.dash?.some((v) => v > 0.01) ||
+          (looks.look[i] >= 0 && sizeLook[looks.look[i]])),
+    );
+    const lid = legendIdentity(
+      chains,
+      sigs,
+      eligible,
+      styles,
+      looks.look,
+      (i) => describeSig(sigs[i]),
+      legendHits,
+      legendKey,
+    );
+    const before = lenOf(
+      chains,
+      chains.map((_, i) => i).filter((i) => cand[i] && unit[i] >= 0),
+    );
+    const got = lid ? lid.label.reduce((a, k, i) => a + (k >= 0 ? chains[i].lengthMm : 0), 0) : 0;
+    const distinct = lid ? lid.matched.filter((m) => m.length).length : 0;
+    diag.legendIdentity = lid
+      ? {
+          matched: lid.matched.map(
+            (m, k) =>
+              `${legendKey[k]}=${m.map((x) => `${x.group}(${(x.lengthMm / 1000).toFixed(1)}m ${x.score})`).join('+') || '∅'}`,
+          ),
+          unmatched: lid.unmatched.map(
+            (u) => `${u.group} ${(u.lengthMm / 1000).toFixed(1)}m best ${u.best} ${u.score}`,
+          ),
+          coverage: +(got / Math.max(1, before)).toFixed(2),
+        }
+      : null;
+    if (lid && distinct >= Math.max(3, Math.ceil(legendKey.length / 2)) && got >= 0.4 * before) {
+      legendId = lid;
+      for (let i = 0; i < chains.length; i++) {
+        if (!cand[i]) continue;
+        if (lid.label[i] >= 0) unit[i] = lid.label[i];
+        else {
+          if (unit[i] >= 0 && !notSize.has(i)) unranked.add(i);
+          unit[i] = -1;
+        }
+      }
+      unitNames = legendKey.slice();
+      unitEvidence = legendKey.map((_, k) => {
+        const ev: ClassEvidence[] = [];
+        const ch = chains.findIndex((_, i) => lid.label[i] === k);
+        const d = ch >= 0 ? styles.get(chains[ch].style)?.dash : null;
+        if (ch >= 0 && d && d.some((v) => v > 0.01))
+          ev.push({ kind: 'declared-dash', dash: normDash(d) });
+        else if (ch >= 0 && sigs[ch]?.motif)
+          ev.push({ kind: 'recovered-motif', motif: sigs[ch].motif! });
+        return ev;
+      });
+      for (const k of lid.absent)
+        ambiguities.push({
+          kind: 'size-empty',
+          message: `the legend's sample for ${legendKey[k]} matches no line on the sheet: ${legendKey[k]} is drawn on another size's line or not at all`,
+          classes: [],
+          chains: [],
+          at: legendHits.find((h) => h.label === legendKey[k])?.text.anchor ?? null,
+        });
+      for (const u of lid.unmatched)
+        ambiguities.push({
+          kind: 'class-split',
+          message: `${(u.lengthMm / 1000).toFixed(1)} m drawn as "${u.group}" match no legend sample (closest ${u.best}, ${u.score}): ranked by their neighbours`,
+          classes: [],
+          chains: [],
+          at: null,
+        });
+    }
+  }
   const nUnits = unitNames.length;
-  if (process.env.F3_DEBUG)
+  if (debugFlag('F3_DEBUG'))
     diag.allLooks = Array.from({ length: nLooks }, (_, l) => l)
       .filter((l) => lookLen[l] > 200)
       .map(
@@ -375,19 +540,43 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       );
 
   // ── cross-sections over size candidates; every other line blocks ────────────────────────────
-  const sizeCand = chains.map((_, i) => cand[i] && unit[i] >= 0);
+  const sizeCand = chains.map((_, i) => cand[i] && (unit[i] >= 0 || unranked.has(i)));
   if (encoding === 'text-label')
     for (let i = 0; i < chains.length; i++)
-      if (cand[i] && looks.look[i] >= 0 && sizeLook[looks.look[i]]) sizeCand[i] = true;
-  const xsB = crossSections(chains, sizeCand, blockers).sections;
+      if (cand[i] && looks.look[i] >= 0 && sizeLook[looks.look[i]] && !notSize.has(i))
+        sizeCand[i] = true;
+  // lane spacing: plus-size runs (reef XS–5XL) grade 10–25 mm per size on long seams; a fixed
+  // 12 mm reach leaves those lines alone and they read as shared. Measure the spacing between
+  // neighbouring lanes of different identity and reach 1.5× its upper quartile (12…30 mm).
+  let sepMm = BUNDLE.maxSepMm;
+  {
+    const wide = crossSections(chains, sizeCand, blockers, 40).sections;
+    const gaps: number[] = [];
+    for (const x of wide)
+      for (let k = 1; k < x.lanes.length; k++) {
+        const a = majorityUnit(x.lanes[k - 1], unit, chains);
+        const b = majorityUnit(x.lanes[k], unit, chains);
+        if (a >= 0 && b >= 0 && a !== b) gaps.push(x.offsets[k] - x.offsets[k - 1]);
+      }
+    gaps.sort((a, b) => a - b);
+    if (gaps.length >= 50) {
+      const q75 = gaps[Math.floor(0.75 * (gaps.length - 1))];
+      sepMm = Math.min(30, Math.max(BUNDLE.maxSepMm, 1.5 * q75));
+    }
+    diag.laneSpacing = {
+      n: gaps.length,
+      median: gaps.length ? +gaps[gaps.length >> 1].toFixed(1) : null,
+      q75: gaps.length ? +gaps[Math.floor(0.75 * (gaps.length - 1))].toFixed(1) : null,
+      reachMm: +sepMm.toFixed(1),
+    };
+  }
+  const xsB = crossSections(chains, sizeCand, blockers, sepMm).sections;
   const laneUnit = (lane: number[]) => majorityUnit(lane, unit, chains);
   const laneHist = new Map<number, number>();
   for (const x of xsB) laneHist.set(x.lanes.length, (laneHist.get(x.lanes.length) ?? 0) + 1);
   diag.sectionLanes = Object.fromEntries([...laneHist].sort((a, b) => a[0] - b[0]));
 
   // ── size count n ────────────────────────────────────────────────────────────────────────────
-  const texts = [...allTexts.map((t) => t.text), ...(inp.extraTexts ?? [])];
-  const runs: TextRun[] = [...runsInText(texts), ...runsInTokens(allTexts.map((t) => t.text))];
   const coverage = (nn: number) => {
     let cov = 0;
     for (const x of xsB) {
@@ -474,6 +663,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         });
     }
   }
+  if (legendId && n !== legendKey.length) {
+    nWhy += ` → ${legendKey.length} (the legend names ${legendKey.join(' ')})`;
+    n = legendKey.length;
+  }
   diag.n = { n, why: nWhy };
   {
     const said = new Set(
@@ -531,10 +724,22 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   }
   let labels: (string | null)[] = new Array(n).fill(null);
   let labelEvidence: ClassEvidence[][] = Array.from({ length: n }, () => []);
+  if (legendId) {
+    labels = legendKey.slice();
+    labels.forEach((l, r) =>
+      labelEvidence[r].push({
+        kind: 'text-label',
+        text: `legend ${l}`,
+        distanceMm: medianDist(legendHits, l!),
+      }),
+    );
+  }
   // votes[chain] = weight per rank
   const votes = new Map<number, number[]>();
+  // sizes the legend shows but the sheet does not draw apart (viola 34 on 36's line) take no votes
+  const noVote = new Set(legendId?.absent ?? []);
   const vote = (c: number, r: number, w: number) => {
-    if (r < 0 || r >= n) return;
+    if (r < 0 || r >= n || noVote.has(r)) return;
     let v = votes.get(c);
     if (!v) {
       v = new Array(n).fill(0);
@@ -696,6 +901,47 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       nUnits,
       n,
     );
+    {
+      // where all n sizes stand side by side in distinct looks/colours, the lane order IS the size
+      // order (up to direction): one permutation dominating those cross-sections overrides the
+      // seriation coordinates (leonie: 358 of 364 full sections read grey·purple·yellow·green·pink·blue)
+      const perm = new Map<string, number>();
+      let fullDistinct = 0;
+      for (const g of groups) {
+        const us = g.group.units;
+        if (us.length !== n || us.some((u) => u < 0) || new Set(us).size !== n) continue;
+        fullDistinct++;
+        const seq = us[0] < us[us.length - 1] ? us : us.slice().reverse();
+        const k = seq.join(',');
+        perm.set(k, (perm.get(k) ?? 0) + 1);
+      }
+      const top = [...perm].sort((a, b) => b[1] - a[1]);
+      diag.permutations = {
+        fullDistinct,
+        top: top.slice(0, 4).map(([k, v]) => `${k}:${v}`),
+      };
+      if (!legendId && top.length && top[0][1] >= 30 && top[0][1] >= 0.6 * fullDistinct) {
+        const order = top[0][0].split(',').map(Number);
+        const supp = ser.support.slice().sort((a, b) => a - b);
+        const med = supp[supp.length >> 1] ?? 0;
+        const outside = ser.support
+          .map((sp, u) => ({ u, sp }))
+          .filter((e) => !order.includes(e.u) && e.sp >= 0.1 * med);
+        if (!outside.length) {
+          const p0 = ser.p;
+          // a minor look outside the permutation sits where its seriation coordinate is nearest
+          ser.p = p0.map((x, u) => {
+            if (order.includes(u)) return order.indexOf(u);
+            if (!Number.isFinite(x)) return x;
+            let bk = 0;
+            for (let k = 1; k < order.length; k++)
+              if (Math.abs(p0[order[k]] - x) < Math.abs(p0[order[bk]] - x)) bk = k;
+            return bk;
+          });
+          diag.permutationOrder = order.map((u) => unitNames[u]);
+        }
+      }
+    }
     // inside vote: the chain a section was cast from, closed by its chord, encloses the piece on
     // its left when its signed area is positive. Big closures (most of a piece outline) dominate;
     // local curvature is not used — princess seams (viola) curve both ways.
@@ -749,9 +995,13 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         chains: [],
         at: null,
       });
-    const identityUnits = encoding === 'declared-dash' || encoding === 'file-per-size';
+    const identityUnits =
+      encoding === 'declared-dash' || encoding === 'file-per-size' || !!legendId;
     let ur: number[];
-    if ((identityUnits || encoding === 'color') && nUnits === n) {
+    if (legendId) {
+      // the key IS the order: unit k = key index k
+      ur = unitNames.map((_, u) => u);
+    } else if ((identityUnits || encoding === 'color') && nUnits === n) {
       // each unit IS a size: its rank is its place on the axis (coordinates compress, order holds)
       const order = ser.p
         .map((x, u) => ({ u, x: Number.isFinite(x) ? x : Infinity }))
@@ -772,6 +1022,13 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     const pure = (u: number) => u >= 0 && unitRank[u] >= 0 && unitPurity[u] >= 0.8;
     for (const g of groups) {
       const r = g.group.units.map((u) => (pure(u) ? unitRank[u] : -1));
+      if (encoding === 'color') {
+        // a lane whose colour breaks the order of the others is that look borrowed by another
+        // size (leonie: 38 drawn in 44's purple on three tiles): keep the longest monotone run of
+        // known ranks, the rest are filled from their neighbours like unknown lanes
+        const keep = longestMonotone(r);
+        for (let k = 0; k < r.length; k++) if (r[k] >= 0 && !keep.has(k)) r[k] = -1;
+      }
       // direction of rank along the lanes, from the known lanes
       let dir = 0;
       for (let a = 0; a < r.length; a++)
@@ -798,7 +1055,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const u = unit[i];
       if (identityUnits && u >= 0 && unitRank[u] >= 0)
         rankOf.set(i, unitRank[u]); // identity wins
-      else if (pure(u) && sizeCand[i]) vote(i, unitRank[u], 4);
+      // colour is a hint, not identity: one vote, the cross-sections outvote it where they disagree
+      else if (pure(u) && sizeCand[i] && (encoding !== 'color' || votes.has(i)))
+        // a colour chain no cross-section saw (black text among the 46 lines) is not ranked by
+        // its colour alone
+        vote(i, unitRank[u], encoding === 'color' ? 1 : 4);
     });
     settle(0.45);
     for (let u = 0; u < nUnits; u++)
@@ -813,13 +1074,96 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
             .slice(0, 50),
           at: null,
         });
+    if (encoding === 'color') {
+      // a colour chain that never runs beside a line of ANOTHER colour is not a size line: black
+      // text and black construction lines share the 46 colour (leonie)
+      const besideOther = new Set<number>();
+      for (const x of xsB)
+        x.lanes.forEach((ln, k) => {
+          const own = majorityUnit(ln, unit, chains);
+          const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean);
+          if (nb.some((l) => majorityUnit(l, unit, chains) !== own))
+            for (const c of ln) besideOther.add(c);
+        });
+      let dropped = 0;
+      for (const c of [...rankOf.keys()])
+        if (!besideOther.has(c)) {
+          rankOf.delete(c);
+          dropped += chains[c].lengthMm;
+        }
+      diag.colourAlone = +(dropped / 1000).toFixed(2);
+      // colour borrowed by another size (leonie: 38 drawn in 44's purple on some tiles): the
+      // cross-sections ranked these chains away from their colour — say where
+      const moved = new Map<string, { n: number; len: number; ids: number[] }>();
+      for (const [c, r] of rankOf) {
+        const u = unit[c];
+        if (u < 0 || unitRank[u] < 0 || unitRank[u] === r) continue;
+        const k = `${u}|${r}`;
+        const e = moved.get(k) ?? { n: 0, len: 0, ids: [] };
+        e.n++;
+        e.len += chains[c].lengthMm;
+        if (e.ids.length < 50) e.ids.push(c);
+        moved.set(k, e);
+      }
+      for (const [k, e] of moved) {
+        if (e.len < 100) continue;
+        const [u, r] = k.split('|').map(Number);
+        ambiguities.push({
+          kind: 'class-split',
+          message: `${e.n} chains (${(e.len / 1000).toFixed(1)} m) drawn in ${unitNames[u]} (rank ${unitRank[u]}) sit where rank ${r} runs: ranked ${r} by nesting — confirm`,
+          classes: [],
+          chains: e.ids,
+          at: chains[e.ids[0]].pts[0],
+        });
+      }
+    }
     if (encoding === 'file-per-size') labels = labels.map(() => null);
+  }
+
+  // ── identity vs nesting: where every line carries its size (OCG, file, declared dash, the
+  // legend), the sizes met crossing a graded group must come in order — in either direction. A
+  // group whose known sizes go up and down contradicts the identities (shuffled dashes, a wrong
+  // key match): flag it rather than trust either.
+  if (identityEncoding(encoding) || legendId) {
+    let mono = 0;
+    let broken = 0;
+    const bad: number[] = [];
+    for (const g of groups) {
+      // lanes of ONE size only (a line printed in every OCG layer is one lane of all sizes)
+      const rs = g.lanes
+        .map((k) => {
+          const us = new Set(g.x.lanes[k].map((c) => unit[c]).filter((u) => u >= 0));
+          return us.size === 1 ? unitRank[[...us][0]] : -1;
+        })
+        .filter((r) => r >= 0);
+      if (rs.length < 3) continue;
+      let up = 0;
+      let down = 0;
+      for (let k = 1; k < rs.length; k++) {
+        if (rs[k] > rs[k - 1]) up++;
+        else if (rs[k] < rs[k - 1]) down++;
+      }
+      if (up && down) {
+        broken++;
+        if (bad.length < 50) bad.push(g.x.from);
+      } else mono++;
+    }
+    diag.identityOrder = { monotone: mono, broken };
+    if (broken > 0.2 * (mono + broken) && broken >= 10)
+      ambiguities.push({
+        kind: 'class-merge',
+        message: `size identities and nesting disagree: in ${broken} of ${mono + broken} graded cross-sections the sizes do not come in order (${encoding}${legendId ? ', legend' : ''}) — a class may carry two sizes or a size two looks`,
+        classes: [],
+        chains: bad,
+        at: bad.length ? chains[bad[0]].pts[0] : null,
+      });
   }
 
   // ── legend: sample strokes with a size token beside them name the units directly ────────────
   diag.legendHits = legendHits.map((h) => `${h.label}:c${h.chain}`);
   if (
     legendHits.length >= 3 &&
+    !legendId &&
     encoding !== 'ocg' &&
     encoding !== 'text-label' &&
     !(encoding === 'file-per-size' && labelOrderKnown)
@@ -981,7 +1325,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       const consistent = Math.min(agree, against) === 0;
       if (consistent) {
         for (const p of pairs) {
-          if (labels[p.r] === p.label) continue;
+          if (p.r < 0 || p.r >= n || labels[p.r] === p.label) continue;
           labels[p.r] = p.label;
           labelEvidence[p.r].push({
             kind: 'text-label',
@@ -1074,7 +1418,19 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const sectioned = new Set<number>();
   for (const x of xsB)
     if (x.lanes.length >= 2) for (const l of x.lanes) for (const c of l) sectioned.add(c);
-  splitShared(chains, rankOf, sharedFrom, landings, sectioned);
+  // which unranked size candidates actually run beside graded lines (a ranked neighbour lane), and
+  // the widest section each sits in: drawn letters, grain arrows and notch stacks drawn in the size
+  // pen bundle only with themselves
+  const besideRanked = new Set<number>();
+  const widest = new Map<number, number>();
+  for (const x of xsB) {
+    x.lanes.forEach((ln, k) => {
+      for (const c of ln) widest.set(c, Math.max(widest.get(c) ?? 0, x.lanes.length));
+      const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean).flat();
+      if (nb.some((c) => rankOf.has(c))) for (const c of ln) besideRanked.add(c);
+    });
+  }
+  splitShared(chains, rankOf, sharedFrom, landings, sectioned, sepMm);
   diag.bridges = joined.size;
   diag.landings = landings.length;
 
@@ -1103,7 +1459,11 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     if (L < 0.9 * c.lengthMm) return false;
     const t = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
     let steep = false;
-    for (const p of [a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]) {
+    // ends, middle, and every mm between: a graded notch stack crosses the size lines it marks
+    const probes = [a, b];
+    for (let t = 0; t <= L; t += 1)
+      probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
+    for (const p of probes) {
       touchGrid.near(p, 1, (j, si) => {
         if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j))) return;
         const q0 = chains[j].pts[si];
@@ -1150,7 +1510,12 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (!sectioned.has(i)) {
         if (touchesOthers(i)) common.push(i);
         else internal.push(i);
-      } else orphans.push(i);
+      } else if (
+        besideRanked.has(i) ||
+        ((widest.get(i) ?? 0) >= Math.max(3, n - 1) && c.lengthMm >= 15)
+      )
+        orphans.push(i);
+      else internal.push(i);
       return;
     }
     const st = styles.get(c.style);
@@ -1259,7 +1624,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         relaxed.set(key, (relaxed.get(key) ?? 0) + 1);
       }
     }
-    if (g.lanes.length !== n) continue;
+    // a size the legend shows but the sheet draws on another size's line (viola 34 on 36) has no
+    // lane of its own: a full group has n − |absent| lanes and the absent rank takes the line it
+    // is drawn on (its nearest present neighbour)
+    if (g.lanes.length !== n - noVote.size) continue;
     const byRank = new Array<number>(n).fill(-1);
     let ok = true;
     for (const k of g.lanes) {
@@ -1276,6 +1644,14 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       }
       byRank[r] = best;
     }
+    if (ok)
+      for (const r of noVote) {
+        let best = -1;
+        for (let d = 1; d < n && best < 0; d++)
+          for (const q of [r + d, r - d])
+            if (best < 0 && q >= 0 && q < n && !noVote.has(q) && byRank[q] >= 0) best = byRank[q];
+        byRank[r] = best;
+      }
     if (!ok || byRank.some((c) => c < 0)) continue;
     const offs = g.lanes.map((k) => g.x.offsets[k]);
     const sp = Math.abs(offs[offs.length - 1] - offs[0]) / Math.max(1, offs.length - 1);
@@ -1347,7 +1723,18 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
       list.push({ c: i, p, t });
     }
   });
-  const out: { text: IRText; label: string; value: number; chain: number; d: number }[] = [];
+  // every (label, sample stroke) candidate with a score; assigned one-to-one below (a stroke
+  // between two labels belongs to the nearer one: reef's chevrons are no chain, so "SIZE S" must not
+  // take the XS stroke above it)
+  type Cand = {
+    text: IRText;
+    label: string;
+    value: number;
+    chain: number;
+    d: number;
+    score: number;
+  };
+  const cands: Cand[] = [];
   const segs = new SegGrid(8);
   chains.forEach((c, i) => {
     if (ok[i] && c.lengthMm < 150 && !c.closed) segs.addPolyline(i, c.pts);
@@ -1359,8 +1746,7 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
     const b = tx.bbox;
     if (worded) {
       // "SIZE XS" with its sample stroke under / beside it (reef's Size Line Key)
-      let bd = 5;
-      let bc = -1;
+      const best = new Map<number, number>();
       const c0 = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
       segs.near(c0, 12, (ci, si) => {
         const a = chains[ci].pts[si];
@@ -1369,21 +1755,17 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
           const dx = Math.max(b.minX - p.x, 0, p.x - b.maxX);
           const dy = Math.max(b.minY - p.y, 0, p.y - b.maxY);
           const d = Math.hypot(dx, dy);
-          if (d < bd) {
-            bd = d;
-            bc = ci;
-          }
+          if (d < 5 && d < (best.get(ci) ?? Infinity)) best.set(ci, d);
         }
       });
-      if (bc >= 0) out.push({ text: tx, label: tok.label, value: tok.value, chain: bc, d: bd });
+      for (const [ci, d] of best)
+        cands.push({ text: tx, label: tok.label, value: tok.value, chain: ci, d, score: d });
       continue;
     }
     const cx = (b.minX + b.maxX) / 2;
     const cy = (b.minY + b.maxY) / 2;
-    let best = Infinity;
-    let bd = 0;
-    let bi = -1;
     const h = Math.max(1, b.maxY - b.minY, b.maxX - b.minX);
+    const best = new Map<number, { d: number; score: number }>();
     ends.near({ x: cx, y: cy }, 10, (k) => {
       const e = list[k];
       const dx = Math.max(b.minX - e.p.x, 0, e.p.x - b.maxX);
@@ -1396,15 +1778,70 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
       const lat = Math.abs(vx * e.t.y - vy * e.t.x);
       if (along <= 0 || lat > h) return; // the stroke must point at the label, not pass beside it
       const score = d + 3 * lat;
-      if (score < best) {
-        best = score;
-        bd = d;
-        bi = e.c;
-      }
+      const prev = best.get(e.c);
+      if (!prev || score < prev.score) best.set(e.c, { d, score });
     });
-    if (bi >= 0) out.push({ text: tx, label: tok.label, value: tok.value, chain: bi, d: bd });
+    for (const [ci, v] of best)
+      cands.push({
+        text: tx,
+        label: tok.label,
+        value: tok.value,
+        chain: ci,
+        d: v.d,
+        score: v.score,
+      });
+  }
+  cands.sort((a, b) => a.score - b.score);
+  if (debugFlag('F3_LEGEND'))
+    for (const c of cands)
+      console.log(`legend cand ${c.label} c${c.chain} d=${c.d.toFixed(2)} s=${c.score.toFixed(2)}`);
+  const usedText = new Set<IRText>();
+  const usedChain = new Set<number>();
+  const out: { text: IRText; label: string; value: number; chain: number; d: number }[] = [];
+  for (const c of cands) {
+    if (usedText.has(c.text) || usedChain.has(c.chain)) continue;
+    usedText.add(c.text);
+    usedChain.add(c.chain);
+    out.push({ text: c.text, label: c.label, value: c.value, chain: c.chain, d: c.d });
   }
   return out;
+}
+
+/**
+ * A key is a column (or row) of labels: keep the aligned set with the most distinct labels, one hit
+ * per label. Size numbers in a measurement table next to it (viola p29) end table rules too.
+ */
+function alignedLegend<
+  T extends { text: IRText; label: string; value: number; d: number; chain: number },
+>(hits: T[], chains: Chain[]): T[] {
+  if (hits.length < 3) return hits;
+  let best: T[] = [];
+  let bestRun = 0;
+  for (const axis of ['x', 'y'] as const) {
+    for (const h of hits) {
+      const v = h.text.anchor[axis];
+      const set = hits.filter((o) => Math.abs(o.text.anchor[axis] - v) <= 2);
+      const byLabel = new Map<string, T>();
+      for (const o of set) {
+        const prev = byLabel.get(o.label);
+        if (!prev || o.d < prev.d) byLabel.set(o.label, o);
+      }
+      // a ruler row has more distinct numbers than a key; the key's numbers form a size run
+      const run = labelRun([...byLabel.values()], 1, 2).size;
+      if (run > bestRun || (run === bestRun && byLabel.size > best.length)) {
+        best = [...byLabel.values()];
+        bestRun = run;
+      }
+    }
+  }
+  if (bestRun < 3) return hits;
+  // a key draws its samples alike long: a table rule or an outline ending near a number is not one
+  const lens = best.map((h) => chains[h.chain].lengthMm).sort((a, b) => a - b);
+  const med = lens[lens.length >> 1];
+  return best.filter((h) => {
+    const L = chains[h.chain].lengthMm;
+    return L >= 0.6 * med && L <= 1.6 * med;
+  });
 }
 
 /**
@@ -1412,7 +1849,11 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
  * consecutive run (numbers with step 2/4/6, or letters) whose labels each occur ≥ 2× and roughly
  * equally often. Ruler digits (step 1), tile marks and piece numbers do not form such a run.
  */
-function labelRun(hits: { label: string; value: number }[], minCount: number): Set<string> {
+function labelRun(
+  hits: { label: string; value: number }[],
+  minCount: number,
+  holes = 0,
+): Set<string> {
   const cnt = new Map<string, { value: number; n: number; letter: boolean }>();
   for (const h of hits) {
     const e = cnt.get(h.label) ?? { value: h.value, n: 0, letter: !/^\d+$/.test(h.label) };
@@ -1427,9 +1868,20 @@ function labelRun(hits: { label: string; value: number }[], minCount: number): S
     for (const step of steps)
       for (let i = 0; i < vals.length; i++) {
         const run = [vals[i]];
-        for (let j = i + 1; j < vals.length; j++)
-          if (vals[j][1].value === run[run.length - 1][1].value + step) run.push(vals[j]);
+        let holed = 0;
+        for (let j = i + 1; j < vals.length; j++) {
+          const last = run[run.length - 1][1].value;
+          if (vals[j][1].value === last + step) run.push(vals[j]);
+          else if (!letter && holed < holes && vals[j][1].value === last + 2 * step) {
+            // a key entry whose sample is not a chain (viola 44: dashes broken by «x» marks)
+            run.push([String(last + step), { value: last + step, n: vals[j][1].n, letter }]);
+            run.push(vals[j]);
+            holed++;
+          }
+        }
         const ns = run.map(([, e]) => e.n);
+        // a hole needs a real run around it: ≥ 4 labels actually seen, at most a quarter missing
+        if (holed && (run.length - holed < 4 || holed * 4 > run.length)) continue;
         if (
           run.length >= 3 &&
           Math.min(...ns) >= 0.25 * Math.max(...ns) &&
@@ -1439,6 +1891,37 @@ function labelRun(hits: { label: string; value: number }[], minCount: number): S
       }
   }
   return new Set(best);
+}
+
+/** Lane indices of the longest strictly monotone (either direction) run of known ranks (≥ 0). */
+function longestMonotone(r: number[]): Set<number> {
+  const idx = r.map((v, k) => ({ v, k })).filter((e) => e.v >= 0);
+  let best: number[] = [];
+  for (const sgn of [1, -1]) {
+    const L = idx.map(() => 1);
+    const prev = idx.map(() => -1);
+    for (let a = 0; a < idx.length; a++)
+      for (let b = 0; b < a; b++)
+        if (sgn * (idx[a].v - idx[b].v) > 0 && L[b] + 1 > L[a]) {
+          L[a] = L[b] + 1;
+          prev[a] = b;
+        }
+    let end = -1;
+    for (let a = 0; a < idx.length; a++) if (end < 0 || L[a] > L[end]) end = a;
+    const seq: number[] = [];
+    for (let a = end; a >= 0; a = prev[a]) seq.push(idx[a].k);
+    if (seq.length > best.length) best = seq;
+  }
+  return new Set(best);
+}
+
+/** Probe-only diagnostics (node); the browser worker has no `process`. */
+function debugFlag(k: string): boolean {
+  return typeof process !== 'undefined' && !!process.env?.[k];
+}
+
+function identityEncoding(e: SizeEncoding): boolean {
+  return e === 'ocg' || e === 'file-per-size' || e === 'declared-dash';
 }
 
 function colourKey(rgb: number[]): string {
@@ -1533,6 +2016,7 @@ function splitShared(
   sharedFrom: Map<number, number>,
   landings: Landing[],
   sectioned: Set<number>,
+  sepMm = BUNDLE.maxSepMm,
 ): void {
   const ids = [...rankOf.keys()];
   const rank0 = new Map(rankOf);
@@ -1573,11 +2057,11 @@ function splitShared(
     if (smp.length < 4) continue;
     const accompanied = smp.map((s) => {
       let hit = false;
-      grid.near(s.p, 1.4 * BUNDLE.maxSepMm, (j, si) => {
+      grid.near(s.p, 1.4 * sepMm, (j, si) => {
         if (hit || j === i || rank0.get(j) === r) return;
         const pj = poly.get(j)!;
         const q = segNearest(s.p, pj[si], pj[si + 1]);
-        if (q.d <= 1.4 * BUNDLE.maxSepMm) {
+        if (q.d <= 1.4 * sepMm) {
           const a = pj[si];
           const b = pj[si + 1];
           const L = dist(a, b) || 1;

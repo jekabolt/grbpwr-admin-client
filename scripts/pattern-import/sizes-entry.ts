@@ -17,10 +17,13 @@ import { extractRasterPdfDetailed, setRasterPdfjsLoader } from 'lib/pattern-impo
 import { buildChainsDetailed, rankOfClass } from 'lib/pattern-import/chains/build';
 import { makeChains } from 'lib/pattern-import/chains/make';
 import { describeSig } from 'lib/pattern-import/chains/motif';
+import { resample, SegGrid } from 'lib/pattern-import/chains/geom';
 import type { BoxMm, ChainSet, IRPath, PtMm, Sheet, SourceDoc } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { renderPng, PALETTE } from './sizes-render';
+import { assembleSheet, classifyPages } from 'lib/pattern-import/assemble';
+
 import { cachePath, readCached, shimSheet, writeCached, type ShimLayout } from './sizes-shim';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
@@ -92,11 +95,21 @@ async function loadDoc(file: string, id: string, raster = false): Promise<Source
   return doc;
 }
 
+const sheetCache = new Map<string, Sheet>();
+
 export async function sheetOf(s: Sample): Promise<{ sheet: Sheet; docs: SourceDoc[] }> {
   const docs: SourceDoc[] = [];
   for (let i = 0; i < s.files.length; i++)
     docs.push(await loadDoc(s.files[i], String(i), s.raster));
-  return { sheet: shimSheet(docs, s.layouts), docs };
+  // F3b: the real F2 assembly (classifyPages → assembleSheet, tile sheet 0). SHIM=1 keeps the old
+  // translation-only shim for comparison.
+  if (process.env.SHIM) return { sheet: shimSheet(docs, s.layouts), docs };
+  const key = `${s.id}${s.raster ? '_raster' : ''}`;
+  const hit = sheetCache.get(key);
+  if (hit) return { sheet: hit, docs };
+  const sheet = assembleSheet(docs, classifyPages(docs), 0);
+  sheetCache.set(key, sheet);
+  return { sheet, docs };
 }
 
 async function explore(id: string) {
@@ -147,9 +160,16 @@ async function zoom(id: string, args: string[]) {
   const box = process.env.ABS
     ? { minX: x0, minY: y0, maxX: x0 + w, maxY: y0 + h }
     : { minX: b.minX + x0, minY: b.maxY - y0 - h, maxX: b.minX + x0 + w, maxY: b.maxY - y0 };
+  const rgbHex = (st: { strokeRgb?: number[] | null; fillRgb?: number[] | null }) => {
+    const c = st.strokeRgb ?? st.fillRgb;
+    return c ? '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('') : '#000';
+  };
   const strokes = sheet.paths.map((p) => ({
     pts: p.pts,
-    color: PALETTE[p.style % PALETTE.length],
+    // RGB=1: the drawing's own colours (leonie) instead of a palette per style
+    color: process.env.RGB
+      ? rgbHex(sheet.styles[p.style] as never)
+      : PALETTE[p.style % PALETTE.length],
     width: 1,
   }));
   const labels = sheet.texts.map((t) => ({ at: t.anchor, text: t.text, color: '#000', size: 10 }));
@@ -197,6 +217,16 @@ async function chainsMode(id: string, args: string[]) {
   });
   for (const [k, e] of [...hist].sort((a, b) => b[1].len - a[1].len).slice(0, 40))
     console.log(`  ${(e.len / 1000).toFixed(2).padStart(7)} m ${String(e.n).padStart(5)}  ${k}`);
+  if (process.env.LOOK) {
+    const b = sheet.bbox;
+    cb.chains.forEach((c, i) => {
+      if (c.lengthMm < 20 || !describeSig(cb.sigs[i]).includes(process.env.LOOK!)) return;
+      const m = c.pts[Math.floor(c.pts.length / 2)];
+      console.log(
+        `  look@ chain ${i} len=${c.lengthMm.toFixed(0)} mid (${(m.x - b.minX).toFixed(0)},${(b.maxY - m.y).toFixed(0)}) ${describeSig(cb.sigs[i])}`,
+      );
+    });
+  }
   const [x0, y0, w, h, px] = args.map(Number);
   if (args.length >= 4) {
     const b = sheet.bbox;
@@ -256,11 +286,26 @@ async function sizesMode(id: string, args: string[]) {
   }
   console.log(`  bundles=${set.bundles.length} orphans=${set.orphans.length}`);
   if (process.env.AT) {
+    const mk = makeChains(sheet, OPTS);
     for (const xy of process.env.AT.split(';')) {
       const [ax, ay] = xy.split(',').map(Number);
       const P = { x: sheet.bbox.minX + ax, y: sheet.bbox.maxY - ay };
+      const segD = (c: { pts: PtMm[] }) => {
+        let m = Infinity;
+        for (let i = 0; i + 1 < c.pts.length; i++) {
+          const a = c.pts[i];
+          const b = c.pts[i + 1];
+          const L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1e-12;
+          const t = Math.max(
+            0,
+            Math.min(1, ((P.x - a.x) * (b.x - a.x) + (P.y - a.y) * (b.y - a.y)) / L2),
+          );
+          m = Math.min(m, Math.hypot(a.x + t * (b.x - a.x) - P.x, a.y + t * (b.y - a.y) - P.y));
+        }
+        return m;
+      };
       const near = set.chains
-        .map((c) => ({ c, d: Math.min(...c.pts.map((q) => Math.hypot(q.x - P.x, q.y - P.y))) }))
+        .map((c) => ({ c, d: segD(c) }))
         .sort((a, b) => a.d - b.d)
         .slice(0, 4);
       for (const { c, d } of near) {
@@ -270,9 +315,34 @@ async function sizesMode(id: string, args: string[]) {
         const rel = (q: { x: number; y: number }) =>
           `(${(q.x - sheet.bbox.minX).toFixed(0)},${(sheet.bbox.maxY - q.y).toFixed(0)})`;
         console.log(
-          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')}`,
+          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')} look=${c.id < mk.sigs.length ? describeSig(mk.sigs[c.id]) : '-'} rgb=${sheet.styles[c.style]?.strokeRgb?.join(',')}`,
         );
       }
+    }
+  }
+  if (process.env.HLINE) {
+    // chains crossing a horizontal probe "y,x0,x1" (sheet top-left mm), left to right
+    const [hy, hx0, hx1] = process.env.HLINE.split(',').map(Number);
+    const Y = sheet.bbox.maxY - hy;
+    const X0 = sheet.bbox.minX + hx0;
+    const X1 = sheet.bbox.minX + hx1;
+    const hits: { x: number; c: number }[] = [];
+    set.chains.forEach((c) => {
+      for (let i = 0; i + 1 < c.pts.length; i++) {
+        const a = c.pts[i];
+        const q = c.pts[i + 1];
+        if ((a.y - Y) * (q.y - Y) > 0 || a.y === q.y) continue;
+        const x = a.x + ((Y - a.y) * (q.x - a.x)) / (q.y - a.y);
+        if (x >= X0 && x <= X1) hits.push({ x, c: c.id });
+      }
+    });
+    hits.sort((a, b) => a.x - b.x);
+    for (const h of hits) {
+      const c = set.chains[h.c];
+      const cls = set.classes.find((k) => k.chains.includes(c.id));
+      console.log(
+        `  x=${(h.x - sheet.bbox.minX).toFixed(1)} chain ${c.id} len=${c.lengthMm.toFixed(0)} ${cls?.role ?? (set.orphans.includes(c.id) ? 'ORPHAN' : '-')}${cls ? rankOfClass(cls) ?? '' : ''} rgb=${sheet.styles[c.style]?.strokeRgb?.join(',')} w=${sheet.styles[c.style]?.widthMm.toFixed(2)}`,
+      );
     }
   }
   for (const a of set.ambiguities ?? []) console.log(`  ? ${a.kind}: ${a.message}`);
@@ -349,6 +419,81 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (mode === 'zoom') {
     await zoom(rest[0], rest.slice(1));
+    return 0;
+  }
+  if (mode === 'texts') {
+    // texts matching a regex, with sheet-relative (top-left) positions
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const re = new RegExp(rest[1] ?? '.', 'i');
+    const b = sheet.bbox;
+    for (const t of sheet.texts)
+      if (re.test(t.text))
+        console.log(
+          `${JSON.stringify(t.text)} @ ${(t.anchor.x - b.minX).toFixed(0)},${(b.maxY - t.anchor.y).toFixed(0)} p${t.src?.page ?? '?'}`,
+        );
+    return 0;
+  }
+  if (mode === 'near') {
+    // styles of the paths in a sheet-relative box (top-left origin): near <id> x y w h
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const [x0, y0, w, h] = rest.slice(1).map(Number);
+    const b = sheet.bbox;
+    const box = {
+      minX: b.minX + x0,
+      maxX: b.minX + x0 + w,
+      minY: b.maxY - y0 - h,
+      maxY: b.maxY - y0,
+    };
+    const st = new Map<number, { n: number; len: number; y: number[] }>();
+    for (const p of sheet.paths) {
+      if (
+        !p.pts.every(
+          (q) => q.x >= box.minX && q.x <= box.maxX && q.y >= box.minY && q.y <= box.maxY,
+        )
+      )
+        continue;
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++)
+        L += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
+      const e = st.get(p.style) ?? { n: 0, len: 0, y: [] };
+      e.n++;
+      e.len += L;
+      e.y.push(Math.round(b.maxY - p.pts[0].y));
+      if (process.env.SHAPES) {
+        const xs = p.pts.map((q) => q.x);
+        const ys = p.pts.map((q) => q.y);
+        console.log(
+          `  s${p.style} closed=${p.closed} n=${p.pts.length} w=${(Math.max(...xs) - Math.min(...xs)).toFixed(2)} h=${(Math.max(...ys) - Math.min(...ys)).toFixed(2)} L=${L.toFixed(2)} at ${(p.pts[0].x - b.minX).toFixed(1)},${(b.maxY - p.pts[0].y).toFixed(1)}`,
+        );
+      }
+      st.set(p.style, e);
+    }
+    for (const [sid, e] of st) {
+      const S = sheet.styles[sid];
+      console.log(
+        `s${sid} rgb=${S.strokeRgb?.join(',')} w=${S.widthMm.toFixed(2)} dash=${S.dash?.map((v) => v.toFixed(2)).join('/') ?? '-'} fill=${S.fill} n=${e.n} len=${e.len.toFixed(1)} y=${[...new Set(e.y)].slice(0, 8).join(',')}`,
+      );
+    }
+    return 0;
+  }
+  if (mode === 'pieces') {
+    // histogram of open stroke lengths per style width (0.25 mm bins): pieces <id> [minW] [maxW]
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const [w0, w1] = [Number(rest[1] ?? 0), Number(rest[2] ?? 9)];
+    const h = new Map<string, number>();
+    for (const p of sheet.paths) {
+      const st = sheet.styles[p.style];
+      if (st.widthMm < w0 || st.widthMm > w1 || p.closed) continue;
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++)
+        L += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
+      const k = `w${st.widthMm.toFixed(2)} ${st.fill ? 'F' : ''}${st.dash ? 'D' : ''} L${(Math.round(L * 4) / 4).toFixed(2)}`;
+      h.set(k, (h.get(k) ?? 0) + 1);
+    }
+    for (const [k, v] of [...h].sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(v, k);
     return 0;
   }
   if (mode === 'explore') {
@@ -510,6 +655,93 @@ function rankByOp(sheet: Sheet, set: ChainSet): Map<string, number> {
   return out;
 }
 
+/**
+ * Shared-line false positives (proxy, no per-line truth). A stretch split off as shared ("drawn
+ * once in one size's style, used by all") must sit where the sizes have converged. Two ways it is
+ * a size line misread as shared:
+ *  - inside a group: parallel line work on BOTH sides within `reachMm` (2.5 × the median spacing
+ *    between neighbouring sizes), a size / shared line on at least one side, along ≥ half its length;
+ *  - in a ladder: graded ends of a band (reef's hem bands, one end per size 50 mm apart) — on both
+ *    sides within 60 mm a parallel size / shared chain of similar length (±30 %), along ≥ 60 %.
+ */
+export function sharedFalsePositives(set: ChainSet, reachMm: number) {
+  const sizeIds = new Set<number>();
+  for (const c of set.classes) if (c.role === 'size') for (const id of c.chains) sizeIds.add(id);
+  const grid = new SegGrid(8);
+  const shared = set.classes
+    .filter((c) => c.role === 'common' && c.evidence.length)
+    .flatMap((c) => c.chains)
+    .filter((id) => set.chains[id].lengthMm >= 30);
+  // neighbours: every line work chain — in a misread group the other sizes may be shared too
+  const lineWork = set.classes
+    .filter((c) => c.role !== 'ignore' && c.role !== 'notch')
+    .flatMap((c) => c.chains)
+    .concat(set.orphans)
+    .filter((id) => set.chains[id].lengthMm >= 20);
+  for (const id of lineWork) grid.addPolyline(id, set.chains[id].pts);
+  const sizeSet = new Set([...sizeIds, ...shared]);
+  /** Nearest parallel chain crossed by the ray p + u·n, u ∈ (0.25, reach]. */
+  const firstHit = (self: number, p: PtMm, n: PtMm, t: PtMm, reach: number) => {
+    let best = -1;
+    let bu = Infinity;
+    const mid = { x: p.x + (n.x * reach) / 2, y: p.y + (n.y * reach) / 2 };
+    grid.near(mid, reach / 2 + 1, (j, si) => {
+      if (j === self) return;
+      const a = set.chains[j].pts[si];
+      const b = set.chains[j].pts[si + 1];
+      const sx = b.x - a.x;
+      const sy = b.y - a.y;
+      const den = n.x * sy - n.y * sx;
+      if (Math.abs(den) < 1e-12) return;
+      const qx = a.x - p.x;
+      const qy = a.y - p.y;
+      const u = (qx * sy - qy * sx) / den;
+      const v = (qx * n.y - qy * n.x) / den;
+      if (v < 0 || v > 1 || u <= 0.25 || u > reach || u >= bu) return;
+      const L = Math.hypot(sx, sy) || 1;
+      if (Math.abs((t.x * sx + t.y * sy) / L) >= 0.8) {
+        best = j;
+        bu = u;
+      }
+    });
+    return best;
+  };
+  const fp: number[] = [];
+  let inGroup = 0;
+  let ladder = 0;
+  for (const id of shared) {
+    const L0 = set.chains[id].lengthMm;
+    const smp = resample(set.chains[id].pts, 5);
+    let both = 0;
+    let rungs = 0;
+    for (const s of smp) {
+      const nrm = { x: -s.t.y, y: s.t.x };
+      const neg = { x: -nrm.x, y: -nrm.y };
+      const a = firstHit(id, s.p, nrm, s.t, reachMm);
+      const b = firstHit(id, s.p, neg, s.t, reachMm);
+      if (a >= 0 && b >= 0 && (sizeSet.has(a) || sizeSet.has(b))) both++;
+      const similar = (j: number) =>
+        j >= 0 && sizeSet.has(j) && Math.abs(set.chains[j].lengthMm - L0) <= 0.3 * L0;
+      if (similar(firstHit(id, s.p, nrm, s.t, 60)) && similar(firstHit(id, s.p, neg, s.t, 60)))
+        rungs++;
+    }
+    const g = smp.length > 0 && both >= 0.5 * smp.length;
+    const l = smp.length > 0 && rungs >= 0.6 * smp.length;
+    if (g) inGroup++;
+    else if (l) ladder++;
+    if (g || l) fp.push(id);
+  }
+  return {
+    shared: shared.length,
+    sharedM: +(shared.reduce((a, i) => a + set.chains[i].lengthMm, 0) / 1000).toFixed(2),
+    falsePositives: fp.length,
+    inGroup,
+    ladder,
+    falsePositiveM: +(fp.reduce((a, i) => a + set.chains[i].lengthMm, 0) / 1000).toFixed(2),
+    reachMm: +reachMm.toFixed(1),
+  };
+}
+
 function summarise(
   id: string,
   set: ChainSet,
@@ -546,6 +778,8 @@ function summarise(
       ? truthList.length === labels.length && truthList.every((l, k) => labels[k] === l)
       : null,
     nonEmptyClasses: sizes.filter((c) => c.chains.length).length,
+    // a class "filled" carries real line work (≥ 0.25 m), not a stray fragment
+    filledClasses: sizes.filter((c) => c.totalLengthMm >= 250).length,
     classes: sizes.map((c) => ({
       rank: rankOfClass(c),
       label: c.sizeLabel,
@@ -559,6 +793,19 @@ function summarise(
     bundlesOfPresentRanks: recover.diag.bundlesOfPresentRanks ?? null,
     unassignedShare: +(orphanLen / Math.max(1, sizeLen + orphanLen)).toFixed(3),
     sharedM: +(shared.reduce((a, c) => a + c.totalLengthMm, 0) / 1000).toFixed(2),
+    // reach: 2.5 × the median spacing between neighbouring sizes (12…35 mm)
+    sharedCheck: sharedFalsePositives(
+      set,
+      // FP_REACH='{"reef":31.8}' replays a reach (comparing against an older build without diag)
+      (JSON.parse(process.env.FP_REACH ?? '{}') as Record<string, number>)[id] ??
+        Math.min(
+          35,
+          Math.max(
+            12,
+            2.5 * ((recover.diag.laneSpacing as { median?: number } | undefined)?.median ?? 0),
+          ),
+        ),
+    ),
     landings: recover.diag.landings,
     bridges: recover.diag.bridges,
     ambiguities: (set.ambiguities ?? []).map((a) => `${a.kind}: ${a.message}`),
@@ -574,7 +821,7 @@ function summarise(
 }
 
 export async function reportMode(ids: string[]) {
-  const shots = resolve(REPORTS, 'F3-shots');
+  const shots = resolve(REPORTS, process.env.SHIM ? 'F3b-shots-shim' : 'F3b-shots');
   mkdirSync(shots, { recursive: true });
   const truth = JSON.parse(readFileSync(resolve(CORPUS, 'truth.json'), 'utf8')) as Truth;
   const truthOf: Record<string, string> = {
@@ -613,19 +860,25 @@ export async function reportMode(ids: string[]) {
     const px = Math.min(0.8, 2400 / Math.max(W, H));
     overlay(set, b, px, resolve(shots, `${id}-classes.png`));
     console.log(
-      `${id}: ${sm.encoding} n=${sm.n} (truth ${sm.truthN}) classes ${sm.nonEmptyClasses}/${sm.n} bundles ${sm.bundles} runs ${sm.gradedRuns} unassigned ${(sm.unassignedShare * 100).toFixed(1)} % labels ${sm.labels.join(',')} ${ms} ms`,
+      `${id}: ${sm.encoding} n=${sm.n} (truth ${sm.truthN}) filled ${sm.filledClasses}/${sm.n} bundles ${sm.bundles} runs ${sm.gradedRuns} unassigned ${(sm.unassignedShare * 100).toFixed(1)} % shared ${sm.sharedCheck.shared} (FP ${sm.sharedCheck.falsePositives}, ${sm.sharedCheck.falsePositiveM} m) labels ${sm.labels.join(',')} ${ms} ms`,
     );
   }
   // zooms the reviewer looks at
   const zooms: [string, number, number, number, number, number][] = [
-    ['palto', 0, 1000, 1190, 285, 1.6],
-    ['palto', 960, 980, 230, 180, 5],
-    ['viola', 520, 540, 220, 220, 4],
+    // F3b: coordinates on the F2 sheets (top-left origin, mm)
+    ['palto', 0, 950, 1190, 335, 1.6],
+    ['palto', 820, 960, 160, 160, 5],
+    ['viola', 380, 1240, 300, 180, 3],
+    ['viola', 840, 1120, 140, 50, 6],
     ['kombinezon', 0, 840, 950, 600, 1.5],
     ['r4454', 300, 0, 500, 330, 2],
     ['robe', 300, 250, 500, 350, 2],
-    ['reef', 300, 300, 600, 500, 1.5],
-    ['leonie', 0, 0, 503, 900, 1.5],
+    ['reef', 0, 640, 400, 380, 2],
+    ['reef', 600, 1170, 190, 110, 6],
+    ['reef', 100, 30, 90, 70, 10],
+    ['zhaket', 0, 380, 620, 420, 1.6],
+    ['leonie', 0, 1150, 595, 1300, 0.9],
+    ['leonie', 0, 1330, 90, 120, 8],
   ];
   for (const [id, x0, y0, w, h, px] of zooms) {
     if (!ids.includes(id)) continue;
@@ -651,6 +904,11 @@ export async function reportMode(ids: string[]) {
       (s: Sheet) => dashShuffle(s, 11),
       'each dashed path gets a random dash pattern of the file',
     ],
+    [
+      'reef',
+      (s: Sheet) => dashShuffle(s, 5),
+      'each dashed path gets a random dash pattern of the file (legend identity)',
+    ],
   ] as const) {
     if (!ids.includes(id)) continue;
     const base = await runSample(id);
@@ -664,12 +922,16 @@ export async function reportMode(ids: string[]) {
         both++;
         if (bb.get(k) === r) same++;
       }
-    const flagsBase = (base.set.ambiguities ?? []).filter(
-      (x) => x.kind === 'class-merge' || x.kind === 'class-split' || x.kind === 'unassigned',
-    ).length;
-    const flagsNeg = (neg.set.ambiguities ?? []).filter(
-      (x) => x.kind === 'class-merge' || x.kind === 'class-split' || x.kind === 'unassigned',
-    ).length;
+    // identity / look contradictions the operator must see
+    const flagKinds = new Set([
+      'class-merge',
+      'class-split',
+      'unassigned',
+      'rank-direction',
+      'size-empty',
+    ]);
+    const flagsBase = (base.set.ambiguities ?? []).filter((x) => flagKinds.has(x.kind)).length;
+    const flagsNeg = (neg.set.ambiguities ?? []).filter((x) => flagKinds.has(x.kind)).length;
     const sm = summarise(`${id}-negative`, neg.set, neg.recover, neg.ms);
     negatives.push({
       id,
@@ -682,7 +944,8 @@ export async function reportMode(ids: string[]) {
       unassignedBase: summarise(id, base.set, base.recover, base.ms).unassignedShare,
       unassignedNegative: sm.unassignedShare,
       ambiguitiesNegative: sm.ambiguities,
-      pass: same / Math.max(1, both) < 0.8 || flagsNeg > flagsBase,
+      // F3b: a control passes only when it RAISES flags (the assignment changing alone is silent)
+      pass: flagsNeg > flagsBase,
     });
     overlay(
       neg.set,
@@ -695,6 +958,11 @@ export async function reportMode(ids: string[]) {
   out.samples = summaries;
   out.negatives = negatives;
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  writeFileSync(resolve(REPORTS, `F3-${date}.json`), JSON.stringify(out, null, 2));
-  console.log(`report: ${resolve(REPORTS, `F3-${date}.json`)}; shots: ${shots}`);
+  writeFileSync(
+    resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`),
+    JSON.stringify(out, null, 2),
+  );
+  console.log(
+    `report: ${resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`)}; shots: ${shots}`,
+  );
 }
