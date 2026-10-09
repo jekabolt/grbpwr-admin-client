@@ -82,6 +82,14 @@ import { ImportError, cancelled, stageUnavailable } from './errors';
 import { chainPreviewOf, previewOf } from './preview';
 import { wallsUsedBy } from './walls-used';
 import { checkInputSet, imagePixelsRefusal } from './limits';
+import {
+  attributeSizes,
+  mergeDxfSet,
+  reviewPlaceholderSizes,
+  settleDxfSet,
+  type DxfSet,
+  type DxfSetSize,
+} from './dxf-set';
 
 /** Hex SHA-256 of the bytes ('' where the runtime has no WebCrypto — an insecure origin). */
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -158,6 +166,10 @@ export class Session {
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
+  /** Several DXF files, one per size, merged into one drawing at open (owner decision 5). */
+  private dxfSet: DxfSet | null = null;
+  /** The set's sizes as the reader saw them in the merged drawing (`settleDxfSet`). */
+  private setSizes: DxfSetSize[] = [];
   // scale
   private decision: ScaleDecision | null = null;
   private fast: DxfFastPath | null = null;
@@ -214,10 +226,10 @@ export class Session {
         'unsupported-format',
         `one run reads one format — got ${[...kinds].join(' + ')}. Import each format on its own.`,
       );
+    // Several DXF files = one file per size: merged into one drawing here, read as one DXF after.
     if (routes[0].route === 'dxf' && files.length > 1)
-      throw new ImportError(
-        'unsupported-format',
-        'several DXF files are not merged yet — export all sizes into one DXF (or use "merge sizes").',
+      this.dxfSet = mergeDxfSet(
+        files.map((f, i) => ({ id: String(i), name: f.name, bytes: f.bytes })),
       );
     this.files = files.map((f, i) => ({
       id: String(i),
@@ -237,6 +249,7 @@ export class Session {
     this.sheet = null;
     this.fast = null;
     this.dxf = null;
+    this.dxfSet = null;
   }
 
   /** Running stage S drops every output after S (render-som drops nothing). */
@@ -311,6 +324,7 @@ export class Session {
     const docs: SourceDoc[] = [];
     this.calibrations = [];
     this.dxf = null;
+    if (this.dxfSet) return [await this.readDxfSet(this.dxfSet, ctx, opts)];
     const n = this.files.length;
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
@@ -383,6 +397,35 @@ export class Session {
     return docs;
   }
 
+  /**
+   * A per-size DXF set: every file is hashed (provenance), the merged drawing is read as the one
+   * DXF of the run, and the reader must see one size per file (`settleDxfSet`).
+   */
+  private async readDxfSet(set: DxfSet, ctx: StageCtx, opts: ExtractOpts): Promise<SourceDoc> {
+    const n = this.files.length;
+    for (let i = 0; i < n; i++) {
+      ctx.checkCancel();
+      const info = this.files[i];
+      const blob = this.blobs.get(`file:${i}`);
+      if (!blob)
+        throw new ImportError('no-session', 'the session lost its files — read them again');
+      if (!this.sha.has(info.id)) this.sha.set(info.id, await sha256Hex(await blob.arrayBuffer()));
+      ctx.progress(i, n + 1, info.name);
+    }
+    const bytes = set.bytes.slice().buffer;
+    const read = await readDxf({ id: '0', name: set.name, bytes }, opts, (d, t, note) => {
+      ctx.checkCancel();
+      ctx.progress(n + d / Math.max(1, t), n + 1, `${set.name}${note ? ` · ${note}` : ''}`);
+    });
+    const seg = segmentDxf(read);
+    if (!seg.presegmented)
+      throw new ImportError('corrupt', `${set.name}: the merged drawing has no block inserts`);
+    this.setSizes = settleDxfSet(set, seg);
+    this.dxf = { read, seg };
+    ctx.progress(n + 1, n + 1);
+    return read.doc;
+  }
+
   private async extract(
     input: StageIO['extract']['in'],
     ctx: StageCtx,
@@ -391,8 +434,12 @@ export class Session {
     const docs = await this.readAll(ctx, opts);
     this.docs = docs;
     this.docsFactor = 1;
-    this.files = docs.map((d) => d.file);
+    // A merged set keeps its own files: the operator dropped them, the manifest names them.
+    this.files = this.dxfSet
+      ? this.files.map((f) => ({ ...f, sha256: this.sha.get(f.id) ?? '', pages: 1 }))
+      : docs.map((d) => d.file);
     const warnings = docs.flatMap((d) => d.warnings.map((w) => `${d.file.name}: ${w}`));
+    if (this.dxfSet) warnings.unshift(...this.dxfSet.notes);
 
     // Page classes: PDFs are sorted by F2; a one-page drawing (DXF, SVG, PLT, a scan image) is
     // its own sheet.
@@ -418,6 +465,17 @@ export class Session {
         ),
       ),
     ];
+    if (this.dxfSet)
+      this.pages = this.setSizes.map(
+        (s): PageClassification => ({
+          file: s.file,
+          page: 0,
+          cls: 'tile',
+          sheet: 0,
+          confidence: 1,
+          why: `DXF, size ${s.token} — merged with the other files into one drawing`,
+        }),
+      );
 
     // Scale candidates by kind.
     let scale: ScaleCandidate[];
@@ -494,6 +552,7 @@ export class Session {
               return { read: r2, seg: segmentDxf(r2) };
             })();
       this.fast = dxfFastPath(scaled.read, scaled.seg);
+      if (this.dxfSet) this.fast = attributeSizes(this.fast, this.setSizes);
       ctx.progress(1, 1);
     } else {
       await this.ensureDocs(ctx);
@@ -602,6 +661,7 @@ export class Session {
       throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
     const run = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
     let map = proposeCardSizeMap(run, input.card);
+    if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
