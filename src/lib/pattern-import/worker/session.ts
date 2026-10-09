@@ -473,7 +473,10 @@ export class Session {
           cls: 'tile',
           sheet: 0,
           confidence: 1,
-          why: `DXF, size ${s.token} — merged with the other files into one drawing`,
+          why:
+            s.from === 'placeholder'
+              ? 'DXF · size unknown: map it on the sizes step'
+              : `DXF · size ${s.token}, from the ${s.from === 'blocks' ? 'block names' : 'file name'}`,
         }),
       );
 

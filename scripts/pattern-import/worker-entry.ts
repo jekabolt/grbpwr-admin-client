@@ -1334,7 +1334,7 @@ async function dxfSetCase() {
       'sizes read from the file names, mapped to the card',
       r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token}`).join(' ') ===
         SIZES.map((s) => `${s}→${s}`).join(' ') &&
-        r.ex.warnings.some((w) => /jacket XS\.dxf: size XS \(from the file name\)/.test(w)),
+        r.ex.pages.every((p) => /, from the file name$/.test(p.why)),
       r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
     );
     check(
@@ -1417,7 +1417,7 @@ async function dxfSetCase() {
       { name: 'coat_m.dxf', bytes: enc(splitSize(graded, 'M')) },
       { name: 'coat_l.dxf', bytes: enc(splitSize(graded, 'M')) },
     ],
-    /coat_m\.dxf and coat_l\.dxf are both size M/,
+    /coat_m\.dxf and coat_l\.dxf are both size M\. A set is one file per size/,
   );
   await refusedBy(
     'a duplicate size spelled in the file names only',

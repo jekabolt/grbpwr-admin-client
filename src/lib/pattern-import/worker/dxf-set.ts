@@ -46,7 +46,7 @@ export type DxfSet = {
   sizes: DxfSetSize[];
   /** Block name in the merged drawing → the file that brought it. */
   blockFile: Map<string, FileId>;
-  /** Said on the files step: which size each file is and why, plus the merger's own notes. */
+  /** Said on the files step: files whose size needs the operator, and the merger's own notes. */
   notes: string[];
 };
 
@@ -65,7 +65,7 @@ type Scan = { version: string; blocks: string[] };
 /** $ACADVER and the block names (anonymous `*` blocks left out) of an ASCII DXF. */
 function scanDxf(text: string, name: string): Scan {
   if (text.startsWith('AutoCAD Binary DXF'))
-    throw refuse(`${name}: a binary DXF — a set of sizes is merged from ASCII DXF exports only`);
+    throw refuse(`${name}: a binary DXF; a set of sizes is merged from ASCII DXF exports only`);
   const lines = text.split('\n');
   let version = '';
   let section = '';
@@ -77,7 +77,7 @@ function scanDxf(text: string, name: string): Scan {
     if (raw === '') break; // the trailing newline; a gap mid-file is the merger's to refuse
     const code = Number(raw);
     if (!Number.isInteger(code))
-      throw refuse(`${name}: not an ASCII DXF — line ${i + 1} carries “${raw}” instead of a code`);
+      throw refuse(`${name}: not an ASCII DXF: line ${i + 1} carries “${raw}” instead of a code`);
     const value = lines[i + 1].replace(/\r$/, '');
     if (code === 0) {
       entity = value.trim();
@@ -170,12 +170,12 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
   const old = read.filter((r) => !R2000_PLUS.has(r.scan.version));
   if (old.length)
     throw refuse(
-      `${list(old.map((r) => `${r.name} (${r.scan.version || 'no version'})`))}: several DXF files are merged from AAMA R2000+ exports only (AC1015 and newer, as CLO gives them out per size) — export the sizes as R2000, or all sizes into one DXF`,
+      `${list(old.map((r) => `${r.name} (${r.scan.version || 'no version'})`))}: several DXF files are merged from AAMA R2000+ exports only (AC1015 and newer, as CLO gives them out per size). Export the sizes as R2000, or all sizes into one DXF`,
     );
   for (const r of read)
     if (!r.scan.blocks.length)
       throw refuse(
-        `${r.name}: no blocks — a set of sizes is merged from per-piece (AAMA) exports, one block per piece`,
+        `${r.name}: no blocks; a set of sizes is merged from per-piece (AAMA) exports, one block per piece`,
       );
 
   // the size of every file
@@ -184,14 +184,14 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
     const own = sizeOfBlocks(r.scan.blocks);
     if (own.several.length)
       throw refuse(
-        `${r.name} carries several sizes (${own.several.join(', ')}) — a set is one file per size; import a file with all sizes on its own`,
+        `${r.name} carries several sizes (${own.several.join(', ')}). A set is one file per size; import a file with all sizes on its own`,
       );
     const fromName = fileSizeLabel(r.name);
     const named = fromName ? sizeTokenOf(fromName) : null;
     if (own.size) {
       if (named && named !== own.size)
         notes.push(
-          `${r.name}: the file name says ${named}, the blocks say ${own.size} — the blocks win`,
+          `${r.name}: the file name says ${named}, the blocks say ${own.size}; the blocks win`,
         );
       return { r, token: own.size, from: 'blocks' as DxfSetSizeSource };
     }
@@ -216,7 +216,7 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
   if (twice.length)
     throw refuse(
       twice.map(([size, names]) => `${names.join(' and ')} are both size ${size}`).join('; ') +
-        ' — a set is one file per size (CLO sometimes repeats the previous size: export that size again)',
+        '. A set is one file per size (CLO sometimes repeats the previous size: export that size again)',
     );
 
   // the same pieces in every file
@@ -232,7 +232,7 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
     .filter((x) => x.missing.length);
   if (short.length)
     throw refuse(
-      `the files do not carry the same pieces: ${short.map((x) => `${x.name} has no ${list(x.missing)}`).join('; ')} — export every size of the same pattern`,
+      `the files do not carry the same pieces: ${short.map((x) => `${x.name} has no ${list(x.missing)}`).join('; ')}. Export every size of the same pattern`,
     );
 
   // rename blocks of the files whose size is not in the block names, then merge
@@ -264,12 +264,12 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
     token: d.token,
     from: d.from,
   }));
+  // which size each file is, is on the files step's page table; only what needs a look is a note
   for (const s of sizes)
-    notes.push(
-      s.from === 'placeholder'
-        ? `${s.name}: no size in the block names or the file name — read as size ${s.token}; pick its card size on the sizes step`
-        : `${s.name}: size ${s.token} (from the ${s.from === 'blocks' ? 'block names' : 'file name'})`,
-    );
+    if (s.from === 'placeholder')
+      notes.push(
+        `${s.name}: no size in the block names or the file name; pick its card size on the sizes step`,
+      );
   notes.push(...merged.warnings.map((w) => `merge: ${w}`));
   const tokens = sizes.filter((s) => s.from !== 'placeholder').map((s) => s.token.toLowerCase());
   return {
@@ -297,14 +297,14 @@ export function settleDxfSet(set: DxfSet, seg: DxfSegmentation): DxfSetSize[] {
     const got = [...(seen.get(s.file) ?? [])];
     if (got.length !== 1 || !got[0])
       throw refuse(
-        `${s.name}: its pieces did not read as one size (${got.map((g) => g || 'no size').join(', ') || 'no pieces'}) — name every block PIECE_SIZE (a number reads as a size only when two pieces carry it)`,
+        `${s.name}: its pieces did not read as one size (${got.map((g) => g || 'no size').join(', ') || 'no pieces'}). Name every block PIECE_SIZE (a number reads as a size only when two pieces carry it)`,
       );
     return { ...s, token: got[0] };
   });
   const twice = out.filter((s, i) => out.findIndex((o) => o.token === s.token) !== i);
   if (twice.length)
     throw refuse(
-      `${list(twice.map((s) => s.name))} read as a size another file already has (${list([...new Set(twice.map((s) => s.token))])}) — a set is one file per size`,
+      `${list(twice.map((s) => s.name))} read as a size another file already has (${list([...new Set(twice.map((s) => s.token))])}). A set is one file per size`,
     );
   return out;
 }
@@ -365,7 +365,7 @@ export function reviewPlaceholderSizes(
       origin: 'auto' as const,
       confidence: pick ? 0.3 : 0,
       evidence: [
-        `${s.name}: no size in the block names or the file name — ${pick ? 'proposed by its place in the set, confirm or change it' : 'pick the card size'}`,
+        `${s.name}: no size in the block names or the file name; ${pick ? 'proposed by its place in the set, confirm or change it' : 'pick the card size'}`,
       ],
     };
   });
