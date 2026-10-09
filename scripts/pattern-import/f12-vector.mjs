@@ -281,6 +281,9 @@ async function geometryFixture(name, t) {
     );
     if (best) checkStyle(name, c.name, page, best.p, c);
   }
+  // Truth sizes are what the source sets: SVG font-size = em, HPGL SI = CAP height. The contract
+  // pins IRText.fontSizeMm = em size (HPGL converts cap / 0.7, 89653d57), so compare like with like.
+  const capOf = (tx) => (doc.file.kind === 'hpgl' ? tx.fontSizeMm * 0.7 : tx.fontSizeMm);
   for (const L of t.labels ?? []) {
     const tx = page.texts.find((x) => x.text === L.text);
     if (!tx) {
@@ -305,7 +308,7 @@ async function geometryFixture(name, t) {
     } else if (L.center) {
       // LO5: the glyph box middle = the label origin.
       const w = tx.bbox.maxX - tx.bbox.minX;
-      const c = [tx.anchor.x + w / 2, tx.anchor.y + tx.fontSizeMm / 2];
+      const c = [tx.anchor.x + w / 2, tx.anchor.y + capOf(tx) / 2];
       const d = Math.hypot(c[0] - L.center[0], c[1] - L.center[1]);
       check(name, `label "${L.text}": centred (LO5) ±${L.tolMm}`, d <= L.tolMm, c.map(r), L.center);
     }
@@ -313,9 +316,9 @@ async function geometryFixture(name, t) {
     check(name, `label "${L.text}": rotation`, dr <= 0.5, r(tx.rotationDeg), L.rot);
     check(
       name,
-      `label "${L.text}": size mm`,
-      near(tx.fontSizeMm, L.size, 0.05),
-      r(tx.fontSizeMm),
+      `label "${L.text}": size mm${doc.file.kind === 'hpgl' ? ' (cap height = em × 0.7)' : ''}`,
+      near(capOf(tx), L.size, 0.05),
+      r(capOf(tx)),
       L.size,
     );
     if (L.layer !== undefined)

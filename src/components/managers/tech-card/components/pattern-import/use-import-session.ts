@@ -1,0 +1,735 @@
+// The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
+// `ImportSession` is the latest stage output, and `inputs` are what the operator decided — kept
+// across `back`, so re-entering a step re-runs it with the previous answers (contract: "back{to}
+// re-enters a step with its previous inputs; outputs after it are dropped").
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  AllowanceDecision,
+  ApplyResult,
+  ChainRole,
+  ClassId,
+  FabricAssignment,
+  GridOverride,
+  ImportSession,
+  NameDecision,
+  PieceEdit,
+  PtMm,
+  ScaleDecision,
+  Seed,
+  SeedId,
+  SizeMapEntry,
+  StageIO,
+  StageName,
+  WizardEvent,
+  WizardStep,
+} from 'lib/pattern-import/types';
+import { PATIMPORT } from 'lib/pattern-import/types';
+import type {
+  ApplyDraftFn,
+  ApplyProgress,
+  CardContext,
+  DraftBuilder,
+  ImportClient,
+  NameSuggester,
+} from './client';
+import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+
+export const STEPS: { id: WizardStep; label: string }[] = [
+  { id: 'files', label: 'files' },
+  { id: 'scale', label: 'scale' },
+  { id: 'sheet', label: 'sheet' },
+  { id: 'sizes', label: 'sizes' },
+  { id: 'pieces', label: 'pieces' },
+  { id: 'meaning', label: 'details' },
+  { id: 'fabrics', label: 'fabrics' },
+  { id: 'check', label: 'check' },
+  { id: 'apply', label: 'apply' },
+];
+export const stepIndex = (s: WizardStep) => STEPS.findIndex((x) => x.id === s);
+
+export type LegendEdit = { classId: ClassId; role: ChainRole; sizeLabel: string | null };
+export type PieceOverride = NonNullable<StageIO['semantics']['in']['pieceOverrides'][SeedId]>;
+
+/** What the operator decided. Survives `back`; cleared only by `reset`. */
+export type Inputs = {
+  fileList: File[];
+  scaleIndex: number;
+  /** Measured length of the test square when the operator overrides the detection, mm. */
+  manualMeasuredMm: number | null;
+  scaleConfirmed: boolean;
+  gridOverride: GridOverride | undefined;
+  legend: LegendEdit[];
+  /** Low-confidence legend rows the operator has looked at and accepted. */
+  legendConfirmed: ClassId[];
+  sizeMap: SizeMapEntry[] | null;
+  variant: string | null;
+  /** Seeds the operator added by clicking (appended to the text seeds of the first run). */
+  clickSeeds: Seed[];
+  edits: PieceEdit[];
+  fileAllowance: AllowanceDecision | null;
+  overrides: StageIO['semantics']['in']['pieceOverrides'];
+  operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */
+  confirmedNames: SeedId[];
+  /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
+  editedNames: SeedId[];
+  assignment: FabricAssignment | null;
+};
+
+const EMPTY_INPUTS: Inputs = {
+  fileList: [],
+  scaleIndex: 0,
+  manualMeasuredMm: null,
+  scaleConfirmed: false,
+  gridOverride: undefined,
+  legend: [],
+  legendConfirmed: [],
+  sizeMap: null,
+  variant: null,
+  clickSeeds: [],
+  edits: [],
+  fileAllowance: null,
+  overrides: {},
+  operatorGrain: {},
+  confirmedNames: [],
+  editedNames: [],
+  assignment: null,
+};
+
+const EMPTY_SESSION: ImportSession = {
+  sessionId: null,
+  step: 'files',
+  files: [],
+  pages: [],
+  scale: { candidates: [], decision: null },
+  sheet: null,
+  chains: null,
+  sizes: null,
+  pieces: null,
+  names: [],
+  semantics: null,
+  fabrics: null,
+  variant: null,
+  draft: null,
+  gate: {},
+  busy: null,
+  error: null,
+};
+
+/** Fields each step OWNS — dropped when the operator goes back to an earlier step. */
+function dropAfter(s: ImportSession, to: WizardStep): ImportSession {
+  const at = stepIndex(to);
+  const next = { ...s, step: to, error: null };
+  if (at < stepIndex('scale')) next.scale = { ...next.scale, decision: null };
+  if (at < stepIndex('sheet')) next.sheet = null;
+  if (at < stepIndex('sizes')) {
+    next.chains = null;
+    next.sizes = null;
+  }
+  if (at < stepIndex('pieces')) next.pieces = null;
+  if (at < stepIndex('meaning')) {
+    next.names = [];
+    next.semantics = null;
+  }
+  if (at < stepIndex('fabrics')) next.fabrics = null;
+  if (at < stepIndex('check')) {
+    next.draft = null;
+    next.gate = {};
+  }
+  return next;
+}
+
+export type ApplyState =
+  | { phase: 'idle' }
+  | { phase: 'running'; progress: Record<string, ApplyProgress['state']> }
+  | { phase: 'done'; result: ApplyResult; progress: Record<string, ApplyProgress['state']> };
+
+export function useImportSession(deps: {
+  client: ImportClient;
+  card: CardContext;
+  namer: NameSuggester;
+  buildDraft: DraftBuilder;
+  applyDraft: ApplyDraftFn;
+}) {
+  const { client, card, namer, buildDraft, applyDraft } = deps;
+  const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
+  const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
+  const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
+  // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
+  // because `pieces.in.seeds` replaces the whole list (no 'add' edit kind in the contract).
+  const baseSeeds = useRef<Seed[] | null>(null);
+  const sRef = useRef(session);
+  sRef.current = session;
+  const iRef = useRef(inputs);
+  iRef.current = inputs;
+
+  const patch = useCallback((p: Partial<ImportSession>) => setSession((s) => ({ ...s, ...p })), []);
+  const patchInputs = useCallback(
+    (p: Partial<Inputs> | ((i: Inputs) => Partial<Inputs>)) =>
+      setInputs((i) => ({ ...i, ...(typeof p === 'function' ? p(i) : p) })),
+    [],
+  );
+
+  // Close the worker session when the wizard unmounts.
+  useEffect(
+    () => () => {
+      const id = sRef.current.sessionId;
+      if (id != null) void client.close(id);
+    },
+    [client],
+  );
+
+  async function run<S extends StageName>(stage: S, input: StageIO[S]['in']) {
+    const id = sRef.current.sessionId;
+    if (id == null) throw new Error('no session — read the files first');
+    patch({ busy: { stage, done: 0, total: 1 }, error: null });
+    try {
+      return await client.run(id, stage, input, (p) =>
+        patch({ busy: { stage, done: p.done, total: p.total, note: p.note } }),
+      );
+    } finally {
+      patch({ busy: null });
+    }
+  }
+
+  const fail = (e: unknown) =>
+    patch({ busy: null, error: e instanceof Error ? e.message : String(e) });
+
+  // ── derived inputs ───────────────────────────────────────────────────────────────────────
+  const scaleDecision = (i: Inputs = iRef.current): ScaleDecision | null => {
+    const c = sRef.current.scale.candidates[i.scaleIndex];
+    if (!c) return null;
+    if (i.manualMeasuredMm && c.declaredMm)
+      return {
+        factor: c.declaredMm / i.manualMeasuredMm,
+        method: 'manual',
+        operatorConfirmed: true,
+      };
+    return { factor: c.factor, method: c.method, operatorConfirmed: i.scaleConfirmed };
+  };
+
+  const piecesInput = (i: Inputs = iRef.current): StageIO['pieces']['in'] => ({
+    seeds:
+      i.clickSeeds.length && baseSeeds.current
+        ? [...baseSeeds.current, ...i.clickSeeds]
+        : undefined,
+    edits: i.edits,
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: i.variant },
+  });
+
+  const semanticsInput = (i: Inputs = iRef.current): StageIO['semantics']['in'] => ({
+    fileAllowance: i.fileAllowance ?? {
+      meaning: 'seam',
+      allowanceMm: PATIMPORT.defaultAllowanceMm,
+      origin: 'default',
+      evidence: [],
+    },
+    pieceOverrides: i.overrides,
+    operatorGrain: i.operatorGrain,
+  });
+
+  // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
+  async function dispatch(ev: WizardEvent): Promise<void> {
+    try {
+      switch (ev.type) {
+        case 'files': {
+          patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
+          baseSeeds.current = null;
+          const old = sRef.current.sessionId;
+          if (old != null) await client.close(old);
+          setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
+          const bytes = await Promise.all(
+            ev.files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+          );
+          const opened = await client.open(bytes);
+          patch({ sessionId: opened.sessionId, files: opened.files });
+          sRef.current = { ...sRef.current, sessionId: opened.sessionId };
+          const out = await run('extract', {
+            opts: { sagittaMm: PATIMPORT.sagittaMm, keepFills: true },
+          });
+          // The best candidate is preselected; the operator confirms on the scale step.
+          const best = out.scale.reduce(
+            (b, c, i) => (c.confidence > out.scale[b].confidence ? i : b),
+            0,
+          );
+          patchInputs({ scaleIndex: best });
+          patch({
+            files: out.files,
+            pages: out.pages,
+            scale: { candidates: out.scale, decision: null },
+          });
+          if (out.warnings.length) patch({ error: null });
+          return;
+        }
+        case 'scale': {
+          await run('scale', { decision: ev.decision });
+          patch({ scale: { ...sRef.current.scale, decision: ev.decision } });
+          const out = await run('assemble', { sheet: 0, override: iRef.current.gridOverride });
+          patch({ sheet: out, step: 'sheet' });
+          return;
+        }
+        case 'sheet': {
+          patchInputs({ gridOverride: ev.override });
+          const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
+          patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
+          return;
+        }
+        case 'legend': {
+          patchInputs({ legend: ev.edits });
+          const chains = await run('chains', {
+            opts: chainOpts(),
+            legend: ev.edits,
+          });
+          const sizes = await run('sizes', { card: card.sizes });
+          patchInputs({ sizeMap: null });
+          patch({ chains, sizes });
+          return;
+        }
+        case 'size-map': {
+          patchInputs({ sizeMap: ev.entries });
+          const sizes = await run('sizes', { card: card.sizes, operatorMap: ev.entries });
+          patch({ sizes });
+          return;
+        }
+        case 'variant': {
+          patchInputs({ variant: ev.variant });
+          const out = await run('pieces', piecesInput({ ...iRef.current, variant: ev.variant }));
+          patch({ pieces: out, variant: ev.variant });
+          return;
+        }
+        case 'piece-edits': {
+          const next = { ...iRef.current, edits: ev.edits };
+          patchInputs({ edits: ev.edits });
+          const out = await run('pieces', piecesInput(next));
+          patch({ pieces: out });
+          return;
+        }
+        case 'names': {
+          // Names travel to the writer through the semantics overrides (I1): display name,
+          // nameOrigin (incl. 'ai-auto') and aiConfidence end up in PieceSpec and the manifest.
+          patch({ names: ev.decisions });
+          const overrides = overridesFromNames(ev.decisions, iRef.current.overrides);
+          const next = { ...iRef.current, overrides };
+          iRef.current = next;
+          patchInputs({ overrides });
+          if (sRef.current.semantics) {
+            const out = await run('semantics', semanticsInput(next));
+            patch({ semantics: out });
+          }
+          return;
+        }
+        case 'semantics': {
+          patchInputs({
+            fileAllowance: ev.input.fileAllowance,
+            overrides: ev.input.pieceOverrides,
+            operatorGrain: ev.input.operatorGrain,
+          });
+          const out = await run('semantics', ev.input);
+          patch({ semantics: out });
+          return;
+        }
+        case 'fabrics':
+          patchInputs({ assignment: ev.assignment });
+          patch({ fabrics: ev.assignment });
+          return;
+        case 'write': {
+          const a = sRef.current.fabrics;
+          const sizes = sRef.current.sizes;
+          let sem = sRef.current.semantics;
+          if (!a || !sizes || !sem) return;
+          // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
+          // but is a PieceSpec field: hand it to semantics as an override and re-run when it moved,
+          // so the manifest, the draft and the card read the same flag.
+          const fused = fusedSeedsOf(a);
+          if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
+            const overrides = { ...iRef.current.overrides };
+            for (const sd of new Set(sem.pieces.map((p) => p.seed)))
+              overrides[sd] = { ...(overrides[sd] ?? {}), fused: fused.has(sd) };
+            const next = { ...iRef.current, overrides };
+            iRef.current = next;
+            patchInputs({ overrides });
+            sem = await run('semantics', semanticsInput(next));
+            patch({ semantics: sem });
+          }
+          const out = await run('write', {
+            scopes: card.scopes,
+            assignment: a,
+            sizes: sizes.map.entries.flatMap((e) =>
+              e.card
+                ? [
+                    {
+                      token: e.card.token,
+                      sizeId: e.card.sizeId,
+                      name: e.card.name,
+                      sourceLabel: e.source.label,
+                      rank: e.source.rank,
+                    },
+                  ]
+                : [],
+            ),
+            dialect: 'r12',
+            generator: `grbpwr-admin pattern-import (${client.kind})`,
+          });
+          const draft = buildDraft(out, { card, semantics: sem });
+          patch({ draft, gate: out.gate, step: 'check' });
+          return;
+        }
+        case 'apply': {
+          const draft = sRef.current.draft;
+          if (!draft) return;
+          const progress: Record<string, ApplyProgress['state']> = {};
+          setApply({ phase: 'running', progress });
+          const result = await applyDraft(draft, (p) => {
+            progress[p.scopeKey] = p.state;
+            setApply({ phase: 'running', progress: { ...progress } });
+          });
+          setApply({ phase: 'done', result, progress: { ...progress } });
+          return;
+        }
+        case 'download': {
+          for (const d of sRef.current.draft?.downloads ?? []) downloadText(d.filename, d.dxfText);
+          return;
+        }
+        case 'back':
+          setApply({ phase: 'idle' });
+          patch(dropAfter(sRef.current, ev.to));
+          return;
+        case 'reset': {
+          const old = sRef.current.sessionId;
+          if (old != null) await client.close(old);
+          baseSeeds.current = null;
+          setInputs(EMPTY_INPUTS);
+          setApply({ phase: 'idle' });
+          setSession(EMPTY_SESSION);
+          return;
+        }
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  const chainOpts = () => ({
+    joinGapMm: PATIMPORT.joinGapMm,
+    joinAngleDeg: PATIMPORT.joinAngleDeg,
+    joinLateralMm: PATIMPORT.joinLateralMm,
+  });
+
+  /** Seed names from the namer, keeping what the operator already decided for surviving seeds. */
+  function mergeNames(fresh: NameDecision[]): NameDecision[] {
+    const prev = new Map(sRef.current.names.map((n) => [n.seed, n]));
+    const kept = new Set(iRef.current.confirmedNames);
+    return fresh.map((n) => (kept.has(n.seed) && prev.get(n.seed) ? prev.get(n.seed)! : n));
+  }
+
+  /**
+   * Every name as a semantics override, so the writer spells what the table shows AND the
+   * manifest says where the name came from (owner decision 11: auto-accepted AI names stay flagged).
+   */
+  function overridesFromNames(names: NameDecision[], base: Inputs['overrides']) {
+    const out: Inputs['overrides'] = { ...base };
+    const edited = new Set(iRef.current.editedNames);
+    for (const n of names) {
+      const { aiConfidence: _drop, ...prev } = out[n.seed] ?? {};
+      const nameOrigin = nameOriginOf(n, edited.has(n.seed));
+      out[n.seed] = {
+        ...prev,
+        code: n.code,
+        mods: n.mods,
+        displayName: n.displayName,
+        nameOrigin,
+        ...(nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? { aiConfidence: n.confidence } : {}),
+      };
+    }
+    return out;
+  }
+
+  // ── forward transitions: run what the NEXT step shows, then move ────────────────────────
+  async function next(): Promise<void> {
+    const s = sRef.current;
+    try {
+      switch (s.step) {
+        case 'files':
+          patch({ step: 'scale' });
+          return;
+        case 'scale': {
+          const d = scaleDecision();
+          if (d) await dispatch({ type: 'scale', decision: d });
+          return;
+        }
+        case 'sheet': {
+          const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
+          const sizes = await run('sizes', {
+            card: card.sizes,
+            operatorMap: iRef.current.sizeMap ?? undefined,
+          });
+          patch({ chains, sizes, step: 'sizes' });
+          return;
+        }
+        case 'sizes': {
+          // The first run shows every model on the sheet: the variant is picked on the pieces step.
+          const first = !baseSeeds.current;
+          const out = await run(
+            'pieces',
+            piecesInput(first ? { ...iRef.current, variant: null } : iRef.current),
+          );
+          if (first) baseSeeds.current = out.seeds;
+          patch({ pieces: out, variant: first ? null : iRef.current.variant, step: 'pieces' });
+          return;
+        }
+        case 'pieces': {
+          const som = await run('render-som', {
+            seeds: s.pieces?.families.map((f) => f.seed) ?? [],
+            dpi: 72,
+          });
+          patch({
+            busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' },
+          });
+          const names = mergeNames(
+            await namer(som, { card, threshold: PATIMPORT.aiAutoAcceptInitial }),
+          );
+          patch({ busy: null, names });
+          const overrides = overridesFromNames(names, iRef.current.overrides);
+          patchInputs({ overrides });
+          const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
+          patch({ semantics: sem, step: 'meaning' });
+          return;
+        }
+        case 'meaning': {
+          const out = await run('fabrics', { bom: card.scopes });
+          // An assignment the operator already edited survives a round trip through `back`.
+          const a = iRef.current.assignment ?? out;
+          patch({ fabrics: a, step: 'fabrics' });
+          return;
+        }
+        case 'fabrics':
+          await dispatch({ type: 'write' });
+          return;
+        case 'check':
+          patch({ step: 'apply' });
+          return;
+        default:
+          return;
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  const sizeTokens = useMemo(
+    () => new Set(card.sizes.map((c) => c.token.toLowerCase())),
+    [card.sizes],
+  );
+
+  // ── what blocks "next" — said in words, in the footer, before the click ─────────────────
+  const blocker = useMemo((): string | null => {
+    const s = session;
+    if (s.busy) return null;
+    switch (s.step) {
+      case 'files':
+        if (!s.files.length) return 'drop the pattern files and read them';
+        if (!s.scale.candidates.length) return 'the files are not read yet';
+        return null;
+      case 'scale': {
+        const c = s.scale.candidates[inputs.scaleIndex];
+        if (!c) return 'pick how the scale is known';
+        const d = scaleDecision(inputs);
+        const off = d ? Math.abs(d.factor - 1) : 0;
+        const needsHuman = c.confidence < 0.9 || off > PATIMPORT.scaleWarnRatio;
+        if (needsHuman && !inputs.scaleConfirmed && !inputs.manualMeasuredMm)
+          return 'confirm the scale — the detection is not certain';
+        return null;
+      }
+      case 'sheet': {
+        const miss = s.sheet?.sheet.missing.length ?? 0;
+        if (miss) return `${miss} pages are missing — set the grid by hand`;
+        const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
+        if (worst > PATIMPORT.registrationMaxResidualMm)
+          return `tiles do not close: ${worst.toFixed(2)} mm > ${PATIMPORT.registrationMaxResidualMm} mm`;
+        return null;
+      }
+      case 'sizes': {
+        if (!card.sizes.length) return 'the card has no size range — set it on the card first';
+        const pending = (s.chains?.classes ?? []).filter(
+          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
+        );
+        if (pending.length) return `${pending.length} legend row to confirm`;
+        const entries = s.sizes?.map.entries ?? [];
+        if (!entries.some((e) => e.card)) return 'map at least one size to the card';
+        const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
+        if (new Set(ids).size !== ids.length) return 'two source sizes point at one card size';
+        return null;
+      }
+      case 'pieces': {
+        const fams = s.pieces?.families ?? [];
+        const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current);
+        if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
+        const open = fams.filter((f) => f.candidates.some((c) => c.outcome !== 'closed'));
+        if (!fams.length) return 'no pieces — click inside a piece to seed it';
+        if (open.length)
+          return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — leak, merged or tiny`;
+        return null;
+      }
+      case 'meaning': {
+        const blocked = s.semantics?.blocked ?? [];
+        if (blocked.length) {
+          const grain = blocked.filter((b) => b.reason === 'no-grain').length;
+          return grain
+            ? `${grain} ${grain === 1 ? 'piece has' : 'pieces have'} no grainline — draw it (two clicks)`
+            : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
+        }
+        const pending = s.names.filter(
+          (n) => !n.autoAccepted && !inputs.confirmedNames.includes(n.seed) && exportedSeed(n.seed),
+        );
+        if (pending.length)
+          return `${pending.length} AI ${pending.length === 1 ? 'name' : 'names'} to confirm`;
+        // The identities the writer will spell (both hands of a declared pair), checked with the
+        // gate's own rule — a declared `_L`/`_R` is exempt from "ends in a size token".
+        const isSizeToken = sizeTokenTest(sizeTokens);
+        for (const n of s.names) {
+          if (!exportedSeed(n.seed)) continue;
+          const hand =
+            inputs.overrides[n.seed]?.pairHand !== undefined
+              ? inputs.overrides[n.seed]!.pairHand!
+              : s.semantics?.pieces.find((p) => p.seed === n.seed)?.pairHand ?? null;
+          for (const w of identitiesOf(n.code, n.mods, hand)) {
+            const why = identityProblem(w.identity, {
+              isSizeToken,
+              pair: { hand: w.pairHand, of: w.pairOf },
+            });
+            if (why) return `${w.identity || 'a code'}: ${why}`;
+          }
+        }
+        return null;
+      }
+      case 'fabrics': {
+        const a = s.fabrics;
+        if (!a) return 'fabrics are not proposed yet';
+        const seeds = new Set((s.semantics?.pieces ?? []).map((p) => p.seed));
+        const covered = new Set(Object.values(a.byPurpose).flat());
+        const orphan = [...seeds].filter((sd) => !covered.has(sd));
+        if (orphan.length)
+          return `${orphan.length} ${orphan.length === 1 ? 'piece has' : 'pieces have'} no fabric`;
+        if (!card.scopes.length) return 'the BOM has no fabric lines';
+        return null;
+      }
+      case 'check': {
+        const failing = Object.values(s.gate).flatMap((g) =>
+          g.checks.filter((c) => !c.ok && c.severity === 'block'),
+        );
+        if (failing.length)
+          return `${failing.length} blocking ${failing.length === 1 ? 'check' : 'checks'}`;
+        return null;
+      }
+      default:
+        return null;
+    }
+    // exportedSeed/sizeTokens are derived from session/card on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, inputs, card]);
+
+  /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
+  async function addSeed(at: PtMm) {
+    try {
+      const i = iRef.current;
+      const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
+      const id = Math.max(0, ...all.map((s) => s.id)) + 1;
+      const seed: Seed = { id, at, origin: 'click', variant: i.variant };
+      const next = { ...i, clickSeeds: [...i.clickSeeds, seed] };
+      iRef.current = next;
+      patchInputs({ clickSeeds: next.clickSeeds });
+      const out = await run('pieces', piecesInput(next));
+      patch({ pieces: out });
+      return id;
+    } catch (e) {
+      fail(e);
+      return null;
+    }
+  }
+
+  /** The operator TYPED a code or display name: it is theirs now (nameOrigin 'operator'). */
+  async function editName(
+    seed: SeedId,
+    p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>,
+  ) {
+    const i = iRef.current;
+    const next = {
+      ...i,
+      editedNames: [...new Set([...i.editedNames, seed])],
+      confirmedNames: [...new Set([...i.confirmedNames, seed])],
+    };
+    iRef.current = next;
+    patchInputs({ editedNames: next.editedNames, confirmedNames: next.confirmedNames });
+    await dispatch({
+      type: 'names',
+      decisions: sRef.current.names.map((n) => (n.seed === seed ? { ...n, ...p } : n)),
+    });
+  }
+
+  /** Append (or, with `undo`, drop the last) piece edit and re-run the fill. */
+  async function editPieces(e: PieceEdit | 'undo') {
+    const cur = iRef.current.edits;
+    const edits = e === 'undo' ? cur.slice(0, -1) : [...cur, e];
+    iRef.current = { ...iRef.current, edits };
+    await dispatch({ type: 'piece-edits', edits });
+  }
+
+  function exportedSeed(seed: SeedId) {
+    return (session.semantics?.pieces ?? []).some((p) => p.seed === seed);
+  }
+
+  return {
+    session,
+    inputs,
+    apply,
+    blocker,
+    sizeTokens,
+    baseSeeds: baseSeeds.current,
+    dispatch,
+    next,
+    addSeed,
+    editPieces,
+    editName,
+    patchInputs,
+    scaleDecision: () => scaleDecision(inputs),
+    piecesInput,
+    semanticsInput,
+    cancel: () => client.cancel(),
+  };
+}
+
+export type ImportSessionApi = ReturnType<typeof useImportSession>;
+
+/** Where a name came from, as the manifest records it. */
+export function nameOriginOf(
+  n: NameDecision,
+  typed: boolean,
+): NonNullable<PieceOverride['nameOrigin']> {
+  if (typed) return 'operator';
+  if (n.evidence.some((e) => e.kind === 'text-synonym')) return 'text';
+  return n.autoAccepted ? 'ai-auto' : 'ai';
+}
+
+/** The interlining proposal's seeds when interlining is NOT in the BOM: they carry `fused`. */
+const INTERLINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+export function fusedSeedsOf(a: FabricAssignment): Set<SeedId> {
+  if (a.interliningInBom) return new Set();
+  return new Set(a.proposals.find((p) => p.purpose === INTERLINING_PURPOSE)?.seeds ?? []);
+}
+
+export function variantsOf(seeds: Seed[], base: Seed[] | null): string[] {
+  return [
+    ...new Set([...(base ?? []), ...seeds].flatMap((s) => (s.variant ? [s.variant] : []))),
+  ].sort();
+}
+
+function downloadText(filename: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/dxf' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

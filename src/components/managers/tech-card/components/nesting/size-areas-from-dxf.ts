@@ -51,6 +51,7 @@ import {
   uniGroupsOf,
   uniOf,
 } from './block-code';
+import { manifestFactsOf } from './manifest-facts';
 import {
   readMarkerConditions,
   rebuildParseOpts,
@@ -140,18 +141,35 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // одной половине имён оно может разойтись с посчитанным по другой: файл, из которого сохраняли,
   // мог нести размеры, которых в сегодняшнем наборе листов уже нет. Разошедшийся вердикт означал бы,
   // что блоб и файл режутся на идентичности по-разному, — то есть сверка сравнивала бы разное.
+  //
+  // БЛОКИ ФАЙЛА С МАНИФЕСТОМ КОНВЕРТАЦИИ (F6b) В ВЫВОД НЕ ИДУТ НИ С ОДНОЙ СТОРОНЫ: их идентичность и
+  // размер заявлены конвертером, и той же заявкой режется СОХРАНЁННОЕ имя — блоб хранит сырое имя
+  // блока, то есть ровно ключ этой карты. Собирается по ВСЕМУ разбору (`input.parsed`), а не по
+  // кандидатам: факты едут на детали, и проверять, донесли ли их разворот и припуск, незачем.
+  const declaredByBlock = new Map<string, BlockCodeLite>();
+  for (const p of input.parsed) {
+    const m = manifestFactsOf(p);
+    const n = normBlock(p.blockName ?? '');
+    if (!m || !n) continue;
+    declaredByBlock.set(
+      n.toLowerCase(),
+      uniOf(n) ? { identity: n, size: '' } : { identity: m.identity, size: bare(m.size) },
+    );
+  }
   const names: string[] = [];
   for (const p of candidates) {
     const n = normBlock(p.blockName ?? '');
-    if (n) names.push(n);
+    if (n && !declaredByBlock.has(n.toLowerCase())) names.push(n);
   }
   for (const p of stored) {
     const n = normBlock(p.blockName ?? '');
-    if (n) names.push(n);
+    if (n && !declaredByBlock.has(n.toLowerCase())) names.push(n);
   }
   const verdict = deriveBlockSizes(names, input.isSizeToken);
   const codeOf = (raw: string): BlockCodeLite => {
     const n = normBlock(raw);
+    const declared = declaredByBlock.get(n.toLowerCase());
+    if (declared) return declared;
     const size = verdict.get(n) ?? '';
     if (!size) return { identity: n, size: '' };
     const identity = n.slice(0, n.length - size.length - 1);
