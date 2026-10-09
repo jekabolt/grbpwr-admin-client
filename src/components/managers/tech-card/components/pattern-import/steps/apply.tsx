@@ -13,6 +13,9 @@ import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, fmtBytes } from '../ui-bits';
 
+/** The card save answered something other than "saved" / "nothing to save". */
+const saveFailed = (save?: string) => !!save && save !== 'ok' && save !== 'nothing';
+
 export function ApplyStep({
   api,
   card,
@@ -32,6 +35,7 @@ export function ApplyStep({
   const progress = apply.phase === 'idle' ? {} : apply.progress;
   const created = draft.pieces.filter((p) => !p.existingLineKey);
   const reused = draft.pieces.filter((p) => p.existingLineKey);
+  const toUpload = draft.scopes.filter((s) => !s.alreadyOnCard).length;
   const existingName = (lineKey: string) =>
     card.existingPieces.find((p) => p.lineKey === lineKey)?.name ?? lineKey;
 
@@ -52,6 +56,7 @@ export function ApplyStep({
           <tbody>
             {draft.scopes.map((s) => {
               const st = progress[s.target.scopeKey];
+              const onCard = !!s.alreadyOnCard;
               return (
                 <tr key={s.target.scopeKey}>
                   <td>{s.filename}</td>
@@ -59,7 +64,11 @@ export function ApplyStep({
                   <td>{s.manifest.blocks.length}</td>
                   <td>{fmtBytes(new Blob([s.dxfText]).size)}</td>
                   <td data-align='left'>
-                    {st === 'uploaded' ? (
+                    {onCard ? (
+                      <Pill tone='mut' title={s.alreadyOnCard!.url}>
+                        already on the card
+                      </Pill>
+                    ) : st === 'uploaded' ? (
                       <Pill tone='ok'>uploaded</Pill>
                     ) : st === 'uploading' ? (
                       <Pill tone='attention'>uploading…</Pill>
@@ -101,7 +110,16 @@ export function ApplyStep({
                 <td data-align='left'>{p.fused ? 'yes' : '—'}</td>
                 <td data-align='left'>
                   {p.existingLineKey ? (
-                    <Pill tone='mut'>reuses “{existingName(p.existingLineKey)}”</Pill>
+                    <Pill
+                      tone='mut'
+                      title={
+                        p.basis === 'alias'
+                          ? 'already bound to these blocks on the card'
+                          : 'a card piece with this name exists'
+                      }
+                    >
+                      reuses “{existingName(p.existingLineKey)}”
+                    </Pill>
                   ) : (
                     <Pill tone='ink'>new</Pill>
                   )}
@@ -119,11 +137,7 @@ export function ApplyStep({
           <>
             <GroupLabel>existing pieces rewritten</GroupLabel>
             {draft.pieceUpdates.map((u) => (
-              <Row
-                key={u.lineKey}
-                label={existingName(u.lineKey)}
-                value={`→ identical · ${u.reason}`}
-              />
+              <Row key={u.lineKey} label={existingName(u.lineKey)} value={u.reason} />
             ))}
           </>
         )}
@@ -144,28 +158,56 @@ export function ApplyStep({
         )}
         {!done && (
           <Text size='micro' component='p' className='mb-2'>
-            applying uploads {draft.scopes.length} {draft.scopes.length === 1 ? 'file' : 'files'},
-            then adds {created.length} cut {created.length === 1 ? 'piece' : 'pieces'} and{' '}
-            {draft.aliases.length} block links to the card form in one step. if any upload fails,
-            the card is not changed. the card still has to be saved afterwards.
+            applying uploads {toUpload} {toUpload === 1 ? 'file' : 'files'}
+            {draft.scopes.length > toUpload
+              ? ` (${draft.scopes.length - toUpload} already on the card)`
+              : ''}
+            , then adds {created.length} cut {created.length === 1 ? 'piece' : 'pieces'} and{' '}
+            {draft.aliases.length} block links to the card form in one step, and saves the card. if
+            any upload fails, the card is not changed.
           </Text>
         )}
         {done?.ok && (
-          <CalloutBox tone='note' className='mb-2'>
-            <Text size='micro' component='p' className='text-success'>
-              <b>applied.</b> {done.uploaded.length} {done.uploaded.length === 1 ? 'file' : 'files'}{' '}
-              {stub
-                ? 'walked through (simulated) — nothing was written.'
-                : 'uploaded, the form is updated — save the card to keep it.'}
-            </Text>
+          <CalloutBox tone={saveFailed(done.save) ? 'warning' : 'note'} className='mb-2'>
+            {stub ? (
+              <Text size='micro' component='p'>
+                <b>walked through (simulated).</b> nothing was written.
+              </Text>
+            ) : done.writes === 0 ? (
+              <Text size='micro' component='p'>
+                <b>nothing to change.</b> this import is already on the card: same files, same
+                pieces, same block links.
+              </Text>
+            ) : (
+              <>
+                <Text size='micro' component='p' className='text-success'>
+                  <b>applied.</b> {done.uploaded.length}{' '}
+                  {done.uploaded.length === 1 ? 'file' : 'files'} uploaded
+                  {done.reused?.length ? `, ${done.reused.length} already on the card` : ''}; the
+                  card form is updated.
+                </Text>
+                <Text size='micro' component='p' className='mt-1'>
+                  {done.save === 'ok' || done.save === 'nothing'
+                    ? 'card saved.'
+                    : done.save
+                      ? `card not saved yet (${done.save}): the header shows why; autosave retries with the next edit.`
+                      : 'the card saves itself in a moment.'}
+                </Text>
+              </>
+            )}
           </CalloutBox>
         )}
         {done && !done.ok && (
           <CalloutBox tone='error' className='mb-2'>
             <Text size='micro' component='p'>
-              <b>! upload of {done.failedScope} failed:</b> {done.message}. nothing was written to
-              the card.
+              <b>! {done.failedScope}:</b> {done.message}. nothing was written to the card.
             </Text>
+            {done.uploaded.length > 0 && (
+              <Text size='micro' component='p' className='mt-1'>
+                uploaded before the failure and left unused in storage:{' '}
+                {done.uploaded.map((u) => u.filename).join(', ')}. applying again uploads them anew.
+              </Text>
+            )}
           </CalloutBox>
         )}
         <div className='flex flex-col gap-2'>
@@ -177,8 +219,8 @@ export function ApplyStep({
               disabled={running}
               onClick={() => void api.dispatch({ type: 'apply' })}
             >
-              apply to card · {draft.scopes.length} {draft.scopes.length === 1 ? 'file' : 'files'},{' '}
-              {created.length} {created.length === 1 ? 'piece' : 'pieces'}
+              apply to card · {toUpload} {toUpload === 1 ? 'file' : 'files'}, {created.length}{' '}
+              {created.length === 1 ? 'piece' : 'pieces'}
             </Button>
           ) : (
             <Button variant='main' size='lg' onClick={onClose}>
