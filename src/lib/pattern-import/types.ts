@@ -1546,6 +1546,8 @@ export type WizardEvent =
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
   | { type: 'size-map'; entries: SizeMapEntry[] }
+  /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
+  | { type: 'drawn-sizes'; n: number | null }
   | { type: 'variant'; variant: string | null }
   | { type: 'piece-edits'; edits: PieceEdit[] }
   | { type: 'names'; decisions: NameDecision[] }

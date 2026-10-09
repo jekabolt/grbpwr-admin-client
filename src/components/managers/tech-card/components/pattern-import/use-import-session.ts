@@ -82,6 +82,8 @@ export type Inputs = {
   /** Low-confidence legend rows the operator has looked at and accepted. */
   legendConfirmed: ClassId[];
   sizeMap: SizeMapEntry[] | null;
+  /** H1: the operator's "sizes drawn on this sheet" (null = the card's run decides). */
+  drawnSizes: number | null;
   variant: string | null;
   /** Seeds the operator added by clicking (appended to the text seeds of the first run). */
   clickSeeds: Seed[];
@@ -107,6 +109,7 @@ const EMPTY_INPUTS: Inputs = {
   legend: [],
   legendConfirmed: [],
   sizeMap: null,
+  drawnSizes: null,
   variant: null,
   clickSeeds: [],
   edits: [],
@@ -308,7 +311,13 @@ export function useImportSession(deps: {
         ? [...baseSeeds.current, ...i.clickSeeds]
         : undefined,
     edits: i.edits,
-    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: i.variant },
+    opts: {
+      cellMm: PATIMPORT.fillCellMm,
+      snapMm: PATIMPORT.snapMm,
+      variant: i.variant,
+      // H1: the fill refuses graded pieces it cannot prove against this count
+      ...(sRef.current.sizes?.expected ? { expectedSizes: sRef.current.sizes.expected } : {}),
+    },
   });
 
   const semanticsInput = (i: Inputs = iRef.current): StageIO['semantics']['in'] => ({
@@ -396,14 +405,29 @@ export function useImportSession(deps: {
             opts: chainOpts(),
             legend: ev.edits,
           });
-          const sizes = await run('sizes', { card: card.sizes });
+          const sizes = await run('sizes', {
+            card: card.sizes,
+            drawnSizes: iRef.current.drawnSizes ?? undefined,
+          });
           patchInputs({ sizeMap: null });
           patch({ chains, sizes });
           return;
         }
         case 'size-map': {
           patchInputs({ sizeMap: ev.entries });
-          const sizes = await run('sizes', { card: card.sizes, operatorMap: ev.entries });
+          const sizes = await run('sizes', {
+            card: card.sizes,
+            operatorMap: ev.entries,
+            drawnSizes: iRef.current.drawnSizes ?? undefined,
+          });
+          patch({ sizes });
+          return;
+        }
+        case 'drawn-sizes': {
+          // H1: how many sizes the sheet draws re-reads the run; the operator's map starts over
+          patchInputs({ drawnSizes: ev.n, sizeMap: null });
+          iRef.current = { ...iRef.current, drawnSizes: ev.n, sizeMap: null };
+          const sizes = await run('sizes', { card: card.sizes, drawnSizes: ev.n ?? undefined });
           patch({ sizes });
           return;
         }
@@ -587,6 +611,7 @@ export function useImportSession(deps: {
     const sizes = await run('sizes', {
       card: card.sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
+      drawnSizes: iRef.current.drawnSizes ?? undefined,
     });
     patch({ sizes });
     const pieces = await run('pieces', piecesInput({ ...iRef.current, variant: null }));
@@ -666,6 +691,7 @@ export function useImportSession(deps: {
           const sizes = await run('sizes', {
             card: card.sizes,
             operatorMap: iRef.current.sizeMap ?? undefined,
+            drawnSizes: iRef.current.drawnSizes ?? undefined,
           });
           patch({ chains, sizes, step: 'sizes' });
           return;
@@ -939,6 +965,7 @@ export function useImportSession(deps: {
     editName,
     confirmSize,
     setSize,
+    setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
     patchInputs,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
