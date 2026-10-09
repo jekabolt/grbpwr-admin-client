@@ -16,6 +16,7 @@
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
     "patimport:dxf": "node scripts/pattern-import/dxf.mjs",
     "patimport:raster": "node scripts/pattern-import/raster.mjs",
+    "patimport:sizes": "node scripts/pattern-import/sizes.mjs all",
     "paint:regions": "node scripts/paint-regions-probe.mjs",
     "paint:map": "node scripts/paint-map-probe.mjs",
     "paint:pen": "node scripts/paint-pen-probe.mjs",

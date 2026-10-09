@@ -374,12 +374,35 @@ export type Bundle = {
   endsOn: [ChainId | null, ChainId | null];
 };
 
+/** Something the size/legend step could not decide alone — shown to the operator in the legend. */
+export type ChainAmbiguity = {
+  kind:
+    | 'size-count' // geometry and text disagree on how many sizes
+    | 'labels-missing' // ranks known, size names not found
+    | 'rank-direction' // smallest/largest may be swapped
+    | 'class-merge' // two sizes drawn alike (one look over several ranks)
+    | 'class-split' // one size drawn in several looks
+    | 'size-empty' // a rank with no line
+    | 'unassigned' // size-line chains without a rank
+    | 'bundle-overfull'; // parallel group wider than the size count after splitting
+  message: string;
+  classes: ClassId[];
+  chains: ChainId[];
+  /** Where to look on the sheet, when it is one place. */
+  at: PtMm | null;
+};
+
 export type ChainSet = {
   chains: Chain[];
   classes: LineClass[];
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */
   orphans: ChainId[];
+  /**
+   * Open questions for the operator (legend step); empty when everything was decided. Optional so
+   * ChainSets built without size recovery (a CLO DXF read by blocks) need not invent an empty list.
+   */
+  ambiguities?: ChainAmbiguity[];
   warnings: string[];
 };
 
