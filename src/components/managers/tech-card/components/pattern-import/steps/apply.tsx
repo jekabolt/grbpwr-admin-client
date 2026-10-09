@@ -431,6 +431,15 @@ export function ApplyStep({
                 pattern files yet, so they stay in storage; applying again uploads them anew.
               </Text>
             )}
+            <Button
+              variant='underline'
+              size='xs'
+              className='mt-1 whitespace-nowrap'
+              title='saves a JSON file: versions, file names, sizes and checksums, the failed step, the gate and your answers; never the files themselves'
+              onClick={api.downloadReport}
+            >
+              download report
+            </Button>
           </CalloutBox>
         )}
         <div className='flex flex-col gap-2'>

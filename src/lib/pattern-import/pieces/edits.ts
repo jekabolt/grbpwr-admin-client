@@ -167,7 +167,14 @@ export const applyPieceEdits: ApplyPieceEditsFn = (families, edits, ctx) => {
       [seed],
       { ...ctx.opts, variant: null },
       undefined,
-      wall ? { exclude: [wall.instead], include: [{ rank: wall.rank, ids: [wall.use] }] } : {},
+      {
+        exclude: [...(ctx.walls?.exclude ?? []), ...(wall ? [wall.instead] : [])],
+        include: [
+          ...(ctx.walls?.include ?? []),
+          ...(wall ? [{ rank: wall.rank, ids: [wall.use] }] : []),
+        ],
+        bridges: ctx.walls?.bridges ?? [],
+      },
     );
     return fs[0] ?? null;
   };

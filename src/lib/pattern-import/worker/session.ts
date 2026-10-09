@@ -56,10 +56,19 @@ import {
 import { assembleSheetDetailed, classifyPages } from '../assemble';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
-import { applyLegend, buildChainsDetailed } from '../chains';
+import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
-import { applyPieceEdits, fillPiecesDetailed, proposeSeeds } from '../pieces';
+import {
+  applyPieceEdits,
+  applyWallEdits,
+  isWallEdit,
+  proposeSeeds,
+  startSession,
+  wallEditsInto,
+  type PieceSession,
+  type WallPieceEdit,
+} from '../pieces';
 import {
   allowanceFromTexts,
   buildPieceSpecsDetailed,
@@ -69,7 +78,6 @@ import {
 import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
-import { isWallEdit, mergeSameSize, withOperatorLines } from './operator-lines';
 import { chainPreviewOf, previewOf } from './preview';
 import { wallsUsedBy } from './walls-used';
 import { checkInputSet, imagePixelsRefusal } from './limits';
@@ -160,8 +168,16 @@ export class Session {
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
-  /** The set the fill ran on: `chains` + the operator's bridges − ignored lines. */
+  /** The set the fill ran on (the operator's wall edits live in `pieceSession.walls`, not here). */
   private wallSet: ChainSet | null = null;
+  /**
+   * The fill's state (F4b operator API, pieces/operator.ts): the operator's walls + the families.
+   * Kept while the wizard only APPENDS wall edits (same chains, run, seeds, opts), so a closed gap
+   * or an ignored line refills only the seeds it can reach; anything else starts a new session.
+   */
+  private pieceSession: PieceSession | null = null;
+  private pieceWallEdits: WallPieceEdit[] = [];
+  private pieceKey = '';
   private run: SizeRun | null = null;
   private sizeMap: SizeMap | null = null;
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
@@ -243,6 +259,9 @@ export class Session {
       this.seeds = null;
       this.families = null;
       this.wallSet = null;
+      this.pieceSession = null;
+      this.pieceWallEdits = [];
+      this.pieceKey = '';
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
@@ -622,16 +641,65 @@ export class Session {
     const run = this.run ?? detectSizeRun(sheet, base, this.files);
     this.run = run;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
-    const lines = withOperatorLines(base, run, input.edits);
-    const set = lines.set;
+    // Wall edits (close gap / ignore line / use line) go through the F4b session: appended ones
+    // refill only the seeds they reach; an undo, new seeds or another variant fill afresh with
+    // every wall edit so far. The other edits (not a piece, reseed, merge, split) apply after, on
+    // the session's families, keeping the operator's walls.
+    const wallEdits = input.edits.filter(isWallEdit);
+    const key = JSON.stringify([
+      seeds.map((x) => [x.id, x.at.x, x.at.y, x.variant, x.origin]),
+      input.opts,
+    ]);
+    const prev = this.pieceSession;
+    const prior = this.pieceWallEdits;
+    const appended =
+      !!prev &&
+      prev.set === base &&
+      prev.run === run &&
+      this.pieceKey === key &&
+      prior.length <= wallEdits.length &&
+      prior.every((e, i) => JSON.stringify(e) === JSON.stringify(wallEdits[i]));
     ctx.checkCancel();
-    let families = fillPiecesDetailed(sheet, set, run, seeds, input.opts, (d, t, n) => {
-      ctx.checkCancel();
-      ctx.progress(d, t, n);
-    }).families;
+    let ps: PieceSession;
+    if (appended) {
+      ps = applyWallEdits(prev!, wallEdits.slice(prior.length));
+    } else {
+      const empty: PieceSession = {
+        sheet,
+        set: base,
+        run,
+        seeds,
+        opts: input.opts,
+        walls: { exclude: [], include: [], bridges: [] },
+        families: [],
+      };
+      ps = startSession(
+        sheet,
+        base,
+        run,
+        seeds,
+        input.opts,
+        wallEditsInto(empty, wallEdits).walls,
+        (d, t, n) => {
+          ctx.checkCancel();
+          ctx.progress(d, t, n);
+        },
+      );
+    }
+    this.pieceSession = ps;
+    this.pieceWallEdits = wallEdits;
+    this.pieceKey = key;
+    const set = base;
+    let families = ps.families;
     const edits = input.edits.filter((e) => !isWallEdit(e));
     if (edits.length)
-      families = applyPieceEdits(families, edits, { sheet, set, run, opts: input.opts });
+      families = applyPieceEdits(families, edits, {
+        sheet,
+        set,
+        run,
+        opts: input.opts,
+        walls: ps.walls,
+      });
     this.wallSet = set;
     this.seeds = seeds;
     this.families = families;

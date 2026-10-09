@@ -715,6 +715,32 @@ async function pipelineCase(
     lf.candidates.some((x) => x.outcome !== 'closed'),
     `wall ${wall}: ${lf.candidates.map((x) => x.outcome[0]).join('')}${lf.candidates.find((x) => x.leakAt)?.leakAt ? ` leak@${lf.candidates.find((x) => x.leakAt)!.leakAt!.x.toFixed(0)},${lf.candidates.find((x) => x.leakAt)!.leakAt!.y.toFixed(0)}` : ''}`,
   );
+  // F4b operator API (I2): an appended wall edit refills only the seeds it can reach — the other
+  // families come back exactly as before.
+  const same = leak.families.filter((x) => {
+    const was = pc.families.find((y) => y.seed === x.seed);
+    return !!was && JSON.stringify(was) === JSON.stringify(x);
+  });
+  check(
+    name,
+    'ignore-line refills only the seeds it reaches',
+    same.length < leak.families.length && !same.some((x) => x.seed === f.seed),
+    `${leak.families.length - same.length} of ${leak.families.length} families refilled`,
+  );
+  // "use line" (setWall) on the ignored chain makes it a wall again: the piece closes as before.
+  const setBack = await run('pieces', {
+    seeds: pc.seeds,
+    edits: [ignore, { kind: 'set-wall', chain: wall, rank: null }],
+    opts,
+  });
+  const sf = setBack.families.find((x) => x.seed === f.seed)!;
+  const sa = sf.candidates[sf.candidates.length - 1].areaMm2;
+  check(
+    name,
+    'set-wall on the ignored line closes the piece again',
+    closed(sf) && Math.abs(sa - c.areaMm2) <= 0.01 * c.areaMm2,
+    `${sf.candidates.map((x) => x.outcome[0]).join('')} area ${(sa / 100).toFixed(0)} vs ${(c.areaMm2 / 100).toFixed(0)} cm²`,
+  );
   const a = ch.chainPreview[wall];
   const pts: { x: number; y: number }[] = [];
   for (let i = 0; i < a.length; i += 2) pts.push({ x: a[i], y: a[i + 1] });

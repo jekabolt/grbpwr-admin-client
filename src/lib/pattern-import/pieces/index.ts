@@ -10,11 +10,19 @@ export { applyPieceEdits } from './edits';
 export {
   addBridge,
   affectedSeeds,
+  affectedSeedsNear,
+  applyWallEdits,
+  BRIDGE_END_SNAP_MM,
+  BRIDGE_LINE_SNAP_MM,
   ignoreChain,
+  isWallEdit,
   refill,
   setWall,
+  snapBridge,
   startSession,
+  wallEditsInto,
   type PieceSession,
+  type WallPieceEdit,
 } from './operator';
 export { proposeVariants, variantKnives, type VariantOption } from './variants';
 export { labelOf, seedLabel, textSeeds, variantLabels } from './seeds';

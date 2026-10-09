@@ -5,7 +5,7 @@
 // the middle, an action strip below. Nine steps read as words in a `Stepper`; a reached step is a
 // door back (contract: `back{to}` keeps that step's inputs, drops the outputs after it).
 import * as Dialog from '@radix-ui/react-dialog';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -35,7 +35,6 @@ import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
-import { createStubClient, createStubNamer, stubApplyDraft, stubBuildDraft } from './stub-client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
 
 const STAGE_WORD: Record<string, string> = {
@@ -71,16 +70,35 @@ type WizardProps = {
  * step. Everything else runs the real worker.
  */
 const STUB_BY_DEFAULT = import.meta.env.VITE_PATTERN_IMPORT_STUB === '1';
+/**
+ * Fixture mode exists only in dev builds and where `VITE_PATTERN_IMPORT_STUB=1` is set at build
+ * time. Both are compile-time constants, so in a production build the dynamic import below is dead
+ * code and the fixture (fixture.ts, stub-client.ts) never reaches a chunk.
+ */
+const STUB_AVAILABLE = import.meta.env.DEV || STUB_BY_DEFAULT;
+
+type StubKit = typeof import('./stub-client');
 
 export function ImportWizard(props: WizardProps) {
-  const [stub, setStub] = useState(STUB_BY_DEFAULT);
+  const [stub, setStub] = useState(STUB_AVAILABLE && STUB_BY_DEFAULT);
+  const [kit, setKit] = useState<StubKit | null>(null);
+  useEffect(() => {
+    if (!STUB_AVAILABLE || !stub || kit) return;
+    let live = true;
+    void import('./stub-client').then((m) => live && setKit(m));
+    return () => {
+      live = false;
+    };
+  }, [stub, kit]);
+  // fixture mode waits for its chunk (dev only; a few ms)
+  if (stub && !kit) return null;
   // A new mode is a new run: the keyed body drops its client and session with it.
   return (
     <WizardBody
       key={stub ? 'stub' : 'worker'}
       {...props}
       onToggleStub={props.client || !import.meta.env.DEV ? undefined : () => setStub((v) => !v)}
-      stub={stub}
+      kit={stub ? kit : null}
     />
   );
 }
@@ -106,18 +124,20 @@ function WizardBody({
   followUp,
   onRetryFollowUp,
   onReviewPieces,
-  stub,
+  kit,
   onToggleStub,
-}: WizardProps & { stub: boolean; onToggleStub?: () => void }) {
+}: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
   // One client per wizard run. useState, not useMemo: the client owns the worker session and must
   // outlive any re-render (React may drop a memo; fast refresh re-runs one).
   const [client] = useState<ImportClient>(
-    () => clientProp ?? (stub ? createStubClient() : new ImportWorkerClient()),
+    () => clientProp ?? (kit ? kit.createStubClient() : new ImportWorkerClient()),
   );
   // Fixture mode keeps the fixture draft and the simulated apply (it writes nothing); the real
   // worker gets F7's draft and the card's apply (patterns-field passes it with the form inside).
-  const buildDraft = buildDraftProp ?? (client.kind === 'stub' ? stubBuildDraft : cardBuildDraft);
-  const applyDraft = client.kind === 'stub' ? stubApplyDraft : applyDraftProp ?? noCardApply;
+  const buildDraft =
+    buildDraftProp ?? (client.kind === 'stub' && kit ? kit.stubBuildDraft : cardBuildDraft);
+  const applyDraft =
+    client.kind === 'stub' && kit ? kit.stubApplyDraft : applyDraftProp ?? noCardApply;
   const latest = useRef<ImportSession | null>(null);
   // The real AI namer (F10) needs real renders, so it rides with the real worker; the stub client's
   // render-som draws nothing and keeps the fixture namer. VITE_PATTERN_IMPORT_AI=stub turns the AI
@@ -130,11 +150,13 @@ function WizardBody({
         ? import.meta.env.VITE_PATTERN_IMPORT_AI === 'stub'
           ? noNames
           : createAiNamer()
-        : createStubNamer(
-            () => latest.current?.pieces?.seeds ?? [],
-            () => latest.current?.pieces?.families ?? [],
-          )),
-    [namerProp, client],
+        : kit
+          ? kit.createStubNamer(
+              () => latest.current?.pieces?.seeds ?? [],
+              () => latest.current?.pieces?.families ?? [],
+            )
+          : noNames),
+    [namerProp, client, kit],
   );
   const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
   latest.current = api.session;

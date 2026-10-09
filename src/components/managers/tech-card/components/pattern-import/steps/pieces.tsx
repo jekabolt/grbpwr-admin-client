@@ -1,7 +1,8 @@
 // Step 5 · PIECES — seed + outer fill (06-SYNTHESIS: the core). Every region is drawn as found;
 // what the fill could not close goes to the human: a leak (red, with where the outside got in),
 // two seeds in one region (blue), a region too small to be a piece. Tools: click to seed, close a
-// gap (two clicks: a wall between two line ends), ignore a line (a frame, a watermark), lasso to
+// gap (two clicks: a wall between two line ends), use a line (it becomes an outline for this size
+// or all sizes), ignore a line (a frame, a watermark), lasso to
 // merge (around several seeds) or split (inside a merged region), "not a piece", reseed. Each
 // region carries a strip of its sizes, so a piece closed in four sizes of six says which two.
 import { useMemo, useRef, useState } from 'react';
@@ -19,12 +20,13 @@ import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
 import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
 
-type Tool = 'pan' | 'seed' | 'bridge' | 'ignore' | 'lasso' | 'reseed';
+type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
 const HINT: Record<Tool, string> = {
   pan: 'click a piece to select · wheel zoom · drag pan',
   seed: 'click inside a piece to seed it',
   bridge: 'click one end of the gap, then the other — a wall is drawn between them',
+  wall: 'click a line the fill should treat as an outline (a facing line, a seam)',
   ignore: 'click a line that is not an outline (frame, watermark, label box)',
   lasso: 'draw around several seeds to merge · inside a two-seed region to split',
   reseed: 'click the new place for the selected seed',
@@ -32,7 +34,7 @@ const HINT: Record<Tool, string> = {
 
 type Bridge = Extract<PieceEdit, { kind: 'bridge' }>;
 
-/** Where the worker will land a bridge end (display only; same rule as worker/operator-lines). */
+/** Where the worker will land a bridge end (display only; same rule as pieces/operator snapBridge). */
 function landOn(previews: readonly Float32Array[], p: PtMm, skip: ReadonlySet<number>): PtMm {
   let best: PtMm | null = null;
   let bd = 4;
@@ -125,7 +127,18 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
   const markOf = useMemo(() => new Map(families.map((f, i) => [f.seed, i + 1])), [families]);
   if (!out || !session.sheet || !session.chains) return null;
   const previews = session.chains.chainPreview;
-  const ignored = new Set(inputs.edits.flatMap((e) => (e.kind === 'ignore-line' ? [e.chain] : [])));
+  // the last word on a line wins: "use line" after "ignore line" makes it a wall again, and back
+  const ignored = new Set<number>();
+  const used = new Map<number, number | null>();
+  for (const e of inputs.edits) {
+    if (e.kind === 'ignore-line') {
+      ignored.add(e.chain);
+      used.delete(e.chain);
+    } else if (e.kind === 'set-wall') {
+      ignored.delete(e.chain);
+      used.set(e.chain, e.rank);
+    }
+  }
   const bridges = inputs.edits.filter((e): e is Bridge => e.kind === 'bridge');
   const mapped = exportedRanks(session.sizes?.map);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
@@ -176,6 +189,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   ['pan', 'pan', 'pan and select'],
                   ['seed', '+ seed', 'click inside a piece the text did not label'],
                   ['bridge', 'close gap', 'two clicks: a wall between two line ends'],
+                  ['wall', 'use line', 'a drawn line the fill should treat as an outline'],
                   ['ignore', 'ignore line', 'a line that is not an outline'],
                   ['lasso', 'lasso', 'merge seeds or split a two-seed region'],
                 ] as const
@@ -249,13 +263,17 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                 </ChipRow>
               </>
             )}
-            {tool === 'bridge' && (
+            {(tool === 'bridge' || tool === 'wall') && (
               <ChipRow className='ml-3'>
                 <Chip
                   selected={!allSizes}
                   pressed={!allSizes}
                   onClick={() => setAllSizes(false)}
-                  title='the gap is in this size line only'
+                  title={
+                    tool === 'bridge'
+                      ? 'the gap is in this size line only'
+                      : 'the line bounds this size only'
+                  }
                 >
                   size {labelOf(rank)}
                 </Chip>
@@ -263,7 +281,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   selected={allSizes}
                   pressed={allSizes}
                   onClick={() => setAllSizes(true)}
-                  title='the gap is in a line every size shares'
+                  title={
+                    tool === 'bridge'
+                      ? 'the gap is in a line every size shares'
+                      : 'the line bounds every size'
+                  }
                 >
                   all sizes
                 </Chip>
@@ -295,6 +317,22 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   setGapA(null);
                   setHint(
                     `gap closed in ${allSizes ? 'every size' : `size ${labelOf(rank)}`} — the fill runs again`,
+                  );
+                  return;
+                }
+                if (tool === 'wall') {
+                  const hit = nearestLine(previews, pt, Math.max(1.5, unitRef.current * 8));
+                  if (!hit) {
+                    setHint('no line under the click — zoom in and click on the line itself');
+                    return;
+                  }
+                  void api.editPieces({
+                    kind: 'set-wall',
+                    chain: hit.id,
+                    rank: allSizes ? null : rank,
+                  });
+                  setHint(
+                    `line used as an outline in ${allSizes ? 'every size' : `size ${labelOf(rank)}`} — the pieces it touches are filled again`,
                   );
                   return;
                 }
@@ -347,6 +385,18 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   >
                     {[...ignored].map((i) =>
                       previews[i] ? <polyline key={`x${i}`} points={f32Attr(previews[i])} /> : null,
+                    )}
+                  </g>
+                  <g
+                    fill='none'
+                    stroke={SHEET_INK.blue}
+                    strokeWidth={unit * 2}
+                    pointerEvents='none'
+                  >
+                    {[...used].map(([i, r]) =>
+                      previews[i] && (r == null || r === rank) ? (
+                        <polyline key={`w${i}`} points={f32Attr(previews[i])} />
+                      ) : null,
                     )}
                   </g>
                   {[...families]
@@ -609,6 +659,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                 `${inputs.edits.length} ${inputs.edits.length === 1 ? 'edit' : 'edits'}`,
                 bridges.length &&
                   `${bridges.length} ${bridges.length === 1 ? 'gap' : 'gaps'} closed`,
+                used.size && `${used.size} ${used.size === 1 ? 'line' : 'lines'} used`,
                 ignored.size && `${ignored.size} ${ignored.size === 1 ? 'line' : 'lines'} ignored`,
                 `${inputs.clickSeeds.length} clicked ${inputs.clickSeeds.length === 1 ? 'seed' : 'seeds'}`,
               ]

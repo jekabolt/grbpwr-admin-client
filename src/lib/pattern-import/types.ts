@@ -596,12 +596,31 @@ export type PieceEdit =
    */
   | { kind: 'bridge'; seed: SeedId | null; rank: number | null; from: PtMm; to: PtMm }
   /** The operator's "ignore this line": the chain is never a wall (a frame, a watermark, a label box). */
-  | { kind: 'ignore-line'; chain: ChainId };
+  | { kind: 'ignore-line'; chain: ChainId }
+  /**
+   * The operator's "use line" (F4b `setWall`): the chain becomes a wall of one size rank, or —
+   * `rank: null` — of every size (a facing line inside a hood that bounds the facing piece).
+   */
+  | { kind: 'set-wall'; chain: ChainId; rank: number | null };
 
 export type ApplyPieceEditsFn = (
   families: PieceFamily[],
   edits: PieceEdit[],
-  ctx: { sheet: Sheet; set: ChainSet; run: SizeRun; opts: FillOpts },
+  ctx: {
+    sheet: Sheet;
+    set: ChainSet;
+    run: SizeRun;
+    opts: FillOpts;
+    /**
+     * The operator's wall edits so far (F4b `PieceSession.walls`): a reseed / wall-override refill
+     * keeps the gaps the operator closed and the lines they ignored or set.
+     */
+    walls?: {
+      exclude?: ChainId[];
+      include?: { rank: number | null; ids: ChainId[] }[];
+      bridges?: { rank: number; from: PtMm; to: PtMm }[];
+    };
+  },
 ) => PieceFamily[];
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────

@@ -5,12 +5,11 @@ import { sizeTokensOf } from '../nesting/block-code';
 import type { CardContext } from './client';
 
 /**
- * The wizard runs on the real worker (F13b), but stops where the pipeline does today (after the
- * sheet; a DXF reaches details): the door is shown in dev builds and where `VITE_PATTERN_IMPORT=1`
- * is set, not to operators on a real card. Drop the gate when semantics/fabrics land.
+ * The door is open by default (beta shows it with no env change); `VITE_PATTERN_IMPORT=0` at build
+ * time closes it on a contour. Fixture mode stays off unless `VITE_PATTERN_IMPORT_STUB=1`
+ * (import-wizard.tsx).
  */
-export const PATTERN_IMPORT_ENABLED =
-  import.meta.env.DEV || import.meta.env.VITE_PATTERN_IMPORT === '1';
+export const PATTERN_IMPORT_ENABLED = import.meta.env.VITE_PATTERN_IMPORT !== '0';
 
 const INTERLINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
 const INTERLINING_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';

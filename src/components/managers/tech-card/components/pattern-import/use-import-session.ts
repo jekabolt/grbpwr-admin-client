@@ -508,6 +508,13 @@ export function useImportSession(deps: {
             progress[p.scopeKey] = p.state;
             setApply({ phase: 'running', progress: { ...progress } });
           });
+          // the apply step's "download report" carries what the card refused (M5)
+          if (!result.ok)
+            failureRef.current = {
+              stage: null,
+              code: null,
+              message: `apply: ${result.failedScope}: ${result.message}`,
+            };
           setApply({ phase: 'done', result, progress: { ...progress } });
           return;
         }
