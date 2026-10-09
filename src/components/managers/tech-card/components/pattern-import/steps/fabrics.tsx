@@ -3,8 +3,10 @@
 // operator ticks the matrix. A piece in two fabrics goes into both files. Interlining that is not
 // in the BOM is not a file at all — its pieces get `fused` (decision 14).
 import { useMemo, useState } from 'react';
-import type { FabricAssignment, SeedId } from 'lib/pattern-import/types';
+import type { FabricAssignment, FabricEvidence, SeedId } from 'lib/pattern-import/types';
+import { PURPOSE, isLiningScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import { cn } from 'lib/utility';
+import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
@@ -16,7 +18,26 @@ import { SHEET_INK, SheetViewport, ptsAttr } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, SplitStage, fmtPct } from '../ui-bits';
 
-const INTERLINING = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+const INTERLINING = PURPOSE.interfacing;
+
+/** One short line per kind of evidence: what the sheet (or the AI) said about this fabric. */
+function evidenceLine(ev: readonly FabricEvidence[]): string {
+  const labels = ev.filter((e) => e.kind === 'label').length;
+  const layouts = ev.flatMap((e) => (e.kind === 'cut-layout' ? [e] : []));
+  const ai = ev.some((e) => e.kind === 'ai');
+  const parts: string[] = [];
+  if (labels) parts.push(`${labels} ${labels === 1 ? 'label' : 'labels'} on the pieces`);
+  const seen = new Set<string>();
+  for (const l of layouts) {
+    if (seen.has(l.text)) continue;
+    seen.add(l.text);
+    parts.push(
+      `cut list «${l.text.slice(0, 32)}»${l.widthCm ? ` ${l.widthCm} cm` : ''}: ${l.pieces.join(', ')}`,
+    );
+  }
+  if (ai) parts.push('AI');
+  return parts.join(' · ') || 'nothing named: main fabric by default';
+}
 
 export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
   const { session } = api;
@@ -27,11 +48,20 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   if (!a || !sem || !session.sheet) return null;
 
   const seeds = [...new Set(sem.pieces.map((p) => p.seed))];
-  const nameOf = (seed: SeedId) =>
-    session.names.find((n) => n.seed === seed)?.displayName || `piece ${seed}`;
   const idsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed).map((p) => p.identity);
+  const nameOf = (seed: SeedId) =>
+    session.names.find((n) => n.seed === seed)?.displayName ||
+    sem.pieces.find((p) => p.seed === seed)?.displayName ||
+    idsOf(seed)[0] ||
+    `piece ${seed}`;
   const interliningProposal = a.proposals.find((p) => p.purpose === INTERLINING);
   const fusedSet = new Set(a.interliningInBom ? [] : interliningProposal?.seeds ?? []);
+  // the planner the write stage cuts the files with: what it refuses is said here, per piece
+  const problems = planScopes(sem.pieces, a, card.scopes).problems;
+  const blockedSeed = new Set(problems.flatMap((p) => p.seeds));
+  const refusedOf = (seed: SeedId) => (a.refused ?? []).filter((r) => r.seeds.includes(seed));
+  const scopeLabel = (key: string | null | undefined) =>
+    card.scopes.find((s) => s.scopeKey === key)?.label ?? null;
 
   const set = (next: FabricAssignment) => void api.dispatch({ type: 'fabrics', assignment: next });
   const toggle = (scopeKey: string, seed: SeedId, on: boolean) => {
@@ -69,26 +99,29 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
             <DataTable>
               <thead>
                 <tr>
-                  <th data-align='left'>on the sheet</th>
-                  <th data-align='left'>purpose</th>
+                  <th data-align='left'>fabric</th>
                   <th data-align='left'>card scope</th>
+                  <th data-align='left'>evidence</th>
                   <th>pieces</th>
                   <th>sure</th>
                 </tr>
               </thead>
               <tbody>
                 {a.proposals.map((p) => {
-                  const target = card.scopes.find((s) => s.fabricPurpose === p.purpose);
+                  const target = scopeLabel(p.scopeKey);
                   const fusedHere = p.purpose === INTERLINING && !a.interliningInBom;
+                  const refused = (a.refused ?? []).find((r) => r.purpose === p.purpose);
                   return (
-                    <tr key={p.purpose + p.label}>
-                      <td data-align='left'>“{p.label}”</td>
-                      <td data-align='left' className='text-labelColor'>
-                        {p.purpose.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()}
+                    <tr key={(p.scopeKey ?? p.purpose) + p.label}>
+                      <td data-align='left'>
+                        “{p.label}”
+                        <span className='ml-1 text-labelColor'>
+                          {p.purpose.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()}
+                        </span>
                       </td>
                       <td data-align='left'>
                         {target ? (
-                          target.label
+                          target
                         ) : fusedHere ? (
                           <Pill
                             tone='attention'
@@ -97,10 +130,13 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                             not in BOM → fused
                           </Pill>
                         ) : (
-                          <Pill tone='warn' title='add this fabric to the BOM to export its DXF'>
-                            not in BOM
+                          <Pill tone='warn' title={refused?.reason ?? 'add this fabric to the BOM'}>
+                            not in BOM · no DXF
                           </Pill>
                         )}
+                      </td>
+                      <td data-align='left' className='max-w-[360px] text-labelColor'>
+                        {evidenceLine(p.evidence)}
                       </td>
                       <td>{p.seeds.length}</td>
                       <td>{fmtPct(p.confidence, 0)}</td>
@@ -109,6 +145,15 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 })}
               </tbody>
             </DataTable>
+            {problems.length > 0 && (
+              <CalloutBox tone='error' className='mt-2'>
+                {problems.map((p, i) => (
+                  <Text key={i} size='micro' component='p'>
+                    <b>! {p.seeds.map(nameOf).join(', ')}:</b> {p.message}
+                  </Text>
+                ))}
+              </CalloutBox>
+            )}
           </div>
 
           <div>
@@ -125,6 +170,14 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       className={cn(focusScope === s.scopeKey && 'text-textColor')}
                     >
                       {s.label}
+                      {isLiningScope(s) && (
+                        <span
+                          className='block text-labelColor'
+                          title='lining copies are written LIN_<name> and become their own card pieces, never the shell piece'
+                        >
+                          as LIN_…
+                        </span>
+                      )}
                     </th>
                   ))}
                   {!a.interliningInBom && <th data-align='left'>fused</th>}
@@ -135,11 +188,21 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                   const none = card.scopes.every(
                     (s) => !(a.byPurpose[s.scopeKey] ?? []).includes(seed),
                   );
+                  const refused = refusedOf(seed);
+                  const blocked = none || blockedSeed.has(seed);
                   return (
                     <tr key={seed}>
-                      <td className={none ? 'text-error' : undefined}>
-                        {none ? '! ' : ''}
+                      <td
+                        className={blocked ? 'text-error' : undefined}
+                        title={refused.map((r) => r.reason).join('\n') || undefined}
+                      >
+                        {blocked ? '! ' : ''}
                         {nameOf(seed)}
+                        {refused.length > 0 && (
+                          <span className='ml-1 text-labelColor'>
+                            (also {refused.map((r) => r.label).join(', ')}: not in BOM)
+                          </span>
+                        )}
                       </td>
                       <td data-align='left' className='text-labelColor'>
                         {idsOf(seed).join(' + ')}
@@ -171,8 +234,8 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
             </DataTable>
             <Text size='micro' variant='label' component='p' className='mt-1'>
               {a.interliningInBom
-                ? 'interlining is in the BOM — it gets its own DXF like any other fabric.'
-                : 'interlining is not in the BOM — no DXF for it; ticked pieces carry the fused flag on the card.'}
+                ? 'interlining is in the BOM: its pieces get their own DXF and stay the same card piece as the shell, marked fused.'
+                : 'interlining is not in the BOM: no DXF for it; ticked pieces carry the fused flag on the card.'}
             </Text>
           </div>
         </Panel>

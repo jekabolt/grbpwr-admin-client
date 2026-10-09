@@ -39,8 +39,10 @@ import {
   type FabricScope,
   type ScopeDirection,
   aliasInScope,
+  aliasScopeKey,
   bindingForScope,
   bomPurposeLabel,
+  fabricScopeKey,
   fabricScopes,
   scopeKeyOfBinding,
   strictestDirection,
@@ -56,6 +58,9 @@ import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
+import { createCardApply } from './pattern-import/card-apply';
+import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -251,7 +256,9 @@ export function PatternsField({
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  // The import wizard's apply ends in the card's own save (F7): the page has no save button.
+  const autosave = useTechCardAutosave();
   const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
@@ -269,6 +276,9 @@ export function PatternsField({
     lineKey?: string;
     name?: string;
     cutSymmetry?: string;
+    piecesPerGarment?: number;
+    fused?: boolean;
+    fusingMode?: string;
   }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
@@ -878,14 +888,15 @@ export function PatternsField({
               {stray && (
                 <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
                   <Text size='nano' component='span' className='text-error'>
-                    the size of this row is not in the card's range — the server will refuse the save
+                    the size of this row is not in the card's range — the server will refuse the
+                    save
                   </Text>
                   {canEdit && storageSizeId > 0 && (
                     <Button
                       type='button'
                       variant='secondary'
                       size='xs'
-                      title="re-file the row onto a size that is in the range (the size is only a storage slot)"
+                      title='re-file the row onto a size that is in the range (the size is only a storage slot)'
                       onClick={() =>
                         // Смена size_id — это keyed replacement: сервер перенумерует ревизию
                         // (MAX+1). Файл при этом тот же, и ни один потребитель размер строки не
@@ -1318,7 +1329,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   title={`automatic marker of “${label}” pieces on a strip`}
                   onClick={() =>
                     setNesting({
@@ -1376,7 +1388,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   data-field='patterns.match'
                   title={`match the DXF pieces to the cut pieces of “${label}”`}
                   onClick={() =>
@@ -1404,7 +1417,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
                   onClick={() =>
                     setMeasuring({
@@ -1479,7 +1493,10 @@ export function PatternsField({
           materials: {scopeGroups.length}
         </Text>
         {materialsWithoutDxf.length > 0 && (
-          <HeaderNote tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
+          <HeaderNote
+            tone='warn'
+            title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}
+          >
             without DXF: {materialsWithoutDxf.length}
           </HeaderNote>
         )}
@@ -1679,7 +1696,31 @@ export function PatternsField({
                 sections: sc.lines.map((l) => l.section),
               })),
               pieces: cardPieces,
+              aliases: pieceDxfAliases.map((a) => ({
+                scopeKey: aliasScopeKey(a),
+                blockName: a.blockName,
+                pieceLineKey: a.pieceLineKey,
+              })),
+              patterns: liveRows.map((p) => ({
+                scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+                filename: p.filename,
+                url: p.url,
+              })),
               styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+            })}
+            // F7: upload every file, then ONE batch into this form, then the card's own save.
+            applyDraft={createCardApply({
+              read: () => ({
+                patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
+                pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
+                aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
+              }),
+              write: (path, value) =>
+                setValue(path as Parameters<typeof setValue>[0], value as never, {
+                  shouldDirty: true,
+                }),
+              storageSizeId,
+              save: (reason) => autosave.flush(reason),
             })}
             onClose={() => setImporting(false)}
           />

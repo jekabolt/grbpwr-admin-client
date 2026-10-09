@@ -84,6 +84,7 @@
     "patimport:f12-fixtures": "node scripts/pattern-import/f12-fixtures.mjs",
     "patimport:f12": "node scripts/pattern-import/f12-vector.mjs",
     "patimport:semantics": "node scripts/pattern-import/semantics.mjs",
+    "patimport:fabrics": "node scripts/pattern-import/fabrics.mjs",
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",
