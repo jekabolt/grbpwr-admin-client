@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   ApplyResult,
+  CardSize,
   ImportErrorCode,
   ChainRole,
   ClassId,
@@ -18,6 +19,7 @@ import type {
   ScaleDecision,
   Seed,
   SeedId,
+  SizeMap,
   SizeMapEntry,
   StageIO,
   StageName,
@@ -182,6 +184,11 @@ export function useImportSession(deps: {
   const [errorCode, setErrorCode] = useState<ImportErrorCode | null>(null);
   /** The latest Set-of-Mark render (what the AI was shown), kept to draw it on the details step. */
   const [som, setSom] = useState<StageIO['render-som']['out'] | null>(null);
+  /**
+   * Something the operator should know that is not a failure of the run — the AI namer could not
+   * be reached (not logged in, offline): the pieces are named by hand instead.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
   // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
@@ -468,6 +475,7 @@ export function useImportSession(deps: {
         }
         case 'back':
           setApply({ phase: 'idle' });
+          setNotice(null);
           setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
           return;
@@ -476,6 +484,7 @@ export function useImportSession(deps: {
           if (old != null) await client.close(old);
           baseSeeds.current = null;
           setSom(null);
+          setNotice(null);
           setExtracted(NO_EXTRACT);
           setInputs(EMPTY_INPUTS);
           setApply({ phase: 'idle' });
@@ -503,14 +512,15 @@ export function useImportSession(deps: {
     try {
       names = mergeNames(await namer(out, { card, threshold: AI_AUTO_ACCEPT_T }));
     } catch (e) {
-      namerError = `AI names: ${e instanceof Error ? e.message : String(e)}`;
+      namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
     }
     patch({ busy: null, names, step: 'meaning' });
     const overrides = overridesFromNames(names, iRef.current.overrides);
     patchInputs({ overrides });
     iRef.current = { ...iRef.current, overrides };
     const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
-    patch({ semantics: sem, ...(namerError ? { error: namerError } : {}) });
+    patch({ semantics: sem });
+    setNotice(namerError);
   }
 
   /**
@@ -534,6 +544,12 @@ export function useImportSession(deps: {
     baseSeeds.current = pieces.seeds;
     patch({ pieces, variant: null });
     sRef.current = { ...sRef.current, sheet, chains, sizes, pieces };
+    // A guessed match, or a size the card does not carry, stops on the sizes step: the gate
+    // refuses an exported size without a card id, so the operator answers it first.
+    if (sizeMapOpen(sizes.map)) {
+      patch({ step: 'sizes' });
+      return;
+    }
     await toDetails();
   }
 
@@ -620,6 +636,7 @@ export function useImportSession(deps: {
           await toDetails();
           return;
         case 'meaning': {
+          setNotice(null);
           // The AI's fabric calls ride along; the worker uses them only where the sheet is silent.
           const aiHints = s.names.flatMap((n) =>
             n.suggestion?.fabrics.length
@@ -689,21 +706,29 @@ export function useImportSession(deps: {
         const pending = (s.chains?.classes ?? []).filter(
           (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
         );
-        if (pending.length) return `${pending.length} legend row to confirm`;
+        if (pending.length)
+          return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
         const entries = s.sizes?.map.entries ?? [];
         if (!entries.some((e) => e.card)) return 'map at least one size to the card';
         const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
         if (new Set(ids).size !== ids.length) return 'two source sizes point at one card size';
+        const guesses = guessedSizes(entries);
+        if (guesses.length)
+          return `${guesses.length} size ${guesses.length === 1 ? 'match is a guess' : 'matches are guesses'} — confirm or change ${guesses.length === 1 ? 'it' : 'them'}`;
         return null;
       }
       case 'pieces': {
         const fams = s.pieces?.families ?? [];
         const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current);
         if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
-        const open = fams.filter((f) => f.candidates.some((c) => c.outcome !== 'closed'));
+        // Only the sizes that are exported must close: an unmapped size is never written.
+        const mapped = exportedRanks(s.sizes?.map);
+        const open = fams.filter((f) =>
+          f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
+        );
         if (!fams.length) return 'no pieces — click inside a piece to seed it';
         if (open.length)
-          return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — leak, merged or tiny`;
+          return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — close the gap, split, or mark "not a piece"`;
         return null;
       }
       case 'meaning': {
@@ -801,9 +826,33 @@ export function useImportSession(deps: {
     };
     iRef.current = next;
     patchInputs({ editedNames: next.editedNames, confirmedNames: next.confirmedNames });
+    const names = sRef.current.names;
+    // A piece nobody named yet (no AI answer — not logged in, or the AI is off) gets its first
+    // name from what the operator typed, on top of what the sheet text gave the spec.
+    const decisions = names.some((n) => n.seed === seed)
+      ? names.map((n) => (n.seed === seed ? { ...n, ...p } : n))
+      : [...names, { ...textNameOf(seed, sRef.current.semantics, i.overrides[seed]), ...p }];
+    await dispatch({ type: 'names', decisions });
+  }
+
+  /** The operator accepted an automatic size match as it is. */
+  async function confirmSize(rank: number) {
+    const entries = sRef.current.sizes?.map.entries ?? [];
+    const own = (iRef.current.sizeMap ?? []).filter((e) => e.source.rank !== rank);
+    const hit = entries.find((e) => e.source.rank === rank);
+    if (!hit) return;
+    await dispatch({ type: 'size-map', entries: [...own, { ...hit, origin: 'operator' }] });
+  }
+
+  /** The operator set a source size's card size (null = not exported). */
+  async function setSize(rank: number, cardSize: CardSize | null) {
+    const entries = sRef.current.sizes?.map.entries ?? [];
+    const own = (iRef.current.sizeMap ?? []).filter((e) => e.source.rank !== rank);
+    const hit = entries.find((e) => e.source.rank === rank);
+    if (!hit) return;
     await dispatch({
-      type: 'names',
-      decisions: sRef.current.names.map((n) => (n.seed === seed ? { ...n, ...p } : n)),
+      type: 'size-map',
+      entries: [...own, { ...hit, card: cardSize, origin: 'operator' }],
     });
   }
 
@@ -825,6 +874,7 @@ export function useImportSession(deps: {
     apply,
     extracted,
     errorCode,
+    notice,
     som,
     clientKind: client.kind,
     blocker,
@@ -835,6 +885,8 @@ export function useImportSession(deps: {
     addSeed,
     editPieces,
     editName,
+    confirmSize,
+    setSize,
     patchInputs,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
@@ -855,6 +907,46 @@ export function nameOriginOf(
   // agrees with is still the AI's: auto-accepted it stays flagged 'ai-auto' (owner decision 11).
   if (n.source === 'text') return 'text';
   return n.autoAccepted ? 'ai-auto' : 'ai';
+}
+
+/** Auto matches below the confirm line (F5: < 0.9) that the operator has not answered. */
+export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
+  entries.filter((e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9);
+
+/** The map still has a question: a guess, or no size reaching the card at all. */
+const sizeMapOpen = (map: SizeMap) =>
+  guessedSizes(map.entries).length > 0 || !map.entries.some((e) => e.card);
+
+/** Source ranks written to the card (null = no map yet: every rank counts). */
+export function exportedRanks(map: SizeMap | undefined): Set<number> | null {
+  if (!map) return null;
+  return new Set(map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
+}
+
+/**
+ * A name decision for a piece the namer said nothing about: what the operator already typed (kept
+ * in the semantics overrides across `back`), else what semantics read off the sheet, else empty.
+ */
+export function textNameOf(
+  seed: SeedId,
+  sem: ImportSession['semantics'],
+  override?: PieceOverride,
+): NameDecision {
+  const spec = sem?.pieces.find((p) => p.seed === seed);
+  const hand = override?.pairHand ?? spec?.pairHand ?? null;
+  return {
+    seed,
+    suggestion: null,
+    source: 'text',
+    evidence: [],
+    confidence: 1,
+    autoAccepted: false,
+    code: override?.code ?? spec?.code ?? '',
+    mods: (override?.code ? override.mods ?? [] : spec?.mods ?? []).filter(
+      (m) => !(hand && m === hand),
+    ),
+    displayName: override?.displayName ?? spec?.displayName ?? '',
+  };
 }
 
 export function variantsOf(seeds: Seed[], base: Seed[] | null): string[] {
