@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
+import { UnitGlyph, useUnitPicture } from './unit-silhouette';
 
 // Шапка блока подсборки в рельсе.
 //
@@ -24,6 +25,8 @@ export function UnitBlockHeader({
   terminal: boolean;
 }) {
   const isTail = block.key === '';
+  // Глиф узла (полоса C): только когда каркас поставил пиктограмму, иначе строка как была.
+  const picture = useUnitPicture(isTail ? null : block.key);
   return (
     <div
       className={cn(
@@ -31,7 +34,18 @@ export function UnitBlockHeader({
         isTail && 'border-dashed border-borderColor',
       )}
     >
-      <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+      <UnitGlyph
+        picture={picture}
+        name={block.name || block.key}
+        boxClassName='mr-0 size-4 self-center'
+      />
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='label'
+        component='span'
+        className='font-bold'
+      >
         {isTail ? '◌ outside units' : `▣ ${block.key}`}
       </Text>
       {!isTail && block.name && (
@@ -44,11 +58,7 @@ export function UnitBlockHeader({
           (нормальная середина сборки) и разрыв (живой, но не единственный — сборка не сошлась). */}
       {!isTail && (
         <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          {terminal
-            ? '✓ garment'
-            : block.absorbedInto
-              ? `→ ▣ ${block.absorbedInto}`
-              : '✕ break'}
+          {terminal ? '✓ garment' : block.absorbedInto ? `→ ▣ ${block.absorbedInto}` : '✕ break'}
         </Text>
       )}
       {isTail && (
