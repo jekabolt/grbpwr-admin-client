@@ -28,6 +28,8 @@ import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
+import { useSkeletonDoor } from './assembly-skeleton-panel';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -740,6 +742,18 @@ export function ConstructionTab({
     return m;
   }, [techCard?.resolvedTechnicalMedia]);
 
+  // КАРКАС СБОРКИ ПО ВЫКРОЙКЕ: две двери (шапка блока операций и пустое состояние), панель
+  // предложения и запрос записи, который уезжает в `OperationsField`. Хук сам ни на что в форме не
+  // подписан: панель читает форму, только пока открыта.
+  const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  const categoryNames = useCardCategoryNames();
+  const skeleton = useSkeletonDoor({
+    frozen,
+    shapes: pieceShapes,
+    cloth: pieceClothByColorway[0]?.map ?? null,
+    categoryNames,
+  });
+
   return (
     <div className='flex flex-col gap-3.5'>
       {/* ═══ ЗДЕСЬ СТОЯЛИ ТРИ БЛОКА КРУГА 20 — И ОНИ УЕХАЛИ В СТУДИЮ ═══════════════════════════
@@ -805,7 +819,12 @@ export function ConstructionTab({
             <SectionHeader
               title='operations — assembly order'
               question='— what each step does, where, on which pieces, and how long it takes'
-              action={shapesAffordance(pieceShapes)}
+              action={
+                <>
+                  {shapesAffordance(pieceShapes)}
+                  {skeleton.headerAction}
+                </>
+              }
             />
             <OperationsField
               activePin={pin.active}
@@ -835,6 +854,9 @@ export function ConstructionTab({
               )}
               onSave={onSave}
               saving={saving}
+              applyRequest={skeleton.applyRequest}
+              onSkeletonApplied={skeleton.onSkeletonApplied}
+              emptyAction={skeleton.emptyAction}
               // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
               // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
               // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
@@ -859,10 +881,34 @@ export function ConstructionTab({
                 />
               }
             />
+            {skeleton.panel}
           </section>
         </div>
       </div>
 
     </div>
   );
+}
+
+/**
+ * The card's category chain as names, leaf first — what the skeleton picks its order template by.
+ * Read from the dictionary loaded at startup (no fetch); an unset category gives an empty chain and
+ * the skeleton falls back to its generic template, saying so on the proposal screen.
+ */
+function useCardCategoryNames(): string[] {
+  const { dictionary } = useDictionary();
+  const categoryId =
+    (useWatch<TechCardFormData>({ name: 'categoryId' }) as number | undefined) ?? 0;
+  return useMemo(() => {
+    const byId = new Map<number, { name?: string; parentId?: number }>();
+    for (const c of dictionary?.categories ?? []) if (c.id != null) byId.set(c.id, c);
+    const out: string[] = [];
+    let cur = categoryId ? byId.get(categoryId) : undefined;
+    let guard = 0;
+    while (cur && guard++ < 8) {
+      if (cur.name) out.push(cur.name);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    return out;
+  }, [categoryId, dictionary?.categories]);
 }

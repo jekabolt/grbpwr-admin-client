@@ -111,6 +111,11 @@ export type SeamEvidence = {
   self: boolean;
   /** Which §G rule decided it, in words (shown to the technologist). */
   rule?: string;
+  /** Lengths of the two edges, mm — lets the screen say «518 = 518 mm». Optional (lane D reads). */
+  aLenMm?: Mm;
+  bLenMm?: Mm;
+  /** Notches that matched along the pair. Optional (lane D reads). */
+  notchesMatched?: number;
 };
 
 export type SeamCandidate = {
