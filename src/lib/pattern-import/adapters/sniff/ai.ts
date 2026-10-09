@@ -70,8 +70,33 @@ export function pickExtractor(bytes: ArrayBuffer, name: string, reg: ExtractorRe
   const sn = sniffFormat(bytes, name);
   if (sn.route === null) throw new UnsupportedFormat(sn.refusal, sn.why);
   if (sn.route === 'pdf')
-    return sn.kind === 'ai' || (sn.pdfOffset ?? 0) > 0 ? makeExtractAi(reg.pdf) : reg.pdf;
+    return refusePassword(
+      sn.kind === 'ai' || (sn.pdfOffset ?? 0) > 0 ? makeExtractAi(reg.pdf) : reg.pdf,
+    );
   const fn = reg[sn.route];
   if (!fn) throw new UnsupportedFormat('unknown-format', `${sn.route} adapter not registered`);
   return fn;
+}
+
+/** pdf.js throws `PasswordException` ("No password given" / "Incorrect Password") for a PDF
+ * with a user password; an owner-password-only PDF (print/copy restrictions) opens normally, so
+ * the refusal is decided by the reader, not by the presence of /Encrypt. */
+export function isPdfPasswordError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const { name, message } = e as { name?: unknown; message?: unknown };
+  return (
+    name === 'PasswordException' ||
+    (typeof message === 'string' && /no password given|incorrect password/i.test(message))
+  );
+}
+
+function refusePassword(fn: ExtractFn): ExtractFn {
+  return async (file, opts, progress) => {
+    try {
+      return await fn(file, opts, progress);
+    } catch (e) {
+      if (isPdfPasswordError(e)) throw new UnsupportedFormat('pdf-password');
+      throw e;
+    }
+  };
 }

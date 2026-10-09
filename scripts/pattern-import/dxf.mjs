@@ -1034,6 +1034,201 @@ console.log(
   };
 }
 
+// ── 3c. binary DXF (F17): ASCII → binary (own writer, R12 + R2000 encodings) → identical IR ──
+console.log('\n# binary DXF round-trip parity');
+report.binary = {};
+// Writer independent of the adapter: value type by group code per the DXF reference
+// ("Group code value types"), binary widths as AutoCAD/ODA write them.
+function binType(c) {
+  if (c >= 0 && c <= 9) return 's';
+  if (c >= 10 && c <= 59) return 'd';
+  if (c >= 60 && c <= 79) return 'h';
+  if (c >= 90 && c <= 99) return 'l';
+  if (c >= 110 && c <= 149) return 'd';
+  if (c >= 160 && c <= 169) return 'q';
+  if (c >= 170 && c <= 179) return 'h';
+  if (c >= 210 && c <= 239) return 'd';
+  if (c >= 270 && c <= 279) return 'h';
+  if (c >= 280 && c <= 289) return 'b';
+  if (c >= 290 && c <= 299) return 'b';
+  if (c >= 310 && c <= 319) return 'x';
+  if (c >= 370 && c <= 389) return 'h';
+  if (c >= 400 && c <= 409) return 'h';
+  if ((c >= 420 && c <= 429) || (c >= 440 && c <= 459)) return 'l';
+  if (c >= 460 && c <= 469) return 'd';
+  if (c === 1004) return 'x';
+  if (c >= 1010 && c <= 1059) return 'd';
+  if (c >= 1060 && c <= 1070) return 'h';
+  if (c === 1071) return 'l';
+  return 's';
+}
+const CP1251 = (() => {
+  const d = new TextDecoder('windows-1251');
+  const m = new Map();
+  for (let b = 0x80; b <= 0xff; b++) m.set(d.decode(Uint8Array.of(b)), b);
+  return m;
+})();
+function enc1251(str) {
+  const out = [];
+  for (const ch of str) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (CP1251.has(ch)) out.push(CP1251.get(ch));
+    else return null;
+  }
+  return Uint8Array.from(out);
+}
+/** ASCII DXF text → binary DXF bytes. mode 'r12' = 1-byte codes (255-escape), 'r2000' = 2-byte. */
+function toBinaryDxf(text, mode, charset) {
+  const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
+  const chunks = [Buffer.from('AutoCAD Binary DXF\r\n\x1a\0', 'latin1')];
+  const issues = [];
+  const utf8 = new TextEncoder();
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    if (lines[i].trim() === '') break;
+    const code = Number(lines[i].trim());
+    const v = lines[i + 1];
+    if (mode === 'r12') {
+      if (code < 255 && code >= 0) chunks.push(Buffer.from([code]));
+      else {
+        const b = Buffer.alloc(3);
+        b[0] = 255;
+        b.writeInt16LE(code, 1);
+        chunks.push(b);
+      }
+    } else {
+      const b = Buffer.alloc(2);
+      b.writeInt16LE(code, 0);
+      chunks.push(b);
+    }
+    const t = binType(code);
+    if (t === 's') {
+      const sb = charset === 'cp1251' ? enc1251(v) : utf8.encode(v);
+      chunks.push(Buffer.from(sb), Buffer.from([0]));
+      continue;
+    }
+    if (t === 'x') {
+      const raw = Buffer.from(v.trim(), 'hex');
+      chunks.push(Buffer.from([raw.length]), raw);
+      continue;
+    }
+    const n = Number(v.trim());
+    if (!Number.isFinite(n)) issues.push(`line ${i + 1}: group ${code} “${v}” is not a number`);
+    if (t === 'd') {
+      const b = Buffer.alloc(8);
+      b.writeDoubleLE(n, 0);
+      chunks.push(b);
+      continue;
+    }
+    if (!Number.isInteger(n)) issues.push(`line ${i + 1}: group ${code} “${v}” is not an integer`);
+    if (t === 'h') {
+      if (n < -32768 || n > 32767) issues.push(`line ${i + 1}: group ${code} ${n} overflows int16`);
+      const b = Buffer.alloc(2);
+      b.writeInt16LE(n, 0);
+      chunks.push(b);
+    } else if (t === 'l') {
+      const b = Buffer.alloc(4);
+      b.writeInt32LE(n, 0);
+      chunks.push(b);
+    } else if (t === 'q') {
+      const b = Buffer.alloc(8);
+      b.writeBigInt64LE(BigInt(n), 0);
+      chunks.push(b);
+    } else if (t === 'b') {
+      if (n < 0 || n > 255) issues.push(`line ${i + 1}: group ${code} ${n} overflows a byte`);
+      chunks.push(Buffer.from([n & 0xff]));
+    }
+  }
+  return { bytes: Buffer.concat(chunks), issues };
+}
+/** Everything the import produces, minus what legitimately differs by encoding. */
+function irOf(read, seg) {
+  const { doc, meta } = read;
+  return JSON.stringify({
+    pages: doc.pages,
+    warnings: doc.warnings.filter((w) => !/not UTF-8/.test(w)),
+    groups: meta.groups,
+    points: meta.points,
+    pathEntity: meta.pathEntity,
+    textEntity: meta.textEntity,
+    attribTag: meta.attribTag,
+    tally: meta.tally,
+    units: meta.units,
+    dialect: meta.dialect,
+    manifest: meta.manifest,
+    version: meta.version,
+    modelLabels: meta.modelLabels,
+    seg,
+  });
+}
+const SYN17 = resolve(CORPUS, 'synthetic/f17');
+mkdirSync(SYN17, { recursive: true });
+const parityFiles = [
+  resolve(PLAN, 'k2-work/golden-min.dxf'),
+  resolve(PLAN, 'k2-work/golden-min-r12.dxf'),
+  ...readdirSync(resolve(CORPUS, 'dxf-clo'))
+    .filter((f) => /\.dxf$/i.test(f))
+    .sort()
+    .map((f) => resolve(CORPUS, 'dxf-clo', f)),
+];
+for (const path of parityFiles) {
+  const name = path.split('/').pop();
+  const buf = readFileSync(path);
+  const asciiText = new TextDecoder('utf-8').decode(buf);
+  const a = await load(name, ab(buf));
+  const ref = irOf(a.read, a.seg);
+  const stat = (report.binary[name] = {});
+  for (const mode of ['r12', 'r2000']) {
+    // R12 strings in the ANSI codepage (as AutoCAD R12 writes them) when they fit cp1251,
+    // R2000 in UTF-8 (R2007+ style) — so both decoder branches are exercised.
+    const nonAscii = /[^\x00-\x7f]/.test(asciiText);
+    const charset =
+      mode === 'r12' && nonAscii && enc1251(asciiText.replace(/[\r\n]/g, '')) ? 'cp1251' : 'utf-8';
+    const { bytes, issues } = toBinaryDxf(asciiText, mode, charset);
+    if (path.includes('k2-work'))
+      writeFileSync(resolve(SYN17, name.replace(/\.dxf$/, `.binary-${mode}.dxf`)), bytes);
+    const t0 = performance.now();
+    let got;
+    try {
+      const b = await load(name, ab(bytes));
+      got = { ir: irOf(b.read, b.seg), meta: b.read.meta };
+    } catch (e) {
+      got = { err: `${e?.name}: ${e?.kind ?? ''} ${e?.message}` };
+    }
+    const ms = Math.round(performance.now() - t0);
+    const same = got.ir === ref;
+    let firstDiff = '';
+    if (!same && got.ir) {
+      let k = 0;
+      while (k < ref.length && ref[k] === got.ir[k]) k++;
+      firstDiff = `first diff @${k}: ascii …${ref.slice(Math.max(0, k - 60), k + 60)}… vs binary …${got.ir.slice(Math.max(0, k - 60), k + 60)}…`;
+    }
+    stat[mode] = {
+      bytes: bytes.length,
+      charset,
+      ms,
+      writerIssues: issues.slice(0, 5),
+      binaryMode: got.meta?.binary ?? null,
+      encoding: got.meta?.encoding ?? null,
+      identical: same,
+    };
+    ck(
+      issues.length === 0,
+      `binary ${mode} ${name}: every ASCII value fits its binary type`,
+      issues.slice(0, 3).join('; '),
+    );
+    ck(
+      got.meta?.binary === (mode === 'r12' ? 'r12' : 'r13+'),
+      `binary ${mode} ${name}: read as binary ${mode === 'r12' ? 'R12 (1-byte codes)' : 'R13+ (2-byte codes)'}`,
+      got.err ?? `${got.meta?.binary} · ${got.meta?.encoding} · ${bytes.length} B · ${ms} ms`,
+    );
+    ck(
+      same,
+      `binary ${mode} ${name}: IR identical to ASCII (paths, texts, groups, POINT attrs, tally, segmentation + features)`,
+      got.err ?? firstDiff,
+    );
+  }
+}
 // ── 4. negative controls ─────────────────────────────────────────────────────────────────────
 console.log('\n# negative controls');
 const golden = readFileSync(resolve(PLAN, 'k2-work/golden-min.dxf'));
@@ -1075,10 +1270,34 @@ await expectKind(
 );
 const bin = new Uint8Array(64);
 bin.set(new TextEncoder().encode('AutoCAD Binary DXF\r\n\x1a\0'));
-await expectKind('binary DXF sentinel', bin.buffer, 'binary-dxf');
+// F17: binary DXF is read now; a sentinel followed by zeros is a damaged binary file
+await expectKind('binary DXF sentinel + zeros', bin.buffer, 'corrupt');
+await expectKind('binary DXF sentinel only', bin.buffer.slice(0, 22), 'empty');
 await expectKind('DWG magic', enc('AC1015\0\0\0\0\0\0garbage'), 'dwg');
 await expectKind('empty file', new ArrayBuffer(0), 'empty');
 await expectKind('a PDF', enc('%PDF-1.7\n%âãÏÓ\n1 0 obj\n'), 'not-dxf');
+
+// negative: truncated binary → typed corrupt, never a hang; a flipped group code → corrupt too
+{
+  const g = readFileSync(resolve(PLAN, 'k2-work/golden-min.dxf'));
+  for (const mode of ['r12', 'r2000']) {
+    const { bytes } = toBinaryDxf(new TextDecoder().decode(g), mode, 'utf-8');
+    for (const frac of [0.003, 0.1, 0.37, 0.5, 0.81, 0.97]) {
+      const cut = Math.max(23, Math.floor(bytes.length * frac));
+      const t0 = performance.now();
+      await expectKind(
+        `binary ${mode} truncated at ${cut}/${bytes.length} B`,
+        ab(bytes.subarray(0, cut)),
+        'corrupt',
+      );
+      const ms = performance.now() - t0;
+      ck(ms < 2000, `binary ${mode} truncated at ${cut}: answers fast`, `${Math.round(ms)} ms`);
+    }
+    // a string with no terminating NUL at the very end
+    const noNul = Buffer.concat([bytes.subarray(0, bytes.length - 1)]);
+    await expectKind(`binary ${mode} last string unterminated`, ab(noNul), 'corrupt');
+  }
+}
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
