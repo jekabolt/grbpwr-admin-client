@@ -11,6 +11,7 @@
 //
 // ФИЗИКА ПЕЧАТИ (разбор SCHEME-UNFOLDED.pdf): только 100 % K, ничего мельче 10 pt, линейки
 // 0,3 / 0,35 / 0,53 мм, дорожки 0,3 мм, силуэт 0,5 мм, мерная линейка 50 мм в подвале.
+import type { UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { mapCrossings, mapLayout, routeCrossings, routeGeometry, type CardMeasure } from './layout';
 import type { PrintModel, PrintRow, PrintUnit } from './model';
@@ -93,6 +94,12 @@ export type SheetMeta = {
 
 /** Контур по ключу детали; `null` целиком — силуэты выключены. */
 export type ShapeLookup = ((pieceKey: string) => PieceDTO | null) | null;
+
+/**
+ * Пиктограмма узла по его ключу (полоса C); `null` целиком — пиктограмм нет. Сегодня её не
+ * поставляет никто: лист без неё набирается буква в букву как раньше.
+ */
+export type UnionLookup = ((unitKey: string) => UnionPicture | null) | null;
 
 export type SheetReport = {
   form: 'route' | 'map';
@@ -352,6 +359,47 @@ function shapePrim(
   return { k: 'poly', pts, sw: lineMm, closed: true, join: 'round' };
 }
 
+/**
+ * Пиктограмма узла, вписанная в бокс (x, y, boxW, boxH) мм по центру: по контуру на форму, штрих
+ * `lineMm` на бумаге. Сложенные слои — одной формой, подвешенные — своим контуром рядом; знаки «×n»
+ * и «~» печатает подпись плитки (`unionCaption`), а не сама плитка — 10 pt в 16 мм не помещаются.
+ */
+export function unionPrim(
+  pic: UnionPicture,
+  x: number,
+  y: number,
+  boxW: number,
+  boxH: number,
+  lineMm: number,
+): Prim[] {
+  const w = Math.max(pic.w, 1e-3);
+  const h = Math.max(pic.h, 1e-3);
+  const scale = Math.min((boxW - 2 * lineMm) / w, (boxH - 2 * lineMm) / h);
+  const ox = x + (boxW - w * scale) / 2;
+  const oy = y + (boxH - h * scale) / 2;
+  return pic.shapes.map((s) => ({
+    k: 'poly' as const,
+    // Картинка уже в кадре «y вниз» от левого верхнего угла узла — переворачивать нечего.
+    pts: simplify(
+      s.pts.map(([px, py]) => ({ x: px, y: py })),
+      0.25 / scale,
+    ).map((p) => [ox + p.x * scale, oy + p.y * scale] as [number, number]),
+    sw: lineMm,
+    closed: true,
+    join: 'round' as const,
+  }));
+}
+
+/** Подпись плитки узла словами: что сложено в «×n», что подвешено, что не нарисовано. */
+export function unionCaption(pic: UnionPicture): string[] {
+  const out = [plural(pic.pieceCount, 'PIECE')];
+  const layers = pic.shapes.filter((s) => s.count > 1).length;
+  if (layers) out.push(`×${Math.max(...pic.shapes.map((s) => s.count))} LAYERS AS ONE`);
+  if (pic.shapes.some((s) => s.hung)) out.push('~ HUNG ON A 3D SEAM');
+  if (pic.overflow.length) out.push(`+${pic.overflow.length} NOT DRAWN`);
+  return out;
+}
+
 /** Плитки деталей в колонке шириной `width`; возвращает высоту. Нет контура — пунктирная рамка. */
 function tiles(
   P: Painter,
@@ -582,7 +630,12 @@ const R = {
   PAD_X: 2,
 };
 
-export function typesetRoute(M: PrintModel, meta: SheetMeta, shapeOf: ShapeLookup): PaperDoc {
+export function typesetRoute(
+  M: PrintModel,
+  meta: SheetMeta,
+  shapeOf: ShapeLookup,
+  unionOf: UnionLookup = null,
+): PaperDoc {
   const COLS = shapeOf ? R.COLS_TILES : R.COLS_TEXT;
   const fixedW = COLS.step + COLS.op + COLS.takes + COLS.unit;
   const n = M.lanes.length;
@@ -664,6 +717,13 @@ export function typesetRoute(M: PrintModel, meta: SheetMeta, shapeOf: ShapeLooku
     for (const runs of workpieceRuns(r, continued)) {
       uy += cell.para(xs.unit + R.PAD_X, uy, innerW.unit, runs);
       if (runs[0].size === 10) uy += 0.4;
+    }
+    // Плитка узла — под словом MAKES, один раз на узел: там, где он рождается.
+    const pic = r.kind === 'makes' && r.workpiece && unionOf ? unionOf(r.workpiece.key) : null;
+    if (pic) {
+      uy += 0.6;
+      cell.prims.push(...unionPrim(pic, xs.unit + R.PAD_X, uy, TILE.w, TILE.h, TILE.line));
+      uy += TILE.h;
     }
     const hUnit = uy - top;
     const rowH = Math.max(hStep, hOp, hTakes, hUnit) + 2 * R.PAD_Y;
@@ -764,7 +824,7 @@ const T = { MARGIN: 14, GUTTER: 20, COL_W: 110, COL_MIN: 80, GAP_Y: 7, PAD_X: 3 
 
 type Card = CardMeasure & { prims: Prim[] };
 
-function typesetCard(u: PrintUnit, colW: number, shapeOf: ShapeLookup): Card {
+function typesetCard(u: PrintUnit, colW: number, shapeOf: ShapeLookup, unionOf: UnionLookup): Card {
   const C = new Painter();
   const inner = colW - 2 * T.PAD_X;
   const range =
@@ -786,6 +846,17 @@ function typesetCard(u: PrintUnit, colW: number, shapeOf: ShapeLookup): Card {
   y += Math.max(nameH, ry - y) + 1.8;
   C.hline(0, colW, y, RULE);
   const headY = y / 2;
+  // Пиктограмма узла: плитка 28×16 слева, подпись словами справа.
+  const pic = unionOf ? unionOf(u.key) : null;
+  if (pic) {
+    y += 1.4;
+    C.prims.push(...unionPrim(pic, T.PAD_X, y, TILE.w, TILE.h, TILE.line));
+    let cy = y;
+    for (const line of unionCaption(pic))
+      cy += C.para(T.PAD_X + TILE.w + 3, cy, inner - TILE.w - 3, [{ s: line, size: 10 }]);
+    y += Math.max(TILE.h, cy - y) + 1.6;
+    C.hline(0, colW, y, RULE);
+  }
   // Детали кроя.
   if (u.pieces.length) {
     y += 1.4;
@@ -837,7 +908,12 @@ function typesetCard(u: PrintUnit, colW: number, shapeOf: ShapeLookup): Card {
   return { h: y, headY, rowOf: (step) => rows.get(step) ?? null, prims: C.prims };
 }
 
-export function typesetMap(M: PrintModel, meta: SheetMeta, shapeOf: ShapeLookup): PaperDoc {
+export function typesetMap(
+  M: PrintModel,
+  meta: SheetMeta,
+  shapeOf: ShapeLookup,
+  unionOf: UnionLookup = null,
+): PaperDoc {
   const cols = Math.max(1, M.maxHeight + 1);
   const need = (c: number, cw: number) => T.MARGIN * 2 + c * cw + (c - 1) * T.GUTTER;
   const a0 = WIDTHS[WIDTHS.length - 1];
@@ -853,7 +929,7 @@ export function typesetMap(M: PrintModel, meta: SheetMeta, shapeOf: ShapeLookup)
     'STEPS 10 – 20 = STEPS THAT BUILD THE UNIT · WITH = UNITS THE STEP JOINS',
   ]);
   const cards = new Map<string, Card>();
-  for (const u of M.units) cards.set(u.key, typesetCard(u, colW, shapeOf));
+  for (const u of M.units) cards.set(u.key, typesetCard(u, colW, shapeOf, unionOf));
   const L = mapLayout(
     M,
     { left: T.MARGIN, gutter: T.GUTTER, colW, gapY: T.GAP_Y, top: yHead + 6 },

@@ -182,8 +182,14 @@ export type UnionLayout = {
   stacked: string[][];
   /** Pieces hung on a 3D / composite join («~»). */
   hung: string[];
-  /** Pieces that did not fit without overlap > SKELETON.overlapMax. */
+  /** Pieces that did not fit without overlap > SKELETON.overlapMax (or have no contour). */
   overflow: string[];
+  /** Surface joins (patch pocket, appliqué): drawn ON their host, last. */
+  surface?: string[];
+  /** Interfacing pieces: never a shape of their own — an underlay of the piece they fuse to. */
+  underlay?: string[];
+  /** Largest pairwise overlap of the drawn shapes, share of the smaller piece (0..1). */
+  overlap?: number;
 };
 
 // ── Thresholds ──────────────────────────────────────────────────────────────────────────────

@@ -32,8 +32,16 @@ import { skuToSeasonLabel } from '../components/season-util';
 import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
+import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
-import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
+import {
+  typesetMap,
+  typesetRoute,
+  type PaperDoc,
+  type SheetMeta,
+  type ShapeLookup,
+  type UnionLookup,
+} from './paper';
 import {
   exportPaperPdf,
   isPaper,
@@ -187,9 +195,15 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
+  // Пиктограммы узлов (полоса C) — только когда их поставили выше по дереву; сегодня никто.
+  const unitPictures = useUnitPictures();
+  const unionOf = useMemo<UnionLookup>(
+    () => (unitPictures ? (key) => unitPictures.get(key) ?? null : null),
+    [unitPictures],
+  );
   const doc = useMemo(() => {
     const set = (m: SheetMeta) =>
-      form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
+      form === 'map' ? typesetMap(M, m, shapeOf, unionOf) : typesetRoute(M, m, shapeOf, unionOf);
     let d = set(meta);
     if (!target) return d;
     // Подвал масштабированного листа длиннее (размер файла, процент, формат и число страниц) и может
@@ -208,7 +222,7 @@ function Document({
     if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
       d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
-  }, [M, meta, shapeOf, form, target]);
+  }, [M, meta, shapeOf, unionOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
   // Экран и ⌘P показывают ФАЙЛ: те же страницы в физическом размере, разбивка — сеткой склейки.
   const out = pdfSize(doc, target);

@@ -60,6 +60,7 @@
     "view:switch": "node scripts/view-switch-probe.mjs",
     "cloth:pieces": "node scripts/piece-cloth-probe.mjs",
     "assembly:views": "node scripts/assembly-views-probe.mjs",
+    "skeleton:union": "node scripts/assembly-skeleton/union-probe.mjs",
     "hatch:markup": "node scripts/hatch-markup-probe.mjs",
     "canvas:view": "node scripts/canvas-view-probe.mjs",
     "undo:record": "node scripts/last-mutation-probe.mjs",

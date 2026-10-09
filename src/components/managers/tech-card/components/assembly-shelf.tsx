@@ -42,6 +42,7 @@ import {
   type PieceClothState,
 } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
+import { UnitGlyph, useUnitPicture } from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { FoldCaret } from 'ui/components/fold-caret';
 
@@ -663,6 +664,7 @@ function GroupHead({
     const name = unitNameOf(group.unitKey).trim();
     return (
       <Head title={`unit ▣ ${group.unitKey}${name ? ` — ${name}` : ''} · ${count}`}>
+        <UnitHeadGlyph unitKey={group.unitKey} name={name} />
         {/* КЛЮЧ И ИМЯ ОБА, даже когда имя — это ключ строчными: ключ пишут в поле «produces», имя
             даёт человек, и совпадают они не всегда. Прятать имя по совпадению значило бы заводить
             правило, которое молча перестаёт работать, как только имя разошлось с ключом. Ключ
@@ -690,6 +692,15 @@ function GroupHead({
       )}
     </Head>
   );
+}
+
+/**
+ * Глиф узла в заголовке группы (полоса C): детали узла, состыкованные по швам, в высоту строки.
+ * Пиктограммы нет — ничего нет, заголовок как был.
+ */
+function UnitHeadGlyph({ unitKey, name }: { unitKey: string; name: string }) {
+  const picture = useUnitPicture(unitKey);
+  return <UnitGlyph picture={picture} name={name || unitKey} boxClassName='mr-0 h-4 w-6' />;
 }
 
 /** Общая коробка заголовка группы: 10px прописными над волосяной линией. */
