@@ -47,7 +47,8 @@ export const SAMPLES: Sample[] = [
   },
   { id: 'reef', files: ['reef.pdf'], layouts: [{ kind: 'mosaic' }] },
   { id: 'robe', files: ['robe.pdf'], layouts: [{ kind: 'mosaic' }] },
-  { id: 'r4454', files: ['r4454.pdf'], layouts: [{ kind: 'mosaic' }] },
+  // r4454: main sheet = pages 4–34, 8 per row (K0); the interfacing sheet (35–39) is left out
+  { id: 'r4454', files: ['r4454.pdf'], layouts: [{ kind: 'stitch', pages: [3, 33], cols: 8 }] },
   { id: 'zhaket', files: ['zhaket.pdf'], layouts: [{ kind: 'recurrence', pages: [1, 28] }] },
 ];
 

@@ -12,7 +12,7 @@ import { LINK, linkPts, normDash, type WChain } from './link';
 
 const BIN = 0.25;
 const NB = 80; // 0 … 20 mm
-const DECOR_KINDS = ['tick', 'ring', 'dot'] as const;
+const DECOR_KINDS = ['tick', 'ring', 'ringL', 'dot'] as const;
 const NW = 32; // width buckets of 0.05 mm
 
 export type Signature = {
@@ -123,17 +123,19 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   const innerPieces = merged.slice(1, -1);
   const solid = !declared && gaps.length === 0;
 
-  const decorPer10 = { tick: 0, ring: 0, dot: 0 };
+  const decorPer10 = { tick: 0, ring: 0, ringL: 0, dot: 0 };
   // beads inside the chain itself (palto's dots are subpaths) count as pieces; free beads as decor
-  for (const d of ch.decor) decorPer10[d.bead ?? 'dot'] += 1;
-  for (const l of items) if (l.it.kind === 'bead') decorPer10[l.it.bead ?? 'dot'] += 1;
+  const kindOf = (it: { bead?: string; size?: number }) =>
+    (it.bead === 'ring' && (it.size ?? 0) >= 1.6 ? 'ringL' : it.bead ?? 'dot') as (typeof DECOR_KINDS)[number];
+  for (const d of ch.decor) decorPer10[kindOf(d)] += 1;
+  for (const l of items) if (l.it.kind === 'bead') decorPer10[kindOf(l.it)] += 1;
   for (const k of DECOR_KINDS) decorPer10[k] = lengthMm > 0 ? (10 * decorPer10[k]) / lengthMm : 0;
 
-  const V = new Float64Array(2 * NB + 1 + 3 + NW + 1);
+  const V = new Float64Array(2 * NB + 1 + DECOR_KINDS.length + NW + 1);
   const offG = NB;
   const offS = 2 * NB;
   const offD = offS + 1;
-  const offW = offD + 3;
+  const offW = offD + DECOR_KINDS.length;
   if (declared) {
     for (let i = 0; i < declared.length; i += 2) {
       addHist(V, 0, declared[i]);
@@ -152,7 +154,7 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   }
   normBlock(V, 0, NB, 1);
   normBlock(V, offG, 2 * NB, 1);
-  normBlock(V, offD, offD + 3, 0.8);
+  normBlock(V, offD, offD + DECOR_KINDS.length, 0.8);
   normBlock(V, offW, offW + NW + 1, 0.6);
   const reliable = !!declared || (solid ? lengthMm >= 15 : innerPieces.length >= 3 && lengthMm >= 12);
   const motif = declared ? declared.map(q) : solid ? null : recoverMotif(merged.slice(1), gaps.slice(1));

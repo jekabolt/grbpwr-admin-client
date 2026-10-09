@@ -26,6 +26,8 @@ export type Item = {
   /** Beads: centre, kind and (ticks) direction. */
   c?: PtMm;
   bead?: BeadKind;
+  /** Rings: diameter (reef draws two sizes as zigzags with small vs large rings). */
+  size?: number;
   dir?: PtMm | null;
   /** Other items folded into this one (a tiny mark of several strokes acting as one bead). */
   extra?: Item[];
@@ -110,7 +112,7 @@ export function itemOf(p: IRPath, style: Style): Item | null {
   const diag = Math.hypot(bb.maxX - bb.minX, bb.maxY - bb.minY);
   if (p.closed && diag <= ITEM.ringMaxMm) {
     const pr = principal(p.pts);
-    return { kind: 'bead', bead: 'ring', path: p.id, pts: p.pts, edges, len, style: style.id, c: pr.c, dir: null, op, sub: p.src.sub };
+    return { kind: 'bead', bead: 'ring', size: diag, path: p.id, pts: p.pts, edges, len, style: style.id, c: pr.c, dir: null, op, sub: p.src.sub };
   }
   if (len <= ITEM.beadMaxMm) {
     const a = p.pts[0];

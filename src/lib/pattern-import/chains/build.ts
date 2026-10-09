@@ -101,6 +101,8 @@ function toChainSet(rec: RecoverOut, stats: { items: number; freeBeads: number; 
       classes.push({ id: classes.length, role: 'common', sizeLabel: null, chains: ids, totalLengthMm: total(ids), evidence: ev, confidence: 0.6 });
     }
   }
+  if (rec.notches.length)
+    classes.push({ id: classes.length, role: 'notch', sizeLabel: null, chains: rec.notches, totalLengthMm: total(rec.notches), evidence: [], confidence: 0.5 });
   if (rec.internal.length)
     classes.push({ id: classes.length, role: 'internal', sizeLabel: null, chains: rec.internal, totalLengthMm: total(rec.internal), evidence: [], confidence: 0.5 });
   const byWhy = new Map<string, number[]>();

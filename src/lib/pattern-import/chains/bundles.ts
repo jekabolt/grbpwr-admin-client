@@ -17,7 +17,7 @@ import { dist, resample, SegGrid } from './geom';
 
 export const BUNDLE = {
   stepMm: 2,
-  maxSepMm: 9,
+  maxSepMm: 12,
   coincideMm: 0.25,
   parallelDeg: 25,
   minOverlapMm: 14,

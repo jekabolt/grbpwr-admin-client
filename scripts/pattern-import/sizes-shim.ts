@@ -27,6 +27,7 @@ export type ShimLayout =
   | { kind: 'recurrence'; pages: [number, number]; cols?: number }
   | { kind: 'grid'; pages: [number, number]; cols: number; dx: number; dy: number }
   | { kind: 'cells'; dx: number; dy: number; cells: [page: number, row: number, col: number][] }
+  | { kind: 'stitch'; pages: [number, number]; cols: number }
   | { kind: 'mosaic'; pages?: [number, number] };
 
 type PageRef = { doc: number; page: number };
@@ -166,6 +167,50 @@ function recurrenceOffsets(doc: SourceDoc, from: number, to: number, colsHint?: 
   return placed;
 }
 
+/**
+ * Edge-stitch pitch (Ф0 probe stitchVote): vertices near the right edge of page p against the left
+ * edge of p+1 vote for dx (step 0.1); p against p+cols for dy. The global mode wins.
+ */
+function stitchPitch(doc: SourceDoc, from: number, to: number, cols: number) {
+  const pts = (p: number) => (doc.pages[p]?.paths ?? []).filter((q) => q.pts.length >= 2).flatMap((q) => q.pts);
+  const vote = (a: number, b: number, axis: 'x' | 'y', votes: Map<string, number>) => {
+    const A = doc.pages[a];
+    const B = doc.pages[b];
+    if (!A || !B) return;
+    const band = 40;
+    const pa = pts(a).filter((q) => (axis === 'x' ? q.x > A.widthMm - band : q.y < band));
+    const pb = pts(b).filter((q) => (axis === 'x' ? q.x < band : q.y > B.heightMm - band));
+    const idx = new Map<number, { x: number; y: number }[]>();
+    for (const q of pb) {
+      const k = Math.round((axis === 'x' ? q.y : q.x) / 0.12);
+      const arr = idx.get(k);
+      if (arr) arr.push(q);
+      else idx.set(k, [q]);
+    }
+    const size = axis === 'x' ? A.widthMm : A.heightMm;
+    for (const q of pa) {
+      const k = Math.round((axis === 'x' ? q.y : q.x) / 0.12);
+      for (const kk of [k - 1, k, k + 1])
+        for (const r of idx.get(kk) ?? []) {
+          if (Math.abs((axis === 'x' ? q.y - r.y : q.x - r.x)) > 0.12) continue;
+          const d = axis === 'x' ? q.x - r.x : r.y - q.y;
+          if (d < size - band || d > size + 1) continue;
+          const key = (Math.round(d * 10) / 10).toFixed(1);
+          votes.set(key, (votes.get(key) ?? 0) + 1);
+        }
+    }
+  };
+  const vx = new Map<string, number>();
+  const vy = new Map<string, number>();
+  for (let p = from; p <= to; p++) {
+    const i = p - from;
+    if (i % cols !== cols - 1 && p + 1 <= to) vote(p, p + 1, 'x', vx);
+    if (p + cols <= to) vote(p, p + cols, 'y', vy);
+  }
+  const top = (m: Map<string, number>) => Number([...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0);
+  return { dx: top(vx), dy: top(vy) };
+}
+
 /** Build a Sheet from docs by translation only. Path ids are re-numbered sheet-wide; src kept. */
 export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
   const styles: Style[] = [];
@@ -184,6 +229,9 @@ export function shimSheet(docs: SourceDoc[], layouts: ShimLayout[]): Sheet {
     else if (L.kind === 'grid') {
       for (let p = from, i = 0; p <= to; p++, i++)
         offs.set(p, { x: (i % L.cols) * L.dx, y: -Math.floor(i / L.cols) * L.dy });
+    } else if (L.kind === 'stitch') {
+      const { dx, dy } = stitchPitch(doc, from, to, L.cols);
+      for (let p = from, i = 0; p <= to; p++, i++) offs.set(p, { x: (i % L.cols) * dx, y: -Math.floor(i / L.cols) * dy });
     } else if (L.kind === 'cells') {
       for (const [p, row, col] of L.cells) offs.set(p, { x: col * L.dx, y: -row * L.dy });
     } else {
