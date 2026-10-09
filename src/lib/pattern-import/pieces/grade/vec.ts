@@ -75,11 +75,11 @@ export function endTangent(pts: readonly V[], end: 0 | 1, span = 3): V {
 }
 
 /** Samples every `step` mm (first at step/2) with the local unit tangent and arc position. */
-export function resampleT(pts: readonly V[], step: number): { p: V; t: V; u: number }[] {
+export function resampleT(pts: readonly V[], step: number, phase = 0.5): { p: V; t: V; u: number }[] {
   const out: { p: V; t: V; u: number }[] = [];
   let acc = 0;
   const total = polyLen(pts);
-  let next = total < step ? total / 2 : step / 2;
+  let next = total < step ? total / 2 : step * phase;
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i];
     const b = pts[i + 1];

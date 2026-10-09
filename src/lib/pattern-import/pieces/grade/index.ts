@@ -31,14 +31,14 @@ import {
   type PortionPts,
   type SeedSolve,
 } from './choose';
-import { buildModel, maskOrderConflicts, trackPortions, type GradeModel } from './model';
+import { buildModel, maskOrderConflicts, trackPortions, type GradeModel, type ModelOpts } from './model';
 import { chainSpans } from './tracks';
 import { bboxOfPts, growBox, median, unionBox } from './vec';
 
 export { detectUnencodedGrading, type GuardOpts } from './guard';
 
 /** Module-level switches (probes flip them to measure each guard; production keeps the defaults). */
-export const GRADE_TUNING = { orderCheck: false };
+export const GRADE_TUNING = { orderCheck: false, twoReadings: true };
 
 export type GradeRefusal = NonNullable<PieceCandidate['gradeRefusal']>;
 
@@ -113,8 +113,10 @@ export type GradeOpts = {
   keepModel?: boolean;
   /** the variant's cutting lines (F4 knives): the final region is cut along them */
   knives?: PtMm[][];
-  /** mask cross-sections that contradict the grade order (default on) */
+  /** mask cross-sections that contradict the grade order (default GRADE_TUNING) */
   orderCheck?: boolean;
+  /** trust a rank only where a second, perturbed reading agrees (default GRADE_TUNING) */
+  twoReadings?: boolean;
 };
 
 /**
@@ -123,6 +125,20 @@ export type GradeOpts = {
  * foreign line closing a rank breaks exactly this.
  */
 export function familyCheck(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
+  const f = familyCheck1(areas);
+  if (f.ok) return f;
+  // an end rank whose region is off (it closed on another line) — the rest may still be one
+  // even grade; that rank is then refused, the others kept
+  const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
+  for (const drop of [closed[0], closed[closed.length - 1]]) {
+    if (drop == null) continue;
+    const g = familyCheck1(areas.map((a, r) => (r === drop ? -1 : a)));
+    if (g.ok) return g;
+  }
+  return f;
+}
+
+function familyCheck1(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
   const n = areas.length;
   const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
   const leaks = areas.map((a, r) => (a < 0 ? r : -1)).filter((r) => r >= 0);
@@ -232,6 +248,25 @@ function growSolve(M: GradeModel, seed: Seed, o: Required<Pick<GradeOpts, 'cellM
   return solveSeed(M, seed, growBox(env, 8 + 2 * M.step0), { cellMm: o.cellMm, maxFree: o.maxFree });
 }
 
+/** The reading the walls come from. */
+export const BASE_READING: ModelOpts = { pitchMm: 4, laneAngleDeg: 30 };
+/**
+ * A second, perturbed reading (other sample phase, looser junctions, tighter lane runs). Every
+ * fragile decision — which stub continues which line at a sub-mm junction, which lanes form a
+ * cross-section — can fall differently; a rank is trusted only where both readings agree.
+ */
+export const ALT_READING: ModelOpts = {
+  pitchMm: 4,
+  phase: 0.15,
+  laneAngleDeg: 24,
+  splitRatio: 2.1,
+  track: { gapMm: 2.5, angleDeg: 18, lateralMm: 0.4, junctionMm: 0.8, junctionAngleDeg: 16, junctionMarginDeg: 2 },
+};
+/** A component built from fewer full cross-sections than this has an unproven orientation. */
+export const WEAK_SUPPORT = 60;
+/** Two readings agree on a rank when their regions differ by less than this × the grade step. */
+export const READING_AGREE = 0.25;
+
 export function gradeRanks(
   sheet: Sheet,
   set: ChainSet,
@@ -241,10 +276,43 @@ export function gradeRanks(
   progress?: (done: number, total: number, note?: string) => void,
 ): GradeResult {
   const t0 = Date.now();
+  const base = gradeOnce(sheet, set, seeds, n, opts, BASE_READING, progress);
+  if (!(opts.twoReadings ?? GRADE_TUNING.twoReadings)) return base;
+  const alt = gradeOnce(sheet, set, seeds, n, { ...opts, keepModel: false }, ALT_READING);
+  const other = new Map(alt.seeds.map((x) => [x.seed, x]));
+  for (const s of base.seeds) {
+    if (!s.accepted) continue;
+    const a = other.get(s.seed);
+    const fa = s.finalAreasMm2.filter((x) => x >= 0);
+    const steps = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+    const step = steps.length ? median(steps) : 0;
+    let lost = 0;
+    s.rankOk = s.rankOk.map((ok, r) => {
+      if (!ok) return false;
+      const agree = !!a && a.rankOk[r] && step > 0 && Math.abs(a.finalAreasMm2[r] - s.finalAreasMm2[r]) <= READING_AGREE * step;
+      if (!agree) lost++;
+      return agree;
+    });
+    if (lost) s.reason += `${s.reason ? '; ' : ''}a second reading disagrees on ${lost} rank(s)`;
+  }
+  base.diag.ms = Date.now() - t0;
+  return base;
+}
+
+function gradeOnce(
+  sheet: Sheet,
+  set: ChainSet,
+  seeds: Seed[],
+  n: number,
+  opts: GradeOpts,
+  reading: ModelOpts,
+  progress?: (done: number, total: number, note?: string) => void,
+): GradeResult {
+  const t0 = Date.now();
   const log = opts.log ?? (() => {});
   const skip = new Set(set.classes.filter((c) => c.role === 'notch').flatMap((c) => c.chains));
   const use = set.chains.filter((c) => !skip.has(c.id) && c.pts.length >= 2).map((c) => c.id);
-  const M = buildModel(sheet, set, use, n, { pitchMm: 4, laneAngleDeg: 30, log });
+  const M = buildModel(sheet, set, use, n, { ...reading, log });
   markFrames(M, seeds);
   let bandMode = 0;
   let bw = -1;
@@ -337,7 +405,30 @@ export function gradeRanks(
       refusal = 'sizes-not-distinguished';
       reason = fam.why;
     }
-    const rankOk = fills.map((f) => refusal == null && f.closed && !f.knifeIncomplete);
+    const rankOk = fills.map((f, r) => refusal == null && f.closed && !f.knifeIncomplete && !fam.leaks.includes(r));
+    // a component built from a handful of cross-sections has a barely evidenced orientation: a
+    // rank whose region changes when such a component flips is not trusted
+    if (refusal == null) {
+      const fa = areas.filter((x) => x >= 0);
+      const st = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+      const step = st.length ? median(st) : 0;
+      for (const c of S.free) {
+        if (M.compSupport[c] >= WEAK_SUPPORT) continue;
+        const flipped = bits.slice();
+        flipped[c] ^= 1;
+        const ps2 = portionPts(M, flipped, S.inBox);
+        let hit = 0;
+        for (let r = 0; r < n; r++) {
+          if (!rankOk[r]) continue;
+          const f2 = fillRank(S.box, opts.cellMm, ps2, r, sd.at, knives);
+          if (!f2.closed || Math.abs(f2.area - areas[r]) > 0.05 * step) {
+            rankOk[r] = false;
+            hit++;
+          }
+        }
+        if (hit) reason += `${reason ? '; ' : ''}${hit} rank(s) hang on weakly evidenced component ${c} (${M.compSupport[c]} cross-sections)`;
+      }
+    }
     if (refusal == null && fam.leaks.length) reason = `ranks ${fam.leaks.join(',')} do not close`;
     const knifeBad = fills.map((f, r) => (f.knifeIncomplete ? r : -1)).filter((r) => r >= 0);
     if (refusal == null && knifeBad.length) reason += `${reason ? '; ' : ''}the variant's cutting line does not reach ranks ${knifeBad.join(',')}`;

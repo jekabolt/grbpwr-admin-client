@@ -8,7 +8,8 @@
 //   controls [sample…]           n−1 / n+1 (no wrong closed, ambiguity raised), shuffled truth
 //   encoded                      encoded (non-stripped) inputs: hook not invoked, F4 byte-identical
 //   all                          every mode, every sample, L1 + L2 → <out>/REPORT-data.json
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
@@ -17,6 +18,7 @@ import { SegGrid, segNearest } from 'lib/pattern-import/pieces/geom';
 import { bboxOfPts, GRADE_TUNING, gradeRanks, type GradeResult } from 'lib/pattern-import/pieces/grade';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { nestPairs, portionPts, rankMasks, tracksIn } from 'lib/pattern-import/pieces/grade/choose';
+import { HOOK_DEBUG } from 'lib/pattern-import/pieces/grade/hook';
 import { DEBUG_ORDER, ranksAt } from 'lib/pattern-import/pieces/grade/model';
 import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
 import type { BoxMm, ChainSet, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
@@ -430,8 +432,16 @@ function controls(rest: string[]) {
 /** Encoded inputs: the hook stays out and F4's output is byte-identical with grade 'solve' vs 'off'. */
 function encoded() {
   const out: unknown[] = [];
-  for (const id of ['robe', 'kombinezon', 'palto', 'reef', 'polupalto']) {
-    const file = resolve(PREP, `prep-${id}.json`);
+  const f4cache = resolve(tmpdir(), 'patimport-f4-cache');
+  const extra = existsSync(f4cache)
+    ? readdirSync(f4cache).filter((f) => /^prep-.*\.json$/.test(f)).map((f) => ({ id: `${f.replace(/^prep-|\.json$/g, '')} (F4 probe cache)`, file: resolve(f4cache, f) }))
+    : [];
+  const list = [
+    ...['robe', 'kombinezon', 'palto', 'reef', 'polupalto'].map((id) => ({ id, file: resolve(PREP, `prep-${id}.json`) })),
+    ...extra,
+  ];
+  for (const { id: label, file } of list) {
+    const id = label.split(/[- ]/)[0];
     if (!existsSync(file)) {
       console.log(`${id}: no encoded prep cache (${file})`);
       continue;
@@ -446,8 +456,8 @@ function encoded() {
     const a = run('off');
     const c = run('solve');
     const same = a.json === c.json;
-    console.log(`${id.padEnd(10)} encoded: F4 mode ${a.mode}, hook invoked ${c.hook}, families byte-identical ${same} (${a.json.length} bytes)`);
-    out.push({ sample: id, mode: a.mode, hook: c.hook, identical: same });
+    console.log(`${label.padEnd(30)} encoded: F4 mode ${a.mode}, hook invoked ${c.hook}, families byte-identical ${same} (${a.json.length} bytes)`);
+    out.push({ sample: label, mode: a.mode, hook: c.hook, identical: same });
   }
   return out;
 }
@@ -537,6 +547,15 @@ function walls(rest: string[]) {
         console.log(`  end e${e.id}.${end} chain c${e.chain} truth ${truthOfChain(e.chain)} at (${p.x.toFixed(2)},${p.y.toFixed(2)}) d=${d.toFixed(2)} out→(${(p.x - q.x).toFixed(2)},${(p.y - q.y).toFixed(2)}) len ${(e.to - e.from).toFixed(1)} track t${tr?.id}`);
       }
   }
+  if (rest.includes('--purity')) {
+    for (const [tr, pu] of [...M.purity].sort((a, b2) => a[1] - b2[1])) {
+      if (pu > (process.env.PUMAX ? +process.env.PUMAX : 0.95)) continue;
+      const t = M.tracks[tr];
+      const truth = [...new Set(t.items.map((it) => truthOfChain(M.els[it.el].chain)))].join('+');
+      const fin = [...new Set((M.samplesOf.get(tr) ?? []).map((_, i) => ranksAt(M, tr, i, G.bits).join('') || '_'))].slice(0, 4).join('/');
+      console.log(`  purity t${tr} ${pu.toFixed(2)} len ${t.lengthMm.toFixed(0)} truth ${truth} final ${fin}`);
+    }
+  }
   const ti = rest.indexOf('--track');
   if (ti >= 0) {
     const tr = +rest[ti + 1];
@@ -559,6 +578,7 @@ function walls(rest: string[]) {
       const { masks } = rankMasks(gs.box, 0.5, ps, b.n, sd.at);
       console.log(`  nest pairs (excess/growth px): ${nestPairs(masks).map((q) => `r${q.r}:${q.excess}/${q.growth}`).join(' ')}`);
     }
+    console.log(`  comp support: ${gs.components.map((c) => `c${c}:${M.compSupport[c]}`).join(' ')}`);
     console.log(`piece ${lab}: ${gs.accepted ? 'ok' : gs.refusal} ${gs.reason} comps=${gs.components.join(',')} areas=${gs.areasMm2.map((a) => (a / 100).toFixed(0)).join('/')}`);
     const zb = process.env.ZOOMBOX?.split(',').map(Number);
     const box = zb ? { minX: zb[0], minY: zb[1], maxX: zb[2], maxY: zb[3] } : gs.box;
@@ -592,6 +612,8 @@ function walls(rest: string[]) {
 export async function main(argv: string[]) {
   const [mode = 'all', ...rest] = argv;
   if (process.env.GRADE_NO_ORDER) GRADE_TUNING.orderCheck = false;
+  if (process.env.HOOK_DEBUG) HOOK_DEBUG.on = true;
+  if (process.env.GRADE_ONE_READING) GRADE_TUNING.twoReadings = false;
   if (mode === 'baseline') baseline(rest);
   else if (mode === 'solve') solve(rest);
   else if (mode === 'controls') controls(rest);

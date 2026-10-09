@@ -14,7 +14,7 @@ import type { ChainSet, Sheet } from 'lib/pattern-import/types';
 
 import { SegGrid } from '../geom';
 
-import { buildTracks, elementsOf, TRACK_OPTS, type Element, type Track } from './tracks';
+import { buildTracks, elementsOf, TRACK_OPTS, type Element, type Track, type TrackOpts } from './tracks';
 import { arcLengths, dist, dot, endTangent, median, resampleT, sub, unit, type V } from './vec';
 
 /** A parallel track met by a sample's normal ray: offset s (mm) and |cos| of its angle to the track. */
@@ -53,6 +53,10 @@ export type GradeModel = {
   bandHist: Map<number, number>;
   /** label frames: never walls */
   frames: Set<number>;
+  /** component → number of full cross-sections (samples) that built it: its orientation evidence */
+  compSupport: number[];
+  /** ranked track → share of its full-tuple votes that went to rank0 (1 = unanimous) */
+  purity: Map<number, number>;
   /** track → sample indices whose cross-section contradicts the grade order (no wall there) */
   masked: Map<number, Set<number>>;
 };
@@ -151,7 +155,7 @@ function rayHits(grid: SegGrid, tracks: Track[], p: V, nrm: V, reach: number, se
  * median spacing; keep the group holding self.
  */
 export const SPLIT_RATIO = 2.6;
-function splitRun(run: Lane[], self: number): Lane[] {
+function splitRun(run: Lane[], self: number, ratio = SPLIT_RATIO): Lane[] {
   if (run.length < 4) return run;
   const sp = run.slice(1).map((l, k) => l.s - run[k].s);
   const med = median(sp);
@@ -159,12 +163,12 @@ function splitRun(run: Lane[], self: number): Lane[] {
   let hi = run.length - 1;
   const si = run.findIndex((l) => l.track === self);
   for (let k = si; k > 0; k--)
-    if (sp[k - 1] > SPLIT_RATIO * med) {
+    if (sp[k - 1] > ratio * med) {
       lo = k;
       break;
     }
   for (let k = si; k < run.length - 1; k++)
-    if (sp[k] > SPLIT_RATIO * med) {
+    if (sp[k] > ratio * med) {
       hi = k;
       break;
     }
@@ -174,6 +178,10 @@ function splitRun(run: Lane[], self: number): Lane[] {
 export type ModelOpts = {
   /** sample pitch along a track, mm */
   pitchMm: number;
+  /** first sample at phase × pitch */
+  phase?: number;
+  splitRatio?: number;
+  track?: TrackOpts;
   /** max angle between a lane and the track, degrees */
   laneAngleDeg: number;
   log?: (s: string) => void;
@@ -186,8 +194,8 @@ export const MODEL_OPTS: ModelOpts = { pitchMm: 4, laneAngleDeg: 30 };
 
 export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number, mo: ModelOpts = MODEL_OPTS): GradeModel {
   const log = mo.log ?? (() => {});
-  const els = elementsOf(sheet, set, use);
-  const tracks = buildTracks(els);
+  const els = elementsOf(sheet, set, use, mo.track ?? TRACK_OPTS);
+  const tracks = buildTracks(els, mo.track ?? TRACK_OPTS);
   const long = tracks.filter((t) => t.lengthMm >= 1.5);
   const grid = new SegGrid(8);
   for (const t of long) grid.addPolyline(t.id, t.pts);
@@ -196,7 +204,7 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
   const hist = new Map<number, number>();
   const raw = new Map<number, { p: V; t: V; u: number }[]>();
   for (const t of long) {
-    const rs = resampleT(t.pts, mo.pitchMm);
+    const rs = resampleT(t.pts, mo.pitchMm, mo.phase ?? 0.5);
     raw.set(t.id, rs);
     for (const s of rs) {
       const nrm = { x: -s.t.y, y: s.t.x };
@@ -231,7 +239,7 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
       while (lo > 0 && all[lo].s - all[lo - 1].s <= 2.5 * step0) lo--;
       let hi = si;
       while (hi + 1 < all.length && all[hi + 1].s - all[hi].s <= 2.5 * step0) hi++;
-      list.push({ track: t.id, idx, p: s.p, t: s.t, n: nrm, u: s.u, lanes: splitRun(all.slice(lo, hi + 1), t.id), coincident });
+      list.push({ track: t.id, idx, p: s.p, t: s.t, n: nrm, u: s.u, lanes: splitRun(all.slice(lo, hi + 1), t.id, mo.splitRatio ?? SPLIT_RATIO), coincident });
     });
     samplesOf.set(t.id, list);
   }
@@ -254,6 +262,8 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
     bandHist: new Map(),
     frames: new Set(),
     masked: new Map(),
+    purity: new Map(),
+    compSupport: [],
   };
   for (const [, ss] of samplesOf)
     for (const s of ss) if (s.lanes.length > 1) M.bandHist.set(s.lanes.length, (M.bandHist.get(s.lanes.length) ?? 0) + 1);
@@ -343,15 +353,21 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
     });
   }
   M.nComps = compIdOf.size;
+  M.compSupport = new Array(M.nComps).fill(0);
+  for (const t of full) M.compSupport[compIdOf.get(par.find(nodeOf.get(t.key)!)[0])!] += t.count;
   for (const [tr, v] of votes) {
     let br = -1;
     let bw = -1;
-    for (const [r, w] of v)
+    let tot = 0;
+    for (const [r, w] of v) {
+      tot += w;
       if (w > bw) {
         bw = w;
         br = r;
       }
+    }
     M.rank0[tr] = br;
+    M.purity.set(tr, tot ? bw / tot : 0);
   }
   // per-sample rank sets of ranked tracks; votes for the unranked neighbours
   const ALL = Array.from({ length: n }, (_, i) => i);

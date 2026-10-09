@@ -29,7 +29,7 @@ import { itemsOf, type WallModel } from '../walls';
 
 import { gradingEvidence } from './guard';
 import { gradeRanks, type GradeRefusal, type GradeResult } from './index';
-import { boxOverlap, bboxOfPts, growBox } from './vec';
+import { boxOverlap, bboxOfPts, growBox, median } from './vec';
 
 export type GradeHook = {
   /** ranks to fill */
@@ -169,24 +169,40 @@ export function gradeHook(
             refuse(c, 'sizes-not-distinguished', p);
             continue;
           }
-          if (c.outcome !== 'closed') continue;
-          // F4's contour on the sheet-wide walls must be the solver's region (the raster region
-          // counts the wall pixels: ≈ half a cell beyond the outline all round)
-          const a = s.finalAreasMm2[c.rank];
-          let per = 0;
-          for (let i = 0; i < c.outer.length; i++) {
-            const q = c.outer[(i + 1) % c.outer.length];
-            per += Math.hypot(q.x - c.outer[i].x, q.y - c.outer[i].y);
+        }
+        // F4's contours on the sheet-wide walls must be the solver's regions. The raster region
+        // also holds the wall pixels and F4 opens narrow spurs, so the two differ by a rim that
+        // is the same for every rank of the piece: compare each rank's offset with the piece's
+        // median offset, against the grade step (a contour that took another line moves by one)
+        if (!s?.accepted) continue;
+        const live = list.filter((c) => c.outcome === 'closed' && s.rankOk[c.rank] && s.finalAreasMm2[c.rank] >= 0);
+        const off = live.map((c) => s.finalAreasMm2[c.rank] - c.areaMm2);
+        const fa = s.finalAreasMm2.filter((a) => a >= 0);
+        const steps = fa.slice(1).map((a, k) => a - fa[k]).filter((d) => d > 0);
+        const step = steps.length ? median(steps) : 0;
+        const mo = off.length ? median(off) : 0;
+        live.forEach((c, k) => {
+          const bad = !step || Math.abs(off[k] - mo) > GRADE_STEP_TOL * step || Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2;
+          if (bad) {
+            if (HOOK_DEBUG.on)
+              HOOK_DEBUG.log(`    crosscheck seed ${id} r${c.rank}: solver ${(s.finalAreasMm2[c.rank] / 100).toFixed(1)} vs F4 ${(c.areaMm2 / 100).toFixed(1)} cm², offset ${(off[k] / 100).toFixed(2)} vs median ${(mo / 100).toFixed(2)}, step ${(step / 100).toFixed(2)} cm²`);
+            refuse(c, 'grade-ambiguous', p);
           }
-          const expected = c.areaMm2 + per * cell * GRADE_INFLATION;
-          if (a < 0 || Math.abs(a - expected) > GRADE_AREA_TOL * expected) refuse(c, 'grade-ambiguous', p);
+        });
+        // and F4's own family still grows rank by rank
+        let prev = -1;
+        for (const c of list.filter((x) => x.outcome === 'closed').sort((x, y) => x.rank - y.rank)) {
+          if (c.areaMm2 <= prev) refuse(c, 'grade-ambiguous', p);
+          else prev = c.areaMm2;
         }
       }
     },
   };
 }
 
-/** Raster region area beyond the vector outline, in cells × perimeter (measured on the bench). */
-export const GRADE_INFLATION = 1.2;
-/** Max relative disagreement between F4's contour and the solver's region. */
-export const GRADE_AREA_TOL = 0.015;
+export const HOOK_DEBUG = { on: false, log: (s: string) => console.log(s) };
+
+/** Max deviation of a rank's (solver − F4) area offset from the piece's median, × grade step. */
+export const GRADE_STEP_TOL = 0.3;
+/** Max |median offset| as a share of the contour area (rim + opened spurs). */
+export const GRADE_RIM_MAX = 0.06;
