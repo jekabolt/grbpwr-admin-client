@@ -376,6 +376,7 @@ export type SizeEncoding =
   | 'color'
   | 'file-per-size'
   | 'text-label'
+  | 'dxf-block' // sizes come from DXF block names / AAMA SIZE labels (adapters/dxf fast path)
   | 'single'; // one size in the file (BLAZER M)
 
 export type SourceSize = {
@@ -453,6 +454,8 @@ export type PieceCandidate = {
   p95Mm: Mm;
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
+  /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
+  features?: Feature[];
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
