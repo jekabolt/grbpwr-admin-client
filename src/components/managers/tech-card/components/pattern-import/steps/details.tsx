@@ -193,7 +193,10 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 const specs = specsOf(seed);
                 // No AI answer for this piece (not logged in, AI off): show what the sheet text
                 // gave the spec; typing a code makes it the operator's.
-                const n = nameOf(seed) ?? (specs.length ? textNameOf(seed, sem) : undefined);
+                const ov0 = inputs.overrides[seed];
+                const n =
+                  nameOf(seed) ??
+                  (specs.length || ov0?.code ? textNameOf(seed, sem, ov0) : undefined);
                 const b = blockedOf(seed);
                 const ov = inputs.overrides[seed] ?? {};
                 // A blocked piece has no spec yet: fall back to what the namer read off the sheet.

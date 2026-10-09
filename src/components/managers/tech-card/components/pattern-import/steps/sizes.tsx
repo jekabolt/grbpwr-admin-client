@@ -394,10 +394,10 @@ function CardSizeCell({
         onChange={onChange}
         invalid={invalid}
         aria-label={`card size for source size ${e.source.label}`}
-        className='w-24'
+        className='w-28'
         title={why}
         options={[
-          { value: '', label: '— not exported —' },
+          { value: '', label: 'not exported' },
           ...card.sizes.map((c) => ({ value: String(c.sizeId), label: c.name })),
         ]}
       />

@@ -706,7 +706,8 @@ export function useImportSession(deps: {
         const pending = (s.chains?.classes ?? []).filter(
           (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
         );
-        if (pending.length) return `${pending.length} legend row to confirm`;
+        if (pending.length)
+          return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
         const entries = s.sizes?.map.entries ?? [];
         if (!entries.some((e) => e.card)) return 'map at least one size to the card';
         const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
@@ -830,7 +831,7 @@ export function useImportSession(deps: {
     // name from what the operator typed, on top of what the sheet text gave the spec.
     const decisions = names.some((n) => n.seed === seed)
       ? names.map((n) => (n.seed === seed ? { ...n, ...p } : n))
-      : [...names, { ...textNameOf(seed, sRef.current.semantics), ...p }];
+      : [...names, { ...textNameOf(seed, sRef.current.semantics, i.overrides[seed]), ...p }];
     await dispatch({ type: 'names', decisions });
   }
 
@@ -922,9 +923,17 @@ export function exportedRanks(map: SizeMap | undefined): Set<number> | null {
   return new Set(map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
 }
 
-/** A name decision seeded from what semantics read off the sheet (or empty: the operator types). */
-export function textNameOf(seed: SeedId, sem: ImportSession['semantics']): NameDecision {
+/**
+ * A name decision for a piece the namer said nothing about: what the operator already typed (kept
+ * in the semantics overrides across `back`), else what semantics read off the sheet, else empty.
+ */
+export function textNameOf(
+  seed: SeedId,
+  sem: ImportSession['semantics'],
+  override?: PieceOverride,
+): NameDecision {
   const spec = sem?.pieces.find((p) => p.seed === seed);
+  const hand = override?.pairHand ?? spec?.pairHand ?? null;
   return {
     seed,
     suggestion: null,
@@ -932,9 +941,11 @@ export function textNameOf(seed: SeedId, sem: ImportSession['semantics']): NameD
     evidence: [],
     confidence: 1,
     autoAccepted: false,
-    code: spec?.code ?? '',
-    mods: (spec?.mods ?? []).filter((m) => !(spec?.pairHand && m === spec.pairHand)),
-    displayName: spec?.displayName ?? '',
+    code: override?.code ?? spec?.code ?? '',
+    mods: (override?.code ? override.mods ?? [] : spec?.mods ?? []).filter(
+      (m) => !(hand && m === hand),
+    ),
+    displayName: override?.displayName ?? spec?.displayName ?? '',
   };
 }
 
