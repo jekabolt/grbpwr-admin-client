@@ -16,6 +16,7 @@ import { GRADE_TUNING } from 'lib/pattern-import/pieces/grade';
 import { pickLayout, scoreAreas } from 'lib/pattern-import/pieces/grade/choose';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
+import { proposeSizeMap } from 'lib/pattern-import/sizes/map';
 import type { CardSize, IRPath, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
@@ -142,8 +143,20 @@ function mixed(): FixtureResult {
   const a = gradedPiece(0, 0, 5, (s) => 2 + s);
   const b = gradedPiece(600, 0, 5, () => 0);
   const { families, run: r } = run([...a.draws, ...b.draws], [a.seed, b.seed], 5);
-  const wrong = wrongOf(families, [a.truth, b.truth]);
-  return { name: 'mixed', ok: !wrong.length, why: `encoding ${r.encoding} n=${r.sizes.length}; ${tally(families)}${wrong.length ? ` wrong ${wrong.join(', ')}` : ''}` };
+  // what reaches the card: a source rank the size map ties to a card size. A GUESSED tie (no label
+  // matched, confidence < 0.9) stops the wizard on the sizes step for the operator to confirm
+  const map = proposeSizeMap(r, cardOf(5));
+  const sure = new Map(map.entries.filter((e) => e.card && (e.confidence ?? 1) >= 0.9).map((e) => [e.source.rank, e.card!.rank]));
+  const guessed = map.entries.filter((e) => e.card && (e.confidence ?? 1) < 0.9).length;
+  const truthByCard = [a.truth, b.truth].map((t) => Array.from({ length: r.sizes.length }, (_, rank) => (sure.has(rank) ? t[sure.get(rank)!] ?? null : null)));
+  const exported = families.map((f) => ({ ...f, candidates: f.candidates.filter((c) => sure.has(c.rank)) }));
+  const wrong = wrongOf(exported, truthByCard);
+  return {
+    name: 'mixed',
+    // and the unencoded piece never closes as some size
+    ok: !wrong.length && !families.find((f) => f.seed === 1)?.candidates.some((c) => c.outcome === 'closed'),
+    why: `encoding ${r.encoding} n=${r.sizes.length}, size map: ${sure.size} sure, ${guessed} guessed (operator confirms); ${tally(families)}${wrong.length ? ` wrong ${wrong.join(', ')}` : ''}`,
+  };
 }
 
 function shortZone(): FixtureResult {
