@@ -36,6 +36,7 @@ const FLAG: Record<ChainAmbiguity['kind'], string> = {
   'size-empty': 'size not drawn',
   unassigned: 'lines without a size',
   'bundle-overfull': 'too many lines',
+  'grade-ambiguous': 'which size is which',
 };
 
 /** A dash rhythm as the eye reads it: 7.78/1.66, not 7.781600531/1.659…. */

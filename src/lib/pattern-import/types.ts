@@ -384,7 +384,8 @@ export type ChainAmbiguity = {
     | 'class-split' // one size drawn in several looks
     | 'size-empty' // a rank with no line
     | 'unassigned' // size-line chains without a rank
-    | 'bundle-overfull'; // parallel group wider than the size count after splitting
+    | 'bundle-overfull' // parallel group wider than the size count after splitting
+    | 'grade-ambiguous'; // pieces/grade (H1): two rank layouts of an unencoded graded piece fit
   message: string;
   classes: ClassId[];
   chains: ChainId[];
@@ -541,7 +542,12 @@ export type PieceCandidate = {
    * 'bundleRank' = ranked locally by nesting inside the seed's region (F3 had no usable class);
    * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade';
+  /**
+   * pieces/grade (H1): why an unencoded graded piece was NOT closed (outcome 'leak'): no rank model
+   * ('sizes-not-distinguished'), two layouts fit ('grade-ambiguous'), size count disputed.
+   */
+  gradeRefusal?: 'sizes-not-distinguished' | 'grade-ambiguous' | 'size-count';
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
@@ -560,6 +566,13 @@ export type FillOpts = {
   snapMm: Mm;
   /** Only this variant's seeds; null = all seeds. */
   variant: string | null;
+  /**
+   * pieces/grade (H1) on sheets whose sizes are drawn alike (F4 fell to 'single' with n > 1):
+   * 'solve' (default) ranks them, 'guard' refuses them, 'off' = the single-size fill as before.
+   */
+  grade?: 'solve' | 'guard' | 'off';
+  /** Size count when the SizeRun does not carry it (the wizard's "how many sizes"). */
+  sizeCount?: number;
 };
 
 export type ProposeSeedsFn = (sheet: Sheet, set: ChainSet) => Seed[];

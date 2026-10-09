@@ -37,6 +37,7 @@ import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
 import { localRanks } from './bundle-rank';
+import { gradeHook, type GradeHook } from './grade/hook';
 import {
   frameLike,
   itemsOf,
@@ -65,6 +66,8 @@ export type FillDiag = {
   frames: ChainId[];
   /** 'ignore' chains brought back as walls (both ends on outline lines). */
   rescued: number;
+  /** pieces/grade (H1): the unencoded-grading hook, when it ran. */
+  grade?: GradeHook;
   ms: number;
 };
 
@@ -283,6 +286,8 @@ export function fillPiecesDetailed(
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
+  const graded = gradeHook(sheet, set, run, use, model, opts); // H1: sizes drawn alike (null = as before)
+  const nRanks = graded?.n ?? model.n;
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
   const knifeSet = new Set(knives);
@@ -293,6 +298,7 @@ export function fillPiecesDetailed(
     cand: new Map(),
     frames: [],
     rescued: 0,
+    ...(graded ? { grade: graded } : {}),
     ms: 0,
   };
   const cands = new Map<number, PieceCandidate[]>(use.map((s) => [s.id, []]));
@@ -340,9 +346,10 @@ export function fillPiecesDetailed(
     const base = buildRank(
       box,
       cell,
-      [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone].filter(
-        keep,
-      ),
+      (graded?.walls
+        ? graded.walls(r)
+        : [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone]
+      ).filter(keep),
     );
     const pts = use.map((s) => shift(s.at, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
@@ -528,8 +535,8 @@ export function fillPiecesDetailed(
   };
 
   const excl = new Set<ChainId>(userExcl);
-  for (let r = 0; r < model.n; r++) {
-    progress?.(r, model.n, `rank ${r}`);
+  for (let r = 0; r < nRanks; r++) {
+    progress?.(r, nRanks, `rank ${r}`);
     let res = rankPass(r, excl);
     // frames found around merged regions are not walls: drop them and fill this rank again
     for (let attempt = 0; attempt < 3 && res.frames.size; attempt++) {
@@ -546,7 +553,7 @@ export function fillPiecesDetailed(
   }
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
-  for (let r = 0; r < model.n; r++) {
+  for (let r = 0; r < nRanks; r++) {
     const leaks = use
       .map((s, si) => ({ s, si, c: cands.get(s.id)!.find((x) => x.rank === r) }))
       .filter((x) => x.c && x.c.outcome === 'leak');
@@ -555,9 +562,10 @@ export function fillPiecesDetailed(
     const ctx = buildRank(
       box,
       cell,
-      [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone].filter(
-        (it) => !excl.has(it.chain) && !knifeSet.has(it.chain),
-      ),
+      (graded?.walls
+        ? graded.walls(r)
+        : [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone]
+      ).filter((it) => !excl.has(it.chain) && !knifeSet.has(it.chain)),
     );
     for (const { s, c } of leaks) {
       const closed = cands
@@ -569,6 +577,7 @@ export function fillPiecesDetailed(
       c!.leakAt = leakMouth(ctx.g, ctx.wall, k, closed[0]?.outer) ?? at;
     }
   }
+  graded?.finish(cands);
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -576,7 +585,7 @@ export function fillPiecesDetailed(
     families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) });
   }
   diag.ms = Date.now() - t0;
-  progress?.(model.n, model.n);
+  progress?.(nRanks, nRanks);
   return { families, diag };
 }
 
