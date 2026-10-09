@@ -9,7 +9,7 @@ import { formatTechCardDate } from 'components/managers/tech-cards/components/ut
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { PieceDTO } from 'lib/nesting/types';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -755,6 +755,43 @@ export function PatternsField({
   // Порядок работы в ателье обратный: DXF приходит от конструктора раньше, чем кто-либо утверждает
   // градацию, и ряд из этих же файлов потом и набирают.
   const canUpload = canEdit && uploadScopes.length > 0;
+
+  // Дверь импорта (F13, J1). Импорт раскладывает размеры файла по РЯДУ карточки (шаг 4), и без
+  // ряда прогон упирался в стену после всей работы — поэтому без ряда дверь закрыта и говорит, где
+  // его задать. Отсутствие ткани в BOM дверь НЕ закрывает: прогон тогда кончается скачиванием DXF
+  // (forRun в pattern-import/client.ts), а это и есть основной выход импорта.
+  const importNoteId = useId();
+  const importDoor = () => {
+    if (!PATTERN_IMPORT_ENABLED || !techCardId || !canEdit) return null;
+    const needsSizes = sizeIds.length === 0;
+    return (
+      <span className='flex items-center gap-1.5'>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor disabled:hover:text-textInactiveColor'
+          disabled={needsSizes}
+          aria-describedby={needsSizes ? importNoteId : undefined}
+          onClick={() => setImporting(true)}
+          title={
+            needsSizes
+              ? 'the import maps the sizes of the file onto the card range: set the range first'
+              : scopes.length === 0
+                ? 'no fabric line in the BOM: the import converts the pattern and ends in a DXF download'
+                : 'convert a pattern in any format (PDF, foreign DXF, PLT, SVG, scan) into a DXF with named pieces and the card sizes'
+          }
+        >
+          import pattern
+        </Button>
+        {needsSizes && (
+          <Text id={importNoteId} size='nano' variant='label' component='span'>
+            set the size range above first
+          </Text>
+        )}
+      </span>
+    );
+  };
 
   // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
   // server enforces), then stage the good files for naming + upload.
@@ -1579,14 +1616,87 @@ export function PatternsField({
     );
   }
 
+  // Мастер импорта монтируется из обеих веток: из полной панели и из пустой (нет ни ткани, ни
+  // выкроек — тогда прогон кончается скачиванием).
+  const renderImportWizard = () =>
+    techCardId ? (
+      <Suspense fallback={null}>
+        <ImportWizard
+          card={buildCardContext({
+            techCardId,
+            orderedSizeIds: orderSizes(sizeIds),
+            sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+            rawSizeName: (id) => sizeById.get(id),
+            scopes: scopes.map((sc) => ({
+              key: sc.key,
+              byPurpose: sc.byPurpose,
+              label: scopeLabel(sc),
+              binding: bindingForScope(sc),
+              sections: sc.lines.map((l) => l.section),
+            })),
+            pieces: cardPieces,
+            aliases: pieceDxfAliases.map((a) => ({
+              scopeKey: aliasScopeKey(a),
+              blockName: a.blockName,
+              pieceLineKey: a.pieceLineKey,
+            })),
+            patterns: liveRows.map((p) => ({
+              scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+              filename: p.filename,
+              url: p.url,
+              lineKey: p.lineKey,
+              name: p.name,
+              manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
+            })),
+            styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+          })}
+          // F7: upload every file, then ONE batch into this form, then the card's own save.
+          applyDraft={followUpApply(
+            createCardApply({
+              read: () => ({
+                patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
+                pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
+                aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
+              }),
+              write: (path, value) =>
+                setValue(path as Parameters<typeof setValue>[0], value as never, {
+                  shouldDirty: true,
+                }),
+              storageSizeId,
+              save: (reason) => autosave.flush(reason),
+            }),
+          )}
+          followUp={followUp?.rows ?? null}
+          onRetryFollowUp={retryFollowUp}
+          onReviewPieces={(scopeKey) => {
+            const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+            if (!g || g.entries.length === 0) return;
+            setImporting(false);
+            setSelectedKey(scopeKey);
+            setMatching({
+              scope: g.scope,
+              fabricName: scopeLabel(g.scope),
+              files: filesOf(g.entries),
+            });
+          }}
+          onClose={() => setImporting(false)}
+        />
+      </Suspense>
+    ) : null;
+
   if (fields.length === 0 && fabricBomLines.length === 0) {
+    const door = importDoor();
     return (
-      <Text size='micro' variant='label'>
-        add fabric lines in the BOM — a pattern binds to a material.
-        {sizeIds.length === 0
-          ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
-          : ''}
-      </Text>
+      <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5'>
+        <Text size='micro' variant='label'>
+          add fabric lines in the BOM — a pattern binds to a material.
+          {sizeIds.length === 0
+            ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
+            : ''}
+        </Text>
+        {door}
+        {door && importing && renderImportWizard()}
+      </div>
     );
   }
 
@@ -1636,29 +1746,21 @@ export function PatternsField({
               >
                 merge sizes
               </Button>
-              {/* Импорт выкройки ЛЮБОГО формата — третий вход рядом с загрузкой и склейкой: не
-                  «положить готовый DXF», а «сделать его» из PDF, чужого DXF, PLT, SVG или скана. */}
-              {PATTERN_IMPORT_ENABLED && !!techCardId && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='text-labelColor hover:text-textColor'
-                  onClick={() => setImporting(true)}
-                  title='convert a pattern in any format (PDF, foreign DXF, PLT, SVG, scan) into a DXF with named pieces and the card sizes'
-                >
-                  import pattern
-                </Button>
-              )}
-              <PatternUploadButton
-                label='+ DXF'
-                dxfOnly
-                fabricScopes={uploadScopes}
-                defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
-                onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-                quiet
-              />
             </>
+          )}
+          {/* Импорт выкройки ЛЮБОГО формата — третий вход рядом с загрузкой и склейкой: не
+              «положить готовый DXF», а «сделать его» из PDF, чужого DXF, PLT, SVG или скана. Стоит
+              вне `canUpload`: без ткани в BOM он всё равно отдаёт файл на скачивание. */}
+          {importDoor()}
+          {canUpload && (
+            <PatternUploadButton
+              label='+ DXF'
+              dxfOnly
+              fabricScopes={uploadScopes}
+              defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
+              onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+              quiet
+            />
           )}
         </div>
       </div>
@@ -1828,70 +1930,7 @@ export function PatternsField({
         pattern pieces are shared — but the article and its width are substituted per colourway.
       </Text>
 
-      {importing && techCardId && (
-        <Suspense fallback={null}>
-          <ImportWizard
-            card={buildCardContext({
-              techCardId,
-              orderedSizeIds: orderSizes(sizeIds),
-              sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
-              rawSizeName: (id) => sizeById.get(id),
-              scopes: scopes.map((sc) => ({
-                key: sc.key,
-                byPurpose: sc.byPurpose,
-                label: scopeLabel(sc),
-                binding: bindingForScope(sc),
-                sections: sc.lines.map((l) => l.section),
-              })),
-              pieces: cardPieces,
-              aliases: pieceDxfAliases.map((a) => ({
-                scopeKey: aliasScopeKey(a),
-                blockName: a.blockName,
-                pieceLineKey: a.pieceLineKey,
-              })),
-              patterns: liveRows.map((p) => ({
-                scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
-                filename: p.filename,
-                url: p.url,
-                lineKey: p.lineKey,
-                name: p.name,
-                manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
-              })),
-              styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
-            })}
-            // F7: upload every file, then ONE batch into this form, then the card's own save.
-            applyDraft={followUpApply(
-              createCardApply({
-                read: () => ({
-                  patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
-                  pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
-                  aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
-                }),
-                write: (path, value) =>
-                  setValue(path as Parameters<typeof setValue>[0], value as never, {
-                    shouldDirty: true,
-                  }),
-                storageSizeId,
-                save: (reason) => autosave.flush(reason),
-              }),
-            )}
-            followUp={followUp?.rows ?? null}
-            onRetryFollowUp={retryFollowUp}
-            onReviewPieces={(scopeKey) => {
-              const g = scopeGroups.find((x) => x.scope.key === scopeKey);
-              if (!g || g.entries.length === 0) return;
-              setImporting(false);
-              setSelectedKey(scopeKey);
-              setMatching({
-                scope: g.scope,
-                fabricName: scopeLabel(g.scope),
-                files: filesOf(g.entries),
-              });
-            }}
-            onClose={() => setImporting(false)}
-          />
-        </Suspense>
-      )}
+      {importing && renderImportWizard()}
 
       {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
           материала — грузится он как любая другая выкройка, потому что после склейки он и есть
