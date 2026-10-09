@@ -1,0 +1,100 @@
+{
+  "id": "tee",
+  "category": "tee",
+  "garmentName": "Tee",
+  "_note": "Knit tee: shoulders → close the neck rib into a ring → set the rib → sleeves set flat → side + underarm in one → sleeve hems → body hem → final press.",
+  "pressOpen": false,
+  "pressFlat": false,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood", "rib"],
+  "fuseRoles": [],
+  "stages": [
+    { "id": "fuse", "op": "fuse", "label": "Fuse interlining" },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Subassemblies",
+      "roles": ["rib", "collar", "stand", "hood", "cuff", "pocket", "placket"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "shoulders",
+      "op": "combine",
+      "label": "Join shoulders",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "SHOULDER",
+      "press": "open"
+    },
+    {
+      "id": "close-rib",
+      "op": "process",
+      "label": "Close the neck rib into a ring",
+      "roles": ["rib"],
+      "zone": "NECKLINE"
+    },
+    {
+      "id": "neckline",
+      "op": "attach",
+      "label": "Set the neck rib",
+      "roles": ["rib", "collar", "stand", "hood"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with neck rib",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "sides",
+      "op": "process",
+      "label": "Close side and underarm seams",
+      "roles": ["body"],
+      "zone": "OUTER"
+    },
+    {
+      "id": "cuffs",
+      "op": "attach",
+      "label": "Attach cuffs",
+      "roles": ["cuff"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with cuffs",
+      "zone": "SLEEVE"
+    },
+    {
+      "id": "sleeve-hem",
+      "op": "process",
+      "label": "Hem sleeves",
+      "roles": ["body"],
+      "zone": "SLEEVE",
+      "unless": ["cuff"]
+    },
+    { "id": "hem", "op": "process", "label": "Hem", "roles": ["body"], "zone": "HEM" },
+    {
+      "id": "tape",
+      "op": "bom",
+      "label": "Tape the shoulder seams",
+      "when": "tape",
+      "machine": "binding_taping",
+      "zone": "SHOULDER"
+    },
+    { "id": "final-press", "op": "press", "label": "Final press", "zone": "OUTER" }
+  ]
+}

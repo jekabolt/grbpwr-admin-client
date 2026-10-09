@@ -1,0 +1,204 @@
+{
+  "id": "generic",
+  "category": "generic",
+  "garmentName": "Garment",
+  "_note": "Any garment without a category template: subassemblies \u2192 panels \u2192 shoulders \u2192 neckline \u2192 sleeves \u2192 sides \u2192 cuffs \u2192 hem \u2192 closures from the BOM \u2192 final press. Lining, if any, is a parallel subtree bagged at the end.",
+  "pressOpen": true,
+  "pressFlat": true,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
+  "fuseRoles": ["collar", "stand", "cuff", "placket", "facing", "pocket"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Subassemblies",
+      "roles": [
+        "collar",
+        "stand",
+        "hood",
+        "rib",
+        "cuff",
+        "hemband",
+        "pocket",
+        "placket",
+        "fly",
+        "facing",
+        "waistband",
+        "loop"
+      ]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "shoulders",
+      "op": "combine",
+      "label": "Join shoulders",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "SHOULDER",
+      "press": "open"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set the collar, rib or hood",
+      "roles": ["collar", "stand", "hood", "rib"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with neckline",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "sides",
+      "op": "process",
+      "label": "Close side and underarm seams",
+      "roles": ["body"],
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "cuffs",
+      "op": "attach",
+      "label": "Attach cuffs",
+      "roles": ["cuff"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with cuffs",
+      "zone": "SLEEVE",
+      "press": "flat"
+    },
+    {
+      "id": "bag",
+      "op": "bag",
+      "label": "Bag the lining into the shell",
+      "roles": ["facing"],
+      "name": "Garment",
+      "zone": "LINING",
+      "press": "flat"
+    },
+    {
+      "id": "hem-band",
+      "op": "attach",
+      "label": "Attach the hem band",
+      "roles": ["hemband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with hem band",
+      "zone": "HEM"
+    },
+    {
+      "id": "waistband",
+      "op": "attach",
+      "label": "Attach the waistband",
+      "roles": ["waistband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with waistband",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "loops",
+      "op": "attach",
+      "label": "Attach belt loops",
+      "roles": ["loop"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with belt loops",
+      "zone": "WAIST"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM",
+      "unless": ["hemband"]
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "tape",
+      "op": "bom",
+      "label": "Tape seams",
+      "when": "tape",
+      "machine": "binding_taping",
+      "zone": "OUTER"
+    },
+    {
+      "id": "drawcord",
+      "op": "bom",
+      "label": "Thread the drawcord",
+      "when": "drawcord",
+      "operationType": "HANDWORK",
+      "zone": "OUTER"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

@@ -151,6 +151,8 @@ export type SkeletonStep = {
   source: 'geometry' | 'template' | 'bom' | 'ai';
   /** Alternative input sets for an ambiguous join; the first entry of `inputs` wins by default. */
   alternatives?: { inputs: string[]; seams: SeamCandidate[]; reason: string }[];
+  /** What the step does, in words («Join shoulders», «Press seams open») — the row's title in D2. */
+  label?: string;
 };
 
 export type SkeletonProposal = {
@@ -159,6 +161,72 @@ export type SkeletonProposal = {
   /** Template id the order came from (skeleton/templates/<id>.json). */
   template: string;
   warnings: string[];
+};
+
+/** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */
+export type SkeletonTree = 'shell' | 'lining';
+
+/**
+ * A unit as `groupUnits` (B1) sees it: one join that turns its inputs into a named unit before the
+ * body is assembled (layers, panels, plackets on fronts …). `key` is provisional (`~u1`) until
+ * `buildSkeleton` swaps it for a unit code; lane A's composite pass (A4) reads `pieceKeys`.
+ */
+export type SkeletonUnit = {
+  key: string;
+  name: string;
+  /** Piece keys or earlier units' provisional keys. */
+  inputs: string[];
+  /** Leaf pieces of the unit, in card order. */
+  pieceKeys: string[];
+  /** Role ids from skeleton/templates/roles.json; the first one is the unit's own. */
+  roles: string[];
+  hand: Hand;
+  tree: SkeletonTree;
+  kind: 'fuse' | 'layers' | 'panel' | 'merge' | 'wrap' | 'attach' | 'geometry';
+  seams: SeamCandidate[];
+  confidence: number;
+  reason: string;
+  source: 'geometry' | 'template';
+  alternatives?: { inputs: string[]; seams: SeamCandidate[]; reason: string }[];
+};
+
+/** The draft card a zone is inferred on: pieces + the steps built so far (unit keys provisional). */
+export type SkeletonDraftCard = {
+  pieces: { lineKey: string; name: string }[];
+  steps: SkeletonStep[];
+};
+
+/** Step shape of the frontier sweep (assembly-frontier.ts `AssemblyStep`), restated for lib/**. */
+export type SkeletonCheckStep = {
+  inputs: { kind: 'piece' | 'unit'; key: string }[];
+  outputUnitKey: string;
+  outputUnitName: string;
+};
+
+export type SkeletonViolation = { rule: number; detail: string; step: number; message: string };
+
+/**
+ * What `buildSkeleton` borrows from the tech-card components. Injected, because lib/** must not
+ * import components/**; the composed instance lives next to them (assembly-skeleton-deps.ts).
+ */
+export type SkeletonDeps = {
+  /** Zone of draft step `index` as a full enum value, or '' when the sources are silent/disagree. */
+  zoneOf: (draft: SkeletonDraftCard, index: number) => string;
+  /** `suggestUnitCode` of assembly-suggest.ts: `taken` = piece keys + unit codes already given. */
+  suggestUnitCode: (zone: string, taken: Set<string>) => string;
+  /** `assemblySweep` (rules 1–3, 6, 7) + `assemblyReleaseCheck` (rule 4) of assembly-frontier.ts. */
+  checkAssembly: (
+    pieces: { lineKey: string; name: string }[],
+    steps: SkeletonCheckStep[],
+  ) => { violations: SkeletonViolation[]; release: SkeletonViolation[] };
+};
+
+/** Switches over the template's own defaults (01-PLAN §2 B2: press steps are switchable). */
+export type SkeletonOptions = {
+  /** PRESS_OPEN after a seam join. */
+  pressOpen?: boolean;
+  /** PRESS (flat) after a turned subassembly (collar, cuff, placket …). */
+  pressFlat?: boolean;
 };
 
 // ── Union pictogram (lane C) ────────────────────────────────────────────────────────────────

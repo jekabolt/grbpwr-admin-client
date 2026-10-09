@@ -1,0 +1,3109 @@
+{
+  "source": "/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/assembly-from-pattern/probe/out/shirt-M (probe v3, 09.10)",
+  "graph": {
+    "pieces": [
+      {
+        "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+        "name": "CLR",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [415],
+        "edges": [
+          {
+            "id": "01M1M1S2WRS97ZSG21VFZJ60JK#0",
+            "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+            "k": 0,
+            "s": 173,
+            "e": 213,
+            "pts": [],
+            "lenMm": 40,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRS97ZSG21VFZJ60JK#1",
+            "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+            "k": 1,
+            "s": 213,
+            "e": 617,
+            "pts": [],
+            "lenMm": 396.8,
+            "chordMm": 0,
+            "turnDeg": 218,
+            "notchesMm": [202],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRS97ZSG21VFZJ60JK#2",
+            "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+            "k": 2,
+            "s": 617,
+            "e": 657,
+            "pts": [],
+            "lenMm": 40,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRS97ZSG21VFZJ60JK#3",
+            "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+            "k": 3,
+            "s": 657,
+            "e": 173,
+            "pts": [],
+            "lenMm": 349.8,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 13013,
+        "perimMm": 826.6,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRAT0E32F4CD4AC2ER",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+        "name": "NCK",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [137, 173, 223, 324, 510, 611, 661, 697, 837],
+        "edges": [
+          {
+            "id": "01M1M1S2WRYYP3D90C15RN93FE#0",
+            "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+            "k": 0,
+            "s": 186,
+            "e": 211,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRYYP3D90C15RN93FE#1",
+            "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+            "k": 1,
+            "s": 211,
+            "e": 623,
+            "pts": [],
+            "lenMm": 412.2,
+            "chordMm": 0,
+            "turnDeg": 252,
+            "notchesMm": [12, 113, 299, 400],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRYYP3D90C15RN93FE#2",
+            "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+            "k": 2,
+            "s": 623,
+            "e": 648,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRYYP3D90C15RN93FE#3",
+            "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+            "k": 3,
+            "s": 648,
+            "e": 186,
+            "pts": [],
+            "lenMm": 374.7,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [329, 365, 13, 49, 189],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 9985,
+        "perimMm": 836.9,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRD4PS0KGFPVVX6301",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+        "name": "PLCK_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "01M1M1S2WRKPF7CBSVY8VFH76T#0",
+            "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+            "k": 0,
+            "s": 13,
+            "e": 606,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRKPF7CBSVY8VFH76T#1",
+            "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+            "k": 1,
+            "s": 606,
+            "e": 710,
+            "pts": [],
+            "lenMm": 102,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRKPF7CBSVY8VFH76T#2",
+            "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+            "k": 2,
+            "s": 710,
+            "e": 1303,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRKPF7CBSVY8VFH76T#3",
+            "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+            "k": 3,
+            "s": 1303,
+            "e": 13,
+            "pts": [],
+            "lenMm": 102,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 60462,
+        "perimMm": 1389.6,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRSJFKPTJQD6NP5B34",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+        "name": "FRONT_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [455, 529],
+        "edges": [
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#0",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 0,
+            "s": 0,
+            "e": 86,
+            "pts": [],
+            "lenMm": 89.4,
+            "chordMm": 0,
+            "turnDeg": -162,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#1",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 1,
+            "s": 86,
+            "e": 212,
+            "pts": [],
+            "lenMm": 126.2,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#2",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 2,
+            "s": 212,
+            "e": 332,
+            "pts": [],
+            "lenMm": 115.5,
+            "chordMm": 0,
+            "turnDeg": -113,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#3",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 3,
+            "s": 332,
+            "e": 848,
+            "pts": [],
+            "lenMm": 517.9,
+            "chordMm": 0,
+            "turnDeg": -120,
+            "notchesMm": [123, 197],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#4",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 4,
+            "s": 848,
+            "e": 925,
+            "pts": [],
+            "lenMm": 76.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR7Z1ED4Q4DPAXXA50#5",
+            "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "k": 5,
+            "s": 925,
+            "e": 0,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 61995,
+        "perimMm": 1518.4,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+        "name": "BP",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [41, 392, 407, 528, 634, 782, 1091, 1400, 1548, 1654, 1775, 1790, 2141],
+        "edges": [
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#0",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 0,
+            "s": 41,
+            "e": 56,
+            "pts": [],
+            "lenMm": 15.4,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#1",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 1,
+            "s": 56,
+            "e": 86,
+            "pts": [],
+            "lenMm": 30.5,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#2",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 2,
+            "s": 86,
+            "e": 101,
+            "pts": [],
+            "lenMm": 14.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#3",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 3,
+            "s": 101,
+            "e": 145,
+            "pts": [],
+            "lenMm": 45.3,
+            "chordMm": 0,
+            "turnDeg": -85,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#4",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 4,
+            "s": 145,
+            "e": 271,
+            "pts": [],
+            "lenMm": 126.2,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#5",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 5,
+            "s": 271,
+            "e": 378,
+            "pts": [],
+            "lenMm": 107,
+            "chordMm": 0,
+            "turnDeg": -8,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#6",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 6,
+            "s": 378,
+            "e": 392,
+            "pts": [],
+            "lenMm": 14.3,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#7",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 7,
+            "s": 392,
+            "e": 963,
+            "pts": [],
+            "lenMm": 568.2,
+            "chordMm": 0,
+            "turnDeg": -97,
+            "notchesMm": [15, 136, 242, 390],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#8",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 8,
+            "s": 963,
+            "e": 1219,
+            "pts": [],
+            "lenMm": 252.5,
+            "chordMm": 0,
+            "turnDeg": 54,
+            "notchesMm": [128],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#9",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 9,
+            "s": 1219,
+            "e": 1790,
+            "pts": [],
+            "lenMm": 568.2,
+            "chordMm": 0,
+            "turnDeg": -97,
+            "notchesMm": [181, 329, 435, 556],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#10",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 10,
+            "s": 1790,
+            "e": 1804,
+            "pts": [],
+            "lenMm": 14.3,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#11",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 11,
+            "s": 1804,
+            "e": 1911,
+            "pts": [],
+            "lenMm": 107,
+            "chordMm": 0,
+            "turnDeg": -8,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#12",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 12,
+            "s": 1911,
+            "e": 2037,
+            "pts": [],
+            "lenMm": 126.2,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#13",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 13,
+            "s": 2037,
+            "e": 2081,
+            "pts": [],
+            "lenMm": 45.3,
+            "chordMm": 0,
+            "turnDeg": -85,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#14",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 14,
+            "s": 2081,
+            "e": 2096,
+            "pts": [],
+            "lenMm": 14.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#15",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 15,
+            "s": 2096,
+            "e": 2126,
+            "pts": [],
+            "lenMm": 30.5,
+            "chordMm": 0,
+            "turnDeg": -13,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#16",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 16,
+            "s": 2126,
+            "e": 2141,
+            "pts": [],
+            "lenMm": 15.4,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRVE27KVQT0GQ9490Y#17",
+            "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+            "k": 17,
+            "s": 2141,
+            "e": 41,
+            "pts": [],
+            "lenMm": 91.5,
+            "chordMm": 0,
+            "turnDeg": -63,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 174450,
+        "perimMm": 2187,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+        "name": "FRONT_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [396, 470],
+        "edges": [
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#0",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 0,
+            "s": 0,
+            "e": 77,
+            "pts": [],
+            "lenMm": 76.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#1",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 1,
+            "s": 77,
+            "e": 593,
+            "pts": [],
+            "lenMm": 517.9,
+            "chordMm": 0,
+            "turnDeg": -120,
+            "notchesMm": [319, 393],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#2",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 2,
+            "s": 593,
+            "e": 713,
+            "pts": [],
+            "lenMm": 115.5,
+            "chordMm": 0,
+            "turnDeg": -113,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#3",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 3,
+            "s": 713,
+            "e": 839,
+            "pts": [],
+            "lenMm": 126.2,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#4",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 4,
+            "s": 839,
+            "e": 925,
+            "pts": [],
+            "lenMm": 89.4,
+            "chordMm": 0,
+            "turnDeg": -162,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR4DTBW8FVRST2G68Y#5",
+            "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+            "k": 5,
+            "s": 925,
+            "e": 0,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 61994,
+        "perimMm": 1518.4,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+        "name": "SLV_M_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 836, 951, 1054, 1059, 1064, 1583, 1595, 1740, 1753],
+        "edges": [
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#0",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 0,
+            "s": 175,
+            "e": 728,
+            "pts": [],
+            "lenMm": 552.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#1",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 1,
+            "s": 728,
+            "e": 1059,
+            "pts": [],
+            "lenMm": 330.9,
+            "chordMm": 0,
+            "turnDeg": 151,
+            "notchesMm": [108, 223, 326],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#2",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 2,
+            "s": 1059,
+            "e": 1570,
+            "pts": [],
+            "lenMm": 510.3,
+            "chordMm": 0,
+            "turnDeg": -31,
+            "notchesMm": [5],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#3",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 3,
+            "s": 1570,
+            "e": 1608,
+            "pts": [],
+            "lenMm": 37.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [13, 25],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#4",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 4,
+            "s": 1608,
+            "e": 1728,
+            "pts": [],
+            "lenMm": 120,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRX1BE9JJPFGSMBC1M#5",
+            "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "k": 5,
+            "s": 1728,
+            "e": 175,
+            "pts": [],
+            "lenMm": 212.1,
+            "chordMm": 0,
+            "turnDeg": -5,
+            "notchesMm": [37, 12, 25],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 145993,
+        "perimMm": 1763.6999999999998,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+        "name": "SLV_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 779, 791, 935],
+        "edges": [
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#0",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 0,
+            "s": 0,
+            "e": 161,
+            "pts": [],
+            "lenMm": 160.3,
+            "chordMm": 0,
+            "turnDeg": -84,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#1",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 1,
+            "s": 161,
+            "e": 714,
+            "pts": [],
+            "lenMm": 552.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#2",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 2,
+            "s": 714,
+            "e": 803,
+            "pts": [],
+            "lenMm": 90,
+            "chordMm": 0,
+            "turnDeg": 5,
+            "notchesMm": [65, 77],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#3",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 3,
+            "s": 803,
+            "e": 923,
+            "pts": [],
+            "lenMm": 120,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#4",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 4,
+            "s": 923,
+            "e": 948,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [12],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRGEC995414HSKZKAQ#5",
+            "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+            "k": 5,
+            "s": 948,
+            "e": 0,
+            "pts": [],
+            "lenMm": 510.3,
+            "chordMm": 0,
+            "turnDeg": 31,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 65966,
+        "perimMm": 1458.2,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+        "name": "SLV_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [513, 657, 669, 1448],
+        "edges": [
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#0",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 0,
+            "s": 500,
+            "e": 525,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [13],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#1",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 1,
+            "s": 525,
+            "e": 645,
+            "pts": [],
+            "lenMm": 120,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#2",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 2,
+            "s": 645,
+            "e": 734,
+            "pts": [],
+            "lenMm": 90,
+            "chordMm": 0,
+            "turnDeg": 5,
+            "notchesMm": [12, 24],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#3",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 3,
+            "s": 734,
+            "e": 1287,
+            "pts": [],
+            "lenMm": 552.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#4",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 4,
+            "s": 1287,
+            "e": 1448,
+            "pts": [],
+            "lenMm": 160.3,
+            "chordMm": 0,
+            "turnDeg": -84,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0YCH5JC3H9YE425V#5",
+            "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+            "k": 5,
+            "s": 1448,
+            "e": 500,
+            "pts": [],
+            "lenMm": 510.3,
+            "chordMm": 0,
+            "turnDeg": 31,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 65966,
+        "perimMm": 1458.2,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRGEC995414HSKZKAQ",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+        "name": "SLV_M_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [0, 13, 158, 170, 689, 694, 699, 802, 917, 1753],
+        "edges": [
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#0",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 0,
+            "s": 25,
+            "e": 145,
+            "pts": [],
+            "lenMm": 120,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#1",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 1,
+            "s": 145,
+            "e": 183,
+            "pts": [],
+            "lenMm": 37.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [13, 25],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#2",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 2,
+            "s": 183,
+            "e": 694,
+            "pts": [],
+            "lenMm": 510.3,
+            "chordMm": 0,
+            "turnDeg": -31,
+            "notchesMm": [506],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#3",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 3,
+            "s": 694,
+            "e": 1025,
+            "pts": [],
+            "lenMm": 330.9,
+            "chordMm": 0,
+            "turnDeg": 151,
+            "notchesMm": [5, 108, 223],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#4",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 4,
+            "s": 1025,
+            "e": 1578,
+            "pts": [],
+            "lenMm": 552.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRC8S24MQAPZA9Z13F#5",
+            "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+            "k": 5,
+            "s": 1578,
+            "e": 25,
+            "pts": [],
+            "lenMm": 212.1,
+            "chordMm": 0,
+            "turnDeg": -5,
+            "notchesMm": [187, 200, 175],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 145994,
+        "perimMm": 1763.6999999999998,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+        "name": "2CLR",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [390],
+        "edges": [
+          {
+            "id": "01M1M1S2WR0EY99A13FQ0FJK6G#0",
+            "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+            "k": 0,
+            "s": 173,
+            "e": 198,
+            "pts": [],
+            "lenMm": 24.9,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0EY99A13FQ0FJK6G#1",
+            "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+            "k": 1,
+            "s": 198,
+            "e": 582,
+            "pts": [],
+            "lenMm": 380.1,
+            "chordMm": 0,
+            "turnDeg": 229,
+            "notchesMm": [192],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0EY99A13FQ0FJK6G#2",
+            "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+            "k": 2,
+            "s": 582,
+            "e": 607,
+            "pts": [],
+            "lenMm": 24.9,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR0EY99A13FQ0FJK6G#3",
+            "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+            "k": 3,
+            "s": 607,
+            "e": 173,
+            "pts": [],
+            "lenMm": 349.8,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 8257,
+        "perimMm": 779.7,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR1R778DV2X5A2R7NJ",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+        "name": "FP_2_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [483],
+        "edges": [
+          {
+            "id": "01M1M1S2WRSGF4RN5CHYJ6JH79#0",
+            "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+            "k": 0,
+            "s": 200,
+            "e": 240,
+            "pts": [],
+            "lenMm": 39.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSGF4RN5CHYJ6JH79#1",
+            "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+            "k": 1,
+            "s": 240,
+            "e": 628,
+            "pts": [],
+            "lenMm": 386.1,
+            "chordMm": 0,
+            "turnDeg": -33,
+            "notchesMm": [243],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSGF4RN5CHYJ6JH79#2",
+            "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+            "k": 2,
+            "s": 628,
+            "e": 655,
+            "pts": [],
+            "lenMm": 26.9,
+            "chordMm": 0,
+            "turnDeg": -31,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSGF4RN5CHYJ6JH79#3",
+            "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+            "k": 3,
+            "s": 655,
+            "e": 200,
+            "pts": [],
+            "lenMm": 400.8,
+            "chordMm": 0,
+            "turnDeg": 53,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 12409,
+        "perimMm": 853.4000000000001,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+        "name": "FP_1_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "01M1M1S2WRRK49WAK4CSSDNWHG#0",
+            "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+            "k": 0,
+            "s": 224,
+            "e": 264,
+            "pts": [],
+            "lenMm": 39.5,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRRK49WAK4CSSDNWHG#1",
+            "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+            "k": 1,
+            "s": 264,
+            "e": 667,
+            "pts": [],
+            "lenMm": 400.8,
+            "chordMm": 0,
+            "turnDeg": -53,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRRK49WAK4CSSDNWHG#2",
+            "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+            "k": 2,
+            "s": 667,
+            "e": 718,
+            "pts": [],
+            "lenMm": 53.8,
+            "chordMm": 0,
+            "turnDeg": -122,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRRK49WAK4CSSDNWHG#3",
+            "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+            "k": 3,
+            "s": 718,
+            "e": 224,
+            "pts": [],
+            "lenMm": 454.7,
+            "chordMm": 0,
+            "turnDeg": 98,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 14790,
+        "perimMm": 948.8,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR53BQY1W9B7M48TRK",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRHNCD0GZC2003B7GF",
+        "name": "FP_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [152, 227],
+        "edges": [
+          {
+            "id": "01M1M1S2WRHNCD0GZC2003B7GF#0",
+            "pieceKey": "01M1M1S2WRHNCD0GZC2003B7GF",
+            "k": 0,
+            "s": 27,
+            "e": 546,
+            "pts": [],
+            "lenMm": 518,
+            "chordMm": 0,
+            "turnDeg": 166,
+            "notchesMm": [125, 200],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHNCD0GZC2003B7GF#1",
+            "pieceKey": "01M1M1S2WRHNCD0GZC2003B7GF",
+            "k": 1,
+            "s": 546,
+            "e": 586,
+            "pts": [],
+            "lenMm": 39.6,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHNCD0GZC2003B7GF#2",
+            "pieceKey": "01M1M1S2WRHNCD0GZC2003B7GF",
+            "k": 2,
+            "s": 586,
+            "e": 27,
+            "pts": [],
+            "lenMm": 481.6,
+            "chordMm": 0,
+            "turnDeg": -26,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 17931,
+        "perimMm": 1039.2,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+        "name": "BP_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [261, 407, 514],
+        "edges": [
+          {
+            "id": "01M1M1S2WR1JPRXR7ZDFV6N58S#0",
+            "pieceKey": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+            "k": 0,
+            "s": 0,
+            "e": 80,
+            "pts": [],
+            "lenMm": 79.5,
+            "chordMm": 0,
+            "turnDeg": 10,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR1JPRXR7ZDFV6N58S#1",
+            "pieceKey": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+            "k": 1,
+            "s": 80,
+            "e": 610,
+            "pts": [],
+            "lenMm": 528.2,
+            "chordMm": 0,
+            "turnDeg": 145,
+            "notchesMm": [181, 327, 434],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR1JPRXR7ZDFV6N58S#2",
+            "pieceKey": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+            "k": 2,
+            "s": 610,
+            "e": 0,
+            "pts": [],
+            "lenMm": 514.7,
+            "chordMm": 0,
+            "turnDeg": -38,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 28250,
+        "perimMm": 1122.4,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+        "name": "BP_1_L",
+        "hand": "L",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [205],
+        "edges": [
+          {
+            "id": "01M1M1S2WRJR80BWYDK85NWME3#0",
+            "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+            "k": 0,
+            "s": 0,
+            "e": 60,
+            "pts": [],
+            "lenMm": 61.9,
+            "chordMm": 0,
+            "turnDeg": -131,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRJR80BWYDK85NWME3#1",
+            "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+            "k": 1,
+            "s": 60,
+            "e": 445,
+            "pts": [],
+            "lenMm": 386.1,
+            "chordMm": 0,
+            "turnDeg": -23,
+            "notchesMm": [145],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRJR80BWYDK85NWME3#2",
+            "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+            "k": 2,
+            "s": 445,
+            "e": 525,
+            "pts": [],
+            "lenMm": 79.5,
+            "chordMm": 0,
+            "turnDeg": 9,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRJR80BWYDK85NWME3#3",
+            "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+            "k": 3,
+            "s": 525,
+            "e": 0,
+            "pts": [],
+            "lenMm": 416.3,
+            "chordMm": 0,
+            "turnDeg": 28,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 25011,
+        "perimMm": 943.8,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+        "name": "FP_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [614, 689],
+        "edges": [
+          {
+            "id": "01M1M1S2WRHHXRFCM6ZKHP5WDT#0",
+            "pieceKey": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+            "k": 0,
+            "s": 234,
+            "e": 295,
+            "pts": [],
+            "lenMm": 60.1,
+            "chordMm": 0,
+            "turnDeg": 10,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHHXRFCM6ZKHP5WDT#1",
+            "pieceKey": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+            "k": 1,
+            "s": 295,
+            "e": 814,
+            "pts": [],
+            "lenMm": 518,
+            "chordMm": 0,
+            "turnDeg": 166,
+            "notchesMm": [319, 394],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHHXRFCM6ZKHP5WDT#2",
+            "pieceKey": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+            "k": 2,
+            "s": 814,
+            "e": 234,
+            "pts": [],
+            "lenMm": 475.9,
+            "chordMm": 0,
+            "turnDeg": -35,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 25908,
+        "perimMm": 1054,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRHNCD0GZC2003B7GF",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+        "name": "FP_1_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [200],
+        "edges": [
+          {
+            "id": "01M1M1S2WR53BQY1W9B7M48TRK#0",
+            "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+            "k": 0,
+            "s": 0,
+            "e": 55,
+            "pts": [],
+            "lenMm": 53.8,
+            "chordMm": 0,
+            "turnDeg": -111,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR53BQY1W9B7M48TRK#1",
+            "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+            "k": 1,
+            "s": 55,
+            "e": 442,
+            "pts": [],
+            "lenMm": 386.1,
+            "chordMm": 0,
+            "turnDeg": -33,
+            "notchesMm": [145],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR53BQY1W9B7M48TRK#2",
+            "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+            "k": 2,
+            "s": 442,
+            "e": 502,
+            "pts": [],
+            "lenMm": 58.6,
+            "chordMm": 0,
+            "turnDeg": 9,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR53BQY1W9B7M48TRK#3",
+            "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+            "k": 3,
+            "s": 502,
+            "e": 0,
+            "pts": [],
+            "lenMm": 422.1,
+            "chordMm": 0,
+            "turnDeg": 43,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 19239,
+        "perimMm": 920.6000000000001,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRRK49WAK4CSSDNWHG",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+        "name": "BP_2_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [491],
+        "edges": [
+          {
+            "id": "01M1M1S2WRHGHKRGDS0S8N7P7A#0",
+            "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+            "k": 0,
+            "s": 198,
+            "e": 251,
+            "pts": [],
+            "lenMm": 53,
+            "chordMm": 0,
+            "turnDeg": 5,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHGHKRGDS0S8N7P7A#1",
+            "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+            "k": 1,
+            "s": 251,
+            "e": 636,
+            "pts": [],
+            "lenMm": 386.1,
+            "chordMm": 0,
+            "turnDeg": -23,
+            "notchesMm": [240],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHGHKRGDS0S8N7P7A#2",
+            "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+            "k": 2,
+            "s": 636,
+            "e": 666,
+            "pts": [],
+            "lenMm": 31,
+            "chordMm": 0,
+            "turnDeg": -33,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRHGHKRGDS0S8N7P7A#3",
+            "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+            "k": 3,
+            "s": 666,
+            "e": 198,
+            "pts": [],
+            "lenMm": 394.1,
+            "chordMm": 0,
+            "turnDeg": 20,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 15087,
+        "perimMm": 864.2,
+        "twinOf": []
+      },
+      {
+        "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+        "name": "BP_1_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "01M1M1S2WRWSSBP3QM8VKGDAVF#0",
+            "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+            "k": 0,
+            "s": 232,
+            "e": 286,
+            "pts": [],
+            "lenMm": 53,
+            "chordMm": 0,
+            "turnDeg": 6,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRWSSBP3QM8VKGDAVF#1",
+            "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+            "k": 1,
+            "s": 286,
+            "e": 679,
+            "pts": [],
+            "lenMm": 394.1,
+            "chordMm": 0,
+            "turnDeg": -20,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRWSSBP3QM8VKGDAVF#2",
+            "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+            "k": 2,
+            "s": 679,
+            "e": 758,
+            "pts": [],
+            "lenMm": 80.2,
+            "chordMm": 0,
+            "turnDeg": -139,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRWSSBP3QM8VKGDAVF#3",
+            "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+            "k": 3,
+            "s": 758,
+            "e": 232,
+            "pts": [],
+            "lenMm": 466,
+            "chordMm": 0,
+            "turnDeg": 56,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 16838,
+        "perimMm": 993.3000000000001,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRJR80BWYDK85NWME3",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+        "name": "BP_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [146, 253, 399],
+        "edges": [
+          {
+            "id": "01M1M1S2WRP8PQ0YZ7PBAW976R#0",
+            "pieceKey": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+            "k": 0,
+            "s": 50,
+            "e": 579,
+            "pts": [],
+            "lenMm": 528.2,
+            "chordMm": 0,
+            "turnDeg": 145,
+            "notchesMm": [96, 203, 349],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRP8PQ0YZ7PBAW976R#1",
+            "pieceKey": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+            "k": 1,
+            "s": 579,
+            "e": 632,
+            "pts": [],
+            "lenMm": 53,
+            "chordMm": 0,
+            "turnDeg": 6,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRP8PQ0YZ7PBAW976R#2",
+            "pieceKey": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+            "k": 2,
+            "s": 632,
+            "e": 50,
+            "pts": [],
+            "lenMm": 515.2,
+            "chordMm": 0,
+            "turnDeg": -19,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 21339,
+        "perimMm": 1096.4,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+        "name": "PLCK_R",
+        "hand": "R",
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [],
+        "edges": [
+          {
+            "id": "01M1M1S2WRSJFKPTJQD6NP5B34#0",
+            "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+            "k": 0,
+            "s": 0,
+            "e": 52,
+            "pts": [],
+            "lenMm": 50,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSJFKPTJQD6NP5B34#1",
+            "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+            "k": 1,
+            "s": 52,
+            "e": 645,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSJFKPTJQD6NP5B34#2",
+            "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+            "k": 2,
+            "s": 645,
+            "e": 697,
+            "pts": [],
+            "lenMm": 50,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRSJFKPTJQD6NP5B34#3",
+            "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+            "k": 3,
+            "s": 697,
+            "e": 0,
+            "pts": [],
+            "lenMm": 592.8,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 29640,
+        "perimMm": 1285.6,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRKPF7CBSVY8VFH76T",
+            "kind": "mirror"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+        "name": "2CLR_1",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [390],
+        "edges": [
+          {
+            "id": "01M1M1S2WR1R778DV2X5A2R7NJ#0",
+            "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+            "k": 0,
+            "s": 173,
+            "e": 198,
+            "pts": [],
+            "lenMm": 24.9,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR1R778DV2X5A2R7NJ#1",
+            "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+            "k": 1,
+            "s": 198,
+            "e": 582,
+            "pts": [],
+            "lenMm": 380.1,
+            "chordMm": 0,
+            "turnDeg": 229,
+            "notchesMm": [192],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR1R778DV2X5A2R7NJ#2",
+            "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+            "k": 2,
+            "s": 582,
+            "e": 607,
+            "pts": [],
+            "lenMm": 24.9,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WR1R778DV2X5A2R7NJ#3",
+            "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+            "k": 3,
+            "s": 607,
+            "e": 173,
+            "pts": [],
+            "lenMm": 349.8,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 8256,
+        "perimMm": 779.7,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WR0EY99A13FQ0FJK6G",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+        "name": "CLR_1",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [415],
+        "edges": [
+          {
+            "id": "01M1M1S2WRAT0E32F4CD4AC2ER#0",
+            "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+            "k": 0,
+            "s": 173,
+            "e": 213,
+            "pts": [],
+            "lenMm": 40,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRAT0E32F4CD4AC2ER#1",
+            "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+            "k": 1,
+            "s": 213,
+            "e": 617,
+            "pts": [],
+            "lenMm": 396.8,
+            "chordMm": 0,
+            "turnDeg": 218,
+            "notchesMm": [202],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRAT0E32F4CD4AC2ER#2",
+            "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+            "k": 2,
+            "s": 617,
+            "e": 657,
+            "pts": [],
+            "lenMm": 40,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRAT0E32F4CD4AC2ER#3",
+            "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+            "k": 3,
+            "s": 657,
+            "e": 173,
+            "pts": [],
+            "lenMm": 349.8,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 13014,
+        "perimMm": 826.6,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRS97ZSG21VFZJ60JK",
+            "kind": "identical"
+          }
+        ]
+      },
+      {
+        "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+        "name": "NCK_1",
+        "hand": null,
+        "cloth": "main",
+        "rs": [],
+        "corners": [],
+        "notchIdx": [137, 173, 223, 324, 510, 611, 661, 697, 837],
+        "edges": [
+          {
+            "id": "01M1M1S2WRD4PS0KGFPVVX6301#0",
+            "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+            "k": 0,
+            "s": 186,
+            "e": 211,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRD4PS0KGFPVVX6301#1",
+            "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+            "k": 1,
+            "s": 211,
+            "e": 623,
+            "pts": [],
+            "lenMm": 412.2,
+            "chordMm": 0,
+            "turnDeg": 252,
+            "notchesMm": [12, 113, 299, 400],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRD4PS0KGFPVVX6301#2",
+            "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+            "k": 2,
+            "s": 623,
+            "e": 648,
+            "pts": [],
+            "lenMm": 25,
+            "chordMm": 0,
+            "turnDeg": 0,
+            "notchesMm": [],
+            "kind": "edge"
+          },
+          {
+            "id": "01M1M1S2WRD4PS0KGFPVVX6301#3",
+            "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+            "k": 3,
+            "s": 648,
+            "e": 186,
+            "pts": [],
+            "lenMm": 374.7,
+            "chordMm": 0,
+            "turnDeg": -249,
+            "notchesMm": [329, 365, 13, 49, 189],
+            "kind": "edge"
+          }
+        ],
+        "rect": false,
+        "areaMm2": 9989,
+        "perimMm": 836.9,
+        "twinOf": [
+          {
+            "key": "01M1M1S2WRYYP3D90C15RN93FE",
+            "kind": "identical"
+          }
+        ]
+      }
+    ],
+    "chosen": [
+      {
+        "a": "01M1M1S2WRYYP3D90C15RN93FE#3",
+        "b": "01M1M1S2WRD4PS0KGFPVVX6301#3",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#3",
+        "b": "01M1M1S2WRHHXRFCM6ZKHP5WDT#1",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0.1,
+          "relLen": 0.0003,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR4DTBW8FVRST2G68Y#1",
+        "b": "01M1M1S2WRHNCD0GZC2003B7GF#0",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0.1,
+          "relLen": 0.0003,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRSGF4RN5CHYJ6JH79#1",
+        "b": "01M1M1S2WRJR80BWYDK85NWME3#1",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR53BQY1W9B7M48TRK#1",
+        "b": "01M1M1S2WRHGHKRGDS0S8N7P7A#1",
+        "score": 1,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRS97ZSG21VFZJ60JK#1",
+        "b": "01M1M1S2WRAT0E32F4CD4AC2ER#1",
+        "score": 0.98,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRYYP3D90C15RN93FE#1",
+        "b": "01M1M1S2WRD4PS0KGFPVVX6301#1",
+        "score": 0.98,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR0EY99A13FQ0FJK6G#1",
+        "b": "01M1M1S2WR1R778DV2X5A2R7NJ#1",
+        "score": 0.98,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "identical",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRVE27KVQT0GQ9490Y#7",
+        "b": "01M1M1S2WRVE27KVQT0GQ9490Y#9",
+        "score": 0.8,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": true
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRS97ZSG21VFZJ60JK#3",
+        "b": "01M1M1S2WR0EY99A13FQ0FJK6G#3",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRS97ZSG21VFZJ60JK#3",
+            "b": "01M1M1S2WR1R778DV2X5A2R7NJ#3",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRKPF7CBSVY8VFH76T#0",
+        "b": "01M1M1S2WR4DTBW8FVRST2G68Y#5",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0.1,
+          "relLen": 0.0001,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRKPF7CBSVY8VFH76T#2",
+            "b": "01M1M1S2WR4DTBW8FVRST2G68Y#5",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0.1,
+              "relLen": 0.0001,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "same",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#0",
+        "b": "01M1M1S2WRVE27KVQT0GQ9490Y#17",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 2.1,
+          "relLen": 0.023,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRVE27KVQT0GQ9490Y#17",
+            "b": "01M1M1S2WR4DTBW8FVRST2G68Y#4",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 2.1,
+              "relLen": 0.023,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#1",
+        "b": "01M1M1S2WRVE27KVQT0GQ9490Y#4",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0.0003,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#1",
+            "b": "01M1M1S2WRVE27KVQT0GQ9490Y#12",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0.0003,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#5",
+        "b": "01M1M1S2WRSJFKPTJQD6NP5B34#1",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0.0001,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#5",
+            "b": "01M1M1S2WRSJFKPTJQD6NP5B34#3",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0.0001,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "same",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRVE27KVQT0GQ9490Y#12",
+        "b": "01M1M1S2WR4DTBW8FVRST2G68Y#3",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0.0003,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WR7Z1ED4Q4DPAXXA50#1",
+            "b": "01M1M1S2WRVE27KVQT0GQ9490Y#12",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0.0003,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRX1BE9JJPFGSMBC1M#0",
+        "b": "01M1M1S2WRGEC995414HSKZKAQ#1",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRX1BE9JJPFGSMBC1M#4",
+        "b": "01M1M1S2WRGEC995414HSKZKAQ#3",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0.0002,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR0YCH5JC3H9YE425V#1",
+        "b": "01M1M1S2WRC8S24MQAPZA9Z13F#0",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0.0002,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR0YCH5JC3H9YE425V#3",
+        "b": "01M1M1S2WRC8S24MQAPZA9Z13F#4",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRSGF4RN5CHYJ6JH79#3",
+        "b": "01M1M1S2WRRK49WAK4CSSDNWHG#1",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR1JPRXR7ZDFV6N58S#0",
+        "b": "01M1M1S2WRJR80BWYDK85NWME3#2",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRHHXRFCM6ZKHP5WDT#0",
+        "b": "01M1M1S2WR53BQY1W9B7M48TRK#2",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 1.5,
+          "relLen": 0.025,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRHGHKRGDS0S8N7P7A#3",
+        "b": "01M1M1S2WRWSSBP3QM8VKGDAVF#1",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR1R778DV2X5A2R7NJ#3",
+        "b": "01M1M1S2WRAT0E32F4CD4AC2ER#3",
+        "score": 0.78,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRS97ZSG21VFZJ60JK#3",
+            "b": "01M1M1S2WR1R778DV2X5A2R7NJ#3",
+            "score": 0.78,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WR0YCH5JC3H9YE425V#5",
+        "b": "01M1M1S2WRRK49WAK4CSSDNWHG#2+3",
+        "score": 0.72,
+        "evidence": {
+          "dLenMm": 1.8,
+          "relLen": 0.0034999999999999996,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WR0YCH5JC3H9YE425V#5",
+            "b": "01M1M1S2WR1JPRXR7ZDFV6N58S#2",
+            "score": 0.72,
+            "evidence": {
+              "dLenMm": 1.8,
+              "relLen": 0.0034999999999999996,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "same",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRJR80BWYDK85NWME3#0",
+        "b": "01M1M1S2WRVE27KVQT0GQ9490Y#2+3",
+        "score": 0.72,
+        "evidence": {
+          "dLenMm": 2,
+          "relLen": 0.0327,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "neutral",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRJR80BWYDK85NWME3#0",
+            "b": "01M1M1S2WRVE27KVQT0GQ9490Y#13+14",
+            "score": 0.72,
+            "evidence": {
+              "dLenMm": 2,
+              "relLen": 0.0327,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "neutral",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRHHXRFCM6ZKHP5WDT#2",
+        "b": "01M1M1S2WR53BQY1W9B7M48TRK#3+0",
+        "score": 0.72,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WRHHXRFCM6ZKHP5WDT#2",
+            "b": "01M1M1S2WRWSSBP3QM8VKGDAVF#1+2",
+            "score": 0.72,
+            "evidence": {
+              "dLenMm": 0,
+              "relLen": 0,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "same",
+              "twin": "none",
+              "self": false
+            },
+            "kind": "edge"
+          }
+        ]
+      },
+      {
+        "a": "01M1M1S2WRX1BE9JJPFGSMBC1M#2",
+        "b": "01M1M1S2WRC8S24MQAPZA9Z13F#2",
+        "score": 0.7,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRX1BE9JJPFGSMBC1M#5",
+        "b": "01M1M1S2WRC8S24MQAPZA9Z13F#5",
+        "score": 0.7,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRGEC995414HSKZKAQ#2",
+        "b": "01M1M1S2WR0YCH5JC3H9YE425V#2",
+        "score": 0.7,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRGEC995414HSKZKAQ#5",
+        "b": "01M1M1S2WRP8PQ0YZ7PBAW976R#2",
+        "score": 0.69,
+        "evidence": {
+          "dLenMm": 4.9,
+          "relLen": 0.0095,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false,
+          "rule": "eased: lengths within 3.5 %"
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WRX1BE9JJPFGSMBC1M#1",
+        "b": "01M1M1S2WRC8S24MQAPZA9Z13F#3",
+        "score": 0.68,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR1JPRXR7ZDFV6N58S#1",
+        "b": "01M1M1S2WRP8PQ0YZ7PBAW976R#0",
+        "score": 0.68,
+        "evidence": {
+          "dLenMm": 0,
+          "relLen": 0,
+          "notchScore": 1,
+          "curvature": "flat",
+          "hand": "cross",
+          "twin": "mirror",
+          "self": false
+        },
+        "kind": "edge"
+      },
+      {
+        "a": "01M1M1S2WR1JPRXR7ZDFV6N58S#2",
+        "b": "01M1M1S2WRHNCD0GZC2003B7GF#1+2",
+        "score": 0.64,
+        "evidence": {
+          "dLenMm": 6.5,
+          "relLen": 0.0125,
+          "notchScore": null,
+          "curvature": "flat",
+          "hand": "same",
+          "twin": "none",
+          "self": false,
+          "rule": "eased: lengths within 3.5 %"
+        },
+        "kind": "edge",
+        "ambiguousWith": [
+          {
+            "a": "01M1M1S2WR1JPRXR7ZDFV6N58S#2",
+            "b": "01M1M1S2WRRK49WAK4CSSDNWHG#2+3",
+            "score": 0.64,
+            "evidence": {
+              "dLenMm": 6.5,
+              "relLen": 0.0125,
+              "notchScore": null,
+              "curvature": "flat",
+              "hand": "same",
+              "twin": "none",
+              "self": false,
+              "rule": "eased: lengths within 3.5 %"
+            },
+            "kind": "edge"
+          }
+        ]
+      }
+    ],
+    "rejected": [],
+    "components": [
+      [
+        "01M1M1S2WRS97ZSG21VFZJ60JK",
+        "01M1M1S2WR0EY99A13FQ0FJK6G",
+        "01M1M1S2WR1R778DV2X5A2R7NJ",
+        "01M1M1S2WRAT0E32F4CD4AC2ER"
+      ],
+      ["01M1M1S2WRYYP3D90C15RN93FE", "01M1M1S2WRD4PS0KGFPVVX6301"],
+      [
+        "01M1M1S2WRKPF7CBSVY8VFH76T",
+        "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+        "01M1M1S2WRVE27KVQT0GQ9490Y",
+        "01M1M1S2WR4DTBW8FVRST2G68Y",
+        "01M1M1S2WRX1BE9JJPFGSMBC1M",
+        "01M1M1S2WRGEC995414HSKZKAQ",
+        "01M1M1S2WR0YCH5JC3H9YE425V",
+        "01M1M1S2WRC8S24MQAPZA9Z13F",
+        "01M1M1S2WRSGF4RN5CHYJ6JH79",
+        "01M1M1S2WRRK49WAK4CSSDNWHG",
+        "01M1M1S2WRHNCD0GZC2003B7GF",
+        "01M1M1S2WR1JPRXR7ZDFV6N58S",
+        "01M1M1S2WRJR80BWYDK85NWME3",
+        "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+        "01M1M1S2WR53BQY1W9B7M48TRK",
+        "01M1M1S2WRHGHKRGDS0S8N7P7A",
+        "01M1M1S2WRWSSBP3QM8VKGDAVF",
+        "01M1M1S2WRP8PQ0YZ7PBAW976R",
+        "01M1M1S2WRSJFKPTJQD6NP5B34"
+      ]
+    ],
+    "warnings": []
+  },
+  "facts": {
+    "pieces": [
+      {
+        "pieceKey": "01M1M1S2WR0EY99A13FQ0FJK6G",
+        "name": "2CLR",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR1R778DV2X5A2R7NJ",
+        "name": "2CLR_1",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRVE27KVQT0GQ9490Y",
+        "name": "BP",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRJR80BWYDK85NWME3",
+        "name": "BP_1_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRWSSBP3QM8VKGDAVF",
+        "name": "BP_1_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRHGHKRGDS0S8N7P7A",
+        "name": "BP_2_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR1JPRXR7ZDFV6N58S",
+        "name": "BP_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRP8PQ0YZ7PBAW976R",
+        "name": "BP_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRS97ZSG21VFZJ60JK",
+        "name": "CLR",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRAT0E32F4CD4AC2ER",
+        "name": "CLR_1",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRRK49WAK4CSSDNWHG",
+        "name": "FP_1_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR53BQY1W9B7M48TRK",
+        "name": "FP_1_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRSGF4RN5CHYJ6JH79",
+        "name": "FP_2_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRHNCD0GZC2003B7GF",
+        "name": "FP_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRHHXRFCM6ZKHP5WDT",
+        "name": "FP_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR4DTBW8FVRST2G68Y",
+        "name": "FRONT_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR7Z1ED4Q4DPAXXA50",
+        "name": "FRONT_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRYYP3D90C15RN93FE",
+        "name": "NCK",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRD4PS0KGFPVVX6301",
+        "name": "NCK_1",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRKPF7CBSVY8VFH76T",
+        "name": "PLCK_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRSJFKPTJQD6NP5B34",
+        "name": "PLCK_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WR0YCH5JC3H9YE425V",
+        "name": "SLV_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRC8S24MQAPZA9Z13F",
+        "name": "SLV_M_L",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRX1BE9JJPFGSMBC1M",
+        "name": "SLV_M_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      },
+      {
+        "pieceKey": "01M1M1S2WRGEC995414HSKZKAQ",
+        "name": "SLV_R",
+        "piecesPerGarment": 1,
+        "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL",
+        "cloth": "main",
+        "fused": false
+      }
+    ],
+    "category": "shirt",
+    "bom": {
+      "zipper": 0,
+      "buttons": 1,
+      "snaps": 0,
+      "tape": 0,
+      "elastic": 0,
+      "drawcord": 0,
+      "interlining": 0
+    },
+    "defaultMachineType": "TECH_CARD_MACHINE_TYPE_LOCKSTITCH"
+  },
+  "truth": [
+    {
+      "name": "Collar base",
+      "inputs": ["01M1M1S2WRS97ZSG21VFZJ60JK", "01M1M1S2WRAT0E32F4CD4AC2ER"]
+    },
+    {
+      "name": "Second collar",
+      "inputs": ["01M1M1S2WR1R778DV2X5A2R7NJ", "01M1M1S2WR0EY99A13FQ0FJK6G"]
+    },
+    {
+      "name": "Collar",
+      "inputs": ["Collar base", "Second collar"]
+    },
+    {
+      "name": "Collar with neck details",
+      "inputs": ["01M1M1S2WRYYP3D90C15RN93FE", "01M1M1S2WRD4PS0KGFPVVX6301", "Collar"]
+    },
+    {
+      "name": "Left front panel",
+      "inputs": [
+        "01M1M1S2WRHNCD0GZC2003B7GF",
+        "01M1M1S2WRRK49WAK4CSSDNWHG",
+        "01M1M1S2WRSGF4RN5CHYJ6JH79"
+      ]
+    },
+    {
+      "name": "right front panel",
+      "inputs": ["01M1M1S2WRHHXRFCM6ZKHP5WDT", "01M1M1S2WR53BQY1W9B7M48TRK"]
+    },
+    {
+      "name": "left back panel",
+      "inputs": ["01M1M1S2WR1JPRXR7ZDFV6N58S", "01M1M1S2WRJR80BWYDK85NWME3"]
+    },
+    {
+      "name": "Right back panel",
+      "inputs": [
+        "01M1M1S2WRP8PQ0YZ7PBAW976R",
+        "01M1M1S2WRWSSBP3QM8VKGDAVF",
+        "01M1M1S2WRHGHKRGDS0S8N7P7A"
+      ]
+    },
+    {
+      "name": "Left panel",
+      "inputs": ["01M1M1S2WR4DTBW8FVRST2G68Y", "Left front panel"]
+    },
+    {
+      "name": "right panel",
+      "inputs": ["01M1M1S2WR7Z1ED4Q4DPAXXA50", "right front panel"]
+    },
+    {
+      "name": "Back panel",
+      "inputs": ["Right back panel", "01M1M1S2WRVE27KVQT0GQ9490Y", "left back panel"]
+    },
+    {
+      "name": "left panel with placket",
+      "inputs": ["01M1M1S2WRKPF7CBSVY8VFH76T", "Left panel"]
+    },
+    {
+      "name": "right panel with placket",
+      "inputs": ["01M1M1S2WRSJFKPTJQD6NP5B34", "right panel"]
+    },
+    {
+      "name": "Base",
+      "inputs": ["left panel with placket", "right panel with placket", "Back panel"]
+    },
+    {
+      "name": "base with collar",
+      "inputs": ["Collar with neck details", "Base"]
+    },
+    {
+      "name": "right sleeve",
+      "inputs": ["01M1M1S2WRX1BE9JJPFGSMBC1M", "01M1M1S2WRGEC995414HSKZKAQ"]
+    },
+    {
+      "name": "left sleeve",
+      "inputs": ["01M1M1S2WRC8S24MQAPZA9Z13F", "01M1M1S2WR0YCH5JC3H9YE425V"]
+    },
+    {
+      "name": "Shirt",
+      "inputs": ["right sleeve", "left sleeve", "base with collar"]
+    }
+  ]
+}

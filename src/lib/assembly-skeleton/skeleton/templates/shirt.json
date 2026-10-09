@@ -1,0 +1,113 @@
+{
+  "id": "shirt",
+  "category": "shirt",
+  "garmentName": "Shirt",
+  "_note": "Woven shirt, flat construction: subassemblies (collar + stand, cuffs, pockets, plackets) → panels → shoulders → collar → sleeves set flat → side + underarm in one → cuffs → hem → buttons → final press. Industry order, not a workshop's: a draft.",
+  "pressOpen": true,
+  "pressFlat": true,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
+  "fuseRoles": ["collar", "stand", "cuff", "placket", "facing", "pocket"],
+  "stages": [
+    { "id": "fuse", "op": "fuse", "label": "Fuse interlining" },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Subassemblies",
+      "roles": [
+        "collar",
+        "stand",
+        "cuff",
+        "pocket",
+        "placket",
+        "fly",
+        "facing",
+        "hood",
+        "waistband"
+      ]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "shoulders",
+      "op": "combine",
+      "label": "Join shoulders",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "SHOULDER",
+      "press": "open"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set collar into the neckline",
+      "roles": ["collar", "stand", "hood", "rib"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with collar",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "sides",
+      "op": "process",
+      "label": "Close side and underarm seams",
+      "roles": ["body"],
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "cuffs",
+      "op": "attach",
+      "label": "Attach cuffs",
+      "roles": ["cuff"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with cuffs",
+      "zone": "SLEEVE",
+      "press": "flat"
+    },
+    { "id": "hem", "op": "process", "label": "Hem", "roles": ["body"], "zone": "HEM" },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    { "id": "final-press", "op": "press", "label": "Final press", "zone": "OUTER" }
+  ]
+}
