@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:check": "tsc && vite build",
     "preview": "vite preview",
+    "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
     "nest:probe": "node scripts/nest-probe.mjs",
     "paint:regions": "node scripts/paint-regions-probe.mjs",
     "paint:map": "node scripts/paint-map-probe.mjs",
