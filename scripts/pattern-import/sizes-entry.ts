@@ -904,6 +904,11 @@ export async function reportMode(ids: string[]) {
       (s: Sheet) => dashShuffle(s, 11),
       'each dashed path gets a random dash pattern of the file',
     ],
+    [
+      'reef',
+      (s: Sheet) => dashShuffle(s, 5),
+      'each dashed path gets a random dash pattern of the file (legend identity)',
+    ],
   ] as const) {
     if (!ids.includes(id)) continue;
     const base = await runSample(id);
@@ -917,12 +922,16 @@ export async function reportMode(ids: string[]) {
         both++;
         if (bb.get(k) === r) same++;
       }
-    const flagsBase = (base.set.ambiguities ?? []).filter(
-      (x) => x.kind === 'class-merge' || x.kind === 'class-split' || x.kind === 'unassigned',
-    ).length;
-    const flagsNeg = (neg.set.ambiguities ?? []).filter(
-      (x) => x.kind === 'class-merge' || x.kind === 'class-split' || x.kind === 'unassigned',
-    ).length;
+    // identity / look contradictions the operator must see
+    const flagKinds = new Set([
+      'class-merge',
+      'class-split',
+      'unassigned',
+      'rank-direction',
+      'size-empty',
+    ]);
+    const flagsBase = (base.set.ambiguities ?? []).filter((x) => flagKinds.has(x.kind)).length;
+    const flagsNeg = (neg.set.ambiguities ?? []).filter((x) => flagKinds.has(x.kind)).length;
     const sm = summarise(`${id}-negative`, neg.set, neg.recover, neg.ms);
     negatives.push({
       id,
@@ -935,7 +944,8 @@ export async function reportMode(ids: string[]) {
       unassignedBase: summarise(id, base.set, base.recover, base.ms).unassignedShare,
       unassignedNegative: sm.unassignedShare,
       ambiguitiesNegative: sm.ambiguities,
-      pass: same / Math.max(1, both) < 0.8 || flagsNeg > flagsBase,
+      // F3b: a control passes only when it RAISES flags (the assignment changing alone is silent)
+      pass: flagsNeg > flagsBase,
     });
     overlay(
       neg.set,
