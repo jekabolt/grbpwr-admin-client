@@ -217,6 +217,8 @@ import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piec
 import { PieceTile, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
+import type { SkeletonStep } from 'lib/assembly-skeleton/types';
+import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 
 /** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
@@ -733,6 +735,181 @@ type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
 type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
 type MachineProfileRow = NonNullable<EquipmentDefaultsForm['machines']>[number];
 type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
+
+/** A step row exactly as the field array holds it. */
+export type OperationRow = typeof emptyOperation;
+
+/**
+ * THE ONE DEFINITION OF «A FILLED STEP THIS SCREEN WRITES». The create dialog's result and the
+ * skeleton's step both land here: a second spread of `emptyOperation` next to this one would drift
+ * from it silently (a field added to one writer and not the other is a field RHF never registers).
+ *
+ * Pure: no form, no history, no position. The caller decides where the row goes.
+ */
+export function rowFromCreate(r: CreateResult): OperationRow {
+  return {
+    ...emptyOperation,
+    inputKeys: r.inputKeys,
+    outputUnitKey: r.outputUnitKey,
+    outputUnitName: r.outputUnitName,
+    operationType: r.operationType as OperationRow['operationType'],
+    zone: r.zone as OperationRow['zone'],
+    ...(r.machineType ? { machineType: r.machineType as OperationRow['machineType'] } : {}),
+    ...(r.pressEquipment
+      ? { pressEquipment: r.pressEquipment as OperationRow['pressEquipment'] }
+      : {}),
+    // ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ПАРОЙ «ПОЛЕ + ЗНАЧЕНИЕ». Какое из шести полей несёт ответ,
+    // решает `STEP_DISCRIMINATORS` в диалоге; здесь ключ подставляется по имени, потому что
+    // второй разбор «у какого глагола какое поле» разошёлся бы с таблицей молча — и шаг уехал
+    // бы в форму с `*_UNKNOWN` там, где сервер требует значение безусловно.
+    ...(r.discriminatorField && r.discriminatorValue
+      ? ({ [r.discriminatorField]: r.discriminatorValue } as Partial<OperationRow>)
+      : {}),
+    // ОСТАЛЬНОЕ, ЧТО ПРОСТАВИЛ ПУНКТ ПИКЕРА: класс шва у отстрочки, под-глагол у ВТО (0325).
+    // Имена, которых в `emptyOperation` нет, отбрасываются ЗДЕСЬ, а не молча ниже: строка
+    // расстилается прямо в массив полей, и ключ, которого RHF не регистрировал, поехал бы в
+    // форму мусором. Щит остаётся и после 0325 — следующее поле пикера войдёт тем же путём.
+    ...(Object.fromEntries(
+      Object.entries(r.kindWrites ?? {}).filter(([k]) => k in emptyOperation),
+    ) as Partial<OperationRow>),
+  };
+}
+
+const OP_TYPE_PREFIX = 'TECH_CARD_OPERATION_TYPE_';
+const ZONE_PREFIX = 'TECH_CARD_GARMENT_ZONE_';
+const MACHINE_PREFIX = 'TECH_CARD_MACHINE_TYPE_';
+const PRESS_STEP_TYPES = new Set([
+  'TECH_CARD_OPERATION_TYPE_PRESS',
+  'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+  'TECH_CARD_OPERATION_TYPE_FUSING',
+]);
+
+/**
+ * What a skeleton step needs from the card to become a row the server accepts: the machine and the
+ * pressing equipment of the card's park. The server refuses a MACHINE step without `machine_type`
+ * and a pressing step without `press_equipment`; the skeleton reads neither off the pattern, so both
+ * come from here and the proposal screen says «check» beside them.
+ */
+export type SkeletonRowContext = {
+  /** The card's machine profiles (CARD DEFAULTS), in card order. */
+  machines: ReadonlyArray<{ machineType?: string }>;
+  /** The card's press profiles, in card order. */
+  presses: ReadonlyArray<{ pressEquipment?: string; operationType?: string }>;
+};
+
+/** Enum or lower-case token → the wire enum name; '' stays ''. */
+const enumOf = (prefix: string, v: string | undefined): string => {
+  const s = (v ?? '').trim();
+  if (!s) return '';
+  return s.startsWith(prefix) ? s : `${prefix}${s.toUpperCase()}`;
+};
+
+/**
+ * The machine a draft MACHINE step gets: the step's own (when the skeleton named one), else the first
+ * machine of the card's park, else lockstitch. `fromCard` / `fallback` say which — the proposal
+ * screen words it («card default», «no machine on the card»), it is never silent.
+ */
+export function skeletonMachineOf(
+  step: Pick<SkeletonStep, 'machineType'>,
+  ctx: SkeletonRowContext,
+): { machineType: string; source: 'step' | 'card' | 'fallback' } {
+  const own = enumOf(MACHINE_PREFIX, step.machineType);
+  if (own && own !== NONE_MACHINE) return { machineType: own, source: 'step' };
+  const park = ctx.machines.find((m) => !!m.machineType && m.machineType !== NONE_MACHINE);
+  if (park?.machineType) return { machineType: park.machineType, source: 'card' };
+  return { machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH', source: 'fallback' };
+}
+
+/**
+ * The pressing equipment of a draft pressing step: the first press profile written for this process
+ * (or for any), else the obvious tool — a fusing press for fusing, an iron for the rest.
+ */
+export function skeletonPressOf(
+  operationType: string,
+  ctx: SkeletonRowContext,
+): { pressEquipment: string; source: 'card' | 'fallback' } {
+  const fits = ctx.presses.find(
+    (p) =>
+      !!p.pressEquipment &&
+      p.pressEquipment !== NONE_PRESS_EQUIPMENT &&
+      (!p.operationType || p.operationType === NONE_OP_TYPE || p.operationType === operationType),
+  );
+  if (fits?.pressEquipment) return { pressEquipment: fits.pressEquipment, source: 'card' };
+  return {
+    pressEquipment:
+      operationType === 'TECH_CARD_OPERATION_TYPE_FUSING'
+        ? 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS'
+        : 'TECH_CARD_PRESS_EQUIPMENT_IRON',
+    source: 'fallback',
+  };
+}
+
+/** A skeleton step's zone as the wire wants it; an unnamed zone becomes OTHER, never UNKNOWN. */
+export function skeletonZoneOf(step: Pick<SkeletonStep, 'zone'>): string {
+  const z = enumOf(ZONE_PREFIX, step.zone);
+  return !z || z === NONE_ZONE ? 'TECH_CARD_GARMENT_ZONE_OTHER' : z;
+}
+
+/**
+ * A skeleton step → the row it becomes. Goes through `rowFromCreate`, so a skeleton step and a step
+ * made in the create dialog are the same kind of row: nothing in the data says where it came from.
+ * Seam type, work and SMV stay empty — the technologist fills them (00-FEASIBILITY §E).
+ */
+export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): OperationRow {
+  const operationType = enumOf(OP_TYPE_PREFIX, step.operationType);
+  const isMachine = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
+  return rowFromCreate({
+    inputKeys: step.inputs.map((k) => k.trim()).filter(Boolean),
+    outputUnitKey: step.outputUnitKey.trim(),
+    outputUnitName: step.outputUnitKey.trim() ? step.outputUnitName.trim() : '',
+    operationType,
+    zone: skeletonZoneOf(step),
+    ...(isMachine ? { machineType: skeletonMachineOf(step, ctx).machineType } : {}),
+    ...(PRESS_STEP_TYPES.has(operationType)
+      ? { pressEquipment: skeletonPressOf(operationType, ctx).pressEquipment }
+      : {}),
+  });
+}
+
+/**
+ * The fields that say WHAT a step is. A draft row keeps its «draft» mark in the rail while these
+ * read as they were applied; the first hand that changes one of them takes the mark off for good.
+ * Positional and server-stamped fields (`operationNumber`) are not here: a save re-stamps them, and
+ * a save is not a touch.
+ */
+const DRAFT_FIELDS = [
+  'inputKeys',
+  'outputUnitKey',
+  'outputUnitName',
+  'operationType',
+  'zone',
+  'machineType',
+  'pressEquipment',
+  'work',
+  'seamClass',
+  'smv',
+  'calloutNumber',
+  'note',
+] as const;
+const draftPrint = (row: Record<string, unknown> | undefined): string =>
+  JSON.stringify(DRAFT_FIELDS.map((f) => row?.[f] ?? null));
+
+/** What `OperationsField` reports back after an apply request. */
+export type SkeletonApplyResult = {
+  nonce: number;
+  /** Rows written. 0 with `refused` set means nothing changed. */
+  applied: number;
+  refused?: string;
+};
+
+/** A request to write skeleton steps into the form (modelled on `addRequest`; nonce dedupes). */
+export type SkeletonApplyRequest = {
+  steps: SkeletonStep[];
+  mode: 'append' | 'replace';
+  nonce: number;
+  /** `replace` over a non-empty list is refused unless the person confirmed it. */
+  confirmedReplace?: boolean;
+};
 
 type PickerOption = { value: number; label: string };
 // materialId is the SLOT DEFAULT article. It is read from the form (not from the card read) so an
@@ -5650,6 +5827,9 @@ export function OperationsField({
   pieceShapes = null,
   addRequest = null,
   onAdded,
+  applyRequest = null,
+  onSkeletonApplied,
+  emptyAction,
   storedHasUnits = false,
   storedHasMedia = false,
   frozen = false,
@@ -5694,6 +5874,17 @@ export function OperationsField({
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
   /**
+   * SKELETON STEPS TO WRITE — the only door through which the assembly skeleton reaches the form.
+   * Modelled on `addRequest`: nothing happens until a new `nonce` arrives, so a proposal that is
+   * only looked at changes nothing. Rows are built by `rowFromStep`; after the write they are
+   * ordinary steps, and only this session's rail remembers them as «draft».
+   */
+  applyRequest?: SkeletonApplyRequest | null;
+  /** Answer to `applyRequest`: how many rows landed, or why none did. */
+  onSkeletonApplied?: (r: SkeletonApplyResult) => void;
+  /** A second door in the empty state, beside «+ operation» (the skeleton's «suggest»). */
+  emptyAction?: ReactNode;
+  /**
    * У карточки есть НЕВОССТАНОВЛЕННЫЙ черновик. Нужен ровно одному решению: подавить автооткрытие
    * фулскрина по `?fs=1`. Коллаут черновика живёт в корне карточки, под оверлеем его не видно, а
    * «restore», нажатый после выхода, затирает всё, что сделано в фулскрине.
@@ -5713,7 +5904,7 @@ export function OperationsField({
   sketchNote?: ReactNode;
 } = {}) {
   const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
-  const { fields, append, remove, insert, move } = useFieldArray({
+  const { fields, append, remove, insert, move, replace } = useFieldArray({
     control,
     name: 'operations',
   });
@@ -5984,6 +6175,106 @@ export function OperationsField({
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addRequest?.nonce]);
+
+  // --- КАРКАС СБОРКИ: ЗАПИСЬ ПРЕДЛОЖЕНИЯ ---------------------------------------------------------
+  //
+  // ЕДИНСТВЕННАЯ ДВЕРЬ КАРКАСА В ФОРМУ, и открывается она только новым `nonce`: предложение, на
+  // которое просто смотрят, не меняет ни одного поля (приёмка волны, п.5 — «ничего молча»).
+  // Строки собирает `rowFromStep`, то есть тот же писатель, что и диалог создания: после записи это
+  // обычные шаги, и в данных нет следа, откуда они взялись. След — только пометка «draft» в рельсе
+  // этой сессии, до первого касания рукой.
+  const autosave = useTechCardAutosave();
+  const [draftPrints, setDraftPrints] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const draftRef = useRef(draftPrints);
+  draftRef.current = draftPrints;
+  const pendingDraft = useRef<{ from: number; count: number; fresh: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!applyRequest) return;
+    const answer = (r: Omit<SkeletonApplyResult, 'nonce'>) =>
+      onSkeletonApplied?.({ nonce: applyRequest.nonce, ...r });
+    // Гейт заморозки первой строкой — как у каждого мутатора этого файла.
+    if (frozen) return answer({ applied: 0, refused: FROZEN_REFUSAL });
+    const steps = applyRequest.steps;
+    if (steps.length === 0) return answer({ applied: 0, refused: 'no steps to apply' });
+    const current = getValues('operations') ?? [];
+    const replacing = applyRequest.mode === 'replace';
+    if (replacing && current.length > 0 && !applyRequest.confirmedReplace) {
+      return answer({
+        applied: 0,
+        refused: `replacing ${current.length} ${current.length === 1 ? 'step' : 'steps'} needs a confirmation`,
+      });
+    }
+    const park = getValues('construction.equipmentDefaults');
+    const rows = steps.map((s) =>
+      rowFromStep(s, { machines: park?.machines ?? [], presses: park?.presses ?? [] }),
+    );
+    // Массив поехал не жестом полотна — формовые записи отмены протухли.
+    clearFormHistory();
+    if (replacing) {
+      // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
+      remapIssues(() => null);
+      replace(rows);
+    } else {
+      // Хвостом: номера стоящих шагов не двигаются, ремапить нечего.
+      append(rows);
+    }
+    if (rows.some((r) => r.outputUnitKey)) {
+      setValue('assemblyCleared', false, { shouldDirty: true });
+    }
+    const from = replacing ? 0 : current.length;
+    pendingDraft.current = { from, count: rows.length, fresh: replacing };
+    setSelected(from);
+    // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
+    // человек был (кнопка «apply»).
+    autosave.request('skeleton');
+    answer({ applied: rows.length });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyRequest?.nonce]);
+
+  // ВТОРОЙ ТАКТ: id строк появляются только с новым `fields`.
+  useEffect(() => {
+    const p = pendingDraft.current;
+    if (!p) return;
+    pendingDraft.current = null;
+    const values = (getValues('operations') ?? []) as Record<string, unknown>[];
+    setDraftPrints((prev) => {
+      const next = new Map(p.fresh ? [] : prev);
+      for (let i = p.from; i < p.from + p.count; i++) {
+        const id = fields[i]?.id;
+        if (id) next.set(id, draftPrint(values[i]));
+      }
+      return next;
+    });
+  }, [fields, getValues]);
+
+  // ПЕРВОЕ КАСАНИЕ СНИМАЕТ ПОМЕТКУ НАВСЕГДА: строка, чьи смысловые поля разошлись с записанными,
+  // уже не черновик — даже если потом вернуть как было. Удалённая строка уходит из карты тоже.
+  // Подписка только будит сверку; сама сверка идёт после рендера, когда `fields` уже знает новый
+  // порядок строк (перестановка и удаление шлют событие раньше, чем приезжают их id).
+  const [touchTick, setTouchTick] = useState(0);
+  useEffect(() => {
+    const sub = watch((_, { name }) => {
+      if (draftRef.current.size === 0) return;
+      if (name && !name.startsWith('operations')) return;
+      setTouchTick((t) => t + 1);
+    });
+    return () => sub.unsubscribe();
+  }, [watch]);
+  useEffect(() => {
+    if (draftPrints.size === 0) return;
+    const ops = (getValues('operations') ?? []) as Record<string, unknown>[];
+    const ids = fields.map((f) => f.id);
+    let next: Map<string, string> | null = null;
+    for (const [id, print] of draftPrints) {
+      const i = ids.indexOf(id);
+      if (i >= 0 && draftPrint(ops[i]) === print) continue;
+      next ??= new Map(draftPrints);
+      next.delete(id);
+    }
+    if (next) setDraftPrints(next);
+  }, [touchTick, fields, draftPrints, getValues]);
+  const draftIds = useMemo(() => new Set(draftPrints.keys()), [draftPrints]);
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -6305,32 +6596,7 @@ export function OperationsField({
     // СТРОКА СОБИРАЕТСЯ ОТДЕЛЬНОЙ ПЕРЕМЕННОЙ, потому что её берёт себе запись истории: ⇧⌘Z
     // дописывает ЕЁ ЖЕ, а не пустой шаг. Собрать её второй раз в повторе значило бы завести второе
     // определение того, что такое «созданный этим жестом шаг».
-    const row = {
-      ...emptyOperation,
-      inputKeys: r.inputKeys,
-      outputUnitKey: r.outputUnitKey,
-      outputUnitName: r.outputUnitName,
-      operationType: r.operationType as typeof emptyOperation.operationType,
-      zone: r.zone as typeof emptyOperation.zone,
-      ...(r.machineType ? { machineType: r.machineType as typeof emptyOperation.machineType } : {}),
-      ...(r.pressEquipment
-        ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
-        : {}),
-      // ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ПАРОЙ «ПОЛЕ + ЗНАЧЕНИЕ». Какое из шести полей несёт ответ,
-      // решает `STEP_DISCRIMINATORS` в диалоге; здесь ключ подставляется по имени, потому что
-      // второй разбор «у какого глагола какое поле» разошёлся бы с таблицей молча — и шаг уехал
-      // бы в форму с `*_UNKNOWN` там, где сервер требует значение безусловно.
-      ...(r.discriminatorField && r.discriminatorValue
-        ? ({ [r.discriminatorField]: r.discriminatorValue } as Partial<typeof emptyOperation>)
-        : {}),
-      // ОСТАЛЬНОЕ, ЧТО ПРОСТАВИЛ ПУНКТ ПИКЕРА: класс шва у отстрочки, под-глагол у ВТО (0325).
-      // Имена, которых в `emptyOperation` нет, отбрасываются ЗДЕСЬ, а не молча ниже: строка
-      // расстилается прямо в массив полей, и ключ, которого RHF не регистрировал, поехал бы в
-      // форму мусором. Щит остаётся и после 0325 — следующее поле пикера войдёт тем же путём.
-      ...(Object.fromEntries(
-        Object.entries(r.kindWrites ?? {}).filter(([k]) => k in emptyOperation),
-      ) as Partial<typeof emptyOperation>),
-    };
+    const row = rowFromCreate(r);
     // ССЫЛКИ ДЕФЕКТОВ ЕДУТ ВНИЗ ВМЕСТЕ СО СВОИМИ ШАГАМИ, и считается это ДО правки массива:
     // `remapIssues` читает позиции через getValues. При вставке хвостом (`at === fields.length`)
     // формула не двигает ничего — сдвигать нечего, — поэтому она одна на оба случая, а не две.
@@ -6833,8 +7099,10 @@ export function OperationsField({
    * ФОЛБЭК ПРИ ЭТОМ ЦЕЛ, и это не оговорка: композитор приходит к первой строке заметки САМ, в той
    * же точке, где приходил, — просто теперь он единственный, кто решает, когда до неё дошло.
    */
+  // Схема и фулскрин печатают шаг этим словом — пометка черновика каркаса едет в них отсюда же,
+  // без второго провода через все виды (в рельсе списка у неё свой узел, `draft`).
   const labelOfStep = (i: number) =>
-    operationHeading({
+    (operationHeading({
       operationType: getValues(`operations.${i}.operationType`) as Parameters<
         typeof operationHeading
       >[0]['operationType'],
@@ -6846,7 +7114,7 @@ export function OperationsField({
       zone: getValues(`operations.${i}.zone`) as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: [],
       note: getValues(`operations.${i}.note`) as string,
-    }) || 'step';
+    }) || 'step') + (draftIds.has(fields[i]?.id ?? '') ? ' · draft' : '');
 
   const pieceNameOf = (k: string) => pieces.find((p) => p.lineKey === k)?.name ?? k;
 
@@ -7123,6 +7391,7 @@ export function OperationsField({
             <Button type='button' variant='main' size='sm' onClick={addOperation}>
               + operation
             </Button>
+            {emptyAction}
             {pieces.length > 0 && (
               <Chip
                 nonForm
@@ -7287,6 +7556,8 @@ export function OperationsField({
                     readPieceDrag={readPieceDrag}
                     // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
                     workCatalog={workCatalog}
+                    // Шаги каркаса, которых ещё не касалась рука, — состояние сессии, не данные.
+                    draftIds={draftIds}
                   />
                 </div>
               )}
