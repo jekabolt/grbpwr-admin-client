@@ -1,7 +1,7 @@
 import { adminService } from 'api/api';
 import { useFormState, type Control } from 'react-hook-form';
 import { extractFieldViolations } from 'utils/field-errors';
-import type { DxfPieceAreaRow } from './nesting/dxf-consumption';
+import type { DxfNormPiece, DxfPieceAreaRow } from './nesting/dxf-consumption';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
 import type { TechCardFormData } from './schema';
 
@@ -69,6 +69,51 @@ export function useUnsavedAreaSource(control: Control<TechCardFormData>): boolea
 // заявить покрытие по файлам, которых нет, отсюда нельзя, а перезаливка любого листа делает площади
 // устаревшими сама, без чьего-либо участия.
 
+/**
+ * КОМПЛЕКТ ДЕТАЛЕЙ ЗАМЕРА ОДНОЙ ТКАНИ — из связей блок→деталь её скоупа (см. piece-areas-dialog.tsx:
+ * сервер сверяет присланный комплект именно с ними, в обе стороны). Одна функция на два входа —
+ * диалог «∑ piece areas» и замер сразу после импорта (pattern-import/follow-up.tsx), чтобы они
+ * собирали ОДИН и тот же набор. Дедуп по имени блока: одна деталь законно названа несколькими
+ * блоками (разные листы), побеждает первая нашедшаяся связь.
+ */
+export function scopeAreaPieces(
+  aliases: readonly { blockName?: string; pieceLineKey?: string }[],
+  pieceRows: readonly {
+    lineKey?: string;
+    name?: string;
+    piecesPerGarment?: number;
+    ungraded?: boolean;
+  }[],
+  scopeKey: string,
+): DxfNormPiece[] {
+  const byPiece = new Map<string, { block: string; scopeKey: string }[]>();
+  for (const a of aliases) {
+    const key = (a.pieceLineKey ?? '').trim().toLowerCase();
+    const block = (a.blockName ?? '').trim();
+    if (!key || !block) continue;
+    const list = byPiece.get(key) ?? [];
+    if (!list.some((r) => r.block === block)) list.push({ block, scopeKey });
+    byPiece.set(key, list);
+  }
+  const out: DxfNormPiece[] = [];
+  for (const p of pieceRows) {
+    const key = (p.lineKey ?? '').trim().toLowerCase();
+    if (!key) continue;
+    const refs = byPiece.get(key);
+    if (!refs || refs.length === 0) continue;
+    out.push({
+      name: p.name?.trim() || key,
+      lineKey: (p.lineKey ?? '').trim(),
+      // Количество на изделие в ПЛОЩАДИ ОДНОГО КОНТУРА не участвует (её умножает читатель), но
+      // входит в объяснение разбора — поэтому берётся честное, а не единица.
+      perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
+      refs,
+      ungraded: !!p.ungraded,
+    });
+  }
+  return out;
+}
+
 export type PublishPieceAreasResult = { ok: true; stored: number } | { ok: false; reason: string };
 
 /** Лист выкройки в терминах публикации: сырая привязка и стабильный ключ строки. */
@@ -106,7 +151,7 @@ export function pieceAreaSheetsRefusal(
   if (sheets.length === 0) return 'this fabric has no pattern sheets';
   const keys = new Set(sheets.map(serverScopeKeyOfSheet));
   if (keys.size > 1) {
-    return "the sheets of this fabric are bound differently: some to a purpose, some to a BOM line. the server keeps them in DIFFERENT scopes, and the measurement would answer for files that are not in its scope. bind the sheets to a purpose as well (the “⇄” button on the sheet row)";
+    return 'the sheets of this fabric are bound differently: some to a purpose, some to a BOM line. the server keeps them in DIFFERENT scopes, and the measurement would answer for files that are not in its scope. bind the sheets to a purpose as well (the “⇄” button on the sheet row)';
   }
   const only = [...keys][0] ?? '';
   if (!only) {
@@ -259,7 +304,9 @@ export async function publishPieceAreas(args: {
       ok: false,
       reason: `the area of these pieces is zero or smaller than a hundredth of a cm²: ${[
         ...new Set(tooSmall.map((a) => named(a.pieceLineKey))),
-      ].join(', ')} — on the wire it becomes a zero that neither the server nor common sense will accept. looks like the wrong contour layer is picked`,
+      ].join(
+        ', ',
+      )} — on the wire it becomes a zero that neither the server nor common sense will accept. looks like the wrong contour layer is picked`,
     };
   }
   const sheetLineKeys = args.sheets.map((sh) => (sh.lineKey ?? '').trim()).filter(Boolean);
@@ -285,7 +332,7 @@ export async function publishPieceAreas(args: {
     return { ok: true, stored: Number(res?.stored ?? rows.length) };
   } catch (e) {
     const violations = extractFieldViolations(e);
-    const first = violations.length > 0 ? violations[0].description : "";
+    const first = violations.length > 0 ? violations[0].description : '';
     return { ok: false, reason: first || "the server didn't accept the piece-area measurement" };
   }
 }

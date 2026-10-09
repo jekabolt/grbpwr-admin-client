@@ -21,6 +21,12 @@
 //     the reason ("both hands drawn" / "unfolded") — never a root rewrite.
 //   · FUSED: any interlining copy (file or `fused` flag) → `fused` + fusing mode FULL on a new piece;
 //     an existing piece's own fusing mode is kept.
+//   · RE-IMPORT (MF-C, M4): a scope that already holds a sheet THIS importer wrote (manifest on the
+//     card) gets `replaces` = that row, default mode 'replace': the new file takes the row's place
+//     instead of becoming a revision. Picked by the same source file (sha256, then file name), else
+//     the scope alone (newest conversion). `vanished` = the scope's links to blocks the old manifest
+//     drew and the new one does not — listed, never removed here (presence ≠ geometry: only the
+//     piece-match modal, on the card's complete parse, may offer removal).
 //   · ALIASES: per scope per identity, `blockName` = the identity as the card's splitter keys it (the
 //     manifest identity; an ungraded `_UNI` block keeps its raw name — split-pieces.ts does the same).
 
@@ -30,7 +36,9 @@ import type {
   DraftAlias,
   DraftPiece,
   DraftPieceUpdate,
+  DraftReplaceTarget,
   DraftScope,
+  DraftVanished,
   ManifestPiece,
 } from '../types';
 import { MANIFEST_TAG } from '../types';
@@ -53,8 +61,18 @@ export type DraftCardContext = {
   }[];
   /** Live block → piece links, scope = `fabricScopeKey(purpose, line)`. */
   existingAliases?: { scopeKey: string; blockName: string; pieceLineKey: string }[];
-  /** Live pattern rows, scope as above. */
-  existingPatterns?: { scopeKey: string; filename: string; url: string }[];
+  /**
+   * Live pattern rows, scope as above. `manifest` = the conversion manifest the card's parse read
+   * off that sheet (MF-C: a sheet this importer wrote; null/absent = a foreign DXF or not parsed).
+   */
+  existingPatterns?: {
+    scopeKey: string;
+    filename: string;
+    url: string;
+    lineKey?: string;
+    name?: string;
+    manifest?: ConversionManifest | null;
+  }[];
   styleLabel: string;
 };
 
@@ -131,7 +149,7 @@ export function scopeFileName(
 }
 
 /** Alias spelling of each identity in one file: the identity, or the raw `_UNI` block. */
-function aliasNames(m: ConversionManifest): Map<string, string> {
+export function aliasNames(m: ConversionManifest): Map<string, string> {
   const out = new Map<string, string>();
   for (const b of m.blocks) {
     if (out.has(b.identity)) continue;
@@ -163,11 +181,15 @@ export function buildDraft(
     const onCard = (card.existingPatterns ?? []).find(
       (p) => p.scopeKey === sc.target.scopeKey && p.filename === filename,
     );
+    const replaces = onCard ? null : replaceTargetOf(sc, card);
     return {
       ...sc,
       filename,
       name: sc.name || name,
       alreadyOnCard: onCard ? { url: onCard.url, filename: onCard.filename } : null,
+      replaces,
+      vanished: replaces ? vanishedOf(sc, replaces, card) : [],
+      readsBack: readsBack(sc.manifest),
     };
   });
 
@@ -307,6 +329,84 @@ export function buildDraft(
     pieceUpdates,
     downloads: scopes.map((s) => ({ filename: s.filename, dxfText: s.dxfText })),
   };
+}
+
+/** The new file read back through our own parser completely (gate G1-roundtrip passed). */
+export function readsBack(m: ConversionManifest): boolean {
+  const g1 = m.gate?.checks.find((c) => c.id === 'G1-roundtrip');
+  return !!g1 && g1.ok;
+}
+
+const nonEmpty = (xs: string[]) => xs.map((x) => x.trim().toLowerCase()).filter(Boolean);
+
+/**
+ * The previous import's sheet in this scope, if any. Only rows whose manifest the card's parse read
+ * (a sheet this importer wrote) qualify: a foreign CLO sheet is never replaced. Strongest match
+ * first: the same source sha256 (MF-B fills it), the same source file name, else the scope alone
+ * (the newest conversion — one DXF per scope is the importer's rule, K1 item 7).
+ */
+export function replaceTargetOf(
+  sc: Pick<DraftScope, 'target' | 'manifest'>,
+  card: Pick<DraftCardContext, 'existingPatterns'>,
+): DraftReplaceTarget | null {
+  const rows = (card.existingPatterns ?? []).filter(
+    (p) => p.scopeKey === sc.target.scopeKey && !!p.manifest && !!(p.lineKey ?? '').trim(),
+  );
+  if (!rows.length) return null;
+  const sha = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.sha256)));
+  const src = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.name)));
+  const score = (p: (typeof rows)[number]): [number, DraftReplaceTarget['matchedBy']] => {
+    const files = p.manifest!.source.files;
+    if (sha.size && nonEmpty(files.map((f) => f.sha256)).some((h) => sha.has(h)))
+      return [2, 'sha256'];
+    if (src.size && nonEmpty(files.map((f) => f.name)).some((n) => src.has(n)))
+      return [1, 'source'];
+    return [0, 'scope'];
+  };
+  const best = rows
+    .map((p) => ({ p, s: score(p) }))
+    .sort(
+      (a, b) =>
+        b.s[0] - a.s[0] ||
+        (b.p.manifest!.createdAt ?? '').localeCompare(a.p.manifest!.createdAt ?? ''),
+    )[0];
+  return {
+    lineKey: best.p.lineKey!.trim(),
+    url: best.p.url,
+    filename: best.p.filename,
+    name: best.p.name ?? '',
+    matchedBy: best.s[1],
+    convertedAt: best.p.manifest!.createdAt ?? '',
+  };
+}
+
+/**
+ * Links of this scope to blocks the replaced sheet's manifest drew and the new file does not. A
+ * link to a block of ANOTHER sheet of the scope is not ours to judge and is never listed.
+ */
+export function vanishedOf(
+  sc: Pick<DraftScope, 'target' | 'manifest'>,
+  replaces: DraftReplaceTarget,
+  card: Pick<DraftCardContext, 'existingPatterns' | 'existingAliases' | 'existingPieces'>,
+): DraftVanished[] {
+  const old = (card.existingPatterns ?? []).find((p) => p.lineKey?.trim() === replaces.lineKey);
+  if (!old?.manifest) return [];
+  const lower = (s: string) => normBlock(s).toLowerCase();
+  const before = new Set([...aliasNames(old.manifest).values()].map(lower));
+  const now = new Set([...aliasNames(sc.manifest).values()].map(lower));
+  const nameOf = new Map(card.existingPieces.map((p) => [p.lineKey, p.name]));
+  const out: DraftVanished[] = [];
+  for (const a of card.existingAliases ?? []) {
+    if (a.scopeKey !== sc.target.scopeKey) continue;
+    const b = lower(a.blockName);
+    if (!before.has(b) || now.has(b)) continue;
+    out.push({
+      blockName: a.blockName,
+      pieceLineKey: a.pieceLineKey,
+      pieceName: nameOf.get(a.pieceLineKey) ?? a.pieceLineKey,
+    });
+  }
+  return out;
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

@@ -25,6 +25,7 @@ import type {
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
+import type { FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import { CheckStep } from './steps/check';
 import { DetailsStep } from './steps/details';
 import { FabricsStep } from './steps/fabrics';
@@ -57,6 +58,11 @@ type WizardProps = {
   namer?: NameSuggester;
   buildDraft?: DraftBuilder;
   applyDraft?: ApplyDraftFn;
+  /** MF-C: piece areas + size index after the apply (run by the card, shown on the apply step). */
+  followUp?: FollowUpRow[] | null;
+  onRetryFollowUp?: (only?: { scopeKey?: string; step?: FollowUpStep }) => void;
+  /** MF-C: close the wizard and open the piece-match modal of this scope (vanished pieces). */
+  onReviewPieces?: (scopeKey: string) => void;
 };
 
 /**
@@ -97,6 +103,9 @@ function WizardBody({
   namer: namerProp,
   buildDraft: buildDraftProp,
   applyDraft: applyDraftProp,
+  followUp,
+  onRetryFollowUp,
+  onReviewPieces,
   stub,
   onToggleStub,
 }: WizardProps & { stub: boolean; onToggleStub?: () => void }) {
@@ -162,7 +171,17 @@ function WizardBody({
       case 'check':
         return <CheckStep api={api} />;
       case 'apply':
-        return <ApplyStep api={api} card={card} stub={client.kind === 'stub'} onClose={onClose} />;
+        return (
+          <ApplyStep
+            api={api}
+            card={card}
+            stub={client.kind === 'stub'}
+            onClose={onClose}
+            followUp={followUp ?? null}
+            onRetryFollowUp={onRetryFollowUp}
+            onReviewPieces={onReviewPieces}
+          />
+        );
     }
   })();
 

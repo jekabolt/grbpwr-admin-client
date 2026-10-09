@@ -180,6 +180,13 @@ export function useImportSession(deps: {
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
+  /**
+   * MF-C (M4): per scope, what to do with the previous import's sheet the draft found
+   * (`DraftScope.replaces`). Absent = 'replace', the default. Read at apply time.
+   */
+  const [sheetModes, setSheetModes] = useState<Record<string, 'replace' | 'add'>>({});
+  const modesRef = useRef(sheetModes);
+  modesRef.current = sheetModes;
   const [extracted, setExtracted] = useState<ExtractInfo>(NO_EXTRACT);
   const [errorCode, setErrorCode] = useState<ImportErrorCode | null>(null);
   /** The latest Set-of-Mark render (what the AI was shown), kept to draw it on the details step. */
@@ -458,8 +465,17 @@ export function useImportSession(deps: {
           return;
         }
         case 'apply': {
-          const draft = sRef.current.draft;
-          if (!draft) return;
+          const built = sRef.current.draft;
+          if (!built) return;
+          // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
+          const draft = {
+            ...built,
+            scopes: built.scopes.map((sc) =>
+              sc.replaces
+                ? { ...sc, sheetMode: modesRef.current[sc.target.scopeKey] ?? 'replace' }
+                : sc,
+            ),
+          };
           const progress: Record<string, ApplyProgress['state']> = {};
           setApply({ phase: 'running', progress });
           const result = await applyDraft(draft, (p) => {
@@ -872,6 +888,9 @@ export function useImportSession(deps: {
     session,
     inputs,
     apply,
+    sheetModes,
+    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') =>
+      setSheetModes((m) => ({ ...m, [scopeKey]: mode })),
     extracted,
     errorCode,
     notice,

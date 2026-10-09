@@ -34,5 +34,26 @@ export {
   type ScopePlan,
   type ScopeProblem,
 } from './scope';
-export { buildDraft, cardNameOf, fingerprint, type DraftCardContext } from './draft';
+export {
+  buildDraft,
+  cardNameOf,
+  fingerprint,
+  readsBack,
+  replaceTargetOf,
+  vanishedOf,
+  type DraftCardContext,
+} from './draft';
 export { applyDraft, planFormWrites, type ApplyDeps, type LiveCard, type FormWrite } from './apply';
+export {
+  failWaiting,
+  followUpPending,
+  followUpTargets,
+  initialRows,
+  retryRows,
+  runFollowUp,
+  type FollowUpCell,
+  type FollowUpDeps,
+  type FollowUpRow,
+  type FollowUpStep,
+  type FollowUpTarget,
+} from './followup';

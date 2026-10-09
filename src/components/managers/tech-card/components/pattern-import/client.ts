@@ -10,6 +10,7 @@ import type {
   ApplyResult,
   CardDraft,
   CardSize,
+  ConversionManifest,
   DraftScopeTarget,
   NameDecision,
   SourceFileInfo,
@@ -60,8 +61,19 @@ export type CardContext = {
   }[];
   /** Block → piece links the card already has, by scope key (F7: re-apply binds to the same piece). */
   existingAliases?: { scopeKey: string; blockName: string; pieceLineKey: string }[];
-  /** Pattern rows the card already has, by scope key (F7: the same file is not uploaded twice). */
-  existingPatterns?: { scopeKey: string; filename: string; url: string }[];
+  /**
+   * Pattern rows the card already has, by scope key (F7: the same file is not uploaded twice).
+   * MF-C: `lineKey`/`name` and the conversion manifest the card's parse read off the sheet — a
+   * sheet this importer wrote earlier is offered for replacement on a re-import (M4).
+   */
+  existingPatterns?: {
+    scopeKey: string;
+    filename: string;
+    url: string;
+    lineKey?: string;
+    name?: string;
+    manifest?: ConversionManifest | null;
+  }[];
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
 };

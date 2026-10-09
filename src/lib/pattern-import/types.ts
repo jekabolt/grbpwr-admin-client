@@ -859,7 +859,36 @@ export type DraftScope = {
    * scope — no upload, no new row; re-applying an import changes nothing.
    */
   alreadyOnCard?: { url: string; filename: string } | null;
+  /**
+   * MF-C (M4): a sheet THIS importer wrote earlier (its manifest is on the card) in the same scope.
+   * `replace` (the default when present) puts the new file into that row (lineKey, name, binding
+   * kept; url, filename and size new) instead of adding a second sheet the card would count as a
+   * revision. `matchedBy`: the same source file (sha256 / file name) or just the same scope.
+   */
+  replaces?: DraftReplaceTarget | null;
+  /** MF-C: the operator's answer when `replaces` is set; absent = 'replace'. */
+  sheetMode?: 'replace' | 'add';
+  /**
+   * MF-C: block links of this scope that the replaced sheet's import wrote and the new file no
+   * longer draws. Never removed by apply: listed, and handed to the piece-match modal's deletion
+   * flow, which checks presence on the full parse and shows what a removal takes with it.
+   */
+  vanished?: DraftVanished[];
+  /** MF-C: the new file read back completely (gate G1); removal is only offered when true. */
+  readsBack?: boolean;
 };
+
+export type DraftReplaceTarget = {
+  lineKey: string;
+  url: string;
+  filename: string;
+  name: string;
+  matchedBy: 'sha256' | 'source' | 'scope';
+  /** When the replaced sheet was converted (its manifest `createdAt`). */
+  convertedAt: string;
+};
+
+export type DraftVanished = { blockName: string; pieceLineKey: string; pieceName: string };
 
 export type DraftPiece = {
   /** Client-minted ULID, same contract as pieces.N.lineKey. */
@@ -922,7 +951,15 @@ export type ApplyUploaded = { scopeKey: string; url: string; filename: string; s
  * card save's answer (autosave `flush`), when the host passed one.
  */
 export type ApplyResult =
-  | { ok: true; uploaded: ApplyUploaded[]; reused?: string[]; writes?: number; save?: string }
+  | {
+      ok: true;
+      uploaded: ApplyUploaded[];
+      reused?: string[];
+      writes?: number;
+      save?: string;
+      /** MF-C: rows whose file was replaced in place (M4), old url → new url. */
+      replaced?: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
+    }
   | { ok: false; failedScope: string; message: string; uploaded: ApplyUploaded[] };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
