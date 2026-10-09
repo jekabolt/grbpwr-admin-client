@@ -594,7 +594,11 @@ export type PieceSpec = {
   fabrics: FabricPurposeKey[];
   /** Owner decision 14: interlining not in BOM → `fused` on the piece. */
   fused: boolean;
-  /** No grading: one contour for all sizes; written as `<identity>_UNI_<base>` per K2. */
+  /**
+   * No grading: one contour for all sizes; written as ONE block `<identity>_UNI` (09-CARD-CONTRACT
+   * obligation 12, K1 case g — `<identity>_UNI_<base>` would leak the base size into the card's
+   * identity). Manifest `sizeToken: 'UNI'`, `sizeId` of the base size.
+   */
   ungraded: boolean;
   /** One entry per exported size rank. */
   sizes: PieceSizeSpec[];
