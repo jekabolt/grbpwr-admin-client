@@ -30,6 +30,8 @@ export type SeedSolve = {
   free: number[];
   compLen: Map<number, number>;
   top: Combo[];
+  /** every combination, indexed by the mask over `free` */
+  all: Combo[];
   ambiguous: boolean;
   reason: string;
 };
@@ -60,33 +62,59 @@ export function portionPts(M: GradeModel, bits: readonly number[], only?: Set<nu
   return out;
 }
 
-export type FillRes = { closed: boolean; area: number; touchesBorder: boolean };
+export type FillRes = {
+  closed: boolean;
+  /** region area (walls included), mm²; −1 = leak */
+  area: number;
+  /** after the variant knives: the seed's side, mm² (= area when no knife crosses) */
+  cutArea: number;
+  /** a knife crosses the region but does not separate it (the cut is not drawn for this rank) */
+  knifeIncomplete: boolean;
+};
 
-/** Fill rank r of a seed inside box with the given wall portions. */
-export function fillRank(box: BoxMm, cellMm: number, ps: readonly PortionPts[], r: number, seed: PtMm): FillRes {
+const LEAK: FillRes = { closed: false, area: -1, cutArea: -1, knifeIncomplete: false };
+
+/** Fill rank r of a seed inside box with the given wall portions (and the variant's knives). */
+export function fillRank(
+  box: BoxMm,
+  cellMm: number,
+  ps: readonly PortionPts[],
+  r: number,
+  seed: PtMm,
+  knives: readonly PtMm[][] = [],
+): FillRes {
   const g = new Grid(box, cellMm);
   const wall = new Uint8Array(g.W * g.H);
   for (const p of ps) if (p.ranks.includes(r)) drawPolyline(g, wall, p.pts);
   const k0 = g.iy(seed.y) * g.W + g.ix(seed.x);
-  if (wall[k0]) return { closed: false, area: -1, touchesBorder: false };
+  if (wall[k0]) return LEAK;
   const ext = exterior(g, wall);
-  if (ext[k0]) {
-    // a leak: does the free space around the seed reach the box border (box too small?)
-    return { closed: false, area: -1, touchesBorder: true };
-  }
-  const { area } = regionOf(g, ext, k0);
-  return { closed: true, area: area * g.cell * g.cell, touchesBorder: false };
+  if (ext[k0]) return LEAK;
+  const { mask, area } = regionOf(g, ext, k0);
+  const a = area * g.cell * g.cell;
+  if (!knives.length) return { closed: true, area: a, cutArea: a, knifeIncomplete: false };
+  const kn = new Uint8Array(mask.length);
+  for (const k of knives) drawPolyline(g, kn, k);
+  let hit = 0;
+  for (let j = 0; j < mask.length; j++) if (mask[j] && kn[j]) hit++;
+  if (!hit) return { closed: true, area: a, cutArea: a, knifeIncomplete: false };
+  if (kn[k0]) return { closed: true, area: a, cutArea: a, knifeIncomplete: true };
+  const blocked = new Uint8Array(mask.length);
+  for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
+  const cut = new Uint8Array(mask.length);
+  const c = flood(g, blocked, [k0], cut);
+  // the flood went round the knife's end: nothing was cut off
+  const incomplete = c >= area - hit - 4;
+  return { closed: true, area: a, cutArea: c * g.cell * g.cell, knifeIncomplete: incomplete };
 }
 
 function evalCombo(M: GradeModel, bits: number[], box: BoxMm, seed: PtMm, inBox: Set<number>, cellMm: number): Combo {
   const n = M.n;
   const ps = portionPts(M, bits, inBox);
   const areas: number[] = [];
-  let closed = 0;
   for (let r = 0; r < n; r++) {
     const f = fillRank(box, cellMm, ps, r, seed);
     areas.push(f.closed ? f.area : -1);
-    if (f.closed) closed++;
   }
   return scoreAreas(bits, areas, n);
 }
@@ -177,6 +205,7 @@ export function solveSeed(M: GradeModel, seed: Seed, box: BoxMm, o: ChooseOpts):
     free.forEach((c, i) => (bits[c] = (m >> i) & 1));
     combos.push(evalCombo(M, bits, box, seed.at, inBox, o.cellMm));
   }
+  const all = combos.slice();
   combos.sort((a, b) => b.score - a.score);
   const top = combos.slice(0, 4);
   const best = top[0];
@@ -193,7 +222,16 @@ export function solveSeed(M: GradeModel, seed: Seed, box: BoxMm, o: ChooseOpts):
     ambiguous = true;
     reason = `top-2 close (${best.score.toFixed(2)} vs ${second.score.toFixed(2)})`;
   }
-  return { seed, box, inBox, comps: compList, free, compLen, top, ambiguous, reason };
+  return { seed, box, inBox, comps: compList, free, compLen, top, all, ambiguous, reason };
 }
 
 export { growBox, flood };
+
+/** Score of a seed's family under global bits (its precomputed combination over its free comps). */
+export function scoreUnder(S: SeedSolve, bits: readonly number[]): Combo {
+  let m = 0;
+  S.free.forEach((c, i) => {
+    if (bits[c]) m |= 1 << i;
+  });
+  return S.all[m];
+}

@@ -22,9 +22,10 @@ import type {
 import { Grid, drawPolyline, exterior, maskBox, regionOf } from '../raster';
 
 import {
+  fillRank,
   markFrames,
   portionPts,
-  scoreAreas,
+  scoreUnder,
   solveSeed,
   type Combo,
   type PortionPts,
@@ -32,7 +33,7 @@ import {
 } from './choose';
 import { buildModel, trackPortions, type GradeModel } from './model';
 import { chainSpans } from './tracks';
-import { bboxOfPts, growBox, unionBox } from './vec';
+import { bboxOfPts, growBox, median, unionBox } from './vec';
 
 export { detectUnencodedGrading, type GuardOpts } from './guard';
 
@@ -68,6 +69,10 @@ export type GradeSeedResult = {
   refusal: GradeRefusal | null;
   /** solver raster area per rank under the global bits (−1 = leak), mm² */
   areasMm2: number[];
+  /** the same after the variant's knives (what F4's contour must match) */
+  finalAreasMm2: number[];
+  /** per rank: trusted (closed, family consistent, knife complete) */
+  rankOk: boolean[];
   box: BoxMm;
   reason: string;
 };
@@ -89,6 +94,8 @@ export type GradeResult = {
     bandMode: number;
     ms: number;
   };
+  /** the rank model (opts.keepModel only) */
+  model?: GradeModel;
 };
 
 export type GradeOpts = {
@@ -98,7 +105,35 @@ export type GradeOpts = {
   /** max components enumerated per seed (2^maxFree combinations) */
   maxFree?: number;
   log?: (s: string) => void;
+  /** keep the rank model on the result (probes) */
+  keepModel?: boolean;
+  /** the variant's cutting lines (F4 knives): the final region is cut along them */
+  knives?: PtMm[][];
 };
+
+/**
+ * A graded family is trusted when its closed ranks (≥ 2, and at most two missing) grow strictly
+ * and evenly: every per-rank area step within ±35 % of the median step. A flipped component or a
+ * foreign line closing a rank breaks exactly this.
+ */
+export function familyCheck(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
+  const n = areas.length;
+  const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
+  const leaks = areas.map((a, r) => (a < 0 ? r : -1)).filter((r) => r >= 0);
+  if (closed.length < Math.max(2, n - 2)) return { ok: false, why: `only ${closed.length}/${n} ranks close`, leaks };
+  const steps: number[] = [];
+  for (let k = 1; k < closed.length; k++) {
+    const a = closed[k - 1];
+    const b = closed[k];
+    const d = (areas[b] - areas[a]) / (b - a);
+    if (d <= areas[a] * 0.0005) return { ok: false, why: `area does not grow from rank ${a} to ${b}`, leaks };
+    steps.push(d);
+  }
+  const med = median(steps);
+  for (const d of steps)
+    if (Math.abs(d - med) > 0.35 * med) return { ok: false, why: `uneven area steps (${steps.map((x) => (x / 100).toFixed(1)).join('/')} cm²)`, leaks };
+  return { ok: true, why: '', leaks };
+}
 
 const alt = (c: Combo): GradeAlternative => ({
   bits: c.bits,
@@ -109,39 +144,39 @@ const alt = (c: Combo): GradeAlternative => ({
   areasMm2: c.areas,
 });
 
-/** The free cell around the seed with every line a wall, grown until it stops touching the box. */
-function cellBox(M: GradeModel, seed: Seed, cellMm: number, sheetBox: BoxMm): BoxMm | null {
-  const all = portionPts(M, new Array(M.nComps).fill(0));
-  for (let R = 200; R <= 3200; R *= 2) {
+/**
+ * The seed's envelope: every drawn line a wall, the region holding the seed (internal lines do not
+ * split it) = the union of every size of the piece (and of pieces drawn over it). The box grows
+ * until the envelope no longer touches it; null when even the whole sheet leaves the seed open.
+ */
+function envelopeBox(M: GradeModel, seed: Seed, cellMm: number, sheetBox: BoxMm): BoxMm | null {
+  const full = growBox(sheetBox, 5);
+  for (let R = 200; ; R *= 2) {
     const box = {
-      minX: Math.max(sheetBox.minX - 5, seed.at.x - R),
-      minY: Math.max(sheetBox.minY - 5, seed.at.y - R),
-      maxX: Math.min(sheetBox.maxX + 5, seed.at.x + R),
-      maxY: Math.min(sheetBox.maxY + 5, seed.at.y + R),
+      minX: Math.max(full.minX, seed.at.x - R),
+      minY: Math.max(full.minY, seed.at.y - R),
+      maxX: Math.min(full.maxX, seed.at.x + R),
+      maxY: Math.min(full.maxY, seed.at.y + R),
     };
-    const g = new Grid(box, cellMm);
+    const whole = box.minX <= full.minX && box.minY <= full.minY && box.maxX >= full.maxX && box.maxY >= full.maxY;
+    const g = new Grid(box, Math.max(cellMm, 1));
     const wall = new Uint8Array(g.W * g.H);
-    for (const p of all) drawPolyline(g, wall, p.pts);
+    for (const t of M.tracks) if (!M.frames.has(t.id)) drawPolyline(g, wall, t.pts);
     const k0 = g.iy(seed.at.y) * g.W + g.ix(seed.at.x);
     if (wall[k0]) return null;
     const ext = exterior(g, wall);
     if (ext[k0]) {
-      if (R * 2 > 3200 || (box.minX <= sheetBox.minX && box.maxX >= sheetBox.maxX && box.minY <= sheetBox.minY && box.maxY >= sheetBox.maxY))
-        return null;
+      if (whole) return null;
       continue;
     }
-    // the innermost cell: flood over free (non-wall) pixels
-    const cell = new Uint8Array(g.W * g.H);
-    const blocked = new Uint8Array(g.W * g.H);
-    for (let i = 0; i < wall.length; i++) blocked[i] = wall[i];
-    floodFree(g, blocked, k0, cell);
-    const mb = maskBox(g, cell);
-    if (mb.x1 < 0) return null;
+    const { mask } = regionOf(g, ext, k0);
+    const mb = maskBox(g, mask);
+    const touches = mb.x0 <= 2 || mb.y0 <= 2 || mb.x1 >= g.W - 3 || mb.y1 >= g.H - 3;
+    if (touches && !whole) continue;
     const a = g.centre(mb.x0, mb.y0);
     const b = g.centre(mb.x1, mb.y1);
     return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
   }
-  return null;
 }
 
 function floodFree(g: Grid, blocked: Uint8Array, k0: number, out: Uint8Array) {
@@ -183,33 +218,11 @@ function rankRegionBox(box: BoxMm, cellMm: number, ps: readonly PortionPts[], r:
 const inside = (a: BoxMm, b: BoxMm, tol = 1) =>
   a.minX >= b.minX - tol && a.minY >= b.minY - tol && a.maxX <= b.maxX + tol && a.maxY <= b.maxY + tol;
 
-/** Seed region grown from its cell: solve → largest closed rank's region + margin → repeat. */
+/** Seed region = its envelope + a margin; solved once there. */
 function growSolve(M: GradeModel, seed: Seed, o: Required<Pick<GradeOpts, 'cellMm' | 'maxFree'>>, sheetBox: BoxMm): SeedSolve | null {
-  const cb = cellBox(M, seed, o.cellMm, sheetBox);
-  if (!cb) return null;
-  let box = growBox(cb, 8 + 2 * M.step0 * (M.n - 1));
-  let S: SeedSolve | null = null;
-  for (let it = 0; it < 4; it++) {
-    S = solveSeed(M, seed, box, { cellMm: o.cellMm, maxFree: o.maxFree });
-    const best = S.top[0];
-    if (!best) break;
-    let big = -1;
-    for (let r = M.n - 1; r >= 0; r--)
-      if (best.areas[r] >= 0) {
-        big = r;
-        break;
-      }
-    if (big < 0) break;
-    const ps = portionPts(M, best.bits, S.inBox);
-    const rb = rankRegionBox(box, o.cellMm, ps, big, seed.at);
-    if (!rb) break;
-    const want = growBox(rb, 8 + 2 * M.step0 * (M.n - big));
-    // stable when the wanted box sits inside the current one and is not much smaller
-    if (inside(want, box) && (box.maxX - box.minX) * (box.maxY - box.minY) <= 1.6 * (want.maxX - want.minX) * (want.maxY - want.minY))
-      break;
-    box = inside(want, box) ? want : unionBox(box, want);
-  }
-  return S;
+  const env = envelopeBox(M, seed, o.cellMm, sheetBox);
+  if (!env) return null;
+  return solveSeed(M, seed, growBox(env, 8 + 2 * M.step0), { cellMm: o.cellMm, maxFree: o.maxFree });
 }
 
 export function gradeRanks(
@@ -255,10 +268,29 @@ export function gradeRanks(
     }
     if (owner?.top[0]) bits[c] = owner.top[0].bits[c];
   }
+  // then the bits that serve every seed together best (coordinate ascent on the summed score)
+  const live = solves.filter((s): s is SeedSolve => !!s && s.all.length > 0);
+  const total = () => live.reduce((a, s) => a + scoreUnder(s, bits).score, 0);
+  let cur = total();
+  for (let pass = 0; pass < 8; pass++) {
+    let moved = false;
+    for (let c = 0; c < M.nComps; c++) {
+      if (!live.some((s) => s.free.includes(c))) continue;
+      bits[c] ^= 1;
+      const t = total();
+      if (t > cur + 1e-6) {
+        cur = t;
+        moved = true;
+      } else bits[c] ^= 1;
+    }
+    if (!moved) break;
+  }
   const results: GradeSeedResult[] = [];
   const ambiguities: ChainAmbiguity[] = [];
+  const knives = opts.knives ?? [];
   seeds.forEach((sd, i) => {
     const S = solves[i];
+    const none = new Array(n).fill(-1);
     if (!S || !S.top.length) {
       results.push({
         seed: sd.id,
@@ -268,7 +300,9 @@ export function gradeRanks(
         ambiguous: false,
         accepted: false,
         refusal: 'sizes-not-distinguished',
-        areasMm2: new Array(n).fill(-1),
+        areasMm2: none,
+        finalAreasMm2: none,
+        rankOk: new Array(n).fill(false),
         box: { minX: sd.at.x, minY: sd.at.y, maxX: sd.at.x, maxY: sd.at.y },
         reason: 'no region around the seed',
       });
@@ -277,31 +311,25 @@ export function gradeRanks(
     // the seed's family under the GLOBAL bits (a component shared with another piece may have been
     // decided there): it must be what this seed would choose itself
     const ps = portionPts(M, bits, S.inBox);
-    const areas: number[] = [];
-    for (let r = 0; r < n; r++) {
-      const g = new Grid(S.box, opts.cellMm);
-      const wall = new Uint8Array(g.W * g.H);
-      for (const p of ps) if (p.ranks.includes(r)) drawPolyline(g, wall, p.pts);
-      const k0 = g.iy(sd.at.y) * g.W + g.ix(sd.at.x);
-      const ext = exterior(g, wall);
-      areas.push(wall[k0] || ext[k0] ? -1 : regionOf(g, ext, k0).area * g.cell * g.cell);
-    }
-    const glob = scoreAreas(bits, areas, n);
+    const fills = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps, r, sd.at, knives));
+    const areas = fills.map((f) => f.area);
     const best = S.top[0];
     const same = best.areas.every((x, r) => Math.abs(x - areas[r]) <= 0.001 * Math.max(1, Math.abs(x)));
+    const fam = familyCheck(areas);
     let reason = S.reason;
     let refusal: GradeRefusal | null = null;
     if (S.ambiguous) refusal = 'grade-ambiguous';
     else if (!same) {
       refusal = 'grade-ambiguous';
       reason = 'a component shared with another piece points the other way';
-    } else if (glob.closed < n || !glob.monotone) {
+    } else if (!fam.ok) {
       refusal = 'sizes-not-distinguished';
-      reason = reason || 'not every rank closes monotonically';
-    } else if (glob.cv > 0.5) {
-      refusal = 'sizes-not-distinguished';
-      reason = `irregular area steps (cv ${glob.cv.toFixed(2)})`;
+      reason = fam.why;
     }
+    const rankOk = fills.map((f) => refusal == null && f.closed && !f.knifeIncomplete);
+    if (refusal == null && fam.leaks.length) reason = `ranks ${fam.leaks.join(',')} do not close`;
+    const knifeBad = fills.map((f, r) => (f.knifeIncomplete ? r : -1)).filter((r) => r >= 0);
+    if (refusal == null && knifeBad.length) reason += `${reason ? '; ' : ''}the variant's cutting line does not reach ranks ${knifeBad.join(',')}`;
     results.push({
       seed: sd.id,
       components: S.comps,
@@ -311,6 +339,8 @@ export function gradeRanks(
       accepted: refusal == null,
       refusal,
       areasMm2: areas,
+      finalAreasMm2: fills.map((f) => (f.closed ? f.cutArea : -1)),
+      rankOk,
       box: S.box,
       reason,
     });
@@ -353,6 +383,7 @@ export function gradeRanks(
       bandMode,
       ms: Date.now() - t0,
     },
+    ...(opts.keepModel ? { model: M } : {}),
   };
 }
 

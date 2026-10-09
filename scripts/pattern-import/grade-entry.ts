@@ -12,11 +12,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
-import { fillPiecesDetailed, hausdorffP95, proposeSeeds, seedLabel, type FillDiag } from 'lib/pattern-import/pieces';
+import { fillPiecesDetailed, hausdorffP95, proposeSeeds, seedLabel, variantKnives, type FillDiag } from 'lib/pattern-import/pieces';
 import { SegGrid, segNearest } from 'lib/pattern-import/pieces/geom';
-import type { GradeResult } from 'lib/pattern-import/pieces/grade';
+import { bboxOfPts, gradeRanks, type GradeResult } from 'lib/pattern-import/pieces/grade';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
-import type { ChainSet, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
+import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
+import type { BoxMm, ChainSet, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
@@ -128,6 +129,11 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
         row += '?';
         sc.unknown++;
         continue;
+      }
+      if (process.env.DIST && (process.env.DIST === '1' || process.env.DIST === label)) {
+        const area = (o: PtMm[]) => Math.abs(o.reduce((a, p, i) => { const q = o[(i + 1) % o.length]; return a + p.x * q.y - q.x * p.y; }, 0) / 2);
+        const bb = (o: PtMm[]) => { const xs = o.map((p) => p.x); const ys = o.map((p) => p.y); return `[${Math.min(...xs).toFixed(0)},${Math.min(...ys).toFixed(0)}..${Math.max(...xs).toFixed(0)},${Math.max(...ys).toFixed(0)}]`; };
+        console.log(`      dist ${label}/r${r}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} got ${(area(g.outer) / 100).toFixed(1)} cm² ${bb(g.outer)} truth ${(t.areaMm2 / 100).toFixed(1)} cm² ${bb(t.outer)}`);
       }
       if (hausdorffP95(g.outer, t.outer) <= 1.0) {
         row += 'C';
@@ -428,12 +434,159 @@ function encoded() {
   return out;
 }
 
+/** BFS from the seed to the box border over non-wall pixels: the path, or null when closed. */
+function leakPath(box: BoxMm, lines: PtMm[][], at: PtMm): PtMm[] | null {
+  const g = new Grid(box, 0.5);
+  const wall = new Uint8Array(g.W * g.H);
+  for (const l of lines) drawPolyline(g, wall, l);
+  const k0 = g.iy(at.y) * g.W + g.ix(at.x);
+  const from = new Int32Array(wall.length).fill(-2);
+  const q = new Int32Array(wall.length);
+  let h = 0;
+  let t = 0;
+  q[t++] = k0;
+  from[k0] = -1;
+  while (h < t) {
+    const c = q[h++];
+    const y = (c / g.W) | 0;
+    const x = c - y * g.W;
+    if (x === 0 || y === 0 || x === g.W - 1 || y === g.H - 1) {
+      const out: PtMm[] = [];
+      for (let p = c; p >= 0; p = from[p]) {
+        const py = (p / g.W) | 0;
+        out.push(g.centre(p - py * g.W, py));
+      }
+      // keep the stretch nearest the walls' crossing: the last 40 mm before leaving the piece
+      return out.reverse();
+    }
+    for (const j of [c - 1, c + 1, c - g.W, c + g.W]) {
+      if (j < 0 || j >= wall.length || from[j] !== -2 || wall[j]) continue;
+      from[j] = c;
+      q[t++] = j;
+    }
+  }
+  return null;
+}
+
+/** walls <sample> <L1|L2> <label>[,<label>…]: per-rank walls of the solver around a piece, track ids. */
+function walls(rest: string[]) {
+  const [id, L, labs] = rest;
+  const b = loadBench(id, L as Level);
+  const { set } = chainsOf(b, b.n);
+  const v = VARIANT[id] ?? null;
+  const seeds = b.seeds.filter((s) => !v || !s.variant || s.variant === v);
+  const G = gradeRanks(b.sheet, set, seeds, b.n, { cellMm: PATIMPORT.fillCellMm, keepModel: true, log: (x) => console.log(x) });
+  const M = G.model!;
+  const dir = mk(resolve(OUT, 'debug'));
+  // truth per track: majority over its elements' chains' source paths
+  const truthOfChain = (cid: number) => {
+    const c = set.chains[cid];
+    const w = new Map<string, number>();
+    for (const r of c.ranges) {
+      const t = b.truth[b.origOfPath[r.path]];
+      const k = `${t.role[0]}${t.rank ?? ''}`;
+      w.set(k, (w.get(k) ?? 0) + Math.max(1, r.to - r.from));
+    }
+    return [...w].sort((x, y) => y[1] - x[1]).map(([k]) => k).join('|');
+  };
+  if (v) {
+    const kn = variantKnives(b.sheet, set, v);
+    console.log(`knives for ${v}: ${kn.map((k) => `c${k}(${set.chains[k].lengthMm.toFixed(0)}mm y≈${set.chains[k].pts[0].y.toFixed(0)})`).join(' ')}; texts: ${b.sheet.texts.filter((t) => /cut/i.test(t.text)).map((t) => `"${t.text}"@${t.anchor.y.toFixed(0)}`).join(' ')}`);
+  }
+  const ti = rest.indexOf('--track');
+  if (ti >= 0) {
+    const tr = +rest[ti + 1];
+    const t = M.tracks[tr];
+    console.log(`track t${tr} len ${t.lengthMm.toFixed(0)} closed ${t.closed} items ${t.items.map((it) => `e${it.el}(c${M.els[it.el].chain}${it.rev ? 'r' : ''} ${it.at.toFixed(0)}+${it.L.toFixed(0)})`).join(' ')}`);
+    for (const s of (M.samplesOf.get(tr) ?? []).filter((_, i) => i % +(process.env.EVERY ?? 10) === 0))
+      console.log(`  u=${s.u.toFixed(0)} p=(${s.p.x.toFixed(0)},${s.p.y.toFixed(0)}) lanes ${s.lanes.map((l) => `t${l.track}@${l.s.toFixed(1)}`).join(' ')} sets ${(M.sets.get(tr)?.[s.idx] ?? []).map((e) => `c${e.comp}:${e.ranks.join('')}`).join(' ')}`);
+  }
+  for (const lab of labs.split(',')) {
+    const sd = seeds.find((s) => seedLabel(s) === lab);
+    const gs = G.seeds.find((s) => s.seed === sd?.id);
+    if (!sd || !gs) continue;
+    console.log(`piece ${lab}: ${gs.accepted ? 'ok' : gs.refusal} ${gs.reason} comps=${gs.components.join(',')} areas=${gs.areasMm2.map((a) => (a / 100).toFixed(0)).join('/')}`);
+    const zb = process.env.ZOOMBOX?.split(',').map(Number);
+    const box = zb ? { minX: zb[0], minY: zb[1], maxX: zb[2], maxY: zb[3] } : gs.box;
+    const labels: Label[] = [];
+    for (const t of M.tracks) {
+      const bb = bboxOfPts(t.pts);
+      if (bb.maxX < box.minX || bb.minX > box.maxX || bb.maxY < box.minY || bb.minY > box.maxY) continue;
+      const mid = t.pts[t.pts.length >> 1];
+      const tr = [...new Set(t.items.map((it) => truthOfChain(M.els[it.el].chain)))].join('+');
+      labels.push({ at: mid, text: `t${t.id}:${tr}`, color: '#555', size: 8 });
+      if (rest.includes('--tracks'))
+        console.log(`  t${t.id} len=${t.lengthMm.toFixed(0)} truth=${tr} rank0=${M.rank0[t.id]} comp=${M.compOf[t.id]}/${M.compOfSet.get(t.id) ?? ''} common=${M.common.has(t.id)} frame=${M.frames.has(t.id)} lanes=${(M.samplesOf.get(t.id) ?? []).map((s) => s.lanes.length).join('').slice(0, 40)} sets=${(M.sets.get(t.id) ?? []).map((e) => e.map((x) => x.ranks.join('')).join('/') || '_').join(' ').slice(0, 160)}`);
+    }
+    labels.push({ at: sd.at, text: `● ${lab}`, color: '#00f', size: 14 });
+    for (let r = 0; r < b.n; r++) {
+      const strokes: Stroke[] = M.tracks.map((t) => ({ pts: t.pts, color: '#ddd', width: 0.5 }));
+      for (const p of G.portions) if (p.ranks.includes(r)) strokes.push({ pts: p.pts, color: p.ranks.length === b.n ? '#000' : PALETTE[r % PALETTE.length], width: 1.4 });
+      for (const c of b.cands) if (c.label === lab && c.rank === r) strokes.push({ pts: c.outer, closed: true, color: '#0a0', width: 0.6, dash: '3 3' });
+      if (v) for (const k of variantKnives(b.sheet, set, v)) strokes.push({ pts: set.chains[k].pts, color: '#f0f', width: 0.8, dash: '2 2' });
+      const leak = leakPath(box, G.portions.filter((p) => p.ranks.includes(r)).map((p) => p.pts), sd.at);
+      if (leak) {
+        strokes.push({ pts: leak, color: '#f00', width: 1.5 });
+        console.log(`  r${r} LEAK path crosses walls near (${leak[leak.length - 1].x.toFixed(0)},${leak[leak.length - 1].y.toFixed(0)})`);
+      }
+      renderPng(resolve(dir, `${id}-${L}-walls-${lab}-r${r}.png`), box, strokes, labels, +(process.env.PX ?? 2));
+    }
+  }
+}
+
 export async function main(argv: string[]) {
   const [mode = 'all', ...rest] = argv;
   if (mode === 'baseline') baseline(rest);
   else if (mode === 'solve') solve(rest);
   else if (mode === 'controls') controls(rest);
   else if (mode === 'encoded') encoded();
+  else if (mode === 'walls') walls(rest);
+  else if (mode === 'rank') {
+    // the solver alone (no F4): rank metrics with the grown region vs the prototype's truth box
+    for (const L of levelsOf(rest))
+      for (const id of samplesOf(rest)) {
+        const b = loadBench(id, L);
+        const { set } = chainsOf(b, b.n);
+        const v = VARIANT[id] ?? null;
+        const seeds = b.seeds.filter((s) => !v || !s.variant || s.variant === v);
+        for (const truthBox of [false, true]) {
+          const region = (sd: Seed) => {
+            const lab = seedLabel(sd);
+            const tc = b.cands.filter((c) => c.label === lab);
+            if (!tc.length) return { minX: sd.at.x - 300, minY: sd.at.y - 300, maxX: sd.at.x + 300, maxY: sd.at.y + 300 };
+            const big = tc.reduce((a, c) => (c.areaMm2 > a.areaMm2 ? c : a));
+            const bb = bboxOfPts(big.outer);
+            const mg = 8 + 2 * 8 * (b.n - big.rank);
+            return { minX: bb.minX - mg, minY: bb.minY - mg, maxX: bb.maxX + mg, maxY: bb.maxY + mg };
+          };
+          const t0 = Date.now();
+          const G = gradeRanks(b.sheet, set, seeds, b.n, { cellMm: 0.5, ...(truthBox ? { region } : {}) });
+          const m = rankMetrics(b, G);
+          console.log(`${id} ${L} ${truthBox ? 'truth-box' : 'grown   '}: rankAcc ${pct(m.rankAcc)} wrong ${pct(m.rankWrong)} unresolved ${pct(m.rankUnresolved)} comps ${G.components} bits ${G.bits.join('')} ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+          for (const x of G.seeds) {
+            const sd = seeds.find((q) => q.id === x.seed)!;
+            console.log(`    ${(seedLabel(sd) ?? '').padEnd(4)} ${x.rankOk.map((o) => (o ? 'o' : '.')).join('')} ${x.accepted ? 'ok' : x.refusal} ${x.reason} areas=${x.areasMm2.map((a) => (a < 0 ? '-' : (a / 100).toFixed(0))).join('/')} box=${(x.box.maxX - x.box.minX).toFixed(0)}x${(x.box.maxY - x.box.minY).toFixed(0)}`);
+          }
+        }
+      }
+  }
+  else if (mode === 'knife') {
+    const b = loadBench('kombinezon', 'L1');
+    const { set, run } = chainsOf(b, b.n);
+    const P = JSON.parse(readFileSync(resolve(PREP, 'prep-kombinezon.json'), 'utf8')) as { sheet: Sheet; set: ChainSet; run: SizeRun };
+    for (const k of variantKnives(P.sheet, P.set, 'Style A')) { const c = P.set.chains[k]; const xs = c.pts.map((p) => p.x); const ys = c.pts.map((p) => p.y); const cl = P.set.classes.find((q) => q.chains.includes(k)); console.log(`ENC knife c${k} ${cl?.role} x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)} y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`); }
+    const G = gradeRanks(b.sheet, set, b.seeds, b.n, { cellMm: 0.5 });
+    for (const k of variantKnives(b.sheet, set, 'Style A')) { const c = set.chains[k]; const xs = c.pts.map((p) => p.x); const ys = c.pts.map((p) => p.y); console.log(`knife c${k} x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)} y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`); }
+    for (const p of G.portions) {
+      const ys = p.pts.map((q) => q.y); const xs = p.pts.map((q) => q.x);
+      if (Math.min(...xs) > 870 && Math.max(...xs) < 960 && Math.min(...ys) < 1000 && Math.max(...ys) > 950) console.log(`portion c${p.chain} ${p.fromMm.toFixed(0)}..${p.toMm.toFixed(0)} ranks ${p.ranks.join('')} x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)} y ${Math.min(...ys).toFixed(1)}..${Math.max(...ys).toFixed(1)}`);
+    }
+    for (const v of ['Style A', null]) {
+      const { families } = fillPiecesDetailed(b.sheet, set, run, b.seeds, fillOpts(v, 'solve'));
+      const f = families.find((x) => x.seed === 5)!;
+      console.log(v, f.candidates.map((c) => `${c.rank}:${c.outcome}:${(c.areaMm2 / 100).toFixed(0)}:${c.bbox.minY.toFixed(0)}`).join(' '));
+    }
+  }
   else if (mode === 'all') {
     const data = {
       at: new Date().toISOString(),

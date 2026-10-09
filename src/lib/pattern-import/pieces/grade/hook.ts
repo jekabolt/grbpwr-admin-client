@@ -24,6 +24,7 @@ import type {
 
 import { drawPolyline, exterior, Grid, regionOf } from '../raster';
 import type { WallItem } from '../snap';
+import { variantKnives } from '../variants';
 import { itemsOf, type WallModel } from '../walls';
 
 import { gradingEvidence } from './guard';
@@ -133,7 +134,8 @@ export function gradeHook(
     },
   });
   if (mode === 'guard') return guardOnly('sizes-not-distinguished', null, []);
-  const G = gradeRanks(sheet, set, seeds, n, { cellMm: cell });
+  const knives = opts.variant ? itemsOf(set, variantKnives(sheet, set, opts.variant)).map((it) => it.pts) : [];
+  const G = gradeRanks(sheet, set, seeds, n, { cellMm: cell, knives });
   if (G.diag.bandMode !== n) {
     const amb: ChainAmbiguity = {
       kind: 'size-count',
@@ -163,10 +165,14 @@ export function gradeHook(
             continue;
           }
           c.rankFrom = 'grade';
+          if (!s.rankOk[c.rank]) {
+            refuse(c, 'sizes-not-distinguished', p);
+            continue;
+          }
           if (c.outcome !== 'closed') continue;
           // F4's contour on the sheet-wide walls must be the solver's region (the raster region
           // counts the wall pixels: ≈ half a cell beyond the outline all round)
-          const a = s.areasMm2[c.rank];
+          const a = s.finalAreasMm2[c.rank];
           let per = 0;
           for (let i = 0; i < c.outer.length; i++) {
             const q = c.outer[(i + 1) % c.outer.length];
