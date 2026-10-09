@@ -523,6 +523,13 @@ export type PieceCandidate = {
   leakAt?: PtMm;
   /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
   features?: Feature[];
+  /**
+   * How this rank's walls were chosen (F4): 'class' = the F3 size class of this rank + common;
+   * 'innerPlug' = + the smaller ranks' lines (this rank coincides with one where it is not drawn);
+   * 'bundleRank' = ranked locally by nesting inside the seed's region (F3 had no usable class);
+   * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
+   */
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single';
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */

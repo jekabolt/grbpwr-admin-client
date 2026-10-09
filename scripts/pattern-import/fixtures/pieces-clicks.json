@@ -1,0 +1,44 @@
+{
+  "_note": "F4 probe: simulated operator clicks (sheet frame of the F2 assembly, mm, y-up) for samples whose piece labels are curves, placed by eye on the assembled sheet renders at the K0 truth pieces. Labels = corpus/truth.json labels.",
+  "blazer": {
+    "clicks": [
+      { "label": "DELANTERO", "at": [380, 410] },
+      { "label": "ESPALDA", "at": [380, 150] },
+      { "label": "COSTADO", "at": [300, 1270] },
+      { "label": "MANGA", "at": [300, 800] },
+      { "label": "CUELLO", "at": [200, 1065] },
+      { "label": "PUNTA DE CUELLO", "at": [510, 1540] },
+      { "label": "VUELTA", "at": [665, 1350] },
+      { "label": "BOLSILLO", "at": [230, 1590] }
+    ]
+  },
+  "r4454": {
+    "clicks": [
+      { "label": "1", "at": [1350, 720] },
+      { "label": "2", "at": [450, 690] },
+      { "label": "3", "at": [850, 800] },
+      { "label": "4", "at": [760, 250] },
+      { "label": "5", "at": [1000, 230] },
+      { "label": "6", "at": [170, 650] },
+      { "label": "7", "at": [180, 960] },
+      { "label": "8", "at": [385, 420] },
+      { "label": "10", "at": [120, 315] }
+    ]
+  },
+  "redcafe": {
+    "clicks": [
+      { "label": "спинка", "at": [100, 400] },
+      { "label": "перед", "at": [320, 450] },
+      { "label": "рукав", "at": [500, 350] },
+      { "label": "капюшон", "at": [720, 450] }
+    ]
+  },
+  "wm": {
+    "clicks": [
+      { "label": "ID: 1", "at": [180, 450] },
+      { "label": "ID: 2", "at": [620, 400] },
+      { "label": "ID: 3", "at": [390, 450] },
+      { "label": "ID: 4", "at": [890, 250] }
+    ]
+  }
+}
