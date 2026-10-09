@@ -408,6 +408,15 @@ export function fillPiecesDetailed(
   );
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
+  // a variant's cutting line drawn once per size cuts only its own size (kombinezon's 4XL pants
+  // were trimmed at the 2XL cut line inside them); unranked knives cut every size
+  const rankOfKnife = new Map<ChainId, number>();
+  model.byRank.forEach((ids, r) => ids.forEach((id) => rankOfKnife.set(id, r)));
+  const knivesOf = (r: number) =>
+    knifeItems.filter((it) => {
+      const kr = rankOfKnife.get(it.chain);
+      return kr === undefined || kr === r || model.mode === 'single';
+    });
   const boxes = rankBoxes(set, model);
   const shift = fileShift(model, boxes);
   const diag: FillDiag = {
@@ -553,9 +562,10 @@ export function fillPiecesDetailed(
         const { g: gg } = c;
         let { mask } = regionOf(gg, c.ext, kk);
         // knives (variant cutting lines) crossing the region: cut and keep the seed's side
-        if (knifeItems.length) {
+        const kis = knivesOf(r);
+        if (kis.length) {
           const kn = new Uint8Array(mask.length);
-          for (const it of knifeItems) drawPolyline(gg, kn, it.pts, it.closed);
+          for (const it of kis) drawPolyline(gg, kn, it.pts, it.closed);
           let hit = false;
           for (let j = 0; j < mask.length; j++)
             if (mask[j] && kn[j]) {
@@ -717,7 +727,7 @@ export function fillPiecesDetailed(
         out.set(seed.id, cand);
         continue;
       }
-      const sn = snapOutline(raster, ctx.items.concat(knifeItems), {
+      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r)), {
         stepMm: 1,
         reachMm: 2.5,
         snapMm: opts.snapMm || PATIMPORT.snapMm,

@@ -515,6 +515,7 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
     // headline: gate-passing candidates of families whose areas grow with rank (G8)
     const passed = traceable.reduce((a, r) => a + (r.monotone ? r.passed : 0), 0);
     const full = traceable.filter((r) => r.passed === r.ranks && r.monotone).length;
+    const autoFamilies = sr.families;
     // operator-assisted: the fixture's wall edits through the operator API (F13c's calls)
     const ops = plan.seeds === 'click' ? clicks[s.id]?.operator ?? [] : [];
     let operator: Record<string, unknown> | null = null;
@@ -591,7 +592,7 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
       for (const gap of [2, 5])
         negs.push({ sample: 'palto', control: 'gap', ...gapControl(p, sr, '22', gap) });
     if (['robe', 'palto', 'kombinezon', 'reef', 'viola', 'r4454'].includes(s.id)) {
-      const b = bandControl(p, sr);
+      const b = bandControl(p, { ...sr, families: autoFamilies });
       const bandSeeds = s.id === 'reef' ? ['I', 'J'] : [];
       negs.push({
         sample: s.id,
