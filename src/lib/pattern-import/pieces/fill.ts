@@ -31,8 +31,21 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, signedArea } from './geom';
-import { drawPolyline, exterior, flood, Grid, openMask, regionOf, traceOuter } from './raster';
+import { bboxOf, dist, pointInPoly, segNearest, signedArea } from './geom';
+import {
+  components,
+  drawPolyline,
+  exterior,
+  flood,
+  Grid,
+  openMask,
+  regionOf,
+  splitByCells,
+  traceOuter,
+} from './raster';
+import { pageMarginIds } from 'lib/pattern-import/chains/classify';
+
+import { type Bridge, wallBridges } from './bridges';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
@@ -65,6 +78,18 @@ export type FillDiag = {
   frames: ChainId[];
   /** 'ignore' chains brought back as walls (both ends on outline lines). */
   rescued: number;
+  /** Candidates of an undrawn end size copied from the neighbour's contour ('shared-rank'). */
+  sharedRank?: number;
+  /** Seeds whose piece is drawn identically in every size layer (equal areas accepted). */
+  ungraded?: number[];
+  /** Seeds whose family was ranked upside down in its piece and re-ranked (areas shrank). */
+  reversed?: number[];
+  /** Candidates closed by derived bridges (family-corroborated). */
+  bridged?: number;
+  /** Merged outer regions split by cells (touching pieces). */
+  split?: number;
+  /** File-per-size: seed placements moved to the matching region of another size's file. */
+  moved?: number;
   ms: number;
 };
 
@@ -233,6 +258,72 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
 
 type RankCtx = { g: Grid; wall: Uint8Array; ext: Uint8Array; items: WallItem[] };
 
+/** The exterior pixel nearest (x, y) — a square spiral out to 2000 px; −1 when none. */
+function nearestExterior(c: { g: Grid; ext: Uint8Array }, x: number, y: number): number {
+  for (let r = 0; r < 2000; r++)
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const xx = x + dx;
+        const yy = y + dy;
+        if (!c.g.inside(xx, yy)) continue;
+        const k = yy * c.g.W + xx;
+        if (c.ext[k]) return k;
+      }
+  return -1;
+}
+
+let pathBuf: Int32Array | null = null;
+let queueBuf: Int32Array | null = null;
+
+/**
+ * Shortest 4-connected path through non-wall pixels from `k` to the grid border (`to` null: a
+ * leak) or to any pixel of `to` (a merge). Returns the path's pixels, or null when none.
+ */
+function escapePath(g: Grid, wall: Uint8Array, k: number, to: Set<number> | null) {
+  const N = g.W * g.H;
+  if (!pathBuf || pathBuf.length < N) pathBuf = new Int32Array(N);
+  const prev = pathBuf;
+  prev.fill(-2, 0, N);
+  prev[k] = -1;
+  if (!queueBuf || queueBuf.length < N) queueBuf = new Int32Array(N);
+  const q = queueBuf;
+  let head = 0;
+  let tail = 0;
+  q[tail++] = k;
+  let hit = -1;
+  while (head < tail) {
+    const c = q[head++];
+    const y = (c / g.W) | 0;
+    const x = c - y * g.W;
+    if (to ? to.has(c) : x === 0 || y === 0 || x === g.W - 1 || y === g.H - 1) {
+      hit = c;
+      break;
+    }
+    if (x > 0 && prev[c - 1] === -2 && !wall[c - 1]) (prev[c - 1] = c), (q[tail++] = c - 1);
+    if (x < g.W - 1 && prev[c + 1] === -2 && !wall[c + 1]) (prev[c + 1] = c), (q[tail++] = c + 1);
+    if (y > 0 && prev[c - g.W] === -2 && !wall[c - g.W]) (prev[c - g.W] = c), (q[tail++] = c - g.W);
+    if (y < g.H - 1 && prev[c + g.W] === -2 && !wall[c + g.W])
+      (prev[c + g.W] = c), (q[tail++] = c + g.W);
+  }
+  if (hit < 0) return null;
+  const path = new Set<number>();
+  for (let c = hit; c >= 0; c = prev[c]) path.add(c);
+  return path;
+}
+
+/** A bridge segment's pixels (± 1) meet the path. */
+function crossesPath(g: Grid, b: Bridge, path: Set<number>): boolean {
+  const n = Math.max(2, Math.ceil(dist(b.from, b.to) / (g.cell / 2)));
+  for (let i = 0; i <= n; i++) {
+    const x = g.ix(b.from.x + ((b.to.x - b.from.x) * i) / n);
+    const y = g.iy(b.from.y + ((b.to.y - b.from.y) * i) / n);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) if (path.has((y + dy) * g.W + x + dx)) return true;
+  }
+  return false;
+}
+
 function buildRank(box: BoxMm, cell: number, items: WallItem[]): RankCtx {
   const g = new Grid(box, cell);
   const wall = new Uint8Array(g.W * g.H);
@@ -240,16 +331,23 @@ function buildRank(box: BoxMm, cell: number, items: WallItem[]): RankCtx {
   return { g, wall, ext: exterior(g, wall), items };
 }
 
-/** File-per-size: where a seed placed on one size's drawing lands on another's. */
-function fileShift(set: ChainSet, m: WallModel) {
-  const boxes = m.byRank.map((ids) =>
-    ids.length ? bboxOf(ids.flatMap((i) => set.chains[i].pts)) : null,
+/** File-per-size: each rank's drawing box (its own chains). */
+function rankBoxes(set: ChainSet, m: WallModel): (BoxMm | null)[] {
+  return m.byRank.map((ids) => (ids.length ? bboxOf(ids.flatMap((i) => set.chains[i].pts)) : null));
+}
+
+/** File-per-size: the rank whose drawing holds a point (−1 none). */
+function homeRank(boxes: (BoxMm | null)[], p: PtMm): number {
+  return boxes.findIndex(
+    (b) => b && p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY,
   );
+}
+
+/** File-per-size: where a seed placed on one size's drawing lands on another's. */
+function fileShift(m: WallModel, boxes: (BoxMm | null)[]) {
   return (p: PtMm, r: number): PtMm => {
     if (m.mode !== 'file') return p;
-    const home = boxes.findIndex(
-      (b) => b && p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY,
-    );
+    const home = homeRank(boxes, p);
     const a = home >= 0 ? boxes[home] : null;
     const b = boxes[r];
     if (!a || !b || home === r) return p;
@@ -260,12 +358,37 @@ function fileShift(set: ChainSet, m: WallModel) {
   };
 }
 
+/**
+ * How unlike two regions are, for file-per-size correspondence: area, bbox sides and the position
+ * inside their own size's drawing (top-left anchored, as fraction of the drawing). One size step
+ * changes area by a few per cent; a different piece differs in size or place.
+ */
+function unlike(
+  a: { area: number; box: BoxMm },
+  ab: BoxMm,
+  b: { area: number; box: BoxMm },
+  bb: BoxMm,
+): number {
+  const w = (x: BoxMm) => Math.max(1, x.maxX - x.minX);
+  const h = (x: BoxMm) => Math.max(1, x.maxY - x.minY);
+  const nx = (x: BoxMm, f: BoxMm) => ((x.minX + x.maxX) / 2 - f.minX) / w(f);
+  const ny = (x: BoxMm, f: BoxMm) => (f.maxY - (x.minY + x.maxY) / 2) / h(f);
+  return (
+    2 * Math.abs(Math.log(Math.max(1, b.area) / Math.max(1, a.area))) +
+    Math.abs(Math.log(w(b.box) / w(a.box))) +
+    Math.abs(Math.log(h(b.box) / h(a.box))) +
+    2 * (Math.abs(nx(b.box, bb) - nx(a.box, ab)) + Math.abs(ny(b.box, bb) - ny(a.box, ab)))
+  );
+}
+
 /** Edits that change the walls themselves (the wizard's wall override, "not a wall" on a frame). */
 export type WallEdits = {
   /** Never a wall (any rank). */
   exclude?: ChainId[];
-  /** Extra walls per rank (the operator's "use this line"). */
-  include?: { rank: number; ids: ChainId[] }[];
+  /** Extra walls per rank (the operator's "use this line"); rank null = every rank. */
+  include?: { rank: number | null; ids: ChainId[] }[];
+  /** Operator bridges: straight walls the source does not draw, per rank. */
+  bridges?: { rank: number; from: PtMm; to: PtMm }[];
 };
 
 export function fillPiecesDetailed(
@@ -273,20 +396,29 @@ export function fillPiecesDetailed(
   set: ChainSet,
   run: SizeRun,
   seeds: Seed[],
-  opts: FillOpts,
+  opts: FillOpts & { splitTouching?: boolean; only?: ReadonlySet<number> },
   progress?: (done: number, total: number, note?: string) => void,
   edits: WallEdits = {},
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = wallModel(set, run);
+  const model = wallModel(set, run, sheet.texts);
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
-  const knifeSet = new Set(knives);
-  const shift = fileShift(set, model);
+  // a variant's cutting line drawn once per size cuts only its own size (kombinezon's 4XL pants
+  // were trimmed at the 2XL cut line inside them); unranked knives cut every size
+  const rankOfKnife = new Map<ChainId, number>();
+  model.byRank.forEach((ids, r) => ids.forEach((id) => rankOfKnife.set(id, r)));
+  const knivesOf = (r: number) =>
+    knifeItems.filter((it) => {
+      const kr = rankOfKnife.get(it.chain);
+      return kr === undefined || kr === r || model.mode === 'single';
+    });
+  const boxes = rankBoxes(set, model);
+  const shift = fileShift(model, boxes);
   const diag: FillDiag = {
     model: { mode: model.mode, n: model.n, emptyRanks: model.emptyRanks },
     duplicates: [],
@@ -299,8 +431,15 @@ export function fillPiecesDetailed(
   const dropped = new Set<number>();
   const box = grow(sheet.bbox, 15);
   const lone = lonePortions(set, model);
-  const rescued = rescuedIgnored(set, model);
   const module = sheetModule(sheet);
+  const rescued = rescuedIgnored(
+    set,
+    model,
+    1.5,
+    15,
+    module,
+    pageMarginIds(set.chains, sheet.poses),
+  );
   diag.rescued = rescued.length;
   const textCentres = sheet.texts.map((t) => ({
     id: t.id,
@@ -331,20 +470,35 @@ export function fillPiecesDetailed(
   };
   const userExcl = new Set(edits.exclude ?? []);
   const extraOf = (r: number) =>
-    (edits.include ?? []).filter((x) => x.rank === r).flatMap((x) => x.ids);
+    (edits.include ?? []).filter((x) => x.rank === r || x.rank === null).flatMap((x) => x.ids);
+  const opBridges = (r: number) => (edits.bridges ?? []).filter((b) => b.rank === r);
+  const bandCuts = (r: number) => (model.bandCuts ?? []).filter((b) => b.rank === r);
+
+  /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
+  const baseItems = (r: number, excl: Set<ChainId>) => {
+    const ownIds = model.mode === 'single' ? [] : model.byRank[r];
+    return [
+      ...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]),
+      ...lone,
+      ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
+      ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
+    ].filter((it) => !excl.has(it.chain));
+  };
 
   /** One rank, every seed; returns the candidates and the frame chains found around merges. */
-  const rankPass = (r: number, excl: Set<ChainId>) => {
-    const keep = (it: WallItem) => !excl.has(it.chain) && !knifeSet.has(it.chain);
-    const ownIds = model.mode === 'single' ? [] : model.byRank[r];
-    const base = buildRank(
-      box,
-      cell,
-      [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone].filter(
-        keep,
-      ),
-    );
-    const pts = use.map((s) => shift(s.at, r));
+  const rankPass = (
+    r: number,
+    excl: Set<ChainId>,
+    override?: Map<number, PtMm>,
+    /** Seeds to bridge, with the least area the family's trend allows (0: none known). */
+    bridgeFor?: Map<number, number>,
+  ) => {
+    // knives stay walls where they are this rank's lines: the variant's cutting line is the
+    // piece's edge (taken out, kombinezon's 4XL front leaked through it); the cut below still
+    // trims any region that crosses one
+    const keep = (it: WallItem) => !excl.has(it.chain);
+    const base = buildRank(box, cell, baseItems(r, excl));
+    const pts = use.map((s) => override?.get(s.id) ?? shift(s.at, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
     // passes after A, built lazily once per rank
     const later: { from: RankFrom; build: () => RankCtx }[] =
@@ -377,11 +531,18 @@ export function fillPiecesDetailed(
             },
           ];
     const built: (RankCtx | null)[] = later.map(() => null);
+    const bridgedCache = new Map<RankCtx, Bridge[]>();
+    const bridgedOf = (c0: RankCtx) => {
+      let v = bridgedCache.get(c0);
+      if (!v) bridgedCache.set(c0, (v = wallBridges(c0.items, opts.autoBridgeMm ?? 3)));
+      return v;
+    };
     const out = new Map<number, PieceCandidate>();
     const frames = new Set<ChainId>();
     for (let si = 0; si < use.length; si++) {
       const seed = use[si];
       if (dropped.has(seed.id)) continue;
+      if (opts.only && !opts.only.has(seed.id)) continue;
       let ctx = base;
       let rankFrom: RankFrom = model.mode === 'single' ? 'single' : 'class';
       let { k, movedMm } = px[si];
@@ -396,6 +557,138 @@ export function fillPiecesDetailed(
           rankFrom = later[pi].from;
         }
       }
+      /** The seed's region in a context: knife cut, sliver opening, other seeds inside. */
+      const regionAt = (c: RankCtx, kk: number) => {
+        const { g: gg } = c;
+        let { mask } = regionOf(gg, c.ext, kk);
+        // knives (variant cutting lines) crossing the region: cut and keep the seed's side
+        const kis = knivesOf(r);
+        if (kis.length) {
+          const kn = new Uint8Array(mask.length);
+          for (const it of kis) drawPolyline(gg, kn, it.pts, it.closed);
+          let hit = false;
+          for (let j = 0; j < mask.length; j++)
+            if (mask[j] && kn[j]) {
+              hit = true;
+              break;
+            }
+          if (hit) {
+            const cut = new Uint8Array(mask.length);
+            const blocked = new Uint8Array(mask.length);
+            for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
+            flood(gg, blocked, [kk], cut);
+            if (cut.some((v) => v)) mask = cut;
+          }
+        }
+        // the opening cuts slivers (< 2 mm) off the seed's region: two pieces joined only through
+        // a hairline gap between their walls come apart here, so "merged" is judged after it
+        let opened = openMask(gg, mask, 2, kk);
+        const others: number[] = [];
+        const kOf = new Map<number, number>();
+        for (let sj = 0; sj < use.length; sj++) {
+          if (sj === si || dropped.has(use[sj].id)) continue;
+          const kj = c === base ? px[sj].k : seedPixel(gg, c.wall, c.ext, pts[sj]).k;
+          kOf.set(sj, kj);
+          if (opened[kj]) others.push(sj);
+        }
+        // touching pieces (one outer region, each seed in its own cell): split by cells
+        const live = others.filter((sj) => !dropped.has(use[sj].id));
+        if (live.length && opts.splitTouching !== false) {
+          const part = splitByCells(
+            gg,
+            c.wall,
+            mask,
+            [kk, ...live.map((sj) => kOf.get(sj)!)],
+            0,
+            c.items,
+          );
+          if (part) {
+            opened = openMask(gg, part, 2, kk);
+            diag.split = (diag.split ?? 0) + 1;
+            return { opened, others: others.filter((sj) => !live.includes(sj)) };
+          }
+        }
+        return { opened, others };
+      };
+      const isMerged = (o: number[]) => o.some((sj) => !dropped.has(use[sj].id));
+      let reg = ctx.ext[k] ? null : regionAt(ctx, k);
+      // leak or merge: close the gap the fill escapes through with short derived bridges (≤ 3 mm,
+      // dangling end → nearest wall of this rank). Only bridges crossing the escape path are
+      // added (to the sheet border for a leak, to the other seed for a merge), one round at a
+      // time — never a bridge elsewhere that would cut the piece itself.
+      let bridges: Bridge[] = [];
+      if (bridgeFor?.has(seed.id) && (!reg || isMerged(reg.others)))
+        for (const c0 of ctx === base ? [base] : [ctx, base]) {
+          const all = bridgedOf(c0);
+          if (!all.length) continue;
+          let chosen: Bridge[] = [];
+          let c = c0;
+          let done = false;
+          const minArea = bridgeFor?.get(seed.id) ?? 0;
+          for (let round = 0; round < 6 && !done; round++) {
+            const p2 = seedPixel(c.g, c.wall, c.ext, pts[si]);
+            const rg = c.ext[p2.k] ? null : regionAt(c, p2.k);
+            // closed, but well short of the family's trend: a wall across the piece (a grain
+            // line from edge to edge) closed one side while the other still leaks — escape from
+            // the exterior just across it, nearest the region's middle
+            if (rg && !isMerged(rg.others) && minArea) {
+              let n = 0;
+              let sx = 0;
+              let sy = 0;
+              for (let j = 0; j < rg.opened.length; j++)
+                if (rg.opened[j]) {
+                  n++;
+                  const y = (j / c.g.W) | 0;
+                  sx += j - y * c.g.W;
+                  sy += y;
+                }
+              if (n * cell * cell < minArea) {
+                const start = nearestExterior(c, Math.round(sx / n), Math.round(sy / n));
+                const path = start >= 0 ? escapePath(c.g, c.wall, start, null) : null;
+                const add = path
+                  ? all.filter((b) => !chosen.includes(b) && crossesPath(c.g, b, path))
+                  : [];
+                if (!add.length) break;
+                chosen = chosen.concat(add);
+                c = buildRank(box, cell, [
+                  ...c0.items,
+                  ...chosen.map((b) => ({ chain: -1, pts: [b.from, b.to] })),
+                ]);
+                continue;
+              }
+            }
+            if (rg && !isMerged(rg.others)) {
+              if (chosen.length) {
+                if (c0 === base && ctx !== base)
+                  rankFrom = model.mode === 'single' ? 'single' : 'class';
+                ctx = c;
+                k = p2.k;
+                movedMm = p2.movedMm;
+                reg = rg;
+                bridges = chosen;
+              }
+              done = true;
+              break;
+            }
+            const to = rg
+              ? new Set(
+                  rg.others
+                    .filter((sj) => !dropped.has(use[sj].id))
+                    .map((sj) => seedPixel(c.g, c.wall, c.ext, pts[sj]).k),
+                )
+              : null;
+            const path = escapePath(c.g, c.wall, p2.k, to);
+            if (!path) break;
+            const add = all.filter((b) => !chosen.includes(b) && crossesPath(c.g, b, path));
+            if (!add.length) break;
+            chosen = chosen.concat(add);
+            c = buildRank(box, cell, [
+              ...c0.items,
+              ...chosen.map((b) => ({ chain: -1, pts: [b.from, b.to] })),
+            ]);
+          }
+          if (bridges.length) break;
+        }
       const { g } = ctx;
       const cand: PieceCandidate = {
         seed: seed.id,
@@ -411,38 +704,13 @@ export function fillPiecesDetailed(
         p95Mm: 0,
         rankFrom,
       };
-      if (ctx.ext[k]) {
+      if (!reg) {
         cand.outcome = 'leak';
         cand.leakAt = pts[si]; // refined after every rank is filled (leak mouths, below)
         out.set(seed.id, cand);
         continue;
       }
-      let { mask } = regionOf(g, ctx.ext, k);
-      // knives (variant cutting lines) crossing the region: cut and keep the seed's side
-      if (knifeItems.length) {
-        const kn = new Uint8Array(mask.length);
-        for (const it of knifeItems) drawPolyline(g, kn, it.pts, it.closed);
-        let hit = false;
-        for (let j = 0; j < mask.length; j++)
-          if (mask[j] && kn[j]) {
-            hit = true;
-            break;
-          }
-        if (hit) {
-          const cut = new Uint8Array(mask.length);
-          const blocked = new Uint8Array(mask.length);
-          for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
-          flood(g, blocked, [k], cut);
-          if (cut.some((v) => v)) mask = cut;
-        }
-      }
-      // other seeds in this region
-      const others: number[] = [];
-      for (let sj = 0; sj < use.length; sj++) {
-        if (sj === si || dropped.has(use[sj].id)) continue;
-        const kj = ctx === base ? px[sj].k : seedPixel(g, ctx.wall, ctx.ext, pts[sj]).k;
-        if (mask[kj]) others.push(sj);
-      }
+      const { opened, others } = reg;
       const lab = seedLabel(seed);
       for (const sj of others) {
         const lj = seedLabel(use[sj]);
@@ -452,22 +720,51 @@ export function fillPiecesDetailed(
           diag.duplicates.push({ seed: use[sj].id, of: seed.id });
         }
       }
-      const merged = others.some((sj) => !dropped.has(use[sj].id));
-      const opened = openMask(g, mask, 2, k);
+      const merged = isMerged(others);
       const raster = traceOuter(g, opened);
       if (raster.length < 4) {
         cand.outcome = 'tiny';
         out.set(seed.id, cand);
         continue;
       }
-      const sn = snapOutline(raster, ctx.items.concat(knifeItems), {
+      const sn = snapOutline(raster, ctx.items.concat(knivesOf(r)), {
         stepMm: 1,
         reachMm: 2.5,
         snapMm: opts.snapMm || PATIMPORT.snapMm,
       });
       const outer = signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer;
       cand.outer = outer;
-      cand.walls = sn.walls;
+      cand.walls = sn.walls.filter((id) => id >= 0);
+      // bridges the outline runs along are derived edges the operator must see
+      const usedB = bridges.filter((b) => {
+        const m = { x: (b.from.x + b.to.x) / 2, y: (b.from.y + b.to.y) / 2 };
+        let d = Infinity;
+        for (let i = 0; i < outer.length && d > 1; i++)
+          d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
+        return d <= 1;
+      });
+      const usedOp = opBridges(r).filter((b) => {
+        const m = { x: (b.from.x + b.to.x) / 2, y: (b.from.y + b.to.y) / 2 };
+        let d = Infinity;
+        for (let i = 0; i < outer.length && d > 1; i++)
+          d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
+        return d <= 1;
+      });
+      const onOutline = (b: { from: PtMm; to: PtMm }) => {
+        const m = { x: (b.from.x + b.to.x) / 2, y: (b.from.y + b.to.y) / 2 };
+        let d = Infinity;
+        for (let i = 0; i < outer.length && d > 1; i++)
+          d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
+        return d <= 1;
+      };
+      const der = [
+        ...usedB.map((b) => ({ kind: 'bridge' as const, pts: [b.from, b.to] })),
+        ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
+        ...bandCuts(r)
+          .filter(onOutline)
+          .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to] })),
+      ];
+      if (der.length) cand.derived = der;
       cand.areaMm2 = Math.abs(signedArea(outer));
       cand.bbox = bboxOf(outer);
       cand.sourceCoverage = sn.coverage;
@@ -527,6 +824,147 @@ export function fillPiecesDetailed(
     return { out, frames };
   };
 
+  /**
+   * File-per-size: a click lands on one size's drawing; on the other files the pieces sit elsewhere
+   * (larger sizes push their neighbours along). Each seed's home-rank piece is the reference; on
+   * every other rank the enclosed regions of that file are matched to the references (greedy, one
+   * region per seed, by area, sides and place in the drawing) and the seed is moved into its match
+   * when the shifted click fell into another region (or none).
+   */
+  const placed = new Map<string, PtMm>();
+  const correspond = (excl: Set<ChainId>) => {
+    const refs = new Map<number, { cand: PieceCandidate; home: number }>();
+    for (const s of use) {
+      const home = homeRank(boxes, s.at);
+      const c = cands.get(s.id)!.find((x) => x.rank === home && x.outcome === 'closed');
+      if (home >= 0 && c) refs.set(s.id, { cand: c, home });
+    }
+    if (!refs.size) return;
+    for (let r = 0; r < model.n; r++) {
+      const fb = boxes[r];
+      if (!fb) continue;
+      const ctx = buildRank(box, cell, baseItems(r, excl));
+      const { comps, labelAt } = components(
+        ctx.g,
+        ctx.wall,
+        ctx.ext,
+        grow(fb, 2),
+        PATIMPORT.minPieceAreaMm2 / (cell * cell),
+      );
+      if (!comps.length) continue;
+      const pairs: { sid: number; ci: number; d: number }[] = [];
+      for (const [sid, { cand, home }] of refs) {
+        if (home === r) continue;
+        const hb = boxes[home]!;
+        comps.forEach((cp, ci) =>
+          pairs.push({
+            sid,
+            ci,
+            d: unlike(
+              { area: cand.areaMm2, box: cand.bbox },
+              hb,
+              { area: cp.count * cell * cell, box: cp.box },
+              fb,
+            ),
+          }),
+        );
+      }
+      pairs.sort((a, b) => a.d - b.d);
+      const takenS = new Set<number>();
+      const takenC = new Set<number>();
+      const override = new Map<number, PtMm>();
+      for (const p of pairs) {
+        if (takenS.has(p.sid) || takenC.has(p.ci) || p.d > 1.5) continue;
+        takenS.add(p.sid);
+        takenC.add(p.ci);
+        const s = use.find((x) => x.id === p.sid)!;
+        const now = seedPixel(ctx.g, ctx.wall, ctx.ext, shift(s.at, r));
+        const cp = comps[p.ci];
+        if (ctx.ext[now.k] || labelAt(now.k) !== cp.id) {
+          const y = (cp.k / ctx.g.W) | 0;
+          override.set(p.sid, ctx.g.centre(cp.k - y * ctx.g.W, y));
+        }
+      }
+      if (!override.size) continue;
+      const res = rankPass(r, excl, override);
+      for (const [sid, at] of override) placed.set(key(sid, r), at);
+      for (const sid of override.keys()) {
+        const c = res.out.get(sid);
+        const list = cands.get(sid)!;
+        const i = list.findIndex((x) => x.rank === r);
+        if (c && i >= 0) list[i] = c;
+      }
+      diag.moved = (diag.moved ?? 0) + override.size;
+    }
+  };
+
+  /**
+   * Derived bridges, per leaking / merged candidate, after every rank is filled: the bridged region
+   * is kept only when the family corroborates it — its area must sit on the trend of the seed's
+   * closed, unbridged ranks (a bridge that closes half a piece behind a grain line does not).
+   * Without such a rank nothing is bridged.
+   */
+  const bridgePass = (excl: Set<ChainId>) => {
+    for (let r = 0; r < model.n; r++) {
+      const want = new Set<number>();
+      for (const s of use) {
+        const c = cands.get(s.id)?.find((x) => x.rank === r);
+        if (c && (c.outcome === 'leak' || c.outcome === 'merged') && expectedArea(s.id, r))
+          want.add(s.id);
+      }
+      if (!want.size) continue;
+      const override = new Map<number, PtMm>();
+      for (const sid of want) {
+        const at = placed.get(key(sid, r));
+        if (at) override.set(sid, at);
+      }
+      const res = rankPass(
+        r,
+        excl,
+        override,
+        new Map(
+          [...want].map((sid) => {
+            const ex = expectedArea(sid, r);
+            return [sid, ex ? ex.area * (1 - ex.tol) : 0];
+          }),
+        ),
+      );
+      for (const sid of want) {
+        const c = res.out.get(sid);
+        const ex = expectedArea(sid, r);
+        if (!c || c.outcome !== 'closed' || !c.derived?.length) continue;
+        if (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area) continue;
+        const list = cands.get(sid)!;
+        const i = list.findIndex((x) => x.rank === r);
+        if (i >= 0) list[i] = c;
+        diag.bridged = (diag.bridged ?? 0) + 1;
+      }
+    }
+  };
+  /** The family's area trend at rank r from its closed, unbridged ranks (null: none). */
+  const expectedArea = (sid: number, r: number) => {
+    const ok = (cands.get(sid) ?? []).filter(
+      (x) => x.outcome === 'closed' && !x.derived?.length && x.rank !== r,
+    );
+    if (!ok.length) return null;
+    if (ok.length === 1) {
+      const d = Math.abs(r - ok[0].rank);
+      return { area: ok[0].areaMm2 * (1 + 0.04 * (r - ok[0].rank)), tol: 0.05 + 0.03 * d };
+    }
+    const n = ok.length;
+    const mx = ok.reduce((a, x) => a + x.rank, 0) / n;
+    const my = ok.reduce((a, x) => a + x.areaMm2, 0) / n;
+    let sxy = 0;
+    let sxx = 0;
+    for (const x of ok) {
+      sxy += (x.rank - mx) * (x.areaMm2 - my);
+      sxx += (x.rank - mx) ** 2;
+    }
+    const slope = sxx ? sxy / sxx : 0;
+    const near = Math.min(...ok.map((x) => Math.abs(x.rank - r)));
+    return { area: my + slope * (r - mx), tol: 0.05 + 0.02 * near };
+  };
+
   const excl = new Set<ChainId>(userExcl);
   for (let r = 0; r < model.n; r++) {
     progress?.(r, model.n, `rank ${r}`);
@@ -544,6 +982,8 @@ export function fillPiecesDetailed(
       if (c) cands.get(s.id)!.push(c);
     }
   }
+  if (model.mode === 'file') correspond(excl);
+  if (opts.autoBridgeMm !== 0) bridgePass(excl);
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
   for (let r = 0; r < model.n; r++) {
@@ -551,29 +991,106 @@ export function fillPiecesDetailed(
       .map((s, si) => ({ s, si, c: cands.get(s.id)!.find((x) => x.rank === r) }))
       .filter((x) => x.c && x.c.outcome === 'leak');
     if (!leaks.length) continue;
-    const ownIds = model.mode === 'single' ? [] : model.byRank[r];
-    const ctx = buildRank(
-      box,
-      cell,
-      [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone].filter(
-        (it) => !excl.has(it.chain) && !knifeSet.has(it.chain),
-      ),
-    );
+    const ctx = buildRank(box, cell, baseItems(r, excl));
     for (const { s, c } of leaks) {
       const closed = cands
         .get(s.id)!
         .filter((x) => x.outcome === 'closed' && x.outer.length > 2)
-        .sort((a, b) => Math.abs(a.rank - r) - Math.abs(b.rank - r));
+        // the next LARGER closed size encloses this one: the escape crosses its outline just
+        // past the gap (a smaller one is crossed deep inside, far from it)
+        .sort(
+          (a, b) =>
+            (a.rank > r ? 0 : 1000) +
+            Math.abs(a.rank - r) -
+            (b.rank > r ? 0 : 1000) -
+            Math.abs(b.rank - r),
+        );
       const at = shift(s.at, r);
       const { k } = seedPixel(ctx.g, ctx.wall, null, at);
-      c!.leakAt = leakMouth(ctx.g, ctx.wall, k, closed[0]?.outer) ?? at;
+      // file-per-size: the reference rank sits in another file — move its outline over
+      let ref = closed[0]?.outer;
+      if (ref && model.mode === 'file') {
+        const from = shift(s.at, closed[0].rank);
+        const dx = at.x - from.x;
+        const dy = at.y - from.y;
+        ref = ref.map((q) => ({ x: q.x + dx, y: q.y + dy }));
+      }
+      c!.leakAt = leakMouth(ctx.g, ctx.wall, k, ref) ?? at;
     }
   }
+  // a size the run lists but no line draws (viola's 34: every bundle has 7 lines for 8 sizes — the
+  // smallest is drawn on the next one's line): at the end of the run, that rank's piece IS its
+  // neighbour's contour. Copied, flagged 'shared-rank' so the operator sees it is not drawn.
+  if (model.mode === 'graded' && model.n > 2)
+    for (const r of model.emptyRanks) {
+      const from = r === 0 ? 1 : r === model.n - 1 ? model.n - 2 : -1;
+      if (from < 0 || model.emptyRanks.includes(from)) continue;
+      for (const s of use) {
+        const list = cands.get(s.id);
+        const src = list?.find((x) => x.rank === from && x.outcome === 'closed');
+        const i = list?.findIndex((x) => x.rank === r) ?? -1;
+        if (!list || !src || i < 0 || list[i].outcome === 'closed') continue;
+        list[i] = {
+          ...src,
+          rank: r,
+          derived: [...(src.derived ?? []), { kind: 'shared-rank', pts: [] }],
+        };
+        diag.sharedRank = (diag.sharedRank ?? 0) + 1;
+      }
+    }
+  // an UNGRADED piece is drawn identically in every size layer (kombinezon's piece 8: eight equal
+  // rectangles, F3 keeps one as common and marks the rest duplicates). Equal areas are right
+  // there — only when every wall of its outline has a copy at the same place in ≥ n − 1 layers.
+  const dupCount = (id: ChainId) => {
+    const c = set.chains[id];
+    if (!c) return 0;
+    const b = bboxOf(c.pts);
+    let k = 0;
+    for (const o of set.chains) {
+      if (o.id === id || Math.abs(o.lengthMm - c.lengthMm) > 0.2) continue;
+      const q = bboxOf(o.pts);
+      if (
+        Math.abs(q.minX - b.minX) < 0.2 &&
+        Math.abs(q.minY - b.minY) < 0.2 &&
+        Math.abs(q.maxX - b.maxX) < 0.2 &&
+        Math.abs(q.maxY - b.maxY) < 0.2
+      )
+        k++;
+    }
+    return k;
+  };
+  const ungraded = (c: PieceCandidate[]) => {
+    if (model.mode !== 'graded') return false;
+    const cl = c.filter((x) => x.outcome === 'closed');
+    if (cl.length !== model.n) return false;
+    const a0 = cl[0].areaMm2;
+    if (!cl.every((x) => Math.abs(x.areaMm2 - a0) <= 0.001 * a0)) return false;
+    const walls = new Set(cl.flatMap((x) => x.walls));
+    if (!walls.size || ![...walls].every((id) => dupCount(id) >= model.n - 1)) return false;
+    (diag.ungraded ??= []).push(c[0].seed);
+    return true;
+  };
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
-    const c = cands.get(s.id)!;
-    families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) });
+    let c = cands.get(s.id)!;
+    // a family whose closed areas strictly SHRINK with rank (≥ 3 of them) was ranked upside down
+    // in that piece (F3 read its nesting from the wrong side): the outline of rank r belongs to
+    // size n−1−r. Re-rank it when the reversed family is monotone, and say so.
+    if (model.mode === 'graded' && !isMonotone(c)) {
+      const cl = c.filter((x) => x.outcome === 'closed').sort((a, b) => a.rank - b.rank);
+      const shrinks =
+        cl.length >= 3 && cl.every((x, i) => i === 0 || x.areaMm2 < cl[i - 1].areaMm2);
+      const rev = c
+        .map((x) => ({ ...x, rank: model.n - 1 - x.rank }))
+        .sort((a, b) => a.rank - b.rank);
+      if (shrinks && isMonotone(rev)) {
+        c = rev;
+        cands.set(s.id, c);
+        (diag.reversed ??= []).push(s.id);
+      }
+    }
+    families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) || ungraded(c) });
   }
   diag.ms = Date.now() - t0;
   progress?.(model.n, model.n);
@@ -585,7 +1102,10 @@ export function fillPiecesDetailed(
  * piece whose ranks all came out alike lost its size lines (or it is ungraded — the operator says so).
  */
 export function isMonotone(c: PieceCandidate[]): boolean {
-  const a = c.filter((x) => x.outcome === 'closed').sort((x, y) => x.rank - y.rank);
+  // a rank drawn on its neighbour's line shares its area by construction
+  const a = c
+    .filter((x) => x.outcome === 'closed' && !x.derived?.some((d) => d.kind === 'shared-rank'))
+    .sort((x, y) => x.rank - y.rank);
   for (let i = 1; i < a.length; i++) if (a[i].areaMm2 <= a[i - 1].areaMm2 * 1.0005) return false;
   // one size step changes a piece by a few per cent; a rank 25 % off the next closed one closed
   // a different region (half a skirt behind a centre line, a neighbour's band) — not a grade
