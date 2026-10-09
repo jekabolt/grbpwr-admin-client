@@ -136,6 +136,22 @@ export function ranksFromCoords(p: number[], n: number, weight: number[]): numbe
       last.x = (last.x * (last.us.length - 1) + e.x) / last.us.length;
     } else clusters.push({ x: e.x, us: [e.u] });
   }
+  // a look seen in a handful of sections (a stray notch-ticked stretch, zhaket's "irregular w0.35")
+  // does not open a size of its own: fold weak clusters into their nearest neighbour first
+  const wOf = (c: { us: number[] }) => c.us.reduce((a, u) => a + weight[u], 0);
+  while (clusters.length > n) {
+    const ws = clusters.map(wOf);
+    const med = ws.slice().sort((a, b) => a - b)[ws.length >> 1];
+    let k = -1;
+    for (let i = 0; i < clusters.length; i++)
+      if (ws[i] < 0.15 * med && (k < 0 || ws[i] < ws[k])) k = i;
+    if (k < 0) break;
+    const left = k > 0 ? clusters[k].x - clusters[k - 1].x : Infinity;
+    const right = k + 1 < clusters.length ? clusters[k + 1].x - clusters[k].x : Infinity;
+    const into = left <= right ? k - 1 : k + 1;
+    clusters[into].us.push(...clusters[k].us);
+    clusters.splice(k, 1);
+  }
   if (clusters.length === n) {
     // one cluster per size: the order is all that matters (coordinates compress where sizes coincide)
     clusters.forEach((c, r) => {

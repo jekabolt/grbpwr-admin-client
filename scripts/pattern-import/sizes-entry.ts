@@ -21,6 +21,8 @@ import type { BoxMm, ChainSet, IRPath, PtMm, Sheet, SourceDoc } from 'lib/patter
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { renderPng, PALETTE } from './sizes-render';
+import { assembleSheet, classifyPages } from 'lib/pattern-import/assemble';
+
 import { cachePath, readCached, shimSheet, writeCached, type ShimLayout } from './sizes-shim';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
@@ -92,11 +94,21 @@ async function loadDoc(file: string, id: string, raster = false): Promise<Source
   return doc;
 }
 
+const sheetCache = new Map<string, Sheet>();
+
 export async function sheetOf(s: Sample): Promise<{ sheet: Sheet; docs: SourceDoc[] }> {
   const docs: SourceDoc[] = [];
   for (let i = 0; i < s.files.length; i++)
     docs.push(await loadDoc(s.files[i], String(i), s.raster));
-  return { sheet: shimSheet(docs, s.layouts), docs };
+  // F3b: the real F2 assembly (classifyPages → assembleSheet, tile sheet 0). SHIM=1 keeps the old
+  // translation-only shim for comparison.
+  if (process.env.SHIM) return { sheet: shimSheet(docs, s.layouts), docs };
+  const key = `${s.id}${s.raster ? '_raster' : ''}`;
+  const hit = sheetCache.get(key);
+  if (hit) return { sheet: hit, docs };
+  const sheet = assembleSheet(docs, classifyPages(docs), 0);
+  sheetCache.set(key, sheet);
+  return { sheet, docs };
 }
 
 async function explore(id: string) {
@@ -197,6 +209,16 @@ async function chainsMode(id: string, args: string[]) {
   });
   for (const [k, e] of [...hist].sort((a, b) => b[1].len - a[1].len).slice(0, 40))
     console.log(`  ${(e.len / 1000).toFixed(2).padStart(7)} m ${String(e.n).padStart(5)}  ${k}`);
+  if (process.env.LOOK) {
+    const b = sheet.bbox;
+    cb.chains.forEach((c, i) => {
+      if (c.lengthMm < 20 || !describeSig(cb.sigs[i]).includes(process.env.LOOK!)) return;
+      const m = c.pts[Math.floor(c.pts.length / 2)];
+      console.log(
+        `  look@ chain ${i} len=${c.lengthMm.toFixed(0)} mid (${(m.x - b.minX).toFixed(0)},${(b.maxY - m.y).toFixed(0)}) ${describeSig(cb.sigs[i])}`,
+      );
+    });
+  }
   const [x0, y0, w, h, px] = args.map(Number);
   if (args.length >= 4) {
     const b = sheet.bbox;
@@ -256,6 +278,7 @@ async function sizesMode(id: string, args: string[]) {
   }
   console.log(`  bundles=${set.bundles.length} orphans=${set.orphans.length}`);
   if (process.env.AT) {
+    const mk = makeChains(sheet, OPTS);
     for (const xy of process.env.AT.split(';')) {
       const [ax, ay] = xy.split(',').map(Number);
       const P = { x: sheet.bbox.minX + ax, y: sheet.bbox.maxY - ay };
@@ -270,7 +293,7 @@ async function sizesMode(id: string, args: string[]) {
         const rel = (q: { x: number; y: number }) =>
           `(${(q.x - sheet.bbox.minX).toFixed(0)},${(sheet.bbox.maxY - q.y).toFixed(0)})`;
         console.log(
-          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')}`,
+          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')} look=${c.id < mk.sigs.length ? describeSig(mk.sigs[c.id]) : '-'}`,
         );
       }
     }
@@ -349,6 +372,71 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (mode === 'zoom') {
     await zoom(rest[0], rest.slice(1));
+    return 0;
+  }
+  if (mode === 'texts') {
+    // texts matching a regex, with sheet-relative (top-left) positions
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const re = new RegExp(rest[1] ?? '.', 'i');
+    const b = sheet.bbox;
+    for (const t of sheet.texts)
+      if (re.test(t.text))
+        console.log(
+          `${JSON.stringify(t.text)} @ ${(t.anchor.x - b.minX).toFixed(0)},${(b.maxY - t.anchor.y).toFixed(0)} p${t.src?.page ?? '?'}`,
+        );
+    return 0;
+  }
+  if (mode === 'near') {
+    // styles of the paths in a sheet-relative box (top-left origin): near <id> x y w h
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const [x0, y0, w, h] = rest.slice(1).map(Number);
+    const b = sheet.bbox;
+    const box = { minX: b.minX + x0, maxX: b.minX + x0 + w, minY: b.maxY - y0 - h, maxY: b.maxY - y0 };
+    const st = new Map<number, { n: number; len: number; y: number[] }>();
+    for (const p of sheet.paths) {
+      if (!p.pts.every((q) => q.x >= box.minX && q.x <= box.maxX && q.y >= box.minY && q.y <= box.maxY)) continue;
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++)
+        L += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
+      const e = st.get(p.style) ?? { n: 0, len: 0, y: [] };
+      e.n++;
+      e.len += L;
+      e.y.push(Math.round(b.maxY - p.pts[0].y));
+      if (process.env.SHAPES) {
+        const xs = p.pts.map((q) => q.x);
+        const ys = p.pts.map((q) => q.y);
+        console.log(
+          `  s${p.style} closed=${p.closed} n=${p.pts.length} w=${(Math.max(...xs) - Math.min(...xs)).toFixed(2)} h=${(Math.max(...ys) - Math.min(...ys)).toFixed(2)} L=${L.toFixed(2)} at ${(p.pts[0].x - b.minX).toFixed(1)},${(b.maxY - p.pts[0].y).toFixed(1)}`,
+        );
+      }
+      st.set(p.style, e);
+    }
+    for (const [sid, e] of st) {
+      const S = sheet.styles[sid];
+      console.log(
+        `s${sid} rgb=${S.strokeRgb?.join(',')} w=${S.widthMm.toFixed(2)} dash=${S.dash?.map((v) => v.toFixed(2)).join('/') ?? '-'} fill=${S.fill} n=${e.n} len=${e.len.toFixed(1)} y=${[...new Set(e.y)].slice(0, 8).join(',')}`,
+      );
+    }
+    return 0;
+  }
+  if (mode === 'pieces') {
+    // histogram of open stroke lengths per style width (0.25 mm bins): pieces <id> [minW] [maxW]
+    const s = SAMPLES.find((x) => x.id === rest[0])!;
+    const { sheet } = await sheetOf(s);
+    const [w0, w1] = [Number(rest[1] ?? 0), Number(rest[2] ?? 9)];
+    const h = new Map<string, number>();
+    for (const p of sheet.paths) {
+      const st = sheet.styles[p.style];
+      if (st.widthMm < w0 || st.widthMm > w1 || p.closed) continue;
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++)
+        L += Math.hypot(p.pts[i].x - p.pts[i - 1].x, p.pts[i].y - p.pts[i - 1].y);
+      const k = `w${st.widthMm.toFixed(2)} ${st.fill ? 'F' : ''}${st.dash ? 'D' : ''} L${(Math.round(L * 4) / 4).toFixed(2)}`;
+      h.set(k, (h.get(k) ?? 0) + 1);
+    }
+    for (const [k, v] of [...h].sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(v, k);
     return 0;
   }
   if (mode === 'explore') {
@@ -574,7 +662,7 @@ function summarise(
 }
 
 export async function reportMode(ids: string[]) {
-  const shots = resolve(REPORTS, 'F3-shots');
+  const shots = resolve(REPORTS, process.env.SHIM ? 'F3b-shots-shim' : 'F3b-shots');
   mkdirSync(shots, { recursive: true });
   const truth = JSON.parse(readFileSync(resolve(CORPUS, 'truth.json'), 'utf8')) as Truth;
   const truthOf: Record<string, string> = {
@@ -695,6 +783,6 @@ export async function reportMode(ids: string[]) {
   out.samples = summaries;
   out.negatives = negatives;
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  writeFileSync(resolve(REPORTS, `F3-${date}.json`), JSON.stringify(out, null, 2));
-  console.log(`report: ${resolve(REPORTS, `F3-${date}.json`)}; shots: ${shots}`);
+  writeFileSync(resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`), JSON.stringify(out, null, 2));
+  console.log(`report: ${resolve(REPORTS, `F3b${process.env.SHIM ? '-shim' : ''}-${date}.json`)}; shots: ${shots}`);
 }
