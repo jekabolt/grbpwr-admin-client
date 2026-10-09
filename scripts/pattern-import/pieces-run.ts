@@ -100,7 +100,22 @@ async function look(p: Prepared, args: string[]) {
 }
 
 export type Click = { label: string; at: [number, number] };
-export type ClickFile = Record<string, { variant?: string; clicks: Click[] }>;
+/** Operator wall edits the acceptance run applies after the automatic fill (operator API). */
+export type OperatorOp =
+  | { op: 'setWall'; near: [number, number]; rank?: number | null; why: string }
+  | { op: 'ignoreChain'; near: [number, number]; why: string }
+  | {
+      op: 'addBridge';
+      seed: string;
+      rank: number;
+      from: [number, number];
+      to: [number, number];
+      why: string;
+    };
+export type ClickFile = Record<
+  string,
+  { variant?: string; clicks: Click[]; operator?: OperatorOp[] }
+>;
 
 export type SampleRun = {
   p: Prepared;
@@ -304,7 +319,7 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     const [id, rs, ...ns] = rest;
     const [ax, ay, bx, by] = ns.map(Number);
     const p = await prepare(pick([id])[0]);
-    const m = wallModel(p.set, p.run);
+    const m = wallModel(p.set, p.run, p.sheet.texts);
     const lone = lonePortions(p.set, m);
     const resc = rescuedIgnored(
       p.set,
@@ -358,11 +373,59 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     );
     return 0;
   }
+  if (mode === 'folds') {
+    const [id] = rest;
+    const p = await prepare(pick([id])[0]);
+    const m = wallModel(p.set, p.run, p.sheet.texts);
+    console.log(`  relinked moved=${m.relinked?.moved} conflicts=${m.relinked?.conflicts.length}`);
+    if (process.env.CHAINS)
+      for (const id of process.env.CHAINS.split(',').map(Number))
+        console.log(
+          `  chain ${id} rank ${m.byRank.findIndex((ids) => ids.includes(id))} conflict ${m.relinked?.conflicts.includes(id)}`,
+        );
+    for (const f of m.folds ?? []) {
+      const c = p.set.chains[f];
+      const a = c.pts[0];
+      const b = c.pts[c.pts.length - 1];
+      const cls = p.set.classes.find((k) => k.chains.includes(f));
+      console.log(
+        `  fold ${f} ${c.lengthMm.toFixed(0)}mm ${cls?.role}/${cls?.sizeLabel ?? ''} ${a.x.toFixed(0)},${a.y.toFixed(0)} → ${b.x.toFixed(0)},${b.y.toFixed(0)}`,
+      );
+    }
+    return 0;
+  }
+  if (mode === 'dangles') {
+    // dangles <sample> <rank> x0 y0 w h: dangling wall ends of the rank (pass A) inside a box and
+    // how far the nearest other wall is (bridges ≤ 30 mm)
+    const [id, rs, ...a] = rest;
+    const [x0, y0, w, h] = a.map(Number);
+    const p = await prepare(pick([id])[0]);
+    const m = wallModel(p.set, p.run, p.sheet.texts);
+    const lone = lonePortions(p.set, m);
+    const resc = rescuedIgnored(
+      p.set,
+      m,
+      1.5,
+      15,
+      sheetModule(p.sheet),
+      pageMarginIds(p.set.chains, p.sheet.poses),
+    );
+    const { itemsOf } = await import('lib/pattern-import/pieces/walls');
+    const { wallBridges } = await import('lib/pattern-import/pieces/bridges');
+    const items = [...itemsOf(p.set, [...m.common, ...(m.byRank[+rs] ?? []), ...resc]), ...lone];
+    const inBox = (q: PtMm) => q.x >= x0 && q.x <= x0 + w && q.y >= y0 && q.y <= y0 + h;
+    for (const b of wallBridges(items, 30))
+      if (inBox(b.from))
+        console.log(
+          `  dangle ${b.from.x.toFixed(1)},${b.from.y.toFixed(1)} → ${b.to.x.toFixed(1)},${b.to.y.toFixed(1)} ${b.lengthMm.toFixed(1)} mm`,
+        );
+    return 0;
+  }
   if (mode === 'ascii') {
     // ascii <sample> <rank> x y [half]: wall/exterior raster around a point (rank's pass-A walls)
     const [id, rs, xs, ys, hs] = rest;
     const p = await prepare(pick([id])[0]);
-    const m = wallModel(p.set, p.run);
+    const m = wallModel(p.set, p.run, p.sheet.texts);
     const lone = lonePortions(p.set, m);
     const resc = rescuedIgnored(
       p.set,
@@ -409,7 +472,7 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     const [id, rs, ...a] = rest;
     const p = await prepare(pick([id])[0]);
     const r = +rs;
-    const m = wallModel(p.set, p.run);
+    const m = wallModel(p.set, p.run, p.sheet.texts);
     const lone = lonePortions(p.set, m);
     const resc = rescuedIgnored(
       p.set,

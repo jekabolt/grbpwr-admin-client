@@ -9,9 +9,9 @@
 //   single   one size (BLAZER M, or no class carries a chain): every line that is not page
 //            furniture or a notch is a wall; the outer fill takes the outermost (the cut line).
 //   file     file-per-size: rank r = the chains of file r (+ common); seeds move with the file.
-import type { ChainId, ChainSet, LineClass, PtMm, SizeRun } from 'lib/pattern-import/types';
+import type { ChainId, ChainSet, IRText, LineClass, PtMm, SizeRun } from 'lib/pattern-import/types';
 
-import { dist, SegGrid, segNearest } from './geom';
+import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
 import type { WallItem } from './snap';
 
 export type WallMode = 'graded' | 'single' | 'file';
@@ -29,7 +29,103 @@ export type WallModel = {
   graded: ChainId[];
   /** file mode: rank → FileId of that size's file. */
   fileOfRank: (string | null)[];
+  /** Shared straight edges (fold lines) promoted to walls of every rank — also in `common`. */
+  folds?: ChainId[];
+  /** Rank by continuity: chains moved to their outline's rank, and undecided components. */
+  relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
 };
+
+/**
+ * FOLD EDGES and other shared straight edges: a straight line (≥ 40 mm, ≤ 0.5 mm off its chord) on
+ * which the lines of ≥ 3 different size ranks END is an edge every one of those sizes uses (reef
+ * draws "cut 1 on fold" edges once per few sizes, in one size's dash, and the bottom and neck lines
+ * of all nine sizes stop on them, across it, inside its length). Whatever F3 called it (a size, a dashed guide, an orphan), it
+ * is a wall of every rank. Grain lines, guides and page rules have no size lines ending on them.
+ */
+export function sharedFolds(
+  set: ChainSet,
+  byRank: ChainId[][],
+  common: ReadonlySet<ChainId>,
+): ChainId[] {
+  const rankOfChain = new Map<ChainId, number>();
+  byRank.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
+  const cand: ChainId[] = [];
+  for (const c of set.chains) {
+    if (common.has(c.id) || c.closed || c.pts.length < 2 || c.lengthMm < 40) continue;
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    const L = dist(a, b);
+    if (L < 40 || c.lengthMm > L * 1.01) continue;
+    let dev = 0;
+    for (const p of c.pts) dev = Math.max(dev, segNearest(p, a, b).d);
+    if (dev <= 0.5) cand.push(c.id);
+  }
+  if (!cand.length) return [];
+  const grid = new SegGrid(4);
+  for (const id of cand) {
+    const c = set.chains[id];
+    grid.addPolyline(id, [c.pts[0], c.pts[c.pts.length - 1]]);
+  }
+  const ranksOn = new Map<ChainId, Set<number>>();
+  for (const [id, r] of rankOfChain) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    const n = c.pts.length;
+    for (const [p, inner] of [
+      [c.pts[0], c.pts[Math.min(n - 1, 1)]],
+      [c.pts[n - 1], c.pts[Math.max(0, n - 2)]],
+    ] as [PtMm, PtMm][])
+      grid.near(p, 1, (o) => {
+        if (o === id || rankOfChain.get(o) === r) return;
+        const q = set.chains[o].pts;
+        const a = q[0];
+        const b = q[q.length - 1];
+        const h = segNearest(p, a, b);
+        if (h.d > 1) return;
+        // a T-landing: inside the edge (not at its ends) and across it (≥ 30°), not a collinear
+        // overlap of nested straight hems
+        const L = dist(a, b);
+        if (h.u * L < 2 || (1 - h.u) * L < 2) return;
+        const ex = p.x - inner.x;
+        const ey = p.y - inner.y;
+        const el = Math.hypot(ex, ey);
+        if (el < 1e-6) return;
+        const sin = Math.abs(ex * (b.y - a.y) - ey * (b.x - a.x)) / (el * L);
+        if (sin < 0.5) return;
+        let s = ranksOn.get(o);
+        if (!s) ranksOn.set(o, (s = new Set()));
+        s.add(r);
+      });
+  }
+  // an edge is a BOUNDARY: size lines end on it from one side and none runs on across it (viola's
+  // dashed "lengthen here" line has graded lines ending on it AND crossing it — not a fold)
+  const sizeGrid = new SegGrid(8);
+  const sized = [...rankOfChain.keys(), ...set.orphans].filter(
+    (id) => set.chains[id] && set.chains[id].pts.length >= 2,
+  );
+  for (const id of sized) sizeGrid.addPolyline(id, set.chains[id].pts);
+  const crossed = (id: ChainId) => {
+    const c = set.chains[id];
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    const L = dist(a, b);
+    const seen = new Set<ChainId>();
+    for (let t = 0; t <= L; t += 4)
+      sizeGrid.near(
+        { x: a.x + ((b.x - a.x) * t) / L, y: a.y + ((b.y - a.y) * t) / L },
+        4,
+        (o, sIdx) => {
+          if (o === id || seen.has(o)) return;
+          const q = set.chains[o].pts;
+          const x = segIntersect(a, b, q[sIdx], q[sIdx + 1]);
+          if (!x || x.t < 0.01 || x.t > 0.99) return;
+          if (dist(x.p, q[0]) >= 2 && dist(x.p, q[q.length - 1]) >= 2) seen.add(o);
+        },
+      );
+    return seen.size >= 2;
+  };
+  return cand.filter((id) => (ranksOn.get(id)?.size ?? 0) >= 3 && !crossed(id));
+}
 
 export function rankOf(c: LineClass): number | null {
   if (c.role !== 'size') return null;
@@ -37,7 +133,7 @@ export function rankOf(c: LineClass): number | null {
   return null;
 }
 
-export function wallModel(set: ChainSet, run: SizeRun): WallModel {
+export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] = []): WallModel {
   const byId = new Map(set.classes.map((c) => [c.id, c]));
   const sizeClasses = set.classes.filter((c) => c.role === 'size');
   const common = set.classes.filter((c) => c.role === 'common').flatMap((c) => c.chains);
@@ -67,12 +163,37 @@ export function wallModel(set: ChainSet, run: SizeRun): WallModel {
       fileOfRank: [run.sizes[0]?.file ?? null],
     };
   }
-  return {
-    mode: run.encoding === 'file-per-size' ? 'file' : 'graded',
+  const mode: WallMode = run.encoding === 'file-per-size' ? 'file' : 'graded';
+  const base: WallModel = {
+    mode,
     n,
     common,
     byRank,
-    emptyRanks: byRank.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
+    emptyRanks: [],
+    graded,
+    fileOfRank,
+  };
+  // orphans with their size printed beside them (r4454's band: one end tick per size, "44" … "54"
+  // next to each) take that size
+  const labelled =
+    mode === 'graded' && !process.env.F4_NOLABEL
+      ? labelRanks(set, run, texts)
+      : new Map<ChainId, number>();
+  for (const [id, r] of labelled) byRank[r].push(id);
+  const cr = mode === 'graded' && !process.env.F4_NOCONNECT ? connectRanks(set, base) : null;
+  const ranks = cr ? cr.byRank : byRank;
+  const folds =
+    mode === 'graded' && !process.env.F4_NOFOLDS ? sharedFolds(set, ranks, new Set(common)) : [];
+  return {
+    mode,
+    n,
+    common: [...common, ...folds],
+    folds,
+    relinked: cr
+      ? { moved: cr.moved, conflicts: cr.conflicts, labelled: labelled.size }
+      : undefined,
+    byRank: ranks,
+    emptyRanks: ranks.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
     graded,
     fileOfRank,
   };
@@ -458,4 +579,194 @@ export function sheetModule(sheet: {
     out.add(Math.round(p.heightMm));
   }
   return [...out].filter((v) => v > 50);
+}
+
+/**
+ * Rank by CONTINUITY (F4b, r4454): one size's outline is drawn as chains that meet end to end. Where
+ * exactly two size-line ends meet (an L-junction no other line passes through), both chains belong
+ * to the same size. Components of such links vote with their classified length; a member F3 put in
+ * another rank (r4454's back neck "54" continuing the 44 shoulder) moves to the component's rank
+ * when ≥ 60 % of the ranked length agrees. Orphans in a decided component get its rank. Components
+ * without such a majority are left alone and returned as conflicts (the operator sees them).
+ */
+export function connectRanks(
+  set: ChainSet,
+  m: WallModel,
+  tolMm = 0.5,
+): { byRank: ChainId[][]; moved: number; conflicts: ChainId[] } {
+  const rankOf = new Map<ChainId, number>();
+  m.byRank.forEach((ids, r) => ids.forEach((id) => rankOf.set(id, r)));
+  const ids = [...new Set([...rankOf.keys(), ...set.orphans])].filter((id) => {
+    const c = set.chains[id];
+    return c && !c.closed && c.pts.length >= 2 && dist(c.pts[0], c.pts[c.pts.length - 1]) > tolMm;
+  });
+  const ends: { id: ChainId; p: PtMm }[] = [];
+  for (const id of ids) {
+    const p = set.chains[id].pts;
+    ends.push({ id, p: p[0] }, { id, p: p[p.length - 1] });
+  }
+  const grid = new SegGrid(4);
+  ids.forEach((id) => grid.addPolyline(id, set.chains[id].pts));
+  const epGrid = new SegGrid(2);
+  ends.forEach((e, i) => epGrid.addSeg(i, 0, e.p, e.p));
+  const parent = new Map<ChainId, ChainId>(ids.map((id) => [id, id]));
+  const find = (a: ChainId): ChainId => {
+    while (parent.get(a) !== a) {
+      parent.set(a, parent.get(parent.get(a)!)!);
+      a = parent.get(a)!;
+    }
+    return a;
+  };
+  ends.forEach((e, i) => {
+    const near: number[] = [];
+    epGrid.near(e.p, tolMm, (j) => {
+      if (j !== i && !near.includes(j) && dist(ends[j].p, e.p) <= tolMm) near.push(j);
+    });
+    if (near.length !== 1) return;
+    const o = ends[near[0]];
+    if (o.id === e.id || near[0] < i) return;
+    // no third line passing through the junction (a T or a crossing is not a continuation)
+    let through = false;
+    grid.near(e.p, tolMm, (id, s) => {
+      if (through || id === e.id || id === o.id) return;
+      const q = set.chains[id].pts;
+      if (segNearest(e.p, q[s], q[s + 1]).d <= tolMm) through = true;
+    });
+    if (!through) parent.set(find(e.id), find(o.id));
+  });
+  const comps = new Map<ChainId, ChainId[]>();
+  for (const id of ids) {
+    const r = find(id);
+    const a = comps.get(r);
+    if (a) a.push(id);
+    else comps.set(r, [id]);
+  }
+  const byRank = m.byRank.map((a) => a.slice());
+  let moved = 0;
+  const conflicts: ChainId[] = [];
+  const undecided: ChainId[][] = [];
+  for (const members of comps.values()) {
+    if (members.length < 2) continue;
+    const votes = new Map<number, number>();
+    let total = 0;
+    for (const id of members) {
+      const r = rankOf.get(id);
+      if (r === undefined) continue;
+      votes.set(r, (votes.get(r) ?? 0) + set.chains[id].lengthMm);
+      total += set.chains[id].lengthMm;
+    }
+    if (!total || votes.size === 0) continue;
+    const [best, w] = [...votes].sort((a, b) => b[1] - a[1])[0];
+    const mixed = votes.size > 1 || members.some((id) => !rankOf.has(id));
+    if (!mixed) continue;
+    if (w < 0.6 * total) {
+      undecided.push(members);
+      continue;
+    }
+    for (const id of members) {
+      const r = rankOf.get(id);
+      if (r === best) continue;
+      if (r !== undefined) byRank[r] = byRank[r].filter((x) => x !== id);
+      byRank[best].push(id);
+      moved++;
+    }
+  }
+  // undecided outlines (r4454's pocket: every size's top says one rank, its bottom the reverse)
+  // that are one piece in n sizes — n of them, each box overlapping the next ≥ 80 % — take their
+  // rank from their size order: the smallest outline is the smallest size
+  const boxOf = (ms: ChainId[]) => bboxOf(ms.flatMap((id) => set.chains[id].pts));
+  const und = undecided.map((ms) => ({ ms, b: boxOf(ms) }));
+  const area = (b: { minX: number; minY: number; maxX: number; maxY: number }) =>
+    (b.maxX - b.minX) * (b.maxY - b.minY);
+  // same piece, another size: boxes overlap heavily (r4454's pocket grows only in width and the
+  // sizes step down the sheet 3.5 mm each, so the boxes are not strictly nested)
+  const iou = (
+    a: { minX: number; minY: number; maxX: number; maxY: number },
+    b: { minX: number; minY: number; maxX: number; maxY: number },
+  ) => {
+    const w = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+    const h = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY);
+    if (w <= 0 || h <= 0) return 0;
+    return (w * h) / (area(a) + area(b) - w * h);
+  };
+  const usedU = new Set<number>();
+  und
+    .map((u, i) => ({ ...u, i }))
+    .sort((a, b) => area(a.b) - area(b.b))
+    .forEach((u0, _k, sorted) => {
+      if (usedU.has(u0.i)) return;
+      const chain = [u0];
+      for (const u of sorted) {
+        if (usedU.has(u.i) || chain.includes(u)) continue;
+        const last = chain[chain.length - 1];
+        if (
+          area(u.b) > area(last.b) &&
+          iou(last.b, u.b) >= 0.8 &&
+          dist(
+            { x: (u.b.minX + u.b.maxX) / 2, y: (u.b.minY + u.b.maxY) / 2 },
+            { x: (last.b.minX + last.b.maxX) / 2, y: (last.b.minY + last.b.maxY) / 2 },
+          ) < 40
+        )
+          chain.push(u);
+      }
+      if (chain.length !== m.n) return;
+      chain.forEach((u, r) => {
+        usedU.add(u.i);
+        for (const id of u.ms) {
+          const cur = rankOf.get(id);
+          if (cur === r) continue;
+          if (cur !== undefined) byRank[cur] = byRank[cur].filter((x) => x !== id);
+          byRank[r].push(id);
+          moved++;
+        }
+      });
+    });
+  und.forEach((u, i) => {
+    if (!usedU.has(i)) conflicts.push(...u.ms);
+  });
+  return { byRank, moved, conflicts };
+}
+
+/**
+ * Orphan chains labelled with a size: a text that IS a size label ("44", "XL") whose start (anchor)
+ * lies ≤ 4 mm from exactly one orphan chain — the next orphan at least 1.5× farther. Labels are
+ * written starting at their line; their far end may touch the neighbour's line, so the anchor
+ * decides. A chain given two different sizes is left alone.
+ */
+export function labelRanks(
+  set: ChainSet,
+  run: SizeRun,
+  texts: readonly IRText[],
+  reachMm = 4,
+): Map<ChainId, number> {
+  const out = new Map<ChainId, number>();
+  if (!texts.length || !set.orphans.length) return out;
+  const rankOfLabel = new Map<string, number>();
+  run.sizes.forEach((s, r) => rankOfLabel.set(s.label.trim().toUpperCase(), r));
+  const grid = new SegGrid(4);
+  for (const id of set.orphans) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) grid.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  const bad = new Set<ChainId>();
+  for (const t of texts) {
+    const r = rankOfLabel.get(t.text.trim().toUpperCase());
+    if (r === undefined) continue;
+    const best = new Map<ChainId, number>();
+    grid.near(t.anchor, reachMm * 1.5 + 1, (id, s) => {
+      const q = set.chains[id].pts;
+      const b = s + 1 < q.length ? q[s + 1] : q[0];
+      const d = segNearest(t.anchor, q[s], b).d;
+      if (d < (best.get(id) ?? Infinity)) best.set(id, d);
+    });
+    const ds = [...best].sort((a, b) => a[1] - b[1]);
+    if (!ds.length || ds[0][1] > reachMm) continue;
+    if (ds.length > 1 && ds[1][1] < 1.5 * ds[0][1]) continue;
+    const id = ds[0][0];
+    const prev = out.get(id);
+    if (prev !== undefined && prev !== r) bad.add(id);
+    else out.set(id, r);
+  }
+  for (const id of bad) out.delete(id);
+  return out;
 }

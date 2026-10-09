@@ -7,6 +7,15 @@ import { proposeSeedsFrom } from './seeds';
 
 export { fillPieces, fillPiecesDetailed, isMonotone, type FillDiag } from './fill';
 export { applyPieceEdits } from './edits';
+export {
+  addBridge,
+  affectedSeeds,
+  ignoreChain,
+  refill,
+  setWall,
+  startSession,
+  type PieceSession,
+} from './operator';
 export { proposeVariants, variantKnives, type VariantOption } from './variants';
 export { labelOf, seedLabel, textSeeds, variantLabels } from './seeds';
 export { wallModel, type WallModel } from './walls';

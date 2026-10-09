@@ -4,17 +4,86 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  addBridge,
   applyPieceEdits,
   fillPiecesDetailed,
+  ignoreChain,
+  setWall,
+  type PieceSession,
   proposeSeeds,
   proposeVariants,
   seedLabel,
 } from 'lib/pattern-import/pieces';
-import type { PieceCandidate, PieceFamily, Seed } from 'lib/pattern-import/types';
+import type {
+  ChainId,
+  ChainSet,
+  PieceCandidate,
+  PieceFamily,
+  Seed,
+} from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { CORPUS, REPORTS, type Prepared, type Sample } from './pieces-entry';
-import { clickSeeds, fillSample, renderRun, type ClickFile, type SampleRun } from './pieces-run';
+import {
+  clickSeeds,
+  fillSample,
+  renderRun,
+  type ClickFile,
+  type OperatorOp,
+  type SampleRun,
+} from './pieces-run';
+
+/** The chain nearest a sheet point (operator ops name walls by a point on them). */
+function chainNear(set: ChainSet, x: number, y: number): ChainId {
+  let best = -1;
+  let bd = Infinity;
+  for (const c of set.chains)
+    for (let i = 0; i + 1 < c.pts.length; i++) {
+      const a = c.pts[i];
+      const b = c.pts[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const L = dx * dx + dy * dy;
+      const u = L ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / L)) : 0;
+      const d = Math.hypot(x - a.x - u * dx, y - a.y - u * dy);
+      if (d < bd) {
+        bd = d;
+        best = c.id;
+      }
+    }
+  return best;
+}
+
+/** Apply the fixture's operator ops through the operator API; returns the session and a log. */
+function operate(sr: SampleRun, ops: OperatorOp[]): { s: PieceSession; log: string[] } {
+  let s: PieceSession = {
+    sheet: sr.p.sheet,
+    set: sr.p.set,
+    run: sr.p.run,
+    seeds: sr.seeds,
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+    walls: { exclude: [], include: [], bridges: [] },
+    families: sr.families,
+  };
+  const log: string[] = [];
+  for (const o of ops) {
+    const before = s.families;
+    if (o.op === 'setWall' || o.op === 'ignoreChain') {
+      const id = chainNear(s.set, o.near[0], o.near[1]);
+      s = o.op === 'setWall' ? setWall(s, id, o.rank ?? null) : ignoreChain(s, id);
+      const touched = s.families.filter((f, i) => f !== before[i]).map((f) => f.seed);
+      log.push(
+        `${o.op}(${id}) → refilled seeds ${touched.map((t) => seedLabel(s.seeds.find((x) => x.id === t)!)).join(',')} — ${o.why}`,
+      );
+    } else {
+      const sd = s.seeds.find((x) => seedLabel(x) === o.seed);
+      if (!sd) continue;
+      s = addBridge(s, sd.id, o.rank, { x: o.from[0], y: o.from[1] }, { x: o.to[0], y: o.to[1] });
+      log.push(`addBridge(${o.seed}, r${o.rank}) — ${o.why}`);
+    }
+  }
+  return { s, log };
+}
 
 type Pick = (ids: string[]) => Sample[];
 type Prep = (s: Sample, fresh?: boolean) => Promise<Prepared>;
@@ -321,6 +390,29 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
     // headline: gate-passing candidates of families whose areas grow with rank (G8)
     const passed = traceable.reduce((a, r) => a + (r.monotone ? r.passed : 0), 0);
     const full = traceable.filter((r) => r.passed === r.ranks && r.monotone).length;
+    // operator-assisted: the fixture's wall edits through the operator API (F13c's calls)
+    const ops = plan.seeds === 'click' ? clicks[s.id]?.operator ?? [] : [];
+    let operator: Record<string, unknown> | null = null;
+    if (ops.length) {
+      const { s: ses, log } = operate(sr, ops);
+      const sr2: SampleRun = { ...sr, families: ses.families };
+      const rows2 = rowsOf(sr2, truth, plan.skip ?? {}).filter(
+        (r) => !r.note?.startsWith('not traceable'),
+      );
+      const passed2 = rows2.reduce((a, r) => a + (r.monotone ? r.passed : 0), 0);
+      operator = {
+        ops: log,
+        passed: passed2,
+        closedShare: total ? +(passed2 / total).toFixed(3) : 0,
+        fullFamilies: rows2.filter((r) => r.passed === r.ranks && r.monotone).length,
+        rows: rows2.map((r) => `${r.label} ${r.outcomes}${r.monotone ? '' : '¬m'}`),
+      };
+      sr.families = ses.families;
+      for (const l of log) console.log(`   operator: ${l}`);
+      console.log(
+        `   with operator edits: candidates ${passed2}/${total} (${((100 * passed2) / Math.max(1, total)).toFixed(0)} %)`,
+      );
+    }
     const file = resolve(shots, `${s.id}.png`);
     renderRun(sr, file);
     const extra = sr.families
@@ -354,6 +446,7 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
       closedShare: total ? +(passed / total).toFixed(3) : 0,
       fullFamilies: full,
       extraSeeds: extra,
+      operator,
       rows,
       overlay: file,
     };

@@ -50,6 +50,19 @@ export function furniture(
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   const rects = new Map<string, number[]>();
   const lines = new Map<string, number[]>();
+  // pens that also draw curves are garment pens: reef draws every size dashed (dash-dot, dash-dot-
+  // dot…), so a size's straight fold edge or band edge is NOT a dashed guide
+  const pen = (st: Style | undefined) =>
+    st
+      ? `${st.strokeRgb?.join(',')}|${st.widthMm.toFixed(2)}|${(st.dash ? normDash(st.dash) : [])
+          .map((v) => (Math.round(v * 2) / 2).toFixed(1))
+          .join('/')}`
+      : '';
+  const curvedPens = new Set<string>();
+  chains.forEach((c) => {
+    if (c.lengthMm < 40) return;
+    if (!straightAxis(c).straight) curvedPens.add(pen(styles.get(c.style)));
+  });
   chains.forEach((c, i) => {
     const st = styles.get(c.style);
     if (st?.strokeRgb) {
@@ -63,7 +76,7 @@ export function furniture(
     }
     const { axis, straight } = straightAxis(c);
     if (straight && axis && c.lengthMm >= 40) {
-      if (st?.dash && (st.widthMm <= 0.2 || c.lengthMm >= 150)) {
+      if (st?.dash && (st.widthMm <= 0.2 || c.lengthMm >= 150) && !curvedPens.has(pen(st))) {
         out[i] = 'dashed guide';
         return;
       }
@@ -95,8 +108,28 @@ export function furniture(
     }
   });
   for (const a of rects.values()) if (a.length >= 3) for (const i of a) out[i] = 'tile frame';
-  for (const a of lines.values())
-    if (a.length >= 3) for (const i of a) out[i] = 'tile frame / cut mark';
+  // straight rules of one length: tile frames and cut marks repeat per PAGE, far apart; a ladder of
+  // equal-length lines 1–3 mm apart is a graded edge (r4454's pocket sides: every size 208 mm long,
+  // graded only in width) — a member with a twin ≤ 15 mm across it is line work
+  for (const [k, a] of lines) {
+    if (a.length < 3) continue;
+    const ax = k.startsWith('x') ? 'x' : 'y';
+    const at = (i: number) => {
+      const b = bboxOf(chains[i].pts);
+      return ax === 'x'
+        ? { v: (b.minY + b.maxY) / 2, lo: b.minX, hi: b.maxX }
+        : { v: (b.minX + b.maxX) / 2, lo: b.minY, hi: b.maxY };
+    };
+    const lone = a.filter((i) => {
+      const p = at(i);
+      return !a.some((j) => {
+        if (j === i) return false;
+        const q = at(j);
+        return Math.abs(q.v - p.v) <= 15 && Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) > 0;
+      });
+    });
+    if (lone.length >= 3) for (const i of lone) out[i] = 'tile frame / cut mark';
+  }
   return out;
 }
 

@@ -78,6 +78,10 @@ export type FillDiag = {
   frames: ChainId[];
   /** 'ignore' chains brought back as walls (both ends on outline lines). */
   rescued: number;
+  /** Candidates of an undrawn end size copied from the neighbour's contour ('shared-rank'). */
+  sharedRank?: number;
+  /** Seeds whose family was ranked upside down in its piece and re-ranked (areas shrank). */
+  reversed?: number[];
   /** Candidates closed by derived bridges (family-corroborated). */
   bridged?: number;
   /** Merged outer regions split by cells (touching pieces). */
@@ -364,8 +368,10 @@ function unlike(
 export type WallEdits = {
   /** Never a wall (any rank). */
   exclude?: ChainId[];
-  /** Extra walls per rank (the operator's "use this line"). */
-  include?: { rank: number; ids: ChainId[] }[];
+  /** Extra walls per rank (the operator's "use this line"); rank null = every rank. */
+  include?: { rank: number | null; ids: ChainId[] }[];
+  /** Operator bridges: straight walls the source does not draw, per rank. */
+  bridges?: { rank: number; from: PtMm; to: PtMm }[];
 };
 
 export function fillPiecesDetailed(
@@ -373,13 +379,13 @@ export function fillPiecesDetailed(
   set: ChainSet,
   run: SizeRun,
   seeds: Seed[],
-  opts: FillOpts & { splitTouching?: boolean },
+  opts: FillOpts & { splitTouching?: boolean; only?: ReadonlySet<number> },
   progress?: (done: number, total: number, note?: string) => void,
   edits: WallEdits = {},
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = wallModel(set, run);
+  const model = wallModel(set, run, sheet.texts);
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
@@ -439,7 +445,8 @@ export function fillPiecesDetailed(
   };
   const userExcl = new Set(edits.exclude ?? []);
   const extraOf = (r: number) =>
-    (edits.include ?? []).filter((x) => x.rank === r).flatMap((x) => x.ids);
+    (edits.include ?? []).filter((x) => x.rank === r || x.rank === null).flatMap((x) => x.ids);
+  const opBridges = (r: number) => (edits.bridges ?? []).filter((b) => b.rank === r);
 
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
@@ -447,6 +454,7 @@ export function fillPiecesDetailed(
     return [
       ...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]),
       ...lone,
+      ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
     ].filter((it) => !excl.has(it.chain) && !knifeSet.has(it.chain));
   };
 
@@ -503,6 +511,7 @@ export function fillPiecesDetailed(
     for (let si = 0; si < use.length; si++) {
       const seed = use[si];
       if (dropped.has(seed.id)) continue;
+      if (opts.only && !opts.only.has(seed.id)) continue;
       let ctx = base;
       let rankFrom: RankFrom = model.mode === 'single' ? 'single' : 'class';
       let { k, movedMm } = px[si];
@@ -684,7 +693,18 @@ export function fillPiecesDetailed(
           d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
         return d <= 1;
       });
-      if (usedB.length) cand.derived = usedB.map((b) => ({ kind: 'bridge', pts: [b.from, b.to] }));
+      const usedOp = opBridges(r).filter((b) => {
+        const m = { x: (b.from.x + b.to.x) / 2, y: (b.from.y + b.to.y) / 2 };
+        let d = Infinity;
+        for (let i = 0; i < outer.length && d > 1; i++)
+          d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
+        return d <= 1;
+      });
+      const der = [
+        ...usedB.map((b) => ({ kind: 'bridge' as const, pts: [b.from, b.to] })),
+        ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
+      ];
+      if (der.length) cand.derived = der;
       cand.areaMm2 = Math.abs(signedArea(outer));
       cand.bbox = bboxOf(outer);
       cand.sourceCoverage = sn.coverage;
@@ -829,7 +849,11 @@ export function fillPiecesDetailed(
       const want = new Set<number>();
       for (const s of use) {
         const c = cands.get(s.id)?.find((x) => x.rank === r);
-        if (c && (c.outcome === 'leak' || c.outcome === 'merged') && expectedArea(s.id, r))
+        if (
+          c &&
+          (c.outcome === 'leak' || c.outcome === 'merged') &&
+          (expectedArea(s.id, r) || process.env.F4_BRIDGE_ANY)
+        )
           want.add(s.id);
       }
       if (!want.size) continue;
@@ -841,9 +865,10 @@ export function fillPiecesDetailed(
       const res = rankPass(r, excl, override, want);
       for (const sid of want) {
         const c = res.out.get(sid);
-        const ex = expectedArea(sid, r)!;
+        const ex = expectedArea(sid, r);
         if (!c || c.outcome !== 'closed' || !c.derived?.length) continue;
-        if (Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area) continue;
+        if (!process.env.F4_BRIDGE_ANY && (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area))
+          continue;
         const list = cands.get(sid)!;
         const i = list.findIndex((x) => x.rank === r);
         if (i >= 0) list[i] = c;
@@ -920,10 +945,46 @@ export function fillPiecesDetailed(
       c!.leakAt = leakMouth(ctx.g, ctx.wall, k, ref) ?? at;
     }
   }
+  // a size the run lists but no line draws (viola's 34: every bundle has 7 lines for 8 sizes — the
+  // smallest is drawn on the next one's line): at the end of the run, that rank's piece IS its
+  // neighbour's contour. Copied, flagged 'shared-rank' so the operator sees it is not drawn.
+  if (model.mode === 'graded' && model.n > 2)
+    for (const r of model.emptyRanks) {
+      const from = r === 0 ? 1 : r === model.n - 1 ? model.n - 2 : -1;
+      if (from < 0 || model.emptyRanks.includes(from)) continue;
+      for (const s of use) {
+        const list = cands.get(s.id);
+        const src = list?.find((x) => x.rank === from && x.outcome === 'closed');
+        const i = list?.findIndex((x) => x.rank === r) ?? -1;
+        if (!list || !src || i < 0 || list[i].outcome === 'closed') continue;
+        list[i] = {
+          ...src,
+          rank: r,
+          derived: [...(src.derived ?? []), { kind: 'shared-rank', pts: [] }],
+        };
+        diag.sharedRank = (diag.sharedRank ?? 0) + 1;
+      }
+    }
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
-    const c = cands.get(s.id)!;
+    let c = cands.get(s.id)!;
+    // a family whose closed areas strictly SHRINK with rank (≥ 3 of them) was ranked upside down
+    // in that piece (F3 read its nesting from the wrong side): the outline of rank r belongs to
+    // size n−1−r. Re-rank it when the reversed family is monotone, and say so.
+    if (model.mode === 'graded' && !isMonotone(c)) {
+      const cl = c.filter((x) => x.outcome === 'closed').sort((a, b) => a.rank - b.rank);
+      const shrinks =
+        cl.length >= 3 && cl.every((x, i) => i === 0 || x.areaMm2 < cl[i - 1].areaMm2);
+      const rev = c
+        .map((x) => ({ ...x, rank: model.n - 1 - x.rank }))
+        .sort((a, b) => a.rank - b.rank);
+      if (shrinks && isMonotone(rev)) {
+        c = rev;
+        cands.set(s.id, c);
+        (diag.reversed ??= []).push(s.id);
+      }
+    }
     families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) });
   }
   diag.ms = Date.now() - t0;
@@ -936,7 +997,10 @@ export function fillPiecesDetailed(
  * piece whose ranks all came out alike lost its size lines (or it is ungraded — the operator says so).
  */
 export function isMonotone(c: PieceCandidate[]): boolean {
-  const a = c.filter((x) => x.outcome === 'closed').sort((x, y) => x.rank - y.rank);
+  // a rank drawn on its neighbour's line shares its area by construction
+  const a = c
+    .filter((x) => x.outcome === 'closed' && !x.derived?.some((d) => d.kind === 'shared-rank'))
+    .sort((x, y) => x.rank - y.rank);
   for (let i = 1; i < a.length; i++) if (a[i].areaMm2 <= a[i - 1].areaMm2 * 1.0005) return false;
   // one size step changes a piece by a few per cent; a rank 25 % off the next closed one closed
   // a different region (half a skirt behind a centre line, a neighbour's band) — not a grade
