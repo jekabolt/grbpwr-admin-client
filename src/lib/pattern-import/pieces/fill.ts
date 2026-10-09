@@ -420,6 +420,7 @@ export function fillPiecesDetailed(
   model.byRank.forEach((ids, r) => ids.forEach((id) => rankOfKnife.set(id, r)));
   const knivesOf = (r: number) =>
     knifeItems.filter((it) => {
+      if (graded?.notKnife.has(it.chain)) return false; // H1: a size line, not a knife
       const kr = rankOfKnife.get(it.chain);
       return kr === undefined || kr === r || model.mode === 'single';
     });

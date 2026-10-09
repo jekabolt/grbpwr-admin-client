@@ -61,7 +61,7 @@ import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
-import { expectedSizes } from '../pieces/grade/expected';
+import { expectedSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
   applyPieceEdits,
@@ -608,12 +608,14 @@ export class Session {
   private sizesStage(input: StageIO['sizes']['in']): StageIO['sizes']['out'] {
     if (!this.sheet || !this.chains)
       throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
-    const run = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
+    const read = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
+    // H1: the sizes the sheet draws decide the run the pieces are ranked in
+    this.expected = expectedSizes(read, input.card, input.drawnSizes, this.chains);
+    const run = runForExpected(read, this.expected);
     let map = proposeCardSizeMap(run, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    this.expected = expectedSizes(run, input.card, input.drawnSizes);
     return { run, map, expected: this.expected };
   }
 
@@ -653,7 +655,7 @@ export class Session {
     // H1: the fill must know how many sizes the sheet draws — the wizard passes the sizes step's
     // answer; without it, the session's own (sizes stage), else what the source alone says
     const expected =
-      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null) ?? undefined;
+      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null, base) ?? undefined;
     const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
     // Wall edits (close gap / ignore line / use line) go through the F4b session: appended ones

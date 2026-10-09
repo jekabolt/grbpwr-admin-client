@@ -47,6 +47,8 @@ export type GradeHook = {
   walls: ((r: number) => WallItem[]) | null;
   /** seeds refused up front: the fill skips them, `finish` gives them refused candidates */
   skip: ReadonlySet<SeedId>;
+  /** variant knife chains that are size lines (cut only as their size's outline, never all sizes) */
+  notKnife: ReadonlySet<ChainId>;
   /** apply refusals / cross-checks to the finished candidates (in place) */
   finish: (cands: Map<SeedId, PieceCandidate[]>) => void;
   result: GradeResult | null;
@@ -218,6 +220,7 @@ export function gradeHook(
     n,
     walls,
     skip: new Set(ids),
+    notKnife: new Set(),
     result,
     guarded: ids,
     ambiguities: amb,
@@ -287,7 +290,7 @@ export function gradeHook(
       set,
       seeds,
       n,
-      { cellMm: cell, knives, knifeCarriers: knifeCarriers(set, kIds), exclude: [...blocked], tick },
+      { cellMm: cell, knives, knifeIds: kIds, knifeCarriers: knifeCarriers(set, kIds), exclude: [...blocked], tick },
       progress,
     );
     cache.set(key, G);
@@ -313,6 +316,7 @@ export function gradeHook(
     n,
     walls: (r) => byRank[r] ?? [],
     skip,
+    notKnife: new Set(G.gradedKnives),
     result: G,
     guarded: all,
     ambiguities: G.ambiguities,

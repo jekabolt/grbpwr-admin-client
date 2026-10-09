@@ -23,6 +23,10 @@ import { Grid, drawPolyline, exterior, maskBox, regionOf } from '../raster';
 
 import {
   fillRank,
+  layoutTol,
+  maskDiff,
+  rankMasks,
+  sameRegions,
   markFrames,
   portionPts,
   scoreUnder,
@@ -31,7 +35,7 @@ import {
   type PortionPts,
   type SeedSolve,
 } from './choose';
-import { buildModel, trackPortions, type GradeModel, type ModelOpts } from './model';
+import { buildModel, compOfTrack, trackPortions, type GradeModel, type ModelOpts } from './model';
 import { chainSpans } from './tracks';
 import { bboxOfPts, growBox, median, unionBox } from './vec';
 
@@ -40,7 +44,7 @@ import { notEvidence } from './guard';
 export { detectUnencodedGrading, type GuardOpts } from './guard';
 
 /** Module-level switches (probes flip them to measure each guard; production keeps the defaults). */
-export const GRADE_TUNING = { twoReadings: true };
+export const GRADE_TUNING = { twoReadings: true, maxFree: 8 };
 
 export type GradeRefusal = NonNullable<PieceCandidate['gradeRefusal']>;
 
@@ -102,6 +106,11 @@ export type GradeResult = {
   };
   /** the rank model (opts.keepModel only) */
   model?: GradeModel;
+  /**
+   * Knife chains that are SIZE lines here (in a ranked component): a cutting line drawn once per
+   * size is that size's outline, not a knife for every size — F4 must not cut with them either.
+   */
+  gradedKnives: ChainId[];
 };
 
 export type GradeOpts = {
@@ -115,6 +124,8 @@ export type GradeOpts = {
   keepModel?: boolean;
   /** the variant's cutting lines (F4 knives): the final region is cut along them */
   knives?: PtMm[][];
+  /** chain id of each knife (same order) */
+  knifeIds?: ChainId[];
   /** the rest of each knife's cutting line (collinear pieces F4 does not cut with) */
   knifeCarriers?: PtMm[][];
   /** trust a rank only where a second, perturbed reading agrees (default GRADE_TUNING) */
@@ -365,9 +376,10 @@ function gradeOnce(
       ambiguities: [{ kind: 'size-count', message, classes: [], chains: [], at: null }],
       diag: diag(),
       ...(opts.keepModel ? { model: M } : {}),
+      gradedKnives: [],
     };
   }
-  const o = { cellMm: opts.cellMm, maxFree: opts.maxFree ?? 8, tick: opts.tick };
+  const o = { cellMm: opts.cellMm, maxFree: opts.maxFree ?? GRADE_TUNING.maxFree, tick: opts.tick };
   const solves: (SeedSolve | null)[] = [];
   const tooLarge = new Set<number>();
   seeds.forEach((sd, i) => {
@@ -411,7 +423,15 @@ function gradeOnce(
   }
   const results: GradeSeedResult[] = [];
   const ambiguities: ChainAmbiguity[] = [];
-  const knives = opts.knives ?? [];
+  const knifeIds = opts.knifeIds ?? [];
+  const gradedKnife = new Set<ChainId>();
+  if (knifeIds.length) {
+    const ranked = new Set<ChainId>();
+    for (const t of M.tracks)
+      if (compOfTrack(M, t.id) >= 0) for (const it of t.items) ranked.add(M.els[it.el].chain);
+    for (const id of knifeIds) if (ranked.has(id)) gradedKnife.add(id);
+  }
+  const knives = (opts.knives ?? []).filter((_, i) => !gradedKnife.has(knifeIds[i]));
   const carriers = opts.knifeCarriers ?? [];
   seeds.forEach((sd, i) => {
     const S = solves[i];
@@ -443,7 +463,14 @@ function gradeOnce(
     const areas = fills.map((f) => f.area);
     const best = S.top[0];
     // the family under the global bits must be the seed's own best layout, region for region
-    const same = fills.every((f, r) => f.hash === best.hashes[r]);
+    // (pixels, within a quarter grade step — equal AREAS are not the same layout)
+    const same =
+      fills.every((f, r) => f.hash === best.hashes[r]) ||
+      sameRegions(
+        rankMasks(S.box, opts.cellMm, portionPts(M, best.bits, S.inBox), n, sd.at).masks,
+        rankMasks(S.box, opts.cellMm, ps, n, sd.at).masks,
+        layoutTol(best.areas, opts.cellMm),
+      );
     const fam = familyCheck(areas);
     let reason = S.reason;
     let refusal: GradeRefusal | null = null;
@@ -481,18 +508,17 @@ function gradeOnce(
     }
     // components beyond the search (more than maxFree around the seed) kept their global bit
     // unsearched: flipping one must not move any trusted rank, else the layout was never proven
-    if (refusal == null) {
+    if (refusal == null && S.comps.length > S.free.length) {
       const free = new Set(S.free);
+      const tolPx = layoutTol(areas, opts.cellMm);
+      const here = rankMasks(S.box, opts.cellMm, ps, n, sd.at).masks;
       for (const c of S.comps) {
         if (free.has(c)) continue;
+        opts.tick?.();
         const flipped = bits.slice();
         flipped[c] ^= 1;
-        const ps2 = portionPts(M, flipped, S.inBox);
-        const moves = rankOk.some((ok, r) => {
-          if (!ok) return false;
-          opts.tick?.();
-          return fillRank(S.box, opts.cellMm, ps2, r, sd.at).hash !== fills[r].hash;
-        });
+        const there = rankMasks(S.box, opts.cellMm, portionPts(M, flipped, S.inBox), n, sd.at).masks;
+        const moves = rankOk.some((ok, r) => ok && maskDiff(here[r], there[r]) > tolPx);
         if (moves) {
           refusal = 'grade-ambiguous';
           reason = `${S.comps.length} line groups around the piece, ${S.free.length} searched: group ${c} was not, and it changes the outline`;
@@ -572,6 +598,7 @@ function gradeOnce(
     ambiguities,
     diag: diag(),
     ...(opts.keepModel ? { model: M } : {}),
+    gradedKnives: [...gradedKnife],
   };
 }
 

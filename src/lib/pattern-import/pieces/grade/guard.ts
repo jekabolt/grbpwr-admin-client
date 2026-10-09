@@ -42,11 +42,22 @@ export const GUARD_OPTS: GuardOpts = {
 export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
 
 /** Roles whose lines never count as size evidence (and never become graded walls). */
-export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore', 'notch', 'seam', 'grain', 'internal']);
+export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore', 'notch']);
+/**
+ * Roles that are not outline lines when SOMEONE SAYS SO (the operator's legend, confidence 1):
+ * F3's own 'internal' is also its bucket for lines it could not place — on a sheet whose sizes all
+ * look alike that is every outline, so an unconfirmed 'internal' stays evidence (the solver's
+ * acceptance checks still have to prove it).
+ */
+export const NOT_EVIDENCE_CONFIRMED: ReadonlySet<ChainRole> = new Set<ChainRole>(['seam', 'grain', 'internal']);
 
 /** Chains of the classes above. */
 export function notEvidence(classes: readonly LineClass[]): Set<ChainId> {
-  return new Set(classes.filter((c) => NOT_EVIDENCE.has(c.role)).flatMap((c) => c.chains));
+  return new Set(
+    classes
+      .filter((c) => NOT_EVIDENCE.has(c.role) || (NOT_EVIDENCE_CONFIRMED.has(c.role) && c.confidence >= 0.9))
+      .flatMap((c) => c.chains),
+  );
 }
 
 /** Two lines look alike: colour (Σ|ΔRGB| ≤ 60), width (±0.1 mm or ×1.5), dash (both solid, or motifs within 0.5 mm). */

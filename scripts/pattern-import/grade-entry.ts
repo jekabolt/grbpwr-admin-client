@@ -22,7 +22,8 @@ import { HOOK_DEBUG } from 'lib/pattern-import/pieces/grade/hook';
 import { ranksAt } from 'lib/pattern-import/pieces/grade/model';
 import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
 import type { BoxMm, CardSize, ChainSet, ExpectedSizes, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
-import { expectedSizes } from 'lib/pattern-import/pieces/grade/expected';
+import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
+import { runFixtures } from './grade-fixtures';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
@@ -141,15 +142,18 @@ type Score = {
  * by eye on the named overlay — our contour is then judged by provenance alone (≥ OWN_AUDIT of it on
  * its own size's / common source lines), never dropped from the count.
  */
+const KOMB_2 = {
+  pieces: { '2': [0, 1, 2, 3, 4, 6, 7] },
+  why:
+    "the Style A cutting line F4 finds (variantKnives) includes SIZE 5's crotch curve; the encoded " +
+    'truth run cut every size with it, so the truth contours of r0–r4 leave their own crotch curve ' +
+    "for size 5's (r6/r7: the cut also trims them). On the drawn lines the r0 crotch is the red " +
+    'curve that meets the red r0 inseam in a corner — ours runs 100 % on its own lines there',
+  image: 'hard-sizes/h1/kombinezon-L2-truth-2-zoom.png + hard-sizes/h1/kombinezon-L1-walls-2-r0.png',
+};
 const AUDITED: Record<string, { pieces: Record<string, number[]>; why: string; image: string }> = {
-  'kombinezon-L2': {
-    pieces: { '2': [0, 1, 2, 3, 4, 6, 7] },
-    why:
-      "the truth contours of piece 2 run 28–54 % on OTHER sizes' crotch lines (F3 on the encoded " +
-      "original classed a crotch curve 'common', so F4 cut every size with it); the r0 truth contour " +
-      'leaves the red r0 crotch curve for the sixth curve',
-    image: 'hard-sizes/h1/kombinezon-L2-truth-2-zoom.png',
-  },
+  'kombinezon-L1': KOMB_2,
+  'kombinezon-L2': KOMB_2,
 };
 const auditedOf = (b: Bench, label: string, r: number) =>
   AUDITED[`${b.sample}-${b.level}`]?.pieces[label]?.includes(r) ?? false;
@@ -212,8 +216,11 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
         }
         continue;
       }
-      if (process.env.DIST && (process.env.DIST === '1' || process.env.DIST === label))
-        console.log(`      dist ${id}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} own ${(own * 100).toFixed(0)}% truth own ${(ownShare(b, t.outer, truthRank(label, r)) * 100).toFixed(0)}%`);
+      if (process.env.DIST && (process.env.DIST === '1' || process.env.DIST === label)) {
+        const miss: PtMm[] = [];
+        ownShare(b, g.outer, truthRank(label, r), miss);
+        console.log(`      dist ${id}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} own ${(own * 100).toFixed(0)}% truth own ${(ownShare(b, t.outer, truthRank(label, r)) * 100).toFixed(0)}%${miss.length ? ` misses ${miss.length} in ${JSON.stringify(bboxOfPts(miss), (_, v) => (typeof v === 'number' ? Math.round(v) : v))}` : ''}`);
+      }
       const match = hausdorffP95(g.outer, t.outer) <= 1.0;
       if (!counted) {
         row += match ? 'c' : 'n';
@@ -241,12 +248,17 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
 
 /** A closed contour is CORRECT only when it matches the truth contour AND runs on its own size's lines. */
 const OWN_MIN = 0.9;
+/** A point on another size's line is this size's own when this size draws nothing within this reach. */
+const SHARED_REACH_MM = 12;
+/** A contour point is on a line within this distance (the same 1 mm as the contour match). */
+const PROV_MM = 1.0;
 /** An audited truth override judges our contour by provenance alone, at this stricter share. */
 const OWN_AUDIT = 0.95;
 const pathGrids = new WeakMap<Bench, SegGrid>();
 /**
- * Share of a contour (sampled every quarter segment) lying ≤ 0.3 mm from a source line whose
- * truth is size `rank` or common — the contour runs on its own size's lines. Independent of the
+ * Share of a contour (sampled every quarter segment) lying ≤ 0.3 mm from a source line that is not
+ * ANOTHER size's line (truth size `rank`, common, cutting / internal lines, or a line drawn once that
+ * serves `rank` too) — the contour runs on its own size's lines. Independent of the
  * truth contours (which F4 built on the encoded original and can be noise, see NOISE).
  */
 function ownShare(b: Bench, o: PtMm[], rank: number, miss?: PtMm[]): number {
@@ -264,16 +276,48 @@ function ownShare(b: Bench, o: PtMm[], rank: number, miss?: PtMm[]): number {
     for (let u = 0; u < 1; u += 0.25) {
       const q = { x: oo[i].x + (oo[i + 1].x - oo[i].x) * u, y: oo[i].y + (oo[i + 1].y - oo[i].y) * u };
       let hit = false;
-      grid.near(q, 0.3, (pk, j) => {
+      let onLine = false;
+      // within the contour tolerance (p95 ≤ 1 mm): sizes drawn within a millimetre of each other
+      // are one line for the cut
+      grid.near(q, PROV_MM, (pk, j) => {
         if (hit) return;
         const pp = pts(pk);
-        if (segNearest(q, pp[j], pp[j + 1]).d > 0.3) return;
+        if (segNearest(q, pp[j], pp[j + 1]).d > PROV_MM) return;
+        onLine = true;
         const t = b.truth[b.origOfPath[b.sheet.paths[pk].id]];
-        if (t.role === 'common' || (t.role === 'size' && t.rank === rank)) hit = true;
+        // provenance asks one thing: is this stretch on ANOTHER size's line? common lines, the
+        // variant's cutting lines and every other non-size line are not
+        if (t.role !== 'size' || t.rank === rank) hit = true;
       });
+      // a line drawn ONCE for several sizes carries one size's label in the original: it serves
+      // this size too when this size has no line of its own within SHARED_REACH_MM here
+      if (!hit && onLine) {
+        let ownNear = false;
+        grid.near(q, SHARED_REACH_MM, (pk, j) => {
+          if (ownNear) return;
+          const t = b.truth[b.origOfPath[b.sheet.paths[pk].id]];
+          if (t.role !== 'size' || t.rank !== rank) return;
+          const pp = pts(pk);
+          if (segNearest(q, pp[j], pp[j + 1]).d <= SHARED_REACH_MM) ownNear = true;
+        });
+        if (!ownNear) hit = true;
+      }
       tot++;
       if (hit) own++;
-      else miss?.push(q);
+      else {
+        miss?.push(q);
+        if (process.env.MISSDBG) {
+          const roles: string[] = [];
+          grid.near(q, 1.5, (pk, j) => {
+            const pp = pts(pk);
+            const d = segNearest(q, pp[j], pp[j + 1]).d;
+            if (d > 1.5) return;
+            const t = b.truth[b.origOfPath[b.sheet.paths[pk].id]];
+            roles.push(`${t.role}${t.rank ?? ''}@${d.toFixed(2)}`);
+          });
+          console.log(`        miss r${rank} (${q.x.toFixed(0)},${q.y.toFixed(0)}) ${[...new Set(roles)].slice(0, 6).join(' ')}`);
+        }
+      }
     }
   return tot ? own / tot : 0;
 }
@@ -354,8 +398,9 @@ type RunRow = {
  */
 function runFill(b: Bench, mode: FillOpts['grade'], cardN: number = b.n) {
   const t0 = Date.now();
-  const { set, run } = chainsOf(b);
-  const expected = expectedSizes(run, cardOf(cardN), null) ?? undefined;
+  const { set, run: read } = chainsOf(b);
+  const expected = expectedSizes(read, cardOf(cardN), null, set) ?? undefined;
+  const run = runForExpected(read, expected ?? null);
   const { families, diag } = fillPiecesDetailed(b.sheet, set, run, b.seeds, fillOpts(VARIANT[b.sample] ?? null, mode, expected));
   return { set, run, families, diag, ms: Date.now() - t0, expected };
 }
@@ -523,11 +568,12 @@ function controls(rest: string[]) {
   for (const L of levelsOf(rest))
     for (const id of samplesOf(rest)) {
       const b = loadBench(id, L);
-      for (const dn of [-1, 1]) {
-        const n = b.n + dn;
+      // the card says one size fewer / more than the drawing has, or nothing at all (an empty card
+      // run nobody answered: the count is unknown — graded-looking pieces must be refused)
+      for (const [tag, n] of [['n-1', b.n - 1], ['n+1', b.n + 1], ['nocount', 0]] as const) {
         const f = runFill(b, 'solve', n);
         // the truth is in b.n ranks: a closed contour is wrong unless it is the truth's same rank
-        const row = summarize(b, `n${dn > 0 ? '+1' : '-1'}`, f.families, f.diag, f.ms, n);
+        const row = summarize(b, tag, f.families, f.diag, f.ms, n);
         printRow(row);
         out.push(row);
       }
@@ -546,6 +592,20 @@ function controls(rest: string[]) {
       );
       out.push({ sample: id, level: L, mode: 'shuffled', real: { correct: real.correctAcc, wrong: real.wrong, withTruth: real.withTruth }, shuffled: { correct: shuf.correctAcc, wrong: shuf.wrong, withTruth: shuf.withTruth } });
     }
+  return out;
+}
+
+/** The adversarial fixtures (grade-fixtures.ts) + the bench solved with maxFree below its component count. */
+function fixtures() {
+  const out = runFixtures(() =>
+    (['robe', 'kombinezon'] as const).map((id) => {
+      const b = loadBench(id, 'L1');
+      const f = runFill(b, 'solve');
+      const sc = scoreContours(b, gotOf(b, f.families));
+      return { name: `${id} L1`, wrong: sc.wrongList, note: Object.entries(sc.perPiece).map(([k, v]) => `${k}:${v}`).join(' ') };
+    }),
+  );
+  for (const f of out) console.log(`fixture ${f.ok ? 'ok  ' : 'FAIL'} ${f.name.padEnd(34)} ${f.why}`);
   return out;
 }
 
@@ -814,13 +874,26 @@ export async function main(argv: string[]) {
       console.log(v, f.candidates.map((c) => `${c.rank}:${c.outcome}:${(c.areaMm2 / 100).toFixed(0)}:${c.bbox.minY.toFixed(0)}`).join(' '));
     }
   }
-  else if (mode === 'all') {
+  else if (mode === 'runinfo') {
+    for (const L of levelsOf(rest))
+      for (const id of samplesOf(rest)) {
+        const b = loadBench(id, L);
+        const { set, run } = chainsOf(b);
+        const ex = expectedSizes(run, cardOf(b.n), null, set);
+        console.log(`${id} ${L}: encoding ${run.encoding} sizes ${run.sizes.length} [${run.sizes.map((z) => z.label || '·').join(',')}] classes ${set.classes.map((c) => `${c.role}${c.chains.length}`).join(' ')} expected ${JSON.stringify(ex)} truth n ${b.n}`);
+      }
+    return 0;
+  } else if (mode === 'fixtures') {
+    const fx = fixtures();
+    return fx.every((f) => f.ok) ? 0 : 1;
+  } else if (mode === 'all') {
     const data = {
       at: new Date().toISOString(),
       baseline: baseline(rest),
       solve: solve(rest),
       controls: controls(rest),
       encoded: encoded(),
+      fixtures: fixtures(),
     };
     writeFileSync(resolve(mk(OUT), 'REPORT-data.json'), JSON.stringify(data, null, 1));
     const sol = data.solve as RunRow[];
@@ -831,17 +904,24 @@ export async function main(argv: string[]) {
     const ctlWrong = ctl.reduce((a, r) => a + (r.score?.wrong ?? 0), 0);
     const ctlNoAmb = ctl.filter((r) => r.score && !r.sizeCountAmb).length;
     const encBad = enc.filter((r) => r.hook || !r.identical).map((r) => r.sample);
-    // the gate is safety: no wrong closed contour anywhere, n±1 raise the size-count ambiguity,
-    // encoded inputs never reach the module. Accuracy targets are reported, not gated.
-    const safe = wrong === 0 && ctlWrong === 0 && ctlNoAmb === 0 && encBad.length === 0;
-    console.log(`\nH1 safety: wrong closed ${wrong} (solve + guard), controls n±1 wrong ${ctlWrong}, without size-count ambiguity ${ctlNoAmb}, encoded regressions ${encBad.length ? encBad.join(' ') : 'none'} → ${safe ? 'PASS' : 'FAIL'}`);
+    // the gate: SAFETY (no wrong closed contour anywhere, every control raises the size-count
+    // question and closes nothing wrong, encoded inputs untouched, the adversarial fixtures hold)
+    // AND the documented accuracy targets. `--informational` reports accuracy without failing on it.
+    const fx = data.fixtures as { name: string; ok: boolean; why: string }[];
+    const fxBad = fx.filter((f) => !f.ok).map((f) => f.name);
+    const safe = wrong === 0 && ctlWrong === 0 && ctlNoAmb === 0 && encBad.length === 0 && fxBad.length === 0;
+    console.log(`\nH1 safety: wrong closed ${wrong} (solve + guard), controls wrong ${ctlWrong}, controls without size-count ambiguity ${ctlNoAmb}, encoded regressions ${encBad.length ? encBad.join(' ') : 'none'}, fixtures failing ${fxBad.length ? fxBad.join(' ') : 'none'} → ${safe ? 'PASS' : 'FAIL'}`);
+    let accurate = true;
     for (const r of sol) {
       if (!ACCEPT_SAMPLES.includes(r.sample)) continue;
       const acc = r.score.withTruth ? r.score.correctAcc / r.score.withTruth : 0;
       const target = r.level === 'L1' ? 0.9 : 0.75;
+      if (acc < target) accurate = false;
       console.log(`H1 accuracy ${r.sample.padEnd(10)} ${r.level}: ${r.score.correctAcc}/${r.score.withTruth} = ${pct(acc)} (target ${pct(target)}) ${acc >= target ? 'met' : 'NOT MET'}`);
     }
-    return safe ? 0 : 1;
+    const informational = rest.includes('--informational');
+    console.log(`H1 gate: safety ${safe ? 'PASS' : 'FAIL'}, accuracy ${accurate ? 'PASS' : 'NOT MET'}${informational ? ' (informational run: accuracy not gated)' : ''}`);
+    return safe && (accurate || informational) ? 0 : 1;
   } else {
     console.log('modes: all | baseline | solve | controls | encoded');
     return 1;

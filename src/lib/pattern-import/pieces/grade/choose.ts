@@ -5,7 +5,8 @@
 // rank (walls = the portions carrying r, raster `cellMm`), and scored by closure, strict area
 // growth and the regularity of the area steps. Two DISTINCT best combinations within 0.5 points,
 // both closed and monotone → ambiguous (the operator / the judge decides, never the code).
-// "Distinct" = different REGIONS (a hash of every rank's mask), over EVERY combination searched —
+// "Distinct" = different REGIONS, over EVERY combination searched: two layouts are one when every
+// rank's region differs by less than a quarter of a grade step (pixels that differ, not areas) —
 // two layouts with equal areas but other outlines are two answers, not one.
 import type { BoxMm, PtMm, Seed } from 'lib/pattern-import/types';
 
@@ -349,25 +350,78 @@ export function solveSeed(M: GradeModel, seed: Seed, box: BoxMm, o: ChooseOpts):
     combos.push(evalCombo(M, bits, box, seed.at, inBox, o.cellMm, memo, o.tick));
   }
   const all = combos.slice();
-  combos.sort((a, b) => b.score - a.score);
-  // distinct layouts by region, over every combination (not a truncated top list)
+  const masksOf = new Map<Combo, (Uint8Array | null)[]>();
+  const regions = (c: Combo) => {
+    let m = masksOf.get(c);
+    if (!m) {
+      o.tick?.();
+      m = rankMasks(box, o.cellMm, portionPts(M, c.bits, inBox), M.n, seed.at).masks;
+      masksOf.set(c, m);
+    }
+    return m;
+  };
+  const tol = (c: Combo) => layoutTol(c.areas, o.cellMm);
+  const { top, ambiguous, reason } = pickLayout(combos, M.n, (a, b) =>
+    sameLayout(a, b) || sameRegions(regions(a), regions(b), tol(a)),
+  );
+  return { seed, box, inBox, comps: compList, free, compLen, top, all, ambiguous, reason };
+}
+
+/**
+ * The best layout of a seed and whether a RIVAL fits as well: distinct = another region for some
+ * rank (mask hash), over every combination; a rival is closed in every rank, monotone, and within
+ * 0.5 points of the best. Equal areas with different outlines are two answers.
+ */
+export function pickLayout(
+  combos: readonly Combo[],
+  n: number,
+  same: (a: Combo, b: Combo) => boolean = sameLayout,
+): { top: Combo[]; ambiguous: boolean; reason: string } {
+  const sorted = [...combos].sort((a, b) => b.score - a.score);
+  // identical hashes are one layout for sure; region comparison (costly) only for the contenders
+  const byHash: Combo[] = [];
+  for (const c of sorted) if (!byHash.some((d) => sameLayout(c, d))) byHash.push(c);
+  const best = byHash[0];
+  const contenders = best
+    ? byHash.filter((c) => c === best || (c.closed === n && c.monotone && c.score >= best.score - 0.5))
+    : [];
   const distinct: Combo[] = [];
-  for (const c of combos) if (!distinct.some((d) => sameLayout(c, d))) distinct.push(c);
-  const top = distinct.slice(0, 4);
-  const best = top[0];
+  for (const c of contenders) if (!distinct.some((d) => same(c, d))) distinct.push(c);
+  const top = [...distinct, ...byHash.filter((c) => !contenders.includes(c))].slice(0, 4);
   let ambiguous = false;
   let reason = '';
   if (!best) reason = 'no combos';
-  else if (best.closed < M.n) reason = `only ${best.closed}/${M.n} closed`;
+  else if (best.closed < n) reason = `only ${best.closed}/${n} closed`;
   else if (!best.monotone) reason = 'not monotone';
   const rival = best
-    ? distinct.find((c) => c !== best && c.closed === M.n && c.monotone && c.score >= best.score - 0.5)
+    ? distinct.find((c) => c !== best && c.closed === n && c.monotone && c.score >= best.score - 0.5)
     : undefined;
   if (best && rival) {
     ambiguous = true;
     reason = `two layouts fit (${best.score.toFixed(2)} vs ${rival.score.toFixed(2)})`;
   }
-  return { seed, box, inBox, comps: compList, free, compLen, top, all, ambiguous, reason };
+  return { top, ambiguous, reason };
+}
+
+/** Pixels that differ between two regions (null = leak: any region differs completely). */
+export function maskDiff(a: Uint8Array | null, b: Uint8Array | null): number {
+  if (!a || !b) return a === b ? 0 : Infinity;
+  let d = 0;
+  for (let j = 0; j < a.length; j++) if (a[j] !== b[j]) d++;
+  return d;
+}
+
+/** Per rank, the pixels two layouts may differ by and still be one: a quarter of a grade step. */
+export function layoutTol(areas: readonly number[], cellMm: number): number {
+  const fa = areas.filter((a) => a >= 0);
+  const steps = fa.slice(1).map((a, k) => a - fa[k]).filter((d) => d > 0).sort((x, y) => x - y);
+  const step = steps.length ? steps[steps.length >> 1] : 0;
+  const big = fa.length ? Math.max(...fa) : 0;
+  return Math.max(0.25 * step, 0.001 * big) / (cellMm * cellMm);
+}
+
+export function sameRegions(a: readonly (Uint8Array | null)[], b: readonly (Uint8Array | null)[], tolPx: number): boolean {
+  return a.length === b.length && a.every((m, r) => maskDiff(m, b[r]) <= tolPx);
 }
 
 export { growBox, flood };
