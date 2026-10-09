@@ -7,6 +7,10 @@
 //   node scripts/assembly-skeleton/ui-probe.mjs --mutate-autoapply   the door applies the proposal
 //                                                                    the moment it is read — the
 //                                                                    «nothing silently» checks MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-pictures-churn  the card's unit pictures
+//                                                                    re-read the graph whenever the
+//                                                                    contour Map changes identity —
+//                                                                    the «BOM keystroke» check MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -18,6 +22,12 @@
 //   E  shut doors: released card, no engine — disabled and saying why in words; a card with no
 //      DXF has NO header door at all (owner 09.10: silent, like the silhouette line), the reason
 //      only in the empty-state door
+//   H  readings: choosing the second reading REBUILDS the proposal; «apply all» then keeps the
+//      order (sweep clean); readings lock once a step is applied; a remounted field does not replay
+//   I  replace over steps with photos / units declares mediaCleared / assemblyCleared and says so
+//   J  typing in the BOM (contour Map churns identity) does NOT re-read the seam graph
+//   K  THE REAL ENGINE on the blazer: every step ticked, the second reading of an ambiguous join
+//      chosen, «apply all» — the order stays clean (skipped, loudly, without the corpus)
 //   G  THE REAL ENGINE on SS26-005 (25 pieces, sewing lines from the DXF): the production provider
 //      reads the pattern; unit inputs and outputs carry real pictograms; after apply the schematic
 //      shows unit glyphs through CardUnitPicturesProvider. Skipped, loudly, without the plans folder.
@@ -31,6 +41,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
+const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -77,7 +88,28 @@ const outfile = resolve(tmpdir(), `skeleton-ui-${process.pid}.js`);
 // ── mutation (in the bundler's memory, never in the file) ───────────────────────────────────────
 const AUTOAPPLY_FIX = `    applyRequest,\n    onSkeletonApplied: (r) => {`;
 const AUTOAPPLY_BROKEN = `    applyRequest: applyRequest ?? (ready ? { steps: ready.steps, mode: 'append', nonce: -1 } : null),\n    onSkeletonApplied: (r) => {`;
-const plugins = [];
+// Instrumentation (always on, in memory): count the card pictures' seam-graph reads.
+const GRAPH_READ = `g = readSeamGraph(facts);`;
+const GRAPH_READ_COUNTED = `g = ((window.__graphReads = (window.__graphReads || 0) + 1), readSeamGraph(facts));`;
+const CHURN_FIX = `}, [factsSig, live]);`;
+const CHURN_BROKEN = `}, [factsSig, live, shapes]);`;
+const plugins = [
+  {
+    name: 'skeleton-instrument',
+    setup(b) {
+      b.onLoad({ filter: /card-unit-pictures\.tsx$/ }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        if (!src.includes(GRAPH_READ)) throw new Error('instrumentation did not find its line');
+        src = src.replace(GRAPH_READ, GRAPH_READ_COUNTED);
+        if (MUTATE_CHURN) {
+          if (!src.includes(CHURN_FIX)) throw new Error('churn mutation did not find its line');
+          src = src.replace(CHURN_FIX, CHURN_BROKEN);
+        }
+        return { contents: src, loader: 'tsx' };
+      });
+    },
+  },
+];
 if (MUTATE_AUTOAPPLY)
   plugins.push({
     name: 'skeleton-mutation',
@@ -170,6 +202,44 @@ async function loadRealCard() {
   };
 }
 
+// The blazer (46 pieces, lined, numbered names) — the corpus card whose skeleton has readings.
+async function loadBlazer() {
+  const plans = process.env.SKELETON_PLANS ?? resolve(REPO, '../tmp/plans');
+  const dxf = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo/blazer.dxf');
+  if (!existsSync(dxf)) return null;
+  const nodeOut = resolve(tmpdir(), `skeleton-ui-node-${process.pid}.mjs`);
+  await esbuild({
+    entryPoints: [resolve(HERE, 'seams-entry.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: nodeOut,
+    logLevel: 'warning',
+    absWorkingDir: REPO,
+  });
+  const { loadFacts } = await import(nodeOut);
+  const buf = readFileSync(dxf);
+  const quiet = [console.log, console.warn];
+  console.log = () => {};
+  console.warn = () => {};
+  const { facts } = await loadFacts(
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    'M',
+    'jacket-lined',
+  );
+  [console.log, console.warn] = quiet;
+  return {
+    category: 'blazers',
+    lining: true,
+    pieces: facts.pieces.map((p) => ({
+      lineKey: p.pieceKey,
+      name: p.name,
+      piece: p.piece,
+      cloth: p.cloth ?? 'main',
+    })),
+  };
+}
+
 let bad = 0;
 const ck = (ok, what, d = '') => {
   if (!ok) bad++;
@@ -238,7 +308,17 @@ await shot('a-panel');
 // fiddle: untick, switch press open, pick the second reading — still nothing written
 await page.click('[data-skeleton-press]');
 await page.click('[data-skeleton-variant="2.1"]');
+await page.waitForFunction(
+  () => document.querySelector('[data-skeleton-variant="2.1"]')?.className.includes('bg-textColor'),
+  null,
+  { timeout: 5000 },
+);
 await page.click('[data-skeleton-variant="2.0"]');
+await page.waitForFunction(
+  () => document.querySelector('[data-skeleton-variant="2.0"]')?.className.includes('bg-textColor'),
+  null,
+  { timeout: 5000 },
+);
 await page.click('[data-skeleton-press]');
 await closePanel();
 await page.waitForTimeout(200);
@@ -359,6 +439,16 @@ ck(
   'reopening does not read the pattern again',
 );
 await closePanel();
+{
+  const n = (await ops()).length;
+  await page.evaluate(() => window.__sk.remountField());
+  await page.waitForTimeout(300);
+  ck(
+    (await ops()).length === n,
+    'a remounted field does not replay the apply',
+    `${n} → ${(await ops()).length}`,
+  );
+}
 
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
@@ -497,6 +587,184 @@ ck(
 );
 ck((await ops()).length === 0, 'and nothing is written');
 
+// ── H ───────────────────────────────────────────────────────────────────────────────────────────
+head('H — the second reading rebuilds the order; apply all keeps it clean');
+await mount({});
+await openPanel();
+await page.click('[data-skeleton-variant="2.1"]');
+await page.waitForFunction(
+  () => document.querySelector('[data-skeleton-variant="2.1"]')?.className.includes('bg-textColor'),
+  null,
+  { timeout: 5000 },
+);
+ck(
+  /Body with pocket/.test(await page.locator('[data-skeleton-step="2"]').innerText()),
+  'the chosen reading is the step now (rebuilt, not patched)',
+);
+ck((await page.evaluate(() => window.__sk.providerCalls())) === 2, 'one rebuild for one choice');
+ck((await page.locator('[data-skeleton-violation]').count()) === 0, 'no step breaks the order');
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+r = await ops();
+ck(
+  r.some((x) => x.outputUnitKey === 'NECK' && (x.inputKeys ?? []).includes('PKT')),
+  'the applied order carries the chosen reading',
+);
+{
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(hard.length === 0, 'assemblySweep clean after the second reading', JSON.stringify(hard));
+}
+ck(
+  await page.locator('[data-skeleton-variant="2.0"]').isDisabled(),
+  'readings lock once a step of the skeleton is applied',
+);
+await closePanel();
+
+// ── I ───────────────────────────────────────────────────────────────────────────────────────────
+head('I — replace over steps with photos and units says what goes, and tells the server');
+const PHOTO = { mediaId: 7, caption: '', annotations: [] };
+await mount({
+  ops: [
+    {
+      operationType: MACHINE,
+      machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+      zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+      inputKeys: ['PKT', 'FP'],
+      outputUnitKey: 'FRONT-P',
+      outputUnitName: 'Front with pocket',
+      media: [PHOTO, { ...PHOTO, mediaId: 8 }],
+    },
+  ],
+});
+await openPanel();
+await page.click('[data-skeleton-mode="replace"]');
+await page.click('[data-skeleton-apply-all]');
+{
+  const t =
+    (await page
+      .locator('[data-skeleton-replace-loses]')
+      .innerText()
+      .catch(() => '')) ?? '';
+  ck(/2 step photos will be removed/.test(t), 'the confirmation says the photos go', t);
+}
+await shot('i-replace-photos', '[data-skeleton-panel]');
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+{
+  const f = await page.evaluate(() => ({
+    media: window.__sk.form().getValues('mediaCleared'),
+    units: window.__sk.form().getValues('assemblyCleared'),
+  }));
+  ck(f.media === true, 'replace over photos declares mediaCleared', JSON.stringify(f));
+  ck(f.units === false, 'replace with unit rows keeps assemblyCleared off', JSON.stringify(f));
+}
+await closePanel();
+await mount({
+  unitless: true,
+  ops: [
+    {
+      operationType: MACHINE,
+      machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+      zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+      inputKeys: ['PKT', 'FP'],
+      outputUnitKey: 'FRONT-P',
+      outputUnitName: 'Front with pocket',
+    },
+  ],
+});
+await openPanel();
+await page.click('[data-skeleton-mode="replace"]');
+await page.click('[data-skeleton-apply-all]');
+{
+  const t =
+    (await page
+      .locator('[data-skeleton-replace-loses]')
+      .innerText()
+      .catch(() => '')) ?? '';
+  ck(/unit markup goes/.test(t), 'the confirmation says the unit markup goes', t);
+}
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+ck(
+  (await page.evaluate(() => window.__sk.form().getValues('assemblyCleared'))) === true,
+  'replace with no unit rows over a card with units declares assemblyCleared',
+);
+await closePanel();
+
+// ── J ───────────────────────────────────────────────────────────────────────────────────────────
+head('J — typing in the BOM does not re-read the seam graph');
+await mount({ churnShapes: true });
+await openPanel();
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+await closePanel();
+await page.evaluate(() =>
+  window.__sk.form().setValue('bomItems', [{ lineKey: 'B1', name: '' }], { shouldDirty: true }),
+);
+await page.waitForTimeout(1500);
+const readsBefore = await page.evaluate(() => window.__graphReads ?? 0);
+ck(readsBefore >= 1, 'the unit pictures read the graph once units exist', `${readsBefore} reads`);
+const word = 'cotton twill';
+for (let i = 1; i <= word.length; i++) {
+  await page.evaluate(
+    (v) => window.__sk.form().setValue('bomItems.0.name', v, { shouldDirty: true }),
+    word.slice(0, i),
+  );
+  await page.waitForTimeout(40);
+}
+await page.waitForTimeout(1500);
+const readsAfter = await page.evaluate(() => window.__graphReads ?? 0);
+ck(
+  readsAfter === readsBefore,
+  `${word.length} BOM keystrokes (contour Map re-created each time) re-read the graph 0 times`,
+  `${readsAfter - readsBefore} extra reads`,
+);
+
+// ── K ───────────────────────────────────────────────────────────────────────────────────────────
+head('K — the real engine on the blazer: the second reading, everything ticked, apply all');
+const blazer = await loadBlazer();
+if (!blazer) {
+  ck(false, 'blazer DXF found (SKELETON_PLANS)', 'corpus missing');
+} else {
+  await mount({ real: blazer });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  const first = page.locator('[data-skeleton-variants]').first();
+  const at = await first.getAttribute('data-skeleton-variants');
+  const before = await page.locator('[data-skeleton-step]').allInnerTexts();
+  await page.click(`[data-skeleton-variant="${at}.1"]`);
+  await page.waitForFunction(
+    (sel) => document.querySelector(sel)?.className.includes('bg-textColor'),
+    `[data-skeleton-variant="${at}.1"]`,
+    { timeout: 10000 },
+  );
+  const after = await page.locator('[data-skeleton-step]').allInnerTexts();
+  ck(
+    JSON.stringify(after) !== JSON.stringify(before),
+    `choosing reading ${at}.1 rebuilt the proposal`,
+  );
+  // tick everything still unticked, in order (a join's tick carries its riders)
+  for (;;) {
+    const off = page.locator(
+      '[data-skeleton-accepted="0"]:not([data-skeleton-step-applied]) [data-skeleton-check]',
+    );
+    if ((await off.count()) === 0) break;
+    await off.first().click();
+  }
+  const blocked = await page.locator('[data-skeleton-violation]').count();
+  ck(blocked === 0, 'the whole rebuilt proposal keeps the order', `${blocked} violations`);
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(
+    hard.length === 0,
+    'assemblySweep clean on the applied blazer order (second reading)',
+    JSON.stringify(hard).slice(0, 300),
+  );
+  await shot('k-blazer-second-reading', '[data-skeleton-panel]');
+  await closePanel();
+}
+
 // ── G ───────────────────────────────────────────────────────────────────────────────────────────
 head('G — the real engine on SS26-005: pictograms in the panel and on the schematic');
 const real = await loadRealCard();
@@ -508,6 +776,15 @@ if (!real) {
   await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
   const steps = await page.locator('[data-skeleton-step]').count();
   ck(steps >= 18, 'the real engine proposes the order', `${steps} steps`);
+  {
+    const head = page.locator('[data-skeleton-to-decide]');
+    const n = Number(await head.getAttribute('data-skeleton-to-decide'));
+    const riders = await page.locator('[data-skeleton-follows]').count();
+    console.log(`        header: ${(await head.innerText()).replace(/\s+/g, ' ')}`);
+    // The genuine guesses of SS26-005: collar with stand, collar into the neckline, set sleeves.
+    ck(n <= 5, 'only the genuine guesses are left to decide', `${n} to decide, ${riders} riders`);
+    ck(riders >= 15, 'presses and processing ride on their joins', `${riders} riders`);
+  }
   const outPics = await page.locator('[data-skeleton-unit] svg[role="img"]').count();
   ck(outPics >= 8, 'unit outputs carry their pictogram', `${outPics} pictograms`);
   const inPics = await page.locator('[data-skeleton-unit-input] svg[role="img"]').count();

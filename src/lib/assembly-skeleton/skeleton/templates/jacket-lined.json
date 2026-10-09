@@ -4,7 +4,7 @@
   "garmentName": "Jacket",
   "_note": "Lined jacket: the shell and the lining are two parallel subtrees (pieces with cloth = lining), assembled by the same stages; facings go onto the lining, then shell and lining are bagged at the front edge / neckline / hem / sleeve hems in one join. Order is knowledge, not geometry: the weakest template \u2014 ratify step by step.",
   "pressOpen": true,
-  "pressFlat": true,
+  "pressFlat": false,
   "mergeHands": ["back", "yoke", "collar", "stand", "hood"],
   "fuseRoles": ["front", "collar", "stand", "facing", "pocket", "cuff"],
   "stages": [

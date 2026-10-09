@@ -11,7 +11,9 @@
 import {
   SKELETON,
   type SeamGraph,
+  type SkeletonDecision,
   type SkeletonFacts,
+  type SkeletonPins,
   type SkeletonTree,
   type SkeletonUnit,
 } from '../types';
@@ -111,11 +113,44 @@ const listNames = (es: Entity[]) => es.map((e) => e.name).join(', ');
 /** Seam score floors for geometry-only grouping: notches matched, then lengths, then accepted. */
 const GEOMETRY_TIERS = [0.95, 0.75, SKELETON.accept];
 
+/**
+ * One ambiguous join as a decision. The readings keep the engine's order (its own first); `pins`
+ * may choose another, and the unit is then BUILT from that reading — everything after it reads the
+ * table as that choice left it, so the proposal stays one consistent order.
+ */
+type Reading = { inputs: Entity[]; reason: string };
+function decide(
+  pins: SkeletonPins,
+  id: string,
+  readings: Reading[],
+  live: (e: Entity) => boolean,
+): { chosen: number; decision?: SkeletonDecision; others: SkeletonUnit['alternatives'] } {
+  const want = pins[id] ?? 0;
+  // A pin that no longer fits (the reading vanished, or one of its inputs is already sewn
+  // elsewhere) falls back to the engine's own reading rather than inventing a join.
+  const chosen = want > 0 && want < readings.length && readings[want].inputs.every(live) ? want : 0;
+  if (readings.length < 2) return { chosen, others: undefined };
+  return {
+    chosen,
+    decision: { id, chosen },
+    others: readings
+      .filter((_, i) => i !== chosen)
+      .map((r) => ({ inputs: r.inputs.map((e) => e.key), seams: [], reason: r.reason })),
+  };
+}
+
+const leafId = (es: Entity[]) =>
+  es
+    .flatMap((e) => e.leaves)
+    .sort()
+    .join('+');
+
 /** B1 with the state `buildSkeleton` continues from. */
 export function groupDetailed(
   graph: SeamGraph,
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
+  pins: SkeletonPins = {},
 ): Grouping {
   const pieces = readPieces(graph, facts);
   const seams = new SeamIndex(graph, pieces, template);
@@ -140,6 +175,7 @@ export function groupDetailed(
       hand?: Entity['hand'];
       tree?: SkeletonTree;
       alternatives?: SkeletonUnit['alternatives'];
+      decision?: SkeletonDecision;
       judgement?: Pick<SkeletonUnit, 'confidence' | 'reason' | 'source'>;
     },
   ): Entity => {
@@ -164,9 +200,17 @@ export function groupDetailed(
       reason: spec.judgement?.reason ?? j.reason,
       source: spec.judgement?.source ?? j.source,
       ...(spec.alternatives?.length ? { alternatives: spec.alternatives } : {}),
+      ...(spec.decision ? { decision: spec.decision } : {}),
     });
     return e;
   };
+  const isLive = (e: Entity) => table.live.get(e.key) === e;
+  /** A reading's seams, for the alternatives the screen lists beside the chosen one. */
+  const withSeams = (alts: SkeletonUnit['alternatives']) =>
+    alts?.map((a) => {
+      const [x, ...rest] = a.inputs.map((k) => table.live.get(k)?.leaves ?? [k]);
+      return { ...a, seams: seams.between(x ?? [], rest.flat()) };
+    });
 
   // ── 0. interfacing as a separate card piece enters ONLY through a FUSING join (§G) ────────────
   for (const p of pieces.filter((x) => x.cloth === 'interfacing')) {
@@ -349,23 +393,43 @@ export function groupDetailed(
       }
       const comps = new Map<number, Entity[]>();
       nameless.forEach((e, i) => comps.set(find(i), [...(comps.get(find(i)) ?? []), e]));
-      for (const comp of comps.values()) {
+      for (const found of comps.values()) {
+        // A pinned reading earlier in this pass may already have sewn one of these elsewhere.
+        const comp = found.filter(isLive);
         if (comp.length < 2) continue;
-        const shown = comp.map((e) => e.name);
-        record(comp, {
-          name: comp.length <= 3 ? shown.join(' + ') : `${shown[0]} + ${comp.length - 1} more`,
-          roles: [],
-          kind: 'geometry',
-          why: `Sewn to each other by the pattern alone (no role in the names): ${listNames(comp)}`,
-          alternatives: comp.length === 2 ? rivals(comp, tree) : undefined,
+        const readings: Reading[] = [
+          { inputs: comp, reason: `or ${listNames(comp)} — the pattern's first reading` },
+          ...(comp.length === 2 ? rivals(comp, tree) : []),
+        ];
+        const d = decide(pins, `pair:${leafId(comp)}`, readings, isLive);
+        const pick = readings[d.chosen].inputs;
+        const named = pick.find((e) => e.roles.length > 0);
+        const shown = pick.map((e) => e.name);
+        record(pick, {
+          name: named
+            ? `${named.name} + ${pick
+                .filter((e) => e !== named)
+                .map((e) => e.name)
+                .join(' + ')}`
+            : pick.length <= 3
+              ? shown.join(' + ')
+              : `${shown[0]} + ${pick.length - 1} more`,
+          roles: named ? named.roles : [],
+          kind: named ? 'attach' : 'geometry',
+          hand: named?.hand,
+          why: d.chosen
+            ? `Your reading: ${listNames(pick)} sewn to each other`
+            : `Sewn to each other by the pattern alone (no role in the names): ${listNames(comp)}`,
+          alternatives: withSeams(d.others),
+          decision: d.decision,
         });
       }
     }
   }
   // A pair joined by geometry alone whose seam has a rival within SKELETON.ambiguity: the rival's
   // piece is the other way to read the pattern («?» in D2, the first one preselected).
-  function rivals(pair: Entity[], tree: SkeletonTree): SkeletonUnit['alternatives'] {
-    const out: NonNullable<SkeletonUnit['alternatives']> = [];
+  function rivals(pair: Entity[], tree: SkeletonTree): Reading[] {
+    const out: Reading[] = [];
     for (const c of seams.crossing(pair.map((e) => e.leaves))) {
       for (const alt of c.ambiguousWith ?? []) {
         const ends = [pieceOf(alt.a), pieceOf(alt.b)];
@@ -374,10 +438,9 @@ export function groupDetailed(
           if (!ends.some((k) => keep.leaves.includes(k))) continue;
           const other = ends.find((k) => !keep.leaves.includes(k));
           const rival = table.list(tree).find((x) => other && x.leaves.includes(other));
-          if (!rival || rival === e || out.some((o) => o.inputs.includes(rival.key))) continue;
+          if (!rival || rival === e || out.some((o) => o.inputs.includes(rival))) continue;
           out.push({
-            inputs: [keep.key, rival.key],
-            seams: [alt],
+            inputs: [keep, rival],
             reason: `or ${keep.name} with ${rival.name} — ${seams.words(alt)}`,
           });
         }
@@ -411,18 +474,29 @@ export function groupDetailed(
       }
     }
     if (!best) break;
-    const { u, t, others } = best;
+    const { u } = best;
+    const targets = [best.t, ...best.others];
+    const d = decide(
+      pins,
+      `attach:${leafId([u])}`,
+      targets.map((o, i) => ({
+        inputs: [o, u],
+        reason:
+          i === 0 ? `or to ${o.name} — its best seam` : `or to ${o.name} — a seam almost as good`,
+      })),
+      isLive,
+    );
+    const t = targets[d.chosen];
     record([t, u], {
       name: `${t.name} + ${u.name}`,
       roles: t.roles,
       kind: 'attach',
       hand: t.hand,
-      why: `${u.name} has no role in its name; its best seam goes to ${t.name}`,
-      alternatives: others.map((o) => ({
-        inputs: [o.key, u.key],
-        seams: seams.between(u.leaves, o.leaves),
-        reason: `or to ${o.name} — a seam almost as good`,
-      })),
+      why: d.chosen
+        ? `${u.name} has no role in its name; your reading sews it to ${t.name}`
+        : `${u.name} has no role in its name; its best seam goes to ${t.name}`,
+      alternatives: withSeams(d.others),
+      decision: d.decision,
     });
   }
 
@@ -452,25 +526,42 @@ export function groupDetailed(
         warnings.push(`${e.name}: no ${attachTo.join(' or ')} to sew it onto — left for the end`);
         continue;
       }
-      const [top] = cands;
-      const others = cands
-        .slice(1)
-        .filter((x) => (top.score > 0 ? x.score >= top.score - SKELETON.ambiguity : true))
-        .slice(0, 2);
-      const why = top.score
-        ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)}`
-        : `${roleName(def.id, e.hand)} goes onto ${display(top.t)} by name (${attachTo.join(' / ')})`;
+      const [first] = cands;
+      const readings = [
+        first,
+        ...cands
+          .slice(1)
+          .filter((x) => (first.score > 0 ? x.score >= first.score - SKELETON.ambiguity : true))
+          .slice(0, 2),
+      ];
+      const d = decide(
+        pins,
+        `onto:${leafId([e])}`,
+        readings.map((o, i) => ({
+          inputs: [e, o.t],
+          reason:
+            i === 0
+              ? `or onto ${o.t.name} — the pattern's first reading`
+              : o.score
+                ? `or onto ${o.t.name} — a seam almost as good`
+                : `or onto ${o.t.name}`,
+        })),
+        isLive,
+      );
+      const top = readings[d.chosen];
+      const why = d.chosen
+        ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)} — your reading`
+        : top.score
+          ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)}`
+          : `${roleName(def.id, e.hand)} goes onto ${display(top.t)} by name (${attachTo.join(' / ')})`;
       record([e, top.t], {
         name: `${display(top.t)} with ${def.name.toLowerCase()}`,
         roles: mergeRoles(top.t.roles, [def.id]),
         kind: 'attach',
         hand: top.t.hand,
         why,
-        alternatives: others.map((o) => ({
-          inputs: [e.key, o.t.key],
-          seams: seams.between(e.leaves, o.t.leaves),
-          reason: o.score ? `or onto ${o.t.name} — a seam almost as good` : `or onto ${o.t.name}`,
-        })),
+        alternatives: withSeams(d.others),
+        decision: d.decision,
       });
     }
   }
@@ -483,8 +574,9 @@ export function groupUnits(
   graph: SeamGraph,
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
+  pins: SkeletonPins = {},
 ): SkeletonUnit[] {
-  return groupDetailed(graph, facts, template).units;
+  return groupDetailed(graph, facts, template, pins).units;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────

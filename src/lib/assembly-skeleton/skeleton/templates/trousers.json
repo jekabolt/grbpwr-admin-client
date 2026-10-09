@@ -4,7 +4,7 @@
   "garmentName": "Trousers",
   "_note": "Trousers: pockets, fly and waistband built first \u2192 pockets set on the fronts \u2192 side seams per leg \u2192 inseam \u2192 crotch \u2192 zipper \u2192 waistband \u2192 belt loops \u2192 hem \u2192 buttons \u2192 final press. Back legs stay separate until the crotch seam (back is NOT merged across hands here).",
   "pressOpen": true,
-  "pressFlat": true,
+  "pressFlat": false,
   "mergeHands": ["waistband", "yoke"],
   "fuseRoles": ["waistband", "fly", "pocket", "facing"],
   "stages": [

@@ -5,12 +5,15 @@
 // 18 join steps BY INPUTS: a join counts when one of ours takes exactly the same inputs, each
 // input compared by the pieces it holds ({FP_L}, {FP_1_L}, {FP_2_L} → «Left front panel»). Order
 // of inputs, unit keys and names do not count; the partition does. Tee (hand-written truth):
-// 3 of 3 joins, ≤ 8 steps. Every proposal must pass the frontier sweep (rules 1–3, 6, 7) clean.
+// 3 of 3 joins, ≤ 8 steps. Allsizes (CLO yoke shirt, truth in fixtures/allsizes.truth.json): 5 of 5
+// joins by inputs. Every proposal must pass the frontier sweep (rules 1–3, 6, 7) clean.
 //
 // CONTROLS (the probe must be able to go red):
 //   • shuffled template stages → the joins that depend on order (collar before sleeves …) drop;
 //   • names stripped (P01 …) → geometry alone; shows what the graph carries without names;
-//   • seams removed → names alone; shows what the names carry without the graph.
+//   • seams removed → names alone; shows what the names carry without the graph;
+//   • EMPTY PROPOSAL → every fixture's gate set (SS26-005, tee, Allsizes) must FAIL on it: a gate a
+//     proposal of no steps passes measures nothing (a sweep of nothing is always clean).
 //
 // Graph: the feasibility probe's seam graph converted to the SeamGraph contract
 // (fixtures/*.json, made by fixture-from-probe.mjs). Re-run on lane A's real graph by replacing
@@ -42,9 +45,8 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { buildSkeleton, orderTemplate, skeletonDeps, readSeamGraph, loadFacts } = await import(
-  pathToFileURL(outfile).href
-);
+const { buildSkeleton, orderTemplate, skeletonDeps, readSeamGraph, proposeSkeleton, loadFacts } =
+  await import(pathToFileURL(outfile).href);
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
@@ -151,6 +153,42 @@ const gate = (name, ok, detail) => {
   if (!ok) failed++;
 };
 
+// ── the gate sets, as predicates: run on the real proposal AND on an empty one (must fail) ────
+const ssGates = (fx, p) => {
+  const m = measure(fx, p);
+  return [
+    [`≥ 14 of 18 technologist joins by inputs`, m.byInputs >= 14, `${m.byInputs}/18`],
+    ['frontier sweep clean (rules 1–3, 6, 7)', broken(p).length === 0, broken(p).join('; ')],
+    [
+      'every MACHINE step has a machine, every step a zone',
+      p.steps.every(
+        (s) =>
+          (s.operationType !== 'MACHINE' || s.machineType) && s.zone && !s.zone.endsWith('UNKNOWN'),
+      ),
+    ],
+  ];
+};
+const teeGates = (fx, p) => {
+  const m = measure(fx, p);
+  return [
+    ['3 of 3 joins by inputs', m.joins === 3 && m.byInputs === 3, `${m.byInputs}/${m.joins}`],
+    ['≤ 8 steps', p.steps.length <= 8, `${p.steps.length}`],
+    ['frontier sweep clean', broken(p).length === 0, broken(p).join('; ')],
+  ];
+};
+const alGates = (fx, p) => {
+  const m = measure(fx, p);
+  return [
+    [
+      `all ${m.joins} truth joins by inputs (allsizes.truth.json)`,
+      m.joins === 5 && m.byInputs === m.joins,
+      `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
+    ],
+    ['frontier sweep clean', broken(p).length === 0, broken(p).join('; ')],
+  ];
+};
+const gates = (prefix, list) => list.forEach(([n, ok, d]) => gate(`${prefix}: ${n}`, ok, d));
+
 // SS26-005
 const ss = load('ss26-005.json');
 if (graphArg) ss.graph = JSON.parse(readFileSync(resolve(graphArg), 'utf8'));
@@ -172,19 +210,7 @@ console.log(
 console.log(`  warnings (${ssP.warnings.length}):`);
 for (const w of ssP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(ss, ssP);
-gate('SS26-005: ≥ 14 of 18 technologist joins by inputs', ssM.byInputs >= 14, `${ssM.byInputs}/18`);
-gate(
-  'SS26-005: frontier sweep clean (rules 1–3, 6, 7)',
-  broken(ssP).length === 0,
-  broken(ssP).join('; '),
-);
-gate(
-  'SS26-005: every MACHINE step has a machine, every step a zone',
-  ssP.steps.every(
-    (s) =>
-      (s.operationType !== 'MACHINE' || s.machineType) && s.zone && !s.zone.endsWith('UNKNOWN'),
-  ),
-);
+gates('SS26-005', ssGates(ss, ssP));
 
 // SS26-005 on the REAL graph (A3 + A4 through the product pipeline)
 {
@@ -275,16 +301,14 @@ console.log(`  ours : ${teeP.steps.map((s) => s.label).join(' → ')}`);
 console.log(`  truth: ${tee.truthSteps.join(' → ')}`);
 for (const w of teeP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(tee, teeP);
-gate('Tee: 3 of 3 joins by inputs', teeM.byInputs === teeM.joins, `${teeM.byInputs}/${teeM.joins}`);
-gate('Tee: ≤ 8 steps', teeP.steps.length <= 8, `${teeP.steps.length}`);
-gate('Tee: frontier sweep clean', broken(teeP).length === 0, broken(teeP).join('; '));
+gates('Tee', teeGates(tee, teeP));
 const teePress = run(tee, {
   template: { ...orderTemplate('tee'), pressOpen: true, pressFlat: true },
 });
 console.log(`  with press steps switched on: ${teePress.steps.length} steps`);
 
-// Allsizes (CLO yoke shirt) — informative, hand-written truth
-const al = load('allsizes.json');
+// Allsizes (CLO yoke shirt) — hand-written truth, measured against allsizes.truth.json itself
+const al = { ...load('allsizes.json'), truth: load('allsizes.truth.json').joins };
 const alP = run(al);
 const alM = measure(al, alP);
 console.log(
@@ -293,7 +317,7 @@ console.log(
 if (alM.miss.length) console.log(`  missed: ${alM.miss.join(', ')}`);
 for (const w of alP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(al, alP);
-gate('Allsizes: frontier sweep clean', broken(alP).length === 0, broken(alP).join('; '));
+gates('Allsizes', alGates(al, alP));
 
 // ── every category template on a name-only card: sweep clean, one terminal, nothing orphaned ──
 console.log('\nTemplate smoke (names only, no seams)');
@@ -442,6 +466,71 @@ console.log('\nControls on SS26-005');
   const nh = measure(noHands, run(noHands));
   console.log(`  hands removed from names: ${nh.byInputs}/${nh.joins} by inputs`);
   gate('control: without hands L/R the fronts and sleeves collapse', nh.byInputs < ssM.byInputs);
+}
+
+// ── chosen readings: every reading of every ambiguous join REBUILDS a clean order ─────────────
+// The blazer (46 numbered pieces) is the corpus card whose skeleton has readings. Pinning one must
+// give a proposal where that reading IS the step and the frontier sweep stays clean — a patched
+// step would double-consume downstream (the defect this gate exists for).
+console.log('\nChosen readings on the blazer (pins → rebuild)');
+{
+  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
+  const dxf = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo/blazer.dxf');
+  let bytes = null;
+  try {
+    const buf = readFileSync(dxf);
+    bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  } catch {
+    gate('blazer DXF found', false, dxf);
+  }
+  if (bytes) {
+    const quiet = [console.log, console.warn];
+    console.log = () => {};
+    console.warn = () => {};
+    const { facts } = await loadFacts(bytes, 'M', 'jacket-lined');
+    [console.log, console.warn] = quiet;
+    const base = proposeSkeleton(facts, skeletonDeps);
+    const decisions = base.steps.filter((x) => x.decision);
+    let runs = 0;
+    let worst = 0;
+    const bad = [];
+    for (const d of decisions) {
+      for (let v = 1; v <= d.alternatives.length; v++) {
+        const t0 = performance.now();
+        const p = proposeSkeleton(facts, skeletonDeps, { pins: { [d.decision.id]: v } });
+        worst = Math.max(worst, performance.now() - t0);
+        runs++;
+        const step = p.steps.find((x) => x.decision?.id === d.decision.id);
+        if (!step || step.decision.chosen !== v) bad.push(`${d.decision.id}=${v}: not chosen`);
+        if (broken(p).length) bad.push(`${d.decision.id}=${v}: ${broken(p).join('; ')}`);
+      }
+    }
+    console.log(
+      `  ${decisions.length} ambiguous joins, ${runs} other readings rebuilt, slowest ${worst.toFixed(0)} ms`,
+    );
+    gate('blazer: the skeleton offers readings', decisions.length > 0, `${decisions.length}`);
+    gate('blazer: every chosen reading rebuilds a clean order', bad.length === 0, bad.join(' | '));
+  }
+}
+
+// ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────
+console.log('\nMutation: the empty proposal');
+{
+  const empty = { steps: [], unresolved: [], warnings: [], template: 'none' };
+  for (const [name, fx, set] of [
+    ['SS26-005', ss, ssGates],
+    ['Tee', tee, teeGates],
+    ['Allsizes', al, alGates],
+  ]) {
+    const failing = set(fx, empty)
+      .filter(([, ok]) => !ok)
+      .map(([n]) => n);
+    gate(
+      `mutation: ${name} gates go red on an empty proposal`,
+      failing.length > 0,
+      failing.length ? `red: ${failing.join('; ')}` : 'ALL GREEN on nothing',
+    );
+  }
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nall gates green');

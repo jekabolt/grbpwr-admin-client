@@ -4,7 +4,7 @@
   "garmentName": "Shirt",
   "_note": "Woven shirt, flat construction: subassemblies (collar + stand, cuffs, pockets, plackets) → panels → shoulders → collar → sleeves set flat → side + underarm in one → cuffs → hem → buttons → final press. Industry order, not a workshop's: a draft.",
   "pressOpen": true,
-  "pressFlat": true,
+  "pressFlat": false,
   "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
   "fuseRoles": ["collar", "stand", "cuff", "placket", "facing", "pocket"],
   "stages": [

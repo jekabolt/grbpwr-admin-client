@@ -18,6 +18,7 @@ import type {
   SkeletonCategory,
   SkeletonDeps,
   SkeletonFacts,
+  SkeletonOptions,
   SkeletonPieceInput,
   SkeletonProposal,
 } from 'lib/assembly-skeleton/types';
@@ -33,14 +34,16 @@ export type SkeletonProvider = (
   facts: SkeletonFacts,
   /** The card's own deps (zone inference reading its BOM and piece↔block links); else names only. */
   deps?: SkeletonDeps,
+  /** Chosen readings of ambiguous joins: the proposal is rebuilt around them. */
+  options?: SkeletonOptions,
 ) => SkeletonProposal | Promise<SkeletonProposal>;
 
 /**
  * THE PRODUCTION PROVIDER: the rules engine on the main thread. Measured in node on the 46-piece
  * lined blazer: 40–90 ms for the whole proposal, so no worker (01-PLAN D3: worker above 300 ms).
  */
-export const DEFAULT_SKELETON_PROVIDER: SkeletonProvider | null = (facts, deps) =>
-  proposeSkeleton(facts, deps ?? skeletonDeps);
+export const DEFAULT_SKELETON_PROVIDER: SkeletonProvider | null = (facts, deps, options) =>
+  proposeSkeleton(facts, deps ?? skeletonDeps, options);
 
 export const SkeletonProviderContext = createContext<SkeletonProvider | null>(
   DEFAULT_SKELETON_PROVIDER,
@@ -60,7 +63,7 @@ export type SkeletonRun =
  */
 export function useSkeletonProposal(): {
   available: boolean;
-  run: (facts: SkeletonFacts, deps?: SkeletonDeps) => void;
+  run: (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => void;
   state: SkeletonRun;
 } {
   const provider = useContext(SkeletonProviderContext);
@@ -73,14 +76,15 @@ export function useSkeletonProposal(): {
     [],
   );
   const run = useCallback(
-    (facts: SkeletonFacts, deps?: SkeletonDeps) => {
+    (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => {
       if (!provider) return;
       const my = ++gen.current;
-      setState({ status: 'running' });
+      // A rebuild (a chosen reading) keeps the proposal on screen until the new one replaces it.
+      setState((s) => (s.status === 'ready' ? s : { status: 'running' }));
       // One frame for «reading the pattern…» to paint before the pass blocks the thread.
       window.setTimeout(() => {
         Promise.resolve()
-          .then(() => provider(facts, deps))
+          .then(() => provider(facts, deps, options))
           .then(
             (proposal) => {
               if (gen.current === my) setState({ status: 'ready', proposal });

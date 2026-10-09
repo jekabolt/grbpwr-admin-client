@@ -5,11 +5,16 @@
 // the same seam the production provider plugs into; no file under src/ imports it.
 import { zodResolver } from '@hookform/resolvers/zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { SkeletonFacts, SkeletonProposal, SkeletonStep } from 'lib/assembly-skeleton/types';
+import type {
+  SkeletonFacts,
+  SkeletonOptions,
+  SkeletonProposal,
+  SkeletonStep,
+} from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
+import { FormProvider, useForm, useWatch, type UseFormReturn } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
 import { SectionHeader } from 'ui/components/section-header';
 
@@ -148,9 +153,33 @@ const MACHINE = (
   ...s,
 });
 
-/** What a rules engine would plausibly return for the tee — shape, not truth. */
-export function mockProposal(facts: SkeletonFacts): SkeletonProposal {
+/**
+ * What a rules engine would plausibly return for the tee — shape, not truth. It honours a chosen
+ * reading the way the engine does: the neck join is REBUILT on the pocket (and the neckband left
+ * out), not patched — the steps after it take the unit it now makes.
+ */
+export function mockProposal(
+  facts: SkeletonFacts,
+  options: SkeletonOptions = {},
+): SkeletonProposal {
   const has = (k: string) => facts.pieces.some((p) => p.pieceKey === k);
+  const neck = options.pins?.neck === 1 ? 1 : 0;
+  const band = {
+    inputs: ['SHOULDERS', 'NB'],
+    seams: [
+      seam('NB', 'FP', 460, 518, 2, {
+        curvature: 'complementary',
+        rule: 'band eased 11 % into the neckline',
+      }),
+    ],
+    reason: '',
+  };
+  const pocket = {
+    inputs: ['SHOULDERS', 'PKT'],
+    seams: [seam('PKT', 'FP', 140, 142, 0)],
+    reason: 'the pocket top is as long as the band end — weaker, no notches',
+  };
+  const readings = [band, pocket];
   if (!has('FP') || !has('BP'))
     return {
       steps: [],
@@ -179,30 +208,19 @@ export function mockProposal(facts: SkeletonFacts): SkeletonProposal {
         operationType: 'PRESS_OPEN',
         zone: 'TECH_CARD_GARMENT_ZONE_SHOULDER',
         seams: [],
-        confidence: 0.9,
+        confidence: 0.92,
         reason: 'press the shoulder seams before the neckband crosses them',
         source: 'template',
+        derivedFrom: 0,
       },
       MACHINE({
-        inputs: ['SHOULDERS', 'NB'],
+        ...readings[neck],
         outputUnitKey: 'NECK',
-        outputUnitName: 'Body with neckband',
+        outputUnitName: neck ? 'Body with pocket' : 'Body with neckband',
         zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
-        seams: [
-          seam('NB', 'FP', 460, 518, 2, {
-            curvature: 'complementary',
-            rule: 'band eased 11 % into the neckline',
-          }),
-        ],
         confidence: 0.66,
-        reason: '',
-        alternatives: [
-          {
-            inputs: ['SHOULDERS', 'PKT'],
-            seams: [seam('PKT', 'FP', 140, 142, 0)],
-            reason: 'the pocket top is as long as the band end — weaker, no notches',
-          },
-        ],
+        alternatives: [readings[1 - neck]],
+        decision: { id: 'neck', chosen: neck },
       }),
       MACHINE({
         inputs: ['NECK', 'SL_L'],
@@ -246,12 +264,33 @@ export function mockProposal(facts: SkeletonFacts): SkeletonProposal {
   };
 }
 
+/** A card whose skeleton has no units at all: two processing steps on loose pieces. */
+export function unitlessProposal(): SkeletonProposal {
+  return {
+    template: 'generic',
+    warnings: [],
+    unresolved: [],
+    steps: [
+      MACHINE({
+        inputs: ['NB'],
+        outputUnitKey: '',
+        outputUnitName: '',
+        zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
+        seams: [],
+        confidence: 0.9,
+        reason: 'close the band into a ring',
+        source: 'template',
+      }),
+    ],
+  };
+}
+
 // ── the stand ───────────────────────────────────────────────────────────────────────────────────
 
 /** A real card: pieces with their sewing-line contours, read by the REAL engine (scenario G). */
 type RealCard = {
   category: string;
-  pieces: { lineKey: string; name: string; piece: PieceDTO }[];
+  pieces: { lineKey: string; name: string; piece: PieceDTO; cloth?: PieceCloth['state'] }[];
 };
 
 type Mount = {
@@ -262,6 +301,10 @@ type Mount = {
   ops?: Record<string, unknown>[];
   machines?: { machineType: string }[];
   failProvider?: boolean;
+  /** The proposal has no unit at all (replace over a card with units → markup cleared). */
+  unitless?: boolean;
+  /** Clone the contour Map on every BOM change, as `usePieceShapes` does on the card. */
+  churnShapes?: boolean;
 };
 
 type Probe = {
@@ -273,6 +316,8 @@ type Probe = {
   sweep: () => { rule: number; detail: string; message: string }[];
   opErrors: () => Promise<number>;
   touch: (index: number) => void;
+  /** Unmount and mount OperationsField again, with the same door state above it. */
+  remountField: () => void;
 };
 declare global {
   interface Window {
@@ -284,6 +329,7 @@ let form: UseFormReturn<TechCardFormData> | null = null;
 let requests: string[] = [];
 let calls = 0;
 let root: Root | null = null;
+let remount: (() => void) | null = null;
 
 const SHAPES_NONE: PieceShapes = {
   shapeByKey: null,
@@ -312,7 +358,7 @@ const realShapes = (r: RealCard): PieceShapes => {
   return { shapeByKey: m, hasDxf: true, foundCount: m.size, isLoading: false, error: null };
 };
 const realCloth = (r: RealCard) =>
-  new Map<string, PieceCloth>(r.pieces.map((p) => [p.lineKey, { state: 'main' }]));
+  new Map<string, PieceCloth>(r.pieces.map((p) => [p.lineKey, { state: p.cloth ?? 'main' }]));
 const CLOTH = new Map<string, PieceCloth>([
   ['FP', { state: 'main' }],
   ['BP', { state: 'main' }],
@@ -327,6 +373,16 @@ function Stand({ m }: { m: Mount }) {
   const [shapes] = useState(() => (m.real ? realShapes(m.real) : shapesFor(!!m.noDxf)));
   const [cloth] = useState(() => (m.real ? realCloth(m.real) : CLOTH));
   const [categoryNames] = useState(() => (m.real ? [m.real.category] : []));
+  const [fieldKey, setFieldKey] = useState(0);
+  remount = () => setFieldKey((k) => k + 1);
+  // The card's contour Map gets a new identity on every BOM keystroke (usePieceShapes rebuilds it
+  // from the BOM's roll-goods scopes); the stand reproduces that churn on demand.
+  const bom = useWatch<TechCardFormData>({ name: 'bomItems' });
+  const shapeByKey = useMemo(
+    () => (m.churnShapes && shapes.shapeByKey ? new Map(shapes.shapeByKey) : shapes.shapeByKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shapes, bom],
+  );
   const skeleton = useSkeletonDoor({
     frozen: !!m.frozen,
     shapes,
@@ -341,12 +397,11 @@ function Stand({ m }: { m: Mount }) {
         question='— what each step does, where, on which pieces, and how long it takes'
         action={skeleton.headerAction}
       />
-      <CardUnitPicturesProvider
-        shapes={shapes.shapeByKey}
-        cloth={cloth}
-        categoryNames={categoryNames}
-      >
+      <CardUnitPicturesProvider shapes={shapeByKey} cloth={cloth} categoryNames={categoryNames}>
         <OperationsField
+          key={fieldKey}
+          storedHasMedia={(m.ops ?? []).some((o) => ((o.media as unknown[]) ?? []).length > 0)}
+          storedHasUnits={(m.ops ?? []).some((o) => !!o.outputUnitKey)}
           frozen={!!m.frozen}
           pieceShapes={shapes.shapeByKey}
           applyRequest={skeleton.applyRequest}
@@ -381,12 +436,13 @@ function Harness({ m }: { m: Mount }) {
     },
   });
   form = methods;
-  const provider: SkeletonProvider = (facts, deps) => {
+  const provider: SkeletonProvider = (facts, deps, options) => {
     calls += 1;
     if (m.failProvider) throw new Error('mock engine failed');
     // Scenario G runs the PRODUCTION provider — the one the tech card's context defaults to.
-    if (m.real && DEFAULT_SKELETON_PROVIDER) return DEFAULT_SKELETON_PROVIDER(facts, deps);
-    return mockProposal(facts);
+    if (m.real && DEFAULT_SKELETON_PROVIDER) return DEFAULT_SKELETON_PROVIDER(facts, deps, options);
+    if (m.unitless) return unitlessProposal();
+    return mockProposal(facts, options);
   };
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
@@ -426,7 +482,11 @@ window.__sk = {
   ops: () => (form?.getValues('operations') ?? []) as unknown as Record<string, unknown>[],
   sweep: () => {
     const ops = form?.getValues('operations') ?? [];
-    const pieces = PIECES.map((p) => ({ lineKey: p.lineKey as string, name: p.name as string }));
+    // The card's own pieces (the tee fixture or a real card), as the form holds them.
+    const pieces = (form?.getValues('pieces') ?? []).map((p) => ({
+      lineKey: (p.lineKey ?? '') as string,
+      name: (p.name ?? '') as string,
+    }));
     const keys = new Set(pieces.map((p) => p.lineKey));
     const res = assemblySweep(
       pieces,
@@ -447,4 +507,5 @@ window.__sk = {
   touch: (index) => {
     form!.setValue(`operations.${index}.smv`, '1.2', { shouldDirty: true });
   },
+  remountField: () => remount?.(),
 };

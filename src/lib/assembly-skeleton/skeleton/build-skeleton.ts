@@ -53,7 +53,7 @@ export function buildSkeleton(
   deps: SkeletonDeps,
   options: SkeletonOptions = {},
 ): SkeletonProposal {
-  const g = groupDetailed(graph, facts, template);
+  const g = groupDetailed(graph, facts, template, options.pins);
   const { table, seams, pieces } = g;
   const warnings = [...g.warnings];
   const steps: SkeletonStep[] = [];
@@ -103,6 +103,9 @@ export function buildSkeleton(
     return (inferFirst ? inferred || preferred : preferred || inferred) || fallback || OUTER;
   };
 
+  // A press after a step is not a decision of its own: it rides on the step it follows (its tick,
+  // its confidence), and the provenance is recorded HERE, where it is known — not guessed later
+  // from the press's position.
   const pushPress = (after: SkeletonStep, unitKey: string, kind: 'open' | 'flat' | 'none') => {
     if (kind === 'none' || !unitKey) return;
     if (kind === 'open' && !pressOpen) return;
@@ -114,7 +117,8 @@ export function buildSkeleton(
       operationType: kind === 'open' ? 'PRESS_OPEN' : 'PRESS',
       zone: after.zone,
       seams: [],
-      confidence: 0.5,
+      confidence: after.confidence,
+      derivedFrom: steps.indexOf(after),
       reason:
         kind === 'open'
           ? 'Press the new seam open (template)'
@@ -139,6 +143,7 @@ export function buildSkeleton(
       reason: string;
       source: SkeletonStep['source'];
       alternatives?: SkeletonStep['alternatives'];
+      decision?: SkeletonStep['decision'];
       press: 'open' | 'flat' | 'none';
     },
   ) => {
@@ -155,6 +160,7 @@ export function buildSkeleton(
       source: spec.source,
       label: spec.label,
       ...(spec.alternatives?.length ? { alternatives: spec.alternatives } : {}),
+      ...(spec.decision ? { decision: spec.decision } : {}),
     };
     steps.push(step);
     step.zone = resolveZone(steps.length - 1, spec.zone, spec.roleZone, true);
@@ -175,6 +181,17 @@ export function buildSkeleton(
       press?: 'open' | 'flat' | 'none';
     },
   ) => {
+    // Processing a unit (hem, side seams, buttonholes, final press on «Shirt») follows the join that
+    // made it: same tick, and — for the template's own steps — the same confidence. A BOM step
+    // keeps its own (the BOM is evidence), but still rides on the join's tick. Processing a loose
+    // piece (fusing, the rib closed into a ring) follows nothing and stands on its own.
+    let made = -1;
+    for (let j = steps.length - 1; j >= 0; j--) {
+      if (steps[j].outputUnitKey === target.key) {
+        made = j;
+        break;
+      }
+    }
     const step: SkeletonStep = {
       inputs: [target.key],
       outputUnitKey: '',
@@ -185,7 +202,9 @@ export function buildSkeleton(
         : {}),
       zone: '',
       seams: [],
-      confidence: spec.confidence,
+      confidence:
+        made >= 0 && spec.source === 'template' ? steps[made].confidence : spec.confidence,
+      ...(made >= 0 ? { derivedFrom: made } : {}),
       reason: spec.reason,
       source: spec.source,
       label: spec.label,
@@ -223,6 +242,7 @@ export function buildSkeleton(
       reason: u.reason,
       source: u.source,
       alternatives: u.alternatives,
+      decision: u.decision,
       press,
     });
   };

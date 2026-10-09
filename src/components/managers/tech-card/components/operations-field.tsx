@@ -6189,8 +6189,12 @@ export function OperationsField({
   draftRef.current = draftPrints;
   const pendingDraft = useRef<{ from: number; count: number; fresh: boolean } | null>(null);
 
+  // Последний увиденный nonce: перемонтированное поле получает тот же `applyRequest` (состояние
+  // живёт выше, у двери) и без этой памяти записало бы предложение второй раз.
+  const seenApply = useRef<number | null>(applyRequest?.nonce ?? null);
   useEffect(() => {
-    if (!applyRequest) return;
+    if (!applyRequest || applyRequest.nonce === seenApply.current) return;
+    seenApply.current = applyRequest.nonce;
     const answer = (r: Omit<SkeletonApplyResult, 'nonce'>) =>
       onSkeletonApplied?.({ nonce: applyRequest.nonce, ...r });
     // Гейт заморозки первой строкой — как у каждого мутатора этого файла.
@@ -6219,8 +6223,19 @@ export function OperationsField({
       // Хвостом: номера стоящих шагов не двигаются, ремапить нечего.
       append(rows);
     }
+    // ЗАМЕНА СНИМАЕТ ТО, ЧТО НЕСЛИ СТАРЫЕ ШАГИ, — и обязана сказать это серверу. Строки каркаса
+    // приходят без снимков; без объявленного намерения щит сервера отвергает «осведомлённую
+    // пустоту» против карточки со снимками — и с ней КАЖДЫЙ следующий автосейв. Так же с узлами,
+    // когда ни одна новая строка узла не объявляет. Маппер всё равно сверит флаг с сохранённой
+    // карточкой, так что лишний флаг на карточке без снимков/узлов не уходит.
+    const hadMedia =
+      storedHasMedia || current.some((o) => ((o as { media?: unknown[] }).media?.length ?? 0) > 0);
+    const hadUnits = storedHasUnits || current.some((o) => (o?.outputUnitKey ?? '').trim() !== '');
+    if (replacing && hadMedia) setValue('mediaCleared', true, { shouldDirty: true });
     if (rows.some((r) => r.outputUnitKey)) {
       setValue('assemblyCleared', false, { shouldDirty: true });
+    } else if (replacing && hadUnits) {
+      setValue('assemblyCleared', true, { shouldDirty: true });
     }
     const from = replacing ? 0 : current.length;
     pendingDraft.current = { from, count: rows.length, fresh: replacing };

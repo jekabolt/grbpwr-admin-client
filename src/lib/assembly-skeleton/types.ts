@@ -160,11 +160,30 @@ export type SkeletonStep = {
   confidence: number;
   reason: string;
   source: 'geometry' | 'template' | 'bom' | 'ai';
-  /** Alternative input sets for an ambiguous join; the first entry of `inputs` wins by default. */
+  /** The other readings of an ambiguous join (the chosen one is `inputs`), in the decision's order. */
   alternatives?: { inputs: string[]; seams: SeamCandidate[]; reason: string }[];
+  /**
+   * The ambiguous join as a decision: `id` is stable across rebuilds, `chosen` is the reading this
+   * proposal was built with (0 = the engine's own). The readings in their stable order are
+   * `alternatives` with `inputs` spliced in at `chosen`. Choosing another reading REBUILDS the whole
+   * proposal with `SkeletonOptions.pins` — never patches one step, which would leave the steps after
+   * it on the old topology.
+   */
+  decision?: SkeletonDecision;
+  /**
+   * Index (in `SkeletonProposal.steps`) of the join this processing / press step follows, set when
+   * the step is built. A derived step inherits the join's tick and confidence and is not a decision
+   * of its own: unticking the join unticks it.
+   */
+  derivedFrom?: number;
   /** What the step does, in words («Join shoulders», «Press seams open») — the row's title in D2. */
   label?: string;
 };
+
+export type SkeletonDecision = { id: string; chosen: number };
+
+/** Pinned readings: decision id → reading index (0 = the engine's own). */
+export type SkeletonPins = Readonly<Record<string, number>>;
 
 export type SkeletonProposal = {
   steps: SkeletonStep[];
@@ -201,6 +220,7 @@ export type SkeletonUnit = {
   reason: string;
   source: 'geometry' | 'template';
   alternatives?: { inputs: string[]; seams: SeamCandidate[]; reason: string }[];
+  decision?: SkeletonDecision;
 };
 
 /** The draft card a zone is inferred on: pieces + the steps built so far (unit keys provisional). */
@@ -238,8 +258,10 @@ export type SkeletonDeps = {
 export type SkeletonOptions = {
   /** PRESS_OPEN after a seam join. */
   pressOpen?: boolean;
-  /** PRESS (flat) after a turned subassembly (collar, cuff, placket …). */
+  /** PRESS (flat) after a turned subassembly (collar, cuff, placket …). Off unless asked for. */
   pressFlat?: boolean;
+  /** Readings the person chose for ambiguous joins; the proposal is rebuilt around them. */
+  pins?: SkeletonPins;
 };
 
 // ── Union pictogram (lane C) ────────────────────────────────────────────────────────────────

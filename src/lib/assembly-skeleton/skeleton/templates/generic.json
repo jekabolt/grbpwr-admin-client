@@ -4,7 +4,7 @@
   "garmentName": "Garment",
   "_note": "Any garment without a category template: subassemblies \u2192 panels \u2192 shoulders \u2192 neckline \u2192 sleeves \u2192 sides \u2192 cuffs \u2192 hem \u2192 closures from the BOM \u2192 final press. Lining, if any, is a parallel subtree bagged at the end.",
   "pressOpen": true,
-  "pressFlat": true,
+  "pressFlat": false,
   "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
   "fuseRoles": ["collar", "stand", "cuff", "placket", "facing", "pocket"],
   "stages": [

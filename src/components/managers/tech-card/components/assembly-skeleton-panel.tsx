@@ -20,6 +20,8 @@ import {
   type SeamCandidate,
   type SkeletonDeps,
   type SkeletonFacts,
+  type SkeletonOptions,
+  type SkeletonPins,
   type SkeletonProposal,
   type SkeletonStep,
 } from 'lib/assembly-skeleton/types';
@@ -150,41 +152,69 @@ function operationWords(
 
 type Variant = { inputs: string[]; seams: SeamCandidate[]; reason: string };
 
-const variantsOf = (s: SkeletonStep): Variant[] => [
-  { inputs: s.inputs, seams: s.seams, reason: s.reason },
-  ...(s.alternatives ?? []),
-];
+/**
+ * The readings of an ambiguous join in their STABLE order: the step carries the chosen one as its
+ * own inputs and the rest as `alternatives`, so the chosen one is spliced back in at its place.
+ */
+const variantsOf = (s: SkeletonStep): Variant[] => {
+  const own = { inputs: s.inputs, seams: s.seams, reason: s.reason };
+  const list = [...(s.alternatives ?? [])];
+  list.splice(Math.min(s.decision?.chosen ?? 0, list.length), 0, own);
+  return list;
+};
 
 const isAmbiguous = (s: SkeletonStep): boolean =>
   (s.alternatives?.length ?? 0) > 0 || s.seams.some((c) => (c.ambiguousWith?.length ?? 0) > 0);
 
-/** The step as it will be written: the chosen reading's inputs and seams. */
-const resolveStep = (s: SkeletonStep, variant: number): SkeletonStep => {
-  if (variant <= 0) return s;
-  const v = variantsOf(s)[variant];
-  return v ? { ...s, inputs: v.inputs, seams: v.seams, reason: v.reason } : s;
+/** The readings the proposal was built with — the base a new choice is added to. */
+const pinsOf = (p: SkeletonProposal): Record<string, number> => {
+  const pins: Record<string, number> = {};
+  for (const s of p.steps) if (s.decision) pins[s.decision.id] = s.decision.chosen;
+  return pins;
 };
 
-type StepPick = { accepted: boolean; variant: number; applied: boolean };
+/** A press or processing step that rides on the join it follows (its tick, its confidence). */
+const isDerived = (s: SkeletonStep): boolean => s.derivedFrom != null && s.derivedFrom >= 0;
+
+/** Steps that ride on step `i`, directly or through another derived step. */
+const ridersOf = (steps: readonly SkeletonStep[], i: number): number[] => {
+  const out: number[] = [];
+  const parents = new Set([i]);
+  steps.forEach((s, j) => {
+    if (isDerived(s) && parents.has(s.derivedFrom!)) {
+      out.push(j);
+      parents.add(j);
+    }
+  });
+  return out;
+};
+
+type StepPick = { accepted: boolean; applied: boolean };
 
 const defaultPick = (s: SkeletonStep): StepPick => ({
   // A guess is shown, not applied: it stays unticked until a person ticks it.
   accepted: s.confidence >= SKELETON.accept,
-  variant: 0,
   applied: false,
 });
 
 /**
- * Default picks for a whole proposal: a sure step whose input is a unit made by an UNTICKED step
- * (the final press on «Shirt» when «Set sleeves» is a guess) is unticked too — ticked, it would
- * refer to a unit the batch never makes, and «apply all accepted» would refuse the whole batch.
+ * Picks made consistent with the order: a derived step follows its join's tick, and a step whose
+ * input is a unit made by an UNTICKED step (the final press on «Shirt» when «Set sleeves» is a
+ * guess) is unticked too — ticked, it would refer to a unit the batch never makes, and «apply all
+ * accepted» would refuse the whole batch.
  */
-const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] => {
+const settlePicks = (
+  steps: readonly SkeletonStep[],
+  base: readonly StepPick[],
+  followJoin: (i: number) => boolean,
+): StepPick[] => {
   const madeBy = new Map<string, number>();
   const picks: StepPick[] = [];
   steps.forEach((s, i) => {
-    const pick = defaultPick(s);
-    if (pick.accepted)
+    const pick = { ...base[i] };
+    if (isDerived(s) && followJoin(i) && picks[s.derivedFrom!])
+      pick.accepted = picks[s.derivedFrom!].accepted;
+    if (pick.accepted && !pick.applied)
       pick.accepted = s.inputs.every((k) => {
         const j = madeBy.get(k);
         return j === undefined || picks[j].accepted;
@@ -193,6 +223,43 @@ const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] => {
     if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
   });
   return picks;
+};
+
+const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] =>
+  settlePicks(steps, steps.map(defaultPick), () => true);
+
+/**
+ * A step by WHAT it does, not where it sits or which code its unit got: operation, label and the
+ * pieces each input holds. Two proposals of one card (before and after a chosen reading) share
+ * every step the choice did not touch, and those keep the person's ticks.
+ */
+const stepSignatures = (steps: readonly SkeletonStep[]): string[] => {
+  const leaves = new Map<string, string>();
+  const seen = new Map<string, number>();
+  return steps.map((s) => {
+    const parts = s.inputs.map((k) => leaves.get(k) ?? k).sort();
+    if (s.outputUnitKey) leaves.set(s.outputUnitKey, parts.join('+').split('+').sort().join('+'));
+    const base = `${s.operationType}|${s.label ?? ''}|${parts.join(' | ')}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return `${base}#${n}`;
+  });
+};
+
+/** The person's ticks carried from the proposal they were made on to its rebuild. */
+const carryPicks = (
+  prev: SkeletonProposal | null,
+  prevPicks: readonly StepPick[],
+  next: SkeletonProposal,
+): StepPick[] => {
+  if (!prev || prevPicks.length !== prev.steps.length) return defaultPicks(next.steps);
+  const old = new Map(stepSignatures(prev.steps).map((sig, i) => [sig, prevPicks[i]]));
+  const carried = stepSignatures(next.steps).map((sig) => old.get(sig));
+  return settlePicks(
+    next.steps,
+    next.steps.map((s, i) => carried[i] ?? defaultPick(s)),
+    (i) => !carried[i],
+  );
 };
 
 // ── the door ────────────────────────────────────────────────────────────────────────────────────
@@ -235,10 +302,14 @@ export function useSkeletonDoor({
   const [result, setResult] = useState<SkeletonApplyResult | null>(null);
   const [picks, setPicks] = useState<StepPick[]>([]);
 
-  // A fresh proposal gets fresh picks; the same proposal keeps them across close/open.
+  // A fresh proposal gets fresh picks; the same proposal keeps them across close/open; a rebuild
+  // around a chosen reading keeps the ticks of every step the choice did not touch.
   const ready = proposal.state.status === 'ready' ? proposal.state.proposal : null;
+  const pickedOn = useRef<SkeletonProposal | null>(null);
   useEffect(() => {
-    setPicks(ready ? defaultPicks(ready.steps) : []);
+    const prev = pickedOn.current;
+    pickedOn.current = ready;
+    setPicks((before) => (ready ? carryPicks(prev, before, ready) : []));
   }, [ready]);
 
   // Which proposal steps each request carried, so its answer marks exactly those as applied.
@@ -364,7 +435,7 @@ function AssemblySkeletonPanel({
   onClose,
 }: {
   run: SkeletonRun;
-  onRun: (facts: SkeletonFacts, deps?: SkeletonDeps) => void;
+  onRun: (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => void;
   shapes: PieceShapes;
   cloth: ReadonlyMap<string, PieceCloth> | null;
   categoryNames: ReadonlyArray<string>;
@@ -480,7 +551,7 @@ function AssemblySkeletonPanel({
       // A replace rewrites the whole order, so steps applied earlier go in again.
       if (p && p.accepted && (!p.applied || replacing) && shown(s)) idx.push(i);
     });
-    return { idx, steps: idx.map((i) => resolveStep(proposal.steps[i], picks[i].variant)) };
+    return { idx, steps: idx.map((i) => proposal.steps[i]) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposal, picks, pressOpen, replacing]);
   const base = effectiveMode === 'replace' ? 0 : existing;
@@ -507,7 +578,7 @@ function AssemblySkeletonPanel({
   /** Why «apply this step» alone would break the order now, or '' when it would not. */
   const singleRefusal = (i: number): string => {
     if (!proposal) return '';
-    const s = resolveStep(proposal.steps[i], picks[i]?.variant ?? 0);
+    const s = proposal.steps[i];
     const res = assemblySweep(sweepPieces, [...formSteps, asAssembly(s)]);
     const v = res.violations.find((x) => x.rule !== 4 && x.step === formSteps.length);
     return v ? v.message : '';
@@ -515,15 +586,39 @@ function AssemblySkeletonPanel({
 
   const usedPieces = useMemo(() => {
     const used = new Set<string>();
-    proposal?.steps.forEach((s, i) =>
-      resolveStep(s, picks[i]?.variant ?? 0).inputs.forEach((k) => used.add(k)),
-    );
+    proposal?.steps.forEach((s) => s.inputs.forEach((k) => used.add(k)));
     return used;
-  }, [proposal, picks]);
+  }, [proposal]);
   const leftOut = built.facts.pieces.map((p) => p.pieceKey).filter((k) => !usedPieces.has(k));
 
-  const setPick = (i: number, patch: Partial<StepPick>) =>
-    onPicks((prev) => prev.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  // Ticking a join ticks what rides on it (its press, the hem on the unit it made); unticking it
+  // unticks them. A rider may still be dropped on its own.
+  const setAccepted = (i: number, accepted: boolean) => {
+    const riders = new Set(proposal ? ridersOf(proposal.steps, i) : []);
+    onPicks((prev) =>
+      prev.map((p, j) => (j === i || (riders.has(j) && !p.applied) ? { ...p, accepted } : p)),
+    );
+  };
+
+  // CHOOSING A READING REBUILDS THE PROPOSAL around it: the steps after an ambiguous join depend on
+  // which pieces it took, so patching that one step would leave them consuming the wrong units.
+  // Once a step of this proposal is in the order, the readings are fixed — a rebuild could recode
+  // the units the applied steps already made; «replace» rewrites the whole order and may.
+  const readingsLocked = !replacing && picks.some((p) => p.applied);
+  const chooseReading = (step: SkeletonStep, v: number) => {
+    if (!proposal || !step.decision || step.decision.chosen === v || readingsLocked) return;
+    const pins: SkeletonPins = { ...pinsOf(proposal), [step.decision.id]: v };
+    onRun(built.facts, deps, { pins });
+  };
+
+  // What a confirmed replace takes with the old steps, said before the confirming press.
+  const photosInForm = operations.reduce(
+    (n, o) => n + ((o as { media?: unknown[] }).media?.length ?? 0),
+    0,
+  );
+  const unitsGo =
+    operations.some((o) => (o.outputUnitKey ?? '').trim() !== '') &&
+    !batch.steps.some((s) => s.outputUnitKey);
 
   const applyAll = () => {
     if (batch.steps.length === 0) return;
@@ -536,10 +631,26 @@ function AssemblySkeletonPanel({
   };
 
   const steps = proposal?.steps ?? [];
+  // To decide = the engine's own doubts: a join it guessed or read two ways. A press or a hem that
+  // rides on a join is decided with it; a step unticked only because its join is a guess is too.
   const toCheck = steps.filter(
-    (s, i) => shown(s) && (isAmbiguous(s) || (picks[i] && !picks[i].accepted)),
+    (s) => shown(s) && !isDerived(s) && (isAmbiguous(s) || s.confidence < SKELETON.accept),
   ).length;
-  let nextNumber = base;
+  // The number each counted step will get, for «with 30» on the steps that ride on it.
+  const numbers = new Map<number, number>();
+  {
+    let n = base;
+    steps.forEach((s, i) => {
+      const stored = picks[i] ?? defaultPick(s);
+      const applied = replacing ? false : stored.applied;
+      if (shown(s) && stored.accepted && !applied) numbers.set(i, (n += 1) * 10);
+    });
+  }
+  const stepNumber = (i: number): string => {
+    const n = numbers.get(i);
+    if (n != null) return String(n);
+    return picks[i]?.applied && !replacing ? 'an applied step' : 'an unticked step';
+  };
 
   return (
     <Dialog.Root
@@ -575,6 +686,7 @@ function AssemblySkeletonPanel({
                 component='span'
                 className='tabular-nums'
                 data-skeleton-count={steps.length}
+                data-skeleton-to-decide={toCheck}
               >
                 {steps.length} {steps.length === 1 ? 'step' : 'steps'}
                 {toCheck > 0 ? ` · ${toCheck} to decide` : ''} · read off the pattern, nothing
@@ -679,9 +791,9 @@ function AssemblySkeletonPanel({
                     const stored = picks[i] ?? defaultPick(raw);
                     // Under «replace» an applied step is rewritten with the rest: it reads as open.
                     const pick = replacing ? { ...stored, applied: false } : stored;
-                    const s = resolveStep(raw, pick.variant);
+                    const s = raw;
                     const counted = pick.accepted && (!pick.applied || replacing);
-                    const number = counted ? (nextNumber += 1) * 10 : null;
+                    const number = counted ? numbers.get(i) ?? null : null;
                     return (
                       <SkeletonLine
                         key={i}
@@ -715,8 +827,10 @@ function AssemblySkeletonPanel({
                         unitInput={
                           renderUnit ? (k: string) => renderUnit(k, nameOf(k), proposal) : undefined
                         }
-                        onAccept={(v) => setPick(i, { accepted: v })}
-                        onVariant={(v) => setPick(i, { variant: v })}
+                        follows={isDerived(raw) ? stepNumber(raw.derivedFrom!) : null}
+                        readingsLocked={readingsLocked}
+                        onAccept={(v) => setAccepted(i, v)}
+                        onVariant={(v) => chooseReading(raw, v)}
                         onApplyOne={() => onApply([s], [i], 'append')}
                       />
                     );
@@ -786,7 +900,15 @@ function AssemblySkeletonPanel({
               className='min-w-0 flex-1'
               data-skeleton-footer='1'
             >
-              {result?.refused ? (
+              {confirmReplace ? (
+                <span data-skeleton-replace-loses={photosInForm}>
+                  the {existing} {existing === 1 ? 'step goes' : 'steps go'}
+                  {photosInForm > 0
+                    ? ` · ${photosInForm} step ${photosInForm === 1 ? 'photo' : 'photos'} will be removed`
+                    : ''}
+                  {unitsGo ? ' · the unit markup goes with them' : ''}
+                </span>
+              ) : result?.refused ? (
                 <span className='text-error' data-skeleton-refused='1'>
                   not applied — {result.refused}
                 </span>
@@ -862,6 +984,8 @@ function SkeletonLine({
   singleRefusal,
   unitSlot,
   unitInput,
+  follows,
+  readingsLocked,
   onAccept,
   onVariant,
   onApplyOne,
@@ -881,6 +1005,10 @@ function SkeletonLine({
   unitSlot: ReactNode;
   /** An earlier unit taken as an input, drawn as its pictogram; null → the plain «▣ key» tile. */
   unitInput?: (unitKey: string) => ReactNode;
+  /** The number of the join this step rides on («30»), or null for a step of its own. */
+  follows: string | null;
+  /** A step of this proposal is already in the order: the readings can no longer change. */
+  readingsLocked: boolean;
   onAccept: (v: boolean) => void;
   onVariant: (v: number) => void;
   onApplyOne: () => void;
@@ -968,15 +1096,29 @@ function SkeletonLine({
         </span>
       ) : null}
 
-      <Text
-        size='micro'
-        variant='label'
-        component='span'
-        className={cn('shrink-0 uppercase', word === 'sure' && 'text-textColor')}
-        data-skeleton-confidence={index}
-      >
-        {word}
-      </Text>
+      {follows != null ? (
+        // A rider is not a decision: it says which join it goes with instead of how sure it is.
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className='shrink-0 uppercase'
+          data-skeleton-follows={index}
+          title='rides on that join: ticked and unticked with it'
+        >
+          ↳ with {follows}
+        </Text>
+      ) : (
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className={cn('shrink-0 uppercase', word === 'sure' && 'text-textColor')}
+          data-skeleton-confidence={index}
+        >
+          {word}
+        </Text>
+      )}
       {ambiguous && (
         <Text
           size='control'
@@ -1035,9 +1177,14 @@ function SkeletonLine({
               <Chip
                 key={vi}
                 nonForm
-                selected={pick.variant === vi}
+                selected={(raw.decision?.chosen ?? 0) === vi}
+                disabled={!raw.decision || readingsLocked}
                 onClick={() => onVariant(vi)}
-                title={v.reason}
+                title={
+                  readingsLocked
+                    ? 'a step of this skeleton is already in the order; switch to «replace» to choose again'
+                    : `${v.reason} · choosing it re-reads the steps after it`
+                }
                 data-skeleton-variant={`${index}.${vi}`}
               >
                 {v.inputs.map(nameOf).join(' + ')}
@@ -1046,7 +1193,7 @@ function SkeletonLine({
           </ChipRow>
         </div>
       )}
-      {pick.accepted && step.confidence < SKELETON.accept && (
+      {pick.accepted && follows == null && step.confidence < SKELETON.accept && (
         <Text size='micro' variant='label' component='span' className='w-full pl-[3.25rem]'>
           a guess — kept because you ticked it
         </Text>

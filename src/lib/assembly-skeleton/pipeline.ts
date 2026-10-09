@@ -14,6 +14,7 @@ import type {
   SkeletonDeps,
   SkeletonFacts,
   SkeletonOptions,
+  SkeletonPins,
   SkeletonProposal,
 } from './types';
 
@@ -21,18 +22,23 @@ import type {
 export function readSeamGraph(
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
+  pins: SkeletonPins = {},
 ): SeamGraph {
   const first = buildSeamGraph(facts);
-  return compositeSeams(first, groupUnits(first, facts, template));
+  return compositeSeams(first, groupUnits(first, facts, template, pins));
 }
 
-/** The whole proposal; it carries the graph it was read from (the screen draws pictograms on it). */
+/**
+ * The whole proposal; it carries the graph it was read from (the screen draws pictograms on it).
+ * Chosen readings (`options.pins`) rebuild it from the units up — the composite pass reads the
+ * units, so the graph is read again too (20–90 ms on the 46-piece blazer, once per choice).
+ */
 export function proposeSkeleton(
   facts: SkeletonFacts,
   deps: SkeletonDeps,
   options: SkeletonOptions = {},
 ): SkeletonProposal {
   const template = orderTemplate(facts.category);
-  const graph = readSeamGraph(facts, template);
+  const graph = readSeamGraph(facts, template, options.pins);
   return { ...buildSkeleton(graph, facts, template, deps, options), graph };
 }
