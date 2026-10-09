@@ -52,6 +52,7 @@ const REASON: Record<string, string> = {
   grammar: 'code grammar',
   'duplicate-identity': 'code used twice',
   'size-unmapped': 'size not mapped',
+  'fold-unresolved': 'fold edge not found',
 };
 
 export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {

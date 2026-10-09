@@ -463,6 +463,13 @@ export type SizeMapEntry = {
   /** null = this source size is NOT exported (not in the card's run). */
   card: CardSize | null;
   origin: 'auto' | 'operator';
+  /**
+   * 0..1 for an 'auto' entry (F5 proposeSizeMap): 1 = same token, lower = alias / numeric
+   * equivalent / tall size / run alignment. Below 0.9 the wizard asks the operator to confirm.
+   */
+  confidence?: number;
+  /** Why this card size (or why none) — shown next to the row. */
+  evidence?: string[];
 };
 
 export type SizeMap = {
@@ -743,7 +750,9 @@ export type BlockReason =
   | 'non-monotone'
   | 'grammar'
   | 'duplicate-identity'
-  | 'size-unmapped';
+  | 'size-unmapped'
+  /** "On fold" declared/detected but no straight fold edge to mirror across — unfold by hand. */
+  | 'fold-unresolved';
 
 export type DetectAllowanceFn = (sheet: Sheet, families: PieceFamily[]) => AllowanceDecision;
 export type BuildPieceSpecsFn = (input: SemanticsInput, progress?: Progress) => SemanticsOutput;
