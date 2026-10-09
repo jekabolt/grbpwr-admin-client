@@ -619,7 +619,8 @@ function pagePairs(poses: PagePose[], manual: boolean): PairTransform[] {
         rotDeg: 0,
         method: manual ? 'manual' : weak ? 'edge-stitch' : 'recurrence',
         score: weak ? 9 : 40 + ((a.page * 7) % 30),
-        secondBestRatio: weak ? 2.1 : 4 + ((a.page * 3) % 5),
+        // second-best / best votes, as F2 reports it: 0 = one clear peak, ≥ 1/3 = ambiguous.
+        secondBestRatio: weak ? 0.48 : 1 / (4 + ((a.page * 3) % 5)),
       });
     }
   return out;

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   ApplyResult,
+  ImportErrorCode,
   ChainRole,
   ClassId,
   FabricAssignment,
@@ -26,6 +27,8 @@ import type {
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { importErrorCode } from 'lib/pattern-import/worker/client';
+import { anisotropyOf, squareSidesOf } from './formats';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -60,6 +63,10 @@ export type Inputs = {
   manualMeasuredMm: number | null;
   scaleConfirmed: boolean;
   gridOverride: GridOverride | undefined;
+  /** The tile sheet being assembled (a Burda file carries several). */
+  sheetIndex: number;
+  /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
+  residualsAccepted: boolean;
   legend: LegendEdit[];
   /** Low-confidence legend rows the operator has looked at and accepted. */
   legendConfirmed: ClassId[];
@@ -84,6 +91,8 @@ const EMPTY_INPUTS: Inputs = {
   manualMeasuredMm: null,
   scaleConfirmed: false,
   gridOverride: undefined,
+  sheetIndex: 0,
+  residualsAccepted: false,
   legend: [],
   legendConfirmed: [],
   sizeMap: null,
@@ -141,6 +150,17 @@ function dropAfter(s: ImportSession, to: WizardStep): ImportSession {
   return next;
 }
 
+/** What extract said besides the contract's session fields (warnings, DXF fast path, scans). */
+export type ExtractInfo = Pick<
+  StageIO['extract']['out'],
+  'warnings' | 'presegmented' | 'calibrations'
+>;
+const NO_EXTRACT: ExtractInfo = { warnings: [] };
+
+/** A best scale candidate the operator does not need to look at (DXF with declared units). */
+const certainScale = (c: StageIO['extract']['out']['scale'][number] | undefined) =>
+  !!c && c.confidence >= 0.9 && Math.abs(c.factor - 1) <= PATIMPORT.scaleWarnRatio;
+
 export type ApplyState =
   | { phase: 'idle' }
   | { phase: 'running'; progress: Record<string, ApplyProgress['state']> }
@@ -157,6 +177,12 @@ export function useImportSession(deps: {
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
+  const [extracted, setExtracted] = useState<ExtractInfo>(NO_EXTRACT);
+  const [errorCode, setErrorCode] = useState<ImportErrorCode | null>(null);
+  /** The latest Set-of-Mark render (what the AI was shown), kept to draw it on the details step. */
+  const [som, setSom] = useState<StageIO['render-som']['out'] | null>(null);
+  const exRef = useRef(extracted);
+  exRef.current = extracted;
   // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
   // because `pieces.in.seeds` replaces the whole list (no 'add' edit kind in the contract).
   const baseSeeds = useRef<Seed[] | null>(null);
@@ -165,18 +191,24 @@ export function useImportSession(deps: {
   const iRef = useRef(inputs);
   iRef.current = inputs;
 
-  const patch = useCallback((p: Partial<ImportSession>) => setSession((s) => ({ ...s, ...p })), []);
+  // The ref follows every patch at once: transitions read `sRef.current` between awaits, before
+  // React re-renders (a stale ref put a finished stage's `busy` back with `dropAfter`).
+  const patch = useCallback((p: Partial<ImportSession>) => {
+    sRef.current = { ...sRef.current, ...p };
+    setSession((s) => ({ ...s, ...p }));
+  }, []);
   const patchInputs = useCallback(
     (p: Partial<Inputs> | ((i: Inputs) => Partial<Inputs>)) =>
       setInputs((i) => ({ ...i, ...(typeof p === 'function' ? p(i) : p) })),
     [],
   );
 
-  // Close the worker session when the wizard unmounts.
+  // Close the worker session — and end the worker — when the wizard unmounts.
   useEffect(
     () => () => {
       const id = sRef.current.sessionId;
       if (id != null) void client.close(id);
+      client.dispose?.();
     },
     [client],
   );
@@ -185,6 +217,7 @@ export function useImportSession(deps: {
     const id = sRef.current.sessionId;
     if (id == null) throw new Error('no session — read the files first');
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
+    setErrorCode(null);
     try {
       return await client.run(id, stage, input, (p) =>
         patch({ busy: { stage, done: p.done, total: p.total, note: p.note } }),
@@ -194,8 +227,28 @@ export function useImportSession(deps: {
     }
   }
 
-  const fail = (e: unknown) =>
-    patch({ busy: null, error: e instanceof Error ? e.message : String(e) });
+  const fail = (e: unknown) => {
+    const message = e instanceof Error ? e.message : String(e);
+    const code = importErrorCode(e);
+    setErrorCode(code);
+    const id = sRef.current.sessionId;
+    // The worker was restarted (a stage that would not stop, a crash): its session is gone, so
+    // the run starts over from the files — still staged on the files step.
+    if (id != null && client.alive && !client.alive(id)) {
+      baseSeeds.current = null;
+      setSom(null);
+      setApply({ phase: 'idle' });
+      setExtracted(NO_EXTRACT);
+      const next = {
+        ...EMPTY_SESSION,
+        error: /read the files again/.test(message) ? message : `${message} — read the files again`,
+      };
+      sRef.current = next;
+      setSession(next);
+      return;
+    }
+    patch({ busy: null, error: message });
+  };
 
   // ── derived inputs ───────────────────────────────────────────────────────────────────────
   const scaleDecision = (i: Inputs = iRef.current): ScaleDecision | null => {
@@ -237,6 +290,8 @@ export function useImportSession(deps: {
         case 'files': {
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
+          setSom(null);
+          setExtracted(NO_EXTRACT);
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
@@ -255,23 +310,41 @@ export function useImportSession(deps: {
             0,
           );
           patchInputs({ scaleIndex: best });
+          setExtracted({
+            warnings: out.warnings,
+            presegmented: out.presegmented,
+            calibrations: out.calibrations,
+          });
+          exRef.current = {
+            warnings: out.warnings,
+            presegmented: out.presegmented,
+            calibrations: out.calibrations,
+          };
           patch({
             files: out.files,
             pages: out.pages,
             scale: { candidates: out.scale, decision: null },
           });
-          if (out.warnings.length) patch({ error: null });
           return;
         }
         case 'scale': {
           await run('scale', { decision: ev.decision });
           patch({ scale: { ...sRef.current.scale, decision: ev.decision } });
-          const out = await run('assemble', { sheet: 0, override: iRef.current.gridOverride });
+          if (exRef.current.presegmented) return await fastPath();
+          const out = await run('assemble', {
+            sheet: iRef.current.sheetIndex,
+            override: iRef.current.gridOverride,
+          });
           patch({ sheet: out, step: 'sheet' });
           return;
         }
         case 'sheet': {
-          patchInputs({ gridOverride: ev.override });
+          patchInputs({
+            gridOverride: ev.override,
+            sheetIndex: ev.sheet,
+            residualsAccepted: false,
+          });
+          iRef.current = { ...iRef.current, gridOverride: ev.override, sheetIndex: ev.sheet };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
           patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
           return;
@@ -394,12 +467,15 @@ export function useImportSession(deps: {
         }
         case 'back':
           setApply({ phase: 'idle' });
+          setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
           return;
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
           baseSeeds.current = null;
+          setSom(null);
+          setExtracted(NO_EXTRACT);
           setInputs(EMPTY_INPUTS);
           setApply({ phase: 'idle' });
           setSession(EMPTY_SESSION);
@@ -409,6 +485,48 @@ export function useImportSession(deps: {
     } catch (e) {
       fail(e);
     }
+  }
+
+  /**
+   * pieces → details: the SoM render (worker), the AI names (main thread), then semantics. The
+   * step moves to details as soon as the pieces are named, so a stage that is not built yet
+   * (semantics, F5) fails ON the details step, where the operator can see what was found.
+   */
+  async function toDetails() {
+    const fams = sRef.current.pieces?.families ?? [];
+    const out = await run('render-som', { seeds: fams.map((f) => f.seed), dpi: 72 });
+    setSom(out);
+    patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
+    let names: NameDecision[] = [];
+    let namerError: string | null = null;
+    try {
+      names = mergeNames(await namer(out, { card, threshold: AI_AUTO_ACCEPT_T }));
+    } catch (e) {
+      namerError = `AI names: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    patch({ busy: null, names, step: 'meaning' });
+    const overrides = overridesFromNames(names, iRef.current.overrides);
+    patchInputs({ overrides });
+    iRef.current = { ...iRef.current, overrides };
+    const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
+    patch({ semantics: sem, ...(namerError ? { error: namerError } : {}) });
+  }
+
+  /**
+   * DXF fast path (F8): the blocks already are pieces × sizes, so assemble / chains / pieces are
+   * answered from the segmentation and the wizard lands on details. The steps in between show as
+   * passed; going back to one of them re-enters it with the DXF's own answers.
+   */
+  async function fastPath() {
+    const sheet = await run('assemble', { sheet: 0 });
+    patch({ sheet });
+    const chains = await run('chains', { opts: chainOpts() });
+    patch({ chains });
+    const pieces = await run('pieces', piecesInput({ ...iRef.current, variant: null }));
+    baseSeeds.current = pieces.seeds;
+    patch({ pieces, variant: null });
+    sRef.current = { ...sRef.current, sheet, chains, pieces };
+    await toDetails();
   }
 
   const chainOpts = () => ({
@@ -451,9 +569,20 @@ export function useImportSession(deps: {
     const s = sRef.current;
     try {
       switch (s.step) {
-        case 'files':
+        case 'files': {
+          // A garment DXF with declared units has nothing to ask on the scale step: confirm it
+          // and go straight to the pieces it already carries.
+          const best = s.scale.candidates[iRef.current.scaleIndex];
+          if (exRef.current.presegmented && certainScale(best)) {
+            await dispatch({
+              type: 'scale',
+              decision: { factor: best.factor, method: best.method, operatorConfirmed: false },
+            });
+            return;
+          }
           patch({ step: 'scale' });
           return;
+        }
         case 'scale': {
           const d = scaleDecision();
           if (d) await dispatch({ type: 'scale', decision: d });
@@ -479,22 +608,9 @@ export function useImportSession(deps: {
           patch({ pieces: out, variant: first ? null : iRef.current.variant, step: 'pieces' });
           return;
         }
-        case 'pieces': {
-          const som = await run('render-som', {
-            seeds: s.pieces?.families.map((f) => f.seed) ?? [],
-            dpi: 72,
-          });
-          patch({
-            busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' },
-          });
-          const names = mergeNames(await namer(som, { card, threshold: AI_AUTO_ACCEPT_T }));
-          patch({ busy: null, names });
-          const overrides = overridesFromNames(names, iRef.current.overrides);
-          patchInputs({ overrides });
-          const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
-          patch({ semantics: sem, step: 'meaning' });
+        case 'pieces':
+          await toDetails();
           return;
-        }
         case 'meaning': {
           const out = await run('fabrics', { bom: card.scopes });
           // An assignment the operator already edited survives a round trip through `back`.
@@ -535,17 +651,23 @@ export function useImportSession(deps: {
         if (!c) return 'pick how the scale is known';
         const d = scaleDecision(inputs);
         const off = d ? Math.abs(d.factor - 1) : 0;
-        const needsHuman = c.confidence < 0.9 || off > PATIMPORT.scaleWarnRatio;
+        const sides = squareSidesOf(c.evidence?.text);
+        const needsHuman =
+          c.confidence < 0.9 ||
+          off > PATIMPORT.scaleWarnRatio ||
+          (!!sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio);
         if (needsHuman && !inputs.scaleConfirmed && !inputs.manualMeasuredMm)
-          return 'confirm the scale — the detection is not certain';
+          return sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio
+            ? 'the test square is not square in the file — measure it on paper or confirm'
+            : 'confirm the scale — the detection is not certain';
         return null;
       }
       case 'sheet': {
         const miss = s.sheet?.sheet.missing.length ?? 0;
         if (miss) return `${miss} pages are missing — set the grid by hand`;
         const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
-        if (worst > PATIMPORT.registrationMaxResidualMm)
-          return `tiles do not close: ${worst.toFixed(2)} mm > ${PATIMPORT.registrationMaxResidualMm} mm`;
+        if (worst > PATIMPORT.registrationMaxResidualMm && !inputs.residualsAccepted)
+          return `tiles do not close: ${worst.toFixed(2)} mm > ${PATIMPORT.registrationMaxResidualMm} mm — check the seams, then accept or set the grid`;
         return null;
       }
       case 'sizes': {
@@ -571,7 +693,8 @@ export function useImportSession(deps: {
         return null;
       }
       case 'meaning': {
-        const blocked = s.semantics?.blocked ?? [];
+        if (!s.semantics) return 'piece details are not built yet';
+        const blocked = s.semantics.blocked;
         if (blocked.length) {
           const grain = blocked.filter((b) => b.reason === 'no-grain').length;
           return grain
@@ -689,6 +812,10 @@ export function useImportSession(deps: {
     session,
     inputs,
     apply,
+    extracted,
+    errorCode,
+    som,
+    clientKind: client.kind,
     blocker,
     sizeTokens,
     baseSeeds: baseSeeds.current,
