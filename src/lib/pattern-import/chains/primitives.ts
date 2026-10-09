@@ -94,6 +94,8 @@ export const ITEM = {
   fillDashMaxWidthMm: 1.0,
   fillDashMinMm: 0.8,
   fillDotMaxMm: 1.3,
+  /** Filled closed marks up to this size (not dots, not dashes) are ticks / chevrons. */
+  fillMarkMaxMm: 2.0,
 };
 
 /** Classify one IR path. null = not line work (letters, logos, page fills). */
@@ -106,10 +108,13 @@ export function itemOf(p: IRPath, style: Style): Item | null {
     // Fill-only: a thin elongated shape is a dash drawn as an outline; a small blob is a dot.
     if (!p.closed && p.pts.length < 3) return null;
     const pr = principal(p.pts);
-    if (pr.major <= ITEM.fillDotMaxMm && pr.minor <= ITEM.fillDotMaxMm)
+    // a dot is round; a small elongated fill is a mark (reef's zigzag pieces are 1.2 × 0.75)
+    const round = pr.minor >= 0.75 * pr.major || pr.major <= 0.6;
+    if (pr.major <= ITEM.fillDotMaxMm && pr.minor <= ITEM.fillDotMaxMm && round)
       return {
         kind: 'bead',
         bead: 'dot',
+        size: Math.max(pr.major, pr.minor),
         path: p.id,
         pts: p.pts,
         edges,
@@ -138,6 +143,23 @@ export function itemOf(p: IRPath, style: Style): Item | null {
         sub: p.src.sub,
       };
     }
+    if (p.closed && pr.major <= ITEM.fillMarkMaxMm && pr.minor >= 0.25)
+      // a small filled mark: reef's chevrons «∠∠∠» and the zigzag pieces of «^^o^^o» are filled
+      // outlines, one mark per path — a bead of a line of marks
+      return {
+        kind: 'bead',
+        bead: 'tick',
+        size: pr.major,
+        path: p.id,
+        pts: p.pts,
+        edges,
+        len: 0,
+        style: style.id,
+        c: pr.c,
+        dir: pr.u,
+        op,
+        sub: p.src.sub,
+      };
     return null;
   }
   if (!strokeOnly) return null;

@@ -35,6 +35,8 @@ export const LINK = {
   /** Dots of a dot-only line are at most this far apart; such a line has ≥ minDots dots. */
   beadGapMm: 4.5,
   minDots: 6,
+  /** A lone stroke up to this long may be one mark of a row of marks («—ooo—ooo»). */
+  markStrokeMm: 5,
 };
 
 /** Visual identity of a style for joining: colour (coarse), width (0.05), fill, layer, dash. */
@@ -157,45 +159,52 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   // ── pass 1: operation chains ────────────────────────────────────────────────────────────────
   const chains: WChain[] = [];
   const freeBeads: Item[] = [];
-  for (const arr of byOp.values()) {
-    arr.sort((a, b) => a.sub - b.sub);
-    if (arr.length === 1) {
-      if (arr[0].kind === 'bead') freeBeads.push(arr[0]);
-      else chains.push({ items: [{ it: arr[0], rev: false }], decor: [], dead: false });
-      continue;
-    }
-    let cur: WChain | null = null;
-    for (const it of arr) {
-      if (cur) {
-        const l: Link = { it, rev: false };
-        const [a, b] = itemEnds(l);
-        if (cur.items.length === 1) {
-          // first junction: both orientations of the first item are open
-          const f = cur.items[0];
-          const [fa, fb] = itemEnds(f);
-          const opts4 = [
-            { g: dist(fb, a), frev: f.rev, rev: false },
-            { g: dist(fb, b), frev: f.rev, rev: true },
-            { g: dist(fa, a), frev: !f.rev, rev: false },
-            { g: dist(fa, b), frev: !f.rev, rev: true },
-          ].sort((x, y) => x.g - y.g)[0];
-          if (opts4.g <= LINK.opGapMm) {
-            f.rev = opts4.frev;
-            cur.items.push({ it, rev: opts4.rev });
-            continue;
-          }
-        } else {
-          const e = chainEnd(cur, 1);
-          const g0 = dist(e, a);
-          const g1 = dist(e, b);
-          if (Math.min(g0, g1) <= LINK.opGapMm) {
-            cur.items.push({ it, rev: g1 < g0 });
-            continue;
+  for (const arr0 of byOp.values()) {
+    arr0.sort((a, b) => a.sub - b.sub);
+    // one paint operation has one style in a vector PDF; a traced raster (leonie) may put every
+    // colour of a tile into one operation — link only subpaths drawn alike
+    const keys = new Set(arr0.map((it) => keyOf.get(it.style)));
+    const parts =
+      keys.size > 1 ? [...keys].map((k) => arr0.filter((it) => keyOf.get(it.style) === k)) : [arr0];
+    for (const arr of parts) {
+      if (arr.length === 1) {
+        if (arr[0].kind === 'bead') freeBeads.push(arr[0]);
+        else chains.push({ items: [{ it: arr[0], rev: false }], decor: [], dead: false });
+        continue;
+      }
+      let cur: WChain | null = null;
+      for (const it of arr) {
+        if (cur) {
+          const l: Link = { it, rev: false };
+          const [a, b] = itemEnds(l);
+          if (cur.items.length === 1) {
+            // first junction: both orientations of the first item are open
+            const f = cur.items[0];
+            const [fa, fb] = itemEnds(f);
+            const opts4 = [
+              { g: dist(fb, a), frev: f.rev, rev: false },
+              { g: dist(fb, b), frev: f.rev, rev: true },
+              { g: dist(fa, a), frev: !f.rev, rev: false },
+              { g: dist(fa, b), frev: !f.rev, rev: true },
+            ].sort((x, y) => x.g - y.g)[0];
+            if (opts4.g <= LINK.opGapMm) {
+              f.rev = opts4.frev;
+              cur.items.push({ it, rev: opts4.rev });
+              continue;
+            }
+          } else {
+            const e = chainEnd(cur, 1);
+            const g0 = dist(e, a);
+            const g1 = dist(e, b);
+            if (Math.min(g0, g1) <= LINK.opGapMm) {
+              cur.items.push({ it, rev: g1 < g0 });
+              continue;
+            }
           }
         }
+        cur = { items: [{ it, rev: false }], decor: [], dead: false };
+        chains.push(cur);
       }
-      cur = { items: [{ it, rev: false }], decor: [], dead: false };
-      chains.push(cur);
     }
   }
   // An op chain made only of beads is not a line yet: release its beads.
@@ -306,19 +315,43 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     if (!merged) break;
   }
 
-  // ── pass 3: decorations ─────────────────────────────────────────────────────────────────────
+  // ── pass 3: lines of marks, then decorations ─────────────────────────────────────────────────
   // Tiny one-piece chains that CROSS a longer line ("////" ticks, "x" marks drawn as 1.4 mm
-  // strokes) are that line's decoration, like beads.
+  // strokes) are that line's decoration, like beads. But a ROW of marks is a line of its own even
+  // where it runs within decorMm of another line (reef's hem: «∠∠∠» and «^^o^^o» touch the XS
+  // dash), and short lone strokes between ring groups make one line too («—ooo—ooo», reef 3XL) —
+  // so rows are chained first and only rows that hug one line all along become its decoration.
   const isTiny = (ch: WChain) =>
     ch.items.length <= 2 && ch.items.reduce((a, l) => a + l.it.len, 0) <= LINK.tinyMm;
+  const isShortLone = (ch: WChain) =>
+    !isTiny(ch) &&
+    ch.items.length === 1 &&
+    ch.items[0].it.kind === 'stroke' &&
+    ch.items[0].it.len <= LINK.markStrokeMm;
   const hosts = chains.filter((c) => !c.dead && !isTiny(c));
+  const hostIdx = new Map(hosts.map((h, k) => [h, k]));
   const grid = new SegGrid(4);
   const ptsOf = hosts.map((ch) => ch.items.flatMap(linkPts));
   ptsOf.forEach((pts, ci) => grid.addPolyline(ci, pts));
-  const nearestHost = (p: PtMm, dir: PtMm | null, minCrossDeg: number) => {
+  // a host drawn with its own declared dash is a line of its own: a row of marks running on it is
+  // another size sharing the stretch (reef: 5XL rings on the 4XL dash), not its decoration
+  const declaredHost = hosts.map((h) =>
+    h.items.some((l) => {
+      const d = styles.get(l.it.style)?.dash;
+      return l.it.kind !== 'bead' && !!d && d.some((v) => v > 0.01);
+    }),
+  );
+  const nearestHost = (
+    p: PtMm,
+    dir: PtMm | null,
+    minCrossDeg: number,
+    self = -1,
+    skipDeclared = false,
+  ) => {
     let best = LINK.decorMm;
     let bi = -1;
     grid.near(p, LINK.decorMm, (ci, si) => {
+      if (ci === self || dropped.has(ci) || (skipDeclared && declaredHost[ci])) return;
       const pts = ptsOf[ci];
       const a = pts[si];
       const b = pts[si + 1];
@@ -334,8 +367,68 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
     });
     return bi;
   };
+  const dropped = new Set<number>(); // hosts consumed by a row of marks
+  const markOf = (ch: WChain): Item => {
+    const pts = ch.items.flatMap(linkPts);
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    const L = dist(a, b);
+    const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const dir = L > 0.05 ? { x: (b.x - a.x) / L, y: (b.y - a.y) / L } : null;
+    return {
+      ...ch.items[0].it,
+      kind: 'bead',
+      bead: 'tick',
+      c,
+      dir,
+      extra: ch.items.slice(1).map((l) => l.it),
+    };
+  };
+  const pool: Item[] = [...freeBeads];
+  const chainOfMark = new Map<Item, WChain>();
+  const markOfChain = new Map<WChain, Item>();
+  for (const ch of chains) {
+    if (ch.dead || !(isTiny(ch) || isShortLone(ch))) continue;
+    const m = markOf(ch);
+    pool.push(m);
+    chainOfMark.set(m, ch);
+    markOfChain.set(ch, m);
+  }
+  const rows = chainBeads(pool).filter((row) => {
+    // a row that hugs other lines all along is their decoration (viola's «//////» on size 38)
+    let near = 0;
+    for (const l of row.items) {
+      const own = chainOfMark.get(l.it);
+      const self = own ? hostIdx.get(own) ?? -1 : -1;
+      if (nearestHost(l.it.c!, null, 0, self, true) >= 0) near++;
+    }
+    const marks = row.items.filter((l) => chainOfMark.has(l.it) && !isTiny(chainOfMark.get(l.it)!));
+    // a row of short strokes only is a dashed line the tracker did not join, not marks
+    if (marks.length === row.items.length) return false;
+    return near < 0.7 * row.items.length;
+  });
+  const used = new Set<Item>();
+  for (const row of rows) {
+    for (const l of row.items) {
+      used.add(l.it);
+      const own = chainOfMark.get(l.it);
+      if (own) {
+        own.dead = true;
+        const k = hostIdx.get(own);
+        if (k !== undefined) dropped.add(k);
+      }
+    }
+    row.items = row.items.flatMap((l) => [
+      l,
+      ...(l.it.extra ?? []).map((it) => ({
+        it: { ...it, kind: 'bead' as const, bead: 'tick' as const, c: l.it.c },
+        rev: false,
+      })),
+    ]);
+  }
   const loose: Item[] = [];
   for (const b of freeBeads) {
+    if (used.has(b)) continue; // rows keep their beads
     const bi = nearestHost(b.c!, null, 0);
     if (bi >= 0) hosts[bi].decor.push(b);
     else loose.push(b);
@@ -348,34 +441,19 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
       alive.push(ch);
       continue;
     }
-    const pts = ch.items.flatMap(linkPts);
-    const a = pts[0];
-    const b = pts[pts.length - 1];
-    const L = dist(a, b);
-    const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const dir = L > 0.05 ? { x: (b.x - a.x) / L, y: (b.y - a.y) / L } : null;
-    const bi = nearestHost(c, dir, 30);
+    const m = markOfChain.get(ch) ?? markOf(ch);
+    const bi = nearestHost(m.c!, m.dir ?? null, 30);
     if (bi >= 0) {
       for (const l of ch.items)
-        hosts[bi].decor.push({ ...l.it, kind: 'bead', bead: 'tick', c, dir });
+        hosts[bi].decor.push({ ...l.it, kind: 'bead', bead: 'tick', c: m.c, dir: m.dir });
     } else {
-      // a free tiny mark: maybe one element of a line of marks (reef: «∠∠∠», «^^o^^o»)
-      const rep: Item = {
-        ...ch.items[0].it,
-        kind: 'bead',
-        bead: 'tick',
-        c,
-        dir,
-        extra: ch.items.slice(1).map((l) => l.it),
-      };
-      loose.push(rep);
-      tinyLeft.set(rep, ch);
+      // a free tiny mark that no row took
+      loose.push(m);
+      tinyLeft.set(m, ch);
     }
   }
-  // Lines drawn ONLY with dots or marks (viola: a size as a row of filled dots): chain loose beads
-  // by mutual nearest neighbours on opposite sides, ≤ beadGapMm apart.
+  // what is left of the loose beads: rows the first pass could not see (beads freed above)
   const dotChains = chainBeads(loose);
-  const used = new Set<Item>();
   for (const dc of dotChains) {
     for (const l of dc.items) used.add(l.it);
     dc.items = dc.items.flatMap((l) => [
@@ -386,7 +464,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
       })),
     ]);
   }
-  alive.push(...dotChains);
+  alive.push(...rows, ...dotChains);
   for (const [rep, ch] of tinyLeft) if (!used.has(rep)) alive.push(ch);
   const free = loose.filter((b) => !used.has(b) && !tinyLeft.has(b)).length;
   return { chains: alive, items: nItems, freeBeads: free, ignoredPaths: ignored };

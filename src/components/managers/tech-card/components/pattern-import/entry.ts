@@ -5,9 +5,9 @@ import { sizeTokensOf } from '../nesting/block-code';
 import type { CardContext } from './client';
 
 /**
- * Phase 1 runs on the STUB worker (fixture data, writes nothing), so the door is shown in dev
- * builds and where `VITE_PATTERN_IMPORT=1` is set — not to operators on a real card, where a
- * pretend import would read as a real one. Drop the gate when the worker client lands.
+ * The wizard runs on the real worker (F13b), but stops where the pipeline does today (after the
+ * sheet; a DXF reaches details): the door is shown in dev builds and where `VITE_PATTERN_IMPORT=1`
+ * is set, not to operators on a real card. Drop the gate when semantics/fabrics land.
  */
 export const PATTERN_IMPORT_ENABLED =
   import.meta.env.DEV || import.meta.env.VITE_PATTERN_IMPORT === '1';

@@ -12,7 +12,7 @@ import { LINK, linkPts, normDash, type WChain } from './link';
 
 const BIN = 0.25;
 const NB = 80; // 0 … 20 mm
-const DECOR_KINDS = ['tick', 'ring', 'ringL', 'dot'] as const;
+const DECOR_KINDS = ['tick', 'ring', 'ringL', 'dot', 'dotL'] as const;
 const NW = 32; // width buckets of 0.05 mm
 
 export type Signature = {
@@ -126,41 +126,20 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   const innerPieces = merged.slice(1, -1);
   const solid = !declared && gaps.length === 0;
 
-  const decorPer10 = { tick: 0, ring: 0, ringL: 0, dot: 0 };
+  const decorPer10 = { tick: 0, ring: 0, ringL: 0, dot: 0, dotL: 0 };
   // beads inside the chain itself (palto's dots are subpaths) count as pieces; free beads as decor
+  // ring / dot diameter tells sizes apart (reef: zigzag with small vs with large dots)
   const kindOf = (it: { bead?: string; size?: number }) =>
     (it.bead === 'ring' && (it.size ?? 0) >= 1.6
       ? 'ringL'
-      : it.bead ?? 'dot') as (typeof DECOR_KINDS)[number];
+      : it.bead === 'dot' && (it.size ?? 0) >= 1.05
+        ? 'dotL'
+        : it.bead ?? 'dot') as (typeof DECOR_KINDS)[number];
   for (const d of ch.decor) decorPer10[kindOf(d)] += 1;
   for (const l of items) if (l.it.kind === 'bead') decorPer10[kindOf(l.it)] += 1;
   for (const k of DECOR_KINDS) decorPer10[k] = lengthMm > 0 ? (10 * decorPer10[k]) / lengthMm : 0;
 
-  const V = new Float64Array(2 * NB + 1 + DECOR_KINDS.length + NW + 1);
-  const offG = NB;
-  const offS = 2 * NB;
-  const offD = offS + 1;
-  const offW = offD + DECOR_KINDS.length;
-  if (declared) {
-    for (let i = 0; i < declared.length; i += 2) {
-      addHist(V, 0, declared[i]);
-      addHist(V, offG, declared[i + 1] ?? 0);
-    }
-  } else {
-    for (const x of innerPieces) addHist(V, 0, Math.min(x, NB * BIN - BIN));
-    for (const x of gaps) addHist(V, offG, Math.min(x, NB * BIN - BIN));
-    if (solid) V[offS] = 1;
-  }
-  DECOR_KINDS.forEach((k, i) => (V[offD + i] = Math.min(3, decorPer10[k])));
-  if (backbone) {
-    const fillDash = backbone.fill && backbone.widthMm === 0;
-    if (fillDash) V[offW + NW] = 1;
-    else V[offW + Math.min(NW - 1, Math.round(backbone.widthMm / 0.05))] = 1;
-  }
-  normBlock(V, 0, NB, 1);
-  normBlock(V, offG, 2 * NB, 1);
-  normBlock(V, offD, offD + DECOR_KINDS.length, 0.8);
-  normBlock(V, offW, offW + NW + 1, 0.6);
+  const V = vecOf({ declared, innerPieces, gaps, solid, decorPer10, backbone });
   const reliable =
     !!declared || (solid ? lengthMm >= 15 : innerPieces.length >= 3 && lengthMm >= 12);
   const motif = declared
@@ -179,6 +158,59 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
     motif,
     backbone,
   };
+}
+
+type VecParts = Pick<Signature, 'declared' | 'gaps' | 'solid' | 'decorPer10' | 'backbone'> & {
+  innerPieces: number[];
+};
+
+/** The signature vector; `scale` stretches the rhythm (a legend printed at another scale). */
+function vecOf(s: VecParts, scale = 1): Float64Array {
+  const V = new Float64Array(2 * NB + 1 + DECOR_KINDS.length + NW + 1);
+  const offG = NB;
+  const offS = 2 * NB;
+  const offD = offS + 1;
+  const offW = offD + DECOR_KINDS.length;
+  if (s.declared) {
+    for (let i = 0; i < s.declared.length; i += 2) {
+      addHist(V, 0, s.declared[i] * scale);
+      addHist(V, offG, (s.declared[i + 1] ?? 0) * scale);
+    }
+  } else {
+    for (const x of s.innerPieces) addHist(V, 0, Math.min(x * scale, NB * BIN - BIN));
+    for (const x of s.gaps) addHist(V, offG, Math.min(x * scale, NB * BIN - BIN));
+    if (s.solid) V[offS] = 1;
+  }
+  let dsum = 0;
+  DECOR_KINDS.forEach((k, i) => {
+    V[offD + i] = Math.min(3, s.decorPer10[k] / scale);
+    dsum += V[offD + i];
+  });
+  if (s.backbone) {
+    const fillDash = s.backbone.fill && s.backbone.widthMm === 0;
+    if (fillDash) V[offW + NW] = 1;
+    else V[offW + Math.min(NW - 1, Math.round(s.backbone.widthMm / 0.05))] = 1;
+  }
+  normBlock(V, 0, NB, 1);
+  normBlock(V, offG, 2 * NB, 1);
+  // sparse decorations (a notch tick every 14 mm, a stray ring) weigh less than a beaded line's
+  normBlock(V, offD, offD + DECOR_KINDS.length, 0.8 * Math.min(1, dsum / 2));
+  normBlock(V, offW, offW + NW + 1, 0.6);
+  return V;
+}
+
+/** `a`'s vector re-drawn at scales 0.8…1.25 (a legend printed at another scale than the sheet). */
+export function scaledVecs(a: Signature): Float64Array[] {
+  const out: Float64Array[] = [];
+  for (let f = 0.8; f <= 1.251; f += 0.025) out.push(vecOf({ ...a, innerPieces: a.pieces }, f));
+  return out;
+}
+
+/** Best shapeCosine of any of `as` (scaledVecs of a sample) against `b`. */
+export function shapeCosineBest(as: Float64Array[], b: Float64Array): number {
+  let best = 0;
+  for (const v of as) best = Math.max(best, shapeCosine(v, b));
+  return best;
 }
 
 export function cosine(a: Float64Array, b: Float64Array): number {
@@ -212,4 +244,43 @@ export function describeSig(s: Signature): string {
         ? `rhythm ${s.motif.map((v) => v.toFixed(2)).join('/')}`
         : 'irregular';
   return [m, w, dec].filter(Boolean).join(' ');
+}
+
+/** Cosine over the rhythm and decoration blocks only (no stroke width / fill): a legend sample
+ * drawn as a declared dash and the same size drawn as filled dashes on the sheet still match. */
+export function shapeCosine(a: Float64Array, b: Float64Array): number {
+  const end = 2 * NB + 1 + DECOR_KINDS.length;
+  let d = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < end; i++) {
+    d += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return d / (Math.sqrt(na * nb) || 1);
+}
+
+/** Same width bucket (or both fill-only) — 1, else 0; for tie-breaking legend matches. */
+export function sameStroke(a: Float64Array, b: Float64Array): number {
+  const off = 2 * NB + 1 + DECOR_KINDS.length;
+  for (let i = off; i < a.length; i++) if (a[i] > 0 && b[i] > 0) return 1;
+  return 0;
+}
+
+/** Declared dash patterns of the same shape at another scale (reef: one size's dash prints
+ * 9.63/1.03/0.34 on most tiles, 9.29/1.00/0.33 on some and 8.17/0.87/0.29 in the key). */
+export function sameDashShape(a: number[], b: number[], scaleTol = 0.25, shapeTol = 0.1): boolean {
+  if (a.length !== b.length || !a.length) return false;
+  const sa = a.reduce((x, y) => x + y, 0);
+  const sb = b.reduce((x, y) => x + y, 0);
+  if (sa <= 0 || sb <= 0) return false;
+  const r = sa / sb;
+  if (r < 1 - scaleTol || r > 1 / (1 - scaleTol)) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] / sa;
+    const y = b[i] / sb;
+    if (Math.abs(x - y) > Math.max(0.012, shapeTol * Math.max(x, y))) return false;
+  }
+  return true;
 }

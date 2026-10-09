@@ -32,6 +32,7 @@ import {
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
+import { PendingDetails } from './details-pending';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
 
 const MEANING: { value: LineMeaning; label: string }[] = [
@@ -51,6 +52,7 @@ const REASON: Record<string, string> = {
   grammar: 'code grammar',
   'duplicate-identity': 'code used twice',
   'size-unmapped': 'size not mapped',
+  'fold-unresolved': 'fold edge not found',
 };
 
 export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
@@ -62,7 +64,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   );
   const [grainA, setGrainA] = useState<PtMm | null>(null);
   const [drawing, setDrawing] = useState(false);
-  if (!sem || !session.sheet) return null;
+  if (!sem) return <PendingDetails api={api} />;
+  if (!session.sheet) return null;
 
   const fileAllowance: AllowanceDecision = inputs.fileAllowance ?? {
     meaning: 'seam',

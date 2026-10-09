@@ -1,5 +1,7 @@
 // Step 1 · FILES — drop anything (owner decision 1: every format), several files = one per size
-// (decision 5, merged into one run). Reading runs `open` + `extract`; the page classification is
+// (decision 5, merged into one run). Reading runs `open` + `extract`: the worker sniffs each file by
+// its CONTENT (adapters/sniff `pickExtractor`), so the "read as" column before reading is only the
+// extension's guess and the pages panel says what the file really is. The page classification is
 // shown at once so a wrong file is caught before the scale is asked about.
 import { useRef, useState } from 'react';
 import type { PageClass } from 'lib/pattern-import/types';
@@ -18,16 +20,25 @@ import { Panel, fmtBytes, fmtPct } from '../ui-bits';
 const ACCEPT = '.pdf,.dxf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff';
 const KIND_LABEL: Record<string, string> = {
   pdf: 'vector PDF',
-  dxf: 'foreign DXF',
+  dxf: 'DXF',
   raster: 'scan',
   hpgl: 'PLT / HPGL',
   svg: 'SVG',
-  ai: 'AI (as PDF)',
+  ai: 'Illustrator PDF',
 };
 const CLASS_ORDER: PageClass[] = ['tile', 'overview', 'instructions', 'cover', 'blank', 'unknown'];
 
-export function FilesStep({ api, stub }: { api: ImportSessionApi; stub: boolean }) {
-  const { session, inputs } = api;
+export function FilesStep({
+  api,
+  stub,
+  onToggleStub,
+}: {
+  api: ImportSessionApi;
+  stub: boolean;
+  /** Dev builds only: switch between the real worker and the F13 fixture. */
+  onToggleStub?: () => void;
+}) {
+  const { session, inputs, extracted } = api;
   const [staged, setStaged] = useState<File[]>(inputs.fileList);
   const [over, setOver] = useState(false);
   const pick = useRef<HTMLInputElement>(null);
@@ -193,6 +204,18 @@ export function FilesStep({ api, stub }: { api: ImportSessionApi; stub: boolean 
                 ! the list changed — read the files again
               </Text>
             )}
+            {onToggleStub && (
+              <Button
+                variant='underline'
+                size='xs'
+                className='ml-auto text-labelColor hover:text-textColor'
+                disabled={!!session.busy}
+                onClick={onToggleStub}
+                title='dev only: the fixture walks every step with made-up data; the worker reads your files'
+              >
+                {stub ? 'use the real importer' : 'use fixture data'}
+              </Button>
+            )}
           </div>
         </div>
       </Panel>
@@ -264,6 +287,38 @@ export function FilesStep({ api, stub }: { api: ImportSessionApi; stub: boolean 
             {session.files.length > 1 && (
               <CalloutBox tone='note'>
                 {session.files.length} files — read as one file per size and merged into one run.
+              </CalloutBox>
+            )}
+            {extracted.presegmented && (
+              <CalloutBox tone='note'>
+                the DXF already carries its pieces as blocks, one per size — the sheet, legend and
+                seed steps are answered from the file.
+              </CalloutBox>
+            )}
+            {extracted.warnings.length > 0 && (
+              <CalloutBox tone='warning'>
+                <Text size='micro' component='p' className='mb-0.5'>
+                  <b>
+                    {extracted.warnings.length} {extracted.warnings.length === 1 ? 'note' : 'notes'}{' '}
+                    from reading
+                  </b>
+                </Text>
+                <ul className='max-h-32 space-y-0.5 overflow-y-auto'>
+                  {extracted.warnings.slice(0, 40).map((w, i) => (
+                    <li key={i}>
+                      <Text size='micro' component='span'>
+                        {w}
+                      </Text>
+                    </li>
+                  ))}
+                  {extracted.warnings.length > 40 && (
+                    <li>
+                      <Text size='micro' component='span'>
+                        + {extracted.warnings.length - 40} more
+                      </Text>
+                    </li>
+                  )}
+                </ul>
               </CalloutBox>
             )}
           </div>

@@ -4,11 +4,14 @@
 // confidence < 0.9 or the deviation exceeds 0.3 %).
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
+import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
+import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
+import { anisotropyOf, squareSidesOf } from '../formats';
 import type { ImportSessionApi } from '../use-import-session';
 import { Field, NumberField, Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
 
@@ -26,8 +29,15 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
   const chosen = cands[inputs.scaleIndex];
   const decision = api.scaleDecision();
   const dev = decision ? decision.factor - 1 : 0;
+  // A square that is not square in the file (Burda: 100.27 × 99.89) — one factor fixes the mean
+  // only; the operator decides on paper.
+  const sides = squareSidesOf(chosen?.evidence?.text);
+  const skew = sides ? anisotropyOf(sides) : 0;
+  const nonSquare = skew > PATIMPORT.scaleWarnRatio;
   const needsHuman =
-    !!chosen && (chosen.confidence < 0.9 || Math.abs(dev) > PATIMPORT.scaleWarnRatio);
+    !!chosen && (chosen.confidence < 0.9 || Math.abs(dev) > PATIMPORT.scaleWarnRatio || nonSquare);
+  const calibs = api.extracted.calibrations ?? [];
+  const fileName = (id: string) => session.files.find((f) => f.id === id)?.name ?? id;
 
   return (
     <SplitStage
@@ -45,8 +55,11 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
         >
           <SquareDrawing
             measured={inputs.manualMeasuredMm ?? chosen?.measuredMm ?? null}
+            sides={inputs.manualMeasuredMm ? null : sides}
             declared={chosen?.declaredMm ?? null}
-            label={chosen?.evidence?.text}
+            label={chosen?.evidence?.text
+              ?.replace(/\s*\[measured[^\]]*\]/, '')
+              .replace(/\s*\(traced[^)]*\)/, '')}
           />
         </Panel>
       }
@@ -106,6 +119,70 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
             })}
           </div>
 
+          {nonSquare && sides && (
+            <CalloutBox tone='warning' className='mt-2'>
+              <Text size='micro' component='p'>
+                <b>! the square is not square in the file:</b> {sides.w.toFixed(2)} ×{' '}
+                {sides.h.toFixed(2)} mm ({(skew * 100).toFixed(2)} % apart). one factor corrects the
+                mean only — print it, measure the side that matters and type it below, or confirm
+                the mean.
+              </Text>
+            </CalloutBox>
+          )}
+
+          {calibs.length > 0 && (
+            <>
+              <GroupLabel>scan calibration, per page</GroupLabel>
+              <Text size='micro' variant='label' component='p' className='mb-1'>
+                every traced page is already corrected — to its own test square, or with the scanner
+                factor of the nearest page that has one.
+              </Text>
+              <DataTable>
+                <thead>
+                  <tr>
+                    <th>page</th>
+                    <th data-align='left'>from</th>
+                    <th>traced, mm</th>
+                    <th title='corner fit after the correction, mm'>fit</th>
+                    <th>sure</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calibs.map((c) => {
+                    const sq = c.calibration.square;
+                    return (
+                      <tr key={`${c.file}:${c.page}`}>
+                        <td>
+                          {session.files.length > 1 ? `${fileName(c.file)} · ` : ''}
+                          {c.page + 1}
+                        </td>
+                        <td data-align='left'>
+                          {c.calibration.method === 'test-square'
+                            ? 'own square'
+                            : c.calibration.method === 'inherited'
+                              ? 'inherited'
+                              : 'none'}
+                        </td>
+                        <td className='whitespace-nowrap tabular-nums'>
+                          {sq ? `${sq.measuredWMm.toFixed(2)} × ${sq.measuredHMm.toFixed(2)}` : '—'}
+                        </td>
+                        <td className='tabular-nums'>{sq ? sq.residualMm.toFixed(3) : '—'}</td>
+                        <td
+                          className={cn(
+                            'whitespace-nowrap',
+                            c.calibration.confidence < 0.7 && 'text-warning',
+                          )}
+                        >
+                          {fmtPct(c.calibration.confidence, 0)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </DataTable>
+            </>
+          )}
+
           <GroupLabel>result</GroupLabel>
           <Row label='factor' value={decision ? decision.factor.toFixed(5) : '—'} />
           <Row
@@ -164,10 +241,13 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
 /** Nominal square dashed, measured square in ink, both from one corner — the gap IS the error. */
 function SquareDrawing({
   measured,
+  sides,
   declared,
   label,
 }: {
   measured: number | null;
+  /** Both sides when the file measures them apart (a non-square square). */
+  sides: { w: number; h: number } | null;
   declared: number | null;
   label?: string;
 }) {
@@ -181,9 +261,10 @@ function SquareDrawing({
     );
   // Exaggerate the difference ×20 so a 0.1 % error is visible at all; the numbers stay true.
   const k = 20;
-  const shown = declared + (measured - declared) * k;
+  const shownW = declared + ((sides?.w ?? measured) - declared) * k;
+  const shownH = declared + ((sides?.h ?? measured) - declared) * k;
   const pad = declared * 0.35;
-  const size = Math.max(declared, shown);
+  const size = Math.max(declared, shownW, shownH);
   return (
     <svg
       viewBox={`${-pad} ${-pad} ${size + pad * 2} ${size + pad * 2}`}
@@ -203,8 +284,8 @@ function SquareDrawing({
       <rect
         x={0}
         y={0}
-        width={shown}
-        height={shown}
+        width={shownW}
+        height={shownH}
         fill='#f2f2f2'
         fillOpacity={0.6}
         stroke='#111111'
@@ -231,20 +312,31 @@ function SquareDrawing({
         x1={-pad * 0.35}
         y1={0}
         x2={-pad * 0.35}
-        y2={shown}
+        y2={shownH}
         stroke='#111111'
         strokeWidth={0.3}
       />
       <text
         x={-pad * 0.5}
-        y={shown / 2}
+        y={shownH / 2}
         fontSize={pad * 0.09}
         textAnchor='middle'
         fill='#111111'
-        transform={`rotate(-90 ${-pad * 0.5} ${shown / 2})`}
+        transform={`rotate(-90 ${-pad * 0.5} ${shownH / 2})`}
       >
-        measured {measured.toFixed(2)} mm
+        measured {(sides?.h ?? measured).toFixed(2)} mm
       </text>
+      {sides && (
+        <text
+          x={shownW / 2}
+          y={shownH + pad * 0.3}
+          fontSize={pad * 0.09}
+          textAnchor='middle'
+          fill='#111111'
+        >
+          measured {sides.w.toFixed(2)} mm
+        </text>
+      )}
       {label && (
         <text
           x={declared / 2}
