@@ -13,7 +13,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist } from './geom';
+import { bboxOf, dist, SegGrid, segNearest } from './geom';
 import { normDash } from './link';
 import { cosine, type Signature } from './motif';
 
@@ -47,6 +47,7 @@ export function furniture(
 ): (string | null)[] {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
+  for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   const rects = new Map<string, number[]>();
   const lines = new Map<string, number[]>();
   chains.forEach((c, i) => {
@@ -97,6 +98,132 @@ export function furniture(
   for (const a of lines.values())
     if (a.length >= 3) for (const i of a) out[i] = 'tile frame / cut mark';
   return out;
+}
+
+/**
+ * Lettering drawn as line work (wm's "WWW.PAFAVERO.PL" watermark, 60 mm outline glyphs in every
+ * size file; "ID: 1 PRZÓD" stencil text): chain indices. Small chains (≤ 120 mm across) that touch
+ * form glyph clusters; a TEXT LINE is ≥ 4 clusters of one height (± 15 %) on one baseline band,
+ * each within 1.2 heights of the next, along x or (rotated text) along y — and not all of one width
+ * (a row of identical belt loops or labels is not text), and glyphs are two-dimensional (median
+ * width ≥ ¼ height, lower median: a legend's stacked line swatches are not) and turn (median ≥ 3 rad per glyph: band
+ * end ticks are straight). Smaller clusters inside a text line's band
+ * between its glyphs (the dot of ".PL") go with it.
+ */
+export function lettering(chains: Chain[]): number[] {
+  const small: number[] = [];
+  const bb = chains.map((c) => bboxOf(c.pts));
+  chains.forEach((c, i) => {
+    const b = bb[i];
+    if (c.pts.length >= 2 && Math.max(b.maxX - b.minX, b.maxY - b.minY) <= 120) small.push(i);
+  });
+  if (small.length < 4) return [];
+  const grid = new SegGrid(4);
+  for (const i of small) grid.addPolyline(i, chains[i].pts);
+  const parent = new Map<number, number>(small.map((i) => [i, i]));
+  const find = (i: number): number => {
+    let r = i;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    let j = i;
+    while (parent.get(j) !== r) {
+      const n = parent.get(j)!;
+      parent.set(j, r);
+      j = n;
+    }
+    return r;
+  };
+  for (const i of small) {
+    const pts = chains[i].pts;
+    for (const p of [pts[0], pts[pts.length - 1]])
+      grid.near(p, 0.6, (o, sIdx) => {
+        if (o === i) return;
+        const q = chains[o].pts;
+        if (segNearest(p, q[sIdx], q[sIdx + 1]).d <= 0.6) parent.set(find(o), find(i));
+      });
+  }
+  // total turning of a chain (rad): glyphs are full of corners and bowls, rules and ticks are not
+  const turn = (i: number) => {
+    const p = chains[i].pts;
+    let t = 0;
+    for (let k = 1; k + 1 < p.length; k++) {
+      const a = Math.atan2(p[k].y - p[k - 1].y, p[k].x - p[k - 1].x);
+      const b = Math.atan2(p[k + 1].y - p[k].y, p[k + 1].x - p[k].x);
+      let d = Math.abs(b - a);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      t += d;
+    }
+    return t;
+  };
+  type Cl = {
+    ids: number[];
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    turn: number;
+  };
+  const cls = new Map<number, Cl>();
+  for (const i of small) {
+    const r = find(i);
+    const b = bb[i];
+    const c = cls.get(r);
+    if (!c) cls.set(r, { ids: [i], ...b, turn: turn(i) });
+    else {
+      c.ids.push(i);
+      c.turn += turn(i);
+      c.minX = Math.min(c.minX, b.minX);
+      c.minY = Math.min(c.minY, b.minY);
+      c.maxX = Math.max(c.maxX, b.maxX);
+      c.maxY = Math.max(c.maxY, b.maxY);
+    }
+  }
+  const all = [...cls.values()].filter((c) => Math.max(c.maxX - c.minX, c.maxY - c.minY) <= 110);
+  const text = new Set<number>();
+  for (const along of ['x', 'y'] as const) {
+    // glyph frame: u along the line, v across (height)
+    const g = all.map((c) => {
+      const u0 = along === 'x' ? c.minX : c.minY;
+      const u1 = along === 'x' ? c.maxX : c.maxY;
+      const v0 = along === 'x' ? c.minY : c.minX;
+      const v1 = along === 'x' ? c.maxY : c.maxX;
+      return { c, u0, u1, v0, v1, h: v1 - v0, w: u1 - u0, vc: (v0 + v1) / 2 };
+    });
+    const tall = g.filter((x) => x.h >= 3).sort((a, b) => a.u0 - b.u0);
+    const used = new Set<(typeof g)[number]>();
+    for (const start of tall) {
+      if (used.has(start)) continue;
+      const run = [start];
+      let last = start;
+      for (const x of tall) {
+        if (x.u0 <= last.u0 || used.has(x)) continue;
+        if (Math.abs(x.h - start.h) > 0.15 * start.h) continue;
+        if (Math.abs(x.vc - start.vc) > 0.2 * start.h) continue;
+        const gap = x.u0 - last.u1;
+        if (gap > 1.2 * start.h) continue;
+        if (gap < -0.2 * start.h) continue;
+        run.push(x);
+        last = x;
+      }
+      if (run.length < 4) continue;
+      const ws = run.map((x) => x.w);
+      if (Math.max(...ws) < 1.15 * Math.min(...ws)) continue;
+      // glyphs are two-dimensional: a legend's stacked line swatches are flat
+      const med = (v: number[]) => v.slice().sort((a, b) => a - b)[(v.length - 1) >> 1];
+      if (med(ws) < 0.25 * start.h) continue;
+      // and they turn: median ≥ 3 rad per glyph (an "E" stroke has four corners, an "O" a
+      // full turn); a row of straight ticks or swatches does not turn at all
+      if (med(run.map((x) => x.c.turn)) < 3) continue;
+      for (const x of run) used.add(x);
+      const u0 = run[0].u0;
+      const u1 = last.u1;
+      const v0 = Math.min(...run.map((x) => x.v0));
+      const v1 = Math.max(...run.map((x) => x.v1));
+      for (const x of g)
+        if (x.u0 >= u0 - 0.5 && x.u1 <= u1 + 0.5 && x.v0 >= v0 - 0.5 && x.v1 <= v1 + 0.5)
+          for (const i of x.c.ids) text.add(i);
+    }
+  }
+  return [...text];
 }
 
 /** A page's rectangle in sheet frame (bbox of its transformed corners). */
@@ -173,6 +300,7 @@ function pageMarginLines(chains: Chain[], poses: PagePose[], out: (string | null
 export function pageMarginIds(chains: Chain[], poses: PagePose[]): Set<number> {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
+  for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   const ids = new Set<number>();
   out.forEach((w, i) => w && ids.add(chains[i].id));
   return ids;
