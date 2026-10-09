@@ -579,6 +579,37 @@ function walls(rest: string[]) {
       console.log(`  purity t${tr} ${pu.toFixed(2)} len ${t.lengthMm.toFixed(0)} truth ${truth} final ${fin}`);
     }
   }
+  // per-element truth: nearest stripped path at the element's samples
+  const pg = new SegGrid(4);
+  const ppts = b.sheet.paths.map((q) => (q.closed ? [...q.pts, q.pts[0]] : q.pts));
+  ppts.forEach((q, k) => pg.addPolyline(k, q));
+  const elTruth = (ei: number) => {
+    const e = M.els[ei];
+    const w = new Map<string, number>();
+    for (let k = 0; k < e.pts.length; k++) {
+      const q = e.pts[k];
+      let best = -1;
+      let bd = 0.2;
+      pg.near(q, 0.2, (pk, j) => {
+        const d = segNearest(q, ppts[pk][j], ppts[pk][j + 1]).d;
+        if (d < bd) {
+          bd = d;
+          best = pk;
+        }
+      });
+      if (best < 0) continue;
+      const t = b.truth[b.origOfPath[b.sheet.paths[best].id]];
+      const key = `${t.role[0]}${t.rank ?? ''}`;
+      w.set(key, (w.get(key) ?? 0) + 1);
+    }
+    return [...w].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k}${w.size > 1 ? `:${v}` : ''}`).join('|');
+  };
+  const xi = rest.indexOf('--elements');
+  if (xi >= 0)
+    for (const tr of rest[xi + 1].split(',').map(Number)) {
+      const t = M.tracks[tr];
+      console.log(`track t${tr} rank0=${M.rank0[tr]} sub=${M.subOf[tr]} final=${[...new Set((M.samplesOf.get(tr) ?? []).map((_, i) => ranksAt(M, tr, i, G.bits).join('') || '_'))].join('/')}: ${t.items.map((it) => `e${it.el}[${elTruth(it.el)}]${process.env.XY ? `(${M.els[it.el].pts[0].x.toFixed(1)},${M.els[it.el].pts[0].y.toFixed(1)})` : ''}`).join(' ')}`);
+    }
   const ti = rest.indexOf('--track');
   if (ti >= 0) {
     const tr = +rest[ti + 1];

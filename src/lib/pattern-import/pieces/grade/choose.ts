@@ -55,9 +55,9 @@ function accOf(M: GradeModel, tr: number) {
   return a;
 }
 
-export function portionPts(M: GradeModel, bits: readonly number[], only?: Set<number>): PortionPts[] {
+export function portionPts(M: GradeModel, bits: readonly number[], only?: Set<number>, flipSub = -1): PortionPts[] {
   const out: PortionPts[] = [];
-  for (const p of trackPortions(M, bits, only)) {
+  for (const p of trackPortions(M, bits, only, flipSub)) {
     const pts = subPolyline(M.tracks[p.track].pts, accOf(M, p.track), p.from, p.to);
     if (pts.length >= 2) out.push({ track: p.track, ranks: p.ranks, pts });
   }

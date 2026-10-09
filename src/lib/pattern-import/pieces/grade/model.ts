@@ -53,6 +53,9 @@ export type GradeModel = {
   bandHist: Map<number, number>;
   /** label frames: never walls */
   frames: Set<number>;
+  /** ranked track → sub-component (same-lane linked full tuples), −1 otherwise */
+  subOf: Int32Array;
+  nSubs: number;
   /** component → number of full cross-sections (samples) that built it: its orientation evidence */
   compSupport: number[];
   /** ranked track → share of its full-tuple votes that went to rank0 (1 = unanimous) */
@@ -261,6 +264,8 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
     frames: new Set(),
     purity: new Map(),
     compSupport: [],
+    subOf: new Int32Array(tracks.length).fill(-1),
+    nSubs: 0,
   };
   for (const [, ss] of samplesOf)
     for (const s of ss) if (s.lanes.length > 1) M.bandHist.set(s.lanes.length, (M.bandHist.get(s.lanes.length) ?? 0) + 1);
@@ -321,12 +326,20 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
       if (a) a.push(e);
       else byTrack.set(tr, [e]);
     });
+  // sub-components: full tuples linked by SAME-lane relations only. A component is sub-components
+  // joined at forks (mirrored lane); the orientation across a fork is the fragile part of a
+  // component, so each sub-component can be flipped on its own in the ambiguity test
+  const subUf = full.map((_, i) => i);
+  const subFind = (x: number): number => (subUf[x] === x ? x : (subUf[x] = subFind(subUf[x])));
   for (const [, list] of byTrack) {
     list.sort((a, b) => b.count - a.count);
     const a = list[0];
     for (let i = 1; i < list.length; i++) {
       const c = list[i];
-      if (c.lane === a.lane) par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 0);
+      if (c.lane === a.lane) {
+        par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 0);
+        subUf[subFind(nodeOf.get(a.key)!)] = subFind(nodeOf.get(c.key)!);
+      }
       else if (c.lane === n - 1 - a.lane) par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 1);
       else M.laneConflicts++;
     }
@@ -350,6 +363,15 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
     });
   }
   M.nComps = compIdOf.size;
+  {
+    const subId = new Map<number, number>();
+    for (const [tr, list] of byTrack) {
+      const root = subFind(nodeOf.get(list[0].key)!); // list sorted by count above
+      if (!subId.has(root)) subId.set(root, subId.size);
+      M.subOf[tr] = subId.get(root)!;
+    }
+    M.nSubs = subId.size;
+  }
   M.compSupport = new Array(M.nComps).fill(0);
   for (const t of full) M.compSupport[compIdOf.get(par.find(nodeOf.get(t.key)!)[0])!] += t.count;
   for (const [tr, v] of votes) {
@@ -725,28 +747,29 @@ export const compOfTrack = (M: GradeModel, tr: number) =>
 const flip = (ranks: number[], n: number, bit: number) =>
   bit ? ranks.map((r) => n - 1 - r).sort((a, b) => a - b) : ranks;
 
-export function ranksAt(M: GradeModel, tr: number, i: number, bits: readonly number[]): number[] {
+export function ranksAt(M: GradeModel, tr: number, i: number, bits: readonly number[], flipSub = -1): number[] {
   const m = M.sets.get(tr);
   if (!m) return [];
   const out = new Set<number>();
-  for (const e of m[i] ?? []) for (const r of e.comp >= 0 ? flip(e.ranks, M.n, bits[e.comp] ?? 0) : e.ranks) out.add(r);
+  const extra = flipSub >= 0 && M.subOf[tr] === flipSub ? 1 : 0;
+  for (const e of m[i] ?? []) for (const r of e.comp >= 0 ? flip(e.ranks, M.n, (bits[e.comp] ?? 0) ^ extra) : e.ranks) out.add(r);
   return [...out].sort((a, b) => a - b);
 }
 
 export type TrackPortion = { track: number; from: number; to: number; ranks: number[]; comps: number[] };
 
 /** Maximal runs of equal rank sets along each track (boundaries halfway between samples). */
-export function trackPortions(M: GradeModel, bits: readonly number[], only?: Set<number>): TrackPortion[] {
+export function trackPortions(M: GradeModel, bits: readonly number[], only?: Set<number>, flipSub = -1): TrackPortion[] {
   const out: TrackPortion[] = [];
   for (const [tr, ss] of M.samplesOf) {
     if (M.frames.has(tr) || (only && !only.has(tr))) continue;
     const total = M.tracks[tr].lengthMm;
     let i = 0;
     while (i < ss.length) {
-      const rs = ranksAt(M, tr, i, bits);
+      const rs = ranksAt(M, tr, i, bits, flipSub);
       const key = rs.join(',');
       let j = i;
-      while (j + 1 < ss.length && ranksAt(M, tr, j + 1, bits).join(',') === key) j++;
+      while (j + 1 < ss.length && ranksAt(M, tr, j + 1, bits, flipSub).join(',') === key) j++;
       const from = i === 0 ? 0 : (ss[i - 1].u + ss[i].u) / 2;
       const to = j === ss.length - 1 ? total : (ss[j].u + ss[j + 1].u) / 2;
       if (rs.length) {

@@ -246,7 +246,7 @@ export const ALT_READING: ModelOpts = {
   phase: 0.15,
   laneAngleDeg: 24,
   splitRatio: 2.1,
-  track: { gapMm: 2.5, angleDeg: 18, lateralMm: 0.4, junctionMm: 0.8, junctionAngleDeg: 16, junctionMarginDeg: 2 },
+  track: { gapMm: 2.5, angleDeg: 18, lateralMm: 0.4, junctionMm: 0.3, junctionAngleDeg: 16, junctionMarginDeg: 2 },
 };
 /** A component built from fewer full cross-sections than this has an unproven orientation. */
 export const WEAK_SUPPORT = 60;
@@ -449,6 +449,29 @@ function gradeOnce(
           }
         }
         if (hit) reason += `${reason ? '; ' : ''}${hit} rank(s) hang on weakly evidenced component ${c} (${M.compSupport[c]} cross-sections)`;
+      }
+    }
+    // forks: flip one sub-component (a side of a fork) alone. If that layout is ALSO an even,
+    // closed grade of this piece with other regions, the drawing does not say which side of the
+    // fork is which — the piece goes to the operator
+    if (refusal == null && rankOk.some((x) => x)) {
+      const fa = areas.filter((x) => x >= 0);
+      const st = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+      const step = st.length ? median(st) : 0;
+      const subs = new Set<number>();
+      for (const tr of S.inBox) if (M.subOf[tr] >= 0) subs.add(M.subOf[tr]);
+      for (const sub of subs) {
+        const ps2 = portionPts(M, bits, S.inBox, sub);
+        const a2 = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps2, r, sd.at).area);
+        if (!familyCheck(a2).ok) continue;
+        const differs = rankOk.some((ok, r) => ok && (a2[r] < 0 || Math.abs(a2[r] - areas[r]) > 0.3 * step));
+        const keeps = rankOk.every((ok, r) => !ok || a2[r] >= 0);
+        if (differs && keeps) {
+          refusal = 'grade-ambiguous';
+          reason = `flipping one side of a fork (sub-component ${sub}) gives another even grade (${a2.map((x) => (x < 0 ? '-' : (x / 100).toFixed(0))).join('/')} cm²)`;
+          for (let r = 0; r < n; r++) rankOk[r] = false;
+          break;
+        }
       }
     }
     if (refusal == null && fam.leaks.length) reason = `ranks ${fam.leaks.join(',')} do not close`;

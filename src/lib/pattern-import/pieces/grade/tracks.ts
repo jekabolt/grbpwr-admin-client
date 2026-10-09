@@ -51,7 +51,7 @@ export const TRACK_OPTS: TrackOpts = {
   gapMm: 3,
   angleDeg: 22,
   lateralMm: 0.5,
-  junctionMm: 0.6,
+  junctionMm: 0.15,
   junctionAngleDeg: 10,
   junctionMarginDeg: 4,
 };
