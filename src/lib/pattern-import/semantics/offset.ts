@@ -33,6 +33,14 @@ export const OFFSET_SCALE = 1000;
 export const ARC_TOL_MM = 0.01;
 /** Same thresholds as gate G6. */
 export const HULL_RATIO_MAX = 0.995;
+/**
+ * A source at least this convex (≤ 1 % hull deficit: a near-rectangle whose only bays are notch
+ * cuts) may legitimately turn convex under a true outward parallel — the bays narrower than twice
+ * the allowance fill. Only a source with real concavity (armhole, neckline, crotch) can "collapse to
+ * the hull"; a fill across those is also caught by the parallel-deviation check (I2: kombinezon's
+ * notched strips were blocked at 0.9925 → 0.9960).
+ */
+export const HULL_SOURCE_CONCAVE_MAX = 0.99;
 export const MAX_DEVIATION_MM = 0.2;
 
 const toPath = (pts: readonly PtMm[]): Path64 => {
@@ -169,7 +177,7 @@ export function offsetContour(
   const si = best.length ? selfIntersects(best) : false;
   if (si) reasons.push('self-intersection');
   const hr = best.length ? hullRatio(best) : 1;
-  const hull = srcHull < HULL_RATIO_MAX && hr >= HULL_RATIO_MAX;
+  const hull = srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX;
   if (hull)
     reasons.push(`collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`);
   const dev = best.length ? parallelDeviation(best, src, mm) : Infinity;

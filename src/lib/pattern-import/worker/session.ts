@@ -65,6 +65,7 @@ import {
   isWallEdit,
   proposeSeeds,
   startSession,
+  variantLabels,
   wallEditsInto,
   type PieceSession,
   type WallPieceEdit,
@@ -703,7 +704,8 @@ export class Session {
     this.wallSet = set;
     this.seeds = seeds;
     this.families = families;
-    return { seeds, families };
+    const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
+    return { seeds, families, variants };
   }
 
   // ── semantics (F5) ────────────────────────────────────────────────────────────────────────

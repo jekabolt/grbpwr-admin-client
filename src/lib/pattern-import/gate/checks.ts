@@ -437,6 +437,9 @@ export function g5(ctx: GateCtx): GateCheck {
 // ── G6 ─────────────────────────────────────────────────────────────────────────────────────
 
 export const OFFSET_HULL_RATIO = 0.995;
+/** The base line must be at least this concave for a convex derived line to be a collapse (see
+ * semantics/offset.ts HULL_SOURCE_CONCAVE_MAX: notch bays on a near-rectangle fill legitimately). */
+export const OFFSET_HULL_SOURCE_MAX = 0.99;
 export const OFFSET_MAX_DEV_MM = 0.2;
 
 export function g6(ctx: GateCtx): GateCheck {
@@ -486,7 +489,7 @@ export function g6(ctx: GateCtx): GateCheck {
     const hrBase = hullRatio(baseLine);
     const hrDerived = hullRatio(derivedLine);
     if (
-      hrBase < OFFSET_HULL_RATIO &&
+      hrBase < OFFSET_HULL_SOURCE_MAX &&
       (hrDerived >= OFFSET_HULL_RATIO || r.hullRatio >= OFFSET_HULL_RATIO)
     ) {
       bad(

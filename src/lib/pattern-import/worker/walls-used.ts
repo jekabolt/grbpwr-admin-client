@@ -175,22 +175,24 @@ export function junctionsOf(walls: readonly PtMm[][]): number[][] {
       [li.pts[0], 0],
       [li.pts[li.pts.length - 1], li.len],
     ] as const) {
-      let best = Infinity;
-      let bk = -1;
-      let bs = 0;
+      // nearest point of every other wall within reach; the end lands on the nearest one — and on
+      // every wall drawn on top of it (a line repeated per size layer): a coincident duplicate must
+      // not steal the junction from the wall that bounds the piece (I2, kombinezon's Style A knife
+      // drawn once per size, ending on the side seam)
+      const nearest = new Map<number, { d: number; s: number }>();
       grid.near(end, TOUCH_MM, (k, b) => {
         if (k === i) return;
         const lk = lines[k];
         const r = segNearest(end, lk.pts[b], lk.pts[b + 1]);
-        if (r.d < best) {
-          best = r.d;
-          bk = k;
-          bs = lk.cum[b] + r.u * (lk.cum[b + 1] - lk.cum[b]);
-        }
+        const cur = nearest.get(k);
+        if (!cur || r.d < cur.d)
+          nearest.set(k, { d: r.d, s: lk.cum[b] + r.u * (lk.cum[b + 1] - lk.cum[b]) });
       });
-      if (bk < 0 || best > TOUCH_MM) continue;
+      let best = Infinity;
+      for (const v of nearest.values()) best = Math.min(best, v.d);
+      if (!(best <= TOUCH_MM)) continue;
       js[i].push(s);
-      js[bk].push(bs);
+      for (const [k, v] of nearest) if (v.d <= best + MERGE_MM) js[k].push(v.s);
     }
   });
   return js.map((list, i) => {

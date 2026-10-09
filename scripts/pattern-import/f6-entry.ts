@@ -1549,6 +1549,42 @@ export async function main(opts: { plans: string }): Promise<number> {
       'denominator = the perimeter between the junctions (tails and the neighbour dropped)',
       `${usedLen.toFixed(1)} mm of ${2 * (W + H)}`,
     );
+    {
+      // I2: a variant's cutting line drawn once per size layer (two coincident copies) ends on the
+      // side of a longer loop (the other variant's outline, 50 mm further down). The copy must not
+      // steal the junction from the loop: the stretch past the cut leaves the denominator.
+      const len = (ls: { x: number; y: number }[][]) =>
+        ls.reduce(
+          (a, l) =>
+            a + l.slice(1).reduce((b, q, i) => b + Math.hypot(q.x - l[i].x, q.y - l[i].y), 0),
+          0,
+        );
+      const loop = [
+        { x: 0, y: -50 },
+        { x: 0, y: 200 },
+        { x: 100, y: 200 },
+        { x: 100, y: -50 },
+        { x: 0, y: -50 },
+      ];
+      // the cut stops 0.1 mm short of the sides (as drawn): the coincident copy is nearer
+      const knife = [
+        { x: 99.9, y: 0 },
+        { x: 0.1, y: 0 },
+      ];
+      const vote = [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 200 },
+        { x: 0, y: 200 },
+      ];
+      const one = len(wallsUsedBy([loop, knife], vote));
+      const two = len(wallsUsedBy([loop, knife, knife.map((q) => ({ ...q }))], vote));
+      ck(
+        Math.abs(one - 600) < 1 && Math.abs(two - 700) < 1.5,
+        'a cutting line drawn twice still splits the loop it ends on (the duplicate does not steal the junction)',
+        `one copy ${one.toFixed(1)} mm (600 = perimeter) · two copies ${two.toFixed(1)} mm (700 = perimeter + the second copy)`,
+      );
+    }
     for (const vote of ['source', 'written'] as const) {
       const r = await run(spec(1), vote);
       const c = g3(r);

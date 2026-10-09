@@ -122,7 +122,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
   const [allSizes, setAllSizes] = useState(false);
   /** mm per screen pixel of the last render: a click picks a line within a few pixels. */
   const unitRef = useRef(1);
-  const variants = variantsOf(out?.seeds ?? [], api.baseSeeds);
+  const variants = variantsOf(out?.seeds ?? [], api.baseSeeds, out?.variants);
   const families = useMemo(() => out?.families ?? [], [out]);
   const markOf = useMemo(() => new Map(families.map((f, i) => [f.seed, i + 1])), [families]);
   if (!out || !session.sheet || !session.chains) return null;
@@ -227,7 +227,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   pressed={rank === s.rank}
                   onClick={() => setRank(s.rank)}
                 >
-                  {s.label}
+                  {labelOf(s.rank)}
                 </Chip>
               ))}
             </ChipRow>

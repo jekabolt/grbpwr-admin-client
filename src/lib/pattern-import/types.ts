@@ -1353,7 +1353,16 @@ export type StageIO = {
   };
   pieces: {
     in: { seeds?: Seed[]; edits: PieceEdit[]; opts: FillOpts };
-    out: { seeds: Seed[]; families: PieceFamily[] };
+    out: {
+      seeds: Seed[];
+      families: PieceFamily[];
+      /**
+       * Models the sheet names ("Style A", "Mod. 125": F4 `variantLabels` over the sheet and the
+       * instruction pages), also when no seed carries one — the wizard offers them as the model
+       * choice, and the chosen one's cutting lines become knives (FillOpts.variant).
+       */
+      variants?: string[];
+    };
   };
   semantics: {
     in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families'>;

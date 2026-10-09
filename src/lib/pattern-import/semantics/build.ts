@@ -702,6 +702,10 @@ export function buildPieceSpecsDetailed(
       .map((id) => set.chains[id])
       .filter((ch) => !!ch && ch.pts.length > 1)
       .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
+    // the outline's derived stretches (F4b: an auto or operator bridge over a gap, a band cut) are
+    // walls the fill was told to use — the written line follows them, so G3/G4 measure it against
+    // them too (a 4.7 mm operator bridge is 2.35 mm from any drawn line at its middle: G4 blocked)
+    for (const d of cand.derived ?? []) if (d.pts.length > 1) lines.push(d.pts);
     if (!lines.length) return undefined;
     if (w.fold) {
       const M = reflection(w.fold.a, w.fold.b);

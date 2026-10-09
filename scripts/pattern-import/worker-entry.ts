@@ -181,6 +181,7 @@ export async function main(): Promise<number> {
       // palto BP_3 at 84 runs 0.3–1 mm off its wall for a stretch: G3 blocks it, honestly
       mustPass: false,
     });
+    await operatorBridgeGateCase();
   }
   await guardsCase();
   if (process.env.PI_E2E_ONLY) return report([]);
@@ -632,6 +633,87 @@ async function skipControl(
 }
 
 const shaOf = new Map<string, string[]>();
+
+/**
+ * I2: the operator's "close gap" through the F4b API, end to end on palto (Mod. 125, size 72 not
+ * exported — its raster neck splits under the offset): one 4.7 mm bridge "for all sizes" at piece
+ * 27's corner closes the region in every size, the two foreign-model leaks are "not a piece", and
+ * the gate passes. G4 measures the written line against the walls INCLUDING the bridge (a derived
+ * stretch, `PieceCandidate.derived`) — without it SL_76 blocked at max 1.42 mm.
+ */
+async function operatorBridgeGateCase() {
+  const name = 'palto bridge';
+  if (process.env.PI_ONLY && process.env.PI_ONLY !== name) return;
+  const s = new Session(1, ['pdf/palto.pdf'].map(fileOf));
+  const run: Run = (st, input) => s.runStage(st, input, ctx());
+  const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  await run('scale', {
+    decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
+  });
+  await run('assemble', { sheet: 0 });
+  await run('chains', { opts: CHAIN_OPTS });
+  const cardSizes = card(['72', '76', '80', '84', '88']);
+  const sz0 = await run('sizes', { card: cardSizes });
+  const sz = await run('sizes', {
+    card: cardSizes,
+    operatorMap: [{ ...sz0.map.entries[0], card: null, origin: 'operator' }],
+  });
+  const opts = { ...FILL, variant: 'Mod. 125' };
+  const pc0 = await run('pieces', { edits: [], opts });
+  const open0 = pc0.families.filter((f) => f.candidates.some((c) => c.outcome !== 'closed'));
+  const corner = pc0.families.find((f) =>
+    f.candidates.some((c) => c.leakAt && Math.hypot(c.leakAt.x - 997.5, c.leakAt.y - 1190.5) < 5),
+  );
+  const edits: PieceEdit[] = [
+    {
+      kind: 'bridge',
+      seed: null,
+      rank: null,
+      from: { x: 996.6, y: 1194.1 },
+      to: { x: 997.7, y: 1189.5 },
+    },
+  ];
+  const pc1 = await run('pieces', { seeds: pc0.seeds, edits, opts });
+  const fixed = pc1.families.find((f) => f.seed === corner?.seed);
+  check(
+    name,
+    'one bridge "all sizes" closes the corner piece in every size (refill of the seeds it reaches)',
+    !!fixed &&
+      fixed.candidates.every((c) => c.outcome === 'closed') &&
+      fixed.candidates.some((c) => c.derived?.some((d) => d.kind === 'operator-bridge')),
+    fixed?.candidates.map((c) => c.outcome[0]).join('') ?? 'no corner leak found',
+  );
+  const drop = pc1.families
+    .filter((f) => f.candidates.some((c) => c.outcome !== 'closed'))
+    .map((f): PieceEdit => ({ kind: 'not-a-piece', seed: f.seed }));
+  const pc = await run('pieces', { seeds: pc0.seeds, edits: [...edits, ...drop], opts });
+  const codes = ['FAC', 'FP', 'PCK', 'BP', 'SL', 'CLR', 'LAP'];
+  const names = Object.fromEntries(
+    pc.families.map((f, i) => [
+      f.seed,
+      {
+        code: codes[i] ?? 'BP',
+        mods: [],
+        displayName: `p${i + 1}`,
+        nameOrigin: 'operator' as const,
+      },
+    ]),
+  );
+  const sem = await run('semantics', {
+    fileAllowance: { meaning: 'seam', allowanceMm: 15, origin: 'operator', evidence: [] },
+    pieceOverrides: names,
+    operatorGrain: {},
+  });
+  check(
+    name,
+    'semantics: every piece specced (72 not exported)',
+    sem.blocked.length === 0 && sem.pieces.length === pc.families.length,
+    `${open0.length} open before, ${drop.length} dropped, ${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
+  );
+  const w = await writeCase(name, run, sem, sz.map, { mustPass: true });
+  const g4 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G4-hausdorff');
+  check(name, 'G4 measures the bridged stretch against the bridge', !!g4?.ok, `${g4?.value}`);
+}
 
 async function pipelineCase(
   name: string,

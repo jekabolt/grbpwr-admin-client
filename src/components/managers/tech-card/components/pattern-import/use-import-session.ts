@@ -768,7 +768,7 @@ export function useImportSession(deps: {
       }
       case 'pieces': {
         const fams = s.pieces?.families ?? [];
-        const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current);
+        const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current, s.pieces?.variants);
         if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
         // Only the sizes that are exported must close: an unmapped size is never written.
         const mapped = exportedRanks(s.sizes?.map);
@@ -1026,9 +1026,17 @@ export function textNameOf(
   };
 }
 
-export function variantsOf(seeds: Seed[], base: Seed[] | null): string[] {
+/** The models to choose from: the seeds' own, plus the ones the sheet names (pieces out). */
+export function variantsOf(
+  seeds: Seed[],
+  base: Seed[] | null,
+  named: readonly string[] = [],
+): string[] {
   return [
-    ...new Set([...(base ?? []), ...seeds].flatMap((s) => (s.variant ? [s.variant] : []))),
+    ...new Set([
+      ...[...(base ?? []), ...seeds].flatMap((s) => (s.variant ? [s.variant] : [])),
+      ...named,
+    ]),
   ].sort();
 }
 
