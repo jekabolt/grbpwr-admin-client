@@ -32,6 +32,7 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G12-pair': { what: '_R mirrors _L', fix: 'meaning' },
   'G13-manifest': { what: 'manifest complete', fix: 'fabrics' },
   'G14-prologue': { what: 'manifest fits in front of the drawing', fix: null },
+  'G15-derived': { what: 'closed gaps land on drawn lines and stay short', fix: 'pieces' },
 };
 
 export function CheckStep({ api }: { api: ImportSessionApi }) {

@@ -1,5 +1,5 @@
-// gate/ — the export self-check (08-CONTRACT §5). `runGate(dxfText, expect)` = G1–G13 against the
-// card's own parser, the gate's tag reader, the source walls and the manifest.
+// gate/ — the export self-check (08-CONTRACT §5). `runGate(dxfText, expect)` = G1–G13 + G15 against
+// the card's own parser, the gate's tag reader, the source walls and the manifest.
 //
 //   createRunGate(rules)   → RunGateFn   (card block-name rules injected: see rules.ts)
 //   roundTrip(text)        → card parser view (G1)
@@ -9,8 +9,11 @@
 // `expect.pieces` must be the WRITTEN-frame specs (`WriteDetail.plan.specs`) and
 // `expect.wallsByBlock` the source walls mapped through `WriteDetail.transforms[block]`
 // (`wallsByBlockFor` does that) — the writer lays identities out on a shelf and derives mirrors.
+// Walls are SOURCE chains only; the outline's derived edges travel apart in `expect.derivedByBlock`
+// (`derivedByBlockFor`) and are judged by G15, never measured against (F14b, Codex C1).
 
 import type {
+  DerivedEdge,
   EmbedManifestFn,
   GateCheck,
   GateExpectation,
@@ -37,6 +40,7 @@ import {
   g11,
   g12,
   g13,
+  g15,
   g2From,
   g3g4,
   g5,
@@ -183,10 +187,11 @@ export function createRunGate(
       rawError = e instanceof Error ? e.message : String(e);
     }
     const ctx = buildCtx({ text: dxfText, expect, rules, read, rt, rtError, raw, rawError });
+    const derived = g15(ctx);
     const checks: GateCheck[] = [
       g1(ctx),
       await squareProbe(),
-      ...g3g4(ctx),
+      ...g3g4(ctx, derived.ok),
       g5(ctx),
       g6(ctx),
       g7(ctx),
@@ -196,8 +201,15 @@ export function createRunGate(
       g11(ctx),
       g12(ctx),
       g13(expect.manifest, false),
+      derived.check,
     ];
-    return { passed: passedOf(checks), checks, durationMs: Date.now() - t0 };
+    return {
+      passed: passedOf(checks),
+      checks,
+      durationMs: Date.now() - t0,
+      // the audited list rides in the manifest with the report (absent when there is nothing)
+      ...(derived.audit.length ? { derived: derived.audit } : {}),
+    };
   };
 }
 
@@ -218,6 +230,26 @@ export function wallsByBlockFor(
   return out;
 }
 
+/** The outline's derived edges (source frame) → `derivedByBlock` in the written frame (G15). */
+export function derivedByBlockFor(
+  detail: WriteDetail,
+  derivedOf: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined,
+): Record<string, DerivedEdge[]> {
+  const out: Record<string, DerivedEdge[]> = {};
+  for (const b of detail.plan.blocks) {
+    const d = derivedOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!d?.length) continue;
+    const T = detail.transforms[b.name];
+    const map = (l: PtMm[]) => l.map((p) => applyAffine(T, p));
+    out[b.name] = d.map((e) => ({
+      kind: e.kind,
+      pts: map(e.pts),
+      ...(e.along ? { along: e.along.map(map) } : {}),
+    }));
+  }
+  return out;
+}
+
 export type WriteAndGateCtx = {
   rules: CardBlockRules;
   sizeTokens: ReadonlySet<string>;
@@ -228,6 +260,11 @@ export type WriteAndGateCtx = {
    * see worker/walls-used.ts). Absent = `wallsOf`.
    */
   wallsUsedOf?: (sourceIdentity: string, rank: number) => PtMm[][] | undefined;
+  /**
+   * The outline's derived edges (F4b bridges, operator bridges, band cuts), same frame as
+   * `wallsOf` — G15 checks them; G3/G4 never use them as walls (F14b, Codex C1).
+   */
+  derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
   overview?: GateExpectation['overview'];
   /** Vector 0.3 (default) / raster 0.5. */
   hausdorffP95Mm?: number;
@@ -255,6 +292,7 @@ export async function writeAndGate(
     sizeTokens: ctx.sizeTokens,
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
     coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
+    derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
   };

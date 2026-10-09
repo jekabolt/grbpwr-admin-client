@@ -24,6 +24,7 @@ import { checkInputSet, imageSize, imagePixelsRefusal } from 'lib/pattern-import
 import { buildErrorReport, ImportLog } from 'lib/pattern-import/worker/report';
 import { zipEntryNames } from 'lib/pattern-import/adapters/sniff/native';
 import { PATIMPORT, type ImportSession } from 'lib/pattern-import/types';
+import { readManifest } from 'lib/pattern-import/manifest';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -638,8 +639,10 @@ const shaOf = new Map<string, string[]>();
  * I2: the operator's "close gap" through the F4b API, end to end on palto (Mod. 125, size 72 not
  * exported — its raster neck splits under the offset): one 4.7 mm bridge "for all sizes" at piece
  * 27's corner closes the region in every size, the two foreign-model leaks are "not a piece", and
- * the gate passes. G4 measures the written line against the walls INCLUDING the bridge (a derived
- * stretch, `PieceCandidate.derived`) — without it SL_76 blocked at max 1.42 mm.
+ * the gate passes. F14b (Codex C1): the bridge is NOT a wall — G4 measures against the drawn
+ * walls only and leaves out just the written stretch on the bridge, which G15 audits (lands on
+ * drawn lines, short) and the manifest lists. Negative control: the same gap closed by a 44.7 mm
+ * line drawn across it (the bridge carried 20 mm past each end) must block on G15.
  */
 async function operatorBridgeGateCase() {
   const name = 'palto bridge';
@@ -711,8 +714,87 @@ async function operatorBridgeGateCase() {
     `${open0.length} open before, ${drop.length} dropped, ${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
   );
   const w = await writeCase(name, run, sem, sz.map, { mustPass: true });
-  const g4 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G4-hausdorff');
-  check(name, 'G4 measures the bridged stretch against the bridge', !!g4?.ok, `${g4?.value}`);
+  const g = w.gate[MAIN.scopeKey];
+  const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
+  const g15 = g?.checks.find((c) => c.id === 'G15-derived');
+  const audited = (g?.derived ?? []).filter((d) => d.kind === 'operator-bridge');
+  const inFile = readManifest(w.scopes[0]?.dxfText ?? '')?.gate?.derived?.length ?? 0;
+  check(
+    name,
+    'G4 on drawn walls only passes; G15 audits the 4.7 mm bridge; the manifest lists it',
+    !!g4?.ok && !!g15?.ok && audited.length > 0 && inFile === (g?.derived?.length ?? -1),
+    `G4 ${g4?.value} · ${g4?.note} · G15 ${g15?.value} · audited ${audited.map((d) => `${d.block} ${d.lengthMm}/${d.offSourceMm} mm`).join(', ')} · in file ${inFile}`,
+  );
+
+  // negative control: the same gap closed by a long line drawn across it
+  const ux = 1.1 / Math.hypot(1.1, 4.6);
+  const uy = -4.6 / Math.hypot(1.1, 4.6);
+  const long: PieceEdit[] = [
+    {
+      kind: 'bridge',
+      seed: null,
+      rank: null,
+      from: { x: 996.6 - 20 * ux, y: 1194.1 - 20 * uy },
+      to: { x: 997.7 + 20 * ux, y: 1189.5 + 20 * uy },
+    },
+  ];
+  const pl1 = await run('pieces', { seeds: pc0.seeds, edits: long, opts });
+  const dropL = pl1.families
+    .filter((f) => f.candidates.some((c) => c.outcome !== 'closed'))
+    .map((f): PieceEdit => ({ kind: 'not-a-piece', seed: f.seed }));
+  const pl = await run('pieces', { seeds: pc0.seeds, edits: [...long, ...dropL], opts });
+  const longUsed = pl.families.some((f) =>
+    f.candidates.some((c) =>
+      c.derived?.some(
+        (d) =>
+          d.kind === 'operator-bridge' &&
+          Math.hypot(d.pts[1].x - d.pts[0].x, d.pts[1].y - d.pts[0].y) > 30,
+      ),
+    ),
+  );
+  const semL = await run('semantics', {
+    fileAllowance: { meaning: 'seam', allowanceMm: 15, origin: 'operator', evidence: [] },
+    pieceOverrides: Object.fromEntries(
+      pl.families.map((f, i) => [
+        f.seed,
+        {
+          code: codes[i] ?? 'BP',
+          mods: [],
+          displayName: `p${i + 1}`,
+          nameOrigin: 'operator' as const,
+        },
+      ]),
+    ),
+    operatorGrain: {},
+  });
+  const seedsL = [...new Set(semL.pieces.map((p) => p.seed))];
+  const wl = await run('write', {
+    scopes: [MAIN],
+    assignment: { byPurpose: { [MAIN.scopeKey]: seedsL }, interliningInBom: false, proposals: [] },
+    sizes: sz.map.entries.flatMap((e) =>
+      e.card
+        ? [
+            {
+              token: e.card.token,
+              sizeId: e.card.sizeId,
+              name: e.card.name,
+              sourceLabel: e.source.label,
+              rank: e.source.rank,
+            },
+          ]
+        : [],
+    ),
+    dialect: 'r12',
+    generator: 'probe',
+  });
+  const gl = wl.gate[MAIN.scopeKey];
+  const g15l = gl?.checks.find((c) => c.id === 'G15-derived');
+  check(
+    name,
+    'negative: a 44.7 mm line across the same gap is outlined on, and G15 blocks the export',
+    longUsed && !!gl && !gl.passed && !!g15l && !g15l.ok && g15l.severity === 'block',
+    `outline uses it ${longUsed} · passed ${gl?.passed} · G15 ${g15l?.note?.slice(0, 240)}`,
+  );
 }
 
 async function pipelineCase(

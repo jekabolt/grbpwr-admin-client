@@ -188,6 +188,8 @@ export class Session {
   private semantics: SemanticsOutput | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
+  /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
+  private derivedOf: SemanticsDetail['derivedOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -267,6 +269,7 @@ export class Session {
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
       this.wallsOf = null;
+      this.derivedOf = null;
     }
   }
 
@@ -745,6 +748,7 @@ export class Session {
     );
     this.semantics = detail.output;
     this.wallsOf = detail.wallsOf;
+    this.derivedOf = detail.derivedOf;
     return detail.output;
   }
 
@@ -825,6 +829,7 @@ export class Session {
     // chains' own topology, never trimmed by the output (walls-used.ts, M7). A DXF's walls are its
     // own blocks.
     const rawWalls = this.wallsOf;
+    const derived = this.derivedOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -868,6 +873,7 @@ export class Session {
           sizeTokens,
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
+          derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );

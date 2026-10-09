@@ -1275,6 +1275,7 @@ export async function main(): Promise<number> {
           rules,
           sizeTokens: tokensOf(smx),
           wallsOf: (id, r) => d.wallsOf(sp.sourceOf[id] ?? id, r),
+          derivedOf: (id, r) => d.derivedOf(sp.sourceOf[id] ?? id, r),
           now: () => new Date(0),
         },
       );
@@ -1423,6 +1424,7 @@ async function runImport(
           rules,
           sizeTokens: tokensOf(map),
           wallsOf: (id, r) => d.wallsOf(sp.sourceOf[id] ?? id, r),
+          derivedOf: (id, r) => d.derivedOf(sp.sourceOf[id] ?? id, r),
           now: () => o.now ?? new Date(0),
         },
       );
