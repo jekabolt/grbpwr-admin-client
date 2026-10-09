@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "nest:probe": "node scripts/nest-probe.mjs",
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
+    "patimport:dxf": "node scripts/pattern-import/dxf.mjs",
     "paint:regions": "node scripts/paint-regions-probe.mjs",
     "paint:map": "node scripts/paint-map-probe.mjs",
     "paint:pen": "node scripts/paint-pen-probe.mjs",
