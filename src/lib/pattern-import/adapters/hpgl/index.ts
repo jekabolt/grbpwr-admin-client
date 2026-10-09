@@ -7,7 +7,7 @@
 // pens share a colour. Line types → `Style.dash` in mm (HP-GL/2 default pattern table; relative
 // pattern lengths resolved against the IP diagonal, else the drawing's own diagonal — warned).
 // One pen-down run = one `PathSource.op`; labels are IRText (anchor = baseline-left,
-// fontSizeMm = character CAP height as set by SI).
+// fontSizeMm = nominal em size = SI cap height / 0.7, per types.ts).
 
 import type { ExtractFn, ExtractOpts, PtMm, SourceDoc } from '../../types';
 import { PATIMPORT } from '../../types';
@@ -166,7 +166,7 @@ async function build(
       text: l.text,
       anchor: a,
       bbox: bboxOf(corners),
-      fontSizeMm: capMm,
+      fontSizeMm: capMm / 0.7,
       rotationDeg: (Math.atan2(u.y, u.x) * 180) / Math.PI,
       layer: null,
       src: { file: file.id, page: 0, op: l.op, sub: l.line, block: null },

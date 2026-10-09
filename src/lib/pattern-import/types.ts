@@ -67,6 +67,7 @@ export type PathSource = {
 /** Stroke style, interned per page. Dash arrays are in mm after scale. */
 export type Style = {
   id: StyleId;
+  /** Integer channels 0..255 (all adapters). Fill-only paths carry the FILL colour here with widthMm 0. */
   strokeRgb: [number, number, number] | null;
   widthMm: Mm;
   /** Declared dash pattern (PDF `d`, SVG stroke-dasharray, DXF LTYPE). null = solid or unknown. */
@@ -98,6 +99,7 @@ export type IRText = {
   /** Baseline-left anchor and the glyph box, page frame, mm. */
   anchor: PtMm;
   bbox: BoxMm;
+  /** Nominal font size (em height) in mm. Adapters that only know cap height (HPGL SI) use capHeight / 0.7. */
   fontSizeMm: Mm;
   rotationDeg: Deg;
   layer: string | null;
