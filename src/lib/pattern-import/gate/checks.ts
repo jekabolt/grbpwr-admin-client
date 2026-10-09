@@ -35,7 +35,7 @@ import {
   UNI_TOKEN,
   blockNameOf,
 } from '../write/plan';
-import { identityGrammarProblem } from './grammar';
+import { identityProblem } from '../manifest/identity';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -729,11 +729,14 @@ export function g11(ctx: GateCtx): GateCheck {
       notes.push(`identity ${p.identity} not unique`);
     }
     seenIds.set(k, p.identity);
-    const problem = ctx.rules.isValidIdentity
-      ? ctx.rules.isValidIdentity(p.identity, ctx.sizeBare)
-        ? null
-        : 'rejected by dictionary grammar'
-      : identityGrammarProblem(p.identity);
+    // Grammar + "last token is not a size of the run" with the ONE exemption, the declared hand
+    // of a pair (owner decision 9) — the same function the wizard's code cell runs
+    // (manifest/identity.ts). G9 proves the card still splits FP_L_L right.
+    const problem = identityProblem(p.identity, {
+      isSizeToken: ctx.isSize,
+      pair: { hand: p.pairHand, of: p.pairOf },
+      isKnownCode: ctx.rules.isKnownCode,
+    });
     if (problem) {
       failed.push(p.identity);
       notes.push(`${p.identity}: ${problem}`);
@@ -741,15 +744,6 @@ export function g11(ctx: GateCtx): GateCheck {
     if ([p.code, ...p.mods].join('_') !== p.identity) {
       failed.push(p.identity);
       notes.push(`${p.identity}: ≠ code+mods ${[p.code, ...p.mods].join('_')}`);
-    }
-    // FP_L vs size L: an identity ending in a size token is exactly what tail-stripping code
-    // misreads. The ONE exemption is the declared hand of a pair (owner decision 9: `_L`/`_R`
-    // blocks are mandatory) — G9 proves the card still splits those blocks right.
-    const toks = p.identity.split('_');
-    const last = toks[toks.length - 1];
-    if (toks.length > 1 && ctx.isSize(last) && !(p.pairHand && p.pairHand === last && p.pairOf)) {
-      failed.push(p.identity);
-      notes.push(`${p.identity}: last token "${last}" is a size of the run`);
     }
   }
   for (const b of ctx.m.blocks) {

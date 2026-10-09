@@ -268,7 +268,16 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
 
   const sheet: Sheet = {
     id: 0,
-    poses: [{ file: read.doc.file.id, page: 0, toSheet: IDENTITY, residualMm: 0 }],
+    poses: [
+      {
+        file: read.doc.file.id,
+        page: 0,
+        toSheet: IDENTITY,
+        widthMm: page.widthMm,
+        heightMm: page.heightMm,
+        residualMm: 0,
+      },
+    ],
     pairs: [],
     bbox: read.meta.extents,
     missing: [],

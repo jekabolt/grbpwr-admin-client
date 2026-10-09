@@ -23,7 +23,12 @@ import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import type { CardContext } from '../client';
-import { checkIdentity } from '../grammar-lite';
+import {
+  codeWordsOf,
+  identitiesOf,
+  identityProblem,
+  sizeTokenTest,
+} from 'lib/pattern-import/manifest';
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
@@ -39,6 +44,8 @@ const REASON: Record<string, string> = {
   'offset-self-intersection': 'offset crosses itself',
   'offset-topology': 'offset broke the shape',
   leak: 'outline not closed',
+  merged: 'two pieces in one region',
+  tiny: 'too small for a piece',
   'non-monotone': 'sizes do not grow',
   grammar: 'code grammar',
   'duplicate-identity': 'code used twice',
@@ -83,16 +90,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     rerun({
       overrides: { ...inputs.overrides, [seed]: { ...(inputs.overrides[seed] ?? {}), ...o } },
     });
-  const setName = (
-    seed: SeedId,
-    p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>,
-  ) => {
-    void api.dispatch({
-      type: 'names',
-      decisions: session.names.map((n) => (n.seed === seed ? { ...n, ...p } : n)),
-    });
-    patchInputs((i) => ({ confirmedNames: [...new Set([...i.confirmedNames, seed])] }));
-  };
+  const setName = (seed: SeedId, p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>) =>
+    void api.editName(seed, p);
   const confirm = (seed: SeedId) =>
     patchInputs((i) => ({ confirmedNames: [...new Set([...i.confirmedNames, seed])] }));
 
@@ -218,14 +217,10 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                     <td data-align='left'>
                       <CodeCell
                         value={n ? [n.code, ...n.mods].filter(Boolean).join('_') : ''}
-                        hands={!!pair}
+                        hand={pair}
                         blocks={specs.map((s) => s.identity).join(' + ')}
                         sizeTokens={api.sizeTokens}
-                        onCommit={(v) => {
-                          const [code, ...mods] = v.split('_').filter(Boolean);
-                          setName(seed, { code: code ?? '', mods });
-                          override(seed, { code: code ?? '', mods });
-                        }}
+                        onCommit={(v) => setName(seed, splitCode(v))}
                       />
                     </td>
                     <td data-align='left'>
@@ -241,7 +236,24 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       />
                     </td>
                     <td>
-                      {specs.length ? specs.reduce((k, s) => k + s.piecesPerGarment, 0) : '—'}
+                      {!specs.length ? (
+                        '—'
+                      ) : pair ? (
+                        // Both hands of a pair are drawn and count 1 each (PieceSpec).
+                        <span title='a pair: one _L and one _R per garment'>1 + 1</span>
+                      ) : (
+                        <NumberField
+                          value={specs[0].piecesPerGarment}
+                          min={1}
+                          aria-label={`pieces per garment of piece ${mark(seed)}`}
+                          className='ml-auto w-12'
+                          onCommit={(v) =>
+                            v && v !== specs[0].piecesPerGarment
+                              ? override(seed, { piecesPerGarment: Math.round(v) })
+                              : undefined
+                          }
+                        />
+                      )}
                     </td>
                     <td data-align='left'>
                       <NativeSelect
@@ -487,15 +499,22 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
 }
 
 /** The code input: grammar checked per keystroke, committed on blur/Enter. */
+/** "LIN_FP_1" → code LIN_FP (all code words), mods ['1']. */
+function splitCode(v: string): { code: string; mods: string[] } {
+  const t = v.trim().split('_').filter(Boolean).join('_');
+  const words = t ? codeWordsOf(t) : [];
+  return { code: words.join('_'), mods: t.split('_').slice(words.length) };
+}
+
 function CodeCell({
   value,
-  hands,
+  hand,
   blocks,
   sizeTokens,
   onCommit,
 }: {
   value: string;
-  hands: boolean;
+  hand: 'L' | 'R' | null;
   blocks: string;
   sizeTokens: ReadonlySet<string>;
   onCommit: (v: string) => void;
@@ -506,9 +525,18 @@ function CodeCell({
     setPrev(value);
     setText(value);
   }
-  // The hand is added by the pair control, so check the identity the writer will actually spell.
-  const probe = hands ? text.replace(/^([^_]+)/, '$1_L') : text;
-  const verdict = checkIdentity(probe, sizeTokens);
+  // The hand is added by the pair control, so check the identities the writer will actually spell
+  // (both hands, declared as a pair) with the gate's own G11 rule.
+  const { code, mods } = splitCode(text);
+  const isSizeToken = sizeTokenTest(sizeTokens);
+  const why = text.trim()
+    ? identitiesOf(code, mods, hand)
+        .map((w) =>
+          identityProblem(w.identity, { isSizeToken, pair: { hand: w.pairHand, of: w.pairOf } }),
+        )
+        .find((x) => x) ?? null
+    : 'empty code';
+  const verdict = why ? { ok: false as const, why } : { ok: true as const };
   return (
     <span className='flex flex-col gap-0.5'>
       <Input

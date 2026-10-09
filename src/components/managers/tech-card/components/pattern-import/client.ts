@@ -64,13 +64,11 @@ export type DraftBuilder = (
   write: StageIO['write']['out'],
   ctx: {
     card: CardContext;
-    semantics: StageIO['semantics']['out'];
     /**
-     * The names table as the operator left it. CONTRACT GAP (reported in F13.md): the semantics
-     * input can carry only code/mods per seed, so display names and the ai-auto flag reach the
-     * draft here, main-thread, and not yet the manifest inside the DXF.
+     * The pieces as written. Names, the ai-auto flag, quantity and `fused` reach PieceSpec through
+     * `SemanticsInput.pieceOverrides` (I1), so the draft and the manifest inside the DXF agree.
      */
-    names: NameDecision[];
+    semantics: StageIO['semantics']['out'];
   },
 ) => CardDraft;
 

@@ -10,6 +10,7 @@ import path from 'node:path';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
 import { mergeDxfSheets } from 'lib/nesting/dxf/merge';
 import type {
+  CardSize,
   DraftScopeTarget,
   FoldFeature,
   GateCheckId,
@@ -35,7 +36,10 @@ import {
   reflection,
   applyAffine,
 } from 'lib/pattern-import/write/geom';
-import { embedManifest as embedManifestLocal, readManifest as readManifestLocal } from 'lib/pattern-import/manifest';
+import {
+  embedManifest as embedManifestLocal,
+  readManifest as readManifestLocal,
+} from 'lib/pattern-import/manifest';
 import {
   type CardBlockRules,
   createRunGate,
@@ -43,6 +47,9 @@ import {
   roundTrip,
   writeAndGate,
 } from 'lib/pattern-import/gate';
+import { sameManifest } from 'lib/pattern-import/gate/checks';
+import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import * as fx from 'components/managers/tech-card/components/pattern-import/fixture';
 
 const rules: CardBlockRules = blockCode;
 
@@ -296,7 +303,7 @@ function bpSpec(identity = 'BP', fabric = MAIN.fabricPurpose, shrink = 1): Piece
   });
 }
 
-// FP_L is the base hand (D1: write `_L` and its explicit mirror `_R`); grain at x = −465.
+// FP_L is the base hand (D1': both hands drawn, `_R` = explicit mirror of `_L`); grain at x = −465.
 const FPL_M = ccw(
   mirrorX([
     { x: 330, y: 0 },
@@ -306,12 +313,12 @@ const FPL_M = ccw(
     { x: 330, y: 600 },
   ]),
 );
-function fpLSpec(): PieceSpec {
+function fpLSpec(sizes: SizeDef[] = SIZES): PieceSpec {
   const anchor = { x: -465, y: 1 };
   return piece('FP_L', 'FP', ['L'], {
     pairHand: 'L',
     pairOf: 'FP_R',
-    sizes: SIZES.map((s) => {
+    sizes: sizes.map((s) => {
       const cut = ccw(scaleAbout(FPL_M, anchor, s.k));
       const seam = offsetPoly(cut, 10);
       return sizeSpec(s, {
@@ -363,7 +370,7 @@ const SL_M = ccw([
   { x: 90, y: 500 },
   { x: -40, y: 420 },
 ]);
-function slSpec(identity = 'SL', fabric = MAIN.fabricPurpose): PieceSpec {
+function slSpec(identity = 'SL', fabric = MAIN.fabricPurpose, sizes: SizeDef[] = SIZES): PieceSpec {
   const anchor = { x: 130, y: 1 };
   return piece(identity, identity, [], {
     fabrics: [fabric],
@@ -374,7 +381,7 @@ function slSpec(identity = 'SL', fabric = MAIN.fabricPurpose): PieceSpec {
       origin: 'text',
       evidence: ['seam allowance not included'],
     },
-    sizes: SIZES.map((s) => {
+    sizes: sizes.map((s) => {
       const seam = ccw(scaleAbout(SL_M, anchor, s.k));
       const cut = offsetPoly(seam, -10);
       return sizeSpec(s, {
@@ -442,9 +449,12 @@ const job = (
   dialect,
 });
 const NOW = () => new Date('2026-10-09T12:00:00Z');
-const gateCtx = (specs: PieceSpec[], extra: { shiftWalls?: number } = {}) => ({
+const gateCtx = (
+  specs: PieceSpec[],
+  extra: { shiftWalls?: number; sizeTokens?: ReadonlySet<string> } = {},
+) => ({
   rules,
-  sizeTokens: CARD_TOKENS,
+  sizeTokens: extra.sizeTokens ?? CARD_TOKENS,
   wallsOf: (id: string, rank: number) => {
     const w = wallsOfFor(specs)(id, rank);
     const s = extra.shiftWalls ?? 0;
@@ -679,6 +689,16 @@ export async function main(opts: { plans: string }): Promise<number> {
   const sampleDir = path.join(outDir, 'f6-samples');
   fs.mkdirSync(sampleDir, { recursive: true });
   const runGate = createRunGate(rules);
+  // Every VALID job's final text must re-read through the shared, strict manifest/ validator
+  // (the writer may never emit a manifest that readManifest rejects). Checked in section R.
+  const valid: { label: string; text: string; manifest: unknown }[] = [];
+  const keep = <T extends { dxfText: string; detail: { manifest: unknown } }>(
+    label: string,
+    r: T,
+  ) => {
+    valid.push({ label, text: r.dxfText, manifest: r.detail.manifest });
+    return r;
+  };
 
   // T1 ─────────────────────────────────────────────────────────────────────────────────────
   head('T1 · golden structure (k2-work/golden-min.dxf)');
@@ -746,7 +766,7 @@ export async function main(opts: { plans: string }): Promise<number> {
   head('T2 · main scope: BP unfolded · FP_L/FP_R · SL (seam meaning) · PCK UNI × S/M/L');
   const L = fpLSpec();
   const mainSpecs = [bpSpec(), L, fpRFrom(L), slSpec(), pckSpec()];
-  const main = await writeAndGate(job(MAIN, mainSpecs), gateCtx(mainSpecs));
+  const main = keep('T2 main', await writeAndGate(job(MAIN, mainSpecs), gateCtx(mainSpecs)));
   fs.writeFileSync(path.join(sampleDir, 'main.dxf'), main.dxfText, 'latin1');
   {
     const r = main.report;
@@ -783,7 +803,7 @@ export async function main(opts: { plans: string }): Promise<number> {
       'embedded manifest carries the passed gate report',
     );
     const fp = back.pieces.find((p) => p.identity === 'FP_L')!;
-    ck(fp.pairHand === 'L' && fp.pairOf === 'FP_R', 'manifest pairHand/pairOf (D1)');
+    ck(fp.pairHand === 'L' && fp.pairOf === 'FP_R', "manifest pairHand/pairOf (D1')");
     ck(back.pieces.find((p) => p.identity === 'BP')!.unfoldedFold, 'manifest unfoldedFold on BP');
     ck(
       back.blocks.find((b) => b.block === 'PCK_UNI')!.sizeToken === 'UNI',
@@ -815,12 +835,15 @@ export async function main(opts: { plans: string }): Promise<number> {
       slSpec('LIN_SL', LINING.fabricPurpose),
     ];
     const all = [...mainSpecs, ...lin];
-    const r = await writeAndGate(
-      job(
-        LINING,
-        all.filter((p) => p.fabrics.includes(LINING.fabricPurpose)),
+    const r = keep(
+      'T3 lining',
+      await writeAndGate(
+        job(
+          LINING,
+          all.filter((p) => p.fabrics.includes(LINING.fabricPurpose)),
+        ),
+        gateCtx(all),
       ),
-      gateCtx(all),
     );
     fs.writeFileSync(path.join(sampleDir, 'lining.dxf'), r.dxfText, 'latin1');
     ck(r.report.passed, 'lining gate passes', summary(r.report));
@@ -850,6 +873,8 @@ export async function main(opts: { plans: string }): Promise<number> {
       },
       { now: NOW },
     );
+    for (const f of fan)
+      keep(`T3 writeScopes ${f.scope.label}`, { dxfText: f.detail.dxfText, detail: f.detail });
     ck(
       fan.length === 2 &&
         fan[0].detail.plan.blocks.length === 13 &&
@@ -862,7 +887,7 @@ export async function main(opts: { plans: string }): Promise<number> {
   head('T4 · `_R` derived by the writer from `_L` (explicit mirror across the grain)');
   {
     const specs = [fpLSpec()];
-    const r = await writeAndGate(job(MAIN, specs), gateCtx(specs));
+    const r = keep('T4 derived _R', await writeAndGate(job(MAIN, specs), gateCtx(specs)));
     ck(r.report.passed, 'gate passes', summary(r.report));
     const names = r.detail.plan.blocks.map((b) => b.name).join(' ');
     ck(names === 'FP_L_S FP_R_S FP_L_M FP_R_M FP_L_L FP_R_L', 'both hands written', names);
@@ -884,7 +909,7 @@ export async function main(opts: { plans: string }): Promise<number> {
   // T5 ─────────────────────────────────────────────────────────────────────────────────────
   head('T5 · R12 dialect (opt-in)');
   {
-    const r = await writeAndGate(job(MAIN, mainSpecs, 'r12'), gateCtx(mainSpecs));
+    const r = keep('T5 r12', await writeAndGate(job(MAIN, mainSpecs, 'r12'), gateCtx(mainSpecs)));
     fs.writeFileSync(path.join(sampleDir, 'main-r12.dxf'), r.dxfText, 'latin1');
     ck(r.report.passed, 'R12 gate passes', summary(r.report));
     for (const c of r.report.checks)
@@ -954,6 +979,191 @@ export async function main(opts: { plans: string }): Promise<number> {
       threw = true;
     }
     ck(threw, 'corrupt manifest → readManifest throws');
+  }
+
+  // C ──────────────────────────────────────────────────────────────────────────────────────
+  // G11 vs pairs (I1): F13 read G11 as "every FP_L on a card with size L blocks"; F6 exempts the
+  // declared hand of a real pair. Settled here through the actual gate on a run S M L XL.
+  const S4: SizeDef[] = [...SIZES, { token: 'XL', sizeId: 14, rank: 3, k: 1.08 }];
+  const M4: ManifestSize[] = S4.map((s) => ({
+    token: s.token,
+    sizeId: s.sizeId,
+    name: `${s.token.toLowerCase()}_eu`,
+    sourceLabel: String(44 + s.rank * 2),
+    rank: s.rank,
+  }));
+  const T4 = new Set(S4.map((s) => s.token));
+  head('C · G11 vs declared pairs on a run S M L XL (FP_L vs size L)');
+  {
+    const Lp = fpLSpec(S4);
+    const pair = [Lp, fpRFrom(Lp)];
+    const r = keep(
+      'C pair on S M L XL',
+      await writeAndGate(job(MAIN, pair, 'r2000', M4), gateCtx(pair, { sizeTokens: T4 })),
+    );
+    const g11 = checkOf(r.report, 'G11-grammar')[0];
+    ck(
+      r.report.passed && g11.ok,
+      'declared FP_L/FP_R pair on S M L XL → G11 green, gate passes',
+      summary(r.report),
+    );
+    const names = r.detail.plan.blocks.map((b) => b.name);
+    const derived = blockCode.deriveBlockSizes(names, (t) => T4.has(t.toUpperCase()));
+    ck(
+      derived.get('FP_L_L') === 'L' && derived.get('FP_R_XL') === 'XL',
+      'card derives FP_L_L → L and FP_R_XL → XL',
+      names.join(' '),
+    );
+    const sl = slSpec('SL_L', MAIN.fabricPurpose, S4);
+    sl.code = 'SL';
+    sl.mods = ['L'];
+    const r2 = await writeAndGate(job(MAIN, [sl], 'r2000', M4), gateCtx([sl], { sizeTokens: T4 }));
+    ck(
+      !r2.report.passed && failing(r2.report).includes('G11-grammar'),
+      'non-pair SL_L on S M L XL → G11 red, gate fails',
+      checkOf(r2.report, 'G11-grammar')[0].note,
+    );
+    const isSizeToken = sizeTokenTest(T4);
+    ck(
+      identityProblem('FP_L', { isSizeToken, pair: { hand: 'L', of: 'FP_R' } }) === null &&
+        identityProblem('FP_L', { isSizeToken }) !== null &&
+        identityProblem('FP_L', { isSizeToken, pair: { hand: 'L', of: null } }) !== null &&
+        identityProblem('FP_R', { isSizeToken, pair: { hand: 'L', of: 'FP_R' } }) === null,
+      'shared identityProblem: exemption only for a DECLARED pair hand (hand + pairOf)',
+    );
+    ck(
+      identitiesOf('LIN_FP', ['1'], 'R')
+        .map((w) => `${w.identity}/${w.pairOf}`)
+        .join(' ') === 'LIN_FP_L_1/LIN_FP_R_1 LIN_FP_R_1/LIN_FP_L_1',
+      'identitiesOf writes both hands, hand first among the mods',
+    );
+  }
+
+  // W ──────────────────────────────────────────────────────────────────────────────────────
+  head(
+    'W · wizard (F13 fixture): pairs declared before gating; overrides reach PieceSpec + manifest',
+  );
+  {
+    const card: CardSize[] = S4.map((s) => ({
+      sizeId: s.sizeId,
+      name: `${s.token.toLowerCase()}_eu`,
+      token: s.token,
+      rank: s.rank,
+    }));
+    const tokens = new Set(card.map((c) => c.token.toLowerCase()));
+    const sz = fx.fixtureSizes(card, undefined, fx.fixtureChains([]).classes);
+    const pc = fx.fixturePieces(
+      {
+        edits: [],
+        opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+      },
+      sz.map.entries.length,
+    );
+    const base = { fileAllowance: fx.DEFAULT_ALLOWANCE, pieceOverrides: {}, operatorGrain: {} };
+    const semOf = (pieceOverrides: typeof base.pieceOverrides) =>
+      fx.fixtureSemantics({
+        input: { ...base, pieceOverrides } as never,
+        seeds: pc.seeds,
+        families: pc.families,
+        map: sz.map,
+        sizeTokens: tokens,
+      });
+    const sem0 = semOf({});
+    const fp = sem0.pieces.filter((p) => p.code === 'FP');
+    ck(
+      sz.map.entries.some((e) => e.card?.token === 'L') &&
+        fp.length === 2 &&
+        fp.every((p) => p.pairHand && p.pairOf),
+      'run maps to S M L XL; FP is written as a declared pair FP_L + FP_R',
+      fp.map((p) => `${p.identity}→${p.pairOf}`).join(' '),
+    );
+    ck(
+      !sem0.blocked.some((b) => b.reason === 'grammar'),
+      'no grammar block on a run with size L (declared pair hands are exempt)',
+      sem0.blocked.map((b) => `${b.seed}:${b.reason}`).join(' '),
+    );
+    ck(
+      sem0.blocked.some((b) => b.reason === 'merged') &&
+        !sem0.blocked.some((b) => b.reason === 'leak' && /share one region/.test(b.detail)),
+      "a merged region is blocked as 'merged' (not 'leak')",
+    );
+    const bpSeed = sem0.pieces.find((p) => p.code === 'BP')!.seed;
+    const sem1 = semOf({ [bpSeed]: { code: 'BP', mods: ['L'], pairHand: null } });
+    ck(
+      sem1.blocked.some((b) => b.seed === bpSeed && b.reason === 'grammar'),
+      'BP_L that is not a pair → blocked (grammar) before gating',
+      sem1.blocked.find((b) => b.seed === bpSeed)?.detail,
+    );
+    const sem2 = semOf({
+      [bpSeed]: {
+        displayName: 'back body',
+        nameOrigin: 'ai-auto',
+        aiConfidence: 0.91,
+        piecesPerGarment: 1,
+        fused: true,
+      },
+    });
+    const bp = sem2.pieces.find((p) => p.seed === bpSeed)!;
+    ck(
+      bp.displayName === 'back body' &&
+        bp.nameOrigin === 'ai-auto' &&
+        bp.aiConfidence === 0.91 &&
+        bp.piecesPerGarment === 1 &&
+        bp.fused,
+      'pieceOverrides displayName/nameOrigin/aiConfidence/piecesPerGarment/fused → PieceSpec',
+    );
+    // …and through the REAL writer into the embedded manifest.
+    const d = writeDxfDetailed(
+      { ...job(MAIN, [bp], 'r2000', fx.manifestSizes(sz.map)) },
+      { now: NOW },
+    );
+    const mp = readManifestLocal(d.dxfText)?.pieces.find((p) => p.identity === bp.identity);
+    ck(
+      !!mp &&
+        mp.displayName === 'back body' &&
+        mp.nameOrigin === 'ai-auto' &&
+        mp.aiConfidence === 0.91 &&
+        mp.fused === true,
+      'write/ → manifest piece carries displayName, ai-auto flag, aiConfidence, fused',
+      JSON.stringify(
+        mp && { n: mp.displayName, o: mp.nameOrigin, c: mp.aiConfidence, f: mp.fused },
+      ),
+    );
+  }
+
+  // R ──────────────────────────────────────────────────────────────────────────────────────
+  head('R · every valid fixture round-trips through the shared readManifest');
+  {
+    const gold = goldenSpecs();
+    const goldScope: DraftScopeTarget = {
+      scopeKey: 'shell',
+      fabricPurpose: 'shell',
+      bomLineKey: '',
+      label: 'shell',
+      isInterlining: false,
+    };
+    keep(
+      'T1 golden',
+      await writeAndGate(
+        job(goldScope, gold, 'r2000', [
+          { token: 'M', sizeId: 2, name: 'm', sourceLabel: 'M', rank: 0 },
+          { token: 'L', sizeId: 3, name: 'l', sourceLabel: 'L', rank: 1 },
+        ]),
+        { ...gateCtx(gold), sizeTokens: new Set(['M', 'L']), wallsOf: undefined },
+      ),
+    );
+    for (const v of valid) {
+      let note = '';
+      let ok = false;
+      try {
+        const back = readManifestLocal(v.text);
+        ok = !!back && sameManifest(back, v.manifest);
+        if (!ok) note = back ? 'read back differs from the written manifest' : 'no manifest';
+      } catch (e) {
+        note = String(e);
+      }
+      ck(ok, `${v.label}: readManifest accepts the written manifest and it deep-equals`, note);
+    }
   }
 
   // N ──────────────────────────────────────────────────────────────────────────────────────
@@ -1094,7 +1304,11 @@ export async function main(opts: { plans: string }): Promise<number> {
       await neg('PCK graded + PCK_UNI in one file', 'G10-uni', r);
     } catch (e) {
       const code = (e as { code?: string }).code;
-      ck(code === 'shape', 'PCK graded + PCK_UNI in one file → manifest refuses the duplicate identity', String(e));
+      ck(
+        code === 'shape',
+        'PCK graded + PCK_UNI in one file → manifest refuses the duplicate identity',
+        String(e),
+      );
     }
   }
   {
@@ -1140,11 +1354,20 @@ export async function main(opts: { plans: string }): Promise<number> {
   }
   {
     const sizes = MANIFEST_SIZES.map((s, i) => (i === 0 ? { ...s, sizeId: 0 } : s));
-    await neg(
-      'a size without a card sizeId',
-      'G13-manifest',
-      (await writeAndGate(job(MAIN, mainSpecs, 'r2000', sizes), gateCtx(mainSpecs))).report,
-    );
+    // Same pattern as the PCK duplicate: the shared manifest/ validator refuses `sizeId: 0` when
+    // the manifest is embedded, before G13 runs. Either refusal keeps the file off the card.
+    try {
+      const r = (await writeAndGate(job(MAIN, mainSpecs, 'r2000', sizes), gateCtx(mainSpecs)))
+        .report;
+      await neg('a size without a card sizeId', 'G13-manifest', r);
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      ck(
+        code === 'shape' && /sizeId/.test(String(e)),
+        'a size without a card sizeId → manifest refuses it (before G13)',
+        String(e),
+      );
+    }
   }
   {
     const r = (

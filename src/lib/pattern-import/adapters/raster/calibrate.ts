@@ -6,10 +6,18 @@
 // vertices (thinning rounds them) but from the intersection of total-least-squares lines fitted
 // to the dense middle 84 % of each side.
 
-import type { Affine, IRPage, IRPath, Mm, PtMm } from '../../types';
+import type {
+  Affine,
+  IRPage,
+  IRPath,
+  Mm,
+  PtMm,
+  RasterCalibration,
+  RasterSquare,
+} from '../../types';
 import { apply, fitAffine, IDENTITY, qr } from './affine';
 import { simplifyDP } from './skeleton';
-import type { RasterCalibration, RasterRef, RasterSquare } from './types';
+import type { RasterRef } from './types';
 
 /** Common printed test squares: 1", 5 cm, 2", 10 cm, 4". */
 export const SQUARE_CANDIDATES_MM = [25.4, 50, 50.8, 100, 101.6];
@@ -298,10 +306,10 @@ export function calibrate(page: IRPage, ref: RasterRef): RasterCalibration {
   };
 }
 
-/** Pure: the page with every coordinate mapped through the calibration. */
+/** Pure: the page with every coordinate mapped through the calibration, which it then carries. */
 export function applyCalibration(page: IRPage, calib: RasterCalibration): IRPage {
   const A = calib.affine;
-  if (A === IDENTITY) return page;
+  if (A === IDENTITY) return { ...page, calibration: calib };
   const mapBox = (b: IRPage['rasters'][number]['bbox']) => {
     const c = [
       apply(A, b.minX, b.minY),
@@ -320,5 +328,6 @@ export function applyCalibration(page: IRPage, calib: RasterCalibration): IRPage
     ...page,
     paths: page.paths.map((p) => ({ ...p, pts: p.pts.map((q) => apply(A, q.x, q.y)) })),
     rasters: page.rasters.map((r) => ({ ...r, bbox: mapBox(r.bbox) })),
+    calibration: calib,
   };
 }

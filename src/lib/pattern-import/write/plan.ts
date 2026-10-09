@@ -1,12 +1,14 @@
 // PieceSpec[] (source frame) → PlannedBlock[] (written frame): everything the emitters need,
 // with every garment decision already taken. The emitters only serialise.
 //
-// Decisions taken here (10-CLO-DXF-FORMAT §1.5–1.8, 09-CARD-CONTRACT obligations 12–14, 07-TASKS D1):
+// Decisions taken here (10-CLO-DXF-FORMAT §1.5–1.8, 09-CARD-CONTRACT obligations 12–14, 07-TASKS D1'):
 //   • block name = `<IDENTITY>_<SIZE>`; an ungraded piece is ONE block `<IDENTITY>_UNI` (K1 case g:
 //     the card reads `PCK_UNI` as one ungraded piece; `PCK_UNI_M` would leak the base size into the
 //     card's identity, see block-code.ts splitBlockSize);
-//   • pairs are two blocks; a hand whose sibling spec is missing is DERIVED as the explicit mirror
-//     across that size's grain line (never an INSERT with negative scale);
+//   • pairs are two blocks (owner decision 9) of ONE card piece cut IDENTICAL — both hands drawn
+//     (D1', F6b: card markers never lay a mirrored copy); a hand whose sibling spec is missing is
+//     DERIVED as the explicit mirror across that size's grain line (never an INSERT with negative
+//     scale) — a geometric mirror, not MIRRORED cut symmetry;
 //   • every identity (all its sizes together, keeping their shared grade nest) is translated onto a
 //     shelf so different pieces never overlap in world space — the source sheet placement is not
 //     kept: a derived mirror lands on top of its sibling, and an unfolded piece on its neighbour;
@@ -241,7 +243,7 @@ export function planBlocks(
     else warnings.push(`${p.identity}: not cut from ${scope.label || scope.scopeKey} — skipped`);
   }
 
-  // 2. pair siblings (D1: `_L` + its explicit mirror `_R`, two blocks)
+  // 2. pair siblings (`_L` + its explicit mirror `_R`, two blocks — D1', cut IDENTICAL)
   const byId = new Map(inScope.map((p) => [p.identity, p]));
   type Entry = { spec: PieceSpec; srcT: Map<number, Affine>; derivedFrom: string | null };
   const entries: Entry[] = [];

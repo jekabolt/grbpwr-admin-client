@@ -1,11 +1,10 @@
 // RASTER ADAPTER (F11) — private types. The public surface (traceRaster / calibrate /
 // extractRasterPdf / extractRasterImage) is re-exported from ./index.ts.
 //
-// Contract gap (reported in F11.md): types.ts §1 names `RasterCalibration` in the module map but
-// does not define it, and `IRPage` has no slot for a per-page correction. Both live here until T0
-// decides whether the wizard needs them on the wire.
+// `RasterCalibration` / `RasterSquare` are contract types (types.ts §1, I1): a calibrated page
+// carries its correction in `IRPage.calibration`.
 
-import type { Affine, FileId, Mm, PageIndex, PtMm } from '../../types';
+import type { Affine, FileId, Mm, PageIndex, RasterCalibration } from '../../types';
 
 /** One decoded raster as the adapter sees it: pixels + where they sit on the page. */
 export type RasterImage = {
@@ -42,33 +41,6 @@ export type RasterRef =
    */
   | { kind: 'inherit'; from: RasterCalibration }
   | { kind: 'none' };
-
-export type RasterSquare = {
-  page: PageIndex;
-  /** Corners as traced (page frame, before correction), counter-clockwise from min-angle. */
-  cornersMm: PtMm[];
-  /** Mean of opposite sides, as traced. */
-  measuredWMm: Mm;
-  measuredHMm: Mm;
-  /** Orientation of the "horizontal" pair vs the page x axis. */
-  angleDeg: number;
-  /** Deviation of the corner angle from 90°. */
-  skewDeg: number;
-  /** Side the square is declared to have (ref or the matched candidate). */
-  sideMm: Mm;
-  /** RMS of the 4 corners after the fitted affine, mm. */
-  residualMm: Mm;
-};
-
-export type RasterCalibration = {
-  method: 'test-square' | 'inherited' | 'none';
-  /** Traced page frame → corrected page frame (true mm). Identity for 'none'. */
-  affine: Affine;
-  square: RasterSquare | null;
-  /** 0..1: square with a declared/matched side 0.95, inherited 0.5, none 0. */
-  confidence: number;
-  notes: string[];
-};
 
 export type TraceOpts = {
   /** Douglas–Peucker tolerance on the traced centre line, mm. */

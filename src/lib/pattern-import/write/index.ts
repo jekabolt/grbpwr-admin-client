@@ -30,7 +30,7 @@ export { blockNameOf, pieceInScope, UNI_TOKEN } from './plan';
 export type { Plan, PlannedBlock } from './plan';
 
 export type WriteOptions = {
-  /** Manifest embedder; null = bare DXF. Default: the local stand-in until `manifest/` merges. */
+  /** Manifest embedder; null = bare DXF. Default: the shared `manifest/` `embedManifest`. */
   embed?: EmbedManifestFn | null;
   /** Clock for `createdAt` (tests pin it). */
   now?: () => Date;

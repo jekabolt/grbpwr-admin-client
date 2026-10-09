@@ -21,7 +21,8 @@
 // always did); tag present but anything wrong with it → `ManifestError`, never a partial object and
 // never a silent `null`.
 //
-// Main-thread safe by contract: JSON and string operations only, no imports beyond `types.ts`.
+// Main-thread safe by contract: JSON and string operations only, no imports beyond `types.ts` (and
+// the sibling `identity.ts`, the G11 identity grammar the wizard and the gate share).
 import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
@@ -33,6 +34,16 @@ import {
 } from '../types';
 
 export { MANIFEST_TAG, MANIFEST_VERSION };
+export {
+  bareSizeToken,
+  codeWordsOf,
+  identitiesOf,
+  identityGrammarProblem,
+  identityProblem,
+  modStage,
+  sizeTokenTest,
+  type IdentityRules,
+} from './identity';
 
 export type ManifestErrorCode =
   /** A tagged line that is not `GRBPWR-MANIFEST v<n> <i>/<n> <base64>`, bad base64, bad UTF-8, bad JSON. */

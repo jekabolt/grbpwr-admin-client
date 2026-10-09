@@ -51,7 +51,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { kindOfName } from './formats';
-import { checkIdentity, identityOf } from './grammar-lite';
+import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 
 // ── the sheet ───────────────────────────────────────────────────────────────────────────────
 export const PAGE_W = 210;
@@ -593,6 +593,8 @@ export function pagePoses(override?: GridOverride): PagePose[] {
       file: '0',
       page: 3 + i,
       toSheet: { a: 1, b: 0, c: 0, d: 1, e: col * sx, f: (rows - 1 - row) * sy },
+      widthMm: PAGE_W,
+      heightMm: PAGE_H,
       row,
       col,
       residualMm: override ? 0 : jitter[i % jitter.length],
@@ -1024,13 +1026,17 @@ export function fixtureSemantics(args: {
     if (outcome === 'merged') {
       blocked.push({
         seed: f.seed,
-        reason: 'leak',
+        reason: 'merged',
         detail: 'two seeds share one region — split them with the lasso',
       });
       continue;
     }
     if (outcome === 'tiny') {
-      warnings.push(`seed ${f.seed}: below ${PATIMPORT.minPieceAreaMm2} mm² — not exported`);
+      blocked.push({
+        seed: f.seed,
+        reason: 'tiny',
+        detail: `below ${PATIMPORT.minPieceAreaMm2} mm² — mark it "not a piece" or reseed`,
+      });
       continue;
     }
     const ov = input.pieceOverrides[f.seed] ?? {};
@@ -1053,14 +1059,24 @@ export function fixtureSemantics(args: {
       blocked.push({ seed: f.seed, reason: 'no-grain', detail: 'no grainline found — draw it' });
       continue;
     }
-    const hands: (('L' | 'R') | null)[] = pairHand ? ['L', 'R'] : [null];
-    const ids = hands.map((h) => identityOf(code, h ? [h, ...mods] : mods));
-    const bad = ids.map((id) => checkIdentity(id, sizeTokens)).find((v) => !v.ok);
-    if (bad && !bad.ok) {
-      blocked.push({ seed: f.seed, reason: 'grammar', detail: bad.why });
+    // Both hands of a declared pair, with their pair fields — so the grammar check gets the same
+    // `_L`/`_R` exemption G11 applies (FP_L on a run with size L is fine; SL_L that is no pair is not).
+    const written = identitiesOf(code, mods, pairHand);
+    const isSizeToken = sizeTokenTest(sizeTokens);
+    const bad = written
+      .map((w) =>
+        identityProblem(w.identity, { isSizeToken, pair: { hand: w.pairHand, of: w.pairOf } }),
+      )
+      .find((v) => v);
+    if (bad) {
+      blocked.push({ seed: f.seed, reason: 'grammar', detail: bad });
       continue;
     }
-    hands.forEach((h, hi) => {
+    const nameOrigin = ov.nameOrigin ?? p.nameOrigin;
+    const aiConfidence =
+      nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? ov.aiConfidence ?? p.ai : undefined;
+    written.forEach((w) => {
+      const h = w.pairHand;
       const sizes = exported.map((e) => {
         const raw = outlineOf(p, e.source.rank);
         const drawn = unfolded && p.fold ? unfold(raw, boxAtRank(p, e.source.rank).maxX) : raw;
@@ -1092,21 +1108,22 @@ export function fixtureSemantics(args: {
         };
       });
       pieces.push({
-        identity: ids[hi],
+        identity: w.identity,
         code,
-        mods: h ? [h, ...mods] : mods,
-        displayName: p.name,
-        nameOrigin: p.nameOrigin,
-        aiConfidence: p.ai,
+        mods: w.mods,
+        displayName: ov.displayName ?? p.name,
+        nameOrigin,
+        ...(aiConfidence != null ? { aiConfidence } : {}),
         seed: f.seed,
         variant: p.variant,
         pairHand: h,
-        pairOf: h ? ids[1 - hi] : null,
+        pairOf: w.pairOf,
         unfoldedFold: unfolded && p.fold,
-        piecesPerGarment: h ? 1 : p.fold && unfolded ? 1 : p.cutQty,
+        // Both hands of a pair count 1 each (PieceSpec); otherwise the operator/AI quantity.
+        piecesPerGarment: h ? 1 : ov.piecesPerGarment ?? (p.fold && unfolded ? 1 : p.cutQty),
         allowance,
         fabrics: p.fabrics.map((t) => PURPOSE[t]),
-        fused: false,
+        fused: ov.fused ?? false,
         ungraded: false,
         sizes,
       });
@@ -1254,8 +1271,11 @@ function gateOf(
         narrowSeed(seeds, s.seed) && s.allowance.meaning !== 'cut' && s.allowance.allowanceMm > 12,
     )
     .map((s) => s.identity);
+  const isSizeToken = sizeTokenTest(sizeTokens);
   const grammarFail = specs
-    .filter((s) => !checkIdentity(s.identity, sizeTokens).ok)
+    .filter((s) =>
+      identityProblem(s.identity, { isSizeToken, pair: { hand: s.pairHand, of: s.pairOf } }),
+    )
     .map((s) => s.identity);
   const coverageWarn = specs
     .filter((s) => s.code === 'FP')
@@ -1417,7 +1437,7 @@ export function fixtureWrite(args: {
         unfoldedFold: s.unfoldedFold,
         piecesPerGarment: s.piecesPerGarment,
         fabrics: s.fabrics,
-        fused: !input.assignment.interliningInBom && interliningSeeds(input.assignment).has(s.seed),
+        fused: s.fused,
         ungraded: s.ungraded,
         allowanceMm: s.allowance.allowanceMm,
         nameOrigin: s.nameOrigin,

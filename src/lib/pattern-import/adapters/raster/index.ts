@@ -7,9 +7,9 @@
 //   extractRasterPdf / extractRasterImage   ExtractFn (contract shape)
 //   extract*Detailed                same, plus per-page calibrations, stats and the ink classes
 
-import type { IRPage } from '../../types';
+import type { IRPage, RasterCalibration } from '../../types';
 import { tracePageSync } from './trace';
-import type { RasterCalibration, RasterPageInput, TraceOpts } from './types';
+import type { RasterPageInput, TraceOpts } from './types';
 
 export { calibrate, applyCalibration, findRasterSquares, SQUARE_CANDIDATES_MM } from './calibrate';
 export {

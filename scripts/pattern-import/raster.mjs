@@ -147,6 +147,7 @@ async function phaseSynthTrace(m) {
         ),
         inks: res.stats[0][0].inks.map((i) => ({ rgb: i.rgb, share: +i.share.toFixed(3) })),
         paths: page.paths.length,
+        pageCarriesCalibration: JSON.stringify(page.calibration) === JSON.stringify(cal),
         calibration: {
           method: cal.method,
           square: cal.square && { ...cal.square, cornersMm: undefined },
@@ -217,6 +218,9 @@ async function phaseLeonie(m) {
       notes: sq.notes,
     },
     calibrationMethods: res.calibrations.map((c) => c.method),
+    pagesCarryCalibration: res.doc.pages.every(
+      (p, i) => JSON.stringify(p.calibration) === JSON.stringify(res.calibrations[i]),
+    ),
     inkClasses: res.inkClasses.map((c) => ({ ...c, share: +(c.lengthMm / totalLen).toFixed(4) })),
     lineClassCount: lineClasses.length,
     lineClassCountOver1pct: lineClasses.filter((c) => c.lengthMm / totalLen >= 0.01).length,
@@ -319,11 +323,20 @@ if (st) {
   console.log(
     `(3) negative control error grows: ${pass ? 'PASS' : 'FAIL'} (${st['scan-uncalibrated'].p95} vs ${st['scan-calibrated'].p95})`,
   );
+  const carried = Object.values(st)
+    .filter((v) => v && typeof v === 'object')
+    .every((v) => v.pageCarriesCalibration);
+  console.log(
+    `(4) IRPage.calibration = the applied calibration (synthetic): ${carried ? 'PASS' : 'FAIL'}`,
+  );
 }
 const le = all.leonie;
 if (le) {
   console.log(
     `(2) leonie: ${le.pages} pages, ${le.totalMs} ms, peak ${le.peakMb} MB, line classes ${le.lineClassCount} (≥1 %: ${le.lineClassCountOver1pct}), square ${le.square ? `${le.square.measuredWMm.toFixed(3)}×${le.square.measuredHMm.toFixed(3)} mm` : 'not found'}`,
+  );
+  console.log(
+    `(4) IRPage.calibration on every leonie page: ${le.pagesCarryCalibration ? 'PASS' : 'FAIL'}`,
   );
   const g = all['leonie-gc'];
   const d = all['leonie-decode'];

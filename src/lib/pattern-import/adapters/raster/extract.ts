@@ -1,7 +1,15 @@
 // Raster sources → SourceDoc (F11): raster PDFs (page by page, ≤ one page of pixels alive) and
 // bare image scans (PNG/JPG with a declared or given DPI).
 
-import type { ExtractFn, ExtractOpts, IRPage, Progress, SourceDoc, Style } from '../../types';
+import type {
+  ExtractFn,
+  ExtractOpts,
+  IRPage,
+  Progress,
+  RasterCalibration,
+  SourceDoc,
+  Style,
+} from '../../types';
 import { PATIMPORT } from '../../types';
 import { applyCalibration, calibrate } from './calibrate';
 import {
@@ -17,14 +25,7 @@ import {
 } from './decode';
 import { compose } from './affine';
 import { tracePageSync } from './trace';
-import type {
-  RasterCalibration,
-  RasterImage,
-  RasterPageInput,
-  RasterRef,
-  TraceOpts,
-  TraceStats,
-} from './types';
+import type { RasterImage, RasterPageInput, RasterRef, TraceOpts, TraceStats } from './types';
 
 export type RasterExtractConfig = {
   progress?: Progress;

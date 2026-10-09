@@ -14,11 +14,6 @@ import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtMm } from '../ui-bits';
 
-// CONTRACT GAP (F13.md): `PagePose` carries no page size, so tiles are drawn as A4 portrait. Add
-// `widthMm/heightMm` to PagePose and read them here.
-const PAGE_W = 210;
-const PAGE_H = 297;
-
 const tileName = (row?: number, col?: number) =>
   row == null || col == null ? '?' : `${String.fromCharCode(65 + row)}${col + 1}`;
 
@@ -61,15 +56,17 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                 {sheet.poses.map((p) => {
                   const x = p.toSheet.e;
                   const y = p.toSheet.f;
+                  const w = p.widthMm;
+                  const h = p.heightMm;
                   const on = picked === p.page;
                   const bad = p.residualMm > PATIMPORT.registrationMaxResidualMm * 0.66;
                   return (
                     <g key={p.page} data-key={p.page}>
                       <rect
                         x={x}
-                        y={vy(y + PAGE_H)}
-                        width={PAGE_W}
-                        height={PAGE_H}
+                        y={vy(y + h)}
+                        width={w}
+                        height={h}
                         fill={on ? SHEET_INK.pick : '#ffffff'}
                         fillOpacity={on ? 0.7 : 0}
                         stroke={bad ? SHEET_INK.blue : '#d5d5d5'}
@@ -77,7 +74,7 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                       />
                       <text
                         x={x + 6}
-                        y={vy(y + PAGE_H - 14)}
+                        y={vy(y + h - 14)}
                         fontSize={unit * 14}
                         fill={bad ? SHEET_INK.blue : SHEET_INK.mut}
                       >
@@ -95,10 +92,10 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                   const a = poseOf(w.from.page);
                   const b = poseOf(w.to.page);
                   if (!a || !b) return null;
-                  const ax = a.toSheet.e + PAGE_W / 2;
-                  const ay = a.toSheet.f + PAGE_H / 2;
-                  const bx = b.toSheet.e + PAGE_W / 2;
-                  const by = b.toSheet.f + PAGE_H / 2;
+                  const ax = a.toSheet.e + a.widthMm / 2;
+                  const ay = a.toSheet.f + a.heightMm / 2;
+                  const bx = b.toSheet.e + b.widthMm / 2;
+                  const by = b.toSheet.f + b.heightMm / 2;
                   return (
                     <line
                       key={i}

@@ -6,7 +6,7 @@
 // after the page returns. Peak working set ≈ pixels + 3 B/px (strength, label, visited) + the
 // largest component crop.
 
-import type { BoxMm, IRPage, IRPath, IRRaster, PtMm, Style } from '../../types';
+import type { BoxMm, IRPage, IRPath, IRRaster, PtMm, RasterCalibration, Style } from '../../types';
 import { apply, IDENTITY, meanScale } from './affine';
 import { clusterInks, estimatePaper } from './ink';
 import {
@@ -16,14 +16,7 @@ import {
   skeletonToPolylines,
   zhangSuen,
 } from './skeleton';
-import type {
-  InkClass,
-  RasterCalibration,
-  RasterImage,
-  RasterPageInput,
-  TraceOpts,
-  TraceStats,
-} from './types';
+import type { InkClass, RasterImage, RasterPageInput, TraceOpts, TraceStats } from './types';
 import { TRACE_DEFAULTS } from './types';
 
 const N8X = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -585,6 +578,7 @@ export function tracePageSync(
       texts: [],
       rasters,
       layers: [],
+      ...(calib ? { calibration: calib } : {}),
     },
     stats,
   };

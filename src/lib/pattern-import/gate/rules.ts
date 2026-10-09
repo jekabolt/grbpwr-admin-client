@@ -7,8 +7,8 @@
 // type structurally). ORCHESTRATOR: once block-code.ts moves under lib/ (F6b touches it anyway),
 // a default can be wired here and the parameter dropped.
 //
-// `isValidIdentity` is F5's `dictionary/grammar.ts`; until it lands the gate uses its local
-// structural grammar (gate/grammar.ts), which cannot check dictionary membership.
+// The identity grammar itself is `manifest/identity.ts` (shared with the wizard). `isKnownCode` is
+// F5's dictionary membership of one code word; absent = structural grammar only.
 
 export type CardBlockRules = {
   deriveBlockSizes(
@@ -30,5 +30,5 @@ export type CardBlockRules = {
     gradedIdentities: ReadonlySet<string>,
   ): { kind: string; subject: string; blocks: string[] }[];
   bareToken(s: string): string;
-  isValidIdentity?: (identity: string, sizeTokens: ReadonlySet<string>) => boolean;
+  isKnownCode?: (word: string) => boolean;
 };

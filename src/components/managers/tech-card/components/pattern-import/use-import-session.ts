@@ -32,7 +32,7 @@ import type {
   ImportClient,
   NameSuggester,
 } from './client';
-import { checkIdentity } from './grammar-lite';
+import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
   { id: 'files', label: 'files' },
@@ -71,6 +71,8 @@ export type Inputs = {
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
   /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */
   confirmedNames: SeedId[];
+  /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
+  editedNames: SeedId[];
   assignment: FabricAssignment | null;
 };
 
@@ -90,6 +92,7 @@ const EMPTY_INPUTS: Inputs = {
   overrides: {},
   operatorGrain: {},
   confirmedNames: [],
+  editedNames: [],
   assignment: null,
 };
 
@@ -301,9 +304,20 @@ export function useImportSession(deps: {
           patch({ pieces: out });
           return;
         }
-        case 'names':
+        case 'names': {
+          // Names travel to the writer through the semantics overrides (I1): display name,
+          // nameOrigin (incl. 'ai-auto') and aiConfidence end up in PieceSpec and the manifest.
           patch({ names: ev.decisions });
+          const overrides = overridesFromNames(ev.decisions, iRef.current.overrides);
+          const next = { ...iRef.current, overrides };
+          iRef.current = next;
+          patchInputs({ overrides });
+          if (sRef.current.semantics) {
+            const out = await run('semantics', semanticsInput(next));
+            patch({ semantics: out });
+          }
           return;
+        }
         case 'semantics': {
           patchInputs({
             fileAllowance: ev.input.fileAllowance,
@@ -321,8 +335,22 @@ export function useImportSession(deps: {
         case 'write': {
           const a = sRef.current.fabrics;
           const sizes = sRef.current.sizes;
-          const sem = sRef.current.semantics;
+          let sem = sRef.current.semantics;
           if (!a || !sizes || !sem) return;
+          // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
+          // but is a PieceSpec field: hand it to semantics as an override and re-run when it moved,
+          // so the manifest, the draft and the card read the same flag.
+          const fused = fusedSeedsOf(a);
+          if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
+            const overrides = { ...iRef.current.overrides };
+            for (const sd of new Set(sem.pieces.map((p) => p.seed)))
+              overrides[sd] = { ...(overrides[sd] ?? {}), fused: fused.has(sd) };
+            const next = { ...iRef.current, overrides };
+            iRef.current = next;
+            patchInputs({ overrides });
+            sem = await run('semantics', semanticsInput(next));
+            patch({ semantics: sem });
+          }
           const out = await run('write', {
             scopes: card.scopes,
             assignment: a,
@@ -342,7 +370,7 @@ export function useImportSession(deps: {
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
           });
-          const draft = buildDraft(out, { card, semantics: sem, names: sRef.current.names });
+          const draft = buildDraft(out, { card, semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
           return;
         }
@@ -394,10 +422,25 @@ export function useImportSession(deps: {
     return fresh.map((n) => (kept.has(n.seed) && prev.get(n.seed) ? prev.get(n.seed)! : n));
   }
 
-  /** Every name's code/mods as a semantics override, so the writer spells what the table shows. */
+  /**
+   * Every name as a semantics override, so the writer spells what the table shows AND the
+   * manifest says where the name came from (owner decision 11: auto-accepted AI names stay flagged).
+   */
   function overridesFromNames(names: NameDecision[], base: Inputs['overrides']) {
     const out: Inputs['overrides'] = { ...base };
-    for (const n of names) out[n.seed] = { ...(out[n.seed] ?? {}), code: n.code, mods: n.mods };
+    const edited = new Set(iRef.current.editedNames);
+    for (const n of names) {
+      const { aiConfidence: _drop, ...prev } = out[n.seed] ?? {};
+      const nameOrigin = nameOriginOf(n, edited.has(n.seed));
+      out[n.seed] = {
+        ...prev,
+        code: n.code,
+        mods: n.mods,
+        displayName: n.displayName,
+        nameOrigin,
+        ...(nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? { aiConfidence: n.confidence } : {}),
+      };
+    }
     return out;
   }
 
@@ -540,11 +583,23 @@ export function useImportSession(deps: {
         );
         if (pending.length)
           return `${pending.length} AI ${pending.length === 1 ? 'name' : 'names'} to confirm`;
-        const bad = s.names.find(
-          (n) =>
-            exportedSeed(n.seed) && !checkIdentity([n.code, ...n.mods].join('_'), sizeTokens).ok,
-        );
-        if (bad) return `${[bad.code, ...bad.mods].join('_') || 'a code'} fails the code grammar`;
+        // The identities the writer will spell (both hands of a declared pair), checked with the
+        // gate's own rule — a declared `_L`/`_R` is exempt from "ends in a size token".
+        const isSizeToken = sizeTokenTest(sizeTokens);
+        for (const n of s.names) {
+          if (!exportedSeed(n.seed)) continue;
+          const hand =
+            inputs.overrides[n.seed]?.pairHand !== undefined
+              ? inputs.overrides[n.seed]!.pairHand!
+              : s.semantics?.pieces.find((p) => p.seed === n.seed)?.pairHand ?? null;
+          for (const w of identitiesOf(n.code, n.mods, hand)) {
+            const why = identityProblem(w.identity, {
+              isSizeToken,
+              pair: { hand: w.pairHand, of: w.pairOf },
+            });
+            if (why) return `${w.identity || 'a code'}: ${why}`;
+          }
+        }
         return null;
       }
       case 'fabrics': {
@@ -592,6 +647,25 @@ export function useImportSession(deps: {
     }
   }
 
+  /** The operator TYPED a code or display name: it is theirs now (nameOrigin 'operator'). */
+  async function editName(
+    seed: SeedId,
+    p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>,
+  ) {
+    const i = iRef.current;
+    const next = {
+      ...i,
+      editedNames: [...new Set([...i.editedNames, seed])],
+      confirmedNames: [...new Set([...i.confirmedNames, seed])],
+    };
+    iRef.current = next;
+    patchInputs({ editedNames: next.editedNames, confirmedNames: next.confirmedNames });
+    await dispatch({
+      type: 'names',
+      decisions: sRef.current.names.map((n) => (n.seed === seed ? { ...n, ...p } : n)),
+    });
+  }
+
   /** Append (or, with `undo`, drop the last) piece edit and re-run the fill. */
   async function editPieces(e: PieceEdit | 'undo') {
     const cur = iRef.current.edits;
@@ -615,6 +689,7 @@ export function useImportSession(deps: {
     next,
     addSeed,
     editPieces,
+    editName,
     patchInputs,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
@@ -624,6 +699,23 @@ export function useImportSession(deps: {
 }
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
+
+/** Where a name came from, as the manifest records it. */
+export function nameOriginOf(
+  n: NameDecision,
+  typed: boolean,
+): NonNullable<PieceOverride['nameOrigin']> {
+  if (typed) return 'operator';
+  if (n.evidence.some((e) => e.kind === 'text-synonym')) return 'text';
+  return n.autoAccepted ? 'ai-auto' : 'ai';
+}
+
+/** The interlining proposal's seeds when interlining is NOT in the BOM: they carry `fused`. */
+const INTERLINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+export function fusedSeedsOf(a: FabricAssignment): Set<SeedId> {
+  if (a.interliningInBom) return new Set();
+  return new Set(a.proposals.find((p) => p.purpose === INTERLINING_PURPOSE)?.seeds ?? []);
+}
 
 export function variantsOf(seeds: Seed[], base: Seed[] | null): string[] {
   return [

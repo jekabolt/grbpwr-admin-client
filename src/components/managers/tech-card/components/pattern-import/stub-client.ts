@@ -7,7 +7,6 @@ import type {
   CardSize,
   DraftPiece,
   FabricAssignment,
-  NameDecision,
   PieceFamily,
   ScaleDecision,
   Seed,
@@ -219,20 +218,14 @@ export function createStubNamer(
 const IDENTICAL = 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 
 /** F7 `buildDraft` stand-in — the same shape, so the apply step shows what the real one will write. */
-export const stubBuildDraft: DraftBuilder = (write, { card, semantics, names }) => {
-  const nameOf = new Map<number, NameDecision>(names.map((n) => [n.seed, n]));
+export const stubBuildDraft: DraftBuilder = (write, { card, semantics }) => {
   const bySeed = new Map<number, typeof semantics.pieces>();
   for (const p of semantics.pieces) bySeed.set(p.seed, [...(bySeed.get(p.seed) ?? []), p]);
-  const fusedSeeds = new Set<number>();
-  for (const sc of write.scopes)
-    for (const mp of sc.manifest.pieces)
-      if (mp.fused)
-        fusedSeeds.add(semantics.pieces.find((x) => x.identity === mp.identity)?.seed ?? -1);
   const pieces: DraftPiece[] = [];
   const lineKeyOfSeed = new Map<number, string>();
   const pieceUpdates: { lineKey: string; cutSymmetry: string; reason: string }[] = [];
   for (const [seed, specs] of bySeed) {
-    const display = nameOf.get(seed)?.displayName || specs[0].displayName;
+    const display = specs[0].displayName;
     // C10: reuse an existing piece only when the name came from TEXT on the sheet, never on an AI
     // guess alone.
     const existing =
@@ -257,7 +250,7 @@ export const stubBuildDraft: DraftBuilder = (write, { card, semantics, names }) 
       piecesPerGarment: specs.reduce((n, s) => n + s.piecesPerGarment, 0),
       cutSymmetry: IDENTICAL,
       grainline: 'lengthwise',
-      fused: fusedSeeds.has(seed),
+      fused: specs.some((s) => s.fused),
       existingLineKey: existing?.lineKey ?? null,
     });
   }
