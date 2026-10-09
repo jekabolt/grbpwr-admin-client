@@ -4,7 +4,8 @@
 //   node scripts/pattern-import/f6b.mjs            (yarn patimport:f6b)
 //
 // Four bundles of the same machinery:
-//   base   — the tree before F6b (git archive of F6B_BASE, default 48ebc92f) + f6b-fingerprint-entry
+//   base   — the tree before F6b (git archive of F6B_BASE, default 48ebc92f) with THIS tree's
+//            src/lib/nesting/dxf overlaid (F15 — see below) + f6b-fingerprint-entry
 //   head   — this tree + f6b-fingerprint-entry and f6b-entry (manifest unit tests + K1 fixtures)
 //   open   — HEAD with the gate forced OPEN (manifest-facts.ts fabricates facts for every block)
 //   shut   — HEAD with the gate forced SHUT (manifest-facts.ts always answers null)
@@ -50,6 +51,14 @@ execFileSync('sh', [
   `git -C "${REPO}" archive ${BASE} src tsconfig.json global.d.ts | tar -x -C "${baseRoot}"`,
 ]);
 symlinkSync(resolve(REPO, 'node_modules'), join(baseRoot, 'node_modules'));
+// The card DXF PARSER is not F6b's subject: F15 (CLO grain arrow, R12 POINT notches, notch twins) changed
+// what it reads from real CLO files on purpose, and has its own before/after probe (yarn
+// patimport:f15). The base gets THIS tree's parser so the regression keeps isolating the manifest
+// gate. F6b never touched these files (git diff 48ebc92f..c456bf6e -- src/lib/nesting/dxf is empty).
+for (const dir of (process.env.F6B_OVERLAY ?? 'src/lib/nesting/dxf').split(',').filter(Boolean)) {
+  rmSync(join(baseRoot, dir), { recursive: true, force: true });
+  execFileSync('cp', ['-R', resolve(REPO, dir), join(baseRoot, dir)]);
+}
 mkdirSync(join(baseRoot, 'scripts', 'pattern-import'), { recursive: true });
 copyFileSync(
   join(HERE, 'f6b-fingerprint-entry.ts'),

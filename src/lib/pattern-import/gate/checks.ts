@@ -384,16 +384,23 @@ export function g5(ctx: GateCtx): GateCheck {
       bad(
         `card parser sees grain candidates on layer(s) ${[...new Set(cand.map((g) => g.layer))].join(',')}`,
       );
+    // The card parser reads the grain itself since F15 (the CLO 3-vertex arrow in R2000, the
+    // 2-point LINE in R12): exactly one candidate on the grain layer.
+    const own = (ctx.rtByBlock.get(b.block)?.[0]?.grain ?? []).filter(
+      (g) => g.layer === LAYERS.grain,
+    );
+    if (own.length !== 1)
+      bad(`card parser sees ${own.length} grain candidates on layer ${LAYERS.grain}`);
     // What the CARD carries onto the marker: its layer-1 piece's inner geometry (4000-point
-    // budget in pieces.ts) must still hold every notch and drill. R12 POINT notches are dropped by
-    // the parser by design (K2 pitfall 2) — counted only for R2000.
+    // budget in pieces.ts) must still hold every notch and drill. R12 POINT notches are read since
+    // F15 (K2 pitfall 2), so both dialects count.
     const l1 = ctx.rtByBlock.get(b.block)?.find((p) => p.layer === LAYERS.cut);
-    if (l1 && !r12) {
+    if (l1) {
       const inner = l1.inner ?? [];
       const n4 = inner.filter((p) => p.layer === LAYERS.notch).length;
       const n8 = inner.filter((p) => p.layer === LAYERS.internal).length;
       if (n4 !== s.notches.length) bad(`card parser keeps ${n4} of ${s.notches.length} notches`);
-      if (n8 !== s.drills.length + wantInternal)
+      if (!r12 && n8 !== s.drills.length + wantInternal)
         bad(`card parser keeps ${n8} of ${s.drills.length + wantInternal} layer-8 paths`);
     }
   }
@@ -402,7 +409,7 @@ export function g5(ctx: GateCtx): GateCheck {
     failed,
     'block',
     (notes.length ? notes.join('; ') + '; ' : '') +
-      'grain verified by the gate reader + manifest: the card parser does not read the CLO 3-vertex arrow yet (K2 pitfall 1, task F15)',
+      'grain verified by the gate reader + manifest, and read by the card parser (CLO arrow / R12 LINE, F15)',
     null,
     'exact',
   );
