@@ -135,6 +135,15 @@ export function sharedFolds(
   return cand.filter((id) => (ranksOn.get(id)?.size ?? 0) >= 3 && !crossed(id));
 }
 
+/**
+ * Probe switches (node only; the browser worker has no `process`): F4_NOLABEL, F4_NOCONNECT,
+ * F4_NOBANDS, F4_NOFOLDS turn one F4b repair off — the acceptance probe's negative controls compare
+ * every family with and without them.
+ */
+function probeOff(k: string): boolean {
+  return typeof process !== 'undefined' && !!process.env?.[k];
+}
+
 export function rankOf(c: LineClass): number | null {
   if (c.role !== 'size') return null;
   for (const e of c.evidence) if (e.kind === 'nesting-order') return e.rank;
@@ -184,11 +193,11 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
   // orphans with their size printed beside them (r4454's band: one end tick per size, "44" … "54"
   // next to each) take that size
   const labelled =
-    mode === 'graded' && !process.env.F4_NOLABEL
+    mode === 'graded' && !probeOff('F4_NOLABEL')
       ? labelRanks(set, run, texts)
       : new Map<ChainId, number>();
   for (const [id, r] of labelled) byRank[r].push(id);
-  const cr = mode === 'graded' && !process.env.F4_NOCONNECT ? connectRanks(set, base) : null;
+  const cr = mode === 'graded' && !probeOff('F4_NOCONNECT') ? connectRanks(set, base) : null;
   const ranks = cr ? cr.byRank : byRank;
   // band ladders: their ticks are size ends (rank by order), never shared walls
   const notchIds = new Set(
@@ -197,7 +206,7 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
       .flatMap((c) => c.chains),
   );
   const band =
-    mode === 'graded' && !process.env.F4_NOBANDS
+    mode === 'graded' && !probeOff('F4_NOBANDS')
       ? bandTicks(
           set,
           n,
@@ -216,7 +225,7 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
   const kept0 = uncommon.size ? common.filter((id) => !uncommon.has(id)) : common;
   const kept = [...kept0, ...[...band.edges].filter((id) => !kept0.includes(id))];
   const folds =
-    mode === 'graded' && !process.env.F4_NOFOLDS ? sharedFolds(set, ranks, new Set(kept)) : [];
+    mode === 'graded' && !probeOff('F4_NOFOLDS') ? sharedFolds(set, ranks, new Set(kept)) : [];
   return {
     mode,
     n,

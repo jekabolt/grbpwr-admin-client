@@ -80,6 +80,8 @@ export type FillDiag = {
   rescued: number;
   /** Candidates of an undrawn end size copied from the neighbour's contour ('shared-rank'). */
   sharedRank?: number;
+  /** Seeds whose piece is drawn identically in every size layer (equal areas accepted). */
+  ungraded?: number[];
   /** Seeds whose family was ranked upside down in its piece and re-ranked (areas shrank). */
   reversed?: number[];
   /** Candidates closed by derived bridges (family-corroborated). */
@@ -256,6 +258,21 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | u
 
 type RankCtx = { g: Grid; wall: Uint8Array; ext: Uint8Array; items: WallItem[] };
 
+/** The exterior pixel nearest (x, y) — a square spiral out to 2000 px; −1 when none. */
+function nearestExterior(c: { g: Grid; ext: Uint8Array }, x: number, y: number): number {
+  for (let r = 0; r < 2000; r++)
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const xx = x + dx;
+        const yy = y + dy;
+        if (!c.g.inside(xx, yy)) continue;
+        const k = yy * c.g.W + xx;
+        if (c.ext[k]) return k;
+      }
+  return -1;
+}
+
 let pathBuf: Int32Array | null = null;
 let queueBuf: Int32Array | null = null;
 
@@ -391,7 +408,6 @@ export function fillPiecesDetailed(
   );
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
-  const knifeSet = new Set(knives);
   const boxes = rankBoxes(set, model);
   const shift = fileShift(model, boxes);
   const diag: FillDiag = {
@@ -457,7 +473,7 @@ export function fillPiecesDetailed(
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
       ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
-    ].filter((it) => !excl.has(it.chain) && !knifeSet.has(it.chain));
+    ].filter((it) => !excl.has(it.chain));
   };
 
   /** One rank, every seed; returns the candidates and the frame chains found around merges. */
@@ -465,9 +481,13 @@ export function fillPiecesDetailed(
     r: number,
     excl: Set<ChainId>,
     override?: Map<number, PtMm>,
-    bridgeFor?: Set<number>,
+    /** Seeds to bridge, with the least area the family's trend allows (0: none known). */
+    bridgeFor?: Map<number, number>,
   ) => {
-    const keep = (it: WallItem) => !excl.has(it.chain) && !knifeSet.has(it.chain);
+    // knives stay walls where they are this rank's lines: the variant's cutting line is the
+    // piece's edge (taken out, kombinezon's 4XL front leaked through it); the cut below still
+    // trims any region that crosses one
+    const keep = (it: WallItem) => !excl.has(it.chain);
     const base = buildRank(box, cell, baseItems(r, excl));
     const pts = use.map((s) => override?.get(s.id) ?? shift(s.at, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
@@ -594,9 +614,39 @@ export function fillPiecesDetailed(
           let chosen: Bridge[] = [];
           let c = c0;
           let done = false;
-          for (let round = 0; round < 4 && !done; round++) {
+          const minArea = bridgeFor?.get(seed.id) ?? 0;
+          for (let round = 0; round < 6 && !done; round++) {
             const p2 = seedPixel(c.g, c.wall, c.ext, pts[si]);
             const rg = c.ext[p2.k] ? null : regionAt(c, p2.k);
+            // closed, but well short of the family's trend: a wall across the piece (a grain
+            // line from edge to edge) closed one side while the other still leaks — escape from
+            // the exterior just across it, nearest the region's middle
+            if (rg && !isMerged(rg.others) && minArea) {
+              let n = 0;
+              let sx = 0;
+              let sy = 0;
+              for (let j = 0; j < rg.opened.length; j++)
+                if (rg.opened[j]) {
+                  n++;
+                  const y = (j / c.g.W) | 0;
+                  sx += j - y * c.g.W;
+                  sy += y;
+                }
+              if (n * cell * cell < minArea) {
+                const start = nearestExterior(c, Math.round(sx / n), Math.round(sy / n));
+                const path = start >= 0 ? escapePath(c.g, c.wall, start, null) : null;
+                const add = path
+                  ? all.filter((b) => !chosen.includes(b) && crossesPath(c.g, b, path))
+                  : [];
+                if (!add.length) break;
+                chosen = chosen.concat(add);
+                c = buildRank(box, cell, [
+                  ...c0.items,
+                  ...chosen.map((b) => ({ chain: -1, pts: [b.from, b.to] })),
+                ]);
+                continue;
+              }
+            }
             if (rg && !isMerged(rg.others)) {
               if (chosen.length) {
                 if (c0 === base && ctx !== base)
@@ -661,18 +711,6 @@ export function fillPiecesDetailed(
         }
       }
       const merged = isMerged(others);
-      if (process.env.F4DBG)
-        console.log(
-          'DBG',
-          r,
-          seed.id,
-          pts[si],
-          rankFrom,
-          ctx === base,
-          merged,
-          others.map((sj) => use[sj].id),
-          bridges.length,
-        );
       const raster = traceOuter(g, opened);
       if (raster.length < 4) {
         cand.outcome = 'tiny';
@@ -861,11 +899,7 @@ export function fillPiecesDetailed(
       const want = new Set<number>();
       for (const s of use) {
         const c = cands.get(s.id)?.find((x) => x.rank === r);
-        if (
-          c &&
-          (c.outcome === 'leak' || c.outcome === 'merged') &&
-          (expectedArea(s.id, r) || process.env.F4_BRIDGE_ANY)
-        )
+        if (c && (c.outcome === 'leak' || c.outcome === 'merged') && expectedArea(s.id, r))
           want.add(s.id);
       }
       if (!want.size) continue;
@@ -874,13 +908,22 @@ export function fillPiecesDetailed(
         const at = placed.get(key(sid, r));
         if (at) override.set(sid, at);
       }
-      const res = rankPass(r, excl, override, want);
+      const res = rankPass(
+        r,
+        excl,
+        override,
+        new Map(
+          [...want].map((sid) => {
+            const ex = expectedArea(sid, r);
+            return [sid, ex ? ex.area * (1 - ex.tol) : 0];
+          }),
+        ),
+      );
       for (const sid of want) {
         const c = res.out.get(sid);
         const ex = expectedArea(sid, r);
         if (!c || c.outcome !== 'closed' || !c.derived?.length) continue;
-        if (!process.env.F4_BRIDGE_ANY && (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area))
-          continue;
+        if (!ex || Math.abs(c.areaMm2 - ex.area) > ex.tol * ex.area) continue;
         const list = cands.get(sid)!;
         const i = list.findIndex((x) => x.rank === r);
         if (i >= 0) list[i] = c;
@@ -943,7 +986,15 @@ export function fillPiecesDetailed(
       const closed = cands
         .get(s.id)!
         .filter((x) => x.outcome === 'closed' && x.outer.length > 2)
-        .sort((a, b) => Math.abs(a.rank - r) - Math.abs(b.rank - r));
+        // the next LARGER closed size encloses this one: the escape crosses its outline just
+        // past the gap (a smaller one is crossed deep inside, far from it)
+        .sort(
+          (a, b) =>
+            (a.rank > r ? 0 : 1000) +
+            Math.abs(a.rank - r) -
+            (b.rank > r ? 0 : 1000) -
+            Math.abs(b.rank - r),
+        );
       const at = shift(s.at, r);
       const { k } = seedPixel(ctx.g, ctx.wall, null, at);
       // file-per-size: the reference rank sits in another file — move its outline over
@@ -977,6 +1028,38 @@ export function fillPiecesDetailed(
         diag.sharedRank = (diag.sharedRank ?? 0) + 1;
       }
     }
+  // an UNGRADED piece is drawn identically in every size layer (kombinezon's piece 8: eight equal
+  // rectangles, F3 keeps one as common and marks the rest duplicates). Equal areas are right
+  // there — only when every wall of its outline has a copy at the same place in ≥ n − 1 layers.
+  const dupCount = (id: ChainId) => {
+    const c = set.chains[id];
+    if (!c) return 0;
+    const b = bboxOf(c.pts);
+    let k = 0;
+    for (const o of set.chains) {
+      if (o.id === id || Math.abs(o.lengthMm - c.lengthMm) > 0.2) continue;
+      const q = bboxOf(o.pts);
+      if (
+        Math.abs(q.minX - b.minX) < 0.2 &&
+        Math.abs(q.minY - b.minY) < 0.2 &&
+        Math.abs(q.maxX - b.maxX) < 0.2 &&
+        Math.abs(q.maxY - b.maxY) < 0.2
+      )
+        k++;
+    }
+    return k;
+  };
+  const ungraded = (c: PieceCandidate[]) => {
+    if (model.mode !== 'graded') return false;
+    const cl = c.filter((x) => x.outcome === 'closed');
+    if (cl.length !== model.n) return false;
+    const a0 = cl[0].areaMm2;
+    if (!cl.every((x) => Math.abs(x.areaMm2 - a0) <= 0.001 * a0)) return false;
+    const walls = new Set(cl.flatMap((x) => x.walls));
+    if (!walls.size || ![...walls].every((id) => dupCount(id) >= model.n - 1)) return false;
+    (diag.ungraded ??= []).push(c[0].seed);
+    return true;
+  };
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -997,7 +1080,7 @@ export function fillPiecesDetailed(
         (diag.reversed ??= []).push(s.id);
       }
     }
-    families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) });
+    families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) || ungraded(c) });
   }
   diag.ms = Date.now() - t0;
   progress?.(model.n, model.n);

@@ -107,7 +107,18 @@ export function furniture(
       else rects.set(k, [i]);
     }
   });
-  for (const a of rects.values()) if (a.length >= 3) for (const i of a) out[i] = 'tile frame';
+  // a tile frame repeats per page, at DIFFERENT places; one rectangle drawn identically in every
+  // size layer (kombinezon's piece 8, cut to the same size for all) is line work
+  for (const a of rects.values()) {
+    if (a.length < 3) continue;
+    const centres: PtMm[] = [];
+    for (const i of a) {
+      const b = bboxOf(chains[i].pts);
+      const c = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+      if (!centres.some((q) => dist(q, c) < 20)) centres.push(c);
+    }
+    if (centres.length >= 3) for (const i of a) out[i] = 'tile frame';
+  }
   // straight rules of one length: tile frames and cut marks repeat per PAGE, far apart; a ladder of
   // equal-length lines 1–3 mm apart is a graded edge (r4454's pocket sides: every size 208 mm long,
   // graded only in width) — a member with a twin ≤ 15 mm across it is line work

@@ -356,6 +356,25 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
       console.log('not connected');
       return 0;
     }
+    if (process.env.ESCAPE) {
+      // render the escape path over the rank's walls: ESCAPE=x0,y0,w,h,px
+      const [ex, ey, ew, eh, epx] = process.env.ESCAPE.split(',').map(Number);
+      const path: PtMm[] = [];
+      for (let k = kb; k >= 0; k = prev[k]) {
+        const y = (k / g.W) | 0;
+        path.push(g.centre(k - y * g.W, y));
+      }
+      const strokes: Stroke[] = items.map((it) => ({ pts: it.pts, color: '#00c', width: 1 }));
+      strokes.push({ pts: path, color: '#e00', width: 1.5 });
+      renderPng(
+        `${OUT}/${id}-escape-r${rs}.png`,
+        { minX: ex, minY: ey, maxX: ex + ew, maxY: ey + eh },
+        strokes,
+        [],
+        epx || 2,
+      );
+      console.log(`${OUT}/${id}-escape-r${rs}.png`);
+    }
     let worst = { k: -1, c: Infinity };
     for (let k = kb; k >= 0; k = prev[k]) {
       const y = (k / g.W) | 0;

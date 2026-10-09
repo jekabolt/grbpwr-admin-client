@@ -19,6 +19,7 @@ import type {
   ChainSet,
   PieceCandidate,
   PieceFamily,
+  PtMm,
   Seed,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -297,6 +298,130 @@ function negative(p: Prepared, sr: SampleRun, label: string) {
   };
 }
 
+/** Resample a polyline's arc position s → point. */
+function atArc(pts: readonly PtMm[], s: number): { p: PtMm; i: number } {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (acc + L >= s) {
+      const u = L ? (s - acc) / L : 0;
+      return {
+        p: {
+          x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * u,
+          y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u,
+        },
+        i,
+      };
+    }
+    acc += L;
+  }
+  return { p: pts[pts.length - 1], i: pts.length - 1 };
+}
+
+/**
+ * Gap control (F4b auto-bridges): cut a gap of `gapMm` into the middle of the candidate's longest
+ * own-rank wall and fill again. ≤ 3 mm must close again with a derived 'bridge'; longer must leak.
+ */
+function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
+  const seed = sr.seeds.find((s) => normLabel(seedLabel(s) ?? '') === label);
+  const fam = seed && sr.families.find((f) => f.seed === seed.id);
+  const ok = fam?.candidates.filter((c) => c.outcome === 'closed') ?? [];
+  if (!seed || !ok.length) return { label, gapMm, result: 'no closed candidate', pass: false };
+  const cand = ok[Math.floor(ok.length / 2)];
+  const own = new Set(
+    p.set.classes
+      .filter((c) => c.role === 'size')
+      .find((c) => c.id === p.run.sizes[cand.rank]?.classId)?.chains ?? [],
+  );
+  const wall = cand.walls
+    .filter((w) => own.has(w) && !p.set.chains[w].closed)
+    .sort((a, b) => p.set.chains[b].lengthMm - p.set.chains[a].lengthMm)[0];
+  if (wall === undefined) return { label, gapMm, result: 'no open own wall', pass: false };
+  const c = p.set.chains[wall];
+  const mid = c.lengthMm / 2;
+  const a = atArc(c.pts, mid - gapMm / 2);
+  const b = atArc(c.pts, mid + gapMm / 2);
+  const first = [...c.pts.slice(0, a.i), a.p];
+  const second = [b.p, ...c.pts.slice(b.i)];
+  const nid = p.set.chains.length;
+  const set: ChainSet = {
+    ...p.set,
+    chains: [
+      ...p.set.chains.map((x) =>
+        x.id === wall ? { ...x, pts: first, lengthMm: mid - gapMm / 2 } : x,
+      ),
+      { ...c, id: nid, pts: second, lengthMm: c.lengthMm - mid - gapMm / 2 },
+    ],
+    classes: p.set.classes.map((k) =>
+      k.chains.includes(wall) ? { ...k, chains: [...k.chains, nid] } : k,
+    ),
+  };
+  const { families } = fillPiecesDetailed(p.sheet, set, p.run, [seed], {
+    cellMm: PATIMPORT.fillCellMm,
+    snapMm: PATIMPORT.snapMm,
+    variant: sr.variant,
+  });
+  const after = families[0]?.candidates.find((x) => x.rank === cand.rank);
+  const bridged = !!after?.derived?.some((d) => d.kind === 'bridge');
+  const res = after
+    ? `${after.outcome}${bridged ? ' with a derived bridge' : ''}${after.outcome === 'closed' ? ` (area ${(after.areaMm2 / 100).toFixed(0)} vs ${(cand.areaMm2 / 100).toFixed(0)} cm²)` : ''}`
+    : 'missing';
+  // a gap too long to bridge is the operator's: addBridge over it refills this seed only
+  let operator: string | undefined;
+  let opPass = true;
+  if (gapMm > 3 && after?.outcome === 'leak') {
+    const ses: PieceSession = {
+      sheet: p.sheet,
+      set,
+      run: p.run,
+      seeds: [seed],
+      opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+      walls: { exclude: [], include: [], bridges: [] },
+      families,
+    };
+    const s2 = addBridge(ses, seed.id, cand.rank, a.p, b.p);
+    const c2 = s2.families[0]?.candidates.find((x) => x.rank === cand.rank);
+    const opB = !!c2?.derived?.some((d) => d.kind === 'operator-bridge');
+    operator = `addBridge → ${c2?.outcome}${opB ? ' with an operator bridge' : ''}${c2?.outcome === 'closed' ? ` (area ${(c2.areaMm2 / 100).toFixed(0)} cm²)` : ''}`;
+    opPass = c2?.outcome === 'closed' && opB;
+  }
+  return {
+    label,
+    rank: cand.rank,
+    chain: wall,
+    gapMm,
+    result: res,
+    operator,
+    pass:
+      (gapMm <= 3 ? after?.outcome === 'closed' && bridged : after?.outcome === 'leak') && opPass,
+  };
+}
+
+/**
+ * Band control (F4b band ladders): fill again with the band repair off; every family that is not a
+ * band must come out identical (no real piece is cut by it).
+ */
+function bandControl(p: Prepared, sr: SampleRun) {
+  const prev = process.env.F4_NOBANDS;
+  process.env.F4_NOBANDS = '1';
+  const { families } = fillPiecesDetailed(p.sheet, p.set, p.run, sr.seeds, {
+    cellMm: PATIMPORT.fillCellMm,
+    snapMm: PATIMPORT.snapMm,
+    variant: sr.variant,
+  });
+  if (prev === undefined) delete process.env.F4_NOBANDS;
+  else process.env.F4_NOBANDS = prev;
+  const sig = (f: PieceFamily) =>
+    f.candidates.map((c) => `${c.outcome}:${Math.round(c.areaMm2 / 100)}`).join(' ');
+  const changed: string[] = [];
+  for (const f of sr.families) {
+    const g = families.find((x) => x.seed === f.seed);
+    if (!g || sig(f) !== sig(g))
+      changed.push(seedLabel(sr.seeds.find((s) => s.id === f.seed)!) ?? '?');
+  }
+  return { changedFamilies: changed };
+}
+
 /** applyPieceEdits on real families: reseed keeps the piece, not-a-piece drops, split cuts a merge. */
 function editChecks(p: Prepared, sr: SampleRun) {
   const ctx = {
@@ -459,6 +584,23 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
         `   ${r.label.padEnd(16)} ${r.outcomes.padEnd(10)} ${r.monotone ? 'mono' : 'NON-MONO'} cov≥${r.minCoverage ?? '-'} p95≤${r.maxP95 ?? '-'} bbox ${r.bboxLargest?.join('×') ?? '-'} vs ${r.bboxTruth?.join('×') ?? '?'} ${r.note ?? ''}`,
       );
     if (s.id === 'palto') negs.push({ sample: 'palto', ...negative(p, sr, '22') });
+    if (s.id === 'robe')
+      for (const gap of [2, 5])
+        negs.push({ sample: 'robe', control: 'gap', ...gapControl(p, sr, '67', gap) });
+    if (s.id === 'palto')
+      for (const gap of [2, 5])
+        negs.push({ sample: 'palto', control: 'gap', ...gapControl(p, sr, '22', gap) });
+    if (['robe', 'palto', 'kombinezon', 'reef', 'viola', 'r4454'].includes(s.id)) {
+      const b = bandControl(p, sr);
+      const bandSeeds = s.id === 'reef' ? ['I', 'J'] : [];
+      negs.push({
+        sample: s.id,
+        control: 'bands off',
+        changedFamilies: b.changedFamilies,
+        expectChanged: bandSeeds,
+        pass: b.changedFamilies.every((l) => bandSeeds.includes(l)),
+      });
+    }
     if (s.id === 'robe' || s.id === 'blazer') edits.push(...editChecks(p, sr));
     if (s.id === 'robe') negs.push({ sample: 'robe', ...negative(p, sr, '67') });
     if (s.id === 'kombinezon') negs.push({ sample: 'kombinezon', ...negative(p, sr, '1') });
