@@ -737,6 +737,98 @@ export async function main(): Promise<number> {
       !res.ok ? res.uploaded.map((u) => u.filename).join(',') : '',
     );
   }
+  const IDENTICAL = 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
+  // D1b (F14 MAJOR 2) — an explicit FOLD / MIRRORED on a piece the import claims WITHOUT the
+  // manifest's proof (no pair, no unfolded fold) is never rewritten; unmarked → IDENTICAL; a
+  // MIRRORED the import's count makes impossible (odd) → IDENTICAL. Draft and apply agree.
+  {
+    const FOLD = 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD';
+    const mainM = r1.scopes.find((sc) => sc.target.scopeKey === MAIN.scopeKey)!.manifest;
+    const plain = mainM.pieces.filter((mp) => !mp.pairOf && !mp.unfoldedFold && !mp.ungraded);
+    const [pf, pu, pm] = plain;
+    ck(
+      plain.length >= 3,
+      'D1b: main has ≥ 3 single, folded-as-drawn pieces to claim',
+      plain.map((x) => x.identity).join(','),
+    );
+    const live: LiveCard = {
+      patterns: [],
+      pieces: [
+        { lineKey: 'P-F', name: pf.identity, piecesPerGarment: 2, cutSymmetry: FOLD, fused: false },
+        { lineKey: 'P-U', name: pu.identity, piecesPerGarment: 1, cutSymmetry: '', fused: false },
+        {
+          lineKey: 'P-M',
+          name: pm.identity,
+          piecesPerGarment: 2,
+          cutSymmetry: MIRRORED,
+          fused: false,
+        },
+      ],
+      aliases: [],
+    };
+    const draft = buildDraft({ scopes: r1.scopes }, cardOf(live), { mintKey: mint });
+    const dp = (k: string) => draft.pieces.find((x) => x.existingLineKey === k)!;
+    const du = (k: string) => draft.pieceUpdates.find((x) => x.lineKey === k);
+    ck(
+      dp('P-F').cutSymmetry === FOLD && !du('P-F')?.cutSymmetry && !dp('P-F').symmetryForce,
+      `D1b draft: card FOLD «${pf.identity}» claimed with no unfold → symmetry kept`,
+      `${dp('P-F').cutSymmetry} · update ${du('P-F')?.cutSymmetry ?? '—'}`,
+    );
+    ck(
+      du('P-U')?.cutSymmetry === IDENTICAL && /not marked/.test(du('P-U')!.reason),
+      `D1b draft: unmarked «${pu.identity}» → IDENTICAL (the modal's rule)`,
+      du('P-U')?.reason ?? '',
+    );
+    const pmPpg = dp('P-M').piecesPerGarment;
+    ck(
+      pmPpg % 2 === 1
+        ? du('P-M')?.cutSymmetry === IDENTICAL
+        : dp('P-M').cutSymmetry === MIRRORED && !du('P-M')?.cutSymmetry,
+      `D1b draft: card MIRRORED «${pm.identity}» → ${pmPpg % 2 ? 'IDENTICAL (odd count)' : 'kept (even count)'}`,
+      `ppg ${pmPpg} · ${du('P-M')?.reason ?? 'no update'}`,
+    );
+    const form = fakeForm(live);
+    const res = await applyDraft(draft, {
+      upload: fakeUpload(null).upload,
+      read: form.read,
+      write: form.write,
+      storageSizeId: 501,
+      save: async () => 'ok',
+    });
+    const at = (k: string) => form.state.pieces.find((x) => x.lineKey === k)!;
+    ck(
+      res.ok &&
+        at('P-F').cutSymmetry === FOLD &&
+        !form.log.includes(
+          `pieces.${live.pieces.findIndex((x) => x.lineKey === 'P-F')}.cutSymmetry`,
+        ) &&
+        at('P-U').cutSymmetry === IDENTICAL,
+      'D1b apply: FOLD untouched (no cutSymmetry write), unmarked → IDENTICAL',
+      `${at('P-F').cutSymmetry} / ${at('P-U').cutSymmetry} · ${form.log.filter((l) => /cutSymmetry/.test(l)).join(' ')}`,
+    );
+    // the same import with the FOLD piece's manifest saying «unfolded» DOES rewrite it, with a reason
+    const forged = r1.scopes.map((sc) =>
+      sc.target.scopeKey !== MAIN.scopeKey
+        ? sc
+        : {
+            ...sc,
+            manifest: {
+              ...sc.manifest,
+              pieces: sc.manifest.pieces.map((mp) =>
+                mp.identity === pf.identity ? { ...mp, unfoldedFold: true } : mp,
+              ),
+            },
+          },
+    );
+    const d2 = buildDraft({ scopes: forged }, cardOf(live), { mintKey: mint });
+    const u2 = d2.pieceUpdates.find((x) => x.lineKey === 'P-F');
+    ck(
+      u2?.cutSymmetry === IDENTICAL && /unfolded/.test(u2?.reason ?? ''),
+      'D1b control: the same FOLD piece with an unfolded manifest → IDENTICAL with the reason',
+      u2?.reason ?? '',
+    );
+  }
+
   // D2 — success: ordered batch, lining not bound to the shell piece, MIRRORED → IDENTICAL
   let afterFirst: LiveCard;
   {
@@ -758,7 +850,7 @@ export async function main(): Promise<number> {
     );
     const upd = draft.pieceUpdates.find((u) => u.lineKey === 'P-FP');
     ck(
-      !!upd && upd.cutSymmetry.endsWith('IDENTICAL') && /both hands/.test(upd.reason),
+      !!upd && !!upd.cutSymmetry?.endsWith('IDENTICAL') && /both hands/.test(upd.reason),
       'draft: existing MIRRORED FP → IDENTICAL with the reason',
       upd?.reason ?? '',
     );

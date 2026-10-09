@@ -925,8 +925,14 @@ export type DraftPiece = {
   lineKey: string;
   name: string;
   piecesPerGarment: number;
-  /** Always IDENTICAL_CUT_SYMMETRY (06-SYNTHESIS): both hands / the unfolded piece are drawn. */
+  /**
+   * New piece: IDENTICAL_CUT_SYMMETRY (06-SYNTHESIS). Reused piece: what it will carry after apply —
+   * IDENTICAL only when the manifest proves it (`symmetryForce`) or the piece was unmarked / an
+   * impossible pair; an explicit MIRRORED/FOLD is kept otherwise (F14 MAJOR 2).
+   */
   cutSymmetry: string;
+  /** F14: the manifest's proof that every contour is drawn — both hands of a pair / unfolded fold. */
+  symmetryForce?: 'pair' | 'unfolded';
   grainline: string;
   fused: boolean;
   /** Reuse of an existing card piece instead of creating one. */
@@ -952,7 +958,8 @@ export type DraftAlias = {
 
 export type DraftPieceUpdate = {
   lineKey: string;
-  cutSymmetry: string;
+  /** Set only when the symmetry is rewritten (`importedCutSymmetry`). */
+  cutSymmetry?: string;
   /** Shown to the operator: why an explicit MIRRORED/FOLD became IDENTICAL. */
   reason: string;
   /** F7: point writes beside the symmetry — only fields the import changes. */

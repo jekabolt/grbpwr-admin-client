@@ -22,6 +22,12 @@ import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, fmtBytes } from '../ui-bits';
 
+const CUT_SYMMETRY_WORD: Record<string, string> = {
+  TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'identical',
+  TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED: 'mirrored (kept)',
+  TECH_CARD_PIECE_CUT_SYMMETRY_FOLD: 'on fold (kept)',
+};
+
 /** The card save answered something other than "saved" / "nothing to save". */
 const saveFailed = (save?: string) => !!save && save !== 'ok' && save !== 'nothing';
 
@@ -242,7 +248,7 @@ export function ApplyStep({
                 <td>{p.name}</td>
                 <td>{p.piecesPerGarment}</td>
                 <td data-align='left' className='text-labelColor'>
-                  identical
+                  {CUT_SYMMETRY_WORD[p.cutSymmetry] ?? 'identical'}
                 </td>
                 <td data-align='left'>{p.grainline}</td>
                 <td data-align='left'>{p.fused ? 'yes' : '—'}</td>
@@ -267,8 +273,9 @@ export function ApplyStep({
           </tbody>
         </DataTable>
         <Text size='micro' variant='label' component='p' className='mt-1'>
-          symmetry is always identical: the file already carries both hands of a pair and the
-          unfolded fold piece, so the marker must not mirror or fold them again.
+          new pieces are cut identical: the file already carries both hands of a pair and the
+          unfolded fold piece. an existing piece marked mirrored or on fold keeps its mark unless
+          the conversion drew both hands or unfolded it.
         </Text>
 
         {draft.pieceUpdates.length > 0 && (

@@ -51,7 +51,7 @@ import { clampUtf8Bytes } from 'utils/pattern';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
 import {
   IDENTICAL_CUT_SYMMETRY,
-  cutSymmetryCountInvalid,
+  importedCutSymmetry,
   isCutSymmetryMarked,
 } from '../piece-codes';
 import type { TechCardFormData } from '../schema';
@@ -564,20 +564,23 @@ function planPieceUpdates(
         (acc, f) => (acc === 'pair' || f === 'pair' ? 'pair' : (acc ?? f)),
         undefined,
       );
-    if (forced && current !== IDENTICAL_CUT_SYMMETRY) {
+    // ОДНО правило с apply импорта (piece-codes `importedCutSymmetry`); ниже — почему каждая ветка.
+    const symmetry = importedCutSymmetry(current, total, forced);
+    if (symmetry && forced) {
       // Чертёж конвертера несёт каждый контур, раскладка карточки кладёт их как нарисованы и не
       // отражает ничего — значит деталь режется как нарисована, и хранимая «зеркальная пара» или
       // «со сгиба» ему прямо противоречит (первая — BLOCKER настила лицом вверх, второй печатает
       // «on fold» на полной детали). Расчёт и цена (лицом к лицу) — FORCED_REASON выше.
-      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+      update.cutSymmetry = symmetry;
       if (isCutSymmetryMarked(current)) update.reason = FORCED_REASON[forced];
-    } else if (!isCutSymmetryMarked(current)) {
+    } else if (symmetry && !isCutSymmetryMarked(current)) {
       // Не размечено — значит никто не отвечал, а чертёж отвечает: он несёт КАЖДЫЙ контур, и
       // деталь режется как нарисована. Молчание здесь не нейтрально — оно гасит выводы бэка
       // (клетка покрытия настила становится UNKNOWN, проверки зеркального разворота и перекроя
       // перестают судить), поэтому ответ ставится, а не оставляется на потом.
-      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
-    } else if (cutSymmetryCountInvalid(current, total)) {
+      update.cutSymmetry = symmetry;
+    } else if (symmetry) {
+      // = cutSymmetryCountInvalid(current, total):
       // Единственное исключение к «явную разметку не трогаем»: новое количество делает хранимую
       // зеркальную пару невозможной (нечётное или < 2), и сохранение ВСЕЙ карточки упёрлось бы в
       // серверную проверку и двухколоночный CHECK `chk_tcp_mirrored_needs_even_count`.
@@ -589,7 +592,7 @@ function planPieceUpdates(
       // следующим проходом как «не размечено», ветка выше ставила ему IDENTICAL — и повторное
       // применение БЕЗ единой правки в чертеже меняло данные и роняло подписи. Теперь второй
       // проход не меняет ничего: cutSymmetryCountInvalid у IDENTICAL всегда false.
-      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+      update.cutSymmetry = symmetry;
     }
     // Явные «зеркальные пары» и «со сгибом», которым новое количество не противоречит, остаются
     // как есть: человек утверждал факт, и чертёж ему не возражает.
