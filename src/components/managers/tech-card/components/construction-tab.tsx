@@ -29,6 +29,7 @@ import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
 import { useSkeletonDoor } from './assembly-skeleton-panel';
+import { CardUnitPicturesProvider, renderProposalUnit } from './card-unit-pictures';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
@@ -248,17 +249,16 @@ function ConstructionSummary() {
       {opCount > 0 && unattached.length > 0 && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
-            bound to no operation:{' '}
-            {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
+            bound to no operation: {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
           </Text>
         </CalloutBox>
       )}
       {labelsOffRoute && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
-            {usedLabels} labels are declared, but no step sews them on — that work is in neither
-            the workshop route nor the SAM. add a step that attaches them, and link the label's BOM
-            line to it.
+            {usedLabels} labels are declared, but no step sews them on — that work is in neither the
+            workshop route nor the SAM. add a step that attaches them, and link the label's BOM line
+            to it.
           </Text>
         </CalloutBox>
       )}
@@ -752,6 +752,7 @@ export function ConstructionTab({
     shapes: pieceShapes,
     cloth: pieceClothByColorway[0]?.map ?? null,
     categoryNames,
+    renderUnit: renderProposalUnit,
   });
 
   return (
@@ -826,66 +827,73 @@ export function ConstructionTab({
                 </>
               }
             />
-            <OperationsField
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-              activeBom={bom.active}
-              onActiveBomChange={bom.setActive}
-              colorwayArticles={colorwayArticles}
-              pieceClothByColorway={pieceClothByColorway}
-              pieceShapes={pieceShapes.shapeByKey}
-              // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
-              // принимает намерение «снять разметку» только против карточки, которая её несёт,
-              // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
-              // распакована (восстановленный черновик).
-              storedHasUnits={(techCard?.techCard?.operations ?? []).some(
-                (o) => (o?.outputUnitKey ?? '').trim() !== '',
-              )}
-              // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
-              // замораживает тело. Схема получает его ЯВНО, а не через внешний
-              // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
-              frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-              // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
-              operationMediaUrls={operationMediaUrls}
-              // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
-              // от него зависит, показывать ли путь отступления «снять фотографии шагов».
-              storedHasMedia={(techCard?.techCard?.operations ?? []).some(
-                (o) => (o?.media ?? []).length > 0,
-              )}
-              onSave={onSave}
-              saving={saving}
-              applyRequest={skeleton.applyRequest}
-              onSkeletonApplied={skeleton.onSkeletonApplied}
-              emptyAction={skeleton.emptyAction}
-              // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
-              // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
-              // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
-              // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
-              //
-              // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
-              // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
-              // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
-              // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
-              // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
-              sketchNote={
-                <ConstructionSketch
-                  mediaById={mediaById}
-                  activePin={pin.active}
-                  onActivePinChange={pin.setActive}
-                  // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
-                  // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
-                  // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
-                  // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
-                  // было бы новое визуальное состояние, которого у инлайна нет.
-                  note='hover a pin — in the list view it lights that step; the canvas never reacts'
-                />
-              }
-            />
+            {/* Пиктограммы узлов карточки — над всеми поверхностями сборки, что живут внутри поля
+                (схема, фулскрин, рельс, полка). Без DXF провайдер отдаёт null: всё как было. */}
+            <CardUnitPicturesProvider
+              shapes={pieceShapes.shapeByKey}
+              cloth={pieceClothByColorway[0]?.map ?? null}
+              categoryNames={categoryNames}
+            >
+              <OperationsField
+                activePin={pin.active}
+                onActivePinChange={pin.setActive}
+                activeBom={bom.active}
+                onActiveBomChange={bom.setActive}
+                colorwayArticles={colorwayArticles}
+                pieceClothByColorway={pieceClothByColorway}
+                pieceShapes={pieceShapes.shapeByKey}
+                // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+                // принимает намерение «снять разметку» только против карточки, которая её несёт,
+                // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+                // распакована (восстановленный черновик).
+                storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                  (o) => (o?.outputUnitKey ?? '').trim() !== '',
+                )}
+                // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+                // замораживает тело. Схема получает его ЯВНО, а не через внешний
+                // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+                // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+                operationMediaUrls={operationMediaUrls}
+                // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+                // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+                storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                  (o) => (o?.media ?? []).length > 0,
+                )}
+                onSave={onSave}
+                saving={saving}
+                applyRequest={skeleton.applyRequest}
+                onSkeletonApplied={skeleton.onSkeletonApplied}
+                emptyAction={skeleton.emptyAction}
+                // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+                // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+                // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+                // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+                //
+                // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+                // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+                // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+                // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+                // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+                sketchNote={
+                  <ConstructionSketch
+                    mediaById={mediaById}
+                    activePin={pin.active}
+                    onActivePinChange={pin.setActive}
+                    // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
+                    // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
+                    // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
+                    // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
+                    // было бы новое визуальное состояние, которого у инлайна нет.
+                    note='hover a pin — in the list view it lights that step; the canvas never reacts'
+                  />
+                }
+              />
+            </CardUnitPicturesProvider>
             {skeleton.panel}
           </section>
         </div>
       </div>
-
     </div>
   );
 }

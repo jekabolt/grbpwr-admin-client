@@ -196,6 +196,12 @@ export type FoundPiece = {
   instances: number;
   layer: string;
   sizes: string[];
+  /**
+   * Every contour of this block in this size from the file `piece` came from, one per layer (cut
+   * line, sewing line, mode-B loop). The tiles draw `piece`; the assembly skeleton needs them all
+   * to find the SEWING line (`seamPieceOf`). Optional: hand-built pieces (probes) may omit it.
+   */
+  layers?: PieceDTO[];
 };
 
 /**
@@ -241,6 +247,7 @@ export function findPiece(
       instances: Math.max(...perFile.values()),
       layer: drawn[0].layer ?? '',
       sizes,
+      layers: list.filter((p) => p.fileIndex === drawn[0].fileIndex),
     };
   }
   return null;

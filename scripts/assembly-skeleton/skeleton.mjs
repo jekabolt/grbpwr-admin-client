@@ -16,6 +16,12 @@
 // (fixtures/*.json, made by fixture-from-probe.mjs). Re-run on lane A's real graph by replacing
 // `graph` in the fixture — or pass `--graph <file>` with a SeamGraph JSON for SS26-005.
 //
+// REAL GRAPH (integration round): SS26-005 is also run on the product pipeline itself — the DXF
+// through the nesting parser, the sewing line per block (seamPieceOf over every layer), A3 → units →
+// A4 (`readSeamGraph`, the function the tech card's provider calls) — keyed by the card's lineKeys
+// exactly as buildSkeletonFacts keys them. Same gate (≥ 14 / 18 by inputs), same names-stripped
+// control. Needs the plans folder (SKELETON_PLANS, default ../tmp/plans); skipped, loudly, without it.
+//
 //   node scripts/assembly-skeleton/skeleton.mjs [--verbose] [--graph ss26-graph.json]
 
 import { build } from 'esbuild';
@@ -36,7 +42,9 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { buildSkeleton, orderTemplate, skeletonDeps } = await import(pathToFileURL(outfile).href);
+const { buildSkeleton, orderTemplate, skeletonDeps, readSeamGraph, loadFacts } = await import(
+  pathToFileURL(outfile).href
+);
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
@@ -177,6 +185,83 @@ gate(
       (s.operationType !== 'MACHINE' || s.machineType) && s.zone && !s.zone.endsWith('UNKNOWN'),
   ),
 );
+
+// SS26-005 on the REAL graph (A3 + A4 through the product pipeline)
+{
+  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
+  const dxf = resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf');
+  let bytes = null;
+  try {
+    const buf = readFileSync(dxf);
+    bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  } catch {
+    console.log(`\nSS26-005 REAL graph: SKIPPED — ${dxf} not found`);
+    failed++;
+  }
+  if (bytes) {
+    const quiet = [console.log, console.warn];
+    console.log = () => {};
+    console.warn = () => {};
+    const { facts: parsed } = await loadFacts(bytes, 'M', 'shirt');
+    [console.log, console.warn] = quiet;
+    // block name → the card's piece (lineKey, name, cut symmetry, cloth) — as buildSkeletonFacts.
+    const byName = new Map(parsed.pieces.map((p) => [p.name, p.piece]));
+    const realFacts = {
+      ...ss.facts,
+      pieces: ss.facts.pieces
+        .filter((p) => byName.has(p.name))
+        .map((p) => ({ ...p, piece: byName.get(p.name) })),
+    };
+    const t0 = performance.now();
+    const graph = readSeamGraph(realFacts);
+    const ms = performance.now() - t0;
+    const real = { ...ss, facts: realFacts, graph };
+    const p = run(real);
+    const m = measure(real, p);
+    const joins = p.steps.filter((s) => s.outputUnitKey);
+    const geo = joins.filter((s) => s.source === 'geometry').length;
+    const kinds = graph.chosen.reduce((a, c) => ({ ...a, [c.kind]: (a[c.kind] ?? 0) + 1 }), {});
+    console.log(
+      `\nSS26-005 on the REAL graph (A3 + A4, ${realFacts.pieces.length} pieces, ${graph.chosen.length} seams ${JSON.stringify(kinds)}, graph ${ms.toFixed(0)} ms)`,
+    );
+    console.log(
+      `  joins reproduced by inputs: ${m.byInputs}/${m.joins}; same unit contents: ${m.byLeaves}/${m.joins}`,
+    );
+    if (m.miss.length) console.log(`  missed: ${m.miss.join(', ')}`);
+    console.log(
+      `  geometry-backed joins: ${geo}/${joins.length} (${Math.round((100 * geo) / Math.max(1, joins.length))} %)`,
+    );
+    if (verbose) printSteps(real, p);
+    gate('SS26-005 REAL graph: ≥ 14 of 18 joins by inputs', m.byInputs >= 14, `${m.byInputs}/18`);
+    gate('SS26-005 REAL graph: frontier sweep clean', broken(p).length === 0, broken(p).join('; '));
+
+    // names stripped BEFORE the graph is read: no hands, no roles — geometry alone end to end.
+    const rename = new Map(
+      realFacts.pieces.map((q, i) => [q.name, `P${String(i + 1).padStart(2, '0')}`]),
+    );
+    const strippedFacts = {
+      ...realFacts,
+      pieces: realFacts.pieces.map((q) => ({
+        ...q,
+        name: rename.get(q.name),
+        piece: { ...q.piece, name: rename.get(q.name), blockName: rename.get(q.name) },
+      })),
+    };
+    const sGraph = readSeamGraph(strippedFacts);
+    const sReal = { ...ss, facts: strippedFacts, graph: sGraph };
+    const sp = run(sReal);
+    const sm = measure(sReal, sp);
+    const sJoins = sp.steps.filter((s) => s.outputUnitKey);
+    console.log(
+      `  names stripped (geometry alone, REAL graph): ${sm.byInputs}/${sm.joins} by inputs, ${sm.byLeaves}/${sm.joins} by contents; geometry-backed ${sJoins.filter((s) => s.source === 'geometry').length}/${sJoins.length}`,
+    );
+    gate(
+      'control (REAL graph): stripping names loses joins',
+      sm.byInputs < m.byInputs,
+      `${m.byInputs} → ${sm.byInputs}`,
+    );
+  }
+}
 
 // Tee
 const tee = load('tee.json');

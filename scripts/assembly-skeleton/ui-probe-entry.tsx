@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SkeletonFacts, SkeletonProposal, SkeletonStep } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
+import { useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
@@ -18,9 +19,14 @@ import {
 } from 'components/managers/tech-card/components/assembly-frontier';
 import { useSkeletonDoor } from 'components/managers/tech-card/components/assembly-skeleton-panel';
 import {
+  DEFAULT_SKELETON_PROVIDER,
   SkeletonProviderContext,
   type SkeletonProvider,
 } from 'components/managers/tech-card/components/assembly-skeleton-source';
+import {
+  CardUnitPicturesProvider,
+  renderProposalUnit,
+} from 'components/managers/tech-card/components/card-unit-pictures';
 import {
   AutosaveContext,
   AUTOSAVE_OFF,
@@ -242,7 +248,14 @@ export function mockProposal(facts: SkeletonFacts): SkeletonProposal {
 
 // ── the stand ───────────────────────────────────────────────────────────────────────────────────
 
+/** A real card: pieces with their sewing-line contours, read by the REAL engine (scenario G). */
+type RealCard = {
+  category: string;
+  pieces: { lineKey: string; name: string; piece: PieceDTO }[];
+};
+
 type Mount = {
+  real?: RealCard;
   frozen?: boolean;
   noDxf?: boolean;
   noProvider?: boolean;
@@ -293,6 +306,13 @@ const SHAPES_DXF: PieceShapes = (() => {
   };
 })();
 const shapesFor = (noDxf: boolean): PieceShapes => (noDxf ? SHAPES_NONE : SHAPES_DXF);
+const realShapes = (r: RealCard): PieceShapes => {
+  const m = new Map<string, FoundPiece | null>();
+  for (const p of r.pieces) m.set(pieceRefKey(p.lineKey), { ...found(p.piece), layers: [p.piece] });
+  return { shapeByKey: m, hasDxf: true, foundCount: m.size, isLoading: false, error: null };
+};
+const realCloth = (r: RealCard) =>
+  new Map<string, PieceCloth>(r.pieces.map((p) => [p.lineKey, { state: 'main' }]));
 const CLOTH = new Map<string, PieceCloth>([
   ['FP', { state: 'main' }],
   ['BP', { state: 'main' }],
@@ -303,11 +323,16 @@ const CLOTH = new Map<string, PieceCloth>([
 ]);
 
 function Stand({ m }: { m: Mount }) {
+  // Stable per mount: the door and the pictures memoise on these identities.
+  const [shapes] = useState(() => (m.real ? realShapes(m.real) : shapesFor(!!m.noDxf)));
+  const [cloth] = useState(() => (m.real ? realCloth(m.real) : CLOTH));
+  const [categoryNames] = useState(() => (m.real ? [m.real.category] : []));
   const skeleton = useSkeletonDoor({
     frozen: !!m.frozen,
-    shapes: shapesFor(!!m.noDxf),
-    cloth: CLOTH,
-    categoryNames: [],
+    shapes,
+    cloth,
+    categoryNames,
+    renderUnit: m.real ? renderProposalUnit : undefined,
   });
   return (
     <section className='border border-borderColor bg-bgColor p-4'>
@@ -316,13 +341,19 @@ function Stand({ m }: { m: Mount }) {
         question='— what each step does, where, on which pieces, and how long it takes'
         action={skeleton.headerAction}
       />
-      <OperationsField
-        frozen={!!m.frozen}
-        pieceShapes={shapesFor(!!m.noDxf).shapeByKey}
-        applyRequest={skeleton.applyRequest}
-        onSkeletonApplied={skeleton.onSkeletonApplied}
-        emptyAction={skeleton.emptyAction}
-      />
+      <CardUnitPicturesProvider
+        shapes={shapes.shapeByKey}
+        cloth={cloth}
+        categoryNames={categoryNames}
+      >
+        <OperationsField
+          frozen={!!m.frozen}
+          pieceShapes={shapes.shapeByKey}
+          applyRequest={skeleton.applyRequest}
+          onSkeletonApplied={skeleton.onSkeletonApplied}
+          emptyAction={skeleton.emptyAction}
+        />
+      </CardUnitPicturesProvider>
       {skeleton.panel}
     </section>
   );
@@ -334,7 +365,7 @@ function Harness({ m }: { m: Mount }) {
     mode: 'onChange',
     defaultValues: {
       ...techCardDefaultData,
-      pieces: PIECES.map((p) => ({
+      pieces: (m.real ? m.real.pieces : PIECES).map((p) => ({
         lineKey: p.lineKey,
         name: p.name,
         piecesPerGarment: 1,
@@ -350,9 +381,11 @@ function Harness({ m }: { m: Mount }) {
     },
   });
   form = methods;
-  const provider: SkeletonProvider = (facts) => {
+  const provider: SkeletonProvider = (facts, deps) => {
     calls += 1;
     if (m.failProvider) throw new Error('mock engine failed');
+    // Scenario G runs the PRODUCTION provider — the one the tech card's context defaults to.
+    if (m.real && DEFAULT_SKELETON_PROVIDER) return DEFAULT_SKELETON_PROVIDER(facts, deps);
     return mockProposal(facts);
   };
   const qc = new QueryClient({

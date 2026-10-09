@@ -100,6 +100,16 @@ export function resolveEdge(
   const pieceKey = pieceKeyOf(id);
   const g = geoms.get(pieceKey);
   if (!g) return null;
+  // A chain (`P#3+4`, two neighbouring edges A3 matched as one): its edges' points end to end.
+  if (id.includes('+', pieceKey.length)) {
+    const parts = id
+      .slice(pieceKey.length + 1)
+      .split('+')
+      .map((k) => resolveEdge(`${pieceKey}#${k}`, geoms));
+    if (parts.some((x) => !x)) return null;
+    const pts = parts.flatMap((x, i) => (i === 0 ? x!.pts : x!.pts.slice(1)));
+    return { id, pieceKey, pts, len: parts.reduce((s, x) => s + x!.len, 0) };
+  }
   const k = Number(id.slice(pieceKey.length + 1));
   const e = g.edges.find((x) => x.id === id) ?? g.edges.find((x) => x.k === k);
   if (!e) return null;

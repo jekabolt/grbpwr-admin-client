@@ -15,7 +15,12 @@
 //      autosave asked with 'skeleton'; rail marks the rows «draft»; a touch takes one mark off
 //   C  apply this step + ambiguous variant + a guess unticked by default
 //   D  existing steps: append numbers after them; replace needs a second, confirming press
-//   E  shut doors: released card, no DXF, no engine — disabled and saying why in words
+//   E  shut doors: released card, no engine — disabled and saying why in words; a card with no
+//      DXF has NO header door at all (owner 09.10: silent, like the silhouette line), the reason
+//      only in the empty-state door
+//   G  THE REAL ENGINE on SS26-005 (25 pieces, sewing lines from the DXF): the production provider
+//      reads the pattern; unit inputs and outputs carry real pictograms; after apply the schematic
+//      shows unit glyphs through CardUnitPicturesProvider. Skipped, loudly, without the plans folder.
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -128,6 +133,43 @@ try {
 }
 if (!css) console.log('note: dist CSS missing — screenshots are unstyled (run `yarn build`)');
 
+// SS26-005 as a card: the DXF through the product parser (node), the sewing line per block, keyed by
+// the card's lineKeys from the B4 fixture — the same facts the tech card would build.
+async function loadRealCard() {
+  const plans = process.env.SKELETON_PLANS ?? resolve(REPO, '../tmp/plans');
+  const dxf = resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf');
+  if (!existsSync(dxf)) return null;
+  const nodeOut = resolve(tmpdir(), `skeleton-ui-node-${process.pid}.mjs`);
+  await esbuild({
+    entryPoints: [resolve(HERE, 'seams-entry.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: nodeOut,
+    logLevel: 'warning',
+    absWorkingDir: REPO,
+  });
+  const { loadFacts } = await import(nodeOut);
+  const buf = readFileSync(dxf);
+  const quiet = [console.log, console.warn];
+  console.log = () => {};
+  console.warn = () => {};
+  const { facts } = await loadFacts(
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    'M',
+    'shirt',
+  );
+  [console.log, console.warn] = quiet;
+  const card = JSON.parse(readFileSync(resolve(HERE, 'fixtures/ss26-005.json'), 'utf8')).facts;
+  const byName = new Map(facts.pieces.map((p) => [p.name, p.piece]));
+  return {
+    category: 'shirts',
+    pieces: card.pieces
+      .filter((p) => byName.has(p.name))
+      .map((p) => ({ lineKey: p.pieceKey, name: p.name, piece: byName.get(p.name) })),
+  };
+}
+
 let bad = 0;
 const ck = (ok, what, d = '') => {
   if (!ok) bad++;
@@ -154,7 +196,7 @@ async function mount(m) {
   await page.goto('http://probe.local/');
   await page.addScriptTag({ content: bundle });
   await page.evaluate((mm) => window.__sk.mount(mm), m);
-  await page.waitForSelector('[data-skeleton-door="header"]', { timeout: 20000 });
+  await page.waitForSelector('[data-skeleton-door]', { timeout: 20000 });
   await page.waitForTimeout(300);
 }
 const shot = async (name, el) => {
@@ -409,9 +451,23 @@ await closePanel();
 
 // ── E ───────────────────────────────────────────────────────────────────────────────────────────
 head('E — shut doors say why');
+await mount({ noDxf: true });
+ck(
+  (await page.locator('[data-skeleton-door="header"]').count()) === 0 &&
+    (await page.locator('[data-skeleton-why="header"]').count()) === 0,
+  'no DXF: the header carries no door and no reason (silent)',
+);
+ck(
+  await page.locator('[data-skeleton-door="empty"]').isDisabled(),
+  'no DXF: the empty-state door is disabled',
+);
+{
+  const w = (await page.locator('[data-skeleton-why="empty"]').textContent()) ?? '';
+  ck(/no pattern/.test(w), 'no DXF: the empty state says why in words', w);
+}
+await shot('e-nodxf', 'section');
 for (const [m, why, name] of [
   [{ frozen: true }, /released/, 'released card'],
-  [{ noDxf: true }, /no pattern/, 'no DXF'],
   [{ noProvider: true }, /not connected/, 'no engine'],
 ]) {
   await mount(m);
@@ -440,6 +496,39 @@ ck(
   'the error is shown with its reason',
 );
 ck((await ops()).length === 0, 'and nothing is written');
+
+// ── G ───────────────────────────────────────────────────────────────────────────────────────────
+head('G — the real engine on SS26-005: pictograms in the panel and on the schematic');
+const real = await loadRealCard();
+if (!real) {
+  ck(false, 'SS26-005 DXF found (SKELETON_PLANS)', 'plans folder missing');
+} else {
+  await mount({ real });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  const steps = await page.locator('[data-skeleton-step]').count();
+  ck(steps >= 18, 'the real engine proposes the order', `${steps} steps`);
+  const outPics = await page.locator('[data-skeleton-unit] svg[role="img"]').count();
+  ck(outPics >= 8, 'unit outputs carry their pictogram', `${outPics} pictograms`);
+  const inPics = await page.locator('[data-skeleton-unit-input] svg[role="img"]').count();
+  ck(inPics >= 4, 'earlier units taken as inputs are drawn, not «▣ key»', `${inPics} unit inputs`);
+  const blocked = await page.locator('[data-skeleton-violation]').count();
+  ck(blocked === 0, 'the default ticks make a batch that keeps the order', `${blocked} violations`);
+  await shot('g-real-panel', '[data-skeleton-panel]');
+  if (process.env.SKELETON_DEBUG) {
+    for (const t of await page.locator('[data-skeleton-violation]').allTextContents())
+      console.log('   VIOLATION', t);
+    for (const t of await page.locator('[data-skeleton-step]').allInnerTexts())
+      console.log('   STEP', t.replace(/\s+/g, ' ').slice(0, 220));
+  }
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await page.waitForTimeout(500);
+  const glyphs = await page.locator('section svg[role="img"][aria-label*=" pieces · "]').count();
+  ck(glyphs >= 4, 'after apply the schematic draws unit glyphs', `${glyphs} glyphs`);
+  await shot('g-real-schematic', 'section');
+}
 
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();

@@ -18,6 +18,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import {
   SKELETON,
   type SeamCandidate,
+  type SkeletonDeps,
   type SkeletonFacts,
   type SkeletonProposal,
   type SkeletonStep,
@@ -33,6 +34,7 @@ import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './assembly-frontier';
+import { makeSkeletonDeps } from './assembly-skeleton-deps';
 import {
   buildSkeletonFacts,
   skeletonCategoryOf,
@@ -41,6 +43,7 @@ import {
   type SkeletonRun,
 } from './assembly-skeleton-source';
 import { machineTypeLabel, pressEquipmentLabel } from './equipment-options';
+import type { InferenceAlias, InferenceBomLine } from './operation-inference';
 import { zoneLabel } from './operation-options';
 import {
   skeletonMachineOf,
@@ -56,8 +59,12 @@ import { PieceTile } from './piece-silhouette';
 import type { TechCardFormData } from './schema';
 import type { PieceShapes } from './use-piece-shapes';
 
-/** Lane C's unit pictogram goes here; until it lands the slot renders nothing. */
-export type RenderUnit = (step: SkeletonStep, proposal: SkeletonProposal) => ReactNode;
+/**
+ * A unit's pictogram (lane C) — for the unit a step makes and for an earlier unit it takes as an
+ * input. Returns null when the unit has no picture (no contours); the line then shows the plain
+ * «▣ key» tile.
+ */
+export type RenderUnit = (unitKey: string, name: string, proposal: SkeletonProposal) => ReactNode;
 
 // ── words ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -167,6 +174,27 @@ const defaultPick = (s: SkeletonStep): StepPick => ({
   applied: false,
 });
 
+/**
+ * Default picks for a whole proposal: a sure step whose input is a unit made by an UNTICKED step
+ * (the final press on «Shirt» when «Set sleeves» is a guess) is unticked too — ticked, it would
+ * refer to a unit the batch never makes, and «apply all accepted» would refuse the whole batch.
+ */
+const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] => {
+  const madeBy = new Map<string, number>();
+  const picks: StepPick[] = [];
+  steps.forEach((s, i) => {
+    const pick = defaultPick(s);
+    if (pick.accepted)
+      pick.accepted = s.inputs.every((k) => {
+        const j = madeBy.get(k);
+        return j === undefined || picks[j].accepted;
+      });
+    picks.push(pick);
+    if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
+  });
+  return picks;
+};
+
 // ── the door ────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -210,7 +238,7 @@ export function useSkeletonDoor({
   // A fresh proposal gets fresh picks; the same proposal keeps them across close/open.
   const ready = proposal.state.status === 'ready' ? proposal.state.proposal : null;
   useEffect(() => {
-    setPicks(ready ? ready.steps.map(defaultPick) : []);
+    setPicks(ready ? defaultPicks(ready.steps) : []);
   }, [ready]);
 
   // Which proposal steps each request carried, so its answer marks exactly those as applied.
@@ -234,6 +262,9 @@ export function useSkeletonDoor({
   );
 
   const door = (where: 'header' | 'empty') => {
+    // A card without a pattern has nothing to read: the header stays silent (as the silhouette
+    // line does), and only the empty state names the reason.
+    if (where === 'header' && !shapes.hasDxf) return null;
     const label = where === 'header' ? 'suggest skeleton' : 'suggest a skeleton from the pattern';
     const button =
       where === 'header' ? (
@@ -333,7 +364,7 @@ function AssemblySkeletonPanel({
   onClose,
 }: {
   run: SkeletonRun;
-  onRun: (facts: SkeletonFacts) => void;
+  onRun: (facts: SkeletonFacts, deps?: SkeletonDeps) => void;
   shapes: PieceShapes;
   cloth: ReadonlyMap<string, PieceCloth> | null;
   categoryNames: ReadonlyArray<string>;
@@ -357,6 +388,8 @@ function AssemblySkeletonPanel({
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as NonNullable<
     TechCardFormData['operations']
   >;
+  const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
+    []) as InferenceAlias[];
   const park = useWatch<TechCardFormData>({ name: 'construction.equipmentDefaults' }) as
     | TechCardFormData['construction']['equipmentDefaults']
     | undefined;
@@ -380,9 +413,19 @@ function AssemblySkeletonPanel({
     });
   }, [formPieces, bomItems, shapes.shapeByKey, cloth, categoryNames, park]);
 
+  // The card's own deps: zones read its BOM and piece↔block links (lining steps → LINING zone).
+  const deps = useMemo(
+    () =>
+      makeSkeletonDeps({
+        bomLines: (bomItems ?? []) as InferenceBomLine[],
+        aliases,
+      }),
+    [bomItems, aliases],
+  );
+
   // Opening the panel the first time reads the pattern; reopening shows what was read.
   useEffect(() => {
-    if (run.status === 'idle') onRun(built.facts);
+    if (run.status === 'idle') onRun(built.facts, deps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -567,7 +610,7 @@ function AssemblySkeletonPanel({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  onClick={() => onRun(built.facts)}
+                  onClick={() => onRun(built.facts, deps)}
                 >
                   try again
                 </Button>
@@ -660,7 +703,18 @@ function AssemblySkeletonPanel({
                               ? 'one step at a time adds at the end — switch to «add after»'
                               : singleRefusal(i)
                         }
-                        unitSlot={renderUnit ? renderUnit(s, proposal) : null}
+                        unitSlot={
+                          renderUnit && s.outputUnitKey
+                            ? renderUnit(
+                                s.outputUnitKey,
+                                s.outputUnitName || s.outputUnitKey,
+                                proposal,
+                              )
+                            : null
+                        }
+                        unitInput={
+                          renderUnit ? (k: string) => renderUnit(k, nameOf(k), proposal) : undefined
+                        }
                         onAccept={(v) => setPick(i, { accepted: v })}
                         onVariant={(v) => setPick(i, { variant: v })}
                         onApplyOne={() => onApply([s], [i], 'append')}
@@ -807,6 +861,7 @@ function SkeletonLine({
   violations,
   singleRefusal,
   unitSlot,
+  unitInput,
   onAccept,
   onVariant,
   onApplyOne,
@@ -824,6 +879,8 @@ function SkeletonLine({
   violations: string[];
   singleRefusal: string;
   unitSlot: ReactNode;
+  /** An earlier unit taken as an input, drawn as its pictogram; null → the plain «▣ key» tile. */
+  unitInput?: (unitKey: string) => ReactNode;
   onAccept: (v: boolean) => void;
   onVariant: (v: number) => void;
   onApplyOne: () => void;
@@ -870,14 +927,18 @@ function SkeletonLine({
                 +
               </Text>
             )}
-            {/* A piece is drawn from the pattern; a unit made earlier has no shape of its own yet
-                (lane C draws unit pictograms) — it stands as an empty tile with its name. */}
+            {/* A piece is drawn from the pattern; a unit made earlier by its pictogram — its pieces
+                laid along their seams — or, with none, as an empty tile with its code. */}
             {isPiece(k) ? (
               <PieceTile
                 found={shapes.shapeByKey?.get(pieceRefKey(k)) ?? null}
                 name={nameOf(k)}
                 cloth={cloth?.get(k) ?? null}
               />
+            ) : unitInput?.(k) ? (
+              <span className='contents' data-skeleton-unit-input={k}>
+                {unitInput(k)}
+              </span>
             ) : (
               // Unit codes are short and the schematic prints them with «▣» — the same mark here.
               <PieceTile

@@ -17,7 +17,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -32,6 +32,7 @@ import { skuToSeasonLabel } from '../components/season-util';
 import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
+import { CardUnitPicturesProvider } from '../components/card-unit-pictures';
 import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
 import {
@@ -231,6 +232,20 @@ function Document({
       <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
       <PaperPages doc={doc} size={out} gapMm={PAGE_GAP_MM} />
     </>
+  );
+}
+
+/**
+ * Пиктограммы узлов на бумаге — той же арифметикой и по тем же контурам, что на экране
+ * (`CardUnitPicturesProvider`); выключаются тем же выбором «силуэты», что и силуэты деталей. Без
+ * DXF карта пустая, и лист набирается как раньше.
+ */
+function PrintUnitPictures({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const { shapeByKey, hasDxf } = usePieceShapes(enabled);
+  return (
+    <CardUnitPicturesProvider shapes={enabled && hasDxf ? shapeByKey : null} cloth={null}>
+      {children}
+    </CardUnitPicturesProvider>
   );
 }
 
@@ -598,18 +613,20 @@ export function TechCardAssemblyPrint() {
             style={{ transform: `scale(${k})`, width: `${stageWmm}mm` }}
           >
             <FormProvider {...methods}>
-              <Document
-                techCard={techCard}
-                form={form}
-                shapes={shapes}
-                workCatalog={workCatalog}
-                meta={meta}
-                onDeps={setDocDeps}
-                onShapesAvailable={setShapesAvailable}
-                onDoc={onDoc}
-                docKey={currentKey}
-                target={target}
-              />
+              <PrintUnitPictures enabled={shapes}>
+                <Document
+                  techCard={techCard}
+                  form={form}
+                  shapes={shapes}
+                  workCatalog={workCatalog}
+                  meta={meta}
+                  onDeps={setDocDeps}
+                  onShapesAvailable={setShapesAvailable}
+                  onDoc={onDoc}
+                  docKey={currentKey}
+                  target={target}
+                />
+              </PrintUnitPictures>
             </FormProvider>
           </div>
         </div>

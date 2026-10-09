@@ -172,6 +172,8 @@ export type SkeletonProposal = {
   /** Template id the order came from (skeleton/templates/<id>.json). */
   template: string;
   warnings: string[];
+  /** The seam graph the proposal was read from — pieces' geometry and seams for the pictograms. */
+  graph?: SeamGraph;
 };
 
 /** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */

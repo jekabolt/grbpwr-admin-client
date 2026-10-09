@@ -8,3 +8,5 @@ export {
   readTemplate,
 } from '../../src/lib/assembly-skeleton/skeleton';
 export { skeletonDeps } from '../../src/components/managers/tech-card/components/assembly-skeleton-deps';
+export { readSeamGraph, proposeSkeleton } from '../../src/lib/assembly-skeleton/pipeline';
+export { loadFacts } from './seams-entry';

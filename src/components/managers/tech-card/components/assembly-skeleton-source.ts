@@ -6,20 +6,24 @@
 // engine directly, so swapping the engine (rules today, rules + AI arbiter in P3) touches one line.
 //
 // THE PROVIDER IS INJECTED, NOT IMPORTED. `SkeletonProviderContext` defaults to
-// `DEFAULT_SKELETON_PROVIDER`, which is `null` until lane B lands: with no provider the door says so
-// in words and stays shut. The UI probe mounts a dev-only mock through the same context; no mock
-// ships in a production path.
+// `DEFAULT_SKELETON_PROVIDER` — the engine itself (`proposeSkeleton`: seam graph A3 → units →
+// composite second pass A4 → proposal B3). The UI probe mounts a dev-only mock through the same
+// context; no mock ships in a production path. With no provider the door says so and stays shut.
 //
 // Nothing here writes to the form. A proposal is data to look at; only `OperationsField`'s
 // `applyRequest` writes, and only on a pressed «apply».
+import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
+import { proposeSkeleton } from 'lib/assembly-skeleton/pipeline';
 import type {
   SkeletonCategory,
+  SkeletonDeps,
   SkeletonFacts,
   SkeletonPieceInput,
   SkeletonProposal,
 } from 'lib/assembly-skeleton/types';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
+import { skeletonDeps } from './assembly-skeleton-deps';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
@@ -27,13 +31,16 @@ import type { PieceShapeMap } from './use-piece-shapes';
 
 export type SkeletonProvider = (
   facts: SkeletonFacts,
+  /** The card's own deps (zone inference reading its BOM and piece↔block links); else names only. */
+  deps?: SkeletonDeps,
 ) => SkeletonProposal | Promise<SkeletonProposal>;
 
 /**
- * THE PRODUCTION PROVIDER. `null` until lane B (`buildSkeleton`) is merged; the orchestrator wires it
- * here, e.g. `(facts) => buildSkeleton(matchSeams(segment(facts)), facts, orderTemplate(facts.category))`.
+ * THE PRODUCTION PROVIDER: the rules engine on the main thread. Measured in node on the 46-piece
+ * lined blazer: 40–90 ms for the whole proposal, so no worker (01-PLAN D3: worker above 300 ms).
  */
-export const DEFAULT_SKELETON_PROVIDER: SkeletonProvider | null = null;
+export const DEFAULT_SKELETON_PROVIDER: SkeletonProvider | null = (facts, deps) =>
+  proposeSkeleton(facts, deps ?? skeletonDeps);
 
 export const SkeletonProviderContext = createContext<SkeletonProvider | null>(
   DEFAULT_SKELETON_PROVIDER,
@@ -53,7 +60,7 @@ export type SkeletonRun =
  */
 export function useSkeletonProposal(): {
   available: boolean;
-  run: (facts: SkeletonFacts) => void;
+  run: (facts: SkeletonFacts, deps?: SkeletonDeps) => void;
   state: SkeletonRun;
 } {
   const provider = useContext(SkeletonProviderContext);
@@ -66,14 +73,14 @@ export function useSkeletonProposal(): {
     [],
   );
   const run = useCallback(
-    (facts: SkeletonFacts) => {
+    (facts: SkeletonFacts, deps?: SkeletonDeps) => {
       if (!provider) return;
       const my = ++gen.current;
       setState({ status: 'running' });
       // One frame for «reading the pattern…» to paint before the pass blocks the thread.
       window.setTimeout(() => {
         Promise.resolve()
-          .then(() => provider(facts))
+          .then(() => provider(facts, deps))
           .then(
             (proposal) => {
               if (gen.current === my) setState({ status: 'ready', proposal });
@@ -179,7 +186,9 @@ export function buildSkeletonFacts(args: {
     inputs.push({
       pieceKey: key,
       name: (p.name ?? '').trim() || key,
-      piece: found.piece,
+      // The SEWING line, read from every layer of the block (mode-B files draw it on its own
+      // layer); the tile's drawn contour when the index did not keep the layers.
+      piece: seamPieceOf(found.layers?.length ? found.layers : [found.piece]) ?? found.piece,
       piecesPerGarment: p.piecesPerGarment || 1,
       cutSymmetry: p.cutSymmetry || null,
       cloth: state,
