@@ -3,8 +3,12 @@
 // cancel by message with terminate + respawn as the hard fallback.
 //
 // This file and types.ts are all the main thread imports from lib/pattern-import (besides
-// manifest/): everything heavy — pdf.js, the adapters, assembly, the writer — lives behind the
-// worker. File bytes go in TRANSFERRED; preview polylines come back transferred.
+// manifest/; `limits.ts` and `report.ts` are type-only / pure and ride along): everything heavy —
+// pdf.js, the adapters, assembly, the writer — lives behind the worker. File bytes go in
+// TRANSFERRED; preview polylines come back transferred.
+//
+// Observability (M5): every open / stage start / end / error is one console line with the prefix
+// `[pattern-import]` and lands in `client.log` (a ring buffer), which the error report carries.
 import type {
   ImportErrorCode,
   ImportWorkerRequest,
@@ -13,6 +17,28 @@ import type {
   StageIO,
   StageName,
 } from '../types';
+import { checkInputSet } from './limits';
+import { ImportLog } from './report';
+
+export {
+  buildErrorReport,
+  downloadErrorReport,
+  errorReportFilename,
+  LOG_PREFIX,
+  type ErrorReport,
+  type ErrorReportInput,
+  type ImportLogEvent,
+} from './report';
+
+/**
+ * M6, before any byte is read: too many files or too many bytes for one run. Call it on the File
+ * objects BEFORE `File.arrayBuffer()` — a 1 GB scan must not reach the tab's memory. Throws the
+ * typed `too-large` refusal.
+ */
+export function checkFilesBeforeReading(files: readonly { name: string; size: number }[]): void {
+  const r = checkInputSet(files.map((f) => ({ name: f.name, bytes: f.size })));
+  if (r) throw new ImportWorkerError(r.code, r.message);
+}
 
 /** The wire plus the worker's JS heap after each answer (Chrome `performance.memory`). */
 export type WorkerMessage = ImportWorkerResponse & { heapMb?: number };
@@ -33,6 +59,8 @@ export class ImportWorkerError extends Error {
 
 export const importErrorCode = (e: unknown): ImportErrorCode | null =>
   e instanceof ImportWorkerError ? e.code : null;
+
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /** How long a soft cancel may take before the worker is terminated (sync stages never yield). */
 const HARD_CANCEL_MS = 1200;
@@ -55,6 +83,8 @@ export class ImportWorkerClient {
   /** Worker JS heap after the last answer, and the peak over the client's life (MB). */
   heapMb: number | null = null;
   peakHeapMb: number | null = null;
+  /** Timeline of this client: open, stage start / end / error (also on the console). */
+  readonly log = new ImportLog();
 
   constructor() {
     // Dev builds: the live client is reachable from the console (heap numbers, `cancel()`).
@@ -89,6 +119,12 @@ export class ImportWorkerClient {
       // A crashed worker (out of memory, a throw outside any request) fails every pending job;
       // its sessions are gone, the next call respawns clean.
       e.preventDefault?.();
+      this.log.push({
+        event: 'crash',
+        code: 'crashed',
+        message: e.message || 'worker error',
+        heapMb: this.heapMb,
+      });
       this.kill(
         new ImportWorkerError(
           'crashed',
@@ -131,11 +167,24 @@ export class ImportWorkerClient {
     files: { name: string; bytes: ArrayBuffer }[],
   ): Promise<{ sessionId: number; files: SourceFileInfo[] }> {
     const id = this.nextId++;
+    const total = files.reduce((a, f) => a + f.bytes.byteLength, 0);
+    this.log.push({
+      event: 'open',
+      message: `${files.length} file(s), ${(total / 1048576).toFixed(1)} MB: ${files.map((f) => f.name).join(', ')}`,
+    });
+    const refusal = checkInputSet(files.map((f) => ({ name: f.name, bytes: f.bytes.byteLength })));
+    if (refusal) {
+      this.log.push({ event: 'error', code: refusal.code, message: refusal.message });
+      throw new ImportWorkerError(refusal.code, refusal.message);
+    }
     // Transferred: the bytes leave the main thread (the wizard keeps the File objects).
     const msg = await this.request(
       { type: 'open', id, files },
       files.map((f) => f.bytes),
-    );
+    ).catch((e) => {
+      this.logError(e);
+      throw e;
+    });
     if (msg.type !== 'opened') throw new ImportWorkerError('internal', 'unexpected worker reply');
     this.live.add(msg.sessionId);
     return { sessionId: msg.sessionId, files: msg.files };
@@ -155,6 +204,8 @@ export class ImportWorkerClient {
       );
     const id = this.nextId++;
     this.running = id;
+    const t0 = now();
+    this.log.push({ event: 'start', stage });
     try {
       const msg = await this.request(
         { type: 'run', id, sessionId, stage, input } as ImportWorkerRequest,
@@ -163,10 +214,26 @@ export class ImportWorkerClient {
       );
       if (msg.type !== 'result' || msg.stage !== stage)
         throw new ImportWorkerError('internal', 'unexpected worker reply', stage);
+      this.log.push({ event: 'end', stage, ms: Math.round(now() - t0), heapMb: this.heapMb });
       return msg.output as StageIO[S]['out'];
+    } catch (e) {
+      this.logError(e, stage, Math.round(now() - t0));
+      throw e;
     } finally {
       if (this.running === id) this.running = null;
     }
+  }
+
+  private logError(e: unknown, stage?: StageName, ms?: number) {
+    const code = e instanceof ImportWorkerError ? e.code : 'internal';
+    this.log.push({
+      event: code === 'cancelled' ? 'cancel' : 'error',
+      stage: stage ?? (e instanceof ImportWorkerError ? e.stage : undefined),
+      ms,
+      code,
+      message: e instanceof Error ? e.message : String(e),
+      heapMb: this.heapMb,
+    });
   }
 
   /**

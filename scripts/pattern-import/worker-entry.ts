@@ -19,6 +19,11 @@ import type {
 } from 'lib/pattern-import/types';
 import { ImportError, toWireError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
+import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
+import { checkInputSet, imageSize, imagePixelsRefusal } from 'lib/pattern-import/worker/limits';
+import { buildErrorReport, ImportLog } from 'lib/pattern-import/worker/report';
+import { zipEntryNames } from 'lib/pattern-import/adapters/sniff/native';
+import { PATIMPORT, type ImportSession } from 'lib/pattern-import/types';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -29,8 +34,10 @@ const REPORTS =
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/reports/';
 const LEGACY = pathToFileURL(resolve(REPO, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs')).href;
 const loadLegacy = () => import(LEGACY) as Promise<PdfjsModule>;
-setPdfjsLoader(loadLegacy);
-setRasterPdfjsLoader(loadLegacy);
+// The worker entry hands both adapters the guarded module (M6); the probe does the same.
+const loadGuarded = () => loadLegacy().then((m) => guardPdfjs(m));
+setPdfjsLoader(loadGuarded);
+setRasterPdfjsLoader(loadGuarded);
 
 const ab = (rel: string) => {
   const b = readFileSync(resolve(CORPUS, rel));
@@ -175,6 +182,7 @@ export async function main(): Promise<number> {
       mustPass: false,
     });
   }
+  await guardsCase();
   if (process.env.PI_E2E_ONLY) return report([]);
   perf.push(await vectorCase('kombinezon', ['pdf/kombinezon.pdf'], { tiles: 44 }));
   perf.push(await vectorCase('palto', ['pdf/palto.pdf'], { tiles: 35 }));
@@ -529,12 +537,101 @@ async function writeCase(
       ? `${w.scopes[0]?.identities.length} identities · ${g.checks.filter((c) => c.ok).length}/${g.checks.length} ok${blocking.length ? ` · BLOCK ${blocking.map((c) => `${c.id}[${c.blocks.slice(0, 4).join(',')}] ${c.note ?? ''}`).join(' | ')}` : ''}`
       : 'no report',
   );
+  // M7: G3's denominator comes from the source chain topology (walls-used.ts); print what it read.
+  const g3 = g?.checks.find((c) => c.id === 'G3-coverage');
+  console.log(
+    `      ${name}: G3 ${g3?.value} · ${g3?.ok ? 'ok' : g3?.severity} · ${g3?.note ?? '—'}`,
+  );
   const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
   check(name, 'G4 against the semantics walls (closing edge kept)', !!g4?.ok, g4?.note ?? '—');
   const g1 = g?.checks.find((c) => c.id === 'G1-roundtrip');
   check(name, 'G1 the card parser reads it back', !!g1?.ok, g1?.note ?? '—');
   return w;
 }
+
+/**
+ * M7 negative control on real data: the written seam of one drawn piece (its outline votes, so the
+ * vote does not see the edit) runs 1.5 mm inside its wall for 20 mm. G3 must block that block.
+ */
+async function skipControl(
+  name: string,
+  s: Session,
+  run: Run,
+  map: StageIO['sizes']['out']['map'],
+) {
+  const inner = s as unknown as { semantics: StageIO['semantics']['out'] };
+  const saved = inner.semantics;
+  const bySeed = new Map<number, number>();
+  for (const p of saved.pieces) bySeed.set(p.seed, (bySeed.get(p.seed) ?? 0) + 1);
+  const target = saved.pieces.find(
+    (p) => !p.unfoldedFold && bySeed.get(p.seed) === 1 && p.allowance.meaning === 'seam',
+  );
+  if (!target) {
+    check(name, 'M7 negative control: a drawn seam piece to edit', false, 'none');
+    return;
+  }
+  const z = target.sizes[Math.floor(target.sizes.length / 2)];
+  const line = z.seam!;
+  const cx = line.reduce((a, q) => a + q.x, 0) / line.length;
+  const cy = line.reduce((a, q) => a + q.y, 0) / line.length;
+  // resample every 0.5 mm, then pull the stretch [40, 60] mm toward the centroid by 1.5 mm
+  const pts: { x: number; y: number }[] = [];
+  let arc = 0;
+  for (let i = 0; i < line.length; i++) {
+    const a = line[i];
+    const b = line[(i + 1) % line.length];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(L / 0.5));
+    for (let k = 0; k < n; k++) {
+      const q = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n };
+      const sArc = arc + (L * k) / n;
+      if (sArc >= 40 && sArc <= 60) {
+        const d = Math.hypot(cx - q.x, cy - q.y) || 1;
+        q.x += ((cx - q.x) / d) * 1.5;
+        q.y += ((cy - q.y) / d) * 1.5;
+      }
+      pts.push(q);
+    }
+    arc += L;
+  }
+  inner.semantics = {
+    ...saved,
+    pieces: saved.pieces.map((p) =>
+      p === target ? { ...p, sizes: p.sizes.map((q) => (q === z ? { ...q, seam: pts } : q)) } : p,
+    ),
+  };
+  const seeds = [...new Set(saved.pieces.map((p) => p.seed))];
+  const w = await run('write', {
+    scopes: [MAIN],
+    assignment: { byPurpose: { [MAIN.scopeKey]: seeds }, interliningInBom: false, proposals: [] },
+    sizes: map.entries.flatMap((e) =>
+      e.card
+        ? [
+            {
+              token: e.card.token,
+              sizeId: e.card.sizeId,
+              name: e.card.name,
+              sourceLabel: e.source.label,
+              rank: e.source.rank,
+            },
+          ]
+        : [],
+    ),
+    dialect: 'r12',
+    generator: 'probe',
+  });
+  inner.semantics = saved;
+  const block = `${target.identity}_${z.sizeToken}`;
+  const g3 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G3-coverage');
+  check(
+    name,
+    `M7 negative control: ${block}'s seam skips 20 mm of its wall (1.5 mm inside) → G3 blocks it`,
+    !!g3 && !g3.ok && g3.severity === 'block' && g3.blocks.includes(block),
+    `${g3?.value} · ${g3?.note}`,
+  );
+}
+
+const shaOf = new Map<string, string[]>();
 
 async function pipelineCase(
   name: string,
@@ -545,6 +642,19 @@ async function pipelineCase(
   const run: Run = (st, input) => s.runStage(st, input, ctx());
   const t0 = Date.now();
   const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  const { createHash } = await import('node:crypto');
+  const want = files.map((f) =>
+    createHash('sha256')
+      .update(readFileSync(resolve(CORPUS, f)))
+      .digest('hex'),
+  );
+  check(
+    name,
+    'M5: sha256 of every source file (WebCrypto in the session = node crypto)',
+    ex.files.every((f, i) => f.sha256 === want[i]),
+    ex.files.map((f) => f.sha256.slice(0, 12)).join(','),
+  );
+  shaOf.set(name, want);
   await run('scale', {
     decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
   });
@@ -667,7 +777,235 @@ async function pipelineCase(
     !sem2.blocked.some((b) => b.reason === 'no-grain'),
     `${sem2.pieces.length} specs, ${sem2.blocked.length} blocked (${[...new Set(sem2.blocked.map((b) => b.reason))].join(', ')})`,
   );
-  await writeCase(name, run, sem2, sz.map, { mustPass: o.mustPass });
+  const w = await writeCase(name, run, sem2, sz.map, { mustPass: o.mustPass });
+  check(
+    name,
+    'M5: the manifest carries the source sha256 (provenance)',
+    w.scopes.every(
+      (x) => x.manifest.source.files.map((f) => f.sha256).join() === shaOf.get(name)?.join(),
+    ),
+    w.scopes[0]?.manifest.source.files.map((f) => f.sha256.slice(0, 12)).join(',') ?? '—',
+  );
+  if (name === 'robe') {
+    const g3 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G3-coverage');
+    check(name, 'M7 positive control: G3 passes on every closed piece', !!g3?.ok, `${g3?.value}`);
+    await skipControl(name, s, run, sz.map);
+  }
+  if (name === 'palto') {
+    // M7: with the denominator from source topology the two size-72 pieces whose outline leaves
+    // its wall for 5–10 mm (the raster necks F13c saw at 72/76) block; BP_3_84's earlier block
+    // came from the sheet frame line counted as its wall and is gone.
+    const g3 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G3-coverage');
+    check(
+      name,
+      'M7: G3 blocks only size-72 blocks (outline leaves its wall there)',
+      !!g3 && !g3.ok && g3.blocks.length > 0 && g3.blocks.every((b) => b.endsWith('_72')),
+      `${g3?.value} [${g3?.blocks.join(',')}]`,
+    );
+  }
   console.log(`      ${name}: pipeline ${Date.now() - t0} ms`);
   s.close();
+}
+
+// ── MF-B: input guards (M6) and the error report (M5) ─────────────────────────────────────
+
+async function guardsCase() {
+  const C = 'guards';
+  const tiny = () => new ArrayBuffer(16);
+  // files per run, bytes per run
+  check(
+    C,
+    `${PATIMPORT.maxInputFiles + 1} files → too-large before reading`,
+    checkInputSet(
+      Array.from({ length: PATIMPORT.maxInputFiles + 1 }, (_, i) => ({
+        name: `${i}.pdf`,
+        bytes: 1,
+      })),
+    )?.code === 'too-large',
+    checkInputSet(
+      Array.from({ length: PATIMPORT.maxInputFiles + 1 }, (_, i) => ({
+        name: `${i}.pdf`,
+        bytes: 1,
+      })),
+    )?.message ?? '',
+  );
+  const huge = checkInputSet([{ name: 'scan.pdf', bytes: PATIMPORT.maxInputBytes + 1 }]);
+  check(
+    C,
+    '150 MB + 1 byte → too-large, the message names the file',
+    huge?.code === 'too-large' && huge.message.includes('scan.pdf'),
+    huge?.message ?? '',
+  );
+  check(
+    C,
+    'a corpus-size set passes',
+    checkInputSet([{ name: 'polupalto.pdf', bytes: 40e6 }]) === null,
+    'ok',
+  );
+  check(
+    C,
+    'the worker re-checks: Session refuses 41 files (typed too-large)',
+    (await errCode(
+      () =>
+        new Session(
+          9,
+          Array.from({ length: PATIMPORT.maxInputFiles + 1 }, (_, i) => ({
+            name: `${i}.pdf`,
+            bytes: tiny(),
+          })),
+        ),
+    )) === 'too-large',
+    'too-large',
+  );
+  // PDF page cap: palto (35 tile pages) against a guard of 3 pages
+  setPdfjsLoader(() => loadLegacy().then((m) => guardPdfjs(m, { maxPages: 3 })));
+  try {
+    const s = new Session(1, [fileOf('pdf/palto.pdf')]);
+    let msg = '';
+    let code: string | null = null;
+    try {
+      await s.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx());
+    } catch (e) {
+      const w = toWireError(e);
+      code = w.code;
+      msg = w.message;
+    }
+    check(
+      C,
+      'PDF over the page cap → too-large before any page is parsed, named',
+      code === 'too-large' && msg.startsWith('palto.pdf'),
+      msg,
+    );
+  } finally {
+    setPdfjsLoader(loadGuarded);
+  }
+  // the guard forces no-eval and keeps the caller's params
+  let seen: Record<string, unknown> = {};
+  const spy = {
+    getDocument: (p: Record<string, unknown>) => {
+      seen = p;
+      return { promise: Promise.resolve({ numPages: 1 }), destroy: async () => {} };
+    },
+  } as unknown as PdfjsModule;
+  await guardPdfjs(spy).getDocument({ data: new Uint8Array(4), isEvalSupported: true } as never)
+    .promise;
+  check(
+    C,
+    'pdf.js guard: isEvalSupported false, XFA off, maxImageSize set, caller params kept',
+    seen.isEvalSupported === false &&
+      seen.enableXfa === false &&
+      seen.maxImageSize === PATIMPORT.maxRasterPixels &&
+      seen.data instanceof Uint8Array,
+    JSON.stringify({ eval: seen.isEvalSupported, xfa: seen.enableXfa, max: seen.maxImageSize }),
+  );
+  // raster pixels: a PNG header claiming 20000 × 20000 px is refused before decoding
+  const png = new Uint8Array(33);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(png.buffer).setUint32(16, 20000);
+  new DataView(png.buffer).setUint32(20, 20000);
+  check(
+    C,
+    'image header reader (PNG)',
+    JSON.stringify(imageSize(png.buffer)) === '{"width":20000,"height":20000}',
+    JSON.stringify(imageSize(png.buffer)),
+  );
+  const scan = new Session(2, [{ name: 'giant.png', bytes: png.buffer.slice(0) }]);
+  const scanErr = await errCode(
+    scan.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx()),
+  );
+  check(
+    C,
+    '400-megapixel PNG → too-large before decoding',
+    scanErr === 'too-large' && !!imagePixelsRefusal(png.buffer, 'giant.png'),
+    imagePixelsRefusal(png.buffer, 'giant.png')?.message ?? String(scanErr),
+  );
+  // zip listing: a forged central directory count cannot make the walk unbounded
+  const z = new Uint8Array(22 + 46 * 3 + 9);
+  const dv = new DataView(z.buffer);
+  for (let k = 0; k < 3; k++) {
+    const p = k * 49;
+    dv.setUint32(p, 0x02014b50, true);
+    dv.setUint16(p + 28, 3, true);
+    z.set([0x61, 0x2e, 0x62], p + 46);
+  }
+  const eocd = z.length - 22;
+  dv.setUint32(eocd, 0x06054b50, true);
+  dv.setUint16(eocd + 10, 0xfffe, true); // claims 65534 entries
+  dv.setUint32(eocd + 16, 0, true);
+  const t0 = Date.now();
+  const names = zipEntryNames(z);
+  check(
+    C,
+    'zip listing: a forged entry count reads only what is there',
+    names?.length === 3 && Date.now() - t0 < 100,
+    `${names?.length} names`,
+  );
+  // error report: no contents, files with sha, the gate, the timeline
+  const log = new ImportLog();
+  log.push({ event: 'start', stage: 'write' });
+  log.push({ event: 'error', stage: 'write', code: 'internal', message: 'probe' });
+  const sess = {
+    sessionId: 1,
+    step: 'check',
+    files: [
+      { id: '0', name: 'robe.pdf', bytes: 123, sha256: 'ab'.repeat(32), kind: 'pdf', pages: 9 },
+    ],
+    pages: [],
+    scale: { candidates: [], decision: null },
+    sheet: null,
+    chains: null,
+    sizes: null,
+    pieces: null,
+    names: [],
+    semantics: null,
+    fabrics: null,
+    variant: null,
+    draft: {
+      scopes: [
+        {
+          target: {
+            scopeKey: 'MAIN',
+            fabricPurpose: 'MAIN',
+            bomLineKey: '',
+            label: 'main',
+            isInterlining: false,
+          },
+          filename: 'robe-main.dxf',
+          name: '',
+          dxfText: 'SECRET-DXF-CONTENTS',
+          manifest: { blocks: [{}, {}] },
+          identities: [],
+        },
+      ],
+      downloads: [],
+    },
+    gate: { MAIN: { passed: false, checks: [], durationMs: 1 } },
+    busy: null,
+    error: 'probe failure',
+  } as unknown as ImportSession;
+  const rep = buildErrorReport({
+    session: sess,
+    operator: {
+      files: [{ name: 'robe.pdf', bytes: 123 }],
+      blob: new Uint8Array(1000),
+      edits: [{ kind: 'bridge' }],
+    },
+    failure: { stage: 'write', code: 'internal', message: 'probe failure' },
+    generator: 'probe',
+    log: log.events,
+  });
+  const json = JSON.stringify(rep);
+  check(
+    C,
+    'M5 error report: files + sha256, stage, gate, timeline, operator edits; no DXF text, no bytes',
+    rep.files[0].sha256 === 'ab'.repeat(32) &&
+      rep.failure?.stage === 'write' &&
+      !!rep.gate.MAIN &&
+      rep.timeline.length === 2 &&
+      rep.written[0].bytes === 19 &&
+      !json.includes('SECRET-DXF-CONTENTS') &&
+      json.includes('"bytes":1000') &&
+      json.includes('bridge'),
+    `${json.length} bytes of JSON`,
+  );
 }

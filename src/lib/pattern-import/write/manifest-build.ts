@@ -11,8 +11,10 @@ import type {
 import { MANIFEST_VERSION } from '../types';
 import type { PlannedBlock } from './plan';
 
-const r3 = (v: number) => Math.round(v * 1000) / 1000;
-const r2 = (v: number) => Math.round(v * 100) / 100;
+// Manifest numbers are provenance, not geometry (the geometry is the DXF): bbox to 0.1 mm and
+// area to 1 mm² keep the per-block entry short (M1: the 999 prologue of a 138-block sheet).
+const r1 = (v: number) => Math.round(v * 10) / 10;
+const r0 = (v: number) => Math.round(v);
 
 export const LAYERS = { cut: '1', seam: '14', grain: '7', notch: '4', internal: '8' } as const;
 
@@ -54,8 +56,8 @@ export function manifestBlock(b: PlannedBlock): ManifestBlock {
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.sizeId,
-    bboxMm: [r3(minX), r3(minY), r3(maxX), r3(maxY)],
-    areaMm2: r2(b.size.areaMm2),
+    bboxMm: [r1(minX), r1(minY), r1(maxX), r1(maxY)],
+    areaMm2: r0(b.size.areaMm2),
     hasGrain: !!b.grain,
     notches: b.notches.length,
     drills: b.drills.length,

@@ -38,8 +38,11 @@ import {
 } from 'lib/pattern-import/write/geom';
 import {
   embedManifest as embedManifestLocal,
+  embedManifestAs,
+  manifestPrologueBytes,
   readManifest as readManifestLocal,
 } from 'lib/pattern-import/manifest';
+import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
 import {
   type CardBlockRules,
   createRunGate,
@@ -931,8 +934,8 @@ export async function main(opts: { plans: string }): Promise<number> {
     ck(!/[^\r]\n/.test(t), 'CRLF line endings only');
     const lines = t.split('\r\n');
     ck(
-      lines[0] === '999' && lines[1].startsWith('GRBPWR-MANIFEST v1 1/'),
-      'manifest 999 lines first',
+      lines[0] === '999' && lines[1].startsWith('GRBPWR-MANIFEST v1z 1/'),
+      'manifest 999 lines first (compact form v1z)',
     );
     const firstSection = lines.findIndex((l, i) => l === 'SECTION' && lines[i - 1] === '  0');
     ck(
@@ -950,7 +953,7 @@ export async function main(opts: { plans: string }): Promise<number> {
       lines
         .slice(1, firstSection)
         .filter((_, i) => i % 2 === 0)
-        .every((l) => l.length <= 'GRBPWR-MANIFEST v1 99/99 '.length + PATIMPORT.manifestLineMax),
+        .every((l) => l.length <= 'GRBPWR-MANIFEST v1z 99/99 '.length + PATIMPORT.manifestLineMax),
       `manifest chunks ≤ ${PATIMPORT.manifestLineMax} chars`,
     );
     let merged = '';
@@ -971,8 +974,8 @@ export async function main(opts: { plans: string }): Promise<number> {
     try {
       readManifestLocal(
         t.replace(
-          /GRBPWR-MANIFEST v1 1\/(\d+) ([A-Za-z0-9+/=]{8})/,
-          'GRBPWR-MANIFEST v1 1/$1 !!!!!!!!',
+          /GRBPWR-MANIFEST v1z 1\/(\d+) ([A-Za-z0-9+/=]{8})/,
+          'GRBPWR-MANIFEST v1z 1/$1 !!!!!!!!',
         ),
       );
     } catch {
@@ -1231,8 +1234,8 @@ export async function main(opts: { plans: string }): Promise<number> {
     });
     await neg('manifest tampered after writing', 'G9-sizes', await reGate(tampered));
     const corrupt = main.dxfText.replace(
-      /GRBPWR-MANIFEST v1 1\/(\d+) ([A-Za-z0-9+/=]{8})/,
-      'GRBPWR-MANIFEST v1 1/$1 AAAAAAAA',
+      /GRBPWR-MANIFEST v1z 1\/(\d+) ([A-Za-z0-9+/=]{8})/,
+      'GRBPWR-MANIFEST v1z 1/$1 AAAAAAAA',
     );
     await neg('manifest corrupt', 'G9-sizes', await reGate(corrupt));
     await neg('no manifest at all', 'G9-sizes', await reGate(main.detail.bareText));
@@ -1378,6 +1381,272 @@ export async function main(opts: { plans: string }): Promise<number> {
       r.passed && !c3.ok && c3.severity === 'warn',
       'no source walls → G3/G4 WARN (not verified), gate still passes',
       c3.note,
+    );
+  }
+
+  // M1 ─────────────────────────────────────────────────────────────────────────────────────
+  head('M1 · compact manifest: a polupalto-size sheet (23 pieces × 6 sizes = 138 blocks)');
+  {
+    const S6: SizeDef[] = [44, 46, 48, 50, 52, 54].map((n, i) => ({
+      token: String(n),
+      sizeId: 40 + i,
+      rank: i,
+      k: 0.94 + i * 0.024,
+    }));
+    const M6: ManifestSize[] = S6.map((x) => ({
+      token: x.token,
+      sizeId: x.sizeId,
+      name: `${x.token}_eu`,
+      sourceLabel: x.token,
+      rank: x.rank,
+    }));
+    const specs = Array.from({ length: 23 }, (_, i) => {
+      const p = slSpec(`SL_${i + 1}`, MAIN.fabricPurpose, S6);
+      p.code = 'SL';
+      p.mods = [String(i + 1)];
+      return p;
+    });
+    const big = await writeAndGate(job(MAIN, specs, 'r2000', M6), {
+      ...gateCtx(specs, { sizeTokens: new Set(S6.map((x) => x.token)) }),
+    });
+    const zBytes = manifestPrologueBytes(big.dxfText);
+    const plainBytes = manifestPrologueBytes(
+      embedManifestAs(big.detail.bareText, big.detail.manifest, 'v1'),
+    );
+    ck(
+      big.detail.manifest.blocks.length === 138,
+      '138 blocks written',
+      String(big.detail.manifest.blocks.length),
+    );
+    ck(
+      zBytes <= 16 * 1024,
+      'v1z prologue ≤ 16 KB',
+      `v1z ${(zBytes / 1024).toFixed(1)} KB vs plain v1 ${(plainBytes / 1024).toFixed(1)} KB (gate ${big.report.passed ? 'passed' : 'blocked'}, ${big.report.checks.length} checks)`,
+    );
+    ck(
+      !big.report.checks.some((c) => c.id === 'G14-prologue'),
+      'no G14 warning on the compact file',
+    );
+    const back = readManifestLocal(big.dxfText);
+    ck(
+      !!back && sameManifest(back, big.detail.manifest),
+      'the 138-block manifest reads back and deep-equals',
+    );
+    // Preflight: a prologue past 48 KB (here: a 50 KB foreign comment block in front) warns,
+    // never blocks.
+    const pad = (t: string) =>
+      `${Array.from({ length: 250 }, () => `999\r\n${'x'.repeat(200)}\r\n`).join('')}${t}`;
+    const fat = await writeAndGate(job(MAIN, mainSpecs), {
+      ...gateCtx(mainSpecs),
+      embed: (t, m) => embedManifestLocal(pad(t), m),
+    });
+    const g14 = checkOf(fat.report, 'G14-prologue')[0];
+    ck(
+      !!g14 && !g14.ok && g14.severity === 'warn' && fat.report.passed === main.report.passed,
+      'prologue > 48 KB → G14 warning, the gate verdict unchanged',
+      g14?.note ?? 'no G14',
+    );
+  }
+
+  // M7 ─────────────────────────────────────────────────────────────────────────────────────
+  head('M7 · G3 from source topology: PDF-like walls (overshooting corners, a grazing neighbour)');
+  {
+    // A 100 × 60 mm piece whose four walls are open chains running 15 mm past each corner (the
+    // way PDF size lines continue into the next piece) plus a neighbouring size line 0.6 mm under
+    // the bottom edge that the fill grazed. `cut` meaning: the written line is layer 1.
+    const W = 100;
+    const H = 60;
+    const rect = (k: number): PtMm[] =>
+      ccw([
+        { x: 0, y: 0 },
+        { x: W * k, y: 0 },
+        { x: W * k, y: H * k },
+        { x: 0, y: H * k },
+      ]);
+    const wallsAt = (k: number): PtMm[][] => {
+      const w = W * k;
+      const h = H * k;
+      return [
+        [
+          { x: -15, y: 0 },
+          { x: w + 15, y: 0 },
+        ],
+        [
+          { x: w, y: -15 },
+          { x: w, y: h + 15 },
+        ],
+        [
+          { x: w + 15, y: h },
+          { x: -15, y: h },
+        ],
+        [
+          { x: 0, y: h + 15 },
+          { x: 0, y: -15 },
+        ],
+        [
+          { x: -15, y: -0.6 },
+          { x: w + 15, y: -0.6 },
+        ],
+      ];
+    };
+    // the output skips a 20 mm notch-free stretch of the top wall: it runs 1.5 mm inside it
+    const skip = (k: number): PtMm[] => {
+      const w = W * k;
+      const h = H * k;
+      return ccw([
+        { x: 0, y: 0 },
+        { x: w, y: 0 },
+        { x: w, y: h },
+        { x: w / 2 + 10, y: h },
+        { x: w / 2 + 10, y: h - 1.5 },
+        { x: w / 2 - 10, y: h - 1.5 },
+        { x: w / 2 - 10, y: h },
+        { x: 0, y: h },
+      ]);
+    };
+    const spec = (skipAt: number | null) =>
+      piece('PKT', 'PKT', [], {
+        sizes: SIZES.map((sz) => {
+          const cut = sz.rank === skipAt ? skip(sz.k) : rect(sz.k);
+          const seam = offsetPoly(cut, 10);
+          return sizeSpec(sz, {
+            cut,
+            seam,
+            offset: offsetReport(seam),
+            grain: grainF({ x: 50 * sz.k, y: 15 }, { x: 50 * sz.k, y: 45 }),
+          });
+        }),
+      });
+    const kOf = (rank: number) => SIZES.find((x) => x.rank === rank)!.k;
+    const run = async (p: PieceSpec, vote: 'source' | 'written') =>
+      (
+        await writeAndGate(job(MAIN, [p]), {
+          rules,
+          sizeTokens: CARD_TOKENS,
+          now: NOW,
+          wallsOf: (_id, rank) => wallsAt(kOf(rank)),
+          wallsUsedOf: (_id, rank) =>
+            wallsUsedBy(
+              wallsAt(kOf(rank)),
+              vote === 'source' ? rect(kOf(rank)) : p.sizes.find((z) => z.rank === rank)!.cut,
+            ),
+        })
+      ).report;
+    const g3 = (r: GateReport) => checkOf(r, 'G3-coverage')[0];
+    const ok = await run(spec(null), 'source');
+    ck(
+      g3(ok).ok,
+      'positive control: overshooting walls + a grazing neighbour line → G3 passes',
+      `${g3(ok).value} · ${g3(ok).note}`,
+    );
+    const used = wallsUsedBy(wallsAt(1), rect(1));
+    const usedLen = used.reduce(
+      (a, l) => a + l.slice(1).reduce((b, q, i) => b + Math.hypot(q.x - l[i].x, q.y - l[i].y), 0),
+      0,
+    );
+    ck(
+      Math.abs(usedLen - 2 * (W + H)) < 1,
+      'denominator = the perimeter between the junctions (tails and the neighbour dropped)',
+      `${usedLen.toFixed(1)} mm of ${2 * (W + H)}`,
+    );
+    for (const vote of ['source', 'written'] as const) {
+      const r = await run(spec(1), vote);
+      const c = g3(r);
+      ck(
+        !c.ok &&
+          c.severity === 'block' &&
+          c.blocks.includes('PKT_M') &&
+          Number(c.value) < PATIMPORT.coverageBlock &&
+          !r.passed,
+        `negative control (${vote} line votes): output skips 20 mm of the top wall → G3 < ${PATIMPORT.coverageBlock} and blocks`,
+        `${c.value} · ${c.note}`,
+      );
+    }
+    {
+      // The F13c denominator (walls trimmed to the runs within 1 mm of the OUTPUT) on the same
+      // skip: the skipped stretch leaves the denominator, G3 reads ~100 % — the tautology M7 fixes.
+      const p = spec(1);
+      const trimmedByOutput = (rank: number): PtMm[][] => {
+        const out = p.sizes.find((z) => z.rank === rank)!.cut;
+        const d = (q: PtMm) =>
+          Math.min(
+            ...out.map((a, i) => {
+              const b = out[(i + 1) % out.length];
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const t = Math.max(
+                0,
+                Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)),
+              );
+              return Math.hypot(a.x + t * dx - q.x, a.y + t * dy - q.y);
+            }),
+          );
+        const runs: PtMm[][] = [];
+        for (const w of wallsAt(kOf(rank))) {
+          let run: PtMm[] = [];
+          const n = Math.ceil(Math.hypot(w[1].x - w[0].x, w[1].y - w[0].y) / 0.5);
+          for (let i = 0; i <= n; i++) {
+            const q = {
+              x: w[0].x + ((w[1].x - w[0].x) * i) / n,
+              y: w[0].y + ((w[1].y - w[0].y) * i) / n,
+            };
+            if (d(q) <= 0.3) run.push(q);
+            else if (d(q) > 1) {
+              if (run.length > 1) runs.push(run);
+              run = [];
+            }
+          }
+          if (run.length > 1) runs.push(run);
+        }
+        return runs;
+      };
+      const r = (
+        await writeAndGate(job(MAIN, [p]), {
+          rules,
+          sizeTokens: CARD_TOKENS,
+          now: NOW,
+          wallsOf: (_id, rank) => wallsAt(kOf(rank)),
+          wallsUsedOf: (_id, rank) => trimmedByOutput(rank),
+        })
+      ).report;
+      ck(
+        g3(r).ok,
+        'control of the control: the old output-trimmed denominator lets the same skip pass G3',
+        `${g3(r).value}`,
+      );
+    }
+    // the same skip on a long piece: the share stays above 0.95, the contiguous-run rule blocks
+    const long = spec(1);
+    long.sizes = long.sizes.map((z) => {
+      const k = 4;
+      const cut = z.rank === 1 ? skip(k) : rect(k * (0.96 + 0.04 * z.rank));
+      const seam = offsetPoly(cut, 10);
+      return {
+        ...z,
+        cut,
+        seam,
+        offset: offsetReport(seam),
+        bbox: bboxOf(cut),
+        areaMm2: areaOf(cut),
+      };
+    });
+    const r = (
+      await writeAndGate(job(MAIN, [long]), {
+        rules,
+        sizeTokens: CARD_TOKENS,
+        now: NOW,
+        wallsOf: (_id, rank) => wallsAt(rank === 1 ? 4 : 4 * (0.96 + 0.04 * rank)),
+        wallsUsedOf: (_id, rank) => {
+          const k = rank === 1 ? 4 : 4 * (0.96 + 0.04 * rank);
+          return wallsUsedBy(wallsAt(k), rect(k));
+        },
+      })
+    ).report;
+    const c = g3(r);
+    ck(
+      !c.ok && c.severity === 'block' && Number(c.value) >= PATIMPORT.coverageBlock,
+      `400 × 240 mm piece: share ${c.value} ≥ ${PATIMPORT.coverageBlock}, but the 20 mm run off the line blocks`,
+      c.note,
     );
   }
 

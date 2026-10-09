@@ -29,7 +29,15 @@ import type {
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
-import { importErrorCode } from 'lib/pattern-import/worker/client';
+import {
+  buildErrorReport,
+  checkFilesBeforeReading,
+  downloadErrorReport,
+  ImportWorkerError,
+  importErrorCode,
+  type ErrorReport,
+  type ImportLogEvent,
+} from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
 import type {
   ApplyDraftFn,
@@ -226,6 +234,7 @@ export function useImportSession(deps: {
     if (id == null) throw new Error('no session — read the files first');
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
+    failureRef.current = null;
     try {
       return await client.run(id, stage, input, (p) =>
         patch({ busy: { stage, done: p.done, total: p.total, note: p.note } }),
@@ -235,9 +244,24 @@ export function useImportSession(deps: {
     }
   }
 
+  /** The last failure, kept for the error report (M5): which stage, which code, what it said. */
+  const failureRef = useRef<{
+    stage: StageName | null;
+    code: ImportErrorCode | null;
+    message: string;
+  } | null>(null);
+
   const fail = (e: unknown) => {
     const message = e instanceof Error ? e.message : String(e);
     const code = importErrorCode(e);
+    failureRef.current = {
+      stage:
+        e instanceof ImportWorkerError
+          ? e.stage ?? sRef.current.busy?.stage ?? null
+          : sRef.current.busy?.stage ?? null,
+      code,
+      message,
+    };
     setErrorCode(code);
     const id = sRef.current.sessionId;
     // The worker was restarted (a stage that would not stop, a crash): its session is gone, so
@@ -302,6 +326,8 @@ export function useImportSession(deps: {
           setExtracted(NO_EXTRACT);
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
+          // M6: too many files / bytes are refused before a single byte is read.
+          checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
             ev.files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
@@ -892,7 +918,32 @@ export function useImportSession(deps: {
     piecesInput,
     semanticsInput,
     cancel: () => client.cancel(),
+    errorReport,
+    downloadReport: () => downloadErrorReport(errorReport()),
   };
+
+  /** M5: everything needed to reproduce this run without the files (no file contents). */
+  function errorReport(): ErrorReport {
+    const c = client as ImportClient & {
+      log?: { events: readonly ImportLogEvent[] };
+      heapMb?: number | null;
+      peakHeapMb?: number | null;
+    };
+    const { fileList, ...rest } = iRef.current;
+    return buildErrorReport({
+      session: sRef.current,
+      operator: {
+        files: fileList.map((f) => ({ name: f.name, bytes: f.size, type: f.type })),
+        ...rest,
+      },
+      failure: failureRef.current ?? undefined,
+      extract: exRef.current,
+      generator: `grbpwr-admin pattern-import (${client.kind})`,
+      log: c.log?.events,
+      heapMb: c.heapMb ?? null,
+      peakHeapMb: c.peakHeapMb ?? null,
+    });
+  }
 }
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;

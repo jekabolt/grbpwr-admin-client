@@ -225,6 +225,7 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
   const notes4: string[] = [];
   for (const b of ctx.blocks) {
     const walls = ctx.expect.wallsByBlock[b.block];
+    const used = ctx.expect.coverageWallsByBlock?.[b.block] ?? walls;
     const { line, layer } = linesFor(ctx, b);
     if (!walls?.length) {
       unverified.push(b.block);
@@ -239,18 +240,36 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
     const lineIdx = new SegmentIndex([{ pts: line, closed: true }], 5);
     let total = 0;
     let near = 0;
-    for (const w of walls) {
+    // Longest contiguous stretch of wall off the written line (M7): a skipped corner or bump is
+    // one run, and on a long piece its share alone may stay above the threshold.
+    let gapMm = 0;
+    for (const w of used) {
       const s = sampleAlong(w, false, 0.5);
+      let off: PtMm | null = null;
+      let offLen = 0;
+      let prev: PtMm | null = null;
       for (const p of s) {
         total++;
-        if (lineIdx.nearest(p, snap) <= snap) near++;
+        const on = lineIdx.nearest(p, snap) <= snap;
+        if (on) near++;
+        if (!on) {
+          if (off && prev) offLen += Math.hypot(p.x - prev.x, p.y - prev.y);
+          else offLen = 0;
+          off = p;
+          gapMm = Math.max(gapMm, offLen);
+        } else off = null;
+        prev = p;
       }
     }
     const cov = total ? near / total : 0;
     worstCov = Math.min(worstCov, cov);
-    if (cov < PATIMPORT.coverageBlock) hard.push(b.block);
+    const gap = gapMm >= PATIMPORT.coverageGapMm;
+    if (cov < PATIMPORT.coverageBlock || gap) hard.push(b.block);
     else if (cov < PATIMPORT.coverageWarn) soft.push(b.block);
-    if (cov < PATIMPORT.coverageWarn) notes3.push(`${b.block}: ${(cov * 100).toFixed(1)} %`);
+    if (cov < PATIMPORT.coverageWarn || gap)
+      notes3.push(
+        `${b.block}: ${(cov * 100).toFixed(1)} %${gap ? `, ${gapMm.toFixed(1)} mm of wall in one run off the line` : ''}`,
+      );
 
     const wallIdx = new SegmentIndex(
       walls.map((w) => ({ pts: w, closed: false })),
@@ -279,7 +298,7 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
     hard.length ? 'block' : soft.length || unverified.length ? 'warn' : 'block',
     notes3.join('; ') || 'every wall is on the written line',
     fmt(worstCov, 4),
-    `≥ ${PATIMPORT.coverageWarn} (block < ${PATIMPORT.coverageBlock})`,
+    `≥ ${PATIMPORT.coverageWarn} (block < ${PATIMPORT.coverageBlock} or a ${PATIMPORT.coverageGapMm} mm run off)`,
   );
   const c4 = check(
     'G4-hausdorff',
