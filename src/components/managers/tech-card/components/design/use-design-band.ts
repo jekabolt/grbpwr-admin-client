@@ -2,12 +2,19 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { adminService } from 'api/api';
 import {
   DesignBenchSlotRef,
+  DesignQuizAnswer,
+  DesignQuizQuestion,
   DesignSplitFrame,
   DesignUploadItem,
   GetDesignBandResponse,
+  common_DesignRunParams,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
+
+import { settleRunLedger } from './generation/run-ledger';
+import { configureRunCap } from './generation/run-state';
+import { applyRows } from './quiz-model';
 
 /**
  * THE BAND'S DATA SEAM. Every organ of the DESIGN band reads through here and writes through here;
@@ -25,6 +32,8 @@ export const designKeys = {
   all: ['design'] as const,
   band: (techCardId: number) => [...designKeys.all, 'band', techCardId] as const,
   layer: (layerId: number) => [...designKeys.all, 'layer', layerId] as const,
+  /** Ответы квиза доски (ASK ME) — своя таблица на сервере, своя запись в кэше. */
+  quiz: (techCardId: number) => [...designKeys.all, 'quiz', techCardId] as const,
 };
 
 /**
@@ -37,7 +46,7 @@ export const designKeys = {
  * against an old binary is a 400 on the WHOLE UpdateTechCard document, i.e. nobody saves any tech
  * card at all (`DiscardUnknown: false`, internal/api/http/http.go).
  */
-function isUnimplemented(error: unknown): boolean {
+export function isUnimplemented(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
   return status === 404 || status === 501;
 }
@@ -129,6 +138,15 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   // Поля 32/33 (фаза 3) — то же правило отсутствия: бинарь без них рисует формы второй фазы.
   runKinds: undefined,
   suggestPromptsModel: undefined,
+  // AUTO PARTS (paint the parts Ф2): none yet — the canvas asks for a side it opens.
+  partsSuggestions: [],
+  // THE JOIN LIST (flat route, 0397): absent = none yet; the FLAT step asks for it.
+  joins: undefined,
+  // The image-run cap (05.10): absent = the client's default (`run-state.ts`).
+  imageRunCapSeconds: undefined,
+  cappedRunKinds: undefined,
+  // M6 · the PARTS pieces list: `undefined` = not read yet (or an older server).
+  partsPieces: undefined,
 };
 
 export type DesignBandState = {
@@ -153,35 +171,41 @@ function bandQuery(techCardId: number) {
   return {
     queryKey: designKeys.band(techCardId),
     queryFn: () =>
-      adminService.GetDesignBand({
-        techCardId,
-        /**
-         * ═══ THE BENCH IS READ WHOLE, AND SCOPED ON THE CLIENT (L-2, D6) ═════════════════════
-         *
-         * `bench_colorway_id` has THREE outcomes and 0 is «NOT STATED», i.e. the WHOLE bench —
-         * byte for byte what every client before this axis sent. That is what travels here, and
-         * the picked colourway narrows the rows in `benchRowMatches` instead.
-         *
-         * WHY NOT FILTER ON THE SERVER, WHICH IT CAN DO (`-1` for the colourway-less bench, a
-         * product id for a named one). Because this message is not the bench: it is the bench PLUS
-         * the budget, the references, the layers, the shelves, the aggregates and the first page of
-         * the merged feed — and the filter narrows `bench` ONLY, by the contract's own words. A
-         * per-colourway argument would therefore mint one CACHE ENTRY PER COLOURWAY of the same
-         * card, each holding its own copy of a feed that is identical in all of them, and every
-         * write on the card would have to invalidate all of them or leave the others stale. One
-         * key per card is the guarantee this seam was built for: «the bench and the feed on screen
-         * are the same instant of the card».
-         *
-         * IT ALSO KEEPS COLOURWAY SWITCHING FREE. The rows are already in hand, so picking a
-         * colour redraws without a round trip — and `render_bench_colorway_ids`, which the picker
-         * draws its presence dots from, is whole-card regardless of this argument.
-         *
-         * THE COST IS NAMED AND PAID IN ONE PLACE: every reader of the render bench must match the
-         * TRIPLE (view, kind, colourway). That is `benchRowMatches` in `./bench-kinds`, and a
-         * second parse of a slot's colourway anywhere else is the L-5 defect with a new axis.
-         */
-        benchColorwayId: 0,
-      }),
+      adminService
+        .GetDesignBand({
+          techCardId,
+          /**
+           * ═══ THE BENCH IS READ WHOLE, AND SCOPED ON THE CLIENT (L-2, D6) ═════════════════════
+           *
+           * `bench_colorway_id` has THREE outcomes and 0 is «NOT STATED», i.e. the WHOLE bench —
+           * byte for byte what every client before this axis sent. That is what travels here, and
+           * the picked colourway narrows the rows in `benchRowMatches` instead.
+           *
+           * WHY NOT FILTER ON THE SERVER, WHICH IT CAN DO (`-1` for the colourway-less bench, a
+           * product id for a named one). Because this message is not the bench: it is the bench PLUS
+           * the budget, the references, the layers, the shelves, the aggregates and the first page of
+           * the merged feed — and the filter narrows `bench` ONLY, by the contract's own words. A
+           * per-colourway argument would therefore mint one CACHE ENTRY PER COLOURWAY of the same
+           * card, each holding its own copy of a feed that is identical in all of them, and every
+           * write on the card would have to invalidate all of them or leave the others stale. One
+           * key per card is the guarantee this seam was built for: «the bench and the feed on screen
+           * are the same instant of the card».
+           *
+           * IT ALSO KEEPS COLOURWAY SWITCHING FREE. The rows are already in hand, so picking a
+           * colour redraws without a round trip — and `render_bench_colorway_ids`, which the picker
+           * draws its presence dots from, is whole-card regardless of this argument.
+           *
+           * THE COST IS NAMED AND PAID IN ONE PLACE: every reader of the render bench must match the
+           * TRIPLE (view, kind, colourway). That is `benchRowMatches` in `./bench-kinds`, and a
+           * second parse of a slot's colourway anywhere else is the L-5 defect with a new axis.
+           */
+          benchColorwayId: 0,
+        })
+        .then((band) => {
+          // A run started by GENERATE shows here: its request id is released (`run-ledger.ts`).
+          settleRunLedger(techCardId, band);
+          return band;
+        }),
   };
 }
 
@@ -197,6 +221,8 @@ export function useDesignBand(techCardId?: number): DesignBandState {
   });
 
   const unimplemented = isUnimplemented(query.error);
+  // The image-run cap the live rows are measured against (`run-state.ts`).
+  if (query.data) configureRunCap(query.data);
 
   return {
     band: query.data ?? EMPTY_BAND,
@@ -217,6 +243,19 @@ export function serverSpeaksNow(qc: QueryClient, techCardId: number): boolean {
   if (techCardId <= 0) return false;
   const state = qc.getQueryState(designKeys.band(techCardId));
   return !!state?.data && !isUnimplemented(state.error);
+}
+
+/**
+ * THE BAND AS THE SERVER HAS IT NOW, for a CAS retry (the join list, `flat-joins.tsx`): a running
+ * read may have left before the write that beat ours, so it is cancelled and the band read afresh.
+ * The answer lands in the cache too — it is the newest there is.
+ */
+export async function rereadBandNow(
+  qc: QueryClient,
+  techCardId: number,
+): Promise<GetDesignBandResponse> {
+  await qc.cancelQueries({ queryKey: designKeys.band(techCardId) });
+  return qc.fetchQuery({ ...bandQuery(techCardId), staleTime: 0 });
 }
 
 /**
@@ -340,6 +379,18 @@ export function useDesignWrites(techCardId?: number) {
     },
     [qc, techCardId],
   );
+  /**
+   * TF4 · THE SAME RE-READ, BUT THE WRITE IS NOT DONE UNTIL IT LANDS. A slot write carries the
+   * slot's CAS token (`expectedSlotRev`) read from the band on screen. Settling on the server's
+   * answer re-armed the menus while the invalidated band was still in flight, so a quick re-pick
+   * sent the OLD revision and was refused. Returning the refetch keeps `isPending` (and every
+   * `onSettled` of the caller) until the band that carries the new revision is in the cache.
+   */
+  const invalidateWrittenAndWait = useCallback(
+    (_data: unknown, _variables: unknown, context?: WriteContext) =>
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) }),
+    [qc, techCardId],
+  );
 
   /**
    * The shared tail of every band write. Kept as a plain function rather than a hook so the
@@ -357,6 +408,21 @@ export function useDesignWrites(techCardId?: number) {
       showMessage(aborted ? `someone changed this first — ${message}` : message, 'error');
     },
     [showMessage, qc, techCardId],
+  );
+  /**
+   * ОТКАЗ ЗАПИСИ СЛОТА ПЕРЕЧИТЫВАЕТ ПОЛОСУ ВСЕГДА, не только на 409. `picture_already_in_slot`,
+   * `slot_occupied` и прочие FailedPrecondition значат то же, что и 409: экран отстал от сервера
+   * (undo цепочки уже переставил плиту, слот заняли из другой двери). Без перечитывания следующий
+   * жест повторял бы тот же отказ до перезагрузки.
+   */
+  const onSlotError = useCallback(
+    (error: unknown, variables?: unknown, context?: WriteContext) => {
+      if (!isAborted(error)) {
+        qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) });
+      }
+      onError(error, variables, context);
+    },
+    [onError, qc, techCardId],
   );
 
   const registerUpload = useMutation({
@@ -379,7 +445,7 @@ export function useDesignWrites(techCardId?: number) {
       }),
     onMutate,
     onSuccess: invalidateWritten,
-    onError,
+    onError: onSlotError,
   });
 
   const setBenchSlot = useMutation({
@@ -399,8 +465,8 @@ export function useDesignWrites(techCardId?: number) {
         newDetailName: input.newDetailName ?? '',
       }),
     onMutate,
-    onSuccess: invalidateWritten,
-    onError,
+    onSuccess: invalidateWrittenAndWait,
+    onError: onSlotError,
   });
 
   const deleteDetailSlot = useMutation({
@@ -419,6 +485,38 @@ export function useDesignWrites(techCardId?: number) {
   });
 
   /**
+   * UNDO / REDO OF AN EDIT CHAIN (T28 v2) — ONE server write each (`UndoDesignEdit` /
+   * `RedoDesignEdit`): the server locks the chain, checks that `expectedCurrentId` is still its
+   * current version (`stale_chain` otherwise), marks or clears `undone_at` and moves the slot that
+   * held the old current version, in one transaction. The key is minted per gesture by the caller.
+   * Settles only once the re-read band is in (the slot revision moved), success or refusal alike:
+   * a `stale_chain` refusal means the screen is behind, and the re-read is the fix.
+   */
+  const stepEditChain = useMutation({
+    mutationFn: (input: {
+      step: 'undo' | 'redo';
+      pictureId: number;
+      expectedCurrentId: number;
+      expectedTargetId: number;
+      idempotencyKey: string;
+    }) => {
+      const req = {
+        pictureId: input.pictureId,
+        expectedCurrentId: input.expectedCurrentId,
+        expectedTargetId: input.expectedTargetId,
+        idempotencyKey: input.idempotencyKey,
+      };
+      return input.step === 'undo'
+        ? adminService.UndoDesignEdit(req)
+        : adminService.RedoDesignEdit(req);
+    },
+    onMutate,
+    onError,
+    onSettled: (_data: unknown, _error: unknown, _variables: unknown, context?: WriteContext) =>
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) }),
+  });
+
+  /**
    * THE MARK «CHOSEN» ON A PICTURE — W-12. `selected: false` takes the mark off; the server keeps
    * the two picture flags INDEPENDENT and so does this seam: choosing is not un-hiding, hiding is
    * not un-choosing, and nothing is exclusive — the owner speaks in the plural, so many pictures
@@ -434,18 +532,26 @@ export function useDesignWrites(techCardId?: number) {
   });
 
   const splitPicture = useMutation({
-    mutationFn: (input: {
-      pictureId: number;
-      clientRequestId: string;
-      frames: DesignSplitFrame[];
-      /**
-       * Просит ли ВЫЗЫВАЮЩИЙ показать кропы модели. Обязателен и без умолчания: разрез с верстака
-       * и разрез из блока входа — два разных намерения, и молчание одного из них означало бы
-       * умолчание, выбранное здесь, а не сказанное тем, кто режет. Сервер по лжи пишет роли
-       * промпта (`design_reference`), и снять их потом без гонки с человеком нечем.
-       */
-      forInput: boolean;
-    }) => adminService.SplitDesignPicture(input),
+    mutationFn: (
+      input: {
+        pictureId: number;
+        clientRequestId: string;
+        frames: DesignSplitFrame[];
+        /**
+         * Просит ли ВЫЗЫВАЮЩИЙ показать кропы модели. Обязателен и без умолчания: разрез с верстака
+         * и разрез из блока входа — два разных намерения, и молчание одного из них означало бы
+         * умолчание, выбранное здесь, а не сказанное тем, кто режет. Сервер по лжи пишет роли
+         * промпта (`design_reference`), и снять их потом без гонки с человеком нечем.
+         */
+        forInput: boolean;
+      } & SilentWrite,
+    ) =>
+      adminService.SplitDesignPicture({
+        pictureId: input.pictureId,
+        clientRequestId: input.clientRequestId,
+        frames: input.frames,
+        forInput: input.forInput,
+      }),
     onMutate,
     onSuccess: invalidateWritten,
     onError,
@@ -515,15 +621,34 @@ export function useDesignWrites(techCardId?: number) {
     onError,
   });
 
+  /**
+   * «REMOVE FROM PROMPT» (M15, 109 §4): the label stays, the picture stays on the board, only its
+   * state moves between `ok` and `held` — a held picture rides no run. `held: false` puts it back.
+   * The caller speaks its own refusal (`silent`): the tile it hid comes back with one line.
+   */
+  const setReferenceHeld = useMutation({
+    mutationFn: (input: { mediaId: number; held: boolean; silent?: boolean }) =>
+      adminService.SetDesignReferenceHeld({
+        techCardId: techCardId ?? 0,
+        mediaId: input.mediaId,
+        held: input.held,
+      }),
+    onMutate,
+    onSuccess: invalidateWritten,
+    onError,
+  });
+
   return useMemo(
     () => ({
       registerUpload,
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      stepEditChain,
       setPictureSelected,
       splitPicture,
       setReferenceRole,
+      setReferenceHeld,
       invalidate,
     }),
     [
@@ -531,9 +656,11 @@ export function useDesignWrites(techCardId?: number) {
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      stepEditChain,
       setPictureSelected,
       splitPicture,
       setReferenceRole,
+      setReferenceHeld,
       invalidate,
     ],
   );
@@ -587,4 +714,166 @@ export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number)
     }
   }
   return '';
+}
+
+/**
+ * ═══ КВИЗ ДОСКИ — ASK ME (волна 04.10, 20-DESIGN §7) ══════════════════════════════════════════
+ *
+ * Ответы живут в своей таблице (`tech_card_design_quiz_answer`), а не в `details[]` формы: автосейв
+ * заменяет детали целиком каждые 2 с и стёр бы их. Поэтому чтение и запись здесь — мимо формы.
+ *
+ * ЗАПИСЬ — ТОЛЬКО ИЗМЕНЁННЫЕ СТРОКИ (W-B1): сервер обновляет по `question.id`, остальные строки
+ * стоят; пустая не-`skipped` строка — «забыть» id. Кэш ставится сразу тем же правилом (`applyRows`)
+ * и откатывается на отказ; ответ сервера ложится, только если после него не ушла более новая
+ * запись — иначе старый ответ затёр бы новый ответ. Писать можно лишь после того, как список
+ * прочитан (`isSuccess`, W-C1): экран держит двери закрытыми до тех пор.
+ */
+const NO_ANSWERS: DesignQuizAnswer[] = [];
+const NO_PENDING: DesignQuizQuestion[] = [];
+
+/**
+ * «WHAT THE MODEL GETS» OF A FLAT PRESS (101 Ф2/Ф3): the snapshot the server would freeze for THESE
+ * params now (`PreviewDesignRunInputs` — the same `designAssembleInputs` as StartDesignRun), plus why
+ * each other board picture stays home. Read only while the modal is open; re-read on every band
+ * change and after every save (`stamp`), because it reads the SAVED card.
+ */
+export function useFlatPreview(
+  techCardId: number,
+  params: common_DesignRunParams,
+  enabled: boolean,
+  stamp: string,
+) {
+  const qc = useQueryClient();
+  const bandAt = qc.getQueryState(designKeys.band(techCardId))?.dataUpdatedAt ?? 0;
+  return useQuery({
+    queryKey: [...designKeys.all, 'preview', techCardId, params, bandAt, stamp] as const,
+    queryFn: () => adminService.PreviewDesignRunInputs({ techCardId, kind: 'flat', params }),
+    enabled: enabled && techCardId > 0,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/**
+ * THE INPUT'S PICTURES OF ONE FLAT PRESS (M13) — the same server answer as the modal and the run,
+ * for one target. Always on while the FLAT input is drawn, so it is keyed on WHAT IT READS (`stamp`:
+ * the saved board, the labels, the flat bench), not on every save: WORDS typed into the card do not
+ * re-ask. Each mount asks again (staleTime 0 — an answer cached before a save made elsewhere is never
+ * trusted); a changed stamp keeps the old tiles on screen until the new answer (no blink); another
+ * card never shows this one's. Free: a dry run of the input assembly — no model, no money (server).
+ */
+export function useFlatPreviewTiles(
+  techCardId: number,
+  params: common_DesignRunParams,
+  stamp: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...designKeys.all, 'preview-tiles', techCardId, params, stamp] as const,
+    queryFn: () => adminService.PreviewDesignRunInputs({ techCardId, kind: 'flat', params }),
+    enabled: enabled && techCardId > 0,
+    staleTime: 0,
+    retry: false,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === techCardId ? previous : undefined,
+  });
+}
+/**
+ * СЕССИЯ ПРОГОНА НА СЕРВЕРЕ (E2): чтение несёт и `pending` — вопросы открытого прогона без
+ * сохранённой строки, в порядке модели. Это источник `resume N` с любой вкладки и устройства;
+ * `sessionStorage` остаётся лишь курсором. Запись с `closeSession` закрывает прогон (`discard`,
+ * ответ на последний вопрос) — кэш снимает `pending` сразу.
+ */
+type QuizCache = { answers: DesignQuizAnswer[]; pending: DesignQuizQuestion[]; family: string };
+
+export type QuizSave = { rows: DesignQuizAnswer[]; closeSession?: boolean };
+
+export function useDesignQuizAnswers(techCardId?: number) {
+  const id = techCardId ?? 0;
+  const query = useQuery({
+    queryKey: designKeys.quiz(id),
+    queryFn: async (): Promise<QuizCache> => {
+      const res = await adminService.GetDesignQuizAnswers({ techCardId: id });
+      return {
+        answers: res.answers ?? [],
+        pending: res.pending ?? [],
+        family: res.pendingFamily ?? '',
+      };
+    },
+    enabled: id > 0,
+    retry: (failureCount, error) => !isUnimplemented(error) && failureCount < 1,
+    staleTime: 60_000,
+  });
+  return {
+    answers: query.data?.answers ?? NO_ANSWERS,
+    /** Открытый прогон на сервере: что ещё не спрошено (без сохранённой строки). */
+    pending: query.data?.pending ?? NO_PENDING,
+    pendingFamily: query.data?.family ?? '',
+    /** Сервер маршрута не знает (старый бинарь) — двери квиза нет вовсе. */
+    unimplemented: isUnimplemented(query.error),
+    isLoading: id > 0 && query.isLoading,
+    /** Список прочитан — только тогда квиз может писать (W-C1). */
+    isSuccess: query.isSuccess,
+    isError: query.isError && !isUnimplemented(query.error),
+    refetch: query.refetch,
+  };
+}
+
+export function useDesignQuizWrites(techCardId?: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const id = techCardId ?? 0;
+  useCardOnScreen(id);
+
+  const generate = useMutation({
+    mutationFn: () => adminService.GenerateDesignQuiz({ techCardId: id }),
+    // Сервер открыл новый прогон с этими вопросами (прежний закрыт).
+    onSuccess: (res) => {
+      const key = designKeys.quiz(id);
+      const prev = qc.getQueryData<QuizCache>(key);
+      if (!prev) return;
+      qc.setQueryData<QuizCache>(key, {
+        ...prev,
+        pending: res.questions ?? [],
+        family: res.family ?? '',
+      });
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: ({ rows, closeSession }: QuizSave) =>
+      adminService.SaveDesignQuizAnswers({
+        techCardId: id,
+        answers: rows,
+        closeSession: closeSession || undefined,
+      }),
+    onMutate: async ({ rows, closeSession }: QuizSave) => {
+      const key = designKeys.quiz(id);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<QuizCache>(key);
+      const base = previous ?? { answers: [], pending: [], family: '' };
+      const sent: QuizCache = {
+        answers: applyRows(base.answers, rows),
+        pending: closeSession ? [] : base.pending,
+        family: closeSession ? '' : base.family,
+      };
+      qc.setQueryData(key, sent);
+      return { previous, card: id, sent };
+    },
+    onError: (error, _answers, context) => {
+      const card = context?.card ?? id;
+      const key = designKeys.quiz(card);
+      // Откат — только если на экране всё ещё наш оптимистичный список.
+      if (context && qc.getQueryData(key) === context.sent) qc.setQueryData(key, context.previous);
+      if (!cardOnScreen(card)) return;
+      showMessage((error as Error)?.message || 'the answer was not saved', 'error');
+    },
+    onSuccess: (res, _answers, context) => {
+      const key = designKeys.quiz(context?.card ?? id);
+      if (context && qc.getQueryData(key) === context.sent)
+        qc.setQueryData<QuizCache>(key, { ...context.sent, answers: res.answers ?? [] });
+    },
+  });
+
+  return { generate, save };
 }

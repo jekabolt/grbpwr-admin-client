@@ -993,6 +993,13 @@ export type VectorReplace = {
    * nowhere. The editor reads it off the band re-read after an overwrite, for its toast (D-55).
    */
   slotOf?: (band: GetDesignBandResponse, pictureId: number) => string | null;
+  /**
+   * THE EDIT PROPAGATES — NOTHING IS ASKED (04.10, owner item 28, T28): «save» overwrites at once,
+   * and where overwrite is closed it saves as new (into the editor's slot, when it has one). The
+   * question still opens for what only it can settle: an earlier save with no answer, a full ledger,
+   * or a reason that closed overwrite while the save was on its way. `undo` on the tile walks back.
+   */
+  direct?: boolean;
 };
 
 /**
@@ -6614,7 +6621,7 @@ export function VectorModal({
    * `answer` is what the person chose. 'new' files the edit BESIDE its base — every host, and the
    * only thing this editor did before the workbench's question. 'overwrite' exists only under
    * `replace` with nothing closing it: the same flatten, naming `replace.pictureId`, and the edit
-   * takes that picture's place in the latest generation (its bench slot moves onto the edit, the
+   * takes that picture's place on the workbench (its bench slot moves onto the edit, the
    * picture is stamped `replaced_by`; nothing is deleted — the history keeps it).
    *
    * EVERY PRESS HERE IS A NEW GESTURE UNDER A NEW KEY (review r3). The drawing is saved, rasterised
@@ -6802,6 +6809,17 @@ export function VectorModal({
     openQuestion();
   };
 
+  /** «save» under `replace.direct` (T28): overwrite now, or save as new where overwrite is closed. */
+  const saveNow = () => {
+    if (frozen || tooLarge || !anyContent || busy || pressingRef.current) return;
+    if (unansweredHere() || ledgerFull(techCardId, cardLayers())) {
+      setLateClosed(null);
+      openQuestion();
+      return;
+    }
+    void saveAsPicture(closedNow() ? 'new' : 'overwrite');
+  };
+
   /**
    * «save as a new picture» where nothing asks (the history, the empty studio) saves at once —
    * unless the tab's ledger has something to say first (review r3, r4: one behaviour for both
@@ -6818,6 +6836,9 @@ export function VectorModal({
     setLateClosed(null);
     openQuestion();
   };
+
+  /** The picture button's act: the workbench's question, the propagating save, or a save as new. */
+  const savePicture = replace ? (replace.direct ? saveNow : askToSave) : askOrSave;
 
   const saveBlob = (blob: Blob) => {
     const href = URL.createObjectURL(blob);
@@ -7215,13 +7236,17 @@ export function VectorModal({
      but the edit may take the original's place. */
   const saveNote = !base
     ? 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.'
-    : replace
-      ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» in the latest generation${
+    : replace?.direct
+      ? `saving puts the edit in the place of «${pictureHandle(base)}»${
           replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
-        }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
-      : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
-          slot ? `, taking the ${slot.label} slot` : ''
-        }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`;
+        }; undo on the tile brings it back, and the history keeps both. «Save the drawing only» keeps the strokes and makes no picture.`
+      : replace
+        ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» on the workbench${
+            replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
+          }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
+        : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
+            slot ? `, taking the ${slot.label} slot` : ''
+          }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`;
 
   /**
    * ГДЕ СТОИТ ШАБЛОН — ОДИН ОТВЕТ НА ДВА ЭЛЕМЕНТА (над растром и под ним).
@@ -7666,15 +7691,18 @@ export function VectorModal({
                         variant='main'
                         size='sm'
                         disabled={!ready}
-                        data-save-picture={replace ? 'ask' : 'new'}
-                        onClick={replace ? askToSave : askOrSave}
+                        data-save-picture={replace ? (replace.direct ? 'direct' : 'ask') : 'new'}
+                        onClick={savePicture}
                         title={
-                          replace
-                            ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
-                            : undefined
+                          replace?.direct
+                            ? 'make a picture of this edit — it takes the place of the one it is drawn over; undo on the tile brings that one back'
+                            : replace
+                              ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
+                              : undefined
                         }
                       >
-                        {busy ?? (replace ? 'save ›' : 'save as a new picture')}
+                        {busy ??
+                          (replace ? (replace.direct ? 'save' : 'save ›') : 'save as a new picture')}
                       </Button>
                   </>
                 )}
@@ -7730,9 +7758,14 @@ export function VectorModal({
                           size='sm'
                           disabled={!ready}
                           data-refusal-door='picture'
-                          onClick={replace ? askToSave : askOrSave}
+                          onClick={savePicture}
                         >
-                          {busy ?? (replace ? 'save ›' : 'save as a new picture')}
+                          {busy ??
+                            (replace
+                              ? replace.direct
+                                ? 'save'
+                                : 'save ›'
+                              : 'save as a new picture')}
                         </Button>
                       </div>
                     )}

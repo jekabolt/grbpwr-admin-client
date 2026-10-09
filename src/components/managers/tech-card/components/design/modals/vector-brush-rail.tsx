@@ -1571,14 +1571,20 @@ export function VectorBrushRail(p: RailProps) {
               editing ? (
                 <span className='flex items-center gap-1.5'>
                   <Button
-                    variant='secondary'
+                    variant='underline'
                     size='xs'
+                    className='text-labelColor hover:text-textColor'
                     disabled={p.frozen}
                     onClick={p.onRemoveSelected}
                   >
                     delete
                   </Button>
-                  <Button variant='secondary' size='xs' onClick={p.onDeselect}>
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor hover:text-textColor'
+                    onClick={p.onDeselect}
+                  >
                     done
                   </Button>
                 </span>

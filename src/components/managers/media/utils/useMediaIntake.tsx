@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { isFileDrag } from '../components/gallery-order';
 import { MediaIntakeDialog } from '../components/media-intake-dialog';
 import { mergeQueue } from './intake-queue';
-import { filesOfKind, usePasteFiles, type PasteAccept } from './usePasteFiles';
+import { filesOfKind, refusalOf, usePasteFiles, type PasteAccept } from './usePasteFiles';
 
 // ПРИЁМ МЕДИА ИЗВНЕ — ОДИН ХУК НА ВСЕ ТРИ ЖЕСТА.
 //
@@ -68,7 +68,12 @@ export function useMediaIntake({
   const openFiles = useCallback(
     (files: File[]) => {
       const accepted = filesOfKind(files, accept);
-      if (!accepted.length) return;
+      if (!accepted.length) {
+        // A vector-only slot says WHY a photo did not land: the frame looks like any other media
+        // slot, and a silent no-op would read as «the drop did not work».
+        if (accept === 'vector' && files.length) showMessage(refusalOf(accept), 'error');
+        return;
+      }
       const merged = mergeQueue(queueRef.current, accepted, limit);
       // МОЛЧАТЬ ПРО ОТБРОШЕННОЕ НЕЛЬЗЯ: до сих пор лишнее срезал `slice`, и человек узнавал об
       // этом по недостающему кадру. Считает `mergeQueue`, говорит — здесь.
@@ -96,7 +101,9 @@ export function useMediaIntake({
       // приёмка), но выбрасывался: принимать вставку в открытое окно было нечем — оно листало
       // очередь по индексу. Теперь окно копит, и вторая вставка добавляет кадр к первому.
       accepts: enabled,
-      accept,
+      // A vector-only slot listens for pictures too, so a pasted screenshot gets its refusal
+      // sentence (openFiles) instead of vanishing in the clipboard filter.
+      accept: accept === 'vector' ? 'image+svg' : accept,
       limit,
     },
     openFiles,
@@ -167,8 +174,10 @@ export function useMediaIntake({
   const dialog = (
     <MediaIntakeDialog
       files={queue}
-      aspect={aspect}
-      lockAspect={lockAspect}
+      // A vector is never cropped: the cropper rasterises, and a PNG is exactly what a vector-only
+      // slot refuses. The frame's ratio is the slot's business, not the file's.
+      aspect={accept === 'vector' ? undefined : aspect}
+      lockAspect={accept === 'vector' ? false : lockAspect}
       purpose={purpose}
       onDone={finish}
       onQueueChange={setQueue}

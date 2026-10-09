@@ -86,7 +86,14 @@ export type EnhanceMode =
   | 'steer';
 
 /** Что за поле — закрытый список (сервер держит такой же enum; свободный текст в промпт не идёт). */
-export type EnhanceField = 'description' | 'note' | 'words' | 'silhouette' | 'fabric' | 'other';
+export type EnhanceField =
+  | 'description'
+  | 'note'
+  | 'words'
+  | 'render-words'
+  | 'silhouette'
+  | 'fabric'
+  | 'other';
 
 export const ENHANCE_MODES: ReadonlyArray<{ mode: EnhanceMode; label: string; hint: string }> = [
   { mode: 'improve', label: 'improve', hint: 'fix errors, make it clearer' },
@@ -133,6 +140,7 @@ const FIELD_WIRE: Record<EnhanceField, EnhanceTextField> = {
   description: 'ENHANCE_TEXT_FIELD_DESCRIPTION',
   note: 'ENHANCE_TEXT_FIELD_NOTE',
   words: 'ENHANCE_TEXT_FIELD_WORDS',
+  'render-words': 'ENHANCE_TEXT_FIELD_RENDER_WORDS',
   silhouette: 'ENHANCE_TEXT_FIELD_SILHOUETTE',
   fabric: 'ENHANCE_TEXT_FIELD_FABRIC',
   other: 'ENHANCE_TEXT_FIELD_OTHER',
@@ -513,16 +521,21 @@ export function AiEnhance({
             onMouseDown: (e) => e.preventDefault(),
           }}
           openElement={
+            /* БЕЗ ОБВОДКИ — ПОДЧЁРКНУТОЕ СЛОВО (item 41, 04.10). Владелец: «сделай ai кнопку без
+               обводки просто с подчеркиванием». Та же грамматика, что у действий шапок техкарты
+               (`clear the input ✕`, item 32). Фон `bgColor` остаётся: слово стоит поверх поля и
+               не должно просвечивать текстом под собой. */
             <Button
               asChild
-              variant='secondary'
+              variant='underline'
               size='xs'
               disabled={busy}
               title={
                 busy ? 'working…' : 'ai enhance: improve, expand, shorten or rewrite as a prompt'
               }
+              data-ai-enhance-trigger=''
               // Appears with a short fade (the button is absolute: nothing moves); leaves at once.
-              className='bg-bgColor transition-opacity duration-100 starting:opacity-0 motion-reduce:transition-none'
+              className='bg-bgColor text-labelColor transition-opacity duration-100 hover:text-textColor starting:opacity-0 motion-reduce:transition-none'
             >
               <span>{busy ? 'ai …' : 'ai ✦'}</span>
             </Button>

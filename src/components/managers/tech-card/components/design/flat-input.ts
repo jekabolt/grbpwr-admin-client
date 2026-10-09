@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 
 import type { FlushResult } from './autosave-contract';
+import type { StructurePick } from './flat-mode';
+import { VIEWS_TARGET, type FlatTarget } from './flat-route';
 import type { RunRefusal } from './generation/refusal';
 
 /**
@@ -27,29 +29,56 @@ import type { RunRefusal } from './generation/refusal';
  *   · `serverRefusal` — отказ СЕРВЕРА последнему запуску, дословно, пока его не прочли или не нажали
  *                       GENERATE снова (ревью раунда 3, m2: в состоянии ряда он жил до смены шага и
  *                       дальше показывался только всплывашкой);
- *   · `ask`           — виды, детали и раскладка запроса в полёте (и отказанного, пока отказ стоит):
- *                       ряд, вернувшийся после смены шага, рисует ИХ, а не чипы по умолчанию рядом со
+ *   · `ask`           — цель и «from my flat» запроса в полёте (и отказанного, пока отказ стоит):
+ *                       ряд, вернувшийся после смены шага, рисует ИХ, а не умолчание рядом со
  *                       `starting…` (m2).
  *
  * Отдельный модуль, а не экспорт ряда: его читают и приёмник рекола, и секция, а ряд тянет за собой
  * модалки и органы — цикл импортов здесь не нужен никому.
  */
-export type FlatLayout = 'one' | 'per_view';
-
+/**
+ * ЧТО ПРОСЯТ У ПРОГОНА (82-INPUT-REDESIGN, 06.10): цель (`views` или деталь), тихий тумблер «from my
+ * flat» и его выбор флэтов. Всё остальное — константы и правила (`flat-route.ts`): четыре стороны
+ * одним листом, маршрут — в коде.
+ */
 export type FlatAsk = {
-  views: Record<string, boolean>;
-  detailTicks: Record<number, boolean>;
-  layout: FlatLayout;
+  target: FlatTarget;
+  /** «from my flat» включён; без выбранного флэта маршрутом не становится. */
+  fromMyFlat: boolean;
+  /** «from my flat»: which technical flat is the front, which the back. */
+  structure: StructurePick[];
 };
 
+export const DEFAULT_FLAT_ASK: FlatAsk = { target: VIEWS_TARGET, fromMyFlat: false, structure: [] };
+
+/** Память вкладки по карточке: цель и тумблер переживают смену шага, но не перезагрузку. */
+const drafts = new Map<number, FlatAsk>();
+
+/**
+ * Черновик ряда ДЛЯ ЭТОЙ КАРТОЧКИ (гейт волны 3, W1): выбор из запроса в полёте, если он есть, иначе
+ * память вкладки, иначе умолчание. Ряд, не перемонтированный при смене карточки, обязан пересеять
+ * черновик отсюда — иначе выбор одной карточки молча уезжает платным прогоном другой.
+ */
+export function flatDraftOf(card: number): FlatAsk {
+  const ask = readFlatInput(card).ask ?? drafts.get(card) ?? DEFAULT_FLAT_ASK;
+  return { target: ask.target, fromMyFlat: ask.fromMyFlat, structure: [...ask.structure] };
+}
+
+export function rememberFlatDraft(card: number, ask: FlatAsk): void {
+  if (card > 0) drafts.set(card, { ...ask, structure: [...ask.structure] });
+}
+
 export type FlatInputState = {
-  run: 'saving' | 'starting' | null;
+  /** `reading` (M15): GENERATE waits ≤15 s for pictures just added to the input to be read. */
+  run: 'saving' | 'reading' | 'starting' | null;
   refused: FlushResult | 'released' | 'stopped' | null;
   clearing: boolean;
   rewriting: number;
   wordsHeld: number;
   serverRefusal: RunRefusal | null;
   ask: FlatAsk | null;
+  /** M15: pictures still being read when the last GENERATE went — not in that run (one line). */
+  leftOut: number;
 };
 
 const FLAT_INPUT_IDLE: FlatInputState = {
@@ -60,6 +89,7 @@ const FLAT_INPUT_IDLE: FlatInputState = {
   wordsHeld: 0,
   serverRefusal: null,
   ask: null,
+  leftOut: 0,
 };
 const flatInput = new Map<number, FlatInputState>();
 const flatInputListeners = new Set<() => void>();
@@ -97,7 +127,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.rewriting === prev.rewriting &&
     next.wordsHeld === prev.wordsHeld &&
     next.serverRefusal === prev.serverRefusal &&
-    next.ask === prev.ask
+    next.ask === prev.ask &&
+    next.leftOut === prev.leftOut
   ) {
     return;
   }
@@ -108,7 +139,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.rewriting === 0 &&
     next.wordsHeld === 0 &&
     next.serverRefusal === null &&
-    next.ask === null
+    next.ask === null &&
+    next.leftOut === 0
   ) {
     flatInput.delete(card);
   } else {
@@ -157,4 +189,23 @@ export function holdFlatInput(card: number, opts?: { words?: boolean }): () => v
       ...(words ? { wordsHeld: Math.max(0, now.wordsHeld - 1) } : {}),
     });
   };
+}
+
+/**
+ * ═══ ЧИТАЕТСЯ ВО ВХОДЕ (M15, 109 §5, Q2) ═════════════════════════════════════════════════════
+ *
+ * Картинки, брошенные во вход в этой сессии, чей ярлык ещё читается (плитка `…` в лотке). Вход
+ * публикует их здесь, GENERATE читает: ждёт ≤15 с (`reading…`), потом идёт с готовым и говорит,
+ * что не вошло. Память модуля, по карточке.
+ */
+const reading = new Map<number, number[]>();
+
+export function setFlatReading(card: number, mediaIds: number[]): void {
+  if (card <= 0) return;
+  if (mediaIds.length) reading.set(card, [...mediaIds]);
+  else reading.delete(card);
+}
+
+export function readFlatReading(card: number): number[] {
+  return reading.get(card) ?? [];
 }

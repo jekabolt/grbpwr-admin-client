@@ -6,31 +6,38 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
+import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
 import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
+import { createReady } from '../create-ready';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
 import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
-import { GenerationStudio } from './generation';
+import { Workbench } from './generation';
 import type { DesignKind } from './bench-kinds';
-import { ChainRail, useChainCtx } from './chain-rail';
+import { ChainRail, useChainCtx, useMoodMinimumGate } from './chain-rail';
 import {
   PLAYGROUND_WF_PARAM,
   addressedStep,
   defaultStep,
   kindOfStep,
   legacyStep,
+  openGateDoor,
+  stepDone,
   stepOfField,
   stepOfKind,
   threedStepRetired,
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
-import { GenerationHistory, LatestGeneration } from './generation';
+import { RENDER_MIN_VIEWS, benchSides, type Gate } from './render/model';
+import { StepFooter } from './step-footer';
+import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
+import { useGuideFace } from './guide-face';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import {
@@ -42,7 +49,7 @@ import {
   useLegacyStepRewrite,
   useStepAddress,
 } from './playground';
-import { ImageToFabricSection, PatternStudio, clothSlots } from './pattern';
+import { FabricsHardware, clothSlots, labelSeedsOf, materialSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -106,9 +113,34 @@ export function StudioTab({
   cardDetails,
   constructionAspects,
   navTo,
+  labelMedia,
+  guided = false,
+  onCreate,
+  onExitGuide,
 }: {
   techCardId?: number;
+  /**
+   * A card born from CREATE NEW and still on its guide (server flag `guided`, onboarding Q4). The
+   * footer of FLAT then offers `skip → fabric render ›` beside `go to materials ›` (Q6). Legacy
+   * cards: `false`, and the studio is exactly what it was, footers aside.
+   */
+  guided?: boolean;
+  /**
+   * Creates the card that does not exist yet and resolves to its id (`undefined` = not created —
+   * refused, or a field error is on screen). The owner of the form (`components/index.tsx`) holds
+   * the CREATE path, so it arrives as a prop, like `navTo`. Absent: an unsaved card gets NO footer
+   * (its `add` is the one door) — nothing here creates a card on its own.
+   */
+  onCreate?: () => Promise<number | undefined>;
+  /**
+   * Leaves the guide (`ExitTechCardGuide`): the rail's `show all blocks ›`, drawn only while the
+   * card is guided. After it the card reads `guided: false` and is an ordinary card — every cell a
+   * door, every block of the moodboard on screen.
+   */
+  onExitGuide?: () => void;
   disabled?: boolean;
+  /** The card's resolved label media (`resolvedLabelMedia`): the composition label's logo. */
+  labelMedia?: common_TechCard['resolvedLabelMedia'];
   /**
    * ПЕРЕХОД НА СОСЕДНЮЮ ВКЛАДКУ — ЧУЖОЙ ПИСАТЕЛЬ, А НЕ СВОЙ.
    *
@@ -186,6 +218,23 @@ export function StudioTab({
      расхода или строки ниток. Форма здесь только ЧИТАЕТСЯ: писатель `bomItems` — корневой
      `setValue`, и `useFieldArray` над ним один (вкладка BOM). */
   const cloth = useWatch({ control, name: 'bomItems', compute: (lines) => clothSlots(lines) });
+  // STEP 3 · MATERIALS: every saved BOM line except threads.
+  const materials = useWatch({
+    control,
+    name: 'bomItems',
+    compute: (lines) => materialSlots(lines),
+  });
+  // A label slot seeds placement · fold · size from its card LABELS row (read, never written).
+  const labelSeeds = useWatch({
+    control,
+    name: 'garmentLabels',
+    compute: (rows) => labelSeedsOf(rows),
+  });
+  // A label slot seeds its logo from the composition label's (resolved by the card read).
+  const logoMediaId = useWatch({ control, name: 'careLabel.logoMediaId' }) as number | undefined;
+  const labelLogo = (labelMedia ?? []).find(
+    (m) => (m.media?.id ?? 0) > 0 && m.media?.id === (logoMediaId ?? 0),
+  )?.media;
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
@@ -272,10 +321,14 @@ export function StudioTab({
      click away at any moment (and that click writes the address, which then wins). */
   /* `params` / `setParams` взяты выше — у чтения `?colorway=`: адрес один, и читатель его один. */
   const urlStep = params.get('step');
+  /* WHO WALKS THE GUIDE: a guided card in the hands of someone who can write it. A viewer or a frozen
+     card gets the ordinary studio — every cell a door, every block on screen (S6). */
+  const walking = guided && canWriteCard && !readOnly;
   const chain = useChainCtx({
     band,
     bandless,
     colorway: { id: colorway.colorwayId, label: colorway.label, archived: colorway.archived },
+    guided: walking,
   });
   const opened = useRef<{ id: number | undefined; step: StepId | null }>({
     id: techCardId,
@@ -330,6 +383,156 @@ export function StudioTab({
      означает ровно это. Ни одна дверь рекола с этих двух шагов не открывается (история прогонов
      стоит только на генеративных), так что читателей у пустой записи нет. */
   useStudioKindSwitch(kind ? techCardId ?? 0 : 0, kind ?? 'flat', goKind);
+
+  /* ═══ THE STEP FOOTER — ONE FORWARD DOOR PER STEP, DECIDED HERE (onboarding S3) ═══════════════
+     The composer knows the step and owns `goStep`, so the footer of every step is chosen in this one
+     place and drawn as the last child of that step's screen (`step-footer.tsx`). Each door is the
+     owner's: CARD DETAILS → moodboard, MOODBOARD → flats, FLAT → materials, MATERIALS → fabric
+     render, FABRIC RENDER → image to 3D, where the guide ends (Q7) — 3D and the playground keep
+     their own doors and get no footer. Each gate is the one the next step is opened by: the
+     moodboard minimum (the same sentence the flat's GENERATE refuses with), front and back on the
+     flat bench (what a fabric render is coloured over, `RENDER_MIN_VIEWS`), a render on the bench
+     (`stepDone('render')`, what 3D is built from). MATERIALS is optional and never holds anyone. */
+  const [newName, newCategoryId, newSeason, newStyleNumber] = useWatch({
+    control,
+    name: ['name', 'categoryId', 'season', 'styleNumber'],
+  });
+  const moodMinimum = useMoodMinimumGate();
+  /* THE GUIDED FACE OF STEP 1 (onboarding S5): one reading for the whole step — the board, its quiz
+     and DESCRIPTION get it as a prop, the lower blocks and the footer are hidden by it here. A viewer
+     or a frozen card cannot walk the guide, so it gets the whole step, as a legacy card does. */
+  const guide = useGuideFace(techCardId, walking);
+  const flatsMissing = bandless
+    ? [...RENDER_MIN_VIEWS]
+    : benchSides(band)
+        .filter((s) => RENDER_MIN_VIEWS.includes(s.view) && !s.picture)
+        .map((s) => s.view);
+  const flatGate: Gate = flatsMissing.length
+    ? {
+        ok: false,
+        reason: `${flatsMissing.join(' and ')} flat${flatsMissing.length > 1 ? 's' : ''} first`,
+      }
+    : { ok: true };
+  let footer: ReactNode = null;
+  switch (decided) {
+    case 'card': {
+      // A new card off the guided path is created by `add` at the top, and by nothing else: no
+      // footer at all — a dead second door would promise what the four fields do not do (review M3).
+      if (!techCardId && !onCreate) break;
+      if (techCardId) {
+        footer = (
+          <StepFooter
+            step='card'
+            label='next · moodboard ›'
+            gate={{ ok: true }}
+            onGo={() => goStep('mood')}
+          />
+        );
+        break;
+      }
+      const ready = createReady({
+        name: newName,
+        categoryId: newCategoryId,
+        season: newSeason,
+        styleNumber: newStyleNumber,
+      });
+      footer = (
+        <StepFooter
+          step='card'
+          label='next · moodboard ›'
+          pendingLabel='creating…'
+          gate={ready.ok ? { ok: true } : ready}
+          /* The create lands on MOODBOARD by itself (`onCreate` navigates to the new card's
+             address with `step=mood`): a `goStep` from here would carry the OLD address (C-note). */
+          onGo={() => onCreate?.()}
+        />
+      );
+      break;
+    }
+    case 'mood':
+      // A guided card earns its `go to flats ›` with the blocks (the owner: «дальше наш обычный
+      // флоу где уже видны все блоки и снизу справа кнопка go to flats»).
+      if (!guide.show.blocks) break;
+      footer = (
+        <StepFooter
+          step='mood'
+          label='go to flats ›'
+          gate={moodMinimum}
+          /* Only the doors that lead OFF this screen (the category, on CARD DETAILS): the board and
+             DESCRIPTION are blocks of this very step, and three doors beside one dead primary
+             would be the clutter the footer exists to avoid. */
+          doors={
+            !moodMinimum.ok &&
+            moodMinimum.doors
+              .filter((d) => d.step !== 'mood')
+              .map((d) => (
+                <Button
+                  key={d.field}
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => openGateDoor(d)}
+                  data-gate-door={d.field}
+                >
+                  {d.label}
+                </Button>
+              ))
+          }
+          onGo={() => goStep('flat')}
+        />
+      );
+      break;
+    case 'flat':
+      footer = (
+        <StepFooter
+          step='flat'
+          label='go to materials ›'
+          gate={flatGate}
+          aside={
+            guided &&
+            flatGate.ok && (
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                data-step-skip='render'
+                onClick={() => {
+                  goStep('render');
+                  window.scrollTo({ top: 0 });
+                }}
+              >
+                skip → fabric render ›
+              </Button>
+            )
+          }
+          onGo={() => goStep('pattern')}
+        />
+      );
+      break;
+    case 'pattern':
+      footer = (
+        <StepFooter
+          step='pattern'
+          label='go to fabric render ›'
+          gate={{ ok: true }}
+          onGo={() => goStep('render')}
+        />
+      );
+      break;
+    case 'render':
+      footer = (
+        <StepFooter
+          step='render'
+          label='image to 3d ›'
+          gate={
+            stepDone('render', ctx)
+              ? { ok: true }
+              : { ok: false, reason: 'a fabric render on the bench first' }
+          }
+          onGo={() => goKind('threed')}
+        />
+      );
+      break;
+  }
 
   /* ═══ A REFUSAL AIMED AT A FIELD OF ANOTHER STEP SWITCHES TO THAT STEP ═════════════════════════
      One step is on screen at a time, so `revealField` (utils/field-errors) finds NO anchor for a
@@ -391,13 +594,12 @@ export function StudioTab({
      Drawn before the band is read and before the card exists: while the band loads every
      band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate.
 
-     ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Он стоял в слоте `action` — «чей это рендер», —
-     и уехал ТУДА, ГДЕ ЭТОТ ВЫБОР ТРАТИТ ДЕНЬГИ: `for:` в ряду GENERATE — и фабрик-рендера, и 3D,
-     — чипы PAINT на on-model. Довод целиком — в шапке `ChainRail` и у самого
-     `ColorwaySelect`; коротко: `colorway_id` прогона неизменяем, и цель обязана называться у
-     кнопки, которая её замораживает, а не в ряду «где я нахожусь». Состояние по-прежнему ОДНО
-     (`useColorwayChoice` выше) и раздаётся вниз пропами. */
-  const rail = <ChainRail ctx={ctx} onStepChange={goStep} />;
+     ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Ось показывают общие плиточные полосы MATERIALS
+     и FABRIC RENDER, селект в ряду GENERATE у 3D и чипы PAINT on-model. Состояние по-прежнему
+     ОДНО (`useColorwayChoice` выше) и раздаётся вниз пропами. */
+  const rail = (
+    <ChainRail ctx={ctx} onStepChange={goStep} onExitGuide={walking ? onExitGuide : undefined} />
+  );
 
   /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
      The header used to be drawn inside each of three returns — same element, different parents —
@@ -421,6 +623,7 @@ export function StudioTab({
     screen = cardDetails ? (
       <div data-step-screen='card' className='contents'>
         {cardDetails}
+        {footer}
       </div>
     ) : null;
   } else if (!techCardId) {
@@ -466,8 +669,19 @@ export function StudioTab({
                       (EnhanceText and DraftDesignIdea need tech_cards:write), so the board locks on
                       the grant as GENERAL INFORMATION does — one rule per door on every surface
                       (seam review, S-m2). */}
-                  <MoodBoard techCardId={techCardId} disabled={readOnly || !canWriteCard} />
-                  {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
+                  <MoodBoard
+                    techCardId={techCardId}
+                    disabled={readOnly || !canWriteCard}
+                    guide={guide.active ? guide : undefined}
+                  />
+                  {/* THE LOWER BLOCKS WAIT FOR THE DRAFT ON A GUIDED CARD (S5) — hidden, NOT
+                      unmounted: GENERAL INFORMATION, the aspects and MATERIAL SLOTS keep their
+                      `useFieldArray`s and their `data-field` anchors, so a refusal on
+                      `bomItems.2.name` still finds the field and opens the face (`useGuideFace`).
+                      `display: contents` — open, the blocks stay direct children of the stack and
+                      keep its gutter; hidden, they leave no gap. */}
+                  <div hidden={!guide.show.blocks} className='contents' data-guide-blocks=''>
+                    {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
                       `ConstructionGeneralInfo` рисует `general information · what this style is`
                       с рядом `FROM THE MOODBOARD · N OF M DRAFTED FIELDS · MOODBOARD MOVED ON` в
                       правом углу линейки, `DetailsEditor` — `construction · described aspect by
@@ -477,30 +691,31 @@ export function StudioTab({
                       → слоты» выражается соседством в стеке. Слот аспектов может быть пуст
                       (владелец шапки отдаёт сюда свой единственный `DetailsEditor`); пустой он не
                       рисует ни секции, ни отступа. */}
-                  <ConstructionGeneralInfo
-                    isAux={isAux}
-                    readOnly={readOnly || !canWriteCard}
-                    frozen={readOnly}
-                  />
-                  {constructionAspects}
-                  {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
+                    <ConstructionGeneralInfo
+                      isAux={isAux}
+                      readOnly={readOnly || !canWriteCard}
+                      frozen={readOnly}
+                    />
+                    {constructionAspects}
+                    {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
                       ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
                       именно её пустота зовёт нажать «draft the construction» выше. `Section` у
                       блока СВОЯ: у него собственный `action` — чипы рождения слота. `navTo` — его
                       дверь `›` в редактор ЭТОЙ строки на вкладке BOM. */}
-                  <MaterialSlots
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                    onGoTab={navTo}
-                  />
-                  {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
+                    <MaterialSlots
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                      onGoTab={navTo}
+                    />
+                    {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
                       макете нет; стоит сразу под таблицей слотов и читается её продолжением: «вот
                       слоты; вот чем их красят». Блока НЕТ ВОВСЕ, пока черновик ничего не предложил —
                       условие знает только орган (модульный стор), поэтому обёртка у него своя. */}
-                  <ColourwayProposals
-                    techCardId={techCardId}
-                    readOnly={readOnly || !canWriteCard}
-                  />
+                    <ColourwayProposals
+                      techCardId={techCardId}
+                      readOnly={readOnly || !canWriteCard}
+                    />
+                  </div>
                 </>
               )}
               {step !== 'mood' &&
@@ -532,68 +747,43 @@ export function StudioTab({
                             disabled={readOnly || !canWriteCard}
                           />
                         </div>
-                        {/* ═══ LATEST GENERATION — A BLOCK OF ITS OWN, RIGHT UNDER INPUT — REFERENCES
-                            (28.09, O-67, D-73). What this step's GENERATE brought back, with the
-                            history's doors; until O-67 the last row of the input block. Its
-                            `[data-latest-generation]` wrapper is the next sibling of `#design-input`,
-                            and with no flat run at all it draws nothing — no empty header. */}
-                        <LatestGeneration
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly || !canWriteCard}
-                        />
-                        <GenerationStudio
+                        {/* ═══ WORKBENCH — ONE BLOCK, RIGHT UNDER INPUT — REFERENCES (T30): what this
+                            step's GENERATE brought back, then the GENERATION HISTORY folded as its
+                            last part (`generation/studio.tsx`). Its `[data-workbench]` wrapper is
+                            the next sibling of `#design-input`. */}
+                        <Workbench
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly || !canWriteCard}
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · PATTERN — TWO SIBLING BLOCKS (owner, 2026-09-26; and from beta:
-                        «IMAGE TO FABRIC должно быть отдельным блоком»): PATTERN, a fabric swatch
-                        for every colourway and slot, then IMAGE TO FABRIC with the step's one
-                        history, the LAST FABRICS carousel. Two `Section`s side by side in the
-                        stack, parted by its 24px gutter — never one inside the other. The SHARED
-                        run history is NOT mounted here any more (review B5), and the one thing it
-                        did for this step — `useRunPolling`, so «making the fabric…» ever ends — is
-                        mounted ONCE, by `PatternStudio`; the second block does not poll again.
-                        Both take the same raw props from here (band, the colourway list, the slots
-                        of the one `useWatch`) and derive the rest with one function
-                        (`usePatternStepView`). They draw EVERY colourway at once, so they take the
-                        list and not the selected one; the axis stays this file's
-                        (`useColorwayChoice`). `onGoTab` is withheld on an auxiliary card: it has no
-                        colourways tab, and a door there would bounce straight back. */}
+                    {/* ═══ STEP 3 · MATERIALS — the studio's shared colourway strip, then the
+                        material cells and their generate panel. Polls its own runs. */}
                     {step === 'pattern' && (
-                      <>
-                        <PatternStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorways={colorway.colorways}
-                          slots={cloth.slots}
-                          unsavedSlots={cloth.unsavedCount}
-                          onGoTab={isAux ? undefined : (tab) => navTo(tab)}
-                          onGoStep={goStep}
-                        />
-                        <ImageToFabricSection
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorways={colorway.colorways}
-                          slots={cloth.slots}
-                        />
-                      </>
+                      <FabricsHardware
+                        band={band}
+                        techCardId={techCardId}
+                        disabled={readOnly || !canWriteCard}
+                        colorways={colorway.cardColorways ?? colorway.colorways}
+                        colorwayId={colorway.colorwayId}
+                        onColorwayChange={colorway.setColorwayId}
+                        slots={materials.slots}
+                        labelSeeds={labelSeeds}
+                        labelLogo={labelLogo}
+                        onGoStep={goStep}
+                        loading={colorway.loading}
+                      />
                     )}
                     {/* ═══ STEP 4 · FABRIC RENDER.
 
                         ⚠ `key={colorway.colorwayId}` СНЯТ (G2-3), И ЭТО ОБЯЗАТЕЛЬНО, А НЕ УБОРКА.
                         Ремоунт стоял ради одного: `useColourDraft` засевает рецепт ОДИН РАЗ ЗА
-                        МОНТИРОВАНИЕ, и «однажды» ≠ «заново на смене цвета». Теперь селект цели
+                        МОНТИРОВАНИЕ, и «однажды» ≠ «заново на смене цвета». Теперь полоса цели
                         живёт ВНУТРИ этого экрана — компонент не может ремоунтить сам себя, не
-                        уничтожив состояние собственного органа выбора (список закрылся бы прямо
-                        под пальцем). Второе правило переехало туда, где ему место: `useColourDraft`
-                        на смене цели переселяет ТОЛЬКО цветную половину (hex/code), а ткань и слова
-                        остаются — ткань есть свойство изделия, цвет есть свойство колорвея.
+                        уничтожив состояние собственного органа выбора. Второе правило живёт у
+                        `useColourDraft`: на смене цели он переселяет цвет и ткани из привязок
+                        новой цели, не теряя ручной выбор по правилам происхождения.
                         `colorwayArchived` — ЕДИНСТВЕННЫЙ предикат архива студии
                         (`useColorwayChoice`), поэтому подсказка и отказ не могут разойтись. */}
                     {step === 'render' && (
@@ -608,8 +798,8 @@ export function StudioTab({
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
                           /* ЦЕЛЬ ВЫБИРАЮТ ЗДЕСЬ, НО ВЛАДЕЕТ ЕЮ КОМПОЗИТОР: вниз едет список
-                             колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы
-                             on-model. Второго состояния не заводится ни на одном экране. */
+                             колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуется полоса
+                             MATERIALS. Второго состояния не заводится ни на одном экране. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
                           /* O-57 r4: СЫРОЙ список колорвеев карточки, архивные без плит тоже, —
@@ -623,18 +813,10 @@ export function StudioTab({
                              выше. По ним подача засевает ткани колорвея из привязок, а сетка
                              CLOTHS ставит надетые плитки первыми. */
                           slots={cloth.slots}
-                        >
-                          {/* J-18: the history filters to fabric renders by default; E-22: closed.
-                              O-63 (D-62): it stands INSIDE the studio — the studio's render scope
-                              reaches its rows, and a render run's tiles carry the render doors. */}
-                          <GenerationHistory
-                            band={band}
-                            techCardId={techCardId}
-                            disabled={readOnly}
-                            defaultRep='render'
-                            defaultOpen={false}
-                          />
-                        </RenderStudio>
+                          /* R7 · artworks = the DECORATION lines of the same MATERIALS read. */
+                          artworkSlots={materials.slots}
+                          /* T30: the history is mounted by the studio, inside its workbench block. */
+                        />
                       </>
                     )}
                     {/* ═══ STEP 5 · 3D — ONLY WHERE THE RAIL STILL DRAWS IT (C-10). On a server that
@@ -717,6 +899,8 @@ export function StudioTab({
                     )}
                   </>
                 ))}
+              {/* THE STEP'S ONE FORWARD DOOR — always its last child, chosen above. */}
+              {footer}
             </div>
           </PickModeProvider>
         </PictureGalleryProvider>

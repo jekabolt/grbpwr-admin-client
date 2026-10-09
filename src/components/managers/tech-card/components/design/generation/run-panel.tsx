@@ -5,6 +5,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
@@ -23,6 +24,7 @@ import {
 } from './run-state';
 import { Thumb, thumbUrl } from './thumb';
 import { useGenerationWrites } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE RUN PANEL — what went into a run, unfolded under its row by `META ▸` (the mock-up's
@@ -254,16 +256,17 @@ export function RunPanel({
         flush
         className={GROUP_GAP}
         action={
-          <span className='flex flex-wrap items-center gap-1'>
-            <CountPill n={refs.length} noun='picture' />
+          /* Plain text, not pills (owner, item 38): a group header frames no words. */
+          <span className='flex flex-wrap items-center gap-2'>
+            <HeaderCount n={refs.length} noun='picture' />
             {platesShown > 0 && (
-              <CountPill
+              <HeaderCount
                 n={platesShown}
                 noun={run.kind === 'threed' ? 'render plate' : 'plate'}
                 title='plates the run took off the bench by itself; the rest are the card’s references'
               />
             )}
-            <CountPill n={sent.length} noun='character' />
+            <HeaderCount n={sent.length} noun='character' />
           </span>
         }
       >
@@ -375,7 +378,8 @@ export function RunPanel({
               aria-label={`${textOpen ? 'hide' : 'show'} the prompt of run ${run.id ?? ''}`}
               title='the base instruction the worker composed and stored at dispatch, before the first paid attempt. A per-view run appends its own view line to each call and a 3D run is cut to the texture ceiling, so on those two routes this is the base and not a transcript.'
             >
-              {textOpen ? 'hide ▾' : 'show ▸'}
+              {textOpen ? 'hide' : 'show'}
+              <FoldCaret open={textOpen} />
             </Button>
             <CountPill n={sent.length} noun='character' />
           </>

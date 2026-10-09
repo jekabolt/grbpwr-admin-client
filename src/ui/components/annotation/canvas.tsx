@@ -336,7 +336,6 @@ export function AnnotationCanvas({
   placingKind: externalKind,
   onPlaced,
   cornerSlot,
-  zoomable = false,
   renderPiecePicker,
   pieceLabel,
   onPlacedCountChange,
@@ -353,7 +352,6 @@ export function AnnotationCanvas({
   placingKind?: string | null;
   onPlaced?: () => void;
   cornerSlot?: ReactNode;
-  zoomable?: boolean;
   /** Сколько якорей набрано — общая панель полосы рисует подсказку сама. */
   onPlacedCountChange?: (n: number) => void;
   // ВЫБОР И ДОБАВОЧНАЯ СТРОКА РЕДАКТОРА СЮДА НЕ ВХОДЯТ. Инлайн-кадр держит выбор сам, и принимать
@@ -387,75 +385,29 @@ export function AnnotationCanvas({
           onPlaced?.();
         }}
         onPlacedCountChange={onPlacedCountChange}
-        cornerSlot={
-          <>
-            {cornerSlot}
-            {zoomable && (
-              <FrameButton
-                label='zoom'
-                title='open the picture full screen — callouts are placed more precisely there too'
-                onPress={() => {
-                  // ЗУМ ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ. Полноэкранная поверхность — другая,
-                  // со своей панелью и своими точками; продолжить в ней мерку, начатую на
-                  // миниатюре, нечем, а оставить режим включённым значило бы, что после закрытия
-                  // первый же клик по кадру уронит на снимок постороннюю фигуру.
-                  if (tool) {
-                    setOwnKind(null);
-                    onPlaced?.();
-                  }
-                  setZoomOpen(true);
-                }}
-              />
-            )}
-          </>
-        }
+        cornerSlot={cornerSlot}
+        // ЗУМ — ДВОЙНЫМ КЛИКОМ ПО СНИМКУ, без угловой кнопки (T12: «кнопку зум на ховер нигде
+        // показывать не нужно»). Одиночный клик занят постановкой и выбором.
+        onOpenLarge={() => {
+          // ЗУМ ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ. Полноэкранная поверхность — другая, со своей
+          // панелью и своими точками; оставить режим включённым значило бы, что после закрытия
+          // первый же клик по кадру уронит на снимок постороннюю фигуру.
+          if (tool) {
+            setOwnKind(null);
+            onPlaced?.();
+          }
+          setZoomOpen(true);
+        }}
       />
 
-      {zoomable && (
+      {zoomOpen && (
         <AnnotationZoomDialog
           {...surface}
-          open={zoomOpen}
+          open
           onOpenChange={setZoomOpen}
           title={alt || 'unit picture'}
         />
       )}
     </div>
-  );
-}
-
-/**
- * Кнопка поверх кадра. Не `<button>`: холст живёт внутри общего `<fieldset disabled>` выпущенной
- * карточки, а задизейбленность наследуется — на выпущенной карточке зум перестал бы открываться,
- * то есть читать архив стало бы нечем.
- */
-export function FrameButton({
-  label,
-  title,
-  onPress,
-}: {
-  label: string;
-  title: string;
-  onPress: () => void;
-}) {
-  return (
-    <span
-      role='button'
-      tabIndex={0}
-      title={title}
-      aria-label={title}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
-        e.stopPropagation();
-        onPress();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        onPress();
-      }}
-      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-    >
-      {label}
-    </span>
   );
 }

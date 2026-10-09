@@ -1,10 +1,15 @@
-import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  useIsMutating,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
-import { unstickPin } from '../generation/bench-store';
+import { clearBenchChoice, unstickPin } from '../generation/bench-store';
 import {
   isAborted,
   isDefinitiveRefusal,
@@ -104,6 +109,12 @@ export type StartRunCallbacks = {
    */
   beforeSend?: (clientRequestId: string, stored: boolean) => boolean;
   /**
+   * A DETERMINISTIC key fixed by the caller (≤ 36 chars, the column's width). For a press no human
+   * makes — the automatic cut-out — the page-local ledger cannot stop a second tab or a remount from
+   * buying the same run twice; a key derived from WHAT is asked lets the server collapse them.
+   */
+  clientRequestId?: string;
+  /**
    * `onStarted` — WHAT THE SCREEN DOES ONCE THE RUN EXISTS, AND ONLY THEN (O-61 r4, D-71).
    *
    * A press can have a consequence on the screen that pressed it which must not outlive a press that
@@ -121,6 +132,12 @@ export type StartRunCallbacks = {
    * whose answer then arrives late is a rejected mutation: its `onAccepted` fires, this does not.
    */
   onStarted?: () => void;
+  /**
+   * THE SENTENCE OF THE ACCEPTED PRESS, when the kind's own one names the wrong place (M17): the
+   * moodboard's `remove bg` lands its cut-out ON THE TILE, not in the history. `''` says nothing —
+   * the tile's own «…» already does. Absent = the kind's sentence (`STARTED_BY_KIND`).
+   */
+  startedSay?: string;
 };
 
 export type StartRunState = {
@@ -269,11 +286,16 @@ export function useStartDesignRun(
     if (shownCard.current === input.techCardId) setRefusal(null);
     // The run comes back PENDING, not done: the picture arrives in the feed when the provider
     // answers. Saying so is the difference between «nothing happened» and «it was booked».
-    showMessage(STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT, 'success');
+    const say = input.startedSay ?? STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT;
+    if (say) showMessage(say, 'success');
     // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
     // left by earlier work stops holding the run it kept. Not a release — an editor opened while
-    // this answer travelled keeps its run until it closes.
-    if (input.wire.kind === 'render') unstickPin(input.techCardId);
+    // this answer travelled keeps its run until it closes. A run put on the bench from the history
+    // lets go too (T24): the new run is what the person wants to see now.
+    if (input.wire.kind === 'render') {
+      unstickPin(input.techCardId);
+      clearBenchChoice(input.techCardId, 'render');
+    }
   };
 
   const mutation = useMutation({
@@ -296,6 +318,15 @@ export function useStartDesignRun(
         START_RUN_DEADLINE_MS,
         () => accepted(input),
       ),
+    /* A REFUSAL IS AN ANSWER, NOT A HICCUP (M7b, 07.10 — the rule FLAT's `useStartRun` took in M8).
+       The app retries every mutation once (`src/index.tsx`), and while the tab is hidden react-query
+       holds that retry until the tab shows again: a 4xx refusal — a missing input, a busy card, the
+       day's money spent — could come back minutes later as a PAID start the person was never told
+       about, from a tab nobody was looking at. A definitive refusal is never retried; an answer that
+       may not have been one (`isDefinitiveRefusal` false: no status, the deadline, 408, 499, 5xx)
+       keeps the app's own policy (once) — it carries the same client_request_id, so the server hands
+       back the run if it was booked. */
+    retry: (failures, error) => !isDefinitiveRefusal(error) && appRetries(qc, failures, error),
     onSuccess: (_answer: unknown, input) => accepted(input),
     onError: (error: unknown, input) => {
       const definitive = isDefinitiveRefusal(error);
@@ -341,7 +372,13 @@ export function useStartDesignRun(
       const fingerprint = requestFingerprint(wire);
       // The operator is taken ONCE, here: the answer settles the namespace this key was sent in.
       const operator = operatorKey();
-      const { id: clientRequestId, stored } = ledgerSend(techCardId, scope, fingerprint, operator);
+      const { id: clientRequestId, stored } = ledgerSend(
+        techCardId,
+        scope,
+        fingerprint,
+        operator,
+        opts?.clientRequestId,
+      );
       if (opts?.beforeSend && !opts.beforeSend(clientRequestId, stored)) return;
       const sent: SentRun = {
         wire,
@@ -353,6 +390,7 @@ export function useStartDesignRun(
         onAccepted: opts?.onAccepted,
         onRefused: opts?.onRefused,
         provesUnbooked: opts?.provesUnbooked,
+        startedSay: opts?.startedSay,
       };
       // `onStarted` is the per-call one, and it fires after `accepted` ran for THIS press — so it
       // reads the gate `accepted` wrote rather than the bare fact that the call resolved. The
@@ -380,6 +418,18 @@ export function useStartDesignRun(
     refusal,
     dismissRefusal,
   };
+}
+
+/**
+ * The app's own retry policy for mutations (`src/index.tsx`: once), asked for one failure — what the
+ * start would do without a `retry` of its own. A number is a count, a function is asked, `true` is
+ * react-query's «for ever», anything else none.
+ */
+function appRetries(qc: QueryClient, failures: number, error: unknown): boolean {
+  const policy = qc.getDefaultOptions().mutations?.retry;
+  if (typeof policy === 'function') return policy(failures, error as Error);
+  if (typeof policy === 'number') return failures < policy;
+  return policy === true;
 }
 
 /**
@@ -438,6 +488,8 @@ type SentRun = {
   onAccepted?: (clientRequestId: string) => void;
   onRefused?: (error: unknown) => void;
   provesUnbooked?: (error: unknown) => boolean;
+  /** `StartRunCallbacks.startedSay`. */
+  startedSay?: string;
   /**
    * WRITTEN BY `accepted`, READ BY THE PER-CALL `onStarted`: the door's answer to this press came
    * while the ledger still held its key — the answer is this press's own. Never set for a late

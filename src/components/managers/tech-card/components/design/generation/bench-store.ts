@@ -139,3 +139,97 @@ export function unstickPin(card: number) {
   if (!s.pin?.sticky) return;
   write(card, { ...s, pin: { ...s.pin, sticky: false } });
 }
+
+/* ═══ WHICH RUN THE PERSON PUT ON THE BENCH (03.10, owner item 9) ════════════════════════════════
+ *
+ * Owner: the history is a grid of each run's pictures with one «put on bench» per run, and a click on
+ * any tile sends that run to the bench (LATEST GENERATION). So the workbench no longer follows only
+ * the newest run: it shows, in this order, the PINNED run (a surface is open on it), the run the
+ * person PUT on the bench, and the newest flat run. The choice is per card and survives a reload
+ * (browser storage, every access guarded: a private window or blocked storage just forgets it).
+ * This tab's GENERATE, «show ›», archiving the chosen run, or the choice becoming the newest run
+ * anyway let it go — from then on the bench follows the newest again.
+ */
+
+/**
+ * THE STEP WHOSE BENCH IT IS (03.10, owner item T24): FABRIC RENDER's history is FLAT's grid too,
+ * so each of the two benches keeps its own choice — a flat run never lands on the render bench, nor
+ * the other way round. FLAT's storage key is unchanged.
+ */
+export type BenchKind = 'flat' | 'render';
+
+const CHOICE_KEY = (card: number, kind: BenchKind) => `grbpwr.design.bench.${kind}.${card}`;
+/** `kind:card` → chosen run id; a card read once from storage is cached here (0 = no choice). */
+const choices = new Map<string, number>();
+
+function storedChoice(card: number, kind: BenchKind): number {
+  try {
+    const raw = window.localStorage.getItem(CHOICE_KEY(card, kind));
+    const id = raw ? Number(raw) : 0;
+    return Number.isInteger(id) && id > 0 ? id : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The chosen run of a card, outside React (the store's own reads, and the probe). */
+export function readBenchChoice(card: number, kind: BenchKind = 'flat'): number {
+  return readChoice(card, kind);
+}
+
+function readChoice(card: number, kind: BenchKind): number {
+  if (!card) return 0;
+  let id = choices.get(`${kind}:${card}`);
+  if (id === undefined) {
+    id = storedChoice(card, kind);
+    choices.set(`${kind}:${card}`, id);
+  }
+  return id;
+}
+
+function writeChoice(card: number, runId: number, kind: BenchKind) {
+  if (!card || readChoice(card, kind) === runId) return;
+  choices.set(`${kind}:${card}`, runId);
+  try {
+    if (runId > 0) window.localStorage.setItem(CHOICE_KEY(card, kind), String(runId));
+    else window.localStorage.removeItem(CHOICE_KEY(card, kind));
+  } catch {
+    // Storage refused: the choice still holds for this page.
+  }
+  listeners.forEach((listener) => listener());
+}
+
+/** The run the person put on this card's bench; 0 — none, the bench follows the newest. */
+export function useBenchChoice(card: number, kind: BenchKind = 'flat'): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => readChoice(card, kind),
+    () => 0,
+  );
+}
+
+/**
+ * «put on bench» from the history: the workbench shows `runId` from now on. A pin some earlier work
+ * left goes — the person asked for this run — but an open surface keeps the run it works on until it
+ * closes (`openSurface` pins again on the next one).
+ */
+export function putOnBench(card: number, runId: number, kind: BenchKind = 'flat') {
+  if (!card || runId <= 0) return;
+  const s = read(card);
+  if (s.pin && s.surfaces.size === 0) write(card, { ...s, pin: null });
+  writeChoice(card, runId, kind);
+}
+
+/** Forget the choice — the bench of that step follows its newest run again. */
+export function clearBenchChoice(card: number, kind: BenchKind = 'flat') {
+  writeChoice(card, 0, kind);
+}
+
+/**
+ * WHICH RUN THE WORKBENCH HOLDS ON TO, before the newest: the pinned run, else the chosen one; 0 —
+ * none, it shows the newest. A choice equal to the newest holds nothing it would not show anyway.
+ */
+export function heldRunId(pin: BenchPin | null, chosen: number, newestId: number): number {
+  if (pin) return pin.runId;
+  return chosen > 0 && chosen !== newestId ? chosen : 0;
+}

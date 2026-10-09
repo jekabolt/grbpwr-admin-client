@@ -1,13 +1,17 @@
 import type { common_Category } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { useParams } from 'react-router-dom';
 
 import type { TechCardFormData } from '../../schema';
 import { detailKeyLabel } from '../../tech-card-options';
-import type { CardFacts } from '../core/card-facts';
+import { garmentNameOf, type CardFacts } from '../core/card-facts';
 import { categoryChain, fitLabel, fitsForTopCategory, topCategoryName } from '../fit-vocabulary';
+import { useQuizLive } from '../quiz-live';
+import { decisionLines } from '../quiz-model';
+import { useDesignQuizAnswers } from '../use-design-band';
 
 /**
  * ═══ ФАКТЫ КАРТОЧКИ ИЗ ФОРМЫ — ОДИН ЧИТАТЕЛЬ ДЛЯ ВСЕХ КНОПОК `ai ✦` (волна 25.09, DEEP-03) ═══════
@@ -35,6 +39,44 @@ export function categoryPathOf(
 ): string[] {
   if (!leafId || leafId <= 0) return [];
   return categoryChain(categories, leafId).map((c) => (c.name ?? '').trim() || `#${c.id}`);
+}
+
+/** The class word of a category (`garment: <this>`), the name `composeWords` seeds WORDS with. */
+export function garmentClassOf(
+  categories: readonly common_Category[] | undefined,
+  categoryId: number | null | undefined,
+): string {
+  return garmentNameOf(categoryPathOf(categories, categoryId).join(' › '));
+}
+
+/**
+ * M10 · the card's class word now and every class word the dictionary can seed — what
+ * `followCategory` (`../flat-route.ts`) needs to move a seeded «garment:» line and keep a written one.
+ */
+export function useGarmentClass(): {
+  current: string;
+  seeded: ReadonlySet<string>;
+  /** The class of a category id read at the moment of use (after an await, not at render). */
+  classOf: (categoryId: number | null | undefined) => string;
+} {
+  const { control } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+  const categories = dictionary?.categories;
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const seeded = useMemo(() => {
+    const out = new Set<string>();
+    for (const c of categories ?? []) {
+      const name = garmentClassOf(categories, c.id).toLowerCase();
+      if (name) out.add(name);
+    }
+    return out;
+  }, [categories]);
+  const current = useMemo(() => garmentClassOf(categories, categoryId), [categories, categoryId]);
+  const classOf = useCallback(
+    (id: number | null | undefined) => garmentClassOf(categories, id),
+    [categories],
+  );
+  return { current, seeded, classOf };
 }
 
 /**
@@ -93,6 +135,20 @@ export function useCardFacts(isBoard: (row: BoardRowLike) => boolean): CardFacts
   const board = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardRowLike[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLike[];
+  // Решения квиза доски — своя таблица на сервере, не поле формы (автосейв их не трогает). Карточка —
+  // из адреса (`/tech-cards/:id`), как у GENERAL INFORMATION: в форме id карточки нет.
+  const { id: routeId } = useParams<{ id?: string }>();
+  const cardId = routeId ? parseInt(routeId, 10) : 0;
+  const { answers } = useDesignQuizAnswers(
+    Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+  );
+  const fresh = useMemo(() => decisionLines(answers), [answers]);
+  // W-C2: пока прогон квиза открыт, решения стоят как в его начале — бриф WORDS не зовётся на
+  // каждый ответ; закрылся — догоняют разом.
+  const quizLive = useQuizLive(Number.isFinite(cardId) ? cardId : 0);
+  const held = useRef(fresh);
+  if (!quizLive) held.current = fresh;
+  const decisions = quizLive ? held.current : fresh;
 
   return useMemo(() => {
     const text = (key: string) => (details.find((d) => d.key === key)?.text ?? '').trim();
@@ -124,8 +180,10 @@ export function useCardFacts(isBoard: (row: BoardRowLike) => boolean): CardFacts
             .join(' · '),
         )
         .filter(Boolean),
+      decisions,
     };
   }, [
+    decisions,
     dictionary?.categories,
     categoryId,
     fit,

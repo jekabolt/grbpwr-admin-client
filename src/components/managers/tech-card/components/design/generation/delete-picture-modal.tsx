@@ -1,10 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService, requestHandler } from 'api/api';
 import type { common_DesignPicture } from 'api/proto-http/admin';
-import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
@@ -124,31 +122,31 @@ export function refusalSentence(error: unknown): string {
 
 /* ────────────────────────────── the door ────────────────────────────── */
 
-export function DeletePictureDoor({
-  techCardId,
-  picture,
-  siblings,
-  disabled,
-  className,
-}: {
-  techCardId: number;
-  picture: common_DesignPicture;
-  /** The pictures of the row this one stands in — where its descendants are counted. */
-  siblings?: readonly common_DesignPicture[];
-  disabled?: boolean;
-  className?: string;
-}) {
+/**
+ * THE QUESTION AND THE WRITE, WITHOUT THE BUTTON (T13). The workbench tile asks from its `slot ▾`
+ * menu (`delete…`, the danger row) instead of a door under the frame, so the confirmation and the
+ * mutation live here once and both organs open the same modal.
+ */
+export function useDeletePicture(
+  techCardId: number,
+  picture: common_DesignPicture,
+  siblings?: readonly common_DesignPicture[],
+) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
   const pictureId = picture.id ?? 0;
   const pieces = descendantsOf(siblings ?? [], pictureId);
 
+  /* TF3 · THE QUESTION STAYS UP, BUSY, UNTIL THE ANSWER IS IN. Closing it on «ok» re-armed the
+     tile's menu while the delete was still in flight, so a mark or a second delete could race a
+     picture that was leaving. The success path waits for the band to be read again, so the tile
+     is already gone (or the menu still busy) when the question closes. */
   const remove = useMutation({
     mutationFn: () => deleteDesignPicture(pictureId),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+    onSuccess: async (res) => {
       showMessage(deletedSentence(res), 'success');
+      await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
     },
     onError: (error) => {
       // Already gone: the band is stale, and a re-read takes the tile away by itself.
@@ -158,36 +156,31 @@ export function DeletePictureDoor({
     },
   });
 
-  return (
-    <>
-      <Button
-        type='button'
-        variant='underline'
-        size='xs'
-        data-delete-picture={pictureId || undefined}
-        className={cn('shrink-0', className)}
-        disabled={disabled || remove.isPending}
-        onClick={() => setOpen(true)}
-        aria-label={`delete picture ${pictureId} for good`}
-        title={`delete this picture for good — it${pieces > 0 ? ` and its ${pieces} cut ${pieces === 1 ? 'piece' : 'pieces'}` : ''} leave this card and the storage; this cannot be undone`}
-      >
-        delete
-      </Button>
-      {open && (
-        <ConfirmationModal
-          open
-          onOpenChange={setOpen}
-          title='delete this picture?'
-          confirmLabel='delete for good'
-          cancelLabel='keep'
-          width='sm'
-          onConfirm={() => remove.mutate()}
-        >
-          <Text size='small' component='p'>
-            <span data-delete-question=''>{deleteQuestion(pieces)}</span>
-          </Text>
-        </ConfirmationModal>
-      )}
-    </>
-  );
+  const modal = open ? (
+    <ConfirmationModal
+      open
+      onOpenChange={(next) => {
+        if (!remove.isPending) setOpen(next);
+      }}
+      title='delete this picture?'
+      confirmLabel={remove.isPending ? 'deleting…' : 'delete for good'}
+      cancelLabel='keep'
+      confirmDisabled={remove.isPending}
+      cancelDisabled={remove.isPending}
+      closeOnConfirm={false}
+      width='sm'
+      onConfirm={() => remove.mutate(undefined, { onSettled: () => setOpen(false) })}
+    >
+      <Text size='small' component='p'>
+        <span data-delete-question=''>{deleteQuestion(pieces)}</span>
+      </Text>
+    </ConfirmationModal>
+  ) : null;
+
+  return { ask: () => setOpen(true), pending: remove.isPending, pieces, modal };
+}
+
+/** The sentence a delete organ carries in its `title`. */
+export function deleteTitle(pieces: number): string {
+  return `delete this picture for good — it${pieces > 0 ? ` and its ${pieces} cut ${pieces === 1 ? 'piece' : 'pieces'}` : ''} leave this card and the storage; this cannot be undone`;
 }

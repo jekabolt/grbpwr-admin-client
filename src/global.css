@@ -446,6 +446,110 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   }
 }
 
+/* A picture being worked on (ui/components/picture-busy.tsx). Two motions that must not read
+   alike: `read` — a scan line top → bottom; `cut` — a transparency checker wiped left → right.
+   Transform and opacity only. The wipe moves its window and counter-moves the checker inside it
+   by the same amount on the same curve, so the squares stay put while the edge travels. */
+.picture-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.picture-busy[data-picture-busy='read'] {
+  background: rgb(255 255 255 / 0.3);
+}
+.picture-busy-scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 72%,
+    rgb(255 255 255 / 0.55) calc(100% - 1px),
+    #000 calc(100% - 1px)
+  );
+  transform: translateY(-100%);
+  animation: pictureBusyScan 1800ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes pictureBusyScan {
+  0% {
+    transform: translateY(-100%);
+    opacity: 1;
+  }
+  82% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+}
+.picture-busy-wipe {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-right: 1px solid #000;
+  transform: translateX(-100%);
+  animation: pictureBusyWipe 2400ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+.picture-busy-checker {
+  position: absolute;
+  inset: 0;
+  opacity: 0.78;
+  background-color: #fff;
+  background-image: conic-gradient(
+    #e6e6e6 90deg,
+    transparent 90deg 180deg,
+    #e6e6e6 180deg 270deg,
+    transparent 270deg
+  );
+  background-size: 12px 12px;
+  transform: translateX(100%);
+  animation: pictureBusyWipeCounter 2400ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes pictureBusyWipe {
+  0% {
+    transform: translateX(-100%);
+    opacity: 1;
+  }
+  62%,
+  80% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+}
+@keyframes pictureBusyWipeCounter {
+  0% {
+    transform: translateX(100%);
+  }
+  62%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .picture-busy-scan {
+    animation: none;
+    opacity: 0;
+  }
+  .picture-busy-wipe,
+  .picture-busy-checker {
+    animation: none;
+    transform: none;
+  }
+  .picture-busy-wipe {
+    border-right: 0;
+    opacity: 0.6;
+  }
+}
+
 /* Читалка pdf (managers/files/components/file-reader.tsx). Появление — тот же кроссфейд, что
    у просмотрщика медиа: два способа открыть документ в одном разделе не должны выглядеть
    по-разному. */
@@ -509,4 +613,75 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 }
 .pdf-text-layer[data-main-rotation='270'] {
   transform: rotate(270deg) translateX(-100%);
+}
+
+/* Composition label (labels rework): a line's value swaps to its field, and «↺ derived»
+   appears, with a 150ms fade. Reduced motion: instant. */
+@keyframes compositionLineIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.composition-line-in {
+  animation: compositionLineIn 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .composition-line-in {
+    animation: none;
+  }
+}
+
+/* Quiz spot rings (99-SPOTS §2): the same 150ms opacity ease as the board's dimming; the
+   ring layer carries `motion-reduce:animate-none`. */
+@keyframes spotIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Selected callout (annotation surface, R43): no thicker stroke, no frame; a soft halo that
+   breathes. `.callout-breathe` is an SVG halo group under the shape's own path;
+   `.callout-breathe-box` puts the same halo on a pin, plate or inset through ::after, so the
+   element's own outline and box-shadow stay untouched (focus ring rules live there).
+   Reduced motion: the halo stays, still. Print: never. */
+@keyframes calloutBreathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.callout-breathe {
+  animation: calloutBreathe 1.6s ease-in-out infinite alternate;
+}
+.callout-breathe-box::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--color-bgColor),
+    0 0 6px 3px color-mix(in srgb, var(--color-textColor) 45%, transparent);
+  animation: calloutBreathe 1.6s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .callout-breathe,
+  .callout-breathe-box::after {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+@media print {
+  .callout-breathe,
+  .callout-breathe-box::after {
+    display: none;
+  }
 }

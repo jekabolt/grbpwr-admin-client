@@ -8,6 +8,7 @@ import type {
 } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 
+import { kindLabel } from '../../bom-kind';
 import { sectionShort } from '../../bom-line-picker';
 import {
   UNSET_PURPOSE,
@@ -20,6 +21,7 @@ import { findPantone } from '../../pantone-swatches';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
+  ASSET_HARDWARE,
   ASSET_NAME_MAX,
   assetById,
   assetLabel,
@@ -31,6 +33,7 @@ import { isRunLive, runOutcomeNote, runStatus } from '../generation/run-state';
 import type { Gate } from '../render/model';
 import { isRunArchived, selectVisiblePictures, stampIsSet } from '../visibility';
 import { patternRuns } from './model';
+import { trimPictogramKind } from './trim-pictograms';
 
 /**
  * ═══ STEP 3 · PATTERN — THE FABRIC OF EVERY (COLOURWAY, SLOT), AS A PURE MODEL ════════════════
@@ -108,6 +111,7 @@ export type BomLineLike = {
   name?: string | null;
   composition?: string | null;
   spec?: string | null;
+  kind?: string | null;
 };
 
 /** Обрезка по кодовым точкам, с многоточием: промпт и имя не рвут букву пополам. */
@@ -174,6 +178,213 @@ export function clothSlots(
   });
   rows.sort((a, b) => a.order - b.order || a.at - b.at);
   return { slots: rows.map((r) => r.slot), unsavedCount };
+}
+
+/** A MATERIALS bench slot: a cloth/BOM slot plus the family and kind used by its pictogram. */
+export type MaterialSlot = ClothSlot & {
+  family: 'fabric' | 'hardware';
+  kind: string;
+};
+
+export type MaterialSlots = { slots: MaterialSlot[]; unsavedCount: number };
+
+const THREAD_SECTION = 'TECH_CARD_BOM_SECTION_THREAD';
+
+/** `label`, unless it only repeats `name`. */
+const distinct = (label: string, name: string): string =>
+  label && label.trim().toLowerCase() !== name.trim().toLowerCase() ? label : '';
+
+/**
+ * Every saved BOM line except threads (a thread is a colour, not a picture): roll goods are
+ * `fabric`, everything else `hardware`. Fabrics keep `clothSlots` order; hardware follows BOM order.
+ */
+export function materialSlots(
+  lines: readonly (BomLineLike | null | undefined)[] | null | undefined,
+): MaterialSlots {
+  const cloth = clothSlots(lines);
+  const hardware: MaterialSlot[] = [];
+  let unsavedCount = cloth.unsavedCount;
+  for (const line of lines ?? []) {
+    const section = (line?.section ?? '').trim();
+    if (!line || isRollGoodsSection(section) || section === THREAD_SECTION) continue;
+    const bomItemId = wireInt(line.id);
+    if (bomItemId <= 0) {
+      unsavedCount += 1;
+      continue;
+    }
+    const label = kindLabel(line.kind ?? undefined) || sectionShort(section);
+    const name = (line.name ?? '').trim() || label || `slot ${bomItemId}`;
+    const detail = [formatCompositionCell(line.composition ?? ''), (line.spec ?? '').trim()]
+      .filter(Boolean)
+      .join(' · ');
+    hardware.push({
+      bomItemId,
+      lineKey: (line.lineKey ?? '').trim(),
+      name,
+      kind: (line.kind ?? '').trim(),
+      purpose: '',
+      purposeLabel: distinct(label, name),
+      section,
+      detail,
+      words: clip(
+        [name, distinct(label, name), detail].filter(Boolean).join(' · '),
+        SLOT_WORDS_MAX,
+      ),
+      family: 'hardware',
+    });
+  }
+  return {
+    slots: [
+      ...cloth.slots.map((s) => ({
+        ...s,
+        kind: '',
+        words: clip(
+          [s.name, distinct(s.purposeLabel, s.name), s.detail].filter(Boolean).join(' · '),
+          SLOT_WORDS_MAX,
+        ),
+        family: 'fabric' as const,
+      })),
+      ...hardware,
+    ],
+    unsavedCount,
+  };
+}
+
+/* ─────────────────────────── label slots ─────────────────────────── */
+
+/** A label slot stays `hardware`; recognised by its BOM section only (stickers / hang tags are packaging). */
+export function isLabelSlot(slot: MaterialSlot): boolean {
+  return slot.section === 'TECH_CARD_BOM_SECTION_LABEL';
+}
+
+/**
+ * R9 · a hardware slot PARTS can paint (buttons, snaps, zips…): the hardware family, not a label
+ * (sewn inside, never on the flat) and not an artwork (placed as a box, R7).
+ */
+export function isPaintableHardware(slot: Pick<MaterialSlot, 'family' | 'section'>): boolean {
+  return (
+    slot.family === 'hardware' &&
+    slot.section !== 'TECH_CARD_BOM_SECTION_LABEL' &&
+    !isArtworkSlot(slot)
+  );
+}
+
+/* ─────────────────────────── artwork slots (round 7) ─────────────────────────── */
+
+/** The BOM section an artwork (print, embroidery, patch…) lives in. */
+export const ARTWORK_SECTION = 'TECH_CARD_BOM_SECTION_DECORATION';
+
+/**
+ * An artwork slot stays `hardware` (same cells, same binding); it is recognised by its BOM section
+ * only — mirrors `isLabelSlot`. It leaves the HARDWARE group for its own ARTWORK group.
+ */
+export function isArtworkSlot(slot: Pick<MaterialSlot, 'section'>): boolean {
+  return slot.section === ARTWORK_SECTION;
+}
+
+/** How an artwork is made — chip words (comma-free: the words list splits on `,`). */
+export const ARTWORK_TECHNIQUES = [
+  'embroidery',
+  'screen print',
+  'DTG',
+  'patch',
+  'appliqué',
+  'rubber print',
+  'heat transfer',
+  'puff print',
+];
+
+/**
+ * The BOM kind a technique writes onto its line — every one is homed in DECORATION (bom-kind.ts
+ * `KIND_HOME_SECTION`), so the line passes the schema's kind↔section parity and the autosave runs.
+ */
+const ARTWORK_TECHNIQUE_KIND: Record<string, string> = {
+  embroidery: 'TECH_CARD_BOM_KIND_EMBROIDERY',
+  'screen print': 'TECH_CARD_BOM_KIND_PRINT',
+  dtg: 'TECH_CARD_BOM_KIND_PRINT',
+  patch: 'TECH_CARD_BOM_KIND_PATCH',
+  appliqué: 'TECH_CARD_BOM_KIND_APPLIQUE',
+  'rubber print': 'TECH_CARD_BOM_KIND_PRINT',
+  'heat transfer': 'TECH_CARD_BOM_KIND_HEAT_TRANSFER',
+  'puff print': 'TECH_CARD_BOM_KIND_PRINT',
+};
+
+/** The line kind of an artwork technique ('' for a word outside `ARTWORK_TECHNIQUES`). */
+export function artworkKindOf(technique: string): string {
+  return ARTWORK_TECHNIQUE_KIND[technique.trim().toLowerCase()] ?? '';
+}
+
+/** The technique an artwork line was born with: the last ` · ` part of its detail, if a chip word. */
+export function artworkTechniqueOf(detail: string): string {
+  const last = detail.split(' · ').pop()?.trim().toLowerCase() ?? '';
+  return ARTWORK_TECHNIQUES.find((t) => t.toLowerCase() === last) ?? '';
+}
+
+/** `artwork N` with the smallest N ≥ 1 no name in `taken` already says (case-insensitive). */
+export function nextArtworkName(taken: readonly string[]): string {
+  const used = new Set(taken.map((n) => n.trim().toLowerCase()));
+  let n = 1;
+  while (used.has(`artwork ${n}`)) n += 1;
+  return `artwork ${n}`;
+}
+
+/** The artwork slots of a bench, in bench order. */
+export function artworkSlotsOf<T extends Pick<MaterialSlot, 'section'>>(slots: readonly T[]): T[] {
+  return slots.filter(isArtworkSlot);
+}
+
+/** How a label looks — chip words (comma-free: the words list splits on `,`). */
+export const LABEL_LOOKS = ['woven', 'printed', 'satin', 'leather patch', 'rubber', 'embroidered'];
+
+/** Where a label is sewn — chip words (comma-free). */
+export const LABEL_PLACES = [
+  'centre back neck',
+  'left side seam',
+  'right side seam',
+  'inside waistband',
+  'lining',
+  'pocket',
+  'hem',
+  'sleeve',
+];
+
+/** Card LABELS placement options whose wording carries a comma, mapped to their chip word. */
+const PLACEMENT_CHIP: Record<string, string> = {
+  'neckline, centre back': 'centre back neck',
+  'waistband, inside': 'inside waistband',
+};
+
+/** A card placement as a chip word; anything else verbatim. */
+export function placementChip(placement: string): string {
+  const p = placement.trim();
+  return PLACEMENT_CHIP[p.toLowerCase()] ?? p;
+}
+
+/** What a card LABELS row tells the bench about its BOM line. */
+export type LabelSeed = { placement: string; folding: string; size: string };
+
+type GarmentLabelLike = {
+  bomItemId?: unknown;
+  placement?: string | null;
+  folding?: string | null;
+  size?: string | null;
+};
+
+/** Card label rows by their BOM line (`bomItemId > 0`); the first row of a line wins. */
+export function labelSeedsOf(
+  rows: readonly (GarmentLabelLike | null | undefined)[] | null | undefined,
+): Map<number, LabelSeed> {
+  const out = new Map<number, LabelSeed>();
+  for (const row of rows ?? []) {
+    const id = row ? wireInt(row.bomItemId) : 0;
+    if (!row || id <= 0 || out.has(id)) continue;
+    out.set(id, {
+      placement: (row.placement ?? '').trim(),
+      folding: (row.folding ?? '').trim(),
+      size: (row.size ?? '').trim(),
+    });
+  }
+  return out;
 }
 
 /* ─────────────────────────── рецепт колорвея для слота ─────────────────────────── */
@@ -259,7 +470,7 @@ export function slotSuggestions(
 export type SwatchColour = { code: string; hex: string; words: string };
 
 /** Код без хвоста системы: `18-1664 TCX` и `18-1664` — один цвет, `185 C` и `185` — тоже. */
-function codeStem(code: string): string {
+export function codeStem(code: string): string {
   return code
     .trim()
     .toLowerCase()
@@ -289,6 +500,20 @@ function codeStem(code: string): string {
  * старые строки записаны до него. С приставкой поиск промахивался (hex не ехал вовсе), а слова
  * выходили «Pantone PANTONE 18-1664 TCX»; код без неё — тот же цвет, и едет он без неё.
  */
+/** Picked code equals the colourway's own code → its own screen hex, not the library one. */
+export function withOwnHex(
+  colour: SwatchColour | null,
+  ownPantone: string,
+  ownHex: string,
+): SwatchColour | null {
+  const own = normaliseHex(ownHex);
+  if (!colour || !own || !colour.code.trim() || !ownPantone.trim()) return colour;
+  const strip = (c: string) => c.trim().replace(/^pantone\s+/i, '');
+  return codeStem(strip(colour.code)) === codeStem(strip(ownPantone))
+    ? { ...colour, hex: own }
+    : colour;
+}
+
 export function swatchColour(code: string | null | undefined): SwatchColour | null {
   const c = (code ?? '')
     .trim()
@@ -505,7 +730,8 @@ export function bindingsOf(
   const out: { slot: ClothSlot; asset: common_DesignAsset }[] = [];
   for (const slot of slots) {
     const asset = byPair.get(pairKey(colorwayId, slot.bomItemId));
-    if (asset) out.push({ slot, asset });
+    // A hardware picture bound to a slot is not a cloth: it never seeds FABRIC RENDER.
+    if (asset && asset.kind !== ASSET_HARDWARE) out.push({ slot, asset });
   }
   return out;
 }

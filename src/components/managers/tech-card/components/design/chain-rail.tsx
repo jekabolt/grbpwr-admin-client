@@ -5,6 +5,7 @@ import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
@@ -15,10 +16,7 @@ import {
   chainGate,
   doneCount,
   moodMinimumGate,
-  nearestBlock,
-  openGateDoor,
   railSteps,
-  stepById,
   stepState,
   type ChainCtx,
   type MoodMinimum,
@@ -27,7 +25,6 @@ import {
   type StepState,
 } from './core/chain';
 import { isBoardRow, type BoardItem } from './mood-board';
-import { LockBar } from './render/generate-row';
 import { countThreedResults } from './threed/media';
 
 /**
@@ -57,6 +54,12 @@ import { countThreedResults } from './threed/media';
  * OPENS: behind it is the screen that explains in full what is missing and offers the exits, and
  * closing it would hide the one place that says so. The refusal itself lives on the server.
  *
+ * ═══ NO BAR UNDER THE RAIL, AND `later` (onboarding wave, П6) ══════════════════════════════════
+ * The `LOCKED · step N · …` bar is gone for every card (owner: «не должно быть блока снизу LOCKED
+ * step 4 · fabric render … мы просто в THE CHAIN показываем следующие блоки неактивными»). The
+ * links past the next one read `later` — grey name, no pill. On a GUIDED card (`ctx.guided`) such a
+ * cell is not a door: the chain is walked in order. On every other card it opens, as before.
+ *
  * `Section`, not a bare strip: the rail has a title, a question and a counter in its header, which
  * is what a `Section` is for. Inside, the links are ONE ruled row (a table, the way `StatGrid`
  * is a table: one outline, inner rules) and the aside is a second full-width row pressed to it —
@@ -80,6 +83,8 @@ const PILL_BASE =
   'inline-flex items-center whitespace-nowrap border px-[7px] py-px text-micro uppercase tracking-pill';
 
 function StatePill({ state, inverted }: { state: StepState; inverted: boolean }) {
+  // A link whose turn has not come says nothing: the dimmed name is its whole state (П6).
+  if (state === 'later') return null;
   const tone = inverted
     ? 'border-bgColor text-bgColor'
     : state === 'done'
@@ -90,20 +95,12 @@ function StatePill({ state, inverted }: { state: StepState; inverted: boolean })
   return <span className={cn(PILL_BASE, tone)}>{state}</span>;
 }
 
-/** `3 of 5 steps` — the header counter; a dashed pill at zero, never a red one. */
+/**
+ * `3 of 5 steps` — the header counter, PLAIN TEXT (owner, item 38: «в THE CHAIN у нас есть 5 OF 5
+ * STEPS в хедере справа … только обычный текст»). It was a pill; a header frames no words.
+ */
 function StepsCounter({ n, total }: { n: number; total: number }) {
-  return (
-    <span
-      className={cn(
-        PILL_BASE,
-        n === 0
-          ? 'border-dashed border-borderColor text-labelColor'
-          : 'border-borderColor text-labelColor',
-      )}
-    >
-      {n} of {total} {total === 1 ? 'step' : 'steps'}
-    </span>
-  );
+  return <HeaderCount n={n} noun='step' total={total} data-chain-steps='' />;
 }
 
 function StepCell({
@@ -115,12 +112,16 @@ function StepCell({
 }: {
   step: Step;
   state: StepState;
-  /** The long reason behind a blocked cell, spoken on hover; the bar below speaks it first. */
+  /** The reason behind a blocked or later cell: spoken on hover where blocked, and carried by
+   *  `data-locked` on both. */
   note?: string;
   onOpen?: () => void;
   className?: string;
 }) {
   const active = state === 'now';
+  const later = state === 'later';
+  // LATER IS GREY INK, NOT A FADE. `opacity-45` over the grey number line fell under 2:1 on white;
+  // the name in `labelColor` (5.7:1) beside the black names around it already reads «not yet».
   const body = (
     <>
       <Text
@@ -137,7 +138,10 @@ function StepCell({
         variant='uppercase'
         tracking='label'
         component='span'
-        className={cn('truncate font-bold', active ? 'text-bgColor' : 'text-textColor')}
+        className={cn(
+          'truncate font-bold',
+          active ? 'text-bgColor' : later ? 'text-labelColor' : 'text-textColor',
+        )}
       >
         {step.label}
       </Text>
@@ -155,6 +159,7 @@ function StepCell({
         aria-current={active ? 'step' : undefined}
         data-step={step.id}
         data-state={state}
+        data-locked={later ? note : undefined}
         className={cn(CELL, active && 'bg-textColor', className)}
       >
         {body}
@@ -167,8 +172,8 @@ function StepCell({
       data-step={step.id}
       data-state={state}
       // THE REASON IS A VALUE, NOT A STYLING. Readable by a probe through the attribute and by a
-      // person through the bar under the rail; the pill alone would vanish on monochrome print.
-      data-locked={state === 'blocked' ? note : undefined}
+      // person through the tooltip of a blocked cell; the pill alone would vanish on monochrome print.
+      data-locked={state === 'blocked' || later ? note : undefined}
       aria-label={`${step.label} · ${state}`}
       onClick={onOpen}
       className={cn(CELL, 'hover:bg-bgSecondary', className)}
@@ -176,7 +181,7 @@ function StepCell({
       {body}
     </button>
   );
-  if (!note) return button;
+  if (!note || later) return button;
   return (
     <Tooltip side='bottom' align='start' className='max-w-[320px] normal-case' trigger={button}>
       {note}
@@ -205,12 +210,15 @@ export function useChainCtx({
   band,
   bandless,
   colorway,
+  guided = false,
 }: {
   band: GetDesignBandResponse;
   /** The server does not serve the band; every band-derived state is «unknown», never «locked». */
   bandless: boolean;
   /** The one colourway axis of the studio (`useColorwayChoice`), read for the 3D and render gates. */
   colorway: { id: number; label: string; archived: boolean };
+  /** A guided card (onboarding wave): its `later` cells are not doors. False = every cell opens. */
+  guided?: boolean;
 }): ChainCtx {
   const { control } = useFormContext<TechCardFormData>();
   // BOARD ROWS ONLY (Codex B-10). `moodboardMedia` holds the flat input too — REFERENCE rows —
@@ -253,6 +261,7 @@ export function useChainCtx({
     moodConcept,
     counts,
     colorway,
+    guided,
   };
 }
 
@@ -280,33 +289,6 @@ export function useMoodMinimumGate(): MoodMinimum {
 }
 
 /**
- * The word on the door under the rail. The product's gates (`core/chain.ts` → `render/model.ts`)
- * name the step a refusal is FIXED on but carry no door label of their own; the mock-up's `gate()`
- * does («fill the empty sides ›» for the render bench, «+ add front ›» for the flat bench,
- * «+ picture ›» for the board). The label is chosen by the destination, which is the one fact both
- * sides state.
- */
-function doorLabel(door: StepId): string {
-  switch (door) {
-    case 'render':
-      return 'fill the empty sides ›';
-    case 'flat':
-      // The mock-up's own door word for this destination (`step-4.png`: «THE FLAT BENCH ›»). Not
-      // «fill the flat sides»: the product's 3D gate sends here over a card that OWNS no fabric
-      // render yet, and its flats may well be standing already.
-      return 'the flat bench ›';
-    case 'mood':
-      // A single door to the moodboard step. The moodboard minimum itself (D-10, fix-up B1) draws
-      // one door per missing part from `block.doors` and never reaches this label.
-      return 'moodboard ›';
-    case 'card':
-      return 'card details ›';
-    default:
-      return `go to ${stepById(door).label} ›`;
-  }
-}
-
-/**
  * ═══ У РЕЛЬСА БОЛЬШЕ НЕТ СЛОТА `action`, И ЭТО ПЕРЕЕЗД ОРГАНА, А НЕ ЕГО СНЯТИЕ (G2-2) ══════════
  *
  * Здесь стоял `ColorwaySelect` — «чей это рендер», — и довод был про МЕСТО: единственный ряд,
@@ -325,11 +307,17 @@ function doorLabel(door: StepId): string {
 export function ChainRail({
   ctx,
   onStepChange,
+  onExitGuide,
 }: {
   /** What the chain reads, `now` filled in — see `useChainCtx`. */
   ctx: ChainCtx;
   /** A cell was pressed. The composer holds the step (`S.step` of the prototype) and switches. */
   onStepChange: (id: StepId) => void;
+  /**
+   * The way out of the guide (onboarding S4, owner Q4): `show all blocks ›`, an underlined word beside
+   * the counter — the one extra organ of this header, drawn only while the card walks the guide.
+   */
+  onExitGuide?: () => void;
 }): JSX.Element {
   // Every cell opens its step; the one on display is drawn as a place, not a control (`StepCell`).
   function open(step: Step): () => void {
@@ -339,13 +327,16 @@ export function ChainRail({
   const cell = (step: Step, className?: string) => {
     const state = stepState(step.id, ctx);
     const gate = chainGate(step.id, ctx);
+    const said = state === 'blocked' || state === 'later';
     return (
       <StepCell
         key={step.id}
         step={step}
         state={state}
-        note={state === 'blocked' && !gate.ok ? gate.reason : undefined}
-        onOpen={open(step)}
+        note={said && !gate.ok ? gate.reason : undefined}
+        // A guided card walks the chain in order: a link whose turn has not come is not a door.
+        // Every other card keeps every cell a door, as before (owner, Q3).
+        onOpen={state === 'later' && ctx.guided ? undefined : open(step)}
         className={className}
       />
     );
@@ -354,15 +345,29 @@ export function ChainRail({
   /* THE LINKS OF THIS SERVER'S RAIL (C-10): five, or six where STEP 5 is still the only way to a
      3D model (`railSteps`, core/chain.ts). The cells, the counter and the bar walk the same list. */
   const steps = railSteps(ctx);
-  const block = nearestBlock(ctx);
-  const blockStep = block ? steps.find((s) => s.id === block.stepId) : null;
-  const doorStep = block?.door ? [...steps, ...ASIDES].find((s) => s.id === block.door) : null;
 
   return (
     <Section
       title='the chain'
       question='· where this card stands'
-      action={<StepsCounter n={doneCount(ctx)} total={steps.length} />}
+      action={
+        ctx.guided && onExitGuide ? (
+          <span className='flex items-center gap-3'>
+            <StepsCounter n={doneCount(ctx)} total={steps.length} />
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={onExitGuide}
+              data-exit-guide=''
+            >
+              show all blocks ›
+            </Button>
+          </span>
+        ) : (
+          <StepsCounter n={doneCount(ctx)} total={steps.length} />
+        )
+      }
     >
       <TooltipProvider>
         {/* THE LINKS IN ONE OUTLINED ROW, RULED BY HAIRLINES. The cells share the width (`flex-1` —
@@ -387,53 +392,6 @@ export function ChainRail({
           </div>
         </div>
       </TooltipProvider>
-      {/* ═══ THE NEAREST OBSTACLE, AS A VISIBLE BAR (SPEC §8: never `title` alone) ═══════════════════
-          Drawn only when the chain is actually held up: `nearestBlock` skips optional steps and
-          `own` refusals, so an empty flat prompt or an unstated cloth never puts a bar here. The bar
-          reads as the mock-up's `lockBar`: the word LOCKED, then `step N · name · why` (the number
-          comes from the step itself, never from a string), then the door that goes where the refusal
-          is FIXED — the step the gate points at — not to the blocked step itself. */}
-      {block && blockStep && (
-        <LockBar>
-          <Text
-            size='micro'
-            variant='uppercase'
-            tracking='label'
-            component='span'
-            className='font-bold'
-          >
-            locked
-          </Text>
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            className='min-w-0 flex-1 normal-case'
-          >
-            step {blockStep.n} · {blockStep.label} · {block.why}
-          </Text>
-          {/* ONE DOOR PER PART when the refusal has several (the moodboard minimum, Codex B1):
-              the picture is added on the board, the words are written in DESCRIPTION, the category
-              is picked in CARD DETAILS — three places, three doors, in the sentence's order. */}
-          {block.doors.length > 0
-            ? block.doors.map((d) => (
-                <Button
-                  key={d.field}
-                  variant='secondary'
-                  size='xs'
-                  onClick={() => openGateDoor(d)}
-                  data-gate-door={d.field}
-                >
-                  {d.label}
-                </Button>
-              ))
-            : doorStep && (
-                <Button variant='secondary' size='xs' onClick={open(doorStep)}>
-                  {doorLabel(doorStep.id)}
-                </Button>
-              )}
-        </LockBar>
-      )}
     </Section>
   );
 }

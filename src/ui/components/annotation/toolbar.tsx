@@ -2,8 +2,13 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import { kindDef, PALETTE_KINDS, placingHint, type KindDef } from './kinds';
+import { PURPOSE_TOOLS } from './purpose';
 
 export { placingHint };
+
+// ПОДСКАЗОК ПОСТАНОВКИ И «CANCEL» В ПАНЕЛИ НЕТ (T20, владелец: «"click on the picture you need /
+// CANCEL / click a point on the picture" этот текст не должен появлятся»). Взвод снимается тем же
+// чипом, которым взведён (повторное нажатие), и Esc на кадре (`surface.tsx`, лестница Esc).
 
 // ПАНЕЛЬ ИНСТРУМЕНТОВ — ТОЛЬКО ВИДЫ, пять чипов в одну строку.
 //
@@ -52,16 +57,26 @@ export function AnnotationToolbar({
   kinds,
   /** Сколько указаний ещё влезет; 0 — панель уступает место объяснению. */
   remaining,
-  /** Подсказка постановки: что делать следующим кликом. Приходит от активного кадра. */
-  hint,
   className,
+  quiet,
+  purposes,
+  trailing,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
   kinds?: string[];
   remaining?: number;
-  hint?: string;
   className?: string;
+  /** In a block or group header (owner, item 38): tools as underlined words, never framed chips. */
+  quiet?: boolean;
+  /**
+   * НАЗНАЧЕНИЯ (волна callout kinds) — второй ряд слов в той же строке, отделённый только
+   * воздухом. Ключ назначения и есть инструмент: ключи видов и назначений не пересекаются, и
+   * поверхность сводит назначение к его фигуре сама (`toolGeometry`).
+   */
+  purposes?: boolean;
+  /** Last in the same row, after the purposes (the sheet's `suggest ✦`): one door, not a second bar. */
+  trailing?: React.ReactNode;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -80,6 +95,7 @@ export function AnnotationToolbar({
           // чипа, иначе проба ярлыка красила бы и все пробы жеста.
           data-tool={d.key}
           nonForm
+          quiet={quiet}
           dashed={tool !== d.key}
           selected={tool === d.key}
           pressed={tool === d.key}
@@ -89,18 +105,24 @@ export function AnnotationToolbar({
           {d.label}
         </Chip>
       ))}
-      {tool && (
-        <>
-          {hint && (
-            <Text size='micro' variant='label' component='span'>
-              {hint}
-            </Text>
-          )}
-          <Chip nonForm dashed onClick={() => onTool(null)} title='leave the placing mode'>
-            cancel
+      {purposes &&
+        PURPOSE_TOOLS.map((p, i) => (
+          <Chip
+            key={p.key}
+            data-tool={p.key}
+            nonForm
+            quiet={quiet}
+            className={i === 0 ? 'ml-3' : undefined}
+            dashed={tool !== p.key}
+            selected={tool === p.key}
+            pressed={tool === p.key}
+            onClick={() => onTool(tool === p.key ? null : p.key)}
+            title={p.hint}
+          >
+            {p.label}
           </Chip>
-        </>
-      )}
+        ))}
+      {trailing}
     </ChipRow>
   );
 }

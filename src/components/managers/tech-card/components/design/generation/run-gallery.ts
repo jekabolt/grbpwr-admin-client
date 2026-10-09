@@ -6,6 +6,7 @@ import {
 } from 'ui/components/media-viewer';
 
 import { cropFamilies, isCutOut } from './composite';
+import { isUndoneEdit } from './edit-chain';
 import { isRunLive } from './run-state';
 
 /**
@@ -28,6 +29,11 @@ export type OutputPlan = {
   cards: OutputCard[];
   /** piece id → the id of the card whose deck holds it (E-4: a zoom outside a deck folds it). */
   deckOf: Map<number, number>;
+  /**
+   * After `piecesInPlace` only: piece id → the sheet it was cut from. No deck is drawn any more, but
+   * the bench still names each cut (`put the N pieces into sides ▸`, gate wave 3, W4).
+   */
+  rootOf?: Map<number, number>;
 };
 
 /**
@@ -48,6 +54,12 @@ export type OutputPlan = {
  *   · a picture in `keep` is drawn as itself — an editor is open over it, and swapping the tile
  *     would unmount that editor mid-drawing; its head waits until the editor closes.
  * The history keeps showing every link (captioned «replaced by an edit», `run-tile.tsx`).
+ *
+ * AN UNDONE EDIT IS NOT A HEAD (04.10, T28 v2, `edit-chain.ts`): the walk stops before an undone
+ * link (`undone_at`, not `hidden_at`) —
+ * the version undo went back to stands in the chain's place — and an undone edit is drawn nowhere
+ * here, neither as a head nor as a card of its own (after a new edit over it, it is linked from
+ * nothing). The history draws it, dimmed.
  *
  * The walk is bounded like `cropFamilies`' (the server cannot mint a cycle; a malformed page must
  * not hang the tab): every chain and every deck is walked with a `seen` set.
@@ -100,7 +112,7 @@ export function outputPlan(
     const seen = new Set<number>([picture.id ?? 0]);
     while (!keep.has(head.id ?? 0)) {
       const next = byId.get(head.replacedBy ?? 0);
-      if (!next || seen.has(next.id ?? 0)) break;
+      if (!next || seen.has(next.id ?? 0) || isUndoneEdit(next)) break;
       seen.add(next.id ?? 0);
       head = next;
     }
@@ -133,7 +145,7 @@ export function outputPlan(
   for (const picture of pictures) {
     const id = picture.id ?? 0;
     // A piece stands in its sheet's deck; an edit that took a place stands in that place.
-    if (families.rootOf.has(id) || replacements.has(id)) continue;
+    if (families.rootOf.has(id) || replacements.has(id) || isUndoneEdit(picture)) continue;
     const head = headOf(picture);
     const headId = head.id ?? 0;
     if (headId > 0) {
@@ -145,6 +157,50 @@ export function outputPlan(
     cards.push({ picture: head, members });
   }
   return { cards, deckOf };
+}
+
+/**
+ * THE WORKBENCH'S PLAN: the heads of replacement chains (`outputPlan` with `heads`, an open editor's
+ * tile kept) — for every run on the bench, the one put there from the history too. 04.10, owner
+ * item 28 («не должно показываться две картинки новая и старая а только новая») supersedes the
+ * 03.10 gate FX4 for edit chains: an edit stands in its original's place, never beside it.
+ */
+export function benchPlan(
+  pictures: readonly common_DesignPicture[],
+  opts: { keep?: ReadonlySet<number> } = {},
+): OutputPlan {
+  return outputPlan(pictures, { heads: true, keep: opts.keep });
+}
+
+/**
+ * ═══ AFTER THE CUT THE BENCH SHOWS THE PIECES, NOT THE SHEET (03.10, owner items 20 and 21) ══════
+ *
+ * Owner, verbatim: «после сплита мы должны показывать уже сплитнутые картинки» and «в окошке latest
+ * generation не будет общей картинки со всеми вью». So on the FLAT bench a sheet that has been cut
+ * leaves the row entirely: no tile, no deck, no thumbnail of it; its pieces stand in its place as
+ * ordinary cards, in the deck's order, each with the full tile anatomy (slot, edit, delete). The
+ * sheet stays where it always was, in GENERATION HISTORY, whose rows draw `outputPlan` unchanged.
+ */
+export function piecesInPlace(plan: OutputPlan, cutRoots?: ReadonlySet<number>): OutputPlan {
+  /* A CUT SHEET IS A CARD WITH PIECES HERE — or one the host knows was cut (`cutRoots`: the brought
+     group's `wholeDecks`) whose every piece already stands on SIDES. That one leaves the bench
+     whole: with no piece left to show it is not «uncut» (gate wave 3, W5). */
+  const cut = (card: OutputCard) =>
+    card.members.length > 0 || !!cutRoots?.has(card.picture.id ?? 0);
+  if (!plan.cards.some(cut)) return plan;
+  const cards: OutputCard[] = [];
+  const rootOf = new Map<number, number>();
+  for (const card of plan.cards) {
+    if (!cut(card)) {
+      cards.push(card);
+      continue;
+    }
+    for (const piece of card.members) {
+      cards.push({ picture: piece, members: [] });
+      rootOf.set(piece.id ?? 0, card.picture.id ?? 0);
+    }
+  }
+  return { cards, deckOf: new Map(), rootOf };
 }
 
 /**

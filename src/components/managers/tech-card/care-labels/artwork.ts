@@ -11,6 +11,7 @@
 // по всем 95 путям) и атрибуты заливки/штриха. Любое другое — ошибка с адресом, а не «примерно
 // похоже»: относительная команда или transform, нарисованные мимо, ушли бы в печать молча.
 import type { PathCmd, Prim } from '../assembly-print/paper';
+import { ArtworkError, type Art, type ArtPath } from './art-types';
 import BA from 'ui/icons/care/BA.svg?raw';
 import DCAS from 'ui/icons/care/DCAS.svg?raw';
 import DCASE from 'ui/icons/care/DCASE.svg?raw';
@@ -100,15 +101,9 @@ const CARE_SVG: Record<string, string> = {
 export const CARE_ART_CODES: readonly string[] = Object.keys(CARE_SVG);
 export const hasCareArtwork = (code: string) => Object.hasOwn(CARE_SVG, code);
 
-export class ArtworkError extends Error {
-  constructor(
-    readonly where: string,
-    message: string,
-  ) {
-    super(`${where}: ${message}`);
-    this.name = 'ArtworkError';
-  }
-}
+// Класс ошибки и тип рисунка живут в `art-types.ts`: их берут и разбор SVG лого, и адаптер, которым
+// не нужны 40 файлов символов ухода.
+export { ArtworkError } from './art-types';
 
 // ---------- разбор `d` ----------
 
@@ -187,8 +182,7 @@ export function parsePathD(d: string, where = 'path'): PathCmd[] {
 
 // ---------- разбор файла ----------
 
-type ArtPath = { d: PathCmd[]; fill: boolean; fillRule?: 'nonzero' | 'evenodd'; sw: number };
-type Art = { vx: number; vy: number; vw: number; vh: number; paths: ArtPath[] };
+export type { Art, ArtPath } from './art-types';
 
 const PATH_ATTRS = new Set([
   'd',
@@ -317,4 +311,22 @@ export function careSymbolPath(code: string, x: number, y: number, sizeMm: numbe
  */
 export function logoPath(x: number, y: number, sizeMm: number): Prim[] {
   return place(art('#mark'), x, y, sizeMm, 'miter');
+}
+
+/**
+ * ЛОГО ЛЕНТЫ: монограмма бренда либо SVG, загруженный на составник (`logo-svg.ts` разбирает его в
+ * тот же `Art`). Нет своего — ровно `logoPath` (байт-в-байт прежняя лента). Свой рисунок вписан в
+ * тот же квадрат по большей стороне и отцентрован по меньшей.
+ */
+export function logoPrims(x: number, y: number, sizeMm: number, logo?: Art | null): Prim[] {
+  if (!logo) return logoPath(x, y, sizeMm);
+  const side = Math.max(logo.vw, logo.vh);
+  const k = sizeMm / side;
+  return place(
+    { ...logo, vw: side, vh: side },
+    x + ((side - logo.vw) / 2) * k,
+    y + ((side - logo.vh) / 2) * k,
+    sizeMm,
+    'miter',
+  );
 }

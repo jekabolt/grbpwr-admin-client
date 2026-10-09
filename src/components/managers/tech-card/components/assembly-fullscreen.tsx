@@ -46,6 +46,7 @@ import {
 } from './use-panel-prefs';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 // ФУЛСКРИН СХЕМЫ СБОРКИ — ТРЕТИЙ ВИД, а не отдельный экран.
 //
@@ -2065,9 +2066,7 @@ export function AssemblyFullscreen({
                   aria-label='collapse the dock'
                   className='text-labelColor transition-colors hover:text-textColor'
                 >
-                  <Text size='micro' component='span'>
-                    ▾
-                  </Text>
+                  <FoldCaret open className='ml-0' />
                 </button>
                 <Text size='micro' variant='uppercase' tracking='label' component='span' className='min-w-0 truncate font-bold'>
                   {/* ПОДПИСЬ НАЗЫВАЕТ РОЛЬ, а не всегда шаг. ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА:
@@ -2801,9 +2800,7 @@ function SketchSticker({
           title={folded ? 'open the sketch' : 'collapse the sketch to its head'}
           className='text-labelColor transition-colors hover:text-textColor'
         >
-          <Text size='micro' component='span'>
-            {folded ? '▸' : '▾'}
-          </Text>
+          <FoldCaret open={!folded} className='ml-0' />
         </button>
         <Text
           size='micro'

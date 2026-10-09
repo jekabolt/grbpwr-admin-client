@@ -100,7 +100,7 @@ export const STEPS: readonly Step[] = [
   { id: 'card', n: '0', label: 'card details' },
   { id: 'mood', n: '1', label: 'moodboard' },
   { id: 'flat', n: '2', label: 'flat', kind: 'flat' },
-  { id: 'pattern', n: '3', label: 'pattern', optional: true, kind: 'pattern' },
+  { id: 'pattern', n: '3', label: 'materials', optional: true, kind: 'pattern' },
   { id: 'render', n: '4', label: 'fabric render', kind: 'render' },
 ];
 
@@ -268,8 +268,12 @@ const FIELD_STEP: Record<string, StepId> = {
   callouts: 'mood',
   details: 'mood',
   bomItems: 'mood',
+  // the colourways block of the moodboard step (`colourway-proposals.tsx`, `data-field='colorways'`)
+  colorways: 'mood',
   // the flat step: the prompt's words, and the bench doors (`design.bench.*`, `doors.ts`)
   garmentDescription: 'flat',
+  // M14: the person's own flat words — the WORDS box of the flat step
+  flatWords: 'flat',
 };
 
 export function stepOfField(path: string): StepId | null {
@@ -385,6 +389,11 @@ export type ChainCtx = {
     playground: number;
   };
   colorway: { id: number; label: string; archived: boolean };
+  /**
+   * A card made through the guided create (onboarding wave): its `later` cells do not open — the
+   * chain is walked in order. False on every other card, whose cells all stay doors (`chain-rail`).
+   */
+  guided: boolean;
 };
 
 /**
@@ -426,7 +435,15 @@ export type GateDoor = {
   label: string;
 };
 
-export type StepState = 'now' | 'done' | 'skipped' | 'optional' | 'blocked' | 'next' | 'ready';
+export type StepState =
+  | 'now'
+  | 'done'
+  | 'skipped'
+  | 'optional'
+  | 'blocked'
+  | 'next'
+  | 'ready'
+  | 'later';
 
 /* ─────────────────────────── the moodboard minimum ─────────────────────────── */
 
@@ -707,7 +724,9 @@ export function nextUp(ctx: ChainCtx): StepId | null {
  *     nobody up, and calling it blocked would announce an obstacle where there is only a skip;
  *   · `next` goes to EXACTLY one step, otherwise it stands on three cells and stops meaning anything
  *     — and never to an optional one: `nextUp` passes those over, so the word lands on a cell that
- *     can print it (FABRIC RENDER after the flat, not PATTERN).
+ *     can print it (FABRIC RENDER after the flat, not PATTERN);
+ *   · `later` (onboarding wave) goes BEFORE `blocked`: a link past the next one is not an obstacle
+ *     the person must deal with now, it is simply not its turn (`isLater` below).
  *
  * `skipped` is in the vocabulary and has no writer yet: the product keeps no «skip PATTERN» mark
  * (a new form field is not this phase's to add), so an optional step reads `optional` or `done`.
@@ -716,10 +735,35 @@ export function stepState(id: StepId, ctx: ChainCtx): StepState {
   if (ctx.now === id) return 'now';
   if (stepDone(id, ctx)) return 'done';
   const step = ALL_STEPS.find((s) => s.id === id);
+  const next = nextUp(ctx);
+  // On a GUIDED card `later` outranks `optional` (review M2): MATERIALS between two dimmed links
+  // must not stand as a live door that skips the moodboard and the flats. A legacy card keeps its
+  // `optional` pill exactly as before.
+  const later = isLater(id, next ?? ctx.now, ctx);
+  if (later && ctx.guided) return 'later';
   if (step?.optional) return 'optional';
+  if (later) return 'later';
   const g = chainGate(id, ctx);
   if (!g.ok && !g.own) return 'blocked';
-  return nextUp(ctx) === id ? 'next' : 'ready';
+  return next === id ? 'next' : 'ready';
+}
+
+/**
+ * ═══ `later` — A LINK WHOSE TURN HAS NOT COME (onboarding wave, П6) ══════════════════════════════
+ *
+ * Владелец: «не должно быть блока снизу LOCKED step 4 · fabric render … мы просто в THE CHAIN
+ * показываем следующие блоки неактивными». A link of the rail that stands AFTER the step the person
+ * is sent to (`nextUp`), or after the one on screen when nothing is next, is `later`: no pill, dimmed,
+ * and on a guided card not a door at all (`chain-rail.tsx`). Its refusal, if any, is not spoken on
+ * the rail any more — it lives on the step's own screen, where it is fixed. An aside is never later:
+ * it is not a link of the chain.
+ */
+function isLater(id: StepId, ref: StepId | null, ctx: ChainCtx): boolean {
+  if (!ref) return false;
+  const steps = railSteps(ctx);
+  const at = steps.findIndex((s) => s.id === id);
+  const refAt = steps.findIndex((s) => s.id === ref);
+  return at >= 0 && refAt >= 0 && at > refAt;
 }
 
 export type NearestBlock = {
@@ -735,7 +779,8 @@ export type NearestBlock = {
 /**
  * The nearest obstacle — the first NON-optional link that refuses over something not fixable on
  * its own step. Optional steps are skipped, not repaired; `own` refusals are open steps, not
- * obstacles. Null means the bar under the rail is not drawn at all.
+ * obstacles. The rail no longer draws it as a bar (onboarding wave, П6); `defaultStep` still opens
+ * a held-up card where it leads.
  *
  * ⚠ A DONE STEP IS NEVER LOCKED (round-2 fix-up, MIN-4 — D-13''). Its cell already reads `done`
  * (`stepState` checks done first); a bar under the rail saying «LOCKED · flat» over flats that

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import type { ShapePoint } from 'ui/components/annotation/geometry';
+import { parseSpec, placePurpose, sectionLettersOf } from 'ui/components/annotation/purpose';
 import type { PenStyle, SurfaceCallout } from 'ui/components/annotation/surface';
 
 import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
@@ -106,7 +107,13 @@ export type MoodCalloutsHandle = {
    * бы писать в форму то, что нарисовано, а не то, что хранится.
    */
   rowsOn: (mediaId: number) => { index: number; key: string; value: MoodCallout }[];
-  add: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
+  add: (
+    mediaId: number,
+    kind: string,
+    points: ShapePoint[],
+    pen: PenStyle,
+    armed?: string | null,
+  ) => void;
   editPoints: (key: string, points: ShapePoint[]) => void;
   moveLabel: (key: string, x: number, y: number) => void;
   removeByKey: (key: string) => void;
@@ -164,6 +171,12 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
     [moodMediaIds],
   );
 
+  // Буквы разрезов — счёт доски, как у листа свой (номеров у пометок доски нет, букв — своя серия).
+  const letterOf = sectionLettersOf(
+    values.filter((c) => isMine(c)),
+    (c) => c.spec,
+  );
+
   const calloutsFor = (mediaId: number): SurfaceCallout[] =>
     fa.fields
       .map((f, index) => ({ f, index, c: values[index] }))
@@ -188,6 +201,8 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
           // КАК ХРАНИТСЯ, без раскрытия: «не задано» раскрывает по виду сама поверхность
           // (`effectiveCaps`), и раскрыть здесь значило бы записать выбор, которого не было.
           caps: x.c?.caps ?? '',
+          spec: parseSpec(x.c?.spec),
+          letter: x.c ? letterOf.get(x.c) : undefined,
         };
       });
 
@@ -208,14 +223,26 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
           !!row.value && (row.value.mediaId ?? 0) === mediaId && mediaId > 0,
       );
 
-  const add = (mediaId: number, kind: string, pts: ShapePoint[], pen: PenStyle) => {
-    if (!pts.length || !mediaId) return;
+  const add = (
+    mediaId: number,
+    shape: string,
+    raw: ShapePoint[],
+    pen: PenStyle,
+    armed?: string | null,
+  ) => {
+    if (!raw.length || !mediaId) return;
+    // НАЗНАЧЕНИЕ — тем же правилом, что на листе ARTIFACTS (`placePurpose`).
+    const placed = placePurpose(armed, shape, raw);
+    const kind = placed.shape;
+    const pts = placed.pts;
     const pin = kind === 'pin';
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
     const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
     // У пина единственная точка И ЕСТЬ маркер; у фигуры подпись отводится над центром, чтобы не
     // легла на саму линию.
-    const marker = pin ? pts[0] : { x: clamp(cx, 0.04, 0.96), y: clamp(cy - 0.08, 0.06, 0.96) };
+    const marker = pin
+      ? pts[0]
+      : placed.marker ?? { x: clamp(cx, 0.04, 0.96), y: clamp(cy - 0.08, 0.06, 0.96) };
     writeCallouts([
       ...((getValues('callouts') ?? []) as MoodCallout[]),
       {
@@ -232,13 +259,14 @@ export function useMoodCallouts(moodMediaIds: ReadonlySet<number>): MoodCallouts
         kind: kind as AnnotationKind,
         points: pin ? [] : pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
         color: pen.color as AnnotationColor,
-        dashed: pen.dashed,
-        filled: pen.filled,
+        dashed: placed.dashed ?? pen.dashed,
+        filled: placed.filled ?? pen.filled,
         // Поверхность отдаёт `caps` УЖЕ В ФОРМЕ ХРАНЕНИЯ (пара с `kind`, см. `capsStorage`):
         // линия со стрелками приходит как `dim` + `arrow`, скоба — как `bracket` + ''. Не
         // записать поле — значит молча превратить нарисованные стрелки в засечки. Пустая строка
         // — «не задано», ровно как её читает с провода `readAnnotationCaps`.
-        caps: pen.caps as AnnotationCaps,
+        caps: (placed.caps ?? pen.caps) as AnnotationCaps,
+        spec: placed.spec,
         // КЛЮЧ СТРОКИ МИНТИТСЯ ПРИ РОЖДЕНИИ, ВСЕГДА. Он — личность строки: без него после сейва
         // форма не понимает, какой её строке достался какой серверный ответ, и «легаси-ноль»
         // становится неотличим от новорождённой выноски навсегда. Опустить его тут — значит

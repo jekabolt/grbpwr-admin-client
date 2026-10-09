@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 
 import { cn } from 'lib/utility';
+import { HEADER_TEXT } from 'ui/components/section-header';
 
 export type ViewSwitchOption<T extends string> = {
   value: T;
@@ -8,6 +9,8 @@ export type ViewSwitchOption<T extends string> = {
   label: string;
   /** What that view shows — the segment's tooltip. */
   hint?: string;
+  /** This one segment cannot be chosen now (its `hint` says why); the others stay live. */
+  disabled?: boolean;
 };
 
 /**
@@ -35,6 +38,7 @@ export function ViewSwitch<T extends string>({
   label,
   className,
   disabled,
+  quiet,
 }: {
   value: T;
   options: readonly ViewSwitchOption<T>[];
@@ -43,6 +47,11 @@ export function ViewSwitch<T extends string>({
   label: string;
   className?: string;
   disabled?: boolean;
+  /**
+   * IN A BLOCK OR GROUP HEADER (owner, item 38): no framed segments. The current view is plain
+   * ink text, the others are underlined words — the header door's own metric.
+   */
+  quiet?: boolean;
 }) {
   const refs = useRef<(HTMLSpanElement | null)[]>([]);
   // Клавиатурный вход в группу — ровно один сегмент, и он обязан существовать всегда. Если
@@ -53,7 +62,7 @@ export function ViewSwitch<T extends string>({
 
   const go = (i: number) => {
     const next = options[(i + options.length) % options.length];
-    if (!next) return;
+    if (!next || next.disabled) return;
     onChange(next.value);
     refs.current[(i + options.length) % options.length]?.focus();
   };
@@ -73,7 +82,7 @@ export function ViewSwitch<T extends string>({
     }
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
-      if (e.repeat) return;
+      if (e.repeat || options[i].disabled) return;
       onChange(options[i].value);
     }
   };
@@ -86,6 +95,7 @@ export function ViewSwitch<T extends string>({
     >
       {options.map((o, i) => {
         const on = o.value === value;
+        const off = disabled || !!o.disabled;
         return (
           // СЕГМЕНТЫ — SPAN'Ы, А НЕ КНОПКИ, и это несущее решение: переключатель вида обязан
           // работать на выпущенной карточке, которую целиком глушит внешний `<fieldset disabled>`.
@@ -100,26 +110,36 @@ export function ViewSwitch<T extends string>({
             }}
             role='radio'
             aria-checked={on}
-            aria-disabled={disabled || undefined}
+            aria-disabled={off || undefined}
             tabIndex={disabled ? undefined : i === entry ? 0 : -1}
             title={o.hint}
-            onClick={disabled ? undefined : () => onChange(o.value)}
+            onClick={off ? undefined : () => onChange(o.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
-              '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
+              quiet
+                ? cn(
+                    'inline-flex select-none items-center px-1.5 py-px transition-colors',
+                    HEADER_TEXT,
+                  )
+                : '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
-              disabled ? 'cursor-not-allowed' : 'cursor-pointer',
+              off ? 'cursor-not-allowed' : 'cursor-pointer',
               // `relative` НА ВЫБРАННОМ — не украшение. Сегменты склеены `-ml-px`, то есть их
               // рамки лежат в одном пикселе, и позже нарисованный сосед закрывает край залитого
               // чернилами сегмента своей серой рамкой: чёрный блок получал светлую кромку с одной
               // стороны и не с другой. Позиционированный элемент рисуется поверх статичных в том
               // же контексте, поэтому хватает `relative` — z-index заводить не нужно.
-              on
-                ? 'relative border-textColor bg-textColor text-bgColor'
-                : cn(
-                    'border-borderColor bg-bgColor text-labelColor',
-                    !disabled && 'hover:text-textColor',
-                  ),
+              quiet
+                ? on
+                  ? 'text-textColor'
+                  : cn('text-labelColor underline', !off && 'hover:text-textColor')
+                : on
+                  ? 'relative border-textColor bg-textColor text-bgColor'
+                  : cn(
+                      'border-borderColor bg-bgColor text-labelColor',
+                      !off && 'hover:text-textColor',
+                    ),
+              o.disabled && !on && 'text-textInactiveColor',
             )}
           >
             {o.label}

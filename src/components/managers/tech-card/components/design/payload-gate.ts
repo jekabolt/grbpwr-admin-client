@@ -75,6 +75,7 @@ export type GateableCallout = { clientRef?: string | null };
 export type GateableTechCardPayload = {
   moodNote?: string | null;
   garmentDescription?: string | null;
+  flatWords?: string | null;
   moodboardMedia?: GateableMediaItem[];
   technicalMedia?: GateableMediaItem[];
   callouts?: GateableCallout[];
@@ -161,6 +162,12 @@ export function gateTechCardPayload<T extends GateableTechCardPayload>(
   if ('garmentDescription' in narrowed) {
     report.garmentDescriptionWithheld = !!(narrowed.garmentDescription ?? '').trim();
     delete narrowed.garmentDescription;
+  }
+  // M14 · слова человека для флэта — то же правило: ключ удаляется; непустые сказаны тем же флагом
+  // («то, что уходит в прогоны, не сохранится»).
+  if ('flatWords' in narrowed) {
+    if ((narrowed.flatWords ?? '').trim()) report.garmentDescriptionWithheld = true;
+    delete narrowed.flatWords;
   }
 
   if (Array.isArray(narrowed.callouts)) {

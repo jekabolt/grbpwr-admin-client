@@ -176,6 +176,8 @@ export function ApplySplitDoor({
   onCreateColorway,
   className,
   doorClassName,
+  label = 'apply splitted',
+  quiet = false,
 }: {
   techCardId: number;
   /**
@@ -232,6 +234,14 @@ export function ApplySplitDoor({
   className?: string;
   /** Класс самой кнопки — ряд дверей выходов держит все свои двери одной метрикой (`h-5`, F-9). */
   doorClassName?: string;
+  /** The door's word. `apply splitted` on a deck; the bench's line names the count (W4). */
+  label?: string;
+  /**
+   * THE BENCH'S QUIET LINE (gate wave 3, W4): the same door as a text line under the run's tiles,
+   * not a button in a tile's door row. Nothing to write → nothing drawn (the pieces' own tiles say
+   * where they stand); a refusal → the line, dimmed, the reason in `title`.
+   */
+  quiet?: boolean;
 }): JSX.Element | null {
   const writes = useDesignWrites(techCardId);
   const [asking, setAsking] = useState<number | null>(null);
@@ -276,6 +286,7 @@ export function ApplySplitDoor({
     targets.filter((t) => planFor(t.colorwayId).length === 0).map((t) => t.colorwayId),
   );
   const done = pieces.length > 0 && targets.length > 0 && exactTargets.size === targets.length;
+  if (done && quiet) return null;
   if (done) {
     return (
       <span
@@ -295,11 +306,28 @@ export function ApplySplitDoor({
      на ряд, на которую дверь ссылается `describedBy`. Круг r3 держал здесь фокусируемую дверь с
      причиной у самой двери — вторую семантику рядом с `InertDoor`. Классы хозяина (`[&>button]:…`)
      доходят: обёртка — `[data-inert]` с кнопкой прямым ребёнком. */
+  if (refusal && quiet) {
+    return (
+      <span className={cn('flex', className)} data-apply-split-refused=''>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          disabled
+          className='text-labelColor'
+          title={refusal}
+          aria-describedby={refusalDescribedBy}
+        >
+          {label}
+        </Button>
+      </span>
+    );
+  }
   if (refusal) {
     return (
       <InertDoor
         className={cn('[&>button]:w-full', className)}
-        label='apply splitted'
+        label={label}
         reason={refusal}
         describedBy={refusalDescribedBy}
       />
@@ -380,9 +408,12 @@ export function ApplySplitDoor({
           Потеря названа на самой двери, до нажатия, подсказкой; вопрос — между нажатием и записью. */}
       {only !== null ? (
         <Button
-          variant='secondary'
+          variant={quiet ? 'underline' : 'secondary'}
           size='xs'
-          className={cn('w-full whitespace-nowrap', doorClassName)}
+          className={cn(
+            quiet ? 'text-labelColor hover:text-textColor' : 'w-full whitespace-nowrap',
+            doorClassName,
+          )}
           loading={busy}
           disabled={disabled}
           data-apply-split-door=''
@@ -396,7 +427,7 @@ export function ApplySplitDoor({
           }
           onClick={() => start(only)}
         >
-          apply splitted
+          {label}
         </Button>
       ) : (
         /* ═══ ТА ЖЕ ДВЕРЬ, КОГДА ЦЕЛЕЙ НЕСКОЛЬКО (r3, семпл-лист при усыновлении) ═══════════════
@@ -422,14 +453,14 @@ export function ApplySplitDoor({
           <SelectComponent
             name={`apply-split-${techCardId}-${pieces.length}`}
             value={APPLY_PROMPT}
-            placeholder='apply ▸'
+            placeholder={quiet ? label : 'apply ▸'}
             disabled={disabled || busy}
             className={cn(
               'h-5 min-h-0 whitespace-nowrap py-0 text-micro uppercase tracking-label',
               doorClassName,
             )}
             items={[
-              { value: APPLY_PROMPT, label: 'apply ▸' },
+              { value: APPLY_PROMPT, label: quiet ? label : 'apply ▸' },
               ...targets.map((t) =>
                 exactTargets.has(t.colorwayId)
                   ? {
@@ -522,7 +553,9 @@ export function ApplySplitDoor({
             className='normal-case'
             title={`${outcome.failed
               .map((f) => `${viewLabel(f.view)} — ${f.reason}`)
-              .join('; ')}. Nothing was undone: the sides are separate slots, and taking a good one back would be another write that can fail in its turn. Press the door again — it reads the bench afresh.`}
+              .join(
+                '; ',
+              )}. Nothing was undone: the sides are separate slots, and taking a good one back would be another write that can fail in its turn. Press the door again — it reads the bench afresh.`}
           >
             <b>
               {outcome.done.length} of {outcome.done.length + outcome.failed.length} written.

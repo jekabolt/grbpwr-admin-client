@@ -10,6 +10,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
@@ -18,7 +19,7 @@ import { serverSpeaksDesign } from '../capability';
 import { EmptyState } from '../core';
 import { pictureHandle, runHandle } from '../handles';
 import { RecallBenchIntake, RecallDoors } from '../history-recall';
-import { useGalleryGroup } from '../picture-tile';
+import { PictureTile, useGalleryGroup } from '../picture-tile';
 import {
   RenderDoorsHost,
   RenderDoorsNotes,
@@ -27,16 +28,19 @@ import {
   useRenderStep,
 } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
-import { isRunArchived } from '../visibility';
+import { isPictureHidden, isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
-import { closeSurface, openSurface, useBenchRun } from './bench-store';
+import { closeSurface, openSurface, putOnBench, useBenchRun, type BenchKind } from './bench-store';
+import { LiveTiles } from './live-tiles';
 import { formatMoney } from './money';
-import { CountPill, RunPanel } from './run-panel';
+import { RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
 import { RunOutputs, runOutputsShown } from './run-outputs';
-import { fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
+import { expectedTileCount, fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
 import { REP_NOUN } from './run-tile';
+import { thumbUrl } from './thumb';
 import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE GENERATION HISTORY — runs, and only runs. ONE organ on five steps.
@@ -44,6 +48,7 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * ═══ THE LAYOUT IS THE MOCK-UP'S `histBlock()` (`_core.js`), THE MECHANISM IS THE PRODUCT'S ═════
  * Top to bottom (r2 п.22, п.23, п.27 — три правки владельца поверх макета):
  *   · header  `GENERATION HISTORY · nothing here is deleted`  [2 PATTERN RUNS ▾]  ← И СВЁРТКА ТОЖЕ
+ *             (FLAT, 03.10: `GENERATION HISTORY   N RUNS` — plain text, no subtitle, no doors)
  *   · row                                                          [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
  *             (the run standing on the workbench under GENERATE: «run N · on the bench ↑» in place
@@ -90,6 +95,18 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
 
 /** How many run rows one page of the history holds. The owner's number (T-17). */
 const PAGE = 3;
+/**
+ * ═══ THE GRID HISTORY (FLAT, FABRIC RENDER) PACKS RUNS ACROSS THE WIDTH (T30, owner item 30) ═══
+ * Owner: «в generation history большая часть это белый экран … может гридом». A run used to be a
+ * row of 148px tracks holding its one or two pictures at the left and nothing after them. Now a run
+ * is a GROUP — its tiles at a fixed narrow width, then its door — and the groups flow side by side
+ * and wrap (`data-history-grid`). Tiles inside a group stand 4px apart, groups 24px apart: the gap
+ * is what tells one run from the next, no rule and no label. A page holds what used to be three
+ * rows of runs, now three rows of groups: one server page.
+ */
+const GRID_TILE_PX = 104;
+const GRID_TILE_GAP = 4;
+const GRID_PAGE = 12;
 /**
  * Сколько СЕРВЕРНЫХ страниц дочитыватель окна берёт на одно положение окна. Разбор, почему
  * единица, — у `autofillBudget` в теле органа; коротко: окно короче страницы ровно на одну
@@ -140,7 +157,7 @@ function RunRow({
   openDeck: number | null;
   onDeck: (rootId: number) => void;
   onZoomPicture?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
   const [open, setOpen] = useState(false);
@@ -194,10 +211,7 @@ function RunRow({
      line exists only when there is something. */
   const pointer = !folded && !!onBench;
   const outputsShown = !folded && !onBench && runOutputsShown(run);
-  const toBench = () =>
-    document
-      .querySelector('[data-latest-generation]')
-      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const toBench = scrollToBench;
 
   return (
     /* ЯКОРЯ СТРОКИ (G-1): её прогон и её представление — по ним читают строку и проба, и человек в
@@ -309,7 +323,8 @@ function RunRow({
             aria-label={`${open ? 'hide' : 'show'} what went into ${handle || 'this run'}`}
             title='what this run was given, what it sent and what it cost — launch-time copies'
           >
-            {open ? 'meta ▾' : 'meta ▸'}
+            meta
+            <FoldCaret open={open} />
           </Button>
 
           {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). It is
@@ -339,6 +354,131 @@ function RunRow({
       </div>
 
       {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
+    </div>
+  );
+}
+
+/* ────────────────────────────── the flat grid row (03.10) ────────────────────────────── */
+
+/**
+ * ═══ FLAT: A RUN IS ITS PICTURES, AND ONE DOOR TO THE BENCH (03.10, owner items 9 and 10b) ═════
+ *
+ * Owner: «в GENERATION HISTORY не должно быть лишней инфы только картинки которые были сгенерены …
+ * плиткой гридом и должна быть кнопка поместить на бенч … назначать слоты можно только из бенча на
+ * клик по плитке он автоматом уходит в бенч ака LATEST GENERATION». So on FLAT a row is the grid of
+ * what the run drew (the cards of `outputPlan`: the outputs and their edits; cut pieces stay behind
+ * their sheet, as on the bench) and `put on bench`. No meta, no recall, no slot picker, no split or
+ * edit corners: all of that lives on the bench. A press on any tile does what the door does.
+ * The run that stands on the bench says `on bench` in the door's place, and its tiles take you up.
+ */
+
+/**
+ * The pictures a FLAT history row shows — EVERY picture the run drew, its edits included. A hidden
+ * one stays in its place, dimmed (03.10 gate FX3): the history is the run's record, and hiding a
+ * picture must never make its run vanish from it.
+ */
+export function gridPicturesOf(run: common_DesignRun): common_DesignPicture[] {
+  return outputPlan(run.pictures ?? [])
+    .cards.map((card) => card.picture)
+    .filter((picture) => (picture.id ?? 0) > 0);
+}
+
+/** A FLAT row has something to show: a run in flight, or at least one picture (hidden counts). */
+const gridShows = (run: common_DesignRun): boolean =>
+  isRunLive(run) || gridPicturesOf(run).length > 0;
+
+const scrollToBench = () =>
+  document
+    .querySelector('[data-workbench]')
+    ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+
+function RunGridRow({
+  techCardId,
+  run,
+  kind,
+  onBench,
+  disabled,
+}: {
+  techCardId: number;
+  run: common_DesignRun;
+  /** The step whose bench a press puts the run on (FLAT, FABRIC RENDER — T24). */
+  kind: BenchKind;
+  /** Its pictures stand on the bench now (the run the workbench shows). */
+  onBench: boolean;
+  /** No write from here: the card is read-only, or the server is silent — no `cancel` corner. */
+  disabled?: boolean;
+}) {
+  const runId = run.id ?? 0;
+  const live = isRunLive(run);
+  const elapsed = useElapsed(live ? run.startedAt || run.createdAt : undefined);
+  const pictures = useMemo(() => gridPicturesOf(run), [run]);
+  const handle = runHandle(runId);
+  const toBench = () => {
+    if (!onBench) putOnBench(techCardId, runId, kind);
+    scrollToBench();
+  };
+
+  /** Cells of the group: its pictures, then the reserved cells of a run in flight. */
+  const reserved = live ? Math.max(1, expectedTileCount(run) - pictures.length) : 0;
+  const cells = Math.max(1, pictures.length + reserved);
+
+  return (
+    /* THE GROUP (T30): as wide as its cells, never wider than the history; a run with many pictures
+       wraps inside its own group. */
+    <div
+      data-run={runId || undefined}
+      data-rep={kind}
+      className='min-w-0 max-w-full space-y-1.5'
+      style={{ width: cells * GRID_TILE_PX + (cells - 1) * GRID_TILE_GAP }}
+    >
+      <div
+        className='grid [&>*]:min-w-0'
+        style={{
+          gridTemplateColumns: `repeat(auto-fill, ${GRID_TILE_PX}px)`,
+          gap: GRID_TILE_GAP,
+        }}
+      >
+        {pictures.map((picture) => (
+          <div key={picture.id} className='min-w-0' data-picture={picture.id}>
+            <PictureTile
+              url={thumbUrl(picture.media)}
+              alt={pictureHandle(picture)}
+              className='w-full'
+              dim={isPictureHidden(picture)}
+              onOpen={toBench}
+            />
+          </div>
+        ))}
+        {/* A RUN IN FLIGHT: its reserved cells after whatever already came back, the first with the
+            run's `cancel` corner (owner item 23, `live-tiles.tsx`). */}
+        {live && (
+          <LiveTiles
+            techCardId={techCardId}
+            run={run}
+            count={reserved}
+            disabled={disabled}
+            wordOf={(i) => (i === 0 && !pictures.length ? elapsed || 'running' : 'reserved')}
+          />
+        )}
+      </div>
+      <div className='flex items-center' data-run-bench-door={runId || undefined}>
+        {onBench ? (
+          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+            on bench
+          </Text>
+        ) : (
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            aria-label={`put every picture of ${handle} on the bench`}
+            onClick={toBench}
+          >
+            put on bench
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -432,7 +572,115 @@ function HistoryWindowAutofill({
   return null;
 }
 
+/* ────────────────────────────── the flat header fold (03.10, T22) ────────────────────────────── */
+
+/**
+ * The FLAT fold (T22). Owner, item 22: «GENERATION HISTORY по дефолту свернут во флетах». The block
+ * starts folded on every visit (not remembered). Item 10b still holds («просто текстом сколько
+ * ранов было и все»), so there is no framed button: the header line itself, `history · N runs`
+ * (T30: a sub-part of the workbench block), is the door. Mouse: the whole line; keyboard: Tab to it, Enter or Space.
+ *
+ * THE DOOR SAYS IT IS ONE (04.10, owner item 37: «в WORKBENCH не очевидно что хистори может
+ * расколапсится надо сделать это понятным»). The two words every operator already reads as «this
+ * opens», and nothing more: the count is an underlined word, as every action in the tech card is
+ * (item 32), and a quiet `▸` after it turns to `▾` while open (the same glyph as `meta ▸`). The whole
+ * line inks on hover. No peek of thumbnails while folded: the fold is folded so the bench stays
+ * the only picture in the block.
+ */
+export const gridHistoryStartsOpen = false;
+
+/** `4 runs` / `1 run` / `3+ runs` — the door's word. */
+export function historyRunsWord(count: number, floor: boolean): string {
+  return `${count}${floor ? '+' : ''} run${count === 1 && !floor ? '' : 's'}`;
+}
+
+export function HistoryFoldHeader({
+  open,
+  count,
+  floor,
+  rep,
+  anchorRef,
+  onToggle,
+}: {
+  open: boolean;
+  count: number;
+  /** The feed has unread pages: the count is a floor (`4+ runs`). */
+  floor: boolean;
+  rep: RepFilter;
+  /** The gallery group's anchor (O-54): mounted as long as the block is, folded or not. */
+  anchorRef?: React.RefObject<HTMLDivElement | null>;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      aria-expanded={open}
+      aria-controls='design-history-runs'
+      data-history-fold={open ? 'open' : 'closed'}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (!e.repeat) onToggle();
+      }}
+      className='group cursor-pointer select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+    >
+      {/* T30: a SUB-PART of the workbench block, so its header is the block's sub-group line
+          (`GroupLabel`, as `details` in FLAT SLOTS), not a second block title: `history · 4 runs`. */}
+      <GroupLabel
+        flush
+        className={open ? undefined : '!mb-0'}
+        lead={
+          <div ref={anchorRef} data-rep-filter={rep} className='flex items-center'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='whitespace-nowrap uppercase tracking-label group-hover:text-textColor'
+              data-run-count={count}
+            >
+              {'· '}
+              <span data-history-runs=''>
+                {historyRunsWord(count, floor)}
+              </span>
+            </Text>
+            {/* T55 (04.10): без подчёркивания, галочка под кегль `micro` (7px) и по центру строки. */}
+            <span
+              data-history-caret=''
+              className='ml-1 flex items-center text-labelColor group-hover:text-textColor'
+            >
+              <FoldCaret open={open} className='ml-0 h-[7px] w-[7px]' />
+            </span>
+          </div>
+        }
+      >
+        <span className='group-hover:text-textColor'>history</span>
+      </GroupLabel>
+    </div>
+  );
+}
+
 /* ────────────────────────────── the section ────────────────────────────── */
+
+/**
+ * T30: ON FLAT AND FABRIC RENDER (the grid, `sub`) THE HISTORY IS A SUB-PART OF THE WORKBENCH BLOCK
+ * (`Workbench`, `studio.tsx`), not a block of its own: a block never holds another one, so its frame
+ * is the workbench's and its header the sub-group line `history · N runs`. Every other step keeps
+ * its own `Section`.
+ */
+function HistoryShell({
+  sub,
+  children,
+  ...section
+}: { sub: boolean } & React.ComponentProps<typeof Section>) {
+  if (!sub) return <Section {...section}>{children}</Section>;
+  return (
+    <div id={section.id} data-workbench-history='' className='scroll-mt-20 space-y-stack'>
+      {children}
+    </div>
+  );
+}
 
 export function GenerationHistory({
   band,
@@ -492,13 +740,29 @@ export function GenerationHistory({
    * положение фильтра осталось выразимым только в типе, ради `repLabel`/`repWord`.
    */
   const rep: RepFilter = defaultRep;
+  /**
+   * FLAT'S HISTORY IS A GRID (03.10, owner items 9 and 10b): each run its pictures and `put on
+   * bench`, the header a plain «N runs» — no archived shelf (archived runs are not shown).
+   * FABRIC RENDER too (T24, owner: «в фабрик рендере в GENERATION HISTORY должна быть по дизайну и
+   * смыслу такая же как во флетах»): a press puts the run on the render bench; no render doors, no
+   * brought group here — marking into a side lives on the bench. Every other step keeps its rows.
+   */
+  const grid = (rep === 'flat' || rep === 'render') && !match;
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
-  /** Свёртка RUNS (макет: `fold('hist.'+kind, …)`). */
-  const [runsOpen, setRunsOpen] = useState(defaultOpen);
+  /**
+   * Свёртка RUNS (макет: `fold('hist.'+kind, …)`). The grid (FLAT T22, FABRIC RENDER T24): folded on every
+   * visit whatever the caller passes; its door is the header line (`HistoryFoldHeader`). Neither
+   * `put on bench` nor a tile press touches it.
+   */
+  const foldDefault = grid ? gridHistoryStartsOpen : defaultOpen;
+  /** Runs per page: three rows (T-17) — of runs, or, in the packed grid, of run groups (T30). */
+  const pageSize = grid ? GRID_PAGE : PAGE;
+  const [runsOpen, setRunsOpen] = useState(foldDefault);
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
+    views: readonly string[];
   } | null>(null);
   /**
    * РАЗРЕЗ В ИСТОРИИ — ТОЖЕ ПОВЕРХНОСТЬ ПРОГОНА (`bench-store.ts`, O-53 review): пока он открыт,
@@ -530,7 +794,7 @@ export function GenerationHistory({
    * the cards of the group: a cut sheet is one, its pieces stand behind it.
    */
   const renderStep = useRenderStep();
-  const rendersHere = rep === 'render' && !!renderStep;
+  const rendersHere = rep === 'render' && !!renderStep && !grid;
   /**
    * The group as it is drawn (O-63 r3, `broughtGroup`): its pseudo-run, its cards with the decks of
    * the pieces off SIDES — climbed through the whole family, not through the group's list alone —
@@ -564,8 +828,8 @@ export function GenerationHistory({
   const shownScope = useRef(scopeKey);
   if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` || shownScope.current !== scopeKey) {
     // Only a new step folds the list back; a new scope inside one step keeps the fold.
-    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsOpen !== defaultOpen) {
-      setRunsOpen(defaultOpen);
+    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsOpen !== foldDefault) {
+      setRunsOpen(foldDefault);
     }
     shownDefaults.current = `${defaultRep}|${defaultOpen}`;
     shownScope.current = scopeKey;
@@ -634,7 +898,7 @@ export function GenerationHistory({
    * ВСЁ, ЧТО НИЖЕ, ВЫВОДИТСЯ ИЗ `visible`: страницы, зажим окна, ряд просмотрщика, «show all» и
    * подпись пейджера. Поэтому фильтр стоит ЗДЕСЬ и ровно одной строкой.
    */
-  const visible = useMemo(
+  const kindRuns = useMemo(
     () =>
       match
         ? unfiltered.filter(match)
@@ -643,7 +907,9 @@ export function GenerationHistory({
           : unfiltered.filter((run) => runRepresentation(run) === rep),
     [unfiltered, rep, match],
   );
-  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE));
+  /** FLAT's grid draws only runs with something to show (pictures, or in flight). */
+  const visible = useMemo(() => (grid ? kindRuns.filter(gridShows) : kindRuns), [grid, kindRuns]);
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   /**
    * THE WINDOW IS CLAMPED RATHER THAN TRUSTED, and the clamp is written back after the commit (the
    * effect below), because `reachable` blinks with `more.loading` and a write in the render body
@@ -652,7 +918,9 @@ export function GenerationHistory({
    */
   const current = Math.min(page, pageCount - 1);
   const reachable = pageCount - 1 + (more.hasMore || more.loading ? 1 : 0);
-  const shown = showAll ? visible : visible.slice(current * PAGE, current * PAGE + PAGE);
+  const shown = showAll
+    ? visible
+    : visible.slice(current * pageSize, current * pageSize + pageSize);
   const onLastLocalPage = current >= pageCount - 1;
 
   /**
@@ -679,7 +947,8 @@ export function GenerationHistory({
     () =>
       runsGallery(
         [
-          ...[...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])].filter(
+          // FLAT's grid tiles do not zoom (a press sends the run to the bench): nothing to walk.
+          ...[...(runsOpen && !grid ? visible : []), ...(archShown ? archivedRows : [])].filter(
             (run) => (run.id ?? 0) !== benchRunId,
           ),
           // O-63: the brought group, while it is open — last, as it stands.
@@ -690,6 +959,7 @@ export function GenerationHistory({
       ),
     [
       runsOpen,
+      grid,
       visible,
       archShown,
       archivedRows,
@@ -748,9 +1018,9 @@ export function GenerationHistory({
     const byId = new Map(hostRuns.map((run) => [run.id ?? 0, run] as const));
     return (picture: common_DesignPicture) => byId.get(picture.runId ?? 0) ?? hostRuns[0];
   }, [hostRuns]);
-  const splitHere = (picture: common_DesignPicture) => {
+  const splitHere = (picture: common_DesignPicture, views: readonly string[]) => {
     openSurface(techCardId, 'split:history', picture.runId ?? 0);
-    setSplitting({ picture, handle: pictureHandle(picture) });
+    setSplitting({ picture, handle: pictureHandle(picture), views });
   };
 
   /** «SHOW ALL» READS THE SERVER'S PAGES TO THE END; `hasMore` goes false on its own. */
@@ -812,7 +1082,7 @@ export function GenerationHistory({
    * карточными. ⚠ `totalRuns > 0` в проверке живых — сторож против сервера, который агрегата не
    * считает вовсе: «0 − 0» тогда не должно читаться как «всё прочитано».
    */
-  const liveShown = visible.length;
+  const liveShown = kindRuns.length;
   const liveFloor =
     more.hasMore && !(totalRuns > 0 && unfiltered.length >= totalRuns - archivedRuns);
   const archShownCount = archivedRows.length;
@@ -829,7 +1099,8 @@ export function GenerationHistory({
     more.loading ||
     (more.hasMore &&
       (showAll || autofillBudget > 0 || (archShown && archivedLoaded.length < archivedRuns)));
-  const allArchived = totalRuns > 0 && totalRuns === archivedRuns && unfiltered.length === 0;
+  const allArchived =
+    !grid && totalRuns > 0 && totalRuns === archivedRuns && unfiltered.length === 0;
 
   /** The door of the empty window: to the GENERATE row of this step, which stands above. */
   const goToRun = () => {
@@ -839,28 +1110,52 @@ export function GenerationHistory({
   };
 
   const rowsOf = (list: common_DesignRun[], shelf: boolean) =>
-    list.map((run) => (
-      <RunRow
-        key={run.id}
-        band={band}
-        techCardId={techCardId}
-        run={run}
-        cardFit={cardFit}
-        shelf={shelf || undefined}
-        onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
-        disabled={disabled || !speaks}
-        galleryKey={galleryGroup.key}
-        galleryIndexOf={gallery.indexOf}
-        openDeck={openDeck}
-        /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН: нажатие на дверь другой колоды ПЕРЕПИСЫВАЕТ
+    list.map((run) =>
+      grid && !shelf ? (
+        <RunGridRow
+          key={run.id}
+          techCardId={techCardId}
+          run={run}
+          kind={rep === 'render' ? 'render' : 'flat'}
+          onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
+          disabled={disabled || !speaks}
+        />
+      ) : (
+        <RunRow
+          key={run.id}
+          band={band}
+          techCardId={techCardId}
+          run={run}
+          cardFit={cardFit}
+          shelf={shelf || undefined}
+          onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
+          disabled={disabled || !speaks}
+          galleryKey={galleryGroup.key}
+          galleryIndexOf={gallery.indexOf}
+          openDeck={openDeck}
+          /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН: нажатие на дверь другой колоды ПЕРЕПИСЫВАЕТ
            адрес; у состояния из одного значения второе открытое просто невыразимо. */
-        onDeck={toggleDeck}
-        onZoomPicture={foldOnForeignZoom}
-        onSplit={splitHere}
-      />
-    ));
+          onDeck={toggleDeck}
+          onZoomPicture={foldOnForeignZoom}
+          onSplit={splitHere}
+        />
+      ),
+    );
 
-  const paged = visible.length > PAGE || more.hasMore;
+  const paged = visible.length > pageSize || more.hasMore;
+
+  /**
+   * THE PAGER'S DOORS. In the grid (T30) they are words: `newer · page 1 of 2 · older`, `show all`
+   * underlined, like `put on bench` above them — the pager is not a toolbar.
+   */
+  const pagerDoor = grid
+    ? ({ variant: 'underline', className: 'text-labelColor hover:text-textColor' } as const)
+    : ({ variant: 'secondary' } as const);
+  const pagerDot = (
+    <Text size='nano' variant='label' component='span' aria-hidden>
+      ·
+    </Text>
+  );
 
   return (
     /* O-63: ON FABRIC RENDER the render doors of every row below read ONE host (`RenderDoorsHost`);
@@ -889,10 +1184,12 @@ export function GenerationHistory({
           render-прогона, лента свернулась бы, плиты не приехали — и ни одна строка об этом не
           сказала бы. Разбор владения — в `history-recall.tsx`; здесь только место. */}
       <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
-      <Section
+      <HistoryShell
+        sub={grid}
         id='design-history'
-        title='generation history'
-        question='· nothing here is deleted'
+        /* FLAT (T22): the header line is drawn below as the fold's door (`HistoryFoldHeader`). */
+        title={grid ? undefined : 'generation history'}
+        question={grid ? undefined : '· nothing here is deleted'}
         /* ═══ ОДИН ОРГАН СВОРАЧИВАНИЯ, И ОН СТОИТ ТАМ, ГДЕ СТОЯЛО ЧИСЛО (r2 п.23) ══════════════
            Владелец: «кнопка HIDE должна быть на месте „23 RUNS“ и выглядеть органично». Было ДВА
            органа об одном и том же: пилюля-счётчик в шапке и отдельная линейка `RUNS ─── HIDE ▾`
@@ -912,73 +1209,90 @@ export function GenerationHistory({
            первую. И `collapsible` этой секции НЕ ставить — свёрнутая коробка не рисует `action`
            вовсе, а кнопка внутри кнопки невалидна (разбор в `ui/components/section.tsx`). */
         action={
-          /* ЯКОРЬ ГРУППЫ ПРОСМОТРЩИКА — ЭТА ЛИНЕЙКА (O-54): она стоит, пока стоит блок, свёрнут он
+          grid ? undefined : (
+            /* ЯКОРЬ ГРУППЫ ПРОСМОТРЩИКА — ЭТА ЛИНЕЙКА (O-54): она стоит, пока стоит блок, свёрнут он
              или нет, и её место в полосе — место истории (разбор у `gallery`). */
-          <div
-            ref={galleryGroup.anchorRef}
-            data-rep-filter={rep}
-            className='flex flex-wrap items-center gap-1.5'
-          >
-            <Button
-              variant='secondary'
-              size='xs'
-              aria-expanded={runsOpen}
-              aria-controls='design-history-runs'
-              aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
-              onClick={() => setRunsOpen((v) => !v)}
-              className='whitespace-nowrap'
-              title={
-                liveFloor
-                  ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
-                  : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
-              }
+            <div
+              ref={galleryGroup.anchorRef}
+              data-rep-filter={rep}
+              className='flex flex-wrap items-center gap-1.5'
             >
-              {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
-            </Button>
-            <Button
-              variant='secondary'
-              size='xs'
-              aria-expanded={archShown}
-              className='whitespace-nowrap'
-              aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
-              title={
-                archFloor
-                  ? `the archived ${repRunNoun(rep)}s read so far — the shelf reads the rest when it opens. Card-wide: ${cardWide}.`
-                  : `every archived ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
-              }
-              onClick={() => {
-                setArchShown((v) => !v);
-                // Колода складывается: на полке может стоять её же строка, и «одна открытая на всю
-                // ленту» — закон над лентой целиком. ⚠ `setPage(0)` здесь НЕТ (J-22): полка не
-                // меняет длину списка под окном, и сброс страницы съедал жест.
-                setOpenDeck(null);
-              }}
-            >
-              · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
-            </Button>
-            {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
+              <>
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='whitespace-nowrap text-labelColor hover:text-textColor'
+                  aria-expanded={runsOpen}
+                  aria-controls='design-history-runs'
+                  aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
+                  onClick={() => setRunsOpen((v) => !v)}
+                  title={
+                    liveFloor
+                      ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
+                      : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+                  }
+                >
+                  {runCountWords(rep, liveShown, liveFloor)}
+                  <FoldCaret open={runsOpen} />
+                </Button>
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='whitespace-nowrap text-labelColor hover:text-textColor'
+                  aria-expanded={archShown}
+                  aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
+                  title={
+                    archFloor
+                      ? `the archived ${repRunNoun(rep)}s read so far — the shelf reads the rest when it opens. Card-wide: ${cardWide}.`
+                      : `every archived ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+                  }
+                  onClick={() => {
+                    setArchShown((v) => !v);
+                    // Колода складывается: на полке может стоять её же строка, и «одна открытая на всю
+                    // ленту» — закон над лентой целиком. ⚠ `setPage(0)` здесь НЕТ (J-22): полка не
+                    // меняет длину списка под окном, и сброс страницы съедал жест.
+                    setOpenDeck(null);
+                  }}
+                >
+                  · {`${archShownCount}${archFloor ? '+' : ''}`} archived
+                  <FoldCaret open={archShown} />
+                </Button>
+              </>
+              {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
                 (r3b, M-3: a door never gets a row of its own), only while something brought stands
                 off SIDES. Its group opens after the shelf. */}
-            {rendersHere && broughtCards > 0 && (
-              <Button
-                variant='secondary'
-                size='xs'
-                aria-expanded={broughtShown}
-                className='whitespace-nowrap'
-                data-brought-door={broughtCards}
-                aria-label={`${broughtShown ? 'hide' : 'open'} the ${broughtCards} brought render${broughtCards === 1 ? '' : 's'} that no side of SIDES shows`}
-                title='renders uploaded by hand (no run) that stand in no side SIDES shows — mark them into a side from here'
-                onClick={() => {
-                  setBroughtShown((v) => !v);
-                  setOpenDeck(null);
-                }}
-              >
-                · {broughtCards} brought ▸
-              </Button>
-            )}
-          </div>
+              {rendersHere && broughtCards > 0 && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='whitespace-nowrap text-labelColor hover:text-textColor'
+                  aria-expanded={broughtShown}
+                  data-brought-door={broughtCards}
+                  aria-label={`${broughtShown ? 'hide' : 'open'} the ${broughtCards} brought render${broughtCards === 1 ? '' : 's'} that no side of SIDES shows`}
+                  title='renders uploaded by hand (no run) that stand in no side SIDES shows — mark them into a side from here'
+                  onClick={() => {
+                    setBroughtShown((v) => !v);
+                    setOpenDeck(null);
+                  }}
+                >
+                  · {broughtCards} brought
+                  <FoldCaret open={broughtShown} />
+                </Button>
+              )}
+            </div>
+          )
         }
       >
+        {grid && (
+          <HistoryFoldHeader
+            open={runsOpen}
+            count={liveShown}
+            floor={liveFloor}
+            rep={rep}
+            anchorRef={galleryGroup.anchorRef}
+            onToggle={() => setRunsOpen((v) => !v)}
+          />
+        )}
         {/* O-63: why a render door below is dark — one line per reason, above the rows (D-56′). */}
         <RenderDoorsNotes />
 
@@ -1002,7 +1316,7 @@ export function GenerationHistory({
           <div id='design-history-runs' className='space-y-stack'>
             {!showAll && (
               <HistoryWindowAutofill
-                want={PAGE * (current + 1)}
+                want={pageSize * (current + 1)}
                 have={visible.length}
                 hasMore={more.hasMore}
                 loading={more.loading}
@@ -1014,7 +1328,14 @@ export function GenerationHistory({
 
             {/* Место истории в ряду просмотрщика держит линейка шапки (якорь группы, O-54);
                 порядок внутри — из списка группы. */}
-            <div className='space-y-2'>{rowsOf(shown, false)}</div>
+            {grid ? (
+              /* T30: the run groups pack across the width and wrap — runs flow, not one per row. */
+              <div data-history-grid='' className='flex flex-wrap items-start gap-x-6 gap-y-4'>
+                {rowsOf(shown, false)}
+              </div>
+            ) : (
+              <div className='space-y-2'>{rowsOf(shown, false)}</div>
+            )}
 
             {/* ПУСТОЕ ОКНО — СЛОВАМИ, НА МЕСТЕ СТРОК, с дверью, которая его наполняет (макет
                 `histBody`): нет прогонов → к запуску; все в архиве → на полку; фильтр пуст →
@@ -1058,26 +1379,30 @@ export function GenerationHistory({
                 history down, `show all` is for searching it; `show all` ↔ `paged again` is ONE door
                 in two positions. `page N of M` is a caption, never a button. Absent on one page. */}
             {paged && (
-              <div className='flex flex-wrap items-center gap-1.5'>
+              <div className='flex flex-wrap items-center gap-1.5' data-history-pager=''>
                 {showAll ? (
                   <>
                     {more.loading ? (
                       <Text size='nano' variant='label' component='span'>
                         reading earlier runs…
                       </Text>
+                    ) : grid ? (
+                      <Text size='nano' variant='label' component='span' className='uppercase'>
+                        {visible.length} runs
+                      </Text>
                     ) : (
-                      <CountPill n={visible.length} noun='run' />
+                      <HeaderCount n={visible.length} noun='run' />
                     )}
                     <span className='ml-auto'>
                       <Button
-                        variant='secondary'
+                        {...pagerDoor}
                         size='xs'
                         onClick={() => {
                           setShowAll(false);
                           setPage(0);
                           setOpenDeck(null);
                         }}
-                        aria-label='go back to three runs a page'
+                        aria-label={`go back to ${pageSize} runs a page`}
                       >
                         paged again
                       </Button>
@@ -1086,7 +1411,7 @@ export function GenerationHistory({
                 ) : (
                   <>
                     <Button
-                      variant='secondary'
+                      {...pagerDoor}
                       size='xs'
                       disabled={current === 0}
                       onClick={() => {
@@ -1095,16 +1420,18 @@ export function GenerationHistory({
                       }}
                       aria-label='newer runs'
                     >
-                      ‹ newer
+                      {grid ? 'newer' : '‹ newer'}
                     </Button>
+                    {grid && pagerDot}
                     <Text size='nano' variant='label' component='span'>
                       page {current + 1} of {pageCount}
                       {/* The server has pages this client has not read, so the total is a floor
                           and says so rather than naming a number it would have to correct. */}
                       {more.hasMore ? '+' : ''}
                     </Text>
+                    {grid && pagerDot}
                     <Button
-                      variant='secondary'
+                      {...pagerDoor}
                       size='xs'
                       disabled={(onLastLocalPage && !more.hasMore) || more.loading}
                       onClick={() => {
@@ -1116,11 +1443,11 @@ export function GenerationHistory({
                       }}
                       aria-label='earlier runs'
                     >
-                      {more.loading ? 'reading…' : 'older ›'}
+                      {more.loading ? 'reading…' : grid ? 'older' : 'older ›'}
                     </Button>
                     <span className='ml-auto'>
                       <Button
-                        variant='secondary'
+                        {...pagerDoor}
                         size='xs'
                         onClick={() => {
                           setShowAll(true);
@@ -1149,7 +1476,7 @@ export function GenerationHistory({
             <GroupLabel
               action={
                 <span className='flex flex-wrap items-center gap-1.5'>
-                  <CountPill
+                  <HeaderCount
                     n={archShownCount}
                     noun={repRunNoun(rep)}
                     atLeast={archFloor}
@@ -1160,8 +1487,9 @@ export function GenerationHistory({
                     }
                   />
                   <Button
-                    variant='secondary'
+                    variant='underline'
                     size='xs'
+                    className='text-labelColor hover:text-textColor'
                     aria-expanded
                     aria-label='hide the archived shelf'
                     onClick={() => {
@@ -1169,7 +1497,8 @@ export function GenerationHistory({
                       setOpenDeck(null);
                     }}
                   >
-                    hide ▾
+                    hide
+                    <FoldCaret open />
                   </Button>
                 </span>
               }
@@ -1207,8 +1536,9 @@ export function GenerationHistory({
             <GroupLabel
               action={
                 <Button
-                  variant='secondary'
+                  variant='underline'
                   size='xs'
+                  className='text-labelColor hover:text-textColor'
                   aria-expanded
                   aria-label='hide the brought renders'
                   onClick={() => {
@@ -1216,7 +1546,8 @@ export function GenerationHistory({
                     setOpenDeck(null);
                   }}
                 >
-                  hide ▾
+                  hide
+                  <FoldCaret open />
                 </Button>
               }
             >
@@ -1246,6 +1577,7 @@ export function GenerationHistory({
             techCardId={techCardId}
             picture={splitting.picture}
             handle={splitting.handle}
+            views={splitting.views}
             open
             /* Разрез в истории — раскладка склеенного листа на виды, а НЕ пополнение промпта
                (T-15): кадры получат вид и станут картинками полосы; ролей промпта сервер им не
@@ -1254,7 +1586,7 @@ export function GenerationHistory({
             onOpenChange={(open) => !open && setSplitting(null)}
           />
         )}
-      </Section>
+      </HistoryShell>
     </RenderDoorsHost>
   );
 }

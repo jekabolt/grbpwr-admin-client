@@ -1,41 +1,31 @@
 import type {
-  DesignBenchSlotRef,
   GetDesignBandResponse,
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { useEffect, useState } from 'react';
 
-import type { TechCardFormData } from '../../schema';
 import { isPickablePicture } from '../band-feed';
-import {
-  COLORWAY_NONE,
-  benchKindOf,
-  colorwayOf,
-  pictureBenchKind,
-  type Representation,
-} from '../bench-kinds';
-import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
+import { pictureBenchKind, type Representation } from '../bench-kinds';
+import { refBenchKind } from '../bench-slot';
 import { pictureHandle } from '../handles';
 import { VectorModal } from '../modals';
-import type { VectorReplace } from '../modals/vector-modal';
 import { usePickMode } from '../pick-mode';
-import { PictureTile } from '../picture-tile';
+import { PictureTile, type PictureTileFlag, type PictureTileMenu } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { RunRenderTile, useRenderHost } from '../render/render-tile';
 import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
-import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
-import { compositeTail, isCutOut, readComposite, splitVerb } from './composite';
-import { DeletePictureDoor, isDerivedPicture } from './delete-picture-modal';
-import { SlotPicker } from './slot-picker';
+import { compositeTail, offersSplit, readComposite, readSplit, splitVerb } from './composite';
+import { deleteTitle, isDerivedPicture, useDeletePicture } from './delete-picture-modal';
+import { isUndoneEdit, successorStands } from './edit-chain';
+import { useEditChainDoors } from './edit-chain-doors';
+import { slotOfPicture } from './picture-slot';
+import { ReplacingEditor } from './propagating-editor';
+import { useSlotMenu } from './slot-picker';
 import { thumbUrl } from './thumb';
 
 /**
@@ -45,82 +35,12 @@ import { thumbUrl } from './thumb';
  * (`slotOfPicture`, `kindWord`), so the history row and the latest-generation workbench under
  * GENERATE (`latest-generation.tsx`, through `run-outputs.tsx`) put the SAME tile on screen: split
  * in the corner of an uncut sheet, edit that files a NEW sibling picture (`slot={null}` — the tile
- * is not a bench slot), zoom through the host's viewer group, and the footer that marks a plate
- * into FLAT SLOTS (`SlotPicker`) or takes it out (`unmark`).
+ * is not a bench slot), the viewer through the host's gallery group, and the two placing organs —
+ * `slot ▾` (`useSlotMenu`) for a free plate, `✕` (unmark) for a plate a slot reads — IN THE FRAME
+ * since T13, like FLAT SLOTS' own cells.
  */
 
 /* ────────────────────────────── reading ────────────────────────────── */
-
-type SlotOfPicture = {
-  ref: DesignBenchSlotRef;
-  /**
-   * THE SLOT'S FULL NAME, FOR PROSE: `front`, or `render · front` — a bench other than the flat one
-   * says its name, because «FRONT» alone names two different slots. Read by `unmark`'s label and
-   * title, where the sentence has to be unambiguous on its own («take this picture out of …»).
-   * ⚠ NOT the badge — see `badge` below.
-   */
-  label: string;
-  /**
-   * THE WORD ON THE TILE'S BADGE — the side, and only the side (r3 п.33). Владелец, дословно: «в
-   * истории на FABRIC RENDER в миниатюрах не писать род RENDER FRONT». Род здесь сказан ДВАЖДЫ до
-   * того, как его прочтут: шаг, на котором открыта история, уже сузил её до своего рода, и подпись
-   * под кадром печатает его словом (`render · front`). Третье повторение на самом кадре — шум, и
-   * оно съедало ширину ярлыка, у которого есть свой потолок в примитиве.
-   * ⚠ ЭТО ПОЛЕ, А НЕ `label.split()` У ВЫЗЫВАЮЩЕГО: два имени одного слота обязаны считаться там
-   * же, где считается его адрес, иначе они разойдутся молча — ровно как разошлись роды верстаков.
-   */
-  badge: string;
-  /** The caption's word for the place: `front`, `cuff (2)`. */
-  place: string;
-  rev: number;
-};
-
-/**
- * Which bench slot holds this picture, addressed the way a write to it must be addressed.
- *
- * THE ROW ITSELF NAMES ITS BENCH (L-1/L-5). This walks the raw rows: whatever bench the picture
- * actually stands on — its own, or the wrong one placed by the old defect — the unmark addresses
- * THAT row, with THAT row's kind and CAS token, which is the only ref the server will not refuse.
- * The kind is spelled from the row, never guessed from the picture.
- */
-function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPicture | null {
-  if (!pictureId) return null;
-  for (const row of band.bench ?? []) {
-    if ((row.pictureId ?? 0) !== pictureId) continue;
-    const view = normaliseViewKey(row.viewKey);
-    // A RETIRED THREE-QUARTER IS STILL A SIDE ROW, NOT A DETAIL (D-18, Codex M-11): it is addressed
-    // by its view key like any side, and prints «3/4 left (legacy)» — «not active» never means
-    // «address it as a detail by id».
-    if (isActiveView(view) || isLegacyView(view)) {
-      const kind = benchKindOf(row);
-      return {
-        /* И КОЛОРВЕЙ БЕРЁТСЯ У САМОЙ СТРОКИ, А НЕ У ЭКРАНА (L-2): снятие адресует ТУ строку, в
-           которой плита стоит, — со всеми тремя половинами её адреса. Разбор — один, `colorwayOf`
-           в `../bench-kinds`. */
-        ref: { viewKey: view, kind, colorwayId: colorwayOf(row) },
-        // The flat bench keeps its bare labels — the look every tile has always had; any other
-        // bench says its name, because «FRONT» alone now names two different slots. That is the
-        // PROSE name; the badge on the tile carries the side alone (r3 п.33).
-        label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
-        badge: viewLabel(view),
-        place: viewLabel(view),
-        rev: row.slotRev ?? 0,
-      };
-    }
-    const name = displayDetailName(readBench(band, benchKindOf(row)).details, row);
-    return {
-      // A minted id already names its bench AND its colourway; both are ignored/deferred to beside
-      // a slot_id, so 0 here is «not stated» and lets the row's own value stand.
-      ref: { slotId: row.id, kind: undefined, colorwayId: COLORWAY_NONE },
-      // Именованная деталь рода не носила никогда — её имя и есть её адрес.
-      label: name,
-      badge: name,
-      place: name,
-      rev: row.slotRev ?? 0,
-    };
-  }
-  return null;
-}
 
 /** The word for a run's kind on its own line: `flat · pattern · render · 3D · on model`. */
 export const REP_NOUN: Record<Representation, string> = {
@@ -145,166 +65,41 @@ function kindWord(run: Pick<common_DesignRun, 'kind'>, rep: Representation | nul
   return rep ? REP_NOUN[rep] : kind || 'run';
 }
 
-/* ─────────────────────── «overwrite» — when it is closed (O-53 phase 2) ─────────────────────── */
-
 /**
- * HOW MANY PIECES CUT STRAIGHT OUT OF `sheetId` STILL STAND — the server's `cut_sheet` guard, read
- * off the row (`DesignStandingPieces`, entity/design_replace.go): a piece stands while anything
- * grown from it is visible — the piece itself, an edit that took its place (`replaced_by`, followed
- * to the end), a piece cut from any of those, and so on down the branch. Crops and edits inherit
- * their parent's run, so the row IS the whole branch.
+ * ═══ THE ONE SPLIT GATE (03.10, owner items 8 and 19) ═══════════════════════════════════════════
+ * A tile offers the cut where a cut is NEEDED (item 8: `readSplit` + `offersSplit`) and only where
+ * the picture can be cut at all: not on a card the person cannot write, not on an old hidden stamp,
+ * not on a picture an edit replaced, never on a 3D file (E-32). The SPLIT corner here and the
+ * bench's inline editor (`latest-generation.tsx`, T20) read this one gate, so the bench never draws
+ * an editor over a sheet whose tile would not have offered the cut. Returns the views the frames
+ * are seeded from, or `null`.
  */
-function standingPieces(pictures: readonly common_DesignPicture[], sheetId: number): number {
-  const byId = new Map<number, common_DesignPicture>();
-  const cutsOf = new Map<number, number[]>();
-  for (const picture of pictures) {
-    const id = picture.id ?? 0;
-    if (id <= 0) continue;
-    byId.set(id, picture);
-    const parent = picture.derivedFrom ?? 0;
-    if (!isCutOut(picture) || parent <= 0) continue;
-    const list = cutsOf.get(parent);
-    if (list) list.push(id);
-    else cutsOf.set(parent, [id]);
-  }
-  let standing = 0;
-  for (const piece of cutsOf.get(sheetId) ?? []) {
-    const stack = [piece];
-    const seen = new Set<number>([sheetId]);
-    let stands = false;
-    while (stack.length && !stands) {
-      const id = stack.pop() ?? 0;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const node = byId.get(id);
-      if (!node) continue;
-      if (!isPictureHidden(node)) stands = true;
-      stack.push(...(cutsOf.get(id) ?? []));
-      if ((node.replacedBy ?? 0) > 0) stack.push(node.replacedBy ?? 0);
-    }
-    if (stands) standing += 1;
-  }
-  return standing;
-}
-
-/**
- * WHY «OVERWRITE» IS CLOSED FOR THIS PICTURE, as the end of «overwrite is closed: …» — or null.
- * 07-FLAT-WORKBENCH.md §3c/3d, in this order:
- *   · the server predates the verb — `replaced_by` ABSENT (not 0) on the read; the gateway emits
- *     the field on every picture of a server that has it (proto: DesignPicture.replaced_by);
- *   · an edit already took its place (only a picture held under an open editor is still drawn so on
- *     the workbench — `outputPlan`'s `keep`);
- *   · the picture carries the old hidden stamp (27.09, review r2): a stamp from before per-picture
- *     hiding was removed (T-14), which nothing on this screen can lift — the edit goes beside;
- *   · a sheet with pieces standing: they would stay cut from the original (`cut_sheet`);
- *   · the original is on the card's technical sheet (`technicalMedia`): `documentPlates` lists the
- *     card's media first and the bench plate after it, so the edit taking the slot would print a
- *     SECOND front beside the original — and its callouts would stay pinned to the original. The
- *     server refuses the same (`technical_sheet`, D-55); this reading only spares the save and the
- *     upload that its refusal would come after.
- * Every fact here can change while the editor is open — a poll brings another tab's edit or cut,
- * the card form takes a callout — so the open workbench editor re-renders the reason
- * (`WorkbenchEditor`: `useWatch`, the band) and asks for it again right before it writes
- * (`VectorReplace.closedNow`).
- */
-function overwriteClosed(
+export function splitViewsOf(
+  band: GetDesignBandResponse,
   picture: common_DesignPicture,
-  siblings: readonly common_DesignPicture[],
-  form: { technicalMedia?: { mediaId?: number }[]; callouts?: { mediaId?: number }[] } | null,
-): string | null {
-  if (picture.replacedBy === undefined) return 'this server cannot replace a picture yet';
-  if ((picture.replacedBy ?? 0) > 0)
-    return 'an edit has already taken this picture’s place — edit that one instead';
-  if (isPictureHidden(picture))
-    return 'this picture is hidden — an old stamp nothing here can lift, so save the edit as new';
-  const pieces = standingPieces(siblings, picture.id ?? 0);
-  if (pieces > 0)
-    return pieces === 1
-      ? 'this sheet is already cut into 1 piece and it stays cut from the original — edit the piece instead'
-      : `this sheet is already cut into ${pieces} pieces and they stay cut from the original — edit a piece instead`;
-  const mediaId = picture.media?.id ?? 0;
-  if (mediaId > 0 && (form?.technicalMedia ?? []).some((m) => (m.mediaId ?? 0) === mediaId)) {
-    const callouts = (form?.callouts ?? []).filter((c) => (c.mediaId ?? 0) === mediaId).length;
-    return callouts > 0
-      ? `${callouts} callout${callouts === 1 ? '' : 's'} on the sheet ${callouts === 1 ? 'is' : 'are'} pinned to the original and would stay with it`
-      : 'the original is on the card’s technical sheet and would stay there beside the edit';
-  }
-  return null;
-}
-
-/** The card fields `overwriteClosed` reads — one array for the life of the page (`useWatch` keys on it). */
-const SHEET_FIELDS = ['technicalMedia', 'callouts'] as const;
-
-/** Where a picture stands on `band`'s bench, in prose — the editor's toast after an overwrite (D-55). */
-function slotLabelOf(band: GetDesignBandResponse, pictureId: number): string | null {
-  return slotOfPicture(band, pictureId)?.label ?? null;
-}
-
-/**
- * ═══ THE WORKBENCH'S EDITOR OVER ONE TILE — AND THE ONLY WATCHER OF THE CARD FORM (review r3) ═══
- *
- * Overwrite's reasons read the card form — `technicalMedia` and `callouts` — and move with it while
- * the question stands (27.09, review r2, D-55): a snapshot read as the editor opened went stale the
- * moment somebody pinned a callout. Watched by every tile, though, a keystroke in a callout made
- * every picture of the history render again, for a question none of them can ask. Mounted only
- * while a workbench tile's editor is open, this watches for exactly one tile, and only then.
- *
- * `closedNow` is the same reading made at the moment of the call — the editor asks it right before
- * it writes an overwrite, long after the render that drew the question (`VectorReplace.closedNow`).
- */
-function WorkbenchEditor({
-  band,
-  techCardId,
-  picture,
-  siblings,
-  slotLabel,
-  disabled,
-  onOpenChange,
-}: {
-  band: GetDesignBandResponse;
-  techCardId: number;
-  picture: common_DesignPicture;
-  siblings?: readonly common_DesignPicture[];
-  slotLabel: string | null;
-  disabled?: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const form = useFormContext<TechCardFormData>();
-  const [technicalMedia, callouts] = useWatch({ control: form.control, name: SHEET_FIELDS });
-  /** The picture and its row as of the last render — what `closedNow` judges. */
-  const latest = useRef({ picture, siblings });
-  latest.current = { picture, siblings };
-  const closedNow = useCallback(() => {
-    const { picture: p, siblings: row } = latest.current;
-    return overwriteClosed(
-      p,
-      row ?? [p],
-      form.getValues() as Parameters<typeof overwriteClosed>[2],
-    );
-  }, [form]);
-  return (
-    <VectorModal
-      open
-      onOpenChange={onOpenChange}
-      techCardId={techCardId}
-      band={band}
-      base={picture}
-      slot={null}
-      replace={
-        {
-          pictureId: picture.id ?? 0,
-          slotLabel,
-          closed: overwriteClosed(picture, siblings ?? [picture], { technicalMedia, callouts }),
-          closedNow,
-          slotOf: slotLabelOf,
-        } satisfies VectorReplace
-      }
-      disabled={disabled}
-    />
-  );
+  siblings: readonly common_DesignPicture[] | undefined,
+  run: common_DesignRun | undefined,
+  disabled: boolean | undefined,
+): string[] | null {
+  // A restored original (its successor undone, T28 v2) is the current version and is cut as any.
+  if (disabled || isPictureHidden(picture) || successorStands(picture, siblings ?? [picture]))
+    return null;
+  const threed =
+    (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(thumbUrl(picture.media));
+  if (threed) return null;
+  const split = readSplit(band, picture, siblings, run);
+  return offersSplit(split) ? split.views : null;
 }
 
 /* ────────────────────────────── the tile ────────────────────────────── */
+
+/** The `delete…` row of the tile's menu — a value no slot can spell (`v:` / `d:` / `__new_detail`). */
+const DELETE_ITEM = '__delete';
+
+/** The worker's `grey` flag: a grey fill or tint inside the drawing. */
+function isGrey(picture: common_DesignPicture): boolean {
+  return (picture.flags ?? []).some((f) => f.trim().toLowerCase() === 'grey');
+}
 
 /**
  * A run's output. THE PICTURE ITSELF IS `PictureTile` AND NOTHING ELSE (T-8): the file says WHICH
@@ -312,15 +107,21 @@ function WorkbenchEditor({
  * where they sit. The tile is handed its OFFSET in a row the section assembled from the whole
  * loaded history (`galleryIndex`) — that is what makes the arrow leave the page it was opened from.
  *
- * WHAT IS LOCAL IS THE CAPTION AND THE FOOTER, the mock-up's `histTile`: `flat · front` under the
- * frame, then `UNMARK` for a plate a slot reads (И-1 — neither a ✕ nor a picker), the slot picker
- * for a free picture, nothing under a sheet (its one door is the split in the corner).
+ * ═══ NOTHING STANDS UNDER THE FRAME (T13, 20-TILE-SPEC §3) ═══════════════════════════════════
+ * Владелец: «в FLAT LATEST GENERATION кнопки unmark или селектор должны быть внутри плитки по
+ * принципу как это сделано в flat slots». The caption (`flat · not standing`) and the door row
+ * (`unmark` button / `— slot —` select / `delete`) are gone: a plate a slot reads wears its side on
+ * the badge and `✕` = unmark top-right (FLAT SLOTS' verb and RPC); a free plate gets the `slot ▾`
+ * corner; `delete…` (workbench, derived only) is the menu's last, danger row behind the same
+ * modal. States the frame cannot show (`hidden`, `replaced`, `fit ≠ card`) are the flag; the
+ * address, provenance and every reason ride in the cell's `title`.
  */
 export function RunTile({
   band,
   techCardId,
   picture,
   siblings,
+  run,
   workbench,
   rep,
   cardFit,
@@ -339,6 +140,8 @@ export function RunTile({
   picture: common_DesignPicture;
   /** Every picture of the run row this tile stands in — the branch `overwrite` is judged by. */
   siblings?: readonly common_DesignPicture[];
+  /** The run row the tile stands in: its params tell a one-picture sheet the writer never saw. */
+  run?: common_DesignRun;
   /**
    * The tile stands on the latest-generation WORKBENCH: its editor asks «overwrite or save as new»
    * (`VectorModal.replace`). In the history an edit is always new.
@@ -358,7 +161,12 @@ export function RunTile({
   /** The frame's surface unfolds a closed deck instead of zooming (J-2); only the sheet has it. */
   onOpen?: () => void;
   onZoom?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  /**
+   * Cut this sheet — the host's split window. `views` is the tile's own reading (`readSplit`), the
+   * one the split gate offered the cut by: the window seeds its frames from it, so a `one` sheet the
+   * writer never stamped (`composite_views` empty, beta) still opens as FRONT / BACK / … (R(a)).
+   */
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -394,11 +202,14 @@ export function RunTile({
    * changed — it is not hidden, its pixels and crops are its own; the history says so under it,
    * «replaced by an edit», and no cut is offered (the server refuses one: `already_replaced`).
    */
-  const replaced = (picture.replacedBy ?? 0) > 0;
+  const replaced = successorStands(picture, siblings ?? [picture]);
+  /** An edit the person undid (T28 v2, `undone_at`): its place given back to the version before it. */
+  const undone = isUndoneEdit(picture);
   // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. Nothing here infers compositeness
   // from what the run ASKED for.
-  const facts = readComposite(band, picture);
+  const facts = readComposite(band, picture, siblings);
   const composite = facts.declared;
+  const split = readSplit(band, picture, siblings, run);
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture);
   const inSlot = slotOfPicture(band, pictureId);
@@ -419,7 +230,7 @@ export function RunTile({
    * Прогон считается целиком: и `.glb`, и его растровая миниатюра приезжают с родом `threed`.
    */
   const threedFile = (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(url);
-  /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `footer` ниже). */
+  /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `menu` ниже). */
   const patternTile = (picture.kind ?? '').trim().toLowerCase() === 'pattern' || rep === 'pattern';
   // The frame opens by its MEDIA (`openAt`), the offset stays the fallback.
   const galleryGroup =
@@ -430,11 +241,21 @@ export function RunTile({
   /* ═══ «DELETE» — ON THE WORKBENCH, ON A DERIVED PICTURE ONLY (28.09, O-68, D-74) ═══════════════
      A crop or an edit of one leaves the card and the storage for good; a root plate of the run has
      no door (the server refuses it: `picture_is_root`). The history's tiles draw none of this — the
-     host gates it (`workbench`). The last door of the row, one step away from the others. */
-  const deleteDoor =
-    workbench && !disabled && pictureId > 0 && isDerivedPicture(picture) ? (
-      <DeletePictureDoor techCardId={techCardId} picture={picture} siblings={siblings} />
-    ) : null;
+     host gates it (`workbench`). On every tile, the render tile included, it is the menu's last
+     row, `delete…` (T13, T17), opening the one confirmation `useDeletePicture` owns. */
+  const canDelete = !!workbench && !disabled && pictureId > 0 && isDerivedPicture(picture);
+  /* Hooks above the render-host branch: a tile never changes host, but React counts calls. */
+  const removal = useDeletePicture(techCardId, picture, siblings);
+  const slotMenu = useSlotMenu({ band, techCardId, picture, rep, disabled });
+  /* UNDO / REDO (T28 v2): on the FLAT workbench only — where an edit takes its original's place. The
+     history shows every link and walks none; a render's edit is always new. The server moves the
+     slot holding the version itself. */
+  const chainDoors = useEditChainDoors({
+    techCardId,
+    picture,
+    handle,
+    disabled: !workbench || !!renderHost || !!disabled || threedFile,
+  });
 
   /* ═══ A FABRIC RENDER IN A RUN ROW IS THE RENDER TILE (27.09, O-63, D-62 п.2) ═════════════════
      On FABRIC RENDER a render run's plate draws the doors RENDERS OF THIS CARD drew — `mark ▸`,
@@ -454,22 +275,36 @@ export function RunTile({
         deckMemberOf={deckMemberOf}
         galleryGroup={galleryGroup}
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
-        onSplit={() => onSplit(picture)}
+        onSplit={() => onSplit(picture, split.views)}
         onEdit={openEditor}
-        trailingDoor={deleteDoor}
+        split={split}
+        onDelete={canDelete ? removal.ask : undefined}
+        deletePending={removal.pending}
       >
-        {editing && (
-          <VectorModal
-            open
-            onOpenChange={setEditing}
-            techCardId={techCardId}
-            band={band}
-            base={picture}
-            slot={null}
-            replace={null}
-            disabled={disabled}
-          />
-        )}
+        {removal.modal}
+        {/* T59: a render's edit takes its place too — the slot holding it moves onto the edit. */}
+        {editing &&
+          (pictureId > 0 ? (
+            <ReplacingEditor
+              band={band}
+              techCardId={techCardId}
+              picture={picture}
+              siblings={siblings}
+              disabled={disabled}
+              onOpenChange={setEditing}
+            />
+          ) : (
+            <VectorModal
+              open
+              onOpenChange={setEditing}
+              techCardId={techCardId}
+              band={band}
+              base={picture}
+              slot={null}
+              replace={null}
+              disabled={disabled}
+            />
+          ))}
       </RunRenderTile>
     );
   }
@@ -483,51 +318,56 @@ export function RunTile({
    * picker below.
    */
   const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.badge : undefined;
-  const place = inSlot ? inSlot.place : 'not standing';
-  /**
-   * «REPLACED BY AN EDIT» TAKES THE CAPTION'S ROOM (O-53 phase 2). It is the one fact about the tile
-   * that the frame does not show, and «flat · replaced by an edit» does not fit the history's 148px
-   * track — measured: it cut at «replaced by an e…». The kind word goes (only a flat is ever replaced:
-   * the question lives on the FLAT workbench); a slot the original was put back into stays named.
-   */
-  const replacedCaption = replaced
-    ? inSlot
-      ? `${inSlot.place} · replaced by an edit`
-      : 'replaced by an edit'
-    : null;
 
-  // `flat · front` — the mock-up's `picName`. The address (`run 7 · b`), the provenance and the
-  // composite tail ride in the title: the row already says which run, and the caption is one line.
-  //
-  // ⚠ У ПЛИТКИ ТКАНИ ВТОРОЙ ПОЛОВИНЫ НЕТ (r3 п.20, вторая половина того же пункта). «pattern · not
-  // standing» — то же самое утверждение, что и снятая фраза «стоит не в слоте», сказанное мельче:
-  // паттерн НЕ СТОИТ НИГДЕ ПО УСТРОЙСТВУ, и «не стоит» под каждым кадром ленты — это не факт о
-  // работе, а повторение определения. Остаётся род, который на смешанной ленте ещё различает кадры.
-  // ⚠ У ЛИСТА ПОДПИСИ НЕТ (владелец, 2026-09-07 утро: «flat · sheet of 6 — этот текст убрать»):
-  // бейдж `N views` уже несёт единственный факт, который эта строка повторяла словами.
-  const caption = (
-    <>
-      {/* A REPLACED SHEET SAYS SO TOO: the owner took «flat · sheet of 6» off the sheet because the
-          badge already said it; «replaced by an edit» is a state no badge carries. */}
-      {(!composite || replaced) && (
-        <Text
-          size='micro'
-          component='p'
-          className='mt-1 truncate'
-          title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}${replaced ? ' · replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here' : ''}`}
-        >
-          {replacedCaption ?? (patternTile && !inSlot ? word : `${word} · ${place}`)}
-        </Text>
-      )}
-      {fitMismatch && (
-        // Слово, а не только цвет: система обязана читаться в монохроме, и «≠» здесь несёт смысл
-        // сама по себе. Обе величины названы — расхождение без второй половины ничего не значит.
-        <Text size='nano' component='p' className='truncate uppercase text-error'>
-          fit {runFit} ≠ card {cardFit}
-        </Text>
-      )}
-    </>
-  );
+  /**
+   * ONE FLAG — the state the frame cannot show, in this order: the old `hidden` stamp (pickers and
+   * slots skip it), «replaced by an edit» (O-53 phase 2), the run's fit against the card's. Words,
+   * not colour alone: `≠` carries the meaning in monochrome too.
+   */
+  const flag: PictureTileFlag | undefined = undone
+    ? {
+        word: 'undone',
+        tone: 'mut',
+        title: 'an undone edit: the version before it stands in its place; redo brings it back',
+      }
+    : hidden
+      ? {
+          word: 'hidden',
+          tone: 'mut',
+          title:
+            'hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.',
+        }
+      : replaced
+        ? {
+            word: 'replaced',
+            tone: 'mut',
+            title:
+              'replaced by an edit: the edit stands in its place on the workbench, and this picture stays here',
+          }
+        : fitMismatch
+          ? { word: 'fit ≠ card', tone: 'warn', title: `fit ${runFit} ≠ card ${cardFit}` }
+          : isGrey(picture)
+            ? {
+                word: 'grey',
+                tone: 'mut',
+                title:
+                  'a grey fill or tint inside the drawing — the flat style is white inside black lines',
+              }
+            : undefined;
+
+  /**
+   * THE CELL'S TITLE — what the caption under the frame used to say, plus its tooltip: the kind
+   * and the place, the address, the provenance, the composite tail, and the reason a picture is
+   * offered no slot (E-12, `useSlotMenu.reason`; the pattern step stays silent, r3 п.20).
+   */
+  const cellTitle = [
+    patternTile && !inSlot ? word : `${word} · ${inSlot ? inSlot.label : 'not standing'}`,
+    `${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`,
+    fitMismatch && flag?.word !== 'fit ≠ card' ? `fit ${runFit} ≠ card ${cardFit}` : '',
+    !patternTile && !composite && !inSlot ? slotMenu.reason ?? '' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   /**
    * PICK MODE TAKES THE TILE OVER, and the picture keeps its skin while it does. The tile becomes
@@ -538,7 +378,7 @@ export function RunTile({
   if (pick.target) {
     const targetKind = refBenchKind(band, pick.target.slot);
     const kindOk = pictureBenchKind(picture) === targetKind;
-    const pickable = isPickablePicture(picture) && kindOk;
+    const pickable = isPickablePicture(picture) && kindOk && !replaced;
     return (
       <button
         type='button'
@@ -562,100 +402,105 @@ export function RunTile({
       >
         {/* `w-full` НЕСУЩЕЕ: обёртка здесь — <button>, а у кнопки UA-раскладка не растягивает
             детей по поперечной оси, и кадр с одним лишь `aspect-ratio` схлопнулся бы. */}
-        <PictureTile url={url} alt={handle} badge={badge} selected={pickable} className='w-full' />
-        {caption}
+        <PictureTile
+          url={url}
+          alt={handle}
+          badge={badge}
+          flag={flag}
+          selected={pickable}
+          className='w-full'
+        />
       </button>
     );
   }
 
-  let footer: React.ReactNode = null;
-  if (hidden) {
-    /**
-     * A STATE, NOT AN ORGAN. Hiding one picture is gone (T-14) and so is its undo; what is left is
-     * a stamp some earlier session wrote, which every picker still obeys.
-     */
-    footer = (
-      <Pill
-        tone='mut'
-        title='hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.'
-      >
-        hidden
-      </Pill>
-    );
-  } else if (inSlot) {
-    // И-1: a plate that a slot reads carries neither a ✕ nor a picker — both would be refused — so
-    // the one honest door is the one that undoes the placement. Full width, as the mock-up's.
-    footer = (
-      <Button
-        variant='secondary'
-        size='xs'
-        className='w-full'
-        disabled={disabled || setBenchSlot.isPending}
-        onClick={() =>
-          setBenchSlot.mutate({
-            slot: inSlot.ref,
-            // 0 is UNMARK: empty the slot without deleting it. A different act from deleting a
-            // detail slot, and it has to stay different.
-            pictureId: 0,
-            expectedSlotRev: inSlot.rev,
-          })
+  /**
+   * ✕ = UNMARK — exactly FLAT SLOTS' verb, word and RPC (`bench-slot.tsx`): out of the block is
+   * out of the slot, and the plate stays in the history. pictureId 0 EMPTIES the slot without
+   * deleting it — a different act from deleting a detail slot, and it has to stay different. A
+   * hidden plate keeps no ✕: its stamp is the one fact its tile shows (as before, И-1).
+   */
+  const onRemove =
+    inSlot && !hidden && !disabled
+      ? {
+          onClick: () =>
+            setBenchSlot.mutate({ slot: inSlot.ref, pictureId: 0, expectedSlotRev: inSlot.rev }),
+          ariaLabel: `take ${handle} off ${inSlot.label}`,
+          title:
+            `unmark — take this picture out of ${inSlot.label}; it stays here` +
+            (canDelete ? '. To delete it for good, unmark it first' : ''),
+          pending: setBenchSlot.isPending,
         }
-        aria-label={`take ${handle} off ${inSlot.label}`}
-        title={disabled ? undefined : `take this picture out of ${inSlot.label}`}
-      >
-        unmark
-      </Button>
-    );
-  } else if (!composite && !patternTile) {
-    // NO SLOT PICKER UNDER A COMPOSITE, AND THAT IS THE RULE: a slot holds one view and that file
-    // holds several, so its only door is the split in the corner. `rep` — the RUN'S kind — is
-    // load-bearing (E-12): a recolour's outputs say «render» on the wire.
-    // ⚠ И НИ ПИКЕРА, НИ ФРАЗЫ ПОД ПЛИТКОЙ ПАТТЕРНА (r3 п.20). Владелец, дословно: «в истории на
-    // PATTERN убрать текст a repeating tile stands in no slot — it is cloth, not a view». Пикер
-    // рисовал на её месте объяснение, почему двери нет, — по общему правилу волны «никогда не
-    // отсутствие, никогда мёртвый орган». Правило верно там, где человек ИЩЕТ дверь; здесь он её
-    // не ищет: шаг называется PATTERN, и ни одна плитка на нём в слот не встаёт, так что фраза
-    // повторялась под КАЖДЫМ кадром ленты, одна и та же. Объяснение живёт там, где оно ещё нужно,
-    // — у 3D-кадра и у снимка на модели, где рядом СТОЯТ плитки, у которых дверь есть.
-    // `min-h`, not `h`: one branch of the picker draws a phrase, not a control, and a fixed height
-    // painted it over the next row's meta line (measured on beta, tab ALL, 1400 wide).
-    footer = !disabled && (
-      <SlotPicker
-        band={band}
-        techCardId={techCardId}
-        picture={picture}
-        rep={rep}
-        className='min-h-[20px] w-full'
-      />
-    );
-  }
+      : undefined;
+
+  /**
+   * `slot ▾` — A FREE PLATE'S ONE PLACING ORGAN. None under a composite (a slot holds one view and
+   * a sheet several: its door is `split`), none on a pattern tile (r3 п.20: the step has no
+   * slots, the phrase repeated under every frame), none where no bench takes the kind (E-12 — the
+   * reason is the cell's title). `delete…` rides last, in the error ink, on the workbench only;
+   * a plate standing in a slot has no menu at all — unmark first, then delete.
+   */
+  const slotItems =
+    !inSlot && !hidden && !composite && !patternTile && !disabled ? slotMenu.items : [];
+  const offerDelete = canDelete && !inSlot;
+  const menu: PictureTileMenu | undefined =
+    slotItems.length || offerDelete
+      ? {
+          label: slotItems.length ? 'slot' : 'more',
+          ariaLabel: slotItems.length ? `put ${handle} into a slot` : `more for ${handle}`,
+          items: [
+            ...slotItems,
+            ...(offerDelete
+              ? [
+                  {
+                    value: DELETE_ITEM,
+                    label: 'delete…',
+                    tone: 'danger' as const,
+                    title: deleteTitle(removal.pieces),
+                  },
+                ]
+              : []),
+          ],
+          onPick: (value) => (value === DELETE_ITEM ? removal.ask() : slotMenu.place(value)),
+          pending: slotMenu.pending || removal.pending,
+          'data-menu': `slot:${pictureId}`,
+        }
+      : undefined;
 
   return (
     <div
-      className='flex h-full w-full min-w-0 flex-col'
+      className='group flex h-full w-full min-w-0 flex-col'
       data-picture={pictureId || undefined}
       data-deck-member={deckMemberOf || undefined}
+      title={cellTitle}
     >
       <PictureTile
         url={url}
         alt={handle}
         badge={badge}
+        flag={flag}
+        menu={menu}
+        onRemove={onRemove}
         onOpen={onOpen}
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
         galleryGroup={galleryGroup}
+        onUndo={chainDoors.onUndo}
+        onRedo={chainDoors.onRedo}
         /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6): прозрачность на всей плитке глушила бы и дверь
-           `edit` до 1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
+           `edit` до 1.6:1. Флаг «hidden» состояние держит и без заливки. */
         dim={hidden || dim}
         className='w-full'
-        /* РЕЗ ПРЕДЛАГАЕТСЯ НА ЖИВОЙ И ЕЩЁ НЕ РАЗРЕЗАННОЙ КАРТИНКЕ. Этот экран и есть то место, где
-           человек ОБЪЯВЛЯЕТ свой лист многовидовым (полосы входов показывают колоды только для
-           машинных композитов). У уже разрезанной угла нет (F-8). У файла 3D — тем более (E-32). */
+        /* SPLIT ONLY WHERE A SPLIT IS NEEDED (03.10, owner item 8: «кнопка сплит должна быть только
+           на тех карточках где мы уверенны что сплит нужен»): the file declares two or more views
+           (`composite_views`, written by the server for a one-image multi-view run) and nothing
+           has been cut out of it yet (F-8). A single-view picture no longer offers it. Never on a
+           3D file (E-32). */
         onSplit={
-          !disabled && !hidden && !replaced && !threedFile && facts.splitInto === 0
+          splitViewsOf(band, picture, siblings, run, disabled)
             ? {
-                onClick: () => onSplit(picture),
+                onClick: () => onSplit(picture, split.views),
                 ariaLabel: `split ${handle} into views`,
-                title: `${splitVerb(facts)} cut this file into pictures a slot can take`,
+                title: `${splitVerb(split)} cut this file into pictures a slot can take`,
               }
             : undefined
         }
@@ -668,9 +513,7 @@ export function RunTile({
                 onClick: openEditor,
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
-                  (workbench
-                    ? 'draw over this picture — saving asks whether the edit takes this picture’s place in the latest generation or stands beside it; the original stays in the history either way'
-                    : 'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten') +
+                  'draw over this picture — the edit takes its place on the bench and in every slot it stands in; the history keeps both' +
                   (composite
                     ? '. This file holds several views at once, so the edit keeps them together — cut it into views first if you want them apart'
                     : '') +
@@ -681,24 +524,12 @@ export function RunTile({
             : undefined
         }
       />
-      {caption}
-      {/* THE DOOR ROW. With «delete» (D-74) the row is one line: the footer's door keeps the width
-          it had (`flex-1`), «delete» stands last, one step (16px) away from it — twice the gap
-          between doors — and never wraps under it. Without it, the row is what it always was. */}
-      {deleteDoor ? (
-        <div className='mt-1 flex items-center'>
-          {footer && <div className='flex min-w-0 flex-1 items-center gap-x-2'>{footer}</div>}
-          <div className={footer ? 'ml-4 shrink-0' : 'shrink-0'}>{deleteDoor}</div>
-        </div>
-      ) : (
-        footer && (
-          <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>
-        )
-      )}
+      {slotMenu.modal}
+      {removal.modal}
 
       {/* Редактор монтируется только раскрытым. `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не
           слот верстака, и результат правки не обязан никуда вставать. На ВЕРСТАКЕ правка
-          спрашивает «overwrite или save as new» (`replace`): слот, где стоит картинка, переезжает
+          встаёт на место картинки сразу (T28, `replace.direct`; `undo` в углу — шаг назад): слот, где стоит картинка, переезжает
           на правку СЕРВЕРОМ, в той же транзакции, — клиент его не пишет. Причины закрытой
           перезаписи ЖИВЫЕ, пока редактор открыт (D-55): опрос полосы приносит чужую правку или
           разрез, форма карточки — выноску на листе; поэтому `closed` перерисовывается с полосой и
@@ -707,13 +538,13 @@ export function RunTile({
           перерисовывала всю историю на каждую букву выноски. Тост после перезаписи называет слот
           по ПЕРЕЧИТАННОЙ полосе (`slotOf`), а не по вопросу. */}
       {editing &&
-        (workbench && pictureId > 0 ? (
-          <WorkbenchEditor
+        (pictureId > 0 ? (
+          /* T59: the edit takes the picture's place from the history too, not only on the bench. */
+          <ReplacingEditor
             band={band}
             techCardId={techCardId}
             picture={picture}
             siblings={siblings}
-            slotLabel={inSlot?.label ?? null}
             disabled={disabled}
             onOpenChange={setEditing}
           />

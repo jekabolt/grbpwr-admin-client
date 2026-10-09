@@ -9,6 +9,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
@@ -20,11 +21,12 @@ import {
   type Representation,
 } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
+import { ReplacingEditor } from '../generation/propagating-editor';
 import { colorwayLabel } from '../colorway-picker';
-import { Counter, EmptyState } from '../core';
+import { EmptyState } from '../core';
+import { standsOnBench } from '../generation/edit-chain';
 import { isRunLive, runOutcomeNote } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
-import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { pictureIsSelected, pictureThumb, serverStatesSelected } from '../render/model';
 import { isVideoUrl } from '../video-media';
@@ -65,7 +67,8 @@ import { MaskEditor } from './mask';
  * the tiles of the colourway pool (`COLOURWAY_POOL`): a recolour or a 3D model may be filed under a
  * colourway, so no playground window says anything true about their list.
  *
- * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
+ * A press on the picture opens the gallery (no zoom corner, T12); corners: `edit ▸` (draw over
+ * it, saving a NEW picture) on every picture;
  * `mask` (C-11: paint a zone and retouch it, a new picture comes back) on every raster of the room
  * while the server offers Retouch a Zone — the same door the viewer shows for that picture;
  * the `select` mark where the workflow says so (`ResultsDef.selectable` — recolours, as ON MODEL
@@ -135,6 +138,7 @@ function pageRows(band: GetDesignBandResponse, reps: readonly Representation[]):
     if (!rep || !reps.includes(rep)) continue;
     for (const picture of run.pictures ?? []) {
       if (isPictureHidden(picture) || (picture.id ?? 0) <= 0) continue;
+      if (!standsOnBench(picture)) continue; // T59, as in `cardOutputRows`
       out.push({ picture, run });
     }
   }
@@ -157,7 +161,9 @@ export function PlaygroundResults({
   const speaks = serverSpeaksDesign();
   const { setPictureSelected } = useDesignWrites(techCardId);
   const { data: techCard } = useTechCard(techCardId || undefined);
-  const [editingId, setEditingId] = useState(0);
+  /* T59: the picture itself is held, not looked up in the list — the overwrite takes it off the
+     list (an original an edit replaced is offered nowhere) before its editor closes. */
+  const [editing, setEditing] = useState<common_DesignPicture | null>(null);
   const [maskingId, setMaskingId] = useState(0);
   const [selecting, setSelecting] = useState(0);
   /* The picture whose editor is open — its `mask` corner is where focus returns when the door that
@@ -177,7 +183,7 @@ export function PlaygroundResults({
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
-    if (editingId) setEditingId(0);
+    if (editing) setEditing(null);
     if (maskingId) setMaskingId(0);
   }
 
@@ -246,7 +252,7 @@ export function PlaygroundResults({
           ? '· every playground picture of this card'
           : `· ${def.title.toLowerCase()}`
       }
-      action={<Counter n={rows.length} noun='picture' />}
+      action={<HeaderCount n={rows.length} noun='picture' />}
     >
       <div className='flex flex-col gap-4'>
         {pinned.map(({ run, elsewhere }) => {
@@ -280,7 +286,7 @@ export function PlaygroundResults({
               const own = resultsOfRun(run);
               const cut = !!own?.cutout;
               /* B-32: a clip plays in its tile; it has no mask and no draw-over (both are raster
-                 doors — the mask editor and the vector modal read pixels), only zoom. */
+                 doors — the mask editor and the vector modal read pixels), only the gallery. */
               const clip = isVideoUrl(pictureThumb(picture));
               const selectable = !!own?.selectable;
               const chosen = selectable && pictureIsSelected(picture);
@@ -351,7 +357,7 @@ export function PlaygroundResults({
                     onEdit={
                       !writesOff && !clip && pictureThumb(picture)
                         ? {
-                            onClick: () => setEditingId(id),
+                            onClick: () => setEditing(picture),
                             ariaLabel:
                               `edit picture ${picture.ordinal ?? ''} — draw over it`.trim(),
                             title:
@@ -412,15 +418,14 @@ export function PlaygroundResults({
         />
       )}
 
-      {editingId > 0 && rows.some((o) => (o.picture.id ?? 0) === editingId) && (
-        <VectorModal
-          open
-          onOpenChange={(next: boolean) => !next && setEditingId(0)}
-          techCardId={techCardId}
+      {/* T59: the edit takes the picture's place — every slot holding it moves onto the edit. */}
+      {editing && (
+        <ReplacingEditor
           band={band}
-          base={rows.find((o) => (o.picture.id ?? 0) === editingId)!.picture}
-          slot={null}
+          techCardId={techCardId}
+          picture={editing}
           disabled={disabled}
+          onOpenChange={(next: boolean) => !next && setEditing(null)}
         />
       )}
     </Section>

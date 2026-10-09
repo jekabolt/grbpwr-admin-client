@@ -5,6 +5,24 @@ import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
 import { categoryChain } from './fit-vocabulary';
+import {
+  FAMILIES,
+  baseOf,
+  familyFor,
+  isGarmentFamily,
+  type FamilyInput,
+  type GarmentFamily,
+} from './garment-manifest';
+import { SHAPES as B1 } from './garment-shapes/b1';
+import { SHAPES as B2 } from './garment-shapes/b2';
+import { SHAPES as B3 } from './garment-shapes/b3';
+import { SHAPES as B4 } from './garment-shapes/b4';
+import { SHAPES as B5 } from './garment-shapes/b5';
+import { SHAPES as B6 } from './garment-shapes/b6';
+import { SHAPES as B7 } from './garment-shapes/b7';
+import { SHAPES as B8 } from './garment-shapes/b8';
+import { SHAPES as B9 } from './garment-shapes/b9';
+import type { GarmentShape } from './garment-shapes/kit';
 import { isActiveView, normaliseViewKey, type ActiveView } from './views';
 
 /**
@@ -40,7 +58,7 @@ import { isActiveView, normaliseViewKey, type ActiveView } from './views';
  * бок смотрит влево. У плоской вещи (сумка, ремень, шарф, галстук, бумажник, брелок, цепочка,
  * флакон) бок — УЗКИЙ контур предмета ребром, как велит D-36; у объёмной (обувь, кепка, очки,
  * перчатка, носок) — её узнаваемый силуэт сбоку. Представители: сумки — тоут, обувь — кроссовка,
- * предметы — флакон с плоским телом. Аксессуары — ПО ПОДКАТЕГОРИИ (`ACCESSORY_FAMILIES`): у
+ * предметы — флакон с плоским телом. Аксессуары — ПО ПОДКАТЕГОРИИ (манифест, `categories`): у
  * перчатки, очков и галстука нет общего контура, и одна картинка на всех соврала бы почти каждой
  * карточке.
  *
@@ -54,89 +72,14 @@ import { isActiveView, normaliseViewKey, type ActiveView } from './views';
  * категории или верхняя категория, которой этот клиент не знает (новый сервер), — пиктограммы нет:
  * неверная подсказка хуже никакой.
  */
-export type GarmentFamily =
-  // одежда (D-22)
-  | 'jacket'
-  | 'hoodie'
-  | 'tee'
-  | 'trousers'
-  | 'shorts'
-  | 'skirt'
-  | 'dress'
-  | 'briefs'
-  // аксессуары — по подкатегории (D-51)
-  | 'cap'
-  | 'glove'
-  | 'sock'
-  | 'belt'
-  | 'scarf'
-  | 'tie'
-  | 'glasses'
-  | 'wallet'
-  | 'keyring'
-  | 'necklace'
-  // обувь, сумки, предметы (D-51)
-  | 'shoe'
-  | 'bag'
-  | 'object';
-
-/** Имена уровней категории, как их называет словарь (`common_Category.name`). */
-export type FamilyInput = { top?: string | null; sub?: string | null };
-
 /**
- * Подкатегория аксессуара → свой силуэт (D-51): по представителю на подкатегорию — шляпы рисует
- * бейсболка, украшения — кулон на цепочке, брелоки — брелок на кольце. Без подкатегории или с
- * подкатегорией, которой этот клиент не знает, — бейсболка: представитель верхней категории.
- * Имена — те же ключи словаря, что у `familyFor` (0001 и 0367 бэка).
+ * Все силуэты квиза и фоновых подсказок FLAT SLOTS (O5) — из манифеста (95-GARMENT-TAXONOMY §3):
+ * 124 семейства, категория → семейство и уточнение словами деталей карточки живут там же, где их
+ * читает бэк. Здесь только геометрия.
  */
-const ACCESSORY_FAMILIES: ReadonlyMap<string, GarmentFamily> = new Map<string, GarmentFamily>([
-  ['hats', 'cap'],
-  ['gloves', 'glove'],
-  ['socks', 'sock'],
-  ['belts', 'belt'],
-  ['scarves', 'scarf'],
-  ['ties', 'tie'],
-  ['eyewear', 'glasses'],
-  ['wallets', 'wallet'],
-  ['keychains', 'keyring'],
-  ['jewelry', 'necklace'],
-]);
-
-/**
- * Категория → семейство силуэта (D-22, D-51). Порядок проверок — от частного к общему:
- * подкатегория, у которой свой силуэт (худи, шорты, юбки, трусы, любой аксессуар), выигрывает у
- * своей верхней категории. Все девять верхних категорий таксономии имеют семейство; `null` —
- * только у карточки без категории и у верхней категории, которой этот клиент не знает.
- */
-export function familyFor(c: FamilyInput): GarmentFamily | null {
-  const top = (c.top ?? '').trim().toLowerCase();
-  const sub = (c.sub ?? '').trim().toLowerCase();
-  switch (top) {
-    case 'outerwear':
-      return 'jacket';
-    case 'tops':
-      return sub === 'hoodies_sweatshirts' ? 'hoodie' : 'tee';
-    case 'bottoms':
-      if (sub === 'shorts') return 'shorts';
-      if (sub === 'skirts') return 'skirt';
-      return 'trousers';
-    case 'dresses':
-      return 'dress';
-    case 'loungewear_sleepwear':
-      return sub === 'boxers' || sub === 'briefs' ? 'briefs' : 'tee';
-    case 'accessories':
-      return ACCESSORY_FAMILIES.get(sub) ?? 'cap';
-    case 'shoes':
-      return 'shoe';
-    case 'bags':
-      return 'bag';
-    case 'objects':
-      return 'object';
-    default:
-      // нет категории · верхняя категория нового сервера
-      return null;
-  }
-}
+export const GARMENT_FAMILIES: readonly GarmentFamily[] = FAMILIES;
+export { familyFor, isGarmentFamily };
+export type { FamilyInput, GarmentFamily, GarmentShape };
 
 /**
  * Лист категории → имена её уровней. Уровни сопоставляются ЯВНО по `level`, не по глубине:
@@ -161,14 +104,16 @@ export function resolveCategory(
 }
 
 /** Семейство карточки из формы (`categoryId`) и словаря. Вызывать под `FormProvider`. */
-export function useCardGarmentFamily(): GarmentFamily | null {
+export function useCardGarmentFamily(): GarmentFamily | '' {
   const { control } = useFormContext<TechCardFormData>();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
+  // §3.4: «sleeveless / strappy» в деталях карточки уводит блузку в cami, футболку в tank
+  const details = useWatch({ control, name: 'details' }) as TechCardFormData['details'] | undefined;
   const { dictionary } = useDictionary();
   const categories = dictionary?.categories;
   return useMemo(
-    () => familyFor(resolveCategory(categories, categoryId)),
-    [categories, categoryId],
+    () => familyFor(resolveCategory(categories, categoryId), details),
+    [categories, categoryId, details],
   );
 }
 
@@ -179,13 +124,10 @@ export function useCardGarmentFamily(): GarmentFamily | null {
  * общего с фасом контура, рукав или штанина стоят перед туловищем. Где перед и спинка зеркальны
  * (перчатка: большой палец меняет сторону), общий `body` — только то, что у них совпадает, а
  * контур кисти лежит в `front` и `back` каждый своим. Координаты — рука, а не данные:
- * восемьдесят четыре клетки (21 семейство × 4 стороны) проверены глазами на листе-контактке при
+ * сто двадцать клеток (30 семейств × 4 стороны) проверены глазами на листе-контактке при
  * 136px и при 0.12 поверх полос.
  */
-export const GARMENT_SHAPES: Record<
-  GarmentFamily,
-  { body: string; front: string[]; back: string[]; side: string[] }
-> = {
+const BASE_SHAPES = {
   tee: {
     body: 'M26 14 L15 18 L5 33 L13 38 L18 32 L18 86 L46 86 L46 32 L51 38 L59 33 L49 18 L38 14',
     front: ['M26 14 Q32 23 38 14', 'M28 14 Q32 20.5 36 14'],
@@ -200,6 +142,62 @@ export const GARMENT_SHAPES: Record<
       // короткий рукав — замкнутая труба с плеча на задней половине туловища (рука висит у спины,
       // грудь видна перед ней), низ на середине плеча руки, сзади чуть ниже
       'M30.5 20.5 Q37 17 43.5 19 L45.5 40.5 Q38.5 43 30 38.5 Z',
+    ],
+  },
+  shirt: {
+    body: 'M25 14 L14 18 L5 72 L12 75 L18 36 L18 86 L46 86 L46 36 L52 75 L59 72 L50 18 L39 14',
+    front: [
+      'M25 14 L22 20 L29 25 L32 19',
+      'M39 14 L42 20 L35 25 L32 19',
+      'M32 19 L32 86',
+      'M29 31 L35 31',
+      'M21 36 L29 36 L29 48 L21 48 Z',
+      'M6.5 67 L12.8 69.5',
+      'M57.5 67 L51.2 69.5',
+      'M18 82 Q32 86 46 82',
+    ],
+    back: [
+      'M25 14 Q32 18 39 14',
+      'M16.5 19 Q32 29 47.5 19',
+      'M32 25 L32 82',
+      'M6.5 67 L12.8 69.5',
+      'M57.5 67 L51.2 69.5',
+      'M18 82 Q32 86 46 82',
+    ],
+    side: [
+      'M24 18 Q17 28 20 45 L21 86 Q32 83 44 86 L44 31 L42 14',
+      'M24 18 Q32 12 42 14',
+      'M25 17 L29 11 L35 15 L42 12 L42 14',
+      'M25 18 L24 35 L23 84',
+      'M31 20 Q37 17.5 43.5 19 L45.5 73 Q39 76 32 74 Z',
+      'M32 69.5 Q39 72 45.3 69.5',
+    ],
+  },
+  knit: {
+    body: 'M25 14 L14 18 L5 73 L12 76 L18 37 L18 86 L46 86 L46 37 L52 76 L59 73 L50 18 L39 14',
+    front: [
+      'M25 14 Q32 22 39 14',
+      'M27.5 14 Q32 19 36.5 14',
+      'M18 80 L46 80',
+      'M6.5 68 L12.8 70.5',
+      'M57.5 68 L51.2 70.5',
+      'M21 55 L28 55 L28 65 L21 65 Z',
+    ],
+    back: [
+      'M25 14 Q32 17.5 39 14',
+      'M27 14 Q32 16 37 14',
+      'M32 16 L32 80',
+      'M18 80 L46 80',
+      'M6.5 68 L12.8 70.5',
+      'M57.5 68 L51.2 70.5',
+    ],
+    side: [
+      'M24 19 Q17 29 20 46 L21 86 L44 86 L44 31 L42 14',
+      'M24 19 Q32 12.5 42 14',
+      'M25.5 17.5 Q32 16 39 14',
+      'M21 80 L44 80',
+      'M30.5 21 Q37 18 43.5 20 L45.5 74 Q39 77 32 75 Z',
+      'M32 70.5 Q39 73 45.3 70.5',
     ],
   },
   hoodie: {
@@ -267,6 +265,59 @@ export const GARMENT_SHAPES: Record<
       // длинный рукав — замкнутая труба до запястья на задней половине туловища, манжета
       'M30.5 20 Q37 17.5 43.5 19 L45.5 77.5 Q39 80 32 78 Z',
       'M32 73.5 Q39 75.8 45.3 73.5',
+    ],
+  },
+  coat: {
+    body: 'M26 10 L14 15 L5 72 L12 75 L18 34 L15 91 L49 91 L46 34 L52 75 L59 72 L50 15 L38 10',
+    front: [
+      'M26 10 L32 31 L38 10',
+      'M26 10 L21 19 L28 27',
+      'M38 10 L43 19 L36 27',
+      'M32 31 L32 91',
+      'M27.5 38 A1 1 0 1 0 29.5 38 A1 1 0 1 0 27.5 38',
+      'M34.5 38 A1 1 0 1 0 36.5 38 A1 1 0 1 0 34.5 38',
+      'M18 55 L46 55',
+      'M20 59 L29 59 L27 67 L19 67 Z',
+      'M44 59 L35 59 L37 67 L45 67 Z',
+      'M6.5 67 L12.7 69.5',
+      'M57.5 67 L51.3 69.5',
+    ],
+    back: [
+      'M26 10 Q32 14 38 10',
+      'M16 17 Q32 27 48 17',
+      'M32 23 L32 91',
+      'M25 55 L39 55',
+      'M32 73 L27 91',
+      'M32 73 L37 91',
+      'M6.5 67 L12.7 69.5',
+      'M57.5 67 L51.3 69.5',
+    ],
+    side: [
+      'M25 15 Q17 26 20 43 L18 91 L47 91 L44 29 L42 11',
+      'M25 15 Q33 9 42 11',
+      'M25 14 Q33 6.5 43 8.5 L42 11',
+      'M25.5 15.5 L23.5 35 L21 89',
+      'M31 18 Q37 15.5 43.5 17 L45.5 73 Q39 76 32 74 Z',
+      'M32 69.5 Q39 72 45.3 69.5',
+      'M18.8 55 L45.2 55',
+    ],
+  },
+  vest: {
+    body: 'M25 13 L16 18 L20 35 L18 86 L46 86 L44 35 L48 18 L39 13',
+    front: [
+      'M25 13 L32 31 L39 13',
+      'M32 31 L32 86',
+      'M23 58 L29 58 L29 64 L22 64 Z',
+      'M41 58 L35 58 L35 64 L42 64 Z',
+      'M18 82 L46 82',
+    ],
+    back: ['M25 13 Q32 17 39 13', 'M21 17 Q32 23 43 17', 'M32 20 L32 82', 'M18 82 L46 82'],
+    side: [
+      'M24 18 Q17 28 20 45 L21 86 L44 86 L44 29 L42 13',
+      'M24 18 Q32 11.5 42 13',
+      'M28 16 C27 30 38 33 39 16',
+      'M25 19 L24 84',
+      'M21 82 L44 82',
     ],
   },
   trousers: {
@@ -343,6 +394,39 @@ export const GARMENT_SHAPES: Record<
       'M23 42 L41 42',
     ],
   },
+  jumpsuit: {
+    body: 'M25 7 L15 11 L6 43 L13 46 L18 27 L18 43 L12 90 L28 90 L32 55 L36 90 L52 90 L46 43 L46 27 L51 46 L58 43 L49 11 L39 7',
+    front: [
+      'M25 7 Q32 16 39 7',
+      'M25 7 L22 13 L29 19 L32 14',
+      'M39 7 L42 13 L35 19 L32 14',
+      'M32 14 L32 55',
+      'M18 43 L46 43',
+      'M19 47 L27 47 L26 57 L20 57 Z',
+      'M45 47 L37 47 L38 57 L44 57 Z',
+      'M7.5 38 L13.8 40.5',
+      'M56.5 38 L50.2 40.5',
+    ],
+    back: [
+      'M25 7 Q32 11 39 7',
+      'M16 12 Q32 22 48 12',
+      'M32 18 L32 55',
+      'M18 43 L46 43',
+      'M20 48 L27 48 L26 56 L21 56 Z',
+      'M44 48 L37 48 L38 56 L43 56 Z',
+      'M7.5 38 L13.8 40.5',
+      'M56.5 38 L50.2 40.5',
+    ],
+    side: [
+      'M24 12 Q17 22 20 38 L22 48 L20 90 L36 90 L34 52 L44 42 L44 24 L42 7',
+      'M24 12 Q32 5.5 42 7',
+      'M25 11 L29 5 L35 9 L42 5 L42 7',
+      'M21 43 L43 43',
+      'M31 14 Q37 11.5 43.5 13 L45 43 Q39 45 33 43 Z',
+      'M33 38.5 Q39 40.5 44.8 38.5',
+      'M28 48 L28 90',
+    ],
+  },
   briefs: {
     body: 'M11 32 L53 32 L53 38 Q49 55 37 64 L27 64 Q15 55 11 38 Z',
     front: ['M11 38 L53 38', 'M32 38 L32 64'],
@@ -351,6 +435,30 @@ export const GARMENT_SHAPES: Record<
       'M21 32 L43 32 L43 38 L21 38 Z',
       // спереди мешочек, сзади седалище полнее, между ними вырез ноги, поднятый на бедре
       'M21 38 Q18.5 46 19.5 53 Q21 61 26.5 61 Q29.5 60 31 56 Q33 60 37 62 Q44.5 62.5 45.5 52 Q46.5 44 43 38',
+    ],
+  },
+  bra: {
+    body: 'M14 31 L20 31 C21 22 25 16 32 16 C39 16 43 22 44 31 L50 31 L48 60 Q40 67 32 60 Q24 67 16 60 Z',
+    front: [
+      'M20 31 L20 15 Q20 9 25 9 Q30 9 30 16',
+      'M44 31 L44 15 Q44 9 39 9 Q34 9 34 16',
+      'M16 39 C18 27 29 27 32 39 C35 27 46 27 48 39',
+      'M32 39 L32 60',
+      'M16 56 Q24 63 32 58 Q40 63 48 56',
+    ],
+    back: [
+      'M20 31 L20 15 Q20 9 25 9 Q30 9 30 16',
+      'M44 31 L44 15 Q44 9 39 9 Q34 9 34 16',
+      'M14 34 Q32 48 50 34',
+      'M14 45 L50 45',
+      'M29 43 L29 48 L35 48 L35 43',
+      'M16 56 L48 56',
+    ],
+    side: [
+      'M25 14 Q28 8 32 9 Q36 10 37 16 L40 31 Q46 36 44 46 Q42 57 36 61 L25 58 Q20 46 22 34 Z',
+      'M25 14 L22 34',
+      'M22 37 Q32 27 40 31',
+      'M24 54 L38 59',
     ],
   },
   cap: {
@@ -381,6 +489,29 @@ export const GARMENT_SHAPES: Record<
       'M31.5 33 Q34 29.8 36.5 33',
       'M34 32.5 Q27 45 28 62',
       'M34 32.5 Q43 44 44 63.8',
+    ],
+  },
+  hat: {
+    body: 'M16 57 Q18 29 32 27 Q46 29 48 57',
+    front: [
+      'M16 52 Q32 58 48 52',
+      'M7 58 Q32 52 57 58 Q61 60 57 63 Q32 69 7 63 Q3 60 7 58 Z',
+      'M18 47 Q32 52 46 47',
+      'M32 27 L32 52',
+      'M28 38 L36 38 L36 46 L28 46 Z',
+    ],
+    back: [
+      'M16 52 Q32 58 48 52',
+      'M7 58 Q32 52 57 58 Q61 60 57 63 Q32 69 7 63 Q3 60 7 58 Z',
+      'M18 47 Q32 52 46 47',
+      'M32 27 L32 52',
+    ],
+    side: [
+      'M18 57 Q19 31 34 27 Q48 30 50 58',
+      'M18 50 Q34 55 48 50',
+      'M5 58 Q27 54 58 58 Q62 60 58 63 Q28 67 5 63 Q2 60 5 58 Z',
+      'M20 46 Q34 51 47 46',
+      'M33 27 Q28 39 29 53',
     ],
   },
   glove: {
@@ -655,6 +786,65 @@ export const GARMENT_SHAPES: Record<
       'M56.6 36.6 L57.1 33.6 L59.9 34 L59.3 36.6',
     ],
   },
+  boot: {
+    body: 'M20 18 L44 18 L44 71 L48 78 L48 86 L16 86 L16 78 L20 71 Z',
+    front: [
+      'M24 18 L24 65 Q32 70 40 65 L40 18',
+      'M25 31 L39 31',
+      'M25 38 L39 38',
+      'M25 45 L39 45',
+      'M25 52 L39 52',
+      'M25 59 L39 59',
+      'M16 78 Q32 74 48 78',
+      'M16 83 L48 83',
+    ],
+    back: [
+      'M24 18 L24 67 Q32 72 40 67 L40 18',
+      'M29 18 L29 9 L35 9 L35 18',
+      'M32 18 L32 75',
+      'M16 78 Q32 74 48 78',
+      'M16 83 L48 83',
+    ],
+    side: [
+      'M25 12 L45 12 L45 62 Q49 69 56 72 Q61 75 61 82 L61 86 L6 86 Q3 86 3 82 Q3 75 10 73 L24 68 Z',
+      'M25 18 L45 18',
+      'M28 27 L42 27',
+      'M27 34 L42 34',
+      'M26 41 L42 41',
+      'M25 48 L42 48',
+      'M24 68 Q34 66 45 62',
+      'M3 82 L61 82',
+      'M52 70 L52 82',
+      'M42 12 L42 6 L46 6 L46 14',
+      'M43 22 L46 22 L46 58 L43 58',
+    ],
+  },
+  sandal: {
+    body: 'M16 69 Q16 62 22 59 L25 38 Q26 31 32 31 Q38 31 39 38 L42 59 Q48 62 48 69 L48 75 Q48 81 42 82 L22 82 Q16 81 16 75 Z',
+    front: [
+      'M24 59 Q32 52 40 59',
+      'M20 64 Q32 57 44 64',
+      'M24 46 L40 46',
+      'M26 38 Q32 43 38 38',
+      'M18 73 L46 73',
+      'M21 79 L43 79',
+    ],
+    back: [
+      'M24 59 Q32 52 40 59',
+      'M23 39 L23 55 Q32 62 41 55 L41 39',
+      'M23 39 Q32 34 41 39',
+      'M18 73 L46 73',
+      'M21 79 L43 79',
+    ],
+    side: [
+      'M5 70 Q8 65 16 64 L29 60 Q38 57 49 61 L59 68 L59 78 Q59 83 54 83 L10 83 Q5 83 5 78 Z',
+      'M5 76 L59 76',
+      'M16 64 Q13 52 22 46 Q30 42 35 60',
+      'M31 60 Q35 48 45 49 Q51 50 53 64',
+      'M45 49 L51 46 L54 50 L50 54',
+      'M51 77 L51 83',
+    ],
+  },
   bag: {
     // тоут: корпус чуть шире книзу; ручки — плоские ленты (внешняя и внутренняя кромка)
     body: 'M13 40 L51 40 L53 86 L11 86 Z',
@@ -707,7 +897,41 @@ export const GARMENT_SHAPES: Record<
       'M32 36 L32 86',
     ],
   },
+} satisfies Partial<Record<GarmentFamily, GarmentShape>>;
+
+/** Рисунки волны 95 §4.2 — по файлу на партию, каждый правится отдельно (garment-shapes/b1..b9). */
+const BATCH_SHAPES: Partial<Record<GarmentFamily, GarmentShape>> = {
+  ...B1,
+  ...B2,
+  ...B3,
+  ...B4,
+  ...B5,
+  ...B6,
+  ...B7,
+  ...B8,
+  ...B9,
 };
+
+const OWN_SHAPES: Partial<Record<GarmentFamily, GarmentShape>> = {
+  ...BATCH_SHAPES,
+  ...BASE_SHAPES,
+};
+
+/** Семейства, у которых ещё нет своего рисунка: рисуют `base` манифеста (проба — предупреждением). */
+export const UNDRAWN_FAMILIES: readonly GarmentFamily[] = FAMILIES.filter((f) => !OWN_SHAPES[f]);
+
+/**
+ * Рисунок каждого из 124 семейств: свой (30 прежних + партии), иначе — `base` манифеста, чтобы
+ * посреди волны ни одна ячейка не стала пустой.
+ */
+export const GARMENT_SHAPES: Record<GarmentFamily, GarmentShape> = Object.fromEntries(
+  FAMILIES.map((f) => {
+    const base = baseOf(f);
+    const shape = OWN_SHAPES[f] ?? (base ? OWN_SHAPES[base] : undefined);
+    if (!shape) throw new Error(`garment pictogram: ${f} has neither a drawing nor a drawn base`);
+    return [f, shape];
+  }),
+) as Record<GarmentFamily, GarmentShape>;
 
 /** Сторона рисунка: одна из четырёх активных сторон ленты (`views.ts`). */
 export type PictogramView = ActiveView;
@@ -737,18 +961,20 @@ export function GarmentPictogram({
   view,
   className,
   style,
+  viewBox = '0 0 64 96',
 }: {
   family: GarmentFamily;
   view: PictogramView;
   className?: string;
   style?: CSSProperties;
+  viewBox?: string;
 }): JSX.Element {
   const paths = pictogramPaths(family, view);
   return (
     <svg
       aria-hidden
       data-pictogram={view}
-      viewBox='0 0 64 96'
+      viewBox={viewBox}
       fill='none'
       stroke='currentColor'
       strokeWidth={1.25}

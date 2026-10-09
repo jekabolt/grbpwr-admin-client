@@ -1,17 +1,32 @@
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
+import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 
-import { colourPlanGate, planRecipe } from '../colour-plan/model';
-import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
-import { useColourPlan } from '../colour-plan/use-colour-plan';
+import { ColourwayStrip } from '../colourway-strip';
 import { GROUP_SEAM } from '../core';
-import { LatestGeneration } from '../generation/latest-generation';
-import type { ClothSlot } from '../pattern/slot-fabrics';
-import { useCardFit, useColourDraft } from './drafts';
+import { openStepOf } from '../core/chain';
+import { Workbench } from '../generation/studio';
+import { artworkModelLines, artworksOf } from '../paint/artworks';
+import {
+  artworkGuideCount,
+  fitMockups,
+  overCeilingSentence,
+  renderEngine,
+  renderInputMediaIds,
+} from '../paint/ceiling';
+import { garmentOfChart } from '../paint/mockup';
+import { PartsCanvas } from '../paint/parts-canvas';
+import { paintRun } from '../paint/plan-run';
+import { useMapLooks, usePaint } from '../paint/use-paint';
+import { isPaintableHardware, type ClothSlot, type MaterialSlot } from '../pattern/slot-fabrics';
+import { packOf, useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   clampColourName,
@@ -23,24 +38,24 @@ import {
   wireColourSource,
   type Gate,
 } from './model';
-import { Palette } from './palette';
+import { MaterialsPack } from './materials-pack';
+import { InWords } from './palette';
 import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
 import { useStartDesignRun, type StartRunInput } from './use-design-run';
+import { seedBriefInFlight, settleSeedBrief } from '../words-brief';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
  * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
- *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
- *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
+ *   ── MATERIALS ────── the colourway's pack from MATERIALS, read-only (V5: the pack is the recipe)
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
- *   LATEST GENERATION ──── the newest render run, its tiles with the doors — a block of its own
- *                         right under this one (O-63; 28.09, O-67, D-73; `LatestGeneration`)
+ *   WORKBENCH ─────────── the newest render run, its tiles with the doors, and under them the
+ *                         GENERATION HISTORY folded — ONE block (T30; `Workbench`, O-63, O-67)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
- *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63), folded
  *
  * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
  * boxes: a block never contains another block (DESIGN.md).
@@ -73,14 +88,13 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * «what the model gets»: the inventory must name EVERYTHING that travels.
  *
  * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO, AND IT IS CHOSEN HERE (D2, G2-3) ════════
- * ОДНО СОСТОЯНИЕ (`useColorwayChoice` у композитора) — но ОРГАН его стоит на этом экране, в ряду
- * GENERATE: `for: [sample ▾]`. Круг раньше он стоял на рельсе шагов, и довод был про место; он не
- * учёл того, что этот выбор РЕШАЕТ: `colorway_id` прогона неизменяем, значит цель — часть покупки.
+ * ОДНО СОСТОЯНИЕ (`useColorwayChoice` у композитора), показанное общей плиточной полосой над
+ * рецептом. Выбор РЕШАЕТ: `colorway_id` прогона неизменяем, значит цель — часть покупки.
  * Верстак рендеров ПИШЕТ этот экран (SIDES снимает, `mark ▸` кладёт), ЧИТАЕТ 3D, СОБИРАЕТ сервер
  * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
  * рендер наполняет другой.
  *
- * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample`, только пока у
+ * ⚠ РАБОЧАЯ ЦЕЛЬ СОВПАДАЕТ СО СТОЛБЦАМИ SIDES (O-57). Таблица рисует столбец `sample`, пока у
  * карточки нет ни одного колорвея (архивные тоже считаются, D-56″), и экран работает там, где
  * столбец виден: сохранённая цель без столбца (`sample` у карточки с колорвеями, списанный пустой
  * колорвей) читается ПЕРВЫМ столбцом. Столбца нет ни одного (одни архивные без плит) — цели нет,
@@ -89,9 +103,9 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * `./side-row`).
  *
  * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
- * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
- * цветной половины рецепта переехал внутрь `useColourDraft` — ткань и слова там остаются, потому
- * что ткань есть свойство изделия, а цвет — колорвея (D6).
+ * ремоунтящий сам себя на смене цели, закрывал бы собственную полосу прямо под пальцем. Пересев
+ * цвета и привязанных тканей живёт внутри `useColourDraft`; ручные ткани сохраняются по его
+ * правилам происхождения.
  */
 export function RenderStudio({
   band,
@@ -106,7 +120,7 @@ export function RenderStudio({
   onColorwayChange,
   cardColorways,
   slots,
-  children,
+  artworkSlots,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -117,7 +131,7 @@ export function RenderStudio({
    * Список колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы on-model. Второго
    * состояния не заводится: верстак рендеров ПИШЕТ этот экран, ЧИТАЕТ 3D, а СЕРВЕР по нему
    * собирает — заведи второго владельца, и полоса входа 3D показывала бы ROSSO, пока прогон
-   * уезжает за OLIVE. Не задан `onColorwayChange` — селекта нет вовсе (композитор без оси).
+   * уезжает за OLIVE. Не задан `onColorwayChange` — полосы нет вовсе (композитор без оси).
    */
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
@@ -159,15 +173,17 @@ export function RenderStudio({
    */
   slots?: readonly ClothSlot[];
   /**
+   * R7 · ARTWORK — the card's MATERIALS slots (the composer's same `materialSlots` read); only the
+   * DECORATION lines are taken (`artworksOf`). Their colourway pictures arm the `artwork` tool of
+   * PARTS and are listed by «what the model gets». Absent = no artworks on this screen.
+   * R9 · the same read gives PARTS its hardware tiles (`isPaintableHardware`).
+   */
+  artworkSlots?: readonly MaterialSlot[];
+  /**
    * Go to another step of the studio. The step lives in ONE place (`StudioTab`); a screen that kept
    * its own would desynchronise the rail from its own content.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
-  /**
-   * THE STEP'S GENERATION HISTORY, handed in by the composer (`studio-tab.tsx`) and drawn last, under
-   * this studio's render scope (O-63, D-62): its rows carry the render doors, which read the step.
-   */
-  children?: ReactNode;
 }): JSX.Element {
   /* ═══ O-57 · ЦЕЛЬ, ПОД КОТОРОЙ РАБОТАЕТ ЭКРАН, — ПЕРВЫМ ДЕЛОМ, ДО ВСЕХ ЕЁ ЧИТАТЕЛЕЙ ═════════════
      У сохранённой цели нет столбца в SIDES — экран работает под первым столбцом, и читают это
@@ -193,21 +209,43 @@ export function RenderStudio({
      Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
      GENERATE покупал бы лист по чужому рецепту. Довод целиком — в шапке `useColourDraft`. */
   const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId, slots);
-  /**
-   * ⚠ THE PLAN LIVES HERE, NOT IN THE PALETTE, for the reason the draft does: the gate and the run
-   * body read it together with the parts row; two hooks would be two documents of different
-   * revisions — saving under one, refusing by the other.
-   */
-  const colourPlan = useColourPlan(techCardId, band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
+  /* R9 · the hardware slots PARTS paints (buttons, snaps, zips — not labels, not artworks). */
+  const hardwareSlots = useMemo(
+    () => (artworkSlots ?? []).filter(isPaintableHardware),
+    [artworkSlots],
+  );
+  /* PAINT THE PARTS: the card's painting session (maps are the card's, cloths the colourway's). */
+  const paint = usePaint(techCardId, band, slots, colorwayId, hardwareSlots);
+  /* R7 · the artworks of this colourway, and where they stand on the flats (for the inventory). */
+  const artworks = useMemo(
+    () => artworksOf(band, colorwayId, artworkSlots),
+    [band, colorwayId, artworkSlots],
+  );
+  const artworkLines = useMemo(() => artworkModelLines(band, artworks), [band, artworks]);
+  const paintVersion = paint.getVersion();
+  /* QW2 · the card's size chart (the query the tech pack reads) sets the cloth's scale on the
+     flats: canvas and mockup alike. No chart, or no chest / length — 600 mm across, estimated. */
+  const { dictionary } = useDictionary();
+  const chart = useQuery({
+    queryKey: ['styleSizeChart', techCardId],
+    queryFn: () => adminService.GetStyleSizeChart({ styleId: techCardId }),
+    enabled: techCardId > 0,
+    retry: false,
+  });
+  const garment = useMemo(
+    () => garmentOfChart(chart.data?.chart, dictionary?.measurements),
+    [chart.data, dictionary?.measurements],
+  );
+  useEffect(() => paint.setGarment(garment), [paint, garment]);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
   const [inspecting, setInspecting] = useState(false);
 
   /**
    * ═══ РОЖДЕНИЕ КОЛОРВЕЯ — ОДНО ОКНО НА ЭКРАН, СКОЛЬКО БЫ ДВЕРЕЙ К НЕМУ НИ ВЕЛО (G2-4) ═════════
    *
-   * Дверей три: пункт `+ colourway…` в селекте цели, заголовок-плейсхолдер столбца в SIDES и цель
+   * Дверей три: плитка `new colourway`, заголовок-плейсхолдер столбца в SIDES и цель
    * `mark ▸` / `apply splitted` в блоке рендеров. Окно одно — иначе три копии формы разошлись бы в
    * проверке имени и в подборе словарного цвета, и разошлись бы молча.
    *
@@ -270,11 +308,16 @@ export function RenderStudio({
    * ⚠ THE GATE READS THIS, NOT `draft.recipe`: a run stated only by opacity and weight is a legal
    * statement about the cloth (H-13).
    */
+  // V5: the cloths that travel are the colourway's pack, whatever the draft held before.
+  const pack = useMemo(() => packOf(band, colorwayId, slots), [band, colorwayId, slots]);
   const sent = useMemo(() => {
     const hex = hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '';
     return {
       ...draft.recipe,
-      words: statedWords(draft),
+      ...pack,
+      /* ⚠ ONLY THE VISIBLE IN WORDS TEXT TRAVELS: the retired CLOTH IS opacity / GSM may still sit
+         seeded in the hidden `draft.cloth`, and nothing unseen may be composed into a paid run. */
+      words: statedWords({ recipe: draft.recipe, cloth: null }),
       /**
        * ⚠ THE COLOUR INVARIANT IS HELD BY THIS DOOR, NOT BY THE FIELD: no hex the screen calls
        * «not stated» travels. The client's predicate (`hexIsPaintable`) and the server's («any
@@ -298,13 +341,72 @@ export function RenderStudio({
        */
       code: hex ? clampColourName(colorwayId > 0 ? colorwayLabel.trim() : '') : '',
     };
-  }, [draft.recipe, draft.cloth, colorwayId, colorwayLabel]);
+  }, [draft.recipe, pack, colorwayId, colorwayLabel]);
 
-  /** What will actually travel — the recipe SUBSTITUTED BY THE PLAN when colour maps ride along. */
-  const wire = useMemo(
-    () => planRecipe(band, colourPlan.plan, sent),
-    [band, colourPlan.plan, sent],
+  /**
+   * What will actually travel. PAINT THE PARTS (Ф1): the pack stays the source of the cloths; the
+   * saved, non-stale colour maps only say WHERE each goes (`paintRun`: remainder, painted labels,
+   * the rest). No maps, or fewer than two uses — exactly the pack, `colourMaps: []`.
+   */
+  const painted = useMemo(
+    () =>
+      paintRun({
+        band,
+        plan: paint.plan(),
+        slots,
+        colorwayId,
+        colorwayLabel,
+        partNames: paint.partNames(),
+        hardware: hardwareSlots,
+        hardwareParts: paint.hardwareParts(),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [band, paint, paintVersion, slots, colorwayId, colorwayLabel, hardwareSlots],
   );
+  /* R9 · what the hardware of this run needs at GENERATE: its labels (the mockups draw them) and
+     the views whose map goes out exported (the hardware pixels in the cloth around them). */
+  const hardware = useMemo(
+    () =>
+      painted.kind === 'maps'
+        ? {
+            labels: painted.hardwareLabels,
+            views: painted.hardwareViews,
+            remainder: painted.remainder,
+          }
+        : { labels: new Map<string, number>(), views: [] as string[], remainder: -1 },
+    [painted],
+  );
+  const wire = useMemo(
+    () =>
+      painted.kind === 'maps'
+        ? {
+            ...sent,
+            fabrics: painted.fabrics,
+            fabricMediaId: painted.fabricMediaId,
+            colourMaps: painted.colourMaps,
+          }
+        : { ...sent, colourMaps: [] },
+    [sent, painted],
+  );
+
+  /**
+   * T24 · THE ENGINE'S PICTURE CEILING. Counted as the server counts the call (plates, references,
+   * cloths, placed artworks — each once — then maps and their mockups); over the default engine's
+   * `maxReferences`, mockups give way side_r → side_l → back → front. Still over → the gate below
+   * refuses with the server's sentence. WHAT THE MODEL GETS reads `mockupFit.keep`.
+   */
+  const mockupFit = useMemo(() => {
+    const engine = renderEngine(band);
+    const fit = fitMockups(
+      renderInputMediaIds(band, colorwayId, wire, artworks),
+      wire.colourMaps ?? [],
+      engine?.maxReferences ?? 0,
+      artworkGuideCount(band, artworks),
+      // R9 · the mockup is where the model reads a button's place: those views give way last.
+      new Set(hardware.views),
+    );
+    return { ...fit, label: (engine?.label ?? '').trim() || (engine?.slug ?? '') };
+  }, [band, colorwayId, wire, artworks, hardware]);
 
   const gate: Gate = useMemo(() => {
     /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
@@ -316,25 +418,52 @@ export function RenderStudio({
        and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
-    /* ⚠ THE PAINT GATE STANDS BEFORE THE RECIPE GATE: a painted colour without a cloth is a
-       person's statement left unanswered, not an empty recipe. Three of its four refusals mirror
-       the server's doors. */
-    const painted = colourPlanGate(band, colourPlan.plan);
-    if (!painted.ok) return painted;
-    /* ⚠ UNDER PAINT THE STATEMENT ABOUT THE CLOTH LIVES PER PART, NOT IN THE SCALARS; a non-empty
-       `colour_maps` already means «everything is stated», because the gate above refused every
-       painted colour nothing was said about. */
-    if ((wire.colourMaps ?? []).length === 0 && !recipeIsStated(wire)) {
+    /* PAINT THE PARTS: the run never races the autosave, and every painted label must be claimed. */
+    if (paint.busy()) return { ok: false, reason: 'saving the parts…' };
+    if (paint.movingArt()) return { ok: false, reason: 'moving the artwork…' };
+    if (paint.save === 'unsaved' || paint.save === 'error')
+      return { ok: false, reason: `parts not saved · ${paint.saveError || 'retry'}` };
+    if (painted.kind === 'refuse') return { ok: false, reason: painted.reason };
+    /* A run with maps takes mockups drawn at the card's scale and the parts' names: neither may
+       still be arriving. A failed chart read falls back to the 600 mm estimate. */
+    if (painted.kind === 'maps' && chart.isLoading)
+      return { ok: false, reason: 'reading the size chart…' };
+    if (painted.kind === 'maps' && paint.naming) return { ok: false, reason: 'naming the parts…' };
+    if (!recipeIsStated(wire)) {
       return {
         ok: false,
         reason:
-          'no fabric is stated · pick a cloth, a colour, say what it is, or describe it. Any one is enough',
+          'no cloth is marked for this colourway · mark one in MATERIALS, or describe it in words',
       };
     }
+    if (mockupFit.over)
+      return { ok: false, reason: overCeilingSentence(mockupFit, mockupFit.label) };
     return { ok: true };
-  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    band,
+    wire,
+    mockupFit,
+    colorwayArchived,
+    colorwayLabel,
+    target.nowhere,
+    painted,
+    paint,
+    paintVersion,
+    chart.isLoading,
+  ]);
 
-  const generate = () => {
+  /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile.
+     ONE PRESS AT A TIME, SYNCHRONOUSLY: the ref is set before the first await, so a second press
+     while preparing is a no-op (a second upload would mint new mockup ids → a new fingerprint →
+     a second paid run). */
+  const [mocking, setMocking] = useState(false);
+  /* QW4 · the mockups failed at the press: the run did not start, and the bar says so. */
+  const [mockFailed, setMockFailed] = useState('');
+  const preparing = useRef(false);
+  const mapsSig = (wire.colourMaps ?? []).map((m) => `${m.view}:${m.mediaId}`).join('|');
+  useEffect(() => setMockFailed(''), [mapsSig, techCardId]);
+  const launch = async () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
        подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
@@ -343,6 +472,74 @@ export function RenderStudio({
        или обрыв не трогают ничего — слова остаются живым засевом. Свои слова уже стоят — квитанции
        нет. */
     const pressed = draft.wordsAtPress();
+    /* T13 · each outgoing map takes its cloth mockup (the cloth at its true repeat on that flat),
+       on the run's recipe only — the plan never stores one. QW4: any side that cannot be drawn or
+       uploaded → NO run, `mockup failed · retry` in the lock bar (never a quiet run without). */
+    let colourMaps = wire.colourMaps ?? [];
+    /* The parts' topology the run's names were read from: changed before the launch → no run. */
+    const topology = paint.partsGen;
+    if (colourMaps.length > 0) {
+      const card = techCardId;
+      const rev = paint.plan()?.rev;
+      // Every side's scale, once: the mockups are signed and drawn off this snapshot.
+      const scales = paint.scaleSnapshot(colourMaps);
+      // Painting stands still from here to the launch: the maps sent are the maps drawn.
+      paint.setFrozen(true);
+      setMocking(true);
+      try {
+        if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
+        /* T24 · only the maps whose mockup fits the engine's ceiling take one (`mockupFit`). */
+        const keep = mockupFit.keep;
+        const mocked = colourMaps.filter((m) => keep.has(m.view ?? ''));
+        const { ids, error } =
+          mocked.length > 0
+            ? await paint.mockups(
+                mocked,
+                wire.fabrics ?? [],
+                scales,
+                hardware.labels,
+                hardware.remainder,
+              )
+            : { ids: new Map<string, number>(), error: '' };
+        /* R9 · a map that carries hardware goes out EXPORTED: its hardware pixels in the cloth
+           around them (a hardware hex on the model's map tints the button), its own media. */
+        const hwViews = new Set(hardware.views);
+        const toExport = colourMaps.filter((m) => hwViews.has(m.view ?? ''));
+        const exported =
+          toExport.length > 0
+            ? await paint.exportMaps(toExport)
+            : {
+                maps: new Map<
+                  string,
+                  { mediaId: number; palette: (typeof colourMaps)[number]['palette'] }
+                >(),
+                error: '',
+              };
+        // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
+        if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
+        if (error || mocked.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
+          setMockFailed(error || 'mockup failed');
+          return;
+        }
+        if (exported.error || toExport.some((m) => !exported.maps.has(m.view ?? ''))) {
+          setMockFailed(exported.error || 'map export failed');
+          return;
+        }
+        setMockFailed('');
+        colourMaps = colourMaps.map((m) => {
+          const out = exported.maps.get(m.view ?? '');
+          return {
+            ...m,
+            ...(out ? { mediaId: out.mediaId, palette: out.palette } : {}),
+            mockupMediaId: keep.has(m.view ?? '') ? ids.get(m.view ?? '') ?? 0 : 0,
+          };
+        });
+      } finally {
+        paint.setFrozen(false);
+        setMocking(false);
+      }
+    }
+    if ((wire.colourMaps ?? []).length > 0 && (paint.partsGen !== topology || paint.naming)) return;
     const body: StartRunInput = {
       kind: 'render',
       ask: '',
@@ -360,6 +557,7 @@ export function RenderStudio({
         layout: 'one',
         colour: {
           ...wire,
+          colourMaps,
           // DERIVED AT THE DOOR, NOT HELD BY A CONTROL: `source` predates combination and never
           // decides what travels — the populated fields do.
           source: wireColourSource(wire),
@@ -384,9 +582,39 @@ export function RenderStudio({
         inpaint: undefined,
         extend: undefined,
         video: undefined,
+        flat: undefined,
       },
     };
     run.start(body, pressed ? { onStarted: () => draft.materializeWords(pressed) } : undefined);
+  };
+
+  /* R2: бриф WORDS в пути — IN WORDS ещё пусто, и прогон ушёл бы без брифа. GENERATE ждёт его
+     (кнопка занята), потом берёт ПОСЛЕДНЮЮ отрисовку — её слова, тело и ворота — и только на той же
+     карточке. Набранные руками слова засев не трогает. */
+  const [briefing, setBriefing] = useState(false);
+  const latest = useRef({ launch, gate, disabled });
+  latest.current = { launch, gate, disabled };
+  const generate = async () => {
+    if (preparing.current || run.isPending) return;
+    preparing.current = true;
+    try {
+      const card = techCardId;
+      if (!seedBriefInFlight(card)) {
+        await launch();
+        return;
+      }
+      setBriefing(true);
+      try {
+        if ((await settleSeedBrief(card)) === 'busy') return;
+      } finally {
+        setBriefing(false);
+      }
+      const now = latest.current;
+      if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
+      await now.launch();
+    } finally {
+      preparing.current = false;
+    }
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
@@ -407,6 +635,9 @@ export function RenderStudio({
      ровно тот проп, которым экран объявляет «мой состав называю стандартными словами». Дверь описи
      при этом осталась — она висит на `onInspect`, а не на `shape` (разбор там же). */
 
+  /* QW10 · WHAT THE MODEL GETS shows each outgoing map and the mockup it would take. */
+  const mapLooks = useMapLooks(paint, wire.colourMaps, wire.fabrics, inspecting, hardware);
+
   /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
      bench; the archived colourway → `for:` IN THIS VERY ROW (the rail has no select any more —
      G2-2/G2-3, so no door is drawn for it: the organ is already on screen); everything else is
@@ -416,85 +647,81 @@ export function RenderStudio({
       <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
         the flat bench ›
       </Button>
+    ) : !gate.ok && painted.kind === 'refuse' && painted.next === 'materials' && onGoToKind ? (
+      <Button variant='secondary' size='xs' onClick={() => onGoToKind('pattern')}>
+        materials ›
+      </Button>
     ) : null;
 
   return (
     <RenderStepScope step={renderStep}>
       <Section
-        /* THE ANCHOR OF THE STEP'S ONE BLOCK: statements of absence («no colourway picker in this
-           block», E-16) and of belonging («the cloth grid lives HERE», E-7) are made about it. */
+        /* THE ANCHOR OF THE STEP'S ONE BLOCK: the shared colourway strip and cloth grid both live
+           here; the recipe menu below does not grow a second colourway control. */
         id='design-render-bench'
         title='fabric render'
         question='· the cloth on the flats'
-        action={<Pill tone='ink'>step 4</Pill>}
+        action={<HeaderNote tone='ink'>step 4</HeaderNote>}
         /* ГЭПЫ КАК В CARD DETAILS (r3 п.34) — ОДИН ТОКЕН НА ВСЮ ПОЛОСУ. `GROUP_SEAM` разводит
            прямых детей блока (рецепт · полоса замка · отказ · ряд GENERATE) одним швом в 20px
            вместо `space-y-stack` в 10px; зазор «линейка группы → содержимое» внутри рецепта
            держит `GROUP_GAP` на самих линейках (`./palette`). */
         className={GROUP_SEAM}
       >
-        {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
-            owns them because they write one draft (`useColourDraft`) and the gate above reads
-            the same one. ⚠ THE ANCHOR `#design-fabric-menu` STAYS ON THE GRID: E-7 («no cloth
-            placeholder in the input») and E-16 («no colourway picker in the menu») are asserted
-            against it. */}
-        <div id='design-fabric-menu'>
-          <Palette
+        {onColorwayChange && (
+          <div data-render-colourways=''>
+            <GroupLabel flush>colourway</GroupLabel>
+            <div className='pt-1.5'>
+              {/* Only colourways the render can draw for (the SIDES columns), and the highlighted
+                  tile is the EFFECTIVE target — the colourway the paid render actually buys for. */}
+              <ColourwayStrip
+                colorways={colorways.filter((c) => target.drawn.includes(c.colorwayId ?? 0))}
+                selectedId={colorwayId}
+                onSelect={onColorwayChange}
+                onCreate={() => openStepOf('colorways')}
+                disabled={disabled}
+                loading={cardColorways === undefined && colorways.length === 0}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* V5 · MATERIALS (the pack; with flats on the bench — the palette) · PARTS (paint the
+            parts inline, `../paint`) · IN WORDS. */}
+        <div id='design-fabric-menu' className={GROUP_SEAM}>
+          <MaterialsPack
             band={band}
-            techCardId={techCardId}
-            disabled={disabled}
-            draft={draft}
-            colourPlan={colourPlan}
-            /* STEP 3: whose bindings rank and label the CLOTHS grid — the same target and the
-               same slots the draft was seeded from, so the tile marked «outer» is the cloth
-               the seed put first. */
             colorwayId={colorwayId}
+            colorwayLabel={colorwayLabel}
             slots={slots}
-            /* K-16: the second door of the cloth shelf. Without `onGoToKind` it does not exist —
-               a button with nowhere to lead is worse than none. */
-            onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+            onEdit={onGoToKind && (() => onGoToKind('pattern'))}
+            paint={paint}
+            disabled={disabled}
+            artworks={artworks}
           />
+          <PartsCanvas session={paint} disabled={disabled} band={band} artworks={artworks} />
+          <InWords state={draft} band={band} techCardId={techCardId} disabled={disabled} />
         </div>
 
         {/* ═══ THE RUN DOORS — the prototype's `runDoors`: the LOCKED bar when the gate refuses,
             the last refusal of the server verbatim, then GENERATE · WHAT THE MODEL GETS ▸ · money. */}
         {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
+        {gate.ok && mockFailed && (
+          <div title={mockFailed} data-mockup-failed=''>
+            <LockBar reason='mockup failed'>
+              <Button variant='secondary' size='xs' onClick={generate} disabled={disabled}>
+                retry
+              </Button>
+            </LockBar>
+          </div>
+        )}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
-        {/* ═══ ДЛЯ КОГО ЭТОТ ПРОГОН — В ОДНОМ РЯДУ С ДЕНЬГАМИ (D2, G2-3) ═══════════════════════
-            `colorway_id` прогона НЕИЗМЕНЯЕМ: лист, купленный не под тем именем, останется в
-            истории чужим навсегда. Поэтому цель называется у самой кнопки, а не на рельсе шагов,
-            где она стояла кругом раньше (`chain-rail.tsx` слота `action` больше не имеет). Пункт
-            `+ colourway…` — та же дверь, что и заголовок столбца в SIDES: одно окно, три двери. */}
         <GenerateRow
           gate={gate}
-          pending={run.isPending}
+          pending={run.isPending || briefing || mocking}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
-          trailing={
-            onColorwayChange ? (
-              <ColorwaySelect
-                band={band}
-                label='for'
-                probe='design-render-target'
-                disabled={disabled}
-                onCreate={() => openCreate()}
-                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. D-56″: столбца
-                   нет ни одного — на лице слово об этом, а пункт один, `+ colourway…`. */
-                only={target.drawn}
-                unmatched={target.nowhere ? 'no live colourway' : undefined}
-                choice={{
-                  colorwayId,
-                  setColorwayId: onColorwayChange,
-                  colorways,
-                  current: colorwayRef,
-                  label: colorwayLabel,
-                  archived: colorwayArchived,
-                  loading: false,
-                }}
-              />
-            ) : null
-          }
         />
       </Section>
 
@@ -508,7 +735,9 @@ export function RenderStudio({
           stands right under it, and SIDES below reads what was marked. Still inside
           `RenderStepScope` — its doors' host is the step's host 0, so a refusal it shares with the
           history prints once (D-72 п.5). With no render run at all it draws nothing. */}
-      <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
+      {/* T30: the WORKBENCH — the latest generation and, folded as its last part, this step's
+          GENERATION HISTORY: one block (`generation/studio.tsx`). SIDES stands under it. */}
+      <Workbench band={band} techCardId={techCardId} disabled={disabled} kind='render' />
 
       {/* ═══ SIDES — СВОЙ БЛОК, МЕЖДУ ПОСЛЕДНЕЙ ГЕНЕРАЦИЕЙ И ИСТОРИЕЙ (r2 п.29, O-63) ════════════
           Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:
@@ -531,21 +760,21 @@ export function RenderStudio({
         onGoToKind={onGoToKind}
       />
 
-      {/* THE HISTORY — last, inside the scope: its render rows read the same doors (O-63). */}
-      {children}
-
       <WhatModelGetsRenderModal
+        mapLooks={mapLooks}
         open={inspecting}
         onOpenChange={setInspecting}
         band={band}
         kind='render'
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
+        mockupsAtGenerate={mockupFit.dropped.length > 0 ? mockupFit.keep : true}
         cardFit={cardFit}
+        artworks={artworkLines}
       />
 
       {/* ОДНО ОКНО РОЖДЕНИЯ НА ВЕСЬ ЭКРАН. Оно не носит `anchor`: двери держат `open` сами —
-          пункт селекта, заголовок столбца, цель разреза. После успеха цель прогона переключается
+          плитка полосы, заголовок столбца, цель разреза. После успеха цель прогона переключается
           на новый колорвей, и продолжение жеста (если оно было) доигрывается уже в его столбце. */}
       <ColourwayCreatePopover
         techCardId={techCardId}

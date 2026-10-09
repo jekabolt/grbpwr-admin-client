@@ -9,12 +9,15 @@ import type {
   common_TechCard,
   common_TechCardMediaKind,
 } from 'api/proto-http/admin';
+import type { CalloutSuggestion } from 'api/proto-http/admin';
+import { abortableAdminService } from 'api/api';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
 // ПЛИТА АРТЕФАКТА — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО ЛИСТ ЭСКИЗА И СНИМОК ШАГА СБОРКИ, а не третья
@@ -32,18 +35,23 @@ import {
   type SurfaceCallout,
 } from 'ui/components/annotation/surface';
 import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
-import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
+import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation/purpose';
+import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
+import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { Toolbar } from 'ui/components/toolbar';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
-import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
+import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import {
   COLORWAY_NONE,
   benchKindOf,
@@ -54,7 +62,21 @@ import {
   runRepresentation,
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
+import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { CalloutRail } from './callout-rail';
+import {
+  addDismissed,
+  ghostOf,
+  layoutSuggestions,
+  NOMINAL_FRAME,
+  normalizeSuggestions,
+  opNumberOf,
+  readDismissed,
+  seedOf,
+  type CalloutSeed,
+} from './callout-suggest';
+import { SuggestedCallouts } from './suggested-callouts';
+import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 // ОДИН СЛОВАРЬ ИМЁН НА СТУДИЮ И НА ЛИСТ. `colorwayLabel` — та же лестница `devName → colorCode →
 // baseSku`, которой колорвей зовут в пикере и в столбцах SIDES; `archivedRef` — тот же предикат
 // архива. Второе написание разошлось бы с первым в день, когда у цвета появится четвёртое имя.
@@ -62,6 +84,7 @@ import { archivedRef, colorwayLabel } from './colorway-picker';
 import { EMPTY_WORD, GROUP_GAP } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
+import { ReplacingEditor } from './generation/propagating-editor';
 import { VectorModal } from './modals';
 import { recolorOutputs } from './recolor/model';
 // K-15 — ПЛИТКИ. Читатель ленты и раппорт прогона берутся у экрана паттернов: одно определение
@@ -70,7 +93,6 @@ import { recolorOutputs } from './recolor/model';
 // ⚠ ИЗ `./pattern/model`, А НЕ ИЗ `./pattern`. Индекс папки тянет за собой сам экран, а тот —
 // `../render` и `../generation` целиком; этой панели нужны две чистые функции без единого хука.
 import { patternOutputs, repeatOfRun } from './pattern/model';
-import { TILE_CORNER, TILE_QUIET } from './picture-tile';
 import { provenanceLabel, readProvenance } from './provenance';
 import {
   SELECT_MARK_NOT_STATED,
@@ -89,6 +111,7 @@ import { Swatch } from './render/field-row';
 import { pictureIsModel, threedResults } from './threed/media';
 import { ThreedModelModal } from './threed/model-modal';
 import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
+import { SHEET_CALLOUTS_PREFS_KEY } from './use-callouts-prefs';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { ACTIVE_VIEWS, LEGACY_VIEWS, SHEET_MIN_VIEWS, normaliseViewKey, viewLabel } from './views';
 import { isPictureHidden } from './visibility';
@@ -775,7 +798,7 @@ export function renderGroups(
 ): RenderGroup[] {
   const byColorway = new Map<number, DocumentPlate[]>();
   for (const plate of plates) {
-    const id = plate.benchKind === 'render' ? (plate.colorwayId ?? 0) : RENDER_GROUP_LOOSE;
+    const id = plate.benchKind === 'render' ? plate.colorwayId ?? 0 : RENDER_GROUP_LOOSE;
     const list = byColorway.get(id);
     if (list) list.push(plate);
     else byColorway.set(id, [plate]);
@@ -871,7 +894,8 @@ export function sideCells(
   };
   for (const side of sides) {
     const inSlot = side.picture?.media?.id ?? 0;
-    const bySlot = inSlot > 0 ? plates.find((p) => p.mediaId === inSlot && !used.has(p.mediaId)) : undefined;
+    const bySlot =
+      inSlot > 0 ? plates.find((p) => p.mediaId === inSlot && !used.has(p.mediaId)) : undefined;
     const byCard =
       bySlot ??
       plates.find(
@@ -1222,7 +1246,13 @@ export function ArtifactsPanel({
     // сохранено», и без неё новая плита рождалась бы пустой, как рождалась взятая.
     for (const item of picked) if (item.id != null) map.set(item.id, item);
     return map;
-  }, [card?.resolvedTechnicalMedia, techCard?.resolvedTechnicalMedia, band.runs, band.bench, picked]);
+  }, [
+    card?.resolvedTechnicalMedia,
+    techCard?.resolvedTechnicalMedia,
+    band.runs,
+    band.bench,
+    picked,
+  ]);
 
   const plates = useMemo(
     () => documentPlates(technicalMedia, resolved, bench),
@@ -1408,9 +1438,7 @@ export function ArtifactsPanel({
     let renderAt = 0;
     const renderGrouped = renderGroups(renderAll, colourways, dictionary?.colors).map((group) => ({
       ...group,
-      cells: group.plates.map(
-        (plate): SheetCell => ({ type: 'plate', plate, index: renderAt++ }),
-      ),
+      cells: group.plates.map((plate): SheetCell => ({ type: 'plate', plate, index: renderAt++ })),
     }));
     const renderPlates = renderGrouped.flatMap((group) => group.plates);
 
@@ -1493,8 +1521,6 @@ export function ArtifactsPanel({
    * внутри поверхности: мерка, начатая на переде и достроенная на спинке, — не мерка.
    */
   const [tool, setTool] = useState<string | null>(DEFAULT_TOOL);
-  /** Сколько якорей набрано в незавершённом жесте — подсказку рисует панель, а она снаружи. */
-  const [placed, setPlaced] = useState(0);
   /**
    * ВЫНОСКА ПОД КУРСОРОМ В СПИСКЕ CALLOUTS (C-2) — индекс строки формы, как и `selected`. Плита
    * подсвечивает её накладкой; хранится здесь, потому что список и плита — соседи, и общий у них
@@ -1633,6 +1659,13 @@ export function ArtifactsPanel({
    * Цена индекса — сдвиг после удаления соседа; она оплачена тем, что удаление и откат снимают
    * выбор явно (ниже), а не оставляют его висеть на съехавшей строке.
    */
+  /** Буквы разрезов — по порядку на карточке: A–A, B–B… (одна буква на номер не тратится). */
+  const sectionLetters = new Map<number, string>();
+  callouts.forEach((c, i) => {
+    if (parseSpec(c.spec)?.t === 'section')
+      sectionLetters.set(i, sectionLetter(sectionLetters.size));
+  });
+
   const calloutsOfPlate = (mediaId: number): SurfaceCallout[] =>
     callouts
       .map((c, index) => ({ c, index }))
@@ -1660,6 +1693,8 @@ export function ArtifactsPanel({
              указание на листе и указание в окне это ОДНА строка формы, и два разных наконечника у
              неё означают, что один из двух экранов врёт о том, что сохранено. */
           caps: c.caps ?? '',
+          spec: parseSpec(c.spec),
+          letter: sectionLetters.get(index),
         };
       });
 
@@ -1694,28 +1729,60 @@ export function ArtifactsPanel({
    * номер не сел на саму линию. Стиль наследуется от ПАМЯТИ ПЕРА: у человека одна рука, и выбрав
    * красный пунктир, он рисует им дальше.
    */
-  function addCalloutOn(mediaId: number, shape: string, pts: ShapePoint[], pen: PenStyle) {
-    if (pts.length === 0) return;
+  function addCalloutOn(
+    mediaId: number,
+    shape: string,
+    pts: ShapePoint[],
+    pen: PenStyle,
+    /** Чем ставили — приходит от поверхности; увеличенный вид держит свой инструмент (T08). */
+    armed?: string | null,
+    /**
+     * ПРИНЯТОЕ ПРЕДЛОЖЕНИЕ (T28, `suggest ✦` → ✓): фигура, маркер, `spec`, текст и детали уже
+     * решены сервером — `placePurpose` не зовётся. Номер выдаётся тем же счётом, что у руки.
+     */
+    seed?: CalloutSeed,
+  ): number {
+    if (pts.length === 0 && !seed) return 0;
+    // НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ: фигура и `spec` — общим правилом (`placePurpose`, оно же у мудборда).
+    const placed = seed
+      ? {
+          shape,
+          pts,
+          marker: seed.marker,
+          dashed: seed.dashed,
+          filled: seed.filled,
+          caps: seed.caps,
+          spec: seed.spec,
+        }
+      : placePurpose(armed === undefined ? tool : armed, shape, pts);
+    shape = placed.shape;
+    pts = placed.pts;
     /* ПЕРВОЕ УКАЗАНИЕ БЕРЁТ ПЛИТУ НА КАРТОЧКУ (D-18, довод у `canPlaceOn`). Плита ищется по
        СЕГМЕНТУ на экране: род, под которым она ляжет в медиа, — это род вкладки. */
     const plate = onScreen.find((p) => p.mediaId === mediaId);
     if (plate && plate.origin !== 'card') takeIntoCard(plate, { withCallout: true });
     const pin = shape === 'pin';
-    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    const marker = pin
-      ? pts[0]
-      : { x: Math.min(0.96, Math.max(0.04, cx)), y: Math.min(0.96, Math.max(0.06, cy - 0.08)) };
+    const cx = pts.length ? pts.reduce((s, p) => s + p.x, 0) / pts.length : 0.5;
+    const cy = pts.length ? pts.reduce((s, p) => s + p.y, 0) / pts.length : 0.5;
+    const marker = seed
+      ? seed.marker
+      : pin
+        ? pts[0]
+        : placed.marker ?? {
+            x: Math.min(0.96, Math.max(0.04, cx)),
+            y: Math.min(0.96, Math.max(0.06, cy - 0.08)),
+          };
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
+    const number = nextCalloutNumber();
     form.setValue(
       'callouts',
       [
         ...rows,
         {
-          number: nextCalloutNumber(),
-          part: '',
-          parts: [],
-          description: '',
+          number,
+          part: seed?.parts[0] ?? '',
+          parts: seed?.parts ?? [],
+          description: seed?.description ?? '',
           dimensions: '',
           mediaId,
           posX: marker.x.toFixed(3),
@@ -1723,12 +1790,15 @@ export function ArtifactsPanel({
           kind: shape as AnnotationKind,
           points: pin ? [] : pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
           color: pen.color as AnnotationColor,
-          dashed: pen.dashed,
-          filled: pen.filled,
+          dashed: placed.dashed ?? pen.dashed,
+          filled: placed.filled ?? pen.filled,
+          ...(placed.caps ? { caps: placed.caps as AnnotationCaps } : {}),
+          spec: placed.spec,
         },
       ],
       { shouldDirty: true },
     );
+    return number;
     // ВЫБОР ПОСТАВЛЕННОЙ ВЫНОСКИ ЗДЕСЬ НЕ ДЕЛАЕТСЯ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. Третий такт жеста
     // «клик — клик — напиши, что это» исполняет сама поверхность: она выбирает выноску, только что
     // выросшую в ЕЁ списке, и просит поставить в правку курсор. Написанный ещё и здесь, он открывал
@@ -1743,6 +1813,19 @@ export function ArtifactsPanel({
     }
   };
 
+  /**
+   * ЯКОРЬ НА КАРТИНКУ (владелец, 05.10: «при клике на колаут нас должно анкорить на ту картинку, на
+   * которой он находится», «даже если он suggested»). Ряд кадров бывает и лентой, и сеткой — поэтому
+   * и `block`, и `inline`; `nearest` не дёргает страницу, если кадр уже виден.
+   */
+  function revealPlate(mediaId?: number | null) {
+    if (!mediaId) return;
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-plate-media="${mediaId}"]`),
+    ).find((n) => n.offsetParent !== null);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+
   function removeCalloutAt(index: number) {
     calloutHistory?.record();
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
@@ -1754,6 +1837,8 @@ export function ArtifactsPanel({
     // ВЫБОР СНИМАЕТСЯ ВСЕГДА. Он адресует строку индексом, а после удаления по этому индексу
     // стоит СОСЕДНЯЯ выноска: оставленный выбор открыл бы чужую правку, ничего об этом не сказав.
     setSelected(null);
+    // Взвод «+ point» адресует строку тем же индексом — после сдвига он целился бы в соседнюю.
+    setAddingCallout(null);
   }
 
   /**
@@ -1799,7 +1884,11 @@ export function ArtifactsPanel({
       setSelected(key == null ? null : Number(key));
       // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
       setAddingCallout(null);
-      if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+      if (key != null && opts?.focus) {
+        // Текст выноски пишется только в панели — свёрнутая, она раскрывается на сеанс (как у доски).
+        if (calloutsShell.collapsed) calloutsShell.hold();
+        setFocusEditor((n) => n + 1);
+      }
     },
     onBeforeMutate: calloutHistory?.record,
     // ОТКАТ СНИМАЕТ ВЫБОР по тому же доводу, что и удаление: ⌘Z возвращает МАССИВ целиком, и
@@ -1901,7 +1990,7 @@ export function ArtifactsPanel({
     // Витринный флэт (`run` в сегменте флэтов) — DETAIL: рендером он не является.
     const mediaKind: common_TechCardMediaKind =
       plate.origin === 'bench' && plate.benchKind !== 'render'
-        ? (BENCH_VIEW_MEDIA_KIND[(plate.viewKey ?? '').trim()] ?? 'TECH_CARD_MEDIA_KIND_DETAIL')
+        ? BENCH_VIEW_MEDIA_KIND[(plate.viewKey ?? '').trim()] ?? 'TECH_CARD_MEDIA_KIND_DETAIL'
         : kind === 'flat'
           ? 'TECH_CARD_MEDIA_KIND_DETAIL'
           : 'TECH_CARD_MEDIA_KIND_RENDER';
@@ -2118,6 +2207,205 @@ export function ArtifactsPanel({
       .filter(({ c }) => onTab.has(c.mediaId ?? 0));
   }, [callouts, onScreen]);
 
+  /* ═══ CALLOUTS СВОРАЧИВАЕТСЯ, КАК У МУДБОРДА (T14) ═════════════════════════════════════════════
+     Владелец, 04.10: «в artefacts the sheet сделать так что бы колаут блок тоже мог колапсится как в
+     мудборде». Не копия, а тот же орган (`./callouts-panel`): полоска, шеврон, разделитель ширины,
+     пустой лист без предпочтения — свёрнут. Предпочтение своё (`SHEET_CALLOUTS_PREFS_KEY`). */
+  const calloutsPanel = useRef<HTMLDivElement>(null);
+  const calloutsShell = useCalloutsPanel({
+    count: sheetRows.length,
+    holdKey: techCardId,
+    panelRef: calloutsPanel,
+    prefsBase: SHEET_CALLOUTS_PREFS_KEY,
+  });
+
+  /* ═══ SUGGEST ✦ (T28, R36) ════════════════════════════════════════════════════════════════════
+     Владелец: «кнопка отдельная где мы нажимаем … оно думает и подсказывает»; «сначала сохранить».
+     Нажатие: сейв карточки тем же путём, что у всех платных дверей (`autosave.flush`), затем
+     `SuggestCallouts` по всем карточным флэтам листа и отклонённым источникам этого компьютера.
+     Повторное нажатие во время прогона — отмена (соединение рвётся, `abortableAdminService`).
+     Новый прогон заменяет непринятые призраки; поставленные рукой указания не трогаются. */
+  const autosave = useTechCardAutosave();
+  const [suggestions, setSuggestions] = useState<CalloutSuggestion[]>([]);
+  /**
+   * Набор прогона целиком — основа раскладки по полям. ✓ и ✕ убирают строку, но НЕ место: принятое
+   * указание стоит там, где стоял его призрак, и пересчёт по оставшимся сдвинул бы соседний
+   * призрак прямо на него.
+   */
+  const [suggestBasis, setSuggestBasis] = useState<CalloutSuggestion[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(true);
+  const [suggestHot, setSuggestHot] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const suggestAbort = useRef<AbortController | null>(null);
+  /**
+   * ПОКОЛЕНИЕ ПРОГОНА. Отмена гасит `thinking…` СРАЗУ, даже если сейв перед запросом ещё висит, —
+   * и поднимает поколение: поздний ответ или `finally` старого прогона состояния не трогают.
+   */
+  const suggestRun = useRef(0);
+  /** Предложения, уже принятые этим экраном: двойной ✓ не рождает второе указание. */
+  const suggestConsumed = useRef(new Set<string>());
+  const cancelSuggest = () => {
+    suggestRun.current += 1;
+    suggestAbort.current?.abort();
+    suggestAbort.current = null;
+    setSuggesting(false);
+  };
+  useEffect(() => () => suggestAbort.current?.abort(), []);
+  // Другая карточка — другие предложения: призраки чужой карточки на этой были бы враньём.
+  useEffect(() => {
+    suggestRun.current += 1;
+    suggestAbort.current?.abort();
+    suggestAbort.current = null;
+    setSuggesting(false);
+    setSuggestions([]);
+    setSuggestBasis([]);
+  }, [techCardId]);
+  /** Карточные флэты листа — то, что сервер может прочесть и на что ляжет указание. */
+  const suggestMediaIds = useMemo(
+    () =>
+      segments.flat.plates
+        .filter((p) => p.origin === 'card' && !p.modelOnly && !!p.media)
+        .map((p) => p.mediaId),
+    [segments],
+  );
+  const liveFlats = useRef<number[]>(suggestMediaIds);
+  liveFlats.current = suggestMediaIds;
+  // Флэт сняли или заменили — его предложения уходят: ✓ на снятой плите писал бы в карточку
+  // указание на медиа, которого у неё нет.
+  const liveFlatsKey = suggestMediaIds.join(',');
+  useEffect(() => {
+    const live = new Set(liveFlats.current);
+    setSuggestions((list) =>
+      list.every((x) => live.has(x.mediaId ?? 0))
+        ? list
+        : list.filter((x) => live.has(x.mediaId ?? 0)),
+    );
+  }, [liveFlatsKey]);
+  const runSuggest = async () => {
+    if (suggestAbort.current) {
+      cancelSuggest();
+      return;
+    }
+    const gen = (suggestRun.current += 1);
+    const control = new AbortController();
+    suggestAbort.current = control;
+    setSuggesting(true);
+    const stale = () => gen !== suggestRun.current;
+    try {
+      let flushed: Awaited<ReturnType<typeof autosave.flush>>;
+      try {
+        flushed = await autosave.flush('suggest-callouts');
+      } catch {
+        flushed = 'error';
+      }
+      if (stale()) return;
+      if (!flushAllowsRun(flushed)) {
+        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        return;
+      }
+      const res = await abortableAdminService(control.signal).SuggestCallouts({
+        techCardId,
+        mediaIds: liveFlats.current,
+        dismissedSourceIds: readDismissed(techCardId),
+      });
+      if (stale()) return;
+      const next = normalizeSuggestions(res.suggestions, liveFlats.current);
+      suggestConsumed.current = new Set();
+      setSuggestions(next);
+      setSuggestBasis(next);
+      setSuggestHot(null);
+      if (next.length === 0) {
+        showMessage('nothing to suggest', 'success');
+        return;
+      }
+      setSuggestOpen(true);
+      if (calloutsShell.collapsed) calloutsShell.hold();
+    } catch (error) {
+      if (!stale()) showMessage(techCardErrorMessage(error, 'suggest failed'), 'error');
+    } finally {
+      if (!stale()) {
+        suggestAbort.current = null;
+        setSuggesting(false);
+      }
+    }
+  };
+  /**
+   * ПЛАШКИ ПРИЗРАКОВ — ПО ПОЛЯМ КАЖДОГО ФЛЭТА (R38). Раскладка одна на экран и на ✓: что видно,
+   * то и ляжет в `posX/posY`. Кадр — замер плиты; плиты ещё нет на экране — номинальный.
+   */
+  const [ghostFrames, setGhostFrames] = useState<Record<number, { w: number; h: number }>>({});
+  const noteGhostFrame = useCallback((mediaId: number, sz: { w: number; h: number }) => {
+    setGhostFrames((m) =>
+      m[mediaId]?.w === sz.w && m[mediaId]?.h === sz.h ? m : { ...m, [mediaId]: sz },
+    );
+  }, []);
+  const ghostLayout = useMemo(() => {
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const mediaId of new Set(suggestBasis.map((x) => x.mediaId ?? 0)))
+      Object.assign(
+        out,
+        layoutSuggestions(
+          suggestBasis.filter((x) => (x.mediaId ?? 0) === mediaId),
+          ghostFrames[mediaId] ?? NOMINAL_FRAME,
+        ),
+      );
+    return out;
+  }, [suggestBasis, ghostFrames]);
+  const suggestionsOf = (mediaId: number): SurfaceCallout[] =>
+    kind === 'flat'
+      ? suggestions
+          .filter((x) => (x.mediaId ?? 0) === mediaId)
+          .map((x) => {
+            const g = ghostOf(x);
+            const at = ghostLayout[g.key];
+            return at ? { ...g, label: { x: at.x, y: at.y } } : g;
+          })
+      : [];
+  /** ✓ — настоящее указание тем же путём, что у руки; источник-операция получает его номер. */
+  const acceptSuggestions = (ids: string[]) => {
+    const live = new Set(liveFlats.current);
+    const picked = suggestions.filter(
+      (x) =>
+        ids.includes(x.id ?? '') &&
+        !suggestConsumed.current.has(x.id ?? '') &&
+        live.has(x.mediaId ?? 0),
+    );
+    // Помечено ДО записи в форму: второй ✓ того же рендера уже ничего не найдёт.
+    for (const x of picked) suggestConsumed.current.add(x.id ?? '');
+    setSuggestions((list) =>
+      list.filter((x) => !ids.includes(x.id ?? '') && live.has(x.mediaId ?? 0)),
+    );
+    setSuggestHot(null);
+    if (picked.length === 0) return;
+    calloutHistory?.record();
+    for (const x of picked) {
+      const seed = seedOf(x, ghostLayout[x.id ?? '']);
+      const number = addCalloutOn(
+        seed.mediaId,
+        seed.kind,
+        seed.points,
+        { color: '', dashed: false, filled: false, caps: '' } as PenStyle,
+        null,
+        seed,
+      );
+      const opNumber = opNumberOf(x.sourceId);
+      if (number > 0 && opNumber != null) {
+        const ops = form.getValues('operations') ?? [];
+        // Шаг без номера сервер называет так, как его показывает карточка: (i+1)·10.
+        const at = ops.findIndex((o, i) => (o.operationNumber || (i + 1) * 10) === opNumber);
+        if (at >= 0) form.setValue(`operations.${at}.calloutNumber`, number, { shouldDirty: true });
+      }
+    }
+  };
+  /** ✕ — источник больше не предлагается на этой карточке в этом браузере. */
+  const dismissSuggestion = (id: string) => {
+    const x = suggestions.find((s) => s.id === id);
+    if (!x) return;
+    addDismissed(techCardId, [x.sourceId ?? '']);
+    setSuggestions((list) => list.filter((s) => s.id !== id));
+    setSuggestHot(null);
+  };
+
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
 
@@ -2152,6 +2440,9 @@ export function ArtifactsPanel({
       onSlotMedia={!disabled ? placeInSlot : undefined}
       onView3d={setViewing3d}
       calloutsOf={calloutsOfPlate}
+      ghostsOf={suggestionsOf}
+      ghostHot={suggestHot}
+      onGhostFrame={noteGhostFrame}
       selected={selected}
       canPlaceOn={canPlaceOn}
       tool={tool}
@@ -2159,7 +2450,6 @@ export function ArtifactsPanel({
          взведённым видом, и «поставил линию — рука пуста» вернуло бы снятый порядок
          «сначала взведи». */
       onToolDone={() => setTool(DEFAULT_TOOL)}
-      onPlacedCountChange={setPlaced}
       onAddCallout={addCalloutOn}
       bindings={surfaceBindings}
       onZoom={setZoomAt}
@@ -2247,12 +2537,14 @@ export function ArtifactsPanel({
             lead={
               <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
                 <ViewSwitch<ArtifactKind>
+                  quiet
                   label='representation'
                   value={kind}
                   options={ARTIFACT_KINDS}
                   onChange={setKind}
                 />
                 <ViewSwitch<PlateLayout>
+                  quiet
                   label='layout'
                   value={layout}
                   options={PLATE_LAYOUTS}
@@ -2299,23 +2591,32 @@ export function ArtifactsPanel({
               но только когда она сообщает ход жеста — набранные точки многоточечного вида; у
               взведённой по умолчанию записки без единой точки ей нечего сказать, кроме тех же
               снятых слов. */}
+          {/* ПАНЕЛЬ ВИДОВ — ТА ЖЕ РАМКА С ЧИПАМИ, ЧТО НА МУДБОРДЕ (владелец, 04.10: «там должен быть
+              такой дизайн»): виды и назначения одним рядом, без слова-заголовка. */}
           {drawableHere && (
-            <GroupLabel
-              className={GROUP_GAP}
-              lead={
-                <AnnotationToolbar
-                  tool={tool}
-                  onTool={setTool}
-                  hint={
-                    tool && (placed > 0 || tool !== DEFAULT_TOOL)
-                      ? placingHint(tool, placed)
-                      : undefined
-                  }
-                />
-              }
-            >
-              draw
-            </GroupLabel>
+            <Toolbar className={GROUP_GAP}>
+              <AnnotationToolbar
+                purposes
+                tool={tool}
+                onTool={setTool}
+                trailing={
+                  kind === 'flat' && suggestMediaIds.length > 0 ? (
+                    <Chip
+                      className='ml-3'
+                      data-callout-suggest=''
+                      dashed={!suggesting}
+                      selected={suggesting}
+                      pressed={suggesting}
+                      aria-busy={suggesting || undefined}
+                      onClick={() => void runSuggest()}
+                      title={suggesting ? 'cancel' : 'suggest callouts from the card'}
+                    >
+                      {suggesting ? 'thinking…' : 'suggest ✦'}
+                    </Chip>
+                  ) : undefined
+                }
+              />
+            </Toolbar>
           )}
 
           {/* `EmptyDocument` СНЯТ ВМЕСТЕ С ЕГО ЧЕТЫРЬМЯ КНОПКАМИ «front slot ✗» (D-15): стороны
@@ -2343,7 +2644,7 @@ export function ArtifactsPanel({
                          прозой была бы второй дверью в ту же комнату. */
                       'no renders marked yet — mark them in STUDIO › FABRIC RENDER › SIDES'
                     : kind === 'pattern'
-                      ? 'no tile of this card yet. A repeating tile is made on STUDIO → PATTERN, out of one picture; the ones you mark as chosen there are listed here — or put your own file into the slot below.'
+                      ? 'no tile of this card yet. Fabrics are made on STUDIO → MATERIALS; they are listed here — or put your own file into the slot below.'
                       : kind === 'onmodel'
                         ? 'no on-model picture of this card yet. STUDIO → ON MODEL re-dresses a photograph of a person in this garment; the ones you mark as chosen there are listed here.'
                         : 'no 3D of this card yet. A model is built on STUDIO from the renders standing in the sides — or put your own file into the slot below.'}
@@ -2389,18 +2690,18 @@ export function ArtifactsPanel({
           </>
         </Section>
 
-        <Section
-          title='callouts'
-          question='— a number is minted once and never reused'
-          action={
+        <CalloutsPanel
+          panel={calloutsShell}
+          tag='sheet'
+          where={`on ${ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}`}
+          note={
             /* ЧИСЛО = СПИСОК. Считается ровно то, что панель ниже рисует (`sheetRows`): выноски на
                плитах документа. Открученные и мудбордные не показываются — значит и не считаются;
                пилюли «unpinned» больше нет по слову владельца (R-14), а не по забывчивости. */
-            <Pill tone='mut' data-callouts-count=''>
+            <HeaderNote tone='mut' data-callouts-count=''>
               {sheetRows.length} on {ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}
-            </Pill>
+            </HeaderNote>
           }
-          className='lg:w-[340px] lg:shrink-0'
         >
           {/* ⚠ ТОТ ЖЕ ОРГАН, ЧТО У МУДБОРДА (B-9). Тело переехало отсюда в `./callout-rail`
               целиком — со списком, правкой, наведением и пиктограммой вида, — потому что владелец
@@ -2416,7 +2717,10 @@ export function ArtifactsPanel({
           <CalloutRail
             rows={sheetRows}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={(i) => {
+              setSelected(i);
+              if (i != null) revealPlate(callouts[i]?.mediaId);
+            }}
             hoverIndex={hoverIndex}
             onHover={setHoverIndex}
             disabled={disabled}
@@ -2432,9 +2736,31 @@ export function ArtifactsPanel({
             }
             focusToken={focusEditor}
             caps
-            emptyLabel='none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
+            purposes
+            emptyLabel={
+              suggestions.length > 0 && kind === 'flat'
+                ? undefined
+                : 'none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
+            }
           />
-        </Section>
+          {kind === 'flat' && (
+            <SuggestedCallouts
+              rows={suggestions}
+              flats={segments.flat.plates
+                .filter((p) => suggestMediaIds.includes(p.mediaId))
+                .map((p) => ({ mediaId: p.mediaId, name: p.caption || p.name }))}
+              open={suggestOpen}
+              onOpen={setSuggestOpen}
+              hot={suggestHot}
+              onHover={setSuggestHot}
+              disabled={disabled}
+              onAccept={(id) => acceptSuggestions([id])}
+              onAcceptAll={() => acceptSuggestions(suggestions.map((x) => x.id ?? ''))}
+              onDismiss={dismissSuggestion}
+              onReveal={revealPlate}
+            />
+          )}
+        </CalloutsPanel>
       </SectionStack>
 
       {/* ═══ УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО НА ПЛИТЕ ═══════════════════════════════════
@@ -2454,9 +2780,11 @@ export function ArtifactsPanel({
           srcFallbacks={plateSources(onScreen[zoomAt], true).slice(1)}
           callouts={calloutsOfPlate(onScreen[zoomAt].mediaId)}
           frozen={!canPlaceOn(onScreen[zoomAt])}
+          purposes
           onAdd={
             canPlaceOn(onScreen[zoomAt])
-              ? (shape, points, pen) => addCalloutOn(onScreen[zoomAt].mediaId, shape, points, pen)
+              ? (shape, points, pen, armed) =>
+                  addCalloutOn(onScreen[zoomAt].mediaId, shape, points, pen, armed)
               : undefined
           }
           selectedKey={selected == null ? null : String(selected)}
@@ -2498,17 +2826,34 @@ export function ArtifactsPanel({
           вставать. Он рождается сиблингом основы (наследует её `run_id` или `batch_id`) и попадает
           в историю генераций или на полку загрузок — туда же, куда попадает правка из тех мест.
           Положить его на ЭТОТ лист — отдельное решение, и его принимает первое указание. */}
-      {rasterOn && (
-        <VectorModal
-          open
-          onOpenChange={(open) => !open && setRasterOn(null)}
-          techCardId={techCardId}
-          band={band}
-          base={bandPictureOfMedia.get(rasterOn.mediaId) ?? plateAsPicture(rasterOn)}
-          slot={null}
-          disabled={disabled}
-        />
-      )}
+      {/* T59: a plate that IS a band picture is edited in its place — every slot holding it moves
+          onto the edit, and a sheet row (with its callouts) follows it in the card form. A plate
+          the band does not know (a library upload) has nothing to be replaced in and goes as
+          before, beside. */}
+      {rasterOn &&
+        ((bandPictureOfMedia.get(rasterOn.mediaId)?.id ?? 0) > 0 ? (
+          <ReplacingEditor
+            band={band}
+            techCardId={techCardId}
+            picture={bandPictureOfMedia.get(rasterOn.mediaId)!}
+            disabled={disabled}
+            onOpenChange={(open) => !open && setRasterOn(null)}
+            onFlattened={(edit) => {
+              const full = edit.media;
+              if (full?.id) setPicked((prev) => [...prev, full]);
+            }}
+          />
+        ) : (
+          <VectorModal
+            open
+            onOpenChange={(open) => !open && setRasterOn(null)}
+            techCardId={techCardId}
+            band={band}
+            base={plateAsPicture(rasterOn)}
+            slot={null}
+            disabled={disabled}
+          />
+        ))}
 
       {/* ═══ ОКНО МОДЕЛИ — ТО ЖЕ, ЧТО ОТКРЫВАЕТ ПЛИТКА СТУДИИ (D-26) ═══════════════════════════════
           Одно окно на оба экрана, и снимок живёт в нём (довод в `threed/model-modal.tsx`).
@@ -2553,8 +2898,8 @@ export function ArtifactsPanel({
               own picture.
             </Text>
             <Text size='micro' component='p'>
-              They are removed with it. Nothing is kept as an «unpinned» line beside the sheet:
-              a number without a picture cannot be read back onto a garment, and a list of such
+              They are removed with it. Nothing is kept as an «unpinned» line beside the sheet: a
+              number without a picture cannot be read back onto a garment, and a list of such
               numbers grows until nobody trusts any of it.
             </Text>
           </div>
@@ -2612,6 +2957,12 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     // ЗАМЕНА (O-53) — ТОЖЕ МОЛЧАНИЕ: `0` на проводе значит «голова цепочки замен», то есть
     // утверждение о картинке, а эта подделка о заменах не знает ничего.
     replacedBy: undefined,
+    // T28 v2: undo/redo — this stand-in is in no edit chain.
+    undoneAt: undefined,
+    canUndo: undefined,
+    canRedo: undefined,
+    undoToId: undefined,
+    flags: undefined,
   };
 }
 
@@ -2864,18 +3215,21 @@ const PLATE_BADGE_CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 bg-bgColo
  * отсутствие учит, что жеста не существует вовсе, а погашенный орган с причиной учит, что именно
  * стоит на пути (выпущенная карточка, плита не на документе).
  */
-function PlateGrid({
+/** Экспорт ради стенда `scripts/plate-open-probe.mjs` (мышиная дверь в крупный вид, T17). */
+export function PlateGrid({
   cells,
   layout,
   hoverIndex,
   onSlotMedia,
   onView3d,
   calloutsOf,
+  ghostsOf,
+  ghostHot,
+  onGhostFrame,
   selected,
   canPlaceOn,
   tool,
   onToolDone,
-  onPlacedCountChange,
   onAddCallout,
   bindings,
   onZoom,
@@ -2911,13 +3265,23 @@ function PlateGrid({
   onView3d: (plate: DocumentPlate) => void;
   /** Указания одной плиты, уже в вью-модели поверхности. */
   calloutsOf: (mediaId: number) => SurfaceCallout[];
+  /** Непринятые предложения `suggest ✦` на этой плите — призраки (T28). */
+  ghostsOf?: (mediaId: number) => SurfaceCallout[];
+  ghostHot?: string | null;
+  /** Замер кадра плиты — раскладке призраков по полям (`layoutSuggestions`). */
+  onGhostFrame?: (mediaId: number, size: { w: number; h: number }) => void;
   selected: number | null;
   /** Принимает ли эта плита указание — и, значит, заморожена её поверхность или нет. */
   canPlaceOn: (plate: DocumentPlate) => boolean;
   tool: string | null;
   onToolDone: () => void;
-  onPlacedCountChange: (n: number) => void;
-  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
+  onAddCallout: (
+    mediaId: number,
+    kind: string,
+    points: ShapePoint[],
+    pen: PenStyle,
+    armed?: string | null,
+  ) => void;
   /** Общая обвязка поверхности: перенос, правка якорей, удаление, выбор, откат. */
   bindings: Omit<AnnotationSurfaceProps, 'src' | 'callouts'>;
   /** Открыть плиту во весь экран — по её месту в ряду, чтобы листалось по всему ряду. */
@@ -3061,7 +3425,7 @@ function PlateGrid({
                целиком. Остальные плиты несут дверь верстака, как несли; карточная плита
                рендер-верстака свою дверь не теряет — та переезжает на обёртку кадра ниже. */
             data-field={sheet?.path ?? plate.door}
-/* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
+            /* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
                (рамка, шапка, кадр, подпись, подвал дверей). Пробы геометрии меряют вписанность
                кадра в плитку, и опознавать плитку по классам оказалось нельзя — «p-1» ушёл вместе
                с волной медиа, и проба стала находить `null`, то есть молча перестала мерить. */
@@ -3069,52 +3433,60 @@ function PlateGrid({
             data-plate-media={plate.mediaId}
             className='group relative w-fit max-w-full shrink-0'
           >
-            {/* ПОДСВЕТКА ВЫНОСКИ ИЗ СПИСКА (C-2) — накладка НАД кадром, прозрачная для указателя,
-                тем же законом, что ярлык: под ней поверхность постановки. */}
-            {hovered && <CalloutHighlight callout={hovered} />}
             {/* ЯРЛЫК ПЛИТЫ — НАКЛАДКОЙ НА КАДРЕ (K-2, довод у `PLATE_BADGE_BAR`). Кадр стоит первым
                 ребёнком плиты и начинается в её верхнем левом углу, поэтому `left-1 top-1` плиты и
                 `left-1 top-1` кадра — одна точка; отдельной позиционированной обёртки для этого не
                 нужно, а лишняя стояла бы между поверхностью и её собственными углами.
                 `pointer-events-none` НЕСУЩИЙ: под ярлыком лежит поверхность постановки указаний, и
                 проглоченный им `pointerdown` означал бы мёртвую зону в углу каждого чертежа. */}
-            <div
-              className={cn(
-                PLATE_BADGE_BAR,
-                !!plate.model && PLATE_BADGE_BAR_WIDE_RESERVE,
-              )}
-            >
+            <div className={cn(PLATE_BADGE_BAR, !!plate.model && PLATE_BADGE_BAR_WIDE_RESERVE)}>
               <div className={PLATE_BADGE_CHIP}>
-                <Text
-                  size='nano'
-                  variant='uppercase'
-                  tracking='label'
-                  component='span'
-                  data-plate-name
-                  className='min-w-0 truncate'
+                {/* ═══ ИМЯ — МЫШИНАЯ ДВЕРЬ В КРУПНЫЙ ВИД (T17) ══════════════════════════════════
+                    На плите всегда взведён инструмент, а взведённый двойной клик ставит точки
+                    (HX1: постановка старше зума), поэтому снимок мышью в крупный вид не вёл —
+                    только клавиатурой (HX3). Кнопки `zoom` на кадре нет и не будет (T12); дверью
+                    стало имя: нажатие по нему открывает крупный вид, курсор говорит это сам.
+                    Ловит указатель ТОЛЬКО имя (`pointer-events-auto` на нём одном) — мёртвая
+                    зона в углу чертежа равна слову, а не всей шапке. Для клавиатуры дверь уже есть
+                    (`data-open-large` поверхности), поэтому вторая остановка табом не заводится. */}
+                <button
+                  type='button'
+                  tabIndex={-1}
+                  aria-hidden='true'
+                  data-plate-open={plate.mediaId}
+                  title={`open ${plate.name} large`}
+                  onClick={() => onZoom(index)}
+                  className='pointer-events-auto min-w-0 cursor-zoom-in truncate text-left hover:underline'
                 >
-                  {/* ЯРЛЫК ПИШЕТ КОРОТКОЕ ИМЯ, КОГДА РЯД ВОКРУГ УЖЕ НАЗВАЛ ОСТАЛЬНОЕ (довод у
-                      `DocumentPlate.caption`): под шапкой `ROSSO` плита говорит `FRONT`. Полное
-                      имя от этого не пропадает — оно стоит в углах кадра (`zoom · FRONT · ROSSO`,
-                      `detach …`), в увеличенном виде и в строке «где» списка указаний. `title`
-                      здесь бесполезен: ярлык прозрачен для указателя и всплывающей подсказки не
-                      даёт вовсе (довод у второй строки ярлыка ниже). */}
-                  {plate.caption || plate.name}
-                </Text>
-              {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
-              {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
-              {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
-              {/* КАДР ТОЛЬКО ДЛЯ ПОКАЗА ГОВОРИТ ЭТО САМ (D-24): голубая пилюля — «нужен человек»,
+                  <Text
+                    size='nano'
+                    variant='uppercase'
+                    tracking='label'
+                    component='span'
+                    data-plate-name
+                    className='min-w-0 truncate'
+                  >
+                    {/* ЯРЛЫК ПИШЕТ КОРОТКОЕ ИМЯ, КОГДА РЯД ВОКРУГ УЖЕ НАЗВАЛ ОСТАЛЬНОЕ (довод у
+                        `DocumentPlate.caption`): под шапкой `ROSSO` плита говорит `FRONT`. Полное
+                        имя от этого не пропадает — оно стоит в `title` этой двери, в углах кадра
+                        (`detach …`), в увеличенном виде и в строке «где» списка указаний. */}
+                    {plate.caption || plate.name}
+                  </Text>
+                </button>
+                {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
+                {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
+                {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
+                {/* КАДР ТОЛЬКО ДЛЯ ПОКАЗА ГОВОРИТ ЭТО САМ (D-24): голубая пилюля — «нужен человек»,
                   и здесь это верно буквально: в промпт этот кадр не уедет ни при каком жесте. */}
-              {plate.displayOnly && (
-                <Pill
-                  tone='attention'
-                  title='filed for display only — it goes into no slot and is never sent to a prompt'
-                >
-                  display only
-                </Pill>
-              )}
-              {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
+                {plate.displayOnly && (
+                  <Pill
+                    tone='attention'
+                    title='filed for display only — it goes into no slot and is never sent to a prompt'
+                  >
+                    display only
+                  </Pill>
+                )}
+                {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
                   once, on arrival; the badge is on screen for as long as the picture is, and it is
                   what a person sees when they come back to this tab an hour later.
                   ЗДЕСЬ ВИСЕЛО «not on the sheet» — прямая неправда: плита, лежащая в медиа
@@ -3122,14 +3494,14 @@ function PlateGrid({
                   (`tech-pack-document.tsx`, без единого условия по роду). Пилюля называет теперь
                   ровно это, и только там, где оно удивляет: у флэта попадание на бумагу и так
                   никого не удивляет, а у плиты, которой в медиа карточки ещё нет, своя пилюля. */}
-              {sayPrints && plate.origin === 'card' && (
-                <Pill
-                  tone='attention'
-                  title='this picture is in the card’s media, so the tech pack prints it on the technical sketch page, with the callouts standing on it'
-                >
-                  on paper
-                </Pill>
-              )}
+                {sayPrints && plate.origin === 'card' && (
+                  <Pill
+                    tone='attention'
+                    title='this picture is in the card’s media, so the tech pack prints it on the technical sketch page, with the callouts standing on it'
+                  >
+                    on paper
+                  </Pill>
+                )}
                 {/* Число выносок ЭТОЙ плиты. Стояло `ml-auto` у правого края строки-шапки; строки
                     больше нет, а правый верхний угол кадра занят рядом `zoom · ✕`. Здесь оно
                     читается вместе с именем, которому принадлежит, и рисуется только когда есть
@@ -3174,6 +3546,7 @@ function PlateGrid({
             <div data-field={sheet ? plate.door : undefined}>
               <AnnotationSurface
                 {...bindings}
+                frameId={plate.mediaId}
                 src={sources[0] ?? ''}
                 srcFallbacks={sources.slice(1)}
                 alt={plate.name}
@@ -3183,14 +3556,22 @@ function PlateGrid({
                 frameClassName='w-auto'
                 frameStyle={{ height: PLATE_FRAME_HEIGHT }}
                 callouts={mine}
+                ghosts={ghostsOf?.(plate.mediaId)}
+                ghostHot={ghostHot}
+                onFrameSize={onGhostFrame ? (sz) => onGhostFrame(plate.mediaId, sz) : undefined}
                 selectedKey={selected == null ? null : String(selected)}
+                /* ПОДСВЕТКА ВЫНОСКИ ИЗ СПИСКА (C-2) — изоляцией самой поверхности, как в мудборде.
+                   Прежняя накладка рисовала квадрат 32px на точке подписи и пунктир по габариту
+                   якорей — тот самый «толстый квадратик» и внешняя рамка (R43, R18): строка под
+                   курсором — это обычно и выбранная строка. */
+                hoveredKey={hovered?.key ?? null}
                 frozen={!drawable}
                 tool={drawable ? tool : null}
                 onToolDone={onToolDone}
-                onPlacedCountChange={drawable ? onPlacedCountChange : undefined}
                 onAdd={
                   drawable
-                    ? (shape, points, pen) => onAddCallout(plate.mediaId, shape, points, pen)
+                    ? (shape, points, pen, armed) =>
+                        onAddCallout(plate.mediaId, shape, points, pen, armed)
                     : undefined
                 }
                 legend
@@ -3208,25 +3589,24 @@ function PlateGrid({
                    после K-2 это ЕДИНСТВЕННАЯ граница плиты: внешняя рамка снята, а вместе с ней и
                    4px, которые только и отделяли одну линию от другой. */
                 halo={halo}
-                // ВЕРХ СПРАВА — РЯД, А НЕ УГОЛ, ровно как у `PictureTile`: увеличение и снятие
-                // обязаны стоять рядом, не наезжая. Место ряда назначает сама поверхность
-                // (`cornerSlot` рисуется ею по `right-1 top-1`), поэтому координат здесь нет.
+                // ВЕРХ СПРАВА — РЯД, А НЕ УГОЛ, ровно как у `PictureTile`: 3D и снятие обязаны
+                // стоять рядом, не наезжая. Место ряда назначает сама поверхность (`cornerSlot`
+                // рисуется ею по `right-1 top-1`), поэтому координат здесь нет.
                 //
-                // ZOOM ЖИВ И НА ВЫПУЩЕННОЙ КАРТОЧКЕ: мерку и дугу на плите иначе не разглядеть, а
-                // увеличение и есть способ их прочесть. ✕ (detach) — правка листа, поэтому гаснет.
+                // ZOOM — ДВОЙНЫМ КЛИКОМ ПО СНИМКУ, без кнопки (T12: «кнопку зум на ховер нигде
+                // показывать не нужно»), и жив на выпущенной карточке: мерку и дугу на плите иначе
+                // не разглядеть. ✕ (detach) — правка листа, поэтому гаснет.
                 //
                 // ═══ ЗДЕСЬ СТОЯЛ `take in`, И ЕГО СНЯЛИ (H-41) ═════════════════════════════
                 // «Кнопки take in быть не должно: если размечено в студии — на листе по
-                // умолчанию». Ряд отвечает теперь на один вопрос — ПОСМОТРЕТЬ (zoom, 3D) — плюс
+                // умолчанию». Ряд отвечает теперь на один вопрос — ПОСМОТРЕТЬ (3D) — плюс
                 // `✕`, который снимает плиту с листа.
+                onOpenLarge={() => onZoom(index)}
                 cornerSlot={
                   <>
-                    <PlateCorner label={`zoom · ${plate.name}`} onPress={() => onZoom(index)}>
-                      zoom
-                    </PlateCorner>
                     {/* ═══ 3D — ДВЕРЬ В ОКНО МОДЕЛИ, ЗА КОТОРУЮ ЭТОТ РАСТР СТОИТ (D-26) ════════
                         Только у плиты, за которой модель есть: у чужой это обещание сцены,
-                        которой нет. В том же ряду, что zoom: оба — «посмотреть крупнее». */}
+                        которой нет. */}
                     {plate.model && (
                       <PlateCorner
                         label={`open the 3D model behind ${plate.name} — orbit it and take a snapshot from any angle`}
@@ -3567,7 +3947,12 @@ function ModelPlateTile({
         </div>
         {plate.note ? (
           <span className={cn(PLATE_BADGE_CHIP, TILE_QUIET)}>
-            <Text size='nano' variant='label' component='span' className='line-clamp-2 min-w-0 break-words'>
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              className='line-clamp-2 min-w-0 break-words'
+            >
               {plate.note}
             </Text>
           </span>
@@ -3588,59 +3973,6 @@ function ModelPlateTile({
           no thumbnail came back — a snapshot from the 3D window makes one
         </Text>
       </button>
-    </div>
-  );
-}
-
-/**
- * ═══ ПОДСВЕТКА ВЫНОСКИ, НАД КОТОРОЙ СТОИТ КУРСОР В СПИСКЕ (C-2) ═════════════════════════════════
- *
- * Владелец: «на ховер в левом меню CALLOUTS должны подсвечивать тот колаут который заховерили».
- *
- * НАКЛАДКА ЛИСТА, А НЕ СОСТОЯНИЕ ПОВЕРХНОСТИ. У поверхности своё наведение (маркер под мышью
- * гасит соседей), но снаружи его не задать: пропа нет, а файл чужой и прямо сейчас переписывается
- * соседней волной. Накладка живёт в долях кадра — тех же, в которых хранится выноска, — и потому
- * стоит ровно там, где стоит плашка: `left/top` в процентах кадра, чья высота задана числом, а
- * ширина равна ширине плиты (`w-fit`).
- *
- * КВАДРАТ ВОКРУГ ПЛАШКИ И ПУНКТИРНАЯ РАМКА ПО ЯКОРЯМ ФИГУРЫ — та же геометрия, какой поверхность
- * показывает ВЫБОР (маркиза): человек уже знает этот язык. Белая подложка в 2px — чтобы чернильная
- * рамка читалась и на пёстром рендере, где линия тонет.
- */
-function CalloutHighlight({ callout }: { callout: SurfaceCallout }) {
-  const pts = callout.points ?? [];
-  const box =
-    pts.length >= 2
-      ? {
-          x0: Math.min(...pts.map((p) => p.x)),
-          y0: Math.min(...pts.map((p) => p.y)),
-          x1: Math.max(...pts.map((p) => p.x)),
-          y1: Math.max(...pts.map((p) => p.y)),
-        }
-      : null;
-  return (
-    <div
-      data-callout-highlight={callout.key}
-      aria-hidden='true'
-      className='pointer-events-none absolute left-0 top-0 z-[6] w-full'
-      style={{ height: PLATE_FRAME_HEIGHT }}
-    >
-      {box && (
-        <div
-          className='absolute border border-dashed border-textColor shadow-[0_0_0_2px_var(--color-bgColor)]'
-          style={{
-            left: `calc(${box.x0 * 100}% - 6px)`,
-            top: `calc(${box.y0 * 100}% - 6px)`,
-            width: `calc(${(box.x1 - box.x0) * 100}% + 12px)`,
-            height: `calc(${(box.y1 - box.y0) * 100}% + 12px)`,
-          }}
-        />
-      )}
-      <div
-        data-callout-highlight-mark=''
-        className='absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 border-2 border-textColor shadow-[0_0_0_2px_var(--color-bgColor)]'
-        style={{ left: `${callout.label.x * 100}%`, top: `${callout.label.y * 100}%` }}
-      />
     </div>
   );
 }

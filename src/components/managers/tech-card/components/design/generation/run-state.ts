@@ -4,6 +4,7 @@ import type {
   common_DesignRunParams,
 } from 'api/proto-http/admin';
 
+import { FLAT_MODE_WORD, flatModeOf } from '../flat-mode';
 import { clockStamp } from '../handles';
 import { stampIsSet } from '../visibility';
 import { normaliseViewKey, viewLabel } from '../views';
@@ -57,9 +58,7 @@ export function isRunLive(run: Pick<common_DesignRun, 'status'>): boolean {
  * that a result landing after this stamp is recorded rather than dropped, so the pill says
  * `cancelling…` and never `cancelled` — the ledger decides which of the two it becomes.
  */
-export function isCancelling(
-  run: Pick<common_DesignRun, 'status' | 'cancelRequestedAt'>,
-): boolean {
+export function isCancelling(run: Pick<common_DesignRun, 'status' | 'cancelRequestedAt'>): boolean {
   return isRunLive(run) && stampIsSet(run.cancelRequestedAt);
 }
 
@@ -122,6 +121,9 @@ export const RUN_CODE_WORDS: Readonly<Record<string, string>> = {
      is not a failure — the worker comes back to it — so the words say what it is waiting for. */
   submit_settling: 'waiting for the provider to confirm the earlier request',
   paid_collect_waiting: 'already paid, waiting to collect the result',
+  /* The server's cap on an image run (05.10): past it the run is closed `failed`. */
+  timed_out: 'timed out',
+  landing_failed: 'the result could not be saved',
   source_too_large:
     'the picture is too large to edit here (over 18 MP); downscale it and try again',
 };
@@ -224,6 +226,76 @@ export function runOutcomeChip(run: common_DesignRun): string {
 }
 
 /**
+ * ═══ A RUN THAT TAKES TOO LONG (owner 05.10: «пользователь не ждал бесконечно») ════════════════
+ *
+ * The server closes an image run past its cap (`RUN_CAP_MS`, `timed_out`). Past the cap the live
+ * row says `taking too long` and offers `cancel` in plain sight; past the cap + 2 min the band is
+ * read as a stale row (`stuck`) — the client never waits forever on it.
+ */
+export const RUN_CAP_MS = 6 * 60_000;
+/** How long past the cap a row still reading `running` is taken for a stale one (`stuck`). */
+export const RUN_STUCK_AFTER_MS = 2 * 60_000;
+
+/**
+ * THE SERVER'S CAP, as the band says it (`image_run_cap_seconds`, `capped_run_kinds`, 05.10). Set
+ * by the band read (`useDesignBand`); a server that does not say it leaves the default for every kind.
+ */
+let capMs = RUN_CAP_MS;
+let cappedKinds: ReadonlySet<string> | null = null;
+export function configureRunCap(
+  band: Pick<GetDesignBandResponse, 'imageRunCapSeconds' | 'cappedRunKinds'> | undefined,
+): void {
+  const seconds = band?.imageRunCapSeconds ?? 0;
+  capMs = seconds > 0 ? seconds * 1000 : RUN_CAP_MS;
+  const kinds = (band?.cappedRunKinds ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
+  cappedKinds = kinds.length ? new Set(kinds) : null;
+}
+
+/** The cap of this run, ms; 0 = its kind is not capped. */
+export function runCapMs(run: Pick<common_DesignRun, 'kind'>): number {
+  const kind = (run.kind ?? '').trim().toLowerCase();
+  return !cappedKinds || cappedKinds.has(kind) ? capMs : 0;
+}
+
+/** `/ 6:00` beside a live capped run's clock; '' otherwise. */
+export function capClock(run: common_DesignRun): string {
+  const cap = runCapMs(run);
+  if (!cap || !isRunLive(run)) return '';
+  const s = Math.round(cap / 1000);
+  return `/ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+export function runOverdue(
+  run: Pick<common_DesignRun, 'status' | 'startedAt' | 'createdAt' | 'kind'>,
+  now = Date.now(),
+): 'late' | 'stuck' | null {
+  if (!isRunLive(run)) return null;
+  const cap = runCapMs(run);
+  if (!cap) return null;
+  const since = new Date(run.startedAt || run.createdAt || '').getTime();
+  if (!Number.isFinite(since)) return null;
+  const age = now - since;
+  return age > cap + RUN_STUCK_AFTER_MS ? 'stuck' : age > cap ? 'late' : null;
+}
+
+/** The live tile's word past the cap; `''` while the run is within it. */
+export function overdueWord(run: common_DesignRun): string {
+  const late = runOverdue(run);
+  return late === 'stuck' ? 'stuck' : late === 'late' ? 'taking too long' : '';
+}
+
+/** A failed / cancelled run in one short line: `timed out` · `failed · <reason>` · `cancelled`. */
+export function runShortFailure(run: common_DesignRun): string {
+  const status = runStatus(run);
+  const code = (run.errorCode ?? '').trim();
+  if (code === 'timed_out') return 'timed out';
+  const why = (runCodeWords(code) || (run.lastError ?? '').trim()).replace(/\s+/g, ' ');
+  const short = why.length > 60 ? `${why.slice(0, 60).trimEnd()}…` : why;
+  const head = status === 'cancelled' ? 'cancelled' : 'failed';
+  return short ? `${head} · ${short}` : head;
+}
+
+/**
  * СОСТОЯНИЕ ПРОГОНА — СЛОВОМ, И ТОЛЬКО ПОКА О НЁМ ЕСТЬ ЧТО СКАЗАТЬ (r2 п.22).
  *
  * Владелец о ряде пилюль на строке: «RUN 30 · FLAT · DONE — эти все иконки надо убрать». Пилюли
@@ -249,10 +321,13 @@ export function runStateWord(
     const failedOnce = !!((run.errorCode ?? '').trim() || (run.lastError ?? '').trim());
     const word = isCancelling(run)
       ? 'cancelling…'
-      : status === 'pending' && !failedOnce
-        ? 'reserved'
-        : chip;
-    const clock = status === 'running' || failedOnce ? elapsed : '';
+      : overdueWord(run)
+        ? overdueWord(run)
+        : status === 'pending' && !failedOnce
+          ? 'reserved'
+          : chip;
+    const tick = status === 'running' || failedOnce || overdueWord(run) ? elapsed : '';
+    const clock = tick && capClock(run) && !overdueWord(run) ? `${tick} ${capClock(run)}` : tick;
     return {
       word: clock ? `${word} ${clock}` : word,
       note: isCancelling(run) ? undefined : note,
@@ -313,7 +388,9 @@ export function viewsLine(params?: common_DesignRunParams | null): string {
   const layoutText =
     layout === 'one' ? 'one picture' : layout === 'per_view' ? 'a picture per view' : layout;
   const left = views.length ? views.join(', ') : '—';
-  return layoutText ? `${left} · ${layoutText}` : left;
+  const mode = flatModeOf(params);
+  const tail = [layoutText, mode === 'photos' ? '' : FLAT_MODE_WORD[mode]].filter(Boolean);
+  return tail.length ? `${left} · ${tail.join(' · ')}` : left;
 }
 
 /**

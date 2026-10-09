@@ -1789,6 +1789,9 @@ export type TechCardMediaItem = {
   mediaId: number | undefined;
   kind: TechCardMediaKind | undefined;
   caption: string | undefined;
+  // Moodboard picture role (0395): "target" (the garment we make) | "detail" | "material" | "mood";
+  // "" = unassigned. Only moodboard_media carries it; rides the full-replace card save.
+  role: string | undefined;
 };
 
 // TechCardMediaFull is a resolved sketch-media reference for display.
@@ -1796,6 +1799,7 @@ export type TechCardMediaFull = {
   media: MediaFull | undefined;
   kind: TechCardMediaKind | undefined;
   caption: string | undefined;
+  role: string | undefined;
 };
 
 // TechCardCallout is a numbered detail note pointing at the technical sketch.
@@ -1878,6 +1882,13 @@ export type TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: TechCardAnnotationCaps | undefined;
+  // НАЗНАЧЕНИЕ ВЫНОСКИ и её структурное содержимое — JSON-объект строкой (0388): заметка, узел
+  // крупно, нанесение, строчка/шов, материал, разрез. Ось, ортогональная виду (как caps): вид
+  // говорит, ЧТО нарисовано, spec — ЗАЧЕМ. Форму держит клиент; сервер проверяет только «объект,
+  // не длиннее 16 КБ» и канонизирует (ключи по алфавиту), чтобы подпись DESIGN была стабильной.
+  // Пусто = обычная выноска, как до 0388. Входит в атомарную группу геометрии: без `kind` хранимый
+  // spec переносится вместе с якорями.
+  spec: string | undefined;
 };
 
 // Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
@@ -3371,6 +3382,62 @@ export type TechCardPackaging = {
   notes: string | undefined;
 };
 
+// TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
+// label (labels rework, 0386). The ten translations come from the fibre dictionary.
+export type TechCardCareLabelFiber = {
+  part: TechCardBomLabelPart | undefined;
+  fiberCode: string | undefined;
+  pct: number | undefined;
+};
+
+// TechCardCareLabelColorway holds the per-colourway overrides of the composition label.
+export type TechCardCareLabelColorway = {
+  colorwayId: number | undefined;
+  colourName: string | undefined;
+  fibers: TechCardCareLabelFiber[] | undefined;
+};
+
+// TechCardCareLabel — СОСТАВНИК: the overrides of the always-present composition label. Every field
+// empty = the derived value (brand mark, dictionary prose, storefront QR, default caption, company
+// address). Lines are sent one string per printed line and must not contain a newline.
+export type TechCardCareLabel = {
+  logoMediaId: number | undefined;
+  careProseLines: string[] | undefined;
+  qrPreset: string | undefined;
+  qrTemplate: string | undefined;
+  backCaptionLines: string[] | undefined;
+  addressLines: string[] | undefined;
+  colorways: TechCardCareLabelColorway[] | undefined;
+};
+
+// TechCardGarmentLabel is one label on the garment other than the composition label (labels rework,
+// 0386), shaped like a construction aspect: a known key or a custom name, a mockup, and where / how
+// it goes on. A label without a mockup is saved, but the LABELS sign-off cannot be approved (D-04).
+export type TechCardGarmentLabel = {
+  key: string | undefined;
+  placement: string | undefined;
+  attachment: string | undefined;
+  folding: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
+// changed — `usage` instead of placement, `packing` instead of attachment + folding.
+export type TechCardPackagingItem = {
+  key: string | undefined;
+  usage: string | undefined;
+  packing: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
 // TechCardCostLine is one currency bucket of the materials rollup.
 export type TechCardCostLine = {
   currency: string | undefined;
@@ -3700,6 +3767,15 @@ export type TechCardInsert = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   garmentDescription?: string;
+  // THE PERSON'S OWN WORDS FOR A FLAT (flat-consistency M14, owner 07.10: «показывай в WORDS только
+  // то, что уходит»). Typed by a person in FLAT › WORDS, under the class line, and by nothing else:
+  // no model writes it (no ai ✦ on that box, no seeding, no brief), so it is human by construction —
+  // the provenance garment_description lacks (it is seeded by a model brief and edited by people,
+  // one string with no author). A flat run sends «garment: <class>» (from garment_description) and
+  // then these lines as typed; the description's other words never travel to a flat.
+  // Read by flat runs only; frozen into DesignInputSnapshot.garment_note. Not in any section digest.
+  // OPTIONAL for the same reason as garment_description: absent = keep, "" = clear, value = set.
+  flatWords?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -3713,6 +3789,9 @@ export type TechCardInsert = {
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: TechCardConstruction | undefined;
   operations: TechCardOperation[] | undefined;
+  // DEPRECATED (labels rework, 0386): READ-ONLY until the drop migration (I-19); IGNORED ON WRITE —
+  // the save neither clears nor inserts tech_card_label any more. The labels live in garment_labels
+  // (121) and the composition label in care_label (120). Not in any section digest.
   labels: TechCardLabel[] | undefined;
   packaging: TechCardPackaging | undefined;
   costing: TechCardCosting | undefined;
@@ -3905,6 +3984,21 @@ export type TechCardInsert = {
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции — которым бандлом сохранили
   // карточку, не то, от чего может зависеть подпись.
   bomQtyAware: boolean | undefined;
+  // СОСТАВНИК (labels rework, 0386) — the composition (care) label's overrides, 1:1 with the card.
+  // Presence-aware like packaging: null on write = KEEP the stored record; a present message replaces
+  // it (a present-but-empty one resets every line to derived). Null on read = nothing overridden.
+  careLabel: TechCardCareLabel | undefined;
+  // The garment labels other than the composition label (brand, size, flag, hangtag, … or a custom
+  // name). Full replace on write — but only from a client that sets labels_aware (123).
+  garmentLabels: TechCardGarmentLabel[] | undefined;
+  // The packaging items (polybag, tissue, insert card, … or a custom name). Full replace on write —
+  // but only from a client that sets labels_aware (123). The carton facts stay on `packaging` (46).
+  packagingItems: TechCardPackagingItem[] | undefined;
+  // ЩИТ СОВМЕСТИМОСТИ для garment_labels (121) и packaging_items (122): оба — полная замена, и
+  // payload бандла, который про них не знает, неотличим от «удалили все». Без флага UpdateTechCard
+  // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
+  labelsAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3996,6 +4090,16 @@ export type TechCard = {
   // URL и размеры это read-данные, и класть их во вход записи значило бы принимать от клиента то,
   // что сервер обязан знать сам.
   resolvedOperationMedia: TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (M-02): the labels rework's media resolved — the composition label's logo override
+  // (care_label.logo_media_id) and every garment-label and packaging-item mockup (media_ids),
+  // distinct by media_id. The write side carries ids only; without this list the client could turn
+  // them into pictures only through its media-library page, which holds just the latest files.
+  // Ignored on write.
+  resolvedLabelMedia: TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (0407): the card was created through the guided studio flow
+  // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
+  // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
+  guided: boolean | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -4555,6 +4659,11 @@ export type TechCardListItem = {
   // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
   // this build cannot map; never a stand-in for ADULT.
   ageGroup: AgeGroupEnum | undefined;
+  // Mirrors TechCard.guided (0407).
+  guided: boolean | undefined;
+  // The card is still being set up: guided, no moodboard picture (reference rows do not count) and
+  // no concept text. Derived server-side, the same rule for ListTechCards and GetStylePipeline.
+  setup: boolean | undefined;
 };
 
 // DesignRun is one row of the band's history: a generation job, its money, its inputs and its
@@ -4846,6 +4955,10 @@ export type DesignRunParams = {
   extend: DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: DesignVideoParams | undefined;
+  // THE FLAT GENERATION MODE (kind=flat, flat-consistency 81-FINAL-MODES). Refused on every other kind
+  // (`flat_forbidden`). Absent = the photos route. A rerun inherits its parent's block (a different one
+  // is `mode_not_for_this_run`).
+  flat: DesignFlatParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4975,6 +5088,18 @@ export type DesignColourMap = {
   // a claim that the file is gone. The distinction is DesignEditLayer.raster_deleted's, verbatim:
   // a failed lookup must not report a deletion that may not have happened.
   deleted: boolean | undefined;
+  // FK media(id), OPTIONAL (0 = none): THE CLOTH MOCKUP OF THIS MAP — the same flat of the same
+  // `view` over the same base, each labelled part filled flat with its cloth's tile at the cloth's
+  // TRUE repeat. Read on the frozen recipe (DesignColourRecipe.colour_maps) only; the colour plan
+  // does not store it.
+  // ⚠ IT SHOWS WHERE AND HOW BIG, NEVER HOW IT LOOKS. Measured (paint-parts T13 A/B): handed a
+  // mockup, the image model copies the motif's SCALE and colours from it — so its scale must be
+  // the cloth's real repeat — while placement was already right from the map alone. It is attached
+  // right after its map with a caption that forbids its flat, unlit look.
+  // It belongs to its map, so it travels HERE rather than as an extra input; the run door holds it
+  // to the same rules as the map: card-owned media, never also a map, a plate, a reference or a
+  // cloth of the same run.
+  mockupMediaId: number | undefined;
 };
 
 // DesignColourSwatch is ONE label of a colour map: a colour somebody deliberately chose, and how
@@ -5226,6 +5351,31 @@ export type DesignVideoParams = {
   sourceMediaId: number | undefined;
   duration: number | undefined;
   model: string | undefined;
+};
+
+// DesignFlatParams — how ONE flat press draws its sheet (81-FINAL-MODES).
+// - "" (or "photos"): the card's kept reference photos with roles and notes + the join list in words
+// when the card has one; TWO candidate sheets. The default.
+// - hand_flat: the card's own hand-drawn technical flats (structure_refs) are redrawn cleanly, the
+// missing views derived; the kept photos travel for fit only; no join list. TWO candidates.
+// - straps: the photos route with the designer-CONFIRMED join list (DesignJoins.confirmed at the
+// card's current rev); FOUR candidates.
+// Door refusals (all free, before any money): `unknown_flat_mode`, `structure_required` (hand_flat
+// without refs), `structure_forbidden` (refs on another mode), `structure_malformed` (a role that is not
+// front_flat | back_flat, a role or media twice), `structure_not_on_card` (not a TECHNICAL media of this
+// card), `joins_unconfirmed` (straps on a card whose list is missing or not confirmed at its current rev;
+// FailedPrecondition, metadata `joins_rev`), `mode_not_for_this_run` (a detail-only or per_view run, or
+// a rerun that changes its parent's mode, flats or views). The structure flats travel in the input
+// snapshot as the first references, with their roles.
+export type DesignFlatParams = {
+  mode: string | undefined;
+  structureRefs: DesignFlatStructureRef[] | undefined;
+};
+
+// DesignFlatStructureRef — one hand-drawn technical flat of the card and what it shows.
+export type DesignFlatStructureRef = {
+  mediaId: number | undefined;
+  role: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -5485,7 +5635,8 @@ export type DesignPicture = {
   displayOnly: boolean | undefined;
   // THE EDIT THAT TOOK THIS PICTURE'S PLACE (O-53) — the id of the flatten filed by
   // FlattenDesignEditLayer with replace_picture_id = this picture. 0 = not replaced. OUTPUT-ONLY:
-  // no request carries it, and no verb clears it (there is no «un-replace» in v1).
+  // no request carries it, and no verb clears it. An overwrite over an UNDONE successor (undone_at)
+  // rewrites it to the new edit; the undone branch keeps its rows, cut off.
   // A REPLACED PICTURE IS NOT HIDDEN AND NOT CHANGED. Its pixels, run row, crops, reference roles
   // and hidden_at are exactly what they were; what moved is the bench slot that held it, which now
   // holds the edit. The history keeps showing it — captioned «replaced by an edit» — and it can be
@@ -5499,7 +5650,31 @@ export type DesignPicture = {
   // ErrorInfo metadata names the head of its chain as head_picture_id.
   // ⚠ ABSENT — not 0 — on a server older than the field, and that absence is how a client knows
   // the server cannot replace a picture yet (FlattenDesignEditLayerRequest.replace_picture_id).
+  // UNDO / REDO (T28 v2, undone_at below). The CURRENT VERSION of a chain is reached by walking
+  // replaced_by from the root and stopping BEFORE the first link with undone_at set. The head named
+  // in already_replaced is that current version.
   replacedBy: number | undefined;
+  // THIS EDIT WAS UNDONE (T28 v2) — UndoDesignEdit set it on the current version of its chain,
+  // RedoDesignEdit clears it. It is NOT hidden_at: undo and redo never touch visibility, and a hidden
+  // picture keeps every rule of hidden_at. An undone link and every link after it stand nowhere on
+  // the bench and in no slot; the history keeps them. A chain whose ROOT is undone is a branch cut off
+  // by a newer edit (an overwrite over an undone successor detaches it) and has no current version.
+  // Unset = not undone.
+  undoneAt: wellKnownTimestamp | undefined;
+  // The server's answer from the WHOLE chain (not from the page the client holds), so a plate in a
+  // slot whose run row is paged out keeps its corners. Set only on the CURRENT version of a chain:
+  // can_undo — the chain has a link before this one;
+  // can_redo — the link after this one is undone.
+  canUndo: boolean | undefined;
+  canRedo: boolean | undefined;
+  // The version undo makes current — the link before this one; 0 when can_undo is false. Sent back
+  // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
+  // Redo's target is replaced_by.
+  undoToId: number | undefined;
+  // QUALITY FLAGS of a generated picture (0397, flat route): labels the worker read off the pixels,
+  // never a refusal. "grey" = a flat candidate whose drawing carries a mid-grey fill or tint inside
+  // its silhouette (the owner's style is white inside black lines). Empty = nothing noticed.
+  flags: string[] | undefined;
 };
 
 // DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per
@@ -5652,6 +5827,10 @@ export type DesignAssetPlacement = {
   note: string | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+  // The picture it sits on, so a client can carry a placement whose picture left the band (old
+  // flats drop out of the paged runs/batches lists). Filled by GetDesignBand with media resolved;
+  // unset on the Set response and when the picture row is gone.
+  picture: DesignPicture | undefined;
 };
 
 // DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM
@@ -5795,6 +5974,25 @@ export type DesignReference = {
   // rather than inventing a name it does not have. On any role other than `detail` it is always 0,
   // and the store enforces that.
   detailSlotId: number | undefined;
+  // ═══ BOARD LABEL (101-MOODBOARD-ROLES, wave 11) ═══
+  // The row is the server's label on a moodboard picture: which view it shows, or which detail slot it
+  // belongs to. A cheap model labels a new board picture, a strong one takes the unclear ones, and what
+  // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
+  // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
+  labelSource: string | undefined;
+  // pending | ok | unsure | failed | held; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»). `held` = a
+  // person took the picture out of the prompt (SetDesignReferenceHeld): the role and slot stay, the
+  // picture does not ride (109 §4).
+  labelState: string | undefined;
+  // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
+  // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
+  proposedPurpose: string | undefined;
+  // What the model read (the reason it was unsure, a phrase about a detail). NEVER sent to a prompt —
+  // shown greyed as «model read · not sent» in «what the model gets» only.
+  modelCaption: string | undefined;
+  labelModel: string | undefined;
+  labelledAt: wellKnownTimestamp | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -5876,6 +6074,26 @@ export type DesignBenchSlot = {
   // the page-bound lookup is still the only answer available. A client must not read the silence of
   // an old server as «this plate has no revision».
   runRrev: number | undefined;
+  // ═══ STALE DETAIL AND ITS «KEEP» (82-INPUT-REDESIGN §5, owner 06.10) ═══
+  // Computed by GetDesignBand (and SetDesignDetailKept) on FLAT DETAIL slots only; false / 0 / empty
+  // everywhere else, including slots returned by SetDesignBenchSlot / RegisterDesignBatch.
+  // stale: the detail's plate came out of a run older (lower design_run id) than the run of the
+  // card's current FRONT flat plate — BACK when the front slot is empty. An uploaded detail (no run)
+  // or uploaded views (no run) are never stale. RAW: true even when kept.
+  stale: boolean | undefined;
+  // kept: a person marked this stale detail kept against the CURRENT views run and the CURRENT
+  // plate. The mark clears by itself when the views run or the detail plate changes. Show the stale
+  // pill when stale && !kept.
+  kept: boolean | undefined;
+  // The views run this detail is compared with (the run of the front / back plate); 0 = none. Send
+  // it back as SetDesignDetailKeptRequest.against_run_id.
+  staleAgainstRunId: number | undefined;
+  keptBy: string | undefined;
+  keptAt: wellKnownTimestamp | undefined;
+  // A detail slot a model minted from a detail photo on the moodboard (101 §2.5). Only such a slot
+  // does the server delete by itself — when it is empty and its last photo left the board; a person
+  // renaming it clears the flag.
+  madeByModel: boolean | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
@@ -6148,6 +6366,128 @@ export type DesignColourwaySlotColour = {
 export type DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// DesignJoinLayer — one layer of a multi-layer garment. 0 = outermost.
+export type DesignJoinLayer = {
+  index: number | undefined;
+  name: string | undefined;
+  sheer: boolean | undefined;
+  note: string | undefined;
+  // front | back | both | "" — the face this depth level is on. A layer is a DEPTH level per face,
+  // not a panel: 0 = everything outermost, 1 = the cloth directly behind layer 0.
+  face: string | undefined;
+};
+
+// DesignJoinItem — one edge, seam, band, closure, pocket or opening of the garment.
+export type DesignJoinItem = {
+  // edge | seam | binding | band | strap | collar | stand | placket | cuff | waistband | sleeve |
+  // closure | pocket | opening
+  kind: string | undefined;
+  from: string | undefined;
+  to: string | undefined;
+  view: string | undefined;
+  side: string | undefined;
+  text: string | undefined;
+  id: string | undefined;
+  via: string[] | undefined;
+  width: string | undefined;
+  closed: boolean | undefined;
+  type: string | undefined;
+  count: number | undefined;
+  boundedBy: string[] | undefined;
+  continuesInto: string[] | undefined;
+  layer: number | undefined;
+  visibility: string | undefined;
+  caughtInto: string[] | undefined;
+  freeEdge: boolean | undefined;
+  sharp: string[] | undefined;
+  size: number | undefined;
+  // READ-ONLY, server-computed: a designer added or changed this item (SetDesignJoins diff against the
+  // stored list; it stays set until the model rewrites the list). Its text is said to the flat model as a
+  // «designer:» check line.
+  edited: boolean | undefined;
+};
+
+// DesignJoinsConsistencyGroup — photos that show one and the same garment.
+export type DesignJoinsConsistencyGroup = {
+  mediaIds: number[] | undefined;
+  what: string | undefined;
+};
+
+// DesignJoinsConsistency — do the reference photos show ONE garment?
+export type DesignJoinsConsistency = {
+  consistent: boolean | undefined;
+  note: string | undefined;
+  keepMediaIds: number[] | undefined;
+  groups: DesignJoinsConsistencyGroup[] | undefined;
+};
+
+// DesignJoins — the card's current join list (one row per card, rev for CAS).
+export type DesignJoins = {
+  rev: number | undefined;
+  items: DesignJoinItem[] | undefined;
+  absences: string[] | undefined;
+  consistency: DesignJoinsConsistency | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  layers: DesignJoinLayer[] | undefined;
+  uncertain: string[] | undefined;
+  fit: DesignJoinsFit | undefined;
+  // A designer confirmed THIS rev (SetDesignJoins with confirm = true); any later save — the model's or
+  // an edit without confirm — clears it. The straps mode needs it.
+  confirmed: boolean | undefined;
+};
+
+// DesignJoinsFit — the garment's ease and waist, closed vocabularies (anything else is cleaned to "").
+export type DesignJoinsFit = {
+  ease: string | undefined;
+  waist: string | undefined;
+};
+
+// DesignPartsPieces — the card's PIECES LIST for PARTS (M6, flat-consistency 107): the closed list of
+// part names the parts labeller may use. Read by a model from the ACCEPTED FRONT/BACK flats (the
+// plates of the FLAT bench slots — never the photos, never the join list) from a fixed garment
+// vocabulary, then edited by the designer. A re-read never writes over a designer's edits: once
+// edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
+// generation.
+export type DesignPartsPieces = {
+  // CAS revision: every write + 1, a proposal's too (a settle is tied to the proposal seen). The
+  // labeller's answers are keyed on what the list TELLS it (names, openings, edited), not on rev.
+  rev: number | undefined;
+  pieces: DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  // The bench plates the list (as read) came from; 0 = that side had none.
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  // A newer read of changed FRONT/BACK flats, held because the designer edited the list; absent =
+  // none. SetDesignPartsPieces with settle_proposal = true takes it (send its names) or keeps the
+  // list (send the list's names) and drops it.
+  proposal: DesignPartsPiecesProposal | undefined;
+  // The FRONT/BACK flats on the bench now differ from the ones the list (or its proposal) was read
+  // from: the next parts naming reads them again.
+  stale: boolean | undefined;
+};
+
+// DesignPartsPiece — one cut piece of the garment.
+export type DesignPartsPiece = {
+  name: string | undefined;
+  views: string[] | undefined;
+};
+
+// DesignPartsPiecesProposal — a newer read waiting on the designer.
+export type DesignPartsPiecesProposal = {
+  pieces: DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  readAt: wellKnownTimestamp | undefined;
 };
 
 export type OrderFactor =

@@ -147,7 +147,8 @@ export type EnhanceTextField =
   | "ENHANCE_TEXT_FIELD_WORDS"
   | "ENHANCE_TEXT_FIELD_SILHOUETTE"
   | "ENHANCE_TEXT_FIELD_FABRIC"
-  | "ENHANCE_TEXT_FIELD_OTHER";
+  | "ENHANCE_TEXT_FIELD_OTHER"
+  | "ENHANCE_TEXT_FIELD_RENDER_WORDS";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
   | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
@@ -6443,6 +6444,43 @@ export type SuggestPromptsResponse = {
   model: string | undefined;
 };
 
+export type SuggestCalloutsRequest = {
+  techCardId: number | undefined;
+  mediaIds: number[] | undefined;
+  dismissedSourceIds: string[] | undefined;
+};
+
+export type SuggestCalloutsResponse = {
+  suggestions: CalloutSuggestion[] | undefined;
+  model: string | undefined;
+};
+
+// CalloutSuggestion — one ghost callout. Geometry follows TechCardCallout: LABEL 1 point (stitch, material), DIM 2
+// (section), POLYGON 4 (detail, artwork — a rectangle TL, TR, BR, BL), PIN 0.
+export type CalloutSuggestion = {
+  id: string | undefined;
+  // stable: "bom:<lineKey>", "op:<operation number, or (index+1)*10 when unset>", "label:<garment label key>",
+  // "section:card", "detail:<aspect key>", "quiz:<question id>", "pic:<n>" (model-own)
+  sourceId: string | undefined;
+  sourceLabel: string | undefined;
+  mediaId: number | undefined;
+  kind: common_TechCardAnnotationKind | undefined;
+  points: common_TechCardAnnotationPoint[] | undefined;
+  // label / marker position 0..1: a fallback beside the anchor only — the model gives no plate
+  // position, the client lays the plates out in the margins (R38)
+  posX: googletype_Decimal | undefined;
+  posY: googletype_Decimal | undefined;
+  spec: string | undefined;
+  description: string | undefined;
+  parts: string[] | undefined;
+  missing: string[] | undefined;
+  fromData: boolean | undefined;
+  // the ghost plate's text: one line, ≤ 32 chars (R38). Data-backed: rendered from the row (material: the
+  // BOM name; stitch: "301 · side seam"; label: "main label"; section: "A–A layers"; detail: the aspect
+  // words "collar"); model-own: the model's text cut to 32. description stays the full text (used on ✓)
+  label: string | undefined;
+};
+
 export type UpdateTaskRequest = {
   id: number | undefined;
   task: common_TaskInsert | undefined;
@@ -7866,6 +7904,11 @@ export type RunTierBackfillResponse = {
 
 export type CreateTechCardRequest = {
   techCard: common_TechCardInsert | undefined;
+  // Client-minted key (≤64 chars, trimmed; "" = none). A repeat under the same key returns the card
+  // the first call created instead of a second one — a lost response or a doubled effect is one card.
+  clientRequestId: string | undefined;
+  // Create the card in the guided studio flow (TechCard.guided).
+  guided: boolean | undefined;
 };
 
 export type common_TechCardInsert = {
@@ -7934,6 +7977,15 @@ export type common_TechCardInsert = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   garmentDescription?: string;
+  // THE PERSON'S OWN WORDS FOR A FLAT (flat-consistency M14, owner 07.10: «показывай в WORDS только
+  // то, что уходит»). Typed by a person in FLAT › WORDS, under the class line, and by nothing else:
+  // no model writes it (no ai ✦ on that box, no seeding, no brief), so it is human by construction —
+  // the provenance garment_description lacks (it is seeded by a model brief and edited by people,
+  // one string with no author). A flat run sends «garment: <class>» (from garment_description) and
+  // then these lines as typed; the description's other words never travel to a flat.
+  // Read by flat runs only; frozen into DesignInputSnapshot.garment_note. Not in any section digest.
+  // OPTIONAL for the same reason as garment_description: absent = keep, "" = clear, value = set.
+  flatWords?: string;
   // materials (Phase 2): bill of materials (article catalog). Colourways are no longer style
   // children (R1 merge — a colourway is a product); their material recipe lives on the colourway via
   // ColorwayDevelopmentInsert.usages, keyed by an explicit colorway_id = product.id.
@@ -7947,6 +7999,9 @@ export type common_TechCardInsert = {
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: common_TechCardConstruction | undefined;
   operations: common_TechCardOperation[] | undefined;
+  // DEPRECATED (labels rework, 0386): READ-ONLY until the drop migration (I-19); IGNORED ON WRITE —
+  // the save neither clears nor inserts tech_card_label any more. The labels live in garment_labels
+  // (121) and the composition label in care_label (120). Not in any section digest.
   labels: common_TechCardLabel[] | undefined;
   packaging: common_TechCardPackaging | undefined;
   costing: common_TechCardCosting | undefined;
@@ -8139,6 +8194,21 @@ export type common_TechCardInsert = {
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции — которым бандлом сохранили
   // карточку, не то, от чего может зависеть подпись.
   bomQtyAware: boolean | undefined;
+  // СОСТАВНИК (labels rework, 0386) — the composition (care) label's overrides, 1:1 with the card.
+  // Presence-aware like packaging: null on write = KEEP the stored record; a present message replaces
+  // it (a present-but-empty one resets every line to derived). Null on read = nothing overridden.
+  careLabel: common_TechCardCareLabel | undefined;
+  // The garment labels other than the composition label (brand, size, flag, hangtag, … or a custom
+  // name). Full replace on write — but only from a client that sets labels_aware (123).
+  garmentLabels: common_TechCardGarmentLabel[] | undefined;
+  // The packaging items (polybag, tissue, insert card, … or a custom name). Full replace on write —
+  // but only from a client that sets labels_aware (123). The carton facts stay on `packaging` (46).
+  packagingItems: common_TechCardPackagingItem[] | undefined;
+  // ЩИТ СОВМЕСТИМОСТИ для garment_labels (121) и packaging_items (122): оба — полная замена, и
+  // payload бандла, который про них не знает, неотличим от «удалили все». Без флага UpdateTechCard
+  // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
+  labelsAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -8180,6 +8250,9 @@ export type common_TechCardMediaItem = {
   mediaId: number | undefined;
   kind: common_TechCardMediaKind | undefined;
   caption: string | undefined;
+  // Moodboard picture role (0395): "target" (the garment we make) | "detail" | "material" | "mood";
+  // "" = unassigned. Only moodboard_media carries it; rides the full-replace card save.
+  role: string | undefined;
 };
 
 // TechCardMediaKind classifies a tech-card sketch image.
@@ -8282,6 +8355,13 @@ export type common_TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: common_TechCardAnnotationCaps | undefined;
+  // НАЗНАЧЕНИЕ ВЫНОСКИ и её структурное содержимое — JSON-объект строкой (0388): заметка, узел
+  // крупно, нанесение, строчка/шов, материал, разрез. Ось, ортогональная виду (как caps): вид
+  // говорит, ЧТО нарисовано, spec — ЗАЧЕМ. Форму держит клиент; сервер проверяет только «объект,
+  // не длиннее 16 КБ» и канонизирует (ключи по алфавиту), чтобы подпись DESIGN была стабильной.
+  // Пусто = обычная выноска, как до 0388. Входит в атомарную группу геометрии: без `kind` хранимый
+  // spec переносится вместе с якорями.
+  spec: string | undefined;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
@@ -10029,6 +10109,62 @@ export type common_TechCardPieceDxfAlias = {
   fabricPurpose: common_TechCardBomPurpose | undefined;
 };
 
+// TechCardCareLabel — СОСТАВНИК: the overrides of the always-present composition label. Every field
+// empty = the derived value (brand mark, dictionary prose, storefront QR, default caption, company
+// address). Lines are sent one string per printed line and must not contain a newline.
+export type common_TechCardCareLabel = {
+  logoMediaId: number | undefined;
+  careProseLines: string[] | undefined;
+  qrPreset: string | undefined;
+  qrTemplate: string | undefined;
+  backCaptionLines: string[] | undefined;
+  addressLines: string[] | undefined;
+  colorways: common_TechCardCareLabelColorway[] | undefined;
+};
+
+// TechCardCareLabelColorway holds the per-colourway overrides of the composition label.
+export type common_TechCardCareLabelColorway = {
+  colorwayId: number | undefined;
+  colourName: string | undefined;
+  fibers: common_TechCardCareLabelFiber[] | undefined;
+};
+
+// TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
+// label (labels rework, 0386). The ten translations come from the fibre dictionary.
+export type common_TechCardCareLabelFiber = {
+  part: common_TechCardBomLabelPart | undefined;
+  fiberCode: string | undefined;
+  pct: number | undefined;
+};
+
+// TechCardGarmentLabel is one label on the garment other than the composition label (labels rework,
+// 0386), shaped like a construction aspect: a known key or a custom name, a mockup, and where / how
+// it goes on. A label without a mockup is saved, but the LABELS sign-off cannot be approved (D-04).
+export type common_TechCardGarmentLabel = {
+  key: string | undefined;
+  placement: string | undefined;
+  attachment: string | undefined;
+  folding: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
+// changed — `usage` instead of placement, `packing` instead of attachment + folding.
+export type common_TechCardPackagingItem = {
+  key: string | undefined;
+  usage: string | undefined;
+  packing: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
 export type CreateTechCardResponse = {
   id: number | undefined;
 };
@@ -10081,6 +10217,13 @@ export type RemoveTechCardRoleAssignmentRequest = {
 };
 
 export type RemoveTechCardRoleAssignmentResponse = {
+};
+
+export type ExitTechCardGuideRequest = {
+  techCardId: number | undefined;
+};
+
+export type ExitTechCardGuideResponse = {
 };
 
 export type ListTechCardRoleAssignmentsRequest = {
@@ -10214,6 +10357,16 @@ export type common_TechCard = {
   // URL и размеры это read-данные, и класть их во вход записи значило бы принимать от клиента то,
   // что сервер обязан знать сам.
   resolvedOperationMedia: common_TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (M-02): the labels rework's media resolved — the composition label's logo override
+  // (care_label.logo_media_id) and every garment-label and packaging-item mockup (media_ids),
+  // distinct by media_id. The write side carries ids only; without this list the client could turn
+  // them into pictures only through its media-library page, which holds just the latest files.
+  // Ignored on write.
+  resolvedLabelMedia: common_TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (0407): the card was created through the guided studio flow
+  // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
+  // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
+  guided: boolean | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -10232,6 +10385,7 @@ export type common_TechCardMediaFull = {
   media: common_MediaFull | undefined;
   kind: common_TechCardMediaKind | undefined;
   caption: string | undefined;
+  role: string | undefined;
 };
 
 // AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may
@@ -11211,6 +11365,11 @@ export type common_TechCardListItem = {
   // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
   // this build cannot map; never a stand-in for ADULT.
   ageGroup: common_AgeGroupEnum | undefined;
+  // Mirrors TechCard.guided (0407).
+  guided: boolean | undefined;
+  // The card is still being set up: guided, no moodboard picture (reference rows do not count) and
+  // no concept text. Derived server-side, the same rule for ListTechCards and GetStylePipeline.
+  setup: boolean | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -15170,6 +15329,20 @@ export type GetDesignBandResponse = {
   // THE MODEL SuggestPrompts ANSWERS WITH ('' = the assistant is not configured: draw the static Ideas list only).
   // ABSENT = a binary without SuggestPrompts.
   suggestPromptsModel: string | undefined;
+  // AUTO PARTS of the flat each side holds NOW (base_media_id = the media in that side's flat slot),
+  // every algo_rev. A row of a flat that left its slot is not sent.
+  partsSuggestions: DesignPartsSuggestion[] | undefined;
+  // joins — the card's current join list (flat route, 0397); absent = none yet.
+  joins: common_DesignJoins | undefined;
+  // The WALL-CLOCK CAP of an image run (owner 05.10): a run of a kind in capped_run_kinds that is not
+  // done image_run_cap_seconds after its started_at is closed failed `timed_out` ("took longer than N
+  // min — try again"). The client shows elapsed / limit from started_at; a failed run carries
+  // error_code (timed_out | landing_failed | …) and a human last_error.
+  imageRunCapSeconds: number | undefined;
+  cappedRunKinds: string[] | undefined;
+  // PARTS · the card's pieces list (M6): the closed names the parts labeller uses; parts_suggestions
+  // carries only the rows named under its current names. Absent = none read yet.
+  partsPieces: common_DesignPartsPieces | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -15251,6 +15424,26 @@ export type common_DesignBenchSlot = {
   // the page-bound lookup is still the only answer available. A client must not read the silence of
   // an old server as «this plate has no revision».
   runRrev: number | undefined;
+  // ═══ STALE DETAIL AND ITS «KEEP» (82-INPUT-REDESIGN §5, owner 06.10) ═══
+  // Computed by GetDesignBand (and SetDesignDetailKept) on FLAT DETAIL slots only; false / 0 / empty
+  // everywhere else, including slots returned by SetDesignBenchSlot / RegisterDesignBatch.
+  // stale: the detail's plate came out of a run older (lower design_run id) than the run of the
+  // card's current FRONT flat plate — BACK when the front slot is empty. An uploaded detail (no run)
+  // or uploaded views (no run) are never stale. RAW: true even when kept.
+  stale: boolean | undefined;
+  // kept: a person marked this stale detail kept against the CURRENT views run and the CURRENT
+  // plate. The mark clears by itself when the views run or the detail plate changes. Show the stale
+  // pill when stale && !kept.
+  kept: boolean | undefined;
+  // The views run this detail is compared with (the run of the front / back plate); 0 = none. Send
+  // it back as SetDesignDetailKeptRequest.against_run_id.
+  staleAgainstRunId: number | undefined;
+  keptBy: string | undefined;
+  keptAt: wellKnownTimestamp | undefined;
+  // A detail slot a model minted from a detail photo on the moodboard (101 §2.5). Only such a slot
+  // does the server delete by itself — when it is empty and its last photo left the board; a person
+  // renaming it clears the flag.
+  madeByModel: boolean | undefined;
 };
 
 // DesignPicture is one image in the band. It hangs under EITHER a run (generated) or a batch
@@ -15364,7 +15557,8 @@ export type common_DesignPicture = {
   displayOnly: boolean | undefined;
   // THE EDIT THAT TOOK THIS PICTURE'S PLACE (O-53) — the id of the flatten filed by
   // FlattenDesignEditLayer with replace_picture_id = this picture. 0 = not replaced. OUTPUT-ONLY:
-  // no request carries it, and no verb clears it (there is no «un-replace» in v1).
+  // no request carries it, and no verb clears it. An overwrite over an UNDONE successor (undone_at)
+  // rewrites it to the new edit; the undone branch keeps its rows, cut off.
   // A REPLACED PICTURE IS NOT HIDDEN AND NOT CHANGED. Its pixels, run row, crops, reference roles
   // and hidden_at are exactly what they were; what moved is the bench slot that held it, which now
   // holds the edit. The history keeps showing it — captioned «replaced by an edit» — and it can be
@@ -15378,7 +15572,31 @@ export type common_DesignPicture = {
   // ErrorInfo metadata names the head of its chain as head_picture_id.
   // ⚠ ABSENT — not 0 — on a server older than the field, and that absence is how a client knows
   // the server cannot replace a picture yet (FlattenDesignEditLayerRequest.replace_picture_id).
+  // UNDO / REDO (T28 v2, undone_at below). The CURRENT VERSION of a chain is reached by walking
+  // replaced_by from the root and stopping BEFORE the first link with undone_at set. The head named
+  // in already_replaced is that current version.
   replacedBy: number | undefined;
+  // THIS EDIT WAS UNDONE (T28 v2) — UndoDesignEdit set it on the current version of its chain,
+  // RedoDesignEdit clears it. It is NOT hidden_at: undo and redo never touch visibility, and a hidden
+  // picture keeps every rule of hidden_at. An undone link and every link after it stand nowhere on
+  // the bench and in no slot; the history keeps them. A chain whose ROOT is undone is a branch cut off
+  // by a newer edit (an overwrite over an undone successor detaches it) and has no current version.
+  // Unset = not undone.
+  undoneAt: wellKnownTimestamp | undefined;
+  // The server's answer from the WHOLE chain (not from the page the client holds), so a plate in a
+  // slot whose run row is paged out keeps its corners. Set only on the CURRENT version of a chain:
+  // can_undo — the chain has a link before this one;
+  // can_redo — the link after this one is undone.
+  canUndo: boolean | undefined;
+  canRedo: boolean | undefined;
+  // The version undo makes current — the link before this one; 0 when can_undo is false. Sent back
+  // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
+  // Redo's target is replaced_by.
+  undoToId: number | undefined;
+  // QUALITY FLAGS of a generated picture (0397, flat route): labels the worker read off the pixels,
+  // never a refusal. "grey" = a flat candidate whose drawing carries a mid-grey fill or tint inside
+  // its silhouette (the owner's style is white inside black lines). Empty = nothing noticed.
+  flags: string[] | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -15448,6 +15666,25 @@ export type common_DesignReference = {
   // rather than inventing a name it does not have. On any role other than `detail` it is always 0,
   // and the store enforces that.
   detailSlotId: number | undefined;
+  // ═══ BOARD LABEL (101-MOODBOARD-ROLES, wave 11) ═══
+  // The row is the server's label on a moodboard picture: which view it shows, or which detail slot it
+  // belongs to. A cheap model labels a new board picture, a strong one takes the unclear ones, and what
+  // neither is sure of waits for a person. Any SetDesignReferenceRole write is a person's (human, ok).
+  // human | model_cheap | model_strong | quiz; "" = a row older than the field (a person's).
+  labelSource: string | undefined;
+  // pending | ok | unsure | failed | held; "" reads as ok. Only `ok` with a role travels to a run; a
+  // pending / unsure / failed row carries an empty role (the tile says «…» / «view ?»). `held` = a
+  // person took the picture out of the prompt (SetDesignReferenceHeld): the role and slot stay, the
+  // picture does not ride (109 §4).
+  labelState: string | undefined;
+  // The model's proposal for the picture's board PURPOSE (target | detail | mood | material): the
+  // client applies it to an EMPTY purpose of the form row, once. The server never writes the form.
+  proposedPurpose: string | undefined;
+  // What the model read (the reason it was unsure, a phrase about a detail). NEVER sent to a prompt —
+  // shown greyed as «model read · not sent» in «what the model gets» only.
+  modelCaption: string | undefined;
+  labelModel: string | undefined;
+  labelledAt: wellKnownTimestamp | undefined;
 };
 
 // DesignEditLayer is a vector layer: strokes over a raster base, or strokes over nothing.
@@ -15664,6 +15901,18 @@ export type common_DesignColourMap = {
   // a claim that the file is gone. The distinction is DesignEditLayer.raster_deleted's, verbatim:
   // a failed lookup must not report a deletion that may not have happened.
   deleted: boolean | undefined;
+  // FK media(id), OPTIONAL (0 = none): THE CLOTH MOCKUP OF THIS MAP — the same flat of the same
+  // `view` over the same base, each labelled part filled flat with its cloth's tile at the cloth's
+  // TRUE repeat. Read on the frozen recipe (DesignColourRecipe.colour_maps) only; the colour plan
+  // does not store it.
+  // ⚠ IT SHOWS WHERE AND HOW BIG, NEVER HOW IT LOOKS. Measured (paint-parts T13 A/B): handed a
+  // mockup, the image model copies the motif's SCALE and colours from it — so its scale must be
+  // the cloth's real repeat — while placement was already right from the map alone. It is attached
+  // right after its map with a caption that forbids its flat, unlit look.
+  // It belongs to its map, so it travels HERE rather than as an extra input; the run door holds it
+  // to the same rules as the map: card-owned media, never also a map, a plate, a reference or a
+  // cloth of the same run.
+  mockupMediaId: number | undefined;
 };
 
 // DesignColourSwatch is ONE label of a colour map: a colour somebody deliberately chose, and how
@@ -15967,6 +16216,10 @@ export type common_DesignRunParams = {
   extend: common_DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: common_DesignVideoParams | undefined;
+  // THE FLAT GENERATION MODE (kind=flat, flat-consistency 81-FINAL-MODES). Refused on every other kind
+  // (`flat_forbidden`). Absent = the photos route. A rerun inherits its parent's block (a different one
+  // is `mode_not_for_this_run`).
+  flat: common_DesignFlatParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -16206,6 +16459,31 @@ export type common_DesignVideoParams = {
   sourceMediaId: number | undefined;
   duration: number | undefined;
   model: string | undefined;
+};
+
+// DesignFlatParams — how ONE flat press draws its sheet (81-FINAL-MODES).
+// - "" (or "photos"): the card's kept reference photos with roles and notes + the join list in words
+// when the card has one; TWO candidate sheets. The default.
+// - hand_flat: the card's own hand-drawn technical flats (structure_refs) are redrawn cleanly, the
+// missing views derived; the kept photos travel for fit only; no join list. TWO candidates.
+// - straps: the photos route with the designer-CONFIRMED join list (DesignJoins.confirmed at the
+// card's current rev); FOUR candidates.
+// Door refusals (all free, before any money): `unknown_flat_mode`, `structure_required` (hand_flat
+// without refs), `structure_forbidden` (refs on another mode), `structure_malformed` (a role that is not
+// front_flat | back_flat, a role or media twice), `structure_not_on_card` (not a TECHNICAL media of this
+// card), `joins_unconfirmed` (straps on a card whose list is missing or not confirmed at its current rev;
+// FailedPrecondition, metadata `joins_rev`), `mode_not_for_this_run` (a detail-only or per_view run, or
+// a rerun that changes its parent's mode, flats or views). The structure flats travel in the input
+// snapshot as the first references, with their roles.
+export type common_DesignFlatParams = {
+  mode: string | undefined;
+  structureRefs: common_DesignFlatStructureRef[] | undefined;
+};
+
+// DesignFlatStructureRef — one hand-drawn technical flat of the card and what it shows.
+export type common_DesignFlatStructureRef = {
+  mediaId: number | undefined;
+  role: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -16484,6 +16762,10 @@ export type common_DesignAssetPlacement = {
   note: string | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+  // The picture it sits on, so a client can carry a placement whose picture left the band (old
+  // flats drop out of the paged runs/batches lists). Filled by GetDesignBand with media resolved;
+  // unset on the Set response and when the picture row is gone.
+  picture: common_DesignPicture | undefined;
 };
 
 // DesignCardOutput is ONE generative output of the card, carrying the minimal facts of the run it
@@ -16616,6 +16898,154 @@ export type DesignImageModel = {
   isDefault: boolean | undefined;
   maxReferences: number | undefined;
   backgrounds: string[] | undefined;
+};
+
+export type DesignPartsSuggestion = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  algoRev: string | undefined;
+  parts: DesignPartGroup[] | undefined;
+  splitNeeded: DesignPartSplit[] | undefined;
+  model: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignPartGroup is one garment part: its name and its region numbers (1-based).
+export type DesignPartGroup = {
+  label: string | undefined;
+  regions: number[] | undefined;
+  // part_key — the part's identity across the sides of one SuggestDesignPartsCard answer (slug of
+  // the label, unique within the answer: "left-sleeve", "collar-2"; "unnamed-<view>" for what the
+  // model left out). Empty on answers of the per-side SuggestDesignParts.
+  partKey: string | undefined;
+};
+
+// DesignPartSplit is a region that spans two parts with no seam line drawn.
+export type DesignPartSplit = {
+  region: number | undefined;
+  why: string | undefined;
+};
+
+// DesignJoins — the card's current join list (one row per card, rev for CAS).
+export type common_DesignJoins = {
+  rev: number | undefined;
+  items: common_DesignJoinItem[] | undefined;
+  absences: string[] | undefined;
+  consistency: common_DesignJoinsConsistency | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  layers: common_DesignJoinLayer[] | undefined;
+  uncertain: string[] | undefined;
+  fit: common_DesignJoinsFit | undefined;
+  // A designer confirmed THIS rev (SetDesignJoins with confirm = true); any later save — the model's or
+  // an edit without confirm — clears it. The straps mode needs it.
+  confirmed: boolean | undefined;
+};
+
+// DesignJoinItem — one edge, seam, band, closure, pocket or opening of the garment.
+export type common_DesignJoinItem = {
+  // edge | seam | binding | band | strap | collar | stand | placket | cuff | waistband | sleeve |
+  // closure | pocket | opening
+  kind: string | undefined;
+  from: string | undefined;
+  to: string | undefined;
+  view: string | undefined;
+  side: string | undefined;
+  text: string | undefined;
+  id: string | undefined;
+  via: string[] | undefined;
+  width: string | undefined;
+  closed: boolean | undefined;
+  type: string | undefined;
+  count: number | undefined;
+  boundedBy: string[] | undefined;
+  continuesInto: string[] | undefined;
+  layer: number | undefined;
+  visibility: string | undefined;
+  caughtInto: string[] | undefined;
+  freeEdge: boolean | undefined;
+  sharp: string[] | undefined;
+  size: number | undefined;
+  // READ-ONLY, server-computed: a designer added or changed this item (SetDesignJoins diff against the
+  // stored list; it stays set until the model rewrites the list). Its text is said to the flat model as a
+  // «designer:» check line.
+  edited: boolean | undefined;
+};
+
+// DesignJoinsConsistency — do the reference photos show ONE garment?
+export type common_DesignJoinsConsistency = {
+  consistent: boolean | undefined;
+  note: string | undefined;
+  keepMediaIds: number[] | undefined;
+  groups: common_DesignJoinsConsistencyGroup[] | undefined;
+};
+
+// DesignJoinsConsistencyGroup — photos that show one and the same garment.
+export type common_DesignJoinsConsistencyGroup = {
+  mediaIds: number[] | undefined;
+  what: string | undefined;
+};
+
+// DesignJoinLayer — one layer of a multi-layer garment. 0 = outermost.
+export type common_DesignJoinLayer = {
+  index: number | undefined;
+  name: string | undefined;
+  sheer: boolean | undefined;
+  note: string | undefined;
+  // front | back | both | "" — the face this depth level is on. A layer is a DEPTH level per face,
+  // not a panel: 0 = everything outermost, 1 = the cloth directly behind layer 0.
+  face: string | undefined;
+};
+
+// DesignJoinsFit — the garment's ease and waist, closed vocabularies (anything else is cleaned to "").
+export type common_DesignJoinsFit = {
+  ease: string | undefined;
+  waist: string | undefined;
+};
+
+// DesignPartsPieces — the card's PIECES LIST for PARTS (M6, flat-consistency 107): the closed list of
+// part names the parts labeller may use. Read by a model from the ACCEPTED FRONT/BACK flats (the
+// plates of the FLAT bench slots — never the photos, never the join list) from a fixed garment
+// vocabulary, then edited by the designer. A re-read never writes over a designer's edits: once
+// edited, a newer read waits in `proposal` until the designer takes or keeps it. Never sent to image
+// generation.
+export type common_DesignPartsPieces = {
+  // CAS revision: every write + 1, a proposal's too (a settle is tied to the proposal seen). The
+  // labeller's answers are keyed on what the list TELLS it (names, openings, edited), not on rev.
+  rev: number | undefined;
+  pieces: common_DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  // The bench plates the list (as read) came from; 0 = that side had none.
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  // A newer read of changed FRONT/BACK flats, held because the designer edited the list; absent =
+  // none. SetDesignPartsPieces with settle_proposal = true takes it (send its names) or keeps the
+  // list (send the list's names) and drops it.
+  proposal: common_DesignPartsPiecesProposal | undefined;
+  // The FRONT/BACK flats on the bench now differ from the ones the list (or its proposal) was read
+  // from: the next parts naming reads them again.
+  stale: boolean | undefined;
+};
+
+// DesignPartsPiece — one cut piece of the garment.
+export type common_DesignPartsPiece = {
+  name: string | undefined;
+  views: string[] | undefined;
+};
+
+// DesignPartsPiecesProposal — a newer read waiting on the designer.
+export type common_DesignPartsPiecesProposal = {
+  pieces: common_DesignPartsPiece[] | undefined;
+  openings: string[] | undefined;
+  model: string | undefined;
+  frontMediaId: number | undefined;
+  backMediaId: number | undefined;
+  readAt: wellKnownTimestamp | undefined;
 };
 
 export type ListDesignRunsRequest = {
@@ -16818,6 +17248,46 @@ export type HideDesignPictureRequest = {
 
 export type HideDesignPictureResponse = {
   picture: common_DesignPicture | undefined;
+};
+
+export type UndoDesignEditRequest = {
+  pictureId: number | undefined;
+  // CAS: the current version the client saw (the picture whose undo corner was pressed).
+  expectedCurrentId: number | undefined;
+  idempotencyKey: string | undefined;
+  // The version that should become current: the link before expected_current_id
+  // (common.DesignPicture.undo_to_id). Required. A repeat is answered OK only when THIS is current
+  // and expected_current_id stands undone right after it; anything else not matching is stale_chain.
+  expectedTargetId: number | undefined;
+};
+
+// The chain after the step — the band rows the step touched.
+export type DesignEditChainState = {
+  // The current version now.
+  currentPictureId: number | undefined;
+  // Every link of the chain, root first, with undone_at, can_undo and can_redo as stored now.
+  pictures: common_DesignPicture[] | undefined;
+  // The bench slots that hold the current version now (the ones this step moved), slot_rev bumped.
+  slots: common_DesignBenchSlot[] | undefined;
+};
+
+export type UndoDesignEditResponse = {
+  chain: DesignEditChainState | undefined;
+};
+
+export type RedoDesignEditRequest = {
+  pictureId: number | undefined;
+  expectedCurrentId: number | undefined;
+  idempotencyKey: string | undefined;
+  // The version that should become current: the undone link right after expected_current_id (its
+  // replaced_by). Required. A repeat is answered OK only when THIS is current and
+  // expected_current_id stands right before it — a newer edit over expected_current_id made in
+  // another tab is stale_chain, not a repeat.
+  expectedTargetId: number | undefined;
+};
+
+export type RedoDesignEditResponse = {
+  chain: DesignEditChainState | undefined;
 };
 
 export type DeleteDesignPictureRequest = {
@@ -17214,6 +17684,43 @@ export type SetDesignReferenceRoleResponse = {
   reference: common_DesignReference | undefined;
 };
 
+export type SetDesignReferenceHeldRequest = {
+  techCardId: number | undefined;
+  mediaId: number | undefined;
+  held: boolean | undefined;
+};
+
+export type SetDesignReferenceHeldResponse = {
+  reference: common_DesignReference | undefined;
+};
+
+export type PreviewDesignRunInputsRequest = {
+  techCardId: number | undefined;
+  kind: string | undefined;
+  params: common_DesignRunParams | undefined;
+};
+
+// DesignInputHeld — a moodboard picture that does NOT go to this run, and why.
+export type DesignInputHeld = {
+  mediaId: number | undefined;
+  // mood | material | unmarked (no purpose) | pending (the label is being read) | view_unknown
+  // (unsure / failed — answer the question card or tap the tile) | not_a_view (a person's «no view»)
+  // | older (beyond the two newest of its view) | other_detail (a detail of another slot) | detail
+  // (a detail picture on a views run) | over_cap | render (a design run's output: never a flat's
+  // input, M16) | held (a person took it out of the prompt — SetDesignReferenceHeld, 109 §4)
+  reason: string | undefined;
+  role: string | undefined;
+  modelCaption: string | undefined;
+};
+
+export type PreviewDesignRunInputsResponse = {
+  // Exactly what designAssembleInputs would freeze into design_run.inputs — refs in prompt order with
+  // their media resolved, the bench plates, the words.
+  inputs: common_DesignInputSnapshot | undefined;
+  // The board pictures that stay home, in board order.
+  held: DesignInputHeld[] | undefined;
+};
+
 // UpsertDesignAssetRequest writes one shelf row of the card (V-11).
 // EVERY FIELD IS SENT ON EVERY CALL — this is a replace, not a patch, and the screen holds the
 // whole tile in a form. A patch would need a presence flag per field for no gain: there is no
@@ -17321,11 +17828,11 @@ export type DeleteDesignAssetPlacementResponse = {
 export type DraftDesignIdeaRequest = {
   techCardId: number | undefined;
   clientRequestId: string | undefined;
-  // ASK FOR THE STRUCTURED ANSWER instead of the three-section prose.
-  // ABSENT (false) IS THE OLD BEHAVIOUR, BYTE FOR BYTE: the same system prompt, the same user
-  // prompt, no json mode, no token ceiling, and `output_text` still holds the prose the client
-  // splits by its three titles. A client that predates this field keeps working unchanged, which
-  // is the entire reason this is a flag on the existing verb and not a second verb.
+  // ASK FOR THE STRUCTURED ANSWER instead of the prose description.
+  // ABSENT (false): no json mode, no token ceiling; `output_text` holds the concept & construction
+  // description itself (T39), written from the board pictures, the card facts and the moodboard quiz
+  // decisions. It needs ≥ 1 attached board picture OR ≥ 1 non-skipped quiz answer (a quiz-only card
+  // is drafted text-only, 62-DEEP-FIXES D3); otherwise FailedPrecondition board_has_no_pictures.
   // WHY NOT A NEW `kind`. Run kinds are a vocabulary every client maps — the bench, the history,
   // the artifacts panel each hold their own table of them — so a new member would ripple through
   // all of them to say something none of them act on: this is still one text run on the moodboard,
@@ -17506,6 +18013,186 @@ export type common_DesignColourwaySlotColour = {
 export type common_DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// DesignQuizQuestion is one question of the moodboard quiz, as asked and as stored.
+export type DesignQuizQuestion = {
+  id: string | undefined;
+  category: string | undefined;
+  part: string | undefined;
+  family: string | undefined;
+  view: string | undefined;
+  kind: string | undefined;
+  question: string | undefined;
+  options: string[] | undefined;
+  contradicts: boolean[] | undefined;
+  visualEvidence: string | undefined;
+  clarifyQuestion: string | undefined;
+  clarifyOptions: string[] | undefined;
+  // decision_key — snake_case key of the DECISION (not the wording), e.g. chest_room, collar_type;
+  // "" = none. A saved answer closes its key for later quizzes; saving an answer whose key matches a
+  // different saved question id forgets that older row (latest wins). Clients echo it on save.
+  decisionKey: string | undefined;
+  // media_id — the moodboard picture (tech card media id, as attached to the board) this question
+  // is about; 0 = not a picture question. When set, part is "whole" and family/view are ignored by
+  // clients (no pictogram: the board anchors to the picture instead). Clients echo it on save.
+  mediaId?: number | undefined;
+  // spots — the 1–3 places IN the anchored picture the question is about (99-SPOTS), drawn as
+  // numbered rings on the board tile. Only when media_id ≠ 0 and the picture is a target or detail
+  // reference; empty for whole-picture questions. Clients echo it on save (like media_id).
+  spots?: DesignQuizSpot[] | undefined;
+};
+
+// DesignQuizSpot — one place on a quiz question's picture (99-SPOTS).
+export type DesignQuizSpot = {
+  // label — the place in the question's own words, 1–4 words ("inner strap edge").
+  label?: string | undefined;
+  // x — 0..1000 across the picture's width, from the left edge as the viewer sees it.
+  x?: number | undefined;
+  // y — 0..1000 down the picture's height, from the top.
+  y?: number | undefined;
+  // scale — "zone" (a part: sleeve, yoke, the run of a hem) or "detail" (a stitch line, a button).
+  scale?: string | undefined;
+  // at — output only, server-computed: where label sits inside the question text, as a UTF-16 code
+  // unit offset (a JS string index), matched case-insensitively; -1 = not found. Ignored on save.
+  at?: number | undefined;
+};
+
+export type GenerateDesignQuizRequest = {
+  techCardId: number | undefined;
+};
+
+export type GenerateDesignQuizResponse = {
+  questions: DesignQuizQuestion[] | undefined;
+  family: string | undefined;
+  model: string | undefined;
+};
+
+export type DesignQuizAnswer = {
+  question: DesignQuizQuestion | undefined;
+  selected: string[] | undefined;
+  freeText: string | undefined;
+  skipped: boolean | undefined;
+  answeredAt: wellKnownTimestamp | undefined;
+  // stale — OUTPUT ONLY, ignored on save (62-DEEP-FIXES D1): the card's structured facts (category,
+  // fit, gender, details, BOM names/compositions, base-size measurements) changed since this answer
+  // was saved. Downstream prompts treat it as unconfirmed; re-saving the same answer makes it fresh.
+  stale: boolean | undefined;
+  // stale_changes — OUTPUT ONLY, ignored on save (98-STALE §3): what changed since the answer was given,
+  // one line per changed fact of the answer's topic ("main fabric: cotton twill → wool flannel",
+  // "lining: — → viscose twill", "detail: hood: … → —", "picture 3: removed from the board",
+  // "picture 2 role: mood → material"); at most 4 lines, then "+N more". A row saved before per-topic
+  // tracking says "the card changed (answered before per-topic tracking)". Empty when not stale.
+  staleChanges: string[] | undefined;
+};
+
+export type GetDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+  // pending — the card's OPEN quiz session (the last GenerateDesignQuiz) minus every saved question
+  // id (answered or skipped), in the generated order; empty when no session is open. Resume source.
+  pending: DesignQuizQuestion[] | undefined;
+  pendingFamily: string | undefined;
+};
+
+// SaveDesignQuizAnswersRequest carries the rows to upsert (or forget, when sent empty); see the rpc.
+export type SaveDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+  answers: DesignQuizAnswer[] | undefined;
+  // close_session — after the save, close the card's open quiz session (discard, or the quiz ended).
+  closeSession: boolean | undefined;
+};
+
+export type SaveDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SuggestDesignPartsRequest = {
+  techCardId: number | undefined;
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+};
+
+export type SuggestDesignPartsResponse = {
+  suggestion: DesignPartsSuggestion | undefined;
+  cached: boolean | undefined;
+};
+
+// DesignPartsViewInput is one side of a SuggestDesignPartsCard request.
+export type DesignPartsViewInput = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+};
+
+export type SuggestDesignPartsCardRequest = {
+  techCardId: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+  views: DesignPartsViewInput[] | undefined;
+};
+
+export type SuggestDesignPartsCardResponse = {
+  suggestions: DesignPartsSuggestion[] | undefined;
+  cached: boolean | undefined;
+  // The card's pieces list the answer was named under (M6); the server may have read it (or a
+  // proposal) during this very call. Absent = the card has no FRONT/BACK flat to read pieces from
+  // (labels were free).
+  pieces: common_DesignPartsPieces | undefined;
+};
+
+export type GenerateDesignJoinsRequest = {
+  techCardId: number | undefined;
+  force: boolean | undefined;
+};
+
+export type GenerateDesignJoinsResponse = {
+  joins: common_DesignJoins | undefined;
+  cached: boolean | undefined;
+};
+
+export type SetDesignJoinsRequest = {
+  techCardId: number | undefined;
+  joins: common_DesignJoins | undefined;
+  expectedRev: number | undefined;
+  // The designer confirms the list as saved: the new rev is marked DesignJoins.confirmed (the straps
+  // flat mode needs it). A save without confirm clears the mark.
+  confirm: boolean | undefined;
+};
+
+export type SetDesignJoinsResponse = {
+  joins: common_DesignJoins | undefined;
+};
+
+export type SetDesignPartsPiecesRequest = {
+  techCardId: number | undefined;
+  expectedRev: number | undefined;
+  names: string[] | undefined;
+  settleProposal: boolean | undefined;
+};
+
+export type SetDesignPartsPiecesResponse = {
+  pieces: common_DesignPartsPieces | undefined;
+};
+
+export type SetDesignDetailKeptRequest = {
+  techCardId: number | undefined;
+  slotId: number | undefined;
+  keep: boolean | undefined;
+  // The views run the client saw as stale_against_run_id (CAS); 0 = no check.
+  againstRunId: number | undefined;
+};
+
+export type SetDesignDetailKeptResponse = {
+  slot: common_DesignBenchSlot | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -18415,6 +19102,15 @@ export interface AdminService {
   // refusals; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText → ResourceExhausted.
   // Classified as a WRITE on tech_cards, like EnhanceText (a press spends the AI key).
   SuggestPrompts(request: SuggestPromptsRequest): Promise<SuggestPromptsResponse>;
+  // SuggestCallouts — the `suggest ✦` chip of the ARTIFACTS sheet (R36, T28): the callouts the SAVED card's own data
+  // implies (BOM lines, operations, garment labels, layered pieces, details aspects, STUDIO quiz decisions) and the sheet
+  // does not have yet, placed on the given flats by a vision model, plus up to 4 per flat the model sees on the picture
+  // itself (from_data = false). Spec, description and parts of a data-backed suggestion are rendered by the SERVER from
+  // its source row, never from model text. Nothing is stored; an identical request is answered from memory for ten
+  // minutes. Limits: no key → FailedPrecondition AI_NOT_CONFIGURED; no flat, > 4 flats, a flat that is not a technical
+  // picture of this card → InvalidArgument; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText →
+  // ResourceExhausted. Classified as a WRITE on tech_cards, like SuggestPrompts (a press spends the AI key).
+  SuggestCallouts(request: SuggestCalloutsRequest): Promise<SuggestCalloutsResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -18468,6 +19164,9 @@ export interface AdminService {
   AssignTechCardRole(request: AssignTechCardRoleRequest): Promise<AssignTechCardRoleResponse>;
   // RemoveTechCardRoleAssignment removes one role assignment by id.
   RemoveTechCardRoleAssignment(request: RemoveTechCardRoleAssignmentRequest): Promise<RemoveTechCardRoleAssignmentResponse>;
+  // ExitTechCardGuide leaves the guided studio flow for a card (clears TechCard.guided). Idempotent;
+  // does not bump lock_version, so an open card form gets no conflict.
+  ExitTechCardGuide(request: ExitTechCardGuideRequest): Promise<ExitTechCardGuideResponse>;
   // ListTechCardRoleAssignments lists a card's role assignments with resolved usernames (Q5).
   ListTechCardRoleAssignments(request: ListTechCardRoleAssignmentsRequest): Promise<ListTechCardRoleAssignmentsResponse>;
   // ListAdmins is the panel-wide people picker: id, username, self-declared specialties and the
@@ -18927,6 +19626,22 @@ export interface AdminService {
   // Guards, each of which would otherwise leave a live reference pointing at something the band
   // refuses to draw — FailedPrecondition: in_slot | live_run_input | live_crop_parent.
   HideDesignPicture(request: HideDesignPictureRequest): Promise<HideDesignPictureResponse>;
+  // UndoDesignEdit takes back the CURRENT VERSION of an edit chain (replaced_by, T28 v2): undone_at is
+  // set on it and every bench slot that held it moves to the link before it (slot_rev + 1). ONE
+  // transaction: the chain rows are locked, then a compare-and-set on expected_current_id.
+  // picture_id names the chain (any link of it). IDEMPOTENT BY OUTCOME: a repeat that finds the
+  // undo already in place (expected_target_id current, expected_current_id undone right after it)
+  // answers OK and writes nothing; idempotency_key is required and logged.
+  // InvalidArgument: a missing id or key. FailedPrecondition: stale_chain (the current version is
+  // not expected_current_id — re-read the band), nothing_to_undo (the current version is the
+  // original), live_crop_parent (it is cut into visible pieces), and every refusal of a slot
+  // placement (hidden_plate, picture_already_in_slot, …). NotFound: no such picture.
+  UndoDesignEdit(request: UndoDesignEditRequest): Promise<UndoDesignEditResponse>;
+  // RedoDesignEdit brings back the undone link right after the current version (T28 v2): undone_at
+  // is cleared on it and every bench slot that held the current version moves onto it. Same
+  // transaction, lock, compare-and-set and idempotency as UndoDesignEdit.
+  // FailedPrecondition: stale_chain, nothing_to_redo, and every refusal of a slot placement.
+  RedoDesignEdit(request: RedoDesignEditRequest): Promise<RedoDesignEditResponse>;
   // DeleteDesignPicture removes a DERIVED picture FOR GOOD — a crop, or an edit of a crop — with
   // everything cut or flattened from it and with the files behind them (O-68, D-74). It is the
   // one verb on a picture that is NOT reversible, and that is why it is narrow: only a picture
@@ -18976,7 +19691,9 @@ export interface AdminService {
   // IDEMPOTENT BY DERIVATION, NOT YET BY client_request_id: while the crops of an earlier cut of
   // this picture are visible, a repeat returns THEM and cuts nothing. The key is required but not
   // stored yet (backlog) — a retry that lands after those crops were hidden cuts again.
-  // A REPLACED PICTURE IS NOT CUT (O-53): FailedPrecondition already_replaced, whose ErrorInfo
+  // A REPLACED PICTURE IS NOT CUT (O-53) — one whose place ANOTHER picture holds (the head of its
+  // chain is not itself; a restored original whose successor is undone is current and is cut, T28
+  // v2): FailedPrecondition already_replaced, whose ErrorInfo
   // metadata carries head_picture_id — the head of its replacement chain, the picture a stale tab
   // should cut instead. A HIDDEN PICTURE IS NOT CUT EITHER: FailedPrecondition hidden_picture. Its
   // crops would be born visible under a parent nobody can see — the state HideDesignPicture refuses
@@ -19005,6 +19722,21 @@ export interface AdminService {
   // and saving one must not stale a sign-off.
   // InvalidArgument: an unknown role, or a media_id the card does not hold.
   SetDesignReferenceRole(request: SetDesignReferenceRoleRequest): Promise<SetDesignReferenceRoleResponse>;
+  // SetDesignReferenceHeld takes a labelled board picture OUT OF THE PROMPT, or puts it back
+  // (109 §4, «remove from prompt»). The label (view / detail slot) and the picture on the board stay;
+  // only label_state moves between ok and held, and a held picture rides no run. A model's detail
+  // whose every photo is held loses its slot; putting such a photo back reads it again (the label
+  // goes pending and the sync mints or joins a slot). The label source never changes. Enters no
+  // digest, like the role.
+  // FailedPrecondition nothing_to_hold: the picture has no settled label (no row, no role, still
+  // being read, waiting for a person) — it is not in the prompt. Putting back a picture that is not
+  // held is a no-op.
+  SetDesignReferenceHeld(request: SetDesignReferenceHeldRequest): Promise<SetDesignReferenceHeldResponse>;
+  // PreviewDesignRunInputs is a DRY RUN of StartDesignRun's input assembly (101 §2.8): the snapshot a
+  // run of this kind and params would freeze right now — the same function, the same sources, no
+  // reservation, no money, no model. «what the model gets» draws this answer instead of re-deriving
+  // the rule on the client, plus the board pictures that stay home and why.
+  PreviewDesignRunInputs(request: PreviewDesignRunInputsRequest): Promise<PreviewDesignRunInputsResponse>;
   // DeleteDesignDetailSlot removes an EMPTY detail slot.
   // FailedPrecondition: slot_filled.
   DeleteDesignDetailSlot(request: DeleteDesignDetailSlotRequest): Promise<DeleteDesignDetailSlotResponse>;
@@ -19173,6 +19905,72 @@ export interface AdminService {
   // FailedPrecondition: no_moodboard. (`budget_exceeded` was listed here until 0358 removed the
   // generation ceiling as a concept — no verb refuses for money any more.)
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
+  // GenerateDesignQuiz (moodboard quiz) — one sync vision+JSON call: the model reads the board
+  // pictures, the board words and the card facts, and asks 0..15 questions about what is still
+  // unclear or non-standard. The generated list is stored as the card's OPEN quiz session (closing the
+  // previous one) so another tab or device can resume it (GetDesignQuizAnswers.pending); ai_usage_event
+  // books the call. Questions already answered on the card (by id, text or decision_key) are never
+  // returned again.
+  // FailedPrecondition: nothing to ask about (no attached picture and no concept).
+  GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
+  // SuggestDesignParts (auto parts) — one sync vision+JSON call: the model reads the side's flat cut
+  // into numbered regions (marks_media_id, drawn by the client) and groups the numbers into named
+  // garment parts. Cached per (card, view, base_media_id, algo_rev): a cached answer is returned
+  // without a call unless force.
+  // FailedPrecondition: the flat changed (base_media_id is not the side's flat), the region count is
+  // outside 2..60.
+  SuggestDesignParts(request: SuggestDesignPartsRequest): Promise<SuggestDesignPartsResponse>;
+  // SuggestDesignPartsCard (auto parts, topology) — ONE sync vision+JSON call over every requested
+  // side at once: the model sees the marks pictures in view order and lists the garment's PHYSICAL
+  // parts, each with its region numbers on every side it is visible on, so one part (the collar)
+  // is one part across front, back and the sides. The answer is stored per side in the same cache
+  // as SuggestDesignParts (card, view, base_media_id, algo_rev); every group carries a part_key
+  // shared across the sides. A cached answer is returned without a call when EVERY requested side
+  // has one from this call shape and !force.
+  // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
+  SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
+  // GenerateDesignJoins (flat route) — one sync vision+JSON call (chat.design_joins): the model reads
+  // the card's reference photos (with their roles) and the garment note and writes the JOIN LIST on
+  // the fixed landmark ruler, the layers, the absences and a verdict on whether the photos show one
+  // garment. Stored as the card's current list (rev + 1). A stored list is returned without a call
+  // (cached) when !force and it was written from the same photos and note, or a designer edited it.
+  // FailedPrecondition: nothing to read (no reference photo and no garment note).
+  GenerateDesignJoins(request: GenerateDesignJoinsRequest): Promise<GenerateDesignJoinsResponse>;
+  // SetDesignJoins saves the designer's join list (CAS: expected_rev must be the stored rev; 0 = no
+  // list yet). The server cleans it as it cleans the model's: unknown kinds and landmarks dropped,
+  // absences kept only when they are negations, counts and lengths capped. Aborted
+  // (joins_rev_mismatch) on a stale rev.
+  SetDesignJoins(request: SetDesignJoinsRequest): Promise<SetDesignJoinsResponse>;
+  // SetDesignPartsPieces saves the designer's PIECES LIST for PARTS (M6, flat-consistency 107) — the
+  // closed list of names the parts labeller may use (CAS: expected_rev must be the stored rev; 0 = no
+  // list yet). Names are cleaned (lowercase, ≤ 40 characters, unique, not "opening"/"unnamed", ≤ 30);
+  // the list is marked edited, so a later read of changed flats only PROPOSES (rev + 1, names kept).
+  // settle_proposal = true also drops the pending proposal (the names sent are the designer's answer
+  // to it: its names = take, the list's own = keep). Aborted (parts_pieces_rev_mismatch) on a stale
+  // rev. Spends no key; the next SuggestDesignPartsCard names the parts again under the new names.
+  SetDesignPartsPieces(request: SetDesignPartsPiecesRequest): Promise<SetDesignPartsPiecesResponse>;
+  // SetDesignDetailKept marks a STALE flat detail as kept (keep = true) or takes the mark off (keep =
+  // false) — 82-INPUT-REDESIGN §5, owner 06.10: «keep» is stored on the server, everyone sees it.
+  // A detail is stale when its plate came out of a run OLDER than the run of the card's current
+  // FRONT flat plate (BACK when front is empty) — see common.DesignBenchSlot.stale. The mark is
+  // stored against that views run AND the detail's plate, so it clears by itself the moment either
+  // changes (new views, another detail picture). `discard` is not this verb: it is
+  // SetDesignBenchSlot with picture_id = 0 (the slot is emptied and kept, the picture stays in history).
+  // against_run_id = the stale_against_run_id the client saw (CAS); 0 = do not check.
+  // FailedPrecondition: not_a_flat_detail | detail_empty | detail_not_stale (keep only).
+  // Aborted: views_changed (against_run_id is not the current views run). NotFound: no such slot on
+  // this card. Unkeep of an unmarked slot is a no-op.
+  SetDesignDetailKept(request: SetDesignDetailKeptRequest): Promise<SetDesignDetailKeptResponse>;
+  // GetDesignQuizAnswers — every quiz answer stored on the card, in display order, plus the open
+  // session's questions not yet saved (pending).
+  GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
+  // SaveDesignQuizAnswers MERGES the sent answers into the card's stored list by question id: a sent
+  // row is upserted (stamped with the card's current fingerprint, so it reads fresh), a row sent EMPTY
+  // (no selection, no free text, not skipped) forgets that id, every stored row not sent stays.
+  // `stale` on a sent row is ignored. A saved row whose decision_key matches a DIFFERENT stored
+  // question id forgets that older row (latest wins). close_session closes the open quiz session after
+  // the save. Returns the stored list.
+  SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -23372,6 +24170,23 @@ export function createAdminServiceClient(
         method: "SuggestPrompts",
       }) as Promise<SuggestPromptsResponse>;
     },
+    SuggestCallouts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/suggest-callouts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestCallouts",
+      }) as Promise<SuggestCalloutsResponse>;
+    },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
       const body = null;
@@ -23689,6 +24504,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "RemoveTechCardRoleAssignment",
       }) as Promise<RemoveTechCardRoleAssignmentResponse>;
+    },
+    ExitTechCardGuide(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/guide/exit`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExitTechCardGuide",
+      }) as Promise<ExitTechCardGuideResponse>;
     },
     ListTechCardRoleAssignments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
@@ -25328,6 +26160,46 @@ export function createAdminServiceClient(
         method: "HideDesignPicture",
       }) as Promise<HideDesignPictureResponse>;
     },
+    UndoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/undo`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UndoDesignEdit",
+      }) as Promise<UndoDesignEditResponse>;
+    },
+    RedoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/redo`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RedoDesignEdit",
+      }) as Promise<RedoDesignEditResponse>;
+    },
     DeleteDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
         throw new Error("missing required field request.picture_id");
@@ -25447,6 +26319,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignReferenceRole",
       }) as Promise<SetDesignReferenceRoleResponse>;
+    },
+    SetDesignReferenceHeld(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/reference-held`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignReferenceHeld",
+      }) as Promise<SetDesignReferenceHeldResponse>;
+    },
+    PreviewDesignRunInputs(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/runs/preview`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PreviewDesignRunInputs",
+      }) as Promise<PreviewDesignRunInputsResponse>;
     },
     DeleteDesignDetailSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.slotId) {
@@ -25719,6 +26631,189 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DraftDesignIdea",
       }) as Promise<DraftDesignIdeaResponse>;
+    },
+    GenerateDesignQuiz(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignQuiz",
+      }) as Promise<GenerateDesignQuizResponse>;
+    },
+    SuggestDesignParts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignParts",
+      }) as Promise<SuggestDesignPartsResponse>;
+    },
+    SuggestDesignPartsCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest-card`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignPartsCard",
+      }) as Promise<SuggestDesignPartsCardResponse>;
+    },
+    GenerateDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/joins:generate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignJoins",
+      }) as Promise<GenerateDesignJoinsResponse>;
+    },
+    SetDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/joins`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignJoins",
+      }) as Promise<SetDesignJoinsResponse>;
+    },
+    SetDesignPartsPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts/pieces`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignPartsPieces",
+      }) as Promise<SetDesignPartsPiecesResponse>;
+    },
+    SetDesignDetailKept(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.slotId) {
+        throw new Error("missing required field request.slot_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/bench/${request.slotId}/kept`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignDetailKept",
+      }) as Promise<SetDesignDetailKeptResponse>;
+    },
+    GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignQuizAnswers",
+      }) as Promise<GetDesignQuizAnswersResponse>;
+    },
+    SaveDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignQuizAnswers",
+      }) as Promise<SaveDesignQuizAnswersResponse>;
     },
     GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes

@@ -138,7 +138,9 @@ const DEFS: KindDef[] = [
     // редакторе), и хранится такая записка как `multi` — счётчик, а не второй вид.
     key: 'label',
     points: [1, 1],
-    label: 'note',
+    // «leader», а не «note» (волна callout kinds): «note» теперь — назначение «просто прямоугольник
+    // с текстом» (`purpose.ts`), и два чипа с одним словом выбирались бы наугад.
+    label: 'leader',
     hint: 'a note on an arrow — one click puts it; “+ point” makes it point at more places',
     grammar: 'click',
     inPalette: true,
@@ -276,7 +278,7 @@ const DEFS: KindDef[] = [
     // читаются как читались, провод и zod не тронуты.
     key: 'multi',
     points: [2, 8],
-    label: 'note',
+    label: 'leader',
     hint: 'a note pointing at several places',
     grammar: 'click',
     inPalette: false,

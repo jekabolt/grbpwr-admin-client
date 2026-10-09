@@ -9,8 +9,7 @@
 //
 // ЧТО ИМЕННО МЕРЯЕТСЯ:
 //   · кадр ячейки — коробка 132×148, то есть переезд на `PictureTile` не поехал геометрией;
-//   · угловой `zoom` СУЩЕСТВУЕТ и подчиняется закону тихого органа (прозрачен в покое, виден при
-//     наведении) — до правки его рисовала сама ячейка своим классом;
+//   · угловой кнопки `zoom` НЕТ (T12); зум — сама поверхность кадра, названная «zoom …»;
 //   · РЯД ПРОСМОТРЩИКА СКВОЗНОЙ: открытый из первой полосы, он держит картинки И ВТОРОЙ полосы.
 //     Ровно это было сломано — ряд собирался вызывающим и кончался на краю блока;
 //   · порядок ряда — ПОРЯДОК В ДОКУМЕНТЕ: открытие из второй полосы встаёт на третий кадр, а не
@@ -211,32 +210,29 @@ if (box) {
   ck(Math.abs(box.h - 148) <= 1, 'высота кадра 148px', `замер ${box.h}`);
 }
 
-// ── 2. ТИХИЙ ОРГАН ───────────────────────────────────────────────────────────────────────────────
-head('угловой zoom — закон тихого органа');
+// ── 2. ЗУМ — САМА КАРТИНКА, БЕЗ УГЛОВОЙ КНОПКИ (T12) ───────────────────────────────────────────────
+// Владелец: «кнопку зум на ховер нигде показывать не нужно». Орган зума — поверхность кадра: она
+// носит имя «zoom …» (клавиатура и читалка не теряют двери), накрывает кадр целиком и не пишет
+// на картинке ни одного слова «zoom».
+head('зум — поверхность кадра, угловой кнопки нет');
 const zoomSel = '[data-cell="a1"] button[aria-label="zoom front flat"]';
 const hasZoom = (await page.locator(zoomSel).count()) > 0;
-ck(hasZoom, 'угловая кнопка zoom нарисована примитивом');
+ck(hasZoom, 'поверхность кадра названа «zoom …»');
+const visibleZoomWords = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-cell] *')].filter(
+    (n) => n.children.length === 0 && /^\s*zoom\s*$/i.test(n.textContent || ''),
+  ).length,
+);
+ck(visibleZoomWords === 0, 'слова «zoom» на плитках нет', `найдено ${visibleZoomWords}`);
 if (hasZoom) {
-  const atRest = await page.locator(zoomSel).evaluate((n) => getComputedStyle(n).opacity);
-  ck(atRest === '0', 'в покое орган прозрачен', `opacity ${atRest}`);
-  // НАСТОЯЩЕЕ ДВИЖЕНИЕ МЫШИ В ЦЕНТР КАДРА, а не `locator.hover()`: поверхность-зум примитива
-  // накрывает картинку целиком и честно перехватывает указатель, поэтому playwright отказывается
-  // наводиться на сам `<img>`. Наведение проверяется как жест человека — по координате.
-  const at = await page.evaluate(() => {
-    const r = document
-      .querySelector('[data-cell="a1"] img')
-      .closest('div[style*="aspect-ratio"]')
-      .getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const cover = await page.locator(zoomSel).evaluate((n) => {
+    const tile = n.closest('[data-picture-tile]').getBoundingClientRect();
+    const r = n.getBoundingClientRect();
+    return Math.abs(r.width - tile.width) <= 2 && Math.abs(r.height - tile.height) <= 2;
   });
-  await page.mouse.move(at.x, at.y);
-  await page.waitForFunction(
-    (s) => getComputedStyle(document.querySelector(s)).opacity === '1',
-    zoomSel,
-    { timeout: 3000 },
-  ).catch(() => {});
-  const onHover = await page.locator(zoomSel).evaluate((n) => getComputedStyle(n).opacity);
-  ck(onHover === '1', 'при наведении орган виден', `opacity ${onHover}`);
+  ck(cover, 'поверхность-зум накрывает кадр целиком');
+  const focusable = await page.locator(zoomSel).evaluate((n) => n.tabIndex >= 0 && !n.closest('[aria-hidden="true"]'));
+  ck(focusable, 'поверхность-зум в табе и видна читалке');
 }
 
 // ── 3. РЯД СКВОЗНОЙ ──────────────────────────────────────────────────────────────────────────────
@@ -271,7 +267,7 @@ if (hasZoom) {
     `активна ${fromB.active}`,
   );
 } else {
-  ck(false, 'ряд не измерен: угловой кнопки нет');
+  ck(false, 'ряд не измерен: поверхности-зума нет');
 }
 
 // ── 4. ШУМ СТРАНИЦЫ ──────────────────────────────────────────────────────────────────────────────

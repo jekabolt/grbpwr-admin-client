@@ -1551,8 +1551,9 @@ try {
   // G-02 Codex 3: the server reserves max(estimate, the configured route) — no figure is shown.
   ck(
     !(await open3.textContent()).includes('$') &&
-      (await open3.textContent()).includes('1 model · priced by the server when the run starts'),
-    'у GENERATE ни одной суммы: «1 model · priced by the server when the run starts»',
+      !(await open3.textContent()).includes('priced by the server') &&
+      !(await open3.textContent()).includes('1 model ·'),
+    'у GENERATE ни суммы, ни строки «1 model · priced by the server…» (item 34)',
   );
   ck(
     (await generate().isDisabled()) &&
@@ -1776,7 +1777,8 @@ try {
     await active(),
   );
   // m-4 · the viewer's Mask (the viewer closes first, its button is gone): focus on the corner.
-  await page.locator('[data-pg-output="800"] button[aria-label^="zoom"]').click();
+  // The zoom corner is gone (T12): the viewer opens from the picture's own surface.
+  await page.locator('[data-pg-output="800"] [data-tile-surface]').click();
   const viewerMask = page.locator('[role="dialog"] button', { hasText: /^mask$/ });
   await viewerMask.waitFor();
   await viewerMask.click();
@@ -1810,8 +1812,8 @@ try {
     text10.slice(0, 200),
   );
   ck(
-    text10.includes('priced by the server when the run starts') && !text10.includes('$'),
-    'панель плитки 10: строка цены — «priced by the server», без выдуманной суммы (m-3)',
+    !text10.includes('priced by the server') && !text10.includes('$'),
+    'панель плитки 10: строки «priced by the server» нет (item 34), суммы нет',
   );
   const slot = open10.locator('[data-retouch-source]');
   ck(

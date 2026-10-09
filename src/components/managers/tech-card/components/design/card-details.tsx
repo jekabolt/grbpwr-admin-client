@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
   common_Colorway,
+  common_SkuSeason,
   common_TechCardRoleAssignment,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -14,7 +15,7 @@ import {
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
@@ -23,6 +24,7 @@ import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Select from 'ui/components/select';
 import Textarea from 'ui/components/text-area';
 import Text from 'ui/components/text';
@@ -30,7 +32,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import { fieldErrorSummary, revealField } from 'utils/field-errors';
+import { fieldErrorSummary } from 'utils/field-errors';
 
 import { CollectionField } from '../collection-field';
 import { BaseModelFields, CategoryBrowser } from '../header-meta-fields';
@@ -45,7 +47,7 @@ import {
   isAgeGroupSet,
 } from '../tech-card-options';
 import { useRoleAssignments } from '../useRoles';
-import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
+import { EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { categoryChain, fitChoicesFor, fitLabel } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
@@ -56,8 +58,8 @@ import { FitCell, useStyleLockWords } from './style-cells';
  *
  * The header of the card as the prototype draws it: ONE `Section` titled «card details · who and
  * what this card is», a `N of 12 fields` counter in its rule, and inside it the groups as
- * `GroupLabel` rules — IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE, NOTE, and the
- * two-column row RESPONSIBLE ROLES | LINKED PRODUCTS. Not four separate blocks: the owner saw
+ * `GroupLabel` rules — IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE, the two-column
+ * row RESPONSIBLE ROLES | LINKED PRODUCTS, and NOTE under it (onboarding П5). Not four separate blocks: the owner saw
  * those and said «не как в референсе». A block never contains a block (DESIGN.md), so the groups
  * are rules, not borders.
  *
@@ -83,9 +85,10 @@ import { FitCell, useStyleLockWords } from './style-cells';
  *   · NOTE (T07, D-05) — the card's existing `notes` field, which had lost its editor.
  *
  * WHAT THE PROTOTYPE HAS AND THE WIRE DOES NOT — named, not faked:
- *   · a `#PRD-…` product id under a colourway (the product prints the colourway id);
- *   · the `season ›` door under a disabled SUGGEST leads to the season FIELD (`revealField`), not
- *     straight into the picker — the picker's open state is the season organ's own.
+ *   · a `#PRD-…` product id under a colourway (the product prints the colourway id).
+ *
+ * THE ONBOARDING WAVE (2026-10-07) took the `locked · pick a season` bar off SUGGEST: without a
+ * season SUGGEST opens the season picker itself and suggests with the season it commits (П1).
  */
 
 /**
@@ -141,33 +144,17 @@ const GENERATED = 'STYLE_NUMBER_SOURCE_GENERATED';
 const MANUAL = 'STYLE_NUMBER_SOURCE_MANUAL';
 
 /**
- * STYLE NUMBER — the field, SUGGEST to its right, and the reason SUGGEST is dead under both.
- *
- * `{SEASON}-{SEQ}` and nothing else; the server names the next free number (SuggestStyleNumber)
- * and guards uniqueness. Typing flips the source to MANUAL — the ONE place the number becomes
- * «by hand» — and SUGGEST writes GENERATED past that path.
- *
- * ПРОВЕНАНС НЕ ПОКАЗЫВАЕТСЯ (владелец, r3 п.1: «STYLE NUMBER * в рамке (SUGGESTED) не надо
- * показывать»). `styleNumberSource` живёт дальше — он идёт на провод и решает, чем считать
- * номер, — но пилюли `suggested` / `by hand` на подписи больше нет: человек и так знает, набрал
- * он номер сам или нажал SUGGEST секунду назад, а пилюля добавляла второй орган в ряд подписи.
- *
- * Without a season the button is disabled and the cause stands as a VISIBLE `LockBar` with a door
- * to the season field — never as a `title` on a dead control (the prototype's rule, kept). A door
- * to a cell this account cannot change is no door (Codex m3): with the season locked the bar names
- * the grant it takes instead.
+ * SUGGEST — asks the server for the next free `{SEASON}-{SEQ}` of a season and writes it as
+ * GENERATED. Held by `CardDetails`, not by the cell: the season it suggests for is either the one
+ * on the card or the one the season picker has JUST committed (`onPicked`), which the cell's
+ * `useWatch` would not see until the next render.
  */
-function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLocked: boolean }) {
-  const { control, setValue, clearErrors } = useFormContext<TechCardFormData>();
-  const season = useWatch({ control, name: 'season' }) as string | undefined;
-  const source = useWatch({ control, name: 'styleNumberSource' }) as string | undefined;
+function useStyleNumberSuggest() {
+  const { setValue, clearErrors } = useFormContext<TechCardFormData>();
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState('');
 
-  const sku = parseSeasonToSku(season);
-
-  const suggest = async () => {
-    if (!sku) return;
+  const suggest = async (sku: common_SkuSeason) => {
     setSuggesting(true);
     setSuggestError('');
     try {
@@ -186,6 +173,49 @@ function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLock
       setSuggesting(false);
     }
   };
+
+  return { suggest, suggesting, suggestError };
+}
+
+/**
+ * STYLE NUMBER — the field and SUGGEST to its right.
+ *
+ * `{SEASON}-{SEQ}` and nothing else; the server names the next free number (SuggestStyleNumber)
+ * and guards uniqueness. Typing flips the source to MANUAL — the ONE place the number becomes
+ * «by hand» — and SUGGEST writes GENERATED past that path.
+ *
+ * ПРОВЕНАНС НЕ ПОКАЗЫВАЕТСЯ (владелец, r3 п.1: «STYLE NUMBER * в рамке (SUGGESTED) не надо
+ * показывать»). `styleNumberSource` живёт дальше — он идёт на провод и решает, чем считать
+ * номер, — но пилюли `suggested` / `by hand` на подписи больше нет: человек и так знает, набрал
+ * он номер сам или нажал SUGGEST секунду назад, а пилюля добавляла второй орган в ряд подписи.
+ *
+ * SUGGEST БЕЗ СЕЗОНА НЕ ЗАПЕРТ (онбординг, П1). Владелец: «не должно быть LOCKED pick a season to
+ * enable suggest — при нажатии suggest сразу открывается модалка сезона и после этого срабатывает
+ * саджест». Без сезона кнопка открывает пикер сезона (`onNeedSeason`), и номер предлагается для
+ * сезона, который пикер записал. Заперта она только там, где сезон этому аккаунту не поставить
+ * (products:write на сохранённой карте) — и тогда под ней сказано, какой нужен грант.
+ */
+function StyleNumberCell({
+  isIdea,
+  seasonLocked,
+  suggesting,
+  suggestError,
+  onSuggest,
+  onNeedSeason,
+}: {
+  isIdea: boolean;
+  seasonLocked: boolean;
+  suggesting: boolean;
+  suggestError: string;
+  onSuggest: (sku: common_SkuSeason) => void;
+  onNeedSeason: () => void;
+}) {
+  const { control, setValue, clearErrors } = useFormContext<TechCardFormData>();
+  const season = useWatch({ control, name: 'season' }) as string | undefined;
+  const source = useWatch({ control, name: 'styleNumberSource' }) as string | undefined;
+
+  const sku = parseSeasonToSku(season);
+  const noSeasonLocked = !sku && seasonLocked;
 
   return (
     <FormField
@@ -219,16 +249,16 @@ function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLock
                 size='sm'
                 className='shrink-0 whitespace-nowrap'
                 loading={suggesting}
-                disabled={suggesting || !sku}
+                disabled={suggesting || noSeasonLocked}
                 aria-label='suggest the next free style number'
-                onClick={suggest}
+                onClick={() => (sku ? onSuggest(sku) : onNeedSeason())}
               >
                 suggest
               </Button>
             </div>
-            {/* Spelled as the rail spells its own strip (`chain-rail.tsx`): the word LOCKED, the
-                reason, the door — one grammar for every lock on this screen. */}
-            {!sku && (
+            {/* Spelled as every lock on this screen: the word LOCKED, then the reason. No door —
+                the season cell beside it is locked on the same grant. */}
+            {noSeasonLocked && (
               <LockBar>
                 <Text
                   size='micro'
@@ -245,21 +275,8 @@ function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLock
                   component='span'
                   className='min-w-0 flex-1 normal-case'
                 >
-                  {seasonLocked
-                    ? 'no season — setting one needs products:write'
-                    : 'pick a season to enable suggest'}
+                  no season — setting one needs products:write
                 </Text>
-                {!seasonLocked && (
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    className='shrink-0 whitespace-nowrap'
-                    onClick={() => revealField('season')}
-                  >
-                    season ›
-                  </Button>
-                )}
               </LockBar>
             )}
             {suggestError && (
@@ -269,8 +286,8 @@ function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLock
             )}
             {isIdea && (
               <Text variant='inactive' size='micro'>
-                optional while this is an idea — a real style number is required before the card
-                can advance to PROTO
+                optional while this is an idea — a real style number is required before the card can
+                advance to PROTO
               </Text>
             )}
             {/* server field-tagged errors (BadRequest.FieldViolation on style_number) land here */}
@@ -401,9 +418,7 @@ function NoteField({ context, canEdit }: { context: string; canEdit: boolean }) 
 
 /** `techCard.colorways` → the ids the tiles are drawn for (unset ids are not a colourway). */
 function colorwayIds(colorways: common_AdminColorwayRef[]): number[] {
-  return colorways
-    .map((c) => c.colorwayId)
-    .filter((id): id is number => id != null && id > 0);
+  return colorways.map((c) => c.colorwayId).filter((id): id is number => id != null && id > 0);
 }
 
 function productName(product?: common_Colorway): string {
@@ -447,15 +462,11 @@ function LinkedProducts({
   const ids = colorwayIds(colorways);
   const productMap = useProductsByIds(ids);
 
-  if (!techCardId) {
-    return (
-      <Text size='micro' variant='label' data-linked-products='unsaved'>
-        save this tech card first — linked products are its colourways, created from the
-        colourways tab.
-      </Text>
-    );
-  }
-  if (ids.length === 0) {
+  /* A card that does not exist yet has no colourways either: the same quiet line as an empty one
+     (review M4). «save this tech card first» was struck by the owner beside RESPONSIBLE ROLES, and the
+     roles' own line («once the card exists») already says it for the whole row — a second caption
+     here would say it twice. */
+  if (!techCardId || ids.length === 0) {
     /* Тихий текст без двери — дверь одна и она в линейке группы (см. шапку органа). */
     return <EmptyState>no colourways yet</EmptyState>;
   }
@@ -553,6 +564,12 @@ export function CardDetails({
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { canWrite } = usePermissions();
+  // SUGGEST without a season opens the season picker and suggests with the season it commits (П1).
+  // The picker's open state lives here so SUGGEST can open it; `pendingSuggest` remembers who did,
+  // so a season picked through the field's own `pick` writes the season and nothing more.
+  const { suggest, suggesting, suggestError } = useStyleNumberSuggest();
+  const [seasonOpen, setSeasonOpen] = useState(false);
+  const pendingSuggest = useRef(false);
   const meta = useWatch({ control, name: [...META_FIELDS] }) as unknown[];
   const auxSubtype = (useWatch({ control, name: 'auxSubtype' }) as string | undefined) ?? '';
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
@@ -632,7 +649,7 @@ export function CardDetails({
     <Section
       title='card details'
       question='— who and what this card is'
-      action={<Counter n={filled} noun='field' total={counted.length} />}
+      action={<HeaderCount n={filled} noun='field' total={counted.length} />}
       id='card-details'
       className={cn('min-w-0', GROUP_SEAM)}
     >
@@ -646,7 +663,17 @@ export function CardDetails({
             <InputField name='name' label='name *' placeholder='what this style is called' />
           </div>
           <div className={W3}>
-            <StyleNumberCell isIdea={isIdea} seasonLocked={seededLocked} />
+            <StyleNumberCell
+              isIdea={isIdea}
+              seasonLocked={seededLocked}
+              suggesting={suggesting}
+              suggestError={suggestError}
+              onSuggest={suggest}
+              onNeedSeason={() => {
+                pendingSuggest.current = true;
+                setSeasonOpen(true);
+              }}
+            />
           </div>
           <div
             className={W2}
@@ -663,15 +690,28 @@ export function CardDetails({
             data-style-lock={seededLocked ? 'locked' : 'open'}
             title={seededLocked ? 'needs products:write' : undefined}
           >
-            {/* SeasonField has no lock of its own, and needs none here: its ONE writer is the
-                `pick` button's click (the input is read-only and the picker opens only from that
-                click), and a disabled fieldset kills click and focus on the buttons inside it —
+            {/* SeasonField has no lock of its own, and needs none here: its writers are the
+                `pick` button's click and SUGGEST without a season (which is disabled on the same
+                lock), and a disabled fieldset kills click and focus on the buttons inside it —
                 measured; pointerdown still fires, but nothing in this cell listens to it. The
-                picker itself portals out of the fieldset, so the lock REMOUNTS the field (`key`):
-                a picker already open when the lock lands closes with it and writes nothing
-                (Codex m2). */}
+                picker itself portals out of the fieldset, so the lock REMOUNTS the field (`key`)
+                and closes the picker (`open` is ANDed with it): a picker already open when the
+                lock lands closes and writes nothing (Codex m2). */}
             <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
-              <SeasonField key={seededLocked ? 'locked' : 'open'} pickHint={seasonPickHint} />
+              <SeasonField
+                key={seededLocked ? 'locked' : 'open'}
+                pickHint={seasonPickHint}
+                open={seasonOpen && !seededLocked}
+                onOpenChange={(o) => {
+                  setSeasonOpen(o);
+                  if (!o) pendingSuggest.current = false;
+                }}
+                onPicked={(sku) => {
+                  if (!pendingSuggest.current) return;
+                  pendingSuggest.current = false;
+                  void suggest(sku);
+                }}
+              />
             </fieldset>
             <StyleLockNote locked={seededLocked} />
           </div>
@@ -751,8 +791,8 @@ export function CardDetails({
               />
               {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
                 <Text size='micro' variant='label'>
-                  unclassified — the assembly bill and the labels/packaging pickers file this
-                  card under «unknown» until a type is set
+                  unclassified — the assembly bill and the labels/packaging pickers file this card
+                  under «unknown» until a type is set
                 </Text>
               )}
             </div>
@@ -770,24 +810,13 @@ export function CardDetails({
         </div>
       </div>
 
-      {/* ── NOTE — the card's free text, full width, before the people and the products ────── */}
-      <div className='min-w-0' data-card-group='note'>
-        <GroupLabel flush className={GROUP_GAP}>
-          note
-        </GroupLabel>
-        <NoteField context={noteContext} canEdit={canEdit} />
-      </div>
-
       {/* ── RESPONSIBLE ROLES | LINKED PRODUCTS — the prototype's `.brow.even` ───────────────
           Two columns from `lg` up, stacked below. `items-stretch` is load-bearing: the four role
           rows share the LEFT column's height equally, and that column is stretched to the height of
           the tiles on the right — so the rows space out to the tiles, and never squeeze. */}
       <div className='flex min-w-0 flex-col gap-gutter lg:flex-row lg:items-stretch'>
         <div
-          className={cn(
-            'flex min-w-0 flex-col',
-            isAux ? 'flex-1' : 'lg:w-[420px] lg:shrink-0',
-          )}
+          className={cn('flex min-w-0 flex-col', isAux ? 'flex-1' : 'lg:w-[420px] lg:shrink-0')}
           data-card-group='roles'
         >
           {/* БЕЗ СЧЁТЧИКА. Владелец (r3 п.2): «RESPONSIBLE ROLES „2 OF 4 ROLES“ не нужно, и так
@@ -809,13 +838,13 @@ export function CardDetails({
                 /* two organs on one line: the count, then the one door out — `Button` is a block,
                    so without the row the door would drop under the pill */
                 <div className='flex flex-wrap items-center gap-1.5'>
-                  <Counter n={colorwayIds(ways).length} noun='colourway' />
+                  <HeaderCount n={colorwayIds(ways).length} noun='colourway' />
                   {techCardId ? (
                     <Button
                       type='button'
-                      variant='secondary'
+                      variant='underline'
                       size='xs'
-                      className='whitespace-nowrap'
+                      className='text-labelColor hover:text-textColor whitespace-nowrap'
                       onClick={onGoColourways}
                     >
                       go to colourways ›
@@ -829,6 +858,15 @@ export function CardDetails({
             <LinkedProducts techCardId={techCardId} colorways={ways} />
           </div>
         )}
+      </div>
+
+      {/* ── NOTE — the card's free text, full width, under the people and the products (owner,
+          onboarding П5: «NOTE должна идти под RESPONSIBLE ROLES») ─────────────────────────── */}
+      <div className='min-w-0' data-card-group='note'>
+        <GroupLabel flush className={GROUP_GAP}>
+          note
+        </GroupLabel>
+        <NoteField context={noteContext} canEdit={canEdit} />
       </div>
     </Section>
   );

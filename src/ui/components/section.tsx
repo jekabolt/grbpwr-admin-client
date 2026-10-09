@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cn } from 'lib/utility';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
-import { Arrow } from 'ui/icons/arrow';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE block — the unit every screen in this admin is built from.
@@ -151,7 +151,7 @@ export function Section({
           >
             {title}
           </Text>
-          <Arrow aria-hidden className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor' />
+          <FoldCaret open={false} className='ml-0 text-labelColor group-hover:text-textColor' />
         </button>
       </section>
     );
@@ -191,7 +191,7 @@ export function Section({
                 >
                   {/* Поворота здесь нет и быть не может: эта ветка рисуется только раскрытой —
                       свёрнутую перехватывает ранний возврат выше. */}
-                  <Arrow aria-hidden className='shrink-0 text-labelColor group-hover:text-textColor' />
+                  <FoldCaret open className='ml-0 text-labelColor group-hover:text-textColor' />
                 </button>
               </>
             ) : (

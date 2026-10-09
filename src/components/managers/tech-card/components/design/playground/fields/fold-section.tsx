@@ -1,7 +1,7 @@
 import { useState, type JSX, type ReactNode } from 'react';
 
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
+import { HeaderNote } from 'ui/components/section-header';
 
 import { Fold } from '../../head/mood-organs';
 import { FieldGlyph, InfoTip, type FieldGlyphName } from './glyphs';
@@ -74,7 +74,7 @@ export function FoldSection({
   const side =
     required || value != null ? (
       <span className='flex items-center gap-2.5'>
-        {required && <Pill tone='ink'>required</Pill>}
+        {required && <HeaderNote tone='ink'>required</HeaderNote>}
         {value != null && (
           <span
             className='inline-flex items-center gap-1.5 text-micro text-labelColor'

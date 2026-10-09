@@ -43,6 +43,7 @@ import {
 } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /** Ось группировки полки. Взаимоисключающая: не фильтр и не вложенность. */
 export type ShelfAxis = 'unit' | 'cloth';
@@ -374,7 +375,7 @@ export function AssemblyShelf({
       aria-label={collapsed ? 'expand the pieces shelf' : 'collapse the pieces shelf'}
       className='cursor-pointer select-none text-micro leading-none text-labelColor transition-colors hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
     >
-      {collapsed ? '▸' : '▾'}
+      <FoldCaret open={!collapsed} className='ml-0' />
     </span>
   );
 

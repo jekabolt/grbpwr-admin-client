@@ -1,13 +1,20 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
-import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  PreviewDesignRunInputsResponse,
+  common_DesignInputSnapshot,
+  common_DesignRunParams,
+} from 'api/proto-http/admin';
+import { abortableAdminService, adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { cn } from 'lib/utility';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
+import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
-import { ViewSwitch } from 'ui/components/view-switch';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
@@ -21,103 +28,151 @@ import {
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
 import { useMoodMinimumGate } from './chain-rail';
-import { GROUP_GAP } from './core';
+import { ControlLabel } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import {
+  flatDraftOf,
   flatInputBusy,
   patchFlatInput,
   readFlatInput,
+  readFlatReading,
+  rememberFlatDraft,
   useFlatInput,
   type FlatAsk,
-  type FlatLayout,
 } from './flat-input';
+import { inputStillReading, labelsByMedia, photoDetailSlots, takeProposals } from './board-labels';
+import {
+  autoStructure,
+  flatParamsFor,
+  flatRefusalWords,
+  liveStructure,
+  moodPictureIds,
+  pickStructure,
+  type FlatMode,
+  type StructurePick,
+  type StructureRole,
+} from './flat-mode';
+import {
+  VIEWS_ORDER,
+  VIEWS_TARGET,
+  detailFlatSlotIds,
+  flatHumanWords,
+  flatTargets,
+  followCategory,
+  modeOfRoute,
+  routeOf,
+  settleTarget,
+  targetSlotId,
+  type FlatRoute,
+  type FlatTarget,
+} from './flat-route';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
+import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
-import { isBoardRow, type BoardItem } from './mood-board';
+import { isBoardRow, setBoardRole, type BoardItem } from './mood-board';
+import Select from 'ui/components/select';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
-import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
 import type { CalloutLike } from './render/what-model-gets';
-import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
+import { staleShown } from './stale-details';
+import {
+  cardOnScreen,
+  designKeys,
+  isUnimplemented,
+  serverSpeaksNow,
+  type WriteContext,
+} from './use-design-band';
+import { useGarmentClass } from './head/card-facts-form';
+import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
 /**
- * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
+ * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (82-INPUT-REDESIGN, 06.10; M7 07.10) ══════════════════
  *
- *   GENERATE · WHAT THE MODEL GETS ▸
+ *   GENERATE · target ▾ · (from my flat) · what the model gets ▸
  *
- * Здесь стояла ОТДЕЛЬНАЯ секция `generation — flat`, потом — подвал `the flat run` с линейкой
- * группы, чипами видов, переключателем раскладки и рядом. Макет (`_step-flat.js`, SPEC п.7) знает
- * один блок и один ряд: то, что модели дают, и то, что у неё просят, — один запрос.
+ * Owner request 8: «always 4 views; first press = the views sheet; drop one picture / per view; drop
+ * FRONT/BACK/SIDE toggles; a dropdown by GENERATE: views again first, then un-generated details; no
+ * mode switch — route automatic, from-my-flat explicit».
+ *   · `target ▾` (`flatTargets`): `views` / `views again`, then each detail not drawn yet (or stale
+ *     and not kept) — disabled until FRONT and BACK hold a picture;
+ *   · `from my flat` — a quiet toggle, drawn only when the card has technical flats and the target
+ *     is the views; never automatic. On: the structure tiles under the row (front / back per flat).
+ * M7 (owner 07.10, 100-CONSTRUCTION-DEADEND): no construction on the row any more — no ASK ·
+ * construction questions, no route pill, no `straps & openings`, no «reading the construction» lock.
+ * M6: nor is the join list read in the background any more — PARTS reads its own pieces list
+ * from the accepted FRONT/BACK flats on the server.
  *
- * ПОЧЕМУ ОТДЕЛЬНЫЙ КОМПОНЕНТ, А НЕ ВСТАВКА В `ReferencesSection`. Секция референсов уже несёт
- * два десятка хуков и приёмник рекола (`RecalledRunPrompt`), который при размонтировании стирает
- * выбор из реестра; всякий условный хук в её теле — риск сдвинуть их порядок. Органы прогона
- * живут своим состоянием и монтируются ВНУТРИ той же `Section`.
- *
- * ⚠ РЯД ВИДОВ — ПРОДУКТОВЫЙ, У МАКЕТА ЕГО НЕТ. Прототипный прогон флэта возвращает «до двух
- * свободных флэтов с видом» из фикстур; продуктовый `StartDesignRun` требует `params.views[]` —
- * какие стороны рисовать — и `layout`. Спрятать выбор и слать всегда `front, back` значило бы
- * решать за человека, за что он платит. Поэтому ряд остаётся, одной строкой над рядом запуска:
- * ярлык `VIEWS`, чипы сторон и деталей, справа — раскладка ответа. Это названо в gaps.
- *
- * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35). Здесь стояла строка «US$… · last flat run · priced by the
- * server when the run starts» — цена ПОСЛЕДНЕГО прогона под видом цены следующего. Владелец:
- * «убрать полностью». Цена прогона живёт в истории, по факту; ряд запуска о деньгах молчит.
+ * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35): цена прогона живёт в истории, по факту.
  */
 
 /**
- * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ ОБОИХ РЯДОВ — VIEWS И ЗАПУСКА (r3 п.5) ═══════════════════════════
- *
- * Владелец, дословно: «после WORDS очень много кнопок разного размера с минимальными отступами …
- * сделать по уму». «Разного размера» — это измеримо и это была правда: `Button size='sm'` (рамка +
- * `py-1` + `leading-4`) ростом 26px стояла вплотную к `Chip` и к сегменту `ViewSwitch` ростом 19px,
- * и тогдашние три ряда органов читались как три разных класса вещей. Средний ряд (источники) снят
- * волной 25.09 (T24, D-20), рядов два: VIEWS и запуск.
- *
- * ЭТАЛОН ВЫБРАН НЕ ГОЛОСОВАНИЕМ: 26px — рост `GENERATE`, а её разметку держит общий ряд
- * (`render/generate-row.tsx`, зона G1), то есть подогнать надо было ВСЁ ОСТАЛЬНОЕ к ней, а не
- * наоборот. Число живёт здесь одно, и ленты берут его отсюда.
- *
- * ⚠ ИНЛАЙНОМ, А НЕ КЛАССОМ, И ЭТО НЕ НЕБРЕЖНОСТЬ. Класса на 26px в tailwind нет (`h-6` = 24), а
- * произвольного (`h-[26px]`) НЕТ В СОБРАННОМ CSS, если его не было в дереве на момент сборки —
- * стенд читает именно собранный CSS и намерил бы неправильную геометрию, показав зелёное там, где
- * у человека разъехалось (память `probe-served-a-stale-bundle`).
+ * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ РЯДА (r3 п.5) ═══════════════════════════════════════════════════════
+ * 26px — рост `GENERATE` (`render/generate-row.tsx`); остальное подгоняется к ней. Инлайном, а не
+ * классом: произвольного класса нет в собранном CSS, если его не было в дереве при сборке.
  */
 export const ROW_CONTROL_PX = 26;
 export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
 
+/** The native select of the row, styled as the neck-shape select of the joins list. */
+const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
+  { role: 'front_flat', label: 'front' },
+  { role: 'back_flat', label: 'back' },
+];
+
 /**
- * ═══ ПОДПИСЬ ВТОРОСТЕПЕННОЙ КНОПКИ — РАЗМЕРОМ КОНТРОЛА, А НЕ ТЕЛА ТЕКСТА (r3 п.5) ══════════════
- *
- * Владелец просил ещё и ОДИН РАЗМЕР ШРИФТА в этих рядах. Замерено: чипы и сегменты раскладки
- * печатают 10px, а `Button size='sm'` — 12px, хотя DESIGN.md на второстепенную кнопку говорит
- * ровно «10px label type uppercase». Разница не в вызове: `buttonVariants` кладёт на одну кнопку
- * И `text-textBaseSize` (от `variant`), И `text-micro` (от `size`), а `cva` их не мирит — спор
- * решает порядок утилит в собранном CSS, и `text-textBaseSize` там ПОЗЖЕ. То есть `text-micro`
- * размера `sm` мёртв во всей админке, и класс с места вызова умрёт так же.
- *
- * ПОЭТОМУ РАЗМЕР НАЗЫВАЕТ ПОДПИСЬ, А НЕ КНОПКА: у вложенного `span` конкурента нет. Это не обход
- * системы, а её же значение — 10px, `text-micro`, — возвращённое туда, где примитив его теряет.
- * ⚠ ПОЧИНКА ПО СУЩЕСТВУ ЖИВЁТ В `ui/components/button.tsx` (снять `text-textBaseSize` с вариантов
- * или помирить классы через `twMerge`); она за пределами этой зоны и названа в отчёте. Главную
- * кнопку (`GENERATE`) это не касается: 12px у неё — по системе.
+ * THE PARAMS OF A FLAT PRESS — one builder for GENERATE and for «what the model gets» (101 Ф3): the
+ * modal asks the server about EXACTLY the request the button would send.
  */
-export function ControlLabel({ children }: { children: ReactNode }): JSX.Element {
-  return <span className='text-micro'>{children}</span>;
+export function flatRunParams(
+  slotId: number,
+  mode: FlatMode | null,
+  structure: readonly StructurePick[],
+): common_DesignRunParams {
+  return {
+    views: slotId > 0 ? ['detail'] : [...VIEWS_ORDER],
+    detailSlotIds: slotId > 0 ? [slotId] : [],
+    layout: 'one',
+    colorwayId: 0,
+    colour: undefined,
+    threed: undefined,
+    fixTarget: '',
+    fixTargets: [],
+    fixSlotIds: [],
+    autoSplit: slotId === 0,
+    pattern: undefined,
+    freeform: undefined,
+    /* A DETAIL READS THE FINISHED FRONT AND BACK (owner 06.10, answer 3) — attached by the SERVER on
+       a detail run (T8); the client sends no slots on any flat run. `false` is SAID: an empty list
+       with the flag on would mean «every filled slot». */
+    useFlatSlots: false,
+    flatSlotIds: [],
+    // The moodboard is the input (101): nothing travels beside it.
+    extraInputMediaIds: [],
+    image: undefined,
+    inpaint: undefined,
+    extend: undefined,
+    video: undefined,
+    flat: mode ? flatParamsFor(mode, [...structure]) : undefined,
+  };
 }
 
-const LAYOUT_OPTIONS = [
-  { value: 'one' as const, label: 'one picture', hint: 'all the ticked views drawn into one file' },
-  {
-    value: 'per_view' as const,
-    label: 'a picture per view',
-    hint: 'each ticked view comes back on its own',
-  },
-];
-type Layout = FlatLayout;
+/**
+ * WHAT THE ROW STANDS ON, FOR THE INPUT'S PICTURES (M13): the target ▾ and the params a VIEWS press
+ * would send (the «from my flat» choice applies to the views only). A detail press sends
+ * `flatRunParams(slotId, null, [])` — the input's pictures build it themselves.
+ */
+export type FlatSelection = { target: FlatTarget; views: common_DesignRunParams };
+
+/** A local stop that reads like the server's refusal of the same thing (nothing was sent). */
+const localRefusal = (reason: string): ServerRefusal => ({
+  words: reason,
+  status: 0,
+  clientRequestId: '',
+  reason,
+});
 
 /** Утверждение карточки замораживает её (`index.tsx`, `frozen`); строка — проводная. */
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
@@ -139,11 +194,57 @@ const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
  *     другой запрос.
  * Полоса — СВЕЖЕЕ чтение (`freshBand` в `submit`, ревью раунда 4, MAJ-1), а не кэш экрана.
  */
-function flatSnapshot(
+export function flatSnapshot(
   band: GetDesignBandResponse | undefined,
   now: TechCardFormData,
   detailSlotIds: readonly number[],
+  /**
+   * THE TARGET AND THE ROUTE (82-INPUT-REDESIGN §3.1): a different target or route is a different
+   * intent; a detail run's FRONT/BACK slots travel with their pictures (owner 06.10, answer 3).
+   */
+  intent?: {
+    target: string;
+    route: string;
+    flatSlotIds?: readonly number[];
+    /**
+     * 101 Ф3: WHAT THE SERVER SAID IT WOULD SEND (`PreviewDesignRunInputs`, same params). When it
+     * answered, the pictures of the intent are ITS list — refs in prompt order with their view, and
+     * the attached plates; a model label landing on a picture that stays home is not a new intent.
+     */
+    preview?: common_DesignInputSnapshot | null;
+  },
 ): unknown {
+  if (intent?.preview) {
+    const p = intent.preview;
+    const details = band
+      ? readBench(band, 'flat')
+          .details.filter((d) => detailSlotIds.includes(d.id ?? 0))
+          .map((d) => [d.id ?? 0, (d.detailName ?? '').trim()])
+          .sort((a, b) => (a[0] as number) - (b[0] as number))
+      : [];
+    return {
+      // M14 (Codex): the words are the server's own note below — the class line and the person's
+      // flat words as they travel. The description's prose and the fit are not sent to a flat, so an
+      // edit of them is the same request.
+      preview: {
+        refs: (p.refs ?? []).map((r) => [
+          r.mediaId ?? 0,
+          (r.role ?? '').trim(),
+          (r.note ?? '').trim(),
+          (r.callouts ?? []).map((c) => (c.text ?? '').trim()),
+        ]),
+        slots: (p.slots ?? []).map((x) => [
+          (x.viewKey ?? '').trim(),
+          x.slotId ?? 0,
+          x.mediaId ?? 0,
+        ]),
+        note: (p.garmentNote ?? '').trim(),
+      },
+      details,
+      target: intent.target,
+      route: intent.route,
+    };
+  }
   const refs = (band?.references ?? [])
     .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
     .map((r) => [
@@ -155,6 +256,15 @@ function flatSnapshot(
     ])
     .sort((a, b) => (a[0] as number) - (b[0] as number));
   const roled = new Set(refs.map((r) => r[0] as number));
+  // The mood pictures among the references: they travel as `mood`, so turning a picture into mood
+  // (or back) on the board is a new intent even when the references block did not move (c2).
+  const moodIds = moodPictureIds(now.moodboardMedia as { mediaId?: number; role?: string }[]);
+  const mood = (band?.references ?? [])
+    .filter((r) => moodIds.has(r.mediaId ?? 0))
+    .map((r) => [r.mediaId ?? 0, (r.role ?? '').trim(), r.ordinal ?? 0, (r.note ?? '').trim()])
+    .sort((a, b) => (a[0] as number) - (b[0] as number));
+  // A role-less reference on a mood picture travels too (as mood), with its callouts.
+  for (const m of mood) roled.add(m[0] as number);
   const callouts = ((now.callouts ?? []) as CalloutLike[]).filter((c) =>
     roled.has(c?.mediaId ?? 0),
   );
@@ -166,11 +276,36 @@ function flatSnapshot(
     : [];
   return {
     words: ((now.garmentDescription ?? '') as string).trim(),
+    human: flatHumanWords((now.flatWords ?? '') as string),
     fit: now.fit ?? '',
     refs,
+    mood,
     callouts,
     details,
+    // The join list is no input of a flat (M7): kept null so a fingerprint stays the one it was.
+    joins: null,
+    ...(intent
+      ? {
+          target: intent.target,
+          route: intent.route,
+          flatSlots: (intent.flatSlotIds ?? []).map((id) => [
+            id,
+            (band?.bench ?? []).find((b) => (b.id ?? 0) === id)?.pictureId ?? 0,
+          ]),
+        }
+      : {}),
   };
+}
+
+/**
+ * A FLAT RUN OF THIS CARD IS IN FLIGHT (91-LIVE D5, 82 §2 S4): GENERATE says so and waits — a second
+ * press would book a second paid run. Any flat run counts, the views or a detail.
+ */
+export function flatRunInFlight(band: Pick<GetDesignBandResponse, 'runs'> | undefined): boolean {
+  return (band?.runs ?? []).some(
+    // Archived too: archiving is presentational, a live archived run is still being paid for.
+    (r) => (r.kind ?? '').trim().toLowerCase() === 'flat' && isRunLive(r),
+  );
 }
 
 /** Сколько GENERATE ждёт незавершённых записей входа, прежде чем отказать (финальная сверка). */
@@ -186,7 +321,143 @@ const BAND_WRITES_WAIT_MS = 15_000;
 function isDigestWrite(variables: unknown): boolean {
   if (!variables || typeof variables !== 'object') return false;
   const v = variables as Record<string, unknown>;
-  return ('mediaId' in v && 'role' in v) || ('slot' in v && v.newDetailName !== undefined);
+  // M15: «remove from prompt» (`{ mediaId, held }`) moves what a flat sends exactly as a role does.
+  return (
+    ('mediaId' in v && ('role' in v || 'held' in v)) ||
+    ('slot' in v && v.newDetailName !== undefined)
+  );
+}
+
+/** M15 (109 §5, Q2): how long GENERATE waits for pictures just dropped into the input to be read. */
+const READING_WAIT_MS = 15_000;
+const READING_POLL_MS = 1_500;
+
+/**
+ * GENERATE AT PICTURES STILL BEING READ (109 §5, owner Q2): not forever, and not silently without the
+ * picture the person just put in. The press waits ≤ READING_WAIT_MS (`reading…`) for the pictures the
+ * input published (`readFlatReading`), re-reading the band; a model's proposal for a picture with no
+ * purpose is applied on the way (the board, which applies it elsewhere, is not mounted here) and
+ * saved, so the server's next read settles it. Returns the pictures it waited for and those still
+ * being read when it went (what is actually left out is said by the press's own preview, Codex M15),
+ * or `null` when the save of a proposal failed (nothing is started).
+ *
+ * «Still being read» is the tray's own rule (`inputStillReading`, owner 07.10): every round asks the
+ * press's OWN preview (`ask`), and a picture it does not send while holding it as `pending` /
+ * `unmarked` — or not naming it at all — is still waited for, even when the band's label already
+ * looks settled (the cheap model's proposal landed, the strong detail read has not). Before, the wait
+ * read the band alone, went at ~4 s, and the run left the picture out. No preview route (404/501) or
+ * a failed ask — the band's label word alone.
+ *
+ * THE 15 s ARE A DEADLINE, NOT A CHECK BETWEEN REQUESTS (Codex review, 07.10): every band read and
+ * every preview ask inside the wait runs against what is left of it. A stalled band read is
+ * cancelled (`cancelQueries`) and the wait goes with what it last knew; a stalled ask is aborted
+ * (its connection closed) and the round reads the band's word. GENERATE never sits on «reading…»
+ * past the deadline.
+ */
+async function waitForReading(opts: {
+  qc: QueryClient;
+  card: number;
+  form: ReturnType<typeof useFormContext<TechCardFormData>>;
+  flush: () => Promise<FlushResult>;
+  ask: (signal: AbortSignal) => Promise<PreviewDesignRunInputsResponse>;
+}): Promise<{ waited: number[]; left: number[] } | null> {
+  const { qc, card, form } = opts;
+  const ids = readFlatReading(card);
+  if (!ids.length) return { waited: [], left: [] };
+  patchFlatInput(card, { run: 'reading' });
+  const until = Date.now() + READING_WAIT_MS;
+  let lastLeft = ids;
+  for (;;) {
+    let band: GetDesignBandResponse;
+    try {
+      band = await beforeDeadline(rereadBand(qc, card), until, () => {
+        void qc.cancelQueries({ queryKey: designKeys.band(card) });
+      });
+    } catch {
+      // A read cancelled by the page's own refetch, or failed: the next round reads again — the
+      // wait is over only at the deadline, not at the first hiccup.
+      if (Date.now() >= until) return { waited: ids, left: lastLeft };
+      await new Promise((r) =>
+        window.setTimeout(r, Math.max(0, Math.min(READING_POLL_MS, until - Date.now()))),
+      );
+      continue;
+    }
+    const labels = labelsByMedia(band.references);
+    const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
+    const board = live.filter(isBoardRow);
+    const take = takeProposals(
+      card,
+      board.filter((i) => ids.includes(i.mediaId)),
+      labels,
+    );
+    if (take.length) {
+      let next = live;
+      for (const t of take) next = setBoardRole(next, t.mediaId, t.purpose);
+      form.setValue('moodboardMedia', next as TechCardFormData['moodboardMedia'], {
+        shouldDirty: true,
+      });
+      let saved: FlushResult;
+      try {
+        saved = await opts.flush();
+      } catch {
+        saved = 'error';
+      }
+      if (!flushAllowsRun(saved)) return null;
+    }
+    const now = ((form.getValues('moodboardMedia') ?? []) as BoardItem[]).filter(isBoardRow);
+    const purposeOf = new Map(now.map((i) => [i.mediaId, (i.role ?? '').trim()]));
+    let server: { sent: Set<number>; held: Map<number, string> } | null = null;
+    const abort = new AbortController();
+    try {
+      const answer = await beforeDeadline(opts.ask(abort.signal), until, () => abort.abort());
+      server = {
+        sent: new Set((answer.inputs?.refs ?? []).map((r) => r.mediaId ?? 0)),
+        held: new Map((answer.held ?? []).map((h) => [h.mediaId ?? 0, (h.reason ?? '').trim()])),
+      };
+    } catch {
+      server = null;
+    }
+    const slots = photoDetailSlots(band.bench);
+    const left = ids.filter(
+      (id) =>
+        purposeOf.has(id) &&
+        !server?.sent.has(id) &&
+        inputStillReading(
+          purposeOf.get(id) ?? '',
+          labels.get(id),
+          slots,
+          server ? server.held.get(id) : null,
+        ),
+    );
+    lastLeft = left;
+    if (!left.length || Date.now() >= until) return { waited: ids, left };
+    await new Promise((r) =>
+      window.setTimeout(r, Math.max(0, Math.min(READING_POLL_MS, until - Date.now()))),
+    );
+  }
+}
+
+/** `p`, or a rejection once `until` passes (`onExpire` cancels the request behind it). */
+function beforeDeadline<T>(p: Promise<T>, until: number, onExpire: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => {
+        onExpire();
+        reject(new Error('the reading wait ran out'));
+      },
+      Math.max(0, until - Date.now()),
+    );
+    p.then(
+      (v) => {
+        window.clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 /**
@@ -238,6 +509,8 @@ async function rereadBand(qc: QueryClient, card: number): Promise<GetDesignBandR
   const queryKey = designKeys.band(card);
   const queryFn = qc.getQueryCache().find({ queryKey, exact: true })?.options.queryFn;
   if (typeof queryFn !== 'function') throw new Error('the band is not read on this page');
+  // A fetch already in flight is not joined: it may be one that never answers (Codex 07.10).
+  await qc.cancelQueries({ queryKey, exact: true });
   return qc.fetchQuery({
     queryKey,
     queryFn: queryFn as QueryFunction<GetDesignBandResponse>,
@@ -251,35 +524,54 @@ export function FlatRunRow({
   band,
   techCardId,
   disabled,
+  thumbOf,
+  onSelection,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** The picture of a media id as the input already resolves it (library + band). */
+  thumbOf?: (mediaId: number) => string;
+  /** M13: told the target ▾ and the views params whenever they change (the INPUT's pictures). */
+  onSelection?: (selection: FlatSelection) => void;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
   const qc = useQueryClient();
   const startRun = useStartRun(techCardId);
   const { showMessage } = useSnackBarStore();
-  /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
-     рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
-     выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
-  const [views, setViews] = useState<Record<string, boolean>>(
-    () => readFlatInput(techCardId).ask?.views ?? { front: true, back: true },
-  );
-  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(
-    () => readFlatInput(techCardId).ask?.detailTicks ?? {},
-  );
-  /** «one picture» по умолчанию (T23, D-19): виды приходят одним листом и режутся сами (`autoSplit`). */
-  const [layout, setLayout] = useState<Layout>(
-    () => readFlatInput(techCardId).ask?.layout ?? 'one',
-  );
-  const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
-  const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
-  const tickedDetails = bench.details.filter((d) => (d.id ?? 0) > 0 && detailTicks[d.id ?? 0]);
-  const ticked: string[] = [...tickedSides, ...tickedDetails.map(() => DETAIL_VIEW)];
-  const tickedDetailIds: number[] = tickedDetails.map((d) => d.id ?? 0);
+  /* ЧЕРНОВИК — С ЗАПРОСА В ПОЛЁТЕ, ИНАЧЕ ПАМЯТЬ ВКЛАДКИ (ревью раунда 3, m2; гейт волны 3, W1): ряд,
+     вернувшийся после смены шага, рисует то, за что уже платят; ряд, не перемонтированный при смене
+     карточки, пересеивает выбор с новой карточки прямо в отрисовке. */
+  const [draft, setDraftState] = useState<FlatAsk>(() => flatDraftOf(techCardId));
+  const [draftCard, setDraftCard] = useState(techCardId);
+  if (draftCard !== techCardId) {
+    setDraftCard(techCardId);
+    setDraftState(flatDraftOf(techCardId));
+  }
+  const setDraft = (next: FlatAsk) => {
+    setDraftState(next);
+    rememberFlatDraft(techCardId, next);
+  };
+
+  const bench = useMemo(() => readBench(band, 'flat'), [band]);
+  const drafted = useDrafted();
+
+  /* ═══ TARGET ▾ (§1.1) — views first, then the details not drawn yet. */
+  const targets = useMemo(
+    () =>
+      flatTargets({
+        sides: bench.sides,
+        details: bench.details,
+        nameOf: (d) => displayDetailName(bench.details, d),
+        proposed: (id) => drafted.slotProposed(id),
+        stale: staleShown,
+      }),
+    [bench, drafted],
+  );
+  const target = settleTarget(draft.target, targets);
+  const detailId = targetSlotId(target);
 
   const wholeBench = useMemo(
     () => ({
@@ -290,65 +582,23 @@ export function FlatRunRow({
   );
   const marked = useMemo(() => markedPlatesOf(band, wholeBench), [band, wholeBench]);
 
-  /**
-   * ═══ МИНИМУМ МУДБОРДА — ТА ЖЕ ФРАЗА, ЧТО ЗАПИРАЕТ FLAT НА РЕЛЬСЕ (D-10, контракт `mood-gate`) ══
-   *
-   * Флэт, нарисованный с пустой доски и без категории, — флэт НИЧЕГО. Правило ОДНО и живёт в
-   * `core/mood-gate.ts` (что считается минимумом — картинка на доске, описание, категория — решает
-   * только оно; строки входа REFERENCE доской не считаются). Читает его ОДИН хук рельса
-   * (`useMoodMinimumGate`, заведён под эту кнопку), поэтому фраза отказа дословно та, что запирает
-   * FLAT на рельсе, и кнопка с рельсом не могут разойтись в «почему». Двери — туда, где отказ
-   * чинится: к доске, к описанию, к категории в CARD DETAILS. Открываются `openGateDoor`
-   * (`openStepOf`), а не `revealField`: это не ошибка поля, и красная пульсация после «отведи меня
-   * туда» читалась бы как «там что-то сломано».
-   *
-   * ГЕЙТ ЧИТАЮТ ДВАЖДЫ — в `gateReason` (кнопка и строка под ней) и в `submit` ПОСЛЕ ожидания
-   * сохранения: пока шёл `flush`, доска могла опустеть (правка отменена, другая вкладка сохранила
-   * раньше), и старт сверяется с гейтом, каким он стал. Второе чтение — из ФОРМЫ (`getValues`), а
-   * не из снимка отрисовки: ряд к тому моменту может быть размонтирован сменой шага, и снимок
-   * застыл бы на том, что было при щелчке (ревью раунда 2, MAJOR B).
-   *
-   * ДВЕРИ — ГЕЙТА, ПО ОДНОЙ НА НЕДОСТАЮЩУЮ ЧАСТЬ (`doors`, `core/chain.ts`): слова и адреса живут
-   * там же, где у рельса, и копии здесь больше нет (ревью m6).
-   */
+  /** МИНИМУМ МУДБОРДА — та же фраза, что запирает FLAT на рельсе (D-10, `core/mood-gate.ts`). */
   const mood = useMoodMinimumGate();
   const moodReason = mood.ok ? null : mood.reason;
   const moodDoors = mood.ok ? [] : mood.doors;
 
-  /**
-   * ═══ СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05) ══════════════
-   *
-   * Прогон читает СОХРАНЁННУЮ карточку: WORDS, засеянные секунду назад, и роль, выбранная только
-   * что, на сервер ещё не уехали, и модель получила бы вчерашний запрос за сегодняшние деньги.
-   * Поэтому GENERATE сначала ждёт `flush` и стартует только при `ok`/`nothing`/`off`; иначе —
-   * фраза контракта (`flushRefusalSentence`) стойкой строкой под рядом, не всплывашкой.
-   */
+  /** СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05). */
   const autosave = useTechCardAutosave();
-  /**
-   * Занятость и отказ — из модульного хранилища карточки (см. `FlatInputState`): вернувшийся после
-   * смены шага ряд видит `starting…` над идущим запросом и не пускает второй щелчок. `busy` держит
-   * GENERATE занятым от щелчка до ответа сервера одним куском — между «сохраняю» и «запускаю» нет
-   * ни кадра живой кнопки (ревью m1).
-   */
   const input = useFlatInput(techCardId);
   const busy = input.run !== null;
-  /**
-   * ИСХОД отказавшего сохранения, а не готовая фраза: фраза собирается при отрисовке, и число полей
-   * в ней — ТЕКУЩЕЕ (`errorsCount` после flush), а не снятое на щелчке, когда провал ещё не был
-   * известен (ревью m2).
-   */
+  /** A flat run of this card is drawing (D5): GENERATE pending until it ends. */
+  const inFlight = flatRunInFlight(band);
   const refused = input.refused;
-  /* Отказ снимается сам, как только карточка сохранилась: поправленное поле — это и есть ответ на
-     него, и строка отказа («fix 1 field first …») над сохранённой карточкой была бы неправдой. */
   useEffect(() => {
     if (autosave.status === 'saved' || autosave.status === 'idle') {
       patchFlatInput(techCardId, { refused: null });
     }
   }, [autosave.status, techCardId]);
-  /* КАРТОЧКА, КОТОРАЯ БОЛЬШЕ НЕ СОХРАНЯЕТСЯ (утверждена, только для чтения, автосейв выключен), не
-     сохранится и дальше — строка «до следующего сохранения» стояла бы вечно. Почему GENERATE молчит,
-     говорит замок ряда (`gateReason`: «this card is read-only»), второй строки не нужно (ревью раунда 3,
-     m7). Не рисуется с того же кадра, а снимается эффектом — без вспышки. */
   const saveless = !!disabled || autosave.status === 'off';
   useEffect(() => {
     if (saveless && refused !== null) patchFlatInput(techCardId, { refused: null });
@@ -364,15 +614,94 @@ export function FlatRunRow({
             'the card is not saved yet'
           : null;
 
-  /**
-   * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ (ревью m3). `invalid` — к первому полю с ошибкой: проверка громкая
-   * (человек сам попросил показать), путь — первый из `flattenFieldErrors`, показ — `revealField`
-   * (шаг студии он приносит сам). Поле, которого эта вкладка не рисует, и прочие исходы — к чипу
-   * сохранения в шапке (`save-status-chip.tsx`, зона CL-A): его поповер говорит причину целиком.
-   * Сохранять там нечем (O-60, D-59): упавшая запись повторяется сама, а решения — подтвердить
-   * перевод в auxiliary, решить конфликт — ведёт слово чипа рядом с `▾`.
-   */
   const form = useFormContext<TechCardFormData>();
+  /* M10: the one line of words a flat sends — «garment: <class>» — names the card's category NOW. */
+  const garmentClass = useGarmentClass();
+
+  /* ═══ THE CARD'S TECHNICAL FLATS — what «from my flat» redraws (the server accepts only these). */
+  const techRows = useWatch({ control: form.control, name: 'technicalMedia' });
+  const techIds = useMemo(
+    () =>
+      [...new Set(((techRows ?? []) as { mediaId?: number }[]).map((r) => r?.mediaId ?? 0))].filter(
+        (id) => id > 0,
+      ),
+    [techRows],
+  );
+  const { data: techCard } = useTechCard(techCardId > 0 ? techCardId : undefined);
+  const techThumb = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const rm of techCard?.resolvedTechnicalMedia ?? []) {
+      const id = rm.media?.id ?? 0;
+      const url = rm.media?.media?.thumbnail?.mediaUrl || rm.media?.media?.fullSize?.mediaUrl || '';
+      if (id > 0 && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard?.resolvedTechnicalMedia]);
+  /** The toggle stands only for the views, and only when the card has a technical flat. */
+  const myFlatOffered = techIds.length > 0 && detailId === 0;
+  const fromMyFlat = myFlatOffered && draft.fromMyFlat;
+  const structureNow = fromMyFlat ? liveStructure(draft.structure, techIds) : [];
+  /** The toggle was on and the card's flats are gone: said, and the route falls back. */
+  const myFlatGone = draft.fromMyFlat && detailId === 0 && techIds.length === 0;
+  const toggleMyFlat = () => {
+    if (fromMyFlat) setDraft({ ...draft, fromMyFlat: false, structure: [] });
+    else
+      setDraft({
+        ...draft,
+        fromMyFlat: true,
+        structure:
+          liveStructure(draft.structure, techIds).length > 0
+            ? liveStructure(draft.structure, techIds)
+            : autoStructure(techIds),
+      });
+  };
+
+  /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
+  const route = routeOf({ target, fromMyFlat, structure: structureNow.length });
+
+  /* M13 · THE INPUT'S PICTURES ARE THE SERVER'S ANSWER FOR THESE VERY PARAMS. The views press as it
+     would go with `views` on the target ▾ — the same builder as GENERATE and the modal, so on the
+     views target it IS the press. Told before paint: the tiles never show the other target. */
+  const viewsFromMyFlat = techIds.length > 0 && draft.fromMyFlat;
+  const viewsStructure = viewsFromMyFlat ? liveStructure(draft.structure, techIds) : [];
+  const viewsParams = flatRunParams(
+    0,
+    modeOfRoute(
+      routeOf({
+        target: VIEWS_TARGET,
+        fromMyFlat: viewsFromMyFlat,
+        structure: viewsStructure.length,
+      }),
+    ),
+    viewsStructure,
+  );
+  const selectionKey = JSON.stringify([target, viewsParams]);
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
+  useLayoutEffect(() => {
+    const [t, views] = JSON.parse(selectionKey) as [FlatTarget, common_DesignRunParams];
+    onSelectionRef.current?.({ target: t, views });
+  }, [selectionKey]);
+
+  const writesOff = !!disabled || !speaks;
+  /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте (ревью MAJOR), и пока CLEAR. */
+  const choiceOff = writesOff || busy || input.clearing;
+  const gateReason = !speaks
+    ? 'this server does not speak the design band yet — nothing can be generated here'
+    : disabled
+      ? 'this card is read-only'
+      : input.clearing || input.rewriting > 0
+        ? 'the prompt is being changed — generate once it is done'
+        : moodReason
+          ? moodReason
+          : fromMyFlat && structureNow.length === 0
+            ? 'pick a front or back flat'
+            : null;
+
+  /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
+  const cardNow = useRef(techCardId);
+  cardNow.current = techCardId;
+
   const openSaveDoor = async () => {
     if (refused === 'invalid') {
       await form.trigger();
@@ -388,82 +717,33 @@ export function FlatRunRow({
     chip.querySelector<HTMLElement>('[aria-haspopup]')?.click();
   };
 
-  /* ЧИПЫ ДЕТАЛЕЙ, КОТОРЫЕ ПРЕДЛОЖИЛ ЧЕРНОВИК (26.09, O-34): синие, пока слот не принят, — по тому же
-     журналу, что и слот на бенче (`slotProposed`); своего состояния у ряда нет. */
-  const drafted = useDrafted();
-
-  const writesOff = !!disabled || !speaks;
-  /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте: `submit` берёт виды и раскладку
-     на щелчке, и открытые чипы дали бы прогону не то, что на экране (ревью MAJOR). И пока CLEAR
-     снимает роли — промпт в этот момент наполовину старый. */
-  const choiceOff = writesOff || busy || input.clearing;
-  const noViews = ticked.length === 0;
-  /* Ряд (`GenerateRow`) сам спрашивает `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку;
-     ветка ниже остаётся ЗАМКОМ ПРОВОДА: `submit` заперт этой же переменной. */
-  const gateReason = !speaks
-    ? 'this server does not speak the design band yet — nothing can be generated here'
-    : disabled
-      ? 'this card is read-only'
-      : input.clearing || input.rewriting > 0
-        ? 'the prompt is being changed — generate once it is done'
-        : moodReason
-          ? moodReason
-          : noViews
-            ? 'no views ticked — tick at least one'
-            : null;
-
+  /** GENERATE. */
   const submit = async () => {
     const card = techCardId;
-    if (gateReason || !mood.ok || card <= 0) return;
-    // Занятость — из хранилища В МОМЕНТ щелчка, а не из снимка отрисовки: два щелчка в одном кадре
-    // и щелчок по ряду, вернувшемуся к идущему запросу, отказываются одинаково.
+    if (gateReason || !mood.ok || card <= 0 || inFlight) return;
     if (flatInputBusy(readFlatInput(card))) return;
-    /* АВТОСЕЙВ БЫЛ ЖИВ НА ЩЕЛЧКЕ? (ревью раунда 3, m3). Выключенный или уничтоженный автосейв (уход со
-       страницы посреди flush, утверждение) отвечает `off`, а `off` пропускает прогон — и для записи, у
-       которой автосейва нет вовсе, так и надо. Но если на щелчке он был ЖИВ, `off` после ожидания
-       значит «сохранение остановилось»: прогон по несохранённой карточке не стартует. */
     const wasOn = autosave.status !== 'off';
-    // Запрос — то, что на экране В МОМЕНТ щелчка; на время ожидания выбор заперт (`choiceOff`), а
-    // сам выбор лежит в хранилище карточки: ряд, вернувшийся после смены шага, рисует его (m2).
-    const ask: FlatAsk = { views: { ...views }, detailTicks: { ...detailTicks }, layout };
-    const params: common_DesignRunParams = {
-      views: [...ticked],
-      detailSlotIds: [...tickedDetailIds],
-      layout,
-      colorwayId: 0,
-      colour: undefined,
-      threed: undefined,
-      fixTarget: '',
-      fixTargets: [],
-      fixSlotIds: [],
-      autoSplit: layout === 'one' && ticked.length >= 2,
-      pattern: undefined,
-      // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
-      // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
-      freeform: undefined,
-      /* ПЛИТЫ ВЕРСТАКА В ПРОГОН ФЛЭТА НЕ ЕДУТ (T24, D-20): дверь `also send the flat slots` снята
-         владельцем вместе с лентой плит. `false` — СКАЗАНО, а не опущено: пустой `flat_slot_ids`
-         при включённом флаге значил бы «все» (`design.proto`), и старый флаг из хранилища вкладки
-         не должен дожить до платного запроса. */
-      useFlatSlots: false,
-      flatSlotIds: [],
-      extraInputMediaIds: [],
-      image: undefined,
-      inpaint: undefined,
-      extend: undefined,
-      video: undefined,
-    };
-    patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
+    const ask: FlatAsk = { target, fromMyFlat, structure: [...structureNow] };
+    patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask, leftOut: 0 });
     let refusal: ServerRefusal | null = null;
     try {
-      // D-20'''': засев, показанный в пустом поле, уходит в форму «грязным» ДО flush — эта запись его
-      // и понесёт, прогон прочтёт его из сохранённой карточки.
+      const brief = await settleSeedBrief(card);
+      if (brief === 'busy') return;
+      if (brief === 'waited' && (cardNow.current !== card || !cardOnScreen(card))) return;
       materializeWords(card, form, wasOn && !disabled);
+      // M10: a seeded class line left behind by a category change goes with this save, so the run
+      // (which reads the SAVED card) names the category on screen; a written class stays. The
+      // category is read NOW, not at the click: the brief above may have waited (Codex M10).
+      if (wasOn && !disabled) {
+        const was = (form.getValues('garmentDescription') ?? '') as string;
+        const cls = garmentClass.classOf(Number(form.getValues('categoryId') ?? 0));
+        const next = followCategory(was, cls, garmentClass.seeded);
+        if (next !== was) form.setValue('garmentDescription', next, { shouldDirty: true });
+      }
       let saved: FlushResult;
       try {
         saved = await autosave.flush('flat');
       } catch {
-        // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
         saved = 'error';
       }
       if (saved === 'off' && wasOn) {
@@ -476,13 +756,6 @@ export function FlatRunRow({
         patchFlatInput(card, { refused: saved });
         return;
       }
-      /* ПОСЛЕ ОЖИДАНИЯ — ТОЛЬКО СВЕЖИЕ ЧТЕНИЯ (ревью раунда 2, MAJOR B). Ряд мог быть размонтирован
-         сменой шага: форма живёт в `index.tsx` и отвечает сейчас, снимки отрисовки — нет.
-         · Утверждение, пришедшее во время flush, выключает автосейв, и flush отвечает `off` —
-           `flushAllowsRun` его пропускает; прогон по замороженной карточке не стартует.
-         · Сервер полосы — из кэша её чтения (`serverSpeaksNow`): контекст возможностей — хук, и
-           после `await` его не спросить.
-         · Минимум доски — тем же правилом, что у рельса, по значениям формы. */
       const now = form.getValues();
       if (now.approvalState === RELEASED) {
         patchFlatInput(card, { refused: 'released' });
@@ -494,21 +767,40 @@ export function FlatRunRow({
         concept: now.concept,
         categoryId: now.categoryId,
       });
-      // Отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
       if (!gateNow.ok) return;
-      /* РОЛИ ДЛЯ ОТПЕЧАТКА — СВЕЖИМ ЧТЕНИЕМ (ревью раунда 4, MAJ-1). Кэш полосы отстаёт от каждой
-         записи роли на одно перечитывание: `mutateAsync` отвечает раньше, чем перечитывание приходит.
-         GENERATE, нажатый в это окно, взял бы в отпечаток СТАРЫЕ роли, а сервер заморозил бы НОВЫЕ; и
-         после потерянного ответа повтор (кэш уже свежий) получил бы другой id — второй платный
-         прогон за то же. Поэтому: дождаться записей полосы этой карточки, перечитать полосу и брать
-         роли из этого чтения. */
       if (!(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS))) {
         if (cardOnScreen(card)) {
           showMessage('the input is still being saved — try again; nothing was started', 'error');
         }
         return;
       }
-      let freshBand: GetDesignBandResponse | undefined;
+      /* M15 Q2: pictures just dropped into the input are given ≤15 s to be read; what is still
+         being read after that stays out of this run, and the row says so. */
+      // The params this press will send (the same as below): the wait asks ITS preview.
+      const waitParams = flatRunParams(
+        targetSlotId(target),
+        modeOfRoute(routeOf({ target, fromMyFlat, structure: structureNow.length })),
+        structureNow,
+      );
+      const reading = await waitForReading({
+        qc,
+        card,
+        form,
+        flush: () => autosave.flush('flat'),
+        ask: (signal) =>
+          abortableAdminService(signal).PreviewDesignRunInputs({
+            techCardId: card,
+            kind: 'flat',
+            params: waitParams,
+          }),
+      });
+      if (reading === null) {
+        patchFlatInput(card, { refused: 'error' });
+        return;
+      }
+      patchFlatInput(card, { run: 'saving' });
+      if (cardNow.current !== card || !cardOnScreen(card)) return;
+      let freshBand: GetDesignBandResponse;
       try {
         freshBand = await rereadBand(qc, card);
       } catch {
@@ -517,32 +809,131 @@ export function FlatRunRow({
         }
         return;
       }
+      // D5: a flat run started meanwhile (another tab, or this press's band not re-read yet).
+      if (flatRunInFlight(freshBand)) {
+        if (cardOnScreen(card)) {
+          showMessage('a flat run is already drawing — nothing was started', 'error');
+        }
+        return;
+      }
+      const fresh = readBench(freshBand, 'flat');
+      const freshRoute: FlatRoute = routeOf({ target, fromMyFlat, structure: structureNow.length });
+      if (freshRoute === 'hand_flat') {
+        const onCard = new Set(
+          ((form.getValues('technicalMedia') ?? []) as { mediaId?: number }[]).map(
+            (r) => r?.mediaId ?? 0,
+          ),
+        );
+        if (structureNow.some((r) => !onCard.has(r.mediaId))) {
+          refusal = localRefusal('structure_gone');
+          return;
+        }
+      }
+      const slotId = targetSlotId(target);
+      /* The FRONT and BACK a detail agrees with: the server attaches their plates itself (T8); here
+         they only gate the press and travel in the fingerprint (other views = another intent). */
+      const flatSlotIds = slotId > 0 ? detailFlatSlotIds(fresh.sides) : [];
+      if (slotId > 0 && flatSlotIds.length < 2) {
+        refusal = localRefusal('views_first');
+        return;
+      }
+      const params = flatRunParams(slotId, modeOfRoute(freshRoute), structureNow);
+      /* THE FINGERPRINT IS THE SERVER'S LIST (101 Ф3): what this very request would freeze. A server
+         without the route (404/501) — the band's labels stand in, as before the preview existed; any
+         other failure stops the press: nothing was started (Codex Ф3). */
+      let preview: common_DesignInputSnapshot | null = null;
+      try {
+        const answer = await adminService.PreviewDesignRunInputs({
+          techCardId: card,
+          kind: 'flat',
+          params,
+        });
+        preview = answer.inputs ?? null;
+        /* WHAT IS LEFT OUT IS THE SERVER'S WORD (Codex M15): of the pictures the press waited for,
+           those this very snapshot does not send and holds as still being read (or with no purpose
+           yet) — a label that settled after the wait is not «left out». */
+        /* By the SAME rule the wait used (`inputStillReading`, Codex review 07.10): a picture this
+           snapshot neither sends nor names in `held` is still being read too — counting only the
+           explicit `pending` / `unmarked` rows let it go missing with no word. */
+        const sent = new Set((preview?.refs ?? []).map((r) => r.mediaId ?? 0));
+        const heldOf = new Map(
+          (answer.held ?? []).map((h) => [h.mediaId ?? 0, (h.reason ?? '').trim()]),
+        );
+        const labelsNow = labelsByMedia(freshBand.references);
+        const slotsNow = photoDetailSlots(freshBand.bench);
+        const purposeNow = new Map(
+          ((form.getValues('moodboardMedia') ?? []) as BoardItem[])
+            .filter(isBoardRow)
+            .map((i) => [i.mediaId, (i.role ?? '').trim()]),
+        );
+        patchFlatInput(card, {
+          leftOut: reading.waited.filter(
+            (id) =>
+              purposeNow.has(id) &&
+              !sent.has(id) &&
+              inputStillReading(
+                purposeNow.get(id) ?? '',
+                labelsNow.get(id),
+                slotsNow,
+                heldOf.get(id),
+              ),
+          ).length,
+        });
+      } catch (e) {
+        if (!isUnimplemented(e)) {
+          if (cardOnScreen(card)) {
+            showMessage(
+              'could not read what the model gets — nothing was started; try again',
+              'error',
+            );
+          }
+          return;
+        }
+        // A server without the preview: the wait's own count.
+        patchFlatInput(card, { leftOut: reading.left.length });
+      }
+      if (flatRunInFlight(freshBand)) {
+        if (cardOnScreen(card)) {
+          showMessage('a flat run is already drawing — nothing was started', 'error');
+        }
+        return;
+      }
       patchFlatInput(card, { run: 'starting' });
-      // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
-      // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
       refusal = await startRun.start({
         kind: 'flat',
         ask: '',
         params,
-        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? []),
+        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? [], {
+          target,
+          route: freshRoute,
+          flatSlotIds,
+          preview,
+        }),
       });
+      // M8: another tab started a flat run of this card — re-read, so GENERATE shows it drawing.
+      if (refusal?.reason === 'flat_run_in_flight') {
+        void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+      }
     } finally {
-      // Отказ сервера — в хранилище карточки, до прочтения или следующего GENERATE; с ним остаются
-      // чипы отказанного запроса. Без отказа запрос отпущен.
       patchFlatInput(card, { run: null, serverRefusal: refusal, ask: refusal ? ask : null });
     }
   };
 
+  /**
+   * GENERATE PRESSED (T70): the pictures with no role are asked about first — the quiz opens above
+   * the row and nothing is sent; its last answer calls `submit` with the same options.
+   */
+  const press = () => {
+    if (gateReason || !mood.ok || techCardId <= 0 || inFlight) return;
+    if (flatInputBusy(readFlatInput(techCardId))) return;
+    void submit();
+  };
+
+  const targetItems = targets;
+  const selectTitle = targetItems.find((t) => t.value === target)?.title ?? '';
+
   return (
-    /* ═══ ДВА РЯДА, ОДИН ЗАЗОР, ОДИН РОСТ ОРГАНОВ (r3 п.5; ряд источников снят D-20) ══════════
-       Владелец: «сделать по уму … три спокойных ряда … дай больше спейсинга». Ряды идут в его
-       порядке: виды → запуск (средний ряд источников снят владельцем в волне 25.09). Зазор —
-       12px, ТОТ ЖЕ ШАГ, что `GROUP_GAP` («линейка группы → содержимое», `core/organs.tsx`):
-       между полосами одного решения он обязан быть тем же, что между подписью и её содержимым,
-       и меньше шва между блоками (16px у секции).
-       Классом `GROUP_GAP` его не выразить — тот margin-bottom на подписи, а здесь нужен ритм
-       между рядами; поэтому шаг один, а написаний два, и оба названы здесь. */
-    <div data-flat-run='' className='space-y-3'>
+    <div data-flat-run='' data-flat-route={route} className='space-y-3'>
       {!speaks && (
         <CalloutBox tone='note'>
           this server does not speak the design band yet — the controls are here, but nothing can be
@@ -550,119 +941,137 @@ export function FlatRunRow({
         </CalloutBox>
       )}
 
-      {/* ═══ РЯД 1 · ВИДЫ — ярлык, чипы сторон и деталей, справа раскладка ответа ═══════════════
-          Отмеченный чип заливается чернилами — это и есть состояние; «слот заполнен / пуст»
-          живёт в title, потому что лента FLAT SLOTS стоит на той же вкладке и показывает то же
-          глазами. Раскладка имеет смысл от двух видов; при одном она ничего не меняет и молчит
-          (`title`), а не пропадает: положение переключателя — предпочтение, оно переживает галки.
-          Ярлык `views` — единственный текст ряда; рост у чипов и у полосы раскладки тот же, что у
-          кнопок двух рядов ниже (`ROW_CONTROL_STYLE`). */}
-      <div className='flex flex-wrap items-center gap-2' data-flat-views=''>
-        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          views
-        </Text>
-        <ChipRow>
-          {ACTIVE_VIEWS.map((view) => {
-            const on = !!views[view];
-            const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
-            const slotFilled = (slot?.pictureId ?? 0) > 0;
-            return (
-              <Chip
-                key={view}
-                selected={on}
-                pressed={on}
-                disabled={choiceOff}
-                style={ROW_CONTROL_STYLE}
-                title={
-                  slotFilled
-                    ? 'its flat slot below is already filled'
-                    : 'its flat slot below is empty'
-                }
-                onClick={() => setViews((prev) => ({ ...prev, [view]: !prev[view] }))}
-              >
-                {viewLabel(view)}
-              </Chip>
-            );
-          })}
-          {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
-          {bench.details.map((d) => {
-            const id = d.id ?? 0;
-            if (id <= 0) return null;
-            const on = !!detailTicks[id];
-            const proposed = drafted.slotProposed(id);
-            return (
-              <Chip
-                key={`d:${id}`}
-                selected={on}
-                pressed={on}
-                disabled={choiceOff}
-                tone={proposed ? 'attention' : undefined}
-                data-proposed={proposed || undefined}
-                style={ROW_CONTROL_STYLE}
-                title={
-                  proposed
-                    ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
-                    : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
-                }
-                onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
-              >
-                detail · {displayDetailName(bench.details, d)}
-              </Chip>
-            );
-          })}
-        </ChipRow>
-        {/* ПЕРЕКЛЮЧАТЕЛЬ РАСКЛАДКИ — В КОНЦЕ ТОГО ЖЕ РЯДА (слово владельца), и рост ему задаёт
-            обёртка: у самой полосы сегменты растянуты (`items-stretch`), поэтому высоту довольно
-            назвать один раз снаружи. */}
-        <span
-          className='ml-auto flex'
-          style={ROW_CONTROL_STYLE}
-          title={
-            ticked.length <= 1
-              ? 'one view is asked — both layouts return one picture, so this changes nothing here'
-              : undefined
-          }
-        >
-          <ViewSwitch
-            label='layout'
-            value={layout}
-            options={LAYOUT_OPTIONS}
-            disabled={choiceOff}
-            onChange={setLayout}
-            className='h-full'
-          />
-        </span>
-      </div>
-
-      {/* ═══ РЯД 2 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
-          названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
-          хвост здесь свой — только дверь описи рядом с GENERATE (O-37: строки денег нет).
-          `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
+      {/* Z3 · THE RUN ROW. `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
           gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
-          pending={busy}
-          onGenerate={() => void submit()}
+          pending={busy || inFlight}
+          pendingLabel={
+            inFlight && !busy ? 'drawing…' : input.run === 'reading' ? 'reading…' : undefined
+          }
+          onGenerate={() => press()}
           trailing={
             <>
-              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
-                  до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке).
-                  ⚠ ЭТА ДВЕРЬ СТОИТ РЯДОМ С GENERATE, А НЕ У ПРАВОГО КРАЯ (R2 п.20), слово
-                  владельца: «WHAT THE MODEL GETS ▸ помести рядом с GENERATE». Прежний `ml-auto`
-                  разносил две двери одного решения по краям ряда, и глаз шёл через всю ширину
-                  блока за ответом на вопрос «а что именно уедет». Правило макета («дверь описи у
-                  правого края») остаётся у остальных четырёх рядов — они этот хвост не рисуют. */}
+              {/* T69 (06.10): «дропдаун не системный а с нашим дизайном и в размер кнопки генерейт» —
+                  общий Radix-список (`ui/components/select`), коробка ровно с GENERATE по высоте. */}
+              <span className='inline-flex shrink-0' data-flat-target={target} title={selectTitle}>
+                <Select
+                  name='flat-target'
+                  placeholder='what to draw'
+                  items={targetItems.map((t) => ({
+                    value: t.value,
+                    label: t.label,
+                    disabled: t.disabled,
+                  }))}
+                  value={target}
+                  disabled={choiceOff}
+                  onValueChange={(v: string) => setDraft({ ...draft, target: v })}
+                  className='!min-h-0 h-[26px] min-w-[9rem] !py-0 text-micro uppercase tracking-label'
+                  itemClassName='text-micro uppercase tracking-label'
+                />
+              </span>
+              {myFlatOffered && (
+                <Chip
+                  data-flat-myflat={fromMyFlat ? 'on' : 'off'}
+                  selected={fromMyFlat}
+                  pressed={fromMyFlat}
+                  disabled={choiceOff}
+                  style={ROW_CONTROL_STYLE}
+                  title={
+                    fromMyFlat
+                      ? 'your technical flats are redrawn clean · click: draw from the photos'
+                      : 'redraw your own technical flats clean instead of reading the photos'
+                  }
+                  onClick={toggleMyFlat}
+                >
+                  from my flat
+                </Chip>
+              )}
+              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — рядом с GENERATE (R2 п.20). */}
               <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
                 <ControlLabel>what the model gets ▸</ControlLabel>
               </Button>
             </>
           }
         />
+        {/* «FROM MY FLAT»: the card's technical flats, each one front or back (one per side). */}
+        {fromMyFlat && (
+          <div data-flat-structure='' className='flex flex-wrap items-start gap-3 pt-1'>
+            {techIds.map((id) => {
+              const role = structureNow.find((p) => p.mediaId === id)?.role ?? '';
+              const url = techThumb.get(id) || thumbOf?.(id) || '';
+              return (
+                <div
+                  key={id}
+                  data-flat-structure-tile={id}
+                  data-structure-role={role}
+                  className='flex flex-col items-center gap-1'
+                >
+                  <div
+                    className={cn(
+                      'flex size-16 items-center justify-center border bg-bgColor',
+                      role ? 'border-textColor' : 'border-borderColor',
+                    )}
+                  >
+                    {url ? (
+                      <img src={url} alt='' className='size-full object-contain' />
+                    ) : (
+                      <Text size='micro' variant='label' component='span'>
+                        #{id}
+                      </Text>
+                    )}
+                  </div>
+                  <span className='flex gap-2'>
+                    {STRUCTURE_ROLES.map(({ role: r, label }) => (
+                      <button
+                        key={r}
+                        type='button'
+                        data-structure-pick={r}
+                        aria-pressed={role === r}
+                        disabled={choiceOff}
+                        title={role === r ? `the ${label} · click: neither` : `use as the ${label}`}
+                        onClick={() =>
+                          setDraft({ ...draft, structure: pickStructure(structureNow, id, r) })
+                        }
+                        className={cn(
+                          'text-nano uppercase tracking-label',
+                          role === r
+                            ? 'text-textColor'
+                            : 'text-labelColor underline hover:text-textColor',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* ОТКАЗ МИНИМУМА МУДБОРДА — СЛОВАМИ И С ДВЕРЬЮ, А НЕ ТОЛЬКО ПОГАШЕННОЙ КНОПКОЙ. Погашенный
-          GENERATE держит повод в `title`, то есть по наведению; здесь он же стоит строкой, и рядом —
-          дверь туда, где он чинится. Только на карточке, которую можно писать. */}
+      {/* Z4 · ONE LINE UNDER THE ROW: why GENERATE waits, and the one door that moves it on. */}
+      {input.leftOut > 0 && !busy && (
+        <Text
+          size='nano'
+          variant='label'
+          component='p'
+          className='uppercase tracking-label'
+          data-flat-left-out={input.leftOut}
+        >
+          {input.leftOut === 1
+            ? '1 picture was still being read · not in this run'
+            : `${input.leftOut} pictures were still being read · not in this run`}
+        </Text>
+      )}
+      {myFlatGone && (
+        <div data-flat-myflat-gone=''>
+          <LockBar reason='your flat was removed — drawing from photos' />
+        </div>
+      )}
+
+      {/* ОТКАЗ МИНИМУМА МУДБОРДА — СЛОВАМИ И С ДВЕРЬЮ. */}
       {moodReason && speaks && !disabled && (
         <div data-flat-mood-gate=''>
           <LockBar reason={moodReason}>
@@ -680,12 +1089,10 @@ export function FlatRunRow({
           </LockBar>
         </div>
       )}
-      {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). Стойкая строка до следующей
-          попытки: исправление («поправь поле») — не новое нажатие, и всплывашка ушла бы раньше. */}
+      {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). */}
       {refusalSentence && (
         <div data-flat-flush-refusal=''>
           <LockBar reason={`${refusalSentence} — nothing was started, nothing was charged`}>
-            {/* Утверждённой карточке чинить нечего — двери нет. */}
             {refused !== 'released' && (
               <Button
                 variant='secondary'
@@ -699,7 +1106,6 @@ export function FlatRunRow({
           </LockBar>
         </div>
       )}
-      {/* МЕТКИ НЕ ЕДУТ, И СКАЗАНО ЭТО ТАМ, ГДЕ ТРАТЯТСЯ ДЕНЬГИ. Рисуется только пока метки есть. */}
       {marked.length > 0 && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
@@ -709,25 +1115,48 @@ export function FlatRunRow({
           </Text>
         </CalloutBox>
       )}
-      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), тот же орган, что у FABRIC RENDER
-          и 3D: слова сервера дословно, «nothing was charged» только когда сервер ОТВЕТИЛ. */}
-      <RunRefusal
-        refusal={input.serverRefusal}
-        onDismiss={() =>
+      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E). */}
+      {(() => {
+        const dismiss = () =>
           patchFlatInput(
             techCardId,
             readFlatInput(techCardId).run === null
               ? { serverRefusal: null, ask: null }
               : { serverRefusal: null },
-          )
-        }
-      />
+          );
+        const short = flatRefusalWords(input.serverRefusal?.reason);
+        return short ? (
+          <CalloutBox tone='error'>
+            <div
+              data-flat-refusal={input.serverRefusal?.reason}
+              className='flex items-center gap-2'
+            >
+              <Text size='micro' component='span' className='min-w-0 flex-1 normal-case'>
+                <b>not started</b> · {short}
+              </Text>
+              <button
+                type='button'
+                onClick={dismiss}
+                className='shrink-0 text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              >
+                <Text size='nano' variant='uppercase' tracking='label' component='span'>
+                  dismiss
+                </Text>
+              </button>
+            </div>
+          </CalloutBox>
+        ) : (
+          <RunRefusal refusal={input.serverRefusal} onDismiss={dismiss} />
+        );
+      })()}
       <WhatModelGetsModal
         open={wmgOpen}
         onOpenChange={setWmgOpen}
         band={band}
         techCardId={techCardId}
         readOnly={!!disabled}
+        detail={detailId > 0}
+        params={flatRunParams(detailId, modeOfRoute(route), structureNow)}
       />
     </div>
   );

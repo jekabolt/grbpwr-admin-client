@@ -24,12 +24,7 @@ export function arcControlPoint(p0: ShapePoint, p1: ShapePoint, p2: ShapePoint):
 }
 
 /** Точка квадратичной кривой Безье при параметре t — используется пробой и ничем больше. */
-export function quadraticAt(
-  p0: ShapePoint,
-  c: ShapePoint,
-  p2: ShapePoint,
-  t: number,
-): ShapePoint {
+export function quadraticAt(p0: ShapePoint, c: ShapePoint, p2: ShapePoint, t: number): ShapePoint {
   const u = 1 - t;
   return {
     x: u * u * p0.x + 2 * u * t * c.x + t * t * p2.x,
@@ -329,10 +324,7 @@ function strokePath(pts: ShapePoint[]): string {
  * штрих, и `strokePath` отработает как прежний `inkPath`.
  */
 export function inkPath(pts: ShapePoint[]): string {
-  return splitInkStrokes(pts)
-    .map(strokePath)
-    .filter(Boolean)
-    .join(' ');
+  return splitInkStrokes(pts).map(strokePath).filter(Boolean).join(' ');
 }
 
 /** Расстояние от точки до ОТРЕЗКА (не до прямой) плюс параметр проекции на нём. */
@@ -428,4 +420,236 @@ export function simplifyToLimit(pts: ShapePoint[], limit: number, start = 0.002)
   const out: ShapePoint[] = [];
   for (let i = 0; i < limit; i++) out.push(pts[Math.round(i * step)]);
   return out;
+}
+
+// ── ВАРП КАРТИНКИ АРТВОРКА НА ЧЕТЫРЕ РУЧКИ (R20) ────────────────────────────────────────────────
+//
+// Владелец: «картинка когда добавляется в принт она должна помещатся внутрь подвижных штук и
+// варпаться вместе с ними». Зона артворка — четыре точки в порядке `rectCorners` (TL, TR, BR, BL);
+// углы картинки садятся РОВНО на них, середина — по проективному преобразованию.
+//
+// ОДИН ЭЛЕМЕНТ, CSS `matrix3d` (T27, R35; владелец: «оно очень лагает»). Прежде проекция
+// приближалась сеткой 10×10 аффинных треугольников — 200 <clipPath> и 200 <image> на каждое
+// движение ручки. Теперь это одна <img> с проективной матрицей: Chrome рисует её точно, в том числе
+// на печати (Skia умеет перспективу и без композитора — проверено снимком PDF, shots/27-print*).
+//
+// ТОЛЬКО ВЫПУКЛАЯ ЗОНА (R34; владелец: «так быть не должно» — угол утянули внутрь, и проекция
+// выбросила лучи далеко за кадр). У выпуклого четырёхугольника знаменатель проекции на всём
+// квадрате положителен, и картинка лежит строго внутри зоны; у вогнутого или перекрученного он
+// проходит через ноль. Поэтому зона обязана быть `quadIsSound`, а ручка, которая её вывернула бы,
+// упирается (`clampQuadCorner`).
+
+/** Коэффициенты проекции единичного квадрата на четырёхугольник: x=(a·u+b·v+c)/w, w=g·u+h·v+1. */
+export type Homography = {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+  g: number;
+  h: number;
+};
+
+/**
+ * Проекция единичного квадрата (0,0)→q0, (1,0)→q1, (1,1)→q2, (0,1)→q3 (Heckbert). У параллелограмма
+ * g = h = 0 — это обычный аффин. `null` — вырожденный четырёхугольник (три точки на прямой).
+ */
+export function squareToQuad(q: ShapePoint[]): Homography | null {
+  if (q.length !== 4) return null;
+  const [p0, p1, p2, p3] = q;
+  const dx1 = p1.x - p2.x;
+  const dx2 = p3.x - p2.x;
+  const dx3 = p0.x - p1.x + p2.x - p3.x;
+  const dy1 = p1.y - p2.y;
+  const dy2 = p3.y - p2.y;
+  const dy3 = p0.y - p1.y + p2.y - p3.y;
+  let g = 0;
+  let h = 0;
+  if (Math.abs(dx3) > 1e-12 || Math.abs(dy3) > 1e-12) {
+    const den = dx1 * dy2 - dx2 * dy1;
+    if (Math.abs(den) < 1e-12) return null;
+    g = (dx3 * dy2 - dx2 * dy3) / den;
+    h = (dx1 * dy3 - dx3 * dy1) / den;
+  }
+  const H = {
+    a: p1.x - p0.x + g * p1.x,
+    b: p3.x - p0.x + h * p3.x,
+    c: p0.x,
+    d: p1.y - p0.y + g * p1.y,
+    e: p3.y - p0.y + h * p3.y,
+    f: p0.y,
+    g,
+    h,
+  };
+  // Аффинная часть обязана быть обратимой, иначе квадрат сплющен в линию.
+  if (Math.abs(H.a * H.e - H.b * H.d) < 1e-12 && g === 0 && h === 0) return null;
+  return H;
+}
+
+/** Точка квадрата (u, v) ∈ [0,1]² на четырёхугольнике. `null` — за линией горизонта (w ≤ 0). */
+export function applyHomography(H: Homography, u: number, v: number): ShapePoint | null {
+  const w = H.g * u + H.h * v + 1;
+  if (w <= 1e-9) return null;
+  return { x: (H.a * u + H.b * v + H.c) / w, y: (H.d * u + H.e * v + H.f) / w };
+}
+
+/**
+ * CSS `matrix3d(...)` (16 чисел, по столбцам) для элемента размером `w`×`h` с `transform-origin: 0 0`,
+ * положенного в (0, 0) слоя кадра: его углы (0,0), (w,0), (w,h), (0,h) садятся ровно на точки `q`
+ * (TL, TR, BR, BL) в пикселях того же слоя. `null` — зона не выпуклая или вырождена: проекция на ней
+ * не определена внутри квадрата.
+ */
+export function quadMatrix3d(q: ShapePoint[], w: number, h: number): number[] | null {
+  // Только строгая выпуклость: пороги угла и площади — забота ручки, а не отрисовки.
+  if (!(w > 0) || !(h > 0) || !quadIsSound(q, 0, 180)) return null;
+  const H = squareToQuad(q);
+  if (!H) return null;
+  // (u, v) = (x/w, y/h): x' = (a·u + b·v + c)/W, y' = (d·u + e·v + f)/W, W = g·u + h·v + 1.
+  return [H.a / w, H.d / w, 0, H.g / w, H.b / h, H.e / h, 0, H.h / h, 0, 0, 1, 0, H.c, H.f, 0, 1];
+}
+
+/**
+ * ТА ЖЕ ПРОЕКЦИЯ, РАЗЛОЖЕННАЯ ТАК, ЧТОБЫ ЕХАТЬ С КАДРОМ ПРИ ПЕЧАТИ: `translate(tx, ty)
+ * perspective(d) matrix3d(m)`. Печать меняет ширину кадра ПОСЛЕ замера, и ResizeObserver на это не
+ * стреляет; у `matrix3d` в пикселях замера картинка осталась бы прежнего размера (снимок
+ * shots/27-print-pdf до правки). Кадр масштабируется равномерно (пропорции = пропорции картинки),
+ * а при равномерном масштабе k у проекции меняются только величины с размерностью: сдвиг (×k) и
+ * перспектива (÷k). Здесь они вынесены в `tx`, `ty`, `d` — длины в пикселях замера, которые
+ * разметка пишет в единицах контейнера (cqw/cqh) и которые потому растут вместе с кадром; `m` —
+ * безразмерная, от масштаба не зависит.
+ *
+ * Как сходится: Z·(x, y) = ((A−C·G)x + (B−C·H)y, (D−F·G)x + (E−F·H)y, −d·(G·x + H·y), 1); перспектива
+ * делает w = 1 + G·x + H·y; сдвиг на (C, F)·w возвращает числитель A·x + B·y + C. То же, что `quadMatrix3d`.
+ */
+export function quadPerspectiveParts(
+  q: ShapePoint[],
+  w: number,
+  h: number,
+): { tx: number; ty: number; d: number; m: number[] } | null {
+  const M = quadMatrix3d(q, w, h);
+  if (!M) return null;
+  const [A, D0, , G, B, E, , Hh, , , , , C, F] = M;
+  // Любая положительная длина; порядок размера зоны держит числа в m около единицы.
+  const d = Math.max(w, h, 1);
+  return {
+    tx: C,
+    ty: F,
+    d,
+    m: [
+      A - C * G,
+      D0 - F * G,
+      -d * G,
+      0,
+      B - C * Hh,
+      E - F * Hh,
+      -d * Hh,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+    ],
+  };
+}
+
+/**
+ * ЗОНА ГОДИТСЯ ПОД КАРТИНКУ: четыре точки, строго выпуклый обход (ни вогнутости, ни перекрёста), ни
+ * один внутренний угол не тупее `maxAngle`° (почти прямой угол сплющивает картинку в нитку) и
+ * площадь больше `minArea` (в квадратных единицах координат `q`). Углы считаются в тех же единицах,
+ * что и точки: зовите с пикселями кадра, а не с долями, иначе альбомный кадр исказит углы.
+ */
+export function quadIsSound(q: readonly ShapePoint[], minArea = 0, maxAngle = 175): boolean {
+  if (q.length !== 4 || q.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
+  let sign = 0;
+  let area2 = 0;
+  // Внешний поворот в вершине не меньше 180° − maxAngle: синус этого поворота — нижняя граница.
+  const minTurn = Math.sin(((180 - maxAngle) * Math.PI) / 180);
+  for (let i = 0; i < 4; i++) {
+    const a = q[i];
+    const b = q[(i + 1) % 4];
+    const c = q[(i + 2) % 4];
+    const ux = b.x - a.x;
+    const uy = b.y - a.y;
+    const vx = c.x - b.x;
+    const vy = c.y - b.y;
+    const lu = Math.hypot(ux, uy);
+    const lv = Math.hypot(vx, vy);
+    if (lu < 1e-12 || lv < 1e-12) return false;
+    const cross = ux * vy - uy * vx;
+    const s = Math.sign(cross);
+    if (s === 0 || (sign !== 0 && s !== sign)) return false;
+    sign = s;
+    // Поворот почти 0° (угол почти 180°) или почти 180° назад (шпилька) — оба отбиваются: у шпильки
+    // скалярное произведение отрицательно, и тогда это не «тупой угол», а разворот.
+    if (Math.abs(cross) / (lu * lv) < minTurn && ux * vx + uy * vy > 0) return false;
+    area2 += a.x * b.y - b.x * a.y;
+  }
+  // Четыре одинаковых поворота у четырёх вершин — это один оборот (сумма внешних углов < 4·180°),
+  // то есть простой выпуклый контур: перекрученный «бантик» всегда меняет знак поворота.
+  return Math.abs(area2) / 2 > minArea;
+}
+
+/**
+ * РУЧКА ЗОНЫ УПИРАЕТСЯ, А НЕ ПРЫГАЕТ (R34): угол `index` тянут в `target`. Если там зона годна —
+ * туда; если нет — самая дальняя годная точка на отрезке от прежнего места к `target` (зона
+ * «прилипает» к границе выпуклости и скользит дальше, когда рука вернётся). Прежнее место само
+ * негодно (старая запись) — `target` как есть: не запирать ручку там, откуда её не выпустить.
+ */
+export function clampQuadCorner(
+  q: readonly ShapePoint[],
+  index: number,
+  target: ShapePoint,
+  ok: (q: ShapePoint[]) => boolean,
+): ShapePoint {
+  const at = (p: ShapePoint) => q.map((x, i) => (i === index ? p : x));
+  if (ok(at(target))) return target;
+  const from = q[index];
+  if (!from || !ok(at(from))) return target;
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 24; k++) {
+    const t = (lo + hi) / 2;
+    if (ok(at({ x: from.x + (target.x - from.x) * t, y: from.y + (target.y - from.y) * t })))
+      lo = t;
+    else hi = t;
+  }
+  return { x: from.x + (target.x - from.x) * lo, y: from.y + (target.y - from.y) * lo };
+}
+
+/**
+ * Зона под пропорции картинки — один раз, при первом прикреплении: иначе картинка рождается
+ * растянутой под ту рамку, которую нарисовали до неё. Центр и поворот зоны сохраняются (ось — средняя
+ * из верхнего и нижнего рёбер), картинка ВПИСЫВАЕТСЯ в прежнюю зону (одна сторона укорачивается).
+ * Порядок вершин тот же: TL, TR, BR, BL. Координаты — пиксели кадра; `aspect` = ширина/высота.
+ */
+export function fitQuadToAspect(q: ShapePoint[], aspect: number): ShapePoint[] {
+  if (q.length !== 4 || !(aspect > 0) || !Number.isFinite(aspect)) return q;
+  const [p0, p1, p2, p3] = q;
+  const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
+  const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
+  const ux = (p1.x - p0.x + p2.x - p3.x) / 2;
+  const uy = (p1.y - p0.y + p2.y - p3.y) / 2;
+  const vx = (p3.x - p0.x + p2.x - p1.x) / 2;
+  const vy = (p3.y - p0.y + p2.y - p1.y) / 2;
+  const W = Math.hypot(ux, uy);
+  const Hh = Math.hypot(vx, vy);
+  if (W < 1e-9 || Hh < 1e-9) return q;
+  const ex = ux / W;
+  const ey = uy / W;
+  // Нормаль к оси — в ту же сторону, куда смотрело боковое ребро: зона не выворачивается.
+  const side = ex * vy - ey * vx >= 0 ? 1 : -1;
+  const nx = -ey * side;
+  const ny = ex * side;
+  const w = W / Hh > aspect ? Hh * aspect : W;
+  const h = W / Hh > aspect ? Hh : W / aspect;
+  const at = (su: number, sv: number) => ({
+    x: cx + (ex * (su * w)) / 2 + (nx * (sv * h)) / 2,
+    y: cy + (ey * (su * w)) / 2 + (ny * (sv * h)) / 2,
+  });
+  return [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)];
 }

@@ -1,6 +1,7 @@
 import type {
   GetDesignBandResponse,
   common_Color,
+  common_DesignColourMap,
   common_DesignColourRecipe,
   common_MediaFull,
   common_Model,
@@ -23,8 +24,11 @@ import {
   WordsAsSent,
   latestRunOfKind,
 } from '../core';
-import { openDoor, openDoorAcrossKind } from '../doors';
+import { openDoor } from '../doors';
 import { viewLabel } from '../views';
+import { MAX_RENDER_ARTWORKS } from '../paint/artworks';
+import { hardwareModelLines, isHardwareUse } from '../paint/plan-run';
+import { PictureTile } from '../picture-tile';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
@@ -183,6 +187,9 @@ export function WhatModelGetsRenderModal({
   sizeName,
   colorwayId,
   colorwayLabel,
+  artworks,
+  mockupsAtGenerate,
+  mapLooks,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -205,6 +212,20 @@ export function WhatModelGetsRenderModal({
    */
   colorwayId?: number;
   colorwayLabel?: string;
+  /**
+   * R7 · one line per artwork of this colourway placed on the bench flats (`chest embroidery on
+   * front`), read client-side from the same placements the server freezes at launch. Render arm.
+   */
+  artworks?: readonly string[];
+  /**
+   * T13 · the live GENERATE row: every map of `recipe` will take its cloth mockup at the press
+   * (drawn then, so it has no media yet). A frozen recipe names its own `mockupMediaId`.
+   * T24 · a SET names the views whose map still takes one: the rest were left out so the call
+   * fits the engine's picture ceiling (`paint/ceiling.ts`).
+   */
+  mockupsAtGenerate?: MockupsAtGenerate;
+  /** QW10 · per view: the map's picture, its mockup's (drawn or uploaded), the scale if guessed. */
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): JSX.Element {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -230,7 +251,15 @@ export function WhatModelGetsRenderModal({
 
   const body =
     kind === 'render' ? (
-      <RenderBody band={band} recipe={recipe} garment={garment} resolved={resolved} />
+      <RenderBody
+        band={band}
+        recipe={recipe}
+        garment={garment}
+        resolved={resolved}
+        artworks={artworks ?? []}
+        mockupsAtGenerate={mockupsAtGenerate ?? false}
+        mapLooks={mapLooks}
+      />
     ) : kind === 'recolor' ? (
       <RecolorBody
         band={band}
@@ -265,6 +294,9 @@ export function WhatModelGetsRenderModal({
         resolved,
         colorwayId: colorwayId ?? 0,
         colorwayLabel: colorwayLabel ?? '',
+        artworks: artworks ?? [],
+        mockupsAtGenerate,
+        mapLooks,
       }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
@@ -281,6 +313,9 @@ export function WhatModelGetsRenderModal({
       models,
       colorwayId,
       colorwayLabel,
+      artworks,
+      mockupsAtGenerate,
+      mapLooks,
     ],
   );
 
@@ -304,11 +339,11 @@ export function WhatModelGetsRenderModal({
            door was dead; it is true, and it belongs beside the inventory instead of in place of
            it — a person reading this list must know it is the PAYLOAD and not the whole prompt. */
         <>
-          <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side
-          from a prompt PROFILE — server configuration, not a card field — and the profile's name
-          and version reach this screen only as the stamp on a run that has already happened. So
-          the wording around these facts is not shown here, because it is not knowable here. The
-          facts are, and they are the part you are paying for.
+          <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side from
+          a prompt PROFILE — server configuration, not a card field — and the profile's name and
+          version reach this screen only as the stamp on a run that has already happened. So the
+          wording around these facts is not shown here, because it is not knowable here. The facts
+          are, and they are the part you are paying for.
         </>
       }
     >
@@ -318,21 +353,8 @@ export function WhatModelGetsRenderModal({
         words={words}
         say={showMessage}
         doors={[
-          {
-            label: 'edit the description ▸',
-            onClick: () =>
-              /* ЧЕРЕЗ ВИД, А НЕ НА МЕСТЕ. Панель открыта со стороны FABRIC RENDER или 3D, а
-                 описание изделия живёт в INPUT — REFERENCES, то есть на FLAT: отсюда блок
-                 размонтирован, и `openDoor` честно ответил бы «не на этой вкладке», оставив
-                 переход человеку. Дверь закрывает панель, переводит студию и ждёт монтажа. */
-              openDoorAcrossKind(
-                'garmentDescription',
-                'flat',
-                'the garment description is in INPUT — REFERENCES, on FLAT',
-                showMessage,
-                () => onOpenChange(false),
-              ),
-          },
+          /* M14: the card's description is no longer edited on FLAT (its WORDS show only what a flat
+             sends), so there is no door to it from here; it is written from the moodboard. */
           {
             label: 'edit the fit ▸',
             onClick: () => openDoor('fit', FIT_WHERE, showMessage),
@@ -368,16 +390,24 @@ function RenderBody({
   recipe,
   garment,
   resolved,
+  artworks,
+  mockupsAtGenerate,
+  mapLooks,
 }: {
   band: GetDesignBandResponse;
   recipe?: common_DesignColourRecipe;
   garment: string;
   resolved: Resolved;
+  artworks: readonly string[];
+  mockupsAtGenerate: MockupsAtGenerate;
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): JSX.Element {
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
-  /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. */
-  const cloths = recipe?.fabrics ?? [];
+  /** Ткани этого прогона — то самое поле провода, а не второй список рядом с ним. R9 · without
+   *  the hardware uses: they are no cloth, and the server lists them apart (HARDWARE). */
+  const cloths = (recipe?.fabrics ?? []).filter((f) => !isHardwareUse(f));
+  const hardware = hardwareModelLines(recipe?.fabrics);
   /** The sheet's own left-to-right order — the same list the run sends and the splitter labels. */
   const views = useMemo(() => renderSheetViews(band), [band]);
   const stated = fabricStatement(recipe);
@@ -513,17 +543,92 @@ function RenderBody({
             covers which part»); прочитанная под общей подписью референса, она была бы чертежом
             вещи в неправдоподобных цветах. Строка рисуется только когда карты есть: пустая
             говорила бы про прогон то, чего в нём нет. */}
+        {/* R9 · HARDWARE PAINTED ON PARTS — one line per use: where, how many, picture or words. */}
+        {hardware.map((line, i) => (
+          <InventoryLine
+            key={`hw${i}`}
+            data-sent-hardware={i}
+            name='hardware'
+            origin='recipe'
+            text={line}
+          />
+        ))}
+        {/* R7 · ARTWORKS PLACED ON THE FLATS — each travels as its own image with its box. */}
+        {artworks.length > 0 && (
+          <InventoryLine
+            data-sent-artworks={artworks.length}
+            name='artworks'
+            origin='recipe'
+            text={
+              <>
+                <b>
+                  {artworks.length} of {MAX_RENDER_ARTWORKS}
+                </b>{' '}
+                · {artworks.join(' · ')} — each travels as its own image, inside the box drawn on
+                that flat
+                {artworks.length > MAX_RENDER_ARTWORKS && (
+                  <span className='text-error'>
+                    {' '}
+                    · at most {MAX_RENDER_ARTWORKS} artworks per render — remove one on PARTS
+                  </span>
+                )}
+              </>
+            }
+          />
+        )}
         {(recipe?.colourMaps ?? []).length > 0 && (
           <InventoryLine
             data-sent-colour-maps={(recipe?.colourMaps ?? []).length}
             name='colour maps'
             origin='recipe'
+            lead={
+              mapLooks && mapLooks.size > 0 ? (
+                <span className='flex flex-wrap items-center gap-2'>
+                  {(recipe?.colourMaps ?? []).map((m) => {
+                    const view = m.view ?? '';
+                    const look = mapLooks.get(view);
+                    const mock =
+                      mockupState(m, mockupsAtGenerate) === 'dropped' ? '' : look?.mockup;
+                    const pics = [
+                      { url: look?.map ?? '', alt: `${viewLabel(view)} colour map` },
+                      { url: mock ?? '', alt: `${viewLabel(view)} cloth mockup` },
+                    ].filter((x) => x.url);
+                    if (pics.length === 0) return null;
+                    return (
+                      <span key={view} className='flex gap-0.5' data-map-thumbs={view}>
+                        {pics.map((x) => (
+                          <PictureTile
+                            key={x.alt}
+                            url={x.url}
+                            alt={x.alt}
+                            aspect='4/5'
+                            fit='contain'
+                            className='w-10 shrink-0'
+                          />
+                        ))}
+                      </span>
+                    );
+                  })}
+                </span>
+              ) : undefined
+            }
             text={
               <>
                 {(recipe?.colourMaps ?? [])
-                  .map((m) => `${viewLabel((m.view ?? '').trim())} · media ${m.mediaId ?? 0}`)
+                  .map((m) =>
+                    colourMapLine(m, mockupsAtGenerate, ' · ', mapLooks?.get(m.view ?? '')?.scale),
+                  )
                   .join(' · ')}{' '}
                 — <b>each travels as its own image</b>, and the prompt says which flat it labels
+                {(recipe?.colourMaps ?? []).some((m) => {
+                  const st = mockupState(m, mockupsAtGenerate);
+                  return st === 'media' || st === 'drawn';
+                }) && (
+                  <>
+                    ; each <b>mockup</b> follows its map — the cloth on that flat at its true
+                    repeat, read for WHERE and HOW BIG, never for its flat, unlit look
+                  </>
+                )}
               </>
             }
           />
@@ -723,9 +828,7 @@ function RecolorBody({
         <InventoryLine
           name='garment'
           origin='linked'
-          text={
-            garment || <span className='text-labelColor'>the card states no description</span>
-          }
+          text={garment || <span className='text-labelColor'>the card states no description</span>}
         />
         <InventoryLine
           name='fit'
@@ -757,7 +860,10 @@ function RecolorBody({
             reason:
               'each shot is its own paid call and the model sees only that one — what keeps them the same shade is the colour you named, not that they went together',
           },
-          { label: 'references', reason: 'reference photographs belong to FLAT and never reach this run' },
+          {
+            label: 'references',
+            reason: 'reference photographs belong to FLAT and never reach this run',
+          },
           { label: 'moodboard', reason: 'mood is for the human — it is never instruction' },
         ]}
       />
@@ -909,8 +1015,8 @@ function ThreedBody({
           text={
             (threed?.fitOverride ?? '').trim() ? (
               <>
-                <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge,
-                and the card still says {cardFit || '—'}
+                <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge, and
+                the card still says {cardFit || '—'}
               </>
             ) : (
               `${cardFit || '—'} (from the card)`
@@ -920,9 +1026,7 @@ function ThreedBody({
         <InventoryLine
           name='garment'
           origin='linked'
-          text={
-            garment || <span className='text-labelColor'>the card states no description</span>
-          }
+          text={garment || <span className='text-labelColor'>the card states no description</span>}
         />
       </WmgGroup>
 
@@ -939,7 +1043,10 @@ function ThreedBody({
             label: 'the flats',
             reason: '3D is built from the renders, not from the drawings underneath them',
           },
-          { label: 'notes', reason: 'notes are internal and reach neither the factory nor a model' },
+          {
+            label: 'notes',
+            reason: 'notes are internal and reach neither the factory nor a model',
+          },
         ]}
       />
     </>
@@ -948,10 +1055,7 @@ function ThreedBody({
 
 /* ─────────────────────────── the shared shapes live in core/wmg.tsx ─────────────────────────── */
 
-function modelCaptionOf(
-  models: readonly common_Model[] | undefined,
-  modelId?: number,
-): string {
+function modelCaptionOf(models: readonly common_Model[] | undefined, modelId?: number): string {
   if (!modelId) return '';
   const model = (models ?? []).find((m) => m.id === modelId);
   return (model?.model?.name ?? '').trim() || `model ${modelId}`;
@@ -963,10 +1067,7 @@ function modelCaptionOf(
  * ОДИН ВОПРОС, ДВА РЕГИСТРА ОТВЕТА (V-15), поэтому и строка одна: панель повторяет то, что человек
  * только что сказал на экране, а два отдельных поля здесь читались бы как два независимых решения.
  */
-function bodyLine(
-  models: readonly common_Model[] | undefined,
-  threed?: ThreedDraft,
-): string {
+function bodyLine(models: readonly common_Model[] | undefined, threed?: ThreedDraft): string {
   const who = modelCaptionOf(models, threed?.modelId);
   const build = (threed?.bodyType ?? '').trim();
   if (who && build) return `${who}, a ${build} build`;
@@ -982,6 +1083,44 @@ function bodyLine(
  * the rendered nodes would silently change whenever a label was reworded, and would carry «missing
  * — blocks 3D» into a brief as if it were an instruction.
  */
+/** QW10 · what one outgoing map looks like: its picture, its mockup's, the scale when guessed. */
+export type MapLook = { map: string; mockup: string; scale: string };
+
+/** T13 / T24 · whether the live row draws every map's mockup, or only the views of this set. */
+export type MockupsAtGenerate = boolean | ReadonlySet<string>;
+
+/** One map's mockup: frozen media, drawn at the press, left out for the ceiling, or none. */
+function mockupState(
+  m: common_DesignColourMap,
+  atGenerate: MockupsAtGenerate,
+): 'media' | 'drawn' | 'dropped' | 'none' {
+  if ((m.mockupMediaId ?? 0) > 0) return 'media';
+  if (atGenerate === false) return 'none';
+  if (atGenerate === true) return 'drawn';
+  return atGenerate.has(m.view ?? '') ? 'drawn' : 'dropped';
+}
+
+/** One map of the inventory with its cloth mockup (T13): its media, or «drawn at GENERATE». */
+function colourMapLine(
+  m: common_DesignColourMap,
+  atGenerate: MockupsAtGenerate,
+  sep: string,
+  scale = '',
+): string {
+  const head = `${viewLabel((m.view ?? '').trim())}${sep}media ${m.mediaId ?? 0}`;
+  const tail = scale ? `${sep}${scale}` : '';
+  switch (mockupState(m, atGenerate)) {
+    case 'media':
+      return `${head} + mockup media ${m.mockupMediaId ?? 0}${tail}`;
+    case 'drawn':
+      return `${head} + cloth mockup (drawn at GENERATE)${tail}`;
+    case 'dropped':
+      return `${head} · no mockup (left out: the model's picture ceiling)${tail}`;
+    default:
+      return head;
+  }
+}
+
 function plainText({
   kind,
   band,
@@ -993,6 +1132,9 @@ function plainText({
   resolved,
   colorwayId,
   colorwayLabel,
+  artworks,
+  mockupsAtGenerate,
+  mapLooks,
 }: {
   kind: WhatModelGetsKind;
   band: GetDesignBandResponse;
@@ -1004,6 +1146,9 @@ function plainText({
   resolved: Resolved;
   colorwayId: number;
   colorwayLabel: string;
+  artworks: readonly string[];
+  mockupsAtGenerate?: MockupsAtGenerate;
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): string {
   const lines: string[] = [
     `what the model gets — ${kindLabel(kind)}`,
@@ -1041,6 +1186,7 @@ function plainText({
       // входов, в котором этой строки нет, там просто неверен.
       `cloths: ${
         (recipe?.fabrics ?? [])
+          .filter((f) => !isHardwareUse(f))
           .map(
             (f) =>
               // ⚠ МЕТКА ПЕЧАТАЕТСЯ И ЗДЕСЬ. Текст уезжает в буфер и живёт дальше без экрана; список
@@ -1054,9 +1200,13 @@ function plainText({
       }`,
       `colour maps: ${
         (recipe?.colourMaps ?? [])
-          .map((m) => `${viewLabel((m.view ?? '').trim())} media ${m.mediaId ?? 0}`)
+          .map((m) =>
+            colourMapLine(m, mockupsAtGenerate ?? false, ' ', mapLooks?.get(m.view ?? '')?.scale),
+          )
           .join(', ') || '—'
       }`,
+      ...hardwareModelLines(recipe?.fabrics).map((line) => `hardware · ${line}`),
+      `artworks: ${artworks.length > 0 ? `${artworks.length} of ${MAX_RENDER_ARTWORKS} · ${artworks.join(', ')}` : '—'}`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
       `picked colour: ${colourLabel(recipe, resolved.colors)}`,
       `fabric in words: ${(recipe?.words ?? '').trim() || '—'}`,

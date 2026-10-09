@@ -3,7 +3,7 @@ import type {
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
-import { useEffect, useLayoutEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -15,31 +15,57 @@ import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
-import { RenderDoorsHost, hostPlates } from '../render/render-tile';
+import {
+  PutPiecesIntoSides,
+  RenderDoorsNotes,
+  RenderDoorsHost,
+  broughtGroup,
+  hostPlates,
+  useRenderStep,
+} from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
+  clearBenchChoice,
   closeSurface,
+  heldRunId,
   openSurface,
   pinShown,
   publishShown,
   releasePin,
   useBench,
+  useBenchChoice,
 } from './bench-store';
-import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery, type OutputPlan } from './run-gallery';
+import { ApplyFlatSlots } from './apply-flat-slots';
+import { useDetailAutoPlace } from './detail-auto-place-hook';
+import { InlineSplit, useKeptWhole } from './inline-split';
+import {
+  benchPlan,
+  deckAfterZoom,
+  deckOfRuns,
+  piecesInPlace,
+  runsGallery,
+  type OutputPlan,
+} from './run-gallery';
 import { RunOutputs } from './run-outputs';
+import { splitViewsOf } from './run-tile';
 import {
   isRunLive,
   runFailureText,
   runOutcomeNote,
+  runShortFailure,
   runStamp,
   runStateWord,
   runStatus,
 } from './run-state';
-import { useElapsed, useRunById } from './use-generation';
+import { useElapsed, useRunById, useStartRun } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN UNDER THE GENERATE BLOCK (O-53; 28.09, O-67) ═══
+ *
+ * T30 (04.10, owner item 30): the block is called `workbench`, and the step's GENERATION HISTORY
+ * is its last part (`history`, collapsed) — one block, not two (`Workbench`, `studio.tsx`).
  *
  * Owner, verbatim: «после генерации в FLAT INPUT — REFERENCES в этом же блоке но снизу должны
  * появятся сгенерированные картинки и там мы уже можем непосредственно делать все тоже самое что и в
@@ -57,11 +83,14 @@ import { useElapsed, useRunById } from './use-generation';
  * then the history row's own outputs block (`RunOutputs`) on the workbench's 190px track — the
  * reference grid's, one block up, so the columns line up across the gutter. The doors are
  * `RunTile`'s, unchanged:
- * split an uncut sheet (`SplitModal forInput={false}` — a cut here lays a sheet out into views, it
- * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written), edit
+ * split an uncut sheet (the sheet IS the inline split editor, `inline-split.tsx`, T20 — on FABRIC
+ * RENDER too since 03.10, R(b); `forInput={false}` — a cut here lays a sheet out into views, it
+ * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written; after
+ * the cut the pieces stand in the sheet's place, `piecesInPlace`), edit
  * (a NEW sibling picture in the same run, `slot={null}`, exactly as from the history — «overwrite or
- * save as new» is phase 2), zoom through the studio's one viewer, and the slot marks: `SlotPicker`
- * under a free picture, `unmark` under a plate a FLAT SLOTS slot reads («разметка», D-40 п.1).
+ * save as new» is phase 2), the studio's one viewer on the surface, and the slot marks IN THE
+ * FRAME (T13): `slot ▾` on a free picture, `✕` = unmark on a plate a FLAT SLOTS slot reads
+ * («разметка», D-40 п.1). Nothing stands under a tile.
  *
  * WHICH RUN (§3a, D-40 п.4). The newest run on the band's first page whose `kind` is `flat` (the
  * GENERATE of this block — a text draft, a vector redraw, a render never), not archived, and either
@@ -88,14 +117,18 @@ import { useElapsed, useRunById } from './use-generation';
  * and this row draws only the HEAD of each replacement chain, in the original's place — as a card
  * or as a piece in its deck (`outputPlan` with `heads`). A picture under an open editor is drawn as
  * itself until the editor closes (`keep`). The history keeps every link, captioned.
+ * A RUN PUT HERE FROM THE HISTORY STANDS THE SAME WAY (04.10, owner item 28, T28 — supersedes the
+ * FX4 «whole» for edit chains): every picture, each edit chain as its current version.
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
  * slot writes of these pictures exist once.
  *
  * THE DECK OF THIS RUN IS OPEN BY DEFAULT, AND A SPLIT THAT LANDS OPENS IT: the pieces are what the
- * owner asked to keep seeing «после сплита». One open deck per host (H-10), and zooming a picture
- * outside it folds it (E-4) — the history's rules, through the same readers (`run-gallery.ts`).
+ * owner asked to keep seeing «после сплита». (Since 03.10 neither step has a deck of a run here: a
+ * cut sheet leaves the bench and its pieces are ordinary cards, so there is no deck to open.) One
+ * open deck per host (H-10), and zooming a picture outside it folds it (E-4) — the history's rules,
+ * through the same readers (`run-gallery.ts`).
  *
  * WHAT IT DOES NOT DO — ON PURPOSE. It polls nothing, recalls nothing and reads no further pages:
  * `GenerationHistory` below owns all three and stays MOUNTED while folded (O-54), so a live run is
@@ -191,6 +224,86 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
  * gives them (`run-panel.tsx`), cut to four lines with the whole text in the title (up to 4 000
  * characters, D-4). The code stands in the header's state word already.
  */
+/**
+ * A FAILED FLAT RUN IN ONE LINE, AND THE SAME PRESS AGAIN (owner 05.10: «ошибку показывать если не
+ * получилось»): `timed out · retry`, `failed · <reason> · retry`. Retry repeats the run from its own
+ * frozen inputs (`rerun_of`), so what failed is what is asked again.
+ */
+/**
+ * ONE RETRY PER FAILED RUN UNTIL THE BAND ANSWERS (Codex, 05.10): a second press would buy a second
+ * run. The press is held — across remounts — until the band shows a run repeating this one (or this
+ * row is no longer the one shown), with a fallback release after `RETRY_HOLD_MS`.
+ */
+const RETRY_HOLD_MS = 90_000;
+const retryHeld = new Map<number, number>();
+
+function RetryLine({
+  techCardId,
+  band,
+  run,
+  disabled,
+}: {
+  techCardId: number;
+  band: GetDesignBandResponse;
+  run: common_DesignRun;
+  disabled?: boolean;
+}): JSX.Element | null {
+  const start = useStartRun(techCardId);
+  const [, setTick] = useState(0);
+  const runId = run.id ?? 0;
+  const answered = (band.runs ?? []).some((r) => (r.rerunOf ?? 0) === runId);
+  const until = retryHeld.get(runId) ?? 0;
+  const held = !answered && until > Date.now();
+  useEffect(() => {
+    if (!held) return;
+    const t = window.setTimeout(() => setTick((n) => n + 1), until - Date.now() + 50);
+    return () => window.clearTimeout(t);
+  }, [held, until]);
+  if (runStatus(run) !== 'failed' || (run.kind ?? '').trim().toLowerCase() !== 'flat') return null;
+  const params = run.params;
+  return (
+    <span className='flex flex-wrap items-center gap-1.5' data-latest-failed={runId}>
+      <Text size='micro' variant='errorLabel' component='span' title={runOutcomeNote(run)}>
+        {runShortFailure(run)}
+      </Text>
+      {!disabled && params && (
+        <>
+          <Text size='micro' variant='label' component='span'>
+            ·
+          </Text>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            data-latest-retry={runId}
+            disabled={held}
+            title='run it again from the same inputs'
+            onClick={async () => {
+              if ((retryHeld.get(runId) ?? 0) > Date.now()) return;
+              retryHeld.set(runId, Date.now() + RETRY_HOLD_MS);
+              setTick((n) => n + 1);
+              const refusal = await start.start({
+                kind: 'flat',
+                ask: run.ask ?? '',
+                params,
+                rerunOfRunId: runId,
+              });
+              // Refused before anything was bought: the press is free again (same idempotency key).
+              if (refusal) {
+                retryHeld.delete(runId);
+                setTick((n) => n + 1);
+              }
+            }}
+          >
+            {held ? 'retrying…' : 'retry'}
+          </Button>
+        </>
+      )}
+    </span>
+  );
+}
+
 function BareOutcome({
   run,
   earlier,
@@ -257,6 +370,15 @@ function decksOf(plan: OutputPlan | null): { root: number; count: number }[] {
 }
 
 /**
+ * ВОЗДУХ МЕЖДУ КАРТИНКАМИ ВЕРСТАКА И СТРОКОЙ ИСТОРИИ (п. 47): «в WORKBENCH сделай гэп от картинок
+ * до хистори больше». Ритм блока (`space-y-stack`, 10px) ставил `history · N runs` вплотную под
+ * плитки, и строка читалась подписью к ним, а не своей частью блока. 32px — шире шва группы
+ * (`GROUP_SEAM`, 20px): история — другой вопрос, чем этот прогон. Ставится только там, где над
+ * историей есть картинки: без них она стоит под шапкой своим обычным шагом.
+ */
+const HISTORY_AIR = '[&>[data-workbench-history]]:!mt-8';
+
+/**
  * Pictures an editor is open over, anywhere on the step (`RunTile`'s `edit:<id>` surfaces), as a
  * sorted key — the store hands a new map on every write of any surface, the key changes only when
  * this set does.
@@ -276,12 +398,19 @@ export function LatestGeneration({
   techCardId,
   disabled,
   kind = 'flat',
+  history,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /** The step whose GENERATE this row answers — FLAT's by default, FABRIC RENDER's (O-63). */
   kind?: WorkbenchKind;
+  /**
+   * THE STEP'S GENERATION HISTORY, AS THE LAST PART OF THIS BLOCK (T30, owner item 30: «generation
+   * history и workbench должны быть одим блоком»). Given, the block always stands — even with no
+   * run to show — because the history holds the run poll and must stay mounted (`studio.tsx`).
+   */
+  history?: ReactNode;
 }) {
   const speaks = serverSpeaksDesign();
   const form = useFormContext<TechCardFormData>();
@@ -289,6 +418,17 @@ export function LatestGeneration({
 
   const newest = useMemo(() => latestRunOf(band, kind), [band, kind]);
   const newestId = newest?.run.id ?? 0;
+  /** The highest run of the kind, failed or empty included — auto-apply only ever follows it. */
+  const newestFlatId = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...(band.runs ?? [])
+          .filter((r) => isRunOfKind(r, kind) && !isRunArchived(r))
+          .map((r) => r.id ?? 0),
+      ),
+    [band.runs, kind],
+  );
 
   /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
      The pinned run is read from the band while the band's first page holds it, so a split's pieces
@@ -299,23 +439,33 @@ export function LatestGeneration({
   const bench = useBench(techCardId);
   const viewerOpen = useGalleryViewerOpen();
   const pin = bench.pin;
+  /* THE RUN PUT ON THE BENCH FROM THE HISTORY (03.10, owner items 9 and T24; `bench-store.ts`) —
+     each step its own. It is held exactly as a pin is: read from the band's first page, else by id. */
+  const chosen = useBenchChoice(techCardId, kind);
+  const heldId = heldRunId(pin, chosen, newestId);
   const pinnedLive = useMemo(
-    () => (pin ? (band.runs ?? []).find((r) => (r.id ?? 0) === pin.runId) ?? null : null),
-    [band, pin],
+    () => (heldId ? (band.runs ?? []).find((r) => (r.id ?? 0) === heldId) ?? null : null),
+    [band, heldId],
   );
-  const byId = useRunById(techCardId, pin?.runId ?? 0, !!pin && !pinnedLive);
+  const byId = useRunById(techCardId, heldId, !!heldId && !pinnedLive);
   const byIdRun = byId.data?.run;
-  /** The pinned run from a read that CONTAINS it — the band's first page, or its own by-id read. */
+  /** The held run from a read that CONTAINS it — the band's first page, or its own by-id read. */
   const pinnedFresh =
-    pinnedLive ?? (pin && byIdRun && (byIdRun.id ?? 0) === pin.runId ? byIdRun : null);
+    pinnedLive ?? (heldId && byIdRun && (byIdRun.id ?? 0) === heldId ? byIdRun : null);
   const [pinnedCopy, setPinnedCopy] = useState<common_DesignRun | null>(null);
   if (pinnedFresh && pinnedFresh !== pinnedCopy) setPinnedCopy(pinnedFresh);
-  const pinnedRun = pin
-    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === pin.runId ? pinnedCopy : null)
+  const pinnedRun = heldId
+    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === heldId ? pinnedCopy : null)
     : null;
   /** Archival OBSERVED (D-49): the archived stamp on a read that contains the run — never inferred. */
   const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
-  const run = pinnedRun ?? newest?.run ?? null;
+  /** The chosen run was archived, or is not a flat run: the choice goes, the bench follows the newest. */
+  const choiceGone =
+    !pin && heldId > 0 && !!pinnedFresh && (archivedSeen || !isRunOfKind(pinnedFresh, kind));
+  useLayoutEffect(() => {
+    if (choiceGone) clearBenchChoice(techCardId, kind);
+  }, [choiceGone, techCardId, kind]);
+  const run = (choiceGone ? null : pinnedRun) ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
   /**
    * THE RUN STANDS HERE BARE (O-63 r2, D-72 п.3): nothing of the kind came back with pictures, and
@@ -365,6 +515,7 @@ export function LatestGeneration({
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
+    views: readonly string[];
   } | null>(null);
   /** The split is a surface of its run (`bench-store.ts`); it goes when the modal does. */
   useEffect(() => {
@@ -384,13 +535,90 @@ export function LatestGeneration({
    * Nothing else touches `openDeck` here: the person's own toggles and the E-4 fold stand until the
    * next run or the next split.
    */
-  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept. */
+  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept.
+   *  A run put on the bench from the history too (T28 supersedes FX4 for edit chains). */
   const editingKey = editedKey(bench.surfaces);
-  const plan = useMemo(() => {
+  /** The row with its decks — what the render doors read (`piecesOf`, W4); never drawn as such. */
+  const drawnPlan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
-    return outputPlan(run.pictures ?? [], { heads: true, keep });
+    return benchPlan(run.pictures ?? [], { keep });
   }, [run, editingKey]);
+  // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
+  // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸`; the bulk placement is
+  // a line under the tiles (`PutPiecesIntoSides`, W4).
+  /* ONE SHEET PER PRESS (owner 06.10, wave 10: «убрать тиндер-фичу»): a views run buys ONE sheet,
+     the bench cuts it by itself and the cut lands in the four slots by itself — nobody picks. A
+     legacy run that bought several candidate sheets shows them all, cut by hand only. */
+  const benchDrawn = drawnPlan;
+  /** The run carries one garment sheet: only then does the bench cut and apply without a press. */
+  const oneSheet = (run?.requestedOutputs ?? 1) <= 1;
+  /** FLAT cuts and applies by itself only the HIGHEST flat run — failed or empty newer runs included
+   *  (`newestFlatId`), so an older sheet never overwrites the slots after a newer press (Codex, wave
+   *  10). FABRIC RENDER keeps its auto-cut as before. */
+  const autoFlat = kind === 'flat' && oneSheet && runId > 0 && runId === newestFlatId;
+  const autoCut = kind === 'render' || autoFlat;
+  const plan = useMemo(() => (benchDrawn ? piecesInPlace(benchDrawn) : null), [benchDrawn]);
+  /**
+   * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
+   * SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the inline editor
+   * instead of a tile, all of them stacked above the tiles in the row's order: a sheet on the bench
+   * is something to cut, and no sheet ever stands here as a picture.
+   * FABRIC RENDER the same since 03.10 (owner item 24: «по дизайну и смыслу такая же как во
+   * флетах», R(b)). Its render doors keep working on what is left: the pieces stand as cards
+   * (`piecesInPlace`), each placed into a side by its own `mark ▾`, and every cut's bulk placement
+   * (`apply splitted`, owner E-6) is one quiet line under the tiles (`PutPiecesIntoSides`, W4).
+   */
+  const writesOff = disabled || !speaks;
+  /* 91-LIVE D1 (82 §8): a finished detail run's picture lands in the detail slot it was drawn for,
+     once per run — whatever run the workbench shows (`detail-auto-place.ts`). */
+  useDetailAutoPlace(band, techCardId, kind !== 'flat' || writesOff);
+  /** W6: pictures the person kept as one picture — tiles again, the split corner on them. */
+  const keptWhole = useKeptWhole(techCardId);
+  const inlineSheets = useMemo(() => {
+    if (!run || !plan || isRunLive(run)) return [];
+    const pictures = run.pictures ?? [];
+    const out: { picture: common_DesignPicture; views: string[] }[] = [];
+    for (const card of plan.cards) {
+      if (card.members.length || (card.picture.id ?? 0) <= 0) continue;
+      if (keptWhole.has(card.picture.id ?? 0)) continue;
+      const views = splitViewsOf(band, card.picture, pictures, run, writesOff);
+      if (views) out.push({ picture: card.picture, views });
+    }
+    return out;
+  }, [run, plan, band, writesOff, keptWhole]);
+  /** The row's tiles: the plan without the sheets drawn as inline editors. */
+  const tilePlan = useMemo(() => {
+    if (!plan || !inlineSheets.length) return plan;
+    const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
+    return { ...plan, cards: plan.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
+  }, [plan, inlineSheets]);
+  /**
+   * ═══ THE RENDERS BROUGHT BY HAND THAT STAND IN NO SIDE (03.10, R(c)) ════════════════════════════
+   * An upload or a flatten with no run has no row in the history, and since T24 the render history
+   * is FLAT's grid of runs: its «· N brought ▸» group went with the render doors. Marking into a
+   * side lives on the bench, so the group lives here, FABRIC RENDER only: one quiet line under the
+   * run's tiles, `N brought ▸`, folded by default (they are rare, and the bench is the last run's).
+   * Open, the group's cards stand as tiles with the same render doors (`mark ▾`, ✕, edit, split),
+   * a cut sheet's free pieces in its place as on the run above (`piecesInPlace`; the whole split
+   * still counted by `wholeDecks`). With no render run at all the block stands for the group alone.
+   */
+  const renderStep = useRenderStep();
+  const brought = useMemo(
+    () => (kind === 'render' && renderStep ? broughtGroup(band, renderStep) : null),
+    [kind, renderStep, band],
+  );
+  /* W5: a brought sheet is a cut FAMILY when the band carries pieces of it (`wholeDecks`), wherever
+     they stand — one whose every piece is on SIDES leaves the group whole, not drawn as uncut. */
+  const broughtPlan = useMemo(
+    () => (brought ? piecesInPlace(brought.plan, new Set(brought.wholeDecks.keys())) : null),
+    [brought],
+  );
+  const [broughtOpen, setBroughtOpen] = useState(false);
+  if (broughtOpen && !brought) setBroughtOpen(false);
+  const broughtRun = broughtOpen && brought && broughtPlan ? brought.run : null;
+  const planOf = (r: common_DesignRun): OutputPlan =>
+    (r === broughtRun ? broughtPlan : tilePlan) ?? { cards: [], deckOf: new Map() };
   const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
@@ -407,6 +635,7 @@ export function LatestGeneration({
       // the SAME card never gets here while the modal is open — the split pins the run it cuts
       // (`bench-store.ts`), and the pieces land on this row.
       if (seen && seen.card !== techCardId && splitting) setSplitting(null);
+      if (seen && seen.card !== techCardId && broughtOpen) setBroughtOpen(false);
     } else {
       const grown = decks.find((d) => d.count > (seen.sizes.get(d.root) ?? 0));
       if (grown) next = grown.root;
@@ -421,22 +650,179 @@ export function LatestGeneration({
   }
 
   /** The viewer row of THIS row: its pictures in the order shown, the open deck's pieces inside. */
+  const shownRuns = useMemo(
+    () => [...(run && tilePlan ? [run] : []), ...(broughtRun ? [broughtRun] : [])],
+    [run, tilePlan, broughtRun],
+  );
   const gallery = useMemo(
-    () => (run && plan ? runsGallery([run], openDeck, () => plan) : runsGallery([], openDeck)),
-    [run, plan, openDeck],
+    () => runsGallery(shownRuns, openDeck, planOf),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRuns, openDeck, tilePlan, broughtPlan],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
   const deckOf = useMemo(
-    () => (run && plan ? deckOfRuns([run], () => plan) : new Map<number, number>()),
-    [run, plan],
+    () => deckOfRuns(shownRuns, planOf),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRuns, tilePlan, broughtPlan],
   );
-  /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
-  const plates = useMemo(() => hostPlates(kind === 'render' && plan ? [plan] : []), [kind, plan]);
+  /**
+   * O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`).
+   * The plans WITH their decks (W4): the bench draws pieces in place, but `piecesOf(root)` and
+   * `applyRefusalFor(root)` still read each cut through `membersOf`. The inline sheets stay out, as
+   * they stay off the tiles.
+   */
+  const deckPlan = useMemo(() => {
+    if (!benchDrawn || !inlineSheets.length) return benchDrawn;
+    const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
+    return { ...benchDrawn, cards: benchDrawn.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
+  }, [benchDrawn, inlineSheets]);
+  const plates = useMemo(
+    () =>
+      hostPlates(
+        kind === 'render'
+          ? [
+              ...(deckPlan && !bare ? [deckPlan] : []),
+              ...(broughtRun && brought ? [brought.plan] : []),
+            ]
+          : [],
+      ),
+    [kind, deckPlan, bare, broughtRun, brought],
+  );
+  /**
+   * W4: the cuts each host shows — one `put the N pieces into sides ▸` line per sheet whose pieces
+   * stand on the bench in its place (`rootOf` of the drawn plan), the sheet read off the decked plan.
+   */
+  const cutSheets = (
+    drawn: OutputPlan | null | undefined,
+    decked: OutputPlan | null | undefined,
+  ) => {
+    const roots = new Set(drawn?.rootOf?.values() ?? []);
+    return (decked?.cards ?? []).filter((c) => roots.has(c.picture.id ?? 0)).map((c) => c.picture);
+  };
+  const runCuts = kind === 'render' && !bare ? cutSheets(tilePlan, deckPlan) : [];
+  /** Owner 04.10: «PUT THE 4 PIECES INTO SIDES ▸ это должна быть кнопка в хедере» — the latest cut
+   *  on the bench (the last in the row's order) puts its pieces from the header, as FLAT's
+   *  `apply flat slots` does; one cut per press, since the render apply also clears the sides the
+   *  cut does not name. */
+  const headerCut = runCuts.length > 0 ? runCuts[runCuts.length - 1] : null;
+  /** Item 27: FLAT's cut pieces standing on the bench, in the row's order — `apply flat slots`. */
+  const flatPieces = useMemo(() => {
+    const rootOf = tilePlan?.rootOf;
+    if (kind !== 'flat' || bare || !rootOf?.size) return [];
+    return (tilePlan?.cards ?? []).map((c) => c.picture).filter((p) => rootOf.has(p.id ?? 0));
+  }, [kind, bare, tilePlan]);
+  const broughtCuts = broughtRun && brought ? cutSheets(broughtPlan, brought.plan) : [];
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
+  const onZoomPicture = (pictureId: number) => {
+    // The viewer is a surface of this run too: pinned from the click, before any re-read.
+    pinShown(techCardId, true);
+    setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+  };
+  const onSplit = (picture: common_DesignPicture, views: readonly string[]) => {
+    openSurface(techCardId, 'split:bench', picture.runId ?? 0);
+    setSplitting({ picture, handle: pictureHandle(picture), views });
+  };
 
-  if (!run) return null;
+  /** R(c): the brought line and, open, its tiles — inside the render doors' host. */
+  const broughtBlock =
+    brought && broughtPlan && broughtPlan.cards.length > 0 ? (
+      <div data-latest-brought={broughtPlan.cards.length} className='space-y-2'>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          aria-expanded={broughtOpen}
+          data-latest-brought-door=''
+          title='renders brought by hand that stand in no side — mark them into a side here'
+          onClick={() => setBroughtOpen((v) => !v)}
+        >
+          {broughtPlan.cards.length} brought
+          <FoldCaret open={broughtOpen} />
+        </Button>
+        {broughtRun && (
+          <RunOutputs
+            band={band}
+            techCardId={techCardId}
+            run={broughtRun}
+            rep='render'
+            cardFit={cardFit}
+            elapsed=''
+            disabled={writesOff}
+            galleryKey={galleryGroup.key}
+            galleryIndexOf={gallery.indexOf}
+            openDeck={openDeck}
+            onDeck={toggleDeck}
+            onZoomPicture={onZoomPicture}
+            onSplit={onSplit}
+            workbench
+            plan={broughtPlan}
+          />
+        )}
+        {broughtCuts.map((sheet) => (
+          <PutPiecesIntoSides key={sheet.id} sheet={sheet} />
+        ))}
+      </div>
+    ) : null;
+  const doorsHost = (children: JSX.Element | null, notes = true) => (
+    <RenderDoorsHost
+      notes={notes}
+      band={band}
+      techCardId={techCardId}
+      disabled={disabled}
+      pictures={plates.pictures}
+      membersOf={plates.membersOf}
+      wholeDecks={broughtRun ? brought?.wholeDecks : undefined}
+      openDeck={openDeck}
+      onDeck={toggleDeck}
+      /* A plate without a run is the brought group's; the host is mounted only when one of the
+         two exists. */
+      runOf={(picture) =>
+        ((picture.runId ?? 0) <= 0 && brought
+          ? brought.run
+          : run ?? brought?.run) as common_DesignRun
+      }
+    >
+      {children}
+    </RenderDoorsHost>
+  );
+  const splitModal = splitting && (
+    <SplitModal
+      techCardId={techCardId}
+      picture={splitting.picture}
+      handle={splitting.handle}
+      views={splitting.views}
+      open
+      /* The history's cut, not the input's (T-15): the pieces get their views and become
+         pictures of the band; no prompt role is written for them. */
+      forInput={false}
+      onOpenChange={(open) => !open && setSplitting(null)}
+    />
+  );
 
+  if (!run) {
+    // R(c): no render run at all, but renders brought by hand wait for a side — the block stands
+    // for them alone.
+    if (!broughtBlock && !history) return null;
+    return (
+      <div
+        data-workbench=''
+        data-latest-generation={broughtBlock ? 0 : undefined}
+        ref={galleryGroup.anchorRef}
+        className='scroll-mt-20'
+      >
+        <Section title='workbench' className={broughtBlock ? HISTORY_AIR : undefined}>
+          {broughtBlock && doorsHost(broughtBlock)}
+          {history}
+        </Section>
+        {splitModal}
+      </div>
+    );
+  }
+
+  const hostIfRender = (block: JSX.Element) =>
+    kind === 'render' ? doorsHost(block, false) : block;
   const state = runStateWord(run, elapsed);
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
   const note = skippedNote(newest && newestId === runId && !bare ? newest.skipped : []);
@@ -451,124 +837,161 @@ export function LatestGeneration({
       rep={runRepresentation(run)}
       cardFit={cardFit}
       elapsed={elapsed}
-      disabled={disabled || !speaks}
+      disabled={writesOff}
       galleryKey={galleryGroup.key}
       galleryIndexOf={gallery.indexOf}
       openDeck={openDeck}
       onDeck={toggleDeck}
-      onZoomPicture={(pictureId) => {
-        // The viewer is a surface of this run too: pinned from the click, before any re-read.
-        pinShown(techCardId, true);
-        setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
-      }}
-      onSplit={(picture) => {
-        openSurface(techCardId, 'split:bench', picture.runId ?? 0);
-        setSplitting({ picture, handle: pictureHandle(picture) });
-      }}
+      onZoomPicture={onZoomPicture}
+      onSplit={onSplit}
       workbench
-      plan={plan ?? undefined}
+      plan={tilePlan ?? undefined}
     />
   );
+  /** Every picture of the row went into an inline editor: no empty grid under them. */
+  const tilesLeft = isRunLive(run) || (tilePlan?.cards.length ?? 0) > 0;
+  const inline = inlineSheets.map(({ picture, views }) => (
+    <InlineSplit
+      key={picture.id}
+      techCardId={techCardId}
+      picture={picture}
+      views={views}
+      runId={runId}
+      auto={autoCut}
+    />
+  ));
 
   return (
-    <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
+    <div
+      data-workbench=''
+      data-latest-generation={runId}
+      ref={galleryGroup.anchorRef}
+      className='scroll-mt-20'
+    >
       {/* THE BLOCK (O-67, D-73): the neighbours' `Section`, the run's stamp in its header's action
           slot, the pieces below spaced by the block's own rhythm — no hand margins. The wrapper
           carries the anchor and the gallery group's node, and is the NEXT SIBLING of the block whose
           GENERATE this answers (`#design-input` on FLAT, `#design-render-bench` on FABRIC RENDER). */}
-      <Section
-        title='latest generation'
-        question='— what the last run brought back'
-        action={
-          <Text size='nano' variant='label' component='span' data-latest-stamp=''>
-            {state && (
-              <>
-                <span className='text-textColor' title={state.note}>
-                  {state.word}
-                </span>
-                {' · '}
-              </>
-            )}
-            {runStamp(run)}
-          </Text>
-        }
-      >
-        {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+      {/* FABRIC RENDER: the render doors' host spans the whole block, its header too (the header's
+          `put the N pieces into sides ▸` is a door of the host); its notes stand atop the body. */}
+      {hostIfRender(
+        <Section
+          title='workbench'
+          className={HISTORY_AIR}
+          action={
+            <>
+              <Text size='nano' variant='label' component='span' data-latest-stamp=''>
+                {state && (
+                  <>
+                    <span className='text-textColor' title={state.note}>
+                      {state.word}
+                    </span>
+                    {' · '}
+                  </>
+                )}
+                {runStamp(run)}
+              </Text>
+              {/* Item 27: the cut pieces into their FLAT SLOTS sides — the header action, styled as
+                INPUT — REFERENCES' `clear the input ✕`; absent when nothing would be written. */}
+              {flatPieces.length > 0 && !isRunLive(run) && (
+                <ApplyFlatSlots
+                  band={band}
+                  techCardId={techCardId}
+                  pieces={flatPieces}
+                  disabled={writesOff}
+                  /* 82 §4.1: the newest flat run's cut lands in the four slots by itself, once. */
+                  autoRun={
+                    runId === newestId &&
+                    !bare &&
+                    !writesOff &&
+                    autoFlat &&
+                    (run.params?.views ?? []).length >= 4
+                      ? run
+                      : null
+                  }
+                />
+              )}
+              {headerCut && !isRunLive(run) && <PutPiecesIntoSides sheet={headerCut} />}
+            </>
+          }
+        >
+          {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+          {kind === 'flat' && newest && (bare || newest.skipped.length > 0) && (
+            <RetryLine
+              techCardId={techCardId}
+              band={band}
+              run={bare ? run : newest.skipped[0]}
+              disabled={writesOff}
+            />
+          )}
 
-        {note && newest && (
-          <Text
-            size='micro'
-            variant='label'
-            component='p'
-            data-latest-passed-over={newest.skipped[0]?.id ?? 0}
-            data-latest-skipped={newest.skipped.length}
-            title={note.title}
-          >
-            {note.text}
-          </Text>
-        )}
+          {note && newest && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              data-latest-passed-over={newest.skipped[0]?.id ?? 0}
+              data-latest-skipped={newest.skipped.length}
+              title={note.title}
+            >
+              {note.text}
+            </Text>
+          )}
 
-        {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
+          {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
             row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
             stand once above the tiles, spaced by the block. `disabled` is the card's alone: the
             server's silence the doors read themselves, and say so in their own words. */}
-        {bare ? null : kind === 'render' ? (
-          <RenderDoorsHost
-            band={band}
-            techCardId={techCardId}
-            disabled={disabled}
-            pictures={plates.pictures}
-            membersOf={plates.membersOf}
-            openDeck={openDeck}
-            onDeck={toggleDeck}
-            runOf={() => run}
-          >
-            {outputs}
-          </RenderDoorsHost>
-        ) : (
-          outputs
-        )}
+          {kind === 'render' ? (
+            <>
+              <RenderDoorsNotes />
+              {!bare && inline}
+              {!bare && tilesLeft && outputs}
+              {broughtBlock}
+            </>
+          ) : bare ? null : (
+            <>
+              {inline}
+              {tilesLeft && outputs}
+            </>
+          )}
 
-        {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
+          {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
             workbench to the newest and lets the pin go. «started» while that run is in flight: it is
             not ready yet. */}
-        {newer && (
-          <span className='flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
-            <Text size='micro' variant='label' component='span'>
-              {isRunLive(newer)
-                ? 'newer run started'
-                : newest?.bare
-                  ? 'newer run came back with nothing'
-                  : 'newer run ready'}{' '}
-              ·
-            </Text>
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              aria-label={`show ${runHandle(newestId)} here`}
-              title={`the newest ${kind} run — the one shown now stays in the history below`}
-              onClick={() => releasePin(techCardId)}
-            >
-              show ›
-            </Button>
-          </span>
-        )}
-      </Section>
+          {newer && (
+            <span className='flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
+              <Text size='micro' variant='label' component='span'>
+                {isRunLive(newer)
+                  ? 'newer run started'
+                  : newest?.bare
+                    ? 'newer run came back with nothing'
+                    : 'newer run ready'}{' '}
+                ·
+              </Text>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                aria-label={`show ${runHandle(newestId)} here`}
+                title={`the newest ${kind} run — the one shown now stays in the history`}
+                onClick={() => {
+                  releasePin(techCardId);
+                  clearBenchChoice(techCardId, kind);
+                }}
+              >
+                show ›
+              </Button>
+            </span>
+          )}
 
-      {splitting && (
-        <SplitModal
-          techCardId={techCardId}
-          picture={splitting.picture}
-          handle={splitting.handle}
-          open
-          /* The history's cut, not the input's (T-15): the pieces get their views and become
-             pictures of the band; no prompt role is written for them. */
-          forInput={false}
-          onOpenChange={(open) => !open && setSplitting(null)}
-        />
+          {/* T30: the history, collapsed, as the block's last part. */}
+          {history}
+        </Section>,
       )}
+
+      {splitModal}
     </div>
   );
 }

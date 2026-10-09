@@ -1,10 +1,9 @@
-// НАСТРОЙКА QR — зона «настройки» экрана составников (план §7, §9.3).
+// QR СОСТАВНИКА — показ на экране печати (план §7, §9.3; labels rework D-05).
 //
-// Пресеты: витрина (дефолт) / свой шаблон / фиксированная ссылка. Под полем — ЖИВОЙ пример ссылки
-// для выбранного в превью варианта, версия QR, мм на модуль и мини-QR: всё из того же `qr.ts`, что
-// рисует изнанку A, поэтому то, что видно здесь, и есть то, что напечатается.
-import Input from 'ui/components/input';
-import { Chip, ChipRow } from 'ui/components/chip';
+// Ссылка QR — свойство этикетки, и задаётся она на составнике карточки (одно место правки). Здесь —
+// только показ: пресет, шаблон, ЖИВОЙ пример ссылки для выбранного в превью варианта, версия QR, мм
+// на модуль и мини-QR — всё из того же `qr.ts`, что рисует изнанку A, — и дверь «edit on the card».
+import { Link } from 'react-router-dom';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import {
@@ -16,7 +15,7 @@ import {
 } from './qr';
 import { qrLink, type CareLabelPrefs, type QrPreset } from './use-care-label-prefs';
 
-const PRESETS: { id: QrPreset; label: string; title: string }[] = [
+export const QR_PRESETS: { id: QrPreset; label: string; title: string }[] = [
   {
     id: 'storefront',
     label: 'storefront',
@@ -31,7 +30,7 @@ const PRESETS: { id: QrPreset; label: string; title: string }[] = [
 ];
 
 /** Мини-QR: те же прямоугольники, что на изнанке A, с тихой зоной вокруг. */
-function MiniQr({ link }: { link: string }) {
+export function MiniQr({ link }: { link: string }) {
   const r = qrPrims(link, 0, 0, QR_SIZE_MM);
   if (r.prims.length === 0) return null;
   const q = QR_QUIET_MODULES * r.moduleMm;
@@ -55,54 +54,38 @@ function MiniQr({ link }: { link: string }) {
 
 export function QrSettings({
   prefs,
-  onChange,
   example,
+  editHref,
 }: {
-  prefs: CareLabelPrefs;
-  onChange: (patch: Partial<CareLabelPrefs>) => void;
+  prefs: Pick<CareLabelPrefs, 'qrPreset' | 'qrTemplate'>;
   /** Выбранный в превью вариант: подстановки и подпись («RC27-99999-OFW-03 · M»). */
   example: { vars: QrTemplateVars; label: string } | null;
+  /** Куда править: составник на карточке. */
+  editHref: string;
 }) {
   const link = example ? qrLink(prefs, example.vars) : '';
   const r = example ? qrPrims(link, 0, 0, QR_SIZE_MM) : null;
   const holes = r?.holes ?? [];
-  const editable = prefs.qrPreset !== 'storefront';
+  const preset = QR_PRESETS.find((p) => p.id === prefs.qrPreset) ?? QR_PRESETS[0];
+  const template = prefs.qrPreset === 'storefront' ? STOREFRONT_QR_TEMPLATE : prefs.qrTemplate;
 
   return (
-    <div className='flex flex-col gap-2' data-care-zone='qr'>
-      <ChipRow>
-        {PRESETS.map((p) => (
-          <Chip
-            key={p.id}
-            nonForm
-            pressed={prefs.qrPreset === p.id}
-            selected={prefs.qrPreset === p.id}
-            onClick={() => onChange({ qrPreset: p.id })}
-            title={p.title}
-            data-qr-preset={p.id}
-          >
-            {p.label}
-          </Chip>
-        ))}
-      </ChipRow>
-      <Input
-        name='care-qr-template'
-        aria-label='QR link template'
-        data-care-qr-template=''
-        value={editable ? prefs.qrTemplate : STOREFRONT_QR_TEMPLATE}
-        disabled={!editable}
-        placeholder={
-          prefs.qrPreset === 'fixed' ? 'https://…' : 'https://grbpwr.com/p/{base_sku}?s={size}'
-        }
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          onChange({ qrTemplate: e.target.value })
-        }
-      />
-      {prefs.qrPreset === 'custom' && (
-        <Text size='micro' variant='label'>
-          {'{base_sku} {sku} {size} {colorway_id} {style}'} — base SKU is lower-cased
+    <div className='flex flex-col gap-2' data-care-zone='qr' data-qr-preset={preset.id}>
+      <div className='flex items-baseline justify-between gap-3'>
+        <Text size='micro' className='uppercase' title={preset.title}>
+          {preset.label}
         </Text>
-      )}
+        <Link
+          to={editHref}
+          className='text-micro uppercase tracking-label underline underline-offset-2'
+          data-care-qr-edit=''
+        >
+          edit on the card
+        </Link>
+      </div>
+      <Text size='micro' variant='label' className='break-all' data-care-qr-template=''>
+        {template || '—'}
+      </Text>
       <div className='flex items-start gap-3'>
         {link && holes.every((h) => h.level !== 'block') ? <MiniQr link={link} /> : null}
         <div className='flex min-w-0 flex-col gap-1'>

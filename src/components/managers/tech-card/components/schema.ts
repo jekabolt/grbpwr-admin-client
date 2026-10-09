@@ -96,6 +96,19 @@ import {
   isWeldMachineType,
 } from './equipment-options';
 import { wireInt } from './wire-int';
+import {
+  careLabelOut,
+  careLabelSchema,
+  careLabelToForm,
+  garmentLabelSchema,
+  garmentLabelsOut,
+  garmentLabelsToForm,
+  keyedList,
+  newCareLabel,
+  packagingItemSchema,
+  packagingItemsOut,
+  packagingItemsToForm,
+} from './labels-schema';
 // ТОКЕН РАБОТЫ «ПРОРЕЗЬ» — ИЗ ОБЩЕГО МОДУЛЯ ОСИ, а не строкой здесь: то же правило проверяет
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
 // остался бы на поле, которого нет на экране.
@@ -117,6 +130,7 @@ import {
   annotationKindToWire,
   readAnnotationCaps,
 } from 'ui/components/annotation/wire';
+import { parseSpec, specWire } from 'ui/components/annotation/purpose';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -244,6 +258,8 @@ const mediaItemSchema = z.object({
   mediaId: z.number(),
   kind: z.string().optional().default(DEFAULT_MEDIA_KIND),
   caption: z.string().optional().default(''), // carried (v2; no UI yet)
+  // E3: moodboard picture role — 'target' | 'detail' | 'material' | 'mood'; '' = unassigned.
+  role: z.string().optional().default(''),
 });
 
 // `calloutSchema` живёт НИЖЕ, сразу за словарём видов выносок: с 0309 карточное указание несёт вид,
@@ -1123,6 +1139,9 @@ const calloutSchema = z.object({
   //     «у этой выноски ключа нет» и на полном перезаписывающем сейве стёрло бы хранимый.
   //     Отсутствие обязано оставаться отсутствием до самого провода.
   clientRef: z.string().nullish(),
+  // НАЗНАЧЕНИЕ (волна callout kinds): JSON-объект строкой, '' = обычное указание. На провод уходит
+  // ВСЕГДА объектом (`specWire`): пустая строка там значит «не прислано».
+  spec: z.string().optional().default(''),
 });
 
 // K-3 · ПОЛНОСТЬЮ ПУСТАЯ ВЫНОСКА НЕ СОХРАНЯЕТСЯ.
@@ -2072,6 +2091,11 @@ const techCardObject = z.object({
   // (отсутствует = сохрани хранимое, `''` = сотри, значение = поставь), и пустая строка отсюда
   // была бы КОМАНДОЙ, а не молчанием.
   garmentDescription: z.string().nullish(),
+  // СЛОВА ЧЕЛОВЕКА ДЛЯ ФЛЭТА (M14, владелец 07.10: «показывай в WORDS только то, что уходит»). Пишет
+  // только человек в FLAT › WORDS под строкой класса (`design/flat-words-field.tsx`): ни засева, ни
+  // `ai ✦`, ни рекола — автор известен по построению, и флэт шлёт их как напечатаны. Та же дисциплина
+  // отсутствия, что у описания: `undefined` — сервер про поле не знает (ключ не уезжает).
+  flatWords: z.string().nullish(),
   // children
   sizeIds: z.array(z.number()).default([]),
   // NO sizeQuantities. Типовой калькуляционный тираж («size run») удалён из формы целиком:
@@ -2148,8 +2172,15 @@ const techCardObject = z.object({
   // осведомлённую пустоту против карточки, у которой снимки есть, — иначе отставшая вкладка
   // стирала бы десятки выносок молча. Ставит только кнопка «снять фотографии шагов».
   mediaCleared: z.boolean().default(false),
+  // LEGACY (tech_card_label): read for the old labels tab until I-11 deletes it; NEVER written —
+  // the server ignores labels=45 since 0386, and this client does not send it at all.
   labels: z.array(labelSchema).default([]),
   packaging: packagingSchema,
+  // LABELS REWORK (0386): the composition label (always present, overrides only), the garment
+  // labels and the packaging items. Written ONLY through the writers in form-writers.ts.
+  careLabel: careLabelSchema.default(newCareLabel),
+  garmentLabels: keyedList(garmentLabelSchema, 'labels'),
+  packagingItems: keyedList(packagingItemSchema, 'packaging items'),
   costing: costingSchema,
   issues: z.array(issueSchema).default([]),
   signoffs: z.array(signoffSchema).default([]),
@@ -2291,6 +2322,9 @@ export const techCardDefaultData: TechCardFormData = {
   mediaCleared: false,
   labels: [],
   packaging: { ...emptyPackaging },
+  careLabel: newCareLabel(),
+  garmentLabels: [],
+  packagingItems: [],
   costing: { ...emptyCosting },
   issues: [],
   signoffs: [],
@@ -2318,6 +2352,7 @@ function mapMediaItemToForm(
     mediaId: m.mediaId || 0,
     kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : fallbackKind,
     caption: m.caption || '',
+    role: m.role || '',
   };
 }
 function mapMediaItemOut(m: FormMediaItem): common_TechCardMediaItem {
@@ -2325,6 +2360,7 @@ function mapMediaItemOut(m: FormMediaItem): common_TechCardMediaItem {
     mediaId: m.mediaId,
     kind: (m.kind || 'TECH_CARD_MEDIA_KIND_UNKNOWN') as common_TechCardMediaKind,
     caption: m.caption?.trim() || '',
+    role: m.role || '',
   };
 }
 
@@ -2494,6 +2530,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // строкой выше: `?? undefined`, а не `|| ''`, иначе первый же сейв карточки, прочитанной без
     // описания, стёр бы описание.
     garmentDescription: insert?.garmentDescription ?? undefined,
+    // M14: тот же протокол — сервер без поля его не шлёт, и ключ не уезжает назад.
+    flatWords: insert?.flatWords ?? undefined,
     sizeIds: insert?.sizeIds ?? [],
     // size_quantities НЕ читается в форму — типовой тираж больше не существует как понятие в UI.
     patterns: (insert?.patterns ?? []).map((p) => ({
@@ -2556,6 +2594,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // записанная до контракта, ключа не несёт, и придуманное здесь `''` означало бы «ключа нет»
       // вместо «я про ключ ничего не знаю».
       clientRef: c.clientRef ?? undefined,
+      // '' и '{}' — одно «обычное»; форма держит пустое, чтобы прочитанное без правки не было грязным.
+      spec: parseSpec(c.spec) ? (c.spec ?? '') : '',
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -2779,6 +2819,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           notes: insert.packaging.notes || '',
         }
       : { ...emptyPackaging },
+    careLabel: careLabelToForm(insert?.careLabel),
+    garmentLabels: garmentLabelsToForm(insert?.garmentLabels),
+    packagingItems: packagingItemsToForm(insert?.packagingItems),
     costing: insert?.costing
       ? {
           cmtCost: decimalToInput(insert.costing.cmtCost),
@@ -3151,6 +3194,9 @@ export function mapFormToTechCardInsert(
       data.garmentDescription === undefined || data.garmentDescription === null
         ? undefined
         : data.garmentDescription.trim(),
+    // M14: слова человека для флэта — та же дисциплина ключа (и тот же гейт возможностей на выходе).
+    flatWords:
+      data.flatWords === undefined || data.flatWords === null ? undefined : data.flatWords.trim(),
     // Схема их объявила и читатель их читает, но провод ими молчит, пока не подключён гейт
     // возможностей (`design/payload-gate.ts`): гейтвей собран с `DiscardUnknown: false`, поэтому
     // незнакомое поле — это 400 на ВЕСЬ документ, а не тишина, и бандл, начавший их слать раньше
@@ -3237,6 +3283,8 @@ export function mapFormToTechCardInsert(
       // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
       // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
       parts: calloutPartsOut(c),
+      // ВСЕГДА ОБЪЕКТ, вместе с видом: '{}' — «обычное», '' сервер прочёл бы как «не прислано».
+      spec: specWire(c.spec),
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
@@ -3787,16 +3835,18 @@ export function mapFormToTechCardInsert(
         note: o.note?.trim() || '',
       };
     }),
-    labels: (data.labels ?? []).map((l) => ({
-      labelType: (l.labelType || 'TECH_CARD_LABEL_TYPE_UNKNOWN') as common_TechCardLabelType,
-      content: l.content?.trim() || '',
-      placement: l.placement?.trim() || '',
-      attachment: l.attachment?.trim() || '',
-      size: l.size?.trim() || '',
-      note: l.note?.trim() || '',
-      bomItemId: wireInt(l.bomItemId),
-    })),
+    // LEGACY labels (45) are NOT sent: the server has ignored them on write since 0386, and an
+    // explicit undefined also keeps `...original` from echoing the stored rows back.
+    labels: undefined,
     packaging: mapPackagingOut(data.packaging),
+    // LABELS REWORK (0386). `labelsAware` on EVERY save: without it the server keeps the stored
+    // garment labels / packaging items as they are (a bundle that does not know them is
+    // indistinguishable from «deleted all») and refuses LABELS / PACKAGING approval. Transport, not
+    // content — not hashed. `careLabel` is always present (null would mean «keep the stored one»).
+    careLabel: careLabelOut(data.careLabel),
+    garmentLabels: garmentLabelsOut(data.garmentLabels),
+    packagingItems: packagingItemsOut(data.packagingItems),
+    labelsAware: true,
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
     costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({

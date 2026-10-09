@@ -11,7 +11,6 @@ import {
   common_TechCardFabricDirection,
   common_TechCardIssueSeverity,
   common_TechCardIssueStatus,
-  common_TechCardLabelType,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardMeasurementUnit,
@@ -280,19 +279,6 @@ export const techCardSignoffStateOptions: Array<{
   { value: 'TECH_CARD_SIGNOFF_STATE_PENDING', label: 'pending' },
   { value: 'TECH_CARD_SIGNOFF_STATE_APPROVED', label: 'approved' },
   { value: 'TECH_CARD_SIGNOFF_STATE_REJECTED', label: 'rejected' },
-];
-
-// Label / tag type (Sheet «Этикетки и упаковка»); required on each label. New labels
-// default to MAIN. Excludes the UNKNOWN sentinel.
-export const techCardLabelTypeOptions: Array<{ value: common_TechCardLabelType; label: string }> = [
-  { value: 'TECH_CARD_LABEL_TYPE_MAIN', label: 'main (brand)' },
-  { value: 'TECH_CARD_LABEL_TYPE_SIZE', label: 'size' },
-  { value: 'TECH_CARD_LABEL_TYPE_CARE', label: 'care' },
-  { value: 'TECH_CARD_LABEL_TYPE_ORIGIN', label: 'origin' },
-  { value: 'TECH_CARD_LABEL_TYPE_FLAG', label: 'flag' },
-  { value: 'TECH_CARD_LABEL_TYPE_HANGTAG', label: 'hangtag' },
-  { value: 'TECH_CARD_LABEL_TYPE_BARCODE', label: 'barcode / RFID' },
-  { value: 'TECH_CARD_LABEL_TYPE_SPECIAL', label: 'special' },
 ];
 
 // The catalog colour filter is sourced from the controlled colour dictionary (see

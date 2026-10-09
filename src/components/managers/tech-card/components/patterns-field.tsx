@@ -17,6 +17,7 @@ import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import { HeaderNote } from 'ui/components/section-header';
 import { Tile, Tiles } from 'ui/components/tiles';
 import {
   PatternUploadButton,
@@ -1302,8 +1303,8 @@ export function PatternsField({
               {has && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   title={`automatic marker of “${label}” pieces on a strip`}
                   onClick={() =>
                     setNesting({
@@ -1360,8 +1361,8 @@ export function PatternsField({
               {has && canEdit && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   data-field='patterns.match'
                   title={`match the DXF pieces to the cut pieces of “${label}”`}
                   onClick={() =>
@@ -1388,8 +1389,8 @@ export function PatternsField({
               {has && canEdit && !!techCardId && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
                   onClick={() =>
                     setMeasuring({
@@ -1413,9 +1414,8 @@ export function PatternsField({
                   onUploaded={(p) =>
                     append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })
                   }
-                  // PatternUploadButton renders a page-sized Button; in a group header it has to
-                  // sit at control density. It exposes no `size`, so density is applied here.
-                  className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
+                  // A group header frames no words (owner, item 38): the underlined door.
+                  quiet
                 />
               )}
             </div>
@@ -1465,16 +1465,18 @@ export function PatternsField({
           materials: {scopeGroups.length}
         </Text>
         {materialsWithoutDxf.length > 0 && (
-          <Pill tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
+          <HeaderNote tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
             without DXF: {materialsWithoutDxf.length}
-          </Pill>
+          </HeaderNote>
         )}
         {missingSizeNotes.length > 0 && (
-          <Pill tone='warn' title={missingSizeNotes.join('; ')}>
+          <HeaderNote tone='warn' title={missingSizeNotes.join('; ')}>
             size gaps: {missingSizeNotes.length}
-          </Pill>
+          </HeaderNote>
         )}
-        {looseDxf.length > 0 && <Pill tone='attention'>without a material: {looseDxf.length}</Pill>}
+        {looseDxf.length > 0 && (
+          <HeaderNote tone='attention'>without a material: {looseDxf.length}</HeaderNote>
+        )}
         <div className='ml-auto flex flex-wrap items-center gap-1.5'>
           {geometry.isFetching && (
             <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
@@ -1488,8 +1490,9 @@ export function PatternsField({
                   кто просто хочет положить готовый чертёж. */}
               <Button
                 type='button'
-                variant='secondary'
+                variant='underline'
                 size='xs'
+                className='text-labelColor hover:text-textColor'
                 onClick={() => setMerging(true)}
                 title='CLO exports the seam allowance only for the current size — merge the sizes into one drawing'
               >
@@ -1501,7 +1504,7 @@ export function PatternsField({
                 fabricScopes={uploadScopes}
                 defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
                 onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-                className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
+                quiet
               />
             </>
           )}

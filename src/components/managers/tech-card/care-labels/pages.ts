@@ -11,6 +11,7 @@
 // Уникальная сторона верстается и кладётся в PDF ОДИН раз (`sideKey`), страницы — ссылки на неё.
 import type { Prim } from '../assembly-print/paper';
 import { paperSvgString } from '../assembly-print/paper-svg';
+import type { Art } from './art-types';
 import type { PartComposition } from './composition-resolver';
 import { withColorway, type Hole } from './holes';
 import {
@@ -60,6 +61,10 @@ export type PrintJob = {
   mode: PrintMode;
   care: { codes: readonly string[]; prose: readonly string[] };
   colorways: readonly ColorwayPrintJob[];
+  /** Переопределения составника (labels rework): нет — лента как была, байт-в-байт. */
+  logo?: Art | null;
+  caption?: readonly string[];
+  address?: readonly string[];
 };
 
 // ---------- выход ----------
@@ -192,7 +197,14 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
       const stem = sizeStem(s);
       const face = typesetAFace(
         sh,
-        { sku: s.sku, colour: cw.colour, size: s.label, care: job.care, country: cw.country },
+        {
+          sku: s.sku,
+          colour: cw.colour,
+          size: s.label,
+          care: job.care,
+          country: cw.country,
+          logo: job.logo,
+        },
         seamFor(mode, 'face'),
       );
       const faceKey = addSide(
@@ -210,7 +222,11 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
       );
       const bKey = sideKey(cw.colorwayId, 'A', 'back', qrPerSize ? String(s.sizeId) : '');
       if (!sides.has(bKey)) {
-        const back = typesetABack(sh, { url: s.qrUrl }, seamFor(mode, 'back'));
+        const back = typesetABack(
+          sh,
+          { url: s.qrUrl, caption: job.caption, address: job.address },
+          seamFor(mode, 'back'),
+        );
         addSide(
           {
             key: bKey,

@@ -713,7 +713,7 @@ function MachineProfiles({
         flush
         action={
           <Chip
-            dashed
+            quiet
             onClick={() => {
               const row = { ...emptyMachineProfile, profileKey: ulid() };
               append(row);
@@ -1006,7 +1006,7 @@ function PressProfiles({
       <GroupLabel
         action={
           <Chip
-            dashed
+            quiet
             onClick={() => {
               const row = { ...emptyPressProfile, profileKey: ulid() };
               append(row);
@@ -1669,7 +1669,7 @@ function AdoptChip({
     ? `${moving} ${moving === 1 ? 'setting moves' : 'settings move'} into profile “${targetName}” and clear in the step: it starts inheriting them. steps that already inherit this profile will see the new values.`
     : `${moving} ${moving === 1 ? 'setting moves' : 'settings move'} into a new card profile and clear in the step: it starts inheriting them instead of holding its own copy.`;
   return (
-    <Chip dashed disabled={disabled} onClick={onClick} title={reason || promise}>
+    <Chip quiet disabled={disabled} onClick={onClick} title={reason || promise}>
       ↑ {what}
     </Chip>
   );

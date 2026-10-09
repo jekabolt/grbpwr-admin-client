@@ -47,7 +47,7 @@ import { Placeholder } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
 import { Row, RowTotal } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
-import { SectionHeader } from 'ui/components/section-header';
+import { HeaderNote, SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { carriesGarmentComposition } from 'utils/care-label';
@@ -106,6 +106,7 @@ import {
   useApplyColorwayPalette,
   useUpdateColorwayRecipe,
 } from './useColorwayRecipe';
+import { readColorwayVersion } from './colorway-version';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // Пересчёт dxf-нормы по текущим данным (Ф2) — lazy() ровно потому же, почему dxf-apply.tsx лениво
@@ -286,21 +287,8 @@ function frontRenderUrl(sides?: readonly BenchSide[]): string | undefined {
   return front ? pictureUrl(front) || undefined : undefined;
 }
 
-// THE OPTIMISTIC LOCK, READ AT COMMIT TIME — never at render time. Both colourway writes echo the
-// ref's lockVersion, which IS the shared tech_card.lock_version. Under one staged save the card body
-// commits first (COMMIT_ORDER 0) and bumps that version, and so does every colourway write queued
-// ahead of this one. A version captured when this panel rendered is therefore already stale by the
-// time the header reaches it, and the save would 409 against its own card body. So re-read it
-// immediately before each write — the same move the size chart makes with GetStyleSizeChart.
-async function readColorwayVersion(
-  techCardId: number,
-  colorwayId: number,
-  fallback: number,
-): Promise<number> {
-  const res = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
-  const ref = res.techCard?.colorways?.find((c) => c.colorwayId === colorwayId);
-  return ref?.lockVersion ?? res.techCard?.lockVersion ?? fallback;
-}
+// THE OPTIMISTIC LOCK, READ AT COMMIT TIME — `readColorwayVersion` lives in colorway-version.ts
+// (the composition label's made-in row stages the same kind of colourway write).
 
 // How many recipe rows this draft actually changes against what the server returned. The write is a
 // FULL REPLACE, but identity is the durable pair (piece_line_key || '', bom_line_key): the same slot
@@ -2515,7 +2503,13 @@ function FabricRecipeCard({
           />
         )}
         {normEditable && (
-          <Button type='button' variant='secondary' size='xs' onClick={() => setEditing((v) => !v)}>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            onClick={() => setEditing((v) => !v)}
+          >
             {editing ? 'done' : 'edit'}
           </Button>
         )}
@@ -2525,8 +2519,9 @@ function FabricRecipeCard({
         {canEdit && garment && (
           <Button
             type='button'
-            variant='secondary'
+            variant='underline'
             size='xs'
+            className='text-labelColor hover:text-textColor'
             onClick={() => {
               setEditing(false);
               onRemoveRow(garment.index);
@@ -2606,7 +2601,11 @@ function FabricRecipeCard({
                   className='w-[280px]'
                   triggerProps={{
                     'aria-label': 'colourway article',
-                    className: buttonVariants({ variant: 'secondary', size: 'xs' }),
+                    className: buttonVariants({
+                      variant: 'underline',
+                      size: 'xs',
+                      className: 'text-labelColor hover:text-textColor',
+                    }),
                   }}
                   openElement={draft.materialId > 0 ? 'pin ✎' : 'another article…'}
                 >
@@ -4073,7 +4072,7 @@ function ColorwayRecipeEditor({
           .join(' · ')}
         action={
           <span className='flex items-center gap-2'>
-            {staged && <Pill tone='attention'>staged</Pill>}
+            {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
             {/* ═══ ДВЕРЬ «APPLY PALETTE TO SLOTS ›» — ЯВНАЯ, ОДНА, И ТОЛЬКО ПРИ ПАЛИТРЕ (T45, решение
                 владельца 7). Правка палитры рецепт не трогает никогда; сюда цвет попадает лишь этим
                 жестом и только для названных слотов. Без палитры двери нет вовсе — она обещала бы
@@ -4082,12 +4081,17 @@ function ColorwayRecipeEditor({
                 свежего чтения молча. */}
             {(colorway.colours?.length ?? 0) > 0 &&
               (applyRefusal ? (
-                <InertDoor label='apply palette to slots ›' reason={applyRefusal} size='sm' />
+                <InertDoor
+                  label='apply palette to slots ›'
+                  reason={applyRefusal}
+                  variant='underline'
+                />
               ) : (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='sm'
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   data-cw-apply-door=''
                   onClick={() => setApplying(true)}
                 >
@@ -4315,8 +4319,9 @@ function ColorwayRecipeEditor({
           action={
             <Button
               type='button'
-              variant='secondary'
-              size='sm'
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
               onClick={() => onOpenStudio(colorwayId)}
             >
               open in studio ›

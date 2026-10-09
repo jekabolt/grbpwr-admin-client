@@ -1,16 +1,12 @@
 import { ASPECT_RATIOS } from 'constants/constants';
-import getCroppedImg, { imageFormatOf, normaliseImageFormat } from 'lib/features/getCropped';
+import getCroppedImg, {
+  imageFormatOf,
+  normaliseImageFormat,
+  type CropFrame,
+} from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import {
-  FC,
-  ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { FC, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactCrop, { PercentCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Button } from 'ui/components/button';
@@ -82,7 +78,8 @@ function presetLabel(value: number): string | undefined {
 
 interface CropperInterface {
   selectedFile: string | undefined;
-  saveCroppedImage: (croppedImage: string) => void;
+  /** `frame` — where the cut fell in the source (fractions), for hosts that pin marks to it. */
+  saveCroppedImage: (croppedImage: string, frame?: CropFrame) => void;
   onCancel: () => void;
   /** Preset crop ratio (e.g. the target slot's ratio). */
   initialAspect?: number;
@@ -136,7 +133,7 @@ export const MediaCropper: FC<CropperInterface> = ({
   const { showMessage } = useSnackBarStore();
 
   // Жёсткое требование слота: пропорция одна, менять её нечем и не на что.
-  const lockedAspect = lockAspect ? (initialAspect ?? DEFAULT_LOCKED_ASPECT) : undefined;
+  const lockedAspect = lockAspect ? initialAspect ?? DEFAULT_LOCKED_ASPECT : undefined;
   // Без требования слота кадрирование начинается с ПОЛНОГО кадра «свободно»: пока оператор
   // не выбрал пропорцию, ничего не срезано. Раньше здесь молча вставало 4:5, и снимок 16:9
   // открывался уже наполовину отрезанным, без единого слова об этом.
@@ -350,7 +347,13 @@ export const MediaCropper: FC<CropperInterface> = ({
       // пикселях, и подгонять её второй раз — значит разойтись с числом, которое подписано
       // на рамке.
       const croppedImage = await getCroppedImg(selectedFile, rect, undefined, format, rotation);
-      saveCroppedImage(croppedImage);
+      saveCroppedImage(croppedImage, {
+        x: rect.x / srcW,
+        y: rect.y / srcH,
+        w: rect.width / srcW,
+        h: rect.height / srcH,
+        rotation,
+      });
     } catch (error) {
       console.error('Error cropping image:', error);
       const message =
@@ -373,14 +376,10 @@ export const MediaCropper: FC<CropperInterface> = ({
   const blockedReason = !loadFailed && natural && !rect ? 'no frame set' : null;
 
   const lostShare = rect && srcW && srcH ? 1 - (rect.width * rect.height) / (srcW * srcH) : 0;
-  const lostLabel = rect
-    ? lostShare > 0.005
-      ? `−${Math.round(lostShare * 100)}%`
-      : 'full'
-    : '—';
+  const lostLabel = rect ? (lostShare > 0.005 ? `−${Math.round(lostShare * 100)}%` : 'full') : '—';
   const resultRatio = rect ? (aspect ? presetLabel(aspect) : undefined) : undefined;
-  const resultLabel = rect ? (resultRatio ?? ratioLabel(rect.width, rect.height)) : '—';
-  const sourceRatio = srcW && srcH ? (presetLabel(srcW / srcH) ?? ratioLabel(srcW, srcH)) : '—';
+  const resultLabel = rect ? resultRatio ?? ratioLabel(rect.width, rect.height) : '—';
+  const sourceRatio = srcW && srcH ? presetLabel(srcW / srcH) ?? ratioLabel(srcW, srcH) : '—';
   const capBelow = (crop?.y ?? 0) < 6;
 
   return (

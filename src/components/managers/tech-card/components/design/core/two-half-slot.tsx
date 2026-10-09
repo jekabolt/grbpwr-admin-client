@@ -109,10 +109,16 @@ function DrawHalf({
   onClick,
   anchor,
   ariaLabel,
+  glyph,
+  title,
   className,
   ...rest
 }: {
   label: string;
+  /** Знак половины вместо пера (MATERIALS: `generate ✦` — своя дверь, не рисование). */
+  glyph?: React.ReactNode;
+  /** `title` вместо фразы `drawTitle` — для половины, которая не рисует. */
+  title?: string;
   /**
    * КУДА встанет нарисованное — существительным, а не целой фразой: предложение пишет
    * `drawTitle` один раз на всю студию (разбор у него).
@@ -132,12 +138,12 @@ function DrawHalf({
       data-draw-half={anchor ?? ''}
       {...rest}
       aria-label={ariaLabel}
-      title={drawTitle(into)}
+      title={title ?? drawTitle(into)}
       onClick={onClick}
       style={{ minHeight: 0 }}
       className={cn(HALF_FACE, 'border-t border-dashed border-borderColor', className)}
     >
-      <PenGlyph />
+      {glyph ?? <PenGlyph />}
       <span className='leading-tight'>{label}</span>
     </button>
   );
@@ -188,12 +194,18 @@ export function PlaceOrDrawCell({
   onDraw,
   drawLabel = 'draw',
   drawAriaLabel,
+  drawGlyph,
+  drawTitle: drawTitleOverride,
   /** Адрес нарисованного — существительным; предложение пишет `drawTitle`. */
   into,
   cap,
   instead,
   backdrop,
+  corner,
+  quietDoor,
   topAligned,
+  onPick,
+  selected,
   role,
   ariaLabel,
   className,
@@ -224,6 +236,10 @@ export function PlaceOrDrawCell({
   drawLabel?: string;
   /** Шесть половин с надписью «draw» в одной ленте неразличимы на слух — здесь их различают. */
   drawAriaLabel?: string;
+  /** Знак нижней половины вместо пера — когда она не рисует (MATERIALS: `generate`). */
+  drawGlyph?: React.ReactNode;
+  /** `title` нижней половины вместо фразы о рисовании. */
+  drawTitle?: string;
   into?: string;
   /** Подвал под кадром — имя слота и звёздочка обязательной (верстак флэтов). */
   cap?: React.ReactNode;
@@ -235,8 +251,23 @@ export function PlaceOrDrawCell({
    * кадр при этом становится `position: relative`, и больше ничего в плитке не меняется.
    */
   backdrop?: React.ReactNode;
+  /**
+   * T75 · THE TOP-RIGHT CORNER OF THE FRAME (tile anatomy, 20-TILE-SPEC: top-right ✕ = take out of
+   * this block). Drawn over the stripes, inside the box, above the doors; the caller gives a quiet
+   * corner button (`TILE_CORNER + TILE_QUIET`), which shows on hover / focus and always on touch.
+   */
+  corner?: React.ReactNode;
+  /**
+   * Door face without the photo glyph, its word at the bottom of the frame — for a backdrop
+   * pictogram that would otherwise collide with the glyph in the centre (MATERIALS slots).
+   */
+  quietDoor?: boolean;
   /** Не растягивать коробку по строке грида: её рост задаёт пропорция, а не сосед. */
   topAligned?: boolean;
+  /** Any click inside the frame selects the cell first; the click still reaches its door. */
+  onPick?: () => void;
+  /** Selected cell: solid 2px ink frame (ColourwayStrip's selection). */
+  selected?: boolean;
   role?: string;
   ariaLabel?: string;
   className?: string;
@@ -251,9 +282,16 @@ export function PlaceOrDrawCell({
       aria-label={ariaLabel}
       /* Рост — ИНЛАЙНОМ: стенд читает CSS готовой сборки, где произвольного класса, которого не
          было в дереве на момент сборки, нет вовсе (замерено на `h-[calc(50%+1px)]`). */
-      style={{ ...(heightPx != null ? { height: heightPx } : null), ...(topAligned ? { alignSelf: 'start' } : null) }}
+      style={{
+        ...(heightPx != null ? { height: heightPx } : null),
+        ...(topAligned ? { alignSelf: 'start' } : null),
+      }}
+      onClickCapture={onPick}
       className={cn(
         'flex w-full min-w-0 flex-col overflow-hidden border border-dashed border-borderColor',
+        // Outline over the 1px border: a 2px frame without shifting the cell's size.
+        selected &&
+          'border-solid border-textColor outline outline-2 -outline-offset-2 outline-textColor',
         className,
       )}
     >
@@ -266,7 +304,7 @@ export function PlaceOrDrawCell({
         style={{
           ...PLACEHOLDER_SURFACE,
           minHeight: 0,
-          ...(backdrop ? { position: 'relative' as const } : null),
+          ...(backdrop || corner ? { position: 'relative' as const } : null),
           ...(aspect ? { aspectRatio: aspect } : { flex: '1 1 auto' }),
           /* Слово состояния — единственное, что центрируется флексом: у него нет своей ширины и
              отнимать её не у чего. Дверям кадр отдаётся дорожками грида — разбор у `slotFrame`. */
@@ -277,6 +315,7 @@ export function PlaceOrDrawCell({
         className={cn(instead && 'flex items-center justify-center px-2 text-center')}
       >
         {backdrop}
+        {corner && <div className='absolute right-1 top-1 z-20 flex'>{corner}</div>}
         {instead ?? (
           <>
             {/* ⚠ ОБЁРТКА С НУЛЕВЫМ МИНИМУМОМ НЕСУЩАЯ, А НЕ УБОРКА — см. разбор у `slotFrame`. */}
@@ -305,7 +344,8 @@ export function PlaceOrDrawCell({
                   if (first?.id) onSelect?.(first);
                 }}
                 sizeClassName='h-full w-full'
-                className='border-0'
+                compact={quietDoor}
+                className={quietDoor ? 'justify-end border-0 pb-2' : 'border-0'}
               />
             </div>
             {onDraw && (
@@ -315,6 +355,8 @@ export function PlaceOrDrawCell({
                 label={drawLabel}
                 ariaLabel={drawAriaLabel ?? `${drawLabel} — ${label}`}
                 into={into}
+                glyph={drawGlyph}
+                title={drawTitleOverride}
                 onClick={onDraw}
               />
             )}

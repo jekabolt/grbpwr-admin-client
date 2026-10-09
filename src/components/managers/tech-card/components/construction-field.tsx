@@ -94,7 +94,13 @@ export function ConstructionField() {
             The equipment park below takes their place. */}
       </div>
       <div className='mt-2'>
-        <TextareaField name='construction.notes' label='notes' rows={2} maxLength={2000} />
+        <TextareaField
+          name='construction.notes'
+          label='notes'
+          rows={2}
+          maxLength={2000}
+          enhance='note'
+        />
       </div>
       {/* MACHINES & PRESSING — the same question as the three fields above («what does a step
           inherit») asked of the equipment instead of the workmanship, and the reason it sits inside

@@ -10,7 +10,8 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
-import { PlaceOrDrawCell, Reason } from './core';
+import { AskModal, PlaceOrDrawCell, Reason } from './core';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -20,7 +21,13 @@ import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
 import type { MediaViewerItem } from 'ui/components/media-viewer';
 import { PictureTile } from './picture-tile';
+import { successorStands } from './generation/edit-chain';
+import { useEditChainDoors } from './generation/edit-chain-doors';
+import { rowOfPicture } from './generation/picture-slot';
+import { WorkbenchEditor } from './generation/propagating-editor';
 import { selectPickablePictures } from './visibility';
+import { forgetRemoval, rememberRemoval, useRemovals, type Removal } from './removal-undo';
+import { useDesignBand, useDesignWrites } from './use-design-band';
 
 /**
  * ONE BENCH SLOT — and the vocabulary of «what a slot is», which the three other organs of the
@@ -69,7 +76,6 @@ import {
   refColorwayFor,
   colorwayOf,
 } from './bench-kinds';
-
 
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
 export type BenchRead = {
@@ -242,8 +248,13 @@ export function pickableFlats(band: GetDesignBandResponse): common_DesignPicture
      задумано: догадка «флэт» для рода, о котором сборка не слышала, — это дефект L-1 под новым
      именем, а `pictureBenchKind` остаётся при своём вопросе (КАКОЙ ВЕРСТАК берёт плиту) и при
      своих читателях. */
+  // An undone edit (T28 v2) stands in no slot — the server refuses it (`undone_picture`).
   return selectPickablePictures(all).filter(
-    (p) => (p.compositeViews ?? []).length === 0 && pictureRepresentation(band, p) === 'flat',
+    (p) =>
+      !p.undoneAt &&
+      !successorStands(p, all) &&
+      (p.compositeViews ?? []).length === 0 &&
+      pictureRepresentation(band, p) === 'flat',
   );
 }
 
@@ -335,6 +346,7 @@ export function InertDoor({
   label,
   reason,
   size = 'xs',
+  variant = 'secondary',
   className,
   reasonVisible = false,
   describedBy,
@@ -354,6 +366,11 @@ export function InertDoor({
    * с `xs`-кнопками, и менять их размер значило бы чинить одну строку и сломать тридцать шесть.
    */
   size?: 'xs' | 'sm';
+  /**
+   * `underline` — the dead twin of a header action (item 32: a door in a block's header is an
+   * underlined word, never a framed button). It ignores `size`: header words are all `xs`.
+   */
+  variant?: 'secondary' | 'underline';
   className?: string;
   /**
    * Print the reason UNDER the door as well as in `title`. Off by default — the sixteen existing
@@ -373,11 +390,26 @@ export function InertDoor({
     <span
       data-inert={reason}
       title={reason}
-      className={cn(reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex', className)}
+      className={cn(
+        reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex',
+        className,
+      )}
     >
-      <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
-        {label}
-      </Button>
+      {variant === 'underline' ? (
+        <Button
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          disabled
+          aria-describedby={describedBy}
+        >
+          {label}
+        </Button>
+      ) : (
+        <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
+          {label}
+        </Button>
+      )}
       {reasonVisible && <Reason>{reason}</Reason>}
     </span>
   );
@@ -460,15 +492,24 @@ export type BenchSlotProps = {
      Единственные два вызывающих (`bench.tsx`) сняты тем же движением; оставленный проп был бы
      API, которого никто не вызывает, и приглашением вернуть орган обратно. Вырезать деталь из
      плиты по-прежнему можно — это `onCrop`, другая дверь с другим исходом. */
+  /** T49 · a picture was taken off this slot in this session: put it back (empty slot only). */
+  undo?: { onClick: () => void; pending?: boolean };
   /** Details only. */
   onRename?: (name: string) => void;
-  onDelete?: () => void;
+  /** Details only. A filled slot is emptied first: the server deletes only an empty one. */
+  onDelete?: () => Promise<unknown> | void;
   /**
    * Бледная пиктограмма изделия в ПУСТОМ кадре (techcard-ux-0925, D-22) — только у сторон, и у
    * каждой стороны СВОЯ: перед, спинка, левый и правый профиль (D-36). Деталь не сторона изделия,
    * и силуэт ей ничего не подсказывает. Готовый узел (`PictogramBackdrop` со `view` этого слота).
    */
   backdrop?: React.ReactNode;
+  /**
+   * Details only (82-INPUT-REDESIGN §5, owner 9): the views were drawn again after this detail —
+   * `stale` with `keep` (stored on the server) · `discard` (the slot empties; the picture stays in
+   * the history and the detail returns to the run row's `target ▾`). `onKeep` absent = no door.
+   */
+  stale?: { onKeep?: () => void; onDiscard: () => void } | null;
 };
 
 /**
@@ -541,6 +582,17 @@ export const BENCH_CELL_STYLE: React.CSSProperties = {
 };
 export const BENCH_FRAME_ASPECT = '1/1';
 
+/**
+ * T31 + T61 · THE FLAT SLOTS CELL — 20% wider than the shared box (166px). FLAT SLOTS owns it, and
+ * MATERIALS (owner T61: «блоки по аналогии с FLAT SLOTS») stands every cell in exactly this box, so
+ * the two steps cannot drift apart: one number, read by both.
+ */
+export const FLAT_CELL_PX = Math.round(BENCH_CELL_PX * 1.2);
+export const FLAT_CELL_STYLE: React.CSSProperties = {
+  width: FLAT_CELL_PX,
+  flex: `0 0 ${FLAT_CELL_PX}px`,
+};
+
 /*
  * ПУСТОГО КАДРА СВОЕЙ РУКОЙ ЭТОТ ФАЙЛ БОЛЬШЕ НЕ РИСУЕТ ВОВСЕ. Полосатая поверхность, квадрат с
  * нулевым минимумом (без него содержательная высота кнопки перебивала `aspect-ratio` — замерено,
@@ -565,28 +617,66 @@ export function SlotCap({
   requiredNote,
   title,
   trailing,
+  strong,
+  quiet,
+  wrap,
+  chosen,
+  rename,
 }: {
   label: string;
+  /**
+   * T75 · THE NAME IS EDITED WHERE IT IS PRINTED (owner 07.10: «2 раза дублируется название детали
+   * в карточке и в текстбоксе снизу — оставим только то что в карточке и эдит по клику»). A click on
+   * the name turns it into a field of the same line height; Enter / blur saves, Esc cancels, an
+   * empty field keeps the old name. `value` is the raw stored name (the printed `label` may carry a
+   * disambiguating suffix).
+   */
+  rename?: { value: string; onCommit: (next: string) => void };
   required?: boolean;
   requiredNote?: string;
   title?: string;
   trailing?: React.ReactNode;
+  /** Bold name: the selected cell of a selectable row (MATERIALS). */
+  strong?: boolean;
+  /** Grey name that goes ink on the hover of an enclosing `group` (selectable rows). */
+  quiet?: boolean;
+  /** The whole name on up to two lines instead of one truncated line (MATERIALS). */
+  wrap?: boolean;
+  /**
+   * T61 · THE CHOSEN CELL of a selectable row (MATERIALS: what GENERATE will make). The cap goes
+   * inverted — the app's own selected grammar (`Text variant='selected'`, the chosen chip) — so the
+   * choice reads from across the screen, not only from a 2px frame.
+   */
+  chosen?: boolean;
 }) {
   return (
     <div
-      className='flex min-w-0 items-baseline gap-1 border-t border-hairline px-1.5 py-1'
+      className={cn(
+        'flex min-w-0 items-baseline gap-1 border-t px-1.5 py-1',
+        chosen
+          ? 'border-textColor bg-textColor text-bgColor [&_button]:text-bgColor [&_button:hover]:text-bgColor'
+          : 'border-hairline',
+      )}
       title={title || undefined}
       data-bench-cap={label}
     >
-      <Text
-        size='micro'
-        variant='uppercase'
-        tracking='label'
-        component='span'
-        className='min-w-0 truncate'
-      >
-        {label}
-      </Text>
+      {rename ? (
+        <CapName label={label} rename={rename} />
+      ) : (
+        <Text
+          size='micro'
+          variant={chosen ? 'selected' : 'uppercase'}
+          tracking='label'
+          component='span'
+          className={cn(
+            wrap ? 'line-clamp-2 min-w-0 flex-1 break-words' : 'min-w-0 truncate',
+            strong && 'font-bold',
+            quiet && !strong && !chosen && 'text-labelColor group-hover:text-textColor',
+          )}
+        >
+          {label}
+        </Text>
+      )}
       {required && (
         <Text size='micro' component='span' className='text-error' title={requiredNote}>
           *
@@ -595,6 +685,188 @@ export function SlotCap({
       {trailing}
     </div>
   );
+}
+
+/**
+ * T75 · THE CAP'S NAME, RENAMEABLE IN PLACE. At rest it is the printed name with a text cursor and
+ * an underline on hover (`title='rename'`); a click swaps it for a bare input in the same type and
+ * line, so the cap does not grow. Only the name is the target: the cap's `undo` and pills beside it
+ * stay their own buttons.
+ */
+export function CapName({
+  label,
+  rename,
+  muted = false,
+}: {
+  label: string;
+  rename: { value: string; onCommit: (next: string) => void };
+  /** M15: a name the model gave (`made_by_model`) is grey until a person renames it. */
+  muted?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(rename.value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Esc and Enter both end the edit; the blur that follows must not commit a second time.
+  const done = useRef(false);
+  const refocus = useRef(false);
+
+  useEffect(() => {
+    if (!editing) {
+      if (refocus.current) buttonRef.current?.focus();
+      refocus.current = false;
+      return;
+    }
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  const close = (commit: boolean, focusBack = false) => {
+    if (done.current) return;
+    done.current = true;
+    refocus.current = focusBack;
+    const next = draft.trim();
+    if (commit && next && next !== rename.value) rename.onCommit(next);
+    setEditing(false);
+  };
+
+  if (editing)
+    return (
+      <input
+        ref={inputRef}
+        data-detail-rename=''
+        aria-label={`rename ${label}`}
+        value={draft}
+        maxLength={120}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => close(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            close(true, true);
+          } else if (e.key === 'Escape') {
+            // The studio listens for Esc (pick mode, viewers): this one belongs to the field.
+            e.preventDefault();
+            e.stopPropagation();
+            close(false, true);
+          }
+        }}
+        className='m-0 h-[1lh] min-w-0 flex-1 border-0 bg-transparent p-0 text-micro uppercase tracking-label text-textColor underline decoration-textColor underline-offset-2 outline-none'
+      />
+    );
+
+  return (
+    <button
+      ref={buttonRef}
+      type='button'
+      data-detail-name={label}
+      title='rename'
+      aria-label={`rename detail ${label}`}
+      onClick={() => {
+        done.current = false;
+        setDraft(rename.value);
+        setEditing(true);
+      }}
+      className={cn(
+        'min-w-0 cursor-text truncate text-left text-micro uppercase tracking-label decoration-labelColor underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none',
+        muted ? 'text-labelColor' : 'text-textColor',
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * T49 · THE QUIET `undo` OF A REMOVAL (owner item 49): one underlined word on an empty slot whose
+ * picture was taken off in this session. The write is the menu's own (`SetDesignBenchSlot` with
+ * the remembered picture, at the slot's current revision) — see `useRemovalUndo`.
+ */
+export function UndoRemoval({
+  label,
+  pending,
+  onClick,
+  className,
+}: {
+  label: string;
+  pending?: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type='button'
+      data-undo-removal={label}
+      aria-label={`undo — put the removed picture back into ${label}`}
+      title='undo — put the removed picture back'
+      disabled={pending}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        'cursor-pointer bg-bgColor text-nano uppercase tracking-label text-labelColor underline hover:text-textColor disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        className,
+      )}
+    >
+      {pending ? 'undo…' : 'undo'}
+    </button>
+  );
+}
+
+/**
+ * T49 · REMEMBER A REMOVAL, AND PUT IT BACK. `remember` is called by the ✕ writers on success;
+ * `undoFor(ref)` answers the slot's undo (or null), and its click re-places the same picture with
+ * `SetDesignBenchSlot` at `currentRev`. Success or refusal, the undo is spent: a refusal (the slot
+ * was filled meanwhile, the picture was deleted…) is said by the write seam's snackbar.
+ */
+export function useRemovalUndo(techCardId: number) {
+  const writes = useDesignWrites(techCardId);
+  const { band } = useDesignBand(techCardId);
+  const removalAt = useRemovals();
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const remember = (
+    ref: DesignBenchSlotRef,
+    kind: Removal['kind'],
+    side: string,
+    pictureId: number,
+  ) =>
+    rememberRemoval({
+      card: techCardId,
+      key: slotRefKey(ref),
+      kind,
+      ref,
+      side,
+      colorwayId: ref.colorwayId ?? 0,
+      pictureId,
+    });
+  const undoFor = (ref: DesignBenchSlotRef, currentRev: number) => {
+    const key = slotRefKey(ref);
+    const removal = removalAt(techCardId, key);
+    if (!removal) return undefined;
+    /* The picture already stands in another slot per the band (marked from the workbench, moved
+       by an edit-chain undo): putting it back here is refused `picture_already_in_slot`. */
+    if ((band.bench ?? []).some((row) => (row.pictureId ?? 0) === removal.pictureId)) {
+      return undefined;
+    }
+    return {
+      pending: pendingKey === key,
+      onClick: () => {
+        if (pendingKey) return;
+        setPendingKey(key);
+        writes.setBenchSlot.mutate(
+          { slot: removal.ref, pictureId: removal.pictureId, expectedSlotRev: currentRev },
+          {
+            onSettled: () => {
+              forgetRemoval(techCardId, key);
+              setPendingKey(null);
+            },
+          },
+        );
+      },
+    };
+  };
+  return { remember, undoFor };
 }
 
 /**
@@ -619,11 +891,20 @@ function EmptyCell({
   mediaLabel = 'from media',
   onPlaceMedia,
   onDraw,
+  undo,
+  rename,
+  corner,
 }: {
   label: string;
   required?: boolean;
   requiredNote?: string;
   purpose: string;
+  /** T75 · details: the cap's name renames in place. */
+  rename?: { value: string; onCommit: (next: string) => void };
+  /** T75 · details: the frame's top-right ✕ that deletes the detail itself. */
+  corner?: React.ReactNode;
+  /** T49 · the quiet `undo` of the last removal from this slot, on the cap's right. */
+  undo?: React.ReactNode;
   disabled?: boolean;
   picking?: boolean;
   /**
@@ -678,28 +959,52 @@ function EmptyCell({
         ) : undefined
       }
       backdrop={backdrop}
+      corner={disabled ? undefined : corner}
       className={cn(picking && 'border-textColor', proposed && 'border-solid border-warning')}
       cap={
         <SlotCap
           label={label}
+          rename={disabled ? undefined : rename}
           required={required}
           requiredNote={requiredNote}
           trailing={
-            proposed ? (
-              <Pill
-                tone='attention'
-                data-proposed-pill=''
-                className='ml-auto leading-none'
-                title='the construction draft proposed this detail — put a picture, draw, rename or remove it to accept'
-              >
-                proposed
-              </Pill>
+            proposed || undo ? (
+              <span className='ml-auto flex items-baseline gap-1'>
+                {proposed ? (
+                  <Pill
+                    tone='attention'
+                    data-proposed-pill=''
+                    className='leading-none'
+                    title='the construction draft proposed this detail'
+                  >
+                    proposed
+                  </Pill>
+                ) : null}
+                {undo}
+              </span>
             ) : undefined
           }
         />
       }
     />
   );
+}
+
+/**
+ * T75 · WHAT POINTS AT A DETAIL SLOT — runs that asked for its output (`params.detail_slot_ids`) and
+ * references labelled with it (`detail_slot_id`). Null when nothing does: then the detail is only a
+ * name, and the ✕ deletes it without a question.
+ */
+export function detailHistory(band: GetDesignBandResponse, slotId: number): string | null {
+  const runs = (band.runs ?? []).filter((r) =>
+    (r.params?.detailSlotIds ?? []).includes(slotId),
+  ).length;
+  const refs = (band.references ?? []).filter((r) => (r.detailSlotId ?? 0) === slotId).length;
+  const parts = [
+    runs ? `${runs} run${runs === 1 ? '' : 's'}` : '',
+    refs ? `${refs} reference${refs === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' and ') : null;
 }
 
 export function BenchSlot(props: BenchSlotProps) {
@@ -727,6 +1032,8 @@ export function BenchSlot(props: BenchSlotProps) {
     onRename,
     onDelete,
     backdrop,
+    undo,
+    stale: staleDoor,
   } = props;
 
   const provenance = picture ? slotProvenance({ picture }) : null;
@@ -770,12 +1077,83 @@ export function BenchSlot(props: BenchSlotProps) {
       ? 'edit marks sit on a layer over this plate — a run reads the plate alone until «save as picture» presses them in'
       : null;
 
+  /* T75 · «from mixed input» is no longer printed under the cell (owner 07.10: «не нужный текст
+     вообще убрать»); the fact rides in the cap's hover title with the rest of the provenance. */
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
-  const footnote = picture ? slotFootnote(band, picture, shelfOrdinals) : '';
+  const footnote = picture
+    ? [slotFootnote(band, picture, shelfOrdinals), mixedNote].filter(Boolean).join(' · ')
+    : '';
+
+  /* T75 · THE NAME LIVES IN THE CAP ONLY — click to rename, no second field under the cell. */
+  const rename =
+    detail && onRename && !disabled
+      ? {
+          value: (slot?.detailName ?? '').trim(),
+          onCommit: (next: string) => {
+            accept();
+            onRename(next);
+          },
+        }
+      : undefined;
+
+  /* T75 · DELETING THE DETAIL MOVED INTO THE CELL: the empty cell's top-right ✕ deletes the slot
+     itself. There is no write that re-creates an EMPTY detail slot (a mint needs a picture), so an
+     `undo` cannot be offered; the question is asked only when something points at the detail —
+     runs that asked for it or references labelled with it. Otherwise the ✕ deletes at once. */
+  const [askDelete, setAskDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const history = detail && slotId > 0 ? detailHistory(band, slotId) : null;
+  const runDelete = () => {
+    if (!onDelete || deleting) return;
+    setAskDelete(false);
+    setDeleting(true);
+    removeThenSettle(onDelete, accept)
+      .catch(() => {
+        // The refusal is said by the mutation's seam; the slot stays.
+      })
+      .finally(() => setDeleting(false));
+  };
+  const deleteCorner =
+    detail && onDelete && !disabled && !proposed ? (
+      <button
+        type='button'
+        data-detail-delete={label}
+        aria-label={`delete detail ${label}`}
+        title={`delete detail «${label}»`}
+        aria-busy={deleting || undefined}
+        disabled={deleting || saving}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (history) setAskDelete(true);
+          else runDelete();
+        }}
+        className={cn(
+          'z-20 py-0.5 leading-none',
+          TILE_CORNER,
+          TILE_QUIET,
+          deleting && 'opacity-100',
+        )}
+      >
+        {deleting ? '…' : '✕'}
+      </button>
+    ) : undefined;
+
+  /* THE EDIT PROPAGATES, AND WALKS BACK (04.10, owner item 28, T28): the editor over a filled slot
+     overwrites its picture (the server moves this slot onto the edit, and the bench above draws the
+     edit in the original's place), and `undo` / `redo` step the chain in one server write that
+     moves this slot too (`edit-chain.ts`). The editor reads the overwrite's limits off the row the
+     picture is filed in. */
+  const chainRow = picture ? rowOfPicture(band, picture) : [];
+  const chainDoors = useEditChainDoors({
+    techCardId,
+    picture,
+    handle: label,
+    disabled: !!disabled || !editable || saving,
+  });
 
   return (
-    // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`,
-    // the «remove slot» door) reveal on hover of the whole cell, not of the frame alone.
+    // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`)
+    // reveal on hover of the whole cell, not of the frame alone.
     <div className='group flex h-full min-w-0 flex-col gap-1' data-bench-slot={label}>
       {url && picture ? (
         /* ═══ ЗАПОЛНЕННАЯ — рамка на ЯЧЕЙКЕ, кадр без своей (`border-0`), подвал под кадром ═══ */
@@ -814,12 +1192,15 @@ export function BenchSlot(props: BenchSlotProps) {
                   }
                 : undefined
             }
+            onUndo={chainDoors.onUndo}
+            onRedo={chainDoors.onRedo}
           />
           {/* ПОДВАЛ — имя стороны и звёздочка; происхождение плиты (`AI · run 5 · a`) уехало в
               `title`: макет его не печатает, а факт остаётся в одном наведении. Тот же орган, что
               у пустой ветки, — этим и держится «одна коробка». */}
           <SlotCap
             label={label}
+            rename={rename}
             required={required}
             requiredNote={requiredNote}
             title={footnote}
@@ -842,6 +1223,13 @@ export function BenchSlot(props: BenchSlotProps) {
           picking={picking}
           proposed={proposed}
           backdrop={backdrop}
+          rename={rename}
+          corner={deleteCorner}
+          undo={
+            undo && !disabled ? (
+              <UndoRemoval label={label} pending={undo.pending} onClick={undo.onClick} />
+            ) : undefined
+          }
           onPlaceMedia={(media) => {
             accept();
             onPlaceMedia(media);
@@ -878,40 +1266,23 @@ export function BenchSlot(props: BenchSlotProps) {
         </div>
       )}
 
-      {detail && onRename && (
-        <DetailNameField
-          name={(slot?.detailName ?? '').trim()}
-          disabled={disabled}
-          onRename={(next) => {
-            accept();
-            onRename(next);
-          }}
-        />
+      {/* ДВЕРЬ СЛОТА ДЕТАЛИ — видна всегда, тихая, под именем (moodboard-flats-1003, T05 + T10).
+          Предложенный пустой слот отвечает здесь же `keep` / `dismiss`; принятый — `remove` в два
+          шага. Другой глагол, чем ✕ плиты: крестик очищает слот, эта дверь сносит сам слот. */}
+      {detail && staleDoor && url && picture && (
+        <StaleDetailDoor label={label} disabled={disabled || saving} door={staleDoor} />
       )}
-
-      {/* ДВЕРЬ СНОСА СЛОТА ДЕТАЛИ — другой глагол, чем ✕ (крестик очищает слот, эта кнопка сносит
-          сам слот), и рядом с плитой их путать нельзя. Появление — той же формулой прозрачности,
-          что у углов плитки: коробка на месте, полоса не дёргается под курсором. */}
-      {!disabled && detail && onDelete && (
-        <span
-          className={cn(
-            'flex flex-wrap items-center gap-1.5',
-            'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
-            '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
-          )}
-        >
-          <Button
-            variant='secondary'
-            size='xs'
-            title='remove this detail slot — not just its picture'
-            onClick={() => {
-              accept();
-              onDelete();
-            }}
-          >
-            remove slot
-          </Button>
-        </span>
+      {/* T75 · only the PROPOSED detail keeps a line under the cell (`keep` / `dismiss`); an accepted
+          one is deleted by the ✕ in its empty frame, and its name is renamed in the cap. */}
+      {!disabled && detail && onDelete && proposed && (
+        <DetailSlotDoor
+          label={label}
+          proposed={proposed}
+          filled={!!(url && picture)}
+          busy={saving}
+          onKeep={accept}
+          onRemove={() => removeThenSettle(onDelete, accept)}
+        />
       )}
 
       {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. `editable`
@@ -920,24 +1291,50 @@ export function BenchSlot(props: BenchSlotProps) {
           «рисунок с нуля» (слой с `base_media_id = 0`), а `slot` тот же, поэтому сплющенная
           картинка встаёт РОВНО В ЭТУ ячейку. Держать его смонтированным под закрытой дверью
           значило бы отбирать оконные клавиши у страницы. */}
-      {!disabled && editable && (picture || vectorOpen) && (
-        <VectorModal
-          open={vectorOpen}
-          onOpenChange={setVectorOpen}
-          techCardId={techCardId}
+      {!disabled && editable && picture && (picture.id ?? 0) > 0 && vectorOpen ? (
+        <WorkbenchEditor
           band={band}
-          base={picture ?? null}
+          techCardId={techCardId}
+          picture={picture}
+          siblings={chainRow}
           slot={{ ref: slotRef, label, slotRev }}
+          slotLabel={label}
+          slotOf={() => label}
           disabled={disabled}
+          onOpenChange={setVectorOpen}
+        />
+      ) : (
+        !disabled &&
+        editable &&
+        (picture || vectorOpen) && (
+          <VectorModal
+            open={vectorOpen}
+            onOpenChange={setVectorOpen}
+            techCardId={techCardId}
+            band={band}
+            base={picture ?? null}
+            slot={{ ref: slotRef, label, slotRev }}
+            disabled={disabled}
+          />
+        )
+      )}
+
+      {history && (
+        <AskModal
+          open={askDelete}
+          title='delete detail'
+          sentence={
+            <>
+              «{label}» is named by {history}. Deleting the detail unhooks them from it.
+            </>
+          }
+          verb='delete detail'
+          onDo={runDelete}
+          onClose={() => setAskDelete(false)}
         />
       )}
 
       {/* Оговорки — только когда они есть: в покое под ячейкой ничего не стоит (макет). */}
-      {mixedNote && (
-        <Text size='nano' variant='label' component='span'>
-          {mixedNote}
-        </Text>
-      )}
       {stale && (
         <Text size='nano' component='span' className='text-warning'>
           {stale}
@@ -1029,45 +1426,238 @@ export function LegacySlotCell({
   );
 }
 
+/** Тихая текстовая кнопка двери: тот же микро-капс и тот же фокус, что у соседних органов. */
+const DOOR_QUIET =
+  'cursor-pointer whitespace-nowrap text-micro uppercase leading-none tracking-label text-labelColor transition-colors hover:text-textColor disabled:cursor-default disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor motion-reduce:transition-none';
+
+/** Взведённый сброс гаснет сам: забытое «remove?» не должно ждать случайного щелчка. */
+const DOOR_ARM_MS = 4000;
+
 /**
- * The detail's name field. Renaming goes through `SetDesignBenchSlot` with the slot's CURRENT
- * picture echoed back — the RPC's `picture_id` is not optional and 0 means UNMARK, so a rename that
- * forgot to carry the plate would silently empty the slot it was renaming.
+ * СНАЧАЛА СНОС, ПОТОМ ЖУРНАЛ (03.10, gate FX5). Запись черновика о предложенном слоте закрывается
+ * (`drafted.acceptSlot`) только после того, как сервер снёс слот: отказ сноса оставляет слот
+ * предложенным, и дверь снова говорит `keep` / `dismiss`, а не `remove` принятого слота.
  */
-function DetailNameField({
-  name,
-  disabled,
-  onRename,
+export function removeThenSettle(
+  remove: () => Promise<unknown> | void,
+  settle: () => void,
+): Promise<unknown> {
+  return Promise.resolve()
+    .then(remove)
+    .then((result) => {
+      settle();
+      return result;
+    });
+}
+
+/**
+ * ═══ ДВЕРЬ СЛОТА ДЕТАЛИ (moodboard-flats-1003, T05 + T10) ═══════════════════════════════════════
+ *
+ * Владелец: «в FLAT SLOTS proposed DETAILS нельзя законфирмить никак» и «не понятно как удалять
+ * детейл, кнопка REMOVE SLOT появляется только на ховер». Одна строка под именем, видна ВСЕГДА:
+ *
+ *   предложенный пустой слот → `keep` (принять запись журнала, `drafted.acceptSlot`) · `dismiss`
+ *     (снести пустой слот сразу: его заводил черновик, и терять в нём нечего, кроме имени);
+ *   принятый слот → `remove`, ВТОРЫМ шагом `remove? yes · no`. Взвод гаснет по Esc, по щелчку
+ *     мимо строки и сам через `DOOR_ARM_MS`; фокус при взводе встаёт на `no`, чтобы двойной
+ *     Enter не сносил слот.
+ *
+ * ⚠ СЕРВЕР СНОСИТ ТОЛЬКО ПУСТОЙ СЛОТ (`slot_filled`). До волны кнопка на заполненном слоте
+ * упиралась в отказ. Теперь вопрос называет картинку (`remove + picture?`), а `onRemove`
+ * вызывающего сначала снимает плиту со слота (она остаётся в истории), потом сносит слот.
+ *
+ * Отказ записи говорит шов мутации; дверь лишь возвращается в покой.
+ */
+export function DetailSlotDoor({
+  label,
+  proposed,
+  filled,
+  busy,
+  onKeep,
+  onRemove,
 }: {
-  name: string;
-  disabled?: boolean;
-  onRename: (name: string) => void;
+  label: string;
+  proposed: boolean;
+  filled: boolean;
+  busy?: boolean;
+  onKeep: () => void;
+  onRemove: () => Promise<unknown> | void;
 }) {
-  const [value, setValue] = useState(name);
-  // The server's name wins whenever it changes underneath — somebody else may have renamed it.
-  useEffect(() => setValue(name), [name]);
-  const commit = () => {
-    const next = value.trim();
-    if (!next || next === name) {
-      setValue(name);
-      return;
+  const [phase, setPhase] = useState<'rest' | 'armed' | 'removing'>('rest');
+  const rowRef = useRef<HTMLDivElement>(null);
+  const noRef = useRef<HTMLButtonElement>(null);
+  const removeRef = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+
+  useEffect(() => {
+    if (phase === 'armed') {
+      noRef.current?.focus();
+      const t = window.setTimeout(() => setPhase('rest'), DOOR_ARM_MS);
+      // Щелчок мимо строки гасит взвод. Не `onBlur`: Safari не фокусирует кнопку по щелчку, и
+      // уход фокуса с `no` снял бы `yes` раньше, чем щелчок до него дойдёт.
+      const away = (e: PointerEvent) => {
+        if (!rowRef.current?.contains(e.target as Node)) setPhase('rest');
+      };
+      document.addEventListener('pointerdown', away, true);
+      return () => {
+        window.clearTimeout(t);
+        document.removeEventListener('pointerdown', away, true);
+      };
     }
-    onRename(next);
+    if (phase === 'rest' && refocus.current) {
+      refocus.current = false;
+      removeRef.current?.focus();
+    }
+    return undefined;
+  }, [phase]);
+
+  const disarm = (focusBack: boolean) => {
+    refocus.current = focusBack;
+    setPhase('rest');
   };
+
+  const run = () => {
+    setPhase('removing');
+    Promise.resolve()
+      .then(onRemove)
+      .catch(() => {
+        // Отказ уже сказан мутацией; слот на месте — дверь снова в покое.
+        setPhase('rest');
+      });
+  };
+
   return (
-    <Input
-      value={value}
-      disabled={disabled}
-      aria-label='detail name'
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          commit();
+    <div
+      ref={rowRef}
+      data-detail-door={phase === 'rest' ? (proposed ? 'proposed' : 'rest') : phase}
+      className='flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1.5'
+      onKeyDown={(e) => {
+        if (phase === 'armed' && e.key === 'Escape') {
+          e.stopPropagation();
+          disarm(true);
         }
       }}
-    />
+    >
+      {phase === 'removing' ? (
+        <Text size='micro' variant='label' component='span' className='uppercase leading-none'>
+          removing…
+        </Text>
+      ) : phase === 'armed' ? (
+        <>
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='uppercase leading-none tracking-label'
+          >
+            {filled ? 'remove + picture?' : 'remove?'}
+          </Text>
+          <span className='inline-flex items-center gap-2'>
+            <button
+              type='button'
+              data-detail-door-confirm=''
+              aria-label={`remove ${label}`}
+              title={filled ? 'the picture leaves the slot and stays in the history' : undefined}
+              className={cn(DOOR_QUIET, 'text-error hover:text-error hover:underline')}
+              onClick={run}
+            >
+              yes
+            </button>
+            <button
+              ref={noRef}
+              type='button'
+              data-detail-door-cancel=''
+              aria-label={`keep ${label}`}
+              className={DOOR_QUIET}
+              onClick={() => disarm(true)}
+            >
+              no
+            </button>
+          </span>
+        </>
+      ) : proposed ? (
+        <>
+          <button
+            type='button'
+            data-detail-door-keep=''
+            aria-label={`keep proposed detail ${label}`}
+            className='inline-flex shrink-0 cursor-pointer items-center whitespace-nowrap border border-warning px-[7px] py-px text-micro uppercase leading-none tracking-pill text-warning transition-colors hover:bg-warning hover:text-bgColor focus-visible:bg-warning focus-visible:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor motion-reduce:transition-none'
+            onClick={onKeep}
+          >
+            keep
+          </button>
+          <button
+            type='button'
+            data-detail-door-dismiss=''
+            aria-label={`dismiss proposed detail ${label}`}
+            disabled={busy}
+            className={DOOR_QUIET}
+            onClick={run}
+          >
+            dismiss
+          </button>
+        </>
+      ) : (
+        <button
+          ref={removeRef}
+          type='button'
+          data-detail-door-remove=''
+          aria-label={`remove detail slot ${label}`}
+          disabled={busy}
+          className={DOOR_QUIET}
+          onClick={() => setPhase('armed')}
+        >
+          remove
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ═══ STALE · KEEP · DISCARD (82-INPUT-REDESIGN §5) ═══════════════════════════════════════════════
+ * One line above the detail door: the blue `stale` pill (mid-flight, needs a human) and two quiet
+ * words. A read-only card shows the pill alone.
+ */
+export function StaleDetailDoor({
+  label,
+  disabled,
+  door,
+}: {
+  label: string;
+  disabled?: boolean;
+  door: { onKeep?: () => void; onDiscard: () => void };
+}) {
+  return (
+    <div data-detail-stale='' className='flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1.5'>
+      <span title='the views were drawn again after this detail'>
+        <Pill tone='attention'>stale</Pill>
+      </span>
+      {!disabled && door.onKeep && (
+        <button
+          type='button'
+          data-detail-stale-keep=''
+          aria-label={`keep stale detail ${label}`}
+          title='it still agrees with the views — keep it'
+          className={DOOR_QUIET}
+          onClick={door.onKeep}
+        >
+          keep
+        </button>
+      )}
+      {!disabled && (
+        <button
+          type='button'
+          data-detail-stale-discard=''
+          aria-label={`discard stale detail ${label}`}
+          title='empty the slot — the picture stays in the history, the detail can be drawn again'
+          className={DOOR_QUIET}
+          onClick={door.onDiscard}
+        >
+          discard
+        </button>
+      )}
+    </div>
   );
 }
 

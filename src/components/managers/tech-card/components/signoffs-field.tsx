@@ -56,8 +56,9 @@ const SECTION_WATCH_FIELDS: Record<string, (keyof TechCardFormData)[]> = {
   // cut pieces' per-colourway fabric map, which is also what the server's colour projection hashes
   // (piece line_keys + the BOM keys the map points at).
   TECH_CARD_SIGNOFF_SECTION_COLOUR: ['pieces'],
-  TECH_CARD_SIGNOFF_SECTION_LABELS: ['labels'],
-  TECH_CARD_SIGNOFF_SECTION_PACKAGING: ['packaging'],
+  // Legacy `labels` left the LABELS digest in 0386 (never written any more), so it is not watched.
+  TECH_CARD_SIGNOFF_SECTION_LABELS: ['careLabel', 'garmentLabels'],
+  TECH_CARD_SIGNOFF_SECTION_PACKAGING: ['packaging', 'packagingItems'],
   TECH_CARD_SIGNOFF_SECTION_COSTING: ['costing'],
 };
 
@@ -305,6 +306,9 @@ export function SignoffsField() {
   const bomItems = useWatch({ control, name: 'bomItems' });
   const labels = useWatch({ control, name: 'labels' });
   const packaging = useWatch({ control, name: 'packaging' });
+  const careLabel = useWatch({ control, name: 'careLabel' });
+  const garmentLabels = useWatch({ control, name: 'garmentLabels' });
+  const packagingItems = useWatch({ control, name: 'packagingItems' });
   const costing = useWatch({ control, name: 'costing' });
 
   // SECTION_WATCH_FIELDS is the single source of truth for the mapping — looked up here, not
@@ -320,6 +324,9 @@ export function SignoffsField() {
     bomItems,
     labels,
     packaging,
+    careLabel,
+    garmentLabels,
+    packagingItems,
     costing,
   };
   const sectionSnapshot = useMemo<Record<string, string>>(() => {
@@ -340,6 +347,9 @@ export function SignoffsField() {
     bomItems,
     labels,
     packaging,
+    careLabel,
+    garmentLabels,
+    packagingItems,
     costing,
   ]);
 

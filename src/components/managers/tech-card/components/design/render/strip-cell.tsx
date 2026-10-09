@@ -7,7 +7,13 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 
 import { EMPTY_WORD } from '../core';
-import { PictureTile, type PictureTileAction, type PictureTileProps } from '../picture-tile';
+import {
+  PictureTile,
+  type PictureTileAction,
+  type PictureTileFlag,
+  type PictureTileMenu,
+  type PictureTileProps,
+} from '../picture-tile';
 import { viewLabel } from '../views';
 
 /**
@@ -120,6 +126,21 @@ export function StripCell({
   /* Правка кадра — тот же угол, что и у сплита (E-3). Пробрасывается, а не решается здесь:
      кто имеет право править и что именно, знает раздел, а не ячейка. */
   onEdit,
+  /**
+   * T17 (спека §3): ✕ — «вон из этого блока» (у плитки рендера — снять со стороны), угол-меню
+   * `mark ▾` и флаг состояния под ярлыком. Ячейка их не раскладывает — это решение примитива.
+   */
+  onRemove,
+  menu,
+  flag,
+  flagInline,
+  /**
+   * ПРИЧИНЫ И ФАКТЫ, КОТОРЫМ НЕ МЕСТО ПОД КАДРОМ (T17, правило 5): подпись «вид · rN», горизонт
+   * колорвея, «почему здесь нечего нажать». Живут в подсказке ячейки, а не строкой прозы.
+   */
+  title,
+  /** Якоря проб, которые раньше висели на строках подписи и дверях под кадром. */
+  anchors,
   selectLabel,
   offeredPictureId,
   /**
@@ -149,18 +170,27 @@ export function StripCell({
   onZoom?: () => void;
   onSelect?: PictureTileAction;
   onEdit?: PictureTileAction;
+  onRemove?: PictureTileAction;
+  menu?: PictureTileMenu;
+  flag?: PictureTileFlag;
+  /** Флаг в строку с ярлыком (п. 44, плита рендера), а не под ним. */
+  flagInline?: boolean;
+  title?: string;
+  anchors?: Record<`data-${string}`, string | number | undefined>;
   selectLabel?: string;
   offeredPictureId?: number;
   cellPictureId?: number;
   empty?: React.ReactNode;
   /** The cell holds something the screen READS — a heavier frame, as on a filled bench slot. */
   emphasis?: boolean;
-  lines: React.ReactNode[];
+  lines?: React.ReactNode[];
   action?: React.ReactNode;
   className?: string;
 }): JSX.Element {
   return (
     <div
+      {...anchors}
+      title={title}
       data-offered={offeredPictureId || undefined}
       data-cell-picture={cellPictureId || undefined}
       className={cn('flex flex-col gap-1', CELL_WIDTH, className)}
@@ -184,6 +214,10 @@ export function StripCell({
           onSplit={onSplit}
           onSelect={onSelect}
           onEdit={onEdit}
+          onRemove={onRemove}
+          menu={menu}
+          flag={flag}
+          flagInline={flagInline}
           selectLabel={selectLabel}
           className='w-full bg-bgColor'
         />
@@ -196,7 +230,7 @@ export function StripCell({
         </div>
       )}
 
-      {lines.map((line, i) => (
+      {(lines ?? []).map((line, i) => (
         <Text key={i} size='nano' variant='label' component='span' className='min-w-0 break-words'>
           {line}
         </Text>

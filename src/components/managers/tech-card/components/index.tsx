@@ -20,6 +20,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   techCardKeys,
   useCreateTechCard,
+  useExitTechCardGuide,
   useTechCardReadiness,
   useUpdateTechCard,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -34,6 +35,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import {
   applyServerFieldErrors,
   errorRootKey,
+  extractFieldViolations,
   flattenFieldErrors,
   revealField,
   transportRefusal,
@@ -65,7 +67,7 @@ import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
-import { LabelsField } from './labels-field';
+import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -75,7 +77,6 @@ import {
   OutputVariantsPanel,
   seedColourVariants,
 } from './output-variants-field';
-import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
 import { PiecesTab } from './pieces-tab';
@@ -102,8 +103,11 @@ import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
+import { CompositionLabelBlock } from './composition-label/composition-label-block';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
+import { createReady } from './create-ready';
+import { parseSeasonToSku } from './season-util';
 import { TechCardFittings } from './tech-card-fittings';
 import {
   auditOperationPresence,
@@ -304,6 +308,9 @@ const ERROR_TAB: Record<string, TabId> = {
   operations: 'construction',
   labels: 'labels',
   packaging: 'labels',
+  careLabel: 'labels',
+  garmentLabels: 'labels',
+  packagingItems: 'labels',
   costing: 'costing',
   issues: 'issues',
   signoffs: 'signoff',
@@ -498,14 +505,21 @@ export function TechCardForm({
   isEditMode,
   id,
   techCard,
+  onCreated,
 }: {
   isEditMode: boolean;
   id?: string;
   techCard?: common_TechCard;
+  /**
+   * Told the id of a card THIS form created, right before it opens that card's address — so the page
+   * keeps this form mounted instead of re-reading it (page.tsx, onboarding S4).
+   */
+  onCreated?: (id: number) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const navigate = useNavigate();
   const createTechCard = useCreateTechCard();
+  const exitGuide = useExitTechCardGuide(id ? parseInt(id, 10) : undefined);
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   // Одно чтение полосы на страницу: студия и артефакты читают тот же ключ React Query, поэтому
@@ -556,6 +570,18 @@ export function TechCardForm({
   // form (the backend would 400 with no field pointer) or park the page on a blank tab.
   const [params, setParams] = useSearchParams();
   const stageParam = params.get('stage');
+  // ═══ CREATE NEW — THE GUIDED CREATE (onboarding S4, owner Q1/Q4) ═══════════════════════════════
+  // A card opened from the list's CREATE NEW (`?guided=1`) is created the moment its four fields are
+  // filled (`createReady`), lands on its own address without a remount and walks the studio's guide.
+  // Every other new card («new idea», a typed /add-tech-card) keeps its `add` button (A5).
+  const guidedCreate = !isEditMode && params.get('guided') === '1';
+  // One key per create session of this mount: a lost answer or a doubled trigger replays the card the
+  // first call made instead of minting a second one (CreateTechCard `client_request_id`).
+  const clientRequestId = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `tc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   const initialStage = techCardStageOptions.some((o) => o.value === stageParam)
     ? (stageParam as TechCardFormData['stage'])
     : undefined;
@@ -1779,7 +1805,7 @@ export function TechCardForm({
         });
         bodySaved = true;
       } else {
-        const created = await createTechCard.mutateAsync(techCardInsert);
+        const created = await createTechCard.mutateAsync({ techCard: techCardInsert });
         bodySaved = true;
         newId = created?.id ?? undefined;
         if (newId) {
@@ -2318,8 +2344,221 @@ export function TechCardForm({
         )()
         .catch(() => resolve(null));
     });
-  // Every «save» door of the page. A new card has no autosave: `add` IS the save.
-  const save = () => (autosaveEnabled ? autosave.saveNow('button') : explicitSave());
+  // ═══ THE GUIDED CREATE — ONE PIPELINE, ONE FLIGHT (onboarding S4, amendments A3–A5) ══════════
+  // create → the staged panels (the style facts) → a forced read of the card → the page adopts it
+  // and the form settles against it → the card's own address, on the SAME mount. The autosave stays
+  // off for all of it: it turns on only with the address (`autosaveEnabled` reads the route id), by
+  // which time the page stands on the version the server holds, and an edit typed while the create
+  // was in flight is still dirty against it (the deep `before` snapshot) and is the autosave's first
+  // write. The flight is installed synchronously: two triggers in one tick (a blur and the footer)
+  // share one promise, so neither a second row nor a second staging commit can start.
+  //   `land` — where it opens: `card` when the fields themselves completed it (the person is still
+  //   typing on CARD DETAILS), `mood` when the footer's `next · moodboard ›` asked for it.
+  //   `loud` — the footer / Enter: refusals are published on the fields; the field commits are quiet.
+  const createFlight = useRef<Promise<number | undefined> | null>(null);
+  const createGuided = (land: 'card' | 'mood', loud: boolean): Promise<number | undefined> => {
+    if (createFlight.current) return createFlight.current;
+    const flight = runGuidedCreate(land, loud).catch((error) => {
+      showMessage(techCardErrorMessage(error, 'the card could not be created'), 'error');
+      return undefined;
+    });
+    createFlight.current = flight;
+    void flight.then((id) => {
+      // A refusal lets the next commit try again; a created card keeps its answer.
+      if (!id && createFlight.current === flight) createFlight.current = null;
+    });
+    return flight;
+  };
+  async function runGuidedCreate(
+    land: 'card' | 'mood',
+    loud: boolean,
+  ): Promise<number | undefined> {
+    const parse = async (): Promise<TechCardFormData | null> => {
+      if (loud) return validatedValues();
+      const parsed = await techCardSchema.safeParseAsync(form.getValues());
+      return parsed.success ? (parsed.data as TechCardFormData) : null;
+    };
+    let data = await parse();
+    if (!data || !createReady(data).ok) return undefined;
+    let resuggested = false;
+    let newId: number | undefined;
+    // What the form held when the create started, deep — the settle below keeps every edit made
+    // since as the operator's own, still dirty.
+    let before = cloneFormValues(form.getValues());
+    for (;;) {
+      const { payload } = gateTechCardPayload(
+        mapFormToTechCardInsert(data, undefined, canWriteCosting),
+        { serverSpeaksDesign: designBandSpeaks },
+      );
+      try {
+        const created = await createTechCard.mutateAsync({
+          techCard: payload,
+          clientRequestId: clientRequestId.current,
+          guided: true,
+        });
+        newId = created?.id ?? undefined;
+        break;
+      } catch (error) {
+        // A generated style number taken in the moment since it was proposed: propose again, once.
+        const taken = extractFieldViolations(error).some(
+          (v) => /style_number$/.test(v.field) && /already/i.test(v.description),
+        );
+        const sku = parseSeasonToSku(data.season);
+        if (
+          taken &&
+          !resuggested &&
+          data.styleNumberSource === 'STYLE_NUMBER_SOURCE_GENERATED' &&
+          sku
+        ) {
+          resuggested = true;
+          // Codex 2: only over the number that was SENT. One the person changed while the create
+          // was on the wire is theirs — not overwritten, and the refusal is not about it: their own
+          // commit (blur, SUGGEST) tries again.
+          const untouched = () =>
+            form.getValues('styleNumber') === data?.styleNumber &&
+            form.getValues('styleNumberSource') === data?.styleNumberSource;
+          if (!untouched()) return undefined;
+          try {
+            const next = (await adminService.SuggestStyleNumber({ skuSeason: sku })).styleNumber;
+            if (!untouched()) return undefined;
+            if (next?.trim()) {
+              form.setValue('styleNumber', next.trim(), { shouldDirty: true });
+              form.setValue('styleNumberSource', 'STYLE_NUMBER_SOURCE_GENERATED', {
+                shouldDirty: true,
+              });
+              const again = await parse();
+              if (again) {
+                data = again;
+                before = cloneFormValues(form.getValues());
+                continue;
+              }
+            }
+          } catch {
+            // No fresh proposal: the refusal below is pinned to the field as it came.
+          }
+        }
+        applyServerFieldErrors(error, form.setError, { stripPrefixes: ['tech_card'] });
+        if (loud)
+          showMessage(techCardErrorMessage(error, 'the card could not be created'), 'error');
+        return undefined;
+      }
+    }
+    if (!newId) return undefined;
+    createdIdRef.current = newId;
+    // The style facts panel stages against the id (A7): a sync render lets its staging effect run
+    // against the new id before the queue is committed.
+    const minted = newId;
+    flushSync(() => setCreatedId(minted));
+    const outcome = await staging.commitAll();
+    // The card exists; what failed stays staged and the autosave carries it through the UPDATE path
+    // once the card's address is open.
+    const stagedNote = outcome.failed
+      ? `the card is created — «${outcome.failed.change.label}» failed: ${techCardErrorMessage(outcome.failed.error, 'unknown error')}. It is still staged and is saved again with the next change.`
+      : null;
+    if (stagedNote) setStagingError(stagedNote);
+    // The forced read: the version every later write claims is the server's, not mount-time zero.
+    // Codex 3: there is no going on without it. Opening the card cold would remount the form and drop
+    // what was typed during the create; opening it warm would arm the autosave on version zero. So
+    // the form stays as it is, the autosave stays off (the address is still /add-tech-card), and the
+    // read is retried with a growing pause until it answers — said once, on the page's banner.
+    let fresh: common_TechCard | undefined;
+    let said = false;
+    for (let attempt = 0; !fresh; attempt++) {
+      if (!pageMounted.current) return newId;
+      try {
+        fresh = (await adminService.GetTechCard({ id: newId, vatCountryCode: undefined })).techCard;
+      } catch {
+        fresh = undefined;
+      }
+      if (fresh) break;
+      if (attempt >= 2 && !said) {
+        said = true;
+        setStagingError(
+          stagedNote
+            ? `${stagedNote} Reading the card back failed — retrying.`
+            : 'the card is created, but reading it back failed — retrying',
+        );
+      }
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** attempt, 10_000)));
+    }
+    if (said) setStagingError(stagedNote);
+    if (!pageMounted.current) return newId;
+    // The studio opens on the step asked for; a create pressed from another tab (the labels prompt,
+    // the fullscreen save) stays on that tab.
+    const address =
+      activeTab === 'studio'
+        ? `${ROUTES.techCards}/${newId}?tab=studio&step=${land}`
+        : `${ROUTES.techCards}/${newId}?tab=${activeTab}`;
+    adopt(fresh);
+    queryClient.setQueryData(techCardKeys.detail(newId), fresh);
+    const server = mapTechCardToForm(fresh);
+    const { signoffs, patterns, bomItems } = assignServerLists(data, server);
+    settleAfterBodySave(
+      before,
+      {
+        values: {
+          ...data,
+          signoffs,
+          patterns,
+          bomItems,
+          construction: server.construction,
+          assemblyCleared: false,
+          mediaCleared: false,
+        },
+        server,
+      },
+      undefined,
+      STYLE_FACT_KEYS,
+    );
+    onCreated?.(newId);
+    navigate(address, { replace: true });
+    return newId;
+  }
+  // Field commits on a guided new card: a blur of name / style number, a pick of category / season
+  // (both commit through `setValue`). Never a keystroke — a card is not created halfway through a name.
+  const [commitTick, setCommitTick] = useState(0);
+  useEffect(() => {
+    if (!guidedCreate) return;
+    const sub = form.watch((_v, { name, type }) => {
+      // A typed style number is NOT a commit: its keystrokes arrive as `change` events (and the
+      // first one flips `styleNumberSource` to MANUAL — not watched for that reason, review M1); it
+      // commits on blur. A style number WRITTEN by SUGGEST (`setValue`, no event type) is a commit.
+      if (
+        name === 'categoryId' ||
+        name === 'season' ||
+        (name === 'styleNumber' && type !== 'change')
+      )
+        setCommitTick((t) => t + 1);
+    });
+    return () => sub.unsubscribe();
+  }, [form, guidedCreate]);
+  const onCardFieldBlur = (e: React.FocusEvent) => {
+    // The field's form path: its `[data-field]` anchor (FormItem, the style number cell) — the inputs
+    // themselves carry no `name` attribute.
+    const target = e.target as HTMLElement;
+    const field =
+      target.closest?.('[data-field]')?.getAttribute('data-field') ?? target.getAttribute?.('name');
+    if (guidedCreate && (field === 'name' || field === 'styleNumber')) setCommitTick((t) => t + 1);
+  };
+  useEffect(() => {
+    // A5: the guided path is the ONLY one that creates by itself.
+    if (!guidedCreate || commitTick === 0) return;
+    if (createdIdRef.current || createFlight.current) return;
+    if (!createReady(form.getValues()).ok) return;
+    void createGuided('card', false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commitTick, guidedCreate]);
+
+  // Every «save» door of the page. A new card has no autosave: `add` IS the save — except on the
+  // guided path, where the save is the guided create (Enter in a field, the fullscreen save).
+  const save = () =>
+    autosaveEnabled
+      ? autosave.saveNow('button')
+      : guidedCreate
+        ? createGuided('card', true).then(
+            (created): SaveResult => ({ outcome: created ? 'complete' : 'invalid' }),
+          )
+        : explicitSave();
 
   // THE AUTOSAVE'S WRITE (mode 'silent'). The controller has already validated QUIETLY (the schema's
   // own parse, nothing published onto the fields — Codex M-02); here the values are parsed exactly as
@@ -2656,7 +2895,9 @@ export function TechCardForm({
   // moved, not rewritten. `StyleFactsField` does NOT ride along: it is the one writer of brand /
   // collection / season / targetGender and stays mounted unconditionally below.
   const cardDetails = (
-    <>
+    /* `display: contents` — the blocks stay items of the studio's stack; the wrapper only hears a
+       blur of name / style number, the commits that may create a guided card. */
+    <div className='contents' onBlur={onCardFieldBlur}>
       {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
         The prototype's `cardBlock()`: a single CARD DETAILS block with a `N of 10 fields` counter
         in its rule and the groups as rules inside it — IDENTIFICATION, CLASSIFICATION, BASE MODEL
@@ -2740,7 +2981,7 @@ export function TechCardForm({
           )}
         </Section>
       )}
-    </>
+    </div>
   );
 
   return (
@@ -2840,7 +3081,9 @@ export function TechCardForm({
                 re-open to draft
               </Button>
             )}
-            {canWrite(SECTION.techCards) && !isEditMode && (
+            {/* The guided path has no `add`: the card is created by its four fields, or by the
+                footer's `next · moodboard ›` (A5) — never two doors for one create. */}
+            {canWrite(SECTION.techCards) && !isEditMode && !guidedCreate && (
               <Button
                 type='button'
                 variant='main'
@@ -3285,8 +3528,25 @@ export function TechCardForm({
               <StudioTab
                 techCardId={numId}
                 disabled={frozen}
+                labelMedia={techCard?.resolvedLabelMedia}
                 cardDetails={cardDetails}
                 constructionAspects={<DetailsEditor techCard={techCard} />}
+                /* THE GUIDE (onboarding S4): the server's flag once the card exists, the address's
+                   promise (`?guided=1`) before it does. */
+                guided={techCard?.guided ?? guidedCreate}
+                onCreate={guidedCreate ? () => createGuided('mood', true) : undefined}
+                onExitGuide={
+                  numId
+                    ? () =>
+                        exitGuide.mutate(undefined, {
+                          onError: (e) =>
+                            showMessage(
+                              techCardErrorMessage(e, 'could not leave the guide'),
+                              'error',
+                            ),
+                        })
+                    : undefined
+                }
                 /* ОДИН ПИСАТЕЛЬ АДРЕСА НА ВСЮ СТРАНИЦУ. Студия держала СВОЮ копию этой записи
                    (`?tab=` + чистка `sample`/`fits` + `replace`) — не по выбору, а потому что
                    волне, писавшей блоки CONSTRUCTION, было запрещено трогать этот файл. Читатель
@@ -3455,20 +3715,19 @@ export function TechCardForm({
               />
             </SectionStack>
 
-            {/* LABELS & PACKAGING */}
+            {/* LABELS & PACKAGING — three full-width blocks, stacked with a large gap (D-13):
+                composition label → labels → packaging. The assembly bill and the packaging recipe
+                stay below, unchanged (D-07). */}
             <SectionStack hidden={activeTab !== 'labels'}>
-              <SectionStack row>
-                <Section title='labels' className='w-full lg:w-1/2'>
-                  <LabelsField
-                    onMissingComposition={goToBomComposition}
-                    // Only a SAVED card has the print door (the screen reads GetTechCard).
-                    techCardId={isEditMode && numId ? numId : undefined}
-                  />
-                </Section>
-                <Section title='packaging' className='w-full lg:w-1/2'>
-                  <PackagingField />
-                </Section>
-              </SectionStack>
+              <div className='flex flex-col gap-12' data-labels-tab=''>
+                <CompositionLabelBlock
+                  techCard={techCard}
+                  techCardId={isEditMode && numId ? numId : undefined}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
+                <LabelsBlock resolvedMedia={techCard?.resolvedLabelMedia} />
+                <PackagingBlock resolvedMedia={techCard?.resolvedLabelMedia} />
+              </div>
               {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
                 need a saved card id. For a brand-new card, prompt to Save (which lands back here)
                 instead of silently hiding them, so the user is never left wondering. */}

@@ -4,7 +4,13 @@ import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
 import type { FlushResult } from '../autosave-contract';
-import type { ProposedColourway, ProposedSlotColour } from '../colourway-proposals-model';
+import {
+  proposalIdentity,
+  withoutKnownColourways,
+  type ColourwayIdentity,
+  type ProposedColourway,
+  type ProposedSlotColour,
+} from '../colourway-proposals-model';
 import type { ConstructionDraft } from './construction-draft-model';
 import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './draft-fills';
 
@@ -677,7 +683,11 @@ type Store = {
   clearDismissed: (card: number) => void;
   /** Чужая вкладка записала ключ карточки (событие `storage`) — память освежается из хранилища. */
   refresh: (card: number, which: 'fills' | 'dismissed') => void;
-  setProposals: (card: number, list: ProposedColourway[]) => void;
+  /**
+   * `known` — колорвеи, уже сохранённые на карточке (T06): совпавшее с ними предложение не встаёт,
+   * как и совпавшее с подтверждённым в этой памяти.
+   */
+  setProposals: (card: number, list: ProposedColourway[], known?: ColourwayIdentity[]) => void;
   patchProposal: (card: number, id: string, patch: Partial<ProposedColourway>) => void;
   patchSlot: (card: number, id: string, slot: number, patch: Partial<ProposedSlotColour>) => void;
   setVerdict: (card: number, id: string, verdict: ColourwayVerdict) => void;
@@ -928,13 +938,24 @@ export const useDraftMemory = create<Store>((set, get) => ({
    * предложить создать его второй раз. Отклонённые уходят вместе со своим предложением — отказ
    * был отказом ЭТОМУ предложению, а не цвету навсегда.
    */
-  setProposals: (card, list) =>
+  setProposals: (card, list, known = []) =>
     set((s) =>
       edit(s, card, (m) => {
         const kept: Record<string, ColourwayVerdict> = {};
         for (const [id, v] of Object.entries(m.verdicts))
           if (v.status === 'confirmed') kept[id] = v;
-        return { ...m, proposals: list, verdicts: kept };
+        // T06: подтверждённое — это продукт; новый ответ не предлагает его второй раз, даже пока
+        // перечитанная карточка его ещё не несёт. Повтор ТОГО ЖЕ ответа (те же id) несёт и само
+        // подтверждённое — оно остаётся, его квитанция и так прячет его рядом с сохранённым рядом.
+        const confirmed = m.proposals.filter((p) => kept[p.id]).map(proposalIdentity);
+        const fresh = new Set(
+          withoutKnownColourways(list, [...known, ...confirmed]).map((p) => p.id),
+        );
+        return {
+          ...m,
+          proposals: list.filter((p) => kept[p.id] || fresh.has(p.id)),
+          verdicts: kept,
+        };
       }),
     ),
 

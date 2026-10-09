@@ -161,11 +161,13 @@ export function ledgerSend(
   scope: string,
   fingerprint: string,
   operator = operatorKey(),
+  /** A key the caller derives itself (deterministic across tabs and remounts); wins over the entry's. */
+  fixedId?: string,
 ): { id: string; stored: boolean } {
   const all = book();
   const at = scopeOf(operator, techCardId, scope);
   const found = all[at]?.[fingerprint];
-  const id = found ? found.id : newClientRequestId();
+  const id = fixedId || (found ? found.id : newClientRequestId());
   const unsure = !!found && (found.unsure || found.pending);
   all[at] = { ...all[at], [fingerprint]: { id, pending: true, unsure } };
   return { id, stored: save() };

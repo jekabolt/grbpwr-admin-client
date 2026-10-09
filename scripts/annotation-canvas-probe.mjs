@@ -50,8 +50,8 @@ const MUTATIONS = {
     from: "      if (e.key === 'Enter' && !typing && !placing && selected !== null && byKey.has(selected)) {",
     to: '      if (false) {',
   },
-  // Маркиза выбранной фигуры не рисуется.
-  marquee: { file: /annotation\/surface\.tsx$/, from: '  const marquee = (() => {', to: '  const marquee = (() => { if (1) return null;' },
+  // R18: след выбора рисуется и у фигуры С РУЧКАМИ — второй сигнал выбора поверх ручек.
+  trace: { file: /annotation\/surface\.tsx$/, from: 'dim(selectedCallout.key) || handlesVisible) return null;', to: 'dim(selectedCallout.key)) return null;' },
   // ⌘Z снова сравнивается по НАПЕЧАТАННОЙ букве: на кириллице и греческом откат умирает.
   keyz: { file: /annotation\/surface\.tsx$/, from: "e.code === 'KeyZ'", to: "e.key === 'z'" },
   // Штрих снова копится в буфере вместо записи в форму: Save отправляет карточку без нарисованного.
@@ -66,6 +66,22 @@ const MUTATIONS = {
   slot: { file: /focused-annotator\.tsx$/, from: '    !readOnly && hasMedia ? (', to: '    !readOnly && hasMedia && selected != null ? (' },
   // Редактор не прокидывается в увеличенный вид: правка в зуме идёт в редактор ПОЗАДИ модалки.
   zoom: { file: /focused-annotator\.tsx$/, from: '          renderEditor={renderEditor}', to: '          renderEditor={undefined}' },
+  // T12: двойной клик по снимку больше не открывает увеличенный вид — двери в зум нет вовсе.
+  dbldoor: { file: /focused-annotator\.tsx$/, from: 'onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}', to: 'onOpenLarge={undefined}' },
+  // T12: двойной клик взведённым инструментом открывает зум вместо второй точки фигуры.
+  dblarmed: { file: /annotation\/surface\.tsx$/, from: 'if (placing || adding !== null || lastPresses.current.some(Boolean)) return;', to: 'if (false) return;' },
+  // HX1: прежнее окно «800 мс от последнего взведённого нажатия» — глотает зум сразу после постановки.
+  dblwindow: {
+    edits: [
+      { file: /annotation\/surface\.tsx$/, from: '  const lastPresses = useRef<boolean[]>([]);', to: '  const lastPresses = useRef<boolean[]>([]);\n  const armedPressAt = useRef(-Infinity);' },
+      { file: /annotation\/surface\.tsx$/, from: 'lastPresses.current.some(Boolean)) return;', to: 'e.timeStamp - armedPressAt.current < 800) return;' },
+      { file: /annotation\/surface\.tsx$/, from: '    lastPresses.current = [...lastPresses.current, placing || adding !== null].slice(-2);\n', to: '    if (placing || adding !== null) armedPressAt.current = e.timeStamp;\n' },
+    ],
+  },
+  // HX3: двери в зум с клавиатуры нет — кнопка на кадре не рисуется.
+  kbddoor: { file: /annotation\/surface\.tsx$/, from: '          {onOpenLarge && (\n            <button', to: '          {false && (\n            <button' },
+  // HX3: Enter на двери перехватывает слушатель окна — при выбранной выноске открывается её редактор.
+  kbdenter: { file: /annotation\/surface\.tsx$/, from: "      if (isEnter(e) && t?.closest?.('[data-open-large]')) return;\n", to: '' },
   // Порог заворота вернулся к «упёрся в самый конец»: первая стрелка не листает.
   rail: { file: /focused-annotator\.tsx$/, from: 'el.scrollLeft >= max - by / 2', to: 'el.scrollLeft >= max' },
   // Перенос строк в сетке не включается.
@@ -192,18 +208,28 @@ const stubNetwork = {
 const mutation = MUTATE_LIST.length && {
   name: `canvas-mutation-${MUTATE_LIST.join('+')}`,
   setup(b) {
+    // ПРАВКИ ОДНОГО ФАЙЛА — ОДНИМ `onLoad`. esbuild берёт ПЕРВЫЙ `onLoad`, вернувший содержимое, и
+    // остальные для того же пути молча не зовутся: мутация из трёх правок одного файла применялась
+    // на треть (HX1, `dblwindow`) и выходила «слепой» не по вине пробы.
+    const byFile = new Map();
     for (const name of MUTATE_LIST) {
       // Мутация — это либо одна правка, либо СПИСОК правок: сторож, разложенный на два звена,
       // ловится только снятием обоих сразу.
-      const edits = MUTATIONS[name].edits ?? [MUTATIONS[name]];
-      for (const m of edits) {
-        b.onLoad({ filter: m.file }, async (a) => {
-          const src = await readFile(a.path, 'utf8');
-          if (!src.includes(m.from)) throw new Error(`мутация «${name}» не нашла свою строку в ${a.path}`);
-          const contents = m.all ? src.split(m.from).join(m.to) : src.replace(m.from, m.to);
-          return { contents, loader: a.path.endsWith('.tsx') ? 'tsx' : 'ts' };
-        });
+      for (const m of MUTATIONS[name].edits ?? [MUTATIONS[name]]) {
+        const k = String(m.file);
+        if (!byFile.has(k)) byFile.set(k, { file: m.file, edits: [] });
+        byFile.get(k).edits.push({ ...m, name });
       }
+    }
+    for (const { file, edits } of byFile.values()) {
+      b.onLoad({ filter: file }, async (a) => {
+        let src = await readFile(a.path, 'utf8');
+        for (const m of edits) {
+          if (!src.includes(m.from)) throw new Error(`мутация «${m.name}» не нашла свою строку в ${a.path}`);
+          src = m.all ? src.split(m.from).join(m.to) : src.replace(m.from, m.to);
+        }
+        return { contents: src, loader: a.path.endsWith('.tsx') ? 'tsx' : 'ts' };
+      });
     }
   },
 };
@@ -294,6 +320,25 @@ const run = async (name, fn) => {
 const browser = await chromium.launch();
 
 // ── 1. Backspace удаляет ВЫБРАННОЕ, и клик не крадёт фокус ───────────────────────────────────────
+// Дверь в увеличенный вид (T12): двойной клик по самому снимку первой плитки — в точке, где под
+// указателем действительно картинка, а не выноска (иначе жест честно ничего не откроет).
+async function openZoomByPicture(page, { wait = true } = {}) {
+  const at = await page.evaluate(() => {
+    const img = document.querySelector('[data-rail-view] [data-annot-frame] img');
+    const r = img.getBoundingClientRect();
+    for (let fy = 0.92; fy > 0.05; fy -= 0.07)
+      for (let fx = 0.08; fx < 0.95; fx += 0.07) {
+        const x = r.x + r.width * fx;
+        const y = r.y + r.height * fy;
+        if (document.elementFromPoint(x, y) === img) return { x, y };
+      }
+    return null;
+  });
+  if (!at) throw new Error('на снимке нет свободной точки под двойной клик');
+  await page.mouse.dblclick(at.x, at.y);
+  if (wait) await page.waitForSelector('[role="dialog"]');
+}
+
 await run('1 backspace', async () => {
   const { ctx, page } = await fresh(browser);
   await page.click('span[title="two"]');
@@ -392,17 +437,18 @@ await run('3 enter-edit', async () => {
 // ── 4. Выбранное видно ──────────────────────────────────────────────────────────────────────────
 await run('4 highlight', async () => {
   const { ctx, page } = await fresh(browser);
-  check('4a до выбора маркизы нет', (await page.$$('[data-marquee]')).length === 0);
+  // R18 (владелец: «внешний контур выделения не должен показываться»): рамки по габаритам нет НИКОГДА;
+  // выбор фигуры с якорями показывают ручки, а не рамка и не второй след.
+  check('4a до выбора ни рамки, ни следа', (await page.$$('[data-marquee], [data-selection-trace]')).length === 0);
   await page.click('span[title="four"]'); // dim, два якоря
-  const marq = await page.$$('[data-marquee]');
-  check('4b у выбранной фигуры с якорями есть маркиза', marq.length === 1, `найдено ${marq.length}`);
-  const box = await page.$eval('[data-marquee] rect', (r) => r.getBoundingClientRect().width);
-  check('4c маркиза имеет ненулевую ширину', box > 10, `width=${box}`);
+  check('4b у выбранной фигуры с якорями внешней рамки нет', (await page.$$('[data-marquee]')).length === 0);
+  const handles = await page.$$('span[title^="drag — move the point"]');
+  check('4c выбор показан ручками (2 на мерке), без следа', handles.length === 2 && (await page.$$('[data-selection-trace]')).length === 0, `ручек ${handles.length}`);
   await page.click('span[title="one"]'); // пин
   check(
-    '4d выбранный пин помечен и маркизы у него нет',
+    '4d выбранный пин помечен, и ни рамки, ни следа у него нет',
     (await page.$$('[data-callout-selected="true"]')).length === 1 &&
-      (await page.$$('[data-marquee]')).length === 0,
+      (await page.$$('[data-marquee], [data-selection-trace]')).length === 0,
   );
   const ring = await page.$eval('[data-callout-selected="true"]', (el) => getComputedStyle(el).outlineWidth);
   check('4e кольцо выбора реально нарисовано', ring !== '0px' && ring !== '', `outline-width=${ring}`);
@@ -514,7 +560,7 @@ await run('5x ink commit by tool change', async () => {
 
 await run('5z ink commit on zoom close', async () => {
   const { ctx, page } = await fresh(browser);
-  await page.click('[aria-label="zoom · pan · edit — picture 1"]');
+  await openZoomByPicture(page);
   await page.waitForSelector('[role="dialog"]');
   await page.click('[role="dialog"] span[title*="press and drag"]');
   const img = await page.$('[role="dialog"] img');
@@ -542,6 +588,102 @@ await run('5z ink commit on zoom close', async () => {
       if (pts[i].x === pts[i - 1].x && pts[i].y === pts[i - 1].y) dups += 1;
     check('5l и разделитель на месте', dups === 1, `дублей ${dups}`);
   }
+  await ctx.close();
+});
+
+// ── 14. Дверь в зум — двойной клик по снимку, кнопки нет (T12) ─────────────────────────────────
+await run('14 zoom-door', async () => {
+  const { ctx, page } = await fresh(browser);
+  const zoomWords = await page.$$eval('[data-rail-view] *', (ns) =>
+    ns.filter((n) => n.children.length === 0 && /^\s*zoom\s*$/i.test(n.textContent || '')).length,
+  );
+  check('14a на кадрах нет ни одного органа «zoom»', zoomWords === 0, `найдено ${zoomWords}`);
+  await openZoomByPicture(page, { wait: false });
+  const opened = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14b двойной клик по снимку открывает увеличенный вид', opened);
+  if (opened) {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  }
+  // Взвод инструмента — чипом следа (чип «pin» в этом стенде не кликается и до T12: 5x красна на
+  // базе), смысл тот же: двойной клик взведённым инструментом — жест фигуры, а не зума.
+  await page.click('span[title*="press and drag"]');
+  await openZoomByPicture(page, { wait: false });
+  await page.waitForTimeout(300);
+  const dialogs = await page.$$eval('[role="dialog"]', (n) => n.length);
+  check('14c двойной клик взведённым инструментом зум НЕ открывает', dialogs === 0, `диалогов ${dialogs}`);
+  await ctx.close();
+});
+
+// ── 14d–14g. Двойной клик: без инструмента — зум и ни одной записи; со взведённым — постановка (HX1)
+await run('14d dblclick rule', async () => {
+  const { ctx, page } = await fresh(browser);
+  const count = async () => (await state(page)).callouts.length;
+  const n0 = await count();
+  await openZoomByPicture(page, { wait: false });
+  const opened = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14d без инструмента двойной клик открывает зум', opened);
+  check('14e и ничего не записал', (await count()) === n0, `было ${n0} стало ${await count()}`);
+  if (opened) {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  }
+  // Две свободные точки снимка — заранее: второй двойной клик идёт СРАЗУ за первым, без замеров.
+  const spots = await page.evaluate(() => {
+    const img = document.querySelector('[data-rail-view] [data-annot-frame] img');
+    const r = img.getBoundingClientRect();
+    const out = [];
+    for (let fy = 0.92; fy > 0.05 && out.length < 2; fy -= 0.07)
+      for (let fx = 0.08; fx < 0.95 && out.length < 2; fx += 0.3) {
+        const x = r.x + r.width * fx;
+        const y = r.y + r.height * fy;
+        if (document.elementFromPoint(x, y) === img) out.push({ x, y });
+      }
+    return out;
+  });
+  if (spots.length < 2) throw new Error('на снимке нет двух свободных точек');
+  // Двухточечная линия взведена: двойной клик — это две точки фигуры, постановка старше зума.
+  // Линия записана, инструмент погас — и СРАЗУ ЖЕ двойной клик в другом месте снимка: это уже
+  // просьба увеличить (окно «800 мс после взведённого нажатия» её глотало).
+  await page.click('span[title^="two points"]');
+  await page.mouse.dblclick(spots[0].x, spots[0].y);
+  const placed = await count();
+  const d1 = await page.$$eval('[role="dialog"]', (n) => n.length);
+  await page.mouse.dblclick(spots[1].x, spots[1].y);
+  check('14f взведённая линия: двойной клик зум НЕ открывает и ставит фигуру', d1 === 0 && placed === n0 + 1, `диалогов ${d1}, выносок ${placed} (было ${n0})`);
+  const d2 = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14g сразу после постановки двойной клик без инструмента открывает зум', d2);
+  check('14h и не пишет ничего сверх линии', (await count()) === n0 + 1, `выносок ${await count()}`);
+  await ctx.close();
+});
+
+// ── 14k–14n. Клавиатура: в зум аннотированного снимка можно попасть без мыши (HX3) ─────────────
+await run('14k keyboard door', async () => {
+  const { ctx, page } = await fresh(browser);
+  const door = '[data-rail-view] [data-open-large]';
+  const info = await page.$eval(door, (el) => ({ tab: el.tabIndex, name: el.getAttribute('aria-label'), w: el.getBoundingClientRect().width }));
+  check('14k у кадра есть фокусируемая дверь в зум с именем и без видимой кнопки', info.tab >= 0 && /^zoom /.test(info.name || '') && info.w <= 1, JSON.stringify(info));
+  const open = async (key) => {
+    await page.focus(door);
+    await page.keyboard.press(key);
+    return page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  };
+  const close = async () => {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  };
+  const enter = await open('Enter');
+  check('14l Enter на двери открывает увеличенный вид', enter);
+  if (enter) await close();
+  const space = await open(' ');
+  check('14m пробел на двери открывает увеличенный вид', space);
+  if (space) await close();
+  // Выбранная выноска не отнимает Enter у двери: слушатель окна открыл бы её редактор.
+  await page.click('span[title="two"]');
+  const n0 = (await state(page)).callouts.length;
+  const sel = await open('Enter');
+  check('14n при выбранной выноске Enter на двери всё равно открывает зум', sel);
+  check('14o и выноски целы', (await state(page)).callouts.length === n0);
   await ctx.close();
 });
 
@@ -577,7 +719,7 @@ await run('7 no-jump', async () => {
 // ── 8. Редактор в зуме ──────────────────────────────────────────────────────────────────────────
 await run('8 zoom-editor', async () => {
   const { ctx, page } = await fresh(browser);
-  await page.click('[aria-label="zoom · pan · edit — picture 1"]');
+  await openZoomByPicture(page);
   await page.waitForSelector('[role="dialog"]');
   await page.click('[role="dialog"] span[title="two"]');
   await page.waitForTimeout(80);
@@ -619,7 +761,7 @@ await run('9 reorder', async () => {
   await page.waitForTimeout(150);
   let s = await state(page);
   check('9d бросок плитки применяется', s.order.join(',') === '33,11,22', `order=${s.order}`);
-  const firstKind = await page.$eval('[aria-label="probe images"] > div [data-footer-kind]', (el) => el.dataset.footerKind);
+  const firstKind = await page.$eval('[aria-label="probe images"] > div [data-flag]', (el) => el.dataset.flag);
   check('9e подвал первой плитки показывает вид ПЕРЕЕХАВШЕГО кадра', firstKind === 'detail', `kind=${firstKind}`);
   await ctx.close();
 });
@@ -701,7 +843,7 @@ await run('9k reorder by keyboard', async () => {
   await page.waitForTimeout(80);
   const s = await state(page);
   check('9k стрелка ← переставляет с клавиатуры', s.order.join(',') === '11,33,22', `order=${s.order}`);
-  const firstKind = await page.$$eval('[aria-label="probe images"] > div [data-footer-kind]', (e) => e.map((x) => x.dataset.footerKind));
+  const firstKind = await page.$$eval('[aria-label="probe images"] > div [data-flag]', (e) => e.map((x) => x.dataset.flag));
   check('9l подвалы плиток поехали вместе с кадрами', firstKind.join(',') === 'front,detail,back', firstKind.join(','));
   await ctx.close();
 });
@@ -801,6 +943,49 @@ await run('12 keyz', async () => {
   await page.waitForTimeout(80);
   const s = await state(page);
   check('12b ⌘Z сработал на греческой раскладке (key=ω, code=KeyZ)', s.calls.undo === 1 && s.callouts.length === 4, `undo=${s.calls.undo}, выносок ${s.callouts.length}`);
+  await ctx.close();
+});
+
+// ── 13. T20: взведённая панель молчит — ни подсказки постановки, ни «cancel» ────────────────────
+// Владелец: «"click on the picture you need / CANCEL / click a point on the picture" этот текст не
+// должен появлятся». Взвод снимается повторным нажатием чипа и Esc.
+await run('13 armed toolbar quiet', async () => {
+  const { ctx, page } = await fresh(browser);
+  const row = async () =>
+    page.$eval('[data-tool="dim"]', (el) => {
+      const r = el.parentElement;
+      return { text: r.textContent, kids: r.children.length, cancel: [...r.querySelectorAll('*')].some((n) => n.textContent.trim().toLowerCase() === 'cancel') };
+    });
+  const idle = await row();
+  await page.click('[data-tool="dim"]');
+  const armed = await row();
+  check('13a взведено: в ряду ни подсказки, ни «cancel», ни лишнего узла', armed.text === idle.text && armed.kids === idle.kids && !armed.cancel, JSON.stringify({ idle, armed }));
+  // Одна точка мерки — набранный жест: раньше здесь появлялось «… 1 placed».
+  const frame = await page.$('[aria-label="probe images"] [data-annot-frame]');
+  const r = await frame.boundingBox();
+  await page.mouse.click(r.x + r.width * 0.15, r.y + r.height * 0.85);
+  await page.waitForTimeout(60);
+  const mid = await row();
+  const body = await page.evaluate(() => document.body.innerText);
+  check('13b с набранной точкой подсказки тоже нет', mid.text === idle.text && !/placed|Shift holds|click a point|click on the picture/i.test(body), body.match(/.*(placed|Shift holds|click a point|click on the picture).*/i)?.[0] ?? mid.text);
+  await page.keyboard.press('Escape'); // точки
+  await page.keyboard.press('Escape'); // инструмент
+  await page.waitForTimeout(60);
+  check('13c Esc снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await page.click('[data-tool="dim"]');
+  await page.click('[data-tool="dim"]');
+  check('13d повторное нажатие чипа снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await ctx.close();
+});
+
+// ── 14. R24: кнопки delete в строке нет — удаляет Delete по выбранной фигуре ────────────────────
+await run('14 delete key', async () => {
+  const { ctx, page } = await fresh(browser);
+  await page.click('span[title="four"]');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(60);
+  const s = await state(page);
+  check('14a Delete удаляет выбранное', s.calls.remove === 1 && !s.callouts.some((c) => c.text === 'four'), JSON.stringify(s.calls));
   await ctx.close();
 });
 

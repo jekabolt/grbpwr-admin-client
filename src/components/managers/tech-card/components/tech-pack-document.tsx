@@ -69,7 +69,6 @@ import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
-import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
 import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
 import {
@@ -80,6 +79,21 @@ import {
   type AnnotationForm,
 } from './schema';
 import { kindDef } from 'ui/components/annotation/kinds';
+import {
+  ArtworkImage,
+  DetailInset,
+  SectionInset,
+  SectionLetters,
+} from 'ui/components/annotation/insets';
+import { StitchPictogram, stitchIsoOf } from 'ui/components/annotation/stitch-pictogram';
+import {
+  artworkQuad,
+  boundsOf,
+  parseSpec,
+  purposeLabel,
+  sectionLetter,
+  specSummary,
+} from 'ui/components/annotation/purpose';
 import { annotationCapsFromWire } from 'ui/components/annotation/wire';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
@@ -98,7 +112,6 @@ import {
   techCardGenderOptions,
   techCardIssueSeverityOptions,
   techCardIssueStatusOptions,
-  techCardLabelTypeOptions,
   techCardMeasurementUnitOptions,
   techCardMediaKindOptions,
   techCardSignoffSectionOptions,
@@ -107,7 +120,7 @@ import {
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMediaQuery } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
@@ -120,6 +133,8 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
+import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
+import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
 import { slotNormRows, slotTakesWastage } from './bom-norm';
@@ -135,7 +150,6 @@ const unitL = mapOf(techCardMeasurementUnitOptions);
 const mediaKindL = mapOf(techCardMediaKindOptions);
 const bomSectionL = mapOf(techCardBomSectionOptions);
 const fabricDirL = mapOf(techCardFabricDirectionOptions);
-const labelTypeL = mapOf(techCardLabelTypeOptions);
 const issueSevL = mapOf(techCardIssueSeverityOptions);
 const issueStatusL = mapOf(techCardIssueStatusOptions);
 const signoffSectionL = mapOf(techCardSignoffSectionOptions);
@@ -294,7 +308,17 @@ const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
 // на альбомном эскизе стали бы косыми, а окружность — эллипсом. Печать меняет ширину коробки
 // ПОСЛЕ замера, и ResizeObserver на это не стреляет, — с viewBox холст масштабируется вместе с
 // коробкой, пропорции которой равны пропорциям картинки, и указание остаётся на своём узле.
-function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] }) {
+function SketchGeometryLayer({
+  callouts,
+  src,
+  letterOf,
+}: {
+  callouts: common_TechCardCallout[];
+  /** Картинка листа — её увеличенный кусок печатает вставка детали. */
+  src: string;
+  /** Буква разреза по порядку на карточке — та же, что на экране. */
+  letterOf: (c: common_TechCardCallout) => string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -307,11 +331,31 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
     return () => ro.disconnect();
   }, []);
   const drawn = callouts.filter((c) => (c.points?.length ?? 0) > 0);
+  const at = (x?: googletype_Decimal, y?: googletype_Decimal) => ({
+    x: num(dec(x)) * box.w,
+    y: num(dec(y)) * box.h,
+  });
   return (
     <div ref={ref} className='pointer-events-none absolute inset-0'>
+      {/* АРТВОРК НА БУМАГЕ — та же картинка в той же зоне, что на экране (`ArtworkImage`), под
+          пунктиром: цех видит, ЧТО ставится, а не только где. */}
+      {box.w > 0 &&
+        drawn.map((c, i) => {
+          const spec = parseSpec(c.spec);
+          if (spec?.t !== 'artwork' || !spec.url) return null;
+          return (
+            <ArtworkImage
+              key={`a${i}`}
+              src={spec.url}
+              quad={(c.points ?? []).map((p) => at(p.x, p.y))}
+              box={box}
+            />
+          );
+        })}
       {box.w > 0 && drawn.length > 0 && (
         <svg
-          className='h-full w-full'
+          // `absolute` — чтобы картинка артворка (позиционированная) не легла ПОВЕРХ пунктира.
+          className='absolute inset-0 h-full w-full'
           viewBox={`0 0 ${box.w} ${box.h}`}
           preserveAspectRatio='none'
           aria-hidden
@@ -323,10 +367,15 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
             <CalloutShape
               key={i}
               kind={annotationKindFromWire(c.kind)}
-              pts={(c.points ?? []).map((p) => ({
-                x: num(dec(p.x)) * box.w,
-                y: num(dec(p.y)) * box.h,
-              }))}
+              pts={(() => {
+                const pts = (c.points ?? []).map((p) => ({
+                  x: num(dec(p.x)) * box.w,
+                  y: num(dec(p.y)) * box.h,
+                }));
+                // Пунктир зоны артворка — там же, где картинка: вывернутая старая зона рисуется
+                // габаритом и на бумаге (`artworkQuad`, T27).
+                return parseSpec(c.spec)?.t === 'artwork' ? artworkQuad(pts) : pts;
+              })()}
               // Подпись фигуры — сам нумерованный маркер: лидер тянется к нему, и на бумаге он
               // единственное, что можно прочесть глазами.
               label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}
@@ -347,6 +396,49 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
           ))}
         </svg>
       )}
+      {/* ВСТАВКИ ДЕТАЛИ И РАЗРЕЗА — ТОТ ЖЕ РЕНДЕР, ЧТО НА ЛИСТЕ ARTIFACTS (`annotation/insets`):
+          бумага, на которой вместо увеличенного узла стоит один номер, отдаёт в цех половину
+          указания. Без `glass` вставка неинтерактивна и печатается чернилами по белому. */}
+      {box.w > 0 &&
+        drawn.map((c, i) => {
+          const spec = parseSpec(c.spec);
+          const pts = (c.points ?? []).map((p) => at(p.x, p.y));
+          const label = at(c.posX, c.posY);
+          const n = wireInt(c.number) || undefined;
+          if (spec?.t === 'detail') {
+            const b = boundsOf(pts);
+            return (
+              <DetailInset
+                key={`d${i}`}
+                at={label}
+                region={b}
+                frame={box}
+                src={spec.url || src}
+                own={!!spec.url}
+                scale={spec.scale}
+                number={n}
+                text={c.description ?? ''}
+              />
+            );
+          }
+          if (spec?.t === 'section' && pts.length >= 2) {
+            const letter = letterOf(c);
+            return (
+              <Fragment key={`s${i}`}>
+                <SectionLetters a={pts[0]} z={pts[1]} letter={letter} />
+                <SectionInset
+                  at={label}
+                  frame={box}
+                  letter={letter}
+                  number={n}
+                  layers={spec.layers.map((l) => l.name)}
+                  text={c.description ?? ''}
+                />
+              </Fragment>
+            );
+          }
+          return null;
+        })}
     </div>
   );
 }
@@ -358,11 +450,13 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
  * списка и первым же новым видом отстал бы — на бумаге появилась бы пустая клетка вида там, где
  * на экране стоит зона.
  */
-function calloutKindLabel(kind?: string): string {
+function calloutKindLabel(kind?: string, spec?: string): string {
+  // НАЗНАЧЕНИЕ СТАРШЕ ФИГУРЫ (волна callout kinds): «stitch» говорит цеху больше, чем «leader».
+  const purpose = purposeLabel(parseSpec(spec));
+  if (purpose) return purpose;
   const k = annotationKindFromWire(kind);
   return k === 'pin' ? '' : kindDef(k).label;
 }
-
 
 // The printed sheet renders dictionary TOKENS, so it needs the same labels the editor shows. They
 // come from the one options module rather than a second table here — the tech pack and the screen
@@ -609,8 +703,11 @@ export function TechPackDocument({
   const { dictionary } = useDictionary();
   // КАТАЛОГ РАБОТ — ИМЕНА ШАГОВ НА БУМАГЕ (R8). Один ключ на приложение: тот же справочник уже
   // прочитан редактором, и второго обращения к сети здесь не будет.
-  const { catalog: workCatalog, live: workCatalogLive, loading: workCatalogLoading } =
-    useOperationWorkCatalog();
+  const {
+    catalog: workCatalog,
+    live: workCatalogLive,
+    loading: workCatalogLoading,
+  } = useOperationWorkCatalog();
 
   // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
   // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
@@ -635,7 +732,7 @@ export function TechPackDocument({
     const steps = ops.map((o) => ({
       inputs: classifyAssemblyInputs(
         pieceKeys,
-        o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []),
+        o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? [],
       ),
       outputUnitKey: (o.outputUnitKey ?? '').trim(),
       outputUnitName: (o.outputUnitName ?? '').trim(),
@@ -795,6 +892,13 @@ export function TechPackDocument({
     () => new Set((tc?.technicalMedia ?? []).map((m) => wireInt(m.mediaId))),
     [tc?.technicalMedia],
   );
+  // Буквы разрезов — по порядку на карточке, тем же счётом, что лист ARTIFACTS.
+  const sectionLetters = new Map<common_TechCardCallout, string>();
+  for (const c of tc?.callouts ?? [])
+    if (parseSpec(c.spec)?.t === 'section')
+      sectionLetters.set(c, sectionLetter(sectionLetters.size));
+  const sectionLetterOf = (c: common_TechCardCallout) => sectionLetters.get(c) ?? 'A';
+
   const printedOnSketch = (c: common_TechCardCallout) => {
     const mid = wireInt(c.mediaId);
     return mid === 0 || sketchMediaIds.has(mid);
@@ -810,11 +914,20 @@ export function TechPackDocument({
   }, [tc?.pieces]);
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
-  const libraryMap = useMediaMap();
-  // Тот же запрос, что внутри useMediaMap (react-query отдаёт его из кэша) — но со статусом:
-  // useMediaMap возвращает голую Map, а гейту печати нужно знать, приехала ли медиатека. Без
-  // неё referenced-картинки деталей просто не появятся в DOM, и ждать их decode будет нечего.
-  const { isLoading: mediaLoading, isError: mediaError } = useMedia(500, 0);
+  // Label mockups are not listed: `resolvedLabelMedia` resolves every saved one on the read.
+  const libraryIds = useMemo(
+    () => (tc?.details ?? []).flatMap((d) => d.mediaIds ?? []),
+    [tc?.details],
+  );
+  // Every referenced id, not only the newest 500 library files (live bug 06.10): the library window
+  // plus the pages past it for the ids neither it nor the card resolves. The status (window + walk)
+  // gates the print: without it the detail images would simply be absent from the DOM, with nothing
+  // to wait a decode on.
+  const {
+    byId: libraryMap,
+    isPending: mediaLoading,
+    isError: mediaError,
+  } = useResolvedMediaQuery(libraryIds, mediaById);
   const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
   // Size/measurement grading chart (task: point-of-measure table never printed). Walk the stored
@@ -892,6 +1005,16 @@ export function TechPackDocument({
   } = useWorkshopSettings();
   const shopAllowance = dec(workshop?.settings?.defaultSeamAllowanceMm).trim();
 
+  // СОСТАВНИК КОЛОРВЕЯ ПО УМОЛЧАНИЮ (I-17): первый колорвей скоупа — тот же, что блок на вкладке
+  // показывает первым. Страна — из полного ответа колорвея, он тоже в гейте готовности ниже.
+  const labelColorwayId = wireInt(scopedColorways(printScope)[0]?.colorwayId);
+  const { summary: labelSummary, status: labelColorwayStatus } = useTechPackCompositionLabel({
+    techCard,
+    colorwayId: labelColorwayId,
+    materials: materialsData ? materialsData.materials ?? [] : null,
+    dictionary: dictionary ?? undefined,
+  });
+
   // Статусы запросов, которые документ делает сам, — наверх, в гейт печати. Ключ-строка не даёт
   // эффекту срабатывать на каждый рендер (массив пересоздаётся всегда, статусы — нет).
   // ЛИСТ, КОТОРЫЙ МОЖЕТ НАЗВАТЬ ШАГ НЕ ТЕМ СЛОВОМ, ЧТО ЭКРАН, — ЭТО ДЕГРАДАЦИЯ, И ОНА ОБЯЗАНА БЫТЬ
@@ -918,6 +1041,7 @@ export function TechPackDocument({
     mediaError,
     workshopLoading,
     workshopError,
+    labelColorwayStatus,
   ].join(',');
   useEffect(() => {
     onDataStatus?.([
@@ -933,6 +1057,7 @@ export function TechPackDocument({
       // называется на бумаге в `degraded` — это честное «стандарт цеха прочитать не удалось»,
       // которое читающий лист может проверить, в отличие от молчаливой пустой клетки.
       { label: 'workshop standards', status: depStatus(workshopLoading, workshopError) },
+      { label: 'composition label colourway', status: labelColorwayStatus },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);
@@ -1402,7 +1527,7 @@ export function TechPackDocument({
     // старой проекции `piece_line_keys` узлов не бывает — там ненайденный ключ есть деталь,
     // которую не нашли. Дефект был здесь и до Ф6; печать по нему выдавала деталь за узел.
     const legacy = !o.inputKeys?.length;
-    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
+    const keys = legacy ? o.pieceLineKeys ?? [] : o.inputKeys ?? [];
     return keys
       .map((k) => {
         if (!k) return '';
@@ -1937,7 +2062,7 @@ export function TechPackDocument({
                     {/* ГЕОМЕТРИЯ УКАЗАНИЙ — на бумаге тоже. Мерка «6 мм» между двумя точками и
                         скобка над участком это инструкция швее; напечатать только номер, оставив
                         фигуру на экране, значило бы выдать в цех половину указания. */}
-                    <SketchGeometryLayer callouts={pins} />
+                    <SketchGeometryLayer callouts={pins} src={url} letterOf={sectionLetterOf} />
                     {pins.map((c, j) => {
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
@@ -1946,6 +2071,23 @@ export function TechPackDocument({
                       // и в джойне деталей. Локальный индекс внутри картинки (j) расходился бы с
                       // ними, как только эскизов больше одного: пин сказал бы «2», строка — «5».
                       const pinNumber = wireInt(c.number) || (tc.callouts ?? []).indexOf(c) + 1;
+                      // У ДЕТАЛИ И РАЗРЕЗА НОМЕР СТОИТ НА САМОЙ ВСТАВКЕ — второй кружок поверх неё
+                      // закрыл бы увеличенный узел.
+                      const pt = parseSpec(c.spec)?.t;
+                      if ((pt === 'detail' || pt === 'section') && (c.points?.length ?? 0) > 0)
+                        return null;
+                      // ЗАПИСКА — ПРЯМОУГОЛЬНИК С ТЕКСТОМ и на бумаге: без номера и без кружка.
+                      if (pt === 'note') {
+                        return (
+                          <span
+                            key={j}
+                            className='absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 whitespace-pre-wrap border border-black bg-white px-1 py-0.5 text-[8px] leading-tight text-black'
+                            style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                          >
+                            {c.description || '—'}
+                          </span>
+                        );
+                      }
                       return (
                         <span
                           key={j}
@@ -2001,8 +2143,10 @@ export function TechPackDocument({
                             сокращённый до «и ещё две», на листе швеи означает две потерянные
                             детали. Указание законно называет несколько — узел собирает их вместе. */}
                         {(c.parts?.length ? c.parts : c.part ? [c.part] : []).join(', ') || '—'}
-                        {calloutKindLabel(c.kind) && (
-                          <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
+                        {calloutKindLabel(c.kind, c.spec) && (
+                          <span className='ml-1 text-labelColor'>
+                            · {calloutKindLabel(c.kind, c.spec)}
+                          </span>
                         )}
                       </td>
                       <td className={TD}>
@@ -2010,7 +2154,19 @@ export function TechPackDocument({
                           ? '—'
                           : pieces.map((p) => p.name || '(unnamed)').join(', ')}
                       </td>
-                      <td className={TD}>{c.description || '—'}</td>
+                      <td className={TD}>
+                        {specSummary(parseSpec(c.spec)) && (
+                          <span className='block font-semibold'>
+                            {/* Вид шва рядом с номером ISO — тот же рисунок, что на плашке. */}
+                            <StitchPictogram
+                              iso={stitchIsoOf(c.spec)}
+                              className='mr-1 inline-block align-middle'
+                            />
+                            {specSummary(parseSpec(c.spec))}
+                          </span>
+                        )}
+                        {c.description || (specSummary(parseSpec(c.spec)) ? '' : '—')}
+                      </td>
                     </tr>
                   );
                 })}
@@ -2993,85 +3149,25 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* LABELS + PACKAGING */}
-      {has(tc.labels) && (b('sew') || b('qc')) && (
-        <Sheet title='labels'>
-          {has(tc.labels) && (
-            <table className='mb-3 w-full border-collapse text-micro'>
-              <thead>
-                <tr>
-                  <th className={TH}>type</th>
-                  <th className={TH}>content</th>
-                  <th className={TH}>placement</th>
-                  <th className={TH}>attachment</th>
-                  <th className={TH}>size</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(tc.labels ?? []).map((l, i) => {
-                  const isCare = l.labelType === 'TECH_CARD_LABEL_TYPE_CARE';
-                  const careCodes = isCare
-                    ? (l.content ?? '')
-                        .split(',')
-                        .map((s) => s.trim())
-                        .filter(Boolean)
-                    : [];
-                  return (
-                    <tr key={i} className='break-inside-avoid'>
-                      <td className={TD}>{labelTypeL[l.labelType ?? ''] ?? '—'}</td>
-                      <td className={TD}>
-                        {isCare && careCodes.length > 0 ? (
-                          <div className='flex flex-wrap items-center gap-1'>
-                            {careCodes.map((code, k) => {
-                              const m = careVocabulary.byCode[code];
-                              // Local artwork fallback: the printed tech pack must not degrade
-                              // to bare codes while the backend dictionary is empty (pre-0217).
-                              const img = m?.img ?? CARE_ARTWORK[code];
-                              return img ? (
-                                <img
-                                  key={k}
-                                  src={img}
-                                  alt={m?.name ?? code}
-                                  title={m?.name ?? code}
-                                  className='h-5 w-5'
-                                />
-                              ) : (
-                                <span key={k}>{code}</span>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          l.content || '—'
-                        )}
-                        {l.note?.trim() && <div className='text-labelColor'>{l.note}</div>}
-                      </td>
-                      <td className={TD}>
-                        {/* Схема размещения жила только на экране. Словами «left side seam, 10 cm
-                            from hem» этикетку ставят по-разному в двух цехах; силуэт с меткой
-                            снимает разночтение быстрее, чем любая формулировка. Нераспознанное
-                            размещение силуэта НЕ печатает — пустой силуэт читался бы как «этикетка
-                            никуда не крепится». */}
-                        <div className='flex items-start gap-2'>
-                          {resolvePlacementRegion(l.placement) && (
-                            <LabelPlacementPictogram
-                              placement={l.placement}
-                              attachment={l.attachment}
-                              className='shrink-0'
-                            />
-                          )}
-                          <span>{l.placement || '—'}</span>
-                        </div>
-                      </td>
-                      <td className={TD}>{l.attachment || '—'}</td>
-                      <td className={TD}>{l.size || '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </Sheet>
-      )}
+      {/* СОСТАВНИК + ЭТИКЕТКИ + ПРЕДМЕТЫ УПАКОВКИ (labels rework I-17): заменили легаси-таблицу
+          `labels`. Мокапы — из `resolvedLabelMedia` карточки (сервер разрешает каждый id), затем
+          медиатека. */}
+      <TechPackLabelSheets
+        summary={labelSummary}
+        hasColorway={labelColorwayId > 0}
+        labels={tc.garmentLabels ?? []}
+        items={tc.packagingItems ?? []}
+        urlOf={(id) => {
+          const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
+          return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';
+        }}
+        careArt={(code) => {
+          const voc = careVocabulary.byCode[code];
+          return { img: voc?.img ?? CARE_ARTWORK[code], name: voc?.name ?? code };
+        }}
+        showLabels={b('sew') || b('qc')}
+        showItems={b('qc')}
+      />
 
       {/* ASSEMBLY — ON-GARMENT ITEMS: labels/tags/hangtags attached on or into the garment
           (ListStyleAssembly). Root cause of #71 — this RPC was never fetched, so the section

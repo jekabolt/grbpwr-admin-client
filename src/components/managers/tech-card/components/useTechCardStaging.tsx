@@ -64,6 +64,8 @@ export const COMMIT_ORDER = {
   packaging: 20,
   recipe: 30,
   labDip: 30,
+  // The composition label's made-in row: UpdateColorway(country_code), after the card body (M-01).
+  colorwayCountry: 30,
   samples: 40,
   substitutions: 40,
   devExpenses: 40,

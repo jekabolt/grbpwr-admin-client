@@ -1,9 +1,10 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import Input from 'ui/components/input';
@@ -15,6 +16,9 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
 import { InertDoor } from './design/bench-slot';
+import { cardFactsContext } from './design/core/card-facts';
+import { isBoardRow } from './design/core/mood-gate';
+import { useCardFacts } from './design/head/card-facts-form';
 import { GROUP_SEAM } from './design/core';
 import { DraftedField } from './design/core/drafted-field';
 import { draftedKey, useDrafted } from './design/drafted-contract';
@@ -94,6 +98,8 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const details = (useWatch({ control, name: 'details' }) ?? []) as FormDetail[];
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
+  // Факты карточки для `ai ✦` аспектов (item 41) — тот же композитор, что у GENERAL INFORMATION.
+  const enhanceContext = cardFactsContext(useCardFacts(isBoardRow));
   // «Стоит и во входе» — картинка, поднятая референсом шага FLAT (строка `moodboardMedia` вида
   // REFERENCE). Ровно этим отличается картинка аспекта от входа прогона, и отличие ПОКАЗАНО пилюлей
   // под кадром, а не рассказано оговоркой.
@@ -148,9 +154,13 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     return m;
   }, [techCard?.resolvedTechnicalMedia, techCard?.resolvedMoodboardMedia]);
   // The resolved sketch maps carry only the sketch media; detail reference images are plain
-  // library media ids, so resolve them from the media library too (otherwise they show as
-  // "#id" after a reload).
-  const libraryMap = useMediaMap();
+  // library media ids, so resolve them from the media library too (otherwise they show as "#id"
+  // after a reload) — every one of them, not only the newest 500 library files:
+  // `useResolvedMedia` reads past that window (live bug 06.10).
+  const libraryMap = useResolvedMedia(
+    details.flatMap((d) => d.mediaIds ?? []),
+    mediaById,
+  );
 
   const detailByKey = (key: string) => details.find((d) => d.key === key);
 
@@ -282,6 +292,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
               inputIds={inputIds}
               urlOf={urlOf}
               onText={(text) => upsert(key, { text })}
+              enhanceContext={enhanceContext}
               onAddImages={(picked) => addImages(key, picked)}
               onRemoveImage={(id) => removeImage(key, id)}
               onRemoveAspect={() => removeAspect(key)}
@@ -428,8 +439,11 @@ function AspectRow({
   onRemoveAspect,
   onOpenViewer,
   last,
+  enhanceContext,
 }: {
   aspectKey: string;
+  /** Факты карточки для `ai ✦` (`cardFactsContext`). */
+  enhanceContext?: string;
   text: string;
   ids: number[];
   /** Кадры, которые ТА ЖЕ карточка держит референсом входа шага FLAT. */
@@ -509,10 +523,20 @@ function AspectRow({
           maxLength={2000}
           value={text}
           placeholder='how this aspect is made'
-          className={drafted ? 'border-0 bg-transparent' : undefined}
+          className={drafted ? 'border-0 bg-transparent pb-7' : 'pb-7'}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onText(e.target.value)}
           onFocus={settle.onFocus}
           onBlur={settle.onBlur}
+        />
+        {/* `ai ✦` НА АКТИВНОМ ПОЛЕ АСПЕКТА (item 41: «в CONSTRUCTION в тексбоксе на актив нет ai
+            кнопки»). Ключа «аспект» у сервера нет — ближайший `description` (описание
+            конструкции). Запертая карточка гасит кнопку внешним fieldset. */}
+        <AiEnhance
+          field='description'
+          value={text}
+          onApply={onText}
+          context={enhanceContext}
+          maxRunes={2000}
         />
       </DraftedField>
 

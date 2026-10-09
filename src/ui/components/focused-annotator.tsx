@@ -18,12 +18,16 @@ import {
   type ShapePoint,
   type SurfaceCallout,
 } from './annotation/surface';
-import { AnnotationToolbar, placingHint } from './annotation/toolbar';
+import { AnnotationToolbar } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
+import { PictureBusy, type PictureBusyKind } from './picture-busy';
+import { Pill } from './pill';
 import { PLACEHOLDER_SURFACE } from './placeholder';
+import { SpotRings, type SpotRing } from './spot-rings';
 import Text from './text';
+import { TILE_CORNER, TILE_QUIET } from './tile-skin';
 import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
@@ -45,7 +49,8 @@ import { Toolbar, ToolbarSpacer } from './toolbar';
 //
 // Everything form- or domain-specific is injected: the resolved media (`views`), the callouts for
 // an image (`calloutsFor` + the add/move/remove/render callbacks), how a picked image is committed
-// (`onPickMedia`), and any per-image caption controls (`renderFocusedFooter`). That keeps the same
+// (`onPickMedia`), and the grid tile's own facts and corners (`tileFlag` / `tileBadge` /
+// `tileCorners`). That keeps the same
 // gallery driving the tech-card moodboard + technical sketch AND the fitting photos, each binding
 // its own React Hook Form fields, without this component knowing which form it sits in.
 
@@ -90,7 +95,7 @@ const RAIL_GAP = 8;
 // exist when they do anything) and steps by exactly one card, wrapping at both ends. The wrap is
 // what makes it read as a loop; cloning the views to get a truly seamless one would duplicate
 // media ids, and every pin, piece and "pinned to" select addresses an image BY id.
-function useRailScroll(itemCount: number) {
+export function useRailScroll(itemCount: number) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
@@ -152,7 +157,14 @@ export type FocusedAnnotatorProps = {
    * якорях значило бы завести два места для одной координаты. Владелец кладёт `points[0]` в
    * posX/posY и оставляет якоря пустыми.
    */
-  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
+  onAddCallout: (
+    mediaId: number,
+    kind: string,
+    points: ShapePoint[],
+    pen: PenStyle,
+    /** Чем ставили — вид или назначение (`purpose.ts`), если включены `calloutPurposes`. */
+    armed?: string | null,
+  ) => void;
   onMoveCallout: (key: string, xNorm: number, yNorm: number) => void;
   onRemoveCallout: (key: string) => void;
   /**
@@ -170,31 +182,8 @@ export type FocusedAnnotatorProps = {
    * не было НИКОГДА). Не задан — полосы редактора под кадрами нет вовсе: ни самой правки, ни её
    * пустого состояния. Второй редактор на то же поле означал бы драку за фокус и правку, которую
    * не видно.
-   *
-   * ⚠ УВЕЛИЧЕННЫЙ ВИД ПРИ ЭТОМ БЕЗ ПРАВКИ НЕ ОСТАЁТСЯ — у него свой проп, см. `renderZoomEditor`.
    */
   renderEditor?: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
-  /**
-   * ═══ РЕДАКТОР ТОЛЬКО ДЛЯ УВЕЛИЧЕННОГО ВИДА — ОТДЕЛЬНЫЙ ПРОП, И ЭТО НЕСУЩЕЕ ══════════════════
-   *
-   * Увеличенный вид — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Владелец, у которого
-   * правка живёт СНАРУЖИ (боковое меню мудборда, B-9), внутри открытого зума недостижим ФИЗИЧЕСКИ:
-   * просьба поставить курсор уезжает в поле за оверлеем, и фокус-скоуп немедленно тащит фокус
-   * обратно. То есть указание, поставленное в зуме — а по миллиметровой детали его ставят именно
-   * там, — нельзя ни назвать, ни покрасить, ни удалить, не закрыв окно.
-   *
-   * Поэтому раскладок ДВЕ, и они независимы:
-   *   · `renderEditor` — полоса под кадрами НА СТРАНИЦЕ (эскиз, примерка). Задан — она есть;
-   *   · `renderZoomEditor` — тело правки ВНУТРИ диалога. Задан — правка достижима в зуме.
-   * Мудборд задаёт ТОЛЬКО второй: «брови» над картинками у него нет (владелец снял её дословно), а
-   * правка в зуме обязана быть. Кто задал только первый, получает прежнее поведение — тот же
-   * редактор в обоих местах.
-   *
-   * ⚠ И ФОКУС ТОГДА НАРУЖУ НЕ ПРОСИТСЯ: при заданном `renderZoomEditor` жест выбора внутри зума
-   * отдаёт владельцу `focus: false` — курсор ставит сам диалог, своим `EditorSlot`. Иначе две
-   * половины дрались бы за фокус через границу модалки, и выигрывала бы ловушка.
-   */
-  renderZoomEditor?: (key: string, opts: AnnotationEditorSlotOpts) => ReactNode;
   /** Optional header title inside a note (e.g. a part code, or a constant "fit note"). */
 
   /** Commit newly-picked media (caller dedupes + appends) and return the ids actually added, so the
@@ -217,9 +206,68 @@ export type FocusedAnnotatorProps = {
   previewFirst?: boolean;
   /** Accessible name for an image + lightbox (per image). */
   mediaLabel?: (view: FocusedView, positionInViews: number) => string;
-  /** Caption controls under an image (kind select, "set as preview", …). In `grid` this renders
-   *  under EVERY cell; in `focused` only under the focused image. */
-  renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
+  /**
+   * АНАТОМИЯ ПЛИТКИ СЕТКИ (20-TILE-SPEC §3) — те же места, что у `PictureTile`, но на своей
+   * поверхности (указания приколоты к кадру, поэтому примитив здесь не встаёт).
+   *   · `tileFlag` — слово СОСТОЯНИЯ под номером (верх слева), всегда видно, прозрачно для указателя;
+   *   · `tileCorners` — глаголы нижних углов: `left` — режут ЭТУ картинку (crop), `right` — правка
+   *     (edit). Места назначает поверхность (`cornerSlotBottom`), кожу — `TILE_CORNER + TILE_QUIET`
+   *     вызывающего; углы без `group`-хозяина не проявятся, поэтому `group` стоит на плитке здесь.
+   *   · `removeLabel` — имя ✕: «вон из ЭТОГО блока» (с доски, с эскиза), а не «удалить файл».
+   * Только `layout='grid'`.
+   */
+  tileFlag?: (view: FocusedView, positionInViews: number) => FocusedTileFlag | null | undefined;
+  /**
+   * Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер.
+   * M15: объект — ещё и ТОН (`guess` — догадка модели, серым) и нажатие по слову (принять догадку).
+   */
+  tileBadge?: (
+    view: FocusedView,
+    positionInViews: number,
+  ) => string | FocusedTileBadge | null | undefined;
+  /**
+   * M15 (109 §4.2) · ОДИН ГЛАГОЛ НА ВЕСЬ КАДР — «remove from prompt» на плитке входа флэта. Мышью:
+   * ховер затемняет кадр (чернила 60 %) и пишет глагол по центру, клик — исполнение. Касанием:
+   * первый тап взводит накладку, второй исполняет, тап мимо — сбрасывает. С клавиатуры: накладка —
+   * кнопка, фокус её показывает, Enter/Space исполняет. Номер и плашка остаются над накладкой.
+   * Только `layout='grid'`.
+   */
+  tileAction?: (view: FocusedView, positionInViews: number) => FocusedTileAction | null | undefined;
+  /**
+   * С КАКОГО ЧИСЛА СЧИТАЕТ ЯРЛЫК (умолчание 1). M13: вход флэта рисует то, что уйдёт в промпт, двумя
+   * лентами разной высоты (фото и приложенные флэты) — номер второй продолжает первую, как строки
+   * «what the model gets». Только `layout='grid'`.
+   */
+  numberFrom?: number;
+  /**
+   * M14: false — the badge carries the word alone (`tileBadge`), no number. The flat input draws a
+   * picture just added and not yet sent: it has no place in the prompt's order. Default true.
+   */
+  numbered?: boolean;
+  /**
+   * 96-PICTURE-QUESTIONS: the picture a quiz question is about. While set (grid only) that tile wears
+   * a 2px ink outline and every other tile drops to 25% — the question points at one picture.
+   * `null`/absent — every tile as usual.
+   */
+  anchoredMediaId?: number | null;
+  /**
+   * 99-SPOTS: places on the anchored picture the question is about — numbered rings inside its
+   * frame (`SpotRings`). `hotSpot` — the ring number under the pointer.
+   */
+  anchoredSpots?: SpotRing[];
+  hotSpot?: number | null;
+  onHotSpot?: (n: number | null) => void;
+  tileCorners?: (
+    view: FocusedView,
+    positionInViews: number,
+  ) => { left?: ReactNode; right?: ReactNode } | null | undefined;
+  removeLabel?: (view: FocusedView, positionInViews: number) => string;
+  /**
+   * The picture is being worked on (owner, 07.10): `read` — its label is being read, `cut` — its
+   * background is being removed. Drawn ON the picture (`PictureBusy`), under the action veil, the
+   * number and the corners. Only `layout='grid'`.
+   */
+  tileBusy?: (view: FocusedView, positionInViews: number) => PictureBusyKind | null | undefined;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
   /**
@@ -231,6 +279,8 @@ export type FocusedAnnotatorProps = {
    * и жеста, и держать его в доменном слое значило бы держать его в двух местах.
    */
   calloutKinds?: string[];
+  /** Чипы назначений (note, detail, …) — те же, что в панели листа ARTIFACTS. */
+  calloutPurposes?: boolean;
   /**
    * Белая подложка под линиями указаний. Включать на ФОТОГРАФИЯХ (мудборд, примерка): чернильная
    * линия на пёстром снимке тонет, и указание перестаёт быть видно ровно там, где его поставили.
@@ -396,6 +446,13 @@ export type FocusedAnnotatorProps = {
    */
   zoomEditorReserve?: boolean;
   /**
+   * Есть ли у экрана увеличенный вид. Кнопки `zoom` на кадре нет нигде (T12, владелец: «кнопку
+   * зум на ховер нигде показывать не нужно»); дверь в зум — двойной клик по самой картинке
+   * (`onOpenLarge` у поверхности), одиночный клик уже ставит указание. Мудборд вида не держит
+   * вовсе (T01: указания правятся в боковой панели), поэтому снимает и двойной клик.
+   */
+  zoomable?: boolean;
+  /**
    * РЕЖИМ ВЫБОРА ПЛИТКИ: пока он взведён, клик по кадру НЕ ставит указание, а возвращает вид
    * вызывающему.
    *
@@ -404,6 +461,31 @@ export type FocusedAnnotatorProps = {
    * это и делает режим законным — не обещание не нажимать, а невозможность нажать.
    */
   tilePick?: TilePick;
+};
+
+/** M15 · ярлык плитки как объект: тон и нажатие по слову. */
+export type FocusedTileBadge = {
+  word: string;
+  /** `guess` — догадка модели (серым), `ink` — слово человека или факт (умолчание). */
+  tone?: 'ink' | 'guess';
+  /** Нажатие по слову (принять догадку). Нет — ярлык прозрачен для указателя, как раньше. */
+  onPress?: () => void;
+  pressLabel?: string;
+};
+
+/** M15 · глагол на весь кадр — см. `tileAction`. */
+export type FocusedTileAction = {
+  /** Слово на накладке (`remove from prompt`). */
+  label: string;
+  ariaLabel: string;
+  onAction: () => void;
+};
+
+/** Флаг плитки — та же форма, что у `PictureTile` (`PictureTileFlag`). */
+export type FocusedTileFlag = {
+  word: string;
+  tone: 'attention' | 'mut' | 'ink' | 'warn';
+  title?: string;
 };
 
 /** Взведённый выбор плитки — см. `tilePick`. */
@@ -425,7 +507,6 @@ export function FocusedAnnotator({
   onMoveCallout,
   onRemoveCallout,
   renderEditor,
-  renderZoomEditor,
   onPickMedia,
   onRemoveMedia,
   addLabel,
@@ -436,10 +517,22 @@ export function FocusedAnnotator({
   fallbackAspect = '4/5',
   previewFirst = false,
   mediaLabel,
-  renderFocusedFooter,
+  tileFlag,
+  tileBadge,
+  tileAction,
+  numberFrom = 1,
+  numbered = true,
+  anchoredMediaId = null,
+  anchoredSpots,
+  hotSpot = null,
+  onHotSpot,
+  tileCorners,
+  removeLabel,
+  tileBusy,
   carouselLabel,
   gridRowHeight,
   calloutKinds,
+  calloutPurposes,
   onEditPoints,
   onBeforeMutate,
   onUndo,
@@ -458,6 +551,7 @@ export function FocusedAnnotator({
   pinText = 'legend',
   preferNaturalAspect = false,
   zoomEditorReserve = false,
+  zoomable = true,
   tilePick,
   selectedKey,
   onSelectedChange,
@@ -514,7 +608,6 @@ export function FocusedAnnotator({
     onAddingChange?.(key);
   };
   const [focusEditor, setFocusEditor] = useState(0);
-  const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
@@ -568,6 +661,18 @@ export function FocusedAnnotator({
   }, [picking]);
   /** Порядок правится только там, где вообще правят, и только когда есть что переставлять. */
   const canOrder = isGrid && !readOnly && !!onReorderMedia && views.length > 1;
+  /* M15 · ВЗВЕДЁННАЯ НАКЛАДКА (`tileAction`) на устройстве без ховера: первый тап показывает глагол,
+     второй исполняет. Тап мимо любой накладки — сброс. */
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (armedKey == null) return;
+    const off = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.(`[data-tile-action="${CSS.escape(armedKey)}"]`)) setArmedKey(null);
+    };
+    document.addEventListener('pointerdown', off, true);
+    return () => document.removeEventListener('pointerdown', off, true);
+  }, [armedKey]);
   const reorder = useReorder((from, to) => onReorderMedia?.(from, to));
   const hasMedia = views.length > 0;
   const focused = views.find((v) => v.mediaId === focusedId) ?? views[0];
@@ -645,13 +750,7 @@ export function FocusedAnnotator({
           tool={tool}
           onTool={setTool}
           kinds={calloutKinds}
-          hint={
-            tool
-              ? placed > 0
-                ? placingHint(tool, placed)
-                : 'click on the picture you need'
-              : undefined
-          }
+          purposes={calloutPurposes}
         />
       )}
     </ChipRow>
@@ -702,12 +801,6 @@ export function FocusedAnnotator({
   // клик по указанию на кадре И строка боковой панели (`selectedKey`/`onSelectedChange`),
   // Backspace — слушатель окна у самой поверхности (`annotation/surface.tsx`), Enter — тот же
   // слушатель, чей запрос фокуса теперь доезжает до владельца через `opts.focus`.
-  /**
-   * КТО РИСУЕТ ПРАВКУ В УВЕЛИЧЕННОМ ВИДЕ. Свой редактор зума старше общего: владелец, увёзший
-   * правку в боковое меню (B-9), задаёт ТОЛЬКО `renderZoomEditor` — полосы на странице у него нет,
-   * а в модалке правка обязана быть достижима, потому что меню за оверлеем недостижимо.
-   */
-  const zoomEditor = renderZoomEditor ?? renderEditor;
 
   const editorSlot =
     renderEditor && !readOnly && hasMedia ? (
@@ -749,11 +842,9 @@ export function FocusedAnnotator({
     ? 'taking the picture from the clipboard…'
     : intake.dragging
       ? 'drop the file — the crop will open'
-      : tool
-        ? placingHint(tool, placed)
-        : pinText === 'hover'
-          ? ''
-          : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
+      : pinText === 'hover'
+        ? ''
+        : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -801,7 +892,10 @@ export function FocusedAnnotator({
 
   return (
     <div className='space-y-2.5' {...regionHandlers}>
+      {/* ПУСТАЯ ПОЛОСА НЕ РИСУЕТСЯ (M13): на поверхности только для чтения без подсказки и без
+          читательских органов в ней нечего держать — рамка с пустотой внутри была бы шумом. */}
       {hasMedia &&
+        (!readOnly || !!hint || !!viewControls) &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
           // in a bar above the grid and apply to every cell at once.
@@ -818,31 +912,7 @@ export function FocusedAnnotator({
             {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДА — ЧИТАТЕЛЬСКИЙ ОРГАН, поэтому стоит до режимов постановки и живёт
                 на выпущенной карточке тоже. */}
             {viewControls}
-            {/* Only once the rail actually runs off the edge — arrows that can't move anything are
-                noise. They live in the bar rather than floating over the pictures, where they would
-                sit on top of the pins they exist to help you reach. */}
-            {railArrows && rail.overflowing && (
-              <div className='flex items-center gap-1'>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  aria-label='previous view'
-                  onClick={() => rail.step(-1)}
-                >
-                  ‹
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  aria-label='next view'
-                  onClick={() => rail.step(1)}
-                >
-                  ›
-                </Button>
-              </div>
-            )}
+            {/* T68 (05.10): стрелки ‹ › сняты по слову владельца — ряд листается прокруткой/свайпом. */}
             {!kindsFirst && modeToggles}
           </Toolbar>
         ) : (
@@ -893,16 +963,81 @@ export function FocusedAnnotator({
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
+              const flag = tileFlag?.(v, i);
+              const badgeRaw = tileBadge?.(v, i);
+              const badge: FocusedTileBadge | null =
+                badgeRaw == null || badgeRaw === ''
+                  ? null
+                  : typeof badgeRaw === 'string'
+                    ? { word: badgeRaw }
+                    : badgeRaw.word
+                      ? badgeRaw
+                      : null;
+              const badgeNote = badge?.word ?? '';
+              const action = isGrid ? tileAction?.(v, i) : null;
+              const corners = tileCorners?.(v, i);
+              const busy = isGrid ? tileBusy?.(v, i) : null;
+              const busyEl = busy ? <PictureBusy kind={busy} /> : null;
+              /* M15 · ГЛАГОЛ НА ВЕСЬ КАДР (`tileAction`) — слоем ВНУТРИ кадра (`overlay` поверхности),
+                 ровно по снимку; ярлык плитки (z-20) — номер и плашка — остаётся над затемнением. */
+              const actionEl =
+                action && !picking ? (
+                  <button
+                    type='button'
+                    data-tile-action={v.key}
+                    data-armed={armedKey === v.key ? '' : undefined}
+                    aria-label={action.ariaLabel}
+                    onClick={() => {
+                      const touch = window.matchMedia?.('(hover: none)').matches;
+                      if (touch && armedKey !== v.key) {
+                        setArmedKey(v.key);
+                        return;
+                      }
+                      setArmedKey(null);
+                      action.onAction();
+                    }}
+                    className={cn(
+                      'absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-textColor/60 px-2',
+                      'opacity-0 transition-opacity duration-150 ease-out motion-reduce:transition-none',
+                      '[@media(hover:hover)]:hover:opacity-100 focus-visible:opacity-100 data-[armed]:opacity-100',
+                      'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+                    )}
+                  >
+                    <span className='text-center text-nano uppercase leading-tight tracking-label text-bgColor'>
+                      {action.label}
+                    </span>
+                  </button>
+                ) : null;
               return (
                 <div
                   key={v.key}
                   data-rail-view={v.mediaId}
+                  data-anchored={
+                    anchoredMediaId == null
+                      ? undefined
+                      : v.mediaId === anchoredMediaId
+                        ? 'on'
+                        : 'off'
+                  }
                   ref={canOrder ? reorder.registerTile(i) : undefined}
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
-                    'relative shrink-0 space-y-1',
-                    !wrap && 'snap-start',
+                    // `group` — хозяин тихих углов (`TILE_QUIET`): ✕, crop, edit проявляются на
+                    // наведении или фокусе внутри ЭТОЙ плитки, как у каждой плитки админки.
+                    'group relative shrink-0 space-y-1',
+                    // Q26: якорная плитка щёлкает ЦЕНТРОМ — иначе снап откатил бы ленту к её началу.
+                    !wrap && (v.mediaId === anchoredMediaId ? 'snap-center' : 'snap-start'),
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
+                    // 96: the anchored picture keeps full ink, the rest step back.
+                    // Q26 (owner, «чуть тоньше», «без белой линии»): the frame sits on the PICTURE
+                    // box (`data-annot-frame`), not the taller tile, so no empty band under the
+                    // photo; 1px ink at -1px lies exactly over the frame's grey 1px border — no gap.
+                    // (1.5px was tried: Chromium floors it to 1px even at DPR 2.)
+                    'transition-opacity duration-150 ease-out motion-reduce:transition-none',
+                    anchoredMediaId != null &&
+                      (v.mediaId === anchoredMediaId
+                        ? '[&_[data-annot-frame]]:outline [&_[data-annot-frame]]:-outline-offset-1 [&_[data-annot-frame]]:outline-textColor'
+                        : 'opacity-25'),
                     // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ. У ленты
                     // контейнер выше несёт `overflow-x-auto`, и широкая плитка листается в ней; у
                     // переноса по строкам (`railWrap`) контейнер его не несёт, и плитка не шире
@@ -921,6 +1056,7 @@ export function FocusedAnnotator({
                 >
                   <AnnotationSurface
                     hoveredKey={hoveredKey}
+                    frameId={v.mediaId}
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     media={isVideo(url) ? 'video' : 'image'}
@@ -931,15 +1067,39 @@ export function FocusedAnnotator({
                     // ФИЛМСТРИП: высота кадра общая, ширину считает пропорция, вбок листается сам
                     // ряд — панораму в нём не укорачивают.
                     frameStyle={rowMode ? { height: gridRowHeight } : undefined}
+                    overlay={
+                      anchoredSpots?.length && v.mediaId === anchoredMediaId
+                        ? (size) => (
+                            <>
+                              {busyEl}
+                              <SpotRings
+                                spots={anchoredSpots}
+                                size={size}
+                                hot={hotSpot}
+                                onHot={onHotSpot}
+                              />
+                              {actionEl}
+                            </>
+                          )
+                        : actionEl || busyEl
+                          ? () => (
+                              <>
+                                {busyEl}
+                                {actionEl}
+                              </>
+                            )
+                          : undefined
+                    }
                     callouts={calloutsFor(v.mediaId)}
                     frozen={readOnly}
                     tool={tool}
                     onToolDone={() => setTool(null)}
-                    onPlacedCountChange={setPlaced}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     // каждый приходится перекрашивать поштучно в списке выносок — то есть панель
                     // без цвета оправдана памятью пера, которой бы не было.
-                    onAdd={(kind, points, pen) => onAddCallout(v.mediaId, kind, points, pen)}
+                    onAdd={(kind, points, pen, armed) =>
+                      onAddCallout(v.mediaId, kind, points, pen, armed)
+                    }
                     onEditPoints={onEditPoints}
                     onBeforeMutate={onBeforeMutate}
                     onUndo={onUndo}
@@ -959,32 +1119,88 @@ export function FocusedAnnotator({
                     legend={pinText === 'legend'}
                     hoverNotes={pinText === 'hover'}
                     halo={halo}
+                    // Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу на
+                    // плитке в 300px не разглядеть. Двойным кликом по снимку (T12), без кнопки.
+                    onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}
                     cornerSlot={
-                      <div className='flex items-center gap-1'>
-                        {/* Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу
-                            на плитке в 300px не разглядеть, увеличение и есть способ их прочесть. */}
+                      !readOnly ? (
                         <FrameButton
-                          ariaLabel={`zoom · pan · edit — picture ${i + 1}`}
-                          onPress={() => setZoomIndex(i)}
+                          ariaLabel={removeLabel?.(v, i) ?? `remove image ${i + 1}`}
+                          onPress={() => handleRemoveMedia(v)}
                         >
-                          zoom
+                          ✕
                         </FrameButton>
-                        {!readOnly && (
-                          <FrameButton
-                            ariaLabel={`remove image ${i + 1}`}
-                            onPress={() => handleRemoveMedia(v)}
-                          >
-                            ✕
-                          </FrameButton>
-                        )}
-                      </div>
+                      ) : undefined
+                    }
+                    // НИЖНИЙ РЯД — место назначает поверхность; обе стороны передаются всегда
+                    // (пустой `<span />`), иначе единственный орган сменил бы угол молча.
+                    cornerSlotBottom={
+                      corners && (corners.left || corners.right) ? (
+                        <>
+                          <span className='flex items-end gap-1'>{corners.left}</span>
+                          <span className='flex items-end gap-1'>{corners.right}</span>
+                        </>
+                      ) : undefined
                     }
                   />
-                  {/* Position marker — pieces / operations / the "pinned to" select all address
-                      images by this number. */}
-                  <span className='pointer-events-none absolute left-0 top-0 z-[4] bg-textColor px-1 py-px text-nano leading-none tabular-nums text-bgColor'>
-                    {i + 1}
-                  </span>
+                  {/* ВЕРХ СЛЕВА — ФАКТЫ СТОЛБИКОМ, как у `PictureTile`: номер (pieces, operations
+                      и «pinned to» адресуют картинку по нему), под ним флаг состояния. Оба видны
+                      всегда и прозрачны для указателя; флаг — на непрозрачной подложке, под ним
+                      снимок. */}
+                  {/* 32px справа — место ✕; у плитки только для чтения ✕ нет, и ярлык берёт всю ширину. */}
+                  <div
+                    className={cn(
+                      'pointer-events-none absolute left-0 top-0 z-20 flex flex-col items-start gap-0.5',
+                      readOnly ? 'max-w-full' : 'max-w-[calc(100%-32px)]',
+                    )}
+                  >
+                    {(numbered || !!badgeNote) &&
+                      (() => {
+                        const text = (
+                          <>
+                            {numbered ? numberFrom + i : null}
+                            {badgeNote ? `${numbered ? ' · ' : ''}${badgeNote}` : null}
+                          </>
+                        );
+                        // Догадка модели — серым (109 §2.2): одно слово, один тон, без «?».
+                        const tone = cn(
+                          'px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor',
+                          badge?.tone === 'guess' ? 'bg-labelColor' : 'bg-textColor',
+                        );
+                        return badge?.onPress ? (
+                          <button
+                            type='button'
+                            data-tile-badge=''
+                            data-tone={badge.tone ?? 'ink'}
+                            aria-label={badge.pressLabel ?? badgeNote}
+                            title={badge.pressLabel}
+                            onClick={badge.onPress}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={cn(
+                              tone,
+                              'pointer-events-auto cursor-pointer hover:bg-textColor focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
+                            )}
+                          >
+                            {text}
+                          </button>
+                        ) : (
+                          <span
+                            className={tone}
+                            data-tile-badge=''
+                            data-tone={badge?.tone ?? 'ink'}
+                          >
+                            {text}
+                          </span>
+                        );
+                      })()}
+                    {flag && (
+                      <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
+                        <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>
+                          {flag.word}
+                        </Pill>
+                      </span>
+                    )}
+                  </div>
                   {/* ПОДВАЛ ПЛИТКИ — КАНОННЫЙ, тот же, что во всех галереях формы: ручка ⠿ мышью,
                       стрелки ← → с клавиатуры, номер позиции и форма кадра. Ховер-иконка поверх
                       картинки была бы недостижима с клавиатуры и с планшета и дралась бы за
@@ -1002,7 +1218,6 @@ export function FocusedAnnotator({
                       unit='view'
                     />
                   )}
-                  {renderFocusedFooter?.(v, i)}
                   {/* НАКЛАДКА ВЫБОРА. Перекрывает плитку ЦЕЛИКОМ, и в этом весь довод: пока режим
                       взведён, ни пин, ни ✕, ни ручка перестановки под ней не достижимы, поэтому
                       «один клик — два факта» не выражается вовсе. Рисуется только во взведённом
@@ -1026,7 +1241,9 @@ export function FocusedAnnotator({
                           }
                           onClick={() => tilePick?.onPick(v, i)}
                           className={cn(
-                            'absolute inset-0 z-[7] flex items-end justify-center pb-2',
+                            // Выше углов (z-20): пока выбор взведён, ✕ и crop под накладкой
+                            // недостижимы — в этом и довод накладки.
+                            'absolute inset-0 z-30 flex items-end justify-center pb-2',
                             // Стиль обводки задан ЯВНО (`outline-dashed` / `outline-solid`), а не
                             // голым `outline`: twMerge выбрасывает голый класс рядом с
                             // `outline-2` — они одной группы, — и рамка молча исчезает.
@@ -1062,11 +1279,12 @@ export function FocusedAnnotator({
         </Text>
       ) : (
         <div className='space-y-2.5'>
-          {/* Focused image — annotate in place; the zoom control opens the lightbox for pan + draw */}
+          {/* Focused image — annotate in place; a double-click opens the zoomed view for pan + draw */}
           {focused && (
             <div className='mx-auto w-full max-w-[26rem] space-y-2'>
               <AnnotationSurface
                 hoveredKey={hoveredKey}
+                frameId={focused.mediaId}
                 src={focusedUrl}
                 alt={focusedAlt}
                 media={isVideo(focusedUrl) ? 'video' : 'image'}
@@ -1076,8 +1294,9 @@ export function FocusedAnnotator({
                 frozen={readOnly}
                 tool={tool}
                 onToolDone={() => setTool(null)}
-                onPlacedCountChange={setPlaced}
-                onAdd={(kind, points, pen) => onAddCallout(focused.mediaId, kind, points, pen)}
+                onAdd={(kind, points, pen, armed) =>
+                  onAddCallout(focused.mediaId, kind, points, pen, armed)
+                }
                 onEditPoints={onEditPoints}
                 onBeforeMutate={onBeforeMutate}
                 onUndo={onUndo}
@@ -1096,17 +1315,8 @@ export function FocusedAnnotator({
                 legend={pinText === 'legend'}
                 hoverNotes={pinText === 'hover'}
                 halo={halo}
-                cornerSlot={
-                  <FrameButton
-                    ariaLabel='zoom · pan · edit'
-                    onPress={() => setZoomIndex(focusedViewerIndex)}
-                  >
-                    zoom
-                  </FrameButton>
-                }
+                onOpenLarge={zoomable ? () => setZoomIndex(focusedViewerIndex) : undefined}
               />
-
-              {renderFocusedFooter?.(focused, focusedPosition)}
             </div>
           )}
 
@@ -1194,8 +1404,11 @@ export function FocusedAnnotator({
           callouts={calloutsFor(views[zoomIndex].mediaId)}
           frozen={readOnly}
           toolKinds={calloutKinds}
+          purposes={calloutPurposes}
           halo={halo}
-          onAdd={(kind, points, pen) => onAddCallout(views[zoomIndex].mediaId, kind, points, pen)}
+          onAdd={(kind, points, pen, armed) =>
+            onAddCallout(views[zoomIndex].mediaId, kind, points, pen, armed)
+          }
           onEditPoints={onEditPoints}
           onBeforeMutate={onBeforeMutate}
           onUndo={onUndo}
@@ -1204,11 +1417,7 @@ export function FocusedAnnotator({
           addingKey={adding}
           onAddingChange={setAdding}
           onSelect={(key, opts) => {
-            // ⚠ ФОКУС НАРУЖУ НЕ ПРОСИТСЯ, КОГДА ПРАВКА ЖИВЁТ ВНУТРИ ДИАЛОГА. Владелец мудборда
-            // держит правку в боковом меню и на `opts.focus` ставит курсор ТУДА — за оверлей, где
-            // ловушка фокуса Radix немедленно отбирает его назад. Курсор внутри зума ставит сам
-            // диалог (`EditorSlot` поверхности), поэтому наружу уезжает жест выбора БЕЗ просьбы.
-            setSelected(key, renderZoomEditor ? { ...opts, focus: false } : opts);
+            setSelected(key, opts);
             setAdding(null);
             if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
           }}
@@ -1224,16 +1433,13 @@ export function FocusedAnnotator({
             // есть под ровно тот орган, который владелец снял (B-9). Высота назначена под ПОЛОСУ
             // (`editorHeight`), поэтому резерв просят только те, кто эту полосу и держит: у тела
             // бокового меню рядов больше, и зажатое в чужое число оно обрезалось бы `overflow`.
-            zoomEditorReserve && renderEditor && !renderZoomEditor ? editorHeight : undefined
+            zoomEditorReserve && renderEditor ? editorHeight : undefined
           }
           // РЕДАКТОР ЕДЕТ В УВЕЛИЧЕННЫЙ ВИД. Его здесь не было вовсе: выбрав указание в зуме,
           // человек правил его в редакторе, который рисовался на СТРАНИЦЕ ПОЗАДИ модалки — то есть
           // нигде. А ставят указание по миллиметровой детали именно в зуме. Диалог прокидывает
           // проп в поверхность спредом, `EditorSlot` и тёмная подложка под кадром уже готовы.
-          //
-          // ⚠ СОБСТВЕННЫЙ РЕДАКТОР ЗУМА СТАРШЕ ОБЩЕГО: владелец, у которого правка снаружи (B-9),
-          // задаёт только его — и тогда полосы на странице по-прежнему нет, а в зуме правка есть.
-          renderEditor={zoomEditor}
+          renderEditor={renderEditor}
         />
       )}
 
@@ -1263,7 +1469,7 @@ function EditorPanel({ focusToken, children }: { focusToken: number; children: R
 }
 
 // ---------------------------------------------------------------------------
-// A control floating on an image frame (zoom, remove). It has to swallow its own pointer
+// A control floating on an image frame (remove). It has to swallow its own pointer
 // gestures, or the press underneath reaches the Stage's add-callout / pan handler.
 // ---------------------------------------------------------------------------
 
@@ -1298,7 +1504,9 @@ function FrameButton({
         e.preventDefault();
         onPress();
       }}
-      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+      // Кожа и правило появления — общие для всех плиток (`tile-skin.ts`): ✕ тихий, как у
+      // `PictureTile`, а не вечно видимый с инверсией на наведении.
+      className={cn(TILE_CORNER, TILE_QUIET, 'cursor-pointer py-0.5 leading-none')}
     >
       {children}
     </span>

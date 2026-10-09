@@ -10,8 +10,8 @@ import Text from 'ui/components/text';
 import { MediaManager } from '..';
 import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
 import { mergeQueue } from '../utils/intake-queue';
-import { filesOfKind, usePasteFiles } from '../utils/usePasteFiles';
-import { useUploadMedia } from '../utils/useUploadMedia';
+import { acceptOf, filesOfKind, refusalOf, usePasteFiles } from '../utils/usePasteFiles';
+import { isSvgMedia, isSvgUrl, useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 import { MediaIntakeDialog } from './media-intake-dialog';
 
@@ -22,6 +22,13 @@ interface MediaSelectorProps {
   aspectRatio?: string[];
   allowMultiple?: boolean;
   showVideos?: boolean;
+  /** SVG files are taken too (uploaded through the vector door). */
+  allowSvg?: boolean;
+  /**
+   * An SVG and nothing else (the care-label logo). A photo — dropped, pasted, picked from disk or
+   * from the library — is refused with a sentence, never delivered.
+   */
+  vectorOnly?: boolean;
   triggerClassName?: string;
   /** Custom trigger element (rendered through Radix `asChild`) in place of the default button —
    *  lets a caller demote the library to a quiet "browse all…" beside an inline add strip. */
@@ -42,11 +49,14 @@ export function MediaSelector({
   aspectRatio,
   allowMultiple = true,
   showVideos = true,
+  allowSvg = false,
+  vectorOnly = false,
   triggerClassName,
   trigger,
   returnFocusWithoutScroll = false,
-  saveSelectedMedia,
+  saveSelectedMedia: deliverSelected,
 }: MediaSelectorProps) {
+  const accept = acceptOf({ showVideos, allowSvg, vectorOnly });
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
@@ -73,6 +83,17 @@ export function MediaSelector({
 
   const uploadMedia = useUploadMedia();
   const { showMessage } = useSnackBarStore();
+
+  /** The ONE exit to the owner. A vector-only slot lets through vectors only, whatever the road. */
+  const saveSelectedMedia = useCallback(
+    (media: common_MediaFull[]) => {
+      if (!vectorOnly) return deliverSelected(media);
+      const vectors = media.filter(isSvgMedia);
+      if (vectors.length < media.length) showMessage(refusalOf('vector'), 'error');
+      if (vectors.length) deliverSelected(vectors);
+    },
+    [vectorOnly, deliverSelected, showMessage],
+  );
 
   // A slot has a fixed ratio when it lists concrete ratios and no "Custom" (free-form) option.
   // Разбор ЗАПОМИНАЕТСЯ по самому списку: вызывающие пишут его литералом прямо в JSX, и без
@@ -192,8 +213,13 @@ export function MediaSelector({
         if (media.length === 0) return;
         const m = media[0];
         const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
-        // Right ratio (or video) → add as-is; wrong ratio → offer crop/keep.
-        if (isVideo(url) || matchesRatio(m)) {
+        if (vectorOnly && !isSvgUrl(url)) {
+          showMessage(refusalOf('vector'), 'error');
+          return;
+        }
+        // Right ratio (or video, or a vector — the cropper would rasterise it) → add as-is; wrong
+        // ratio → offer crop/keep.
+        if (isVideo(url) || isSvgUrl(url) || matchesRatio(m)) {
           commitMedia([m]);
         } else {
           enterCrop(m);
@@ -209,7 +235,16 @@ export function MediaSelector({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [oneAtATime, allowMultiple, saveSelectedMedia, closeAndReset, commitMedia, enterCrop],
+    [
+      oneAtATime,
+      allowMultiple,
+      vectorOnly,
+      saveSelectedMedia,
+      closeAndReset,
+      commitMedia,
+      enterCrop,
+      showMessage,
+    ],
   );
 
   // ⌘V ПРЯМО В ДИАЛОГЕ. Скриншот уже в буфере: заставлять сохранять его файлом, чтобы потом
@@ -234,13 +269,9 @@ export function MediaSelector({
       // Бросок несёт что угодно, а приёмка открывает КРОП: PDF или zip показали бы пустой холст.
       // ⌘V отсеивается самим перехватчиком буфера, у `input` фильтр — только подсказка диалога
       // ОС, поэтому отбор стоит здесь, на общих воротах, и об отброшенном говорится вслух.
-      const kind = showVideos ? 'media' : 'image';
-      const usable = filesOfKind(files, kind);
+      const usable = filesOfKind(files, accept);
       if (!usable.length) {
-        showMessage(
-          kind === 'media' ? 'images and videos go here' : 'only images go here',
-          'error',
-        );
+        showMessage(refusalOf(accept), 'error');
         return;
       }
       const limit = oneAtATime || !allowMultiple ? 1 : undefined;
@@ -259,7 +290,7 @@ export function MediaSelector({
       }
       setPasted(merged.queue);
     },
-    [oneAtATime, allowMultiple, showVideos, showMessage],
+    [oneAtATime, allowMultiple, accept, showMessage],
   );
 
   usePasteFiles(
@@ -272,7 +303,8 @@ export function MediaSelector({
       // Приёмка БОЛЬШЕ НЕ ГЛУШИТ ВСТАВКУ: она копит. Гасится только кроп — там ⌘V означал бы
       // вставку поверх кадрируемого снимка, а этого никто не просил.
       accepts: open && !cropMedia,
-      accept: showVideos ? 'media' : 'image',
+      // A vector-only dialog hears photos too, so takeFiles can say why it refuses them.
+      accept: accept === 'vector' ? 'image+svg' : accept,
     },
     takeFiles,
   );
@@ -519,8 +551,9 @@ export function MediaSelector({
               прямо в слот: превью, кроп, подтверждение. */}
           <MediaIntakeDialog
             files={pasted}
-            aspect={cropAspect}
-            lockAspect={ratioConstrained}
+            // Never crop a vector (the cropper rasterises); see useMediaIntake.
+            aspect={vectorOnly ? undefined : cropAspect}
+            lockAspect={vectorOnly ? false : ratioConstrained}
             purpose={purpose}
             // Очередью правит сама приёмка: пачка может доехать наполовину, и отказавшееся
             // остаётся в ней с причиной. Гасить очередь здесь значило бы выбрасывать то, что

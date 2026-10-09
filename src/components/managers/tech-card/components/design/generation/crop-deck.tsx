@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { cutPiecesWord } from './composite';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ THE CROP DECK — A SHEET WITH ITS CUT PIECES FANNED OUT BEHIND IT (H-10, J-2) ═════════════
@@ -302,7 +303,8 @@ export function CropDeck({
           'focus-visible:outline-offset-2 focus-visible:outline-textColor'
         }
       >
-        {open ? '▾' : '▸'} {word}
+        {word}
+        <FoldCaret open={open} />
       </button>
       )}
     </div>

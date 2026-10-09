@@ -6,24 +6,28 @@ import type {
 import { Fragment, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Tiles } from 'ui/components/tiles';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
 import { useRenderHost } from '../render/render-tile';
 import { CropDeck } from './crop-deck';
+import { LiveTiles } from './live-tiles';
 import { outputPlan, type OutputPlan } from './run-gallery';
 import { GapPill } from './run-panel';
 import {
   expectedTileCount,
   isRunLive,
   isTextRun,
+  overdueWord,
+  capClock,
   runOutcomeNote,
   runOutputText,
   runStatus,
 } from './run-state';
 import { RunTile } from './run-tile';
 import { thumbUrl } from './thumb';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ WHAT A RUN BROUGHT BACK — ONE BLOCK, TWO HOSTS (26.09, O-53) ═══════════════════════════════
@@ -101,7 +105,7 @@ export function RunOutputs({
   openDeck: number | null;
   onDeck: (rootId: number) => void;
   onZoomPicture?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
   /**
    * THE HOST IS THE WORKBENCH UNDER GENERATE, not a history row. It changes two things: the grid
    * runs on the block's 190px track instead of the history's 148px, and each tile's editor asks
@@ -166,7 +170,8 @@ export function RunOutputs({
               onClick={() => setTextOpen((v) => !v)}
               aria-expanded={textOpen}
             >
-              {textOpen ? 'hide the draft ▾' : 'read the draft ▸'} · {outputText.length} characters
+              {textOpen ? 'hide the draft' : 'read the draft'}
+              <FoldCaret open={textOpen} /> · {outputText.length} characters
             </Button>
             {textOpen && (
               /* ПРОЗА МЕРИТСЯ СТРОКОЙ, А НЕ БЛОКОМ: `max-w-[75ch]` + `break-words` держат любой
@@ -190,30 +195,23 @@ export function RunOutputs({
   }
 
   if (live) {
-    // `runOutputsShown` has already said `expected > 0` for a live run.
+    // `runOutputsShown` has already said `expected > 0` for a live run. The first cell carries the
+    // run's `cancel` corner (owner item 23, `live-tiles.tsx`).
     return (
       <Tiles min={track}>
-        {Array.from({ length: expected }, (_, i) => (
-          <Tile
-            key={i}
-            dashed
-            media={
-              <div
-                className='flex w-full items-center justify-center bg-bgSecondary'
-                style={{ aspectRatio: '4 / 5' }}
-              >
-                <Text
-                  size='nano'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                >
-                  {i === 0 && runStatus(run) === 'running' ? `running ${elapsed}` : 'reserved'}
-                </Text>
-              </div>
-            }
-          />
-        ))}
+        <LiveTiles
+          techCardId={techCardId}
+          run={run}
+          count={expected}
+          disabled={disabled}
+          wordOf={(i) =>
+            i === 0 && overdueWord(run)
+              ? `${overdueWord(run)} · ${elapsed}`
+              : i === 0 && runStatus(run) === 'running'
+                ? `running ${elapsed}${capClock(run) ? ` ${capClock(run)}` : ''}`
+                : 'reserved'
+          }
+        />
       </Tiles>
     );
   }
@@ -234,6 +232,7 @@ export function RunOutputs({
               techCardId={techCardId}
               picture={picture}
               siblings={pictures}
+              run={run}
               workbench={workbench}
               rep={rep}
               cardFit={cardFit}
@@ -279,6 +278,7 @@ export function RunOutputs({
                     techCardId={techCardId}
                     picture={member}
                     siblings={pictures}
+                    run={run}
                     workbench={workbench}
                     rep={rep}
                     cardFit={cardFit}

@@ -13,6 +13,7 @@ import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useFormPieces } from './piece-picker';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 const OPEN = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const RESOLVED = 'TECH_CARD_ISSUE_STATUS_RESOLVED';
@@ -149,12 +150,14 @@ function IssueEditor({
         label='description *'
         rows={2}
         maxLength={2000}
+        enhance='description'
       />
       <TextareaField
         name={`issues.${index}.resolutionNote`}
         label='resolution note'
         rows={2}
         maxLength={2000}
+        enhance='note'
       />
     </div>
   );
@@ -386,8 +389,8 @@ export function IssuesField() {
         action={
           <Button
             type='button'
-            variant='main'
-            size='sm'
+            variant='underline'
+            size='xs' className='text-labelColor hover:text-textColor'
             onClick={() => {
               append({ ...emptyIssue });
               setPendingAdd(true);
@@ -478,7 +481,7 @@ export function IssuesField() {
                               toggle(key);
                             }}
                           >
-                            {isOpen ? '▾' : '▸'}
+                            <FoldCaret open={isOpen} className='ml-0' />
                           </Button>
                           <Button
                             type='button'

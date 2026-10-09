@@ -6,6 +6,7 @@ import type {
   common_DesignBatch,
   common_DesignRun,
   common_DesignRunParams,
+  StartDesignRunResponse,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,9 +18,10 @@ import {
   useDesignWrites,
   type WriteContext,
 } from '../use-design-band';
-import { unstickPin } from './bench-store';
-import { refusalFromError, type RunRefusal } from './refusal';
+import { clearBenchChoice, unstickPin } from './bench-store';
+import { isDefinitiveRefusal, refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
+import { awaitRun, runLedger } from './run-ledger';
 
 /**
  * THE GENERATIVE HALF OF THE BAND'S SEAM.
@@ -105,6 +107,13 @@ export function useGenerationWrites(techCardId?: number) {
         // rather than left unset — one spelling for one meaning.
         rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
+    /* A REFUSAL IS AN ANSWER, NOT A HICCUP (M8, 07.10). The app retries every mutation once; a 4xx
+       refusal repeated a second later is the same refusal — and while the tab is hidden the retry is
+       held until it shows again, so `flat_run_in_flight` («another tab is drawing») could come back
+       minutes later as a paid start the person was never told about. Only an answer that may not
+       have been one (`isDefinitiveRefusal` false: no status, 408, 499, 5xx) is retried: the same
+       client_request_id makes that replay safe. */
+    retry: (failures, error) => failures < 1 && !isDefinitiveRefusal(error),
     onMutate,
     onSuccess: invalidateWritten,
     onError,
@@ -215,7 +224,6 @@ export type StartRunState = {
  * they put in `params`; the money, the idempotency and the invalidation are one mechanism, and a
  * second copy of it is precisely where two screens start disagreeing about what a retry means.
  */
-const runLedger = new Map<string, string>();
 
 /**
  * A SHORT, STABLE DIGEST of a JSON-able value (cyrb53: two 32-bit lanes, 53 bits out). It keeps the
@@ -262,8 +270,9 @@ export function useStartRun(techCardId?: number): StartRunState {
         clientRequestId = newClientRequestId();
         runLedger.set(key, clientRequestId);
       }
+      let started: StartDesignRunResponse | undefined;
       try {
-        await startRun.mutateAsync({ ...input, clientRequestId });
+        started = await startRun.mutateAsync({ ...input, clientRequestId });
       } catch (error) {
         // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
         // seconds, the refusal stays on the screen until read (CONTRACT §E) — in the CALLER's
@@ -272,7 +281,8 @@ export function useStartRun(techCardId?: number): StartRunState {
         // same id.
         return refusalFromError(error, clientRequestId);
       }
-      if (runLedger.get(key) === clientRequestId) runLedger.delete(key);
+      // Kept until the band shows the run (`run-ledger.ts`): a press before that replays this id.
+      awaitRun(key, card, started?.run?.id ?? 0, clientRequestId);
       // The run comes back PENDING, not done: the pictures arrive when the provider answers.
       // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
       // while the card is on screen, whether or not the row that pressed is still mounted. WHERE
@@ -285,7 +295,12 @@ export function useStartRun(techCardId?: number): StartRunState {
       // …and the workbench goes to it (O-53 review, `bench-store.ts`): a pin left by earlier work
       // stops holding the run it kept. Not a release — an editor opened while this answer travelled
       // keeps its run until it closes.
-      if (input.kind === 'flat') unstickPin(card);
+      // A run put on the bench from the history lets go too: the new run is what the person wants
+      // to see now (03.10, owner item 9).
+      if (input.kind === 'flat') {
+        unstickPin(card);
+        clearBenchChoice(card);
+      }
       // The caller clears its fields HERE and not on the click: clearing the ask before the row is
       // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh
       // id and buy a second picture.

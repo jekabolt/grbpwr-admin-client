@@ -10,17 +10,16 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
-import { InertDoor } from '../bench-slot';
-import { Counter } from '../core';
 import { serverSpeaksDesign } from '../capability';
+import { ReplacingEditor } from '../generation/propagating-editor';
 import { cropFamilies } from '../generation/composite';
 import { CropDeck } from '../generation/crop-deck';
 import { runStatus } from '../generation/run-state';
 import { useElapsed } from '../generation/use-generation';
-import { VectorModal } from '../modals';
 import { ModelSnapshotScope } from '../picture-tile';
 import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
@@ -38,8 +37,9 @@ import {
   pictureThumb,
   serverStatesSelected,
 } from './model';
-import { DOOR, DOOR_ROW, INERT_DOOR } from './render-tile';
+import { DOOR, DOOR_ROW } from './render-tile';
 import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
    Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и
@@ -270,7 +270,9 @@ export function OutputsSection({
   });
   /* КАКУЮ ИМЕННО КАРТИНКУ ПРАВИМ. Не булево `editing`: ячеек в полосе много, а модалка одна,
      и флаг открыл бы редактор сразу над всеми. Ноль — закрыто. */
-  const [editingId, setEditingId] = useState(0);
+  /* T59: the picture itself is held, not looked up in the list — the overwrite takes it off the
+     list (an original an edit replaced is offered nowhere) before its editor closes. */
+  const [editing, setEditing] = useState<common_DesignPicture | null>(null);
   /**
    * ОДНА ОТКРЫТАЯ КОЛОДА НА РАЗДЕЛ, тем же законом, что и в ленте: «нажимаешь на другой мультивью
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
@@ -289,7 +291,7 @@ export function OutputsSection({
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     if (openDeck !== null) setOpenDeck(null);
-    if (editingId) setEditingId(0);
+    if (editing) setEditing(null);
   }
 
 
@@ -581,9 +583,8 @@ export function OutputsSection({
            ⚠ СЮДА ПЕРЕЕХАЛА ТОЛЬКО ЖИВАЯ ДВЕРЬ, И ЭТО РЕШЕНИЕ ЭТОГО ЖЕ ФАЙЛА, ПРИНЯТОЕ РАНЬШЕ. У
            плитки рендера (`./render-tile`) стоит разбор снесённой двери «split first ▸»: «Угол —
            ТИХИЙ орган: он появляется по наведению, то есть отказ называл орган, которого на экране
-           не видно». Отказ, спрятанный в наведение, — это отсутствие отказа. Поэтому оба неживых
-           состояния (сервер не знает пометки; карточка только для чтения) остаются `InertDoor` ПОД
-           кадром, словами и всегда видимыми, — см. ряд `action` ниже. */
+           не видно». T17 переписал это правило для всей системы (спека §3, правило 5): причины
+           живут в `title` ячейки, а «сервер не знает пометки» — ещё и запиской над полкой. */
         onSelect={
           carries && !writesOff
             ? {
@@ -634,10 +635,10 @@ export function OutputsSection({
         onEdit={
           !writesOff && !modelUrl && !composite
             ? {
-                onClick: () => setEditingId(picture.id ?? 0),
+                onClick: () => setEditing(picture),
                 ariaLabel: `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
                 title:
-                  'draw over this picture — saving makes a NEW picture; the original is never overwritten',
+                  'draw over this picture — the edit takes its place here and in every slot it stands in',
               }
             : undefined
         }
@@ -686,21 +687,32 @@ export function OutputsSection({
                 ? 'selected'
                 : undefined
         }
-        /* Вторая строка подписи снята (F-13) — разбор у плитки рендера (`./render-tile`). */
-        lines={[
-          <span key='shape'>{stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}</span>,
-        ]}
+        /* T17 (спека §3, правило 3): под кадром — ничего, кроме ряда колоды. Подпись прогона и
+           причина погашенной пометки — в подсказке ячейки; причина «сервер не знает пометки» к
+           тому же стоит одной запиской над полкой. */
+        title={[
+          stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`,
+          !carries
+            ? SELECT_MARK_NOT_STATED
+            : writesOff
+              ? disabled
+                ? 'this card is read-only for you — the mark is an edit of the card'
+                : 'this server does not answer the design routes'
+              : '',
+        ]
+          .filter(Boolean)
+          .join(' — ')}
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
            `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
-           из них дверь жива. Единственные жильцы ряда — дверь колоды и ОТКАЗ пометки; живая
-           пометка уехала на кадр.
+           из них дверь жива. Единственный жилец ряда — дверь колоды (T17: отказ пометки ушёл
+           в `title`); живая пометка уехала на кадр.
 
            ⚠ У 3D РЯД ПОЯВЛЯЕТСЯ РОВНО У ЛИСТА, ИЗ КОТОРОГО УЖЕ ВЫРЕЗАНЫ КУСКИ (`deck`), и ни у
            одной другой ячейки полки. Нерезаный лист свою дверь носит УГЛОМ (`split`), как и всякий
            лист этой системы; у одиночного снимка под кадром по-прежнему нет ничего. */
         action={
-          !!deck || !carries || writesOff ? (
+          deck ? (
           /* Метрика ряда — одна на все двери студии: `DOOR_ROW` (`./render-tile`, F-9). */
           <div data-door-row='' className={DOOR_ROW}>
             {/* ═══ КОЛОДА ЛИСТА 3D — ДВЕ ДВЕРИ И НИ ОДНОЙ ТРЕТЬЕЙ ══════════════════════════════
@@ -734,7 +746,8 @@ export function OutputsSection({
                   title='fold these views back behind the sheet'
                   onClick={() => setOpenDeck(null)}
                 >
-                  fold ▾
+                  fold
+                  <FoldCaret open />
                 </Button>
               ) : (
                 <Button
@@ -746,51 +759,10 @@ export function OutputsSection({
                   onClick={() => setOpenDeck(picture.id ?? 0)}
                   title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' view was' : ' views were'} cut from this sheet — open them as cards on the shelf`}
                 >
-                  expand ▸
+                  expand
+                  <FoldCaret open={false} />
                 </Button>
               ))}
-            {/* ═══ ЗДЕСЬ СТОЯЛИ `open` И `download` — ОБЕ СНЯТЫ (E-25) ═══════════════════════
-                Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на
-                карточку а не кнопками снизу а кнопки DOWNLOAD быть не должно она только во вьере».
-
-                `open` НЕ ПОТЕРЯН, А ПЕРЕЕХАЛ В ПРИМИТИВ: у плитки, за которой стоит модель,
-                поверхность открывает просмотрщик модели, а по наведению в верхнем правом углу
-                появляется объявленный орган `open 3d` (`picture-tile.tsx`). Это верно для ОБЕИХ
-                строк 3D — и для постера, и для самого `.glb`, — потому что кадр теперь всегда
-                есть (разбор у `src` выше).
-
-                `download` СНЯТ НАСОВСЕМ, и довод «файл отдаётся до всякого просмотра и независимо
-                от него» ПРОВЕРЕН, а не отброшен: ссылка на файл в окне модели стоит НАД сценой и
-                от неё не зависит — так написана её собственная шапка (`threed/model-modal.tsx`).
-                Упавший разбор `.glb`, выключенный WebGL, нехватка памяти уносят картинку, но не
-                ссылку. Файл стал на одно нажатие дальше и не стал недостижимым.
-
-                А ВОТ ОТКАЗ ПОМЕТКИ ОСТАЛСЯ ЗДЕСЬ, И ЭТО НЕ НЕДОДЕЛКА: дверь, которой нельзя
-                воспользоваться, обязана быть ВИДНА без наведения — довод у пропа `onSelect`
-                выше. Живая пометка ушла на кадр; неживая говорит словом на прежнем месте. */}
-            {/* ⚠ `INERT_DOOR` НА ОБОИХ НЕЖИВЫХ СОСТОЯНИЯХ, И ЭТО ОДИН ДЕФЕКТ, А НЕ ДВА. Без него
-                `InertDoor` — `inline-flex` по слову: «select» занимал бы 46px там, где живая дверь
-                занимает всю ширину ячейки, и ряд ехал бы при КАЖДОЙ смене состояния той же самой
-                двери. Разведка назвала первую ветку; вторая — та же дверь, и починить одну значило
-                бы оставить скачок ровно между её состояниями. */}
-            {!carries ? (
-            <InertDoor className={INERT_DOOR} label='select' reason={SELECT_MARK_NOT_STATED} />
-          ) : writesOff ? (
-            <InertDoor
-              className={INERT_DOOR}
-              label={chosen ? 'un-select' : 'select'}
-              reason={
-                disabled
-                  ? 'this card is read-only for you — the mark is an edit of the card'
-                  : 'this server does not answer the design routes'
-              }
-            />
-          ) : (
-            /* ЖИВАЯ ПОМЕТКА СТОИТ НА КАДРЕ (проп `onSelect` выше), поэтому под кадром её нет.
-               Ветка оставлена пустой намеренно: три состояния одной двери читаются подряд, и
-               «а где же третье» — вопрос, который иначе задавал бы каждый следующий читатель. */
-            null
-          )}
           </div>
           ) : undefined
         }
@@ -826,7 +798,7 @@ export function OutputsSection({
            лишний span здесь был бы коробкой внутри коробки на ровном месте. */
         <>
           {/* The mockup's counter pill (`0 MODELS`). */}
-          <Counter n={rows.length} noun='model' />
+          <HeaderCount n={rows.length} noun='model' />
           <Text size='micro' variant='label' component='span' className='uppercase'>
             {/* ИМЯ КОЛОРВЕЯ — полка им сужена (`scope`), и молчать об этом нельзя. */}
             {colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
@@ -993,15 +965,14 @@ export function OutputsSection({
           бы столько модалок, сколько плиток; булев флаг открыл бы их разом над всеми.
           `slot={null}` — плитка полосы не слот верстака: машинная векторизация внутри честно
           откажет («the machine reads the bench»), а рисование поверх работает целиком. */}
-      {editingId > 0 && rows.some((r) => (r.picture.id ?? 0) === editingId) && (
-        <VectorModal
-          open
-          onOpenChange={(next: boolean) => !next && setEditingId(0)}
-          techCardId={techCardId}
+      {/* T59: the edit takes the picture's place — every slot holding it moves onto the edit. */}
+      {editing && (
+        <ReplacingEditor
           band={band}
-          base={rows.find((r) => (r.picture.id ?? 0) === editingId)!.picture}
-          slot={null}
+          techCardId={techCardId}
+          picture={editing}
           disabled={disabled}
+          onOpenChange={(next: boolean) => !next && setEditing(null)}
         />
       )}
 

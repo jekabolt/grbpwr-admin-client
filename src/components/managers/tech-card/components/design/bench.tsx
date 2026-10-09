@@ -11,10 +11,12 @@ import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Button } from 'ui/components/button';
 import {
-  BENCH_CELL_STYLE,
+  FLAT_CELL_PX,
+  FLAT_CELL_STYLE,
   BenchSlot,
   LegacySlotCell,
   NewDetailCell,
@@ -25,18 +27,21 @@ import {
   readBench,
   slotFootnote,
   slotRefKey,
+  useRemovalUndo,
   viewLabel,
 } from './bench-slot';
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
 import { PictogramBackdrop, useCardGarmentFamily } from './garment-pictograms';
-import { Counter } from './core';
 import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { LockBar } from './render/generate-row';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
+import { staleShown } from './stale-details';
+import { useKeepStale } from './stale-details-hook';
 import { uploadItem } from './upload-item';
+import { uploadPlacement } from './bench-mint';
 import { normaliseViewKey } from './views';
 
 /**
@@ -95,8 +100,14 @@ const FLAT_BENCH: BenchKind = 'flat';
  * прокручивается внутри блока. Число и стиль ПЕРЕЕХАЛИ в `bench-slot.tsx` (`BENCH_CELL_STYLE`),
  * где живут два других слагаемых коробки — кадр и подвал: с r2 п.25 той же коробкой стоит ячейка
  * SOURCE PICTURE на шаге PATTERN, и «138» в двух файлах разъехалось бы молча. Разбор — там же.
+ *
+ * T31 (04.10, owner item 31: «FLAT SLOTS блок сделай немного крупнее»): THIS strip's cells are 20%
+ * wider than the shared box — 166px, frame and cap kept, so every cell of the block (sides,
+ * details, the mint cell, the legacy row) grows together and keeps its proportions. The box itself
+ * (`BENCH_CELL_PX`) stays for the other steps that borrow it.
  */
-const CELL_STYLE = BENCH_CELL_STYLE;
+const CELL_PX = FLAT_CELL_PX;
+const CELL_STYLE = FLAT_CELL_STYLE;
 
 /**
  * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════
@@ -221,6 +232,8 @@ export function Bench({
   const [mintingDetail, setMintingDetail] = useState(false);
 
   const bench = useMemo(() => readBench(band, FLAT_BENCH), [band]);
+  /** 82 §5: a detail drawn before the views it should agree with — `keep` is stored on the server. */
+  const keepStale = useKeepStale(techCardId);
   const candidates = useMemo(() => pickableFlats(band), [band]);
   /** Семейство силуэта по категории карточки (D-22): пиктограмма на полосах пустой стороны. */
   const family = useCardGarmentFamily();
@@ -322,7 +335,8 @@ export function Bench({
       if (!mediaId) return;
       const key = slotRefKey(ref);
       const ghostView = (ref.viewKey ?? '').trim().toLowerCase() || 'detail';
-      const minting = ghostView === 'detail' && !ref.slotId;
+      const placement = uploadPlacement(ref, expectedSlotRev, newDetailName);
+      const minting = placement.newDetailName !== undefined;
       if (minting) setMintingDetail(true);
       else {
         setOptimistic((prev) => ({
@@ -345,9 +359,11 @@ export function Bench({
               colorwayId: COLORWAY_NONE,
             }),
           ],
-          target: ref,
-          expectedSlotRev,
-          newDetailName,
+          // ONE TRANSACTION, A NEW DETAIL INCLUDED (`bench-mint.ts`, HX6): the target is the new
+          // detail and the typed name rides on the same call.
+          target: placement.target,
+          expectedSlotRev: placement.expectedSlotRev,
+          newDetailName: placement.newDetailName,
         },
         {
           onSettled: () => {
@@ -384,8 +400,13 @@ export function Bench({
     [writes.setBenchSlot],
   );
 
+  /* T49 · a picture taken off a slot keeps an `undo` until the page reloads (`removal-undo.ts`). */
+  const removals = useRemovalUndo(techCardId);
+  const rememberRef = useRef(removals.remember);
+  rememberRef.current = removals.remember;
+
   const unmark = useCallback(
-    (ref: DesignBenchSlotRef, expectedSlotRev: number) => {
+    (ref: DesignBenchSlotRef, expectedSlotRev: number, pictureId = 0, side = '') => {
       const key = slotRefKey(ref);
       setOptimistic((prev) => ({
         ...prev,
@@ -395,7 +416,12 @@ export function Bench({
       }));
       writes.setBenchSlot.mutate(
         { slot: ref, pictureId: 0, expectedSlotRev },
-        { onError: () => dropOptimistic(key) },
+        {
+          onError: () => dropOptimistic(key),
+          onSuccess: () => {
+            if (pictureId > 0) rememberRef.current(ref, 'flat', side, pictureId);
+          },
+        },
       );
     },
     [writes.setBenchSlot, dropOptimistic],
@@ -517,7 +543,7 @@ export function Bench({
               adding a detail…
             </Text>
           )}
-          <Counter n={filledSides} noun='side' total={bench.sides.length} />
+          <HeaderCount n={filledSides} noun='side' total={bench.sides.length} />
         </>
       }
     >
@@ -555,7 +581,8 @@ export function Bench({
                 backdrop={family ? <PictogramBackdrop family={family} view={view} /> : undefined}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
-                onUnmark={() => unmark(ref, rev)}
+                onUnmark={() => unmark(ref, rev, picture?.id ?? 0, viewLabel(view))}
+                undo={picture ? undefined : removals.undoFor(ref, rev)}
                 galleryItem={
                   picture?.media
                     ? mediaFullToViewerItem(picture.media as common_MediaFull)
@@ -581,15 +608,8 @@ export function Bench({
           которые лист цитирует по имени и которые заводит роль `detail` референса. Та же лента,
           те же ячейки; линейка группы — единственная в блоке, потому что это вторая ось, а не
           вторая половина той же. */}
-      <GroupLabel
-        action={
-          <Text size='micro' variant='label' component='span'>
-            {bench.details.length} · the sheet cites a detail by its own name
-          </Text>
-        }
-      >
-        details
-      </GroupLabel>
+      {/* Item 43: no explanatory line beside the label. */}
+      <GroupLabel>details</GroupLabel>
 
       <div data-flat-details='' className='flex items-stretch gap-2 overflow-x-auto pb-1'>
         {bench.details.map((slot, index) => {
@@ -605,7 +625,7 @@ export function Bench({
                   placeholderClass({ dashed: true, tone: 'error' }),
                   'px-2 text-center',
                 )}
-                style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: 138 }}
+                style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: CELL_PX }}
                 title='the server sent this detail row without a slot id, so nothing on it can be addressed — reload the card, and report it if it comes back'
               >
                 <Text size='micro' variant='errorLabel' component='span'>
@@ -635,7 +655,18 @@ export function Bench({
                 shelfOrdinals={shelfOrdinals}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
-                onUnmark={() => unmark(ref, rev)}
+                onUnmark={() => unmark(ref, rev, picture?.id ?? 0, name)}
+                undo={picture ? undefined : removals.undoFor(ref, rev)}
+                stale={
+                  picture && staleShown(slot)
+                    ? {
+                        onKeep: keepStale.busy.has(slotId)
+                          ? undefined
+                          : () => void keepStale.keep(slot),
+                        onDiscard: () => unmark(ref, rev, picture.id ?? 0, name),
+                      }
+                    : null
+                }
                 onRename={(next) => {
                   /* ИМЯ ДЕТАЛИ ЕДЕТ В ПРОМПТ ФЛЭТА (ревью раунда 4, MIN-2): посреди GENERATE или
                      CLEAR оно не меняется, а пока переименование пишется, вход удержан — GENERATE
@@ -663,7 +694,18 @@ export function Bench({
                 }}
                 // СНЯТИЕ ДЕТАЛИ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА: единственный довод запрета («выпущенный
                 // лист ссылается на слот») умер вместе с версиями листа.
-                onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}
+                // ⚠ СЕРВЕР СНОСИТ ТОЛЬКО ПУСТОЙ СЛОТ (`slot_filled`), поэтому заполненный сначала
+                // пустеет (плита остаётся в истории), и лишь потом сносится. Отказ любого шага
+                // говорит шов мутации, а промис возвращает дверь в покой.
+                onDelete={async () => {
+                  if ((slot.pictureId ?? 0) > 0)
+                    await writes.setBenchSlot.mutateAsync({
+                      slot: ref,
+                      pictureId: 0,
+                      expectedSlotRev: rev,
+                    });
+                  await writes.deleteDetailSlot.mutateAsync(slotId);
+                }}
                 galleryItem={
                   picture?.media
                     ? mediaFullToViewerItem(picture.media as common_MediaFull)

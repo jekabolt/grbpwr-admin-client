@@ -3,7 +3,6 @@ import { common_CareEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useModel } from 'components/managers/models/components/useModelQuery';
 import { CareSymbol } from 'components/managers/product/components/care/care-card';
-import { careCodes } from 'components/managers/product/components/care/care-codes';
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -24,9 +23,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
-import { useCareDrift, type CareDrift } from './care-drift';
 import { FIT_KEYS, fitChoicesFor, fitLabel } from './design/fit-vocabulary';
-import { emptyLabel } from './labels-field';
 import { TechCardFormData, toPurposeEnum } from './schema';
 import { parseSeasonToSku } from './season-util';
 import { isAgeGroupSet, STYLE_FACT_KEYS, type StyleFact } from './tech-card-options';
@@ -84,16 +81,6 @@ const FACT_WORD: Record<Fact, string> = {
 /** A fact's value as comparable text: the form holds strings and enum strings; unset is ''. */
 const factText = (v: unknown): string => (v == null ? '' : String(v));
 
-/**
- * Two care values that name the same symbols. The server stores care in its own print order, so
- * a label picked in another order is the same care, not a difference to report.
- */
-const sameCare = (a: string, b: string): boolean => {
-  const x = new Set(careCodes(a));
-  const y = new Set(careCodes(b));
-  return x.size === y.size && [...x].every((c) => y.has(c));
-};
-
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
 const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
@@ -114,7 +101,7 @@ const careLabelContent = (rows: unknown): string => {
 //
 // Two of the four lines are not authored here and are shown read-only, at their real source:
 // model height comes from the BASE MODEL (header, «base model & sample size»), country of origin
-// from the «origin» label on the labels tab — the same place generateCareLabel reads it.
+// from the legacy «origin» label while the card still carries one.
 function StorefrontPreview() {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
@@ -208,125 +195,19 @@ function ResolvedCareEntries({ entries }: { entries?: common_CareEntry[] }) {
   );
 }
 
-// The header's care picker. It edits the SAME field the LABELS tab does — the care label's
-// `content` — by being handed that exact RHF path, so the two tabs are two views of one value and
-// not two values to reconcile. (The picker that was removed from the header owned its OWN field;
-// that is what made it a duplicate, not the fact that it stood on the header. Care being reachable
-// only from the labels tab reads as "care can no longer be edited" to anyone who never went there.)
-// `careIdx` is resolved by the PARENT and handed down, not looked up again here: the parent's mirror
-// reads the same row to feed `careInstructions`, and two independent lookups over the same array are
-// two chances to disagree the day a card carries more than one care label.
-function HeaderCarePicker({
-  canEdit,
-  careIdx,
-  careCount,
-  careRow,
-}: {
-  canEdit: boolean;
-  careIdx: number;
-  /** How many care labels the card carries — >1 makes «the same field» a lie, see below. */
-  careCount: number;
-  /**
-   * The care row itself, resolved by the parent off the array it already watches. Deliberately NOT
-   * a local `useWatch` on `labels.${careIdx}`: RHF's useWatch does not re-read when its `name`
-   * changes — it only moves on the next emit — so the render right after the row is created would
-   * still be showing whichever row used to sit at that index.
-   */
-  careRow?: LabelRowValue;
-}) {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
-
-  const writeLabels = (rows: NonNullable<TechCardFormData['labels']>) =>
-    setValue('labels', rows, { shouldDirty: true });
-
-  // A card with no care label yet gets one from here rather than sending the operator to the labels
-  // tab to create an empty row first.
-  //
-  // Written with setValue on the ARRAY NAME — deliberately not a second useFieldArray('labels').
-  // Field-array instances do not broadcast their own mutations: only `setValue` on a name that is IN
-  // `control._names.array` pushes through `_subjects.array`, and that broadcast is what re-syncs
-  // LabelsField's array instead of leaving the labels tab rendering a stale row list.
-  //
-  // That makes this depend on LabelsField being MOUNTED when the button is pressed — it is what puts
-  // 'labels' in `_names.array`, and that set is not append-only (`unregister` and `reset` clear it).
-  // Today the tech card mounts every tab and only `hidden`s them, so the dependency holds. If the
-  // labels panel is ever mounted conditionally, this call silently falls back to a plain leaf write:
-  // the row would still save while staying INVISIBLE on the labels tab. Move it onto a handler owned
-  // by LabelsField if that day comes.
-  const createCareLabel = () => {
-    const rows = (getValues('labels') ?? []) as NonNullable<TechCardFormData['labels']>;
-    writeLabels([...rows, { ...emptyLabel, labelType: CARE_LABEL }]);
-  };
-
-  // The undo for the button above. Adding a label row moves the LABELS sign-off to «changed after
-  // approval» — so an operator who pressed «создать», thought better of it and walked away would
-  // have unblessed a signed-off section from a tab that offered no way back. Only offered while the
-  // row is still ENTIRELY blank: a care label carries the composition text in `note` (that is what
-  // «сгенерировать состав» writes), and dropping the row would take that with it.
-  const removable =
-    careIdx >= 0 &&
-    !careRow?.content?.trim() &&
-    !careRow?.note?.trim() &&
-    !careRow?.placement?.trim() &&
-    !careRow?.attachment?.trim() &&
-    !careRow?.size?.trim() &&
-    !careRow?.bomItemId;
-  const removeCareLabel = () => {
-    const rows = (getValues('labels') ?? []) as NonNullable<TechCardFormData['labels']>;
-    writeLabels(rows.filter((_, i) => i !== careIdx));
-  };
-
+// The header's care picker — since the labels rework the ONE place care symbols are edited.
+function HeaderCarePicker({ canEdit, careIdx }: { canEdit: boolean; careIdx: number }) {
+  // NO LEGACY CARE ROW: the picker edits the style's care itself (labels rework, 02-DESIGN §4.2).
+  // The old «create» door appended a TECH_CARD_LABEL_TYPE_CARE row to `labels` — a list the card no
+  // longer sends (labels_aware) and the LABELS tab no longer shows. `careInstructions` is a style
+  // fact, staged through this panel's UpdateStyle like every other one.
   if (careIdx < 0) {
-    return (
-      <div className='space-y-1'>
-        <FormLabel>care symbols</FormLabel>
-        <div className='flex min-h-9 items-center gap-2 border border-borderColor p-1.5'>
-          <Text variant='label' size='micro'>
-            — the card has no “care” label —
-          </Text>
-          {canEdit && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='ml-auto shrink-0'
-              onClick={createCareLabel}
-            >
-              create
-            </Button>
-          )}
-        </div>
-        <Text size='micro' variant='label'>
-          the care symbols live on the “care” label (the LABELS tab) — this is the very same field.
-          “create” adds a row there.
-        </Text>
-      </div>
-    );
+    return <CarePicker name='careInstructions' label='care symbols' editMode={canEdit} />;
   }
 
-  return (
-    <div className='space-y-1'>
-      <CarePicker name={`labels.${careIdx}.content`} label='care symbols' editMode={canEdit} />
-      {careCount > 1 ? (
-        // Nothing forbids a second care label, and the mirror, the printed tag and this picker all
-        // read the FIRST one. Saying «the same field» here would then be false for whoever is editing
-        // the other row on the labels tab, so name which row actually reaches the storefront.
-        <Text size='micro' className='text-error'>
-          “care” labels on the card: {careCount} — the first one is what reaches this field and the
-          storefront, the rest are edited only on the LABELS tab
-        </Text>
-      ) : (
-        <Text size='micro' variant='label'>
-          the same field as on the LABELS tab (the “care” label)
-        </Text>
-      )}
-      {canEdit && removable && (
-        <Button type='button' variant='simple' size='xs' onClick={removeCareLabel}>
-          remove the empty label
-        </Button>
-      )}
-    </div>
-  );
+  // A legacy card still carrying a care row: its content is what the mirror feeds into the style's
+  // care, so the picker keeps editing that one value. The LABELS tab no longer shows the row.
+  return <CarePicker name={`labels.${careIdx}.content`} label='care symbols' editMode={canEdit} />;
 }
 
 // StyleFactsField edits the style catalogue facts fit / care at the tech-card level — they belong to
@@ -455,7 +336,6 @@ export function StyleFactsField({
   // ONE lookup: it is both what the mirror below copies and what the header's picker writes into.
   const careIdx = labels.findIndex((l) => l.labelType === CARE_LABEL);
   const careFromLabel = careIdx < 0 ? '' : labels[careIdx].content?.trim() ?? '';
-  const careCount = labels.filter((l) => l.labelType === CARE_LABEL).length;
   // WHO MAY WRITE A STYLE FACT AT ALL (Codex R3): UpdateStyle is `products:write` on the server
   // (rbac.go:163) — `tech_cards:write` is not enough. Staged for an account without it, every one
   // of these edits came back refused and, a failed commit staying staged (m5), was sent again on
@@ -464,9 +344,6 @@ export function StyleFactsField({
   // created: CreateTechCard seeds those four from its own insert).
   const { canWrite, isLoading: grantLoading } = usePermissions();
   const canStyle = canWrite(SECTION.products);
-  // What the style held when the mirror last adopted the care label over it (see CARE DRIFT
-  // below). Null when it adopted nothing, and again once a care write has landed.
-  const [careAdopted, setCareAdopted] = useState<{ stored: string; label: string } | null>(null);
   const careHeld = useWatch({ control, name: 'careInstructions' }) as string | undefined;
   useEffect(() => {
     // THE STYLE'S CARE IS LEFT ALONE FOR AN ACCOUNT THAT CANNOT WRITE IT (Codex M2). The care
@@ -476,6 +353,10 @@ export function StyleFactsField({
     // in words. An account still loading reads as allowed (the grants fail open), so the mirror
     // waits for the answer: nothing is adopted for an account that turns out not to hold the grant.
     if (!canStyle || grantLoading) return;
+    // LABELS REWORK (I-18): care symbols are edited on the composition label, straight in
+    // `careInstructions`. With no legacy CARE row there is nothing to mirror — and mirroring the
+    // empty label here would put a fresh care edit back to '' on the very next render.
+    if (careIdx < 0) return;
     const held = live('careInstructions');
     const cur = factText(held).trim();
     if (careFromLabel === cur) return;
@@ -493,7 +374,6 @@ export function StyleFactsField({
     if (!getFieldState('careInstructions').isDirty && careFromLabel === serverLabel) {
       if (careFromLabel) {
         moveBaseline('careInstructions', careFromLabel, careFromLabel);
-        setCareAdopted({ stored: factText(held), label: careFromLabel });
       }
       return;
     }
@@ -503,7 +383,7 @@ export function StyleFactsField({
     setValue('careInstructions', careFromLabel, { shouldDirty: true });
     // `live`, `moveBaseline` and `getFieldState` read the page's one form control.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [careFromLabel, canStyle, grantLoading, careHeld, setValue]);
+  }, [careFromLabel, careIdx, canStyle, grantLoading, careHeld, setValue]);
   // brand / collection / season / targetGender / fit / age group are edited in CARD DETAILS and
   // care on the labels — but they are style catalogue facts, so UpdateStyle is their only writer.
   // UpdateTechCard deliberately excludes them (R4/§14.7, "no fact is written by two paths"), while
@@ -593,104 +473,6 @@ export function StyleFactsField({
       setValue(f, get(control._defaultValues, f) as never, { shouldDirty: true });
     }
   }, [unwritable, control, setValue]);
-
-  // CARE DRIFT — THE STOREFRONT'S CARE IS NOT THE CARE LABEL (25.09 decision: no write on open).
-  // Two ways to get here. A legacy card's care was authored somewhere else, and the mirror adopted
-  // the label over it. Or the label was edited by an account that cannot write the style (M2), and
-  // the style kept its care. The care label row says so (`useCareDrift`, LABELS) and offers one
-  // door, `sync ›`: it puts the stored care back under the label as the baseline, so the label
-  // reads as the edit it is and is staged like any other care edit (mask [careInstructions]). An
-  // account without products:write gets the words and no door (the row's own line names that
-  // grant); for it the care in the form IS the stored care, since nothing here writes it.
-  //  - Not while care is staged: that write is what ends the difference.
-  //  - The same symbols in another order are no difference: the server stores its own print order.
-  //  - Without a door the words say why (mn-4): UpdateStyle refuses any unknown code under the
-  //    mask, and a refused write would stay staged and retry on every autosave; a released card
-  //    and an account without tech_cards:write stage nothing at all.
-  //  - The latest card read only ever CLEARS the words (mn-1): a read that shows the label's
-  //    symbols stored ends the difference, whatever the form last knew. It never raises them — a
-  //    read that raced this panel's own write would bring back a difference already written. A
-  //    newer stored care reaches the form by the page's rebase, and the mirror re-adopts (above).
-  const careVocabulary = useCareVocabulary();
-  const careDirty = !!dirtyFields.careInstructions;
-  const readCare = careEntries?.map((e) => e.code?.trim() ?? '').join(',');
-  const readShowsLabel = readCare !== undefined && sameCare(readCare, careFromLabel);
-  const careDrift =
-    !grantLoading &&
-    careIdx >= 0 &&
-    !!careFromLabel &&
-    !readShowsLabel &&
-    (canStyle
-      ? !!careAdopted &&
-        careAdopted.label === careFromLabel &&
-        !careDirty &&
-        !sameCare(careAdopted.stored, careFromLabel)
-      : !sameCare(factText(careHeld), careFromLabel));
-  // WHAT THE DOOR STAGED (mn-2): care staged exactly as `sync ›` stages it — the label as the
-  // value over the stored care as the baseline. The row says so, with «cancel»: a write that
-  // failed stays staged and is retried on every autosave (m5), and the label offers no way back.
-  const careStagedByDoor =
-    canStyle &&
-    !!careAdopted &&
-    careDirty &&
-    careAdopted.label === careFromLabel &&
-    factText(careHeld) === careFromLabel &&
-    factText(get(control._defaultValues, 'careInstructions')) === careAdopted.stored;
-  const labelCodes = careCodes(careFromLabel);
-  const unknownCodes = labelCodes.filter((c) => !careVocabulary.byCode[c]);
-  const archivedCodes = labelCodes.filter((c) => careVocabulary.byCode[c]?.archived);
-  const careCannot: string | null =
-    !careDrift || !canStyle
-      ? null
-      : !canWrite(SECTION.techCards)
-        ? 'needs tech_cards:write'
-        : !canEdit
-          ? 'the card is released'
-          : !staging
-            ? 'nothing on this page stages it'
-            : !careVocabulary.loaded
-              ? 'care symbols are still loading'
-              : labelCodes.length === 0
-                ? 'no care symbols'
-                : unknownCodes.length + archivedCodes.length > 0
-                  ? [
-                      unknownCodes.length > 0 ? `unknown ${unknownCodes.join(', ')}` : '',
-                      archivedCodes.length > 0 ? `archived ${archivedCodes.join(', ')}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(', ')
-                  : null;
-  useEffect(() => {
-    const adopted = careAdopted;
-    const label = careFromLabel;
-    let drift: CareDrift | null = null;
-    if (careStagedByDoor) {
-      drift = {
-        row: careIdx,
-        state: 'staged',
-        sync: null,
-        cannot: null,
-        // The label goes back over the label: care clean, the staged write gone, the words back.
-        cancel: () => moveBaseline('careInstructions', label, label),
-      };
-    } else if (careDrift) {
-      drift = {
-        row: careIdx,
-        state: 'differs',
-        // The value is the LABEL, handed in — never read back from the form (MJ-1).
-        sync:
-          canStyle && !careCannot && adopted
-            ? () => moveBaseline('careInstructions', adopted.stored, label)
-            : null,
-        cannot: careCannot,
-        cancel: null,
-      };
-    }
-    useCareDrift.setState({ drift });
-    return () => useCareDrift.setState({ drift: null });
-    // `moveBaseline` reads the page's one form control.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [careDrift, careStagedByDoor, careCannot, canStyle, careIdx, careAdopted, careFromLabel]);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
@@ -852,8 +634,6 @@ export function StyleFactsField({
         // staged again, not as clean and «saved». Each baseline becomes what was sent, never what
         // the field holds by now — a value typed in flight is still an edit (see moveBaseline).
         for (const f of STYLE_FACT_KEYS) if (f in sent) moveBaseline(f, sent[f]);
-        // The style holds the care that was sent now: whatever the first sync adopted over is gone.
-        if ('careInstructions' in sent) setCareAdopted(null);
         // The style is written: from here on only an edit writes its age group.
         if (Object.keys(sent).length > 0) setCreateMode(false);
       },
@@ -891,12 +671,7 @@ export function StyleFactsField({
           is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
         </Text>
         <SelectField name='fit' label='fit' items={FIT_ITEMS} readOnly={!canEdit} />
-        <HeaderCarePicker
-          canEdit={canEdit}
-          careIdx={careIdx}
-          careCount={careCount}
-          careRow={careIdx < 0 ? undefined : labels[careIdx]}
-        />
+        <HeaderCarePicker canEdit={canEdit} careIdx={careIdx} />
         <ResolvedCareEntries entries={careEntries} />
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>

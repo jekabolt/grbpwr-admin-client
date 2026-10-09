@@ -1,4 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
+import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -31,9 +32,9 @@ export function MediaRecropDialog({
    * и показывала копию рядом с оригиналом. Экрану, который кадрирует картинку РАДИ СВОЕГО СЛОТА
    * («предлагай сразу кропнуть картинку с текстурой на аплоуд»), этого мало — ему нужен сам
    * объект, чтобы поставить его на место исходного. Проп необязателен, и без него поведение
-   * побайтово прежнее.
+   * побайтово прежнее. `frame` — где прошёл рез в исходнике (доли), для указаний, приколотых к нему.
    */
-  onCropped?: (media: common_MediaFull) => void;
+  onCropped?: (media: common_MediaFull, frame?: CropFrame) => void;
 }) {
   const [source, setSource] = useState<string | undefined>(undefined);
   const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined);
@@ -72,14 +73,14 @@ export function MediaRecropDialog({
     };
   }, [blobUrl]);
 
-  const handleSave = async (croppedDataUrl: string) => {
+  const handleSave = async (croppedDataUrl: string, frame?: CropFrame) => {
     setBusy(true);
     try {
       const uploaded = await uploadMedia.mutateAsync(croppedDataUrl);
       showMessage('cropped copy uploaded', 'success');
       // Извещение ПОСЛЕ успешной загрузки и ДО закрытия: слушатель ставит копию себе, а окно
       // закрывается уже над сделанным. Порядок наоборот отдавал бы объект в размонтированное окно.
-      if (uploaded) onCropped?.(uploaded);
+      if (uploaded) onCropped?.(uploaded, frame);
       onOpenChange(false);
     } catch (error) {
       showMessage(error instanceof Error ? error.message : 'the upload failed', 'error');

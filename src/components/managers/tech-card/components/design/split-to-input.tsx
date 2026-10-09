@@ -5,24 +5,17 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useRef, useState, type ReactNode } from 'react';
 
-import type { TechCardFormData } from '../schema';
-import {
-  INPUT_MAX,
-  REFERENCE_KIND,
-  appendBoardPictures,
-  isInputRow,
-  type BoardItem,
-} from './mood-board';
-import { flatInputBusy, holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { SplitModal } from './split-modal';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
-import { isKnownViewKey } from './views';
 import { uploadItem } from './upload-item';
 
 /**
+ * 101 Ф3: ВХОДА ФЛЭТА БОЛЬШЕ НЕТ — флэт берёт картинки с мудборда, — и с ним ушла дверь «разрез во
+ * вход» (`addToInput`): разрез только раскладывает кадры по полосе, на сервер уезжает
+ * `for_input = false`. Ниже — история хука, оставленная как история.
+ *
  * СПЛИТ → ВХОД: разметить на картинке кадры видов и получить их ОТДЕЛЬНЫМИ строками входа, уже
  * помеченными ролью (R-17). Логика вынесена из блока референсов, потому что та же кнопка стоит и
  * на плитах FLAT SLOTS (`bench.tsx` → `openForPicture`): два экрана, один механизм, и разъехаться
@@ -89,17 +82,6 @@ export function useSplitToInput({
   techCardId,
   band,
   /**
-   * ЗАВОДИТ ЛИ ЭТОТ РАЗРЕЗ СТРОКИ ВХОДА. Утверждение вызывающего, а не догадка по данным: с
-   * картинки полосы нельзя прочесть, каким экраном её открыли. По умолчанию `false` — см. шапку.
-   */
-  addToInput = false,
-  /**
-   * Свежепринятые медиа кропов — вызывающему, который держит СВОЮ карту разрешения media_id→файл.
-   * Кропы только что родились на сервере, в библиотечной карте их ещё нет, и без этого колбэка
-   * блок референсов рисовал бы «media #N not resolved» на строке, которую сам же завёл.
-   */
-  onAccepted,
-  /**
    * ═══ КРОП ЗАМЕЩАЕТ, А НЕ ДОПИСЫВАЕТ (J-8) ═══════════════════════════════════════════════════
    *
    * Владелец: «в INPUT — REFERENCES должна быть возможность кропнуть картинку в тамбнейле».
@@ -134,12 +116,9 @@ export function useSplitToInput({
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
-  addToInput?: boolean;
-  onAccepted?: (media: common_MediaFull[]) => void;
   onCropped?: (crop: common_DesignPicture, sourceMediaId: number) => void;
   cutSays?: (views: string) => string;
 }) {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
   const { registerUpload } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
 
@@ -155,28 +134,6 @@ export function useSplitToInput({
   } | null>(null);
   /** Чьё медиа сейчас регистрируется — кнопке-инициатору, чтобы показать «split…» и не дать второй клик. */
   const [registering, setRegistering] = useState<number | null>(null);
-
-  /**
-   * ═══ РАЗРЕЗ ВО ВХОД ДЕРЖИТ ВХОД (ревью раунда 4, MIN-2) ════════════════════════════════════════
-   * Разрез для входа пишет роли на СЕРВЕРЕ (`for_input`) и строки в форме; прогон, начатый посреди,
-   * снял бы вход без них или с половиной. Поэтому от щелчка (регистрация) до закрытия окна вход
-   * удержан — GENERATE ждёт, CLEAR и рекол отказываются; окно не открывается над занятым входом, и
-   * строки не дописываются, если к ответу вход оказался занят. Только для двери входа (`addToInput`):
-   * разрез с верстака во вход не пишет ничего. Удержание снимается и при размонтировании — ответ
-   * регистрации, пришедший без экрана, своих колбэков уже не позовёт.
-   */
-  const inputHold = useRef<(() => void) | null>(null);
-  const holdInput = () => {
-    if (addToInput && !inputHold.current) inputHold.current = holdFlatInput(techCardId);
-  };
-  const releaseInput = () => {
-    inputHold.current?.();
-    inputHold.current = null;
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => releaseInput, []);
-  const INPUT_BUSY =
-    'the input is busy — a run is being saved or started, or the prompt is being changed';
 
   /**
    * Регистрации этой сессии: media_id → {ключ намерения, картинка}. Ключ минтится ОДИН раз на
@@ -220,11 +177,6 @@ export function useSplitToInput({
     if (mediaId == null) return;
     const mode = opts?.mode ?? 'split';
     const note = opts?.note;
-    if (addToInput && flatInputBusy(readFlatInput(techCardId))) {
-      showMessage(`${INPUT_BUSY} — try the ${mode} once it is free`, 'error');
-      return;
-    }
-    holdInput();
     const existing = findBandPicture(mediaId) ?? registered.current.get(mediaId)?.picture;
     if (existing) {
       setTarget({ picture: existing, handle, mode, sourceMediaId: mediaId, note });
@@ -252,24 +204,17 @@ export function useSplitToInput({
           if (!picture) {
             // Сервер сказал «да» и не вернул картинку — это его нарушение контракта, но открыть
             // модалку не на чем, и молчать нельзя: клик выглядел бы съеденным.
-            releaseInput();
             showMessage('the upload was filed but no picture came back', 'error');
             return;
           }
           keep.picture = picture;
           // Окно не открывается над входом, который за время регистрации заняли (GENERATE, CLEAR).
-          if (addToInput && !rowsWritable(readFlatInput(techCardId))) {
-            releaseInput();
-            showMessage(`${INPUT_BUSY} — the ${mode} was not opened`, 'error');
-            return;
-          }
           setTarget({ picture, handle, mode, sourceMediaId: mediaId, note });
         },
         // Слова отказа уже показал шов записи (`useDesignWrites.onError`); здесь — только снять
         // «split…» с кнопки, чтобы она не осталась вечно занятой, и отпустить вход.
         onError: () => {
           setRegistering(null);
-          releaseInput();
         },
       },
     );
@@ -282,60 +227,7 @@ export function useSplitToInput({
    * которой серверу взять неоткуда: `tech_card_media` едет целиком с сейвом формы.
    */
   function handleCrops(pictures: common_DesignPicture[]) {
-    const withMedia = pictures.filter((p) => p.media?.id != null);
-    // Кадры, которым сервер поставил роль промпта, — РОВНО те, что несут вид: условие серверной
-    // транзакции (`IsDesignGhostView`) и это членство в словаре — одно и то же утверждение, и
-    // считать их по-другому значило бы обещать снятие ролей, которых не ставили.
-    // ⚠ СЛОВАРЬ ПРОВОДА, А НЕ СЛОВАРЬ ПИКЕРА (D-18): сервер по-прежнему принимает снятые 3/4, и
-    // зеркало его условия обязано их помнить, хотя окно разреза их больше не предлагает.
-    const framed = withMedia.filter((crop) => isKnownViewKey(crop.ghostView));
-
-    if (!addToInput) {
-      saySlotsOnly(withMedia.length);
-      return;
-    }
-    // Вход заняли, пока шёл разрез (ревью раунда 4, MIN-2): строки не дописываются посреди прогона
-    // или CLEAR. Роли кадров сервер уже поставил — блок референсов покажет их носителей.
-    if (!rowsWritable(readFlatInput(techCardId))) {
-      showMessage(
-        `${INPUT_BUSY} — the cut pictures are filed and carry their views, but were not added to the input`,
-        'error',
-      );
-      return;
-    }
-
-    const result = appendBoardPictures({
-      live: (getValues('moodboardMedia') ?? []) as BoardItem[],
-      inScope: isInputRow,
-      otherListIds: ((getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
-      added: withMedia.map((p) => p.media as common_MediaFull),
-      kind: REFERENCE_KIND,
-      max: INPUT_MAX,
-      scopeLabel: 'input',
-    });
-    // Потолок входа держит и кропы, и отказ называет числа. Кроп, не поместившийся в строки,
-    // роль с сервера ВСЁ РАВНО несёт — прятать его нельзя (носитель роли обязан быть на экране),
-    // поэтому блок референсов покажет его строкой, и его есть чем снять руками. Плашки
-    // «off the card» здесь больше нет — см. шапку файла.
-    if (result.refusal) showMessage(result.refusal, 'error');
-    if (!result.accepted.length) return;
-
-    // Запись по КОРНЮ массива — как везде в этой паре блоков: два экземпляра поля-массива на одно
-    // имя не синхронизируются, а мудборд смонтирован рядом и правит вторую половину того же списка.
-    setValue('moodboardMedia', result.next as TechCardFormData['moodboardMedia'], {
-      shouldDirty: true,
-    });
-    onAccepted?.(result.accepted);
-
-    // Счёт для итоговой строки — по кадрам, несущим вид: ровно то условие, по которому сервер
-    // ставил роль, и потому итог не обещает больше, чем покажет перечитанная полоса. Ключ вне
-    // словаря (сервер из будущего) в счёт не входит.
-    const acceptedIds = new Set(result.accepted.map((m) => m.id));
-    const marked = framed.filter((crop) => acceptedIds.has(crop.media?.id as number)).length;
-    showMessage(
-      `${result.accepted.length} picture${result.accepted.length === 1 ? '' : 's'} added to the input — ${marked} marked with ${marked === 1 ? 'its view' : 'their views'}`,
-      'success',
-    );
+    saySlotsOnly(pictures.filter((p) => p.media?.id != null).length);
   }
 
   /**
@@ -407,9 +299,8 @@ export function useSplitToInput({
       onOpenChange={(open) => {
         if (open) return;
         setTarget(null);
-        releaseInput();
       }}
-      forInput={addToInput}
+      forInput={false}
       onSplit={
         target.mode === 'crop'
           ? (pictures) => handleCrop(pictures, target.sourceMediaId)

@@ -17,10 +17,8 @@ import {
 } from 'react';
 import { Button } from 'ui/components/button';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { InertDoor } from '../bench-slot';
 import {
   COLORWAY_NONE,
   RUN_NOT_STATED,
@@ -33,10 +31,18 @@ import {
 import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
-import { TwoStepPicker, type PickerBranch } from '../core';
-import { cropFamilies, isCutOut } from '../generation/composite';
+import type { PickerBranch } from '../core';
+import { standsOnBench } from '../generation/edit-chain';
+import { cropFamilies, isCutOut, offersSplit } from '../generation/composite';
 import type { OutputPlan } from '../generation/run-gallery';
-import type { PictureTileProps } from '../picture-tile';
+import type {
+  PictureTileAction,
+  PictureTileFlag,
+  PictureTileMenu,
+  PictureTileMenuItem,
+  PictureTileProps,
+} from '../picture-tile';
+import { useRemovalUndo } from '../bench-slot';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../views';
@@ -45,12 +51,12 @@ import {
   outputsHorizon,
   outputsOfKind,
   pictureIsComposite,
-  pictureOffersSplit,
   threedSides,
   type BenchSide,
 } from './model';
 import { SAMPLE_LABEL, colourwayColumns, picturesOnSides } from './side-row';
 import { StripCell } from './strip-cell';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ONE FABRIC RENDER, WITH THE DOORS THAT PUT IT INTO A SIDE (27.09, O-63 step 1, D-62) ═══════
@@ -64,7 +70,7 @@ import { StripCell } from './strip-cell';
  * doors did not.
  *
  * WHAT LIVES HERE:
- *   · the door row's metric (`DOOR_ROW`, `DOOR`, `INERT_DOOR`, F-9) — the 3D shelf's row reads it too;
+ *   · the door row's metric (`DOOR_ROW`, `DOOR`, F-9) — the 3D shelf's row reads it too;
  *   · the reasons a placement is refused and the notes that print each reason once (D-56′);
  *   · `useRenderDoors` — ONE HOST'S rules: where a plate may stand (`destinationsOf`, O-57 r2–r4),
  *     the two-step targets of `mark ▸`, the pieces and the refusal of `apply splitted`, `unmark ▸`
@@ -133,10 +139,6 @@ export const DOOR_ROW = 'flex min-h-5 items-center gap-0.5';
  *  грунтом группы (`Bay`) сквозь неё просвечивал #ededed, и `set` читался залитым — то есть
  *  нажатым или выключенным, — стоя рядом с белыми селекторами. Замерено снимком 2×. */
 export const DOOR = 'h-5 w-full bg-bgColor';
-/** То же для `InertDoor`: класс приезжает на ЕЁ обёртку, а ширину надо отдать кнопке внутри —
- *  примитив её наружу не пускает, а мёртвая дверь обязана занимать ровно то место, которое заняла
- *  бы живая. Иначе отказ выглядит уже своей причины и читается как другой орган. */
-export const INERT_DOOR = 'w-full [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor';
 
 /**
  * O-57 r2 · ПОЧЕМУ СЕМПЛ-ПЛИТЕ НЕКУДА ВСТАТЬ — два случая, две причины (`destinationsOf`). Одна
@@ -230,6 +232,10 @@ export type RenderDoors = {
   markInto: (picture: common_DesignPicture, target: number, view: string) => void;
   unmarkHeld: (picture: common_DesignPicture, colorwayId: number, side: BenchSide) => void;
   heldAway: (
+    picture: common_DesignPicture,
+  ) => { colorwayId: number; side: BenchSide; where: string } | null;
+  /** T17: the side a plate stands in, whatever column it is — where its ✕ empties (`null` — free). */
+  heldAt: (
     picture: common_DesignPicture,
   ) => { colorwayId: number; side: BenchSide; where: string } | null;
   piecesOf: (rootId: number) => SplitPiece[];
@@ -373,6 +379,8 @@ export function useRenderDoors({
 }): RenderDoors {
   const speaks = serverSpeaksDesign();
   const { setBenchSlot } = useDesignWrites(techCardId);
+  /* T49 · a render taken off a side keeps an `undo` on that SIDES cell until the page reloads. */
+  const removals = useRemovalUndo(techCardId);
   /** Для какой плитки идёт запись слота. Общий `isPending` сказал бы «saving» на всех сразу. */
   const [marking, setMarking] = useState<number | null>(null);
   /**
@@ -624,18 +632,18 @@ export function useRenderDoors({
     const pictureId = picture.id ?? 0;
     if (pictureId <= 0) return;
     setMarking(pictureId);
+    /* ⚠ БЕЗ `slotId` — он в одном `oneof` с `viewKey`, как у всех писателей верстака. */
+    const slot = {
+      viewKey: side.view,
+      kind: 'render',
+      colorwayId: refColorwayFor('render', colorwayId),
+    };
     setBenchSlot.mutate(
+      { slot, pictureId: 0, expectedSlotRev: side.slotRev },
       {
-        /* ⚠ БЕЗ `slotId` — он в одном `oneof` с `viewKey`, как у всех писателей верстака. */
-        slot: {
-          viewKey: side.view,
-          kind: 'render',
-          colorwayId: refColorwayFor('render', colorwayId),
-        },
-        pictureId: 0,
-        expectedSlotRev: side.slotRev,
+        onSettled: () => setMarking(null),
+        onSuccess: () => removals.remember(slot, 'render', side.view, pictureId),
       },
-      { onSettled: () => setMarking(null) },
     );
   };
 
@@ -647,10 +655,17 @@ export function useRenderDoors({
    * колорвея (и переписывает колорвей при усыновлении), так что это и есть слот, где она стоит.
    */
   const heldAway = (picture: common_DesignPicture) => {
+    if (axis.some((c) => c.colorwayId === colorwayOf(picture))) return null;
+    return heldAt(picture);
+  };
+  /**
+   * T17 · ГДЕ СТОИТ ПЛИТА — В ЛЮБОМ СТОЛБЦЕ. ✕ на плитке снимает её отовсюду, как у FLAT; у
+   * столбца, который SIDES рисует, ✕ на плите таблицы остаётся вторым входом в тот же жест.
+   */
+  const heldAt = (picture: common_DesignPicture) => {
     const pictureId = picture.id ?? 0;
     if (pictureId <= 0) return null;
     const colorwayId = colorwayOf(picture);
-    if (axis.some((c) => c.colorwayId === colorwayId)) return null;
     const side = threedSides(band, refColorwayFor('render', colorwayId)).find(
       (s) => (s.picture?.id ?? 0) === pictureId,
     );
@@ -852,6 +867,7 @@ export function useRenderDoors({
     markInto,
     unmarkHeld,
     heldAway,
+    heldAt,
     piecesOf,
     piecesCut: (rootId: number) => (wholeDecks?.get(rootId) ?? membersOf.get(rootId) ?? []).length,
     applyRefusalFor,
@@ -924,17 +940,30 @@ export function RenderTile({
   onDeck,
   onEdit,
   onSplit,
-  trailingDoor,
+  split,
+  onDelete,
+  deletePending,
 }: {
   doors: RenderDoors;
   picture: common_DesignPicture;
   /** The run the plate came out of; `id` 0 — a plate without a run (brought, «no run»). */
   run: common_DesignRun;
   /**
-   * O-68 (D-74): the host's LAST door of the row — «delete» on the workbench's derived pictures —
-   * drawn after the tile's own door, one step away from it. The tile does not know what it is.
+   * WHAT THE SPLIT CORNER READS — the host's `readSplit` (`generation/composite.tsx`), the same
+   * facts the FLAT tile of the same row reads (hotfix HX5). An edit of a sheet inherits its views
+   * up the edit chain; reading `compositeViews` alone here hid the cut on every edited sheet.
    */
-  trailingDoor?: ReactNode;
+  split: { views: readonly string[]; splitInto: number };
+  /**
+   * T17: the host's «delete» as an ACT — the last, red row of the tile's menu (`delete…`), opening
+   * the host's own confirmation. Nothing of this picture stands under the frame.
+   */
+  onDelete?: () => void;
+  /**
+   * TF3: the host's delete is in flight — the whole menu (a mark, a second delete) and the ✕ wait
+   * for it, so nothing can race a picture that is leaving.
+   */
+  deletePending?: boolean;
   /** The raster in the frame. Empty — the frame says so in a word. */
   src: string;
   className?: string;
@@ -1039,6 +1068,161 @@ export function RenderTile({
   const shape =
     [view, run.rrev ? `r${run.rrev}` : ''].filter(Boolean).join(' · ') ||
     `picture ${picture.ordinal ?? '—'}`;
+  const ordinal = `${picture.ordinal ?? ''}`;
+  const busy = (marking === pictureId && pictureId > 0) || !!deletePending;
+  /**
+   * ═══ T17 · ВСЁ, ЧТО ДЕЛАЕТСЯ С ЭТОЙ КАРТИНКОЙ, — В КАДРЕ (спека §3, лейн L) ═══════════════════
+   *
+   * Владелец: «кнопки unmark или селектор должны быть внутри плитки по принципу как это сделано в
+   * flat slots» и «везде … похоже по одной логике». Под кадром стоял ряд дверей — `mark ▸`,
+   * `unmark ▸`, плашка `in front`, `split ▸`, погашенные двери с причинами. Теперь:
+   *   · `mark ▾` — угол-меню (низ справа, перед `edit`). Два вопроса прежнего пикера («чей столбец»,
+   *     потом «какая сторона») сложены в ОДИН список: строки идут группами по колорвею, и имя
+   *     колорвея стоит приглушённым началом строки, когда столбцов больше одного. При одном
+   *     столбце строка — просто сторона, как и раньше шаг 1 не существовал;
+   *   · ✕ — снять со стороны (тот же `SetDesignBenchSlot`, `picture_id 0`), у ЛЮБОЙ стоящей плиты,
+   *     а не только у той, чьего столбца SIDES не рисует: так это сделано и у FLAT;
+   *   · где плита стоит, `hidden`, «куски в сторонах» — флаг под ярлыком колорвея;
+   *   · `split` — только угол, по правилу HX5 (`offersSplit(split)`); двери `split ▸` в ряду нет;
+   *   · отказы (карточка только читается, сервер молчит, «встать некуда») — в `title`, записки над
+   *     полосой (`RenderDoorsNotes`) остаются.
+   * Ряд под кадром остаётся ОДИН — у колоды (`expand ▸`, раскрытой — `apply splitted` + `▾`): это
+   * органы ГРУППЫ кусков, а не этой картинки.
+   */
+  const at = held ? doors.heldAt(picture) : null;
+  const heldWord = at
+    ? viewLabel(at.side.view)
+    : held
+      ? viewLabel((held.viewKey ?? '').trim()) || 'a slot'
+      : '';
+  const flag: PictureTileFlag | undefined = held
+    ? {
+        word: `in ${heldWord}`,
+        tone: 'ink',
+        title: [
+          at ? `stands in ${at.where}` : 'stands in a slot of this card',
+          away
+            ? away.colorwayId === COLORWAY_NONE
+              ? 'SIDES draws no sample column while the card has colourways'
+              : `SIDES draws no column for ${colourwayName(away.colorwayId)}`
+            : '',
+          hidden ? 'hidden in an earlier session' : '',
+        ]
+          .filter(Boolean)
+          .join(' — '),
+      }
+    : hidden
+      ? {
+          word: 'hidden',
+          tone: 'mut',
+          title:
+            'hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.',
+        }
+      : cutAway
+        ? {
+            word: 'pieces in sides',
+            tone: 'mut',
+            title:
+              'every piece cut from this sheet stands in a side — SIDES shows them, each with its ✕. The sheet holds several views and stands in no side itself.',
+          }
+        : undefined;
+  const onRemove: PictureTileAction | undefined =
+    at && !writesOff
+      ? {
+          onClick: () => unmarkHeld(picture, at.colorwayId, at.side),
+          ariaLabel: `unmark render ${ordinal} from ${at.where}`,
+          title: `unmark — empty ${at.where}; the render stays on the card`,
+          disabled: busy,
+          pending: busy,
+        }
+      : undefined;
+  /** `mark` стоит там, где стояла дверь `mark ▸`: свободная одиночная плита, запись разрешена. */
+  const markable = !writesOff && !deck && !held && !hidden && !composite;
+  const deleteItem: PictureTileMenuItem[] = onDelete
+    ? [
+        {
+          value: DELETE_ITEM,
+          label: 'delete…',
+          tone: 'danger',
+          title: 'delete this picture for good',
+        },
+      ]
+    : [];
+  const menu = ((): PictureTileMenu | undefined => {
+    if (!markable) {
+      return deleteItem.length
+        ? {
+            label: 'delete',
+            ariaLabel: `delete render ${ordinal}`.trim(),
+            items: deleteItem,
+            pending: busy,
+            onPick: () => onDelete?.(),
+            'data-menu': `delete:${pictureId}`,
+          }
+        : undefined;
+    }
+    const refused = markRefusal(picture);
+    const branches = refused ? [] : markBranches(picture);
+    /* O-57 r2: веток нет у семпл-плиты рядом с колорвеями, когда все столбцы архивные — меню живо
+       ради `+ colourway…`, а причина в подсказке. */
+    const nowhere = refused ?? destinationsOf(colorwayOf(picture)).refusal;
+    const canCreate = !refused && createsColourwayFor(picture) && !!onCreateColorway;
+    const grouped = branches.length > 1 || canCreate;
+    const items: PictureTileMenuItem[] = [
+      ...branches.flatMap((branch) =>
+        branch.leaves.map((leaf) => ({
+          value: `${branch.id}${MARK_SEP}${leaf.value}`,
+          label: (
+            <>
+              {grouped && <span className='text-labelColor'>{branch.label} · </span>}
+              {leaf.label}
+              {leaf.note && <span className='text-labelColor'> · {leaf.note}</span>}
+            </>
+          ),
+          title: leaf.title ?? (grouped ? branch.title : undefined),
+        })),
+      ),
+      ...(canCreate ? [{ value: CREATE_ITEM, label: '+ colourway…' }] : []),
+      ...deleteItem,
+    ];
+    return {
+      label: 'mark',
+      ariaLabel: `mark render ${ordinal} into a side`.replace(/\s+/g, ' '),
+      title:
+        nowhere ??
+        (grouped
+          ? 'put this render into a side — rows are grouped by colourway'
+          : `put this render into a side of ${branches[0]?.label ?? ''}`),
+      items,
+      disabled: !items.length,
+      pending: busy,
+      'data-menu': `mark:${pictureId}`,
+      onPick: (value) => {
+        if (value === DELETE_ITEM) return onDelete?.();
+        if (value === CREATE_ITEM) return onCreateColorway?.();
+        const cut = value.indexOf(MARK_SEP);
+        if (cut < 0) return;
+        markInto(picture, Number(value.slice(0, cut)), value.slice(cut + MARK_SEP.length));
+      },
+    };
+  })();
+  /** Почему у плитки нет органа, который у соседей есть, — одной фразой в подсказке ячейки. */
+  const why = writesOff
+    ? disabled
+      ? 'this card is read-only for you'
+      : 'this server does not answer the design routes'
+    : composite && !deck && !cutAway && !hidden
+      ? 'one sheet with several views glued into it, and a side holds ONE view — split it into frames, then mark them'
+      : '';
+  const tileTitle = [
+    shape,
+    seen
+      ? `${ownName} has ${seen.total} generative pictures in all and the card shipped the newest ${seen.carried} of them, so the oldest are not on this list`
+      : '',
+    why,
+  ]
+    .filter(Boolean)
+    .join(' — ');
   return (
     <StripCell
       onOpen={deckSheet ? onDeck : undefined}
@@ -1050,6 +1234,17 @@ export function RenderTile({
       onZoom={onZoom}
       src={src}
       alt={`render ${picture.ordinal ?? ''}`}
+      title={tileTitle}
+      /* Якоря прежних строк подписи и дверей — на ячейке (их читают пробы и инспектор). */
+      anchors={{
+        'data-outputs-horizon': seen ? `${seen.carried}/${seen.total}` : undefined,
+        'data-held-away': away ? `${away.colorwayId}:${away.side.view}` : undefined,
+        'data-mark-held': held && !away ? pictureId || undefined : undefined,
+        'data-unmark-held': onRemove ? pictureId || undefined : undefined,
+        'data-hidden-marker': hidden ? '' : undefined,
+        'data-cut-away': cutAway ? pictureId || undefined : undefined,
+        'data-mark-for': menu?.label === 'mark' ? pictureId || undefined : undefined,
+      }}
       /* Рисовать нечем вообще — у строки нет адреса файла. Это называется словом: пустая рамка
          читается как несработавший сервер, а сервер тут ни при чём. */
       empty={
@@ -1057,459 +1252,127 @@ export function RenderTile({
           no file address on this row
         </Text>
       }
-      /* Кадр встаёт в ОБЩИЙ ряд просмотрщика студии — «листать по всем картинкам» (T-8) не
-         обрывается на готовых рендерах. */
+      /* Кадр встаёт в ОБЩИЙ ряд просмотрщика студии — «листать по всем картинкам» (T-8). */
       gallery={
         picture.media && mediaFullViewerSrc(picture.media)
           ? mediaFullToViewerItem(picture.media)
           : undefined
       }
-      /* ═══ РЕЗАТЬ ПРЕДЛАГАЕТСЯ ТОЛЬКО ТАМ, ГДЕ РЕЗАТЬ ЕСТЬ ЧТО (F-8, F-18) ═════════════════
-         Владелец, дословно: «на уже заспличеных картинках на ховер сплит писать не нужно так же
-         как и на не мультивью картинках» и «везде где картинка не мультивью флет или рендер там
-         не должно на ховер показываться сплит».
-
-         ЗДЕСЬ СТОЯЛО ОБРАТНОЕ ПРАВИЛО, И ОНО БЫЛО ВЫВЕДЕНО ИЗ ДРУГОЙ ПРОСЬБЫ. Круг 4: «сделай
-         везде одинаково включая кнопку сплит» — про ОДИНАКОВУЮ РАСКЛАДКУ органа (низ слева,
-         один примитив), и этот файл прочитал её как «рисовать его на каждом кадре». Отсюда
-         `split` на одиночном рендере, где он означал уже не разрез листа на виды, а произвольный
-         кроп — второй смысл у одного слова.
-
-         ДВА ЧЛЕНА ПРЕДИКАТА, И КАЖДЫЙ — СВОЙ ВОПРОС ЧЕЛОВЕКА:
-           · «есть ли в этом файле несколько видов». Нет — резать нечего, и угол обещал бы кроп,
-             которого этот экран не делает;
-           · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `apply splitted`
-             в ряду дверей), а второй разрез того же листа завёл бы вторую колоду тех же видов.
-
-         ⚠ ОБА ВОПРОСА ЗАДАЁТ ТЕПЕРЬ `pictureOffersSplit` (`render/model.ts`), И ЭТО НЕ КОСМЕТИКА.
-         Этот файл был ЭТАЛОНОМ правила, но эталон, стоящий литералом, копируется, а копия рано
-         или поздно теряет член: плитка референса предъявляла угол по `!readOnly && url`, то есть
-         не сверялась ни с одним из двух. Здесь остались только вопросы, которые знает ТОЛЬКО
-         этот экран, — род и право писать; «мультивью и не резан» спрашивается у общего предиката.
-         У 3D угла нет по-прежнему: резать модель нечем, а её постер поглощён парой. */
-      /* ПРАВКА (E-3) — от растра, и результат правки никуда вставать не обязан: хозяин открывает
-         редактор со `slot={null}`, сохранение рождает НОВУЮ картинку. */
+      /* ПРАВКА (E-3) — от растра; хозяин открывает редактор со `slot={null}`, сохранение рождает
+         НОВУЮ картинку. */
       onEdit={
         !writesOff && !hidden
           ? {
               onClick: onEdit,
-              ariaLabel: `edit render ${picture.ordinal ?? ''} — draw over this picture`.trim(),
+              ariaLabel: `edit render ${ordinal} — draw over this picture`.trim(),
               title:
                 'draw over this picture — saving makes a NEW picture; the original is never overwritten',
             }
           : undefined
       }
+      /* ═══ РЕЗАТЬ ПРЕДЛАГАЕТСЯ ТОЛЬКО ТАМ, ГДЕ РЕЗАТЬ ЕСТЬ ЧТО (F-8, F-18, HX5) ═════════════
+         Владелец: «везде где картинка не мультивью флет или рендер там не должно на ховер
+         показываться сплит». Виды листа читаются тем же `readSplit`, что и у плитки FLAT в том же
+         ряду (проп `split`): у правки листа виды наследуются по цепочке правок. Разрезанный лист
+         говорит о себе рядом колоды, а не вторым разрезом. Дверь `split ▸` под кадром снята (T17):
+         глагол один, и он — угол. */
       onSplit={
-        !writesOff && !hidden && pictureOffersSplit(picture, !!deck || cutAway)
+        !writesOff && !hidden && !deck && !cutAway && offersSplit(split)
           ? {
               onClick: onSplit,
-              ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
+              ariaLabel: `split render ${ordinal} into views`,
             }
           : undefined
       }
+      onRemove={onRemove}
+      menu={menu}
+      flag={flag}
+      /* Владелец (п. 44): «In front in back и тд показывать в одной строчке с колорвеем». */
+      flagInline
       /* ═══ ПИЛЮЛЯ КАДРА — ИМЯ КОЛОРВЕЯ (D5) ════════════════════════════════════════════════
          «Чей это рендер» обязано стоять НА САМОЙ ПЛИТКЕ: иначе шесть плит трёх цветов читаются
-         как один ряд. `sample` — такое же имя, как `ROSSO`, и рисуется так же: ось 0 не «ничего не
-         выбрано», а вечный верстак семпла. Лист говорит о себе дверью `expand ▸` / `split ▸` в
-         ряду под кадром, а не числом видов на ярлыке — ярлык занят именем колорвея. */
+         как один ряд. `sample` — такое же имя, как `ROSSO`. */
       badge={ownName}
-      /* ═══ ВТОРАЯ СТРОКА ПОДПИСИ СНЯТА — F-13, ДОСЛОВНО «убери текст "AI · run 26 · from mixed
-         input"» ═══════════════════════════════════════════════════════════════════════════════
-         Это `stripProvenance`, и снята она ЗДЕСЬ, а не в мире: тем же вызовом живут полоса входа
-         рендера, полоса входа 3D и `what-model-gets` — там она отвечает на вопрос «а откуда
-         взялось ТО, ЧТО СЕЙЧАС ПОЙДЁТ В ПРОГОН», и молчать об этом нельзя. Здесь же список —
-         весь выход карточки, происхождение у всех строк одно и то же слово, и оно повторялось
-         столько раз, сколько плиток на экране.
-         Что при этом НЕ потеряно: номер прогона стоит первой строкой, и он же — единственный
-         член провенанса, который на этом экране различает строки. */
-      /* ⚠ ГОРИЗОНТ ЕДЕТ ПОДСКАЗКОЙ ЭТОЙ ЖЕ СТРОКИ, А НЕ ВТОРОЙ СТРОКОЙ ПОД НЕЙ. Он поколорвейный
-         («у ROSSO 74 картинки, доехало 60»), а список теперь общий — в шапке одного такого числа
-         нет вовсе. Вторая видимая строка вернула бы под каждую плитку прозу, которую владелец
-         снял (J-19); подсказка отвечает тому, кто спросил «а где остальные». */
-      lines={[
-        <span
-          key='shape'
-          data-outputs-horizon={seen ? `${seen.carried}/${seen.total}` : undefined}
-          title={
-            seen
-              ? `${ownName} has ${seen.total} generative pictures in all and the card shipped the newest ${seen.carried} of them, so the oldest are not on this list`
-              : undefined
-          }
-        >
-          {shape}
-        </span>,
-        /* O-63 r2 (D-72 п.2): the old hidden stamp, said as a word — the frame is dimmed, and a
-           dimmed frame alone reads as a loading image. The same title as the history's pill. */
-        ...(hidden
-          ? [
-              <span
-                key='hidden'
-                data-hidden-marker=''
-                title='hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.'
-              >
-                hidden
-              </span>,
-            ]
-          : []),
-        /* ═══ O-57 r2 · ГДЕ ПЛИТА СТОИТ, КОГДА ЕЁ СТОЛБЦА НА ЭКРАНЕ НЕТ ═══════════════════════
-           У плиты в видимом столбце это слово пилюли в ряду дверей («in front»), а ✕ стоит в
-           таблице. Здесь ряд занят дверью снятия, а таблица этой стороны не показывает вовсе,
-           поэтому место называется строкой подписи — тем же кеглем, что строка прогона. Это не
-           проза под каждой плиткой (J-19), а факт одной плитки: строки нет, пока плита
-           свободна или стоит в видимом столбце. */
-        ...(away
-          ? [
-              <span key='held-away' data-held-away={`${away.colorwayId}:${away.side.view}`}>
-                in {away.where}
-              </span>,
-            ]
-          : []),
-      ]}
       action={
-        /* ⚠ `flex-wrap` СНЯТ ВМЕСТЕ С ПРИЧИНОЙ ПЕРЕНОСА. Переносить было что, пока ряд мог
-           держать ДВА органа шириной 104px и 50px в колонке 132px; теперь живая дверь ровно
-           одна на ячейку (`held` ИЛИ колода ИЛИ лист ИЛИ пометка), и единственный ряд из двух
-           членов — раскрытая колода, где ширины заданы явно. Перенос при этом не «на всякий
-           случай», а вредный: он МЕНЯЕТ ВЫСОТУ ячейки от её содержимого, то есть и есть то
-           самое «кнопки скачут». Разбор метрики — у `DOOR_ROW` в шапке файла. */
-        <div data-door-row='' className={DOOR_ROW}>
-          {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
-              Шесть состояний, и каждое отвечает на СВОЙ вопрос человека:
-                · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
-                  освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
-                  здесь был бы вторым реестром одного действия;
-                · «а если её столбца в SIDES нет» (O-57 r2) — ✕ там нет вовсе, и снятие стоит
-                  здесь: `unmark ▸`, а где плита стоит, говорит строка подписи;
-                · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `apply splitted` + `▾`
-                  (F-7, разбор у самой ветки);
-                · «этот лист ещё не разрезан» — живой `split ▸`;
-                · «почему дверь мертва» — карточка только читается либо сервер молчит;
-                · и сама постановка одиночного кадра — двухшаговый пикер сторон.
-              ⚠ АТРИБУТ ВИСИТ НА ОБЁРТКЕ, А НЕ НА САМОМ ПИКЕРЕ: и у Radix, и у `TwoStepPicker`
-              список пропов ЗАКРЫТ, `data-*` до DOM не доезжает, и утверждение по нему было бы
-              зелёным над отсутствующим узлом. Тот же приём, что у `ColorwaySelect`. */}
-          {deck ? (
-            /* ═══ РАЗРЕЗАННЫЙ ЛИСТ: `expand ▸` ЗАКРЫТЫМ, `apply splitted` + `▾` РАСКРЫТЫМ (F-7 → Ф4) ═══
-               Владелец, дословно: «для уже сплитнутых … мы не должны показывать кнопку SPLIT ▸
-               тк оно уже заслитано надо писать экспанд или что-то вроде того пока оно не
-               открыто а когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
-               RENDER SLOTS и ставить те что в сплите».
-
-               ЭТО ЖЕ МЕСТО ЗАБРАЛО ДВЕРЬ КОЛОДЫ. Под кадром стояла ВТОРАЯ строка — «▸ 3 CUT
-               PIECES», собственная дверь `CropDeck`, — и владелец назвал её визуальным мусором
-               (F-9). Мусором её делало соседство: два органа одного кадра на двух строках,
-               причём верхний («split ▸») врал, а нижний нёс единственный работающий глагол.
-               Теперь глагол один и стоит в ряду дверей, как у всех соседей; счёт кусков ушёл в
-               `title`, а раскрытая колода называет его собой — куски стоят рядом.
-
-               ⚠ СКЛАДЫВАЮЩАЯ ДВЕРЬ ОБЯЗАТЕЛЬНА, И ЭТО НЕ УКРАШЕНИЕ. `CropDeck` объявленно нем
-               при `hostDoor` (веер `aria-hidden`, поверхность листа тоже), поэтому без `▾`
-               раскрытую колоду нечем было бы закрыть ни с клавиатуры, ни читалкой — только
-               раскрыв ЧУЖУЮ. */
-            deck.open ? (
-              <>
-                {/* ⚠ ОТКАЗ НАЗЫВАЕТ СЕБЯ СЛОВОМ, А НЕ СЕРОЙ КНОПКОЙ. Тот же закон, что у
-                    `split ▸` и `mark ▸` двумя ветками ниже: выключенная дверь без причины
-                    отправляет человека искать, что он сделал не так.
-
-                    ДВЕРЬ — ОТДЕЛЬНЫЙ ОРГАН (Ф4): `ApplySplitDoor` из `./apply-split`, и с
-                    круга r2 (п.29/30) хозяин у неё ОДИН — вот эта раскрытая колода. Полосы
-                    входа свои двери постановки потеряли целиком, поэтому «та же, что на
-                    полосах входа» больше не про что: глагол, вопрос и отчёт живут в модуле
-                    не ради второго экрана, а ради того, чтобы занятость и вопрос не были
-                    третьим написанием `set` в этом файле.
-                    Этот экран отдаёт ей АДРЕС ВЕРСТАКА ЦЕЛИ (`sidesOf(target)` — цель
-                    выбирают пунктом селекта, а не секция) и свои отказы (`refusal`, разбор у
-                    `applyRefusalFor`): при отказе дверь стоит погашенной — причина в её
-                    `title`, а у отказа постановки ещё и одной запиской над полосой (O-57 r4),
-                    — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа.
-                    Пустой план (куски без стороны силуэта) — тоже отказ, а не живая кнопка,
-                    которая молчит; полосы входа на него дверь не рисуют вовсе, здесь она
-                    обязана остаться на месте и сказать почему.
-
-                    Ширина и метрика — ряда дверей (F-9): `flex-1` ячейке, `h-5 bg-bgColor`
-                    кнопке, как у соседей.
-
-                    ⚠ ЛИЦО ОТКАЗА — ОДНОЙ СТРОКОЙ И В СВОЕЙ КОРОБКЕ (O-57 r2). В ячейке полосы
-                    RENDERS OF THIS CARD (132px) рядом с `▾` двери доставалось 110px, и «APPLY
-                    SPLITTED» в `InertDoor` ложилось на вторую строку, вылезало из `h-5` и наезжало
-                    на строку причины (замерено снимком) — погашенной кнопке отдавались `nowrap`
-                    и поля `px-0.5`. С O-63 плитка стоит в дорожке строки прогона — не уже 148px
-                    (`RunOutputs`, `.fgrid`), двери достаётся от 126px, и подпись с полями `xs`
-                    помещается: поля `px-0.5` сняты вместе с полосой, `nowrap` остаётся — подпись
-                    двери не переносится ни при какой ширине. Селектор `[data-inert]` — обёртка
-                    `InertDoor`: живую дверь правило не трогает. */}
-                {/* O-63 r2: a hidden sheet puts nothing into the sides — its pieces stay a view. */}
-                {!hidden &&
-                  (() => {
-                    const rootId = picture.id ?? 0;
-                    const own = colorwayOf(picture);
-                    /* ЦЕЛИ — ТЕ ЖЕ, ЧТО ВЕТКИ `mark ▸` (`destinationsOf`, разбор у
-                       `applyRefusalFor`): одна — дверь остаётся кнопкой; несколько (семпл-лист
-                       рядом с колорвеями при флаге) — селект; ни одной — отказ с причиной. */
-                    const targets = destinationsOf(own).ids.map((id) => ({
-                      colorwayId: id,
-                      label: colourwayName(id),
-                    }));
-                    const refusal = applyRefusalFor(rootId);
-                    return (
-                      <ApplySplitDoor
-                        techCardId={techCardId}
-                        sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
-                        targets={targets}
-                        pieces={piecesOf(rootId)}
-                        noun='render'
-                        refusal={refusal}
-                        refusalDescribedBy={noteIdOf(refusal)}
-                        onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
-                        className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap'
-                        doorClassName='h-5 bg-bgColor'
-                      />
-                    );
-                  })()}
-                {/* ⚠ ЭТО БЫЛ СЫРОЙ `<button>` — ЕДИНСТВЕННЫЙ КОНТРОЛ РЯДА МИМО `buttonVariants`,
-                    и он один держал СВОЮ рамку, СВОЙ ховер и СВОЙ фокус, переписанные тут же
-                    строкой классов. Пока их четыре штуки совпадали с примитивом на глаз, он
-                    читался ровно; расходятся такие копии не «иногда», а при первой же правке
-                    кнопки — то есть ряд разъезжается там, где никто не смотрел.
-                    Квадрат 20×20 остаётся квадратом: `size='xs'` даёт метрику текста, а
-                    `h-5 w-5 p-0` — саму клетку, в которой стоит один глиф. */}
+        deck ? (
+          /* ═══ РЯД КОЛОДЫ — ЕДИНСТВЕННЫЙ РЯД ПОД КАДРОМ (T17) ══════════════════════════════
+             Владелец (F-7): «для уже сплитнутых … надо писать экспанд … а когда заэкспанжено
+             кнопка set которая будет чистить текущие FABRIC RENDER SLOTS и ставить те что в
+             сплите». `expand ▸` / `apply splitted` + `▾` действуют на ГРУППУ кусков, а не на эту
+             картинку, поэтому стоят рядом колоды, а не углом. Складывающая `▾` обязательна:
+             `CropDeck` нем при `hostDoor`, и без неё раскрытую колоду нечем закрыть с клавиатуры. */
+          <div data-door-row='' className={DOOR_ROW}>
+            {deck &&
+              (deck.open ? (
+                <>
+                  {/* O-63 r2: a hidden sheet puts nothing into the sides — its pieces stay a view. */}
+                  {!hidden &&
+                    (() => {
+                      const rootId = picture.id ?? 0;
+                      const own = colorwayOf(picture);
+                      /* ЦЕЛИ — ТЕ ЖЕ, ЧТО У `mark` (`destinationsOf`, разбор у `applyRefusalFor`). */
+                      const targets = destinationsOf(own).ids.map((id) => ({
+                        colorwayId: id,
+                        label: colourwayName(id),
+                      }));
+                      const refusal = applyRefusalFor(rootId);
+                      return (
+                        <ApplySplitDoor
+                          techCardId={techCardId}
+                          sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
+                          targets={targets}
+                          pieces={piecesOf(rootId)}
+                          noun='render'
+                          refusal={refusal}
+                          refusalDescribedBy={noteIdOf(refusal)}
+                          onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
+                          className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap'
+                          doorClassName='h-5 bg-bgColor'
+                        />
+                      );
+                    })()}
+                  <Button
+                    variant='secondary'
+                    size='xs'
+                    className='h-5 w-5 shrink-0 bg-bgColor p-0'
+                    aria-expanded
+                    aria-label={`fold the pieces of render ${ordinal} back behind the sheet`.trim()}
+                    data-deck-fold={picture.id || undefined}
+                    title='fold these pieces back behind the sheet'
+                    onClick={onDeck}
+                  >
+                    <FoldCaret open className='ml-0' />
+                  </Button>
+                </>
+              ) : (
                 <Button
                   variant='secondary'
                   size='xs'
-                  className='h-5 w-5 shrink-0 bg-bgColor p-0'
-                  aria-expanded
-                  aria-label={`fold the pieces of render ${picture.ordinal ?? ''} back behind the sheet`.trim()}
-                  data-deck-fold={picture.id || undefined}
-                  title='fold these pieces back behind the sheet'
+                  className={DOOR}
+                  aria-expanded={false}
+                  data-deck-expand={picture.id || undefined}
                   onClick={onDeck}
+                  title={
+                    doors.piecesCut(pictureId) > members.length
+                      ? `${members.length} of the ${doors.piecesCut(pictureId)} pieces cut from this sheet ${members.length === 1 ? 'stands' : 'stand'} here, the rest in sides — open ${members.length === 1 ? 'it as a card' : 'them as cards'} in this row`
+                      : `${members.length}${members.length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`
+                  }
                 >
-                  ▾
+                  expand
+                  <FoldCaret open={false} />
                 </Button>
-              </>
-            ) : (
-              <Button
-                variant='secondary'
-                size='xs'
-                className={DOOR}
-                aria-expanded={false}
-                data-deck-expand={picture.id || undefined}
-                onClick={onDeck}
-                title={
-                  doors.piecesCut(pictureId) > members.length
-                    ? `${members.length} of the ${doors.piecesCut(pictureId)} pieces cut from this sheet ${members.length === 1 ? 'stands' : 'stand'} here, the rest in sides — open ${members.length === 1 ? 'it as a card' : 'them as cards'} in this row`
-                    : `${members.length}${members.length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`
-                }
-              >
-                expand ▸
-              </Button>
-            )
-          ) : away ? (
-            /* ═══ O-57 r2 · ПЛИТА В СТОЛБЦЕ, КОТОРОГО SIDES НЕ РИСУЕТ ═════════════════════════
-               Зеркало `mark ▸` на том же месте и той же меры (`DOOR`): там кладут, здесь
-               снимают. Жест не удаляет ничего — картинка остаётся на карточке и в этом ряду,
-               дальше её дверь снова `mark ▸`. Без права записи — погашенная дверь со словом,
-               как у соседей (`INERT_DOOR`). */
-            writesOff ? (
-              <InertDoor
-                className={INERT_DOOR}
-                label='unmark ▸'
-                reason={
-                  disabled
-                    ? 'this card is read-only for you — emptying a side is an edit of the card'
-                    : 'this server does not answer the design routes'
-                }
-              />
-            ) : (
-              <span data-unmark-held={picture.id || undefined} className='flex w-full'>
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className={DOOR}
-                  disabled={marking === (picture.id ?? 0)}
-                  aria-label={`unmark render ${picture.ordinal ?? ''} from ${away.where}`}
-                  title={`unmark — empty ${away.where}; the render stays on the card. ${
-                    away.colorwayId === COLORWAY_NONE
-                      ? 'SIDES draws no sample column while the card has colourways'
-                      : `SIDES draws no column for ${colourwayName(away.colorwayId)}`
-                  }`}
-                  onClick={() => unmarkHeld(picture, away.colorwayId, away.side)}
-                >
-                  unmark ▸
-                </Button>
-              </span>
-            )
-          ) : held ? (
-            <span
-              data-mark-held={picture.id || undefined}
-              title={
-                `this render already stands in a slot of this card, and one plate stands in one slot: ` +
-                `the server refuses a second placement outright. Empty that side first — the ✕ on its ` +
-                `plate in FABRIC RENDER SLOTS.`
-              }
-              /* ⚠ САМЫЙ ЗАМЕТНЫЙ «СКАЧОК» РЯДА, И ОН БЫЛ У ЧИТАЕМОЙ ПЛАШКИ, А НЕ У КНОПКИ.
-                 `Pill` — `inline-flex` по содержимому и 19px высотой (`py-px` без класса
-                 высоты): в ряду, где каждый сосед занимает всю ширину ячейки и ровно 20px, она
-                 сидела короткой и прижатой влево, и это читалось как «здесь что-то не
-                 дорисовалось». Ширину даёт обёртка (`flex w-full` — сам `span` с `title` был
-                 `inline`, то есть шириной по тексту), высоту и центровку — три класса на самой
-                 плашке. Слово и тон не трогаются: это по-прежнему статус, а не дверь. */
-              className='flex w-full'
-            >
-              <Pill className='h-5 w-full justify-center leading-4'>
-                in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}
-              </Pill>
-            </span>
-          ) : hidden ? (
-            /* O-63 r2: nothing a hidden picture may do from here — the caption says why. */
-            <span data-hidden-doors={picture.id || undefined} className='flex w-full' />
-          ) : composite ? (
-            /* ═══ У ЛИСТА ДВЕРЬ ЖИВАЯ, И ЭТО ПОЧИНКА, А НЕ УКРАШЕНИЕ ══════════════════════
-               Здесь стояла ПОГАШЕННАЯ дверь «split first ▸», чья причина отправляла человека
-               «к угловой кнопке этой плитки». Угол — ТИХИЙ орган: он появляется по наведению,
-               то есть отказ называл орган, которого на экране не видно. Дверь, объясняющая,
-               куда пойти, вместо того чтобы туда вести, — самый дорогой вид мёртвого контрола:
-               она занимает то самое место, где нужный жест и ожидается.
-               Теперь глагол один и он исполним отсюда. «Почему нельзя пометить лист» переехало
-               в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо.
-               O-63 r2: a sheet already cut, its every piece standing on SIDES, says so instead —
-               a status, like «in front», not a door (`cutAway`). */
-            cutAway ? (
-              <span
-                data-cut-away={picture.id || undefined}
-                title='every piece cut from this sheet stands in a side — SIDES shows them, each with its ✕. The sheet holds several views and stands in no side itself.'
-                className='flex w-full'
-              >
-                <Pill className='h-5 w-full justify-center leading-4'>pieces in sides</Pill>
-              </span>
-            ) : writesOff ? (
-              <InertDoor
-                className={INERT_DOOR}
-                label='split ▸'
-                reason={
-                  disabled
-                    ? 'this card is read-only for you — cutting a sheet writes new pictures onto the card'
-                    : 'this server does not answer the design routes'
-                }
-              />
-            ) : (
-              <span data-split-for={picture.id || undefined} className='flex w-full'>
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className={DOOR}
-                  onClick={onSplit}
-                  title='one sheet with several views glued into it, and a side holds ONE view. Cut it into frames here, then put them into their sides below'
-                >
-                  split ▸
-                </Button>
-              </span>
-            )
-          ) : writesOff ? (
-            <InertDoor
-              className={INERT_DOOR}
-              label='mark ▸'
-              reason={
-                disabled
-                  ? 'this card is read-only for you — putting a render into a side is an edit of the card'
-                  : 'this server does not answer the design routes'
-              }
-            />
-          ) : (
-            /* ═══ ОДИН ОРГАН — ДВА ВОПРОСА ПО ОДНОМУ: «ЧЕЙ СТОЛБЕЦ», ПОТОМ «КАКАЯ СТОРОНА» ══
-               Владелец по бете: «надо спросить колорвей сначала, потом уже сторону — сейчас в
-               пикере очень много всего и это не читается вообще».
-
-               ⚠ ЭТО ПО-ПРЕЖНЕМУ ОДНА ДВЕРЬ, И ЭТО ГЛАВНОЕ. Здесь стояла записка «второго
-               уровня кнопок нет намеренно: два органа на один жест — ровно то, чего владелец
-               просил не делать», и она ОСТАЁТСЯ ВЕРНОЙ: в ряду плитки как была одна кнопка
-               `mark ▸`, так и осталась, и открывает она одну панель. Разведены не ОРГАНЫ, а
-               ВОПРОСЫ внутри одной панели — шаг 1 показывает столбцы, шаг 2 стороны выбранного,
-               строкой-«назад» с его именем. Ветка одна (обычный случай без флага и всякая
-               плита именованного колорвея) — шага 1 нет вовсе, и жест не удлинился ни на одно
-               нажатие.
-
-               Состав целей считает `markBranches` (ниже, в теле раздела) — те же три правила
-               зеркала сервера, что и до правки. Орган — `TwoStepPicker` из `../core`. */
-            <span data-mark-for={picture.id || undefined} className='flex w-full'>
-              {(() => {
-                /* ⚠ ЛИЦО У ВСЕХ ПЛИТОК ОДНО — `mark ▸`, И СУЖЕНИЯ ПОСЛЕ РОЖДЕНИЯ ЦВЕТА НЕТ
-                   (r3-w2 №5; разбор на месте снятого `markScope` выше). Теперь оно ещё и НЕ
-                   МОЖЕТ появиться: дверь не держит значения вовсе — она задаёт два вопроса и
-                   забывает оба при закрытии.
-
-                   ЧЕМ КОНЧАЕТСЯ ЖЕСТ РОЖДЕНИЯ. `+ colourway…` закрывает панель, открывает
-                   модалку рождения и передаёт ей ПРОДОЛЖЕНИЕ: как только колорвей заведён
-                   (`onCreated` резолвится после `invalidateQueries`, то есть список веток уже
-                   пересобран), панель открывается снова и сразу на сторонах нового столбца.
-                   Второго нажатия больше не нужно. */
-                /* O-57 r4: ВСТАТЬ НЕКУДА И ЗАВЕСТИ НЕЧЕГО — дверь погашена общим органом
-                   студии (`InertDoor`: вне порядка Tab, причина в `title`), а словами причина
-                   стоит один раз над полосой — записка, на которую дверь ссылается
-                   `describedBy` (разбор у `REFUSAL_NOTES`). */
-                const refused = markRefusal(picture);
-                if (refused)
-                  return (
-                    <InertDoor
-                      className={INERT_DOOR}
-                      label='mark ▸'
-                      reason={refused}
-                      describedBy={noteIdOf(refused)}
-                    />
-                  );
-                const branches = markBranches(picture);
-                /* O-57 r2: ПОЧЕМУ ВЕТОК НЕТ — у семпл-плиты рядом с колорвеями, когда все
-                   столбцы архивные (`destinationsOf`). Дверь жива ради `+ colourway…`, и фраза
-                   стоит на шаге 1 над строкой рождения. */
-                const nowhere = destinationsOf(colorwayOf(picture)).refusal;
-                const canCreate = createsColourwayFor(picture);
-                /* ⚠ ПОДПИСЬ ДВЕРИ ЧИТАЕТ ТО ЖЕ ПРАВИЛО, ЧТО И САМА ПАНЕЛЬ: шаг 1 есть, когда
-                   есть из чего выбирать, а `+ colourway…` — тоже выбор. Второе написание этого
-                   условия обещало бы «сразу сторона» там, где панель спросит столбец. */
-                const asksColourway = branches.length > 1 || canCreate;
-                return (
-                  <TwoStepPicker
-                    face='mark ▸'
-                    title='mark into'
-                    branchNoun='colourways'
-                    leafNoun='sides'
-                    branches={branches}
-                    emptyReason={nowhere ?? undefined}
-                    disabled={marking === (picture.id ?? 0)}
-                    triggerTitle={
-                      nowhere
-                        ? nowhere
-                        : asksColourway
-                          ? 'put this render into a side — the colourway first, then the side'
-                          : `put this render into a side of ${branches[0]?.label ?? ''}`
-                    }
-                    /* ⚠ МЕТРИКА РЯДА ОТДАЁТСЯ СНАРУЖИ, КАК У ВСЕХ СОСЕДЕЙ (F-9): триггер
-                       поповера — это САМА `<button>`, и `DOOR` садится на неё тем же классом,
-                       что на `split ▸` и `expand ▸`. Прежний селект приходилось приводить к
-                       этой мере тремя чужими правилами (`min-h-0`, `py-0`, свой кегль), потому
-                       что под ним стояло поле ввода; кнопке приводить нечего. */
-                    triggerClassName={DOOR}
-                    create={
-                      /* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ — тем же окном, что заголовок
-                         `+ colourway` в SIDES и цель `apply splitted`. */
-                      canCreate && onCreateColorway
-                        ? { face: '+ colourway…', open: (then) => onCreateColorway(then) }
-                        : undefined
-                    }
-                    onPick={(target, view) => markInto(picture, target, view)}
-                  />
-                );
-              })()}
-            </span>
-          )}
-          {/* O-68 (D-74): the host's «delete», last and one step (16px) away from the tile's door —
-              the row's own gap is 2px. The tile's door keeps its width; this one never wraps. */}
-          {trailingDoor && <div className='ml-4 shrink-0'>{trailingDoor}</div>}
-        </div>
+              ))}
+          </div>
+        ) : undefined
       }
     />
   );
 }
+
+/** Значения строк угла-меню: `colourway␟side`, рождение колорвея и удаление. */
+const MARK_SEP = '␟';
+const CREATE_ITEM = '+colourway';
+const DELETE_ITEM = 'delete';
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
    O-63 step 2 · THE SAME TILE ON A RUN'S ROW — THE WORKBENCH UNDER GENERATE (D-62 п.1–2)
@@ -1695,6 +1558,58 @@ function RenderDoorsHostOn({
 }
 
 /**
+ * ═══ PUT A CUT'S PIECES INTO THE SIDES — ONE QUIET LINE PER CUT ON THE BENCH (gate wave 3, W4) ════
+ *
+ * The bench draws a cut sheet's pieces in its place (`piecesInPlace`, owner items 20/21), so the
+ * deck — and its `apply splitted` (owner E-6: «кнопка аплай сплитед и они уходят в инпут после
+ * нажатия … предварительно очищая предыдущий импут») — has no tile to stand on. The verb stays, off
+ * the deck: one line per cut under the run's tiles, the same `ApplySplitDoor` with the host's
+ * `piecesOf` (the whole split, `wholeDecks` for a brought sheet), its targets from `destinationsOf`
+ * and its refusal from `applyRefusalFor`. The sheet itself is never drawn again.
+ */
+export function PutPiecesIntoSides({ sheet }: { sheet: common_DesignPicture }): JSX.Element | null {
+  const host = useContext(RenderHostContext);
+  if (!host || isPictureHidden(sheet)) return null;
+  const {
+    techCardId,
+    band,
+    adopts,
+    onCreateColorway,
+    piecesOf,
+    piecesCut,
+    destinationsOf,
+    colourwayName,
+    applyRefusalFor,
+    noteIdOf,
+  } = host.doors;
+  const rootId = sheet.id ?? 0;
+  const pieces = piecesOf(rootId);
+  const own = colorwayOf(sheet);
+  const targets = destinationsOf(own).ids.map((id) => ({
+    colorwayId: id,
+    label: colourwayName(id),
+  }));
+  const refusal = applyRefusalFor(rootId);
+  const n = pieces.length || piecesCut(rootId);
+  return (
+    <div data-put-pieces={rootId} className='flex'>
+      <ApplySplitDoor
+        techCardId={techCardId}
+        sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
+        targets={targets}
+        pieces={pieces}
+        noun='render'
+        refusal={refusal}
+        refusalDescribedBy={noteIdOf(refusal)}
+        onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
+        label={`put the ${n} ${n === 1 ? 'piece' : 'pieces'} into sides ▸`}
+        quiet
+      />
+    </div>
+  );
+}
+
+/**
  * THE FRAME OF A RUN ROW — `PictureTile`'s own 4/5, the frame `RunTile` draws and `RunOutputs` hands
  * its decks (`frameAspect='4/5'`): the fan behind a sheet lines up with the sheet only on one frame.
  */
@@ -1720,7 +1635,9 @@ export function RunRenderTile({
   onZoom,
   onSplit,
   onEdit,
-  trailingDoor,
+  split,
+  onDelete,
+  deletePending,
   children,
 }: {
   host: RenderHost;
@@ -1733,8 +1650,12 @@ export function RunRenderTile({
   onZoom?: () => void;
   onSplit: () => void;
   onEdit: () => void;
-  /** O-68 (D-74): the row's «delete» on a derived picture of the workbench — the row's last door. */
-  trailingDoor?: ReactNode;
+  /** The row's `readSplit` facts for this picture — see `RenderTile`'s `split`. */
+  split: { views: readonly string[]; splitInto: number };
+  /** T17: the row's «delete» as the tile menu's last item — see `RenderTile`'s `onDelete`. */
+  onDelete?: () => void;
+  /** TF3: that delete is in flight — see `RenderTile`'s `deletePending`. */
+  deletePending?: boolean;
   /** The editor the run row mounts over this tile while it is open. */
   children?: ReactNode;
 }): JSX.Element {
@@ -1760,7 +1681,9 @@ export function RunRenderTile({
         onDeck={() => host.onDeck(pictureId)}
         onEdit={onEdit}
         onSplit={onSplit}
-        trailingDoor={trailingDoor}
+        split={split}
+        onDelete={onDelete}
+        deletePending={deletePending}
       />
       {children}
     </div>
@@ -1846,6 +1769,8 @@ export function broughtGroup(band: GetDesignBandResponse, step: RenderStep): Bro
   const take = (picture: common_DesignPicture) => {
     const id = picture.id ?? 0;
     if (id <= 0 || taken.has(id) || onSides.has(id)) return;
+    // T59: an original an edit replaced is not brought again — the edit stands for it.
+    if (!standsOnBench(picture)) return;
     taken.add(id);
     pictures.push(picture);
   };

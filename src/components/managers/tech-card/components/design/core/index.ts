@@ -3,13 +3,13 @@
  */
 export { AskModal } from './ask';
 export {
+  ControlLabel,
   Counter,
   EMPTY_WORD,
   EmptyState,
   GROUP_GAP,
   GROUP_SEAM,
   Money,
-  PRICED_LATER,
 } from './organs';
 export { Reason } from './reason';
 /* ЭТА ПОВЕРХНОСТЬ ОТДАЁТ ТО, ЧТО ЧИТАЮТ СНАРУЖИ, И НИЧЕГО СВЕРХ (r3c). `DrawHalf`, `SLOT_HALVES`,
@@ -18,7 +18,6 @@ export { Reason } from './reason';
    Внутри файла они живут по-прежнему; экспортированное имя без потребителя — это обещание
    стабильности, за которое никто не платит и о котором забывают при первой же правке. */
 export { HALF_FACE, PlaceOrDrawCell } from './two-half-slot';
-export { TwoStepPicker } from './two-step-picker';
 export type { PickerBranch, PickerLeaf } from './two-step-picker';
 export {
   CopyWords,

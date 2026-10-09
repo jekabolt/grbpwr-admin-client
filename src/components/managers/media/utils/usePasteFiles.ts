@@ -44,14 +44,65 @@ const isEditableTarget = (t: EventTarget | null): boolean => {
  * Что приёмник согласен взять. Видео берётся только там, где слот его показывает; `any` —
  * для библиотеки файлов, которая хранит что угодно и по типу ничего не отбирает.
  */
-export type PasteAccept = 'image' | 'media' | 'any';
+export type PasteAccept = 'image' | 'media' | 'image+svg' | 'media+svg' | 'vector' | 'any';
 
-export const isImageFile = (f: File) => f.type.startsWith('image/');
+/**
+ * SVG IS OPT-IN (labels rework, I-08). The bucket's image door refuses an SVG; only the vector door
+ * takes one (`useUploadMedia` routes it there). So a slot that did not ask for vectors does not take
+ * an SVG at all — before, it took it and the upload failed on the server. `'image+svg'` /
+ * `'media+svg'` add SVG to a slot; `'vector'` takes an SVG and nothing else (the care-label logo).
+ */
+export const isSvgFile = (f: File) =>
+  f.type === 'image/svg+xml' || (!f.type && /\.svg$/i.test(f.name));
+export const isImageFile = (f: File) => f.type.startsWith('image/') && !isSvgFile(f);
 export const isVideoFile = (f: File) => f.type.startsWith('video/');
 export const isMediaFile = (f: File) => isImageFile(f) || isVideoFile(f);
 
-const takes = (accept: PasteAccept): ((f: File) => boolean) =>
-  accept === 'any' ? () => true : accept === 'media' ? isMediaFile : isImageFile;
+const takes = (accept: PasteAccept): ((f: File) => boolean) => {
+  switch (accept) {
+    case 'any':
+      return () => true;
+    case 'media':
+      return isMediaFile;
+    case 'image+svg':
+      return (f) => isImageFile(f) || isSvgFile(f);
+    case 'media+svg':
+      return (f) => isMediaFile(f) || isSvgFile(f);
+    case 'vector':
+      return isSvgFile;
+    default:
+      return isImageFile;
+  }
+};
+
+/** What a slot takes, from its three switches. `vectorOnly` wins over the rest. */
+export function acceptOf(o: {
+  showVideos?: boolean;
+  allowSvg?: boolean;
+  vectorOnly?: boolean;
+}): PasteAccept {
+  if (o.vectorOnly) return 'vector';
+  if (o.allowSvg) return o.showVideos ? 'media+svg' : 'image+svg';
+  return o.showVideos ? 'media' : 'image';
+}
+
+/** The sentence said when a file is not what the slot takes. */
+export function refusalOf(accept: PasteAccept): string {
+  switch (accept) {
+    case 'vector':
+      return 'only an SVG goes here — this slot takes a vector file, not a photo';
+    case 'media':
+      return 'images and videos go here';
+    case 'media+svg':
+      return 'images, SVGs and videos go here';
+    case 'image+svg':
+      return 'only images or SVGs go here';
+    case 'any':
+      return '';
+    default:
+      return 'only images go here';
+  }
+}
 
 export function filesOfKind(files: File[], accept: PasteAccept): File[] {
   return files.filter(takes(accept));

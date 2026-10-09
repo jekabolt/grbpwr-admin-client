@@ -13,7 +13,6 @@ import {
 import Text from 'ui/components/text';
 import { inputToDecimal } from 'utils/decimal';
 
-import { PRICED_LATER } from '../../../core';
 import { slotCounter } from '../../fields';
 import { cornerText, maskDrawable, type MaskPoint } from '../../mask/geometry';
 import { orientationMoves, type PictureOrientation } from '../../mask/orientation';
@@ -305,24 +304,17 @@ export function retouchRequest(input: RetouchInput): RunRequest {
 }
 
 /**
- * The price line of a retouch (G-02 m-3). The band states no price — `image_models` carries slugs,
- * ratios and tiers, not their ceilings — so no number is derived here; the server prices the run when
- * it starts and the history shows what it cost.
- */
-export const RETOUCH_PRICE = `1 new picture per retouch · ${PRICED_LATER}`;
-
-/**
- * The editor's price line (C-14): the same words, preceded by the one fact a person would otherwise
- * not see — this picture falls back to the rectangle although the server takes a mask.
+ * The editor's run-row line (C-14): the one fact a person would otherwise not see — this picture
+ * falls back to the rectangle although the server takes a mask — or '' when there is nothing to
+ * say. The count-and-price sentence that used to follow it is gone (owner item 34, 04.10); the
+ * history shows what a run cost.
  */
 export function retouchPriceLine(
   band: GetDesignBandResponse,
   media: common_MediaFull | null,
   canDraw = true,
 ): string {
-  const base = `1 picture · ${PRICED_LATER}`;
-  const why = retouchWindowReason(band, media, canDraw);
-  return why ? `${why} · ${base}` : base;
+  return retouchWindowReason(band, media, canDraw) ?? '';
 }
 
 /** The panel's words: the owner's 12.png, less the credit (we price in $, by the server). */
@@ -340,15 +332,6 @@ function Explanation({ band }: { band: GetDesignBandResponse }): JSX.Element {
       <Text size='micro' variant='label' component='p' className='normal-case'>
         {retouchCaveat(band)}
         {inpaintOffered(band) ? ` ${RETOUCH_PANEL_FALLBACK}` : ''}
-      </Text>
-      <Text
-        size='micro'
-        variant='label'
-        component='p'
-        className='normal-case'
-        data-retouch-price=''
-      >
-        {RETOUCH_PRICE}
       </Text>
     </div>
   );

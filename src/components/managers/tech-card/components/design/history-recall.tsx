@@ -24,25 +24,19 @@ import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
-import { useTechCardAutosave } from './autosave-contract';
 import { flatInputBusy, holdFlatInput, readFlatInput } from './flat-input';
 import { GapPill } from './generation/run-panel';
 import { isRunLive } from './generation/run-state';
 import { runHandle } from './handles';
 import { retouchSourceId, workflowOfRun } from './playground/registry/run-workflow';
 import type { DesignKind } from './bench-kinds';
-import {
-  INPUT_MAX,
-  REFERENCE_KIND,
-  appendBoardPictures,
-  isInputRow,
-  type BoardItem,
-} from './mood-board';
+import { LABEL_VIEWS } from './board-labels';
+import { MOOD_MAX, appendBoardPictures, isBoardRow, type BoardItem } from './mood-board';
 import { pictureIsModel } from './threed/media';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
-import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
-import { settleWords, shownWords } from './words-seed';
+import { DETAIL_VIEW, isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
+import { flatHumanWords, runFlatWords } from './flat-route';
 
 /**
  * RECALL — ЖЕСТ «СОБЕРИ ЭТОТ ПРОГОН ЗАНОВО», И ОН РАЗРУШИТЕЛЕН, ПОЭТОМУ СПРАШИВАЕТ.
@@ -440,8 +434,6 @@ function keptResults(run: common_DesignRun): { alive: Kept[]; gone: number } {
 
 /* ────────────────────────────── the flat plan ────────────────────────────── */
 
-type MoodCalloutRow = NonNullable<TechCardFormData['callouts']>[number];
-
 /**
  * ЧТО ИМЕННО СЛУЧИТСЯ С ПРОМПТОМ — ОДНА ФУНКЦИЯ НА ВОПРОС И НА ИСПОЛНЕНИЕ.
  *
@@ -456,116 +448,51 @@ function planFlat(input: {
   mode: RecallMode;
   rows: BoardItem[];
   otherListIds: number[];
-  callouts: MoodCalloutRow[];
-  /** Роли, стоящие на карточке сейчас: media_id → есть ли записка. */
-  roled: Map<number, boolean>;
-  description: string;
-  /**
-   * Медиа, чью разметку этот жест трогать НЕ ИМЕЕТ ПРАВА — плиты верстака.
-   *
-   * ⚠ ПОЛЕ `callouts` ОДНО НА ВСЮ КАРТОЧКУ, И ОНО НЕ ТОЛЬКО МУДБОРДНОЕ. Тем же массивом пишет
-   * панель артефактов: указания на плитах ЛИСТА — это строки `callouts`, приколотые к `media_id`
-   * плиты, а плита не стоит ни в `moodboardMedia`, ни в `technicalMedia`. Правило «оставить то, что
-   * осталось в двух списках» стёрло бы их все до одного при первом же реколе — тихо, потому что
-   * лист рисуется на другой вкладке. Поэтому чистка разметки — СПИСОК НА СНОС, а не список на
-   * сохранение, и плиты в него не попадают ни при каких данных.
-   *
-   * `null` = ПЛИТЫ НЕИЗВЕСТНЫ (полосы у вызывающего нет), и тогда разметка не трогается вовсе.
-   * Незнание — не повод стирать: несделанная уборка видна и повторима, стёртая разметка — нет.
-   */
-  pinned: ReadonlySet<number> | null;
+  /** The flat's own words now (`flatWords`) — what the run's lines would replace. */
+  flatWords: string;
 }) {
   const { alive, gone } = input.mode === 'results' ? keptResults(input.run) : keptRefs(input.run);
-  const inputRows = input.rows.filter(isInputRow);
-
   /**
-   * ═══ ОБЕ ДВЕРИ ЧИСТЯТ ВХОД (J-4) ═══════════════════════════════════════════════════════════
+   * ═══ ДВЕРИ КЛАДУТ НА ДОСКУ И НИЧЕГО НЕ ЧИСТЯТ (101 Ф3) ═══════════════════════════════════════
    *
-   * Владелец, дословно: «когда нажимаешь + RESULTS ▸ в GENERATION HISTORY оно должно чистить все
-   * импуты в INPUT — REFERENCES и добавлять только то что является аутпутом».
-   *
-   * ЗДЕСЬ СТОЯЛ `input.mode === 'input'`, и довод был такой: `recall ▸` ВОСПРОИЗВОДИТ прогон, а
-   * `+ results ▸` ничего не воспроизводит и потому только ДОБАВЛЯЕТ. Довод пережил свою причину.
-   * Дверь результатов существует для одного жеста — «взять то, что вышло, и генерить дальше ИЗ
-   * ЭТОГО», — и в нём предыдущий вход не участвует ни одной картинкой: он уже отработал, из него
-   * и получились эти выходы. Дописывание в конец давало промпт-склейку из старого входа и нового
-   * результата, где номера картинок ползли, потолок `INPUT_MAX` съедался прошлым заходом, а роли
-   * прежних референсов молча продолжали ехать в модель.
-   *
-   * ЧТО ИМЕННО УХОДИТ, СЧИТАЕТСЯ НИЖЕ ОДНОЙ ФУНКЦИЕЙ НА ВОПРОС И НА ИСПОЛНЕНИЕ: строки входа, их
-   * роли и записки (у них свой RPC, они уходят СЕЙЧАС), и указания тех картинок, что покидают
-   * карточку целиком. Плиты верстака не трогаются ни при каких данных — их разметка принадлежит
-   * листу, а не промпту (`pinned` ниже).
-   *
-   * ⚠ ОПИСАНИЕ ИЗДЕЛИЯ НЕ ЧИСТИТСЯ, И ЭТО ГРАНИЦА, А НЕ НЕДОДЕЛКА. «Импуты» владельца — картинки
-   * входа; слова же были ВХОДОМ ЭТОГО САМОГО ПРОГОНА, из них эти выходы и получились, и следующий
-   * прогон без них станет прогоном другой вещи. Дверь блока «clear the input» (`runClear`) чистит
-   * и описание — но её жмут, чтобы начать с нуля, а эту, чтобы продолжить.
+   * Отдельного входа флэта больше нет: флэт берёт картинки с МУДБОРДА по ярлыкам, по два самых
+   * свежих на вид (`designFlatPickFromBoard`). Поэтому `recall ▸` и `+ results ▸` кладут картинки
+   * прогона НА ДОСКУ, а не замещают вход: доска — работа человека (указания, роли), и стирать её
+   * жестом истории нельзя. «Только результаты» (J-4) получается само: выходы прогона — новейшие
+   * медиа, и в следующий прогон своего вида едут они, а прежние картинки того же вида остаются дома
+   * строкой «older» в «what the model gets».
    */
-  const clearing = true;
-  const clearRows = clearing ? inputRows.map((i) => i.mediaId) : [];
-  const clearRoles = clearRows.filter((id) => input.roled.has(id));
-
-  /**
-   * УКАЗАНИЯ УХОДЯТ ВМЕСТЕ СО СВОЕЙ КАРТИНКОЙ, НО ТОЛЬКО ЕСЛИ КАРТИНКА УХОДИТ С КАРТОЧКИ ВОВСЕ.
-   * Одно и то же медиа имеет право стоять и на доске, и во входе — это ровно тот жест, ради
-   * которого вход отделили от доски. Снять разметку с доски, потому что чистится ВХОД, значило бы
-   * уничтожить работу, к рекол-у отношения не имеющую.
-   */
-  const staying = new Set<number>([
-    ...input.rows.filter((i) => !isInputRow(i)).map((i) => i.mediaId),
-    ...input.otherListIds,
-  ]);
-  const pinned = input.pinned;
-  const losing = new Set(
-    pinned == null ? [] : clearRows.filter((id) => !staying.has(id) && !pinned.has(id)),
-  );
-  const clearCallouts = input.callouts.filter((c) => losing.has(c?.mediaId ?? 0)).length;
-
-  // Место считается по ОЧИЩЕННОМУ входу: у двери входа он пуст, у двери результата — нет.
-  const kept = clearing ? 0 : inputRows.length;
-  const room = Math.max(0, INPUT_MAX - kept);
-  const occupied = new Set<number>([
-    ...(clearing ? [] : inputRows.map((i) => i.mediaId)),
-    ...input.otherListIds,
-  ]);
+  const board = input.rows.filter(isBoardRow);
+  const room = Math.max(0, MOOD_MAX - board.length);
+  const occupied = new Set<number>([...board.map((i) => i.mediaId), ...input.otherListIds]);
   const fresh = alive.filter((k) => !occupied.has(k.mediaId));
   const already = alive.length - fresh.length;
   const add = fresh.slice(0, room);
   const refused = fresh.length - add.length;
 
-  const words = input.mode === 'input' ? (input.run.inputs?.garmentNote ?? '').trim() : '';
-  const description = input.description.trim();
+  /* THE RUN'S WORDS GO BACK WHERE THEY CAME FROM (M15): a flat run was given «garment: class» + the
+     person's flat words, so only those lines return — into FLAT › WORDS, never into the description
+     (the class line follows the category; a render run's note is model-written prose). */
+  const words = input.mode === 'input' ? runFlatWords(input.run) : null;
+  const current = flatHumanWords(input.flatWords);
+  // The run's lines differ from WORDS now — including «it was given none» over typed lines.
+  const wordsChange = words !== null && words !== current;
 
   return {
-    clearRows,
-    clearRoles,
-    /** Медиа, чья разметка уходит вместе с ними. Ровно этот набор снимает приём. */
-    losing,
-    clearCallouts,
     add,
     already,
     refused,
     gone,
     words,
-    /** Текст, который слова прогона заменят. Пусто — заменять нечего, и вопрос об этом не стоит. */
-    replaces: words && words !== description ? description : '',
+    wordsChange,
+    /** Строки WORDS, которые слова прогона заменят. Пусто — заменять нечего, и вопрос об этом не стоит. */
+    replaces: wordsChange ? current : '',
     /** Жест, который ничего не сделает, называется так вслух, а не рисуется дверью. */
-    empty: !add.length && !clearRows.length && !(words && words !== description),
+    empty: !add.length && !wordsChange,
   };
 }
 
 type FlatPlan = ReturnType<typeof planFlat>;
-
-/** Медиа каждой плиты, стоящей сейчас в слоте верстака: их разметка принадлежит листу, не промпту. */
-function platedMedia(band?: GetDesignBandResponse): Set<number> {
-  const ids = new Set<number>();
-  for (const slot of band?.bench ?? []) {
-    const mediaId = slot.picture?.media?.id;
-    if (mediaId != null) ids.add(mediaId);
-  }
-  return ids;
-}
 
 /* ────────────────────────────── the plate plan ────────────────────────────── */
 
@@ -734,9 +661,6 @@ export function RecallDoors({
   disabled?: boolean;
 }) {
   const form = useFormContext<TechCardFormData>();
-  // Слова на экране — с предложением WORDS только там, где его видно (MIN-4 c).
-  const autosaveStatus = useTechCardAutosave().status;
-  const wordsLive = !disabled && autosaveStatus !== 'off';
   const answerable = useRecallAnswerable(techCardId);
   const canSwitch = useStudioSwitchAvailable(techCardId);
   const [asking, setAsking] = useState<RecallMode | null>(null);
@@ -774,7 +698,7 @@ export function RecallDoors({
           )
         : inputTarget === 'render'
           ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
-          : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
+          : (run.inputs?.refs ?? []).length > 0 || runFlatWords(run) !== null;
   /**
    * ═══ ПРОГОН 3D ДВЕРИ РЕЗУЛЬТАТА НЕ ИМЕЕТ ВОВСЕ (J-11) ═══════════════════════════════════════
    *
@@ -817,21 +741,12 @@ export function RecallDoors({
   const plan = useMemo<FlatPlan | null>(() => {
     if (!asking || recallTargetKind(run, asking, threedRetired) !== 'flat' || !form) return null;
     const rows = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
-    const roled = new Map<number, boolean>();
-    for (const r of band.references ?? []) {
-      if (r.mediaId != null && (r.role ?? '').trim()) roled.set(r.mediaId, !!(r.note ?? '').trim());
-    }
     return planFlat({
       run,
       mode: asking,
       rows,
       otherListIds: ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
-      callouts: (form.getValues('callouts') ?? []) as MoodCalloutRow[],
-      roled,
-      // D-20'''': СЛОВА НА ЭКРАНЕ — засев WORDS в форму не пишется, пока человек не подействовал, и
-      // вопрос «описание будет заменено» обязан видеть то, что человек видит в поле.
-      description: shownWords(techCardId, form, wordsLive),
-      pinned: platedMedia(band),
+      flatWords: (form.getValues('flatWords') as string | null | undefined) ?? '',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asking, run, band, form]);
@@ -849,10 +764,9 @@ export function RecallDoors({
       ? 'go to 3D'
       : target === 'render'
         ? 'put the plates back'
-        : asking === 'results'
-          ? // ПОДПИСЬ КНОПКИ НАЗЫВАЕТ ПОСЛЕДСТВИЕ, А ОНО СТАЛО РАЗРУШИТЕЛЬНЫМ (J-4): дверь больше
-            // не «добавляет», она замещает вход результатами прогона.
-            'replace the input with its results'
+        : target === 'flat'
+          ? // 101 Ф3: обе двери флэта кладут картинки на доску и ничего не стирают.
+            'put them on the moodboard'
           : retouch
             ? 'open the mask'
             : 'replace the prompt';
@@ -875,7 +789,9 @@ export function RecallDoors({
         title={
           inputDark
             ? undefined
-            : `take what ${handle} was given — its reference pictures and its words — into the ${kindLabel(inputTarget)} input. It asks first: the prompt it replaces is not kept anywhere.`
+            : inputTarget === 'flat'
+              ? `put what ${handle} was given — its reference pictures and its words — back on the moodboard. It asks first.`
+              : `take what ${handle} was given — its reference pictures and its words — into the ${kindLabel(inputTarget)} input. It asks first: the prompt it replaces is not kept anywhere.`
         }
       >
         recall ▸
@@ -886,11 +802,11 @@ export function RecallDoors({
         size='xs'
         disabled={resultsDark}
         onClick={() => setAsking('results')}
-        aria-label={`put what ${handle} returned into the flat input`}
+        aria-label={`put what ${handle} returned on the moodboard`}
         title={
           resultsDark
             ? undefined
-            : `replace input — references with the pictures ${handle} produced. Everything standing in the input now — pictures, roles, notes — leaves it. It asks first.`
+            : `put the pictures ${handle} produced on the moodboard — the next flat sends them as the newest of their view. It asks first.`
         }
       >
         + results ▸
@@ -906,8 +822,10 @@ export function RecallDoors({
         }}
         onCancel={() => setAsking(null)}
         title={
-          asking === 'results'
-            ? `replace the input with ${handle}’s results`
+          target === 'flat'
+            ? asking === 'results'
+              ? `${handle}’s results on the moodboard`
+              : `${handle}’s input on the moodboard`
             : `recall ${handle} into ${kindLabel(target)}`
         }
         confirmLabel={confirmLabel}
@@ -955,9 +873,8 @@ export function RecallDoors({
 }
 
 /**
- * ЧТО БУДЕТ СТЁРТО — ЧИСЛАМИ, А НЕ СЛОВОМ «ВСЁ». Разрушительный вопрос, не называющий предмета,
- * читается как формальность и нажимается не глядя; именно поэтому здесь перечислены строки, роли,
- * записки и указания по отдельности, а не «the input».
+ * ЧТО ЛЯЖЕТ НА ДОСКУ — ЧИСЛАМИ (101 Ф3). Двери больше ничего не стирают: картинки прогона встают на
+ * мудборд, и флэт берёт с доски по два самых свежих на вид.
  */
 function FlatQuestion({
   plan,
@@ -968,60 +885,34 @@ function FlatQuestion({
   handle: string;
   mode: RecallMode;
 }) {
-  const removed: string[] = [];
-  if (plan.clearRows.length) removed.push(count(plan.clearRows.length, 'picture'));
-  if (plan.clearRoles.length)
-    removed.push(`${count(plan.clearRoles.length, 'role')} and their notes`);
-  if (plan.clearCallouts) removed.push(count(plan.clearCallouts, 'callout'));
-
-  /**
-   * ОДНА ЧИСЛОВАЯ ФРАЗА НА ОБЕ ДВЕРИ (J-4). Обе теперь ЗАМЕЩАЮТ вход, и различаются ровно двумя
-   * словами: откуда картинки взялись и как они называются. Две редакции одного предложения
-   * разошлись бы в первый же день — и разошлись бы молча, потому что читают их поодиночке.
-   */
   const results = mode === 'results';
-  const source = results ? 'PRODUCED' : 'was given';
   const noun = results ? 'output picture' : 'reference picture';
-  const nothing = results
-    ? `produced nothing the prompt can take — a 3D model is a file, not a picture`
-    : `brought no reference pictures of its own`;
-
   return (
     <>
       <Text size='control' component='p'>
-        {plan.clearRows.length
-          ? plan.add.length
-            ? `The flat prompt is REPLACED with what ${handle} ${source}. ${removed.join(', ')} leave the input; ${count(plan.add.length, noun)} from ${handle} take their place.`
-            : `${removed.join(', ')} leave the input, and ${handle} ${nothing} — the prompt is left empty.`
-          : `The input is empty, so nothing is removed. ${count(plan.add.length, noun)} from ${handle} go in.`}
+        {plan.add.length
+          ? `${count(plan.add.length, noun)} from ${handle} go on the moodboard${results ? ' as flats of this garment' : ' with the views they had'}. Nothing on the board is removed; the flat sends the two newest pictures of each view.`
+          : `Nothing from ${handle} goes on the moodboard.`}
       </Text>
 
       {plan.replaces && (
         <Text size='control' component='p'>
-          The garment description is replaced with the words {handle} was given. The text you have
-          now is not kept anywhere — copy it first if you need it.
+          {plan.words
+            ? `The flat’s words are replaced with the lines ${handle} was given.`
+            : `The flat’s words are cleared — ${handle} was given none.`}{' '}
+          The lines you have now are not kept anywhere — copy them first if you need them.
         </Text>
       )}
 
       {(plan.refused > 0 || plan.gone > 0 || plan.already > 0) && (
         <Text size='control' variant='label' component='p'>
           {[
-            plan.refused > 0 && `${plan.refused} will not fit — the input holds ${INPUT_MAX}`,
-            plan.already > 0 && `${plan.already} already in the input`,
+            plan.refused > 0 && `${plan.refused} will not fit — the board holds ${MOOD_MAX}`,
+            plan.already > 0 && `${plan.already} already on the board`,
             plan.gone > 0 && `${plan.gone} gone from the card, skipped`,
           ]
             .filter(Boolean)
             .join(' · ')}
-        </Text>
-      )}
-
-      {plan.clearRoles.length > 0 && (
-        // ГРАНИЦА ЧЕСТНОСТИ — та же, что у «clear the input»: у ролей свой RPC и они уходят СЕЙЧАС,
-        // а строки и описание живут в документе и уедут с ним при сохранении карточки. С J-4 это
-        // верно для ОБЕИХ дверей: результаты тоже замещают вход, значит тоже снимают роли.
-        <Text size='control' variant='label' component='p'>
-          The roles and notes are removed on the server now; the rows and the description leave the
-          card when you save it.
         </Text>
       )}
     </>
@@ -1113,8 +1004,6 @@ export function RecalledRunPrompt({
   const form = useFormContext<TechCardFormData>();
   const { setReferenceRole } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
-  const autosaveStatus = useTechCardAutosave().status;
-  const wordsLive = !disabled && autosaveStatus !== 'off';
 
   /**
    * Какой жест этот приёмник уже взял — прогон И дверь: один прогон законно вспоминают дважды,
@@ -1160,22 +1049,12 @@ export function RecalledRunPrompt({
     const otherListIds = ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map(
       (i) => i.mediaId,
     );
-    const roled = new Map<number, boolean>();
-    for (const r of band?.references ?? []) {
-      if (r.mediaId != null && (r.role ?? '').trim()) roled.set(r.mediaId, !!(r.note ?? '').trim());
-    }
-    const callouts = (form.getValues('callouts') ?? []) as MoodCalloutRow[];
     const plan = planFlat({
       run,
       mode,
       rows,
       otherListIds,
-      callouts,
-      roled,
-      // D-20'''': слова на экране (см. вопрос у двери).
-      description: shownWords(techCardId, form, wordsLive),
-      // Полосы у этой копии может и не быть; без неё плиты неизвестны, и разметка не трогается.
-      pinned: band ? platedMedia(band) : null,
+      flatWords: (form.getValues('flatWords') as string | null | undefined) ?? '',
     });
 
     if (plan.empty) {
@@ -1183,101 +1062,79 @@ export function RecalledRunPrompt({
         plan.gone > 0
           ? `${handle} kept ${count(plan.gone, 'picture')}, and ${plan.gone === 1 ? 'it is' : 'they are'} gone from the card — there is nothing left to reuse`
           : plan.already > 0
-            ? `nothing new came from ${handle} — its pictures are already in the input`
+            ? `nothing new came from ${handle} — its pictures are already on the moodboard`
             : `${handle} kept nothing this door can reuse`,
         'error',
       );
       return;
     }
 
-    /* ПОД УДЕРЖАНИЕМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): роли снимаются и ставятся по одной, и GENERATE,
-       нажатый посреди, снял бы наполовину старый промпт — он ждёт («the prompt is being changed»).
-       Слова запираются, только если рекол их пишет (ревью раунда 4, MIN-1): иначе набранное посреди
-       не тронуто. Удержание по карточке, в модульном хранилище: переживает смену шага, как и цикл. */
+    /* ПОД УДЕРЖАНИЕМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): ярлыки ставятся по одной, и GENERATE, нажатый
+       посреди, взял бы доску наполовину. Слова запираются, только если рекол их пишет (MIN-1). */
     const card = techCardId;
-    const release = holdFlatInput(card, { words: !!plan.words });
+    const release = holdFlatInput(card, { words: plan.wordsChange });
     void (async () => {
       try {
         const said: string[] = [];
-
-        /* ── чистка: сначала роли, потом строки ──
-           Тот же порядок, что у одиночного ✕ и у «clear the input»: снятая строка при живой роли
-           рождала бы носителя роли без строки на карточке. Роли снимаются ПО ОДНОЙ — bulk-глагола на
-           проводе нет, — и частичный отказ не съедается: не снявшаяся роль остаётся на экране вместе
-           со своей строкой, а итог говорит, сколько именно осталось. */
-        const stayed = new Set<number>();
-        for (const mediaId of plan.clearRoles) {
-          try {
-            await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0, note: '' });
-          } catch {
-            stayed.add(mediaId);
-          }
-        }
-
         const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
-        const dropping = new Set(plan.clearRows.filter((id) => !stayed.has(id)));
-        const cleared = live.filter((i) => !(isInputRow(i) && dropping.has(i.mediaId)));
-
         const result = appendBoardPictures({
-          live: cleared,
-          inScope: isInputRow,
+          live,
+          inScope: isBoardRow,
           otherListIds,
           added: plan.add.map((k) => k.media),
-          kind: REFERENCE_KIND,
-          max: INPUT_MAX,
-          scopeLabel: 'input',
+          kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD',
+          max: MOOD_MAX,
+          scopeLabel: 'board',
         });
-        // Запись по КОРНЮ массива, как и везде в этой паре блоков: два экземпляра поля-массива на одно
-        // имя не синхронизируются, а мудборд правит вторую половину того же списка.
-        form.setValue('moodboardMedia', result.next as TechCardFormData['moodboardMedia'], {
+        /* НАЗНАЧЕНИЕ ПРИНЯТЫХ КАРТИНОК (101 Ф3): вид прогона → `target`, деталь → `detail`; выход
+           прогона (`+ results ▸`) — флэт этой вещи, тоже `target`. Без роли — пусто: назначение
+           предложит модель, как у любой новой картинки доски. */
+        const purposeOf = new Map(
+          plan.add.map((k) => [
+            k.mediaId,
+            mode === 'results' || (k.role && k.role !== DETAIL_VIEW)
+              ? 'target'
+              : k.role === DETAIL_VIEW
+                ? 'detail'
+                : '',
+          ]),
+        );
+        const accepted = new Set(result.accepted.map((m) => m.id ?? 0));
+        const next = result.next.map((i) =>
+          isBoardRow(i) && accepted.has(i.mediaId) && purposeOf.get(i.mediaId)
+            ? { ...i, role: purposeOf.get(i.mediaId) }
+            : i,
+        );
+        // Запись по КОРНЮ массива, как и везде у этого списка.
+        form.setValue('moodboardMedia', next as TechCardFormData['moodboardMedia'], {
           shouldDirty: true,
         });
         if (result.accepted.length) onAccepted?.(result.accepted);
 
-        /* ── разметка ──
-           Указание живёт на медиа, а не на строке входа, поэтому снимается только у картинок, которые
-           уходят с карточки СОВСЕМ: у той, что осталась на доске, разметка чужая этому жесту. */
-        if (dropping.size) {
-          // СПИСОК НА СНОС, А НЕ НА СОХРАНЕНИЕ (см. `pinned` у планировщика): в `callouts` лежат ещё и
-          // указания на плитах листа, и «сохранить то, что осталось во входе и на доске» унесло бы их
-          // целиком. Уходят ровно те медиа, которые план назвал в вопросе, и ни одним больше — плюс
-          // сторож на тот случай, если роль не снялась и строка осталась стоять.
-          const gonePictures = new Set(
-            [...plan.losing].filter(
-              (id) => dropping.has(id) && !result.next.some((i) => i.mediaId === id),
-            ),
-          );
-          const kept = callouts.filter((c) => !gonePictures.has(c?.mediaId ?? 0));
-          const lost = callouts.length - kept.length;
-          if (lost > 0) {
-            form.setValue('callouts', kept as TechCardFormData['callouts'], { shouldDirty: true });
-            said.push(
-              `${count(lost, 'callout')} removed with ${lost === 1 ? 'its' : 'their'} picture`,
-            );
-          }
-        }
-
         /* ── слова ──
-           Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется:
-           человек уже прочитал, что текст будет заменён, и нажал. Второе окно на один жест — это не
-           «подробнее», а сомнение в собственном вопросе. */
-        if (plan.words) {
-          form.setValue('garmentDescription', plan.words, { shouldDirty: true });
-          // Слова пришли из прогона и стоят в форме (D-20'''').
-          settleWords(techCardId, plan.words);
+           Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется. */
+        if (plan.wordsChange) {
+          form.setValue('flatWords', plan.words ?? '', { shouldDirty: true });
         }
 
-        /* ── роли принятых картинок ──
-           Роль ставится ТОЛЬКО на своей новой строке: рекол воспроизводит вход прогона, а не
-           переписывает роли, которые человек поставил соседним картинкам. Порядковый номер промпта —
-           позиция во входе, как и у ручной правки: он нигде не хранится и выводится сканом. */
-        const order = result.next.filter(isInputRow).map((i) => i.mediaId);
-        const roleOf = new Map(plan.add.filter((k) => k.role).map((k) => [k.mediaId, k]));
+        /* ── ярлыки принятых картинок ──
+           Вид, который прогон получил от человека, встаёт ярлыком человека: модель его не перечитывает.
+           Только на принятых картинках — ярлыки соседей не трогаются. У выхода прогона ярлыка нет:
+           его прочтёт модель. */
+        const order = next.filter(isBoardRow).map((i) => i.mediaId);
+        /* Только вид из словаря ярлыков (Codex Ф3): деталь в снимке прогона едет без слота —
+           ярлык человека «detail» без слота ни к чему бы не привязал; её прочтёт модель и сама
+           приведёт к слоту (назначение `detail` уже стоит). Снятые 3/4 — тоже модели. */
+        const roleOf = new Map(
+          plan.add
+            .filter((k) => (LABEL_VIEWS as readonly string[]).includes(k.role))
+            .map((k) => [k.mediaId, k]),
+        );
         let roledOk = 0;
         let roleFailed = 0;
         for (const media of result.accepted) {
           const it = roleOf.get(media.id ?? 0);
-          if (!it) continue;
+          if (!it || mode === 'results') continue;
           try {
             await setReferenceRole.mutateAsync({
               mediaId: it.mediaId,
@@ -1293,32 +1150,27 @@ export function RecalledRunPrompt({
 
         /* ── ИТОГ, НАЗЫВАЮЩИЙ ОБЕ ПОЛОВИНЫ ЧАСТИЧНОГО ИСХОДА ── */
         const added = result.accepted.length;
-        said.unshift(
+        said.push(
           added
-            ? `${count(added, 'picture')} from ${handle} ${added === 1 ? 'is' : 'are'} in the input`
+            ? `${count(added, 'picture')} from ${handle} ${added === 1 ? 'is' : 'are'} on the moodboard`
             : `nothing was added from ${handle}`,
         );
-        if (plan.clearRows.length)
-          said.push(`${count(plan.clearRows.length - stayed.size, 'picture')} cleared before it`);
-        if (stayed.size)
-          said.push(
-            `${count(stayed.size, 'role')} could not be removed — ${stayed.size === 1 ? 'that reference stays' : 'those references stay'} in the input`,
-          );
         if (result.refusal) said.push(result.refusal);
         if (plan.gone) said.push(`${plan.gone} gone from the card, skipped`);
-        if (roledOk) said.push(`${roledOk} kept ${roledOk === 1 ? 'its role' : 'their roles'}`);
+        if (roledOk) said.push(`${roledOk} kept ${roledOk === 1 ? 'its view' : 'their views'}`);
         if (roleFailed)
           said.push(
-            `${roleFailed} could not be given ${roleFailed === 1 ? 'its role' : 'their roles'} — set ${roleFailed === 1 ? 'it' : 'them'} by hand`,
+            `${roleFailed} could not be given ${roleFailed === 1 ? 'its view' : 'their views'} — set ${roleFailed === 1 ? 'it' : 'them'} on the tile`,
           );
-        if (plan.words) said.push('the description was taken from the run');
-        // Итог — только над карточкой, которая на экране: страница перемонтируется по карточке, и
-        // итог рекола карточки A не печатается над карточкой B (ревью раунда 4, MIN-5).
+        if (plan.wordsChange)
+          said.push(
+            plan.words
+              ? 'the flat’s words were taken from the run'
+              : 'the flat’s words were cleared — the run was given none',
+          );
+        // Итог — только над карточкой, которая на экране (ревью раунда 4, MIN-5).
         if (cardOnScreen(card)) {
-          showMessage(
-            said.join(' · '),
-            stayed.size || roleFailed || result.refusal ? 'error' : 'success',
-          );
+          showMessage(said.join(' · '), roleFailed || result.refusal ? 'error' : 'success');
         }
       } finally {
         release();
