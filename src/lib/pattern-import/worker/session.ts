@@ -62,7 +62,12 @@ import { applyLegend, buildChainsDetailed } from '../chains';
 import { detectSizeRun } from '../sizes';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import { applyPieceEdits, fillPiecesDetailed, proposeSeeds } from '../pieces';
-import { buildPieceSpecsDetailed, type SemanticsDetail } from '../semantics';
+import {
+  allowanceFromTexts,
+  buildPieceSpecsDetailed,
+  detectAllowance,
+  type SemanticsDetail,
+} from '../semantics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
 import { isWallEdit, mergeSameSize, withOperatorLines } from './operator-lines';
@@ -604,8 +609,27 @@ export class Session {
       throw new ImportError('out-of-order', 'find the pieces first', 'semantics');
     if (!this.sizeMap)
       throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
+    // Nobody decided the file's allowance yet: what the sheet says (text in 9 languages, or the gap
+    // between two nested loops) beats the owner default. The decision rides on every spec.
+    const fileAllowance =
+      input.fileAllowance.origin === 'default'
+        ? (() => {
+            const found = detectAllowance(sheet, this.families!, set);
+            if (found.origin !== 'default') return found;
+            // the statement is often on an instruction page, not on the sheet itself
+            return allowanceFromTexts(this.docTexts).decision ?? input.fileAllowance;
+          })()
+        : input.fileAllowance;
     const detail = buildPieceSpecsDetailed(
-      { sheet, set, run: this.run, sizeMap: this.sizeMap, families: this.families, ...input },
+      {
+        sheet,
+        set,
+        run: this.run,
+        sizeMap: this.sizeMap,
+        families: this.families,
+        ...input,
+        fileAllowance,
+      },
       (d, t, n) => ctx.progress(d, t, n),
     );
     this.semantics = detail.output;

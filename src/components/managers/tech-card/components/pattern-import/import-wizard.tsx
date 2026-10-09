@@ -285,7 +285,14 @@ function WizardBody({
                   ← back
                 </Button>
               )}
-              <div className='min-w-0 flex-1'>
+              <div className='flex min-w-0 flex-1 flex-col gap-1'>
+                {api.notice && !session.error && (
+                  <CalloutBox tone='note' className='py-1'>
+                    <Text size='micro' component='p'>
+                      {api.notice}
+                    </Text>
+                  </CalloutBox>
+                )}
                 {session.error ? (
                   <StageMessage code={api.errorCode} message={session.error} />
                 ) : blocker ? (

@@ -32,6 +32,7 @@ import {
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
+import { textNameOf } from '../use-import-session';
 import { PendingDetails } from './details-pending';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
 
@@ -67,12 +68,17 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
-  const fileAllowance: AllowanceDecision = inputs.fileAllowance ?? {
-    meaning: 'seam',
-    allowanceMm: PATIMPORT.defaultAllowanceMm,
-    origin: 'default',
-    evidence: ['no allowance text found — owner default'],
-  };
+  // What the worker read off the sheet (allowance text / nested loops) when nobody set it yet.
+  const found = sem.pieces.find(
+    (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
+  )?.allowance;
+  const fileAllowance: AllowanceDecision = inputs.fileAllowance ??
+    found ?? {
+      meaning: 'seam',
+      allowanceMm: PATIMPORT.defaultAllowanceMm,
+      origin: 'default',
+      evidence: ['no allowance text found — owner default'],
+    };
   const nameOf = (seed: SeedId) => session.names.find((n) => n.seed === seed);
   const specsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed);
   const blockedOf = (seed: SeedId) => sem.blocked.find((b) => b.seed === seed);
@@ -158,7 +164,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
             <Text size='micro' variant='label' component='p' className='min-w-0 flex-1 pb-1'>
               {fileAllowance.origin === 'operator'
                 ? 'set by you'
-                : `${fileAllowance.origin}: ${fileAllowance.evidence.join(' · ')}`}
+                : // the reader's evidence already says where it looked ("text: «…»")
+                  fileAllowance.evidence.join(' · ') || fileAllowance.origin}
               {' — '}a seam line gets a cut line {fileAllowance.allowanceMm} mm out (layer 1 = final
               cut, the card adds nothing).
             </Text>
@@ -183,8 +190,10 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
             <tbody>
               {rows.map((f) => {
                 const seed = f.seed;
-                const n = nameOf(seed);
                 const specs = specsOf(seed);
+                // No AI answer for this piece (not logged in, AI off): show what the sheet text
+                // gave the spec; typing a code makes it the operator's.
+                const n = nameOf(seed) ?? (specs.length ? textNameOf(seed, sem) : undefined);
                 const b = blockedOf(seed);
                 const ov = inputs.overrides[seed] ?? {};
                 // A blocked piece has no spec yet: fall back to what the namer read off the sheet.

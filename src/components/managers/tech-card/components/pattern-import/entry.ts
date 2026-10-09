@@ -31,12 +31,18 @@ export function buildCardContext(args: {
   pieces: { lineKey?: string; name?: string; cutSymmetry?: string }[];
   styleLabel: string;
 }): CardContext {
-  const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => ({
-    sizeId,
-    name: args.sizeName(sizeId),
-    token: (sizeTokensOf(args.rawSizeName(sizeId))[0] ?? args.sizeName(sizeId)).toUpperCase(),
-    rank,
-  }));
+  const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
+    // The card's own reader of the dictionary name (xs_44ta_m → xs, 44): the worker's size map
+    // matches the file's labels against exactly these spellings.
+    const spellings = sizeTokensOf(args.rawSizeName(sizeId));
+    return {
+      sizeId,
+      name: args.sizeName(sizeId),
+      token: (spellings[0] ?? args.sizeName(sizeId)).toUpperCase(),
+      rank,
+      spellings: spellings.map((t) => t.toUpperCase()),
+    };
+  });
   const scopes: DraftScopeTarget[] = args.scopes.map((s) => ({
     scopeKey: s.key,
     fabricPurpose: s.binding.fabricPurpose,

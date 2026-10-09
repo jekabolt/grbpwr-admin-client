@@ -18,8 +18,9 @@ import type { Chain, ChainId, ChainSet, LineClass, PieceEdit, PtMm, SizeRun } fr
 type Bridge = Extract<PieceEdit, { kind: 'bridge' }>;
 type Ignore = Extract<PieceEdit, { kind: 'ignore-line' }>;
 
-/** A click this close to a line END lands on it (gaps open between two line ends), mm. */
-export const BRIDGE_END_SNAP_MM = 8;
+/** A click this close to a line END lands on it (gaps open between two line ends), mm — under
+ * the ~5 mm between the ends of two nested sizes, so a click picks ITS size's end. */
+export const BRIDGE_END_SNAP_MM = 4;
 /** Otherwise a click this close to a line lands on its nearest point, mm (size lines sit 3+ mm apart). */
 export const BRIDGE_LINE_SNAP_MM = 2;
 /** A bridge is extended past each landing so its raster overlaps the wall it lands on, mm. */
@@ -84,7 +85,7 @@ function nearestEnd(
 }
 
 /**
- * The two clicks of a bridge, landed on the drawing: a line END within 8 mm first (a gap opens
+ * The two clicks of a bridge, landed on the drawing: a line END within 4 mm first (a gap opens
  * between two ends), else the nearest point of a line within 2 mm, else the click as given.
  */
 export function snapBridge(
