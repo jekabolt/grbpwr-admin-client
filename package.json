@@ -25,6 +25,7 @@
     "autosplit": "node scripts/autosplit-probe.mjs",
     "patimport:pdf": "node scripts/pattern-import/pdf.mjs all",
     "patimport:assemble": "node scripts/pattern-import/assemble.mjs all",
+    "patimport:pieces": "node scripts/pattern-import/pieces.mjs all",
     "patimport:f6b": "node scripts/pattern-import/f6b.mjs",
     "patimport:f15": "node scripts/pattern-import/f15.mjs",
     "patimport:ai": "node scripts/pattern-import/ai.mjs",
