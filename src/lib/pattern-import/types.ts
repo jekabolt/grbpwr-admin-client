@@ -1043,7 +1043,9 @@ export type GateCheckId =
   | 'G10-uni'
   | 'G11-grammar'
   | 'G12-pair'
-  | 'G13-manifest';
+  | 'G13-manifest'
+  /** MF-B preflight: the 999 manifest prologue is larger than `manifestPrologueWarnBytes` (warn). */
+  | 'G14-prologue';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1107,8 +1109,14 @@ export type GateExpectation = {
   manifest: ConversionManifest;
   /** Card size tokens (for G9 via deriveBlockSizes) — the card's `has(token)`. */
   sizeTokens: ReadonlySet<string>;
-  /** Walls per block for G3/G4. */
+  /** Source walls per block: G4 measures the written line against them (whole chains are fine). */
   wallsByBlock: Record<string, PtMm[][]>;
+  /**
+   * G3's denominator (M7): the stretches of the walls this block uses, cut at junctions of the
+   * source chain topology — never trimmed by the written line. Absent for a block = its
+   * `wallsByBlock` (a CLO block's walls are its own outline).
+   */
+  coverageWallsByBlock?: Record<string, PtMm[][]>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
@@ -1378,6 +1386,8 @@ export type ImportErrorCode =
   | 'no-session'
   | 'out-of-order'
   | 'crashed'
+  /** MF-B input guards: too many bytes / files / pages / pixels — refused before reading. */
+  | 'too-large'
   | 'internal';
 
 export type ImportWorkerRequest =
@@ -1504,4 +1514,14 @@ export const PATIMPORT = {
   squareTolMm: 0.1,
   aiAutoAcceptInitial: 0.85,
   manifestLineMax: 200,
+  /** Writer preflight (M1): a 999 prologue above this warns in the gate report (G14). */
+  manifestPrologueWarnBytes: 48 * 1024,
+  /** G3 (M7): a contiguous stretch of source wall off the written line this long blocks. */
+  coverageGapMm: 10,
+  // Input guards (M6), checked before anything is read; the worker re-checks.
+  maxInputBytes: 150 * 1024 * 1024,
+  maxInputFiles: 40,
+  maxPdfPages: 200,
+  /** Pixels of one raster page / image (RGBA decode ≈ 4 B per pixel in the worker). */
+  maxRasterPixels: 100_000_000,
 } as const;

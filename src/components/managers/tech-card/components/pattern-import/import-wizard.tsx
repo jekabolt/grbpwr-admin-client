@@ -326,7 +326,11 @@ function WizardBody({
                   </CalloutBox>
                 )}
                 {session.error ? (
-                  <StageMessage code={api.errorCode} message={session.error} />
+                  <StageMessage
+                    code={api.errorCode}
+                    message={session.error}
+                    onReport={api.downloadReport}
+                  />
                 ) : blocker ? (
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}
@@ -374,7 +378,15 @@ function WizardBody({
  * The footer's word on a failed request. A stage that is not built yet is not a failure of the
  * file: it reads as a note (where the import stops today), not as red. A stop is the operator's own.
  */
-function StageMessage({ code, message }: { code: string | null; message: string }) {
+function StageMessage({
+  code,
+  message,
+  onReport,
+}: {
+  code: string | null;
+  message: string;
+  onReport: () => void;
+}) {
   if (code === 'stage-unavailable')
     return (
       <CalloutBox tone='note' className='py-1'>
@@ -398,12 +410,28 @@ function StageMessage({ code, message }: { code: string | null; message: string 
           ? 'the importer stopped'
           : code === 'no-session'
             ? 'the run was lost'
-            : 'stage failed';
+            : code === 'too-large'
+              ? 'too large to import'
+              : 'stage failed';
   return (
     <CalloutBox tone='error' className='py-1'>
-      <Text size='micro' component='p'>
-        <b>! {head}:</b> {message}
-      </Text>
+      <div className='flex items-start justify-between gap-3'>
+        <Text size='micro' component='p'>
+          <b>! {head}:</b> {message}
+        </Text>
+        {/* a refusal of the file's size is not a defect: nothing to report */}
+        {code !== 'too-large' && (
+          <Button
+            variant='underline'
+            size='xs'
+            className='shrink-0 whitespace-nowrap'
+            title='saves a JSON file: versions, file names, sizes and checksums, the failed stage, the gate and your answers; never the files themselves'
+            onClick={onReport}
+          >
+            download report
+          </Button>
+        )}
+      </div>
     </CalloutBox>
   );
 }

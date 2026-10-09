@@ -59,7 +59,11 @@ const has = (u: Uint8Array, sig: number[], at = 0) =>
  * ZIP64 locator honoured when the 32-bit fields are saturated). null = not a parseable ZIP.
  * Reads at most `max` names; never inflates anything.
  */
-export function zipEntryNames(u: Uint8Array, max = 5000): string[] | null {
+/** Zip-bomb guard for the listing (M6): at most this many names / central-directory bytes are read. */
+export const ZIP_MAX_ENTRIES = 5000;
+export const ZIP_MAX_DIRECTORY_BYTES = 4 * 1024 * 1024;
+
+export function zipEntryNames(u: Uint8Array, max = ZIP_MAX_ENTRIES): string[] | null {
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
   let eocd = -1;
   for (let i = u.length - 22; i >= Math.max(0, u.length - 22 - 0xffff); i--) {
@@ -81,10 +85,13 @@ export function zipEntryNames(u: Uint8Array, max = 5000): string[] | null {
       }
     }
   }
+  if (!(cdOff >= 0 && cdOff < u.length)) return null;
   const names: string[] = [];
   const dec = new TextDecoder('utf-8');
   let p = cdOff;
-  for (let k = 0; k < count && names.length < max; k++) {
+  // A forged count / directory (a zip bomb's listing) cannot make this walk more than the caps.
+  const stop = Math.min(u.length, cdOff + ZIP_MAX_DIRECTORY_BYTES);
+  for (let k = 0; k < count && names.length < Math.min(max, ZIP_MAX_ENTRIES) && p < stop; k++) {
     if (p + 46 > u.length || !has(u, [0x50, 0x4b, 0x01, 0x02], p)) break;
     const nLen = dv.getUint16(p + 28, true);
     const xLen = dv.getUint16(p + 30, true);

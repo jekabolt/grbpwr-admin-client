@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import type { ConversionManifest, ManifestBlock, ManifestPiece } from 'lib/pattern-import/types';
 import {
   embedManifest,
+  embedManifestAs,
+  MANIFEST_MAX_JSON_BYTES,
   readManifest,
   readManifestBytes,
   trustedSheetOf,
@@ -313,49 +315,109 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       false,
       isDeepStrictEqual(readManifestBytes(enc(text).slice().buffer as ArrayBuffer), m),
     );
-    const lines = text.split('\n');
-    const tagged = lines.filter((l) => l.startsWith('GRBPWR-MANIFEST '));
-    const firstSection = lines.indexOf('SECTION');
-    const allLead = tagged.every((l) => lines.indexOf(l) < firstSection);
-    check(
-      'manifest: chunked ≤ 200 base64 chars per 999 line, all before the first SECTION, 1-based i/n',
-      false,
-      tagged.length > 1 &&
-        allLead &&
-        tagged.every((l, i) => {
-          const mm = /^GRBPWR-MANIFEST v1 (\d+)\/(\d+) (\S*)$/.exec(l);
-          return (
-            !!mm &&
-            Number(mm[1]) === i + 1 &&
-            Number(mm[2]) === tagged.length &&
-            mm[3].length <= 200
-          );
-        }) &&
-        lines.every((l, i) => !l.startsWith('GRBPWR-MANIFEST ') || lines[i - 1] === '999'),
-      { n: tagged.length },
-    );
-
-    const corrupt = text.replace(
-      /(GRBPWR-MANIFEST v1 2\/\d+ )(.)/,
-      (_x, a, c) => a + (c === '*' ? 'A' : '*'),
-    );
-    check(
-      'manifest: a corrupt chunk throws (corrupt), never null',
-      false,
-      throwsCode(() => readManifest(corrupt), 'corrupt'),
-    );
-    const partial = text.replace(/999\nGRBPWR-MANIFEST v1 2\/\d+ [^\n]*\n/, '');
-    check(
-      'manifest: a missing chunk throws (partial)',
-      false,
-      throwsCode(() => readManifest(partial), 'partial'),
-    );
-    const v2line = text.replace(/GRBPWR-MANIFEST v1 /g, 'GRBPWR-MANIFEST v2 ');
-    check(
-      'manifest: an unknown line version throws (version)',
-      false,
-      throwsCode(() => readManifest(v2line), 'version'),
-    );
+    // Both line forms: v1z (deflate-raw, what the writer emits since MF-B) and v1 (plain, files
+    // written before it — the reader must keep accepting them).
+    let tagged: string[] = [];
+    let corrupt = '';
+    for (const form of ['v1z', 'v1'] as const) {
+      const t = embedManifestAs(legacy, m, form);
+      const lines = t.split('\n');
+      const tg = lines.filter((l) => l.startsWith('GRBPWR-MANIFEST '));
+      if (form === 'v1z') tagged = tg;
+      const firstSection = lines.indexOf('SECTION');
+      const allLead = tg.every((l) => lines.indexOf(l) < firstSection);
+      const LINE_RE =
+        form === 'v1z'
+          ? /^GRBPWR-MANIFEST v1z (\d+)\/(\d+) (\S*)$/
+          : /^GRBPWR-MANIFEST v1 (\d+)\/(\d+) (\S*)$/;
+      check(
+        `manifest ${form}: chunked ≤ 200 base64 chars per 999 line, all before the first SECTION, 1-based i/n`,
+        false,
+        tg.length >= 1 &&
+          allLead &&
+          tg.every((l, i) => {
+            const mm = LINE_RE.exec(l);
+            return (
+              !!mm && Number(mm[1]) === i + 1 && Number(mm[2]) === tg.length && mm[3].length <= 200
+            );
+          }) &&
+          lines.every((l, i) => !l.startsWith('GRBPWR-MANIFEST ') || lines[i - 1] === '999'),
+        { n: tg.length },
+      );
+      check(
+        `manifest ${form}: embed → read round-trips deep-equal (text and bytes)`,
+        false,
+        isDeepStrictEqual(readManifest(t), m) &&
+          isDeepStrictEqual(readManifestBytes(enc(t).slice().buffer as ArrayBuffer), m),
+      );
+      const bad = t.replace(
+        new RegExp(`(GRBPWR-MANIFEST ${form} 1\\/\\d+ )(.)`),
+        (_x, a, c) => a + (c === '*' ? 'A' : '*'),
+      );
+      if (form === 'v1z') corrupt = bad;
+      check(
+        `manifest ${form}: a corrupt chunk throws (corrupt), never null`,
+        false,
+        bad !== t && throwsCode(() => readManifest(bad), 'corrupt'),
+      );
+      if (tg.length > 1) {
+        const partial = t.replace(
+          new RegExp(`999\\nGRBPWR-MANIFEST ${form} 2\\/\\d+ [^\\n]*\\n`),
+          '',
+        );
+        check(
+          `manifest ${form}: a missing chunk throws (partial)`,
+          false,
+          throwsCode(() => readManifest(partial), 'partial'),
+        );
+      }
+      const v2line = t.replace(
+        new RegExp(`GRBPWR-MANIFEST ${form} `, 'g'),
+        `GRBPWR-MANIFEST ${form.replace('1', '2')} `,
+      );
+      check(
+        `manifest ${form}: an unknown line version throws (version)`,
+        false,
+        throwsCode(() => readManifest(v2line), 'version'),
+      );
+    }
+    {
+      const z = embedManifestAs(legacy, m, 'v1z');
+      const plain = embedManifestAs(legacy, m, 'v1');
+      check(
+        'manifest v1z: at least 3× smaller than the plain form',
+        false,
+        (plain.length - legacy.length) / (z.length - legacy.length) >= 3,
+        { plain: plain.length - legacy.length, z: z.length - legacy.length },
+      );
+      // one v1 line spliced into a v1z prologue
+      const zl = z.split('\n');
+      const pl = plain.split('\n');
+      const mixed = [zl[0], pl[1], ...zl.slice(2)].join('\n');
+      check(
+        'manifest: v1 and v1z lines mixed in one file throw (corrupt)',
+        false,
+        throwsCode(() => readManifest(mixed), 'corrupt'),
+      );
+      // a deflate bomb: 64 MB of zeros compress to ~64 KB; the reader stops at its cap
+      const { deflateSync } = await import('fflate');
+      const bomb = deflateSync(new Uint8Array(16 * MANIFEST_MAX_JSON_BYTES), { level: 9 });
+      let bin = '';
+      for (let i = 0; i < bomb.length; i += 0x8000)
+        bin += String.fromCharCode(...bomb.subarray(i, i + 0x8000));
+      const b = btoa(bin);
+      const chunks = b.match(/.{1,200}/g) ?? [];
+      const bombText =
+        chunks.map((c, i) => `999\nGRBPWR-MANIFEST v1z ${i + 1}/${chunks.length} ${c}\n`).join('') +
+        legacy;
+      const t0 = Date.now();
+      check(
+        'manifest v1z: a deflate bomb is refused (corrupt) without inflating it all',
+        false,
+        throwsCode(() => readManifest(bombText), 'corrupt') && Date.now() - t0 < 5000,
+        { ms: Date.now() - t0 },
+      );
+    }
     const b64 = (o: unknown) =>
       btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(o))));
     const raw = (o: unknown) => `999\nGRBPWR-MANIFEST v1 1/1 ${b64(o)}\n${legacy}`;

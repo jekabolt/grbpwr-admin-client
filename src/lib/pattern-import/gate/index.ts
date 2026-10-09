@@ -26,6 +26,7 @@ import { applyAffine, bboxOf } from '../write/geom';
 import { type WriteDetail, writeDxfDetailed } from '../write';
 import {
   embedManifest as embedManifestLocal,
+  manifestPrologueBytes,
   readManifest as readManifestLocal,
 } from '../manifest';
 import { LAYERS } from '../write/manifest-build';
@@ -220,7 +221,13 @@ export function wallsByBlockFor(
 export type WriteAndGateCtx = {
   rules: CardBlockRules;
   sizeTokens: ReadonlySet<string>;
+  /** Source walls (whole chains are fine): G4 measures the written line against them. */
   wallsOf?: (sourceIdentity: string, rank: number) => PtMm[][] | undefined;
+  /**
+   * The stretches of those walls the piece uses (G3's denominator, M7 — cut by source topology,
+   * see worker/walls-used.ts). Absent = `wallsOf`.
+   */
+  wallsUsedOf?: (sourceIdentity: string, rank: number) => PtMm[][] | undefined;
   overview?: GateExpectation['overview'];
   /** Vector 0.3 (default) / raster 0.5. */
   hausdorffP95Mm?: number;
@@ -247,12 +254,32 @@ export async function writeAndGate(
     manifest: m0,
     sizeTokens: ctx.sizeTokens,
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
+    coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
   };
   const report = await createRunGate(ctx.rules, { read })(text0, expect);
   let m1 = { ...m0, gate: report };
   let text1 = embed(detail.bareText, m1);
+  // Preflight (M1): the manifest rides in front of `0 / SECTION`; a sniffer with a bounded head
+  // window (the backend's was 64 KB) would refuse the upload as "not a DXF". Compressed manifests
+  // keep even a 138-block sheet near 10 KB; a prologue past the limit is reported, never blocked —
+  // the file is still a valid DXF, the warning names the risk.
+  const prologue = manifestPrologueBytes(text1);
+  if (prologue > PATIMPORT.manifestPrologueWarnBytes) {
+    report.checks.push({
+      id: 'G14-prologue',
+      ok: false,
+      severity: 'warn',
+      value: prologue,
+      threshold: `≤ ${PATIMPORT.manifestPrologueWarnBytes} bytes`,
+      blocks: [],
+      note: `the manifest in front of the drawing is ${(prologue / 1024).toFixed(1)} KB (limit ${PATIMPORT.manifestPrologueWarnBytes / 1024} KB); an upload sniffer with a short head window may refuse the file`,
+    });
+    report.passed = passedOf(report.checks);
+    m1 = { ...m0, gate: report };
+    text1 = embed(detail.bareText, m1);
+  }
   // Re-read what will actually be uploaded: the report must be IN the file (G13 "gate filled").
   // The other G13 invariants already ran inside runGate; this adds only the post-embed half.
   let final: GateCheck = {

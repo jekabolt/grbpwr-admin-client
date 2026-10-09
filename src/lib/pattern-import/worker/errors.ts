@@ -52,6 +52,9 @@ export function toWireError(
           : 'corrupt',
       message: e.message,
     };
+  // adapters cannot import ImportError (worker graph): a size guard there names its error
+  if (e instanceof Error && e.name === 'InputTooLarge')
+    return { code: 'too-large', message: e.message };
   if (e instanceof RangeError && /memory|allocation|Array buffer/i.test(e.message))
     return {
       code: 'crashed',

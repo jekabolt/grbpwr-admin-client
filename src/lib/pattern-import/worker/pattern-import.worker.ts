@@ -15,6 +15,7 @@ import { buffersOf } from './preview';
 import { Session } from './session';
 import { setPdfjsLoader } from '../adapters/pdf';
 import { setRasterPdfjsLoader } from '../adapters/raster';
+import { guardPdfjs } from './pdf-guard';
 
 // pdf.js runs IN this worker, not in a nested one: we are already off the main thread, and a
 // nested worker would hold a second copy of every PDF it parses. pdf.js takes its in-thread
@@ -28,8 +29,10 @@ const loadPdfjsInThread = async () => {
   (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = handler;
   return pdfjs;
 };
-setPdfjsLoader(loadPdfjsInThread);
-setRasterPdfjsLoader(loadPdfjsInThread);
+// Both adapters get the guarded module (M6, pdf-guard.ts): page cap, no eval, image size cap.
+const loadGuarded = () => loadPdfjsInThread().then((m) => guardPdfjs(m));
+setPdfjsLoader(loadGuarded);
+setRasterPdfjsLoader(loadGuarded);
 
 const scope = self as unknown as {
   postMessage: (m: WorkerMessage, transfer?: Transferable[]) => void;

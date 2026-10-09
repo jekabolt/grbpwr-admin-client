@@ -824,5 +824,32 @@ async function gunzip(u: Uint8Array): Promise<Uint8Array> {
   ).DecompressionStream;
   if (!DS) throw new UnsupportedFormat('svgz-unsupported');
   const stream = new Blob([u]).stream().pipeThrough(new DS('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  // Gzip-bomb guard (M6): stop inflating past SVGZ_MAX_BYTES instead of filling the worker.
+  const reader = stream.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > SVGZ_MAX_BYTES) {
+      void reader.cancel();
+      const e = new Error(
+        `the compressed SVG inflates past ${SVGZ_MAX_BYTES / 1048576} MB; export it as a plain SVG of the pattern pieces only`,
+      );
+      e.name = 'InputTooLarge';
+      throw e;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }
+
+/** Largest inflated .svgz the importer accepts. */
+export const SVGZ_MAX_BYTES = 64 * 1024 * 1024;

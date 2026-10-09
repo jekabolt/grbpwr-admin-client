@@ -31,6 +31,7 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G11-grammar': { what: 'block names pass the grammar', fix: 'meaning' },
   'G12-pair': { what: '_R mirrors _L', fix: 'meaning' },
   'G13-manifest': { what: 'manifest complete', fix: 'fabrics' },
+  'G14-prologue': { what: 'manifest fits in front of the drawing', fix: null },
 };
 
 export function CheckStep({ api }: { api: ImportSessionApi }) {
@@ -99,6 +100,17 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
                   {blocking().length} blocking · {warns.length}{' '}
                   {warns.length === 1 ? 'warning' : 'warnings'} · {report.durationMs} ms
                 </Text>
+                {!report.passed && (
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='ml-auto whitespace-nowrap text-labelColor hover:text-textColor'
+                    title='saves a JSON file: versions, file names, sizes and checksums, the gate and your answers; never the files themselves'
+                    onClick={api.downloadReport}
+                  >
+                    download report
+                  </Button>
+                )}
               </div>
               <DataTable>
                 <thead>
