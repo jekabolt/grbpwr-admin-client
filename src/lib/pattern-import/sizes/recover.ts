@@ -541,7 +541,32 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     for (let i = 0; i < chains.length; i++)
       if (cand[i] && looks.look[i] >= 0 && sizeLook[looks.look[i]] && !notSize.has(i))
         sizeCand[i] = true;
-  const xsB = crossSections(chains, sizeCand, blockers).sections;
+  // lane spacing: plus-size runs (reef XS–5XL) grade 10–25 mm per size on long seams; a fixed
+  // 12 mm reach leaves those lines alone and they read as shared. Measure the spacing between
+  // neighbouring lanes of different identity and reach 1.5× its upper quartile (12…30 mm).
+  let sepMm = BUNDLE.maxSepMm;
+  {
+    const wide = crossSections(chains, sizeCand, blockers, 40).sections;
+    const gaps: number[] = [];
+    for (const x of wide)
+      for (let k = 1; k < x.lanes.length; k++) {
+        const a = majorityUnit(x.lanes[k - 1], unit, chains);
+        const b = majorityUnit(x.lanes[k], unit, chains);
+        if (a >= 0 && b >= 0 && a !== b) gaps.push(x.offsets[k] - x.offsets[k - 1]);
+      }
+    gaps.sort((a, b) => a - b);
+    if (gaps.length >= 50) {
+      const q75 = gaps[Math.floor(0.75 * (gaps.length - 1))];
+      sepMm = Math.min(30, Math.max(BUNDLE.maxSepMm, 1.5 * q75));
+    }
+    diag.laneSpacing = {
+      n: gaps.length,
+      median: gaps.length ? +gaps[gaps.length >> 1].toFixed(1) : null,
+      q75: gaps.length ? +gaps[Math.floor(0.75 * (gaps.length - 1))].toFixed(1) : null,
+      reachMm: +sepMm.toFixed(1),
+    };
+  }
+  const xsB = crossSections(chains, sizeCand, blockers, sepMm).sections;
   const laneUnit = (lane: number[]) => majorityUnit(lane, unit, chains);
   const laneHist = new Map<number, number>();
   for (const x of xsB) laneHist.set(x.lanes.length, (laneHist.get(x.lanes.length) ?? 0) + 1);
@@ -1355,7 +1380,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (nb.some((c) => rankOf.has(c))) for (const c of ln) besideRanked.add(c);
     });
   }
-  splitShared(chains, rankOf, sharedFrom, landings, sectioned);
+  splitShared(chains, rankOf, sharedFrom, landings, sectioned, sepMm);
   diag.bridges = joined.size;
   diag.landings = landings.length;
 
@@ -1908,6 +1933,7 @@ function splitShared(
   sharedFrom: Map<number, number>,
   landings: Landing[],
   sectioned: Set<number>,
+  sepMm = BUNDLE.maxSepMm,
 ): void {
   const ids = [...rankOf.keys()];
   const rank0 = new Map(rankOf);
@@ -1948,11 +1974,11 @@ function splitShared(
     if (smp.length < 4) continue;
     const accompanied = smp.map((s) => {
       let hit = false;
-      grid.near(s.p, 1.4 * BUNDLE.maxSepMm, (j, si) => {
+      grid.near(s.p, 1.4 * sepMm, (j, si) => {
         if (hit || j === i || rank0.get(j) === r) return;
         const pj = poly.get(j)!;
         const q = segNearest(s.p, pj[si], pj[si + 1]);
-        if (q.d <= 1.4 * BUNDLE.maxSepMm) {
+        if (q.d <= 1.4 * sepMm) {
           const a = pj[si];
           const b = pj[si + 1];
           const L = dist(a, b) || 1;

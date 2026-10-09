@@ -17,6 +17,7 @@ import { extractRasterPdfDetailed, setRasterPdfjsLoader } from 'lib/pattern-impo
 import { buildChainsDetailed, rankOfClass } from 'lib/pattern-import/chains/build';
 import { makeChains } from 'lib/pattern-import/chains/make';
 import { describeSig } from 'lib/pattern-import/chains/motif';
+import { resample, SegGrid } from 'lib/pattern-import/chains/geom';
 import type { BoxMm, ChainSet, IRPath, PtMm, Sheet, SourceDoc } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
@@ -603,6 +604,93 @@ function rankByOp(sheet: Sheet, set: ChainSet): Map<string, number> {
   return out;
 }
 
+/**
+ * Shared-line false positives (proxy, no per-line truth). A stretch split off as shared ("drawn
+ * once in one size's style, used by all") must sit where the sizes have converged. Two ways it is
+ * a size line misread as shared:
+ *  - inside a group: parallel line work on BOTH sides within `reachMm` (2.5 × the median spacing
+ *    between neighbouring sizes), a size / shared line on at least one side, along ≥ half its length;
+ *  - in a ladder: graded ends of a band (reef's hem bands, one end per size 50 mm apart) — on both
+ *    sides within 60 mm a parallel size / shared chain of similar length (±30 %), along ≥ 60 %.
+ */
+export function sharedFalsePositives(set: ChainSet, reachMm: number) {
+  const sizeIds = new Set<number>();
+  for (const c of set.classes) if (c.role === 'size') for (const id of c.chains) sizeIds.add(id);
+  const grid = new SegGrid(8);
+  const shared = set.classes
+    .filter((c) => c.role === 'common' && c.evidence.length)
+    .flatMap((c) => c.chains)
+    .filter((id) => set.chains[id].lengthMm >= 30);
+  // neighbours: every line work chain — in a misread group the other sizes may be shared too
+  const lineWork = set.classes
+    .filter((c) => c.role !== 'ignore' && c.role !== 'notch')
+    .flatMap((c) => c.chains)
+    .concat(set.orphans)
+    .filter((id) => set.chains[id].lengthMm >= 20);
+  for (const id of lineWork) grid.addPolyline(id, set.chains[id].pts);
+  const sizeSet = new Set([...sizeIds, ...shared]);
+  /** Nearest parallel chain crossed by the ray p + u·n, u ∈ (0.25, reach]. */
+  const firstHit = (self: number, p: PtMm, n: PtMm, t: PtMm, reach: number) => {
+    let best = -1;
+    let bu = Infinity;
+    const mid = { x: p.x + (n.x * reach) / 2, y: p.y + (n.y * reach) / 2 };
+    grid.near(mid, reach / 2 + 1, (j, si) => {
+      if (j === self) return;
+      const a = set.chains[j].pts[si];
+      const b = set.chains[j].pts[si + 1];
+      const sx = b.x - a.x;
+      const sy = b.y - a.y;
+      const den = n.x * sy - n.y * sx;
+      if (Math.abs(den) < 1e-12) return;
+      const qx = a.x - p.x;
+      const qy = a.y - p.y;
+      const u = (qx * sy - qy * sx) / den;
+      const v = (qx * n.y - qy * n.x) / den;
+      if (v < 0 || v > 1 || u <= 0.25 || u > reach || u >= bu) return;
+      const L = Math.hypot(sx, sy) || 1;
+      if (Math.abs((t.x * sx + t.y * sy) / L) >= 0.8) {
+        best = j;
+        bu = u;
+      }
+    });
+    return best;
+  };
+  const fp: number[] = [];
+  let inGroup = 0;
+  let ladder = 0;
+  for (const id of shared) {
+    const L0 = set.chains[id].lengthMm;
+    const smp = resample(set.chains[id].pts, 5);
+    let both = 0;
+    let rungs = 0;
+    for (const s of smp) {
+      const nrm = { x: -s.t.y, y: s.t.x };
+      const neg = { x: -nrm.x, y: -nrm.y };
+      const a = firstHit(id, s.p, nrm, s.t, reachMm);
+      const b = firstHit(id, s.p, neg, s.t, reachMm);
+      if (a >= 0 && b >= 0 && (sizeSet.has(a) || sizeSet.has(b))) both++;
+      const similar = (j: number) =>
+        j >= 0 && sizeSet.has(j) && Math.abs(set.chains[j].lengthMm - L0) <= 0.3 * L0;
+      if (similar(firstHit(id, s.p, nrm, s.t, 60)) && similar(firstHit(id, s.p, neg, s.t, 60)))
+        rungs++;
+    }
+    const g = smp.length > 0 && both >= 0.5 * smp.length;
+    const l = smp.length > 0 && rungs >= 0.6 * smp.length;
+    if (g) inGroup++;
+    else if (l) ladder++;
+    if (g || l) fp.push(id);
+  }
+  return {
+    shared: shared.length,
+    sharedM: +(shared.reduce((a, i) => a + set.chains[i].lengthMm, 0) / 1000).toFixed(2),
+    falsePositives: fp.length,
+    inGroup,
+    ladder,
+    falsePositiveM: +(fp.reduce((a, i) => a + set.chains[i].lengthMm, 0) / 1000).toFixed(2),
+    reachMm: +reachMm.toFixed(1),
+  };
+}
+
 function summarise(
   id: string,
   set: ChainSet,
@@ -639,6 +727,8 @@ function summarise(
       ? truthList.length === labels.length && truthList.every((l, k) => labels[k] === l)
       : null,
     nonEmptyClasses: sizes.filter((c) => c.chains.length).length,
+    // a class "filled" carries real line work (≥ 0.25 m), not a stray fragment
+    filledClasses: sizes.filter((c) => c.totalLengthMm >= 250).length,
     classes: sizes.map((c) => ({
       rank: rankOfClass(c),
       label: c.sizeLabel,
@@ -652,6 +742,16 @@ function summarise(
     bundlesOfPresentRanks: recover.diag.bundlesOfPresentRanks ?? null,
     unassignedShare: +(orphanLen / Math.max(1, sizeLen + orphanLen)).toFixed(3),
     sharedM: +(shared.reduce((a, c) => a + c.totalLengthMm, 0) / 1000).toFixed(2),
+    // reach: 2.5 × the median spacing between neighbouring sizes (12…35 mm)
+    sharedCheck: sharedFalsePositives(
+      set,
+      // FP_REACH='{"reef":31.8}' replays a reach (comparing against an older build without diag)
+      (JSON.parse(process.env.FP_REACH ?? '{}') as Record<string, number>)[id] ??
+      Math.min(
+        35,
+        Math.max(12, 2.5 * ((recover.diag.laneSpacing as { median?: number } | undefined)?.median ?? 0)),
+      ),
+    ),
     landings: recover.diag.landings,
     bridges: recover.diag.bridges,
     ambiguities: (set.ambiguities ?? []).map((a) => `${a.kind}: ${a.message}`),
@@ -706,7 +806,7 @@ export async function reportMode(ids: string[]) {
     const px = Math.min(0.8, 2400 / Math.max(W, H));
     overlay(set, b, px, resolve(shots, `${id}-classes.png`));
     console.log(
-      `${id}: ${sm.encoding} n=${sm.n} (truth ${sm.truthN}) classes ${sm.nonEmptyClasses}/${sm.n} bundles ${sm.bundles} runs ${sm.gradedRuns} unassigned ${(sm.unassignedShare * 100).toFixed(1)} % labels ${sm.labels.join(',')} ${ms} ms`,
+      `${id}: ${sm.encoding} n=${sm.n} (truth ${sm.truthN}) filled ${sm.filledClasses}/${sm.n} bundles ${sm.bundles} runs ${sm.gradedRuns} unassigned ${(sm.unassignedShare * 100).toFixed(1)} % shared ${sm.sharedCheck.shared} (FP ${sm.sharedCheck.falsePositives}, ${sm.sharedCheck.falsePositiveM} m) labels ${sm.labels.join(',')} ${ms} ms`,
     );
   }
   // zooms the reviewer looks at
