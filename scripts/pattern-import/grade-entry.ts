@@ -19,7 +19,7 @@ import { bboxOfPts, GRADE_TUNING, gradeRanks, type GradeResult } from 'lib/patte
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { nestPairs, portionPts, rankMasks, tracksIn } from 'lib/pattern-import/pieces/grade/choose';
 import { HOOK_DEBUG } from 'lib/pattern-import/pieces/grade/hook';
-import { DEBUG_ORDER, ranksAt } from 'lib/pattern-import/pieces/grade/model';
+import { ranksAt } from 'lib/pattern-import/pieces/grade/model';
 import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
 import type { BoxMm, ChainSet, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -49,8 +49,23 @@ type Bench = {
 
 const SAMPLES = ['robe', 'kombinezon', 'palto', 'reef'];
 const VARIANT: Record<string, string | null> = { kombinezon: 'Style A' };
-/** Pieces whose encoded truth is itself wrong (02-DESIGN §1, §4): kept in the tables, out of the rates. */
-const NOISE: Record<string, string[]> = { kombinezon: ['5', '7'], palto: ['27'] };
+/**
+ * Encoded truth that is itself wrong: kept in the tables, out of the rates AND out of the wrong count
+ * (listed separately). 'label' = the whole piece, 'label/rN' = one rank.
+ *   kombinezon 5, 7  belts drawn ×8: encoded F4 closes one band for every size (02-DESIGN §1, §4)
+ *   palto 27         five lapel lines all rank 0 in the truth (02-DESIGN §1)
+ *   palto 24 r0–r3   H1: encoded F3 classes the largest size's line on the right curve 'common', so
+ *                    every encoded rank's contour follows the OUTERMOST line there (overlay
+ *                    h1/palto-L1-truth-24.png: black curve; h1/debug/palto-L1-walls-24-r2.png)
+ */
+const NOISE: Record<string, string[]> = {
+  kombinezon: ['5', '7'],
+  palto: ['27', '24/r0', '24/r1', '24/r2', '24/r3'],
+};
+const isNoise = (sample: string, label: string, r: number) => {
+  const l = NOISE[sample] ?? [];
+  return l.includes(label) || l.includes(`${label}/r${r}`);
+};
 const ACCEPT_SAMPLES = ['robe', 'kombinezon', 'palto'];
 
 const mk = (d: string) => {
@@ -109,19 +124,20 @@ type Score = {
   correctAcc: number;
   wrongAcc: number;
   wrongList: string[];
+  /** closed contours that differ from truth-noise entries (not counted as wrong; listed) */
+  noiseWrong: string[];
 };
 
 /** C = closed and p95 ≤ 1 mm to the truth contour · W = closed, off · ? = closed, no truth · L/M/t/- = not closed. */
 function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: number) => number = (_, r) => r): Score {
-  const noise = new Set(NOISE[b.sample] ?? []);
-  const sc: Score = { perPiece: {}, closed: 0, correct: 0, wrong: 0, unknown: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [] };
+  const sc: Score = { perPiece: {}, closed: 0, correct: 0, wrong: 0, unknown: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [], noiseWrong: [] };
   const labels = [...new Set(b.seeds.map((s) => seedLabel(s) ?? String(s.id)))];
   for (const label of labels) {
     let row = '';
     for (let r = 0; r < b.n; r++) {
       const g = got.find((x) => x.label === label && x.rank === r);
       const t = b.cands.find((x) => x.label === label && x.rank === truthRank(label, r));
-      const counted = !!t && !noise.has(label);
+      const counted = !!t && !isNoise(b.sample, label, r);
       if (counted) sc.withTruth++;
       if (!g || g.outcome !== 'closed') {
         row += g ? (g.outcome === 'leak' ? (g.refusal ? 'r' : 'L') : g.outcome === 'merged' ? 'M' : 't') : '-';
@@ -159,11 +175,14 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
         row += 'C';
         sc.correct++;
         if (counted) sc.correctAcc++;
-      } else {
+      } else if (counted) {
         row += 'W';
         sc.wrong++;
         sc.wrongList.push(`${label}/r${r}`);
-        if (counted) sc.wrongAcc++;
+        sc.wrongAcc++;
+      } else {
+        row += 'n'; // closed, differs from a truth known to be wrong
+        sc.noiseWrong.push(`${label}/r${r}`);
       }
     }
     sc.perPiece[label] = row;
@@ -287,6 +306,7 @@ function printRow(r: RunRow) {
   if (r.diag) console.log(`      step0 ${r.diag.step0} reach ${r.diag.reach.toFixed(0)} tracks ${r.diag.tracks} full ${r.diag.fullTuples} parity ${r.diag.parityConflicts} lane ${r.diag.laneConflicts} bandMode ${r.diag.bandMode}`);
   for (const [k, v] of Object.entries(s.perPiece)) console.log(`      ${k.padEnd(6)} ${v.padEnd(10)} ${r.reasons[k] ?? ''}`);
   if (s.wrongList.length) console.log(`      wrong: ${s.wrongList.join(' ')}`);
+  if (s.noiseWrong.length) console.log(`      differs from truth-noise: ${s.noiseWrong.join(' ')}`);
 }
 
 // ── overlays ─────────────────────────────────────────────────────────────────────────────────
@@ -382,6 +402,9 @@ function baseline(rest: string[]): RunRow[] {
   return rows;
 }
 
+/** families of the last solve per sample/level (controls reuse them for the shuffled truth) */
+const SOLVED = new Map<string, PieceFamily[]>();
+
 function solve(rest: string[]): RunRow[] {
   const rows: RunRow[] = [];
   const zi = rest.indexOf('--zoom');
@@ -390,6 +413,7 @@ function solve(rest: string[]): RunRow[] {
     for (const id of samplesOf(rest)) {
       const b = loadBench(id, L);
       const f = runFill(b, 'solve');
+      SOLVED.set(`${id}-${L}`, f.families);
       const row = summarize(b, 'solve', f.families, f.diag, f.ms, b.n);
       printRow(row);
       rows.push(row);
@@ -412,8 +436,8 @@ function controls(rest: string[]) {
         out.push(row);
       }
       // shuffled truth: rescore the real run against permuted rank labels
-      const f = runFill(b, 'solve');
-      const got = gotOf(b, f.families);
+      const fam = SOLVED.get(`${id}-${L}`) ?? runFill(b, 'solve').families;
+      const got = gotOf(b, fam);
       const real = scoreContours(b, got);
       const perm = (label: string, r: number) => {
         // a fixed derangement per piece: reverse, and rotate by one when the middle would stay
@@ -503,7 +527,6 @@ function walls(rest: string[]) {
   const { set } = chainsOf(b, b.n);
   const v = VARIANT[id] ?? null;
   const seeds = b.seeds.filter((s) => !v || !s.variant || s.variant === v);
-  DEBUG_ORDER.on = rest.includes('--order');
   const G = gradeRanks(b.sheet, set, seeds, b.n, { cellMm: PATIMPORT.fillCellMm, keepModel: true, log: (x) => console.log(x) });
   const M = G.model!;
   const dir = mk(resolve(OUT, 'debug'));
@@ -611,7 +634,6 @@ function walls(rest: string[]) {
 
 export async function main(argv: string[]) {
   const [mode = 'all', ...rest] = argv;
-  if (process.env.GRADE_NO_ORDER) GRADE_TUNING.orderCheck = false;
   if (process.env.HOOK_DEBUG) HOOK_DEBUG.on = true;
   if (process.env.GRADE_ONE_READING) GRADE_TUNING.twoReadings = false;
   if (mode === 'baseline') baseline(rest);

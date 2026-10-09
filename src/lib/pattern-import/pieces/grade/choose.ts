@@ -84,6 +84,7 @@ export function fillRank(
   r: number,
   seed: PtMm,
   knives: readonly PtMm[][] = [],
+  carriers: readonly PtMm[][] = [],
 ): FillRes {
   const g = new Grid(box, cellMm);
   const wall = new Uint8Array(g.W * g.H);
@@ -95,19 +96,29 @@ export function fillRank(
   const { mask, area } = regionOf(g, ext, k0);
   const a = area * g.cell * g.cell;
   if (!knives.length) return { closed: true, area: a, cutArea: a, knifeIncomplete: false };
-  const kn = new Uint8Array(mask.length);
-  for (const k of knives) drawPolyline(g, kn, k);
-  let hit = 0;
-  for (let j = 0; j < mask.length; j++) if (mask[j] && kn[j]) hit++;
-  if (!hit) return { closed: true, area: a, cutArea: a, knifeIncomplete: false };
-  if (kn[k0]) return { closed: true, area: a, cutArea: a, knifeIncomplete: true };
-  const blocked = new Uint8Array(mask.length);
-  for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
-  const cut = new Uint8Array(mask.length);
-  const c = flood(g, blocked, [k0], cut);
-  // the flood went round the knife's end: nothing was cut off
-  const incomplete = c >= area - hit - 4;
-  return { closed: true, area: a, cutArea: c * g.cell * g.cell, knifeIncomplete: incomplete };
+  const cutBy = (lines: readonly PtMm[][]) => {
+    const kn = new Uint8Array(mask.length);
+    for (const k of lines) drawPolyline(g, kn, k);
+    let hit = 0;
+    for (let j = 0; j < mask.length; j++) if (mask[j] && kn[j]) hit++;
+    if (!hit) return { hit, count: area, cuts: false, onSeed: false };
+    if (kn[k0]) return { hit, count: area, cuts: false, onSeed: true };
+    const blocked = new Uint8Array(mask.length);
+    for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
+    const cut = new Uint8Array(mask.length);
+    const c = flood(g, blocked, [k0], cut);
+    // the flood went round the knife's end: nothing was cut off
+    return { hit, count: c, cuts: c < area - hit - 4, onSeed: false };
+  };
+  const k1 = cutBy(knives);
+  let incomplete = k1.onSeed || (k1.hit > 0 && !k1.cuts);
+  if (!incomplete && carriers.length) {
+    // the knife's whole cutting line (its collinear pieces, cut apart at crossings) would cut
+    // this region where the knife alone does not: F4's contour will miss the cut
+    const k2 = cutBy([...knives, ...carriers]);
+    if (k2.onSeed || (k2.cuts && (!k1.cuts || Math.abs(k2.count - k1.count) > 0.002 * area))) incomplete = true;
+  }
+  return { closed: true, area: a, cutArea: k1.cuts ? k1.count * g.cell * g.cell : a, knifeIncomplete: incomplete };
 }
 
 /** Rank regions (masks) of one combination. */

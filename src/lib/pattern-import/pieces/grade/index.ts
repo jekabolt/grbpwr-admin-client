@@ -31,14 +31,14 @@ import {
   type PortionPts,
   type SeedSolve,
 } from './choose';
-import { buildModel, maskOrderConflicts, trackPortions, type GradeModel, type ModelOpts } from './model';
+import { buildModel, trackPortions, type GradeModel, type ModelOpts } from './model';
 import { chainSpans } from './tracks';
 import { bboxOfPts, growBox, median, unionBox } from './vec';
 
 export { detectUnencodedGrading, type GuardOpts } from './guard';
 
 /** Module-level switches (probes flip them to measure each guard; production keeps the defaults). */
-export const GRADE_TUNING = { orderCheck: false, twoReadings: true };
+export const GRADE_TUNING = { twoReadings: true };
 
 export type GradeRefusal = NonNullable<PieceCandidate['gradeRefusal']>;
 
@@ -113,8 +113,8 @@ export type GradeOpts = {
   keepModel?: boolean;
   /** the variant's cutting lines (F4 knives): the final region is cut along them */
   knives?: PtMm[][];
-  /** mask cross-sections that contradict the grade order (default GRADE_TUNING) */
-  orderCheck?: boolean;
+  /** the rest of each knife's cutting line (collinear pieces F4 does not cut with) */
+  knifeCarriers?: PtMm[][];
   /** trust a rank only where a second, perturbed reading agrees (default GRADE_TUNING) */
   twoReadings?: boolean;
 };
@@ -125,20 +125,6 @@ export type GradeOpts = {
  * foreign line closing a rank breaks exactly this.
  */
 export function familyCheck(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
-  const f = familyCheck1(areas);
-  if (f.ok) return f;
-  // an end rank whose region is off (it closed on another line) — the rest may still be one
-  // even grade; that rank is then refused, the others kept
-  const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
-  for (const drop of [closed[0], closed[closed.length - 1]]) {
-    if (drop == null) continue;
-    const g = familyCheck1(areas.map((a, r) => (r === drop ? -1 : a)));
-    if (g.ok) return g;
-  }
-  return f;
-}
-
-function familyCheck1(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
   const n = areas.length;
   const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
   const leaks = areas.map((a, r) => (a < 0 ? r : -1)).filter((r) => r >= 0);
@@ -277,7 +263,7 @@ export function gradeRanks(
 ): GradeResult {
   const t0 = Date.now();
   const base = gradeOnce(sheet, set, seeds, n, opts, BASE_READING, progress);
-  if (!(opts.twoReadings ?? GRADE_TUNING.twoReadings)) return base;
+  if (!(opts.twoReadings ?? GRADE_TUNING.twoReadings) || base.diag.bandMode !== n) return base;
   const alt = gradeOnce(sheet, set, seeds, n, { ...opts, keepModel: false }, ALT_READING);
   const other = new Map(alt.seeds.map((x) => [x.seed, x]));
   for (const s of base.seeds) {
@@ -321,6 +307,44 @@ function gradeOnce(
       bw = v;
       bandMode = k;
     }
+  const diag = () => ({
+    step0: M.step0,
+    reach: M.reach,
+    tracks: M.tracks.length,
+    fullTuples: M.fullTuples,
+    parityConflicts: M.parityConflicts,
+    laneConflicts: M.laneConflicts,
+    bandMode,
+    ms: Date.now() - t0,
+  });
+  // the size count must be what the drawing shows side by side most often (§5.6): otherwise no
+  // cross-section is full, ranks mean nothing — ask, never guess
+  if (bandMode !== n) {
+    const message = `the drawing shows ${bandMode} lines side by side, the size run says ${n}`;
+    return {
+      n,
+      portions: [],
+      components: M.nComps,
+      bits: new Array(M.nComps).fill(0),
+      seeds: seeds.map((sd) => ({
+        seed: sd.id,
+        components: [],
+        chosen: null,
+        alternatives: [],
+        ambiguous: false,
+        accepted: false,
+        refusal: 'size-count' as const,
+        areasMm2: new Array(n).fill(-1),
+        finalAreasMm2: new Array(n).fill(-1),
+        rankOk: new Array(n).fill(false),
+        box: { minX: sd.at.x, minY: sd.at.y, maxX: sd.at.x, maxY: sd.at.y },
+        reason: message,
+      })),
+      ambiguities: [{ kind: 'size-count', message, classes: [], chains: [], at: null }],
+      diag: diag(),
+      ...(opts.keepModel ? { model: M } : {}),
+    };
+  }
   const o = { cellMm: opts.cellMm, maxFree: opts.maxFree ?? 8 };
   const solves: (SeedSolve | null)[] = [];
   seeds.forEach((sd, i) => {
@@ -360,12 +384,10 @@ function gradeOnce(
     }
     if (!moved) break;
   }
-  // no wall where a cross-section contradicts the grade order under the chosen bits
-  const conflicts = (opts.orderCheck ?? GRADE_TUNING.orderCheck) ? maskOrderConflicts(M, bits) : 0;
-  log(`  order conflicts: ${conflicts} lane samples masked`);
   const results: GradeSeedResult[] = [];
   const ambiguities: ChainAmbiguity[] = [];
   const knives = opts.knives ?? [];
+  const carriers = opts.knifeCarriers ?? [];
   seeds.forEach((sd, i) => {
     const S = solves[i];
     const none = new Array(n).fill(-1);
@@ -389,7 +411,7 @@ function gradeOnce(
     // the seed's family under the GLOBAL bits (a component shared with another piece may have been
     // decided there): it must be what this seed would choose itself
     const ps = portionPts(M, bits, S.inBox);
-    const fills = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps, r, sd.at, knives));
+    const fills = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps, r, sd.at, knives, carriers));
     const areas = fills.map((f) => f.area);
     const best = S.top[0];
     const g0 = scoreUnder(S, bits).areas; // before the order mask: the seed's own choice?
@@ -420,7 +442,7 @@ function gradeOnce(
         let hit = 0;
         for (let r = 0; r < n; r++) {
           if (!rankOk[r]) continue;
-          const f2 = fillRank(S.box, opts.cellMm, ps2, r, sd.at, knives);
+          const f2 = fillRank(S.box, opts.cellMm, ps2, r, sd.at, knives, carriers);
           if (!f2.closed || Math.abs(f2.area - areas[r]) > 0.05 * step) {
             rankOk[r] = false;
             hit++;
@@ -475,16 +497,7 @@ function gradeOnce(
     bits,
     seeds: results,
     ambiguities,
-    diag: {
-      step0: M.step0,
-      reach: M.reach,
-      tracks: M.tracks.length,
-      fullTuples: M.fullTuples,
-      parityConflicts: M.parityConflicts,
-      laneConflicts: M.laneConflicts,
-      bandMode,
-      ms: Date.now() - t0,
-    },
+    diag: diag(),
     ...(opts.keepModel ? { model: M } : {}),
   };
 }

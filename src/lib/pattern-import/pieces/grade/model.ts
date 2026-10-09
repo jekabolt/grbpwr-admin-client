@@ -57,8 +57,6 @@ export type GradeModel = {
   compSupport: number[];
   /** ranked track → share of its full-tuple votes that went to rank0 (1 = unanimous) */
   purity: Map<number, number>;
-  /** track → sample indices whose cross-section contradicts the grade order (no wall there) */
-  masked: Map<number, Set<number>>;
 };
 
 type Tuple = { key: string; lanes: number[]; count: number };
@@ -261,7 +259,6 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
     laneConflicts: 0,
     bandHist: new Map(),
     frames: new Set(),
-    masked: new Map(),
     purity: new Map(),
     compSupport: [],
   };
@@ -730,7 +727,7 @@ const flip = (ranks: number[], n: number, bit: number) =>
 
 export function ranksAt(M: GradeModel, tr: number, i: number, bits: readonly number[]): number[] {
   const m = M.sets.get(tr);
-  if (!m || M.masked.get(tr)?.has(i)) return [];
+  if (!m) return [];
   const out = new Set<number>();
   for (const e of m[i] ?? []) for (const r of e.comp >= 0 ? flip(e.ranks, M.n, bits[e.comp] ?? 0) : e.ranks) out.add(r);
   return [...out].sort((a, b) => a - b);
@@ -760,78 +757,4 @@ export function trackPortions(M: GradeModel, bits: readonly number[], only?: Set
     }
   }
   return out;
-}
-
-/**
- * The logic of the increment, checked locally: under the chosen bits, the single ranks met along
- * any normal ray must grow with the offset (sizes nest; a fork swaps sides only where lines cross,
- * and crossing lines are not lanes of one ray). A sample whose lanes read e.g. 5 · 1 · 2 · 0 has a
- * wrong rank somewhere in its cross-section — every single-rank lane there loses its wall at that
- * spot (the rank leaks to the operator instead of closing along the wrong line). Returns the
- * number of masked samples.
- */
-const ORDER_COS = Math.cos((8 * Math.PI) / 180);
-export const DEBUG_ORDER = { on: false, printed: 0, log: (s: string) => console.log(s) };
-export function maskOrderConflicts(M: GradeModel, bits: readonly number[]): number {
-  M.masked.clear();
-  const nearest = (tr: number, p: V) => {
-    const ss = M.samplesOf.get(tr);
-    if (!ss) return -1;
-    let bi = -1;
-    let bd = 3;
-    ss.forEach((o, j) => {
-      const d = dist(o.p, p);
-      if (d < bd) {
-        bd = d;
-        bi = j;
-      }
-    });
-    return bi;
-  };
-  const marks: [number, number][] = [];
-  for (const [tr, ss] of M.samplesOf) {
-    ss.forEach((s, i) => {
-      if (s.lanes.length < 3) return;
-      // a clean cross-section only: every lane parallel (≤ 8°) and evenly spaced — a line crossing
-      // the bundle at a shallow angle, or a second bundle meeting it at a corner, is not a lane
-      if (s.lanes.some((l) => (l.c ?? 1) < ORDER_COS)) return;
-      const sp = s.lanes.slice(1).map((l, k) => l.s - s.lanes[k].s);
-      const med = median(sp);
-      if (sp.some((d) => d < 0.5 * med || d > 2.2 * med)) return;
-      if (sp.some((d) => d < 1)) return; // converging below the drawing's resolution
-      const self = M.sets.get(tr)?.[i];
-      if (!self || self.length !== 1 || self[0].comp < 0) return;
-      const comp = self[0].comp;
-      const seq: { tr: number; j: number; r: number }[] = [];
-      for (const l of s.lanes) {
-        const j = l.track === tr ? i : nearest(l.track, { x: s.p.x + s.n.x * l.s, y: s.p.y + s.n.y * l.s });
-        if (j < 0) continue;
-        const e = M.sets.get(l.track)?.[j];
-        if (!e || e.length !== 1 || e[0].comp !== comp) continue; // same component only
-        const rs = ranksAt(M, l.track, j, bits);
-        if (rs.length === 1) seq.push({ tr: l.track, j, r: rs[0] });
-      }
-      if (seq.length < 3) return;
-      let up = 0;
-      let down = 0;
-      for (let k = 1; k < seq.length; k++) {
-        if (seq[k].r > seq[k - 1].r) up++;
-        else if (seq[k].r < seq[k - 1].r) down++;
-      }
-      if (up && down) {
-        for (const q of seq) marks.push([q.tr, q.j]);
-        if (DEBUG_ORDER.on && DEBUG_ORDER.printed++ < 40)
-          DEBUG_ORDER.log(`   conflict t${tr}#${i} at (${s.p.x.toFixed(0)},${s.p.y.toFixed(0)}): ${s.lanes.map((l) => `t${l.track}@${l.s.toFixed(1)}`).join(' ')} → ${seq.map((q) => `t${q.tr}:${q.r}`).join(' ')}`);
-      }
-    });
-  }
-  for (const [tr, j] of marks) {
-    let m = M.masked.get(tr);
-    if (!m) {
-      m = new Set();
-      M.masked.set(tr, m);
-    }
-    m.add(j);
-  }
-  return marks.length;
 }

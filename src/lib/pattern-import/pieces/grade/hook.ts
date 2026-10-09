@@ -12,6 +12,7 @@
 //            refused too. A drawing whose band count disagrees with n → 'size-count' (guard).
 import type {
   BoxMm,
+  PtMm,
   ChainAmbiguity,
   ChainSet,
   FillOpts,
@@ -107,6 +108,29 @@ const refuse = (c: PieceCandidate, why: GradeRefusal, at: Seed['at']) => {
   c.p95Mm = 0;
 };
 
+/** Chains lying on the infinite carrier line of a straight knife (≤ 0.6 mm), any span. */
+function knifeCarriers(set: ChainSet, knives: readonly number[]): PtMm[][] {
+  const have = new Set(knives);
+  const out: PtMm[][] = [];
+  for (const id of knives) {
+    const p = set.chains[id].pts;
+    const a = p[0];
+    const b = p[p.length - 1];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L < 20) continue;
+    const off = (q: PtMm) => Math.abs(((q.x - a.x) * (b.y - a.y) - (q.y - a.y) * (b.x - a.x)) / L);
+    if (p.some((q) => off(q) > 0.6)) continue; // not a straight cutting line
+    for (const c of set.chains) {
+      if (have.has(c.id) || c.pts.length < 2 || c.lengthMm < 1) continue;
+      if (c.pts.every((q) => off(q) <= 0.6)) {
+        have.add(c.id);
+        out.push(c.pts);
+      }
+    }
+  }
+  return out;
+}
+
 export function gradeHook(
   sheet: Sheet,
   set: ChainSet,
@@ -134,8 +158,9 @@ export function gradeHook(
     },
   });
   if (mode === 'guard') return guardOnly('sizes-not-distinguished', null, []);
-  const knives = opts.variant ? itemsOf(set, variantKnives(sheet, set, opts.variant)).map((it) => it.pts) : [];
-  const G = gradeRanks(sheet, set, seeds, n, { cellMm: cell, knives });
+  const kIds = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
+  const knives = itemsOf(set, kIds).map((it) => it.pts);
+  const G = gradeRanks(sheet, set, seeds, n, { cellMm: cell, knives, knifeCarriers: knifeCarriers(set, kIds) });
   if (G.diag.bandMode !== n) {
     const amb: ChainAmbiguity = {
       kind: 'size-count',
