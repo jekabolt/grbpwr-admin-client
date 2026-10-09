@@ -28,7 +28,10 @@ import {
   splitPiecesBySize,
   type BlockSplit,
 } from 'components/managers/tech-card/components/nesting/split-pieces';
-import { missingSizesIn } from 'components/managers/tech-card/components/nesting/use-block-sizes';
+import {
+  foreignManifestSizes,
+  missingSizesIn,
+} from 'components/managers/tech-card/components/nesting/use-block-sizes';
 import {
   contourIsCutLine,
   defaultContourLayer,
@@ -49,7 +52,7 @@ import {
 import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
 import type { DxfIndex } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import * as modal from 'components/managers/tech-card/components/nesting/piece-match-modal';
-import { DICT_TOKENS, SIZE_BY_ID, plainSizeId } from './f6b-fingerprint-entry';
+import { DICT_NAMES, DICT_TOKENS, SIZE_BY_ID, plainSizeId } from './f6b-fingerprint-entry';
 
 type M = Record<string, any>;
 const M_ = modal as unknown as M;
@@ -560,6 +563,17 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       ),
       missing,
     );
+    // F14 MAJOR 4: the same manifest uploaded to card B whose range is in another size system
+    // (ta_m): its plain M is not trusted, nothing is added, the refusal is reported
+    const cardB = [DICT_NAMES.indexOf('s_46ta_m') + 1];
+    const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
+    const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+    check(
+      'a (F14): manifest from card A on card B (ta_m) → M not added, reported as foreign',
+      true,
+      missingB.length === 0 && isDeepStrictEqual(foreignB, ['m']),
+      { missingB, foreignB },
+    );
     const created = createAll(v.counted);
     check(
       'a: create-all makes FP×2, SL×2 (pairs → one piece), BP×1, CLR×1',
@@ -603,6 +617,34 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
         isDeepStrictEqual(sorted(sizesOf(v, 'clr')), ['L', 'M', 'S', 'XL']),
       { bp: sizesOf(v, 'bp'), clr: sizesOf(v, 'clr') },
     );
+    // F14 MAJOR 4: card B in the ta_m system — the manifest's plain S/M/L/XL are foreign; the sizes
+    // come from the block names (legacy token path), resolved in the card's own system
+    {
+      const id = (n: string) => DICT_NAMES.indexOf(n) + 1;
+      const cardB = [id('s_46ta_m')];
+      const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
+      const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+      check(
+        'b (F14): manifest from card A on card B (ta_m) → no foreign id, sizes derived in ta_m',
+        true,
+        // what the legacy token path derives from the names (XL is on too few stems for it)
+        isDeepStrictEqual(
+          missingB.map((x) => x.sizeId).sort((a, b) => a - b),
+          [id('m_48ta_m'), id('l_50ta_m')],
+        ) && isDeepStrictEqual([...foreignB].sort(), ['l', 'm', 's', 'xl']),
+        { missingB, foreignB },
+      );
+      const missingA = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID);
+      check(
+        'b (F14 control): on its own card (plain system) the manifest sizes are trusted',
+        true,
+        isDeepStrictEqual(
+          missingA.map((x) => x.sizeId).sort((a, b) => a - b),
+          ['m', 'l', 'xl'].map(plainSizeId),
+        ) && foreignManifestSizes(v.pieces, [plainSizeId('s')], SIZE_BY_ID).length === 0,
+        missingA,
+      );
+    }
     check(
       'b: PCK is a piece of size M, not a sizeless piece',
       true,

@@ -68,6 +68,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
 import {
   aliasIdentity,
+  foreignManifestSizes,
   missingSizesIn,
   splitPiecesBySize,
   useDictionarySizeTokens,
@@ -736,6 +737,11 @@ export function PieceMatchModal({
   const missingSizes = useMemo(
     () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById),
     [allPieces, dictTokens, cardSizeIds, sizeById],
+  );
+  // F14: размеры манифеста вне системы карточки не заводятся (файл для другой карточки) — сказать.
+  const foreignSizes = useMemo(
+    () => foreignManifestSizes(allPieces, cardSizeIds, sizeById),
+    [allPieces, cardSizeIds, sizeById],
   );
   // Размеры из файла заводятся в карточку САМИ, как только разбор закончился: файл — источник
   // истины о том, какие размеры у стиля есть, а ручная кнопка означала бы, что деталь может
@@ -1806,6 +1812,16 @@ export function PieceMatchModal({
                   непризнанный размер. Добавляет их ЧЕЛОВЕК: резать имена по всему словарю
                   нельзя («FP_L» — левая полочка, а «L» в словаре есть как размер), поэтому
                   машина только показывает находку. */}
+              {foreignSizes.length > 0 && (
+                <CalloutBox tone='warning'>
+                  <Text size='micro' component='p'>
+                    the converted file names sizes outside this card's size system —{' '}
+                    {foreignSizes.map((n) => formatSizeName(n)).join(', ')}. it was probably
+                    converted for another card: those sizes were not added, the sizes are read from
+                    the block names instead
+                  </Text>
+                </CalloutBox>
+              )}
               {addedSizes.length > 0 && (
                 <CalloutBox tone='note'>
                   <Text size='micro' component='p'>

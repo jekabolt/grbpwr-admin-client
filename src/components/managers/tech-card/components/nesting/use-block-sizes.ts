@@ -5,7 +5,10 @@
 // кроя заводится по набору на каждый размер вместо одного набора на стиль.
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
-import { useSizeNames, useSizeOrdering } from 'components/managers/model/components/use-size-systems';
+import {
+  useSizeNames,
+  useSizeOrdering,
+} from 'components/managers/model/components/use-size-systems';
 import type { PieceDTO } from 'lib/nesting/types';
 import { deriveBlockSizes, sizeTokensOf } from './block-code';
 import { manifestFactsOf } from './manifest-facts';
@@ -68,6 +71,39 @@ function systemOf(name: string | undefined): string {
 
 export type MissingSize = { token: string; sizeId: number; name: string };
 
+// РАЗМЕР ИЗ МАНИФЕСТА ДОВЕРЕН, ТОЛЬКО ЕСЛИ ОН ИЗ СИСТЕМЫ РАЗМЕРОВ ЭТОЙ КАРТОЧКИ (F14 MAJOR 4).
+// Манифест сверен с ЧЕРТЕЖОМ, но не с карточкой: файл, сконвертированный для другой карточки (тот же
+// стиль, другой сезон или другая система размеров) и залитый сюда через «+ DXF», молча дописал бы
+// ряд ЧУЖИМИ id. Правило то же, что у пути по токенам: неоднозначность решает система, которой
+// карточка уже пользуется. Карточка без размеров ничему не противоречит — там манифест верен.
+function manifestSizeTrusted(
+  sizeId: number,
+  cardSystems: ReadonlySet<string>,
+  sizeById: ReadonlyMap<number, string>,
+): boolean {
+  if (cardSystems.size === 0) return true;
+  const name = sizeById.get(sizeId);
+  return name != null && cardSystems.has(systemOf(name));
+}
+
+/** Manifest sizes refused because they are outside this card's size system(s): their names. */
+export function foreignManifestSizes(
+  pieces: readonly PieceDTO[],
+  cardSizeIds: readonly number[],
+  sizeById: ReadonlyMap<number, string>,
+): string[] {
+  const inCard = new Set(cardSizeIds);
+  const cardSystems = new Set([...inCard].map((id) => systemOf(sizeById.get(id))));
+  const out = new Map<number, string>();
+  for (const p of pieces) {
+    const m = manifestFactsOf(p);
+    if (!m || m.sizeId <= 0 || inCard.has(m.sizeId) || out.has(m.sizeId)) continue;
+    if (!manifestSizeTrusted(m.sizeId, cardSystems, sizeById))
+      out.set(m.sizeId, sizeById.get(m.sizeId) ?? `#${m.sizeId}`);
+  }
+  return [...out.values()];
+}
+
 // Размеры, которые есть В ФАЙЛЕ, но не заведены в карточке.
 //
 // Источник — токены, выведенные из структуры файла (deriveSizeTokens), а НЕ словарь: словарь
@@ -87,10 +123,21 @@ export function missingSizesIn(
 
   // Блоки файла с манифестом в вывод не идут — их размеры заявлены, а не выведены (тот же отсев,
   // что в splitPiecesBySize: три входа deriveBlockSizes обязаны видеть один и тот же набор имён).
+  // Исключение — блок, чей заявленный размер вне системы карточки (manifestSizeTrusted): заявке
+  // не верим, и его размер выводится по имени, как у чужого файла.
+  const trustedManifest = (p: PieceDTO) => {
+    const m = manifestFactsOf(p);
+    return (
+      !!m &&
+      (m.sizeId <= 0 ||
+        inCard.has(m.sizeId) ||
+        manifestSizeTrusted(m.sizeId, cardSystems, sizeById))
+    );
+  };
   const derived = new Set(
     [
       ...deriveBlockSizes(
-        pieces.filter((p) => !manifestFactsOf(p)).map((p) => p.blockName ?? ''),
+        pieces.filter((p) => !trustedManifest(p)).map((p) => p.blockName ?? ''),
         (t) => dictTokens.has(t),
       ).values(),
     ].map((raw) => raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()),
@@ -102,9 +149,14 @@ export function missingSizesIn(
   for (const p of pieces) {
     const m = manifestFactsOf(p);
     if (!m || m.sizeId <= 0 || inCard.has(m.sizeId) || found.has(m.sizeId)) continue;
+    if (!manifestSizeTrusted(m.sizeId, cardSystems, sizeById)) continue; // → вывод по имени выше
     const name = sizeById.get(m.sizeId);
     if (name == null) continue; // словарь такого размера не знает — заводить нечего
-    found.set(m.sizeId, { token: m.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase(), sizeId: m.sizeId, name });
+    found.set(m.sizeId, {
+      token: m.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase(),
+      sizeId: m.sizeId,
+      name,
+    });
   }
   for (const token of derived) {
     if (covered.has(token)) continue; // такой размер в карточке уже есть
@@ -121,4 +173,3 @@ export function missingSizesIn(
   }
   return [...found.values()];
 }
-

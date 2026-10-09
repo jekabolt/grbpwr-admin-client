@@ -985,6 +985,16 @@ export function PatternsField({
                     converted
                   </Pill>
                 )}
+                {/* F14: манифест написан для ДРУГОЙ карточки — его размеры здесь не доверены
+                    (use-block-sizes manifestSizeTrusted), сам лист читается. */}
+                {converted && !!techCardId && converted.techCardId !== techCardId && (
+                  <Pill
+                    tone='warn'
+                    title={`this sheet was converted for tech card #${converted.techCardId}, not this one — its sizes are trusted only where they belong to this card's size system`}
+                  >
+                    converted for another card
+                  </Pill>
+                )}
                 {stray && <Pill tone='warn'>size out of range</Pill>}
               </span>
               {/* When a name is set the filename still matters (it is what the factory's CAD
