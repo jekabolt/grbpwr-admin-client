@@ -377,7 +377,9 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     const [id] = rest;
     const p = await prepare(pick([id])[0]);
     const m = wallModel(p.set, p.run, p.sheet.texts);
-    console.log(`  relinked moved=${m.relinked?.moved} conflicts=${m.relinked?.conflicts.length}`);
+    console.log(
+      `  relinked moved=${m.relinked?.moved} conflicts=${m.relinked?.conflicts.length} labelled=${m.relinked?.labelled} bandTicks=${JSON.stringify([...(m.bandTicks ?? [])])}`,
+    );
     if (process.env.CHAINS)
       for (const id of process.env.CHAINS.split(',').map(Number))
         console.log(

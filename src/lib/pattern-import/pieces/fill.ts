@@ -447,6 +447,7 @@ export function fillPiecesDetailed(
   const extraOf = (r: number) =>
     (edits.include ?? []).filter((x) => x.rank === r || x.rank === null).flatMap((x) => x.ids);
   const opBridges = (r: number) => (edits.bridges ?? []).filter((b) => b.rank === r);
+  const bandCuts = (r: number) => (model.bandCuts ?? []).filter((b) => b.rank === r);
 
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
@@ -455,6 +456,7 @@ export function fillPiecesDetailed(
       ...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
+      ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
     ].filter((it) => !excl.has(it.chain) && !knifeSet.has(it.chain));
   };
 
@@ -700,9 +702,19 @@ export function fillPiecesDetailed(
           d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
         return d <= 1;
       });
+      const onOutline = (b: { from: PtMm; to: PtMm }) => {
+        const m = { x: (b.from.x + b.to.x) / 2, y: (b.from.y + b.to.y) / 2 };
+        let d = Infinity;
+        for (let i = 0; i < outer.length && d > 1; i++)
+          d = Math.min(d, segNearest(m, outer[i], outer[(i + 1) % outer.length]).d);
+        return d <= 1;
+      };
       const der = [
         ...usedB.map((b) => ({ kind: 'bridge' as const, pts: [b.from, b.to] })),
         ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
+        ...bandCuts(r)
+          .filter(onOutline)
+          .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to] })),
       ];
       if (der.length) cand.derived = der;
       cand.areaMm2 = Math.abs(signedArea(outer));

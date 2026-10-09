@@ -31,6 +31,14 @@ export type WallModel = {
   fileOfRank: (string | null)[];
   /** Shared straight edges (fold lines) promoted to walls of every rank — also in `common`. */
   folds?: ChainId[];
+  /** Closed loops ranked as one piece drawn once per size, and band ticks (never lone). */
+  loopFamily?: Set<ChainId>;
+  /** Band ladders: tick → rank (bandTicks). */
+  bandTicks?: Map<ChainId, number>;
+  /** The long edges of band ladders, walls of every rank (also in `common`). */
+  bandEdges?: Set<ChainId>;
+  /** Band rungs carried across the band (derived 'band-cut' walls of their rank). */
+  bandCuts?: { rank: number; from: PtMm; to: PtMm }[];
   /** Rank by continuity: chains moved to their outline's rank, and undecided components. */
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
 };
@@ -182,19 +190,49 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
   for (const [id, r] of labelled) byRank[r].push(id);
   const cr = mode === 'graded' && !process.env.F4_NOCONNECT ? connectRanks(set, base) : null;
   const ranks = cr ? cr.byRank : byRank;
+  // band ladders: their ticks are size ends (rank by order), never shared walls
+  const notchIds = new Set(
+    set.classes
+      .filter((c) => c.role === 'notch' || c.role === 'ignore' || c.role === 'internal')
+      .flatMap((c) => c.chains),
+  );
+  const band =
+    mode === 'graded' && !process.env.F4_NOBANDS
+      ? bandTicks(
+          set,
+          n,
+          notchIds,
+          new Map(ranks.flatMap((ids, r) => ids.map((id) => [id, r] as [ChainId, number]))),
+        )
+      : { ticks: new Map<ChainId, number>(), edges: new Set<ChainId>(), cuts: [] };
+  const bands = band.ticks;
+  for (const [id, r] of bands) {
+    ranks.forEach((ids, k) => {
+      if (k !== r && ids.includes(id)) ranks[k] = ids.filter((x) => x !== id);
+    });
+    if (!ranks[r].includes(id)) ranks[r].push(id);
+  }
+  const uncommon = new Set([...(cr?.uncommon ?? []), ...bands.keys()]);
+  const kept0 = uncommon.size ? common.filter((id) => !uncommon.has(id)) : common;
+  const kept = [...kept0, ...[...band.edges].filter((id) => !kept0.includes(id))];
   const folds =
-    mode === 'graded' && !process.env.F4_NOFOLDS ? sharedFolds(set, ranks, new Set(common)) : [];
+    mode === 'graded' && !process.env.F4_NOFOLDS ? sharedFolds(set, ranks, new Set(kept)) : [];
   return {
     mode,
     n,
-    common: [...common, ...folds],
+    common: [...kept, ...folds],
     folds,
     relinked: cr
       ? { moved: cr.moved, conflicts: cr.conflicts, labelled: labelled.size }
       : undefined,
     byRank: ranks,
     emptyRanks: ranks.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
-    graded,
+    // chains ranked here (continuity, labels, nesting) are size lines too
+    graded: [...new Set([...graded, ...ranks.flat()])],
+    loopFamily: new Set([...(cr?.loopFamily ?? []), ...bands.keys()]),
+    bandTicks: bands.size ? bands : undefined,
+    bandEdges: band.edges.size ? band.edges : undefined,
+    bandCuts: band.cuts.length ? band.cuts : undefined,
     fileOfRank,
   };
 }
@@ -240,6 +278,10 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
     const L = cum[cum.length - 1];
     if (L < 3) continue;
+    // a closed outline of a one-loop-per-size family is that size's whole edge — nothing in it is
+    // shared (a band drawn once per size: its end tick is 25 mm from the next size's, not
+    // "beside" it, yet it is no other size's wall)
+    if (m.loopFamily?.has(id)) continue;
     const lone: boolean[] = [];
     const at: number[] = [];
     let seg = 0;
@@ -593,7 +635,13 @@ export function connectRanks(
   set: ChainSet,
   m: WallModel,
   tolMm = 0.5,
-): { byRank: ChainId[][]; moved: number; conflicts: ChainId[] } {
+): {
+  byRank: ChainId[][];
+  moved: number;
+  conflicts: ChainId[];
+  uncommon: ChainId[];
+  loopFamily: ChainId[];
+} {
   const rankOf = new Map<ChainId, number>();
   m.byRank.forEach((ids, r) => ids.forEach((id) => rankOf.set(id, r)));
   const ids = [...new Set([...rankOf.keys(), ...set.orphans])].filter((id) => {
@@ -645,6 +693,10 @@ export function connectRanks(
   let moved = 0;
   const conflicts: ChainId[] = [];
   const undecided: ChainId[][] = [];
+  const commonIds = new Set(m.common);
+  const uncommon: ChainId[] = [];
+  const loopIds = new Set<ChainId>();
+  const loopFamily: ChainId[] = [];
   for (const members of comps.values()) {
     if (members.length < 2) continue;
     const votes = new Map<number, number>();
@@ -675,6 +727,36 @@ export function connectRanks(
   // that are one piece in n sizes — n of them, each box overlapping the next ≥ 80 % — take their
   // rank from their size order: the smallest outline is the smallest size
   const boxOf = (ms: ChainId[]) => bboxOf(ms.flatMap((id) => set.chains[id].pts));
+  // closed outlines that overlap each other (kombinezon's bands: one closed rectangle per size,
+  // each in its own dash, which F3 called size 6, size 20, common or ignore) are one piece in
+  // several sizes: when two of them share a rank, or some of them have none, they all join the
+  // undecided and are ranked by size order like the rest (only when exactly n of them nest)
+  const notch = new Set(set.classes.filter((c) => c.role === 'notch').flatMap((c) => c.chains));
+  const loops = set.chains
+    .filter(
+      (c) =>
+        !notch.has(c.id) &&
+        c.pts.length >= 3 &&
+        c.lengthMm >= 50 &&
+        (c.closed || dist(c.pts[0], c.pts[c.pts.length - 1]) <= tolMm),
+    )
+    .map((c) => ({ id: c.id, b: bboxOf(c.pts) }));
+  const seenL = new Set<ChainId>();
+  for (const l of loops) {
+    if (seenL.has(l.id)) continue;
+    const group = loops.filter((o) => o === l || iouOf(o.b, l.b) >= 0.5);
+    if (group.length < 2) continue;
+    const rs = group.map((g) => rankOf.get(g.id));
+    if (!rs.some((r) => r !== undefined)) continue;
+    const dupRank = rs.some((r, k) => r !== undefined && rs.indexOf(r) !== k);
+    if (!dupRank && !rs.some((r) => r === undefined)) continue;
+    for (const g of group)
+      if (!seenL.has(g.id)) {
+        seenL.add(g.id);
+        loopIds.add(g.id);
+        undecided.push([g.id]);
+      }
+  }
   const und = undecided.map((ms) => ({ ms, b: boxOf(ms) }));
   const area = (b: { minX: number; minY: number; maxX: number; maxY: number }) =>
     (b.maxX - b.minX) * (b.maxY - b.minY);
@@ -712,9 +794,11 @@ export function connectRanks(
       if (chain.length !== m.n) return;
       chain.forEach((u, r) => {
         usedU.add(u.i);
+        for (const id of u.ms) if (loopIds.has(id)) loopFamily.push(id);
         for (const id of u.ms) {
           const cur = rankOf.get(id);
           if (cur === r) continue;
+          if (commonIds.has(id)) uncommon.push(id);
           if (cur !== undefined) byRank[cur] = byRank[cur].filter((x) => x !== id);
           byRank[r].push(id);
           moved++;
@@ -724,7 +808,7 @@ export function connectRanks(
   und.forEach((u, i) => {
     if (!usedU.has(i)) conflicts.push(...u.ms);
   });
-  return { byRank, moved, conflicts };
+  return { byRank, moved, conflicts, uncommon, loopFamily };
 }
 
 /**
@@ -769,4 +853,188 @@ export function labelRanks(
   }
   for (const id of bad) out.delete(id);
   return out;
+}
+
+function iouOf(
+  a: { minX: number; minY: number; maxX: number; maxY: number },
+  b: { minX: number; minY: number; maxX: number; maxY: number },
+): number {
+  const w = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+  const h = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY);
+  if (w <= 0 || h <= 0) return 0;
+  const ar = (x: typeof a) => (x.maxX - x.minX) * (x.maxY - x.minY);
+  return (w * h) / (ar(a) + ar(b) - w * h);
+}
+
+/**
+ * BAND FAMILIES (F4b): a band drawn once at the largest length with one end TICK per size (reef's
+ * hem bands I/J: nine full-width ticks across one strip, F3 called five of them "common"; any
+ * rank's fill stopped at the first tick). A ladder is n straight, parallel ticks of one length
+ * (± 10 %) whose ends both land (≤ 2.5 mm) on lines running across them (the band's long edges), all
+ * crossing the same strip, neighbours closer than the strip is wide, internal lines and notches
+ * excluded (a size table's column rules are internal). Exactly n of them → tick k (counted from the end of the band without
+ * ticks) is size k's end. Anything else — a ladder of buttonholes (ends on nothing), n − 2 ticks —
+ * is left alone, and so is a ladder F3 already ranked in order (a graded piece's straight sides).
+ * Returns tick → rank, the band's long edges and start end (shared walls), and rungs carried
+ * across the band where they stop short (derived band-cuts).
+ */
+export function bandTicks(
+  set: ChainSet,
+  n: number,
+  skip: ReadonlySet<ChainId>,
+  rankOf: ReadonlyMap<ChainId, number> = new Map(),
+): {
+  ticks: Map<ChainId, number>;
+  edges: Set<ChainId>;
+  cuts: { rank: number; from: PtMm; to: PtMm }[];
+} {
+  const out = new Map<ChainId, number>();
+  const edges = new Set<ChainId>();
+  const cuts: { rank: number; from: PtMm; to: PtMm }[] = [];
+  if (n < 3) return { ticks: out, edges, cuts };
+  type Tick = { id: ChainId; a: PtMm; b: PtMm; L: number; dir: PtMm };
+  const ticks: Tick[] = [];
+  for (const c of set.chains) {
+    if (skip.has(c.id) || c.closed || c.pts.length < 2 || c.lengthMm < 15 || c.lengthMm > 250)
+      continue;
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    const L = dist(a, b);
+    if (L < 15 || c.lengthMm > L * 1.02) continue;
+    let dev = 0;
+    for (const p of c.pts) dev = Math.max(dev, segNearest(p, a, b).d);
+    if (dev > 0.5) continue;
+    ticks.push({ id: c.id, a, b, L, dir: { x: (b.x - a.x) / L, y: (b.y - a.y) / L } });
+  }
+  if (ticks.length < n) return { ticks: out, edges, cuts };
+  // long edges: any chain passing within 1.5 mm of a tick end, running across the tick
+  const grid = new SegGrid(4);
+  for (const c of set.chains)
+    if (c.pts.length >= 2 && !skip.has(c.id)) grid.addPolyline(c.id, c.pts);
+  const across = (t: Tick, p: PtMm, found?: Set<ChainId>) => {
+    let ok = false;
+    grid.near(p, 2.5, (o, s) => {
+      if ((ok && !found) || o === t.id) return;
+      const q = set.chains[o].pts;
+      const h = segNearest(p, q[s], q[s + 1]);
+      if (h.d > 2.5) return;
+      const dx = q[s + 1].x - q[s].x;
+      const dy = q[s + 1].y - q[s].y;
+      const l = Math.hypot(dx, dy) || 1;
+      if (Math.abs((dx * t.dir.x + dy * t.dir.y) / l) < 0.2) {
+        ok = true;
+        found?.add(o);
+      }
+    });
+    return ok;
+  };
+  const framedSet = new Set(ticks.filter((t) => across(t, t.a) && across(t, t.b)).map((t) => t.id));
+  const framed = ticks;
+  const used = new Set<ChainId>();
+  for (const t0 of ticks.filter((t) => framedSet.has(t.id))) {
+    if (used.has(t0.id)) continue;
+    const nrm = { x: -t0.dir.y, y: t0.dir.x };
+    const along = (p: PtMm) => p.x * t0.dir.x + p.y * t0.dir.y;
+    const lo0 = Math.min(along(t0.a), along(t0.b));
+    const hi0 = Math.max(along(t0.a), along(t0.b));
+    const ladder = framed.filter((t) => {
+      if (used.has(t.id)) return false;
+      if (Math.abs(t.dir.x * t0.dir.x + t.dir.y * t0.dir.y) < 0.999) return false;
+      if (Math.abs(t.L - t0.L) > 0.1 * t0.L) return false;
+      const lo = Math.min(along(t.a), along(t.b));
+      const hi = Math.max(along(t.a), along(t.b));
+      return Math.min(hi, hi0) - Math.max(lo, lo0) >= 0.9 * Math.min(hi - lo, hi0 - lo0);
+    });
+    // positions across the strip; collinear ticks at one position are one (every size's start
+    // end drawn on the same line)
+    const pos = (t: Tick) => (t.a.x + t.b.x) * 0.5 * nrm.x + (t.a.y + t.b.y) * 0.5 * nrm.y;
+    ladder.sort((x, y) => pos(x) - pos(y));
+    const groups: Tick[][] = [];
+    for (const t of ladder) {
+      const g = groups[groups.length - 1];
+      if (g && pos(t) - pos(g[g.length - 1]) <= 1.5) g.push(t);
+      else groups.push([t]);
+    }
+    let rungs = groups;
+    const gp = (g: Tick[]) => pos(g[0]);
+    const gaps = rungs.slice(1).map((g, k) => gp(g) - gp(rungs[k]));
+    // the band's own start end, far from the ladder, is not a size tick
+    let start: Tick[] = [];
+    if (rungs.length === n + 1 && gaps.length >= 2) {
+      const inner = (xs: number[]) => Math.max(...xs);
+      if (gaps[0] > 2 * inner(gaps.slice(1))) {
+        start = rungs[0];
+        rungs = rungs.slice(1);
+      } else if (gaps[gaps.length - 1] > 2 * inner(gaps.slice(0, -1))) {
+        start = rungs[rungs.length - 1];
+        rungs = rungs.slice(0, -1);
+      }
+    }
+    if (rungs.length !== n) continue;
+    const members = rungs.flat();
+    // all rungs but two land on the long edges at both ends (≤ 2.5 mm; reef's L tick stops 9 mm
+    // short)
+    if (rungs.filter((g) => g.some((t) => framedSet.has(t.id))).length < n - 2) continue;
+    // a ladder: neighbours closer than the band is wide (marks spread along an edge are not one)
+    let gapOk = true;
+    for (let k = 1; k < n; k++) if (gp(rungs[k]) - gp(rungs[k - 1]) > 0.8 * t0.L) gapOk = false;
+    if (!gapOk) continue;
+    // where the band body lies: the long edges through the first rung's end run on to one side
+    let bodyLow = 0;
+    let bodyHigh = 0;
+    grid.near(rungs[0][0].a, 1.5, (o) => {
+      if (members.some((t) => t.id === o)) return;
+      for (const p of set.chains[o].pts) {
+        const v = p.x * nrm.x + p.y * nrm.y;
+        if (v < gp(rungs[0]) - 10) bodyLow++;
+        if (v > gp(rungs[n - 1]) + 10) bodyHigh++;
+      }
+    });
+    if (bodyLow === bodyHigh) continue;
+    const ordered = bodyLow > bodyHigh ? rungs : rungs.slice().reverse();
+    // F3 already ranked every rung, in this order: a graded piece's own sides (reef's D: nine
+    // straight side seams), nothing to repair — and its edges are graded, not shared
+    if (ordered.every((g, r) => g.every((t) => rankOf.get(t.id) === r))) {
+      for (const t of ladder) used.add(t.id);
+      continue;
+    }
+    ordered.forEach((g, r) =>
+      g.forEach((t) => {
+        out.set(t.id, r);
+        used.add(t.id);
+      }),
+    );
+    for (const t of ladder) used.add(t.id);
+    // the band's long edges (every chain the rungs land on) are shared by all its sizes: a size
+    // with no edge of its own (reef's hairline S, M, XL) runs along the longer ones to its tick
+    for (const t of members) {
+      across(t, t.a, edges);
+      across(t, t.b, edges);
+    }
+    // and so is its start end (every size's band starts on that one line)
+    for (const t of start) edges.add(t.id);
+    // a rung that stops short of an edge (reef's L tick, 9 mm) is carried across the band along
+    // its own line to where the framed rungs end — a derived 'band-cut' the operator sees
+    const ends = (side: 'a' | 'b') =>
+      members.filter((t) => framedSet.has(t.id)).map((t) => along(t[side]));
+    const ea = ends('a');
+    const eb = ends('b');
+    if (ea.length && eb.length) {
+      const lo = Math.min(...ea, ...eb);
+      const hi = Math.max(...ea, ...eb);
+      ordered.forEach((g, r) => {
+        if (g.some((t) => framedSet.has(t.id))) return;
+        const t = g[0];
+        const c0 = along(t.a);
+        const base = { x: t.a.x - t0.dir.x * c0, y: t.a.y - t0.dir.y * c0 };
+        cuts.push({
+          rank: r,
+          from: { x: base.x + t0.dir.x * lo, y: base.y + t0.dir.y * lo },
+          to: { x: base.x + t0.dir.x * hi, y: base.y + t0.dir.y * hi },
+        });
+      });
+    }
+  }
+  for (const id of out.keys()) edges.delete(id);
+  return { ticks: out, edges, cuts };
 }
