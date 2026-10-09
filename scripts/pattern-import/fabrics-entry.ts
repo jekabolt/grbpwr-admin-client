@@ -22,6 +22,7 @@ import { readManifest } from 'lib/pattern-import/manifest';
 import {
   PURPOSE,
   SECTION,
+  aiFabricHintsOf,
   fabricKindsIn,
   fusedSeeds,
   linesOf,
@@ -380,6 +381,69 @@ export async function main(): Promise<number> {
     sameSet(scopeSeeds(r1.a, CONTRAST), ['CLR_4']),
     'V1 contrast ← rib knit «Garniturstoff: Teil 9 aus Rippenstrickstoff»',
     scopeSeeds(r1.a, CONTRAST).join(','),
+  );
+  // C7: an AI-only cloth other than main waits for the operator; below T the AI is not used; an
+  // edited name carries no AI fabric
+  ck(
+    (r1.a.aiOnly ?? []).length === 1 &&
+      r1.a.aiOnly![0].seed === S.BP_1 &&
+      r1.a.aiOnly![0].needsConfirm &&
+      r1.a.aiOnly![0].purposes.includes(PURPOSE.interfacing),
+    'C7 V1: BP_1 interlining on the AI alone → needsConfirm (the fabrics step blocks until answered)',
+    JSON.stringify(r1.a.aiOnly),
+  );
+  const runV1With = (ai: { seed: number; fabrics: string[]; confidence: number }[]) =>
+    runImport(fp, sizeMap, V1, {
+      instr: INSTR,
+      label: { seed: S.BP_2, text: LABEL },
+      numberOf,
+      ai,
+    });
+  const low = await runV1With([{ seed: S.BP_1, fabrics: [PURPOSE.lining], confidence: 0.6 }]);
+  ck(
+    !scopeSeeds(low.a, LINING).includes('BP_1') &&
+      scopeSeeds(low.a, MAIN).includes('BP_1') &&
+      !low.a.aiOnly,
+    'C7 negative control: AI lining at 0.60 (< T) is not applied — BP_1 stays main, nothing to confirm',
+    `lining ${scopeSeeds(low.a, LINING).join(',')} · main has BP_1 ${scopeSeeds(low.a, MAIN).includes('BP_1')}`,
+  );
+  const named = (edited: number[]) =>
+    aiFabricHintsOf(
+      [
+        {
+          seed: S.BP_1,
+          suggestion: {
+            mark: 1,
+            code: 'BP',
+            mods: ['1'],
+            displayName: 'back yoke',
+            fabrics: [PURPOSE.lining],
+            cutQty: 2,
+            onFold: false,
+            pair: false,
+            variant: null,
+            modelConfidence: 0.95,
+            evidence: [],
+          },
+          source: 'ai',
+          evidence: [],
+          confidence: 0.93,
+          autoAccepted: true,
+          code: 'BP',
+          mods: ['1'],
+          displayName: 'back yoke',
+        },
+      ],
+      edited,
+    );
+  const kept = await runV1With(named([]));
+  const edited = await runV1With(named([S.BP_1]));
+  ck(
+    scopeSeeds(kept.a, LINING).includes('BP_1') &&
+      !scopeSeeds(edited.a, LINING).includes('BP_1') &&
+      scopeSeeds(edited.a, MAIN).includes('BP_1'),
+    'C7 negative control: the operator edits BP_1’s name → its AI lining is dropped (main again)',
+    `auto name: lining ${scopeSeeds(kept.a, LINING).includes('BP_1')} · edited: lining ${scopeSeeds(edited.a, LINING).includes('BP_1')}`,
   );
   ck(!r1.problems.length, 'V1 no blocking problem', r1.problems.map((p) => p.message).join(' | '));
   ck(

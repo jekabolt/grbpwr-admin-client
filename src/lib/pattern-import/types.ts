@@ -875,6 +875,13 @@ export type FabricAssignment = {
    * NOT refused — its seeds get `fused` (decision 14).
    */
   refused?: { label: string; purpose: FabricPurposeKey; seeds: SeedId[]; reason: string }[];
+  /**
+   * C7: pieces whose fabric rests on the AI alone (the sheet says nothing about them). A cloth other
+   * than the main fabric (lining, interlining → fused, rib …) waits for the operator: `needsConfirm`
+   * blocks the fabrics step until they confirm it or change the piece's ticks. A piece whose name
+   * the operator edits loses its AI fabric (the hint was for the AI's name).
+   */
+  aiOnly?: { seed: SeedId; purposes: FabricPurposeKey[]; needsConfirm: boolean }[];
 };
 
 export type ProposeFabricsFn = (

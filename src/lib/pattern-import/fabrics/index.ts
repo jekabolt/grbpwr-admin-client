@@ -10,6 +10,7 @@
 // Main thread may import `scope.ts`, `draft.ts`, `apply.ts`, `lexicon.ts` directly (types + string
 // ops only). `propose.ts` / `layout.ts` are pure too but belong to the worker's `fabrics` stage.
 export {
+  aiFabricHintsOf,
   proposeFabrics,
   proposeFabricsDetailed,
   type FabricHint,
