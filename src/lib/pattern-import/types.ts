@@ -533,7 +533,8 @@ export type PieceCandidate = {
   /**
    * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
    * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
-   * operator drew; 'band-cut' = a band drawn at the largest length cut at this rank's end tick;
+   * operator drew; 'band-cut' = this rank's end tick across a band, carried to the band's edges
+   * where the source stops it short;
    * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
    * neighbouring rank's contour; its `pts` is empty.
    */
