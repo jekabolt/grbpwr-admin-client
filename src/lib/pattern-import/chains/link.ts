@@ -159,45 +159,52 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   // ── pass 1: operation chains ────────────────────────────────────────────────────────────────
   const chains: WChain[] = [];
   const freeBeads: Item[] = [];
-  for (const arr of byOp.values()) {
-    arr.sort((a, b) => a.sub - b.sub);
-    if (arr.length === 1) {
-      if (arr[0].kind === 'bead') freeBeads.push(arr[0]);
-      else chains.push({ items: [{ it: arr[0], rev: false }], decor: [], dead: false });
-      continue;
-    }
-    let cur: WChain | null = null;
-    for (const it of arr) {
-      if (cur) {
-        const l: Link = { it, rev: false };
-        const [a, b] = itemEnds(l);
-        if (cur.items.length === 1) {
-          // first junction: both orientations of the first item are open
-          const f = cur.items[0];
-          const [fa, fb] = itemEnds(f);
-          const opts4 = [
-            { g: dist(fb, a), frev: f.rev, rev: false },
-            { g: dist(fb, b), frev: f.rev, rev: true },
-            { g: dist(fa, a), frev: !f.rev, rev: false },
-            { g: dist(fa, b), frev: !f.rev, rev: true },
-          ].sort((x, y) => x.g - y.g)[0];
-          if (opts4.g <= LINK.opGapMm) {
-            f.rev = opts4.frev;
-            cur.items.push({ it, rev: opts4.rev });
-            continue;
-          }
-        } else {
-          const e = chainEnd(cur, 1);
-          const g0 = dist(e, a);
-          const g1 = dist(e, b);
-          if (Math.min(g0, g1) <= LINK.opGapMm) {
-            cur.items.push({ it, rev: g1 < g0 });
-            continue;
+  for (const arr0 of byOp.values()) {
+    arr0.sort((a, b) => a.sub - b.sub);
+    // one paint operation has one style in a vector PDF; a traced raster (leonie) may put every
+    // colour of a tile into one operation — link only subpaths drawn alike
+    const keys = new Set(arr0.map((it) => keyOf.get(it.style)));
+    const parts =
+      keys.size > 1 ? [...keys].map((k) => arr0.filter((it) => keyOf.get(it.style) === k)) : [arr0];
+    for (const arr of parts) {
+      if (arr.length === 1) {
+        if (arr[0].kind === 'bead') freeBeads.push(arr[0]);
+        else chains.push({ items: [{ it: arr[0], rev: false }], decor: [], dead: false });
+        continue;
+      }
+      let cur: WChain | null = null;
+      for (const it of arr) {
+        if (cur) {
+          const l: Link = { it, rev: false };
+          const [a, b] = itemEnds(l);
+          if (cur.items.length === 1) {
+            // first junction: both orientations of the first item are open
+            const f = cur.items[0];
+            const [fa, fb] = itemEnds(f);
+            const opts4 = [
+              { g: dist(fb, a), frev: f.rev, rev: false },
+              { g: dist(fb, b), frev: f.rev, rev: true },
+              { g: dist(fa, a), frev: !f.rev, rev: false },
+              { g: dist(fa, b), frev: !f.rev, rev: true },
+            ].sort((x, y) => x.g - y.g)[0];
+            if (opts4.g <= LINK.opGapMm) {
+              f.rev = opts4.frev;
+              cur.items.push({ it, rev: opts4.rev });
+              continue;
+            }
+          } else {
+            const e = chainEnd(cur, 1);
+            const g0 = dist(e, a);
+            const g1 = dist(e, b);
+            if (Math.min(g0, g1) <= LINK.opGapMm) {
+              cur.items.push({ it, rev: g1 < g0 });
+              continue;
+            }
           }
         }
+        cur = { items: [{ it, rev: false }], decor: [], dead: false };
+        chains.push(cur);
       }
-      cur = { items: [{ it, rev: false }], decor: [], dead: false };
-      chains.push(cur);
     }
   }
   // An op chain made only of beads is not a line yet: release its beads.

@@ -288,8 +288,19 @@ async function sizesMode(id: string, args: string[]) {
     for (const xy of process.env.AT.split(';')) {
       const [ax, ay] = xy.split(',').map(Number);
       const P = { x: sheet.bbox.minX + ax, y: sheet.bbox.maxY - ay };
+      const segD = (c: { pts: PtMm[] }) => {
+        let m = Infinity;
+        for (let i = 0; i + 1 < c.pts.length; i++) {
+          const a = c.pts[i];
+          const b = c.pts[i + 1];
+          const L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1e-12;
+          const t = Math.max(0, Math.min(1, ((P.x - a.x) * (b.x - a.x) + (P.y - a.y) * (b.y - a.y)) / L2));
+          m = Math.min(m, Math.hypot(a.x + t * (b.x - a.x) - P.x, a.y + t * (b.y - a.y) - P.y));
+        }
+        return m;
+      };
       const near = set.chains
-        .map((c) => ({ c, d: Math.min(...c.pts.map((q) => Math.hypot(q.x - P.x, q.y - P.y))) }))
+        .map((c) => ({ c, d: segD(c) }))
         .sort((a, b) => a.d - b.d)
         .slice(0, 4);
       for (const { c, d } of near) {
@@ -299,9 +310,34 @@ async function sizesMode(id: string, args: string[]) {
         const rel = (q: { x: number; y: number }) =>
           `(${(q.x - sheet.bbox.minX).toFixed(0)},${(sheet.bbox.maxY - q.y).toFixed(0)})`;
         console.log(
-          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')} look=${c.id < mk.sigs.length ? describeSig(mk.sigs[c.id]) : '-'}`,
+          `  @${xy} chain ${c.id} d=${d.toFixed(1)} len=${c.lengthMm.toFixed(0)} class=${cls?.id}:${cls?.role}${cls ? rankOfClass(cls) ?? '' : ''} ends ${rel(e0)}→${rel(e1)} motif=${c.motif?.join('/')} look=${c.id < mk.sigs.length ? describeSig(mk.sigs[c.id]) : '-'} rgb=${sheet.styles[c.style]?.strokeRgb?.join(',')}`,
         );
       }
+    }
+  }
+  if (process.env.HLINE) {
+    // chains crossing a horizontal probe "y,x0,x1" (sheet top-left mm), left to right
+    const [hy, hx0, hx1] = process.env.HLINE.split(',').map(Number);
+    const Y = sheet.bbox.maxY - hy;
+    const X0 = sheet.bbox.minX + hx0;
+    const X1 = sheet.bbox.minX + hx1;
+    const hits: { x: number; c: number }[] = [];
+    set.chains.forEach((c) => {
+      for (let i = 0; i + 1 < c.pts.length; i++) {
+        const a = c.pts[i];
+        const q = c.pts[i + 1];
+        if ((a.y - Y) * (q.y - Y) > 0 || a.y === q.y) continue;
+        const x = a.x + ((Y - a.y) * (q.x - a.x)) / (q.y - a.y);
+        if (x >= X0 && x <= X1) hits.push({ x, c: c.id });
+      }
+    });
+    hits.sort((a, b) => a.x - b.x);
+    for (const h of hits) {
+      const c = set.chains[h.c];
+      const cls = set.classes.find((k) => k.chains.includes(c.id));
+      console.log(
+        `  x=${(h.x - sheet.bbox.minX).toFixed(1)} chain ${c.id} len=${c.lengthMm.toFixed(0)} ${cls?.role ?? (set.orphans.includes(c.id) ? 'ORPHAN' : '-')}${cls ? rankOfClass(cls) ?? '' : ''} rgb=${sheet.styles[c.style]?.strokeRgb?.join(',')} w=${sheet.styles[c.style]?.widthMm.toFixed(2)}`,
+      );
     }
   }
   for (const a of set.ambiguities ?? []) console.log(`  ? ${a.kind}: ${a.message}`);

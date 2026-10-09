@@ -213,7 +213,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   {
     // compare by value: the key spells "2XL", the run "XS to 5XL" expands to "XXL"
     const spelling = new Map<string, string>();
-    for (const h of legendHits0) spelling.set(`${parseSizeToken(h.label, true)?.kind}${h.value}`, h.label);
+    for (const h of legendHits0)
+      spelling.set(`${parseSizeToken(h.label, true)?.kind}${h.value}`, h.label);
     const keyOf = (l: string) => {
       const t = parseSizeToken(l, true);
       return t ? `${t.kind}${t.value}` : l;
@@ -480,8 +481,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     const distinct = lid ? lid.matched.filter((m) => m.length).length : 0;
     diag.legendIdentity = lid
       ? {
-          matched: lid.matched.map((m, k) =>
-            `${legendKey[k]}=${m.map((x) => `${x.group}(${(x.lengthMm / 1000).toFixed(1)}m ${x.score})`).join('+') || '∅'}`,
+          matched: lid.matched.map(
+            (m, k) =>
+              `${legendKey[k]}=${m.map((x) => `${x.group}(${(x.lengthMm / 1000).toFixed(1)}m ${x.score})`).join('+') || '∅'}`,
           ),
           unmatched: lid.unmatched.map(
             (u) => `${u.group} ${(u.lengthMm / 1000).toFixed(1)}m best ${u.best} ${u.score}`,
@@ -504,8 +506,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         const ev: ClassEvidence[] = [];
         const ch = chains.findIndex((_, i) => lid.label[i] === k);
         const d = ch >= 0 ? styles.get(chains[ch].style)?.dash : null;
-        if (ch >= 0 && d && d.some((v) => v > 0.01)) ev.push({ kind: 'declared-dash', dash: normDash(d) });
-        else if (ch >= 0 && sigs[ch]?.motif) ev.push({ kind: 'recovered-motif', motif: sigs[ch].motif! });
+        if (ch >= 0 && d && d.some((v) => v > 0.01))
+          ev.push({ kind: 'declared-dash', dash: normDash(d) });
+        else if (ch >= 0 && sigs[ch]?.motif)
+          ev.push({ kind: 'recovered-motif', motif: sigs[ch].motif! });
         return ev;
       });
       for (const k of lid.absent)
@@ -1052,7 +1056,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       if (identityUnits && u >= 0 && unitRank[u] >= 0)
         rankOf.set(i, unitRank[u]); // identity wins
       // colour is a hint, not identity: one vote, the cross-sections outvote it where they disagree
-      else if (pure(u) && sizeCand[i]) vote(i, unitRank[u], encoding === 'color' ? 1 : 4);
+      else if (pure(u) && sizeCand[i] && (encoding !== 'color' || votes.has(i)))
+        // a colour chain no cross-section saw (black text among the 46 lines) is not ranked by
+        // its colour alone
+        vote(i, unitRank[u], encoding === 'color' ? 1 : 4);
     });
     settle(0.45);
     for (let u = 0; u < nUnits; u++)
@@ -1067,6 +1074,49 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
             .slice(0, 50),
           at: null,
         });
+    if (encoding === 'color') {
+      // a colour chain that never runs beside a line of ANOTHER colour is not a size line: black
+      // text and black construction lines share the 46 colour (leonie)
+      const besideOther = new Set<number>();
+      for (const x of xsB)
+        x.lanes.forEach((ln, k) => {
+          const own = majorityUnit(ln, unit, chains);
+          const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean);
+          if (nb.some((l) => majorityUnit(l, unit, chains) !== own))
+            for (const c of ln) besideOther.add(c);
+        });
+      let dropped = 0;
+      for (const c of [...rankOf.keys()])
+        if (!besideOther.has(c)) {
+          rankOf.delete(c);
+          dropped += chains[c].lengthMm;
+        }
+      diag.colourAlone = +(dropped / 1000).toFixed(2);
+      // colour borrowed by another size (leonie: 38 drawn in 44's purple on some tiles): the
+      // cross-sections ranked these chains away from their colour — say where
+      const moved = new Map<string, { n: number; len: number; ids: number[] }>();
+      for (const [c, r] of rankOf) {
+        const u = unit[c];
+        if (u < 0 || unitRank[u] < 0 || unitRank[u] === r) continue;
+        const k = `${u}|${r}`;
+        const e = moved.get(k) ?? { n: 0, len: 0, ids: [] };
+        e.n++;
+        e.len += chains[c].lengthMm;
+        if (e.ids.length < 50) e.ids.push(c);
+        moved.set(k, e);
+      }
+      for (const [k, e] of moved) {
+        if (e.len < 100) continue;
+        const [u, r] = k.split('|').map(Number);
+        ambiguities.push({
+          kind: 'class-split',
+          message: `${e.n} chains (${(e.len / 1000).toFixed(1)} m) drawn in ${unitNames[u]} (rank ${unitRank[u]}) sit where rank ${r} runs: ranked ${r} by nesting — confirm`,
+          classes: [],
+          chains: e.ids,
+          at: chains[e.ids[0]].pts[0],
+        });
+      }
+    }
     if (encoding === 'file-per-size') labels = labels.map(() => null);
   }
 
@@ -1411,7 +1461,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     let steep = false;
     // ends, middle, and every mm between: a graded notch stack crosses the size lines it marks
     const probes = [a, b];
-    for (let t = 0; t <= L; t += 1) probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
+    for (let t = 0; t <= L; t += 1)
+      probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
     for (const p of probes) {
       touchGrid.near(p, 1, (j, si) => {
         if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j))) return;
@@ -1664,7 +1715,14 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
   // every (label, sample stroke) candidate with a score; assigned one-to-one below (a stroke
   // between two labels belongs to the nearer one: reef's chevrons are no chain, so "SIZE S" must not
   // take the XS stroke above it)
-  type Cand = { text: IRText; label: string; value: number; chain: number; d: number; score: number };
+  type Cand = {
+    text: IRText;
+    label: string;
+    value: number;
+    chain: number;
+    d: number;
+    score: number;
+  };
   const cands: Cand[] = [];
   const segs = new SegGrid(8);
   chains.forEach((c, i) => {
@@ -1713,10 +1771,19 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
       if (!prev || score < prev.score) best.set(e.c, { d, score });
     });
     for (const [ci, v] of best)
-      cands.push({ text: tx, label: tok.label, value: tok.value, chain: ci, d: v.d, score: v.score });
+      cands.push({
+        text: tx,
+        label: tok.label,
+        value: tok.value,
+        chain: ci,
+        d: v.d,
+        score: v.score,
+      });
   }
   cands.sort((a, b) => a.score - b.score);
-  if (process.env.F3_LEGEND) for (const c of cands) console.log(`legend cand ${c.label} c${c.chain} d=${c.d.toFixed(2)} s=${c.score.toFixed(2)}`);
+  if (process.env.F3_LEGEND)
+    for (const c of cands)
+      console.log(`legend cand ${c.label} c${c.chain} d=${c.d.toFixed(2)} s=${c.score.toFixed(2)}`);
   const usedText = new Set<IRText>();
   const usedChain = new Set<number>();
   const out: { text: IRText; label: string; value: number; chain: number; d: number }[] = [];
