@@ -32,6 +32,7 @@ import { PiecesStep } from './steps/pieces';
 import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
+import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 import { createStubClient, createStubNamer, stubApplyDraft, stubBuildDraft } from './stub-client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
 
@@ -48,34 +49,65 @@ const STAGE_WORD: Record<string, string> = {
   write: 'writing DXF + gate',
 };
 
-export function ImportWizard({
-  card,
-  onClose,
-  client: clientProp,
-  namer: namerProp,
-  buildDraft = stubBuildDraft,
-  applyDraft = stubApplyDraft,
-}: {
+type WizardProps = {
   card: CardContext;
   onClose: () => void;
   client?: ImportClient;
   namer?: NameSuggester;
   buildDraft?: DraftBuilder;
   applyDraft?: ApplyDraftFn;
-}) {
-  // One client per wizard run; the stub until the worker lands (see client.ts).
-  // useState, not useMemo: the client owns the worker session and must outlive any re-render
-  // (React may drop a memo; fast refresh re-runs one).
-  const [client] = useState(() => clientProp ?? createStubClient());
+};
+
+/**
+ * Fixture mode (the F13 stub: fixture data, writes nothing) is for building the later steps before
+ * their stages land. `VITE_PATTERN_IMPORT_STUB=1` starts in it; dev builds can switch on the files
+ * step. Everything else runs the real worker.
+ */
+const STUB_BY_DEFAULT = import.meta.env.VITE_PATTERN_IMPORT_STUB === '1';
+
+export function ImportWizard(props: WizardProps) {
+  const [stub, setStub] = useState(STUB_BY_DEFAULT);
+  // A new mode is a new run: the keyed body drops its client and session with it.
+  return (
+    <WizardBody
+      key={stub ? 'stub' : 'worker'}
+      {...props}
+      onToggleStub={props.client || !import.meta.env.DEV ? undefined : () => setStub((v) => !v)}
+      stub={stub}
+    />
+  );
+}
+
+/** Names when there is no AI to ask (VITE_PATTERN_IMPORT_AI=stub on real data): none, honestly. */
+const noNames: NameSuggester = async () => [];
+
+function WizardBody({
+  card,
+  onClose,
+  client: clientProp,
+  namer: namerProp,
+  buildDraft = stubBuildDraft,
+  applyDraft = stubApplyDraft,
+  stub,
+  onToggleStub,
+}: WizardProps & { stub: boolean; onToggleStub?: () => void }) {
+  // One client per wizard run. useState, not useMemo: the client owns the worker session and must
+  // outlive any re-render (React may drop a memo; fast refresh re-runs one).
+  const [client] = useState<ImportClient>(
+    () => clientProp ?? (stub ? createStubClient() : new ImportWorkerClient()),
+  );
   const latest = useRef<ImportSession | null>(null);
   // The real AI namer (F10) needs real renders, so it rides with the real worker; the stub client's
-  // render-som draws nothing and keeps the fixture namer. VITE_PATTERN_IMPORT_AI=stub forces the
-  // stub namer on the worker too (no paid calls while the pipeline is being tuned).
+  // render-som draws nothing and keeps the fixture namer. VITE_PATTERN_IMPORT_AI=stub turns the AI
+  // off on the worker (no paid calls while the pipeline is tuned): no names, never fixture names
+  // on a real file.
   const namer = useMemo(
     () =>
       namerProp ??
-      (client.kind === 'worker' && import.meta.env.VITE_PATTERN_IMPORT_AI !== 'stub'
-        ? createAiNamer()
+      (client.kind === 'worker'
+        ? import.meta.env.VITE_PATTERN_IMPORT_AI === 'stub'
+          ? noNames
+          : createAiNamer()
         : createStubNamer(
             () => latest.current?.pieces?.seeds ?? [],
             () => latest.current?.pieces?.families ?? [],
@@ -100,11 +132,12 @@ export function ImportWizard({
   const body = (() => {
     switch (session.step) {
       case 'files':
-        return <FilesStep api={api} stub={client.kind === 'stub'} />;
+        return <FilesStep api={api} stub={client.kind === 'stub'} onToggleStub={onToggleStub} />;
       case 'scale':
         return <ScaleStep api={api} />;
       case 'sheet':
-        return <SheetStep api={api} />;
+        // Keyed by sheet: the hand-grid form starts from THIS sheet's tiles.
+        return <SheetStep key={session.sheet?.sheet.id ?? -1} api={api} />;
       case 'sizes':
         return <SizesStep api={api} card={card} />;
       case 'pieces':
@@ -254,11 +287,7 @@ export function ImportWizard({
               )}
               <div className='min-w-0 flex-1'>
                 {session.error ? (
-                  <CalloutBox tone='error' className='py-1'>
-                    <Text size='micro' component='p'>
-                      <b>! stage failed:</b> {session.error}
-                    </Text>
-                  </CalloutBox>
+                  <StageMessage code={api.errorCode} message={session.error} />
                 ) : blocker ? (
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}
@@ -299,5 +328,43 @@ export function ImportWizard({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/**
+ * The footer's word on a failed request. A stage that is not built yet is not a failure of the
+ * file: it reads as a note (where the import stops today), not as red. A stop is the operator's own.
+ */
+function StageMessage({ code, message }: { code: string | null; message: string }) {
+  if (code === 'stage-unavailable')
+    return (
+      <CalloutBox tone='note' className='py-1'>
+        <Text size='micro' component='p'>
+          <b>not built yet:</b> {message}
+        </Text>
+      </CalloutBox>
+    );
+  if (code === 'cancelled')
+    return (
+      <Text size='micro' component='p' className='text-labelColor'>
+        {message}
+      </Text>
+    );
+  const head =
+    code === 'unsupported-format'
+      ? 'cannot read the files'
+      : code === 'corrupt'
+        ? 'the file is damaged'
+        : code === 'crashed'
+          ? 'the importer stopped'
+          : code === 'no-session'
+            ? 'the run was lost'
+            : 'stage failed';
+  return (
+    <CalloutBox tone='error' className='py-1'>
+      <Text size='micro' component='p'>
+        <b>! {head}:</b> {message}
+      </Text>
+    </CalloutBox>
   );
 }

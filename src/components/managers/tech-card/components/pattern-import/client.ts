@@ -3,8 +3,9 @@
 // The wizard is written against the CONTRACT (lib/pattern-import/types.ts §11), not against an
 // implementation: the stage API is `StageIO`, the worker protocol is open → run* → close. Phase 1
 // ships a stub behind these seams (stub-client.ts) so every step renders on fixture data; the real
-// `ImportWorkerClient` (lib/pattern-import/worker/client.ts), the AI namer (F10) and the atomic
-// apply (F7 fabrics/apply.ts) plug into the same three types without the steps changing.
+// `ImportWorkerClient` (lib/pattern-import/worker/client.ts, F13b) satisfies `ImportClient`
+// structurally, the AI namer (F10) is `ai-namer.ts`, and the atomic apply (F7 fabrics/apply.ts)
+// plugs into the same types without the steps changing. The stub stays for fixture mode.
 import type {
   ApplyResult,
   CardDraft,
@@ -35,6 +36,10 @@ export interface ImportClient {
   /** Cancels whatever is running (terminate + respawn is the worker's hard fallback). */
   cancel(): void;
   close(sessionId: number): Promise<void>;
+  /** False once the worker was restarted (hard cancel, crash): the session's state is gone. */
+  alive?(sessionId: number): boolean;
+  /** Ends the worker for good (the wizard unmounted). */
+  dispose?(): void;
 }
 
 /** The card as the wizard sees it: read once when the wizard opens, never written by the steps. */

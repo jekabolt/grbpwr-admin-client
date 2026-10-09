@@ -1144,6 +1144,14 @@ export type StageIO = {
       pages: PageClassification[];
       scale: ScaleCandidate[];
       warnings: string[];
+      /**
+       * The input is a garment DXF whose blocks already ARE pieces × sizes (F8 `dxfFastPath`): the
+       * worker answers assemble / chains / pieces from the segmentation and the wizard skips the
+       * sheet, legend and seed steps.
+       */
+      presegmented?: boolean;
+      /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
+      calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
     };
   };
   scale: { in: { decision: ScaleDecision }; out: { applied: ScaleDecision } };
@@ -1200,6 +1208,23 @@ export type StageIO = {
   };
 };
 
+/**
+ * Why a worker request failed, so the wizard can say what to do (the message is for the operator):
+ * `stage-unavailable` — that stage's module has not landed yet (honest placeholder, no fake data);
+ * `unsupported-format` / `corrupt` — the file itself; `cancelled` — the operator stopped it;
+ * `no-session` — the worker was restarted (hard cancel, crash) and the files must be read again;
+ * `out-of-order` — a stage ran before what it needs; `crashed` — the worker died (memory).
+ */
+export type ImportErrorCode =
+  | 'stage-unavailable'
+  | 'unsupported-format'
+  | 'corrupt'
+  | 'cancelled'
+  | 'no-session'
+  | 'out-of-order'
+  | 'crashed'
+  | 'internal';
+
 export type ImportWorkerRequest =
   | { type: 'open'; id: number; files: { name: string; bytes: ArrayBuffer }[] }
   | {
@@ -1220,7 +1245,7 @@ export type ImportWorkerResponse =
   | {
       [S in StageName]: { type: 'result'; id: number; stage: S; output: StageIO[S]['out'] };
     }[StageName]
-  | { type: 'error'; id: number; stage?: StageName; message: string }
+  | { type: 'error'; id: number; stage?: StageName; code?: ImportErrorCode; message: string }
   | { type: 'closed'; id: number; sessionId: number };
 
 export type WizardStep =
