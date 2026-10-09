@@ -10,21 +10,25 @@ import type { PieceDTO } from '../../src/lib/nesting/types';
 import { parseSheets } from '../../src/lib/nesting/worker/parse-files';
 import {
   buildSeamGraph,
+  compositeSeams,
   edgeIdsOf,
   runsOf,
   scoreRuns,
   seamPieceOf,
   type MatchRules,
 } from '../../src/lib/assembly-skeleton/geometry';
+import { groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
 import type {
   PieceGeom,
+  SeamCandidate,
   SeamGraph,
   SkeletonBomFacts,
   SkeletonCategory,
   SkeletonFacts,
 } from '../../src/lib/assembly-skeleton/types';
 
-export { ALL_RULES, PROBE_RULES } from '../../src/lib/assembly-skeleton/geometry';
+export { ALL_RULES, PROBE_RULES, compositeSeams } from '../../src/lib/assembly-skeleton/geometry';
+export { groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
 
 /**
  * Why each truth pair was (not) taken: its own score as a single-edge pair and which chosen seam
@@ -116,11 +120,27 @@ export async function loadFacts(
   };
 }
 
-export function run(facts: SkeletonFacts, rules: MatchRules): { graph: SeamGraph; ms: number } {
+/**
+ * A3 alone, or (`a4`) the product pipeline: A3 → lane B's units → A4 composite second pass — the
+ * same order the tech card's provider runs.
+ */
+export function run(
+  facts: SkeletonFacts,
+  rules: MatchRules,
+  a4 = false,
+): { graph: SeamGraph; ms: number } {
   const t0 = performance.now();
   const graph = buildSeamGraph(facts, rules);
-  return { graph, ms: performance.now() - t0 };
+  if (!a4) return { graph, ms: performance.now() - t0 };
+  const units = groupUnits(graph, facts, orderTemplate(facts.category));
+  return { graph: compositeSeams(graph, units), ms: performance.now() - t0 };
 }
+
+/** Both sides of a seam as edge-id sets (a composite side is all its parts). */
+const sidesOf = (c: SeamCandidate) => [
+  new Set(c.aParts ?? edgeIdsOf(c.a)),
+  new Set(c.bParts ?? edgeIdsOf(c.b)),
+];
 
 // ── truth ────────────────────────────────────────────────────────────────────────────────────
 
@@ -130,8 +150,15 @@ type ProbeOut = {
   pieces: { id: string; rs: [number, number][] }[];
   edgeIdx: { piece: string; k: number; s: number; e: number }[];
 };
+/**
+ * A composite truth as pieces: the two sides of a composite join, each a set of piece keys
+ * (the truth files carry them as prose, `composite: [...]`; the probe restates them).
+ */
+export type CompositeTruth = { label: string; a: string[]; b: string[] };
+
 export type Truth = {
   pairs: [string, string][];
+  compositePairs?: CompositeTruth[];
   acceptable?: [string, string][];
   wrong_by_design_knowledge?: string[];
 };
@@ -195,6 +222,10 @@ export function labelMapper(
 export type Score = {
   truth: number;
   chosen: number;
+  /** Composite seams that meet a composite truth / partial and composite seams chosen. */
+  composite: number;
+  partial: number;
+  compositeChosen: number;
   recovered: number;
   acceptable: number;
   wrong: number;
@@ -207,7 +238,7 @@ export type Score = {
 };
 
 export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string[]): Score {
-  const sets = graph.chosen.map((c) => [new Set(edgeIdsOf(c.a)), new Set(edgeIdsOf(c.b))]);
+  const sets = graph.chosen.map(sidesOf);
   const covers = ([ta, tb]: [string, string], [x, y]: Set<string>[]) => {
     const A = map(ta);
     const B = map(tb);
@@ -224,7 +255,22 @@ export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string
   }
   let acceptable = 0;
   const wrongPairs: string[] = [];
+  // A composite seam is right when its two sides' pieces meet a composite truth's two sides.
+  const piecesOf = (ids: Set<string>) =>
+    new Set([...ids].map((id) => id.slice(0, id.lastIndexOf('#'))));
+  const meets = (x: Set<string>, ks: string[]) => ks.some((k) => x.has(k));
+  let composite = 0;
   graph.chosen.forEach((c, i) => {
+    if (c.kind === 'composite') {
+      const [pa, pb] = sets[i].map(piecesOf);
+      const ok = (truth.compositePairs ?? []).some(
+        (t) => (meets(pa, t.a) && meets(pb, t.b)) || (meets(pa, t.b) && meets(pb, t.a)),
+      );
+      if (ok) {
+        composite++;
+        return;
+      }
+    }
     if (truth.pairs.some((t) => covers(t, sets[i]))) return;
     if ((truth.acceptable ?? []).some((t) => covers(t, sets[i]))) acceptable++;
     else wrongPairs.push(`${c.a}~${c.b}`);
@@ -234,6 +280,9 @@ export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string
   return {
     truth: truth.pairs.length,
     chosen,
+    composite,
+    partial: graph.chosen.filter((c) => c.kind === 'partial').length,
+    compositeChosen: graph.chosen.filter((c) => c.kind === 'composite').length,
     recovered,
     acceptable,
     wrong: wrongPairs.length,
@@ -256,8 +305,8 @@ export function pairsBetween(
   const R = new Set(right);
   return graph.chosen
     .filter((c) => {
-      const a = edgeIdsOf(c.a);
-      const b = edgeIdsOf(c.b);
+      const a = c.aParts ?? edgeIdsOf(c.a);
+      const b = c.bParts ?? edgeIdsOf(c.b);
       return (
         (a.some((e) => L.has(e)) && b.some((e) => R.has(e))) ||
         (a.some((e) => R.has(e)) && b.some((e) => L.has(e)))

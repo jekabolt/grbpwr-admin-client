@@ -144,7 +144,8 @@ export type Run = {
   turnEnd: number;
 };
 
-const cornerTurn = (piece: PieceGeom, idx: number) =>
+/** Turn (deg, + convex) of the contour at resample index `idx`, over the corner window. */
+export const cornerTurn = (piece: PieceGeom, idx: number) =>
   piece.rs.length
     ? angleAt(
         piece.rs,

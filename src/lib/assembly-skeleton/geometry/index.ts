@@ -30,3 +30,4 @@ export {
 } from './match';
 export { drillPoints, seamLoopOf, seamPieceOf, segmentPiece } from './segment';
 export { handOf, handStem, shapeRelation, twinKind, twins } from './twins';
+export { boundaryRuns, compositeSeams, type CompositeOptions } from './composite';

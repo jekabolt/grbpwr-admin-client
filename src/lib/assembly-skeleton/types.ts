@@ -124,6 +124,12 @@ export type SeamCandidate = {
   score: number;
   evidence: SeamEvidence;
   kind: 'edge' | 'partial' | 'composite' | 'surface' | 'closure-not-seam';
+  /**
+   * Composite side (A4): every edge of the glued run, in walk order, across pieces. `a` / `b` is
+   * then the run's longest part — the edge a pictogram hangs the other side on.
+   */
+  aParts?: EdgeId[];
+  bParts?: EdgeId[];
   /** Alternatives within SKELETON.ambiguity of this score. */
   ambiguousWith?: SeamCandidate[];
 };
