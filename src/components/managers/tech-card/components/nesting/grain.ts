@@ -7,6 +7,7 @@
 // деталей нарисованы под 90°, а в другом 24 под 0° и 22 под 90°. Значит поворот обязан быть
 // ПОДЕТАЛЬНЫМ; общий поворот листа починил бы один файл и сломал другой.
 import type { PieceDTO } from 'lib/nesting/types';
+import { manifestFactsOf } from './manifest-facts';
 
 export type GrainLayerOption = {
   layer: string;
@@ -17,6 +18,9 @@ export type GrainLayerOption = {
   // Медианная длина отрезка. Долевую рисуют заметной линией, а внутренние линии бывают и
   // длиннее, и короче вразнобой — но при прочих равных длина различает лучше, чем имя слоя.
   medianLengthCm: number;
+  // СЛОЙ ДОЛЕВОЙ, ЗАЯВЛЕННЫЙ МАНИФЕСТОМ КОНВЕРТАЦИИ (F6b): каждая деталь с блоком пришла из файла с
+  // манифестом, и все они назвали этот слой. Ключа нет — заявления нет, порядок прежний.
+  declared?: true;
 };
 
 export function grainLayerOptions(pieces: readonly PieceDTO[]): GrainLayerOption[] {
@@ -51,7 +55,7 @@ export function grainLayerOptions(pieces: readonly PieceDTO[]): GrainLayerOption
     const s = [...xs].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
-  return [...stat.values()]
+  const out: GrainLayerOption[] = [...stat.values()]
     .map((s) => ({
       layer: s.layer,
       exactlyOne: s.exactlyOne,
@@ -64,6 +68,20 @@ export function grainLayerOptions(pieces: readonly PieceDTO[]): GrainLayerOption
       (a, b) =>
         b.exactlyOne - a.exactlyOne || b.medianLengthCm - a.medianLengthCm || b.seen - a.seen,
     );
+  // ЗАЯВЛЕННАЯ ДОЛЕВАЯ ВПЕРЕДИ (F6b). Длина — хорошая улика у лекальщика, но плохая у конвертера:
+  // развёрнутая деталь со сгиба несёт линию сгиба (слой 8) одним прямым отрезком через всю высоту,
+  // и по длине она обгоняет настоящую долевую (K1, кейс d). Только когда манифест есть у КАЖДОЙ
+  // детали с блоком и все называют один слой: пачка, где рядом лежит файл лекальщика, решается по
+  // прежнему правилу целиком.
+  const blocked = pieces.filter((p) => !!p.blockName);
+  const named = new Set(blocked.map((p) => manifestFactsOf(p)?.grainLayer ?? ''));
+  const declared = named.size === 1 ? [...named][0] : '';
+  const at = declared ? out.findIndex((o) => o.layer === declared) : -1;
+  if (at >= 0) {
+    const [hit] = out.splice(at, 1);
+    out.unshift({ ...hit, declared: true });
+  }
+  return out;
 }
 
 export function defaultGrainLayer(options: readonly GrainLayerOption[]): string {

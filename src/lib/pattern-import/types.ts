@@ -133,6 +133,40 @@ export type IRPage = {
   rasters: IRRaster[];
   /** OCG / layer names present, in file order. */
   layers: string[];
+  /**
+   * Raster pages only (F11): the correction already applied to every coordinate of this page
+   * (test square or inherited scanner factor). Absent on vector pages.
+   */
+  calibration?: RasterCalibration;
+};
+
+/** A printed test square found on a traced raster page (F11 `calibrate`). */
+export type RasterSquare = {
+  page: PageIndex;
+  /** Corners as traced (page frame, before correction), counter-clockwise from min-angle. */
+  cornersMm: PtMm[];
+  /** Mean of opposite sides, as traced. */
+  measuredWMm: Mm;
+  measuredHMm: Mm;
+  /** Orientation of the "horizontal" pair vs the page x axis. */
+  angleDeg: number;
+  /** Deviation of the corner angle from 90°. */
+  skewDeg: number;
+  /** Side the square is declared to have (ref or the matched candidate). */
+  sideMm: Mm;
+  /** RMS of the 4 corners after the fitted affine, mm. */
+  residualMm: Mm;
+};
+
+/** Per-page raster correction (F11): traced page frame → true mm. */
+export type RasterCalibration = {
+  method: 'test-square' | 'inherited' | 'none';
+  /** Traced page frame → corrected page frame (true mm). Identity for 'none'. */
+  affine: Affine;
+  square: RasterSquare | null;
+  /** 0..1: square with a declared/matched side 0.95, inherited 0.5, none 0. */
+  confidence: number;
+  notes: string[];
 };
 
 export type SourceFileInfo = {
@@ -231,6 +265,9 @@ export type PagePose = {
   page: PageIndex;
   /** Page frame → sheet frame. */
   toSheet: Affine;
+  /** The page's own size (IRPage.widthMm/heightMm) — the wizard draws the tile outline from it. */
+  widthMm: Mm;
+  heightMm: Mm;
   /** Row/column in the tile grid when known. */
   row?: number;
   col?: number;
@@ -396,6 +433,7 @@ export type SizeEncoding =
   | 'color'
   | 'file-per-size'
   | 'text-label'
+  | 'dxf-block' // sizes come from DXF block names / AAMA SIZE labels (adapters/dxf fast path)
   | 'single'; // one size in the file (BLAZER M)
 
 export type SourceSize = {
@@ -473,6 +511,8 @@ export type PieceCandidate = {
   p95Mm: Mm;
   /** Fill gap when outcome = 'leak': where the outside got in. */
   leakAt?: PtMm;
+  /** Features already known at segmentation (DXF fast path: notches, drills, grain). */
+  features?: Feature[];
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
@@ -652,10 +692,29 @@ export type SemanticsInput = {
   families: PieceFamily[];
   /** File-level allowance decision; per-piece overrides live in `pieceOverrides`. */
   fileAllowance: AllowanceDecision;
+  /**
+   * Operator answers per seed. Names travel here (not only in the wizard) so `displayName`,
+   * `nameOrigin` (incl. the 'ai-auto' flag) and `aiConfidence` reach PieceSpec → ManifestPiece;
+   * `fused` comes from the fabrics step (interlining not in BOM, owner decision 14).
+   */
   pieceOverrides: Partial<
     Record<
       SeedId,
-      Partial<Pick<PieceSpec, 'allowance' | 'pairHand' | 'unfoldedFold' | 'code' | 'mods'>>
+      Partial<
+        Pick<
+          PieceSpec,
+          | 'allowance'
+          | 'pairHand'
+          | 'unfoldedFold'
+          | 'code'
+          | 'mods'
+          | 'displayName'
+          | 'nameOrigin'
+          | 'aiConfidence'
+          | 'piecesPerGarment'
+          | 'fused'
+        >
+      >
     >
   >;
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
@@ -674,6 +733,10 @@ export type BlockReason =
   | 'offset-self-intersection'
   | 'offset-topology'
   | 'leak'
+  /** Two seeds share one fill region — split them (lasso) before export. */
+  | 'merged'
+  /** Region below `minPieceAreaMm2` — not a piece unless the operator says so. */
+  | 'tiny'
   | 'non-monotone'
   | 'grammar'
   | 'duplicate-identity'

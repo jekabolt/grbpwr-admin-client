@@ -21,7 +21,7 @@ import type {
 } from '../types';
 import { isAsciiDxf } from './format';
 import { buildManifest } from './manifest-build';
-import { embedManifestLocal } from './manifest-local';
+import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
@@ -30,7 +30,7 @@ export { blockNameOf, pieceInScope, UNI_TOKEN } from './plan';
 export type { Plan, PlannedBlock } from './plan';
 
 export type WriteOptions = {
-  /** Manifest embedder; null = bare DXF. Default: the local stand-in until `manifest/` merges. */
+  /** Manifest embedder; null = bare DXF. Default: the shared `manifest/` `embedManifest`. */
   embed?: EmbedManifestFn | null;
   /** Clock for `createdAt` (tests pin it). */
   now?: () => Date;

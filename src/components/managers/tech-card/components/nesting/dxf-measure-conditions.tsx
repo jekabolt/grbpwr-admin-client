@@ -29,7 +29,7 @@ import type { TechCardFormData } from '../schema';
 import { clampSeamAllowanceMm, engineCmToMm, MAX_SEAM_ALLOWANCE_MM } from './allowance-units';
 import { useCardDxfPack } from './card-dxf-pack';
 import type { ContourAllowance } from './contour-allowance';
-import { layerAllowanceLabel, type LayerOption } from './contour-layer';
+import { contourIsCutLine as contourCarriesCutLine, layerAllowanceLabel, type LayerOption } from './contour-layer';
 import { applyLayerOptions, applySeamPrefill } from './dxf-apply-conditions';
 import { useDxfGeometry, useDxfIndex, type DxfBundle, type DxfIndex } from './dxf-geometry';
 import { isFetchFailure } from './dxf-warnings';
@@ -129,7 +129,7 @@ export function useDxfMeasureConditions(control: Control<TechCardFormData>): Dxf
   // слое лежит ЛИНИЯ КРОЯ, добавленный сверху офсет посчитает припуск ДВАЖДЫ и раздует площадь по
   // всему периметру каждой детали. Прифилл ставит здесь 0 сам, но оператор может напечатать своё.
   const measured = chosenOption?.allowance ?? null;
-  const contourIsCutLine = measured?.verdict === 'cut' && (measured.allowanceCm ?? 0) > 0;
+  const contourIsCutLine = contourCarriesCutLine(measured);
   const doubleAllowance = contourIsCutLine && seamValue > 0;
 
   // ЧАСТИЧНО НЕ СКАЧАННАЯ ПАЧКА — не «просто предупреждение». Если свежий лист не скачался, а старая

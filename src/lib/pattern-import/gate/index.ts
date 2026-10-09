@@ -24,7 +24,10 @@ import type {
 import { PATIMPORT } from '../types';
 import { applyAffine, bboxOf } from '../write/geom';
 import { type WriteDetail, writeDxfDetailed } from '../write';
-import { embedManifestLocal, readManifestLocal } from '../write/manifest-local';
+import {
+  embedManifest as embedManifestLocal,
+  readManifest as readManifestLocal,
+} from '../manifest';
 import { LAYERS } from '../write/manifest-build';
 import {
   buildCtx,
@@ -49,7 +52,7 @@ import type { CardBlockRules } from './rules';
 export { roundTrip } from './roundtrip';
 export type { CardBlockRules } from './rules';
 export { readRawDxf } from './reader';
-export { identityGrammarProblem } from './grammar';
+export { identityGrammarProblem, identityProblem } from '../manifest/identity';
 
 export const passedOf = (checks: readonly GateCheck[]) =>
   checks.every((c) => c.ok || c.severity === 'warn');

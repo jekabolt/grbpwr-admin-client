@@ -38,6 +38,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     failedFiles,
     skippedBlocks,
     blockNames,
+    manifests,
   } = await parseSheets(sheets, opts);
 
   // Every file failed → that's an error, not a note with an empty piece list.
@@ -65,6 +66,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     failedFiles,
     skippedBlocks,
     blockNames,
+    manifests,
   });
 }
 
