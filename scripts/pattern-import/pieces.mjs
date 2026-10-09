@@ -22,6 +22,23 @@ await esbuild({
   logLevel: 'warning',
   absWorkingDir: REPO,
   external: ['pdfjs-dist', 'pdfjs-dist/*'],
+  // PATIMPORT_F3_FROM=<other worktree>/src/lib/pattern-import: read chains/ + sizes/ from another
+  // lane (read-only) to preview F4 on its classes — never used by the acceptance run
+  plugins: process.env.PATIMPORT_F3_FROM
+    ? [
+        {
+          name: 'f3-from',
+          setup(b) {
+            b.onResolve({ filter: /^lib\/pattern-import\/(chains|sizes)\// }, (a) => ({
+              path: resolve(
+                process.env.PATIMPORT_F3_FROM,
+                a.path.replace(/^lib\/pattern-import\//, '') + '.ts',
+              ),
+            }));
+          },
+        },
+      ]
+    : [],
   alias: {
     lib: resolve(REPO, 'src/lib'),
     components: resolve(REPO, 'src/components'),

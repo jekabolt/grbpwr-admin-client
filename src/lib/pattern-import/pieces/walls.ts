@@ -82,7 +82,13 @@ export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
   const out: WallItem[] = [];
   for (const id of ids) {
     const c = set.chains[id];
-    if (c && c.pts.length >= 2) out.push({ chain: c.id, pts: c.pts, closed: c.closed });
+    // a loop drawn as an open chain whose ends meet is closed for snapping (a run may cross its seam)
+    if (c && c.pts.length >= 2)
+      out.push({
+        chain: c.id,
+        pts: c.pts,
+        closed: c.closed || (c.pts.length > 3 && dist(c.pts[0], c.pts[c.pts.length - 1]) < 0.5),
+      });
   }
   return out;
 }
@@ -140,8 +146,10 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
       for (const [o, b] of best) {
         if (b.d > sideMm || b.d < 0.05) continue;
         const op = set.chains[o].pts;
-        const atEnd = (b.u <= 0 && b.i === 0) || (b.u >= 1 && b.i + 2 === op.length);
-        if (atEnd) continue;
+        // the foot within 3 mm (along the line) of its end counts as the end: chains often finish
+        // with a short hook (a zigzag's last tooth) that would otherwise look "beside"
+        const fromEnd = Math.min(arcTo(op, b.i, b.u), arcFrom(op, b.i, b.u));
+        if (fromEnd < 3) continue;
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;
@@ -398,4 +406,17 @@ export function frameLike(pts: readonly PtMm[], minRunMm = 60): boolean {
   }
   flush();
   return total >= minRunMm && framed >= 0.9 * total;
+}
+
+/** Arc length from the start of a polyline to (segment i, parameter u). */
+function arcTo(pts: PtMm[], i: number, u: number): number {
+  let L = 0;
+  for (let k = 0; k < i; k++) L += dist(pts[k], pts[k + 1]);
+  return L + u * dist(pts[i], pts[i + 1]);
+}
+/** Arc length from (segment i, parameter u) to the end of a polyline. */
+function arcFrom(pts: PtMm[], i: number, u: number): number {
+  let L = (1 - u) * dist(pts[i], pts[i + 1]);
+  for (let k = i + 1; k + 1 < pts.length; k++) L += dist(pts[k], pts[k + 1]);
+  return L;
 }

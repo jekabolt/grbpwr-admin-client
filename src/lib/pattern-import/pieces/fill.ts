@@ -73,7 +73,7 @@ function grow(b: BoxMm, m: number): BoxMm {
   return { minX: b.minX - m, minY: b.minY - m, maxX: b.maxX + m, maxY: b.maxY + m };
 }
 
-/** Nearest pixel to p that is not a wall (≤ 8 px away), preferring non-exterior ones. */
+/** Nearest pixel to p that is not a wall (≤ 8 px away); among equally near ones, a non-exterior one. */
 function seedPixel(g: Grid, wall: Uint8Array, ext: Uint8Array | null, p: PtMm) {
   const x0 = g.ix(p.x);
   const y0 = g.iy(p.y);
@@ -97,17 +97,116 @@ function seedPixel(g: Grid, wall: Uint8Array, ext: Uint8Array | null, p: PtMm) {
           bestExt = isExt;
         }
       }
-    if (best >= 0 && !bestExt) break;
+    // the nearest ring with a free pixel decides (inside it, a non-exterior pixel wins): never
+    // walk further to dodge a leak — a seed hopping into a notch circle hides the real gap
+    if (best >= 0) break;
   }
   if (best < 0) best = Math.max(0, Math.min(g.W * g.H - 1, y0 * g.W + x0));
   return { k: best, movedMm: Math.sqrt(bd === Infinity ? 0 : bd) * g.cell };
 }
 
-/** Thicken the walls until the seed is enclosed; the mouth is where a walk from the seed leaves. */
-function leakMouth(g: Grid, wall: Uint8Array, k: number): PtMm | undefined {
+/**
+ * Where the outside gets in. With a `ref` outline (the same piece closed at another rank) the
+ * walk from the seed runs until it is outside `ref` grown by 15 mm (a concave edge of a larger size
+ * lies inside a smaller one); the mouth is the narrowest point of that path.
+ * Without one, the walls are thickened 1–4 mm until the seed is enclosed and the mouth is where the
+ * walk leaves that closure. Undefined when neither finds it (a gap wider than 8 mm).
+ */
+function leakMouth(g: Grid, wall: Uint8Array, k: number, ref?: PtMm[]): PtMm | undefined {
+  const W = g.W;
+  const bfsOut = (inside: (c: number) => boolean) => {
+    const seen = new Uint8Array(wall.length);
+    const from = new Int32Array(wall.length).fill(-1);
+    const q = new Int32Array(wall.length);
+    let h = 0;
+    let t = 0;
+    q[t++] = k;
+    seen[k] = 1;
+    while (h < t) {
+      const c = q[h++];
+      const y = (c / W) | 0;
+      const x = c - y * W;
+      if (!inside(c)) {
+        // back along the path: the gap is its narrowest point — walls close on BOTH sides
+        const reach = 8;
+        const toWall = (px: number, py: number, dx: number, dy: number) => {
+          for (let d = 1; d <= reach; d++) {
+            const xx = px + dx * d;
+            const yy = py + dy * d;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= g.H) return Infinity;
+            if (wall[yy * W + xx]) return d;
+          }
+          return Infinity;
+        };
+        let best = c;
+        let bw = Infinity;
+        for (let p = c; p >= 0; p = from[p]) {
+          const py = (p / W) | 0;
+          const px = p - py * W;
+          for (const [dx, dy] of [
+            [1, 0],
+            [0, 1],
+            [1, 1],
+            [1, -1],
+          ]) {
+            const span = toWall(px, py, dx, dy) + toWall(px, py, -dx, -dy);
+            if (span < bw) {
+              bw = span;
+              best = p;
+            }
+          }
+        }
+        const by = (best / W) | 0;
+        return g.centre(best - by * W, by);
+      }
+      const nb = [
+        x > 0 ? c - 1 : -1,
+        x + 1 < W ? c + 1 : -1,
+        y > 0 ? c - W : -1,
+        y + 1 < g.H ? c + W : -1,
+      ];
+      for (const j of nb) {
+        if (j < 0 || seen[j] || wall[j]) continue;
+        seen[j] = 1;
+        from[j] = c;
+        q[t++] = j;
+      }
+    }
+    return undefined;
+  };
+  if (ref && ref.length > 2) {
+    // ref polygon rasterised and grown by 3 mm
+    const inRef = new Uint8Array(wall.length);
+    const grow = Math.ceil(15 / g.cell);
+    for (let j = 0; j < g.H; j++) {
+      const y = g.box.maxY - (j - 1 + 0.5) * g.cell;
+      const xs: number[] = [];
+      for (let i = 0, m = ref.length - 1; i < ref.length; m = i++) {
+        const a = ref[i];
+        const c = ref[m];
+        if (a.y > y !== c.y > y) xs.push(a.x + ((y - a.y) * (c.x - a.x)) / (c.y - a.y));
+      }
+      xs.sort((p, q) => p - q);
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        const i0 = Math.max(0, g.ix(xs[i]) - grow);
+        const i1 = Math.min(W - 1, g.ix(xs[i + 1]) + grow);
+        for (let x = i0; x <= i1; x++) inRef[j * W + x] = 1;
+      }
+    }
+    // vertical growth
+    const grown = inRef.slice();
+    for (let j = 0; j < g.H; j++)
+      for (let x = 0; x < W; x++)
+        if (inRef[j * W + x])
+          for (let d = 1; d <= grow; d++) {
+            if (j - d >= 0) grown[(j - d) * W + x] = 1;
+            if (j + d < g.H) grown[(j + d) * W + x] = 1;
+          }
+    const p = bfsOut((c) => grown[c] === 1);
+    if (p) return p;
+  }
   for (const r of [2, 4, 8]) {
     const thick = new Uint8Array(wall.length);
-    const W = g.W;
     for (let y = 0; y < g.H; y++)
       for (let x = 0; x < W; x++) {
         if (!wall[y * W + x]) continue;
@@ -123,35 +222,10 @@ function leakMouth(g: Grid, wall: Uint8Array, k: number): PtMm | undefined {
     if (thick[k]) continue;
     const ext2 = exterior(g, thick);
     if (ext2[k]) continue;
-    // region of the closure (not exterior), then BFS from the seed over original non-wall pixels
     const inside = new Uint8Array(wall.length);
     flood(g, ext2, [k], inside);
-    const seen = new Uint8Array(wall.length);
-    const q = new Int32Array(wall.length);
-    let h = 0;
-    let t = 0;
-    q[t++] = k;
-    seen[k] = 1;
-    while (h < t) {
-      const c = q[h++];
-      if (!inside[c]) {
-        const y = (c / W) | 0;
-        return g.centre(c - y * W, y);
-      }
-      const y = (c / W) | 0;
-      const x = c - y * W;
-      const nb = [
-        x > 0 ? c - 1 : -1,
-        x + 1 < W ? c + 1 : -1,
-        y > 0 ? c - W : -1,
-        y + 1 < g.H ? c + W : -1,
-      ];
-      for (const j of nb) {
-        if (j < 0 || seen[j] || wall[j]) continue;
-        seen[j] = 1;
-        q[t++] = j;
-      }
-    }
+    const p = bfsOut((c) => inside[c] === 1);
+    if (p) return p;
   }
   return undefined;
 }
@@ -337,7 +411,7 @@ export function fillPiecesDetailed(
       };
       if (ctx.ext[k]) {
         cand.outcome = 'leak';
-        cand.leakAt = leakMouth(ctx.g, ctx.wall, k) ?? pts[si];
+        cand.leakAt = pts[si]; // refined after every rank is filled (leak mouths, below)
         out.set(seed.id, cand);
         continue;
       }
@@ -468,6 +542,31 @@ export function fillPiecesDetailed(
       if (c) cands.get(s.id)!.push(c);
     }
   }
+  // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
+  // (or, with no closed rank, the thickened-wall closure)
+  for (let r = 0; r < model.n; r++) {
+    const leaks = use
+      .map((s, si) => ({ s, si, c: cands.get(s.id)!.find((x) => x.rank === r) }))
+      .filter((x) => x.c && x.c.outcome === 'leak');
+    if (!leaks.length) continue;
+    const ownIds = model.mode === 'single' ? [] : model.byRank[r];
+    const ctx = buildRank(
+      box,
+      cell,
+      [...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]), ...lone].filter(
+        (it) => !excl.has(it.chain) && !knifeSet.has(it.chain),
+      ),
+    );
+    for (const { s, c } of leaks) {
+      const closed = cands
+        .get(s.id)!
+        .filter((x) => x.outcome === 'closed' && x.outer.length > 2)
+        .sort((a, b) => Math.abs(a.rank - r) - Math.abs(b.rank - r));
+      const at = shift(s.at, r);
+      const { k } = seedPixel(ctx.g, ctx.wall, null, at);
+      c!.leakAt = leakMouth(ctx.g, ctx.wall, k, closed[0]?.outer) ?? at;
+    }
+  }
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -486,6 +585,12 @@ export function fillPiecesDetailed(
 export function isMonotone(c: PieceCandidate[]): boolean {
   const a = c.filter((x) => x.outcome === 'closed').sort((x, y) => x.rank - y.rank);
   for (let i = 1; i < a.length; i++) if (a[i].areaMm2 <= a[i - 1].areaMm2 * 1.0005) return false;
+  // one size step changes a piece by a few per cent; a rank 25 % off the next closed one closed
+  // a different region (half a skirt behind a centre line, a neighbour's band) — not a grade
+  for (let i = 1; i < a.length; i++) {
+    const step = a[i].rank - a[i - 1].rank;
+    if (a[i].areaMm2 > a[i - 1].areaMm2 * (1 + 0.25 * step)) return false;
+  }
   return true;
 }
 

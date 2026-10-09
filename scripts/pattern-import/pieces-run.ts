@@ -248,6 +248,45 @@ export async function runPieces(mode: string, rest: string[], pick: Pick, prepar
     }
     return 0;
   }
+  if (mode === 'ascii') {
+    // ascii <sample> <rank> x y [half]: wall/exterior raster around a point (rank's pass-A walls)
+    const [id, rs, xs, ys, hs] = rest;
+    const p = await prepare(pick([id])[0]);
+    const m = wallModel(p.set, p.run);
+    const lone = lonePortions(p.set, m);
+    const resc = rescuedIgnored(p.set, m);
+    const { itemsOf } = await import('lib/pattern-import/pieces/walls');
+    const { Grid, drawPolyline, exterior } = await import('lib/pattern-import/pieces/raster');
+    const items = [...itemsOf(p.set, [...m.common, ...(m.byRank[+rs] ?? []), ...resc]), ...lone];
+    const b = p.sheet.bbox;
+    const g = new Grid(
+      { minX: b.minX - 15, minY: b.minY - 15, maxX: b.maxX + 15, maxY: b.maxY + 15 },
+      0.5,
+    );
+    const wall = new Uint8Array(g.W * g.H);
+    const owner = new Int32Array(g.W * g.H).fill(-1);
+    for (const it of items) {
+      const before = wall.slice();
+      drawPolyline(g, wall, it.pts, it.closed);
+      for (let k = 0; k < wall.length; k++) if (wall[k] && !before[k]) owner[k] = it.chain;
+    }
+    const ext = exterior(g, wall);
+    const cx = g.ix(+xs);
+    const cy = g.iy(+ys);
+    const h = +(hs ?? 12);
+    const seen = new Set<number>();
+    for (let y = cy - h; y <= cy + h; y++) {
+      let line = '';
+      for (let x = cx - h; x <= cx + h; x++) {
+        const k = y * g.W + x;
+        line += wall[k] ? '#' : ext[k] ? '.' : ' ';
+        if (owner[k] >= 0) seen.add(owner[k]);
+      }
+      console.log(line);
+    }
+    console.log('chains:', [...seen].join(' '));
+    return 0;
+  }
   if (mode === 'walls') {
     // walls <sample> <rank> x0 y0 w h [px]  (absolute sheet mm, y-up box from (x0,y0))
     const [id, rs, ...a] = rest;

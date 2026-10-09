@@ -63,9 +63,34 @@ export function variantKnives(sheet: Sheet, set: ChainSet, variant: string): Cha
   const out = new Set<ChainId>();
   for (const t of cutTexts(sheet, variant)) {
     const id = lineUnder(set, t);
-    if (id != null) out.add(id);
+    if (id == null) continue;
+    out.add(id);
+    // the same cutting line drawn once per size (an OCG per size): every chain on its carrier
+    for (const c of collinear(set, id)) out.add(c);
   }
   return [...out];
+}
+
+/** Straight chains lying on the carrier line of chain `id` (within 0.6 mm), overlapping its span ±50 mm. */
+function collinear(set: ChainSet, id: ChainId): ChainId[] {
+  const p = set.chains[id].pts;
+  const a = p[0];
+  const b = p[p.length - 1];
+  const L = dist(a, b);
+  if (L < 1) return [];
+  const t = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+  const off = (q: PtMm) => Math.abs((q.x - a.x) * t.y - (q.y - a.y) * t.x);
+  const along = (q: PtMm) => (q.x - a.x) * t.x + (q.y - a.y) * t.y;
+  if (p.some((q) => off(q) > 0.6)) return [];
+  const out: ChainId[] = [];
+  for (const c of set.chains) {
+    if (c.id === id || c.pts.length < 2 || c.lengthMm < 20) continue;
+    if (c.pts.some((q) => off(q) > 0.6)) continue;
+    const s = c.pts.map(along);
+    if (Math.max(...s) < -50 || Math.min(...s) > L + 50) continue;
+    out.push(c.id);
+  }
+  return out;
 }
 
 /** Variant choices for the operator: labels from the sheet and the instruction pages. */

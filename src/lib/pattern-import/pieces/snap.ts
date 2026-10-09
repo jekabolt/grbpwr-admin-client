@@ -40,9 +40,11 @@ class WallIndex {
   readonly per: number[];
   constructor(readonly items: WallItem[]) {
     this.pl = items.map((it) => {
-      if (!it.closed || it.pts.length < 3) return it.pts;
-      const ring = dist(it.pts[0], it.pts[it.pts.length - 1]) < 1e-9 ? it.pts.slice(0, -1) : it.pts;
-      return [...ring, ...ring, ring[0]];
+      const ring =
+        it.closed || (it.pts.length > 3 && dist(it.pts[0], it.pts[it.pts.length - 1]) < 0.5);
+      if (!ring || it.pts.length < 3) return it.pts;
+      const loop = dist(it.pts[0], it.pts[it.pts.length - 1]) < 0.5 ? it.pts.slice(0, -1) : it.pts;
+      return [...loop, ...loop, loop[0]];
     });
     this.cum = this.pl.map((pts) => {
       const c = [0];
@@ -204,7 +206,14 @@ export function snapOutline(raster: PtMm[], items: WallItem[], o: SnapOpts): Sna
       else runs.push({ kind: 'raw', item: -1, raw: [samples[i]] });
     } else {
       const h = hits[i]!;
-      if (last && last.kind === 'wall' && last.item === lab[i]) last.hits.push(h);
+      // one run per continuous stretch: a jump along the item (crossing an open item's ends,
+      // which may meet) starts a new run
+      const jump =
+        last?.kind === 'wall' &&
+        last.item === lab[i] &&
+        !idx.per[lab[i]] &&
+        Math.abs(h.s - last.hits[last.hits.length - 1].s) > 5 * o.stepMm;
+      if (last && last.kind === 'wall' && last.item === lab[i] && !jump) last.hits.push(h);
       else runs.push({ kind: 'wall', item: lab[i], hits: [h] });
     }
   }
