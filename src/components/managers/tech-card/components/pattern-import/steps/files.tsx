@@ -4,6 +4,8 @@
 // extension's guess and the pages panel says what the file really is. The page classification is
 // shown at once so a wrong file is caught before the scale is asked about.
 import { useRef, useState } from 'react';
+import { refusalMessage } from 'lib/pattern-import/adapters/sniff/errors';
+import { refusalForName } from 'lib/pattern-import/adapters/sniff/native';
 import type { PageClass } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
@@ -146,6 +148,8 @@ export function FilesStep({
                           </Pill>
                         ) : kind ? (
                           KIND_LABEL[kind]
+                        ) : refusalForName(f.name) ? (
+                          <Pill tone='warn'>not read</Pill>
                         ) : (
                           <Pill tone='warn'>unknown format</Pill>
                         )}
@@ -167,6 +171,20 @@ export function FilesStep({
                 })}
               </tbody>
             </DataTable>
+          )}
+          {/* F17: a native CAD / office / archive file is named by its extension before reading,
+              with the export that makes it importable (the worker says the same after sniffing). */}
+          {staged.some((f) => !kindOfName(f.name) && refusalForName(f.name)) && (
+            <CalloutBox tone='warning' className='py-1'>
+              {staged.map((f) => {
+                const code = kindOfName(f.name) ? null : refusalForName(f.name);
+                return code ? (
+                  <Text key={f.name} size='micro' component='p'>
+                    <b>{f.name}:</b> {refusalMessage(code)}
+                  </Text>
+                ) : null;
+              })}
+            </CalloutBox>
           )}
 
           <div className='flex flex-wrap items-center gap-2'>

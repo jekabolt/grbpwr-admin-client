@@ -4,6 +4,7 @@
 import type { SourceKind } from '../../types';
 import type { UnsupportedCode } from './errors';
 import { looksLikeHpgl } from '../hpgl/tokenize';
+import { classifyNative } from './native';
 
 export type SniffRoute = 'pdf' | 'dxf' | 'hpgl' | 'svg' | 'raster';
 
@@ -17,6 +18,8 @@ export type SniffResult =
       gzip?: boolean;
       /** raster route: detected mime. */
       mime?: string;
+      /** pdf route: the trailer names an /Encrypt dictionary (may still open: owner-only). */
+      encrypted?: boolean;
       why: string;
     }
   | { route: null; refusal: UnsupportedCode; why: string };
@@ -64,7 +67,16 @@ export function sniffFormat(bytes: ArrayBuffer, name: string): SniffResult {
   const pdfAt = findPdfHeader(head.slice(0, 1024));
   if (pdfAt >= 0) {
     const isAi = e === 'ai' || /Adobe Illustrator|\/Illustrator\b|%AI\d?_/.test(head);
-    return { route: 'pdf', kind: isAi ? 'ai' : 'pdf', pdfOffset: pdfAt, why: `%PDF- at ${pdfAt}` };
+    const tail = u.length > HEAD ? latin1(u, u.length - HEAD) : head;
+    const encrypted =
+      /\/Encrypt\s*(\d+\s+\d+\s+R|<<)/.test(tail) || /\/Encrypt\s*(\d+\s+\d+\s+R|<<)/.test(head);
+    return {
+      route: 'pdf',
+      kind: isAi ? 'ai' : 'pdf',
+      pdfOffset: pdfAt,
+      ...(encrypted ? { encrypted } : {}),
+      why: `%PDF- at ${pdfAt}${encrypted ? ', /Encrypt' : ''}`,
+    };
   }
 
   // DOS-binary EPS (C5 D0 D3 C6): PostScript + preview, never a PDF stream.
@@ -130,6 +142,11 @@ export function sniffFormat(bytes: ArrayBuffer, name: string): SniffResult {
   if (/^\s*(999\s*\r?\n[^\n]*\r?\n\s*)*0\s*\r?\nSECTION\s*\r?\n/.test(text))
     return { route: 'dxf', kind: 'dxf', why: '0/SECTION' };
   if (looksLikeHpgl(head)) return { route: 'hpgl', kind: 'hpgl', why: 'plotter mnemonics' };
+
+  // F17 · not a format we read: say what it is and what to export (DWG, CLO/Gerber/Lectra/
+  // Optitex/Valentina natives, ZIPs, office documents, HEIC/PSD).
+  const native = classifyNative(u, e, head);
+  if (native) return { route: null, ...native };
 
   return { route: null, refusal: 'unknown-format', why: 'no known signature' };
 }

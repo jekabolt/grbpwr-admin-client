@@ -63,7 +63,7 @@ import {
   translate,
   type P,
 } from './geometry';
-import { decodeDxf, isOurDxf, num, tokenize, type Tag } from './tags';
+import { loadDxf, num, type Tag } from './tags';
 import { decodeLabel, decodeMText, decodeTextValue, type DecodedLabel } from './text';
 
 const MAX_DEPTH = 16;
@@ -1094,10 +1094,10 @@ export async function readDxf(
   progress?: Progress,
 ): Promise<DxfRead> {
   progress?.(0, 3, 'decode');
-  const dec = decodeDxf(file.bytes);
-  const tok = tokenize(dec.text);
+  const dec = loadDxf(file.bytes);
+  const tok = dec.tok;
   const raw = buildAst(tok.tags);
-  const manifest = isOurDxf(dec.text);
+  const manifest = dec.manifest;
   const modelLabels = modelLabelsOf(raw);
   const units = unitsOf(raw, modelLabels);
   const version = raw.header['$ACADVER']?.[0]?.value.trim() ?? null;
@@ -1171,7 +1171,7 @@ export async function readDxf(
   const dialect = detectDialect(raw, modelLabels, manifest, version);
   const author = modelLabels.find((l) => l.key === 'author')?.value;
   const product = modelLabels.find((l) => l.key === 'product')?.value;
-  const ezdxf = /EZDXF/i.test(dec.text.slice(0, 200_000));
+  const ezdxf = /EZDXF/i.test(dec.probeText);
   const producer =
     [version, author, product, ezdxf ? 'ezdxf' : null].filter(Boolean).join(' · ') || null;
 
@@ -1205,6 +1205,7 @@ export async function readDxf(
     producer,
     encoding: dec.encoding,
     encodingFallback: dec.fallback,
+    binary: dec.binary,
     units,
     manifest,
     modelLabels,

@@ -90,6 +90,8 @@ export type DxfMeta = {
   producer: string | null;
   encoding: string;
   encodingFallback: boolean;
+  /** Binary DXF and its group-code width (F17); null = ASCII. */
+  binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */

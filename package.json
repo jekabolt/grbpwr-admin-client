@@ -84,6 +84,7 @@
     "playground:prompt": "node scripts/playground-prompt-probe.mjs",
     "patimport:f12-fixtures": "node scripts/pattern-import/f12-fixtures.mjs",
     "patimport:f12": "node scripts/pattern-import/f12-vector.mjs",
+    "patimport:f17": "node scripts/pattern-import/f17.mjs",
     "patimport:semantics": "node scripts/pattern-import/semantics.mjs",
     "patimport:fabrics": "node scripts/pattern-import/fabrics.mjs",
     "fix": "yarn lint && yarn format",

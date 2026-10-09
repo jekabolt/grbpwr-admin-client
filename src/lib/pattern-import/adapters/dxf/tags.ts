@@ -4,11 +4,11 @@
 // 10-CLO-DXF-FORMAT §2.4-2.
 
 import { MANIFEST_TAG } from '../../types';
+import { dwgRelease, refusalHint } from '../sniff/errors';
+import { isBinaryDxf, readBinaryDxf, type BinaryDxfMode } from './binary';
 import { DxfImportError } from './errors';
 
 export type Tag = { code: number; value: string; /** 1-based line of the code */ line: number };
-
-const BINARY_SENTINEL = 'AutoCAD Binary DXF';
 
 export type DecodedDxf = {
   text: string;
@@ -18,20 +18,20 @@ export type DecodedDxf = {
   fallback: boolean;
 };
 
-/** Refuse binary DXF / DWG by their magic, then decode UTF-8 first, else the declared ANSI
- * codepage, else cp1251 (pattern-maker files, 10-CLO-DXF-FORMAT §2.4-9). */
+/** Refuse DWG by its magic, then decode UTF-8 first, else the declared ANSI codepage, else
+ * cp1251 (pattern-maker files, 10-CLO-DXF-FORMAT §2.4-9). Binary DXF never gets here (`loadDxf`). */
 export function decodeDxf(bytes: ArrayBuffer): DecodedDxf {
   const u8 = new Uint8Array(bytes);
   if (u8.length === 0) throw new DxfImportError('empty', 'the file is empty');
   const head = latin1(u8.subarray(0, 32));
-  if (head.startsWith(BINARY_SENTINEL)) {
+  const dwg = /^AC10\d\d/.exec(head) ?? /^AC1\d\d\d(?=\0)/.exec(head);
+  if (dwg) {
     throw new DxfImportError(
-      'binary-dxf',
-      'binary DXF is not supported — re-save the file as ASCII DXF from your CAD',
+      'dwg',
+      `This is a DWG drawing (${dwgRelease(dwg[0])}), not DXF. ${refusalHint('dwg')}`,
+      null,
+      refusalHint('dwg'),
     );
-  }
-  if (/^AC10\d\d/.test(head) || /^AC1\d\d\d\0/.test(head)) {
-    throw new DxfImportError('dwg', 'this is a DWG drawing, not DXF — export DXF from your CAD');
   }
   try {
     return {
@@ -71,6 +71,43 @@ export type Tokenized = {
    * stream on purpose — counted so the drop is visible. */
   innerComments: number;
 };
+
+export type LoadedDxf = {
+  tok: Tokenized;
+  encoding: string;
+  fallback: boolean;
+  /** Our manifest leads the file (`isOurDxf`). */
+  manifest: boolean;
+  /** Text to sniff the producer in (the head of the ASCII file / the binary's string values). */
+  probeText: string;
+  /** null = ASCII DXF. */
+  binary: BinaryDxfMode | null;
+};
+
+/** Bytes → the tag stream, for ASCII and binary DXF alike: everything after this is identical. */
+export function loadDxf(bytes: ArrayBuffer): LoadedDxf {
+  const u8 = new Uint8Array(bytes);
+  if (isBinaryDxf(u8)) {
+    const b = readBinaryDxf(u8);
+    return {
+      tok: b.tok,
+      encoding: b.encoding,
+      fallback: b.fallback,
+      manifest: b.manifest,
+      probeText: b.probeText,
+      binary: b.mode,
+    };
+  }
+  const dec = decodeDxf(bytes);
+  return {
+    tok: tokenize(dec.text),
+    encoding: dec.encoding,
+    fallback: dec.fallback,
+    manifest: isOurDxf(dec.text),
+    probeText: dec.text.slice(0, 200_000),
+    binary: null,
+  };
+}
 
 /** Pairs of lines → tags. Throws a typed `corrupt` / `not-dxf` on a broken stream. */
 export function tokenize(text: string): Tokenized {
