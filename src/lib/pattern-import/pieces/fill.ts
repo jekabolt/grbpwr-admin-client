@@ -43,6 +43,7 @@ import {
   landingPlugs,
   lonePortions,
   rescuedIgnored,
+  sheetModule,
   wallModel,
   type WallModel,
 } from './walls';
@@ -299,6 +300,7 @@ export function fillPiecesDetailed(
   const box = grow(sheet.bbox, 15);
   const lone = lonePortions(set, model);
   const rescued = rescuedIgnored(set, model);
+  const module = sheetModule(sheet);
   diag.rescued = rescued.length;
   const textCentres = sheet.texts.map((t) => ({
     id: t.id,
@@ -478,7 +480,7 @@ export function fillPiecesDetailed(
       if (merged)
         // a region holding several pieces bounded by frame-like lines: tile frames / a border
         for (const id of sn.walls)
-          if (!userExcl.has(id) && frameLike(set.chains[id].pts)) frames.add(id);
+          if (!userExcl.has(id) && frameLike(set.chains[id].pts, 60, module)) frames.add(id);
       // a label frame: the text seed sits in a small closed loop drawn around it (an oval round
       // "Piece 8 / cut x1 pair") — a decoration, not the piece; fill again without it
       if (

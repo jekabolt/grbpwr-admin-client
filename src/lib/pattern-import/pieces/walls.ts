@@ -382,15 +382,25 @@ export function rescuedIgnored(
   return cand.filter((id) => !grid2.has(id));
 }
 
-/** A chain made only of long axis-aligned straight runs (a tile frame, a sheet border). */
-export function frameLike(pts: readonly PtMm[], minRunMm = 60): boolean {
+/**
+ * A chain made only of long axis-aligned straight runs (a tile frame, a sheet border). With
+ * `module` (the tile pitches and page sizes), every run must also measure a whole number of them —
+ * a garment's straight centre-back or hem is axis-aligned too, but not 3 × 186 mm long.
+ */
+export function frameLike(pts: readonly PtMm[], minRunMm = 60, module: number[] = []): boolean {
   if (pts.length < 2) return false;
   let total = 0;
   let framed = 0;
   let runLen = 0;
   let runAxis = -1;
+  const onModule = (L: number) =>
+    !module.length ||
+    module.some((P) => {
+      const k = Math.round(L / P);
+      return k >= 1 && Math.abs(L - k * P) <= Math.max(2, 0.02 * L);
+    });
   const flush = () => {
-    if (runLen >= minRunMm) framed += runLen;
+    if (runLen >= minRunMm && onModule(runLen)) framed += runLen;
     runLen = 0;
   };
   for (let i = 1; i < pts.length; i++) {
@@ -419,4 +429,27 @@ function arcFrom(pts: PtMm[], i: number, u: number): number {
   let L = (1 - u) * dist(pts[i], pts[i + 1]);
   for (let k = i + 1; k + 1 < pts.length; k++) L += dist(pts[k], pts[k + 1]);
   return L;
+}
+
+/** Tile pitches and page sizes of a sheet (the lengths a frame line is made of). */
+export function sheetModule(sheet: {
+  poses: { toSheet: { e: number; f: number }; widthMm: number; heightMm: number }[];
+}): number[] {
+  const out = new Set<number>();
+  const step = (v: number[]) => {
+    const u = [...new Set(v.map((x) => Math.round(x * 10) / 10))].sort((a, b) => a - b);
+    const d: number[] = [];
+    for (let i = 1; i < u.length; i++) if (u[i] - u[i - 1] > 20) d.push(u[i] - u[i - 1]);
+    d.sort((a, b) => a - b);
+    return d.length ? d[d.length >> 1] : 0;
+  };
+  const px = step(sheet.poses.map((p) => p.toSheet.e));
+  const py = step(sheet.poses.map((p) => p.toSheet.f));
+  if (px) out.add(px);
+  if (py) out.add(py);
+  for (const p of sheet.poses) {
+    out.add(Math.round(p.widthMm));
+    out.add(Math.round(p.heightMm));
+  }
+  return [...out].filter((v) => v > 50);
 }
