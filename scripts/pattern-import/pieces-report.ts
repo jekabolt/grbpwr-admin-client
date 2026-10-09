@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  applyPieceEdits,
   fillPiecesDetailed,
   proposeSeeds,
   proposeVariants,
@@ -227,6 +228,71 @@ function negative(p: Prepared, sr: SampleRun, label: string) {
   };
 }
 
+/** applyPieceEdits on real families: reseed keeps the piece, not-a-piece drops, split cuts a merge. */
+function editChecks(p: Prepared, sr: SampleRun) {
+  const ctx = {
+    sheet: p.sheet,
+    set: p.set,
+    run: p.run,
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+  };
+  const byLabel = (l: string) =>
+    sr.seeds.find((s) => normLabel(seedLabel(s) ?? '') === normLabel(l));
+  const areas = (f?: PieceFamily) =>
+    f?.candidates.map((c) => `${c.outcome}:${Math.round(c.areaMm2 / 100)}`).join(' ');
+  const res: Record<string, unknown>[] = [];
+  if (p.sample.id === 'robe') {
+    const s = byLabel('67')!;
+    const before = sr.families.find((f) => f.seed === s.id);
+    const after = applyPieceEdits(
+      sr.families,
+      [{ kind: 'reseed', seed: s.id, at: { x: s.at.x + 40, y: s.at.y - 30 } }],
+      ctx,
+    );
+    const a2 = after.find((f) => f.seed === s.id);
+    res.push({
+      sample: 'robe',
+      edit: 'reseed 67 (+40,-30 mm)',
+      before: areas(before),
+      after: areas(a2),
+      pass: areas(before) === areas(a2),
+    });
+    const dropped = applyPieceEdits(sr.families, [{ kind: 'not-a-piece', seed: s.id }], ctx);
+    res.push({
+      sample: 'robe',
+      edit: 'not-a-piece 67',
+      families: `${sr.families.length} → ${dropped.length}`,
+      pass: dropped.length === sr.families.length - 1,
+    });
+  }
+  if (p.sample.id === 'blazer') {
+    const s = byLabel('MANGA')!;
+    const before = sr.families.find((f) => f.seed === s.id);
+    const lasso = [
+      { x: -10, y: 560 },
+      { x: 780, y: 560 },
+      { x: 780, y: 1035 },
+      { x: -10, y: 1035 },
+    ];
+    const after = applyPieceEdits(
+      sr.families,
+      [{ kind: 'split', seed: s.id, lassoMm: lasso }],
+      ctx,
+    );
+    const c = after.find((f) => f.seed === s.id)?.candidates[0];
+    res.push({
+      sample: 'blazer',
+      edit: 'split MANGA (merged with CUELLO) by a lasso y 560–1035',
+      before: areas(before),
+      after: c
+        ? `${c.outcome}:${Math.round(c.areaMm2 / 100)} cm² bbox ${Math.round(c.bbox.maxX - c.bbox.minX)}×${Math.round(c.bbox.maxY - c.bbox.minY)} coverage ${c.sourceCoverage.toFixed(3)}`
+        : 'none',
+      pass: !!c && c.outcome === 'closed',
+    });
+  }
+  return res;
+}
+
 export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise<number> {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const shots = resolve(REPORTS, 'F4-shots');
@@ -238,6 +304,7 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
   const ids = rest.length ? rest : Object.keys(PLAN);
   const out: Record<string, unknown>[] = [];
   const negs: Record<string, unknown>[] = [];
+  const edits: Record<string, unknown>[] = [];
   for (const s of pick(ids)) {
     const plan = PLAN[s.id];
     if (!plan) continue;
@@ -250,7 +317,9 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
     const rows = rowsOf(sr, truth, plan.skip ?? {});
     const traceable = rows.filter((r) => !r.note?.startsWith('not traceable'));
     const total = traceable.reduce((a, r) => a + r.ranks, 0);
-    const passed = traceable.reduce((a, r) => a + r.passed, 0);
+    const passedAny = traceable.reduce((a, r) => a + r.passed, 0);
+    // headline: gate-passing candidates of families whose areas grow with rank (G8)
+    const passed = traceable.reduce((a, r) => a + (r.monotone ? r.passed : 0), 0);
     const full = traceable.filter((r) => r.passed === r.ranks && r.monotone).length;
     const file = resolve(shots, `${s.id}.png`);
     renderRun(sr, file);
@@ -281,6 +350,7 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
       traceable: traceable.length,
       candidates: total,
       passed,
+      passedIgnoringMonotone: passedAny,
       closedShare: total ? +(passed / total).toFixed(3) : 0,
       fullFamilies: full,
       extraSeeds: extra,
@@ -289,19 +359,42 @@ export async function runAll(rest: string[], pick: Pick, prepare: Prep): Promise
     };
     out.push(rec);
     console.log(
-      `${s.id.padEnd(10)} ${plan.seeds} seeds=${seeds.length} pieces ${full}/${traceable.length} full, candidates ${passed}/${total} (${((100 * passed) / Math.max(1, total)).toFixed(0)} %) ${sr.diag.ms} ms`,
+      `${s.id.padEnd(10)} ${plan.seeds} seeds=${seeds.length} pieces ${full}/${traceable.length} full, candidates ${passed}/${total} (${((100 * passed) / Math.max(1, total)).toFixed(0)} %; ${passedAny} ignoring monotone) ${sr.diag.ms} ms`,
     );
     for (const r of rows)
       console.log(
         `   ${r.label.padEnd(16)} ${r.outcomes.padEnd(10)} ${r.monotone ? 'mono' : 'NON-MONO'} cov≥${r.minCoverage ?? '-'} p95≤${r.maxP95 ?? '-'} bbox ${r.bboxLargest?.join('×') ?? '-'} vs ${r.bboxTruth?.join('×') ?? '?'} ${r.note ?? ''}`,
       );
     if (s.id === 'palto') negs.push({ sample: 'palto', ...negative(p, sr, '22') });
+    if (s.id === 'robe' || s.id === 'blazer') edits.push(...editChecks(p, sr));
     if (s.id === 'robe') negs.push({ sample: 'robe', ...negative(p, sr, '67') });
     if (s.id === 'kombinezon') negs.push({ sample: 'kombinezon', ...negative(p, sr, '1') });
   }
   for (const n of negs) console.log('negative control', JSON.stringify(n));
+  const md: string[] = [
+    '| sample | seeds | pieces (traceable) | full families | candidates closed (gate + monotone) | share | per piece: C gate-pass, c closed-below-gate, L leak, M merged, t tiny |',
+    '|---|---|---|---|---|---|---|',
+  ];
+  for (const o of out as {
+    sample: string;
+    seeds: string;
+    traceable: number;
+    fullFamilies: number;
+    passed: number;
+    candidates: number;
+    closedShare: number;
+    rows: Row[];
+  }[])
+    md.push(
+      `| ${o.sample} | ${o.seeds} | ${o.traceable} | ${o.fullFamilies} | ${o.passed}/${o.candidates} | ${(100 * o.closedShare).toFixed(0)} % | ${o.rows
+        .filter((r) => !r.note?.startsWith('not traceable'))
+        .map((r) => `${r.label} ${r.outcomes || '—'}${r.monotone ? '' : '¬m'}`)
+        .join(' · ')} |`,
+    );
+  writeFileSync(resolve(REPORTS, `F4-${date}-table.md`), md.join('\n') + '\n');
   const json = resolve(REPORTS, `F4-${date}.json`);
-  writeFileSync(json, JSON.stringify({ date, samples: out, negative: negs }, null, 1));
+  for (const e of edits) console.log('edit check', JSON.stringify(e));
+  writeFileSync(json, JSON.stringify({ date, samples: out, negative: negs, edits }, null, 1));
   console.log(json);
   return 0;
 }
