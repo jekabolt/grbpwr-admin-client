@@ -4,8 +4,10 @@
 import type { IBlock, IEntity, IInsertEntity } from 'dxf-parser';
 import type { Pt } from '../types';
 import { entityToChain } from './entities';
+import { carrySampleNotches } from './notch';
 
-export type LayeredChain = { pts: Pt[]; closed: boolean; layer: string };
+// `notch` — see Chain in entities.ts: an AAMA POINT notch, kept out of grain and contour logic.
+export type LayeredChain = { pts: Pt[]; closed: boolean; layer: string; notch?: true };
 
 export type EntityGroup = {
   // Block name when the group came from an INSERT; null for loose model-space entities.
@@ -39,7 +41,13 @@ function applyXform(p: Pt, t: Xform): Pt {
   return t.mirror ? { x: -x, y } : { x, y };
 }
 
-function insertXform(ins: IInsertEntity, block: IBlock, u: number, col: number, row: number): Xform {
+function insertXform(
+  ins: IInsertEntity,
+  block: IBlock,
+  u: number,
+  col: number,
+  row: number,
+): Xform {
   return {
     baseX: (block.position?.x ?? 0) * u,
     baseY: (block.position?.y ?? 0) * u,
@@ -130,7 +138,9 @@ function expandInto(
           if (budget.left <= 0) {
             if (!budget.warned) {
               budget.warned = true;
-              warnings.push(`too many nested block inserts (> ${MAX_INSTANCES}) — some are skipped`);
+              warnings.push(
+                `too many nested block inserts (> ${MAX_INSTANCES}) — some are skipped`,
+              );
             }
             // Управление тем же `return`, что и раньше (бросаем и остаток сущностей этого уровня);
             // добавлен только счёт неразвёрнутых инстансов ЭТОЙ вставки.
@@ -140,7 +150,18 @@ function expandInto(
           placed++;
           budget.left--;
           const t = insertXform(ins, block, u, ci, ri);
-          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1, budget, tally);
+          expandInto(
+            block.entities,
+            blocks,
+            u,
+            tolCm,
+            [...transforms, t],
+            group,
+            warnings,
+            depth + 1,
+            budget,
+            tally,
+          );
         }
       }
       continue;
@@ -153,7 +174,12 @@ function expandInto(
       const t = transforms[i];
       pts = pts.map((p) => applyXform(p, t));
     }
-    group.chains.push({ pts, closed: chain.closed, layer: String(e.layer ?? '0') });
+    group.chains.push({
+      pts,
+      closed: chain.closed,
+      layer: String(e.layer ?? '0'),
+      ...(chain.notch ? { notch: true as const } : {}),
+    });
   }
 }
 
@@ -215,7 +241,18 @@ export function expandGroups(
           placed++;
           budget.left--;
           const group: EntityGroup = { blockName: ins.name, chains: [] };
-          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1, budget, tally);
+          expandInto(
+            block.entities,
+            blocks,
+            u,
+            tolCm,
+            [insertXform(ins, block, u, ci, ri)],
+            group,
+            warnings,
+            1,
+            budget,
+            tally,
+          );
           if (group.chains.length > 0) groups.push(group);
         }
       }
@@ -232,9 +269,17 @@ export function expandGroups(
     }
     const chain = entityToChain(e, u, tolCm);
     if (!chain || chain.pts.length < 2) continue;
-    loose.chains.push({ pts: chain.pts, closed: chain.closed, layer: String(e.layer ?? '0') });
+    loose.chains.push({
+      pts: chain.pts,
+      closed: chain.closed,
+      layer: String(e.layer ?? '0'),
+      ...(chain.notch ? { notch: true as const } : {}),
+    });
   }
 
+  // AAMA R12 draws notches in the sample-size block only (K2 pitfall 3) — needs every block of the
+  // file at once, which is here.
+  carrySampleNotches(groups, warnings);
   if (loose.chains.length > 0) groups.push(loose);
   return { groups, skippedBlocks: tally.blocks, blockNames: [...seenBlocks] };
 }

@@ -19,8 +19,11 @@ import type {
   ISplineEntity,
 } from 'dxf-parser';
 import type { Pt } from '../types';
+import { pointNotchPts } from './notch';
 
-export type Chain = { pts: Pt[]; closed: boolean };
+// `notch` marks a path that came from an AAMA POINT notch (dxf/notch.ts): it is piece geometry for
+// the marker, never a grain candidate and never part of a contour.
+export type Chain = { pts: Pt[]; closed: boolean; notch?: true };
 
 const MAX_SEGS = 256;
 
@@ -66,7 +69,10 @@ type FlaggedVertex = IPoint & {
 // drop the frame; when only frame points exist, use them (better than nothing).
 function filterPolylineVertices(vertices: FlaggedVertex[]): FlaggedVertex[] {
   const hasSplineFit = vertices.some((v) => v.splineVertex);
-  if (hasSplineFit) return vertices.filter((v) => v.splineVertex || (!v.splineControlPoint && !v.curveFittingVertex));
+  if (hasSplineFit)
+    return vertices.filter(
+      (v) => v.splineVertex || (!v.splineControlPoint && !v.curveFittingVertex),
+    );
   return vertices.filter((v) => !v.splineControlPoint);
 }
 
@@ -204,10 +210,16 @@ function catmullRom(pts: readonly Pt[], closed: boolean, tolCm: number): Pt[] {
         return {
           x:
             0.5 *
-            (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3),
+            (2 * p1.x +
+              (p2.x - p0.x) * t +
+              (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+              (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3),
           y:
             0.5 *
-            (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3),
+            (2 * p1.y +
+              (p2.y - p0.y) * t +
+              (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+              (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3),
         };
       },
       0,
@@ -232,7 +244,8 @@ function deBoor(degree: number, ctrl: Pt[], knots: number[], t: number): Pt {
     }
   }
   const d: Pt[] = [];
-  for (let j = 0; j <= degree; j++) d.push({ ...ctrl[Math.min(ctrl.length - 1, Math.max(0, j + k - degree))] });
+  for (let j = 0; j <= degree; j++)
+    d.push({ ...ctrl[Math.min(ctrl.length - 1, Math.max(0, j + k - degree))] });
   for (let r = 1; r <= degree; r++) {
     for (let j = degree; j >= r; j--) {
       const i = j + k - degree;
@@ -265,7 +278,13 @@ function splineChain(e: ISplineEntity, u: number, tolCm: number): Chain | null {
   const cm = ctrl.map((p) => scalePt(p, u));
   const t0 = knots[degree];
   const t1 = knots[knots.length - degree - 1];
-  const pts = sampleBySagitta((t) => deBoor(degree, cm, knots, t), t0, t1, Math.max(16, cm.length * 4), tolCm);
+  const pts = sampleBySagitta(
+    (t) => deBoor(degree, cm, knots, t),
+    t0,
+    t1,
+    Math.max(16, cm.length * 4),
+    tolCm,
+  );
   return { pts, closed: !!e.closed };
 }
 
@@ -293,8 +312,16 @@ export function entityToChain(e: IEntity, u: number, tolCm: number): Chain | nul
       return ellipseChain(e as IEllipseEntity, u, tolCm);
     case 'SPLINE':
       return splineChain(e as ISplineEntity, u, tolCm);
+    case 'POINT': {
+      // Only an AAMA notch (layer 4 with its code-50 angle, recovered in parse.ts). Grade points,
+      // curve points and anything without an angle stay invisible, as before.
+      const pts = pointNotchPts(e, u);
+      return pts
+        ? { pts: pts.map((p) => ({ x: p.x * u, y: p.y * u })), closed: false, notch: true }
+        : null;
+    }
     default:
-      // TEXT/MTEXT/POINT/DIMENSION/SOLID/3DFACE/ATTDEF… — not boundary geometry.
+      // TEXT/MTEXT/DIMENSION/SOLID/3DFACE/ATTDEF… — not boundary geometry.
       return null;
   }
 }
