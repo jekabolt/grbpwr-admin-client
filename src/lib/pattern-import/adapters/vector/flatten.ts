@@ -6,7 +6,13 @@
 import type { Affine, PtMm } from '../../types';
 import { apply, sigmaMax } from './affine';
 
-const MAX_DEPTH = 18;
+/**
+ * C4: most segments one curve may become. A real pattern curve at the 0.05 mm sagitta needs a few
+ * hundred at most (a 10 m radius full circle ≈ 1000); a hostile one (radius 1e12, or Infinity from
+ * `1e309`) would otherwise spin the worker. Cubic subdivision stops at the same count (2^12).
+ */
+export const MAX_CURVE_SEGMENTS = 4096;
+const MAX_DEPTH = 12;
 
 function distToSegment(p: PtMm, a: PtMm, b: PtMm): number {
   const dx = b.x - a.x;
@@ -63,6 +69,12 @@ export function arcStep(R: number, s: number): number {
   return Math.min(Math.PI / 4, Math.sqrt((8 * s) / R));
 }
 
+/** ⌈k⌉ segments, at least 1, at most MAX_CURVE_SEGMENTS; a non-number (NaN/∞ input) → the cap. */
+export function curveSegments(k: number): number {
+  if (!Number.isFinite(k)) return MAX_CURVE_SEGMENTS;
+  return Math.min(MAX_CURVE_SEGMENTS, Math.max(1, Math.ceil(k - 1e-9)));
+}
+
 /**
  * Samples the ellipse (cx,cy,rx,ry, x-axis rotation phiRad) from param t0 by dt (signed), in the
  * SOURCE frame, mapping each point through m. Pushes the points after the start (start excluded,
@@ -82,7 +94,7 @@ export function flattenEllipseArc(
   endExact?: PtMm,
 ): void {
   const R = Math.max(Math.abs(rx), Math.abs(ry)) * sigmaMax(m);
-  const n = Math.max(1, Math.ceil(Math.abs(dt) / arcStep(R, s) - 1e-9));
+  const n = curveSegments(Math.abs(dt) / arcStep(R, s));
   const cs = Math.cos(phiRad);
   const sn = Math.sin(phiRad);
   for (let i = 1; i <= n; i++) {

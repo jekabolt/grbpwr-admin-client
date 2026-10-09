@@ -11,7 +11,7 @@
 //  - pdf.js 4.10 `constructPath` args `[ops, flatArgs, minMax]`.
 // Clip is RECORDED on the style, never applied (contract §1, Codex H6).
 
-import type { BoxMm, IRPath, PtMm, Style } from 'lib/pattern-import/types';
+import type { BoxMm, IRPath, PtMm, Style, WorkBudgetLike } from 'lib/pattern-import/types';
 
 import {
   apply,
@@ -105,6 +105,8 @@ export type WalkOpts = {
   sagittaMm: number;
   keepFills: boolean;
   ocName: OcResolver;
+  /** C4: points made here are spent from it (adapters/budget.ts). */
+  budget?: WorkBudgetLike;
 };
 
 export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
@@ -207,44 +209,62 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
       }
       return cur;
     };
+    // C4: one constructPath can hold a million curves of up to 4096 points each — paid as made.
+    let made = 0;
+    const curve = (fl: (out: PtMm[]) => void) => {
+      const out = ensure().pts;
+      const n0 = out.length;
+      fl(out);
+      made += out.length - n0;
+    };
     for (let k = 0; k < pathOps.length; k++) {
       const op = pathOps[k];
+      if (made > 4096) {
+        o.budget?.spend(made, `the paths of page ${o.page + 1}`);
+        made = 0;
+      }
       if (op === OPS.moveTo) {
         start = apply(m, args[j], args[j + 1]);
         cur = { pts: [start], closed: false };
         pending.push(cur);
+        made++;
         j += 2;
       } else if (op === OPS.lineTo) {
         ensure().pts.push(apply(m, args[j], args[j + 1]));
+        made++;
         j += 2;
       } else if (op === OPS.curveTo) {
         const p0 = last();
-        flattenCubic(
-          p0,
-          apply(m, args[j], args[j + 1]),
-          apply(m, args[j + 2], args[j + 3]),
-          apply(m, args[j + 4], args[j + 5]),
-          o.sagittaMm,
-          ensure().pts,
+        curve((out) =>
+          flattenCubic(
+            p0,
+            apply(m, args[j], args[j + 1]),
+            apply(m, args[j + 2], args[j + 3]),
+            apply(m, args[j + 4], args[j + 5]),
+            o.sagittaMm,
+            out,
+          ),
         );
         j += 6;
       } else if (op === OPS.curveTo2) {
         // `v`: first control point = current point.
         const p0 = last();
-        flattenCubic(
-          p0,
-          p0,
-          apply(m, args[j], args[j + 1]),
-          apply(m, args[j + 2], args[j + 3]),
-          o.sagittaMm,
-          ensure().pts,
+        curve((out) =>
+          flattenCubic(
+            p0,
+            p0,
+            apply(m, args[j], args[j + 1]),
+            apply(m, args[j + 2], args[j + 3]),
+            o.sagittaMm,
+            out,
+          ),
         );
         j += 4;
       } else if (op === OPS.curveTo3) {
         // `y`: second control point = end point.
         const p0 = last();
         const p3 = apply(m, args[j + 2], args[j + 3]);
-        flattenCubic(p0, apply(m, args[j], args[j + 1]), p3, p3, o.sagittaMm, ensure().pts);
+        curve((out) => flattenCubic(p0, apply(m, args[j], args[j + 1]), p3, p3, o.sagittaMm, out));
         j += 4;
       } else if (op === OPS.closePath) {
         if (cur) {
@@ -264,9 +284,11 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         pending.push(r);
         start = r.pts[0];
         cur = null;
+        made += 4;
         j += 4;
       }
     }
+    o.budget?.spend(made, `the paths of page ${o.page + 1}`);
   };
 
   const fnArray = ol.fnArray;

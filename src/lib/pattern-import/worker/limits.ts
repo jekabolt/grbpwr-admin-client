@@ -4,10 +4,11 @@
 // tab's memory), the worker runs it again on the bytes it received, and the image-header reader
 // refuses a scan whose pixels would not fit in the worker before anything is decoded.
 //
-// Main-thread safe: imports `types.ts` only.
+// Main-thread safe: imports `types.ts` and the pure adapters/budget.ts only.
+import { rasterPixelsMessage } from '../adapters/budget';
 import { PATIMPORT } from '../types';
 
-export type InputRefusal = { code: 'too-large'; message: string };
+export type InputRefusal = { code: 'too-large' | 'unsupported-format'; message: string };
 
 const mb = (n: number) => `${(n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0)} MB`;
 
@@ -50,16 +51,20 @@ export function pdfPagesRefusal(
 
 /**
  * Pixel size of an image from its header (PNG, JPEG, GIF, BMP, WebP, TIFF) — no decoding. null when
- * the header is not one of these or is unreadable (the decoder then decides).
+ * the header is not one of these or is unreadable. The whole file is searched (C5): a JPEG's SOF
+ * may follow megabytes of EXIF/XMP/ICC segments and a TIFF writer often puts its IFD at the end, so
+ * a window at the head would leave a big scan "unknown" — and unknown is refused, never decoded.
  */
 export function imageSize(bytes: ArrayBuffer): { width: number; height: number } | null {
-  const u = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 1 << 20));
+  const u = new Uint8Array(bytes);
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
   const n = u.length;
   try {
     // PNG: IHDR is the first chunk
     if (n >= 24 && u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47)
-      return { width: dv.getUint32(16), height: dv.getUint32(20) };
+      return String.fromCharCode(u[12], u[13], u[14], u[15]) === 'IHDR'
+        ? { width: dv.getUint32(16), height: dv.getUint32(20) }
+        : null;
     // GIF
     if (n >= 10 && u[0] === 0x47 && u[1] === 0x49 && u[2] === 0x46)
       return { width: dv.getUint16(6, true), height: dv.getUint16(8, true) };
@@ -124,13 +129,32 @@ export function imageSize(bytes: ArrayBuffer): { width: number; height: number }
   return null;
 }
 
-/** An image file whose pixels would not fit in the worker. null = fine (or not readable here). */
+/**
+ * An image file whose pixels would not fit in the worker, or whose pixel size cannot be read from
+ * its header (C5: such a file is never decoded on trust). null = fine.
+ */
 export function imagePixelsRefusal(bytes: ArrayBuffer, name: string): InputRefusal | null {
   const s = imageSize(bytes);
-  if (!s || s.width * s.height <= PATIMPORT.maxRasterPixels) return null;
-  const mp = (s.width * s.height) / 1e6;
-  return {
-    code: 'too-large',
-    message: `${name} is ${s.width} × ${s.height} px (${mp.toFixed(0)} megapixels); the importer reads scans up to ${PATIMPORT.maxRasterPixels / 1e6} megapixels. Scan at 200–300 dpi, or split the sheet into parts.`,
-  };
+  if (!s || !(s.width > 0) || !(s.height > 0))
+    return {
+      code: 'unsupported-format',
+      message: `${name}: the image's pixel size cannot be read from its header, so it is not decoded. Save the scan again as PNG or JPG.`,
+    };
+  return rasterPixelsRefusal(s.width, s.height, name);
+}
+
+/**
+ * Pixels the raster tracer may hold at once (C5). Measured with the raster probe's synthetic scan
+ * (`yarn patimport:raster limit`: pattern outlines + a sheet-wide frame, RGBA): the worker's peak
+ * grows ≈ 16 B per pixel (the RGBA pixels + strength, labels, the skeleton's crop of the largest
+ * component), 345 MB at the 18 MP limit — an A0 sheet fits at 100 dpi, an A1 at 150 dpi, an A2 at
+ * 200 dpi, an A3 at 300 dpi; an A0 at 300 dpi (139 MP) would need ≈ 2.2 GB and is refused.
+ */
+export function rasterPixelsRefusal(
+  width: number,
+  height: number,
+  name: string,
+): InputRefusal | null {
+  if (width * height <= PATIMPORT.maxRasterPixels) return null;
+  return { code: 'too-large', message: rasterPixelsMessage(width, height, name) };
 }

@@ -9,7 +9,10 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
-import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
+import {
+  extractRasterImageDetailed,
+  setRasterPdfjsLoader,
+} from 'lib/pattern-import/adapters/raster';
 import type {
   CardSize,
   DraftScopeTarget,
@@ -71,6 +74,15 @@ function ctx(stopAfter?: number): StageCtx {
     },
   };
 }
+
+/** A PNG signature + IHDR claiming w × h (no pixel data: for the header readers). */
+const pngOf = (w: number, h: number) => {
+  const b = new Uint8Array(33);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  return b;
+};
 
 const errCode = async (p: Promise<unknown> | (() => unknown)) => {
   try {
@@ -1026,6 +1038,78 @@ async function guardsCase() {
     '400-megapixel PNG → too-large before decoding',
     scanErr === 'too-large' && !!imagePixelsRefusal(png.buffer, 'giant.png'),
     imagePixelsRefusal(png.buffer, 'giant.png')?.message ?? String(scanErr),
+  );
+  // C5 negative controls: no header → refused, never decoded on trust; a header past the first
+  // MiB is still read; the decoder's own answer is checked again before the tracer allocates
+  const deep = new Uint8Array((1 << 20) + 70000);
+  deep.set([0xff, 0xd8]);
+  let at = 2;
+  for (; at < 1 << 20; at += 2 + 65533) {
+    deep.set([0xff, 0xe1], at); // APP1 segments (EXIF/XMP) pushing SOF past 1 MiB
+    new DataView(deep.buffer).setUint16(at + 2, 65533);
+  }
+  deep.set([0xff, 0xc0, 0, 17, 8], at);
+  new DataView(deep.buffer).setUint16(at + 5, 20000);
+  new DataView(deep.buffer).setUint16(at + 7, 20000);
+  const deepErr = await errCode(
+    new Session(3, [{ name: 'deep.jpg', bytes: deep.buffer.slice(0) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  check(
+    C,
+    `C5: JPEG whose SOF (20000 × 20000) sits at ${(at / 1048576).toFixed(2)} MiB → too-large before decoding`,
+    deepErr === 'too-large' &&
+      imageSize(deep.buffer)?.width === 20000 &&
+      imageSize(deep.buffer)?.height === 20000,
+    `${deepErr} · ${JSON.stringify(imageSize(deep.buffer))}`,
+  );
+  const blind = png.slice(0);
+  blind.set([0x69, 0x48, 0x44, 0x52], 12); // not an IHDR chunk: the size is unknown
+  const blindErr = await errCode(
+    new Session(4, [{ name: 'blind.png', bytes: blind.buffer.slice(0) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  check(
+    C,
+    'C5: PNG whose size cannot be read from its header → refused, not decoded',
+    blindErr === 'unsupported-format' &&
+      imagePixelsRefusal(blind.buffer, 'blind.png')?.code === 'unsupported-format',
+    `${blindErr} · ${imagePixelsRefusal(blind.buffer, 'blind.png')?.message ?? 'accepted'}`,
+  );
+  let decoderAsked = 0;
+  const lying = await errCode(
+    extractRasterImageDetailed(
+      { id: '0', name: 'lying.png', bytes: png.buffer.slice(0) },
+      { sagittaMm: 0.05, keepFills: true },
+      {
+        dpi: 300,
+        // a decoder that answers more pixels than the limit (a header that lied); it hands no
+        // pixel buffer: the check must come before anything reads one
+        decode: async () => {
+          decoderAsked++;
+          return { data: new Uint8Array(0), width: 6000, height: 6000, channels: 4 };
+        },
+      },
+    ),
+  );
+  check(
+    C,
+    `C5: decoded 6000 × 6000 (> ${PATIMPORT.maxRasterPixels / 1e6} MP) → too-large before tracing`,
+    lying === 'too-large' && decoderAsked === 1,
+    `${lying}, decoder called ${decoderAsked}×`,
+  );
+  check(
+    C,
+    'C5: limit ≤ 18 MP (345 MB measured peak, patimport:raster limit) and A1 @ 150 dpi fits',
+    PATIMPORT.maxRasterPixels <= 18e6 &&
+      imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png') === null,
+    `${PATIMPORT.maxRasterPixels / 1e6} MP; A1@150 ${imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png')?.message ?? 'accepted'}`,
   );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);

@@ -11,6 +11,7 @@ import type {
   Style,
 } from '../../types';
 import { PATIMPORT } from '../../types';
+import { assertRasterPagePixels, assertRasterPixels } from '../budget';
 import { applyCalibration, calibrate } from './calibrate';
 import {
   decodeWithBitmap,
@@ -242,8 +243,17 @@ export async function extractRasterPdfDetailed(
     const shift = { a: 1, b: 0, c: 0, d: 1, e: -vx0 * k, f: -vy0 * k };
     const paints = await imagePaintsOf(lib, page);
     const images: RasterImage[] = [];
+    // C5: one page's images are traced together — their pixels together stay under the limit,
+    // checked from the operators' sizes, then from what pdf.js decoded, before any work buffer
+    const where = `${file.name} page ${pi + 1}`;
+    assertRasterPagePixels(
+      paints.reduce((a, p) => a + (p.w > 0 && p.h > 0 ? p.w * p.h : 0), 0),
+      where,
+    );
+    let decoded = 0;
     for (const p of paints) {
       const px = await pixelsOf(page, p);
+      if (px) assertRasterPagePixels((decoded += px.width * px.height), where);
       const r = px ? rasterFromPdfjs(px, p.ctm, p.op) : null;
       if (r) images.push({ ...r, pxToPage: compose(shift, r.pxToPage) });
       else warnings.push(`page ${pi + 1}: image op ${p.op} has no decodable pixels`);
@@ -308,6 +318,9 @@ export async function extractRasterImageDetailed(
     );
   }
   const img = await (cfg.decode ?? decodeWithBitmap)(file.bytes);
+  // C5: the header was checked before decoding; the decoder's answer is checked again here, before
+  // the tracer allocates a byte for it
+  assertRasterPixels(img.width, img.height, file.name);
   const pxToPage = scanPlacement(img.height, dpi);
   const input: RasterPageInput = {
     file: file.id,

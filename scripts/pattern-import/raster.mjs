@@ -11,6 +11,9 @@
 //               calibration; compare to the vector truth
 //  leonie       all 27 pages of the CorelDRAW→Ghostscript raster PDF, per-page time and memory,
 //               document ink classes, the 5 cm square
+//  limit        C5: a synthetic RGBA scan of exactly PATIMPORT.maxRasterPixels (pattern outlines, a
+//               sheet-wide frame = the largest component) traced in its own process: the peak the
+//               limit is chosen by (≤ ~350 MB)
 // Report: $REPORTS/F11-<yyyymmdd>.json + F11.md
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -228,6 +231,32 @@ async function phaseLeonie(m) {
   };
 }
 
+/** C5: the worker's peak for one scan at the pixel limit (RGBA in, as the browser decoder gives). */
+async function phaseLimit(m) {
+  const px = m.PATIMPORT.maxRasterPixels;
+  const w = Math.round(Math.sqrt(px / Math.SQRT2));
+  const h = Math.floor(px / w);
+  globalThis.gc?.();
+  const baseMb = mb(process.memoryUsage().rss);
+  const data = m.synthScan(w, h);
+  const t0 = performance.now();
+  const res = await m.extractRasterImageDetailed(
+    { id: '0', name: 'limit.png', bytes: new ArrayBuffer(16) },
+    { sagittaMm: 0.05, keepFills: true },
+    { decode: async () => ({ data, width: w, height: h, channels: 4 }), dpi: 300 },
+  );
+  return {
+    width: w,
+    height: h,
+    megapixels: +((w * h) / 1e6).toFixed(1),
+    baseMb,
+    peakMb: peakMb(),
+    bytesPerPixel: +(((peakMb() - baseMb) * 1e6) / (w * h)).toFixed(1),
+    paths: res.doc.pages[0].paths.length,
+    ms: Math.round(performance.now() - t0),
+  };
+}
+
 /** Attribution baseline: pdf.js decoding every image of leonie, no tracing. */
 async function phaseLeonieDecode() {
   const pdfjs = await import(pathToFileURL(PDFJS_LEGACY).href);
@@ -264,6 +293,7 @@ if (PHASE) {
     'leonie-gc': phaseLeonie,
     'leonie-decode': phaseLeonieDecode,
     'leonie-decode-gc': phaseLeonieDecode,
+    'limit-gc': phaseLimit,
   }[PHASE];
   const result = await fn(m);
   result.processPeakMb = peakMb();
@@ -277,6 +307,7 @@ const phases = [];
 if (want === 'all' || want === 'synth') phases.push('synth-make', 'synth-trace');
 if (want === 'all' || want === 'leonie')
   phases.push('leonie', 'leonie-gc', 'leonie-decode', 'leonie-decode-gc');
+if (want === 'all' || want === 'limit') phases.push('limit-gc');
 const results = {};
 for (const ph of phases) {
   // "-gc" phases collect garbage after every page: the retained working set, not V8's laziness.
@@ -328,6 +359,12 @@ if (st) {
     .every((v) => v.pageCarriesCalibration);
   console.log(
     `(4) IRPage.calibration = the applied calibration (synthetic): ${carried ? 'PASS' : 'FAIL'}`,
+  );
+}
+const lim = results['limit-gc'];
+if (lim) {
+  console.log(
+    `(5) C5 pixel limit: ${lim.width}×${lim.height} (${lim.megapixels} MP) traced at peak ${lim.peakMb} MB (${lim.bytesPerPixel} B/px over ${lim.baseMb} MB): ${lim.peakMb <= 360 ? 'PASS' : 'FAIL'} (≤ ~350 MB)`,
   );
 }
 const le = all.leonie;
