@@ -156,12 +156,42 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
       uniOf(n) ? { identity: n, size: '' } : { identity: m.identity, size: bare(m.size) },
     );
   }
+  // INSERT-КОПИИ ОДНОГО БЛОКА С МАНИФЕСТОМ (F14: конвертер вставляет блок «× на изделие» раз) — одна
+  // деталь, раскроенная N раз: раскладка сохранила по записи на копию, а это ОДНА деталь с
+  // количеством N. Сливаются только заявленные манифестом блоки и только при одной площади (блок
+  // один — геометрия одна); иначе записи идут как есть, и отказ ниже говорит сам.
+  const storedPieces: common_TechCardMarkerPiece[] = [];
+  {
+    const copies = new Map<string, common_TechCardMarkerPiece[]>();
+    for (const sp of stored) {
+      const k = normBlock(sp.blockName ?? '').toLowerCase();
+      if (!k || !declaredByBlock.has(k)) {
+        storedPieces.push(sp);
+        continue;
+      }
+      if (!copies.has(k)) storedPieces.push(sp); // место первой копии в порядке блоба
+      copies.set(k, [...(copies.get(k) ?? []), sp]);
+    }
+    for (let i = 0; i < storedPieces.length; i++) {
+      const list = copies.get(normBlock(storedPieces[i].blockName ?? '').toLowerCase());
+      if (!list || list.length < 2) continue;
+      const a0 = list[0].areaCm2 ?? 0;
+      const same = list.every((x) => a0 > 0 && Math.abs((x.areaCm2 ?? 0) - a0) / a0 <= 0.005);
+      if (!same) {
+        storedPieces.splice(i, 1, ...list);
+        i += list.length - 1;
+        continue;
+      }
+      const quantity = list.reduce((n, x) => n + Math.max(1, Math.round(x.quantity ?? 1)), 0);
+      storedPieces[i] = { ...list[0], quantity };
+    }
+  }
   const names: string[] = [];
   for (const p of candidates) {
     const n = normBlock(p.blockName ?? '');
     if (n && !declaredByBlock.has(n.toLowerCase())) names.push(n);
   }
-  for (const p of stored) {
+  for (const p of storedPieces) {
     const n = normBlock(p.blockName ?? '');
     if (n && !declaredByBlock.has(n.toLowerCase())) names.push(n);
   }
@@ -188,7 +218,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   let storedAllUni = stored.length > 0;
   // Сохранённые uni-имена — для вердикта о склеенной выгрузке (см. отказ сразу за циклом).
   const storedUniEntries: { raw: string; uniBase: string }[] = [];
-  for (const sp of stored) {
+  for (const sp of storedPieces) {
     const raw = normBlock(sp.blockName ?? '');
     if (!uniOf(raw)) storedAllUni = false;
     else storedUniEntries.push({ raw, uniBase: uniBaseOf(raw, input.isSizeToken) });
@@ -271,6 +301,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
 
   // ── сторона ФАЙЛА: площадь каждой градуированной детали в каждом размере ───────────────
   const fileArea = new Map<string, number>(); // `${identity} ${sizeToken}` → см²
+  const copySeen = new Set<string>();
   const ambiguous = new Set<string>();
   for (const c of candidates) {
     const raw = normBlock(c.blockName ?? '');
@@ -278,6 +309,12 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     const { identity, size } = codeOf(raw);
     if (!size || !graded.has(identity)) continue;
     const key = `${identity} ${size}`;
+    // INSERT-копии одного блока с манифестом — одна геометрия (см. storedPieces выше)
+    if (manifestFactsOf(c)) {
+      const copy = `${c.fileIndex ?? c.source}|${raw.toLowerCase()}`;
+      if (copySeen.has(copy)) continue;
+      copySeen.add(copy);
+    }
     if (fileArea.has(key)) ambiguous.add(key);
     else fileArea.set(key, c.areaCm2);
   }

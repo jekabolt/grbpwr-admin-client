@@ -5,7 +5,7 @@
 import type { PtMm } from '../types';
 import type { PlannedBlock } from './plan';
 import { GRAIN_SHAFT_MM } from './plan';
-import { LABEL_DY, LABEL_HEIGHT, drillSquare, labelAnchor, labelLines } from './r2000';
+import { LABEL_DY, LABEL_HEIGHT, drillSquare, insertsOf, labelAnchor, labelLines } from './r2000';
 import { type Tag, num, serialize, txt } from './format';
 
 export function writeR12(
@@ -93,11 +93,11 @@ export function writeR12(
   E(0, 'ENDSEC');
   E(0, 'SECTION');
   E(2, 'ENTITIES');
-  for (const b of blocks) {
+  for (const ins of insertsOf(blocks)) {
     E(0, 'INSERT');
     E(8, '1');
-    E(2, txt(b.name));
-    E(10, num(0));
+    E(2, txt(ins.name));
+    E(10, num(ins.x));
     E(20, num(0));
   }
   const d = new Date(meta.createdAt);

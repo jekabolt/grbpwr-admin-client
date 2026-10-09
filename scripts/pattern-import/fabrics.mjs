@@ -7,6 +7,7 @@
 //   node scripts/pattern-import/fabrics.mjs        (yarn patimport:fabrics)
 //   env PATIMPORT_CORPUS, PATIMPORT_REPORTS
 import { build as esbuild } from 'esbuild';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,33 @@ await esbuild({
     components: resolve(REPO, 'src/components'),
     utils: resolve(REPO, 'src/utils'),
   },
+  jsx: 'automatic',
+  // Section G (F14 MAJOR 3) runs the piece-match modal's own pure counting (countBlocks,
+  // planPieceUpdates) on the written files — exported here, its UI imports stubbed (as f6b.mjs does).
+  plugins: [
+    {
+      name: 'modal-internals',
+      setup(b) {
+        const MODAL_RE = /nesting[\\/]piece-match-modal\.tsx$/;
+        const KEEP = new Set(['./block-code', '../piece-codes', './manifest-facts']);
+        b.onResolve({ filter: /.*/ }, (args) =>
+          MODAL_RE.test(args.importer) && !KEEP.has(args.path)
+            ? { path: args.path, namespace: 'modal-stub' }
+            : undefined,
+        );
+        b.onLoad({ filter: /.*/, namespace: 'modal-stub' }, () => ({
+          contents:
+            'const f = () => f; module.exports = new Proxy(f, { get: (_t, k) => (k === "__esModule" ? false : f) });',
+          loader: 'js',
+        }));
+        b.onLoad({ filter: MODAL_RE }, (args) => ({
+          contents: `${readFileSync(args.path, 'utf8')}\nexport { countBlocks, planPieceUpdates, perGarmentFromBlocks };\n`,
+          loader: 'tsx',
+          resolveDir: dirname(args.path),
+        }));
+      },
+    },
+  ],
 });
 process.env.PATIMPORT_REPO = REPO;
 const m = await import(pathToFileURL(outfile).href);

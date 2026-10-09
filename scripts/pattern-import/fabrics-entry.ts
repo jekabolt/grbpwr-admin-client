@@ -30,6 +30,22 @@ import {
   readCutLists,
 } from 'lib/pattern-import/fabrics';
 import { buildDraft, readsBack, type DraftCardContext } from 'lib/pattern-import/fabrics/draft';
+import { parseSheets } from 'lib/nesting/worker/parse-files';
+import { NEST_DEFAULTS } from 'lib/nesting/types';
+import type { PieceDTO } from 'lib/nesting/types';
+import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
+import {
+  defaultContourLayer,
+  layerOptions,
+} from 'components/managers/tech-card/components/nesting/contour-layer';
+import {
+  markerUnits,
+  selectMarkerPieces,
+  unitsOfPieces,
+} from 'components/managers/tech-card/components/nesting/piece-selection';
+import * as pieceMatchModal from 'components/managers/tech-card/components/nesting/piece-match-modal';
+import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
+import type { DxfIndex } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import {
   followUpTargets,
   initialRows,
@@ -1313,6 +1329,194 @@ export async function main(): Promise<number> {
     }
   }
 
+  // ── G ───────────────────────────────────────────────────────────────────────────────────
+  head(
+    'G  × per garment: one source of truth — apply, the modal recount, the marker (F14 MAJOR 3)',
+  );
+  {
+    type ModalInternals = {
+      countBlocks: (
+        pieces: readonly PieceDTO[],
+        split: ReturnType<typeof splitPiecesBySize>,
+      ) => Map<string, { block: string; instances: number }>;
+      planPieceUpdates: (
+        live: readonly Record<string, unknown>[],
+        bound: ReadonlyMap<string, string>,
+        counted: ReadonlyMap<string, unknown>,
+        complete: boolean,
+      ) => { updates: { index: number; piecesPerGarment?: number; cutSymmetry?: string }[] };
+    };
+    const MI = pieceMatchModal as unknown as ModalInternals;
+    // BP_1 is a single symmetric piece printed «cut 2»; CLR_3 single ×1; FP_L/FP_R a pair
+    const rG = await runImport(fp, sizeMap, V1, {
+      instr: INSTR,
+      label: { seed: S.BP_2, text: LABEL },
+      numberOf,
+      ai: AI,
+      ppg: { BP_1: 2 },
+    });
+    const sc = rG.scopes.find((x) => x.target.scopeKey === MAIN.scopeKey)!;
+    ck(
+      !!sc && rG.gate[MAIN.scopeKey].passed,
+      'G main written and gated',
+      failing(rG.gate[MAIN.scopeKey]).join(' '),
+    );
+    const live: LiveCard = { patterns: [], pieces: [], aliases: [] };
+    const draft = buildDraft({ scopes: rG.scopes }, cardOf(live), { mintKey: mint });
+    const want: Record<string, number> = { FP: 2, BP_1: 2, CLR_3: 1 };
+    const dppg = Object.fromEntries(draft.pieces.map((p) => [p.name, p.piecesPerGarment]));
+    ck(
+      Object.entries(want).every(([n, q]) => dppg[n] === q),
+      'G draft: pair FP = 2, «cut 2» BP_1 = 2, single CLR_3 = 1',
+      Object.entries(want)
+        .map(([n]) => `${n} ${dppg[n]}`)
+        .join(' · '),
+    );
+    const form = fakeForm(live);
+    const res = await applyDraft(draft, {
+      upload: fakeUpload(null).upload,
+      read: form.read,
+      write: form.write,
+      storageSizeId: 501,
+      save: async () => 'ok',
+    });
+    ck(res.ok, 'G apply ok', res.ok ? '' : res.message);
+    // the card's parse of the written file — what the modal and the marker read
+    const parsed = await parseSheets(
+      [
+        {
+          name: 'main.dxf',
+          open: async () => new TextEncoder().encode(sc.dxfText).slice().buffer as ArrayBuffer,
+        },
+      ],
+      { unit: 'auto', tol: NEST_DEFAULTS.tol, tolChain: NEST_DEFAULTS.tolChain },
+    );
+    const split = splitPiecesBySize(parsed.pieces, new Map());
+    const layer = defaultContourLayer(layerOptions(parsed.pieces, split.codeById));
+    const contour = parsed.pieces.filter((p) => (p.layer ?? '') === layer);
+    const counted = MI.countBlocks(contour, split);
+    // bound exactly as the apply wrote it: alias (identity) → piece
+    const st = form.state;
+    const bound = new Map<string, string>();
+    for (const a of st.aliases)
+      if (scopeKeyOf(a) === MAIN.scopeKey)
+        bound.set((a.blockName ?? '').toLowerCase(), a.pieceLineKey ?? '');
+    const plan = MI.planPieceUpdates(st.pieces as Record<string, unknown>[], bound, counted, true);
+    ck(
+      parsed.failedFiles === 0 && parsed.skippedBlocks === 0 && plan.updates.length === 0,
+      'G modal recount on the written file = zero updates (× per garment and symmetry agree with apply)',
+      plan.updates
+        .map(
+          (u) =>
+            `${st.pieces[u.index].name}: ×${st.pieces[u.index].piecesPerGarment}→${u.piecesPerGarment ?? '='} ${u.cutSymmetry ?? ''}`,
+        )
+        .join(' | ') || `${counted.size} identities`,
+    );
+    // the marker: one garment of the sample size, every placement counted per card piece
+    const sizeTok = split.codeById.get(
+      contour.find((p) => split.codeById.get(p.id)?.size)!.id,
+    )!.size;
+    const units = markerUnits({
+      graded: true,
+      rows: [{ tokens: [sizeTok], qty: 1 }],
+      ungradedUnits: 1,
+    });
+    const per = unitsOfPieces(contour, (id) => split.codeById.get(id)?.size ?? '', units);
+    const placed = selectMarkerPieces(contour, layer, per);
+    const pieceOf = (p: PieceDTO) =>
+      bound.get((split.codeById.get(p.id)?.identity ?? '').toLowerCase()) ?? '';
+    const bad: string[] = [];
+    const inMain = new Set(bound.values());
+    for (const p of st.pieces.filter((x) => inMain.has(x.lineKey ?? ''))) {
+      const n = placed
+        .filter((q) => pieceOf(q) === p.lineKey)
+        .reduce((s, q) => s + (per.get(q.id) ?? 0), 0);
+      if (n !== p.piecesPerGarment) bad.push(`${p.name} placed ${n} vs ×${p.piecesPerGarment}`);
+    }
+    ck(
+      bad.length === 0,
+      `G marker (1 garment, size ${sizeTok}): placements per card piece = × per garment for every piece`,
+      bad.join(' | ') || `${inMain.size} main pieces`,
+    );
+    // the norm: × per garment × ONE contour; INSERT copies of a manifest block are not «ambiguous»
+    {
+      const byKey = new Map<string, Map<string, PieceDTO[]>>();
+      for (const p of parsed.pieces) {
+        const code = split.codeById.get(p.id);
+        const identity = (code?.identity ?? p.blockName ?? '').trim();
+        if (!identity) continue;
+        const key = `S|${identity.toLowerCase()}`;
+        const bySize = byKey.get(key) ?? new Map<string, PieceDTO[]>();
+        bySize.set(code?.size ?? '', [...(bySize.get(code?.size ?? '') ?? []), p]);
+        byKey.set(key, bySize);
+      }
+      const index: DxfIndex = {
+        split,
+        contourLayer: layer,
+        grainLayer: '',
+        byKey,
+        filesOfScope: new Map([['S', [0]]]),
+      };
+      const mainPieces = st.pieces.filter((x) => inMain.has(x.lineKey ?? ''));
+      const refsOf = (k: string) =>
+        [...bound].filter(([, v]) => v === k).map(([b]) => ({ scopeKey: 'S', block: b }));
+      const norm = dxfNormAreas({
+        index,
+        pieces: mainPieces.map((x) => ({
+          name: x.name ?? '',
+          lineKey: x.lineKey ?? '',
+          perGarment: x.piecesPerGarment ?? 1,
+          refs: refsOf(x.lineKey ?? ''),
+        })),
+        unaliasedPieces: [],
+        sizeIds: [1],
+        tokensOfSize: () => [sizeTok.toLowerCase(), sizeTok],
+        contourLayer: layer,
+        allowanceCm: 0,
+      });
+      const want = mainPieces.reduce((sum, x) => {
+        const ids = new Set(refsOf(x.lineKey ?? '').map((r) => r.block));
+        const one = contour.filter(
+          (q) =>
+            ids.has((split.codeById.get(q.id)?.identity ?? '').toLowerCase()) &&
+            split.codeById.get(q.id)?.size === sizeTok,
+        );
+        // one contour per identity (first instance), × the piece's count per identity
+        const firsts = new Map<string, number>();
+        for (const q of one)
+          if (!firsts.has(split.codeById.get(q.id)!.identity))
+            firsts.set(split.codeById.get(q.id)!.identity, q.areaCm2);
+        const perIdentity = (x.piecesPerGarment ?? 1) / Math.max(1, firsts.size);
+        return sum + [...firsts.values()].reduce((a, v) => a + perIdentity * v, 0);
+      }, 0);
+      const got = norm.ok ? norm.areas.rows[0]?.areaCm2 ?? 0 : 0;
+      ck(
+        norm.ok &&
+          norm.areas.ambiguousPickPieces.length === 0 &&
+          Math.abs(got - want) / want < 1e-6,
+        'G norm: no «ambiguous pick» for INSERT copies, area = Σ × per garment × contour',
+        norm.ok
+          ? `${got.toFixed(1)} vs ${want.toFixed(1)} cm² · ambiguous [${norm.areas.ambiguousPickPieces.join(',')}]`
+          : norm.reason,
+      );
+    }
+    // re-apply the same import onto the card the modal left untouched → zero writes
+    const again = buildDraft({ scopes: rG.scopes }, cardOf(st), { mintKey: mint });
+    const f2 = fakeForm(st);
+    const r2 = await applyDraft(again, {
+      upload: fakeUpload(null).upload,
+      read: f2.read,
+      write: f2.write,
+      storageSizeId: 501,
+      save: async () => 'ok',
+    });
+    ck(
+      r2.ok && f2.log.length === 0 && again.pieceUpdates.length === 0,
+      'G apply → modal → re-apply = zero diff',
+      f2.log.join(' '),
+    );
+  }
+
   // ── E ───────────────────────────────────────────────────────────────────────────────────
   head('E  every garment CLO DXF: main + lining copies through writeAndGate');
   const eRows: unknown[] = [];
@@ -1456,6 +1660,8 @@ async function runImport(
     numberOf: Map<number, string>;
     ai: { seed: number; fabrics: string[]; confidence: number }[];
     operator?: (a: FabricAssignment) => FabricAssignment;
+    /** Operator's × per garment by identity (semantics `pieceOverrides.piecesPerGarment`). */
+    ppg?: Record<string, number>;
     now?: Date;
     dialect?: 'r12' | 'r2000';
   },
@@ -1494,7 +1700,11 @@ async function runImport(
   // `fused` is a PieceSpec field: semantics re-runs with it (the wizard's `write` event does this)
   const fused = fusedSeeds(a, bom);
   const overrides: SemanticsInput['pieceOverrides'] = {};
-  for (const p of d0.output.pieces) overrides[p.seed] = { fused: fused.has(p.seed) };
+  for (const p of d0.output.pieces)
+    overrides[p.seed] = {
+      fused: fused.has(p.seed),
+      ...(o.ppg?.[p.identity] ? { piecesPerGarment: o.ppg[p.identity] } : {}),
+    };
   const d = buildPieceSpecsDetailed(semInput(f, map, overrides, sheet, families));
   const plan = planScopes(d.output.pieces, a, bom);
   const scopes: DraftScope[] = [];
