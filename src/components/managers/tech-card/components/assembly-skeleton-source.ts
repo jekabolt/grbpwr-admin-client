@@ -109,7 +109,7 @@ type FormPiece = {
   piecesPerGarment?: number;
   cutSymmetry?: string;
 };
-type FormBomLine = { kind?: string; purpose?: string; pieceKeys?: string[] };
+type FormBomLine = { kind?: string; purpose?: string };
 
 const BOM_COUNTS: Record<string, keyof SkeletonFacts['bom']> = {
   TECH_CARD_BOM_KIND_ZIPPER: 'zipper',
@@ -173,11 +173,6 @@ export function buildSkeletonFacts(args: {
 }): { facts: SkeletonFacts; withoutContour: string[] } {
   const inputs: SkeletonPieceInput[] = [];
   const withoutContour: string[] = [];
-  const fusedKeys = new Set(
-    args.bomLines
-      .filter((l) => l.purpose === 'TECH_CARD_BOM_PURPOSE_INTERFACING')
-      .flatMap((l) => l.pieceKeys ?? []),
-  );
   for (const p of args.pieces) {
     const key = (p.lineKey ?? '').trim();
     if (!key) continue;
@@ -196,7 +191,9 @@ export function buildSkeletonFacts(args: {
       piecesPerGarment: p.piecesPerGarment || 1,
       cutSymmetry: p.cutSymmetry || null,
       cloth: state,
-      fused: fusedKeys.has(key) || found.piece.name.toLowerCase().includes('fus'),
+      // A BOM line does not name the pieces it fuses (the form keeps no such link), so the only
+      // signal is the block name; interfacing CUT pieces arrive with cloth 'interfacing' instead.
+      fused: found.piece.name.toLowerCase().includes('fus'),
     });
   }
   return {

@@ -184,6 +184,12 @@ const alGates = (fx, p) => {
       m.joins === 5 && m.byInputs === m.joins,
       `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
     ],
+    // ≤ 8 decisions: joins and own steps; press riders ride on their join and are not decisions.
+    [
+      '≤ 8 steps that are not riders',
+      p.steps.filter((s) => !s.derivedFrom).length <= 8,
+      `${p.steps.filter((s) => !s.derivedFrom).length} (+${p.steps.filter((s) => s.derivedFrom).length} riders)`,
+    ],
     ['frontier sweep clean', broken(p).length === 0, broken(p).join('; ')],
   ];
 };

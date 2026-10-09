@@ -173,8 +173,9 @@ export function CardUnitPicturesProvider({
   const unitSig = operations
     .map((o) => `${(o.outputUnitKey ?? '').trim()}<${(o.inputKeys ?? []).join(',')}`)
     .join('~');
-  // Пока новая подпись отстаивается, рисуется граф прошлой: детали те же, сдвинулось имя.
-  const current = factsSig ? graph?.graph ?? null : null;
+  // Только граф ТЕКУЩЕЙ подписи: пока новая отстаивается, пиктограмм нет — старый граф мог быть
+  // прочитан с других деталей (другая карточка, перепривязанный дублерин) при тех же кодах узлов.
+  const current = factsSig && graph?.sig === factsSig ? graph.graph : null;
   const pictures = useMemo(() => {
     if (!current) return null;
     const map = unitPictures(
