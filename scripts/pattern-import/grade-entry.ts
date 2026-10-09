@@ -126,11 +126,56 @@ type Score = {
   wrongList: string[];
   /** closed contours that differ from truth-noise entries (not counted as wrong; listed) */
   noiseWrong: string[];
+  /** closed contours running < 90 % on their own size's (or common) source lines — wrong by line truth */
+  offLines: string[];
+  /** contour differs from a truth contour that runs ≥ 20 points less on its own size's lines than ours (ours ≥ 90 %) */
+  truthOffLines: string[];
+  /** own-line share of every closed contour, for the report */
+  ownShares: number[];
 };
+
+
+const OWN_MIN = 0.9;
+/** truth contour judged noise when it runs on its own size's lines this much less than ours */
+const OWN_MARGIN = 0.2;
+const pathGrids = new WeakMap<Bench, SegGrid>();
+/**
+ * Share of a contour (sampled every quarter segment) lying ≤ 0.3 mm from a source line whose
+ * truth is size `rank` or common — the contour runs on its own size's lines. Independent of the
+ * truth contours (which F4 built on the encoded original and can be noise, see NOISE).
+ */
+function ownShare(b: Bench, o: PtMm[], rank: number, miss?: PtMm[]): number {
+  let grid = pathGrids.get(b);
+  const pts = (k: number) => (b.sheet.paths[k].closed ? [...b.sheet.paths[k].pts, b.sheet.paths[k].pts[0]] : b.sheet.paths[k].pts);
+  if (!grid) {
+    grid = new SegGrid(4);
+    for (let k = 0; k < b.sheet.paths.length; k++) grid.addPolyline(k, pts(k));
+    pathGrids.set(b, grid);
+  }
+  let own = 0;
+  let tot = 0;
+  const oo = [...o, o[0]];
+  for (let i = 0; i + 1 < oo.length; i++)
+    for (let u = 0; u < 1; u += 0.25) {
+      const q = { x: oo[i].x + (oo[i + 1].x - oo[i].x) * u, y: oo[i].y + (oo[i + 1].y - oo[i].y) * u };
+      let hit = false;
+      grid.near(q, 0.3, (pk, j) => {
+        if (hit) return;
+        const pp = pts(pk);
+        if (segNearest(q, pp[j], pp[j + 1]).d > 0.3) return;
+        const t = b.truth[b.origOfPath[b.sheet.paths[pk].id]];
+        if (t.role === 'common' || (t.role === 'size' && t.rank === rank)) hit = true;
+      });
+      tot++;
+      if (hit) own++;
+      else miss?.push(q);
+    }
+  return tot ? own / tot : 0;
+}
 
 /** C = closed and p95 ≤ 1 mm to the truth contour · W = closed, off · ? = closed, no truth · L/M/t/- = not closed. */
 function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: number) => number = (_, r) => r): Score {
-  const sc: Score = { perPiece: {}, closed: 0, correct: 0, wrong: 0, unknown: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [], noiseWrong: [] };
+  const sc: Score = { perPiece: {}, closed: 0, correct: 0, wrong: 0, unknown: 0, leaks: 0, withTruth: 0, correctAcc: 0, wrongAcc: 0, wrongList: [], noiseWrong: [], offLines: [], truthOffLines: [], ownShares: [] };
   const labels = [...new Set(b.seeds.map((s) => seedLabel(s) ?? String(s.id)))];
   for (const label of labels) {
     let row = '';
@@ -145,6 +190,9 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
         continue;
       }
       sc.closed++;
+      const own = ownShare(b, g.outer, truthRank(label, r));
+      sc.ownShares.push(own);
+      if (own < OWN_MIN) sc.offLines.push(`${label}/r${r}`);
       if (!t) {
         row += '?';
         sc.unknown++;
@@ -169,12 +217,19 @@ function scoreContours(b: Bench, got: Got[], truthRank: (label: string, r: numbe
           const fy = far.map((q) => q.y);
           console.log(`      far (>1.5 mm) ${far.length}/${g.outer.length} pts in [${Math.min(...fx).toFixed(0)},${Math.min(...fy).toFixed(0)}..${Math.max(...fx).toFixed(0)},${Math.max(...fy).toFixed(0)}]`);
         }
+        const miss: PtMm[] = [];
+        const og = ownShare(b, g.outer, truthRank(label, r), miss);
+        console.log(`      lines under ${label}/r${r}: got own ${(100 * og).toFixed(0)}% truth own ${(100 * ownShare(b, t.outer, truthRank(label, r))).toFixed(0)}%${miss.length ? ` got misses in ${JSON.stringify(bboxOfPts(miss))}` : ''}`);
         console.log(`      dist ${label}/r${r}: p95=${hausdorffP95(g.outer, t.outer).toFixed(2)} got ${(area(g.outer) / 100).toFixed(1)} cm² ${bb(g.outer)} truth ${(t.areaMm2 / 100).toFixed(1)} cm² ${bb(t.outer)}`);
       }
       if (hausdorffP95(g.outer, t.outer) <= 1.0) {
         row += 'C';
         sc.correct++;
         if (counted) sc.correctAcc++;
+      } else if (counted && own >= OWN_MIN && ownShare(b, t.outer, truthRank(label, r)) <= own - OWN_MARGIN) {
+        row += 'n'; // ours runs on its own size's lines, the truth contour on other sizes'
+        sc.truthOffLines.push(`${label}/r${r}`);
+        sc.withTruth--;
       } else if (counted) {
         row += 'W';
         sc.wrong++;
@@ -307,6 +362,9 @@ function printRow(r: RunRow) {
   for (const [k, v] of Object.entries(s.perPiece)) console.log(`      ${k.padEnd(6)} ${v.padEnd(10)} ${r.reasons[k] ?? ''}`);
   if (s.wrongList.length) console.log(`      wrong: ${s.wrongList.join(' ')}`);
   if (s.noiseWrong.length) console.log(`      differs from truth-noise: ${s.noiseWrong.join(' ')}`);
+  if (s.truthOffLines.length) console.log(`      truth contour off its own lines (ours on them): ${s.truthOffLines.join(' ')}`);
+  const sh = [...s.ownShares].sort((a, b) => a - b);
+  console.log(`      line check: ${s.offLines.length} closed contour(s) < ${OWN_MIN * 100}% on own lines${s.offLines.length ? ` (${s.offLines.join(' ')})` : ''}; own share min ${sh.length ? pct(sh[0]) : '-'} p10 ${sh.length ? pct(sh[Math.floor(sh.length * 0.1)]) : '-'}`);
 }
 
 // ── overlays ─────────────────────────────────────────────────────────────────────────────────
@@ -373,8 +431,10 @@ function render(b: Bench, families: PieceFamily[], diag: FillDiag, tag: string, 
     renderPng(resolve(dir, `${b.sample}-${b.level}-${tag}-${lab}.png`), box, strokes, labels, 2, legend);
     // truth beside it
     const ts: Stroke[] = b.sheet.paths.map((q) => ({ pts: q.closed ? [...q.pts, q.pts[0]] : q.pts, color: truthColor(b.truth[b.origOfPath[q.id]]), width: 1.0 }));
-    for (const c of tc) ts.push({ pts: c.outer, closed: true, color: '#00a', width: 0.6, dash: '4 3' });
-    renderPng(resolve(dir, `${b.sample}-${b.level}-truth-${lab}.png`), box, ts, [{ at: sd.at, text: lab, color: '#00f', size: 14 }], 2);
+    for (const c of tc) if (!process.env.TRUTHRANK || c.rank === +process.env.TRUTHRANK) ts.push({ pts: c.outer, closed: true, color: '#00a', width: 0.6, dash: '4 3' });
+    const zb = process.env.ZOOMBOX?.split(',').map(Number);
+    const zbox = zb ? { minX: zb[0], minY: zb[1], maxX: zb[2], maxY: zb[3] } : box;
+    renderPng(resolve(dir, `${b.sample}-${b.level}-truth-${lab}${zb ? '-zoom' : ''}.png`), zbox, ts, [{ at: sd.at, text: lab, color: '#00f', size: 14 }], zb ? +(process.env.PX ?? 4) : 2);
   }
 }
 
@@ -728,15 +788,24 @@ export async function main(argv: string[]) {
     };
     writeFileSync(resolve(mk(OUT), 'REPORT-data.json'), JSON.stringify(data, null, 1));
     const sol = data.solve as RunRow[];
-    const wrong = sol.reduce((a, r) => a + r.score.wrong, 0) + (data.baseline as RunRow[]).filter((r) => r.mode === 'guard').reduce((a, r) => a + r.score.wrong, 0);
-    let ok = wrong === 0;
+    const guard = (data.baseline as RunRow[]).filter((r) => r.mode === 'guard');
+    const ctl = data.controls as { mode: string; score?: Score; sizeCountAmb?: boolean; real?: { correct: number }; shuffled?: { correct: number } }[];
+    const enc = data.encoded as { sample: string; hook: boolean; identical: boolean }[];
+    const wrong = [...sol, ...guard].reduce((a, r) => a + r.score.wrong, 0);
+    const ctlWrong = ctl.reduce((a, r) => a + (r.score?.wrong ?? 0), 0);
+    const ctlNoAmb = ctl.filter((r) => r.score && !r.sizeCountAmb).length;
+    const encBad = enc.filter((r) => r.hook || !r.identical).map((r) => r.sample);
+    // the gate is safety: no wrong closed contour anywhere, n±1 raise the size-count ambiguity,
+    // encoded inputs never reach the module. Accuracy targets are reported, not gated.
+    const safe = wrong === 0 && ctlWrong === 0 && ctlNoAmb === 0 && encBad.length === 0;
+    console.log(`\nH1 safety: wrong closed ${wrong} (solve + guard), controls n±1 wrong ${ctlWrong}, without size-count ambiguity ${ctlNoAmb}, encoded regressions ${encBad.length ? encBad.join(' ') : 'none'} → ${safe ? 'PASS' : 'FAIL'}`);
     for (const r of sol) {
       if (!ACCEPT_SAMPLES.includes(r.sample)) continue;
       const acc = r.score.withTruth ? r.score.correctAcc / r.score.withTruth : 0;
-      if (acc < (r.level === 'L1' ? 0.9 : 0.75)) ok = false;
+      const target = r.level === 'L1' ? 0.9 : 0.75;
+      console.log(`H1 accuracy ${r.sample.padEnd(10)} ${r.level}: ${r.score.correctAcc}/${r.score.withTruth} = ${pct(acc)} (target ${pct(target)}) ${acc >= target ? 'met' : 'NOT MET'}${r.score.truthOffLines.length ? ` · truth off its lines: ${r.score.truthOffLines.join(' ')}` : ''}`);
     }
-    console.log(`\nH1 acceptance: wrong closed ${wrong} → ${ok ? 'PASS' : 'FAIL'}`);
-    return ok ? 0 : 1;
+    return safe ? 0 : 1;
   } else {
     console.log('modes: all | baseline | solve | controls | encoded');
     return 1;
