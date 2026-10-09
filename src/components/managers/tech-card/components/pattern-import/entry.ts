@@ -1,6 +1,6 @@
 // The door from the Patterns tab — kept tiny so patterns-field pulls nothing heavy: the wizard
 // itself is a lazy chunk.
-import type { CardSize, DraftScopeTarget } from 'lib/pattern-import/types';
+import type { CardSize, ConversionManifest, DraftScopeTarget } from 'lib/pattern-import/types';
 import { sizeTokensOf } from '../nesting/block-code';
 import type { CardContext } from './client';
 
@@ -39,7 +39,15 @@ export function buildCardContext(args: {
   /** Live block → piece links, scope key already resolved (bom-purpose `aliasScopeKey`). */
   aliases?: { scopeKey: string; blockName?: string; pieceLineKey?: string }[];
   /** Live pattern rows, scope key already resolved (`fabricScopeKey`). */
-  patterns?: { scopeKey: string; filename?: string; url?: string }[];
+  patterns?: {
+    scopeKey: string;
+    filename?: string;
+    url?: string;
+    lineKey?: string;
+    name?: string;
+    /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
+    manifest?: ConversionManifest | null;
+  }[];
   styleLabel: string;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
@@ -85,7 +93,16 @@ export function buildCardContext(args: {
     ),
     existingPatterns: (args.patterns ?? []).flatMap((p) =>
       p.scopeKey && p.filename
-        ? [{ scopeKey: p.scopeKey, filename: p.filename, url: p.url ?? '' }]
+        ? [
+            {
+              scopeKey: p.scopeKey,
+              filename: p.filename,
+              url: p.url ?? '',
+              lineKey: p.lineKey ?? '',
+              name: p.name ?? '',
+              manifest: p.manifest ?? null,
+            },
+          ]
         : [],
     ),
     styleLabel: args.styleLabel,

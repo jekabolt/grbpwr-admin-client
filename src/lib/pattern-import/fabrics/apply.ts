@@ -8,15 +8,20 @@
 //      form; files that landed before it are listed as orphans (unreferenced objects in storage —
 //      acceptable, K1; the card's orphan sweep only sees URLs the card once held).
 //   2. ONE ordered batch of form writes, re-resolved against the LIVE form (the card may have moved
-//      since the wizard read it): `patterns` (append rows) → `pieces` (append created) → point writes
+//      since the wizard read it): `patterns` (append rows; a scope in 'replace' mode (MF-C, M4) puts
+//      its file into the previous import's row instead — same lineKey, name, size slot and binding,
+//      new url/filename/size, version 0 so the server numbers the new file) → `pieces` (append
+//      created) → point writes
 //      `pieces.N.*` (symmetry, × per garment, fused — never a root rewrite of existing pieces) →
 //      `pieceDxfAliases` (full set: other scopes' links preserved, ours keyed
 //      `${scopeKey}|${normBlock(block).toLowerCase()}` as the piece-match modal keys them).
 //      A write that changes nothing is not made: re-applying the same import makes zero writes.
 //   3. The card's own save (autosave `flush`): only that save is a transaction (K1: BOM, pieces,
 //      aliases and sheets in one UpdateTechCard). Piece areas and the size index are separate calls
-//      the card makes AFTER a save — the size index publishes itself from the Patterns tab, areas are
-//      measured from the scope's tile; this function does neither.
+//      made AFTER that save succeeded — `followup.ts` runs them (MF-C, M3); this function does
+//      neither, and their failure never undoes what it wrote.
+//   Links to blocks the new file no longer draws are NEVER removed here (MF-C): the draft lists them
+//   (`DraftScope.vanished`) and the piece-match modal removes them on the card's complete parse.
 
 import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
@@ -35,6 +40,8 @@ export type LivePattern = {
   lineKey?: string;
   fabricPurpose?: string;
   bomLineKey?: string;
+  version?: number;
+  uploadedAt?: string;
 };
 export type LivePiece = {
   lineKey?: string;
@@ -108,13 +115,47 @@ export function planFormWrites(
   live: LiveCard,
   uploaded: readonly ApplyUploaded[],
   opts: { storageSizeId: number; mintKey: () => string },
-): { writes: FormWrite[]; created: number; reusedPieces: number } {
+): {
+  writes: FormWrite[];
+  created: number;
+  reusedPieces: number;
+  replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
+} {
   const writes: FormWrite[] = [];
 
-  // 1. patterns — one row per uploaded scope
+  // 1. patterns — one row per uploaded scope: the previous import's row replaced in place, or a new
+  //    row appended. The replaced row is re-found in the LIVE form by its lineKey and must still be
+  //    bound to the same scope; if the operator removed or rebound it meanwhile, the file is added.
+  const nextPatterns = live.patterns.map((p) => ({ ...p }));
+  const replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[] = [];
   const rows = uploaded.flatMap((u) => {
     const sc = draft.scopes.find((s) => s.target.scopeKey === u.scopeKey);
     if (!sc) return [];
+    if (sc.replaces && sc.sheetMode !== 'add') {
+      const key = sc.replaces.lineKey.toLowerCase();
+      const i = nextPatterns.findIndex(
+        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeKeyOf(p) === u.scopeKey,
+      );
+      if (i >= 0 && !replaced.some((r) => r.lineKey.toLowerCase() === key)) {
+        const old = nextPatterns[i];
+        replaced.push({
+          scopeKey: u.scopeKey,
+          lineKey: old.lineKey ?? '',
+          oldUrl: old.url ?? '',
+          newUrl: u.url,
+        });
+        nextPatterns[i] = {
+          ...old,
+          url: u.url,
+          filename: u.filename,
+          sizeBytes: u.sizeBytes,
+          // 0 = "assign one": the server numbers a url it has not seen on this card (schema.ts)
+          version: 0,
+          uploadedAt: '',
+        };
+        return [];
+      }
+    }
     return [
       {
         sizeId: opts.storageSizeId,
@@ -128,7 +169,8 @@ export function planFormWrites(
       },
     ];
   });
-  if (rows.length) writes.push({ path: 'patterns', value: [...live.patterns, ...rows] });
+  if (rows.length || replaced.length)
+    writes.push({ path: 'patterns', value: [...nextPatterns, ...rows] });
 
   // 2. pieces — re-resolve every draft piece against the live card
   const liveIdx = new Map<string, number>();
@@ -233,7 +275,7 @@ export function planFormWrites(
         (a.bomLineKey ?? '') === (live.aliases[i].bomLineKey ?? ''),
     );
   if (!same) writes.push({ path: 'pieceDxfAliases', value: next });
-  return { writes, created: created.length, reusedPieces };
+  return { writes, created: created.length, reusedPieces, replaced };
 }
 
 export async function applyDraft(
@@ -295,5 +337,12 @@ export async function applyDraft(
 
   // 3. the card's own save (the only transaction)
   const save = plan.writes.length && deps.save ? await deps.save('pattern-import') : undefined;
-  return { ok: true, uploaded, reused, writes: plan.writes.length, ...(save ? { save } : {}) };
+  return {
+    ok: true,
+    uploaded,
+    reused,
+    writes: plan.writes.length,
+    ...(plan.replaced.length ? { replaced: plan.replaced } : {}),
+    ...(save ? { save } : {}),
+  };
 }
