@@ -448,6 +448,35 @@ export async function main(): Promise<number> {
       'negative control: the hull of it would read as collapsed',
       `${hullRatio(hull).toFixed(4)}`,
     );
+    ck(
+      hullRatio(B) < 0.99,
+      'the bodice is concave enough for the hull test (< 0.99)',
+      `${hullRatio(B).toFixed(4)}`,
+    );
+    // I2: a 30 × 200 mm strip with two 6 mm deep V notches cut in (kombinezon's straps, hull ratio
+    // between 0.99 and 0.995): the bays are narrower than 2 × 10 mm, so the true +10 parallel fills
+    // them and turns convex — not a collapse.
+    const strip = [
+      { x: 0, y: 0 },
+      { x: 30, y: 0 },
+      { x: 30, y: 96 },
+      { x: 24, y: 100 },
+      { x: 30, y: 104 },
+      { x: 30, y: 200 },
+      { x: 0, y: 200 },
+      { x: 0, y: 54 },
+      { x: 6, y: 50 },
+      { x: 0, y: 46 },
+    ];
+    const rs = offsetContour(strip, 10);
+    ck(
+      rs.report.ok &&
+        rs.report.maxDeviationMm <= 0.05 &&
+        rs.sourceHullRatio < 0.995 &&
+        rs.sourceHullRatio >= 0.99,
+      'notched strip +10: bays fill, true parallel, not a hull collapse',
+      `source hull ${rs.sourceHullRatio.toFixed(4)} → ${rs.report.hullRatio.toFixed(4)}, dev ${rs.report.maxDeviationMm.toFixed(4)} mm${rs.report.reason ? ` · ${rs.report.reason}` : ''}`,
+    );
     const rin = offsetContour(B, -10);
     ck(
       rin.report.ok && rin.report.maxDeviationMm <= 0.05,

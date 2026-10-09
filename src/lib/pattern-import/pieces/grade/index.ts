@@ -35,6 +35,8 @@ import { buildModel, trackPortions, type GradeModel, type ModelOpts } from './mo
 import { chainSpans } from './tracks';
 import { bboxOfPts, growBox, median, unionBox } from './vec';
 
+import { notEvidence } from './guard';
+
 export { detectUnencodedGrading, type GuardOpts } from './guard';
 
 /** Module-level switches (probes flip them to measure each guard; production keeps the defaults). */
@@ -117,6 +119,11 @@ export type GradeOpts = {
   knifeCarriers?: PtMm[][];
   /** trust a rank only where a second, perturbed reading agrees (default GRADE_TUNING) */
   twoReadings?: boolean;
+  /**
+   * Chains that are never size evidence nor walls (default: the legend's ignore / notch / seam /
+   * grain / internal classes; the hook adds the operator's "ignore line").
+   */
+  exclude?: readonly ChainId[];
 };
 
 /**
@@ -296,7 +303,7 @@ function gradeOnce(
 ): GradeResult {
   const t0 = Date.now();
   const log = opts.log ?? (() => {});
-  const skip = new Set(set.classes.filter((c) => c.role === 'notch').flatMap((c) => c.chains));
+  const skip = new Set(opts.exclude ?? notEvidence(set.classes));
   const use = set.chains.filter((c) => !skip.has(c.id) && c.pts.length >= 2).map((c) => c.id);
   const M = buildModel(sheet, set, use, n, { ...reading, log });
   markFrames(M, seeds);

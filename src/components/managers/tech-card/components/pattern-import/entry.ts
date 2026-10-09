@@ -1,16 +1,15 @@
 // The door from the Patterns tab — kept tiny so patterns-field pulls nothing heavy: the wizard
 // itself is a lazy chunk.
-import type { CardSize, DraftScopeTarget } from 'lib/pattern-import/types';
+import type { CardSize, ConversionManifest, DraftScopeTarget } from 'lib/pattern-import/types';
 import { sizeTokensOf } from '../nesting/block-code';
 import type { CardContext } from './client';
 
 /**
- * The wizard runs on the real worker (F13b), but stops where the pipeline does today (after the
- * sheet; a DXF reaches details): the door is shown in dev builds and where `VITE_PATTERN_IMPORT=1`
- * is set, not to operators on a real card. Drop the gate when semantics/fabrics land.
+ * The door is open by default (beta shows it with no env change); `VITE_PATTERN_IMPORT=0` at build
+ * time closes it on a contour. Fixture mode stays off unless `VITE_PATTERN_IMPORT_STUB=1`
+ * (import-wizard.tsx).
  */
-export const PATTERN_IMPORT_ENABLED =
-  import.meta.env.DEV || import.meta.env.VITE_PATTERN_IMPORT === '1';
+export const PATTERN_IMPORT_ENABLED = import.meta.env.VITE_PATTERN_IMPORT !== '0';
 
 const INTERLINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
 const INTERLINING_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';
@@ -39,7 +38,15 @@ export function buildCardContext(args: {
   /** Live block → piece links, scope key already resolved (bom-purpose `aliasScopeKey`). */
   aliases?: { scopeKey: string; blockName?: string; pieceLineKey?: string }[];
   /** Live pattern rows, scope key already resolved (`fabricScopeKey`). */
-  patterns?: { scopeKey: string; filename?: string; url?: string }[];
+  patterns?: {
+    scopeKey: string;
+    filename?: string;
+    url?: string;
+    lineKey?: string;
+    name?: string;
+    /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
+    manifest?: ConversionManifest | null;
+  }[];
   styleLabel: string;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
@@ -85,7 +92,16 @@ export function buildCardContext(args: {
     ),
     existingPatterns: (args.patterns ?? []).flatMap((p) =>
       p.scopeKey && p.filename
-        ? [{ scopeKey: p.scopeKey, filename: p.filename, url: p.url ?? '' }]
+        ? [
+            {
+              scopeKey: p.scopeKey,
+              filename: p.filename,
+              url: p.url ?? '',
+              lineKey: p.lineKey ?? '',
+              name: p.name ?? '',
+              manifest: p.manifest ?? null,
+            },
+          ]
         : [],
     ),
     styleLabel: args.styleLabel,

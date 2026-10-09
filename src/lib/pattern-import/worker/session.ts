@@ -7,6 +7,7 @@
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
 import type {
+  ChainAmbiguity,
   ChainSet,
   DraftScope,
   ExtractOpts,
@@ -27,6 +28,8 @@ import type {
   SemanticsOutput,
   Sheet,
   SizeMap,
+  ExpectedSizes,
+  FillOpts,
   SizeRun,
   SourceDoc,
   SourceFileInfo,
@@ -56,10 +59,21 @@ import {
 import { assembleSheetDetailed, classifyPages } from '../assemble';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
-import { applyLegend, buildChainsDetailed } from '../chains';
+import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
+import { expectedSizes } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
-import { applyPieceEdits, fillPiecesDetailed, proposeSeeds } from '../pieces';
+import {
+  applyPieceEdits,
+  applyWallEdits,
+  isWallEdit,
+  proposeSeeds,
+  startSession,
+  variantLabels,
+  wallEditsInto,
+  type PieceSession,
+  type WallPieceEdit,
+} from '../pieces';
 import {
   allowanceFromTexts,
   buildPieceSpecsDetailed,
@@ -69,9 +83,19 @@ import {
 import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
-import { isWallEdit, mergeSameSize, withOperatorLines } from './operator-lines';
 import { chainPreviewOf, previewOf } from './preview';
 import { wallsUsedBy } from './walls-used';
+import { checkInputSet, imagePixelsRefusal } from './limits';
+
+/** Hex SHA-256 of the bytes ('' where the runtime has no WebCrypto — an insecure origin). */
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const subtle = (globalThis as { crypto?: Crypto }).crypto?.subtle;
+  if (!subtle) return '';
+  const d = new Uint8Array(await subtle.digest('SHA-256', bytes));
+  let hex = '';
+  for (const b of d) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
 
 /**
  * Card size spellings come from the CARD side (`CardSize.spellings`, read there by block-code
@@ -149,10 +173,21 @@ export class Session {
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
-  /** The set the fill ran on: `chains` + the operator's bridges − ignored lines. */
+  /** The set the fill ran on (the operator's wall edits live in `pieceSession.walls`, not here). */
   private wallSet: ChainSet | null = null;
+  /**
+   * The fill's state (F4b operator API, pieces/operator.ts): the operator's walls + the families.
+   * Kept while the wizard only APPENDS wall edits (same chains, run, seeds, opts), so a closed gap
+   * or an ignored line refills only the seeds it can reach; anything else starts a new session.
+   */
+  private pieceSession: PieceSession | null = null;
+  private pieceWallEdits: WallPieceEdit[] = [];
+  private pieceKey = '';
   private run: SizeRun | null = null;
   private sizeMap: SizeMap | null = null;
+  /** pieces/grade (H1): sizes the sheet draws (sizes stage); the pieces stage fails closed on it. */
+  private expected: ExpectedSizes | null = null;
+  private gradeAmbiguities: ChainAmbiguity[] = [];
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
   private seeds: Seed[] | null = null;
@@ -163,9 +198,15 @@ export class Session {
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
+  /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
+  private sha = new Map<string, string>();
+
   constructor(id: number, files: { name: string; bytes: ArrayBuffer }[]) {
     this.id = id;
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
+    // M6: the main thread checked the File sizes already; the worker re-checks what it received.
+    const refusal = checkInputSet(files.map((f) => ({ name: f.name, bytes: f.bytes.byteLength })));
+    if (refusal) throw new ImportError(refusal.code, refusal.message);
     const routes = files.map((f) => {
       const sn = sniffFormat(f.bytes, f.name);
       if (sn.route === null) {
@@ -221,11 +262,15 @@ export class Session {
     if (at < ORDER.indexOf('sizes')) {
       this.run = null;
       this.sizeMap = null;
+      this.expected = null;
     }
     if (at < ORDER.indexOf('pieces')) {
       this.seeds = null;
       this.families = null;
       this.wallSet = null;
+      this.pieceSession = null;
+      this.pieceWallEdits = [];
+      this.pieceKey = '';
     }
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
@@ -282,6 +327,7 @@ export class Session {
       if (!blob)
         throw new ImportError('no-session', 'the session lost its files — read them again');
       const bytes = await blob.arrayBuffer();
+      if (!this.sha.has(info.id)) this.sha.set(info.id, await sha256Hex(bytes));
       const fileProgress: Progress = (done, total, note) =>
         ctx.progress(i + done / Math.max(1, total), n, `${info.name}${note ? ` · ${note}` : ''}`);
       const calibs = this.calibrations;
@@ -315,17 +361,31 @@ export class Session {
         hpgl: extractHpgl,
         svg: extractSvg,
         raster: async (f, o, p) => {
+          // M6: an image whose pixels would not fit in the worker is refused before decoding.
+          const big = imagePixelsRefusal(f.bytes, f.name);
+          if (big) throw new ImportError(big.code, big.message);
           const r = await extractRasterImageDetailed(f, o, { progress: p });
           keepCalibs(f.id, r.calibrations, r.doc);
           return r.doc;
         },
       };
       const extract = pickExtractor(bytes, info.name, reg);
-      const doc = await extract({ id: info.id, name: info.name, bytes }, opts, (d, t, note) => {
-        ctx.checkCancel();
-        fileProgress(d, t, note);
+      let doc: SourceDoc;
+      try {
+        doc = await extract({ id: info.id, name: info.name, bytes }, opts, (d, t, note) => {
+          ctx.checkCancel();
+          fileProgress(d, t, note);
+        });
+      } catch (e) {
+        // the pdf.js guard (pdf-guard.ts) does not know the file's name
+        if (e instanceof ImportError && e.code === 'too-large' && !e.message.startsWith(info.name))
+          throw new ImportError(e.code, `${info.name}: ${e.message}`, e.stage);
+        throw e;
+      }
+      docs.push({
+        ...doc,
+        file: { ...doc.file, sha256: this.sha.get(info.id) ?? doc.file.sha256 },
       });
-      docs.push(doc);
     }
     ctx.progress(n, n);
     return docs;
@@ -553,7 +613,8 @@ export class Session {
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    return { run, map };
+    this.expected = expectedSizes(run, input.card, input.drawnSizes);
+    return { run, map, expected: this.expected };
   }
 
   // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
@@ -589,21 +650,85 @@ export class Session {
     if (!base) throw new ImportError('out-of-order', 'trace the lines first', 'pieces');
     const run = this.run ?? detectSizeRun(sheet, base, this.files);
     this.run = run;
+    // H1: the fill must know how many sizes the sheet draws — the wizard passes the sizes step's
+    // answer; without it, the session's own (sizes stage), else what the source alone says
+    const expected =
+      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null) ?? undefined;
+    const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
-    const lines = withOperatorLines(base, run, input.edits);
-    const set = lines.set;
+    // Wall edits (close gap / ignore line / use line) go through the F4b session: appended ones
+    // refill only the seeds they reach; an undo, new seeds or another variant fill afresh with
+    // every wall edit so far. The other edits (not a piece, reseed, merge, split) apply after, on
+    // the session's families, keeping the operator's walls.
+    const wallEdits = input.edits.filter(isWallEdit);
+    const key = JSON.stringify([
+      seeds.map((x) => [x.id, x.at.x, x.at.y, x.variant, x.origin]),
+      opts,
+    ]);
+    const prev = this.pieceSession;
+    const prior = this.pieceWallEdits;
+    const appended =
+      !!prev &&
+      prev.set === base &&
+      prev.run === run &&
+      this.pieceKey === key &&
+      prior.length <= wallEdits.length &&
+      prior.every((e, i) => JSON.stringify(e) === JSON.stringify(wallEdits[i]));
     ctx.checkCancel();
-    let families = fillPiecesDetailed(sheet, set, run, seeds, input.opts, (d, t, n) => {
-      ctx.checkCancel();
-      ctx.progress(d, t, n);
-    }).families;
+    let ps: PieceSession;
+    if (appended) {
+      ps = applyWallEdits(prev!, wallEdits.slice(prior.length));
+    } else {
+      const empty: PieceSession = {
+        sheet,
+        set: base,
+        run,
+        seeds,
+        opts,
+        walls: { exclude: [], include: [], bridges: [] },
+        families: [],
+      };
+      ps = startSession(
+        sheet,
+        base,
+        run,
+        seeds,
+        opts,
+        wallEditsInto(empty, wallEdits).walls,
+        (d, t, n) => {
+          ctx.checkCancel();
+          ctx.progress(d, t, n);
+        },
+      );
+    }
+    this.pieceSession = ps;
+    this.pieceWallEdits = wallEdits;
+    this.pieceKey = key;
+    const set = base;
+    let families = ps.families;
     const edits = input.edits.filter((e) => !isWallEdit(e));
     if (edits.length)
-      families = applyPieceEdits(families, edits, { sheet, set, run, opts: input.opts });
+      families = applyPieceEdits(families, edits, {
+        sheet,
+        set,
+        run,
+        opts,
+        walls: ps.walls,
+      });
     this.wallSet = set;
     this.seeds = seeds;
     this.families = families;
-    return { seeds, families };
+    const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
+    // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
+    // fill's answer: the solver reads the whole sheet either way)
+    if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
+    else if (ps.diag?.grade) this.gradeAmbiguities = ps.diag.grade.ambiguities;
+    return {
+      seeds,
+      families,
+      variants,
+      grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
+    };
   }
 
   // ── semantics (F5) ────────────────────────────────────────────────────────────────────────
@@ -719,16 +844,28 @@ export class Session {
     // The walls each WRITTEN identity × rank came from, in its own frame (F5): a closed wall keeps
     // its closing edge, an unfolded piece and a derived `_R` get their mirrored walls. G3 asks how
     // much of the walls the written line follows; a PDF wall chain runs on past the piece, so each
-    // is cut to the stretch this piece uses (walls-used.ts). A DXF's walls are its own blocks.
+    // is cut to the junction-to-junction segments this piece uses — junctions from the source
+    // chains' own topology, never trimmed by the output (walls-used.ts, M7). A DXF's walls are its
+    // own blocks.
     const rawWalls = this.wallsOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
-    const walls = rawWalls
+    // The fill's snapped outline votes which segments are this piece's — only where it is in the
+    // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
+    const drawnOfSeed = new Map<number, string>();
+    for (const p of sem.pieces) if (!drawnOfSeed.has(p.seed)) drawnOfSeed.set(p.seed, p.identity);
+    const famBySeed = new Map((this.families ?? []).map((f) => [f.seed, f]));
+    const wallsUsed = rawWalls
       ? (identity: string, rank: number): PtMm[][] | undefined => {
           const w = rawWalls(identity, rank);
           const spec = specOf.get(identity);
           const size = spec?.sizes.find((z) => z.rank === rank) ?? spec?.sizes[0];
           if (!w || !spec || !size || this.fast) return w;
-          return wallsUsedBy(w, spec.allowance.meaning === 'seam' ? size.seam : size.cut);
+          const written = spec.allowance.meaning === 'seam' ? size.seam : size.cut;
+          const outline =
+            !spec.unfoldedFold && drawnOfSeed.get(spec.seed) === identity
+              ? famBySeed.get(spec.seed)?.candidates.find((c) => c.rank === size.rank)?.outer
+              : undefined;
+          return wallsUsedBy(w, outline && overlaps(outline, w) ? outline : written);
         }
       : null;
     const sizeTokens = new Set(input.sizes.map((s) => s.token.toLowerCase()));
@@ -752,7 +889,8 @@ export class Session {
         {
           rules: cardRules,
           sizeTokens,
-          wallsOf: walls ? (id, rank) => walls(sp.sourceOf[id] ?? id, rank) : undefined,
+          wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
+          wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );
@@ -770,6 +908,28 @@ export class Session {
     ctx.progress(plan.scopes.length, plan.scopes.length);
     return { scopes, gate };
   }
+}
+
+/** Bounding boxes of a line and a set of walls overlap (a sanity check that both share a frame). */
+function overlaps(line: readonly PtMm[], walls: readonly PtMm[][]): boolean {
+  let a = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const p of line)
+    a = {
+      x0: Math.min(a.x0, p.x),
+      y0: Math.min(a.y0, p.y),
+      x1: Math.max(a.x1, p.x),
+      y1: Math.max(a.y1, p.y),
+    };
+  let b = { ...a, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const w of walls)
+    for (const p of w)
+      b = {
+        x0: Math.min(b.x0, p.x),
+        y0: Math.min(b.y0, p.y),
+        x1: Math.max(b.x1, p.x),
+        y1: Math.max(b.y1, p.y),
+      };
+  return a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1;
 }
 
 /**

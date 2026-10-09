@@ -177,11 +177,17 @@ export function buildPieceSpecsDetailed(
     }
     const bad = mapped.find((m) => m.c.outcome !== 'closed');
     if (bad) {
-      const r = bad.c.outcome as BlockReason;
+      // H1: a refused size names its own reason (sizes not told apart / count / ambiguous)
+      const r: BlockReason =
+        bad.c.outcome === 'refused'
+          ? bad.c.gradeRefusal ?? 'sizes-not-distinguished'
+          : (bad.c.outcome as BlockReason);
       block(
         seed,
         r,
-        r === 'leak'
+        bad.c.outcome === 'refused'
+          ? `size ${bad.card.token}: ${bad.c.gradeDetail ?? 'its outline could not be told apart from the other sizes'}`
+          : r === 'leak'
           ? `outline of size ${bad.card.token} is not closed${bad.c.leakAt ? ` near (${bad.c.leakAt.x.toFixed(0)}, ${bad.c.leakAt.y.toFixed(0)}) mm` : ''}`
           : r === 'merged'
             ? 'two seeds share one region — split them'
@@ -702,6 +708,10 @@ export function buildPieceSpecsDetailed(
       .map((id) => set.chains[id])
       .filter((ch) => !!ch && ch.pts.length > 1)
       .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
+    // the outline's derived stretches (F4b: an auto or operator bridge over a gap, a band cut) are
+    // walls the fill was told to use — the written line follows them, so G3/G4 measure it against
+    // them too (a 4.7 mm operator bridge is 2.35 mm from any drawn line at its middle: G4 blocked)
+    for (const d of cand.derived ?? []) if (d.pts.length > 1) lines.push(d.pts);
     if (!lines.length) return undefined;
     if (w.fold) {
       const M = reflection(w.fold.a, w.fold.b);

@@ -29,7 +29,14 @@ import {
   proposeFabricsDetailed,
   readCutLists,
 } from 'lib/pattern-import/fabrics';
-import { buildDraft, type DraftCardContext } from 'lib/pattern-import/fabrics/draft';
+import { buildDraft, readsBack, type DraftCardContext } from 'lib/pattern-import/fabrics/draft';
+import {
+  followUpTargets,
+  initialRows,
+  retryRows,
+  runFollowUp,
+  type FollowUpRow,
+} from 'lib/pattern-import/fabrics/followup';
 import {
   applyDraft,
   planFormWrites,
@@ -39,6 +46,7 @@ import {
 import type {
   CardDraft,
   CardSize,
+  ConversionManifest,
   DraftScope,
   DraftScopeTarget,
   FabricAssignment,
@@ -937,6 +945,280 @@ export async function main(): Promise<number> {
       'apply re-resolves against the live form: a LIN_FP added meanwhile is reused, not duplicated',
       `created ${z.created}`,
     );
+  }
+
+  // ── F ───────────────────────────────────────────────────────────────────────────────────
+  head('F  re-import (replace / add / vanished / zero-diff) + the follow-up after the save (MF-C)');
+  {
+    // the card after the first import; the parse read each of our sheets' manifests (by url)
+    const manifestByUrl = new Map<string, ConversionManifest>();
+    const firstDraft = buildDraft({ scopes: r1.scopes }, cardOf(initial()), { mintKey: mint });
+    for (const sc of firstDraft.scopes)
+      manifestByUrl.set(`https://cdn.test/${sc.filename}`, sc.manifest);
+    const withManifests = (live: LiveCard, on = true): DraftCardContext => {
+      const c = cardOf(live);
+      return {
+        ...c,
+        existingPatterns: live.patterns.map((p) => ({
+          scopeKey: scopeKeyOf(p),
+          filename: p.filename ?? '',
+          url: p.url ?? '',
+          lineKey: p.lineKey ?? '',
+          name: p.name ?? '',
+          manifest: on ? manifestByUrl.get(p.url ?? '') ?? null : null,
+        })),
+      };
+    };
+    // the pattern maker re-draws: CLR_3 is no longer cut from the main fabric (still interlining)
+    const r2 = await runImport(fp, sizeMap, V1, {
+      instr: INSTR,
+      label: { seed: S.BP_2, text: LABEL },
+      numberOf,
+      ai: AI,
+      operator: (a) => ({
+        ...a,
+        byPurpose: {
+          ...a.byPurpose,
+          [MAIN.scopeKey]: (a.byPurpose[MAIN.scopeKey] ?? []).filter((x) => x !== S.CLR_3),
+        },
+      }),
+    });
+    const mainRow0 = afterFirst.patterns.find((p) => scopeKeyOf(p) === MAIN.scopeKey)!;
+    const d2 = buildDraft({ scopes: r2.scopes }, withManifests(afterFirst), { mintKey: mint });
+    const m2 = d2.scopes.find((x) => x.target.scopeKey === MAIN.scopeKey)!;
+    ck(
+      !m2.alreadyOnCard && m2.replaces?.lineKey === mainRow0.lineKey,
+      'F1 changed main file → replaces the previous import row of that scope (by lineKey)',
+      `${m2.replaces?.matchedBy} · ${m2.replaces?.filename}`,
+    );
+    ck(
+      d2.scopes
+        .filter((x) => x.target.scopeKey !== MAIN.scopeKey)
+        .every((x) => !!x.alreadyOnCard && !x.replaces),
+      'F1 unchanged scopes: already on the card, no replace offered',
+    );
+    ck(
+      (m2.vanished ?? []).map((v) => v.blockName).join() === 'CLR_3' &&
+        m2.vanished![0].pieceName === 'CLR_3',
+      'F1 vanished in main: CLR_3 (its main link), named by its card piece',
+      JSON.stringify(m2.vanished),
+    );
+    ck(m2.readsBack === true, 'F1 the new file reads back (G1) → removal may be offered');
+    const g1Fail: ConversionManifest = {
+      ...m2.manifest,
+      gate: {
+        ...m2.manifest.gate!,
+        checks: m2.manifest.gate!.checks.map((c) =>
+          c.id === 'G1-roundtrip' ? { ...c, ok: false } : c,
+        ),
+      },
+    };
+    ck(!readsBack(g1Fail), 'F1 G1 failed → readsBack false (removal not offered)');
+
+    // F2 replace (default)
+    const form = fakeForm(afterFirst);
+    const up = fakeUpload(null);
+    const saves: string[] = [];
+    const res = await applyDraft(d2, {
+      upload: up.upload,
+      read: form.read,
+      write: form.write,
+      storageSizeId: 501,
+      save: async () => {
+        saves.push('save');
+        return 'ok';
+      },
+    });
+    const st = form.state;
+    const row = st.patterns.find((p) => p.lineKey === mainRow0.lineKey)!;
+    ck(
+      res.ok && up.calls.length === 1 && st.patterns.length === afterFirst.patterns.length,
+      'F2 replace: 1 upload, no new row (patterns stay ' + afterFirst.patterns.length + ')',
+      up.calls.join(' '),
+    );
+    ck(
+      row.url === `https://cdn.test/${m2.filename}` &&
+        row.filename === m2.filename &&
+        row.name === mainRow0.name &&
+        row.fabricPurpose === mainRow0.fabricPurpose &&
+        row.bomLineKey === mainRow0.bomLineKey &&
+        row.sizeId === mainRow0.sizeId &&
+        row.version === 0 &&
+        st.patterns.indexOf(row) === afterFirst.patterns.indexOf(mainRow0),
+      'F2 the row keeps lineKey, name, binding, slot and place; new url/filename, version 0',
+    );
+    ck(
+      res.ok && res.replaced?.length === 1 && res.replaced[0].oldUrl === mainRow0.url,
+      'F2 result lists the replaced row (old → new url)',
+    );
+    ck(
+      st.aliases.some((a) => scopeKeyOf(a) === MAIN.scopeKey && a.blockName === 'CLR_3') &&
+        st.pieces.length === afterFirst.pieces.length,
+      'F2 vanished CLR_3: main link and piece NOT deleted by apply',
+    );
+    ck(
+      saves.length === 1 && form.log[0] === 'patterns',
+      'F2 one batch (patterns first) then one save',
+    );
+
+    // F3 re-applying the same changed import on the replaced card: zero diff
+    {
+      const f3 = fakeForm(st);
+      const up3 = fakeUpload(null);
+      manifestByUrl.set(`https://cdn.test/${m2.filename}`, m2.manifest);
+      const d3 = buildDraft({ scopes: r2.scopes }, withManifests(st), { mintKey: mint });
+      const r3 = await applyDraft(d3, {
+        upload: up3.upload,
+        read: f3.read,
+        write: f3.write,
+        storageSizeId: 501,
+      });
+      ck(
+        d3.scopes.every((x) => !!x.alreadyOnCard && !x.replaces) &&
+          r3.ok &&
+          r3.writes === 0 &&
+          up3.calls.length === 0 &&
+          JSON.stringify(f3.state) === JSON.stringify(st),
+        'F3 re-apply of the same import after a replace = zero uploads, zero writes',
+      );
+      ck(!!r3.ok && followUpTargets(d3, r3) === null, 'F3 zero-diff re-apply starts no follow-up');
+    }
+
+    // F4 add as another sheet: the old row stays, a second sheet in the scope
+    {
+      const f4 = fakeForm(afterFirst);
+      const d4 = {
+        ...d2,
+        scopes: d2.scopes.map((x) => (x.replaces ? { ...x, sheetMode: 'add' as const } : x)),
+      };
+      const r4 = await applyDraft(d4, {
+        upload: fakeUpload(null).upload,
+        read: f4.read,
+        write: f4.write,
+        storageSizeId: 501,
+      });
+      const mains = f4.state.patterns.filter((p) => scopeKeyOf(p) === MAIN.scopeKey);
+      ck(
+        r4.ok &&
+          !r4.replaced &&
+          f4.state.patterns.length === afterFirst.patterns.length + 1 &&
+          mains.length === 2 &&
+          mains.some((p) => p.url === mainRow0.url),
+        'F4 add: old main row intact + a second main row',
+      );
+    }
+    // F5 a foreign sheet (no manifest) is never replaced
+    {
+      const d5 = buildDraft({ scopes: r2.scopes }, withManifests(afterFirst, false), {
+        mintKey: mint,
+      });
+      ck(
+        d5.scopes.every((x) => !x.replaces && (x.vanished ?? []).length === 0),
+        'F5 sheets without a manifest: no replace offered, nothing listed as vanished',
+      );
+    }
+    // F6 the row was removed in the form after the wizard read the card → the file is added
+    {
+      const live = structuredClone(afterFirst) as LiveCard;
+      live.patterns = live.patterns.filter((p) => p.lineKey !== mainRow0.lineKey);
+      const f6 = fakeForm(live);
+      const r6 = await applyDraft(d2, {
+        upload: fakeUpload(null).upload,
+        read: f6.read,
+        write: f6.write,
+        storageSizeId: 501,
+      });
+      ck(
+        r6.ok &&
+          !r6.replaced &&
+          f6.state.patterns.length === live.patterns.length + 1 &&
+          f6.state.patterns.some((p) => p.url === `https://cdn.test/${m2.filename}`),
+        'F6 replaced row gone from the live form → the new file is appended, nothing lost',
+      );
+    }
+
+    // F7 follow-up: only after save 'ok' and when something was written
+    ck(
+      res.ok && (followUpTargets(d2, res) ?? []).length === d2.scopes.length,
+      'F7 save ok + writes → follow-up targets every scope',
+    );
+    ck(
+      followUpTargets(d2, { ...(res as Extract<typeof res, { ok: true }>), save: 'error' }) ===
+        null &&
+        followUpTargets(d2, { ok: false, failedScope: 'x', message: 'y', uploaded: [] }) === null,
+      'F7 save not ok / apply failed → no follow-up',
+    );
+    ck(
+      (followUpTargets(d2, res) ?? []).every((t) => t.cutLayer === '1'),
+      'F7 every target measures on the manifest cut layer 1',
+    );
+    // F8 order with fake services; the areas call failing is a warning, not a rollback
+    {
+      const log: string[] = [...saves];
+      const before = JSON.stringify(form.state);
+      const targets = followUpTargets(d2, res)!;
+      const short = (k: string) => k.replace('TECH_CARD_BOM_PURPOSE_', '');
+      let rows: FollowUpRow[] = initialRows(targets);
+      const updates: number[] = [];
+      rows = await runFollowUp(
+        rows,
+        {
+          areas: async (t) => {
+            log.push(`areas:${short(t.scopeKey)}`);
+            if (t.scopeKey === LINING.scopeKey) return { ok: false, reason: 'server 503' };
+            if (t.scopeKey === CONTRAST.scopeKey) throw new Error('network down');
+            return { ok: true, detail: 'ok' };
+          },
+          sizeIndex: async (t) => {
+            log.push(`index:${short(t.scopeKey)}`);
+            return { ok: true, detail: 'ok' };
+          },
+        },
+        (r) => updates.push(r.length),
+      );
+      const expect = [
+        'save',
+        ...targets.flatMap((t) => [`areas:${short(t.scopeKey)}`, `index:${short(t.scopeKey)}`]),
+      ];
+      ck(
+        log.join() === expect.join(),
+        'F8 order: card save → per scope areas → size index, sequential',
+        log.join(' → '),
+      );
+      const lin = rows.find((r) => r.scopeKey === LINING.scopeKey)!;
+      const con = rows.find((r) => r.scopeKey === CONTRAST.scopeKey)!;
+      ck(
+        lin.areas.state === 'failed' &&
+          lin.areas.detail === 'server 503' &&
+          lin.sizeIndex.state === 'ok' &&
+          con.areas.state === 'failed' &&
+          /network down/.test(con.areas.detail),
+        'F8 areas failure / throw → a failed cell with the reason; the index still runs',
+      );
+      ck(
+        JSON.stringify(form.state) === before && saves.length === 1,
+        'F8 a follow-up failure writes nothing back: no rollback, no second save',
+      );
+      // retry only the failed cells
+      const again: string[] = [];
+      const retried = await runFollowUp(retryRows(rows), {
+        areas: async (t) => {
+          again.push(`areas:${short(t.scopeKey)}`);
+          return { ok: true, detail: 'ok' };
+        },
+        sizeIndex: async (t) => {
+          again.push(`index:${short(t.scopeKey)}`);
+          return { ok: true, detail: 'ok' };
+        },
+      });
+      ck(
+        again.sort().join() === ['areas:CONTRAST', 'areas:LINING'].join() &&
+          retried.every((r) => r.areas.state === 'ok' && r.sizeIndex.state === 'ok'),
+        'F8 retry re-runs only the failed cells',
+        again.join(' '),
+      );
+      json.followUp = { log, rows };
+    }
   }
 
   // ── E ───────────────────────────────────────────────────────────────────────────────────

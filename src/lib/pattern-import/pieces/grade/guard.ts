@@ -6,7 +6,11 @@
 // kombinezon 5/8, palto 4/7 wrong). The guard says when a seed's region holds ≥ 2 near-parallel
 // contours of the SAME look that no size class covers: then the seed is graded and must either be
 // ranked by gradeRanks or refused ('sizes-not-distinguished'), never closed as a single size.
-import type { Chain, ChainId, LineClass } from 'lib/pattern-import/types';
+//
+// "The same look" is the line's APPEARANCE, not its style id: two adapters (or two layers) give the
+// same black 0.3 mm solid line different ids. Width, colour and dash are compared within tolerance.
+// Lines the legend made frames / grids / notches / seam / grain / internal lines are never evidence.
+import type { Chain, ChainId, ChainRole, LineClass, Style } from 'lib/pattern-import/types';
 
 import { SegGrid } from '../geom';
 
@@ -37,14 +41,49 @@ export const GUARD_OPTS: GuardOpts = {
 
 export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
 
+/** Roles whose lines never count as size evidence (and never become graded walls). */
+export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore', 'notch', 'seam', 'grain', 'internal']);
+
+/** Chains of the classes above. */
+export function notEvidence(classes: readonly LineClass[]): Set<ChainId> {
+  return new Set(classes.filter((c) => NOT_EVIDENCE.has(c.role)).flatMap((c) => c.chains));
+}
+
+/** Two lines look alike: colour (Σ|ΔRGB| ≤ 60), width (±0.1 mm or ×1.5), dash (both solid, or motifs within 0.5 mm). */
+export type StyleMap = ReadonlyMap<number, Style>;
+
+export function sameLook(a: Chain, b: Chain, styles?: StyleMap): boolean {
+  if (a.style === b.style && !styles) return true;
+  const sa = styles?.get(a.style);
+  const sb = styles?.get(b.style);
+  if (sa && sb) {
+    const ca = sa.strokeRgb ?? [0, 0, 0];
+    const cb = sb.strokeRgb ?? [0, 0, 0];
+    if (Math.abs(ca[0] - cb[0]) + Math.abs(ca[1] - cb[1]) + Math.abs(ca[2] - cb[2]) > 60) return false;
+    const wa = sa.widthMm || 0;
+    const wb = sb.widthMm || 0;
+    if (Math.abs(wa - wb) > 0.1 && Math.max(wa, wb) > 1.5 * Math.min(wa, wb)) return false;
+    if (sa.fill !== sb.fill) return false;
+  } else if (a.style !== b.style) return false;
+  const ma = a.motif;
+  const mb = b.motif;
+  if (!ma || !mb) return !ma && !mb;
+  if (ma.length !== mb.length) return false;
+  return ma.every((x, i) => Math.abs(x - mb[i]) <= 0.5);
+}
+
 /** Evidence version of {@link detectUnencodedGrading}. */
 export function gradingEvidence(
   chains: readonly Chain[],
   classes: readonly LineClass[],
   opts: Partial<GuardOpts> = {},
+  styles?: StyleMap,
 ): GuardEvidence {
   const o = { ...GUARD_OPTS, ...opts };
-  const covered = new Set<ChainId>(classes.filter((c) => c.role === 'size').flatMap((c) => c.chains));
+  const covered = new Set<ChainId>([
+    ...classes.filter((c) => c.role === 'size').flatMap((c) => c.chains),
+    ...notEvidence(classes),
+  ]);
   const cand = chains.filter((c) => !covered.has(c.id) && c.lengthMm >= 10 && c.pts.length >= 2);
   const byId = new Map(cand.map((c) => [c.id, c]));
   const grid = new SegGrid(8);
@@ -63,7 +102,7 @@ export function gradingEvidence(
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
-        if (!d || d.style !== c.style) return;
+        if (!d || !sameLook(c, d, styles)) return;
         const p = d.pts[i];
         const q = d.pts[(i + 1) % d.pts.length];
         const sx = q.x - p.x;
@@ -98,6 +137,7 @@ export function detectUnencodedGrading(
   chains: readonly Chain[],
   classes: readonly LineClass[],
   opts: Partial<GuardOpts> = {},
+  styles?: StyleMap,
 ): boolean {
-  return gradingEvidence(chains, classes, opts).graded;
+  return gradingEvidence(chains, classes, opts, styles).graded;
 }

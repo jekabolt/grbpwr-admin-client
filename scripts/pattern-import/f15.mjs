@@ -109,8 +109,77 @@ inputs.push({
 // the LEGACY files they imitate, with the leading 999 lines removed.
 for (const f of ['golden-min.dxf', 'golden-min-r12.dxf'])
   inputs.push({ id: `k2/${f}`, files: [join(K2, f)], stripManifest: true });
+
+// ── synthetic notch controls (F14 MAJOR 1) ─────────────────────────────────────────────────────────
+// mm, one single-size block each. `neg-*` are REAL notches the twin dedupe must keep (base, which has
+// no dedupe at all, is the oracle: notch paths byte-identical). `twin` is the CLO cut/seam shape plus
+// an exact duplicate: one notch per logical notch, the kept copy on the contour.
+function syntheticDxf(block, ents) {
+  const L = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC'];
+  L.push('0', 'SECTION', '2', 'BLOCKS', '0', 'BLOCK', '8', '0', '2', block, '70', '0');
+  L.push('10', '0', '20', '0', '30', '0', '3', block);
+  for (const e of ents) {
+    if (e.poly) {
+      L.push('0', 'LWPOLYLINE', '8', e.layer, '90', String(e.poly.length), '70', '1');
+      for (const [x, y] of e.poly) L.push('10', x.toFixed(4), '20', y.toFixed(4));
+    } else {
+      const [[x0, y0], [x1, y1]] = e.line;
+      L.push('0', 'LINE', '8', e.layer, '10', x0.toFixed(4), '20', y0.toFixed(4), '30', '0');
+      L.push('11', x1.toFixed(4), '21', y1.toFixed(4), '31', '0');
+    }
+  }
+  L.push('0', 'ENDBLK', '8', '0', '0', 'ENDSEC');
+  L.push('0', 'SECTION', '2', 'ENTITIES', '0', 'INSERT', '8', '0', '2', block);
+  L.push('10', '0', '20', '0', '30', '0', '0', 'ENDSEC', '0', 'EOF');
+  return `${L.join('\n')}\n`;
+}
+const rect = (x0, y0, x1, y1) => [
+  [x0, y0],
+  [x1, y0],
+  [x1, y1],
+  [x0, y1],
+];
+const n4 = (a, b) => ({ layer: '4', line: [a, b] });
+const SYNTH = {
+  // 20 mm strap, matching notches on both long edges (starts 20 mm apart, step along both axes)
+  'neg-strap': syntheticDxf('STRAP_M', [
+    { layer: '1', poly: rect(0, 0, 300, 20) },
+    n4([100, 0], [100, 5]),
+    n4([100, 20], [100, 15]),
+    n4([200, 0], [200, 5]),
+    n4([200, 20], [200, 15]),
+  ]),
+  // asymmetric corner notches on adjacent edges: 4 mm from the corner on one, 20 mm on the other
+  'neg-corner': syntheticDxf('CORNER_M', [
+    { layer: '1', poly: rect(0, 0, 200, 300) },
+    n4([4, 0], [4, 5]),
+    n4([0, 20], [5, 20]),
+    n4([200, 296], [195, 296]),
+    n4([180, 300], [180, 295]),
+  ]),
+  // CLO twin: cut-line notch + seam-line copy 10 mm in (straight edge and side edge) + a contour-start
+  // duplicate 0.02 mm away
+  twin: syntheticDxf('TWIN_M', [
+    { layer: '1', poly: rect(0, 0, 200, 300) },
+    { layer: '14', poly: rect(10, 10, 190, 290) },
+    n4([100, 0], [100, 5]),
+    n4([100, 10], [100, 15]),
+    n4([100.02, 0], [100.02, 5]),
+    n4([0, 150], [5, 150]),
+    n4([10, 150], [15, 150]),
+  ]),
+};
+const synthDir = join(work, 'synthetic');
+mkdirSync(synthDir);
+for (const [id, text] of Object.entries(SYNTH)) {
+  const file = join(synthDir, `${id}.dxf`);
+  writeFileSync(file, text, 'latin1');
+  inputs.push({ id: `synthetic/${id}`, files: [file] });
+}
+
 // Whole parse must be byte-identical: no CLO notch quirks in these (K1 + our writer + our markers).
-const FULLY_IDENTICAL = (id) => id.startsWith('k1/') || id.includes('/RC28-');
+const FULLY_IDENTICAL = (id) =>
+  id.startsWith('k1/') || id.includes('/RC28-') || id.startsWith('synthetic/neg-');
 // Notch paths must not move: one notch per logical notch already (K1, our R2000 writer, markers).
 const NOTCHES_UNTOUCHED = (id) => FULLY_IDENTICAL(id) || id === 'k2/golden-min.dxf';
 
@@ -202,6 +271,32 @@ for (const input of inputs) {
   if (NOTCHES_UNTOUCHED(input.id)) {
     const notchOf = (r) => J(r.parse.map((p) => [p.id, p.innerNotch]));
     ck(notchOf(b) === notchOf(h), `notches ${input.id}: layer-4 paths byte-identical to base`);
+  }
+  if (input.id.startsWith('synthetic/')) {
+    const r = h.rows[0];
+    const want = input.id === 'synthetic/twin' ? 2 : 4;
+    const off = (r?.inner ?? [])
+      .filter((c) => c.layer === '4')
+      .filter((c) => {
+        let m = Infinity;
+        for (let k = 0; k < r.poly.length; k++) {
+          const a = r.poly[k];
+          const b = r.poly[(k + 1) % r.poly.length];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const t = Math.max(
+            0,
+            Math.min(1, ((c.pts[0].x - a.x) * dx + (c.pts[0].y - a.y) * dy) / (dx * dx + dy * dy)),
+          );
+          m = Math.min(m, Math.hypot(c.pts[0].x - a.x - t * dx, c.pts[0].y - a.y - t * dy));
+        }
+        return m > 0.05;
+      });
+    ck(
+      h.rows.length === 1 && r.notches === want && off.length === 0,
+      `notch dedupe ${input.id}: ${want} notches kept, all on the contour (L${h.contourLayer})`,
+      `head ${r?.notches}, base ${b.rows[0]?.notches}, off-contour ${off.length}`,
+    );
   }
   if (FULLY_IDENTICAL(input.id)) {
     ck(

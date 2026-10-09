@@ -51,7 +51,7 @@ import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
-import { publishPatternSizeIndex } from './pattern-size-index';
+import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
 import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
 import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
@@ -59,7 +59,17 @@ import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-
 import type { NestingFile } from './nesting/use-nesting';
 import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
 import { createCardApply } from './pattern-import/card-apply';
+import type { ApplyDraftFn } from './pattern-import/client';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import {
+  followUpPending,
+  followUpTargets,
+  initialRows,
+  retryRows,
+  type FollowUpStep,
+} from 'lib/pattern-import/fabrics/followup';
+import type { ConversionManifest } from 'lib/pattern-import/types';
+import type { FollowUpJob } from './pattern-import/follow-up';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 
@@ -90,6 +100,26 @@ const ImportWizard = lazy(() =>
 // офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
 // открытый диалог второй раз ничего не качает.
 const PieceAreasDialog = lazy(() => import('./piece-areas-dialog'));
+// Замер площадей + индекс размеров сразу после импорта (MF-C): тот же ленивый чанк разбора.
+const ImportFollowUpRunner = lazy(() =>
+  import('./pattern-import/follow-up').then((m) => ({ default: m.ImportFollowUpRunner })),
+);
+
+/** «converted» badge tooltip: what the importer wrote into the sheet (MF-C, M10). */
+function convertedTitle(m: ConversionManifest): string {
+  const src =
+    m.source.files
+      .map((f) => f.name)
+      .filter(Boolean)
+      .join(', ') || 'unknown source';
+  const at = formatTechCardDate(m.createdAt);
+  const gate = !m.gate
+    ? 'no gate report'
+    : m.gate.passed
+      ? `gate passed${m.gate.checks.some((c) => !c.ok) ? ' with warnings' : ''}`
+      : `gate blocked (${m.gate.checks.filter((c) => !c.ok && c.severity === 'block').length})`;
+  return `converted by the pattern importer from ${src}${at !== '—' ? ` on ${at}` : ''} · ${gate} · layer ${m.layers.cut} is the final cut line, sizes and pieces come from the file's manifest`;
+}
 
 // Секции BOM, к которым МОЖНО привязать выкройку. Это ровно те же четыре «рулонные» семьи,
 // что стор гросс-апит вейстеджем и что кладёт маркер (rollGoodsSections): подклад, бортовку и
@@ -338,6 +368,9 @@ export function PatternsField({
   // фоном, и рассказывать про удавшуюся запись, которую никто не заказывал, — это отчёт о работе,
   // о которой не спрашивали. А вот «карточку надо сохранить» — руководство к действию.
   const [indexFailures, setIndexFailures] = useState<Record<string, string>>({});
+  // Замер площадей и индекс размеров после импорта (MF-C, M3): работа живёт здесь, а не в мастере —
+  // она переживает его закрытие и показывает отказ строкой под шапкой с повтором.
+  const [followUp, setFollowUp] = useState<FollowUpJob | null>(null);
   // Раскладка modal: the DXF files of one fabric, pooled (null = closed).
   const [nesting, setNesting] = useState<{
     sizeId: number;
@@ -757,44 +790,88 @@ export function PatternsField({
   // фоновую запись был бы отчётом о работе, о которой не спрашивали; ответ, за которым сюда
   // пришли, стоит на плитках. Отказ пишется строкой под шапкой: «сохраните карточку» — это
   // руководство к действию, а не отчёт.
-  const publishedRef = useRef<Set<string>>(new Set());
+  //
+  // Запись по ключу хранит ОБЕЩАНИЕ, а не галку (MF-C): замер после импорта публикует индекс своих
+  // скоупов сам, следом за площадями, и обязан не дублировать уже улетевший PUT, а дождаться его.
+  // Пока его работа открыта, этот эффект её скоупы пропускает — порядок «сохранение → площади →
+  // индекс» держит она.
+  const publishedRef = useRef<Map<string, Promise<PublishSizeIndexResult>>>(new Map());
+  const recordIndex = (sig: string, res: PublishSizeIndexResult) =>
+    setIndexFailures((f) => {
+      if (res.ok) {
+        if (!(sig in f)) return f;
+        const { [sig]: _dropped, ...rest } = f;
+        return rest;
+      }
+      return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
+    });
+  const indexOnce = (
+    g: (typeof scopeGroups)[number],
+    force = false,
+  ):
+    | { sig: string; run: Promise<PublishSizeIndexResult>; fresh: boolean }
+    | { sig: string; skip: string } => {
+    const sig = sigOf(g.entries);
+    const a = audits[sig];
+    if (!techCardId) return { sig, skip: "the card isn't saved yet" };
+    if (a?.phase !== 'ready') return { sig, skip: 'the sheets of this fabric are not parsed yet' };
+    const tokens = [...a.found];
+    const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
+    const had = publishedRef.current.get(key);
+    if (had && !force) return { sig, run: had, fresh: false };
+    const run = publishPatternSizeIndex({
+      techCardId,
+      sheets: g.entries.map((e) => ({
+        lineKey: e.row.lineKey,
+        fabricPurpose: e.row.fabricPurpose,
+        bomLineKey: e.row.bomLineKey,
+      })),
+      sizeTokens: tokens,
+    });
+    publishedRef.current.set(key, run);
+    return { sig, run, fresh: true };
+  };
+  // Публикация индекса одного скоупа для замера после импорта: тот же ключ, та же запись отказа.
+  const publishIndexForRef = useRef<
+    (scopeKey: string, force: boolean) => Promise<PublishSizeIndexResult>
+  >(async () => ({ ok: false, reason: 'not ready' }));
+  publishIndexForRef.current = async (scopeKey, force) => {
+    if (!canPublishIndex) return { ok: false, reason: 'publishing is not allowed on this card' };
+    const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+    if (!g || g.entries.length === 0) return { ok: false, reason: 'no DXF sheet in this fabric' };
+    const o = indexOnce(g, force);
+    if ('skip' in o) return { ok: false, reason: o.skip };
+    const res = await o.run;
+    recordIndex(o.sig, res);
+    return res;
+  };
+  const followUpScopes = useMemo(
+    () =>
+      new Set(
+        followUp && followUpPending(followUp.rows) ? followUp.rows.map((r) => r.scopeKey) : [],
+      ),
+    [followUp],
+  );
   useEffect(() => {
     if (!canPublishIndex || !techCardId || !bundle) return;
     let cancelled = false;
     (async () => {
       for (const g of scopeGroups) {
         if (g.entries.length === 0) continue;
-        const sig = sigOf(g.entries);
-        const a = audits[sig];
-        if (a?.phase !== 'ready') continue;
-        const tokens = [...a.found];
-        const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
-        if (publishedRef.current.has(key)) continue;
-        publishedRef.current.add(key);
-        const res = await publishPatternSizeIndex({
-          techCardId,
-          sheets: g.entries.map((e) => ({
-            lineKey: e.row.lineKey,
-            fabricPurpose: e.row.fabricPurpose,
-            bomLineKey: e.row.bomLineKey,
-          })),
-          sizeTokens: tokens,
-        });
+        if (followUpScopes.has(g.scope.key)) continue;
+        const o = indexOnce(g);
+        if ('skip' in o || !o.fresh) continue;
+        const res = await o.run;
         if (cancelled) return;
-        setIndexFailures((f) => {
-          if (res.ok) {
-            if (!(sig in f)) return f;
-            const { [sig]: _dropped, ...rest } = f;
-            return rest;
-          }
-          return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
-        });
+        recordIndex(o.sig, res);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt]);
+    // indexOnce/recordIndex read this render's audits/scopeGroups — exactly the deps below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt, followUpScopes]);
 
   // Загрузчик возвращает НЕПРОЗРАЧНЫЙ ключ скоупа: контрол живёт в ui/ и не обязан знать ни про
   // назначения, ни про строки BOM. Разворачивает его в два поля провода здесь — в одном месте, тем
@@ -821,6 +898,27 @@ export function PatternsField({
     setEditing(null);
   }
 
+  // Применение импорта + запуск замера после него (MF-C, M3). Замер стартует ТОЛЬКО на сохранении
+  // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
+  // нулевым (F7).
+  function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
+    return async (draft, onProgress) => {
+      const result = await apply(draft, onProgress);
+      const targets = followUpTargets(draft, result);
+      if (targets && result.ok) {
+        const urls = [
+          ...result.uploaded.map((u) => u.url),
+          ...draft.scopes.flatMap((sc) => (sc.alreadyOnCard ? [sc.alreadyOnCard.url] : [])),
+        ];
+        setFollowUp({ id: Date.now(), rows: initialRows(targets), urls, nonce: 0 });
+      }
+      return result;
+    };
+  }
+  function retryFollowUp(only?: { scopeKey?: string; step?: FollowUpStep }) {
+    setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
+  }
+
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
     const rev = revisionOf(row);
@@ -836,6 +934,7 @@ export function PatternsField({
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM — и с поправкой на то, что
     // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
 
     return (
       <tr
@@ -878,6 +977,14 @@ export function PatternsField({
                 {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
                     котором заводят выкройки. Серый нейтральный тон, а не красный. */}
                 {!dxf && <Pill tone='mut'>legacy format</Pill>}
+                {/* Лист написан импортом (манифест прочитан разбором карточки): слой 1 — линия
+                    кроя, размеры и детали — из манифеста. Серый, потому что это факт о
+                    происхождении, а не состояние, требующее действия. */}
+                {converted && (
+                  <Pill tone='mut' title={convertedTitle(converted)}>
+                    converted
+                  </Pill>
+                )}
                 {stray && <Pill tone='warn'>size out of range</Pill>}
               </span>
               {/* When a name is set the filename still matters (it is what the factory's CAD
@@ -1594,6 +1701,47 @@ export function PatternsField({
           </Text>
         ))}
 
+      {/* После импорта: что не записалось из площадей и индекса, с повтором (MF-C). Пока мастер
+          открыт, то же показывает его шаг apply. */}
+      {!importing &&
+        followUp?.rows.flatMap((r) =>
+          (['areas', 'sizeIndex'] as const)
+            .filter((step) => r[step].state === 'failed')
+            .map((step) => (
+              <span key={`${r.scopeKey}|${step}`} className='flex flex-wrap items-baseline gap-1.5'>
+                <Text size='nano' component='span' className='text-error'>
+                  ! after the import, {step === 'areas' ? 'the piece areas' : 'the size index'} of “
+                  {r.label}” were not saved: {r[step].detail}
+                </Text>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => retryFollowUp({ scopeKey: r.scopeKey, step })}
+                >
+                  retry
+                </Button>
+              </span>
+            )),
+        )}
+      {followUp && techCardId && followUpPending(followUp.rows) && (
+        <Suspense fallback={null}>
+          <ImportFollowUpRunner
+            job={followUp}
+            techCardId={techCardId}
+            scopes={scopes}
+            sheetsOfScope={sheetsOfScope}
+            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc))}
+            sizeIds={sizeIds}
+            savedSizeIds={savedSizeIds}
+            sizeNameById={sizeById}
+            sourceDirty={sourceDirty}
+            publishIndex={(k, force) => publishIndexForRef.current(k, force)}
+            onRows={(id, rows) => setFollowUp((j) => (j && j.id === id ? { ...j, rows } : j))}
+          />
+        </Suspense>
+      )}
+
       {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
           карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
           материале, и увидеть его, не открыв нужную плитку, было бы нельзя. Всё остальное, что
@@ -1705,23 +1853,41 @@ export function PatternsField({
                 scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
                 filename: p.filename,
                 url: p.url,
+                lineKey: p.lineKey,
+                name: p.name,
+                manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
               })),
               styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             })}
             // F7: upload every file, then ONE batch into this form, then the card's own save.
-            applyDraft={createCardApply({
-              read: () => ({
-                patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
-                pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
-                aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
-              }),
-              write: (path, value) =>
-                setValue(path as Parameters<typeof setValue>[0], value as never, {
-                  shouldDirty: true,
+            applyDraft={followUpApply(
+              createCardApply({
+                read: () => ({
+                  patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
+                  pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
+                  aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
                 }),
-              storageSizeId,
-              save: (reason) => autosave.flush(reason),
-            })}
+                write: (path, value) =>
+                  setValue(path as Parameters<typeof setValue>[0], value as never, {
+                    shouldDirty: true,
+                  }),
+                storageSizeId,
+                save: (reason) => autosave.flush(reason),
+              }),
+            )}
+            followUp={followUp?.rows ?? null}
+            onRetryFollowUp={retryFollowUp}
+            onReviewPieces={(scopeKey) => {
+              const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+              if (!g || g.entries.length === 0) return;
+              setImporting(false);
+              setSelectedKey(scopeKey);
+              setMatching({
+                scope: g.scope,
+                fabricName: scopeLabel(g.scope),
+                files: filesOf(g.entries),
+              });
+            }}
             onClose={() => setImporting(false)}
           />
         </Suspense>

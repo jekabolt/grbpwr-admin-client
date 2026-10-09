@@ -5,24 +5,33 @@
 // code 999), which both dxf-parser and CLO skip:
 //
 //   999
-//   GRBPWR-MANIFEST v1 1/3 <base64 chunk>
+//   GRBPWR-MANIFEST v1z 1/3 <base64 chunk>
 //   999
-//   GRBPWR-MANIFEST v1 2/3 <base64 chunk>
+//   GRBPWR-MANIFEST v1z 2/3 <base64 chunk>
 //   …
 //   0
 //   SECTION
 //
-// The payload is the manifest as UTF-8 JSON, base64-encoded and cut into chunks of at most
-// `PATIMPORT.manifestLineMax` characters. `i` is 1-based.
+// Two line forms, one JSON schema (`v: 1`):
+//   v1   payload = base64(UTF-8 JSON)                — the first form; still read, never written
+//   v1z  payload = base64(deflate-raw(UTF-8 JSON))   — written since MF-B: a 138-block sheet's
+//        manifest is ~5× smaller (polupalto ≈ 10 KB instead of ≈ 55–110 KB of prologue), which
+//        keeps the 999 prologue inside any sniffer window. deflate-raw is RFC 1951, the same
+//        bytes `CompressionStream('deflate-raw')` produces; fflate does it synchronously, because
+//        `readManifest` runs inside the card's synchronous parse path.
+// Chunks are at most `PATIMPORT.manifestLineMax` characters; `i` is 1-based; every tagged line of
+// one file carries the same form.
 //
 // READING IS DELIBERATELY ALL-OR-NOTHING. The card replaces its guesses (sizes from block names, which
 // layer is the cut line, how a pair is counted) with what the manifest says, so a manifest that is only
 // partly readable must not be half-trusted: absent tag → `null` (a foreign DXF, the card guesses as it
 // always did); tag present but anything wrong with it → `ManifestError`, never a partial object and
-// never a silent `null`.
+// never a silent `null`. A compressed payload that inflates past `MANIFEST_MAX_JSON_BYTES` is
+// `corrupt` (a deflate bomb in a comment line must not take the card's parser down).
 //
-// Main-thread safe by contract: JSON and string operations only, no imports beyond `types.ts` (and
-// the sibling `identity.ts`, the G11 identity grammar the wizard and the gate share).
+// Main-thread safe by contract: JSON, string and fflate (pure JS) operations only, no imports beyond
+// `types.ts` (and the sibling `identity.ts`, the G11 identity grammar the wizard and the gate share).
+import { Inflate, deflateSync } from 'fflate';
 import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
@@ -66,8 +75,13 @@ export class ManifestError extends Error {
 
 // ── base64 over UTF-8, without Buffer (browser, worker and node ≥ 16 all have btoa/atob) ──────────
 
-function toBase64(json: string): string {
-  const bytes = new TextEncoder().encode(json);
+/** Line form: `v1` = plain JSON, `v1z` = deflate-raw JSON (see the header). */
+export type ManifestLineForm = 'v1' | 'v1z';
+
+/** Inflated JSON larger than this is refused as `corrupt` (a real manifest is well under 1 MB). */
+export const MANIFEST_MAX_JSON_BYTES = 4 * 1024 * 1024;
+
+function bytesToBase64(bytes: Uint8Array): string {
   let bin = '';
   const STEP = 0x8000;
   for (let i = 0; i < bytes.length; i += STEP) {
@@ -76,9 +90,39 @@ function toBase64(json: string): string {
   return btoa(bin);
 }
 
+function toBase64(json: string, form: ManifestLineForm): string {
+  const utf8 = new TextEncoder().encode(json);
+  return bytesToBase64(form === 'v1z' ? deflateSync(utf8, { level: 9 }) : utf8);
+}
+
+/** deflate-raw → bytes, refusing more than `max` bytes of output. */
+function inflateCapped(z: Uint8Array, max: number): Uint8Array {
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  const inf = new Inflate((chunk) => {
+    total += chunk.length;
+    if (total > max)
+      throw new ManifestError('corrupt', `compressed payload inflates past ${max} bytes`);
+    parts.push(chunk);
+  });
+  try {
+    inf.push(z, true);
+  } catch (e) {
+    if (e instanceof ManifestError) throw e;
+    throw new ManifestError('corrupt', 'compressed payload is not deflate data');
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
 const B64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
-function fromBase64(b64: string): string {
+function fromBase64(b64: string, form: ManifestLineForm): string {
   if (b64.length % 4 !== 0 || !B64.test(b64))
     throw new ManifestError('corrupt', 'payload is not base64');
   let bin: string;
@@ -87,8 +131,11 @@ function fromBase64(b64: string): string {
   } catch {
     throw new ManifestError('corrupt', 'payload is not base64');
   }
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const raw = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+  if (form === 'v1' && raw.length > MANIFEST_MAX_JSON_BYTES)
+    throw new ManifestError('corrupt', `payload is larger than ${MANIFEST_MAX_JSON_BYTES} bytes`);
+  const bytes = form === 'v1z' ? inflateCapped(raw, MANIFEST_MAX_JSON_BYTES) : raw;
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
@@ -137,7 +184,7 @@ function leadingComments(text: string): LeadingComments {
 
 const isTagged = (value: string) => value === MANIFEST_TAG || value.startsWith(`${MANIFEST_TAG} `);
 
-const LINE = /^GRBPWR-MANIFEST v(\d+) (\d+)\/(\d+) ([A-Za-z0-9+/=]*)$/;
+const LINE = /^GRBPWR-MANIFEST v(\d+)(z?) (\d+)\/(\d+) ([A-Za-z0-9+/=]*)$/;
 
 // ── shape ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -297,7 +344,18 @@ export function validateManifest(x: unknown): ConversionManifest {
  * and the file's line endings. Throws `ManifestError` on an invalid manifest: a writer bug must not
  * produce a file the card refuses later.
  */
-export const embedManifest: EmbedManifestFn = (dxfText, manifest) => {
+export const embedManifest: EmbedManifestFn = (dxfText, manifest) =>
+  embedManifestAs(dxfText, manifest, 'v1z');
+
+/**
+ * `embedManifest` with an explicit line form. `'v1'` (uncompressed) exists for the probes and for
+ * reading back files written before MF-B; the writer always uses `'v1z'`.
+ */
+export function embedManifestAs(
+  dxfText: string,
+  manifest: ConversionManifest,
+  form: ManifestLineForm,
+): string {
   validateManifest(manifest);
   const eol = dxfText.includes('\r\n') ? '\r\n' : '\n';
   const lead = leadingComments(dxfText);
@@ -308,17 +366,28 @@ export const embedManifest: EmbedManifestFn = (dxfText, manifest) => {
     if (!isTagged(c.value)) continue;
     body = body.slice(0, c.from - lead.start) + body.slice(c.to - lead.start);
   }
-  const payload = toBase64(JSON.stringify(manifest));
+  const payload = toBase64(JSON.stringify(manifest), form);
   const max = PATIMPORT.manifestLineMax;
   const chunks: string[] = [];
   for (let i = 0; i < payload.length; i += max) chunks.push(payload.slice(i, i + max));
   if (chunks.length === 0) chunks.push('');
   const n = chunks.length;
   const head = chunks
-    .map((c, i) => `999${eol}${MANIFEST_TAG} v${MANIFEST_VERSION} ${i + 1}/${n} ${c}${eol}`)
+    .map((c, i) => `999${eol}${MANIFEST_TAG} ${form} ${i + 1}/${n} ${c}${eol}`)
     .join('');
   return dxfText.slice(0, lead.start) + head + body;
-};
+}
+
+/**
+ * Bytes of the leading 999 block (the manifest prologue plus any foreign leading comments) — what
+ * a sniffer has to walk before it sees `0 / SECTION`. The writer's preflight warns above 48 KB.
+ */
+export function manifestPrologueBytes(dxfText: string): number {
+  const lead = leadingComments(dxfText);
+  let n = 0;
+  for (let i = lead.start; i < lead.end; i++) n += dxfText.charCodeAt(i) < 0x80 ? 1 : 2;
+  return n;
+}
 
 /**
  * `null` when the file carries no manifest (a foreign DXF). Throws `ManifestError` when it carries
@@ -330,12 +399,13 @@ export const readManifest: ReadManifestFn = (dxfText) => {
   const tagged = lead.comments.filter((c) => isTagged(c.value)).map((c) => c.value);
   if (tagged.length === 0) return null;
   let total = -1;
+  let form: ManifestLineForm | null = null;
   const chunks = new Map<number, string>();
   for (const line of tagged) {
     const m = LINE.exec(line);
     if (!m) {
       // A version we do not know may also change the line format; say «version» when we can tell.
-      const v = /^GRBPWR-MANIFEST v(\d+)\b/.exec(line);
+      const v = /^GRBPWR-MANIFEST v(\d+)/.exec(line);
       if (v && Number(v[1]) !== MANIFEST_VERSION) {
         throw new ManifestError(
           'version',
@@ -344,13 +414,17 @@ export const readManifest: ReadManifestFn = (dxfText) => {
       }
       throw new ManifestError('corrupt', `unreadable manifest line "${line.slice(0, 60)}"`);
     }
-    const [, ver, iStr, nStr, chunk] = m;
+    const [, ver, z, iStr, nStr, chunk] = m;
     if (Number(ver) !== MANIFEST_VERSION) {
       throw new ManifestError(
         'version',
         `line says v${ver}, this reader knows v${MANIFEST_VERSION}`,
       );
     }
+    const f: ManifestLineForm = z ? 'v1z' : 'v1';
+    if (form === null) form = f;
+    else if (form !== f)
+      throw new ManifestError('corrupt', 'compressed and plain manifest lines are mixed');
     const i = Number(iStr);
     const n = Number(nStr);
     if (!(n >= 1) || !(i >= 1) || i > n)
@@ -368,7 +442,7 @@ export const readManifest: ReadManifestFn = (dxfText) => {
   }
   let payload = '';
   for (let i = 1; i <= total; i++) payload += chunks.get(i)!;
-  const json = fromBase64(payload);
+  const json = fromBase64(payload, form ?? 'v1');
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);

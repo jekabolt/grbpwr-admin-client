@@ -124,6 +124,11 @@ const TWIN_SIN = Math.sin((15 * Math.PI) / 180);
 // CLO also writes one notch twice at a closed contour's start/end vertex, 0.02 mm apart
 // (CLR_3_M: x = ±0.01). Starts this close are the same notch whatever the direction.
 const SAME_START_CM = 0.01;
+// A cut/seam twin has exactly ONE copy on (or near) this piece's contour — the other sits an
+// allowance away, or both sit off a graded outline (mode A). Two notches whose starts BOTH lie on the
+// contour are two real notches: matching notches across a strap narrower than TWIN_MAX_CM, or
+// asymmetric corner notches on two adjacent edges. Never paired (exact duplicates: SAME_START_CM).
+const ON_CONTOUR_CM = 0.05;
 
 function segDist(p: Pt, a: Pt, b: Pt): number {
   const dx = b.x - a.x;
@@ -176,6 +181,9 @@ export function duplicateNotches(
   type Pair = { i: number; j: number; d: number };
   const pairs: Pair[] = [];
   const live = idx.filter((i) => !drop.has(i));
+  const onContour = new Map(
+    live.map((i) => [i, distToLoop(chains[i].pts[0], contour) <= ON_CONTOUR_CM]),
+  );
   for (let a = 0; a < live.length; a++) {
     const A = chains[live[a]].pts;
     const ua = unit(A[0], A[1]);
@@ -188,6 +196,7 @@ export function duplicateNotches(
       if (d > TWIN_MAX_CM) continue;
       const v = { x: (B[0].x - A[0].x) / d, y: (B[0].y - A[0].y) / d };
       if (Math.abs(cross(v, ua)) > TWIN_SIN && Math.abs(cross(v, ub)) > TWIN_SIN) continue;
+      if (onContour.get(live[a]) && onContour.get(live[b])) continue;
       pairs.push({ i: live[a], j: live[b], d });
     }
   }

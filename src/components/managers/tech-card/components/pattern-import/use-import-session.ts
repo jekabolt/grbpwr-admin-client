@@ -29,7 +29,15 @@ import type {
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
-import { importErrorCode } from 'lib/pattern-import/worker/client';
+import {
+  buildErrorReport,
+  checkFilesBeforeReading,
+  downloadErrorReport,
+  ImportWorkerError,
+  importErrorCode,
+  type ErrorReport,
+  type ImportLogEvent,
+} from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
 import type {
   ApplyDraftFn,
@@ -180,6 +188,13 @@ export function useImportSession(deps: {
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
+  /**
+   * MF-C (M4): per scope, what to do with the previous import's sheet the draft found
+   * (`DraftScope.replaces`). Absent = 'replace', the default. Read at apply time.
+   */
+  const [sheetModes, setSheetModes] = useState<Record<string, 'replace' | 'add'>>({});
+  const modesRef = useRef(sheetModes);
+  modesRef.current = sheetModes;
   const [extracted, setExtracted] = useState<ExtractInfo>(NO_EXTRACT);
   const [errorCode, setErrorCode] = useState<ImportErrorCode | null>(null);
   /** The latest Set-of-Mark render (what the AI was shown), kept to draw it on the details step. */
@@ -226,6 +241,7 @@ export function useImportSession(deps: {
     if (id == null) throw new Error('no session — read the files first');
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
+    failureRef.current = null;
     try {
       return await client.run(id, stage, input, (p) =>
         patch({ busy: { stage, done: p.done, total: p.total, note: p.note } }),
@@ -235,9 +251,24 @@ export function useImportSession(deps: {
     }
   }
 
+  /** The last failure, kept for the error report (M5): which stage, which code, what it said. */
+  const failureRef = useRef<{
+    stage: StageName | null;
+    code: ImportErrorCode | null;
+    message: string;
+  } | null>(null);
+
   const fail = (e: unknown) => {
     const message = e instanceof Error ? e.message : String(e);
     const code = importErrorCode(e);
+    failureRef.current = {
+      stage:
+        e instanceof ImportWorkerError
+          ? e.stage ?? sRef.current.busy?.stage ?? null
+          : sRef.current.busy?.stage ?? null,
+      code,
+      message,
+    };
     setErrorCode(code);
     const id = sRef.current.sessionId;
     // The worker was restarted (a stage that would not stop, a crash): its session is gone, so
@@ -302,6 +333,8 @@ export function useImportSession(deps: {
           setExtracted(NO_EXTRACT);
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
+          // M6: too many files / bytes are refused before a single byte is read.
+          checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
             ev.files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
@@ -458,14 +491,30 @@ export function useImportSession(deps: {
           return;
         }
         case 'apply': {
-          const draft = sRef.current.draft;
-          if (!draft) return;
+          const built = sRef.current.draft;
+          if (!built) return;
+          // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
+          const draft = {
+            ...built,
+            scopes: built.scopes.map((sc) =>
+              sc.replaces
+                ? { ...sc, sheetMode: modesRef.current[sc.target.scopeKey] ?? 'replace' }
+                : sc,
+            ),
+          };
           const progress: Record<string, ApplyProgress['state']> = {};
           setApply({ phase: 'running', progress });
           const result = await applyDraft(draft, (p) => {
             progress[p.scopeKey] = p.state;
             setApply({ phase: 'running', progress: { ...progress } });
           });
+          // the apply step's "download report" carries what the card refused (M5)
+          if (!result.ok)
+            failureRef.current = {
+              stage: null,
+              code: null,
+              message: `apply: ${result.failedScope}: ${result.message}`,
+            };
           setApply({ phase: 'done', result, progress: { ...progress } });
           return;
         }
@@ -719,7 +768,7 @@ export function useImportSession(deps: {
       }
       case 'pieces': {
         const fams = s.pieces?.families ?? [];
-        const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current);
+        const variants = variantsOf(s.pieces?.seeds ?? [], baseSeeds.current, s.pieces?.variants);
         if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
         // Only the sizes that are exported must close: an unmapped size is never written.
         const mapped = exportedRanks(s.sizes?.map);
@@ -872,6 +921,9 @@ export function useImportSession(deps: {
     session,
     inputs,
     apply,
+    sheetModes,
+    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') =>
+      setSheetModes((m) => ({ ...m, [scopeKey]: mode })),
     extracted,
     errorCode,
     notice,
@@ -892,7 +944,32 @@ export function useImportSession(deps: {
     piecesInput,
     semanticsInput,
     cancel: () => client.cancel(),
+    errorReport,
+    downloadReport: () => downloadErrorReport(errorReport()),
   };
+
+  /** M5: everything needed to reproduce this run without the files (no file contents). */
+  function errorReport(): ErrorReport {
+    const c = client as ImportClient & {
+      log?: { events: readonly ImportLogEvent[] };
+      heapMb?: number | null;
+      peakHeapMb?: number | null;
+    };
+    const { fileList, ...rest } = iRef.current;
+    return buildErrorReport({
+      session: sRef.current,
+      operator: {
+        files: fileList.map((f) => ({ name: f.name, bytes: f.size, type: f.type })),
+        ...rest,
+      },
+      failure: failureRef.current ?? undefined,
+      extract: exRef.current,
+      generator: `grbpwr-admin pattern-import (${client.kind})`,
+      log: c.log?.events,
+      heapMb: c.heapMb ?? null,
+      peakHeapMb: c.peakHeapMb ?? null,
+    });
+  }
 }
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
@@ -949,9 +1026,17 @@ export function textNameOf(
   };
 }
 
-export function variantsOf(seeds: Seed[], base: Seed[] | null): string[] {
+/** The models to choose from: the seeds' own, plus the ones the sheet names (pieces out). */
+export function variantsOf(
+  seeds: Seed[],
+  base: Seed[] | null,
+  named: readonly string[] = [],
+): string[] {
   return [
-    ...new Set([...(base ?? []), ...seeds].flatMap((s) => (s.variant ? [s.variant] : []))),
+    ...new Set([
+      ...[...(base ?? []), ...seeds].flatMap((s) => (s.variant ? [s.variant] : [])),
+      ...named,
+    ]),
   ].sort();
 }
 

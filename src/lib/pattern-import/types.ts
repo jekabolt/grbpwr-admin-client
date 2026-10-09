@@ -512,7 +512,29 @@ export type FillOutcome =
   | 'closed'
   | 'leak' // seed region touches the outside — contour has a gap
   | 'merged' // two seeds in one region
-  | 'tiny'; // area below MIN_PIECE_AREA
+  | 'tiny' // area below MIN_PIECE_AREA
+  /**
+   * pieces/grade (H1): the sheet draws several sizes alike and this size of this piece could not
+   * be PROVEN — no contour is given (`outer` empty), `gradeRefusal` says why. Not a gap: closing a
+   * gap does not help; the operator answers the size count, picks an orientation, or traces it.
+   */
+  | 'refused';
+
+/** pieces/grade (H1): why a candidate is 'refused'. */
+export type GradeRefusal =
+  /** several sizes are drawn alike here and nothing proves which line is which size */
+  | 'sizes-not-distinguished'
+  /** more than one size layout fits the drawn lines equally well */
+  | 'grade-ambiguous'
+  /** the size count is unknown, or the drawing shows a different number of lines side by side */
+  | 'size-count';
+
+/**
+ * How many sizes the sheet draws, and who says so. 'source' = the file encodes its sizes (legend,
+ * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step;
+ * 'card' = the card's size run (the converter runs inside the card), used when the source is silent.
+ */
+export type ExpectedSizes = { n: number; from: 'source' | 'operator' | 'card' };
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
@@ -544,10 +566,20 @@ export type PieceCandidate = {
    */
   rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade';
   /**
-   * pieces/grade (H1): why an unencoded graded piece was NOT closed (outcome 'leak'): no rank model
-   * ('sizes-not-distinguished'), two layouts fit ('grade-ambiguous'), size count disputed.
+   * pieces/grade (H1): why this candidate is 'refused' (set only with that outcome).
    */
-  gradeRefusal?: 'sizes-not-distinguished' | 'grade-ambiguous' | 'size-count';
+  gradeRefusal?: GradeRefusal;
+  /** pieces/grade (H1): the refusal in words for the operator ("the drawing shows 5 lines …"). */
+  gradeDetail?: string;
+  /**
+   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
+   * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
+   * operator drew; 'band-cut' = this rank's end tick across a band, carried to the band's edges
+   * where the source stops it short;
+   * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
+   * neighbouring rank's contour; its `pts` is empty.
+   */
+  derived?: { kind: 'bridge' | 'operator-bridge' | 'band-cut' | 'shared-rank'; pts: PtMm[] }[];
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
@@ -567,12 +599,19 @@ export type FillOpts = {
   /** Only this variant's seeds; null = all seeds. */
   variant: string | null;
   /**
-   * pieces/grade (H1) on sheets whose sizes are drawn alike (F4 fell to 'single' with n > 1):
-   * 'solve' (default) ranks them, 'guard' refuses them, 'off' = the single-size fill as before.
+   * pieces/grade (H1) on sheets whose sizes are drawn alike (no size class carries the piece's
+   * lines while more than one size is expected): 'solve' (default) ranks them and refuses what it
+   * cannot prove, 'guard' refuses every expected size of them, 'off' = the single-size fill as
+   * before (probes only — it can close a contour of no size).
    */
   grade?: 'solve' | 'guard' | 'off';
-  /** Size count when the SizeRun does not carry it (the wizard's "how many sizes"). */
-  sizeCount?: number;
+  /**
+   * How many sizes the sheet draws (sizes stage `expected`). Absent = unknown: a piece that looks
+   * graded is refused ('size-count') rather than closed as one size.
+   */
+  expectedSizes?: ExpectedSizes;
+  /** F4b: longest wall gap closed by a derived bridge, mm. Default 3; 0 = never. */
+  autoBridgeMm?: Mm;
 };
 
 export type ProposeSeedsFn = (sheet: Sheet, set: ChainSet) => Seed[];
@@ -598,12 +637,31 @@ export type PieceEdit =
    */
   | { kind: 'bridge'; seed: SeedId | null; rank: number | null; from: PtMm; to: PtMm }
   /** The operator's "ignore this line": the chain is never a wall (a frame, a watermark, a label box). */
-  | { kind: 'ignore-line'; chain: ChainId };
+  | { kind: 'ignore-line'; chain: ChainId }
+  /**
+   * The operator's "use line" (F4b `setWall`): the chain becomes a wall of one size rank, or —
+   * `rank: null` — of every size (a facing line inside a hood that bounds the facing piece).
+   */
+  | { kind: 'set-wall'; chain: ChainId; rank: number | null };
 
 export type ApplyPieceEditsFn = (
   families: PieceFamily[],
   edits: PieceEdit[],
-  ctx: { sheet: Sheet; set: ChainSet; run: SizeRun; opts: FillOpts },
+  ctx: {
+    sheet: Sheet;
+    set: ChainSet;
+    run: SizeRun;
+    opts: FillOpts;
+    /**
+     * The operator's wall edits so far (F4b `PieceSession.walls`): a reseed / wall-override refill
+     * keeps the gaps the operator closed and the lines they ignored or set.
+     */
+    walls?: {
+      exclude?: ChainId[];
+      include?: { rank: number | null; ids: ChainId[] }[];
+      bridges?: { rank: number; from: PtMm; to: PtMm }[];
+    };
+  },
 ) => PieceFamily[];
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -788,6 +846,12 @@ export type BlockReason =
   /** Region below `minPieceAreaMm2` — not a piece unless the operator says so. */
   | 'tiny'
   | 'non-monotone'
+  /** pieces/grade (H1): the piece's sizes are drawn alike and could not be told apart */
+  | 'sizes-not-distinguished'
+  /** pieces/grade (H1): the size count is unknown or disputed by the drawing */
+  | 'size-count'
+  /** pieces/grade (H1): more than one size layout fits */
+  | 'grade-ambiguous'
   | 'grammar'
   | 'duplicate-identity'
   | 'size-unmapped'
@@ -872,7 +936,36 @@ export type DraftScope = {
    * scope — no upload, no new row; re-applying an import changes nothing.
    */
   alreadyOnCard?: { url: string; filename: string } | null;
+  /**
+   * MF-C (M4): a sheet THIS importer wrote earlier (its manifest is on the card) in the same scope.
+   * `replace` (the default when present) puts the new file into that row (lineKey, name, binding
+   * kept; url, filename and size new) instead of adding a second sheet the card would count as a
+   * revision. `matchedBy`: the same source file (sha256 / file name) or just the same scope.
+   */
+  replaces?: DraftReplaceTarget | null;
+  /** MF-C: the operator's answer when `replaces` is set; absent = 'replace'. */
+  sheetMode?: 'replace' | 'add';
+  /**
+   * MF-C: block links of this scope that the replaced sheet's import wrote and the new file no
+   * longer draws. Never removed by apply: listed, and handed to the piece-match modal's deletion
+   * flow, which checks presence on the full parse and shows what a removal takes with it.
+   */
+  vanished?: DraftVanished[];
+  /** MF-C: the new file read back completely (gate G1); removal is only offered when true. */
+  readsBack?: boolean;
 };
+
+export type DraftReplaceTarget = {
+  lineKey: string;
+  url: string;
+  filename: string;
+  name: string;
+  matchedBy: 'sha256' | 'source' | 'scope';
+  /** When the replaced sheet was converted (its manifest `createdAt`). */
+  convertedAt: string;
+};
+
+export type DraftVanished = { blockName: string; pieceLineKey: string; pieceName: string };
 
 export type DraftPiece = {
   /** Client-minted ULID, same contract as pieces.N.lineKey. */
@@ -935,7 +1028,15 @@ export type ApplyUploaded = { scopeKey: string; url: string; filename: string; s
  * card save's answer (autosave `flush`), when the host passed one.
  */
 export type ApplyResult =
-  | { ok: true; uploaded: ApplyUploaded[]; reused?: string[]; writes?: number; save?: string }
+  | {
+      ok: true;
+      uploaded: ApplyUploaded[];
+      reused?: string[];
+      writes?: number;
+      save?: string;
+      /** MF-C: rows whose file was replaced in place (M4), old url → new url. */
+      replaced?: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
+    }
   | { ok: false; failedScope: string; message: string; uploaded: ApplyUploaded[] };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1008,7 +1109,9 @@ export type GateCheckId =
   | 'G10-uni'
   | 'G11-grammar'
   | 'G12-pair'
-  | 'G13-manifest';
+  | 'G13-manifest'
+  /** MF-B preflight: the 999 manifest prologue is larger than `manifestPrologueWarnBytes` (warn). */
+  | 'G14-prologue';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1072,8 +1175,14 @@ export type GateExpectation = {
   manifest: ConversionManifest;
   /** Card size tokens (for G9 via deriveBlockSizes) — the card's `has(token)`. */
   sizeTokens: ReadonlySet<string>;
-  /** Walls per block for G3/G4. */
+  /** Source walls per block: G4 measures the written line against them (whole chains are fine). */
   wallsByBlock: Record<string, PtMm[][]>;
+  /**
+   * G3's denominator (M7): the stretches of the walls this block uses, cut at junctions of the
+   * source chain topology — never trimmed by the written line. Absent for a block = its
+   * `wallsByBlock` (a CLO block's walls are its own outline).
+   */
+  coverageWallsByBlock?: Record<string, PtMm[][]>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
@@ -1286,12 +1395,40 @@ export type StageIO = {
     };
   };
   sizes: {
-    in: { card: CardSize[]; operatorMap?: SizeMapEntry[] };
-    out: { run: SizeRun; map: SizeMap };
+    in: {
+      card: CardSize[];
+      operatorMap?: SizeMapEntry[];
+      /** pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet". */
+      drawnSizes?: number;
+    };
+    out: {
+      run: SizeRun;
+      map: SizeMap;
+      /**
+       * pieces/grade (H1): sizes the sheet draws — from the source when it encodes them, else the
+       * operator's answer, else the card's run; null = unknown (the sizes step asks).
+       */
+      expected: ExpectedSizes | null;
+    };
   };
   pieces: {
     in: { seeds?: Seed[]; edits: PieceEdit[]; opts: FillOpts };
-    out: { seeds: Seed[]; families: PieceFamily[] };
+    out: {
+      seeds: Seed[];
+      families: PieceFamily[];
+      /**
+       * Models the sheet names ("Style A", "Mod. 125": F4 `variantLabels` over the sheet and the
+       * instruction pages), also when no seed carries one — the wizard offers them as the model
+       * choice, and the chosen one's cutting lines become knives (FillOpts.variant).
+       */
+      variants?: string[];
+      /**
+       * pieces/grade (H1): what the size solver could not decide (kind 'size-count' /
+       * 'grade-ambiguous'), and the size count the fill assumed — the refused candidates carry
+       * the per-piece reason.
+       */
+      grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
+    };
   };
   semantics: {
     in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families'>;
@@ -1343,6 +1480,8 @@ export type ImportErrorCode =
   | 'no-session'
   | 'out-of-order'
   | 'crashed'
+  /** MF-B input guards: too many bytes / files / pages / pixels — refused before reading. */
+  | 'too-large'
   | 'internal';
 
 export type ImportWorkerRequest =
@@ -1469,4 +1608,14 @@ export const PATIMPORT = {
   squareTolMm: 0.1,
   aiAutoAcceptInitial: 0.85,
   manifestLineMax: 200,
+  /** Writer preflight (M1): a 999 prologue above this warns in the gate report (G14). */
+  manifestPrologueWarnBytes: 48 * 1024,
+  /** G3 (M7): a contiguous stretch of source wall off the written line this long blocks. */
+  coverageGapMm: 10,
+  // Input guards (M6), checked before anything is read; the worker re-checks.
+  maxInputBytes: 150 * 1024 * 1024,
+  maxInputFiles: 40,
+  maxPdfPages: 200,
+  /** Pixels of one raster page / image (RGBA decode ≈ 4 B per pixel in the worker). */
+  maxRasterPixels: 100_000_000,
 } as const;

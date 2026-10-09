@@ -178,7 +178,8 @@ export function variantLabels(texts: readonly string[]): string[] {
     const s = raw.trim();
     for (const re of VARIANT) {
       const m = s.match(re);
-      if (m)
+      // "STYLE NO. 1042" is the pattern's number, not a model
+      if (m && !/^(?:no|nr)$/i.test(m[1]))
         out.add(re === VARIANT[0] ? `Style ${m[1].toUpperCase()}` : `Mod. ${m[1].toUpperCase()}`);
     }
     // "Mod. 123,124,125" lists several models
