@@ -1,6 +1,8 @@
 // Per-file pipeline: bytes → dxf-parser → block expansion → loop chaining/filtering →
 // raw pieces in absolute cm coordinates, then the normalization into PieceDTO.
-import type { ParseOpts, PieceDTO, Unit } from '../types';
+import type { ParseOpts, PieceDTO, PieceManifestFacts, Unit } from '../types';
+import type { ConversionManifest } from 'lib/pattern-import/types';
+import { readManifestBytes } from 'lib/pattern-import/manifest';
 import { parseDxf } from '../dxf/parse';
 import { expandGroups } from '../dxf/transform';
 import { groupToPieces, type RawPiece } from '../dxf/pieces';
@@ -70,7 +72,76 @@ export type ParsedSheets = {
   // вопрос, по которому деталь кроя предлагается удалить. `pieces` на него отвечать не может: между
   // блоком и деталью лежит геометрия, и она законно возвращает ноль контуров.
   blockNames: string[];
+  // МАНИФЕСТ КОНВЕРТАЦИИ по индексу файла (F6b, 08-CONTRACT §3.1); null — файл без манифеста.
+  // Детали такого файла уже несут `manifest` — массив здесь для тех, кому нужен файл целиком
+  // (значок «сконвертировано» на вкладке выкроек), а не для разбора деталей.
+  manifests: (ConversionManifest | null)[];
 };
+
+// Факты манифеста по имени блока (ci). Манифест обязан описывать файл ЦЕЛИКОМ: каждый
+// встреченный блок есть в манифесте и каждый блок манифеста встречен. Иначе файл правили после
+// конвертера (или манифест от другого файла), и доверять ему частично нельзя — карточка тогда
+// смешала бы заявленное с угаданным внутри одной ткани. Расхождение — отказ файла, а не тихий
+// откат к угадыванию: то же правило «всё или ничего», что у readManifest.
+function manifestFactsByBlock(
+  m: ConversionManifest,
+  seenBlocks: readonly string[],
+  geometryBlocks: readonly string[],
+): Map<string, PieceManifestFacts> {
+  const declared = new Map(m.blocks.map((b) => [b.block.trim().toLowerCase(), b]));
+  const seen = new Set(seenBlocks.map((b) => b.trim().toLowerCase()).filter(Boolean));
+  const extra = [...seen].filter((b) => !declared.has(b));
+  const absent = [...declared.keys()].filter((b) => !seen.has(b));
+  if (extra.length > 0 || absent.length > 0) {
+    throw new Error(
+      `the conversion manifest does not describe this drawing (${[
+        extra.length > 0 ? `blocks not in the manifest: ${extra.join(', ')}` : '',
+        absent.length > 0 ? `manifest blocks missing from the drawing: ${absent.join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('; ')}) — the file was edited after conversion; re-export it from the converter`,
+    );
+  }
+  if (geometryBlocks.some((b) => !b.trim() || !declared.has(b.trim().toLowerCase()))) {
+    throw new Error(
+      'the conversion manifest does not describe this drawing (it carries geometry outside its blocks) — re-export it from the converter',
+    );
+  }
+  const pieceOf = new Map(m.pieces.map((p) => [p.identity.trim().toLowerCase(), p]));
+  const out = new Map<string, PieceManifestFacts>();
+  for (const [ci, b] of declared) {
+    const piece = pieceOf.get(b.identity.trim().toLowerCase())!;
+    const raw = b.block.trim();
+    const tail = `_${b.sizeToken}`;
+    // Хвост берётся В НАПИСАНИИ ФАЙЛА, как его берёт и разбор имён (deriveBlockSizes отдаёт хвост
+    // как написан). Неградуируемая деталь размера не несёт, даже если блок назван по базовому.
+    const size =
+      piece.ungraded || !raw.toLowerCase().endsWith(tail.toLowerCase())
+        ? ''
+        : raw.slice(raw.length - b.sizeToken.length);
+    if (!piece.ungraded && !size) {
+      throw new Error(
+        `the conversion manifest does not describe this drawing (block “${raw}” does not end with its size “${b.sizeToken}”) — re-export it from the converter`,
+      );
+    }
+    const hand = piece.pairHand;
+    const mods = hand ? piece.mods.filter((x) => x.toUpperCase() !== hand) : piece.mods;
+    out.set(ci, {
+      identity: piece.identity.trim(),
+      size,
+      sizeId: piece.ungraded ? 0 : b.sizeId,
+      cardName: hand ? [piece.code, ...mods].filter(Boolean).join('_') || piece.identity.trim() : piece.identity.trim(),
+      pairHand: hand,
+      pairOf: piece.pairOf ? piece.pairOf.trim() : null,
+      unfolded: piece.unfoldedFold,
+      cutLayer: m.layers.cut,
+      seamLayer: m.layers.seam,
+      grainLayer: m.layers.grain,
+      cutAllowanceCm: m.allowanceMm / 10,
+    });
+  }
+  return out;
+}
 
 // Parse a batch of sheets into placement-ready pieces. Ids are minted across the batch
 // (1-based) because everything downstream — the marker blob, the cut-piece aliases, the
@@ -88,17 +159,32 @@ export async function parseSheets(
   // Набор на всю пачку: один и тот же блок лежит в каждом размерном листе, и присутствие — это
   // вопрос про ткань целиком, а не про отдельный лист.
   const blockNames = new Set<string>();
+  const manifests: (ConversionManifest | null)[] = [];
   let fileIndex = 0;
 
   for (const sheet of sheets) {
+    manifests.push(null);
     try {
+      const buf = await sheet.open();
+      // МАНИФЕСТ ЧИТАЕТСЯ ДО РАЗБОРА и по тем же байтам. Битый манифест — отказ ЭТОГО листа, а не
+      // тихий null: файл, про который конвертер что-то заявил, но прочитать заявление не удалось,
+      // разобранный «как обычный» молча вернул бы карточку к угадыванию размеров и слоя кроя.
+      const manifest = readManifestBytes(buf);
       const {
         raws,
         unit,
         unitGuessed,
         skippedBlocks: skipped,
         blockNames: seen,
-      } = parseFiles(await sheet.open(), opts, warnings);
+      } = parseFiles(buf, opts, warnings);
+      const facts = manifest
+        ? manifestFactsByBlock(
+            manifest,
+            seen,
+            raws.map((r) => r.blockName ?? ''),
+          )
+        : null;
+      manifests[fileIndex] = manifest;
       skippedBlocks += skipped;
       for (const b of seen) blockNames.add(b);
       detectedUnit = unit;
@@ -132,6 +218,8 @@ export async function parseSheets(
           areaCm2: area(poly),
           originX: bb.minX,
           originY: bb.minY,
+          // Есть у КАЖДОЙ детали файла с манифестом (manifestFactsByBlock проверил это до цикла).
+          ...(facts ? { manifest: facts.get((raw.blockName ?? '').trim().toLowerCase())! } : {}),
         });
       }
     } catch (e) {
@@ -148,5 +236,6 @@ export async function parseSheets(
     failedFiles,
     skippedBlocks,
     blockNames: [...blockNames],
+    manifests,
   };
 }

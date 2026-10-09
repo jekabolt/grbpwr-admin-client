@@ -78,6 +78,7 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
+import { manifestFactsOf } from './manifest-facts';
 
 // Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
 // «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.
@@ -129,10 +130,17 @@ type BlockRow = {
   // What the dialog proposes and why. 'exact' | 'loose' need no badge — they ARE the name;
   // 'similar' and 'other-fabric' are guesses and say so.
   suggested: string; // piece lineKey, '' = none
-  basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'none';
+  // 'same-name-elsewhere' — ТОЛЬКО у строк файла с манифестом (F6b): имя совпало с деталью, которая
+  // привязана к ДРУГОЙ ткани и не к этой. Подкладочная FP_L и FP_L верха — разные детали кроя, и
+  // совпадение имени здесь — подсказка, а не ответ: предлагается, но не выбирается само (K1, C5).
+  basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'same-name-elsewhere' | 'none';
   // Слот, с которого пришла подсказка 'other-fabric'. '' для остальных оснований.
   fromSlot?: string;
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
+  // ИМЯ ДЕТАЛИ КАРТОЧКИ ИЗ МАНИФЕСТА КОНВЕРТАЦИИ (F6b). У пары — без руки: FP_L и FP_R предлагают
+  // одно имя «FP», и вторая строка по общему правилу привязывается к детали, которую заводит первая —
+  // одна деталь, ×2 по perGarmentFromBlocks. Нет ключа — манифеста нет, имя по умолчанию прежнее.
+  manifestName?: string;
 };
 
 // Деталь кроя, которой в перезалитом чертеже больше нет. Собирается ниже (deleteCandidates),
@@ -156,8 +164,11 @@ type DeleteCandidate = {
 // хранит сервер, так что связь деталь↔чертёж сохраняется у обеих копий.
 //
 // Имя — предложение, а не приговор: оно стоит в поле «название новой детали» и правится там же.
-const defaultPieceName = (row: { block: string; uniBase: string }): string =>
-  row.uniBase || row.block;
+//
+// F6b: у строки файла с манифестом конвертации имя по умолчанию — заявленное конвертером (у пары — без
+// руки, см. BlockRow.manifestName). Оно стоит ПЕРВЫМ: манифест знает про деталь больше, чем имя блока.
+const defaultPieceName = (row: { block: string; uniBase: string; manifestName?: string }): string =>
+  row.manifestName || row.uniBase || row.block;
 
 // Sentinel for «создать новую деталь», deliberately unable to collide with a piece lineKey: a
 // ULID is 26 chars of upper-case Crockford base32, so a '+' and lower case can never be one.
@@ -172,7 +183,190 @@ const MAX_PIECE_NAME = 255;
 type PieceValue = NonNullable<TechCardFormData['pieces']>[number];
 // Что известно про идентичность из разбора: сколько раз она в чертеже (максимум по файлам и
 // размерам) и общий корень uni-копий, если он есть.
-type BlockCount = { instances: number; uniBase: string };
+//
+// `force` — ТОЛЬКО у идентичностей из файла с манифестом (F6b): конвертер нарисовал КАЖДЫЙ контур
+// детали сам — обе руки пары отдельными блоками ('pair') или деталь со сгиба развёрнутой целиком
+// ('unfolded'). Такая деталь режется как нарисована, и хранимая «зеркальная пара» / «со сгиба» ей
+// прямо противоречит (см. planPieceUpdates и forcedSymmetryReason).
+type BlockCount = { instances: number; uniBase: string; force?: 'pair' | 'unfolded' };
+
+// Строка подсчёта блоков разбора: то, что знает о идентичности диалог (см. countBlocks).
+type CountedBlock = {
+  block: string;
+  instances: number;
+  sizes: string[];
+  uniBase: string;
+  manifestName?: string;
+  force?: 'pair' | 'unfolded';
+};
+
+// ПОЧЕМУ ХРАНИМАЯ РАЗМЕТКА ПЕРЕПИСЫВАЕТСЯ НА «ОДИНАКОВЫЕ КОПИИ» (F6b) — словами для сводки.
+//
+// Решение и его цена записаны в tmp/plans/pdf-to-dxf/reports/F6b.md (D1). Коротко: раскладка
+// карточки кладёт каждый контур как нарисован и НИКОГДА не отражает (flippedQuantity не ставится нигде),
+// поэтому в настиле ЛИЦОМ ВВЕРХ (его и предлагает очередь партии) обе руки пары дают только два
+// нарисованных блока — «зеркальная пара» там BLOCKER `lay_mirror_expansion`, а «одинаковые копии»
+// считаются верно. В настиле ЛИЦОМ К ЛИЦУ сервер сочтёт отражения «одинаковой» детали перекроем и
+// покажет ложную нехватку ×½ — это известная цена, она названа в сводке, а не скрыта.
+const FORCED_REASON: Record<'pair' | 'unfolded', string> = {
+  pair: 'the drawing carries both hands as separate pieces — cut as drawn',
+  unfolded: 'the drawing carries the unfolded piece — cut flat, not on the fold',
+};
+
+// Подсчёт блоков разбора — тело эффекта диалога, вынесенное ЧИСТОЙ функцией, чтобы зонд проверял
+// именно его, а не копию (K1 держал REPLICA этого цикла).
+function countBlocks(
+  contourPieces: readonly PieceDTO[],
+  split: ReturnType<typeof splitPiecesBySize>,
+): Map<string, CountedBlock> {
+  // Blocks are counted under the SERVER's identity — normalized then case-folded — because
+  // that is what its UNIQUE index collapses. Counting case-sensitively made «ПОЛОЧКА» in one
+  // sheet and «Полочка» in another two rows, both auto-preselected, and the resulting pair of
+  // aliases was rejected as a duplicate: the card then could not be saved at all, with the bad
+  // aliases sitting in form state where nothing could delete them.
+  // Per FILE, then max across files: two pattern rows of one fabric+size are usually two
+  // REVISIONS of the same sheet, so summing their instances doubled pieces_per_garment and
+  // every consumption derived from it.
+  const perFile = new Map<string, Map<string, number>>();
+  const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
+  const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
+  const uniBaseByCi = new Map<string, string>(); // ci key → uniBase у помеченных блоков
+  // F6b: факты манифеста по идентичности (первое написание выигрывает, как у spelling).
+  const declaredByCi = new Map<string, { name: string; force?: 'pair' | 'unfolded' }>();
+  for (const p of contourPieces) {
+    // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
+    // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
+    // here is what keeps the piece count a property of the STYLE.
+    const b = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
+    if (!b) continue; // a file with no per-piece blocks has nothing to map
+    const ci = b.toLowerCase();
+    if (!spelling.has(ci)) spelling.set(ci, b);
+    const uniBase = split.codeById.get(p.id)?.uniBase ?? '';
+    if (uniBase && !uniBaseByCi.has(ci)) uniBaseByCi.set(ci, normBlock(uniBase));
+    const declared = manifestFactsOf(p);
+    if (declared && !declaredByCi.has(ci)) {
+      const force = declared.pairOf ? 'pair' : declared.unfolded ? 'unfolded' : undefined;
+      declaredByCi.set(ci, { name: normBlock(declared.cardName), ...(force ? { force } : {}) });
+    }
+    const sz = split.codeById.get(p.id)?.size ?? '';
+    if (sz) {
+      const set = sizesByCi.get(ci) ?? new Set<string>();
+      set.add(sz);
+      sizesByCi.set(ci, set);
+    }
+    // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
+    // legitimately share a display name (two revisions re-exported by the factory under one
+    // filename), so the name cannot separate them — and now that one file holds every size,
+    // counting per file would report «BP_1 ×5» for a piece cut once per garment, multiplying
+    // pieces_per_garment and every consumption derived from it by the size run.
+    const bucket = `${p.fileIndex ?? p.source}|${split.codeById.get(p.id)?.size ?? ''}`;
+    const file = perFile.get(bucket) ?? new Map<string, number>();
+    file.set(ci, (file.get(ci) ?? 0) + 1);
+    perFile.set(bucket, file);
+  }
+  const counts = new Map<string, number>();
+  for (const file of perFile.values()) {
+    for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
+  }
+  const all = new Map<string, CountedBlock>();
+  for (const [ci, instances] of counts) {
+    const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
+      (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
+    );
+    const declared = declaredByCi.get(ci);
+    all.set(ci, {
+      block: spelling.get(ci)!,
+      instances,
+      sizes,
+      uniBase: uniBaseByCi.get(ci) ?? '',
+      ...(declared ? { manifestName: declared.name } : {}),
+      ...(declared?.force ? { force: declared.force } : {}),
+    });
+  }
+  return all;
+}
+
+// Предложение по строкам — второе тело того же эффекта, тоже чистой функцией. `elsewhereOnly` —
+// детали (lineKey, ci), привязанные к ДРУГИМ тканям и ни разу к этой: по ним строка файла с
+// манифестом получает 'same-name-elsewhere' вместо автоматического выбора (F6b). Блоки без
+// манифеста этот набор не читают вовсе.
+function proposeRows(
+  counted: ReadonlyMap<string, CountedBlock>,
+  args: {
+    storedFirst: ReadonlyMap<string, string>;
+    pieceOptions: readonly { lineKey: string; name: string }[];
+    otherFabricByBlock: ReadonlyMap<string, { pieceKey: string; fromSlot: string }>;
+    elsewhereOnly: ReadonlyMap<string, string>;
+  },
+): BlockRow[] {
+  const { storedFirst, pieceOptions, otherFabricByBlock, elsewhereOnly } = args;
+  const next: BlockRow[] = [];
+  for (const [ci, c] of counted) {
+    const block = c.block;
+    const instances = c.instances;
+    // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
+    // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
+    // from the dialog with no way to ever map it.
+    if (storedFirst.has(ci)) continue;
+    let suggested = '';
+    let basis: BlockRow['basis'] = 'none';
+    let fromSlot = '';
+    // F6b: строка с манифестом сверяется ещё и по имени детали карточки, заявленному конвертером
+    // (у пары — «FP» для FP_L и FP_R): деталь, заведённую мастером конвертации, она узнаёт сама.
+    const names = c.manifestName && c.manifestName.toLowerCase() !== block.toLowerCase()
+      ? [block, c.manifestName]
+      : [block];
+    const exact = pieceOptions.find((p) => names.some((n) => p.name.toLowerCase() === n.toLowerCase()));
+    const byLoose = pieceOptions.find((p) => names.some((n) => loose(p.name) === loose(n)));
+    const hint = otherFabricByBlock.get(loose(block));
+    if (exact) {
+      suggested = exact.lineKey;
+      basis = 'exact';
+    } else if (byLoose) {
+      suggested = byLoose.lineKey;
+      basis = 'loose';
+    } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
+      suggested = hint.pieceKey;
+      basis = 'other-fabric';
+      fromSlot = hint.fromSlot;
+    } else {
+      let best = SUGGEST_MIN;
+      for (const p of pieceOptions) {
+        const s = similarity(p.name, block);
+        if (s >= best) {
+          best = s;
+          suggested = p.lineKey;
+          basis = 'similar';
+        }
+      }
+    }
+    // F6b: точное имя у ДРУГОЙ ткани — не ответ. Деталь подкладки FP_L и деталь верха FP_L — разные
+    // детали кроя; автоматический выбор здесь молча посадил бы подкладку на деталь верха.
+    if (c.manifestName && (basis === 'exact' || basis === 'loose')) {
+      const from = elsewhereOnly.get(suggested.toLowerCase());
+      if (from !== undefined) {
+        basis = 'same-name-elsewhere';
+        fromSlot = from;
+      }
+    }
+    // Only the two exact tiers are pre-selected. A similarity guess or another fabric's
+    // mapping is offered, never applied by default — being wrong there costs cloth.
+    const preselect = basis === 'exact' || basis === 'loose' ? suggested : '';
+    next.push({
+      block,
+      instances,
+      sizes: c.sizes,
+      uniBase: c.uniBase,
+      suggested,
+      basis,
+      fromSlot,
+      choice: preselect,
+      ...(c.manifestName ? { manifestName: c.manifestName } : {}),
+    });
+  }
+  next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
+  return next;
+}
 
 // СКОЛЬКО ЭТОЙ ДЕТАЛИ В ИЗДЕЛИИ — ОДНА ФУНКЦИЯ НА ОБА ПУТИ (заведение и пересчёт).
 //
@@ -224,7 +418,15 @@ function sizelessStem(block: string, isSizeToken: (token: string) => boolean): s
 // Что применение изменит у ОДНОЙ уже существующей детали. Незаполненное поле значит «не трогать»:
 // запись того, что и так стоит, — это лишний dirty на форме и лишний сдвиг дайджеста CONSTRUCTION,
 // то есть подпись, протухшая без единого изменения физического состава кроя.
-type PieceUpdate = { index: number; piecesPerGarment?: number; cutSymmetry?: string };
+//
+// `reason` — только когда переписывается ЯВНАЯ разметка по манифесту конвертации (F6b): сводка обязана
+// назвать, почему «зеркальная пара» или «со сгиба» стала «одинаковыми копиями».
+type PieceUpdate = {
+  index: number;
+  piecesPerGarment?: number;
+  cutSymmetry?: string;
+  reason?: string;
+};
 
 // ЧТО ЭТОТ СКОУП БУДЕТ СВЯЗЫВАТЬ ПОСЛЕ ПРИМЕНЕНИЯ — блок (идентичность, ci) → деталь кроя.
 //
@@ -354,7 +556,22 @@ function planPieceUpdates(
     const update: PieceUpdate = { index };
     if ((p.piecesPerGarment ?? 0) !== total) update.piecesPerGarment = total;
     const current = (p.cutSymmetry ?? '').trim();
-    if (!isCutSymmetryMarked(current)) {
+    // F6b: блоки детали пришли из файла с манифестом, и конвертер нарисовал КАЖДЫЙ её контур сам —
+    // обе руки пары или развёрнутый сгиб. Пара побеждает сгиб в подписи: она называет больше.
+    const forced = cis
+      .map((ci) => blockCounts.get(ci)?.force)
+      .reduce<'pair' | 'unfolded' | undefined>(
+        (acc, f) => (acc === 'pair' || f === 'pair' ? 'pair' : (acc ?? f)),
+        undefined,
+      );
+    if (forced && current !== IDENTICAL_CUT_SYMMETRY) {
+      // Чертёж конвертера несёт каждый контур, раскладка карточки кладёт их как нарисованы и не
+      // отражает ничего — значит деталь режется как нарисована, и хранимая «зеркальная пара» или
+      // «со сгиба» ему прямо противоречит (первая — BLOCKER настила лицом вверх, второй печатает
+      // «on fold» на полной детали). Расчёт и цена (лицом к лицу) — FORCED_REASON выше.
+      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+      if (isCutSymmetryMarked(current)) update.reason = FORCED_REASON[forced];
+    } else if (!isCutSymmetryMarked(current)) {
       // Не размечено — значит никто не отвечал, а чертёж отвечает: он несёт КАЖДЫЙ контур, и
       // деталь режется как нарисована. Молчание здесь не нейтрально — оно гасит выводы бэка
       // (клетка покрытия настила становится UNKNOWN, проверки зеркального разворота и перекроя
@@ -545,11 +762,7 @@ export function PieceMatchModal({
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
-  const [blockCounts, setBlockCounts] = useState<
-    Map<string, { block: string; instances: number; sizes: string[]; uniBase: string }>
-  >(
-    new Map(),
-  );
+  const [blockCounts, setBlockCounts] = useState<Map<string, CountedBlock>>(new Map());
   // Blocks the operator asked to unmap in this dialog session (ci keys).
   const [unmapped, setUnmapped] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -656,122 +869,36 @@ export function PieceMatchModal({
     return m;
   }, [aliases, scope, split]);
 
+  // F6b: детали, привязанные к ДРУГИМ тканям и ни разу к этой, — lineKey (ci) → ключ первой такой
+  // ткани. Читается только строками файла с манифестом (см. proposeRows, 'same-name-elsewhere').
+  const elsewhereOnly = useMemo(() => {
+    const here = new Set<string>();
+    const there = new Map<string, string>();
+    for (const a of aliases ?? []) {
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (!pk || !livePieceKeys.has(pk)) continue;
+      if (aliasInScope(a, scope)) here.add(pk);
+      else if (!there.has(pk)) there.set(pk, aliasScopeKey(a));
+    }
+    for (const pk of here) there.delete(pk);
+    return there;
+  }, [aliases, scope, livePieceKeys]);
+
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
   useEffect(() => {
     if (parse.phase !== 'ready') return;
-    // Blocks are counted under the SERVER's identity — normalized then case-folded — because
-    // that is what its UNIQUE index collapses. Counting case-sensitively made «ПОЛОЧКА» in one
-    // sheet and «Полочка» in another two rows, both auto-preselected, and the resulting pair of
-    // aliases was rejected as a duplicate: the card then could not be saved at all, with the bad
-    // aliases sitting in form state where nothing could delete them.
-    // Per FILE, then max across files: two pattern rows of one fabric+size are usually two
-    // REVISIONS of the same sheet, so summing their instances doubled pieces_per_garment and
-    // every consumption derived from it.
-    const perFile = new Map<string, Map<string, number>>();
-    const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
-    const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
-    const uniBaseByCi = new Map<string, string>(); // ci key → uniBase у помеченных блоков
-    for (const p of contourPieces) {
-      // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
-      // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
-      // here is what keeps the piece count a property of the STYLE.
-      const b = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
-      if (!b) continue; // a file with no per-piece blocks has nothing to map
-      const ci = b.toLowerCase();
-      if (!spelling.has(ci)) spelling.set(ci, b);
-      const uniBase = split.codeById.get(p.id)?.uniBase ?? '';
-      if (uniBase && !uniBaseByCi.has(ci)) uniBaseByCi.set(ci, normBlock(uniBase));
-      const sz = split.codeById.get(p.id)?.size ?? '';
-      if (sz) {
-        const set = sizesByCi.get(ci) ?? new Set<string>();
-        set.add(sz);
-        sizesByCi.set(ci, set);
-      }
-      // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
-      // legitimately share a display name (two revisions re-exported by the factory under one
-      // filename), so the name cannot separate them — and now that one file holds every size,
-      // counting per file would report «BP_1 ×5» for a piece cut once per garment, multiplying
-      // pieces_per_garment and every consumption derived from it by the size run.
-      const bucket = `${p.fileIndex ?? p.source}|${split.codeById.get(p.id)?.size ?? ''}`;
-      const file = perFile.get(bucket) ?? new Map<string, number>();
-      file.set(ci, (file.get(ci) ?? 0) + 1);
-      perFile.set(bucket, file);
-    }
-    const counts = new Map<string, number>();
-    for (const file of perFile.values()) {
-      for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
-    }
-    const all = new Map<
-      string,
-      { block: string; instances: number; sizes: string[]; uniBase: string }
-    >();
-    for (const [ci, instances] of counts) {
-      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
-      );
-      all.set(ci, {
-        block: spelling.get(ci)!,
-        instances,
-        sizes,
-        uniBase: uniBaseByCi.get(ci) ?? '',
-      });
-    }
+    const all = countBlocks(contourPieces, split);
     setBlockCounts(all);
-    const next: BlockRow[] = [];
-    for (const [ci, instances] of counts) {
-      const block = spelling.get(ci)!;
-      // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
-      // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
-      // from the dialog with no way to ever map it.
-      if (stored.first.has(ci)) continue;
-      let suggested = '';
-      let basis: BlockRow['basis'] = 'none';
-      let fromSlot = '';
-      const exact = pieceOptions.find((p) => p.name.toLowerCase() === block.toLowerCase());
-      const byLoose = pieceOptions.find((p) => loose(p.name) === loose(block));
-      const hint = otherFabricByBlock.get(loose(block));
-      if (exact) {
-        suggested = exact.lineKey;
-        basis = 'exact';
-      } else if (byLoose) {
-        suggested = byLoose.lineKey;
-        basis = 'loose';
-      } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
-        suggested = hint.pieceKey;
-        basis = 'other-fabric';
-        fromSlot = hint.fromSlot;
-      } else {
-        let best = SUGGEST_MIN;
-        for (const p of pieceOptions) {
-          const s = similarity(p.name, block);
-          if (s >= best) {
-            best = s;
-            suggested = p.lineKey;
-            basis = 'similar';
-          }
-        }
-      }
-      // Only the two exact tiers are pre-selected. A similarity guess or another fabric's
-      // mapping is offered, never applied by default — being wrong there costs cloth.
-      const preselect = basis === 'exact' || basis === 'loose' ? suggested : '';
-      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
-      );
-      next.push({
-        block,
-        instances,
-        sizes,
-        uniBase: uniBaseByCi.get(ci) ?? '',
-        suggested,
-        basis,
-        fromSlot,
-        choice: preselect,
-      });
-    }
-    next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-    setRows(next);
-  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock]);
+    setRows(
+      proposeRows(all, {
+        storedFirst: stored.first,
+        pieceOptions,
+        otherFabricByBlock,
+        elsewhereOnly,
+      }),
+    );
+  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock, elsewhereOnly]);
 
   const decided = rows.filter((r) => r.choice).length;
   const alreadyMapped = mineByBlock.size;
@@ -960,8 +1087,23 @@ export function PieceMatchModal({
       removed: toDelete.length,
       updated: updates.length,
       unchanged,
+      // F6b: явная разметка, которую применение перепишет по манифесту, — с причиной для сводки.
+      rewritten: updates
+        .filter((u) => u.reason)
+        .map((u) => ({ name: live[u.index]?.name ?? '', reason: u.reason! })),
     };
   }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts, parseComplete]);
+  // F6b: идентичности, которые манифест объявил нарисованными целиком (обе руки пары, развёрнутый
+  // сгиб), — сводка называет их всегда, а не только когда переписывается хранимая разметка: новая
+  // деталь из них тоже заводится «одинаковыми копиями», и цена этого (настил лицом к лицу) та же.
+  const manifestDrawn = useMemo(
+    () =>
+      [...blockCounts.values()]
+        .filter((c) => c.force)
+        .map((c) => ({ block: c.block, reason: FORCED_REASON[c.force!] }))
+        .sort((a, b) => a.block.localeCompare(b.block, 'ru')),
+    [blockCounts],
+  );
 
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
   // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
@@ -1132,6 +1274,7 @@ export function PieceMatchModal({
           suggested: '',
           basis: 'none',
           choice: '',
+          ...(found.manifestName ? { manifestName: found.manifestName } : {}),
         },
       ];
     });
@@ -1445,6 +1588,14 @@ export function PieceMatchModal({
     if (r.basis === 'other-fabric') {
       const from = r.fromSlot ? scopeLabelByKey?.get(r.fromSlot) : '';
       return <Pill tone='warn'>{from ? `from “${from}”` : 'from another fabric'}</Pill>;
+    }
+    if (r.basis === 'same-name-elsewhere') {
+      const from = r.fromSlot ? scopeLabelByKey?.get(r.fromSlot) : '';
+      return (
+        <Pill tone='warn'>
+          {from ? `same name as a piece of “${from}” — confirm` : 'same name as another fabric’s piece — confirm'}
+        </Pill>
+      );
     }
     return null;
   };
@@ -1785,7 +1936,7 @@ export function PieceMatchModal({
                       <div className='flex flex-wrap items-center gap-1'>
                         {choiceSelect(
                           focus.ci,
-                          focus.row.block,
+                          focus.row.manifestName || focus.row.block,
                           focus.row.instances,
                           focus.row.choice,
                         )}
@@ -2093,7 +2244,7 @@ export function PieceMatchModal({
                     <td>×{r.instances}</td>
                     <td>
                       <div className='flex flex-wrap items-center gap-1'>
-                        {choiceSelect(ci, r.block, r.instances, r.choice)}
+                        {choiceSelect(ci, r.manifestName || r.block, r.instances, r.choice)}
                         {basisLabel(r)}
                       </div>
                     </td>
@@ -2179,6 +2330,33 @@ export function PieceMatchModal({
               copies” is set, otherwise the card will not save at all. the drawing here directly
               contradicts the mark and carries every contour separately — so the piece is cut as it
               is drawn.
+            </Text>
+            {outcome.rewritten.map((r) => (
+              <Text key={r.name} size='micro' component='p'>
+                {`${r.name}: “how it's cut” becomes identical copies — ${r.reason}`}
+              </Text>
+            ))}
+          </div>
+        )}
+        {/* F6b: файл сконвертирован, и конвертер заявил, какие детали нарисованы ЦЕЛИКОМ. Это
+            объяснение «одинаковых копий» и его цены — без него оператор не узнал бы, почему
+            «со сгиба» исчезло и почему настил лицом к лицу покажет нехватку. */}
+        {parse.phase === 'ready' && manifestDrawn.length > 0 && (
+          <div className='space-y-0.5 border border-borderColor p-2'>
+            <Text size='micro' component='p'>
+              converted patterns: these pieces are drawn in full and are cut as drawn (identical
+              copies)
+            </Text>
+            {manifestDrawn.map((m) => (
+              <Text key={m.block} size='nano' variant='label' component='p'>
+                {`${m.block} — ${m.reason}`}
+              </Text>
+            ))}
+            <Text size='nano' variant='label' component='p'>
+              lay them FACE UP (the batch queue does): every contour is in the marker as drawn, and
+              the count is exact. a FACE-TO-FACE lay cuts a mirror of each contour on every second
+              ply, which the server counts as overcut for “identical copies” — it will report about
+              half the garments for these pieces even though both hands (or the full piece) are cut.
             </Text>
           </div>
         )}

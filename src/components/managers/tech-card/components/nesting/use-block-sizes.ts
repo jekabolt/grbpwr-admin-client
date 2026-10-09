@@ -8,6 +8,7 @@ import { useWatch } from 'react-hook-form';
 import { useSizeNames, useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import type { PieceDTO } from 'lib/nesting/types';
 import { deriveBlockSizes, sizeTokensOf } from './block-code';
+import { manifestFactsOf } from './manifest-facts';
 
 // Чистая половина (splitPiecesBySize, aliasIdentity) живёт в split-pieces.ts: публичному вьюеру
 // выкроек нужна она БЕЗ хуков словаря этого файла. Реэкспорт сохраняет всех прежних импортёров.
@@ -84,15 +85,27 @@ export function missingSizesIn(
   const covered = new Set<string>();
   for (const id of inCard) for (const t of sizeTokensOf(sizeById.get(id))) covered.add(t);
 
+  // Блоки файла с манифестом в вывод не идут — их размеры заявлены, а не выведены (тот же отсев,
+  // что в splitPiecesBySize: три входа deriveBlockSizes обязаны видеть один и тот же набор имён).
   const derived = new Set(
     [
       ...deriveBlockSizes(
-        pieces.map((p) => p.blockName ?? ''),
+        pieces.filter((p) => !manifestFactsOf(p)).map((p) => p.blockName ?? ''),
         (t) => dictTokens.has(t),
       ).values(),
     ].map((raw) => raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()),
   );
   const found = new Map<number, MissingSize>();
+  // РАЗМЕРЫ ИЗ МАНИФЕСТА (F6b) — уже id размеров карточки, выбранные человеком в мастере
+  // конвертации. Угадывать по токену нечего, и одноразмерный файл (вывод по структуре там молчит —
+  // хвостов меньше двух) называет свой размер так же, как многоразмерный.
+  for (const p of pieces) {
+    const m = manifestFactsOf(p);
+    if (!m || m.sizeId <= 0 || inCard.has(m.sizeId) || found.has(m.sizeId)) continue;
+    const name = sizeById.get(m.sizeId);
+    if (name == null) continue; // словарь такого размера не знает — заводить нечего
+    found.set(m.sizeId, { token: m.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase(), sizeId: m.sizeId, name });
+  }
   for (const token of derived) {
     if (covered.has(token)) continue; // такой размер в карточке уже есть
     const ids = dictTokens.get(token) ?? [];
