@@ -38,7 +38,8 @@ import type {
 } from '../../src/lib/assembly-skeleton/types';
 
 export { ALL_RULES, PROBE_RULES, compositeSeams } from '../../src/lib/assembly-skeleton/geometry';
-export { groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
+export { buildSkeleton, groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
+export { skeletonDeps } from '../../src/components/managers/tech-card/components/assembly-skeleton-deps';
 
 /**
  * Why each truth pair was (not) taken: its own score as a single-edge pair and which chosen seam

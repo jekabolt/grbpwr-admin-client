@@ -510,6 +510,28 @@ console.log('\n── surface joins (P2 lane S)');
       bad.join('; ') || `${shown.length} surface units`,
     );
   }
+  // The steps carry it too: a surface join names its host and the mark (the map and the pictogram
+  // read `feature`, not the seam list).
+  {
+    const { graph } = mod.run(blazer.facts, ALL, false);
+    const p = mod.buildSkeleton(
+      graph,
+      blazer.facts,
+      mod.orderTemplate(blazer.facts.category),
+      mod.skeletonDeps,
+    );
+    const feats = p.steps
+      .filter((s) => s.feature?.kind === 'surface')
+      .map((s) => `${s.feature.pieceKey}@${s.feature.marks.join(',')}`)
+      .sort();
+    const hosts = blazer.truthJson.surface.map(([, host]) => host).sort();
+    check(
+      feats.length === hosts.length &&
+        feats.every((f, i) => f.startsWith(`${hosts[i]}@`) && f.length > hosts[i].length + 1),
+      'blazer steps: every surface join carries feature {surface, host, mark}',
+      feats.join(' · ') || 'none',
+    );
+  }
   // The pictogram lays the part ON the mark (T_world = host.T ∘ surface.T), not in a corner.
   {
     const { graph } = mod.run(blazer.facts, ALL, true);

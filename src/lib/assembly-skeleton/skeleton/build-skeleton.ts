@@ -179,6 +179,7 @@ export function buildSkeleton(
       source: SkeletonStep['source'];
       alternatives?: SkeletonStep['alternatives'];
       decision?: SkeletonStep['decision'];
+      feature?: SkeletonStep['feature'];
       press: 'open' | 'flat' | 'none';
     },
   ) => {
@@ -195,6 +196,7 @@ export function buildSkeleton(
       source: spec.source,
       label: spec.label,
       ...(spec.alternatives?.length ? { alternatives: spec.alternatives } : {}),
+      ...(spec.feature ? { feature: spec.feature } : {}),
       ...(spec.decision ? { decision: spec.decision } : {}),
     };
     steps.push(step);
@@ -278,6 +280,7 @@ export function buildSkeleton(
       source: u.source,
       alternatives: u.alternatives,
       decision: u.decision,
+      feature: surfaceFeature(u.seams),
       press,
     });
   };
@@ -1070,4 +1073,12 @@ function seamId(c: SeamCandidate): string {
 
 function dedupe(xs: string[]): string[] {
   return [...new Set(xs)];
+}
+
+/** A join laid by a surface seam (P2 lane S) names its host and the placement mark it sits on. */
+function surfaceFeature(seams: SeamCandidate[]): SkeletonStep['feature'] {
+  const c = seams.find((q) => q.kind === 'surface' && q.surface);
+  return c?.surface
+    ? { kind: 'surface', pieceKey: c.surface.host, marks: [c.surface.mark] }
+    : undefined;
 }
