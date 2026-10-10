@@ -1081,8 +1081,22 @@ export class Session {
         opts,
         walls: ps.walls,
       });
+    // A2: a face seed whose region the fill finds open in every size is no closed outline after
+    // all (the face pass closed a gap the fill does not): it goes, as if never offered
+    const open = new Set(
+      families
+        .filter(
+          (f) =>
+            seeds.find((x) => x.id === f.seed)?.origin === 'face' &&
+            f.candidates.length > 0 &&
+            f.candidates.every((c) => c.outcome === 'leak' || c.outcome === 'tiny'),
+        )
+        .map((f) => f.seed),
+    );
+    if (open.size) families = families.filter((f) => !open.has(f.seed));
+    const shown = open.size ? seeds.filter((x) => !open.has(x.id)) : seeds;
     this.wallSet = set;
-    this.seeds = seeds;
+    this.seeds = shown;
     this.families = families;
     const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
@@ -1090,7 +1104,7 @@ export class Session {
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
     else if (ps.diag?.grade) this.gradeAmbiguities = ps.diag.grade.ambiguities;
     return {
-      seeds,
+      seeds: shown,
       families,
       variants,
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
