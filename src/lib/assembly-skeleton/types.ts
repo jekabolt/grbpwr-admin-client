@@ -161,7 +161,10 @@ export type PieceMark = {
   lenMm: Mm;
   /** vee: the opening at the contour (intake), the depth from it, the apex angle, the edge it opens on. */
   vee?: { intakeMm: Mm; depthMm: Mm; apexDeg: number; edge: EdgeId };
-  /** drill / buttonhole / fold / parallel: the nearest edge, the offset from it, the foot along it. */
+  /**
+   * drill / buttonhole / fold / parallel: the nearest edge, the offset from it, the foot along it.
+   * Absent when no edge is within the classifier's search reach (66 mm): not «at» an edge.
+   */
   nearEdge?: { edge: EdgeId; offsetMm: Mm; alongMm: Mm };
 };
 

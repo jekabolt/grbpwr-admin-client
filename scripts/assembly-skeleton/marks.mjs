@@ -261,6 +261,33 @@ for (const id of ['ss26', 'allsizes', 'blazer', 'pockets', 'summer']) {
   );
 }
 
+// A valid DXF can carry annotations a metre or two off the piece; classifying must stay cheap.
+// MUTATION: SewLine.nearest without a max distance (`limit = Infinity`) → 71 s instead of
+// ~15 ms (10.10): the gate goes red; that is the hang Codex found on the CONSTRUCTION tab.
+{
+  const far = mod.farAnnotation();
+  check(
+    far.ms < 50,
+    'synthetic: annotations 1–2 m off the piece classify in < 50 ms',
+    `${far.ms.toFixed(1)} ms`,
+  );
+  const fold = far.marks.filter((m) => m.kind === 'fold');
+  check(
+    fold.length === 1,
+    'synthetic: the real fold inside is still a fold',
+    far.marks.map((m) => m.kind).join(', '),
+  );
+  const away = far.marks.filter(
+    (m) => m.bbox.cx > 1000 || m.bbox.cx < 0 || m.bbox.cy > 1000 || m.bbox.cy < 0,
+  );
+  check(
+    away.length === 21 &&
+      away.every((m) => !m.nearEdge && !m.vee && m.kind !== 'fold' && m.kind !== 'parallel'),
+    'synthetic: the far annotations are at no edge (no nearEdge, no vee / fold / parallel)',
+    away.map((m) => m.kind).join(', '),
+  );
+}
+
 // ── negative controls ────────────────────────────────────────────────────────────────────────
 console.log('\n── negative controls (each must go red)');
 {
