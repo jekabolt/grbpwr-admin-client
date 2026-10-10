@@ -112,10 +112,12 @@ export function assertRasterPagePixels(pixels: number, where: string): void {
  * stream, so its dictionary is never inside an object stream: `/Subtype /Image` with `/Width` /
  * `/Height` between the object header and its `stream` keyword.
  *
- * F14 R8: a size may be indirect (`/Width 12 0 R`). Such a reference is resolved when its object
- * is a plain integer written uncompressed (`12 0 obj 6000 endobj`, the last definition wins); a
- * size that still cannot be read (inside an object stream, odd syntax) is counted in `unknown` —
- * `extractPdf` refuses an empty result when such an image was never drawn (the backstop).
+ * F14 R8 / S2: a size may be indirect (`/Width 12 0 R`). Such a reference is resolved from an
+ * index of EVERY plain integer object written uncompressed (`12 0 obj 6000 endobj`, the last
+ * definition wins), built in one linear pass on the first indirect size — no per-lookup cap that
+ * a file could exhaust with decoy images. A size that still cannot be read (the integer inside a
+ * compressed object stream, odd syntax) is counted in `unknown`; the readers refuse such a file
+ * (`unreadablePdfImagesMessage`).
  */
 export function pdfImageScan(
   bytes: ArrayBuffer,
@@ -127,19 +129,15 @@ export function pdfImageScan(
   const IMG = [0x2f, 0x49, 0x6d, 0x61, 0x67, 0x65]; // "/Image"
   const word = (c: number) =>
     (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
-  const resolved = new Map<string, number | null>();
-  let lookups = 0;
-  const sizeOf = (dict: string, key: string): number | null => {
+  // pass 1: every image's size, direct or as a reference "num gen"
+  type Size = number | string | null;
+  const sizeOf = (dict: string, key: string): Size => {
     const ref = new RegExp(`/${key}\\s+(\\d+)\\s+(\\d+)\\s+R(?![A-Za-z0-9])`).exec(dict);
-    if (ref) {
-      const k = `${+ref[1]} ${+ref[2]}`;
-      if (!resolved.has(k))
-        resolved.set(k, lookups++ < MAX_REF_LOOKUPS ? indirectInt(u, +ref[1], +ref[2]) : null);
-      return resolved.get(k) ?? null;
-    }
+    if (ref) return `${+ref[1]} ${+ref[2]}`;
     const direct = new RegExp(`/${key}\\s+(\\d+)(?![\\d.])`).exec(dict);
     return direct ? +direct[1] : null;
   };
+  const images: [Size, Size][] = [];
   for (let i = u.indexOf(0x2f); i !== -1 && i + 6 < u.length; i = u.indexOf(0x2f, i + 1)) {
     let hit = true;
     for (let k = 1; k < 6 && hit; k++) hit = u[i + k] === IMG[k];
@@ -151,8 +149,15 @@ export function pdfImageScan(
     const from = Math.max(head.lastIndexOf(' obj'), head.lastIndexOf('\nobj'), 0);
     const to = tail.indexOf('stream');
     const dict = head.slice(from) + (to === -1 ? tail : tail.slice(0, to));
-    const width = sizeOf(dict, 'Width');
-    const height = sizeOf(dict, 'Height');
+    images.push([sizeOf(dict, 'Width'), sizeOf(dict, 'Height')]);
+  }
+  // pass 2 (only when a size is indirect): ONE linear pass indexing the referenced integers
+  const refs = new Set(images.flat().filter((x): x is string => typeof x === 'string'));
+  const ints = refs.size ? plainIntObjects(u, refs) : new Map<string, number>();
+  const value = (x: Size) => (typeof x === 'string' ? ints.get(x) ?? null : x);
+  for (const [w, h] of images) {
+    const width = value(w);
+    const height = value(h);
     if (width == null || height == null) {
       unknown++;
       continue;
@@ -170,29 +175,61 @@ export function oversizedPdfImages(
   return pdfImageScan(bytes, max).oversized;
 }
 
-/** Indirect sizes resolved per file at most (each is one backward scan of the bytes). */
-const MAX_REF_LOOKUPS = 64;
+const isWs = (c: number) =>
+  c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09 || c === 0x0c || c === 0x00;
+const isDigit = (c: number) => c >= 0x30 && c <= 0x39;
+const isAlnum = (c: number) => isDigit(c) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+const ENDOBJ = [0x65, 0x6e, 0x64, 0x6f, 0x62, 0x6a]; // "endobj"
 
 /**
- * The value of `num gen obj <integer> endobj` written uncompressed — the LAST definition (an
- * incremental update overrides earlier ones). null when absent or not a plain integer.
+ * F14 S2: the `wanted` `num gen obj <integer> endobj` written uncompressed, keyed `"num gen"`, in ONE
+ * forward pass over the bytes (each "obj" keyword looks back over at most two ≤ 10-digit numbers
+ * and their whitespace, forward over one ≤ 15-digit integer — O(bytes)). A later definition
+ * overrides an earlier one, as an incremental update does.
  */
-function indirectInt(u: Uint8Array, num: number, gen: number): number | null {
-  const pat = Array.from(`${num} ${gen} obj`, (c) => c.charCodeAt(0));
-  for (let i = u.length - pat.length; i >= 0; i--) {
-    i = u.lastIndexOf(pat[0], i);
-    if (i < 0) break;
-    let ok = true;
-    for (let k = 1; k < pat.length && ok; k++) ok = u[i + k] === pat[k];
-    if (!ok) continue;
-    const before = i > 0 ? u[i - 1] : 0x0a;
-    if (before >= 0x30 && before <= 0x39) continue; // "112 0 obj" is not "12 0 obj"
-    const m = /^\s*(\d+)\s*endobj/.exec(
-      latin1Of(u.subarray(i + pat.length, Math.min(u.length, i + pat.length + 64))),
-    );
-    return m ? +m[1] : null;
+function plainIntObjects(u: Uint8Array, wanted: ReadonlySet<string>): Map<string, number> {
+  const out = new Map<string, number>();
+  const n = u.length;
+  const numAt = (a: number, b: number) => {
+    let v = 0;
+    for (let k = a; k < b; k++) v = v * 10 + (u[k] - 0x30);
+    return v;
+  };
+  for (let i = 1; i + 2 < n; i++) {
+    if (u[i] !== 0x6f || u[i + 1] !== 0x62 || u[i + 2] !== 0x6a) continue; // "obj"
+    if (i + 3 < n && isAlnum(u[i + 3])) continue; // "objx"
+    // back: ws+ gen ws+ num, preceded by a non-word byte
+    let j = i - 1;
+    if (j < 0 || !isWs(u[j])) continue;
+    let w = 0;
+    while (j >= 0 && isWs(u[j]) && w++ < 16) j--;
+    const genEnd = j + 1;
+    while (j >= 0 && isDigit(u[j]) && genEnd - j <= 10) j--;
+    const genStart = j + 1;
+    if (genStart === genEnd || (j >= 0 && !isWs(u[j]))) continue;
+    w = 0;
+    while (j >= 0 && isWs(u[j]) && w++ < 16) j--;
+    const numEnd = j + 1;
+    while (j >= 0 && isDigit(u[j]) && numEnd - j <= 10) j--;
+    const numStart = j + 1;
+    if (numStart === numEnd || (j >= 0 && isAlnum(u[j]))) continue;
+    // forward: ws* integer ws* endobj
+    let k = i + 3;
+    w = 0;
+    while (k < n && isWs(u[k]) && w++ < 16) k++;
+    const vStart = k;
+    while (k < n && isDigit(u[k]) && k - vStart < 15) k++;
+    if (k === vStart || (k < n && isDigit(u[k]))) continue;
+    const value = numAt(vStart, k);
+    w = 0;
+    while (k < n && isWs(u[k]) && w++ < 16) k++;
+    let end = k + ENDOBJ.length <= n;
+    for (let q = 0; q < ENDOBJ.length && end; q++) end = u[k + q] === ENDOBJ[q];
+    if (!end) continue;
+    const key = `${numAt(numStart, numEnd)} ${numAt(genStart, genEnd)}`;
+    if (wanted.has(key)) out.set(key, value);
   }
-  return null;
+  return out;
 }
 
 function latin1Of(u: Uint8Array): string {
@@ -202,12 +239,13 @@ function latin1Of(u: Uint8Array): string {
 }
 
 /**
- * F14 R8 backstop: an image whose size the raw scan could not read was never drawn and nothing
- * else is on the pages — pdf.js dropped it, almost surely for its size (it decodes and hands over
- * every image it keeps).
+ * F14 R8 / S2: images whose pixel size the raw scan cannot read even with every plain integer
+ * object indexed. pdf.js reads them and silently drops one over the limit, so the importer cannot
+ * tell a logo from a 300 dpi scan — such a file is refused (both PDF readers), never imported with
+ * a hole where the scan was.
  */
 export function unreadablePdfImagesMessage(n: number): string {
-  return `${n === 1 ? 'an embedded image' : `${n} embedded images`} could not be read (pixel size not readable from the file) and nothing else is drawn — most likely ${n === 1 ? 'it is' : 'they are'} larger than the ${megapixels(PATIMPORT.maxRasterPixels)} the importer traces. ${RASTER_HINT}`;
+  return `${n === 1 ? 'an embedded image' : `${n} embedded images`} ${n === 1 ? 'has' : 'have'} a pixel size the importer cannot read before decoding (stored in a compressed part of the PDF), so ${n === 1 ? 'it' : 'they'} may exceed the ${megapixels(PATIMPORT.maxRasterPixels)} the importer traces and would be dropped without a trace. Export the PDF again (PDF 1.4, no object compression) or remove the images. ${RASTER_HINT}`;
 }
 
 /** The refusal / note for oversized PDF images (same dpi guidance as a scan file). */
