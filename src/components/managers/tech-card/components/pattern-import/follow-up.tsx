@@ -232,13 +232,21 @@ export function ImportFollowUpRunner({
       allowanceCm: mmToEngineCm(c.seamMm) ?? 0,
     });
     if (!outcome.ok) return { ok: false, reason: outcome.reason };
+    const name = (id: number) => L.sizeNameById.get(id) ?? `#${id}`;
+    // same wording as the "∑ piece areas" dialog: the set must come together for every card size
     if (outcome.areas.sizesIncompleteWhy.length)
-      return { ok: false, reason: outcome.areas.sizesIncompleteWhy.join('; ') };
+      return {
+        ok: false,
+        reason: `the set did not come together for every card size: ${outcome.areas.sizesIncompleteWhy
+          .map(
+            (s) => `${name(s.sizeId)} — ${s.piece ? `piece “${s.piece}” is missing` : 'zero area'}`,
+          )
+          .join('; ')}`,
+      };
     const sheets = L.sheetsOfScope(scope.key);
     const scopeKey = serverKeyOfScope(scope);
     const sheetsWhy = pieceAreaSheetsRefusal(sheets, scopeKey);
     if (sheetsWhy) return { ok: false, reason: sheetsWhy };
-    const name = (id: number) => L.sizeNameById.get(id) ?? `#${id}`;
     const rangeWhy = pieceAreaSizeRangeRefusal(
       L.sizeIds,
       L.savedSizeIds,

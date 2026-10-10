@@ -380,6 +380,7 @@ export async function main(): Promise<number> {
       'write needs semantics',
       (await errCode(
         run('write', {
+          techCardId: 0,
           scopes: [],
           assignment: { byPurpose: {}, interliningInBom: false, proposals: [] },
           sizes: [],
@@ -456,6 +457,7 @@ export async function main(): Promise<number> {
     );
     const fronts = sem.pieces.filter((p) => p.identity.startsWith('FP')).map((p) => p.seed);
     const wr = await run('write', {
+      techCardId: 0,
       scopes: bom,
       assignment: { ...fab, byPurpose: { ...fab.byPurpose, TECH_CARD_BOM_PURPOSE_LINING: fronts } },
       sizes: sz.map.entries.flatMap((e) =>
@@ -668,7 +670,15 @@ async function writeCase(
     ),
     dialect: opt.dialect ?? 'r12',
     generator: 'probe',
+    techCardId: 4711,
   });
+  // smoke 10.10: the live wizard wrote techCardId 0, so the card distrusted its own import
+  check(
+    name,
+    'the manifest carries the card id it was written for',
+    w.scopes.every((sc) => sc.manifest.techCardId === 4711),
+    w.scopes.map((sc) => sc.manifest.techCardId).join(','),
+  );
   const g = w.gate[MAIN.scopeKey];
   const blocking = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   check(
@@ -750,6 +760,7 @@ async function skipControl(
   };
   const seeds = [...new Set(saved.pieces.map((p) => p.seed))];
   const w = await run('write', {
+    techCardId: 0,
     scopes: [MAIN],
     assignment: { byPurpose: { [MAIN.scopeKey]: seeds }, interliningInBom: false, proposals: [] },
     sizes: map.entries.flatMap((e) =>
@@ -921,6 +932,7 @@ async function operatorBridgeGateCase() {
   });
   const seedsL = [...new Set(semL.pieces.map((p) => p.seed))];
   const wl = await run('write', {
+    techCardId: 0,
     scopes: [MAIN],
     assignment: { byPurpose: { [MAIN.scopeKey]: seedsL }, interliningInBom: false, proposals: [] },
     sizes: sz.map.entries.flatMap((e) =>

@@ -642,6 +642,7 @@ export function useImportSession(deps: {
             ),
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
+            techCardId: card.techCardId,
           });
           const draft = buildDraft(out, { card, semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
