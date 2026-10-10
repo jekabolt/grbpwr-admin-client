@@ -74,25 +74,27 @@ export function dollFiles(plans) {
       shuffleOps: true,
       gender: 'MALE',
     },
-    {
-      // beta card 49 (FW26-001 CHECK SHIRT): a double yoke (BP + BP_2, two plies) over the back
-      // BP_1 — the technologist's order and the rows stored on beta live in card49.json.
-      id: 'card49',
-      label: 'beta card 49 FW26-001 check shirt (double yoke)',
+    // beta card 49 (FW26-001 CHECK SHIRT): a double yoke (BP + BP_2, two plies) over the back
+    // BP_1 — the technologist's order and the rows stored on beta live in card49.json. The BOM as
+    // the card has it: buttons (front placket, cuffs) and an interlining.
+    ...[
+      ['card49', 'beta card 49 FW26-001 check shirt (double yoke)', null],
+      [
+        'card49-rows',
+        'beta card 49 — with the 5 rows stored on beta (live, 10.10 evening)',
+        'live',
+      ],
+      ['card49-rows-hem', 'beta card 49 — the 18:02 rows (+ the manual hem ↔ hem row)', 'hem'],
+    ].map(([id, label, rows]) => ({
+      id,
+      label,
       dxf: resolve(beta, 'card49-MAIN.dxf'),
       category: 'shirt',
       betaCard: resolve(beta, 'card49.json'),
+      ...(rows ? { betaRows: rows } : {}),
+      bom: { buttons: 10, interlining: 1 },
       gender: 'MALE',
-    },
-    {
-      id: 'card49-rows',
-      label: 'beta card 49 — with the rows stored on beta 10.10 18:02',
-      dxf: resolve(beta, 'card49-MAIN.dxf'),
-      category: 'shirt',
-      betaCard: resolve(beta, 'card49.json'),
-      betaRows: true,
-      gender: 'MALE',
-    },
+    })),
     {
       id: 'card4',
       label: 'prod card 4 SS26-004 short-sleeve shirt',
