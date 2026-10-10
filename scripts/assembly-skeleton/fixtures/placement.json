@@ -1,0 +1,19 @@
+{
+  "_note": "Synthetic cards for placement without a seam (07-ENGINE-QUALITY §4.1–4.3). Compact form, expanded by skeleton.mjs into the SeamGraph contract: a piece is [name, areaMm2] or [name, areaMm2, twinName, 'identical' | 'mirror']; a seam is [nameA, nameB, score], each on a fresh edge. Names are made up, not a card's.",
+  "cards": {
+    "strips": {
+      "_why": "Two strips of one front (upper larger than main) and a BOTTOM pocket with no seam to either: the pocket goes onto the main strip by its position word, before the strips meet.",
+      "category": "generic",
+      "pieces": [
+        ["FP_U_L", 52000],
+        ["FP_L", 48000],
+        ["BP", 90000],
+        ["PCK_BTTM_L", 4000]
+      ],
+      "seams": [
+        ["FP_U_L", "FP_L", 0.9],
+        ["FP_L", "BP", 0.9]
+      ]
+    }
+  }
+}

@@ -1369,6 +1369,165 @@ console.log('\nClosures (P2 lane Z)');
   }
 }
 
+// ── placement without a seam (07-ENGINE-QUALITY §4.1–4.3) ─────────────────────────────────────
+// A part the pattern gives no seam to its panel for (a patch pocket, a bag half, a border strip) is
+// still placed while the panel is flat — by name, position word and balance — as a decision, never
+// left for the end. Synthetic cards (fixtures/placement.json), each with a mutation or a control.
+console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
+{
+  const { cards } = load('placement.json');
+  /** Compact card → { graph, facts }: one fresh edge per seam end, twins both ways. */
+  const synth = (spec, rename = {}) => {
+    const nm = (n) => rename[n] ?? n;
+    const twins = new Map();
+    for (const [n, , t, kind] of spec.pieces) {
+      if (!t) continue;
+      twins.set(n, [...(twins.get(n) ?? []), { key: t, kind }]);
+      twins.set(t, [...(twins.get(t) ?? []), { key: n, kind }]);
+    }
+    const edges = new Map(spec.pieces.map(([n]) => [n, 0]));
+    const edge = (n) => {
+      const k = edges.get(n);
+      edges.set(n, k + 1);
+      return `${n}#${k}`;
+    };
+    const chosen = spec.seams.map(([a, b, score]) => ({
+      a: edge(a),
+      b: edge(b),
+      score,
+      evidence: {
+        dLenMm: 0,
+        relLen: 0,
+        notchScore: 0,
+        curvature: 'flat',
+        hand: 'neutral',
+        self: false,
+      },
+      kind: 'edge',
+    }));
+    return {
+      graph: {
+        pieces: spec.pieces.map(([n, area]) => ({
+          pieceKey: n,
+          name: nm(n),
+          hand: null,
+          cloth: 'main',
+          rs: [],
+          corners: [],
+          notchIdx: [],
+          edges: [],
+          rect: false,
+          areaMm2: area,
+          perimMm: 0,
+          twinOf: twins.get(n) ?? [],
+        })),
+        chosen,
+        rejected: [],
+        components: [],
+        warnings: [],
+      },
+      facts: {
+        pieces: spec.pieces.map(([n]) => ({
+          pieceKey: n,
+          name: nm(n),
+          piecesPerGarment: 1,
+          cutSymmetry: null,
+          cloth: 'main',
+          fused: false,
+        })),
+        category: spec.category,
+        bom: {},
+        defaultMachineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+      },
+    };
+  };
+  /** The join whose inputs hold exactly these piece sets (any order), with its step index. */
+  const leavesOf = (p) => {
+    const m = new Map();
+    for (const s of p.steps.filter((x) => x.outputUnitKey))
+      m.set(
+        s.outputUnitKey,
+        s.inputs.flatMap((k) => m.get(k) ?? [k]),
+      );
+    return m;
+  };
+  const joinOf = (p, ...sets) => {
+    const m = leavesOf(p);
+    const want = sets
+      .map((s) => [...s].sort().join('+'))
+      .sort()
+      .join(' | ');
+    const i = p.steps.findIndex(
+      (s) =>
+        s.outputUnitKey &&
+        s.inputs
+          .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
+          .sort()
+          .join(' | ') === want,
+    );
+    return { i, step: p.steps[i] };
+  };
+  /** The first join that takes `piece` together with something else, and what that is. */
+  const firstJoin = (p, piece) => {
+    const m = leavesOf(p);
+    const i = p.steps.findIndex((s) => s.outputUnitKey && s.inputs.some((k) => k === piece));
+    const s = p.steps[i];
+    return {
+      i,
+      step: s,
+      with: s ? s.inputs.filter((k) => k !== piece).flatMap((k) => m.get(k) ?? [k]) : [],
+    };
+  };
+  const placed = (p, piece) => {
+    const j = firstJoin(p, piece);
+    return `${piece} → ${j.with.join('+') || 'nothing'} at ${j.i}${j.step?.decision ? ` (${j.step.decision.id})` : ''}`;
+  };
+  const clean = (name, p) =>
+    gate(
+      `${name}: sweep clean, one terminal`,
+      !p.warnings.some((w) => /rule \d+ broken|terminal|never reach/.test(w)),
+      p.warnings.filter((w) => /rule \d+ broken|terminal|never reach/.test(w)).join('; '),
+    );
+
+  // §4.1 strips: a BOTTOM pocket onto the main strip (not the larger upper one) before the strips meet
+  {
+    const c = synth(cards.strips);
+    const p = run(c);
+    const pocket = firstJoin(p, 'PCK_BTTM_L');
+    const strips = joinOf(p, ['FP_U_L'], ['FP_L', 'PCK_BTTM_L']);
+    console.log(`  strips: ${placed(p, 'PCK_BTTM_L')}; strips joined at ${strips.i}`);
+    gate(
+      'strips: the bottom pocket goes onto the main strip by its position word, as a decision',
+      pocket.with.join() === 'FP_L' &&
+        pocket.step.decision?.id === 'place:PCK_BTTM_L' &&
+        pocket.step.alternatives?.some((a) => a.inputs.includes('FP_U_L')) &&
+        pocket.step.confidence < SKELETON.accept,
+      placed(p, 'PCK_BTTM_L'),
+    );
+    gate('strips: … before the two strips meet', strips.i > pocket.i, `${pocket.i} / ${strips.i}`);
+    clean('strips', p);
+    // Mutation: the position word gone, the pocket goes onto the larger strip (the upper one).
+    const m = run(synth(cards.strips, { PCK_BTTM_L: 'PCK_L' }));
+    gate(
+      'mutation: no position word → the larger strip',
+      firstJoin(m, 'PCK_BTTM_L').with.join() === 'FP_U_L',
+      placed(m, 'PCK_BTTM_L'),
+    );
+    // Control: a pocket WITH a seam to a strip is step E's — onto that strip, no placement decision.
+    const s = synth({
+      ...cards.strips,
+      seams: [...cards.strips.seams, ['PCK_BTTM_L', 'FP_U_L', 0.8]],
+    });
+    const ps = run(s);
+    const js = firstJoin(ps, 'PCK_BTTM_L');
+    gate(
+      'control: a pocket with a seam to a strip is not placed by name',
+      js.with.join() === 'FP_U_L' && !js.step.decision,
+      placed(ps, 'PCK_BTTM_L'),
+    );
+  }
+}
+
 // ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────
 console.log('\nMutation: the empty proposal');
 {

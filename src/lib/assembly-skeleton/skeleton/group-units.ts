@@ -226,6 +226,21 @@ export function groupDetailed(
   const units: SkeletonUnit[] = [];
   const warnings: string[] = [];
   const mergeHands = new Set(template.mergeHands);
+  const areaOf = (e: Entity) => e.leaves.reduce((a, k) => a + (byKey.get(k)?.areaMm2 ?? 0), 0);
+  /** Parts already sewn onto a thing (a front with two pockets: 2); a flap is not a part of its own. */
+  const partCount = (e: Entity) =>
+    e.leaves.filter((k) => {
+      const p = byKey.get(k);
+      return roleDef(p?.role ?? null)?.level === 'sub' && !isFlap(p?.name ?? '');
+    }).length;
+  /** A flap, or a unit of flap layers only. */
+  const flapEntity = (e: Entity) => e.leaves.every((k) => isFlap(byKey.get(k)?.name ?? ''));
+  /** The best seam from `leaves` to the panel pieces of `t` — not to a pocket already on it. */
+  const panelScore = (e: Entity, t: Entity) =>
+    seams.between(
+      e.leaves,
+      t.leaves.filter((k) => roleDef(byKey.get(k)?.role ?? null)?.level !== 'sub'),
+    )[0]?.score ?? 0;
 
   // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them).
   for (const w of graph.warnings) if (w.includes('have the same shape')) warnings.push(w);
@@ -626,7 +641,7 @@ export function groupDetailed(
   // ── E. onto its panel first: a pocket (or, on a garment with no body, a belt) whose seam says
   // which piece it goes onto is sewn there while that piece is still flat — before the piece
   // meets the rest of its family, before any panel seam (F2, 05-PROD-DIAGNOSIS §4 P2: 10/10
-  // cards). A part laid by a placement mark is step S's; a part with no seam waits for step 5.
+  // cards). A part laid by a placement mark is step S's; a part with no seam to any panel is E2's.
   {
     const bodyless = !pieces.some((p) => p.role === 'front' || p.role === 'back');
     const toBody = new Set(
@@ -640,19 +655,19 @@ export function groupDetailed(
       if (def.attachEarly) return true;
       return bodyless && def.level === 'sub' && toBody.has(def.id);
     };
+    const host = (attachTo: string[], t: Entity) => {
+      const tdef = roleDef(t.roles[0] ?? null);
+      if (!tdef) return true; // a nameless piece: the geometry pass names nothing anyway
+      if (tdef.attachTo?.length || tdef.wraps || early(t)) return false;
+      return t.roles.some((r) => attachTo.includes(r)) || (bodyless && tdef.level === 'panel');
+    };
     for (const e of table.list().filter(early)) {
       if (!isLive(e)) continue;
       const def = roleDef(e.roles[0])!;
       const attachTo = def.attachTo ?? [];
-      const host = (t: Entity) => {
-        const tdef = roleDef(t.roles[0] ?? null);
-        if (!tdef) return true; // a nameless piece: the geometry pass names nothing anyway
-        if (tdef.attachTo?.length || tdef.wraps || early(t)) return false;
-        return t.roles.some((r) => attachTo.includes(r)) || (bodyless && tdef.level === 'panel');
-      };
       const cands = table
         .list(e.tree)
-        .filter((t) => t !== e && host(t))
+        .filter((t) => t !== e && host(attachTo, t))
         // A seam read before any panel is assembled is only trusted between pieces of one hand:
         // a left pocket «matching» a centre-back yoke is the rectangles' noise, not its host.
         .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand)
@@ -678,6 +693,90 @@ export function groupDetailed(
         why: `${roleName(def.id, e.hand)} goes onto ${display(t)} while it is still flat`,
       });
       made.family = t.family;
+    }
+
+    // ── E2. a part the pattern gives no seam to any panel for (a patch pocket with no placement
+    // mark, a pocket bag half): still sewn onto a panel while it is flat, never left for the end
+    // of the order. Which panel is said by names, not geometry (a seam would have been step E's):
+    //   a. the panel its own name points at (PCK_BACK_L → the back);
+    //   b. the position word in both names (a BOTTOM pocket onto the lower strip, not the upper);
+    //   c. between panels of different roles, a bag onto the one with the fewest parts so far and
+    //      a flap onto the one with the most (it covers a pocket) — strips of one panel are told
+    //      apart by position and size only;
+    //   d. the order of the role's `attachTo` (front before back), then the larger panel.
+    // Always a decision with the next panels beside it, and said as a guess.
+    for (const e of table.list().filter(early)) {
+      if (!isLive(e)) continue;
+      const def = roleDef(e.roles[0])!;
+      const attachTo = def.attachTo ?? [];
+      const hosts = table
+        .list(e.tree)
+        // A named panel only: a nameless piece may be anything, the geometry pass reads it.
+        .filter((t) => t !== e && !!t.roles.length && host(attachTo, t))
+        .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand);
+      if (!hosts.length) continue;
+      // A seam to a panel itself is step E's — placed there, or held back for step 5 as rivalled.
+      if (hosts.some((t) => panelScore(e, t) >= SKELETON.accept)) continue;
+      const oneRole = new Set(hosts.map((t) => t.roles[0])).size === 1;
+      const pos = positionOf(e.name);
+      const flap = flapEntity(e);
+      const ranked = hosts
+        .map((t) => {
+          const at = positionOf(t.name);
+          return {
+            t,
+            hint: hintsAt(e, t, attachTo) ? 0 : 1,
+            position: pos === null || at === null ? 1 : at === pos ? 0 : 2,
+            parts: oneRole ? 0 : flap ? -partCount(t) : partCount(t),
+            rank: Math.min(
+              ...t.roles.map((r) => (attachTo.includes(r) ? attachTo.indexOf(r) : 99)),
+            ),
+            area: areaOf(t),
+          };
+        })
+        .sort(
+          (a, b) =>
+            a.hint - b.hint ||
+            a.position - b.position ||
+            a.parts - b.parts ||
+            a.rank - b.rank ||
+            b.area - a.area,
+        );
+      const because = (o: (typeof ranked)[number]) =>
+        o.hint === 0
+          ? 'its name points there'
+          : o.position === 0
+            ? 'the position word in both names'
+            : oneRole
+              ? 'the larger strip'
+              : flap
+                ? 'the panel with the most parts on it'
+                : 'the panel with the fewest parts on it';
+      const d = decide(
+        pins,
+        `place:${leafId([e])}`,
+        ranked.slice(0, 3).map((o, i) => ({
+          inputs: [e, o.t],
+          reason: i === 0 ? `or onto ${display(o.t)} — ${because(o)}` : `or onto ${display(o.t)}`,
+        })),
+        isLive,
+      );
+      const top = ranked[d.chosen] ?? ranked[0];
+      const made = record([e, top.t], {
+        name: withPart(display(top.t), def.name.toLowerCase()),
+        roles: mergeRoles(top.t.roles, [def.id]),
+        kind: 'attach',
+        hand: top.t.hand,
+        why: '',
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        judgement: {
+          confidence: top.hint === 0 || top.position === 0 ? 0.55 : 0.45,
+          source: 'template',
+          reason: `${roleName(def.id, e.hand)}: the pattern gives no seam to a panel — onto ${display(top.t)} by ${d.chosen ? 'your reading' : because(top)}, while it is flat; check`,
+        },
+      });
+      made.family = top.t.family;
     }
   }
 
@@ -1148,6 +1247,50 @@ function hintsAt(e: Entity, t: Entity, attachTo: string[]): boolean {
   return attachTo.some(
     (r) => t.roles.includes(r) && (roleDef(r)?.tokens ?? []).some((x) => own.has(x)),
   );
+}
+
+/** A name's tokens without the numbers glued to them: PCK_BACK_1L → pck, back, l. */
+const bareTokens = (name: string) => nameTokens(name).map((x) => x.replace(/^\d+|\d+$/g, ''));
+
+const POSITION_TOP = new Set([
+  'top',
+  'upper',
+  'up',
+  'u',
+  'верх',
+  'верхний',
+  'верхняя',
+  'górny',
+  'gorny',
+  'górna',
+  'gorna',
+]);
+const POSITION_BOTTOM = new Set([
+  'bottom',
+  'bttm',
+  'btm',
+  'lower',
+  'low',
+  'down',
+  'dn',
+  'низ',
+  'нижний',
+  'нижняя',
+  'dolny',
+  'dolna',
+]);
+/** The position word in a name: P_R_U → top, PCK_R_BTTM → bottom, none → null. */
+function positionOf(name: string): 'top' | 'bottom' | null {
+  const t = bareTokens(name);
+  if (t.some((x) => POSITION_TOP.has(x))) return 'top';
+  if (t.some((x) => POSITION_BOTTOM.has(x))) return 'bottom';
+  return null;
+}
+
+/** A pocket flap by its name (the pocket role reads flaps and bags alike). */
+const FLAP_TOKENS = new Set(['fl', 'flp', 'flap', 'клапан', 'patka']);
+function isFlap(name: string): boolean {
+  return bareTokens(name).some((x) => FLAP_TOKENS.has(x));
 }
 
 /** The number a layer carries in its name (BLT_3_M → 3, CLR_MAIN → 0): the last number token. */
