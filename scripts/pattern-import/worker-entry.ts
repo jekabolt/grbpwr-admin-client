@@ -641,8 +641,14 @@ async function skipControl(
   const saved = inner.semantics;
   const bySeed = new Map<number, number>();
   for (const p of saved.pieces) bySeed.set(p.seed, (bySeed.get(p.seed) ?? 0) + 1);
+  // the DRAWN identity of its seed (a single piece, or the drawn hand of a pair the D3 shape
+  // suggestion made — its outline still votes); a mirrored `_R` is not drawn
   const target = saved.pieces.find(
-    (p) => !p.unfoldedFold && bySeed.get(p.seed) === 1 && p.allowance.meaning === 'seam',
+    (p) =>
+      !p.unfoldedFold &&
+      (bySeed.get(p.seed) === 1 || (p.pairHand === 'L' && bySeed.get(p.seed) === 2)) &&
+      saved.pieces.find((q) => q.seed === p.seed) === p &&
+      p.allowance.meaning === 'seam',
   );
   if (!target) {
     check(name, 'M7 negative control: a drawn seam piece to edit', false, 'none');
@@ -786,7 +792,8 @@ async function operatorBridgeGateCase() {
   check(
     name,
     'semantics: every piece specced (72 not exported)',
-    sem.blocked.length === 0 && sem.pieces.length === pc.families.length,
+    // one spec per family, or two where D3 suggests a pair (no "cut n" on an asymmetric outline)
+    sem.blocked.length === 0 && new Set(sem.pieces.map((p) => p.seed)).size === pc.families.length,
     `${open0.length} open before, ${drop.length} dropped, ${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
   );
   const w = await writeCase(name, run, sem, sz.map, { mustPass: true });

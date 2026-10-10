@@ -283,5 +283,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     outerIsSeam: boolean;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */
     instances?: number;
+    /** The block's QUANTITY label (D3: the CAD's count, read by semantics). */
+    quantity?: number;
   };
 };

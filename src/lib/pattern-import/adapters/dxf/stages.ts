@@ -412,6 +412,8 @@ function candidateOf(
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.instances ? { instances: p.instances } : {}),
+      // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)
+      ...(p.labels.quantity != null ? { quantity: p.labels.quantity } : {}),
     },
   };
 }
