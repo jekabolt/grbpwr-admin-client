@@ -85,6 +85,7 @@ function RailStep({
   readPieceDrag,
   workCatalog,
   draft = false,
+  onReviewed,
 }: {
   uid: string;
   index: number;
@@ -118,10 +119,12 @@ function RailStep({
    */
   workCatalog: WorkCatalog | undefined;
   /**
-   * Шаг пришёл из каркаса сборки и рука его ещё не трогала. Состояние СЕССИИ, а не данных: в
-   * записи шага следа нет, и после перезагрузки это обычный шаг.
+   * Шаг записал каркас сборки, и его ещё никто не проверил — поле шага `draft` (0410): переживает
+   * перезагрузку и видно всей команде.
    */
   draft?: boolean;
+  /** Клик по чипу draft — «проверено»: метка снимается, поля шага не трогаются. */
+  onReviewed?: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -272,18 +275,6 @@ function RailStep({
             >
               {label}
             </Text>
-            {draft && (
-              <Text
-                size='nano'
-                variant='label'
-                component='span'
-                className='shrink-0 uppercase'
-                data-rail-draft={index}
-                title='suggested by the assembly skeleton — the mark goes once you change the step, and it is never saved'
-              >
-                draft
-              </Text>
-            )}
             {(hasError || assemblyBroken) && (
               <Text
                 size='nano'
@@ -322,6 +313,22 @@ function RailStep({
               {smvMin > 0 ? smvMin.toFixed(1) : '—'}
             </Text>
           </span>
+          {/* ЧИП DRAFT — КНОПКА РЯДОМ СО СТРОКОЙ, А НЕ ВНУТРИ НЕЁ: строка сама `role='button'`
+              (открыть шаг), и вложенный орган был бы кнопкой в кнопке. Нативная кнопка, как ручка
+              перетаскивания: «проверено» — правка, и в `<fieldset disabled>` выпущенной карточки
+              она молчит. */}
+          {draft && (
+            <button
+              type='button'
+              onClick={onReviewed}
+              data-rail-draft={index}
+              aria-label={`step ${opNumber} is a draft from the assembly skeleton: mark it reviewed`}
+              title='written by the assembly skeleton and not reviewed yet. Click to mark it reviewed; changing the step does it too'
+              className='shrink-0 border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
+            >
+              <span className='text-nano uppercase'>draft</span>
+            </button>
+          )}
         </div>
       )}
     </SortableEntity>
@@ -350,6 +357,7 @@ export function SequenceRail({
   readPieceDrag,
   workCatalog,
   draftIds,
+  onReviewed,
 }: {
   /**
    * Мета массива строк из `useFieldArray` владельца — СВОЕГО экземпляра здесь нет и быть не может.
@@ -374,8 +382,10 @@ export function SequenceRail({
   /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. Обязателен,
    * как аргументы композитора: «рельс без каталога» — решение вызывателя, а не забытый проп. */
   workCatalog: WorkCatalog | undefined;
-  /** Id строк (`fields[i].id`), пришедших из каркаса и ещё не тронутых рукой. */
+  /** Id строк (`fields[i].id`), чьё поле `draft` поднято: каркас записал, никто не проверил. */
   draftIds?: ReadonlySet<string>;
+  /** «Проверено» по клику на чип draft строки `index`. */
+  onReviewed?: (index: number) => void;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -423,6 +433,7 @@ export function SequenceRail({
                 readPieceDrag={readPieceDrag}
                 workCatalog={workCatalog}
                 draft={draftIds?.has(f.id) ?? false}
+                onReviewed={onReviewed ? () => onReviewed(index) : undefined}
               />
             </Fragment>
           ))}

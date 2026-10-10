@@ -48,10 +48,13 @@ import {
 import { pieceRefKey } from 'components/managers/tech-card/components/piece-block-refs';
 import type { PieceCloth } from 'components/managers/tech-card/components/piece-cloth';
 import {
+  mapFormToTechCardInsert,
+  mapTechCardToForm,
   techCardDefaultData,
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
+import { settleFormAfterSave } from 'components/managers/tech-card/components/useTechCardAutosave';
 import type { PieceShapes } from 'components/managers/tech-card/components/use-piece-shapes';
 
 // ── fixtures: a tee ─────────────────────────────────────────────────────────────────────────────
@@ -327,6 +330,16 @@ type Probe = {
   remountField: () => void;
   /** How many times the stub AI was asked, and the requests it got. */
   aiCalls: () => number;
+  /**
+   * ONE AUTOSAVE, AS THE PAGE SETTLES IT: the form goes to the wire (the real mapper), comes back as
+   * a server that echoes the payload would return it (the real reverse mapper), and the REAL
+   * `settleFormAfterSave` writes it into the form — the path index.tsx runs after every body save.
+   */
+  settleLikeAutosave: () => void;
+  /** `draft` of every operation as the WRITE would send it (the real mapper to the wire). */
+  wireDrafts: () => (boolean | undefined)[];
+  /** The operations as a reload would put them into the form: wire → DTO → the real read mapper. */
+  reloadedOps: () => Record<string, unknown>[];
 };
 declare global {
   interface Window {
@@ -612,4 +625,20 @@ window.__sk = {
   },
   remountField: () => remount?.(),
   aiCalls: () => aiCalls,
+  wireDrafts: () =>
+    (mapFormToTechCardInsert(form!.getValues(), undefined, true).operations ?? []).map(
+      (o) => o.draft,
+    ),
+  reloadedOps: () =>
+    mapTechCardToForm({
+      id: 1,
+      techCard: mapFormToTechCardInsert(form!.getValues(), undefined, true),
+    } as never).operations as unknown as Record<string, unknown>[],
+  settleLikeAutosave: () => {
+    const f = form!;
+    const before = structuredClone(f.getValues());
+    const insert = mapFormToTechCardInsert(f.getValues(), undefined, true);
+    const server = mapTechCardToForm({ id: 1, techCard: insert } as never);
+    settleFormAfterSave(f, before, { values: server, server });
+  },
 };

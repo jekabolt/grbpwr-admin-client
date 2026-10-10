@@ -455,6 +455,113 @@ await closePanel();
   );
 }
 
+// ── M0 ──────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6 SUSPECTED DEFECT, MEASURED: «autosave re-mints row ids on a length change, so the draft
+// marks keyed by field id die seconds after apply». The apply changes the length BEFORE the save; the
+// save then lands the same length, and settle writes leaves. Measured on the real mapper both ways and
+// the real settleFormAfterSave: are the rows the same DOM nodes (React key = field id), and do the
+// draft marks survive?
+head('M0 — an autosave after apply: row ids and draft marks survive the settle');
+await mount({ machines: [{ machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK' }] });
+await openPanel();
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+await closePanel();
+await page.click('[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")');
+await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+{
+  const marksBefore = await page.locator('[data-rail-draft]').count();
+  await page.evaluate(() =>
+    document.querySelectorAll('[data-rail-step]').forEach((n) => (n.__probeTag = 1)),
+  );
+  await page.evaluate(() => window.__sk.settleLikeAutosave());
+  await page.waitForTimeout(400);
+  const sameNodes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-rail-step]')].every((n) => n.__probeTag === 1),
+  );
+  const marksAfter = await page.locator('[data-rail-draft]').count();
+  console.log(
+    `        measured: rows kept their DOM nodes (ids not re-minted): ${sameNodes}; draft marks ${marksBefore} → ${marksAfter}`,
+  );
+  ck(marksBefore === 5, 'five draft marks before the save', `${marksBefore}`);
+  ck(sameNodes, 'the settle does not re-mint the applied rows');
+  ck(
+    marksAfter === marksBefore,
+    'the draft marks survive the autosave settle',
+    `${marksBefore} → ${marksAfter}`,
+  );
+}
+
+// ── M ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §7: «draft» is a FIELD of the step (0410), not session state. It rides the write, comes back
+// on a reload, an edit takes it off, and a click on the chip says «reviewed» without touching the step.
+head('M — the draft mark is stored on the step: reload keeps it, edit or click takes it off');
+{
+  ck(
+    (await ops()).every((r) => r.draft === true),
+    'every applied row carries draft = true in the form',
+  );
+  const wire = await page.evaluate(() => window.__sk.wireDrafts());
+  ck(
+    wire.length === 5 && wire.every((d) => d === true),
+    'the write sends draft = true on every applied step',
+    JSON.stringify(wire),
+  );
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded });
+  const labels = await page.evaluate(
+    () => (document.body.textContent ?? '').match(/· draft/g)?.length ?? 0,
+  );
+  ck(labels === 5, 'a reload (mount from the DTO) keeps five «· draft» labels', `seen ${labels}`);
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === 5,
+    'the rail of the reloaded card marks five rows «draft»',
+  );
+  ck(!(await isDirty()), 'loading drafts does not dirty the form');
+  await page.evaluate(() => window.__sk.touch(1));
+  await page.waitForTimeout(250);
+  const afterEdit = await ops();
+  ck(
+    afterEdit[1].draft === false && afterEdit.filter((r) => r.draft).length === 4,
+    'an edit takes the mark off that row only, in the data',
+    afterEdit.map((r) => (r.draft ? 1 : 0)).join(''),
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 4, 'the rail shows four chips');
+  const beforeClick = JSON.stringify({ ...(await ops())[3], draft: null });
+  await page.click('[data-rail-draft="3"]');
+  await page.waitForTimeout(250);
+  const afterClick = await ops();
+  ck(afterClick[3].draft === false, 'a click on the chip marks the step reviewed');
+  ck(
+    JSON.stringify({ ...afterClick[3], draft: null }) === beforeClick,
+    'reviewing touches no other field of the step',
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 3, 'three chips left');
+  ck(await isDirty(), 'reviewing dirties the form, so the autosave carries it');
+  await shot('m-rail-reviewed', '[data-rail-step="0"]');
+}
+{
+  // A released card: the chip is there, but «reviewed» is an edit and does nothing.
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded, frozen: true });
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  const n = await page.locator('[data-rail-draft]').count();
+  await page.locator('[data-rail-draft]').first().click({ force: true });
+  await page.waitForTimeout(200);
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === n && n === 3,
+    'a frozen card keeps its marks: reviewing is an edit',
+    `${n}`,
+  );
+}
+
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
 await mount({});

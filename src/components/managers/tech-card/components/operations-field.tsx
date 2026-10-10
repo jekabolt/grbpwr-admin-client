@@ -646,6 +646,8 @@ export const emptyOperation = {
   zone: NONE_ZONE,
   calloutNumber: 0, // 0 = no sketch pin linked
   smv: '',
+  // A hand-made step is never a draft; only the assembly skeleton writes `true` (rowFromStep).
+  draft: false,
   seamClass: NONE_SEAM_CLASS,
   stitchesPerCm: '',
   seamAllowanceMm: '',
@@ -858,7 +860,9 @@ export function skeletonZoneOf(step: Pick<SkeletonStep, 'zone'>): string {
 export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): OperationRow {
   const operationType = enumOf(OP_TYPE_PREFIX, step.operationType);
   const isMachine = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-  return rowFromCreate({
+  // DRAFT (0410): the one writer of `draft: true`. Stored on the step, so the mark survives a reload
+  // and the whole team sees which steps nobody has checked.
+  const row = rowFromCreate({
     inputKeys: step.inputs.map((k) => k.trim()).filter(Boolean),
     outputUnitKey: step.outputUnitKey.trim(),
     outputUnitName: step.outputUnitKey.trim() ? step.outputUnitName.trim() : '',
@@ -869,6 +873,7 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
       ? { pressEquipment: skeletonPressOf(operationType, ctx).pressEquipment }
       : {}),
   });
+  return { ...row, draft: true };
 }
 
 /**
@@ -6181,13 +6186,8 @@ export function OperationsField({
   // ЕДИНСТВЕННАЯ ДВЕРЬ КАРКАСА В ФОРМУ, и открывается она только новым `nonce`: предложение, на
   // которое просто смотрят, не меняет ни одного поля (приёмка волны, п.5 — «ничего молча»).
   // Строки собирает `rowFromStep`, то есть тот же писатель, что и диалог создания: после записи это
-  // обычные шаги, и в данных нет следа, откуда они взялись. След — только пометка «draft» в рельсе
-  // этой сессии, до первого касания рукой.
+  // обычные шаги; след происхождения — только поле `draft` (0410), до первой правки или «reviewed».
   const autosave = useTechCardAutosave();
-  const [draftPrints, setDraftPrints] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const draftRef = useRef(draftPrints);
-  draftRef.current = draftPrints;
-  const pendingDraft = useRef<{ from: number; count: number; fresh: boolean } | null>(null);
 
   // Последний увиденный nonce: перемонтированное поле получает тот же `applyRequest` (состояние
   // живёт выше, у двери) и без этой памяти записало бы предложение второй раз.
@@ -6238,7 +6238,6 @@ export function OperationsField({
       setValue('assemblyCleared', true, { shouldDirty: true });
     }
     const from = replacing ? 0 : current.length;
-    pendingDraft.current = { from, count: rows.length, fresh: replacing };
     setSelected(from);
     // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
     // человек был (кнопка «apply»).
@@ -6247,49 +6246,75 @@ export function OperationsField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyRequest?.nonce]);
 
-  // ВТОРОЙ ТАКТ: id строк появляются только с новым `fields`.
-  useEffect(() => {
-    const p = pendingDraft.current;
-    if (!p) return;
-    pendingDraft.current = null;
-    const values = (getValues('operations') ?? []) as Record<string, unknown>[];
-    setDraftPrints((prev) => {
-      const next = new Map(p.fresh ? [] : prev);
-      for (let i = p.from; i < p.from + p.count; i++) {
-        const id = fields[i]?.id;
-        if (id) next.set(id, draftPrint(values[i]));
-      }
-      return next;
-    });
-  }, [fields, getValues]);
-
-  // ПЕРВОЕ КАСАНИЕ СНИМАЕТ ПОМЕТКУ НАВСЕГДА: строка, чьи смысловые поля разошлись с записанными,
-  // уже не черновик — даже если потом вернуть как было. Удалённая строка уходит из карты тоже.
-  // Подписка только будит сверку; сама сверка идёт после рендера, когда `fields` уже знает новый
-  // порядок строк (перестановка и удаление шлют событие раньше, чем приезжают их id).
+  // --- ЧЕРНОВИК КАРКАСА (0410): МЕТКА — ПОЛЕ СТРОКИ `draft`, А НЕ СОСТОЯНИЕ СЕССИИ -------------------
+  //
+  // Правда одна — `operations[i].draft`: его ставит `rowFromStep`, его везёт автосейв, его читает
+  // перезагрузка, его видит вся команда. Здесь только ДЕТЕКТОР ПЕРВОГО КАСАНИЯ: у каждой строки-
+  // черновика запоминается отпечаток смысловых полей (`draftPrint`) в момент, когда метка впервые
+  // увидена (запись каркаса, загрузка карточки); строка, чьи поля разошлись с ним, теряет метку
+  // НАВСЕГДА (`draft = false`, грязное поле → автосейв), даже если потом вернуть как было.
+  //
+  // КЛЮЧ — id строки useFieldArray. Замер M0 (`yarn skeleton:ui`): автосейв после записи каркаса id НЕ
+  // перечеканивает (массив той же длины пишется по листьям) — подозрение 03-P2 §6 не подтвердилось.
+  // Но и перечеканка не страшна: строка с неизвестным id получает отпечаток заново, а метка живёт в
+  // данных, не в этой карте.
+  //
+  // ЗАПИСЬ — НЕ КАСАНИЕ. Если отпечаток разошёлся, а строка совпадает с сохранённой базой формы на
+  // том же месте, — это лёг автосейв (сервер мог канонизировать поле), и отпечаток берётся заново.
+  const [draftIds, setDraftIds] = useState<ReadonlySet<string>>(() => new Set());
+  const draftRef = useRef(draftIds);
+  draftRef.current = draftIds;
+  const draftBase = useRef(new Map<string, string>());
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
     const sub = watch((_, { name }) => {
-      if (draftRef.current.size === 0) return;
       if (name && !name.startsWith('operations')) return;
+      // Без черновиков будить сверку стоит только сменой самой метки (или всей формы — reset).
+      if (draftRef.current.size === 0 && name && !name.endsWith('.draft')) return;
       setTouchTick((t) => t + 1);
     });
     return () => sub.unsubscribe();
   }, [watch]);
   useEffect(() => {
-    if (draftPrints.size === 0) return;
     const ops = (getValues('operations') ?? []) as Record<string, unknown>[];
-    const ids = fields.map((f) => f.id);
-    let next: Map<string, string> | null = null;
-    for (const [id, print] of draftPrints) {
-      const i = ids.indexOf(id);
-      if (i >= 0 && draftPrint(ops[i]) === print) continue;
-      next ??= new Map(draftPrints);
-      next.delete(id);
-    }
-    if (next) setDraftPrints(next);
-  }, [touchTick, fields, draftPrints, getValues]);
-  const draftIds = useMemo(() => new Set(draftPrints.keys()), [draftPrints]);
+    const saved = ((control._defaultValues as { operations?: unknown[] }).operations ??
+      []) as Record<string, unknown>[];
+    const base = draftBase.current;
+    const next = new Set<string>();
+    const touched: number[] = [];
+    const live = new Set<string>();
+    fields.forEach((f, i) => {
+      live.add(f.id);
+      const row = ops[i];
+      if (!row?.draft) {
+        base.delete(f.id);
+        return;
+      }
+      const print = draftPrint(row);
+      const was = base.get(f.id);
+      if (was === undefined || was === print || draftPrint(saved[i]) === print) {
+        base.set(f.id, print);
+        next.add(f.id);
+        return;
+      }
+      base.delete(f.id);
+      touched.push(i);
+    });
+    for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
+    if (!frozen)
+      for (const index of touched)
+        setValue(`operations.${index}.draft`, false, { shouldDirty: true });
+    else for (const index of touched) next.add(fields[index].id);
+    setDraftIds((prev) =>
+      prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
+    );
+  }, [touchTick, fields, getValues, setValue, control, frozen]);
+  // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
+  // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
+  const markReviewed = (i: number) => {
+    if (frozen) return;
+    setValue(`operations.${i}.draft`, false, { shouldDirty: true, shouldTouch: true });
+  };
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -7571,8 +7596,10 @@ export function OperationsField({
                     readPieceDrag={readPieceDrag}
                     // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
                     workCatalog={workCatalog}
-                    // Шаги каркаса, которых ещё не касалась рука, — состояние сессии, не данные.
+                    // Шаги каркаса, которых ещё никто не проверил (поле `draft`, 0410), и жест
+                    // «проверено» — клик по чипу.
                     draftIds={draftIds}
+                    onReviewed={markReviewed}
                   />
                 </div>
               )}

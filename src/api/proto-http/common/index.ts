@@ -3333,6 +3333,12 @@ export type TechCardOperation = {
   // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
   // жест, а не потеря.
   bomQuantities: TechCardOperationBomQty[] | undefined;
+  // ЧЕРНОВИК КАРКАСА СБОРКИ (0410). true = шаг записал каркас сборки (OPERATIONS → build from pattern
+  // → apply), и его ещё никто не проверил. Снимает первая смысловая правка строки или клик по чипу
+  // «draft» (reviewed). В ДАЙДЖЕСТ НЕ ВХОДИТ: проверка шага не меняет того, что карточка говорит цеху,
+  // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
+  // сборки — это пометка для команды, а не инструкция.
+  draft: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
