@@ -10,3 +10,10 @@ export {
 export { skeletonDeps } from '../../src/components/managers/tech-card/components/assembly-skeleton-deps';
 export { readSeamGraph, proposeSkeleton } from '../../src/lib/assembly-skeleton/pipeline';
 export { loadFacts } from './seams-entry';
+export {
+  buttonColumns,
+  planButtons,
+  ventEvidence,
+  zipSeats,
+} from '../../src/lib/assembly-skeleton/geometry/closures';
+export { SKELETON } from '../../src/lib/assembly-skeleton/types';

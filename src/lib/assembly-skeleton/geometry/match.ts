@@ -42,8 +42,9 @@ import {
   type SeamGraph,
   type SkeletonFacts,
 } from '../types';
+import { closureDrills, closureReason, type ClosureVerdict } from './closures';
 import { isMirroredPair } from '../cut';
-import { angleAt, dist, drillPoints } from './segment';
+import { angleAt, dist } from './segment';
 import { unprovenCopies } from './twins';
 
 export type MatchRules = {
@@ -108,9 +109,6 @@ const STRAIGHT = 0.98;
 const CONVEX_TOL_DEG = 5;
 /** A centre seam runs the length of the piece: at least this share of its longest edge. */
 const CENTRE_MIN_SHARE = 0.5;
-/** Drills this close to an edge mark buttons/buttonholes along it. */
-const DRILL_EDGE_MM = 40;
-const DRILLS_FOR_CLOSURE = 2;
 /** Shape test: profile samples and the deviation (mm) below which an edge is «straight enough». */
 const PROFILE_SAMPLES = 24;
 const PROFILE_FLAT_MM = 3;
@@ -125,8 +123,6 @@ const SOFT_CORNER_DEG = 60;
 const SIDE_CONFIDENT = 0.9;
 /** Rejected list keeps candidates down to this score. */
 const REJECTED_FLOOR = 0.4;
-
-const FRONT_NAME = /(^|[^a-z])(front|frt|fp|cf|перед|полоч)/i;
 
 // ── runs ────────────────────────────────────────────────────────────────────────────────────
 
@@ -398,6 +394,7 @@ type Cand = {
   parts: ScoreParts;
   /** Why a rule dropped it (kept for `rejected`). */
   dropped?: string;
+  closure?: ClosureVerdict['closure'];
 };
 
 const isStraight = (r: Run) => r.chordMm / r.lenMm >= STRAIGHT;
@@ -633,22 +630,6 @@ function inferSides(
   };
 }
 
-// ── closures ────────────────────────────────────────────────────────────────────────────────
-
-function closureReason(c: Cand, facts: SkeletonFacts, drills: Map<string, Pt2[]>): string | null {
-  if (!isStraight(c.u) || !isStraight(c.v)) return null;
-  const near = (r: Run) =>
-    (drills.get(r.piece.pieceKey) ?? []).filter((d) =>
-      r.pts.some((p) => dist(p, d) <= DRILL_EDGE_MM),
-    ).length;
-  const nd = Math.max(near(c.u), near(c.v));
-  if (nd >= DRILLS_FOR_CLOSURE) return `closure: ${nd} drills along the edge`;
-  const trims = facts.bom.zipper + facts.bom.buttons + facts.bom.snaps;
-  const front = FRONT_NAME.test(c.u.piece.name) || FRONT_NAME.test(c.v.piece.name);
-  if (trims > 0 && front) return 'closure: centre front with zip / buttons / snaps in the BOM';
-  return null;
-}
-
 // ── A3 ──────────────────────────────────────────────────────────────────────────────────────
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -661,6 +642,7 @@ const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate =>
   score: Math.round(c.score * 1000) / 1000,
   evidence: c.dropped ? { ...c.evidence, rule: c.dropped } : c.evidence,
   kind: c.kind,
+  ...(c.closure ? { closure: c.closure } : {}),
   ...(ambiguousWith && ambiguousWith.length ? { ambiguousWith } : {}),
 });
 
@@ -734,20 +716,21 @@ export function matchSeams(
     }
   }
   const drills = new Map<string, Pt2[]>();
-  for (const p of facts.pieces) drills.set(p.pieceKey, drillPoints(p.piece));
+  for (const p of pieces) drills.set(p.pieceKey, closureDrills(p));
 
   for (const c of all) {
     if (c.regular) continue;
     const mirror = c.evidence.twin === 'mirror';
     if (rules.closure && mirror) {
-      const why = closureReason(c, facts, drills);
+      const why = closureReason(c.u, c.v, isStraight(c.u) && isStraight(c.v), facts, drills);
       // A closure is judged on the base score: the twin penalty is what makes it a closure.
       const rivalled = [...c.u.edges, ...c.v.edges].some(
         (e) => (bestRegular.get(e.id) ?? -Infinity) >= SKELETON.accept,
       );
       if (why && !rivalled && c.score + SKELETON.twinMirrorPenalty >= SKELETON.accept) {
         c.kind = 'closure-not-seam';
-        c.evidence = { ...c.evidence, rule: why };
+        c.evidence = { ...c.evidence, rule: why.rule };
+        c.closure = why.closure;
         continue;
       }
     }

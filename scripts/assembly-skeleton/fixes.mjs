@@ -504,7 +504,8 @@ console.log('\n6 · ×2 mirrored blocks (SS26-005 with the right-hand blocks rem
   );
   gate(
     'FOLD ×2 is one piece: no «×2» anywhere',
-    !fold.steps.some((s) => /×\d/.test(`${s.label} ${s.outputUnitName}`)),
+    // A closure step counts buttons («Buttonholes ×6», P2 lane Z), not pieces: not this gate's ×.
+    !fold.steps.some((s) => !s.feature && /×\d/.test(`${s.label} ${s.outputUnitName}`)),
   );
 }
 

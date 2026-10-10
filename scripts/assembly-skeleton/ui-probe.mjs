@@ -801,8 +801,10 @@ if (!real) {
     const n = Number(await head.getAttribute('data-skeleton-to-decide'));
     const riders = await page.locator('[data-skeleton-follows]').count();
     console.log(`        header: ${(await head.innerText()).replace(/\s+/g, ' ')}`);
-    // The genuine guesses of SS26-005: collar with stand, collar into the neckline, set sleeves.
-    ck(n <= 5, 'only the genuine guesses are left to decide', `${n} to decide, ${riders} riders`);
+    // The genuine guesses of SS26-005: collar with stand, collar into the neckline, set sleeves —
+    // + 3 closure steps of P2 lane Z whose side CLO does not draw (buttonholes / buttons ×6 on the
+    // plackets, the collar band's two slits): counted from the pattern, the side is a decision.
+    ck(n <= 8, 'only the genuine guesses are left to decide', `${n} to decide, ${riders} riders`);
     ck(riders >= 15, 'presses and processing ride on their joins', `${riders} riders`);
   }
   const outPics = await page.locator('[data-skeleton-unit] svg[role="img"]').count();
