@@ -1890,6 +1890,17 @@ export async function main(): Promise<number> {
         'N3: 8 strokes at one end (a tile label the line runs into) are no head',
         JSON.stringify(crowd.d.output.grainProposals),
       );
+      // palto: one head per size — the same V (barb → tip → barb, one polyline) drawn 3 times
+      const vee = (): Extra => {
+        const [l, r] = [stroke(-1, 28, 7), stroke(1, 28, 7)];
+        return { pts: [l.pts[1], { x: 90, y: 120 }, r.pts[1]], closed: false, role: 'internal' };
+      };
+      const copies = run1([line(90), vee(), vee(), vee()], word);
+      ck(
+        grainOf(copies.d)?.origin === 'detected',
+        'N3: a mirrored head drawn 3 times over (one per size, palto) is still a head',
+        JSON.stringify(copies.d.output.grainProposals),
+      );
       // the same arrow among lettering: 12 short strokes in the cell of its top end (wm, G18)
       const letters: Extra[] = Array.from({ length: 12 }, (_, i) => ({
         pts: [

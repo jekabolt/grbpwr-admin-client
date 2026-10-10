@@ -453,12 +453,22 @@ function arrowheads(
   }
   const both = sides[0].size > 0 && sides[1].size > 0;
   // N3 (wm M back): a pair at ONE end is a drawn head only when its two barbs mirror each other —
-  // like angles (± 10°), like lengths (≤ 1.6 ×), each ≥ 2.5 mm — and stand alone (≤ 4 strokes at
-  // the tip, a head drawn twice at most). A diagonal running into a tile label («KOLUMNA 5») meets 8
-  // short horizontal / vertical strokes there: lettering, no head.
+  // like angles (± 10°), like lengths (≤ 1.6 ×), each ≥ 2.5 mm — and stand alone (≤ 4 DIFFERENT
+  // strokes at the tip; palto draws one head per size, 5 identical copies). A diagonal running into
+  // a tile label («KOLUMNA 5») meets short horizontal / vertical strokes of all lengths: no head.
+  const distinct = (bs: { side: number; deg: number; len: number }[]) =>
+    bs.filter(
+      (b, i) =>
+        !bs
+          .slice(0, i)
+          .some(
+            (o) =>
+              o.side === b.side && Math.abs(o.deg - b.deg) <= 2 && Math.abs(o.len - b.len) <= 0.5,
+          ),
+    ).length;
   const pair = barbsAt.some(
     (bs) =>
-      bs.length <= 4 &&
+      distinct(bs) <= 4 &&
       bs.some(
         (p) =>
           p.len >= GRAIN_PAIR_BARB_MIN_MM &&
