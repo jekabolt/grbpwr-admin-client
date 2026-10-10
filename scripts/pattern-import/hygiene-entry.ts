@@ -289,6 +289,48 @@ export async function main(): Promise<number> {
       `${water.filter((i) => over.has(i)).length}/${water.length} watermark strokes marked`,
     );
   }
+  // T5: four small repeated CLOSED cut contours (35 × 45 mm, every file alike) with an inner loop
+  // each, crossed by a file-specific line — never overprint; the same with each contour drawn as
+  // four separate sides (a chain that closes a loop with others)
+  for (const sides of [false, true]) {
+    const files = ['0', '1', '2'];
+    const draw: { pts: P[]; style: number; file: string; closed?: boolean }[] = [];
+    for (const [k, file] of files.entries()) {
+      for (let s = 0; s < 4; s++) {
+        const x0 = 100 + 50 * s;
+        const r = rect(x0, 100, x0 + 35, 145);
+        if (sides)
+          for (let e = 0; e < 4; e++) draw.push({ pts: [r[e], r[(e + 1) % 4]], style: 1, file });
+        else draw.push({ pts: r, closed: true, style: 1, file });
+        draw.push({ pts: rect(x0 + 8, 110, x0 + 27, 135), closed: true, style: 1, file });
+      }
+      draw.push({
+        pts: [
+          [80, 120 + 2 * k],
+          [320, 126 + 2 * k],
+        ],
+        style: 1,
+        file,
+      });
+    }
+    const sheet = sheetOf(draw, [], files);
+    const mk = makeChains(sheet, DEFAULT_CHAIN_OPTS);
+    const pathFile = new Map(sheet.paths.map((p) => [p.id, p.src.file]));
+    const fileOf = (i: number) => pathFile.get(mk.chains[i].ranges[0]?.path ?? -1) ?? '';
+    const over = new Set(overprintLines(mk.chains, fileOf));
+    const outer = mk.chains
+      .map((_, i) => i)
+      .filter((i) => {
+        const xs = mk.chains[i].pts.map((p) => p.y);
+        return Math.min(...xs) < 101 || Math.max(...xs) > 144;
+      })
+      .filter((i) => mk.chains[i].pts.every((p) => p.y >= 99 && p.y <= 146));
+    check(
+      `T5 repeated closed cut contours crossed by a graded line → not overprint${sides ? ' (drawn as sides)' : ''}`,
+      outer.length > 0 && outer.every((i) => !over.has(i)),
+      `${outer.filter((i) => over.has(i)).length}/${outer.length} contour chains marked, ${over.size} marked in all`,
+    );
+  }
   console.log(bad ? `\n${bad} FAILED` : '\nall hygiene controls ok');
   return bad;
 }

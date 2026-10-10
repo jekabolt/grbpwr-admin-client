@@ -714,7 +714,50 @@ export function overprintLines(
     const b = bboxOf(chains[i].pts);
     return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
   };
-  const strokes = [...same].filter((i) => extent(i) <= 120);
+  // a CLOSED contour is never overprint: a closed chain, or a chain whose ends all meet other
+  // chain ends of its file (no free end in its end-to-end component) — four small repeated cut
+  // loops crossed by a graded line read as a "glyph cluster" and their inner loops passed as cut
+  // outlines (Codex T5). Glyph evidence is OPEN short strokes only.
+  const ends = new PtGrid(4);
+  chains.forEach((c, i) => {
+    if (c.pts.length < 2 || known[i]) return;
+    ends.add(2 * i, c.pts[0]);
+    ends.add(2 * i + 1, c.pts[c.pts.length - 1]);
+  });
+  const endPt = (e: number) => {
+    const c = chains[e >> 1];
+    return e & 1 ? c.pts[c.pts.length - 1] : c.pts[0];
+  };
+  const parent = new Map<number, number>();
+  const find = (i: number): number => {
+    let r = i;
+    while ((parent.get(r) ?? r) !== r) r = parent.get(r)!;
+    parent.set(i, r);
+    return r;
+  };
+  const freeEnd = new Set<number>();
+  chains.forEach((c, i) => {
+    if (c.pts.length < 2 || known[i] || c.closed) return;
+    for (const e of [2 * i, 2 * i + 1]) {
+      const p = endPt(e);
+      let met = false;
+      ends.near(p, 1, (o) => {
+        if (o >> 1 === i || known[o >> 1] || fileOf(o >> 1) !== fileOf(i)) return;
+        if (dist(endPt(o), p) > 1) return;
+        met = true;
+        parent.set(find(i), find(o >> 1));
+      });
+      if (!met && dist(c.pts[0], c.pts[c.pts.length - 1]) > 1) freeEnd.add(i);
+    }
+  });
+  const openComp = new Set<number>();
+  for (const i of freeEnd) openComp.add(find(i));
+  const loopy = (i: number) => {
+    const c = chains[i];
+    if (c.closed || (c.pts.length > 3 && dist(c.pts[0], c.pts[c.pts.length - 1]) <= 1)) return true;
+    return !openComp.has(find(i));
+  };
+  const strokes = [...same].filter((i) => extent(i) <= 120 && !loopy(i));
   const sGrid = new PtGrid(60);
   for (const i of strokes) sGrid.add(i, mid(i));
   const glyphy = (i: number) => {
