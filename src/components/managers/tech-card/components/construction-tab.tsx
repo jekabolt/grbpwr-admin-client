@@ -753,6 +753,7 @@ export function ConstructionTab({
     cloth: pieceClothByColorway[0]?.map ?? null,
     categoryNames,
     renderUnit: renderProposalUnit,
+    techCardId: techCard?.id,
   });
 
   return (

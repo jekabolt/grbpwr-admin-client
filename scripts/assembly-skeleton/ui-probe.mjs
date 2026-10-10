@@ -785,6 +785,117 @@ if (!blazer) {
   await closePanel();
 }
 
+// ── L ───────────────────────────────────────────────────────────────────────────────────────────
+head('L — the AI second opinion (stub asker): shown beside the steps, used only on a press');
+if (!blazer) {
+  ck(false, 'blazer DXF found (SKELETON_PLANS)', 'corpus missing');
+} else {
+  // The steps in their order, without the AI's own marks (its pills and its «AI:» lines).
+  const stepWords = async () =>
+    (await page.locator('[data-skeleton-step]').allInnerTexts()).map((t) =>
+      t
+        .split('\n')
+        .filter((l) => !/^AI\b/.test(l.trim()))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .replace(/ · AI\b/g, ''),
+    );
+  const aiCalls = () => page.evaluate(() => window.__sk.aiCalls());
+  await mount({ real: blazer, ai: true });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  ck((await page.locator('[data-skeleton-ai="idle"]').count()) === 1, 'the AI bar is there, idle');
+  ck((await aiCalls()) === 0, 'opening the panel asks the AI nothing');
+  const engineCalls = await page.evaluate(() => window.__sk.providerCalls());
+  const opsBefore = JSON.stringify(await ops());
+  const before = await stepWords();
+
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  ck((await aiCalls()) === 1, 'one press, one call');
+  ck(
+    JSON.stringify(await stepWords()) === JSON.stringify(before),
+    'the answer is SHOWN: the steps stay in the engine order',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'the form does not move');
+  ck((await requests()).length === 0, 'autosave never asked');
+  const places = await page.locator('[data-skeleton-ai-place]').count();
+  ck(places >= 10, 'each ordered step carries its AI place', `${places} AI places`);
+  const picksShown = await page.locator('[data-skeleton-ai-pick]').count();
+  ck(picksShown >= 1, 'the AI pick is marked on the reading chips', `${picksShown}`);
+  ck(
+    (await page.locator('[data-skeleton-ai-cost="0.0123"]').innerText()).includes('$0.0123'),
+    'the cost is printed',
+  );
+  ck(
+    (await page.locator('[data-skeleton-ai-warning]').count()) === 1,
+    'the AI doubt sits on its step',
+  );
+  const moved = Number(
+    await page.locator('[data-skeleton-ai-use-order]').getAttribute('data-skeleton-ai-use-order'),
+  );
+  ck(moved > 0, 'the AI order moves steps — offered, not applied', `${moved} would move`);
+  await shot('l-ai-shown', '[data-skeleton-panel]');
+
+  // Readings first: a rebuild, and the order read on the old readings is no longer offered.
+  await page.click('[data-skeleton-ai-use-readings]');
+  await page.waitForFunction((n) => window.__sk.providerCalls() > n, engineCalls, {
+    timeout: 10000,
+  });
+  await page.waitForSelector('[data-skeleton-ai-order-blocked]', { timeout: 10000 });
+  ck(
+    /changed since the AI read it/.test(
+      await page.locator('[data-skeleton-ai-order-blocked]').innerText(),
+    ),
+    'after the AI readings the old AI order is refused in words',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'still nothing in the form');
+
+  // Ask again on the rebuilt skeleton, then use its order.
+  await page.click('[data-skeleton-ai-again]');
+  await page.waitForFunction(() => window.__sk.aiCalls() === 2, null, { timeout: 10000 });
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  const beforeOrder = await stepWords();
+  await page.click('[data-skeleton-ai-use-order]');
+  await page.waitForFunction(
+    () => document.querySelector('[data-skeleton-ai-use-order]')?.textContent?.includes('in use'),
+    null,
+    { timeout: 10000 },
+  );
+  const afterOrder = await stepWords();
+  ck(
+    JSON.stringify(afterOrder) !== JSON.stringify(beforeOrder) &&
+      // Step numbers («30», «↳ with 30») follow the order; what each step IS does not.
+      JSON.stringify(afterOrder.map((t) => t.replace(/\d+/g, '#')).sort()) ===
+        JSON.stringify(beforeOrder.map((t) => t.replace(/\d+/g, '#')).sort()),
+    '«use AI order» reorders the same steps on screen',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'using the AI order writes nothing to the form');
+  for (;;) {
+    const off = page.locator(
+      '[data-skeleton-accepted="0"]:not([data-skeleton-step-applied]) [data-skeleton-check]',
+    );
+    if ((await off.count()) === 0) break;
+    await off.first().click();
+  }
+  const blocked = await page.locator('[data-skeleton-violation]').count();
+  ck(blocked === 0, 'the AI-ordered batch keeps the order', `${blocked} violations`);
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(
+    hard.length === 0,
+    'assemblySweep clean on the applied AI order',
+    JSON.stringify(hard).slice(0, 300),
+  );
+  await shot('l-ai-applied', '[data-skeleton-panel]');
+  await closePanel();
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
+  ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
+  await closePanel();
+}
+
 // ── G ───────────────────────────────────────────────────────────────────────────────────────────
 head('G — the real engine on SS26-005: pictograms in the panel and on the schematic');
 const real = await loadRealCard();
