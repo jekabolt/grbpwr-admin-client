@@ -734,7 +734,14 @@ export function matchSeams(
     if (c.regular) continue;
     const mirror = c.evidence.twin === 'mirror';
     if (rules.closure && mirror) {
-      const why = closureReason(c.u, c.v, isStraight(c.u) && isStraight(c.v), facts, drills);
+      const why0 = closureReason(c.u, c.v, isStraight(c.u) && isStraight(c.v), facts, drills);
+      // Buttons / a zip in the BOM say the garment HAS a front opening, not which edges it is:
+      // on that evidence alone only the centre front qualifies — a straight edge running the
+      // piece — never the two hems or the two shoulders of the left and right fronts.
+      const why =
+        why0?.closure.evidence === 'bom+name' && !(isCentreLong(c.u) && isCentreLong(c.v))
+          ? null
+          : why0;
       // A closure is judged on the base score: the twin penalty is what makes it a closure.
       const rivalled = [...c.u.edges, ...c.v.edges].some(
         (e) => (bestRegular.get(e.id) ?? -Infinity) >= SKELETON.accept,

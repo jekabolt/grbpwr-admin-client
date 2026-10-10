@@ -362,158 +362,166 @@ const orbitFps = async () => {
   return { fps, raf, dt, long: r.long };
 };
 
-// ════ SS26-005, no stored rows ════
-head('SS26-005 — engine only (no stored rows)');
-let m = await mount(ss);
-ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
-ck(
-  (await page
-    .locator('[aria-label="assembly map view"] [role="radio"]', { hasText: '3d' })
-    .count()) === 1,
-  'the map shows the fourth chip: STEP · PIECES · SKETCH · 3D',
-);
-await open3d();
-ck(await overlayDone(), 'the overlay solves the doll in the worker');
-const tSS = await timing('SS26-005 M (engine)');
-ck(tSS.first <= 1500, 'first frame ≤ 1.5 s after the graph is ready', `${tSS.first.toFixed(0)} ms`);
-ck(tSS.verts <= 20000, '≤ 20k vertices', `${tSS.verts}`);
-const honesty = await page.locator('[data-doll-honesty]').innerText();
-ck(
-  /paper doll — shape approximate, no fabric or body · measures from the pattern laid flat \(seam lines\) · size M/i.test(
-    honesty,
-  ),
-  'header honesty line verbatim',
-  honesty,
-);
-const stateSS = await page.locator('[data-doll-state]').innerText();
-console.log(`  state: ${stateSS}`);
-ck(/seams? closed/.test(stateSS), 'state line in words');
-await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
-const pomRows = await page.locator('[data-pom-row]').count();
-ck(pomRows >= 10, 'POM rail lists the standard measures', `${pomRows}`);
-const exWords = await page
-  .locator('[data-pom-row]')
-  .evaluateAll((els) => els.map((e) => e.getAttribute('data-pom-exactness')));
-console.log(
-  `  exactness: ${JSON.stringify(exWords.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
-);
-const specs = await page.locator('[data-pom-spec]').allInnerTexts();
-console.log(`  spec rows: ${specs.join(' | ')}`);
-ck(specs.length >= 3, 'spec + Δ shown where the (stand) chart has a value');
-ck(
-  specs.some((t) => /±1\.0 default/.test(t)),
-  'tolerance said as «±1.0 default»',
-);
-await page.locator('[data-doll-toggle="pom"]').click();
-await wait(400);
-await shot('02-overlay-ss26-front-pom-lines');
-const chestRow = page.locator('[data-pom-row="chest"]');
-await chestRow.hover();
-await wait(400);
-const pin = await page.locator('[data-pin^="pom:"]').allInnerTexts();
-ck(
-  pin.length === 1 && /chest · \d+\.\d cm/i.test(pin[0]),
-  'hovered POM row → its line lit with «chest · 44.5 cm»',
-  pin[0],
-);
-await shot('03-hover-pom-chest');
-const fpsSS = await orbitFps();
-console.log(
-  `  orbit: ${fpsSS.fps.toFixed(1)} frames drawn/s (one per mouse move the probe sends) · rAF ${fpsSS.raf.toFixed(1)}/s · ${fpsSS.long} long tasks over ${fpsSS.dt.toFixed(1)} s (${process.env.GL === 'swiftshader' ? 'SwiftShader, software GL' : 'GPU through ANGLE'})`,
-);
-ck(fpsSS.fps > 0, 'orbit redraws on drag');
-ck(
-  fpsSS.raf >= 55 && fpsSS.long === 0,
-  'orbit holds 60 fps: rAF ≥ 55/s, no long task during the drag',
-  `${fpsSS.raf.toFixed(1)}/s · ${fpsSS.long} long`,
-);
-// the report strip
-const reportRowsSS = await page
-  .locator('[data-doll-row]')
-  .evaluateAll((els) => els.map((e) => e.getAttribute('data-doll-row')));
-console.log(
-  `  report rows: ${JSON.stringify(reportRowsSS.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
-);
-// camera presets
-await page.locator('[aria-label="camera"] [role="radio"]', { hasText: 'back' }).click();
-await wait(500);
-await shot('04-ss26-back');
-await page.locator('[aria-label="camera"] [role="radio"]', { hasText: 'front' }).click();
-await wait(400);
-// size switch
-await page.locator('[aria-label="size"] [role="radio"]', { hasText: /^S$/ }).click();
-ck(await overlayDone('S'), 'size S: the doll is rebuilt in the worker on selection');
-const tS = await timing('SS26-005 S (engine)');
-ck(tS.first <= 1500, 'size S: first frame ≤ 1.5 s', `${tS.first.toFixed(0)} ms`);
-ck(
-  /size S/.test(await page.locator('[data-doll-honesty]').innerText()),
-  'honesty line follows the size',
-);
-await wait(300);
-await shot('05-size-switch-S');
-await page.locator('[aria-label="size"] [role="radio"]', { hasText: /^M$/ }).click();
-ck(await overlayDone('M'), 'back to M: the cached doll');
-// fix in seams review
-const fixDoors = page.locator('[data-doll-door="fix"]');
-if ((await fixDoors.count()) > 0) {
-  await fixDoors.first().click();
-  await page.locator('[data-seams-review]').waitFor();
-  await wait(500);
-  const sel = await page.locator('[data-seam-row][aria-selected="true"]').count();
-  const hand = await page.locator('[data-connect-words]').count();
+// ONLY=card49: the card 49 sections alone (iteration on the double yoke).
+const ONLY = process.env.ONLY ?? '';
+let m;
+if (!ONLY) {
+  // ════ SS26-005, no stored rows ════
+  head('SS26-005 — engine only (no stored rows)');
+  m = await mount(ss);
+  ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
   ck(
-    sel === 1 || hand === 1,
-    '«fix in seams review» opens SEAMS on that seam (row selected, or laid in the connect strip)',
-    `selected ${sel} · strip ${hand}`,
+    (await page
+      .locator('[aria-label="assembly map view"] [role="radio"]', { hasText: '3d' })
+      .count()) === 1,
+    'the map shows the fourth chip: STEP · PIECES · SKETCH · 3D',
   );
-  await shot('06-fix-in-seams-review');
-  await page.keyboard.press('Escape');
-  await wait(200);
-  if (await page.locator('[data-connect-words]').count()) {
+  await open3d();
+  ck(await overlayDone(), 'the overlay solves the doll in the worker');
+  const tSS = await timing('SS26-005 M (engine)');
+  ck(
+    tSS.first <= 1500,
+    'first frame ≤ 1.5 s after the graph is ready',
+    `${tSS.first.toFixed(0)} ms`,
+  );
+  ck(tSS.verts <= 20000, '≤ 20k vertices', `${tSS.verts}`);
+  const honesty = await page.locator('[data-doll-honesty]').innerText();
+  ck(
+    /paper doll — shape approximate, no fabric or body · measures from the pattern laid flat \(seam lines\) · size M/i.test(
+      honesty,
+    ),
+    'header honesty line verbatim',
+    honesty,
+  );
+  const stateSS = await page.locator('[data-doll-state]').innerText();
+  console.log(`  state: ${stateSS}`);
+  ck(/seams? closed/.test(stateSS), 'state line in words');
+  await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
+  const pomRows = await page.locator('[data-pom-row]').count();
+  ck(pomRows >= 10, 'POM rail lists the standard measures', `${pomRows}`);
+  const exWords = await page
+    .locator('[data-pom-row]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-pom-exactness')));
+  console.log(
+    `  exactness: ${JSON.stringify(exWords.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
+  );
+  const specs = await page.locator('[data-pom-spec]').allInnerTexts();
+  console.log(`  spec rows: ${specs.join(' | ')}`);
+  ck(specs.length >= 3, 'spec + Δ shown where the (stand) chart has a value');
+  ck(
+    specs.some((t) => /±1\.0 default/.test(t)),
+    'tolerance said as «±1.0 default»',
+  );
+  await page.locator('[data-doll-toggle="pom"]').click();
+  await wait(400);
+  await shot('02-overlay-ss26-front-pom-lines');
+  const chestRow = page.locator('[data-pom-row="chest"]');
+  await chestRow.hover();
+  await wait(400);
+  const pin = await page.locator('[data-pin^="pom:"]').allInnerTexts();
+  ck(
+    pin.length === 1 && /chest · \d+\.\d cm/i.test(pin[0]),
+    'hovered POM row → its line lit with «chest · 44.5 cm»',
+    pin[0],
+  );
+  await shot('03-hover-pom-chest');
+  const fpsSS = await orbitFps();
+  console.log(
+    `  orbit: ${fpsSS.fps.toFixed(1)} frames drawn/s (one per mouse move the probe sends) · rAF ${fpsSS.raf.toFixed(1)}/s · ${fpsSS.long} long tasks over ${fpsSS.dt.toFixed(1)} s (${process.env.GL === 'swiftshader' ? 'SwiftShader, software GL' : 'GPU through ANGLE'})`,
+  );
+  ck(fpsSS.fps > 0, 'orbit redraws on drag');
+  ck(
+    fpsSS.raf >= 55 && fpsSS.long === 0,
+    'orbit holds 60 fps: rAF ≥ 55/s, no long task during the drag',
+    `${fpsSS.raf.toFixed(1)}/s · ${fpsSS.long} long`,
+  );
+  // the report strip
+  const reportRowsSS = await page
+    .locator('[data-doll-row]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-doll-row')));
+  console.log(
+    `  report rows: ${JSON.stringify(reportRowsSS.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
+  );
+  // camera presets
+  await page.locator('[aria-label="camera"] [role="radio"]', { hasText: 'back' }).click();
+  await wait(500);
+  await shot('04-ss26-back');
+  await page.locator('[aria-label="camera"] [role="radio"]', { hasText: 'front' }).click();
+  await wait(400);
+  // size switch
+  await page.locator('[aria-label="size"] [role="radio"]', { hasText: /^S$/ }).click();
+  ck(await overlayDone('S'), 'size S: the doll is rebuilt in the worker on selection');
+  const tS = await timing('SS26-005 S (engine)');
+  ck(tS.first <= 1500, 'size S: first frame ≤ 1.5 s', `${tS.first.toFixed(0)} ms`);
+  ck(
+    /size S/.test(await page.locator('[data-doll-honesty]').innerText()),
+    'honesty line follows the size',
+  );
+  await wait(300);
+  await shot('05-size-switch-S');
+  await page.locator('[aria-label="size"] [role="radio"]', { hasText: /^M$/ }).click();
+  ck(await overlayDone('M'), 'back to M: the cached doll');
+  // fix in seams review
+  const fixDoors = page.locator('[data-doll-door="fix"]');
+  if ((await fixDoors.count()) > 0) {
+    await fixDoors.first().click();
+    await page.locator('[data-seams-review]').waitFor();
+    await wait(500);
+    const sel = await page.locator('[data-seam-row][aria-selected="true"]').count();
+    const hand = await page.locator('[data-connect-words]').count();
+    ck(
+      sel === 1 || hand === 1,
+      '«fix in seams review» opens SEAMS on that seam (row selected, or laid in the connect strip)',
+      `selected ${sel} · strip ${hand}`,
+    );
+    await shot('06-fix-in-seams-review');
     await page.keyboard.press('Escape');
     await wait(200);
+    if (await page.locator('[data-connect-words]').count()) {
+      await page.keyboard.press('Escape');
+      await wait(200);
+    }
+    if (await page.locator('[data-seams-review]').count()) {
+      await page.locator('[data-seams-door="close"]').click();
+      await wait(300);
+    }
+    ck(
+      (await page.locator('[data-seams-review]').count()) === 0,
+      'the review closes back onto the doll',
+    );
   }
-  if (await page.locator('[data-seams-review]').count()) {
-    await page.locator('[data-seams-door="close"]').click();
-    await wait(300);
-  }
+  await page.keyboard.press('Escape');
+  await wait(400);
+  ck((await page.locator('[data-doll-overlay]').count()) === 0, 'Esc closes the overlay');
+  await waitFor(() => !!document.querySelector('[data-doll-still] img'));
+  const colState = await page.locator('[data-doll-column-state]').innerText();
+  console.log(`  column: ${colState}`);
+  ck(/closed/.test(colState), 'column: the state line');
   ck(
-    (await page.locator('[data-seams-review]').count()) === 0,
-    'the review closes back onto the doll',
+    (await page.locator('[data-doll-still] img').count()) === 1,
+    'column: the PNG still from the worker (no second WebGL context)',
   );
+  ck(
+    (await page.locator('[data-map-column] canvas').count()) === 0,
+    'column: no canvas in the column',
+  );
+  await shot('01-chip-in-column', '[data-map-column]');
+
+  // ════ SS26-005 with gold rows ════
+  head('SS26-005 — gold seam rows stored on the card');
+  m = await mount(ss, { gold: goldOf('ss26') });
+  ck(m.ok, 'the provider reads the seam graph with the stored rows');
+  await wait(1500);
+  await open3d();
+  ck(await overlayDone(), 'solved');
+  await timing('SS26-005 M (gold rows)');
+  await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
+  console.log(`  state: ${await page.locator('[data-doll-state]').innerText()}`);
+  await page.locator('[data-doll-toggle="pom"]').click();
+  await wait(400);
+  await shot('07-ss26-gold-front-pom-lines');
+  await page.keyboard.press('Escape');
 }
-await page.keyboard.press('Escape');
-await wait(400);
-ck((await page.locator('[data-doll-overlay]').count()) === 0, 'Esc closes the overlay');
-await waitFor(() => !!document.querySelector('[data-doll-still] img'));
-const colState = await page.locator('[data-doll-column-state]').innerText();
-console.log(`  column: ${colState}`);
-ck(/closed/.test(colState), 'column: the state line');
-ck(
-  (await page.locator('[data-doll-still] img').count()) === 1,
-  'column: the PNG still from the worker (no second WebGL context)',
-);
-ck(
-  (await page.locator('[data-map-column] canvas').count()) === 0,
-  'column: no canvas in the column',
-);
-await shot('01-chip-in-column', '[data-map-column]');
-
-// ════ SS26-005 with gold rows ════
-head('SS26-005 — gold seam rows stored on the card');
-m = await mount(ss, { gold: goldOf('ss26') });
-ck(m.ok, 'the provider reads the seam graph with the stored rows');
-await wait(1500);
-await open3d();
-ck(await overlayDone(), 'solved');
-await timing('SS26-005 M (gold rows)');
-await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
-console.log(`  state: ${await page.locator('[data-doll-state]').innerText()}`);
-await page.locator('[data-doll-toggle="pom"]').click();
-await wait(400);
-await shot('07-ss26-gold-front-pom-lines');
-await page.keyboard.press('Escape');
-
 // ════ beta card 49 — a double yoke (two plies BP + BP_2 over the back BP_1) ════
 // The card as the LIVE app builds it: pieces under their line keys, block links by the DXF block,
 // the technologist's order with piece line keys and unit codes. Rows are written in the page by
@@ -522,7 +530,7 @@ const b49 = JSON.parse(
   readFileSync(resolve(PLANS, 'assembly-3d-doll/beta-data/card49.json'), 'utf8'),
 );
 const lk49 = Object.fromEntries(b49.pieces.map((p) => [p[1], p[0]]));
-const BOM49 = '01STANDBOM49MA1N0000000000';
+const BOM49 = '01M28F0ZB8WC3QMMVCRAXH3RZ1';
 const URL49 = 'https://files.invalid/stand/card49-MAIN.dxf';
 const card49 = {
   code: 'FW26-001',
@@ -536,20 +544,37 @@ const card49 = {
       name: 'CHECK SHIRT',
       targetGender: 'GENDER_ENUM_MALE',
       measurementUnit: 'TECH_CARD_MEASUREMENT_UNIT_MM',
-      sizeIds: [3],
+      // As the beta card reads (10.10): sizes xs…xl, the file uploaded on xs, a BOM with buttons,
+      // interlining, thread, a label and two artworks.
+      sizeIds: [2, 3, 4, 5, 6],
       bomItems: [
-        {
-          lineKey: BOM49,
-          section: 'TECH_CARD_BOM_SECTION_FABRIC',
-          purpose: P('MAIN'),
-          kind: 'TECH_CARD_BOM_KIND_UNSET',
-          name: 'main',
-          unit: 'm',
-        },
-      ],
+        ['FABRIC', 'MAIN', 'UNSET', 'main fabric', BOM49],
+        ['THREAD', 'UNSET', 'SEWING_THREAD', 'sewing thread', '01M3PDYPS2K8QC3YF67YSB7Y8X'],
+        [
+          'INTERLINING',
+          'INTERFACING',
+          'UNSET',
+          'placket/collar interlining',
+          '01M3PDYPS4X77DSD9XJKV8GD0X',
+        ],
+        ['HARDWARE', 'UNSET', 'BUTTON', 'front placket button', '01M3PDYPS5HJJ4DS7F8E68CMKT'],
+        ['HARDWARE', 'UNSET', 'BUTTON', 'cuff button', '01M3PDYPS6ZY6EAMSYZDX861R6'],
+        ['LABEL', 'UNSET', 'UNSET', 'brand label', '01M3PDYPS7A0Y3ZNNZDYPMSWA1'],
+        ['DECORATION', 'UNSET', 'EMBROIDERY', 'artwork 1', '01M45HJEFVBSQ7G67TXA5ACYJP'],
+        ['DECORATION', 'UNSET', 'EMBROIDERY', 'artwork 2', '01M45SJ0E6FBPCWJD0JX1HW5TG'],
+      ]
+        .filter((_, i) => !process.env.B49_BOM || i === 0)
+        .map(([section, purpose, kind, name, lineKey]) => ({
+          lineKey,
+          section: `TECH_CARD_BOM_SECTION_${section}`,
+          purpose: P(purpose),
+          kind: `TECH_CARD_BOM_KIND_${kind}`,
+          name,
+          unit: section === 'HARDWARE' || section === 'LABEL' ? 'pcs' : 'm',
+        })),
       patterns: [
         {
-          sizeId: 3,
+          sizeId: Number(process.env.B49_SZ || 2),
           filename: 'card49-MAIN.dxf',
           url: URL49,
           fabricPurpose: P('MAIN'),
@@ -615,21 +640,77 @@ ck(
 await shot('10-card49-engine');
 await page.keyboard.press('Escape');
 
-// The rows beta had stored at 18:02 (two clients), written the review's way, + the ply↔ply row a
-// second time under another key (two clients confirmed the same pair).
+// The rows beta had stored at 18:02 (two clients), written the review's way.
 const pairs49 = (b49['stored_seams_on_beta_2026-10-10_18:02'] ?? []).flatMap((line) => {
   const mm = /(\S+#[\d+]+)\s*<->\s*(\S+#[\d+]+)/.exec(line);
-  return mm ? [[mm[1], mm[2], /manual/.test(line) ? 'manual' : 'graph']] : [];
+  return mm
+    ? [
+        [
+          mm[1],
+          mm[2],
+          /manual/.test(line) ? 'manual' : 'graph',
+          // the underarm was connected by hand and flipped to «same way» on beta
+          /underarm/.test(line) ? 'same' : 'reversed',
+        ],
+      ]
+    : [];
 });
-pairs49.push(['BP#5', 'BP_2#5', 'graph']);
-const rows49 = await page.evaluate(([p, sz]) => window.__doll.rowsFor(p, sz), [pairs49, size49]);
+const isHem = (p) => /FP_L#4/.test(p[0]);
+// LIVE on beta (10.10, after the owner's request): the manual hem ↔ hem row was removed — the
+// 5 rows beta keeps, under their beta keys.
+const live49 = pairs49.filter((p) => !isHem(p));
+const LIVE_KEYS = [
+  '01M4KFGBEZB6WA0MBZZ4RXRC0G',
+  '01M4KFGE7GEGZJ4HA3Z7HRVAXG',
+  '01M4KFGGC89NSY6GAQWYTQ06QF',
+  '01M4KFGKJWS8V4374K4AZ5QQSF',
+  '01M4KFN0JTFD4SRPEGTNWPHBRM',
+];
+const liveRows49 = await page.evaluate(
+  ([p, sz, k]) => window.__doll.rowsFor(p, sz, k),
+  [live49, size49, LIVE_KEYS],
+);
 ck(
-  rows49.length === pairs49.length,
-  'every beta row anchors on the live graph (line keys)',
-  `${rows49.length} of ${pairs49.length}`,
+  liveRows49.length === 5,
+  'the 5 live beta rows anchor on the live graph (line keys)',
+  `${liveRows49.length} of 5`,
 );
 
-head('beta card 49 — with the rows stored on beta (incl. the same ply pair twice)');
+head('beta card 49 — LIVE: the 5 rows beta keeps, the live BOM (buttons)');
+m = await mount(card49, { seams: liveRows49 });
+ck(m.ok, 'the provider reads the seam graph with the live rows');
+await wait(1500);
+await open3d();
+ck(await overlayDone(), 'solved');
+st49 = await page.locator('[data-doll-state]').innerText();
+console.log(`  state: ${st49}`);
+rr49 = await dollRows();
+rr49.forEach((x) => console.log(`  row: ${x.kind} · ${x.text.slice(0, 200)}`));
+ck(floatingOf(rr49).length === 0, 'nothing floating (CLR 3 and the yoke attached)');
+ck(
+  rr49.filter((r) => r.kind === 'contradiction').length === 0,
+  'no contradiction: the confirmed side rows close',
+  rr49
+    .filter((r) => r.kind === 'contradiction')
+    .map((r) => r.text.slice(0, 160))
+    .join(' | '),
+);
+ck(!/\b[1-9]\d* open\b/.test(st49), 'nothing open', st49);
+await shot('11a-card49-live');
+await page.keyboard.press('Escape');
+await wait(300);
+
+// The 18:02 state: + the hem ↔ hem row, + the ply↔ply row a second time under another key (two
+// clients confirmed the same pair).
+const hem49 = [...pairs49, ['BP#5', 'BP_2#5', 'graph', 'reversed']];
+const rows49 = await page.evaluate(([p, sz]) => window.__doll.rowsFor(p, sz), [hem49, size49]);
+ck(
+  rows49.length === hem49.length,
+  'every 18:02 row anchors on the live graph (line keys)',
+  `${rows49.length} of ${hem49.length}`,
+);
+
+head('beta card 49 — the 18:02 rows (+ hem ↔ hem, + the same ply pair twice)');
 m = await mount(card49, { seams: rows49 });
 ck(m.ok, 'the provider reads the seam graph with the stored rows');
 await wait(1500);
@@ -685,7 +766,7 @@ await wait(300);
 // Another client confirms a proposal's pair a moment before this tab accepts it: the accept goes
 // onto the other client's key — one pair, one row. (This tab's card read lacks the FP R side row,
 // so that seam is still a proposal here.)
-const noSide = rows49.filter((_, i) => !/FP_R#4/.test(pairs49[i][0] + pairs49[i][1]));
+const noSide = rows49.filter((_, i) => !/FP_R#4/.test(hem49[i][0] + hem49[i][1]));
 m = await mount(card49, { seams: noSide });
 await wait(1500);
 await page.locator('[data-seams-door="review"]').click();
@@ -801,37 +882,38 @@ ck(
 );
 await page.keyboard.press('Escape');
 
-// ════ card 6 ════
-for (const [label, gold, name] of [
-  ['prod card 6 (SS26-006) — engine only', null, '08-card6-engine'],
-  ['prod card 6 (SS26-006) — gold seam rows', goldOf('card6'), '09-card6-gold'],
-]) {
-  head(label);
-  m = await mount(card6, gold ? { gold } : {});
-  ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
-  if (!m.ok) continue;
-  await wait(gold ? 1500 : 300);
-  await open3d();
-  ck(await overlayDone(), 'solved');
-  await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
-  await page.locator('[data-doll-toggle="pom"]').click();
-  await wait(400);
-  const t = await timing(label);
-  ck(t.first <= 1500, 'first frame ≤ 1.5 s', `${t.first.toFixed(0)} ms`);
-  console.log(`  state: ${await page.locator('[data-doll-state]').innerText()}`);
-  const rr = await page.locator('[data-doll-row]').allInnerTexts();
-  rr.slice(0, 6).forEach((x) => console.log(`  row: ${x.replace(/\n+/g, ' | ')}`));
-  await shot(name);
-  if (rr.some((x) => /^open/i.test(x)))
-    await shot(`${name}-report-open-seam`, '[data-doll-report]');
-  const f = await orbitFps();
-  console.log(
-    `  orbit: ${f.fps.toFixed(1)} frames drawn/s · rAF ${f.raf.toFixed(1)}/s · ${f.long} long tasks`,
-  );
-  ck(f.raf >= 55 && f.long === 0, 'orbit holds 60 fps', `${f.raf.toFixed(1)}/s · ${f.long} long`);
-  await page.keyboard.press('Escape');
+if (!ONLY) {
+  // ════ card 6 ════
+  for (const [label, gold, name] of [
+    ['prod card 6 (SS26-006) — engine only', null, '08-card6-engine'],
+    ['prod card 6 (SS26-006) — gold seam rows', goldOf('card6'), '09-card6-gold'],
+  ]) {
+    head(label);
+    m = await mount(card6, gold ? { gold } : {});
+    ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
+    if (!m.ok) continue;
+    await wait(gold ? 1500 : 300);
+    await open3d();
+    ck(await overlayDone(), 'solved');
+    await waitFor(() => document.querySelectorAll('[data-pom-row]').length > 0);
+    await page.locator('[data-doll-toggle="pom"]').click();
+    await wait(400);
+    const t = await timing(label);
+    ck(t.first <= 1500, 'first frame ≤ 1.5 s', `${t.first.toFixed(0)} ms`);
+    console.log(`  state: ${await page.locator('[data-doll-state]').innerText()}`);
+    const rr = await page.locator('[data-doll-row]').allInnerTexts();
+    rr.slice(0, 6).forEach((x) => console.log(`  row: ${x.replace(/\n+/g, ' | ')}`));
+    await shot(name);
+    if (rr.some((x) => /^open/i.test(x)))
+      await shot(`${name}-report-open-seam`, '[data-doll-report]');
+    const f = await orbitFps();
+    console.log(
+      `  orbit: ${f.fps.toFixed(1)} frames drawn/s · rAF ${f.raf.toFixed(1)}/s · ${f.long} long tasks`,
+    );
+    ck(f.raf >= 55 && f.long === 0, 'orbit holds 60 fps', `${f.raf.toFixed(1)}/s · ${f.long} long`);
+    await page.keyboard.press('Escape');
+  }
 }
-
 head('network');
 ck(escaped.length === 0, 'no request left the page', escaped.slice(0, 3).join(', '));
 const all = await page.evaluate(() => window.__doll.calls().map((c) => `${c.method} ${c.path}`));
