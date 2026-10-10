@@ -819,9 +819,16 @@ export async function runCase(c: Case): Promise<Rec> {
       }
       // E1a cutting list: mark the list's pieces (truth) as fold — they come back as questions
       if (sem.foldList && sem.foldList.entries.some((e) => !foldListChecked.includes(e))) {
+        // the operator marks a fold piece (truth) only where an entry names it by its number
+        const names = (label: string) => {
+          const n = label.replace(/\.$/, '').trim();
+          const re = new RegExp(`(^|[^\\d])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\d]|$)`);
+          return /\d/.test(n) && sem.foldList!.entries.some((e) => re.test(e));
+        };
         const marked = fams.filter(
           (f) =>
             truthFold(labelOf(seedsNow)(f.seed)) === true &&
+            names(labelOf(seedsNow)(f.seed)) &&
             overrides[f.seed]?.unfoldedFold === undefined &&
             !foldPick[f.seed] &&
             !sem.pieces.some((p) => p.seed === f.seed && p.unfoldedFold),

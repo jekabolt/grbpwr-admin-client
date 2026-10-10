@@ -589,14 +589,16 @@ export function buildPieceSpecsDetailed(
   const listBound: { entry: string; seed: SeedId }[] = [];
   const listUnbound: string[] = [];
   if (listEntries.length) {
-    const pieceLabels = preps.map((p) => {
-      const c = p.cands[p.cands.length - 1].c;
+    // every piece on the sheet, including one blocked before naming (no code yet): its label is
+    // still on the sheet, and a list entry it names must not fall back to the file level
+    const pieceLabels = families.map((f) => {
+      const c = f.candidates.reduce((a, x) => (x.rank > a.rank ? x : a), f.candidates[0]);
       const isTitle = titleTest(c, textById);
       return {
-        seed: p.seed,
+        seed: f.seed,
         labels: [
-          ...(input.seedLabels?.[p.seed] ? [input.seedLabels[p.seed]!] : []),
-          ...p.texts.filter(isTitle),
+          ...(input.seedLabels?.[f.seed] ? [input.seedLabels[f.seed]!] : []),
+          ...textsOf(c, textById).filter(isTitle),
         ],
       };
     });
