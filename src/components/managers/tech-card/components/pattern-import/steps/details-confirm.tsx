@@ -16,9 +16,9 @@ import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import { NumberField } from '../ui-bits';
 
-/** The open questions of the step, as the footer counts them. */
+/** The open questions of the step, as the footer counts them (live answers only, S3). */
 export function useOpenQuestions(api: ImportSessionApi) {
-  return openQuestions(api.session.semantics, api.session.names, api.inputs);
+  return openQuestions(api.session.semantics, api.session.names, api.inputs, api.answersNow);
 }
 
 export function OutlineQuestion({
