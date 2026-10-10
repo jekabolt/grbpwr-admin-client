@@ -119,7 +119,7 @@ type FormPiece = {
   piecesPerGarment?: number;
   cutSymmetry?: string;
 };
-type FormBomLine = { kind?: string; purpose?: string; lineKey?: string };
+type FormBomLine = { kind?: string; purpose?: string; lineKey?: string; section?: string };
 type FormAlias = {
   pieceLineKey?: string;
   bomLineKey?: string;
@@ -421,9 +421,12 @@ const LINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_LINING';
  * Is the garment lined? Any one of four signals — the colourway's cloth is only one of them, and a
  * card without a colourway yet (most cards while the pattern is being worked) has none:
  *   • a piece cut from a lining slot of the first colourway;
- *   • a piece↔block link scoped to a lining fabric (its BOM line or its own purpose is lining);
+ *   • a piece whose every piece↔block link is scoped to a lining fabric (its BOM line or its own
+ *     purpose is lining) — a piece linked to the main file too is the shell's, cut also in lining;
  *   • a pattern file attached to a lining fabric;
  *   • a piece NAME that says lining (LIN_FRONT, подклад спинки, podszewka).
+ * None of them on a card whose every fabric line is lining (`liningOnlyCard`): its one cloth was
+ * filed as lining — there is nothing for a lining to line.
  */
 export function skeletonLined(args: {
   cloth: ReadonlyMap<string, PieceCloth> | null;
@@ -432,9 +435,10 @@ export function skeletonLined(args: {
   patterns?: ReadonlyArray<FormPattern>;
   bomLines?: ReadonlyArray<FormBomLine>;
 }): boolean {
+  if (liningOnlyCard(args.bomLines ?? [])) return false;
   if ([...(args.cloth?.values() ?? [])].some((c) => c.state === 'lining')) return true;
   const liningLines = liningLineKeys(args.bomLines ?? []);
-  if ((args.aliases ?? []).some((a) => aliasIsLining(a, liningLines))) return true;
+  if (liningScopedPieces(args.aliases ?? [], liningLines).size) return true;
   if (
     (args.patterns ?? []).some(
       (p) => p.fabricPurpose === LINING_PURPOSE || liningLines.has((p.bomLineKey ?? '').trim()),
@@ -456,14 +460,43 @@ function liningLineKeys(lines: ReadonlyArray<FormBomLine>): Set<string> {
 const aliasIsLining = (a: FormAlias, liningLines: ReadonlySet<string>) =>
   a.fabricPurpose === LINING_PURPOSE || liningLines.has((a.bomLineKey ?? '').trim());
 
+const FABRIC_SECTION = 'TECH_CARD_BOM_SECTION_FABRIC';
+
+/**
+ * A card whose every FABRIC line is lining (and there is one) has no lining: its one cloth was
+ * filed as lining, and reading it so would make every piece «Lining …» with no shell to bag into.
+ */
+export function liningOnlyCard(lines: ReadonlyArray<FormBomLine>): boolean {
+  const fabric = lines.filter((l) => l.section === FABRIC_SECTION);
+  return fabric.length > 0 && fabric.every((l) => l.purpose === LINING_PURPOSE);
+}
+
+/**
+ * The pieces (by ref key) that are lining by their block links: EVERY link of the piece is scoped
+ * to a lining fabric. A piece linked to the main file as well (a pocket bag cut in both) is the
+ * shell's — read as lining it would leave the shell for the lining's subtree.
+ */
+export function liningScopedPieces(
+  aliases: ReadonlyArray<FormAlias>,
+  liningLines: ReadonlySet<string>,
+): Set<string> {
+  const lining = new Map<string, boolean>();
+  for (const a of aliases) {
+    const k = pieceRefKey((a.pieceLineKey ?? '').trim());
+    lining.set(k, (lining.get(k) ?? true) && aliasIsLining(a, liningLines));
+  }
+  return new Set([...lining].filter(([, all]) => all).map(([k]) => k));
+}
+
 /**
  * Card → `SkeletonFacts`. Only pieces with a found contour go in: the engine reads geometry, and a
  * piece without one is reported back by the screen as a gap («no contour»), not guessed at — as is
  * a piece the card has not given a key yet (nothing can refer to it in a step).
  *
- * Cloth: the first colourway's, else LINING when the piece's block link is scoped to a lining
- * fabric (a card without a colourway still knows which file its lining comes from); the engine adds
- * the name rule (LIN_FRONT) itself.
+ * Cloth: the first colourway's, else LINING when every block link of the piece is scoped to a
+ * lining fabric (a card without a colourway still knows which file its lining comes from); the
+ * engine adds the name rule (LIN_FRONT) itself. On a card whose only fabric is lining
+ * (`liningOnlyCard`) nothing is lining, the colourway's slot included.
  *
  * `existing` (append mode): the card's own steps — the engine builds only over what they have not
  * consumed and never reuses their unit codes.
@@ -481,12 +514,10 @@ export function buildSkeletonFacts(args: {
   const inputs: SkeletonPieceInput[] = [];
   const withoutContour: string[] = [];
   const withoutKey: string[] = [];
-  const liningLines = liningLineKeys(args.bomLines);
-  const liningScoped = new Set(
-    (args.aliases ?? [])
-      .filter((a) => aliasIsLining(a, liningLines))
-      .map((a) => pieceRefKey((a.pieceLineKey ?? '').trim())),
-  );
+  const liningOnly = liningOnlyCard(args.bomLines);
+  const liningScoped = liningOnly
+    ? new Set<string>()
+    : liningScopedPieces(args.aliases ?? [], liningLineKeys(args.bomLines));
   args.pieces.forEach((p, i) => {
     const key = (p.lineKey ?? '').trim();
     if (!key) {
@@ -498,8 +529,10 @@ export function buildSkeletonFacts(args: {
       withoutContour.push(key);
       return;
     }
+    const own = args.cloth?.get(key)?.state;
     const state =
-      args.cloth?.get(key)?.state ?? (liningScoped.has(pieceRefKey(key)) ? 'lining' : null);
+      (liningOnly && own === 'lining' ? null : own) ??
+      (liningScoped.has(pieceRefKey(key)) ? 'lining' : null);
     inputs.push({
       pieceKey: key,
       // A name the database garbled (double-encoded UTF-8) is not guessed at: «unnamed piece 8

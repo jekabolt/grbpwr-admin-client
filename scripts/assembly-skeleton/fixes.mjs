@@ -212,6 +212,28 @@ console.log('\n1 · category and lining');
     ].join('; '),
   );
   const pieces = [{ name: 'FRONT' }, { name: 'BACK' }];
+  const MAIN_LINE = {
+    lineKey: 'M1',
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  };
+  const LINING_LINE = {
+    lineKey: 'L1',
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose: 'TECH_CARD_BOM_PURPOSE_LINING',
+  };
+  /** A found contour, the least the facts read: a 100 × 100 mm square on no layer. */
+  const SHAPE = {
+    name: 'X',
+    layer: '',
+    areaCm2: 100,
+    points: [
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+    ],
+  };
   const lined = [
     ['no signal', { cloth: null, pieces }, false],
     ['colourway cloth', { cloth: new Map([['a', { state: 'lining' }]]), pieces }, true],
@@ -245,12 +267,74 @@ console.log('\n1 · category and lining');
       { cloth: null, pieces: [...pieces, { name: 'подклад спинки' }] },
       true,
     ],
+    // 07 §4.5: a piece linked to the main file AND the lining file is the shell's (a pocket bag
+    // cut in both); a card whose only fabric line is lining has no lining at all.
+    [
+      'NOT lined: a piece linked to the main and the lining file',
+      {
+        cloth: null,
+        pieces,
+        aliases: [
+          { pieceLineKey: 'x', bomLineKey: 'M1' },
+          { pieceLineKey: 'x', bomLineKey: 'L1' },
+        ],
+        bomLines: [MAIN_LINE, LINING_LINE],
+      },
+      false,
+    ],
+    [
+      'NOT lined: the one fabric line is lining (colourway and links say lining)',
+      {
+        cloth: new Map([['x', { state: 'lining' }]]),
+        pieces,
+        aliases: [{ pieceLineKey: 'x', bomLineKey: 'L1' }],
+        bomLines: [LINING_LINE],
+      },
+      false,
+    ],
+    [
+      'lined: a main and a lining fabric, a piece linked to the lining only',
+      {
+        cloth: null,
+        pieces,
+        aliases: [{ pieceLineKey: 'x', bomLineKey: 'L1' }],
+        bomLines: [MAIN_LINE, LINING_LINE],
+      },
+      true,
+    ],
   ];
   const badL = lined.filter(([, a, want]) => E.skeletonLined(a) !== want);
   gate(
-    'skeletonLined: cloth, links, files and names all say «lined»',
+    'skeletonLined: cloth, links, files and names all say «lined»; both-file pieces and a lining-only card do not',
     badL.length === 0,
     badL.map(([w]) => w).join('; '),
+  );
+
+  // The facts agree: on the lining-only card no piece is lining (colourway slot included); with a
+  // main fabric, a piece linked to both files is shell and one linked to lining only is lining.
+  const facts = (bomLines, cloth = null) =>
+    E.buildSkeletonFacts({
+      pieces: [
+        { lineKey: 'BOTH', name: 'PCK_L' },
+        { lineKey: 'LIN', name: 'BP' },
+      ],
+      shapes: new Map(['both', 'lin'].map((k) => [k, { piece: SHAPE, layers: [] }])),
+      cloth,
+      bomLines,
+      category: 'generic',
+      defaultMachineType: null,
+      aliases: [
+        { pieceLineKey: 'BOTH', bomLineKey: 'M1' },
+        { pieceLineKey: 'BOTH', bomLineKey: 'L1' },
+        { pieceLineKey: 'LIN', bomLineKey: 'L1' },
+      ],
+    }).facts.pieces.map((x) => `${x.pieceKey}:${x.cloth}`);
+  const mixed = facts([MAIN_LINE, LINING_LINE]).join(' ');
+  const only = facts([LINING_LINE], new Map([['LIN', { state: 'lining' }]])).join(' ');
+  gate(
+    'facts: both-file piece is shell, lining-only link is lining; nothing is lining on a lining-only card',
+    mixed === 'BOTH:null LIN:lining' && only === 'BOTH:null LIN:null',
+    `${mixed} / ${only}`,
   );
 }
 
