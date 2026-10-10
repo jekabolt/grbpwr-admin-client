@@ -239,6 +239,8 @@ export type FoundPiece = {
 export function findPiece(
   index: DxfIndex | null,
   refs: readonly PieceBlockRef[],
+  /** A graded size to read instead of the median one (the 3D doll's size selector). */
+  atSize?: string,
 ): FoundPiece | null {
   if (!index || refs.length === 0) return null;
   for (const r of refs) {
@@ -254,7 +256,8 @@ export function findPiece(
     const sizes = [...bySize.keys()].sort(
       (a, b) => (index.split.orderOfSize.get(a) ?? 1e6) - (index.split.orderOfSize.get(b) ?? 1e6),
     );
-    const size = sizes[Math.floor((sizes.length - 1) / 2)];
+    if (atSize !== undefined && !bySize.has(atSize)) continue;
+    const size = atSize ?? sizes[Math.floor((sizes.length - 1) / 2)];
     const list = bySize.get(size)!;
     // Линия кроя, если она у этой детали есть; иначе то, что в файле нарисовано вообще — показать
     // не тот слой честнее, чем сказать «детали нет».

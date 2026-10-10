@@ -38,6 +38,10 @@ const OUT = resolve(arg('--out') ?? resolve(root, '../tmp/plans/assembly-from-pa
 mkdirSync(OUT, { recursive: true });
 const AI_DUMP = arg('--ai-dump') ? resolve(arg('--ai-dump')) : null;
 const AI_ANSWERS = arg('--ai-answers') ? resolve(arg('--ai-answers')) : null;
+// --examples <file>: { "<code>": [AssemblySkeletonExample, …] } — few-shot trees sent with that card's request
+const EXAMPLES = arg('--examples')
+  ? JSON.parse(readFileSync(resolve(arg('--examples')), 'utf8'))
+  : null;
 if (AI_DUMP) mkdirSync(AI_DUMP, { recursive: true });
 const safeName = (code) => code.replace(/[^\w.~-]+/g, '_');
 
@@ -191,6 +195,7 @@ for (const input of inputs) {
     const f = resolve(AI_ANSWERS, `${safeName(input.code)}.response.json`);
     if (existsSync(f)) input.aiAnswer = JSON.parse(readFileSync(f, 'utf8'));
   }
+  if (EXAMPLES?.[input.code]) input.aiExamples = EXAMPLES[input.code];
   let res;
   try {
     // hang guard: a card that does not finish in 60 s is a finding, not a stuck run

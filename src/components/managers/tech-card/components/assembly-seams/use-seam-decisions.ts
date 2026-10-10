@@ -19,7 +19,14 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { buildReview, type Review } from './review-model';
-import { readWire, rowsOf, useSeamsStore, type PendingOp } from './seams-store';
+import {
+  hydrateSeams,
+  readWire,
+  reuseKeys,
+  rowsOf,
+  useSeamsStore,
+  type PendingOp,
+} from './seams-store';
 
 export type SeamReviewRead = {
   graph: SeamGraph | null;
@@ -68,6 +75,10 @@ const wireOut = (row: StoredSeam): common_TechCardSeam => ({
 const message = (e: unknown) =>
   e instanceof Error ? e.message.replace(/^Error:\s*/, '') : 'the server did not answer';
 
+/** A server list older than this is read again before a new row is written. */
+const FRESH_MS = 10_000;
+let refreshing: Promise<void> | null = null;
+
 export type SeamWrites = {
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
   upsert: (rows: StoredSeam[], errorAt?: string) => Promise<boolean>;
@@ -100,7 +111,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       useSeamsStore.setState({
         pending,
         errors,
-        ...(echo ? { server: readWire(echo).rows } : {}),
+        ...(echo ? { server: readWire(echo).rows, serverAt: Date.now() } : {}),
       });
       if (cardId) qc.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
     },
@@ -143,15 +154,44 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
     [cardId, frozen, settle, showMessage],
   );
 
+  // The list a new row is checked against must be recent: another client may have confirmed the
+  // same pair since this card was read (the card query lives 5 min). Older than FRESH_MS → read
+  // the card's rows again first (one read for writes queued meanwhile).
+  const fresh = useCallback(async () => {
+    if (!cardId || frozen) return;
+    const s = useSeamsStore.getState();
+    const readAt = qc.getQueryState(techCardKeys.detail(cardId))?.dataUpdatedAt ?? 0;
+    if (Date.now() - Math.max(readAt, s.serverAt) <= FRESH_MS) return;
+    refreshing ??= adminService
+      .GetTechCard({ id: cardId, vatCountryCode: undefined })
+      .then((res) => {
+        if (useSeamsStore.getState().cardId !== cardId) return;
+        hydrateSeams(cardId, (res.techCard?.seams ?? []) as TechCardSeamWire[]);
+        useSeamsStore.setState({ serverAt: Date.now() });
+      })
+      .catch(() => {
+        /* the write goes on with the list it has; the server keeps whatever it is sent */
+      })
+      .finally(() => {
+        refreshing = null;
+      });
+    await refreshing;
+  }, [cardId, frozen, qc]);
+
   const upsert = useCallback(
-    (rows: StoredSeam[], errorAt?: string) =>
-      run(
+    async (rows0: StoredSeam[], errorAt?: string) => {
+      await fresh();
+      // A new row of a pair already stored (server or in flight) goes onto that row's key.
+      const s = useSeamsStore.getState();
+      const rows = reuseKeys(rows0, rowsOf(s));
+      return run(
         Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
         () => adminService.UpsertTechCardSeams({ techCardId: cardId, seams: rows.map(wireOut) }),
         rows.length > 1 ? `decisions (${rows.length})` : 'decision',
         errorAt,
-      ),
-    [cardId, run],
+      );
+    },
+    [cardId, fresh, run],
   );
 
   const remove = useCallback(

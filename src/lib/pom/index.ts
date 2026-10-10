@@ -18,7 +18,10 @@ import type {
   SkeletonFacts,
   SkeletonPieceInput,
 } from 'lib/assembly-skeleton/types';
-import { edgeMap, seamsOfGraph, type Model } from './model';
+import { grainDegOf } from 'lib/seams/frame';
+import { resolveAcrossSizes, type SizePieces } from 'lib/seams/transfer';
+import type { StoredSeam } from 'lib/seams/types';
+import { edgeMap, partnersOf, seamsOfGraph, type Model } from './model';
 import { readPieces } from './pieces';
 import { measureModel } from './poms';
 import { classifyEdges } from './roles';
@@ -51,6 +54,13 @@ export type PomInput = {
   sizes?: { size: string; pieces: SkeletonPieceInput[] }[];
   convention?: GirthConvention;
   conventionSource?: 'default' | 'card';
+  /**
+   * L4: seams stored on the card (lib/seams rows). The base graph is re-read with them resolved on
+   * `baseSize` (resolveAcrossSizes; `sizes` = other sizes' pieces when confirmed on another size):
+   * a confirmed seam is PARTNER evidence, so the POMs resting on it may be exact. Absent / empty →
+   * the engine's graph, exactly as before.
+   */
+  seams?: { rows: readonly StoredSeam[]; sizes?: readonly SizePieces[] };
 };
 
 /** The base size's model with edge roles read. */
@@ -90,6 +100,10 @@ export function baseModel(facts: SkeletonFacts, graph: SeamGraph, size: string):
   };
   classifyEdges(model);
   assumeFolds(model);
+  // A reading resting on a seam a person confirmed says so.
+  for (const [id, r] of model.roles)
+    if (r.evidence === 'partner' && partnersOf(model, id).some((p) => p.seam.confirmed))
+      model.roles.set(id, { ...r, why: `${r.why} — the seam is confirmed by a person` });
   return model;
 }
 
@@ -120,7 +134,20 @@ function assumeFolds(m: Model) {
 
 export function measurePattern(input: PomInput): PomReport {
   const convention = input.convention ?? 'half';
-  const graph = input.graph ?? readSeamGraph(input.facts);
+  const rows = input.seams?.rows ?? [];
+  const grain = rows.length ? grainDegOf(input.facts) : undefined;
+  const graph = rows.length
+    ? readSeamGraph(
+        input.facts,
+        undefined,
+        undefined,
+        (pieces) =>
+          resolveAcrossSizes(rows, [
+            { size: input.baseSize, pieces, grainDeg: grain },
+            ...(input.seams?.sizes ?? []).filter((x) => x.size !== input.baseSize),
+          ]).get(input.baseSize)!,
+      )
+    : input.graph ?? readSeamGraph(input.facts);
   const base = baseModel(input.facts, graph, input.baseSize);
   const sizes: SizePoms[] = [];
   const order = input.sizes?.length

@@ -164,6 +164,8 @@ export type AppliedRow = {
   /** The candidate handed to the graph (confirmed / closure) or the pair excluded (rejected). */
   candidate?: SeamCandidate;
   excluded?: ExcludedPair;
+  /** The pair's edges, order-free (two rows of one pair share it: read as one seam). */
+  sig?: string;
 };
 
 export type Resolved = SeamDecisions & {

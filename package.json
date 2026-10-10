@@ -13,6 +13,7 @@
     "build:check": "tsc && vite build",
     "preview": "vite preview",
     "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
+    "doll:check": "node scripts/doll/check.mjs",
     "nest:probe": "node scripts/nest-probe.mjs",
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
     "patimport:dxf": "node scripts/pattern-import/dxf.mjs",
