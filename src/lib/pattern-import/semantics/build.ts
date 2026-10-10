@@ -19,6 +19,7 @@
 
 import { isMirrorSymmetric } from '../ai/geom';
 import { parseQuantity, saysFold } from '../ai/evidence';
+import { readPieceText } from '../dictionary';
 import { identitiesOf, sizeTokenTest } from '../manifest/identity';
 import type {
   Affine,
@@ -73,6 +74,8 @@ import {
   foldEdges,
   foldLineOnCut,
   bindFoldListEntry,
+  bindListEntry,
+  quantityListEntries,
   foldListEntries,
   normFoldLine,
   foldShapeProblem,
@@ -667,7 +670,10 @@ export function buildPieceSpecsDetailed(
   const listEntries = foldListEntries(input.docTexts ?? [], consumedFold);
   const listBound: { entry: string; seed: SeedId }[] = [];
   const listUnbound: string[] = [];
-  if (listEntries.length) {
+  // N3: the cutting list's printed counts ("69. Ærme, 4 gange"), bound to their pieces the same way
+  const qtyEntries = quantityListEntries(input.docTexts ?? []);
+  const listQty = new Map<SeedId, { qty: number; entry: string; by: 'no' | 'name' }>();
+  if (listEntries.length || qtyEntries.length) {
     // every piece on the sheet, including one blocked before naming (no code yet): its label is
     // still on the sheet, and a list entry it names must not fall back to the file level
     const pieceLabels = families.map((f) => {
@@ -685,6 +691,40 @@ export function buildPieceSpecsDetailed(
       const seed = bindFoldListEntry(e, pieceLabels);
       if (seed != null) listBound.push({ entry: e.text, seed });
       else listUnbound.push(e.text);
+    }
+    // two entries landing on one piece (a number and another line's name) prove nothing: dropped
+    const twice = new Set<SeedId>();
+    for (const e of qtyEntries) {
+      const b = bindListEntry(e, pieceLabels);
+      if (!b) continue;
+      const was = listQty.get(b.seed);
+      if (was && was.qty !== e.qty) twice.add(b.seed);
+      else if (!was || (was.by === 'name' && b.by === 'no'))
+        listQty.set(b.seed, { qty: e.qty, entry: e.text, by: b.by });
+    }
+    for (const sd of twice) listQty.delete(sd);
+  }
+  // N3 (r4454 «7 - Карман - 2 дет.»): pieces whose number is drawn as curves (no text label) are
+  // named by the operator or the AI. An entry no label took is bound by its name read as a code
+  // (Карман → PCK) to the ONLY piece of that code — a weak link: the count is the answer shown,
+  // still asked. Two entries reading the same code with different counts bind nothing.
+  if (qtyEntries.length) {
+    const byNo = new Set([...listQty.values()].filter((q) => q.by === 'no').map((q) => q.entry));
+    const keyed = new Map<string, { e: (typeof qtyEntries)[number]; side: string | null }[]>();
+    for (const e of qtyEntries) {
+      if (byNo.has(e.text)) continue;
+      const r = readPieceText(e.words.join(' '));
+      if (!r.code) continue;
+      const k = `${r.code}|${r.side ?? ''}`;
+      keyed.set(k, [...(keyed.get(k) ?? []), { e, side: r.side }]);
+    }
+    for (const [k, es] of keyed) {
+      if (new Set(es.map((x) => x.e.qty)).size !== 1) continue;
+      const [code, side] = k.split('|');
+      let fit = preps.filter((p) => p.name.code === code && !listQty.has(p.seed));
+      if (fit.length > 1 && side) fit = fit.filter((p) => p.name.mods.includes(side));
+      if (fit.length !== 1) continue;
+      listQty.set(fit[0].seed, { qty: es[0].e.qty, entry: es[0].e.text, by: 'name' });
     }
   }
 
@@ -1172,8 +1212,15 @@ export function buildPieceSpecsDetailed(
     // (a CAD file draws every cut piece, so an unlabelled block is cut once), else an AI name
     // auto-accepted on printed "cut n" evidence. Nothing → the shape suggests, the operator says.
     const isDxf = !!largest.dxf;
-    const aiQ = qtyText == null && !saysPair ? input.aiQuantity?.[seed] : undefined;
-    const qty = qtyText ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
+    // N3 (robe 69 "4 gange"): the cutting list's count of THIS piece. Bound by its printed number
+    // it is a printed count like "cut n" on the piece; bound by name only, or disagreeing with the
+    // piece's own text, it is the answer shown — still asked (D3)
+    const lq = !isDxf ? listQty.get(seed) : undefined;
+    const listConflict = lq != null && qtyText != null && qtyText !== lq.qty;
+    const listAsk = lq != null && (lq.by === 'name' || listConflict);
+    const aiQ = qtyText == null && !saysPair && !lq ? input.aiQuantity?.[seed] : undefined;
+    const qty =
+      qtyText ?? lq?.qty ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
     const pp =
       drawnCopies >= 2
         ? {
@@ -1189,6 +1236,12 @@ export function buildPieceSpecsDetailed(
             onFold: anyFold,
             namedHand: !!name.hand,
           });
+    if (lq && !listAsk && qtyText == null) pp.why = `cutting list «${lq.entry}»: ${pp.why}`;
+    if (listConflict)
+      pp.why = `the piece says ×${qtyText}, the cutting list «${lq!.entry}» ×${lq!.qty}: which?`;
+    else if (lq && listAsk)
+      pp.why = `${pp.why} — the cutting list «${lq.entry}» names it by title only`;
+    if (listAsk) pp.proven = false;
     pieceNotes.push(`quantity: ${pp.why}`);
     // pairHand override: undefined = no answer, null = "not a pair", L/R = the DRAWN hand of a pair
     let hand: PairHand | null = name.hand;

@@ -5,6 +5,7 @@
 // offset, so the derived cut/seam line simply runs across where the fold was.
 
 import type { BoxMm, FoldFeature, PtMm } from '../types';
+import { parseQuantity } from '../ai/evidence';
 import { PIECE_NO_SRC } from '../pieces/seeds';
 import {
   SegIndex,
@@ -582,6 +583,68 @@ export function bindFoldListEntry<S>(
     }),
   );
   return byName.length === 1 ? byName[0].seed : null;
+}
+
+/**
+ * N3: one numbered cutting-list line that prints a count ("69. Ærme, 4 gange", "7 - Карман - 2
+ * дет."). The count is the line's own statement about ITS piece; it is bound by the printed number
+ * (`bindListEntry`) before it says anything about a piece on the sheet.
+ */
+export type QtyListEntry = { text: string; no: string; words: string[]; qty: number };
+
+/** A list line names its piece in a few words; a longer line is an instruction step. */
+const QTY_LIST_MAX_WORDS = 4;
+
+/**
+ * The cutting list's counts, from the document's text: numbered lines whose remainder (after the
+ * number) prints a count. Every copy of a number (the list in DK / NO / SE, per fabric) must print
+ * the SAME count — copies that disagree (main 2, lining 1; an interfacing list numbered 1..4 again)
+ * prove nothing and the number is dropped (D3: the operator is asked as before).
+ */
+export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
+  const byNo = new Map<string, QtyListEntry>();
+  const conflict = new Set<string>();
+  for (let i = 0; i < texts.length; i++) {
+    let t = normFoldLine(texts[i]);
+    // "69." + "Ærme, 4 gange": a number item right before the line is its number
+    const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
+    if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
+    const m = LIST_LINE.exec(t);
+    if (!m) continue;
+    const rest = t.slice(m[0].length - 1);
+    const qty = parseQuantity(rest);
+    if (qty == null) continue;
+    const words = rest
+      .replace(LIST_NOISE, ' ')
+      .toLowerCase()
+      .split(/[^\p{L}]+/u)
+      .filter(
+        (w) =>
+          w.length >= 3 && !/^(?:gange?r?|gånger|ggr|mal|fois|razy|keer|veces|дет|шт)$/u.test(w),
+      );
+    if (!words.length || words.length > QTY_LIST_MAX_WORDS) continue;
+    const no = m[1].toLowerCase();
+    const was = byNo.get(no);
+    if (was && was.qty !== qty) conflict.add(no);
+    else if (!was) byNo.set(no, { text: t, no, words, qty });
+  }
+  return [...byNo.values()].filter((e) => !conflict.has(e.no));
+}
+
+/**
+ * The piece a list entry names and HOW: 'no' = the only piece labelled with the entry's printed
+ * number (the number is printed twice — on the piece and in the list), 'name' = the only piece whose
+ * title holds every name word (a weaker link: shown as the answer, still asked).
+ */
+export function bindListEntry<S>(
+  e: { no: string; words: readonly string[] },
+  pieces: readonly { seed: S; labels: readonly string[] }[],
+): { seed: S; by: 'no' | 'name' } | null {
+  const byNo = pieces.filter((p) => p.labels.some((l) => normLabel(l) === e.no));
+  if (byNo.length === 1) return { seed: byNo[0].seed, by: 'no' };
+  if (byNo.length > 1 || !e.words.length) return null;
+  const s = bindFoldListEntry({ text: '', no: e.no, words: [...e.words] }, pieces);
+  return s == null ? null : { seed: s, by: 'name' };
 }
 
 /** The drawn lines around a piece that are not its own outline (any size): see `foldWordRole`. */

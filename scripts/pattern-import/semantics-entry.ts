@@ -1304,6 +1304,85 @@ export async function main(): Promise<number> {
     json.d3 = { ids, gate: g.report.checks.map((c) => [c.id, c.ok, c.value]) };
   }
 
+  head("D3l N3 the cutting list's count of a piece (robe «69. Ærme, 4 gange»)");
+  {
+    const build = (
+      docTexts: string[],
+      texts = ['SLEEVE'],
+      seedLabels: Record<number, string> = { 1: '69' },
+    ) => {
+      const F = fx();
+      addFamily(
+        F,
+        1,
+        bodice,
+        0,
+        [{ pts: grainLine(120, 100, 450), closed: false, role: 'grain' }],
+        texts,
+      );
+      return buildPieceSpecsDetailed(input(F, CUT10, { docTexts, seedLabels })).output;
+    };
+    const qOf = (o: ReturnType<typeof build>) => o.unproven.find((u) => u.kind === 'quantity');
+    const ids = (o: ReturnType<typeof build>) =>
+      o.pieces.map((p) => `${p.identity}×${p.piecesPerGarment}`).join(' ');
+    const a = build([
+      '67.',
+      'Forstykke, 1 gang mod fold',
+      '69.',
+      'Ærme, 4 gange',
+      '69.',
+      'Erme, 4 ganger',
+      '69. Ärm, 4 ggr',
+    ]);
+    ck(
+      ids(a) === 'SL_L×2 SL_R×2' && !qOf(a),
+      'bound by its printed number: «69. Ærme, 4 gange» → 2 pairs (4), no question',
+      `${ids(a)} ${JSON.stringify(qOf(a))}`,
+    );
+    const none = build([]);
+    ck(
+      ids(none) === 'SL_L×1 SL_R×1' && qOf(none)?.shown === 'pair×1',
+      'no list → the pair default stays a question (pair×1)',
+      `${ids(none)} ${JSON.stringify(qOf(none))}`,
+    );
+    const split = build(['69. Ærme, 4 gange', '69. Ærme (for), 2 gange']);
+    ck(
+      qOf(split)?.shown === 'pair×1',
+      'copies of «69» that disagree (4 / 2) prove nothing → asked as before',
+      JSON.stringify(qOf(split)),
+    );
+    const byName = build(['5 - Sleeve - 4 дет.'], ['SLEEVE'], {});
+    ck(
+      qOf(byName)?.shown === 'pair×2' && /title only/.test(qOf(byName)?.detail ?? ''),
+      'bound by its name only → the list count is the answer shown, still asked',
+      JSON.stringify(qOf(byName)),
+    );
+    const clash = build(['69. Ærme, 4 gange'], ['SLEEVE', 'Cut 2']);
+    ck(
+      !!qOf(clash) && /cutting list/.test(qOf(clash)?.detail ?? ''),
+      'the piece prints «Cut 2», the list ×4 → asked, both quoted',
+      JSON.stringify(qOf(clash)),
+    );
+    const byCode = build(['7 - Карман - 4 дет.', '8 - Обтачка - 2 дет.'], ['POCKET'], {});
+    ck(
+      qOf(byCode)?.shown === 'pair×2' && /title only/.test(qOf(byCode)?.detail ?? ''),
+      'no label (number drawn as curves): «Карман» read as PCK → the one PCK piece, shown ×4, still asked',
+      JSON.stringify(qOf(byCode)),
+    );
+    const twoPck = build(['7 - Карман - 4 дет.', '12 - Карман - 2 дет.'], ['POCKET'], {});
+    ck(
+      qOf(twoPck)?.shown === 'pair×1' && !/cutting list/.test(qOf(twoPck)?.detail ?? ''),
+      'two entries read as PCK with different counts → no answer shown from the list',
+      JSON.stringify(qOf(twoPck)),
+    );
+    const steps = build(['69 Læg ærmerne sammen to og to og sy 2 x langs kanten forneden']);
+    ck(
+      qOf(steps)?.shown === 'pair×1',
+      'a numbered sewing step with a count in it is not a list line',
+      JSON.stringify(qOf(steps)),
+    );
+  }
+
   head('D3q what the drawing does not prove is asked (10.10): allowance, title vs note');
   {
     // title labels vs construction notes, on the corpus' own words
