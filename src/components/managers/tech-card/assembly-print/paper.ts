@@ -377,17 +377,38 @@ export function unionPrim(
   const scale = Math.min((boxW - 2 * lineMm) / w, (boxH - 2 * lineMm) / h);
   const ox = x + (boxW - w * scale) / 2;
   const oy = y + (boxH - h * scale) / 2;
-  return pic.shapes.map((s) => ({
-    k: 'poly' as const,
-    // Картинка уже в кадре «y вниз» от левого верхнего угла узла — переворачивать нечего.
-    pts: simplify(
-      s.pts.map(([px, py]) => ({ x: px, y: py })),
-      0.25 / scale,
-    ).map((p) => [ox + p.x * scale, oy + p.y * scale] as [number, number]),
-    sw: lineMm,
-    closed: true,
-    join: 'round' as const,
-  }));
+  const at = ([px, py]: [number, number]) => [ox + px * scale, oy + py * scale] as [number, number];
+  return pic.shapes.flatMap((s): Prim[] => [
+    {
+      k: 'poly' as const,
+      // Картинка уже в кадре «y вниз» от левого верхнего угла узла — переворачивать нечего.
+      pts: simplify(
+        s.pts.map(([px, py]) => ({ x: px, y: py })),
+        0.25 / scale,
+      ).map((p) => at([p.x, p.y])),
+      sw: lineMm,
+      closed: true,
+      join: 'round' as const,
+    },
+    // Вытачки (P2 §4) — тонкой линией поверх контура; короче 1 мм на бумаге не печатаются.
+    ...(s.lines ?? [])
+      .map((l) => l.map(at))
+      .filter((l) => l.length >= 2 && polyLen(l) >= 1)
+      .map((pts) => ({
+        k: 'poly' as const,
+        pts,
+        sw: lineMm * 0.6,
+        closed: false,
+        join: 'round' as const,
+      })),
+  ]);
+}
+
+function polyLen(pts: readonly [number, number][]): number {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++)
+    n += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  return n;
 }
 
 /** Подпись плитки узла словами: что сложено в «×n», что подвешено, что не нарисовано. */

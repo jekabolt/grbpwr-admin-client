@@ -18,6 +18,7 @@ import type {
   SkeletonTree,
   SkeletonUnit,
 } from '../types';
+import { DART_CONFIDENCE, dartsByPiece, outlineVNotches } from '../geometry/darts';
 import { handWord, judge, mergeRoles, multWord, roleDef, zoneEnum, type Entity } from './model';
 import { display, groupDetailed } from './group-units';
 import type { SkeletonTemplate, TemplateStage } from './template';
@@ -322,9 +323,11 @@ export function buildSkeleton(
       runFuse(stage);
       continue;
     }
-    // Before any unit is emitted, like fuse — a feature is sewn on the flat piece. Empty until lane D
-    // (P2 §4) reads PieceGeom.marks here.
-    if (stage.op === 'features') continue;
+    // Before any unit is emitted, like fuse — a feature is sewn on the flat piece (P2 §4).
+    if (stage.op === 'features') {
+      runFeatures(stage);
+      continue;
+    }
     if (stage.op === 'units') {
       const roles = stage.roles ?? ['*'];
       for (const u of g.units) {
@@ -384,6 +387,78 @@ export function buildSkeleton(
         source: p.fused ? 'template' : 'bom',
         confidence: p.fused ? 0.7 : 0.4,
       });
+    }
+  }
+
+  /**
+   * P2 lane D: darts read off the pieces' internal marks (geometry/darts.ts), one step per piece,
+   * on the flat piece before its first seam. Never above the accept threshold: no real pattern has
+   * confirmed the reader yet, so every dart step is a «decide». A V cut into the outline is only
+   * reported.
+   */
+  function runFeatures(stage: TemplateStage) {
+    const byPiece = dartsByPiece(graph.pieces);
+    const geomName = new Map(graph.pieces.map((g) => [g.pieceKey, g.name]));
+    for (const p of pieces) {
+      const d = byPiece.get(p.key);
+      if (!d?.count || p.cloth === 'interfacing') continue;
+      // Already sewn by the card's own order (append mode): its darts are the card's business.
+      if (replay.consumed.has(p.key)) continue;
+      if (consumedByEmitted.has(p.key)) {
+        warnings.push(`${p.name} has darts but is sewn before them — move the dart step up`);
+        continue;
+      }
+      const n = d.count;
+      const what = `dart${n > 1 ? 's' : ''}`;
+      const lines = d.darts
+        .map((x) => `${Math.round(x.intakeMm)} × ${Math.round(x.depthMm)} mm`)
+        .join(', ');
+      const twin = d.inheritedFrom
+        ? pieceName.get(d.inheritedFrom) ?? geomName.get(d.inheritedFrom)
+        : null;
+      const at = steps.length;
+      pushProcess(anyEntity(p.key), {
+        stage: stage.id,
+        label: `Sew ${n} ${what} on ${p.name}${multWord(p.mult)}`,
+        operationType: 'MACHINE',
+        zone: '',
+        reason: twin
+          ? `${p.name} has no dart lines of its own; its mirror ${twin} has ${n} — read as ${what}, check`
+          : `${n} V-shaped line${n > 1 ? 's' : ''} inside ${p.name} (intake × depth ${lines}) read as ${what} — check`,
+        source: 'geometry',
+        confidence: DART_CONFIDENCE,
+      });
+      steps[at].feature = {
+        kind: 'dart',
+        pieceKey: p.key,
+        count: n,
+        marks: d.darts.map((x) => x.mark),
+      };
+      // Pressing direction is unknown («toward the centre»?): only with press-open switched on,
+      // and then as a rider on the dart step.
+      if (pressOpen) {
+        steps.push({
+          inputs: [p.key],
+          outputUnitKey: '',
+          outputUnitName: '',
+          operationType: 'PRESS',
+          zone: steps[at].zone,
+          seams: [],
+          confidence: steps[at].confidence,
+          derivedFrom: at,
+          reason: `Press the darts of ${p.name} (direction: check)`,
+          source: 'template',
+          label: 'Press darts',
+        });
+      }
+    }
+    for (const g of graph.pieces) {
+      if (replay.consumed.has(g.pieceKey) || !pieceName.has(g.pieceKey)) continue;
+      if (outlineVNotches(g).length) {
+        warnings.push(
+          `V-notch in the outline of ${pieceName.get(g.pieceKey)} — a dart cut out? add the step by hand`,
+        );
+      }
     }
   }
 

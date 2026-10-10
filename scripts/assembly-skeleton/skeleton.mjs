@@ -29,7 +29,7 @@
 
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -517,6 +517,306 @@ console.log('\nChosen readings on the blazer (pins → rebuild)');
     gate('blazer: the skeleton offers readings', decisions.length > 0, `${decisions.length}`);
     gate('blazer: every chosen reading rebuilds a clean order', bad.length === 0, bad.join(' | '));
   }
+}
+
+// ── P2 lane D: darts (03-P2-DESIGN §4) ────────────────────────────────────────────────────────
+// Synthetic fixtures (fixtures/darts-*.json: one V, two V, a V of two straight legs, a closed
+// triangle, a mirror pair whose right side has no lines, and vees that are NOT darts + a dart cut
+// out of the outline) run through the product pipeline (segmentPiece → marks → twins → graph →
+// proposal). Gates: darts found n = 1/2/1/1, the mirror takes its twin's count; every dart step is
+// a «decide» (confidence < accept, never auto-ticked), on the flat piece BEFORE its first join,
+// with a machine and a zone; the pictogram draws the legs; the sweep is clean.
+// Real negatives: NO dart in any corpus / Downloads file (all menswear) — the blazer's back vent
+// (3_M: a vee of intake ≈ 194 mm) is NOT a dart; SS26 BP and Allsizes BP_1 read 0.
+// Controls: each rule loosened alone turns one of the negative fixture's vees into a dart; all
+// rules off («any vee is a dart») turns the blazer's vents into darts — the real gate goes red.
+console.log('\nDarts (P2 lane D)');
+{
+  const D = await import(pathToFileURL(outfile).href);
+  const NO_BOM = {
+    zipper: 0,
+    buttons: 0,
+    snaps: 0,
+    tape: 0,
+    elastic: 0,
+    drawcord: 0,
+    interlining: 0,
+  };
+  const xy = (pts) => pts.map(([x, y]) => ({ x, y }));
+  const dto = (p, i) => {
+    const xs = p.poly.map((q) => q[0]);
+    const ys = p.poly.map((q) => q[1]);
+    let area = 0;
+    p.poly.forEach((q, j) => {
+      const r = p.poly[(j + 1) % p.poly.length];
+      area += q[0] * r[1] - r[0] * q[1];
+    });
+    return {
+      id: i + 1,
+      name: p.key,
+      blockName: p.key,
+      layer: '1',
+      source: 'fixture',
+      poly: xy(p.poly),
+      inner: p.inner.map((m) => ({ layer: m.layer, closed: m.closed, pts: xy(m.pts) })),
+      bboxW: Math.max(...xs) - Math.min(...xs),
+      bboxH: Math.max(...ys) - Math.min(...ys),
+      areaCm2: Math.abs(area / 2),
+      originX: 0,
+      originY: 0,
+    };
+  };
+  const factsOf = (fx) => ({
+    pieces: fx.pieces.map((p, i) => ({
+      pieceKey: p.key,
+      name: p.key,
+      piece: dto(p, i),
+      piecesPerGarment: p.piecesPerGarment ?? 1,
+      cutSymmetry: p.cutSymmetry ?? null,
+      cloth: null,
+      fused: false,
+    })),
+    category: fx.category,
+    bom: NO_BOM,
+    defaultMachineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+  });
+  const dartSteps = (p) =>
+    p.steps.map((s, i) => ({ s, i })).filter(({ s }) => s.feature?.kind === 'dart');
+  /** Index of the first join whose unit holds `key`, or Infinity. */
+  const firstJoin = (p, key) => {
+    const leaves = new Map();
+    for (let i = 0; i < p.steps.length; i++) {
+      const s = p.steps[i];
+      if (!s.outputUnitKey) continue;
+      const ls = s.inputs.flatMap((k) => leaves.get(k) ?? [k]);
+      leaves.set(s.outputUnitKey, ls);
+      if (ls.includes(key)) return i;
+    }
+    return Infinity;
+  };
+  const notchWarnings = (p) => p.warnings.filter((w) => w.startsWith('V-notch in the outline'));
+
+  const files = [
+    'darts-skirt.json',
+    'darts-bodice.json',
+    'darts-trouser.json',
+    'darts-triangle.json',
+    'darts-mirror.json',
+    'darts-negative.json',
+  ];
+  let panel = null;
+  for (const f of files) {
+    const fx = load(f);
+    const facts = factsOf(fx);
+    const p = proposeSkeleton(facts, skeletonDeps);
+    const ds = dartSteps(p);
+    const got = Object.fromEntries(ds.map(({ s }) => [s.feature.pieceKey, s.feature.count]));
+    const perPiece = new Map();
+    for (const { s } of ds)
+      perPiece.set(s.feature.pieceKey, (perPiece.get(s.feature.pieceKey) ?? 0) + 1);
+    console.log(
+      `  ${fx.id} (${fx.category}): ${p.steps.length} steps; darts ${JSON.stringify(got)}; expected ${JSON.stringify(fx.expect)}`,
+    );
+    if (verbose) printSteps({ facts: { pieces: facts.pieces } }, p);
+    for (const { s, i } of ds) console.log(`     ${i + 1}. ${s.label} — ${s.reason}`);
+    for (const w of notchWarnings(p)) console.log(`     · ${w}`);
+    const keys = new Set([...Object.keys(fx.expect), ...Object.keys(got)]);
+    gate(
+      `${fx.id}: darts per piece = ${JSON.stringify(fx.expect)}, one step each`,
+      [...keys].every((k) => got[k] === fx.expect[k]) &&
+        [...perPiece.values()].every((n) => n === 1),
+      JSON.stringify(got),
+    );
+    gate(
+      `${fx.id}: every dart step is a «decide» (confidence ${D.DART_CONFIDENCE} < accept ${D.SKELETON.accept}), geometry, machine + zone`,
+      ds.every(
+        ({ s }) =>
+          s.confidence === D.DART_CONFIDENCE &&
+          s.confidence < D.SKELETON.accept &&
+          s.source === 'geometry' &&
+          s.operationType === 'MACHINE' &&
+          !!s.machineType &&
+          !!s.zone &&
+          !s.zone.endsWith('UNKNOWN') &&
+          s.derivedFrom === undefined,
+      ),
+    );
+    const late = ds.filter(({ s, i }) => firstJoin(p, s.feature.pieceKey) < i);
+    gate(
+      `${fx.id}: every dart step comes before the piece joins anything`,
+      late.length === 0,
+      late.map(({ s }) => s.feature.pieceKey).join(', '),
+    );
+    gate(`${fx.id}: frontier sweep clean`, broken(p).length === 0, broken(p).join('; '));
+    gate(
+      `${fx.id}: V-notch-in-the-outline warnings = ${fx.notchWarnings}`,
+      notchWarnings(p).length === fx.notchWarnings,
+      `${notchWarnings(p).length}`,
+    );
+    // The pictogram draws the legs of the piece's own darts over its silhouette.
+    const geoms = p.graph.pieces;
+    const drawn = [];
+    for (const { s } of ds) {
+      if (fx.inherited?.[s.feature.pieceKey]) continue;
+      const pic = D.unionPicture(D.unionLayout([s.feature.pieceKey], [], geoms), geoms);
+      const shape = pic.shapes.find((x) => x.pieceKey === s.feature.pieceKey);
+      drawn.push([s.feature.pieceKey, shape?.lines.length ?? 0, s.feature.count]);
+    }
+    if (drawn.length)
+      gate(
+        `${fx.id}: the pictogram draws every own dart`,
+        drawn.every(([, n, want]) => n === want),
+        drawn.map(([k, n]) => `${k} ${n}`).join(', '),
+      );
+    for (const [k, from] of Object.entries(fx.inherited ?? {})) {
+      const st = ds.find(({ s }) => s.feature.pieceKey === k)?.s;
+      gate(
+        `${fx.id}: ${k} (no lines of its own) takes its mirror ${from}'s count`,
+        !!st &&
+          st.feature.count === got[from] &&
+          st.feature.marks.length === 0 &&
+          st.reason.includes(from),
+        st ? `${st.feature.count}, marks ${st.feature.marks.length}` : 'no step',
+      );
+    }
+    if (fx.id === 'darts-negative') panel = geoms.find((g) => g.pieceKey === 'PANEL');
+  }
+
+  // Press: only with press-open on, as a rider on the dart step.
+  {
+    const fx = load('darts-skirt.json');
+    const on = proposeSkeleton(factsOf(fx), skeletonDeps, { pressOpen: true });
+    const off = proposeSkeleton(factsOf(fx), skeletonDeps, { pressOpen: false });
+    const riders = (p) =>
+      p.steps.filter(
+        (s) => s.label === 'Press darts' && p.steps[s.derivedFrom]?.feature?.kind === 'dart',
+      );
+    gate(
+      'darts-skirt: «Press darts» rides on each dart step with press-open on, none with it off',
+      riders(on).length === 2 && riders(off).length === 0,
+      `${riders(on).length} / ${riders(off).length}`,
+    );
+  }
+
+  // Controls on the negative fixture: each rule loosened alone lets one vee through.
+  if (panel) {
+    const R = D.DART_RULES;
+    const loosened = {
+      'intake ≤ 80': { ...R, intakeMm: [R.intakeMm[0], 80] },
+      'depth ≥ 30': { ...R, depthMin: 30 },
+      'depth ≥ 1.0 × intake (apex ≤ 60°)': { ...R, depthRatio: 1.0, apexDeg: 60 },
+    };
+    for (const [name, rules] of Object.entries(loosened)) {
+      const n = D.dartsOf(panel, rules).length;
+      gate(`control: ${name} → the negative fixture reads a dart (would go red)`, n > 0, `${n}`);
+    }
+  } else gate('darts-negative: PANEL read', false);
+
+  // Real negatives: every corpus / Downloads file, the product path (segmentPiece → marks → twins).
+  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
+  const downloads = process.env.SKELETON_DOWNLOADS ?? resolve(homedir(), 'Downloads');
+  const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
+  const REAL = [
+    [
+      'ss26',
+      resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'),
+      'M',
+      'shirt',
+      true,
+    ],
+    ['allsizes', resolve(corpus, 'Allsizes_with_notches.dxf'), 'M', 'shirt', true],
+    ['blazer', resolve(corpus, 'blazer.dxf'), 'M', 'jacket-lined', true],
+    ['pockets', resolve(corpus, 'POCKETS.dxf'), null, 'generic', true],
+    ['summer', resolve(corpus, 'summer men.dxf'), null, 'shirt', true],
+    ['allsizes-plain', resolve(corpus, 'allsizes.dxf'), null, 'shirt', false],
+    ['gerber-summer', resolve(corpus, 'summer men_ganjubas_gerber.dxf'), null, 'shirt', false],
+    ['dl-blazer_1', resolve(downloads, 'blazer_1.dxf'), null, 'jacket-lined', false],
+    [
+      'dl-summer-outline',
+      resolve(downloads, 'summer men with pattern outline1.dxf'),
+      null,
+      'shirt',
+      false,
+    ],
+    ['dl-pockets-2', resolve(downloads, 'POCKETS (2).dxf'), null, 'generic', false],
+  ];
+  const ANY = { intakeMm: [0, Infinity], depthMin: 0, depthRatio: 0, apexDeg: 180 };
+  const quietly = async (fn) => {
+    const q = [console.log, console.warn];
+    console.log = () => {};
+    console.warn = () => {};
+    try {
+      return await fn();
+    } finally {
+      [console.log, console.warn] = q;
+    }
+  };
+  const realGeoms = new Map();
+  let anyVeeDarts = 0;
+  for (const [id, dxf, want, category, required] of REAL) {
+    let buf;
+    try {
+      buf = readFileSync(dxf);
+    } catch {
+      if (required) gate(`${id}: DXF found`, false, dxf);
+      else console.log(`  ${id}: ${dxf} not found — skipped`);
+      continue;
+    }
+    const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    const bySize = await quietly(() => D.loadInputs(bytes));
+    const size =
+      want && bySize.has(want)
+        ? want
+        : [...bySize.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+    const inputs = bySize.get(size) ?? [];
+    const geoms = D.twins(inputs.map(D.segmentPiece));
+    realGeoms.set(id, geoms);
+    const byPiece = D.dartsByPiece(geoms);
+    const darts = [...byPiece.values()].reduce((n, d) => n + d.count, 0);
+    const vees = geoms.flatMap((g) => (g.marks ?? []).filter((m) => m.kind === 'vee'));
+    const notches = geoms.flatMap((g) => D.outlineVNotches(g).map(() => g.pieceKey));
+    anyVeeDarts += [...D.dartsByPiece(geoms, ANY).values()].reduce((n, d) => n + d.count, 0);
+    // The proposal itself: no dart step, no V-notch warning.
+    const facts = { pieces: inputs, category, bom: NO_BOM, defaultMachineType: null };
+    const p = inputs.length <= D.SKELETON.maxPieces ? proposeSkeleton(facts, skeletonDeps) : null;
+    const steps = p ? dartSteps(p).length : 0;
+    const warns = p ? notchWarnings(p).length : 0;
+    console.log(
+      `  ${id} (size ${size || '—'}, ${geoms.length} pieces): vees ${vees.length}${vees.length ? ` [${vees.map((v) => `${v.id} ${Math.round(v.vee.intakeMm)}×${Math.round(v.vee.depthMm)} ${Math.round(v.vee.apexDeg)}°`).join('; ')}]` : ''}; darts ${darts}; outline V-notches ${notches.length}${notches.length ? ` (${notches.join(', ')})` : ''}; dart steps ${steps}`,
+    );
+    gate(
+      `${id}: 0 darts, 0 dart steps, 0 V-notch warnings (no darts in the file)`,
+      darts === 0 && steps === 0 && notches.length === 0 && warns === 0,
+      `darts ${darts}, steps ${steps}, notches ${notches.length}`,
+    );
+  }
+  const g = (id, key) => realGeoms.get(id)?.find((x) => x.pieceKey === key);
+  {
+    const vents = ['3', '4', '17', '18'].map((k) => [k, g('blazer', k)]);
+    const back = g('blazer', '3');
+    const vent = back?.marks?.find((m) => m.kind === 'vee');
+    gate(
+      'blazer 3_M: the back vent is a vee (intake ≈ 194 mm) and NOT a dart',
+      !!vent && Math.abs(vent.vee.intakeMm - 194) <= 6 && D.dartsOf(back).length === 0,
+      vent
+        ? `intake ${Math.round(vent.vee.intakeMm)}, depth ${Math.round(vent.vee.depthMm)}, apex ${Math.round(vent.vee.apexDeg)}°`
+        : 'no vee',
+    );
+    gate(
+      'blazer 3_M / 4_M / 17_M / 18_M: 0 darts',
+      vents.every(([, x]) => x && D.dartsOf(x).length === 0),
+      vents.map(([k, x]) => `${k}: ${x ? D.dartsOf(x).length : 'missing'}`).join(', '),
+    );
+    const bp = g('ss26', 'BP');
+    gate('SS26 BP (lines across the shoulders): 0 darts', !!bp && D.dartsOf(bp).length === 0);
+    const bp1 = g('allsizes', 'BP_1');
+    gate('Allsizes BP_1 (two centre-back lines): 0 darts', !!bp1 && D.dartsOf(bp1).length === 0);
+  }
+  gate(
+    'control: all dart rules off («any vee is a dart») → the real files read darts (the gate above would go red)',
+    anyVeeDarts > 0,
+    `${anyVeeDarts}`,
+  );
 }
 
 // ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────

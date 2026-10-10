@@ -26,7 +26,17 @@ const BOX_FALLBACK = { w: 48, h: 38 };
 const BADGE_PX = 9;
 const MARK_PX = 13;
 
+// Линия вытачки короче этого на экране не рисуется (плитка 56px, 03-P2-DESIGN §4).
+const LINE_MIN_PX = 3;
+
 const ptsAttr = (pts: readonly [number, number][]) => pts.map((p) => `${p[0]},${p[1]}`).join(' ');
+
+const lineLen = (pts: readonly [number, number][]) => {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++)
+    n += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  return n;
+};
 
 /** Рамка, в которую деталь штрихуется: `unbound`/нет ткани — без знака, серой подложкой. */
 const isHatch = (c: string | null): c is PieceClothState => !!c && c !== 'unbound';
@@ -109,6 +119,20 @@ export const UnitShape = memo(function UnitShape({
               vectorEffect='non-scaling-stroke'
               strokeLinejoin='round'
             />
+            {/* Вытачки (P2 §4): тонкие линии поверх штриховки, форма детали не меняется. В глифе
+                не рисуются, а короче LINE_MIN_PX на экране — шум, их тоже нет. */}
+            {!plain &&
+              s.lines
+                .filter((l) => lineLen(l) / u >= LINE_MIN_PX)
+                .map((l, i) => (
+                  <polyline
+                    key={i}
+                    points={ptsAttr(l)}
+                    style={{ fill: 'none', stroke: '#000', strokeWidth: 0.6 }}
+                    vectorEffect='non-scaling-stroke'
+                    strokeLinejoin='round'
+                  />
+                ))}
           </g>
         );
       })}

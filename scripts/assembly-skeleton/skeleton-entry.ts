@@ -10,3 +10,15 @@ export {
 export { skeletonDeps } from '../../src/components/managers/tech-card/components/assembly-skeleton-deps';
 export { readSeamGraph, proposeSkeleton } from '../../src/lib/assembly-skeleton/pipeline';
 export { loadFacts } from './seams-entry';
+// P2 lane D (darts): the reader, the geometry it stands on, and the pictogram that draws it.
+export {
+  DART_CONFIDENCE,
+  DART_RULES,
+  dartsByPiece,
+  dartsOf,
+  outlineVNotches,
+} from '../../src/lib/assembly-skeleton/geometry/darts';
+export { segmentPiece, twins } from '../../src/lib/assembly-skeleton/geometry';
+export { unionLayout, unionPicture } from '../../src/lib/assembly-skeleton/union';
+export { SKELETON } from '../../src/lib/assembly-skeleton/types';
+export { loadInputs } from './marks-entry';
