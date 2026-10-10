@@ -342,6 +342,26 @@ export function applySkeletonAIOrder(
         };
     }
   }
+  // Work on a piece or a unit (a dart, buttonholes, a press) must come before the join that sews it
+  // into the next unit — after that it is no longer on the table on its own.
+  const consumedAt = new Map<string, number>();
+  placed.forEach((i, at) => {
+    const s = steps[i];
+    if (!s.outputUnitKey) return;
+    for (const k of s.inputs) if (!consumedAt.has(k)) consumedAt.set(k, at);
+  });
+  for (let at = 0; at < placed.length; at++) {
+    const s = steps[placed[at]];
+    if (s.outputUnitKey) continue;
+    for (const k of s.inputs) {
+      const c = consumedAt.get(k);
+      if (c != null && c < at)
+        return {
+          ok: false,
+          why: `the AI order works on ${k} after it was sewn into the next unit — not applied`,
+        };
+    }
+  }
   const newIndex = new Map(placed.map((old, at) => [old, at]));
   const reordered = placed.map((old) => {
     const s = steps[old];

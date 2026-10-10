@@ -385,6 +385,17 @@ const stubAI: SkeletonAIAsk = async (req) => {
       ),
     ]),
   );
+  // Work on a piece / unit (no output unit) comes before the join that sews it on.
+  for (const id of ordered) {
+    const st = byId.get(id);
+    if (!st || st.outputUnit) continue;
+    for (const k of st.inputs ?? []) {
+      const consumer = ordered.find(
+        (c) => c !== id && !!byId.get(c)?.outputUnit && (byId.get(c)?.inputs ?? []).includes(k),
+      );
+      if (consumer) needs.get(consumer)!.add(id);
+    }
+  }
   const done = new Set<string>();
   const order: { stepId: string; reason: string }[] = [];
   while (order.length < ordered.length) {

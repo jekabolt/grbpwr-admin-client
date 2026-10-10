@@ -230,6 +230,17 @@ function otherOrder(req) {
       ),
     ]),
   );
+  // Work on a piece / unit (outputUnit empty) comes before the join that sews it on.
+  for (const id of ordered) {
+    const st = byId.get(id);
+    if (st.outputUnit) continue;
+    for (const k of st.inputs) {
+      const consumer = ordered.find(
+        (c) => c !== id && byId.get(c).outputUnit && byId.get(c).inputs.includes(k),
+      );
+      if (consumer) needs.get(consumer).add(id);
+    }
+  }
   const done = new Set();
   const out = [];
   while (out.length < ordered.length) {
@@ -379,6 +390,24 @@ for (const card of cards) {
     !short.ok && /leaves steps out/.test(short.why),
     short.ok ? 'APPLIED' : short.why,
   );
+  // 4c work on a unit after the join that sews it on: take the stub's valid order and move one
+  // own processing step (no output unit) to the very end.
+  const work = req.steps.find(
+    (s) =>
+      !s.follows &&
+      !s.outputUnit &&
+      s.inputs.some((k) => req.steps.some((c) => c.outputUnit && c.inputs.includes(k))),
+  );
+  if (work) {
+    const good = otherOrder(req).map((o) => o.stepId);
+    const late = [...good.filter((id) => id !== work.id), work.id].map((stepId) => ({ stepId }));
+    const r = E.applySkeletonAIOrder(proposal, late, built.signatures);
+    gate(
+      `4c work on a unit after it was sewn on (${work.id} last) is refused`,
+      !r.ok && /after it was sewn into the next unit/.test(r.why),
+      r.ok ? 'APPLIED' : r.why,
+    );
+  }
 }
 
 console.log(failed ? `\n${failed} gate(s) FAILED` : '\nall gates pass');
