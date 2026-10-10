@@ -1416,7 +1416,7 @@ async function guardsCase() {
  * sizes leave with their BLOCK_RECORD and INSERT; `stripTail` also drops `_<size>` from the names
  * (an exporter that names pieces without the size); `drop` removes pieces (negative control).
  */
-function splitSize(
+export function splitSize(
   text: string,
   size: string,
   opt: { stripTail?: boolean; drop?: string[]; as?: string } = {},
