@@ -91,6 +91,24 @@ export function removedLine(rows: KindRow[]): string {
     .join(' · ')}`;
 }
 
+/**
+ * The clean stage in one line — "removed: … · 3 pages set aside (1 to check)" — on the files step
+ * and next to its Next button, so what is set aside is seen before the run goes on.
+ */
+export function cleanLine(clean: StageIO['clean']['out']): string {
+  const rows = kindRows(clean.pages.flatMap((p) => p.items));
+  const waiting = rows.filter((r) => r.suggested > 0 && !r.applied).length;
+  const check = clean.dropped.filter((d) => d.status === 'suggest').length;
+  const n = clean.dropped.length;
+  return [
+    removedLine(rows),
+    waiting ? `${waiting} ${waiting === 1 ? 'kind' : 'kinds'} suggested` : '',
+    n ? `${n} ${n === 1 ? 'page' : 'pages'} set aside${check ? ` (${check} to check)` : ''}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** The edits with this kind's run-wide decision replaced. */
 export function withKind(edits: PageMaskEdit[], kind: BackgroundKind, keep: boolean) {
   return [
@@ -127,7 +145,7 @@ export function KindTable({
           const state = r.applied
             ? { tone: 'mut' as const, text: 'removed', act: 'keep', keep: true }
             : r.suggested
-              ? { tone: 'attention' as const, text: 'suggested', act: 'remove', keep: false }
+              ? { tone: 'attention' as const, text: 'suggested', act: 'accept', keep: false }
               : { tone: 'mut' as const, text: 'kept', act: 'remove', keep: false };
           return (
             <tr
@@ -228,6 +246,63 @@ function PageView({ p, hover }: { p: CleanPreview; hover: BackgroundKind | null 
   );
 }
 
+/** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */
+function AsideThumb({
+  p,
+  d,
+  busy,
+  files,
+  onRead,
+}: {
+  p: CleanPreview | undefined;
+  d: StageIO['clean']['out']['dropped'][number];
+  busy: boolean;
+  files: number;
+  onRead: () => void;
+}) {
+  const live = useMemo(() => (p ? pathData(p.live) : ''), [p]);
+  const W = p?.widthMm ?? 210;
+  const H = p?.heightMm ?? 297;
+  return (
+    <figure
+      className='flex w-24 flex-col gap-0.5'
+      title={`${d.why}${d.drawing ? ` — holds ${d.drawing}: check it is not a pattern page` : ''}`}
+    >
+      <svg
+        viewBox={`0 ${-H} ${W} ${H}`}
+        className={
+          d.status === 'suggest'
+            ? 'h-32 w-24 border border-textColor'
+            : 'h-32 w-24 border border-borderColor'
+        }
+        preserveAspectRatio='xMidYMid meet'
+        aria-label={`page ${d.page + 1}, set aside as ${d.cls}`}
+      >
+        <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
+        <path
+          d={live}
+          fill='none'
+          stroke={SHEET_INK.ink}
+          strokeWidth={0.6}
+          vectorEffect='non-scaling-stroke'
+        />
+      </svg>
+      <figcaption className='flex flex-wrap items-center gap-1'>
+        <Text size='micro' component='span' className='tabular-nums'>
+          p{d.page + 1}
+          {files > 1 ? `·f${Number(d.file) + 1}` : ''}
+        </Text>
+        <Pill tone={d.status === 'suggest' ? 'attention' : 'mut'}>
+          {d.status === 'suggest' ? 'check' : d.cls}
+        </Pill>
+        <Button variant='underline' size='xs' disabled={busy} onClick={onRead}>
+          read as tile
+        </Button>
+      </figcaption>
+    </figure>
+  );
+}
+
 /** The files step's clean block: the line, the kinds, the selected page with its mask. */
 export function CleanBlock({
   api,
@@ -242,23 +317,50 @@ export function CleanBlock({
   const [hover, setHover] = useState<BackgroundKind | null>(null);
   const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
   if (!clean) return null;
+  const tilePreviews = clean.previews.filter((p) =>
+    clean.pages.some((m) => m.file === p.file && m.page === p.page && m.role === 'tile'),
+  );
   const shown =
-    clean.previews.find((p) => `${p.file}:${p.page}` === page) ??
+    tilePreviews.find((p) => `${p.file}:${p.page}` === page) ??
     clean.previews.find((p) =>
       clean.pages.some((m) => m.file === p.file && m.page === p.page && m.items.length),
     ) ??
-    clean.previews[0];
+    tilePreviews[0];
   const edit = (kind: BackgroundKind, keep: boolean) =>
     void api.dispatch({ type: 'clean', edits: withKind(inputs.cleanEdits, kind, keep) });
   return (
     <div className='mb-3'>
       <GroupLabel flush>before reading</GroupLabel>
       <Text size='micro' component='p' className='mb-1'>
-        {removedLine(rows)}
-        {clean.dropped.length > 0 &&
-          ` · ${clean.dropped.length} ${clean.dropped.length === 1 ? 'page' : 'pages'} set aside`}
+        {cleanLine(clean)}
       </Text>
       <KindTable rows={rows} busy={!!session.busy} onEdit={edit} onHover={setHover} />
+      {clean.dropped.length > 0 && (
+        <div className='mt-2'>
+          <Text size='micro' variant='label' component='p' className='mb-0.5'>
+            pages set aside — framed: it holds line work that could be pattern, check it
+          </Text>
+          <div className='flex flex-wrap gap-2'>
+            {[...clean.dropped]
+              .sort((a, b) => (a.status === b.status ? 0 : a.status === 'suggest' ? -1 : 1))
+              .map((d) => (
+                <AsideThumb
+                  key={`${d.file}:${d.page}`}
+                  d={d}
+                  p={clean.previews.find((x) => x.file === d.file && x.page === d.page)}
+                  busy={!!session.busy}
+                  files={session.files.length}
+                  onRead={() =>
+                    void api.dispatch({
+                      type: 'clean',
+                      edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
+                    })
+                  }
+                />
+              ))}
+          </div>
+        </div>
+      )}
       {shown && (
         <div className='mt-2'>
           <Text size='micro' variant='label' component='p' className='mb-0.5'>

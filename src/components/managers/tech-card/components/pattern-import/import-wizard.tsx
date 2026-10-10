@@ -31,6 +31,7 @@ import { CheckStep } from './steps/check';
 import { DetailsStep } from './steps/details';
 import { FabricsStep } from './steps/fabrics';
 import { FilesStep } from './steps/files';
+import { cleanLine } from './steps/files-clean';
 import { PiecesStep } from './steps/pieces';
 import { ScaleStep } from './steps/scale';
 import { SheetStep } from './steps/sheet';
@@ -407,6 +408,12 @@ function WizardBody({
                     ! {blocker}
                   </Text>
                 ) : null}
+                {/* A8: what the clean stage set aside, seen before the run goes on */}
+                {session.step === 'files' && session.clean && !api.extracted.presegmented && (
+                  <Text size='micro' variant='label' component='p'>
+                    before reading — {cleanLine(session.clean)}
+                  </Text>
+                )}
               </div>
               {nextStep && session.step !== 'apply' && (
                 <Button
