@@ -692,7 +692,16 @@ export function buildPieceSpecsDetailed(
   const listUnbound: string[] = [];
   // N3: the cutting list's printed counts ("69. Ærme, 4 gange"), bound to their pieces the same way
   const qtyEntries = quantityListEntries(input.docTexts ?? []);
-  const listQty = new Map<SeedId, { qty: number; entry: string; by: 'no' | 'name' }>();
+  type ListQty = {
+    qty: number;
+    entry: string;
+    by: 'no' | 'name';
+    /** Codex N3: why the count is only the answer shown (asked), null = it answers by itself. */
+    ask: string | null;
+  };
+  const listQty = new Map<SeedId, ListQty>();
+  /** Lists that print different counts for one piece: quoted, no count taken. */
+  const listSplit = new Map<SeedId, string[]>();
   if (listEntries.length || qtyEntries.length) {
     // every piece on the sheet, including one blocked before naming (no code yet): its label is
     // still on the sheet, and a list entry it names must not fall back to the file level
@@ -712,15 +721,43 @@ export function buildPieceSpecsDetailed(
       if (seed != null) listBound.push({ entry: e.text, seed });
       else listUnbound.push(e.text);
     }
+    // Codex N3: a count answers by itself only from a cutting-list line (its section), bound by
+    // the piece's printed number, whose words name THIS piece (its code or title), whose number is
+    // no size token, with no other list printing another count. Anything else is the answer shown.
+    const prepOf = new Map(preps.map((p) => [p.seed, p]));
+    const titlesOf = new Map(pieceLabels.map((p) => [p.seed, p.labels]));
+    const namesPiece = (seed: SeedId, words: readonly string[]) => {
+      const code = readPieceText(words.join(' ')).code;
+      const pr = prepOf.get(seed);
+      if (code && pr && pr.name.code === code) return true;
+      const ws = (titlesOf.get(seed) ?? []).flatMap((l) => l.toLowerCase().split(/[^\p{L}]+/u));
+      return words.every((w) =>
+        ws.some((x) => x.length >= 3 && (x.startsWith(w) || w.startsWith(x))),
+      );
+    };
     // two entries landing on one piece (a number and another line's name) prove nothing: dropped
     const twice = new Set<SeedId>();
     for (const e of qtyEntries) {
       const b = bindListEntry(e, pieceLabels);
       if (!b) continue;
+      if (e.conflict) {
+        listSplit.set(b.seed, [e.text, ...e.conflict]);
+        continue;
+      }
+      const ask =
+        b.by === 'name'
+          ? 'bound by title only'
+          : !e.section
+            ? 'is not in a cutting list (no cutting header, no list of counts around it)'
+            : isSizeToken(e.no)
+              ? `its number ${e.no} is a size`
+              : !namesPiece(b.seed, e.words)
+                ? `«${e.words.join(' ')}» does not name this piece`
+                : null;
       const was = listQty.get(b.seed);
       if (was && was.qty !== e.qty) twice.add(b.seed);
       else if (!was || (was.by === 'name' && b.by === 'no'))
-        listQty.set(b.seed, { qty: e.qty, entry: e.text, by: b.by });
+        listQty.set(b.seed, { qty: e.qty, entry: e.text, by: b.by, ask });
     }
     for (const sd of twice) listQty.delete(sd);
   }
@@ -732,7 +769,7 @@ export function buildPieceSpecsDetailed(
     const byNo = new Set([...listQty.values()].filter((q) => q.by === 'no').map((q) => q.entry));
     const keyed = new Map<string, { e: (typeof qtyEntries)[number]; side: string | null }[]>();
     for (const e of qtyEntries) {
-      if (byNo.has(e.text)) continue;
+      if (byNo.has(e.text) || e.conflict) continue;
       const r = readPieceText(e.words.join(' '));
       if (!r.code) continue;
       const k = `${r.code}|${r.side ?? ''}`;
@@ -744,7 +781,12 @@ export function buildPieceSpecsDetailed(
       let fit = preps.filter((p) => p.name.code === code && !listQty.has(p.seed));
       if (fit.length > 1 && side) fit = fit.filter((p) => p.name.mods.includes(side));
       if (fit.length !== 1) continue;
-      listQty.set(fit[0].seed, { qty: es[0].e.qty, entry: es[0].e.text, by: 'name' });
+      listQty.set(fit[0].seed, {
+        qty: es[0].e.qty,
+        entry: es[0].e.text,
+        by: 'name',
+        ask: 'bound by its name (read as a code) only',
+      });
     }
   }
 
@@ -1237,7 +1279,7 @@ export function buildPieceSpecsDetailed(
     // piece's own text, it is the answer shown — still asked (D3)
     const lq = !isDxf ? listQty.get(seed) : undefined;
     const listConflict = lq != null && qtyText != null && qtyText !== lq.qty;
-    const listAsk = lq != null && (lq.by === 'name' || listConflict);
+    const listAsk = lq != null && (lq.ask != null || listConflict);
     const aiQ = qtyText == null && !saysPair && !lq ? input.aiQuantity?.[seed] : undefined;
     const qty =
       qtyText ?? lq?.qty ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
@@ -1259,8 +1301,10 @@ export function buildPieceSpecsDetailed(
     if (lq && !listAsk && qtyText == null) pp.why = `cutting list «${lq.entry}»: ${pp.why}`;
     if (listConflict)
       pp.why = `the piece says ×${qtyText}, the cutting list «${lq!.entry}» ×${lq!.qty}: which?`;
-    else if (lq && listAsk)
-      pp.why = `${pp.why} — the cutting list «${lq.entry}» names it by title only`;
+    else if (lq && listAsk) pp.why = `${pp.why} — «${lq.entry}»: ${lq.ask}`;
+    const split = !isDxf ? listSplit.get(seed) : undefined;
+    if (split)
+      pp.why = `${pp.why} — the cutting lists disagree: ${split.map((x) => `«${x}»`).join(' / ')}`;
     if (listAsk) pp.proven = false;
     pieceNotes.push(`quantity: ${pp.why}`);
     // pairHand override: undefined = no answer, null = "not a pair", L/R = the DRAWN hand of a pair

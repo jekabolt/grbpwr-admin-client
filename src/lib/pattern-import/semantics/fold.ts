@@ -590,27 +590,58 @@ export function bindFoldListEntry<S>(
  * дет."). The count is the line's own statement about ITS piece; it is bound by the printed number
  * (`bindListEntry`) before it says anything about a piece on the sheet.
  */
-export type QtyListEntry = { text: string; no: string; words: string[]; qty: number };
+export type QtyListEntry = {
+  text: string;
+  no: string;
+  words: string[];
+  qty: number;
+  /**
+   * It sits in a cutting-list section: under a cutting header («Klippevejledning», «Раскрой
+   * деталей…», «Cutting layout») or in a run of ≥ 3 such lines (the list layout), and names no
+   * fabric of its own. Only such a line may answer a count by itself; any other numbered line with
+   * a count ("69. Pres sømmen 4 gange", a sewing step) is a pre-filled question at most.
+   */
+  section: boolean;
+  /** Lists (scopes) that print another count for this number — no count is taken from them. */
+  conflict?: string[];
+};
 
 /** A list line names its piece in a few words; a longer line is an instruction step. */
 const QTY_LIST_MAX_WORDS = 4;
+/** A cutting-list header: a short line naming the cutting (DA/NO/SE/DE/EN/RU/PL/FR/ES/NL/IT). */
+const CUT_HEADER =
+  /klipp|tilskj[æa]r|tillsk[äa]r|zuschn|zuschneid|\bcut(?:ting)?\b|раскро|кроить|(?<!\p{L})крой|wykr[oó]j|kroj|\bcoupe|\bcorte\b|\bknip|taglio/iu;
+/** A header counts for the list run starting this many text items after it. */
+const CUT_HEADER_REACH = 8;
+/** A list line naming a fabric of its own ("2 x lining") counts per fabric: never one count. */
+const FABRIC_WORD =
+  /lining|interfacing|fusing|futter|einlage|vlies|подклад|дублерин|флизелин|podszewk|flizelin|doublure|entoilage|forro|entretela|vlieseline|mellemlæg|indlæg|innlegg|mellanlägg|foer/iu;
 
 /**
  * The cutting list's counts, from the document's text: numbered lines whose remainder (after the
- * number) prints a count. Every copy of a number (the list in DK / NO / SE, per fabric) must print
- * the SAME count — copies that disagree (main 2, lining 1; an interfacing list numbered 1..4 again)
- * prove nothing and the number is dropped (D3: the operator is asked as before).
+ * number) prints a count. Each cutting header opens a scope (main fabric, lining, interfacing —
+ * r4454 numbers its interfacing list 1..4 again): copies of a number inside one scope that disagree
+ * prove nothing (dropped); scopes that disagree are kept apart and the entry carries the others as
+ * `conflict` (asked, never applied).
  */
 export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
-  const byNo = new Map<string, QtyListEntry>();
-  const conflict = new Set<string>();
+  type Raw = { at: number; scope: number; text: string; no: string; words: string[]; qty: number };
+  const raws: Raw[] = [];
+  let scope = 0;
+  const headerAt: number[] = [];
   for (let i = 0; i < texts.length; i++) {
     let t = normFoldLine(texts[i]);
     // "69." + "Ærme, 4 gange": a number item right before the line is its number
     const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
     if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
     const m = LIST_LINE.exec(t);
-    if (!m) continue;
+    if (!m) {
+      if (CUT_HEADER.test(t) && t.split(/\s+/).length <= 8) {
+        scope++;
+        headerAt.push(i);
+      }
+      continue;
+    }
     const rest = t.slice(m[0].length - 1);
     const qty = parseQuantity(rest);
     if (qty == null) continue;
@@ -623,12 +654,43 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
           w.length >= 3 && !/^(?:gange?r?|gånger|ggr|mal|fois|razy|keer|veces|дет|шт)$/u.test(w),
       );
     if (!words.length || words.length > QTY_LIST_MAX_WORDS) continue;
-    const no = m[1].toLowerCase();
-    const was = byNo.get(no);
-    if (was && was.qty !== qty) conflict.add(no);
-    else if (!was) byNo.set(no, { text: t, no, words, qty });
+    raws.push({ at: i, scope, text: t, no: m[1].toLowerCase(), words, qty });
   }
-  return [...byNo.values()].filter((e) => !conflict.has(e.no));
+  // runs: list lines one after another (a split-off number item between them)
+  const inSection = new Set<Raw>();
+  for (let k = 0; k < raws.length; ) {
+    let e = k;
+    while (e + 1 < raws.length && raws[e + 1].at - raws[e].at <= 2) e++;
+    const run = raws.slice(k, e + 1);
+    const head = headerAt.some((h) => h < run[0].at && run[0].at - h <= CUT_HEADER_REACH);
+    if (run.length >= 3 || head) for (const r of run) inSection.add(r);
+    k = e + 1;
+  }
+  // per number: one entry per scope (a scope whose copies disagree is dropped)
+  const byNo = new Map<string, Map<number, Raw | null>>();
+  for (const r of raws) {
+    const sc = byNo.get(r.no) ?? new Map<number, Raw | null>();
+    byNo.set(r.no, sc);
+    const was = sc.get(r.scope);
+    if (was === undefined) sc.set(r.scope, r);
+    else if (was && was.qty !== r.qty) sc.set(r.scope, null);
+  }
+  const out: QtyListEntry[] = [];
+  for (const [no, sc] of byNo) {
+    const live = [...sc.values()].filter((r): r is Raw => !!r);
+    if (!live.length) continue;
+    const first = live.find((r) => inSection.has(r)) ?? live[0];
+    const others = live.filter((r) => r.qty !== first.qty);
+    out.push({
+      text: first.text,
+      no,
+      words: first.words,
+      qty: first.qty,
+      section: inSection.has(first) && !FABRIC_WORD.test(first.text),
+      ...(others.length ? { conflict: others.map((r) => r.text) } : {}),
+    });
+  }
+  return out;
 }
 
 /**

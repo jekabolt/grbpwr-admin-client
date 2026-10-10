@@ -1408,6 +1408,7 @@ export async function main(): Promise<number> {
       docTexts: string[],
       texts = ['SLEEVE'],
       seedLabels: Record<number, string> = { 1: '69' },
+      extraCard?: string,
     ) => {
       const F = fx();
       addFamily(
@@ -1418,7 +1419,14 @@ export async function main(): Promise<number> {
         [{ pts: grainLine(120, 100, 450), closed: false, role: 'grain' }],
         texts,
       );
-      return buildPieceSpecsDetailed(input(F, CUT10, { docTexts, seedLabels })).output;
+      const sm = proposeSizeMap(RUN3, CARD3);
+      const sizeMap = extraCard
+        ? {
+            ...sm,
+            unmapped: [...sm.unmapped, { sizeId: 99, name: extraCard, token: extraCard, rank: 3 }],
+          }
+        : sm;
+      return buildPieceSpecsDetailed(input(F, CUT10, { docTexts, seedLabels, sizeMap })).output;
     };
     const qOf = (o: ReturnType<typeof build>) => o.unproven.find((u) => u.kind === 'quantity');
     const ids = (o: ReturnType<typeof build>) =>
@@ -1463,7 +1471,7 @@ export async function main(): Promise<number> {
     );
     const byCode = build(['7 - Карман - 4 дет.', '8 - Обтачка - 2 дет.'], ['POCKET'], {});
     ck(
-      qOf(byCode)?.shown === 'pair×2' && /title only/.test(qOf(byCode)?.detail ?? ''),
+      qOf(byCode)?.shown === 'pair×2' && /read as a code/.test(qOf(byCode)?.detail ?? ''),
       'no label (number drawn as curves): «Карман» read as PCK → the one PCK piece, shown ×4, still asked',
       JSON.stringify(qOf(byCode)),
     );
@@ -1472,6 +1480,49 @@ export async function main(): Promise<number> {
       qOf(twoPck)?.shown === 'pair×1' && !/cutting list/.test(qOf(twoPck)?.detail ?? ''),
       'two entries read as PCK with different counts → no answer shown from the list',
       JSON.stringify(qOf(twoPck)),
+    );
+    // Codex N3: only a cutting-list line that names THIS piece answers by itself
+    const step = build(['69. Pres sømmen 4 gange']);
+    ck(
+      qOf(step)?.shown === 'pair×2' && /not in a cutting list/.test(qOf(step)?.detail ?? ''),
+      'Codex N3: «69. Pres sømmen 4 gange» (a numbered step, no list around it) → shown ×4, asked',
+      JSON.stringify(qOf(step)),
+    );
+    const notNamed = build(['Klippevejledning:', '69. Pres sømmen 4 gange']);
+    ck(
+      qOf(notNamed)?.shown === 'pair×2' &&
+        /does not name this piece/.test(qOf(notNamed)?.detail ?? ''),
+      'Codex N3: under a cutting header but its words do not name the sleeve → asked',
+      JSON.stringify(qOf(notNamed)),
+    );
+    const scopes = build([
+      'Klippevejledning:',
+      '69. Ærme, 4 gange',
+      'Cutting lining:',
+      '69. Ærme, 2 gange',
+    ]);
+    ck(
+      qOf(scopes)?.shown === 'pair×1' && /disagree/.test(qOf(scopes)?.detail ?? ''),
+      'Codex N3: two lists (scopes) printing 4 and 2 for «69» → no count taken, both quoted',
+      JSON.stringify(qOf(scopes)),
+    );
+    const lining = build(['Klippevejledning:', '69. Ærme lining, 4 gange']);
+    ck(
+      !!qOf(lining) && /not in a cutting list/.test(qOf(lining)?.detail ?? ''),
+      'Codex N3: a list line naming a fabric of its own («lining») → asked',
+      JSON.stringify(qOf(lining)),
+    );
+    const sized = build(['Klippevejledning:', '46. Ærme, 4 gange'], ['SLEEVE'], { 1: '46' }, '46');
+    ck(
+      qOf(sized)?.shown === 'pair×2' && /is a size/.test(qOf(sized)?.detail ?? ''),
+      'Codex N3: the list number 46 is a card size → asked',
+      JSON.stringify(qOf(sized)),
+    );
+    const headed = build(['Klippevejledning:', '69. Ærme, 4 gange']);
+    ck(
+      !qOf(headed),
+      'Codex N3: one line under a cutting header, naming the sleeve, bound by 69 → answers by itself',
+      JSON.stringify(qOf(headed)),
     );
     const steps = build(['69 Læg ærmerne sammen to og to og sy 2 x langs kanten forneden']);
     ck(
