@@ -590,8 +590,10 @@ export type PieceCandidate = {
    * where the source stops it short;
    * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
    * neighbouring rank's contour; its `pts` is empty.
+   * `chains` (band-cut only): the ladder rung(s) of this rank the cut carries across the band — its
+   * source provenance and the ONLY chains that may carry it in G15 (F14e/S1, Codex round 3).
    */
-  derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[] }[];
+  derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
 };
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
