@@ -40,6 +40,12 @@ export type ReviewItem = {
   pending: boolean;
   /** The server refused the last write of this row: its words. */
   error?: string;
+  /** Other stored rows of the very same pair (two clients confirmed it): shown as this one. */
+  dupes?: StoredSeam[];
+  /** The two plies of one ply pair sewn to each other (a double yoke, collar plies): its keys. */
+  plies?: string[];
+  /** One side runs through a ply pair (sewn between both plies): the pair's keys. */
+  through?: string[];
 };
 
 export type Review = {
@@ -70,6 +76,31 @@ export const pairId = (c: SeamCandidate) => {
   const b = sideOfCandidate(c, 'b').join('+');
   return `p:${a < b ? `${a}~${b}` : `${b}~${a}`}`;
 };
+
+/**
+ * Ply pairs of the graph (identical twins: congruent layers of one cloth) and an edge mapper that
+ * reads a follower ply's edge as the lead ply's edge at the same place — the pair is ONE piece for
+ * the review: a row on either ply is the same seam.
+ */
+export function plyPairsOf(graph: SeamGraph) {
+  const byKey = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  const groupOf = new Map<string, string[]>();
+  for (const p of graph.pieces) {
+    const mates = p.twinOf.filter((t) => t.kind === 'identical').map((t) => t.key);
+    if (!mates.length) continue;
+    groupOf.set(p.pieceKey, [p.pieceKey, ...mates].sort());
+  }
+  const canon = (id: EdgeId): EdgeId => {
+    const k = pieceOf(id);
+    const g = groupOf.get(k);
+    if (!g || g[0] === k) return id;
+    const from = byKey.get(k)?.edges.find((e) => e.id === id);
+    const to = byKey.get(g[0])?.edges.find((e) => e.k === from?.k);
+    if (!from || !to || Math.abs(from.lenMm - to.lenMm) > Math.max(3, 0.02 * from.lenMm)) return id;
+    return to.id;
+  };
+  return { groupOf, canon };
+}
 
 export function buildReview(
   graph: SeamGraph,
@@ -111,6 +142,38 @@ export function buildReview(
     });
   }
 
+  // Ply pairs: one piece for the review. The same pair stored twice (two clients, two keys — or one
+  // row on each ply) is ONE row: the first, carrying the others as `dupes`.
+  const { groupOf, canon } = plyPairsOf(graph);
+  const canonSide = (ids: readonly EdgeId[]) => [...new Set(ids.map(canon))].sort();
+  const sigOf = (it: ReviewItem) =>
+    `${it.group}|${[canonSide(it.a).join('+'), canonSide(it.b).join('+')].sort().join('~')}`;
+  const firstOf = new Map<string, ReviewItem>();
+  for (const it of items.slice()) {
+    if (it.group !== 'confirmed' && it.group !== 'rejected') continue;
+    if (!it.a.length || !it.b.length) continue;
+    const sig = sigOf(it);
+    const first = firstOf.get(sig);
+    if (!first) {
+      firstOf.set(sig, it);
+      continue;
+    }
+    first.dupes = [...(first.dupes ?? []), it.row!];
+    items.splice(items.indexOf(it), 1);
+  }
+  const plyOfSide = (ids: readonly EdgeId[]) => {
+    const gs = new Set(ids.map((id) => groupOf.get(pieceOf(id))?.join('+') ?? ''));
+    return gs.size === 1 && !gs.has('') ? [...gs][0].split('+') : null;
+  };
+  const markPlies = (it: ReviewItem) => {
+    const ga = plyOfSide(it.a);
+    const gb = plyOfSide(it.b);
+    if (ga && gb && ga.join('+') === gb.join('+')) it.plies = ga;
+    else if (ga && !gb) it.through = ga;
+    else if (gb && !ga) it.through = gb;
+  };
+  items.forEach(markPlies);
+
   const stored = items.slice();
   const seen = new Set<string>();
   for (const c of graph.chosen) {
@@ -120,7 +183,8 @@ export function buildReview(
     const a = sideOfCandidate(c, 'a');
     const b = sideOfCandidate(c, 'b');
     if (a.length === 0 || b.length === 0) continue;
-    if (stored.some((s) => samePair(a, b, s.a, s.b))) continue;
+    if (stored.some((s) => samePair(a.map(canon), b.map(canon), s.a.map(canon), s.b.map(canon))))
+      continue;
     const id = pairId(c);
     if (seen.has(id)) continue;
     seen.add(id);
@@ -136,6 +200,7 @@ export function buildReview(
       pending: false,
       ...(errors[id] ? { error: errors[id] } : {}),
     });
+    markPlies(items[items.length - 1]);
   }
 
   // Stable numbers: by the first piece either side touches (sheet order), then by its edge.

@@ -128,7 +128,7 @@ export function reportRows(
       kind: 'words',
       key: `r:${w}`,
       label: 'stored rows',
-      text: w,
+      text: say(w),
       check: /stale|not found/.test(w),
     });
   return rows;

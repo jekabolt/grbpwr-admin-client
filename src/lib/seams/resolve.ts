@@ -383,10 +383,20 @@ export function resolveSeamDecisions(
 
     const hows = new Set([...ha, ...hb].map((h) => h.how));
     const how = hows.has('shape') ? 'shape' : hows.has('topology') ? 'topology' : 'hint';
+    // The same pair stored twice (two clients confirmed it, each with its own key): one seam. The
+    // second row is applied (it is decided) but adds no second seam over the same edges.
+    const sig = pairSig(ha, hb, s.kind);
+    const twin = applied.find((x) => x.candidate && x.seam.status === s.status && x.sig === sig);
+    if (twin?.candidate) {
+      const w = `${label(s)}: the same pair is stored twice (rows ${twin.seam.seamKey.slice(-6)} and ${s.seamKey.slice(-6)}) — read as one seam`;
+      words.push(w);
+      applied.push({ seam: s, a: ha, b: hb, candidate: twin.candidate, sig });
+      continue;
+    }
     const cand = candidateOf(s, ha, hb, ruleWords, provenanceOf(s, by, at, how));
     if (s.kind === 'closure') closures.push(cand);
     else forced.push(cand);
-    applied.push({ seam: s, a: ha, b: hb, candidate: cand });
+    applied.push({ seam: s, a: ha, b: hb, candidate: cand, sig });
   }
 
   return { forced, closures, excluded, words, applied, stale, orphan };
@@ -395,6 +405,12 @@ export function resolveSeamDecisions(
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+
+/** A resolved pair's edges, order-free: `kind|A edges|B edges` with the sides sorted. */
+const pairSig = (ha: AnchorHit[], hb: AnchorHit[], kind: StoredSeam['kind']) => {
+  const side = (hs: AnchorHit[]) => [...new Set(hs.flatMap((h) => h.edges))].sort().join('+');
+  return `${kind}|${[side(ha), side(hb)].sort().join('~')}`;
+};
 
 export function hitOf(
   a: EdgeAnchor,

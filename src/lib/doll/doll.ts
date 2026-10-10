@@ -4057,6 +4057,19 @@ export function solveDoll(input: DollInput): DollReport {
       w.note = `its two edges are ${far.toFixed(0)} mm apart once the pieces are placed (${ga} ↔ ${gb}) — a wrong pairing? not sewn`;
     }
   }
+  // A ply pair drawn as one panel (a double yoke: the plies are sewn to each other) that nothing
+  // else holds: said as the pair, and what the order wants it sewn to — never «no seam found».
+  const plyWords = (P: { key: string; layers: string[] }): string | null => {
+    if (!P.layers.length) return null;
+    const keys = new Set([P.key, ...P.layers]);
+    const want = new Set<string>();
+    for (const J of opt.joins ?? [])
+      if (J.parts.some((X) => X.some((k) => keys.has(k))))
+        for (const X of J.parts) for (const k of X) if (!keys.has(k)) want.add(k);
+    const others = [...want].slice(0, 4);
+    return `layer pair ${[P.key, ...P.layers].join(' + ')} — the plies are sewn to each other, but the pair is not attached to the rest yet (${others.length ? `no seam to ${others.join(', ')}${want.size > others.length ? ', …' : ''}` : 'no seam to any other piece'}) — drawn apart`;
+  };
+
   // Floating pieces stand beside the doll, flat, facing front.
   let xMax = 0;
   for (let v = 0; v < N; v++) if (placed[v]) xMax = Math.max(xMax, pos[3 * v]);
@@ -4081,9 +4094,11 @@ export function solveDoll(input: DollInput): DollReport {
     const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
     floating.push({
       pieceKey: P.key,
-      reason: has
-        ? 'sewn only to pieces outside any wrap group — drawn apart'
-        : 'no seam found for any of its edges — drawn apart',
+      reason:
+        plyWords(P) ??
+        (has
+          ? 'sewn only to pieces outside any wrap group — drawn apart'
+          : 'no seam found for any of its edges — drawn apart'),
     });
   }
 
@@ -4324,6 +4339,24 @@ export function solveDoll(input: DollInput): DollReport {
         : {}),
     });
   }
+  // A contradiction next to a confirmed seam stretched > 20 % on the same pieces: that seam is the
+  // likely culprit (it pulls the pieces away from where the contradicted seam wants them).
+  if (l4) {
+    const piecesOf = (s: { a: string[]; b: string[] }) => new Set([...s.a, ...s.b].map(pk));
+    const pulled = seams.filter(
+      (s) => s.decidedBy === 'person' && s.state === 'stretched' && s.stretchPct > 20,
+    );
+    for (const s of seams) {
+      if (!s.note.startsWith('CONTRADICTION — ')) continue;
+      const P = piecesOf(s);
+      const c = pulled.find((x) => x !== s && [...piecesOf(x)].some((k) => P.has(k)));
+      if (!c) continue;
+      const add = ` · most likely culprit: the confirmed seam ${c.id} closes only by stretching ${c.stretchPct.toFixed(0)} % and pulls ${[...piecesOf(c)].join(' and ')} together`;
+      const i = contradictions.findIndex((w) => s.note.endsWith(w));
+      if (i >= 0) contradictions[i] += add;
+      s.note += add;
+    }
+  }
   for (const s of G.layerSeams)
     seams.push({
       id: `${s.a}~${s.b}`,
@@ -4469,7 +4502,7 @@ export function solveDoll(input: DollInput): DollReport {
     if (!any)
       floating.push({
         pieceKey: P.key,
-        reason: 'in its group but no seam of it closed or was proposed',
+        reason: plyWords(P) ?? 'in its group but no seam of it closed or was proposed',
       });
   }
   // Collar units: gaps after solving; a fall's outer edge vs the stand top it hangs from, and how

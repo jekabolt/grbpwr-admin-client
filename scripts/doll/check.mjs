@@ -218,11 +218,16 @@ if (GOLD) {
 }
 const real6 = summary.find((s) => s.id === 'card6');
 const shuf6 = summary.find((s) => s.id === 'card6-shuf');
+// The order must MEAN something: read with shuffled inputs, fewer of its declared parts end up
+// joined (by the graph or a doll proposal) than with the technologist's own inputs. (Counted over
+// parts, not only from-order proposals: a seam the graph finds itself — the yoke sandwiched between
+// its plies — leaves the from-order count without being any less the order's.)
+const share = (s) => (s.declaredParts ? s.joinedParts / s.declaredParts : 0);
 if (real6 && shuf6)
   gate(
-    'NEG card6-shuf: shuffled order inputs → fewer seams proposed from the order close',
-    shuf6.fromOrderClosed < real6.fromOrderClosed,
-    `real ${real6.fromOrderClosed} closed of ${real6.fromOrder} · shuffled ${shuf6.fromOrderClosed} of ${shuf6.fromOrder}`,
+    'NEG card6-shuf: shuffled order inputs → fewer declared parts joined',
+    share(shuf6) < share(real6),
+    `real ${real6.joinedParts}/${real6.declaredParts} · shuffled ${shuf6.joinedParts}/${shuf6.declaredParts} · from-order closed: real ${real6.fromOrderClosed} of ${real6.fromOrder}, shuffled ${shuf6.fromOrderClosed} of ${shuf6.fromOrder}`,
   );
 if (summary.some((s) => s.id === 'ss26')) {
   const g = ss26Gates('ss26');

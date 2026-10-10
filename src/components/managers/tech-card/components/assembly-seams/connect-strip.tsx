@@ -19,6 +19,43 @@ import {
   type RoleWords,
 } from './words';
 
+/**
+ * Edge roles that are normally left FREE — a hem, the centre-front opening, a vent, a strip's
+ * outer edge, a sleeve's wrist: two of them sewn to each other is rarely what the person means.
+ */
+const FREE_ROLES = new Set(['hem', 'cf', 'vent', 'strip edge', 'wrist']);
+const ROLE_PLURAL: Record<string, string> = {
+  hem: 'hems',
+  cf: 'centre-front edges',
+  vent: 'vent edges',
+  'strip edge': 'outer strip edges',
+  wrist: 'wrists',
+};
+
+/** «two hems are not usually sewn together — sure?», or null when either side is a sewing edge. */
+export function freeEdgesWarning(
+  a: readonly string[],
+  b: readonly string[],
+  roles: RoleWords,
+): string | null {
+  const roleOf = (ids: readonly string[]) => {
+    const rs = new Set(ids.map((id) => roles.get(id) ?? ''));
+    return rs.size === 1 ? [...rs][0] : '';
+  };
+  const ra = roleOf(a);
+  const rb = roleOf(b);
+  if (!FREE_ROLES.has(ra) || !FREE_ROLES.has(rb)) return null;
+  const what =
+    ra === rb
+      ? `two ${ROLE_PLURAL[ra] ?? ra}`
+      : `a ${ra === 'cf' ? 'centre-front edge' : ra} and a ${rb === 'cf' ? 'centre-front edge' : rb}`;
+  const hint =
+    ra === 'cf' && rb === 'cf'
+      ? ' (the front opening is buttoned — mark it a closure, not a seam)'
+      : ' — both are edges a garment usually leaves free';
+  return `${what} are not usually sewn together${hint} — sure?`;
+}
+
 export function ConnectStrip({
   pick,
   geoms,
@@ -49,6 +86,7 @@ export function ConnectStrip({
   const side = (ids: readonly string[], len: number) =>
     `${sideWords(ids, geoms, roles)} ${Math.round(len)} mm`;
   const d = deltaPct(la, lb);
+  const warning = ready ? freeEdgesWarning(pick.a, pick.b, roles) : null;
   return (
     <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5' data-connect-strip=''>
       <Text
@@ -86,6 +124,16 @@ export function ConnectStrip({
           </>
         )}
       </Text>
+      {warning && (
+        <Text
+          size='micro'
+          component='span'
+          className='basis-full text-warning'
+          data-connect-warning=''
+        >
+          ! {warning}
+        </Text>
+      )}
       <div className='flex items-center gap-1.5'>
         <Button
           variant='main'

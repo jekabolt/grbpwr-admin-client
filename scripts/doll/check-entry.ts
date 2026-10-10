@@ -13,7 +13,7 @@ import type { SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
 import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
-import { anchorOfRunId, grainDegOf, type StoredSeam } from '../../src/lib/seams';
+import { anchorOfRunId, grainDegOf, seamFromCandidate, type StoredSeam } from '../../src/lib/seams';
 import { neckFixtures } from './neck-fixture';
 
 type FileSpec = {
@@ -39,6 +39,11 @@ type FileSpec = {
   /** L4 NEGATIVE CONTROL: one gold row deliberately wrong — `row` (edge hints a ↔ b) re-pointed
    *  from its b to `to` (an edge id of today's segmentation). */
   wrong?: { a: string; b: string; to: string };
+  /** A beta card (tmp/plans/assembly-3d-doll/beta-data/<card>.json): pieces, order by piece NAME. */
+  betaCard?: string;
+  /** Also hand the doll the rows that card had stored on beta (edge pairs in its JSON, written
+   *  here the way the review writes them: seamFromCandidate on today's graph). */
+  betaRows?: boolean;
 };
 
 const [specPath, outDir] = process.argv.slice(2);
@@ -158,7 +163,21 @@ for (const f of spec.files) {
   let ops: DeclaredOp[] = [];
   let pieceOf: (k: string) => string | null = () => null;
   let opsSource = '';
-  if (card && !f.noOps) {
+  const beta = f.betaCard
+    ? (JSON.parse(await readFile(f.betaCard, 'utf8')) as {
+        ops: [number, string, string, string, string, string][];
+        ['stored_seams_on_beta_2026-10-10_18:02']?: string[];
+      })
+    : undefined;
+  if (beta && !f.noOps) {
+    pieceOf = (k) => (inDxf.has(k) ? k : null);
+    ops = beta.ops.map(([, type, , inputs, output]) => ({
+      inputs: inputs.split('+'),
+      output,
+      type,
+    }));
+    opsSource = `beta card order (${f.betaCard?.split('/').pop()})`;
+  } else if (card && !f.noOps) {
     const nameOf = new Map(card.pieces.map((p) => [p[0], p[1]]));
     const keys = card.pieces.map((p) => p[0]);
     const shuffled = new Map(keys.map((k, i) => [k, keys[(i * 7 + 3) % keys.length]]));
@@ -192,6 +211,25 @@ for (const f of spec.files) {
   const joins = joinsFromOps(ops, pieceOf);
   let rows: StoredSeam[] | undefined;
   let wrongWords = '';
+  if (beta && f.betaRows) {
+    const grain = grainDegOf(facts);
+    rows = (beta['stored_seams_on_beta_2026-10-10_18:02'] ?? []).flatMap((line, i) => {
+      const m = /(\S+#[\d+]+)\s*<->\s*(\S+#[\d+]+)/.exec(line);
+      if (!m) return [];
+      const r = seamFromCandidate(
+        { a: m[1], b: m[2], kind: 'edge', score: 1, evidence: {} as never },
+        graph.pieces,
+        {
+          seamKey: `BETA${String(i).padStart(22, '0')}`,
+          status: 'confirmed',
+          source: /manual/.test(line) ? 'manual' : 'graph',
+          anchoredSize: f.size ?? 'M',
+          grainDeg: grain,
+        },
+      );
+      return r ? [r] : [];
+    });
+  }
   if (f.gold) {
     const gj = JSON.parse(await readFile(f.gold, 'utf8')) as { rows: { row: StoredSeam }[] };
     rows = gj.rows.map((r) => r.row);
@@ -261,6 +299,8 @@ for (const f of spec.files) {
   const opsLines: string[] = [];
   let lacks = 0;
   let proposedN = 0;
+  let declaredParts = 0;
+  let joinedParts = 0;
   const graphLinks = new Set<string>();
   for (const sc of graph.chosen)
     for (const a of (sc.aParts ?? [sc.a]).map(pk))
@@ -292,13 +332,16 @@ for (const f of spec.files) {
         return;
       }
       const g = others.some((Y) => touches(graphLinks, X, Y));
+      declaredParts++;
       if (g) {
+        joinedParts++;
         rows.push(`${X.join('+')}: graph ✓`);
         return;
       }
       lacks++;
       const d = others.some((Y) => touches(dollLinks, X, Y));
       if (d) proposedN++;
+      if (d) joinedParts++;
       const how = report.orderJoins.filter(
         (o) => o.join === J.label && X.some((k) => o.seam.includes(`${k}#`)),
       );
@@ -528,6 +571,8 @@ for (const f of spec.files) {
     p99: S.stretchP99Pct,
     lacks,
     proposed: proposedN,
+    declaredParts,
+    joinedParts,
     fromOrder: report.seams.filter((x) => x.kind === 'from-order').length,
     fromOrderClosed: report.seams.filter((x) => x.kind === 'from-order' && x.state !== 'open')
       .length,

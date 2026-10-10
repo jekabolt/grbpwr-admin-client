@@ -514,6 +514,293 @@ await wait(400);
 await shot('07-ss26-gold-front-pom-lines');
 await page.keyboard.press('Escape');
 
+// ════ beta card 49 — a double yoke (two plies BP + BP_2 over the back BP_1) ════
+// The card as the LIVE app builds it: pieces under their line keys, block links by the DXF block,
+// the technologist's order with piece line keys and unit codes. Rows are written in the page by
+// lib/seams' own seamFromCandidate on the live graph (the review's path) — no remap.
+const b49 = JSON.parse(
+  readFileSync(resolve(PLANS, 'assembly-3d-doll/beta-data/card49.json'), 'utf8'),
+);
+const lk49 = Object.fromEntries(b49.pieces.map((p) => [p[1], p[0]]));
+const BOM49 = '01STANDBOM49MA1N0000000000';
+const URL49 = 'https://files.invalid/stand/card49-MAIN.dxf';
+const card49 = {
+  code: 'FW26-001',
+  categoryNames: ['shirts', 'tops'],
+  cloth: null,
+  files: { [URL49]: b64file(resolve(PLANS, 'assembly-3d-doll/beta-data/card49-MAIN.dxf')) },
+  card: {
+    id: 6,
+    techCard: {
+      styleNumber: 'FW26-001',
+      name: 'CHECK SHIRT',
+      targetGender: 'GENDER_ENUM_MALE',
+      measurementUnit: 'TECH_CARD_MEASUREMENT_UNIT_MM',
+      sizeIds: [3],
+      bomItems: [
+        {
+          lineKey: BOM49,
+          section: 'TECH_CARD_BOM_SECTION_FABRIC',
+          purpose: P('MAIN'),
+          kind: 'TECH_CARD_BOM_KIND_UNSET',
+          name: 'main',
+          unit: 'm',
+        },
+      ],
+      patterns: [
+        {
+          sizeId: 3,
+          filename: 'card49-MAIN.dxf',
+          url: URL49,
+          fabricPurpose: P('MAIN'),
+          bomLineKey: BOM49,
+        },
+      ],
+      pieces: b49.pieces.map((p) => ({
+        lineKey: p[0],
+        name: p[1],
+        piecesPerGarment: p[2],
+        cutSymmetry: `TECH_CARD_PIECE_CUT_SYMMETRY_${p[3]}`,
+        fused: false,
+        grainline: 'lengthwise',
+      })),
+      pieceDxfAliases: {
+        items: b49.pieces.map((p) => ({
+          pieceLineKey: p[0],
+          blockName: p[1],
+          bomLineKey: BOM49,
+          fabricPurpose: P('MAIN'),
+        })),
+      },
+      operations: b49.ops.map((o) => ({
+        inputKeys: o[3].split('+').map((k) => lk49[k] ?? k),
+        outputUnitKey: o[4],
+        outputUnitName: o[5],
+        operationType: `TECH_CARD_OPERATION_TYPE_${o[1]}`,
+        operationNumber: o[0],
+      })),
+    },
+  },
+};
+const dollRows = () =>
+  page.locator('[data-doll-row]').evaluateAll((els) =>
+    els.map((e) => ({
+      kind: e.getAttribute('data-doll-row'),
+      text: e.innerText.replace(/\n+/g, ' · '),
+    })),
+  );
+const floatingOf = (rows) => rows.filter((r) => r.kind === 'floating');
+
+head('beta card 49 (double yoke) — engine and the order only, no stored rows');
+m = await mount(card49);
+ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
+await open3d();
+ck(await overlayDone(), 'solved');
+const size49 = await page.locator('[data-doll-overlay]').getAttribute('data-doll-size');
+let st49 = await page.locator('[data-doll-state]').innerText();
+console.log(`  state (size ${size49}): ${st49}`);
+let rr49 = await dollRows();
+rr49.slice(0, 8).forEach((x) => console.log(`  row: ${x.kind} · ${x.text.slice(0, 160)}`));
+ck(
+  floatingOf(rr49).length === 0,
+  'nothing floating: the yoke plies BP + BP 2 are attached (back BP 1 under them, fronts at the shoulders)',
+  floatingOf(rr49)
+    .map((r) => r.text.slice(0, 90))
+    .join(' | '),
+);
+ck(
+  !rr49.some((r) => /no seam found for any of its edges/.test(r.text)),
+  'no «no seam found for any of its edges» row',
+);
+await shot('10-card49-engine');
+await page.keyboard.press('Escape');
+
+// The rows beta had stored at 18:02 (two clients), written the review's way, + the ply↔ply row a
+// second time under another key (two clients confirmed the same pair).
+const pairs49 = (b49['stored_seams_on_beta_2026-10-10_18:02'] ?? []).flatMap((line) => {
+  const mm = /(\S+#[\d+]+)\s*<->\s*(\S+#[\d+]+)/.exec(line);
+  return mm ? [[mm[1], mm[2], /manual/.test(line) ? 'manual' : 'graph']] : [];
+});
+pairs49.push(['BP#5', 'BP_2#5', 'graph']);
+const rows49 = await page.evaluate(([p, sz]) => window.__doll.rowsFor(p, sz), [pairs49, size49]);
+ck(
+  rows49.length === pairs49.length,
+  'every beta row anchors on the live graph (line keys)',
+  `${rows49.length} of ${pairs49.length}`,
+);
+
+head('beta card 49 — with the rows stored on beta (incl. the same ply pair twice)');
+m = await mount(card49, { seams: rows49 });
+ck(m.ok, 'the provider reads the seam graph with the stored rows');
+await wait(1500);
+await open3d();
+ck(await overlayDone(), 'solved');
+st49 = await page.locator('[data-doll-state]').innerText();
+console.log(`  state: ${st49}`);
+rr49 = await dollRows();
+rr49.slice(0, 10).forEach((x) => console.log(`  row: ${x.kind} · ${x.text.slice(0, 200)}`));
+ck(floatingOf(rr49).length === 0, 'nothing floating with the rows applied');
+ck(
+  !rr49.some((r) => /an edge takes one seam/.test(r.text)),
+  'the duplicated ply row is read as one (no «an edge takes one seam» contradiction)',
+);
+const contra = rr49.filter((r) => r.kind === 'contradiction');
+ck(
+  contra.length > 0 && contra.every((r) => /most likely culprit/.test(r.text)),
+  'each contradiction names the likely culprit (the hem ↔ hem row stretched > 20 %)',
+  contra.map((r) => r.text.slice(0, 220)).join(' | '),
+);
+await shot('11-card49-rows');
+await page.keyboard.press('Escape');
+await wait(300);
+
+// SEAMS review on the same rows: the ply pair once, the duplicated row once.
+await page.locator('[data-seams-door="review"]').click();
+await page.locator('[data-seams-review]').waitFor();
+await wait(600);
+const titles49 = await page.locator('[data-seam-row]').allInnerTexts();
+ck(
+  titles49.some((t) => /^\d*\s*BP( 2)? \+ BP( 2)? · two plies, sewn to each other/m.test(t)),
+  'review: the ply↔ply row reads «BP 2 + BP · two plies, sewn to each other …»',
+);
+ck(
+  titles49.filter((t) => /BP( 2)? \+ BP( 2)? · two plies/.test(t)).length === 1 &&
+    titles49.some((t) => /stored 2 times/.test(t)),
+  'review: the same pair stored twice is ONE row, «stored 2 times … read as one»',
+);
+console.log(`  progress: ${await page.locator('[data-seams-progress]').innerText()}`);
+await shot('12-card49-review');
+
+const sheetLabels = await page
+  .locator('[data-sheet-piece] > text')
+  .evaluateAll((els) => els.map((e) => e.textContent ?? ''));
+ck(
+  sheetLabels.some((t) => /ply of/i.test(t)),
+  'sheet: each ply is labelled «· ply of …»',
+  sheetLabels.filter((t) => /ply of/i.test(t)).join(' | '),
+);
+await page.locator('[data-seams-door="close"]').click();
+await wait(300);
+
+// Another client confirms a proposal's pair a moment before this tab accepts it: the accept goes
+// onto the other client's key — one pair, one row. (This tab's card read lacks the FP R side row,
+// so that seam is still a proposal here.)
+const noSide = rows49.filter((_, i) => !/FP_R#4/.test(pairs49[i][0] + pairs49[i][1]));
+m = await mount(card49, { seams: noSide });
+await wait(1500);
+await page.locator('[data-seams-door="review"]').click();
+await page.locator('[data-seams-review]').waitFor();
+await wait(600);
+const decideId = await page
+  .locator('[data-seam-group="decide"]')
+  .first()
+  .getAttribute('data-seam-row');
+const [ea, eb] = decideId.slice(2).split('~');
+const OTHER = '01OTHERC11ENT0000000000000';
+const other = await page.evaluate(
+  ([a, b, sz, k]) => window.__doll.rowsFor([[a, b, 'graph']], sz, [k]),
+  [ea, eb, size49, OTHER],
+);
+await page.evaluate((w) => window.__doll.serverWrite(w), other);
+await page.locator(`[data-seam-row="${decideId}"]`).click();
+await page.locator(`[data-seam-row="${decideId}"] [data-seam-door="accept"]`).click();
+await wait(1200);
+const tbl = await page.evaluate(() => window.__doll.table());
+const sigOf = (w) =>
+  [
+    w.sideA.parts
+      .map((x) => x.edgeHint)
+      .sort()
+      .join('+'),
+    w.sideB.parts
+      .map((x) => x.edgeHint)
+      .sort()
+      .join('+'),
+  ]
+    .sort()
+    .join('~');
+const sameRows = tbl.filter((w) => sigOf(w) === sigOf(other[0]));
+const putsNow = await page.evaluate(() => window.__doll.puts());
+console.log(
+  `  accepted ${decideId}: ${sameRows.length} row(s) for the pair · last write keys ${JSON.stringify(putsNow.at(-1))}`,
+);
+ck(
+  sameRows.length === 1 && putsNow.at(-1)?.[0]?.seamKey === OTHER,
+  'accept after another client confirmed the same pair → written onto ITS key (the card list was read again first)',
+);
+
+// Connect by hand: two hems → a plain warning line before connect (still allowed).
+await page.locator('[data-seams-door="hand"]').click();
+await wait(150);
+const clickHit = (id, shift = false) =>
+  page.evaluate(
+    ([i, sh]) =>
+      document
+        .querySelector(`[data-sheet-hit="${i}"]`)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: sh })),
+    [id, shift],
+  );
+await clickHit(`${lk49.FP_L}#4`);
+await clickHit(`${lk49.FP_R}#5`);
+await wait(200);
+const warn = (await page.locator('[data-connect-warning]').count())
+  ? await page.locator('[data-connect-warning]').innerText()
+  : '';
+console.log(`  strip: ${await page.locator('[data-connect-words]').innerText()}`);
+ck(
+  /two hems are not usually sewn together/.test(warn),
+  'hem ↔ hem by hand: «two hems are not usually sewn together — sure?»',
+  warn,
+);
+ck(
+  !(await page.locator('[data-connect-door="connect"]').isDisabled()),
+  'still allowed: connect stays enabled',
+);
+await shot('13-card49-hem-warning');
+// A side seam by hand: no warning.
+await clickHit(`${lk49.FP_R}#4`);
+await clickHit(`${lk49.BP_1}#0`);
+await wait(200);
+ck(
+  (await page.locator('[data-connect-warning]').count()) === 0,
+  'side ↔ side by hand: no warning',
+);
+await page.keyboard.press('Escape');
+await wait(150);
+ck(
+  (await page.evaluate(() => window.__doll.puts().length)) === 1,
+  'the only write of the section is the accept (the doll, the review read and the hand strip write nothing)',
+);
+
+// MUTATION: a row keyed to a piece that is not on the card → said in the doll, never dropped.
+const badRows = rows49.map((w, i) =>
+  i === 1
+    ? {
+        ...w,
+        sideA: {
+          parts: w.sideA.parts.map((x) => ({
+            ...x,
+            pieceLineKey: '01NOTONTHECARD00000000000Z',
+            edgeHint: `01NOTONTHECARD00000000000Z#${x.edgeHint.split('#')[1]}`,
+          })),
+        },
+      }
+    : w,
+);
+head('beta card 49 — MUTATION: one row keyed to a piece the card has not got');
+m = await mount(card49, { seams: badRows });
+await wait(1500);
+await open3d();
+ck(await overlayDone(), 'solved');
+rr49 = await dollRows();
+const said = rr49.filter((r) => r.kind === 'stored rows');
+ck(
+  said.some((r) => /no longer on the card/.test(r.text) && !/01M4J/.test(r.text)),
+  'the wrongly keyed row is a visible «stored rows» line in ASSEMBLY CHECK (pieces by name)',
+  said.map((r) => r.text.slice(0, 160)).join(' | '),
+);
+await page.keyboard.press('Escape');
+
 // ════ card 6 ════
 for (const [label, gold, name] of [
   ['prod card 6 (SS26-006) — engine only', null, '08-card6-engine'],

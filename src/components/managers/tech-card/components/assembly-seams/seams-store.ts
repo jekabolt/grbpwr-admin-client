@@ -41,6 +41,8 @@ type SeamsState = {
   /** The facts the provider read the graph from — grain lines for anchors, inputs for POM roles. */
   facts: SkeletonFacts | null;
   grainDeg: Map<string, number> | null;
+  /** When `server` was last taken from the server itself (an RPC echo or a fresh read), ms. */
+  serverAt: number;
 };
 
 const EMPTY: SeamsState = {
@@ -52,6 +54,7 @@ const EMPTY: SeamsState = {
   resolved: null,
   facts: null,
   grainDeg: null,
+  serverAt: 0,
 };
 
 export const useSeamsStore = create<SeamsState>(() => EMPTY);
@@ -88,6 +91,31 @@ export function rowsSig(rows: readonly StoredSeam[]): string {
     )
     .sort()
     .join(',');
+}
+
+/** A row's pair, order-free: kind + both sides' run hints (the same pair from two clients agrees). */
+export function rowPairSig(r: StoredSeam): string {
+  const side = (xs: StoredSeam['sideA']) =>
+    xs
+      .map((a) => a.edgeHint)
+      .sort()
+      .join('+');
+  return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
+}
+
+/**
+ * New rows onto the key of a row already stored for the same pair (another client confirmed it a
+ * moment ago, or a write of this tab is still in flight): one pair, one row — never two keys.
+ */
+export function reuseKeys(rows: readonly StoredSeam[], have: readonly StoredSeam[]): StoredSeam[] {
+  const keys = new Set(have.map((r) => r.seamKey));
+  const bySig = new Map<string, string>();
+  for (const r of have) if (!bySig.has(rowPairSig(r))) bySig.set(rowPairSig(r), r.seamKey);
+  return rows.map((r) => {
+    if (keys.has(r.seamKey)) return r;
+    const k = bySig.get(rowPairSig(r));
+    return k ? { ...r, seamKey: k } : r;
+  });
 }
 
 /** The card read's rows, readable ones only; how many were not. */

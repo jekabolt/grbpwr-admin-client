@@ -13,6 +13,7 @@ export function dollFiles(plans) {
     return f ? resolve(prod, f) : null;
   };
   const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
+  const beta = resolve(plans, 'assembly-3d-doll/beta-data');
   const SIDE_SEAMS = ['BP_2_R#0~FP_1_R#1', 'BP_1_L#2~FP_2_L#0'];
   const ALL = [
     {
@@ -71,6 +72,25 @@ export function dollFiles(plans) {
       category: 'shirt',
       card: '6',
       shuffleOps: true,
+      gender: 'MALE',
+    },
+    {
+      // beta card 49 (FW26-001 CHECK SHIRT): a double yoke (BP + BP_2, two plies) over the back
+      // BP_1 — the technologist's order and the rows stored on beta live in card49.json.
+      id: 'card49',
+      label: 'beta card 49 FW26-001 check shirt (double yoke)',
+      dxf: resolve(beta, 'card49-MAIN.dxf'),
+      category: 'shirt',
+      betaCard: resolve(beta, 'card49.json'),
+      gender: 'MALE',
+    },
+    {
+      id: 'card49-rows',
+      label: 'beta card 49 — with the rows stored on beta 10.10 18:02',
+      dxf: resolve(beta, 'card49-MAIN.dxf'),
+      category: 'shirt',
+      betaCard: resolve(beta, 'card49.json'),
+      betaRows: true,
       gender: 'MALE',
     },
     {

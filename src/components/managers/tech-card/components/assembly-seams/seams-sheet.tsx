@@ -16,6 +16,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Review, ReviewItem, SeamGroup } from './review-model';
 import { pieceWords, plainEdges, runWords, type RoleWords } from './words';
 
+/** « · ply of BP» on a piece with an identical twin (a double yoke, collar plies): one pair. */
+const plyWord = (g: PieceGeom, nameOf: (key: string) => string) => {
+  const mates = g.twinOf.filter((t) => t.kind === 'identical').map((t) => nameOf(t.key));
+  return mates.length ? ` · ply of ${mates.join(' + ')}` : '';
+};
+
 const INK = '#000';
 const GREY = '#999';
 const PIECE_FILL = '#e6e6e6';
@@ -257,6 +263,7 @@ export function SeamsSheet({
                 style={{ fontSize: 10, letterSpacing: '0.04em' }}
               >
                 {pieceWords(p.g, p.g.pieceKey)}
+                {plyWord(p.g, (k) => pieceWords(laid.placed.find((x) => x.g.pieceKey === k)?.g, k))}
               </text>
               <polygon
                 points={outline.map((q) => `${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' ')}

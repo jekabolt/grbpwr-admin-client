@@ -36,7 +36,8 @@ import { useDollStore } from 'components/managers/tech-card/components/assembly-
 import type { SeamGraph } from 'lib/assembly-skeleton/types';
 import { parseSheets } from 'lib/nesting/worker/parse-files';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
-import { toWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
+import { seamFromCandidate, toWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
+import { useSeamsStore } from 'components/managers/tech-card/components/assembly-seams/seams-store';
 import { useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -78,6 +79,8 @@ const MEASURES = [
 
 const table = new Map<string, TechCardSeamWire>();
 const calls: { method: string; path: string }[] = [];
+/** Bodies of every seam write the page sent (what the stand checks the keys of). */
+const puts: { seamKey: string; status: string }[][] = [];
 let chartCells: { sizeId: number; measurementNameId: number; value: { value: string } }[] = [];
 
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -96,8 +99,17 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     for (const k of body?.seamKeys ?? []) table.delete(k);
     return json({ seams: [...table.values()] });
   }
+  // The card read (a write reads the card's rows again when its list is old): today's table.
+  if (/\/tech-card\/\d+$/.test(url.pathname) && method === 'GET')
+    return json({ techCard: { id: 6, seams: [...table.values()] } });
   if (/\/tech-card\/\d+\/seams$/.test(url.pathname) && method === 'PUT') {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
+    puts.push(
+      (body?.seams ?? []).map((r: TechCardSeamWire) => ({
+        seamKey: r.seamKey ?? '',
+        status: r.status ?? '',
+      })),
+    );
     for (const r of body?.seams ?? []) table.set(r.seamKey, { ...r, stale: false });
     return json({ seams: [...table.values()] });
   }
@@ -115,6 +127,7 @@ localStorage.setItem(
 // ── the stand ───────────────────────────────────────────────────────────────────────────────────
 let root: Root | null = null;
 let graph: SeamGraph | null = null;
+let lastForm: TechCardFormData | null = null;
 
 function GraphTap() {
   graph = useCardSeamGraph().graph;
@@ -227,7 +240,21 @@ function goldWire(rows: StoredSeam[], form: TechCardFormData): TechCardSeamWire[
 declare global {
   interface Window {
     __doll: {
-      mount: (c: StandCard, o?: { gold?: StoredSeam[]; frozen?: boolean }) => Promise<number>;
+      mount: (
+        c: StandCard,
+        o?: { gold?: StoredSeam[]; frozen?: boolean; seams?: TechCardSeamWire[] },
+      ) => Promise<number>;
+      /** Rows the way the review writes them (seamFromCandidate on the live graph), by piece NAME
+       *  pairs «BP_2#5» ↔ «BP#5». */
+      rowsFor: (
+        pairs: [string, string, 'graph' | 'manual'][],
+        size: string,
+        keys?: string[],
+      ) => TechCardSeamWire[];
+      /** Another client writes straight to the server (not into this page's card read). */
+      serverWrite: (w: TechCardSeamWire[]) => void;
+      table: () => TechCardSeamWire[];
+      puts: () => typeof puts;
       hasGraph: () => boolean;
       calls: () => typeof calls;
       solves: () => Record<
@@ -269,7 +296,8 @@ window.__doll = {
       scopeByFile: new Map(),
       warnings: parsed.warnings,
     };
-    const seams = o.gold ? goldWire(o.gold, form) : [];
+    lastForm = form;
+    const seams = o.seams ?? (o.gold ? goldWire(o.gold, form) : []);
     for (const w of seams) table.set(w.seamKey!, w);
     chartCells = (c.chart ?? []).flatMap((x) => {
       const s = SIZES.find((z) => z.name === x.size.toLowerCase());
@@ -290,6 +318,44 @@ window.__doll = {
     return parseMs;
   },
   hasGraph: () => !!graph,
+  rowsFor: (pairs, size, keys) => {
+    const byName = new Map((lastForm?.pieces ?? []).map((p) => [p.name ?? '', p.lineKey ?? '']));
+    const id = (x: string) => {
+      const at = x.lastIndexOf('#');
+      return `${byName.get(x.slice(0, at)) ?? x.slice(0, at)}#${x.slice(at + 1)}`;
+    };
+    const grainDeg = useSeamsStore.getState().grainDeg ?? undefined;
+    return pairs.flatMap(([a, b, source], i) => {
+      const r = seamFromCandidate(
+        { a: id(a), b: id(b), kind: 'edge', score: 1, evidence: {} as never },
+        graph?.pieces ?? [],
+        {
+          seamKey: keys?.[i] ?? `01STAND${String(i).padStart(19, '0')}`,
+          status: 'confirmed',
+          source,
+          anchoredSize: size,
+          ...(grainDeg ? { grainDeg } : {}),
+        },
+      );
+      return r
+        ? [
+            {
+              ...toWire(r),
+              stale: false,
+              createdBy: 'other client (stand)',
+              createdAt: '2026-10-10T18:00:00Z',
+              updatedBy: 'other client (stand)',
+              updatedAt: '2026-10-10T18:00:00Z',
+            },
+          ]
+        : [];
+    });
+  },
+  serverWrite: (ws) => {
+    for (const w of ws) table.set(w.seamKey!, w);
+  },
+  table: () => [...table.values()],
+  puts: () => puts,
   calls: () => calls,
   solves: () =>
     Object.fromEntries(

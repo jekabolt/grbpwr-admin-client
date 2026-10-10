@@ -207,8 +207,9 @@ export function SeamsReview({
     },
     undo: (it) => {
       if (shut(it)) return;
+      // A pair stored twice is undone as one: every row of it.
       if (it.row && (it.group === 'confirmed' || it.group === 'rejected'))
-        void writes.remove([it.row]);
+        void writes.remove([it.row, ...(it.dupes ?? [])]);
     },
     note: (it, note) => {
       if (shut(it)) return;
@@ -227,7 +228,7 @@ export function SeamsReview({
     },
     remove: (it) => {
       if (shut(it)) return;
-      if (it.row) void writes.remove([it.row]);
+      if (it.row) void writes.remove([it.row, ...(it.dupes ?? [])]);
     },
     connectAgain: (it) => {
       if (frozen) return showMessage(FROZEN_REFUSAL, 'error');

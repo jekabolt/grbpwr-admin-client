@@ -19,6 +19,9 @@ import {
   lostSideWords,
   notchCheck,
   notchWords,
+  pieceOf,
+  pieceWords,
+  runWords,
   sideLen,
   sideWords,
   type RoleWords,
@@ -110,8 +113,13 @@ export function SeamRow({
   const shownAlts = allReadings ? alts : alts.slice(0, 1);
   // Readings of one role on twin edges read the same in words: name the edge as well.
   const withEdge = alts.length > 0;
+  const plyNames = (keys: readonly string[]) =>
+    keys.map((k) => pieceWords(geoms.get(k), k)).join(' + ');
   const side = (s: 'a' | 'b') => {
     const ids = s === 'a' ? item.a : item.b;
+    // A side through a ply pair: the pair, once («BP + BP 2 (both plies) · edge 6 of 6»).
+    if (item.through && ids.length && ids.every((id) => item.through!.includes(pieceOf(id))))
+      return `${plyNames(item.through)} (both plies) · ${runWords(ids, geoms.get(pieceOf(ids[0])), roles, withEdge)}`;
     if (ids.length || !item.row) return sideWords(ids, geoms, roles, withEdge);
     return lostSideWords(
       (s === 'a' ? item.row.sideA : item.row.sideB).map((x) => x.piece),
@@ -137,6 +145,9 @@ export function SeamRow({
     status = (
       <Text size='micro' variant='label' component='span' data-seam-decided=''>
         {decidedWords(item.row!, busy)}
+        {item.dupes?.length
+          ? ` · stored ${item.dupes.length + 1} times (another client decided the same pair) — read as one`
+          : ''}
       </Text>
     );
   } else if (g === 'stale') {
@@ -200,10 +211,23 @@ export function SeamRow({
         >
           {item.n}
         </Text>
-        <Text component='span' className='min-w-0 break-words'>
-          {side('a')}
-          <span className='px-1 text-labelColor'>↔</span>
-          {side('b')}
+        <Text component='span' className='min-w-0 break-words' data-seam-title=''>
+          {item.plies ? (
+            <>
+              {plyNames(item.plies)}
+              <span className='text-labelColor'>
+                {' '}
+                · two plies, sewn to each other along{' '}
+                {runWords(item.a, geoms.get(pieceOf(item.a[0] ?? '')), roles)}
+              </span>
+            </>
+          ) : (
+            <>
+              {side('a')}
+              <span className='px-1 text-labelColor'>↔</span>
+              {side('b')}
+            </>
+          )}
         </Text>
       </div>
       <div className='flex flex-col gap-1 pl-8'>

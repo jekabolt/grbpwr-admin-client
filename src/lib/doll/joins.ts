@@ -9,6 +9,7 @@
 // waistband ↔ top) are left to the doll's free-loop proposals: those edges are composites across
 // pieces (an armhole is half front, half back), which a pair search would read wrong.
 
+import { handSideOn, sameWayUp, xSideOf } from 'lib/assembly-skeleton/geometry/plies';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 
 import { roleOfPiece } from './groups';
@@ -253,157 +254,272 @@ export function completeFromJoins(
       const g = geomOf.get(k);
       return !!g && cls.includes(classOf_(g) ?? '');
     });
-  for (const J of joins) {
-    for (let i = 0; i < J.parts.length; i++) {
-      const X = J.parts[i];
-      const others = J.parts.filter((_, j) => j !== i);
-      // Already joined to another part of this operation (by the graph or an earlier proposal)?
-      if (others.some((Y) => X.some((a) => Y.some((b) => linked.has(`${a}|${b}`))))) continue;
-      const cx = new Set(
-        X.map((k) => geomOf.get(k))
+  /**
+   * Search one part X of join J against the other parts: the best free edge pair, proposed when it is
+   * close enough. `ply` (a ply pair of another part, see below) narrows the search onto that pair's
+   * canonical ply with a stricter length band, and nothing is said when no pair is found.
+   */
+  const searchPart = (
+    J: DeclaredJoin,
+    X: string[],
+    others: string[][],
+    ply?: { keys: Set<string>; lead: string; sideOk?: (B: Run) => boolean },
+  ) => {
+    // Already joined to another part of this operation (by the graph or an earlier proposal)? With
+    // `ply`: already joined to the ply pair itself.
+    if (ply) {
+      if (X.some((a) => [...ply.keys].some((b) => linked.has(`${a}|${b}`)))) return;
+    } else if (others.some((Y) => X.some((a) => Y.some((b) => linked.has(`${a}|${b}`))))) return;
+    const cx = new Set(
+      X.map((k) => geomOf.get(k))
+        .filter(Boolean)
+        .map((g) => classOf_(g!)),
+    );
+    let best: { A: Run; B: Run; score: number; ratio: number; pleated: boolean } | null = null;
+    let skippedTube = 0;
+    for (const Y of others) {
+      const cy = new Set(
+        Y.map((k) => geomOf.get(k))
           .filter(Boolean)
           .map((g) => classOf_(g!)),
       );
-      let best: { A: Run; B: Run; score: number; ratio: number } | null = null;
-      let skippedTube = 0;
-      for (const Y of others) {
-        const cy = new Set(
-          Y.map((k) => geomOf.get(k))
+      // Tube / ring onto the body: the free-loop proposals own it.
+      const tube = (c: Set<string | null>) =>
+        c.has('sleeve') || c.has('neck') || c.has('cuff') || c.has('band');
+      // Two sleeves are never sewn to each other (an order that joins both to the body lists them
+      // in one operation).
+      const roles = (K: string[]) =>
+        new Set(
+          K.map((k) => geomOf.get(k))
             .filter(Boolean)
-            .map((g) => classOf_(g!)),
+            .map((g) => readName(g!.name).role),
         );
-        // Tube / ring onto the body: the free-loop proposals own it.
-        const tube = (c: Set<string | null>) =>
-          c.has('sleeve') || c.has('neck') || c.has('cuff') || c.has('band');
-        // Two sleeves are never sewn to each other (an order that joins both to the body lists them
-        // in one operation).
-        const roles = (K: string[]) =>
-          new Set(
-            K.map((k) => geomOf.get(k))
-              .filter(Boolean)
-              .map((g) => readName(g!.name).role),
-          );
-        const rx = roles(X);
-        const ry = roles(Y);
-        // A collar onto its stand: the stand's top is a free loop the doll proposes against.
-        const collarOnStand =
-          cx.has('neck') &&
-          cy.has('neck') &&
-          ((rx.has('collar') && ry.has('stand')) || (rx.has('stand') && ry.has('collar')));
-        const hx = new Set(X.map(handOf).filter(Boolean));
-        const hy = new Set(Y.map(handOf).filter(Boolean));
-        const otherHand = hx.size === 1 && hy.size === 1 && [...hx][0] !== [...hy][0];
-        const twoTubes = (cx.has('sleeve') && cy.has('sleeve') && otherHand) || collarOnStand;
-        if (
-          twoTubes ||
-          (cx.has('body') && tube(cy)) ||
-          (cy.has('body') && tube(cx)) ||
-          (cx.has('sleeve') && cy.has('cuff')) ||
-          (cy.has('sleeve') && cx.has('cuff'))
-        ) {
-          skippedTube++;
-          continue;
-        }
-        for (const ka of X) {
-          const ga = geomOf.get(ka);
-          if (!ga || classOf_(ga) === 'skip') continue;
-          for (const kb of Y) {
-            const gb = geomOf.get(kb);
-            if (!gb || ka === kb || classOf_(gb) === 'skip') continue;
-            const ha = handOf(ka);
-            const hb = handOf(kb);
-            const lr = !!ha && !!hb && ha !== hb;
-            const fronts =
-              ['front', 'placket'].includes(readName(ga.name).role ?? '') &&
-              ['front', 'placket'].includes(readName(gb.name).role ?? '');
-            for (const A of runsOf(ga))
-              for (const B of runsOf(gb)) {
-                const ratio = Math.min(A.len, B.len) / Math.max(A.len, B.len);
-                if (ratio < 0.82) continue;
-                // Left leg onto right leg only at the rise; left front onto right front only as the
-                // front opening (a closure, not a seam).
-                if (lr && legs && Math.max(A.len, B.len) > 450) continue;
-                // …and the rise is in the upper half of both pieces (never two hems).
-                if (lr && legs && (A.yMid < 0.5 || B.yMid < 0.5)) continue;
-                if (lr && !legs && fronts && Math.max(A.len, B.len) > 300) continue;
-                let score = (1 - ratio) * 1.5;
-                if (A.notches && B.notches)
-                  score += A.notches === B.notches ? -0.05 : 0.04 * Math.abs(A.notches - B.notches);
-                score += Math.min(0.15, 0.003 * Math.abs(A.turn + B.turn));
-                score += 0.03 * (A.edges.length + B.edges.length - 2);
-                const horiz = (r: Run) => r.dx > r.dy;
-                // Two hems are never sewn to each other.
-                if (horiz(A) && horiz(B) && A.yMid < 0.4 && B.yMid < 0.4) score += 0.15;
-                // A vertical edge onto a horizontal one is unlikely.
-                if (
-                  horiz(A) !== horiz(B) &&
-                  Math.max(A.dx, A.dy) > 120 &&
-                  Math.max(B.dx, B.dy) > 120
-                )
-                  score += 0.1;
-                if (!best || score < best.score - 1e-9) best = { A, B, score, ratio };
-              }
-          }
-        }
-      }
-      if (!best || best.score > 0.25) {
-        if (skippedTube === others.length) {
-          byLoops.push({ join: J.label, part: X });
-          continue;
-        }
-        // A small piece onto a big one with no edge to match: a flap, welt or patch sewn onto the
-        // panel's face — not an edge-to-edge seam the doll can draw.
-        const big = Math.max(...others.map(areaOf));
-        const small = Math.min(areaOf(X), big);
-        const surf = (Y: string[]) =>
-          areaOf(Y) < 0.2 * areaOf(X) && !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
-        if (
-          (small < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
-          others.every(surf)
-        ) {
-          surface.push({ join: J.label, part: X });
-          continue;
-        }
-        left.push(
-          `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides${best ? ` (closest: ${best.A.id} ↔ ${best.B.id}, ${best.A.len.toFixed(0)} vs ${best.B.len.toFixed(0)} mm, score ${best.score.toFixed(2)})` : ''}`,
-        );
+      const rx = roles(X);
+      const ry = roles(Y);
+      // A collar onto its stand: the stand's top is a free loop the doll proposes against.
+      const collarOnStand =
+        cx.has('neck') &&
+        cy.has('neck') &&
+        ((rx.has('collar') && ry.has('stand')) || (rx.has('stand') && ry.has('collar')));
+      const hx = new Set(X.map(handOf).filter(Boolean));
+      const hy = new Set(Y.map(handOf).filter(Boolean));
+      const otherHand = hx.size === 1 && hy.size === 1 && [...hx][0] !== [...hy][0];
+      const twoTubes = (cx.has('sleeve') && cy.has('sleeve') && otherHand) || collarOnStand;
+      if (
+        twoTubes ||
+        (cx.has('body') && tube(cy)) ||
+        (cy.has('body') && tube(cx)) ||
+        (cx.has('sleeve') && cy.has('cuff')) ||
+        (cy.has('sleeve') && cx.has('cuff'))
+      ) {
+        skippedTube++;
         continue;
       }
-      const { A, B, ratio } = best;
-      const seam: SeamCandidate = {
-        a: A.id,
-        b: B.id,
-        score: Math.max(0, 1 - best.score),
-        kind:
-          A.edges.length > 1 || B.edges.length > 1
-            ? 'composite'
-            : ratio < 0.97
-              ? 'partial'
-              : 'edge',
-        evidence: {
-          dLenMm: Math.abs(A.len - B.len),
-          relLen: ratio,
-          notchScore: null,
-          curvature: 'flat',
-          hand: 'neutral',
-          twin: 'none',
-          self: false,
-          rule: `from the technologist's order «${J.label}»`,
-          aLenMm: A.len,
-          bLenMm: B.len,
-        },
-        ...(A.edges.length > 1 ? { aParts: A.edges.map((e) => e.id) } : {}),
-        ...(B.edges.length > 1 ? { bParts: B.edges.map((e) => e.id) } : {}),
-      };
-      markUsed(A.id);
-      markUsed(B.id);
-      link(A.piece.pieceKey, B.piece.pieceKey);
-      added.push({
-        seam,
-        join: J.label,
-        note: `proposed (from the technologist's order «${J.label}») · ${A.id} ↔ ${B.id} · ${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)} mm${A.notches || B.notches ? ` · notches ${A.notches}/${B.notches}` : ''}`,
-      });
+      for (const ka of X) {
+        const ga = geomOf.get(ka);
+        if (!ga || classOf_(ga) === 'skip') continue;
+        for (const kb of Y) {
+          const gb = geomOf.get(kb);
+          if (!gb || ka === kb || classOf_(gb) === 'skip') continue;
+          if (ply && kb !== ply.lead) continue;
+          const ha = handOf(ka);
+          const hb = handOf(kb);
+          const lr = !!ha && !!hb && ha !== hb;
+          const fronts =
+            ['front', 'placket'].includes(readName(ga.name).role ?? '') &&
+            ['front', 'placket'].includes(readName(gb.name).role ?? '');
+          for (const A of runsOf(ga))
+            for (const B of runsOf(gb)) {
+              const ratio = Math.min(A.len, B.len) / Math.max(A.len, B.len);
+              if (ratio < (ply ? 0.97 : 0.82)) continue;
+              if (ply?.sideOk && !ply.sideOk(B)) continue;
+              // Through a ply pair only a plain, clear seam (a shoulder): no short bits (an
+              // armhole end of the yoke, a placket's end), no notch disagreement.
+              if (ply && (Math.min(A.len, B.len) < 120 || Math.abs(A.notches - B.notches) > 1))
+                continue;
+              // Left leg onto right leg only at the rise; left front onto right front only as the
+              // front opening (a closure, not a seam).
+              if (lr && legs && Math.max(A.len, B.len) > 450) continue;
+              // …and the rise is in the upper half of both pieces (never two hems).
+              if (lr && legs && (A.yMid < 0.5 || B.yMid < 0.5)) continue;
+              if (lr && !legs && fronts && Math.max(A.len, B.len) > 300) continue;
+              // A pleated edge onto a plain one (a back gathered into a yoke by box pleats): the
+              // longer edge carries the pleat notches, the shorter none — its extra length is the
+              // pleats' intake, not a mismatch.
+              const [lo, sh] = A.len >= B.len ? [A, B] : [B, A];
+              const pleated =
+                ratio < 0.97 &&
+                ratio >= 0.85 &&
+                lo.len - sh.len >= 20 &&
+                lo.notches >= 2 &&
+                sh.notches === 0;
+              let score = (1 - ratio) * (pleated ? 0.5 : 1.5);
+              if (A.notches && B.notches)
+                score += A.notches === B.notches ? -0.05 : 0.04 * Math.abs(A.notches - B.notches);
+              score += Math.min(0.15, 0.003 * Math.abs(A.turn + B.turn));
+              score += 0.03 * (A.edges.length + B.edges.length - 2);
+              const horiz = (r: Run) => r.dx > r.dy;
+              // Two hems are never sewn to each other.
+              if (horiz(A) && horiz(B) && A.yMid < 0.4 && B.yMid < 0.4) score += 0.15;
+              // A vertical edge onto a horizontal one is unlikely.
+              if (horiz(A) !== horiz(B) && Math.max(A.dx, A.dy) > 120 && Math.max(B.dx, B.dy) > 120)
+                score += 0.1;
+              if (!best || score < best.score - 1e-9) best = { A, B, score, ratio, pleated };
+            }
+        }
+      }
     }
+    if (!best || best.score > 0.25) {
+      if (ply) return;
+      if (skippedTube === others.length) {
+        byLoops.push({ join: J.label, part: X });
+        return;
+      }
+      // A small piece onto a big one with no edge to match: a flap, welt or patch sewn onto the
+      // panel's face — not an edge-to-edge seam the doll can draw.
+      const big = Math.max(...others.map(areaOf));
+      const small = Math.min(areaOf(X), big);
+      const surf = (Y: string[]) =>
+        areaOf(Y) < 0.2 * areaOf(X) && !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
+      if (
+        (small < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
+        others.every(surf)
+      ) {
+        surface.push({ join: J.label, part: X });
+        return;
+      }
+      left.push(
+        `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides${best ? ` (closest: ${best.A.id} ↔ ${best.B.id}, ${best.A.len.toFixed(0)} vs ${best.B.len.toFixed(0)} mm, score ${best.score.toFixed(2)})` : ''}`,
+      );
+      return;
+    }
+    const { A, B, ratio, pleated } = best;
+    const plyWords = ply
+      ? ` · sewn between the two plies ${[...ply.keys].join(' + ')} (one seam through both)`
+      : '';
+    const pleatWords = pleated
+      ? ` · pleated: ${Math.abs(A.len - B.len).toFixed(0)} mm taken up by the pleats marked on the longer edge`
+      : '';
+    const seam: SeamCandidate = {
+      a: A.id,
+      b: B.id,
+      score: Math.max(0, 1 - best.score),
+      kind:
+        A.edges.length > 1 || B.edges.length > 1
+          ? 'composite'
+          : ratio < 0.97 && !pleated
+            ? 'partial'
+            : 'edge',
+      evidence: {
+        dLenMm: Math.abs(A.len - B.len),
+        relLen: ratio,
+        notchScore: null,
+        curvature: 'flat',
+        hand: 'neutral',
+        twin: 'none',
+        self: false,
+        rule: `from the technologist's order «${J.label}»${plyWords}${pleatWords}`,
+        aLenMm: A.len,
+        bLenMm: B.len,
+      },
+      ...(A.edges.length > 1 ? { aParts: A.edges.map((e) => e.id) } : {}),
+      ...(B.edges.length > 1 ? { bParts: B.edges.map((e) => e.id) } : {}),
+    };
+    markUsed(A.id);
+    markUsed(B.id);
+    link(A.piece.pieceKey, B.piece.pieceKey);
+    added.push({
+      seam,
+      join: J.label,
+      note: `proposed (from the technologist's order «${J.label}») · ${A.id} ↔ ${B.id} · ${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)} mm${A.notches || B.notches ? ` · notches ${A.notches}/${B.notches}` : ''}${pleatWords}${plyWords}`,
+    });
+  };
+  for (const J of joins)
+    for (let i = 0; i < J.parts.length; i++)
+      searchPart(
+        J,
+        J.parts[i],
+        J.parts.filter((_, j) => j !== i),
+      );
+  // PLY PAIRS. Two congruent layers of one cloth (identical twins: a double yoke, a facing and its
+  // piece) that the order puts in the same operation are ONE piece for the joins to other pieces:
+  // every seam along their edges goes through both plies (the back sandwiched under the yoke, the
+  // fronts' shoulders between the yoke plies). A part linked to another piece of the same unit (the
+  // fronts to the back by the side seams) says nothing about the yoke — so each other part of the
+  // operation is searched against the pair's lead ply, on edges no seam took yet. Rings (collar,
+  // stand, cuff plies) stay with the free-loop proposals.
+  const seamsNow = () => [
+    ...graph.chosen.filter((s) => !ignore.has(`${s.a}~${s.b}`)),
+    ...added.map((x) => x.seam),
+  ];
+  const edgeById = (id: EdgeId) => geomOf.get(pk(id))?.edges.find((e) => e.id === id);
+  const plain = (s: SeamCandidate, w: 'a' | 'b') =>
+    (w === 'a' ? s.aParts ?? [s.a] : s.bParts ?? [s.b]).flatMap(ids);
+  /**
+   * Which of the pair's edges a handed part may take: the side of the pair its hand is on, read
+   * from the drawing through the piece sandwiched under the pair (plies.ts). Undefined when the
+   * part has no single hand or the drawing does not tell.
+   */
+  const sideOkFor = (X: string[], pair: Set<string>) => {
+    const hx = [...new Set(X.map(handOf).filter(Boolean))] as ('L' | 'R')[];
+    if (hx.length !== 1) return undefined;
+    let sw: { q: PieceGeom; qe: Edge; p: PieceGeom; pe: Edge } | null = null;
+    for (const s of seamsNow())
+      for (const [P, Q] of [
+        [plain(s, 'a'), plain(s, 'b')],
+        [plain(s, 'b'), plain(s, 'a')],
+      ]) {
+        if (P.length !== 1 || Q.length !== 1) continue;
+        if (!pair.has(pk(P[0])) || pair.has(pk(Q[0]))) continue;
+        const pe = edgeById(P[0]);
+        const qe = edgeById(Q[0]);
+        const p = geomOf.get(pk(P[0]));
+        const q = geomOf.get(pk(Q[0]));
+        if (pe && qe && p && q && (!sw || pe.lenMm > sw.pe.lenMm)) sw = { q, qe, p, pe };
+      }
+    if (!sw) return undefined;
+    const S = sw;
+    const links = seamsNow().flatMap((s) => {
+      const a = plain(s, 'a');
+      const b = plain(s, 'b');
+      const out: { qEdge: Edge; hand: 'L' | 'R' | null }[] = [];
+      for (const [mine, theirs] of [
+        [a, b],
+        [b, a],
+      ])
+        if (mine.length === 1 && pk(mine[0]) === S.q.pieceKey && theirs.length) {
+          const e = edgeById(mine[0]);
+          const h = handOf(pk(theirs[0]));
+          if (e && h && pk(theirs[0]) !== S.q.pieceKey) out.push({ qEdge: e, hand: h });
+        }
+      return out;
+    });
+    const want = handSideOn(S.q, links, hx[0]) * sameWayUp(S.q, S.qe, S.p, S.pe);
+    if (!want) return undefined;
+    return (B: Run) => {
+      const e = B.edges[Math.floor(B.edges.length / 2)];
+      const twin = S.p.edges.find((x) => x.k === e.k) ?? e;
+      return xSideOf(S.p, twin) === want;
+    };
+  };
+  const plyMates = (k: string) =>
+    (geomOf.get(k)?.twinOf ?? []).filter((t) => t.kind === 'identical').map((t) => t.key);
+  for (const J of joins) {
+    const all = J.parts.flat();
+    for (const P of J.parts)
+      for (const k of P) {
+        const mates = plyMates(k).filter((m) => all.includes(m));
+        if (!mates.length) continue;
+        const keys = [k, ...mates].sort();
+        if (keys[0] !== k) continue;
+        const g = geomOf.get(k);
+        if (!g || classOf_(g) !== 'body') continue;
+        const pair = new Set(keys);
+        for (const X of J.parts) {
+          if (X.some((x) => pair.has(x))) continue;
+          searchPart(J, X, [keys], { keys: pair, lead: k, sideOk: sideOkFor(X, pair) });
+        }
+      }
   }
   return { added, left, byLoops, surface };
 }

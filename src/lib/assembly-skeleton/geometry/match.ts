@@ -48,6 +48,7 @@ import { closureDrills, closureReason, type ClosureVerdict } from './closures';
 import { isMirroredPair, pieceMultiplicity } from '../cut';
 import { angleAt, dist, drillPoints } from './segment';
 import { surfaceSeams } from './surface';
+import { handSideOn, sameWayUp, xSideOf } from './plies';
 import { unprovenCopies } from './twins';
 
 export type MatchRules = {
@@ -860,7 +861,6 @@ export function matchSeams(
     chosenC.push(c);
     take(c);
   }
-
   const touches = (a: Cand, b: Cand) => {
     const ea = new Set([...a.u.edges, ...a.v.edges].map((e) => e.id));
     return [...b.u.edges, ...b.v.edges].some((e) => ea.has(e.id));
@@ -878,6 +878,126 @@ export function matchSeams(
     (c.u.id === q.v.id && sameAnswer(c.v, q.u)) ||
     (c.v.id === q.u.id && sameAnswer(c.u, q.v)) ||
     (c.v.id === q.v.id && sameAnswer(c.u, q.u));
+  // PLY SANDWICH. Identical layers (proven twins — a double yoke, collar plies) are sewn to each
+  // other along their designated edge, and a straight designated edge usually carries a THIRD
+  // piece between the two plies (the back under a double yoke). The ply seam does not use that edge
+  // up for a single-layer piece: after the greedy, a straight designated edge sewn only to its ply
+  // partner takes the best free edge of a piece with no layer of its own — once per ply pair. A
+  // pattern without identical layers never gets here (the graph is unchanged).
+  if (rules.identical && designated.size) {
+    const geomByKey = new Map(pieces.map((p) => [p.pieceKey, p]));
+    const plyOf = (p: PieceGeom) =>
+      p.twinOf.filter((t) => t.kind === 'identical').map((t) => t.key);
+    const plyRun = (r: Run) =>
+      !r.chain &&
+      designated.has(r.edges[0].id) &&
+      isStraight(r) &&
+      plyOf(r.piece).length > 0 &&
+      (usedBy.get(r.edges[0].id) ?? []).length > 0 &&
+      (usedBy.get(r.edges[0].id) ?? []).every((u) => plyOf(r.piece).includes(u.piece));
+    const single = (r: Run) =>
+      plyOf(r.piece).length === 0 && r.edges.every((e) => !(usedBy.get(e.id) ?? []).length);
+    const untake = (c: Cand) => {
+      for (const [r, other] of sides(c))
+        for (const e of r.edges) {
+          const left = (usedBy.get(e.id) ?? []).filter(
+            (u) => !(u.piece === other.piece.pieceKey && u.edge === other.edges[0].id),
+          );
+          if (left.length) usedBy.set(e.id, left);
+          else usedBy.delete(e.id);
+        }
+    };
+    // The piece sandwiched under a ply pair (the back under the yoke) gives its neighbours' seams to
+    // the pair where the pair offers the same answer: a front's shoulder the greedy put on the
+    // back's armhole edge (a near tie) goes to the yoke's shoulder on the front's own side — the
+    // side of the back the pieces of its hand are sewn to (plies.ts: read from the drawing).
+    const rehome = (ply: Run, q: Run, names: string) => {
+      const up = sameWayUp(q.piece, q.edges[0], ply.piece, ply.edges[0]);
+      const linksOfQ = (skip: Cand) =>
+        chosenC.flatMap((x) => {
+          if (x === skip) return [];
+          const [qr, o] =
+            x.u.piece === q.piece ? [x.u, x.v] : x.v.piece === q.piece ? [x.v, x.u] : [null, null];
+          return qr && o && o.piece !== q.piece && !qr.chain
+            ? [{ qEdge: qr.edges[0], hand: o.piece.hand }]
+            : [];
+        });
+      for (const c of [...chosenC]) {
+        if (c.dropped) continue;
+        const [qr, sr] =
+          c.u.piece === q.piece ? [c.u, c.v] : c.v.piece === q.piece ? [c.v, c.u] : [null, null];
+        if (!qr || !sr || qr.chain || qr.edges[0] === q.edges[0]) continue;
+        if (sr.piece === q.piece || sr.piece === ply.piece || !sr.piece.hand) continue;
+        if (plyOf(ply.piece).includes(sr.piece.pieceKey)) continue;
+        const want = handSideOn(q.piece, linksOfQ(c), sr.piece.hand) * up;
+        if (want === 0) continue;
+        const alt = eligible.find((x) => {
+          if (x === c || x.dropped) return false;
+          const [pr, s2] =
+            x.u.piece === ply.piece
+              ? [x.u, x.v]
+              : x.v.piece === ply.piece
+                ? [x.v, x.u]
+                : [null, null];
+          if (!pr || !s2 || pr.chain || s2.id !== sr.id) return false;
+          if ((usedBy.get(pr.edges[0].id) ?? []).length) return false;
+          if (x.score < c.score - SKELETON.ambiguity) return false;
+          if (x.evidence.dLenMm > c.evidence.dLenMm) return false;
+          return xSideOf(ply.piece, pr.edges[0]) === want;
+        });
+        if (!alt) continue;
+        untake(c);
+        chosenC.splice(chosenC.indexOf(c), 1);
+        alt.evidence = {
+          ...alt.evidence,
+          rule: `through the plies ${names}: ${sr.piece.name} is sewn to the ply pair, not to ${q.piece.name} sandwiched under it (${c.u.id} ↔ ${c.v.id} was a near tie)`,
+        };
+        chosenC.push(alt);
+        take(alt);
+      }
+    };
+    const pairDone = new Set<string>();
+    for (const c of eligible) {
+      if (c.score < SKELETON.accept) break;
+      if (c.kind !== 'edge' || chosenC.includes(c)) continue;
+      const [ply, other] =
+        plyRun(c.u) && single(c.v)
+          ? [c.u, c.v]
+          : plyRun(c.v) && single(c.u)
+            ? [c.v, c.u]
+            : [null, null];
+      if (!ply || !other) continue;
+      // Only a clear answer: lengths equal, and no other reading of either edge comes close (a
+      // collar ply's straight edge «fits» a sleeve's underarm by length alone; a belt loop fits
+      // a dozen short edges).
+      if (c.evidence.dLenMm > SKELETON.lenAbsMm) continue;
+      if (
+        eligible.some(
+          (q) =>
+            q !== c &&
+            twinKindOf(q.u.piece, q.v.piece) !== 'identical' &&
+            Math.abs(q.score - c.score) <= SKELETON.ambiguity &&
+            touches(c, q) &&
+            !equivalent(c, q),
+        )
+      )
+        continue;
+      const pair = [ply.piece.pieceKey, ...plyOf(ply.piece)].sort(cmp).join('+');
+      if (pairDone.has(pair)) continue;
+      pairDone.add(pair);
+      const names = [ply.piece.pieceKey, ...plyOf(ply.piece)]
+        .map((k) => geomByKey.get(k)?.name ?? k)
+        .join(' + ');
+      c.evidence = {
+        ...c.evidence,
+        rule: `sandwich: ${other.piece.name} sewn between the two plies ${names} (the plies are stitched together along this edge)`,
+      };
+      chosenC.push(c);
+      take(c);
+      rehome(ply, other, names);
+    }
+  }
+
   const chosenSet = new Set(chosenC);
   const engineChosen = chosenC.map((c) => {
     const alts = eligible.filter(
