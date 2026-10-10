@@ -26,7 +26,13 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { budgetOf, inputTooLarge, oversizedPdfImages, oversizedPdfImagesMessage } from '../budget';
+import {
+  budgetOf,
+  inputTooLarge,
+  oversizedPdfImagesMessage,
+  pdfImageScan,
+  unreadablePdfImagesMessage,
+} from '../budget';
 import { boxArea, intersectBox, type M6 } from './geom';
 import { loadPdfjs, openPdf, type PdfDocument, type PdfPage } from './pdfjs';
 import { textsOf } from './text';
@@ -214,11 +220,17 @@ export async function extractPdfWith(
     }
     // C5: pdf.js drops an image over the raster limit without a trace. Nothing drawn besides it →
     // the file is that scan: refuse it; vectors drawn → keep them and say the image was skipped.
-    const big = oversizedPdfImages(file.bytes);
+    const scan = pdfImageScan(file.bytes);
+    const big = scan.oversized;
+    const empty = pages.every((pg) => pg.paths.length === 0);
     if (big.length) {
       const msg = oversizedPdfImagesMessage(big);
-      if (pages.every((pg) => pg.paths.length === 0)) throw inputTooLarge(msg);
+      if (empty) throw inputTooLarge(msg);
       warnings.push(msg);
+    } else if (scan.unknown && empty && pages.every((pg) => pg.rasters.length === 0)) {
+      // F14 R8 backstop: an image whose size the raw scan could not read, never drawn, nothing
+      // else on the pages — pdf.js dropped it (it hands over every image it keeps)
+      throw inputTooLarge(unreadablePdfImagesMessage(scan.unknown));
     }
     progress?.(pageList.length, pageList.length);
     return {

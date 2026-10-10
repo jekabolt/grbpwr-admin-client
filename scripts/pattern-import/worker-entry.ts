@@ -77,15 +77,29 @@ function ctx(stopAfter?: number): StageCtx {
 }
 
 /** A one-page PDF painting a w × h image XObject (8-bit gray, no data: pdf.js drops it for its
- * size before decoding), optionally with a stroked vector line. */
-function pdfWithImage(w: number, h: number, vectors: boolean): ArrayBuffer {
+ * size before decoding), optionally with a stroked vector line. `dims`: the size written directly,
+ * as indirect integer objects (`/Width 6 0 R`, F14 R8), or indirect with a comment inside the
+ * integer object (`6 0 obj % …` — pdf.js reads it, the raw byte scan cannot: the backstop). */
+function pdfWithImage(
+  w: number,
+  h: number,
+  vectors: boolean,
+  dims: 'direct' | 'indirect' | 'hidden' = 'direct',
+): ArrayBuffer {
   const content = `${vectors ? '10 10 m 500 500 l S\n' : ''}q 595 0 0 842 0 0 cm /Im1 Do Q\n`;
+  const size = dims === 'direct' ? `/Width ${w} /Height ${h}` : '/Width 6 0 R /Height 7 0 R';
+  const data = w * h <= 1e6 ? '\x80'.repeat(w * h) : '\x00';
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',
     `<< /Length ${content.length} >>\nstream\n${content}endstream`,
-    `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x00\nendstream`,
+    `<< /Type /XObject /Subtype /Image ${size} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${data.length} >>\nstream\n${data}\nendstream`,
+    ...(dims === 'direct'
+      ? []
+      : dims === 'indirect'
+        ? [`${w}`, `${h}`]
+        : [`% width\n${w}`, `% height\n${h}`]),
   ];
   let pdf = '%PDF-1.4\n';
   const offs: number[] = [];
@@ -1254,6 +1268,45 @@ async function guardsCase() {
     'C5: raster PDF whose 36 MP image pdf.js would drop → too-large; with vectors → kept + visible note',
     scanOnly === 'too-large' && !!note,
     `${scanOnly} · ${note ?? JSON.stringify(mixedOut).slice(0, 120)}`,
+  );
+  // F14 R8: the same images with an INDIRECT size (`/Width 6 0 R`) — the raw scan resolves the
+  // integer objects; with a size the scan cannot read (a comment inside the object) the backstop
+  // refuses the empty result; a small image of unreadable size is drawn, so it is NOT refused.
+  const extractOf = (name: string, bytes: ArrayBuffer) =>
+    new Session(7, [{ name, bytes }])
+      .runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx())
+      .catch((e: unknown) => toWireError(e));
+  const indOnly = await extractOf('ind36.pdf', pdfWithImage(6000, 6000, false, 'indirect'));
+  const indMixed = await extractOf('indmixed36.pdf', pdfWithImage(6000, 6000, true, 'indirect'));
+  const indNote =
+    'warnings' in indMixed ? indMixed.warnings.find((w) => /6000 × 6000/.test(w)) : undefined;
+  check(
+    C,
+    'R8: indirect /Width /Height, image only → too-large naming 6000 × 6000 and the dpi guidance',
+    'code' in indOnly &&
+      indOnly.code === 'too-large' &&
+      /6000 × 6000/.test(indOnly.message) &&
+      /dpi/.test(indOnly.message),
+    'code' in indOnly ? `${indOnly.code}: ${indOnly.message.slice(0, 140)}` : 'read',
+  );
+  check(
+    C,
+    'R8: indirect /Width /Height + vectors → vectors kept + the visible note',
+    'pages' in indMixed && indMixed.pages.length === 1 && !!indNote,
+    'pages' in indMixed
+      ? `${indMixed.pages.map((p) => p.cls).join(',')} · ${indNote ?? 'no note'}`
+      : JSON.stringify(indMixed).slice(0, 140),
+  );
+  const hidden = await extractOf('hidden36.pdf', pdfWithImage(6000, 6000, false, 'hidden'));
+  const hiddenSmall = await extractOf('hidden-small.pdf', pdfWithImage(64, 64, false, 'hidden'));
+  check(
+    C,
+    'R8 backstop: size unreadable by the scan, image dropped, page empty → too-large; a small one is drawn → not refused',
+    'code' in hidden &&
+      hidden.code === 'too-large' &&
+      /dpi/.test(hidden.message) &&
+      !('code' in hiddenSmall && hiddenSmall.code === 'too-large'),
+    `${'code' in hidden ? `${hidden.code}: ${hidden.message.slice(0, 100)}` : 'read'} · small: ${'code' in hiddenSmall ? hiddenSmall.code : 'read'}`,
   );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);
