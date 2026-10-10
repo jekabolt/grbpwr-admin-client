@@ -8,6 +8,8 @@
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
 //   grid-hatch      graded nest under a sheet grid (thin grey) and same-look hatching inside the piece
 //   equal-area      two layouts with equal areas but other regions → ambiguous (pickLayout, pure)
+//   card-prior      one size + a card of 6: fills as one size (also drawn twice, offset); a nested
+//                   same-look line → refused
 //   over-maxfree    the bench's robe / kombinezon solved with maxFree 1–2: components beyond the
 //                   search are proven irrelevant or the piece is refused — never a wrong contour
 import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
@@ -203,8 +205,48 @@ function equalArea(): FixtureResult {
   return { name: 'equal-area', ok, why: `equal areas, other region → ambiguous ${two.ambiguous}; same region → ambiguous ${one.ambiguous}` };
 }
 
+/**
+ * The card's size run is a weak prior. A one-size piece (cut line + a stitch line of another look,
+ * no size label) with a card of 6 sizes fills as one size; so does the same piece drawn twice with a
+ * few mm registration offset (a tiled sheet, blazer). The same piece with a nested SAME-look line
+ * (two sizes nobody encoded) is refused.
+ */
+function cardPrior(): FixtureResult {
+  // a 5-sided piece (not a rectangle: the registration copy must be a curved line)
+  const piece = (dx: number, dy: number, inset = 0): PtMm[] => [
+    { x: dx + inset, y: dy + inset },
+    { x: dx + 300 - inset, y: dy + inset },
+    { x: dx + 340 - inset, y: dy + 120 },
+    { x: dx + 300 - inset, y: dy + 240 - inset },
+    { x: dx + inset, y: dy + 240 - inset },
+    { x: dx + inset, y: dy + inset },
+  ];
+  const seed = { x: 150, y: 120 };
+  const cases: { name: string; draws: Draw[]; refuse: boolean }[] = [
+    { name: 'one size', draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(0, 0, 10), style: 2 }], refuse: false },
+    {
+      name: 'registration copy',
+      draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(3, -2), style: 0 }, { pts: piece(0, 0, 10), style: 2 }],
+      refuse: false,
+    },
+    { name: 'nested same look', draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(0, 0, 8), style: 0 }], refuse: true },
+  ];
+  const notes: string[] = [];
+  let ok = true;
+  for (const k of cases) {
+    const { families } = run(k.draws, [seed], 6);
+    const cs = families.flatMap((f) => f.candidates);
+    const refused = cs.some((c) => c.outcome === 'refused');
+    const closed = cs.some((c) => c.outcome === 'closed');
+    const good = k.refuse ? refused && !closed : !refused && closed;
+    if (!good) ok = false;
+    notes.push(`${k.name} ${tally(families)}${good ? '' : ' ✗'}`);
+  }
+  return { name: 'card-prior', ok, why: notes.join(' · ') };
+}
+
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {

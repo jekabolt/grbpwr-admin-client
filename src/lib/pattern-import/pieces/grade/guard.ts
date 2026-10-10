@@ -10,11 +10,11 @@
 // "The same look" is the line's APPEARANCE, not its style id: two adapters (or two layers) give the
 // same black 0.3 mm solid line different ids. Width, colour and dash are compared within tolerance.
 // Lines the legend made frames / grids / notches / seam / grain / internal lines are never evidence.
-import type { Chain, ChainId, ChainRole, LineClass, Style } from 'lib/pattern-import/types';
+import type { Chain, ChainId, ChainRole, LineClass, PtMm, Style } from 'lib/pattern-import/types';
 
 import { SegGrid } from '../geom';
 
-import { resampleT } from './vec';
+import { bboxOfPts, resampleT } from './vec';
 
 export type GuardOpts = {
   /** contours side by side (self included) that make a graded nest */
@@ -112,6 +112,77 @@ export function sameLook(a: Chain, b: Chain, styles?: StyleMap): boolean {
   return ma.every((x, i) => Math.abs(x - mb[i]) <= 0.5);
 }
 
+/** Distance from p to segment ab. */
+function segDist(p: PtMm, a: PtMm, b: PtMm): number {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const L2 = vx * vx + vy * vy;
+  const t = L2 > 1e-12 ? Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2)) : 0;
+  return Math.hypot(p.x - a.x - vx * t, p.y - a.y - vy * t);
+}
+
+/** Max distance of a line's points from its end-to-end chord, mm (a closed loop: never straight). */
+function bendMm(c: Chain): number {
+  if (c.closed) return Infinity;
+  const a = c.pts[0];
+  const b = c.pts[c.pts.length - 1];
+  let m = 0;
+  for (const q of c.pts) m = Math.max(m, segDist(q, a, b));
+  return m;
+}
+
+/**
+ * Two same-look lines are a TRANSLATED COPY of each other when one, shifted as a whole, lies on the
+ * other: equal length (±1 %), equal extent (±2 mm), and ≥ 90 % of its samples within 0.5 mm of the
+ * other after the shift. That is one line drawn twice with a registration offset (a tiled sheet whose
+ * pages each carry the whole drawing, misaligned by a few mm — blazer), never two sizes: a graded
+ * outline grows, it does not move. Straight lines are left out (a graded straight edge IS a moved
+ * copy of the smaller size's), as are lines too short to tell (< COPY_MIN_MM).
+ */
+export const COPY_MIN_MM = 150;
+/** A straight-ish line: no point farther than this from its chord. */
+export const COPY_MIN_BEND_MM = 10;
+
+function isTranslatedCopy(c: Chain, d: Chain, grid: SegGrid): boolean {
+  if (Math.min(c.lengthMm, d.lengthMm) < COPY_MIN_MM) return false;
+  if (Math.abs(c.lengthMm - d.lengthMm) > 0.01 * Math.max(c.lengthMm, d.lengthMm)) return false;
+  if (bendMm(c) < COPY_MIN_BEND_MM || bendMm(d) < COPY_MIN_BEND_MM) return false;
+  const bc = bboxOfPts(c.pts);
+  const bd = bboxOfPts(d.pts);
+  const wc = bc.maxX - bc.minX;
+  const hc = bc.maxY - bc.minY;
+  if (Math.abs(wc - (bd.maxX - bd.minX)) > 2 || Math.abs(hc - (bd.maxY - bd.minY)) > 2)
+    return false;
+  const samples = resampleT(c.pts, 4);
+  if (samples.length < 10) return false;
+  // the shift: the boxes' centres, or either corner (an open copy may miss a few mm at its ends)
+  const shifts = [
+    {
+      x: (bd.minX + bd.maxX - bc.minX - bc.maxX) / 2,
+      y: (bd.minY + bd.maxY - bc.minY - bc.maxY) / 2,
+    },
+    { x: bd.minX - bc.minX, y: bd.minY - bc.minY },
+    { x: bd.maxX - bc.maxX, y: bd.maxY - bc.maxY },
+  ];
+  for (const t of shifts) {
+    if (Math.hypot(t.x, t.y) < 1) continue; // the same line drawn twice in place: not a lane anyway
+    let on = 0;
+    for (const s of samples) {
+      const q = { x: s.p.x + t.x, y: s.p.y + t.y };
+      let best = Infinity;
+      grid.near(q, 1, (k, i) => {
+        if (k !== d.id) return;
+        const a = d.pts[i];
+        const b = d.pts[(i + 1) % d.pts.length];
+        best = Math.min(best, segDist(q, a, b));
+      });
+      if (best <= 0.5) on++;
+    }
+    if (on >= 0.9 * samples.length) return true;
+  }
+  return false;
+}
+
 /** Evidence version of {@link detectUnencodedGrading}. */
 export function gradingEvidence(
   chains: readonly Chain[],
@@ -128,6 +199,13 @@ export function gradingEvidence(
   const byId = new Map(cand.map((c) => [c.id, c]));
   const grid = new SegGrid(8);
   for (const c of cand) grid.addPolyline(c.id, c.pts, c.closed);
+  const copies = new Map<string, boolean>();
+  const copyOf = (a: Chain, b: Chain) => {
+    const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+    let v = copies.get(key);
+    if (v === undefined) copies.set(key, (v = isTranslatedCopy(a, b, grid)));
+    return v;
+  };
   const cosMin = Math.cos((o.angleDeg * Math.PI) / 180);
   let total = 0;
   let nested = 0;
@@ -142,7 +220,7 @@ export function gradingEvidence(
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
-        if (!d || !sameLook(c, d, styles)) return;
+        if (!d || !sameLook(c, d, styles) || copyOf(c, d)) return;
         const p = d.pts[i];
         const q = d.pts[(i + 1) % d.pts.length];
         const sx = q.x - p.x;

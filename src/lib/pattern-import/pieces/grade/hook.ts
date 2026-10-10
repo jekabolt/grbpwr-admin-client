@@ -7,6 +7,8 @@
 //     nest of same-looking lines;
 //   • no size class carries a line and ONE size is expected (the source names its size, the
 //     operator said so, the card has one size);
+//   • only the card's size run expects n ≥ 2, no seed looks graded (the guard) and the drawing does
+//     not show n lines side by side (the solver's band count) — the card is a weak prior;
 //   • the expected size count is unknown and no seed looks graded.
 // Otherwise, per seed:
 //   expected n ≥ 2, nothing encoded  every seed must be PROVEN by gradeRanks — refused otherwise,
@@ -288,6 +290,12 @@ export function gradeHook(
     return refuseSeeds(g, 1, 'size-count', DETAIL['size-count'], null, [amb]);
   }
 
+  // the card's size run is a weak prior (the garment's sizes, not what this sheet draws): when only
+  // the card says n and no seed sits among same-looking parallel lines, a drawing that does not show
+  // n lines side by side is ONE size (blazer: cut line + stitch line, no label) — F4 as before. A
+  // drawing that does show n lanes still has to be proven size by size below
+  const weakCard =
+    exp.from === 'card' && !guardedSeeds(sheet, set, seeds, lineIds, cell, {}).length;
   const n = exp.n;
   const all = seeds.map((s) => s.id);
   if (mode === 'guard')
@@ -342,6 +350,7 @@ export function gradeHook(
     cache.set(key, G);
   }
   if (G.diag.bandMode !== n) {
+    if (weakCard) return null;
     const message =
       G.diag.bandMode > 0
         ? `the drawing shows ${G.diag.bandMode} line(s) side by side, ${exp.from === 'card' ? "the card's size run" : exp.from === 'operator' ? 'you said' : 'the source says'} ${n}`
