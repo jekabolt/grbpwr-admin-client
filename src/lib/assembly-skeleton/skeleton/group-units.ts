@@ -129,6 +129,9 @@ export type Grouping = {
 
 const listNames = (es: Entity[]) => es.map((e) => e.name).join(', ');
 
+/** F4: this many nameless pieces of one shape are a repeat (a ring), read by name, not by seams. */
+const REPEAT_MIN = 6;
+
 /** Seam score floors for geometry-only grouping: notches matched, then lengths, then accepted. */
 const GEOMETRY_TIERS = [0.95, 0.75, SKELETON.accept];
 
@@ -863,6 +866,43 @@ export function groupDetailed(
         hand: target.hand,
         why: `${def.name} layers ${listNames(layers)} sewn around ${target.name} in one step`,
       });
+    }
+  }
+
+  // ── R. repeats: six or more nameless pieces of ONE shape (the 16 triangles of a bag) ──────────
+  // Between congruent pieces every edge «matches» every other: lane A's pairing of them is noise,
+  // not evidence (F4, 05-PROD-DIAGNOSIS §6). They are read by name instead — one ring per name
+  // stem (outer_* apart from inner_*), all of it in one step — and said as a guess.
+  for (const tree of ['shell', 'lining'] as const) {
+    const loose = table.list(tree).filter((e) => !e.unit && e.roles.length === 0);
+    const seen = new Set<string>();
+    for (const e of loose) {
+      if (seen.has(e.key)) continue;
+      const same = loose.filter((x) => x === e || identical(e, x));
+      if (
+        same.length < REPEAT_MIN ||
+        !same.every((a) => same.every((b) => a === b || identical(a, b)))
+      )
+        continue;
+      same.forEach((x) => seen.add(x.key));
+      const byStem = new Map<string, Entity[]>();
+      for (const x of same)
+        byStem.set(layerStem(x.name), [...(byStem.get(layerStem(x.name)) ?? []), x]);
+      for (const [stem, ring] of byStem) {
+        if (ring.length < 3) continue;
+        ring.sort((x, y) => nameIndex(x.name) - nameIndex(y.name));
+        record(ring, {
+          name: `${stem || ring[0].name} ×${ring.length}`,
+          roles: [],
+          kind: 'geometry',
+          why: '',
+          judgement: {
+            confidence: 0.5,
+            source: 'template',
+            reason: `${ring.length} pieces of one shape (${ring[0].name} … ${ring[ring.length - 1].name}) joined into one by their name — the seams between congruent pieces cannot tell which edge meets which, check`,
+          },
+        });
+      }
     }
   }
 
