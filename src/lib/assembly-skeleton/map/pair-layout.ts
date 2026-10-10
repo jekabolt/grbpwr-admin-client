@@ -33,7 +33,13 @@ export type PairSide = {
   notches: MapNotch[];
 };
 
-export type PairLabel = { input: number; at: Pt2; pieces: number };
+export type PairLabel = {
+  input: number;
+  at: Pt2;
+  pieces: number;
+  /** Width of the input's drawn group (picture units): its name is fitted inside, not over others. */
+  w: number;
+};
 
 export type PairPicture = {
   w: number;
@@ -140,10 +146,12 @@ export function pairPicture(read: MapRead, i: number, opts: PairOptions = {}): P
   const labels: PairLabel[] = [];
   for (const k of [...new Set(shapes.map((s) => s.input))].sort((a, b) => a - b)) {
     const mine = shapes.filter((s) => s.input === k);
+    const gb = bboxOf(mine.flatMap((s) => s.pts));
     labels.push({
       input: k,
       at: centroidOf(mine.flatMap((s) => s.pts)),
       pieces: mine.reduce((n, s) => n + s.count, 0),
+      w: gb.x1 - gb.x0,
     });
   }
   return {

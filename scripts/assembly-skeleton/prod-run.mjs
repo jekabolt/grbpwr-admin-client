@@ -206,6 +206,9 @@ for (const input of inputs) {
       `\n  seams ${JSON.stringify(r.seams)}; steps ${r.steps} (units ${r.units}, riders ${r.riders}); to decide ${r.toDecide}; unresolved ${r.unresolvedEdgePairs}; left out ${r.leftOut?.length}` +
       `\n  gate ${JSON.stringify(r.gate)}` +
       `\n  sweep replace ${JSON.stringify(r.sweep_replace)}; old naive append ${r.sweep_appendNaive?.hard}` +
+      (r.ticks
+        ? `\n  ticks ${JSON.stringify(r.ticks)}; category ${JSON.stringify(r.categoryRead)}`
+        : '') +
       (r.append?.length
         ? `\n  APPEND ${JSON.stringify(r.append.map(({ stepList, ...x }) => x))}`
         : '') +

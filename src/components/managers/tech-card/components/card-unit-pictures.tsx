@@ -25,10 +25,14 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
-import { buildSkeletonFacts, skeletonCategoryOf, skeletonLined } from './assembly-skeleton-source';
+import {
+  buildSkeletonFacts,
+  skeletonCategoryRead,
+  skeletonLined,
+} from './assembly-skeleton-source';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
-import type { TechCardFormData } from './schema';
+import { toPurposeEnum, type TechCardFormData } from './schema';
 import { UnitPicturesProvider, UnitTile } from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
@@ -101,6 +105,8 @@ export function CardUnitPicturesProvider({
     []) as TechCardFormData['pieceDxfAliases'];
   const patterns = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
     []) as TechCardFormData['patterns'];
+  // A card with no category is read from its piece names; an auxiliary item stays generic.
+  const purpose = useWatch<TechCardFormData>({ name: 'purpose' }) as string | undefined;
 
   // (а) Нет ни одного шага, который что-то соединяет или объявляет узел, — граф не нужен никому:
   // ни пиктограммам (им нужны узлы), ни карте сборки (ей нужны входы шагов).
@@ -130,7 +136,7 @@ export function CardUnitPicturesProvider({
     ...(aliases ?? []).map((a) => [a.pieceLineKey, a.bomLineKey, a.fabricPurpose].join('|')),
     ...(patterns ?? []).map((p) => [p.bomLineKey, p.fabricPurpose].join('|')),
   ].join('~');
-  const catSig = (categoryNames ?? []).join('|');
+  const catSig = [...(categoryNames ?? []), purpose ?? ''].join('|');
   const factsSig =
     hasUnits && shapes && contoured > 0 && contoured <= CAP_PIECES
       ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}`
@@ -138,7 +144,16 @@ export function CardUnitPicturesProvider({
 
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
   const [graph, setGraph] = useState<{ sig: string; graph: SeamGraph | null } | null>(null);
-  const live = useLatest({ pieces, bomItems, shapes, cloth, categoryNames, aliases, patterns });
+  const live = useLatest({
+    pieces,
+    bomItems,
+    shapes,
+    cloth,
+    categoryNames,
+    aliases,
+    patterns,
+    purpose,
+  });
   useEffect(() => {
     if (!factsSig) {
       setGraph(null);
@@ -165,7 +180,12 @@ export function CardUnitPicturesProvider({
           shapes: v.shapes,
           cloth: v.cloth,
           bomLines,
-          category: skeletonCategoryOf(v.categoryNames ?? [], lined),
+          category: skeletonCategoryRead({
+            categoryNames: v.categoryNames ?? [],
+            hasLining: lined,
+            pieceNames: v.pieces.map((p) => p.name ?? ''),
+            purpose: toPurposeEnum(v.purpose),
+          }).category,
           defaultMachineType: null,
           aliases: v.aliases ?? [],
         });
