@@ -388,7 +388,16 @@ export type ClassEvidence =
   /** A seam line drawn at this constant distance inside the cut line (role 'seam'). */
   | { kind: 'seam-offset'; offsetMm: Mm }
   /** Set aside only for its light-grey colour (no grid, frame or watermark evidence): confirm. */
-  | { kind: 'colour-only'; rgb: [number, number, number] };
+  | { kind: 'colour-only'; rgb: [number, number, number] }
+  /**
+   * A0.3: the lines close these closed outlines (chains/face-role.ts); `cues` are the independent
+   * evidences, `auto` = enough of them to assign the row without asking.
+   */
+  | { kind: 'faces'; pieces: number; cues: string[]; auto: boolean }
+  /** A0.3: lines inside the closed outlines (grain, darts, placement). */
+  | { kind: 'inside-faces'; pieces: number }
+  /** A0.3: lines that are no outline — outside them, in a junk face, offered as background. */
+  | { kind: 'face-stray'; why: string };
 
 export type LineClass = {
   id: ClassId;
@@ -540,9 +549,15 @@ export type ProposeSizeMapFn = (run: SizeRun, card: CardSize[]) => SizeMap;
 export type Seed = {
   id: SeedId;
   at: PtMm;
-  origin: 'text' | 'click' | 'ai';
+  /**
+   * 'face' (A2): one per closed outline the sheet draws (pieces/faces.ts) — not a decision: the
+   * piece still goes through the fill, the H1 guard and the gate, and "not a piece" drops it.
+   */
+  origin: 'text' | 'click' | 'ai' | 'face';
   /** Text that produced the seed (piece number / name), when origin = 'text'. */
   text?: IRText;
+  /** A face seed's outline: area inside its outer wall, nesting depth of the seeded face, box. */
+  face?: { areaMm2: number; depth: number; box: BoxMm };
   /** Variant filter the seed belongs to (Mod. 125 / Style A). null = all. */
   variant: string | null;
 };

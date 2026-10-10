@@ -12,6 +12,7 @@ import type {
   PieceEdit,
   PieceFamily,
   PtMm,
+  Seed,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -99,6 +100,14 @@ const OUTCOME: Record<FillOutcome, { word: string; tone: 'ok' | 'warn' | 'attent
   merged: { word: 'two seeds', tone: 'attention' },
   tiny: { word: 'tiny', tone: 'mut' },
   refused: { word: 'sizes unclear', tone: 'attention' },
+};
+
+/** Where a seed came from, as the regions list says it (A2: 'face' = a closed outline). */
+const SEED_WORD: Record<Seed['origin'], string> = {
+  text: 'text seed',
+  click: 'clicked seed',
+  ai: 'AI seed',
+  face: 'outline seed',
 };
 
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
@@ -608,7 +617,7 @@ export function PiecesStep({
                         >
                           {m}
                         </text>
-                        {(s.origin === 'click' || moved) && (
+                        {(s.origin === 'click' || s.origin === 'face' || moved) && (
                           <text
                             x={s.at.x}
                             y={vy(s.at.y) + r * 2.2}
@@ -616,7 +625,7 @@ export function PiecesStep({
                             fill={SHEET_INK.mut}
                             textAnchor='middle'
                           >
-                            {moved ? 'reseed' : 'click'}
+                            {moved ? 'reseed' : s.origin === 'face' ? 'outline' : 'click'}
                           </text>
                         )}
                       </g>
@@ -758,7 +767,7 @@ export function PiecesStep({
                       {markOf.get(f.seed)}
                     </span>
                     <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                      {s?.origin === 'click' ? 'clicked seed' : `text seed`}
+                      {SEED_WORD[s?.origin ?? 'text']}
                       {s?.variant ? ` · ${s.variant}` : ''}
                     </Text>
                     <Text size='micro' variant='label' component='span' className='tabular-nums'>

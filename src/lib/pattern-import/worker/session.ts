@@ -84,6 +84,7 @@ import {
   type WallPieceEdit,
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
+import { blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -282,6 +283,8 @@ export class Session {
   private gradeAmbiguities: ChainAmbiguity[] = [];
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
+  /** A2: the sheet's closed faces for this chain set and size run (face seeds, click placement). */
+  private faces: { set: ChainSet; run: SizeRun; map: FaceMap; seeds: Seed[] } | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
   private semantics: SemanticsOutput | null = null;
@@ -365,6 +368,7 @@ export class Session {
     }
     if (at < ORDER.indexOf('pieces')) {
       this.seeds = null;
+      this.faces = null;
       this.families = null;
       this.wallSet = null;
       this.pieceSession = null;
@@ -961,7 +965,30 @@ export class Session {
     const expected =
       input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, null, base) ?? undefined;
     const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
-    const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
+    // A2: text seeds, then one face seed per closed outline no text seed is in (junk filtered)
+    const text = (this.textSeeds ??= proposeSeeds(sheet, base));
+    if (this.faces?.set !== base || this.faces.run !== run) {
+      const map = faceMap(sheet, base, run, text, { cellMm: input.opts.cellMm });
+      const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
+      this.faces = { set: base, run, map, seeds: faceSeedsOf(map, first) };
+    }
+    const fm = this.faces.map;
+    // A click is the operator's own point and stays where it is; it supersedes the face seed of
+    // the outline it falls in (one seed per region) — unless the operator drew walls of his own
+    // (a "use line" makes a region inside it the face map does not know: both seeds stay).
+    const given = input.seeds ?? [...text, ...this.faces.seeds];
+    const ownWalls = input.edits.some((e) => isWallEdit(e));
+    const clicked = new Set(
+      ownWalls
+        ? []
+        : given
+            .flatMap((x) => (x.origin === 'click' ? [blobOf(fm, x.at)] : []))
+            .filter((b) => b >= 0),
+    );
+    const superseded = new Set(
+      given.filter((x) => x.origin === 'face' && clicked.has(blobOf(fm, x.at))).map((x) => x.id),
+    );
+    const seeds = given.filter((x) => !superseded.has(x.id));
     // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or
     // shared another seed's region), or it sits inside another piece's outline — takes it out of
     // the FILL, not only out of the result: such a seed makes its neighbour "merged", drops
