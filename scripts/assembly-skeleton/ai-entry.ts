@@ -2,6 +2,7 @@
 // panel calls, the real engine, the real frontier rules — only the model's answer is a stub.
 export {
   applySkeletonAIOrder,
+  skeletonAIDecisionKey,
   skeletonAIPins,
   skeletonAIPlaces,
   skeletonAIRequest,

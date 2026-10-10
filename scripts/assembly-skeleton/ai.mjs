@@ -293,7 +293,9 @@ for (const card of cards) {
   if (picks.length) {
     const rebuilt = E.proposeSkeleton(facts, E.skeletonDeps, { pins });
     const landed = picks.filter((p) => {
-      const s = rebuilt.steps.find((st) => st.decision?.id === p.decisionId);
+      const s = rebuilt.steps.find(
+        (st) => st.decision && E.skeletonAIDecisionKey(st.decision.id) === p.decisionId,
+      );
       // A decision a chosen reading made moot (its join disappeared) is not «landed wrong».
       return !s || s.decision.chosen === p.reading;
     });
@@ -408,6 +410,29 @@ for (const card of cards) {
       r.ok ? 'APPLIED' : r.why,
     );
   }
+}
+
+// 5 a decision id over the server's 64 runes (long piece names) goes as a key of ≤64, the same key
+// every time, and the AI's pick on that key lands back on the real decision.
+{
+  const long =
+    'which side carries the holes: FRONT LEFT PLACKET EXTENSION / FRONT RIGHT PLACKET EXT';
+  const key = E.skeletonAIDecisionKey(long);
+  const other = E.skeletonAIDecisionKey(long.replace(/EXT$/, 'EXTN'));
+  const fake = {
+    steps: [{ decision: { id: long, chosen: 0 }, inputs: [], seams: [], operationType: 'x' }],
+  };
+  const { pins, changed } = E.skeletonAIPins(fake, { picks: [{ decisionId: key, reading: 1 }] });
+  gate(
+    '5 a decision id over 64 runes is sent as a stable key ≤64 and its pick maps back',
+    [...key].length <= E.SKELETON_AI.keyRunes &&
+      key === E.skeletonAIDecisionKey(long) &&
+      key !== other &&
+      E.skeletonAIDecisionKey('short id') === 'short id' &&
+      pins[long] === 1 &&
+      changed === 1,
+    `${key} (${[...key].length}) pins=${JSON.stringify(pins)}`,
+  );
 }
 
 console.log(failed ? `\n${failed} gate(s) FAILED` : '\nall gates pass');

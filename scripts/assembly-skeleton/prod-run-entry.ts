@@ -62,6 +62,7 @@ import {
 import {
   applySkeletonAIOrder,
   SKELETON_AI,
+  skeletonAIDecisionKey,
   skeletonAIPins,
   skeletonAIRequest,
 } from '../../src/lib/assembly-skeleton/ai';
@@ -1104,7 +1105,8 @@ async function aiVariants(args: {
   // b — «use AI readings»
   const { pins, changed } = skeletonAIPins(proposal, answer);
   out.picks = (answer.picks ?? []).length;
-  out.picksMapped = (answer.picks ?? []).filter((p) => (p.decisionId ?? '') in pins).length;
+  const keys = new Set(Object.keys(pins).map(skeletonAIDecisionKey));
+  out.picksMapped = (answer.picks ?? []).filter((p) => keys.has(p.decisionId ?? '')).length;
   out.picksUsed = changed;
   let b = proposal;
   if (changed > 0) b = await DEFAULT_SKELETON_PROVIDER!(facts, deps, { pins });

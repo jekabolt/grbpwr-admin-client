@@ -17,6 +17,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   applySkeletonAIOrder,
+  skeletonAIDecisionKey,
   skeletonAIPins,
   skeletonAIPlaces,
   skeletonAIRequest,
@@ -1188,7 +1189,7 @@ function AssemblySkeletonPanel({
                                 reason: aiView.places[i]?.reason ?? '',
                                 warnings: aiView.warningsAt.get(i) ?? [],
                                 pick: raw.decision
-                                  ? aiView.picks.get(raw.decision.id) ?? null
+                                  ? aiView.picks.get(skeletonAIDecisionKey(raw.decision.id)) ?? null
                                   : null,
                               }
                             : null

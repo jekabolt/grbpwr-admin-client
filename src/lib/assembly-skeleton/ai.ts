@@ -72,6 +72,20 @@ const SEAM_KIND: Record<SeamCandidate['kind'], string> = {
 /** The id a step carries in the request (and the answer): its place in the proposal, 1-based. */
 export const skeletonAIStepId = (i: number) => `s${i + 1}`;
 
+/**
+ * The id a decision carries in the request (and the answer). A decision id names its pieces, so a
+ * card with long piece names makes one over the server's 64 runes — and the whole ask is refused.
+ * A long id is cut and tagged with a hash of the whole: a function of the id alone, so it survives
+ * a rebuild exactly as the id does.
+ */
+export function skeletonAIDecisionKey(id: string): string {
+  const r = [...id];
+  if (r.length <= SKELETON_AI.keyRunes) return id;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193);
+  return `${r.slice(0, SKELETON_AI.keyRunes - 9).join('')}~${(h >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 const isRider = (s: SkeletonStep) => s.derivedFrom != null && s.derivedFrom >= 0;
 
 /**
@@ -207,7 +221,7 @@ export function skeletonAIRequest(args: {
     if (readings.length > SKELETON_AI.maxReadings || !readings.every((r) => inputsOk(r.inputs)))
       return { ok: false, why: `decision ${s.decision.id} has readings the AI cannot take` };
     decisions.push({
-      id: s.decision.id,
+      id: skeletonAIDecisionKey(s.decision.id),
       chosen: Math.min(s.decision.chosen, readings.length - 1),
       readings: readings.map((r) => ({
         inputs: r.inputs,
@@ -215,7 +229,7 @@ export function skeletonAIRequest(args: {
       })),
     });
   }
-  const decisionIds = new Set(decisions.map((d) => d.id));
+  const decisionKeys = new Set(decisions.map((d) => d.id));
 
   const reqSteps: NonNullable<SuggestAssemblySkeletonRequest['steps']> = [];
   for (let i = 0; i < steps.length; i++) {
@@ -233,7 +247,10 @@ export function skeletonAIRequest(args: {
       operation: s.operationType,
       label: cut(s.label ?? '', SKELETON_AI.labelRunes),
       confidence: Math.max(0, Math.min(1, Number.isFinite(s.confidence) ? s.confidence : 0)),
-      decisionId: s.decision && decisionIds.has(s.decision.id) ? s.decision.id : '',
+      decisionId:
+        s.decision && decisionKeys.has(skeletonAIDecisionKey(s.decision.id))
+          ? skeletonAIDecisionKey(s.decision.id)
+          : '',
       follows: root != null && root < i ? skeletonAIStepId(root) : '',
     });
   }
@@ -265,11 +282,16 @@ export function skeletonAIPins(
   answer: SuggestAssemblySkeletonResponse,
 ): { pins: SkeletonPins; changed: number } {
   const pins: Record<string, number> = {};
-  for (const s of proposal.steps) if (s.decision) pins[s.decision.id] = s.decision.chosen;
+  const byKey = new Map<string, string>();
+  for (const s of proposal.steps)
+    if (s.decision) {
+      pins[s.decision.id] = s.decision.chosen;
+      byKey.set(skeletonAIDecisionKey(s.decision.id), s.decision.id);
+    }
   let changed = 0;
   for (const p of answer.picks ?? []) {
-    const id = p.decisionId ?? '';
-    if (!(id in pins)) continue;
+    const id = byKey.get(p.decisionId ?? '');
+    if (id == null) continue;
     const reading = p.reading ?? 0;
     if (pins[id] !== reading) changed += 1;
     pins[id] = reading;
