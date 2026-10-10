@@ -94,6 +94,11 @@ export type Inputs = {
   confirmedNames: SeedId[];
   /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
   editedNames: SeedId[];
+  /**
+   * D3: quantities the operator confirmed AS SHOWN, keyed by what was shown (`Unproven.shown`): a
+   * count that changes afterwards (a fold, a pair answer) is a new question.
+   */
+  confirmedQuantities: Partial<Record<SeedId, string>>;
   assignment: FabricAssignment | null;
 };
 
@@ -116,6 +121,7 @@ const EMPTY_INPUTS: Inputs = {
   operatorGrain: {},
   confirmedNames: [],
   editedNames: [],
+  confirmedQuantities: {},
   assignment: null,
 };
 
@@ -321,6 +327,7 @@ export function useImportSession(deps: {
     },
     pieceOverrides: i.overrides,
     operatorGrain: i.operatorGrain,
+    aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
   });
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
@@ -788,11 +795,15 @@ export function useImportSession(deps: {
             ? `${grain} ${grain === 1 ? 'piece has' : 'pieces have'} no grainline — draw it (two clicks)`
             : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
         }
-        const pending = s.names.filter(
-          (n) => !n.autoAccepted && !inputs.confirmedNames.includes(n.seed) && exportedSeed(n.seed),
-        );
-        if (pending.length)
-          return `${pending.length} AI ${pending.length === 1 ? 'name' : 'names'} to confirm`;
+        // D3: what the drawing does not prove waits for the operator, like the grainline
+        const open = openQuestions(s.semantics, s.names, inputs);
+        if (open.allowance.length || open.total)
+          return [
+            open.allowance.length ? 'say what the drawn outline is (cut or seam line)' : '',
+            open.total ? `confirm ${countWords(open)} — or "confirm all as shown"` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
         // The identities the writer will spell (both hands of a declared pair), checked with the
         // gate's own rule — a declared `_L`/`_R` is exempt from "ends in a size token".
         const isSizeToken = sizeTokenTest(sizeTokens);
@@ -928,6 +939,43 @@ export function useImportSession(deps: {
     return (session.semantics?.pieces ?? []).some((p) => p.seed === seed);
   }
 
+  /**
+   * D3 "confirm as shown": every open quantity, sheet-note name and AI name below the threshold —
+   * of one piece (`seed`), or of the whole step. The outline question is never in it: that one is
+   * answered explicitly (`answerOutline`).
+   */
+  function confirmShown(seed?: SeedId) {
+    const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current);
+    const mine = <T extends { seed: SeedId }>(xs: T[]) =>
+      seed == null ? xs : xs.filter((x) => x.seed === seed);
+    const qty = mine(open.quantity);
+    const names = [...mine(open.name).map((u) => u.seed), ...mine(open.aiNames).map((n) => n.seed)];
+    patchInputs((i) => {
+      const next = {
+        confirmedQuantities: {
+          ...i.confirmedQuantities,
+          ...Object.fromEntries(qty.map((u) => [u.seed, u.shown])),
+        },
+        confirmedNames: [...new Set([...i.confirmedNames, ...names])],
+      };
+      iRef.current = { ...i, ...next };
+      return next;
+    });
+  }
+
+  /** D3: the operator's explicit answer to "what is the drawn outline" for the file. */
+  async function answerOutline(meaning: 'cut' | 'seam', allowanceMm: number) {
+    const fileAllowance: AllowanceDecision = {
+      meaning,
+      allowanceMm,
+      origin: 'operator',
+      evidence: [],
+    };
+    const next = { ...iRef.current, fileAllowance };
+    iRef.current = next;
+    await dispatch({ type: 'semantics', input: semanticsInput(next) });
+  }
+
   return {
     session,
     inputs,
@@ -950,6 +998,8 @@ export function useImportSession(deps: {
     editName,
     confirmSize,
     setSize,
+    confirmShown,
+    answerOutline,
     patchInputs,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
@@ -1035,6 +1085,68 @@ export function textNameOf(
     ),
     displayName: override?.displayName ?? spec?.displayName ?? '',
   };
+}
+
+/**
+ * D3: the details step's open questions — what semantics found unproven, minus what the operator
+ * already confirmed as shown, plus the AI names below the auto-accept threshold (decision 11).
+ * The outline (allowance) is answered by setting the file's allowance, so it closes in semantics.
+ */
+export function openQuestions(
+  sem: ImportSession['semantics'],
+  names: readonly NameDecision[],
+  i: Pick<Inputs, 'confirmedQuantities' | 'confirmedNames' | 'editedNames'>,
+) {
+  const un = sem?.unproven ?? [];
+  const named = new Set([...i.confirmedNames, ...i.editedNames]);
+  const exported = new Set((sem?.pieces ?? []).map((p) => p.seed));
+  const allowance = un.filter((u) => u.kind === 'allowance');
+  const quantity = un.filter(
+    (u) => u.kind === 'quantity' && i.confirmedQuantities[u.seed] !== u.shown,
+  );
+  const name = un.filter((u) => u.kind === 'name' && !named.has(u.seed));
+  const aiNames = names.filter(
+    (n) => !n.autoAccepted && !named.has(n.seed) && exported.has(n.seed),
+  );
+  return {
+    allowance,
+    quantity,
+    name,
+    aiNames,
+    total: quantity.length + name.length + aiNames.length,
+  };
+}
+
+/** "3 quantities, 2 names" for the footer and the confirm strip. */
+export function countWords(o: ReturnType<typeof openQuestions>): string {
+  const n = o.name.length + o.aiNames.length;
+  return [
+    o.quantity.length
+      ? `${o.quantity.length} ${o.quantity.length === 1 ? 'quantity' : 'quantities'}`
+      : '',
+    n ? `${n} ${n === 1 ? 'name' : 'names'}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/**
+ * D3: the count an AI name auto-accepted at T backs with the sheet's own "cut n" (`cut-qty`
+ * evidence) is the sheet's word. A model call without that evidence, or a name the operator typed
+ * over, proves nothing.
+ */
+function aiQuantityOf(
+  names: readonly NameDecision[],
+  edited: readonly SeedId[],
+): StageIO['semantics']['in']['aiQuantity'] {
+  const out: NonNullable<StageIO['semantics']['in']['aiQuantity']> = {};
+  for (const n of names) {
+    const s = n.suggestion;
+    if (!n.autoAccepted || !s || s.cutQty == null || edited.includes(n.seed)) continue;
+    if (!n.evidence.some((e) => e.kind === 'cut-qty' && e.qty === s.cutQty)) continue;
+    out[n.seed] = { qty: s.cutQty, pair: s.pair };
+  }
+  return out;
 }
 
 /** The models to choose from: the seeds' own, plus the ones the sheet names (pieces out). */
