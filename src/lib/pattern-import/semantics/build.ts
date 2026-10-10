@@ -26,6 +26,9 @@ import type {
   BlockReason,
   BuildPieceSpecsFn,
   CardSize,
+  Chain,
+  ChainId,
+  ChainSet,
   DerivedEdge,
   DrillFeature,
   Feature,
@@ -33,6 +36,7 @@ import type {
   GrainFeature,
   InternalFeature,
   IRText,
+  LineClass,
   NotchFeature,
   OffsetReport,
   PairHand,
@@ -46,6 +50,7 @@ import type {
   SeedId,
   SemanticsInput,
   SemanticsOutput,
+  SizeRun,
 } from '../types';
 import { PATIMPORT } from '../types';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
@@ -127,6 +132,82 @@ function clipFold(line: PtMm[], fold: FoldLine): PtMm[][] {
   }
   if (cur.length > 1) out.push(cur);
   return out;
+}
+
+/**
+ * The chains (closed ones closed) that carry a derived edge (F14e, Codex R1): each chain `may`
+ * accept, kept only when it runs along THIS edge in one contiguous stretch within `snapMm` of at
+ * least `derivedAlongMinShare` of the edge's length (sampled every 0.25 mm). A chain that merely
+ * touches, crosses, or follows the edge for part of its length carries nothing. Exported for the
+ * F6 probe (Codex R1 controls); the gate re-checks the same continuity per edge (G15).
+ */
+export function supportOf(
+  edge: PtMm[],
+  chains: readonly (Chain | undefined)[],
+  may: (ch: Chain) => boolean,
+): PtMm[][] {
+  const snap = PATIMPORT.snapMm;
+  const s: PtMm[] = [];
+  const arc: number[] = [];
+  let len = 0;
+  for (let i = 1; i < edge.length; i++) {
+    const a = edge[i - 1];
+    const b = edge[i];
+    const l = Math.hypot(b.x - a.x, b.y - a.y);
+    const k = Math.max(1, Math.ceil(l / 0.25));
+    for (let j = i === 1 ? 0 : 1; j <= k; j++) {
+      s.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
+      arc.push(len + (l * j) / k);
+    }
+    len += l;
+  }
+  if (!(len > 0)) return [];
+  const eb = bboxOf(edge);
+  const out: PtMm[][] = [];
+  for (const ch of chains) {
+    if (!ch || ch.pts.length < 2 || !may(ch)) continue;
+    const cb = bboxOf(ch.pts);
+    if (
+      cb.minX > eb.maxX + snap ||
+      cb.maxX < eb.minX - snap ||
+      cb.minY > eb.maxY + snap ||
+      cb.maxY < eb.minY - snap
+    )
+      continue;
+    let best = 0;
+    let from = -1;
+    for (let i = 0; i < s.length; i++) {
+      if (closestOnPolyline(s[i], ch.pts, ch.closed).d <= snap) {
+        if (from < 0) from = i;
+        best = Math.max(best, arc[i] - arc[from]);
+      } else from = -1;
+    }
+    if (best >= PATIMPORT.derivedAlongMinShare * len)
+      out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
+  }
+  return out;
+}
+
+/**
+ * The drawn chains that carry a derived BAND CUT of source rank `rank` (F14e, Codex R1): only a
+ * chain that may be a cut line of that rank — the rank's own size class or a common (every-size)
+ * line; never a grain, notch, internal, seam, ignored or unclassified one, nor another size's —
+ * and only where it runs along THIS edge continuously (`supportOf`). Bridges carry nothing: an
+ * automatic or operator bridge is a chord the pipeline drew, bounded by its length alone (G15).
+ */
+export function bandCutSupport(
+  set: ChainSet,
+  run: SizeRun,
+): (edge: PtMm[], rank: number) => PtMm[][] {
+  const clsOf = new Map<ChainId, LineClass>();
+  for (const c of set.classes) for (const id of c.chains) clsOf.set(id, c);
+  return (edge, rank) => {
+    const own = run.sizes[rank]?.classId ?? null;
+    return supportOf(edge, set.chains, (ch) => {
+      const k = clsOf.get(ch.id);
+      return !!k && (k.role === 'common' || (k.role === 'size' && own != null && k.id === own));
+    });
+  };
 }
 
 export function buildPieceSpecsDetailed(
@@ -728,43 +809,15 @@ export function buildPieceSpecsDetailed(
     if (!lines.length) return undefined;
     return toFrame(src.w, lines);
   };
-  /** Drawn chains passing within `snapMm` of a derived edge (sampled every 1 mm), closed ones closed. */
-  const chainBox = new Map<number, ReturnType<typeof bboxOf>>();
-  const alongOf = (pts: PtMm[]): PtMm[][] => {
-    const snap = PATIMPORT.snapMm;
-    const eb = bboxOf(pts);
-    const samples: PtMm[] = [];
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1];
-      const b = pts[i];
-      const k = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
-      for (let j = 0; j <= k; j++)
-        samples.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
-    }
-    const out: PtMm[][] = [];
-    for (const ch of set.chains) {
-      if (!ch || ch.pts.length < 2) continue;
-      let cb = chainBox.get(ch.id);
-      if (!cb) chainBox.set(ch.id, (cb = bboxOf(ch.pts)));
-      if (
-        cb.minX > eb.maxX + snap ||
-        cb.maxX < eb.minX - snap ||
-        cb.minY > eb.maxY + snap ||
-        cb.maxY < eb.minY - snap
-      )
-        continue;
-      if (samples.some((q) => closestOnPolyline(q, ch.pts, ch.closed).d <= snap))
-        out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
-    }
-    return out;
-  };
+  const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
     const src = sourceOf(identity, rank);
     if (!src) return undefined;
     const out: DerivedEdge[] = [];
     for (const d of src.cand.derived ?? []) {
       if (d.kind === 'shared-rank' || d.pts.length < 2) continue;
-      const along = toFrame(src.w, alongOf(d.pts));
+      // per edge, never pooled: each edge carries only the chains that run along it
+      const along = d.kind === 'band-cut' ? toFrame(src.w, alongOf(d.pts, src.cand.rank)) : [];
       for (const pts of toFrame(src.w, [d.pts]))
         if (pts.length > 1) out.push({ kind: d.kind, pts, ...(along.length ? { along } : {}) });
     }

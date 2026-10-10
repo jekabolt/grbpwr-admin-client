@@ -6,12 +6,15 @@
 //   T5  R12 dialect                              T6  file framing, merge, manifest round trip
 //   N*  negative controls: every mutation must turn its check red and fail the gate
 //   D   F14b: G3/G4 on source walls only, derived edges audited by G15; G12 outline mirror
+//       F14e (Codex R1): `along` carries only a band cut — its own, continuous, from a cut line
 import fs from 'node:fs';
 import path from 'node:path';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
 import { mergeDxfSheets } from 'lib/nesting/dxf/merge';
 import type {
   CardSize,
+  Chain,
+  ChainRole,
   DerivedEdge,
   DraftScopeTarget,
   FoldFeature,
@@ -19,6 +22,7 @@ import type {
   GateReport,
   GrainFeature,
   InternalFeature,
+  LineClass,
   ManifestSize,
   ManifestSource,
   NotchFeature,
@@ -26,8 +30,10 @@ import type {
   PieceSizeSpec,
   PieceSpec,
   PtMm,
+  SizeRun,
   WriteJob,
 } from 'lib/pattern-import/types';
+import { bandCutSupport } from 'lib/pattern-import/semantics/build';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { writeDxfDetailed, writeScopes } from 'lib/pattern-import/write';
 import {
@@ -1554,6 +1560,197 @@ export async function main(opts: { plans: string }): Promise<number> {
         'two 25 mm operator bridges = 7.4 % of the line off the drawn walls',
         'G15-derived',
         r,
+      );
+    }
+
+    // ── F14e (Codex R1): `along` carries only a band cut, only its own, only continuously ──────
+    // On PCK's right side: the drawn walls stop at y = 90 ∓ g/2; a derived edge spans the gap.
+    const span = (g: number, kind: DerivedEdge['kind'], along?: PtMm[][]): DerivedEdge => ({
+      kind,
+      pts: [
+        { x: 160, y: 90 - g / 2 },
+        { x: 160, y: 90 + g / 2 },
+      ],
+      ...(along ? { along } : {}),
+    });
+    /** A straight drawn line beside the gap: `dx` off the cut, from y0 to y1. */
+    const line = (dx: number, y0: number, y1: number): PtMm[] => [
+      { x: 160 + dx, y: y0 },
+      { x: 160 + dx, y: y1 },
+    ];
+    const g15of = (r: GateReport) => one(r, 'G15-derived');
+    // Codex's exploit (real walls end at the gap's two ends, an unrelated grain / internal line runs
+    // 0.2 mm beside it, a 100 mm operator "bridge" closes it and carries that line as `along`)
+    {
+      const r = (await gateOf(100, [span(100, 'operator-bridge', [line(0.2, 40, 140)])])).report;
+      await neg(
+        'Codex R1: 100 mm operator bridge carrying a line 0.2 mm beside it as `along`',
+        'G15-derived',
+        r,
+      );
+      ck(
+        failing(r).includes('G4-hausdorff'),
+        '… and G4 measures it against the drawn walls (red)',
+        `${failing(r).join(',')} · G15 ${g15of(r).note.slice(0, 160)}`,
+      );
+    }
+    // the same carried as a "band cut" is NOT carried by a grain line: the semantics filter
+    // (`bandCutSupport`) hands the gate only the rank's own size line or a common line, and only
+    // where it runs along THIS edge in one stretch ≥ derivedAlongMinShare
+    {
+      const RANK = 1;
+      const OWN = 11;
+      const chainOf = (id: number, pts: PtMm[]): Chain => ({
+        id,
+        pts,
+        closed: false,
+        ranges: [],
+        motif: null,
+        style: 1,
+        lengthMm: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y),
+      });
+      const clsOf = (id: number, role: ChainRole, rank: number | null): LineClass => ({
+        id,
+        role,
+        sizeLabel: role === 'size' ? `R${rank}` : null,
+        chains: [0],
+        totalLengthMm: 0,
+        evidence: rank != null ? [{ kind: 'nesting-order', rank }] : [],
+        confidence: 1,
+      });
+      const runOf: SizeRun = {
+        encoding: 'declared-dash',
+        sizes: [
+          { label: 'R0', rank: 0, classId: 10, file: null },
+          { label: 'R1', rank: RANK, classId: OWN, file: null },
+        ],
+        evidence: [],
+      };
+      /** What `bandCutSupport` hands the gate for a 100 mm band cut beside ONE drawn line. */
+      const supportFor = (pts: PtMm[], cls: LineClass | null, g = 100) =>
+        bandCutSupport(
+          {
+            chains: [chainOf(0, pts)],
+            classes: cls ? [cls] : [],
+            bundles: [],
+            orphans: cls ? [] : [0],
+            warnings: [],
+          },
+          runOf,
+        )(span(g, 'band-cut').pts, RANK);
+      const full = line(0.2, 40, 140);
+      const cases: [string, PtMm[], LineClass | null, boolean][] = [
+        ['grain line 0.2 mm beside, full length', full, clsOf(1, 'grain', null), false],
+        ['internal line 0.2 mm beside, full length', full, clsOf(1, 'internal', null), false],
+        ['notch-class line beside', full, clsOf(1, 'notch', null), false],
+        ['unclassified (orphan) line beside', full, null, false],
+        ["another size's line beside", full, clsOf(10, 'size', 0), false],
+        [
+          'own size, 50 % of the cut (one stretch)',
+          line(0.1, 40, 90),
+          clsOf(OWN, 'size', RANK),
+          false,
+        ],
+        ['own size, the whole cut', full, clsOf(OWN, 'size', RANK), true],
+        ['common line, the whole cut', full, clsOf(2, 'common', null), true],
+      ];
+      for (const [what, pts, cls, want] of cases) {
+        const got = supportFor(pts, cls);
+        ck(
+          got.length === (want ? 1 : 0),
+          `bandCutSupport: ${what} → ${want ? 'carries' : 'carries nothing'}`,
+          `${got.length} chain(s)`,
+        );
+      }
+      // the grain line's (empty) support → the 100 mm band cut is uncarried → G15 red, G4 red
+      {
+        const along = supportFor(full, clsOf(1, 'grain', null));
+        const r = (await gateOf(100, [span(100, 'band-cut', along.length ? along : undefined)]))
+          .report;
+        await neg('100 mm band cut beside a grain line (semantics: no support)', 'G15-derived', r);
+        ck(failing(r).includes('G4-hausdorff'), '… and G4 red', failing(r).join(','));
+      }
+      // reef's L: a 95.25 mm cut on its own size's tick that stops 8.5 mm short (91.1 %) — carried
+      {
+        const g = 95.25;
+        const tick = line(0.1, 90 - g / 2 + 8.5, 90 + g / 2);
+        const along = supportFor(tick, clsOf(OWN, 'size', RANK), g);
+        const r = await gateOf(g, [span(g, 'band-cut', along)]);
+        const audit = readManifestLocal(r.dxfText)?.gate?.derived ?? [];
+        ck(
+          along.length === 1 &&
+            r.report.passed &&
+            g15of(r.report).ok &&
+            one(r.report, 'G4-hausdorff').ok &&
+            audit.length === 1 &&
+            // 8.5 mm less the snap at each end of the stretch (reef: 8.0)
+            Math.abs(audit[0].offSourceMm - 8.5) <= 1,
+          "reef's L band cut (95.25 mm, own tick 91.1 % of it) passes; ≈ 8 mm audited off the drawing",
+          `${summary(r.report)} · audit ${JSON.stringify(audit)}`,
+        );
+      }
+    }
+    // gate level, whatever the semantics hand over: an `along` beside only HALF of a 50 mm band
+    // cut does not carry it (one stretch < derivedAlongMinShare) — before F14e the 25 mm left off
+    // was under the 30 mm bound and it passed
+    await neg(
+      '50 mm band cut, `along` beside 25 mm of it',
+      'G15-derived',
+      (await gateOf(50, [span(50, 'band-cut', [line(0.1, 65, 90)])])).report,
+    );
+    // … nor does a dotted contact (five 5 mm touches, half the cut in all)
+    await neg(
+      '50 mm band cut, `along` touching it in five 5 mm pieces',
+      'G15-derived',
+      (
+        await gateOf(50, [
+          span(
+            50,
+            'band-cut',
+            Array.from({ length: 5 }, (_, i) => line(0.1, 65 + i * 10, 70 + i * 10)),
+          ),
+        ])
+      ).report,
+    );
+    // never pooled: two 50 mm band cuts on two gaps; the line beside both rides on B only — A is
+    // judged on its own (no support → longer than an uncarried cut may be)
+    {
+      const wallsAB: PtMm[][] = [
+        [
+          { x: 160, y: 70 },
+          { x: 160, y: 100 },
+        ],
+        [
+          { x: 160, y: 150 },
+          { x: 160, y: 180 },
+          { x: 0, y: 180 },
+          { x: 0, y: 0 },
+          { x: 160, y: 0 },
+          { x: 160, y: 20 },
+        ],
+      ];
+      const edge = (y0: number, y1: number, along?: PtMm[][]): DerivedEdge => ({
+        kind: 'band-cut',
+        pts: [
+          { x: 160, y: y0 },
+          { x: 160, y: y1 },
+        ],
+        ...(along ? { along } : {}),
+      });
+      const r = (
+        await writeAndGate(job(MAIN, [pck]), {
+          ...gateCtx([pck]),
+          wallsOf: (_id: string, rr: number) => (rr === rank ? wallsAB : undefined),
+          derivedOf: (_id: string, rr: number) =>
+            rr === rank ? [edge(20, 70), edge(100, 150, [line(0.1, 20, 150)])] : undefined,
+        })
+      ).report;
+      await neg("band cut A carried only by band cut B's `along` (pooling)", 'G15-derived', r);
+      ck(
+        /band-cut 50\.0 mm: longer than/.test(g15of(r).note) &&
+          (g15of(r).note.match(/band-cut/g) ?? []).length === 1,
+        '… exactly A is named (B, carried by its own line, is fine)',
+        g15of(r).note.slice(0, 220),
       );
     }
   }
