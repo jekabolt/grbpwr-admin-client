@@ -65,13 +65,22 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   if (!chains || !sizes || !session.sheet) return null;
 
   const flags = chains.ambiguities ?? [];
-  const legendOf = (): LegendEdit[] =>
-    chains.classes.map((c) => ({ classId: c.id, role: c.role, sizeLabel: c.sizeLabel }));
-  const edit = (classId: number, p: Partial<LegendEdit>) =>
+  // Only the rows the operator changed travel (Codex round 4 T3): the legend is re-applied to a
+  // fresh build, and a row sent back as built would be taken as answered — an untouched
+  // low-confidence row (a grey "ignore") must stay a question.
+  const edit = (classId: number, p: Partial<LegendEdit>) => {
+    const row = chains.classes.find((c) => c.id === classId);
+    if (!row) return;
+    const prev: LegendEdit = inputs.legend.find((e) => e.classId === classId) ?? {
+      classId,
+      role: row.role,
+      sizeLabel: row.sizeLabel,
+    };
     void api.dispatch({
       type: 'legend',
-      edits: legendOf().map((e) => (e.classId === classId ? { ...e, ...p } : e)),
+      edits: [...inputs.legend.filter((e) => e.classId !== classId), { ...prev, ...p }],
     });
+  };
   const setCard = (e: SizeMapEntry, sizeId: string) =>
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
 

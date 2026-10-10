@@ -58,12 +58,14 @@ import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
   answerCtxOf,
+  bindDrawnToModel,
   countWords,
   drawnSizesKey,
   liveDrawnSizes,
   liveAnswers,
   openQuestions,
   questionKey,
+  REV_SEP,
   settleAnswers,
   UnansweredQuestionsError,
   unansweredAtWrite,
@@ -535,8 +537,14 @@ export function useImportSession(deps: {
         }
         case 'variant': {
           patchInputs({ variant: ev.variant });
-          // S3: a drawn-size count answered for another model is not this model's answer: the
-          // sizes step asks again (the map starts over with it, as on any drawn-sizes answer)
+          // S3: a count answered before any model was picked is the FIRST picked model's answer;
+          // one answered for another model is not this model's: the sizes step asks again (the
+          // map starts over with it, as on any drawn-sizes answer)
+          const bound = bindDrawnToModel(iRef.current, { ...iRef.current, variant: ev.variant });
+          if (bound !== iRef.current.drawnSizesAt) {
+            iRef.current = { ...iRef.current, drawnSizesAt: bound };
+            patchInputs({ drawnSizesAt: bound });
+          }
           const i0 = iRef.current;
           if (i0.drawnSizes != null && liveDrawnSizes(i0, { ...i0, variant: ev.variant }) == null) {
             const cleared = { drawnSizes: null, drawnSizesAt: null, sizeMap: null };
@@ -1192,12 +1200,17 @@ export function useImportSession(deps: {
       heapMb?: number | null;
       peakHeapMb?: number | null;
     };
-    const { fileList, ...rest } = iRef.current;
+    // the answers' fingerprint carries every outline (S3 T2): the report keeps its scope only
+    const { fileList, answerCtx, ...rest } = iRef.current;
     return buildErrorReport({
       session: sRef.current,
       operator: {
         files: fileList.map((f) => ({ name: f.name, bytes: f.size, type: f.type })),
         ...rest,
+        answerScope: answerCtx?.scope ?? null,
+        confirmedQuantities: Object.fromEntries(
+          Object.entries(rest.confirmedQuantities).map(([k, v]) => [k, v?.split(REV_SEP)[0]]),
+        ),
       },
       failure: failureRef.current ?? undefined,
       extract: exRef.current,

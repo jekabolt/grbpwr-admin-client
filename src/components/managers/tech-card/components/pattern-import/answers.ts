@@ -49,32 +49,24 @@ export type Answers = {
   answerCtx: AnswerCtx | null;
 };
 
-/** FNV-1a, 32 bit, as 8 hex digits — a revision tag, not a security hash. */
-function fnv(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
-
 /** Stage outputs are never mutated: a family's revision is hashed once (read on every render). */
 const revCache = new WeakMap<PieceFamily, string>();
 
-/** A piece's geometry revision: every rank's outcome and outline (0.01 mm), in rank order. */
+/**
+ * A piece's geometry revision: every rank's outcome and outline (0.01 mm), in rank order — the
+ * canonical string itself, not a hash of it: two different outlines can never share a revision
+ * (a 32-bit hash did collide, Codex round 4 T2). Compared by equality, cached per stage output.
+ */
 export function pieceRev(f: PieceFamily): string {
   const hit = revCache.get(f);
   if (hit) return hit;
   const ranks = [...f.candidates].sort((a, b) => a.rank - b.rank);
-  const rev = fnv(
-    ranks
-      .map(
-        (c) =>
-          `${c.rank}:${c.outcome}:${c.outer.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')}`,
-      )
-      .join('|'),
-  );
+  const rev = ranks
+    .map(
+      (c) =>
+        `${c.rank}:${c.outcome}:${c.outer.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')}`,
+    )
+    .join('|');
   revCache.set(f, rev);
   return rev;
 }
@@ -98,28 +90,47 @@ export type DrawnAt = { sheetIndex: number; gridOverride: unknown; variant: stri
 export const drawnSizesKey = (at: DrawnAt) =>
   JSON.stringify([at.sheetIndex, at.gridOverride ?? null, at.variant ?? null]);
 
+const parseDrawnAt = (key: string | null): DrawnAt | null => {
+  if (!key) return null;
+  try {
+    const at: unknown = JSON.parse(key);
+    if (!Array.isArray(at) || at.length !== 3) return null;
+    const [sheetIndex, gridOverride, variant] = at as [number, unknown, string | null];
+    return { sheetIndex, gridOverride, variant };
+  } catch {
+    return null;
+  }
+};
+
 /**
- * The drawn-size count, if it was answered on THIS sheet (and grid) and for THIS model. An answer
- * given before any model was picked (every model shown) holds for the model picked from that run;
- * one given for a model does not hold for another. Not live = not answered (null).
+ * The drawn-size count, if it was answered on THIS sheet (and grid) for THIS model — exactly: an
+ * answer given before any model was picked is bound to the first model picked (`bindDrawnToModel`)
+ * and is no wildcard for the others (Codex round 4 T6). Not live = not answered (null).
  */
 export function liveDrawnSizes(
   i: { drawnSizes: number | null; drawnSizesAt: string | null },
   now: DrawnAt,
 ): number | null {
-  if (i.drawnSizes == null || !i.drawnSizesAt) return null;
-  let at: unknown;
-  try {
-    at = JSON.parse(i.drawnSizesAt);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(at) || at.length !== 3) return null;
-  const [sheet, grid, variant] = at as [number, unknown, string | null];
-  const sameSheet =
-    sheet === now.sheetIndex && JSON.stringify(grid) === JSON.stringify(now.gridOverride ?? null);
-  const sameModel = variant === null || variant === (now.variant ?? null);
-  return sameSheet && sameModel ? i.drawnSizes : null;
+  const at = parseDrawnAt(i.drawnSizesAt);
+  if (i.drawnSizes == null || !at) return null;
+  return drawnSizesKey(at) === drawnSizesKey(now) ? i.drawnSizes : null;
+}
+
+/**
+ * A model is picked: a drawn-size answer given on this sheet while no model was picked becomes
+ * this model's answer (the pieces it was asked for). Returns the new `drawnSizesAt`, or the old one
+ * when there is nothing to bind (already bound, another sheet, no answer).
+ */
+export function bindDrawnToModel(
+  i: { drawnSizes: number | null; drawnSizesAt: string | null },
+  now: DrawnAt,
+): string | null {
+  const at = parseDrawnAt(i.drawnSizesAt);
+  if (i.drawnSizes == null || !at || at.variant != null || now.variant == null)
+    return i.drawnSizesAt;
+  if (drawnSizesKey({ ...at, variant: null }) !== drawnSizesKey({ ...now, variant: null }))
+    return i.drawnSizesAt;
+  return drawnSizesKey(now);
 }
 
 const sameRevs = (a: AnswerCtx['revs'], b: AnswerCtx['revs']) => {
@@ -165,12 +176,15 @@ export const settleAnswers = <T extends Answers>(i: T, now: AnswerCtx): T => ({
   answerCtx: now,
 });
 
+/** Splits a `questionKey` from the piece revision it carries (reports keep the question only). */
+export const REV_SEP = '\u0000@';
+
 /**
  * A count confirmed "as shown" is of THIS question: the piece's revision (scope + outline), its
  * kind, what was shown and why it was asked — the full fingerprint, kept with the answer itself.
  */
 export const questionKey = (u: Unproven, now: AnswerCtx) =>
-  `${now.revs[u.seed] ?? '-'}|${u.kind}|${u.shown}|${u.detail}`;
+  `${u.kind}|${u.shown}|${u.detail}${REV_SEP}${now.revs[u.seed] ?? '-'}`;
 
 type Sem = Pick<StageIO['semantics']['out'], 'unproven' | 'pieces'> &
   Partial<Pick<StageIO['semantics']['out'], 'blocked' | 'folds' | 'foldList'>>;

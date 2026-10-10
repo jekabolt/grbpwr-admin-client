@@ -8,6 +8,7 @@
 // Controls: Back and forward over the SAME sheet keeps every answer and the write goes through.
 import type {
   CardSize,
+  ChainSet,
   FabricAssignment,
   ImportSession,
   PieceFamily,
@@ -53,11 +54,14 @@ import {
   questionKey,
   settleAnswers,
   unansweredAtWrite,
+  bindDrawnToModel,
   drawnSizesKey,
   liveDrawnSizes,
+  pieceRev,
   type Answers,
 } from 'components/managers/tech-card/components/pattern-import/answers';
 import { mountHook, rerender } from './react-hook-shim';
+import { applyLegend } from 'lib/pattern-import/chains/legend';
 
 /** A cutting-list entry as printed (the fixture prints none; the key is what is kept). */
 const LIST_ENTRY = '1 - Спинка со сгибом 1 дет.';
@@ -470,6 +474,49 @@ async function answerGrainOnly(w: W) {
 }
 
 // ── unit controls on answers.ts ─────────────────────────────────────────────────────────────
+/** T6: "sizes drawn" answered before a model is picked belongs to the first model picked. */
+async function modelScenario() {
+  console.log('S3 · T6: a drawn-size answer and a model switch');
+  const w = await mount();
+  await w.step((a) =>
+    a.dispatch({
+      type: 'files',
+      files: [new File([new Uint8Array(64)], 'coat-2models.pdf', { type: 'application/pdf' })],
+    }),
+  );
+  await w.step((a) => a.next()); // files → scale
+  await w.step((a) => a.next()); // scale → sheet
+  await w.step((a) => a.next()); // sheet → sizes
+  await w.step((a) => a.setDrawnSizes(5)); // no model picked yet
+  await w.step((a) => a.next()); // sizes → pieces (every model)
+  await w.step((a) => a.dispatch({ type: 'variant', variant: 'MOD. 125' }));
+  const a1 = w.get();
+  check(
+    a1.inputs.drawnSizes === 5 &&
+      a1.session.step === 'pieces' &&
+      /MOD\. 125/.test(a1.inputs.drawnSizesAt ?? ''),
+    'model A picked: the answer is kept and bound to A',
+    a1.inputs.drawnSizesAt,
+  );
+  await w.step((a) => a.dispatch({ type: 'variant', variant: 'MOD. 125' }));
+  check(w.get().inputs.drawnSizes === 5, 'model A picked again: still answered');
+  await w.step((a) => a.dispatch({ type: 'variant', variant: 'MOD. 126' }));
+  const b1 = w.get();
+  check(
+    b1.inputs.drawnSizes === null && b1.session.step === 'sizes',
+    "model B picked: the count is asked again on the sizes step (A's answer is not B's)",
+    { drawn: b1.inputs.drawnSizes, step: b1.session.step },
+  );
+  await w.step((a) => a.setDrawnSizes(3));
+  await w.step((a) => a.next()); // sizes → pieces (model B)
+  const b2 = w.get();
+  check(
+    b2.inputs.drawnSizes === 3 && b2.session.variant === 'MOD. 126',
+    'model B answered on its own: kept for B',
+    { drawn: b2.inputs.drawnSizes, variant: b2.session.variant },
+  );
+}
+
 function units() {
   console.log('S3 · units: liveAnswers / settleAnswers');
   const fam = (seed: number, dx: number): PieceFamily => ({
@@ -586,9 +633,108 @@ function units() {
       liveDrawnSizes(drawnA, { ...atA, variant: 'MOD. 126' }) === null &&
       liveDrawnSizes(drawnA, { ...atA, sheetIndex: 1 }) === null &&
       liveDrawnSizes(drawnA, { ...atA, gridOverride: { rows: 2 } }) === null &&
-      liveDrawnSizes(drawnAll, { ...atA, variant: 'MOD. 126' }) === 3 &&
+      liveDrawnSizes(drawnAll, { ...atA, variant: 'MOD. 126' }) === null &&
+      liveDrawnSizes(drawnAll, { ...atA, variant: null }) === 3 &&
       liveDrawnSizes({ drawnSizes: 3, drawnSizesAt: null }, atA) === null,
-    'drawn sizes: live on the same sheet + model only (an all-models answer holds for any model)',
+    'drawn sizes: live on the same sheet + model only (a no-model answer is no wildcard)',
+  );
+  // T6: an answer given before a model was picked is the first picked model's, no wildcard
+  const bound = bindDrawnToModel(drawnAll, atA);
+  check(
+    liveDrawnSizes({ ...drawnAll, drawnSizesAt: bound }, atA) === 3 &&
+      liveDrawnSizes({ ...drawnAll, drawnSizesAt: bound }, { ...atA, variant: 'MOD. 126' }) ===
+        null &&
+      bindDrawnToModel({ ...drawnAll, drawnSizesAt: bound }, { ...atA, variant: 'MOD. 126' }) ===
+        bound &&
+      bindDrawnToModel(drawnAll, { ...atA, sheetIndex: 1 }) === drawnAll.drawnSizesAt,
+    'drawn sizes: a no-model answer binds to the first model; another model does not inherit it',
+  );
+  // T2: the revision is the outline itself, not a 32-bit hash of it — find a 32-bit collision
+  // between two different rectangles and show their revisions still differ
+  const fnv32 = (t: string) => {
+    let h = 0x811c9dc5;
+    for (let k = 0; k < t.length; k++) {
+      h ^= t.charCodeAt(k);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  };
+  const rect = (w: number, h: number): PieceFamily => ({
+    ...fam(1, 0),
+    candidates: [
+      {
+        ...fam(1, 0).candidates[0],
+        outer: [
+          { x: 0, y: 0 },
+          { x: w / 100, y: 0 },
+          { x: w / 100, y: h / 100 },
+          { x: 0, y: h / 100 },
+        ],
+      },
+    ],
+  });
+  const canon = (f: PieceFamily) =>
+    f.candidates
+      .map(
+        (c) =>
+          `${c.rank}:${c.outcome}:${c.outer.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')}`,
+      )
+      .join('|');
+  const seen = new Map<number, [number, number]>();
+  let pair: [PieceFamily, PieceFamily] | null = null;
+  for (let w = 1000; w < 4000 && !pair; w++)
+    for (let h = 1000; h < 1200 && !pair; h++) {
+      const k = fnv32(canon(rect(w, h)));
+      const hit = seen.get(k);
+      if (hit) pair = [rect(...hit), rect(w, h)];
+      else seen.set(k, [w, h]);
+    }
+  check(
+    !!pair && pieceRev(pair[0]) !== pieceRev(pair[1]),
+    'two rectangles that collide in 32-bit FNV keep different revisions',
+    pair ? pair.map((f) => f.candidates[0].outer[2]) : 'no collision found',
+  );
+  // T3: an untouched low-confidence legend row stays a question
+  const set: ChainSet = {
+    chains: [],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+    classes: [
+      {
+        id: 0,
+        role: 'size',
+        sizeLabel: '44',
+        chains: [],
+        totalLengthMm: 0,
+        evidence: [],
+        confidence: 0.9,
+      },
+      {
+        id: 1,
+        role: 'ignore',
+        sizeLabel: null,
+        chains: [],
+        totalLengthMm: 0,
+        evidence: [],
+        confidence: 0.4,
+      },
+    ],
+  };
+  const l1 = applyLegend(set, [
+    { classId: 0, role: 'size', sizeLabel: '46' },
+    { classId: 1, role: 'ignore', sizeLabel: null },
+  ]);
+  check(
+    l1.classes[0].confidence === 1 && l1.classes[1].confidence === 0.4,
+    'legend: a row sent back as built keeps its low confidence; the changed row is answered',
+    l1.classes.map((c) => c.confidence),
+  );
+  const l2 = applyLegend(set, [{ classId: 1, role: 'common', sizeLabel: null }]);
+  check(
+    l2.classes[1].confidence === 1 && l2.classes[0].confidence === 0.9,
+    'legend: changing the grey row answers it and leaves the others as they were',
+    l2.classes.map((c) => c.confidence),
   );
   const q = openQuestions(sem, [], answers, ctx);
   check(
@@ -600,6 +746,7 @@ function units() {
 export async function main(): Promise<number> {
   units();
   await scenario();
+  await modelScenario();
   console.log(failures ? `S3 · ${failures} FAILED` : 'S3 · all checks passed');
   return failures;
 }

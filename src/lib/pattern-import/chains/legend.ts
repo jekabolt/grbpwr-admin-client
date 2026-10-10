@@ -10,9 +10,12 @@ export const applyLegend: ApplyLegendFn = (set, edits) => {
   const classes: LineClass[] = set.classes.map((c) => {
     const e = byId.get(c.id);
     if (!e) return c;
-    return { ...c, role: e.role, sizeLabel: e.role === 'size' ? e.sizeLabel : null, confidence: 1 };
+    const sizeLabel = e.role === 'size' ? e.sizeLabel : null;
+    // an edit that changes nothing is no answer (T3): the row keeps its confidence and its question
+    if (e.role === c.role && (sizeLabel ?? null) === (c.sizeLabel ?? null)) return c;
+    return { ...c, role: e.role, sizeLabel, confidence: 1 };
   });
-  const edited = new Set(byId.keys());
+  const edited = new Set(classes.filter((c, k) => c !== set.classes[k]).map((c) => c.id));
   const ambiguities = set.ambiguities?.filter((a) => !a.classes.some((c) => edited.has(c)));
   const claimed = new Set(classes.filter((c) => c.role !== 'ignore').flatMap((c) => c.chains));
   const orphans = set.orphans.filter((i) => !claimed.has(i));
