@@ -5,15 +5,17 @@
 //
 //   missing-count   graded nest, empty card run, nobody answered → the piece is refused, never one size
 //   mixed           a colour-encoded piece beside an unencoded (all black) graded piece
-//   region-check    the hook's final check is region-based: an equal-area other shape is refused
+//   region-check    the hook's final check is region-based: an equal-area other shape is refused,
+//                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm)
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
 //   grid-hatch      graded nest under a sheet grid (thin grey) and same-look hatching inside the piece
 //   equal-area      two layouts with equal areas but other regions → ambiguous (pickLayout, pure)
 //   fragment-ids    notEvidence on a chain subset looks chains up by id (the <8 mm fragment rule)
-//   card-prior      one size + a card of 6: fills as one size (also drawn twice, offset); a nested
-//                   same-look line → refused
+//   card-prior      one size + a card of 6 fills as one size; drawn twice (offset) it fills without
+//                   a card and asks with one; a nested same-look line and a cuff graded by a few mm
+//                   → refused
 //   over-maxfree    the bench's robe / kombinezon solved with maxFree 1–2: components beyond the
 //                   search are proven irrelevant or the piece is refused — never a wrong contour
 import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
@@ -258,12 +260,27 @@ function regionCheck(): FixtureResult {
     hook.finish(cands);
     return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
   };
+  // every rank wrong by the same strip (a sew line taken for the cut line): no rank moves off the
+  // piece's median, only the absolute bound sees it — 10 mm, and 2.5 mm (under the area rules)
+  const strip = (d: number) => {
+    const list = p.truth.map((t, r) => {
+      const xs = t.map((q) => q.x);
+      const ys = t.map((q) => q.y);
+      const [x0, x1, y0, y1] = [Math.min(...xs) + d, Math.max(...xs) - d, Math.min(...ys) + d, Math.max(...ys) - d];
+      return cand(r, [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]);
+    });
+    const cands = new Map<number, PieceCandidate[]>([[0, list]]);
+    hook.finish(cands);
+    return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
+  };
   const kept = pass(false);
   const swapped = pass(true);
+  const s10 = strip(10);
+  const s25 = strip(2.5);
   return {
     name: 'region-check',
-    ok: kept === 'CCCCC' && swapped[2] === 'r',
-    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}`,
+    ok: kept === 'CCCCC' && swapped[2] === 'r' && s10 === 'rrrrr' && s25 === 'rrrrr',
+    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}; every rank 10 mm in ${s10}, 2.5 mm in ${s25}`,
   };
 }
 
@@ -319,28 +336,62 @@ function equalArea(): FixtureResult {
  */
 function cardPrior(): FixtureResult {
   // a 5-sided piece (not a rectangle: the registration copy must be a curved line)
-  const piece = (dx: number, dy: number, inset = 0): PtMm[] => [
-    { x: dx + inset, y: dy + inset },
-    { x: dx + 300 - inset, y: dy + inset },
-    { x: dx + 340 - inset, y: dy + 120 },
-    { x: dx + 300 - inset, y: dy + 240 - inset },
-    { x: dx + inset, y: dy + 240 - inset },
-    { x: dx + inset, y: dy + inset },
+  const piece = (dx: number, dy: number): PtMm[] => [
+    { x: dx, y: dy },
+    { x: dx + 300, y: dy },
+    { x: dx + 340, y: dy + 120 },
+    { x: dx + 300, y: dy + 240 },
+    { x: dx, y: dy + 240 },
   ];
+  const closedPts = (q: PtMm[]) => [...q, q[0]];
+  // the sew line: the outline offset 10 mm inward, edge by edge (a true allowance)
+  const inset = (q: PtMm[], d: number): PtMm[] => {
+    const n = q.length;
+    const area2 = q.reduce((acc, v, i) => acc + v.x * q[(i + 1) % n].y - q[(i + 1) % n].x * v.y, 0);
+    const sgn = area2 > 0 ? 1 : -1;
+    const lines = q.map((a, i) => {
+      const b = q[(i + 1) % n];
+      const L = Math.hypot(b.x - a.x, b.y - a.y);
+      const nx = (sgn * -(b.y - a.y)) / L;
+      const ny = (sgn * (b.x - a.x)) / L;
+      return { a: { x: a.x + nx * d, y: a.y + ny * d }, b: { x: b.x + nx * d, y: b.y + ny * d } };
+    });
+    return lines.map((l1, i) => {
+      const l0 = lines[(i + n - 1) % n];
+      const d1 = { x: l0.b.x - l0.a.x, y: l0.b.y - l0.a.y };
+      const d2 = { x: l1.b.x - l1.a.x, y: l1.b.y - l1.a.y };
+      const den = d1.x * d2.y - d1.y * d2.x;
+      const t = ((l1.a.x - l0.a.x) * d2.y - (l1.a.y - l0.a.y) * d2.x) / den;
+      return { x: l0.a.x + d1.x * t, y: l0.a.y + d1.y * t };
+    });
+  };
+  const base = piece(0, 0);
+  const cut: Draw = { pts: closedPts(base), style: 0 };
+  const sew: Draw = { pts: closedPts(inset(base, 10)), style: 2 };
+  const copy: Draw = { pts: closedPts(piece(3, -2)), style: 0 };
+  // a cuff graded +4 mm in length and +2 mm in width per size, three sizes, about one corner
+  const cuff: Draw[] = [0, 1, 2].map((k) => ({
+    pts: closedPts([
+      { x: 0, y: 0 },
+      { x: 250 + 4 * k, y: 0 },
+      { x: 250 + 4 * k, y: 80 + 2 * k },
+      { x: 0, y: 80 + 2 * k },
+    ]),
+    style: 0,
+  }));
   const seed = { x: 150, y: 120 };
-  const cases: { name: string; draws: Draw[]; refuse: boolean }[] = [
-    { name: 'one size', draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(0, 0, 10), style: 2 }], refuse: false },
-    {
-      name: 'registration copy',
-      draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(3, -2), style: 0 }, { pts: piece(0, 0, 10), style: 2 }],
-      refuse: false,
-    },
-    { name: 'nested same look', draws: [{ pts: piece(0, 0), style: 0 }, { pts: piece(0, 0, 8), style: 0 }], refuse: true },
+  const cases: { name: string; draws: Draw[]; card: number; at?: PtMm; refuse: boolean }[] = [
+    { name: 'one size + card 6', draws: [cut, sew], card: 6, refuse: false },
+    { name: 'registration copy, no card', draws: [cut, copy, sew], card: 0, refuse: false },
+    // with a card the copy's offsets to the sew line are not one allowance: the operator answers
+    { name: 'registration copy + card 6', draws: [cut, copy, sew], card: 6, refuse: true },
+    { name: 'nested same look + card 6', draws: [cut, { pts: closedPts(inset(base, 8)), style: 0 }], card: 6, refuse: true },
+    { name: 'cuff 3 sizes + card 6', draws: cuff, card: 6, at: { x: 120, y: 40 }, refuse: true },
   ];
   const notes: string[] = [];
   let ok = true;
   for (const k of cases) {
-    const { families } = run(k.draws, [seed], 6);
+    const { families } = run(k.draws, [k.at ?? seed], k.card);
     const cs = families.flatMap((f) => f.candidates);
     const refused = cs.some((c) => c.outcome === 'refused');
     const closed = cs.some((c) => c.outcome === 'closed');

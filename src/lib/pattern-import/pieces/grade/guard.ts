@@ -33,6 +33,8 @@ export type GuardOpts = {
    * 2–20 mm) all along the line is its sew line drawn alike, not another size: not a lane.
    */
   skipUniformPairs: boolean;
+  /** neighbours of any look are lanes (the solver's band count does not look at the line) */
+  anyLook: boolean;
   /** lines shorter than this are no lane (lettering, symbols and arrows drawn as strokes), mm */
   minChainMm: number;
 };
@@ -45,11 +47,29 @@ export const GUARD_OPTS: GuardOpts = {
   minShare: 0.2,
   minLenMm: 150,
   skipUniformPairs: false,
+  anyLook: false,
   minChainMm: 10,
 };
 
 /** Uniform pair (an allowance): median distance range and spread, mm / share of the median. */
-export const ALLOWANCE_PAIR = { minMm: 2, maxMm: 20, spreadMm: 1, spreadShare: 0.1 };
+/**
+ * Uniform pair (a sew / cut line drawn alike at one allowance): median distance 2–20 mm, standard
+ * deviation ≤ 0.5 mm, measured along ≥ 80 % of the shorter line. Grading is never uniform all
+ * round (widths grow faster than lengths), so a pair measured that way is the allowance signature.
+ */
+export const ALLOWANCE_PAIR = { minMm: 2, maxMm: 20, stdMm: 0.5, coverage: 0.8 };
+
+/** The allowance test on one directed list of offsets (mm) sampled every 4 mm along a line. */
+export function isAllowancePair(offsets: readonly number[], shorterMm: number): boolean {
+  const P = ALLOWANCE_PAIR;
+  if (offsets.length < 3 || offsets.length * 4 < P.coverage * shorterMm) return false;
+  const q = [...offsets].sort((x, y) => x - y);
+  const med = q[q.length >> 1];
+  if (med < P.minMm || med > P.maxMm) return false;
+  const mean = q.reduce((a, b) => a + b, 0) / q.length;
+  const sd = Math.sqrt(q.reduce((a, b) => a + (b - mean) ** 2, 0) / q.length);
+  return sd <= P.stdMm;
+}
 
 export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
 
@@ -146,29 +166,56 @@ function bendMm(c: Chain): number {
 }
 
 /**
- * Two same-look lines are a TRANSLATED COPY of each other when one, shifted as a whole, lies on the
- * other: equal length (±1 %), equal extent (±2 mm), and ≥ 90 % of its samples within 0.5 mm of the
- * other after the shift. That is one line drawn twice with a registration offset (a tiled sheet whose
- * pages each carry the whole drawing, misaligned by a few mm — blazer), never two sizes: a graded
- * outline grows, it does not move. Straight lines are left out (a graded straight edge IS a moved
- * copy of the smaller size's), as are lines too short to tell (< COPY_MIN_MM).
+ * Two same-look lines are a TRANSLATED COPY of each other when one, shifted as a whole, IS the
+ * other — a near-exact tile: equal extent (±0.5 mm), equal length (±0.2 %; up to 1 % when one of
+ * them is open, i.e. the same loop with a gap where a crossing cut it), and ≥ 98 % of the samples
+ * of EACH within 0.3 mm of the other after the shift. That is one line drawn twice with a
+ * registration offset (a tiled sheet whose pages each carry the whole drawing, misaligned by a few
+ * mm — blazer), never two sizes: a graded outline grows, even a cuff graded by a few mm changes its
+ * extent by more than 0.5 mm. Straight lines are left out (a graded straight edge IS a moved copy
+ * of the smaller size's), as are lines too short to tell (< COPY_MIN_MM).
  */
 export const COPY_MIN_MM = 150;
 /** A straight-ish line: no point farther than this from its chord. */
 export const COPY_MIN_BEND_MM = 10;
+export const COPY = {
+  lengthShare: 0.002,
+  /** one of the two is open (a gap): the coverage both ways still has to hold */
+  gapLengthShare: 0.01,
+  boxMm: 0.5,
+  onMm: 0.3,
+  onShare: 0.98,
+};
+
+/** Share of `c`'s samples within COPY.onMm of `d` after shifting c by t. */
+function onShare(c: Chain, d: Chain, t: PtMm, grid: SegGrid): number {
+  const samples = resampleT(c.pts, 4);
+  if (samples.length < 10) return 0;
+  let on = 0;
+  for (const s of samples) {
+    const q = { x: s.p.x + t.x, y: s.p.y + t.y };
+    let best = Infinity;
+    grid.near(q, 1, (k, i) => {
+      if (k !== d.id) return;
+      best = Math.min(best, segDist(q, d.pts[i], d.pts[(i + 1) % d.pts.length]));
+    });
+    if (best <= COPY.onMm) on++;
+  }
+  return on / samples.length;
+}
 
 function isTranslatedCopy(c: Chain, d: Chain, grid: SegGrid): boolean {
   if (Math.min(c.lengthMm, d.lengthMm) < COPY_MIN_MM) return false;
-  if (Math.abs(c.lengthMm - d.lengthMm) > 0.01 * Math.max(c.lengthMm, d.lengthMm)) return false;
+  const lenTol = c.closed && d.closed ? COPY.lengthShare : COPY.gapLengthShare;
+  if (Math.abs(c.lengthMm - d.lengthMm) > lenTol * Math.max(c.lengthMm, d.lengthMm)) return false;
   if (bendMm(c) < COPY_MIN_BEND_MM || bendMm(d) < COPY_MIN_BEND_MM) return false;
   const bc = bboxOfPts(c.pts);
   const bd = bboxOfPts(d.pts);
-  const wc = bc.maxX - bc.minX;
-  const hc = bc.maxY - bc.minY;
-  if (Math.abs(wc - (bd.maxX - bd.minX)) > 2 || Math.abs(hc - (bd.maxY - bd.minY)) > 2)
+  if (
+    Math.abs(bc.maxX - bc.minX - (bd.maxX - bd.minX)) > COPY.boxMm ||
+    Math.abs(bc.maxY - bc.minY - (bd.maxY - bd.minY)) > COPY.boxMm
+  )
     return false;
-  const samples = resampleT(c.pts, 4);
-  if (samples.length < 10) return false;
   // the shift: the boxes' centres, or either corner (an open copy may miss a few mm at its ends)
   const shifts = [
     {
@@ -180,19 +227,11 @@ function isTranslatedCopy(c: Chain, d: Chain, grid: SegGrid): boolean {
   ];
   for (const t of shifts) {
     if (Math.hypot(t.x, t.y) < 1) continue; // the same line drawn twice in place: not a lane anyway
-    let on = 0;
-    for (const s of samples) {
-      const q = { x: s.p.x + t.x, y: s.p.y + t.y };
-      let best = Infinity;
-      grid.near(q, 1, (k, i) => {
-        if (k !== d.id) return;
-        const a = d.pts[i];
-        const b = d.pts[(i + 1) % d.pts.length];
-        best = Math.min(best, segDist(q, a, b));
-      });
-      if (best <= 0.5) on++;
-    }
-    if (on >= 0.9 * samples.length) return true;
+    if (
+      onShare(c, d, t, grid) >= COPY.onShare &&
+      onShare(d, c, { x: -t.x, y: -t.y }, grid) >= COPY.onShare
+    )
+      return true;
   }
   return false;
 }
@@ -238,7 +277,7 @@ export function gradingEvidence(
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
-        if (!d || !sameLook(c, d, styles) || copyOf(c, d)) return;
+        if (!d || (!o.anyLook && !sameLook(c, d, styles)) || copyOf(c, d)) return;
         const p = d.pts[i];
         const q = d.pts[(i + 1) % d.pts.length];
         const sx = q.x - p.x;
@@ -272,17 +311,10 @@ export function gradingEvidence(
   const uniform = new Set<string>();
   if (o.skipUniformPairs)
     for (const [key, ds] of pairD) {
-      const q = [...ds].sort((x, y) => x - y);
-      const at = (f: number) => q[Math.min(q.length - 1, Math.floor(f * q.length))];
-      const med = at(0.5);
-      const P = ALLOWANCE_PAIR;
-      if (
-        q.length >= 3 &&
-        med >= P.minMm &&
-        med <= P.maxMm &&
-        at(0.9) - at(0.1) <= Math.max(P.spreadMm, P.spreadShare * med)
-      )
-        uniform.add(key);
+      const [a, b] = key.split(':').map(Number);
+      const la = byId.get(a)?.lengthMm ?? 0;
+      const lb = byId.get(b)?.lengthMm ?? 0;
+      if (isAllowancePair(ds, Math.min(la, lb))) uniform.add(key);
     }
   let nested = 0;
   for (const { self, hits } of seen) {
