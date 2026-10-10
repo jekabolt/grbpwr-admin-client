@@ -47,6 +47,19 @@ import {
   skeletonLined,
 } from '../../src/components/managers/tech-card/components/assembly-skeleton-source';
 import { namesIn } from '../../src/lib/assembly-skeleton/skeleton/build-skeleton';
+import { orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
+import {
+  isJoin,
+  pairPicture,
+  pieceFamilies,
+  readMap,
+  type MapRead,
+  type MapStep,
+} from '../../src/lib/assembly-skeleton/map';
+import { SKELETON_AI, skeletonAIRequest } from '../../src/lib/assembly-skeleton/ai';
+import { seamSheetOf } from '../../src/components/managers/tech-card/assembly-print/seam-sheet';
+import { typesetSeams } from '../../src/components/managers/tech-card/assembly-print/paper';
+import { seamWords } from '../../src/components/managers/tech-card/components/assembly-skeleton-panel';
 import { replayExisting } from '../../src/lib/assembly-skeleton/skeleton/existing';
 import { scopeKeyOfBinding } from '../../src/components/managers/tech-card/components/bom-purpose';
 import {
@@ -248,6 +261,52 @@ function picStats(pics: Map<string, UnionPicture>, leaves: Map<string, string[]>
   };
 }
 
+/** ASSEMBLY MAP over one order: STEP coverage, pair pictures, PIECES numbering. */
+function mapStats(read: MapRead, nameOf: (k: string) => string) {
+  const joins = read.steps.map((_, i) => i).filter((i) => read.steps[i].sews && isJoin(read, i));
+  const withEdges = joins.filter((i) => (read.seams[i] ?? []).length > 0);
+  let pics = 0;
+  let maxOv = 0;
+  let oneSided = 0;
+  let overflow = 0;
+  for (const i of withEdges) {
+    const p = pairPicture(read, i);
+    if (!p) continue;
+    pics++;
+    maxOv = Math.max(maxOv, p.overlap);
+    if (p.sides.length < 2) oneSided++;
+    overflow += p.overflow.length;
+  }
+  const fams = pieceFamilies(read);
+  const members = fams.flatMap((f) => f.members);
+  const numbered = fams.reduce(
+    (a, f) => a + f.picture.edges.filter((e) => e.steps.length).length,
+    0,
+  );
+  const sewnSteps = new Set(fams.flatMap((f) => f.picture.edges.flatMap((e) => e.steps)));
+  return {
+    joinIdx: withEdges,
+    unreadIdx: joins.filter((i) => !(read.seams[i] ?? []).length),
+    machineJoins: joins.length,
+    joinsWithEdges: withEdges.length,
+    coveragePct: joins.length ? Math.round((100 * withEdges.length) / joins.length) : null,
+    unreadJoins: joins
+      .filter((i) => !(read.seams[i] ?? []).length)
+      .slice(0, 8)
+      .map((i) => `${(i + 1) * 10}: ${read.steps[i].inputs.map((k) => nameOf(k)).join(' + ')}`),
+    pairPictures: pics,
+    pairMaxOverlapPct: +(100 * maxOv).toFixed(1),
+    pairOneSided: oneSided,
+    pairOverflowPieces: overflow,
+    families: fams.length,
+    familyNames: fams.map((f) => f.name + (f.tag ? ` ${f.tag}` : '')).join(', '),
+    familiesCoverEveryPieceOnce:
+      members.length === read.graph.pieces.length && new Set(members).size === members.length,
+    numberedEdges: numbered,
+    stepsNumberedOnPieces: sewnSteps.size,
+  };
+}
+
 const sigOfPic = (p: UnionPicture | undefined) =>
   p
     ? `${p.pieceCount}/${p.shapes.length}/${p.w.toFixed(0)}x${p.h.toFixed(0)}/${p.overflow.length}`
@@ -308,6 +367,78 @@ function defaultTicks(steps: SkeletonStep[]): boolean[] {
     if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
   });
   return ticks;
+}
+
+/** The server's request doors (assembly_skeleton_ai.go), as scripts/assembly-skeleton/ai.mjs restates them. */
+function serverRefusal(req: Json): string | null {
+  const B = SKELETON_AI as Json;
+  const runes = (x: string) => [...(x ?? '')].length;
+  if (!req.pieces.length || req.pieces.length > B.maxPieces) return 'pieces count';
+  if (!req.steps.length || req.steps.length > B.maxSteps) return 'steps count';
+  if (req.seams.length > B.maxSeams) return 'seams count';
+  if (req.decisions.length > B.maxDecisions) return 'decisions count';
+  const CLOTH = new Set([
+    '',
+    'main',
+    'lining',
+    'pocketing',
+    'interfacing',
+    'insulation',
+    'contrast',
+    'mesh',
+    'other',
+  ]);
+  const pieces = new Set<string>();
+  for (const p of req.pieces) {
+    if (!p.key || pieces.has(p.key) || runes(p.key) > B.keyRunes) return `piece key ${p.key}`;
+    if (runes(p.name) > B.nameRunes) return `piece name ${p.key}`;
+    if (!CLOTH.has(p.cloth)) return `cloth ${p.cloth}`;
+    if (!['', 'L', 'R'].includes(p.hand)) return `hand ${p.hand}`;
+    if (p.count < 0 || p.count > 20) return `count ${p.count}`;
+    pieces.add(p.key);
+  }
+  for (const x of req.seams) {
+    if (!pieces.has(x.a) || !pieces.has(x.b)) return `seam ${x.a}/${x.b}`;
+    if (!(x.score >= 0 && x.score <= 1)) return `seam score ${x.score}`;
+    if (!['edge', 'partial', 'composite', 'surface', 'closure'].includes(x.kind))
+      return `seam kind ${x.kind}`;
+    if (runes(x.evidence) > B.evidenceRunes) return 'seam evidence';
+  }
+  const inputsOk = (ins: string[]) =>
+    ins.length >= 1 && ins.length <= B.maxInputs && ins.every((k) => k && runes(k) <= B.keyRunes);
+  const decisions = new Set<string>();
+  for (const d of req.decisions) {
+    if (!d.id || decisions.has(d.id)) return `decision ${d.id}`;
+    if (d.readings.length < 2 || d.readings.length > B.maxReadings) return `readings of ${d.id}`;
+    if (d.chosen < 0 || d.chosen >= d.readings.length) return `chosen of ${d.id}`;
+    if (!d.readings.every((r: Json) => inputsOk(r.inputs) && runes(r.reason) <= B.reasonRunes))
+      return `reading of ${d.id}`;
+    decisions.add(d.id);
+  }
+  const ids = new Map<string, number>();
+  const units = new Set<string>();
+  for (const [i, x] of (req.steps as Json[]).entries()) {
+    if (ids.has(x.id)) return `step id ${x.id} twice`;
+    ids.set(x.id, i);
+  }
+  let ordered = 0;
+  for (const [i, x] of (req.steps as Json[]).entries()) {
+    if (!['MACHINE', 'PRESS', 'PRESS_OPEN', 'FUSING', 'HANDWORK'].includes(x.operation))
+      return `operation ${x.operation}`;
+    if (x.outputUnit && (units.has(x.outputUnit) || pieces.has(x.outputUnit)))
+      return `unit ${x.outputUnit}`;
+    if (x.outputUnit) units.add(x.outputUnit);
+    if (x.decisionId && !decisions.has(x.decisionId)) return `decision of ${x.id}`;
+    if (!inputsOk(x.inputs)) return `inputs of ${x.id}`;
+    if (runes(x.label) > B.labelRunes || runes(x.outputName) > B.nameRunes)
+      return `words of ${x.id}`;
+    if (x.follows) {
+      const j = ids.get(x.follows);
+      if (j == null || j >= i) return `${x.id} follows ${x.follows}`;
+    } else ordered++;
+  }
+  if (!ordered) return 'no ordered step';
+  return JSON.stringify(req).length >= 128 * 1024 ? 'over 128 KiB' : null;
 }
 
 // ── one card ───────────────────────────────────────────────────────────────────────────────────
@@ -670,7 +801,7 @@ export async function runCard(input: CardInput) {
 
   // 7. print sheets (assembly-print/page.tsx Document): route and map, shapes on, unionOf from the
   //    print reader's pictures
-  let print: { route: string; map: string; report: Json } | null = null;
+  let print: { route: string; map: string; report: Json; seams?: string } | null = null;
   if ((insert.operations ?? []).length) {
     try {
       const M = assemblyPrintModel(printInput(insert));
@@ -702,6 +833,104 @@ export async function runCard(input: CardInput) {
       out.errors.push(`print threw: ${(e as Error).stack?.split('\n').slice(0, 5).join(' | ')}`);
     }
   }
+  // 8. ASSEMBLY MAP (STEP + PIECES) over the card's own order (use-map-model: the form's ops, the
+  //    card seam graph) and over the proposal; the print SEAM MAP (seam-sheet.ts + typesetSeams);
+  //    the AI request (the panel's useMemo) against the server's doors — no call is made.
+  let seams: string | null = null;
+  try {
+    const t3 = performance.now();
+    const graph = built.facts.pieces.length ? readSeamGraph(built.facts) : null;
+    const nameOf = (k: string) => nameOfPiece.get(k) || `[${k}]`;
+    if (graph) {
+      const cardSteps: MapStep[] = existingOps.map((o) => ({
+        inputs: (o.inputKeys ?? []).filter(Boolean),
+        outputUnitKey: (o.outputUnitKey ?? '').trim(),
+        sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      }));
+      if (cardSteps.length) out.mapCard = mapStats(readMap(graph, cardSteps), nameOf);
+      if (proposal) {
+        const pSteps: MapStep[] = proposal.steps.map((s) => ({
+          inputs: s.inputs,
+          outputUnitKey: s.outputUnitKey,
+          sews: s.operationType === 'MACHINE',
+          seams: s.seams,
+        }));
+        out.mapProposal = mapStats(readMap(proposal.graph ?? graph, pSteps), nameOf);
+      }
+      out.mapMs = Math.round(performance.now() - t3);
+    }
+    if ((insert.operations ?? []).length) {
+      const M = assemblyPrintModel(printInput(insert));
+      const sheet = seamSheetOf(
+        graph,
+        existingOps.map((o) => ({
+          ...(o as Json),
+          inputKeys: o.inputKeys ?? [],
+          outputUnitKey: o.outputUnitKey ?? '',
+          sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        })) as never,
+        M,
+        {
+          defaultSeamClass: form.construction?.defaultSeamClass,
+          machines: form.construction?.equipmentDefaults?.machines ?? [],
+        } as never,
+      );
+      const doc = typesetSeams(
+        M,
+        {
+          code: insert.styleNumber ?? input.code,
+          name: insert.name ?? '',
+          season: '',
+          revision: '',
+          unreleased: true,
+          warnings: [],
+          printedOn: '2026-10-10',
+        },
+        sheet,
+      );
+      seams = paperSvgString(doc);
+      const A1 = { w: 841, h: 594 };
+      out.seamSheet = {
+        size: `${doc.w.toFixed(0)}×${doc.h.toFixed(0)} mm`,
+        families: sheet?.families.length ?? 0,
+        keyRows: sheet?.key.length ?? 0,
+        unreadKeyRows: sheet?.key.filter((k) => k.unread).length ?? 0,
+        legendRows: sheet?.legend.length ?? 0,
+        // the largest sheet is A1; landing on it with more height than A1 = it did not fit
+        fits: !(doc.w >= A1.w && doc.h > A1.h + 0.01),
+        overWidth: doc.report.overWidth,
+      };
+    }
+    if (proposal) {
+      const r = skeletonAIRequest({
+        proposal,
+        facts: built.facts,
+        templateStages: orderTemplate(built.facts.category).stages.map((st) => st.label),
+        seamWords,
+        techCardId: 1,
+      });
+      if (!r.ok) out.ai = { ok: false, why: r.why };
+      else {
+        const req = r.request as Json;
+        out.ai = {
+          ok: true,
+          pieces: req.pieces.length,
+          steps: req.steps.length,
+          ordered: req.steps.filter((s: Json) => !s.follows).length,
+          seams: req.seams.length,
+          decisions: req.decisions.length,
+          bytes: JSON.stringify(req).length,
+          serverRefusal: serverRefusal(req),
+        };
+      }
+    }
+  } catch (e) {
+    out.errors.push(
+      `map/seams/ai threw: ${(e as Error).stack?.split('\n').slice(0, 6).join(' | ')}`,
+    );
+  }
+  if (print && seams) (print as Json).seams = seams;
+  else if (seams) print = { route: '', map: '', report: {}, seams } as never;
   out.totalMs = Math.round(performance.now() - T0);
 
   // the stand needs the form and the contour map as the card would hold them
@@ -711,7 +940,15 @@ export async function runCard(input: CardInput) {
     categoryNames: input.categoryNames,
     shapes: [...S.shapeByKey.entries()],
     cloth: cloth ? [...cloth.entries()] : null,
+    mapPick: out.mapCard ? { withEdges: out.mapCard.joinIdx, unread: out.mapCard.unreadIdx } : null,
   };
+  // indexes are for the UI stand only; the report keeps counts
+  for (const k of ['mapCard', 'mapProposal']) {
+    if (out[k]) {
+      delete out[k].joinIdx;
+      delete out[k].unreadIdx;
+    }
+  }
   return { report: out, stand, print, proposal };
 }
 

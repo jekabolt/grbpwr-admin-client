@@ -196,6 +196,7 @@ for (const input of inputs) {
   if (res.print) {
     writeFileSync(resolve(OUT, `${safe}-route.svg`), res.print.route);
     writeFileSync(resolve(OUT, `${safe}-map.svg`), res.print.map);
+    if (res.print.seams) writeFileSync(resolve(OUT, `${safe}-seams.svg`), res.print.seams);
   }
   summary.push(res.report);
   const r = res.report;
@@ -215,6 +216,10 @@ for (const input of inputs) {
       (r.pictures
         ? `\n  pictures ${JSON.stringify(r.pictures)}; print differs ${r.printDiffers?.length}`
         : '') +
+      (r.mapCard ? `\n  map(card) ${JSON.stringify(r.mapCard)}` : '') +
+      (r.mapProposal ? `\n  map(proposal) ${JSON.stringify(r.mapProposal)}` : '') +
+      (r.seamSheet ? `\n  SEAM MAP ${JSON.stringify(r.seamSheet)}` : '') +
+      (r.ai ? `\n  AI request ${JSON.stringify(r.ai)}` : '') +
       (r.errors.length ? `\n  ERRORS ${r.errors.join(' || ')}` : ''),
   );
 }
@@ -242,11 +247,22 @@ const row = (r) =>
     r.pictures
       ? `${r.pictures.pictures}/${r.pictures.units} ov${(100 * r.pictures.maxOverlap).toFixed(0)}%`
       : '-',
+    r.mapCard
+      ? `${r.mapCard.coveragePct}%/${r.mapCard.families}f/${r.mapCard.numberedEdges}e ov${r.mapCard.pairMaxOverlapPct}%`
+      : '-',
+    r.seamSheet ? `${r.seamSheet.size}${r.seamSheet.fits ? '' : ' NOFIT'}` : '-',
+    r.ai
+      ? r.ai.ok
+        ? r.ai.serverRefusal
+          ? `REFUSED ${r.ai.serverRefusal}`
+          : `ok ${r.ai.bytes}B`
+        : `no: ${r.ai.why}`
+      : '-',
     `${r.proposalMs ?? '-'}`,
     r.errors?.length ?? 0,
   ].join(' | ');
 const table = [
-  'code | template | matched/pieces | dxf | seams ch/amb/rej | units | steps | to decide | left out | sweep rep/app(cuts) | zod rep/app | tech in/cont/joins | pics/units maxov | ms | err',
+  'code | template | matched/pieces | dxf | seams ch/amb/rej | units | steps | to decide | left out | sweep rep/app(cuts) | zod rep/app | tech in/cont/joins | pics/units maxov | map(card) cov/fam/edges ov | seam sheet | AI req | ms | err',
   ...summary.map(row),
 ].join('\n');
 writeFileSync(resolve(OUT, 'summary.txt'), table + '\n');

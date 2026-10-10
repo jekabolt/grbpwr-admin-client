@@ -134,6 +134,55 @@ for (const code of codes) {
   console.log(`  form steps ${ops0}; unit glyphs on the schematic ${glyphs}`);
   await shot(`${safe}-schematic`, '[data-stand-section]');
 
+  // ASSEMBLY MAP (the card's own order): STEP on the first machine step, on a join with read
+  // edges, on a join with none; then PIECES
+  if (await page.locator('[data-assembly-map]').count()) {
+    const list = page.locator('[aria-label="sequence view"] [role="radio"]', { hasText: 'list' });
+    if (await list.count()) await list.first().click();
+    await page.waitForTimeout(300);
+    await shot(`${safe}-map-step-first`, '[data-stand-map]');
+    const pickOf = stand.mapPick ?? { withEdges: [], unread: [] };
+    const showStep = async (i, tag) => {
+      const row = page.locator(`[data-rail-step="${i}"]`);
+      if (!(await row.count())) return console.log(`  map: no rail row ${i}`);
+      await row.first().click();
+      // the pointer off the rail: hover beats the sticky pick, and a re-layout can put another
+      // row under a resting pointer
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(250);
+      const shown = await page
+        .locator('[data-map-step]')
+        .first()
+        .getAttribute('data-map-step')
+        .catch(() => null);
+      if (shown != null && Number(shown) !== i) console.log(`  map shows step index ${shown}, picked ${i}`);
+      const facts = await page.locator('[data-map-facts]').allInnerTexts();
+      const sides = await page.locator('[data-map-pair] [data-map-side]').count();
+      console.log(
+        `  map STEP ${(i + 1) * 10} (${tag}): sides ${sides}; facts «${facts.join(' / ').replace(/\s+/g, ' ').slice(0, 220)}»`,
+      );
+      await shot(`${safe}-map-step-${tag}`, '[data-stand-map]');
+    };
+    const w = pickOf.withEdges;
+    if (w.length) await showStep(w[Math.floor(w.length / 2)], 'read');
+    if (pickOf.unread.length) await showStep(pickOf.unread[0], 'unread');
+    const pv = page.locator('[aria-label="assembly map view"] [role="radio"]', {
+      hasText: 'pieces',
+    });
+    if (await pv.count()) {
+      await pv.first().click();
+      await page.waitForTimeout(400);
+      const fam = await page.locator('[data-map-family]').count();
+      const nums = await page.locator('[data-map-number]').count();
+      console.log(`  map PIECES: ${fam} families, ${nums} edge numbers`);
+      await shot(`${safe}-map-pieces`, '[data-stand-map]');
+      const sv = page.locator('[aria-label="assembly map view"] [role="radio"]', {
+        hasText: 'step',
+      });
+      if (await sv.count()) await sv.first().click();
+    }
+  } else console.log('  no assembly map on the stand');
+
   const door = page.locator('[data-skeleton-door="header"]');
   if (!(await door.count()) || !(await door.isEnabled())) {
     const why = await page.locator('[data-skeleton-why]').allInnerTexts();
@@ -221,7 +270,7 @@ for (const code of codes) {
 // print sheets: the SVG files typeset by paper.ts, opened as they are
 for (const code of codes) {
   const safe = code.replace(/[^\w.~-]+/g, '_');
-  for (const form of ['route', 'map']) {
+  for (const form of ['route', 'map', 'seams']) {
     const f = resolve(OUT, `${safe}-${form}.svg`);
     if (!existsSync(f)) continue;
     const svg = readFileSync(f, 'utf8');
