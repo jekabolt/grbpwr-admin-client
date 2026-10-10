@@ -79,7 +79,9 @@ import { identityCheck, readName } from './names';
 import { offsetContour } from './offset';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
-type DxfExtra = { dxf?: { identity?: string; outerIsSeam?: boolean; features?: Feature[] } };
+type DxfExtra = {
+  dxf?: { identity?: string; outerIsSeam?: boolean; features?: Feature[]; instances?: number };
+};
 type Blocked = SemanticsOutput['blocked'][number];
 
 /** How a written size relates to its source candidate, for the walls the gate compares (G3/G4). */
@@ -608,13 +610,24 @@ export function buildPieceSpecsDetailed(
     // ── pair / quantity
     const twin = twinOf.get(seed);
     const twinPrep = twin != null ? preps.find((x) => x.seed === twin) : undefined;
-    const pp = planPair({
-      qty: qtyText,
-      saysPair,
-      symmetric,
-      onFold: anyFold,
-      namedHand: !!name.hand,
-    });
+    // F14 R5: a block inserted n times (identical copies, collapsed by the DXF reader) is cut n
+    // times per WRITTEN identity — what our writer emits for × per garment n and what the card
+    // counts. That count is the drawing's own statement, so it is not re-read as a pair.
+    const drawnCopies = Math.max(1, ...p.cands.map(({ c }) => c.dxf?.instances ?? 1));
+    const pp =
+      drawnCopies >= 2
+        ? {
+            pair: false,
+            perIdentity: drawnCopies,
+            why: `block inserted ${drawnCopies} times — cut ${drawnCopies}`,
+          }
+        : planPair({
+            qty: qtyText,
+            saysPair,
+            symmetric,
+            onFold: anyFold,
+            namedHand: !!name.hand,
+          });
     pieceNotes.push(`quantity: ${pp.why}`);
     // pairHand override: undefined = no answer, null = "not a pair", L/R = the DRAWN hand of a pair
     let hand: PairHand | null = name.hand;

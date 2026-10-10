@@ -109,19 +109,37 @@ export function assertRasterPagePixels(pixels: number, where: string): void {
  * C5 follow-up: image XObjects of a PDF larger than the raster limit, read off the raw bytes. The
  * pdf.js guard (`maxImageSize`) drops such an image without a trace — its paint operator never
  * reaches the walkers — so a scan PDF at 300 dpi would import as an empty page. An image is a
- * stream, so its dictionary is never inside an object stream: `/Subtype /Image` with direct
- * `/Width` / `/Height` between the object header and its `stream` keyword. Indirect sizes are not
- * resolved (rare; such an image is then only caught by the decoded-size checks).
+ * stream, so its dictionary is never inside an object stream: `/Subtype /Image` with `/Width` /
+ * `/Height` between the object header and its `stream` keyword.
+ *
+ * F14 R8: a size may be indirect (`/Width 12 0 R`). Such a reference is resolved when its object
+ * is a plain integer written uncompressed (`12 0 obj 6000 endobj`, the last definition wins); a
+ * size that still cannot be read (inside an object stream, odd syntax) is counted in `unknown` —
+ * `extractPdf` refuses an empty result when such an image was never drawn (the backstop).
  */
-export function oversizedPdfImages(
+export function pdfImageScan(
   bytes: ArrayBuffer,
   max: number = PATIMPORT.maxRasterPixels,
-): { width: number; height: number }[] {
+): { oversized: { width: number; height: number }[]; unknown: number } {
   const u = new Uint8Array(bytes);
   const out: { width: number; height: number }[] = [];
+  let unknown = 0;
   const IMG = [0x2f, 0x49, 0x6d, 0x61, 0x67, 0x65]; // "/Image"
   const word = (c: number) =>
     (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+  const resolved = new Map<string, number | null>();
+  let lookups = 0;
+  const sizeOf = (dict: string, key: string): number | null => {
+    const ref = new RegExp(`/${key}\\s+(\\d+)\\s+(\\d+)\\s+R(?![A-Za-z0-9])`).exec(dict);
+    if (ref) {
+      const k = `${+ref[1]} ${+ref[2]}`;
+      if (!resolved.has(k))
+        resolved.set(k, lookups++ < MAX_REF_LOOKUPS ? indirectInt(u, +ref[1], +ref[2]) : null);
+      return resolved.get(k) ?? null;
+    }
+    const direct = new RegExp(`/${key}\\s+(\\d+)(?![\\d.])`).exec(dict);
+    return direct ? +direct[1] : null;
+  };
   for (let i = u.indexOf(0x2f); i !== -1 && i + 6 < u.length; i = u.indexOf(0x2f, i + 1)) {
     let hit = true;
     for (let k = 1; k < 6 && hit; k++) hit = u[i + k] === IMG[k];
@@ -133,20 +151,63 @@ export function oversizedPdfImages(
     const from = Math.max(head.lastIndexOf(' obj'), head.lastIndexOf('\nobj'), 0);
     const to = tail.indexOf('stream');
     const dict = head.slice(from) + (to === -1 ? tail : tail.slice(0, to));
-    const w = /\/Width\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
-    const h = /\/Height\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
-    if (!w || !h) continue;
-    const width = +w[1];
-    const height = +h[1];
+    const width = sizeOf(dict, 'Width');
+    const height = sizeOf(dict, 'Height');
+    if (width == null || height == null) {
+      unknown++;
+      continue;
+    }
     if (width * height > max) out.push({ width, height });
   }
-  return out;
+  return { oversized: out, unknown };
+}
+
+/** The oversized images only (see `pdfImageScan`). */
+export function oversizedPdfImages(
+  bytes: ArrayBuffer,
+  max: number = PATIMPORT.maxRasterPixels,
+): { width: number; height: number }[] {
+  return pdfImageScan(bytes, max).oversized;
+}
+
+/** Indirect sizes resolved per file at most (each is one backward scan of the bytes). */
+const MAX_REF_LOOKUPS = 64;
+
+/**
+ * The value of `num gen obj <integer> endobj` written uncompressed — the LAST definition (an
+ * incremental update overrides earlier ones). null when absent or not a plain integer.
+ */
+function indirectInt(u: Uint8Array, num: number, gen: number): number | null {
+  const pat = Array.from(`${num} ${gen} obj`, (c) => c.charCodeAt(0));
+  for (let i = u.length - pat.length; i >= 0; i--) {
+    i = u.lastIndexOf(pat[0], i);
+    if (i < 0) break;
+    let ok = true;
+    for (let k = 1; k < pat.length && ok; k++) ok = u[i + k] === pat[k];
+    if (!ok) continue;
+    const before = i > 0 ? u[i - 1] : 0x0a;
+    if (before >= 0x30 && before <= 0x39) continue; // "112 0 obj" is not "12 0 obj"
+    const m = /^\s*(\d+)\s*endobj/.exec(
+      latin1Of(u.subarray(i + pat.length, Math.min(u.length, i + pat.length + 64))),
+    );
+    return m ? +m[1] : null;
+  }
+  return null;
 }
 
 function latin1Of(u: Uint8Array): string {
   let s = '';
   for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
   return s;
+}
+
+/**
+ * F14 R8 backstop: an image whose size the raw scan could not read was never drawn and nothing
+ * else is on the pages — pdf.js dropped it, almost surely for its size (it decodes and hands over
+ * every image it keeps).
+ */
+export function unreadablePdfImagesMessage(n: number): string {
+  return `${n === 1 ? 'an embedded image' : `${n} embedded images`} could not be read (pixel size not readable from the file) and nothing else is drawn — most likely ${n === 1 ? 'it is' : 'they are'} larger than the ${megapixels(PATIMPORT.maxRasterPixels)} the importer traces. ${RASTER_HINT}`;
 }
 
 /** The refusal / note for oversized PDF images (same dpi guidance as a scan file). */

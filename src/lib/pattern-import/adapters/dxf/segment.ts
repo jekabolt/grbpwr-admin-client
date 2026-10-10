@@ -944,7 +944,11 @@ export function segmentDxf(read: DxfRead): DxfSegmentation {
       warnings: ['no block inserts: loose geometry — the pieces stage must find the contours'],
     };
   }
-  const work = inserts.map((g) => blockPiece(g, read, pathById, textById));
+  const work = collapseCopies(
+    inserts.map((g) => blockPiece(g, read, pathById, textById)),
+    read,
+    warnings,
+  );
   const pieces = work.map((w) => w.piece);
 
   // identity + size
@@ -1208,6 +1212,53 @@ export function segmentDxf(read: DxfRead): DxfSegmentation {
     pairs,
     warnings,
   };
+}
+
+/**
+ * F14 R5 — INSERT copies are one piece drawn n times, not n size candidates. Our writer inserts a
+ * block once per cut piece (write/r2000 `insertsOf`), CLO and other CADs may do the same. Copies =
+ * the same block, the same labels (an ATTRIB can make two INSERTs of one block different pieces)
+ * and the same linear part of the INSERT transform — they differ by translation only, so their
+ * geometry is identical. The first instance is kept (the writer puts it at the origin, where the
+ * gate reads it); `instances` carries the count to semantics as the cut quantity, and the copies'
+ * paths are marked `qv-copy` (ignored) so they never become loose chains. A mirrored or rotated
+ * INSERT of the same block is NOT a copy and stays a candidate of its own.
+ */
+function collapseCopies(work: BlockWork[], read: DxfRead, warnings: string[]): BlockWork[] {
+  const groups = read.meta.groups;
+  const linear = (w: BlockWork) => groups[w.piece.group].transform;
+  const same = (x: BlockWork, y: BlockWork) => {
+    const a = linear(x);
+    const b = linear(y);
+    const lx = x.piece.labels;
+    const ly = y.piece.labels;
+    return (
+      x.piece.block === y.piece.block &&
+      [a.a - b.a, a.b - b.b, a.c - b.c, a.d - b.d].every((d) => Math.abs(d) <= 1e-9) &&
+      lx.pieceName === ly.pieceName &&
+      lx.size === ly.size &&
+      lx.quantity === ly.quantity
+    );
+  };
+  const kept: BlockWork[] = [];
+  for (const w of work) {
+    const first = kept.find((k) => same(k, w));
+    if (!first) {
+      kept.push(w);
+      continue;
+    }
+    first.piece.instances = (first.piece.instances ?? 1) + 1;
+    for (const id of groups[w.piece.group].paths) first.piece.roles[id] = 'qv-copy';
+  }
+  for (const k of kept) {
+    const n = k.piece.instances;
+    const q = k.piece.labels.quantity;
+    if (n != null && q != null && q !== n)
+      warnings.push(
+        `${k.piece.block}: inserted ${n} times but its QUANTITY label says ${q} — the drawn count is used`,
+      );
+  }
+  return kept;
 }
 
 function spread(xs: number[]): number {

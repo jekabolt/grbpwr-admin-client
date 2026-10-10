@@ -220,6 +220,9 @@ export type DxfBlockPiece = {
   gradePoints: { turn: number; curve: number };
   pointNumbers: number;
   annotations: TextId[];
+  /** F14 R5: identical INSERT copies of this block (translation only) collapsed into this piece —
+   * it is cut this many times per garment. Unset = inserted once. */
+  instances?: number;
 };
 
 export type DxfIdentity = {
@@ -278,5 +281,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
+    /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */
+    instances?: number;
   };
 };
