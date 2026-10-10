@@ -219,6 +219,9 @@ function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
   return out;
 }
 
+/** A8b: tile chrome — a cut line on it, or around it, is traced chrome (G19). */
+const CHROME_KINDS = new Set<BackgroundKind>(['tile-frame', 'regmark', 'tile-label']);
+
 const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   const { paths: _p, texts: _t, rasters: _r, styles: _s, ...rest } = s;
   return rest;
@@ -245,6 +248,8 @@ export class Session {
   private cleanEdits: PageMaskEdit[] = [];
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
+  /** A8b: sources of the tile chrome page items offer but do not apply (G19 measures against them). */
+  private chromeSrc = new Set<string>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -348,6 +353,7 @@ export class Session {
       this.masks = null;
       this.cleanEdits = [];
       this.offeredSrc = new Set();
+      this.chromeSrc = new Set();
     }
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
@@ -721,6 +727,7 @@ export class Session {
     if (this.dxf) {
       this.masks = [];
       this.offeredSrc = new Set();
+      this.chromeSrc = new Set();
       this.pages = this.extractPages;
       this.scaleCands = this.extractScale;
       ctx.progress(1, 1);
@@ -755,11 +762,19 @@ export class Session {
     applyMasks(docs, out.pages);
     this.masks = out.pages;
     this.offeredSrc = new Set<string>();
+    this.chromeSrc = new Set<string>();
     for (const m of out.pages) {
-      const off = new Set(m.items.filter((it) => !it.applied).flatMap((it) => it.paths));
+      const unapplied = m.items.filter((it) => !it.applied);
+      const off = new Set(unapplied.flatMap((it) => it.paths));
       if (!off.size) continue;
+      const chrome = new Set(
+        unapplied.filter((it) => CHROME_KINDS.has(it.kind)).flatMap((it) => it.paths),
+      );
       const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
-      for (const p of pg?.paths ?? []) if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+      for (const p of pg?.paths ?? []) {
+        if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+        if (chrome.has(p.id)) this.chromeSrc.add(srcKey(p.src));
+      }
     }
     this.pages = out.classes;
     this.scaleCands = mergeScale(this.extractScale, out.scaleHints);
@@ -1234,6 +1249,16 @@ export class Session {
           ]
         : []),
     ];
+    // A8b (G19): the sheet's tile chrome — masked frames, marks, tile labels, and the chrome the
+    // clean stage only offered — in the walls' frame
+    const chrome =
+      this.sheet && !this.fast
+        ? this.sheet.paths
+            .filter((p) =>
+              p.background ? CHROME_KINDS.has(p.background) : this.chromeSrc.has(srcKey(p.src)),
+            )
+            .map((p) => (p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts))
+        : [];
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -1257,6 +1282,7 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          chrome,
           openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },

@@ -43,6 +43,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { foldShapeProblem } from '../semantics/fold';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
+import { ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -1408,5 +1409,66 @@ export function g18(ctx: GateCtx): GateCheck {
     notes.join('; ') || 'no found grainline stands on lettering',
     hard.length ? `${hard.length} from lettering` : soft.length ? `${soft.length} touching` : 0,
     `ends not in a ${PATIMPORT.glyphCellMm} mm cell of ≥ ${dense} short strokes; ≥ ${near} mm from short strokes`,
+  );
+}
+
+// ── G19 (A8b): the cut line traced around tile chrome ─────────────────────────────────────
+
+const CHROME_WHY = 'the cut line runs around a registration mark / tile chrome';
+
+/** One block's written ring (cut, seam): its hairpins and its stretches on chrome, in words. */
+export function chromeProblems(
+  ents: readonly RawEntity[],
+  chrome: readonly PtMm[][] | undefined,
+  /** A traced scan: its line wobbles in 2 mm steps (leonie), and a scan has no vector chrome. */
+  raster = false,
+): string[] {
+  const out: string[] = [];
+  const idx = chrome?.length ? new ChromeIndex([...chrome]) : null;
+  for (const layer of [LAYERS.cut, LAYERS.seam]) {
+    for (const e of ents) {
+      if (e.layer !== layer || !isPoly(e) || e.pts.length < 4) continue;
+      const word = layer === LAYERS.cut ? 'cut' : 'seam';
+      for (const h of raster ? [] : hairpins(e.pts, e.closed))
+        out.push(
+          `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
+        );
+      if (idx)
+        for (const r of onChrome(e.pts, e.closed, idx))
+          out.push(
+            `the ${word} line runs ${r.lengthMm.toFixed(0)} mm on tile chrome from (${r.from.x.toFixed(0)}, ${r.from.y.toFixed(0)})`,
+          );
+    }
+  }
+  return out;
+}
+
+export function g19(ctx: GateCtx): GateCheck {
+  if (!ctx.raw) return check('G19-chrome', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
+  const failed: string[] = [];
+  const notes: string[] = [];
+  let n = 0;
+  for (const { block } of ctx.blocks) {
+    const why = chromeProblems(
+      rawOf(ctx, block),
+      ctx.expect.chromeByBlock?.[block],
+      ctx.expect.hausdorffP95Mm > PATIMPORT.hausdorffP95VectorMm,
+    );
+    if (!why.length) continue;
+    n += why.length;
+    failed.push(block);
+    notes.push(
+      `${block}: ${why.slice(0, 3).join('; ')}${why.length > 3 ? ` (+${why.length - 3})` : ''}`,
+    );
+  }
+  return check(
+    'G19-chrome',
+    failed,
+    'block',
+    failed.length
+      ? [CHROME_WHY, ...notes].join('; ')
+      : 'no cut or seam line traced around tile chrome',
+    n,
+    'no hairpin ≤ 2 mm wide, 3–25 mm long; no stretch ≥ 5 mm within 0.3 mm of tile chrome',
   );
 }

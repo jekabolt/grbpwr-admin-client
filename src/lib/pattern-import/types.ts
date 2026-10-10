@@ -1360,7 +1360,12 @@ export type GateCheckId =
   | 'G16-glyphs'
   /** A8: internal-layer length against the outline length (warn). */
   /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
-  | 'G18-grain-source';
+  | 'G18-grain-source'
+  /**
+   * A8b: the cut / seam line traced around tile chrome — a hairpin round a 1 mm bar (a corner
+   * bracket), or a stretch ≥ 5 mm ON a masked / offered chrome line (block).
+   */
+  | 'G19-chrome';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1455,6 +1460,11 @@ export type GateExpectation = {
    * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
    */
   derivedByBlock?: Record<string, DerivedEdge[]>;
+  /**
+   * A8b (G19): tile chrome near each block, written frame — the clean stage's masked frames,
+   * marks and tile labels and the chrome it only offered. A cut / seam line on it is traced chrome.
+   */
+  chromeByBlock?: Record<string, PtMm[][]>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
