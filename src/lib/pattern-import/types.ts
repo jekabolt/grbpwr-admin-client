@@ -667,20 +667,37 @@ export type SizeCountAsk = {
    * `expected` (from 'inferred'); false when the operator took it back (`drawnSizes: 0`) or
    * answered himself.
    */
-  auto?: { n: number | null; evidence: CountEvidence[]; applied: boolean };
+  auto?: {
+    n: number | null;
+    evidence: CountEvidence[];
+    applied: boolean;
+    /** Why AUTO is off whatever the evidences say ("2 models on this sheet"). */
+    blocked?: string;
+  };
 };
 
-/** A6: one independent evidence of how many sizes a sheet draws (`sizes/count-evidence.ts`). */
+/** A6: one evidence of how many sizes a sheet draws (`sizes/count-evidence.ts`). */
 export type CountEvidence = {
   /**
    * 'label' = one size named in text ("SIZE 38", "Gr. 40"); 'text-run' = a size run in text
-   * ("36–46", a legend); 'nests' = nesting depth of the largest closed outlines (A2 faces);
+   * ("36–46", a legend); 'nests' = the rings around the largest closed outlines (A2 faces);
    * 'files' = one file per size; 'ai' = the AI read the count off the sheet (A3).
    */
   kind: 'label' | 'text-run' | 'nests' | 'files' | 'ai';
-  /** The counts it allows (a range "36–46" reads as 6 at step 2 or 11 at step 1). */
+  /** The counts it allows (a range "36–46" reads as 6 at step 2 or 11 at step 1; [] = none). */
   n: number[];
-  /** Human-readable: "SIZE 38", "depth 1 on 2 of 2 largest outlines". */
+  /**
+   * Independence group: two evidences of one group are one fact (a size printed on each file and
+   * the file's own name; the sheet's text; the geometry; the AI). AUTO needs two groups.
+   */
+  group: 'text' | 'files' | 'geometry' | 'ai';
+  /**
+   * It counts toward AUTO. False = shown as a suggestion only: a lone "SIZE 38" the geometry does
+   * not back (a sample-size title sits on side-by-side graded sheets too), rings not proven to be
+   * sizes, one outline drawn at two scales.
+   */
+  counts: boolean;
+  /** Human-readable: "SIZE 38", "one line around each of 2 outlines, no scaled copies". */
   detail: string;
   /** 'label': the size token it names ("38", "M"). */
   label?: string;

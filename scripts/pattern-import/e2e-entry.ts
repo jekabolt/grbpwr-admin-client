@@ -640,7 +640,10 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       !a
         ? 'not asked'
         : a.auto?.applied
-          ? `${sz.expected?.n} · AUTO · ${a.auto.evidence.map((e) => e.kind).join(' + ')}`
+          ? `${sz.expected?.n} · AUTO · ${a.auto.evidence
+              .filter((e) => e.counts)
+              .map((e) => e.kind)
+              .join(' + ')}`
           : a.inferred
             ? `${a.inferred.n} · from the lines`
             : 'asked, no suggestion';
@@ -688,7 +691,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       ...(sz.countAsk?.auto
         ? {
             countEvidence: sz.countAsk.auto.evidence.map(
-              (e) => `${e.kind} ${e.n.join('/')}: ${e.detail}`,
+              (e) => `${e.kind} ${e.n.join('/')}${e.counts ? '' : ' (not counted)'}: ${e.detail}`,
             ),
           }
         : {}),

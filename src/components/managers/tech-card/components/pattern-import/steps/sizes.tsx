@@ -469,12 +469,15 @@ function DrawnSizes({
   const inferred = autoOn == null && ask.inferred?.n !== autoQuick ? ask.inferred : null;
   const card =
     cardCount > 0 && cardCount !== inferred?.n && cardCount !== autoQuick ? cardCount : null;
-  const why = (auto?.evidence ?? []).map((e) => e.detail).join(' · ');
+  const why = [
+    ...(auto?.evidence ?? []).map((e) => `${e.detail}${e.counts ? '' : ' (not counted)'}`),
+    ...(auto?.blocked ? [auto.blocked] : []),
+  ].join(' · ');
   const note =
     autoOn != null
       ? `${autoOn === 1 ? 'one size' : `${autoOn} sizes`}, read off the sheet: ${why}. click AUTO to answer it yourself.`
       : answer == null
-        ? `the file does not say how many sizes it draws. count the outlines of one piece.${auto?.evidence.length && auto.n == null ? ` (the sheet disagrees with itself: ${why})` : ''}`
+        ? `the file does not say how many sizes it draws. count the outlines of one piece.${auto?.evidence.length && auto.n == null ? ` (read off the sheet, not enough to set it: ${why})` : ''}`
         : answer === 1
           ? 'one size: each piece closes as a single outline.'
           : `set by you. a piece that cannot be ranked into ${answer} sizes is held back, not guessed.`;

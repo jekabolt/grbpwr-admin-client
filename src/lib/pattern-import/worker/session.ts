@@ -82,7 +82,7 @@ import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
-import { countEvidence, labelSingleRun } from '../sizes/count-evidence';
+import { blobShapes, countEvidence, labelSingleRun, sheetFeed } from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
@@ -305,6 +305,8 @@ export class Session {
   private sheet: Sheet | null = null;
   /** Every page's text and the file names, kept past the docs: the legend reads size runs there. */
   private docTexts: string[] = [];
+  /** `docTexts` with the file each was printed in (A6: only the selected sheet's files count). */
+  private docTextSrc: { file: FileId; text: string }[] = [];
   private fileNames = new Map<string, string>();
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
@@ -874,9 +876,12 @@ export class Session {
       ctx.checkCancel();
       // Instruction pages carry the size run and the legend; keep their text past the docs (the
       // tile labels and copyright lines the clean stage masked are not read).
-      this.docTexts = docs.flatMap((d) =>
-        d.pages.flatMap((p) => p.texts.filter((t) => !t.background).map((t) => t.text)),
+      this.docTextSrc = docs.flatMap((d) =>
+        d.pages.flatMap((p) =>
+          p.texts.filter((t) => !t.background).map((t) => ({ file: d.file.id, text: t.text })),
+        ),
       );
+      this.docTexts = this.docTextSrc.map((t) => t.text);
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
@@ -971,7 +976,7 @@ export class Session {
     const read = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
     // H1: the sizes the sheet draws decide the run the pieces are ranked in
     let expected = expectedSizes(read, input.drawnSizes, this.chains);
-    const countAsk = this.countAsk(read, input.card.length);
+    const countAsk = this.countAsk(read);
     // A6: two or more independent evidences agree on the count → 'inferred' (taken like the
     // operator's answer; `drawnSizes: 0` = the operator took it back, and he is asked)
     const auto = countAsk?.auto;
@@ -981,7 +986,7 @@ export class Session {
     }
     this.expected = expected;
     // one size drawn and the sheet names it ("SIZE 38"): the run carries the label for the map
-    const label = auto?.evidence.find((e) => e.kind === 'label')?.label ?? null;
+    const label = this.countEv?.set === this.chains ? this.countEv.v.label : null;
     const named =
       expected?.n === 1 && expected.from !== 'source' ? labelSingleRun(read, label) : read;
     const run = runForExpected(named, expected);
@@ -999,9 +1004,9 @@ export class Session {
    * close only as one size). The lines' own suggestion is computed once per chain set.
    */
   private inferred: { set: ChainSet; v: SizeCountAsk['inferred'] } | null = null;
-  private countEv: { set: ChainSet; card: number; v: ReturnType<typeof countEvidence> } | null =
+  private countEv: { key: string; set: ChainSet; v: ReturnType<typeof countEvidence> } | null =
     null;
-  private countAsk(read: SizeRun, cardCount: number): SizeCountAsk | null {
+  private countAsk(read: SizeRun): SizeCountAsk | null {
     if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
     if (
       this.fast &&
@@ -1013,25 +1018,39 @@ export class Session {
     if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
     // A6 (not on the DXF fast path: its blocks are its pieces, the faces are not read)
     if (this.fast) return { inferred: this.inferred.v };
-    if (this.countEv?.set !== set || this.countEv.card !== cardCount) {
+    // A6: only what feeds THIS sheet — its texts, its files' instruction texts, its faces, its files
+    const sheet = this.sheet;
+    const key = `${sheet.id}`;
+    if (this.countEv?.set !== set || this.countEv.key !== key) {
       const faces = this.facesOf(set, read, PATIMPORT.fillCellMm);
+      const feed = sheetFeed(sheet, this.files, this.docTextSrc);
+      const top = new Set(
+        faces.map.blobs.filter((b) => !b.junk && !b.aside && b.inside == null).map((b) => b.id),
+      );
       this.countEv = {
+        key,
         set,
-        card: cardCount,
         v: countEvidence({
-          sheetTexts: this.sheet.texts,
-          docTexts: this.docTexts,
+          texts: feed.texts,
           blobs: faces.map.blobs,
-          seamLines: set.classes.some((c) => c.role === 'seam' && c.chains.length > 0),
-          files: this.files,
-          cardCount,
+          shapes: blobShapes(faces.map, top),
+          files: feed.files,
+          // the models it names are read as the pieces stage reads them (its model choice)
+          models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
         }),
       };
     }
     const ev = this.countEv.v;
     return {
       inferred: this.inferred.v,
-      auto: ev.evidence.length ? { n: ev.n, evidence: ev.evidence, applied: false } : undefined,
+      auto: ev.evidence.length
+        ? {
+            n: ev.n,
+            evidence: ev.evidence,
+            applied: false,
+            ...(ev.blocked ? { blocked: ev.blocked } : {}),
+          }
+        : undefined,
     };
   }
 
