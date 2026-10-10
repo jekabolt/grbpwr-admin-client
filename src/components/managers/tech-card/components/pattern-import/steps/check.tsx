@@ -44,6 +44,10 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   // A8 safety net: nothing in the wizard removes lines inside a piece yet — the note says why
   'G16-glyphs': { what: 'no lettering or watermark inside the pieces', fix: null },
   'G18-grain-source': { what: 'grainline not read from lettering', fix: 'meaning' },
+  'G19-chrome': {
+    what: 'no cut line traced around a registration mark or tile chrome',
+    fix: 'files',
+  },
 };
 
 /**

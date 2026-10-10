@@ -9,6 +9,7 @@
 import type {
   BackgroundKind,
   ChainAmbiguity,
+  ChromeLine,
   CleanPreview,
   ChainSet,
   DraftScope,
@@ -65,7 +66,15 @@ import {
   type ExtractorRegistry,
 } from '../adapters/sniff';
 import { assembleSheetDetailed, classifyPages } from '../assemble';
-import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale, srcKey } from '../clean';
+import {
+  applyMasks,
+  cleanPages,
+  cleanSheet,
+  countsOf,
+  keptByOperator,
+  mergeScale,
+  srcKey,
+} from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
@@ -219,6 +228,9 @@ function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
   return out;
 }
 
+/** A8b: tile chrome — a cut line on it, or around it, is traced chrome (G19). */
+const CHROME_KINDS = new Set<BackgroundKind>(['tile-frame', 'regmark', 'tile-label']);
+
 const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   const { paths: _p, texts: _t, rasters: _r, styles: _s, ...rest } = s;
   return rest;
@@ -245,6 +257,8 @@ export class Session {
   private cleanEdits: PageMaskEdit[] = [];
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
+  /** A8b: sources of the tile chrome page items offer but do not apply (G19 measures against them). */
+  private chromeSrc = new Map<string, BackgroundKind>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -348,6 +362,7 @@ export class Session {
       this.masks = null;
       this.cleanEdits = [];
       this.offeredSrc = new Set();
+      this.chromeSrc = new Map();
     }
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
@@ -721,6 +736,7 @@ export class Session {
     if (this.dxf) {
       this.masks = [];
       this.offeredSrc = new Set();
+      this.chromeSrc = new Map();
       this.pages = this.extractPages;
       this.scaleCands = this.extractScale;
       ctx.progress(1, 1);
@@ -755,11 +771,26 @@ export class Session {
     applyMasks(docs, out.pages);
     this.masks = out.pages;
     this.offeredSrc = new Set<string>();
+    this.chromeSrc = new Map<string, BackgroundKind>();
     for (const m of out.pages) {
-      const off = new Set(m.items.filter((it) => !it.applied).flatMap((it) => it.paths));
+      const unapplied = m.items.filter((it) => !it.applied);
+      const off = new Set(unapplied.flatMap((it) => it.paths));
       if (!off.size) continue;
+      // the chrome offered and not refused: what the operator explicitly kept is out of G19
+      const chrome = new Map<number, BackgroundKind>(
+        unapplied
+          .filter(
+            (it) =>
+              CHROME_KINDS.has(it.kind) && !keptByOperator(it, m.file, m.page, this.cleanEdits),
+          )
+          .flatMap((it) => it.paths.map((id) => [id, it.kind] as const)),
+      );
       const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
-      for (const p of pg?.paths ?? []) if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+      for (const p of pg?.paths ?? []) {
+        if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+        const kind = chrome.get(p.id);
+        if (kind) this.chromeSrc.set(srcKey(p.src), kind);
+      }
     }
     this.pages = out.classes;
     this.scaleCands = mergeScale(this.extractScale, out.scaleHints);
@@ -1234,6 +1265,19 @@ export class Session {
           ]
         : []),
     ];
+    // A8b (G19): the sheet's tile chrome — masked frames, marks, tile labels, and the chrome the
+    // clean stage only offered — in the walls' frame
+    // (a kind the operator kept is out: G19 always has a way out); marks block, frames warn
+    const chrome: ChromeLine[] = [];
+    if (this.sheet && !this.fast)
+      for (const p of this.sheet.paths) {
+        const kind = p.background ?? this.chromeSrc.get(srcKey(p.src));
+        if (!kind || !CHROME_KINDS.has(kind)) continue;
+        chrome.push({
+          mark: kind !== 'tile-frame',
+          pts: p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts,
+        });
+      }
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -1257,6 +1301,7 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          chrome,
           openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },

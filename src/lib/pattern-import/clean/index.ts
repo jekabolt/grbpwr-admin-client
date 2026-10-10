@@ -104,6 +104,30 @@ function appliedOf(
   return on;
 }
 
+/**
+ * A8b (G19's way out): the operator's last word on this item was "keep it as line work" — an
+ * item edit or a kind edit with `keep: true`. Not the same as "not applied": a suggestion nobody
+ * acted on is unapplied too.
+ */
+export function keptByOperator(
+  item: Pick<MaskItem, 'id' | 'kind'>,
+  file: string,
+  page: number,
+  edits: readonly PageMaskEdit[],
+): boolean {
+  let kept = false;
+  for (const e of edits) {
+    if ('item' in e) {
+      if (e.item === item.id) kept = e.keep;
+    } else if ('kind' in e && e.kind === item.kind) {
+      if (e.file !== undefined && e.file !== file) continue;
+      if (e.page !== undefined && e.page !== page) continue;
+      kept = e.keep;
+    }
+  }
+  return kept;
+}
+
 /** Page roles after the operator's door: a page re-included as a tile joins the nearest sheet. */
 export function rolesOf(
   classes: PageClassification[],
@@ -192,7 +216,7 @@ export function cleanPages(
         : tiles.map(() => new Map<number, number>());
     const foundOf = pcs.map((pc, k) => {
       o.checkCancel?.();
-      return detectPage(pc, rep[k], textRep[k], notes);
+      return detectPage(pc, rep[k], textRep[k], notes, pcs.length);
     });
     // Tile chrome is decided per FILE and kind: where garment lines end on a frame (they are cut
     // at it on the tile — blazer, Redcafe), the frame closes their gaps at the seams once tiles
@@ -291,6 +315,8 @@ function detectPage(
   rep: number[],
   textRep: Map<TextId, number>,
   notes: string[],
+  /** Tile pages of this file (the marks' 80 % share). */
+  tilesN: number,
 ): Found[] {
   const styles = new Map(pc.page.styles.map((s) => [s.id, s]));
   const taken = new Set<number>();
@@ -431,12 +457,74 @@ function detectPage(
   // downstream lost its corners and the rest became a wall (blazer's back leaked into the frame).
   // A chain whose own end runs on into a garment line is that line's piece (Redcafe's outline
   // stubs at the same page place on a row of tiles).
+  //
+  // Marks are not frames (A8b, owner 10.10 — Redcafe 44: the corner brackets, filled 15 × 1 mm
+  // bars on every tile, were only offered because garment lines end on them; live, the wall
+  // tracing ran around their arms and the cut line got 15 × 1 mm hairpins). A small repeated
+  // CLOSED shape (a bracket, a crosshair ring, an arrow head) IS the mark: masking it removes
+  // only its own paths (`itemsOf` masks a path only when every chain it feeds is masked), never
+  // the garment line that touches it — no guard, and it never makes the kind "touched". An open
+  // small mark keeps the own-ends guard (a garment stub repeats at one page place too).
+  //
+  // Codex (A8b): only in the tile MARGIN, on ≥ 80 % of the file's tiles — a drill circle or a
+  // buttonhole at the same page place on ≥ 3 pages (a marker of identical pieces) is no mark.
+  // A closed small shape elsewhere is offered (a suggestion), behind the full guard.
+  const W = pc.page.widthMm;
+  const H = pc.page.heightMm;
+  const inMargin = (i: number) => {
+    const bx = pc.box[i];
+    return (
+      Math.min(bx.minX, bx.minY, W - bx.maxX, H - bx.maxY) <= CLEAN.markMarginMm ||
+      // or on the tile frame's band (the printable area's edge, where the brackets sit)
+      Math.min(
+        Math.abs(bx.minX - drawn.minX),
+        Math.abs(bx.minY - drawn.minY),
+        Math.abs(drawn.maxX - bx.maxX),
+        Math.abs(drawn.maxY - bx.maxY),
+      ) <= CLEAN.markMarginMm
+    );
+  };
   for (const [kind, ids] of byKind) {
-    const guarded = touchingLineWork(polys, lens, new Set(ids), inert, {
+    const mark = CLEAN.on.marks && (kind === 'regmark' || kind === 'tile-label');
+    const closedSmall = (i: number) => mark && pc.chains[i].closed;
+    const isMark = (i: number) =>
+      closedSmall(i) &&
+      (!CLEAN.on.markZone || (inMargin(i) && rep[i] >= CLEAN.markTileShare * tilesN));
+    const marks = ids.filter(isMark);
+    const loose = ids.filter((i) => closedSmall(i) && !isMark(i));
+    const rest = ids.filter((i) => !closedSmall(i));
+    if (marks.length)
+      take({
+        kind,
+        chains: marks,
+        evidence: [
+          `${marks.length} small closed marks in the tile margin repeat at one page place on ${Math.min(...marks.map((i) => rep[i]))} of ${tilesN} tiles`,
+        ],
+        repeated: true,
+        chrome: true,
+        touched: false,
+        guarded: 0,
+      });
+    if (loose.length) {
+      const g = touchingLineWork(polys, lens, new Set(loose), inert);
+      const keep = loose.filter((i) => !g.has(i));
+      if (keep.length)
+        take({
+          kind,
+          chains: keep,
+          evidence: [
+            `${keep.length} small closed shapes repeat at one page place on ${Math.max(...keep.map((i) => rep[i]))} tiles (not in the tile margin on most tiles: a drill, a buttonhole?)`,
+          ],
+          repeated: false,
+          guarded: g.size,
+        });
+    }
+    if (!rest.length) continue;
+    const guarded = touchingLineWork(polys, lens, new Set(rest), inert, {
       ownEndsOnly: true,
       along: false,
     });
-    const keep = ids.filter((i) => !guarded.has(i));
+    const keep = rest.filter((i) => !guarded.has(i));
     const n = Math.max(...keep.map((i) => rep[i]), 0);
     // garment lines ending ON the chrome, or running along it (a CF on the tile frame): the
     // file-wide decision in cleanPages

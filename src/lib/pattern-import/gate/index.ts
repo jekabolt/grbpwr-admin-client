@@ -13,6 +13,7 @@
 // (`derivedByBlockFor`) and are judged by G15, never measured against (F14b, Codex C1).
 
 import type {
+  ChromeLine,
   DerivedEdge,
   EmbedManifestFn,
   GateCheck,
@@ -43,6 +44,7 @@ import {
   g15,
   g16,
   g18,
+  g19,
   g2From,
   g3g4,
   g5,
@@ -59,7 +61,7 @@ import type { CardBlockRules } from './rules';
 export { roundTrip } from './roundtrip';
 export type { CardBlockRules } from './rules';
 export { readRawDxf } from './reader';
-export { glyphProblem, glyphStats } from './checks';
+export { chromeProblems, glyphProblem, glyphStats } from './checks';
 export { identityGrammarProblem, identityProblem } from '../manifest/identity';
 
 export const passedOf = (checks: readonly GateCheck[]) =>
@@ -207,6 +209,7 @@ export function createRunGate(
       derived.check,
       g16(ctx),
       g18(ctx),
+      g19(ctx),
     ];
     return {
       passed: passedOf(checks),
@@ -255,6 +258,38 @@ export function derivedByBlockFor(
   return out;
 }
 
+/**
+ * Tile chrome (sheet frame) near each block → `chromeByBlock` in the written frame (G19): the
+ * lines within 5 mm of the box of the block's source walls.
+ */
+export function chromeByBlockFor(
+  detail: WriteDetail,
+  wallsOf: (sourceIdentity: string, rank: number) => PtMm[][] | undefined,
+  chrome: readonly ChromeLine[],
+): Record<string, ChromeLine[]> {
+  const out: Record<string, ChromeLine[]> = {};
+  if (!chrome.length) return out;
+  const boxes = chrome.map((l) => bboxOf(l.pts));
+  for (const b of detail.plan.blocks) {
+    const w = wallsOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!w?.length) continue;
+    const wb = bboxOf(w.flat());
+    const near = chrome.filter((_, i) => {
+      const c = boxes[i];
+      return (
+        c.minX <= wb.maxX + 5 &&
+        c.maxX >= wb.minX - 5 &&
+        c.minY <= wb.maxY + 5 &&
+        c.maxY >= wb.minY - 5
+      );
+    });
+    if (!near.length) continue;
+    const T = detail.transforms[b.name];
+    out[b.name] = near.map((l) => ({ mark: l.mark, pts: l.pts.map((p) => applyAffine(T, p)) }));
+  }
+  return out;
+}
+
 export type WriteAndGateCtx = {
   rules: CardBlockRules;
   sizeTokens: ReadonlySet<string>;
@@ -270,6 +305,8 @@ export type WriteAndGateCtx = {
    * `wallsOf` — G15 checks them; G3/G4 never use them as walls (F14b, Codex C1).
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
+  /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
+  chrome?: readonly ChromeLine[];
   overview?: GateExpectation['overview'];
   /**
    * Fold questions still open in this run (E1a, D3): a piece the sheet says is cut on fold, with no
@@ -304,6 +341,10 @@ export async function writeAndGate(
     wallsByBlock: ctx.wallsOf ? wallsByBlockFor(detail, ctx.wallsOf) : {},
     coverageWallsByBlock: ctx.wallsUsedOf ? wallsByBlockFor(detail, ctx.wallsUsedOf) : undefined,
     derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
+    chromeByBlock:
+      ctx.chrome?.length && ctx.wallsOf
+        ? chromeByBlockFor(detail, ctx.wallsOf, ctx.chrome)
+        : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
     ...(ctx.openFolds?.length ? { openFolds: ctx.openFolds } : {}),

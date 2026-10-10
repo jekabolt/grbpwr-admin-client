@@ -30,6 +30,12 @@ import {
   maskRevOf,
 } from 'components/managers/tech-card/components/pattern-import/answers';
 
+import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { readManifest } from 'lib/pattern-import/manifest';
+import { chromeProblems } from 'lib/pattern-import/gate/checks';
+import { CHROME_GATE, hairpins } from 'lib/pattern-import/gate/chrome';
+import { existsSync, readdirSync } from 'node:fs';
+
 import { CASES, runCase } from './e2e-entry';
 
 const CORPUS =
@@ -1042,12 +1048,367 @@ export async function wallsSection(id: string) {
   );
 }
 
+// ── A8b · Redcafe corner brackets (owner 10.10: «засечки для позиционирования обозначило как
+// детали») and the G19 safety net ─────────────────────────────────────────────────────────
+
+const OWNER_REDCAFE_DXF =
+  process.env.PATIMPORT_OWNER_REDCAFE_DXF ??
+  '/Users/jekabolt/Downloads/fw26-fw26-001-main-5583a330.dxf';
+
+/** Per tile page: is every small closed repeated mark (a 15 × 1 mm bracket) masked, auto? */
+async function bracketsOf(file: string) {
+  const s = new Session(1, [fileOf(file)]);
+  const run = <S extends StageName>(st: S, input: StageIO[S]['in']) => s.runStage(st, input, ctx());
+  await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  const cl = await run('clean', { edits: [] });
+  s.close();
+  const tiles = cl.pages.filter((p) => p.role === 'tile');
+  const withMarks = tiles.filter((p) =>
+    p.items.some((i) => i.kind === 'regmark' && i.status === 'auto' && i.applied && i.lines >= 4),
+  );
+  return {
+    tiles: tiles.length,
+    masked: withMarks.length,
+    lines: cl.summary.regmark ?? 0,
+    offered: cl.offered.regmark ?? 0,
+  };
+}
+
+/** The written files of one e2e run: hairpins on cut / seam, 15 × 1 mm bars on layer 8, G19. */
+async function writtenOf(files: string[], id: string, cleanEdits?: PageMaskEdit[]) {
+  const base = CASES.find((x) => x.id === 'redcafe')!;
+  const sizes = files.map((f) => /(\d+)\.pdf$/.exec(f)![1]);
+  const r = await runCase({ ...base, id, files, card: sizes }, { cleanEdits });
+  const writes = (r.write ?? []) as { file: string; blocking?: string[] }[];
+  let hp = 0;
+  let bars = 0;
+  for (const w of writes) {
+    const raw = readRawDxf(readFileSync(w.file, 'latin1'));
+    for (const [, ents] of raw.blocks)
+      for (const e of ents) {
+        if ((e.layer === '1' || e.layer === '14') && e.pts.length >= 4)
+          hp += hairpins(e.pts, e.closed).length;
+        if (e.layer === '8' && e.closed && e.pts.length >= 4) {
+          const xs = e.pts.map((p) => p.x);
+          const ys = e.pts.map((p) => p.y);
+          const W = Math.max(...xs) - Math.min(...xs);
+          const H = Math.max(...ys) - Math.min(...ys);
+          if (Math.min(W, H) <= 2 && Math.max(W, H) >= 10 && Math.max(W, H) <= 25) bars++;
+        }
+      }
+  }
+  // the G19 notes in full, as the written file's embedded gate report carries them
+  const g19 = writes.flatMap((w) =>
+    (readManifest(readFileSync(w.file, 'latin1'))?.gate?.checks ?? [])
+      .filter((k) => k.id === 'G19-chrome' && !k.ok && k.severity === 'block')
+      .map((k) => `G19-chrome[${k.blocks.join(',')}] ${k.note}`),
+  );
+  return { hp, bars, g19, verdict: r.verdict, clicks: r.clicks?.total, write: writes };
+}
+
+/** Blocks of a DXF file with a hairpin (the finder alone: a raw file carries no chrome). */
+function hairpinBlocks(file: string) {
+  const raw = readRawDxf(readFileSync(file, 'latin1'));
+  const out: string[] = [];
+  for (const [name, ents] of raw.blocks) {
+    if (name.startsWith('*')) continue;
+    const n = ents
+      .filter((e) => (e.layer === '1' || e.layer === '14') && e.pts.length >= 4)
+      .reduce((a, e) => a + hairpins(e.pts, e.closed).length, 0);
+    if (n) out.push(`${name}: ${n}`);
+  }
+  return out;
+}
+
+const ents = (layer: string, ...rings: PtLike[][]) =>
+  rings.map((pts) => ({ type: 'LWPOLYLINE', layer, pts, closed: true })) as Parameters<
+    typeof chromeProblems
+  >[0];
+
+export async function marksSection() {
+  // 1 · clean: the brackets are masked (auto) on every tile of every Redcafe size file
+  for (const n of ['44', '46', '48', '50', '52', '54']) {
+    const b = await bracketsOf(`pdf/${n}.pdf`);
+    check(
+      'A8b marks',
+      `${n}.pdf: the corner brackets are masked by themselves on every tile`,
+      b.tiles > 0 && b.masked === b.tiles && !b.offered,
+      b,
+    );
+  }
+  // 1b · Codex: a small closed shape repeated OUTSIDE the tile margin (a drill circle of a
+  // multi-page marker) is offered, never auto; the corner brackets of the same tiles are auto
+  const disc = (cx: number, cy: number, r: number) =>
+    Array.from({ length: 17 }, (_, k) => ({
+      x: cx + r * Math.cos((2 * Math.PI * k) / 16),
+      y: cy + r * Math.sin((2 * Math.PI * k) / 16),
+    }));
+  const bar = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+    { x: x0, y: y0 },
+  ];
+  const tilesDoc = synthDoc(
+    [0, 1, 2].map((k) => ({
+      lines: [
+        bar(12, 12, 27, 13),
+        bar(183, 12, 198, 13),
+        bar(12, 284, 27, 285),
+        disc(105, 150, 3),
+        [
+          { x: 40 + 10 * k, y: 60 },
+          { x: 90 + 10 * k, y: 150 + 5 * k },
+        ],
+      ],
+    })),
+  );
+  const zoneRun = () => {
+    const o = cleanPages(tilesDoc.docs, tilesDoc.classes, { edits: [] });
+    const items = o.pages
+      .flatMap((p) => p.items)
+      .filter((i) => i.kind === 'regmark' || i.kind === 'tile-label');
+    const drill = items.filter((i) => i.bbox.minX > 90 && i.bbox.maxX < 120);
+    const brackets = items.filter((i) => !drill.includes(i));
+    return { drill, brackets };
+  };
+  const z = zoneRun();
+  check(
+    'A8b marks',
+    'a drill circle at one place on 3 tiles, mid-page: offered, never auto; the corner brackets: auto',
+    z.drill.length > 0 &&
+      z.drill.every((i) => i.status === 'suggest' && !i.applied) &&
+      z.brackets.length > 0 &&
+      z.brackets.every((i) => i.status === 'auto' && i.applied),
+    {
+      drill: z.drill.map((i) => `${i.status} ${i.applied} ${i.lines}`),
+      brackets: z.brackets.map((i) => `${i.status} ${i.applied} ${i.lines}`),
+    },
+  );
+  CLEAN.on.markZone = false;
+  try {
+    const m = zoneRun();
+    check(
+      'mutations',
+      'mark zone off → the mid-page drill circle is auto-masked',
+      m.drill.some((i) => i.status === 'auto' && i.applied),
+      m.drill.map((i) => `${i.status} ${i.applied}`),
+    );
+  } finally {
+    CLEAN.on.markZone = true;
+  }
+  // 2 · the owner's run (44 alone): no hairpin, no bar on layer 8, G19 quiet
+  const w = await writtenOf(['pdf/44.pdf'], 'redcafe-44');
+  check(
+    'A8b marks',
+    '44.pdf written: no hairpin round a bracket on any cut / seam line, no 15 × 1 mm bar on layer 8, G19 does not block',
+    w.write.length > 0 && w.hp === 0 && w.bars === 0 && w.g19.length === 0,
+    { hairpins: w.hp, bars: w.bars, g19: w.g19, verdict: w.verdict, clicks: w.clicks },
+  );
+  // 3 · the owner's DXF (beta): the hairpin finder sees its traced blocks (a raw file has no
+  // chrome, so G19 itself judges them only at export, where the chrome is known — 5 below)
+  if (existsSync(OWNER_REDCAFE_DXF)) {
+    const bad = hairpinBlocks(OWNER_REDCAFE_DXF);
+    check(
+      'A8b G19',
+      "the owner's Redcafe 44 DXF: the hairpin finder sees the blocks traced round a bracket",
+      bad.length >= 3,
+      bad.slice(0, 4),
+    );
+  } else console.log(`  skip the owner's DXF (${OWNER_REDCAFE_DXF} not here)`);
+  // 4 · G19 units: a hairpin is judged only near chrome; marks block, frames warn
+  const outline = (extra: PtLike[]) => [
+    { x: 0, y: 0 },
+    ...extra,
+    { x: 200, y: 0 },
+    { x: 200, y: 300 },
+    { x: 0, y: 300 },
+  ];
+  // a 1 × 10 mm U notch, a slit notch (0.5 × 6) and a narrow dart (2 mm wide, 60 long) on the top
+  const clo = outline([
+    { x: 30, y: 0 },
+    { x: 30, y: 10 },
+    { x: 31, y: 10 },
+    { x: 31, y: 0 },
+    { x: 60, y: 0 },
+    { x: 60, y: 6 },
+    { x: 60.5, y: 6 },
+    { x: 60.5, y: 0 },
+    { x: 100, y: 0 },
+    { x: 101, y: 60 },
+    { x: 102, y: 0 },
+  ]);
+  const farFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: -50, y: -50 },
+        { x: -50, y: 400 },
+      ],
+    },
+  ];
+  // the Redcafe trace: out and back round a 1 × 15 mm bracket the clean stage masked
+  const traced = outline([
+    { x: 120, y: 0 },
+    { x: 120, y: -15 },
+    { x: 121, y: -15 },
+    { x: 121, y: 0 },
+  ]);
+  const bracket = [
+    {
+      mark: true,
+      pts: [
+        { x: 120.1, y: 0 },
+        { x: 120.1, y: -14.9 },
+        { x: 120.9, y: -14.9 },
+        { x: 120.9, y: 0 },
+        { x: 120.1, y: 0 },
+      ],
+    },
+  ];
+  const along = ents('1', outline([]));
+  const onFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 250 },
+      ],
+    },
+  ];
+  const shortFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 110 },
+      ],
+    },
+  ];
+  const onMark = [
+    {
+      mark: true,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 70 },
+      ],
+    },
+  ];
+  const pb = (e: Parameters<typeof chromeProblems>[0], c: Parameters<typeof chromeProblems>[1]) =>
+    chromeProblems(e, c);
+  check(
+    'A8b G19',
+    'a CLO-style outline (1 × 10 U notch, slit notch, 2 mm dart): no block, with or without chrome near',
+    !pb(ents('1', clo), farFrame).block.length && !pb(ents('1', clo), undefined).block.length,
+    pb(ents('1', clo), farFrame),
+  );
+  check(
+    'A8b G19',
+    'the Redcafe trace round a masked bracket blocks; the same hairpin with no chrome near is not judged',
+    pb(ents('1', traced), bracket).block.length > 0 &&
+      !pb(ents('1', traced), farFrame).block.length,
+    { near: pb(ents('1', traced), bracket), far: pb(ents('1', traced), farFrame) },
+  );
+  check(
+    'A8b G19',
+    'a cut line 60 mm ON a frame line (a CF on the tile edge) warns; 200 mm on a frame blocks, naming the way out; ON a mark it blocks',
+    !pb(along, shortFrame).block.length &&
+      pb(along, shortFrame).warn.length > 0 &&
+      pb(along, onFrame).block.some((x) => /keep the frame on the Files step/.test(x)) &&
+      pb(along, onMark).block.length > 0,
+    { short: pb(along, shortFrame), long: pb(along, onFrame), mark: pb(along, onMark) },
+  );
+  const nearMm = CHROME_GATE.hairpinNearMm;
+  CHROME_GATE.hairpinNearMm = 1e6;
+  try {
+    check(
+      'mutations',
+      'hairpins judged anywhere → the CLO-style outline blocks',
+      pb(ents('1', clo), farFrame).block.length > 0,
+      pb(ents('1', clo), farFrame),
+    );
+  } finally {
+    CHROME_GATE.hairpinNearMm = nearMm;
+  }
+  CHROME_GATE.frameBlocks = true;
+  try {
+    check(
+      'mutations',
+      'any frame contact blocks → the 60 mm CF on the tile edge blocks',
+      pb(along, shortFrame).block.length > 0,
+      pb(along, shortFrame),
+    );
+  } finally {
+    CHROME_GATE.frameBlocks = false;
+  }
+  const frameMm = CHROME_GATE.frameBlockMm;
+  CHROME_GATE.frameBlockMm = Infinity;
+  try {
+    check(
+      'mutations',
+      'no length limit on frames → the 200 mm frame trace only warns',
+      !pb(along, onFrame).block.length,
+      pb(along, onFrame),
+    );
+  } finally {
+    CHROME_GATE.frameBlockMm = frameMm;
+  }
+  // 4b · the whole Redcafe run: BP_L_53_52's seam traced 273 mm along a tile frame blocks; the
+  //      operator keeping the frame (the way out) clears it — un-keep → block, keep → no block
+  const all = CASES.find((x) => x.id === 'redcafe')!.files;
+  const rc = await writtenOf(all, 'redcafe-g19');
+  const rcKept = await writtenOf(all, 'redcafe-g19-kept', [{ kind: 'tile-frame', keep: true }]);
+  const frameBlock = (w: typeof rc) => w.g19.filter((x) => /along a tile frame/.test(x));
+  check(
+    'A8b G19',
+    'Redcafe: the seam traced along a tile frame blocks, naming the way out; the operator keeps the frame → no G19 block',
+    frameBlock(rc).length > 0 &&
+      frameBlock(rc).every((x) => /keep the frame on the Files step/.test(x)) &&
+      rcKept.g19.length === 0,
+    {
+      unkept: rc.g19.map((x) => x.slice(0, 420)),
+      kept: rcKept.g19.map((x) => x.slice(0, 160)),
+      verdicts: [rc.verdict, rcKept.verdict],
+    },
+  );
+  // 5 · marks treated like frames (the 10.10 build): brackets offered, traced round, G19 blocks;
+  //     the operator keeping the brackets as line work is the way out (G19 leaves kept chrome)
+  CLEAN.on.marks = false;
+  try {
+    const b = await bracketsOf('pdf/44.pdf');
+    const m = await writtenOf(['pdf/44.pdf'], 'redcafe-44-mut');
+    check(
+      'mutations',
+      'marks off → 44.pdf brackets only offered, the written cut line has hairpins / bars and G19 blocks',
+      b.masked < b.tiles && (m.hp > 0 || m.bars > 0) && m.g19.length > 0,
+      { brackets: b, hairpins: m.hp, bars: m.bars, g19: m.g19.map((x: string) => x.slice(0, 120)) },
+    );
+    // the brackets sit on the frame line: both are kept (two clicks in the files step)
+    const kept = await writtenOf(['pdf/44.pdf'], 'redcafe-44-kept', [
+      { kind: 'regmark', keep: true },
+      { kind: 'tile-frame', keep: true },
+    ]);
+    check(
+      'A8b G19',
+      'the operator keeps the brackets and frames as line work: G19 does not block on them (a way out)',
+      kept.g19.length === 0,
+      { hairpins: kept.hp, g19: kept.g19.map((x: string) => x.slice(0, 120)) },
+    );
+  } finally {
+    CLEAN.on.marks = true;
+  }
+}
+
+type PtLike = { x: number; y: number };
+
 export async function main(args: string[]): Promise<number> {
   const [mode, id] = args;
   if (mode === 'wm-M') await wmSection();
   else if (mode === 'synth') synthSection();
   else if (mode === 'walls') await wallsSection(id);
-  else throw new Error(`mode? wm-M | synth | walls <case>`);
+  else if (mode === 'marks') await marksSection();
+  else throw new Error(`mode? wm-M | synth | marks | walls <case>`);
   for (const c of checks) console.log(`@@CHECK ${JSON.stringify(c)}`);
   return 0;
 }

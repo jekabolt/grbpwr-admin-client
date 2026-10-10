@@ -285,6 +285,8 @@ const GATE_CHECK_IDS = new Set([
   // A8 safety net: lettering inside pieces, internal length, grain provenance
   'G16-glyphs',
   'G18-grain-source',
+  // A8b: a cut line traced around tile chrome (corner brackets, frames)
+  'G19-chrome',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
