@@ -72,6 +72,7 @@ import {
   foldLineOnCut,
   bindFoldListEntry,
   foldListEntries,
+  normFoldLine,
   foldShapeProblem,
   FOLD_LOOSE_TOL_MM,
   looseFoldEdge,
@@ -640,18 +641,25 @@ export function buildPieceSpecsDetailed(
   // ── the cutting list's fold pieces (S5): each entry bound to ONE piece by its printed number or
   // title — never counted against the unfolds of other pieces. A bound entry is that piece's fold
   // evidence (asked unless unfolded); an unbound one stays a file-level question.
-  const listEntries = foldListEntries(input.docTexts ?? []);
+  // R5: a fold line no piece took as its own evidence (edge, internal line, label) and the list
+  // grammar cannot read is never dropped: it becomes an unbound file-level entry
+  const consumedFold = new Set(
+    families.flatMap((f) => foldWordsOf(f, sheet).map((w) => normFoldLine(w.t.text))),
+  );
+  const listEntries = foldListEntries(input.docTexts ?? [], consumedFold);
   const listBound: { entry: string; seed: SeedId }[] = [];
   const listUnbound: string[] = [];
   if (listEntries.length) {
-    const pieceLabels = preps.map((p) => {
-      const c = p.cands[p.cands.length - 1].c;
+    // every piece on the sheet, including one blocked before naming (no code yet): its label is
+    // still on the sheet, and a list entry it names must not fall back to the file level
+    const pieceLabels = families.map((f) => {
+      const c = f.candidates.reduce((a, x) => (x.rank > a.rank ? x : a), f.candidates[0]);
       const isTitle = titleTest(c, textById);
       return {
-        seed: p.seed,
+        seed: f.seed,
         labels: [
-          ...(input.seedLabels?.[p.seed] ? [input.seedLabels[p.seed]!] : []),
-          ...p.texts.filter(isTitle),
+          ...(input.seedLabels?.[f.seed] ? [input.seedLabels[f.seed]!] : []),
+          ...textsOf(c, textById).filter(isTitle),
         ],
       };
     });

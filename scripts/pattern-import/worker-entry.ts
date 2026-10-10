@@ -848,11 +848,16 @@ async function operatorBridgeGateCase() {
       },
     ]),
   );
-  const sem = await run('semantics', {
+  const semIn: StageIO['semantics']['in'] = {
     fileAllowance: { meaning: 'seam', allowanceMm: 15, origin: 'operator', evidence: [] },
     pieceOverrides: names,
     operatorGrain: {},
-  });
+  };
+  // the cutting list's unmatched fold lines are named in Details; the operator checks them (R5)
+  const sem0 = await run('semantics', semIn);
+  const sem = sem0.foldList
+    ? await run('semantics', { ...semIn, foldListChecked: sem0.foldList.entries })
+    : sem0;
   check(
     name,
     'semantics: every piece specced (72 not exported)',
@@ -1103,11 +1108,20 @@ async function pipelineCase(
     const cx = (bb.minX + bb.maxX) / 2;
     grain[b.seed] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
   }
-  const sem2 = await run('semantics', {
+  const sem2a = await run('semantics', {
     ...SEM_DEFAULT,
     pieceOverrides: names,
     operatorGrain: grain,
   });
+  // the cutting list's unmatched fold lines are named in Details; the operator checks them (R5)
+  const sem2 = sem2a.foldList
+    ? await run('semantics', {
+        ...SEM_DEFAULT,
+        pieceOverrides: names,
+        operatorGrain: grain,
+        foldListChecked: sem2a.foldList.entries,
+      })
+    : sem2a;
   check(
     name,
     'semantics: grain clicks unblock',

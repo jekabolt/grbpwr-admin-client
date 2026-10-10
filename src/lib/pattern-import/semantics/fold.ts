@@ -479,9 +479,22 @@ export function foldShapeProblem(
 const CUT_ON_FOLD =
   /on\s+(?:the\s+)?fold|mod\s+fold|im\s*(?:stoff)?bruch|stoffbruch|со\s+сгибом|по\s+сгибу|au\s+pli|na\s+zgi[eę]ciu|al\s+doblez|sulla\s+piega|op\s+de\s+vouw|(?:centre|center|cb)\s+(?:back\s+)?fold/iu;
 /** A numbered cutting-list line: "26 Обтачка горловины спинки со сгибом 1х", "67. Forstykke, 1 gang mod fold". */
-const LIST_LINE = new RegExp(String.raw`^\s*(${PIECE_NO_SRC})\s*[.\-–:)]?\s+\S`, 'iu');
-/** List-shaped: a line that starts with a digit (a piece number the grammar may not take). */
-const LIST_SHAPED = /^\s*\d/u;
+// R5: a list line may lead with a bullet (• · * - –), a piece word (Piece / Pc. / Teil / Деталь /
+// Det. / № / No. / Nr.) and a parenthesised number: "• 123 BACK cut on fold", "Piece 123 BACK …",
+// "(12) Spinka со сгибом".
+const LIST_HEAD = String.raw`^\s*(?:[•·*\-–]\s*)?(?:(?:piece|pc\.?|teil|деталь|дет\.?|det\.?|№|no\.?|nr\.?)\s*)?\(?(${PIECE_NO_SRC})\)?\s*[.\-–:)]?`;
+const LIST_LINE = new RegExp(String.raw`${LIST_HEAD}\s+\S`, 'iu');
+/**
+ * A text item that is only a list number WITH list punctuation ("67.", "4 -", "(12)"): the PDF split
+ * it off its line. A bare "0" or "7" (a ruler, a tile) is not joined.
+ */
+const LIST_NO_ONLY = new RegExp(
+  String.raw`^\s*(?:[•·*\-–]\s*)?(?:(?:piece|pc\.?|teil|деталь|дет\.?|det\.?|№|no\.?|nr\.?)\s*)?(?:\((${PIECE_NO_SRC})\)|(${PIECE_NO_SRC})\s*[.\-–:)])\s*$`,
+  'iu',
+);
+
+/** A text line as the cutting list compares it (whitespace collapsed). */
+export const normFoldLine = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 /** One "cut on fold" line of the cutting list. */
 export type FoldListEntry = {
@@ -492,8 +505,9 @@ export type FoldListEntry = {
   /** The piece's name words, lower case, without the number, the fold phrase and the count. */
   words: string[];
   /**
-   * T4 backstop: a list-shaped "cut on fold" line the number grammar does not take ("1234 BACK
-   * …"). Never bound to a piece, never dropped — an unbound file-level entry.
+   * R5 backstop: a "cut on fold" line the list grammar does not read ("1234 BACK …", "Back: cut on
+   * fold") and that no piece consumed as its own fold evidence. Never bound, never dropped — an
+   * unbound file-level entry.
    */
   unparsed?: boolean;
 };
@@ -506,15 +520,22 @@ const LIST_NOISE =
  * say "cut on fold", one per number. The sheet may draw these pieces with curves only (r4454), so
  * each entry is bound to a piece only by its printed number or name (`bindFoldListEntry`).
  */
-export function foldListEntries(texts: readonly string[]): FoldListEntry[] {
+export function foldListEntries(
+  texts: readonly string[],
+  /** Lines a piece already took as its fold evidence (edge, internal line or label) — normalised. */
+  consumed: ReadonlySet<string> = new Set(),
+): FoldListEntry[] {
   const byNo = new Map<string, FoldListEntry>();
   const unparsed = new Map<string, FoldListEntry>();
-  for (const raw of texts) {
-    const t = raw.replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < texts.length; i++) {
+    let t = normFoldLine(texts[i]);
     if (!CUT_ON_FOLD.test(t)) continue;
+    // "67." + "Forstykke, 1 gang mod fold": a number item right before the line is its number
+    const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
+    if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
     const m = LIST_LINE.exec(t);
     if (!m) {
-      if (LIST_SHAPED.test(t) && !unparsed.has(t))
+      if (!consumed.has(t) && !unparsed.has(t))
         unparsed.set(t, { text: t, no: '', words: [], unparsed: true });
       continue;
     }

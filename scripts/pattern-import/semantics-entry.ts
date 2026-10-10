@@ -1127,6 +1127,44 @@ export async function main(): Promise<number> {
       'an unparseable list-shaped fold line («1234 BACK …») stays an unbound file-level entry',
       JSON.stringify(t4.foldList),
     );
+    // R5: bullets and piece words before the number; a structural backstop for the rest
+    for (const line of ['• 123 BACK cut on fold', 'Piece 123 BACK cut on fold']) {
+      const r = build([line], { seedLabels: { 1: '123' } });
+      ck(
+        (r.folds ?? []).some((q) => q.seed === 1 && q.evidence.some((e) => e.includes(line))) &&
+          !r.foldList,
+        `«${line}» binds to the piece labelled 123`,
+        JSON.stringify({ folds: r.folds?.map((q) => [q.seed, q.evidence]), list: r.foldList }),
+      );
+    }
+    const nn = build(['Back: cut on fold']);
+    ck(
+      !!nn.foldList &&
+        nn.foldList.entries.includes('Back: cut on fold') &&
+        !nn.foldList.bound.length,
+      'a fold line with no number («Back: cut on fold») stays an unbound file-level entry',
+      JSON.stringify(nn.foldList),
+    );
+    // a list number the PDF split off its line ("67." + "Forstykke, 1 gang mod fold") is joined
+    // back; a bare "0" (a ruler) is not
+    const sp = build(['67.', 'Forstykke, 1 gang mod fold'], { seedLabels: { 1: '67' } });
+    ck(
+      (sp.folds ?? []).some((q) => q.seed === 1) && !sp.foldList,
+      '«67.» + «Forstykke, 1 gang mod fold» (split items) bind to the piece labelled 67',
+      JSON.stringify({ folds: sp.folds?.map((q) => [q.seed, q.evidence]), list: sp.foldList }),
+    );
+    const bare = build(['0', 'Back: cut on fold'], { seedLabels: { 1: '0' } });
+    ck(
+      !!bare.foldList && bare.foldList.entries.includes('Back: cut on fold'),
+      'a bare «0» before a fold line is not its number: the line stays unbound',
+      JSON.stringify(bare.foldList),
+    );
+    const cs = build(['PLACE ON FOLD']);
+    ck(
+      !cs.foldList,
+      'a fold line a piece already took as its own evidence («PLACE ON FOLD» on CUFF) is no entry',
+      JSON.stringify(cs.foldList),
+    );
   }
 
   head('D2q a pair suggested by asymmetry, with a long straight edge: "cut on fold" offered (E4)');
