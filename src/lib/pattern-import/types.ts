@@ -1200,6 +1200,11 @@ export type FabricAssignment = {
    * the operator edits loses its AI fabric (the hint was for the AI's name).
    */
   aiOnly?: { seed: SeedId; purposes: FabricPurposeKey[]; needsConfirm: boolean }[];
+  /**
+   * N1: pieces nothing names a fabric for (no label, list, hatch or AI word) — main by default.
+   * With more than one fabric scope on the card the fabrics step shows them before the run goes on.
+   */
+  defaulted?: SeedId[];
 };
 
 export type ProposeFabricsFn = (

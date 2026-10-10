@@ -47,6 +47,13 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
+import {
+  answerProblem,
+  AUTO_STOPS,
+  scaleUncertain,
+  stepOffer,
+  type AutoResolver,
+} from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import type {
   ApplyDraftFn,
@@ -276,6 +283,28 @@ export function useImportSession(deps: {
   const [notice, setNotice] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
+  /**
+   * N1: the steps the wizard went through without the operator — 'auto' = shown, checked, nothing
+   * asked (the stepper: "auto ✓"); 'skipped' = jumped over unseen (the DXF fast path, a one-page
+   * sheet). Each stays a door back. Pruned to the steps before the current one on every move.
+   */
+  const [passed, setPassed] = useState<Partial<Record<WizardStep, 'auto' | 'skipped'>>>({});
+  /**
+   * N1: the forward drive — armed by the operator's next / read, dropped where a step asks. `gen`
+   * tells a stale drive (or a stale resolver answer) from the live one.
+   */
+  const drive = useRef<{ gen: number; resolve?: AutoResolver<Inputs>; asked: Set<string> } | null>(
+    null,
+  );
+  const driveGen = useRef(0);
+  /** N1: bumped by every operator action — an answer computed before it is stale. */
+  const opRev = useRef(0);
+  /** N1: the notice a refused resolver answer left (the next `advance` clears it, no other). */
+  const refusal = useRef<string | null>(null);
+  const [driveTick, setDriveTick] = useState(0);
+  /** Transitions in flight (a stage, the namer, a write): the drive waits for all of them. */
+  const flightRef = useRef(0);
+  const [flight, setFlight] = useState(0);
   // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
   // because `pieces.in.seeds` replaces the whole list (no 'add' edit kind in the contract).
   const baseSeeds = useRef<Seed[] | null>(null);
@@ -452,7 +481,7 @@ export function useImportSession(deps: {
   });
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
-  async function dispatch(ev: WizardEvent): Promise<void> {
+  async function dispatchRaw(ev: WizardEvent): Promise<void> {
     try {
       switch (ev.type) {
         case 'files': {
@@ -735,8 +764,15 @@ export function useImportSession(deps: {
         }
         case 'apply': {
           const built = sRef.current.draft;
-          // a download-only run has no BOM line to bind a file to: nothing is applied
-          if (!built || card.downloadOnly) return;
+          // a download-only run has no BOM line to bind a file to: nothing is applied; and only
+          // from the apply step, past a gate that blocks nothing (never on the way there)
+          if (!built || card.downloadOnly || sRef.current.step !== 'apply') return;
+          if (
+            Object.values(sRef.current.gate).some((g) =>
+              g.checks.some((c) => !c.ok && c.severity === 'block'),
+            )
+          )
+            return;
           // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
           const draft = {
             ...built,
@@ -897,7 +933,7 @@ export function useImportSession(deps: {
   }
 
   // ── forward transitions: run what the NEXT step shows, then move ────────────────────────
-  async function next(): Promise<void> {
+  async function forward(): Promise<void> {
     const s = sRef.current;
     try {
       switch (s.step) {
@@ -906,7 +942,7 @@ export function useImportSession(deps: {
           // and go straight to the pieces it already carries.
           const best = s.scale.candidates[iRef.current.scaleIndex];
           if (exRef.current.presegmented && certainScale(best)) {
-            await dispatch({
+            await dispatchRaw({
               type: 'scale',
               decision: { factor: best.factor, method: best.method, operatorConfirmed: false },
             });
@@ -917,7 +953,7 @@ export function useImportSession(deps: {
         }
         case 'scale': {
           const d = scaleDecision();
-          if (d) await dispatch({ type: 'scale', decision: d });
+          if (d) await dispatchRaw({ type: 'scale', decision: d });
           return;
         }
         case 'sheet':
@@ -950,7 +986,7 @@ export function useImportSession(deps: {
           return;
         }
         case 'fabrics':
-          await dispatch({ type: 'write' });
+          await dispatchRaw({ type: 'write' });
           return;
         case 'check':
           patch({ step: 'apply' });
@@ -981,16 +1017,14 @@ export function useImportSession(deps: {
         const c = s.scale.candidates[inputs.scaleIndex];
         if (!c) return 'pick how the scale is known';
         const d = scaleDecision(inputs);
-        const off = d ? Math.abs(d.factor - 1) : 0;
         const sides = squareSidesOf(c.evidence?.text);
-        const needsHuman =
-          c.confidence < 0.9 ||
-          off > PATIMPORT.scaleWarnRatio ||
-          (!!sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio);
+        const needsHuman = scaleUncertain(c, d?.factor ?? 1, extracted.calibrations);
         if (needsHuman && !inputs.scaleConfirmed && !inputs.manualMeasuredMm)
           return sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio
             ? 'the test square is not square in the file — measure it on paper or confirm'
-            : 'confirm the scale — the detection is not certain';
+            : !scaleUncertain(c, d?.factor ?? 1)
+              ? 'a page has no certain scale of its own (inherited or none) — check it, then confirm'
+              : 'confirm the scale — the detection is not certain';
         return null;
       }
       case 'sheet': {
@@ -1124,7 +1158,161 @@ export function useImportSession(deps: {
     }
     // exportedSeed/sizeTokens are derived from session/card on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, inputs, card]);
+  }, [session, inputs, card, extracted]);
+
+  /** N1: what the step offers without blocking on it (a suggestion waiting for accept). */
+  const offer = session.busy
+    ? null
+    : stepOffer({
+        ...session,
+        presegmented: !!extracted.presegmented,
+        cleanEdits: inputs.cleanEdits,
+        scopes: card.scopes.length,
+        fabricsEdited: inputs.assignment != null,
+      });
+
+  // ── N1 auto-advance: forward through every step that asks nothing ─────────────────────
+  async function tracked<T>(f: () => Promise<T>): Promise<T> {
+    flightRef.current++;
+    setFlight((n) => n + 1);
+    try {
+      return await f();
+    } finally {
+      flightRef.current--;
+      setFlight((n) => n - 1);
+    }
+  }
+  const arm = (resolve?: AutoResolver<Inputs>) => {
+    drive.current = { gen: ++driveGen.current, resolve, asked: new Set() };
+    setDriveTick((t) => t + 1);
+  };
+  const disarm = () => {
+    drive.current = null;
+  };
+  /** An operator action: whatever the drive or a resolver was about to do is stale now. */
+  const operatorActs = () => {
+    opRev.current++;
+    disarm();
+  };
+  /** Only the steps before the current one can be "passed". */
+  const prunePassed = () => {
+    const at = stepIndex(sRef.current.step);
+    setPassed((p) => {
+      const stale = (Object.keys(p) as WizardStep[]).filter((x) => stepIndex(x) >= at);
+      if (!stale.length) return p;
+      const next = { ...p };
+      for (const x of stale) delete next[x];
+      return next;
+    });
+  };
+  /**
+   * One forward move. The step it left is 'auto' when the drive left it (checked, nothing asked);
+   * the steps it jumped over unseen (fast path, one-page sheet) are 'skipped'.
+   */
+  async function forwardMarked(auto: boolean) {
+    const from = sRef.current.step;
+    const rev = opRev.current;
+    await tracked(forward);
+    // the operator acted meanwhile (a door back): what moved is theirs, nothing is marked
+    if (opRev.current !== rev) return false;
+    const a = stepIndex(from);
+    const b = stepIndex(sRef.current.step);
+    if (b <= a) return false;
+    const marks: Partial<Record<WizardStep, 'auto' | 'skipped'>> = {};
+    if (auto) marks[from] = 'auto';
+    for (const x of STEPS.slice(a + 1, b)) marks[x.id] = 'skipped';
+    setPassed((p) => {
+      const next = { ...p, ...marks };
+      if (!auto) delete next[from];
+      return next;
+    });
+    return true;
+  }
+
+  // The drive: armed by "next" / "read files" (or `advance`), it takes the next step while the
+  // current one has no blocker and no offer, and stops — disarmed — on the first that has one, on
+  // an error or a notice, and always on check (the gate is read and apply is a deliberate click).
+  // A resolver (AUTOPILOT) may answer the stopping question once; its answer is taken only while
+  // nothing moved (same drive, run, step, no operator action since) and only as the step's own
+  // answers (`answerProblem`); the step is then checked again.
+  useEffect(() => {
+    const d = drive.current;
+    if (!d || flight > 0 || flightRef.current > 0 || session.busy) return;
+    const step = session.step;
+    if (session.error || notice || AUTO_STOPS.includes(step)) return disarm();
+    const question = blocker ?? offer;
+    if (!question) {
+      void forwardMarked(true).then((moved) => {
+        if (!moved && drive.current === d) disarm();
+      });
+      return;
+    }
+    const key = `${step}|${question}`;
+    if (!d.resolve || d.asked.has(key)) return disarm();
+    d.asked.add(key);
+    const resolve = d.resolve;
+    const at = { gen: d.gen, sid: sRef.current.sessionId, step, rev: opRev.current };
+    const live = () =>
+      drive.current?.gen === at.gen &&
+      sRef.current.sessionId === at.sid &&
+      sRef.current.step === at.step &&
+      opRev.current === at.rev;
+    void tracked(async () => {
+      try {
+        const a = await resolve({ session: sRef.current, inputs: iRef.current, step, question });
+        if (!live()) return;
+        if (!a || a.stop) return disarm();
+        const problem = answerProblem(step, a);
+        if (problem) {
+          disarm();
+          refusal.current = `the automatic answer was refused — ${problem}`;
+          setNotice(refusal.current);
+          return;
+        }
+        if (a.patch) {
+          iRef.current = { ...iRef.current, ...a.patch };
+          patchInputs(a.patch);
+        }
+        for (const ev of a.events ?? []) {
+          if (!live()) return;
+          await dispatchRaw(ev);
+          if (sRef.current.error) break;
+        }
+      } catch (e) {
+        if (!live()) return;
+        disarm();
+        fail(e);
+      }
+    });
+    // the drive reads the latest refs; these are what can change the answer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driveTick, flight, session, blocker, offer, notice]);
+
+  /** Operator events. Reading files arms the drive; any other event stops it (the operator looks). */
+  async function dispatch(ev: WizardEvent): Promise<void> {
+    operatorActs();
+    if (ev.type === 'files' || ev.type === 'reset') setPassed({});
+    await tracked(() => dispatchRaw(ev));
+    prunePassed();
+    if (ev.type === 'files' && !sRef.current.error && sRef.current.sessionId != null) arm();
+  }
+
+  /** The operator's "next": this step, then on through every step that asks nothing. */
+  async function next(): Promise<void> {
+    operatorActs();
+    if (await forwardMarked(false)) arm();
+  }
+
+  /**
+   * N1: run forward from the current step while no step asks anything; with `resolve`, a step that
+   * asks is offered to it first (AUTOPILOT's policy) — its answer is applied and the step checked
+   * again; no answer = the run stops there for the operator.
+   */
+  function advance(opts: { resolve?: AutoResolver<Inputs> } = {}) {
+    if (refusal.current && notice === refusal.current) setNotice(null);
+    refusal.current = null;
+    arm(opts.resolve);
+  }
 
   /**
    * A2 "this is a piece" on a set-aside outline: its held text seed comes back, else a click at its
@@ -1136,6 +1324,7 @@ export function useImportSession(deps: {
 
   /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
   async function addSeed(at: PtMm, aside?: SetAside) {
+    operatorActs();
     try {
       const i = iRef.current;
       const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
@@ -1227,6 +1416,7 @@ export function useImportSession(deps: {
    * answered explicitly (`answerOutline`).
    */
   function confirmShown(seed?: SeedId) {
+    operatorActs();
     const now = answersNow();
     const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current, now);
     const mine = <T extends { seed: SeedId }>(xs: T[]) =>
@@ -1264,14 +1454,21 @@ export function useImportSession(deps: {
     inputs,
     apply,
     sheetModes,
-    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') =>
-      setSheetModes((m) => ({ ...m, [scopeKey]: mode })),
+    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
+      operatorActs();
+      setSheetModes((m) => ({ ...m, [scopeKey]: mode }));
+    },
     extracted,
     errorCode,
     notice,
     som,
     clientKind: client.kind,
     blocker,
+    /** N1: what the step offers without blocking on it — why the drive stopped here. */
+    offer,
+    /** N1: how each step was passed without the operator ('auto' ✓ / 'skipped'), still doors. */
+    passed,
+    advance,
     /** A0.2: the sheet is one page — the stepper shows the step passed over ("1 page"). */
     sheetSkipped:
       !extracted.presegmented && singlePageSheet(session.pages, session.sheet, inputs.gridOverride),
@@ -1290,7 +1487,11 @@ export function useImportSession(deps: {
     setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
     confirmShown,
     answerOutline,
-    patchInputs,
+    /** The steps' own input answers (an operator action: a running drive stops). */
+    patchInputs: (p: Partial<Inputs> | ((i: Inputs) => Partial<Inputs>)) => {
+      operatorActs();
+      patchInputs(p);
+    },
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
     semanticsInput,
