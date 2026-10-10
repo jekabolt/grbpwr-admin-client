@@ -76,6 +76,11 @@ type Case = {
    * Absent = the operator confirms what is shown.
    */
   outline?: 'cut' | 'seam';
+  /**
+   * E4: pieces (seed labels) whose count question the operator answers "cut on fold" — the fold
+   * the sheet draws with curves only (redcafe спинка: ЗАДНЯЯ СЕРЕДИНА СГИБ).
+   */
+  foldOnCount?: string[];
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -204,6 +209,7 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     truth: { id: 'redcafe_tolstovka' },
     clicks: 'redcafe',
+    foldOnCount: ['спинка'],
   },
   {
     id: 'wm',
@@ -863,12 +869,13 @@ export async function runCase(c: Case): Promise<Rec> {
         foldListChecked,
       });
     }
-    // E4: a count question on a piece the garment cuts on fold (K0 truth) is answered "cut on
-    // fold" in the same row; the fold question that follows takes the suggested edge
+    // E4: the count question of a piece the case names (`foldOnCount`, a fold the sheet draws
+    // with curves) is answered "cut on fold" in the same row; the fold question that follows takes
+    // the suggested edge
     const onFold = sem.unproven.filter(
       (u) =>
         u.kind === 'quantity' &&
-        truthFold(lab(u.seed)) === true &&
+        (c.foldOnCount ?? []).includes(lab(u.seed)) &&
         !sem.pieces.some((p) => p.seed === u.seed && p.unfoldedFold),
     );
     if (onFold.length) {
