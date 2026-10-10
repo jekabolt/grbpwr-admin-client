@@ -1172,6 +1172,7 @@ function AssemblySkeletonPanel({
                 <span data-skeleton-replace-loses={photosInForm}>
                   goes for good: {replaceLoses.join(' · ')}
                   {unitsGo ? ' (the new steps make no units)' : ''}
+                  {' · undo is available until the next save'}
                 </span>
               ) : result?.refused ? (
                 <span className='text-error' data-skeleton-refused='1'>

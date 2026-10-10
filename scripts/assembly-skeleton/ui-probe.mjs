@@ -51,6 +51,7 @@ const MUTATE_ROW_WIDE = process.argv.includes('--mutate-suggestion-row-wide');
 const MUTATE_UNDO_REBASE = process.argv.includes('--mutate-undo-rebase');
 const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array');
 const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
+const MUTATE_SNAPSHOT_SUGG = process.argv.includes('--mutate-snapshot-suggestion');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -158,7 +159,9 @@ const REBASE_BROKEN = `    {
     }
     if (!frozen)
       for (const index of touched)`;
-if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY)
+// The apply snapshots the open step WITH its live suggestion (pre-fix): undo restores it unmarked.
+const REVOKE_FIX = `    revokeSuggestions.current?.();\n`;
+if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY || MUTATE_SNAPSHOT_SUGG)
   plugins.push({
     name: 'draft-exemption-mutations',
     setup(b) {
@@ -171,6 +174,7 @@ if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY)
         if (MUTATE_ROW_WIDE) swap(EXEMPT_FIX, EXEMPT_BROKEN);
         if (MUTATE_THREAD_ARRAY) swap(EXEMPT_FIX, EXEMPT_THREAD_ARRAY);
         if (MUTATE_UNDO_REBASE) swap(REBASE_FIX, REBASE_BROKEN);
+        if (MUTATE_SNAPSHOT_SUGG) swap(REVOKE_FIX, '');
         return { contents: src, loader: 'tsx' };
       });
     },
@@ -841,7 +845,7 @@ const U_OWN = [
       {
         lineKey: 'TH1',
         name: 'sewing thread',
-        section: 'thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
         kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
       },
     ],
@@ -887,7 +891,7 @@ const U_OWN = [
       {
         lineKey: 'TH1',
         name: 'sewing thread',
-        section: 'thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
         kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
       },
     ],
@@ -948,13 +952,13 @@ const U_OWN = [
       {
         lineKey: 'TH1',
         name: 'overlock thread',
-        section: 'thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
         kind: 'TECH_CARD_BOM_KIND_OVERLOCK_THREAD',
       },
       {
         lineKey: 'TH2',
         name: 'sewing thread',
-        section: 'thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
         kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
       },
     ],
@@ -1055,6 +1059,69 @@ const U_OWN = [
   ck(
     (await page.evaluate(() => window.__sk.form().getValues('issues').length)) === 1,
     'the issue stands',
+  );
+  await closePanel();
+}
+
+{
+  // U12 the open step shows an auto-suggested thread (marked «suggested») when the person replaces
+  // the steps. The snapshot «before» takes the step as the PERSON left it — the suggestion revoked —
+  // so undo brings the step back and the editor suggests the thread again, WITH its mark, instead of
+  // restoring it as a plain, unmarked link. The replace confirmation says how long undo lives.
+  await mount({
+    ops: [U_OWN[0]],
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  await page.click('[data-rail-step="0"]');
+  await page.waitForTimeout(300);
+  ck(
+    JSON.stringify((await ops())[0]?.bomLineKeys) === '["TH1"]' &&
+      (await page.locator('[data-suggested="thread"]').count()) === 1,
+    'control: the open step shows the thread as a marked suggestion',
+  );
+  await openPanel('header', 'replace');
+  await page.click('[data-skeleton-apply-all]');
+  {
+    const t = await page.locator('[data-skeleton-replace-loses]').innerText();
+    ck(
+      /undo is available until the next save/.test(t),
+      'the replace confirmation says how long undo lives',
+      t,
+    );
+  }
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  // The applied machine step opens and gets the thread suggested too (strict undo: gone); open the
+  // applied press step instead — the suggestion is revoked and the batch is as applied again.
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="1"]', { timeout: 5000 });
+  await page.click('[data-rail-step="1"]');
+  await page.waitForTimeout(300);
+  await openPanel('header');
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  await page.waitForTimeout(300);
+  const r = await ops();
+  ck(r.length === 1, 'undo brings the one step back');
+  ck(
+    JSON.stringify(r[0]?.bomLineKeys) === '["TH1"]' &&
+      (await page.locator('[data-suggested="thread"]').count()) === 1,
+    'the thread is back as a MARKED suggestion, not a plain link',
+    `${JSON.stringify(r[0]?.bomLineKeys)}, marks ${await page.locator('[data-suggested="thread"]').count()}`,
   );
   await closePanel();
 }
@@ -1566,6 +1633,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}`,
 );
 if (bad) process.exitCode = 1;

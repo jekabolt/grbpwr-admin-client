@@ -2462,7 +2462,10 @@ function OperationEditor({
   onEdit,
   frozen = false,
   noteSuggested,
+  revokeSuggestions,
 }: {
+  /** Ручка поля операций: отозвать подстановки открытого шага СЕЙЧАС (перед записью каркаса). */
+  revokeSuggestions?: { current: (() => void) | null };
   /**
    * «Эту строку сейчас переписала подстановка, а не человек» (зона, нитка, утюг — `shouldDirty:
    * false`). Детектор черновика берёт отпечаток заново и метку не снимает; пачка каркаса на вершине
@@ -4074,60 +4077,72 @@ function OperationEditor({
   // значит молча разъехаться с сохранённым, то есть подготовить стирание следующим сохранением.
   const indexRef = useRef(index);
   indexRef.current = index;
-  useEffect(() => {
-    return () => {
-      const wrote = wroteRef.current;
-      // Локальный `index` НАРОЧНО затеняет проп значением на момент размонтирования: сдвиг
-      // индексов при удалении шага не должен отзывать значение чужого шага, а путь записи обязан
-      // читаться разметочной проверкой роундтрипа тем же паттерном, что у остальных эффектов.
-      const index = indexRef.current;
-      const base = (form.formState.defaultValues?.operations?.[index] ?? {}) as {
-        zone?: string;
-        bomLineKeys?: string[];
-        pressEquipment?: string;
-        pressProfileKey?: string;
-      };
-      if (wrote.zone !== undefined) {
-        const cur = getValues(`operations.${index}.zone`);
-        if (cur === wrote.zone && base.zone !== wrote.zone) {
-          noteSuggested?.(index, 'zone', NONE_ZONE);
-          setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
-        }
-      }
-      if (wrote.thread) {
-        const keys = (getValues(`operations.${index}.bomLineKeys`) ?? []) as string[];
-        if (keys.includes(wrote.thread) && !(base.bomLineKeys ?? []).includes(wrote.thread)) {
-          noteSuggested?.(index, 'bomLineKeys', { remove: wrote.thread });
-          setValue(
-            `operations.${index}.bomLineKeys`,
-            keys.filter((k) => k !== wrote.thread),
-            { shouldDirty: false },
-          );
-        }
-      }
-      if (wrote.press) {
-        const eq = getValues(`operations.${index}.pressEquipment`);
-        if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
-          noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
-          setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, {
-            shouldDirty: false,
-          });
-          if (
-            wrote.press.profileKey &&
-            getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
-            base.pressProfileKey !== wrote.press.profileKey
-          ) {
-            noteSuggested?.(index, 'pressProfileKey', '');
-            setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
-          }
-        }
-      }
-      wroteRef.current = {};
+  // ОТЗЫВ ПОДСТАНОВОК — одна функция на два случая: размонтирование редактора и запись каркаса,
+  // которая сейчас заменит или сдвинет строки (`revokeSuggestions`): снимок «до» обязан видеть
+  // шаг таким, каким его оставил человек, а не с подставленным значением без метки.
+  const revokeAll = useRef<() => void>(() => {});
+  revokeAll.current = () => {
+    const wrote = wroteRef.current;
+    // Локальный `index` НАРОЧНО затеняет проп значением на момент размонтирования: сдвиг
+    // индексов при удалении шага не должен отзывать значение чужого шага, а путь записи обязан
+    // читаться разметочной проверкой роундтрипа тем же паттерном, что у остальных эффектов.
+    const index = indexRef.current;
+    const base = (form.formState.defaultValues?.operations?.[index] ?? {}) as {
+      zone?: string;
+      bomLineKeys?: string[];
+      pressEquipment?: string;
+      pressProfileKey?: string;
     };
+    if (wrote.zone !== undefined) {
+      const cur = getValues(`operations.${index}.zone`);
+      if (cur === wrote.zone && base.zone !== wrote.zone) {
+        noteSuggested?.(index, 'zone', NONE_ZONE);
+        setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+      }
+    }
+    if (wrote.thread) {
+      const keys = (getValues(`operations.${index}.bomLineKeys`) ?? []) as string[];
+      if (keys.includes(wrote.thread) && !(base.bomLineKeys ?? []).includes(wrote.thread)) {
+        noteSuggested?.(index, 'bomLineKeys', { remove: wrote.thread });
+        setValue(
+          `operations.${index}.bomLineKeys`,
+          keys.filter((k) => k !== wrote.thread),
+          { shouldDirty: false },
+        );
+      }
+    }
+    if (wrote.press) {
+      const eq = getValues(`operations.${index}.pressEquipment`);
+      if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
+        noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
+        setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, {
+          shouldDirty: false,
+        });
+        if (
+          wrote.press.profileKey &&
+          getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
+          base.pressProfileKey !== wrote.press.profileKey
+        ) {
+          noteSuggested?.(index, 'pressProfileKey', '');
+          setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+        }
+      }
+    }
+    wroteRef.current = {};
+  };
+  useEffect(() => {
+    return () => revokeAll.current();
     // Пустые зависимости НАРОЧНО: отзыв — только на настоящем размонтировании. Пересборка эффекта
     // на смене index отзывала бы по СТАРОМУ индексу значение уже другого шага.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (!revokeSuggestions) return;
+    const revoke = () => revokeAll.current();
+    revokeSuggestions.current = revoke;
+    return () => {
+      if (revokeSuggestions.current === revoke) revokeSuggestions.current = null;
+    };
+  }, [revokeSuggestions]);
 
   /** Снять подставленное касанием: значение уходит, подсказка на этом шаге гаснет. */
   const dropSuggested = (field: SuggestedField) => {
@@ -6247,6 +6262,8 @@ export function OperationsField({
   // Строки собирает `rowFromStep`, то есть тот же писатель, что и диалог создания: после записи это
   // обычные шаги; след происхождения — только поле `draft` (0410), до первой правки или «reviewed».
   const autosave = useTechCardAutosave();
+  // Отзыв подстановок открытого шага — регистрирует редактор (см. OperationEditor.revokeAll).
+  const revokeSuggestions = useRef<(() => void) | null>(null);
 
   // Последний увиденный nonce: перемонтированное поле получает тот же `applyRequest` (состояние
   // живёт выше, у двери) и без этой памяти записало бы предложение второй раз.
@@ -6275,8 +6292,12 @@ export function OperationsField({
     // ОТМЕНА ЗАПИСИ (03-P2 §6): снимок «до» берётся ДО записи, глубоко — строки с `media[].mediaId`,
     // флаги карточки и номера шагов в дефектах. Формовые записи старше этой не гасятся: после
     // replace их щит по `fieldId` откажет сам, словами; после append они и так целы.
+    // Подстановка открытого шага (без жеста человека) не должна попасть в снимок «до» голым
+    // значением: отозвать её сейчас — после отмены редактор предложит её снова, С МЕТКОЙ.
+    revokeSuggestions.current?.();
+    const settled = (getValues('operations') ?? []) as typeof current;
     const before = {
-      rows: replacing ? structuredClone(current) : [],
+      rows: replacing ? structuredClone(settled) : [],
       mediaCleared: !!getValues('mediaCleared'),
       assemblyCleared: !!getValues('assemblyCleared'),
       issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
@@ -6319,7 +6340,7 @@ export function OperationsField({
           // Чужие шаги — какими они стоят сейчас; пачка — как построена. Чужая часть уточняется
           // первым проходом детектора после записи (`snapshotPending`): открытый до записи шаг
           // мог нести живую подстановку редактора, которую его размонтирование тут же отзовёт.
-          all: structuredClone([...(replacing ? [] : current), ...rows]),
+          all: structuredClone([...(replacing ? [] : settled), ...rows]),
           mediaCleared: !!getValues('mediaCleared'),
           assemblyCleared: !!getValues('assemblyCleared'),
           issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
@@ -7905,6 +7926,7 @@ export function OperationsField({
                   // them — quietly writing into blank machine / stitch / thread fields on a drag.
                   key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
                   noteSuggested={noteSuggested}
+                  revokeSuggestions={revokeSuggestions}
                   index={selectedIndex}
                   bomLines={bomItems}
                   pieces={pieces}
@@ -8004,6 +8026,7 @@ export function OperationsField({
             selectedIndex >= 0 ? (
               <OperationEditor
                 noteSuggested={noteSuggested}
+                revokeSuggestions={revokeSuggestions}
                 // ТОТ ЖЕ KEY-КОНТРАКТ, что у инлайна, и упрощать его нельзя: оба «пропусти первый
                 // прогон» сторожа редактора привязаны к монтированию, а их эффекты зависят от
                 // `index`. Пере-сортировка открытого шага меняет индекс без ремаунта — и пресет
