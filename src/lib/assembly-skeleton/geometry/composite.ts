@@ -587,7 +587,11 @@ export function compositeSeams(
 ): SeamGraph {
   const geom = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
   const warnings = [...graph.warnings];
-  let chosen = [...graph.chosen];
+  // Surface joins (P2 lane S) take no edge: they neither use nor glue the host's boundary. Set
+  // aside for the edge passes, back at the end.
+  const surface = graph.chosen.filter((c) => c.kind === 'surface');
+  let chosen = graph.chosen.filter((c) => c.kind !== 'surface');
+  const edgeCount = chosen.length;
   const rejected = [...graph.rejected];
   const added: SeamCandidate[] = [];
 
@@ -779,7 +783,7 @@ export function compositeSeams(
     }
   }
 
-  if (added.length === 0 && chosen.length === graph.chosen.length) return graph;
+  if (added.length === 0 && chosen.length === edgeCount) return graph;
   for (const c of added) warnings.push(`A4 ${c.kind}: ${c.a} ↔ ${c.b} (${c.evidence.rule ?? ''})`);
 
   // Components over every seam, the new ones included (folds join nothing new).
@@ -789,6 +793,7 @@ export function compositeSeams(
     while (parent.get(r) !== r) r = parent.get(r) ?? r;
     return r;
   };
+  chosen = [...chosen, ...surface];
   for (const c of chosen) {
     if (c.evidence.self) continue;
     for (const id of [...idsOf(c, 'a'), ...idsOf(c, 'b')]) {

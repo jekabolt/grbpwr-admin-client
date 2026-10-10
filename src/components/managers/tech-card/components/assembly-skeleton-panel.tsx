@@ -86,6 +86,9 @@ const mm = (v: number) => String(Math.round(v));
 /** One seam's evidence, in words: «518 = 518 mm · 2 notches · curves fit». */
 export function seamWords(s: SeamCandidate): string {
   const e = s.evidence;
+  // A part laid on a placement mark: its evidence is the mark, not two edge lengths.
+  if (s.kind === 'surface')
+    return (e.rule ?? 'laid on its placement mark').replace(/^surface: /, '');
   const parts: string[] = [];
   if (s.kind === 'closure-not-seam') parts.push('a closure, not a seam');
   if (s.kind === 'partial') parts.push('partial seam');

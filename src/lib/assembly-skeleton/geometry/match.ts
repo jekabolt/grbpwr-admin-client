@@ -42,8 +42,9 @@ import {
   type SeamGraph,
   type SkeletonFacts,
 } from '../types';
-import { isMirroredPair } from '../cut';
+import { isMirroredPair, pieceMultiplicity } from '../cut';
 import { angleAt, dist, drillPoints } from './segment';
+import { surfaceSeams } from './surface';
 import { unprovenCopies } from './twins';
 
 export type MatchRules = {
@@ -63,6 +64,8 @@ export type MatchRules = {
   equivRect: boolean;
   /** An alternative on an identical layer of the same cloth is the same answer. */
   equivLayers: boolean;
+  /** Surface joins (P2 lane S): parts laid on a host's placement mark, added after the edges. */
+  surface: boolean;
 };
 
 export const ALL_RULES: MatchRules = {
@@ -79,6 +82,7 @@ export const ALL_RULES: MatchRules = {
   sides: true,
   equivRect: true,
   equivLayers: true,
+  surface: true,
 };
 
 /** The probe as it ran on 09.10 (hand rule only). */
@@ -96,6 +100,7 @@ export const PROBE_RULES: MatchRules = {
   sides: false,
   equivRect: false,
   equivLayers: false,
+  surface: false,
 };
 
 /** Probe's length band without notch requirement: score 0.5 up to 3.5 %. */
@@ -859,7 +864,16 @@ export function matchSeams(
       .map((c) => toCandidate(c)),
   ];
 
-  // Connected components over seams (closures do not join pieces).
+  // Surface joins (P2 lane S) — outside all-pairs and the greedy: they take no edge, so the host's
+  // edges stay free for its ordinary seams; added on top of them.
+  if (rules.surface) {
+    const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
+    const s = surfaceSeams(byKey, copies);
+    chosen.push(...s.chosen);
+    warnings.push(...s.warnings);
+  }
+
+  // Connected components over seams (closures do not join pieces; surface joins do).
   const parent = new Map(pieces.map((p) => [p.pieceKey, p.pieceKey]));
   const find = (k: string): string => {
     let r = k;
@@ -868,6 +882,7 @@ export function matchSeams(
     return r;
   };
   for (const c of chosenC) parent.set(find(c.u.piece.pieceKey), find(c.v.piece.pieceKey));
+  for (const c of chosen) if (c.surface) parent.set(find(c.surface.host), find(c.surface.part));
   const groups = new Map<string, string[]>();
   for (const p of pieces) {
     const r = find(p.pieceKey);

@@ -21,9 +21,10 @@
 
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -390,6 +391,181 @@ const strict = results.get('  └ amb. strict (no equivalence)')[2].s;
 console.log(
   `   info: blazer ambiguity with NO equivalence (rect sides / identical layers count as choices): ${strict.ambiguous}/${strict.chosen} = ${pct(strict.ambiguousShare).trim()}`,
 );
+
+// ── P2 lane S: surface joins (03-P2-DESIGN §3) ───────────────────────────────────────────────
+// A part laid on a placement mark of another piece. Truth: truth/*.json `surface` ([part, host]).
+// Gates: blazer finds exactly its 4 (pocket_l → 6, pocket_r_1 → 10, the 51 × 158 flaps onto the
+// two pockets), on the A3 graph and through the product pipeline; every other file 0 (SS26-005 has
+// no mark on its front, Allsizes / POCKETS / summer none that traces a piece, summer outline's
+// CLR_3 470 × 95 loop has no piece of its shape). The fronts take their pockets before any other
+// unit holds them. NEGATIVE CONTROLS (each must turn a gate red): marks never read → 0 found;
+// every guard off (bbox tol 0.6, no length ratio, no outline trace) → false joins on the blazer;
+// the same plus twins and the area cap off → CLR_3's loop takes its twin CLR_4.
+console.log('\n── surface joins (P2 lane S)');
+{
+  const exists = (p) => {
+    try {
+      readFileSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const downloads = process.env.SKELETON_DOWNLOADS ?? resolve(homedir(), 'Downloads');
+  const EXTRA = [
+    { id: 'pockets', label: 'POCKETS', dxf: resolve(corpus, 'POCKETS.dxf'), size: 'M' },
+    { id: 'summer', label: 'summer men', dxf: resolve(corpus, 'summer men.dxf'), size: 'XS' },
+    {
+      id: 'summer-outline',
+      label: 'summer men with pattern outline1 (Downloads)',
+      dxf: resolve(downloads, 'summer men with pattern outline1.dxf'),
+      size: 'XS',
+    },
+    {
+      id: 'blazer_1',
+      label: 'blazer_1 (Downloads, the other export)',
+      dxf: resolve(downloads, 'blazer_1.dxf'),
+      size: 'M',
+    },
+  ];
+  const extra = [];
+  for (const f of EXTRA) {
+    if (!exists(f.dxf)) {
+      console.log(`   ${f.label}: not found — skipped`);
+      continue;
+    }
+    const buf = readFileSync(f.dxf);
+    const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    console.warn = () => {};
+    console.log = () => {};
+    const { facts } = await mod.loadFacts(bytes, f.size, 'generic');
+    console.warn = warn;
+    console.log = log;
+    extra.push({ ...f, facts });
+  }
+  const expect = (f) =>
+    (f.truthJson?.surface ?? []).map(([part, host]) => `${part}>${host}`).sort();
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const blazer = loaded.find((f) => f.id === 'blazer');
+  for (const f of [...loaded, ...extra]) {
+    const a3 = mod.run(f.facts, ALL, false).graph;
+    const a4 = mod.run(f.facts, ALL, true).graph;
+    const got = mod.surfacePairs(a3);
+    const got4 = mod.surfacePairs(a4);
+    const want = f.truthJson ? expect(f) : f.id === 'blazer_1' ? expect(blazer) : [];
+    console.log(`   ${f.label}: ${got.length} surface joins`);
+    for (const l of mod.surfaceLines(a3)) console.log(`     ${l}`);
+    check(
+      same(got, want) && same(got4, want),
+      `${f.label}: surface joins = truth (${want.length})`,
+      `A3 [${got.join(', ') || '—'}] · A3+A4 [${got4.join(', ') || '—'}]`,
+    );
+  }
+  // CLR_3: the closed L8 loop that step 0 left as a placement (no piece of its shape).
+  const so = extra.find((f) => f.id === 'summer-outline');
+  if (so) {
+    const clr = mod.run(so.facts, ALL, false).graph.pieces.find((p) => p.pieceKey === 'CLR_3');
+    const loop = (clr?.marks ?? []).filter((m) => m.kind === 'placement');
+    console.log(
+      `   CLR_3 placement marks: ${loop.map((m) => `${m.id} ${m.closed ? 'closed' : 'open'} ${Math.round(m.bbox.w)}×${Math.round(m.bbox.h)}`).join(', ') || '—'}`,
+    );
+    check(
+      loop.length > 0 && mod.surfacePairs(mod.run(so.facts, ALL, true).graph).length === 0,
+      'summer outline: the CLR_3 470 × 95 loop is a placement mark and yields NO surface join',
+      `${loop.length} placement mark(s), 0 joins`,
+    );
+  }
+  // The fronts take their pockets while flat: the first unit holding 6 / 10 is the surface join.
+  {
+    const { graph } = mod.run(blazer.facts, ALL, false);
+    const units = mod.groupUnits(graph, blazer.facts, mod.orderTemplate(blazer.facts.category));
+    const bad = [];
+    for (const [part, host] of blazer.truthJson.surface) {
+      const first = units.find((u) => u.pieceKeys.includes(host) && u.pieceKeys.length > 0);
+      const onto = units.find((u) => u.seams.some((c) => c.surface?.part === part));
+      if (!onto) bad.push(`${part}: no unit`);
+      else if (onto.source !== 'geometry' || onto.confidence < 0.8)
+        bad.push(`${part}: ${onto.source} ${onto.confidence}`);
+      if (host === '6' || host === '10') {
+        if (first !== onto) bad.push(`${host} first in «${first?.name}», not with its pocket`);
+      }
+      // The unit holds the host and what goes on it — never the other hand's pocket or flap.
+      const own = new Set([host, part]);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const [p, h] of blazer.truthJson.surface)
+          if (own.has(h) && !own.has(p)) own.add(p), (grew = true);
+      }
+      const named = new Set(blazer.truthJson.surface.flat());
+      const stray = (onto?.pieceKeys ?? []).filter((k) => named.has(k) && !own.has(k));
+      if (stray.length) bad.push(`«${onto.name}» also holds ${stray.join(', ')}`);
+    }
+    const shown = units
+      .filter((u) => u.seams.some((c) => c.kind === 'surface'))
+      .map((u) => `${u.name} [${u.inputs.join(' + ')}] ${u.confidence}`);
+    console.log(`   units: ${shown.join(' · ')}`);
+    check(
+      bad.length === 0,
+      'blazer units: each part goes onto its host by the mark (geometry, 0.8); fronts take their pockets first',
+      bad.join('; ') || `${shown.length} surface units`,
+    );
+  }
+  // The pictogram lays the part ON the mark (T_world = host.T ∘ surface.T), not in a corner.
+  {
+    const { graph } = mod.run(blazer.facts, ALL, true);
+    const drawn = blazer.truthJson.surface.map(([part, host]) => ({
+      part,
+      host,
+      d: mod.surfaceDrawn(graph, host, part),
+    }));
+    check(
+      drawn.every((x) => x.d && x.d.offMm <= 0.5 && x.d.surface && !x.d.approx),
+      'blazer pictograms: every part is drawn on its host mark (≤ 0.5 mm), as a surface piece, not «?»',
+      drawn
+        .map((x) => `${x.part}/${x.host} ${x.d ? `${x.d.offMm.toFixed(2)} mm` : 'not drawn'}`)
+        .join(' · '),
+    );
+  }
+  // Negative controls.
+  {
+    const none = mod.surfacePairs(mod.withoutMarks(blazer.facts));
+    check(
+      none.length === 0,
+      'NEG marks OFF: the blazer finds no surface join (the truth gate above would go red)',
+      `${none.length} found`,
+    );
+    const want = expect(blazer);
+    const loose = mod.surfaceOnly(blazer.facts, { bboxTol: 0.6, lenRatio: false, shape: false });
+    const falseJoins = loose.filter((x) => !want.includes(x));
+    check(
+      falseJoins.length >= 1,
+      'NEG guards OFF (bbox tol 0.6, no length ratio, no outline trace): false joins on the blazer',
+      `${falseJoins.length}: ${falseJoins.slice(0, 4).join(', ')}`,
+    );
+    const tolOnly = mod.surfaceOnly(blazer.facts, { bboxTol: 0.6 });
+    console.log(
+      `   info: bbox tol 0.6 alone (outline trace and length still on) → ${tolOnly.filter((x) => !want.includes(x)).length} false — the trace is the guard that holds`,
+    );
+    const noTrace = mod.surfaceOnly(blazer.facts, { lenRatio: false, shape: false });
+    console.log(
+      `   info: default tol, no length ratio, no trace → ${noTrace.filter((x) => !want.includes(x)).length} false (${noTrace.filter((x) => !want.includes(x)).join(', ') || '—'})`,
+    );
+    if (so) {
+      const all = mod.surfaceOnly(so.facts, {
+        bboxTol: 0.6,
+        lenRatio: false,
+        shape: false,
+        twins: false,
+        areaMax: 10,
+      });
+      check(
+        all.length >= 1,
+        'NEG every guard OFF on summer outline: the CLR_3 loop takes a piece',
+        all.join(', ') || 'none',
+      );
+    }
+  }
+}
 
 console.log(failures ? `\n${failures} gate(s) FAILED` : '\nall gates green');
 process.exit(failures ? 1 : 0);

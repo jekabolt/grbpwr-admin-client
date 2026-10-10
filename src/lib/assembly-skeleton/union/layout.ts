@@ -144,6 +144,8 @@ type Trial = {
   endErr: number;
   mode: 'edge' | 'stack' | 'hung' | 'surface';
   via?: EdgeId;
+  /** A surface part laid by its placement mark — not a guess. */
+  exact?: boolean;
 };
 
 /**
@@ -188,6 +190,15 @@ export function unionLayout(
     const ea = resolveEdge(s.a, G);
     const eb = resolveEdge(s.b, G);
     if (s.kind !== 'surface' && (!ea || !eb)) continue;
+    const S = s.kind === 'surface' ? s.surface : undefined;
+    if (S && inUnit.has(S.host) && inUnit.has(S.part)) {
+      // A part on its placement mark (P2 lane S): exactly where the host's mark says, before any
+      // edge link could lay it elsewhere; only from the host (the bigger piece, placed first).
+      const toHost = S.host === ka;
+      const [from, to] = toHost ? [ea, eb] : [eb, ea];
+      links.push({ seam: s, from, to, fromKey: S.host, toKey: S.part, len: 1e9 });
+      continue;
+    }
     const len = Math.max(ea?.len ?? 0, eb?.len ?? 0);
     links.push({ seam: s, from: ea, to: eb, fromKey: ka, toKey: kb, len });
     links.push({ seam: s, from: eb, to: ea, fromKey: kb, toKey: ka, len });
@@ -238,6 +249,11 @@ export function unionLayout(
     const host = placed.get(l.fromKey)!;
     const toGeom = G.get(l.toKey)!;
 
+    const S = l.seam.surface;
+    if (l.seam.kind === 'surface' && S && S.host === l.fromKey && S.part === l.toKey) {
+      // On the host's placement mark: T_world = host.T ∘ surface.T.
+      return { T: compose(host.T, S.T), overlap: 0, endErr: 0, mode: 'surface', exact: true };
+    }
     if (l.seam.kind === 'surface') {
       // On the host, in its lower-right quadrant, own orientation (§G: no placement mark known).
       const hb = bboxOf(worldPts(l.fromKey, host.T));
@@ -317,7 +333,7 @@ export function unionLayout(
     }
     if (t.mode === 'surface') {
       surface.push(k);
-      put(k, t.T, { approx: true }, false);
+      put(k, t.T, t.exact ? {} : { approx: true }, false);
       return;
     }
     const approx = t.mode === 'hung' || t.endErr > hangErr;

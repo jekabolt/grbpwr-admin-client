@@ -12,12 +12,21 @@ import {
   buildSeamGraph,
   compositeSeams,
   edgeIdsOf,
+  matchSeams,
   runsOf,
   scoreRuns,
   seamPieceOf,
+  segmentPiece,
+  twins,
   type MatchRules,
   unprovenCopies,
 } from '../../src/lib/assembly-skeleton/geometry';
+import {
+  surfaceSeams,
+  type SurfaceOptions,
+} from '../../src/lib/assembly-skeleton/geometry/surface';
+import { pieceMultiplicity } from '../../src/lib/assembly-skeleton/cut';
+import { unionLayout } from '../../src/lib/assembly-skeleton/union/layout';
 import { groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
 import type {
   PieceGeom,
@@ -240,7 +249,9 @@ export type Score = {
   wrongPairs: string[];
 };
 
-export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string[]): Score {
+export function score(whole: SeamGraph, truth: Truth, map: (l: string) => string[]): Score {
+  // Surface joins (P2 lane S) take no edge and are not in the edge truth: scored apart (surface()).
+  const graph = { ...whole, chosen: whole.chosen.filter((c) => c.kind !== 'surface') };
   const sets = graph.chosen.map(sidesOf);
   const covers = ([ta, tb]: [string, string], [x, y]: Set<string>[]) => {
     const A = map(ta);
@@ -334,4 +345,74 @@ export function pairsBetween(
       );
     })
     .map((c) => `${c.a}~${c.b}`);
+}
+
+// ── P2 lane S: surface joins ──────────────────────────────────────────────────────────────────
+
+/** A surface join as `part>host` (piece keys). */
+export const surfacePairs = (graph: Pick<SeamGraph, 'chosen'>): string[] =>
+  graph.chosen
+    .filter((c) => c.kind === 'surface' && c.surface)
+    .map((c) => `${c.surface!.part}>${c.surface!.host}`)
+    .sort();
+
+/** The surface pass alone over the product geometry, with its guards switched by `opts`. */
+export function surfaceOnly(facts: SkeletonFacts, opts: SurfaceOptions): string[] {
+  const pieces = twins(facts.pieces.map(segmentPiece));
+  const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
+  return surfacePairs(surfaceSeams(pieces, copies, opts));
+}
+
+/** NEGATIVE CONTROL: the whole A3 pass on pieces whose marks were never read. */
+export function withoutMarks(facts: SkeletonFacts): SeamGraph {
+  const pieces = twins(facts.pieces.map(segmentPiece)).map((p) => ({ ...p, marks: [] }));
+  return matchSeams(pieces, facts);
+}
+
+/** Every chosen surface join with its evidence, for the listing. */
+export function surfaceLines(graph: SeamGraph): string[] {
+  return graph.chosen
+    .filter((c) => c.kind === 'surface' && c.surface)
+    .map(
+      (c) =>
+        `${c.surface!.part} on ${c.surface!.host} (mark ${c.surface!.mark}, fit ${c.surface!.fit}, score ${c.score}, entry ${c.b}) — ${c.evidence.rule}${c.ambiguousWith?.length ? ` · rivals ${c.ambiguousWith.map((q) => q.surface?.part).join(', ')}` : ''}`,
+    );
+}
+
+/**
+ * The pictogram of host + part (union/layout.ts): how far, in mm, the drawn part lies from the
+ * host's placement mark as drawn (mean over the mark), and whether it is drawn as a surface piece
+ * and not as a guess. The old placement (lower-right quadrant) misses by tens of mm.
+ */
+export function surfaceDrawn(
+  graph: SeamGraph,
+  host: string,
+  part: string,
+): { offMm: number; surface: boolean; approx: boolean } | null {
+  const c = graph.chosen.find((x) => x.surface?.host === host && x.surface.part === part);
+  const G = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  const mark = G.get(host)?.marks?.find((m) => m.id === c?.surface?.mark);
+  if (!c || !mark) return null;
+  const L = unionLayout([host, part], graph.chosen, G);
+  const at = (k: string) => L.placements.find((p) => p.pieceKey === k);
+  const h = at(host);
+  const q = at(part);
+  if (!h || !q) return null;
+  const ap = (T: number[], p: [number, number]): [number, number] => [
+    T[0] * p[0] + T[2] * p[1] + T[4],
+    T[1] * p[0] + T[3] * p[1] + T[5],
+  ];
+  const drawn = G.get(part)!.rs.map((p) => ap(q.T, p));
+  let sum = 0;
+  for (const m of mark.pts) {
+    const w = ap(h.T, m);
+    let best = Infinity;
+    for (const d of drawn) best = Math.min(best, Math.hypot(d[0] - w[0], d[1] - w[1]));
+    sum += best;
+  }
+  return {
+    offMm: sum / mark.pts.length,
+    surface: (L.surface ?? []).includes(part),
+    approx: !!q.approx,
+  };
 }
