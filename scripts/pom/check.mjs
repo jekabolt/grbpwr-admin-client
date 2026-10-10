@@ -6,14 +6,21 @@
 // piece facts). Every file: roles coverage, per-size POM table, an SVG/PNG sheet of the base size.
 //
 // Gates:
-//  G1 SS26-005 M: chest, HPS length, across shoulder, sleeve length, hem, neck width within ±5 mm of
-//     a HAND measurement made on the raw DXF by a different code path (the 09.10 probe's own DXF
-//     reader + hand-written definitions below), and the engine calls them exact;
+//  G1 TRUTH, SS26-005 M: chest, HPS length, CB length, across shoulder, sleeve length, hem, neck
+//     width within ±5 mm of numbers measured between FROZEN points — DXF vertices picked by hand
+//     from vertex-numbered renders (scripts/pom/fixtures/ss26-005-M.truth.json), checked against
+//     the raw file — AND the engine's exactness claim equals the fixture's `expect` for each;
+//  C1 CONSISTENCY (not truth): the same six from a second implementation (the 09.10 probe's DXF
+//     reader + its own corner finder) that shares the engine's DEFINITIONS (highest point = HPS /
+//     cap apex, lowest run = hem, hem-anchored panels) — it catches code bugs, not wrong
+//     definitions; G1 is what checks those;
 //  G2 Allsizes: every POM found in all sizes is monotonic XS → XL (≥ −1 mm per step);
 //  G3 roles ≥ 0.6 on ≥ 80 % of edges of every NAMED file (≥ 80 % of pieces carry a known kind);
 //  G4 blazer (unnamed pieces): every POM is «not found» — no guesses;
 //  G5 negative controls: shoulder↔hem swapped moves HPS length out of G1; neckline↔hem swapped
-//     makes it inexact (the HPS corner is lost) — both must turn G1 red.
+//     makes it inexact (the HPS corner is lost) — both must turn G1 red;
+//  G6 a symmetric piece whose contour starts 180° round in a graded size is never carried over by
+//     the first equal-cost edge order: it is placed by position or read again.
 // Plus a SANITY line (not a fit judgement): pattern chest/hip full − a fit model's body girth.
 //
 // Usage: node scripts/pom/check.mjs   (POM_PLANS=<tmp/plans dir>, POM_OUT=<out dir>, CHROME=<path>)
@@ -235,7 +242,7 @@ if (existsSync(chrome)) {
   console.log(`\nsheets: ${outDir}/<file>.png`);
 }
 
-// ── G1: hand measurement of SS26-005 M (independent code path) ────────────────────────────────
+// ── C1: second implementation of SS26-005 M (consistency, NOT truth) ──────────────────────────────
 // The 09.10 probe's own DXF reader (assembly-from-pattern/probe/dxf.mjs: raw tags → blocks →
 // sewing-line loop per piece, mm, y up), my own resample/corner finder, and definitions written by
 // hand after looking at the pattern: no lib/pom code, no seam graph, no edge roles.
@@ -432,7 +439,7 @@ console.log('\n=== GATES');
 const ss = results.ss26;
 const at = (rep, code, size = rep.baseSize) =>
   rep.sizes.find((s) => s.size === size)?.values.find((v) => v.code === code);
-const G1 = [
+const SIX = [
   ['chest', 'chest', (v) => v.halfMm],
   ['length-hps', 'hpsLength', (v) => v.valueMm],
   ['across-shoulder', 'across', (v) => v.valueMm],
@@ -440,31 +447,121 @@ const G1 = [
   ['hem', 'hem', (v) => v.halfMm],
   ['neck-width', 'neck', (v) => v.valueMm],
 ];
+
+// ── G1: frozen truth ─────────────────────────────────────────────────────────────────────────
+const truth = await (async () => {
+  const fx = JSON.parse(await readFile(resolve(here, 'fixtures/ss26-005-M.truth.json'), 'utf8'));
+  const probe = await import(
+    pathToFileURL(resolve(plans, 'assembly-from-pattern/probe/dxf.mjs')).href
+  );
+  const file = resolve(plans, fx.file);
+  if (!existsSync(file)) return null;
+  const blocks = probe.parseBlocks(probe.readTags(file)).blocks;
+  const raw = Object.fromEntries(probe.extractPieces(blocks, fx.size).map((p) => [p.id, p.seam]));
+  const moved = [];
+  const P = (name) => {
+    const q = fx.points[name];
+    const v = raw[q.piece][q.v];
+    if (Math.hypot(v[0] - q.xy[0], v[1] - q.xy[1]) > 0.5) moved.push(name);
+    return q.xy;
+  };
+  const D = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const ySeg = (a, b, x) => a[1] + ((x - a[0]) * (b[1] - a[1])) / (b[0] - a[0]);
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const hpsLen = (f) => {
+    const h = P(`${f}.hps`);
+    return h[1] - ySeg(P(`${f}.hemA`), P(`${f}.hemB`), h[0]);
+  };
+  const sleeveLen = (f) => {
+    const a = mid(P(`${f}.apexA`), P(`${f}.apexB`));
+    return a[1] - ySeg(P(`${f}.wristA`), P(`${f}.wristB`), a[0]);
+  };
+  const offR = Math.abs(fx.buttonLines.PLCK_R - P('PLCK_R.seam')[0]);
+  const offL = Math.abs(fx.buttonLines.PLCK_L - P('PLCK_L.seam')[0]);
+  const run = ({ piece, from, to }) => raw[piece].slice(from, to + 1);
+  const runLen = (r) => r.slice(1).reduce((s, p, i) => s + D(p, r[i]), 0);
+  const hem = (fx.hemRuns.chain.reduce((s, c) => s + runLen(run(c)), 0) + offR + offL) / 2;
+  // chest: hem corners meet (written convention), side seam tops frozen, widths on the raw loops.
+  const dy = {};
+  let prevRight = null;
+  for (const c of fx.hemRuns.chain) {
+    const r = run(c);
+    const [l, rr] =
+      r[0][0] < r[r.length - 1][0] ? [r[0], r[r.length - 1]] : [r[r.length - 1], r[0]];
+    dy[c.piece] = prevRight == null ? 0 : prevRight - l[1];
+    prevRight = rr[1] + dy[c.piece];
+  }
+  const tops = ['FP_2_L', 'BP_1_L', 'BP_2_R', 'FP_1_R'].map((k) => P(`${k}.sideTop`)[1] + dy[k]);
+  const Y = tops.reduce((s, y) => s + y, 0) / 4 - 25.4;
+  const width = (pts, y) => {
+    const xs = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i],
+        b = pts[(i + 1) % pts.length];
+      if ((y >= a[1] && y < b[1]) || (y >= b[1] && y < a[1]))
+        xs.push(a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
+    }
+    xs.sort((u, v) => u - v);
+    let w = 0;
+    for (let i = 0; i + 1 < xs.length; i += 2) w += xs[i + 1] - xs[i];
+    return w;
+  };
+  const chest =
+    (fx.hemRuns.chain.reduce((s, c) => s + width(raw[c.piece], Y - dy[c.piece]), 0) + offR + offL) /
+    2;
+  return {
+    expect: fx.expect,
+    moved,
+    chest,
+    hpsLength: (hpsLen('FRONT_R') + hpsLen('FRONT_L')) / 2,
+    across: D(P('BP.spR'), P('BP.spL')),
+    neck: D(P('BP.hpsR'), P('BP.hpsL')),
+    cb: P('BP.cbNeck')[1] - P('BP.cbHem')[1],
+    sleeve: (sleeveLen('SLV_M_R') + sleeveLen('SLV_M_L')) / 2,
+    hem,
+    offR,
+    offL,
+  };
+})();
+const TRUTH = [...SIX, ['length-cb', 'cb', (v) => v.valueMm]];
 const g1 = (values, label) => {
   let okAll = true;
-  for (const [code, hk, get] of G1) {
+  for (const [code, hk, get] of TRUTH) {
     const v = values.find((x) => x.code === code);
     const eng = v ? get(v) : null;
-    const d = eng == null ? null : eng - hand[hk];
-    const ok =
-      d != null &&
-      Math.abs(d) <= 5 &&
-      v.exactness !== 'not-found' &&
-      (code !== 'length-hps' || v.exactness === 'exact');
+    const d = eng == null ? null : eng - truth[hk];
+    const want = truth.expect[code];
+    const ok = d != null && Math.abs(d) <= 5 && v.exactness === want;
     if (!label)
       console.log(
-        `  ${ok ? 'ok  ' : 'FAIL'} G1 ${code.padEnd(16)} engine ${cm(eng)} cm  hand ${cm(hand[hk])} cm  Δ ${d == null ? '—' : d.toFixed(1)} mm  (${v?.exactness})`,
+        `  ${ok ? 'ok  ' : 'FAIL'} G1 ${code.padEnd(16)} engine ${cm(eng)} cm  truth ${cm(truth[hk])} cm  Δ ${d == null ? '—' : d.toFixed(1)} mm  claims ${v?.exactness}, expected ${want}`,
       );
     if (!ok) okAll = false;
   }
   return okAll;
 };
-if (hand && ss) {
-  const ok = g1(at(ss.report, 'chest') ? ss.report.sizes.find((s) => s.size === 'M').values : []);
-  if (!ok) bad++;
-  console.log(
-    `       hand: CF offsets ${hand.cfOff.toFixed(0)} mm, side seam tops ${hand.sides.map((y) => y.toFixed(0)).join(' / ')}`,
+const c1 = (values) => {
+  for (const [code, hk, get] of SIX) {
+    const v = values.find((x) => x.code === code);
+    const eng = v ? get(v) : null;
+    const d = eng == null ? null : eng - hand[hk];
+    gate(
+      d != null && Math.abs(d) <= 5,
+      `C1 ${code.padEnd(16)} engine ${cm(eng)} cm  2nd impl ${cm(hand[hk])} cm  Δ ${d == null ? '—' : d.toFixed(1)} mm`,
+    );
+  }
+};
+if (truth && hand && ss) {
+  gate(
+    truth.moved.length === 0,
+    `G1 fixture vertices still where they were frozen${truth.moved.length ? ` — moved: ${truth.moved.join(', ')}` : ''}`,
   );
+  const base = ss.report.sizes.find((s) => s.size === 'M').values;
+  if (!g1(base)) bad++;
+  console.log(
+    `       truth: CF offsets R ${truth.offR.toFixed(1)} / L ${truth.offL.toFixed(1)} mm (L has two button lines — the nearer taken)`,
+  );
+  c1(base);
   // G5 negative controls: the same G1 with roles swapped must fail.
   for (const [a, b] of [
     ['shoulder', 'hem'],
@@ -475,6 +572,9 @@ if (hand && ss) {
     const h = vals.find((v) => v.code === 'length-hps');
     gate(red, `G5 NEG ${a}↔${b}: G1 goes red (HPS length ${cm(h.valueMm)} cm, ${h.exactness})`);
   }
+  // G6: a symmetric strip (PLCK_R, a rectangle) starting 180° round in a graded copy.
+  const g6 = await quiet(() => mod.rotatedStartProbe(ss.loaded, 'PLCK_R'));
+  gate(g6.ok, `G6 PLCK_R with its contour start turned 180°: ${g6.how}`);
 } else gate(false, 'G1 SS26-005 data missing');
 
 // G2: monotonic across sizes (Allsizes gates; others reported).

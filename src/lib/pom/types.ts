@@ -79,6 +79,13 @@ export type RoleReading = {
   confidence: number;
   /** Which signal decided it, in words. */
   why: string;
+  /**
+   * What the reading rests on: a seam partner (`partner`); a fixed relation to a partner-backed
+   * edge — the run on the HPS end of a sewn shoulder, the free bottom run of a panel whose long
+   * sides are sewn (`anchored`); or shape / position / name alone (`shape`). A POM resting on a
+   * `shape` reading is never `exact`.
+   */
+  evidence: 'partner' | 'anchored' | 'shape';
 };
 
 export type PieceInfo = {
@@ -173,6 +180,8 @@ export type PomValue = {
   reason?: string;
   /** Extra readings (left/right, front/back, chord vs curve) in words. */
   detail?: string[];
+  /** Edges whose ROLES the value rests on (their evidence decides whether it can be exact). */
+  basis?: EdgeId[];
   /** The path the value was read along: landmarks, edges, and the lines to draw. */
   path: { landmarks: LandmarkPoint[]; edges: EdgeId[]; lines: PomLine[] };
 };

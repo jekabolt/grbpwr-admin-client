@@ -58,11 +58,100 @@ function feats(model: Model, g: PieceGeom): Feat[] {
   });
 }
 
+/** A reading whose reason names a seam partner rests on it; everything else starts as `shape`. */
+const PARTNER_WHY =
+  /^(sewn (to|onto) |closure with |CF seam to |bottom edge sewn to |straight top edge sewn to )/;
 const R = (role: EdgeRole, confidence: number, why: string): RoleReading => ({
   role,
   confidence: Math.round(confidence * 100) / 100,
   why,
+  evidence: PARTNER_WHY.test(why) ? 'partner' : 'shape',
 });
+
+/** Roles sewn to the same role on the other side. */
+const PAIRED: EdgeRole[] = [
+  'side',
+  'panel',
+  'inseam',
+  'outseam',
+  'shoulder',
+  'sleeve-seam',
+  'underarm',
+  'cb',
+  'cf',
+  'yoke-seam',
+];
+
+const SEWN_LONG: ReadonlySet<EdgeRole> = new Set([
+  'side',
+  'panel',
+  'cf',
+  'cb',
+  'sleeve-seam',
+  'inseam',
+  'outseam',
+  'strip-attach',
+]);
+
+/**
+ * Upgrade `shape` readings that hang on partner evidence: the neckline / armhole runs on either
+ * end of a sewn shoulder, the mirror of a sewn shoulder, and the free top / bottom run of a piece
+ * whose long sides are sewn (its orientation is then fixed by the seams, not by a guess).
+ */
+function settleEvidence(model: Model, out: Map<EdgeId, RoleReading>) {
+  // A seam between two edges that were each read as the same paired role (inseam to inseam, side
+  // to side) is partner evidence for both, however each was read.
+  for (const s of model.seams) {
+    if (s.kind === 'closure-not-seam') continue;
+    const ra = s.a.map((id) => out.get(id)?.role);
+    const rb = s.b.map((id) => out.get(id)?.role);
+    for (const r of PAIRED) {
+      if (!ra.includes(r) || !rb.includes(r)) continue;
+      for (const id of [...s.a, ...s.b]) {
+        const x = out.get(id);
+        if (x && x.role === r && x.evidence === 'shape')
+          out.set(id, {
+            ...x,
+            evidence: 'partner',
+            why: `${x.why}; sewn to an edge read as ${r} too`,
+          });
+      }
+    }
+  }
+  const strong = (id: string) => out.get(id) && out.get(id)!.evidence !== 'shape';
+  for (const g of model.geoms.values()) {
+    const sewnLong = g.edges.some((e) => {
+      const r = out.get(e.id);
+      return !!r && r.evidence === 'partner' && SEWN_LONG.has(r.role);
+    });
+    // Shoulders first: the walks below lean on them.
+    for (const pass of [0, 1]) {
+      for (const e of g.edges) {
+        const r = out.get(e.id);
+        if (!r || r.evidence !== 'shape') continue;
+        const ref = /(?:end of shoulder|mirror of shoulder) (\S+#\d+)/.exec(r.why)?.[1];
+        const isShoulderRef = r.role === 'shoulder';
+        if (pass === 0 && !isShoulderRef) continue;
+        if (pass === 1 && isShoulderRef) continue;
+        let up = false;
+        if (ref) up = !!strong(ref);
+        else if (/between the two shoulders/.test(r.why))
+          up = g.edges.filter((x) => out.get(x.id)?.role === 'shoulder').every((x) => strong(x.id));
+        else if (
+          /bottom-most run|bottom run|top run of the sleeve|top edge of the panel|top of a side panel|top of a panel without a shoulder|concave curve high on the panel/.test(
+            r.why,
+          )
+        )
+          up = sewnLong;
+        else if (/bottom edge of a yoke/.test(r.why))
+          up = g.edges.some(
+            (x) => out.get(x.id)?.role === 'shoulder' && out.get(x.id)!.evidence === 'partner',
+          );
+        if (up) out.set(e.id, { ...r, evidence: 'anchored' });
+      }
+    }
+  }
+}
 
 const groupOf = (k: PieceKind): 'front' | 'back' | 'side' | null =>
   k === 'front' ? 'front' : k === 'back' || k === 'yoke' ? 'back' : k === 'side' ? 'side' : null;
@@ -557,6 +646,7 @@ export function classifyEdges(model: Model): Map<EdgeId, RoleReading> {
       for (const e of g.edges) out.set(e.id, R('pocket-edge', 0.6, 'edge of a pocket piece'));
     else for (const e of g.edges) out.set(e.id, R('unknown', 0, info.why));
   }
+  settleEvidence(model, out);
   model.roles = out;
   return out;
 }

@@ -389,12 +389,138 @@ export function measureModel(m: Model, conv: GirthConvention): PomValue[] {
   const ctx: Ctx = { m, conv, out: new Map() };
   if (m.garment === 'top') measureTop(ctx);
   else measureBottom(ctx);
-  return POM_DEFS.filter((d) => d.garment === m.garment).map((d) => ({
-    code: d.code,
-    name: d.name,
-    method: d.method,
-    ...(ctx.out.get(d.code) ?? notFound('no rule produced it')),
-  }));
+  return POM_DEFS.filter((d) => d.garment === m.garment).map((d) =>
+    honest(m, {
+      code: d.code,
+      name: d.name,
+      method: d.method,
+      ...(ctx.out.get(d.code) ?? notFound('no rule produced it')),
+    }),
+  );
+}
+
+/**
+ * The two claims an `exact` value must survive: every edge role it rests on is backed by a seam
+ * partner (or hangs on one), and every contour it was read on is a sewing line, not a cut line.
+ */
+function honest(m: Model, v: PomValue): PomValue {
+  if (v.exactness === 'not-found') return v;
+  const pieces = new Set([
+    ...(v.basis ?? v.path.edges).map(pieceOf),
+    ...v.path.lines.map((l) => l.pieceKey),
+    ...v.path.landmarks.map((l) => l.pieceKey),
+  ]);
+  // The roles a value leans on: what it says it used, plus the landmark roles of its POM on the
+  // pieces it was read on.
+  const implied = [...pieces].flatMap((k) =>
+    (BASIS_ROLES[v.code] ?? []).flatMap((r) => edgesOf(m, k, r).map((e) => e.id)),
+  );
+  const basis = [...new Set([...(v.basis ?? v.path.edges), ...implied])];
+  const why: string[] = [];
+  const cut = [...pieces].filter((k) => m.contour.get(k) === 'cut');
+  if (cut.length)
+    why.push(`measured on the cut line of ${cut.join(', ')} — includes seam allowance`);
+  const weak = basis.filter((id) => (m.roles.get(id)?.evidence ?? 'shape') === 'shape');
+  if (weak.length && v.exactness === 'exact')
+    why.push(
+      `rests on edge roles read from shape / position only (${weak.slice(0, 4).join(', ')}${weak.length > 4 ? ' …' : ''})`,
+    );
+  if (!why.length) return { ...v, basis };
+  return {
+    ...v,
+    basis,
+    exactness: 'approx',
+    reason: [v.exactness === 'approx' ? v.reason : null, ...why].filter(Boolean).join('; '),
+  };
+}
+
+const BASIS_ROLES: Partial<Record<PomCode, EdgeRole[]>> = {
+  hem: ['hem', 'cf'],
+  'length-hps': ['shoulder', 'neckline', 'hem'],
+  'length-cb': ['cb', 'neckline', 'hem'],
+  'neck-width': ['shoulder', 'neckline'],
+  'neck-drop-front': ['shoulder', 'neckline'],
+  'neck-drop-back': ['shoulder', 'neckline', 'cb'],
+  'sleeve-length': ['cap', 'wrist'],
+  bicep: ['cap'],
+  'sleeve-opening': ['wrist'],
+  thigh: ['rise', 'inseam', 'outseam'],
+  knee: ['rise', 'inseam', 'outseam'],
+  hip: ['rise', 'inseam', 'outseam'],
+  'leg-opening': ['leg-hem'],
+};
+
+/**
+ * Darts drawn as two inner lines meeting at an apex (a V): the intake where the V crosses the
+ * union level Y, per piece, mm. Lines of other shapes are not read as darts.
+ */
+function dartIntake(m: Model, u: Union, keys: string[], Y: number) {
+  let mm = 0;
+  const lines: PomLine[] = [];
+  const where: string[] = [];
+  const folded: string[] = [];
+  for (const k of keys) {
+    const at = u.at.get(k);
+    if (!at) continue;
+    const y = Y - at.dy;
+    const ls = m.inner.get(k) ?? [];
+    const xAt = (l: Pt2[]) => {
+      for (let i = 1; i < l.length; i++) {
+        const a = l[i - 1];
+        const b = l[i];
+        if ((y >= a[1] && y <= b[1]) || (y >= b[1] && y <= a[1]))
+          return a[1] === b[1] ? a[0] : a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
+      }
+      return null;
+    };
+    for (let i = 0; i < ls.length; i++) {
+      for (let j = i + 1; j < ls.length; j++) {
+        const A = ls[i];
+        const B = ls[j];
+        const ends = [A[0], A[A.length - 1]];
+        const apex = ends.find((p) => [B[0], B[B.length - 1]].some((q) => dist(p, q) <= 3));
+        if (!apex) continue;
+        const xa = xAt(A);
+        const xb = xAt(B);
+        if (xa == null || xb == null || Math.abs(xa - xb) < 1) continue;
+        // A dart: two SHORT legs opening at an angle from an apex. Long near-parallel lines that
+        // meet (a pleat drawn full length) take up fabric that is folded, not sewn away — it is in
+        // the width, and the value says so.
+        const h = bboxOf(ringOf(m, k)).h;
+        const legLen = (l: Pt2[]) => dist(l[0], l[l.length - 1]);
+        const far = (l: Pt2[]) =>
+          dist(l[0], apex) > dist(l[l.length - 1], apex) ? l[0] : l[l.length - 1];
+        const va: Pt2 = [far(A)[0] - apex[0], far(A)[1] - apex[1]];
+        const vb: Pt2 = [far(B)[0] - apex[0], far(B)[1] - apex[1]];
+        const angle =
+          (Math.acos(
+            Math.max(
+              -1,
+              Math.min(
+                1,
+                (va[0] * vb[0] + va[1] * vb[1]) / (Math.hypot(...va) * Math.hypot(...vb) || 1),
+              ),
+            ),
+          ) *
+            180) /
+          Math.PI;
+        if (legLen(A) > 0.5 * h || legLen(B) > 0.5 * h || angle < 3) {
+          folded.push(`${k} ${Math.abs(xa - xb).toFixed(0)} mm`);
+          continue;
+        }
+        mm += Math.abs(xa - xb) * (m.info.get(k)?.girthMult ?? 1);
+        lines.push({
+          pieceKey: k,
+          pts: [
+            [xa, y],
+            [xb, y],
+          ],
+        });
+        where.push(`${k} ${Math.abs(xa - xb).toFixed(0)} mm`);
+      }
+    }
+  }
+  return { mm, lines, where, folded };
 }
 
 const usable = (m: Model, key: string) => {
@@ -465,15 +591,19 @@ function measureTop(ctx: Ctx) {
     const cf = edgesOf(m, f, 'cf');
     if (!cf.length || !info.hand) continue;
     const ex = mean(cf.flatMap((e) => e.pts.map((p) => p[0])));
-    const own = drillColumns(m, f)
+    const owns = drillColumns(m, f)
       .filter((x) => Math.abs(x - ex) <= 80)
-      .sort((a, b) => Math.abs(a - ex) - Math.abs(b - ex))[0];
+      .sort((a, b) => Math.abs(a - ex) - Math.abs(b - ex));
+    const own = owns[0];
     if (own != null) {
       cfOffsets.push({
         key: f,
         mm: -Math.abs(own - ex),
-        resolved: true,
-        how: `${f}: button line ${Math.abs(own - ex).toFixed(0)} mm inside the front edge`,
+        resolved: owns.length === 1,
+        how:
+          owns.length === 1
+            ? `${f}: button line ${Math.abs(own - ex).toFixed(0)} mm inside the front edge`
+            : `${f}: ${owns.length} button lines — the one ${Math.abs(own - ex).toFixed(0)} mm inside the edge taken as CF`,
       });
       continue;
     }
@@ -484,16 +614,18 @@ function measureTop(ctx: Ctx) {
     if (plk) {
       const att = (m.geoms.get(plk)?.edges ?? []).filter((e) => ok(m, e.id, 'strip-attach'));
       const ax = att.length ? mean(att.flatMap((e) => e.pts.map((p) => p[0]))) : null;
-      const col =
-        ax == null
-          ? undefined
-          : drillColumns(m, plk).sort((a, b) => Math.abs(a - ax) - Math.abs(b - ax))[0];
+      const cols =
+        ax == null ? [] : drillColumns(m, plk).sort((a, b) => Math.abs(a - ax) - Math.abs(b - ax));
+      const col = cols[0];
       if (ax != null && col != null) {
         cfOffsets.push({
           key: f,
           mm: Math.abs(col - ax),
-          resolved: true,
-          how: `${f}: button line on ${plk}, ${Math.abs(col - ax).toFixed(0)} mm beyond the front edge`,
+          resolved: cols.length === 1,
+          how:
+            cols.length === 1
+              ? `${f}: button line on ${plk}, ${Math.abs(col - ax).toFixed(0)} mm beyond the front edge`
+              : `${f}: ${cols.length} button lines on ${plk} — the one ${Math.abs(col - ax).toFixed(0)} mm from its seam taken as CF`,
         });
         continue;
       }
@@ -506,12 +638,19 @@ function measureTop(ctx: Ctx) {
     });
   }
   const cfSum = cfOffsets.reduce((s, c) => s + c.mm, 0);
+  const cfEdges = cfOffsets.flatMap((c) => edgesOf(m, c.key, 'cf').map((e) => e.id));
   const cfReasons = cfOffsets.filter((c) => !c.resolved).map((c) => c.how);
 
   // Armhole bottom: top of the side seams.
-  let ahb: { y: number; exact: boolean; marks: LandmarkPoint[]; detail: string[] } | null = null;
+  let ahb: {
+    y: number;
+    exact: boolean;
+    marks: LandmarkPoint[];
+    detail: string[];
+    ids: EdgeId[];
+  } | null = null;
   if (u) {
-    const tops: { y: number; mark: LandmarkPoint }[] = [];
+    const tops: { y: number; mark: LandmarkPoint; ids: EdgeId[] }[] = [];
     for (const s of m.seams) {
       if (s.kind === 'closure-not-seam') continue;
       const sideA = s.a.filter((id) => ok(m, id, 'side'));
@@ -533,7 +672,7 @@ function measureTop(ctx: Ctx) {
           `top of the side seam ${sideA.join('+')}~${sideB.join('+')}`,
         );
       }
-      if (ys.length && mark) tops.push({ y: mean(ys), mark });
+      if (ys.length && mark) tops.push({ y: mean(ys), mark, ids: [...sideA, ...sideB] });
     }
     if (tops.length) {
       const ys = tops.map((t) => t.y);
@@ -541,13 +680,16 @@ function measureTop(ctx: Ctx) {
         y: mean(ys),
         exact: true,
         marks: tops.map((t) => t.mark),
+        ids: tops.flatMap((t) => t.ids),
         detail:
           tops.length > 1 && Math.max(...ys) - Math.min(...ys) > POM.pairDiffMm
             ? [`side seam tops differ by ${(Math.max(...ys) - Math.min(...ys)).toFixed(1)} mm`]
             : [],
       };
     } else {
-      const arm = body.flatMap((k) => edgesOf(m, k, 'armhole').map((e) => ({ k, p: lowEnd(e) })));
+      const arm = body.flatMap((k) =>
+        edgesOf(m, k, 'armhole').map((e) => ({ k, p: lowEnd(e), id: e.id })),
+      );
       if (arm.length) {
         const lo = arm.reduce((a, b) =>
           b.p[1] + u.at.get(b.k)!.dy < a.p[1] + u.at.get(a.k)!.dy ? b : a,
@@ -555,6 +697,7 @@ function measureTop(ctx: Ctx) {
         ahb = {
           y: lo.p[1] + u.at.get(lo.k)!.dy,
           exact: false,
+          ids: [lo.id],
           marks: [
             lp('armhole-bottom', lo.k, lo.p, 'approx', 'lowest armhole point (no side seam read)'),
           ],
@@ -564,6 +707,24 @@ function measureTop(ctx: Ctx) {
     }
   }
 
+  // Pleats / gathers below a yoke: the back's yoke seam is longer than the yoke's — that fabric is
+  // in every width read below it, folded or not; the pattern does not say which.
+  const pleats: string[] = [];
+  for (const s of [...m.seams.filter((x) => x.kind !== 'closure-not-seam'), ...extra]) {
+    const ys = [s.a, s.b].find((side) =>
+      side.every((id) => ok(m, id, 'yoke-seam') && m.info.get(pieceOf(id))?.kind === 'yoke'),
+    );
+    const bs = [s.a, s.b].find((side) =>
+      side.every((id) => ok(m, id, 'yoke-seam') && m.info.get(pieceOf(id))?.kind === 'back'),
+    );
+    if (!ys || !bs) continue;
+    const ly = ys.reduce((t, id) => t + m.edges.get(id)!.lenMm, 0);
+    const lb = bs.reduce((t, id) => t + m.edges.get(id)!.lenMm, 0);
+    if (lb - ly > 10)
+      pleats.push(
+        `${(lb - ly).toFixed(0)} mm of pleat / gather under the yoke (${bs.join('+')} ${lb.toFixed(0)} vs ${ys.join('+')} ${ly.toFixed(0)} mm) is included`,
+      );
+  }
   // A girth needs the whole body: a front and a back, and both hands of a front cut in halves.
   const halves = (ks: string[]) => {
     const hands = new Set(ks.map((k) => m.info.get(k)!.hand));
@@ -596,10 +757,17 @@ function measureTop(ctx: Ctx) {
     out.set('chest', notFound('armhole bottom not found: no side seam and no armhole edge read'));
   else {
     const Y = ahb.y - POM.inchMm;
-    const { width, lines } = levelLines(m, u, body, Y);
+    const lv = levelLines(m, u, body, Y);
+    const dart = dartIntake(m, u, body, Y);
+    const width = lv.width - dart.mm;
+    const lines = [...lv.lines, ...dart.lines];
     const reasons = [
       ...reasonsBody,
       ...cfReasons,
+      ...pleats,
+      ...(dart.folded.length
+        ? [`pleat lines cross the level (${dart.folded.join(', ')}) — the pleat is included`]
+        : []),
       ...(ahb.exact ? [] : ['armhole bottom read from the lowest armhole point']),
     ];
     out.set('chest', {
@@ -609,8 +777,10 @@ function measureTop(ctx: Ctx) {
       detail: [
         ...ahb.detail,
         ...cfOffsets.filter((c) => c.resolved).map((c) => c.how),
-        `panels at the level: ${lines.length}`,
+        ...(dart.mm ? [`dart intake subtracted: ${dart.where.join(', ')}`] : []),
+        `panels at the level: ${lv.lines.length}`,
       ],
+      basis: [...ahb.ids, ...cfEdges],
       path: { landmarks: ahb.marks, edges: [], lines },
     });
     // Waist: narrowest girth between chest and hem, if the pattern is shaped there.
@@ -629,11 +799,20 @@ function measureTop(ctx: Ctx) {
         scan[scan.length - 1].w - min.w >= 10;
       if (shaped) {
         const wl = levelLines(m, u, body, min.y);
+        const wd = dartIntake(m, u, body, min.y);
         out.set('waist', {
-          ...girth(min.w + cfSum, conv),
+          ...girth(min.w - wd.mm + cfSum, conv),
           exactness: 'approx',
-          reason: `narrowest level, ${(ahb.y - min.y).toFixed(0)} mm below the armhole bottom (no waist mark in the pattern)`,
-          path: { landmarks: [], edges: [], lines: wl.lines },
+          reason: [
+            `narrowest level, ${(ahb.y - min.y).toFixed(0)} mm below the armhole bottom (no waist mark in the pattern)`,
+            ...pleats,
+            ...(wd.folded.length
+              ? [`pleat lines cross the level (${wd.folded.join(', ')}) — included`]
+              : []),
+          ].join('; '),
+          detail: wd.mm ? [`dart intake subtracted: ${wd.where.join(', ')}`] : [],
+          basis: [...ahb.ids, ...cfEdges],
+          path: { landmarks: [], edges: [], lines: [...wl.lines, ...wd.lines] },
         });
       } else
         out.set(

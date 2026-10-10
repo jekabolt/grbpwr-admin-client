@@ -25,6 +25,7 @@ import { classifyEdges } from './roles';
 import { transferModel } from './sizes';
 import type { GirthConvention, PomReport, PomValue, SizePoms } from './types';
 import { grainRotation, rotatePt, uprightGeom, type Upright } from './upright';
+import { contourSource, innerLines, type ContourSource } from './provenance';
 
 /** Lines and landmarks back from the upright frame to each piece's own (PieceGeom) frame. */
 function toPieceFrame(values: PomValue[], model: Model): PomValue[] {
@@ -59,12 +60,19 @@ export function baseModel(facts: SkeletonFacts, graph: SeamGraph, size: string):
   const geoms = new Map<string, PieceGeom>();
   const upright = new Map<string, Upright>();
   const drills = new Map<string, Pt2[]>();
+  const contour = new Map<string, ContourSource>();
+  const inner = new Map<string, Pt2[][]>();
   for (const g of graph.pieces) {
     const piece = inputs.get(g.pieceKey)?.piece;
     const { geom, up } = uprightGeom(g, grainRotation(piece));
     geoms.set(g.pieceKey, geom);
     upright.set(g.pieceKey, up);
     drills.set(g.pieceKey, piece ? drillPoints(piece).map((p) => rotatePt(p, up.deg, up.c)) : []);
+    contour.set(g.pieceKey, contourSource(piece).source);
+    inner.set(
+      g.pieceKey,
+      innerLines(piece).map((l) => l.map((p) => rotatePt(p, up.deg, up.c))),
+    );
   }
   const model: Model = {
     size,
@@ -76,6 +84,8 @@ export function baseModel(facts: SkeletonFacts, graph: SeamGraph, size: string):
     roles: new Map(),
     drills,
     upright,
+    contour,
+    inner,
     warnings: [...graph.warnings],
   };
   classifyEdges(model);
@@ -158,6 +168,7 @@ export { layoutUnion, fitSeam } from './union';
 export { transferModel } from './sizes';
 export { readPieces } from './pieces';
 export { grainRotation, uprightGeom } from './upright';
+export { contourSource, innerLines } from './provenance';
 export * from './dictionary';
 export * from './types';
 export type { Model, ModelSeam } from './model';

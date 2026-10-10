@@ -16,6 +16,8 @@ import type {
 } from '../../src/lib/assembly-skeleton/types';
 import {
   baseModel,
+  innerLines,
+  transferModel,
   measurePattern,
   measureModel,
   pomsToDictionary,
@@ -24,7 +26,7 @@ import {
   type PomReport,
   type PomValue,
 } from '../../src/lib/pom';
-import { bboxOf } from '../../src/lib/pom/geom';
+import { bboxOf, meanX, meanY } from '../../src/lib/pom/geom';
 
 export { pomsToDictionary, compareToSizeChart };
 
@@ -230,6 +232,12 @@ export function renderSheet(
     parts.push(
       `<polygon points="${g.rs.map((p) => P(g.pieceKey, p)).join(' ')}" fill="${info.lining ? '#f3f0ff' : '#f4f4f4'}" stroke="none"/>`,
     );
+    // Inner open lines (darts / pleats / placement), in the piece's own frame.
+    const dto = l.facts.pieces.find((p) => p.pieceKey === g.pieceKey)?.piece;
+    for (const ln of innerLines(dto))
+      parts.push(
+        `<polyline points="${ln.map((p) => P(g.pieceKey, p)).join(' ')}" fill="none" stroke="#999" stroke-width="0.8"/>`,
+      );
     parts.push(
       `<text x="${(o.x + bb.x0 * S).toFixed(0)}" y="${(o.y - bb.y1 * S - 8).toFixed(0)}" font-size="11" font-weight="600">${esc(g.pieceKey)} <tspan font-weight="400" fill="#666">${info.kind}${info.layerOf ? ` = layer of ${esc(info.layerOf)}` : ''}</tspan></text>`,
     );
@@ -282,4 +290,66 @@ export function renderSheet(
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${maxW + pad}" height="${sheetH}" font-family="Helvetica, Arial"><text x="${pad}" y="28" font-size="16" font-weight="700">${esc(title)} · size ${esc(report.baseSize)} · ${report.garment} · girths ${report.convention} (${report.conventionSource})</text><text x="${pad}" y="46" font-size="11" fill="#666">edges coloured by role (dashed grey = confidence &lt; 0.6); thick lines = POM paths (dashed = approx); dots = landmarks; flat pattern, seam lines</text>${parts.join('')}</svg>`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font:12px Helvetica,Arial;background:#fff}table{border-collapse:collapse;margin:8px 26px}td{padding:2px 8px;border-bottom:1px solid #eee;vertical-align:top}</style></head><body>${svg}<table>${legend.join('')}</table></body></html>`;
   return { html, w: maxW + pad + 20, h: sheetH + base.values.length * 22 + 40 };
+}
+
+/**
+ * G6: a graded copy of the base in which `key`'s contour starts half way round (a symmetric strip
+ * then fits its base edges in two orders of equal length cost). Every base edge's role must land
+ * on the edge at the SAME place in the copy — by position, or by reading the piece again.
+ */
+export function rotatedStartProbe(l: Loaded, key: string): { ok: boolean; how: string } {
+  const graph = readSeamGraph(l.facts);
+  const base = baseModel(l.facts, graph, l.baseSize);
+  const pieces = l.facts.pieces.map((p) => {
+    if (p.pieceKey !== key) return p;
+    const n = p.piece.poly.length;
+    const h = Math.floor(n / 2);
+    return {
+      ...p,
+      piece: { ...p.piece, poly: [...p.piece.poly.slice(h), ...p.piece.poly.slice(0, h)] },
+    };
+  });
+  const { model, placedBy } = transferModel(base, 'rot', pieces);
+  const bg = base.geoms.get(key)!;
+  const sg = model.geoms.get(key)!;
+  if (
+    bg.edges[0].pts[0][0] === sg.edges[0].pts[0][0] &&
+    bg.edges[0].pts[0][1] === sg.edges[0].pts[0][1]
+  )
+    return {
+      ok: false,
+      how: 'the rotation did not move the contour start — probe is not testing anything',
+    };
+  const norm = (g: typeof bg) => {
+    const bb = bboxOf(g.rs);
+    return (e: (typeof bg.edges)[number]) => [
+      (meanX(e.pts) - bb.x0) / bb.w,
+      (meanY(e.pts) - bb.y0) / bb.h,
+    ];
+  };
+  const nb = norm(bg);
+  const ns = norm(sg);
+  const wrong: string[] = [];
+  for (const e of bg.edges) {
+    const p = nb(e);
+    const twin = [...sg.edges].sort((a, b) => {
+      const qa = ns(a);
+      const qb = ns(b);
+      return Math.hypot(qa[0] - p[0], qa[1] - p[1]) - Math.hypot(qb[0] - p[0], qb[1] - p[1]);
+    })[0];
+    const want = base.roles.get(e.id)?.role;
+    const got = model.roles.get(twin.id)?.role;
+    if (want !== got) wrong.push(`${e.id} ${want} → ${twin.id} ${got}`);
+  }
+  const by = placedBy[key];
+  // The hazard is a length-only choice between equal orders: it must not be how this piece was placed.
+  const ok = wrong.length === 0 && by !== 'length';
+  return {
+    ok,
+    how: wrong.length
+      ? `roles moved: ${wrong.join('; ')}`
+      : by === 'length'
+        ? 'placed by length cost alone between equal orders — the tie went undetected'
+        : `equal-length orders detected, ${by === 'position' ? 'placed by edge position' : 'read again'}; every role stays in place`,
+  };
 }

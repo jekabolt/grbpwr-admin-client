@@ -118,6 +118,8 @@ export type MeasurementUnit =
   | 'cm'
   | string;
 
+// TECH_CARD_MEASUREMENT_UNIT_UNKNOWN (and anything not CM) reads as millimetres: the proto documents
+// UNKNOWN as MM, and the tech card's own schema defaults a missing unit to MM (schema.ts).
 export const unitToMm = (unit: MeasurementUnit) => (/cm$/i.test(unit) ? 10 : 1);
 
 /** One cell of the card's chart: the size as the file / dictionary names it, the measurement name. */

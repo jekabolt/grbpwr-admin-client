@@ -6,6 +6,7 @@ import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import type { Edge, EdgeId, PieceGeom, Pt2, SeamGraph } from 'lib/assembly-skeleton/types';
 import type { GarmentKind, PieceInfo, RoleReading } from './types';
 import type { Upright } from './upright';
+import type { ContourSource } from './provenance';
 
 export type ModelSeam = {
   a: EdgeId[];
@@ -25,6 +26,10 @@ export type Model = {
   drills: Map<string, Pt2[]>;
   /** Rotation that stood each piece upright (grain vertical); the model's geometry is upright. */
   upright: Map<string, Upright>;
+  /** Which line each contour is: the sewing line, or the cut line (allowance included). */
+  contour: Map<string, ContourSource>;
+  /** Open inner lines per piece (darts, pleats, placement), upright mm. */
+  inner: Map<string, Pt2[][]>;
   warnings: string[];
 };
 
