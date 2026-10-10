@@ -128,6 +128,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `light grey only (rgb ${e.rgb.join(',')}) — background or a cut line?`;
           case 'seam-offset':
             return `${e.offsetMm} mm inside the cut line`;
+          case 'faces':
+            return `closes ${e.pieces} outline${e.pieces === 1 ? '' : 's'}${e.cues.length > 1 ? ` · ${e.cues.slice(1).join(' · ')}` : ''}`;
+          case 'inside-faces':
+            return `inside the outlines`;
+          case 'face-stray':
+            return `not an outline: ${e.why}`;
         }
       })
       .join(' · ');
@@ -340,7 +346,11 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                             title={
                               c.evidence.some((x) => x.kind === 'colour-only')
                                 ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
-                                : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
+                                : c.evidence.some((x) => x.kind === 'face-stray')
+                                  ? `${fmtPct(c.confidence, 0)} sure — these lines close no outline (strays, lettering, a watermark); set aside unless one is a piece line`
+                                  : c.evidence.some((x) => x.kind === 'faces')
+                                    ? `${fmtPct(c.confidence, 0)} sure — these lines close the outlines, but only that says so; confirm they are the cut lines`
+                                    : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
                             }
                           >
                             ! confirm

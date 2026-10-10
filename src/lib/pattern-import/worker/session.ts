@@ -246,6 +246,8 @@ export class Session {
   private cleanEdits: PageMaskEdit[] = [];
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
+  /** A0.3: sheet path ids the sheet pass (8b) offers and the operator did not take. */
+  private sheetOffered = new Set<number>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -823,7 +825,8 @@ export class Session {
       // A8 8b: the sheet-wide pass (a watermark the tile borders cut); masked texts leave the sheet
       ctx.checkCancel();
       // the paths a page item offers (a stroke-text suggestion) are not offered again
-      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc);
+      this.sheetOffered = new Set();
+      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc, this.sheetOffered);
       sheet = { ...sheet, texts: sheet.texts.filter((t) => !t.background) };
       const byKind = new Map<BackgroundKind, typeof sheet.paths>();
       for (const p of sheet.paths) {
@@ -865,10 +868,17 @@ export class Session {
       set = this.fast.chains;
     } else {
       ctx.checkCancel();
+      // A0.3: what the clean stage offers as background (and the operator did not take) is
+      // evidence for the legend's stray row
+      const offeredPaths = new Set(
+        sheet.paths
+          .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
+          .map((p) => p.id),
+      );
       set = buildChainsDetailed(
         sheet,
         { ...input.opts },
-        { extraTexts: this.docTexts, fileNames: this.fileNames },
+        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths },
         (d, t, n) => {
           ctx.checkCancel();
           ctx.progress(d, t, n);
