@@ -15,6 +15,7 @@ import type {
   CardSize,
   Chain,
   ChainRole,
+  ChainSet,
   DerivedEdge,
   DraftScopeTarget,
   FoldFeature,
@@ -23,6 +24,7 @@ import type {
   GrainFeature,
   InternalFeature,
   LineClass,
+  PieceCandidate,
   ManifestSize,
   ManifestSource,
   NotchFeature,
@@ -33,7 +35,7 @@ import type {
   SizeRun,
   WriteJob,
 } from 'lib/pattern-import/types';
-import { bandCutSupport } from 'lib/pattern-import/semantics/build';
+import { bandCutSupport, slitNotches } from 'lib/pattern-import/semantics/build';
 import { findSpikes, stripSpikes } from 'lib/pattern-import/spikes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { writeDxfDetailed, writeScopes } from 'lib/pattern-import/write';
@@ -1971,41 +1973,183 @@ export async function main(opts: { plans: string }): Promise<number> {
       'kept',
     );
 
-    // the writer: a PCK whose cut carries a 12 mm needle on its bottom edge is written without it
+    // the writer (last defence, Codex r5a): what it strips is never silently lost — a stretch that
+    // goes in and out ≥ notchMinMm is written as a notch at that point (warned), a smaller one is
+    // only removed (warned)
     const clean = pckSpec();
-    const spiked = pckSpec();
-    const c0 = spiked.sizes[0].cut;
-    const i0 = c0.findIndex((p, k) => {
-      const q = c0[(k + 1) % c0.length];
-      return Math.abs(p.y) < 1e-9 && Math.abs(q.y) < 1e-9;
-    });
-    const a = c0[i0];
-    const b = c0[(i0 + 1) % c0.length];
-    const mx = (a.x + b.x) / 2;
-    spiked.sizes[0] = {
-      ...spiked.sizes[0],
-      cut: [
-        ...c0.slice(0, i0 + 1),
-        { x: mx, y: 0 },
-        { x: mx, y: -5 },
-        { x: mx, y: -12 },
-        { x: mx, y: -6.5 },
-        { x: mx, y: 0 },
-        ...c0.slice(i0 + 1),
-      ],
+    const notchesOf = (r: {
+      detail: { plan: { blocks: { identity: string; notches: unknown[] }[] } };
+    }) => r.detail.plan.blocks.find((x) => x.identity === 'PCK')?.notches.length ?? -1;
+    const n0 = notchesOf(await writeAndGate(job(MAIN, [clean]), gateCtx([clean])));
+    const writeWith = async (tipY: number[]) => {
+      const sp = pckSpec();
+      const c0 = sp.sizes[0].cut;
+      const i0 = c0.findIndex((p, k) => {
+        const q = c0[(k + 1) % c0.length];
+        return Math.abs(p.y) < 1e-9 && Math.abs(q.y) < 1e-9;
+      });
+      const mx = (c0[i0].x + c0[(i0 + 1) % c0.length].x) / 2;
+      sp.sizes[0] = {
+        ...sp.sizes[0],
+        cut: [
+          ...c0.slice(0, i0 + 1),
+          { x: mx, y: 0 },
+          ...tipY.map((y) => ({ x: mx, y })),
+          { x: mx, y: 0 },
+          ...c0.slice(i0 + 1),
+        ],
+      };
+      const w = await writeAndGate(job(MAIN, [sp]), gateCtx([clean]));
+      const blk = w.detail.plan.blocks.find((x) => x.identity === 'PCK');
+      return { w, blk };
     };
-    const w = await writeAndGate(job(MAIN, [spiked]), gateCtx([clean]));
-    const blk = w.detail.plan.blocks.find((x) => x.identity === 'PCK');
-    ck(
-      !!blk &&
-        !findSpikes(blk.cut).length &&
-        Math.min(...blk.cut.map((p) => p.y)) >=
-          Math.min(...clean.sizes[0].cut.map((p) => p.y)) - 1e-6 &&
-        w.detail.warnings.some((x) => /zero-width spike/.test(x)) &&
-        w.report.passed,
-      'writer: a 12 mm needle on the cut line is not written (warned), the gate passes',
-      `${blk?.cut.length} vertices · ${w.detail.warnings.filter((x) => /spike/.test(x)).join(' | ')} · ${summary(w.report)}`,
-    );
+    {
+      // a 3 mm slit drawn into the cut line (in and out, along the inward normal)
+      const { w, blk } = await writeWith([1.5, 3, 1.2]);
+      const g5 = checkOf(w.report, 'G5-features')[0];
+      ck(
+        !!blk &&
+          !findSpikes(blk.cut).length &&
+          blk.notches.length === n0 + 1 &&
+          blk.notches.some((n) => Math.abs(n.depthMm - 3) < 1e-6) &&
+          g5.ok &&
+          w.report.passed &&
+          w.detail.warnings.some((x) => /written as notch/.test(x)),
+        'writer: a 3 mm slit in the cut line → no needle, one more layer-4 notch (3 mm) there, G5 + gate pass',
+        `${blk?.cut.length} vertices · notches ${n0} → ${blk?.notches.length} · ${w.detail.warnings.filter((x) => /spike/.test(x)).join(' | ')} · ${summary(w.report)}`,
+      );
+    }
+    {
+      // a 12 mm needle: a notch too (clamped to notchMaxMm, warned), never silently gone
+      const { w, blk } = await writeWith([-5, -12, -6.5]);
+      ck(
+        !!blk &&
+          !findSpikes(blk.cut).length &&
+          blk.notches.length === n0 + 1 &&
+          w.detail.warnings.some((x) => /written as notch/.test(x)) &&
+          w.detail.warnings.some((x) => /clamped/.test(x)) &&
+          w.report.passed,
+        'writer: a 12 mm needle → stripped, written as a notch (clamped, warned), gate passes',
+        `notches ${n0} → ${blk?.notches.length} · ${w.detail.warnings.filter((x) => /spike|clamp/.test(x)).join(' | ')}`,
+      );
+    }
+    {
+      // a 1 mm overshoot-like needle: under notchMinMm → removed, warned, no notch
+      const { w, blk } = await writeWith([-1]);
+      ck(
+        !!blk &&
+          !findSpikes(blk.cut).length &&
+          blk.notches.length === n0 &&
+          w.detail.warnings.some((x) => /zero-width spike/.test(x) && !/notch/.test(x)) &&
+          w.report.passed,
+        'writer: a 1 mm needle (< notchMinMm) → removed and warned, no notch',
+        `notches ${n0} → ${blk?.notches.length} · ${w.detail.warnings.filter((x) => /spike/.test(x)).join(' | ')}`,
+      );
+    }
+    // semantics: a slit is a notch only when THIS piece's own cut-line chain draws it
+    {
+      const SQS: PtMm[] = [
+        { x: 0, y: 0 },
+        { x: 50, y: 0 },
+        { x: 50, y: 3 },
+        { x: 50, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ];
+      const chainOf = (id: number, pts: PtMm[], closed = false): Chain => ({
+        id,
+        pts,
+        closed,
+        ranges: [],
+        motif: null,
+        style: 1,
+        lengthMm: 0,
+      });
+      const clsOf = (id: number, role: ChainRole, chains: number[]): LineClass => ({
+        id,
+        role,
+        sizeLabel: role === 'size' ? 'M' : null,
+        chains,
+        totalLengthMm: 0,
+        evidence: [],
+        confidence: 1,
+      });
+      const runOf: SizeRun = {
+        encoding: 'declared-dash',
+        sizes: [
+          { label: 'S', rank: 0, classId: 10, file: null },
+          { label: 'M', rank: 1, classId: 11, file: null },
+        ],
+        evidence: [],
+      };
+      const cand = (walls: number[]) => ({ rank: 1, walls }) as unknown as PieceCandidate;
+      // the cut line itself goes in and out: one chain of size M, the whole outline with its slit
+      {
+        const st = stripSpikes(SQS);
+        const set: ChainSet = {
+          chains: [chainOf(0, SQS, true)],
+          classes: [clsOf(11, 'size', [0])],
+          bundles: [],
+          orphans: [],
+          warnings: [],
+        };
+        const r = slitNotches(st.excursions, cand([0]), set, runOf);
+        ck(
+          st.spikes > 0 &&
+            !findSpikes(st.ring).length &&
+            r.notches.length === 1 &&
+            Math.hypot(r.notches[0].at.x - 50, r.notches[0].at.y) < 1e-6 &&
+            Math.abs(r.notches[0].depthMm - 3) < 1e-6,
+          "semantics: a 3 mm slit drawn by the piece's own cut line → a 3 mm notch at (50, 0)",
+          JSON.stringify(r.notches.map((n) => ({ at: n.at, depth: n.depthMm }))),
+        );
+      }
+      // the outline ran up a bundle of INTERNAL lines and back: stripped, no notch
+      {
+        const st = stripSpikes(SQS);
+        const set: ChainSet = {
+          chains: [
+            chainOf(0, [SQS[0], SQS[1], SQS[4], SQS[5], SQS[6]], true),
+            chainOf(1, [
+              { x: 50, y: -1 },
+              { x: 50, y: 4 },
+            ]),
+            chainOf(2, [
+              { x: 50.1, y: -1 },
+              { x: 50.1, y: 4 },
+            ]),
+          ],
+          classes: [clsOf(11, 'size', [0]), clsOf(12, 'internal', [1, 2])],
+          bundles: [],
+          orphans: [],
+          warnings: [],
+        };
+        const r = slitNotches(st.excursions, cand([0, 1, 2]), set, runOf);
+        ck(
+          st.spikes > 0 && r.notches.length === 0 && r.dropped.length === 1,
+          'semantics: a spike along a bundle of internal lines → stripped, no notch',
+          `${r.notches.length} notch(es), ${r.dropped.length} dropped`,
+        );
+      }
+      // another size's line draws it: not this piece's cut line → no notch
+      {
+        const st = stripSpikes(SQS);
+        const set: ChainSet = {
+          chains: [chainOf(0, SQS, true)],
+          classes: [clsOf(10, 'size', [0])],
+          bundles: [],
+          orphans: [],
+          warnings: [],
+        };
+        const r = slitNotches(st.excursions, cand([0]), set, runOf);
+        ck(
+          r.notches.length === 0,
+          "semantics: another size's line draws the slit → no notch",
+          `${r.notches.length}`,
+        );
+      }
+    }
 
     // the gate: a needle put back into the written file (after the writer) blocks on G4
     const g = await writeAndGate(job(MAIN, [clean]), gateCtx([clean]));
