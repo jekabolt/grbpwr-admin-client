@@ -27,6 +27,12 @@ import type {
   WizardStep,
 } from 'lib/pattern-import/types';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
+import {
+  nameOriginOf,
+  overridesFromNames as namesToOverrides,
+  planNaming,
+  withAiNames,
+} from 'lib/pattern-import/ai/dxf-names';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import {
@@ -96,6 +102,11 @@ export type Inputs = {
   confirmedNames: SeedId[];
   /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
   editedNames: SeedId[];
+  /**
+   * D3: quantities the operator confirmed AS SHOWN, keyed by what was shown (`Unproven.shown`): a
+   * count that changes afterwards (a fold, a pair answer) is a new question.
+   */
+  confirmedQuantities: Partial<Record<SeedId, string>>;
   assignment: FabricAssignment | null;
 };
 
@@ -119,6 +130,7 @@ const EMPTY_INPUTS: Inputs = {
   operatorGrain: {},
   confirmedNames: [],
   editedNames: [],
+  confirmedQuantities: {},
   assignment: null,
 };
 
@@ -330,6 +342,7 @@ export function useImportSession(deps: {
     },
     pieceOverrides: i.overrides,
     operatorGrain: i.operatorGrain,
+    aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
   });
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
@@ -579,16 +592,25 @@ export function useImportSession(deps: {
    */
   async function toDetails() {
     const fams = sRef.current.pieces?.families ?? [];
-    const out = await run('render-som', { seeds: fams.map((f) => f.seed), dpi: 72 });
-    setSom(out);
-    patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
+    // E3 (D3): a piece its DXF block names is named — never sent to the AI, so the AI cannot
+    // outrank it; only unnamed / numeric / placeholder blocks are asked. Nothing to ask = no call.
+    const plan = planNaming(
+      fams,
+      card.sizes.map((c) => c.token),
+    );
     let names: NameDecision[] = [];
     let namerError: string | null = null;
-    try {
-      names = mergeNames(await namer(out, { card, threshold: AI_AUTO_ACCEPT_T }));
-    } catch (e) {
-      namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
-    }
+    if (plan.ask.length) {
+      const out = await run('render-som', { seeds: plan.ask, dpi: 72 });
+      setSom(out);
+      patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
+      try {
+        names = await namer(out, { card, threshold: AI_AUTO_ACCEPT_T });
+      } catch (e) {
+        namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
+      }
+    } else setSom(null);
+    names = mergeNames(withAiNames(plan, names));
     patch({ busy: null, names, step: 'meaning' });
     const overrides = overridesFromNames(names, iRef.current.overrides);
     patchInputs({ overrides });
@@ -645,23 +667,10 @@ export function useImportSession(deps: {
   /**
    * Every name as a semantics override, so the writer spells what the table shows AND the
    * manifest says where the name came from (owner decision 11: auto-accepted AI names stay flagged).
+   * A DXF-named piece nobody typed over gets none: semantics reads its block, pair included (E3).
    */
   function overridesFromNames(names: NameDecision[], base: Inputs['overrides']) {
-    const out: Inputs['overrides'] = { ...base };
-    const edited = new Set(iRef.current.editedNames);
-    for (const n of names) {
-      const { aiConfidence: _drop, ...prev } = out[n.seed] ?? {};
-      const nameOrigin = nameOriginOf(n, edited.has(n.seed));
-      out[n.seed] = {
-        ...prev,
-        code: n.code,
-        mods: n.mods,
-        displayName: n.displayName,
-        nameOrigin,
-        ...(nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? { aiConfidence: n.confidence } : {}),
-      };
-    }
-    return out;
+    return namesToOverrides(names, base, new Set(iRef.current.editedNames));
   }
 
   // ── forward transitions: run what the NEXT step shows, then move ────────────────────────
@@ -830,11 +839,16 @@ export function useImportSession(deps: {
             ? `${grain} ${grain === 1 ? 'piece has' : 'pieces have'} no grainline — draw it (two clicks)`
             : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
         }
-        const pending = s.names.filter(
-          (n) => !n.autoAccepted && !inputs.confirmedNames.includes(n.seed) && exportedSeed(n.seed),
-        );
-        if (pending.length)
-          return `${pending.length} AI ${pending.length === 1 ? 'name' : 'names'} to confirm`;
+        // D3: what the drawing does not prove waits for the operator, like the grainline; a DXF
+        // block name (E3) is the file's own word and is never in it (openQuestions)
+        const open = openQuestions(s.semantics, s.names, inputs);
+        if (open.allowance.length || open.total)
+          return [
+            open.allowance.length ? 'say what the drawn outline is (cut or seam line)' : '',
+            open.total ? `confirm ${countWords(open)} — or "confirm all as shown"` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
         // The identities the writer will spell (both hands of a declared pair), checked with the
         // gate's own rule — a declared `_L`/`_R` is exempt from "ends in a size token".
         const isSizeToken = sizeTokenTest(sizeTokens);
@@ -970,6 +984,43 @@ export function useImportSession(deps: {
     return (session.semantics?.pieces ?? []).some((p) => p.seed === seed);
   }
 
+  /**
+   * D3 "confirm as shown": every open quantity, sheet-note name and AI name below the threshold —
+   * of one piece (`seed`), or of the whole step. The outline question is never in it: that one is
+   * answered explicitly (`answerOutline`).
+   */
+  function confirmShown(seed?: SeedId) {
+    const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current);
+    const mine = <T extends { seed: SeedId }>(xs: T[]) =>
+      seed == null ? xs : xs.filter((x) => x.seed === seed);
+    const qty = mine(open.quantity);
+    const names = [...mine(open.name).map((u) => u.seed), ...mine(open.aiNames).map((n) => n.seed)];
+    patchInputs((i) => {
+      const next = {
+        confirmedQuantities: {
+          ...i.confirmedQuantities,
+          ...Object.fromEntries(qty.map((u) => [u.seed, u.shown])),
+        },
+        confirmedNames: [...new Set([...i.confirmedNames, ...names])],
+      };
+      iRef.current = { ...i, ...next };
+      return next;
+    });
+  }
+
+  /** D3: the operator's explicit answer to "what is the drawn outline" for the file. */
+  async function answerOutline(meaning: 'cut' | 'seam', allowanceMm: number) {
+    const fileAllowance: AllowanceDecision = {
+      meaning,
+      allowanceMm,
+      origin: 'operator',
+      evidence: [],
+    };
+    const next = { ...iRef.current, fileAllowance };
+    iRef.current = next;
+    await dispatch({ type: 'semantics', input: semanticsInput(next) });
+  }
+
   return {
     session,
     inputs,
@@ -993,6 +1044,8 @@ export function useImportSession(deps: {
     confirmSize,
     setSize,
     setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
+    confirmShown,
+    answerOutline,
     patchInputs,
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
@@ -1028,17 +1081,8 @@ export function useImportSession(deps: {
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
 
-/** Where a name came from, as the manifest records it. */
-export function nameOriginOf(
-  n: NameDecision,
-  typed: boolean,
-): NonNullable<PieceOverride['nameOrigin']> {
-  if (typed) return 'operator';
-  // 'text' = the deterministic reader named it, no model involved. An AI answer the sheet text
-  // agrees with is still the AI's: auto-accepted it stays flagged 'ai-auto' (owner decision 11).
-  if (n.source === 'text') return 'text';
-  return n.autoAccepted ? 'ai-auto' : 'ai';
-}
+/** Where a name came from, as the manifest records it (lib: ai/dxf-names.ts). */
+export { nameOriginOf };
 
 /** Auto matches below the confirm line (F5: < 0.9) that the operator has not answered. */
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
@@ -1078,6 +1122,69 @@ export function textNameOf(
     ),
     displayName: override?.displayName ?? spec?.displayName ?? '',
   };
+}
+
+/**
+ * D3: the details step's open questions — what semantics found unproven, minus what the operator
+ * already confirmed as shown, plus the AI names below the auto-accept threshold (decision 11).
+ * The outline (allowance) is answered by setting the file's allowance, so it closes in semantics.
+ */
+export function openQuestions(
+  sem: ImportSession['semantics'],
+  names: readonly NameDecision[],
+  i: Pick<Inputs, 'confirmedQuantities' | 'confirmedNames' | 'editedNames'>,
+) {
+  const un = sem?.unproven ?? [];
+  const named = new Set([...i.confirmedNames, ...i.editedNames]);
+  const exported = new Set((sem?.pieces ?? []).map((p) => p.seed));
+  const allowance = un.filter((u) => u.kind === 'allowance');
+  const quantity = un.filter(
+    (u) => u.kind === 'quantity' && i.confirmedQuantities[u.seed] !== u.shown,
+  );
+  const name = un.filter((u) => u.kind === 'name' && !named.has(u.seed));
+  // a DXF block name (lane E3: source 'dxf') is the file's own word, never an AI name to confirm
+  const aiNames = names.filter(
+    (n) => !n.autoAccepted && n.source !== 'dxf' && !named.has(n.seed) && exported.has(n.seed),
+  );
+  return {
+    allowance,
+    quantity,
+    name,
+    aiNames,
+    total: quantity.length + name.length + aiNames.length,
+  };
+}
+
+/** "3 quantities, 2 names" for the footer and the confirm strip. */
+export function countWords(o: ReturnType<typeof openQuestions>): string {
+  const n = o.name.length + o.aiNames.length;
+  return [
+    o.quantity.length
+      ? `${o.quantity.length} ${o.quantity.length === 1 ? 'quantity' : 'quantities'}`
+      : '',
+    n ? `${n} ${n === 1 ? 'name' : 'names'}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/**
+ * D3: the count an AI name auto-accepted at T backs with the sheet's own "cut n" (`cut-qty`
+ * evidence) is the sheet's word. A model call without that evidence, or a name the operator typed
+ * over, proves nothing.
+ */
+function aiQuantityOf(
+  names: readonly NameDecision[],
+  edited: readonly SeedId[],
+): StageIO['semantics']['in']['aiQuantity'] {
+  const out: NonNullable<StageIO['semantics']['in']['aiQuantity']> = {};
+  for (const n of names) {
+    const s = n.suggestion;
+    if (!n.autoAccepted || !s || s.cutQty == null || edited.includes(n.seed)) continue;
+    if (!n.evidence.some((e) => e.kind === 'cut-qty' && e.qty === s.cutQty)) continue;
+    out[n.seed] = { qty: s.cutQty, pair: s.pair };
+  }
+  return out;
 }
 
 /** The models to choose from: the seeds' own, plus the ones the sheet names (pieces out). */

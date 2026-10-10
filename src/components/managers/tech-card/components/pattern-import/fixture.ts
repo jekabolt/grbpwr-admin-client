@@ -1016,6 +1016,7 @@ export function fixtureSemantics(args: {
   const pieces: PieceSpec[] = [];
   const blocked: SemanticsOutput['blocked'] = [];
   const warnings: string[] = [];
+  const unproven: SemanticsOutput['unproven'] = [];
   const exported = map.entries.filter((e) => e.card);
   for (const f of families) {
     const s = seeds.find((x) => x.id === f.seed);
@@ -1078,6 +1079,21 @@ export function fixtureSemantics(args: {
       blocked.push({ seed: f.seed, reason: 'grammar', detail: bad });
       continue;
     }
+    // D3: the fixture sheet has no allowance note, and only labels with "N дет." prove a count
+    if (allowance.origin === 'default')
+      unproven.push({
+        seed: f.seed,
+        kind: 'allowance',
+        shown: `${allowance.meaning}+${allowance.allowanceMm}`,
+        detail: 'no allowance text and no second drawn line',
+      });
+    if (!/\d\s*дет/.test(p.text ?? '') && ov.pairHand === undefined && ov.piecesPerGarment == null)
+      unproven.push({
+        seed: f.seed,
+        kind: 'quantity',
+        shown: pairHand ? `pair×1` : `×${p.cutQty}`,
+        detail: 'no quantity printed — suggested from the outline',
+      });
     const nameOrigin = ov.nameOrigin ?? p.nameOrigin;
     const aiConfidence =
       nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? ov.aiConfidence ?? p.ai : undefined;
@@ -1147,7 +1163,13 @@ export function fixtureSemantics(args: {
     seen.set(sp.identity, sp.seed);
   }
   const dup = new Set(blocked.filter((b) => b.reason === 'duplicate-identity').map((b) => b.seed));
-  return { pieces: pieces.filter((x) => !dup.has(x.seed)), blocked, warnings };
+  const kept = new Set(pieces.filter((x) => !dup.has(x.seed)).map((x) => x.seed));
+  return {
+    pieces: pieces.filter((x) => !dup.has(x.seed)),
+    blocked,
+    warnings,
+    unproven: unproven.filter((u) => kept.has(u.seed)),
+  };
 }
 
 /** Is this seed narrow (gate G6 collapses a wide offset)? */

@@ -30,6 +30,7 @@
     "patimport:f15": "node scripts/pattern-import/f15.mjs",
     "patimport:ai": "node scripts/pattern-import/ai.mjs",
     "patimport:worker": "node --expose-gc scripts/pattern-import/worker.mjs",
+    "patimport:e2e": "node scripts/pattern-import/e2e.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:ask": "node scripts/flat-ask-probe.mjs",
     "flat:pictures": "node scripts/flat-input-pictures-probe.mjs",

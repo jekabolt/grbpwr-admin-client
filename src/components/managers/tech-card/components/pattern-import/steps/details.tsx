@@ -34,6 +34,15 @@ import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
 import { textNameOf } from '../use-import-session';
 import { PendingDetails } from './details-pending';
+import {
+  ConfirmStrip,
+  OutlineQuestion,
+  RowQuestions,
+  nameNote,
+  qtyOpen,
+  rowOpen,
+  useOpenQuestions,
+} from './details-confirm';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
 
 const MEANING: { value: LineMeaning; label: string }[] = [
@@ -65,6 +74,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   );
   const [grainA, setGrainA] = useState<PtMm | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const open = useOpenQuestions(api);
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
@@ -89,11 +99,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     const i = { ...inputs, ...p };
     void api.dispatch({
       type: 'semantics',
-      input: {
-        fileAllowance: i.fileAllowance ?? fileAllowance,
-        pieceOverrides: i.overrides,
-        operatorGrain: i.operatorGrain,
-      },
+      input: { ...api.semanticsInput(i), fileAllowance: i.fileAllowance ?? fileAllowance },
     });
   };
   const override = (seed: SeedId, o: NonNullable<Inputs['overrides'][SeedId]>) =>
@@ -170,6 +176,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
               cut, the card adds nothing).
             </Text>
           </div>
+          <OutlineQuestion api={api} current={fileAllowance} />
+          <ConfirmStrip api={api} />
 
           <DataTable className='mt-2'>
             <thead>
@@ -255,21 +263,33 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                     <td>
                       {!specs.length ? (
                         '—'
-                      ) : pair ? (
-                        // Both hands of a pair are drawn and count 1 each (PieceSpec).
-                        <span title='a pair: one _L and one _R per garment'>1 + 1</span>
                       ) : (
-                        <NumberField
-                          value={specs[0].piecesPerGarment}
-                          min={1}
-                          aria-label={`pieces per garment of piece ${mark(seed)}`}
-                          className='ml-auto w-12'
-                          onCommit={(v) =>
-                            v && v !== specs[0].piecesPerGarment
-                              ? override(seed, { piecesPerGarment: Math.round(v) })
-                              : undefined
+                        // A pair counts PER HAND (PieceSpec): 2 = two _L and two _R per garment.
+                        // D3: a count no sheet text gives is marked until confirmed or edited.
+                        <span
+                          className='flex items-center gap-1'
+                          title={
+                            qtyOpen(open, seed)?.detail ??
+                            (pair ? 'per hand: one _L and one _R each' : undefined)
                           }
-                        />
+                        >
+                          {/* fixed slots: the inputs line up whether or not a row is marked */}
+                          <span className='w-2 text-warning'>{qtyOpen(open, seed) ? '?' : ''}</span>
+                          <NumberField
+                            value={specs[0].piecesPerGarment}
+                            min={1}
+                            aria-label={`pieces per garment${pair ? ' per hand' : ''} of piece ${mark(seed)}`}
+                            className={cn('w-12', qtyOpen(open, seed) && 'border-warning')}
+                            onCommit={(v) =>
+                              v && v !== specs[0].piecesPerGarment
+                                ? override(seed, { piecesPerGarment: Math.round(v) })
+                                : undefined
+                            }
+                          />
+                          <Text size='nano' variant='label' component='span' className='w-7'>
+                            {pair ? '/hand' : ''}
+                          </Text>
+                        </span>
                       )}
                     </td>
                     <td data-align='left'>
@@ -355,6 +375,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                     <td data-align='left'>
                       <NameSource
                         n={n}
+                        note={nameNote(open, seed)?.detail ?? null}
                         pending={pending}
                         confirmed={inputs.confirmedNames.includes(seed)}
                         onConfirm={() => confirm(seed)}
@@ -365,6 +386,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                         <Pill tone='warn' title={b.detail}>
                           {REASON[b.reason] ?? b.reason}
                         </Pill>
+                      ) : rowOpen(open, seed) ? (
+                        <RowQuestions api={api} seed={seed} />
                       ) : (
                         <Pill tone='ok'>ready</Pill>
                       )}
@@ -594,16 +617,31 @@ function CodeCell({
 
 function NameSource({
   n,
+  note,
   pending,
   confirmed,
   onConfirm,
 }: {
   n: NameDecision | undefined;
+  /** D3: the code was read off a construction note, not the piece's title — unconfirmed. */
+  note: string | null;
   pending: boolean;
   confirmed: boolean;
   onConfirm: () => void;
 }) {
   if (!n) return <span className='text-labelColor'>—</span>;
+  if (n.source === 'dxf' && !confirmed)
+    return (
+      <Pill tone='ok' title='the name of the source DXF block — the AI is not asked about it'>
+        DXF block
+      </Pill>
+    );
+  if (note)
+    return (
+      <Chip tone='attention' onClick={onConfirm} title={`${note} · click to confirm`}>
+        sheet note · confirm
+      </Chip>
+    );
   const text = n.source === 'text';
   if (text && !confirmed) return <Pill tone='mut'>sheet text</Pill>;
   if (confirmed) return <Pill tone='ink'>you</Pill>;

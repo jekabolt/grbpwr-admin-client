@@ -123,5 +123,16 @@
         "at": [890, 250]
       }
     ]
+  },
+  "leonie": {
+    "clicks": [
+      { "label": "VORD HOSENTEIL", "at": [220, 2220] },
+      { "label": "HINTERES HOSENTEIL", "at": [316, 840] },
+      { "label": "TASCHENBEUTEL", "at": [268, 2016] },
+      { "label": "TASCHENBELEG", "at": [280, 1680] }
+    ]
+  },
+  "synth-scan": {
+    "clicks": [{ "label": "graded piece", "at": [163, 225] }]
   }
 }
