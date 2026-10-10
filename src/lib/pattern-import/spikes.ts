@@ -38,7 +38,23 @@ function segDist(p: PtMm, a: PtMm, b: PtMm): number {
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 }
 
+function closestOn(p: PtMm, a: PtMm, b: PtMm): PtMm {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const l = dx * dx + dy * dy;
+  const t = l > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)) : 0;
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 export type Spike = { at: PtMm; turnDeg: number; widthMm: number };
+
+/**
+ * One stretch `stripSpikes` removed: the surviving vertices around it (`path[0]`, `path[last]`),
+ * the removed ones between, the point of the cleaned ring it leaves from (`base`), its farthest
+ * vertex (`tip`) and how far that is from the cleaned ring (`depthMm`). A slit notch drawn into
+ * the cut line is one of these (semantics turns it back into a notch).
+ */
+export type Excursion = { base: PtMm; tip: PtMm; depthMm: number; path: PtMm[] };
 
 /** The fold-back at v between a and c, or null when the ring does not fold back there. */
 function foldAt(a: PtMm, v: PtMm, c: PtMm, widthMm: number, turnDeg: number): Spike | null {
@@ -73,10 +89,10 @@ export function stripSpikes(
   ring: readonly PtMm[],
   widthMm = SPIKE_WIDTH_MM,
   turnDeg = SPIKE_TURN_DEG,
-): { ring: PtMm[]; spikes: number } {
+): { ring: PtMm[]; spikes: number; excursions: Excursion[] } {
   const { pts: P, dup } = open(ring);
   const n = P.length;
-  if (n < 4) return { ring: ring.slice(), spikes: 0 };
+  if (n < 4) return { ring: ring.slice(), spikes: 0, excursions: [] };
   const next = Array.from({ length: n }, (_, i) => (i + 1) % n);
   const prev = Array.from({ length: n }, (_, i) => (i - 1 + n) % n);
   const alive = new Array<boolean>(n).fill(true);
@@ -117,9 +133,32 @@ export function stripSpikes(
         work.push(y);
       }
   }
-  if (!spikes) return { ring: ring.slice(), spikes: 0 };
+  if (!spikes) return { ring: ring.slice(), spikes: 0, excursions: [] };
   let start = 0;
   while (!alive[start]) start++;
+  // the removed runs, in ring order, between two surviving vertices
+  const excursions: Excursion[] = [];
+  for (let k = 0; k < n; k++) {
+    const i = (start + k) % n;
+    if (!alive[i] || alive[(i + 1) % n]) continue;
+    let j = (i + 1) % n;
+    const path: PtMm[] = [P[i]];
+    while (!alive[j]) {
+      path.push(P[j]);
+      j = (j + 1) % n;
+    }
+    path.push(P[j]);
+    let tip = path[1];
+    let depth = -1;
+    for (const q of path.slice(1, -1)) {
+      const dd = segDist(q, P[i], P[j]);
+      if (dd > depth) {
+        depth = dd;
+        tip = q;
+      }
+    }
+    excursions.push({ base: closestOn(tip, P[i], P[j]), tip, depthMm: depth, path });
+  }
   const out: PtMm[] = [];
   let x = start;
   do {
@@ -128,7 +167,7 @@ export function stripSpikes(
   } while (x !== start);
   if (out.length > 1 && d2(out[0], out[out.length - 1]) <= 1e-9) out.pop();
   if (dup) out.push(out[0]);
-  return { ring: out, spikes };
+  return { ring: out, spikes, excursions };
 }
 
 /** Every vertex of the closed ring where it folds back on itself (the gate's test). */

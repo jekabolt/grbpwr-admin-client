@@ -318,10 +318,28 @@ export function planBlocks(
       const seamS = s.seam ? stripSpikes(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
       const cut = ccw(cutS.ring);
       const seam = seamS ? ccw(seamS.ring) : null;
+      // …and never silently dropped (Codex, r5a): what semantics did not already turn into a notch
+      // and still goes in and out of the cut line ≥ notchMinMm is written as a notch there, warned
+      const slits: NotchFeature[] = cutS.excursions
+        .filter(
+          (e) =>
+            e.depthMm >= PATIMPORT.notchMinMm &&
+            !s.notches.some((n) => Math.hypot(n.at.x - e.base.x, n.at.y - e.base.y) < 0.5),
+        )
+        .map((e) => ({
+          kind: 'notch' as const,
+          origin: 'derived' as const,
+          ranges: [],
+          confidence: 1,
+          at: e.base,
+          seg: [e.base, e.tip] as [PtMm, PtMm],
+          depthMm: e.depthMm,
+        }));
       if (cutS.spikes || seamS?.spikes)
         warnings.push(
-          `${who}: removed ${cutS.spikes + (seamS?.spikes ?? 0)} zero-width spike(s) from the ${cutS.spikes ? 'cut' : 'seam'} line`,
+          `${who}: removed ${cutS.spikes + (seamS?.spikes ?? 0)} zero-width spike(s) from the ${cutS.spikes ? 'cut' : 'seam'} line${slits.length ? ` — ${slits.length} written as notch(es) (${slits.map((e) => `${e.depthMm.toFixed(1)} mm at ${e.at.x.toFixed(1)}, ${e.at.y.toFixed(1)}`).join('; ')})` : ''}`,
         );
+      const sNotches = slits.length ? [...s.notches, ...slits] : s.notches;
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
       const internal = s.internal.map((f) => ({
         pts: f.closed
@@ -338,12 +356,19 @@ export function planBlocks(
       }
       const grain = s.grain ? grainArrow(s.grain) : null;
       if (!grain) warnings.push(`${who}: no grain line`);
-      const notches = s.notches.map((n) => plannedNotch(cut, n, warnings, who));
+      const notches = sNotches.map((n) => plannedNotch(cut, n, warnings, who));
       const annotation: string[] = [];
       if (w.spec.fused) annotation.push('FUSED');
       if (w.spec.unfoldedFold) annotation.push('UNFOLDED');
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
-      const size: PieceSizeSpec = { ...s, cut, seam, bbox: bboxOf(cut), areaMm2: areaOf(cut) };
+      const size: PieceSizeSpec = {
+        ...s,
+        cut,
+        seam,
+        notches: sNotches,
+        bbox: bboxOf(cut),
+        areaMm2: areaOf(cut),
+      };
       outSizes.push(size);
       blocks.push({
         name,

@@ -57,7 +57,7 @@ import type {
   Unproven,
 } from '../types';
 import { PATIMPORT } from '../types';
-import { stripSpikes } from '../spikes';
+import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
 import {
@@ -438,6 +438,67 @@ function tryUnfold(
   return problem ? { u: null, problem } : { u, problem: null };
 }
 
+/**
+ * The excursions `stripSpikes` took off a candidate outline that are SLIT NOTCHES (Codex, r5a): the
+ * drawing itself goes in and out there — every 0.25 mm of the removed stretch lies (≥ 90 %) within
+ * `snapMm` of one of this candidate's own wall chains whose class is a cut line of its rank (its
+ * size class, or a common line; never internal, grain, notch, seam or ignored) — and it is at least
+ * `PATIMPORT.notchMinMm` deep (a corner overshoot of 0.57 mm is not a notch). Those come back as
+ * notches at the point they leave the ring; the rest (a fill that wandered up a bundle of internal
+ * lines, a micro overshoot) are only dropped.
+ */
+export function slitNotches(
+  excursions: readonly Excursion[],
+  cand: PieceCandidate,
+  set: ChainSet,
+  run: SizeRun,
+): { notches: NotchFeature[]; dropped: Excursion[] } {
+  const clsOf = new Map<ChainId, LineClass>();
+  for (const k of set.classes) for (const id of k.chains) clsOf.set(id, k);
+  const own = run.sizes[cand.rank]?.classId ?? null;
+  const multi = run.sizes.length > 1;
+  const cutLines = cand.walls
+    .map((id) => set.chains[id])
+    .filter((ch): ch is Chain => {
+      if (!ch || ch.pts.length < 2) return false;
+      const k = clsOf.get(ch.id);
+      if (!k) return !multi;
+      if (k.role === 'common') return true;
+      if (k.role === 'size') return !multi || (own != null && k.id === own);
+      return false;
+    });
+  const notches: NotchFeature[] = [];
+  const dropped: Excursion[] = [];
+  for (const e of excursions) {
+    let on = 0;
+    let all = 0;
+    for (let i = 1; i < e.path.length; i++) {
+      const a = e.path[i - 1];
+      const b = e.path[i];
+      const k = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.25));
+      for (let j = i === 1 ? 0 : 1; j <= k; j++) {
+        const q = { x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k };
+        all++;
+        if (cutLines.some((ch) => closestOnPolyline(q, ch.pts, ch.closed).d <= PATIMPORT.snapMm))
+          on++;
+      }
+    }
+    const drawn = all > 0 && on / all >= 0.9;
+    if (drawn && e.depthMm >= PATIMPORT.notchMinMm)
+      notches.push({
+        kind: 'notch',
+        origin: 'detected',
+        ranges: [],
+        confidence: 1,
+        at: e.base,
+        seg: [e.base, e.tip],
+        depthMm: e.depthMm,
+      });
+    else dropped.push(e);
+  }
+  return { notches, dropped };
+}
+
 export function buildPieceSpecsDetailed(
   input: SemanticsInput,
   progress?: Progress,
@@ -706,13 +767,22 @@ export function buildPieceSpecsDetailed(
       // (reef HB_4XL, 0.57 mm), the fill wandering up a bundle of lines and back (kombinezon, 12
       // mm) — is a zero-width needle on the cutting line; it goes now (spikes.ts). A traced (scan)
       // outline is made simple below instead (its union drops such spurs, and more).
+      // A stretch the DRAWING itself runs in and out along (its legs on this piece's own cut-line
+      // chains, ≥ notchMinMm deep) is a slit notch drawn into the cut line: it leaves the ring and
+      // comes back as a notch at that point (layer 4), never silently lost (Codex, r5a).
       if (!traced) {
         const st = stripSpikes(outer);
         if (st.spikes) {
           outer = st.ring;
+          const sl = slitNotches(st.excursions, c, set, run);
+          feats.push(...sl.notches);
           pieceNotes.push(
-            `${card.token}: ${st.spikes} zero-width spike(s) removed from the outline`,
+            `${card.token}: ${st.spikes} zero-width spike(s) removed from the outline${sl.notches.length ? ` — ${sl.notches.length} drawn slit(s) kept as notch(es)` : ''}${sl.dropped.length ? ` — ${sl.dropped.length} not drawn by the cut line (${sl.dropped.map((e) => `${e.depthMm.toFixed(1)} mm at ${e.base.x.toFixed(0)}, ${e.base.y.toFixed(0)}`).join('; ')}) dropped` : ''}`,
           );
+          if (sl.dropped.some((e) => e.depthMm >= PATIMPORT.notchMinMm))
+            warnings.push(
+              `${card.token}: a ${Math.max(...sl.dropped.map((e) => e.depthMm)).toFixed(1)} mm needle on the outline that the cut line does not draw was removed`,
+            );
         }
       }
       // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
