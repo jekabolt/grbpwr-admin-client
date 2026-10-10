@@ -7,10 +7,14 @@
 //
 // Pure TS: lib/** only; the tech card injects its own deps (zone inference, unit codes, rules).
 
-import { buildSeamGraph, compositeSeams } from './geometry';
+import { ALL_RULES, buildSeamGraph, compositeSeams, edgeIdsOf, segmentPiece } from './geometry';
 import { buildSkeleton, groupUnits, orderTemplate, type SkeletonTemplate } from './skeleton';
 import {
   SKELETON,
+  type PieceGeom,
+  type SeamCandidate,
+  type SeamDecisions,
+  type SeamDecisionsInput,
   type SeamGraph,
   type SkeletonDeps,
   type SkeletonFacts,
@@ -41,16 +45,69 @@ export function skeletonRefusal(facts: SkeletonFacts): string | null {
   return null;
 }
 
-/** A3 → lane B's units → A4: the seam graph every later reader works from. */
+/**
+ * A3 → lane B's units → A4: the seam graph every later reader works from. `decisions` = the seams
+ * stored on the card, resolved by lib/seams (a value, or a function of the pieces about to be
+ * matched): confirmed seams are taken first, rejected pairs dropped, closures block their edges.
+ */
 export function readSeamGraph(
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
+  decisions?: SeamDecisionsInput,
 ): SeamGraph {
   const refused = skeletonRefusal(facts);
   if (refused) return EMPTY_GRAPH([refused]);
-  const first = buildSeamGraph(facts);
-  return compositeSeams(first, groupUnits(first, facts, template, pins));
+  if (!decisions) {
+    const first = buildSeamGraph(facts);
+    return compositeSeams(first, groupUnits(first, facts, template, pins));
+  }
+  let resolved: SeamDecisions | undefined;
+  const first = buildSeamGraph(facts, ALL_RULES, (pieces) => {
+    resolved = typeof decisions === 'function' ? decisions(pieces) : decisions;
+    return resolved;
+  });
+  return dropRejectedA4(compositeSeams(first, groupUnits(first, facts, template, pins)), resolved);
+}
+
+/**
+ * A partial / composite seam the second pass (A4) found again although a person rejected it: out
+ * of `chosen`, into `rejected` with the person's words (A3 drops rejected pairs before its greedy;
+ * A4 reads its own runs, so the same rule is applied to what it adds).
+ */
+function dropRejectedA4(graph: SeamGraph, d: SeamDecisions | undefined): SeamGraph {
+  const ex = (d?.excluded ?? []).filter((x) => !x.surface);
+  if (ex.length === 0) return graph;
+  const sideIds = (c: SeamCandidate, s: 'a' | 'b') =>
+    s === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b);
+  const hitBy = (c: SeamCandidate) =>
+    c.provenance || (c.kind !== 'partial' && c.kind !== 'composite')
+      ? undefined
+      : ex.find((x) => {
+          const A = new Set(x.aIds);
+          const B = new Set(x.bIds);
+          const a = sideIds(c, 'a');
+          const b = sideIds(c, 'b');
+          return (
+            (a.some((e) => A.has(e)) && b.some((e) => B.has(e))) ||
+            (a.some((e) => B.has(e)) && b.some((e) => A.has(e)))
+          );
+        });
+  const dropped = graph.chosen.flatMap((c) => {
+    const x = hitBy(c);
+    return x ? [{ ...c, evidence: { ...c.evidence, rule: x.rule } }] : [];
+  });
+  if (dropped.length === 0) return graph;
+  return {
+    ...graph,
+    chosen: graph.chosen.filter((c) => !hitBy(c)),
+    rejected: [...dropped, ...graph.rejected],
+  };
+}
+
+/** The pieces as A1 cuts them (the resolver's input) — the same segmentation the graph runs. */
+export function segmentAll(facts: SkeletonFacts): PieceGeom[] {
+  return facts.pieces.map(segmentPiece);
 }
 
 /**
@@ -74,7 +131,7 @@ export function proposeSkeleton(
       graph: EMPTY_GRAPH([refused]),
     };
   }
-  const graph = readSeamGraph(facts, template, options.pins);
+  const graph = readSeamGraph(facts, template, options.pins, options.decisions);
   return {
     ...buildSkeleton(graph, facts, template, deps, options),
     graph,

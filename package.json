@@ -81,6 +81,7 @@
     "assembly:views": "node scripts/assembly-views-probe.mjs",
     "skeleton:union": "node scripts/assembly-skeleton/union-probe.mjs",
     "pom:check": "node scripts/pom/check.mjs",
+    "seams:check": "node scripts/seams/check.mjs",
     "hatch:markup": "node scripts/hatch-markup-probe.mjs",
     "canvas:view": "node scripts/canvas-view-probe.mjs",
     "undo:record": "node scripts/last-mutation-probe.mjs",
