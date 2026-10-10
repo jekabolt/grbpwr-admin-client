@@ -27,6 +27,7 @@ import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import { revealDelta } from './canvas-view';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
+import { useActiveStepStore } from './assembly-map/active-step';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -403,6 +404,20 @@ export function AssemblySchematic({
       : // Без действия нет и роли: иначе скринридер объявляет кнопкой то, что ничего не делает и
         // даже не фокусируется.
         {};
+
+  // СТРОКА ШАГА В БОКСЕ — ОРГАН ОТКРЫТИЯ ПЛЮС ДВЕРЬ КАРТЫ СБОРКИ: наведение светит шаг на карте,
+  // щелчок выбирает его там липко (assembly-map/active-step). Без провайдера карты — как раньше.
+  const mapStore = useActiveStepStore();
+  const stepOrgan = (i: number) => ({
+    ...activate(
+      clickGuard(() => {
+        onPickStep(i);
+        mapStore?.select(i);
+      }),
+    ),
+    onMouseEnter: () => mapStore?.hover(i),
+    onMouseLeave: () => mapStore?.hover(null),
+  });
 
   /**
    * Обработчики наведения для ноды.
@@ -784,7 +799,7 @@ export function AssemblySchematic({
                 // дока у инлайна нет вовсе, показывать список узла негде, и клик открывает
                 // ПЕРВУЮ операцию узла — всё ещё операцию этого узла, а не выделение.
                 headProps={activate(clickGuard(unitHeadOpen(b, toggle, onPickStep)))}
-                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                stepProps={stepOrgan}
                 tokenProps={(k) => activate(clickGuard(() => goToNode(k)), true)}
                 // СЛОВА ПОВЕРХНОСТИ. В инлайне полотна нет вовсе — есть прокручиваемая коробка,
                 // и `revealDelta` здесь двигает прокрутку, а не трансформ; обещать «on the
@@ -809,7 +824,7 @@ export function AssemblySchematic({
               ringClassName={nodeRing('')}
               dragProps={dragHandlers('', layout.tail.x, layout.tail.y)}
               hoverProps={hoverHandlers('')}
-              stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+              stepProps={stepOrgan}
             />
           )}
 
@@ -852,7 +867,7 @@ export function AssemblySchematic({
                 hoverProps={hoverHandlers(t.key)}
                 // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
                 // способа открыть шаг в системе заводить нельзя.
-                stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
+                stepProps={stepOrgan}
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined

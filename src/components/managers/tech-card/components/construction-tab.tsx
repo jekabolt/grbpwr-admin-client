@@ -31,6 +31,8 @@ import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
 import { useSkeletonDoor } from './assembly-skeleton-panel';
 import { CardUnitPicturesProvider, renderProposalUnit } from './card-unit-pictures';
 import { useCardCategoryNames } from './skeleton-card-inputs';
+import { ActiveStepProvider } from './assembly-map/active-step';
+import { AssemblyMap } from './assembly-map/assembly-map';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -778,122 +780,125 @@ export function ConstructionTab({
       {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
           assembly sequence the rest of the screen. At 2/5 the drawing was 640px wide on a 1600px
           display with ~3000px of empty ground under it, while the operations were squeezed. */}
-      <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-        <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
-          <section className='border border-borderColor bg-bgColor p-4'>
-            <SectionHeader
-              title='sketch — assembly map'
-              question='— hovering an operation lights its pin, and the other way round'
-            />
-            <ConstructionSketch
-              mediaById={mediaById}
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-              note='hover an operation — its pin lights up (and the other way round)'
-            />
-          </section>
-          <PieceLegend />
-        </div>
-
-        <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
-          {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
-              рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
-              его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
-          <ConstructionAudit
-            techCardId={techCard?.id}
-            active={active}
-            onGoTab={onGoTab}
-            // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
-            // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
-            // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
-            // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
-            // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
-            // и исчезали бы молча.
-            frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-            // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
-            // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
-            // несохранённых правок.
-            operationCount={(techCard?.techCard?.operations ?? []).length}
-          />
-          <CardStandards />
-          <section className='border border-borderColor bg-bgColor p-4'>
-            <SectionHeader
-              title='operations — assembly order'
-              question='— what each step does, where, on which pieces, and how long it takes'
-              action={
-                <>
-                  {shapesAffordance(pieceShapes)}
-                  {skeleton.headerAction}
-                </>
-              }
-            />
-            {/* Пиктограммы узлов карточки — над всеми поверхностями сборки, что живут внутри поля
-                (схема, фулскрин, рельс, полка). Без DXF провайдер отдаёт null: всё как было. */}
-            <CardUnitPicturesProvider
-              shapes={pieceShapes.shapeByKey}
-              cloth={pieceClothByColorway[0]?.map ?? null}
-              categoryNames={categoryNames}
-            >
-              <OperationsField
-                activePin={pin.active}
-                onActivePinChange={pin.setActive}
-                activeBom={bom.active}
-                onActiveBomChange={bom.setActive}
-                colorwayArticles={colorwayArticles}
-                pieceClothByColorway={pieceClothByColorway}
-                pieceShapes={pieceShapes.shapeByKey}
-                // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
-                // принимает намерение «снять разметку» только против карточки, которая её несёт,
-                // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
-                // распакована (восстановленный черновик).
-                storedHasUnits={(techCard?.techCard?.operations ?? []).some(
-                  (o) => (o?.outputUnitKey ?? '').trim() !== '',
-                )}
-                // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
-                // замораживает тело. Схема получает его ЯВНО, а не через внешний
-                // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
-                frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-                // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
-                operationMediaUrls={operationMediaUrls}
-                // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
-                // от него зависит, показывать ли путь отступления «снять фотографии шагов».
-                storedHasMedia={(techCard?.techCard?.operations ?? []).some(
-                  (o) => (o?.media ?? []).length > 0,
-                )}
-                onSave={onSave}
-                saving={saving}
-                applyRequest={skeleton.applyRequest}
-                onSkeletonApplied={skeleton.onSkeletonApplied}
-                emptyAction={skeleton.emptyAction}
-                // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
-                // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
-                // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
-                // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
-                //
-                // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
-                // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
-                // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
-                // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
-                // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
-                sketchNote={
+      {/* КАРТА СБОРКИ И РЕЛЬС ЧИТАЮТ ОДИН ГРАФ И ОДИН АКТИВНЫЙ ШАГ: провайдер пиктограмм (он же — граф
+          швов карты) и стор активного шага стоят над ОБЕИМИ колонками. Без DXF граф null, и
+          колонка — сегодняшний эскиз байт в байт. */}
+      <ActiveStepProvider>
+        <CardUnitPicturesProvider
+          shapes={pieceShapes.shapeByKey}
+          cloth={pieceClothByColorway[0]?.map ?? null}
+          categoryNames={categoryNames}
+        >
+          <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
+            <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
+              <AssemblyMap
+                sketch={
                   <ConstructionSketch
                     mediaById={mediaById}
                     activePin={pin.active}
                     onActivePinChange={pin.setActive}
-                    // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
-                    // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
-                    // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
-                    // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
-                    // было бы новое визуальное состояние, которого у инлайна нет.
-                    note='hover a pin — in the list view it lights that step; the canvas never reacts'
+                    note='hover an operation — its pin lights up (and the other way round)'
                   />
                 }
               />
-            </CardUnitPicturesProvider>
-            {skeleton.panel}
-          </section>
-        </div>
-      </div>
+              <PieceLegend />
+            </div>
+
+            <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
+              {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
+              рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
+              его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
+              <ConstructionAudit
+                techCardId={techCard?.id}
+                active={active}
+                onGoTab={onGoTab}
+                // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
+                // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
+                // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
+                // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
+                // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
+                // и исчезали бы молча.
+                frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+                // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
+                // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
+                // несохранённых правок.
+                operationCount={(techCard?.techCard?.operations ?? []).length}
+              />
+              <CardStandards />
+              <section className='border border-borderColor bg-bgColor p-4'>
+                <SectionHeader
+                  title='operations — assembly order'
+                  question='— what each step does, where, on which pieces, and how long it takes'
+                  action={
+                    <>
+                      {shapesAffordance(pieceShapes)}
+                      {skeleton.headerAction}
+                    </>
+                  }
+                />
+                {/* Пиктограммы узлов карточки — провайдер выше, над обеими колонками (карта сборки
+                читает тот же граф). Без DXF он отдаёт null: всё как было. */}
+                <OperationsField
+                  activePin={pin.active}
+                  onActivePinChange={pin.setActive}
+                  activeBom={bom.active}
+                  onActiveBomChange={bom.setActive}
+                  colorwayArticles={colorwayArticles}
+                  pieceClothByColorway={pieceClothByColorway}
+                  pieceShapes={pieceShapes.shapeByKey}
+                  // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+                  // принимает намерение «снять разметку» только против карточки, которая её несёт,
+                  // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+                  // распакована (восстановленный черновик).
+                  storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                    (o) => (o?.outputUnitKey ?? '').trim() !== '',
+                  )}
+                  // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+                  // замораживает тело. Схема получает его ЯВНО, а не через внешний
+                  // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                  frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+                  // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+                  operationMediaUrls={operationMediaUrls}
+                  // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+                  // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+                  storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                    (o) => (o?.media ?? []).length > 0,
+                  )}
+                  onSave={onSave}
+                  saving={saving}
+                  applyRequest={skeleton.applyRequest}
+                  onSkeletonApplied={skeleton.onSkeletonApplied}
+                  emptyAction={skeleton.emptyAction}
+                  // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+                  // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+                  // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+                  // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+                  //
+                  // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+                  // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+                  // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+                  // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+                  // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+                  sketchNote={
+                    <ConstructionSketch
+                      mediaById={mediaById}
+                      activePin={pin.active}
+                      onActivePinChange={pin.setActive}
+                      // ПОДВАЛ ОБЕЩАЕТ РОВНО ТО, ЧТО ЕСТЬ, — В ОБОИХ ВИДАХ ФУЛСКРИНА. Пин светит
+                      // строки рельса и только их, а рельс стоит на экране только в виде СПИСКА:
+                      // фраза без оговорки «in the list view» обещала бы подсветку и над полотном,
+                      // где активный пин не потребляет НИКТО — и заводить потребителя нельзя, это
+                      // было бы новое визуальное состояние, которого у инлайна нет.
+                      note='hover a pin — in the list view it lights that step; the canvas never reacts'
+                    />
+                  }
+                />
+                {skeleton.panel}
+              </section>
+            </div>
+          </div>
+        </CardUnitPicturesProvider>
+      </ActiveStepProvider>
     </div>
   );
 }
