@@ -82,7 +82,13 @@ import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
-import { blobShapes, countEvidence, labelSingleRun, sheetFeed } from '../sizes/count-evidence';
+import {
+  blobShapes,
+  countEvidence,
+  labelSingleRun,
+  shapeCandidates,
+  sheetFeed,
+} from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
@@ -306,7 +312,7 @@ export class Session {
   /** Every page's text and the file names, kept past the docs: the legend reads size runs there. */
   private docTexts: string[] = [];
   /** `docTexts` with the file each was printed in (A6: only the selected sheet's files count). */
-  private docTextSrc: { file: FileId; text: string }[] = [];
+  private docTextSrc: { file: FileId; page: PageIndex; text: string }[] = [];
   private fileNames = new Map<string, string>();
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
@@ -878,7 +884,9 @@ export class Session {
       // tile labels and copyright lines the clean stage masked are not read).
       this.docTextSrc = docs.flatMap((d) =>
         d.pages.flatMap((p) =>
-          p.texts.filter((t) => !t.background).map((t) => ({ file: d.file.id, text: t.text })),
+          p.texts
+            .filter((t) => !t.background)
+            .map((t) => ({ file: d.file.id, page: p.page, text: t.text })),
         ),
       );
       this.docTexts = this.docTextSrc.map((t) => t.text);
@@ -1023,17 +1031,15 @@ export class Session {
     const key = `${sheet.id}`;
     if (this.countEv?.set !== set || this.countEv.key !== key) {
       const faces = this.facesOf(set, read, PATIMPORT.fillCellMm);
-      const feed = sheetFeed(sheet, this.files, this.docTextSrc);
-      const top = new Set(
-        faces.map.blobs.filter((b) => !b.junk && !b.aside && b.inside == null).map((b) => b.id),
-      );
+      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
+      const cands = new Set(shapeCandidates(faces.map.blobs).map((b) => b.id));
       this.countEv = {
         key,
         set,
         v: countEvidence({
           texts: feed.texts,
           blobs: faces.map.blobs,
-          shapes: blobShapes(faces.map, top),
+          shapes: blobShapes(faces.map, cands),
           files: feed.files,
           // the models it names are read as the pieces stage reads them (its model choice)
           models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,

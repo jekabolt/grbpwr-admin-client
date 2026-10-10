@@ -23,7 +23,15 @@
 // counting evidence disallows it (a legend "36–46" beside one-line outlines → asked, as before). A
 // sheet with several models is never inferred (its texts and outlines are not split per model).
 // The card's size run is never an evidence (H1c-4) and is not read here at all.
-import type { CountEvidence, FaceJunk, FileId, SizeRun } from 'lib/pattern-import/types';
+import type {
+  CountEvidence,
+  FaceJunk,
+  FileId,
+  PageClassification,
+  PageIndex,
+  SizeRun,
+} from 'lib/pattern-import/types';
+import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { fileSizeLabel } from './recover';
 import { parseSizeToken, runsInText } from './tokens';
@@ -72,8 +80,11 @@ export type CountEvidenceResult = {
 export const COUNT_EVIDENCE = {
   /** Outlines the nest evidence needs at least. */
   nestMin: 2,
-  /** Largest outlines compared for one shape drawn at two scales. */
-  dupTop: 12,
+  /**
+   * Outlines compared for one shape drawn at two scales: EVERY face at or above the piece floor
+   * (a graded copy may be anywhere, set aside or unlabelled); above this many, not checked → off.
+   */
+  dupMax: 4000,
   /** Area ratio of two sizes of one piece side by side (adjacent sizes ≈ 1.05, extremes ≈ 2). */
   dupRatio: [1.015, 2.5] as const,
   /** Largest |Δ log10 h| over h1…h4 for "one shape". */
@@ -166,22 +177,50 @@ function textEvidence(input: CountEvidenceInput): {
   };
 }
 
-/** Two of the largest outlines that are one shape at two scales (sizes side by side), if any. */
+/** Page rectangles: every tile is one shape at about one scale — not a piece drawn twice. */
+const NOT_COMPARED: ReadonlySet<FaceJunk> = new Set<FaceJunk>(['sheet', 'tile-frame']);
+
+/**
+ * The faces the scaled-copy check compares: every outline with pixels of its own at or above the
+ * piece floor, seeded or set aside (a graded copy is often unlabelled or judged junk) — page and
+ * tile rectangles excepted.
+ */
+export function shapeCandidates(
+  blobs: readonly NestBlob[],
+  floorMm2 = PATIMPORT.minPieceAreaMm2,
+): NestBlob[] {
+  return blobs.filter(
+    (b) => !b.aside && b.areaMm2 >= floorMm2 && !(b.junk && NOT_COMPARED.has(b.junk)),
+  );
+}
+
+/**
+ * Two outlines that are one shape at two scales (sizes side by side), if any — over all the
+ * candidates, bucketed by h1 (two faces further apart than the shape tolerance in h1 are never one
+ * shape). 'unchecked' = a candidate has no shape, or there are too many to compare.
+ */
 export function scaledCopy(
-  top: readonly NestBlob[],
+  cands: readonly NestBlob[],
   shapes: ReadonlyMap<number, BlobShape>,
-): [NestBlob, NestBlob] | null {
+): [NestBlob, NestBlob] | 'unchecked' | null {
+  if (cands.length > COUNT_EVIDENCE.dupMax) return 'unchecked';
   const [lo, hi] = COUNT_EVIDENCE.dupRatio;
-  const xs = top.slice(0, COUNT_EVIDENCE.dupTop);
+  const xs: { b: NestBlob; s: BlobShape }[] = [];
+  for (const b of cands) {
+    const sh = shapes.get(b.id);
+    if (!sh) return 'unchecked';
+    xs.push({ b, s: sh });
+  }
+  xs.sort((a, b) => a.s.hu[0] - b.s.hu[0]);
   for (let i = 0; i < xs.length; i++)
     for (let j = i + 1; j < xs.length; j++) {
-      const a = shapes.get(xs[i].id);
-      const b = shapes.get(xs[j].id);
-      if (!a || !b) continue;
+      const a = xs[i].s;
+      const b = xs[j].s;
+      if (b.hu[0] - a.hu[0] > COUNT_EVIDENCE.dupShape) break;
       const r = Math.max(a.px, b.px) / Math.max(1, Math.min(a.px, b.px));
       if (r < lo || r > hi) continue;
       const d = Math.max(...a.hu.map((h, k) => Math.abs(h - b.hu[k])));
-      if (d <= COUNT_EVIDENCE.dupShape) return [xs[i], xs[j]];
+      if (d <= COUNT_EVIDENCE.dupShape) return [xs[i].b, xs[j].b];
     }
   return null;
 }
@@ -206,8 +245,8 @@ function nestEvidence(input: CountEvidenceInput): CountEvidence | null {
   );
   const one = top.every((b) => b.depth === 1 && !ringed.has(b.id));
   if (one) {
-    const dup = input.shapes ? scaledCopy(top, input.shapes) : null;
-    if (input.shapes && !dup)
+    const dup = input.shapes ? scaledCopy(shapeCandidates(blobs), input.shapes) : 'unchecked';
+    if (!dup)
       return {
         kind: 'nests',
         n: [1],
@@ -220,9 +259,9 @@ function nestEvidence(input: CountEvidenceInput): CountEvidence | null {
       n: [],
       group: 'geometry',
       counts: false,
-      detail: dup
+      detail: Array.isArray(dup)
         ? `outlines of ${Math.round(dup[0].areaMm2 / 100)} and ${Math.round(dup[1].areaMm2 / 100)} cm² are one shape at two scales — sizes side by side?`
-        : 'one line around each outline, scaled copies not checked',
+        : 'one line around each outline, but its outlines could not all be compared for scaled copies',
     };
   }
   const by = new Map<number, number>();
@@ -289,23 +328,37 @@ export function countEvidence(input: CountEvidenceInput): CountEvidenceResult {
 }
 
 /**
- * What feeds the selected sheet (A6 counts nothing else): the files it is assembled from, its own
- * texts and the instruction texts printed in those files.
+ * What feeds the selected sheet (A6 counts nothing else): the files it is assembled from, the texts
+ * of ITS pages, and the instruction / cover pages of those files. The tiles of another sheet of the
+ * same file (a multi-sheet Burda PDF), its overview page and pages of other files say nothing about
+ * this sheet.
  */
 export function sheetFeed<F extends { id: FileId }>(
   sheet: {
-    poses: readonly { file: FileId }[];
-    texts: readonly { text: string; src?: { file: FileId } }[];
+    poses: readonly { file: FileId; page: PageIndex }[];
+    texts: readonly { text: string; src?: { file: FileId; page: PageIndex } }[];
   },
   files: readonly F[],
-  docTexts: readonly { file: FileId; text: string }[],
+  docTexts: readonly { file: FileId; page: PageIndex; text: string }[],
+  pages: readonly Pick<PageClassification, 'file' | 'page' | 'cls'>[],
 ): { files: F[]; texts: TextObs[] } {
+  const key = (f: FileId, p: PageIndex) => `${f}:${p}`;
+  const own = new Set(sheet.poses.map((p) => key(p.file, p.page)));
   const feeding = new Set(sheet.poses.map((p) => p.file));
+  const cls = new Map(pages.map((p) => [key(p.file, p.page), p.cls]));
+  const shared = (f: FileId, p: PageIndex) => {
+    const c = cls.get(key(f, p));
+    return feeding.has(f) && (c === 'instructions' || c === 'cover');
+  };
   return {
     files: files.filter((f) => feeding.has(f.id)),
     texts: [
-      ...sheet.texts.map((t) => ({ text: t.text, file: t.src?.file ?? null })),
-      ...docTexts.filter((t) => feeding.has(t.file)),
+      ...sheet.texts
+        .filter((t) => !t.src || own.has(key(t.src.file, t.src.page)))
+        .map((t) => ({ text: t.text, file: t.src?.file ?? null })),
+      ...docTexts
+        .filter((t) => shared(t.file, t.page))
+        .map((t) => ({ text: t.text, file: t.file })),
     ],
   };
 }

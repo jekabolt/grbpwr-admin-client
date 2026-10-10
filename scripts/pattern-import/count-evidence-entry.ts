@@ -131,6 +131,58 @@ function unit() {
   );
   r = ev({ ai: { sizesDrawn: 1 } });
   check(r.n === 1 && kinds(r) === 'nests+ai', 'one-line outlines + AI 1 → 1 (geometry + ai)', r);
+  // 3 · the scaled-copy check covers EVERY face above the piece floor, not only the largest
+  const many = nests(...Array.from({ length: 14 }, () => 1));
+  const deep = apart(14);
+  deep.set(13, { px: deep.get(12)!.px / 1.21, hu: [...deep.get(12)!.hu] });
+  r = ev({ texts: T('SIZE 38'), blobs: many, shapes: deep });
+  check(
+    r.n === null,
+    'SIZE 38 + 14 outlines, the 13th and 14th largest one shape at two scales → NOT inferred',
+    r,
+  );
+  const hid = copy01();
+  r = ev({
+    texts: T('SIZE 38'),
+    blobs: [
+      nests(1)[0],
+      { id: 1, areaMm2: 80_000, depth: 1, junk: 'unlabelled' },
+      { id: 2, areaMm2: 70_000, depth: 1, junk: null },
+    ],
+    shapes: hid,
+  });
+  check(r.n === null, 'SIZE 38 + a scaled copy set aside as unlabelled → NOT inferred', r);
+  r = ev({
+    texts: T('SIZE 38'),
+    blobs: [
+      ...nests(1, 1, 1).filter((b) => b.id !== 1),
+      { id: 1, areaMm2: 300, depth: 1, junk: 'small' },
+    ],
+    shapes: copy01(),
+  });
+  check(r.n === 1, 'a "copy" below the piece floor is not compared → 1', r);
+  r = ev({
+    texts: T('SIZE 38'),
+    blobs: [
+      ...nests(1, 1, 1).filter((b) => b.id !== 1),
+      { id: 1, areaMm2: 90_000, depth: 1, junk: 'tile-frame' },
+    ],
+    shapes: copy01(),
+  });
+  check(r.n === 1, 'tile rectangles are not compared → 1', r);
+  const crowd = Array.from({ length: 4001 }, (_, i) => ({
+    id: i,
+    areaMm2: 500_000 - i,
+    depth: 1,
+    junk: null,
+  }));
+  const crowdShapes = new Map(
+    crowd.map((b) => [b.id, { px: 5000 + b.id, hu: [b.id, b.id, b.id, b.id] }]),
+  );
+  r = ev({ texts: T('SIZE 38'), blobs: crowd, shapes: crowdShapes });
+  check(r.n === null, 'over 4000 outlines: too many to compare → NOT inferred', r);
+  r = ev({ texts: T('SIZE 38'), blobs: crowd.slice(0, 4000), shapes: crowdShapes });
+  check(r.n === 1, '(control) 4000 outlines, all different → 1', r);
   // 4 · rings are a suggestion until proven to be sizes
   r = ev({ texts: T('SIZES 36-46'), blobs: nests(6, 6, 6, 5, 6) });
   check(
@@ -183,19 +235,36 @@ function unit() {
     texts: T('Size 36-46'),
   });
   check(r.n === null, 'files naming no size → no file evidence', r);
-  // 2 · only what feeds the selected sheet: its files, its texts, its files' instruction texts
+  // 1 · only what feeds the selected sheet: its files, the texts of ITS pages, the instruction /
+  //     cover pages of its files — not another sheet's tiles of the same PDF, not its overview
   const fed = sheetFeed(
-    { poses: [{ file: 'f1' }], texts: [{ text: 'SIZE 40', src: { file: 'f1' } }] },
+    {
+      poses: [{ file: 'f1', page: 3 }],
+      texts: [
+        { text: 'SIZE 40', src: { file: 'f1', page: 3 } },
+        { text: 'SIZE 52', src: { file: 'f1', page: 9 } },
+      ],
+    },
     [0, 1, 2].map((i) => ({ id: `f${i}`, name: `coat_${40 + 2 * i}.pdf` })),
     [
-      { file: 'f0', text: 'SIZE 38' },
-      { file: 'f1', text: 'Sizes 40' },
+      { file: 'f0', page: 0, text: 'SIZE 38' },
+      { file: 'f1', page: 0, text: 'Sizes 40' },
+      { file: 'f1', page: 3, text: 'SIZE 40' },
+      { file: 'f1', page: 7, text: 'SIZE 46' },
+      { file: 'f1', page: 8, text: 'SIZE 48' },
+    ],
+    [
+      { file: 'f0', page: 0, cls: 'instructions' },
+      { file: 'f1', page: 0, cls: 'instructions' },
+      { file: 'f1', page: 3, cls: 'tile' },
+      { file: 'f1', page: 7, cls: 'tile' },
+      { file: 'f1', page: 8, cls: 'overview' },
     ],
   );
   check(
     fed.files.map((f) => f.id).join() === 'f1' &&
       fed.texts.map((t) => t.text).join('|') === 'SIZE 40|Sizes 40',
-    "sheet fed by file 1 only: files [1], its own and its file's instruction texts",
+    "sheet = f1 page 3: its file, its page's text and its file's instructions — not f1's other sheet (p7), overview (p8), nor f0",
     fed,
   );
   // 1 · several models: never
