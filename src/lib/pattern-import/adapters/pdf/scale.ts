@@ -6,6 +6,9 @@
 //                matches a dimension written next to it ("10cm x 10cm", "2 inches", "5 cm") and/or
 //                a "test square / Kontrollquadrat / Тестовый квадрат …" label;
 //   grid         a 1 cm (or 1 inch) ruled grid: ≥ 8 equally spaced parallel lines;
+//   declared     (A0.1) the file states its units (an SVG in mm/cm/in whose viewBox agrees, set by
+//                the adapter as `doc.declaredUnits`): confidence 1.0 — unless a labelled test square
+//                on the same file measures otherwise, then 0.5 and the operator looks;
 //   none         nothing found (factor 1, confidence 0) — the wizard asks for a manual measure.
 // factor = declared / measured: multiply page-frame mm by it to get true mm.
 
@@ -352,6 +355,8 @@ function gridCandidates(page: IRPage): ScaleCandidate[] {
 export const detectScale: DetectScaleFn = (doc: SourceDoc) => {
   const all: ScaleCandidate[] = [];
   for (const page of doc.pages) all.push(...squareCandidates(page));
+  const units = declaredCandidate(doc, all);
+  if (units) all.push(units);
   if (!all.some((c) => c.confidence >= 0.9)) {
     const sameBox = (a: BoxMm, b: BoxMm) =>
       Math.abs(a.minX - b.minX) < 0.05 &&
@@ -401,6 +406,35 @@ export const detectScale: DetectScaleFn = (doc: SourceDoc) => {
   }
   return out;
 };
+
+/**
+ * A0.1: the file's own statement of its units (the adapter already mapped user units to mm, so the
+ * factor is 1). A labelled test square that disagrees beyond `scaleWarnRatio` is evidence against
+ * it: the candidate drops to 0.5 and says why — what the drawing does not prove is asked (D3).
+ */
+function declaredCandidate(doc: SourceDoc, squares: ScaleCandidate[]): ScaleCandidate | null {
+  const u = doc.declaredUnits;
+  if (!u) return null;
+  const against = squares.find(
+    (c) =>
+      c.method === 'test-square' &&
+      c.confidence >= 0.9 &&
+      Math.abs(c.factor - 1) > PATIMPORT.scaleWarnRatio,
+  );
+  const page = doc.pages[0]?.page ?? 0;
+  return {
+    method: 'declared',
+    factor: 1,
+    measuredMm: null,
+    declaredMm: null,
+    evidence: {
+      page,
+      bbox: { minX: 0, minY: 0, maxX: u.widthMm, maxY: u.heightMm },
+      text: `units in the file: ${u.evidence}${against ? ` — but the test square measures ×${against.factor.toFixed(4)}` : ''}`,
+    },
+    confidence: against ? 0.5 : 1,
+  };
+}
 
 /** Style.clip carries its box in page mm (`<kind><op>:x0,y0,x1,y1`, see extract.ts) — scale it too. */
 function scaleClip(clip: string | null, f: number): string | null {

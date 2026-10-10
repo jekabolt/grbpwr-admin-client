@@ -726,6 +726,61 @@ const same = (a, b, tol = 1e-3) =>
     ],
   );
 
+  // A0.1 · units in the file → the scale step's 'declared' at confidence 1 (no tick to give);
+  // anything that does not prove 1 user unit = the same mm on both axes stays with the test square
+  {
+    const declared = async (svg) => {
+      const q = await sv(svg);
+      const c = m.detectScale(q.doc)[0];
+      return { u: q.doc.declaredUnits ?? null, c: `${c.method}/${c.confidence}/${c.factor}` };
+    };
+    const head = (attrs) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" ${attrs}><path d="M0,0 L10,10" stroke="#000"/></svg>`;
+    for (const [what, attrs, unit, uu] of [
+      ['mm + viewBox 1:1', 'width="1000mm" height="700mm" viewBox="0 0 1000 700"', 'mm', 1],
+      ['cm + viewBox', 'width="10cm" height="5cm" viewBox="0 0 100 50"', 'cm', 1],
+      ['in + viewBox', 'width="2in" height="1in" viewBox="0 0 2 1"', 'in', 25.4],
+      [
+        'mm at 96 dpi (Seamly2D)',
+        'width="297mm" height="210mm" viewBox="0 0 1122.5197 793.7008"',
+        'mm',
+        25.4 / 96,
+      ],
+    ]) {
+      const d = await declared(head(attrs));
+      check(
+        U,
+        `A0.1 SVG ${what} → declared ${unit}, 1 unit = ${uu.toFixed(4)} mm, scale declared/1/1`,
+        d.u?.unit === unit && near(d.u.userUnitMm, uu, 1e-4) && d.c === 'declared/1/1',
+        { unit: d.u?.unit, userUnitMm: d.u?.userUnitMm, best: d.c },
+        { unit, userUnitMm: uu, best: 'declared/1/1' },
+      );
+    }
+    for (const [what, attrs] of [
+      ['px size', 'width="800px" height="600px" viewBox="0 0 800 600"'],
+      ['unitless size', 'width="800" height="600" viewBox="0 0 800 600"'],
+      ['no size', 'viewBox="0 0 800 600"'],
+      ['mm size, no viewBox', 'width="100mm" height="100mm"'],
+      ['width only', 'width="100mm" viewBox="0 0 100 100"'],
+      ['mixed units', 'width="100mm" height="10cm" viewBox="0 0 100 100"'],
+      ['pt size', 'width="72pt" height="72pt" viewBox="0 0 72 72"'],
+      ['aspect differs (letterboxed)', 'width="100mm" height="100mm" viewBox="0 0 200 100"'],
+      [
+        'aspect differs (stretched)',
+        'width="100mm" height="100mm" viewBox="0 0 200 100" preserveAspectRatio="none"',
+      ],
+    ]) {
+      const d = await declared(head(attrs));
+      check(
+        U,
+        `A0.1 SVG ${what} → not declared (the test square decides)`,
+        d.u === null && !d.c.startsWith('declared'),
+        { unit: d.u?.unit ?? null, best: d.c },
+        { unit: null, best: 'not declared' },
+      );
+    }
+  }
+
   s = await sv(
     '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 200 100" preserveAspectRatio="none"><line x1="0" y1="0" x2="200" y2="100" stroke="#000"/></svg>',
   );
