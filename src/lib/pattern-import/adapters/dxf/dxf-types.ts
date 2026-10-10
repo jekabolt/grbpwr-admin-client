@@ -244,6 +244,9 @@ export type DxfBlockPiece = {
    * sizes (source or operator) refuses the block instead.
    */
   seamPair: { offsetMm: number } | null;
+  /** F14 R5: identical INSERT copies of this block (translation only) collapsed into this piece —
+   * it is cut this many times per garment. Unset = inserted once. */
+  instances?: number;
 };
 
 export type DxfIdentity = {
@@ -304,5 +307,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     outerIsSeam: boolean;
     /** The block's `seamPair` allowance, mm: refused when the operator says the run has 2 sizes. */
     seamPairMm?: number;
+    /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */
+    instances?: number;
   };
 };

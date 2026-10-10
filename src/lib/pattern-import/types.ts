@@ -1680,6 +1680,13 @@ export const PATIMPORT = {
   manifestPrologueWarnBytes: 48 * 1024,
   /** G3 (M7): a contiguous stretch of source wall off the written line this long blocks. */
   coverageGapMm: 10,
+  /**
+   * G15 (F14e, Codex R1): a band cut is carried by its drawn tick only where that tick (or the
+   * piece's walls) runs along the cut CONTINUOUSLY for at least this share of the cut's length —
+   * one contiguous run within `snapMm`, per edge. Corpus: reef's only tick-carried cut (L, rank 3)
+   * is 91.1 % on its tick (86.6 mm of 95.25 mm; the 8.5 mm it stops short is what the cut carries).
+   */
+  derivedAlongMinShare: 0.85,
   // Input guards (M6), checked before anything is read; the worker re-checks.
   maxInputBytes: 150 * 1024 * 1024,
   maxInputFiles: 40,

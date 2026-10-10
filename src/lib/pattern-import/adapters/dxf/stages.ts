@@ -418,6 +418,7 @@ function candidateOf(
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
+      ...(p.instances ? { instances: p.instances } : {}),
     },
   };
 }
