@@ -1111,8 +1111,9 @@ export function buildPieceSpecsDetailed(
         seed,
         kind: 'allowance',
         shown: `${A.meaning}+${allowMm}`,
-        detail:
-          'no allowance text and no second drawn line: is the outline the cut or the seam line?',
+        detail: A.evidence.some((e) => /only for some pieces/.test(e))
+          ? `${A.evidence.find((e) => /only for some pieces/.test(e))}: is the outline the cut or the seam line?`
+          : 'no allowance text and no second drawn line: is the outline the cut or the seam line?',
       });
     // E4: the operator's "cut on fold" (an unfold they asked for) answers the count too — one
     // whole piece per garment unless the sheet prints otherwise

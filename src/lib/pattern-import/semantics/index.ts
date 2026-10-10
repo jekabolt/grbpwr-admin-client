@@ -10,7 +10,13 @@
 //   mirrorAcross(pts, grain)                  the other hand of a pair
 //   classifyFeatures(cand, set, sheet?)       notches / drills / grain / internal from chains
 
-export { detectAllowance, allowanceFromTexts, readAllowanceText, measureGap } from './allowance';
+export {
+  detectAllowance,
+  allowanceFromTexts,
+  pieceOnlyEvidence,
+  readAllowanceText,
+  measureGap,
+} from './allowance';
 export { buildPieceSpecs, buildPieceSpecsDetailed, type SemanticsDetail } from './build';
 export { offsetContour, parallelDeviation, type OffsetResult } from './offset';
 export { unfold, foldLineOnCut, straightFoldEdge, unfoldAreaError, type FoldLine } from './fold';

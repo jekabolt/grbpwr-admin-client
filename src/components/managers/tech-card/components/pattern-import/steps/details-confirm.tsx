@@ -40,8 +40,11 @@ export function OutlineQuestion({
       className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5'
     >
       <Text size='micro' component='p' className='min-w-0 flex-1'>
-        <b>! what is the drawn outline?</b> the sheet has no allowance note and no second line (
-        {open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
+        <b>! what is the drawn outline?</b>{' '}
+        {current.evidence.some((e) => /only for some pieces/.test(e))
+          ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
+          : 'the sheet has no allowance note and no second line'}{' '}
+        ({open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
       </Text>
       <span className='flex flex-wrap items-center gap-1.5'>
         <Button

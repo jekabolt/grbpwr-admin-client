@@ -80,6 +80,7 @@ import {
 import { pointInPoly } from '../pieces/geom';
 import {
   allowanceFromTexts,
+  pieceOnlyEvidence,
   buildPieceSpecsDetailed,
   detectAllowance,
   type SemanticsDetail,
@@ -886,7 +887,14 @@ export class Session {
             const found = detectAllowance(sheet, this.families!, set);
             if (found.origin !== 'default') return found;
             // the statement is often on an instruction page, not on the sheet itself
-            return allowanceFromTexts(this.docTexts).decision ?? input.fileAllowance;
+            const t = allowanceFromTexts(this.docTexts);
+            if (t.decision) return t.decision;
+            // per-piece / per-edge sentences only (FLY M3): shown as context, the outline is
+            // still asked (origin stays 'default')
+            const ctx = t.context.length
+              ? [pieceOnlyEvidence(t.context)]
+              : found.evidence.filter((e) => /only for some pieces/.test(e));
+            return ctx.length ? { ...input.fileAllowance, evidence: ctx } : input.fileAllowance;
           })()
         : input.fileAllowance;
     const detail = buildPieceSpecsDetailed(

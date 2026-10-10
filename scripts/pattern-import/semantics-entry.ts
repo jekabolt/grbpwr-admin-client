@@ -553,6 +553,50 @@ export async function main(): Promise<number> {
       readAllowanceText('Patron sans marges de couture')?.included === false,
       'readAllowanceText: one statement',
     );
+    // FLY M3: a sentence that names a piece, or gives values edge by edge, is not the file's
+    const pieceOnly: string[] = [
+      'Кокетки – по плечевому срезу и срезу горловины припуск 1.5 см, по остальным 2 см.',
+      'Капюшон - по всем срезам припуск 1.5 см.',
+      'Карман - по верхнему срезу припуск 3.5 см, по остальным срезам припуск 2 см.',
+      'Hood: seam allowance 1.5 cm on all edges.',
+      'Seam allowance 1 cm on the shoulder and neck edges, 2 cm on the other edges.',
+    ];
+    for (const t of pieceOnly) {
+      const r = allowanceFromTexts([t]);
+      ck(
+        r.decision == null && r.context.length > 0,
+        `M3 piece/edge sentence is context, not file evidence: «${t.slice(0, 48)}»`,
+        r.decision
+          ? `${r.decision.meaning} ${r.decision.allowanceMm}`
+          : `context ${r.context.length}`,
+      );
+    }
+    const general: [string, number][] = [
+      ['Nahtzugaben 1 cm', 10],
+      ['Все припуски 1 см.', 10],
+      ['Seam allowance 1 cm not included.', 10],
+      ['Naht- und Saumzugaben müssen 1,5 cm an allen Kanten zugegeben werden.', 15],
+    ];
+    for (const [t, mm] of general) {
+      const d = allowanceFromTexts([t]).decision;
+      ck(
+        !!d && d.allowanceMm === mm,
+        `M3 general sentence stays file evidence: «${t.slice(0, 48)}»`,
+        d ? `${d.meaning} ${d.allowanceMm}` : 'none',
+      );
+    }
+    {
+      // a general "without" next to per-piece amounts: no silent 10 mm default, the outline is asked
+      const r = allowanceFromTexts([
+        'Детали выкраиваются без припусков.',
+        'Кокетки – по плечевому срезу припуск 1.5 см, по остальным 2 см.',
+      ]);
+      ck(
+        r.decision == null,
+        'M3 "without" + per-piece amounts only → no file decision (asked, not 10 mm default)',
+        r.decision ? `${r.decision.meaning} ${r.decision.allowanceMm}` : 'none',
+      );
+    }
     // the real sheets
     const truth = JSON.parse(fs.readFileSync(path.join(CORPUS, 'truth.json'), 'utf8')) as {
       samples: {
@@ -580,12 +624,20 @@ export async function main(): Promise<number> {
       const got = allowanceFromTexts(texts).decision;
       const inc = s.seam_allowance.included;
       // known only when the sheet itself says it (truth quotes it); conventions are not text
-      const wantKnown = (inc === true || inc === false) && !!s.seam_allowance.source_quote;
+      // a per-piece table (mm is a description, not one number): the file has no value — asked
+      const perPiece = typeof s.seam_allowance.mm === 'string';
+      const wantKnown =
+        (inc === true || inc === false) && !!s.seam_allowance.source_quote && !perPiece;
       const wantMm =
         typeof s.seam_allowance.mm === 'number' ? (s.seam_allowance.mm as number) : null;
       let ok: boolean;
       let detail: string;
-      if (!got) {
+      if (perPiece) {
+        ok = !got;
+        detail = got
+          ? `per-piece allowances applied to the file as ${got.allowanceMm} mm (FLY M3)`
+          : 'per-piece allowances only → no file decision, the outline is asked';
+      } else if (!got) {
         ok = !wantKnown || texts.join('').length < 50; // no text layer (leonie scan, wm strokes) is honest
         detail = `no statement found (${texts.length} text items)${wantKnown ? ` — truth: ${inc ? 'included' : 'without'}` : ''}`;
       } else {
@@ -789,6 +841,30 @@ export async function main(): Promise<number> {
       failing(gh.report).includes('G6-offset'),
       'negative control: hull forced onto the cut → G6 blocks',
       checkOf(gh.report, 'G6-offset')?.note.slice(0, 120) ?? '',
+    );
+    // FLY copy 2 (b): "cut line · as drawn" adds NO allowance — the cut ring is the drawn outline;
+    // "seam line" grows it by the allowance
+    const CUT10: AllowanceDecision = { ...SEAM10, meaning: 'cut' };
+    const dc = buildPieceSpecsDetailed(
+      input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } }),
+    ).output.pieces[0];
+    const drawnA = (r: number) =>
+      Math.abs(
+        areaOf(F.families.find((f) => f.seed === 1)!.candidates.find((c) => c.rank === r)!.outer),
+      );
+    const cutSame = dc.sizes.every(
+      (z) => Math.abs(Math.abs(areaOf(z.cut)) - drawnA(z.rank)) / drawnA(z.rank) < 1e-6,
+    );
+    const seamGrows = p.sizes.every((z) => Math.abs(areaOf(z.cut)) > drawnA(z.rank) * 1.01);
+    ck(
+      cutSame && seamGrows && dc.allowance.meaning === 'cut',
+      'cut line · as drawn: cut ring == drawn outline (no 10 mm added); seam line: cut ring grows',
+      dc.sizes
+        .map(
+          (z) =>
+            `${(Math.abs(areaOf(z.cut)) / 100).toFixed(1)}/${(drawnA(z.rank) / 100).toFixed(1)}`,
+        )
+        .join(' '),
     );
     json.d1 = {
       gate: g.report.checks.map((c) => [c.id, c.ok, c.value]),
