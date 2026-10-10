@@ -242,6 +242,8 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
       closed,
       style: intern(c.style, c.pose),
       src: c.path.src,
+      // A8: the clean stage's mask rides with the path into the sheet
+      ...(c.path.background ? { background: c.path.background } : {}),
     });
   };
   for (const page of placed.map((_, i) => i)) {

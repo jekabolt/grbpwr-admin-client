@@ -21,6 +21,7 @@ import type {
   CardSize,
   DraftScopeTarget,
   IRText,
+  PageMaskEdit,
   PieceEdit,
   PieceFamily,
   PtMm,
@@ -487,7 +488,13 @@ type Rec = Record<string, unknown> & {
   clicks?: Clicks;
 };
 
-export async function runCase(c: Case): Promise<Rec> {
+/** Probe hooks (clean.mjs): the clean stage's edits, and the session once the pieces are found. */
+export type CaseHooks = {
+  cleanEdits?: PageMaskEdit[];
+  onPieces?: (s: Session) => void;
+};
+
+export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
   const rec: Rec = { id: c.id, group: c.group, files: c.files, ops: [], ms: {} };
   /** One operator answer: `count` units of `kind` (A7: clicks = CLICKS[kind] × count). */
   const op = (kind: OpKind, label: string, count = 1) =>
@@ -516,9 +523,18 @@ export async function runCase(c: Case): Promise<Rec> {
   try {
     // 1 · files
     const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    // A8: the input pages cleaned before anything is parsed (no operator edit on the e2e pass)
+    const cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
     const pageCls: Record<string, number> = {};
-    for (const p of ex.pages) pageCls[p.cls] = (pageCls[p.cls] ?? 0) + 1;
-    const best = ex.scale[0];
+    for (const p of cl.classes) pageCls[p.cls] = (pageCls[p.cls] ?? 0) + 1;
+    rec.clean = {
+      summary: cl.summary,
+      offered: cl.offered,
+      dropped: cl.dropped.length,
+      squares: cl.scaleHints.map((h) => `${h.declaredMm} mm conf ${h.confidence}`),
+      notes: cl.notes.slice(0, 4),
+    };
+    const best = cl.scale[0];
     rec.read = {
       kinds: [...new Set(ex.files.map((f) => f.kind))].join(','),
       pages: ex.pages.length,
@@ -548,6 +564,7 @@ export async function runCase(c: Case): Promise<Rec> {
     if (ex.presegmented) skipped.push(...(needsHuman ? [] : ['scale']), 'sheet');
     // 3 · sheet
     const as = await run('assemble', { sheet: c.sheet ?? 0 });
+    if (as.clean) (rec.clean as Record<string, unknown>).sheet = as.clean.summary;
     // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
     if (!ex.presegmented && singlePageSheet(ex.pages, as)) skipped.push('sheet');
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
@@ -837,6 +854,7 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.reason = 'no region closes';
       return rec;
     }
+    hooks.onPieces?.(s);
     if (process.env.E2E_DUMP)
       writeFileSync(
         resolve(dir, 'families.json'),

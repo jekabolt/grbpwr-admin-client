@@ -18,6 +18,7 @@ import Text from 'ui/components/text';
 import { kindOfName } from '../formats';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, fmtBytes, fmtPct } from '../ui-bits';
+import { CleanBlock, roleEdit } from './files-clean';
 
 const ACCEPT = '.pdf,.dxf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff';
 const KIND_LABEL: Record<string, string> = {
@@ -43,6 +44,19 @@ export function FilesStep({
   const { session, inputs, extracted } = api;
   const [staged, setStaged] = useState<File[]>(inputs.fileList);
   const [over, setOver] = useState(false);
+  /** The page drawn with its mask (`file:page`); null = the first page with something set aside. */
+  const [shownPage, setShownPage] = useState<string | null>(null);
+  const masks = new Map(
+    (session.clean?.pages ?? []).map((m) => [
+      `${m.file}:${m.page}`,
+      m.items.reduce((a, it) => a + (it.applied ? it.lines : 0), 0),
+    ]),
+  );
+  const setRole = (file: string, page: number, role: PageClass) =>
+    void api.dispatch({
+      type: 'clean',
+      edits: roleEdit(inputs.cleanEdits, file, page, role),
+    });
   const pick = useRef<HTMLInputElement>(null);
   const read = session.files.length > 0 && session.scale.candidates.length > 0;
   const dirty =
@@ -196,7 +210,7 @@ export function FilesStep({
                 !!session.busy ||
                 staged.some((f) => f.name.toLowerCase().endsWith('.eps'))
               }
-              loading={session.busy?.stage === 'extract'}
+              loading={session.busy?.stage === 'extract' || session.busy?.stage === 'clean'}
               onClick={() => void api.dispatch({ type: 'files', files: staged })}
             >
               {read && !dirty ? 're-read files' : 'read files'}
@@ -260,6 +274,7 @@ export function FilesStep({
           </Text>
         ) : (
           <div className='space-y-2'>
+            {!extracted.presegmented && <CleanBlock api={api} page={shownPage} />}
             {session.files.map((f) => (
               <div key={f.id}>
                 <GroupLabel flush>
@@ -273,13 +288,25 @@ export function FilesStep({
                       <th data-align='left'>read as</th>
                       <th>sure</th>
                       <th data-align='left'>why</th>
+                      {session.clean && !extracted.presegmented && (
+                        <>
+                          <th title='lines set aside on this page before reading'>set aside</th>
+                          <th aria-label='page role' />
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {session.pages
                       .filter((p) => p.file === f.id)
                       .map((p) => (
-                        <tr key={p.page}>
+                        <tr
+                          key={p.page}
+                          className={
+                            shownPage === `${p.file}:${p.page}` ? 'bg-hairline' : 'cursor-pointer'
+                          }
+                          onClick={() => p.cls === 'tile' && setShownPage(`${p.file}:${p.page}`)}
+                        >
                           <td>{p.page + 1}</td>
                           <td data-align='left'>
                             <Pill
@@ -296,6 +323,28 @@ export function FilesStep({
                           <td data-align='left' className='text-labelColor'>
                             {p.why}
                           </td>
+                          {session.clean && !extracted.presegmented && (
+                            <>
+                              <td className='tabular-nums'>
+                                {masks.get(`${p.file}:${p.page}`) || '—'}
+                              </td>
+                              <td>
+                                {/* the door: a tile set aside, a set-aside page read as a tile */}
+                                <Button
+                                  variant='underline'
+                                  size='xs'
+                                  className='text-labelColor hover:text-textColor'
+                                  disabled={!!session.busy}
+                                  onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation();
+                                    setRole(p.file, p.page, p.cls === 'tile' ? 'blank' : 'tile');
+                                  }}
+                                >
+                                  {p.cls === 'tile' ? 'set aside' : 'read as tile'}
+                                </Button>
+                              </td>
+                            </>
+                          )}
                         </tr>
                       ))}
                   </tbody>

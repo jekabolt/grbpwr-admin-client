@@ -91,6 +91,12 @@ export type IRPath = {
   closed: boolean;
   style: StyleId;
   src: PathSource;
+  /**
+   * A8 (clean stage): the page furniture this path was masked as. Masked, never deleted: assembly
+   * still sees it (tile frames and registration marks register tiles); chains, the legend, seeds,
+   * walls and the Set-of-Mark render skip it. Absent = line work.
+   */
+  background?: BackgroundKind;
 };
 
 export type IRText = {
@@ -104,6 +110,8 @@ export type IRText = {
   rotationDeg: Deg;
   layer: string | null;
   src: PathSource;
+  /** A8: page furniture text (a tile label repeated on every tile, a copyright line). */
+  background?: BackgroundKind;
 };
 
 /** Metadata of an embedded raster. The pixels live in the session's blob store under `id`. */
@@ -1612,6 +1620,7 @@ export type CombineNamesFn = (
 
 export type StageName =
   | 'extract'
+  | 'clean'
   | 'scale'
   | 'assemble'
   | 'chains'
@@ -1641,12 +1650,19 @@ export type StageIO = {
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
     };
   };
+  /** A8: the input pages cleaned before anything is parsed (masks, dropped pages, scale hints). */
+  clean: { in: CleanInput; out: CleanOutput };
   scale: { in: { decision: ScaleDecision }; out: { applied: ScaleDecision } };
   assemble: {
     in: { sheet: number; override?: GridOverride };
     out: {
       sheet: Omit<Sheet, 'paths' | 'texts' | 'rasters' | 'styles'>;
       previewPaths: Float32Array[];
+      /**
+       * A8 8b: what the sheet-wide pass masked after assembly (a watermark whose letters the tile
+       * borders cut), in sheet frame, plus the tinted preview of every masked line by kind.
+       */
+      clean?: SheetClean;
     };
   };
   chains: {
@@ -1799,6 +1815,8 @@ export type ImportSession = {
   step: WizardStep;
   files: SourceFileInfo[];
   pages: PageClassification[];
+  /** A8: the latest clean stage output (null before the files are read / for the fixture). */
+  clean?: StageIO['clean']['out'] | null;
   scale: { candidates: ScaleCandidate[]; decision: ScaleDecision | null };
   sheet: StageIO['assemble']['out'] | null;
   chains: StageIO['chains']['out'] | null;
@@ -1817,6 +1835,8 @@ export type ImportSession = {
 /** Transitions the wizard may take; the state machine is in 08-CONTRACT §6. */
 export type WizardEvent =
   | { type: 'files'; files: File[] }
+  /** A8: the operator's mask edits (undo a kind, accept a suggestion, re-include a page). */
+  | { type: 'clean'; edits: PageMaskEdit[] }
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
@@ -1862,6 +1882,148 @@ export type AutoDecision = {
 export type GrainProposal = { a: PtMm; b: PtMm; why: string };
 /** A1: a proposal for one seed, with the evidence kinds it stands on (one drawn evidence or geometry). */
 export type SeedGrainProposal = GrainProposal & { seed: SeedId; evidence: GrainEvidenceKind[] };
+
+// ── A8 clean stage: page furniture masked on the INPUT pages, before anything is parsed ─────────
+
+/**
+ * What a masked line is. `curve-text` is TEXT drawn as strokes (a piece label "ID: 1 PRZÓD SIZE: M"):
+ * masked out of the line work, kept as text evidence (`CurveText`).
+ */
+export type BackgroundKind =
+  | 'grid'
+  | 'tile-frame'
+  | 'regmark'
+  | 'tile-label'
+  | 'watermark'
+  | 'curve-text'
+  | 'logo'
+  | 'copyright'
+  | 'table'
+  | 'legend-swatch'
+  | 'test-square'
+  | 'stray';
+
+/**
+ * D3 for the mask: 'auto' = two independent evidences (or page-relative repetition on ≥ 3 tiles)
+ * — applied, undoable per kind; 'suggest' = one evidence — shown, applied only when accepted.
+ */
+export type MaskStatus = 'auto' | 'suggest';
+
+/** One masked object on one page (a grid, a text band, a test square, the tile frame). */
+export type MaskItem = {
+  /** Stable for the same input: `${file}:${page}:${kind}:${n}` (8b items: `sheet:watermark:${n}`). */
+  id: string;
+  kind: BackgroundKind;
+  status: MaskStatus;
+  /** Each independent evidence, human-readable ("lattice 10 mm both ways", "repeats on 14 tiles"). */
+  evidence: string[];
+  confidence: number;
+  /** Path ids on the page (`IRPath.id`). */
+  paths: PathId[];
+  /** Text ids on the page (`IRText.id`), for text furniture. */
+  texts?: TextId[];
+  /** Lines (chains) it covers — what the summary counts ("203 grid lines"). */
+  lines: number;
+  /** Page frame, mm. */
+  bbox: BoxMm;
+  /** What it reads, when known (a text label's string, the watermark's word). */
+  label?: string;
+  /** The operator's edit applies: auto undone (false) / suggestion accepted (true); absent = as found. */
+  applied: boolean;
+};
+
+/** A8: the page's role as the clean stage uses it — `PageClass` after the operator's door. */
+export type PageMask = {
+  file: FileId;
+  page: PageIndex;
+  role: PageClass;
+  /** The operator changed the role (re-included a page, or dropped one). */
+  roleEdited?: boolean;
+  /** A page set aside: 'auto' = no line work that could be pattern; 'suggest' = has some — shown. */
+  status?: MaskStatus;
+  items: MaskItem[];
+};
+
+/**
+ * The operator's edits to the mask (the files step): per kind for the whole run (or one page), per
+ * item, or a page's role (`tile` re-includes a page the classifier set aside, `blank` drops one).
+ */
+export type PageMaskEdit =
+  | { kind: BackgroundKind; keep: boolean; file?: FileId; page?: PageIndex }
+  | { item: string; keep: boolean }
+  | { file: FileId; page: PageIndex; role: PageClass };
+
+/** Text drawn as strokes: where it is (page frame), its direction and glyph height — SoM crops, seeds. */
+export type CurveText = {
+  file: FileId;
+  page: PageIndex;
+  bbox: BoxMm;
+  along: 'x' | 'y';
+  glyphs: number;
+  heightMm: Mm;
+};
+
+/** A9 hook (the early AI page call, later phase): one evidence each where it is given. Empty today. */
+export type CleanAiHints = {
+  pages?: { file: FileId; page: PageIndex; role: PageClass; confidence: number }[];
+  /** Junk boxes on a page, page frame, with what the AI read there ("WWW.PAPAVERO.PL"). */
+  junk?: { file: FileId; page: PageIndex; bbox: BoxMm; kind: BackgroundKind; text?: string }[];
+};
+
+export type CleanInput = {
+  edits: PageMaskEdit[];
+  /** A9 (later): the early AI call's page roles and junk boxes. Absent / empty today. */
+  aiHints?: CleanAiHints;
+};
+
+/** The tinted picture of one page: its live lines and its masked lines by kind (page frame). */
+export type CleanPreview = {
+  file: FileId;
+  page: PageIndex;
+  widthMm: Mm;
+  heightMm: Mm;
+  live: Float32Array[];
+  masked: { kind: BackgroundKind; status: MaskStatus; applied: boolean; lines: Float32Array[] }[];
+};
+
+export type CleanOutput = {
+  pages: PageMask[];
+  /** Pages set aside before anything else (cover, instructions, overview, blank). */
+  dropped: {
+    file: FileId;
+    page: PageIndex;
+    cls: PageClass;
+    why: string;
+    /**
+     * 'auto' = the page holds no line work that could be pattern; 'suggest' = it does (`drawing`
+     * says what) — still set aside as the classifier said, shown with its thumbnail to check.
+     */
+    status: MaskStatus;
+    drawing?: string;
+  }[];
+  /** Page classification after the operator's role edits — what assembly reads. */
+  classes: PageClassification[];
+  /** Lines masked per kind (applied items only) — the "removed: …" line. */
+  summary: Partial<Record<BackgroundKind, number>>;
+  /** Lines per kind offered but not applied (suggestions not accepted, autos undone). */
+  offered: Partial<Record<BackgroundKind, number>>;
+  /** Scale candidates the clean stage found (a test square drawn as line work). */
+  scaleHints: ScaleCandidate[];
+  /** extract's scale candidates merged with `scaleHints`, best first — what the scale step offers. */
+  scale: ScaleCandidate[];
+  curveTexts: CurveText[];
+  previews: CleanPreview[];
+  /** Detector notes for the error report (lines protected as walls, pages skipped). */
+  notes: string[];
+};
+
+/** A8 8b: the sheet-wide pass after assembly (sheet frame). */
+export type SheetClean = {
+  items: (Omit<MaskItem, 'paths' | 'texts'> & { pages: { file: FileId; page: PageIndex }[] })[];
+  summary: Partial<Record<BackgroundKind, number>>;
+  /** Masked lines by kind for the sheet view, sheet frame (every applied 8a + 8b mask). */
+  masked: { kind: BackgroundKind; lines: Float32Array[] }[];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 12. Card-side consumption (F6b) — the manifest-aware paths of existing functions

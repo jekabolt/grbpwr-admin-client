@@ -177,6 +177,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   let ignored = 0;
   let nItems = 0;
   for (const p of sheet.paths) {
+    // A8: page furniture the clean stage masked is not line work (the flag, never a deletion)
+    if (p.background) continue;
     const st = styles.get(p.style);
     if (!st) continue;
     const it = itemOf(p, st);
