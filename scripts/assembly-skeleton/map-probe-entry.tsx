@@ -201,7 +201,7 @@ function pickSteps() {
   };
 }
 
-function printSeams(code: string) {
+function printSeams(code: string, plain = false) {
   const ops = form?.getValues('operations') ?? [];
   const pieces = (form?.getValues('pieces') ?? []).map((p) => ({
     lineKey: p.lineKey ?? '',
@@ -218,14 +218,23 @@ function printSeams(code: string) {
       outputUnitName: (o.outputUnitName ?? '').trim(),
     })),
   });
+  const c = form?.getValues('construction');
   const sheet = seamSheetOf(
     graph,
     ops.map((o) => ({
+      // `plain`: the sheet without the «how it is sewn» words — the base layout D8 sizes for A4.
+      ...(plain ? {} : o),
       inputKeys: o.inputKeys ?? [],
       outputUnitKey: o.outputUnitKey ?? '',
       sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
     })),
     M,
+    plain
+      ? { machines: [] }
+      : {
+          defaultSeamClass: c?.defaultSeamClass,
+          machines: c?.equipmentDefaults?.machines ?? [],
+        },
   );
   const doc = typesetSeams(
     M,
@@ -276,6 +285,8 @@ function printSeams(code: string) {
     families: sheet?.families.length ?? 0,
     key: sheet?.key.length ?? 0,
     unread: sheet?.key.filter((k) => k.unread).length ?? 0,
+    legend: sheet?.legend ?? [],
+    keyText: sheet?.key.map((k) => `${k.number} ${k.text}`) ?? [],
   };
 }
 
@@ -285,7 +296,9 @@ declare global {
       mount: (c: StandCard) => void;
       pick: () => ReturnType<typeof pickSteps>;
       hasGraph: () => boolean;
-      print: (code: string) => ReturnType<typeof printSeams>;
+      print: (code: string, plain?: boolean) => ReturnType<typeof printSeams>;
+      set: (path: string, value: unknown) => void;
+      get: (path: string) => unknown;
     };
   }
 }
@@ -302,4 +315,8 @@ window.__map = {
   pick: pickSteps,
   hasGraph: () => !!graph,
   print: printSeams,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  set: (path, value) => form?.setValue(path as any, value as any, { shouldDirty: true }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get: (path) => form?.getValues(path as any),
 };

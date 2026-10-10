@@ -25,6 +25,8 @@ import type { WorkCatalog } from '../operation-work';
 import { UnitGlyph, UnitTile, useUnitPictures } from '../unit-silhouette';
 import { PairShape } from './pair-shape';
 import { PieceMapShape } from './piece-map-shape';
+import type { SewnField } from './sewn';
+import { SewnStrip } from './sewn-strip';
 import { MACHINE, type MapModel } from './use-map-model';
 
 /** Внутренняя ширина колонки 320px за вычетом паддингов блока (16 × 2) и рамки. */
@@ -40,12 +42,15 @@ export function StepView({
   index,
   workCatalog,
   onPick,
+  onDoor,
 }: {
   model: MapModel;
   index: number;
   workCatalog: WorkCatalog | undefined;
   /** Строка THEN — ссылка на шаг: выбрать его (липко) и открыть в рельсе. */
   onPick: (index: number) => void;
+  /** Пустой слот полосы «как шьют»: открыть шаг в рельсе и поставить фокус в поле. */
+  onDoor: (index: number, field: SewnField) => void;
 }) {
   const { read, ops, pieceName, unitName, isUnit } = model;
   const op = ops[index];
@@ -85,6 +90,7 @@ export function StepView({
     .filter((s) => s && !/unknown|not set/i.test(s))
     .join(' · ');
   const then = thenChain(read.steps, index);
+  const sewn = model.sewnOf(index);
 
   const facts: string[] =
     inputs.length === 0
@@ -203,6 +209,13 @@ export function StepView({
           </Text>
         ))}
       </div>
+
+      {sewn.length > 0 && (
+        <div>
+          <GroupLabel flush>how it is sewn</GroupLabel>
+          <SewnStrip tiles={sewn} onDoor={(f) => onDoor(index, f)} />
+        </div>
+      )}
 
       {then.length > 0 && (
         <div>

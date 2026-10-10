@@ -24,12 +24,13 @@ export const PieceMapShape = memo(function PieceMapShape({
   onPickStep,
   numbers = true,
   label,
+  titleOf,
 }: {
   picture: PieceMapPicture;
   boxW: number;
   boxH: number;
-  /** Индекс шага, который сейчас показан, или null. */
-  active: number | null;
+  /** Шаг (или шаги строки легенды), который сейчас показан, или null. */
+  active: number | readonly number[] | null;
   /** Номер шага по индексу (позиционный: (i + 1) · 10). */
   numberOf: (index: number) => number;
   onHoverStep?: (index: number | null) => void;
@@ -37,7 +38,10 @@ export const PieceMapShape = memo(function PieceMapShape({
   /** Без номеров — плитка входа в STEP, где номера не нужны. */
   numbers?: boolean;
   label: string;
+  /** Подсказка номера: полоса «как шьют» шага словами. */
+  titleOf?: (index: number) => string;
 }) {
+  const isHot = (st: number) => (Array.isArray(active) ? active.includes(st) : active === st);
   // Поле под номера — в ПИКСЕЛЯХ, как у прототипа: тонкий воротник получает то же место, что полочка.
   const padPx = numbers ? 14 : 4;
   const px = Math.min(
@@ -121,7 +125,7 @@ export const PieceMapShape = memo(function PieceMapShape({
         />
       ))}
       {picture.edges.map((e) => {
-        const hot = active != null && e.steps.includes(active);
+        const hot = active != null && e.steps.some(isHot);
         const dim = active != null && !hot;
         return (
           <polyline
@@ -149,7 +153,7 @@ export const PieceMapShape = memo(function PieceMapShape({
               style={{ fontSize: NUM_PX * u, fontWeight: 700, ...halo }}
             >
               {e.steps.map((s, k) => {
-                const hot = active === s;
+                const hot = isHot(s);
                 const dim = active != null && !hot;
                 return (
                   <Fragment key={s}>
@@ -164,6 +168,7 @@ export const PieceMapShape = memo(function PieceMapShape({
                       onMouseLeave={onHoverStep ? () => onHoverStep(null) : undefined}
                       onClick={onPickStep ? () => onPickStep(s) : undefined}
                     >
+                      {titleOf && <title>{`${numberOf(s)} · ${titleOf(s)}`}</title>}
                       {numberOf(s)}
                     </tspan>
                   </Fragment>

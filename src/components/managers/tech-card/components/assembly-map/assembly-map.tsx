@@ -17,6 +17,7 @@ import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { activeOf, useActiveStep, useActiveStepStore } from './active-step';
 import { PiecesView } from './pieces-view';
 import { StepView } from './step-view';
+import type { SewnField } from './sewn';
 import { useMapModel } from './use-map-model';
 
 export type MapView = 'step' | 'pieces' | 'sketch';
@@ -80,6 +81,43 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
   const chosen = activeOf(snap);
   const index = chosen != null && chosen < count ? chosen : model.firstMachine;
   const pick = (i: number) => store?.select(i, 'map');
+  // ДВЕРЬ ПУСТОГО СЛОТА: шаг открывается в рельсе, затем фокус встаёт в его поле (селект Radix —
+  // кнопка `combobox` рядом со скрытым нативным `select[name]`). Редактор монтируется кадром позже.
+  const door = (i: number, field: SewnField) => {
+    store?.select(i, 'map');
+    // Селект Radix без нативного двойника: поле ищется по подписи («seam class», «machine *» /
+    // «on what *»), фокус — в его кнопку `combobox`.
+    const labels = field === 'seamClass' ? ['seam class'] : ['machine', 'on what'];
+    let tries = 0;
+    let opened = false;
+    const seek = () => {
+      const editor = document.querySelector('[data-step-editor]');
+      const label = Array.from(editor?.querySelectorAll('label') ?? []).find((l) =>
+        labels.some((w) => (l.textContent ?? '').trim().toLowerCase().startsWith(w)),
+      );
+      let host: HTMLElement | null = label?.parentElement ?? null;
+      while (host && host !== editor && !host.querySelector('[role="combobox"]'))
+        host = host.parentElement;
+      const target = host?.querySelector<HTMLElement>('[role="combobox"]');
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        target.focus();
+        return;
+      }
+      // Поле класса шва живёт в створке «differs from standard»: строка «seam · …» её открывает.
+      if (editor && !opened && field === 'seamClass') {
+        const summary = Array.from(editor.querySelectorAll<HTMLElement>('button')).find((b) =>
+          (b.textContent ?? '').trim().startsWith('seam ·'),
+        );
+        if (summary) {
+          opened = true;
+          summary.click();
+        }
+      }
+      if (++tries < 20) window.setTimeout(seek, 50);
+    };
+    window.setTimeout(seek, 30);
+  };
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.defaultPrevented || view === 'sketch' || count === 0) return;
     const t = e.target as HTMLElement;
@@ -110,13 +148,20 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
       </div>
       {view === 'step' ? (
         index != null ? (
-          <StepView model={model} index={index} workCatalog={workCatalog} onPick={pick} />
+          <StepView
+            model={model}
+            index={index}
+            workCatalog={workCatalog}
+            onPick={pick}
+            onDoor={door}
+          />
         ) : null
       ) : view === 'pieces' ? (
         <PiecesView
           model={model}
           active={chosen != null && chosen < count ? chosen : null}
           onHover={(i) => store?.hover(i)}
+          onHoverMany={(list) => store?.hoverMany(list)}
           onPick={pick}
         />
       ) : (

@@ -988,6 +988,8 @@ export type SeamSheet = {
   numberOf: (index: number) => number;
   /** Ключ: каждый сшивающий шаг-соединение; `unread` — кромки не прочитаны из выкройки. */
   key: { number: number; text: string; unread: boolean }[];
+  /** Швы этой вещи: каждый различный шов словами, с номерами шагов (та же легенда, что PIECES). */
+  legend?: string[];
 } | null;
 
 const SM = { MARGIN: 10, SCALE: 1 / 12, PAD: 5, GAP: 3, NUM_GAP: 1.2, NOTCH: 3, COLS: 5 };
@@ -1149,6 +1151,21 @@ function seamsAttempt(
     cols.push({ x, w: c.w, used: c.h });
     x += c.w + SM.GAP;
   }
+  // Легенда швов — в свободный угол последнего ряда деталей, если влезает: там пусто, а под ключом
+  // она стоила бы листу формата.
+  let legendDone = false;
+  const legendRuns = (sheet.legend ?? []).map((l): Run[] => [{ s: l, size: 10 }]);
+  if (legendRuns.length) {
+    const lx = x + 2;
+    const lw = W - m - lx;
+    const head: Run[] = [{ s: 'SEAMS ON THIS GARMENT', size: 10, bold: true }];
+    const need = paraHeight(lw, head) + legendRuns.reduce((t, r) => t + paraHeight(lw, r), 0);
+    if (lw >= 50 && need <= rowH) {
+      let ly = rowTop + P.para(lx, rowTop, lw, head);
+      for (const r of legendRuns) ly += P.para(lx, ly, lw, r);
+      legendDone = true;
+    }
+  }
   y = rowTop + rowH + 3;
 
   // ── ключ шагов в пять колонок ──
@@ -1188,6 +1205,13 @@ function seamsAttempt(
     ky += P.para(m + col * (colW + colGap), ky, colW, runsOf(r));
     keyBottom = Math.max(keyBottom, ky);
   });
+  if (sheet.legend?.length && !legendDone) {
+    keyBottom += 1;
+    keyBottom += P.para(m, keyBottom, inner, [
+      { s: 'SEAMS ON THIS GARMENT: ', size: 10, bold: true },
+      { s: sheet.legend.join(' · '), size: 10 },
+    ]);
+  }
   const H = Math.max(Hmin, Math.ceil(keyBottom + 3 + fh + m));
   foot(P, meta, W, H, m, H - m - fh);
   return { P, H, fits: H <= Hmin + 0.01 };

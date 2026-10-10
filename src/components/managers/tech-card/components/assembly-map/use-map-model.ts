@@ -7,6 +7,7 @@ import { useMemo, useRef } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
+import { sewnStrip, type SewnCard, type SewnTile } from './sewn';
 
 export type FormOp = NonNullable<TechCardFormData['operations']>[number];
 type FormPiece = TechCardFormData['pieces'][number];
@@ -21,6 +22,8 @@ export type MapModel = {
   isUnit: (key: string) => boolean;
   /** Первый машинный шаг — карта показывает его, пока ничего не выбрано (D2). */
   firstMachine: number | null;
+  /** «Как шьют» шага `i` — поле шага, стандарт карточки или пустой слот (sewn.ts). */
+  sewnOf: (index: number) => SewnTile[];
 };
 
 const sigOf = (ops: readonly FormOp[]) =>
@@ -34,6 +37,9 @@ const sigOf = (ops: readonly FormOp[]) =>
 export function useMapModel(): MapModel {
   const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
   const pieces = (useWatch<TechCardFormData>({ name: 'pieces' }) ?? []) as FormPiece[];
+  const construction = useWatch<TechCardFormData>({ name: 'construction' }) as
+    | TechCardFormData['construction']
+    | undefined;
   const { graph, settling } = useCardSeamGraph();
   // Пока новая подпись отстаивается (400 мс), карта держит прежний граф — без вспышки эскиза.
   const last = useRef<SeamGraph | null>(null);
@@ -70,8 +76,23 @@ export function useMapModel(): MapModel {
     return i >= 0 ? i : ops.length > 0 ? 0 : null;
   }, [ops]);
 
+  const card = useMemo<SewnCard>(
+    () => ({
+      defaultSeamClass: construction?.defaultSeamClass,
+      machines: construction?.equipmentDefaults?.machines ?? [],
+    }),
+    [construction],
+  );
+  const sewn = useMemo(() => new Map<number, SewnTile[]>(), [ops, card]);
+  const sewnOf = (i: number) => {
+    let hit = sewn.get(i);
+    if (!hit) sewn.set(i, (hit = sewnStrip(ops, i, card)));
+    return hit;
+  };
+
   return {
     read,
+    sewnOf,
     ops,
     pieceName: (k) => pieceNames.get(k) || read?.geoms.get(k)?.name || k,
     unitName: (k) => unitNames.get(k) ?? k,

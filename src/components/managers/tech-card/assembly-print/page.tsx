@@ -216,21 +216,33 @@ function Document({
     () => (unitPictures ? (key) => unitPictures.get(key) ?? null : null),
     [unitPictures],
   );
-  // SEAM MAP — тот же граф и та же арифметика, что PIECES на экране (lib/assembly-skeleton/map).
+  // SEAM MAP — тот же граф и та же арифметика, что PIECES на экране (lib/assembly-skeleton/map);
+  // «как шьют» — из формы-снимка сохранённой карточки той же функцией, что полоса STEP на вкладке.
+  const formOps = useWatch<TechCardFormData>({ name: 'operations' }) as
+    | TechCardFormData['operations']
+    | undefined;
+  const construction = useWatch<TechCardFormData>({ name: 'construction' }) as
+    | TechCardFormData['construction']
+    | undefined;
   const seamSheet = useMemo<SeamSheet>(
     () =>
       form === 'seams'
         ? seamSheetOf(
             seamGraph,
-            (techCard.techCard?.operations ?? []).map((o) => ({
-              inputKeys: o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? [],
+            (formOps ?? []).map((o) => ({
+              ...o,
+              inputKeys: o.inputKeys ?? [],
               outputUnitKey: o.outputUnitKey ?? '',
               sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
             })),
             M,
+            {
+              defaultSeamClass: construction?.defaultSeamClass,
+              machines: construction?.equipmentDefaults?.machines ?? [],
+            },
           )
         : null,
-    [form, seamGraph, techCard, M],
+    [form, seamGraph, formOps, construction, M],
   );
   const doc = useMemo(() => {
     const set = (m: SheetMeta) =>

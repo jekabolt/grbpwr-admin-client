@@ -189,7 +189,7 @@ head('LIB — SS26-005 through the real pipeline');
   );
   const nameOf = (k) => bare.geoms.get(k)?.name ?? k;
   const backJoin = joins.find((i) => P.steps[i].inputs.join() === 'BP_L,BP_1_L');
-  if (backJoin != null) {
+  if (backJoin != null && bare.seams[backJoin].length > 0) {
     const w = L.seamWords(bare, bare.seams[backJoin][0], nameOf);
     console.log(`  facts of ${(backJoin + 1) * 10}: ${w}`);
     ck(/onto .* mm, eased|= .* mm/.test(w), 'facts line says lengths in words');
@@ -469,17 +469,154 @@ await page.waitForTimeout(80);
 ck((await mapStep()) === first + 1, '↓ in the block walks to the next step');
 await page.keyboard.press('Escape');
 
+// ── how it is sewn ──
+head('UI — «how it is sewn» strip and the seams legend');
+const set = (path, v) => page.evaluate(([p, x]) => window.__map.set(p, x), [path, v]);
+const showStep = async (i) => {
+  await page.locator(`[data-rail-step="${i}"]`).click();
+  await away();
+  await page.waitForTimeout(120);
+};
+const strip = () =>
+  page
+    .locator('[data-map-sewn] [data-sewn-tile]')
+    .evaluateAll((els) =>
+      els.map(
+        (e) =>
+          `${e.getAttribute('data-sewn-tile')}${e.getAttribute('data-sewn-std') ? '/std' : ''}:${e.textContent?.trim()}`,
+      ),
+    );
+const G = pick.geometry;
+const storedDefault = await page.evaluate(() => window.__map.get('construction.defaultSeamClass'));
+await set('construction.defaultSeamClass', 'TECH_CARD_SEAM_CLASS_UNKNOWN');
+await page.waitForTimeout(100);
+// (a) the technologist's card says nothing on seams: empty slots that are doors
+await showStep(G);
+let tiles = await strip();
+console.log(`  step ${(G + 1) * 10} as stored: ${tiles.join(' | ')}`);
+ck(
+  tiles.some((t) => t.startsWith('empty:')),
+  'nothing stated: an empty «not set» slot, no fake glyph',
+);
+await shot('ss26-sewn-empty');
+// (b) card standard only → «std»
+// the card's own standard as stored (SS26-005 states one); a plain seam if it ever stops doing so
+await set(
+  'construction.defaultSeamClass',
+  storedDefault && !String(storedDefault).endsWith('_UNKNOWN')
+    ? storedDefault
+    : 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
+);
+await page.waitForTimeout(150);
+tiles = await strip();
+ck(
+  tiles.some((t) => t.startsWith('section/std:')),
+  'only the card standard: the cross-section with «std»',
+  tiles[0],
+);
+await shot('ss26-sewn-std');
+// (c) the step's own class + 301 + press open rider + topstitch
+await set(`operations.${G}.seamClass`, 'TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED');
+await set(`operations.${G}.topstitchMode`, 'TECH_CARD_TOPSTITCH_MODE_EDGE');
+await set(`operations.${G}.topstitchWidthMm`, '6');
+await set(`operations.${G}.topstitchRows`, 2);
+const out = await page.evaluate((i) => window.__map.get(`operations.${i}.outputUnitKey`), G);
+const nextIn = await page.evaluate((i) => window.__map.get(`operations.${i + 1}.inputKeys`), G);
+if (out && (nextIn ?? []).includes(out))
+  await set(`operations.${G + 1}.operationType`, 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN');
+await page.waitForTimeout(150);
+tiles = await strip();
+console.log(`  step ${(G + 1) * 10} filled: ${tiles.join(' | ')}`);
+ck(
+  tiles[0]?.startsWith('section:') &&
+    (await page.locator('[data-map-sewn] [data-seam-kind]').count()) === 1,
+  'own class: the ISO 4916 cross-section glyph, no «std»',
+);
+ck(
+  tiles.some((t) => t === 'stitch:301') &&
+    (await page
+      .locator('[data-map-sewn] [data-sewn-tile="stitch"] [data-stitch-pictogram]')
+      .count()) === 1,
+  'lockstitch: the ISO 4915 glyph with «301»',
+);
+ck(
+  tiles.some((t) => /^press:press open/.test(t)),
+  'pressing from the PRESS_OPEN rider',
+);
+ck(
+  tiles.some((t) => /^topstitch:6 mm ×2/.test(t)),
+  'topstitch «6 mm ×2»',
+);
+await shot('ss26-sewn-filled');
+// (d) overlock without a thread count: the family in words, no glyph
+const others = [...Array(pick.steps).keys()].filter((i) => i !== G && i !== pick.template);
+const joinsWithSeams = await page.evaluate(() => {
+  const r = window.__map.pick();
+  return r;
+});
+void joinsWithSeams;
+const ovl = pick.twin != null && pick.twin !== G ? pick.twin : others[2];
+await set(`operations.${ovl}.machineType`, 'TECH_CARD_MACHINE_TYPE_OVERLOCK');
+await set(`operations.${ovl}.threadCount`, 0);
+await set(`operations.${ovl}.seamClass`, 'TECH_CARD_SEAM_CLASS_SS_PLAIN');
+await showStep(ovl);
+tiles = await strip();
+console.log(`  step ${(ovl + 1) * 10} overlock: ${tiles.join(' | ')}`);
+ck(
+  tiles.some((t) => /^stitch:overlock 504/.test(t)) &&
+    (await page
+      .locator('[data-map-sewn] [data-sewn-tile="stitch"] [data-stitch-pictogram]')
+      .count()) === 0,
+  'overlock family «504 / 514 / 516»: words only, no stitch glyph',
+);
+await shot('ss26-sewn-overlock-family');
+// (e) the legend on PIECES after filling three steps
+await chooseView('pieces');
+const rows = await page.locator('[data-map-legend-row]').count();
+const legendText = await page.locator('[data-map-legend]').innerText();
+console.log(`  legend: ${legendText.split('\n').slice(1).join(' / ')}`);
+ck(rows >= 3, 'PIECES: «seams on this garment» lists each distinct seam', `${rows} rows`);
+await page.keyboard.press('Escape');
+const row = page.locator('[data-map-legend-row]').first();
+const rowSteps = (await row.getAttribute('data-map-legend-row')).split(',').map(Number);
+await row.hover();
+await page.waitForTimeout(120);
+ck(
+  (await page.locator('[data-map-lit="1"]').count()) === rowSteps.length,
+  'hover a legend row: the rail lights every step of that seam',
+  `${rowSteps.length}`,
+);
+await shot('ss26-pieces-legend', null);
+await away();
+await chooseView('step');
+await page.keyboard.press('Escape');
+
 // ── print ──
 head('PRINT — SEAM MAP sheet');
-const pr = await page.evaluate(() => window.__map.print('SS26-005'));
-console.log(
-  `  sheet ${pr.w} × ${pr.h} mm · ${pr.families} families · key ${pr.key} rows (${pr.unread} edges not read)`,
-);
-ck(pr.w === 297 && pr.h === 210, 'A4 landscape');
-ck(pr.out === 0, 'nothing off the sheet', `${pr.out} primitives outside`);
-ck(pr.minPt >= 10, 'nothing smaller than 10 pt', `${pr.minPt} pt`);
+const base = await page.evaluate(() => window.__map.print('SS26-005', true));
+console.log(`  base sheet ${base.w} × ${base.h} mm · key ${base.key} rows`);
+ck(base.w === 297 && base.h === 210, 'base sheet (pieces + key): A4 landscape');
+ck(base.out === 0, 'base sheet: nothing off the sheet');
 await page.setViewportSize({ width: 1180, height: 840 });
 await shot('print-seams-a4', '[data-print-stage]');
+await page.setViewportSize({ width: 1440, height: 1100 });
+const pr = await page.evaluate(() => window.__map.print('SS26-005'));
+console.log(
+  `  with the sewing strip: ${pr.w} × ${pr.h} mm · ${pr.families} families · key ${pr.key} rows (${pr.unread} edges not read)`,
+);
+ck(
+  (pr.w === 297 && pr.h === 210) || (pr.w === 420 && pr.h === 297),
+  'with the strip per key row: A4, or A3 when the key outgrows it (D8 «the sheet grows»)',
+);
+ck(pr.out === 0, 'nothing off the sheet', `${pr.out} primitives outside`);
+ck(pr.minPt >= 10, 'nothing smaller than 10 pt', `${pr.minPt} pt`);
+ck(pr.legend.length >= 3, 'the sheet prints the seams legend', pr.legend.join(' · '));
+ck(
+  pr.keyText.some((t) => / 301/.test(t)),
+  'key rows carry the strip in short words, ISO as text',
+);
+await page.setViewportSize({ width: 1180, height: 840 });
+await shot('print-seams-strip', '[data-print-stage]');
 await page.setViewportSize({ width: 1440, height: 1100 });
 
 // ── blazer ──
@@ -498,6 +635,33 @@ if (blazer) {
     await away();
     ck((await page.locator('[data-map-pair]').count()) === 1, 'blazer: a STEP picture');
     await shot('blazer-step');
+    const door = page.locator('[data-map-sewn] [data-sewn-field="seamClass"]');
+    ck(
+      (await door.count()) === 1,
+      'skeleton draft: the seam type slot is empty — no glyph from a guess',
+    );
+    await door.click();
+    await page.waitForTimeout(500);
+    const focused = await page.evaluate(() => {
+      const a = document.activeElement;
+      const editor = a?.closest('[data-step-editor]');
+      let n = a?.parentElement;
+      while (n && !n.querySelector('label')) n = n.parentElement;
+      return {
+        inEditor: !!editor,
+        name: n?.querySelector('label')?.textContent?.trim() ?? '',
+        tag: `${a?.tagName}:${a?.getAttribute('role')}:${(a?.textContent ?? '').slice(0, 30)}`,
+        names: [...document.querySelectorAll('[data-step-editor] [name]')]
+          .map((e) => e.getAttribute('name'))
+          .filter((x) => /seamClass|machineType/.test(x ?? '')),
+      };
+    });
+    ck(
+      focused.inEditor && focused.name === 'seam class',
+      '… and the slot is a door: the step opens, focus lands in its seam class field',
+      JSON.stringify(focused),
+    );
+    await shot('blazer-sewn-door', null);
   }
   await chooseView('pieces');
   ck(

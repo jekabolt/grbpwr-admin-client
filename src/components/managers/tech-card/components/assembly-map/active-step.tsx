@@ -22,6 +22,8 @@ import {
 
 export type ActiveStepSnapshot = {
   hover: number | null;
+  /** Несколько шагов разом — строка легенды швов на PIECES светит все шаги этого шва. */
+  many: readonly number[] | null;
   sticky: number | null;
   /** Последний выбор, сделанный НА КАРТЕ: рельс открывает этот шаг (nonce различает повторы). */
   mapPick: { index: number; nonce: number } | null;
@@ -31,18 +33,20 @@ export type ActiveStepStore = {
   get: () => ActiveStepSnapshot;
   subscribe: (fn: () => void) => () => void;
   hover: (index: number | null) => void;
+  hoverMany: (indexes: readonly number[] | null) => void;
   /** Липкий выбор; `from: 'map'` просит рельс открыть шаг. */
   select: (index: number | null, from?: 'rail' | 'map') => void;
 };
 
 export function createActiveStepStore(): ActiveStepStore {
-  let snap: ActiveStepSnapshot = { hover: null, sticky: null, mapPick: null };
+  let snap: ActiveStepSnapshot = { hover: null, many: null, sticky: null, mapPick: null };
   let nonce = 0;
   const subs = new Set<() => void>();
   const set = (next: Partial<ActiveStepSnapshot>) => {
     const merged = { ...snap, ...next };
     if (
       merged.hover === snap.hover &&
+      merged.many === snap.many &&
       merged.sticky === snap.sticky &&
       merged.mapPick === snap.mapPick
     )
@@ -57,6 +61,7 @@ export function createActiveStepStore(): ActiveStepStore {
       return () => subs.delete(fn);
     },
     hover: (index) => set({ hover: index }),
+    hoverMany: (indexes) => set({ many: indexes }),
     select: (index, from = 'rail') =>
       set({
         sticky: index,
@@ -101,7 +106,7 @@ export function useActiveStepStore(): ActiveStepStore | null {
   return useContext(Ctx);
 }
 
-const NONE: ActiveStepSnapshot = { hover: null, sticky: null, mapPick: null };
+const NONE: ActiveStepSnapshot = { hover: null, many: null, sticky: null, mapPick: null };
 const noop = () => () => {};
 
 /** Весь снимок — для карты. */
@@ -113,9 +118,11 @@ export function useActiveStep(): ActiveStepSnapshot {
 /** Один бит для строки рельса: светит ли карта именно этот шаг. */
 export function useIsActiveStep(index: number): boolean {
   const store = useContext(Ctx);
-  return useSyncExternalStore(store?.subscribe ?? noop, () =>
-    store ? activeOf(store.get()) === index : false,
-  );
+  return useSyncExternalStore(store?.subscribe ?? noop, () => {
+    if (!store) return false;
+    const s = store.get();
+    return activeOf(s) === index || !!s.many?.includes(index);
+  });
 }
 
 /** Nonce выбора на карте для шага `index` (0 — не выбирался): строка рельса открывает себя по нему. */
