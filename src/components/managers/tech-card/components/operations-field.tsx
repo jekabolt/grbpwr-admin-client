@@ -2451,7 +2451,7 @@ function OperationEditor({
    * false`). Детектор черновика берёт отпечаток заново и метку не снимает; пачка каркаса на вершине
    * истории принимает значение как своё (ревью Codex P2).
    */
-  noteSuggested?: (index: number) => void;
+  noteSuggested?: (index: number, field: string, value: unknown) => void;
   index: number;
   bomLines: BomLine[];
   pieces: PieceRef[];
@@ -3923,7 +3923,7 @@ function OperationEditor({
     if (zoneSuggested) {
       wroteRef.current.zone = zoneSuggested;
       if (zoneValue !== zoneSuggested) {
-        noteSuggested?.(index);
+        noteSuggested?.(index, 'zone', zoneSuggested);
         setValue(`operations.${index}.zone`, zoneSuggested, { shouldDirty: false });
       }
       if (applied.zone !== zoneSuggested) setApplied((prev) => ({ ...prev, zone: zoneSuggested }));
@@ -3932,7 +3932,7 @@ function OperationEditor({
     if (ours === undefined) return;
     delete wroteRef.current.zone;
     if (!zoneIsUnset(zoneValue)) {
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'zone', NONE_ZONE);
       setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
     }
     setApplied((prev) => {
@@ -3950,7 +3950,7 @@ function OperationEditor({
       if (ours === threadSuggested && selectedBomKeys.includes(threadSuggested)) return;
       wroteRef.current.thread = threadSuggested;
       const others = selectedBomKeys.filter((k) => k !== ours && k !== threadSuggested);
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'bomLineKeys', [...others, threadSuggested]);
       setValue(`operations.${index}.bomLineKeys`, [...others, threadSuggested], {
         shouldDirty: false,
       });
@@ -3962,6 +3962,11 @@ function OperationEditor({
     if (ours === undefined) return;
     delete wroteRef.current.thread;
     if (selectedBomKeys.includes(ours)) {
+      noteSuggested?.(
+        index,
+        'bomLineKeys',
+        selectedBomKeys.filter((k) => k !== ours),
+      );
       setValue(
         `operations.${index}.bomLineKeys`,
         selectedBomKeys.filter((k) => k !== ours),
@@ -3996,11 +4001,11 @@ function OperationEditor({
     if (pressSuggested) {
       wroteRef.current.press = { equipment: pressSuggested, profileKey: pressProfileSuggested };
       if (pressEquipment !== pressSuggested) {
-        noteSuggested?.(index);
+        noteSuggested?.(index, 'pressEquipment', pressSuggested);
         setValue(`operations.${index}.pressEquipment`, pressSuggested, { shouldDirty: false });
       }
       if (pressProfileSuggested && pressProfileKey !== pressProfileSuggested) {
-        noteSuggested?.(index);
+        noteSuggested?.(index, 'pressProfileKey', pressProfileSuggested);
         setValue(`operations.${index}.pressProfileKey`, pressProfileSuggested, {
           shouldDirty: false,
         });
@@ -4016,11 +4021,11 @@ function OperationEditor({
     if (!ours) return;
     delete wroteRef.current.press;
     if (eqSet) {
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
       setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
     }
     if (ours.profileKey && pressProfileKey) {
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'pressProfileKey', '');
       setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
     }
     setApplied((prev) => {
@@ -4070,13 +4075,18 @@ function OperationEditor({
       if (wrote.zone !== undefined) {
         const cur = getValues(`operations.${index}.zone`);
         if (cur === wrote.zone && base.zone !== wrote.zone) {
-          noteSuggested?.(index);
+          noteSuggested?.(index, 'zone', NONE_ZONE);
           setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
         }
       }
       if (wrote.thread) {
         const keys = (getValues(`operations.${index}.bomLineKeys`) ?? []) as string[];
         if (keys.includes(wrote.thread) && !(base.bomLineKeys ?? []).includes(wrote.thread)) {
+          noteSuggested?.(
+            index,
+            'bomLineKeys',
+            keys.filter((k) => k !== wrote.thread),
+          );
           setValue(
             `operations.${index}.bomLineKeys`,
             keys.filter((k) => k !== wrote.thread),
@@ -4087,7 +4097,7 @@ function OperationEditor({
       if (wrote.press) {
         const eq = getValues(`operations.${index}.pressEquipment`);
         if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
-          noteSuggested?.(index);
+          noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
           setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, {
             shouldDirty: false,
           });
@@ -4096,7 +4106,7 @@ function OperationEditor({
             getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
             base.pressProfileKey !== wrote.press.profileKey
           ) {
-            noteSuggested?.(index);
+            noteSuggested?.(index, 'pressProfileKey', '');
             setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
           }
         }
@@ -4112,10 +4122,15 @@ function OperationEditor({
   const dropSuggested = (field: SuggestedField) => {
     const wrote = wroteRef.current;
     if (field === 'zone') {
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'zone', NONE_ZONE);
       setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
     }
     if (field === 'thread') {
+      noteSuggested?.(
+        index,
+        'bomLineKeys',
+        selectedBomKeys.filter((k) => k !== wrote.thread),
+      );
       setValue(
         `operations.${index}.bomLineKeys`,
         selectedBomKeys.filter((k) => k !== wrote.thread),
@@ -4123,10 +4138,12 @@ function OperationEditor({
       );
     }
     if (field === 'press') {
-      noteSuggested?.(index);
+      noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
       setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
-      if (wrote.press?.profileKey) noteSuggested?.(index);
-      setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+      if (wrote.press?.profileKey) {
+        noteSuggested?.(index, 'pressProfileKey', '');
+        setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+      }
     }
     dismiss(field);
   };
@@ -6323,10 +6340,14 @@ export function OperationsField({
   const [draftIds, setDraftIds] = useState<ReadonlySet<string>>(() => new Set());
   const draftRef = useRef(draftIds);
   draftRef.current = draftIds;
-  const draftBase = useRef(new Map<string, string>());
-  const suggestedRows = useRef(new Set<number>());
-  const noteSuggested = useCallback((index: number) => {
-    suggestedRows.current.add(index);
+  const draftBase = useRef(new Map<string, { print: string; row: Record<string, unknown> }>());
+  // ТОЧНЫЕ ЗАПИСИ ПОДСТАНОВКИ (ревью Codex P2, повтор): строка → поле → значение. Освобождается от
+  // «касания» только то, что подстановка написала, и ровно тем значением; человеческая правка
+  // другого поля в том же коммите остаётся правкой.
+  const suggestedWrites = useRef(new Map<number, Record<string, unknown>>());
+  const noteSuggested = useCallback((index: number, field: string, value: unknown) => {
+    const m = suggestedWrites.current;
+    m.set(index, { ...(m.get(index) ?? {}), [field]: structuredClone(value) });
   }, []);
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
@@ -6343,6 +6364,8 @@ export function OperationsField({
     const saved = ((control._defaultValues as { operations?: unknown[] }).operations ??
       []) as Record<string, unknown>[];
     const base = draftBase.current;
+    const top = peekUndo(history.current);
+    const batch = top?.kind === 'skeleton' ? top : null;
     const next = new Set<string>();
     const touched: number[] = [];
     const rebased: number[] = [];
@@ -6356,37 +6379,47 @@ export function OperationsField({
       }
       const print = draftPrint(row);
       const was = base.get(f.id);
-      // Отпечаток берётся заново, а метка остаётся: впервые увиденная строка; лёгшая запись
-      // (строка = сохранённой базе на том же месте); подстановка редактора (не жест человека).
-      if (
-        was === undefined ||
-        was === print ||
-        draftPrint(saved[i]) === print ||
-        suggestedRows.current.has(i)
-      ) {
-        // Подстановка может лечь РАНЬШЕ первого взгляда детектора (эффекты редактора — ребёнка —
-        // идут до эффектов поля в том же коммите, что и запись каркаса): её строка всё равно
-        // уходит в снимок пачки.
-        if ((was !== undefined && was !== print) || suggestedRows.current.has(i)) rebased.push(i);
-        base.set(f.id, print);
+      const keep = (intoBatch: boolean) => {
+        if (intoBatch) rebased.push(i);
+        base.set(f.id, { print, row: structuredClone(row) });
         next.add(f.id);
-        return;
-      }
+      };
+      if (was?.print === print) return keep(false);
+      // С чем сверять подстановку: прежний вид строки, а при первом взгляде — то, что положила
+      // запись каркаса (подстановка может лечь раньше первого взгляда детектора: эффекты
+      // редактора-ребёнка идут до эффектов поля в том же коммите).
+      const ref =
+        was?.row ??
+        (batch && i >= batch.from && i < batch.from + batch.count
+          ? (batch.after.rows[i - batch.from] as Record<string, unknown>)
+          : undefined);
+      const sugg = suggestedWrites.current.get(i);
+      // Подстановка принимается, только если строка = прежний вид + ЕЁ поля с ЕЁ значениями.
+      const bySuggestion =
+        sugg !== undefined && (ref === undefined || draftPrint({ ...ref, ...sugg }) === print);
+      if (bySuggestion) return keep(ref !== undefined);
+      if (was === undefined) return keep(false); // впервые увиденная строка
+      // Лёгшая запись: строка = сохранённой базе на том же месте (сервер мог канонизировать поле).
+      if (draftPrint(saved[i]) === print) return keep(true);
       base.delete(f.id);
       touched.push(i);
     });
     for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
-    suggestedRows.current.clear();
+    suggestedWrites.current.clear();
     // Строка пачки каркаса, переписанная НЕ человеком (подстановка, лёгшая запись), — всё ещё то,
-    // что положила запись: снимок `after` принимает её, иначе щит отмены счёл бы её правкой.
-    const top = peekUndo(history.current);
-    if (top?.kind === 'skeleton') {
-      const own = rebased.filter((i) => i >= top.from && i < top.from + top.count);
+    // что положила запись: снимок `after` принимает её. Тронутая человеком — нет: щит отмены
+    // обязан увидеть правку.
+    if (batch) {
+      const own = rebased.filter((i) => i >= batch.from && i < batch.from + batch.count);
       if (own.length > 0) {
-        const rows = [...top.after.rows];
-        for (const i of own) rows[i - top.from] = structuredClone(ops[i]) as (typeof rows)[number];
+        const rows = [...batch.after.rows];
+        for (const i of own)
+          rows[i - batch.from] = structuredClone(ops[i]) as (typeof rows)[number];
         setHistory({
-          undo: [...history.current.undo.slice(0, -1), { ...top, after: { ...top.after, rows } }],
+          undo: [
+            ...history.current.undo.slice(0, -1),
+            { ...batch, after: { ...batch.after, rows } },
+          ],
           redo: history.current.redo,
         });
       }

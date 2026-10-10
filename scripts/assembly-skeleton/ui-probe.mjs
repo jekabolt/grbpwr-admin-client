@@ -47,6 +47,7 @@ const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
 const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
 const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
 const MUTATE_DRAFT_PRINT = process.argv.includes('--mutate-draft-print');
+const MUTATE_ROW_WIDE = process.argv.includes('--mutate-suggestion-row-wide');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -129,6 +130,21 @@ if (MUTATE_DRAFT_PRINT)
         const src = await readFile(args.path, 'utf8');
         if (!src.includes(PRINT_FIX)) throw new Error('print mutation did not find its line');
         return { contents: src.replace(PRINT_FIX, PRINT_BROKEN), loader: 'ts' };
+      });
+    },
+  });
+// The pre-re-review exemption: any suggestion on a row accepted the WHOLE row as not-a-touch.
+const EXEMPT_FIX = `      const bySuggestion =
+        sugg !== undefined && (ref === undefined || draftPrint({ ...ref, ...sugg }) === print);`;
+const EXEMPT_BROKEN = `      const bySuggestion = sugg !== undefined;`;
+if (MUTATE_ROW_WIDE)
+  plugins.push({
+    name: 'row-wide-suggestion-mutation',
+    setup(b) {
+      b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(EXEMPT_FIX)) throw new Error('row-wide mutation did not find its line');
+        return { contents: src.replace(EXEMPT_FIX, EXEMPT_BROKEN), loader: 'tsx' };
       });
     },
   });
@@ -805,6 +821,67 @@ const U_OWN = [
   await closePanel();
 }
 
+{
+  // U8 (Codex re-check) a suggestion and a HUMAN edit of another field land in one commit: the
+  // person turns the applied press step into a machine step, and the editor suggests the card's
+  // only thread for it. The exemption covers the thread only — the type change is an edit: the mark
+  // goes, the batch snapshot is not rewritten, and undo is refused in words.
+  await mount({
+    ops: U_OWN,
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'thread',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="3"]', { timeout: 5000 });
+  await page.click('[data-rail-step="3"]');
+  await page.waitForTimeout(300);
+  const pressRow = (await ops())[3];
+  ck(
+    pressRow.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' && pressRow.draft === true,
+    'control: row 3 is the applied press step, still draft',
+    `${pressRow.operationType}`,
+  );
+  await openPanel('header');
+  ck((await page.locator('[data-skeleton-undo]').count()) === 1, 'control: «undo» offered');
+  await page.evaluate((MACHINE) => {
+    window.__sk.form().setValue('operations.3.operationType', MACHINE, { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  }, MACHINE);
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  await page.waitForTimeout(300);
+  const r = await ops();
+  ck(
+    (r[3]?.bomLineKeys ?? []).includes('TH1'),
+    'control: the thread was suggested in that commit',
+    JSON.stringify(r[3]?.bomLineKeys),
+  );
+  ck(
+    (await page.locator('[data-skeleton-undo-refused]').count()) === 1,
+    'suggestion + human type change: undo refused in words',
+  );
+  ck(
+    r.length === 7 && r[3]?.operationType === MACHINE,
+    'the human type change survives',
+    `${r.length} rows, ${r[3]?.operationType}`,
+  );
+  ck(r[3]?.draft === false, 'the human type change takes the draft mark off');
+  await closePanel();
+}
+
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
 await mount({});
@@ -1312,6 +1389,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}`,
 );
 if (bad) process.exitCode = 1;
