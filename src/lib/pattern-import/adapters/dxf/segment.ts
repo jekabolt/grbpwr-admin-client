@@ -281,12 +281,15 @@ const unit = (v: PtMm): PtMm => {
  *  - every bbox side ≥ 60 % of the outer one, ≥ 95 % of its vertices inside (or on) the outer one,
  *    and the two outlines within 15 % of √area of each other all round (p95 both ways): a near
  *    copy of the outline, not some other shape inside the piece;
- *  - not the same contour drawn twice (≤ 0.5 mm apart everywhere: harmless, the same line);
- *  - not a uniform offset (distance spread ≤ max(1 mm, 10 % of the median), median ≥ 2 mm): that
- *    is the sew line drawn alike at one allowance; a size step is never a uniform offset (grading
- *    moves each point by its own rule, and stacked sizes touch at the grade anchor).
- * Anything else that passes — two sizes, or a cut line with a sew line of mixed allowances in the
- * same look — cannot be proven to be one size, and goes to the operator.
+ *  - not the same contour drawn twice (≤ 0.5 mm apart everywhere: harmless, the same line).
+ * Of the loops that pass, ONE inside the outline at a uniform offset (distance spread ≤ max(1 mm,
+ * 10 % of the median), 2 mm ≤ median ≤ 20 mm) is the sew line drawn alike at one allowance — the
+ * block keeps its outline, and the pair is reported (`seamPair`) so a run that expects exactly two
+ * sizes (the source or the operator says 2) can still refuse it. TWO or more such loops are never a
+ * cut line with its sew line: three same-look outlines one inside the other are sizes (a uniformly
+ * offset grade is still a grade), refused whatever their spacing. Anything else that passes — two
+ * sizes, or a cut line with a sew line of mixed allowances in the same look — cannot be proven to
+ * be one size, and goes to the operator.
  */
 const NEST = {
   minAreaRatio: 0.5,
@@ -297,6 +300,8 @@ const NEST = {
   uniformMm: 1,
   uniformShare: 0.1,
   minOffsetMm: 2,
+  /** a sew line lies at most this far inside the cut line (an allowance, not a size step) */
+  maxAllowanceMm: 20,
   rgbTol: 8,
   dashTolMm: 0.1,
 };
@@ -318,39 +323,47 @@ function quantile(xs: number[], q: number): number {
   return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : 0;
 }
 
-/** The loops (largest first, `loops[0]` = the outline) that are other sizes of the same piece. */
+/**
+ * The loops (largest first, `loops[0]` = the outline) that are other sizes of the same piece, and
+ * the uniform-allowance sew line drawn alike when it is the ONLY near copy (`pair`, median offset).
+ */
 function nestedSizeLoops(
   loops: DxfContour[],
   lookOf: (c: DxfContour) => Style | undefined,
-): DxfContour[] {
-  if (loops.length < 2) return [];
+): { nested: DxfContour[]; pair: { loop: DxfContour; offsetMm: number } | null } {
+  if (loops.length < 2) return { nested: [], pair: null };
   const [outer, ...rest] = loops;
   const look = lookOf(outer);
   const ow = outer.bbox.maxX - outer.bbox.minX;
   const oh = outer.bbox.maxY - outer.bbox.minY;
   const near = NEST.closeness * Math.sqrt(outer.areaMm2);
-  return rest.filter((c) => {
-    if (outer.areaMm2 <= 0 || c.areaMm2 < NEST.minAreaRatio * outer.areaMm2) return false;
-    if (!sameLook(lookOf(c), look)) return false;
+  const copies: { loop: DxfContour; uniform: boolean; med: number }[] = [];
+  for (const c of rest) {
+    if (outer.areaMm2 <= 0 || c.areaMm2 < NEST.minAreaRatio * outer.areaMm2) continue;
+    if (!sameLook(lookOf(c), look)) continue;
     const w = c.bbox.maxX - c.bbox.minX;
     const h = c.bbox.maxY - c.bbox.minY;
-    if (w < NEST.minSideRatio * ow || h < NEST.minSideRatio * oh) return false;
+    if (w < NEST.minSideRatio * ow || h < NEST.minSideRatio * oh) continue;
     const toOuter = sampleDistances(c, outer);
-    if (Math.max(...toOuter) <= NEST.dupMm) return false;
+    if (Math.max(...toOuter) <= NEST.dupMm) continue;
     const step = Math.max(1, Math.floor(c.pts.length / 400));
     let n = 0;
     let inside = 0;
     for (let i = 0; i < c.pts.length; i += step, n++)
       if (pointInPolygon(c.pts[i], outer.pts) || toOuter[n] <= PATIMPORT.snapMm) inside++;
-    if (inside < NEST.inside * n) return false;
+    if (inside < NEST.inside * n) continue;
     if (quantile(toOuter, 0.95) > near || quantile(sampleDistances(outer, c), 0.95) > near)
-      return false;
+      continue;
     const med = quantile(toOuter, 0.5);
     const spread = quantile(toOuter, 0.9) - quantile(toOuter, 0.1);
-    if (med >= NEST.minOffsetMm && spread <= Math.max(NEST.uniformMm, NEST.uniformShare * med))
-      return false;
-    return true;
-  });
+    const uniform =
+      med >= NEST.minOffsetMm && spread <= Math.max(NEST.uniformMm, NEST.uniformShare * med);
+    copies.push({ loop: c, uniform, med });
+  }
+  // one near copy at a uniform allowance: the sew line. Two or more: sizes, however spaced
+  if (copies.length === 1 && copies[0].uniform && copies[0].med <= NEST.maxAllowanceMm)
+    return { nested: [], pair: { loop: copies[0].loop, offsetMm: copies[0].med } };
+  return { nested: copies.map((x) => x.loop), pair: null };
 }
 
 // ── per block ───────────────────────────────────────────────────────────────────────────────
@@ -568,9 +581,15 @@ function blockPiece(
 
   // several outlines of one look nested in this block: the sizes are not one per block here
   let nested: DxfNestedOutlines | null = null;
+  let seamPair: DxfBlockPiece['seamPair'] = null;
   {
-    const onCut = cut ? nestedSizeLoops(cutPick.loops, lookOf) : [];
-    const onSeam = seamPick.outer ? nestedSizeLoops(seamPick.loops, lookOf) : [];
+    const none = { nested: [], pair: null };
+    const cutN = cut ? nestedSizeLoops(cutPick.loops, lookOf) : none;
+    const seamN = seamPick.outer ? nestedSizeLoops(seamPick.loops, lookOf) : none;
+    const onCut = cutN.nested;
+    const onSeam = seamN.nested;
+    const pair = cutN.pair ?? seamN.pair;
+    if (pair) seamPair = { offsetMm: Math.round(pair.offsetMm * 100) / 100 };
     const [list, outer] = onCut.length >= onSeam.length ? [onCut, cut] : [onSeam, seamPick.outer];
     if (list.length && outer) {
       nested = {
@@ -782,6 +801,7 @@ function blockPiece(
     pointNumbers,
     annotations,
     nested,
+    seamPair: nested ? null : seamPair,
   };
   return { piece, raw };
 }

@@ -238,6 +238,12 @@ export type DxfBlockPiece = {
   annotations: TextId[];
   /** Several same-look nested outlines in this block (sizes in one block) — refused downstream. */
   nested: DxfNestedOutlines | null;
+  /**
+   * The outline has ONE same-look loop inside it at a uniform allowance (≤ 20 mm): read as its sew
+   * line. Two sizes drawn alike at a uniform step look the same, so a run that expects exactly two
+   * sizes (source or operator) refuses the block instead.
+   */
+  seamPair: { offsetMm: number } | null;
 };
 
 export type DxfIdentity = {
@@ -296,5 +302,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
+    /** The block's `seamPair` allowance, mm: refused when the operator says the run has 2 sizes. */
+    seamPairMm?: number;
   };
 };

@@ -42,8 +42,10 @@ import {
   dxfFastPath,
   dxfScaleCandidates,
   readDxf,
+  refuseSeamPair,
   segmentDxf,
   type DxfFastPath,
+  type DxfPieceCandidate,
   type DxfRead,
   type DxfSegmentation,
 } from '../adapters/dxf';
@@ -701,11 +703,18 @@ export class Session {
           'the pieces of a DXF are its blocks — they are not re-seeded or edited here',
           'pieces',
         );
+      // H1: the operator says the drawing has exactly two sizes — a block whose outline holds one
+      // more alike at a uniform allowance may be those two sizes (the source's own count of two is
+      // refused by the fast path already)
+      const twoSizes = this.expected?.from === 'operator' && this.expected.n === 2;
       // F8 keeps the DXF's own features on `dxf.features`; the contract field is
       // `PieceCandidate.features` — copy them across so every reader finds them in one place.
       const families = this.fast.families.map((f) => ({
         ...f,
-        candidates: f.candidates.map((c) => {
+        candidates: f.candidates.map((c0) => {
+          const c = twoSizes
+            ? refuseSeamPair(c0 as DxfPieceCandidate, 'you said the drawing has two sizes')
+            : c0;
           const dx = (
             c as typeof c & { dxf?: { features?: PieceFamily['candidates'][number]['features'] } }
           ).dxf;

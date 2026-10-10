@@ -1,8 +1,8 @@
 // Nested-size guard probe entry — bundled by `scripts/pattern-import/dxf-nested.mjs`.
-import { dxfFastPath, readDxf, segmentDxf } from 'lib/pattern-import/adapters/dxf';
+import { dxfFastPath, readDxf, refuseSeamPair, segmentDxf } from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 
-export { dxfFastPath, readDxf, segmentDxf };
+export { dxfFastPath, readDxf, refuseSeamPair, segmentDxf };
 
 const OPTS = { sagittaMm: 0.05, keepFills: true };
 

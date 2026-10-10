@@ -9,7 +9,13 @@
 //       SLEEVE_M — 2 nested graded outlines → refused the same way;
 //       FRONT_M  — control: one outline + a pocket cut-out on the cut layer + drill + internal
 //                  line → 'closed' on the outline, the pocket stays a hole;
-//       YOKE_M   — control: one outline + its sew line drawn alike at a uniform 10 mm → 'closed';
+//       YOKE_M   — control: one outline + its sew line drawn alike at a uniform 10 mm → 'closed'
+//                  (reported as a seam pair; refused when the operator says the run has 2 sizes);
+//       STACK_M  — 3 nested same-look rectangles at a uniform 8 mm step → refused (three alike are
+//                  sizes, however uniform);
+//       WIDE_M   — an outline + one alike 25 mm inside (more than an allowance) → refused;
+//     and a second fixture whose blocks name exactly two sizes (PANEL_S, PANEL_M, each an outline
+//     + a uniform 10 mm sew line alike) → refused: with two sizes, the pair may be the sizes;
 //   * corpus/dxf-clo: no block is flagged and no candidate is refused (the guard is silent on
 //     real CLO exports), and — with --baseline FILE — the canonical fast-path output of every
 //     file equals the baseline taken before the change.
@@ -78,7 +84,7 @@ const BODY = [
 const graded = (k, dx, dy) =>
   BODY.map(([x, y]) => [dx + x * (1 + 0.03 * k), dy + y * (1 + 0.02 * k)]);
 
-function fixtureDxf() {
+function fixtureDxf(kind = 'main') {
   const out = [];
   const E = (c, v) => out.push(String(c).padStart(3), String(v));
   const poly = (layer, pts, closed = true) => {
@@ -133,34 +139,62 @@ function fixtureDxf() {
   E(0, 'ENDSEC');
   E(0, 'SECTION');
   E(2, 'BLOCKS');
-  // three sizes of one piece in ONE block, same layer, same look, nested
-  block('BACK_M', () => {
-    for (const k of [-1, 0, 1]) poly('1', graded(k, 0, 0));
-    line('7', [130, 60], [130, 380]);
-  });
-  // two sizes in one block
-  block('SLEEVE_M', () => {
-    for (const k of [0, 1]) poly('1', graded(k, 1000, 0));
-    line('7', [1130, 60], [1130, 380]);
-  });
-  // control: one outline + a pocket cut-out on the cut layer + drill + internal line
-  block('FRONT_M', () => {
-    poly('1', graded(0, 2000, 0));
-    poly('1', rect(2080, 150, 2160, 210)); // pocket opening cut out of the piece
-    point('13', [2120, 300]);
-    line('8', [2040, 250], [2200, 250]);
-    line('7', [2130, 60], [2130, 380]);
-  });
-  // control: outline + its sew line drawn alike at a uniform 10 mm allowance
-  block('YOKE_M', () => {
-    poly('1', rect(3000, 0, 3300, 200));
-    poly('1', rect(3010, 10, 3290, 190));
-    line('7', [3150, 30], [3150, 170]);
-  });
+  if (kind === 'main') {
+    // three sizes of one piece in ONE block, same layer, same look, nested
+    block('BACK_M', () => {
+      for (const k of [-1, 0, 1]) poly('1', graded(k, 0, 0));
+      line('7', [130, 60], [130, 380]);
+    });
+    // two sizes in one block
+    block('SLEEVE_M', () => {
+      for (const k of [0, 1]) poly('1', graded(k, 1000, 0));
+      line('7', [1130, 60], [1130, 380]);
+    });
+    // control: one outline + a pocket cut-out on the cut layer + drill + internal line
+    block('FRONT_M', () => {
+      poly('1', graded(0, 2000, 0));
+      poly('1', rect(2080, 150, 2160, 210)); // pocket opening cut out of the piece
+      point('13', [2120, 300]);
+      line('8', [2040, 250], [2200, 250]);
+      line('7', [2130, 60], [2130, 380]);
+    });
+  }
+  const names = [];
+  if (kind === 'two-sizes') {
+    // the drawing names exactly two sizes; each block: an outline + one alike 10 mm inside
+    for (const [i, z] of ['S', 'M'].entries()) {
+      const x = 5000 + i * 1000;
+      block(`PANEL_${z}`, () => {
+        poly('1', rect(x, 0, x + 300 + 6 * i, 200 + 4 * i));
+        poly('1', rect(x + 10, 10, x + 290 + 6 * i, 190 + 4 * i));
+        line('7', [x + 150, 30], [x + 150, 170]);
+      });
+      names.push(`PANEL_${z}`);
+    }
+  } else {
+    names.push('BACK_M', 'SLEEVE_M', 'FRONT_M', 'YOKE_M', 'STACK_M', 'WIDE_M');
+    // control: outline + its sew line drawn alike at a uniform 10 mm allowance
+    block('YOKE_M', () => {
+      poly('1', rect(3000, 0, 3300, 200));
+      poly('1', rect(3010, 10, 3290, 190));
+      line('7', [3150, 30], [3150, 170]);
+    });
+    // three alike, a uniform 8 mm apart: sizes, not a cut line with its sew line
+    block('STACK_M', () => {
+      for (const k of [0, 8, 16]) poly('1', rect(4000 + k, k, 4300 - k, 200 - k));
+      line('7', [4150, 30], [4150, 170]);
+    });
+    // one alike 25 mm inside: farther than an allowance
+    block('WIDE_M', () => {
+      poly('1', rect(7000, 0, 7300, 200));
+      poly('1', rect(7025, 25, 7275, 175));
+      line('7', [7150, 30], [7150, 170]);
+    });
+  }
   E(0, 'ENDSEC');
   E(0, 'SECTION');
   E(2, 'ENTITIES');
-  for (const name of ['BACK_M', 'SLEEVE_M', 'FRONT_M', 'YOKE_M']) {
+  for (const name of names) {
     E(0, 'INSERT');
     E(8, '0');
     E(2, name);
@@ -226,12 +260,27 @@ console.log('# fixture: nested sizes in one block');
       'FRONT_M: outline = the drawn outline',
     );
   });
-  closed('YOKE_M', (c, p) =>
+  closed('YOKE_M', (c, p) => {
     ck(
       Math.abs(c.areaMm2 - 300 * 200) < 1 && Object.values(p.roles).includes('hole'),
       'YOKE_M: outer = the cut line; the uniform sew line is not taken for a size',
-    ),
-  );
+    );
+    ck(
+      p?.seamPair?.offsetMm === 10 && c.dxf.seamPairMm === 10,
+      'YOKE_M: reported as a cut line + sew line pair (10 mm)',
+      JSON.stringify(p?.seamPair ?? null),
+    );
+    const r = m.refuseSeamPair(c, 'you said the drawing has two sizes');
+    ck(
+      r.outcome === 'refused' &&
+        r.outer.length === 0 &&
+        r.gradeRefusal === 'sizes-not-distinguished',
+      'YOKE_M: refused when the operator says the run has two sizes',
+      r.gradeDetail ?? r.outcome,
+    );
+  });
+  refused('STACK_M', 3);
+  refused('WIDE_M', 2);
   const fam = fast?.families.find((f) => f.candidates.some((c) => c.dxf.block === 'BACK_M'));
   ck(
     !!fast?.sheet.warnings.some((w) => /several outlines/.test(w)),
@@ -239,6 +288,18 @@ console.log('# fixture: nested sizes in one block');
     fast?.sheet.warnings.find((w) => /several outlines/.test(w)) ?? '',
   );
   ck(!!fam, 'BACK_M family present (refused, not dropped)');
+}
+
+console.log('\n# fixture: an outline + a sew line alike, the drawing names two sizes');
+{
+  const { seg, fast } = await m.fastPathOf('two-sizes.dxf', enc(fixtureDxf('two-sizes')));
+  ck(seg.sizes.length === 2, 'the blocks name two sizes', seg.sizes.map((z) => z.token).join(' '));
+  const cs = (fast?.families ?? []).flatMap((f) => f.candidates);
+  ck(
+    cs.length === 2 && cs.every((c) => c.outcome === 'refused' && c.outer.length === 0),
+    'PANEL_S / PANEL_M: refused (the pair may be the two sizes)',
+    cs.map((c) => `${c.dxf.block}=${c.outcome}`).join(' '),
+  );
 }
 
 function area(pts) {
@@ -273,6 +334,11 @@ for (const f of files) {
     `${f}: no nested-size block, nothing refused`,
     `${seg.pieces.length} blocks, ${fast?.families.length ?? 0} families${flagged.length ? `; flagged ${flagged.map((p) => p.block).join(', ')}` : ''}`,
   );
+  const pairs = seg.pieces.filter((p) => p.seamPair).length;
+  if (pairs)
+    console.log(
+      `        ${f}: ${pairs} block(s) read as an outline + a sew line alike (sizes: ${seg.sizes.length})`,
+    );
   snap[f] = m.canonical(fast);
 }
 if (writeBaseline) {
