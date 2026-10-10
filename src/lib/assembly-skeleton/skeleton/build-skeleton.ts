@@ -322,6 +322,9 @@ export function buildSkeleton(
       runFuse(stage);
       continue;
     }
+    // Before any unit is emitted, like fuse — a feature is sewn on the flat piece. Empty until lane D
+    // (P2 §4) reads PieceGeom.marks here.
+    if (stage.op === 'features') continue;
     if (stage.op === 'units') {
       const roles = stage.roles ?? ['*'];
       for (const u of g.units) {

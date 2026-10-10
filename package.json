@@ -49,6 +49,7 @@
     "assembly:cause": "node scripts/assembly-cause-probe.mjs",
     "skeleton:order": "node scripts/assembly-skeleton/skeleton.mjs",
     "skeleton:fixes": "node scripts/assembly-skeleton/fixes.mjs",
+    "skeleton:marks": "node scripts/assembly-skeleton/marks.mjs",
     "skeleton:ui": "node scripts/assembly-skeleton/ui-probe.mjs",
     "stitch:type": "node scripts/stitch-type-probe.mjs",
     "annotation:shapes": "node scripts/annotation-shape-probe.mjs",

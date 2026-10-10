@@ -22,6 +22,12 @@ import trousers from './templates/trousers.json';
 export type StageOp =
   /** FUSING on pieces marked fused (or, with BOM interlining and nothing marked, on `fuseRoles`). */
   | 'fuse'
+  /**
+   * Per-piece features read off the pattern's internal marks (geometry/marks.ts: darts …). Runs
+   * right after `fuse`, before any unit is emitted. Stage 0 of P2 adds it to every template empty;
+   * lane D fills it (`runFeatures` in build-skeleton.ts).
+   */
+  | 'features'
   /** Emit the `groupUnits` units of these roles ('*' = whatever is left) in dependency order. */
   | 'units'
   /** One join of every live unit carrying one of `roles` (per hand with `byHand`). */
@@ -104,6 +110,7 @@ export type RoleBook = {
 
 const OPS: ReadonlySet<string> = new Set([
   'fuse',
+  'features',
   'units',
   'combine',
   'attach',
