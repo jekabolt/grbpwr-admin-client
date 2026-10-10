@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { MANIFEST_VERSION } from '../types';
 import type { PlannedBlock } from './plan';
+import { contourSigCap, contourSignature } from '../manifest/contour-sig';
 
 // Manifest numbers are provenance, not geometry (the geometry is the DXF): bbox to 0.1 mm and
 // area to 1 mm² keep the per-block entry short (M1: the 999 prologue of a 138-block sheet).
@@ -40,7 +41,8 @@ export function manifestPiece(p: PieceSpec): ManifestPiece {
   return m;
 }
 
-export function manifestBlock(b: PlannedBlock): ManifestBlock {
+export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
+  const contour = contourSignature(b.cut, sigPts);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -63,6 +65,8 @@ export function manifestBlock(b: PlannedBlock): ManifestBlock {
     drills: b.drills.length,
     internal: b.internal.length,
     hasSeam: !!b.seam,
+    // F14f (Codex R2): binds this entry to the written cut ring (manifest/contour-sig.ts)
+    ...(contour ? { contour } : {}),
   };
 }
 
@@ -99,7 +103,7 @@ export function buildManifest(
     allowanceMm: fileAllowance(specs),
     sizes: job.sizes.map((s) => ({ ...s })),
     pieces: specs.map(manifestPiece),
-    blocks: blocks.map(manifestBlock),
+    blocks: blocks.map((b) => manifestBlock(b, contourSigCap(blocks.length))),
     source: job.source,
     gate: null,
   };

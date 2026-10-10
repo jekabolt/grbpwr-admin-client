@@ -1038,7 +1038,7 @@ export function PatternsField({
                 {converted && !!techCardId && converted.techCardId !== techCardId && (
                   <Pill
                     tone='warn'
-                    title={`this sheet was converted for tech card #${converted.techCardId}, not this one — its sizes are trusted only where they belong to this card's size system`}
+                    title={`this sheet was converted for tech card #${converted.techCardId}, not this one — its sizes are never added to this card by themselves: the cut-pieces dialog reads them from the block names and asks you to confirm`}
                   >
                     converted for another card
                   </Pill>
@@ -2128,6 +2128,7 @@ export function PatternsField({
             // из которого панель выкроек читает состояние замера.
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
+            techCardId={techCardId}
             onClose={() => setMatching(null)}
           />
         </Suspense>

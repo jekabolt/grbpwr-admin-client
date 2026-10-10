@@ -2,7 +2,7 @@
 // raw pieces in absolute cm coordinates, then the normalization into PieceDTO.
 import type { ParseOpts, PieceDTO, PieceManifestFacts, Unit } from '../types';
 import type { ConversionManifest } from 'lib/pattern-import/types';
-import { readManifestBytes } from 'lib/pattern-import/manifest';
+import { contourSigProblem, readManifestBytes } from 'lib/pattern-import/manifest';
 import { parseDxf } from '../dxf/parse';
 import { expandGroups } from '../dxf/transform';
 import { groupToPieces, type RawPiece } from '../dxf/pieces';
@@ -130,6 +130,7 @@ function manifestFactsByBlock(
     const hand = piece.pairHand;
     const mods = hand ? piece.mods.filter((x) => x.toUpperCase() !== hand) : piece.mods;
     out.set(ci, {
+      techCardId: m.techCardId,
       identity: piece.identity.trim(),
       size,
       sizeId: piece.ungraded ? 0 : b.sizeId,
@@ -148,16 +149,22 @@ function manifestFactsByBlock(
   return out;
 }
 
-// МАНИФЕСТ ПРИВЯЗАН К ГЕОМЕТРИИ (Codex C3). Совпадение ИМЁН блоков (manifestFactsByBlock) подделать
-// легко: манифест одного листа, вклеенный в другой с теми же именами, или лист, правленный после
-// конвертации, — и карточка поверит чужим размерам, слою кроя и парам. Поэтому факты принимаются,
-// только если отчёт ворот конвертера прошёл (`gate.passed`) и КАЖДЫЙ блок нарисован таким, каким он
-// заявлен: габарит на слое кроя (±0.5 мм, у одной из вставок — и положение), площадь (±0.5 %),
-// число надсечек и свёрл. Любое расхождение — манифест для этого листа считается отсутствующим
-// (разбор как у любого DXF) и причина едет в `manifestDistrust` (значок на вкладке выкроек).
+// МАНИФЕСТ ПРИВЯЗАН К ГЕОМЕТРИИ (Codex C3, F14f R2). Совпадение ИМЁН блоков (manifestFactsByBlock)
+// подделать легко: манифест одного листа, вклеенный в другой с теми же именами, или лист, правленный
+// после конвертации, — и карточка поверит чужим размерам, слою кроя и парам. Поэтому факты
+// принимаются, только если отчёт ворот конвертера прошёл (`gate.passed`) и КАЖДЫЙ блок нарисован
+// таким, каким он заявлен:
+//   • ФОРМА — линия кроя совпадает с подписью контура (`ManifestBlock.contour`, двусторонний
+//     Хаусдорф, manifest/contour-sig.ts). Габарит, площадь и счёт признаков формой не являются:
+//     треугольники (0,0),(100,0),(0,100) и (0,0),(100,100),(0,100) совпадают во всём этом (R2-A).
+//     Манифест без подписи (записан до F14f) не доверен целиком — разбор как у любого DXF;
+//   • габарит (±0.5 мм, у одной из вставок — и положение), площадь (±0.5 %);
+//   • число надсечек и свёрл — по СЧЁТУ БЕЗ ПОТОЛКА (`RawPiece.innerTally`), а не по `inner`:
+//     тот урезан бюджетом точек, и шов на 5001 вершину прятал надсечку за собой (R2-B).
+// Любое расхождение — манифест для этого листа считается отсутствующим и причина едет в
+// `manifestDistrust` (значок на вкладке выкроек).
 const GEOM_TOL_MM = 0.5;
 const AREA_TOL = 0.005;
-const DRILL_MM = 10; // write/plan.ts DRILL_SQUARE_MM — свёрла пишутся квадратом 10×10 на слое 8
 export function manifestGeometryProblems(
   m: ConversionManifest,
   raws: readonly RawPiece[],
@@ -165,6 +172,11 @@ export function manifestGeometryProblems(
   const out: string[] = [];
   if (m.gate?.passed !== true)
     out.push(m.gate ? 'its conversion gate did not pass' : 'it carries no conversion gate report');
+  const unsigned = m.blocks.filter((b) => !b.contour).length;
+  if (unsigned > 0)
+    out.push(
+      `${unsigned} of ${m.blocks.length} blocks carry no contour signature (written before F14f)`,
+    );
   const byBlock = new Map<string, RawPiece[]>();
   for (const r of raws) {
     if (r.layer !== m.layers.cut || !r.blockName) continue;
@@ -196,19 +208,22 @@ export function manifestGeometryProblems(
         bad = `area ${a.toFixed(0)} mm², declared ${b.areaMm2}`;
         break;
       }
-      const notches = r.inner.filter((p) => p.layer === m.layers.notch).length;
+      if (b.contour) {
+        const why = contourSigProblem(
+          b.contour,
+          r.poly.map((p) => ({ x: p.x * 10, y: p.y * 10 })),
+        );
+        if (why) {
+          bad = why;
+          break;
+        }
+      }
+      const notches = r.innerTally[m.layers.notch]?.paths ?? 0;
       if (notches !== b.notches) {
         bad = `${notches} notches, declared ${b.notches}`;
         break;
       }
-      const drills = r.inner.filter((p) => {
-        if (p.layer !== m.layers.internal || !p.closed || p.pts.length !== 4) return false;
-        const q = bounds(p.pts);
-        return (
-          Math.abs((q.maxX - q.minX) * 10 - DRILL_MM) <= GEOM_TOL_MM &&
-          Math.abs((q.maxY - q.minY) * 10 - DRILL_MM) <= GEOM_TOL_MM
-        );
-      }).length;
+      const drills = r.innerTally[m.layers.internal]?.drillSquares ?? 0;
       if (drills !== b.drills) {
         bad = `${drills} drills, declared ${b.drills}`;
         break;
