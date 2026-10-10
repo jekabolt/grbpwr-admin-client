@@ -636,8 +636,10 @@ export function buildPieceSpecsDetailed(
     const opFold = wantFold === false ? null : operatorFold[seed] ?? null;
     const foldWords = wantFold === false ? [] : foldWordsOf(p.fam, sheet);
     let refEdge: FoldLine | null = opFold;
-    // the box of the outline the reference edge lies on: the fold question's size for a pick
-    let refBox: BoxMm | null = opFold ? largest.bbox : null;
+    // the box of the outline the operator's pick lies on (the fold question's size): only a PICK
+    // is carried to the other sizes by place (file per size) or loosely (a wandering edge) — a fold
+    // word's edge must match strictly, else the piece is asked
+    const refBox: BoxMm | null = opFold ? largest.bbox : null;
     let refWhy: string | null = opFold ? 'picked by you' : null;
     const internalWords = new Set<string>();
     if (!refEdge && foldWords.length) {
@@ -653,7 +655,6 @@ export function buildPieceSpecsDetailed(
         }
         if (best) {
           refEdge = best.edge;
-          refBox = c.bbox;
           refWhy = `«${best.text}» ${best.how === 'symbol' ? 'on a line along' : `${best.d.toFixed(0)} mm from`} a ${best.edge.lenMm.toFixed(0)} mm straight edge`;
           break;
         }
