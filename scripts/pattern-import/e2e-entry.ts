@@ -493,6 +493,10 @@ export async function runCase(c: Case): Promise<Rec> {
     if (pending.length) rec.ops.push(`confirm ${pending.length} legend rows`);
     const CARD = card(c.card);
     let sz = await run('sizes', { card: CARD });
+    // D1: what the sizes step asks, and what the lines suggest (offered, never applied)
+    const askOf = (a: typeof sz.countAsk) =>
+      !a ? 'not asked' : a.inferred ? `${a.inferred.n} · from the lines` : 'asked, no suggestion';
+    const ask0 = askOf(sz.countAsk);
     // H1c-3/4: a sheet that does not state its size count needs the operator's answer (the card's
     // run is never the count). The operator answers from the drawing: `drawn`, else "1" where one
     // size is drawn (one size read off the sheet, or a one-size card)
@@ -517,6 +521,7 @@ export async function runCase(c: Case): Promise<Rec> {
           `${e.source.label}→${e.card?.token ?? '—'}${e.origin === 'auto' && e.card && (e.confidence ?? 1) < 0.9 ? '?' : ''}`,
       ),
       unmappedCard: sz.map.unmapped.length,
+      countAsk: ask0,
     };
     if (guesses.length) {
       rec.ops.push(`confirm ${guesses.length} size guesses`);

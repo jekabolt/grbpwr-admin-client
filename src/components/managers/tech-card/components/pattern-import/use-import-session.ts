@@ -89,7 +89,7 @@ export type Inputs = {
   /** Low-confidence legend rows the operator has looked at and accepted. */
   legendConfirmed: ClassId[];
   sizeMap: SizeMapEntry[] | null;
-  /** H1: the operator's "sizes drawn on this sheet" (null = the card's run decides). */
+  /** H1: the operator's "sizes drawn on this sheet" (null = not answered). */
   drawnSizes: number | null;
   variant: string | null;
   /** Seeds the operator added by clicking (appended to the text seeds of the first run). */
@@ -798,6 +798,8 @@ export function useImportSession(deps: {
       }
       case 'sizes': {
         if (!card.sizes.length) return 'the card has no size range — set it on the card first';
+        if (s.sizes?.countAsk && !s.sizes.expected)
+          return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
           (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
         );

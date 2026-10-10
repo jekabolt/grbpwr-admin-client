@@ -9,6 +9,7 @@ import type {
   ChainRole,
   ChainAmbiguity,
   ExpectedSizes,
+  SizeCountAsk,
   SizeMapEntry,
 } from 'lib/pattern-import/types';
 import { Chip } from 'ui/components/chip';
@@ -178,8 +179,13 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       }
       side={
         <Panel title='legend and sizes'>
-          {sizes.expected?.from !== 'source' && (
-            <DrawnSizes expected={sizes.expected} onCommit={(n) => void api.setDrawnSizes(n)} />
+          {sizes.countAsk && (
+            <DrawnSizes
+              ask={sizes.countAsk}
+              expected={sizes.expected}
+              cardCount={card.sizes.length}
+              onCommit={(n) => void api.setDrawnSizes(n)}
+            />
           )}
           {flags.length > 0 && (
             <>
@@ -384,68 +390,92 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
 }
 
 /**
- * H1: how many sizes the sheet draws, when the file itself does not say (every size drawn alike).
- * The card's size range is the default; the fill ranks each piece into that many sizes and holds
- * back (never guesses) a piece it cannot rank. Empty = back to the card's range.
+ * H1 / D1: how many sizes the sheet draws, when the file itself does not say. Required: the step
+ * does not continue until it is answered, and nothing is filled in for the operator. Quick answers,
+ * one click each: what the lines show (suggested, not chosen), then the card's size count, then any
+ * number. The fill ranks each piece into that many sizes and holds back (never guesses) a piece it
+ * cannot rank. Clearing the field takes the answer back.
  */
 function DrawnSizes({
+  ask,
   expected,
+  cardCount,
   onCommit,
 }: {
+  ask: SizeCountAsk;
   expected: ExpectedSizes | null;
+  cardCount: number;
   onCommit: (n: number | null) => void;
 }) {
-  const note = !expected
-    ? 'the lines do not say how many sizes are drawn and the card has no size range. type the number.'
-    : expected.from === 'card'
-      ? `from the card's size range. each piece is ranked into ${expected.n} sizes; a piece that cannot be ranked is held back, not guessed. change it if the sheet draws fewer.`
-      : expected.n === 1
+  const answer = expected?.from === 'operator' ? expected.n : null;
+  const inferred = ask.inferred;
+  const card = cardCount > 0 && cardCount !== inferred?.n ? cardCount : null;
+  const note =
+    answer == null
+      ? 'the file does not say how many sizes it draws. count the outlines of one piece.'
+      : answer === 1
         ? 'one size: each piece closes as a single outline.'
-        : `set by you. a piece that cannot be ranked into ${expected.n} sizes is held back, not guessed.`;
+        : `set by you. a piece that cannot be ranked into ${answer} sizes is held back, not guessed.`;
   return (
     <div className='mb-3'>
       <GroupLabel flush>sizes drawn on this sheet</GroupLabel>
-      <span className='flex items-center gap-1.5'>
+      <span className='flex flex-wrap items-center gap-1.5'>
+        {inferred && (
+          <Chip
+            tone={answer === inferred.n ? 'default' : 'attention'}
+            selected={answer === inferred.n}
+            pressed={answer === inferred.n}
+            className='h-[22px]'
+            title={`suggested: ${inferred.why}`}
+            onClick={() => answer !== inferred.n && onCommit(inferred.n)}
+          >
+            {inferred.n} · from the lines
+          </Chip>
+        )}
+        {card != null && (
+          <Chip
+            selected={answer === card}
+            pressed={answer === card}
+            className='h-[22px]'
+            title="the card's size range — the sheet may draw fewer"
+            onClick={() => answer !== card && onCommit(card)}
+          >
+            {card} (card)
+          </Chip>
+        )}
         <Input
           type='number'
           min={1}
           max={30}
           step={1}
           inputMode='numeric'
-          key={`${expected?.from}-${expected?.n ?? 'none'}`}
-          defaultValue={expected?.n ?? ''}
+          key={answer ?? 'none'}
+          defaultValue={answer ?? ''}
+          placeholder='n'
           aria-label='sizes drawn on this sheet'
           aria-describedby='drawn-sizes-note'
-          aria-invalid={!expected || undefined}
+          aria-invalid={answer == null || undefined}
           className='h-[22px] w-16 tabular-nums'
           onBlur={(ev: React.FocusEvent<HTMLInputElement>) => {
             const raw = ev.currentTarget.value.trim();
             const n = raw === '' ? null : Math.round(Number(raw));
             if (n !== null && (!Number.isFinite(n) || n < 1 || n > 30)) {
-              ev.currentTarget.value = expected ? String(expected.n) : '';
+              ev.currentTarget.value = answer != null ? String(answer) : '';
               return;
             }
-            if (n !== (expected?.from === 'operator' ? expected.n : null)) onCommit(n);
+            if (n !== answer) onCommit(n);
           }}
           onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
             if (ev.key === 'Enter') ev.currentTarget.blur();
           }}
         />
-        {expected?.from === 'operator' ? (
-          <Pill tone='ink'>set</Pill>
-        ) : expected ? (
-          <Pill tone='attention' title="taken from the card's size range">
-            card
-          </Pill>
-        ) : (
-          <Pill tone='attention'>! needed</Pill>
-        )}
+        {answer != null ? <Pill tone='ink'>set</Pill> : <Pill tone='attention'>! needed</Pill>}
       </span>
       <Text
         id='drawn-sizes-note'
         size='micro'
         component='p'
-        className={cn('mt-1', expected ? 'text-labelColor' : 'text-error')}
+        className={cn('mt-1', answer != null ? 'text-labelColor' : 'text-error')}
       >
         {note}
       </Text>

@@ -68,7 +68,14 @@ export function isAllowancePair(offsets: readonly number[], shorterMm: number): 
   return sd <= P.stdMm;
 }
 
-export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
+export type GuardEvidence = {
+  graded: boolean;
+  share: number;
+  nestedMm: number;
+  totalMm: number;
+  /** line length (mm) by the number of lanes it sits in (index = lanes, self included) */
+  lanesMm: number[];
+};
 
 /** Roles whose lines never count as size evidence (and never become graded walls). */
 export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore', 'notch']);
@@ -314,10 +321,12 @@ export function gradingEvidence(
       if (isAllowancePair(ds, Math.min(la, lb))) uniform.add(key);
     }
   let nested = 0;
+  const lanesMm: number[] = [];
   for (const { self, hits } of seen) {
     let lanes = 1;
     for (const k of hits) if (!uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`)) lanes++;
     if (lanes >= o.minLanes) nested += 4;
+    lanesMm[lanes] = (lanesMm[lanes] ?? 0) + 4;
   }
   const share = total ? nested / total : 0;
   return {
@@ -325,6 +334,7 @@ export function gradingEvidence(
     share,
     nestedMm: nested,
     totalMm: total,
+    lanesMm: Array.from(lanesMm, (v) => v ?? 0),
   };
 }
 

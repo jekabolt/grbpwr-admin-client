@@ -541,11 +541,18 @@ export type GradeRefusal =
 
 /**
  * How many sizes the sheet draws, and who says so. 'source' = the file encodes its sizes (legend,
- * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step.
- * 'card' is no longer produced (the card's size run is never the count — H1c-4); it stays in the
- * union until the sizes step's copy drops it.
+ * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step. The
+ * card's size run is never the count (H1c-4) — the sizes step only offers it as a quick answer.
  */
-export type ExpectedSizes = { n: number; from: 'source' | 'operator' | 'card' };
+export type ExpectedSizes = { n: number; from: 'source' | 'operator' };
+
+/**
+ * The sizes step's "sizes drawn on this sheet" question (D1). Asked when the source does not state
+ * the count (an unencoded sheet; a DXF whose blocks draw outline and sew line alike); required
+ * while `expected` is null. `inferred` = what the lines alone show, offered first as a suggestion,
+ * never applied.
+ */
+export type SizeCountAsk = { inferred: { n: number; why: string } | null };
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
@@ -1573,9 +1580,11 @@ export type StageIO = {
       map: SizeMap;
       /**
        * pieces/grade (H1): sizes the sheet draws — from the source when it encodes them, else the
-       * operator's answer, else the card's run; null = unknown (the sizes step asks).
+       * operator's answer; null = unknown (the sizes step asks).
        */
       expected: ExpectedSizes | null;
+      /** D1: the step asks the count (null = the source states it, or it does not matter). */
+      countAsk: SizeCountAsk | null;
     };
   };
   pieces: {

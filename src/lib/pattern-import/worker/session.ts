@@ -30,6 +30,7 @@ import type {
   SizeMap,
   ExpectedSizes,
   FillOpts,
+  SizeCountAsk,
   SizeRun,
   SourceDoc,
   SourceFileInfo,
@@ -63,7 +64,7 @@ import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
-import { expectedSizes, runForExpected } from '../pieces/grade/expected';
+import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
   applyPieceEdits,
@@ -702,7 +703,26 @@ export class Session {
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    return { run, map, expected: this.expected };
+    return { run, map, expected: this.expected, countAsk: this.countAsk(read) };
+  }
+
+  /**
+   * D1: the sizes step asks "sizes drawn on this sheet" unless the source states it. A DXF's blocks
+   * are its pieces, so there it is asked only for blocks drawn as outline + sew line alike (they
+   * close only as one size). The lines' own suggestion is computed once per chain set.
+   */
+  private inferred: { set: ChainSet; v: SizeCountAsk['inferred'] } | null = null;
+  private countAsk(read: SizeRun): SizeCountAsk | null {
+    if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
+    if (
+      this.fast &&
+      !this.fast.families.some((f) => f.candidates.some((c) => (c as DxfPieceCandidate).oneSize))
+    )
+      return null;
+    const set = this.chains;
+    if (!set || !this.sheet) return { inferred: null };
+    if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
+    return { inferred: this.inferred.v };
   }
 
   // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
