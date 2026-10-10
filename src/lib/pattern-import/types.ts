@@ -539,8 +539,9 @@ export type GradeRefusal =
 
 /**
  * How many sizes the sheet draws, and who says so. 'source' = the file encodes its sizes (legend,
- * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step;
- * 'card' = the card's size run (the converter runs inside the card), used when the source is silent.
+ * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step.
+ * 'card' is no longer produced (the card's size run is never the count — H1c-4); it stays in the
+ * union until the sizes step's copy drops it.
  */
 export type ExpectedSizes = { n: number; from: 'source' | 'operator' | 'card' };
 

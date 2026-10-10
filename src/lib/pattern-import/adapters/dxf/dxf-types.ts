@@ -297,6 +297,11 @@ export type DxfSegmentation = {
 /** A contract PieceCandidate plus what the DXF already knows (features, block, size). Structurally
  * assignable to PieceCandidate, so F5 can take it as-is. */
 export type DxfPieceCandidate = PieceCandidate & {
+  /**
+   * A refused `seamPair` block: its cut + sew reading, valid only if the drawing holds ONE size
+   * (the operator's or the source's count) — `settleSeamPair` restores it then.
+   */
+  oneSize?: DxfPieceCandidate;
   dxf: {
     block: string;
     group: number;
@@ -305,7 +310,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;
-    /** The block's `seamPair` allowance, mm: refused when the operator says the run has 2 sizes. */
+    /** The block's `seamPair` allowance, mm (the uniform same-look loop inside the outline). */
     seamPairMm?: number;
     /** F14 R5: the block is inserted this many times (identical copies) = its cut quantity. */
     instances?: number;

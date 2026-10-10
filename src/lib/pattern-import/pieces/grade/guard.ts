@@ -33,8 +33,6 @@ export type GuardOpts = {
    * 2–20 mm) all along the line is its sew line drawn alike, not another size: not a lane.
    */
   skipUniformPairs: boolean;
-  /** neighbours of any look are lanes (the solver's band count does not look at the line) */
-  anyLook: boolean;
   /** lines shorter than this are no lane (lettering, symbols and arrows drawn as strokes), mm */
   minChainMm: number;
 };
@@ -47,7 +45,6 @@ export const GUARD_OPTS: GuardOpts = {
   minShare: 0.2,
   minLenMm: 150,
   skipUniformPairs: false,
-  anyLook: false,
   minChainMm: 10,
 };
 
@@ -277,7 +274,7 @@ export function gradingEvidence(
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
-        if (!d || (!o.anyLook && !sameLook(c, d, styles)) || copyOf(c, d)) return;
+        if (!d || !sameLook(c, d, styles) || copyOf(c, d)) return;
         const p = d.pts[i];
         const q = d.pts[(i + 1) % d.pts.length];
         const sx = q.x - p.x;

@@ -5,18 +5,15 @@
 //   • grade 'off' (probes);
 //   • the sheet is encoded (size classes carry the lines) and no seed's region holds an unencoded
 //     nest of same-looking lines;
-//   • no size class carries a line and ONE size is expected (the source names its size, the
-//     operator said so, the card has one size);
-//   • only the card's size run expects n ≥ 2, no seed looks graded (the guard) and the drawing does
-//     not show n lines side by side (the solver's band count) — the card is a weak prior;
-//   • the expected size count is unknown and no seed looks graded.
-// Otherwise, per seed:
+//   • no size class carries a line and ONE size is expected (the source names its size, or the
+//     operator said so on the sizes step).
+// The card's size run is never the count (expected.ts). Otherwise, per seed:
 //   expected n ≥ 2, nothing encoded  every seed must be PROVEN by gradeRanks — refused otherwise,
 //                                    whatever the guard heuristic says ('guard' mode: every seed,
 //                                    every expected size refused). A drawing whose band count is
 //                                    not n refuses the whole sheet ('size-count').
-//   expected unknown                 seeds that look graded are refused ('size-count': answer the
-//                                    count on the sizes step); the others fill as one size.
+//   expected unknown, nothing encoded  EVERY seed is refused ('size-count': the sizes step requires
+//                                    the answer; this is the defence for paths that skip it).
 //   encoded sheet (mixed)            seeds whose region holds an unencoded nest are refused.
 // Refused = outcome 'refused' with `gradeRefusal` + `gradeDetail`, never a contour. An accepted
 // rank whose F4 contour disagrees with the solver's region is refused too.
@@ -33,7 +30,8 @@ import type {
   SizeRun,
 } from 'lib/pattern-import/types';
 
-import { drawPolyline, exterior, Grid, regionOf } from '../raster';
+import { SegGrid } from '../geom';
+import { drawPolyline, exterior, Grid, openMask, regionOf, traceOuter } from '../raster';
 import type { WallItem } from '../snap';
 import { variantKnives } from '../variants';
 import { itemsOf, type WallModel } from '../walls';
@@ -80,20 +78,6 @@ export const mixedGuard = (n: number): Partial<GuardOpts> => ({
  * corpus: no encoded seed flips (viola's nearest lettering pair: 64 mm of nest at ≤ 15 mm);
  * polupalto (audited, not an encoding) refuses more.
  */
-/**
- * The card's run is a weak prior: a sheet the card alone says is graded fills as ONE size only when
- * every pair of lines side by side (any look — the solver's band count does not look at the line)
- * is a cut / sew line pair at one allowance, a near-exact registration copy, or a line under 40 mm.
- */
-export const CARD_SINGLE: Partial<GuardOpts> = {
-  minLanes: 2,
-  minShare: 0,
-  minLenMm: 4,
-  minChainMm: 40,
-  anyLook: true,
-  skipUniformPairs: true,
-};
-
 export const PAIR_GUARD: Partial<GuardOpts> = {
   minLanes: 2,
   minShare: 0,
@@ -309,27 +293,25 @@ export function gradeHook(
     );
   }
 
-  const lineIds = model.common.filter((id) => !blocked.has(id));
   if (exp && exp.n <= 1) return null; // one size, and someone who knows says so
   if (!exp) {
-    const g = guardedSeeds(sheet, set, seeds, lineIds, cell, {});
-    if (!g.length) return null;
     const amb: ChainAmbiguity = {
       kind: 'size-count',
-      message: 'pieces look graded but the number of sizes on the sheet is not known',
+      message: 'the number of sizes drawn on this sheet is not known — answer it on the sizes step',
       classes: [],
       chains: [],
       at: null,
     };
-    return refuseSeeds(g, 1, 'size-count', DETAIL['size-count'], null, [amb]);
+    return refuseSeeds(
+      seeds.map((s) => s.id),
+      1,
+      'size-count',
+      DETAIL['size-count'],
+      null,
+      [amb],
+    );
   }
 
-  // the card's size run is a weak prior (the garment's sizes, not what this sheet draws): when only
-  // the card says n and no seed sits among same-looking parallel lines, a drawing that does not show
-  // n lines side by side is ONE size (blazer: cut line + stitch line, no label) — F4 as before. A
-  // drawing that does show n lanes still has to be proven size by size below
-  const weakCard =
-    exp.from === 'card' && !guardedSeeds(sheet, set, seeds, lineIds, cell, {}).length;
   const n = exp.n;
   const all = seeds.map((s) => s.id);
   if (mode === 'guard')
@@ -384,18 +366,9 @@ export function gradeHook(
     cache.set(key, G);
   }
   if (G.diag.bandMode !== n) {
-    // the card alone said n: one size when the drawing shows at most two lines side by side and
-    // every such pair is a cut / sew line at one allowance (a third line, or a pair that is not,
-    // goes to the operator: how many sizes does the sheet draw)
-    if (
-      weakCard &&
-      G.diag.bandMode <= 2 &&
-      (G.diag.bandMode < 2 || !guardedSeeds(sheet, set, seeds, lineIds, cell, CARD_SINGLE).length)
-    )
-      return null;
     const message =
       G.diag.bandMode > 0
-        ? `the drawing shows ${G.diag.bandMode} line(s) side by side, ${exp.from === 'card' ? "the card's size run" : exp.from === 'operator' ? 'you said' : 'the source says'} ${n}`
+        ? `the drawing shows ${G.diag.bandMode} line(s) side by side, ${exp.from === 'operator' ? 'you said' : 'the source says'} ${n}`
         : `no lines side by side were found, ${n} sizes expected`;
     const amb: ChainAmbiguity = { kind: 'size-count', message, classes: [], chains: [], at: null };
     return refuseSeeds(all, n, 'size-count', message, G, [amb], () => []);
@@ -408,21 +381,35 @@ export function gradeHook(
   const rankPs = G.portions.map((p) => ({ track: p.chain, ranks: p.ranks, pts: p.pts }));
   const gradedKnives = new Set(G.gradedKnives);
   const solverKnives = kIds.flatMap((kid, i) => (gradedKnives.has(kid) ? [] : [knives[i]]));
-  const regionXorMm2 = (
+  const regionDiff = (
     c: PieceCandidate,
     s: GradeResult['seeds'][number],
     sd: Seed,
     r: number,
-  ): number => {
+  ): { xor: number; haus: number } => {
     const f = fillRank(s.box, cell, rankPs, r, sd.at, solverKnives, [], true);
-    if (!f.closed || !f.mask || !f.grid || c.outer.length < 3) return Infinity;
+    if (!f.closed || !f.mask || !f.grid || c.outer.length < 3)
+      return { xor: Infinity, haus: Infinity };
     const g = f.grid;
     const wall = new Uint8Array(g.W * g.H);
     drawPolyline(g, wall, c.outer, true);
     const ext = exterior(g, wall);
+    const mine = new Uint8Array(ext.length);
     let d = 0;
-    for (let k = 0; k < ext.length; k++) if ((ext[k] ? 0 : 1) !== f.mask[k]) d++;
-    return d * g.cell * g.cell;
+    for (let k = 0; k < ext.length; k++) {
+      mine[k] = ext[k] ? 0 : 1;
+      if (mine[k] !== f.mask[k]) d++;
+    }
+    // both boundaries traced the same way (pixel edges of the region, walls included), so the rim
+    // cancels; both opened as F4 opens its region (narrow spurs and slits under ~2 mm are not
+    // outline), so what is left is how far F4's outline strays from the solver's anywhere
+    const k0 = g.iy(sd.at.y) * g.W + g.ix(sd.at.x);
+    const haus = hausdorffMm(
+      traceOuter(g, openMask(g, f.mask, 2, k0)),
+      traceOuter(g, openMask(g, mine, 2, k0)),
+      HAUS_REACH_MM,
+    );
+    return { xor: d * g.cell * g.cell, haus };
   };
   const skip = new Set(
     G.seeds.filter((s) => !s.accepted || !s.rankOk.some(Boolean)).map((s) => s.seed),
@@ -486,7 +473,8 @@ export function gradeHook(
         // and REGION for region (equal areas are not the same outline): the pixels F4's contour
         // and the solver's region differ by, on the solver's own raster — the same rim for every
         // rank; a rank that took another line differs by a strip, not a rim
-        const xor = live.map((c) => regionXorMm2(c, res.get(id)!, byId.get(id)!, c.rank));
+        const diff = live.map((c) => regionDiff(c, res.get(id)!, byId.get(id)!, c.rank));
+        const xor = diff.map((x) => x.xor);
         const mx = median(xor);
         live.forEach((c, k) => {
           const bad =
@@ -498,10 +486,11 @@ export function gradeHook(
             // absolute, per rank: a contour wrong by the same strip in EVERY rank (a sew line
             // taken for the cut line) moves no rank off the median
             xor[k] > GRADE_XOR_AREA_MAX * c.areaMm2 ||
-            xor[k] / perimeter(c.outer) > GRADE_XOR_STRIP_MM;
+            xor[k] / perimeter(c.outer) > GRADE_XOR_STRIP_MM ||
+            diff[k].haus > hausMax(step, c.outer, cell);
           if (HOOK_DEBUG.on)
             HOOK_DEBUG.log(
-              `    region seed ${id} r${c.rank}: strip ${(xor[k] / perimeter(c.outer)).toFixed(3)} mm, area ${((100 * xor[k]) / c.areaMm2).toFixed(3)} %, xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
+              `    region seed ${id} r${c.rank}: haus ${diff[k].haus.toFixed(2)} mm (bound ${hausMax(step, c.outer, cell).toFixed(2)}, grade offset ${(step / perimeter(c.outer)).toFixed(2)} mm), strip ${(xor[k] / perimeter(c.outer)).toFixed(3)} mm, area ${((100 * xor[k]) / c.areaMm2).toFixed(3)} %, xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
             );
           if (bad) {
             if (HOOK_DEBUG.on)
@@ -550,6 +539,65 @@ export const GRADE_XOR_MAX = 0.04;
  */
 export const GRADE_XOR_STRIP_MM = 2;
 export const GRADE_XOR_AREA_MAX = 0.04;
+
+/**
+ * And the farthest F4's outline strays from the solver's region anywhere (symmetric Hausdorff of the
+ * two traced boundaries, sampled every 1 mm): at most min(3 mm, half the piece's mean grade offset
+ * = area step / perimeter) — a tab or a corner that took the neighbour size's line moves a whole
+ * grade offset there. Accepted residual: an all-round inset of ~1.5 mm stays under the 2 mm strip
+ * and may stay under this bound too (on pieces graded by ≥ 3 mm + the raster's resolution floor);
+ * it is not caught on purpose — it cannot be another drawn size line at realistic grade steps (the
+ * nearest line of another size is a whole grade offset away).
+ */
+export const GRADE_HAUS_MAX_MM = 3;
+export const GRADE_HAUS_STEP_SHARE = 0.5;
+const HAUS_REACH_MM = 20;
+/**
+ * The measurement's own resolution: both boundaries are traced on the solver's raster, so two
+ * identical outlines already differ by up to one pixel diagonal (bench: 0.50 / 0.71 mm at 0.5 mm
+ * cells). Below that the bound would refuse correct ranks of pieces whose mean grade offset is
+ * under ~1.4 mm (robe's small pieces: 0.65–0.92 mm) — the floor is that resolution, 1.5 cells.
+ */
+const HAUS_FLOOR_CELLS = 1.5;
+const hausMax = (stepMm2: number, outer: readonly PtMm[], cellMm: number) =>
+  Math.min(
+    GRADE_HAUS_MAX_MM,
+    Math.max(HAUS_FLOOR_CELLS * cellMm, GRADE_HAUS_STEP_SHARE * (stepMm2 / perimeter(outer))),
+  );
+
+/** Symmetric Hausdorff distance of two closed outlines, sampled every 1 mm (capped at `reach`). */
+function hausdorffMm(a: readonly PtMm[], b: readonly PtMm[], reach: number): number {
+  if (a.length < 3 || b.length < 3) return Infinity;
+  const one = (p: readonly PtMm[], q: readonly PtMm[]) => {
+    const grid = new SegGrid(4);
+    grid.addPolyline(0, q, true);
+    let worst = 0;
+    for (let i = 0; i < p.length; i++) {
+      const u = p[i];
+      const v = p[(i + 1) % p.length];
+      const L = Math.hypot(v.x - u.x, v.y - u.y);
+      const n = Math.max(1, Math.ceil(L));
+      for (let k = 0; k < n; k++) {
+        const t = { x: u.x + ((v.x - u.x) * k) / n, y: u.y + ((v.y - u.y) * k) / n };
+        let best = reach;
+        grid.near(t, reach, (_, j) => {
+          const s0 = q[j];
+          const s1 = q[(j + 1) % q.length];
+          const sx = s1.x - s0.x;
+          const sy = s1.y - s0.y;
+          const L2 = sx * sx + sy * sy;
+          const w =
+            L2 > 0 ? Math.max(0, Math.min(1, ((t.x - s0.x) * sx + (t.y - s0.y) * sy) / L2)) : 0;
+          best = Math.min(best, Math.hypot(t.x - s0.x - sx * w, t.y - s0.y - sy * w));
+        });
+        if (best > worst) worst = best;
+        if (worst >= reach) return reach;
+      }
+    }
+    return worst;
+  };
+  return Math.max(one(a, b), one(b, a));
+}
 
 function perimeter(pts: readonly PtMm[]): number {
   let L = 0;

@@ -6,14 +6,17 @@
 //   missing-count   graded nest, empty card run, nobody answered → the piece is refused, never one size
 //   mixed           a colour-encoded piece beside an unencoded (all black) graded piece
 //   region-check    the hook's final check is region-based: an equal-area other shape is refused,
-//                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm)
+//                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm) or by
+//                   a 10 mm tab over 10 % of it (a 1.5 mm inset is the documented residual)
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
 //   grid-hatch      graded nest under a sheet grid (thin grey) and same-look hatching inside the piece
 //   equal-area      two layouts with equal areas but other regions → ambiguous (pickLayout, pure)
 //   fragment-ids    notEvidence on a chain subset looks chains up by id (the <8 mm fragment rule)
-//   card-prior      one size + a card of 6 fills as one size; drawn twice (offset) it fills without
+//   count-required  a sheet that does not encode its sizes needs the operator's count: unanswered
+//                   → every piece refused; answered 1 → one size (also drawn twice, offset); a
+//                   wrong answer, a nested same-look line or a graded cuff → refused
 //                   a card and asks with one; a nested same-look line and a cuff graded by a few mm
 //                   → refused
 //   over-maxfree    the bench's robe / kombinezon solved with maxFree 1–2: components beyond the
@@ -108,7 +111,8 @@ function run(draws: Draw[], seeds: PtMm[], cardN: number) {
     { extraTexts: [] },
   );
   const read = detectSizeRun(sheet, set, [{ id: 'fx', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never]);
-  const expected = expectedSizes(read, cardOf(cardN), null, set) ?? undefined;
+  // the sizes step's answer (the card's run is never the count): 0 = nobody answered
+  const expected = expectedSizes(read, cardN || null, set) ?? undefined;
   const sizeRun = runForExpected(read, expected ?? null);
   const sd: Seed[] = seeds.map((at, i) => ({ id: i, at, origin: 'click', variant: null }));
   const { families, diag } = fillPiecesDetailed(sheet, set, sizeRun, sd, {
@@ -222,7 +226,7 @@ function regionCheck(): FixtureResult {
     { extraTexts: [] },
   );
   const read = detectSizeRun(sheet, set, [{ id: 'fx', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never]);
-  const expected = expectedSizes(read, cardOf(n), null, set) ?? undefined;
+  const expected = expectedSizes(read, n, set) ?? undefined;
   const sizeRun = runForExpected(read, expected ?? null);
   const seeds: Seed[] = [{ id: 0, at: p.seed, origin: 'click', variant: null }];
   const hook = gradeHook(sheet, set, sizeRun, seeds, wallModel(set, sizeRun, sheet.texts), {
@@ -273,14 +277,42 @@ function regionCheck(): FixtureResult {
     hook.finish(cands);
     return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
   };
+  // every rank with a 10 mm tab over 10 % of its outline (the neighbour size's line taken there):
+  // under the strip and area bounds, only the boundary deviation (Hausdorff) sees it
+  const tab = () => {
+    const list = p.truth.map((t, r) => {
+      const xs = t.map((q) => q.x);
+      const ys = t.map((q) => q.y);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const run = 0.1 * 2 * (x1 - x0 + (y1 - y0));
+      const ym = (y0 + y1 - run) / 2;
+      return cand(r, [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: ym },
+        { x: x1 + 10, y: ym },
+        { x: x1 + 10, y: ym + run },
+        { x: x1, y: ym + run },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ]);
+    });
+    const cands = new Map<number, PieceCandidate[]>([[0, list]]);
+    hook.finish(cands);
+    return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
+  };
   const kept = pass(false);
   const swapped = pass(true);
   const s10 = strip(10);
   const s25 = strip(2.5);
+  const t10 = tab();
+  // the accepted residual (hook.ts GRADE_HAUS_MAX_MM): a 1.5 mm all-round inset need not be caught
+  // (informational: here the boundary bound happens to catch it)
+  const s15 = strip(1.5);
   return {
     name: 'region-check',
-    ok: kept === 'CCCCC' && swapped[2] === 'r' && s10 === 'rrrrr' && s25 === 'rrrrr',
-    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}; every rank 10 mm in ${s10}, 2.5 mm in ${s25}`,
+    ok: kept === 'CCCCC' && swapped[2] === 'r' && s10 === 'rrrrr' && s25 === 'rrrrr' && t10 === 'rrrrr',
+    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}; every rank 10 mm in ${s10}, 2.5 mm in ${s25}; a 10 mm tab on 10 % of every outline ${t10}; 1.5 mm in (residual, not required) ${s15}`,
   };
 }
 
@@ -329,12 +361,12 @@ function equalArea(): FixtureResult {
 }
 
 /**
- * The card's size run is a weak prior. A one-size piece (cut line + a stitch line of another look,
- * no size label) with a card of 6 sizes fills as one size; so does the same piece drawn twice with a
- * few mm registration offset (a tiled sheet, blazer). The same piece with a nested SAME-look line
- * (two sizes nobody encoded) is refused.
+ * The count is required (H1c-4): a one-size piece (cut line + a stitch line of another look, no size
+ * label) is refused until the operator answers; answered 1 it fills as one size, and so does the
+ * same piece drawn twice with a few mm registration offset (a tiled sheet, blazer). A wrong answer
+ * (6), a nested SAME-look line or a cuff graded by a few mm stays refused.
  */
-function cardPrior(): FixtureResult {
+function countRequired(): FixtureResult {
   // a 5-sided piece (not a rectangle: the registration copy must be a curved line)
   const piece = (dx: number, dy: number): PtMm[] => [
     { x: dx, y: dy },
@@ -380,18 +412,20 @@ function cardPrior(): FixtureResult {
     style: 0,
   }));
   const seed = { x: 150, y: 120 };
-  const cases: { name: string; draws: Draw[]; card: number; at?: PtMm; refuse: boolean }[] = [
-    { name: 'one size + card 6', draws: [cut, sew], card: 6, refuse: false },
-    { name: 'registration copy, no card', draws: [cut, copy, sew], card: 0, refuse: false },
-    // with a card the copy's offsets to the sew line are not one allowance: the operator answers
-    { name: 'registration copy + card 6', draws: [cut, copy, sew], card: 6, refuse: true },
-    { name: 'nested same look + card 6', draws: [cut, { pts: closedPts(inset(base, 8)), style: 0 }], card: 6, refuse: true },
-    { name: 'cuff 3 sizes + card 6', draws: cuff, card: 6, at: { x: 120, y: 40 }, refuse: true },
+  // `drawn`: the operator's answer on the sizes step (0 = not answered; the card's run is no count)
+  const cases: { name: string; draws: Draw[]; drawn: number; at?: PtMm; refuse: boolean }[] = [
+    { name: 'one size, not answered', draws: [cut, sew], drawn: 0, refuse: true },
+    { name: 'one size, answered 1', draws: [cut, sew], drawn: 1, refuse: false },
+    { name: 'one size, answered 6', draws: [cut, sew], drawn: 6, refuse: true },
+    { name: 'registration copy, answered 1', draws: [cut, copy, sew], drawn: 1, refuse: false },
+    { name: 'nested same look, not answered', draws: [cut, { pts: closedPts(inset(base, 8)), style: 0 }], drawn: 0, refuse: true },
+    { name: 'cuff 3 sizes, not answered', draws: cuff, drawn: 0, at: { x: 120, y: 40 }, refuse: true },
+    { name: 'cuff 3 sizes, answered 6', draws: cuff, drawn: 6, at: { x: 120, y: 40 }, refuse: true },
   ];
   const notes: string[] = [];
   let ok = true;
   for (const k of cases) {
-    const { families } = run(k.draws, [k.at ?? seed], k.card);
+    const { families } = run(k.draws, [k.at ?? seed], k.drawn);
     const cs = families.flatMap((f) => f.candidates);
     const refused = cs.some((c) => c.outcome === 'refused');
     const closed = cs.some((c) => c.outcome === 'closed');
@@ -399,7 +433,7 @@ function cardPrior(): FixtureResult {
     if (!good) ok = false;
     notes.push(`${k.name} ${tally(families)}${good ? '' : ' ✗'}`);
   }
-  return { name: 'card-prior', ok, why: notes.join(' · ') };
+  return { name: 'count-required', ok, why: notes.join(' · ') };
 }
 
 /**
@@ -425,7 +459,7 @@ function fragmentIds(): FixtureResult {
 }
 
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds(), mixedNarrow(), regionCheck()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), countRequired(), fragmentIds(), mixedNarrow(), regionCheck()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {

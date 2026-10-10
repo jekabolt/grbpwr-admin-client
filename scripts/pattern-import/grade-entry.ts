@@ -21,7 +21,7 @@ import { nestPairs, portionPts, rankMasks, tracksIn } from 'lib/pattern-import/p
 import { HOOK_DEBUG } from 'lib/pattern-import/pieces/grade/hook';
 import { ranksAt } from 'lib/pattern-import/pieces/grade/model';
 import { drawPolyline, Grid } from 'lib/pattern-import/pieces/raster';
-import type { BoxMm, CardSize, ChainSet, ExpectedSizes, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
+import type { BoxMm, ChainSet, ExpectedSizes, FillOpts, PieceFamily, PtMm, Seed, Sheet, SizeRun } from 'lib/pattern-import/types';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { runFixtures } from './grade-fixtures';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -95,10 +95,6 @@ function chainsOf(b: Bench, _n?: number): { set: ChainSet; run: SizeRun } {
   );
   return { set, run };
 }
-
-/** A card run of n sizes (the converter runs inside the card; the bench's card has b.n sizes). */
-const cardOf = (n: number): CardSize[] =>
-  Array.from({ length: n }, (_, r) => ({ sizeId: 100 + r, name: `S${r}`, token: `s${r}`, rank: r }));
 
 type Got = { label: string; rank: number; outer: PtMm[]; outcome: string; refusal?: string };
 
@@ -394,12 +390,13 @@ type RunRow = {
 
 /**
  * The worker's path: the size run from the chains, the expected size count from the source, else
- * the card (`cardN` sizes; 0 = an empty card run, nobody answered → expected unknown).
+ * the operator's answer on the sizes step (`cardN` sizes drawn; 0 = nobody answered → expected
+ * unknown — the card's run is never the count, H1c-4).
  */
 function runFill(b: Bench, mode: FillOpts['grade'], cardN: number = b.n) {
   const t0 = Date.now();
   const { set, run: read } = chainsOf(b);
-  const expected = expectedSizes(read, cardOf(cardN), null, set) ?? undefined;
+  const expected = expectedSizes(read, cardN || null, set) ?? undefined;
   const run = runForExpected(read, expected ?? null);
   const { families, diag } = fillPiecesDetailed(b.sheet, set, run, b.seeds, fillOpts(VARIANT[b.sample] ?? null, mode, expected));
   return { set, run, families, diag, ms: Date.now() - t0, expected };
@@ -630,7 +627,7 @@ function encoded() {
     const v = VARIANT[id] ?? null;
     const seeds = proposeSeeds(p.sheet, p.set).filter((s) => !v || !s.variant || s.variant === v);
     // the worker's expected count for this source (no card: what the file itself says)
-    const expected = expectedSizes(p.run, [], null, p.set) ?? undefined;
+    const expected = expectedSizes(p.run, null, p.set) ?? undefined;
     const run = (mode: FillOpts['grade']) => {
       const { families, diag } = fillPiecesDetailed(p.sheet, p.set, p.run, seeds, fillOpts(VARIANT[id] ?? null, mode, expected));
       if (diag.grade && process.env.ENCDBG)
@@ -888,7 +885,7 @@ export async function main(argv: string[]) {
       for (const id of samplesOf(rest)) {
         const b = loadBench(id, L);
         const { set, run } = chainsOf(b);
-        const ex = expectedSizes(run, cardOf(b.n), null, set);
+        const ex = expectedSizes(run, b.n, set);
         console.log(`${id} ${L}: encoding ${run.encoding} sizes ${run.sizes.length} [${run.sizes.map((z) => z.label || '·').join(',')}] classes ${set.classes.map((c) => `${c.role}${c.chains.length}`).join(' ')} expected ${JSON.stringify(ex)} truth n ${b.n}`);
       }
     return 0;
