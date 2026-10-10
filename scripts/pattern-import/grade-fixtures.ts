@@ -8,6 +8,7 @@
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
 //   grid-hatch      graded nest under a sheet grid (thin grey) and same-look hatching inside the piece
 //   equal-area      two layouts with equal areas but other regions → ambiguous (pickLayout, pure)
+//   fragment-ids    notEvidence on a chain subset looks chains up by id (the <8 mm fragment rule)
 //   card-prior      one size + a card of 6: fills as one size (also drawn twice, offset); a nested
 //                   same-look line → refused
 //   over-maxfree    the bench's robe / kombinezon solved with maxFree 1–2: components beyond the
@@ -17,9 +18,10 @@ import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
 import { GRADE_TUNING } from 'lib/pattern-import/pieces/grade';
 import { pickLayout, scoreAreas } from 'lib/pattern-import/pieces/grade/choose';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
+import { notEvidence } from 'lib/pattern-import/pieces/grade/guard';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { proposeSizeMap } from 'lib/pattern-import/sizes/map';
-import type { CardSize, IRPath, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
+import type { CardSize, Chain, IRPath, LineClass, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 export type FixtureResult = { name: string; ok: boolean; why: string };
@@ -245,8 +247,30 @@ function cardPrior(): FixtureResult {
   return { name: 'card-prior', ok, why: notes.join(' · ') };
 }
 
+/**
+ * notEvidence on a SUBSET of the chains (the guard passes the lines of one region): an F3 fragment
+ * (< 8 mm, automatic 'ignore') stays evidence and a long ignored line does not, looked up by id —
+ * never by the chain's position in the subset.
+ */
+function fragmentIds(): FixtureResult {
+  const chain = (id: number, len: number): Chain => ({
+    id,
+    pts: [{ x: 0, y: id }, { x: len, y: id }],
+    closed: false,
+    ranges: [],
+    motif: null,
+    style: 0,
+    lengthMm: len,
+  });
+  const subset = [chain(7, 3), chain(0, 500)];
+  const cls: LineClass = { id: 0, role: 'ignore', sizeLabel: null, chains: [0, 7], totalLengthMm: 503, evidence: [], confidence: 0.8 };
+  const out = notEvidence([cls], subset);
+  const ok = out.has(0) && !out.has(7);
+  return { name: 'fragment-ids', ok, why: `not evidence: [${[...out].join(',')}] (expected [0]: the 500 mm line, not the 3 mm fragment)` };
+}
+
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {

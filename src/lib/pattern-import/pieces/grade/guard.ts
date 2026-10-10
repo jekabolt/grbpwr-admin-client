@@ -62,13 +62,15 @@ export const FRAGMENT_MM = 8;
  * Chains of the classes above. With `chains`, F3's automatic 'ignore' keeps its fragments
  * (< FRAGMENT_MM, not confirmed by the operator): where every crossing cuts the lines those are the
  * outline between two crossings, not a frame or a grid. Frames, grids, duplicates, the operator's
- * ignore — never.
+ * ignore — never. `chains` may be any subset of the set (looked up by id, not by position); a chain
+ * it does not hold is not a fragment.
  */
 export function notEvidence(
   classes: readonly LineClass[],
   chains?: readonly Chain[],
 ): Set<ChainId> {
   const out = new Set<ChainId>();
+  const byId = chains ? new Map(chains.map((c) => [c.id, c])) : null;
   for (const c of classes) {
     const confirmed = c.confidence >= 0.9;
     if (NOT_EVIDENCE.has(c.role)) {
@@ -77,8 +79,8 @@ export function notEvidence(
           !(
             c.role === 'ignore' &&
             !confirmed &&
-            chains &&
-            (chains[id]?.lengthMm ?? Infinity) < FRAGMENT_MM
+            byId &&
+            (byId.get(id)?.lengthMm ?? Infinity) < FRAGMENT_MM
           )
         )
           out.add(id);
