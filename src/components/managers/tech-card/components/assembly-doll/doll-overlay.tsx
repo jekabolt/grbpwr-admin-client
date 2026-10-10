@@ -101,11 +101,13 @@ export default function DollOverlay({
 
   // ── POM values for every size, read once per read of the card (2D, §8 q6) ──
   const pkey = card ? pomKey(card) : null;
+  // After the doll's first frame: the all-size read must not compete with the first solve.
+  const firstFrame = solve?.firstFrameMs != null || solve?.status === 'error';
   useEffect(() => {
-    if (!open || !card || !pkey) return;
+    if (!open || !card || !pkey || !firstFrame) return;
     const req = pomRequest(card);
     if (req) requestPoms(pkey, req);
-  }, [open, card, pkey]);
+  }, [open, card, pkey, firstFrame]);
   const pom = useDollStore((s) => (pkey ? s.poms[pkey] : undefined));
   const hoverPom = useDollStore((s) => s.hoverPom);
   const values = useMemo(
@@ -168,12 +170,19 @@ export default function DollOverlay({
     () => new Map((card?.factsOf(card.baseSize)?.pieces ?? []).map((p) => [p.pieceKey, p.name])),
     [card],
   );
-  const rows = useMemo(
-    () => (report ? reportRows(report, geoms, roles, names) : []),
-    [report, geoms, roles, names],
-  );
   const missing = card && at ? card.missingOf(at) : [];
   const onBase = !!card && at === card.baseSize;
+  // Edge words come from the read size's graph and roles: on another size an edge id may be
+  // another run (grading moved a corner), so its rows name pieces and edge numbers only.
+  const rows = useMemo(
+    () =>
+      report
+        ? onBase
+          ? reportRows(report, geoms, roles, names)
+          : reportRows(report, new Map(), new Map(), names)
+        : [],
+    [report, geoms, roles, names, onBase],
+  );
 
   const fixSeam = (s: DollSeamReport | null) => setFix(s && onBase ? { a: s.a, b: s.b } : null);
 

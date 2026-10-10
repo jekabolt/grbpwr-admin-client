@@ -9,7 +9,15 @@ import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
-import { closeDoll, openDoll, requestDoll, THUMB, useDollStore } from './doll-store';
+import {
+  closeDoll,
+  isSolving,
+  openDoll,
+  requestDoll,
+  resetDoll,
+  THUMB,
+  useDollStore,
+} from './doll-store';
 import { dollKey, dollRequest, useDollCard } from './use-doll-card';
 import { stateLine } from './words';
 
@@ -23,14 +31,18 @@ export function DollColumn() {
   const key = card ? dollKey(card, card.baseSize, false) : null;
   const solve = useDollStore((s) => (key ? s.solves[key] : undefined));
 
-  // The column's doll: the read size, no lining — solved while the column shows it.
+  // The column's doll: the read size, no lining — solved while the column shows it, and at once
+  // when the chip opens the fullscreen view (the view's chunk loads meanwhile). A solve the open
+  // view asked for (another size) is never cancelled from here.
   useEffect(() => {
-    if (open || !card || !key) return;
+    if (!card || !key || (open && isSolving())) return;
     const req = dollRequest(card, card.baseSize, false);
     if (req) requestDoll(key, { size: card.baseSize, lining: false }, req, THUMB);
   }, [open, card, key]);
 
-  useEffect(() => () => closeDoll(), []);
+  // Another card, or the view left: workers stopped, stills released, nothing carried over.
+  const cardId = card?.cardId ?? null;
+  useEffect(() => () => resetDoll(), [cardId]);
 
   if (!card) return null;
   const words =

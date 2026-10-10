@@ -109,7 +109,7 @@ export function reportRows(
       key: `s:${s.id}`,
       state: s.state,
       check: s.state === 'open' || s.state === 'twisted' || s.state === 'stretched',
-      who: `${side(s.a)} ↔ ${side(s.b)}`,
+      who: say(`${side(s.a)} ↔ ${side(s.b)}`),
       gap: gapWords(s),
       note: KIND_WORDS[s.kind] ?? (s.decidedBy === 'person' ? 'confirmed by a person' : ''),
       seam: { ...s, note: say(s.note) },

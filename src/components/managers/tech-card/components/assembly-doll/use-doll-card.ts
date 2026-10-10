@@ -38,6 +38,8 @@ export type DollCard = {
   gender: 'MALE' | 'FEMALE' | null;
   /** Identity of the provider's read: a decision or a pattern edit makes a new one. */
   readId: number;
+  /** What else the doll is solved from: the order's declared joins, the gender. */
+  inputSig: string;
 };
 
 const ids = new WeakMap<object, number>();
@@ -91,11 +93,12 @@ export function useDollCard(): DollCard | null {
         baseCount.set(median.size, (baseCount.get(median.size) ?? 0) + 1);
         for (const s of median.sizes) {
           if (!order.includes(s)) order.push(s);
-          const f = s === median.size ? median : findPiece(index, r, s);
-          if (!f) continue;
-          const piece = seamPieceOf(f.layers?.length ? f.layers : [f.piece]) ?? f.piece;
+          // The read's own input where the read is this size (byte for byte the provider's).
+          const f = s === median.size ? null : findPiece(index, r, s);
+          if (s !== median.size && !f) continue;
+          const piece = f ? seamPieceOf(f.layers?.length ? f.layers : [f.piece]) ?? f.piece : null;
           const m = bySize.get(s) ?? new Map<string, SkeletonPieceInput>();
-          m.set(p.pieceKey, { ...p, piece });
+          m.set(p.pieceKey, piece ? { ...p, piece } : p);
           bySize.set(s, m);
         }
       }
@@ -126,7 +129,9 @@ export function useDollCard(): DollCard | null {
     const base = sized.base || rows.find((r) => r.anchoredSize)?.anchoredSize || 'base';
     const cache = new Map<string, SkeletonFacts | null>();
     const factsOf = (size: string): SkeletonFacts | null => {
-      if (size === base || !sized.bySize.size) return facts;
+      // Every size — the read's one too — from the per-size map: a block whose median is another
+      // size than most pieces' is read at THIS size, or left out and said so.
+      if (!sized.bySize.size) return facts;
       if (cache.has(size)) return cache.get(size)!;
       const m = sized.bySize.get(size);
       const out =
@@ -140,7 +145,7 @@ export function useDollCard(): DollCard | null {
       return out;
     };
     const missingOf = (size: string) => {
-      if (size === base || !sized.bySize.size) return [];
+      if (!sized.bySize.size) return [];
       const m = sized.bySize.get(size);
       return facts.pieces.filter((p) => !m?.has(p.pieceKey)).map((p) => p.name || p.pieceKey);
     };
@@ -156,13 +161,14 @@ export function useDollCard(): DollCard | null {
       gender:
         gender === 'GENDER_ENUM_FEMALE' ? 'FEMALE' : gender === 'GENDER_ENUM_MALE' ? 'MALE' : null,
       readId: idOf(facts),
+      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}`,
     };
   }, [facts, sized, rows, sig, joins, gender, cardId]);
 }
 
 /** The key a solve is cached under: the read, the size, the rows, lining. */
 export const dollKey = (c: DollCard, size: string, lining: boolean) =>
-  `${c.readId}|${size}|${lining ? 'L' : '-'}|${c.rowsSig}`;
+  `${c.readId}|${size}|${lining ? 'L' : '-'}|${c.rowsSig}|${c.inputSig}`;
 
 /** The worker's doll request for a size. */
 export function dollRequest(c: DollCard, size: string, lining: boolean) {

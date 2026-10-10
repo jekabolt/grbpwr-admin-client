@@ -174,6 +174,9 @@ export function requestDoll(
     });
 }
 
+/** A solve is in flight (any size): the column does not start its own over it. */
+export const isSolving = () => solvingKey !== null;
+
 export type PomRequest = Parameters<DollWorkerClient['measure']>[0];
 
 /** Read the POM values of every size for `key` unless read or reading. */
@@ -182,19 +185,28 @@ export function requestPoms(key: string, input: PomRequest): void {
   if (have && have.status !== 'error') return;
   pomClient ??= new DollWorkerClient();
   const t0 = ms();
-  useDollStore.setState((st) => ({ poms: { ...st.poms, [key]: { key, status: 'reading' } } }));
+  useDollStore.setState((st) => {
+    // The last few reads only: a card read is a new key, and each holds every size's POMs.
+    const poms = { ...st.poms, [key]: { key, status: 'reading' as const } };
+    const keys = Object.keys(poms);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 3))) delete poms[k];
+    return { poms };
+  });
   pomClient
     .measure(input)
     .then((report) =>
-      useDollStore.setState((st) => ({
-        poms: { ...st.poms, [key]: { key, status: 'done', report, ms: ms() - t0 } },
-      })),
+      useDollStore.setState((st) =>
+        st.poms[key]
+          ? { poms: { ...st.poms, [key]: { key, status: 'done', report, ms: ms() - t0 } } }
+          : {},
+      ),
     )
-    .catch((e: Error) =>
+    .catch((e: Error) => {
+      if (e.message === 'cancelled') return;
       useDollStore.setState((st) => ({
         poms: { ...st.poms, [key]: { key, status: 'error', error: e.message } },
-      })),
-    );
+      }));
+    });
 }
 
 export const setHoverPom = (code: string | null) => {

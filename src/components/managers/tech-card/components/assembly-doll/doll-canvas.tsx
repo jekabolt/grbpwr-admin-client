@@ -97,7 +97,8 @@ export function DollCanvas({
     fitted: string | null;
     /** The person turned the doll since the last fit: the settled doll does not move the camera. */
     moved: boolean;
-    materials: LineMaterial[];
+    /** Line materials by the group that owns them: clearing a group disposes them, used or not. */
+    materials: Map<LineMaterial, THREE.Group>;
     topoKey: string | null;
     geom: THREE.BufferGeometry | null;
   } | null>(null);
@@ -198,7 +199,7 @@ export function DollCanvas({
       renderer.domElement.style.height = `${h}px`;
       cam.aspect = w / h;
       cam.updateProjectionMatrix();
-      for (const m of api.current?.materials ?? []) m.resolution.set(w, h);
+      for (const m of api.current?.materials.keys() ?? []) m.resolution.set(w, h);
       request();
     };
     const ro = new ResizeObserver(resize);
@@ -221,13 +222,14 @@ export function DollCanvas({
       request,
       fitted: null,
       moved: false,
-      materials: [],
+      materials: new Map(),
       topoKey: null,
       geom: null,
     };
     resize();
     return () => {
       ro.disconnect();
+      for (const g of [cloth, seams, poms]) clear(g);
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();
@@ -235,7 +237,10 @@ export function DollCanvas({
     };
   }, []);
 
-  const lineMat = (o: { width: number; color: number; dashed?: boolean; opacity?: number }) => {
+  const lineMat = (
+    owner: THREE.Group,
+    o: { width: number; color: number; dashed?: boolean; opacity?: number },
+  ) => {
     const a = api.current!;
     const m = new LineMaterial({
       color: o.color,
@@ -252,7 +257,7 @@ export function DollCanvas({
     m.polygonOffsetFactor = -4;
     m.polygonOffsetUnits = -8;
     m.resolution.set(a.renderer.domElement.clientWidth, a.renderer.domElement.clientHeight);
-    a.materials.push(m);
+    a.materials.set(m, owner);
     return m;
   };
   const line = (pts: number[], m: LineMaterial) => {
@@ -269,11 +274,14 @@ export function DollCanvas({
       const o = c as THREE.Mesh;
       o.geometry?.dispose();
       const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
-      for (const m of mats) {
-        m.dispose();
-        if (api.current) api.current.materials = api.current.materials.filter((x) => x !== m);
-      }
+      for (const m of mats) if (!(m instanceof LineMaterial)) m.dispose();
     }
+    const reg = api.current?.materials;
+    for (const [m, owner] of reg ?? [])
+      if (owner === g) {
+        m.dispose();
+        reg!.delete(m);
+      }
   };
 
   /** Cloth geometry for a topology + positions; reused while only positions change (frames). */
@@ -367,6 +375,20 @@ export function DollCanvas({
     a.request();
   };
 
+  // ── another solve on screen: nothing of the previous one stays (a size switch must never show
+  // the old size under the new label while the new one has not posted its first frame) ──
+  useEffect(() => {
+    const a = api.current;
+    if (!a) return;
+    clear(a.cloth);
+    clear(a.seams);
+    clear(a.poms);
+    a.geom = null;
+    a.topoKey = null;
+    a.request();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solveKey]);
+
   // ── a finished solve: its report ──
   useEffect(() => {
     if (!report || !solveKey) return;
@@ -423,9 +445,9 @@ export function DollCanvas({
     const pins: Pin[] = [];
     if (report) {
       const P = report.positions;
-      const closed = lineMat({ width: 1.2, color: INK });
-      const dashed = lineMat({ width: 1.4, color: INK, dashed: true });
-      const heavy = lineMat({ width: 3, color: INK });
+      const closed = lineMat(a.seams, { width: 1.2, color: INK });
+      const dashed = lineMat(a.seams, { width: 1.4, color: INK, dashed: true });
+      const heavy = lineMat(a.seams, { width: 3, color: INK });
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
         const open = s.state === 'open' || s.state === 'twisted';
@@ -477,8 +499,8 @@ export function DollCanvas({
     if (!a) return;
     clear(a.poms);
     const pins: Pin[] = [];
-    const grey = lineMat({ width: 2, color: GREY, opacity: 0.9 });
-    const ink = lineMat({ width: 4, color: INK });
+    const grey = lineMat(a.poms, { width: 2, color: GREY, opacity: 0.9 });
+    const ink = lineMat(a.poms, { width: 4, color: INK });
     for (const l of pomLines) {
       const hot = l.code === hoverPom;
       if (!hot && !showPom) continue;
