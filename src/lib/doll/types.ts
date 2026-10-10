@@ -167,8 +167,59 @@ export type DollReport = {
   orderJoins: { join: string; seam: string; note: string }[];
   /** Declared join parts sewn onto a panel's face (flap, welt, patch): no edge seam to draw. */
   orderSurface: { join: string; part: string[] }[];
+  /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
+  collar?: DollCollarReport;
   /** The honesty line every view carries. */
   honesty: string;
+};
+
+export type DollCollarUnit = {
+  /** Drawn pieces of the unit. */
+  keys: string[];
+  /** stand: on the neck path, standing · fall: on the stand top, turned down · collar: a one-piece
+   *  collar (no separate stand) on the neck path, drawn standing (its roll line is not modelled). */
+  role: 'stand' | 'fall' | 'collar';
+  base: 'neck path' | 'stand top';
+  /** Seam id in `DollReport.seams`; null when the graph already sews the unit (not proposed). */
+  seam: string | null;
+  /** proposed: by the doll onto its base · graph: the pattern sews it to the base · stacked: sewn
+   *  by the graph to another collar unit that is on the base (K4) · not sewn: base far off. */
+  attached: 'proposed' | 'graph' | 'stacked' | 'not sewn';
+  /** Length of the unit's edge that is sewn (between its anchor marks), mm. */
+  sewnMm: number;
+  /** Length of the base it is sewn onto, mm. */
+  baseMm: number;
+  /** sewn / base. */
+  ease: number;
+  /** Unsewn length of the edge beyond the anchor marks (button extensions), mm. */
+  extMm: number;
+  /** Anchors in words (CB by notch / middle, SNP, CF by notches / ends). */
+  anchors: string;
+  /** Layer order outward on a shared base (stacked units, K4): 0 = innermost. */
+  layer: number;
+  /** Fall only: mean height of the outer free edge vs mean height of the stand top it hangs from,
+   *  and the share of its free vertices (all but the sewn neck edge, which lies on the stand top)
+   *  outside the stand surface. */
+  outerYMm?: number;
+  baseYMm?: number;
+  outsidePct?: number;
+};
+
+export type DollCollarReport = {
+  neck: {
+    lenMm: number;
+    closed: boolean;
+    /** The garment's own girth at the armholes (pattern), mm. */
+    chestMm: number;
+    ratio: number;
+    /** Front extension cut off at each end (corner → CF notch), mm. */
+    extMm: [number, number];
+    /** Found by the K1 walk (true) or the closed-loop fallback after the sanity check failed. */
+    ok: boolean;
+    how: string;
+  } | null;
+  units: DollCollarUnit[];
+  notes: string[];
 };
 
 /** A measure line in pattern space (POM engine, lib/pom) → 3D polyline on the doll. */

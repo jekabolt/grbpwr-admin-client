@@ -13,6 +13,7 @@ import type { SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
 import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
+import { neckFixtures } from './neck-fixture';
 
 type FileSpec = {
   id: string;
@@ -27,9 +28,16 @@ type FileSpec = {
   /** Synthetic ×2 test: `drop` is removed from the pattern and `keep` is cut ×2 mirrored instead. */
   x2?: { keep: string; drop: string };
   noOps?: boolean;
+  /** Size label of the DXF blocks (default M; some exports use lower case). */
+  size?: string;
+  /** Synthetic graft: `drop` pieces leave this pattern, `keep` pieces (+ their own seams) of the
+   *  donor DXF come in — a clean body with another garment's collar. */
+  graft?: { dxf: string; keep: string[]; drop: string[] };
 };
 
 const [specPath, outDir] = process.argv.slice(2);
+if (process.env.DOLL_PLACED_ONLY)
+  (globalThis as { __DOLL_PLACED_ONLY?: boolean }).__DOLL_PLACED_ONLY = true;
 if (process.env.DOLL_NOPROXY) (globalThis as { __DOLL_NOPROXY?: boolean }).__DOLL_NOPROXY = true;
 const spec = JSON.parse(await readFile(specPath, 'utf8')) as {
   noOps?: boolean;
@@ -84,7 +92,7 @@ for (const f of spec.files) {
   const buf = await readFile(f.dxf);
   const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   const tParse = performance.now();
-  const { facts, origin } = await quiet(() => loadFacts(bytes, 'M', f.category));
+  const { facts, origin } = await quiet(() => loadFacts(bytes, f.size ?? 'M', f.category));
   const tGraph = performance.now();
   let graph = await quiet(() => readSeamGraph(facts));
   if (f.x2) {
@@ -103,6 +111,37 @@ for (const f of spec.files) {
       .map((p) =>
         p.pieceKey === keep ? { ...p, piecesPerGarment: 2, cutSymmetry: 'MIRRORED' } : p,
       );
+  }
+  if (f.graft) {
+    const { keep, drop } = f.graft;
+    const dbuf = await readFile(f.graft.dxf);
+    const donor = await quiet(() =>
+      loadFacts(
+        dbuf.buffer.slice(dbuf.byteOffset, dbuf.byteOffset + dbuf.byteLength),
+        'M',
+        f.category,
+      ),
+    );
+    const dgraph = await quiet(() => readSeamGraph(donor.facts));
+    const pk0 = (id: string) => id.slice(0, id.lastIndexOf('#'));
+    const out = (sc: { a: string; b: string }) =>
+      drop.includes(pk0(sc.a)) || drop.includes(pk0(sc.b));
+    const inn = (sc: { a: string; b: string }) =>
+      keep.includes(pk0(sc.a)) && keep.includes(pk0(sc.b));
+    graph = {
+      ...graph,
+      pieces: [
+        ...graph.pieces.filter((p) => !drop.includes(p.pieceKey)),
+        ...dgraph.pieces.filter((p) => keep.includes(p.pieceKey)),
+      ],
+      chosen: [...graph.chosen.filter((sc) => !out(sc)), ...dgraph.chosen.filter(inn)],
+      rejected: [...graph.rejected.filter((sc) => !out(sc)), ...dgraph.rejected.filter(inn)],
+      components: [...graph.components.map((c) => c.filter((k) => !drop.includes(k))), keep],
+    };
+    facts.pieces = [
+      ...facts.pieces.filter((p) => !drop.includes(p.pieceKey)),
+      ...donor.facts.pieces.filter((p) => keep.includes(p.pieceKey)),
+    ];
   }
   const msGraph = performance.now() - tGraph;
   const msParse = tGraph - tParse;
@@ -327,6 +366,61 @@ for (const f of spec.files) {
       `sanity: the garment's own max girth (proxy) ${fmt(chest, 0)} mm vs fit model #${fm.id} (${fm.gender}) chest ${fm.m.CHEST} mm — ease ${fmt(chest - fm.m.CHEST, 0)} mm (the proxy is the pattern, not this body)`,
     );
   }
+  // ── collar (04-COLLAR.md) ──
+  const groupOf = new Map(report.panels.map((p) => [p.pieceKey, p.group]));
+  for (const p of report.panels) for (const l of p.layers) groupOf.set(l, p.group);
+  const neckish = (id: string) => ['STAND', 'COLLAR'].includes(groupOf.get(pk(id)) ?? '');
+  const collarSeams = report.seams.filter(
+    (s) => s.origin !== 'layer' && [...s.a, ...s.b].some(neckish),
+  );
+  const openCollar = collarSeams.filter((s) => s.state === 'open' || s.state === 'twisted');
+  const C = report.collar;
+  const unitRows = (C?.units ?? []).map((u) => {
+    const sm = u.seam ? report.seams.find((s) => s.id === u.seam) : undefined;
+    // A unit sewn by the graph to another collar unit (stacked, K4): its gap is that seam's.
+    const via =
+      sm || u.attached === 'not sewn'
+        ? undefined
+        : collarSeams.find(
+            (s) => s.state !== 'open' && [...s.a, ...s.b].some((id) => u.keys.includes(pk(id))),
+          );
+    const g = sm ?? via;
+    return {
+      role: u.role,
+      keys: u.keys.join('+'),
+      base: u.base,
+      ease: u.ease,
+      sewnMm: u.sewnMm,
+      baseMm: u.baseMm,
+      extMm: u.extMm,
+      gapP95: g ? g.residualP95Mm : NaN,
+      gapMax: g ? g.residualMaxMm : NaN,
+      state: g ? g.state : u.attached,
+      attached: u.attached,
+      via: !sm && via ? via.id : null,
+      outerY: u.outerYMm,
+      baseY: u.baseYMm,
+      outsidePct: u.outsidePct,
+      anchors: u.anchors,
+      layer: u.layer,
+    };
+  });
+  if (C) {
+    lines.push('', '## collar');
+    if (C.neck)
+      lines.push(
+        `- neck path: ${fmt(C.neck.lenMm, 0)} mm ${C.neck.closed ? 'CLOSED' : 'OPEN'} · ${fmt(100 * C.neck.ratio, 0)} % of the girth ${fmt(C.neck.chestMm, 0)} mm · ${C.neck.ok ? 'K1' : 'FALLBACK'} · ${C.neck.how}`,
+      );
+    else lines.push('- neck path: none');
+    for (const u of unitRows)
+      lines.push(
+        `- ${u.role} ${u.keys} on the ${u.base}: sewn ${fmt(u.sewnMm, 0)} mm / base ${fmt(u.baseMm, 0)} mm = ease ${fmt(u.ease, 3)} · extensions ${fmt(u.extMm, 0)} mm · gap p95 ${fmt(u.gapP95)} / max ${fmt(u.gapMax)} mm (${u.state}${u.via ? ` via ${u.via}` : ''}) · layer ${u.layer}${u.outerY !== undefined ? ` · outer edge y ${fmt(u.outerY!, 0)} vs ${u.role === 'fall' ? 'stand top' : 'roll line'} y ${fmt(u.baseY!, 0)} (${u.outerY! < u.baseY! ? 'turned DOWN' : 'NOT turned down'}) · ${fmt(u.outsidePct!, 1)} % of its free vertices outside the ${u.role === 'fall' ? 'stand' : 'standing part'}` : ''} · ${u.anchors}`,
+      );
+    lines.push(
+      `- open collar seams: ${openCollar.length}${openCollar.length ? ` (${openCollar.map((s) => s.id).join(', ')})` : ''}`,
+    );
+    for (const n of C.notes) lines.push(`- note: ${n}`);
+  }
   const text = lines.join('\n');
   await writeFile(resolve(outDir, `${f.id}.txt`), text + '\n');
 
@@ -387,6 +481,22 @@ for (const f of spec.files) {
     fromOrderClosed: report.seams.filter((x) => x.kind === 'from-order' && x.state !== 'open')
       .length,
     travelP99: Number(/travel p99 ([\d.]+)/.exec(report.warnings.join('\n'))?.[1] ?? NaN),
+    closedGraph: count('closed') + count('eased'),
+    collar: C
+      ? {
+          neckMm: C.neck?.lenMm ?? null,
+          neckClosed: C.neck?.closed ?? null,
+          neckOk: C.neck?.ok ?? null,
+          chestMm: C.neck?.chestMm ?? null,
+          ratio: C.neck?.ratio ?? null,
+          units: unitRows,
+          openCollar: openCollar.map((s) => s.id),
+        }
+      : null,
   });
 }
 await writeFile(resolve(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
+// K1 negative control on synthetic boundaries (no pattern): pullover closed, open front open.
+const fx = neckFixtures();
+await writeFile(resolve(outDir, 'neck-fixture.json'), JSON.stringify(fx, null, 2));
+console.log(`neck fixtures: ${JSON.stringify(fx)}`);

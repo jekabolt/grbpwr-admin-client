@@ -54,6 +54,11 @@ export type SolverState = {
   /** Weak pull to the initial pose (sleeves, collars: they would swing freely on a ring seam). */
   anchor?: Float64Array;
   anchorK?: Float32Array;
+  /**
+   * One-sided contacts (a fall over its stand): vertex `i` stays at least `gap` mm outside vertex
+   * `j`, measured along the horizontal direction from the vertical axis through (ax, az) to `j`.
+   */
+  contacts?: { i: Int32Array; j: Int32Array; gap: number; ax: number; az: number }[];
 };
 
 /** Rows of a seam: every vertex of A onto B's polyline and every vertex of B onto A's. */
@@ -103,6 +108,56 @@ export function seamRows(
     const tb = B.len > 0 ? B.s[k] / B.len : 0;
     if (tb < bRange[0] - eps || tb > bRange[1] + eps) continue;
     const t = locate(A, bToA(tb));
+    rows.v.push(B.v[k]);
+    rows.b0.push(t.i0);
+    rows.b1.push(t.i1);
+    rows.w.push(t.w);
+  }
+  return rows;
+}
+
+/**
+ * Rows of a seam mapped by ANCHORED arc length (collar onto its base): `anchors` are pairs
+ * (arc on A, arc on B) in mm, strictly increasing in both; between anchors the map is linear. Only
+ * the stretch of A between the first and last anchor is sewn (beyond it: extensions, left free).
+ */
+export function anchoredRows(A: Path, B: Path, anchors: [number, number][]): SeamRows {
+  const rows: SeamRows = { v: [], b0: [], b1: [], w: [] };
+  const locate = (P: Path, s0: number) => {
+    const s = Math.max(0, Math.min(P.len, s0));
+    let lo = 0;
+    let hi = P.v.length - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (P.s[m] <= s) lo = m;
+      else hi = m;
+    }
+    const d = P.s[hi] - P.s[lo];
+    return { i0: P.v[lo], i1: P.v[hi], w: d > 1e-9 ? (s - P.s[lo]) / d : 0 };
+  };
+  const map = (x: number, from: 0 | 1) => {
+    const to = 1 - from;
+    let i = 0;
+    while (i < anchors.length - 2 && anchors[i + 1][from] < x) i++;
+    const a = anchors[i];
+    const b = anchors[i + 1];
+    const w = (x - a[from]) / Math.max(1e-9, b[from] - a[from]);
+    return a[to] + (b[to] - a[to]) * w;
+  };
+  const eps = 1e-6;
+  const [a0, b0] = anchors[0];
+  const [a1, b1] = anchors[anchors.length - 1];
+  for (let k = 0; k < A.v.length; k++) {
+    if (A.s[k] < a0 - eps || A.s[k] > a1 + eps) continue;
+    const t = locate(B, map(A.s[k], 0));
+    rows.v.push(A.v[k]);
+    rows.b0.push(t.i0);
+    rows.b1.push(t.i1);
+    rows.w.push(t.w);
+  }
+  for (let k = 0; k < B.v.length; k++) {
+    if (B.s[k] < b0 - eps || B.s[k] > b1 + eps) continue;
+    const t = locate(A, map(B.s[k], 1));
     rows.v.push(B.v[k]);
     rows.b0.push(t.i0);
     rows.b1.push(t.i1);
@@ -256,6 +311,35 @@ export function pass(S: SolverState, ramp: number): void {
     const pr = S.proxies[x];
     if (S.pullK > 0) pr.pull(p, i, S.pullK);
     if (!(globalThis as { __DOLL_NOPROXY?: boolean }).__DOLL_NOPROXY) pr.push(p, i);
+  }
+  // One-sided contacts (last: nothing after them in the pass pushes back through).
+  for (const C of S.contacts ?? []) {
+    for (let q = 0; q < C.i.length; q++) {
+      const i = C.i[q];
+      const j = C.j[q];
+      const wi = mv[i];
+      const wj = mv[j];
+      if (!wi && !wj) continue;
+      const i3 = i * 3;
+      const j3 = j * 3;
+      let nx = p[j3] - C.ax;
+      let nz = p[j3 + 2] - C.az;
+      const nl = Math.sqrt(nx * nx + nz * nz);
+      if (nl < 1e-6) continue;
+      nx /= nl;
+      nz /= nl;
+      const d = (p[i3] - p[j3]) * nx + (p[i3 + 2] - p[j3 + 2]) * nz;
+      if (d >= C.gap) continue;
+      const corr = (C.gap - d) / (wi + wj);
+      if (wi) {
+        p[i3] += nx * corr * wi;
+        p[i3 + 2] += nz * corr * wi;
+      }
+      if (wj) {
+        p[j3] -= nx * corr * wj;
+        p[j3 + 2] -= nz * corr * wj;
+      }
+    }
   }
 }
 

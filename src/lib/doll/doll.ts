@@ -7,6 +7,18 @@ import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import type { Edge, EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
+import {
+  baseCurve,
+  closedNeckPath,
+  findNeckPath,
+  makeMap,
+  restPath,
+  runMarks,
+  smoothest,
+  symmetricPair,
+  type CollarCtx,
+  type NeckPath,
+} from './collar';
 import { groupPieces, type GroupedPiece, type GroupedSeam } from './groups';
 import { instanceMirrored } from './instance';
 import { completeFromJoins } from './joins';
@@ -14,6 +26,7 @@ import { liningByName } from 'lib/assembly-skeleton/names';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
 import {
+  anchoredRows,
   pass,
   rowGaps,
   seamRows,
@@ -25,6 +38,8 @@ import {
   type SolverState,
 } from './solve';
 import type {
+  DollCollarReport,
+  DollCollarUnit,
   DollGroupId,
   DollInput,
   DollLoop,
@@ -43,6 +58,9 @@ const EPS_WRAP = 0.04; // paper needs slack to wrap (design §3.3)
 const ASPECT = 1.3; // chest wider than deep
 const ARM_DEG = 42; // A-pose: arms 42° off vertical
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
+// One-piece collar (no separate stand): where it rolls over, as a share of its depth from the
+// neck edge. The pattern carries no roll-line mark; a shirt collar stands ~40 % and falls ~60 %.
+const ROLL_FRAC = 0.4;
 
 type Panel = GroupedPiece & {
   idx: number;
@@ -588,7 +606,6 @@ export function solveDoll(input: DollInput): DollReport {
   let vArm = 0;
   let vSh = 0;
   let vLo = 0;
-  let neckR = 60;
   const torso: { y: number; a: number; b: number; tab: Float64Array }[] = [];
   const ellPerimFactor = (() => {
     const b = 1 / ASPECT;
@@ -763,7 +780,6 @@ export function solveDoll(input: DollInput): DollReport {
       kind: 'torso',
       profile: torso.map((L) => [L.y - vLo, L.a, L.b]),
     });
-    neckR = Math.max(45, 0.42 * aArm);
 
     // The torso proxy.
     // Neck: a short cylinder on top of the dome keeps the shoulders' paper from folding inward.
@@ -1223,6 +1239,7 @@ export function solveDoll(input: DollInput): DollReport {
   };
 
   let state: SolverState | null = null;
+  const contacts: NonNullable<SolverState['contacts']> = [];
   const anchor = new Float64Array(3 * N);
   const anchorK = new Float32Array(N);
   const moving = new Uint8Array(N);
@@ -1246,6 +1263,7 @@ export function solveDoll(input: DollInput): DollReport {
       pullK: 0,
       anchor,
       anchorK,
+      contacts,
     };
     return state;
   };
@@ -1745,10 +1763,6 @@ export function solveDoll(input: DollInput): DollReport {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ];
-  const norm = (a: Vec3): Vec3 => {
-    const l = Math.hypot(...a) || 1;
-    return [a[0] / l, a[1] / l, a[2] / l];
-  };
   const inFrame = (F: Frame, p: Vec3) => {
     const d = sub(p, F.c);
     const hh = dot(d, F.up);
@@ -1922,6 +1936,23 @@ export function solveDoll(input: DollInput): DollReport {
   };
   const buildPanelLater: Panel[] = [];
 
+  /** Pattern edges a vertex path runs along (for the report's sides). */
+  const edgesOn = (P: Path) => {
+    const out = new Set<string>();
+    for (const v of P.v) {
+      const Pn = panels[panelOf[v]];
+      const r = ringOf[v];
+      if (r < 0) continue;
+      const rsI = Pn.mesh.bRs[r];
+      const n = Pn.geom.rs.length;
+      for (const e of Pn.geom.edges) {
+        const span = (((e.e - e.s) % n) + n) % n;
+        const off = (((rsI - e.s) % n) + n) % n;
+        if (off > 0 && off < span) out.add(e.id);
+      }
+    }
+    return [...out];
+  };
   const proposals: { gid: DollGroupId; label: string; ok: boolean; note: string }[] = [];
   /** Propose a join between two vertex runs / loops (cut closed loops at their lowest / front point). */
   const ringInfo = { ringOf, nbOf: (p: number) => panels[p].nb };
@@ -1982,22 +2013,6 @@ export function solveDoll(input: DollInput): DollReport {
       );
       return null;
     }
-    const edgesOn = (P: Path) => {
-      const out = new Set<string>();
-      for (const v of P.v) {
-        const Pn = panels[panelOf[v]];
-        const r = ringOf[v];
-        if (r < 0) continue;
-        const rsI = Pn.mesh.bRs[r];
-        const n = Pn.geom.rs.length;
-        for (const e of Pn.geom.edges) {
-          const span = (((e.e - e.s) % n) + n) % n;
-          const off = (((rsI - e.s) % n) + n) % n;
-          if (off > 0 && off < span) out.add(e.id);
-        }
-      }
-      return [...out];
-    };
     const w = addWork(
       {
         id: label,
@@ -2188,80 +2203,683 @@ export function solveDoll(input: DollInput): DollReport {
     );
   }
 
-  // Stand / collar on the neckline.
-  const neckFrame: Frame = (() => {
-    const c = neckLoop ? centroid(neckLoop.verts) : ([0, vSh, 0] as Vec3);
-    return { c, up: [0, 1, 0], e0: [0, 0, 1], e90: [1, 0, 0] };
+  // ── collar (04-COLLAR.md): neck path (K1) · stand on it by landmarks (K2) · fall on the stand
+  //    top, turned down (K3) · collar units joined by the order stacked on one base (K4) ─────────
+  const notchRs = new Map<number, Set<number>>();
+  for (const P of panels) {
+    const n = P.geom.rs.length;
+    notchRs.set(P.idx, new Set(P.geom.notchIdx.map((i) => ((i % n) + n) % n)));
+  }
+  const cctx: CollarCtx = {
+    pos,
+    uv,
+    cuv,
+    panelOf,
+    ringOf,
+    nbOf: (p) => panels[p].nb,
+    isNotch: (v) => {
+      const r = ringOf[v];
+      if (r < 0) return false;
+      const P = panels[panelOf[v]];
+      return notchRs.get(P.idx)!.has(P.mesh.bRs[r]);
+    },
+  };
+  const collarRep: DollCollarReport = { neck: null, units: [], notes: [] };
+  type CollarPlan = {
+    rep: DollCollarUnit;
+    work: Work | null;
+    unit: Panel[];
+    /** Fall: the stand top run it hangs from and the anchored range on it; its own outer run. */
+    standTop?: number[];
+    topRange?: [number, number];
+    outer?: number[];
+    stand?: Panel[];
+    /** The unit's sewn edge (fall: its neck edge on the stand top). */
+    attach?: number[];
+    /** One-piece collar rolled over: its standing part, its turned-down part, the roll line. */
+    fold?: { stand: number[]; fall: number[]; line: number[] };
+  };
+  const collarPlans: CollarPlan[] = [];
+  /** Panels drawn with their face on the other side (a one-piece collar rolled over). */
+  const faceFlip = new Set<number>();
+  const chestMm = torso.length
+    ? (Math.max(...torso.map((L) => L.a)) * ellPerimFactor) / (1 - EPS_WRAP)
+    : 0;
+  let neck: NeckPath | null = null;
+  const neckGroups = (['STAND', 'COLLAR'] as DollGroupId[]).filter((g) => groups.has(g));
+  if (neckGroups.length && groups.has('BODY') && opt.proposeComposite !== false) {
+    const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
+    if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
+    const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
+    let ok = false;
+    if (r.neck && ratioOf(r.neck) >= 0.3 && ratioOf(r.neck) <= 0.55) {
+      neck = r.neck;
+      ok = true;
+    } else {
+      warnings.push(
+        r.neck
+          ? `neck path ${r.neck.path.len.toFixed(0)} mm is ${(ratioOf(r.neck) * 100).toFixed(0)} % of the girth ${chestMm.toFixed(0)} mm (a neckline is 30–55 %) — ${r.note}; the closed neck loop is used instead`
+          : `neck path not found (${r.note}) — the closed neck loop is used instead`,
+      );
+      if (neckLoop)
+        neck = closedNeckPath(cctx, neckLoop.verts, vArm, 'closed neck loop (fallback)');
+    }
+    if (neck)
+      collarRep.neck = {
+        lenMm: neck.path.len,
+        closed: neck.closed,
+        chestMm,
+        ratio: ratioOf(neck),
+        extMm: neck.ext,
+        ok,
+        how: neck.how,
+      };
+    else warnings.push('the body has no neck path — the stand / collar is not attached');
+    if (opt.debug && neck)
+      warnings.push(
+        `debug: neck path ${neck.path.len.toFixed(0)} mm ${neck.closed ? 'closed' : 'open'} · cb ${neck.cb.toFixed(0)} · snp ${neck.snp?.map((x) => x.toFixed(0)).join('/') ?? '-'} · ${neck.how}`,
+      );
+  }
+  // The neck axis: vertical, through the middle of the neck path.
+  const F: Frame = (() => {
+    const vs = neck ? [...neck.path.v] : neckLoop ? neckLoop.verts : [];
+    if (!vs.length) return { c: [0, vSh, 0], up: [0, 1, 0], e0: [0, 0, 1], e90: [1, 0, 0] };
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let z0 = Infinity;
+    let z1 = -Infinity;
+    let ys = 0;
+    for (const v of vs) {
+      const p = getPos(v);
+      x0 = Math.min(x0, p[0]);
+      x1 = Math.max(x1, p[0]);
+      z0 = Math.min(z0, p[2]);
+      z1 = Math.max(z1, p[2]);
+      ys += p[1];
+    }
+    return {
+      c: [(x0 + x1) / 2, ys / vs.length, (z0 + z1) / 2],
+      up: [0, 1, 0],
+      e0: [0, 0, 1],
+      e90: [1, 0, 0],
+    };
   })();
+  const outward = (p: Vec3): Vec3 => {
+    const dx = p[0] - F.c[0];
+    const dz = p[2] - F.c[2];
+    const l = Math.hypot(dx, dz) || 1;
+    return [dx / l, 0, dz / l];
+  };
+  type Unit = {
+    gid: DollGroupId;
+    list: Panel[];
+    keys: Set<string>;
+    /** The edge sewn to the base (u ascending) and the opposite edge (the outer / top edge). */
+    attach: number[];
+    other: number[];
+    /** +1: the piece lies above its attach run in the chart. */
+    sign: 1 | -1;
+    area: number;
+  };
+  const uAsc = (vs: number[]) =>
+    vs.length > 1 && cuv[2 * vs[0]] > cuv[2 * vs[vs.length - 1]] ? [...vs].reverse() : vs;
+  const runsOfPanels = (list: Panel[]) => {
+    const set = new Set(list.map((P) => P.idx));
+    const loops = findLoops({ panels, panelOf, ringOf, uv, seams: activeSeams() }, set);
+    const L = [...loops].sort((x, y) => y.len - x.len)[0];
+    if (!L) return null;
+    const vs = L.verts;
+    let iMin = 0;
+    let iMax = 0;
+    for (let k = 0; k < vs.length; k++) {
+      if (cuv[2 * vs[k]] < cuv[2 * vs[iMin]]) iMin = k;
+      if (cuv[2 * vs[k]] > cuv[2 * vs[iMax]]) iMax = k;
+    }
+    const arcOf = (from: number, to: number) => {
+      const out: number[] = [];
+      for (let k = from; ; k = (k + 1) % vs.length) {
+        out.push(vs[k]);
+        if (k === to) break;
+      }
+      return out;
+    };
+    const r1 = arcOf(iMin, iMax);
+    const r2 = arcOf(iMax, iMin);
+    const mv = (r: number[]) => r.reduce((t, v) => t + cuv[2 * v + 1], 0) / r.length;
+    return mv(r1) < mv(r2) ? { bottom: r1, top: r2 } : { bottom: r2, top: r1 };
+  };
+  const unitsOf = (gid: DollGroupId): Unit[] => {
+    const ch = charts.get(gid);
+    if (!ch) return [];
+    const out: Unit[] = [];
+    for (const comp of ch.components) {
+      const list = comp.keys.map((k) => panelByKey.get(k)!).filter((P) => P && P.group === gid);
+      if (!list.length) continue;
+      const runs = runsOfPanels(list);
+      if (!runs) continue;
+      const bot = uAsc(runs.bottom);
+      const top = uAsc(runs.top);
+      // The neck edge is the bottom run unless the top carries the landmark notches.
+      const nb = bot.filter(cctx.isNotch).length;
+      const nt = top.filter(cctx.isNotch).length;
+      const useTop = nt >= nb + 2;
+      out.push({
+        gid,
+        list,
+        keys: new Set(list.flatMap((P) => [P.key, ...P.layers])),
+        attach: smoothest(cctx, useTop ? top : bot),
+        other: smoothest(cctx, useTop ? bot : top),
+        sign: useTop ? -1 : 1,
+        area: list.reduce((t, P) => t + Math.abs(P.geom.areaMm2), 0),
+      });
+    }
+    return out;
+  };
+  /** Lay a unit along its base: attach run → base by the anchored map, the rest up (stand) or turned
+   *  down and out (fall); extensions beyond the sewn marks overlap (left over right). */
+  const placeUnit = (
+    U: Unit,
+    base: ReturnType<typeof baseCurve>,
+    map: (s: number) => number,
+    sewn: [number, number],
+    mode: 'up' | 'down',
+    layer: number,
+    alpha: number,
+    proxyIdx: number,
+    /** One-piece collar: fold at this fraction of the local depth, the part above turned down. */
+    roll?: { frac: number; alpha: number },
+  ) => {
+    const A = restPath(cctx, U.attach);
+    // Local depth (attach run → opposite run, chart v) by u, for the roll line.
+    const otab = U.other
+      .map((v) => [cuv[2 * v], cuv[2 * v + 1]] as const)
+      .sort((x, y) => x[0] - y[0]);
+    const vOther = (u: number) => {
+      if (!otab.length) return 0;
+      if (u <= otab[0][0]) return otab[0][1];
+      for (let k = 1; k < otab.length; k++)
+        if (otab[k][0] >= u) {
+          const w = (u - otab[k - 1][0]) / Math.max(1e-9, otab[k][0] - otab[k - 1][0]);
+          return otab[k - 1][1] + (otab[k][1] - otab[k - 1][1]) * w;
+        }
+      return otab[otab.length - 1][1];
+    };
+    const fold = { stand: [] as number[], fall: [] as number[], line: [] as number[] };
+    const tab = U.attach
+      .map((v, k) => [cuv[2 * v], A.s[k], cuv[2 * v + 1]] as const)
+      .sort((x, y) => x[0] - y[0]);
+    // s runs with u, or against it (a fall is laid rotated 180°: its attach run reversed).
+    const dir = tab[tab.length - 1][1] >= tab[0][1] ? 1 : -1;
+    const look = (u: number) => {
+      const n = tab.length;
+      if (u <= tab[0][0]) return { s: tab[0][1] - dir * (tab[0][0] - u), v: tab[0][2] };
+      if (u >= tab[n - 1][0])
+        return { s: tab[n - 1][1] + dir * (u - tab[n - 1][0]), v: tab[n - 1][2] };
+      let lo = 0;
+      let hi = n - 1;
+      while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (tab[m][0] <= u) lo = m;
+        else hi = m;
+      }
+      const w = tab[hi][0] > tab[lo][0] ? (u - tab[lo][0]) / (tab[hi][0] - tab[lo][0]) : 0;
+      return {
+        s: tab[lo][1] + (tab[hi][1] - tab[lo][1]) * w,
+        v: tab[lo][2] + (tab[hi][2] - tab[lo][2]) * w,
+      };
+    };
+    const lean = (8 * Math.PI) / 180;
+    for (const P of U.list) {
+      buildPanelLater.push(P);
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        const q = look(cuv[2 * v]);
+        const h = U.sign * (cuv[2 * v + 1] - q.v);
+        const B = base.at(map(q.s));
+        const n = outward(B);
+        const extra = q.s < sewn[0] - 1 ? 4 : q.s > sewn[1] + 1 ? 2 : 0;
+        const hr = roll ? roll.frac * Math.abs(vOther(cuv[2 * v]) - q.v) : Infinity;
+        let p: Vec3;
+        if (mode === 'up' && h > hr) {
+          // Above the roll line: turned down and out over the standing part.
+          const R = add(
+            add(add(B, F.up, hr * Math.cos(lean)), n, -hr * Math.sin(lean)),
+            n,
+            layer + extra,
+          );
+          const d = h - hr;
+          p = add(add(R, n, 3 + d * Math.sin(roll!.alpha)), F.up, -d * Math.cos(roll!.alpha));
+        } else
+          p =
+            mode === 'up'
+              ? add(add(add(B, F.up, h * Math.cos(lean)), n, -h * Math.sin(lean)), n, layer + extra)
+              : add(
+                  add(B, n, 3 + layer + extra + Math.max(0, h) * Math.sin(alpha)),
+                  F.up,
+                  -h * Math.cos(alpha),
+                );
+        if (roll) {
+          if (Math.abs(h - hr) < 5) fold.line.push(v);
+          if (h > hr + 4) fold.fall.push(v);
+          else if (h < hr - 4) fold.stand.push(v);
+        }
+        setPos(v, p);
+        proxyOf[v] = proxyIdx;
+        placed[v] = 1;
+      }
+    }
+    return fold;
+  };
+  /** One-sided contact: each vertex of `outer` stays outside its nearest `inner` vertex (dynamic). */
+  const contactOf = (outerV: number[], innerV: number[], gap: number) => {
+    const ci: number[] = [];
+    const cj: number[] = [];
+    for (const v of outerV) {
+      const p = getPos(v);
+      let best = -1;
+      let bd = Infinity;
+      for (const w of innerV) {
+        const d =
+          (pos[3 * w] - p[0]) ** 2 + (pos[3 * w + 1] - p[1]) ** 2 + (pos[3 * w + 2] - p[2]) ** 2;
+        if (d < bd) [best, bd] = [w, d];
+      }
+      if (best >= 0 && bd < 60 * 60) {
+        ci.push(v);
+        cj.push(best);
+      }
+    }
+    if (ci.length)
+      contacts.push({
+        i: Int32Array.from(ci),
+        j: Int32Array.from(cj),
+        gap,
+        ax: F.c[0],
+        az: F.c[2],
+      });
+  };
+  /** Share of `outerV` outside the surface of `innerV` (nearest inner vertex, outward normal). */
+  const outsideShare = (outerV: number[], innerV: number[]) => {
+    let out = 0;
+    for (const v of outerV) {
+      const p = getPos(v);
+      let best = innerV[0];
+      let bd = Infinity;
+      for (const w of innerV) {
+        const d =
+          (pos[3 * w] - p[0]) ** 2 + (pos[3 * w + 1] - p[1]) ** 2 + (pos[3 * w + 2] - p[2]) ** 2;
+        if (d < bd) [best, bd] = [w, d];
+      }
+      const q = getPos(best);
+      if (dot(sub(p, q), outward(q)) >= -1) out++;
+    }
+    return outerV.length ? (100 * out) / outerV.length : 0;
+  };
+  /** A seam by anchored arc length (K2): only A between its first and last anchor is sewn. */
+  const anchoredWork = (
+    label: string,
+    A: Path,
+    B: Path,
+    anchors: [number, number][],
+    note: string,
+    target: number,
+  ) => {
+    const rows = anchoredRows(A, B, anchors);
+    const solver: SolverSeam = { rows, k: 0, active: true, gap: 0 };
+    const a0 = anchors[0][0];
+    const a1 = anchors[anchors.length - 1][0];
+    const b0 = anchors[0][1];
+    const b1 = anchors[anchors.length - 1][1];
+    const item: Work = {
+      id: label,
+      a: edgesOn(A),
+      b: edgesOn(B),
+      kind: 'proposed-composite',
+      origin: 'doll-proposed',
+      A,
+      B,
+      same: true,
+      aRange: [a0 / Math.max(1e-9, A.len), a1 / Math.max(1e-9, A.len)],
+      bRange: [b0 / Math.max(1e-9, B.len), b1 / Math.max(1e-9, B.len)],
+      rows,
+      solver,
+      target,
+      born: passes,
+      ramp: 120,
+      note,
+    };
+    works.push(item);
+    return item;
+  };
+  const increasing = (an: [number, number][]) =>
+    an.every((x, i) => i === 0 || (x[0] > an[i - 1][0] + 1 && x[1] > an[i - 1][1] + 1));
+  /** K2: a unit's attach run onto the neck path by landmarks. */
+  const neckAnchors = (U: Unit, N: NeckPath) => {
+    const m = runMarks(cctx, U.attach);
+    const Lb = N.path.len;
+    const cf = symmetricPair(m, Lb, 0.8, 1.25);
+    const lo = cf ? cf[0] : 0;
+    const hi = cf ? cf[1] : m.path.len;
+    let snp = N.snp ? symmetricPair(m, N.snp[1] - N.snp[0], 0.75, 1.3, cf) : null;
+    if (snp && (snp[0] <= lo + 5 || snp[1] >= hi - 5)) snp = null;
+    const with_ = (useSnp: boolean): [number, number][] => [
+      [lo, 0],
+      ...(useSnp && snp && N.snp ? [[snp[0], N.snp[0]] as [number, number]] : []),
+      [m.cb, N.cb],
+      ...(useSnp && snp && N.snp ? [[snp[1], N.snp[1]] as [number, number]] : []),
+      [hi, Lb],
+    ];
+    let anchors = with_(true);
+    if (!increasing(anchors)) {
+      snp = null;
+      anchors = with_(false);
+    }
+    if (!increasing(anchors))
+      anchors = [
+        [lo, 0],
+        [hi, Lb],
+      ];
+    const words = `CB ${m.cbByNotch ? 'notch' : 'middle'} ↔ CB · SNP ${snp ? 'notches ↔ shoulder points' : 'proportional'} · CF ${cf ? 'notches' : 'run ends'} ↔ ${N.closed ? 'the centre front' : 'the CF marks'}`;
+    return { m, anchors, sewn: [lo, hi] as [number, number], words };
+  };
+  /** K3: a fall's neck edge onto the stand top (the notch pair that matches, centred at CB). */
+  const topAnchors = (U: Unit, top: number[]) => {
+    const mf = runMarks(cctx, U.attach);
+    const mt = runMarks(cctx, top);
+    const Lf = mf.path.len;
+    const Lt = mt.path.len;
+    const pair = symmetricPair(mt, Lf, 0.85, 1.15);
+    const tA = pair ? pair[0] : Math.max(0, mt.cb - mf.cb);
+    const tB = pair ? pair[1] : Math.min(Lt, mt.cb + (Lf - mf.cb));
+    let anchors: [number, number][] = [
+      [0, tA],
+      [mf.cb, mt.cb],
+      [Lf, tB],
+    ];
+    if (!increasing(anchors))
+      anchors = [
+        [0, tA],
+        [Lf, tB],
+      ];
+    const words = `CB ${mf.cbByNotch ? 'notch' : 'middle'} ↔ stand CB · ends ↔ ${pair ? 'the stand-top notches' : 'centred on the stand top'}`;
+    return { mf, mt, anchors, range: [tA, tB] as [number, number], words };
+  };
+  const joinedUnits = (a: Unit, b: Unit) =>
+    G.seams.some(
+      (sm) =>
+        (a.keys.has(pk(sm.a[0])) && b.keys.has(pk(sm.b[0]))) ||
+        (b.keys.has(pk(sm.a[0])) && a.keys.has(pk(sm.b[0]))),
+    ) ||
+    (opt.joins ?? []).some((J) =>
+      J.parts.some(
+        (X, i) =>
+          X.some((k) => a.keys.has(k)) &&
+          J.parts.some((Y, j) => j !== i && Y.some((k) => b.keys.has(k))),
+      ),
+    );
+  // Ring proxy of units standing on the neck path: never inside the neck path's radius.
+  const neckBase = neck ? baseOf(F, [...neck.path.v]) : null;
+  const ringProxyAt = (layer: number) =>
+    proxies.push({
+      push(p, i) {
+        if (!neckBase) return;
+        const q = inFrame(F, [p[3 * i], p[3 * i + 1], p[3 * i + 2]]);
+        const R = (neckBase.r(q.th) + layer) * PROXY_K;
+        if (q.r >= R || q.r < 1e-6) return;
+        const np = fromFrame(F, q.th, q.h, R);
+        p[3 * i] = np[0];
+        p[3 * i + 1] = np[1];
+        p[3 * i + 2] = np[2];
+      },
+      pull() {},
+    }) - 1;
+  let standTop: number[] | null = null;
+  let standList: Panel[] | null = null;
+  const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
+    if (!neck) return;
+    const N = neck;
+    const base = baseCurve(cctx, N.path);
+    const ordered = [...units].sort((x, y) => y.area - x.area);
+    ordered.forEach((U, idx) => {
+      const layer = 3 * (ordered.length - 1 - idx);
+      const plan = neckAnchors(U, N);
+      const pi = ringProxyAt(layer);
+      const sewnMm = plan.sewn[1] - plan.sewn[0];
+      const ext = plan.m.path.len - sewnMm;
+      // A base far off the unit's length (a neck path that is not a neckline): placed at its own
+      // length centred on the CB, not sewn — never crammed.
+      const off = sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
+      if (off)
+        warnings.push(
+          `${label}: not proposed — ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %); placed at its own length, centred at the CB`,
+        );
+      // A one-piece collar (no stand) rolls over: ROLL_FRAC of its depth stands, the rest turns
+      // down and out, leaning out enough for its longer outer edge (no roll-line mark in the
+      // pattern — a stated prior).
+      let roll: { frac: number; alpha: number } | undefined;
+      if (role === 'collar') {
+        const La = plan.m.path.len;
+        const Lo = restPath(cctx, U.other).len;
+        let rN = 0;
+        for (const v of N.path.v) rN += inFrame(F, getPos(v)).r;
+        rN /= Math.max(1, N.path.v.length);
+        const mid = U.attach[Math.floor(U.attach.length / 2)];
+        const depth = Math.max(
+          20,
+          Math.min(
+            ...U.other.map((v) =>
+              Math.hypot(cuv[2 * v] - cuv[2 * mid], cuv[2 * v + 1] - cuv[2 * mid + 1]),
+            ),
+          ),
+        );
+        const H = (1 - ROLL_FRAC) * depth;
+        const dR = rN * Math.max(0, Lo / Math.max(1, La) - 1) + 3 + layer;
+        roll = {
+          frac: ROLL_FRAC,
+          alpha: Math.max(
+            (20 * Math.PI) / 180,
+            Math.min((70 * Math.PI) / 180, Math.asin(Math.min(1, dR / H))),
+          ),
+        };
+      }
+      const fold = placeUnit(
+        U,
+        base,
+        off
+          ? makeMap([
+              [plan.m.cb, N.cb],
+              [plan.m.cb + 1, N.cb + 1],
+            ])
+          : makeMap(plan.anchors),
+        plan.sewn,
+        'up',
+        layer,
+        0,
+        pi,
+        roll,
+      );
+      for (const P of U.list) buildPanel(P);
+      if (roll) {
+        contactOf(fold.fall, fold.stand, 1.5);
+        // Rolled over, the drawn face shows on the turned-down part (the standing part, hidden
+        // under it, shows its back).
+        for (const P of U.list) faceFlip.add(P.idx);
+      }
+      const graphSewn = graphTouches(U.gid, new Set(['BODY']));
+      const id = idx === 0 ? label : `${label} (layer ${idx + 1})`;
+      const work =
+        graphSewn || off
+          ? null
+          : anchoredWork(
+              id,
+              plan.m.path,
+              N.path,
+              plan.anchors,
+              `proposed by the doll · ${label} · ${sewnMm.toFixed(0)} mm between the marks onto the ${N.closed ? 'closed' : 'open'} neck path ${N.path.len.toFixed(0)} mm (${sewnMm / N.path.len < 0.985 || sewnMm / N.path.len > 1.015 ? `eased ${(Math.abs(1 - sewnMm / N.path.len) * 100).toFixed(0)} %` : 'equal'})${ext > 2 ? ` · ${ext.toFixed(0)} mm beyond the CF marks left free (extensions, overlapping)` : ''} · ${plan.words} · not in the pattern`,
+              0.8,
+            );
+      collarPlans.push({
+        rep: {
+          keys: U.list.map((P) => P.key),
+          role,
+          base: 'neck path',
+          seam: work?.id ?? null,
+          attached: work ? 'proposed' : graphSewn ? 'graph' : 'not sewn',
+          sewnMm,
+          baseMm: N.path.len,
+          ease: sewnMm / N.path.len,
+          extMm: ext,
+          anchors: plan.words,
+          layer,
+        },
+        work,
+        unit: U.list,
+        ...(roll ? { fold, outer: U.other } : {}),
+      });
+      if (idx === 0) {
+        standTop = U.other;
+        standList = U.list;
+      }
+    });
+  };
+  if (groups.has('STAND')) {
+    const units = unitsOf('STAND');
+    placeOnNeck(units, 'stand', 'collar stand ↔ neckline');
+    for (const sm of G.seams)
+      if (inGroups(sm.a, new Set(['STAND'])) && inGroups(sm.b, new Set(['STAND'])))
+        graphWork(sm, passes);
+  }
+  if (groups.has('COLLAR')) {
+    const units = unitsOf('COLLAR');
+    const ordered = [...units].sort((x, y) => y.area - x.area);
+    for (let i = 1; i < ordered.length; i++)
+      if (!joinedUnits(ordered[i], ordered[0]))
+        warnings.push(
+          `${ordered[i].list.map((P) => P.key).join('+')}: a second collar unit not joined to ${ordered[0].list.map((P) => P.key).join('+')} by a seam or the order — stacked on the same base anyway`,
+        );
+    // A later unit sewn by the graph onto an earlier unit's attach edge attaches by that edge.
+    for (let i = 1; i < ordered.length; i++) {
+      const U = ordered[i];
+      for (const sm of G.seams) {
+        const mineA = U.keys.has(pk(sm.a[0]));
+        const mineB = U.keys.has(pk(sm.b[0]));
+        if (mineA === mineB) continue;
+        const [mine, theirs] = mineA ? [sm.a, sm.b] : [sm.b, sm.a];
+        const V = ordered.slice(0, i).find((W) => W.keys.has(pk(theirs[0])));
+        const Pm = pathOf(mine);
+        const Pt = pathOf(theirs);
+        if (!V || !Pm || !Pt) continue;
+        const on = new Set(V.attach);
+        if ([...Pt.v].filter((v) => on.has(v)).length < 0.5 * Pt.v.length) continue;
+        U.attach = uAsc([...Pm.v]);
+        break;
+      }
+    }
+    if (standTop && standList) {
+      // K3: falls on the stand top, turned down and out; stacked outward in area order (K4).
+      const top = standTop as number[];
+      const stand = standList as Panel[];
+      const base = baseCurve(cctx, restPath(cctx, top));
+      const standV: number[] = [];
+      for (const P of stand) for (let i = 0; i < P.count; i++) standV.push(P.offset + i);
+      ordered.forEach((U0, idx) => {
+        const layer = 3 * (ordered.length - 1 - idx);
+        // Turned down = the drawn piece rotated 180° (u and v both reversed): its face shows.
+        const U: Unit = { ...U0, attach: [...U0.attach].reverse(), other: [...U0.other].reverse() };
+        const plan = topAnchors(U, top);
+        // Turned down: the outer edge sits on a larger circle than the neck edge — lean the fall
+        // out so its outer edge needs no stretch.
+        const outer = restPath(cctx, U.other);
+        let rTop = 0;
+        for (const p of base.pts) rTop += inFrame(F, p).r;
+        rTop /= Math.max(1, base.pts.length);
+        const hs = U.other.map((v) => {
+          const q = U.attach.length ? cuv[2 * v + 1] : 0;
+          return Math.abs(q - cuv[2 * U.attach[Math.floor(U.attach.length / 2)] + 1]);
+        });
+        const H = hs.length ? hs.sort((x, y) => x - y)[Math.floor(hs.length / 2)] : 50;
+        const dR = rTop * Math.max(0, outer.len / Math.max(1, plan.mf.path.len) - 1) + layer + 3;
+        const alpha = Math.max(
+          (15 * Math.PI) / 180,
+          Math.min((75 * Math.PI) / 180, Math.asin(Math.min(1, dR / Math.max(1, H)))),
+        );
+        // No proxy push of its own: the contact below keeps it outside the stand (the torso's neck
+        // cylinder, wider than a collar, would hold it off the stand top).
+        const pi = proxies.push({ push() {}, pull() {} }) - 1;
+        placeUnit(U, base, makeMap(plan.anchors), [0, plan.mf.path.len], 'down', layer, alpha, pi);
+        for (const P of U.list) buildPanel(P);
+        // One-sided contact: every vertex of the fall but its sewn neck edge stays outside the
+        // stand point nearest to it at placement (dynamic — it follows the stand as both move).
+        {
+          const edge = new Set(U.attach);
+          const fv: number[] = [];
+          for (const P of U.list)
+            for (let i = 0; i < P.count; i++) if (!edge.has(P.offset + i)) fv.push(P.offset + i);
+          contactOf(fv, standV, 1.5 + layer);
+        }
+        const graphSewn =
+          graphTouches(U.gid, new Set(['STAND'])) ||
+          ordered.slice(0, idx).some((W) =>
+            G.seams.some((sm) => {
+              const ka = pk(sm.a[0]);
+              const kb = pk(sm.b[0]);
+              return (U.keys.has(ka) && W.keys.has(kb)) || (U.keys.has(kb) && W.keys.has(ka));
+            }),
+          );
+        const sewnMm = plan.mf.path.len;
+        const baseMm = plan.range[1] - plan.range[0];
+        const label = idx === 0 ? 'collar ↔ stand top' : `collar ↔ stand top (layer ${idx + 1})`;
+        const work = graphSewn
+          ? null
+          : anchoredWork(
+              label,
+              plan.mf.path,
+              plan.mt.path,
+              plan.anchors,
+              `proposed by the doll · collar ↔ stand top · ${sewnMm.toFixed(0)} ≈ ${baseMm.toFixed(0)} mm of the stand top (${Math.abs(1 - sewnMm / Math.max(1, baseMm)) < 0.015 ? 'equal' : `eased ${(Math.abs(1 - sewnMm / Math.max(1, baseMm)) * 100).toFixed(0)} %`}) · turned down over the stand · ${plan.words} · not in the pattern`,
+              0.7,
+            );
+        collarPlans.push({
+          rep: {
+            keys: U.list.map((P) => P.key),
+            role: 'fall',
+            base: 'stand top',
+            seam: work?.id ?? null,
+            attached: work
+              ? 'proposed'
+              : graphTouches(U.gid, new Set(['STAND']))
+                ? 'graph'
+                : 'stacked',
+            sewnMm,
+            baseMm,
+            ease: sewnMm / Math.max(1, baseMm),
+            extMm: 0,
+            anchors: plan.words,
+            layer,
+          },
+          work,
+          unit: U.list,
+          standTop: top,
+          topRange: plan.range,
+          outer: U.other,
+          stand,
+          attach: U.attach,
+        });
+      });
+    } else if (neck) {
+      // No separate stand: a one-piece collar on the neck path, standing (roll line not modelled).
+      placeOnNeck(ordered, 'collar', 'collar ↔ neckline');
+      collarRep.notes.push(
+        `one-piece collar (no separate stand): rolled over at ${Math.round(ROLL_FRAC * 100)} % of its depth — the pattern has no roll-line mark, so where it turns down is a prior, not read from the pattern`,
+      );
+    }
+    for (const sm of G.seams)
+      if (inGroups(sm.a, new Set(['COLLAR'])) && inGroups(sm.b, new Set(['COLLAR'])))
+        graphWork(sm, passes);
+  }
   const ringLen = (gid: DollGroupId) => {
     const runs = groups.has(gid) ? stripRuns(groups.get(gid)!) : null;
     return runs ? loopPath(runs.bottom, uv, panelOf, 0, false, ringInfo).len : 400;
   };
-  let standTop: number[] | null = null;
-  if (groups.has('STAND')) {
-    const runs = placeRing(
-      'STAND',
-      neckFrame,
-      neckLoop?.verts ?? null,
-      ringLen('STAND') / TAU,
-      'bottom',
-      Math.PI,
-      0,
-    );
-    for (const P of groups.get('STAND')!) buildPanel(P);
-    for (const sm of G.seams)
-      if (inGroups(sm.a, new Set(['STAND'])) && inGroups(sm.b, new Set(['STAND'])))
-        graphWork(sm, passes);
-    if (runs) {
-      standTop = runs.top;
-      if (neckLoop && !graphTouches('STAND', new Set(['BODY'])) && opt.proposeComposite !== false)
-        propose(
-          'collar stand ↔ neckline',
-          { verts: runs.bottom, closed: false },
-          { verts: neckLoop.verts, closed: true },
-          'front',
-          'STAND',
-          0.4,
-        );
-      else if (!neckLoop) warnings.push('the body has no neck loop — the stand is not attached');
-    }
-  }
-  if (groups.has('COLLAR')) {
-    const base = standTop ?? neckLoop?.verts ?? null;
-    const runs = placeRing(
-      'COLLAR',
-      neckFrame,
-      base,
-      ringLen('COLLAR') / TAU,
-      'bottom',
-      Math.PI,
-      standTop ? 3 : 0,
-    );
-    for (const P of groups.get('COLLAR')!) buildPanel(P);
-    for (const sm of G.seams)
-      if (inGroups(sm.a, new Set(['COLLAR'])) && inGroups(sm.b, new Set(['COLLAR'])))
-        graphWork(sm, passes);
-    if (runs && opt.proposeComposite !== false) {
-      if (standTop && !graphTouches('COLLAR', new Set(['STAND'])))
-        propose(
-          'collar ↔ stand top',
-          { verts: runs.bottom, closed: false },
-          { verts: standTop, closed: false },
-          'front',
-          'COLLAR',
-          0.3,
-        );
-      else if (!standTop && neckLoop && !graphTouches('COLLAR', new Set(['BODY'])))
-        propose(
-          'collar ↔ neckline',
-          { verts: runs.bottom, closed: false },
-          { verts: neckLoop.verts, closed: true },
-          'front',
-          'COLLAR',
-          0.4,
-        );
-    }
-  }
   // Cuffs at the wrists.
   for (const s of ['L', 'R'] as const) {
     const gid: DollGroupId = s === 'L' ? 'CUFF_L' : 'CUFF_R';
@@ -2377,6 +2995,9 @@ export function solveDoll(input: DollInput): DollReport {
   for (const P of buildPanelLater) buildPanel(P);
   for (let v = 0; v < N; v++) moving[v] = groupOfV[v] !== 'FLOAT' && proxyOf[v] >= 0 ? 1 : 0;
   const tSolve = now();
+  // Probe switch: the pose as placed, before phase 2 (debugging placement priors).
+  const frozen = !!(globalThis as { __DOLL_PLACED_ONLY?: boolean }).__DOLL_PLACED_ONLY;
+  if (frozen) passCap = passes;
   const p2 = Math.max(300, maxPasses - passes - 400);
   run(p2);
   // Releases get their own budget past maxPasses (the settle loop follows).
@@ -2388,7 +3009,7 @@ export function solveDoll(input: DollInput): DollReport {
   let travel = Infinity;
   let travelV = 0;
   let travelP99 = 0;
-  const settleCap = passes + (opt.settlePasses ?? 2400);
+  const settleCap = frozen ? passes : passes + (opt.settlePasses ?? 2400);
   passCap = settleCap;
   while (passes < settleCap) {
     run(60);
@@ -2410,7 +3031,7 @@ export function solveDoll(input: DollInput): DollReport {
   if (!Number.isFinite(travel)) travel = 0;
   if (opt.debug)
     warnings.push(
-      `debug: travel p99 ${travelP99.toFixed(2)} mm · max ${travel.toFixed(1)} mm at ${panels[panelOf[travelV]].key} (ring ${ringOf[travelV]})`,
+      `debug: travel p99 ${travelP99.toFixed(2)} mm · max ${travel.toFixed(1)} mm at ${panels[panelOf[travelV]]?.key ?? '-'} (ring ${ringOf[travelV]})`,
     );
   // Settled: 99 % of the points move ≤ 1 mm per 20 passes (the max is reported too).
   const converged = travelP99 <= 1.0;
@@ -2636,8 +3257,9 @@ export function solveDoll(input: DollInput): DollReport {
     const tris = new Uint32Array(P.mesh.tris.length);
     for (let t = 0; t < tris.length; t += 3) {
       tris[t] = P.mesh.tris[t];
-      tris[t + 1] = P.mirrored ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
-      tris[t + 2] = P.mirrored ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
+      const flip = P.mirrored !== faceFlip.has(P.idx);
+      tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
+      tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
     }
     const uvf = new Float32Array(2 * P.count);
     for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
@@ -2669,8 +3291,88 @@ export function solveDoll(input: DollInput): DollReport {
         reason: 'in its group but no seam of it closed or was proposed',
       });
   }
+  // Collar units: gaps after solving; a fall's outer edge vs the stand top it hangs from, and how
+  // much of it stays outside the stand's surface.
+  if (opt.debug)
+    for (const cp of collarPlans) {
+      const ys: number[] = [];
+      const rs: number[] = [];
+      for (const P of cp.unit)
+        for (let i = 0; i < P.count; i++) {
+          const q = inFrame(F, getPos(P.offset + i));
+          ys.push(q.h);
+          rs.push(q.r);
+        }
+      ys.sort((x, y) => x - y);
+      rs.sort((x, y) => x - y);
+      const pc = (a: number[], f: number) => a[Math.floor(f * (a.length - 1))]?.toFixed(0);
+      warnings.push(
+        `debug: unit ${cp.rep.keys.join('+')} (${cp.rep.role}) height above the neck axis p5/p50/p95 ${pc(ys, 0.05)}/${pc(ys, 0.5)}/${pc(ys, 0.95)} · radius ${pc(rs, 0.05)}/${pc(rs, 0.5)}/${pc(rs, 0.95)}`,
+      );
+    }
+  for (const cp of collarPlans) {
+    if (cp.fold && cp.outer) {
+      const meanY = (vs: number[]) =>
+        vs.reduce((t, v) => t + pos[3 * v + 1], 0) / Math.max(1, vs.length);
+      cp.rep.outerYMm = meanY(cp.outer);
+      cp.rep.baseYMm = meanY(cp.fold.line);
+      cp.rep.outsidePct = outsideShare(cp.fold.fall, cp.fold.stand);
+    }
+    if (opt.debug && cp.work) {
+      const w = cp.work;
+      const g = rowGaps(pos, w.rows);
+      const nA = w.rows.v.length - [...w.rows.v].filter((v) => !w.A.v.includes(v)).length;
+      const bins = new Array(10).fill(0);
+      const cnt = new Array(10).fill(0);
+      for (let q = 0; q < nA; q++) {
+        const k = [...w.A.v].indexOf(w.rows.v[q]);
+        const b = Math.min(9, Math.floor((10 * w.A.s[k]) / Math.max(1, w.A.len)));
+        bins[b] = Math.max(bins[b], g[q]);
+        cnt[b]++;
+      }
+      const len3 = (P: Path) => {
+        let t = 0;
+        for (let k = 1; k < P.v.length; k++)
+          t += Math.hypot(...sub(getPos(P.v[k]), getPos(P.v[k - 1])));
+        return t;
+      };
+      const jumps: string[] = [];
+      for (let k = 1; k < w.B.v.length; k++) {
+        const d3 = Math.hypot(...sub(getPos(w.B.v[k]), getPos(w.B.v[k - 1])));
+        const dr = w.B.s[k] - w.B.s[k - 1];
+        if (d3 - dr > 8)
+          jumps.push(
+            `${panels[panelOf[w.B.v[k - 1]]].key}→${panels[panelOf[w.B.v[k]]].key} rest ${dr.toFixed(0)} 3D ${d3.toFixed(0)}`,
+          );
+      }
+      if (jumps.length) warnings.push(`debug: ${w.id} base jumps: ${jumps.join(' · ')}`);
+      warnings.push(
+        `debug: ${w.id} gaps along the unit (10 bins, max mm): ${bins.map((x, i) => (cnt[i] ? x.toFixed(0) : '·')).join(' ')} · A rest ${w.A.len.toFixed(0)} 3D ${len3(w.A).toFixed(0)} · B rest ${w.B.len.toFixed(0)} 3D ${len3(w.B).toFixed(0)}`,
+      );
+    }
+    if (cp.standTop && cp.outer && cp.stand && cp.topRange) {
+      const meanY = (vs: number[]) =>
+        vs.reduce((t, v) => t + pos[3 * v + 1], 0) / Math.max(1, vs.length);
+      const Pt = restPath(cctx, cp.standTop);
+      const onRange = cp.standTop.filter(
+        (_, k) => Pt.s[k] >= cp.topRange![0] - 1 && Pt.s[k] <= cp.topRange![1] + 1,
+      );
+      cp.rep.outerYMm = meanY(cp.outer);
+      cp.rep.baseYMm = meanY(onRange.length ? onRange : cp.standTop);
+      const sv: number[] = [];
+      for (const P of cp.stand) for (let i = 0; i < P.count; i++) sv.push(P.offset + i);
+      // The sewn neck edge lies ON the stand top (within the seam's gap): not counted.
+      const sewn = new Set(cp.attach ?? []);
+      const fv: number[] = [];
+      for (const P of cp.unit)
+        for (let i = 0; i < P.count; i++) if (!sewn.has(P.offset + i)) fv.push(P.offset + i);
+      cp.rep.outsidePct = outsideShare(fv, sv);
+    }
+    collarRep.units.push(cp.rep);
+  }
   const tris = panels.reduce((t, P) => t + P.mesh.tris.length / 3, 0);
   return {
+    collar: collarRep,
     panels: outPanels,
     positions,
     seams,

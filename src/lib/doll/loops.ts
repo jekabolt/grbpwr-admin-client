@@ -130,13 +130,23 @@ export function findLoops(L: LoopInput, panelSet: Set<number>): RawLoop[] {
     const verts: number[] = [];
     let len = 0;
     const panels = new Set<number>();
-    for (const id of order) {
+    // Each segment in the direction the walk crosses it (a panel whose contour runs against the
+    // walk is crossed b → a); pushing a, b blindly would zigzag one mesh step back and forth.
+    let at = -1;
+    order.forEach((id, i) => {
       const s = segs[id];
-      if (!verts.length || verts[verts.length - 1] !== s.a) verts.push(s.a);
-      verts.push(s.b);
+      let fwdDir: boolean;
+      if (i === 0) {
+        const nx = order.length > 1 ? segs[order[1]] : null;
+        fwdDir = !nx || nx.ra === s.rb || nx.rb === s.rb;
+      } else fwdDir = s.ra === at || s.rb !== at;
+      const [p, q] = fwdDir ? [s.a, s.b] : [s.b, s.a];
+      if (!verts.length || verts[verts.length - 1] !== p) verts.push(p);
+      verts.push(q);
+      at = fwdDir ? s.rb : s.ra;
       len += s.len;
       panels.add(L.panelOf[s.a]);
-    }
+    });
     if (closed && verts.length > 2 && find(verts[verts.length - 1]) === find(verts[0])) verts.pop();
     loops.push({ verts, closed, len, panels });
   }

@@ -7,6 +7,12 @@
 //             stand on the neckline by a proposed seam;
 //   NEGATIVE CONTROL: SS26-005 with its two side seams dropped must report them open (red), and the
 //             gate set above must FAIL on it — a gate that does not move is not measuring anything.
+//   COLLAR (04-COLLAR.md): on the shirts, the neck path is 30–55 % of the girth, every collar unit is
+//             attached (gap p95 ≤ 3 mm), a stand / one-piece collar sews 0.90–1.15 of the path
+//             between its marks, a fall hangs DOWN from the stand top and ≥ 95 % outside the stand,
+//             no collar seam is open; a synthetic pullover keeps a CLOSED neck path (negative
+//             control), a synthetic open front an OPEN one. Views: four + a collar close-up
+//             (<id>-collar.png).
 //
 // Usage: yarn doll:check            (all files)
 //        DOLL_FILES=ss26,card6 yarn doll:check
@@ -103,6 +109,35 @@ const ALL = [
     gender: 'MALE',
   },
   {
+    id: 'card4',
+    label: 'prod card 4 SS26-004 short-sleeve shirt',
+    dxf: prodFile('card4-'),
+    category: 'shirt',
+    card: '4',
+    gender: 'MALE',
+  },
+  {
+    id: 'card4-graft',
+    label: 'SYNTHETIC card 4 body + SS26-005 stand and fall (collar module on a clean body)',
+    dxf: prodFile('card4-'),
+    category: 'shirt',
+    gender: 'MALE',
+    graft: {
+      dxf: resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'),
+      keep: ['NCK', 'NCK_1', 'CLR', 'CLR_1', '2CLR', '2CLR_1'],
+      drop: ['CLR_3', 'CLR_4'],
+    },
+  },
+  {
+    id: 'card9',
+    label: 'prod card 9 SS26-009 summer shirt',
+    dxf: prodFile('card9-'),
+    category: 'shirt',
+    card: '9',
+    gender: 'FEMALE',
+    size: 'm',
+  },
+  {
     id: 'card16',
     label: 'prod card 16 FW26-001 shirt (MAIN)',
     dxf: prodFile('card16-MAIN'),
@@ -186,10 +221,12 @@ for (const f of files) {
     html,
     `<!doctype html><html><head><meta charset="utf-8"><title>doll ${f.id}</title><style>html,body{margin:0;background:#f4f4f2;overflow:hidden}</style></head><body><script>window.__DOLL__=${scene.replaceAll('<', '\\u003c')};</script><script>${renderJs}</script></body></html>`,
   );
-  const views = (process.env.DOLL_VIEWS ?? 'all').split(',');
+  const views = (process.env.DOLL_VIEWS ?? 'all,collar')
+    .split(',')
+    .filter((v) => v && v !== 'none');
   for (const v of views) {
     const png = resolve(out, v === 'all' ? `${f.id}.png` : `${f.id}-${v}.png`);
-    const size = v === 'all' ? '1600,1400' : '1000,1100';
+    const size = v === 'all' ? '1600,1400' : v === 'collar' ? '1600,900' : '1000,1100';
     try {
       execFileSync(
         chrome,
@@ -296,6 +333,90 @@ if (summary.some((s) => s.id === 'ss26-neg')) {
     'NEG ss26-neg: the doll gate set FAILS without the side seams',
     !(g.truthClosed && g.caps === 2 && g.stand && !g.openSide),
     g.truthDetail,
+  );
+}
+// ── collar gates (tmp/plans/assembly-3d-doll/04-COLLAR.md) ─────────────────────────────────
+// Shirts with a collar: the neck path, every unit on it, every fall on the stand top. A unit not
+// attached, or a gate the body makes impossible, FAILS with its number — never skipped.
+const COLLAR_FILES = ['ss26', 'card4', 'card6', 'card9', 'card16', 'card4-graft'];
+const f1 = (x) => (x === null || x === undefined || Number.isNaN(x) ? 'n/a' : Number(x).toFixed(1));
+for (const s of summary) {
+  if (!COLLAR_FILES.includes(s.id)) continue;
+  const C = s.collar;
+  const units = C?.units ?? [];
+  const r = C?.ratio ?? null;
+  gate(
+    `${s.id}: neck path 30–55 % of the girth`,
+    r !== null && r >= 0.3 && r <= 0.55,
+    C?.neckMm
+      ? `${f1(C.neckMm)} mm ${C.neckClosed ? 'closed' : 'open'} / girth ${f1(C.chestMm)} mm = ${f1(100 * r)} %${C.neckOk ? '' : ' (K1 failed — fallback loop)'}`
+      : 'no neck path',
+  );
+  gate(
+    `${s.id}: a collar unit is attached`,
+    units.some((u) => u.attached !== 'not sewn'),
+    units.map((u) => `${u.role} ${u.keys}: ${u.attached}`).join(' · ') ||
+      'no collar piece drawn as a collar',
+  );
+  for (const u of units) {
+    const tag = `${s.id}: ${u.role} ${u.keys}`;
+    gate(
+      `${tag} attached, gap p95 ≤ 3 mm`,
+      u.attached !== 'not sewn' && u.gapP95 <= 3,
+      `${u.attached} · gap p95 ${f1(u.gapP95)} / max ${f1(u.gapMax)} mm`,
+    );
+    if (u.role !== 'fall')
+      gate(
+        `${tag} sewn length / neck path 0.90–1.15 (extensions excluded)`,
+        u.ease >= 0.9 && u.ease <= 1.15,
+        `${f1(u.sewnMm)} / ${f1(u.baseMm)} mm = ${u.ease.toFixed(3)} · extensions ${f1(u.extMm)} mm`,
+      );
+    if (u.role === 'collar' && u.outerY !== undefined && u.outerY !== null) {
+      gate(
+        `${tag} rolled over (outer edge below the roll line)`,
+        u.outerY < u.baseY,
+        `outer edge y ${f1(u.outerY)} vs roll line y ${f1(u.baseY)}`,
+      );
+      gate(
+        `${tag} turned-down part ≥ 95 % outside its standing part`,
+        u.outsidePct >= 95,
+        `${f1(u.outsidePct)} %`,
+      );
+    }
+    if (u.role === 'fall') {
+      gate(
+        `${tag} turned down (outer edge below the stand top)`,
+        u.outerY < u.baseY,
+        `outer edge y ${f1(u.outerY)} vs stand top y ${f1(u.baseY)}`,
+      );
+      gate(
+        `${tag} ≥ 95 % outside the stand`,
+        u.outsidePct >= 95,
+        `${f1(u.outsidePct)} % of its free vertices`,
+      );
+    }
+  }
+  gate(
+    `${s.id}: no open collar seam`,
+    !(C?.openCollar ?? []).length,
+    (C?.openCollar ?? []).join(', ') || '0',
+  );
+}
+const ss = summary.find((s) => s.id === 'ss26');
+if (ss) gate('ss26: still ≥ 19 closed graph seams', ss.closedGraph >= 19, `${ss.closedGraph}`);
+// Negative control of K1 on synthetic boundaries (no pattern).
+if (existsSync(resolve(out, 'neck-fixture.json'))) {
+  const fx = JSON.parse(readFileSync(resolve(out, 'neck-fixture.json'), 'utf8'));
+  gate(
+    'NEG neck fixture: a pullover (no front opening) keeps a CLOSED neck path',
+    fx.pullover.closed === true,
+    fx.pullover.how,
+  );
+  gate(
+    "neck fixture: an open front gives an OPEN path of the neckline's own length (±2 %)",
+    fx.openFront.closed === false &&
+      Math.abs(fx.openFront.lenMm / fx.openFront.expectMm - 1) <= 0.02,
+    `${f1(fx.openFront.lenMm)} vs ${f1(fx.openFront.expectMm)} mm · ${fx.openFront.how}`,
   );
 }
 console.log(`\nscreenshots:\n${shots.map((s) => `  ${s}`).join('\n')}\nreports: ${out}/*.txt`);

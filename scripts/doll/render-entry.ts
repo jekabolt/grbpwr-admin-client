@@ -150,8 +150,24 @@ const views: Record<string, [number, number, string]> = {
   back: [180, 0, 'back'],
   tq: [35, 12, 'three-quarter'],
   side: [90, 0, 'side (left)'],
+  // Close-ups on the neck: three-quarter front and three-quarter back, from a little above.
+  ctq: [35, 22, 'collar · three-quarter front'],
+  cbk: [150, 22, 'collar · three-quarter back'],
 };
-const order = view === 'all' ? ['front', 'back', 'tq', 'side'] : [view];
+// The collar box: stand / collar panels, else the top fifth of the body.
+const neckBox = new THREE.Box3();
+for (const p of S.panels) {
+  if (p.group !== 'STAND' && p.group !== 'COLLAR') continue;
+  for (let i = 0; i < p.pos.length; i += 3)
+    neckBox.expandByPoint(new THREE.Vector3(p.pos[i], p.pos[i + 1], p.pos[i + 2]));
+}
+if (neckBox.isEmpty()) {
+  neckBox.copy(box);
+  neckBox.min.y = box.max.y - 0.2 * size.y;
+}
+neckBox.expandByScalar(70);
+const order =
+  view === 'all' ? ['front', 'back', 'tq', 'side'] : view === 'collar' ? ['ctq', 'cbk'] : [view];
 const cols = order.length === 1 ? 1 : 2;
 const rows = Math.ceil(order.length / cols);
 const top = 64;
@@ -160,17 +176,23 @@ const ch = (H - top) / rows;
 renderer.clear();
 order.forEach((v, i) => {
   const [az, el, label] = views[v];
+  const close = v === 'ctq' || v === 'cbk';
   const cam = new THREE.PerspectiveCamera(24, cw / ch, 10, 20000);
+  const c = new THREE.Vector3();
+  const sz = new THREE.Vector3();
+  (close ? neckBox : box).getCenter(c);
+  (close ? neckBox : box).getSize(sz);
   const R =
-    (Math.max(size.y, size.x * (ch / cw) * 0.9) / 2 / Math.tan((12 * Math.PI) / 180)) * 1.08;
+    (Math.max(sz.y, Math.max(sz.x, sz.z) * (ch / cw) * 0.9) / 2 / Math.tan((12 * Math.PI) / 180)) *
+    (close ? 1.15 : 1.08);
   const a = (az * Math.PI) / 180;
   const e = (el * Math.PI) / 180;
   cam.position.set(
-    center.x + R * Math.sin(a) * Math.cos(e),
-    center.y + R * Math.sin(e),
-    center.z + R * Math.cos(a) * Math.cos(e),
+    c.x + R * Math.sin(a) * Math.cos(e),
+    c.y + R * Math.sin(e),
+    c.z + R * Math.cos(a) * Math.cos(e),
   );
-  cam.lookAt(center);
+  cam.lookAt(c);
   const x = (i % cols) * cw;
   const y = H - top - (Math.floor(i / cols) + 1) * ch;
   renderer.setViewport(x, y, cw, ch);
