@@ -2,7 +2,9 @@
 // type), the name, how many per garment, fold, the L/R pair, the grainline, the line meaning and
 // the allowance. AI names above the threshold arrive accepted but FLAGGED (owner decision 11);
 // below it they wait for a click. A piece without a grainline cannot be exported until the
-// two-click tool draws one (decision 12).
+// two-click tool draws one (decision 12) or the operator accepts the proposed one (A1: a line
+// drawn with one evidence, or the outline's fold / symmetry axis / straight edge — never applied
+// without that click, D3).
 import { useMemo, useState } from 'react';
 import type {
   AllowanceDecision,
@@ -126,6 +128,18 @@ export function DetailsStep({
   const nameOf = (seed: SeedId) => session.names.find((n) => n.seed === seed);
   const specsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed);
   const blockedOf = (seed: SeedId) => sem.blocked.find((b) => b.seed === seed);
+  // A1: the grainlines proposed for pieces that have none yet
+  const proposals = (sem.grainProposals ?? []).filter((g) => !inputs.operatorGrain[g.seed]);
+  const proposalOf = (seed: SeedId) => proposals.find((g) => g.seed === seed);
+  const acceptProposals = () =>
+    rerun({
+      operatorGrain: {
+        ...inputs.operatorGrain,
+        ...Object.fromEntries(
+          proposals.map((g) => [g.seed, { a: g.a, b: g.b, accepted: g.evidence }]),
+        ),
+      },
+    });
   const mark = (seed: SeedId) => families.findIndex((f) => f.seed === seed) + 1;
 
   /** Re-run semantics with a patch to the operator's answers. */
@@ -202,6 +216,7 @@ export function DetailsStep({
       ? inputs.operatorGrain[sel] ??
         (selSpec && selSpec.pairHand !== 'R' ? selSpec.sizes[0]?.grain : null)
       : null;
+  const selProposal = sel != null && !selGrain ? proposalOf(sel) : undefined;
 
   const rows = families.filter((f) => f.candidates.every((c) => c.outcome !== 'tiny'));
   const startGrain = (seed: SeedId) => {
@@ -290,6 +305,19 @@ export function DetailsStep({
           <OutlineQuestion api={api} current={fileAllowance} />
           <ConfirmStrip api={api} />
 
+          {proposals.length > 0 && (
+            <div className='mt-2 flex flex-wrap items-center gap-2'>
+              <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                ! {proposals.length} grainline{proposals.length === 1 ? '' : 's'} proposed (blue on
+                the piece) — a wrong grain turns the piece in the marker: check them, or draw your
+                own
+              </Text>
+              <Chip onClick={acceptProposals}>
+                accept {proposals.length} proposed grainline{proposals.length === 1 ? '' : 's'}
+              </Chip>
+            </div>
+          )}
+
           {sem.foldList && (
             <div className='mt-2 flex flex-wrap items-center gap-2'>
               <Text size='micro' component='p' className='min-w-0 flex-1 text-error'>
@@ -358,10 +386,13 @@ export function DetailsStep({
                   (specs.length ? specs[0].unfoldedFold : !!n?.suggestion?.onFold);
                 const allowance = ov.allowance ?? specs[0]?.allowance ?? fileAllowance;
                 const grainOrigin = inputs.operatorGrain[seed]
-                  ? 'operator'
+                  ? inputs.operatorGrain[seed]?.accepted
+                    ? 'accepted'
+                    : 'operator'
                   : specs[0]?.sizes[0]?.grain
                     ? 'found'
                     : null;
+                const proposal = proposalOf(seed);
                 const pending = !!n && !n.autoAccepted && !inputs.confirmedNames.includes(seed);
                 const on = sel === seed;
                 return (
@@ -487,8 +518,12 @@ export function DetailsStep({
                     </td>
                     <td data-align='left'>
                       {grainOrigin ? (
-                        <Pill tone={grainOrigin === 'operator' ? 'ink' : 'ok'}>
-                          {grainOrigin === 'operator' ? 'drawn' : 'found'}
+                        <Pill tone={grainOrigin === 'found' ? 'ok' : 'ink'}>
+                          {grainOrigin === 'operator' ? 'drawn' : grainOrigin}
+                        </Pill>
+                      ) : proposal ? (
+                        <Pill tone='attention' title='proposed — accept above, or draw your own'>
+                          proposed · {proposal.why}
                         </Pill>
                       ) : (
                         <Button
@@ -676,6 +711,15 @@ export function DetailsStep({
                           b={selGrain.b}
                           unit={unit}
                           tone={inputs.operatorGrain[sel] ? SHEET_INK.blue : SHEET_INK.red}
+                        />
+                      )}
+                      {selProposal && (
+                        <GrainMark
+                          a={selProposal.a}
+                          b={selProposal.b}
+                          unit={unit}
+                          tone={SHEET_INK.blue}
+                          dashed
                         />
                       )}
                       {grainA && (
@@ -996,7 +1040,20 @@ function NameSource({
   return <Pill tone='mut'>AI</Pill>;
 }
 
-function GrainMark({ a, b, unit, tone }: { a: PtMm; b: PtMm; unit: number; tone: string }) {
+function GrainMark({
+  a,
+  b,
+  unit,
+  tone,
+  dashed,
+}: {
+  a: PtMm;
+  b: PtMm;
+  unit: number;
+  tone: string;
+  /** A1: a proposal, not yet the piece's grain. */
+  dashed?: boolean;
+}) {
   const ang = Math.atan2(vy(b.y) - vy(a.y), b.x - a.x);
   const h = unit * 10;
   const tip = (p: PtMm, dir: number) => {
@@ -1006,7 +1063,15 @@ function GrainMark({ a, b, unit, tone }: { a: PtMm; b: PtMm; unit: number; tone:
   };
   return (
     <g pointerEvents='none'>
-      <line x1={a.x} y1={vy(a.y)} x2={b.x} y2={vy(b.y)} stroke={tone} strokeWidth={unit * 1.8} />
+      <line
+        x1={a.x}
+        y1={vy(a.y)}
+        x2={b.x}
+        y2={vy(b.y)}
+        stroke={tone}
+        strokeWidth={unit * 1.8}
+        strokeDasharray={dashed ? `${unit * 8} ${unit * 5}` : undefined}
+      />
       <polygon points={tip(b, 1)} fill={tone} />
       <polygon points={tip(a, -1)} fill={tone} />
     </g>

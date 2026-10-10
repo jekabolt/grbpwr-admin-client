@@ -115,7 +115,8 @@ export type Inputs = {
   edits: PieceEdit[];
   fileAllowance: AllowanceDecision | null;
   overrides: StageIO['semantics']['in']['pieceOverrides'];
-  operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /** Two clicks, or an accepted proposal (A1: `accepted` = the proposal's evidence). */
+  operatorGrain: StageIO['semantics']['in']['operatorGrain'];
   /** Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`. */
   operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
   /** The unbound cutting-list entries the operator has seen named and checked (S5). */
