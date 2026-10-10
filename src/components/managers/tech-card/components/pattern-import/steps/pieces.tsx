@@ -171,6 +171,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
   const cand = (f: PieceFamily) => f.candidates[Math.min(rank, f.candidates.length - 1)];
   const selected = families.find((f) => f.seed === sel) ?? null;
   const refusedSel = !!selected && cand(selected).outcome === 'refused';
+  // a refused size has no outline to close: an active bridge tool falls back to the default one
+  if (tool === 'bridge' && refusedSel) {
+    setGapA(null);
+    setTool('pan');
+  }
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
