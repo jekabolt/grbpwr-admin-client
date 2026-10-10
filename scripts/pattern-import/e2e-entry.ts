@@ -36,6 +36,10 @@ import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
 
 import { singlePageSheet } from 'components/managers/tech-card/components/pattern-import/sheet-skip';
+import {
+  scaleUncertain,
+  stepOffer,
+} from 'components/managers/tech-card/components/pattern-import/auto-advance';
 
 import { synthDrawables, synthTruth } from './raster-entry';
 
@@ -327,7 +331,11 @@ export const CASES: Case[] = [
 // One unit = one operator action (auto/00-PLAN §1, A7): a click, a pick, a typed code = 2, a
 // grainline = 3 (the row + its two ends), "not a piece" = 2, a size map = 1 per size. Navigation of
 // the linear wizard = file 1 + read 1 + next ×7 + apply 1 + download 1 = 11; a screen the run skips
-// (the DXF fast path: scale, sheet, sizes, pieces; A0.2: a one-page sheet) takes its "next" away.
+// takes its "next" away. N1: the wizard runs forward by itself (auto-advance.ts) through every
+// screen of files…fabrics that asks nothing — no answer here, no offer waiting (`stepOffer`) — so
+// such a screen costs 0; the screen it lands on costs its one "next" after the answers. The DXF
+// fast path never shows the sheet, nor the pieces unless the sizes stopped it; A0.2 passes a
+// one-page sheet. A screen the run never reached (it failed before) is priced as before.
 
 export const CLICKS = {
   scale: 1,
@@ -353,11 +361,24 @@ export const CLICKS = {
   'fold-no': 1, // "not a fold"
   'cutting-list': 1, // confirm the cutting list + 1 per piece marked
   'count-answer': 1, // "cut on fold" in a count row
+  // N1: "accept all N suggestions" on the files step (the clean stage's offers), one click
+  'clean-accept': 1,
   blocker: 0,
   note: 0,
 } as const;
 export type OpKind = keyof typeof CLICKS;
-export type Op = { label: string; kind: OpKind; clicks: number };
+/** N1: the screens whose "next" the wizard takes by itself when they ask nothing. */
+export const AUTO_SCREENS = [
+  'files',
+  'scale',
+  'sheet',
+  'sizes',
+  'pieces',
+  'details',
+  'fabrics',
+] as const;
+export type Screen = (typeof AUTO_SCREENS)[number] | 'check';
+export type Op = { label: string; kind: OpKind; clicks: number; screen?: Screen };
 export type Clicks = { total: number; byKind: Partial<Record<OpKind, number>>; nav: number };
 export const NAV_LINEAR = 11;
 
@@ -508,10 +529,25 @@ export type CaseHooks = {
 export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
   const rec: Rec = { id: c.id, group: c.group, files: c.files, ops: [], ms: {} };
   /** One operator answer: `count` units of `kind` (A7: clicks = CLICKS[kind] × count). */
-  const op = (kind: OpKind, label: string, count = 1) =>
-    rec.ops.push({ label, kind, clicks: CLICKS[kind] * count });
+  /** N1: the screen the simulated operator is on, every screen reached, and where it stopped. */
+  let screen: Screen = 'files';
+  const reached = new Set<Screen>(['files']);
+  const at = (sc: Screen) => {
+    screen = sc;
+    reached.add(sc);
+  };
+  const stops = new Map<Screen, string>();
+  const stop = (why: string) => {
+    if (!stops.has(screen)) stops.set(screen, why);
+  };
+  const op = (kind: OpKind, label: string, count = 1) => {
+    rec.ops.push({ label, kind, clicks: CLICKS[kind] * count, screen });
+    stop(kind);
+  };
   /** A7: the wizard screens the run skipped (nav = NAV_LINEAR − skipped). */
   const skipped: string[] = [];
+  /** N1: screens passed whatever they hold (the fast path, a one-page sheet). */
+  const passed = new Set<Screen>();
   const dir = resolve(OUT, c.id.replace(/[^\w.-]+/g, '_'));
   mkdirSync(dir, { recursive: true });
   const T0 = Date.now();
@@ -545,6 +581,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       squares: cl.scaleHints.map((h) => `${h.declaredMm} mm conf ${h.confidence}`),
       notes: cl.notes.slice(0, 4),
     };
+    // N1: what the files step offers without blocking (suggestions, pages to check) stops the run
+    {
+      const accepted = (hooks.cleanEdits ?? []).filter((e) => 'keep' in e && !e.keep).length;
+      if (accepted) op('clean-accept', `accept all ${accepted} suggested kinds (one click)`);
+      const offer = stepOffer(
+        { step: 'files', clean: cl, pages: cl.classes, sheet: null },
+        !!ex.presegmented,
+      );
+      if (offer) stop(offer);
+    }
     const best = cl.scale[0];
     rec.read = {
       kinds: [...new Set(ex.files.map((f) => f.kind))].join(','),
@@ -561,8 +607,10 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     rec.rssAfterExtractMb = mb(process.memoryUsage().rss);
     if (!best) throw new Error('no scale candidate');
     // 2 · scale (the wizard asks for a confirmation when the detection is not certain)
-    const needsHuman =
-      best.confidence < 0.9 || Math.abs(best.factor - 1) > PATIMPORT.scaleWarnRatio;
+    at('scale');
+    const needsHuman = scaleUncertain(best, best.factor);
+    // the fast path shows an uncertain scale too (priced as before: not counted)
+    if (needsHuman) stop('scale');
     if (needsHuman && !ex.presegmented)
       op(
         'scale',
@@ -571,13 +619,17 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     await run('scale', {
       decision: { factor: best.factor, method: best.method, operatorConfirmed: needsHuman },
     });
-    // the DXF fast path: a certain scale is not shown, the sheet never is (use-import-session)
-    if (ex.presegmented) skipped.push(...(needsHuman ? [] : ['scale']), 'sheet');
-    // 3 · sheet
+    // 3 · sheet — the DXF fast path never shows it (use-import-session)
+    at('sheet');
+    if (ex.presegmented) passed.add('sheet');
     const as = await run('assemble', { sheet: c.sheet ?? 0 });
     if (as.clean) (rec.clean as Record<string, unknown>).sheet = as.clean.summary;
     // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
-    if (!ex.presegmented && singlePageSheet(ex.pages, as)) skipped.push('sheet');
+    if (!ex.presegmented && singlePageSheet(ex.pages, as)) passed.add('sheet');
+    {
+      const offer = stepOffer({ step: 'sheet', clean: cl, pages: cl.classes, sheet: as }, false);
+      if (offer) stop(offer);
+    }
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
     rec.sheet = {
       tiles: as.sheet.poses.length,
@@ -594,6 +646,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     if (worst > PATIMPORT.registrationMaxResidualMm)
       op('residual', `accept tile residual ${worst.toFixed(2)} mm`);
     // 4 · legend + sizes
+    at('sizes');
     let ch = await run('chains', {
       opts: {
         joinGapMm: PATIMPORT.joinGapMm,
@@ -651,6 +704,8 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         op('drawn-sizes', `answer ${drawn} for "sizes drawn on this sheet"`);
         sz = await run('sizes', { card: CARD, ...ask });
       } else op('note', '"sizes drawn on this sheet" not answered (no ground truth in the case)');
+      // the sizes step blocks on the count question whether or not the case answers it
+      stop('drawn-sizes');
     }
     const guesses = sz.map.entries.filter(
       (e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9,
@@ -730,14 +785,12 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       rec.reason = 'no size maps to the card';
       return rec;
     }
-    // the fast path stops on the sizes step only when something there needs an answer
-    if (
-      ex.presegmented &&
-      !rec.ops.some((o) => ['legend-row', 'drawn-sizes', 'size-guess', 'size-map'].includes(o.kind))
-    )
-      skipped.push('sizes', 'pieces');
+    // the fast path stops on the sizes step only when something there needs an answer; else it
+    // lands on details without showing the pieces
+    if (ex.presegmented && !stops.has('sizes')) passed.add('pieces');
     const exported = new Set(sz.map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model
+    at('pieces');
     const FILL = { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm };
     let pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
     const textSeeds = pc.seeds.filter((x) => x.origin !== 'face');
@@ -943,6 +996,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         ),
       );
     // 6 · meaning (no AI names in a headless run: printed text names only)
+    at('details');
     let fileAllowance: StageIO['semantics']['in']['fileAllowance'] = {
       meaning: c.meaning ?? ('seam' as const),
       allowanceMm: PATIMPORT.defaultAllowanceMm,
@@ -1306,6 +1360,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       return rec;
     }
     // 7 · fabrics
+    at('fabrics');
     let fab = await run('fabrics', { bom: SCOPES });
     const plan = planScopes(sem.pieces, fab, SCOPES);
     rec.fabrics = {
@@ -1329,7 +1384,8 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         byPurpose: { TECH_CARD_BOM_PURPOSE_MAIN: [...new Set(sem.pieces.map((p) => p.seed))] },
       };
     }
-    // 8 · write + gate
+    // 8 · write + gate — the run always stops on check
+    at('check');
     const writeSizes = sz.map.entries.flatMap((e) =>
       e.card
         ? [
@@ -1454,8 +1510,13 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     rec.verdict = 'fails';
     rec.error = String((e as Error)?.stack ?? e).slice(0, 600);
   } finally {
+    // N1: a reached screen that asked nothing is passed by the wizard; the fast path / one-page
+    // sheet pass theirs whatever they hold; a screen never reached keeps its "next"
+    for (const sc of AUTO_SCREENS)
+      if (passed.has(sc) || (reached.has(sc) && !stops.has(sc))) skipped.push(sc);
     rec.clicks = clicksOf(rec.ops, skipped.length);
     rec.skippedScreens = skipped;
+    rec.stops = Object.fromEntries(stops);
     rec.totalMs = Date.now() - T0;
     rec.peakRssMb = peakMb();
     s.close();
