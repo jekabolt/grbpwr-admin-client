@@ -2429,11 +2429,18 @@ export function solveDoll(input: DollInput): DollReport {
       };
     };
     const lean = (8 * Math.PI) / 180;
+    // The sewn edge itself by its own arc (u need not run monotonically along a curved edge).
+    const onEdge = new Map<number, number>(U.attach.map((v, k) => [v, A.s[k]]));
     for (const P of U.list) {
       buildPanelLater.push(P);
       for (let i = 0; i < P.count; i++) {
         const v = P.offset + i;
         const q = look(cuv[2 * v]);
+        const se = onEdge.get(v);
+        if (se !== undefined) {
+          q.s = se;
+          q.v = cuv[2 * v + 1];
+        }
         const h = U.sign * (cuv[2 * v + 1] - q.v);
         const B = base.at(map(q.s));
         const n = outward(B);
@@ -2757,6 +2764,7 @@ export function solveDoll(input: DollInput): DollReport {
           `${ordered[i].list.map((P) => P.key).join('+')}: a second collar unit not joined to ${ordered[0].list.map((P) => P.key).join('+')} by a seam or the order — stacked on the same base anyway`,
         );
     // A later unit sewn by the graph onto an earlier unit's attach edge attaches by that edge.
+    const stackOn = new Map<Unit, { V: Unit; pair: Map<number, number> }>();
     for (let i = 1; i < ordered.length; i++) {
       const U = ordered[i];
       for (const sm of G.seams) {
@@ -2770,7 +2778,29 @@ export function solveDoll(input: DollInput): DollReport {
         if (!V || !Pm || !Pt) continue;
         const on = new Set(V.attach);
         if ([...Pt.v].filter((v) => on.has(v)).length < 0.5 * Pt.v.length) continue;
+        // The sewn edge is the unit's other run (the chart drew it the other way up): swap.
+        const onOther = new Set(U.other);
+        if ([...Pm.v].filter((v) => onOther.has(v)).length >= 0.5 * Pm.v.length) {
+          U.other = U.attach;
+          U.sign = U.sign === 1 ? -1 : 1;
+        }
         U.attach = uAsc([...Pm.v]);
+        // Sewn edge to edge: it lies where its partner's stretch of edge lies (K4), end to end the
+        // way the graph pairs them (layers sewn face to face run against each other's contour).
+        const same =
+          (panelByKey.get(pk(mine[0]))?.mirrored ?? false) !==
+          (panelByKey.get(pk(theirs[0]))?.mirrored ?? false);
+        const m0 = Pm.v[0];
+        const m1 = Pm.v[Pm.v.length - 1];
+        const t0 = Pt.v[0];
+        const t1 = Pt.v[Pt.v.length - 1];
+        stackOn.set(U, {
+          V,
+          pair: new Map([
+            [m0, same ? t0 : t1],
+            [m1, same ? t1 : t0],
+          ]),
+        });
         break;
       }
     }
@@ -2781,11 +2811,39 @@ export function solveDoll(input: DollInput): DollReport {
       const base = baseCurve(cctx, restPath(cctx, top));
       const standV: number[] = [];
       for (const P of stand) for (let i = 0; i < P.count; i++) standV.push(P.offset + i);
+      const planOf = new Map<Unit, ReturnType<typeof topAnchors>>();
       ordered.forEach((U0, idx) => {
         const layer = 3 * (ordered.length - 1 - idx);
         // Turned down = the drawn piece rotated 180° (u and v both reversed): its face shows.
         const U: Unit = { ...U0, attach: [...U0.attach].reverse(), other: [...U0.other].reverse() };
         const plan = topAnchors(U, top);
+        // A unit sewn edge to edge onto an earlier one takes that unit's map (scaled to its own
+        // length), so the seam between the layers starts closed instead of fighting two maps.
+        const st = stackOn.get(U0);
+        const pp = st ? planOf.get(st.V) : undefined;
+        const pv = pp ? [...pp.mf.path.v] : [];
+        const kA = pp ? pv.indexOf(st!.pair.get(U.attach[0]) ?? -1) : -1;
+        const kB = pp ? pv.indexOf(st!.pair.get(U.attach[U.attach.length - 1]) ?? -1) : -1;
+        if (pp && kA >= 0 && kB >= 0 && kA !== kB) {
+          // The partner's stretch sA → sB of its neck edge (this unit's start → end, as the graph
+          // pairs them — possibly running backwards: the layer then lies mirrored, face to face),
+          // through the partner's map onto the stand top.
+          const sA = pp.mf.path.s[kA];
+          const sB = pp.mf.path.s[kB];
+          const mapP = makeMap(pp.anchors);
+          const Lm = plan.mf.path.len;
+          const an: [number, number][] = [[0, mapP(sA)]];
+          for (const [sp] of pp.anchors) {
+            const x = ((sp - sA) / (sB - sA)) * Lm;
+            if (x > 5 && x < Lm - 5) an.push([x, mapP(sp)]);
+          }
+          an.push([Lm, mapP(sB)]);
+          an.sort((x, y) => x[0] - y[0]);
+          plan.anchors = an;
+          plan.range = [Math.min(mapP(sA), mapP(sB)), Math.max(mapP(sA), mapP(sB))];
+          plan.words = `stacked on ${st!.V.list.map((P) => P.key).join('+')} (${Math.round(sB - sA)} of its ${Math.round(pp.mf.path.len)} mm neck edge): placed by its marks on the stand top`;
+        }
+        planOf.set(U0, plan);
         // Turned down: the outer edge sits on a larger circle than the neck edge — lean the fall
         // out so its outer edge needs no stretch.
         const outer = restPath(cctx, U.other);
@@ -2872,6 +2930,7 @@ export function solveDoll(input: DollInput): DollReport {
         `one-piece collar (no separate stand): rolled over at ${Math.round(ROLL_FRAC * 100)} % of its depth — the pattern has no roll-line mark, so where it turns down is a prior, not read from the pattern`,
       );
     }
+    // Seams inside the group (between stacked units too: placed above by the graph's own pairing).
     for (const sm of G.seams)
       if (inGroups(sm.a, new Set(['COLLAR'])) && inGroups(sm.b, new Set(['COLLAR'])))
         graphWork(sm, passes);

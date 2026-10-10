@@ -129,6 +129,18 @@ const ALL = [
     },
   },
   {
+    id: 'card4-graft6',
+    label: 'SYNTHETIC card 4 body + card 6 stand and two stacked collar units (K4 on a clean body)',
+    dxf: prodFile('card4-'),
+    category: 'shirt',
+    gender: 'MALE',
+    graft: {
+      dxf: prodFile('card6-MAIN'),
+      keep: ['nck', 'nck_1', 'clr_main', 'clr_main_1', 'CLR_SECOND', 'CLR_SECOND_1'],
+      drop: ['CLR_3', 'CLR_4'],
+    },
+  },
+  {
     id: 'card9',
     label: 'prod card 9 SS26-009 summer shirt',
     dxf: prodFile('card9-'),
@@ -338,7 +350,7 @@ if (summary.some((s) => s.id === 'ss26-neg')) {
 // ── collar gates (tmp/plans/assembly-3d-doll/04-COLLAR.md) ─────────────────────────────────
 // Shirts with a collar: the neck path, every unit on it, every fall on the stand top. A unit not
 // attached, or a gate the body makes impossible, FAILS with its number — never skipped.
-const COLLAR_FILES = ['ss26', 'card4', 'card6', 'card9', 'card16', 'card4-graft'];
+const COLLAR_FILES = ['ss26', 'card4', 'card6', 'card9', 'card16', 'card4-graft', 'card4-graft6'];
 const f1 = (x) => (x === null || x === undefined || Number.isNaN(x) ? 'n/a' : Number(x).toFixed(1));
 for (const s of summary) {
   if (!COLLAR_FILES.includes(s.id)) continue;
@@ -362,7 +374,7 @@ for (const s of summary) {
     const tag = `${s.id}: ${u.role} ${u.keys}`;
     gate(
       `${tag} attached, gap p95 ≤ 3 mm`,
-      u.attached !== 'not sewn' && u.gapP95 <= 3,
+      u.attached !== 'not sewn' && Number.isFinite(u.gapP95) && u.gapP95 <= 3,
       `${u.attached} · gap p95 ${f1(u.gapP95)} / max ${f1(u.gapMax)} mm`,
     );
     if (u.role !== 'fall')
