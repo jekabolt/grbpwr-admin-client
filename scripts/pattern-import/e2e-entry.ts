@@ -235,6 +235,15 @@ export const CASES: Case[] = [
     clicks: 'wm',
     outline: 'cut',
   },
+  // A2: the owner's beta case of 10.10 — wm M alone (one file, one size), no click fixture
+  {
+    id: 'wm-M',
+    group: 'pdf',
+    files: [W('m')],
+    card: ['M'],
+    truth: { id: 'wm_kka_15_01' },
+    outline: 'cut',
+  },
   {
     id: 'polupalto-sheetA',
     group: 'pdf',
@@ -492,6 +501,8 @@ type Rec = Record<string, unknown> & {
 export type CaseHooks = {
   cleanEdits?: PageMaskEdit[];
   onPieces?: (s: Session) => void;
+  /** A2 probe: the automatic pieces run (text + face seeds, no operator answer yet). */
+  onAutoPieces?: (s: Session, out: StageIO['pieces']['out']) => void;
 };
 
 export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
@@ -606,7 +617,8 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       const k = ch.classes
         .filter((x) => x.role !== 'ignore')
         .sort((a, b) => b.totalLengthMm - a.totalLengthMm)[0];
-      if (k && k.role !== 'size') {
+      // A0.3: an outline row the faces already made ('common' for a one-size sheet) needs no edit
+      if (k && k.role !== 'size' && k.role !== 'common') {
         if (!pending.some((x) => x.id === k.id)) legendRows++;
         ch = await run('chains', {
           opts: {
@@ -728,7 +740,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model
     const FILL = { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm };
     let pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
-    const textSeeds = pc.seeds;
+    const textSeeds = pc.seeds.filter((x) => x.origin !== 'face');
     const labelOf = (seeds: Seed[]) => (seed: number) => {
       const sd = seeds.find((x) => x.id === seed);
       return (sd?.text?.text ?? sd?.origin ?? String(seed)).slice(0, 24);
@@ -751,6 +763,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     rec.variant = variant;
     let seedsNow = pc.seeds;
     rec.auto = famStats(pc.families, exported, labelOf(seedsNow));
+    hooks.onAutoPieces?.(s, pc);
     let seedsIn: Seed[] | undefined;
     let wallEdits: PieceEdit[] = [];
     // operator pass: the F4 click fixture where there is one, else "click inside every outline"
@@ -772,7 +785,60 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     }
     let textDrops: PieceEdit[] = [];
     if (clickList) {
-      const base = Math.max(0, ...textSeeds.map((x) => x.id)) + 1;
+      // A2: the operator does not click an outline a face seed already closed — that face seed
+      // takes the click's label (the name the operator gives it); a face seed no click falls in
+      // is junk → "not a piece"
+      const faceSeeds = pc.seeds.filter((x) => x.origin === 'face');
+      const holder = (at: PtMm) =>
+        faceSeeds.find((fs) =>
+          pc.families
+            .find((f) => f.seed === fs.id)
+            ?.candidates.some(
+              (cd) => cd.outcome === 'closed' && cd.outer.length > 2 && insidePoly(at, cd.outer),
+            ),
+        );
+      const covered = new Map<number, string>();
+      const clicksLeft: typeof clickList = [];
+      for (const k of clickList) {
+        const fs = holder({ x: k.at[0], y: k.at[1] });
+        if (fs && !covered.has(fs.id)) covered.set(fs.id, k.label);
+        else clicksLeft.push(k);
+      }
+      // a face seed in whose outline the operator still clicks is superseded by the click
+      const inBox = (fs: Seed, k: { at: [number, number] }) =>
+        !!fs.face &&
+        k.at[0] >= fs.face.box.minX &&
+        k.at[0] <= fs.face.box.maxX &&
+        k.at[1] >= fs.face.box.minY &&
+        k.at[1] <= fs.face.box.maxY;
+      const superseded = new Set(
+        faceSeeds
+          .filter((fs) => !covered.has(fs.id) && clicksLeft.some((k) => inBox(fs, k)))
+          .map((fs) => fs.id),
+      );
+      const junkFaces = faceSeeds.filter((fs) => !covered.has(fs.id) && !superseded.has(fs.id));
+      rec.faceSeeds = {
+        offered: faceSeeds.length,
+        took: covered.size,
+        junk: junkFaces.length,
+        superseded: superseded.size,
+        clicksSaved: clickList.length - clicksLeft.length,
+      };
+      clickList = clicksLeft;
+      const pseudo = (label: string, at: PtMm, i: number): IRText => ({
+        id: -1 - i,
+        text: label,
+        anchor: at,
+        bbox: { minX: at.x, minY: at.y, maxX: at.x, maxY: at.y },
+        fontSizeMm: 0,
+        rotationDeg: 0,
+        layer: null,
+        src: { file: 'click', page: -1, op: -1, sub: 0 },
+      });
+      const keptFaces: Seed[] = faceSeeds.flatMap((fs, i) =>
+        covered.has(fs.id) ? [{ ...fs, text: pseudo(covered.get(fs.id)!, fs.at, 1000 + i) }] : [],
+      );
+      const base = Math.max(0, ...pc.seeds.map((x) => x.id)) + 1;
       const clickSeeds: Seed[] = clickList.map((k, i) => ({
         id: base + i,
         at: { x: k.at[0], y: k.at[1] },
@@ -789,10 +855,14 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
           src: { file: 'click', page: -1, op: -1, sub: 0 },
         },
       }));
-      seedsIn = process.env.E2E_CLICKS_ONLY ? clickSeeds : [...textSeeds, ...clickSeeds];
+      seedsIn = process.env.E2E_CLICKS_ONLY
+        ? clickSeeds
+        : [...textSeeds, ...keptFaces, ...clickSeeds];
       textDrops = (process.env.E2E_CLICKS_ONLY ? [] : textSeeds).map(
         (x): PieceEdit => ({ kind: 'not-a-piece', seed: x.id }),
       );
+      // junk face seeds are not passed on: "not a piece" on each (2 clicks) is counted below
+      const faceDrops = process.env.E2E_CLICKS_ONLY ? 0 : junkFaces.length;
       wallEdits = fxOps.flatMap((o): PieceEdit[] =>
         o.op === 'setWall' && o.near
           ? [
@@ -817,14 +887,17 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         opts: { ...FILL, variant },
       });
       seedsNow = pc.seeds;
-      op(
-        'seed',
-        `${clickSeeds.length} seed clicks${c.clicks ? ' (F4 fixture)' : ' (oracle: one per closed outline)'}`,
-        clickSeeds.length,
-      );
+      if (clickSeeds.length)
+        op(
+          'seed',
+          `${clickSeeds.length} seed clicks${c.clicks ? ' (F4 fixture)' : ' (oracle: one per closed outline)'}`,
+          clickSeeds.length,
+        );
       if (wallEdits.length) op('use-line', `${wallEdits.length} "use line"`, wallEdits.length);
       if (textDrops.length)
         op('not-a-piece', `"not a piece" on ${textDrops.length} text seeds`, textDrops.length);
+      if (faceDrops)
+        op('not-a-piece', `"not a piece" on ${faceDrops} face seeds no piece is in`, faceDrops);
       rec.withClicks = famStats(pc.families, exported, labelOf(seedsNow));
       wallEdits = [...textDrops, ...wallEdits];
     }
@@ -1891,4 +1964,15 @@ export async function cmpDxf(src: string, out: string) {
     rows.push(`${k.padEnd(24)} out ${JSON.stringify(v)}  src ${JSON.stringify(s ?? null)}`);
   }
   return rows;
+}
+
+/** Even-odd point in polygon (A2: does a fixture click fall in a face seed's closed outline). */
+function insidePoly(p: PtMm, poly: readonly PtMm[]): boolean {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
 }
