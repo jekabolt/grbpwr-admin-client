@@ -237,11 +237,24 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
           {sem.foldList && (
             <div className='mt-2 flex flex-wrap items-center gap-2'>
               <Text size='micro' component='p' className='min-w-0 flex-1 text-error'>
-                ! cutting list: {sem.foldList.entries.length} cut on fold (
-                {sem.foldList.entries.map((e) => `«${e}»`).join(', ')}), {sem.foldList.unfolded}{' '}
-                unfolded here. Tick unfold on each, or confirm.
+                ! cutting list: cut on fold, no piece found for{' '}
+                {sem.foldList.entries.map((e) => `«${e}»`).join(', ')}
+                {sem.foldList.bound.length
+                  ? ` (${sem.foldList.bound.length} other ${sem.foldList.bound.length === 1 ? 'entry is' : 'entries are'} asked on ${sem.foldList.bound.length === 1 ? 'its piece' : 'their pieces'})`
+                  : ''}
+                . Tick unfold on the piece it names, then confirm.
               </Text>
-              <Chip onClick={() => rerun({ foldListChecked: true })}>list checked</Chip>
+              <Chip
+                onClick={() =>
+                  rerun({
+                    foldListChecked: [
+                      ...new Set([...inputs.foldListChecked, ...sem.foldList!.entries]),
+                    ],
+                  })
+                }
+              >
+                list checked
+              </Chip>
             </div>
           )}
 
@@ -474,7 +487,19 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                           {REASON[b.reason] ?? b.reason}
                         </Pill>
                       ) : rowOpen(open, seed) ? (
-                        <RowQuestions api={api} seed={seed} />
+                        <RowQuestions
+                          api={api}
+                          seed={seed}
+                          // E4: "cut on fold" from the count question → the fold question of
+                          // this row: semantics asks for the edge, the drawing opens to pick it
+                          onFold={() => {
+                            override(seed, { unfoldedFold: true });
+                            setSel(seed);
+                            setDrawing(false);
+                            setGrainA(null);
+                            setPickingFold(true);
+                          }}
+                        />
                       ) : (
                         <Pill tone='ok'>ready</Pill>
                       )}

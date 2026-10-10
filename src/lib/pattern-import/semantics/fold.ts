@@ -4,7 +4,7 @@
 // the writer, K1 obligation 14). The fold edge has no allowance: unfolding happens BEFORE any
 // offset, so the derived cut/seam line simply runs across where the fold was.
 
-import type { FoldFeature, PtMm } from '../types';
+import type { BoxMm, FoldFeature, PtMm } from '../types';
 import {
   SegIndex,
   applyAffine,
@@ -54,11 +54,34 @@ export type Unfolded = {
  * Mirror a closed half outline across its fold edge into the whole outline. Null when the line is
  * not an edge of the outline (no run of ≥ 2 vertices on it ≥ 10 mm long) or the half straddles it.
  */
-export function unfold(pts: readonly PtMm[], fold: FoldLine): Unfolded | null {
+export function unfold(
+  pts: readonly PtMm[],
+  fold: FoldLine,
+  /** On-line tolerance; above FOLD_TOL_MM the vertices within it are snapped onto the line (E4). */
+  tol = FOLD_TOL_MM,
+): Unfolded | null {
   if (!(dist(fold.a, fold.b) > 0)) return null;
-  const src = ccw([...pts]);
+  let src = ccw([...pts]);
   const n = src.length;
   if (n < 3) return null;
+  // a hand-drawn or scanned fold edge wanders by a millimetre or two (redcafe 44: a 2 mm notch
+  // bump and a 0.3° drift); it becomes interior once unfolded, so it is straightened onto the line
+  // Only the edge's own run is straightened: vertices within tol inside its span; at its ends only
+  // what pokes past the line or lies within 1 mm of it, so a hem or neck vertex keeps its place.
+  if (tol > FOLD_TOL_MM) {
+    const L = dist(fold.a, fold.b);
+    const mass = src.reduce((a, p) => a + sideOf(fold, p), 0);
+    src = src.map((p) => {
+      const sd = sideOf(fold, p);
+      if (Math.abs(sd) > tol) return p;
+      const t = along(fold, p);
+      const outer = Math.sign(sd) !== Math.sign(mass) && Math.abs(sd) > FOLD_TOL_MM;
+      const nearEnd = t > -5 && t < L + 5;
+      return (t > 5 && t < L - 5) || (nearEnd && (outer || Math.abs(sd) <= 1))
+        ? onLine(fold, p)
+        : p;
+    });
+  }
   const s = src.map((p) => sideOf(fold, p));
   const hi = Math.max(...s);
   const lo = Math.min(...s);
@@ -228,9 +251,17 @@ export function foldEdges(outline: readonly PtMm[], minMm = FOLD_EDGE_MIN_MM): F
 
 /**
  * The edge among `edges` that is `ref` in another size: parallel (≤ 3°), its line ≤ 60 mm from
- * ref's midpoint, overlapping ref along its direction; the nearest such. Null when none.
+ * ref's midpoint, overlapping ref along its direction; the nearest such. When the sizes are not
+ * drawn in one frame (a file per size, redcafe 44…54) and the boxes are given, the fallback is the
+ * parallel edge at the same place RELATIVE to its outline's box (≤ 15 % of the box away) and of a
+ * similar length (0.6–1.6×). Null when none.
  */
-export function matchFoldEdge(edges: readonly FoldEdge[], ref: FoldLine): FoldEdge | null {
+export function matchFoldEdge(
+  edges: readonly FoldEdge[],
+  ref: FoldLine,
+  refBox?: BoxMm | null,
+  box?: BoxMm | null,
+): FoldEdge | null {
   const mid = { x: (ref.a.x + ref.b.x) / 2, y: (ref.a.y + ref.b.y) / 2 };
   const rd = dirDeg(ref);
   let best: { e: FoldEdge; d: number } | null = null;
@@ -243,7 +274,86 @@ export function matchFoldEdge(edges: readonly FoldEdge[], ref: FoldLine): FoldEd
     if (Math.max(t0, t1) < 0 || Math.min(t0, t1) > e.lenMm) continue;
     if (!best || d < best.d) best = { e, d };
   }
+  if (best || !refBox || !box) return best?.e ?? null;
+  const rel = (p: PtMm, b: BoxMm) => ({
+    x: (p.x - b.minX) / Math.max(1e-6, b.maxX - b.minX),
+    y: (p.y - b.minY) / Math.max(1e-6, b.maxY - b.minY),
+  });
+  const rm = rel(mid, refBox);
+  const refLen = dist(ref.a, ref.b);
+  for (const e of edges) {
+    if (lineAngle(dirDeg(e), rd) > FOLD_MATCH_ANGLE_DEG) continue;
+    const r = e.lenMm / refLen;
+    if (r < 0.6 || r > 1.6) continue;
+    const em = rel({ x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 }, box);
+    const d = Math.hypot(em.x - rm.x, em.y - rm.y);
+    if (d <= 0.15 && (!best || d < best.d)) best = { e, d };
+  }
   return best?.e ?? null;
+}
+
+/** Tolerance of the loose match: how far a drawn fold edge may wander off its line, mm. */
+export const FOLD_LOOSE_TOL_MM = 3;
+
+/**
+ * The fold edge of another size when no clean straight edge matches `ref` (E4: redcafe 44 draws
+ * its CB with a notch bump and a slight drift): the outline's supporting line on ref's side, its
+ * direction refitted to the outline vertices within 3 mm of it, kept when that run spans ≥ 60 % of
+ * ref's length. Unfold it with `unfold(…, FOLD_LOOSE_TOL_MM)` — the run is straightened onto the
+ * line. Null when the outline has no such run.
+ */
+export function looseFoldEdge(
+  outline: readonly PtMm[],
+  ref: FoldLine,
+  refBox: BoxMm,
+  box: BoxMm,
+): FoldEdge | null {
+  const pts = ccw([...outline]);
+  if (pts.length < 3) return null;
+  let u = unit(ref);
+  // ref's side of its own outline, relative to the box centre: the same side here
+  const c0 = { x: (refBox.minX + refBox.maxX) / 2, y: (refBox.minY + refBox.maxY) / 2 };
+  const rm = { x: (ref.a.x + ref.b.x) / 2, y: (ref.a.y + ref.b.y) / 2 };
+  const nrm = (v: PtMm) => ({ x: -v.y, y: v.x });
+  let n = nrm(u);
+  const sign = Math.sign((rm.x - c0.x) * n.x + (rm.y - c0.y) * n.y) || 1;
+  const runOf = (tol: number) => {
+    const h = pts.map((p) => sign * (p.x * n.x + p.y * n.y));
+    const top = Math.max(...h);
+    return { run: pts.filter((_, i) => top - h[i] <= tol), top };
+  };
+  // pass 1 along ref's direction, generous; refit the direction to that run; pass 2 tight
+  const first = runOf(FOLD_LOOSE_TOL_MM * 2).run;
+  if (first.length >= 2) {
+    const mx = first.reduce((a, p) => a + p.x, 0) / first.length;
+    const my = first.reduce((a, p) => a + p.y, 0) / first.length;
+    let sxx = 0;
+    let sxy = 0;
+    let syy = 0;
+    for (const p of first) {
+      sxx += (p.x - mx) ** 2;
+      sxy += (p.x - mx) * (p.y - my);
+      syy += (p.y - my) ** 2;
+    }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    const v = { x: Math.cos(th), y: Math.sin(th) };
+    if (lineAngle(dirDeg({ a: { x: 0, y: 0 }, b: v }), dirDeg(ref)) <= 5) {
+      u = v.x * u.x + v.y * u.y >= 0 ? v : { x: -v.x, y: -v.y };
+      n = nrm(u);
+    }
+  }
+  const { run } = runOf(FOLD_LOOSE_TOL_MM);
+  if (run.length < 2) return null;
+  const t = run.map((p) => p.x * u.x + p.y * u.y);
+  const t0 = Math.min(...t);
+  const t1 = Math.max(...t);
+  if (t1 - t0 < 0.6 * dist(ref.a, ref.b)) return null;
+  // the line where most of the run lies (its median offset): a notch bump is an outlier, snapped in
+  const offs = run.map((p) => p.x * n.x + p.y * n.y).sort((a, b) => a - b);
+  const off = offs[Math.floor(offs.length / 2)];
+  const at = (tt: number) => ({ x: u.x * tt + n.x * off, y: u.y * tt + n.y * off });
+  void box;
+  return { a: at(t0), b: at(t1), lenMm: t1 - t0 };
 }
 
 /** A fold word as printed: the text, its glyph-box centre, baseline direction and font size. */
@@ -370,21 +480,72 @@ const CUT_ON_FOLD =
 /** A numbered cutting-list line: "26 Обтачка горловины спинки со сгибом 1х", "67. Forstykke, 1 gang mod fold". */
 const LIST_LINE = /^\s*(\d{1,2}[a-z]?)\s*[.\-–:)]?\s+\S/iu;
 
+/** One "cut on fold" line of the cutting list. */
+export type FoldListEntry = {
+  /** As printed ("1 - Спинка со сгибом 1 дет."). */
+  text: string;
+  /** Its piece number ("1", "9", "2a"). */
+  no: string;
+  /** The piece's name words, lower case, without the number, the fold phrase and the count. */
+  words: string[];
+};
+
+const LIST_NOISE =
+  /on\s+(?:the\s+)?fold|mod\s+fold|im\s*(?:stoff)?bruch|stoffbruch|со\s+сгибом|по\s+сгибу|au\s+pli|na\s+zgi[eę]ciu|al\s+doblez|sulla\s+piega|op\s+de\s+vouw|\bcut\b|\bgang\b|\bdet\b|дет|\d+\s*[xх×]|[xх×]\s*\d+|\d+/giu;
+
 /**
  * The cutting list's fold pieces, from the document's text (instruction pages): numbered lines that
- * say "cut on fold", one per number, as printed. The sheet may draw these pieces with curves only
- * (r4454), so the list is evidence for the FILE, not for a region.
+ * say "cut on fold", one per number. The sheet may draw these pieces with curves only (r4454), so
+ * each entry is bound to a piece only by its printed number or name (`bindFoldListEntry`).
  */
-export function foldListEntries(texts: readonly string[]): string[] {
-  const byNo = new Map<string, string>();
+export function foldListEntries(texts: readonly string[]): FoldListEntry[] {
+  const byNo = new Map<string, FoldListEntry>();
   for (const raw of texts) {
     const t = raw.replace(/\s+/g, ' ').trim();
     const m = LIST_LINE.exec(t);
     if (!m || !CUT_ON_FOLD.test(t)) continue;
     const no = m[1].toLowerCase();
-    if (!byNo.has(no)) byNo.set(no, t);
+    if (byNo.has(no)) continue;
+    const words = t
+      .slice(m[0].length - 1)
+      .replace(LIST_NOISE, ' ')
+      .toLowerCase()
+      .split(/[^\p{L}]+/u)
+      .filter((w) => w.length >= 3);
+    byNo.set(no, { text: t, no, words });
   }
   return [...byNo.values()];
+}
+
+const normLabel = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[.,:;()]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * The piece a cutting-list entry names (S5: entries are bound, never counted): a piece whose label
+ * (its seed's text, or a title label inside it) IS the entry's number ("1", "9." for 9), else the
+ * one piece whose title holds every name word of the entry. Null when no piece, or more than one,
+ * fits — the entry then stays a file-level question.
+ */
+export function bindFoldListEntry<S>(
+  e: FoldListEntry,
+  pieces: readonly { seed: S; labels: readonly string[] }[],
+): S | null {
+  const byNo = pieces.filter((p) => p.labels.some((l) => normLabel(l) === e.no));
+  if (byNo.length === 1) return byNo[0].seed;
+  if (byNo.length > 1 || !e.words.length) return null;
+  const byName = pieces.filter((p) =>
+    p.labels.some((l) => {
+      const ws = normLabel(l).split(/[^\p{L}]+/u);
+      return e.words.every((w) =>
+        ws.some((x) => x.startsWith(w) || (w.startsWith(x) && x.length >= 4)),
+      );
+    }),
+  );
+  return byName.length === 1 ? byName[0].seed : null;
 }
 
 /** The drawn lines around a piece that are not its own outline (any size): see `foldWordRole`. */
