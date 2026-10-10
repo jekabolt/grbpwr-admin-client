@@ -977,8 +977,10 @@ export function buildPieceSpecsDetailed(
           notchesOut.push(n);
 
       // ── grain
-      let grain = (feats.find((f) => f.kind === 'grain') as GrainFeature | undefined) ?? null;
-      if (!grain && opGrain)
+      // the operator's two clicks win over a found grain (the details step shows theirs, and a
+      // found grain the gate refuses — G18, lettering — has no other way out)
+      let grain: GrainFeature | null = null;
+      if (opGrain)
         grain = {
           kind: 'grain',
           a: opGrain.a,
@@ -988,10 +990,17 @@ export function buildPieceSpecsDetailed(
           origin: 'operator',
           ranges: [],
           confidence: 1,
+          evidence: ['operator'],
         };
+      grain ??= (feats.find((f) => f.kind === 'grain') as GrainFeature | undefined) ?? null;
       const borrowed = lastGrain as GrainFeature | null;
       if (!grain && borrowed)
-        grain = { ...borrowed, origin: 'derived', confidence: borrowed.confidence * 0.9 };
+        grain = {
+          ...borrowed,
+          origin: 'derived',
+          confidence: borrowed.confidence * 0.9,
+          evidence: [...new Set([...(borrowed.evidence ?? []), 'borrowed' as const])],
+        };
       if (!grain) {
         blockedHere = {
           reason: 'no-grain',

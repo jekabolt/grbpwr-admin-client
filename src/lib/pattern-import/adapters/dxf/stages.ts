@@ -341,6 +341,7 @@ function candidateOf(
       origin: 'detected',
       ranges: [range(p.grain.path)],
       confidence: p.grain.form === 'clo-arrow' ? 1 : p.grain.form === 'axis' ? 0.9 : 0.6,
+      evidence: ['dxf-layer'],
     } satisfies GrainFeature);
   }
   for (const n of p.notches) {

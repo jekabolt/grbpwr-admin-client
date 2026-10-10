@@ -40,7 +40,9 @@ import {
   type ContourSignature,
   type ConversionManifest,
   type EmbedManifestFn,
+  type FeatureOrigin,
   type GateCheck,
+  type GrainEvidenceKind,
   type GateReport,
   type ManifestBlock,
   type ManifestPiece,
@@ -280,6 +282,10 @@ const GATE_CHECK_IDS = new Set([
   'G14-prologue',
   // F14b (pi/f14b): the derived-edge audit — accepted here before that lane lands
   'G15-derived',
+  // A8 safety net: lettering inside pieces, internal length, grain provenance
+  'G16-glyphs',
+  'G17-internal-length',
+  'G18-grain-source',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
@@ -553,6 +559,18 @@ export function validateManifest(x: unknown): ConversionManifest {
       const why = contourSigShapeProblem(b.contour);
       if (why) fail(`${p}.contour`, why);
     }
+    // G18 (A8): optional grain provenance — short words only (origins/evidence kinds may grow)
+    if (
+      b.grain !== undefined &&
+      !(
+        isObj(b.grain) &&
+        isBoundedStr(b.grain.origin, 32) &&
+        Array.isArray(b.grain.evidence) &&
+        b.grain.evidence.length <= 16 &&
+        b.grain.evidence.every((e) => isBoundedStr(e, 32))
+      )
+    )
+      fail(`${p}.grain`, 'needs origin and a short evidence list');
     const ci = b.block.trim().toLowerCase();
     if (blockNames.has(ci)) fail(`${p}.block`, `duplicate "${b.block}"`);
     blockNames.add(ci);
@@ -576,6 +594,14 @@ export function validateManifest(x: unknown): ConversionManifest {
       drills: b.drills as number,
       internal: b.internal as number,
       hasSeam: b.hasSeam,
+      ...(isObj(b.grain)
+        ? {
+            grain: {
+              origin: b.grain.origin as FeatureOrigin,
+              evidence: [...(b.grain.evidence as GrainEvidenceKind[])],
+            },
+          }
+        : {}),
       ...(b.contour !== undefined
         ? {
             contour: {

@@ -41,6 +41,10 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G13-manifest': { what: 'manifest complete', fix: 'fabrics' },
   'G14-prologue': { what: 'manifest fits in front of the drawing', fix: null },
   'G15-derived': { what: 'closed gaps land on drawn lines and stay short', fix: 'pieces' },
+  // A8 safety net: nothing in the wizard removes lines inside a piece yet — the note says why
+  'G16-glyphs': { what: 'no lettering or watermark inside the pieces', fix: null },
+  'G17-internal-length': { what: 'lines inside in proportion to the outline', fix: null },
+  'G18-grain-source': { what: 'grainline not read from lettering', fix: 'meaning' },
 };
 
 /**

@@ -20,6 +20,7 @@ import type {
   DraftScopeTarget,
   FoldFeature,
   GateCheckId,
+  GateExpectation,
   GateReport,
   GrainFeature,
   InternalFeature,
@@ -61,7 +62,13 @@ import {
   roundTrip,
   writeAndGate,
 } from 'lib/pattern-import/gate';
-import { type GateCtx, g12, sameManifest } from 'lib/pattern-import/gate/checks';
+import {
+  type GateCtx,
+  g12,
+  glyphProblem,
+  glyphStats,
+  sameManifest,
+} from 'lib/pattern-import/gate/checks';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import * as fx from 'components/managers/tech-card/components/pattern-import/fixture';
 
@@ -2496,6 +2503,269 @@ export async function main(opts: { plans: string }): Promise<number> {
       `400 × 240 mm piece: share ${c.value} ≥ ${PATIMPORT.coverageBlock}, but the 20 mm run off the line blocks`,
       c.note,
     );
+  }
+
+  // A8 ─────────────────────────────────────────────────────────────────────────────────────
+  head('A8 · G16 lettering inside pieces · G17 internal length · G18 grain provenance');
+  {
+    const one = (r: GateReport, id: GateCheckId) => checkOf(r, id)[0];
+    const c0 = main.report;
+    ck(
+      one(c0, 'G16-glyphs').ok &&
+        one(c0, 'G17-internal-length').ok &&
+        one(c0, 'G18-grain-source').ok,
+      'control: the T2 main scope passes G16, G17, G18',
+      `${one(c0, 'G16-glyphs').value} · ${one(c0, 'G17-internal-length').value}`,
+    );
+    const mb = main.detail.manifest.blocks;
+    ck(
+      mb.every((b) => !b.hasGrain || (b.grain && b.grain.origin === 'detected')),
+      'manifest: every block with a grain records its origin (+ evidence)',
+      JSON.stringify(mb.find((b) => b.block === 'BP_M')?.grain),
+    );
+    const bpM = main.expect.pieces
+      .find((p) => p.identity === 'BP')!
+      .sizes.find((z) => z.sizeToken === 'M')!;
+    const ga = bpM.grain!.a;
+    const gb = bpM.grain!.b;
+    // a 3-vertex 8 mm stroke on layer 8 (3 vertices: the card never takes it for a grain candidate)
+    const stroke = (x: number, y: number, dx = 8, dy = 0): PtMm[] => [
+      { x, y },
+      { x: x + dx / 2, y: y + dy / 2 + 0.5 },
+      { x: x + dx, y: y + dy },
+    ];
+    const polyTags = (pts: PtMm[]): Pair[] => [
+      ['  0', 'LWPOLYLINE'],
+      ['  8', '8'],
+      ['100', 'AcDbPolyline'],
+      [' 90', String(pts.length)],
+      [' 70', '0'],
+      ...pts.flatMap((q): Pair[] => [
+        [' 10', q.x.toFixed(3)],
+        [' 20', q.y.toFixed(3)],
+      ]),
+    ];
+    const C = PATIMPORT.glyphCellMm;
+    const cellOf = (p: PtMm) => ({ x: Math.floor(p.x / C) * C, y: Math.floor(p.y / C) * C });
+    // the manifest and the spec count the injected lines too, so only the A8 checks see them
+    type Injected = { text: string; m: GateExpectation['manifest']; lines: PtMm[][] };
+    const inject = (lines: PtMm[][]): Injected => {
+      const m = {
+        ...main.expect.manifest,
+        blocks: main.expect.manifest.blocks.map((b) =>
+          b.block === 'BP_M' ? { ...b, internal: b.internal + lines.length } : b,
+        ),
+      };
+      const tags = lines.flatMap(polyTags);
+      return {
+        text: embedManifestLocal(injectIntoBlock(main.detail.bareText, 'BP_M', tags), m),
+        m,
+        lines,
+      };
+    };
+    const gateOn = (
+      t: Injected,
+      origin?: GrainFeature['origin'],
+      evidence?: GrainFeature['evidence'],
+    ) => {
+      const e = withGrain(origin, evidence);
+      return runGate(t.text, {
+        ...e,
+        manifest: t.m,
+        pieces: e.pieces.map((p) =>
+          p.identity !== 'BP'
+            ? p
+            : {
+                ...p,
+                sizes: p.sizes.map((z) =>
+                  z.sizeToken !== 'M'
+                    ? z
+                    : {
+                        ...z,
+                        internal: [
+                          ...z.internal,
+                          ...t.lines.map((pts) => ({ ...z.internal[0], pts, closed: false })),
+                        ],
+                      },
+                ),
+              },
+        ),
+      });
+    };
+    const withGrain = (origin?: GrainFeature['origin'], evidence?: GrainFeature['evidence']) => ({
+      ...main.expect,
+      pieces: main.expect.pieces.map((p) =>
+        p.identity !== 'BP'
+          ? p
+          : {
+              ...p,
+              sizes: p.sizes.map((z) =>
+                z.grain && origin ? { ...z, grain: { ...z.grain, origin, evidence } } : z,
+              ),
+            },
+      ),
+    });
+    // 12 strokes in the cell of the grain's end (one of them touching it): a lettering cluster
+    const c = cellOf(ga);
+    const cluster: PtMm[][] = [stroke(ga.x + 0.5, ga.y + 0.5, 6, 6)];
+    for (let i = 0; i < PATIMPORT.glyphMaxShortPerCell + 1; i++)
+      cluster.push(stroke(c.x + 2 + (i % 4) * 12, c.y + 4 + Math.floor(i / 4) * 15));
+    const lettered = inject(cluster);
+    const rA = await gateOn(lettered, 'detected', ['arrowheads']);
+    await neg('12 short strokes in one 60 mm cell (fewer than 40 in the block)', 'G16-glyphs', rA);
+    ck(
+      one(rA, 'G16-glyphs').blocks.includes('BP_M') &&
+        one(rA, 'G16-glyphs').note.startsWith('lines inside the piece look like lettering'),
+      'G16 names the block and says why in plain words',
+      one(rA, 'G16-glyphs').note,
+    );
+    await neg('found grain (arrowheads) ending in that cluster', 'G18-grain-source', rA);
+    const rA0 = await gateOn(lettered, 'detected');
+    await neg(
+      'found grain with no recorded evidence ending in that cluster',
+      'G18-grain-source',
+      rA0,
+    );
+    const rOp = await gateOn(lettered, 'operator', ['operator']);
+    ck(
+      one(rOp, 'G18-grain-source').ok && !one(rOp, 'G16-glyphs').ok,
+      'operator-drawn grain in the same cluster: G18 ok (G16 still blocks the junk)',
+      summary(rOp),
+    );
+    // 45 strokes spread 5 per cell: the per-block count blocks, no cell is dense
+    const spread: PtMm[][] = [];
+    for (let i = 0; i < PATIMPORT.glyphMaxShortPerBlock + 5; i++) {
+      const k = Math.floor(i / 5);
+      spread.push(stroke(c.x - 400 + k * C + 5 + (i % 5) * 10, c.y - 300));
+    }
+    const rB = await gateOn(inject(spread), 'detected', ['arrowheads']);
+    await neg('45 short strokes in one block, ≤ 5 per cell', 'G16-glyphs', rB);
+    ck(
+      one(rB, 'G18-grain-source').ok,
+      'grain away from them: G18 ok',
+      one(rB, 'G18-grain-source').note,
+    );
+    // one short stroke across the middle of the grain line: G18 warns, the gate passes
+    const mid = { x: (ga.x + gb.x) / 2, y: (ga.y + gb.y) / 2 };
+    const rC = await gateOn(inject([stroke(mid.x - 4, mid.y)]), 'detected', ['word']);
+    const g18c = one(rC, 'G18-grain-source');
+    ck(
+      rC.passed && !g18c.ok && g18c.severity === 'warn' && one(rC, 'G16-glyphs').ok,
+      'one short stroke touching a found grain: G18 warns, gate passes',
+      g18c.note,
+    );
+    // a 12 m zig-zag inside: G17 warns, the gate passes
+    const zz: PtMm[] = [];
+    for (let i = 0; i < 120; i++) zz.push({ x: ga.x - 50 + (i % 2) * 100, y: ga.y + i });
+    const rD = await gateOn(inject([zz]));
+    const g17 = one(rD, 'G17-internal-length');
+    ck(
+      rD.passed && !g17.ok && g17.severity === 'warn' && g17.blocks.includes('BP_M'),
+      `12 m of line inside BP_M: G17 warns (> ${PATIMPORT.internalLengthWarnRatio} × outline), gate passes`,
+      g17.note,
+    );
+
+    // real files ─ the owner's beta DXF (wm M, 10.10) must block on G16; the corpus must not
+    const blockedOf = (text: string) => {
+      const raw = readRawDxf(text);
+      const out: string[] = [];
+      for (const [name, ents] of raw.blocks) {
+        if (name.startsWith('*')) continue;
+        const why = glyphProblem(glyphStats(ents));
+        if (why) out.push(`${name}: ${why}`);
+      }
+      return { n: [...raw.blocks.keys()].filter((b) => !b.startsWith('*')).length, out };
+    };
+    const ownerPath =
+      process.env.PATIMPORT_OWNER_DXF ??
+      '/Users/jekabolt/Downloads/fw26-fw26-001-main-3ebedec0.dxf';
+    let positives = 0;
+    if (fs.existsSync(ownerPath)) {
+      const b = blockedOf(fs.readFileSync(ownerPath, 'latin1'));
+      ck(
+        b.n > 0 && b.out.length === b.n,
+        `owner's wm M DXF (passed on beta): G16 blocks every block (${b.out.length}/${b.n})`,
+        b.out.slice(0, 2).join(' | '),
+      );
+      positives++;
+    } else console.log(`  skip owner's DXF (${ownerPath} not here)`);
+    const e2eOut = process.env.E2E_OUT ?? path.join(opts.plans, 'reports/E2E-out');
+    const dxfsIn = (dir: string) =>
+      fs.existsSync(path.join(e2eOut, dir))
+        ? fs
+            .readdirSync(path.join(e2eOut, dir))
+            .filter((f) => f.endsWith('.dxf'))
+            .map((f) => path.join(e2eOut, dir, f))
+        : [];
+    const embedded = (file: string) => readManifestLocal(fs.readFileSync(file, 'latin1'))?.gate;
+    // wm M alone (an earlier e2e run) and the wm 7-file case: the lettering is in the written file
+    for (const d of ['wm-M', 'wm']) {
+      const files = dxfsIn(d);
+      if (!files.length) {
+        console.log(`  skip e2e ${d} (no ${e2eOut}/${d} — run yarn patimport:e2e first)`);
+        continue;
+      }
+      for (const f of files) {
+        const g = embedded(f);
+        const c16 = g?.checks.find((x) => x.id === 'G16-glyphs');
+        const b = blockedOf(fs.readFileSync(f, 'latin1'));
+        // a file written before G16 carries no G16 in its gate: then only the recount speaks
+        ck(
+          b.out.length > 0 && (!c16 || (!g!.passed && !c16.ok && c16.severity === 'block')),
+          `e2e ${d}/${path.basename(f)}: G16 blocks (${b.out.length}/${b.n} blocks lettered${c16 ? ', written gate blocked' : ', file older than G16'})`,
+          c16
+            ? `${c16.value}; G18 ${g?.checks.find((x) => x.id === 'G18-grain-source')?.value}`
+            : b.out[0],
+        );
+      }
+      positives++;
+    }
+    ck(positives > 0, 'at least one real wm M file was checked', `${positives}`);
+    const negDirs = fs.existsSync(e2eOut)
+      ? fs
+          .readdirSync(e2eOut)
+          .filter((d) => /^(dxf_|robe$|reef$|leonie)/.test(d))
+          .sort()
+      : [];
+    for (const d of negDirs)
+      for (const f of dxfsIn(d)) {
+        const g = embedded(f);
+        const red = (g?.checks ?? []).filter(
+          (x) =>
+            (x.id === 'G16-glyphs' || x.id === 'G18-grain-source') &&
+            !x.ok &&
+            x.severity === 'block',
+        );
+        const b = blockedOf(fs.readFileSync(f, 'latin1'));
+        const has16 = !!g?.checks.some((x) => x.id === 'G16-glyphs');
+        ck(
+          !red.length && !b.out.length,
+          `e2e ${d}/${path.basename(f)}: G16/G18 do not block (${b.n} blocks${has16 ? '' : ', file older than G16: recount only'})`,
+          [...red.map((x) => x.note), ...b.out.slice(0, 2)].join(' | '),
+        );
+      }
+    ck(
+      negDirs.length >= 5,
+      'e2e negatives present (CLO DXF, robe, reef, leonie)',
+      negDirs.join(' '),
+    );
+    const corpus = process.env.PATIMPORT_CORPUS ?? path.join(opts.plans, 'corpus');
+    const clo = path.join(corpus, 'dxf-clo');
+    if (fs.existsSync(clo))
+      for (const f of fs.readdirSync(clo).filter((x) => x.endsWith('.dxf'))) {
+        let b: ReturnType<typeof blockedOf> | null = null;
+        try {
+          b = blockedOf(fs.readFileSync(path.join(clo, f), 'latin1'));
+        } catch (e) {
+          console.log(`  skip corpus ${f}: ${e instanceof Error ? e.message : e}`);
+        }
+        if (b)
+          ck(
+            !b.out.length,
+            `corpus CLO ${f}: no block reads as lettering (${b.n} blocks)`,
+            b.out.slice(0, 2).join(' | '),
+          );
+      }
   }
 
   // report ─────────────────────────────────────────────────────────────────────────────────

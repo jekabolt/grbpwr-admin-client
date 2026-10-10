@@ -187,6 +187,12 @@ export function classifyFeatures(cand: PieceCandidate, set: ChainSet, sheet?: Sh
           origin: 'detected',
           ranges: ch.ranges,
           confidence: Math.min(1, 0.4 + score / 7),
+          // G18: which evidence the grain stands on (the gate blocks arrowheads drawn by lettering)
+          evidence: [
+            ...(role === 'grain' ? (['class'] as const) : []),
+            ...(heads ? (['arrowheads'] as const) : []),
+            ...(labelled ? (['word'] as const) : []),
+          ],
           score: score * 10000 + L,
         });
         continue;
