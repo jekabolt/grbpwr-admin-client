@@ -757,7 +757,58 @@ export function overprintLines(
     if (c.closed || (c.pts.length > 3 && dist(c.pts[0], c.pts[c.pts.length - 1]) <= 1)) return true;
     return !openComp.has(find(i));
   };
-  const strokes = [...same].filter((i) => extent(i) <= 120 && !loopy(i));
+  // …unless the loops are LETTERS: outline glyphs (wm's «WWW.PAFAVERO.PL») are closed too. A loop
+  // component counts as a glyph only in a text line: ≥ 4 components of one height (± 15 %) on one
+  // baseline, ≤ 1.2 heights apart, NOT all of one width (a row of identical pockets is no word)
+  const comps = new Map<
+    number,
+    { ids: number[]; minX: number; minY: number; maxX: number; maxY: number; f: string }
+  >();
+  for (const i of same) {
+    if (extent(i) > 120 || !loopy(i)) continue;
+    const r = find(i);
+    const b = bboxOf(chains[i].pts);
+    const c = comps.get(r);
+    if (!c) comps.set(r, { ids: [i], ...b, f: fileOf(i) });
+    else {
+      c.ids.push(i);
+      c.minX = Math.min(c.minX, b.minX);
+      c.minY = Math.min(c.minY, b.minY);
+      c.maxX = Math.max(c.maxX, b.maxX);
+      c.maxY = Math.max(c.maxY, b.maxY);
+    }
+  }
+  const lettered = new Set<number>();
+  const cl = [...comps.values()];
+  for (const along of ['x', 'y'] as const) {
+    const g = cl.map((c) => {
+      const u0 = along === 'x' ? c.minX : c.minY;
+      const u1 = along === 'x' ? c.maxX : c.maxY;
+      const v0 = along === 'x' ? c.minY : c.minX;
+      const v1 = along === 'x' ? c.maxY : c.maxX;
+      return { c, u0, u1, h: v1 - v0, w: u1 - u0, vc: (v0 + v1) / 2 };
+    });
+    g.sort((a, b) => a.u0 - b.u0);
+    for (const start of g) {
+      if (start.h < 3) continue;
+      const run = [start];
+      let last = start;
+      for (const x of g) {
+        if (x.u0 <= last.u0 || x.c.f !== start.c.f) continue;
+        if (Math.abs(x.h - start.h) > 0.15 * start.h || Math.abs(x.vc - start.vc) > 0.2 * start.h)
+          continue;
+        const gap = x.u0 - last.u1;
+        if (gap > 1.2 * start.h || gap < -0.2 * start.h) continue;
+        run.push(x);
+        last = x;
+      }
+      if (run.length < 4) continue;
+      const ws = run.map((x) => x.w);
+      if (Math.max(...ws) < 1.15 * Math.min(...ws)) continue;
+      for (const x of run) for (const i of x.c.ids) lettered.add(i);
+    }
+  }
+  const strokes = [...same].filter((i) => extent(i) <= 120 && (!loopy(i) || lettered.has(i)));
   const sGrid = new PtGrid(60);
   for (const i of strokes) sGrid.add(i, mid(i));
   const glyphy = (i: number) => {
