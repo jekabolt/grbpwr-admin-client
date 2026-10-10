@@ -14,6 +14,7 @@ import type {
   GridOverride,
   ImportSession,
   NameDecision,
+  PageMaskEdit,
   PieceEdit,
   PtMm,
   ScaleDecision,
@@ -92,6 +93,8 @@ export type PieceOverride = NonNullable<StageIO['semantics']['in']['pieceOverrid
 /** What the operator decided. Survives `back`; cleared only by `reset`. */
 export type Inputs = {
   fileList: File[];
+  /** A8: the operator's edits to the clean stage's mask (undo a kind, accept, a page's role). */
+  cleanEdits: PageMaskEdit[];
   scaleIndex: number;
   /** Measured length of the test square when the operator overrides the detection, mm. */
   manualMeasuredMm: number | null;
@@ -141,6 +144,7 @@ export type Inputs = {
 
 const EMPTY_INPUTS: Inputs = {
   fileList: [],
+  cleanEdits: [],
   scaleIndex: 0,
   manualMeasuredMm: null,
   scaleConfirmed: false,
@@ -172,6 +176,7 @@ const EMPTY_SESSION: ImportSession = {
   step: 'files',
   files: [],
   pages: [],
+  clean: null,
   scale: { candidates: [], decision: null },
   sheet: null,
   chains: null,
@@ -216,6 +221,10 @@ export type ExtractInfo = Pick<
   'warnings' | 'presegmented' | 'calibrations'
 >;
 const NO_EXTRACT: ExtractInfo = { warnings: [] };
+
+/** Index of the most confident scale candidate. */
+const bestScale = (cs: StageIO['extract']['out']['scale']) =>
+  cs.reduce((b, c, i) => (c.confidence > cs[b].confidence ? i : b), 0);
 
 /** A best scale candidate the operator does not need to look at (DXF with declared units). */
 const certainScale = (c: StageIO['extract']['out']['scale'][number] | undefined) =>
@@ -432,11 +441,11 @@ export function useImportSession(deps: {
           const out = await run('extract', {
             opts: { sagittaMm: PATIMPORT.sagittaMm, keepFills: true },
           });
+          // A8: the pages are cleaned before anything is parsed — furniture masked, the pages
+          // that are not pattern set aside, a test square drawn as lines offered as the scale
+          const cl = await run('clean', { edits: [] });
           // The best candidate is preselected; the operator confirms on the scale step.
-          const best = out.scale.reduce(
-            (b, c, i) => (c.confidence > out.scale[b].confidence ? i : b),
-            0,
-          );
+          const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best });
           setExtracted({
             warnings: out.warnings,
@@ -450,9 +459,44 @@ export function useImportSession(deps: {
           };
           patch({
             files: out.files,
-            pages: out.pages,
-            scale: { candidates: out.scale, decision: null },
+            pages: cl.classes,
+            clean: cl,
+            scale: { candidates: cl.scale, decision: null },
           });
+          return;
+        }
+        case 'clean': {
+          // A8: an undo / accept / page role re-runs clean and everything after it. From the sheet
+          // step (the sheet pass's watermark) the run comes back to the sheet with the same scale
+          // and grid; from the files step the scale is asked again.
+          const from = sRef.current.step;
+          const decision = sRef.current.scale.decision;
+          patchInputs({ cleanEdits: ev.edits });
+          iRef.current = { ...iRef.current, cleanEdits: ev.edits };
+          const cl = await run('clean', { edits: ev.edits });
+          const best = bestScale(cl.scale);
+          patchInputs({ scaleIndex: best, scaleConfirmed: false });
+          iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
+          patch(
+            dropAfter(
+              {
+                ...sRef.current,
+                clean: cl,
+                pages: cl.classes,
+                scale: { candidates: cl.scale, decision: null },
+              },
+              'files',
+            ),
+          );
+          if (from !== 'files' && decision && !exRef.current.presegmented) {
+            await run('scale', { decision });
+            patch({ scale: { ...sRef.current.scale, decision } });
+            const out = await run('assemble', {
+              sheet: iRef.current.sheetIndex,
+              override: iRef.current.gridOverride,
+            });
+            patch({ sheet: out, step: 'sheet' });
+          }
           return;
         }
         case 'scale': {
