@@ -52,9 +52,13 @@ import {
   openQuestions,
   questionKey,
   settleAnswers,
+  unansweredAtWrite,
   type Answers,
 } from 'components/managers/tech-card/components/pattern-import/answers';
 import { mountHook, rerender } from './react-hook-shim';
+
+/** A cutting-list entry as printed (the fixture prints none; the key is what is kept). */
+const LIST_ENTRY = '1 - Спинка со сгибом 1 дет.';
 
 let failures = 0;
 const check = (ok: boolean, what: string, extra?: unknown) => {
@@ -263,7 +267,7 @@ async function answerDetails(w: W) {
   await w.step((a) =>
     a.dispatch({
       type: 'semantics',
-      input: a.semanticsInput({ ...i, foldListChecked: true }),
+      input: a.semanticsInput({ ...i, foldListChecked: [LIST_ENTRY] }),
     }),
   );
 }
@@ -315,7 +319,7 @@ async function scenario() {
     answerCtx: a.inputs.answerCtx,
   };
   check(
-    answersA.foldListChecked &&
+    answersA.foldListChecked.includes(LIST_ENTRY) &&
       answersA.fileAllowance?.origin === 'operator' &&
       Object.keys(answersA.confirmedQuantities).length > 0 &&
       answersA.confirmedNames.length > 0,
@@ -342,7 +346,7 @@ async function scenario() {
   check(
     JSON.stringify(k.inputs.confirmedQuantities) === JSON.stringify(answersA.confirmedQuantities) &&
       k.inputs.confirmedNames.length === answersA.confirmedNames.length &&
-      k.inputs.foldListChecked &&
+      k.inputs.foldListChecked.includes(LIST_ENTRY) &&
       k.inputs.fileAllowance?.origin === 'operator',
     'control: the kept answers are the same answers',
   );
@@ -367,7 +371,7 @@ async function scenario() {
     b.inputs.confirmedNames.length === 0 &&
       Object.keys(b.inputs.confirmedQuantities).length === 0 &&
       b.inputs.fileAllowance === null &&
-      !b.inputs.foldListChecked,
+      b.inputs.foldListChecked.length === 0,
     'sheet B: sheet A answers were dropped when the pieces settled',
     {
       names: b.inputs.confirmedNames,
@@ -391,7 +395,7 @@ async function scenario() {
     confirmedNames: answersA.confirmedNames,
     confirmedQuantities: answersA.confirmedQuantities,
     fileAllowance: answersA.fileAllowance,
-    foldListChecked: true,
+    foldListChecked: [LIST_ENTRY],
     answerCtx: answersA.answerCtx,
   });
   await w.step(() => undefined);
@@ -416,7 +420,7 @@ async function scenario() {
     confirmedNames: [],
     confirmedQuantities: answersA.confirmedQuantities,
     fileAllowance: null,
-    foldListChecked: false,
+    foldListChecked: [],
     answerCtx: ctxB,
   });
   await w.step(() => undefined);
@@ -482,7 +486,7 @@ function units() {
   const ctx = answerCtxOf(at, [fam(1, 0), fam(2, 300)]);
   const answers: Answers = {
     fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] },
-    foldListChecked: true,
+    foldListChecked: ['1 - Back on fold'],
     confirmedNames: [1, 2],
     editedNames: [2],
     confirmedQuantities: {
@@ -498,7 +502,7 @@ function units() {
   const same = liveAnswers(answers, answerCtxOf(at, [fam(1, 0), fam(2, 300)]));
   check(
     same.confirmedNames.length === 2 &&
-      same.foldListChecked &&
+      same.foldListChecked.length === 1 &&
       !!same.fileAllowance &&
       Object.keys(same.overrides).length === 2,
     'recomputed identical pieces keep every answer',
@@ -510,7 +514,7 @@ function units() {
       Object.keys(moved.confirmedQuantities).join() === '1' &&
       Object.keys(moved.overrides).join() === '1' &&
       Object.keys(moved.operatorGrain).length === 0 &&
-      !moved.foldListChecked &&
+      moved.foldListChecked.length === 0 &&
       !!moved.fileAllowance,
     'a piece whose outline moved loses only its own answers (+ the list check); the outline answer stays',
   );
@@ -546,6 +550,23 @@ function units() {
       { seed: 2, kind: 'quantity' as const, shown: '×3', detail: 'x' },
     ],
   };
+  const listSem = {
+    ...sem,
+    unproven: [],
+    foldList: { entries: ['1 - Back on fold', '2 - Collar on fold'], unfolded: 0, bound: [] },
+  } as unknown as Parameters<typeof unansweredAtWrite>[0];
+  const w1 = unansweredAtWrite(listSem, [], answers, ctx);
+  check(
+    w1.join() === '1 cutting-list entry to check',
+    'write: a new unbound entry is open, the checked one is not',
+    w1,
+  );
+  const w2 = unansweredAtWrite(listSem, [], answers, answerCtxOf(at, [fam(1, 0), fam(2, 305)]));
+  check(
+    w2.join() === '2 cutting-list entries to check',
+    'write: a checked entry stops counting once a piece moved',
+    w2,
+  );
   const q = openQuestions(sem, [], answers, ctx);
   check(
     q.quantity.map((u) => u.seed).join() === '2',

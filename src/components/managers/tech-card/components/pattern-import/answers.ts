@@ -32,7 +32,11 @@ type Edges = Partial<Record<SeedId, { a: { x: number; y: number }; b: { x: numbe
 /** The operator inputs that answer a question (a subset of the wizard's `Inputs`). */
 export type Answers = {
   fileAllowance: StageIO['semantics']['in']['fileAllowance'] | null;
-  foldListChecked: boolean;
+  /**
+   * The unbound cutting-list entries (as printed) the operator checked (S5): a new entry asks again.
+   * Live only while no piece moved; an entry no longer listed simply matches nothing.
+   */
+  foldListChecked: string[];
   confirmedNames: SeedId[];
   editedNames: SeedId[];
   /** Per seed: the `questionKey` of the count confirmed as shown. */
@@ -115,7 +119,7 @@ export function liveAnswers<T extends Answers>(i: T, now: AnswerCtx): T {
   return {
     ...i,
     fileAllowance: sameScope ? i.fileAllowance : null,
-    foldListChecked: sameSheet && i.foldListChecked,
+    foldListChecked: sameSheet ? i.foldListChecked : [],
     confirmedNames: i.confirmedNames.filter(live),
     editedNames: i.editedNames.filter(live),
     confirmedQuantities: keep(i.confirmedQuantities),
@@ -200,6 +204,11 @@ export function unansweredAtWrite(
   now: AnswerCtx,
 ): string[] {
   const o = openQuestions(sem, names, answers, now);
+  // the cutting list: every unbound entry listed NOW that is not among the live checked ones
+  const checked = new Set(liveAnswers(answers, now).foldListChecked);
+  const listOpen = sem.foldList
+    ? Math.max(1, sem.foldList.entries.filter((e) => !checked.has(e)).length)
+    : 0;
   const folds = new Set([
     ...(sem.folds ?? []).map((f) => f.seed),
     ...(sem.blocked ?? []).filter((b) => b.reason === 'fold-question').map((b) => b.seed),
@@ -208,7 +217,7 @@ export function unansweredAtWrite(
   return [
     folds ? `${folds} fold ${folds === 1 ? 'question' : 'questions'}` : '',
     otherBlocked ? `${otherBlocked} blocked ${otherBlocked === 1 ? 'piece' : 'pieces'}` : '',
-    sem.foldList ? 'the cutting list check' : '',
+    listOpen ? `${listOpen} cutting-list ${listOpen === 1 ? 'entry' : 'entries'} to check` : '',
     o.allowance.length ? 'what the drawn outline is' : '',
     o.total ? countWords(o) : '',
   ].filter(Boolean);
