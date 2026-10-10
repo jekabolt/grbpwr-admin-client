@@ -192,6 +192,37 @@ export type HistoryEntry<TRow = unknown> =
        */
       posForward: PosEdit[];
       label: string;
+    }
+  | {
+      /**
+       * ЗАПИСЬ КАРКАСА СБОРКИ (03-P2 §6, полоса U). Панель каркаса пишет пачку шагов одним нажатием
+       * — хвостом (`append`) или вместо всех (`replace`), — и эта пачка отменяется ОДНИМ ⌘Z (или
+       * кнопкой «undo» в панели). Адресуется не `fieldId`, а позицией и меткой: строки пачки —
+       * `[from, from + count)`, и запись жива, пока длина та же и ВСЕ они ещё `draft` (0410).
+       * Первая правка любой из них снимает метку — и отмену вместе с ней («до первой ручной
+       * правки»): вернуть пачку поверх чужой работы значило бы стереть работу.
+       */
+      kind: 'skeleton';
+      /** Nonce запроса записи — по нему панель узнаёт СВОЮ запись на вершине стопки. */
+      nonce: number;
+      mode: 'append' | 'replace';
+      from: number;
+      count: number;
+      /**
+       * Что вернуть отменой. `rows` — ГЛУБОКИЙ снимок шагов до записи (с `media[].mediaId`), нужен
+       * только `replace`: хвостовая пачка отменяется удалением своих строк. Флаги — как стояли до
+       * записи: `replace` поверх фото взводит `mediaCleared`, и без отката флага сервер снял бы фото
+       * со шагов, которые отмена вернула. `issues` — номера шагов в дефектах до ремапа.
+       */
+      before: {
+        rows: TRow[];
+        mediaCleared: boolean;
+        assemblyCleared: boolean;
+        issues: number[];
+      };
+      /** Что вернуть повтором (⇧⌘Z): строки, как их построил каркас, и флаги после записи. */
+      after: { rows: TRow[]; mediaCleared: boolean; assemblyCleared: boolean };
+      label: string;
     };
 
 /** Две стопки: чем дальше в конце, тем свежее. Вершина обеих — последний элемент. */
@@ -257,6 +288,38 @@ export function redoStep<TRow>(h: History<TRow>): History<TRow> {
   const e = peekRedo(h);
   if (!e) return h;
   return { undo: trim([...h.undo, e]), redo: h.redo.slice(0, -1) };
+}
+
+/** Снять вершину ОТМЕНЫ, никуда её не кладя: запись, чей щит отказал по своей причине (каркас). */
+export function dropUndoTop<TRow>(h: History<TRow>): History<TRow> {
+  return h.undo.length ? { undo: h.undo.slice(0, -1), redo: h.redo } : h;
+}
+
+/** Подпись записи каркаса: чип отмены называет пачку, а не «undo». */
+export function skeletonLabel(mode: 'append' | 'replace', count: number): string {
+  const n = `${count} ${count === 1 ? 'step' : 'steps'}`;
+  return mode === 'replace' ? `apply skeleton · ${n}` : `append skeleton · ${n}`;
+}
+
+/**
+ * Щит отмены записи каркаса. Длина — ровно та, что запись оставила, и каждая строка пачки ещё
+ * `draft`: правка любой из них снимает метку (детектор первого касания), «reviewed» — тоже.
+ */
+export function skeletonCanUndo<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'skeleton' }>,
+  rows: ReadonlyArray<{ draft?: boolean } | undefined>,
+): boolean {
+  if (rows.length !== rec.from + rec.count) return false;
+  for (let i = rec.from; i < rec.from + rec.count; i++) if (rows[i]?.draft !== true) return false;
+  return true;
+}
+
+/** Щит повтора: длина — та, что отмена оставила (у `replace` — длина снимка «до»). */
+export function skeletonCanRedo<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'skeleton' }>,
+  length: number,
+): boolean {
+  return length === (rec.mode === 'replace' ? rec.before.rows.length : rec.from);
 }
 
 /** Снять вершину возврата, никуда её не кладя (повтор создания вернёт её сам, вторым тактом). */
@@ -479,6 +542,8 @@ export function canUndo<TRow>(
   getInputKeys?: (index: number) => string[],
 ): boolean {
   if (rec.kind === 'move') return true;
+  // Каркас судится строками, а не `fieldId` — `skeletonCanUndo`; без строк ответ «нет».
+  if (rec.kind === 'skeleton') return false;
   if (rec.index < 0) return false;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
   // Тождество строки — весь щит и для вставки: инвертируется она тем же удалением по адресу, и
@@ -515,6 +580,7 @@ export function canRedo<TRow>(
   getInputKeys?: (index: number) => string[],
 ): boolean {
   if (rec.kind === 'move') return true;
+  if (rec.kind === 'skeleton') return skeletonCanRedo(rec, fields.length);
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
   // У ВСТАВКИ ЩИТ ТОТ ЖЕ ПО СМЫСЛУ, НО ДРУГОЙ ПО ЧИСЛУ. Отменённой строки в форме нет, тождества

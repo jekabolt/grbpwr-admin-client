@@ -50,6 +50,7 @@ const {
   dropForm,
   dropMove,
   dropRedoTop,
+  dropUndoTop,
   emptyHistory,
   insertLabel,
   isFormEntry,
@@ -62,6 +63,9 @@ const {
   redoTitle,
   renameLabel,
   resolvePending,
+  skeletonCanRedo,
+  skeletonCanUndo,
+  skeletonLabel,
   undoStep,
   undoTitle,
   renamePosEdits,
@@ -1620,6 +1624,51 @@ console.log('\nсброс раскладки против переименова
   no('а с половиной — новый', stripped === withPos);
   is('половина снята с обеих сторон', [stripped.undo[0].posBack, stripped.undo[0].posForward], [[], []]);
   is('а формовая часть цела', [stripped.undo[0].from, stripped.undo[0].to], ['A', 'B']);
+}
+
+// --- запись каркаса (03-P2 §6, полоса U) ---------------------------------------------------------
+{
+  const rec = (mode, from, count, beforeLen = 0) => ({
+    kind: 'skeleton',
+    nonce: 1,
+    mode,
+    from,
+    count,
+    before: {
+      rows: Array.from({ length: beforeLen }, () => ({})),
+      mediaCleared: false,
+      assemblyCleared: false,
+      issues: [],
+    },
+    after: { rows: [], mediaCleared: false, assemblyCleared: false },
+    label: skeletonLabel(mode, count),
+  });
+  const D = { draft: true };
+  const N = { draft: false };
+  const app = rec('append', 2, 3);
+  yes('append: хвост из трёх draft — отменяется', skeletonCanUndo(app, [N, N, D, D, D]));
+  no('append: одна строка пачки проверена — нет', skeletonCanUndo(app, [N, N, D, N, D]));
+  no('append: длина поехала — нет', skeletonCanUndo(app, [N, N, D, D, D, N]));
+  yes('append: правка СВОИХ шагов до пачки не мешает', skeletonCanUndo(app, [D, N, D, D, D]));
+  const rep = rec('replace', 0, 2, 4);
+  yes('replace: обе draft — отменяется', skeletonCanUndo(rep, [D, D]));
+  yes('replace: повтор при длине снимка «до»', skeletonCanRedo(rep, 4));
+  no('replace: повтор при другой длине — нет', skeletonCanRedo(rep, 3));
+  yes('append: повтор при длине = from', skeletonCanRedo(app, 2));
+  no('canUndo без строк каркас не пускает', canUndo(app, [], () => ''));
+  yes('canRedo каркаса = skeletonCanRedo', canRedo(app, [{ id: 'a' }, { id: 'b' }], () => ''));
+  is('подпись', [skeletonLabel('replace', 36), skeletonLabel('append', 1)], [
+    'apply skeleton · 36 steps',
+    'append skeleton · 1 step',
+  ]);
+  no('каркас — формовая запись: dropForm его хоронит', isFormEntry(app) === false);
+  is('dropForm хоронит каркас', dropForm(record(emptyHistory(), app)).undo.length, 0);
+  const h = record(record(emptyHistory(), rec('append', 0, 1)), app);
+  is('dropUndoTop снимает только вершину, возврат не трогает', [
+    dropUndoTop(h).undo.length,
+    dropUndoTop(h).redo.length,
+  ], [1, 0]);
+  is('undoTitle называет пачку', undoTitle(app), 'undo — append skeleton · 3 steps');
 }
 
 // --- итог -----------------------------------------------------------------------------------------

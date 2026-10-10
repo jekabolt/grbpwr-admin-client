@@ -11,6 +11,9 @@
 //                                                                    re-read the graph whenever the
 //                                                                    contour Map changes identity —
 //                                                                    the «BOM keystroke» check MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-undo-media   the undo of a skeleton apply
+//                                                                    forgets to restore mediaCleared
+//                                                                    — U2 MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -42,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 
 const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
 const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
+const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -110,6 +114,18 @@ const plugins = [
     },
   },
 ];
+const UNDO_MEDIA_FIX = `      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });\n`;
+if (MUTATE_UNDO_MEDIA)
+  plugins.push({
+    name: 'undo-media-mutation',
+    setup(b) {
+      b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(UNDO_MEDIA_FIX)) throw new Error('undo mutation did not find its line');
+        return { contents: src.replace(UNDO_MEDIA_FIX, ''), loader: 'tsx' };
+      });
+    },
+  });
 if (MUTATE_AUTOAPPLY)
   plugins.push({
     name: 'skeleton-mutation',
@@ -560,6 +576,141 @@ head('M — the draft mark is stored on the step: reload keeps it, edit or click
     'a frozen card keeps its marks: reviewing is an edit',
     `${n}`,
   );
+}
+
+// ── U ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6: one record kind 'skeleton' in the field's history; the panel's «undo» takes the whole
+// batch back while its rows are still draft — photos (mediaId) and mediaCleared included.
+head('U — undo of a skeleton apply: append, replace over photos, refused after an edit');
+const U_OWN = [
+  {
+    operationType: MACHINE,
+    machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+    zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+    inputKeys: ['PKT'],
+  },
+  {
+    operationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
+    zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+    inputKeys: ['LBL'],
+  },
+];
+{
+  // U1 append → undo: the card is exactly as before, no draft left; re-apply works again.
+  await mount({ ops: U_OWN });
+  const before = JSON.stringify(await ops());
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const added = (await ops()).length - 2;
+  ck(added > 0, 'append wrote the batch after the two own steps', `+${added}`);
+  ck((await page.locator('[data-skeleton-undo]').count()) === 1, 'the panel offers «undo»');
+  await shot('u-append-undo-offered', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  ck(after.length === 2, 'undo: the length is as before', `${after.length}`);
+  ck(JSON.stringify(after) === before, 'undo: the own steps are byte-identical');
+  ck(
+    after.every((r) => !r.draft),
+    'undo: no draft left',
+  );
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, '«undo» is gone after it ran');
+  ck(
+    (await page.locator('[data-skeleton-step-applied]').count()) === 0,
+    'the panel un-marks the steps it took back',
+  );
+  await shot('u-append-undone', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck((await ops()).length === 2 + added, 'the same batch applies again after an undo');
+  await closePanel();
+}
+{
+  // U2 replace over a step with photos → undo: the photos come back by mediaId, mediaCleared off.
+  const PH = { mediaId: 7, caption: 'cuff', annotations: [] };
+  await mount({
+    ops: [
+      {
+        operationType: MACHINE,
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+        inputKeys: ['PKT', 'FP'],
+        outputUnitKey: 'FRONT-P',
+        outputUnitName: 'Front with pocket',
+        media: [PH, { ...PH, mediaId: 8 }],
+      },
+    ],
+  });
+  const before = await ops();
+  await openPanel('header', 'replace');
+  await page.click('[data-skeleton-apply-all]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === true,
+    'replace over photos declared mediaCleared',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  const ids = (rows) => rows.flatMap((r) => (r.media ?? []).map((m) => m.mediaId)).join(',');
+  ck(
+    after.length === 1 && ids(after) === ids(before) && ids(after) === '7,8',
+    'undo: the step comes back with its photos (same mediaId)',
+    ids(after),
+  );
+  ck(after[0].outputUnitKey === 'FRONT-P', 'undo: its unit comes back');
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === false,
+    'undo: mediaCleared is off again — the save keeps the photos',
+  );
+  await closePanel();
+}
+{
+  // U3 an edit of one applied row: the record is no longer valid — the button goes, and a press
+  // that races the edit is refused in words, nothing written.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    window.__sk.touch(3);
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused]', { timeout: 5000 });
+  const t = await page.locator('[data-skeleton-undo-refused]').innerText();
+  ck(/applied steps were edited/.test(t), 'undo refused in words after an edit', t);
+  ck((await ops()).length === n, 'the refusal writes nothing');
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, 'no «undo» button any more');
+  await shot('u-refused', '[data-skeleton-panel]');
+  await closePanel();
+}
+{
+  // U4 «reviewed» on one applied row is a decision on the batch, too: undo goes.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'control: a reopened panel still offers «undo» for the untouched batch',
+  );
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-draft="2"]', { timeout: 5000 });
+  await page.click('[data-rail-draft="2"]');
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'a step marked reviewed takes «undo» away',
+  );
+  await closePanel();
 }
 
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
@@ -1067,6 +1218,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}`,
 );
 if (bad) process.exitCode = 1;

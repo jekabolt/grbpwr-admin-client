@@ -190,6 +190,7 @@ import {
   dropForm,
   dropMove,
   dropRedoTop,
+  dropUndoTop,
   emptyHistory,
   insertLabel,
   moveLabel,
@@ -201,6 +202,8 @@ import {
   redoTitle,
   renameLabel,
   resolvePending,
+  skeletonCanUndo,
+  skeletonLabel,
   undoStep,
   undoTitle,
   type History,
@@ -904,6 +907,20 @@ export type SkeletonApplyResult = {
   nonce: number;
   /** Rows written. 0 with `refused` set means nothing changed. */
   applied: number;
+  refused?: string;
+};
+
+/** The panel's «undo» of the apply `nonce`; `seq` dedupes presses. */
+export type SkeletonUndoRequest = { nonce: number; seq: number };
+
+/** What `OperationsField` reports after an undo or a redo of a skeleton apply. */
+export type SkeletonUndoResult = {
+  nonce: number;
+  /** Rows taken back by an undo (0 on a redo or a refusal). */
+  undone: number;
+  /** Rows written again by a redo. */
+  redone?: number;
+  /** Why nothing was undone, in words. */
   refused?: string;
 };
 
@@ -5834,6 +5851,9 @@ export function OperationsField({
   onAdded,
   applyRequest = null,
   onSkeletonApplied,
+  skeletonUndoRequest = null,
+  onSkeletonUndone,
+  onSkeletonUndoable,
   emptyAction,
   storedHasUnits = false,
   storedHasMedia = false,
@@ -5882,11 +5902,20 @@ export function OperationsField({
    * SKELETON STEPS TO WRITE — the only door through which the assembly skeleton reaches the form.
    * Modelled on `addRequest`: nothing happens until a new `nonce` arrives, so a proposal that is
    * only looked at changes nothing. Rows are built by `rowFromStep`; after the write they are
-   * ordinary steps, and only this session's rail remembers them as «draft».
+   * ordinary steps carrying `draft = true` (0410) until an edit or «reviewed».
    */
   applyRequest?: SkeletonApplyRequest | null;
   /** Answer to `applyRequest`: how many rows landed, or why none did. */
   onSkeletonApplied?: (r: SkeletonApplyResult) => void;
+  /**
+   * The panel's «undo» (03-P2 §6): take back the apply with this `nonce`. Same inversion as ⌘Z on
+   * the field's history, and only while that apply's record is on top and its rows are still draft.
+   */
+  skeletonUndoRequest?: SkeletonUndoRequest | null;
+  /** Answer to an undo or a redo of a skeleton apply (⌘Z, ⇧⌘Z, the panel's «undo»). */
+  onSkeletonUndone?: (r: SkeletonUndoResult) => void;
+  /** The nonce of the apply that ⌘Z would take back now, or null — the panel shows «undo» by it. */
+  onSkeletonUndoable?: (nonce: number | null) => void;
   /** A second door in the empty state, beside «+ operation» (the skeleton's «suggest»). */
   emptyAction?: ReactNode;
   /**
@@ -6213,8 +6242,15 @@ export function OperationsField({
     const rows = steps.map((s) =>
       rowFromStep(s, { machines: park?.machines ?? [], presses: park?.presses ?? [] }),
     );
-    // Массив поехал не жестом полотна — формовые записи отмены протухли.
-    clearFormHistory();
+    // ОТМЕНА ЗАПИСИ (03-P2 §6): снимок «до» берётся ДО записи, глубоко — строки с `media[].mediaId`,
+    // флаги карточки и номера шагов в дефектах. Формовые записи старше этой не гасятся: после
+    // replace их щит по `fieldId` откажет сам, словами; после append они и так целы.
+    const before = {
+      rows: replacing ? structuredClone(current) : [],
+      mediaCleared: !!getValues('mediaCleared'),
+      assemblyCleared: !!getValues('assemblyCleared'),
+      issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+    };
     if (replacing) {
       // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
       remapIssues(() => null);
@@ -6238,6 +6274,23 @@ export function OperationsField({
       setValue('assemblyCleared', true, { shouldDirty: true });
     }
     const from = replacing ? 0 : current.length;
+    pendingAppend.current = null;
+    setHistory(
+      record(history.current, {
+        kind: 'skeleton',
+        nonce: applyRequest.nonce,
+        mode: replacing ? 'replace' : 'append',
+        from,
+        count: rows.length,
+        before,
+        after: {
+          rows: structuredClone(rows),
+          mediaCleared: !!getValues('mediaCleared'),
+          assemblyCleared: !!getValues('assemblyCleared'),
+        },
+        label: skeletonLabel(replacing ? 'replace' : 'append', rows.length),
+      }),
+    );
     setSelected(from);
     // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
     // человек был (кнопка «apply»).
@@ -6982,6 +7035,75 @@ export function OperationsField({
   };
 
   /**
+   * ИНВЕРСИЯ ЗАПИСИ КАРКАСА — ОДНА НА ОБА РЕЖИМА ПО СМЫСЛУ: вернуть то, что стояло до записи.
+   * Хвостовая пачка снимается удалением СВОИХ строк (`remove` — id стоящих шагов живут), замена —
+   * снимком «до» целиком, с фото (`media[].mediaId`). Флаги `mediaCleared` / `assemblyCleared` —
+   * как стояли: без отката replace поверх фото оставил бы `mediaCleared`, и следующая запись сняла
+   * бы фото со шагов, которые отмена вернула. Номера шагов в дефектах — из снимка.
+   *
+   * Щит — `skeletonCanUndo`: длина та же и все строки пачки ещё draft. Отказ — словами, и запись
+   * снимается: тронутую пачку вернуть нельзя, не стерев чужую работу. Возвращает текст отказа.
+   */
+  const undoSkeleton = (rec: Extract<Hist['undo'][number], { kind: 'skeleton' }>) => {
+    if (frozen) return FROZEN_REFUSAL;
+    if (!skeletonCanUndo(rec, getValues('operations') ?? [])) {
+      setHistory(dropUndoTop(history.current));
+      return 'the applied steps were edited — nothing to undo';
+    }
+    applyToForm(() => {
+      if (rec.mode === 'replace') {
+        replace(structuredClone(rec.before.rows));
+      } else {
+        remove(Array.from({ length: rec.count }, (_, k) => rec.from + k));
+      }
+      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });
+      setValue('assemblyCleared', rec.before.assemblyCleared, { shouldDirty: true });
+      const issues = getValues('issues') ?? [];
+      if (issues.length === rec.before.issues.length)
+        rec.before.issues.forEach((n, ii) => {
+          if ((issues[ii]?.operationNumber ?? 0) !== n)
+            setValue(`issues.${ii}.operationNumber`, n, { shouldDirty: true });
+        });
+    });
+    setSelected(rec.mode === 'replace' ? 0 : Math.max(0, rec.from - 1));
+    setHistory(undoStep(history.current));
+    onSkeletonUndone?.({ nonce: rec.nonce, undone: rec.count });
+    return null;
+  };
+
+  // «undo» ПАНЕЛИ — та же инверсия, что ⌘Z, но только СВОЕЙ записи: на вершине чужая — отказ.
+  const seenUndo = useRef<number | null>(skeletonUndoRequest?.seq ?? null);
+  useEffect(() => {
+    if (!skeletonUndoRequest || skeletonUndoRequest.seq === seenUndo.current) return;
+    seenUndo.current = skeletonUndoRequest.seq;
+    const top = peekUndo(history.current);
+    if (top?.kind !== 'skeleton' || top.nonce !== skeletonUndoRequest.nonce) {
+      onSkeletonUndone?.({
+        nonce: skeletonUndoRequest.nonce,
+        undone: 0,
+        refused: 'a later change sits on top of it — undo that first',
+      });
+      return;
+    }
+    const refused = undoSkeleton(top);
+    if (refused) onSkeletonUndone?.({ nonce: top.nonce, undone: 0, refused });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skeletonUndoRequest?.seq]);
+
+  // Какую запись ⌘Z взял бы сейчас — панель показывает «undo» только ей и только пока щит пускает.
+  const lastUndoable = useRef<number | null>(null);
+  useEffect(() => {
+    const top = peekUndo(histView);
+    const n =
+      top?.kind === 'skeleton' && !frozen && skeletonCanUndo(top, getValues('operations') ?? [])
+        ? top.nonce
+        : null;
+    if (n === lastUndoable.current) return;
+    lastUndoable.current = n;
+    onSkeletonUndoable?.(n);
+  }, [histView, touchTick, fields, frozen, getValues, onSkeletonUndoable]);
+
+  /**
    * ⌘Z и чип отмены — ЕДИНСТВЕННЫЕ вызыватели инверсии (⇧⌘Z — её зеркало ниже).
    *
    * ГЕЙТ ЗАМОРОЗКИ — ПО-РОДОВОЙ. На выпущенной карточке (R10) раскладывать можно, править нельзя:
@@ -6999,6 +7121,14 @@ export function OperationsField({
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
     if (rec.kind !== 'move' && frozen) {
       showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    if (rec.kind === 'skeleton') {
+      const refused = undoSkeleton(rec);
+      if (refused) {
+        showMessage(refused, 'error');
+        onSkeletonUndone?.({ nonce: rec.nonce, undone: 0, refused });
+      }
       return;
     }
     if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
@@ -7055,6 +7185,24 @@ export function OperationsField({
     if (rec.kind === 'move') {
       prefs.restore(rec.forward);
       setHistory(redoStep(history.current));
+      return;
+    }
+    if (rec.kind === 'skeleton') {
+      // ПОВТОР ЗАПИСИ КАРКАСА: те же строки (снова draft) и те же флаги, что ставила запись. Без
+      // двухтактного захвата — запись адресуется позицией и меткой, а не `fieldId`.
+      applyToForm(() => {
+        if (rec.mode === 'replace') {
+          remapIssues(() => null);
+          replace(structuredClone(rec.after.rows));
+        } else {
+          append(structuredClone(rec.after.rows));
+        }
+        setValue('mediaCleared', rec.after.mediaCleared, { shouldDirty: true });
+        setValue('assemblyCleared', rec.after.assemblyCleared, { shouldDirty: true });
+      });
+      setSelected(rec.from);
+      setHistory(redoStep(history.current));
+      onSkeletonUndone?.({ nonce: rec.nonce, undone: 0, redone: rec.count });
       return;
     }
     if (rec.kind === 'append') {

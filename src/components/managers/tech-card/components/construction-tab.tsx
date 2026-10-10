@@ -865,6 +865,9 @@ export function ConstructionTab({
                 saving={saving}
                 applyRequest={skeleton.applyRequest}
                 onSkeletonApplied={skeleton.onSkeletonApplied}
+                skeletonUndoRequest={skeleton.skeletonUndoRequest}
+                onSkeletonUndone={skeleton.onSkeletonUndone}
+                onSkeletonUndoable={skeleton.onSkeletonUndoable}
                 emptyAction={skeleton.emptyAction}
                 // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
                 // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и

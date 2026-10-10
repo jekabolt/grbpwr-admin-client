@@ -517,6 +517,9 @@ function Stand({ m }: { m: Mount }) {
           pieceShapes={shapes.shapeByKey}
           applyRequest={skeleton.applyRequest}
           onSkeletonApplied={skeleton.onSkeletonApplied}
+          skeletonUndoRequest={skeleton.skeletonUndoRequest}
+          onSkeletonUndone={skeleton.onSkeletonUndone}
+          onSkeletonUndoable={skeleton.onSkeletonUndoable}
           emptyAction={skeleton.emptyAction}
         />
       </CardUnitPicturesProvider>

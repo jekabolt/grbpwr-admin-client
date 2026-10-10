@@ -69,7 +69,17 @@ import {
   type SkeletonApplyRequest,
   type SkeletonApplyResult,
   type SkeletonRowContext,
+  type SkeletonUndoRequest,
+  type SkeletonUndoResult,
 } from './operations-field';
+
+/** The footer's last word: an apply's answer, or what its undo did. */
+type PanelResult = SkeletonApplyResult & {
+  /** Rows an undo took back. */
+  undone?: number;
+  /** Why an undo did nothing, in words. */
+  undoRefused?: string;
+};
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
@@ -289,6 +299,9 @@ export function useSkeletonDoor({
   panel: ReactNode;
   applyRequest: SkeletonApplyRequest | null;
   onSkeletonApplied: (r: SkeletonApplyResult) => void;
+  skeletonUndoRequest: SkeletonUndoRequest | null;
+  onSkeletonUndone: (r: SkeletonUndoResult) => void;
+  onSkeletonUndoable: (nonce: number | null) => void;
 } {
   const proposal = useSkeletonProposal();
   // The AI's answer outlives the panel like the proposal does: reopening shows it again for free.
@@ -307,7 +320,15 @@ export function useSkeletonDoor({
   const [mode, setMode] = useState<SkeletonMode | null>(null);
   const [readFor, setReadFor] = useState<SkeletonMode | null>(null);
   const [applyRequest, setApplyRequest] = useState<SkeletonApplyRequest | null>(null);
-  const [result, setResult] = useState<SkeletonApplyResult | null>(null);
+  const [result, setResult] = useState<PanelResult | null>(null);
+  // UNDO (03-P2 §6). The field owns the history; the door only asks («undo» = this apply's nonce)
+  // and listens: which apply ⌘Z would take back now, and what an undo / a redo did. The picks of
+  // each apply are kept before/after, so an undo un-marks exactly what it took back and a redo
+  // (⇧⌘Z) marks it again.
+  const [undoable, setUndoable] = useState<number | null>(null);
+  const [undoRequest, setUndoRequest] = useState<SkeletonUndoRequest | null>(null);
+  const undoSeq = useRef(0);
+  const pickSnaps = useRef(new Map<number, { before: StepPick[]; after: StepPick[] }>());
   const [picks, setPicks] = useState<StepPick[]>([]);
 
   // A fresh proposal gets fresh picks; the same proposal keeps them across close/open; a rebuild
@@ -415,6 +436,10 @@ export function useSkeletonDoor({
           onReadFor={setReadFor}
           onApply={request}
           result={result}
+          undoable={!!result && result.applied > 0 && undoable === result.nonce}
+          onUndo={() =>
+            result && setUndoRequest({ nonce: result.nonce, seq: (undoSeq.current += 1) })
+          }
           renderUnit={renderUnit}
           onClose={() => setOpen(false)}
         />
@@ -425,12 +450,28 @@ export function useSkeletonDoor({
       if (r.applied === 0 || !carried || carried.nonce !== r.nonce) return;
       const done = new Set(carried.idx);
       // A replace wipes what earlier applies wrote; only this batch stands in the form now.
-      setPicks((prev) =>
-        prev.map((p, i) =>
+      setPicks((prev) => {
+        const next = prev.map((p, i) =>
           done.has(i) ? { ...p, applied: true } : carried.replace ? { ...p, applied: false } : p,
-        ),
-      );
+        );
+        pickSnaps.current.set(r.nonce, { before: prev, after: next });
+        return next;
+      });
     },
+    skeletonUndoRequest: undoRequest,
+    onSkeletonUndone: (r) => {
+      const snap = pickSnaps.current.get(r.nonce);
+      if (r.refused) {
+        setResult({ nonce: r.nonce, applied: 0, undoRefused: r.refused });
+      } else if (r.undone > 0) {
+        setResult({ nonce: r.nonce, applied: 0, undone: r.undone });
+        if (snap) setPicks(snap.before);
+      } else if (r.redone) {
+        setResult({ nonce: r.nonce, applied: r.redone });
+        if (snap) setPicks(snap.after);
+      }
+    },
+    onSkeletonUndoable: setUndoable,
   };
 }
 
@@ -456,6 +497,8 @@ function AssemblySkeletonPanel({
   onReadFor,
   onApply,
   result,
+  undoable,
+  onUndo,
   renderUnit,
   onClose,
 }: {
@@ -481,7 +524,10 @@ function AssemblySkeletonPanel({
     mode: 'append' | 'replace',
     confirmedReplace?: boolean,
   ) => void;
-  result: SkeletonApplyResult | null;
+  result: PanelResult | null;
+  /** The last apply can still be taken back (its record is on top, its rows untouched). */
+  undoable: boolean;
+  onUndo: () => void;
   renderUnit?: RenderUnit;
   onClose: () => void;
 }) {
@@ -1128,15 +1174,37 @@ function AssemblySkeletonPanel({
                 <span className='text-error' data-skeleton-refused='1'>
                   not applied — {result.refused}
                 </span>
+              ) : result?.undoRefused ? (
+                <span className='text-error' data-skeleton-undo-refused='1'>
+                  not undone — {result.undoRefused}
+                </span>
+              ) : result?.undone ? (
+                <span data-skeleton-undone={result.undone}>
+                  {result.undone} {result.undone === 1 ? 'step' : 'steps'} taken back — the steps,
+                  photos and units are as they were before the apply
+                </span>
               ) : result && result.applied > 0 ? (
                 <span data-skeleton-applied={result.applied}>
-                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added — ordinary steps
-                  now; the rail marks them “draft” until you change them
+                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added — the rail marks
+                  them “draft” until you change them or mark them reviewed
+                  {undoable ? ' · undo takes the whole batch back' : ''}
                 </span>
               ) : (
                 'seam types, work and minutes stay empty — they are yours to fill · esc — close'
               )}
             </Text>
+            {undoable && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={onUndo}
+                data-skeleton-undo={result?.nonce}
+                title='take back every step this apply wrote; photos and units come back as they were'
+              >
+                undo
+              </Button>
+            )}
             {batchViolations.size > 0 && (
               <Text
                 size='micro'
