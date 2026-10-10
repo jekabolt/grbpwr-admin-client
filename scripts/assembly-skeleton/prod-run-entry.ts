@@ -239,6 +239,15 @@ function partitions(joins: { name: string; inputs: string[] }[], pieceKeys: Set<
   });
 }
 
+/** Two partitions of one set nest: every part of one lies inside a part of the other or is a union of them. */
+function laminar(a: string[][], b: string[][]): boolean {
+  const sets = a.map((p) => new Set(p));
+  return b.every((part) => {
+    const hit = sets.filter((s) => part.some((k) => s.has(k)));
+    return hit.length === 1 || hit.every((s) => [...s].every((k) => part.includes(k)));
+  });
+}
+
 const isDerived = (s: SkeletonStep) => s.derivedFrom != null && s.derivedFrom >= 0;
 const isAmbiguous = (s: SkeletonStep) =>
   (s.alternatives?.length ?? 0) > 0 || s.seams.some((c) => (c.ambiguousWith?.length ?? 0) > 0);
@@ -736,6 +745,13 @@ export async function runCard(input: CardInput) {
         ourJoins: ours.length,
         byInputs: truth.filter((t) => byInputs.has(t.key)).length,
         byContents: truth.filter((t) => byLeaves.has(t.leaves)).length,
+        // 05-PROD-DIAGNOSIS §2: a technologist join counts when one of our joins has the same
+        // pieces AND its inputs are compatible with theirs (each of our inputs lies inside one of
+        // theirs or is a union of theirs) — one tree refines the other there, so granularity
+        // (three in one step vs two steps) is an alternative, a different grouping is an error.
+        treeRefinement: truth.filter((t) =>
+          ours.some((o) => o.leaves === t.leaves && laminar(t.parts, o.parts)),
+        ).length,
         mismatches: truth
           .filter((t) => !byInputs.has(t.key))
           .map((t) => {
