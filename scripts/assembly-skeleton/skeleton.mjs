@@ -748,25 +748,6 @@ console.log('\nDarts (P2 lane D)');
     ['dl-pockets-2', resolve(downloads, 'POCKETS (2).dxf'), null, 'generic', false],
   ];
   const ANY = { intakeMm: [0, Infinity], depthMin: 0, depthRatio: 0, apexDeg: 180 };
-// ── P2 lane Z: closures off the centre front (03-P2-DESIGN §5) ───────────────────────────────
-// Z1 button columns on real files (SS26-005, Allsizes, blazer, summer men), Z2 BOM-led zip seats
-// (never ticked), Z3 vent template steps (jacket/coat only, «check»). Controls: BOM without a zip
-// gives no zip step; marks stripped gives the template's BOM steps back; SKELETON.drillEdgeMm → 10
-// (one reach for closure-not-seam and columns) takes the placket and front columns out of reach —
-// the SS26 and Allsizes gates must go red.
-console.log('\nClosures (P2 lane Z)');
-{
-  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
-  const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
-  const bytesOf = (f) => {
-    try {
-      const buf = readFileSync(f);
-      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-    } catch {
-      gate(`closures: ${f} found`, false, f);
-      return null;
-    }
-  };
   const quietly = async (fn) => {
     const q = [console.log, console.warn];
     console.log = () => {};
@@ -843,6 +824,37 @@ console.log('\nClosures (P2 lane Z)');
     anyVeeDarts > 0,
     `${anyVeeDarts}`,
   );
+}
+
+// ── P2 lane Z: closures off the centre front (03-P2-DESIGN §5) ───────────────────────────────
+// Z1 button columns on real files (SS26-005, Allsizes, blazer, summer men), Z2 BOM-led zip seats
+// (never ticked), Z3 vent template steps (jacket/coat only, «check»). Controls: BOM without a zip
+// gives no zip step; marks stripped gives the template's BOM steps back; SKELETON.drillEdgeMm → 10
+// (one reach for closure-not-seam and columns) takes the placket and front columns out of reach —
+// the SS26 and Allsizes gates must go red.
+console.log('\nClosures (P2 lane Z)');
+{
+  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
+  const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
+  const bytesOf = (f) => {
+    try {
+      const buf = readFileSync(f);
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    } catch {
+      gate(`closures: ${f} found`, false, f);
+      return null;
+    }
+  };
+  const quietly = async (fn) => {
+    const q = [console.log, console.warn];
+    console.log = () => {};
+    console.warn = () => {};
+    try {
+      return await fn();
+    } finally {
+      [console.log, console.warn] = q;
+    }
+  };
   const BOM0 = {
     zipper: 0,
     buttons: 0,
