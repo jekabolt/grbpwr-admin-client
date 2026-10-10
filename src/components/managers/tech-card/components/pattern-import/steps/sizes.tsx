@@ -22,7 +22,8 @@ import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, LegendEdit } from '../use-import-session';
-import { DashSample, NativeSelect, Panel, SplitStage, fmtPct } from '../ui-bits';
+import { guessedSizes } from '../use-import-session';
+import { DashSample, NativeSelect, Panel, STICKY_END, SplitStage, fmtPct } from '../ui-bits';
 
 const ROLES: { value: ChainRole; label: string }[] = [
   { value: 'size', label: 'size line' },
@@ -64,7 +65,10 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const [flag, setFlag] = useState<number | null>(null);
   if (!chains || !sizes || !session.sheet) return null;
 
-  const flags = chains.ambiguities ?? [];
+  // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
+  // any more; shown, it invited answering 2 on a one-size sheet (blazer).
+  const oneSize = sizes.expected?.n === 1;
+  const flags = (chains.ambiguities ?? []).filter((a) => !(oneSize && a.kind === 'class-merge'));
   // Only the rows the operator changed travel (Codex round 4 T3): the legend is re-applied to a
   // fresh build, and a row sent back as built would be taken as answered — an untouched
   // low-confidence row (a grey "ignore") must stay a question.
@@ -144,6 +148,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   return (
     <SplitStage
       sideWidth={640}
+      // the legend's required answers (confirm, card size) need the room more than the preview
+      sideShare={55}
       canvas={
         <Panel
           title='lines by class'
@@ -241,7 +247,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 <th data-align='left'>meaning</th>
                 <th data-align='left'>size in file</th>
                 <th data-align='left'>card size</th>
-                <th>sure</th>
+                <th className={cn(STICKY_END, 'bg-bgColor')}>sure</th>
               </tr>
             </thead>
             <tbody>
@@ -249,6 +255,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                 const low = c.confidence < 0.6;
                 const confirmed = inputs.legendConfirmed.includes(c.id);
                 const e = c.role === 'size' ? entryOfClass(c.id) : undefined;
+                const rowBg = hover === c.id ? 'bg-bgZebra' : 'bg-bgColor';
                 return (
                   <tr
                     key={c.id}
@@ -262,7 +269,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                         size='nano'
                         variant='label'
                         component='span'
-                        className='block max-w-32 truncate'
+                        className='block max-w-24 truncate'
                       >
                         {evidenceText(c.id) || `${c.chains.length} lines`}
                       </Text>
@@ -308,32 +315,42 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           card={card}
                           invalid={dupe(e.card?.sizeId)}
                           onChange={(v) => setCard(e, v)}
-                          onConfirm={() => void api.confirmSize(e.source.rank)}
                         />
                       ) : (
                         <span className='text-labelColor'>—</span>
                       )}
                     </td>
-                    <td>
-                      {low && !confirmed ? (
-                        <Chip
-                          tone='attention'
-                          onClick={() =>
-                            patchInputs((i) => ({ legendConfirmed: [...i.legendConfirmed, c.id] }))
-                          }
-                          title={
-                            c.evidence.some((x) => x.kind === 'colour-only')
-                              ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
-                              : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
-                          }
-                        >
-                          ! confirm
-                        </Chip>
-                      ) : (
-                        <span className={low ? 'text-labelColor' : undefined}>
-                          {fmtPct(c.confidence, 0)}
-                        </span>
-                      )}
+                    {/* pinned: every answer the footer asks for on this table is in this column */}
+                    <td className={cn(STICKY_END, rowBg)}>
+                      <span className='flex flex-col items-end gap-1'>
+                        {e && (
+                          <SizeConfirm
+                            e={e}
+                            onConfirm={() => void api.confirmSize(e.source.rank)}
+                          />
+                        )}
+                        {low && !confirmed ? (
+                          <Chip
+                            tone='attention'
+                            onClick={() =>
+                              patchInputs((i) => ({
+                                legendConfirmed: [...i.legendConfirmed, c.id],
+                              }))
+                            }
+                            title={
+                              c.evidence.some((x) => x.kind === 'colour-only')
+                                ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
+                                : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
+                            }
+                          >
+                            ! confirm
+                          </Chip>
+                        ) : (
+                          <span className={low ? 'text-labelColor' : undefined}>
+                            {fmtPct(c.confidence, 0)}
+                          </span>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 );
@@ -368,13 +385,18 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                         {e.source.label || '(no label)'}
                       </td>
                       <td data-align='left'>
-                        <CardSizeCell
-                          e={e}
-                          card={card}
-                          invalid={dupe(e.card?.sizeId)}
-                          onChange={(v) => setCard(e, v)}
-                          onConfirm={() => void api.confirmSize(e.source.rank)}
-                        />
+                        <span className='flex items-center gap-1.5'>
+                          <CardSizeCell
+                            e={e}
+                            card={card}
+                            invalid={dupe(e.card?.sizeId)}
+                            onChange={(v) => setCard(e, v)}
+                          />
+                          <SizeConfirm
+                            e={e}
+                            onConfirm={() => void api.confirmSize(e.source.rank)}
+                          />
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -498,21 +520,20 @@ function DrawnSizes({
   );
 }
 
-/** Card size of one source size: a select, how sure the match is, and a confirm for a guess. */
+const isGuess = (e: SizeMapEntry) => guessedSizes([e]).length > 0;
+
+/** Card size of one source size: the select and where the match came from (set / auto / off). */
 function CardSizeCell({
   e,
   card,
   invalid,
   onChange,
-  onConfirm,
 }: {
   e: SizeMapEntry;
   card: CardContext;
   invalid: boolean;
   onChange: (sizeId: string) => void;
-  onConfirm: () => void;
 }) {
-  const guess = e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9;
   const why = e.evidence?.join(' · ');
   return (
     <span className='flex items-center gap-1.5'>
@@ -530,11 +551,7 @@ function CardSizeCell({
       />
       {e.origin === 'operator' ? (
         <Pill tone='ink'>set</Pill>
-      ) : guess ? (
-        <Chip tone='attention' onClick={onConfirm} title={why}>
-          ! {fmtPct(e.confidence ?? 0, 0)} · confirm
-        </Chip>
-      ) : e.card ? (
+      ) : isGuess(e) ? null : e.card ? (
         <Pill tone='attention' title={why ?? 'proposed automatically — change it if it is wrong'}>
           auto
         </Pill>
@@ -544,5 +561,15 @@ function CardSizeCell({
         </Pill>
       )}
     </span>
+  );
+}
+
+/** A guessed card size waits for one click (the footer counts it); nothing otherwise. */
+function SizeConfirm({ e, onConfirm }: { e: SizeMapEntry; onConfirm: () => void }) {
+  if (!isGuess(e)) return null;
+  return (
+    <Chip tone='attention' onClick={onConfirm} title={e.evidence?.join(' · ')}>
+      ! {fmtPct(e.confidence ?? 0, 0)} · confirm
+    </Chip>
   );
 }

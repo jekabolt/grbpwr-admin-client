@@ -786,7 +786,7 @@ export function PatternsField({
         </Button>
         {needsSizes && (
           <Text id={importNoteId} size='nano' variant='label' component='span'>
-            set the size range above first
+            import needs the size range: set it above
           </Text>
         )}
       </span>
@@ -1711,7 +1711,9 @@ export function PatternsField({
       <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5'>
         <Text size='micro' variant='label'>
           add fabric lines in the BOM — a pattern binds to a material.
-          {sizeIds.length === 0
+          {/* door D (FLY-final copy 7): "no range needed" next to an import that is disabled for
+              want of a range read as a contradiction. Said only where no import door stands. */}
+          {sizeIds.length === 0 && !door
             ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
             : ''}
         </Text>

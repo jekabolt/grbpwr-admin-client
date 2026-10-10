@@ -22,6 +22,7 @@ import Text from 'ui/components/text';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, fmtBytes } from '../ui-bits';
+import { NotInFile } from './not-in-file';
 
 const CUT_SYMMETRY_WORD: Record<string, string> = {
   TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'identical',
@@ -451,6 +452,7 @@ export function ApplyStep({
             </Button>
           </CalloutBox>
         )}
+        <NotInFile api={api} className='mb-2' />
         <div className='flex flex-col gap-2'>
           {!done?.ok ? (
             <Button
@@ -524,6 +526,7 @@ function DownloadOnly({ api, onClose }: { api: ImportSessionApi; onClose: () => 
             card. to apply one, add the fabric on the BOM tab and import again.
           </Text>
         </CalloutBox>
+        <NotInFile api={api} className='mb-2' />
         <div className='flex flex-col gap-2'>
           <Button
             variant='main'

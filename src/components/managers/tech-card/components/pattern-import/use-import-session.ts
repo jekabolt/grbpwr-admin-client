@@ -953,7 +953,7 @@ export function useImportSession(deps: {
               : why === 'grade-ambiguous'
                 ? 'two size layouts fit the lines equally well'
                 : 'the sizes are drawn alike and nothing proves which line is which'
-          }; trace them by hand or mark "not a piece"`;
+          }; reseed elsewhere inside the piece or mark "not a piece"`;
         }
         if (open.length)
           return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — close the gap, split, or mark "not a piece"`;

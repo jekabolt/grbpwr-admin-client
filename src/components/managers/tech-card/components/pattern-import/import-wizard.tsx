@@ -37,6 +37,8 @@ import { SheetStep } from './steps/sheet';
 import { SizesStep } from './steps/sizes';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
+import type { PieceFocus } from './piece-focus';
+import { DroppedLabels } from './steps/not-in-file';
 
 const STAGE_WORD: Record<string, string> = {
   extract: 'reading files',
@@ -165,6 +167,24 @@ function WizardBody({
   latest.current = api.session;
   const { session, blocker } = api;
   const [askClose, setAskClose] = useState(false);
+  // "fix in pieces" from check / details: the piece and size to show, and why (M1, M5). It lives
+  // while the pieces step is open and is dropped when the operator leaves it.
+  const [focus, setFocus] = useState<PieceFocus | null>(null);
+  useEffect(() => {
+    if (session.step !== 'pieces') setFocus(null);
+  }, [session.step]);
+  const [dropped, setDropped] = useState<Record<number, string>>({});
+  const droppedCtx = useMemo(
+    () => ({
+      labels: dropped,
+      remember: (seed: number, label: string) => setDropped((d) => ({ ...d, [seed]: label })),
+    }),
+    [dropped],
+  );
+  const fixInPieces = (f: PieceFocus) => {
+    setFocus(f);
+    void api.dispatch({ type: 'back', to: 'pieces' });
+  };
 
   const at = stepIndex(session.step);
   const nextStep = STEPS[at + 1];
@@ -191,13 +211,13 @@ function WizardBody({
       case 'sizes':
         return <SizesStep api={api} card={card} />;
       case 'pieces':
-        return <PiecesStep api={api} />;
+        return <PiecesStep api={api} focus={focus} onDismissFocus={() => setFocus(null)} />;
       case 'meaning':
-        return <DetailsStep api={api} card={card} />;
+        return <DetailsStep api={api} card={card} onFixInPieces={fixInPieces} />;
       case 'fabrics':
         return <FabricsStep api={api} card={card} />;
       case 'check':
-        return <CheckStep api={api} />;
+        return <CheckStep api={api} onFixInPieces={fixInPieces} />;
       case 'apply':
         return (
           <ApplyStep
@@ -339,7 +359,9 @@ function WizardBody({
             </header>
 
             {/* ── stage ────────────────────────────────────────────────────────────────── */}
-            <main className='min-h-0 min-w-0'>{body}</main>
+            <main className='min-h-0 min-w-0'>
+              <DroppedLabels.Provider value={droppedCtx}>{body}</DroppedLabels.Provider>
+            </main>
 
             {/* ── actions ──────────────────────────────────────────────────────────────── */}
             <footer className='flex flex-wrap items-center gap-2 border border-borderColor bg-bgColor px-2 py-1.5'>

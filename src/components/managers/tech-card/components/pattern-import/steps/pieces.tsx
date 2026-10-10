@@ -5,7 +5,7 @@
 // or all sizes), ignore a line (a frame, a watermark), lasso to
 // merge (around several seeds) or split (inside a merged region), "not a piece", reseed. Each
 // region carries a strip of its sizes, so a piece closed in four sizes of six says which two.
-import { useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   FillOutcome,
   PieceCandidate,
@@ -15,6 +15,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -25,6 +26,8 @@ import { SHEET_INK, SheetViewport, f32Attr, inside, ptsAttr, vy } from '../sheet
 import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
 import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
+import type { PieceFocus } from '../piece-focus';
+import { DroppedLabels } from './not-in-file';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
 
@@ -101,11 +104,35 @@ const OUTCOME: Record<FillOutcome, { word: string; tone: 'ok' | 'warn' | 'attent
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
 const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
   'sizes-not-distinguished':
-    'the sizes are drawn alike here and nothing on the sheet proves which line is which size. no outline is given for this size; closing a gap will not change that. trace it by hand, or drop it if it is not a piece.',
+    'the sizes are drawn alike here and nothing on the sheet proves which line is which size, so this size gets no outline. closing a gap does not help. reseed: click another spot inside the piece (the reading starts from the seed, a different spot can prove the sizes). or mark it not a piece.',
   'size-count':
     'how many sizes this sheet draws is not settled. answer it on the sizes step ("sizes drawn on this sheet").',
   'grade-ambiguous':
-    'two size layouts fit these lines equally well. no outline is given until the sizes are told apart.',
+    'two size layouts fit these lines equally well, so no outline is given. reseed: click another spot inside the piece. or mark it not a piece.',
+};
+
+/**
+ * The reader's own detail on a refusal, minus the sentence REFUSED already says (FLY-final copy 6:
+ * the panel printed it twice). Its generic sentences end in the specific reason in brackets.
+ */
+const GENERIC_DETAIL = [
+  'several sizes are drawn alike here and nothing proves which line is which size',
+  'more than one size layout fits these lines',
+  'how many sizes this sheet draws is not known',
+];
+function refusalExtra(detail: string | undefined): string | null {
+  if (!detail) return null;
+  if (!GENERIC_DETAIL.some((g) => detail.startsWith(g))) return detail;
+  return /\(([^()]*)\)\s*$/.exec(detail)?.[1] ?? null;
+}
+
+/** What the note offers to do about a piece sent here from check / details. */
+const FOCUS_HELP: Record<PieceFocus['kind'], string> = {
+  walls:
+    'the written outline leaves the drawn line here. use line: click the drawn line the outline should follow. close gap: click the two ends of a gap. or mark it not a piece.',
+  growth:
+    'a size is not larger than the size below it: that size took the wrong line. step through the size chips, then use line on the right line for that size, or reseed, or mark it not a piece.',
+  region: 'see the region below for what is wrong. reseed, close a gap, or mark it not a piece.',
 };
 
 const STYLE: Record<FillOutcome, { fill: string; stroke: string; dash: boolean }> = {
@@ -126,13 +153,40 @@ const centre = (pts: PtMm[]) => {
   return { x: x / pts.length, y: y / pts.length };
 };
 
-export function PiecesStep({ api }: { api: ImportSessionApi }) {
+export function PiecesStep({
+  api,
+  focus = null,
+  onDismissFocus,
+}: {
+  api: ImportSessionApi;
+  /** Sent from check / details ("fix in pieces"): select it, zoom to it, say why. */
+  focus?: PieceFocus | null;
+  onDismissFocus?: () => void;
+}) {
   const { session, inputs } = api;
+  const { remember } = useContext(DroppedLabels);
   const out = session.pieces;
   const runSizes = session.sizes?.run.sizes ?? [];
-  const [rank, setRank] = useState(() => Math.min(2, Math.max(0, runSizes.length - 1)));
+  const [rank, setRank] = useState(
+    () => focus?.items[0]?.rank ?? Math.min(2, Math.max(0, runSizes.length - 1)),
+  );
   const [tool, setTool] = useState<Tool>('pan');
-  const [sel, setSel] = useState<number | null>(null);
+  const [sel, setSel] = useState<number | null>(() => focus?.items[0]?.seed ?? null);
+  /** The box the sheet zooms to: a piece the operator was sent to, or picked in the note. */
+  const [zoomTo, setZoomTo] = useState<{ seed: number; rank: number | null } | null>(() =>
+    focus?.items[0] ? { seed: focus.items[0].seed, rank: focus.items[0].rank } : null,
+  );
+  const jump = (it: { seed: number; rank: number | null }) => {
+    setSel(it.seed);
+    if (it.rank != null) setRank(it.rank);
+    setZoomTo({ seed: it.seed, rank: it.rank });
+  };
+  // a new "fix in pieces" while the step is open (the wizard keeps it mounted)
+  const lastFocus = useRef(focus);
+  useEffect(() => {
+    if (focus && focus !== lastFocus.current && focus.items[0]) jump(focus.items[0]);
+    lastFocus.current = focus;
+  }, [focus]);
   const [hint, setHint] = useState<string | null>(null);
   /** First end of a bridge being drawn. */
   const [gapA, setGapA] = useState<PtMm | null>(null);
@@ -158,6 +212,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
     }
   }
   const bridges = inputs.edits.filter((e): e is Bridge => e.kind === 'bridge');
+  // A reseed moves the seed: draw its marker where the operator clicked, not where the text put
+  // it (FLY-final M2: the marker stayed at the old point). Undo drops the edit and moves it back.
+  const movedTo = new Map<number, PtMm>();
+  for (const e of inputs.edits) if (e.kind === 'reseed') movedTo.set(e.seed, e.at);
+  const focusSeeds = new Set(focus?.items.map((x) => x.seed) ?? []);
   const mapped = exportedRanks(session.sizes?.map);
   const labelOf = (r: number) => runSizes.find((z) => z.rank === r)?.label || `#${r + 1}`;
   const pickTool = (t: Tool) => {
@@ -176,6 +235,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
     setGapA(null);
     setTool('pan');
   }
+  const zoomFam = zoomTo ? families.find((f) => f.seed === zoomTo.seed) : undefined;
+  const zoomCand = zoomFam
+    ? zoomFam.candidates.find((c) => c.rank === (zoomTo?.rank ?? rank)) ?? cand(zoomFam)
+    : undefined;
+  const zoomBox = zoomCand && zoomCand.outer.length > 2 ? zoomCand.bbox : null;
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
@@ -328,6 +392,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
           <div className='min-h-0 flex-1'>
             <SheetViewport
               bbox={session.sheet.sheet.bbox}
+              focus={zoomBox}
               tool={tool === 'pan' ? 'pan' : tool === 'lasso' ? 'lasso' : 'point'}
               onPick={(k) => setSel(k ? Number(k) : null)}
               onPoint={(pt) => {
@@ -436,6 +501,8 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                       const o = outcomeOf(f);
                       const st = STYLE[o];
                       const on = f.seed === sel;
+                      // a piece the gate / details sent here is outlined red until dismissed
+                      const sent = focusSeeds.has(f.seed);
                       return (
                         <polygon
                           key={f.seed}
@@ -443,8 +510,8 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                           points={ptsAttr(c.outer)}
                           fill={on ? SHEET_INK.pick : st.fill}
                           fillOpacity={o === 'leak' && c.outer.length === 4 ? 0.15 : 0.85}
-                          stroke={on ? SHEET_INK.ink : st.stroke}
-                          strokeWidth={unit * (on ? 2.2 : 1.2)}
+                          stroke={sent ? SHEET_INK.red : on ? SHEET_INK.ink : st.stroke}
+                          strokeWidth={unit * (on || sent ? 2.2 : 1.2)}
                           strokeDasharray={st.dash ? `${unit * 8} ${unit * 5}` : undefined}
                           className={tool === 'pan' ? 'cursor-pointer' : undefined}
                         />
@@ -511,9 +578,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                       pointerEvents='none'
                     />
                   )}
-                  {out.seeds.map((s) => {
-                    const m = markOf.get(s.id);
+                  {out.seeds.map((s0) => {
+                    const m = markOf.get(s0.id);
                     if (!m) return null;
+                    const moved = movedTo.get(s0.id);
+                    const s = moved ? { ...s0, at: moved } : s0;
                     const r = unit * 9;
                     const on = s.id === sel;
                     return (
@@ -539,7 +608,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                         >
                           {m}
                         </text>
-                        {s.origin === 'click' && (
+                        {(s.origin === 'click' || moved) && (
                           <text
                             x={s.at.x}
                             y={vy(s.at.y) + r * 2.2}
@@ -547,7 +616,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                             fill={SHEET_INK.mut}
                             textAnchor='middle'
                           >
-                            click
+                            {moved ? 'reseed' : 'click'}
                           </text>
                         )}
                       </g>
@@ -578,6 +647,84 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
             </Text>
           }
         >
+          {focus && (
+            <CalloutBox tone='error' className='mb-2 flex flex-col gap-1.5 py-1.5'>
+              <div className='flex items-start gap-2'>
+                <Text size='micro' component='p' className='min-w-0 flex-1'>
+                  <b>! from {focus.from}</b>
+                </Text>
+                {onDismissFocus && (
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='shrink-0 text-labelColor hover:text-textColor'
+                    onClick={onDismissFocus}
+                  >
+                    dismiss
+                  </Button>
+                )}
+              </div>
+              <ul className='flex flex-col gap-0.5'>
+                {focus.items.map((it, i) => (
+                  <li key={`${it.label}-${i}`}>
+                    <button
+                      type='button'
+                      onClick={() => jump(it)}
+                      className={cn(
+                        'w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                        sel === it.seed && (it.rank == null || it.rank === rank)
+                          ? 'bg-bgZebra'
+                          : 'hover:bg-bgZebra',
+                      )}
+                    >
+                      <Text size='micro' component='span' className='font-bold'>
+                        {markOf.get(it.seed) ? `${markOf.get(it.seed)} · ` : ''}
+                        {it.label}
+                        {it.rank != null && !it.sized ? ` · size ${labelOf(it.rank)}` : ''}
+                      </Text>
+                      <Text size='micro' variant='label' component='span' className='block'>
+                        {it.why}
+                      </Text>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Text size='micro' component='p'>
+                {FOCUS_HELP[focus.kind]}
+              </Text>
+              <ChipRow>
+                {focus.kind !== 'region' && (
+                  <Chip
+                    selected={tool === 'wall'}
+                    pressed={tool === 'wall'}
+                    onClick={() => pickTool('wall')}
+                  >
+                    use line
+                  </Chip>
+                )}
+                {focus.kind !== 'growth' && (
+                  <Chip
+                    selected={tool === 'bridge'}
+                    pressed={tool === 'bridge'}
+                    disabled={refusedSel}
+                    onClick={() => pickTool('bridge')}
+                  >
+                    close gap
+                  </Chip>
+                )}
+                {focus.kind !== 'walls' && (
+                  <Chip
+                    selected={tool === 'reseed'}
+                    pressed={tool === 'reseed'}
+                    disabled={sel == null}
+                    onClick={() => setTool('reseed')}
+                  >
+                    reseed
+                  </Chip>
+                )}
+              </ChipRow>
+            </CalloutBox>
+          )}
           {variants.length > 1 && !session.variant && (
             <Text size='micro' component='p' className='mb-2 text-warning'>
               ! the sheet carries {variants.length} models ({variants.join(', ')}). one run imports
@@ -617,6 +764,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                     <Text size='micro' variant='label' component='span' className='tabular-nums'>
                       {o === 'closed' ? fmtPct(c.sourceCoverage) : ''}
                     </Text>
+                    {focusSeeds.has(f.seed) && <Pill tone='warn'>! sent here</Pill>}
                     <Pill tone={OUTCOME[o].tone}>{OUTCOME[o].word}</Pill>
                   </button>
                   <div className='flex flex-wrap items-center gap-0.5 pl-6'>
@@ -645,19 +793,34 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
           {selected && (
             <>
               <GroupLabel>region {markOf.get(selected.seed)}</GroupLabel>
+              {/* a refused size has no outline: no area, no coverage, no growth to show (copy 6) */}
               <Row
                 label='area, this size'
-                value={`${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`}
+                value={refusedSel ? '—' : `${(cand(selected).areaMm2 / 100).toFixed(1)} cm²`}
               />
-              <Row label='walls covered' value={fmtPct(cand(selected).sourceCoverage)} />
-              <Row label='p95 to the walls' value={fmtMm(cand(selected).p95Mm)} />
+              <Row
+                label='walls covered'
+                value={refusedSel ? '—' : fmtPct(cand(selected).sourceCoverage)}
+              />
+              <Row
+                label='p95 to the walls'
+                value={refusedSel ? '—' : fmtMm(cand(selected).p95Mm)}
+              />
               <Row
                 label='grows with size'
-                value={selected.monotone ? 'yes' : <span className='text-error'>no</span>}
+                value={
+                  selected.candidates.some((c) => c.outcome === 'refused') ? (
+                    '—'
+                  ) : selected.monotone ? (
+                    'yes'
+                  ) : (
+                    <span className='text-error'>no</span>
+                  )
+                }
               />
               <Text size='micro' variant='label' component='p' className='mt-1'>
                 {cand(selected).outcome === 'refused'
-                  ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${cand(selected).gradeDetail ? ` (${cand(selected).gradeDetail})` : ''}`
+                  ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${refusalExtra(cand(selected).gradeDetail) ? ` (${refusalExtra(cand(selected).gradeDetail)})` : ''}`
                   : outcomeOf(selected) === 'leak'
                     ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
                     : outcomeOf(selected) === 'merged'
@@ -672,6 +835,12 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   size='sm'
                   disabled={!!session.busy}
                   onClick={() => {
+                    // keep how the region read, for "not in this file" on check
+                    const big = Math.max(...selected.candidates.map((c) => c.areaMm2));
+                    remember(
+                      selected.seed,
+                      `region ${markOf.get(selected.seed)}${big > 0 ? ` · ${(big / 100).toFixed(0)} cm²` : ''}`,
+                    );
                     void api.editPieces({ kind: 'not-a-piece', seed: selected.seed });
                     setSel(null);
                   }}

@@ -133,8 +133,9 @@ export function RowQuestions({
     .filter((u) => u.seed === seed)
     .map((u) => `${u.kind}: ${u.detail}`)
     .join(' · ');
+  // stacked: the state column is pinned to the table's right edge and must stay narrow (1024 px)
   return (
-    <span className='flex items-center gap-1'>
+    <span className='flex flex-col items-start gap-1'>
       <Chip
         tone='attention'
         onClick={() => api.confirmShown(seed)}
