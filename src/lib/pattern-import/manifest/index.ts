@@ -364,10 +364,13 @@ function validateGate(x: unknown): GateReport | null {
   if (!isNum(x.durationMs) || x.durationMs < 0)
     fail('gate.durationMs', 'not a non-negative number');
   if (!Array.isArray(x.checks) || x.checks.length > 64) fail('gate.checks', 'not a list');
-  const checks: GateCheck[] = x.checks.map((c, i) => {
+  // A check id this build does not know (written by a newer or an older importer — G17 lived one
+  // day) is validated for shape and then left out: an unknown id must not drop the whole sheet
+  // (Codex G16 review). «passed» is still judged against every check, known or not.
+  const all: GateCheck[] = x.checks.map((c, i) => {
     const p = `gate.checks[${i}]`;
     if (!isObj(c)) fail(p, 'not an object');
-    if (!isStr(c.id) || !GATE_CHECK_IDS.has(c.id)) fail(`${p}.id`, 'unknown check');
+    if (!isBoundedStr(c.id, 64) || !/^G\d{1,2}-[a-z0-9-]+$/.test(c.id)) fail(`${p}.id`, 'not a check id');
     if (!isBool(c.ok)) fail(`${p}.ok`, 'not a boolean');
     if (c.severity !== 'block' && c.severity !== 'warn') fail(`${p}.severity`, 'not block|warn');
     for (const k of ['value', 'threshold'] as const) {
@@ -393,8 +396,9 @@ function validateGate(x: unknown): GateReport | null {
     };
   });
   // «passed» must agree with the checks it reports — a forged true over a blocking failure is a lie
-  if (x.passed && checks.some((c) => !c.ok && c.severity === 'block'))
+  if (x.passed && all.some((c) => !c.ok && c.severity === 'block'))
     fail('gate.passed', 'true over a failed blocking check');
+  const checks = all.filter((c) => GATE_CHECK_IDS.has(c.id));
   // F14b: the derived edges G15 accepted (optional; absent when there are none)
   let derived: DerivedEdgeAudit[] | undefined;
   if (x.derived !== undefined) {

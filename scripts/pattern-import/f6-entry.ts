@@ -2607,7 +2607,10 @@ export async function main(opts: { plans: string }): Promise<number> {
     const c = cellOf(ga);
     const cluster: PtMm[][] = [stroke(ga.x + 0.5, ga.y + 0.5, 6, 6)];
     for (let i = 0; i < PATIMPORT.glyphMaxShortPerCell + 1; i++)
-      cluster.push(stroke(c.x + 2 + (i % 4) * 12, c.y + 4 + Math.floor(i / 4) * 15));
+      // lettering strokes run every which way (a straight row of equal strokes is a dashed line)
+      cluster.push(
+        stroke(c.x + 2 + (i % 4) * 12, c.y + 4 + Math.floor(i / 4) * 15, 6, ((i * 5) % 9) - 4),
+      );
     const lettered = inject(cluster);
     const rA = await gateOn(lettered, 'detected', ['arrowheads']);
     await neg('12 short strokes in one 60 mm cell (fewer than 40 in the block)', 'G16-glyphs', rA);
@@ -2634,7 +2637,7 @@ export async function main(opts: { plans: string }): Promise<number> {
     const spread: PtMm[][] = [];
     for (let i = 0; i < PATIMPORT.glyphMaxShortPerBlock + 5; i++) {
       const k = Math.floor(i / 5);
-      spread.push(stroke(c.x - 400 + k * C + 5 + (i % 5) * 10, c.y - 300));
+      spread.push(stroke(c.x - 400 + k * C + 5 + (i % 5) * 10, c.y - 300, 6, ((i * 5) % 9) - 4));
     }
     const rB = await gateOn(inject(spread), 'detected', ['arrowheads']);
     await neg('45 short strokes in one block, ≤ 5 per cell', 'G16-glyphs', rB);
@@ -2642,6 +2645,17 @@ export async function main(opts: { plans: string }): Promise<number> {
       one(rB, 'G18-grain-source').ok,
       'grain away from them: G18 ok',
       one(rB, 'G18-grain-source').note,
+    );
+    // Codex (G16 review): a dashed construction line — 40 dashes of 6 mm every 10 mm — is not
+    // lettering: G16 passes
+    const dashes: PtMm[][] = [];
+    for (let i = 0; i < PATIMPORT.glyphMaxShortPerBlock + 5; i++)
+      dashes.push(stroke(c.x - 400 + i * 10, c.y - 200, 6, 0));
+    const rDash = await gateOn(inject(dashes));
+    ck(
+      one(rDash, 'G16-glyphs').ok,
+      `${dashes.length} dashes of one dashed line inside BP_M: G16 ok (a dashed line is not lettering)`,
+      one(rDash, 'G16-glyphs').note,
     );
     // one short stroke across the middle of the grain line: G18 warns, the gate passes
     const mid = { x: (ga.x + gb.x) / 2, y: (ga.y + gb.y) / 2 };
