@@ -98,6 +98,9 @@ export type FillRes = {
   knifeIncomplete: boolean;
   /** maskHash of the region before the knives (0 = leak) */
   hash: number;
+  /** the final region (after the knives) on `grid`, with `keepMask` only */
+  mask?: Uint8Array;
+  grid?: Grid;
 };
 
 const LEAK: FillRes = { closed: false, area: -1, cutArea: -1, knifeIncomplete: false, hash: 0 };
@@ -111,6 +114,7 @@ export function fillRank(
   seed: PtMm,
   knives: readonly PtMm[][] = [],
   carriers: readonly PtMm[][] = [],
+  keepMask = false,
 ): FillRes {
   const g = new Grid(box, cellMm);
   const wall = new Uint8Array(g.W * g.H);
@@ -122,20 +126,22 @@ export function fillRank(
   const { mask, area } = regionOf(g, ext, k0);
   const a = area * g.cell * g.cell;
   const hash = maskHash(mask, g.W);
-  if (!knives.length) return { closed: true, area: a, cutArea: a, knifeIncomplete: false, hash };
+  const kept = (m: Uint8Array) => (keepMask ? { mask: m, grid: g } : {});
+  if (!knives.length)
+    return { closed: true, area: a, cutArea: a, knifeIncomplete: false, hash, ...kept(mask) };
   const cutBy = (lines: readonly PtMm[][]) => {
     const kn = new Uint8Array(mask.length);
     for (const k of lines) drawPolyline(g, kn, k);
     let hit = 0;
     for (let j = 0; j < mask.length; j++) if (mask[j] && kn[j]) hit++;
-    if (!hit) return { hit, count: area, cuts: false, onSeed: false };
-    if (kn[k0]) return { hit, count: area, cuts: false, onSeed: true };
+    if (!hit) return { hit, count: area, cuts: false, onSeed: false, cut: null };
+    if (kn[k0]) return { hit, count: area, cuts: false, onSeed: true, cut: null };
     const blocked = new Uint8Array(mask.length);
     for (let j = 0; j < mask.length; j++) blocked[j] = mask[j] && !kn[j] ? 0 : 1;
     const cut = new Uint8Array(mask.length);
     const c = flood(g, blocked, [k0], cut);
     // the flood went round the knife's end: nothing was cut off
-    return { hit, count: c, cuts: c < area - hit - 4, onSeed: false };
+    return { hit, count: c, cuts: c < area - hit - 4, onSeed: false, cut };
   };
   const k1 = cutBy(knives);
   let incomplete = k1.onSeed || (k1.hit > 0 && !k1.cuts);
@@ -152,6 +158,7 @@ export function fillRank(
     cutArea: k1.cuts ? k1.count * g.cell * g.cell : a,
     knifeIncomplete: incomplete,
     hash,
+    ...kept(k1.cuts && k1.cut ? k1.cut : mask),
   };
 }
 

@@ -39,6 +39,7 @@ import { variantKnives } from '../variants';
 import { itemsOf, type WallModel } from '../walls';
 
 import { gradingEvidence, notEvidence, type GuardOpts, type StyleMap } from './guard';
+import { fillRank } from './choose';
 import { gradeRanks, type GradeRefusal, type GradeResult } from './index';
 import { bboxOfPts, boxOverlap, growBox, median } from './vec';
 
@@ -381,6 +382,26 @@ export function gradeHook(
   for (const p of G.portions)
     for (const r of p.ranks) byRank[r].push({ chain: p.chain, pts: p.pts });
   const res = new Map(G.seeds.map((s) => [s.seed, s]));
+  // the solver's final region of a rank, re-filled on its own raster (box, cell, walls, knives)
+  const rankPs = G.portions.map((p) => ({ track: p.chain, ranks: p.ranks, pts: p.pts }));
+  const gradedKnives = new Set(G.gradedKnives);
+  const solverKnives = kIds.flatMap((kid, i) => (gradedKnives.has(kid) ? [] : [knives[i]]));
+  const regionXorMm2 = (
+    c: PieceCandidate,
+    s: GradeResult['seeds'][number],
+    sd: Seed,
+    r: number,
+  ): number => {
+    const f = fillRank(s.box, cell, rankPs, r, sd.at, solverKnives, [], true);
+    if (!f.closed || !f.mask || !f.grid || c.outer.length < 3) return Infinity;
+    const g = f.grid;
+    const wall = new Uint8Array(g.W * g.H);
+    drawPolyline(g, wall, c.outer, true);
+    const ext = exterior(g, wall);
+    let d = 0;
+    for (let k = 0; k < ext.length; k++) if ((ext[k] ? 0 : 1) !== f.mask[k]) d++;
+    return d * g.cell * g.cell;
+  };
   const skip = new Set(
     G.seeds.filter((s) => !s.accepted || !s.rankOk.some(Boolean)).map((s) => s.seed),
   );
@@ -440,11 +461,22 @@ export function gradeHook(
           .filter((d) => d > 0);
         const step = steps.length ? median(steps) : 0;
         const mo = off.length ? median(off) : 0;
+        // and REGION for region (equal areas are not the same outline): the pixels F4's contour
+        // and the solver's region differ by, on the solver's own raster — the same rim for every
+        // rank; a rank that took another line differs by a strip, not a rim
+        const xor = live.map((c) => regionXorMm2(c, res.get(id)!, byId.get(id)!, c.rank));
+        const mx = median(xor);
         live.forEach((c, k) => {
           const bad =
             !step ||
             Math.abs(off[k] - mo) > GRADE_STEP_TOL * step ||
-            Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2;
+            Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2 ||
+            xor[k] - mx > GRADE_XOR_TOL * step ||
+            mx > GRADE_XOR_MAX * c.areaMm2;
+          if (HOOK_DEBUG.on)
+            HOOK_DEBUG.log(
+              `    region seed ${id} r${c.rank}: xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
+            );
           if (bad) {
             if (HOOK_DEBUG.on)
               HOOK_DEBUG.log(
@@ -477,3 +509,10 @@ export const HOOK_DEBUG = { on: false, log: (s: string) => console.log(s) };
 export const GRADE_STEP_TOL = 0.3;
 /** Max |median offset| as a share of the contour area (rim + opened spurs). */
 export const GRADE_RIM_MAX = 0.06;
+/**
+ * Region check (F4 contour vs the solver's region, pixel XOR): a rank may differ from the piece's
+ * median by this × the grade step, and the median (the rim) by this share of the area. Bench
+ * (robe / kombinezon / palto L1+L2, 144 accepted ranks): ≤ 0.16 step, median ≤ 1.45 % of the area.
+ */
+export const GRADE_XOR_TOL = 0.25;
+export const GRADE_XOR_MAX = 0.04;

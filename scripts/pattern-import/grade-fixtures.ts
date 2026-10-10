@@ -5,6 +5,7 @@
 //
 //   missing-count   graded nest, empty card run, nobody answered → the piece is refused, never one size
 //   mixed           a colour-encoded piece beside an unencoded (all black) graded piece
+//   region-check    the hook's final check is region-based: an equal-area other shape is refused
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
@@ -21,10 +22,11 @@ import { GRADE_TUNING } from 'lib/pattern-import/pieces/grade';
 import { pickLayout, scoreAreas } from 'lib/pattern-import/pieces/grade/choose';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { gradingEvidence, notEvidence } from 'lib/pattern-import/pieces/grade/guard';
-import { mixedGuard, PAIR_GUARD } from 'lib/pattern-import/pieces/grade/hook';
+import { gradeHook, mixedGuard, PAIR_GUARD } from 'lib/pattern-import/pieces/grade/hook';
+import { wallModel } from 'lib/pattern-import/pieces/walls';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { proposeSizeMap } from 'lib/pattern-import/sizes/map';
-import type { CardSize, Chain, IRPath, LineClass, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
+import type { CardSize, Chain, IRPath, LineClass, PieceCandidate, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 export type FixtureResult = { name: string; ok: boolean; why: string };
@@ -203,6 +205,68 @@ function mixedNarrow(): FixtureResult {
   return { name: 'mixed-guard', ok, why: notes.join(' · ') };
 }
 
+/**
+ * The hook's last check, F4's contour against the solver's region: a graded piece is solved, then
+ * handed contours = the true outlines (kept), and again with rank 2 swapped for a rectangle of the
+ * SAME area but another shape (refused — equal areas are not the same region).
+ */
+function regionCheck(): FixtureResult {
+  const n = 5;
+  const p = gradedPiece(0, 0, n, () => 0);
+  const sheet = sheetOf(p.draws);
+  const { set } = buildChainsDetailed(
+    sheet,
+    { joinGapMm: PATIMPORT.joinGapMm, joinAngleDeg: PATIMPORT.joinAngleDeg, joinLateralMm: PATIMPORT.joinLateralMm },
+    { extraTexts: [] },
+  );
+  const read = detectSizeRun(sheet, set, [{ id: 'fx', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never]);
+  const expected = expectedSizes(read, cardOf(n), null, set) ?? undefined;
+  const sizeRun = runForExpected(read, expected ?? null);
+  const seeds: Seed[] = [{ id: 0, at: p.seed, origin: 'click', variant: null }];
+  const hook = gradeHook(sheet, set, sizeRun, seeds, wallModel(set, sizeRun, sheet.texts), {
+    cellMm: PATIMPORT.fillCellMm,
+    snapMm: PATIMPORT.snapMm,
+    variant: null,
+    ...(expected ? { expectedSizes: expected } : {}),
+  });
+  const area = (q: PtMm[]) => Math.abs(q.reduce((a, v, i) => a + v.x * q[(i + 1) % q.length].y - q[(i + 1) % q.length].x * v.y, 0) / 2);
+  const cand = (r: number, outer: PtMm[]): PieceCandidate => ({
+    seed: 0,
+    rank: r,
+    outer,
+    walls: [],
+    inside: [],
+    textsInside: [],
+    outcome: 'closed',
+    areaMm2: area(outer),
+    bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    sourceCoverage: 1,
+    p95Mm: 0,
+  });
+  if (!hook) return { name: 'region-check', ok: false, why: 'no hook' };
+  const pass = (swap: boolean) => {
+    const list = p.truth.map((t, r) => {
+      if (!swap || r !== 2) return cand(r, t);
+      // the same area, 15 % wider and 1/1.15 as tall, about the same centre
+      const xs = t.map((q) => q.x);
+      const ys = t.map((q) => q.y);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      return cand(r, t.map((q) => ({ x: cx + (q.x - cx) * 1.15, y: cy + (q.y - cy) / 1.15 })));
+    });
+    const cands = new Map<number, PieceCandidate[]>([[0, list]]);
+    hook.finish(cands);
+    return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
+  };
+  const kept = pass(false);
+  const swapped = pass(true);
+  return {
+    name: 'region-check',
+    ok: kept === 'CCCCC' && swapped[2] === 'r',
+    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}`,
+  };
+}
+
 function shortZone(): FixtureResult {
   // a 300 × 200 rectangle drawn once; on the right edge a 40 mm tab per size, fanning out
   const n = 5;
@@ -310,7 +374,7 @@ function fragmentIds(): FixtureResult {
 }
 
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds(), mixedNarrow()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds(), mixedNarrow(), regionCheck()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {
