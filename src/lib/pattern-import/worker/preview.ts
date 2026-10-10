@@ -42,6 +42,7 @@ export function previewOf(
   paths: readonly Pick<IRPath, 'pts' | 'closed' | 'style'>[],
   styles: readonly Style[] | null,
   extentMm: number,
+  budget = POINT_BUDGET,
 ): Float32Array[] {
   const keep = paths.filter((p) => {
     if (p.pts.length < 2) return false;
@@ -59,7 +60,7 @@ export function previewOf(
       total += s.length;
       out.push(pack(s, p.closed && s.length > 2));
     }
-    if (total <= POINT_BUDGET) return out;
+    if (total <= budget) return out;
     eps *= 2.5;
   }
   // Still over budget after ×244: keep the longest lines only.
