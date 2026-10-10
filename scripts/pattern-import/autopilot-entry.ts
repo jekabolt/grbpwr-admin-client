@@ -268,7 +268,8 @@ export async function runCase(c: Case, mutate: string | null) {
         manifestOk:
           !!m &&
           m.techCardId === CARD_ID &&
-          (m.autopilot?.assumptions.length ?? -1) === Math.min(want, 400),
+          // no assumption = no autopilot field (an operator-shaped manifest)
+          (want ? m.autopilot?.assumptions.length === Math.min(want, 400) : !m.autopilot),
       };
     });
   }
@@ -323,7 +324,7 @@ export async function runCase(c: Case, mutate: string | null) {
         });
       const fab = fabricOf(t.fabric);
       const inFab = (s.fabrics?.byPurpose[fab] ?? []).includes(sd);
-      if (!inFab)
+      if (s.fabrics && !inFab)
         wrong.push({
           kind: 'fabric',
           subject,
@@ -535,11 +536,11 @@ function mutateAnswer(
     const seeds = [...(snap.baseSeeds ?? []), ...(s.pieces?.seeds ?? [])];
     const lab = (sd: SeedId) => seeds.find((x: Seed) => x.id === sd)?.text?.text;
     const tps = truthOf(c)?.variants[c.truth?.variant ?? 0]?.pieces ?? [];
-    const p =
-      s.semantics.pieces.find((x) => {
-        const l = lab(x.seed);
-        return l && tps.some((t) => norm(t.label) === norm(l));
-      }) ?? s.semantics.pieces[0];
+    // only a piece TRUTH knows: elsewhere a wrong count is invisible to any metric
+    const p = s.semantics.pieces.find((x) => {
+      const l = lab(x.seed);
+      return l && tps.some((t) => norm(t.label) === norm(l));
+    });
     if (!p) return a;
     const ppg = p.piecesPerGarment + 1;
     mutated.push(`qty seed ${p.seed}: ${p.piecesPerGarment} → ${ppg}`);

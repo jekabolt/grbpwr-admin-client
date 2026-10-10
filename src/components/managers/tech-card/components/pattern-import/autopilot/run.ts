@@ -18,7 +18,25 @@ import {
 } from './policy';
 import type { Assumption } from './types';
 
+/** A step answered this many times without moving on is a stop. */
+const MAX_ANSWERS_PER_STEP = 12;
+
+/** A number that changes whenever a stage output the questions read is a new object. */
+function outputsRev(run: AutopilotRun, s: ImportSessionApi['session']): number {
+  const now = [s.clean, s.sheet, s.chains, s.sizes, s.pieces, s.semantics, s.fabrics, s.names];
+  if (!run.outputs || now.some((x, k) => x !== run.outputs![k])) {
+    run.outputs = now;
+    run.rev++;
+  }
+  return run.rev;
+}
+
 export type AutopilotRun = {
+  /** The stage outputs last seen, and their revision (`outputsRev`). */
+  outputs: unknown[] | null;
+  rev: number;
+  /** Answers given per step. */
+  perStep: Partial<Record<WizardStep, number>>;
   /** (step, question) pairs already offered to the policy (N1: once each). */
   asked: Set<string>;
   ticks: number;
@@ -29,6 +47,9 @@ export type AutopilotRun = {
 };
 
 export const newAutopilotRun = (): AutopilotRun => ({
+  outputs: null,
+  rev: 0,
+  perStep: {},
   asked: new Set(),
   ticks: 0,
   done: null,
@@ -94,9 +115,17 @@ export async function autopilotTick(
     await api.next();
     return { kind: 'advanced', from: s.step };
   }
-  const key = `${s.step}|${question}`;
+  // N1 offers a question once; here once per question AND stage outputs: an answer that moved the
+  // run (a details answer names a piece, which then asks for its grain in the same words) is a new
+  // question, the same question over the same outputs is a loop → stop. (N1 keys by the question
+  // alone today: the coordinator is asked to key by the outputs too.)
+  const rev = outputsRev(run, s);
+  const key = `${s.step}|${question}|${rev}`;
   if (run.asked.has(key)) return halt({ step: s.step, reason: `asked again: ${question}` });
   run.asked.add(key);
+  const perStep = (run.perStep[s.step] = (run.perStep[s.step] ?? 0) + 1);
+  if (perStep > MAX_ANSWERS_PER_STEP)
+    return halt({ step: s.step, reason: `more than ${MAX_ANSWERS_PER_STEP} answers: ${question}` });
   const a = (opts.answer ?? autopilotAnswer)({
     session: s,
     inputs: api.inputs,
