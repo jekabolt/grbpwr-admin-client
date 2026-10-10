@@ -62,8 +62,12 @@ export function parseQuantity(text: string): number | null {
   return null;
 }
 
+// Corpus spellings (E1a): "CENTRE BACK FOLD", "Cut 1 on fold", "mod fold" / "Fold/ Stoffbruch/
+// Pliure" (DA/DE/FR legend), "im Bruch", "Stoffbr.", "Besatz Umbruch", "со сгибом", "СГИБ", plus
+// pli / doblez / piega / zgięcie / złożenie / vouw. A word is evidence only — semantics binds it to
+// an edge of the piece before anything is unfolded (fold.ts `bindFoldText`).
 const FOLD =
-  /on\s+(?:the\s+)?fold|\bfold\b|im\s*bruch|stoffbr|\bbruch\b|сгиб|au\s+pli|\bpli\b|na\s+zgi[eę]ci|zgięci|doblez|\bvouw\b|på\s+fold/iu;
+  /on\s+(?:the\s+)?fold|\bfold\b|im\s*bruch|stoffbr|\bbruch\b|umbruch|сгиб|au\s+pli|\bpli(?:ure)?\b|na\s+zgi[eę]ci|zgi[eę]ci|z[łl]o[żz]eni|doblez|\bpiega\b|\bvouw\b|på\s+fold/iu;
 
 /** Does the text say "on fold"? */
 export const saysFold = (text: string) => FOLD.test(text);

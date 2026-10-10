@@ -823,6 +823,7 @@ export class Session {
         families: this.families,
         ...input,
         fileAllowance,
+        docTexts: this.docTexts,
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
@@ -931,6 +932,15 @@ export class Session {
         }
       : null;
     const sizeTokens = new Set(input.sizes.map((s) => s.token.toLowerCase()));
+    // E1a: an open fold question blocks every file of the run (the piece is not written at all)
+    const openFolds = [
+      ...sem.blocked.filter((b) => b.reason === 'fold-question').map((b) => b.detail),
+      ...(sem.foldList
+        ? [
+            `the cutting list names ${sem.foldList.entries.length} pieces cut on fold, ${sem.foldList.unfolded} unfolded`,
+          ]
+        : []),
+    ];
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -954,6 +964,7 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );

@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import type {
   AllowanceDecision,
+  FoldAsk,
   LineMeaning,
   NameDecision,
   PtMm,
@@ -15,7 +16,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
-import { Chip } from 'ui/components/chip';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
@@ -54,7 +55,24 @@ const REASON: Record<string, string> = {
   'duplicate-identity': 'code used twice',
   'size-unmapped': 'size not mapped',
   'fold-unresolved': 'fold edge not found',
+  'fold-question': 'fold?',
 };
+
+/** The candidate edge nearest a click, within 30 mm; null = the click missed every edge. */
+function edgeAt(ask: FoldAsk, pt: PtMm): FoldAsk['edges'][number] | null {
+  let best: { e: FoldAsk['edges'][number]; d: number } | null = null;
+  for (const e of ask.edges) {
+    const dx = e.b.x - e.a.x;
+    const dy = e.b.y - e.a.y;
+    const t = Math.max(
+      0,
+      Math.min(1, ((pt.x - e.a.x) * dx + (pt.y - e.a.y) * dy) / (dx * dx + dy * dy || 1)),
+    );
+    const d = Math.hypot(pt.x - e.a.x - t * dx, pt.y - e.a.y - t * dy);
+    if (d <= 30 && (!best || d < best.d)) best = { e, d };
+  }
+  return best?.e ?? null;
+}
 
 export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
   const { session, inputs, patchInputs } = api;
@@ -65,6 +83,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   );
   const [grainA, setGrainA] = useState<PtMm | null>(null);
   const [drawing, setDrawing] = useState(false);
+  // E1a: the fold question's click tool (pick the edge the half is unfolded across)
+  const [pickingFold, setPickingFold] = useState(false);
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
@@ -85,7 +105,14 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   const mark = (seed: SeedId) => families.findIndex((f) => f.seed === seed) + 1;
 
   /** Re-run semantics with a patch to the operator's answers. */
-  const rerun = (p: Partial<Pick<Inputs, 'fileAllowance' | 'overrides' | 'operatorGrain'>>) => {
+  const rerun = (
+    p: Partial<
+      Pick<
+        Inputs,
+        'fileAllowance' | 'overrides' | 'operatorGrain' | 'operatorFold' | 'foldListChecked'
+      >
+    >,
+  ) => {
     const i = { ...inputs, ...p };
     void api.dispatch({
       type: 'semantics',
@@ -93,6 +120,9 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
         fileAllowance: i.fileAllowance ?? fileAllowance,
         pieceOverrides: i.overrides,
         operatorGrain: i.operatorGrain,
+        operatorFold: i.operatorFold,
+        foldListChecked: i.foldListChecked,
+        foldHints: session.names.filter((n) => n.suggestion?.onFold).map((n) => n.seed),
       },
     });
   };
@@ -102,13 +132,41 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     });
   const setName = (seed: SeedId, p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>) =>
     void api.editName(seed, p);
+  const foldAskOf = (seed: SeedId) => sem.folds?.find((q) => q.seed === seed);
+  /** Unfold across the picked edge: every size takes its own matching edge (semantics). */
+  const pickFold = (seed: SeedId, e: { a: PtMm; b: PtMm }) => {
+    setPickingFold(false);
+    rerun({
+      operatorFold: { ...inputs.operatorFold, [seed]: { a: e.a, b: e.b } },
+      overrides: {
+        ...inputs.overrides,
+        [seed]: { ...(inputs.overrides[seed] ?? {}), unfoldedFold: true },
+      },
+    });
+  };
+  const notFold = (seed: SeedId) => {
+    setPickingFold(false);
+    const { [seed]: _drop, ...operatorFold } = inputs.operatorFold;
+    rerun({
+      operatorFold,
+      overrides: {
+        ...inputs.overrides,
+        [seed]: { ...(inputs.overrides[seed] ?? {}), unfoldedFold: false },
+      },
+    });
+  };
   const confirm = (seed: SeedId) =>
     patchInputs((i) => ({ confirmedNames: [...new Set([...i.confirmedNames, seed])] }));
 
   const selFamily = families.find((f) => f.seed === sel);
   const selSpec = sel != null ? specsOf(sel)[0] : undefined;
   const selRank = selSpec?.sizes[0]?.rank ?? Math.min(2, (selFamily?.candidates.length ?? 1) - 1);
-  const selOuter = selFamily?.candidates[selRank]?.outer;
+  const selAsk = sel != null ? foldAskOf(sel) : undefined;
+  // a fold question is asked on its own size: show that one, so the edges sit on the outline
+  const selCand = selAsk
+    ? selFamily?.candidates.find((c) => c.rank === selAsk.rank)
+    : selFamily?.candidates[selRank];
+  const selOuter = selCand?.outer;
   const selGrain =
     sel != null
       ? inputs.operatorGrain[sel] ??
@@ -170,6 +228,17 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
               cut, the card adds nothing).
             </Text>
           </div>
+
+          {sem.foldList && (
+            <div className='mt-2 flex flex-wrap items-center gap-2'>
+              <Text size='micro' component='p' className='min-w-0 flex-1 text-error'>
+                ! cutting list: {sem.foldList.entries.length} cut on fold (
+                {sem.foldList.entries.map((e) => `«${e}»`).join(', ')}), {sem.foldList.unfolded}{' '}
+                unfolded here. Tick unfold on each, or confirm.
+              </Text>
+              <Chip onClick={() => rerun({ foldListChecked: true })}>list checked</Chip>
+            </div>
+          )}
 
           <DataTable className='mt-2'>
             <thead>
@@ -287,19 +356,40 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       />
                     </td>
                     <td data-align='left'>
-                      <label
-                        className='flex items-center gap-1.5'
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <CheckboxCommon
-                          name={`fold-${seed}`}
-                          checked={unfolded}
-                          onChange={(v) => override(seed, { unfoldedFold: v })}
-                        />
-                        <Text size='micro' variant='label' component='span'>
-                          unfold
-                        </Text>
-                      </label>
+                      {foldAskOf(seed) ? (
+                        <Button
+                          variant='secondary'
+                          size='xs'
+                          className='whitespace-nowrap border-error text-error'
+                          title={foldAskOf(seed)!.why}
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            setSel(seed);
+                            setDrawing(false);
+                            setGrainA(null);
+                            setPickingFold(true);
+                          }}
+                        >
+                          ! fold?
+                        </Button>
+                      ) : (
+                        <label
+                          className='flex items-center gap-1.5'
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <CheckboxCommon
+                            name={`fold-${seed}`}
+                            checked={unfolded}
+                            // ticked: semantics asks which edge (E1a); unticked: "not a fold"
+                            onChange={(v) =>
+                              v ? override(seed, { unfoldedFold: true }) : notFold(seed)
+                            }
+                          />
+                          <Text size='micro' variant='label' component='span'>
+                            unfold
+                          </Text>
+                        </label>
+                      )}
                     </td>
                     <td data-align='left'>
                       {grainOrigin ? (
@@ -392,6 +482,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 pressed={drawing}
                 onClick={() => {
                   setGrainA(null);
+                  setPickingFold(false);
                   setDrawing((d) => !d);
                 }}
               >
@@ -410,9 +501,14 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
               <div className='min-h-0 flex-1'>
                 <SheetViewport
                   bbox={session.sheet.sheet.bbox}
-                  focus={selFamily?.candidates[selRank]?.bbox ?? null}
-                  tool={drawing ? 'point' : 'pan'}
+                  focus={selCand?.bbox ?? null}
+                  tool={drawing || pickingFold ? 'point' : 'pan'}
                   onPoint={(pt) => {
+                    if (pickingFold && selAsk) {
+                      const e = edgeAt(selAsk, pt);
+                      if (e) pickFold(sel, e);
+                      return;
+                    }
                     if (!drawing) return;
                     if (!grainA) setGrainA(pt);
                     else {
@@ -443,6 +539,23 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                         stroke={SHEET_INK.ink}
                         strokeWidth={unit * 1.6}
                       />
+                      {selAsk?.edges.map((e, i) => {
+                        // the suggested edge solid, the others dashed: never colour alone
+                        const sug = i === selAsk.suggested;
+                        return (
+                          <line
+                            key={i}
+                            x1={e.a.x}
+                            y1={vy(e.a.y)}
+                            x2={e.b.x}
+                            y2={vy(e.b.y)}
+                            stroke={sug ? SHEET_INK.blue : SHEET_INK.red}
+                            strokeWidth={unit * (sug ? 4 : 2.5)}
+                            strokeDasharray={sug ? undefined : `${unit * 6} ${unit * 4}`}
+                            pointerEvents='none'
+                          />
+                        );
+                      })}
                       {selGrain && (
                         <GrainMark
                           a={selGrain.a}
@@ -470,6 +583,15 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       ? '! click the second end of the grainline'
                       : '! click the first end of the grainline'}
                   </Text>
+                ) : pickingFold && selAsk ? (
+                  <div className='flex items-center gap-2'>
+                    <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                      ! click the fold edge (solid = suggested)
+                    </Text>
+                    <Chip quiet onClick={() => setPickingFold(false)}>
+                      cancel
+                    </Chip>
+                  </div>
                 ) : (
                   <>
                     <Row
@@ -492,7 +614,44 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       label='fabrics (proposed)'
                       value={nameOf(sel)?.suggestion?.fabrics.length ?? '—'}
                     />
-                    {blockedOf(sel) && (
+                    {selAsk && (
+                      <div className='mt-1 flex flex-col gap-1'>
+                        <Text size='micro' component='p' className='text-error'>
+                          ! fold? {selAsk.why}
+                        </Text>
+                        {selAsk.evidence.length > 0 && (
+                          <Text size='micro' variant='label' component='p'>
+                            sheet: {selAsk.evidence.map((t) => `«${t}»`).join(', ')}
+                          </Text>
+                        )}
+                        <ChipRow>
+                          {selAsk.suggested != null && (
+                            <Chip onClick={() => pickFold(sel, selAsk.edges[selAsk.suggested!])}>
+                              unfold on solid edge
+                            </Chip>
+                          )}
+                          <Chip
+                            selected={pickingFold}
+                            pressed={pickingFold}
+                            disabled={!selAsk.edges.length}
+                            onClick={() => {
+                              setDrawing(false);
+                              setGrainA(null);
+                              setPickingFold(true);
+                            }}
+                          >
+                            pick edge
+                          </Chip>
+                          <Chip onClick={() => notFold(sel)}>not a fold</Chip>
+                        </ChipRow>
+                        {!selAsk.edges.length && (
+                          <Text size='micro' variant='label' component='p'>
+                            no straight edge to unfold across: draw the whole piece, or not a fold
+                          </Text>
+                        )}
+                      </div>
+                    )}
+                    {blockedOf(sel) && !selAsk && (
                       <Text size='micro' component='p' className='mt-1 text-error'>
                         ! {blockedOf(sel)!.detail}
                         {blockedOf(sel)!.reason === 'leak' ? ' — back to pieces to fix it' : ''}

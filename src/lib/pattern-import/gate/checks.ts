@@ -40,6 +40,7 @@ import {
   blockNameOf,
 } from '../write/plan';
 import { identityProblem } from '../manifest/identity';
+import { foldShapeProblem } from '../semantics/fold';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -699,6 +700,11 @@ export function g6(ctx: GateCtx): GateCheck {
   const failed: string[] = [];
   const notes: string[] = [];
   let worstDev = 0;
+  // E1a (D3): a fold the sheet claims but nobody resolved blocks the whole file, not just the piece
+  for (const q of ctx.expect.openFolds ?? []) {
+    failed.push('*');
+    notes.push(`fold question open — ${q}`);
+  }
   for (const b of ctx.blocks) {
     const s = b.size;
     const spec = b.spec;
@@ -718,8 +724,12 @@ export function g6(ctx: GateCtx): GateCheck {
         const db = closestOnPolyline(s.fold.b, cut, true).d;
         if (Math.max(da, db) > PATIMPORT.snapMm)
           bad(`fold line ends ${da.toFixed(2)}/${db.toFixed(2)} mm off the cut line`);
+        // E1a: the written whole must be a believable unfold — symmetric about its fold line, simple,
+        // no slot along the fold (a half mirrored across the wrong edge)
+        const why = foldShapeProblem(cut, [s.fold.a, s.fold.b]);
+        if (why) bad(`unfold: ${why}`);
       }
-    }
+    } else if (spec.unfoldedFold) bad('marked unfolded but carries no fold line');
     const derived = s.offset != null || spec.allowance.meaning === 'seam';
     if (!derived) continue;
     const r = s.offset;
