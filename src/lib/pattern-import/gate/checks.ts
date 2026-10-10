@@ -218,9 +218,10 @@ function linesFor(ctx: GateCtx, b: BlockInfo): { line: PtMm[] | null; layer: str
 /**
  * G3/G4 measure the written line against SOURCE geometry only (F14b, Codex C1): `wallsByBlock`
  * holds drawn chains, never a bridge or band cut. `derivedOk` = the derived edges G15 passed, per
- * block: where the written line runs on one, G4 also measures against the drawn chains that edge
- * runs along (`along`, IR), and what is still off every drawn line there — the part G15 bounded —
- * is left out of G4's distances and named in the note. Nothing else is excused; G3 is untouched.
+ * block: where the written line runs on one, G4 also measures against the tick THAT edge runs
+ * along (`along`, IR — only a band cut G15 found carried keeps it), and what is still off every
+ * drawn line there — the part G15 bounded — is left out of G4's distances and named in the note.
+ * Nothing else is excused; G3 is untouched.
  */
 export function g3g4(
   ctx: GateCtx,
@@ -292,29 +293,29 @@ export function g3g4(
       5,
     );
     // on a derived edge G15 passed, the written line is measured against the walls AND the drawn
-    // chains that edge runs along (IR both); what is still off them there is the bounded invention
-    const ok = derivedOk.get(b.block) ?? [];
-    const onDerived = ok.length
-      ? new SegmentIndex(
-          ok.map((e) => ({ pts: e.pts, closed: false })),
-          5,
-        )
-      : null;
-    const alongIdx = ok.some((e) => e.along?.length)
-      ? new SegmentIndex(
-          ok.flatMap((e) => e.along ?? []).map((w) => ({ pts: w, closed: false })),
-          5,
-        )
-      : null;
+    // tick THAT edge runs along (a carried band cut; IR both) — per edge, never another edge's;
+    // what is still off them there is the bounded invention
+    const ok = (derivedOk.get(b.block) ?? []).map((e) => ({
+      on: new SegmentIndex([{ pts: e.pts, closed: false }], 5),
+      tick: e.along?.length
+        ? new SegmentIndex(
+            e.along.map((w) => ({ pts: w, closed: false })),
+            5,
+          )
+        : null,
+    }));
     const d: number[] = [];
     let excused = 0;
     for (const p of sampleAlong(line, true, 0.5)) {
       let dw = wallIdx.nearest(p, 20);
-      if (dw > snap && onDerived && onDerived.nearest(p, snap) <= snap) {
-        if (alongIdx) dw = Math.min(dw, alongIdx.nearest(p, 20));
-        if (dw > snap) {
-          excused++;
-          continue;
+      if (dw > snap) {
+        const here = ok.filter((e) => e.on.nearest(p, snap) <= snap);
+        if (here.length) {
+          for (const e of here) if (e.tick) dw = Math.min(dw, e.tick.nearest(p, 20));
+          if (dw > snap) {
+            excused++;
+            continue;
+          }
         }
       }
       d.push(dw);
@@ -366,16 +367,15 @@ export function g3g4(
 
 /**
  * The most one derived edge may add OFF the drawing (its length farther than `snapMm` from every
- * wall and every drawn chain it runs along), mm, by kind:
+ * wall and, for a band cut its tick carries, from that tick), mm, by kind:
  *   bridge          — the fill's own gap close: `FillOpts.autoBridgeMm` default 3 (pieces/bridges.ts);
  *   operator-bridge — the wizard's "close gap": 30 mm. The tool is for a junction the drawing leaves
  *                     open (a dash phase, a line stopping short: palto 4.7 mm); 30 mm is 10× the
  *                     automatic close and still well under any real piece edge — a longer gap is an
  *                     outline the source does not draw, which only a drawn line ("use a line") may
  *                     supply, never a straight chord the operator invents;
- *   band-cut        — a size tick carried across its band where it stops short (reef's L: 9 mm): the
- *                     same 30 mm bound; the band is never wider than a tick (≤ 250 mm), the
- *                     carried part is what the drawing left out.
+ *   band-cut        — a size tick carried across its band where it stops short (reef's L: 8.5 mm):
+ *                     the same 30 mm bound.
  */
 export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
   bridge: 3,
@@ -386,13 +386,33 @@ export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
  * end, mm (operator bridges overshoot their landing by 0.6 mm, pieces/operator.ts). */
 export const DERIVED_LAND_REACH_MM = 1;
 /**
- * Per block: at most this many derived edges, adding at most this share of the written line's
- * length off the drawing. The corpus (F4 fill, every sample) has at most 3 per candidate (reef) and
- * ≤ 0.32 % off the drawing (reef's auto bridges, palto's 4.7 mm operator bridge): 2× and ~15×
- * headroom, while a piece can still never be 1/20 invented.
+ * The TOTAL length one derived edge may have, whatever runs beside it (F14e, Codex R1: a 100 mm
+ * "bridge" along an unrelated line 0.2 mm away was 0 mm off the drawing and passed). A bridge is a
+ * chord the pipeline drew: its off-drawing bound plus `DERIVED_LAND_REACH_MM` at each end (corpus:
+ * auto ≤ 2.80 mm, palto's operator bridge 5.9 mm with its 0.6 mm overshoots). Only a band cut may
+ * be longer, and only when it is CARRIED: its own tick (or the piece's walls) runs along it in one
+ * contiguous stretch of ≥ `PATIMPORT.derivedAlongMinShare` of its length — then up to the longest
+ * tick a band ladder takes (`bandTicks`: 250 mm) plus the reach (reef's L: 95.25 mm, 91.1 % on
+ * its tick). An uncarried band cut is bounded like an operator bridge. A band cut's walls count
+ * toward its carrying stretch (one that lies on the piece's own line invents nothing); a bridge's
+ * never do.
+ */
+export const DERIVED_LEN_MAX_MM: Record<DerivedEdgeKind, number> = {
+  bridge: DERIVED_OFF_MAX_MM.bridge + 2 * DERIVED_LAND_REACH_MM,
+  'operator-bridge': DERIVED_OFF_MAX_MM['operator-bridge'] + 2 * DERIVED_LAND_REACH_MM,
+  'band-cut': DERIVED_OFF_MAX_MM['band-cut'] + 2 * DERIVED_LAND_REACH_MM,
+};
+export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
+/**
+ * Per block: at most this many derived edges; what they INVENT — a bridge's whole length, a band
+ * cut's stretch off its walls and carrying tick — at most this share of the written line and this
+ * many mm in all. The corpus (F4 fill, every sample) has at most 3 per candidate (reef) and invents
+ * ≤ 8.5 mm per piece (reef's L band cut; three auto bridges 7.3 mm; palto's bridge 5.9 mm), ≤ 0.32 %
+ * of the line: 2×, ~7× and ~15× headroom, while a piece can never be 1/20 invented.
  */
 export const DERIVED_MAX_PER_BLOCK = 6;
 export const DERIVED_MAX_SHARE = 0.05;
+export const DERIVED_MAX_TOTAL_MM = 60;
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
@@ -405,11 +425,15 @@ export type DerivedVerdict = {
 
 /**
  * G15: every derived edge is anchored and short. Both ends land on the block's walls (≤ `snapMm`
- * within `DERIVED_LAND_REACH_MM` of the end); the stretch off the drawing (farther than `snapMm`
- * from the walls and from the drawn chains the edge runs along) is ≤ its kind's
- * `DERIVED_OFF_MAX_MM`; per block ≤ `DERIVED_MAX_PER_BLOCK` edges whose off-drawing stretches total
- * ≤ `DERIVED_MAX_SHARE` of the written line. A block whose edges cannot be checked (no walls)
- * fails. The edges of a block that passes are the audited list the manifest carries.
+ * within `DERIVED_LAND_REACH_MM` of the end); its total length is ≤ `DERIVED_LEN_MAX_MM` of its
+ * kind — a band cut up to `DERIVED_CARRIED_LEN_MAX_MM` only when carried (its walls + its OWN
+ * `along`, never another edge's, run along it in one contiguous stretch of ≥
+ * `PATIMPORT.derivedAlongMinShare`); the stretch off the drawing (farther than `snapMm` from the
+ * walls and, for a carried band cut, its tick) is ≤ its kind's `DERIVED_OFF_MAX_MM`. Per block
+ * ≤ `DERIVED_MAX_PER_BLOCK` edges, inventing (a bridge whole, a band cut off its support) ≤
+ * `DERIVED_MAX_SHARE` of the written line and ≤ `DERIVED_MAX_TOTAL_MM`. A block whose edges cannot
+ * be checked (no walls) fails. The edges of a block that passes are the audited list the manifest
+ * carries; an uncarried band cut's `along` is dropped there, so G4 never measures against it.
  */
 export function g15(ctx: GateCtx): DerivedVerdict {
   const snap = PATIMPORT.snapMm;
@@ -432,27 +456,40 @@ export function g15(ctx: GateCtx): DerivedVerdict {
       bad(`${list.length} derived edge(s) and no drawn walls to land them on`);
       continue;
     }
-    // ends land on the piece's own walls; "off the drawing" = off the walls AND off the drawn
-    // chains the edge runs along (a band cut follows its size tick) — IR lines, never derived ones
+    // ends land on the piece's own walls; "off the drawing" = off the walls and, for a carried
+    // band cut, off its own tick — IR lines, never derived ones, never another edge's support
     const open = (ls: PtMm[][]) => ls.map((w) => ({ pts: w, closed: false }));
     const wallIdx = new SegmentIndex(open(walls), 5);
-    const drawnIdx = new SegmentIndex(open([...walls, ...list.flatMap((e) => e.along ?? [])]), 5);
     const before = failed.length;
-    let offSum = 0;
+    let invented = 0;
     const rows: DerivedEdgeAudit[] = [];
+    const passed: DerivedEdge[] = [];
     for (const e of list) {
       const len = polylineLength(e.pts, false);
       const s = sampleAlong(e.pts, false, 0.25);
-      const d = s.map((p) => drawnIdx.nearest(p, 5));
       const dw = s.map((p) => wallIdx.nearest(p, 5));
-      let off = 0;
+      const tick =
+        e.kind === 'band-cut' && e.along?.length ? new SegmentIndex(open(e.along), 5) : null;
+      const dt = tick ? s.map((p) => tick.nearest(p, 5)) : null;
+      const on = (i: number) => dw[i] <= snap || (!!dt && dt[i] <= snap);
+      // the longest contiguous stretch on walls ∪ this edge's own tick, and the arc
       let arc = 0;
+      let run = 0;
+      let carry = 0;
       const arcs: number[] = [0];
       for (let i = 1; i < s.length; i++) {
         const l = dist(s[i - 1], s[i]);
         arc += l;
         arcs.push(arc);
-        off += l * (((d[i - 1] > snap ? 1 : 0) + (d[i] > snap ? 1 : 0)) / 2);
+        run = on(i - 1) && on(i) ? run + l : 0;
+        carry = Math.max(carry, run);
+      }
+      const carried = e.kind === 'band-cut' && carry >= PATIMPORT.derivedAlongMinShare * len;
+      // off the drawing: off the walls, and off the tick only when the tick carries the edge
+      let off = 0;
+      for (let i = 1; i < s.length; i++) {
+        const offAt = (k: number) => (dw[k] > snap && !(carried && !!dt && dt[k] <= snap) ? 1 : 0);
+        off += (arcs[i] - arcs[i - 1]) * ((offAt(i - 1) + offAt(i)) / 2);
       }
       // nearest approach to a wall within reach of each end
       let landA = Infinity;
@@ -461,6 +498,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
         if (arcs[i] <= DERIVED_LAND_REACH_MM) landA = Math.min(landA, dw[i]);
         if (arc - arcs[i] <= DERIVED_LAND_REACH_MM) landB = Math.min(landB, dw[i]);
       }
+      const lenMax = carried ? DERIVED_CARRIED_LEN_MAX_MM : DERIVED_LEN_MAX_MM[e.kind];
       const what = `${e.kind} ${len.toFixed(1)} mm`;
       if (!Number.isFinite(len) || !(len > 0) || s.some((p) => !Number.isFinite(p.x + p.y)))
         bad(`${what}: not a finite edge`);
@@ -468,11 +506,20 @@ export function g15(ctx: GateCtx): DerivedVerdict {
         bad(
           `${what}: an end does not land on a drawn wall (${fmt(landA, 2) ?? '∞'} / ${fmt(landB, 2) ?? '∞'} mm)`,
         );
+      else if (!(len <= lenMax))
+        bad(
+          `${what}: longer than ${lenMax} mm${
+            e.kind === 'band-cut'
+              ? ` (its tick runs along ${((carry / len) * 100).toFixed(1)} % of it in one stretch; carried needs ≥ ${PATIMPORT.derivedAlongMinShare * 100} %)`
+              : ' — whatever runs beside it, a bridge is a chord the pipeline drew'
+          }`,
+        );
       else if (!(off <= DERIVED_OFF_MAX_MM[e.kind]))
         bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${DERIVED_OFF_MAX_MM[e.kind]} mm)`);
       const a = e.pts[0];
       const z = e.pts[e.pts.length - 1];
-      offSum += off;
+      // what the edge invents: a bridge whole (a chord, wherever it runs), a band cut off its support
+      invented += e.kind === 'band-cut' ? off : len;
       rows.push({
         block: b.block,
         kind: e.kind,
@@ -481,19 +528,22 @@ export function g15(ctx: GateCtx): DerivedVerdict {
         a: [r1(a.x), r1(a.y)],
         b: [r1(z.x), r1(z.y)],
       });
+      passed.push(carried && e.along ? e : { kind: e.kind, pts: e.pts });
     }
     if (list.length > DERIVED_MAX_PER_BLOCK)
       bad(`${list.length} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
     const { line } = linesFor(ctx, b);
     const per = line ? polylineLength(line, true) : NaN;
-    const share = offSum / per;
+    const share = invented / per;
     if (Number.isFinite(share)) worstShare = Math.max(worstShare, share);
     if (!(share <= DERIVED_MAX_SHARE))
       bad(
-        `derived edges add ${offSum.toFixed(1)} mm off the drawing${line ? ` = ${(share * 100).toFixed(1)} % of the line` : ' and there is no written line'} (≤ ${DERIVED_MAX_SHARE * 100} %)`,
+        `derived edges invent ${invented.toFixed(1)} mm${line ? ` = ${(share * 100).toFixed(1)} % of the line` : ' and there is no written line'} (≤ ${DERIVED_MAX_SHARE * 100} %)`,
       );
+    else if (!(invented <= DERIVED_MAX_TOTAL_MM))
+      bad(`derived edges invent ${invented.toFixed(1)} mm in all (≤ ${DERIVED_MAX_TOTAL_MM} mm)`);
     if (failed.length === before) {
-      ok.set(b.block, [...list]);
+      ok.set(b.block, passed);
       audit.push(...rows);
     }
   }
@@ -507,7 +557,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
           ? `${edges} derived edge(s) land on drawn walls and stay short — listed in the manifest`
           : 'no derived edges'),
       `${edges} edge(s) / ${fmt(worstShare * 100, 2)} %`,
-      `ends ≤ ${snap} mm on a wall; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} (auto) / ${DERIVED_OFF_MAX_MM['operator-bridge']} (operator, band cut) mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block, ≤ ${DERIVED_MAX_SHARE * 100} % of the line`,
+      `ends ≤ ${snap} mm on a wall; length ≤ ${DERIVED_LEN_MAX_MM.bridge} (auto) / ${DERIVED_LEN_MAX_MM['operator-bridge']} (operator, band cut) mm, a band cut its tick carries (≥ ${PATIMPORT.derivedAlongMinShare * 100} % in one stretch) ≤ ${DERIVED_CARRIED_LEN_MAX_MM} mm; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} / ${DERIVED_OFF_MAX_MM['operator-bridge']} mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block inventing ≤ ${DERIVED_MAX_SHARE * 100} % of the line and ≤ ${DERIVED_MAX_TOTAL_MM} mm`,
     ),
     ok,
     audit,
