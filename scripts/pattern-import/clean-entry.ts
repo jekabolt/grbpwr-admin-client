@@ -1,5 +1,5 @@
 // PATTERN-IMPORT · A8 probe — the clean stage (lib/pattern-import/clean) on the corpus:
-//   wm      wm M (corpus/pdf/wm_kka_15_01_m_wykroj.pdf, the owner's "complete failure" of 10.10):
+//   wm-M    wm M (corpus/pdf/wm_kka_15_01_m_wykroj.pdf, the owner's "complete failure" of 10.10):
 //           grid, ROW/COLUMN labels, stroke text, the test square (and its scale candidate), the
 //           watermark of the sheet pass masked; the legend before / after; per-kind undo, an
 //           accepted suggestion, the page-role door; then every detector switched off in turn —
@@ -497,10 +497,10 @@ export async function wallsSection(id: string) {
 
 export async function main(args: string[]): Promise<number> {
   const [mode, id] = args;
-  if (mode === 'wm') await wmSection();
+  if (mode === 'wm-M') await wmSection();
   else if (mode === 'synth') synthSection();
   else if (mode === 'walls') await wallsSection(id);
-  else throw new Error(`mode? wm | synth | walls <case>`);
+  else throw new Error(`mode? wm-M | synth | walls <case>`);
   for (const c of checks) console.log(`@@CHECK ${JSON.stringify(c)}`);
   return 0;
 }

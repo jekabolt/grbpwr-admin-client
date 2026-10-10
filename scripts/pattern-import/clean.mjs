@@ -4,7 +4,7 @@
 // detector), the wall guard on a synthetic page, and the negative controls (no wall of a closed
 // piece masked) through the e2e operator pass — one child process per section / case.
 //   node scripts/pattern-import/clean.mjs                 (yarn patimport:clean)
-//   node scripts/pattern-import/clean.mjs wm robe          just these sections / cases
+//   node scripts/pattern-import/clean.mjs wm-M robe          just these sections / cases
 //   env PATIMPORT_CORPUS, PATIMPORT_REPORTS, PATIMPORT_E2E_OUT (the e2e pass writes its files there)
 import { build as esbuild } from 'esbuild';
 import { spawnSync } from 'node:child_process';
@@ -60,9 +60,12 @@ const CONTROLS = [
 ];
 const args = process.argv.slice(2);
 const jobs = [
-  ...(!args.length || args.includes('wm') ? [['wm']] : []),
+  ...(!args.length || args.includes('wm-M') ? [['wm-M']] : []),
   ...(!args.length || args.includes('synth') ? [['synth']] : []),
-  ...CONTROLS.filter((c) => !args.length || args.includes(c)).map((c) => ['walls', c]),
+  ...(args.length ? args.filter((c) => c !== 'wm-M' && c !== 'synth') : CONTROLS).map((c) => [
+    'walls',
+    c,
+  ]),
 ];
 
 const rows = [];
@@ -96,7 +99,9 @@ for (const job of jobs) {
 let bad = 0;
 for (const c of rows) {
   if (!c.ok) bad++;
-  console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.section.padEnd(28)} ${c.check}\n        ${c.got.slice(0, 600)}`);
+  console.log(
+    `${c.ok ? 'PASS' : 'FAIL'}  ${c.section.padEnd(28)} ${c.check}\n        ${c.got.slice(0, 600)}`,
+  );
 }
 mkdirSync(REPORTS, { recursive: true });
 const d = new Date();

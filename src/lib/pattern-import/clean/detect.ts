@@ -34,6 +34,10 @@ export type Found = {
   square?: { box: BoxMm; nominalMm: number; why: string };
   /** Curve text: the band (SoM crops, seeds). */
   band?: GlyphRun;
+  /** Tile chrome found by repetition (decided per file in cleanPages). */
+  chrome?: boolean;
+  /** A garment line ends on it (tile chrome: offered for the whole file, never applied alone). */
+  touched?: boolean;
   /** Text furniture: page `IRText.id`s. */
   textIds?: number[];
 };
@@ -52,7 +56,10 @@ export const CLEAN = {
   textMinStrokes: 12,
   /** Watermark (8b): outline glyphs this tall (across the line), mm. */
   markMinHeightMm: 20,
-  markMaxHeightMm: 250,
+  markMaxHeightMm: 120,
+  /** Watermark letters stand close (gap ≤ 0.9 heights, a dot between two) and none is wider than 1.3 heights. */
+  markMaxGap: 0.9,
+  markMaxAspect: 1.3,
   /** Wall guard: a line this long that a candidate touches end-on is garment line work. */
   guardLongMm: 50,
   guardTouchMm: 0.3,
@@ -125,6 +132,46 @@ export function repetition(pages: PageChains[]): number[][] {
   );
 }
 
+/**
+ * A repeated chain that runs out to the edge of the page's drawing is a garment line the tile
+ * clipped — a straight edge crossing a column of tiles sits at one page place on every one of them
+ * (wm's back and fold lines, clipped at the printable area) — unless that end is a CORNER: it
+ * meets the end of another repeated chain (a tile frame's sides meet at its corners).
+ */
+export function clippedByPage(pc: PageChains, i: number, rep: readonly number[]): boolean {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of pc.box) {
+    minX = Math.min(minX, b.minX);
+    minY = Math.min(minY, b.minY);
+    maxX = Math.max(maxX, b.maxX);
+    maxY = Math.max(maxY, b.maxY);
+  }
+  const onEdge = (p: PtMm) =>
+    p.x <= minX + 1 || p.y <= minY + 1 || p.x >= maxX - 1 || p.y >= maxY - 1;
+  const c = pc.chains[i];
+  if (c.closed) return false;
+  // the partner leaves the corner in another direction (a line drawn twice is no corner)
+  const dirAt = (pts: readonly PtMm[], p: PtMm) => {
+    const far = dist(pts[0], p) <= 0.6 ? pts[pts.length - 1] : pts[0];
+    const L = dist(far, p) || 1;
+    return { x: (far.x - p.x) / L, y: (far.y - p.y) / L };
+  };
+  const corner = (p: PtMm) => {
+    const mine = dirAt(c.pts, p);
+    return pc.chains.some((o, k) => {
+      if (k === i || rep[k] < CLEAN.repeatMinPages || o.closed) return false;
+      if (dist(o.pts[0], p) > 0.6 && dist(o.pts[o.pts.length - 1], p) > 0.6) return false;
+      const d = dirAt(o.pts, p);
+      return Math.abs(mine.x * d.x + mine.y * d.y) < Math.cos(Math.PI / 6);
+    });
+  };
+  for (const p of [c.pts[0], c.pts[c.pts.length - 1]]) if (onEdge(p) && !corner(p)) return true;
+  return false;
+}
+
 /** The kind of a repeated chain by where it sits on the page and how big it is. */
 export function chromeKind(pc: PageChains, i: number): BackgroundKind {
   const b = pc.box[i];
@@ -187,6 +234,8 @@ export function textLines(
     maxGap?: number;
     /** Outline letters: strokes join end to end only (`glyphClusters` endsOnly). */
     endsOnly?: boolean;
+    /** No glyph wider than this many heights (letters; a row of pieces has long ones). */
+    maxAspect?: number;
   },
   keep: (i: number) => boolean = () => true,
 ): GlyphRun[] {
@@ -206,6 +255,7 @@ export function textLines(
       const ws = run.map((x) => x.w);
       if (Math.max(...ws) < 1.15 * Math.min(...ws)) return false;
       if (med(ws) < 0.25 * h) return false;
+      if (o.maxAspect && Math.max(...ws) > o.maxAspect * h) return false;
       const strokes = run.reduce((a, x) => a + x.glyph.ids.length, 0);
       return strokes >= o.minStrokes;
     },
@@ -504,6 +554,8 @@ export function touchingLineWork(
   lens: readonly number[],
   candidate: ReadonlySet<number>,
   masked: ReadonlySet<number>,
+  /** Only the candidate's OWN ends count (a garment line ending ON it does not protect it). */
+  ownEndsOnly = false,
 ): Set<number> {
   const out = new Set<number>();
   if (!candidate.size || !CLEAN.on.guard) return out;
@@ -526,9 +578,10 @@ export function touchingLineWork(
     if (c.length < 2) continue;
     for (const p of [c[0], c[c.length - 1]]) hits(gLong, p, () => out.add(i));
   }
-  polys.forEach((c, i) => {
-    if (c.length < 2 || !long(i)) return;
-    for (const p of [c[0], c[c.length - 1]]) hits(gCand, p, (o) => out.add(o));
-  });
+  if (!ownEndsOnly)
+    polys.forEach((c, i) => {
+      if (c.length < 2 || !long(i)) return;
+      for (const p of [c[0], c[c.length - 1]]) hits(gCand, p, (o) => out.add(o));
+    });
   return out;
 }

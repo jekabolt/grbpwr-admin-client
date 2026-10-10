@@ -36,6 +36,7 @@ import { bboxOf } from '../chains/geom';
 import {
   CLEAN,
   chromeKind,
+  clippedByPage,
   crossedGlyphs,
   gridOf,
   memberIds,
@@ -164,10 +165,30 @@ export function cleanPages(
       pcs.length >= CLEAN.repeatMinPages
         ? repeatedTexts(tiles)
         : tiles.map(() => new Map<number, number>());
+    const foundOf = pcs.map((pc, k) => {
+      o.checkCancel?.();
+      return detectPage(pc, rep[k], textRep[k], notes);
+    });
+    // Tile chrome is decided per FILE and kind: where garment lines end on a frame (they are cut
+    // at it on the tile — blazer, Redcafe), the frame closes their gaps at the seams once tiles
+    // meet, and half a frame masked loses its corners to the furniture test downstream — either
+    // way pieces leak. Such chrome is offered on every page of the file, never applied alone.
+    const touchedKinds = new Set(
+      foundOf.flatMap((fs) => fs.filter((f) => f.repeated && f.touched).map((f) => f.kind)),
+    );
+    for (const fs of foundOf)
+      for (const f of fs)
+        if (f.repeated && f.chrome && touchedKinds.has(f.kind)) {
+          f.repeated = false;
+          f.evidence = [...f.evidence.slice(0, 1)];
+          notes.push(
+            `${doc.file.name}: ${f.kind} — garment lines end on it on some tile, offered, not applied`,
+          );
+        }
     for (let k = 0; k < pcs.length; k++) {
       o.checkCancel?.();
       const pc = pcs[k];
-      const found = detectPage(pc, rep[k], textRep[k], notes);
+      const found = foundOf[k];
       for (const f of found)
         if (f.band)
           curveTexts.push({
@@ -225,7 +246,16 @@ export function cleanPages(
     notes.push(`AI page roles given: ${input.aiHints.pages.length}`);
   pages.sort((a, b) => Number(a.file) - Number(b.file) || a.page - b.page);
   const { summary, offered } = countsOf(pages.flatMap((p) => p.items));
-  return { pages, dropped, classes: roles, summary, offered, scaleHints, curveTexts, notes };
+  return {
+    pages,
+    dropped,
+    classes: roles,
+    summary,
+    offered,
+    scaleHints,
+    curveTexts,
+    notes: [...new Set(notes)],
+  };
 }
 
 /** The detectors of one tile page, in priority order (a line goes to the first that takes it). */
@@ -317,22 +347,31 @@ function detectPage(
   const byKind = new Map<BackgroundKind, number[]>();
   pc.chains.forEach((_, i) => {
     if (!CLEAN.on.chrome || taken.has(i) || rep[i] < CLEAN.repeatMinPages) return;
+    if (clippedByPage(pc, i, rep)) return;
     const k = chromeKind(pc, i);
     const a = byKind.get(k);
     if (a) a.push(i);
     else byKind.set(k, [i]);
   });
-  // No wall guard here: a garment line cut at the tile frame ENDS on it on every tile (blazer), and
-  // a frame half masked is worse than either — the furniture test downstream no longer sees its
-  // corners and the rest became a wall (blazer's back leaked into the frame). A garment line never
-  // repeats at one page place on three tiles; that alone is the proof.
+  // The guard looks at the chain's OWN ends only: a garment line cut at the tile frame ends ON the
+  // frame on every tile (blazer), and a frame half masked is worse than either — the furniture test
+  // downstream lost its corners and the rest became a wall (blazer's back leaked into the frame).
+  // A chain whose own end runs on into a garment line is that line's piece (Redcafe's outline
+  // stubs at the same page place on a row of tiles).
   for (const [kind, ids] of byKind) {
-    const n = Math.max(...ids.map((i) => rep[i]), 0);
+    const guarded = touchingLineWork(polys, lens, new Set(ids), taken, true);
+    const keep = ids.filter((i) => !guarded.has(i));
+    const n = Math.max(...keep.map((i) => rep[i]), 0);
+    // garment lines ending ON the chrome (the file-wide decision in cleanPages)
+    const met = touchingLineWork(polys, lens, new Set(keep), taken);
     take({
       kind,
-      chains: ids,
-      evidence: [`${ids.length} lines repeat at one page place on ${n} tiles`],
+      chains: keep,
+      evidence: [`${keep.length} lines repeat at one page place on ${n} tiles`],
       repeated: true,
+      chrome: true,
+      touched: met.size > 0,
+      guarded: guarded.size,
     });
   }
   // 5 · text furniture (real text): the same words at one page place on ≥ 3 tiles; a URL / ©
@@ -591,7 +630,8 @@ export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['ite
           maxH: CLEAN.markMaxHeightMm,
           minGlyphs: 4,
           minStrokes: 8,
-          maxGap: 1.2,
+          maxGap: CLEAN.markMaxGap,
+          maxAspect: CLEAN.markMaxAspect,
           endsOnly: true,
         },
         live,
