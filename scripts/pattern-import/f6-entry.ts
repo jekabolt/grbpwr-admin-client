@@ -1626,8 +1626,14 @@ export async function main(opts: { plans: string }): Promise<number> {
         ],
         evidence: [],
       };
-      /** What `bandCutSupport` hands the gate for a 100 mm band cut beside ONE drawn line. */
-      const supportFor = (pts: PtMm[], cls: LineClass | null, g = 100) =>
+      /** What `bandCutSupport` hands the gate for a 100 mm band cut beside ONE drawn line — the
+       * cut's own rung (provenance [0]) unless `provenance` says otherwise. */
+      const supportFor = (
+        pts: PtMm[],
+        cls: LineClass | null,
+        g = 100,
+        provenance: number[] = [0],
+      ) =>
         bandCutSupport(
           {
             chains: [chainOf(0, pts)],
@@ -1637,7 +1643,7 @@ export async function main(opts: { plans: string }): Promise<number> {
             warnings: [],
           },
           runOf,
-        )(span(g, 'band-cut').pts, RANK);
+        )(span(g, 'band-cut').pts, RANK, provenance);
       const full = line(0.2, 40, 140);
       const cases: [string, PtMm[], LineClass | null, boolean][] = [
         ['grain line 0.2 mm beside, full length', full, clsOf(1, 'grain', null), false],
@@ -1661,6 +1667,26 @@ export async function main(opts: { plans: string }): Promise<number> {
           `bandCutSupport: ${what} → ${want ? 'carries' : 'carries nothing'}`,
           `${got.length} chain(s)`,
         );
+      }
+      // S1 (Codex round 3): the same own-size line, 0.2 mm beside the whole cut, but NOT the rung
+      // the cut was carried from (another piece's segment) — the search is never global
+      {
+        const own = clsOf(OWN, 'size', RANK);
+        const notMine = supportFor(full, own, 100, [7]);
+        const none = supportFor(full, own, 100, []);
+        ck(
+          notMine.length === 0 && none.length === 0,
+          "bandCutSupport: another piece's own-size line beside the whole cut (not the cut's rung) → carries nothing",
+          `foreign ${notMine.length} chain(s) · no provenance ${none.length} chain(s)`,
+        );
+        const r = (await gateOf(100, [span(100, 'band-cut', notMine.length ? notMine : undefined)]))
+          .report;
+        await neg(
+          "S1: 100 mm band edge beside another piece's same-rank line (0.2 mm, full length)",
+          'G15-derived',
+          r,
+        );
+        ck(failing(r).includes('G4-hausdorff'), '… and G4 red', failing(r).join(','));
       }
       // the grain line's (empty) support → the 100 mm band cut is uncarried → G15 red, G4 red
       {

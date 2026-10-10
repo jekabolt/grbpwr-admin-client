@@ -223,21 +223,30 @@ export function supportOf(
 }
 
 /**
- * The drawn chains that carry a derived BAND CUT of source rank `rank` (F14e, Codex R1): only a
- * chain that may be a cut line of that rank — the rank's own size class or a common (every-size)
- * line; never a grain, notch, internal, seam, ignored or unclassified one, nor another size's —
- * and only where it runs along THIS edge continuously (`supportOf`). Bridges carry nothing: an
+ * The drawn chains that carry a derived BAND CUT of source rank `rank` (F14e, Codex R1 + S1): only
+ * the cut's own provenance — the ladder rung(s) it was carried from (`derived[].chains`), never a
+ * line found by searching the sheet — and of those only a chain that may be a cut line of that
+ * rank (the rank's own size class or a common line; never a grain, notch, internal, seam, ignored
+ * or unclassified one, nor another size's), where it runs along THIS edge continuously
+ * (`supportOf`). No provenance → nothing carries it. Bridges carry nothing: an
  * automatic or operator bridge is a chord the pipeline drew, bounded by its length alone (G15).
  */
 export function bandCutSupport(
   set: ChainSet,
   run: SizeRun,
-): (edge: PtMm[], rank: number) => PtMm[][] {
+): (edge: PtMm[], rank: number, provenance: readonly ChainId[] | undefined) => PtMm[][] {
   const clsOf = new Map<ChainId, LineClass>();
   for (const c of set.classes) for (const id of c.chains) clsOf.set(id, c);
-  return (edge, rank) => {
+  return (edge, rank, provenance) => {
+    // S1 (Codex round 3): never a global search — only the rung(s) this cut was carried from
+    // (`derived[].chains`, set by pieces/walls bandTicks), so another piece's same-rank line
+    // running beside the edge carries nothing
+    if (!provenance?.length) return [];
     const own = run.sizes[rank]?.classId ?? null;
-    return supportOf(edge, set.chains, (ch) => {
+    const mine = provenance
+      .map((id) => set.chains[id])
+      .filter((ch): ch is Chain => !!ch && provenance.includes(ch.id));
+    return supportOf(edge, mine, (ch) => {
       const k = clsOf.get(ch.id);
       return !!k && (k.role === 'common' || (k.role === 'size' && own != null && k.id === own));
     });
@@ -1157,7 +1166,8 @@ export function buildPieceSpecsDetailed(
     for (const d of src.cand.derived ?? []) {
       if (d.kind === 'shared-rank' || d.pts.length < 2) continue;
       // per edge, never pooled: each edge carries only the chains that run along it
-      const along = d.kind === 'band-cut' ? toFrame(src.w, alongOf(d.pts, src.cand.rank)) : [];
+      const along =
+        d.kind === 'band-cut' ? toFrame(src.w, alongOf(d.pts, src.cand.rank, d.chains)) : [];
       for (const pts of toFrame(src.w, [d.pts]))
         if (pts.length > 1) out.push({ kind: d.kind, pts, ...(along.length ? { along } : {}) });
     }
