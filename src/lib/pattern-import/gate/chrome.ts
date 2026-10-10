@@ -25,6 +25,8 @@ export const CHROME_GATE = {
   hairpinNearMm: 1,
   /** A stretch on a FRAME line warns (a CF / fold may lie on a tile edge); true = blocks (mutation). */
   frameBlocks: false,
+  /** …and a stretch on frames longer than this in all (mm, per written line) blocks. */
+  frameBlockMm: 100,
   /** … following it: the offset spreads at most this much (mm) over the stretch. */
   followSpreadMm: 0.1,
 };

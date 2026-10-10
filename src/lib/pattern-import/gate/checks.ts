@@ -1437,6 +1437,7 @@ export function chromeProblems(
   const frames = new ChromeIndex(chrome.filter((c) => !c.mark).map((c) => c.pts));
   const r = CHROME_GATE.hairpinNearMm;
   const nearChrome = (p: PtMm) => marks.near(p, r) || frames.near(p, r);
+  const onFrame: { word: string; run: ReturnType<typeof onChrome>[number] }[] = [];
   for (const layer of [LAYERS.cut, LAYERS.seam]) {
     for (const e of ents) {
       if (e.layer !== layer || !isPoly(e) || e.pts.length < 4) continue;
@@ -1446,15 +1447,29 @@ export function chromeProblems(
           out.block.push(
             `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
           );
-      for (const [idx, list, what] of [
-        [marks, out.block, 'a registration mark'],
-        [frames, CHROME_GATE.frameBlocks ? out.block : out.warn, 'a tile frame'],
-      ] as const)
-        for (const run of onChrome(e.pts, e.closed, idx))
-          list.push(
-            `the ${word} line runs ${run.lengthMm.toFixed(0)} mm on ${what} from (${run.from.x.toFixed(0)}, ${run.from.y.toFixed(0)})`,
-          );
+      for (const run of onChrome(e.pts, e.closed, marks))
+        out.block.push(
+          `the ${word} line runs ${run.lengthMm.toFixed(0)} mm on a registration mark from (${run.from.x.toFixed(0)}, ${run.from.y.toFixed(0)})`,
+        );
+      // a frame: a short contact may be a CF / fold on the tile edge (warn); a long one — more
+      // than 100 mm per block, cut and seam together — is the frame traced as the piece edge
+      // (Redcafe BP_L_53_52: the seam ran 273 mm along a tile frame and passed)
+      for (const run of onChrome(e.pts, e.closed, frames)) onFrame.push({ word, run });
     }
+  }
+  if (onFrame.length) {
+    const total = onFrame.reduce((a, f) => a + f.run.lengthMm, 0);
+    const words = [...new Set(onFrame.map((f) => f.word))].join(' and ');
+    const at = onFrame[0].run.from;
+    const where = `from (${at.x.toFixed(0)}, ${at.y.toFixed(0)})`;
+    if (CHROME_GATE.frameBlocks || total > CHROME_GATE.frameBlockMm)
+      out.block.push(
+        `the ${words} runs ${total.toFixed(0)} mm along a tile frame ${where} — the frame was traced as the piece edge; if the edge truly lies on the tile edge, keep the frame on the Files step`,
+      );
+    else
+      out.warn.push(
+        `the ${words} line runs ${total.toFixed(0)} mm on a tile frame ${where} — check it is the garment edge (a CF / fold on the tile edge)`,
+      );
   }
   return out;
 }
@@ -1492,6 +1507,6 @@ export function g19(ctx: GateCtx): GateCheck {
         ].join('; ')
       : 'no cut or seam line traced around tile chrome',
     n,
-    'no hairpin ≤ 2 mm wide, 3–25 mm long within 1 mm of tile chrome; no stretch ≥ 5 mm on a mark (block) or a frame (warn)',
+    'no hairpin ≤ 2 mm wide, 3–25 mm long within 1 mm of tile chrome; no stretch ≥ 5 mm on a mark (block); on frames > 100 mm per block blocks, less warns',
   );
 }

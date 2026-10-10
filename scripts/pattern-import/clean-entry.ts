@@ -31,6 +31,7 @@ import {
 } from 'components/managers/tech-card/components/pattern-import/answers';
 
 import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { readManifest } from 'lib/pattern-import/manifest';
 import { chromeProblems } from 'lib/pattern-import/gate/checks';
 import { CHROME_GATE, hairpins } from 'lib/pattern-import/gate/chrome';
 import { existsSync, readdirSync } from 'node:fs';
@@ -1096,7 +1097,12 @@ async function writtenOf(files: string[], id: string, cleanEdits?: PageMaskEdit[
         }
       }
   }
-  const g19 = writes.flatMap((w) => (w.blocking ?? []).filter((b) => b.startsWith('G19')));
+  // the G19 notes in full, as the written file's embedded gate report carries them
+  const g19 = writes.flatMap((w) =>
+    (readManifest(readFileSync(w.file, 'latin1'))?.gate?.checks ?? [])
+      .filter((k) => k.id === 'G19-chrome' && !k.ok && k.severity === 'block')
+      .map((k) => `G19-chrome[${k.blocks.join(',')}] ${k.note}`),
+  );
   return { hp, bars, g19, verdict: r.verdict, clicks: r.clicks?.total, write: writes };
 }
 
@@ -1271,6 +1277,15 @@ export async function marksSection() {
       ],
     },
   ];
+  const shortFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 110 },
+      ],
+    },
+  ];
   const onMark = [
     {
       mark: true,
@@ -1297,11 +1312,12 @@ export async function marksSection() {
   );
   check(
     'A8b G19',
-    'a cut line ON a frame line (a CF on the tile edge) only warns; ON a mark it blocks',
-    !pb(along, onFrame).block.length &&
-      pb(along, onFrame).warn.length > 0 &&
+    'a cut line 60 mm ON a frame line (a CF on the tile edge) warns; 200 mm on a frame blocks, naming the way out; ON a mark it blocks',
+    !pb(along, shortFrame).block.length &&
+      pb(along, shortFrame).warn.length > 0 &&
+      pb(along, onFrame).block.some((x) => /keep the frame on the Files step/.test(x)) &&
       pb(along, onMark).block.length > 0,
-    { frame: pb(along, onFrame), mark: pb(along, onMark) },
+    { short: pb(along, shortFrame), long: pb(along, onFrame), mark: pb(along, onMark) },
   );
   const nearMm = CHROME_GATE.hairpinNearMm;
   CHROME_GATE.hairpinNearMm = 1e6;
@@ -1319,13 +1335,43 @@ export async function marksSection() {
   try {
     check(
       'mutations',
-      'frames block again → the CF on the tile edge blocks',
-      pb(along, onFrame).block.length > 0,
-      pb(along, onFrame),
+      'any frame contact blocks → the 60 mm CF on the tile edge blocks',
+      pb(along, shortFrame).block.length > 0,
+      pb(along, shortFrame),
     );
   } finally {
     CHROME_GATE.frameBlocks = false;
   }
+  const frameMm = CHROME_GATE.frameBlockMm;
+  CHROME_GATE.frameBlockMm = Infinity;
+  try {
+    check(
+      'mutations',
+      'no length limit on frames → the 200 mm frame trace only warns',
+      !pb(along, onFrame).block.length,
+      pb(along, onFrame),
+    );
+  } finally {
+    CHROME_GATE.frameBlockMm = frameMm;
+  }
+  // 4b · the whole Redcafe run: BP_L_53_52's seam traced 273 mm along a tile frame blocks; the
+  //      operator keeping the frame (the way out) clears it — un-keep → block, keep → no block
+  const all = CASES.find((x) => x.id === 'redcafe')!.files;
+  const rc = await writtenOf(all, 'redcafe-g19');
+  const rcKept = await writtenOf(all, 'redcafe-g19-kept', [{ kind: 'tile-frame', keep: true }]);
+  const frameBlock = (w: typeof rc) => w.g19.filter((x) => /along a tile frame/.test(x));
+  check(
+    'A8b G19',
+    'Redcafe: the seam traced along a tile frame blocks, naming the way out; the operator keeps the frame → no G19 block',
+    frameBlock(rc).length > 0 &&
+      frameBlock(rc).every((x) => /keep the frame on the Files step/.test(x)) &&
+      rcKept.g19.length === 0,
+    {
+      unkept: rc.g19.map((x) => x.slice(0, 420)),
+      kept: rcKept.g19.map((x) => x.slice(0, 160)),
+      verdicts: [rc.verdict, rcKept.verdict],
+    },
+  );
   // 5 · marks treated like frames (the 10.10 build): brackets offered, traced round, G19 blocks;
   //     the operator keeping the brackets as line work is the way out (G19 leaves kept chrome)
   CLEAN.on.marks = false;
