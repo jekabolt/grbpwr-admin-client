@@ -76,7 +76,32 @@ export type CardContext = {
   }[];
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
+  /**
+   * The BOM has no fabric line: the run converts into one main-fabric file that is only
+   * downloaded, never applied (J1). Set by `forRun`, not by the card.
+   */
+  downloadOnly?: boolean;
 };
+
+/** The one scope of a download-only run: a main-fabric file bound to no BOM line. */
+export const DOWNLOAD_ONLY_SCOPE: DraftScopeTarget = {
+  scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  bomLineKey: '',
+  label: 'main fabric',
+  isInterlining: false,
+  sections: ['TECH_CARD_BOM_SECTION_FABRIC'],
+};
+
+/**
+ * The card as a run sees it. With no fabric line in the BOM there is nothing to bind a file to,
+ * but the conversion is still the operator's main output: the run gets one main scope and ends
+ * in a download instead of a wall on the fabrics step.
+ */
+export function forRun(card: CardContext): CardContext {
+  if (card.scopes.length) return card;
+  return { ...card, scopes: [DOWNLOAD_ONLY_SCOPE], downloadOnly: true };
+}
 
 /**
  * Main-thread AI naming (F10): render-som output → upload → SuggestPatternPieces → combineNames.

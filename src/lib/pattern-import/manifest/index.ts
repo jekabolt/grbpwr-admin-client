@@ -46,6 +46,8 @@ import {
   type ManifestSource,
   type ReadManifestFn,
   type TrustedSheet,
+  type DerivedEdgeAudit,
+  type DerivedEdgeKind,
 } from '../types';
 
 export { MANIFEST_TAG, MANIFEST_VERSION };
@@ -267,7 +269,11 @@ const GATE_CHECK_IDS = new Set([
   'G15-derived',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
-const DERIVED_KINDS = new Set(['bridge', 'auto-bridge', 'operator-bridge', 'band-cut']);
+const DERIVED_KINDS = new Set<string>([
+  'bridge',
+  'operator-bridge',
+  'band-cut',
+] satisfies DerivedEdgeKind[]);
 const isPair = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every(isNum);
 const numOrNull = (x: unknown): x is number | null => x === null || isNum(x);
@@ -372,7 +378,7 @@ function validateGate(x: unknown): GateReport | null {
   if (x.passed && checks.some((c) => !c.ok && c.severity === 'block'))
     fail('gate.passed', 'true over a failed blocking check');
   // F14b: the derived edges G15 accepted (optional; absent when there are none)
-  let derived: Record<string, unknown>[] | undefined;
+  let derived: DerivedEdgeAudit[] | undefined;
   if (x.derived !== undefined) {
     if (!Array.isArray(x.derived) || x.derived.length > MAX_LIST)
       fail('gate.derived', 'not a bounded list');
@@ -387,7 +393,7 @@ function validateGate(x: unknown): GateReport | null {
       if (!isPair(d.a) || !isPair(d.b)) fail(`${p}.a|b`, 'not two finite [x, y] points');
       return {
         block: d.block,
-        kind: d.kind,
+        kind: d.kind as DerivedEdgeKind,
         lengthMm: d.lengthMm,
         offSourceMm: d.offSourceMm,
         a: [d.a[0], d.a[1]],

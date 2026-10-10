@@ -110,6 +110,14 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       sideWidth={420}
       canvas={
         <Panel title='fabric → pieces' bodyClassName='flex flex-col gap-2'>
+          {card.downloadOnly && (
+            <CalloutBox tone='note'>
+              <Text size='micro' component='p'>
+                <b>download only.</b> the BOM has no fabric line: every piece goes into one
+                main-fabric DXF that you download. nothing is written to the card.
+              </Text>
+            </CalloutBox>
+          )}
           <div>
             <GroupLabel flush>what the sheet says</GroupLabel>
             <DataTable>

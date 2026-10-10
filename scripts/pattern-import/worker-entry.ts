@@ -207,6 +207,13 @@ async function vectorCase(
 
 export async function main(): Promise<number> {
   const perf: unknown[] = [];
+  // the per-size DXF set alone (no report file: the full run owns F13c-<date>.json)
+  if (process.env.PI_SET_ONLY) {
+    await dxfSetCase();
+    const failed = rows.filter((r) => !r.ok).length;
+    console.log(`\n${rows.length - failed}/${rows.length} PASS`);
+    return failed ? 1 : 0;
+  }
   if (!process.env.PI_SKIP_E2E) {
     await pipelineCase('robe', ['pdf/robe.pdf'], {
       sizes: ['36', '38', '40', '42', '44', '46'],
@@ -496,10 +503,11 @@ export async function main(): Promise<number> {
   );
   check(
     '2 × dxf',
-    'several DXF refused',
+    'a per-size DXF set of two size-M files refused (one file per size)',
     (await refusal(['dxf-clo/allsizes.dxf', 'dxf-clo/POCKETS.dxf'])) === 'unsupported-format',
     'unsupported-format',
   );
+  await dxfSetCase();
   check(
     'garbage plt',
     'refused at open',
@@ -1328,5 +1336,352 @@ async function guardsCase() {
       json.includes('"bytes":1000') &&
       json.includes('bridge'),
     `${json.length} bytes of JSON`,
+  );
+}
+
+// ── J4: a per-size DXF set (owner decision 5: file per size → one DXF) ─────────────────────
+
+/**
+ * One size of a graded R2000 drawing as its own file — what CLO gives out per size. Blocks of other
+ * sizes leave with their BLOCK_RECORD and INSERT; `stripTail` also drops `_<size>` from the names
+ * (an exporter that names pieces without the size); `drop` removes pieces (negative control).
+ */
+function splitSize(
+  text: string,
+  size: string,
+  opt: { stripTail?: boolean; drop?: string[]; as?: string } = {},
+): string {
+  const lines = text.split('\n');
+  type Ent = { section: string; tags: [string, string][] };
+  const ents: Ent[] = [];
+  let section = '';
+  let cur: Ent | null = null;
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].replace(/\r$/, '');
+    if (code === '0') {
+      cur = { section, tags: [] };
+      ents.push(cur);
+    }
+    if (!cur) {
+      cur = { section, tags: [] };
+      ents.push(cur);
+    }
+    cur.tags.push([lines[i], value]);
+    if (code === '2' && cur.tags[0][1] === 'SECTION') section = value;
+    if (code === '0' && value === 'ENDSEC') section = '';
+  }
+  const nameOf = (e: Ent) => e.tags.find(([c]) => c.trim() === '2')?.[1] ?? '';
+  const tail = (b: string) => b.split('_').pop()!.toUpperCase();
+  const keep = (b: string) =>
+    b.startsWith('*') || (tail(b) === size && !(opt.drop ?? []).includes(b));
+  const rename = (b: string) => {
+    if (b.startsWith('*')) return b;
+    const stem = b.slice(0, b.lastIndexOf('_'));
+    return opt.stripTail ? stem : opt.as ? `${stem}_${opt.as}` : b;
+  };
+  const out: string[] = [];
+  let inDropped = false;
+  for (const e of ents) {
+    const kind = e.tags[0][1];
+    if (e.section === 'BLOCKS' && kind === 'BLOCK') inDropped = !keep(nameOf(e));
+    const dropped =
+      (e.section === 'BLOCKS' && inDropped && (kind === 'BLOCK' || kind !== 'ENDSEC')) ||
+      (e.section === 'TABLES' && kind === 'BLOCK_RECORD' && !keep(nameOf(e))) ||
+      (kind === 'INSERT' && !keep(nameOf(e)));
+    if (e.section === 'BLOCKS' && kind === 'ENDBLK') {
+      const was = inDropped;
+      inDropped = false;
+      if (was) continue;
+    }
+    if (dropped) continue;
+    for (const [c, v] of e.tags) {
+      const code = c.trim();
+      const isName =
+        (code === '2' && (kind === 'INSERT' || kind === 'BLOCK_RECORD')) ||
+        ((code === '2' || code === '3') && kind === 'BLOCK');
+      out.push(c.replace(/\r$/, ''), isName ? rename(v) : v);
+    }
+  }
+  return out.join('\r\n') + '\r\n';
+}
+
+const errOf = async (f: () => unknown) => {
+  try {
+    await f();
+    return { code: null as string | null, message: '' };
+  } catch (e) {
+    return toWireError(e);
+  }
+};
+
+async function dxfSetCase() {
+  const C = 'dxf set';
+  const graded = readFileSync(resolve(CORPUS, 'dxf-clo/allsizes-merged.dxf')).toString('latin1');
+  const SIZES = ['XS', 'S', 'M', 'L', 'XL'];
+  const enc = (t: string) => {
+    const b = Buffer.from(t, 'latin1');
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+  };
+  const set = (
+    named: (s: string, i: number) => string,
+    opt: Parameters<typeof splitSize>[2] = {},
+    sizes = SIZES,
+  ) => sizes.map((s, i) => ({ name: named(s, i), bytes: enc(splitSize(graded, s, opt)) }));
+  const CARD5 = card(SIZES);
+
+  /** open → … → write + gate through the session, as the wizard drives a DXF. */
+  async function walk(
+    label: string,
+    files: { name: string; bytes: ArrayBuffer }[],
+    operatorMap?: (map: StageIO['sizes']['out']['map']) => StageIO['sizes']['in']['operatorMap'],
+  ) {
+    const s = new Session(1, files);
+    const run: Run = (st, input) => s.runStage(st, input, ctx());
+    const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    await run('scale', {
+      decision: {
+        factor: ex.scale[0].factor,
+        method: ex.scale[0].method,
+        operatorConfirmed: false,
+      },
+    });
+    await run('assemble', { sheet: 0 });
+    await run('chains', { opts: CHAIN_OPTS });
+    const sz0 = await run('sizes', { card: CARD5 });
+    const sz = operatorMap
+      ? await run('sizes', { card: CARD5, operatorMap: operatorMap(sz0.map) })
+      : sz0;
+    const pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
+    const sem = await run('semantics', {
+      fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+      pieceOverrides: {},
+      operatorGrain: {},
+    });
+    const w = await writeCase(label, run, sem, sz.map);
+    s.close();
+    return { ex, sz0, sz, pc, sem, w };
+  }
+
+  // control: the graded drawing as one file
+  const one = await walk(`${C} · control allsizes-merged.dxf`, [
+    { name: 'allsizes-merged.dxf', bytes: enc(graded) },
+  ]);
+  const blocksOf = (w: Awaited<ReturnType<typeof walk>>['w']) =>
+    w.scopes.flatMap((x) => x.manifest.blocks.map((b) => b.block)).sort();
+
+  // A: five CLO per-size files (sizes in the block names), dropped in shuffled order
+  {
+    const files = set((s) => `coat_${s.toLowerCase()}.dxf`);
+    const shuffled = [files[3], files[0], files[4], files[1], files[2]];
+    const r = await walk(`${C} · 5 files`, shuffled);
+    check(
+      `${C} · 5 files`,
+      'opens as one presegmented drawing; 5 files, one page each',
+      !!r.ex.presegmented && r.ex.files.length === 5 && r.ex.pages.length === 5,
+      `${r.ex.files.map((f) => f.name).join(',')} · ${r.ex.pages.map((p) => p.why).join(' | ')}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'file sha256 kept per source file',
+      r.ex.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256)) &&
+        new Set(r.ex.files.map((f) => f.sha256)).size === 5,
+      r.ex.files.map((f) => f.sha256.slice(0, 8)).join(','),
+    );
+    const run = r.sz.run;
+    const fileOfSize = run.sizes.map(
+      (x) => `${x.label}←${r.ex.files.find((f) => f.id === x.file)?.name}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'run = one file per size, XS…XL in rank order, each size from its own file',
+      run.encoding === 'file-per-size' &&
+        run.sizes.map((x) => x.label).join() === SIZES.join() &&
+        run.sizes.every(
+          (x) =>
+            r.ex.files.find((f) => f.id === x.file)?.name === `coat_${x.label.toLowerCase()}.dxf`,
+        ),
+      fileOfSize.join(' '),
+    );
+    check(
+      `${C} · 5 files`,
+      'every size auto-mapped to the same card size, no guess',
+      r.sz.map.entries.every(
+        (e) =>
+          e.card?.token === e.source.label && e.origin === 'auto' && (e.confidence ?? 1) >= 0.9,
+      ),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    check(
+      `${C} · 5 files`,
+      '9 pieces × 5 sizes, as the single graded file',
+      r.pc.families.length === 9 &&
+        r.pc.families.every((f) => f.candidates.length === 5) &&
+        r.sem.pieces.length === one.sem.pieces.length &&
+        !r.sem.blocked.length,
+      `${r.pc.families.length} families × ${r.pc.families.map((f) => f.candidates.length).join('')}, ${r.sem.pieces.length} specs (control ${one.sem.pieces.length})`,
+    );
+    check(
+      `${C} · 5 files`,
+      'written blocks = the control (allsizes-merged.dxf) block for block',
+      blocksOf(r.w).join() === blocksOf(one.w).join() && blocksOf(r.w).length === 45,
+      `${blocksOf(r.w).length} blocks, control ${blocksOf(one.w).length}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'manifest source names the 5 files, not the merged drawing',
+      r.w.scopes[0].manifest.source.files.map((f) => f.name).join() ===
+        shuffled.map((f) => f.name).join(),
+      r.w.scopes[0].manifest.source.files.map((f) => f.name).join(','),
+    );
+  }
+
+  // B: pieces named without the size, the size only in the file names
+  {
+    const r = await walk(
+      `${C} · sizes in file names`,
+      set((s) => `jacket ${s}.dxf`, { stripTail: true }),
+    );
+    check(
+      `${C} · sizes in file names`,
+      'sizes read from the file names, mapped to the card',
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token}`).join(' ') ===
+        SIZES.map((s) => `${s}→${s}`).join(' ') &&
+        r.ex.pages.every((p) => /, from the file name$/.test(p.why)),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    check(
+      `${C} · sizes in file names`,
+      'written blocks = the control',
+      blocksOf(r.w).join() === blocksOf(one.w).join(),
+      `${blocksOf(r.w).length} blocks`,
+    );
+  }
+
+  // C: no size anywhere — the operator assigns each file on the sizes step
+  {
+    const names = ['part a.dxf', 'part b.dxf', 'part c.dxf', 'part d.dxf', 'part e.dxf'];
+    let before = '';
+    const r = await walk(
+      `${C} · operator assigns`,
+      set((_, i) => names[i], { stripTail: true }),
+      (map) => {
+        before = map.entries
+          .map((e) => `${e.source.label}→${e.card?.token ?? '—'}@${(e.confidence ?? 1).toFixed(1)}`)
+          .join(' ');
+        // the operator's answer: file i is SIZES[i] (the guess is confirmed by setting it)
+        return map.entries.map((e, i) => ({ ...e, card: CARD5[i], origin: 'operator' as const }));
+      },
+    );
+    check(
+      `${C} · operator assigns`,
+      'no size readable: every row is a guess the wizard makes the operator confirm',
+      r.sz0.map.entries.length === 5 &&
+        r.sz0.map.entries.every((e) => e.origin === 'auto' && (e.confidence ?? 1) < 0.9) &&
+        r.sz0.map.entries.every((e) =>
+          e.evidence?.some((x) => /no size in the block names/.test(x)),
+        ),
+      before,
+    );
+    check(
+      `${C} · operator assigns`,
+      'each file shows on its size row (legend evidence = the file)',
+      r.sz0.run.sizes.every(
+        (x) => r.ex.files.find((f) => f.id === x.file)?.name === names[Number(x.label) - 1],
+      ),
+      r.sz0.run.sizes
+        .map((x) => `${x.label}←${r.ex.files.find((f) => f.id === x.file)?.name}`)
+        .join(' '),
+    );
+    check(
+      `${C} · operator assigns`,
+      "operator's map wins; written blocks = the control",
+      r.sz.map.entries.every((e) => e.origin === 'operator') &&
+        blocksOf(r.w).join() === blocksOf(one.w).join(),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token}`).join(' '),
+    );
+  }
+
+  // negative controls — refused at open, the reason in words
+  const refusedBy = async (
+    label: string,
+    files: { name: string; bytes: ArrayBuffer }[],
+    re: RegExp,
+  ) => {
+    const e = await errOf(() => new Session(1, files));
+    check(
+      `${C} · refuse`,
+      label,
+      e.code === 'unsupported-format' && re.test(e.message),
+      `${e.code}: ${e.message}`,
+    );
+  };
+  await refusedBy(
+    'the files do not carry the same pieces',
+    SIZES.map((s) => ({
+      name: `coat_${s}.dxf`,
+      bytes: enc(splitSize(graded, s, s === 'L' ? { drop: ['CLR_4_L'] } : {})),
+    })),
+    /coat_L\.dxf has no CLR_4/,
+  );
+  await refusedBy(
+    'two files of one size (CLO repeating the previous size)',
+    [
+      { name: 'coat_m.dxf', bytes: enc(splitSize(graded, 'M')) },
+      { name: 'coat_l.dxf', bytes: enc(splitSize(graded, 'M')) },
+    ],
+    /coat_m\.dxf and coat_l\.dxf are both size M\. A set is one file per size/,
+  );
+  await refusedBy(
+    'a duplicate size spelled in the file names only',
+    [
+      { name: 'jacket M.dxf', bytes: enc(splitSize(graded, 'M', { stripTail: true })) },
+      { name: 'jacket M (1).dxf', bytes: enc(splitSize(graded, 'L', { stripTail: true })) },
+    ],
+    /are both size M/,
+  );
+  await refusedBy(
+    'an all-sizes file inside a set',
+    [fileOf('dxf-clo/ALLSIZES_DXF.dxf'), fileOf('dxf-clo/allsizes.dxf')],
+    /ALLSIZES_DXF\.dxf carries several sizes/,
+  );
+  await refusedBy(
+    'R12 files (the merger does not invent R2000 handles)',
+    [fileOf('dxf-clo/blazer.dxf'), fileOf('dxf-clo/summer men.dxf')],
+    /R2000/,
+  );
+  // post-check on what the reader saw: one piece per file and numeric sizes from the file names —
+  // the DXF reader takes a number for a size only when two pieces share it, so the merged drawing
+  // reads with no sizes at all. Opening is fine; reading refuses instead of guessing.
+  {
+    const files = ['XS', 'S'].map((s, i) => ({
+      name: `coat ${44 + i * 2}.dxf`,
+      bytes: enc(
+        splitSize(graded, s, {
+          stripTail: true,
+          drop: ['FP_R', 'SL_R', 'SL_L', 'BP_1', 'CLR_3', 'FP_L', 'BP_2', 'CLR_4'].map(
+            (b) => `${b}_${s}`,
+          ),
+        }),
+      ),
+    }));
+    const opened = await errOf(() => new Session(1, files));
+    const s = opened.code ? null : new Session(1, files);
+    const e = s
+      ? await errOf(() =>
+          s.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx()),
+        )
+      : opened;
+    check(
+      `${C} · refuse`,
+      'the merged drawing must READ as one size per file (checked after reading)',
+      e.code === 'unsupported-format' && /did not read as one size/.test(e.message),
+      `${e.code}: ${e.message}`,
+    );
+  }
+  await refusedBy(
+    'DXF + PDF in one run',
+    [fileOf('dxf-clo/allsizes.dxf'), fileOf('pdf/robe.pdf')],
+    /one run reads one format/,
   );
 }

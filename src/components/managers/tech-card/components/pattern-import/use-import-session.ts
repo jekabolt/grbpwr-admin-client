@@ -493,7 +493,8 @@ export function useImportSession(deps: {
         }
         case 'apply': {
           const built = sRef.current.draft;
-          if (!built) return;
+          // a download-only run has no BOM line to bind a file to: nothing is applied
+          if (!built || card.downloadOnly) return;
           // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
           const draft = {
             ...built,
