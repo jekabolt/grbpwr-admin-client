@@ -357,7 +357,9 @@ export type ClassEvidence =
   | { kind: 'color'; rgb: [number, number, number] }
   | { kind: 'file'; file: FileId; label: string }
   | { kind: 'text-label'; text: string; distanceMm: Mm }
-  | { kind: 'nesting-order'; rank: number };
+  | { kind: 'nesting-order'; rank: number }
+  /** A seam line drawn at this constant distance inside the cut line (role 'seam'). */
+  | { kind: 'seam-offset'; offsetMm: Mm };
 
 export type LineClass = {
   id: ClassId;

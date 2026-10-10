@@ -19,8 +19,10 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
-import { furniture } from './classify';
+import { furniture, overprintLines } from './classify';
+import { overlaidFiles } from './link';
 import { makeChains } from './make';
+import { seamPens, type SeamPen } from './seam';
 
 export const DEFAULT_CHAIN_OPTS: ChainOpts = {
   joinGapMm: PATIMPORT.joinGapMm,
@@ -45,7 +47,13 @@ export function buildChainsDetailed(
   const mk = makeChains(sheet, opts);
   progress?.(1, 3, 'classes');
   const styles = new Map<number, Style>(sheet.styles.map((s) => [s.id, s]));
-  const furn = furniture(mk.chains, styles, sheet.poses);
+  const furn = furniture(mk.chains, styles, sheet.poses, sheet.texts);
+  if (overlaidFiles(sheet)) {
+    const pathFile = new Map(sheet.paths.map((p) => [p.id, p.src.file]));
+    const fileOf = (i: number) => pathFile.get(mk.chains[i].ranges[0]?.path ?? -1) ?? '';
+    for (const i of overprintLines(mk.chains, fileOf))
+      furn[i] = furn[i] ?? 'overprint (drawn over every file)';
+  }
   const opLinked = mk.work.map((w) => {
     const ops = new Set(w.items.map((l) => l.it.op));
     return w.items.length >= 3 && ops.size < w.items.length / 2;
@@ -61,7 +69,7 @@ export function buildChainsDetailed(
     fileNames: extras.fileNames,
   });
   progress?.(2, 3, 'legend');
-  const set = toChainSet(rec, mk.stats);
+  const set = toChainSet(rec, mk.stats, seamPens(rec, styles));
   progress?.(3, 3);
   return { set, recover: rec };
 }
@@ -72,11 +80,31 @@ export const buildChains: BuildChainsFn = (sheet, opts, progress) =>
 function toChainSet(
   rec: RecoverOut,
   stats: { items: number; freeBeads: number; ignoredPaths: number },
+  seam: SeamPen[] = [],
 ): ChainSet {
   const chains: Chain[] = rec.chains;
   const classes: LineClass[] = [];
   const total = (ids: number[]) => ids.reduce((a, i) => a + chains[i].lengthMm, 0);
-  for (const s of rec.sizes) {
+  // a seam line in a pen of its own is not a size (chains/seam.ts): out of every other row
+  const seamIds = new Set(seam.flatMap((p) => p.chains));
+  if (seamIds.size) {
+    const keep = (ids: number[]) => ids.filter((i) => !seamIds.has(i));
+    rec = {
+      ...rec,
+      // a size row that was only the seam pen goes with it
+      sizes: rec.sizes
+        .map((s) => ({ ...s, chains: keep(s.chains), was: s.chains.length }))
+        .filter((s) => s.chains.length || !s.was)
+        .map(({ was: _was, ...s }) => s),
+      orphans: keep(rec.orphans),
+      common: keep(rec.common),
+      internal: keep(rec.internal),
+    };
+  }
+  // sizes no line carries are not sizes: a one-size file whose pens recovery could not rank (every
+  // PLT/SVG fixture, BLAZER) showed two nameless empty rows — it is one size (detectSizeRun: single)
+  const noSizes = rec.sizes.length > 0 && rec.sizes.every((s) => !s.chains.length);
+  for (const s of noSizes ? [] : rec.sizes) {
     classes.push({
       id: classes.length,
       role: 'size',
@@ -121,6 +149,16 @@ function toChainSet(
       });
     }
   }
+  for (const p of seam)
+    classes.push({
+      id: classes.length,
+      role: 'seam',
+      sizeLabel: null,
+      chains: p.chains,
+      totalLengthMm: total(p.chains),
+      evidence: [{ kind: 'seam-offset', offsetMm: p.offsetMm }],
+      confidence: 0.7,
+    });
   if (rec.notches.length)
     classes.push({
       id: classes.length,
@@ -160,14 +198,22 @@ function toChainSet(
     });
   const warnings = [
     `chains ${chains.length} from ${stats.items} items (${stats.ignoredPaths} paths not line work, ${stats.freeBeads} loose beads)`,
-    `size encoding ${rec.encoding}, ${rec.n} sizes`,
+    noSizes
+      ? `size encoding single, 1 sizes (${rec.encoding} found ${rec.n} looks, no line ranked)`
+      : `size encoding ${rec.encoding}, ${rec.n} sizes`,
+    ...seam.map(
+      (p) =>
+        `seam line: ${p.chains.length} chains drawn ${p.offsetMm} mm inside the cut line (allowance evidence)`,
+    ),
   ];
+  // questions about size rows that are not shown any more
+  const sizeQs = new Set<string>(['size-count', 'labels-missing', 'rank-direction', 'size-empty']);
   return {
     chains,
     classes,
     bundles: rec.bundles,
     orphans: rec.orphans,
-    ambiguities: rec.ambiguities,
+    ambiguities: noSizes ? rec.ambiguities.filter((a) => !sizeQs.has(a.kind)) : rec.ambiguities,
     warnings,
   };
 }
