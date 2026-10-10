@@ -73,8 +73,10 @@ export function kindRows(
     else r.kept += it.lines;
     by.set(it.kind, r);
   }
-  return [...by.values()];
+  return [...by.values()].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
 }
+
+const ORDER = Object.keys(KIND_LABEL) as BackgroundKind[];
 
 /** "removed: 646 grid lines · 1 470 tile labels · test square" */
 export function removedLine(rows: KindRow[]): string {

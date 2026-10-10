@@ -42,6 +42,7 @@ import { DroppedLabels } from './steps/not-in-file';
 
 const STAGE_WORD: Record<string, string> = {
   extract: 'reading files',
+  clean: 'setting aside page furniture',
   scale: 'applying scale',
   assemble: 'assembling the sheet',
   chains: 'tracing lines',

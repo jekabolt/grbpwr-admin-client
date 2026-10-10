@@ -210,7 +210,7 @@ export function FilesStep({
                 !!session.busy ||
                 staged.some((f) => f.name.toLowerCase().endsWith('.eps'))
               }
-              loading={session.busy?.stage === 'extract'}
+              loading={session.busy?.stage === 'extract' || session.busy?.stage === 'clean'}
               onClick={() => void api.dispatch({ type: 'files', files: staged })}
             >
               {read && !dirty ? 're-read files' : 'read files'}
