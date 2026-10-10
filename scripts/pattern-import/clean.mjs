@@ -5,6 +5,7 @@
 // piece masked) through the e2e operator pass — one child process per section / case.
 //   node scripts/pattern-import/clean.mjs                 (yarn patimport:clean)
 //   node scripts/pattern-import/clean.mjs wm-M robe          just these sections / cases
+//   node scripts/pattern-import/clean.mjs marks              A8b: Redcafe corner brackets + G19
 //   env PATIMPORT_CORPUS, PATIMPORT_REPORTS, PATIMPORT_E2E_OUT (the e2e pass writes its files there)
 import { build as esbuild } from 'esbuild';
 import { spawnSync } from 'node:child_process';
@@ -62,10 +63,11 @@ const args = process.argv.slice(2);
 const jobs = [
   ...(!args.length || args.includes('wm-M') ? [['wm-M']] : []),
   ...(!args.length || args.includes('synth') ? [['synth']] : []),
-  ...(args.length ? args.filter((c) => c !== 'wm-M' && c !== 'synth') : CONTROLS).map((c) => [
-    'walls',
-    c,
-  ]),
+  ...(!args.length || args.includes('marks') ? [['marks']] : []),
+  ...(args.length
+    ? args.filter((c) => c !== 'wm-M' && c !== 'synth' && c !== 'marks')
+    : CONTROLS
+  ).map((c) => ['walls', c]),
 ];
 
 const rows = [];

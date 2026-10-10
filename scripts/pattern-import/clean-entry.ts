@@ -30,6 +30,11 @@ import {
   maskRevOf,
 } from 'components/managers/tech-card/components/pattern-import/answers';
 
+import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { chromeProblems } from 'lib/pattern-import/gate/checks';
+import { CHROME_GATE, hairpins } from 'lib/pattern-import/gate/chrome';
+import { existsSync, readdirSync } from 'node:fs';
+
 import { CASES, runCase } from './e2e-entry';
 
 const CORPUS =
@@ -1042,12 +1047,204 @@ export async function wallsSection(id: string) {
   );
 }
 
+// ── A8b · Redcafe corner brackets (owner 10.10: «засечки для позиционирования обозначило как
+// детали») and the G19 safety net ─────────────────────────────────────────────────────────
+
+const OWNER_REDCAFE_DXF =
+  process.env.PATIMPORT_OWNER_REDCAFE_DXF ??
+  '/Users/jekabolt/Downloads/fw26-fw26-001-main-5583a330.dxf';
+
+/** Per tile page: is every small closed repeated mark (a 15 × 1 mm bracket) masked, auto? */
+async function bracketsOf(file: string) {
+  const s = new Session(1, [fileOf(file)]);
+  const run = <S extends StageName>(st: S, input: StageIO[S]['in']) => s.runStage(st, input, ctx());
+  await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  const cl = await run('clean', { edits: [] });
+  s.close();
+  const tiles = cl.pages.filter((p) => p.role === 'tile');
+  const withMarks = tiles.filter((p) =>
+    p.items.some((i) => i.kind === 'regmark' && i.status === 'auto' && i.applied && i.lines >= 4),
+  );
+  return {
+    tiles: tiles.length,
+    masked: withMarks.length,
+    lines: cl.summary.regmark ?? 0,
+    offered: cl.offered.regmark ?? 0,
+  };
+}
+
+/** The written files of one e2e run: hairpins on cut / seam, 15 × 1 mm bars on layer 8, G19. */
+async function writtenOf(files: string[], id: string) {
+  const base = CASES.find((x) => x.id === 'redcafe')!;
+  const sizes = files.map((f) => /(\d+)\.pdf$/.exec(f)![1]);
+  const r = await runCase({ ...base, id, files, card: sizes });
+  const writes = (r.write ?? []) as { file: string; blocking?: string[] }[];
+  let hp = 0;
+  let bars = 0;
+  for (const w of writes) {
+    const raw = readRawDxf(readFileSync(w.file, 'latin1'));
+    for (const [, ents] of raw.blocks)
+      for (const e of ents) {
+        if ((e.layer === '1' || e.layer === '14') && e.pts.length >= 4)
+          hp += hairpins(e.pts, e.closed).length;
+        if (e.layer === '8' && e.closed && e.pts.length >= 4) {
+          const xs = e.pts.map((p) => p.x);
+          const ys = e.pts.map((p) => p.y);
+          const W = Math.max(...xs) - Math.min(...xs);
+          const H = Math.max(...ys) - Math.min(...ys);
+          if (Math.min(W, H) <= 2 && Math.max(W, H) >= 10 && Math.max(W, H) <= 25) bars++;
+        }
+      }
+  }
+  const g19 = writes.flatMap((w) => (w.blocking ?? []).filter((b) => b.startsWith('G19')));
+  return { hp, bars, g19, verdict: r.verdict, clicks: r.clicks?.total, write: writes };
+}
+
+/** Blocks of a DXF file the G19 hairpin test refuses (no chrome lines: the raw file alone). */
+function g19Blocks(file: string) {
+  const raw = readRawDxf(readFileSync(file, 'latin1'));
+  const out: string[] = [];
+  for (const [name, ents] of raw.blocks) {
+    if (name.startsWith('*')) continue;
+    const why = chromeProblems(ents, undefined);
+    if (why.length) out.push(`${name}: ${why[0]}`);
+  }
+  return out;
+}
+
+export async function marksSection() {
+  // 1 · clean: the brackets are masked (auto) on every tile of every Redcafe size file
+  for (const n of ['44', '46', '48', '50', '52', '54']) {
+    const b = await bracketsOf(`pdf/${n}.pdf`);
+    check(
+      'A8b marks',
+      `${n}.pdf: the corner brackets are masked by themselves on every tile`,
+      b.tiles > 0 && b.masked === b.tiles && !b.offered,
+      b,
+    );
+  }
+  // 2 · the owner's run (44 alone): no hairpin, no bar on layer 8, G19 quiet
+  const w = await writtenOf(['pdf/44.pdf'], 'redcafe-44');
+  check(
+    'A8b marks',
+    '44.pdf written: no hairpin round a bracket on any cut / seam line, no 15 × 1 mm bar on layer 8, G19 does not block',
+    w.write.length > 0 && w.hp === 0 && w.bars === 0 && w.g19.length === 0,
+    { hairpins: w.hp, bars: w.bars, g19: w.g19, verdict: w.verdict, clicks: w.clicks },
+  );
+  // 3 · the owner's DXF (beta, passed the gate): G19 refuses its traced blocks
+  if (existsSync(OWNER_REDCAFE_DXF)) {
+    const bad = g19Blocks(OWNER_REDCAFE_DXF);
+    check(
+      'A8b G19',
+      "the owner's Redcafe 44 DXF (passed on beta): G19 blocks the blocks traced round a bracket",
+      bad.length >= 3,
+      bad.slice(0, 3),
+    );
+    const cap = CHROME_GATE.capMaxMm;
+    CHROME_GATE.capMaxMm = 0;
+    try {
+      check(
+        'mutations',
+        "hairpin test off → the owner's DXF passes G19",
+        g19Blocks(OWNER_REDCAFE_DXF).length === 0,
+        g19Blocks(OWNER_REDCAFE_DXF).slice(0, 2),
+      );
+    } finally {
+      CHROME_GATE.capMaxMm = cap;
+    }
+  } else console.log(`  skip the owner's DXF (${OWNER_REDCAFE_DXF} not here)`);
+  // 3b · negatives: the CLO corpus DXFs (real 1 mm slit notches live on layer 4) — no hairpin
+  const clo = resolve(CORPUS, 'dxf-clo');
+  if (existsSync(clo)) {
+    const hit: string[] = [];
+    let n = 0;
+    for (const f of readdirSync(clo).filter((x) => x.endsWith('.dxf'))) {
+      n++;
+      for (const b of g19Blocks(resolve(clo, f))) hit.push(`${f} ${b}`);
+    }
+    check(
+      'A8b G19',
+      `corpus CLO DXFs (${n}): G19's hairpin test blocks no block`,
+      n > 0 && !hit.length,
+      hit.slice(0, 3),
+    );
+  }
+  // 4 · G19 on chrome: a cut line ON a frame line blocks; a shallow crossing / a tangent curve not
+  const ring = (pts: PtLike[]) =>
+    [{ type: 'LWPOLYLINE', layer: '1', pts, closed: true }] as Parameters<typeof chromeProblems>[0];
+  const frame = [
+    [
+      { x: 0, y: 0 },
+      { x: 0, y: 300 },
+    ],
+  ];
+  const along = ring([
+    { x: 0, y: 50 },
+    { x: 0, y: 90 },
+    { x: 60, y: 90 },
+    { x: 60, y: 50 },
+  ]);
+  const crossing = ring([
+    { x: -0.4, y: 50 },
+    { x: 0.4, y: 70 },
+    { x: 60, y: 90 },
+    { x: 60, y: 50 },
+  ]);
+  const arc: PtLike[] = [];
+  for (let k = 0; k <= 40; k++) {
+    const t = -0.4 + (0.8 * k) / 40;
+    arc.push({ x: 200 * (1 - Math.cos(t)), y: 100 + 200 * Math.sin(t) });
+  }
+  const tangent = ring([...arc, { x: 80, y: 180 }, { x: 80, y: 20 }]);
+  check(
+    'A8b G19',
+    'a cut line 40 mm ON a frame line blocks; one crossing it at 2° or touching it with a curve does not',
+    chromeProblems(along, frame).length > 0 &&
+      chromeProblems(crossing, frame).length === 0 &&
+      chromeProblems(tangent, frame).length === 0,
+    {
+      along: chromeProblems(along, frame),
+      crossing: chromeProblems(crossing, frame),
+      tangent: chromeProblems(tangent, frame),
+    },
+  );
+  const alongMin = CHROME_GATE.alongMinMm;
+  CHROME_GATE.alongMinMm = Infinity;
+  try {
+    check(
+      'mutations',
+      'on-chrome test off → the cut line ON a frame line passes',
+      chromeProblems(along, frame).length === 0,
+      chromeProblems(along, frame),
+    );
+  } finally {
+    CHROME_GATE.alongMinMm = alongMin;
+  }
+  // 5 · mutation: marks treated like frames again (the 10.10 build) → offered, traced round
+  CLEAN.on.marks = false;
+  try {
+    const b = await bracketsOf('pdf/44.pdf');
+    const m = await writtenOf(['pdf/44.pdf'], 'redcafe-44-mut');
+    check(
+      'mutations',
+      'marks off → 44.pdf brackets only offered, the written cut line has hairpins / bars and G19 blocks',
+      b.masked < b.tiles && (m.hp > 0 || m.bars > 0) && m.g19.length > 0,
+      { brackets: b, hairpins: m.hp, bars: m.bars, g19: m.g19.map((x: string) => x.slice(0, 120)) },
+    );
+  } finally {
+    CLEAN.on.marks = true;
+  }
+}
+
+type PtLike = { x: number; y: number };
+
 export async function main(args: string[]): Promise<number> {
   const [mode, id] = args;
   if (mode === 'wm-M') await wmSection();
   else if (mode === 'synth') synthSection();
   else if (mode === 'walls') await wallsSection(id);
-  else throw new Error(`mode? wm-M | synth | walls <case>`);
+  else if (mode === 'marks') await marksSection();
+  else throw new Error(`mode? wm-M | synth | marks | walls <case>`);
   for (const c of checks) console.log(`@@CHECK ${JSON.stringify(c)}`);
   return 0;
 }
