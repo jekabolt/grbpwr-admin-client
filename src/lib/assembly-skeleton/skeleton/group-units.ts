@@ -491,10 +491,17 @@ export function groupDetailed(
       // an inside pocket on a lining front (a lining unit) — made, in the tree of its panels.
       let tree: SkeletonTree | null = trees.size === 1 ? [...trees][0] : null;
       if (trees.size > 1) {
+        // Only what the hint really takes: pieces on the table, a fused interfacing aside.
+        const taken = inside.flatMap((e) => e.leaves).filter((k) => keys.has(k));
         const bodyOf = (t: SkeletonTree) =>
-          [...keys]
+          taken
             .map((k) => byKey.get(k))
-            .some((p) => p?.tree === t && (!p.role || roleDef(p.role)?.level === 'panel'));
+            .some(
+              (p) =>
+                p?.tree === t &&
+                p.cloth !== 'interfacing' &&
+                (!p.role || roleDef(p.role)?.level === 'panel'),
+            );
         const shellBody = bodyOf('shell');
         const liningBody = bodyOf('lining');
         if (shellBody && liningBody) {
