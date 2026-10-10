@@ -14,6 +14,15 @@
 // Out (default ../tmp/plans/assembly-from-pattern/prod-run): <code>.json per card, <code>.stand.json
 // (form + contours for the UI stand), <code>-route.svg / -map.svg, summary.json, summary.txt.
 // No prod data or URLs are committed — the out folder is outside the repo.
+//
+// THE AI SECOND OPINION, offline (this script never calls the AI or the backend):
+// --ai-dump <dir>: per card with a proposal, <code>.request.json = the exact body the generated
+//   client POSTs to SuggestAssemblySkeleton (captured from createAdminServiceClient, force false as
+//   on the panel's first press) and <code>.sent.json = the step signatures the panel keeps (s1 =
+//   sent[0] …); prints the RPC's HTTP method + path.
+// --ai-answers <dir>: reads <code>.response.json (the raw JSON the server returned, or its error
+//   JSON) and measures a = engine, b = «use AI readings» (pins → rebuild), c = b + «use AI order»
+//   against the technologist's joins, with cost, warnings, picks, moves and c's sweep.
 import { build } from 'esbuild';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +36,10 @@ const arg = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : null);
 const argsAll = (k) => args.flatMap((a, i) => (a === k ? [args[i + 1]] : []));
 const OUT = resolve(arg('--out') ?? resolve(root, '../tmp/plans/assembly-from-pattern/prod-run'));
 mkdirSync(OUT, { recursive: true });
+const AI_DUMP = arg('--ai-dump') ? resolve(arg('--ai-dump')) : null;
+const AI_ANSWERS = arg('--ai-answers') ? resolve(arg('--ai-answers')) : null;
+if (AI_DUMP) mkdirSync(AI_DUMP, { recursive: true });
+const safeName = (code) => code.replace(/[^\w.~-]+/g, '_');
 
 const outfile = resolve(tmpdir(), `prod-run-${process.pid}.mjs`);
 await build({
@@ -170,8 +183,14 @@ if (arg('--corpus')) {
 
 console.log(`${inputs.length} cards`);
 const summary = [];
+const aiFiles = [];
+let aiRoute = null;
 for (const input of inputs) {
   const t0 = performance.now();
+  if (AI_ANSWERS) {
+    const f = resolve(AI_ANSWERS, `${safeName(input.code)}.response.json`);
+    if (existsSync(f)) input.aiAnswer = JSON.parse(readFileSync(f, 'utf8'));
+  }
   let res;
   try {
     // hang guard: a card that does not finish in 60 s is a finding, not a stuck run
@@ -185,7 +204,19 @@ for (const input of inputs) {
     console.log(`\n${input.code}: THREW ${e.message}`);
     continue;
   }
-  const safe = input.code.replace(/[^\w.~-]+/g, '_');
+  const safe = safeName(input.code);
+  if (AI_DUMP && res.aiDump) {
+    const w = res.aiDump;
+    aiRoute ??= `${w.method} /${w.path}`;
+    const req = resolve(AI_DUMP, `${safe}.request.json`);
+    const sent = resolve(AI_DUMP, `${safe}.sent.json`);
+    writeFileSync(req, w.body);
+    writeFileSync(sent, JSON.stringify(w.signatures, null, 1));
+    aiFiles.push(
+      [basename(req), Buffer.byteLength(w.body)],
+      [basename(sent), readFileSync(sent).length],
+    );
+  }
   writeFileSync(resolve(OUT, `${safe}.json`), JSON.stringify(res.report, null, 2));
   writeFileSync(resolve(OUT, `${safe}.stand.json`), JSON.stringify(res.stand));
   if (res.proposal)
@@ -223,12 +254,83 @@ for (const input of inputs) {
       (r.mapProposal ? `\n  map(proposal) ${JSON.stringify(r.mapProposal)}` : '') +
       (r.seamSheet ? `\n  SEAM MAP ${JSON.stringify(r.seamSheet)}` : '') +
       (r.ai ? `\n  AI request ${JSON.stringify(r.ai)}` : '') +
+      (r.aiVariants ? `\n  AI ${aiLine(r.aiVariants)}` : '') +
       (r.errors.length ? `\n  ERRORS ${r.errors.join(' || ')}` : ''),
   );
 }
 writeFileSync(resolve(OUT, 'summary.json'), JSON.stringify(summary, null, 2));
 
 // compact table
+// ── the AI variants ──
+function aiLine(v) {
+  const m = (x) => `${x.inputs ?? '-'}/${x.contents ?? '-'}/${x.tree ?? '-'} of ${x.joins ?? '-'}`;
+  const cost = v.cost
+    ? `$${v.cost.costUsd || '?'} ${v.cost.calls} calls${v.cost.unknownCalls ? ` (${v.cost.unknownCalls} unknown)` : ''}`
+    : '';
+  if (v.refused) return `REFUSED «${v.refused}» · ${cost}`;
+  return [
+    `a ${m(v.a)}`,
+    `b ${m(v.b)}${v.b.rebuilt ? '' : ' (=a)'}`,
+    `c ${m(v.c)}${v.c.applied ? '' : ' (=b)'} inv ${v.c.orderInversions ?? '-'}`,
+    `warn ${v.warnings} picks ${v.picksUsed}/${v.picksMapped}/${v.picks}`,
+    `moved ${v.moved ?? '-'}${v.orderRefusal ? ` order refused «${v.orderRefusal}»` : ''}` +
+      (v.orderOnEngine
+        ? ` (order on a: ${v.orderOnEngine.refused ? `refused «${v.orderOnEngine.refused}»` : `${v.orderOnEngine.moved} moved`})`
+        : ''),
+    `sweep c ${v.c.sweepAll.hard}/${v.c.sweepBatch.hard}`,
+    cost + (v.cached ? ' cached' : ''),
+  ].join(' · ');
+}
+const AI_SETS = {
+  TRAIN: ['SS26-006', 'SS26-007', 'SS26-011', 'SS26-012', 'SS26-016', 'FW26-001'],
+  TEST: ['SS26-004', 'SS26-008', 'SS26-009', 'SS26-013', 'SS26-014', 'SS26-015'],
+  'SS26-005': ['SS26-005'],
+};
+function aiTotals(rows) {
+  const by = new Map(rows.map((r) => [r.code, r]));
+  const lines = [];
+  let usd = 0;
+  let calls = 0;
+  let unknown = 0;
+  let violations = 0;
+  for (const r of rows) {
+    const v = r.aiVariants;
+    if (!v) continue;
+    usd += Number(v.cost?.costUsd) || 0;
+    calls += v.cost?.calls ?? 0;
+    unknown += v.cost?.unknownCalls ?? 0;
+    violations += v.c?.sweepAll?.hard ?? 0;
+  }
+  for (const [name, codes] of Object.entries(AI_SETS)) {
+    const t = { a: [0, 0, 0], b: [0, 0, 0], c: [0, 0, 0] };
+    let joins = 0;
+    let n = 0;
+    for (const c of codes) {
+      const v = by.get(c)?.aiVariants;
+      if (!v || v.a.joins == null) continue;
+      n++;
+      joins += v.a.joins;
+      for (const k of ['a', 'b', 'c'])
+        ['inputs', 'contents', 'tree'].forEach((f, i) => (t[k][i] += v[k][f] ?? 0));
+    }
+    const pct = (x) => (joins ? `${((100 * x) / joins).toFixed(0)}%` : '-');
+    lines.push(
+      `== ${name} (${n}/${codes.length} answered): ` +
+        ['a', 'b', 'c']
+          .map(
+            (k) =>
+              `${k} in ${t[k][0]} (${pct(t[k][0])}) cont ${t[k][1]} (${pct(t[k][1])}) tree ${t[k][2]} (${pct(t[k][2])})`,
+          )
+          .join(' | ') +
+        ` of ${joins}`,
+    );
+  }
+  lines.push(
+    `== AI cost: $${usd.toFixed(4)} · ${calls} calls · ${unknown} with no known charge · c sweep violations ${violations} (must be 0)`,
+  );
+  return lines.join('\n');
+}
+
 const row = (r) =>
   [
     r.code,
@@ -270,3 +372,20 @@ const table = [
 ].join('\n');
 writeFileSync(resolve(OUT, 'summary.txt'), table + '\n');
 console.log(`\n${table}\n\nout → ${OUT}`);
+if (AI_DUMP) {
+  console.log(
+    `\nAI dump → ${AI_DUMP}\nRPC SuggestAssemblySkeleton: ${aiRoute ?? '(no request built)'}`,
+  );
+  for (const [f, n] of aiFiles) console.log(`  ${f} ${n} B`);
+}
+if (AI_ANSWERS) {
+  const rows = summary.filter((r) => r.aiVariants);
+  console.log(`\nAI answers ← ${AI_ANSWERS} (${rows.length} cards)`);
+  for (const r of rows) console.log(`${r.code.padEnd(10)} ${aiLine(r.aiVariants)}`);
+  const tot = aiTotals(summary);
+  console.log(tot);
+  writeFileSync(
+    resolve(OUT, 'ai-summary.txt'),
+    rows.map((r) => `${r.code} ${aiLine(r.aiVariants)}`).join('\n') + '\n' + tot + '\n',
+  );
+}
