@@ -1732,6 +1732,24 @@ export async function main(): Promise<number> {
       ];
       addFamily(F, 1, strip, 0, [], ['WAISTBAND']);
       addFamily(F, 2, bodice, 600, [], ['FRONT']);
+      // a back with a shaped CB and a straight hem (redcafe спинка): the hem is the longest
+      // straight edge, the grain still runs along the length
+      const back = (k: number) =>
+        [
+          { x: 0, y: 0 },
+          { x: 250, y: 0 },
+          { x: 238, y: 120 },
+          { x: 230, y: 250 },
+          { x: 240, y: 340 },
+          { x: 205, y: 400 },
+          { x: 190, y: 470 },
+          { x: 60, y: 500 },
+          { x: 14, y: 480 },
+          { x: 9, y: 360 },
+          { x: 12, y: 240 },
+          { x: 8, y: 120 },
+        ].map((p) => ({ x: p.x * k, y: p.y * k }));
+      addFamily(F, 3, back, 1200, [], ['BACK']);
       const d = buildPieceSpecsDetailed(input(F, CUT10));
       const p1 = d.output.grainProposals?.find((g) => g.seed === 1);
       const p2 = d.output.grainProposals?.find((g) => g.seed === 2);
@@ -1746,6 +1764,12 @@ export async function main(): Promise<number> {
         !!p2 && vertical(p2),
         `bodice with a straight CF edge → proposed parallel to it (${p2?.why})`,
         JSON.stringify(p2),
+      );
+      const p3 = d.output.grainProposals?.find((g) => g.seed === 3);
+      ck(
+        !!p3 && vertical(p3),
+        `a back with a shaped CB and a straight hem → along its length (${p3?.why})`,
+        JSON.stringify(p3),
       );
       ck(
         d.output.pieces.length === 0,

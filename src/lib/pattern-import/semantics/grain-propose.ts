@@ -8,7 +8,12 @@
 //   3. the mirror axis of a piece drawn whole (sleeve, collar, a back drawn complete);
 //   4. parallel to a straight edge ≥ 30 % of the perimeter (CF / CB drawn straight);
 //   5. the long axis of a strip (aspect ≥ 3: waistband, facing, strap, binding);
-//   6. else parallel to the longest straight edge.
+//   6. the long axis of an elongated piece (aspect ≥ 1.4: a back, a front, a sleeve — the
+//      lengthwise grain runs along the garment's length; a hem edge is the longest STRAIGHT edge
+//      of a back with a shaped CB, and taking it turned redcafe's спинка by 90°);
+//   7. else parallel to the longest straight edge.
+// An axis (5, 6) is snapped to a straight side within 10°, else to the sheet's axis within 7°
+// (pieces are mostly laid on the sheet along their grain).
 // The line is placed through the piece (its centroid, else its widest chord) at 70 % of the chord.
 
 import { mirrorAxis, principalAngle, resample } from '../ai/geom';
@@ -18,6 +23,7 @@ import { centroidOf, lineHits, perimeter, pointInPolygon } from './geom';
 
 export const PROPOSE_EDGE_SHARE = 0.3;
 export const PROPOSE_STRIP_ASPECT = 3;
+export const PROPOSE_LONG_ASPECT = 1.4;
 const CHORD_SHARE = 0.7;
 const EDGE_MIN_MM = 30;
 
@@ -111,18 +117,33 @@ export function proposeGrain(
     const w = (p.x - c.x) * -u.y + (p.y - c.y) * u.x;
     [lo, hi, wlo, whi] = [Math.min(lo, t), Math.max(hi, t), Math.min(wlo, w), Math.max(whi, w)];
   }
-  if (hi - lo >= PROPOSE_STRIP_ASPECT * Math.max(1e-6, whi - wlo)) {
-    // a straight long side of the strip (≤ 10° off its axis, ≥ half its length) is the direction
+  const aspect = (hi - lo) / Math.max(1e-6, whi - wlo);
+  // the axis snapped: a straight side (≤ 10° off, ≥ a quarter of the length), else the sheet's
+  // own axis (≤ 7° off), else as measured
+  const snapped = (): PtMm => {
     const side = edges.find(
       (e) =>
-        e.lenMm >= 0.5 * (hi - lo) &&
+        e.lenMm >= 0.25 * (hi - lo) &&
         Math.abs(unit(e.a, e.b).x * u.x + unit(e.a, e.b).y * u.y) >= Math.cos(Math.PI / 18),
     );
-    const r = out(side ? unit(side.a, side.b) : u, 'strip axis');
+    if (side) return unit(side.a, side.b);
+    const cos7 = Math.cos((7 * Math.PI) / 180);
+    if (Math.abs(u.x) >= cos7) return { x: Math.sign(u.x), y: 0 };
+    if (Math.abs(u.y) >= cos7) return { x: 0, y: Math.sign(u.y) };
+    return u;
+  };
+  if (aspect >= PROPOSE_STRIP_ASPECT) {
+    const r = out(snapped(), 'strip axis');
     if (r) return r;
   }
 
-  // 6. the longest straight edge
+  // 6. an elongated piece: its long axis
+  if (aspect >= PROPOSE_LONG_ASPECT) {
+    const r = out(snapped(), 'long axis');
+    if (r) return r;
+  }
+
+  // 7. the longest straight edge
   if (long) return out(unit(long.a, long.b), 'longest straight edge');
   return null;
 }
