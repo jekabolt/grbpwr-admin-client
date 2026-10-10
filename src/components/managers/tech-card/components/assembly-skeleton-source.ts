@@ -334,9 +334,9 @@ const JACKET_WORDS = new Set([
  *   • trousers — a fly, or a crotch / gusset / leg piece (a waistband on left and right panels is
  *     also a skirt);
  *   • hoodie — sleeves and a hood;
- *   • shirt — sleeves with a collar, placket or cuffs; a jacket (lined template) only when the card
- *     is lined AND has a jacket's own pieces (lapel, facing, undercollar) — a lined shirt stays a
- *     shirt;
+ *   • shirt — sleeves with a placket (a collar or cuffs alone are a dress's too); a jacket (lined
+ *     template) only when the card is lined AND has a jacket's own pieces (lapel, undercollar) — a
+ *     facing alone is a lined shirt's too;
  *   • tee — sleeves with a neck rib or band (sleeves alone are also a dress);
  *   • skirt — a skirt panel.
  * An auxiliary card (a garment case, a dust bag) is no garment. Anything else is generic, and `why`
@@ -364,13 +364,18 @@ export function skeletonCategoryFromPieces(
   if (has('skirt')) return found('skirt', 'a skirt panel');
   if (has('sleeve')) {
     if (has('hood')) return found('hoodie', 'sleeves and a hood');
+    // A collar or cuffs alone are a dress's too, and a facing is a lined shirt's too: a jacket needs
+    // its own pieces (lapel, undercollar), a shirt its placket.
+    if (hasLining && any(JACKET_WORDS))
+      return found('jacket-lined', 'sleeves, lapels or an undercollar, and a lining');
+    if (has('placket')) return found('shirt', 'sleeves and a placket');
     const neck = has('collar') || (has('stand') && !any(NECK_RIB_WORDS));
-    if (neck || has('placket') || has('cuff')) {
-      const what = neck ? 'a collar' : has('placket') ? 'a placket' : 'cuffs';
-      if (hasLining && (has('facing') || any(JACKET_WORDS)))
-        return found('jacket-lined', `sleeves, ${what}, jacket facings or lapels and a lining`);
-      return found('shirt', `sleeves and ${what}`);
-    }
+    if (neck || has('cuff'))
+      return {
+        category: 'generic',
+        why: `sleeves and ${neck ? 'a collar' : 'cuffs'}, but no placket or lapel to tell a shirt, a dress or a jacket apart`,
+        evidence: false,
+      };
     if (has('rib') || any(NECK_RIB_WORDS)) return found('tee', 'sleeves and a neck rib');
     return {
       category: 'generic',

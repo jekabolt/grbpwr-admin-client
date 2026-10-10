@@ -150,13 +150,16 @@ console.log('\n1 · category and lining');
   // Only DISCRIMINATING evidence reads a garment: sleeves alone are a dress too, a waistband on
   // left / right panels a skirt too, a lining with a collar a lined shirt too.
   const byPieces = [
-    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], false, null, 'shirt'],
-    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], true, null, 'shirt'], // lined shirt
+    // A collar alone is a dress's too, a facing alone a lined shirt's too: generic, said in words.
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], false, null, 'generic'], // collared dress?
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], true, null, 'generic'], // lined, no placket
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'PLACKET_L', 'PLACKET_R'], false, null, 'shirt'],
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'PLACKET_L'], true, null, 'shirt'], // lined shirt
     [
       ['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'FACING_L', 'FACING_R'],
       true,
       null,
-      'jacket-lined',
+      'generic', // lined shirt with facings, or a jacket — no lapel to tell
     ],
     [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'LAPEL_L'], true, null, 'jacket-lined'],
     [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECK_RIB'], false, null, 'tee'],
@@ -177,7 +180,7 @@ console.log('\n1 · category and lining');
   const readP = E.skeletonCategoryRead({
     categoryNames: [],
     hasLining: false,
-    pieceNames: byPieces[0][0],
+    pieceNames: byPieces[2][0], // sleeves, collar and plackets: a shirt
   });
   const readC = E.skeletonCategoryRead({
     categoryNames: ['shirts', 'tops'],
