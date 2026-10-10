@@ -57,6 +57,7 @@ import type {
   Unproven,
 } from '../types';
 import { PATIMPORT } from '../types';
+import { stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
 import {
@@ -700,6 +701,20 @@ export function buildPieceSpecsDetailed(
     for (const { c, card } of p.cands) {
       const feats = classifyFeatures(c, set, sheet);
       let outer = ccw(c.outer);
+      // Every candidate outline (F4 fill, operator refill, DXF fast path) passes here before fold
+      // and offset: a stretch that runs out and back along itself — a corner overshot and retraced
+      // (reef HB_4XL, 0.57 mm), the fill wandering up a bundle of lines and back (kombinezon, 12
+      // mm) — is a zero-width needle on the cutting line; it goes now (spikes.ts). A traced (scan)
+      // outline is made simple below instead (its union drops such spurs, and more).
+      if (!traced) {
+        const st = stripSpikes(outer);
+        if (st.spikes) {
+          outer = st.ring;
+          pieceNotes.push(
+            `${card.token}: ${st.spikes} zero-width spike(s) removed from the outline`,
+          );
+        }
+      }
       // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
       // simple polygon first, or no offset of it is a parallel curve (offset.ts, E3).
       if (traced) {

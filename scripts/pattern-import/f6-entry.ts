@@ -34,6 +34,7 @@ import type {
   WriteJob,
 } from 'lib/pattern-import/types';
 import { bandCutSupport } from 'lib/pattern-import/semantics/build';
+import { findSpikes, stripSpikes } from 'lib/pattern-import/spikes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { writeDxfDetailed, writeScopes } from 'lib/pattern-import/write';
 import {
@@ -1878,6 +1879,176 @@ export async function main(opts: { plans: string }): Promise<number> {
       !c.ok && c.severity === 'block' && /area not a positive number/.test(c.note),
       'zero-area L/R pair → G12 red (not NaN-green)',
       c.note,
+    );
+  }
+
+  // S ──────────────────────────────────────────────────────────────────────────────────────
+  head(
+    'S · zero-width out-and-back spikes: stripped at the outline and the writer, G4 blocks any left',
+  );
+  {
+    const SQ: PtMm[] = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    /** SQ with `spike` spliced in after (x, 0) on its bottom edge: out and back to (x, 0). */
+    const withSpike = (x: number, spike: PtMm[]): PtMm[] => [
+      SQ[0],
+      { x, y: 0 },
+      ...spike,
+      { x, y: 0 },
+      ...SQ.slice(1),
+    ];
+    /** Largest distance of a vertex from the square's boundary (0 = nothing sticks out). */
+    const offSquare = (r: PtMm[]) =>
+      Math.max(
+        ...r.map(
+          (p) =>
+            Math.min(Math.abs(p.x), Math.abs(p.y), Math.abs(100 - p.x), Math.abs(100 - p.y)) +
+            (p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ? 1000 : 0),
+        ),
+      );
+    const stripCase = (what: string, ring: PtMm[], want: 'stripped' | 'kept') => {
+      const s = stripSpikes(ring);
+      const left = findSpikes(s.ring);
+      const ok =
+        want === 'stripped'
+          ? s.spikes > 0 && offSquare(s.ring) <= 1e-9 && !left.length
+          : s.spikes === 0 && s.ring.length === ring.length && !findSpikes(ring).length;
+      ck(
+        ok,
+        `stripSpikes: ${what} → ${want}`,
+        `${s.spikes} tip(s), ${ring.length} → ${s.ring.length} vertices, off the square ${offSquare(s.ring).toFixed(3)} mm, gate finds ${left.length} · area ${areaOf(s.ring).toFixed(3)} vs ${areaOf(ring).toFixed(3)} mm²`,
+      );
+      return s;
+    };
+    // kombinezon seed 0's case: 12 mm out along a line and back, the two legs at different vertices
+    stripCase(
+      '12 mm spike, legs with different vertices',
+      withSpike(40, [
+        { x: 40, y: -3 },
+        { x: 40, y: -7.5 },
+        { x: 40, y: -12 },
+        { x: 40, y: -9 },
+        { x: 40, y: -4.2 },
+        { x: 40, y: -1 },
+      ]),
+      'stripped',
+    );
+    // reef HB_4XL's case: a corner overshot by 0.57 mm and retraced (p, tip, p)
+    stripCase(
+      '0.57 mm corner overshoot',
+      [SQ[0], SQ[1], { x: 100.57, y: 0 }, ...SQ.slice(1)],
+      'stripped',
+    );
+    // a curved needle: out along an arc, back along the same arc at other vertices; flat tip
+    {
+      const arc = (t: number) => ({ x: 60 + 8 * Math.sin(t), y: -8 * (1 - Math.cos(t)) - 6 * t });
+      const out = Array.from({ length: 9 }, (_, k) => arc(((k + 1) / 9) * 1.2));
+      const back = Array.from({ length: 6 }, (_, k) => arc(((5.5 - k) / 6.2) * 1.2));
+      const tip = out[out.length - 1];
+      stripCase(
+        'curved 15 mm needle, flat tip (two vertices 0.02 mm apart)',
+        withSpike(60, [...out, { x: tip.x + 0.02, y: tip.y }, ...back]),
+        'stripped',
+      );
+    }
+    // genuine narrow features are kept: a 5 mm deep V 0.5 mm wide (a notch), a zig-zag edge
+    stripCase(
+      'notch-like V 5 mm deep, 0.5 mm wide',
+      [SQ[0], { x: 49.75, y: 0 }, { x: 50, y: 5 }, { x: 50.25, y: 0 }, ...SQ.slice(1)],
+      'kept',
+    );
+    stripCase(
+      "zig-zag edge (polupalto's cuff: 1.3 mm teeth, 0.43 mm)",
+      [
+        SQ[0],
+        ...Array.from({ length: 20 }, (_, k) => ({ x: 10 + k * 1.2, y: k % 2 ? 0.43 : 0 })),
+        ...SQ.slice(1),
+      ],
+      'kept',
+    );
+
+    // the writer: a PCK whose cut carries a 12 mm needle on its bottom edge is written without it
+    const clean = pckSpec();
+    const spiked = pckSpec();
+    const c0 = spiked.sizes[0].cut;
+    const i0 = c0.findIndex((p, k) => {
+      const q = c0[(k + 1) % c0.length];
+      return Math.abs(p.y) < 1e-9 && Math.abs(q.y) < 1e-9;
+    });
+    const a = c0[i0];
+    const b = c0[(i0 + 1) % c0.length];
+    const mx = (a.x + b.x) / 2;
+    spiked.sizes[0] = {
+      ...spiked.sizes[0],
+      cut: [
+        ...c0.slice(0, i0 + 1),
+        { x: mx, y: 0 },
+        { x: mx, y: -5 },
+        { x: mx, y: -12 },
+        { x: mx, y: -6.5 },
+        { x: mx, y: 0 },
+        ...c0.slice(i0 + 1),
+      ],
+    };
+    const w = await writeAndGate(job(MAIN, [spiked]), gateCtx([clean]));
+    const blk = w.detail.plan.blocks.find((x) => x.identity === 'PCK');
+    ck(
+      !!blk &&
+        !findSpikes(blk.cut).length &&
+        Math.min(...blk.cut.map((p) => p.y)) >=
+          Math.min(...clean.sizes[0].cut.map((p) => p.y)) - 1e-6 &&
+        w.detail.warnings.some((x) => /zero-width spike/.test(x)) &&
+        w.report.passed,
+      'writer: a 12 mm needle on the cut line is not written (warned), the gate passes',
+      `${blk?.cut.length} vertices · ${w.detail.warnings.filter((x) => /spike/.test(x)).join(' | ')} · ${summary(w.report)}`,
+    );
+
+    // the gate: a needle put back into the written file (after the writer) blocks on G4
+    const g = await writeAndGate(job(MAIN, [clean]), gateCtx([clean]));
+    ck(g.report.passed, 'control: the clean PCK passes', summary(g.report));
+    const p = pairsOf(g.detail.bareText);
+    let inBlock = false;
+    let poly = false;
+    let done = false;
+    let seen = 0;
+    const out: Pair[] = [];
+    for (let k = 0; k < p.length; k++) {
+      const [code, val] = p[k];
+      const c = code.trim();
+      if (c === '0') {
+        if (val === 'BLOCK') inBlock = false;
+        poly = val === 'LWPOLYLINE';
+        seen = 0;
+      }
+      if (c === '2' && /^PCK/.test(val)) inBlock = true;
+      if (poly && c === '8' && val !== '1') poly = false;
+      if (inBlock && poly && !done && c === '90') {
+        out.push([code, String(Number(val) + 2)]);
+        continue;
+      }
+      out.push(p[k]);
+      if (inBlock && poly && !done && c === '20') {
+        seen++;
+        if (seen === 1) {
+          const x = Number(p[k - 1][1]);
+          const y = Number(val);
+          // a 12 mm needle straight out of the first vertex, and back
+          out.push(['10', String(x)], ['20', String(y - 12)], ['10', String(x)], ['20', String(y)]);
+          done = true;
+        }
+      }
+    }
+    const bad = await runGate(embedManifestLocal(textOf(out), g.expect.manifest), g.expect);
+    const n4 = checkOf(bad, 'G4-hausdorff')[0];
+    ck(done, 'mutation: a needle injected into the written PCK cut line', `${done}`);
+    ck(
+      !bad.passed && !n4.ok && n4.severity === 'block' && /zero-width spike/.test(n4.note),
+      'gate: a written cut line with a zero-width needle → G4-hausdorff red',
+      `${failing(bad).join(',')} · ${n4.note.slice(0, 200)}`,
     );
   }
 

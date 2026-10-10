@@ -31,6 +31,7 @@ import type {
   PtMm,
 } from '../types';
 import { PATIMPORT } from '../types';
+import { stripSpikes } from '../spikes';
 import {
   IDENTITY,
   applyAffine,
@@ -312,8 +313,15 @@ export function planBlocks(
       const s = transformSize(s0, T);
       const name = blockNameOf(w.spec, s);
       const who = name;
-      const cut = ccw(simplify(s.cut, true, WRITE_SIMPLIFY_MM));
-      const seam = s.seam ? ccw(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
+      // last defence: a zero-width out-and-back spike is never written (a needle on the line)
+      const cutS = stripSpikes(simplify(s.cut, true, WRITE_SIMPLIFY_MM));
+      const seamS = s.seam ? stripSpikes(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
+      const cut = ccw(cutS.ring);
+      const seam = seamS ? ccw(seamS.ring) : null;
+      if (cutS.spikes || seamS?.spikes)
+        warnings.push(
+          `${who}: removed ${cutS.spikes + (seamS?.spikes ?? 0)} zero-width spike(s) from the ${cutS.spikes ? 'cut' : 'seam'} line`,
+        );
       if (!seam) warnings.push(`${who}: no seam line — layer 14 omitted (the gate will block)`);
       const internal = s.internal.map((f) => ({
         pts: f.closed
