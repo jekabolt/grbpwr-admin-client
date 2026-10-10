@@ -60,6 +60,7 @@ import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
   answerCtxOf,
+  maskRevOf,
   bindDrawnToModel,
   countWords,
   drawnSizesKey,
@@ -384,9 +385,24 @@ export function useImportSession(deps: {
   /** H1 drawn-size count — only as answered on this sheet for this model (S3). */
   const drawnNow = (i: Inputs = iRef.current) => liveDrawnSizes(i, i);
   /** S3: the fingerprint of what is on screen now — the sheet, its grid, the model, the pieces. */
+  /** A8: the mask the sheet was read with — page items, sheet items and the operator's edits. */
+  const maskRevNow = (s: ImportSession, i: Inputs): string | undefined => {
+    const ids = [
+      ...(s.clean?.pages ?? []).flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id)),
+      ...(s.clean?.dropped ?? []).map((d) => `drop:${d.file}:${d.page}`),
+      ...(s.sheet?.clean?.items ?? []).filter((m) => m.applied).map((m) => m.id),
+    ];
+    if (!ids.length && !i.cleanEdits.length) return undefined;
+    return maskRevOf(ids, i.cleanEdits);
+  };
   const answersNow = (s: ImportSession = sRef.current, i: Inputs = iRef.current): AnswerCtx =>
     answerCtxOf(
-      { sheetIndex: i.sheetIndex, gridOverride: i.gridOverride, variant: s.variant },
+      {
+        sheetIndex: i.sheetIndex,
+        gridOverride: i.gridOverride,
+        variant: s.variant,
+        maskRev: maskRevNow(s, i),
+      },
       s.pieces?.families,
     );
   /** S3: after the pieces changed, drop the answers whose question moved and re-stamp the rest. */
