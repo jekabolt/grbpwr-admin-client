@@ -452,6 +452,14 @@ export function tablesOf(
     const rows = pos('x');
     const cols = pos('y');
     if (rows.length < 3 || cols.length < 3) continue;
+    // cells of a table are small and even (a wider label column at most): a piece drawn as a
+    // double rectangle (cut + seam line, 10 / 400 / 10 mm) is not a table
+    const even = (v: number[]) => {
+      const d = v.slice(1).map((x, k) => x - v[k]);
+      const m = d.slice().sort((a, b) => a - b)[d.length >> 1];
+      return m <= 40 && Math.max(...d) <= 4 * m;
+    };
+    if (!even(rows) || !even(cols)) continue;
     const cells = (rows.length - 1) * (cols.length - 1);
     if (cells < 6) continue;
     const box = {
