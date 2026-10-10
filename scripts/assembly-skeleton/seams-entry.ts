@@ -16,6 +16,7 @@ import {
   scoreRuns,
   seamPieceOf,
   type MatchRules,
+  unprovenCopies,
 } from '../../src/lib/assembly-skeleton/geometry';
 import { groupUnits, orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
 import type {
@@ -230,6 +231,8 @@ export type Score = {
   acceptable: number;
   wrong: number;
   ambiguous: number;
+  /** Seams whose only rivals are the same edge on an unproven same-shape copy (asked in words). */
+  copyOnly: number;
   recall: number;
   precision: number;
   ambiguousShare: number;
@@ -276,7 +279,24 @@ export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string
     else wrongPairs.push(`${c.a}~${c.b}`);
   });
   const chosen = graph.chosen.length;
-  const ambiguous = graph.chosen.filter((c) => (c.ambiguousWith ?? []).length > 0).length;
+  // A rival that is the same seam onto an unproven same-shape copy (shell or its lining twin, no
+  // cloth to tell) is not a seam choice: the proposal asks «layer, lining or a copy?» about the
+  // pair in words. The gate measures the seam choices; the copy-only ones are reported apart.
+  const copyPairs = new Set(
+    unprovenCopies(graph.pieces).flatMap(([a, b]) => [
+      `${a.pieceKey}|${b.pieceKey}`,
+      `${b.pieceKey}|${a.pieceKey}`,
+    ]),
+  );
+  const pk = (id: string) => id.slice(0, id.lastIndexOf('#'));
+  const copyRival = (c: SeamCandidate, q: SeamCandidate) =>
+    (q.a === c.a && copyPairs.has(`${pk(q.b)}|${pk(c.b)}`)) ||
+    (q.b === c.b && copyPairs.has(`${pk(q.a)}|${pk(c.a)}`)) ||
+    (q.a === c.b && copyPairs.has(`${pk(q.b)}|${pk(c.a)}`)) ||
+    (q.b === c.a && copyPairs.has(`${pk(q.a)}|${pk(c.b)}`));
+  const withRivals = graph.chosen.filter((c) => (c.ambiguousWith ?? []).length > 0);
+  const copyOnly = withRivals.filter((c) => (c.ambiguousWith ?? []).every((q) => copyRival(c, q)));
+  const ambiguous = withRivals.length - copyOnly.length;
   return {
     truth: truth.pairs.length,
     chosen,
@@ -287,6 +307,7 @@ export function score(graph: SeamGraph, truth: Truth, map: (l: string) => string
     acceptable,
     wrong: wrongPairs.length,
     ambiguous,
+    copyOnly: copyOnly.length,
     recall: recovered / Math.max(1, truth.pairs.length),
     precision: (chosen - wrongPairs.length) / Math.max(1, chosen),
     ambiguousShare: ambiguous / Math.max(1, chosen),

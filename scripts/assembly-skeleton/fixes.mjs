@@ -291,6 +291,26 @@ console.log('\n3 · identical layers need one fabric');
   }
 }
 
+// ── 3b. the same shape, not proven twins: never matched, asked in words ─────────────────────
+{
+  const bp = ssRaw.pieces.find((p) => p.name === 'BP');
+  const facts = {
+    ...ssRaw,
+    pieces: [{ ...bp }, { ...bp, pieceKey: '17', name: '17' }],
+    category: 'shirt',
+  };
+  const p = E.proposeSkeleton(facts, E.skeletonDeps);
+  const pk = (id) => id.slice(0, id.lastIndexOf('#'));
+  const seams = p.graph.chosen.filter((c) => new Set([pk(c.a), pk(c.b)]).size === 2);
+  const joined = p.steps.filter((s) => s.inputs.includes('BP') && s.inputs.includes('17'));
+  const said = p.warnings.find((w) => /(BP and 17|17 and BP) have the same shape/.test(w));
+  gate(
+    'BP + congruent «17» (no cloth): no seam between them, no join, asked in words',
+    seams.length === 0 && joined.length === 0 && !!said,
+    `${seams.length} seams, ${joined.map((s) => s.label).join(', ') || 'no join'}; ${said ?? 'no warning'}`,
+  );
+}
+
 // ── 4. the print sheet reads the screen's graph ──────────────────────────────────────────────
 console.log('\n4 · print = screen');
 {

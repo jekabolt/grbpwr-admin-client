@@ -266,7 +266,7 @@ check(
 check(
   bl.s.ambiguousShare <= 0.6,
   'blazer: ambiguous ≤ 60 % of chosen',
-  `${bl.s.ambiguous}/${bl.s.chosen} = ${pct(bl.s.ambiguousShare).trim()}`,
+  `${bl.s.ambiguous}/${bl.s.chosen} = ${pct(bl.s.ambiguousShare).trim()} (+${bl.s.copyOnly} rivalled only by an unproven same-shape copy, asked in words)`,
 );
 
 for (const [label, neg, pos] of [
@@ -304,7 +304,7 @@ console.log('\n── gates (full rules + A4)');
   check(
     bl4.s.ambiguousShare <= 0.6,
     'A4: blazer ambiguous ≤ 60 % of chosen',
-    `${bl4.s.ambiguous}/${bl4.s.chosen} = ${pct(bl4.s.ambiguousShare).trim()}`,
+    `${bl4.s.ambiguous}/${bl4.s.chosen} = ${pct(bl4.s.ambiguousShare).trim()} (+${bl4.s.copyOnly} copy-only)`,
   );
   const neg4 = results.get('  └ NEG: A4, hand OFF')[0].s;
   check(

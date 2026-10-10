@@ -44,7 +44,7 @@ import {
 } from '../types';
 import { isMirroredPair } from '../cut';
 import { angleAt, dist, drillPoints } from './segment';
-import { congruent } from './twins';
+import { unprovenCopies } from './twins';
 
 export type MatchRules = {
   hand: boolean;
@@ -691,9 +691,21 @@ export function matchSeams(
     facts.pieces.filter((p) => /MIRROR/i.test(p.cutSymmetry ?? '')).map((p) => p.pieceKey),
   );
   const bothHands = new Set(facts.pieces.filter(isMirroredPair).map((p) => p.pieceKey));
+  // One shape, not proven twins: never a seam between the two (every edge would «fit»).
+  const copies = new Set(
+    unprovenCopies(byKey).flatMap(([a, b]) => [
+      `${a.pieceKey}\u0000${b.pieceKey}`,
+      `${b.pieceKey}\u0000${a.pieceKey}`,
+    ]),
+  );
+  for (const [a, b] of unprovenCopies(byKey))
+    warnings.push(
+      `${a.name} and ${b.name} have the same shape — a layer, the lining or a copy? not joined to each other`,
+    );
   const all: Cand[] = [];
   for (let i = 0; i < runs.length; i++) {
     for (let j = i + 1; j < runs.length; j++) {
+      if (copies.has(`${runs[i].piece.pieceKey}\u0000${runs[j].piece.pieceKey}`)) continue;
       const c = scorePair(runs[i], runs[j], rules, { designated, mirroredCut, bothHands });
       if (c) all.push(c);
     }
@@ -813,9 +825,8 @@ export function matchSeams(
     if (Math.abs(x.lenMm - y.lenMm) > SKELETON.lenAbsMm) return false;
     if (x.notchesMm.length !== y.notchesMm.length) return false;
     if (x.piece === y.piece) return rules.equivRect && x.piece.rect;
-    // Another piece of the same shape and (as far as the card knows) the same cloth: the pattern
-    // cannot tell the two apart from this edge — which one is a question of cloth, not of seams.
-    return rules.equivLayers && congruent(x.piece, y.piece);
+    // Only a PROVEN layer (identical twin) is the same answer; an unproven copy is a real choice.
+    return rules.equivLayers && twinKindOf(x.piece, y.piece) === 'identical';
   };
   const equivalent = (c: Cand, q: Cand) =>
     (c.u.id === q.u.id && sameAnswer(c.v, q.v)) ||

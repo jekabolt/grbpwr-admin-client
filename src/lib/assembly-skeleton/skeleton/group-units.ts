@@ -209,6 +209,8 @@ export function groupDetailed(
   const warnings: string[] = [];
   const mergeHands = new Set(template.mergeHands);
 
+  // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them).
+  for (const w of graph.warnings) if (w.includes('have the same shape')) warnings.push(w);
   for (const p of graph.pieces) {
     if (!byKey.has(p.pieceKey))
       warnings.push(`piece ${p.name} is in the pattern but not on the card — left out`);

@@ -159,6 +159,24 @@ export function congruent(a: PieceGeom, b: PieceGeom): boolean {
   return rel === 'same' || rel === 'both';
 }
 
+/**
+ * Pairs of pieces of one shape that are NOT proven twins (no common name family, no cloth to tell):
+ * a layer, the lining's own piece or a duplicated block — the pattern cannot say which. They are
+ * never matched against each other as a seam (shape-to-shape every edge «fits»), and the screen
+ * asks about them in words instead.
+ */
+export function unprovenCopies(pieces: readonly PieceGeom[]): [PieceGeom, PieceGeom][] {
+  const out: [PieceGeom, PieceGeom][] = [];
+  for (let i = 0; i < pieces.length; i++)
+    for (let j = i + 1; j < pieces.length; j++) {
+      const a = pieces[i];
+      const b = pieces[j];
+      if (a.twinOf.some((t) => t.key === b.pieceKey)) continue;
+      if (congruent(a, b)) out.push([a, b]);
+    }
+  return out;
+}
+
 /** A2: fill `twinOf` on every piece (returns new objects; input untouched). */
 export function twins(pieces: readonly PieceGeom[]): PieceGeom[] {
   const out = pieces.map((p) => ({ ...p, twinOf: [] as PieceGeom['twinOf'] }));
