@@ -101,6 +101,8 @@ export const CLEAN = {
     watermark: true,
     sheetText: true,
     guard: true,
+    /** A8b: small closed repeated marks (corner brackets) are masked whatever touches them. */
+    marks: true,
   },
 };
 

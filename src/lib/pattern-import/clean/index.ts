@@ -431,16 +431,26 @@ function detectPage(
   // downstream lost its corners and the rest became a wall (blazer's back leaked into the frame).
   // A chain whose own end runs on into a garment line is that line's piece (Redcafe's outline
   // stubs at the same page place on a row of tiles).
+  //
+  // Marks are not frames (A8b, owner 10.10 — Redcafe 44: the corner brackets, filled 15 × 1 mm
+  // bars on every tile, were only offered because garment lines end on them; live, the wall
+  // tracing ran around their arms and the cut line got 15 × 1 mm hairpins). A small repeated
+  // CLOSED shape (a bracket, a crosshair ring, an arrow head) IS the mark: masking it removes
+  // only its own paths (`itemsOf` masks a path only when every chain it feeds is masked), never
+  // the garment line that touches it — no guard, and it never makes the kind "touched". An open
+  // small mark keeps the own-ends guard (a garment stub repeats at one page place too).
   for (const [kind, ids] of byKind) {
-    const guarded = touchingLineWork(polys, lens, new Set(ids), inert, {
+    const mark = CLEAN.on.marks && (kind === 'regmark' || kind === 'tile-label');
+    const isMark = (i: number) => mark && pc.chains[i].closed;
+    const guarded = touchingLineWork(polys, lens, new Set(ids.filter((i) => !isMark(i))), inert, {
       ownEndsOnly: true,
       along: false,
     });
     const keep = ids.filter((i) => !guarded.has(i));
     const n = Math.max(...keep.map((i) => rep[i]), 0);
     // garment lines ending ON the chrome, or running along it (a CF on the tile frame): the
-    // file-wide decision in cleanPages
-    const met = touchingLineWork(polys, lens, new Set(keep), inert);
+    // file-wide decision in cleanPages — frames only (a mark is masked whatever touches it)
+    const met = mark ? new Set<number>() : touchingLineWork(polys, lens, new Set(keep), inert);
     take({
       kind,
       chains: keep,
