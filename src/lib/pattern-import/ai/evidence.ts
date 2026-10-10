@@ -31,8 +31,8 @@ const QTY_RULES: { re: RegExp; times?: number; pairGroup?: number }[] = [
   {
     re: /(?:quantity|qty|anzahl|кол-?во|количество|ilość|quantité|cantidad|aantal)\s*[:=]?\s*(\d{1,2})(?!\d)/iu,
   },
-  // "cut 2", "Cut 1 on fold", "cut x1 pair", "CUT 2 ON FOLD"
-  { re: /\bcut\s*(?:x\s*)?(\d{1,2})(?:\s*(pairs?|пар))?/iu, pairGroup: 2 },
+  // "cut 2", "Cut 1 on fold", "cut x1 pair", "CUT 2 ON FOLD", "CUT & 2", "Cut: 2", "cut × 2" (A0.4)
+  { re: /\bcut\s*(?:[x×х&:]\s*)?(\d{1,2})(?!\d)(?:\s*(pairs?|пар))?/iu, pairGroup: 2 },
   // "1 пара", "2 пары"
   { re: new RegExp(`(\\d{1,2})\\s*пар(?:а|ы|у)?(?!${L})`, 'iu'), times: 2 },
   // "2 дет.", "КАРМАН 2 ДЕТ.", "2 шт"
