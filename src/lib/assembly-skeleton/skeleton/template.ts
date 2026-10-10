@@ -77,6 +77,12 @@ export type TemplateStage = {
    * («check», 0.4; evidence on the piece raises it, never to a tick). P2 lane Z3.
    */
   check?: boolean;
+  /**
+   * attach: the stage with this id may go BEFORE this one — the order is a decision, this one
+   * first being reading 0, the other first reading 1 (F6: sleeves before the collar on 4 of 5
+   * technologists' shirts, the collar first on SS26-005 — kept as reading 0 by its guard).
+   */
+  orFirst?: string;
 };
 
 export type SkeletonTemplate = {
@@ -198,6 +204,12 @@ export function readTemplate(raw: unknown, book: RoleBook = ROLE_BOOK): Skeleton
     checkRoles(s.to, 'to', s.id);
     checkRoles(s.requireAll, 'requireAll', s.id);
     checkRoles(s.unless, 'unless', s.id);
+  }
+  for (const [i, s] of t.stages.entries()) {
+    if (s.orFirst === undefined) continue;
+    const j = t.stages.findIndex((x) => x.id === s.orFirst);
+    if (j <= i || s.op !== 'attach' || t.stages[j].op !== 'attach')
+      throw new Error(`${where}: stage ${s.id} orFirst «${s.orFirst}» is no later attach stage`);
   }
   checkRoles(t.mergeHands, 'mergeHands', '-');
   checkRoles(t.fuseRoles, 'fuseRoles', '-');

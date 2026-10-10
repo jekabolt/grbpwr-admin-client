@@ -225,6 +225,33 @@ for (const w of ssP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(ss, ssP);
 gates('SS26-005', ssGates(ss, ssP));
 
+// F6: collar / sleeves is ONE order decision. Its other reading (sleeves first — 4 of 5 prod
+// technologists' shirts) rebuilds a clean order with the sleeves step before the collar step.
+{
+  const d = ssP.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
+  gate('SS26-005: collar / sleeves order is a decision', !!d && d.alternatives?.length === 1);
+  if (d) {
+    const f = ss.facts;
+    const p = buildSkeleton(ss.graph, f, orderTemplate(f.category), skeletonDeps, {
+      pins: { 'order:collar-sleeves': 1 },
+    });
+    const at = (label) => p.steps.findIndex((x) => x.label?.startsWith(label));
+    const flipped = p.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
+    const m = measure(ss, p);
+    console.log(
+      `  sleeves-first reading: ${m.byInputs}/${m.joins} by inputs, ${m.byLeaves}/${m.joins} by contents`,
+    );
+    gate(
+      'SS26-005: the sleeves-first reading is chosen and set before the collar, sweep clean',
+      flipped?.decision.chosen === 1 &&
+        at('Set sleeves') >= 0 &&
+        at('Set sleeves') < at('Set collar') &&
+        broken(p).length === 0,
+      broken(p).join('; '),
+    );
+  }
+}
+
 // SS26-005 on the REAL graph (A3 + A4 through the product pipeline)
 {
   const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
