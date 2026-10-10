@@ -76,7 +76,7 @@ import {
   reflection,
 } from './geom';
 import { identityCheck, readName } from './names';
-import { offsetContour } from './offset';
+import { cleanTracedOutline, offsetContour } from './offset';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
 type DxfExtra = {
@@ -218,6 +218,7 @@ export function buildPieceSpecsDetailed(
 ): SemanticsDetail {
   const { sheet, set, run, sizeMap, families, fileAllowance, pieceOverrides, operatorGrain } =
     input;
+  const traced = !!input.traced;
   const warnings: string[] = [];
   const blocked: Blocked[] = [];
   const notes: Record<PieceKey, string[]> = {};
@@ -397,6 +398,18 @@ export function buildPieceSpecsDetailed(
     for (const { c, card } of p.cands) {
       const feats = classifyFeatures(c, set, sheet);
       let outer = ccw(c.outer);
+      // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
+      // simple polygon first, or no offset of it is a parallel curve (offset.ts, E3).
+      if (traced) {
+        const t = cleanTracedOutline(outer);
+        outer = t.pts;
+        const r = t.report;
+        pieceNotes.push(
+          r.cleaned
+            ? `${card.token}: traced outline cleaned (${r.vertices[0]} → ${r.vertices[1]} vertices${r.selfIntersected ? ', crossed itself' : ''}; moved ≤ ${r.movedMm.toFixed(2)} mm, spurs to ${r.removedMm.toFixed(1)} mm removed)`
+            : `${card.token}: traced outline kept as traced — ${r.reason}`,
+        );
+      }
       // ── fold
       let fold: FoldLine | null = null;
       let foldFeat: FoldFeature | null = null;
@@ -426,6 +439,7 @@ export function buildPieceSpecsDetailed(
         );
         if (loop) drawnSeam = ccw(loop);
       }
+      if (traced && drawnSeam) drawnSeam = cleanTracedOutline(drawnSeam).pts;
       let notches = feats.filter((f): f is NotchFeature => f.kind === 'notch');
       let drills = feats.filter((f): f is DrillFeature => f.kind === 'drill');
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');

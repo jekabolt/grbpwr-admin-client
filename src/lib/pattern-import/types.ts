@@ -822,6 +822,11 @@ export type SemanticsInput = {
   /** File-level allowance decision; per-piece overrides live in `pieceOverrides`. */
   fileAllowance: AllowanceDecision;
   /**
+   * The outlines are TRACED from a scan (F11 raster source; set by the worker session, never by
+   * the wizard): each is made a simple polygon (spurs, crossings, staircase out) before any offset.
+   */
+  traced?: boolean;
+  /**
    * Operator answers per seed. Names travel here (not only in the wizard) so `displayName`,
    * `nameOrigin` (incl. the 'ai-auto' flag) and `aiConfidence` reach PieceSpec → ManifestPiece;
    * `fused` comes from the fabrics step (interlining not in BOM, owner decision 14).
@@ -1386,10 +1391,12 @@ export type NameDecision = {
   suggestion: PieceSuggestion | null;
   /**
    * Where the NAME came from: 'text' = read off the sheet by the deterministic reader alone (no
-   * model); 'ai' = the model's answer (text evidence may back it). nameOrigin derives from this +
-   * autoAccepted, so an auto-accepted AI row stays flagged 'ai-auto' even when the sheet agrees.
+   * model); 'ai' = the model's answer (text evidence may back it); 'dxf' = the source DXF's own
+   * block name (E3: outranks the AI, never sent to it — ai/dxf-names.ts). nameOrigin derives from
+   * this + autoAccepted, so an auto-accepted AI row stays flagged 'ai-auto' even when the sheet
+   * agrees; a DXF name is recorded as 'text' (the source's own words).
    */
-  source: 'text' | 'ai';
+  source: 'text' | 'ai' | 'dxf';
   evidence: NameEvidence[];
   /** Combined confidence, 0..1: 0.5·model + 0.5·clamp(Σ evidence weights) (08-CONTRACT §6). */
   confidence: number;
@@ -1508,7 +1515,7 @@ export type StageIO = {
     };
   };
   semantics: {
-    in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families'>;
+    in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced'>;
     out: SemanticsOutput;
   };
   fabrics: {

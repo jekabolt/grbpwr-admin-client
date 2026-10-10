@@ -29,6 +29,8 @@ import { buildErrorReport, ImportLog } from 'lib/pattern-import/worker/report';
 import { zipEntryNames } from 'lib/pattern-import/adapters/sniff/native';
 import { PATIMPORT, type ImportSession } from 'lib/pattern-import/types';
 import { readManifest } from 'lib/pattern-import/manifest';
+import { overridesFromNames, planNaming, withAiNames } from 'lib/pattern-import/ai/dxf-names';
+import type { NameDecision, Seed } from 'lib/pattern-import/types';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -225,6 +227,13 @@ export async function main(): Promise<number> {
   // the per-size DXF set alone (no report file: the full run owns F13c-<date>.json)
   if (process.env.PI_RT_ONLY) {
     await roundTripCase();
+    const failed = rows.filter((r) => !r.ok).length;
+    console.log(`\n${rows.length - failed}/${rows.length} PASS`);
+    return failed ? 1 : 0;
+  }
+  if (process.env.PI_E3_ONLY) {
+    await dxfNamesCase();
+    await tracedOutlineCase();
     const failed = rows.filter((r) => !r.ok).length;
     console.log(`\n${rows.length - failed}/${rows.length} PASS`);
     return failed ? 1 : 0;
@@ -539,6 +548,8 @@ export async function main(): Promise<number> {
   );
   await dxfSetCase();
   await roundTripCase();
+  await dxfNamesCase();
+  await tracedOutlineCase();
   check(
     'garbage plt',
     'refused at open',
@@ -1416,7 +1427,7 @@ async function guardsCase() {
  * sizes leave with their BLOCK_RECORD and INSERT; `stripTail` also drops `_<size>` from the names
  * (an exporter that names pieces without the size); `drop` removes pieces (negative control).
  */
-function splitSize(
+export function splitSize(
   text: string,
   size: string,
   opt: { stripTail?: boolean; drop?: string[]; as?: string } = {},
@@ -2319,4 +2330,241 @@ async function roundTripCase() {
       `${fam?.candidates.length} candidate(s)`,
     );
   }
+}
+
+// ── E3: DXF block names outrank the AI (D3) ───────────────────────────────────────────────────
+
+/** An AI that names every mark it is shown BP_<n>, confidently (the E2E-1010 browser stub). */
+const greedyAi = (seeds: number[]): NameDecision[] =>
+  seeds.map((seed, i) => ({
+    seed,
+    suggestion: null,
+    source: 'ai',
+    evidence: [],
+    confidence: 0.9,
+    autoAccepted: true,
+    code: 'BP',
+    mods: [String(i + 1)],
+    displayName: `piece ${i + 1}`,
+  }));
+
+async function dxfNamesCase() {
+  const C = 'E3 DXF names > AI';
+  const LETTERS = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL'];
+  const NUMS = Array.from({ length: 15 }, (_, i) => String(32 + 2 * i));
+  async function open(rel: string, tokens: string[]) {
+    const s = new Session(1, [fileOf(rel)]);
+    const run: Run = (st, input) => s.runStage(st, input, ctx());
+    const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    await run('scale', {
+      decision: {
+        factor: ex.scale[0].factor,
+        method: ex.scale[0].method,
+        operatorConfirmed: false,
+      },
+    });
+    await run('assemble', { sheet: 0 });
+    await run('chains', { opts: CHAIN_OPTS });
+    let sz = await run('sizes', { card: card(tokens) });
+    sz = await run('sizes', {
+      card: card(tokens),
+      operatorMap: sz.map.entries.map((e) => ({ ...e, origin: 'operator' as const })),
+    });
+    const pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
+    return { s, run, pc, tokens };
+  }
+  const sig = (sem: StageIO['semantics']['out']) =>
+    sem.pieces
+      .map((p) => `${p.identity}${p.pairHand ? `(${p.pairHand})` : ''}`)
+      .sort()
+      .join(' ');
+  const SEM_IN = {
+    fileAllowance: {
+      meaning: 'seam' as const,
+      allowanceMm: 10,
+      origin: 'default' as const,
+      evidence: [],
+    },
+    operatorGrain: {},
+  };
+
+  // (a) ALLSIZES CLO: every block named → nothing asked; names and pairs exactly the DXF's
+  {
+    const { s, run, pc, tokens } = await open('dxf-clo/ALLSIZES_DXF.dxf', [...LETTERS, ...NUMS]);
+    const plan = planNaming(pc.families, tokens);
+    check(
+      C,
+      'ALLSIZES CLO: 0 pieces asked of the AI (no render, no paid call)',
+      plan.ask.length === 0 && plan.named.length === pc.families.length && pc.families.length > 0,
+      `${plan.ask.length} asked · ${plan.named.length}/${pc.families.length} named by the DXF: ${plan.named.map((n) => [n.code, ...n.mods].join('_')).join(' ')}`,
+    );
+    const bare = await run('semantics', { ...SEM_IN, pieceOverrides: {} });
+    // the wizard's path: the namer (here greedy, asked about NOTHING) → names → overrides
+    const names = withAiNames(plan, greedyAi(pc.families.map((f) => f.seed)));
+    const ov = overridesFromNames(names, {}, new Set());
+    const sem = await run('semantics', { ...SEM_IN, pieceOverrides: ov });
+    const pairs = sem.pieces.filter((p) => p.pairHand).length;
+    check(
+      C,
+      'ALLSIZES CLO: names and pairs unchanged by the wizard (even with an AI that names all)',
+      sig(sem) === sig(bare) && pairs > 0 && names.every((n) => n.source === 'dxf'),
+      `${sig(sem)} · ${pairs} pair hand(s)`,
+    );
+    // negative control: the old path (every seed's AI name as an override) loses the DXF names
+    const old: StageIO['semantics']['in']['pieceOverrides'] = {};
+    for (const n of greedyAi(pc.families.map((f) => f.seed)))
+      old[n.seed] = {
+        code: n.code,
+        mods: n.mods,
+        displayName: n.displayName,
+        nameOrigin: 'ai-auto',
+      };
+    const semOld = await run('semantics', { ...SEM_IN, pieceOverrides: old });
+    check(
+      C,
+      'control: AI names as overrides (pre-E3) replace the DXF names and drop the pairs',
+      sig(semOld) !== sig(bare) && semOld.pieces.filter((p) => p.pairHand).length < pairs,
+      sig(semOld),
+    );
+    // an operator who TYPES over a DXF name gets it
+    const typed = overridesFromNames(
+      names.map((n, i) => (i === 0 ? { ...n, code: 'YK', mods: [] } : n)),
+      {},
+      new Set([names[0].seed]),
+    );
+    const semTyped = await run('semantics', { ...SEM_IN, pieceOverrides: typed });
+    check(
+      C,
+      'a code the operator types over a DXF name wins (nameOrigin operator)',
+      semTyped.pieces.some(
+        (p) => p.seed === names[0].seed && p.code === 'YK' && p.nameOrigin === 'operator',
+      ),
+      semTyped.pieces
+        .filter((p) => p.seed === names[0].seed)
+        .map((p) => `${p.identity}/${p.nameOrigin}`)
+        .join(' '),
+    );
+    s.close();
+  }
+  // (b) blazer DXF: numeric block names → those (and only those) are asked; named ones stay
+  {
+    const { s, pc, tokens } = await open('dxf-clo/blazer.dxf', [...LETTERS, ...NUMS]);
+    const plan = planNaming(pc.families, tokens);
+    const names = withAiNames(plan, greedyAi(pc.families.map((f) => f.seed)));
+    const named = new Set(plan.named.map((n) => n.seed));
+    check(
+      C,
+      'blazer DXF: numeric / placeholder blocks asked, AI answers only for them',
+      plan.ask.length > 0 &&
+        names.filter((n) => n.source === 'ai').every((n) => !named.has(n.seed)) &&
+        names.length === pc.families.length,
+      `${plan.ask.length} asked · ${plan.named.length} named by the DXF (${plan.named
+        .slice(0, 6)
+        .map((n) => [n.code, ...n.mods].join('_'))
+        .join(' ')})`,
+    );
+    s.close();
+  }
+}
+
+// ── E3: a traced (scan) outline is a simple polygon before the offset ─────────────────────────
+
+async function tracedOutlineCase() {
+  const C = 'E3 traced outline';
+  const NUM = ['36', '38', '40', '42', '44', '46'];
+  const s = new Session(1, [fileOf('pdf/leonie.pdf')]);
+  const run: Run = (st, input) => s.runStage(st, input, ctx());
+  const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  await run('scale', {
+    decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
+  });
+  await run('assemble', { sheet: 0 });
+  await run('chains', { opts: CHAIN_OPTS });
+  let sz = await run('sizes', { card: card(NUM) });
+  // the browser run (E2E-1010 §4): 38 leaks on the back leg → not exported
+  sz = await run('sizes', {
+    card: card(NUM),
+    operatorMap: sz.map.entries.map((e) => ({
+      ...e,
+      card: e.card && e.card.token !== '38' ? e.card : null,
+      origin: 'operator' as const,
+    })),
+  });
+  // one click inside the back leg (the F4 fixture's "HINTERES HOSENTEIL")
+  const seed: Seed = { id: 1, at: { x: 316, y: 840 }, origin: 'click', variant: null };
+  const pc = await run('pieces', { seeds: [seed], edits: [], opts: { ...FILL, variant: null } });
+  const fam = pc.families[0];
+  check(
+    C,
+    'leonie back leg: closed in every exported size',
+    !!fam && fam.candidates.filter((c) => c.rank !== 1).every((c) => c.outcome === 'closed'),
+    fam?.candidates.map((c) => `${c.rank}:${c.outcome}`).join(' ') ?? 'no family',
+  );
+  const base = {
+    pieceOverrides: {
+      1: { code: 'BP', mods: [], displayName: 'back leg', nameOrigin: 'operator' as const },
+    },
+    operatorGrain: { 1: { a: { x: 316, y: 500 }, b: { x: 316, y: 1200 } } },
+  };
+  const ofSeam = (meaning: 'seam' | 'cut') => ({
+    ...base,
+    fileAllowance: { meaning, allowanceMm: 10, origin: 'operator' as const, evidence: [] },
+  });
+  const seam = await run('semantics', ofSeam('seam'));
+  const devs = seam.pieces.flatMap((p) => p.sizes.map((z) => z.offset?.maxDeviationMm ?? NaN));
+  check(
+    C,
+    '"seam 10": every size offsets as a true parallel (1 loop, dev ≤ 0.2 mm)',
+    !seam.blocked.length && seam.pieces.length === 1 && devs.every((d) => d <= 0.2),
+    seam.blocked.length
+      ? seam.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ')
+      : `${seam.pieces[0].sizes.length} sizes · dev ≤ ${Math.max(...devs).toFixed(3)} mm`,
+  );
+  const cut = await run('semantics', ofSeam('cut'));
+  check(
+    C,
+    '"cut line": the inward seam line of 36 splits at the merged strip (G6 refuses it, rightly)',
+    cut.blocked.some((b) => b.reason === 'offset-topology' && /^36:/.test(b.detail)),
+    cut.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ') || 'not blocked',
+  );
+  // negative control: the same outlines NOT cleaned (as before E3) — the offset breaks
+  const inner = s as unknown as { traced: () => boolean };
+  const was = inner.traced;
+  inner.traced = () => false;
+  const raw = await run('semantics', ofSeam('seam'));
+  inner.traced = was;
+  check(
+    C,
+    'control: uncleaned traced outlines break the offset (the E2E-1010 dead end)',
+    raw.blocked.some((b) => /offset/.test(b.reason)),
+    raw.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ') || 'not blocked',
+  );
+  // 36 also carries a strip and 46 follows the size digits for 13 mm: drop both; 40–44 must pass
+  sz = await run('sizes', {
+    card: card(NUM),
+    operatorMap: sz.map.entries.map((e) => ({
+      ...e,
+      card: e.card && !['36', '38', '46'].includes(e.card.token) ? e.card : null,
+      origin: 'operator' as const,
+    })),
+  });
+  await run('pieces', { seeds: [seed], edits: [], opts: { ...FILL, variant: null } });
+  for (const m of ['seam', 'cut'] as const) {
+    const sem = await run('semantics', ofSeam(m));
+    check(
+      C,
+      `40–44 "${m}": built`,
+      !sem.blocked.length && sem.pieces.length === 1,
+      sem.blocked.map((b) => b.detail).join(' | ') || `${sem.pieces[0]?.sizes.length} sizes`,
+    );
+    const w = await writeCase(`${C} · 40–44 ${m}`, run, sem, sz.map, { mustPass: true });
+    const g6 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G6-offset');
+    check(
+      C,
+      `40–44 "${m}": G6 passes at the vector limit (0.2 mm)`,
+      !!g6?.ok,
+      `${g6?.value} · ${g6?.note}`,
+    );
+  }
+  s.close();
 }

@@ -27,6 +27,12 @@ import type {
   WizardStep,
 } from 'lib/pattern-import/types';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
+import {
+  nameOriginOf,
+  overridesFromNames as namesToOverrides,
+  planNaming,
+  withAiNames,
+} from 'lib/pattern-import/ai/dxf-names';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import {
@@ -579,16 +585,25 @@ export function useImportSession(deps: {
    */
   async function toDetails() {
     const fams = sRef.current.pieces?.families ?? [];
-    const out = await run('render-som', { seeds: fams.map((f) => f.seed), dpi: 72 });
-    setSom(out);
-    patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
+    // E3 (D3): a piece its DXF block names is named — never sent to the AI, so the AI cannot
+    // outrank it; only unnamed / numeric / placeholder blocks are asked. Nothing to ask = no call.
+    const plan = planNaming(
+      fams,
+      card.sizes.map((c) => c.token),
+    );
     let names: NameDecision[] = [];
     let namerError: string | null = null;
-    try {
-      names = mergeNames(await namer(out, { card, threshold: AI_AUTO_ACCEPT_T }));
-    } catch (e) {
-      namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
-    }
+    if (plan.ask.length) {
+      const out = await run('render-som', { seeds: plan.ask, dpi: 72 });
+      setSom(out);
+      patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
+      try {
+        names = await namer(out, { card, threshold: AI_AUTO_ACCEPT_T });
+      } catch (e) {
+        namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
+      }
+    } else setSom(null);
+    names = mergeNames(withAiNames(plan, names));
     patch({ busy: null, names, step: 'meaning' });
     const overrides = overridesFromNames(names, iRef.current.overrides);
     patchInputs({ overrides });
@@ -645,23 +660,10 @@ export function useImportSession(deps: {
   /**
    * Every name as a semantics override, so the writer spells what the table shows AND the
    * manifest says where the name came from (owner decision 11: auto-accepted AI names stay flagged).
+   * A DXF-named piece nobody typed over gets none: semantics reads its block, pair included (E3).
    */
   function overridesFromNames(names: NameDecision[], base: Inputs['overrides']) {
-    const out: Inputs['overrides'] = { ...base };
-    const edited = new Set(iRef.current.editedNames);
-    for (const n of names) {
-      const { aiConfidence: _drop, ...prev } = out[n.seed] ?? {};
-      const nameOrigin = nameOriginOf(n, edited.has(n.seed));
-      out[n.seed] = {
-        ...prev,
-        code: n.code,
-        mods: n.mods,
-        displayName: n.displayName,
-        nameOrigin,
-        ...(nameOrigin === 'ai' || nameOrigin === 'ai-auto' ? { aiConfidence: n.confidence } : {}),
-      };
-    }
-    return out;
+    return namesToOverrides(names, base, new Set(iRef.current.editedNames));
   }
 
   // ── forward transitions: run what the NEXT step shows, then move ────────────────────────
@@ -831,7 +833,11 @@ export function useImportSession(deps: {
             : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
         }
         const pending = s.names.filter(
-          (n) => !n.autoAccepted && !inputs.confirmedNames.includes(n.seed) && exportedSeed(n.seed),
+          (n) =>
+            n.source !== 'dxf' &&
+            !n.autoAccepted &&
+            !inputs.confirmedNames.includes(n.seed) &&
+            exportedSeed(n.seed),
         );
         if (pending.length)
           return `${pending.length} AI ${pending.length === 1 ? 'name' : 'names'} to confirm`;
@@ -1028,17 +1034,8 @@ export function useImportSession(deps: {
 
 export type ImportSessionApi = ReturnType<typeof useImportSession>;
 
-/** Where a name came from, as the manifest records it. */
-export function nameOriginOf(
-  n: NameDecision,
-  typed: boolean,
-): NonNullable<PieceOverride['nameOrigin']> {
-  if (typed) return 'operator';
-  // 'text' = the deterministic reader named it, no model involved. An AI answer the sheet text
-  // agrees with is still the AI's: auto-accepted it stays flagged 'ai-auto' (owner decision 11).
-  if (n.source === 'text') return 'text';
-  return n.autoAccepted ? 'ai-auto' : 'ai';
-}
+/** Where a name came from, as the manifest records it (lib: ai/dxf-names.ts). */
+export { nameOriginOf };
 
 /** Auto matches below the confirm line (F5: < 0.9) that the operator has not answered. */
 export const guessedSizes = (entries: readonly SizeMapEntry[]) =>
