@@ -537,6 +537,10 @@ console.log('\nTemplate smoke (names only, no seams)');
       ],
       { buttons: 1, interlining: 1 },
     ),
+    // 07 §4.7 (review): a bottom read from the pieces — the trousers' panel method, a skirt's words.
+    card('bottom', ['FRONT_L', 'FRONT_R', 'BACK_L', 'BACK_R', 'WB', 'POCKET_L', 'POCKET_R'], {
+      zipper: 1,
+    }),
     card('generic', ['FRONT', 'BACK', 'SLEEVE', 'COLLAR', 'P7'], {}),
   ];
   for (const c of cards) {
@@ -569,14 +573,21 @@ console.log('\nTemplate smoke (names only, no seams)');
       );
     // 07 §4.4: trousers by the panel method — the backs into one, the fronts into one, then the
     // two in one (side seams, inseams, crotch), and only then the waistband.
-    if (c.facts.category === 'trousers') {
+    if (c.facts.category === 'trousers' || c.facts.category === 'bottom') {
       const at = (name) => p.steps.findIndex((s) => s.outputUnitName === name);
       const wb = p.steps.findIndex((s) => s.label?.startsWith('Attach the waistband'));
       gate(
-        'trousers: Back → Front → Body (back + front) → waistband',
+        `${c.facts.category}: Back → Front → Body (back + front) → waistband`,
         at('Back') >= 0 && at('Back') < at('Front') && at('Front') < at('Body') && at('Body') < wb,
         `Back ${at('Back')}, Front ${at('Front')}, Body ${at('Body')}, waistband ${wb}`,
       );
+    }
+    // A bottom read from the pieces may be a skirt: no step claims what only trousers have.
+    if (c.facts.category === 'bottom') {
+      const claims = p.steps
+        .map((s) => `${s.label} ${s.outputUnitName ?? ''}`)
+        .filter((t) => /inseam|crotch|\bleg/i.test(t));
+      gate('bottom: no inseam, crotch or leg in any step', claims.length === 0, claims.join('; '));
     }
   }
 }

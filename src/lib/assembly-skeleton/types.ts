@@ -58,6 +58,11 @@ export type SkeletonCategory =
   | 'sweat'
   | 'hoodie'
   | 'trousers'
+  /**
+   * A bottom read from the pieces alone (no category on the card, no fly or crotch piece): trousers
+   * or a panelled skirt — the panel method with words both share, never an inseam or a crotch.
+   */
+  | 'bottom'
   | 'skirt'
   | 'dress'
   | 'jumpsuit'

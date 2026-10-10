@@ -272,8 +272,9 @@ export function skeletonAIRequest(args: {
       decisions,
       steps: reqSteps,
       force: false,
-      // The categories the engine has a template for: the AI may read the garment as one of them.
-      categoryOptions: [...SKELETON_CATEGORIES],
+      // The categories the engine has a template for: the AI may read the garment as one of them —
+      // a garment, so not «bottom» (the pieces' «trousers or a skirt»): that is what it settles.
+      categoryOptions: SKELETON_CATEGORIES.filter((c) => c !== 'bottom'),
       // none from the panel: the server shows the model the workshop's own trees (house style)
       examples: [],
     },

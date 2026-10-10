@@ -79,7 +79,7 @@ function houseToken(
 }
 
 export function garmentOf(category: SkeletonCategory, kinds: PieceKind[]): GarmentKind {
-  if (category === 'trousers' || category === 'skirt') return 'bottom';
+  if (category === 'trousers' || category === 'skirt' || category === 'bottom') return 'bottom';
   if (category !== 'generic') return 'top';
   if (kinds.some((k) => k === 'sleeve' || k === 'collar' || k === 'stand')) return 'top';
   if (kinds.some((k) => k === 'waistband')) return 'bottom';

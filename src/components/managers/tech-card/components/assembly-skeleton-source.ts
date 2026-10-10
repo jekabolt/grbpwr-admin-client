@@ -172,6 +172,7 @@ const FAMILY: Record<CategoryWord, string> = {
   hoodie: 'top',
   shirt: 'top',
   trousers: 'bottom',
+  bottom: 'bottom',
   skirt: 'bottom',
   jacket: 'outer',
   coat: 'outer',
@@ -302,6 +303,7 @@ const CROTCH_WORDS = new Set([
   'inseam',
   'leg',
   'legs',
+  'rise',
   'шаг',
   'ластовица',
   'штанина',
@@ -319,6 +321,21 @@ const NECK_RIB_WORDS = new Set([
   'горловины',
   'dekolt',
 ]);
+// A bag's own pieces: panels and a «belt» (waistband token) on left and right are a bag's too.
+const BAG_WORDS = new Set([
+  'strap',
+  'straps',
+  'handle',
+  'handles',
+  'tote',
+  'ручка',
+  'ручки',
+  'лямка',
+  'лямки',
+  'rączka',
+  'raczka',
+  'uchwyt',
+]);
 const JACKET_WORDS = new Set([
   'lapel',
   'lpl',
@@ -331,9 +348,11 @@ const JACKET_WORDS = new Set([
 
 /**
  * A card with NO category still has piece names — read only for DISCRIMINATING evidence:
- *   • trousers — a fly, or a crotch / gusset / leg piece; or a waistband on LEFT and RIGHT fronts
- *     AND backs with no sleeve, collar or hood — a skirt's too, but a bottom either way: read as
- *     trousers (back, front, then the two in one) and the panel says it was read from the pieces;
+ *   • trousers — a fly, or a crotch / gusset / inseam / leg / rise piece;
+ *   • bottom — a waistband on LEFT and RIGHT fronts AND backs with no sleeve, collar or hood, and
+ *     none of the trousers' own pieces: trousers or a panelled skirt, so the trousers' panel method
+ *     (back, front, then the two in one) in words both share — side seams, never an inseam or a
+ *     crotch; a strap or a handle (a bag's) keeps it generic;
  *   • hoodie — sleeves and a hood;
  *   • shirt — sleeves with a placket (a collar or cuffs alone are a dress's too); a jacket (lined
  *     template) only when the card is lined AND has a jacket's own pieces (lapel, undercollar) — a
@@ -374,8 +393,18 @@ export function skeletonCategoryFromPieces(
     !has('sleeve') &&
     !has('collar') &&
     !has('hood')
-  )
-    return found('trousers', 'a waistband on left and right fronts and backs, no sleeve or collar');
+  ) {
+    if (any(BAG_WORDS))
+      return {
+        category: 'generic',
+        why: 'panels and a band with straps or handles — a bag’s, not a garment the templates know',
+        evidence: false,
+      };
+    return found(
+      'bottom',
+      'a waistband on left and right fronts and backs, no sleeve or collar — trousers or a skirt: no fly or crotch piece to tell',
+    );
+  }
   if (has('sleeve')) {
     if (has('hood')) return found('hoodie', 'sleeves and a hood');
     // A collar or cuffs alone are a dress's too, and a facing is a lined shirt's too: a jacket needs

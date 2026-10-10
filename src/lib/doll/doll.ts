@@ -301,7 +301,10 @@ export function solveDoll(input: DollInput): DollReport {
     // more pieces of the body / legs (the top path), whatever its name says.
     const bodyish = new Set<DollGroupId>(['BODY', 'LEG_L', 'LEG_R']);
     const legsCat =
-      facts.category === 'trousers' || facts.category === 'jumpsuit' || facts.category === 'skirt';
+      facts.category === 'trousers' ||
+      facts.category === 'jumpsuit' ||
+      facts.category === 'skirt' ||
+      facts.category === 'bottom';
     for (const P of G.pieces) {
       if (P.group === 'WAISTBAND' || !legsCat) continue;
       // A strip: mean width (2·area / perimeter) small against its length (half the perimeter).

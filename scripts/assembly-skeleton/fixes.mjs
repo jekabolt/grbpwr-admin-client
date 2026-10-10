@@ -166,10 +166,22 @@ console.log('\n1 · category and lining');
     [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECKBAND'], false, null, 'tee'],
     [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R'], false, null, 'generic'], // collarless dress
     [['BACK', 'FRONT', 'SLEEVE', 'HOOD_L', 'HOOD_R'], false, null, 'hoodie'],
-    // 07 §4.7: a waistband on left AND right fronts and backs, no sleeve or collar — a bottom; a
-    // skirt's too, read as trousers (back, front, the two in one) and said so on the panel.
-    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'trousers'],
-    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'trousers'],
+    // 07 §4.7: a waistband on left AND right fronts and backs, no sleeve or collar — a bottom;
+    // trousers or a panelled skirt, so the panel method in words both share (never trousers: no
+    // inseam or crotch is claimed). A fly or a crotch / leg / rise piece makes it trousers; a strap
+    // or a handle a bag (generic).
+    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'bottom'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'bottom'], // panelled skirt?
+    [['SKT_FRONT_L', 'SKT_FRONT_R', 'BACK_L', 'BACK_R', 'WB'], false, null, 'skirt'],
+    [
+      ['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'STRAP_L', 'STRAP_R'],
+      false,
+      null,
+      'generic',
+    ],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'BLT', 'HANDLE'], false, null, 'generic'], // bag
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'FLY'], false, null, 'trousers'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'RISE_EXT'], false, null, 'trousers'],
     [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'SLV_L', 'SLV_R'], false, null, 'generic'],
     [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'CLR'], false, null, 'generic'],
     [['BACK', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'generic'], // one back: no evidence
