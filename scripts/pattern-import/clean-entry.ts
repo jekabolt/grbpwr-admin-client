@@ -25,6 +25,11 @@ import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
+import {
+  answerCtxOf,
+  maskRevOf,
+} from 'components/managers/tech-card/components/pattern-import/answers';
+
 import { CASES, runCase } from './e2e-entry';
 
 const CORPUS =
@@ -105,63 +110,87 @@ async function wmRun(edits: PageMaskEdit[]): Promise<WmRun> {
 
 const live = (r: WmRun) => r.legend.filter((k) => k.role !== 'ignore');
 const liveChains = (r: WmRun) => live(r).reduce((a, k) => a + k.n, 0);
-const watermarkAuto = (r: WmRun) =>
-  (r.sheetClean?.items ?? []).filter(
-    (i) => i.kind === 'watermark' && i.status === 'auto' && i.applied,
-  );
+/** Lines of a kind offered (not applied) by the sheet pass, and whether any of it is auto. */
+const sheetOffered = (r: WmRun, kind: BackgroundKind) =>
+  (r.sheetClean?.items ?? [])
+    .filter((i) => i.kind === kind && !i.applied)
+    .reduce((a, i) => a + i.lines, 0);
+const sheetAuto = (r: WmRun, kind: BackgroundKind) =>
+  (r.sheetClean?.items ?? []).some((i) => i.kind === kind && i.status === 'auto');
+const pageItems = (r: WmRun, kind: BackgroundKind) =>
+  r.clean.pages.flatMap((p) => p.items.filter((i) => i.kind === kind));
 
-/** The wm M checks — each names the detector it rests on (the mutation check switches it off). */
+/**
+ * The wm M checks — each names the detector it rests on (the mutation check switches it off).
+ * Round 2 (D3 until A9): only repetition or an explicit keyword masks by itself; the stroke text,
+ * the watermark, the test square without its keyword are one-click suggestions per kind.
+ */
 function wmChecks(section: string, r: WmRun, base: WmRun | null, record = true) {
   const sm = r.clean.summary;
+  const off = r.clean.offered;
   const out: { name: string; on: keyof typeof CLEAN.on | null; ok: boolean; got: unknown }[] = [];
   const sq = r.clean.scaleHints[0];
   out.push({
-    name: 'test square found by geometry, offered as the certain scale',
+    name: 'test square (lettering, no keyword) offered, not masked; its scale candidate ≤ 0.6',
     on: 'square',
     ok:
       !!sq &&
-      sq.confidence >= 0.9 &&
-      r.scaleBest.method === 'test-square' &&
-      Math.abs(r.scaleBest.factor - 1) <= 0.003 &&
-      (sm['test-square'] ?? 0) === 4,
+      sq.confidence <= 0.6 &&
+      (off['test-square'] ?? 0) === 4 &&
+      !sm['test-square'] &&
+      pageItems(r, 'test-square').every((i) => i.status === 'suggest'),
     got: sq ? `${sq.evidence?.text} conf ${sq.confidence}` : 'none',
   });
+  const grids = pageItems(r, 'grid');
   out.push({
-    name: 'background grid masked (≥ 600 lines on 14 tiles)',
+    name: 'background grid masked: proven on every tile (repetition ≥ 3 tiles / whole-page 10 mm), ≥ 550 lines',
     on: 'grid',
-    ok: (sm.grid ?? 0) >= 600,
-    got: sm.grid ?? 0,
+    ok:
+      (sm.grid ?? 0) >= 550 &&
+      grids.length >= 14 &&
+      grids.every(
+        (i) =>
+          i.status === 'suggest' || i.evidence.some((e) => /repeats at one|whole page/.test(e)),
+      ),
+    got: `${sm.grid ?? 0} masked · ${grids.filter((i) => i.status === 'auto').length} of ${grids.length} pages auto`,
   });
   out.push({
-    name: 'ROW/COLUMN labels masked as tile labels (≥ 800 strokes)',
-    on: 'chrome',
+    name: 'ROW/COLUMN labels masked as tile labels by repetition (≥ 800 strokes)',
+    on: 'text',
     ok: (sm['tile-label'] ?? 0) >= 800,
     got: sm['tile-label'] ?? 0,
   });
+  const ct = pageItems(r, 'curve-text');
   out.push({
-    name: 'stroke text masked, kept as text evidence (≥ 1200 strokes, ≥ 20 bands)',
+    name: 'stroke text offered as a suggestion, none auto (≥ 1200 strokes, ≥ 20 bands kept as text evidence)',
     on: 'text',
-    ok: (sm['curve-text'] ?? 0) >= 1200 && r.clean.curveTexts.length >= 20,
-    got: `${sm['curve-text'] ?? 0} strokes · ${r.clean.curveTexts.length} bands`,
+    ok:
+      (off['curve-text'] ?? 0) >= 1200 &&
+      !sm['curve-text'] &&
+      ct.every((i) => i.status === 'suggest') &&
+      r.clean.curveTexts.length >= 20,
+    got: `${off['curve-text'] ?? 0} offered · ${sm['curve-text'] ?? 0} masked · ${r.clean.curveTexts.length} bands`,
   });
-  const wm = watermarkAuto(r);
+  const rows = (r.sheetClean?.items ?? []).filter((i) => i.kind === 'watermark');
   out.push({
-    name: 'watermark «WWW.PAPAVERO.PL» masked by the sheet pass (auto, ≥ 10 letters)',
+    name: 'watermark «WWW.PAPAVERO.PL» offered by the sheet pass (≥ 10 letters), never auto',
     on: 'watermark',
-    ok: wm.some(
-      (i) => /row of (\d+)/.exec(i.evidence[0]) && +/row of (\d+)/.exec(i.evidence[0])![1] >= 10,
+    ok:
+      rows.some(
+        (i) => /row of (\d+)/.exec(i.evidence[0]) && +/row of (\d+)/.exec(i.evidence[0])![1] >= 10,
+      ) && !sheetAuto(r, 'watermark'),
+    got: rows.map(
+      (i) => `${i.status}${i.applied ? '' : '·off'} ${i.lines} lines: ${i.evidence.join('; ')}`,
     ),
-    got: (r.sheetClean?.items ?? [])
-      .filter((i) => i.kind === 'watermark')
-      .map(
-        (i) => `${i.status}${i.applied ? '' : '·off'} ${i.lines} lines: ${i.evidence.join('; ')}`,
-      ),
   });
   out.push({
-    name: 'stroke text cut by tile borders masked by the sheet pass',
+    name: "stroke text no page could see offered by the sheet pass (not the pages' again), never auto",
     on: 'sheetText',
-    ok: (r.sheetClean?.summary['curve-text'] ?? 0) >= 30,
-    got: r.sheetClean?.summary ?? null,
+    ok:
+      sheetOffered(r, 'curve-text') >= 10 &&
+      sheetOffered(r, 'curve-text') <= 0.2 * (off['curve-text'] ?? 0) &&
+      !sheetAuto(r, 'curve-text'),
+    got: `${sheetOffered(r, 'curve-text')} offered on the sheet vs ${off['curve-text'] ?? 0} on the pages`,
   });
   if (base) {
     const before = liveChains(base);
@@ -177,6 +206,13 @@ function wmChecks(section: string, r: WmRun, base: WmRun | null, record = true) 
   return out;
 }
 
+/** The operator's clicks on wm M: accept the stroke text, the watermark, the test square. */
+const ACCEPT_ALL: PageMaskEdit[] = [
+  { kind: 'curve-text', keep: false },
+  { kind: 'watermark', keep: false },
+  { kind: 'test-square', keep: false },
+];
+
 export async function wmSection() {
   const base = await wmRun(ALL_OFF);
   check(
@@ -190,29 +226,73 @@ export async function wmSection() {
     },
   );
   const on = await wmRun([]);
-  const res = wmChecks('wm M', on, base);
+  const res = wmChecks('wm M', on, null);
   console.log(
-    `WM ${JSON.stringify({ summary: on.clean.summary, offered: on.clean.offered, sheet: on.sheetClean?.summary, legendBefore: base.legend, legendAfter: on.legend, scale: on.scaleBest })}`,
+    `WM ${JSON.stringify({ summary: on.clean.summary, offered: on.clean.offered, sheet: on.sheetClean?.summary, sheetItems: (on.sheetClean?.items ?? []).map((i) => `${i.kind} ${i.status} ${i.applied} ${i.lines}`), legendBefore: base.legend, legendAfter: on.legend, scale: on.scaleBest })}`,
+  );
+  // the operator accepts the three suggested kinds (3 clicks): the legend is clean, the square
+  // is the certain scale
+  const acc = await wmRun(ACCEPT_ALL);
+  const before = liveChains(base);
+  const after = liveChains(acc);
+  check(
+    'wm M · 3 clicks',
+    'accept stroke text + watermark + test square: the legend no longer lumps furniture with the pieces (live chains −60 %)',
+    after <= 0.4 * before,
+    `live rows before ${JSON.stringify(live(base))} → defaults ${JSON.stringify(live(on))} → accepted ${JSON.stringify(live(acc))}`,
+  );
+  const rows = (acc.sheetClean?.items ?? []).filter((i) => i.kind === 'watermark');
+  check(
+    'wm M · 3 clicks',
+    'accept "watermark": every suggested row is masked (one click for the kind)',
+    rows.length >= 2 && rows.every((i) => i.applied),
+    rows.map((i) => `${i.status} ${i.applied}`),
+  );
+  const sq = acc.clean.scaleHints[0];
+  check(
+    'wm M · 3 clicks',
+    'accept "test square": its scale candidate is certain (0.97) and the best',
+    !!sq &&
+      sq.confidence >= 0.97 &&
+      acc.scaleBest.method === 'test-square' &&
+      Math.abs(acc.scaleBest.factor - 1) <= 0.003 &&
+      (acc.clean.summary['test-square'] ?? 0) === 4,
+    sq ? `${sq.evidence?.text} conf ${sq.confidence}` : 'none',
   );
   // per-kind undo: the grid comes back (to the legend's furniture row)
   const noGrid = await wmRun([{ kind: 'grid', keep: true }]);
   check(
     'wm M · edits',
-    'undo "grid": the grid is line work again, everything else stays masked',
+    'undo "grid": the grid is line work again, everything else stays as it was',
     !noGrid.clean.summary.grid &&
-      (noGrid.clean.offered.grid ?? 0) >= 600 &&
+      (noGrid.clean.offered.grid ?? 0) >= 550 &&
       (noGrid.clean.summary['tile-label'] ?? 0) === (on.clean.summary['tile-label'] ?? 0),
     { summary: noGrid.clean.summary, offered: noGrid.clean.offered },
   );
-  // an accepted suggestion: every watermark row of the sheet pass is masked
-  const acc = await wmRun([{ kind: 'watermark', keep: false }]);
-  const rows = (acc.sheetClean?.items ?? []).filter((i) => i.kind === 'watermark');
-  check(
-    'wm M · edits',
-    'accept "watermark": the suggested rows are masked too',
-    rows.length >= 2 && rows.every((i) => i.applied),
-    rows.map((i) => `${i.status} ${i.applied}`),
-  );
+  // round 2 · 6: clean re-runs from the unmasked extract — in ONE session, an edit to one kind
+  // leaves every other mask as it was, and undoing the edit brings the first mask back
+  {
+    const s = new Session(1, [fileOf(WM_M)]);
+    const run = <S extends StageName>(st: S, input: StageIO[S]['in']) =>
+      s.runStage(st, input, ctx());
+    await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    const a = await run('clean', { edits: [] });
+    const b = await run('clean', { edits: [{ kind: 'grid', keep: true }] });
+    const c = await run('clean', { edits: [] });
+    s.close();
+    const strip = (m: Partial<Record<BackgroundKind, number>>) =>
+      JSON.stringify(Object.entries(m).filter(([k]) => k !== 'grid'));
+    check(
+      'wm M · rerun',
+      'one session: undo "grid" keeps every other mask; re-doing it gives the first mask back',
+      strip(b.summary) === strip(a.summary) &&
+        !b.summary.grid &&
+        (b.offered.grid ?? 0) === (a.summary.grid ?? 0) + (a.offered.grid ?? 0) &&
+        JSON.stringify(c.summary) === JSON.stringify(a.summary) &&
+        JSON.stringify(c.offered) === JSON.stringify(a.offered),
+      { first: a.summary, undo: b.summary, undoOffered: b.offered, again: c.summary },
+    );
+  }
   // the page-role door: a tile set aside, then re-included
   const away = await wmRun([{ file: '0', page: 4, role: 'instructions' }]);
   check(
@@ -223,7 +303,7 @@ export async function wmSection() {
     away.clean.dropped,
   );
   // mutation checks: each detector off → its check fails
-  for (const det of ['square', 'grid', 'chrome', 'text', 'watermark', 'sheetText'] as const) {
+  for (const det of ['square', 'grid', 'text', 'watermark', 'sheetText'] as const) {
     CLEAN.on[det] = false;
     try {
       const m = await wmRun([]);
@@ -325,6 +405,121 @@ function synthPage(): IRPage {
   };
 }
 
+type P = { x: number; y: number };
+type SynPage = {
+  lines: P[][];
+  texts?: { text: string; x: number; y: number }[];
+  w?: number;
+  h?: number;
+};
+
+/** Pages from polylines (one path each) and texts; `cls` per page (tile by default). */
+function synthDoc(pages: SynPage[], cls: string[] = []) {
+  const docPages: IRPage[] = pages.map((sp, k) => ({
+    file: '0',
+    page: k,
+    widthMm: sp.w ?? 210,
+    heightMm: sp.h ?? 297,
+    styles: [
+      {
+        id: 0,
+        strokeRgb: [0, 0, 0],
+        widthMm: 0.3,
+        dash: null,
+        layer: null,
+        fill: false,
+        clip: null,
+      },
+    ],
+    paths: sp.lines.map((pts, i) => ({
+      id: i,
+      pts,
+      closed: false,
+      style: 0,
+      src: { file: '0', page: k, op: i, sub: 0 },
+    })),
+    texts: (sp.texts ?? []).map((t, i) => ({
+      id: i,
+      text: t.text,
+      anchor: { x: t.x, y: t.y },
+      bbox: { minX: t.x, minY: t.y - 4, maxX: t.x + 4 * t.text.length, maxY: t.y },
+      heightMm: 4,
+      angleDeg: 0,
+      font: '',
+      style: 0,
+    })) as unknown as IRPage['texts'],
+    rasters: [],
+    layers: [],
+  }));
+  const docs = [
+    {
+      file: {
+        id: '0',
+        name: 'synth.svg',
+        bytes: 0,
+        sha256: '',
+        kind: 'svg' as const,
+        pages: pages.length,
+      },
+      pages: docPages,
+      warnings: [],
+    },
+  ];
+  const classes = pages.map((_, k) => ({
+    file: '0',
+    page: k,
+    cls: (cls[k] ?? 'tile') as 'tile',
+    ...((cls[k] ?? 'tile') === 'tile' ? { sheet: 0 } : {}),
+    confidence: 1,
+    why: 'synthetic',
+  }));
+  return { docs, classes, pages: docPages };
+}
+const rect = (x0: number, y0: number, x1: number, y1: number): P[][] => [
+  [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+  ],
+  [
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+  ],
+  [
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ],
+  [
+    { x: x0, y: y1 },
+    { x: x0, y: y0 },
+  ],
+];
+const closedRect = (x0: number, y0: number, x1: number, y1: number): P[] => [
+  { x: x0, y: y0 },
+  { x: x1, y: y0 },
+  { x: x1, y: y1 },
+  { x: x0, y: y1 },
+  { x: x0, y: y0 },
+];
+/** A lattice at `pitch` over [x0..x1]×[y0..y1]. */
+const lattice = (x0: number, y0: number, x1: number, y1: number, pitch: number): P[][] => {
+  const out: P[][] = [];
+  for (let x = x0; x <= x1 + 1e-6; x += pitch)
+    out.push([
+      { x, y: y0 },
+      { x, y: y1 },
+    ]);
+  for (let y = y0; y <= y1 + 1e-6; y += pitch)
+    out.push([
+      { x: x0, y },
+      { x: x1, y },
+    ]);
+  return out;
+};
+const itemsOfKind = (o: ReturnType<typeof cleanPages>, kind: BackgroundKind) =>
+  o.pages.flatMap((p) => p.items.filter((i) => i.kind === kind));
+const statusOf = (o: ReturnType<typeof cleanPages>, kind: BackgroundKind) =>
+  itemsOfKind(o, kind).map((i) => `${i.status}${i.applied ? '' : '·off'} ${i.lines}`);
+
 export function synthSection() {
   const pg = synthPage();
   const docs = [
@@ -337,33 +532,385 @@ export function synthSection() {
   const classes = [
     { file: '0', page: 0, cls: 'tile' as const, sheet: 0, confidence: 1, why: 'synthetic' },
   ];
-  const masked = (o: ReturnType<typeof cleanPages>) =>
-    new Set(o.pages.flatMap((p) => p.items.filter((i) => i.applied).flatMap((i) => i.paths)));
+  /** Paths in any item (applied or offered) / applied only. */
+  const inItems = (o: ReturnType<typeof cleanPages>, applied = false) =>
+    new Set(
+      o.pages.flatMap((p) => p.items.filter((i) => !applied || i.applied).flatMap((i) => i.paths)),
+    );
   const walls = [0, 1, 2, 3];
   const o = cleanPages(docs, classes, { edits: [] });
-  const m = masked(o);
+  const offered = inItems(o);
   const touching = pg.paths
     .filter((p) => p.pts.some((q) => Math.abs(q.x - 20) < 0.01 && q.y > 130))
     .map((p) => p.id);
-  check('synthetic guard', 'the free word is masked as stroke text', m.size >= 18, [...m].length);
   check(
     'synthetic guard',
-    'no wall of the piece and no stroke the outline meets is masked',
-    walls.every((w) => !m.has(w)) && touching.every((t) => !m.has(t)),
-    { masked: [...m].filter((i) => walls.includes(i) || touching.includes(i)) },
+    'the free word is offered as stroke text — a suggestion, not masked (one geometric evidence)',
+    offered.size >= 18 &&
+      inItems(o, true).size === 0 &&
+      itemsOfKind(o, 'curve-text').every(
+        (i) => i.status === 'suggest' && !i.evidence.some((e) => /garment line/.test(e)),
+      ),
+    statusOf(o, 'curve-text'),
+  );
+  const acc = cleanPages(docs, classes, { edits: [{ kind: 'curve-text', keep: false }] });
+  check(
+    'synthetic guard',
+    'accepted (one click for the kind): the free word is masked',
+    inItems(acc, true).size >= 18,
+    statusOf(acc, 'curve-text'),
+  );
+  check(
+    'synthetic guard',
+    'no wall of the piece and no stroke the outline meets is in any item (offered or applied)',
+    walls.every((w) => !offered.has(w)) && touching.every((t) => !offered.has(t)),
+    { inItems: [...offered].filter((i) => walls.includes(i) || touching.includes(i)) },
   );
   CLEAN.on.guard = false;
   try {
-    const mm = masked(cleanPages(docs, classes, { edits: [] }));
+    const mm = inItems(cleanPages(docs, classes, { edits: [] }));
     check(
       'mutations',
-      'guard off → a stroke the outline meets is masked',
+      'guard off → a stroke the outline meets is in an item',
       touching.some((t) => mm.has(t)),
       [...mm].filter((i) => touching.includes(i)),
     );
   } finally {
     CLEAN.on.guard = true;
   }
+  synthChrome();
+  synthLattice();
+  synthSquare();
+  synthPagesAside();
+  synthMaskRev();
+}
+
+/**
+ * Three tiles of one file: the same frame (four sides) on each, a closed 60 × 40 mm shape at one
+ * page place on each (a small piece the tiles repeat), and a different garment line per tile.
+ */
+function chromeDoc(variant: 'plain' | 'cf' | 'short') {
+  const cfAlongFrame = variant === 'cf';
+  const pages: SynPage[] = [0, 1, 2].map((k) => ({
+    lines: [
+      ...rect(10, 10, 200, 287),
+      closedRect(120, 200, 180, 240),
+      [
+        { x: 40 + 10 * k, y: 60 },
+        { x: 90 + 10 * k, y: 150 + 5 * k },
+      ],
+      // the CF of a piece drawn ON the frame's left side (one tile)
+      ...(cfAlongFrame && k === 1
+        ? [
+            [
+              { x: 10, y: 80 },
+              { x: 10, y: 180 },
+            ],
+            [
+              { x: 10, y: 180 },
+              { x: 70, y: 180 },
+            ],
+          ]
+        : []),
+      // a 20 mm garment line (a notch, a short internal line) ending ON the frame (one tile)
+      ...(variant === 'short' && k === 2
+        ? [
+            [
+              { x: 100, y: 10 },
+              { x: 100, y: 30 },
+            ],
+          ]
+        : []),
+    ],
+  }));
+  return synthDoc(pages);
+}
+
+function synthChrome() {
+  const d = chromeDoc('plain');
+  const o = cleanPages(d.docs, d.classes, { edits: [] });
+  const frames = itemsOfKind(o, 'tile-frame');
+  const piecePaths = new Set(o.pages.flatMap((p) => p.items.flatMap((i) => i.paths)));
+  // path 4 = the closed repeated 60 × 40 shape on each tile
+  check(
+    'synthetic chrome',
+    'a frame repeated on 3 tiles is masked by itself (auto)',
+    frames.length === 3 && frames.every((i) => i.status === 'auto' && i.applied && i.lines === 4),
+    statusOf(o, 'tile-frame'),
+  );
+  check(
+    'synthetic chrome',
+    'a closed piece-sized shape repeated at one page place is never chrome',
+    !piecePaths.has(4),
+    o.notes.filter((n) => /piece-sized/.test(n)),
+  );
+  const cf = chromeDoc('cf');
+  const oc = cleanPages(cf.docs, cf.classes, { edits: [] });
+  check(
+    'synthetic chrome',
+    'a CF running along the frame on one tile: the frame is offered on every tile, applied on none',
+    itemsOfKind(oc, 'tile-frame').length >= 3 &&
+      itemsOfKind(oc, 'tile-frame').every((i) => !i.applied),
+    statusOf(oc, 'tile-frame'),
+  );
+  const sh = chromeDoc('short');
+  const os = cleanPages(sh.docs, sh.classes, { edits: [] });
+  check(
+    'synthetic chrome',
+    'a 20 mm line ending on the frame on one tile (< 50 mm protects too): the frame is offered, applied on no tile',
+    itemsOfKind(os, 'tile-frame').length >= 3 &&
+      itemsOfKind(os, 'tile-frame').every((i) => !i.applied),
+    statusOf(os, 'tile-frame'),
+  );
+  const minMm = CLEAN.guardMinMm;
+  CLEAN.guardMinMm = 50;
+  try {
+    const m = cleanPages(sh.docs, sh.classes, { edits: [] });
+    check(
+      'mutations',
+      'guard back to lines ≥ 50 mm → the frame a 20 mm line ends on is applied',
+      itemsOfKind(m, 'tile-frame').some((i) => i.applied),
+      statusOf(m, 'tile-frame'),
+    );
+  } finally {
+    CLEAN.guardMinMm = minMm;
+  }
+  CLEAN.on.chrome = false;
+  try {
+    const m = cleanPages(d.docs, d.classes, { edits: [] });
+    check(
+      'mutations',
+      'chrome off → "a frame repeated on 3 tiles is masked by itself" fails',
+      !itemsOfKind(m, 'tile-frame').some((i) => i.applied),
+      statusOf(m, 'tile-frame'),
+    );
+  } finally {
+    CLEAN.on.chrome = true;
+  }
+  CLEAN.on.guard = false;
+  try {
+    const m = cleanPages(cf.docs, cf.classes, { edits: [] });
+    check(
+      'mutations',
+      'guard off → the frame the CF runs along is applied',
+      itemsOfKind(m, 'tile-frame').some((i) => i.applied),
+      statusOf(m, 'tile-frame'),
+    );
+  } finally {
+    CLEAN.on.guard = true;
+  }
+}
+
+function synthLattice() {
+  const outline = rect(60, 60, 160, 220);
+  // one page, a 10 mm lattice over the whole page under a piece
+  const whole = synthDoc([{ lines: [...lattice(10, 10, 200, 280, 10), ...outline] }]);
+  // one page, a 10 mm quilting lattice inside the piece, its lines ending on the piece's walls
+  // (alone on the page: the piece IS the page's drawing)
+  const quilt: P[][] = [];
+  for (let y = 70; y <= 150; y += 10)
+    quilt.push([
+      { x: 60, y },
+      { x: 160, y },
+    ]);
+  for (let x = 70; x <= 150; x += 10)
+    quilt.push([
+      { x, y: 60 },
+      { x, y: 220 },
+    ]);
+  const region = synthDoc([{ lines: [...quilt, ...outline] }]);
+  // three tiles, the same 7 mm print lattice on each (repetition)
+  const tiles = synthDoc(
+    [0, 1, 2].map((k) => ({
+      lines: [
+        ...lattice(10, 10, 199, 283, 7),
+        [
+          { x: 30 + 20 * k, y: 30 },
+          { x: 120, y: 200 - 10 * k },
+        ],
+      ],
+    })),
+  );
+  const ow = cleanPages(whole.docs, whole.classes, { edits: [] });
+  const orr = cleanPages(region.docs, region.classes, { edits: [] });
+  const ot = cleanPages(tiles.docs, tiles.classes, { edits: [] });
+  const auto = (o: ReturnType<typeof cleanPages>) =>
+    itemsOfKind(o, 'grid').length > 0 && itemsOfKind(o, 'grid').every((i) => i.status === 'auto');
+  check(
+    'synthetic lattice',
+    'a 10 mm lattice over the whole page: auto',
+    auto(ow),
+    statusOf(ow, 'grid'),
+  );
+  // the outline is paths 18–21 (after the 18 quilting lines)
+  const wallIn = (o: ReturnType<typeof cleanPages>) =>
+    itemsOfKind(o, 'grid').some((i) => i.paths.some((p) => p >= 18));
+  check(
+    'synthetic lattice',
+    'a quilting lattice inside a piece: never auto, no wall of the piece in any item',
+    !itemsOfKind(orr, 'grid').some((i) => i.status === 'auto') && !wallIn(orr),
+    { grid: statusOf(orr, 'grid'), paths: itemsOfKind(orr, 'grid').map((i) => i.paths.join(',')) },
+  );
+  CLEAN.on.guard = false;
+  try {
+    const m = cleanPages(region.docs, region.classes, { edits: [] });
+    check(
+      'mutations',
+      'guard off → the quilting lattice takes the piece walls its spacing swallowed',
+      wallIn(m),
+      itemsOfKind(m, 'grid').map((i) => i.paths.join(',')),
+    );
+  } finally {
+    CLEAN.on.guard = true;
+  }
+  check(
+    'synthetic lattice',
+    'a 7 mm lattice repeated on 3 tiles: auto',
+    auto(ot),
+    statusOf(ot, 'grid'),
+  );
+  const pitches = CLEAN.gridPitchesMm;
+  CLEAN.gridPitchesMm = [];
+  try {
+    const m = cleanPages(whole.docs, whole.classes, { edits: [] });
+    check(
+      'mutations',
+      'no proof pitch → "a 10 mm lattice over the whole page: auto" fails',
+      !auto(m),
+      statusOf(m, 'grid'),
+    );
+  } finally {
+    CLEAN.gridPitchesMm = pitches;
+  }
+  // a ruled table with text in its cells on one page: offered; with a line running out of it: none
+  const cells = lattice(20, 20, 100, 60, 10);
+  const texts = [0, 1, 2, 3, 4, 5].map((k) => ({ text: `${36 + 2 * k}`, x: 22 + 10 * k, y: 28 }));
+  const table = synthDoc([{ lines: [...cells, ...rect(10, 120, 190, 280)], texts }]);
+  const crossed = synthDoc([
+    {
+      lines: [
+        ...cells,
+        [
+          { x: 55, y: 45 },
+          { x: 55, y: 200 },
+        ],
+      ],
+      texts,
+    },
+  ]);
+  const otb = cleanPages(table.docs, table.classes, { edits: [] });
+  const ocr = cleanPages(crossed.docs, crossed.classes, { edits: [] });
+  const tbl = [...itemsOfKind(otb, 'table'), ...itemsOfKind(otb, 'grid')];
+  check(
+    'synthetic lattice',
+    'a ruled size table on one page: offered, not auto',
+    tbl.length > 0 && tbl.every((i) => i.status === 'suggest'),
+    [...statusOf(otb, 'table'), ...statusOf(otb, 'grid')],
+  );
+  check(
+    'synthetic lattice',
+    'a ruled grid a line runs out of (a garment through it): no table',
+    itemsOfKind(ocr, 'table').length === 0,
+    { table: statusOf(ocr, 'table'), notes: ocr.notes },
+  );
+}
+
+function synthSquare() {
+  const piece = rect(20, 150, 190, 280);
+  const keyword = synthDoc([
+    {
+      lines: [...rect(40, 30, 140, 130), ...piece],
+      texts: [{ text: 'TEST SQUARE 10 cm', x: 45, y: 140 }],
+    },
+  ]);
+  const other = synthDoc([
+    { lines: [...rect(40, 30, 140, 130), ...piece], texts: [{ text: 'POCKET x2', x: 45, y: 140 }] },
+  ]);
+  const ok = cleanPages(keyword.docs, keyword.classes, { edits: [] });
+  const oo = cleanPages(other.docs, other.classes, { edits: [] });
+  check(
+    'synthetic square',
+    'a 100 mm square labelled with the scale keyword: auto, scale 0.97',
+    itemsOfKind(ok, 'test-square').some((i) => i.status === 'auto' && i.applied) &&
+      ok.scaleHints[0]?.confidence >= 0.97,
+    { items: statusOf(ok, 'test-square'), conf: ok.scaleHints.map((h) => h.confidence) },
+  );
+  check(
+    'synthetic square',
+    'a 100 mm square with another label (a candidate piece): at most a suggestion, scale ≤ 0.6',
+    !itemsOfKind(oo, 'test-square').some((i) => i.status === 'auto') &&
+      oo.scaleHints.every((h) => h.confidence <= 0.6),
+    { items: statusOf(oo, 'test-square'), conf: oo.scaleHints.map((h) => h.confidence) },
+  );
+  CLEAN.on.square = false;
+  try {
+    const m = cleanPages(keyword.docs, keyword.classes, { edits: [] });
+    check(
+      'mutations',
+      'square off → "labelled with the scale keyword: auto" fails',
+      !itemsOfKind(m, 'test-square').length,
+      statusOf(m, 'test-square'),
+    );
+  } finally {
+    CLEAN.on.square = true;
+  }
+}
+
+function synthPagesAside() {
+  // page 0 a tile; page 1 instructions with only short strokes (text); page 2 a cover with a
+  // 150 mm line; page 3 an overview with a closed 30 × 30 mm contour (900 mm² ≥ the piece area)
+  const strokes: P[][] = [];
+  for (let k = 0; k < 40; k++)
+    strokes.push([
+      { x: 20 + 4 * k, y: 30 },
+      { x: 22 + 4 * k, y: 36 },
+    ]);
+  const d = synthDoc(
+    [
+      { lines: rect(20, 20, 180, 250) },
+      { lines: strokes },
+      {
+        lines: [
+          [
+            { x: 20, y: 100 },
+            { x: 170, y: 100 },
+          ],
+        ],
+      },
+      { lines: [closedRect(50, 50, 80, 80)] },
+    ],
+    ['tile', 'instructions', 'cover', 'overview'],
+  );
+  const o = cleanPages(d.docs, d.classes, { edits: [] });
+  const st = Object.fromEntries(
+    o.dropped.map((x) => [x.page, `${x.status}${x.drawing ? ` (${x.drawing})` : ''}`]),
+  );
+  check(
+    'synthetic pages',
+    'a page with no line work that could be pattern is set aside by itself; one with a long line / a piece-sized contour is flagged (suggest)',
+    o.dropped.find((x) => x.page === 1)?.status === 'auto' &&
+      o.dropped.find((x) => x.page === 2)?.status === 'suggest' &&
+      o.dropped.find((x) => x.page === 3)?.status === 'suggest' &&
+      o.pages.find((p) => p.page === 2)?.status === 'suggest',
+    st,
+  );
+}
+
+function synthMaskRev() {
+  const at = { sheetIndex: 0, gridOverride: null, variant: null };
+  const r1 = maskRevOf(['0:1:grid:0', '0:2:tile-label:0'], []);
+  const r2 = maskRevOf(['0:1:grid:0'], []);
+  const r3 = maskRevOf(['0:2:tile-label:0', '0:1:grid:0'], []);
+  const r4 = maskRevOf(['0:1:grid:0', '0:2:tile-label:0'], [{ kind: 'grid', keep: true }]);
+  const s1 = answerCtxOf({ ...at, maskRev: r1 }, null).scope;
+  const s2 = answerCtxOf({ ...at, maskRev: r2 }, null).scope;
+  const s4 = answerCtxOf({ ...at, maskRev: r4 }, null).scope;
+  check(
+    'mask revision',
+    'answers carry the mask: another mask (or another mask edit) is another scope; the same mask in any order is the same',
+    r1 === r3 && s1 !== s2 && s1 !== s4 && s1 === answerCtxOf({ ...at, maskRev: r3 }, null).scope,
+    { r1, r2, r4, s1, s2 },
+  );
 }
 
 // ── negative controls: no wall of a closed piece is masked ──────────────────────────────
