@@ -34,7 +34,7 @@ export type NameReading = {
 export function readName(name: string, book: RoleBook = ROLE_BOOK): NameReading {
   const tokens = nameTokens(name);
   const handOf = (t: string): Hand =>
-    book.hands.L.includes(t) ? 'L' : book.hands.R.includes(t) ? 'R' : null;
+    book.hands.L.includes(t) ? 'L' : book.hands.R.includes(t) ? 'R' : glued(t);
   let hand: Hand = null;
   let family: string | null = null;
   for (const t of tokens) {
@@ -50,6 +50,15 @@ export function readName(name: string, book: RoleBook = ROLE_BOOK): NameReading 
   const bare = new Set(tokens.map((t) => t.replace(/^\d+|\d+$/g, '')).filter(Boolean));
   const role = book.roles.find((r) => r.tokens.some((t) => bare.has(t)))?.id ?? null;
   return { role, family, hand };
+}
+
+/**
+ * A hand glued to a copy number (F3): `PCK_BACK_1L`, `PCK_BACK_1R`. Two side letters glued
+ * together (`Back_Top_RL`) say nothing sure about which comes first — left unread.
+ */
+function glued(t: string): Hand {
+  const m = /^\d+([lr])$/.exec(t);
+  return m ? (m[1] === 'l' ? 'L' : 'R') : null;
 }
 
 export function roleDef(id: string | null, book: RoleBook = ROLE_BOOK): RoleDef | undefined {
@@ -138,7 +147,60 @@ export function readPieces(graph: SeamGraph, facts: SkeletonFacts, book: RoleBoo
       mult: pieceMultiplicity(p),
     });
   });
+  return contextRoles(pieces, graph, book);
+}
+
+/**
+ * F3 (05-PROD-DIAGNOSIS §6): what a name means in the company of the card's other pieces. Never a
+ * word the dictionary reads on its own — only where the card itself settles it:
+ *   1. twins (mirror or identical) with no hand whose names differ only in a final l / r of one
+ *      token are the two hands (FL and FR, PCK_BACK_1L and PCK_BACK_1R);
+ *   2. mirror twins read as different roles, one a panel, are both that panel (FL = flap, but its
+ *      mirror FR is a front: FL is the left front);
+ *   3. roles.json `contextRoles`: a family token that is a role only when the card has no piece of
+ *      that role at all (P_* / PU_* / PD_* are fronts on a card with no front, BPU a back …).
+ */
+function contextRoles(pieces: PieceFact[], graph: SeamGraph, book: RoleBook): PieceFact[] {
+  const byKey = new Map(pieces.map((p) => [p.key, p]));
+  const twins = (p: PieceFact, kinds: string[]) =>
+    (graph.pieces.find((g) => g.pieceKey === p.key)?.twinOf ?? [])
+      .filter((t) => kinds.includes(t.kind))
+      .map((t) => byKey.get(t.key))
+      .filter((q): q is PieceFact => !!q);
+  for (const p of pieces) {
+    for (const q of twins(p, ['mirror', 'identical'])) {
+      if (p.hand || q.hand) continue;
+      const side = lrSuffix(p.name, q.name);
+      if (side) [p.hand, q.hand] = side;
+    }
+  }
+  for (const p of pieces) {
+    for (const q of twins(p, ['mirror'])) {
+      if (!p.role || !q.role || p.role === q.role) continue;
+      const pd = roleDef(p.role, book);
+      const qd = roleDef(q.role, book);
+      if (qd?.level === 'panel' && pd?.level !== 'panel') p.role = q.role;
+    }
+  }
+  const present = new Set(pieces.map((p) => p.role).filter(Boolean));
+  for (const c of book.contextRoles ?? []) {
+    if (present.has(c.role)) continue;
+    for (const p of pieces) if (!p.role && p.family && c.tokens.includes(p.family)) p.role = c.role;
+  }
   return pieces;
+}
+
+/** FL / FR, X_1L / X_1R: one token apart, by a final l against a final r → [hand of a, hand of b]. */
+function lrSuffix(a: string, b: string): [Hand, Hand] | null {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.length !== tb.length) return null;
+  const diff = ta.map((t, i) => i).filter((i) => ta[i] !== tb[i]);
+  if (diff.length !== 1) return null;
+  const [x, y] = [ta[diff[0]], tb[diff[0]]];
+  if (x.length < 2 || x.slice(0, -1) !== y.slice(0, -1)) return null;
+  const end = x.slice(-1) + y.slice(-1);
+  return end === 'lr' ? ['L', 'R'] : end === 'rl' ? ['R', 'L'] : null;
 }
 
 // ── seams as evidence ───────────────────────────────────────────────────────────────────────

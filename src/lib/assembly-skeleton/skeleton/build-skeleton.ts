@@ -29,7 +29,7 @@ import {
   zoneEnum,
   type Entity,
 } from './model';
-import { display, groupDetailed } from './group-units';
+import { display, groupDetailed, withPart } from './group-units';
 import { planButtons, ventEvidence, zipSeats } from '../geometry/closures';
 import { SKELETON } from '../types';
 import type { SkeletonTemplate, TemplateStage } from './template';
@@ -334,7 +334,22 @@ export function buildSkeleton(
   /** Lane Z: closure kinds already read (once each), and template BOM stages that yield to them. */
   const closuresDone = new Set<'marks' | 'zipper'>();
   const closuresTaken = new Set<string>();
-  for (const stage of template.stages) {
+  // F6: an order the template offers both ways (collar / sleeves) is ONE decision. Reading 0 is the
+  // template's own order, reading 1 the other stage first; a pin swaps
+  // the two stages, and the first join of whichever runs first carries the decision.
+  const stages = [...template.stages];
+  const orderChoice = new Map<string, { id: string; chosen: number; other: TemplateStage }>();
+  for (const st of template.stages) {
+    if (!st.orFirst) continue;
+    const id = `order:${st.id}-${st.orFirst}`;
+    const chosen = options.pins?.[id] === 1 ? 1 : 0;
+    const i = stages.findIndex((x) => x.id === st.id);
+    const j = stages.findIndex((x) => x.id === st.orFirst);
+    if (i < 0 || j < 0) continue;
+    if (chosen === 1) [stages[i], stages[j]] = [stages[j], stages[i]];
+    orderChoice.set(stages[i].id, { id, chosen, other: stages[j] });
+  }
+  for (const stage of stages) {
     if (stage.unless?.some(hasRole)) continue;
     if (stage.op === 'fuse') {
       runFuse(stage);
@@ -527,8 +542,10 @@ export function buildSkeleton(
       }
       checkSleeves(stage, attachers, target()!);
       const batches = stage.together ? [attachers] : attachers.map((a) => [a]);
-      for (const batch of batches) {
+      const choice = orderChoice.get(stage.id);
+      for (const [b, batch] of batches.entries()) {
         const t = target()!;
+        const at = steps.length;
         // «Set sleeves ×2»: what is sewn on is two copies under one key (both hands at once).
         const copies = Math.max(...batch.map((e) => e.mult ?? 1));
         bodyJoin(
@@ -537,7 +554,7 @@ export function buildSkeleton(
           {
             name:
               stage.name ??
-              `${display(t)} with ${batch.map((e) => display(e).toLowerCase()).join(', ')}`,
+              batch.reduce((n, e) => withPart(n, display(e).toLowerCase()), display(t)),
             roles: mergeRoles(t.roles, ...batch.map((e) => e.roles)),
             tree: t.tree,
             hand: t.hand,
@@ -545,6 +562,23 @@ export function buildSkeleton(
           undefined,
           `${stage.label}${multWord(copies)}`,
         );
+        // The other order, said on the first join of the pair: its stage's parts onto this target.
+        const rivals = choice
+          ? table
+              .list(tree)
+              .filter((e) => withRole(e, choice.other.roles) && !withRole(e, choice.other.to))
+          : [];
+        if (choice && b === 0 && rivals.length) {
+          const step = steps[at];
+          step.decision = { id: choice.id, chosen: choice.chosen };
+          step.alternatives = [
+            {
+              inputs: [...rivals.map((e) => e.key), step.inputs[step.inputs.length - 1]],
+              seams: [],
+              reason: `or ${choice.other.label.toLowerCase()} first — the other order technologists use; the steps after it follow your choice`,
+            },
+          ];
+        }
       }
     }
   }
