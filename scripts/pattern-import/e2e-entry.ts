@@ -34,6 +34,8 @@ import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
 
+import { singlePageSheet } from 'components/managers/tech-card/components/pattern-import/sheet-skip';
+
 import { synthDrawables, synthTruth } from './raster-entry';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
@@ -544,6 +546,8 @@ export async function runCase(c: Case): Promise<Rec> {
     if (ex.presegmented) skipped.push(...(needsHuman ? [] : ['scale']), 'sheet');
     // 3 · sheet
     const as = await run('assemble', { sheet: c.sheet ?? 0 });
+    // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
+    if (!ex.presegmented && singlePageSheet(ex.pages, as)) skipped.push('sheet');
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
     rec.sheet = {
       tiles: as.sheet.poses.length,

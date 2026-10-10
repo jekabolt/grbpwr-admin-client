@@ -189,8 +189,14 @@ function WizardBody({
   const at = stepIndex(session.step);
   const nextStep = STEPS[at + 1];
   // the last step of a download-only run is the download
+  // A0.2: a one-page sheet is passed over — the step reads "1 page", greyed, and stays a door back
+  const passedOver = (s: (typeof STEPS)[number]) => s.id === 'sheet' && api.sheetSkipped;
   const labelOf = (s: (typeof STEPS)[number]) =>
-    card.downloadOnly && s.id === 'apply' ? 'download' : s.label;
+    card.downloadOnly && s.id === 'apply'
+      ? 'download'
+      : passedOver(s)
+        ? `${s.label} · 1 page`
+        : s.label;
   const applied = api.apply.phase === 'done' && api.apply.result.ok;
   // Leaving discards the run. Nothing is on the card yet (apply is the only writer), but a run
   // with a sheet assembled and pieces named is work — so leaving past the first step asks.
@@ -345,12 +351,18 @@ function WizardBody({
                     i < at && !session.busy && !applied ? (
                       <button
                         type='button'
-                        className='uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) ? ' text-labelColor' : ''}`}
                         onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                        title={`back to ${labelOf(s)} — its answers are kept, later steps re-run`}
+                        title={
+                          passedOver(s)
+                            ? 'one page is the whole sheet — passed over; open it to check'
+                            : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
+                        }
                       >
                         {labelOf(s)}
                       </button>
+                    ) : passedOver(s) && i !== at ? (
+                      <span className='text-labelColor'>{labelOf(s)}</span>
                     ) : (
                       labelOf(s)
                     ),
