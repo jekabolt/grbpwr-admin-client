@@ -98,17 +98,13 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
   if (!sem) return <PendingDetails api={api} />;
   if (!session.sheet) return null;
 
-  // What the worker read off the sheet (allowance text / nested loops) when nobody set it yet.
-  const found = sem.pieces.find(
-    (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
-  )?.allowance;
-  const fileAllowance: AllowanceDecision = inputs.fileAllowance ??
-    found ?? {
-      meaning: 'seam',
-      allowanceMm: PATIMPORT.defaultAllowanceMm,
-      origin: 'default',
-      evidence: ['no allowance text found — owner default'],
-    };
+  // FLY copy 2: the header says what the file's outline IS — the operator's answer, else what the
+  // pieces were built with (a measured second line, the sheet's text), else the asked default
+  // with the worker's own evidence (incl. "allowances only for some pieces" context).
+  const fileAllowance: AllowanceDecision = fileAllowanceShown(
+    inputs.fileAllowance,
+    sem.pieces.map((p) => p.allowance),
+  );
   const nameOf = (seed: SeedId) => session.names.find((n) => n.seed === seed);
   const specsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed);
   const blockedOf = (seed: SeedId) => sem.blocked.find((b) => b.seed === seed);
@@ -124,9 +120,22 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     >,
   ) => {
     const i = { ...inputs, ...p };
+    // only an operator answer travels as the file's allowance: a shown 'measured'/'text' value is
+    // the worker's own reading and is re-read by it (sent back, it would pass as proven everywhere)
     void api.dispatch({
       type: 'semantics',
-      input: { ...api.semanticsInput(i), fileAllowance: i.fileAllowance ?? fileAllowance },
+      input: {
+        ...api.semanticsInput(i),
+        fileAllowance:
+          i.fileAllowance?.origin === 'operator'
+            ? i.fileAllowance
+            : {
+                meaning: 'seam',
+                allowanceMm: PATIMPORT.defaultAllowanceMm,
+                origin: 'default',
+                evidence: [],
+              },
+      },
     });
   };
   const override = (seed: SeedId, o: NonNullable<Inputs['overrides'][SeedId]>) =>
@@ -227,8 +236,8 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 ? 'set by you'
                 : // the reader's evidence already says where it looked ("text: «…»")
                   fileAllowance.evidence.join(' · ') || fileAllowance.origin}
-              {' — '}a seam line gets a cut line {fileAllowance.allowanceMm} mm out (layer 1 = final
-              cut, the card adds nothing).
+              {' — '}
+              {outlineNote(fileAllowance)}
             </Text>
           </div>
           <OutlineQuestion api={api} current={fileAllowance} />
@@ -865,4 +874,43 @@ function GrainMark({ a, b, unit, tone }: { a: PtMm; b: PtMm; unit: number; tone:
       <polygon points={tip(a, -1)} fill={tone} />
     </g>
   );
+}
+
+/** The file's outline as the header shows it (FLY copy 2): answered › built with › asked default. */
+export function fileAllowanceShown(
+  answered: AllowanceDecision | null,
+  built: readonly AllowanceDecision[],
+): AllowanceDecision {
+  if (answered?.origin === 'operator') return answered;
+  const count = (o: AllowanceDecision['origin']) => built.filter((a) => a.origin === o);
+  const measured = count('measured');
+  const text = count('text');
+  const pick = measured.length >= text.length ? measured[0] ?? text[0] : text[0];
+  if (pick) {
+    const n = pick.origin === 'measured' ? measured.length : text.length;
+    return n < built.length
+      ? { ...pick, evidence: [...pick.evidence, `${n} of ${built.length} blocks`] }
+      : pick;
+  }
+  const asked = built.find((a) => a.origin === 'default');
+  return {
+    meaning: asked?.meaning ?? 'seam',
+    allowanceMm: asked?.allowanceMm ?? PATIMPORT.defaultAllowanceMm,
+    origin: 'default',
+    evidence: asked?.evidence.length
+      ? asked.evidence
+      : ['no allowance text and no second line found — answer below'],
+  };
+}
+
+/** What the line choice does to the cut, in words that match the geometry (FLY copy 2). */
+export function outlineNote(a: AllowanceDecision): string {
+  switch (a.meaning) {
+    case 'cut':
+      return `the outline is cut as drawn; the seam line is taken ${a.allowanceMm} mm inside it (layer 1 = final cut, the card adds nothing).`;
+    case 'both':
+      return `both lines are drawn: the outline is cut as drawn, the inner line is the seam (layer 1 = final cut, the card adds nothing).`;
+    default:
+      return `the outline is the seam line: the cut line is built ${a.allowanceMm} mm outside it (layer 1 = final cut, the card adds nothing).`;
+  }
 }

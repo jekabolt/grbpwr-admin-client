@@ -26,6 +26,7 @@ import type {
   Sheet,
 } from '../types';
 import { PATIMPORT } from '../types';
+import { readPieceText } from '../dictionary/synonyms';
 import { SegIndex, perimeter, pointInPolygon, sampleAlong } from './geom';
 
 // ── text ───────────────────────────────────────────────────────────────────────────────────
@@ -162,7 +163,68 @@ export type TextAllowance = {
   included: boolean;
   allowanceMm: number | null;
   quote: string;
+  /**
+   * 'file' — a general sentence ("Nahtzugaben 1 cm", "все припуски 1 см", "seam allowance
+   * included"): evidence for the whole file. 'piece' — the sentence names a piece («Кокетки – …»,
+   * "Hood: …") or gives several values edge by edge ("1.5 cm on the shoulder, 2 cm on the
+   * others"): it speaks of those pieces only, never of the file (FLY M3).
+   */
+  scope: 'file' | 'piece';
+  /** For 'piece': the words that name it, as printed (empty when only the per-edge values tell). */
+  subject?: string;
 };
+
+/** A hem / turn-up amount, read from its own clause ("на подгибку низа … — 4 см", "hem 3 cm"). */
+const HEM_CLAUSE = re(
+  `(?:hem|saum|säume|ourlet|подгиб|${NB}низ|нижн|zoom|dół|opsøm|forneden|bajo|dobladillo|orlo)`,
+);
+/** Edge words: a value tied to an edge, not to the piece ("по плечевому срезу", "an allen Kanten"). */
+const EDGE_WORD = re(
+  `срез|${NB}edge|kante|${NB}bord(?!\\p{L})|${NB}rand|${NB}kant(?!\\p{L})|krawędz|${NB}borde`,
+);
+
+/** Which edge: a value for SOME edges only ("по остальным срезам", "on the top edge"), not all. */
+const EDGE_QUAL = re(
+  `остальн|верхн|нижн|плечев|горловин|боков|кроме|${NB}other|remaining|${NB}top(?!\\p{L})|bottom|shoulder|neck|übrig|ausser|außer|${NB}oberen|${NB}unteren|except`,
+);
+
+/**
+ * Is a statement about named pieces rather than the file (FLY M3)?
+ *   · a piece named as the SUBJECT of a rule: "<1–4 words that name a piece> – / : …" before the
+ *     amount («Кокетки – по …», «Спинка, Полочка, Рукав – …», «Пата – …», "Hood: 1.5 cm");
+ *   · several values edge by edge: two or more distinct amounts outside hem clauses, with an edge
+ *     word («по плечевому срезу … 1.5 см, по остальным 2 см»).
+ */
+function pieceScope(win: string, amountAt: number | null): { subject: string } | null {
+  const upto = amountAt ?? win.length;
+  const sep = /\s[-–—]\s|:\s/gu;
+  for (let m = sep.exec(win); m && m.index < upto; m = sep.exec(win)) {
+    const before = win.slice(0, m.index);
+    // the words right before the separator, back to the previous clause mark
+    const clause = before.split(/[.!?;:)\]]\s|\s[-–—]\s/u).pop() ?? '';
+    const words = clause.trim().split(/\s+/).slice(-4).join(' ');
+    if (!words || SA_RE.test(words)) continue;
+    const r = readPieceText(words);
+    if (r.code) return { subject: words };
+  }
+  const values = new Set<number>();
+  let perEdge = false;
+  AMOUNT.lastIndex = 0;
+  for (let a = AMOUNT.exec(win); a; a = AMOUNT.exec(win)) {
+    const mm = amountMm(a[1].replace(/\s+/g, ''), a[2]);
+    if (mm == null) continue;
+    const clause =
+      win
+        .slice(0, a.index)
+        .split(/[,;.]\s/u)
+        .pop() ?? '';
+    // "по остальным срезам … 5 мм", "on the top edge 3.5 cm": a value for some edges only
+    if (EDGE_WORD.test(clause) && EDGE_QUAL.test(clause)) perEdge = true;
+    if (HEM_CLAUSE.test(clause)) continue;
+    values.add(mm);
+  }
+  return perEdge || (values.size >= 2 && EDGE_WORD.test(win)) ? { subject: '' } : null;
+}
 
 const normalise = (s: string) =>
   s
@@ -202,7 +264,7 @@ export function allowanceStatements(text: string): TextAllowance[] {
     const instruction = INSTRUCTION.test(win);
     // the amount: closest to the SA word, not a hem / safety amount
     const saAt = m.index - from;
-    let best: { mm: number; d: number } | null = null;
+    let best: { mm: number; d: number; at: number } | null = null;
     AMOUNT.lastIndex = 0;
     for (let a = AMOUNT.exec(win); a; a = AMOUNT.exec(win)) {
       const mm = amountMm(a[1].replace(/\s+/g, ''), a[2]);
@@ -214,20 +276,35 @@ export function allowanceStatements(text: string): TextAllowance[] {
       if (HEM_AFTER.test(win.slice(a.index + a[0].length, a.index + a[0].length + 14))) continue;
       if (SAFETY.test(pre)) continue;
       const d = Math.abs(a.index - saAt);
-      if (!best || d < best.d) best = { mm, d };
+      if (!best || d < best.d) best = { mm, d, at: a.index };
     }
     if (!excluded && !included) {
       // "На швы и по срезам — 1,5 см" / "Naht- und Saumzugaben … 1,5 cm an allen Kanten" with no
       // verb: a printed amount TO ADD is the convention of every source that states one without
       // "included" — unless the sentence is a sewing step (trim, press, stitch).
       if (best && !instruction && best.d <= 60)
-        out.push({ included: false, allowanceMm: best.mm, quote: win.trim() });
+        out.push({
+          included: false,
+          allowanceMm: best.mm,
+          quote: win.trim(),
+          ...scopeOf(win, best.at),
+        });
       continue;
     }
-    out.push({ included, allowanceMm: instruction ? null : best?.mm ?? null, quote: win.trim() });
+    out.push({
+      included,
+      allowanceMm: instruction ? null : best?.mm ?? null,
+      quote: win.trim(),
+      ...scopeOf(win, best?.at ?? null),
+    });
   }
   return out;
 }
+
+const scopeOf = (win: string, at: number | null): Pick<TextAllowance, 'scope' | 'subject'> => {
+  const p = pieceScope(win, at);
+  return p ? { scope: 'piece', subject: p.subject } : { scope: 'file' };
+};
 
 /** The first statement in one text, or null (unit-test helper). */
 export function readAllowanceText(text: string): TextAllowance | null {
@@ -239,14 +316,18 @@ export function allowanceFromTexts(texts: readonly string[]): {
   decision: AllowanceDecision | null;
   conflicts: string[];
   statements: TextAllowance[];
+  /** Statements about named pieces / per-edge values: context for the operator, never the file's. */
+  context: TextAllowance[];
 } {
-  const found = allowanceStatements(
+  const all = allowanceStatements(
     texts
       .map((s) => s.trim())
       .filter(Boolean)
       .join(' '),
   );
-  if (!found.length) return { decision: null, conflicts: [], statements: [] };
+  const found = all.filter((f) => f.scope === 'file');
+  const context = all.filter((f) => f.scope === 'piece');
+  if (!found.length) return { decision: null, conflicts: [], statements: [], context };
   const w = (f: TextAllowance) => (f.allowanceMm != null ? 2 : 1);
   const inc = found.filter((f) => f.included);
   const exc = found.filter((f) => !f.included);
@@ -267,6 +348,10 @@ export function allowanceFromTexts(texts: readonly string[]): {
     [...votes].sort((a, b) => b[1] - a[1] || firstAt(a[0]) - firstAt(b[0]))[0]?.[0] ?? null;
   const quoteOf = pick.find((f) => f.allowanceMm === amount) ?? pick[0];
   const included = quoteOf.included;
+  // the sheet prints amounts piece by piece (a table, «Кокетки – 1.5 см …») and no general one:
+  // "without" alone must not become the 10 mm default — the outline is asked (FLY M3)
+  if (amount == null && context.some((c) => c.allowanceMm != null))
+    return { decision: null, conflicts, statements: found, context };
   const evidence = [`text: «${quoteOf.quote.slice(0, 160)}»`];
   if (amount == null)
     evidence.push(
@@ -281,6 +366,7 @@ export function allowanceFromTexts(texts: readonly string[]): {
     },
     conflicts,
     statements: found,
+    context,
   };
 }
 
@@ -439,8 +525,19 @@ export const detectAllowance: DetectAllowanceFn &
     meaning: 'cut',
     allowanceMm: PATIMPORT.defaultAllowanceMm,
     origin: 'default',
-    evidence: [
-      'no seam-allowance statement and no seam line found — the outline is taken as the cut line; confirm',
-    ],
+    evidence: textual.context.length
+      ? [pieceOnlyEvidence(textual.context)]
+      : [
+          'no seam-allowance statement and no seam line found — the outline is taken as the cut line; confirm',
+        ],
   };
 };
+
+/**
+ * The sheet speaks of allowances only for named pieces / edges (FLY M3): shown to the operator as
+ * context, never as the file's value — the outline question is still asked.
+ */
+export function pieceOnlyEvidence(context: readonly TextAllowance[]): string {
+  const q = context[0].quote.slice(0, 120);
+  return `the sheet gives allowances only for some pieces or edges («${q}»${context.length > 1 ? ` and ${context.length - 1} more` : ''}) — no value for the whole file`;
+}
