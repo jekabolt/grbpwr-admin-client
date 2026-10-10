@@ -712,7 +712,13 @@ export function buildSkeleton(
         `the pattern marks ${plans.map((p) => `${p.count} on ${nm(p.pieceKey)}`).join(', ')} for buttons — the BOM has no button or snap line, add it`,
       );
     }
-    for (const p of plans) {
+    // Holes first: the buttons on the other placket ride on them — «which side has the holes» is
+    // ONE decision, and the button step follows its tick (like a press follows its join).
+    const holesAt = new Map<number, number>();
+    const ordered = [...plans].sort(
+      (x, y) => (x.role === 'holes' ? 0 : 1) - (y.role === 'holes' ? 0 : 1),
+    );
+    for (const p of ordered) {
       const sure = p.proof === 'marks';
       const confidence = !bom ? 0.45 : sure ? 0.7 : 0.5;
       const check = sure
@@ -728,7 +734,7 @@ export function buildSkeleton(
           : p.role === 'buttons'
             ? 'Attach buttons'
             : 'Buttonholes or buttons';
-      pushFeature(p.pieceKey, {
+      const at = pushFeature(p.pieceKey, {
         stage,
         label: `${what} ×${p.count} on ${nm(p.pieceKey)}${check}`,
         machine: p.role === 'buttons' ? 'button_attach' : 'buttonhole',
@@ -743,6 +749,13 @@ export function buildSkeleton(
           marks: p.marks,
         },
       });
+      if (at < 0) continue;
+      if (p.role === 'holes' && !holesAt.has(p.count)) holesAt.set(p.count, at);
+      const holes = p.role === 'buttons' ? holesAt.get(p.count) : undefined;
+      if (holes !== undefined) {
+        steps[at].derivedFrom = holes;
+        steps[at].confidence = steps[holes].confidence;
+      }
     }
     closuresTaken.add('buttons');
   }
