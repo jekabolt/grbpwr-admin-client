@@ -11,6 +11,8 @@
 
 import type { EdgeId, SeamCandidate, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
 
+import type { DeclaredJoin } from './joins';
+
 export type Vec3 = [number, number, number];
 
 export type DollOptions = {
@@ -30,6 +32,12 @@ export type DollOptions = {
   dropSeams?: string[];
   /** Extra lines in `warnings` (charts, loops) for probes. */
   debug?: boolean;
+  /**
+   * Declared joins (the technologist's order, or the skeleton's units): which pieces must be sewn
+   * together. A join the graph has no seam for is searched for between those pieces only and
+   * proposed «from the technologist's order». See joins.ts (joinsFromOps).
+   */
+  joins?: DeclaredJoin[];
   /** Call every ~20 passes with the current positions (the worker posts frames from it). */
   onFrame?: (positions: Float32Array, pass: number) => void;
 };
@@ -83,7 +91,13 @@ export type DollSeamReport = {
   id: string;
   a: EdgeId[];
   b: EdgeId[];
-  kind: SeamCandidate['kind'] | 'proposed-composite' | 'proposed-closure' | 'facing-free';
+  kind:
+    | SeamCandidate['kind']
+    | 'proposed-composite'
+    | 'proposed-closure'
+    | 'facing-free'
+    /** Proposed from the technologist's order: a declared join the graph had no seam for. */
+    | 'from-order';
   origin: 'graph' | 'doll-proposed' | 'layer';
   lenA: number;
   lenB: number;
@@ -149,6 +163,10 @@ export type DollReport = {
   };
   /** Words, never bare numbers. */
   warnings: string[];
+  /** Seams proposed from declared joins (the technologist's order), with the join they serve. */
+  orderJoins: { join: string; seam: string; note: string }[];
+  /** Declared join parts sewn onto a panel's face (flap, welt, patch): no edge seam to draw. */
+  orderSurface: { join: string; part: string[] }[];
   /** The honesty line every view carries. */
   honesty: string;
 };

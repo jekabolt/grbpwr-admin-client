@@ -8,6 +8,9 @@ import type { Edge, EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skelet
 
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
 import { groupPieces, type GroupedPiece, type GroupedSeam } from './groups';
+import { instanceMirrored } from './instance';
+import { completeFromJoins } from './joins';
+import { liningByName } from 'lib/assembly-skeleton/names';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
 import {
@@ -72,6 +75,8 @@ type Work = {
   closure?: boolean;
   /** Not solved: free edges facing each other, welded only for the loop topology, drawn open. */
   virtual?: boolean;
+  /** Found from the technologist's order (a declared join the graph had no seam for). */
+  fromOrder?: boolean;
 };
 
 const HONESTY =
@@ -79,11 +84,139 @@ const HONESTY =
 
 export function solveDoll(input: DollInput): DollReport {
   const t0 = now();
-  const { graph, facts } = input;
   const opt = input.options ?? {};
   const warnings: string[] = [];
+  // Mirrored ×2 blocks become two panels (the block and its mirror).
+  const inst = instanceMirrored(input.graph, input.facts);
+  warnings.push(...inst.notes);
+  const facts = inst.facts;
+  // Suspect graph seams: joins that make the wrap topology impossible are not sewn as drawn.
+  //  · the two fronts of a top sewn along their centre-front edges: that is the opening — a
+  //    closure (buttons), drawn closed like one;
+  //  · the left leg sewn to the right leg along more than a rise: legs meet only at the crotch.
+  const suspectsIn = (Gx: ReturnType<typeof groupPieces>) => {
+    const gp = new Map(Gx.pieces.map((p) => [p.key, p]));
+    const handOf = (k: string) => gp.get(k)?.geom.hand ?? null;
+    const edgeLen = (id: string) =>
+      edgeIdsOf(id).reduce(
+        (t, one) => t + (gp.get(pk(one))?.geom.edges.find((e) => e.id === one)?.lenMm ?? 0),
+        0,
+      );
+    const lenOf = (s: GroupedSeam) => Math.max(edgeLen(s.seam.a), edgeLen(s.seam.b));
+    const out = new Map<string, { kind: 'closure' | 'drop'; note: string }>();
+    for (const s of Gx.seams) {
+      const a = gp.get(pk(s.a[0]));
+      const b = gp.get(pk(s.b[0]));
+      if (!a || !b || a.key === b.key) continue;
+      const id = `${s.seam.a}~${s.seam.b}`;
+      const hands = new Set([handOf(a.key), handOf(b.key)]);
+      const lr = hands.has('L') && hands.has('R');
+      // Centre-front: two fronts, or — when the back already has its own left/right centre seam —
+      // any other long left/right seam of the body (fronts whose names carry no role).
+      const isBack = (p: GroupedPiece) => p.role === 'back' || p.role === 'yoke';
+      const cfByRole = a.role === 'front' && b.role === 'front';
+      const cfByCb =
+        !isBack(a) &&
+        !isBack(b) &&
+        Gx.seams.some((o) => {
+          const oa = gp.get(pk(o.a[0]));
+          const ob = gp.get(pk(o.b[0]));
+          if (!oa || !ob || o === s || !isBack(oa) || !isBack(ob)) return false;
+          const oh = new Set([handOf(oa.key), handOf(ob.key)]);
+          return oh.has('L') && oh.has('R') && lenOf(o) > 300;
+        });
+      if (a.group === 'BODY' && b.group === 'BODY' && (cfByRole || cfByCb) && lr && lenOf(s) > 300)
+        out.set(id, {
+          kind: 'closure',
+          note: `suspect — the graph sews the left front to the right front along ${lenOf(s).toFixed(0)} mm: that is the front opening (a closure), drawn closed, not a seam`,
+        });
+      const legs = new Set([a.group, b.group]);
+      if (legs.has('LEG_L') && legs.has('LEG_R') && lenOf(s) > 450)
+        out.set(id, {
+          kind: 'drop',
+          note: `suspect — the graph sews the left leg to the right leg along ${lenOf(s).toFixed(0)} mm; legs meet only at the rise (crotch) — not sewn`,
+        });
+    }
+    // One front opening at most: the longest; any other long left/right seam across the body is
+    // not sewn (side panels sewn to each other across the doll?).
+    const cfs = [...out].filter(([, v]) => v.kind === 'closure');
+    if (cfs.length > 1) {
+      const lenId = (id: string) => {
+        const s = Gx.seams.find((x) => `${x.seam.a}~${x.seam.b}` === id);
+        return s ? lenOf(s) : 0;
+      };
+      cfs.sort((x, y) => lenId(y[0]) - lenId(x[0]));
+      for (const [id] of cfs.slice(1))
+        out.set(id, {
+          kind: 'drop',
+          note: `suspect — a second long left/right seam across the body (${lenId(id).toFixed(0)} mm) besides the centre back and the front opening: the two sides would be sewn to each other — not sewn`,
+        });
+    }
+    return out;
+  };
+  const suspect0 = suspectsIn(
+    groupPieces(inst.graph, facts, { lining: opt.lining, dropSeams: opt.dropSeams }),
+  );
+  // Declared joins (the technologist's order) complete the graph where it has no seam.
+  let graph = inst.graph;
+  const orderNote = new Map<string, string>();
+  const orderJoins: DollReport['orderJoins'] = [];
+  const orderSurface: DollReport['orderSurface'] = [];
+  if (opt.joins?.length) {
+    const notShell = new Set(
+      facts.pieces
+        .filter((p) => {
+          const cloth = p.cloth ?? (liningByName(p.name) ? 'lining' : null);
+          return cloth === 'interfacing' || (cloth === 'lining' && !opt.lining);
+        })
+        .flatMap((p) => [p.pieceKey, p.name]),
+    );
+    const r = completeFromJoins(
+      graph,
+      opt.joins,
+      notShell,
+      new Set([...suspect0].filter(([, v]) => v.kind === 'drop').map(([k]) => k)),
+      facts.category === 'trousers' || facts.category === 'jumpsuit',
+    );
+    graph = { ...graph, chosen: [...graph.chosen, ...r.added.map((x) => x.seam)] };
+    for (const x of r.added) {
+      orderNote.set(`${x.seam.a}~${x.seam.b}`, x.note);
+      orderJoins.push({ join: x.join, seam: `${x.seam.a}~${x.seam.b}`, note: x.note });
+    }
+    for (const l of r.left) warnings.push(`technologist's order — not found: ${l}`);
+    if (opt.debug)
+      warnings.push(
+        `debug: order joins ${opt.joins.length} · added ${r.added.map((x) => `${x.seam.a}~${x.seam.b}`).join(' ')} · by loops ${r.byLoops.map((x) => x.part.join('+')).join(' | ')} · ignored ${[...suspect0.keys()].join(' ')}`,
+      );
+    orderSurface.push(...r.surface);
+    for (const x of r.surface)
+      warnings.push(
+        `technologist's order «${x.join}»: ${x.part.join('+')} is sewn onto a panel's face (a flap / welt / patch), not edge to edge — not drawn as a seam`,
+      );
+  }
   const G = groupPieces(graph, facts, { lining: opt.lining, dropSeams: opt.dropSeams });
   warnings.push(...G.warnings);
+
+  const suspectNote = new Map<string, string>();
+  const suspects: { s: GroupedSeam; note: string }[] = [];
+  {
+    const sus = suspectsIn(G);
+    const keep: GroupedSeam[] = [];
+    for (const s of G.seams) {
+      const id = `${s.seam.a}~${s.seam.b}`;
+      const v = sus.get(id);
+      if (!v || orderNote.has(id)) {
+        keep.push(s);
+        continue;
+      }
+      warnings.push(`${id}: ${v.note}`);
+      if (v.kind === 'closure') {
+        suspectNote.set(id, v.note);
+        G.closures.push(s);
+      } else suspects.push({ s, note: v.note });
+    }
+    G.seams.splice(0, G.seams.length, ...keep);
+  }
 
   // ── meshes ───────────────────────────────────────────────────────────────────────────────
   const area = G.pieces.reduce((s, p) => s + Math.abs(p.geom.areaMm2), 0);
@@ -1127,7 +1260,11 @@ export function solveDoll(input: DollInput): DollReport {
         A,
         B,
         target: closure ? 0.5 : 1,
-        note: closure ? 'closure (buttons / zip) — drawn closed with a small gap' : '',
+        note: closure
+          ? suspectNote.get(`${s.seam.a}~${s.seam.b}`) ??
+            'closure (buttons / zip) — drawn closed with a small gap'
+          : orderNote.get(`${s.seam.a}~${s.seam.b}`) ?? '',
+        fromOrder: orderNote.has(`${s.seam.a}~${s.seam.b}`),
         closure,
         partial: s.seam.kind === 'partial' || Math.min(lenA, lenB) / Math.max(lenA, lenB) < 0.9,
         gap: closure ? 4 : 0,
@@ -1159,7 +1296,7 @@ export function solveDoll(input: DollInput): DollReport {
     w.released = true;
     w.solver.active = false;
     const side = (x: number) => (x > 0 ? "the doll's left" : "the doll's right");
-    w.note = `crosses the doll — ${s.a[0]} sits on ${side(xa)}, ${s.b[0]} on ${side(xb)}: crossed by design (a cross-back) or a wrong pairing? not sewn`;
+    w.note = `wrong reading (direction) — proposed mirror reading: as drawn ${s.a[0]} sits on ${side(xa)} and ${s.b[0]} on ${side(xb)}, the seam would cross the doll (a cross-back by design?) — not sewn as drawn`;
     crossing.push({ s, xa, xb });
   }
   for (const { s, xa, xb } of crossing) {
@@ -1200,7 +1337,7 @@ export function solveDoll(input: DollInput): DollReport {
           origin: 'doll-proposed',
           A: A2,
           B: B2,
-          target: 0.8,
+          target: 1,
           note: `mirror reading of ${s.seam.a} ↔ ${s.seam.b}: ${twin.id} ↔ ${other[0]} (${twin.lenMm.toFixed(0)} ≈ ${B2.len.toFixed(0)} mm) — if the shoulders are not crossed`,
           forceSame: false,
         },
@@ -2124,10 +2261,11 @@ export function solveDoll(input: DollInput): DollReport {
     warnings.push(
       `debug: travel p99 ${travelP99.toFixed(2)} mm · max ${travel.toFixed(1)} mm at ${panels[panelOf[travelV]].key} (ring ${ringOf[travelV]})`,
     );
-  const converged = travel < 1.5;
+  // Settled: 99 % of the points move ≤ 1 mm per 20 passes (the max is reported too).
+  const converged = travelP99 <= 1.0;
   if (!converged)
     warnings.push(
-      `the doll did not settle — points still move ${travel.toFixed(1)} mm per 20 passes; the shape shown is the last frame`,
+      `the doll did not settle — 1 % of the points still move more than ${travelP99.toFixed(1)} mm per 20 passes (max ${travel.toFixed(1)} mm); the shape shown is the last frame`,
     );
   const msSolve = now() - tSolve;
 
@@ -2188,7 +2326,7 @@ export function solveDoll(input: DollInput): DollReport {
     const lenB = w.B.len;
     let state: DollSeamState;
     if (w.released || w.virtual) state = 'open';
-    else if (w.origin === 'doll-proposed') state = 'proposed';
+    else if (w.origin === 'doll-proposed' || w.fromOrder) state = 'proposed';
     else if (twisted) state = 'twisted';
     // Open = a stretch of the seam stays apart (p95), not one corner point that lags.
     else if (m.p95 > 4 || m.max > 15) state = 'open';
@@ -2211,13 +2349,14 @@ export function solveDoll(input: DollInput): DollReport {
       else note = `twisted — ends crossed; sewn the other way round?`;
       if (w.kind === 'partial' && state !== 'closed')
         note += ` · partial (${Math.min(lenA, lenB).toFixed(0)} onto ${Math.max(lenA, lenB).toFixed(0)} mm)`;
-    } else if (w.origin === 'doll-proposed') note += ` · gap after solving ${m.max.toFixed(0)} mm`;
+    } else if (w.origin === 'doll-proposed' || w.fromOrder)
+      note += ` · gap after solving ${m.max.toFixed(0)} mm`;
     seams.push({
       id: w.id,
       a: w.a,
       b: w.b,
-      kind: w.kind,
-      origin: w.origin,
+      kind: w.fromOrder ? 'from-order' : w.kind,
+      origin: w.fromOrder ? 'doll-proposed' : w.origin,
       lenA,
       lenB,
       residualMeanMm: m.mean,
@@ -2252,6 +2391,26 @@ export function solveDoll(input: DollInput): DollReport {
       pathB: new Uint32Array(0),
     });
 
+  for (const { s: sm, note } of suspects)
+    seams.push({
+      id: `${sm.seam.a}~${sm.seam.b}`,
+      a: sm.a,
+      b: sm.b,
+      kind: sm.seam.kind,
+      origin: 'graph',
+      lenA: sm.seam.evidence.aLenMm ?? 0,
+      lenB: sm.seam.evidence.bLenMm ?? 0,
+      residualMeanMm: 0,
+      residualMaxMm: 0,
+      residualP95Mm: 0,
+      stretchPct: 0,
+      twisted: false,
+      state: 'open',
+      released: true,
+      note,
+      pathA: new Uint32Array(0),
+      pathB: new Uint32Array(0),
+    });
   // Free edges facing each other (a seam the pattern has not got): reported open, never solved.
   const freeAll = panels
     .filter((P) => P.group !== 'FLOAT')
@@ -2381,6 +2540,8 @@ export function solveDoll(input: DollInput): DollReport {
       stretchMaxPct: smax * 100,
     },
     warnings,
+    orderJoins,
+    orderSurface,
     honesty: HONESTY,
   };
 }

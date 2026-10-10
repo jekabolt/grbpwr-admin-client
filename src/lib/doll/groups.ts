@@ -55,6 +55,24 @@ const RING_GROUPS = new Set<DollGroupId>([
   'HEMBAND',
 ]);
 const pk = (id: string) => id.slice(0, id.lastIndexOf('#'));
+
+/** Largest piece area per pattern (set by groupPieces / roleOfPiece callers through the graph). */
+const maxAreaOf = new WeakMap<object, number>();
+/**
+ * The piece's role from its name (roles.json), except a «pocket» / «loop» as big as a panel: a name
+ * like FL (left front) reads as a flap — a surface piece a third the size of the biggest panel or
+ * more is not one, and gets no role (it joins the group it is sewn to).
+ */
+export function roleOfPiece(g: PieceGeom, graph?: SeamGraph): string | null {
+  const r = readName(g.name).role;
+  if (r !== 'pocket' && r !== 'loop') return r;
+  let max = graph ? maxAreaOf.get(graph) : undefined;
+  if (graph && max === undefined) {
+    max = Math.max(...graph.pieces.map((p) => Math.abs(p.areaMm2)));
+    maxAreaOf.set(graph, max);
+  }
+  return max !== undefined && Math.abs(g.areaMm2) > 0.33 * max ? null : r;
+}
 const areaOf = (g: PieceGeom) => Math.abs(g.areaMm2);
 const dims = (g: PieceGeom) => {
   let x0 = Infinity;
@@ -93,7 +111,7 @@ export function groupPieces(
   for (const g of graph.pieces) {
     const f = factOf.get(g.pieceKey);
     const name = f?.name ?? g.name;
-    const r = readName(name).role;
+    const r = name === g.name ? roleOfPiece(g, graph) : readName(name).role;
     role.set(g.pieceKey, r);
     const cloth = f?.cloth ?? g.cloth ?? (liningByName(name) ? 'lining' : null);
     if (cloth === 'lining' && !opts.lining) {

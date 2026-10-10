@@ -78,12 +78,37 @@ const ALL = [
     gender: 'MALE',
   },
   {
+    id: 'summer-x2',
+    label: 'summer men — ×2 TEST (SL_R removed, SL_L cut ×2 mirrored)',
+    dxf: resolve(corpus, 'summer men.dxf'),
+    category: 'shirt',
+    gender: 'MALE',
+    x2: { keep: 'SL_L', drop: 'SL_R' },
+  },
+  {
     id: 'card6',
     label: 'prod card 6 SS26-006 shirt with pockets (MAIN)',
     dxf: prodFile('card6-MAIN'),
     category: 'shirt',
     card: '6',
     gender: 'MALE',
+  },
+  {
+    id: 'card6-shuf',
+    label: 'prod card 6 NEGATIVE CONTROL (order inputs shuffled)',
+    dxf: prodFile('card6-MAIN'),
+    category: 'shirt',
+    card: '6',
+    shuffleOps: true,
+    gender: 'MALE',
+  },
+  {
+    id: 'card16',
+    label: 'prod card 16 FW26-001 shirt (MAIN)',
+    dxf: prodFile('card16-MAIN'),
+    category: 'shirt',
+    card: '16',
+    gender: 'FEMALE',
   },
   {
     id: 'card11',
@@ -145,6 +170,7 @@ writeFileSync(
     files,
     plans,
     ...(process.env.DOLL_PASSES ? { maxPasses: Number(process.env.DOLL_PASSES) } : {}),
+    ...(process.env.DOLL_NOOPS ? { noOps: true } : {}),
   }),
 );
 execFileSync(process.execPath, [resolve(dist, 'check.mjs'), specPath, out], { stdio: 'inherit' });
@@ -207,7 +233,7 @@ const gate = (name, ok, detail = '') => {
 const ss26Gates = (id) => {
   const t = txt(id);
   const truth =
-    /TRUTH tube \((\d+);[^)]*?(\d+) beyond ease[^)]*\): residual p95 ([\d.]+) mm [^·]*· local strain max ([\d.]+) %/.exec(
+    /TRUTH tube \((\d+)\): closed (\d+) · proposed (\d+) \(wrong reading \(direction\) — mirror reading closed (\d+) of \d+\) · not closed (\d+); eased \d+ by design, (\d+) beyond ease \+ 2 %: residual p95 ([\d.]+) mm [^·]*· local strain max ([\d.]+) %/.exec(
       t,
     );
   const caps = (t.match(/\[proposed · doll\] (left|right) sleeve cap ↔ armhole/g) ?? []).length;
@@ -216,9 +242,14 @@ const ss26Gates = (id) => {
     /\[open[^\]]*\] [^\n]*(FP_1_R|BP_2_R|BP_1_L|FP_2_L)[^\n]*(FP_1_R|BP_2_R|BP_1_L|FP_2_L)/.test(t);
   return {
     truthClosed:
-      !!truth && Number(truth[2]) === 0 && Number(truth[3]) <= 3 && Number(truth[4]) <= 3,
+      !!truth &&
+      truth[5] === '0' &&
+      truth[3] === truth[4] &&
+      truth[6] === '0' &&
+      Number(truth[7]) <= 3 &&
+      Number(truth[8]) <= 3,
     truthDetail: truth
-      ? `${truth[1]} tube truth seams, gap p95 ${truth[3]} mm, strain max ${truth[4]} %, ${truth[2]} eased beyond ease`
+      ? `${truth[1]} truth seams: ${truth[2]} closed, ${truth[3]} proposed (wrong reading — mirror closed ${truth[4]}), ${truth[5]} not closed; gap p95 ${truth[7]} mm, strain max ${truth[8]} %, ${truth[6]} eased beyond ease`
       : 'no truth line',
     caps,
     stand,
@@ -232,8 +263,22 @@ for (const s of summary) {
     `${Math.round(s.ms)} ms (+ graph ${Math.round(s.msGraph)} ms)`,
   );
   gate(`${s.id}: 0 NaN`, s.nan === 0);
-  gate(`${s.id}: settles`, s.converged);
+  gate(`${s.id}: settles (travel p99 ≤ 1 mm per 20 passes)`, s.converged, `p99 ${s.travelP99} mm`);
+  if (s.lacks > 0 && !s.id.endsWith('-shuf') && !s.id.endsWith('-neg'))
+    gate(
+      `${s.id}: declared joins the graph lacks — doll proposes ≥ 70 %`,
+      s.proposed >= 0.7 * s.lacks,
+      `${s.proposed} of ${s.lacks} (${Math.round((100 * s.proposed) / s.lacks)} %), ${s.fromOrderClosed}/${s.fromOrder} from the order closed`,
+    );
 }
+const real6 = summary.find((s) => s.id === 'card6');
+const shuf6 = summary.find((s) => s.id === 'card6-shuf');
+if (real6 && shuf6)
+  gate(
+    'NEG card6-shuf: shuffled order inputs → fewer seams proposed from the order close',
+    shuf6.fromOrderClosed < real6.fromOrderClosed,
+    `real ${real6.fromOrderClosed} closed of ${real6.fromOrder} · shuffled ${shuf6.fromOrderClosed} of ${shuf6.fromOrder}`,
+  );
 if (summary.some((s) => s.id === 'ss26')) {
   const g = ss26Gates('ss26');
   gate(

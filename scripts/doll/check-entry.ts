@@ -8,9 +8,9 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { readSeamGraph } from '../../src/lib/assembly-skeleton/pipeline';
+import { proposeSkeleton, readSeamGraph } from '../../src/lib/assembly-skeleton/pipeline';
 import type { SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
-import { solveDoll } from '../../src/lib/doll';
+import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
 
@@ -23,11 +23,16 @@ type FileSpec = {
   card?: string;
   gender?: 'MALE' | 'FEMALE';
   drop?: string[];
+  shuffleOps?: boolean;
+  /** Synthetic ×2 test: `drop` is removed from the pattern and `keep` is cut ×2 mirrored instead. */
+  x2?: { keep: string; drop: string };
+  noOps?: boolean;
 };
 
 const [specPath, outDir] = process.argv.slice(2);
 if (process.env.DOLL_NOPROXY) (globalThis as { __DOLL_NOPROXY?: boolean }).__DOLL_NOPROXY = true;
 const spec = JSON.parse(await readFile(specPath, 'utf8')) as {
+  noOps?: boolean;
   files: FileSpec[];
   plans: string;
   maxPasses?: number;
@@ -81,15 +86,73 @@ for (const f of spec.files) {
   const tParse = performance.now();
   const { facts, origin } = await quiet(() => loadFacts(bytes, 'M', f.category));
   const tGraph = performance.now();
-  const graph = await quiet(() => readSeamGraph(facts));
+  let graph = await quiet(() => readSeamGraph(facts));
+  if (f.x2) {
+    const { keep, drop } = f.x2;
+    const pk0 = (id: string) => id.slice(0, id.lastIndexOf('#'));
+    const touches = (sc: { a: string; b: string }) => pk0(sc.a) === drop || pk0(sc.b) === drop;
+    graph = {
+      ...graph,
+      pieces: graph.pieces.filter((p) => p.pieceKey !== drop),
+      chosen: graph.chosen.filter((sc) => !touches(sc)),
+      rejected: graph.rejected.filter((sc) => !touches(sc)),
+      components: graph.components.map((c) => c.filter((k) => k !== drop)),
+    };
+    facts.pieces = facts.pieces
+      .filter((p) => p.pieceKey !== drop)
+      .map((p) =>
+        p.pieceKey === keep ? { ...p, piecesPerGarment: 2, cutSymmetry: 'MIRRORED' } : p,
+      );
+  }
   const msGraph = performance.now() - tGraph;
   const msParse = tGraph - tParse;
+  // Declared joins: the card's technologist order (piece lineKeys → DXF names), else the
+  // skeleton's own steps. NEGATIVE CONTROL: shuffled inputs (each piece key replaced by another).
+  const card = f.card ? cards[f.card] : undefined;
+  const inDxf = new Set(graph.pieces.map((p) => p.pieceKey));
+  let ops: DeclaredOp[] = [];
+  let pieceOf: (k: string) => string | null = () => null;
+  let opsSource = '';
+  if (spec.noOps) f.noOps = true;
+  if (card && !f.noOps) {
+    const nameOf = new Map(card.pieces.map((p) => [p[0], p[1]]));
+    const keys = card.pieces.map((p) => p[0]);
+    const shuffled = new Map(keys.map((k, i) => [k, keys[(i * 7 + 3) % keys.length]]));
+    pieceOf = (k) => {
+      const kk = f.shuffleOps ? shuffled.get(k) ?? k : k;
+      const n = nameOf.get(kk);
+      return n && inDxf.has(n) ? n : null;
+    };
+    ops = card.ops.map(([inputs, output, , type]) => ({ inputs: inputs.split('+'), output, type }));
+    opsSource = f.shuffleOps
+      ? `card ${f.card} order with SHUFFLED inputs`
+      : `card ${f.card} technologist's order`;
+  } else if (!f.noOps) {
+    const prop = proposeSkeleton(facts, {
+      zoneOf: () => '',
+      suggestUnitCode: (_z, taken) => `U${taken.size + 1}`,
+      checkAssembly: () => ({ violations: [], release: [] }),
+    });
+    const keyName = new Map(facts.pieces.map((p) => [p.pieceKey, p.name]));
+    pieceOf = (k) => {
+      const n = keyName.get(k);
+      return n && inDxf.has(n) ? n : inDxf.has(k) ? k : null;
+    };
+    ops = prop.steps.map((st) => ({
+      inputs: st.inputs,
+      output: st.outputUnitKey,
+      type: st.operationType,
+    }));
+    opsSource = "the skeleton's own units (no card order)";
+  }
+  const joins = joinsFromOps(ops, pieceOf);
   const report: DollReport = solveDoll({
     graph,
     facts,
     options: {
       debug: true,
       dropSeams: f.drop,
+      joins,
       ...(spec.maxPasses !== undefined ? { maxPasses: spec.maxPasses } : {}),
     },
   });
@@ -119,70 +182,66 @@ for (const f of spec.files) {
     }
   }
 
-  // ── technologist's ops (prod cards) ──
+  // ── declared joins vs graph vs doll ──
+  // Per operation part: «graph» = the graph already sews it to another part of the same operation;
+  // otherwise it is LACKING, and «doll» = the doll links it (proposed from the order, or a free-loop
+  // proposal such as cap ↔ armhole), «none» = still not joined.
   const opsLines: string[] = [];
-  if (f.card && cards[f.card]) {
-    const card = cards[f.card];
-    const nameOf = new Map(card.pieces.map((p) => [p[0], p[1]]));
-    const units = new Map<string, string[]>();
-    const inDxf = new Set(graph.pieces.map((p) => p.pieceKey));
-    const leaves = (key: string): string[] => {
-      if (nameOf.has(key)) return [nameOf.get(key)!];
-      return units.get(key) ?? [];
+  let lacks = 0;
+  let proposedN = 0;
+  const graphLinks = new Set<string>();
+  for (const sc of graph.chosen)
+    for (const a of (sc.aParts ?? [sc.a]).map(pk))
+      for (const b of (sc.bParts ?? [sc.b]).map(pk)) graphLinks.add(`${a}|${b}`).add(`${b}|${a}`);
+  const dollLinks = new Set<string>();
+  for (const sm of report.seams)
+    if (sm.origin === 'doll-proposed' && sm.kind !== 'facing-free' && sm.state !== 'open')
+      for (const a of sm.a.map(pk))
+        for (const b of sm.b.map(pk)) dollLinks.add(`${a}|${b}`).add(`${b}|${a}`);
+  const touches = (L: Set<string>, X: string[], Y: string[]) =>
+    X.some((a) => Y.some((b) => L.has(`${a}|${b}`)));
+  // Only pieces the doll draws count (lining is off at level 0, pockets are not placed).
+  const drawn = new Set(report.panels.flatMap((p) => [p.pieceKey, ...p.layers]));
+  for (const J0 of joins) {
+    const J = {
+      ...J0,
+      parts: J0.parts.map((X) => X.filter((k) => drawn.has(k))).filter((X) => X.length),
     };
-    for (const [inputs, out, , type] of card.ops) {
-      if (type !== 'MACHINE' || !out) continue;
-      const parts = inputs.split('+').map((k) => leaves(k).filter((n) => inDxf.has(n)));
-      units.set(out, [...new Set([...(units.get(out) ?? []), ...parts.flat()])]);
-      const present = parts.filter((p) => p.length);
-      if (present.length < 2) continue;
-      const linked = (
-        x: string[],
-        y: string[],
-        kinds: (s: DollReport['seams'][number]) => boolean,
-      ) =>
-        report.seams.some(
-          (s) =>
-            kinds(s) &&
-            ((s.a.some((e) => x.includes(pk(e))) && s.b.some((e) => y.includes(pk(e)))) ||
-              (s.a.some((e) => y.includes(pk(e))) && s.b.some((e) => x.includes(pk(e))))),
+    if (J.parts.length < 2) continue;
+    const rows: string[] = [];
+    const isSurface = (X: string[]) =>
+      report.orderSurface.some((o) => o.join === J.label && X.every((k) => o.part.includes(k)));
+    J.parts.forEach((X, i) => {
+      const others = J.parts.filter((_, k) => k !== i);
+      if (isSurface(X) || others.every(isSurface)) {
+        rows.push(
+          `${X.join('+')}: sewn onto a panel's face (flap / welt / patch) — no edge seam, not counted`,
         );
-      const pairs: string[] = [];
-      for (let i = 0; i < present.length; i++)
-        for (let j = i + 1; j < present.length; j++) {
-          const x = present[i];
-          const y = present[j];
-          const inGraph = graph.chosen.some((s) => {
-            const a = (s.aParts ?? [s.a]).map(pk);
-            const b = (s.bParts ?? [s.b]).map(pk);
-            return (
-              (a.some((k) => x.includes(k)) && b.some((k) => y.includes(k))) ||
-              (a.some((k) => y.includes(k)) && b.some((k) => x.includes(k)))
-            );
-          });
-          const doll = linked(
-            x,
-            y,
-            (s) => s.origin === 'doll-proposed' && s.kind !== 'facing-free',
-          );
-          const closedDoll = linked(x, y, (s) => s.origin === 'graph' && s.state !== 'open');
-          const tag = inGraph
-            ? closedDoll
-              ? 'graph ✓ closed'
-              : 'graph, doll left it open'
-            : doll
-              ? 'graph ✗ · doll PROPOSES it'
-              : 'graph ✗ · doll ✗';
-          pairs.push(`${x.join('+')} ⟷ ${y.join('+')}: ${tag}`);
-        }
-      opsLines.push(
-        `  «${out}» (${inputs
-          .split('+')
-          .map((k) => nameOf.get(k) ?? k)
-          .join(' + ')})\n      ${pairs.join('\n      ')}`,
+        return;
+      }
+      const g = others.some((Y) => touches(graphLinks, X, Y));
+      if (g) {
+        rows.push(`${X.join('+')}: graph ✓`);
+        return;
+      }
+      lacks++;
+      const d = others.some((Y) => touches(dollLinks, X, Y));
+      if (d) proposedN++;
+      const how = report.orderJoins.filter(
+        (o) => o.join === J.label && X.some((k) => o.seam.includes(`${k}#`)),
       );
-    }
+      rows.push(
+        `${X.join('+')}: graph ✗ · ${d ? `doll PROPOSES${how.length ? ` — ${how.map((o) => o.note).join('; ')}` : ' (free-loop proposal)'}` : 'doll ✗'}`,
+      );
+    });
+    opsLines.push(
+      `  «${J.label}» (${J.parts.map((x) => x.join('+')).join(' | ')})\n      ${rows.join('\n      ')}`,
+    );
   }
+  if (joins.length)
+    opsLines.unshift(
+      `source: ${opsSource} · ${joins.length} joins · parts the graph lacks: ${lacks} · of those the doll proposes: ${proposedN} (${lacks ? Math.round((100 * proposedN) / lacks) : 100} %)`,
+    );
 
   // ── words ──
   const S = report.stats;
@@ -209,12 +268,19 @@ for (const f of spec.files) {
     lines.push(
       `TRUTH seams (${T.length}): residual max ${fmt(worstR)} mm · mean ${fmt(T.reduce((x, s) => x + s.residualMeanMm, 0) / Math.max(1, T.length))} mm · local strain max ${fmt(worstS)} %`,
     );
-    // The body tube gate: truth seams the doll can sew as drawn. Seams that cross the doll (a
-    // shoulder drawn to the other side) are reported apart — their mirror reading is proposed —
-    // and eased seams (pleats, ease) are held to strain ≤ ease + 2 %, since paper cannot gather.
-    const crossing = T.filter((s) => /crosses the doll/.test(s.note));
+    // The body tube gate. A truth seam that would cross the doll as drawn (a shoulder read in the
+    // wrong direction) counts as PROPOSED — its mirror reading is what is sewn — never as closed.
+    // Eased seams (pleats, ease) are held to strain ≤ ease + 2 %, since paper cannot gather.
+    const crossing = T.filter((s) => /wrong reading \(direction\)/.test(s.note));
+    const mirrors = report.seams.filter(
+      (s) =>
+        s.origin === 'doll-proposed' &&
+        crossing.some((c) => s.note.startsWith(`mirror reading of ${c.id.replace('~', ' ↔ ')}`)),
+    );
+    const mirrorOk = mirrors.filter((s) => s.residualP95Mm <= 3 && s.state !== 'open').length;
     const eased = T.filter((s) => s.state === 'eased');
     const tube = T.filter((s) => !crossing.includes(s));
+    const notClosed = tube.filter((s) => s.state !== 'closed' && s.state !== 'eased').length;
     const tubeR = Math.max(0, ...tube.map((s) => s.residualP95Mm));
     const tubeMax = Math.max(0, ...tube.map((s) => s.residualMaxMm));
     const tubeS = Math.max(0, ...tube.filter((s) => !eased.includes(s)).map((s) => s.stretchPct));
@@ -223,7 +289,7 @@ for (const f of spec.files) {
       return !m || s.stretchPct > Number(m[1]) + 2;
     }).length;
     lines.push(
-      `TRUTH tube (${tube.length}; ${crossing.length} crossing the doll reported apart; ${eased.length} eased by design, ${easedBad} beyond ease + 2 %): residual p95 ${fmt(tubeR)} mm (worst single point ${fmt(tubeMax)} mm) · local strain max ${fmt(tubeS)} %`,
+      `TRUTH tube (${T.length}): closed ${tube.length - notClosed} · proposed ${crossing.length} (wrong reading (direction) — mirror reading closed ${mirrorOk} of ${crossing.length}) · not closed ${notClosed}; eased ${eased.length} by design, ${easedBad} beyond ease + 2 %: residual p95 ${fmt(tubeR)} mm (worst single point ${fmt(tubeMax)} mm) · local strain max ${fmt(tubeS)} %`,
     );
   }
   lines.push('');
@@ -247,8 +313,7 @@ for (const f of spec.files) {
       (l) => `- ${l.label}: ${fmt(l.lenMm, 0)} mm${l.closed ? '' : ' (open run)'}`,
     ),
   );
-  if (opsLines.length)
-    lines.push('', `## technologist's joins (card ${f.card}) vs graph vs doll`, ...opsLines);
+  if (opsLines.length) lines.push('', `## declared joins vs graph vs doll`, ...opsLines);
   // Sanity vs a fit model (never used as the proxy).
   const torso = report.proxies.find((p) => p.kind === 'torso');
   const fm = fitModels.find(
@@ -316,6 +381,12 @@ for (const f of spec.files) {
     nan: S.nan,
     converged: S.converged,
     p99: S.stretchP99Pct,
+    lacks,
+    proposed: proposedN,
+    fromOrder: report.seams.filter((x) => x.kind === 'from-order').length,
+    fromOrderClosed: report.seams.filter((x) => x.kind === 'from-order' && x.state !== 'open')
+      .length,
+    travelP99: Number(/travel p99 ([\d.]+)/.exec(report.warnings.join('\n'))?.[1] ?? NaN),
   });
 }
 await writeFile(resolve(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
