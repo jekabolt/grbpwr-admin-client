@@ -331,8 +331,9 @@ const JACKET_WORDS = new Set([
 
 /**
  * A card with NO category still has piece names — read only for DISCRIMINATING evidence:
- *   • trousers — a fly, or a crotch / gusset / leg piece (a waistband on left and right panels is
- *     also a skirt);
+ *   • trousers — a fly, or a crotch / gusset / leg piece; or a waistband on LEFT and RIGHT fronts
+ *     AND backs with no sleeve, collar or hood — a skirt's too, but a bottom either way: read as
+ *     trousers (back, front, then the two in one) and the panel says it was read from the pieces;
  *   • hoodie — sleeves and a hood;
  *   • shirt — sleeves with a placket (a collar or cuffs alone are a dress's too); a jacket (lined
  *     template) only when the card is lined AND has a jacket's own pieces (lapel, undercollar) — a
@@ -351,9 +352,12 @@ export function skeletonCategoryFromPieces(
     return { category: 'generic', why: 'an auxiliary item, not a garment', evidence: true };
   const roles = new Set<string>();
   const words = new Set<string>();
+  /** The hands each role comes in (FP_L, FP_R → front: L, R). */
+  const hands = new Map<string, Set<string>>();
   for (const n of pieceNames) {
     const r = readName(n ?? '');
     if (r.role) roles.add(r.role);
+    if (r.role && r.hand) hands.set(r.role, (hands.get(r.role) ?? new Set()).add(r.hand));
     for (const t of nameTokens(n ?? '')) words.add(t.replace(/^\d+|\d+$/g, ''));
   }
   const has = (r: string) => roles.has(r);
@@ -362,6 +366,16 @@ export function skeletonCategoryFromPieces(
   if (has('fly')) return found('trousers', 'a fly');
   if (any(CROTCH_WORDS)) return found('trousers', 'a crotch or leg piece');
   if (has('skirt')) return found('skirt', 'a skirt panel');
+  const pair = (r: string) => (hands.get(r)?.size ?? 0) === 2;
+  if (
+    has('waistband') &&
+    pair('front') &&
+    pair('back') &&
+    !has('sleeve') &&
+    !has('collar') &&
+    !has('hood')
+  )
+    return found('trousers', 'a waistband on left and right fronts and backs, no sleeve or collar');
   if (has('sleeve')) {
     if (has('hood')) return found('hoodie', 'sleeves and a hood');
     // A collar or cuffs alone are a dress's too, and a facing is a lined shirt's too: a jacket needs
