@@ -138,6 +138,8 @@ export type CardInput = {
   sizeNames: Record<string, string>;
   /** --ai-answers: the raw JSON SuggestAssemblySkeleton returned for this card's request. */
   aiAnswer?: Json;
+  /** --examples: house-style trees of OTHER cards sent with this card's AI request (few-shot). */
+  aiExamples?: Json[];
 };
 
 // ── the DXF chain (usePieceShapes) ─────────────────────────────────────────────────────────────
@@ -782,6 +784,32 @@ export async function runCard(input: CardInput) {
     const cmp = compareTruth(steps, existingOps, pieceKeys, nameOfPiece);
     if (cmp) out.compare = cmp;
 
+    // 5a. the technologist's tree as a HOUSE-STYLE example in the wire shape of
+    // SuggestAssemblySkeletonRequest.examples (names, not keys): parts are piece names or the names of
+    // earlier units of the same tree. --examples feeds these to other cards' requests.
+    if (cmp) {
+      const unitName = new Map<string, string>();
+      const units: { name: string; parts: string[] }[] = [];
+      for (const o of existingOps) {
+        const key = (o.outputUnitKey ?? '').trim();
+        if (!key) continue;
+        const name = (o.outputUnitName ?? '').trim() || key;
+        const parts = (o.inputKeys ?? [])
+          .filter(Boolean)
+          .map((k) => (pieceKeys.has(k) ? nameOfPiece.get(k) || '' : unitName.get(k) || ''));
+        unitName.set(key, name);
+        if (parts.length >= 2 && parts.every(Boolean))
+          units.push({ name, parts: parts.slice(0, 16) });
+      }
+      out.houseExample = {
+        label: [built.facts.category, String((input.card as Json).techCard?.name ?? '')]
+          .filter(Boolean)
+          .join(' · ')
+          .slice(0, 80),
+        units: units.slice(0, 60),
+      };
+    }
+
     // 5b. the ORACLE of the structural lever: the technologist's own units fed as hints
     // (SkeletonOptions.units, what «use AI structure» passes) — how much of their tree the engine
     // rebuilds when the structure is right. A ceiling for the AI's units, not a score of the AI.
@@ -973,6 +1001,7 @@ export async function runCard(input: CardInput) {
       });
       if (!r.ok) out.ai = { ok: false, why: r.why };
       else {
+        if (input.aiExamples?.length) (r.request as Json).examples = input.aiExamples;
         aiDump = await aiWire(r.request, r.signatures);
         const req = r.request as Json;
         out.ai = {
