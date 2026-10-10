@@ -1,0 +1,141 @@
+{
+  "id": "skirt",
+  "category": "skirt",
+  "garmentName": "Skirt",
+  "_note": "Skirt: pockets, waistband, facings built first → pockets set on the panels → panels joined at the centre seams → side seams → zipper → waistband or waist facing → elastic → belt loops → lining bagged in (if lined) → hem → closures → final press.",
+  "pressOpen": true,
+  "pressFlat": false,
+  "mergeHands": ["front", "back", "yoke", "waistband", "skirt"],
+  "fuseRoles": ["waistband", "facing", "pocket", "fly"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Pockets, waistband, facings",
+      "roles": ["pocket", "fly", "waistband", "facing", "loop", "placket"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "skirt", "*"]
+    },
+    {
+      "id": "sides",
+      "op": "combine",
+      "label": "Join side seams",
+      "roles": ["front", "back", "yoke", "side", "skirt"],
+      "as": "body",
+      "name": "Skirt body",
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "waistband",
+      "op": "attach",
+      "label": "Attach the waistband",
+      "roles": ["waistband"],
+      "to": ["body", "skirt"],
+      "together": true,
+      "name": "Skirt with waistband",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "facings",
+      "op": "attach",
+      "label": "Set the waist facing",
+      "roles": ["facing"],
+      "to": ["body", "skirt"],
+      "together": true,
+      "name": "Skirt with facing",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "loops",
+      "op": "attach",
+      "label": "Attach belt loops",
+      "roles": ["loop"],
+      "to": ["body", "skirt"],
+      "together": true,
+      "name": "Skirt with belt loops",
+      "zone": "WAIST"
+    },
+    {
+      "id": "bag",
+      "op": "bag",
+      "label": "Bag the lining into the shell",
+      "roles": [],
+      "name": "Skirt",
+      "zone": "LINING",
+      "press": "flat"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM"
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "drawcord",
+      "op": "bom",
+      "label": "Thread the drawcord",
+      "when": "drawcord",
+      "operationType": "HANDWORK",
+      "zone": "WAIST"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

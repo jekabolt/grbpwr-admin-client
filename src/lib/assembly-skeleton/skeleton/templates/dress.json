@@ -1,0 +1,180 @@
+{
+  "id": "dress",
+  "category": "dress",
+  "garmentName": "Dress",
+  "_note": "Dress with a waist seam or cut in one: subassemblies → panels (bodice fronts/backs, skirt panels — the skirt's left, right and centre parts become one skirt) → shoulders + sides of the bodice → collar or neckline → sleeves → cuffs → the skirt joined to the bodice at the waist → facings → zipper → lining bagged in (if lined) → hem → closures → final press. A dress cut in one has no skirt pieces and simply skips the waist join.",
+  "pressOpen": true,
+  "pressFlat": false,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband", "skirt"],
+  "fuseRoles": ["collar", "stand", "facing", "cuff", "placket"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Collar, cuffs, pockets, facings",
+      "roles": [
+        "collar",
+        "stand",
+        "hood",
+        "rib",
+        "cuff",
+        "pocket",
+        "placket",
+        "fly",
+        "facing",
+        "waistband",
+        "loop"
+      ]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Bodice and skirt panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "skirt", "*"]
+    },
+    {
+      "id": "bodice",
+      "op": "combine",
+      "label": "Join shoulders and sides of the bodice",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Bodice",
+      "zone": "SHOULDER",
+      "press": "open"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set the collar or neckline",
+      "roles": ["collar", "stand", "hood", "rib"],
+      "to": ["body"],
+      "together": true,
+      "name": "Bodice with collar",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Bodice with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "cuffs",
+      "op": "attach",
+      "label": "Attach cuffs",
+      "roles": ["cuff"],
+      "to": ["body"],
+      "together": true,
+      "name": "Bodice with cuffs",
+      "zone": "SLEEVE",
+      "press": "flat"
+    },
+    {
+      "id": "skirt",
+      "op": "attach",
+      "label": "Join the skirt to the bodice at the waist",
+      "roles": ["skirt"],
+      "to": ["body"],
+      "together": true,
+      "name": "Bodice with skirt",
+      "zone": "WAIST",
+      "press": "open"
+    },
+    {
+      "id": "waistband",
+      "op": "attach",
+      "label": "Attach the waistband or belt",
+      "roles": ["waistband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Dress with waistband",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "facings",
+      "op": "attach",
+      "label": "Set the facings",
+      "roles": ["facing"],
+      "to": ["body"],
+      "together": true,
+      "name": "Dress with facings",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "bag",
+      "op": "bag",
+      "label": "Bag the lining into the shell",
+      "roles": ["facing"],
+      "name": "Dress",
+      "zone": "LINING",
+      "press": "flat"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM"
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

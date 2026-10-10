@@ -1,0 +1,129 @@
+{
+  "id": "coat-lined",
+  "category": "coat-lined",
+  "garmentName": "Coat",
+  "_note": "Lined coat (parka, trench, overcoat): the lined jacket's order — shell and lining as two parallel subtrees, facings onto the lining, the lining bagged into the shell — with the coat as the finished garment. Ratify step by step.",
+  "pressOpen": true,
+  "pressFlat": false,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood"],
+  "fuseRoles": ["front", "collar", "stand", "facing", "pocket", "cuff"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Collar, pockets, flaps, facings",
+      "roles": ["collar", "stand", "hood", "pocket", "fly", "facing", "cuff", "placket"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Shell and lining panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "body",
+      "op": "combine",
+      "label": "Join shoulders and sides",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set the collar",
+      "roles": ["collar", "stand", "hood"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with collar",
+      "zone": "COLLAR",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "facings",
+      "op": "attach",
+      "label": "Sew facings to the lining",
+      "roles": ["facing"],
+      "to": ["body"],
+      "targetTree": "lining",
+      "together": true,
+      "name": "Lining with facings",
+      "zone": "LINING",
+      "press": "open"
+    },
+    {
+      "id": "bag",
+      "op": "bag",
+      "label": "Bag the lining into the shell",
+      "roles": ["facing"],
+      "name": "Coat",
+      "zone": "LINING",
+      "press": "flat"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Close the lining hem",
+      "roles": ["body"],
+      "zone": "HEM",
+      "operationType": "HANDWORK"
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

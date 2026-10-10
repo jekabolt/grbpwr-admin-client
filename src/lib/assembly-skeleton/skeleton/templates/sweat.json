@@ -1,0 +1,143 @@
+{
+  "id": "sweat",
+  "category": "sweat",
+  "garmentName": "Sweatshirt",
+  "_note": "Knit sweatshirt / hoodie: shoulders \u2192 neck rib or hood \u2192 sleeves set flat \u2192 side + underarm in one \u2192 cuffs \u2192 hem band (or a plain hem when there is none) \u2192 drawcord \u2192 final press.",
+  "pressOpen": false,
+  "pressFlat": false,
+  "mergeHands": ["back", "yoke", "collar", "stand", "hood", "rib", "hemband"],
+  "fuseRoles": [],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Subassemblies",
+      "roles": ["rib", "hood", "collar", "stand", "cuff", "hemband", "pocket", "placket"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back panels",
+      "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "shoulders",
+      "op": "combine",
+      "label": "Join shoulders",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "SHOULDER",
+      "press": "open"
+    },
+    {
+      "id": "close-rib",
+      "op": "process",
+      "label": "Close the neck rib into a ring",
+      "roles": ["rib"],
+      "zone": "NECKLINE"
+    },
+    {
+      "id": "neckline",
+      "op": "attach",
+      "label": "Set the neck rib or hood",
+      "roles": ["rib", "hood", "collar", "stand"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with neckline",
+      "zone": "NECKLINE",
+      "press": "flat"
+    },
+    {
+      "id": "sleeves",
+      "op": "attach",
+      "label": "Set sleeves",
+      "roles": ["sleeve"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with sleeves",
+      "zone": "SLEEVE",
+      "press": "open"
+    },
+    {
+      "id": "sides",
+      "op": "process",
+      "label": "Close side and underarm seams",
+      "roles": ["body"],
+      "zone": "OUTER"
+    },
+    {
+      "id": "cuffs",
+      "op": "attach",
+      "label": "Attach cuffs",
+      "roles": ["cuff"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with cuffs",
+      "zone": "SLEEVE",
+      "press": "none"
+    },
+    {
+      "id": "sleeve-hem",
+      "op": "process",
+      "label": "Hem sleeves",
+      "roles": ["body"],
+      "zone": "SLEEVE",
+      "unless": ["cuff"]
+    },
+    {
+      "id": "hem-band",
+      "op": "attach",
+      "label": "Attach the hem band",
+      "roles": ["hemband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with hem band",
+      "zone": "HEM"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM",
+      "unless": ["hemband"]
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "drawcord",
+      "op": "bom",
+      "label": "Thread the drawcord",
+      "when": "drawcord",
+      "operationType": "HANDWORK",
+      "zone": "COLLAR"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}

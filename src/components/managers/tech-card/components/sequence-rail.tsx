@@ -84,6 +84,7 @@ function RailStep({
   onDropPiece,
   readPieceDrag,
   workCatalog,
+  draft = false,
 }: {
   uid: string;
   index: number;
@@ -116,6 +117,11 @@ function RailStep({
    * на одном экране из семи. `undefined` пишется вслух.
    */
   workCatalog: WorkCatalog | undefined;
+  /**
+   * Шаг пришёл из каркаса сборки и рука его ещё не трогала. Состояние СЕССИИ, а не данных: в
+   * записи шага следа нет, и после перезагрузки это обычный шаг.
+   */
+  draft?: boolean;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -266,6 +272,18 @@ function RailStep({
             >
               {label}
             </Text>
+            {draft && (
+              <Text
+                size='nano'
+                variant='label'
+                component='span'
+                className='shrink-0 uppercase'
+                data-rail-draft={index}
+                title='suggested by the assembly skeleton — the mark goes once you change the step, and it is never saved'
+              >
+                draft
+              </Text>
+            )}
             {(hasError || assemblyBroken) && (
               <Text
                 size='nano'
@@ -331,6 +349,7 @@ export function SequenceRail({
   onMoveOperation,
   readPieceDrag,
   workCatalog,
+  draftIds,
 }: {
   /**
    * Мета массива строк из `useFieldArray` владельца — СВОЕГО экземпляра здесь нет и быть не может.
@@ -355,6 +374,8 @@ export function SequenceRail({
   /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. Обязателен,
    * как аргументы композитора: «рельс без каталога» — решение вызывателя, а не забытый проп. */
   workCatalog: WorkCatalog | undefined;
+  /** Id строк (`fields[i].id`), пришедших из каркаса и ещё не тронутых рукой. */
+  draftIds?: ReadonlySet<string>;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -401,6 +422,7 @@ export function SequenceRail({
                 onDropPiece={onDropPiece}
                 readPieceDrag={readPieceDrag}
                 workCatalog={workCatalog}
+                draft={draftIds?.has(f.id) ?? false}
               />
             </Fragment>
           ))}

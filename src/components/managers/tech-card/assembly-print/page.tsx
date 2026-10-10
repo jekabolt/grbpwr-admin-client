@@ -17,8 +17,8 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -32,8 +32,18 @@ import { skuToSeasonLabel } from '../components/season-util';
 import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
+import { CardUnitPicturesProvider } from '../components/card-unit-pictures';
+import { firstColorwayCloth, useCardCategoryNames } from '../components/skeleton-card-inputs';
+import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
-import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
+import {
+  typesetMap,
+  typesetRoute,
+  type PaperDoc,
+  type SheetMeta,
+  type ShapeLookup,
+  type UnionLookup,
+} from './paper';
 import {
   exportPaperPdf,
   isPaper,
@@ -187,9 +197,15 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
+  // Пиктограммы узлов (полоса C) — только когда их поставили выше по дереву; сегодня никто.
+  const unitPictures = useUnitPictures();
+  const unionOf = useMemo<UnionLookup>(
+    () => (unitPictures ? (key) => unitPictures.get(key) ?? null : null),
+    [unitPictures],
+  );
   const doc = useMemo(() => {
     const set = (m: SheetMeta) =>
-      form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
+      form === 'map' ? typesetMap(M, m, shapeOf, unionOf) : typesetRoute(M, m, shapeOf, unionOf);
     let d = set(meta);
     if (!target) return d;
     // Подвал масштабированного листа длиннее (размер файла, процент, формат и число страниц) и может
@@ -208,7 +224,7 @@ function Document({
     if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
       d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
-  }, [M, meta, shapeOf, form, target]);
+  }, [M, meta, shapeOf, unionOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
   // Экран и ⌘P показывают ФАЙЛ: те же страницы в физическом размере, разбивка — сеткой склейки.
   const out = pdfSize(doc, target);
@@ -217,6 +233,40 @@ function Document({
       <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
       <PaperPages doc={doc} size={out} gapMm={PAGE_GAP_MM} />
     </>
+  );
+}
+
+/**
+ * Пиктограммы узлов на бумаге — той же арифметикой и по тем же контурам, что на экране
+ * (`CardUnitPicturesProvider`); выключаются тем же выбором «силуэты», что и силуэты деталей. Без
+ * DXF карта пустая, и лист набирается как раньше.
+ */
+function PrintUnitPictures({
+  enabled,
+  techCard,
+  children,
+}: {
+  enabled: boolean;
+  techCard: common_TechCard;
+  children: ReactNode;
+}) {
+  const { shapeByKey, hasDxf } = usePieceShapes(enabled);
+  // The SAME inputs the construction tab gives its pictures — cloth of the first colourway and the
+  // category chain — so the paper draws the screen's graph (lining apart from the shell, the
+  // garment's own template), not a cloth-less generic one.
+  const bomItems = useWatch<TechCardFormData>({ name: 'bomItems' }) as
+    | TechCardFormData['bomItems']
+    | undefined;
+  const cloth = useMemo(() => firstColorwayCloth(techCard, bomItems), [techCard, bomItems]);
+  const categoryNames = useCardCategoryNames();
+  return (
+    <CardUnitPicturesProvider
+      shapes={enabled && hasDxf ? shapeByKey : null}
+      cloth={cloth}
+      categoryNames={categoryNames}
+    >
+      {children}
+    </CardUnitPicturesProvider>
   );
 }
 
@@ -584,18 +634,20 @@ export function TechCardAssemblyPrint() {
             style={{ transform: `scale(${k})`, width: `${stageWmm}mm` }}
           >
             <FormProvider {...methods}>
-              <Document
-                techCard={techCard}
-                form={form}
-                shapes={shapes}
-                workCatalog={workCatalog}
-                meta={meta}
-                onDeps={setDocDeps}
-                onShapesAvailable={setShapesAvailable}
-                onDoc={onDoc}
-                docKey={currentKey}
-                target={target}
-              />
+              <PrintUnitPictures enabled={shapes} techCard={techCard}>
+                <Document
+                  techCard={techCard}
+                  form={form}
+                  shapes={shapes}
+                  workCatalog={workCatalog}
+                  meta={meta}
+                  onDeps={setDocDeps}
+                  onShapesAvailable={setShapesAvailable}
+                  onDoc={onDoc}
+                  docKey={currentKey}
+                  target={target}
+                />
+              </PrintUnitPictures>
             </FormProvider>
           </div>
         </div>

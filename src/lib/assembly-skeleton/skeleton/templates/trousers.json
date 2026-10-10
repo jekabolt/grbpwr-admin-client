@@ -1,0 +1,141 @@
+{
+  "id": "trousers",
+  "category": "trousers",
+  "garmentName": "Trousers",
+  "_note": "Trousers: pockets, fly and waistband built first \u2192 pockets set on the fronts \u2192 side seams per leg \u2192 inseam \u2192 crotch \u2192 zipper \u2192 waistband \u2192 belt loops \u2192 hem \u2192 buttons \u2192 final press. Back legs stay separate until the crotch seam (back is NOT merged across hands here).",
+  "pressOpen": true,
+  "pressFlat": false,
+  "mergeHands": ["waistband", "yoke"],
+  "fuseRoles": ["waistband", "fly", "pocket", "facing"],
+  "stages": [
+    {
+      "id": "fuse",
+      "op": "fuse",
+      "label": "Fuse interlining"
+    },
+    {
+      "id": "subassemblies",
+      "op": "units",
+      "label": "Pockets, fly, waistband",
+      "roles": ["pocket", "fly", "waistband", "facing", "loop"]
+    },
+    {
+      "id": "panels",
+      "op": "units",
+      "label": "Front and back legs",
+      "roles": ["front", "back", "yoke", "side", "*"]
+    },
+    {
+      "id": "sides",
+      "op": "combine",
+      "label": "Join side seams",
+      "roles": ["front", "back", "yoke", "side"],
+      "requireAll": ["front", "back"],
+      "byHand": true,
+      "as": "leg",
+      "name": "leg",
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "inseam",
+      "op": "process",
+      "label": "Close the inseam",
+      "roles": ["leg"],
+      "zone": "OUTER",
+      "press": "open"
+    },
+    {
+      "id": "crotch",
+      "op": "combine",
+      "label": "Join the crotch seam",
+      "roles": ["leg", "front", "back"],
+      "as": "body",
+      "name": "Body",
+      "zone": "HIP",
+      "press": "open"
+    },
+    {
+      "id": "zipper",
+      "op": "bom",
+      "label": "Set the zipper",
+      "when": "zipper",
+      "machine": "zipper_setting",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "waistband",
+      "op": "attach",
+      "label": "Attach the waistband",
+      "roles": ["waistband"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with waistband",
+      "zone": "WAIST",
+      "press": "flat"
+    },
+    {
+      "id": "elastic",
+      "op": "bom",
+      "label": "Attach elastic",
+      "when": "elastic",
+      "machine": "elastic_attach",
+      "zone": "WAIST"
+    },
+    {
+      "id": "loops",
+      "op": "attach",
+      "label": "Attach belt loops",
+      "roles": ["loop"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with belt loops",
+      "zone": "WAIST"
+    },
+    {
+      "id": "hem",
+      "op": "process",
+      "label": "Hem",
+      "roles": ["body"],
+      "zone": "HEM"
+    },
+    {
+      "id": "buttonholes",
+      "op": "bom",
+      "label": "Buttonholes",
+      "when": "buttons",
+      "machine": "buttonhole",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "buttons",
+      "op": "bom",
+      "label": "Attach buttons",
+      "when": "buttons",
+      "machine": "button_attach",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "snaps",
+      "op": "bom",
+      "label": "Set snaps",
+      "when": "snaps",
+      "machine": "other",
+      "zone": "CLOSURE"
+    },
+    {
+      "id": "drawcord",
+      "op": "bom",
+      "label": "Thread the drawcord",
+      "when": "drawcord",
+      "operationType": "HANDWORK",
+      "zone": "WAIST"
+    },
+    {
+      "id": "final-press",
+      "op": "press",
+      "label": "Final press",
+      "zone": "OUTER"
+    }
+  ]
+}
