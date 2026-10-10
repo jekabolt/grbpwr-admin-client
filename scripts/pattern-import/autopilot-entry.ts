@@ -39,10 +39,11 @@ import {
   angleDiff180,
   autopilotAnswer,
   autopilotRecordOf,
-  autopilotTick,
+  autopilotApply,
+  hookDriveCtx,
+  resolverFor,
   fallbackGrain,
   longestStraight,
-  newAutopilotRun,
   principalAxis,
   type Assumption,
   type AutopilotAnswer,
@@ -51,6 +52,10 @@ import {
 
 import { CARD_ID, CASES } from './e2e-entry';
 import { mountHook, rerender } from './react-hook-shim';
+import {
+  driveTick,
+  newDriveState,
+} from 'components/managers/tech-card/components/pattern-import/auto-drive';
 import { splitSize } from './worker-entry';
 
 type Case = (typeof CASES)[number];
@@ -181,7 +186,9 @@ export async function runCase(c: Case, mutate: string | null) {
     for (let k = 0; k < 4; k++) await Promise.resolve();
     rerender();
   };
-  const run = newAutopilotRun();
+  const st = newDriveState();
+  let done: null | { ok: true } | { ok: false; stop: { step: string; reason: string } } = null;
+  let ticks = 0;
   const mutated: string[] = [];
   const wrapped = (snap: AutopilotSnapshot): AutopilotAnswer => {
     // the policy's own fingerprint of "now" must be the wizard's (answers.ts answersNowOf)
@@ -206,20 +213,48 @@ export async function runCase(c: Case, mutate: string | null) {
       files: files.map((f) => new File([f.bytes], f.name)),
     });
     await settle();
-    for (let t = 0; t < 400; t++) {
+    // the wizard's own drive tick (auto-drive.ts), the autopilot's resolver, then — on a green
+    // gate — the autopilot's explicit apply path: the same code the wizard runs
+    const resolve = resolverFor(card, () => api);
+    const answer = (snap: Parameters<typeof resolve>[0]) => {
+      const x = {
+        ...snap,
+        card,
+        baseSeeds: api.baseSeeds,
+        presegmented: !!api.extracted.presegmented,
+      };
+      return wrapped(x);
+    };
+    for (let t = 0; t < 400 && !done; t++) {
+      ticks++;
       const step = api.session.step;
-      const r = await autopilotTick(api, card, run, { answer: wrapped, offer: offerOf, settle });
+      const r = await driveTick(
+        st,
+        hookDriveCtx(() => api, settle, answer),
+      );
       await settle();
       trace.push(
-        `${step}:${r.kind === 'answered' ? 'answer' : r.kind === 'advanced' ? 'next' : r.kind}`,
+        `${step}:${r.kind === 'answered' ? 'answer' : r.kind === 'moved' ? 'next' : r.kind}`,
       );
-      if (r.kind === 'done' || r.kind === 'stop') break;
+      if (r.kind !== 'stopped') continue;
+      if (r.why === 'auto-stop' && api.session.step === 'check') {
+        const o = await autopilotApply(() => api, card, settle);
+        trace.push(o.ok ? 'apply:done' : `${o.step}:stop`);
+        done = o.ok ? { ok: true } : { ok: false, stop: { step: o.step, reason: o.reason } };
+      } else
+        done = {
+          ok: false,
+          stop: { step: r.step, reason: `${r.why}: ${r.reason ?? r.question ?? ''}` },
+        };
     }
   } catch (e) {
     rec.error = String((e as Error)?.stack ?? e).slice(0, 600);
   }
   const s = api.session;
   rec.trace = compress(trace);
+  rec.setAside = (s.pieces?.setAside ?? []).map(
+    (a) => `${a.reason} ${Math.round(a.areaMm2 / 100)}cm² ${a.seed?.text?.text ?? ''}`,
+  );
   rec.sizesRead = s.sizes
     ? {
         labels: s.sizes.run.sizes.map((x) => x.label),
@@ -232,9 +267,8 @@ export async function runCase(c: Case, mutate: string | null) {
     (k) =>
       `${k.role}${k.sizeLabel ? ` ${k.sizeLabel}` : ''} ${k.confidence.toFixed(2)} ${Math.round(k.totalLengthMm)}mm`,
   );
-  rec.ticks = run.ticks;
+  rec.ticks = ticks;
   rec.clicks = 0;
-  const done = run.done;
   rec.verdict = done?.ok ? 'apply' : 'stopped';
   if (done && !done.ok) rec.stop = done.stop;
   else if (!done) rec.stop = { step: s.step, reason: 'tick budget spent' };
@@ -587,27 +621,6 @@ function mutateAnswer(
     return withA([mk(x, y.card!.token), mk(y, x.card!.token)], {}, [{ type: 'size-map', entries }]);
   }
   return a;
-}
-
-/**
- * What a step offers without blocking (N1 `stepOffer`, auto-advance.ts on pi/n1 — the same three
- * offers): the clean stage's waiting suggestions, pages set aside to check, pages not placed.
- */
-function offerOf(api: ImportSessionApi): string | null {
-  const s = api.session;
-  const waiting = (xs: readonly { status: string; applied: boolean }[]) =>
-    xs.some((it) => it.status === 'suggest' && !it.applied);
-  if (s.step === 'files' && !api.extracted.presegmented && s.clean) {
-    if (waiting(s.clean.pages.flatMap((p) => p.items)))
-      return 'suggested to set aside — accept, or go on with the lines kept';
-    if (s.clean.dropped.some((d) => d.status === 'suggest'))
-      return 'pages set aside to check — read one as a tile, or go on';
-    if (s.pages.some((p) => p.cls === 'unknown'))
-      return 'pages the reader could not place — check their role, or go on';
-  }
-  if (s.step === 'sheet' && waiting(s.sheet?.clean?.items ?? []))
-    return 'suggested to set aside on the sheet — accept, or go on with the lines kept';
-  return null;
 }
 
 const countBy = (xs: string[]) =>

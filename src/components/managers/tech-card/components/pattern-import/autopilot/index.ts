@@ -7,8 +7,8 @@ export type {
   AutopilotSnapshot,
   AutopilotStop,
 } from './policy';
-export { autopilotTick, newAutopilotRun } from './run';
-export type { AutopilotRun, TickOpts, TickResult } from './run';
+export { autopilotApply, gateBlocks, hookDriveCtx, resolverFor } from './run';
+export type { ApplyOutcome } from './run';
 export { fallbackGrain, angleDiff180, longestStraight, principalAxis } from './grain';
 export { deterministicCodes } from './names';
 export { assumptionKey, autopilotRecordOf, mergeAssumptions } from './types';

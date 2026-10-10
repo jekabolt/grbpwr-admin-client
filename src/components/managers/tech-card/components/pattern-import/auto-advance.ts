@@ -206,8 +206,23 @@ export const ANSWERS: Record<
   scale: { events: [], inputs: ['scaleIndex', 'manualMeasuredMm', 'scaleConfirmed'] },
   sheet: { events: ['sheet', 'clean'], inputs: ['residualsAccepted'] },
   sizes: { events: ['legend', 'size-map', 'drawn-sizes'], inputs: ['legendConfirmed'] },
-  pieces: { events: ['variant', 'piece-edits'], inputs: [] },
-  meaning: { events: ['names', 'semantics'], inputs: ['confirmedNames', 'confirmedQuantities'] },
+  // A10: a click seed is the pieces step's own answer (`addSeed`: clickSeeds + the fill again)
+  pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds'] },
+  // A10: the details controls answer through these fields (the grain's two clicks, the fold edge,
+  // "not a fold", the outline, the cutting list, a typed name), then semantics runs again
+  meaning: {
+    events: ['names', 'semantics'],
+    inputs: [
+      'confirmedNames',
+      'confirmedQuantities',
+      'editedNames',
+      'overrides',
+      'operatorGrain',
+      'operatorFold',
+      'fileAllowance',
+      'foldListChecked',
+    ],
+  },
   fabrics: { events: ['fabrics'], inputs: [] },
   check: { events: [], inputs: [] },
   apply: { events: [], inputs: [] },
@@ -219,7 +234,8 @@ export function answerProblem<I>(step: WizardStep, a: AutoAnswer<I>): string | n
   const bad = [
     ...(a.events ?? []).filter((e) => !ok.events.includes(e.type)).map((e) => `event ${e.type}`),
     ...Object.keys(a.patch ?? {})
-      .filter((k) => !ok.inputs.includes(k))
+      // A10: the autopilot's record of what it assumed rides with any answer (it answers nothing)
+      .filter((k) => k !== 'autopilot' && !ok.inputs.includes(k))
       .map((k) => `input ${k}`),
   ];
   return bad.length ? `not an answer on ${step}: ${bad.join(', ')}` : null;

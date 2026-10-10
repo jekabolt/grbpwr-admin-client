@@ -48,14 +48,9 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
-import {
-  answerProblem,
-  AUTO_STOPS,
-  scaleUncertain,
-  stepOffer,
-  type AutoResolver,
-} from './auto-advance';
+import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
+import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, type Assumption } from './autopilot/types';
 import type {
   ApplyDraftFn,
@@ -301,15 +296,21 @@ export function useImportSession(deps: {
    * N1: the forward drive — armed by the operator's next / read, dropped where a step asks. `gen`
    * tells a stale drive (or a stale resolver answer) from the live one.
    */
-  const drive = useRef<{ gen: number; resolve?: AutoResolver<Inputs>; asked: Set<string> } | null>(
+  const drive = useRef<{ gen: number; resolve?: AutoResolver<Inputs>; state: DriveState } | null>(
     null,
   );
+  /** A10: where and why the last armed resolver (the autopilot) stopped; null = it did not. */
+  const [driveStop, setDriveStop] = useState<{
+    step: WizardStep;
+    why: DriveStopWhy;
+    reason: string;
+  } | null>(null);
   const driveGen = useRef(0);
   /** N1: bumped by every operator action — an answer computed before it is stale. */
   const opRev = useRef(0);
   /** N1: the notice a refused resolver answer left (the next `advance` clears it, no other). */
   const refusal = useRef<string | null>(null);
-  const [driveTick, setDriveTick] = useState(0);
+  const [driveTick_, setDriveTick] = useState(0);
   /** Transitions in flight (a stage, the namer, a write): the drive waits for all of them. */
   const flightRef = useRef(0);
   const [flight, setFlight] = useState(0);
@@ -1193,7 +1194,8 @@ export function useImportSession(deps: {
     }
   }
   const arm = (resolve?: AutoResolver<Inputs>) => {
-    drive.current = { gen: ++driveGen.current, resolve, asked: new Set() };
+    drive.current = { gen: ++driveGen.current, resolve, state: newDriveState() };
+    setDriveStop(null);
     setDriveTick((t) => t + 1);
   };
   const disarm = () => {
@@ -1239,29 +1241,14 @@ export function useImportSession(deps: {
     return true;
   }
 
-  // The drive: armed by "next" / "read files" (or `advance`), it takes the next step while the
-  // current one has no blocker and no offer, and stops — disarmed — on the first that has one, on
-  // an error or a notice, and always on check (the gate is read and apply is a deliberate click).
-  // A resolver (AUTOPILOT) may answer the stopping question once; its answer is taken only while
-  // nothing moved (same drive, run, step, no operator action since) and only as the step's own
-  // answers (`answerProblem`); the step is then checked again.
+  // The drive: armed by "next" / "read files" (or `advance`), one tick at a time — the SAME tick
+  // the autopilot metric runs (auto-drive.ts `driveTick`): forward while a step asks nothing; a
+  // step that asks goes to the resolver (AUTOPILOT) once per (step, question, outputs revision),
+  // its answer taken only as the step's own and only while nothing moved; stopped = disarmed.
   useEffect(() => {
     const d = drive.current;
     if (!d || flight > 0 || flightRef.current > 0 || session.busy) return;
-    const step = session.step;
-    if (session.error || notice || AUTO_STOPS.includes(step)) return disarm();
-    const question = blocker ?? offer;
-    if (!question) {
-      void forwardMarked(true).then((moved) => {
-        if (!moved && drive.current === d) disarm();
-      });
-      return;
-    }
-    const key = `${step}|${question}`;
-    if (!d.resolve || d.asked.has(key)) return disarm();
-    d.asked.add(key);
-    const resolve = d.resolve;
-    const at = { gen: d.gen, sid: sRef.current.sessionId, step, rev: opRev.current };
+    const at = { gen: d.gen, sid: sRef.current.sessionId, step: session.step, rev: opRev.current };
     const live = () =>
       drive.current?.gen === at.gen &&
       sRef.current.sessionId === at.sid &&
@@ -1269,25 +1256,42 @@ export function useImportSession(deps: {
       opRev.current === at.rev;
     void tracked(async () => {
       try {
-        const a = await resolve({ session: sRef.current, inputs: iRef.current, step, question });
-        if (!live()) return;
-        if (!a || a.stop) return disarm();
-        const problem = answerProblem(step, a);
-        if (problem) {
-          disarm();
-          refusal.current = `the automatic answer was refused — ${problem}`;
-          setNotice(refusal.current);
-          return;
+        const t = await driveTick(d.state, {
+          session: sRef.current,
+          inputs: iRef.current,
+          blocker,
+          offer,
+          notice,
+          busy: false,
+          resolve: d.resolve,
+          current: () => ({ session: sRef.current, inputs: iRef.current }),
+          forward: async () => {
+            const rev = opRev.current;
+            const moved = await forwardMarked(true);
+            return moved && opRev.current === rev;
+          },
+          patch: (p) => {
+            iRef.current = { ...iRef.current, ...p };
+            patchInputs(p);
+          },
+          dispatch: (ev) => dispatchRaw(ev),
+          live,
+          failed: () => !!sRef.current.error,
+        });
+        if (t.kind !== 'stopped' || drive.current !== d) return;
+        disarm();
+        if (t.why === 'refused' && t.reason) {
+          refusal.current = t.reason;
+          setNotice(t.reason);
         }
-        if (a.patch) {
-          iRef.current = { ...iRef.current, ...a.patch };
-          patchInputs(a.patch);
-        }
-        for (const ev of a.events ?? []) {
-          if (!live()) return;
-          await dispatchRaw(ev);
-          if (sRef.current.error) break;
-        }
+        // A10: why an armed resolver (the autopilot) stopped — the footer's "autopilot stopped"
+        if (d.resolve && t.why !== 'stale' && t.why !== 'not-moved')
+          setDriveStop({
+            step: t.step,
+            why: t.why,
+            reason:
+              t.reason ?? t.question ?? (t.why === 'auto-stop' ? 'the gate is read here' : ''),
+          });
       } catch (e) {
         if (!live()) return;
         disarm();
@@ -1296,7 +1300,7 @@ export function useImportSession(deps: {
     });
     // the drive reads the latest refs; these are what can change the answer
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driveTick, flight, session, blocker, offer, notice]);
+  }, [driveTick_, flight, session, blocker, offer, notice]);
 
   /** Operator events. Reading files arms the drive; any other event stops it (the operator looks). */
   async function dispatch(ev: WizardEvent): Promise<void> {
@@ -1479,6 +1483,8 @@ export function useImportSession(deps: {
     /** N1: how each step was passed without the operator ('auto' ✓ / 'skipped'), still doors. */
     passed,
     advance,
+    /** A10: where and why the autopilot's drive stopped (the footer line); null = it did not. */
+    driveStop,
     /** A0.2: the sheet is one page — the stepper shows the step passed over ("1 page"). */
     sheetSkipped:
       !extracted.presegmented && singlePageSheet(session.pages, session.sheet, inputs.gridOverride),
