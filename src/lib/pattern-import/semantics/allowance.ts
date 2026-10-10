@@ -424,24 +424,44 @@ export function innerSeamLines(c: PieceCandidate, set?: ChainSet): PtMm[][] {
     if (!ch.pts.every((p) => pointInPolygon(p, c.outer))) continue;
     out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
   }
-  if (!out.length)
-    for (const id of drawnSeamChains(c, set)) {
-      const ch = set.chains[id];
-      out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
-    }
+  if (!out.length) return drawnSeam(c, set)?.lines ?? [];
   return out;
 }
 
+/** A drawn seam fragment continues another across a break this short (a notch, a crossing), mm. */
+const SEAM_JOIN_MM = 12;
+/** …turning at most this much more than the outline turns there, degrees. */
+const SEAM_JOIN_TURN_DEG = 25;
+/** A connected run of seam fragments counts from this share of the outline's perimeter. */
+const SEAM_RUN_SHARE = 0.15;
+
+/** The drawn seam line of one candidate, qualified once (Codex N3): its chains and its gap. */
+export type DrawnSeam = { ids: number[]; lines: PtMm[][]; gap: MeasuredGap };
+
+const memo = new WeakMap<PieceCandidate, WeakMap<ChainSet, DrawnSeam | null>>();
+
 /**
- * N3 (wm M): one pen draws the cut line AND the seam line inside it, so the legend files the seam
- * line with the outlines ('common', A0.3 "the seam line inside") or, a piece of it, as 'internal'.
- * Its pieces inside this outline, in the outline's pen, each at a constant distance (3–30 mm,
- * spread ≤ 1.5 mm) are the drawn seam line when they agree on ONE distance: the outline-row pieces
- * within 1 mm of their length-weighted median, covering ≥ 40 % of the outline together (spread ≤
- * 1.5 mm), plus same-pen 'internal' pieces within 0.3 mm of it (≥ 40 mm, spread ≤ 0.5 mm). A line at
- * another distance (a hem fold 20 mm up, a dart) is not; a set that agrees on nothing gives none.
+ * N3 (wm M) + Codex: one pen draws the cut line AND the seam line inside it, so the legend files
+ * the seam line with the outlines ('common', A0.3 "the seam line inside") or, a piece of it, as
+ * 'internal'. A fragment inside this outline, in the outline's pen, at a constant distance to it
+ * (3–30 mm, spread ≤ 1.5 mm; an 'internal' one ≥ 40 mm, spread ≤ 0.5 mm, within 0.3 mm of the
+ * median) is part of the drawn seam ONLY inside a connected, coherent parallel contour: fragments
+ * joined end to end across short breaks (≤ 12 mm, the direction carried on) into runs, a run
+ * counting from 15 % of the perimeter. The qualified runs together must pass `isSeamGap` — the
+ * SAME test (and 50 % coverage) the measured allowance uses; that one result both measures the
+ * allowance and keeps those chains off layer 8. A disconnected pocket placement, topstitch or hem
+ * fold at the same gap stays an internal line.
  */
-export function drawnSeamChains(c: PieceCandidate, set: ChainSet): number[] {
+export function drawnSeam(c: PieceCandidate, set: ChainSet): DrawnSeam | null {
+  const m = memo.get(c)?.get(set);
+  if (m !== undefined) return m;
+  const r = qualifySeam(c, set);
+  if (!memo.has(c)) memo.set(c, new WeakMap());
+  memo.get(c)!.set(set, r);
+  return r;
+}
+
+function qualifySeam(c: PieceCandidate, set: ChainSet): DrawnSeam | null {
   const clsOf = new Map<number, (typeof set.classes)[number]>();
   for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
   const walls = new Set(c.walls);
@@ -462,7 +482,7 @@ export function drawnSeamChains(c: PieceCandidate, set: ChainSet): number[] {
     cands.push({ id, pts, mm: g.mm, spread: g.spreadMm, len: ch.lengthMm, row });
   }
   const rows = cands.filter((x) => x.row).sort((a, b) => a.mm - b.mm);
-  if (!rows.length) return [];
+  if (!rows.length) return null;
   // the length-weighted median distance of the outline-row pieces
   const total = rows.reduce((a, x) => a + x.len, 0);
   let acc = 0;
@@ -471,12 +491,57 @@ export function drawnSeamChains(c: PieceCandidate, set: ChainSet): number[] {
     ...rows.filter((x) => Math.abs(x.mm - med) <= 1),
     ...cands.filter((x) => !x.row && x.len >= 40 && x.spread <= 0.5 && Math.abs(x.mm - med) <= 0.3),
   ];
-  const all = measureGap(
-    c.outer,
-    kept.map((x) => x.pts),
-  );
-  if (!all || all.mm < 3 || all.mm > 30 || all.spreadMm > 1.5 || all.coverage < 0.4) return [];
-  return kept.map((x) => x.id);
+  // runs: fragments joined end to end, the direction carried across the break
+  const ends = (x: Cand) => {
+    const p = x.pts;
+    const n = p.length;
+    // the end point and the direction pointing OUT of the fragment there
+    const out = (a: PtMm, b: PtMm) => {
+      const l = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      return { x: (a.x - b.x) / l, y: (a.y - b.y) / l };
+    };
+    return [
+      { p: p[0], d: out(p[0], p[Math.min(n - 1, 1)]) },
+      { p: p[n - 1], d: out(p[n - 1], p[Math.max(0, n - 2)]) },
+    ];
+  };
+  const closedLoop = (x: Cand) =>
+    Math.hypot(x.pts[0].x - x.pts[x.pts.length - 1].x, x.pts[0].y - x.pts[x.pts.length - 1].y) < 1;
+  const cos = Math.cos((SEAM_JOIN_TURN_DEG * Math.PI) / 180);
+  const joins = (a: Cand, b: Cand) =>
+    ends(a).some((ea) =>
+      ends(b).some((eb) => {
+        const gx = eb.p.x - ea.p.x;
+        const gy = eb.p.y - ea.p.y;
+        const gl = Math.hypot(gx, gy);
+        if (gl <= 1) return true; // touching ends (a break at a corner)
+        if (gl > SEAM_JOIN_MM) return false;
+        // a's end carries on into b: b's end points back at a (opposite directions)…
+        if (-(ea.d.x * eb.d.x + ea.d.y * eb.d.y) < cos) return false;
+        // …and the break itself runs along that direction
+        return (gx * ea.d.x + gy * ea.d.y) / gl >= cos;
+      }),
+    );
+  const parent = kept.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < kept.length; i++)
+    for (let j = i + 1; j < kept.length; j++)
+      if (joins(kept[i], kept[j])) parent[find(i)] = find(j);
+  const runs = new Map<number, Cand[]>();
+  kept.forEach((x, i) => runs.set(find(i), [...(runs.get(find(i)) ?? []), x]));
+  const per = perimeter(c.outer);
+  const qualified = [...runs.values()]
+    .filter(
+      (r) =>
+        r.reduce((a, x) => a + x.len, 0) >= SEAM_RUN_SHARE * per ||
+        (r.length === 1 && closedLoop(r[0])),
+    )
+    .flat();
+  if (!qualified.length) return null;
+  const lines = qualified.map((x) => x.pts);
+  const gap = measureGap(c.outer, lines);
+  if (!isSeamGap(gap)) return null;
+  return { ids: qualified.map((x) => x.id), lines, gap };
 }
 
 /** The measured allowance of one candidate, when a seam line is drawn inside it. */

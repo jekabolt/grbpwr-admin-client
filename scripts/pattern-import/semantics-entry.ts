@@ -34,7 +34,7 @@ import {
   sampleAlong,
 } from 'lib/pattern-import/semantics/geom';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
-import { drawnSeamChains, measuredAllowance } from 'lib/pattern-import/semantics/allowance';
+import { drawnSeam, measuredAllowance } from 'lib/pattern-import/semantics/allowance';
 import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import {
   createProposeSizeMap,
@@ -1386,10 +1386,10 @@ export async function main(): Promise<number> {
       orphans: [],
       warnings: [],
     };
-    const got = drawnSeamChains(cand, set);
+    const got = drawnSeam(cand, set)?.ids ?? [];
     ck(
       got.length === 3 && seam.every((id) => got.includes(id)),
-      'the three seam pieces at 7 mm are the drawn seam line; the hem fold (20 mm) and the dart are not',
+      'the three seam pieces at 7 mm, joined end to end, are the drawn seam line; the hem fold (20 mm) and the dart are not',
       JSON.stringify(got),
     );
     const m = measuredAllowance(cand, set);
@@ -1399,6 +1399,32 @@ export async function main(): Promise<number> {
       internal.length === 2,
       'layer 8 keeps the hem fold and the dart only (the seam line is not an internal line)',
       `${internal.length} internal`,
+    );
+    // Codex N3: a disconnected line at the same 7 mm (a topstitch / placement on the top edge,
+    // 40+ mm from the seam run's ends) is no seam fragment: it stays on layer 8
+    const top = F.chain(
+      [
+        { x: 100, y: 7 },
+        { x: 200, y: 7 },
+      ],
+      false,
+      row,
+    );
+    const cand2: PieceCandidate = { ...cand, inside: [seam[0], seam[1], hem, dart, top] };
+    const got2 = drawnSeam(cand2, set)?.ids ?? [];
+    const int2 = classifyFeatures(cand2, set).filter((f) => f.kind === 'internal');
+    ck(
+      got2.length === 2 && !got2.includes(top) && int2.length === 3,
+      'Codex N3: a disconnected 100 mm line at the same gap stays an internal line (the run of 2 is the seam)',
+      JSON.stringify({ got2, internal: int2.length }),
+    );
+    // one result for both: a run covering < 50 % neither measures nor leaves layer 8
+    const cand3: PieceCandidate = { ...cand, inside: [seam[0], hem, dart] };
+    const int3 = classifyFeatures(cand3, set).filter((f) => f.kind === 'internal');
+    ck(
+      !measuredAllowance(cand3, set) && !drawnSeam(cand3, set) && int3.length === 3,
+      'Codex N3: one fragment covering 34 % — not measured, so not suppressed either (stays on layer 8)',
+      JSON.stringify({ m: measuredAllowance(cand3, set), internal: int3.length }),
     );
   }
 

@@ -31,7 +31,7 @@ import type {
   Sheet,
 } from '../types';
 import { PATIMPORT } from '../types';
-import { drawnSeamChains, featuresOf } from './allowance';
+import { drawnSeam, featuresOf } from './allowance';
 import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
 import { glyphCellKey, undashed } from './glyphs';
 
@@ -183,11 +183,11 @@ export function classifyFeatures(
 
   // the chains inside that may carry a feature (another size's line, a seam, ignored: never)
   // N3: the seam line drawn in the outlines' own pen (one-pen sheets, wm M) is the seam, measured
-  const drawnSeam = new Set(drawnSeamChains(cand, set));
+  const seamIds = new Set(drawnSeam(cand, set)?.ids ?? []);
   const inner: Chain[] = [];
   for (const id of new Set(cand.inside)) {
     const ch = set.chains[id];
-    if (!ch || notchChains.has(id) || drawnSeam.has(id)) continue;
+    if (!ch || notchChains.has(id) || seamIds.has(id)) continue;
     const k = clsOf.get(id);
     const role = k?.role;
     if (role === 'size' && !wallCls.has(k?.id)) continue; // another size's line
