@@ -212,7 +212,56 @@ export type SeamCandidate = {
   bParts?: EdgeId[];
   /** Alternatives within SKELETON.ambiguity of this score. */
   ambiguousWith?: SeamCandidate[];
+  /**
+   * A seam a person decided on (stored on the card, resolved by lib/seams): where it came from and
+   * who said so. Absent on the engine's own readings.
+   */
+  provenance?: SeamProvenance;
+  /**
+   * Sewn sub-range of each side, mm along the run from its start (a partial seam stored with its
+   * range). Absent = the whole run.
+   */
+  range?: { a: [Mm, Mm]; b: [Mm, Mm] };
 };
+
+/** Who decided a stored seam, and how its edges were found today. */
+export type SeamProvenance = {
+  seamKey: string;
+  status: 'confirmed' | 'rejected';
+  source: 'graph' | 'doll' | 'order' | 'manual' | 'ai';
+  direction: 'reversed' | 'same' | 'unknown';
+  by: string;
+  at: string;
+  /**
+   * hint = the stored edge id still fits the same contour; shape = found by its shape; topology =
+   * carried from the size it was confirmed on by the piece's edge sequence.
+   */
+  how: 'hint' | 'shape' | 'topology';
+};
+
+/** One stored «not this seam»: any candidate meeting both sides is dropped with `rule`. */
+export type ExcludedPair = {
+  aIds: EdgeId[];
+  bIds: EdgeId[];
+  rule: string;
+  /** A rejected surface join: the part is not laid on the host. */
+  surface?: { host: string; part: string };
+};
+
+/**
+ * Stored seam decisions resolved against today's pieces (lib/seams `resolveSeamDecisions`).
+ * `forced` seams are taken before the engine's greedy (their edges out of play), `closures` block
+ * their edges, `excluded` pairs are dropped with the person's words, `words` go to the warnings.
+ */
+export type SeamDecisions = {
+  forced: SeamCandidate[];
+  closures: SeamCandidate[];
+  excluded: ExcludedPair[];
+  words: string[];
+};
+
+/** Decisions as a value, or resolved against the pieces the graph is about to match. */
+export type SeamDecisionsInput = SeamDecisions | ((pieces: readonly PieceGeom[]) => SeamDecisions);
 
 export type SeamGraph = {
   pieces: PieceGeom[];
@@ -354,6 +403,8 @@ export type SkeletonOptions = {
   pressFlat?: boolean;
   /** Readings the person chose for ambiguous joins; the proposal is rebuilt around them. */
   pins?: SkeletonPins;
+  /** Seams stored on the card (confirmed / rejected / closures), resolved by lib/seams. */
+  decisions?: SeamDecisionsInput;
 };
 
 // ── Union pictogram (lane C) ────────────────────────────────────────────────────────────────

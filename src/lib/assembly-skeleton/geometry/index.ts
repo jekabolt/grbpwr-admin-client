@@ -8,13 +8,17 @@
 //   components — pieces joined by chosen seams (closures do not join).
 // A4 (composite second pass over lane B's units) plugs in through runsOf / scoreRuns.
 
-import type { SeamGraph, SkeletonFacts } from '../types';
+import type { SeamDecisionsInput, SeamGraph, SkeletonFacts } from '../types';
 import { ALL_RULES, matchSeams, type MatchRules } from './match';
 import { segmentPiece } from './segment';
 import { twins } from './twins';
 
-export function buildSeamGraph(facts: SkeletonFacts, rules: MatchRules = ALL_RULES): SeamGraph {
-  return matchSeams(twins(facts.pieces.map(segmentPiece)), facts, rules);
+export function buildSeamGraph(
+  facts: SkeletonFacts,
+  rules: MatchRules = ALL_RULES,
+  decisions?: SeamDecisionsInput,
+): SeamGraph {
+  return matchSeams(twins(facts.pieces.map(segmentPiece)), facts, rules, decisions);
 }
 
 export {

@@ -33,6 +33,7 @@ import { CardUnitPicturesProvider, renderProposalUnit } from './card-unit-pictur
 import { useCardCategoryNames } from './skeleton-card-inputs';
 import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
+import { SeamsDoor } from './assembly-seams/seams-door';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -802,6 +803,7 @@ export function ConstructionTab({
                   />
                 }
               />
+              <SeamsDoor techCard={techCard} frozen={frozen} shapes={pieceShapes.shapeByKey} />
               <PieceLegend />
             </div>
 
