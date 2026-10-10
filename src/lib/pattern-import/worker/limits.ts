@@ -36,6 +36,28 @@ export function checkInputSet(
   return null;
 }
 
+/**
+ * Bytes of ONE per-size DXF set, all files together (R4). The set is held several times over while
+ * it is merged (the files, their text, the tag arrays of the merger, the merged text and bytes, then
+ * the reader's own decode of the merged drawing), so it gets a tighter cap than a single file's
+ * `maxInputBytes`. 64 MB is ~100× the corpus: a per-size CLO export of a whole coat is 0.1–0.6 MB,
+ * and 6 million lines (`maxDxfLines`, the bound on the merged drawing) are ~60 MB of DXF.
+ */
+export const DXF_SET_MAX_BYTES = 64 * 1024 * 1024;
+
+/** A per-size DXF set heavier than `DXF_SET_MAX_BYTES`. null = fine. */
+export function dxfSetBytesRefusal(
+  files: readonly { name: string; bytes: number }[],
+): InputRefusal | null {
+  const total = files.reduce((a, f) => a + f.bytes, 0);
+  if (total <= DXF_SET_MAX_BYTES) return null;
+  const biggest = [...files].sort((a, b) => b.bytes - a.bytes)[0];
+  return {
+    code: 'too-large',
+    message: `these ${files.length} DXF files are ${mb(total)} together; a set of sizes is merged up to ${mb(DXF_SET_MAX_BYTES)} (the largest is ${biggest.name}, ${mb(biggest.bytes)}). Export only the pattern pieces, one size per file.`,
+  };
+}
+
 /** A PDF with more pages than the importer reads. */
 export function pdfPagesRefusal(
   pages: number,

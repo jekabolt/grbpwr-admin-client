@@ -9,22 +9,40 @@
 //   - every file is ONE size. The size is read from the blocks (all of them end in the same size
 //     token), else from the file name (`fileSizeLabel`, the PDF set's reader), else it is unknown:
 //     the file gets a placeholder size and the sizes step asks the operator which card size it is.
+//     A tail that is also a hand / copy mark of the identity grammar (`_L`, `_R`, `_1`:
+//     manifest/identity.ts) is weak evidence: it is a size only when no other file of the set ends
+//     in the same tail and the file name does not say otherwise (R7: `FRONT_L` in `coat_S.dxf`).
 //     Blocks without a size token are renamed `NAME` → `NAME_<size>` before the merge, so the
 //     merged drawing spells its sizes the way the DXF reader expects them.
 //   - refused, with the reason in words: a file that carries several sizes, two files of one size
 //     (CLO repeating the previous size), files that do not carry the same pieces, R12 / binary files
-//     (the merger rewrites R2000 handles and refuses to invent them), mixed drawing units.
+//     (the merger rewrites R2000 handles and refuses to invent them), mixed drawing units, and a
+//     piece placed other than once, as drawn (R3: the merger writes ONE insert per block and keeps
+//     only its position — a copy, a rotation, a scale, a mirror or an array would be lost).
+//   - bounded before anything is decoded (R4): the set's bytes (`DXF_SET_MAX_BYTES`) and its line
+//     count (the SUM over the files, the merged drawing's own `maxDxfLines`) are checked on the raw
+//     bytes; the merge runs in the read stage, file by file, yielding to a cancel between files.
 //   - after the merged drawing is read, `settleDxfSet` checks the reader saw exactly one size per
 //     file, distinct across files — the claim the run rests on, proved on what was actually read.
 //
-// Positions are kept as drawn (inserts at the origin, no per-size offsets): per-size CLO exports
-// share one frame, and nothing downstream measures one size against another's position.
+// Positions are kept as drawn: each piece's insert keeps its source position (a translation), and
+// per-size CLO exports share one frame, so nothing downstream measures one size against another's.
 import type { FileId, SizeMap, CardSize, LineClass } from '../types';
-import { decodeDxfBytes, encodeDxfBytes, mergeDxfSheets } from 'lib/nesting/dxf/merge';
+import { PATIMPORT } from '../types';
+import {
+  decodeDxfBytes,
+  encodeDxfBytes,
+  mergeDxfSheets,
+  type MergeOffsets,
+} from 'lib/nesting/dxf/merge';
 import { bareSize } from '../adapters/dxf';
 import type { DxfFastPath, DxfSegmentation } from '../adapters/dxf';
+import { countDxfLines } from '../adapters/dxf/tags';
+import { isBinaryDxf } from '../adapters/dxf/binary';
+import { modStage } from '../manifest/identity';
 import { fileSizeLabel, parseSizeToken } from '../sizes';
 import { ImportError } from './errors';
+import { dxfSetBytesRefusal } from './limits';
 
 export type DxfSetFile = { id: FileId; name: string; bytes: ArrayBuffer };
 
@@ -44,10 +62,20 @@ export type DxfSet = {
   name: string;
   bytes: Uint8Array;
   sizes: DxfSetSize[];
-  /** Block name in the merged drawing → the file that brought it. */
+  /**
+   * Block name in the merged drawing → the file that brought it. The key is the name's BYTES (one
+   * char per byte, as the merger handles them), not its text: `settleDxfSet` decodes it with the
+   * reader's own codepage before it matches the pieces (R7).
+   */
   blockFile: Map<string, FileId>;
   /** Said on the files step: files whose size needs the operator, and the merger's own notes. */
   notes: string[];
+};
+
+/** What the merge stage may do between files: stop on a cancel, report progress. */
+export type DxfSetCtx = {
+  checkCancel: () => void;
+  progress?: (done: number, total: number, note?: string) => void;
 };
 
 const R2000_PLUS = new Set(['AC1015', 'AC1018', 'AC1021', 'AC1024', 'AC1027', 'AC1032']);
@@ -60,18 +88,83 @@ function sizeTokenOf(raw: string): string | null {
   return t && parseSizeToken(t, true) ? t : null;
 }
 
-type Scan = { version: string; blocks: string[] };
+/**
+ * A size token that the identity grammar also spells as a modifier: the hand `L`/`R`, the side
+ * `F`/`B`, a copy / part number. Numbers from 20 up are left as sizes (EU 34…70, kids' 86…164 are
+ * never copy numbers; `fileSizeLabel` draws the same line).
+ */
+const weakSize = (t: string) => modStage(t) >= 0 && !(/^\d+$/.test(t) && Number(t) >= 20);
 
-/** $ACADVER and the block names (anonymous `*` blocks left out) of an ASCII DXF. */
+/** Bytes (one char per byte) → text for a message, the way the reader will most likely decode it. */
+function shown(raw: string): string {
+  if (!/[\x80-\xff]/.test(raw)) return raw;
+  const u8 = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(u8);
+  } catch {
+    try {
+      return new TextDecoder('windows-1251').decode(u8);
+    } catch {
+      return raw;
+    }
+  }
+}
+
+/** A block name as the reader decodes it (`meta.encoding`), from the bytes the merger kept. */
+function decodedName(raw: string, encoding: string): string {
+  if (!/[\x80-\xff]/.test(raw) || encoding === 'latin1') return raw;
+  try {
+    return new TextDecoder(encoding).decode(Uint8Array.from(raw, (c) => c.charCodeAt(0)));
+  } catch {
+    return raw;
+  }
+}
+
+/** One model-space INSERT as the source drew it. */
+type Insert = {
+  block: string;
+  x: number;
+  y: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  rot: number;
+  cols: number;
+  rows: number;
+  attribs: boolean;
+  ex: number;
+  ey: number;
+  ez: number;
+};
+
+type Scan = { version: string; blocks: string[]; inserts: Insert[] };
+
+const newInsert = (): Insert => ({
+  block: '',
+  x: 0,
+  y: 0,
+  sx: 1,
+  sy: 1,
+  sz: 1,
+  rot: 0,
+  cols: 1,
+  rows: 1,
+  attribs: false,
+  ex: 0,
+  ey: 0,
+  ez: 1,
+});
+
+/** $ACADVER, the block names (anonymous `*` blocks left out) and the model-space INSERTs. */
 function scanDxf(text: string, name: string): Scan {
-  if (text.startsWith('AutoCAD Binary DXF'))
-    throw refuse(`${name}: a binary DXF; a set of sizes is merged from ASCII DXF exports only`);
   const lines = text.split('\n');
   let version = '';
   let section = '';
   let entity = '';
   let named = true;
   const blocks: string[] = [];
+  const inserts: Insert[] = [];
+  let ins: Insert | null = null;
   for (let i = 0; i + 1 < lines.length; i += 2) {
     const raw = lines[i].trim();
     if (raw === '') break; // the trailing newline; a gap mid-file is the merger's to refuse
@@ -80,9 +173,29 @@ function scanDxf(text: string, name: string): Scan {
       throw refuse(`${name}: not an ASCII DXF: line ${i + 1} carries “${raw}” instead of a code`);
     const value = lines[i + 1].replace(/\r$/, '');
     if (code === 0) {
+      if (ins) inserts.push(ins);
+      ins = null;
       entity = value.trim();
       if (entity === 'BLOCK' && section === 'BLOCKS') named = false;
+      if (entity === 'INSERT' && section === 'ENTITIES') ins = newInsert();
       if (entity === 'ENDSEC') section = '';
+      continue;
+    }
+    if (ins) {
+      const v = Number(value.trim());
+      if (code === 2) ins.block = value;
+      else if (code === 10) ins.x = v;
+      else if (code === 20) ins.y = v;
+      else if (code === 41) ins.sx = v;
+      else if (code === 42) ins.sy = v;
+      else if (code === 43) ins.sz = v;
+      else if (code === 50) ins.rot = v;
+      else if (code === 70) ins.cols = v;
+      else if (code === 71) ins.rows = v;
+      else if (code === 66) ins.attribs = v !== 0;
+      else if (code === 210) ins.ex = v;
+      else if (code === 220) ins.ey = v;
+      else if (code === 230) ins.ez = v;
       continue;
     }
     if (code === 2 && entity === 'SECTION') section = value.trim();
@@ -93,37 +206,28 @@ function scanDxf(text: string, name: string): Scan {
       if (!value.startsWith('*')) blocks.push(value);
     }
   }
-  return { version, blocks };
+  if (ins) inserts.push(ins);
+  return { version, blocks, inserts };
 }
 
-/** Rename blocks in an ASCII DXF: the BLOCK itself, its BLOCK_RECORD and every INSERT of it. */
-function renameBlocks(text: string, rename: Map<string, string>): string {
-  if (!rename.size) return text;
-  const lines = text.split('\n');
-  let section = '';
-  let entity = '';
-  for (let i = 0; i + 1 < lines.length; i += 2) {
-    const code = Number(lines[i].trim());
-    const cr = lines[i + 1].endsWith('\r') ? '\r' : '';
-    const value = lines[i + 1].replace(/\r$/, '');
-    if (code === 0) {
-      entity = value.trim();
-      if (entity === 'ENDSEC') section = '';
-      continue;
-    }
-    if (code === 2 && entity === 'SECTION') {
-      section = value.trim();
-      continue;
-    }
-    const target =
-      (code === 2 && entity === 'INSERT') ||
-      (code === 2 && entity === 'BLOCK_RECORD' && section === 'TABLES') ||
-      ((code === 2 || code === 3) && entity === 'BLOCK' && section === 'BLOCKS');
-    if (!target) continue;
-    const to = rename.get(value);
-    if (to != null) lines[i + 1] = to + cr;
-  }
-  return lines.join('\n');
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+/**
+ * Why the merger cannot carry this insert (it writes one plain insert per block, at the source
+ * position): null = a pure translation, kept as the merge offset.
+ */
+function insertProblem(i: Insert): string | null {
+  const nums = [i.x, i.y, i.sx, i.sy, i.sz, i.rot, i.cols, i.rows, i.ex, i.ey, i.ez];
+  if (nums.some((v) => !Number.isFinite(v))) return 'with an unreadable position or transform';
+  if (i.sx < 0 || i.sy < 0 || i.sz < 0 || !near(i.ex, 0) || !near(i.ey, 0) || !near(i.ez, 1))
+    return 'mirrored';
+  const r = ((i.rot % 360) + 360) % 360;
+  if (!(r < 1e-6 || 360 - r < 1e-6)) return `rotated ${+r.toFixed(2)}°`;
+  if (!near(i.sx, 1) || !near(i.sy, 1) || !near(i.sz, 1))
+    return `scaled ${+i.sx.toFixed(4)} × ${+i.sy.toFixed(4)}`;
+  if (i.cols > 1 || i.rows > 1) return `as a ${i.cols} × ${i.rows} array`;
+  if (i.attribs) return 'with attributes on the insert';
+  return null;
 }
 
 /**
@@ -158,15 +262,85 @@ function sizeOfBlocks(blocks: string[]): { size: string | null; several: string[
 const list = (xs: string[], n = 6) =>
   xs.length > n ? `${xs.slice(0, n).join(', ')} and ${xs.length - n} more` : xs.join(', ');
 
+const mbOf = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+
+/** One macrotask: lets the worker read a `cancel` message between files (microtasks do not). */
+const breathe = () => new Promise<void>((r) => setTimeout(r, 0));
+
+/**
+ * R4: the set's size, on the raw bytes, before any file is decoded — the bytes of all files
+ * together, and the line count of all files together (the merged drawing is read as ONE DXF, so
+ * the sum is what `maxDxfLines` bounds; counting stops at the limit). Binary DXF is refused here
+ * too, by its sentinel.
+ */
+export function guardDxfSet(files: readonly DxfSetFile[]): void {
+  const heavy = dxfSetBytesRefusal(files.map((f) => ({ name: f.name, bytes: f.bytes.byteLength })));
+  if (heavy) throw new ImportError(heavy.code, heavy.message);
+  const max = PATIMPORT.maxDxfLines;
+  let total = 0;
+  const counted: string[] = [];
+  for (const f of files) {
+    const u8 = new Uint8Array(f.bytes);
+    if (isBinaryDxf(u8))
+      throw refuse(`${f.name}: a binary DXF; a set of sizes is merged from ASCII DXF exports only`);
+    const n = countDxfLines(u8, max - total); // stops once the set is over the limit
+    const stopped = total + n > max;
+    total += n;
+    counted.push(`${f.name} ${stopped ? 'at least ' : ''}${n.toLocaleString('en')}`);
+    if (total > max)
+      throw new ImportError(
+        'too-large',
+        `these DXF files have more than ${max / 1e6} million lines together (${list(counted, 4)}), more than the importer reads as one merged drawing (${mbOf(files.reduce((a, x) => a + x.bytes.byteLength, 0))}; a whole graded CLO garment is well under 1 million). Export only the pattern pieces, or fewer sizes per run.`,
+      );
+  }
+}
+
+/** Rename blocks in an ASCII DXF: the BLOCK itself, its BLOCK_RECORD and every INSERT of it. */
+function renameBlocks(text: string, rename: Map<string, string>): string {
+  if (!rename.size) return text;
+  const lines = text.split('\n');
+  let section = '';
+  let entity = '';
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = Number(lines[i].trim());
+    const cr = lines[i + 1].endsWith('\r') ? '\r' : '';
+    const value = lines[i + 1].replace(/\r$/, '');
+    if (code === 0) {
+      entity = value.trim();
+      if (entity === 'ENDSEC') section = '';
+      continue;
+    }
+    if (code === 2 && entity === 'SECTION') {
+      section = value.trim();
+      continue;
+    }
+    const target =
+      (code === 2 && entity === 'INSERT') ||
+      (code === 2 && entity === 'BLOCK_RECORD' && section === 'TABLES') ||
+      ((code === 2 || code === 3) && entity === 'BLOCK' && section === 'BLOCKS');
+    if (!target) continue;
+    const to = rename.get(value);
+    if (to != null) lines[i + 1] = to + cr;
+  }
+  return lines.join('\n');
+}
+
 /**
  * Merge a set of per-size DXF files into one drawing (refusals are `ImportError`s with the reason
- * for the operator). Pure and synchronous: it runs where the session opens.
+ * for the operator). Runs in the session's read stage: the raw-byte guard first, then file by file
+ * (decode + scan) with a cancel check between files, then the merge.
  */
-export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
-  const read = files.map((f) => {
+export async function mergeDxfSet(files: DxfSetFile[], ctx: DxfSetCtx): Promise<DxfSet> {
+  guardDxfSet(files);
+  const steps = files.length + 1;
+  const read: (DxfSetFile & { text: string; scan: Scan })[] = [];
+  for (const f of files) {
+    await breathe();
+    ctx.checkCancel();
+    ctx.progress?.(read.length, steps, `${f.name} · checking`);
     const text = decodeDxfBytes(f.bytes);
-    return { ...f, text, scan: scanDxf(text, f.name) };
-  });
+    read.push({ ...f, text, scan: scanDxf(text, f.name) });
+  }
   const old = read.filter((r) => !R2000_PLUS.has(r.scan.version));
   if (old.length)
     throw refuse(
@@ -178,24 +352,67 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
         `${r.name}: no blocks; a set of sizes is merged from per-piece (AAMA) exports, one block per piece`,
       );
 
+  // R3: every piece placed once, as drawn — the merger writes one plain insert per block
+  const placed = read.map((r) => {
+    const of = new Map<string, Insert[]>();
+    for (const i of r.scan.inserts)
+      if (!i.block.startsWith('*')) (of.get(i.block) ?? of.set(i.block, []).get(i.block)!).push(i);
+    const bad: string[] = [];
+    for (const b of r.scan.blocks) {
+      const ins = of.get(b) ?? [];
+      const why =
+        ins.length === 0
+          ? 'nowhere (the block is defined but never placed)'
+          : ins.length > 1
+            ? `${ins.length} times`
+            : insertProblem(ins[0]);
+      if (why) bad.push(`${shown(b)} ${why}`);
+    }
+    if (bad.length)
+      throw refuse(
+        `${r.name} inserts ${list(bad, 4)}. A set is merged from plain per-size exports — every piece placed once, as drawn: export one size per file without copies, rotations, mirroring or arrays`,
+      );
+    return new Map([...of].map(([b, [i]]) => [b, { dx: i.x, dy: i.y }]));
+  });
+
   // the size of every file
   const notes: string[] = [];
-  const decided = read.map((r) => {
-    const own = sizeOfBlocks(r.scan.blocks);
+  const owns = read.map((r) => sizeOfBlocks(r.scan.blocks));
+  owns.forEach((own, k) => {
     if (own.several.length)
       throw refuse(
-        `${r.name} carries several sizes (${own.several.join(', ')}). A set is one file per size; import a file with all sizes on its own`,
+        `${read[k].name} carries several sizes (${own.several.join(', ')}). A set is one file per size; import a file with all sizes on its own`,
       );
+  });
+  const decided = read.map((r, k) => {
+    const own = owns[k];
     const fromName = fileSizeLabel(r.name);
     const named = fromName ? sizeTokenOf(fromName) : null;
-    if (own.size) {
+    const blocks = { r, token: own.size ?? '', from: 'blocks' as DxfSetSizeSource };
+    const byName = { r, token: named ?? '', from: 'file-name' as DxfSetSizeSource };
+    if (own.size && !weakSize(own.size)) {
       if (named && named !== own.size)
         notes.push(
           `${r.name}: the file name says ${named}, the blocks say ${own.size}; the blocks win`,
         );
-      return { r, token: own.size, from: 'blocks' as DxfSetSizeSource };
+      return blocks;
     }
-    if (named) return { r, token: named, from: 'file-name' as DxfSetSizeSource };
+    // R7: `_L` / `_R` / `_1` may be a hand or a copy mark, not a size. It is the size only when no
+    // other file ends its blocks in the same tail (then it is a mark: FRONT_L in every file) and
+    // the file name does not name another size.
+    if (own.size) {
+      const shared = owns.some((o, j) => j !== k && o.size === own.size);
+      if (!shared && (!named || named === own.size)) return blocks;
+      if (named) {
+        if (named !== own.size)
+          notes.push(
+            `${r.name}: the blocks end in _${own.size}, read as a hand or copy mark; the file name says ${named}`,
+          );
+        return byName;
+      }
+      return { r, token: '', from: 'placeholder' as DxfSetSizeSource };
+    }
+    if (named) return byName;
     return { r, token: '', from: 'placeholder' as DxfSetSizeSource };
   });
   // placeholders: the file's place in the set, never a token another file already has
@@ -232,30 +449,37 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
     .filter((x) => x.missing.length);
   if (short.length)
     throw refuse(
-      `the files do not carry the same pieces: ${short.map((x) => `${x.name} has no ${list(x.missing)}`).join('; ')}. Export every size of the same pattern`,
+      `the files do not carry the same pieces: ${short.map((x) => `${x.name} has no ${list(x.missing.map(shown))}`).join('; ')}. Export every size of the same pattern`,
     );
 
   // rename blocks of the files whose size is not in the block names, then merge
+  await breathe();
+  ctx.checkCancel();
+  ctx.progress?.(files.length, steps, 'merging the sizes');
   const blockFile = new Map<string, FileId>();
-  const sources = decided.map((d) => {
+  const offsets = new Map<string, { dx: number; dy: number }>();
+  const sources = decided.map((d, k) => {
     const rename = new Map<string, string>();
     for (const b of d.r.scan.blocks) {
       const to = d.from === 'blocks' ? b : `${b}_${d.token}`;
       if (to !== b) rename.set(b, to);
       blockFile.set(to, d.r.id);
+      const at = placed[k].get(b);
+      if (at) offsets.set(to, at);
     }
     return { name: d.r.name, text: renameBlocks(d.r.text, rename) };
   });
+  read.length = 0; // the decoded files are not needed past here
   let merged: ReturnType<typeof mergeDxfSheets>;
   try {
-    merged = mergeDxfSheets(sources);
+    merged = mergeDxfSheets(sources, offsets satisfies MergeOffsets);
   } catch (e) {
     throw refuse(`the DXF files cannot be merged: ${e instanceof Error ? e.message : String(e)}`);
   }
   if (merged.skipped.length)
     throw new ImportError(
       'internal',
-      `the merge dropped ${merged.skipped.length} blocks that two files share (${list(merged.skipped.map((s) => s.block))})`,
+      `the merge dropped ${merged.skipped.length} blocks that two files share (${list(merged.skipped.map((s) => shown(s.block)))})`,
     );
 
   const sizes: DxfSetSize[] = decided.map((d) => ({
@@ -270,8 +494,9 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
       notes.push(
         `${s.name}: no size in the block names or the file name; pick its card size on the sizes step`,
       );
-  notes.push(...merged.warnings.map((w) => `merge: ${w}`));
+  notes.push(...merged.warnings.map((w) => `merge: ${shown(w)}`));
   const tokens = sizes.filter((s) => s.from !== 'placeholder').map((s) => s.token.toLowerCase());
+  ctx.progress?.(steps, steps);
   return {
     name: tokens.length ? `allsizes-${tokens.join('-')}.dxf` : 'allsizes.dxf',
     bytes: encodeDxfBytes(merged.text),
@@ -283,13 +508,17 @@ export function mergeDxfSet(files: DxfSetFile[]): DxfSet {
 
 /**
  * The merged drawing as the DXF reader saw it: every file must read as exactly one size, and no
- * two files as the same size (a PIECE NAME / SIZE label inside a block outranks its name). Returns
- * the sizes as read; refuses otherwise.
+ * two files as the same size (a PIECE NAME / SIZE label inside a block outranks its name). Block
+ * names are matched in the reader's own decoding (`encoding` = `meta.encoding` of the read): the
+ * merger keeps bytes, the reader decodes cp1251 / UTF-8 (R7). Returns the sizes as read; refuses
+ * otherwise.
  */
-export function settleDxfSet(set: DxfSet, seg: DxfSegmentation): DxfSetSize[] {
+export function settleDxfSet(set: DxfSet, seg: DxfSegmentation, encoding: string): DxfSetSize[] {
+  const fileOf = new Map<string, FileId>();
+  for (const [raw, f] of set.blockFile) fileOf.set(decodedName(raw, encoding), f);
   const seen = new Map<FileId, Set<string>>();
   for (const p of seg.pieces) {
-    const f = set.blockFile.get(p.block);
+    const f = fileOf.get(p.block);
     if (f == null) continue;
     (seen.get(f) ?? seen.set(f, new Set()).get(f)!).add(p.size);
   }
