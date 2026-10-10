@@ -702,7 +702,7 @@ export async function runCase(c: Case): Promise<Rec> {
     const overrides: StageIO['semantics']['in']['pieceOverrides'] = {};
     const grain: StageIO['semantics']['in']['operatorGrain'] = {};
     const foldPick: NonNullable<StageIO['semantics']['in']['operatorFold']> = {};
-    let foldListChecked = false;
+    let foldListChecked: string[] = [];
     // E1a: the simulated operator answers fold questions from K0 truth (corpus/truth.json) — the
     // person at the wizard knows the garment; a piece truth does not list is "not a fold"
     const truthFold = (() => {
@@ -801,7 +801,7 @@ export async function runCase(c: Case): Promise<Rec> {
         );
       }
       // E1a cutting list: mark the list's pieces (truth) as fold — they come back as questions
-      if (sem.foldList && !foldListChecked) {
+      if (sem.foldList && sem.foldList.entries.some((e) => !foldListChecked.includes(e))) {
         const marked = fams.filter(
           (f) =>
             truthFold(labelOf(seedsNow)(f.seed)) === true &&
@@ -811,7 +811,7 @@ export async function runCase(c: Case): Promise<Rec> {
         );
         for (const f of marked)
           overrides[f.seed] = { ...(overrides[f.seed] ?? {}), unfoldedFold: true };
-        foldListChecked = true;
+        foldListChecked = [...new Set([...foldListChecked, ...sem.foldList.entries])];
         rec.ops.push(
           `cutting list names ${sem.foldList.entries.length} fold pieces, ${sem.foldList.unfolded} unfolded → mark ${marked.map((f) => labelOf(seedsNow)(f.seed)).join(',') || 'none'}, confirm the list`,
         );
@@ -863,10 +863,39 @@ export async function runCase(c: Case): Promise<Rec> {
         foldListChecked,
       });
     }
+    // E4: a count question on a piece the garment cuts on fold (K0 truth) is answered "cut on
+    // fold" in the same row; the fold question that follows takes the suggested edge
+    const onFold = sem.unproven.filter(
+      (u) =>
+        u.kind === 'quantity' &&
+        truthFold(lab(u.seed)) === true &&
+        !sem.pieces.some((p) => p.seed === u.seed && p.unfoldedFold),
+    );
+    if (onFold.length) {
+      for (const u of onFold)
+        overrides[u.seed] = { ...(overrides[u.seed] ?? {}), unfoldedFold: true };
+      const semIn = () => ({
+        fileAllowance,
+        pieceOverrides: overrides,
+        operatorGrain: grain,
+        operatorFold: foldPick,
+        foldListChecked,
+      });
+      sem = await run('semantics', semIn());
+      for (const u of onFold) {
+        const q = sem.folds?.find((x) => x.seed === u.seed);
+        const e = q && q.suggested != null ? q.edges[q.suggested] : null;
+        if (e) foldPick[u.seed] = { a: e.a, b: e.b };
+        rec.ops.push(
+          `count question on ${lab(u.seed)}${u.foldAlt ? ' (cut on fold suggested)' : ''}: "cut on fold" → ${e ? `pick the suggested ${e.lenMm.toFixed(0)} mm edge` : 'NO edge to pick'}`,
+        );
+      }
+      sem = await run('semantics', semIn());
+    }
     const asks = sem.unproven.filter((u) => u.kind !== 'allowance');
     confirm.quantity = asks
       .filter((u) => u.kind === 'quantity')
-      .map((u) => `${lab(u.seed)}=${u.shown}`);
+      .map((u) => `${lab(u.seed)}=${u.shown}${u.foldAlt ? ' (or cut on fold?)' : ''}`);
     confirm.name = asks
       .filter((u) => u.kind === 'name')
       .map((u) => `${lab(u.seed)}=${u.shown} (${u.detail})`);
