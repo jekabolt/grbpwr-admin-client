@@ -759,12 +759,21 @@ export type GrainEvidenceKind =
   | 'word'
   | 'dxf-layer'
   | 'operator'
-  | 'borrowed';
+  | 'borrowed'
+  // A1: the same straight line in every size copy (a grainline is not graded)
+  | 'ungraded'
+  // A1: 2–6 collinear dashes of one style read as one line (a dashed grainline)
+  | 'dashes'
+  // A1: proposed from the outline alone (fold line, symmetry axis, straight edge, strip axis)
+  | 'geometry'
+  // A1: the operator accepted a proposal (with the proposal's own evidence beside it)
+  | 'accepted';
 export type GrainFeature = Omit<FeatureBase, 'origin'> & {
   kind: 'grain';
   /**
-   * AUTO A1 (later phase): 'proposed' = a grainline the drawing suggests (strip axis, symmetry axis,
-   * straight CF/CB edge) with a single evidence: shown as a proposal, accepted only by a click.
+   * A1: 'detected' = a drawn line with two or more independent evidences (a grain class counts
+   * as two); 'proposed' = a drawn line with exactly one — never exported until the operator accepts
+   * it (the geometric proposals travel as `SemanticsOutput.grainProposals`).
    */
   origin: FeatureOrigin | 'proposed';
   a: PtMm;
@@ -917,7 +926,11 @@ export type SemanticsInput = {
       >
     >
   >;
-  operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /**
+   * The operator's grainline per seed: two clicks, or an accepted proposal (A1) — then `accepted`
+   * carries the proposal's evidence kinds, written beside 'operator' + 'accepted' (G18, manifest).
+   */
+  operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm; accepted?: GrainEvidenceKind[] }>>;
   /**
    * D3: per seed, the quantity an AI name auto-accepted at T backs with printed evidence
    * (`cut-qty`) — "cut n" read off the sheet next to the piece. It counts as the sheet's word; a
@@ -994,6 +1007,11 @@ export type SemanticsOutput = {
    * those confirmations, keyed by `shown`, so a value that changes asks again).
    */
   unproven: Unproven[];
+  /**
+   * A1: per seed blocked 'no-grain', the grainline the drawing or the outline proposes (absent =
+   * none). Never applied without the operator's click ("accept N proposed grainlines", D3).
+   */
+  grainProposals?: SeedGrainProposal[];
 };
 
 /**
@@ -1842,6 +1860,8 @@ export type AutoDecision = {
 
 /** A1: a grainline the geometry proposes (origin 'proposed' once it is a feature). */
 export type GrainProposal = { a: PtMm; b: PtMm; why: string };
+/** A1: a proposal for one seed, with the evidence kinds it stands on (one drawn evidence or geometry). */
+export type SeedGrainProposal = GrainProposal & { seed: SeedId; evidence: GrainEvidenceKind[] };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 12. Card-side consumption (F6b) — the manifest-aware paths of existing functions

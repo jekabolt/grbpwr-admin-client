@@ -331,6 +331,8 @@ export const CLICKS = {
   'not-a-piece': 2,
   code: 2,
   grain: 3,
+  // A1: "review N proposed grainlines" + "accept these N" in the overview that shows them all
+  'grain-accept': 2,
   'fold-suggested': 1,
   'fold-pick': 2,
   outline: 1,
@@ -915,23 +917,48 @@ export async function runCase(c: Case): Promise<Rec> {
       })),
       foldList: sem.foldList ?? null,
       unfolded: sem.pieces.filter((p) => p.unfoldedFold).map((p) => p.identity),
+      // A1: where each piece's grain came from before any answer (first size), and the proposals
+      grains: [
+        ...sem.pieces.map((p) => {
+          const g = p.sizes[0]?.grain;
+          return `${labelOf(seedsNow)(p.seed)}:${g ? `${g.origin}[${(g.evidence ?? []).join('+')}] ${g.angleDeg.toFixed(0)}°` : 'none'}`;
+        }),
+        ...sem.blocked
+          .filter((b) => b.reason === 'no-grain')
+          .map((b) => {
+            const pr = sem.grainProposals?.find((x) => x.seed === b.seed);
+            return `${labelOf(seedsNow)(b.seed)}:${pr ? `proposed(${pr.why}) ${((Math.atan2(pr.b.y - pr.a.y, pr.b.x - pr.a.x) * 180) / Math.PI).toFixed(0)}°` : 'no-grain'}`;
+          }),
+      ],
     };
     const fams = pc.families;
     const dropped: string[] = [];
+    const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
     for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
       for (const b of sem.blocked)
         byReason.set(b.reason, [...(byReason.get(b.reason) ?? []), b.seed]);
       const noGrain = byReason.get('no-grain') ?? [];
-      for (const sd of noGrain) {
+      for (const g of sem.grainProposals ?? [])
+        if (!firstProposal.has(g.seed)) firstProposal.set(g.seed, g);
+      // A1: the proposals first — one click accepts them all; the rest are drawn by hand
+      const proposals = (sem.grainProposals ?? []).filter((g) => noGrain.includes(g.seed));
+      for (const g of proposals) grain[g.seed] = { a: g.a, b: g.b, accepted: g.evidence };
+      if (proposals.length)
+        op(
+          'grain-accept',
+          `accept ${proposals.length} proposed grainlines (${[...new Set(proposals.map((g) => g.why))].join(', ')})`,
+        );
+      const drawn = noGrain.filter((sd) => !proposals.some((g) => g.seed === sd));
+      for (const sd of drawn) {
         const f = fams.find((x) => x.seed === sd);
         if (!f) continue;
         const bb = f.candidates[0].bbox;
         const cx = (bb.minX + bb.maxX) / 2;
         grain[sd] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
       }
-      if (noGrain.length)
-        op('grain', `draw grain on ${noGrain.length} pieces (row + 2 ends each)`, noGrain.length);
+      if (drawn.length)
+        op('grain', `draw grain on ${drawn.length} pieces (row + 2 ends each)`, drawn.length);
       const named = [
         ...(byReason.get('grammar') ?? []),
         ...(byReason.get('duplicate-identity') ?? []),
@@ -1085,11 +1112,61 @@ export async function runCase(c: Case): Promise<Rec> {
         'bulk-confirm',
         `confirm all as shown: ${(confirm.quantity as string[]).length} quantities, ${(confirm.name as string[]).length} names (1 click)`,
       );
+    // A1 probe: E2E_GRAIN_PNG=1 → grain-<piece>.png per piece: the sheet's lines (grey), the
+    // outlines, the first proposal (blue, dashed) and the written grain (red)
+    if (process.env.E2E_GRAIN_PNG) {
+      const grey: Stroke[] = ch.chainPreview.map((a) => {
+        const pts: PtMm[] = [];
+        for (let i = 0; i + 1 < a.length; i += 2) pts.push({ x: a[i], y: a[i + 1] });
+        return { pts, color: '#bbbbbb', width: 0.7 };
+      });
+      for (const f of fams) {
+        const c0 = f.candidates[0];
+        if (!c0 || c0.outer.length < 3) continue;
+        const b = c0.bbox;
+        const box = { minX: b.minX - 15, minY: b.minY - 15, maxX: b.maxX + 15, maxY: b.maxY + 15 };
+        const strokes: Stroke[] = [...grey];
+        for (const c of f.candidates)
+          if (c.outer.length > 2)
+            strokes.push({ pts: c.outer, closed: true, color: '#000', width: 1 });
+        const labels: Label[] = [];
+        const pr = firstProposal.get(f.seed);
+        if (pr) {
+          strokes.push({ pts: [pr.a, pr.b], color: '#1f5fd6', width: 4, dash: '10 5' });
+          labels.push({ at: pr.a, text: `PROPOSED · ${pr.why}`, color: '#1f5fd6', size: 14 });
+        }
+        const g = sem.pieces.find((p) => p.seed === f.seed)?.sizes[0]?.grain;
+        if (g) {
+          strokes.push({ pts: [g.a, g.b], color: '#e00000', width: 2 });
+          labels.push({
+            at: g.b,
+            text: `${g.origin} [${(g.evidence ?? []).join('+')}]`,
+            color: '#e00000',
+            size: 14,
+          });
+        }
+        const px = Math.min(3, 900 / Math.max(box.maxX - box.minX, box.maxY - box.minY));
+        renderPng(
+          resolve(dir, `grain-${labelOf(seedsNow)(f.seed).replace(/[^\w.-]+/g, '_')}.png`),
+          box,
+          strokes,
+          labels,
+          px,
+        );
+      }
+    }
     rec.semFinal = {
       pieces: new Set(sem.pieces.map((p) => p.seed)).size,
       specs: sem.pieces.length,
       blocked: sem.blocked.map((b) => `${b.reason}:${b.detail.slice(0, 80)}`),
       foldList: sem.foldList ?? null,
+      // A1: the written grain per identity (first size): origin, evidence, angle, ends
+      grains: sem.pieces.map((p) => {
+        const g = p.sizes[0]?.grain;
+        return g
+          ? `${p.identity}:${g.origin}[${(g.evidence ?? []).join('+')}] ${g.angleDeg.toFixed(0)}° (${g.a.x.toFixed(0)},${g.a.y.toFixed(0)})-(${g.b.x.toFixed(0)},${g.b.y.toFixed(0)})`
+          : `${p.identity}:none`;
+      }),
       pieceInfo: sem.pieces.map((p) => ({
         identity: p.identity,
         seed: p.seed,

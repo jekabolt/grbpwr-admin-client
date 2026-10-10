@@ -398,6 +398,24 @@ function input(
   };
 }
 
+/** A1: arrowhead barbs (8 mm back, 4 mm aside, ≈ 27°) at both ends of a vertical grain line. */
+const barbs = (x: number, y0: number, y1: number, ends: 0 | 1 | 2 = 2) =>
+  [
+    [y0, 1],
+    [y1, -1],
+  ]
+    .slice(0, ends)
+    .flatMap(([y, dir]) =>
+      [-4, 4].map((dx) => ({
+        pts: [
+          { x, y },
+          { x: x + dx, y: y + dir * 8 },
+        ],
+        closed: false,
+        role: 'internal' as const,
+      })),
+    );
+
 const grainLine = (x: number, y0: number, y1: number) => [
   { x, y: y0 },
   { x, y: (y0 + y1) / 2 },
@@ -1403,8 +1421,10 @@ export async function main(): Promise<number> {
       { pts: notchAt({ x: 125, y: 0 }, 0, 1).reverse(), closed: false, role: 'common' as const },
       // drill: a 4 mm circle
       { pts: arc(150, 300, 2, 2, 0, 350, 12), closed: true, role: 'internal' as const },
-      // labelled grain (no grain class): a straight line + text «Fadenlauf» on it
+      // labelled grain (no grain class): a straight line + text «Fadenlauf» on it, arrowheads at
+      // both ends — two evidences (A1), so it is found, not only proposed
       { pts: grainLine(90, 120, 420), closed: false, role: 'internal' as const },
+      ...barbs(90, 120, 420),
       // dart
       {
         pts: [
@@ -1433,7 +1453,7 @@ export async function main(): Promise<number> {
       ck(s.drills.length === 1, 'drill found', `${s.drills.length}`);
       ck(
         s.grain?.origin === 'detected' && Math.abs(s.grain.a.x - 90) < 1e-6,
-        'grain from the «Fadenlauf» label',
+        'grain from the «Fadenlauf» label + arrowheads (detected, two evidences)',
         JSON.stringify(s.grain && [s.grain.a, s.grain.b]),
       );
       ck(
@@ -1490,6 +1510,394 @@ export async function main(): Promise<number> {
     );
     const g2 = await gate(d2.output.pieces, inp2.sizeMap, d2.wallsOf);
     ck(g2.report.passed, 'gate passes (both drawn)', gateLine(g2.report));
+  }
+
+  head('D5b A1 grain: evidence → detected / proposed, lettering, geometric proposals, accept');
+  {
+    type Extra = { pts: PtMm[]; closed: boolean; role: LineClass['role'] };
+    const line = (x: number, y0 = 120, y1 = 420): Extra => ({
+      pts: grainLine(x, y0, y1),
+      closed: false,
+      role: 'internal',
+    });
+    const run1 = (
+      extras: Extra[],
+      texts: { t: string; at: PtMm }[] = [],
+      /** per extra: its source layer / OCG (the extras are the first chains of the fixture) */
+      layers?: (string | null)[],
+    ) => {
+      const F = fx();
+      addFamily(F, 1, bodice, 0, extras, ['FRONT']);
+      for (const t of texts) F.text(t.t, t.at);
+      const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
+      if (layers) {
+        layers.forEach((_, i) => (F.chains[i].style = i + 1));
+        inp.sheet = {
+          ...inp.sheet,
+          styles: layers.map((layer, i) => ({
+            id: i + 1,
+            strokeRgb: [0, 0, 0],
+            widthMm: 0.2,
+            dash: null,
+            layer,
+            fill: false,
+            clip: null,
+          })),
+        };
+      }
+      return { inp, d: buildPieceSpecsDetailed(inp) };
+    };
+    const grainOf = (d: ReturnType<typeof buildPieceSpecsDetailed>) =>
+      d.output.pieces[0]?.sizes[1]?.grain ?? null;
+    const word = [{ t: 'Fadenlauf', at: { x: 92, y: 250 } }];
+
+    // (b) a word alone: ONE evidence → proposed, blocked until accepted
+    {
+      const { inp, d } = run1([line(90)], word);
+      const pr = d.output.grainProposals?.[0];
+      ck(
+        d.output.pieces.length === 0 &&
+          d.output.blocked[0]?.reason === 'no-grain' &&
+          pr?.why === 'line by a grain word' &&
+          Math.abs(pr.a.x - 90) < 1e-6,
+        'word alone → proposed (line by a grain word), not exported',
+        JSON.stringify({ b: d.output.blocked, pr }),
+      );
+      // accept: the operator's word, with the proposal's evidence beside it; G18 is satisfied
+      const d2 = buildPieceSpecsDetailed({
+        ...inp,
+        operatorGrain: { 1: { a: pr!.a, b: pr!.b, accepted: pr!.evidence } },
+      });
+      const g = grainOf(d2);
+      ck(
+        g?.origin === 'operator' &&
+          (g.evidence ?? []).join('+') === 'operator+accepted+word' &&
+          d2.output.pieces[0].sizes.every((s) => s.internal.length === 0),
+        'accepted → origin operator, evidence operator+accepted+word, the line is not also internal',
+        JSON.stringify(g?.evidence),
+      );
+      const gt = await gate(d2.output.pieces, inp.sizeMap, d2.wallsOf);
+      ck(
+        gt.report.passed && !!checkOf(gt.report, 'G18-grain-source')?.ok,
+        'accepted proposal passes the gate (G18)',
+        gateLine(gt.report),
+      );
+      // the operator draws ANOTHER line: the proposed one stays an internal line
+      const d3 = buildPieceSpecsDetailed({
+        ...inp,
+        operatorGrain: { 1: { a: { x: 150, y: 100 }, b: { x: 150, y: 400 } } },
+      });
+      ck(
+        d3.output.pieces[0]?.sizes.every((s) => s.internal.length === 1),
+        'a proposal not taken stays an internal line',
+        `${d3.output.pieces[0]?.sizes.map((s) => s.internal.length)}`,
+      );
+      // a word farther than 60 mm and not turned along the line: no evidence → geometry
+      const far = run1([line(90)], [{ t: 'Fadenlauf', at: { x: 170, y: 250 } }]);
+      ck(
+        far.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'a grain word 80 mm away is not the line’s',
+        JSON.stringify(far.d.output.grainProposals),
+      );
+    }
+    // (a) arrowheads + word → detected; one barb at one end → not arrowheads
+    {
+      const { d } = run1([line(90), ...barbs(90, 120, 420)], word);
+      const g = grainOf(d);
+      ck(
+        g?.origin === 'detected' && (g.evidence ?? []).join('+') === 'arrowheads+word',
+        'arrowheads at both ends + word → detected',
+        JSON.stringify(g?.evidence),
+      );
+      const one = run1([line(90), barbs(90, 120, 420, 1)[0]], word);
+      ck(
+        one.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'a single barb at one end is not an arrowhead (word only → proposed)',
+        JSON.stringify(one.d.output.grainProposals),
+      );
+      // perpendicular end caps (a T, a dimension line) are not barbs: 90° to the line
+      const caps: Extra[] = [120, 420].map((y) => ({
+        pts: [
+          { x: 86, y },
+          { x: 94, y },
+        ],
+        closed: false,
+        role: 'internal',
+      }));
+      const capped = run1([line(90), ...caps], word);
+      ck(
+        capped.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'perpendicular end caps are not arrowheads',
+        JSON.stringify(capped.d.output.grainProposals),
+      );
+      const pair = run1([line(90), ...barbs(90, 120, 420, 1)], word);
+      ck(
+        grainOf(pair.d)?.origin === 'detected',
+        'a symmetric pair at one end counts as arrowheads',
+        JSON.stringify(pair.d.output.blocked),
+      );
+      // the same arrow among lettering: 12 short strokes in the cell of its top end (wm, G18)
+      const letters: Extra[] = Array.from({ length: 12 }, (_, i) => ({
+        pts: [
+          { x: 100 + (i % 4) * 6, y: 130 + Math.floor(i / 4) * 8 },
+          { x: 103 + (i % 4) * 6, y: 136 + Math.floor(i / 4) * 8 },
+        ],
+        closed: false,
+        role: 'internal',
+      }));
+      const lettered = run1([line(90), ...barbs(90, 120, 420), ...letters], word);
+      ck(
+        lettered.d.output.pieces.length === 0 &&
+          !(lettered.d.output.grainProposals?.[0]?.evidence ?? []).includes('arrowheads'),
+        'arrowheads among lettering are not evidence (no detected grain from letters)',
+        JSON.stringify(lettered.d.output.grainProposals),
+      );
+    }
+    // integral barbs: barb → tip → shaft → tip → barb in ONE polyline (blazer) + word → detected
+    {
+      const arrow: Extra = {
+        pts: [
+          { x: 86, y: 128 },
+          { x: 90, y: 120 },
+          { x: 90, y: 420 },
+          { x: 94, y: 412 },
+        ],
+        closed: false,
+        role: 'internal',
+      };
+      const { d } = run1([arrow], word);
+      const g = grainOf(d);
+      ck(
+        g?.origin === 'detected' &&
+          (g.evidence ?? []).includes('arrowheads') &&
+          Math.abs(g.a.y - 120) < 1e-6,
+        'a shaft with its barbs in one stroke: body = the shaft, arrowheads counted',
+        JSON.stringify(g && [g.a, g.b, g.evidence]),
+      );
+    }
+    // (d) dashes: 4 collinear 60 mm dashes, 15 mm gaps (+ word) → one line, detected
+    {
+      const dashes: Extra[] = [0, 1, 2, 3].map((i) => ({
+        pts: [
+          { x: 90, y: 110 + i * 75 },
+          { x: 90, y: 170 + i * 75 },
+        ],
+        closed: false,
+        role: 'internal',
+      }));
+      const { d } = run1(dashes, word);
+      const g = grainOf(d);
+      ck(
+        g?.origin === 'detected' &&
+          (g.evidence ?? []).join('+') === 'word+dashes' &&
+          Math.abs(g.a.y - 110) + Math.abs(g.b.y - 395) < 1e-6,
+        'dashed line read as one (110→395), word + dashes → detected',
+        JSON.stringify(g && [g.a, g.b, g.evidence]),
+      );
+      // irregular "dashes" (letter strokes on one baseline: 60, 8, 60) are not a dashed line
+      const odd = run1(
+        [
+          [110, 170],
+          [180, 188],
+          [195, 255],
+        ].map(
+          ([y0, y1]): Extra => ({
+            pts: [
+              { x: 90, y: y0 },
+              { x: 90, y: y1 },
+            ],
+            closed: false,
+            role: 'internal',
+          }),
+        ),
+      );
+      ck(
+        odd.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'dashes of unlike lengths are not a dashed grainline (nor collinear strokes size copies)',
+        JSON.stringify(odd.d.output.grainProposals),
+      );
+    }
+    // (c) ungraded: the same line in every size copy (3 copies on the line, ±0.4 mm) → proposed;
+    // + a word → detected. Copies must prove they are sizes: on the line, or one per size layer.
+    {
+      const copies = [line(90), line(90.3, 120.4, 420.4), line(89.8, 119.8, 419.8)];
+      const alone = run1(copies);
+      ck(
+        alone.d.output.grainProposals?.[0]?.why === 'line in every size',
+        'the same line in every size copy (on the line) → proposed (line in every size)',
+        JSON.stringify(alone.d.output.grainProposals),
+      );
+      const beside = [line(90), line(96, 120.4, 420.4), line(102, 119.8, 419.8)];
+      ck(
+        run1(beside).d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'equal lines beside each other, one layer: not proven size copies',
+        JSON.stringify(run1(beside).d.output.grainProposals),
+      );
+      const perLayer = run1(beside, [], ['size S', 'size M', 'size L']);
+      ck(
+        perLayer.d.output.grainProposals?.[0]?.why === 'line in every size',
+        'equal lines beside each other, one per size layer (OCG) → size copies',
+        JSON.stringify(perLayer.d.output.grainProposals),
+      );
+      const twoOnLine = run1([line(90), line(90.3, 120.4, 420.4)]);
+      ck(
+        twoOnLine.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'two coincident strokes (a duplicate) are not size copies',
+        JSON.stringify(twoOnLine.d.output.grainProposals),
+      );
+      const graded = run1([line(90), line(96, 120, 440), line(102, 120, 460)]);
+      ck(
+        graded.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'lines of graded lengths are not ungraded',
+        JSON.stringify(graded.d.output.grainProposals),
+      );
+      const both = run1(copies, word);
+      ck(
+        grainOf(both.d)?.origin === 'detected' &&
+          (grainOf(both.d)?.evidence ?? []).join('+') === 'word+ungraded',
+        'ungraded + word → detected',
+        JSON.stringify(grainOf(both.d)?.evidence),
+      );
+    }
+    // a three-size front: a long CF / placket line equal in every size near the true arrowed
+    // grain + a «grain» label beside the arrow → the arrowed line wins, the CF line is internal
+    {
+      const cf = [line(40, 60, 480), line(40.2, 60, 480), line(39.8, 60, 480)];
+      const arrowed = [line(150, 150, 400), ...barbs(150, 150, 400)];
+      const { d } = run1([...cf, ...arrowed], [{ t: 'grain', at: { x: 120, y: 260 } }]);
+      const g = grainOf(d);
+      ck(
+        g?.origin === 'detected' &&
+          Math.abs(g.a.x - 150) < 1e-6 &&
+          (g.evidence ?? []).join('+') === 'arrowheads+word' &&
+          d.output.pieces[0].sizes[1].internal.some((f) => Math.abs(f.pts[0].x - 40) < 1),
+        'CF line equal in every size vs arrowed grain + label → the arrowed line, CF stays internal',
+        JSON.stringify(g && [g.a, g.evidence]),
+      );
+      // no label: the shorter arrowed line still beats the longer ungraded CF (never length first)
+      const noWord = run1([...cf, ...arrowed]);
+      const pr = noWord.d.output.grainProposals?.[0];
+      ck(
+        !!pr && Math.abs(pr.a.x - 150) < 1e-6 && pr.evidence.join() === 'arrowheads',
+        'arrowheads outrank a longer ungraded line',
+        JSON.stringify(pr),
+      );
+      // the word labels ONE line: the nearest (CF 40 mm, grain 20 mm away — only the grain)
+      const between = run1([line(40, 60, 480), line(100)], [{ t: 'grain', at: { x: 75, y: 260 } }]);
+      ck(
+        between.d.output.grainProposals?.[0]?.why === 'line by a grain word' &&
+          Math.abs(between.d.output.grainProposals[0].a.x - 100) < 1e-6,
+        'a grain word between two lines labels only the nearest',
+        JSON.stringify(between.d.output.grainProposals),
+      );
+    }
+    // per-size grains that disagree (S, L vertical; M horizontal from a placement line): never
+    // exported mixed — the majority is proposed; with no majority, nothing is
+    {
+      const mixed = (dirs: ('v' | 'h' | 'd')[]) => {
+        const F = fx();
+        const grainCls = F.cls('grain');
+        const lines = {
+          v: F.chain(grainLine(120, 100, 400), false, grainCls),
+          h: F.chain(
+            [
+              { x: 60, y: 250 },
+              { x: 120, y: 250 },
+              { x: 180, y: 250 },
+            ],
+            false,
+            grainCls,
+          ),
+          d: F.chain(
+            [
+              { x: 60, y: 150 },
+              { x: 180, y: 300 },
+            ],
+            false,
+            grainCls,
+          ),
+        };
+        addFamily(F, 1, bodice, 0, [], ['FRONT']);
+        F.families[0].candidates.forEach((c, i) => (c.inside = [lines[dirs[i]]]));
+        const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
+        return buildPieceSpecsDetailed(inp).output;
+      };
+      const vhv = mixed(['v', 'h', 'v']);
+      const pr = vhv.grainProposals?.[0];
+      ck(
+        vhv.pieces.length === 0 &&
+          vhv.blocked[0]?.reason === 'no-grain' &&
+          !!pr &&
+          Math.abs(pr.a.x - pr.b.x) < 1e-6 &&
+          pr.why === 'most sizes agree',
+        'sizes disagree (S, L vertical, M horizontal) → not exported, the vertical majority proposed',
+        JSON.stringify({ b: vhv.blocked, pr }),
+      );
+      const vhd = mixed(['v', 'h', 'd']);
+      ck(
+        vhd.pieces.length === 0 && !vhd.grainProposals?.length,
+        'three directions, no majority → no grain, no proposal',
+        JSON.stringify(vhd.blocked),
+      );
+      const vvv = mixed(['v', 'v', 'v']);
+      ck(vvv.pieces.length === 1, 'sizes that agree → exported', JSON.stringify(vvv.blocked));
+    }
+    // geometric proposals: a strip (aspect ≥ 3) along its length; a straight CF edge
+    {
+      const F = fx();
+      const strip = (k: number) => [
+        { x: 0, y: 0 },
+        { x: 60 * k, y: 0 },
+        { x: 60 * k, y: 400 * k },
+        { x: 0, y: 420 * k },
+      ];
+      addFamily(F, 1, strip, 0, [], ['WAISTBAND']);
+      addFamily(F, 2, bodice, 600, [], ['FRONT']);
+      // a back with a shaped CB and a straight hem (redcafe спинка): the hem is the longest
+      // straight edge, the grain still runs along the length
+      const back = (k: number) =>
+        [
+          { x: 0, y: 0 },
+          { x: 250, y: 0 },
+          { x: 238, y: 120 },
+          { x: 230, y: 250 },
+          { x: 240, y: 340 },
+          { x: 205, y: 400 },
+          { x: 190, y: 470 },
+          { x: 60, y: 500 },
+          { x: 14, y: 480 },
+          { x: 9, y: 360 },
+          { x: 12, y: 240 },
+          { x: 8, y: 120 },
+        ].map((p) => ({ x: p.x * k, y: p.y * k }));
+      addFamily(F, 3, back, 1200, [], ['BACK']);
+      const d = buildPieceSpecsDetailed(input(F, CUT10));
+      const p1 = d.output.grainProposals?.find((g) => g.seed === 1);
+      const p2 = d.output.grainProposals?.find((g) => g.seed === 2);
+      const vertical = (g?: { a: PtMm; b: PtMm }) =>
+        !!g && Math.abs(g.a.x - g.b.x) < 0.02 * Math.abs(g.a.y - g.b.y);
+      ck(
+        !!p1 && vertical(p1) && p1.evidence.join() === 'geometry',
+        `strip → proposed along its length (${p1?.why})`,
+        JSON.stringify(p1),
+      );
+      ck(
+        !!p2 && vertical(p2),
+        `bodice with a straight CF edge → proposed parallel to it (${p2?.why})`,
+        JSON.stringify(p2),
+      );
+      const p3 = d.output.grainProposals?.find((g) => g.seed === 3);
+      ck(
+        !!p3 && vertical(p3),
+        `a back with a shaped CB and a straight hem → along its length (${p3?.why})`,
+        JSON.stringify(p3),
+      );
+      ck(
+        d.output.pieces.length === 0,
+        'geometric proposals are never applied without a click',
+        `${d.output.pieces.length} pieces`,
+      );
+    }
   }
 
   head('D6 names: AI/operator overrides, size token, duplicates, UNI, lining');
