@@ -24,6 +24,7 @@ import type {
   Affine,
   AllowanceDecision,
   BlockReason,
+  BoxMm,
   BuildPieceSpecsFn,
   CardSize,
   Chain,
@@ -68,8 +69,11 @@ import {
   foldWordRole,
   foldEdges,
   foldLineOnCut,
+  bindFoldListEntry,
   foldListEntries,
   foldShapeProblem,
+  FOLD_LOOSE_TOL_MM,
+  looseFoldEdge,
   matchFoldEdge,
   sideOf,
   unfold,
@@ -83,6 +87,7 @@ import {
   ccw,
   closestOnPolyline,
   compose,
+  dist,
   reflection,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
@@ -102,7 +107,14 @@ type DxfExtra = {
 type Blocked = SemanticsOutput['blocked'][number];
 
 /** How a written size relates to its source candidate, for the walls the gate compares (G3/G4). */
-type WallMap = { seed: SeedId; rank: number; fold: FoldLine | null; t: Affine };
+type WallMap = {
+  seed: SeedId;
+  rank: number;
+  fold: FoldLine | null;
+  /** The fold's on-line tolerance (E4 loose match: 3 mm), for clipping the fold edge's walls. */
+  foldTol?: number;
+  t: Affine;
+};
 
 export type SemanticsDetail = {
   output: SemanticsOutput;
@@ -149,14 +161,14 @@ function titleTest(c: PieceCandidate, byId: Map<number, IRText>): (text: string)
 }
 
 /** Points of the fold edge removed from a wall polyline (they are interior once unfolded). */
-function clipFold(line: PtMm[], fold: FoldLine): PtMm[][] {
+function clipFold(line: PtMm[], fold: FoldLine, tol = FOLD_TOL_MM): PtMm[][] {
   const out: PtMm[][] = [];
   let cur: PtMm[] = [];
   for (let i = 0; i < line.length; i++) {
     const p = line[i];
-    const onP = Math.abs(sideOf(fold, p)) <= FOLD_TOL_MM;
+    const onP = Math.abs(sideOf(fold, p)) <= tol;
     const prev = line[i - 1];
-    const onPrev = prev ? Math.abs(sideOf(fold, prev)) <= FOLD_TOL_MM : false;
+    const onPrev = prev ? Math.abs(sideOf(fold, prev)) <= tol : false;
     if (onP && onPrev) {
       if (cur.length > 1) out.push(cur);
       cur = [p];
@@ -392,13 +404,28 @@ function foldAskOf(
   };
 }
 
+/**
+ * E4: the straight edge that could make this outline the half of a fold piece — the longest edge
+ * ≥ 30 % of the perimeter whose unfold passes `foldShapeProblem`. Null when there is none.
+ */
+function foldAlternative(outline: readonly PtMm[]): FoldEdge | null {
+  const outer = ccw([...outline]);
+  const per = outer.reduce((s, p, i) => s + dist(p, outer[(i + 1) % outer.length]), 0);
+  for (const e of foldEdges(outer)) {
+    if (e.lenMm < 0.3 * per) break;
+    if (tryUnfold(outer, e, e.lenMm).u) return e;
+  }
+  return null;
+}
+
 /** Unfold `outer` across `fold`, or say why that does not give a believable whole piece. */
 function tryUnfold(
   outer: PtMm[],
   fold: FoldLine,
   edgeLen: number | null,
+  tol?: number,
 ): { u: NonNullable<ReturnType<typeof unfold>>; problem: null } | { u: null; problem: string } {
-  const u = unfold(outer, fold);
+  const u = unfold(outer, fold, tol);
   if (!u) return { u: null, problem: 'the fold line is not an edge of the outline' };
   const run = Math.hypot(u.edge[1].x - u.edge[0].x, u.edge[1].y - u.edge[0].y);
   if (edgeLen != null && run < 0.8 * edgeLen)
@@ -548,6 +575,31 @@ export function buildPieceSpecsDetailed(
     }
   }
 
+  // ── the cutting list's fold pieces (S5): each entry bound to ONE piece by its printed number or
+  // title — never counted against the unfolds of other pieces. A bound entry is that piece's fold
+  // evidence (asked unless unfolded); an unbound one stays a file-level question.
+  const listEntries = foldListEntries(input.docTexts ?? []);
+  const listBound: { entry: string; seed: SeedId }[] = [];
+  const listUnbound: string[] = [];
+  if (listEntries.length) {
+    const pieceLabels = preps.map((p) => {
+      const c = p.cands[p.cands.length - 1].c;
+      const isTitle = titleTest(c, textById);
+      return {
+        seed: p.seed,
+        labels: [
+          ...(input.seedLabels?.[p.seed] ? [input.seedLabels[p.seed]!] : []),
+          ...p.texts.filter(isTitle),
+        ],
+      };
+    });
+    for (const e of listEntries) {
+      const seed = bindFoldListEntry(e, pieceLabels);
+      if (seed != null) listBound.push({ entry: e.text, seed });
+      else listUnbound.push(e.text);
+    }
+  }
+
   // ── pass 2: geometry per family ─────────────────────────────────────────────────────────
   const pieces: PieceSpec[] = [];
   const walls = new Map<string, WallMap[]>(); // identity → per rank
@@ -593,6 +645,10 @@ export function buildPieceSpecsDetailed(
     const opFold = wantFold === false ? null : operatorFold[seed] ?? null;
     const foldWords = wantFold === false ? [] : foldWordsOf(p.fam, sheet);
     let refEdge: FoldLine | null = opFold;
+    // the box of the outline the operator's pick lies on (the fold question's size): only a PICK
+    // is carried to the other sizes by place (file per size) or loosely (a wandering edge) — a fold
+    // word's edge must match strictly, else the piece is asked
+    const refBox: BoxMm | null = opFold ? largest.bbox : null;
     let refWhy: string | null = opFold ? 'picked by you' : null;
     const internalWords = new Set<string>();
     if (!refEdge && foldWords.length) {
@@ -618,6 +674,7 @@ export function buildPieceSpecsDetailed(
         `${[...internalWords].map((w) => `«${w}»`).join(', ')}: a fold line across the piece — kept as an internal line`,
       );
     const foldEvidence = [
+      ...listBound.filter((l) => l.seed === seed).map((l) => `cutting list: ${l.entry}`),
       ...new Set(
         foldWords.filter((w) => w.inside && !internalWords.has(w.t.text)).map((w) => w.t.text),
       ),
@@ -659,11 +716,17 @@ export function buildPieceSpecsDetailed(
       let fold: FoldLine | null = null;
       let foldFeat: FoldFeature | null = null;
       let edgeLen: number | null = null;
+      let foldTol: number | undefined;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
         if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
         else if (refEdge) {
-          const e = matchFoldEdge(foldEdges(outer), refEdge);
+          let e = matchFoldEdge(foldEdges(outer), refEdge, refBox, c.bbox);
+          // E4: no clean straight edge in this size (a notch bump, a drift): the loose match
+          if (!e && refBox) {
+            e = looseFoldEdge(outer, refEdge, refBox, c.bbox);
+            if (e) foldTol = FOLD_LOOSE_TOL_MM;
+          }
           if (!e) {
             if (opFold) {
               blockedHere = {
@@ -706,7 +769,7 @@ export function buildPieceSpecsDetailed(
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');
       if (fold) {
         const half = outer;
-        const t = tryUnfold(half, fold, edgeLen);
+        const t = tryUnfold(half, fold, edgeLen, foldTol);
         if (!t.u) {
           if (foldFeat || opFold) {
             blockedHere = {
@@ -727,13 +790,13 @@ export function buildPieceSpecsDetailed(
           foldEdge = u.edge;
           anyFold = true;
           if (drawnSeam) {
-            const us = unfold(drawnSeam, fold);
+            const us = unfold(drawnSeam, fold, foldTol);
             drawnSeam = us ? us.pts : null;
             if (!us)
               pieceNotes.push('seam line has no fold edge — re-derived from the unfolded cut');
           }
           const M = reflection(fold.a, fold.b);
-          const onFold = (q: PtMm) => Math.abs(sideOf(fold!, q)) <= FOLD_TOL_MM;
+          const onFold = (q: PtMm) => Math.abs(sideOf(fold!, q)) <= (foldTol ?? FOLD_TOL_MM);
           notches = [
             ...notches,
             ...notches
@@ -873,7 +936,13 @@ export function buildPieceSpecsDetailed(
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
       });
-      wallMaps.push({ seed, rank: c.rank, fold: fold && foldEdge ? fold : null, t: IDENTITY });
+      wallMaps.push({
+        seed,
+        rank: c.rank,
+        fold: fold && foldEdge ? fold : null,
+        ...(fold && foldEdge && foldTol ? { foldTol } : {}),
+        t: IDENTITY,
+      });
     }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
@@ -960,14 +1029,30 @@ export function buildPieceSpecsDetailed(
         detail:
           'no allowance text and no second drawn line: is the outline the cut or the seam line?',
       });
+    // E4: the operator's "cut on fold" (an unfold they asked for) answers the count too — one
+    // whole piece per garment unless the sheet prints otherwise
     const qtyProven =
-      pp.proven || mode === 'drawn' || ov.pairHand !== undefined || ov.piecesPerGarment != null;
+      pp.proven ||
+      mode === 'drawn' ||
+      ov.pairHand !== undefined ||
+      ov.piecesPerGarment != null ||
+      (ov.unfoldedFold === true && anyFold);
+    // E4 (redcafe спинка): a pair suggested only because the outline is not symmetric, while one
+    // long straight edge (≥ 30 % of the perimeter) would unfold it into a believable whole — the
+    // same outline may be the half of a piece cut on fold. Offered as the alternative, never applied.
+    const foldAlt =
+      !qtyProven && mode === 'derived' && !anyFold && wantFold !== false && !saysPair
+        ? foldAlternative(largest.outer)
+        : null;
     if (!qtyProven)
       unprovenHere.push({
         seed,
         kind: 'quantity',
         shown: mode === 'derived' ? `pair×${ppg}` : `×${ppg}`,
-        detail: pp.why,
+        detail: foldAlt
+          ? `${pp.why} · or cut on fold along its ${foldAlt.lenMm.toFixed(0)} mm straight edge?`
+          : pp.why,
+        ...(foldAlt ? { foldAlt: true } : {}),
       });
     if (name.fromNote)
       unprovenHere.push({
@@ -1138,7 +1223,7 @@ export function buildPieceSpecsDetailed(
   const toFrame = (w: WallMap, lines: PtMm[][]): PtMm[][] => {
     if (w.fold) {
       const M = reflection(w.fold.a, w.fold.b);
-      const clipped = lines.flatMap((l) => clipFold(l, w.fold!));
+      const clipped = lines.flatMap((l) => clipFold(l, w.fold!, w.foldTol));
       lines = [...clipped, ...clipped.map((l) => l.map((q) => applyAffine(M, q)))];
     }
     return lines.map((l) => l.map((q) => applyAffine(w.t, q)));
@@ -1176,14 +1261,14 @@ export function buildPieceSpecsDetailed(
 
   // a blocked piece is not exported: its open questions wait until it is
   const written = new Set(unique.map((s) => s.seed));
-  // the cutting list (instruction pages) names fold pieces the sheet may draw with curves only: when
-  // it names more than were unfolded, the operator marks them or confirms the list (D3)
-  const listed = foldListEntries(input.docTexts ?? []);
+  // unbound cutting-list entries: a file-level question until the operator has seen them named
+  const checked = input.foldListChecked;
+  const listSeen = (e: string) =>
+    checked === true || (Array.isArray(checked) && checked.includes(e));
   const unfoldedSeeds = new Set(unique.filter((s) => s.unfoldedFold).map((s) => s.seed)).size;
-  const foldList =
-    listed.length > unfoldedSeeds && !input.foldListChecked
-      ? { entries: listed, unfolded: unfoldedSeeds }
-      : undefined;
+  const foldList = listUnbound.some((e) => !listSeen(e))
+    ? { entries: listUnbound, unfolded: unfoldedSeeds, bound: listBound }
+    : undefined;
   return {
     output: {
       pieces: unique,

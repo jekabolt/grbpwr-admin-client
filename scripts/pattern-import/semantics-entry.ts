@@ -957,6 +957,126 @@ export async function main(): Promise<number> {
     };
   }
 
+  head('D2l cutting list binds each "cut on fold" entry to ITS piece (Codex S5)');
+  {
+    // BACK and FRONT drawn as unmarked halves; CUFF and WAISTBAND unfold from a word along their
+    // fold edge. The list names 1 BACK and 2 FRONT: 2 entries = 2 unfolds, which the old COUNT
+    // check took as satisfied — the halves passed. Bound, BACK and FRONT are asked.
+    const build = (docTexts: string[], extra: Partial<SemanticsInput> = {}) => {
+      const G = fx();
+      // addFamily moves the extras by the family's dx itself
+      const grain = (_dx: number) => [
+        { pts: grainLine(100, 80, 420), closed: false, role: 'grain' as const },
+      ];
+      addFamily(G, 1, backHalf, 0, grain(0), ['BACK']);
+      addFamily(G, 2, backHalf, 600, grain(600), ['FRONT']);
+      addFamily(G, 3, backHalf, 1200, grain(1200), ['CUFF']);
+      addFamily(G, 4, backHalf, 1800, grain(1800), ['WAISTBAND']);
+      for (const [k, dx] of [
+        [2, 1200],
+        [3, 1800],
+      ] as const) {
+        const id = G.text('PLACE ON FOLD', { x: dx + 4, y: 300 });
+        G.texts[id] = {
+          ...G.texts[id],
+          rotationDeg: 90,
+          bbox: { minX: dx + 4, minY: 300, maxX: dx + 9, maxY: 360 },
+        };
+        for (const c of G.families[k].candidates) c.textsInside.push(id);
+      }
+      return buildPieceSpecsDetailed(input(G, CUT10, { docTexts, ...extra })).output;
+    };
+    const o = build(['1 BACK cut on fold', '2 FRONT cut on fold']);
+    const unfolded = (seed: number) => o.pieces.some((x) => x.seed === seed && x.unfoldedFold);
+    const asked = (seed: number) =>
+      o.blocked.some((b) => b.seed === seed && b.reason === 'fold-question');
+    ck(
+      unfolded(3) && unfolded(4),
+      'CUFF and WAISTBAND unfold from the word along their edge',
+      o.pieces.map((x) => `${x.identity}:${x.unfoldedFold}`).join(' '),
+    );
+    ck(
+      asked(1) && asked(2) && !o.pieces.some((x) => x.seed === 1 || x.seed === 2),
+      'BACK and FRONT (listed, drawn as halves) are asked — 2 entries vs 2 other unfolds is no answer',
+      JSON.stringify(o.blocked),
+    );
+    ck(
+      (o.folds ?? []).some((q) => q.seed === 1 && q.evidence.some((e) => e.includes('1 BACK'))) &&
+        !o.foldList,
+      'the question quotes its list entry; every entry is bound, no file-level check',
+      JSON.stringify({ folds: o.folds?.map((q) => [q.seed, q.evidence]), list: o.foldList }),
+    );
+    // an entry no piece on the sheet matches stays a file-level question until seen and checked
+    const u = build(['1 BACK cut on fold', '5 COLLAR cut on fold'], {
+      operatorFold: {},
+      pieceOverrides: { 1: { unfoldedFold: false } },
+    });
+    ck(
+      !!u.foldList &&
+        u.foldList.entries.length === 1 &&
+        u.foldList.entries[0].includes('COLLAR') &&
+        u.foldList.bound.some((b) => b.seed === 1),
+      'unbound «5 COLLAR» stays open (named); «1 BACK» answered "not a fold" on its piece',
+      JSON.stringify(u.foldList),
+    );
+    const v = build(['1 BACK cut on fold', '5 COLLAR cut on fold'], {
+      pieceOverrides: { 1: { unfoldedFold: false } },
+      foldListChecked: ['5 COLLAR cut on fold'],
+    });
+    ck(!v.foldList, 'checked after seeing «5 COLLAR» named → closed', JSON.stringify(v.foldList));
+    const w = build(['1 BACK cut on fold', '5 COLLAR cut on fold', '6 YOKE cut on fold'], {
+      pieceOverrides: { 1: { unfoldedFold: false } },
+      foldListChecked: ['5 COLLAR cut on fold'],
+    });
+    ck(
+      !!w.foldList && w.foldList.entries.some((e) => e.includes('YOKE')),
+      'a new unbound entry asks again',
+      JSON.stringify(w.foldList?.entries),
+    );
+  }
+
+  head('D2q a pair suggested by asymmetry, with a long straight edge: "cut on fold" offered (E4)');
+  {
+    const G = fx();
+    addFamily(
+      G,
+      1,
+      backHalf,
+      0,
+      [{ pts: grainLine(100, 80, 420), closed: false, role: 'grain' }],
+      ['BACK'],
+    );
+    const o = buildPieceSpecsDetailed(input(G, CUT10)).output;
+    const q = o.unproven.find((u) => u.seed === 1 && u.kind === 'quantity');
+    ck(
+      !!q && q.shown.startsWith('pair') && q.foldAlt === true && !o.pieces[0]?.unfoldedFold,
+      'quantity question suggests a pair, flags "cut on fold" as the alternative, unfolds nothing',
+      JSON.stringify(q),
+    );
+    const f = buildPieceSpecsDetailed(
+      input(G, CUT10, { pieceOverrides: { 1: { unfoldedFold: true } } }),
+    ).output;
+    const ask = f.folds?.find((x) => x.seed === 1);
+    const e = ask && ask.suggested != null ? ask.edges[ask.suggested] : null;
+    const g = buildPieceSpecsDetailed(
+      input(G, CUT10, {
+        pieceOverrides: { 1: { unfoldedFold: true } },
+        operatorFold: e ? { 1: { a: e.a, b: e.b } } : {},
+      }),
+    ).output;
+    ck(
+      !!e &&
+        Math.abs(e.a.x) < 1e-6 &&
+        !!g.pieces[0]?.unfoldedFold &&
+        !g.unproven.some((u) => u.seed === 1 && u.kind === 'quantity'),
+      '"cut on fold" → fold question (edge x = 0 suggested) → unfolded, count answered (×1)',
+      JSON.stringify({
+        e,
+        pieces: g.pieces.map((x) => [x.identity, x.unfoldedFold, x.piecesPerGarment]),
+      }),
+    );
+  }
+
   head('D3 "cut 2" asymmetric piece → _L + mirror _R (G12)');
   {
     const F = fx();

@@ -111,8 +111,8 @@ export type Inputs = {
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
   /** Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`. */
   operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
-  /** The operator checked the cutting list's fold pieces against the sheet. */
-  foldListChecked: boolean;
+  /** The unbound cutting-list entries the operator has seen named and checked (S5). */
+  foldListChecked: string[];
   /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */
   confirmedNames: SeedId[];
   /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
@@ -151,7 +151,7 @@ const EMPTY_INPUTS: Inputs = {
   overrides: {},
   operatorGrain: {},
   operatorFold: {},
-  foldListChecked: false,
+  foldListChecked: [],
   confirmedNames: [],
   editedNames: [],
   confirmedQuantities: {},
@@ -560,7 +560,9 @@ export function useImportSession(deps: {
             overrides: ev.input.pieceOverrides,
             operatorGrain: ev.input.operatorGrain,
             operatorFold: ev.input.operatorFold ?? iRef.current.operatorFold,
-            foldListChecked: ev.input.foldListChecked ?? iRef.current.foldListChecked,
+            foldListChecked: Array.isArray(ev.input.foldListChecked)
+              ? ev.input.foldListChecked
+              : iRef.current.foldListChecked,
           });
           const out = await run('semantics', ev.input);
           patch({ semantics: out });

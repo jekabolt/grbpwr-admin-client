@@ -85,6 +85,8 @@ export function ConfirmStrip({ api }: { api: ImportSessionApi }) {
       <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
         ! {countWords(open)} not proven by the sheet: check the marked rows, fix any that are wrong,
         then confirm the rest.
+        {open.quantity.some((u) => u.foldAlt) &&
+          ` ${open.quantity.filter((u) => u.foldAlt).length} may be cut on fold instead of a pair.`}
       </Text>
       <Button
         variant='main'
@@ -99,11 +101,26 @@ export function ConfirmStrip({ api }: { api: ImportSessionApi }) {
   );
 }
 
-/** What is still open on ONE row: words for the state cell, and its confirm chip. */
-export function RowQuestions({ api, seed }: { api: ImportSessionApi; seed: SeedId }) {
+/**
+ * What is still open on ONE row: words for the state cell, and its confirm chip. A quantity
+ * question also offers "cut on fold" (E4): the outline may be the half of a fold piece, which no
+ * count fixes — the choice turns the row into the fold question (pick the edge, unfold). When an
+ * asymmetric outline suggested the pair but a long straight edge would unfold it cleanly
+ * (`foldAlt`), the choice is marked as the suggested alternative; it is never applied by itself.
+ */
+export function RowQuestions({
+  api,
+  seed,
+  onFold,
+}: {
+  api: ImportSessionApi;
+  seed: SeedId;
+  onFold?: () => void;
+}) {
   const open = useOpenQuestions(api);
+  const qty = open.quantity.find((u) => u.seed === seed);
   const what = [
-    open.quantity.some((u) => u.seed === seed) ? 'qty' : '',
+    qty ? 'qty' : '',
     open.name.some((u) => u.seed === seed) || open.aiNames.some((n) => n.seed === seed)
       ? 'name'
       : '',
@@ -114,13 +131,30 @@ export function RowQuestions({ api, seed }: { api: ImportSessionApi; seed: SeedI
     .map((u) => `${u.kind}: ${u.detail}`)
     .join(' · ');
   return (
-    <Chip
-      tone='attention'
-      onClick={() => api.confirmShown(seed)}
-      title={`${why || 'AI name below the auto-accept threshold'} · click to confirm as shown`}
-    >
-      ? {what.join(' + ')} · confirm
-    </Chip>
+    <span className='flex items-center gap-1'>
+      <Chip
+        tone='attention'
+        onClick={() => api.confirmShown(seed)}
+        title={`${why || 'AI name below the auto-accept threshold'} · click to confirm as shown`}
+      >
+        ? {what.join(' + ')} · confirm
+      </Chip>
+      {qty && onFold && (
+        <Chip
+          tone={qty.foldAlt ? 'attention' : undefined}
+          dashed={!qty.foldAlt}
+          disabled={!!api.session.busy}
+          onClick={onFold}
+          title={
+            qty.foldAlt
+              ? 'suggested: one long straight edge would make this outline the half of a piece cut on fold. pick the fold edge next'
+              : 'the outline is the half of a piece cut on fold: pick the fold edge next'
+          }
+        >
+          {qty.foldAlt ? 'cut on fold?' : 'on fold'}
+        </Chip>
+      )}
+    </span>
   );
 }
 

@@ -875,21 +875,29 @@ export type SemanticsInput = {
    * words may be curves. Asked, never unfolded on that alone (E1a, D3).
    */
   foldHints?: SeedId[];
-  /** The operator checked the cutting list's fold pieces against the sheet (`FoldListCheck`). */
-  foldListChecked?: boolean;
+  /**
+   * The cutting-list entries the operator has seen named and checked against the sheet
+   * (`FoldListCheck.entries`, as printed); a new unbound entry asks again. `true` = all (legacy).
+   */
+  foldListChecked?: boolean | string[];
+  /** The text label of each text-seeded piece ("22", "Piece 7"), for binding the cutting list. */
+  seedLabels?: Partial<Record<SeedId, string>>;
   /** Text of the document's other pages (instructions, cutting list); the session fills it. */
   docTexts?: string[];
 };
 
 /**
- * The cutting list names more pieces "cut on fold" than the sheet has unfolded (E1a): the drawing
- * does not say which regions they are, so the operator marks them or confirms the list.
+ * Cutting-list entries "cut on fold" that no piece on the sheet could be bound to (E1a / S5): by
+ * printed number or title. A bound entry is a fold question of its piece instead; these stay a
+ * file-level question until the operator has seen them named and checked them.
  */
 export type FoldListCheck = {
-  /** The list lines, as printed ("1 - Спинка со сгибом 1 дет."). */
+  /** The UNBOUND list lines, as printed ("1 - Спинка со сгибом 1 дет."). */
   entries: string[];
   /** Pieces unfolded in this run (any evidence). */
   unfolded: number;
+  /** The entries that were bound, and to which piece (each is that piece's fold evidence). */
+  bound: { entry: string; seed: SeedId }[];
 };
 
 /**
@@ -941,6 +949,11 @@ export type Unproven = {
   shown: string;
   /** Why it is a question, in words (the note quoted, the shape that suggests a pair). */
   detail: string;
+  /**
+   * quantity only (E4): the pair is suggested by an asymmetric outline, but one long straight edge
+   * (≥ 30 % of the perimeter) would unfold it cleanly — "cut on fold" is the suggested alternative.
+   */
+  foldAlt?: boolean;
 };
 
 export type BlockReason =
@@ -1603,7 +1616,7 @@ export type StageIO = {
   semantics: {
     in: Omit<
       SemanticsInput,
-      'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced' | 'docTexts'
+      'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced' | 'docTexts' | 'seedLabels'
     >;
     out: SemanticsOutput;
   };
