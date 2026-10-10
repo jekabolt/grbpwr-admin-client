@@ -11,7 +11,13 @@ import type {
   Style,
 } from '../../types';
 import { PATIMPORT } from '../../types';
-import { assertRasterPagePixels, assertRasterPixels } from '../budget';
+import {
+  assertRasterPagePixels,
+  assertRasterPixels,
+  inputTooLarge,
+  oversizedPdfImages,
+  oversizedPdfImagesMessage,
+} from '../budget';
 import { applyCalibration, calibrate } from './calibrate';
 import {
   decodeWithBitmap,
@@ -220,6 +226,10 @@ export async function extractRasterPdfDetailed(
   opts: ExtractOpts,
   cfg: RasterExtractConfig = {},
 ): Promise<RasterExtractResult> {
+  // C5: a scan pdf.js would drop for its size (the guard's maxImageSize) is refused, not traced
+  // as an empty page
+  const big = oversizedPdfImages(file.bytes);
+  if (big.length) throw inputTooLarge(oversizedPdfImagesMessage(big));
   const sha = await sha256Hex(file.bytes);
   const pdf = await openRasterPdf(file.bytes);
   const warnings: string[] = [];

@@ -104,3 +104,53 @@ export function assertRasterPagePixels(pixels: number, where: string): void {
       `${where}: its scanned images hold ${megapixels(pixels)}; the importer traces up to ${megapixels(PATIMPORT.maxRasterPixels)} per page. ${RASTER_HINT}`,
     );
 }
+
+/**
+ * C5 follow-up: image XObjects of a PDF larger than the raster limit, read off the raw bytes. The
+ * pdf.js guard (`maxImageSize`) drops such an image without a trace — its paint operator never
+ * reaches the walkers — so a scan PDF at 300 dpi would import as an empty page. An image is a
+ * stream, so its dictionary is never inside an object stream: `/Subtype /Image` with direct
+ * `/Width` / `/Height` between the object header and its `stream` keyword. Indirect sizes are not
+ * resolved (rare; such an image is then only caught by the decoded-size checks).
+ */
+export function oversizedPdfImages(
+  bytes: ArrayBuffer,
+  max: number = PATIMPORT.maxRasterPixels,
+): { width: number; height: number }[] {
+  const u = new Uint8Array(bytes);
+  const out: { width: number; height: number }[] = [];
+  const IMG = [0x2f, 0x49, 0x6d, 0x61, 0x67, 0x65]; // "/Image"
+  const word = (c: number) =>
+    (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+  for (let i = u.indexOf(0x2f); i !== -1 && i + 6 < u.length; i = u.indexOf(0x2f, i + 1)) {
+    let hit = true;
+    for (let k = 1; k < 6 && hit; k++) hit = u[i + k] === IMG[k];
+    if (!hit || word(u[i + 6])) continue; // /ImageB, /ImageMask …
+    const a = Math.max(0, i - 2048);
+    const head = latin1Of(u.subarray(a, i));
+    const tail = latin1Of(u.subarray(i, Math.min(u.length, i + 2048)));
+    if (!/\/Subtype\s*$/.test(head)) continue;
+    const from = Math.max(head.lastIndexOf(' obj'), head.lastIndexOf('\nobj'), 0);
+    const to = tail.indexOf('stream');
+    const dict = head.slice(from) + (to === -1 ? tail : tail.slice(0, to));
+    const w = /\/Width\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
+    const h = /\/Height\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
+    if (!w || !h) continue;
+    const width = +w[1];
+    const height = +h[1];
+    if (width * height > max) out.push({ width, height });
+  }
+  return out;
+}
+
+function latin1Of(u: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+  return s;
+}
+
+/** The refusal / note for oversized PDF images (same dpi guidance as a scan file). */
+export function oversizedPdfImagesMessage(imgs: { width: number; height: number }[]): string {
+  const big = [...imgs].sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  return `${imgs.length === 1 ? 'an embedded image' : `${imgs.length} embedded images`} (${big.width} × ${big.height} px, ${megapixels(big.width * big.height)}) ${imgs.length === 1 ? 'exceeds' : 'exceed'} the ${megapixels(PATIMPORT.maxRasterPixels)} the importer traces and ${imgs.length === 1 ? 'is' : 'are'} not read. ${RASTER_HINT}`;
+}

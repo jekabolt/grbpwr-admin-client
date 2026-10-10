@@ -75,6 +75,31 @@ function ctx(stopAfter?: number): StageCtx {
   };
 }
 
+/** A one-page PDF painting a w × h image XObject (8-bit gray, no data: pdf.js drops it for its
+ * size before decoding), optionally with a stroked vector line. */
+function pdfWithImage(w: number, h: number, vectors: boolean): ArrayBuffer {
+  const content = `${vectors ? '10 10 m 500 500 l S\n' : ''}q 595 0 0 842 0 0 cm /Im1 Do Q\n`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}endstream`,
+    `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x00\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs) pdf += `${String(o).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b = Buffer.from(pdf, 'latin1');
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+}
+
 /** A PNG signature + IHDR claiming w × h (no pixel data: for the header readers). */
 const pngOf = (w: number, h: number) => {
   const b = new Uint8Array(33);
@@ -1110,6 +1135,28 @@ async function guardsCase() {
     PATIMPORT.maxRasterPixels <= 18e6 &&
       imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png') === null,
     `${PATIMPORT.maxRasterPixels / 1e6} MP; A1@150 ${imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png')?.message ?? 'accepted'}`,
+  );
+  // C5 follow-up: pdf.js drops an image over the limit without a trace — a 6000 × 6000 scan
+  // (36 MP) must not import as an empty page. Alone on its page → too-large; next to vectors →
+  // the vectors are kept and a visible note names the skipped image.
+  const scanOnly = await errCode(
+    new Session(5, [{ name: 'scan36.pdf', bytes: pdfWithImage(6000, 6000, false) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  const mixed = new Session(6, [{ name: 'mixed36.pdf', bytes: pdfWithImage(6000, 6000, true) }]);
+  const mixedOut = await mixed
+    .runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx())
+    .catch((e: unknown) => toWireError(e));
+  const note =
+    'warnings' in mixedOut ? mixedOut.warnings.find((w) => /6000 × 6000/.test(w)) : undefined;
+  check(
+    C,
+    'C5: raster PDF whose 36 MP image pdf.js would drop → too-large; with vectors → kept + visible note',
+    scanOnly === 'too-large' && !!note,
+    `${scanOnly} · ${note ?? JSON.stringify(mixedOut).slice(0, 120)}`,
   );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);
