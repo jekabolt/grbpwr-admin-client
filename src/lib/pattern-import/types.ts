@@ -550,7 +550,20 @@ export type PieceCandidate = {
    * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
    * neighbouring rank's contour; its `pts` is empty.
    */
-  derived?: { kind: 'bridge' | 'operator-bridge' | 'band-cut' | 'shared-rank'; pts: PtMm[] }[];
+  derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[] }[];
+};
+
+/** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
+export type DerivedEdgeKind = 'bridge' | 'operator-bridge' | 'band-cut';
+export type DerivedEdge = {
+  kind: DerivedEdgeKind;
+  pts: PtMm[];
+  /**
+   * The drawn chains (IR, as extracted) the edge runs along or lands on, same frame: a band cut
+   * follows its size tick, which is not one of the piece's walls when the outline snapped to the
+   * cut. G15 measures the edge against walls + these; G3/G4 never see them.
+   */
+  along?: PtMm[][];
 };
 
 /** A family = one seed × every rank. Area must grow with rank (`monotone`). */
@@ -1071,7 +1084,13 @@ export type GateCheckId =
   | 'G12-pair'
   | 'G13-manifest'
   /** MF-B preflight: the 999 manifest prologue is larger than `manifestPrologueWarnBytes` (warn). */
-  | 'G14-prologue';
+  | 'G14-prologue'
+  /**
+   * F14b (Codex C1): every derived outline edge (bridge, operator bridge, band cut) lands on drawn
+   * walls at both ends and stays short, per edge and per piece. G3/G4 measure against the drawn
+   * walls only; the stretch of the written line on an edge that passes here is left to this check.
+   */
+  | 'G15-derived';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1085,7 +1104,25 @@ export type GateCheck = {
   note: string;
 };
 
-export type GateReport = { passed: boolean; checks: GateCheck[]; durationMs: number };
+/** One derived edge G15 accepted — the audited list the manifest carries (`GateReport.derived`). */
+export type DerivedEdgeAudit = {
+  block: string;
+  kind: DerivedEdgeKind;
+  /** Edge length, and the part of it farther than `snapMm` from every drawn wall, mm (0.1). */
+  lengthMm: Mm;
+  offSourceMm: Mm;
+  /** End points in the written frame, mm (0.1). */
+  a: [Mm, Mm];
+  b: [Mm, Mm];
+};
+
+export type GateReport = {
+  passed: boolean;
+  checks: GateCheck[];
+  durationMs: number;
+  /** F14b: the derived edges G15 accepted, per block; absent when there are none. */
+  derived?: DerivedEdgeAudit[];
+};
 
 /**
  * The conversion manifest. Embedded in the DXF as 999 comments (see manifest/) AND returned next
@@ -1143,6 +1180,11 @@ export type GateExpectation = {
    * `wallsByBlock` (a CLO block's walls are its own outline).
    */
   coverageWallsByBlock?: Record<string, PtMm[][]>;
+  /**
+   * F14b (Codex C1): the outline's derived edges per block, written frame. Never walls: G15 checks
+   * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
+   */
+  derivedByBlock?: Record<string, DerivedEdge[]>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
@@ -1546,6 +1588,8 @@ export const PATIMPORT = {
   overviewBboxTolRatio: 0.01,
   pairAreaTol: 0.001,
   pairBboxTolMm: 0.1,
+  /** G12 (F14b): symmetric Hausdorff of the mirrored `_L` vs `_R`, mm — the gate's "on the line". */
+  pairHausdorffMm: 0.3,
   squareTolMm: 0.1,
   aiAutoAcceptInitial: 0.85,
   manifestLineMax: 200,
