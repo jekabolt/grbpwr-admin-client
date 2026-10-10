@@ -45,8 +45,15 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { buildSkeleton, orderTemplate, skeletonDeps, readSeamGraph, proposeSkeleton, loadFacts } =
-  await import(pathToFileURL(outfile).href);
+const {
+  buildSkeleton,
+  orderTemplate,
+  skeletonDeps,
+  readSeamGraph,
+  proposeSkeleton,
+  loadFacts,
+  SKELETON,
+} = await import(pathToFileURL(outfile).href);
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
@@ -741,6 +748,25 @@ console.log('\nDarts (P2 lane D)');
     ['dl-pockets-2', resolve(downloads, 'POCKETS (2).dxf'), null, 'generic', false],
   ];
   const ANY = { intakeMm: [0, Infinity], depthMin: 0, depthRatio: 0, apexDeg: 180 };
+// ── P2 lane Z: closures off the centre front (03-P2-DESIGN §5) ───────────────────────────────
+// Z1 button columns on real files (SS26-005, Allsizes, blazer, summer men), Z2 BOM-led zip seats
+// (never ticked), Z3 vent template steps (jacket/coat only, «check»). Controls: BOM without a zip
+// gives no zip step; marks stripped gives the template's BOM steps back; SKELETON.drillEdgeMm → 10
+// (one reach for closure-not-seam and columns) takes the placket and front columns out of reach —
+// the SS26 and Allsizes gates must go red.
+console.log('\nClosures (P2 lane Z)');
+{
+  const plans = process.env.SKELETON_PLANS ?? resolve(root, '../tmp/plans');
+  const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
+  const bytesOf = (f) => {
+    try {
+      const buf = readFileSync(f);
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    } catch {
+      gate(`closures: ${f} found`, false, f);
+      return null;
+    }
+  };
   const quietly = async (fn) => {
     const q = [console.log, console.warn];
     console.log = () => {};
@@ -817,6 +843,337 @@ console.log('\nDarts (P2 lane D)');
     anyVeeDarts > 0,
     `${anyVeeDarts}`,
   );
+  const BOM0 = {
+    zipper: 0,
+    buttons: 0,
+    snaps: 0,
+    tape: 0,
+    elastic: 0,
+    drawcord: 0,
+    interlining: 0,
+  };
+  const z1 = (p) =>
+    p.steps.filter((s) => s.feature?.kind === 'buttonholes' || s.feature?.kind === 'buttons');
+  const zips = (p) =>
+    p.steps.filter((s) => s.feature?.kind === 'zip' || /\bzip/i.test(s.label ?? ''));
+  const vents = (p) => p.steps.filter((s) => s.feature?.kind === 'vent');
+  const tmplButtons = (p) =>
+    p.steps.filter(
+      (s) => s.source === 'bom' && /^(Buttonholes|Attach buttons)$/.test(s.label ?? ''),
+    );
+  const show = (xs) => xs.map((s) => `${s.label} [${s.confidence}]`).join(' · ') || 'none';
+  const closureSet = (g, nm) =>
+    g.rejected
+      .filter((c) => c.kind === 'closure-not-seam')
+      .map((c) =>
+        [c.a, c.b]
+          .map((id) => nm(id.slice(0, id.lastIndexOf('#'))))
+          .sort()
+          .join('~'),
+      )
+      .sort()
+      .join(', ');
+  const accept = 0.6;
+
+  // SS26-005 on the real graph, keyed by the card's lineKeys (the order probe's real run)
+  const ssBytes = bytesOf(resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'));
+  if (ssBytes) {
+    const { facts: parsed } = await quietly(() => loadFacts(ssBytes, 'M', 'shirt'));
+    const byName = new Map(parsed.pieces.map((p) => [p.name, p.piece]));
+    const facts = {
+      ...ss.facts,
+      pieces: ss.facts.pieces
+        .filter((p) => byName.has(p.name))
+        .map((p) => ({ ...p, piece: byName.get(p.name) })),
+    };
+    const nm = (k) => facts.pieces.find((p) => p.pieceKey === k)?.name ?? k;
+    const placket = (p) => {
+      const steps = z1(p);
+      const holes = steps.find((s) => /^Buttonholes ×6 on PLCK_[LR]\b/.test(s.label));
+      const btns = steps.find((s) => /^Attach buttons ×6 on PLCK_[LR]\b/.test(s.label));
+      const ok =
+        !!holes &&
+        !!btns &&
+        holes.feature.pieceKey !== btns.feature.pieceKey &&
+        holes.feature.count === 6 &&
+        btns.feature.count === 6;
+      return { ok, holes, btns, steps };
+    };
+    const p = proposeSkeleton(facts, skeletonDeps);
+    const { ok, holes, btns, steps } = placket(p);
+    console.log(`  SS26-005 (BOM buttons ${facts.bom.buttons}): ${show(steps)}`);
+    gate(
+      'SS26-005: buttonholes ×6 / buttons ×6 on the two plackets (folded column counted once)',
+      ok,
+      show([holes, btns].filter(Boolean)),
+    );
+    gate(
+      'SS26-005: CLO draws both sides alike — the side is a decision (< accept, «which side: check»)',
+      [holes, btns].every((s) => s && s.confidence < accept && /which side: check/.test(s.label)),
+    );
+    gate(
+      'SS26-005: the template BOM button steps yield',
+      tmplButtons(p).length === 0,
+      show(tmplButtons(p)),
+    );
+    const cs = closureSet(p.graph, nm);
+    gate('SS26-005: closure-not-seam = the centre front only', cs === 'FRONT_L~FRONT_R', cs);
+
+    // control: marks stripped — Z1 silent, the template's BOM steps come back
+    const bare = { ...p.graph, pieces: p.graph.pieces.map((g) => ({ ...g, marks: [] })) };
+    const pb = buildSkeleton(bare, facts, orderTemplate('shirt'), skeletonDeps);
+    gate(
+      'control: marks stripped → no column steps, the template BOM steps return',
+      z1(pb).length === 0 && tmplButtons(pb).length === 2,
+      `${z1(pb).length} column steps, ${tmplButtons(pb).length} template`,
+    );
+    // mutation: one reach for closures and columns — at 10 mm the placket columns (13 / 38 mm in)
+    // are out of reach, the placket gate must go red
+    const keep = SKELETON.drillEdgeMm;
+    SKELETON.drillEdgeMm = 10;
+    const pm = proposeSkeleton(facts, skeletonDeps);
+    SKELETON.drillEdgeMm = keep;
+    gate(
+      'mutation: drillEdgeMm 10 → the SS26 placket gate goes red',
+      !placket(pm).ok,
+      show(z1(pm)),
+    );
+  }
+
+  // Allsizes: one column of 6 per front; the centre front stays a closure, not a seam
+  const alBytes = bytesOf(resolve(corpus, 'Allsizes_with_notches.dxf'));
+  if (alBytes) {
+    const { facts } = await quietly(() => loadFacts(alBytes, 'M', 'shirt', { buttons: 1 }));
+    const p = proposeSkeleton(facts, skeletonDeps);
+    const steps = z1(p);
+    console.log(`  Allsizes: ${show(steps)}`);
+    gate(
+      'Allsizes: buttonholes ×6 + buttons ×6 on FP_L / FP_R',
+      steps.length === 2 &&
+        steps.some((s) => /^Buttonholes ×6 on FP_[LR]/.test(s.label)) &&
+        steps.some((s) => /^Attach buttons ×6 on FP_[LR]/.test(s.label)),
+      show(steps),
+    );
+    const cf = p.graph.rejected.find(
+      (c) => c.kind === 'closure-not-seam' && c.a === 'FP_L#3' && c.b === 'FP_R#0',
+    );
+    gate(
+      'Allsizes: FP_L#3 ~ FP_R#0 still a closure (6 drills), never a chosen seam',
+      cf?.evidence.rule === 'closure: 6 drills along the edge' &&
+        cf.closure?.kind === 'buttons' &&
+        !p.graph.chosen.some((c) => [c.a, c.b].includes('FP_L#3') || [c.a, c.b].includes('FP_R#0')),
+      cf?.evidence.rule ?? 'missing',
+    );
+    const keep = SKELETON.drillEdgeMm;
+    SKELETON.drillEdgeMm = 10;
+    const pm = proposeSkeleton(facts, skeletonDeps);
+    SKELETON.drillEdgeMm = keep;
+    const cm = pm.graph.rejected.find(
+      (c) => c.kind === 'closure-not-seam' && c.a === 'FP_L#3' && c.b === 'FP_R#0',
+    );
+    gate(
+      'mutation: drillEdgeMm 10 → the Allsizes centre front is no longer read off its drills',
+      cm?.evidence.rule !== 'closure: 6 drills along the edge' && z1(pm).length === 0,
+      `${cm?.evidence.rule ?? 'no closure'}; ${z1(pm).length} column steps`,
+    );
+  }
+
+  // blazer (Gerber): buttonholes drawn as slits on 6, none on its mirror twin 10 — the side is read
+  const blBytes = bytesOf(resolve(corpus, 'blazer.dxf'));
+  if (blBytes) {
+    const { facts } = await quietly(() => loadFacts(blBytes, 'M', 'jacket-lined', { buttons: 1 }));
+    const p = proposeSkeleton(facts, skeletonDeps);
+    const steps = z1(p);
+    console.log(`  blazer: ${show(steps)}`);
+    gate(
+      'blazer: buttonholes ×2 on 6, buttons ×2 on 10, ticked (0.7) — the facing copies add nothing',
+      steps.length === 2 &&
+        steps[0].label === 'Buttonholes ×2 on 6' &&
+        steps[1].label === 'Attach buttons ×2 on 10' &&
+        steps.every((s) => s.confidence === 0.7),
+      show(steps),
+    );
+    // Z3: the same blazer named — vents are «check» steps on sleeves and back, raised by evidence
+    const names = {
+      3: 'BACK_L',
+      17: 'BACK_R',
+      19: 'SLEEVE_TOP_1',
+      28: 'SLEEVE_TOP_2',
+      16: 'SLEEVE_UNDER_1',
+      26: 'SLEEVE_UNDER_2',
+      6: 'FRONT_L',
+      10: 'FRONT_R',
+    };
+    const named = {
+      ...facts,
+      pieces: facts.pieces.map((q) => (names[q.pieceKey] ? { ...q, name: names[q.pieceKey] } : q)),
+    };
+    const pj = proposeSkeleton(named, skeletonDeps);
+    const vj = vents(pj);
+    console.log(`  blazer named, jacket-lined: ${show(vj)}`);
+    gate(
+      'blazer named: a back vent and sleeve vents, all «check», none ticked',
+      vj.some((s) => /^Back vent/.test(s.label)) &&
+        vj.some((s) => /^Sleeve vent/.test(s.label)) &&
+        vj.every((s) => s.confidence < accept && /check$/.test(s.label)),
+      show(vj),
+    );
+    gate(
+      'blazer named: the back vent is raised by the 199 mm V line (0.55 > 0.4)',
+      vj.some(
+        (s) => /^Back vent/.test(s.label) && s.confidence === 0.55 && /199 mm/.test(s.reason),
+      ),
+    );
+    const ps = proposeSkeleton({ ...named, category: 'shirt' }, skeletonDeps);
+    gate('control: the shirt template proposes no vent', vents(ps).length === 0, show(vents(ps)));
+  }
+
+  // summer men: BOM zip, no fly, button front read by drills → a zip seat «check», never ticked
+  const smBytes = bytesOf(resolve(corpus, 'summer men.dxf'));
+  if (smBytes) {
+    const run1 = async (bom) => {
+      const { facts } = await quietly(() => loadFacts(smBytes, 'XS', 'shirt', bom));
+      return proposeSkeleton(facts, skeletonDeps);
+    };
+    const p = await run1({ zipper: 1 });
+    const zs = zips(p);
+    console.log(`  summer men, BOM zip 1: ${show(zs)}`);
+    gate(
+      'summer men (zip, no fly): a CB / side seat as a decision, 0 ticked',
+      zs.length >= 1 &&
+        zs.every((s) => s.confidence <= 0.5 && /check/.test(s.label)) &&
+        zs.some((s) => /centre back|side seam/.test(s.label)),
+      show(zs),
+    );
+    const p0 = await run1({ ...BOM0 });
+    gate('control: BOM without a zip → no zip step', zips(p0).length === 0, show(zips(p0)));
+  }
+
+  // centre back: a skirt whose two backs meet along a straight 600 mm edge notched at 200 mm —
+  // the zip stops at the notch, the seam below it is closed after it (riding on the zip's tick)
+  {
+    const edge = (key, notches) => ({
+      id: `${key}#0`,
+      pieceKey: key,
+      k: 0,
+      s: 0,
+      e: 0,
+      pts: [
+        [0, 0],
+        [0, 600],
+      ],
+      lenMm: 600,
+      chordMm: 600,
+      turnDeg: 0,
+      notchesMm: notches,
+      kind: 'edge',
+    });
+    const geomOf = (key, hand, twin, notches) => ({
+      pieceKey: key,
+      name: key,
+      hand,
+      cloth: 'main',
+      rs: [],
+      corners: [],
+      notchIdx: [],
+      edges: [edge(key, notches)],
+      rect: false,
+      areaMm2: 1e5,
+      perimMm: 2000,
+      twinOf: twin ? [{ key: twin, kind: 'mirror' }] : [],
+      marks: [],
+    });
+    const skirt = (notches, zipper) => {
+      const pieces = [
+        geomOf('BACK_L', 'L', 'BACK_R', notches),
+        geomOf('BACK_R', 'R', 'BACK_L', notches),
+        geomOf('FRONT', null, null, []),
+      ];
+      const ev = {
+        dLenMm: 0,
+        relLen: 0,
+        notchScore: 1,
+        curvature: 'flat',
+        hand: 'cross',
+        twin: 'mirror',
+        self: false,
+      };
+      return {
+        graph: {
+          pieces,
+          chosen: [{ a: 'BACK_L#0', b: 'BACK_R#0', score: 0.9, evidence: ev, kind: 'edge' }],
+          rejected: [],
+          components: [['BACK_L', 'BACK_R'], ['FRONT']],
+          warnings: [],
+        },
+        facts: {
+          pieces: pieces.map((g) => ({
+            pieceKey: g.pieceKey,
+            name: g.name,
+            piecesPerGarment: 1,
+            cutSymmetry: null,
+            cloth: 'main',
+            fused: false,
+          })),
+          category: 'skirt',
+          bom: { ...BOM0, zipper },
+          defaultMachineType: null,
+        },
+      };
+    };
+    const p = run(skirt([200], 1));
+    const zs = zips(p);
+    const set = zs.find((s) =>
+      /^Set the zip into the centre back seam \(to the notch, 200 mm\) — check$/.test(s.label),
+    );
+    const below = zs.find((s) => /below the zip/.test(s.label));
+    console.log(`  skirt, CB notched at 200 mm: ${show(zs)}`);
+    gate(
+      'skirt: the zip goes into the CB seam to its notch (200 mm), the seam below is closed after it',
+      !!set &&
+        set.confidence < accept &&
+        set.seams[0]?.closure?.open === 'to-notch' &&
+        set.seams[0]?.closure?.lengthMm === 200 &&
+        !!below &&
+        below.derivedFrom === p.steps.indexOf(set),
+      show(zs),
+    );
+    const pf = run(skirt([], 1));
+    gate(
+      'skirt, no notch: the zip runs the whole CB seam (600 mm), nothing closed below',
+      zips(pf).length === 1 && /\(600 mm\) — check$/.test(zips(pf)[0].label),
+      show(zips(pf)),
+    );
+  }
+
+  // fly: a trousers card by names — the zip goes to the fly, «check»
+  {
+    const fx = {
+      graph: { pieces: [], chosen: [], rejected: [], components: [], warnings: [] },
+      facts: {
+        pieces: ['FRONT_L', 'FRONT_R', 'BACK_L', 'BACK_R', 'WB', 'FLY'].map((n) => ({
+          pieceKey: n,
+          name: n,
+          piecesPerGarment: 1,
+          cutSymmetry: null,
+          cloth: 'main',
+          fused: false,
+        })),
+        category: 'trousers',
+        bom: { ...BOM0, zipper: 1 },
+        defaultMachineType: null,
+      },
+    };
+    const p = run(fx);
+    const zs = zips(p);
+    gate(
+      'trousers with a fly: the zip goes into the fly, «check», and the template step yields',
+      zs.length === 1 &&
+        /^Set the zip into the fly — check$/.test(zs[0].label) &&
+        zs[0].confidence < accept,
+      show(zs),
+    );
+  }
 }
 
 // ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────

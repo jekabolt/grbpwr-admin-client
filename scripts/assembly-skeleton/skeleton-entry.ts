@@ -22,3 +22,9 @@ export { segmentPiece, twins } from '../../src/lib/assembly-skeleton/geometry';
 export { unionLayout, unionPicture } from '../../src/lib/assembly-skeleton/union';
 export { SKELETON } from '../../src/lib/assembly-skeleton/types';
 export { loadInputs } from './marks-entry';
+export {
+  buttonColumns,
+  planButtons,
+  ventEvidence,
+  zipSeats,
+} from '../../src/lib/assembly-skeleton/geometry/closures';

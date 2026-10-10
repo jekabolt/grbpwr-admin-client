@@ -19,8 +19,19 @@ import type {
   SkeletonUnit,
 } from '../types';
 import { DART_CONFIDENCE, dartsByPiece, outlineVNotches } from '../geometry/darts';
-import { handWord, judge, mergeRoles, multWord, roleDef, zoneEnum, type Entity } from './model';
+import {
+  handWord,
+  judge,
+  mergeRoles,
+  multWord,
+  pieceOfEdge,
+  roleDef,
+  zoneEnum,
+  type Entity,
+} from './model';
 import { display, groupDetailed } from './group-units';
+import { planButtons, ventEvidence, zipSeats } from '../geometry/closures';
+import { SKELETON } from '../types';
 import type { SkeletonTemplate, TemplateStage } from './template';
 
 const OUTER = 'TECH_CARD_GARMENT_ZONE_OUTER';
@@ -317,6 +328,9 @@ export function buildSkeleton(
 
   // ── the stage table ────────────────────────────────────────────────────────────────────────
   let bodyStarted = false;
+  /** Lane Z: closure kinds already read (once each), and template BOM stages that yield to them. */
+  const closuresDone = new Set<'marks' | 'zipper'>();
+  const closuresTaken = new Set<string>();
   for (const stage of template.stages) {
     if (stage.unless?.some(hasRole)) continue;
     if (stage.op === 'fuse') {
@@ -347,7 +361,8 @@ export function buildSkeleton(
         runAttach(stage);
         break;
       case 'process':
-        runProcess(stage);
+        if (stage.check) runVents(stage);
+        else runProcess(stage);
         break;
       case 'bom':
         runBom(stage);
@@ -362,6 +377,8 @@ export function buildSkeleton(
   }
   emitAllUnits();
   converge();
+  // A closure the template has no stage for (a zip on a shirt) is still said, at the end.
+  runClosures(null);
 
   function runFuse(stage: TemplateStage) {
     const marked = pieces.filter((p) => p.fused);
@@ -553,6 +570,10 @@ export function buildSkeleton(
   }
 
   function runBom(stage: TemplateStage) {
+    // P2 lane Z: what the pattern itself marks comes first, at the template's closure stage, and
+    // the template's BOM step yields to it.
+    runClosures(stage);
+    if (stage.when && closuresTaken.has(stage.when)) return;
     const n = stage.when ? facts.bom[stage.when] : 0;
     if (!n) return;
     const t = main('shell') ?? main('lining');
@@ -575,6 +596,295 @@ export function buildSkeleton(
       source: 'bom',
       confidence: 0.6,
     });
+  }
+
+  /**
+   * P2 lane Z (03-P2-DESIGN §5), at the first closure stage of its kind (or, `null`, after the
+   * stages for a kind the template has no stage for):
+   *   Z1 — button closures read off the drill / buttonhole columns (geometry/closures.ts): a pair
+   *        of steps per closure, holes and buttons, counted from the pattern; 0.7 when the side is
+   *        read and the BOM has the trim, 0.5 «check» when the side is a guess or a column is
+   *        alone, 0.45 without the trim in the BOM. Snaps when the BOM has snaps and no buttons;
+   *   Z2 — a zip of the BOM: the centre front when the closure there is not a button front, else
+   *        the fly, the centre back, the left side seam — every one 0.45 «check», never ticked.
+   */
+  function runClosures(stage: TemplateStage | null) {
+    const when = stage?.when;
+    if (!closuresDone.has('marks') && (!stage || when === 'buttons' || when === 'snaps')) {
+      closuresDone.add('marks');
+      runButtonColumns(stage);
+    }
+    if (!closuresDone.has('zipper') && (!stage || when === 'zipper')) {
+      closuresDone.add('zipper');
+      runZip(stage);
+    }
+  }
+
+  /** Push a closure / vent step on whatever holds `pieceKey` now; low confidence = its own decision. */
+  function pushFeature(
+    pieceKey: string | null,
+    spec: {
+      stage: TemplateStage | null;
+      label: string;
+      machine?: string;
+      zone: string;
+      reason: string;
+      confidence: number;
+      source: SkeletonStep['source'];
+      feature?: SkeletonStep['feature'];
+      seams?: SeamCandidate[];
+      target?: Entity;
+    },
+  ): number {
+    const t =
+      spec.target ??
+      (pieceKey ? table.list().find((e) => e.leaves.includes(pieceKey)) : undefined) ??
+      main('shell') ??
+      main('lining');
+    if (!t) return -1;
+    const at = steps.length;
+    pushProcess(t, {
+      stage: spec.stage?.id ?? 'closures',
+      label: spec.label,
+      operationType: 'MACHINE',
+      machine: spec.machine,
+      zone: spec.zone,
+      reason: spec.reason,
+      source: spec.source,
+      confidence: spec.confidence,
+    });
+    const step = steps[at];
+    step.confidence = spec.confidence;
+    // A guess is a decision of its own, not a rider on the join that made its unit.
+    if (spec.confidence < SKELETON.accept) delete step.derivedFrom;
+    if (spec.feature) step.feature = spec.feature;
+    if (spec.seams) step.seams = spec.seams;
+    return at;
+  }
+
+  function runButtonColumns(stage: TemplateStage | null) {
+    const plans = planButtons(graph, (k) => pieceName.get(k) ?? k);
+    if (!plans.length) return;
+    const { buttons, snaps } = facts.bom;
+    const closure = zoneEnum(stage?.zone ?? 'CLOSURE');
+    const nm = (k: string) => pieceName.get(k) ?? k;
+    if (snaps > 0 && buttons === 0) {
+      // Snaps: both halves on both sides — no side to choose. One step per closure.
+      const done = new Set<string>();
+      for (const p of plans) {
+        if (done.has(p.pieceKey)) continue;
+        const pair = plans.find(
+          (q) =>
+            q !== p &&
+            q.count === p.count &&
+            p.role !== 'either' &&
+            q.role !== p.role &&
+            q.role !== 'either',
+        );
+        done.add(p.pieceKey);
+        if (pair) done.add(pair.pieceKey);
+        const on = pair ? `${nm(p.pieceKey)} + ${nm(pair.pieceKey)}` : nm(p.pieceKey);
+        pushFeature(p.pieceKey, {
+          stage,
+          label: `Set snaps ×${p.count} on ${on}`,
+          machine: 'other',
+          zone: closure,
+          reason: `BOM has snaps and no buttons; ${p.evidence}`,
+          confidence: 0.7,
+          source: 'geometry',
+          feature: {
+            kind: 'buttons',
+            pieceKey: p.pieceKey,
+            count: p.count,
+            marks: [...p.marks, ...(pair?.marks ?? [])],
+          },
+        });
+      }
+      closuresTaken.add('snaps');
+      return;
+    }
+    const bom = buttons > 0;
+    if (!bom) {
+      warnings.push(
+        `the pattern marks ${plans.map((p) => `${p.count} on ${nm(p.pieceKey)}`).join(', ')} for buttons — the BOM has no button or snap line, add it`,
+      );
+    }
+    for (const p of plans) {
+      const sure = p.proof === 'marks';
+      const confidence = !bom ? 0.45 : sure ? 0.7 : 0.5;
+      const check = sure
+        ? ''
+        : p.role === 'either'
+          ? ' — which: check'
+          : p.proof === 'lone'
+            ? ' — check'
+            : ' — which side: check';
+      const what =
+        p.role === 'holes'
+          ? 'Buttonholes'
+          : p.role === 'buttons'
+            ? 'Attach buttons'
+            : 'Buttonholes or buttons';
+      pushFeature(p.pieceKey, {
+        stage,
+        label: `${what} ×${p.count} on ${nm(p.pieceKey)}${check}`,
+        machine: p.role === 'buttons' ? 'button_attach' : 'buttonhole',
+        zone: closure,
+        reason: `${p.evidence}${bom ? '' : ' — not in the BOM'}`,
+        confidence,
+        source: 'geometry',
+        feature: {
+          kind: p.role === 'buttons' ? 'buttons' : 'buttonholes',
+          pieceKey: p.pieceKey,
+          count: p.count,
+          marks: p.marks,
+        },
+      });
+    }
+    closuresTaken.add('buttons');
+  }
+
+  function runZip(stage: TemplateStage | null) {
+    const n = facts.bom.zipper;
+    if (!n) return;
+    const closure = zoneEnum(stage?.zone ?? 'CLOSURE');
+    // A centre front closure that is not a button front: the zip goes there, as before. One read
+    // as a button front (drills along it) takes no zip — nor does a name-only closure between the
+    // same two pieces.
+    const closures = graph.rejected.filter((c) => c.kind === 'closure-not-seam');
+    const pairOf = (c: SeamCandidate) => [c.a, c.b].map(pieceOfEdge).sort().join('\u0000');
+    const buttoned = new Set(
+      closures
+        .filter((c) => c.closure?.kind === 'buttons' || c.closure?.kind === 'snaps')
+        .map(pairOf),
+    );
+    const cf = closures.find(
+      (c) =>
+        c.closure?.kind !== 'buttons' && c.closure?.kind !== 'snaps' && !buttoned.has(pairOf(c)),
+    );
+    if (cf) {
+      if (stage) return; // the template's own zipper step: «Set the zipper» on the main unit
+      pushFeature(null, {
+        stage,
+        label: 'Set the zip into the centre front',
+        machine: 'zipper_setting',
+        zone: closure,
+        reason: `BOM has a zip and the centre front is a closure (${cf.evidence.rule ?? 'closure'})`,
+        confidence: 0.6,
+        source: 'bom',
+        seams: [
+          {
+            ...withoutRivals(cf),
+            closure: {
+              kind: 'zip',
+              evidence: 'bom+cf',
+              lengthMm: cf.closure?.lengthMm,
+              open: 'full',
+            },
+          },
+        ],
+      });
+      closuresTaken.add('zipper');
+      return;
+    }
+    const nm = (k: string) => pieceName.get(k) ?? k;
+    const fly = pieces.filter((p) => p.role === 'fly');
+    const seats = zipSeats(graph, (k) => roleOfPiece.get(k) ?? null);
+    const WHERE = { cb: 'the centre back seam', side: 'the left side seam' } as const;
+    const others = (skip: string) =>
+      [fly.length ? 'the fly' : '', ...seats.map((s) => WHERE[s.where])].filter(
+        (w) => w && w !== skip,
+      );
+    if (fly.length) {
+      pushFeature(fly[0].key, {
+        stage,
+        label: 'Set the zip into the fly — check',
+        machine: 'zipper_setting',
+        zone: closure,
+        reason: `BOM has a zip and the pattern has a fly (${fly.map((p) => p.name).join(', ')}); no geometric sign of a zip — check`,
+        confidence: 0.45,
+        source: 'bom',
+        feature: { kind: 'zip', pieceKey: fly[0].key, marks: [] },
+      });
+      closuresTaken.add('zipper');
+      if (n < 2) return;
+    }
+    // One zip: the first seat, the others named; two or more: every seat (the rest may be pockets).
+    const take = fly.length ? seats : n >= 2 ? seats : seats.slice(0, 1);
+    for (const s of take) {
+      const where = WHERE[s.where];
+      const rest = others(where);
+      const len = s.open === 'to-notch' ? `to the notch, ${s.lengthMm} mm` : `${s.lengthMm} mm`;
+      const at = pushFeature(s.pieces[0], {
+        stage,
+        label: `Set the zip into ${where} (${len}) — check`,
+        machine: 'zipper_setting',
+        zone: closure,
+        reason: `BOM has a zip, the centre front is not a zip closure; ${where} (${s.pieces.map(nm).join(' + ')}) is a straight seam it fits${rest.length ? ` — or ${rest.join(', ')}?` : ''} check`,
+        confidence: 0.45,
+        source: 'bom',
+        feature: { kind: 'zip', pieceKey: s.pieces[0], marks: [] },
+        seams: [
+          {
+            ...withoutRivals(s.seam),
+            closure: {
+              kind: 'zip',
+              evidence: `bom+${s.where}`,
+              lengthMm: s.lengthMm,
+              open: s.open,
+            },
+          },
+        ],
+      });
+      if (at >= 0 && s.open === 'to-notch') {
+        // The seam stays a join below the zip: closed after it, riding on its tick.
+        const below = pushFeature(s.pieces[0], {
+          stage,
+          label: `Close ${where} below the zip`,
+          zone: closure,
+          reason: `the zip stops at the notch; the seam below it is sewn`,
+          confidence: 0.45,
+          source: 'bom',
+        });
+        if (below >= 0) steps[below].derivedFrom = at;
+      }
+      closuresTaken.add('zipper');
+    }
+    if (!fly.length && !seats.length) {
+      warnings.push('BOM has a zip, the pattern gives no seam for it — add the step by hand');
+      closuresTaken.add('zipper');
+    }
+    if (n >= 2) {
+      warnings.push(
+        `BOM has ${n} zip lines — pocket zips are not read from the pattern; add those steps by hand`,
+      );
+    }
+  }
+
+  /**
+   * Z3: a template vent stage (`check`) — one step per live shell unit of its roles, 0.4 «check»;
+   * a V line wide at an edge or a step in the outline next to a fold line raises it to 0.55 (still
+   * a decision: vents are not detected, P2 §9).
+   */
+  function runVents(stage: TemplateStage) {
+    const geomOf = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+    for (const t of table.list('shell').filter((e) => withRole(e, stage.roles))) {
+      const ev = t.leaves.map((k) => geomOf.get(k)).flatMap((g) => (g ? [ventEvidence(g)] : []));
+      const hit = ev.find(Boolean) ?? null;
+      pushFeature(null, {
+        stage,
+        label: `${stage.label}${multWord(t.mult)} — check`,
+        machine: stage.machine,
+        zone: zoneEnum(stage.zone),
+        reason: hit
+          ? `${why(stage)} on ${t.name}: ${hit.why} — a vent? check`
+          : `${why(stage)} on ${t.name}: a jacket usually has one; the pattern draws none we can read — check`,
+        confidence: hit ? 0.55 : 0.4,
+        source: hit ? 'geometry' : 'template',
+        feature: { kind: 'vent', pieceKey: t.leaves[0], marks: hit?.marks ?? [] },
+        target: t,
+      });
+    }
   }
 
   function runPress(stage: TemplateStage) {
@@ -744,6 +1054,13 @@ export function namesIn(message: string, names: ReadonlyMap<string, string>): st
   const keys = [...names.keys()].filter((k) => k && names.get(k) !== k);
   keys.sort((a, b) => b.length - a.length);
   for (const k of keys) if (out.includes(k)) out = out.split(k).join(names.get(k)!);
+  return out;
+}
+
+/** A seam quoted as a closure's evidence: its rivals belong to the join, not to the closure. */
+function withoutRivals(c: SeamCandidate): SeamCandidate {
+  const out = { ...c };
+  delete out.ambiguousWith;
   return out;
 }
 

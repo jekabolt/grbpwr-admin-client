@@ -72,6 +72,11 @@ export type TemplateStage = {
   unless?: string[];
   /** Press after the stage's joins: 'open' = PRESS_OPEN, 'flat' = PRESS. */
   press?: 'open' | 'flat' | 'none';
+  /**
+   * process: a step the template expects but the pattern cannot show (a vent) — always a decision
+   * («check», 0.4; evidence on the piece raises it, never to a tick). P2 lane Z3.
+   */
+  check?: boolean;
 };
 
 export type SkeletonTemplate = {
