@@ -13570,6 +13570,25 @@ export type SuggestAssemblySkeletonRequest = {
   // dress, jumpsuit, shirt, jacket-lined, coat-lined, generic), ≤ 24 × 32 runes, unique; empty = the
   // model is not asked for a category
   categoryOptions: string[] | undefined;
+  // house style for the units: assembly trees this workshop's technologist made for OTHER garments,
+  // ≤ 4; EMPTY = the server picks up to 3 itself from the card base (other cards with ≥ 4 joins,
+  // the same category as tech_card_id's card first, then the most recently updated; none when
+  // tech_card_id is 0)
+  examples: AssemblySkeletonExample[] | undefined;
+};
+
+// AssemblySkeletonExample is one assembly tree of another garment, shown to the model as house style.
+export type AssemblySkeletonExample = {
+  label: string | undefined;
+  units: AssemblySkeletonExampleUnit[] | undefined;
+};
+
+// AssemblySkeletonExampleUnit is one join of an example: the unit it makes and what goes into it.
+export type AssemblySkeletonExampleUnit = {
+  name: string | undefined;
+  // PIECE NAMES or NAMES of earlier units of the same example (names, not keys), 1..16, each
+  // non-empty, ≤ 80 runes
+  parts: string[] | undefined;
 };
 
 // AssemblySkeletonOrderItem is one step in the model's suggested order.

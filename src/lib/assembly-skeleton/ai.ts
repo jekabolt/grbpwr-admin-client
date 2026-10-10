@@ -274,6 +274,8 @@ export function skeletonAIRequest(args: {
       force: false,
       // The categories the engine has a template for: the AI may read the garment as one of them.
       categoryOptions: [...SKELETON_CATEGORIES],
+      // none from the panel: the server shows the model the workshop's own trees (house style)
+      examples: [],
     },
   };
 }
