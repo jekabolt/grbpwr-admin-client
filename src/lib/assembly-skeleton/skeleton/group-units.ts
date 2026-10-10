@@ -233,14 +233,16 @@ export function groupDetailed(
       const p = byKey.get(k);
       return roleDef(p?.role ?? null)?.level === 'sub' && !isFlap(p?.name ?? '');
     }).length;
+  /** Where a thing first stands on the card: its earliest piece. */
+  const cardOrder = (e: Entity) => Math.min(...e.leaves.map((k) => byKey.get(k)?.order ?? 1e9));
   /** A flap, or a unit of flap layers only. */
   const flapEntity = (e: Entity) => e.leaves.every((k) => isFlap(byKey.get(k)?.name ?? ''));
-  /** The best seam from `leaves` to the panel pieces of `t` — not to a pocket already on it. */
+  /** A thing's own panel pieces — not the pockets or plackets already sewn on it. */
+  const panelLeaves = (t: Entity) =>
+    t.leaves.filter((k) => roleDef(byKey.get(k)?.role ?? null)?.level !== 'sub');
+  /** The best seam from `e` to the panel pieces of `t`. */
   const panelScore = (e: Entity, t: Entity) =>
-    seams.between(
-      e.leaves,
-      t.leaves.filter((k) => roleDef(byKey.get(k)?.role ?? null)?.level !== 'sub'),
-    )[0]?.score ?? 0;
+    seams.between(e.leaves, panelLeaves(t))[0]?.score ?? 0;
 
   // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them).
   for (const w of graph.warnings) if (w.includes('have the same shape')) warnings.push(w);
@@ -327,6 +329,10 @@ export function groupDetailed(
   }
   const identical = (a: Entity, b: Entity) =>
     !a.unit && !b.unit && (twinsOf.get(a.key)?.has(b.key) ?? false);
+  const geomOf = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  /** Two lone pieces lane A calls twins of either kind (mirror or identical). */
+  const twinned = (a: Entity, b: Entity) =>
+    !a.unit && !b.unit && (geomOf.get(a.key)?.twinOf.some((t) => t.key === b.key) ?? false);
   function layerPairs(group: Entity[]): LayerPair[] {
     const out: LayerPair[] = [];
     const used = new Set<string>();
@@ -374,6 +380,9 @@ export function groupDetailed(
         const [a, b] = [group[i], group[j]];
         const adj = Math.abs(idx(a) - idx(b)) === 1;
         if (!identical(a, b) && !(sub && adj)) continue;
+        // Two halves of a pocket bag named for different panels (PCK_B_L for the back, PCK_L for
+        // the front) are copies going two ways, not layers of one thing: each is placed alone.
+        if (sub && panelHint(a.name) !== panelHint(b.name)) continue;
         const s = bestScore(seams, a.leaves, b);
         if (s <= 0) continue;
         cands.push({
@@ -671,28 +680,66 @@ export function groupDetailed(
         // A seam read before any panel is assembled is only trusted between pieces of one hand:
         // a left pocket «matching» a centre-back yoke is the rectangles' noise, not its host.
         .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand)
-        .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
+        // To the panel itself: a seam to a pocket already on it says nothing about this one.
+        .map((t) => ({ t, score: panelScore(e, t) }))
         .filter((x) => x.score >= SKELETON.accept)
         .sort((a, b) => b.score - a.score);
       if (!cands.length) continue;
       // ONE host: a seam the part could equally make with another piece (a rival within
       // SKELETON.ambiguity, here or in lane A's own reading) is no host yet — step 5 decides.
+      // A rival that is itself one of the tied hosts is that tie, not a stranger.
       const { t, score } = cands[0];
-      const own = seams.between(e.leaves, t.leaves)[0];
-      const rivalled = (own?.ambiguousWith ?? []).some((q) =>
-        [q.a, q.b].some((k) => e.leaves.includes(pieceOf(k))),
-      );
-      if (rivalled || cands.some((x) => x !== cands[0] && x.score >= score - SKELETON.ambiguity))
-        continue;
-      const made = record([e, t], {
-        name: withPart(display(t), def.name.toLowerCase()),
-        // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
-        roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
-        kind: 'attach',
-        hand: t.hand,
-        why: `${roleName(def.id, e.hand)} goes onto ${display(t)} while it is still flat`,
+      const tied = cands.filter((x) => x.score >= score - SKELETON.ambiguity);
+      const tiedLeaves = new Set(tied.flatMap((x) => x.t.leaves));
+      const own = seams.between(e.leaves, panelLeaves(t))[0];
+      const rivalled = (own?.ambiguousWith ?? []).some((q) => {
+        const ends = [pieceOf(q.a), pieceOf(q.b)];
+        return (
+          ends.some((k) => e.leaves.includes(k)) &&
+          ends.some((k) => !e.leaves.includes(k) && !tiedLeaves.has(k))
+        );
       });
-      made.family = t.family;
+      // Tied hosts that are twins (two mirrored fronts; the inner and outer of a bag) — or any tie
+      // on a garment with no body — fit the part alike: it goes onto ONE of them now, the one with
+      // the fewest parts on it, as a decision, rather than onto whatever the twins become later.
+      const twinTie = tied.every((x) => x.t === t || twinned(x.t, t));
+      if (rivalled || (tied.length > 1 && !twinTie && !bodyless)) continue;
+      const ordered = [...tied].sort(
+        (x, y) => partCount(x.t) - partCount(y.t) || cardOrder(x.t) - cardOrder(y.t),
+      );
+      const d = decide(
+        pins,
+        `place:${leafId([e])}`,
+        ordered.slice(0, 3).map((o, i) => ({
+          inputs: [e, o.t],
+          reason:
+            i === 0
+              ? `or onto ${display(o.t)} — the same seam, the fewest parts on it`
+              : `or onto ${display(o.t)} — the same seam`,
+        })),
+        isLive,
+      );
+      const pick = (ordered[d.chosen] ?? ordered[0]).t;
+      const made = record([e, pick], {
+        name: withPart(display(pick), def.name.toLowerCase()),
+        // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
+        roles: pick.roles.length ? mergeRoles(pick.roles, [def.id]) : [],
+        kind: 'attach',
+        hand: pick.hand,
+        why: `${roleName(def.id, e.hand)} goes onto ${display(pick)} while it is still flat`,
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        ...(tied.length > 1
+          ? {
+              judgement: {
+                confidence: 0.55,
+                source: 'geometry' as const,
+                reason: `${roleName(def.id, e.hand)} fits ${tied.map((x) => display(x.t)).join(' and ')} alike — onto ${display(pick)} ${d.chosen ? 'by your reading' : 'with the fewest parts on it'}, check`,
+              },
+            }
+          : {}),
+      });
+      made.family = pick.family;
     }
 
     // ── E2. a part the pattern gives no seam to any panel for (a patch pocket with no placement
@@ -1284,6 +1331,19 @@ function positionOf(name: string): 'top' | 'bottom' | null {
   const t = bareTokens(name);
   if (t.some((x) => POSITION_TOP.has(x))) return 'top';
   if (t.some((x) => POSITION_BOTTOM.has(x))) return 'bottom';
+  return null;
+}
+
+/**
+ * The panel a part's own name points at, for telling two halves of one pocket bag apart: the
+ * roles' tokens plus the bare B / F, which only mean back / front next to such a twin.
+ */
+const BACK_HINT = new Set([...(roleDef('back')?.tokens ?? []), 'b']);
+const FRONT_HINT = new Set([...(roleDef('front')?.tokens ?? []), 'f']);
+function panelHint(name: string): 'back' | 'front' | null {
+  const t = bareTokens(name);
+  if (t.some((x) => BACK_HINT.has(x))) return 'back';
+  if (t.some((x) => FRONT_HINT.has(x))) return 'front';
   return null;
 }
 

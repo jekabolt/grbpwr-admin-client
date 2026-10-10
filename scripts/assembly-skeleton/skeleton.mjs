@@ -1369,6 +1369,123 @@ console.log('\nClosures (P2 lane Z)');
   }
 }
 
+/** Compact card → { graph, facts }: one fresh edge per seam end, twins both ways. */
+const synthCard = (spec, rename = {}) => {
+  const nm = (n) => rename[n] ?? n;
+  const twins = new Map();
+  for (const [n, , t, kind] of spec.pieces) {
+    if (!t) continue;
+    twins.set(n, [...(twins.get(n) ?? []), { key: t, kind }]);
+    twins.set(t, [...(twins.get(t) ?? []), { key: n, kind }]);
+  }
+  const edges = new Map(spec.pieces.map(([n]) => [n, 0]));
+  const edge = (n) => {
+    const k = edges.get(n);
+    edges.set(n, k + 1);
+    return `${n}#${k}`;
+  };
+  const chosen = spec.seams.map(([a, b, score]) => ({
+    a: edge(a),
+    b: edge(b),
+    score,
+    evidence: {
+      dLenMm: 0,
+      relLen: 0,
+      notchScore: 0,
+      curvature: 'flat',
+      hand: 'neutral',
+      self: false,
+    },
+    kind: 'edge',
+  }));
+  for (const [i, j] of spec.rivals ?? [])
+    chosen[i].ambiguousWith = [...(chosen[i].ambiguousWith ?? []), chosen[j]];
+  return {
+    graph: {
+      pieces: spec.pieces.map(([n, area]) => ({
+        pieceKey: n,
+        name: nm(n),
+        hand: null,
+        cloth: 'main',
+        rs: [],
+        corners: [],
+        notchIdx: [],
+        edges: [],
+        rect: false,
+        areaMm2: area,
+        perimMm: 0,
+        twinOf: twins.get(n) ?? [],
+      })),
+      chosen,
+      rejected: [],
+      components: [],
+      warnings: [],
+    },
+    facts: {
+      pieces: spec.pieces.map(([n]) => ({
+        pieceKey: n,
+        name: nm(n),
+        piecesPerGarment: 1,
+        cutSymmetry: null,
+        cloth: 'main',
+        fused: false,
+      })),
+      category: spec.category,
+      bom: {},
+      defaultMachineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+    },
+  };
+};
+/** What each unit of a proposal holds, by its output key. */
+const leavesOf = (p) => {
+  const m = new Map();
+  for (const s of p.steps.filter((x) => x.outputUnitKey))
+    m.set(
+      s.outputUnitKey,
+      s.inputs.flatMap((k) => m.get(k) ?? [k]),
+    );
+  return m;
+};
+/** The join whose inputs hold exactly these piece sets (any order), with its step index. */
+const joinOf = (p, ...sets) => {
+  const m = leavesOf(p);
+  const want = sets
+    .map((s) => [...s].sort().join('+'))
+    .sort()
+    .join(' | ');
+  const i = p.steps.findIndex(
+    (s) =>
+      s.outputUnitKey &&
+      s.inputs
+        .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
+        .sort()
+        .join(' | ') === want,
+  );
+  return { i, step: p.steps[i] };
+};
+/** The first join that takes `piece` together with something else, and what that is. */
+const partnerOf = (p, piece) => {
+  const m = leavesOf(p);
+  const i = p.steps.findIndex((s) => s.outputUnitKey && s.inputs.some((k) => k === piece));
+  const s = p.steps[i];
+  return {
+    i,
+    step: s,
+    with: s ? s.inputs.filter((k) => k !== piece).flatMap((k) => m.get(k) ?? [k]) : [],
+  };
+};
+/** «PIECE → what it first joins at step i (decision id)». */
+const placed = (p, piece) => {
+  const j = partnerOf(p, piece);
+  return `${piece} → ${j.with.join('+') || 'nothing'} at ${j.i}${j.step?.decision ? ` (${j.step.decision.id})` : ''}`;
+};
+const cleanGate = (name, p) =>
+  gate(
+    `${name}: sweep clean, one terminal`,
+    !p.warnings.some((w) => /rule \d+ broken|terminal|never reach/.test(w)),
+    p.warnings.filter((w) => /rule \d+ broken|terminal|never reach/.test(w)).join('; '),
+  );
+
 // ── placement without a seam (07-ENGINE-QUALITY §4.1–4.3) ─────────────────────────────────────
 // A part the pattern gives no seam to its panel for (a patch pocket, a bag half, a border strip) is
 // still placed while the panel is flat — by name, position word and balance — as a decision, never
@@ -1376,124 +1493,12 @@ console.log('\nClosures (P2 lane Z)');
 console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
 {
   const { cards } = load('placement.json');
-  /** Compact card → { graph, facts }: one fresh edge per seam end, twins both ways. */
-  const synth = (spec, rename = {}) => {
-    const nm = (n) => rename[n] ?? n;
-    const twins = new Map();
-    for (const [n, , t, kind] of spec.pieces) {
-      if (!t) continue;
-      twins.set(n, [...(twins.get(n) ?? []), { key: t, kind }]);
-      twins.set(t, [...(twins.get(t) ?? []), { key: n, kind }]);
-    }
-    const edges = new Map(spec.pieces.map(([n]) => [n, 0]));
-    const edge = (n) => {
-      const k = edges.get(n);
-      edges.set(n, k + 1);
-      return `${n}#${k}`;
-    };
-    const chosen = spec.seams.map(([a, b, score]) => ({
-      a: edge(a),
-      b: edge(b),
-      score,
-      evidence: {
-        dLenMm: 0,
-        relLen: 0,
-        notchScore: 0,
-        curvature: 'flat',
-        hand: 'neutral',
-        self: false,
-      },
-      kind: 'edge',
-    }));
-    return {
-      graph: {
-        pieces: spec.pieces.map(([n, area]) => ({
-          pieceKey: n,
-          name: nm(n),
-          hand: null,
-          cloth: 'main',
-          rs: [],
-          corners: [],
-          notchIdx: [],
-          edges: [],
-          rect: false,
-          areaMm2: area,
-          perimMm: 0,
-          twinOf: twins.get(n) ?? [],
-        })),
-        chosen,
-        rejected: [],
-        components: [],
-        warnings: [],
-      },
-      facts: {
-        pieces: spec.pieces.map(([n]) => ({
-          pieceKey: n,
-          name: nm(n),
-          piecesPerGarment: 1,
-          cutSymmetry: null,
-          cloth: 'main',
-          fused: false,
-        })),
-        category: spec.category,
-        bom: {},
-        defaultMachineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
-      },
-    };
-  };
-  /** The join whose inputs hold exactly these piece sets (any order), with its step index. */
-  const leavesOf = (p) => {
-    const m = new Map();
-    for (const s of p.steps.filter((x) => x.outputUnitKey))
-      m.set(
-        s.outputUnitKey,
-        s.inputs.flatMap((k) => m.get(k) ?? [k]),
-      );
-    return m;
-  };
-  const joinOf = (p, ...sets) => {
-    const m = leavesOf(p);
-    const want = sets
-      .map((s) => [...s].sort().join('+'))
-      .sort()
-      .join(' | ');
-    const i = p.steps.findIndex(
-      (s) =>
-        s.outputUnitKey &&
-        s.inputs
-          .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
-          .sort()
-          .join(' | ') === want,
-    );
-    return { i, step: p.steps[i] };
-  };
-  /** The first join that takes `piece` together with something else, and what that is. */
-  const firstJoin = (p, piece) => {
-    const m = leavesOf(p);
-    const i = p.steps.findIndex((s) => s.outputUnitKey && s.inputs.some((k) => k === piece));
-    const s = p.steps[i];
-    return {
-      i,
-      step: s,
-      with: s ? s.inputs.filter((k) => k !== piece).flatMap((k) => m.get(k) ?? [k]) : [],
-    };
-  };
-  const placed = (p, piece) => {
-    const j = firstJoin(p, piece);
-    return `${piece} → ${j.with.join('+') || 'nothing'} at ${j.i}${j.step?.decision ? ` (${j.step.decision.id})` : ''}`;
-  };
-  const clean = (name, p) =>
-    gate(
-      `${name}: sweep clean, one terminal`,
-      !p.warnings.some((w) => /rule \d+ broken|terminal|never reach/.test(w)),
-      p.warnings.filter((w) => /rule \d+ broken|terminal|never reach/.test(w)).join('; '),
-    );
 
   // §4.1 strips: a BOTTOM pocket onto the main strip (not the larger upper one) before the strips meet
   {
-    const c = synth(cards.strips);
+    const c = synthCard(cards.strips);
     const p = run(c);
-    const pocket = firstJoin(p, 'PCK_BTTM_L');
+    const pocket = partnerOf(p, 'PCK_BTTM_L');
     const strips = joinOf(p, ['FP_U_L'], ['FP_L', 'PCK_BTTM_L']);
     console.log(`  strips: ${placed(p, 'PCK_BTTM_L')}; strips joined at ${strips.i}`);
     gate(
@@ -1504,26 +1509,74 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
         pocket.step.confidence < SKELETON.accept,
       placed(p, 'PCK_BTTM_L'),
     );
-    gate('strips: … before the two strips meet', strips.i > pocket.i, `${pocket.i} / ${strips.i}`);
-    clean('strips', p);
+    gate(
+      'strips: … before the two strips meet',
+      pocket.i >= 0 && strips.i > pocket.i,
+      `${pocket.i} / ${strips.i}`,
+    );
+    cleanGate('strips', p);
     // Mutation: the position word gone, the pocket goes onto the larger strip (the upper one).
-    const m = run(synth(cards.strips, { PCK_BTTM_L: 'PCK_L' }));
+    const m = run(synthCard(cards.strips, { PCK_BTTM_L: 'PCK_L' }));
     gate(
       'mutation: no position word → the larger strip',
-      firstJoin(m, 'PCK_BTTM_L').with.join() === 'FP_U_L',
+      partnerOf(m, 'PCK_BTTM_L').with.join() === 'FP_U_L',
       placed(m, 'PCK_BTTM_L'),
     );
     // Control: a pocket WITH a seam to a strip is step E's — onto that strip, no placement decision.
-    const s = synth({
+    const s = synthCard({
       ...cards.strips,
       seams: [...cards.strips.seams, ['PCK_BTTM_L', 'FP_U_L', 0.8]],
     });
     const ps = run(s);
-    const js = firstJoin(ps, 'PCK_BTTM_L');
+    const js = partnerOf(ps, 'PCK_BTTM_L');
     gate(
       'control: a pocket with a seam to a strip is not placed by name',
       js.with.join() === 'FP_U_L' && !js.step.decision,
       placed(ps, 'PCK_BTTM_L'),
+    );
+  }
+
+  // §4.2 bag: the belt's seam fits the inner and the outer panel alike (each the other's rival)
+  {
+    const p = run(synthCard(cards.bag));
+    const belt = joinOf(p, ['BLT_1', 'BLT_2'], ['INNER']);
+    const bag = partnerOf(p, 'OUTER');
+    console.log(
+      `  bag: belt onto INNER at ${belt.i} (${belt.step?.decision?.id ?? 'no decision'}); ${placed(p, 'OUTER')}`,
+    );
+    gate(
+      'bag: a belt fitting twin panels alike goes onto the first, as a decision with the other beside it',
+      belt.i >= 0 &&
+        belt.step.decision?.id === 'place:BLT_1+BLT_2' &&
+        belt.step.alternatives?.some((a) => a.inputs.includes('OUTER')),
+      belt.step ? `${belt.step.decision?.id} ${belt.step.confidence}` : placed(p, 'BLT_1'),
+    );
+    gate(
+      'bag: … before the twin panels meet',
+      belt.i >= 0 && bag.i > belt.i,
+      `${belt.i} / ${bag.i}`,
+    );
+    cleanGate('bag', p);
+  }
+  // §4.2 halves: identical bag halves, one named for the back — each on its own panel
+  {
+    const p = run(synthCard(cards.halves));
+    const layered = joinOf(p, ['PCK_L'], ['PCK_B_L']);
+    const front = partnerOf(p, 'PCK_L');
+    const back = partnerOf(p, 'PCK_B_L');
+    console.log(`  halves: ${placed(p, 'PCK_L')}; ${placed(p, 'PCK_B_L')}`);
+    gate(
+      'halves: PCK_L and PCK_B_L are not joined as layers; one onto the front, one onto the back',
+      layered.i < 0 && front.with.join() === 'FP_L' && back.with.join() === 'BP_L',
+      `${placed(p, 'PCK_L')}; ${placed(p, 'PCK_B_L')}`,
+    );
+    cleanGate('halves', p);
+    // Control: halves whose names point at no panel (PCK_1_L, PCK_2_L) are still layers of one bag.
+    const c = run(synthCard(cards.halves, { PCK_L: 'PCK_1_L', PCK_B_L: 'PCK_2_L' }));
+    gate(
+      'control: numbered halves with no panel in their names stay layers',
+      joinOf(c, ['PCK_L'], ['PCK_B_L']).i >= 0,
+      placed(c, 'PCK_L'),
     );
   }
 }

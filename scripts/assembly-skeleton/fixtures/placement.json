@@ -1,5 +1,5 @@
 {
-  "_note": "Synthetic cards for placement without a seam (07-ENGINE-QUALITY §4.1–4.3). Compact form, expanded by skeleton.mjs into the SeamGraph contract: a piece is [name, areaMm2] or [name, areaMm2, twinName, 'identical' | 'mirror']; a seam is [nameA, nameB, score], each on a fresh edge. Names are made up, not a card's.",
+  "_note": "Synthetic cards for placement without a seam (07-ENGINE-QUALITY §4.1–4.3). Compact form, expanded by skeleton.mjs into the SeamGraph contract: a piece is [name, areaMm2] or [name, areaMm2, twinName, 'identical' | 'mirror']; a seam is [nameA, nameB, score], each on a fresh edge; `rivals` [[i, j]] says seam j is within the ambiguity of seam i (ambiguousWith). Names are made up, not a card's.",
   "cards": {
     "strips": {
       "_why": "Two strips of one front (upper larger than main) and a BOTTOM pocket with no seam to either: the pocket goes onto the main strip by its position word, before the strips meet.",
@@ -13,6 +13,40 @@
       "seams": [
         ["FP_U_L", "FP_L", 0.9],
         ["FP_L", "BP", 0.9]
+      ]
+    },
+    "bag": {
+      "_why": "A bag of two identical panels (inner, outer; no body) and a belt of two layers whose seam fits both alike, each a rival of the other: the belt goes onto ONE panel now (the first on the card) as a decision, before the panels meet.",
+      "category": "generic",
+      "pieces": [
+        ["INNER", 60000, "OUTER", "identical"],
+        ["OUTER", 60000],
+        ["BLT_1", 3000, "BLT_2", "identical"],
+        ["BLT_2", 3000]
+      ],
+      "seams": [
+        ["INNER", "OUTER", 0.9],
+        ["BLT_1", "BLT_2", 0.95],
+        ["BLT_1", "INNER", 0.78],
+        ["BLT_1", "OUTER", 0.78]
+      ],
+      "rivals": [
+        [2, 3],
+        [3, 2]
+      ]
+    },
+    "halves": {
+      "_why": "Two identical halves of a side pocket bag sewn to each other, one named for the back (PCK_B_L): not layers — one goes onto the front, the other onto the back.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["BP_L", 50000],
+        ["PCK_L", 5000, "PCK_B_L", "identical"],
+        ["PCK_B_L", 5000]
+      ],
+      "seams": [
+        ["FP_L", "BP_L", 0.9],
+        ["PCK_L", "PCK_B_L", 0.97]
       ]
     }
   }
