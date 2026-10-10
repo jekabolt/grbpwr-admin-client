@@ -728,6 +728,8 @@ export function useImportSession(deps: {
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
             techCardId: card.techCardId,
+            // A10: an autopilot run's assumptions ride in every written manifest
+            ...(ev.autopilot ? { autopilot: ev.autopilot } : {}),
           });
           const draft = buildDraft(out, { card, semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });

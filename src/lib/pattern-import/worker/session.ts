@@ -1363,6 +1363,7 @@ export class Session {
           source,
           generator: input.generator,
           dialect: input.dialect,
+          ...(input.autopilot ? { autopilot: input.autopilot } : {}),
         },
         {
           rules: cardRules,
