@@ -42,6 +42,7 @@ import {
   g13,
   g15,
   g16,
+  g19,
   g18,
   g2From,
   g3g4,
@@ -207,6 +208,7 @@ export function createRunGate(
       derived.check,
       g16(ctx),
       g18(ctx),
+      g19(ctx),
     ];
     return {
       passed: passedOf(checks),

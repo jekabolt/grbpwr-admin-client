@@ -1353,6 +1353,74 @@ export function g16(ctx: GateCtx): GateCheck {
   );
 }
 
+// ── G19 (A2) ─────────────────────────────────────────────────────────────────────────────
+//
+// wm M (10.10): the collar drawn inside the back was written as a rectangle on the back's layer 8
+// — a piece lost and a line cut into the back. The pieces stage now seeds such an outline and keeps
+// it off the host's internal lines; this check refuses to vouch for a file where it happened anyway.
+
+const shoelace = (pts: readonly PtMm[]) => {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a / 2);
+};
+
+/** Layer-8 contours of one block that look like a piece drawn inside it: [area mm², at]. */
+export function nestedPieces(ents: readonly RawEntity[]): { areaMm2: number; at: PtMm }[] {
+  const cut = ents.find((e) => e.layer === LAYERS.cut && isPoly(e) && e.closed && e.pts.length > 2);
+  if (!cut) return [];
+  const A = shoelace(cut.pts);
+  const out: { areaMm2: number; at: PtMm }[] = [];
+  for (const e of ents) {
+    if (e.layer !== LAYERS.internal || e.pts.length < 3 || !(isPoly(e) || e.type === 'LINE'))
+      continue;
+    const n = e.pts.length;
+    const shut =
+      e.closed || Math.hypot(e.pts[0].x - e.pts[n - 1].x, e.pts[0].y - e.pts[n - 1].y) <= 0.5;
+    if (!shut || isDrill(e)) continue;
+    const a = shoelace(e.pts);
+    // its own shape (a seam line or another size's outline is ≥ 45 % of the cut and stays a copy)
+    if (a < PATIMPORT.nestedPieceMinMm2 || a > 0.45 * A) continue;
+    const b = bboxOf(e.pts);
+    out.push({ areaMm2: a, at: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } });
+  }
+  return out;
+}
+
+export function g19(ctx: GateCtx): GateCheck {
+  if (!ctx.raw)
+    return check('G19-nested-piece', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
+  const failed: string[] = [];
+  const notes: string[] = [];
+  let worst = 0;
+  for (const { block } of ctx.blocks) {
+    const hits = nestedPieces(rawOf(ctx, block));
+    if (!hits.length) continue;
+    const big = hits.sort((x, y) => y.areaMm2 - x.areaMm2)[0];
+    worst = Math.max(worst, big.areaMm2);
+    failed.push(block);
+    notes.push(
+      `${block}: a closed ${(big.areaMm2 / 100).toFixed(0)} cm² outline inside at (${big.at.x.toFixed(0)}, ${big.at.y.toFixed(0)})`,
+    );
+  }
+  return check(
+    'G19-nested-piece',
+    failed,
+    'block',
+    failed.length
+      ? ['a piece seems drawn inside another piece — seed it on the pieces step', ...notes].join(
+          '; ',
+        )
+      : 'no closed outline of a piece inside another piece',
+    `${(worst / 100).toFixed(0)} cm²`,
+    `< ${PATIMPORT.nestedPieceMinMm2 / 100} cm² (a shape ≤ 45 % of the cut)`,
+  );
+}
+
 /** Distance from `p` to segment a–b. */
 function segDist(p: PtMm, a: PtMm, b: PtMm): number {
   const dx = b.x - a.x;

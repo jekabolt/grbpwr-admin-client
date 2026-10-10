@@ -285,6 +285,8 @@ const GATE_CHECK_IDS = new Set([
   // A8 safety net: lettering inside pieces, internal length, grain provenance
   'G16-glyphs',
   'G18-grain-source',
+  // A2: a piece drawn inside another written as its internal line
+  'G19-nested-piece',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
@@ -370,7 +372,8 @@ function validateGate(x: unknown): GateReport | null {
   const all: GateCheck[] = x.checks.map((c, i) => {
     const p = `gate.checks[${i}]`;
     if (!isObj(c)) fail(p, 'not an object');
-    if (!isBoundedStr(c.id, 64) || !/^G\d{1,2}-[a-z0-9-]+$/.test(c.id)) fail(`${p}.id`, 'not a check id');
+    if (!isBoundedStr(c.id, 64) || !/^G\d{1,2}-[a-z0-9-]+$/.test(c.id))
+      fail(`${p}.id`, 'not a check id');
     if (!isBool(c.ok)) fail(`${p}.ok`, 'not a boolean');
     if (c.severity !== 'block' && c.severity !== 'warn') fail(`${p}.severity`, 'not block|warn');
     for (const k of ['value', 'threshold'] as const) {
