@@ -614,6 +614,7 @@ export function PieceMatchModal({
   sizeLabel,
   colorways,
   pieceAreaScopes,
+  techCardId,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
@@ -632,6 +633,8 @@ export function PieceMatchModal({
   // обе таблицы в транзакции сохранения карточки). Показать состав потерь можно только отсюда.
   colorways?: readonly common_AdminColorwayRef[];
   pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
+  // Карточка этой формы: размеры из манифеста ДРУГОЙ карточки сами в ряд не пишутся (F14f).
+  techCardId?: number;
   onClose: () => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -735,13 +738,17 @@ export function PieceMatchModal({
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
   const missingSizes = useMemo(
-    () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById),
-    [allPieces, dictTokens, cardSizeIds, sizeById],
+    () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById, techCardId),
+    [allPieces, dictTokens, cardSizeIds, sizeById, techCardId],
   );
-  // F14: размеры манифеста вне системы карточки не заводятся (файл для другой карточки) — сказать.
+  // F14f: что пишется само, а что только предлагается (манифест другой карточки, карточка без
+  // размеров) — второе добавляет человек кнопкой ниже.
+  const autoSizes = useMemo(() => missingSizes.filter((m) => !m.confirm), [missingSizes]);
+  const proposedSizes = useMemo(() => missingSizes.filter((m) => m.confirm), [missingSizes]);
+  // F14: размеры манифеста другой карточки или вне системы карточки не берутся из него — сказать.
   const foreignSizes = useMemo(
-    () => foreignManifestSizes(allPieces, cardSizeIds, sizeById),
-    [allPieces, cardSizeIds, sizeById],
+    () => foreignManifestSizes(allPieces, cardSizeIds, sizeById, techCardId),
+    [allPieces, cardSizeIds, sizeById, techCardId],
   );
   // Размеры из файла заводятся в карточку САМИ, как только разбор закончился: файл — источник
   // истины о том, какие размеры у стиля есть, а ручная кнопка означала бы, что деталь может
@@ -753,13 +760,21 @@ export function PieceMatchModal({
   const [addedSizes, setAddedSizes] = useState<string[]>([]);
   const addedRef = useRef(false);
   useEffect(() => {
-    if (parse.phase !== 'ready' || addedRef.current || missingSizes.length === 0) return;
+    if (parse.phase !== 'ready' || addedRef.current || autoSizes.length === 0) return;
     addedRef.current = true;
-    setAddedSizes(missingSizes.map((m) => formatSizeName(m.name)));
-    setValue('sizeIds', orderSizes([...cardSizeIds, ...missingSizes.map((m) => m.sizeId)]), {
+    setAddedSizes(autoSizes.map((m) => formatSizeName(m.name)));
+    setValue('sizeIds', orderSizes([...cardSizeIds, ...autoSizes.map((m) => m.sizeId)]), {
       shouldDirty: true,
     });
-  }, [parse.phase, missingSizes, cardSizeIds, orderSizes, setValue]);
+  }, [parse.phase, autoSizes, cardSizeIds, orderSizes, setValue]);
+  // Предложенные размеры (F14f) — только по явному нажатию; тем же путём записи, что и выше.
+  const addProposedSizes = () => {
+    if (proposedSizes.length === 0) return;
+    setAddedSizes((prev) => [...prev, ...proposedSizes.map((m) => formatSizeName(m.name))]);
+    setValue('sizeIds', orderSizes([...cardSizeIds, ...proposedSizes.map((m) => m.sizeId)]), {
+      shouldDirty: true,
+    });
+  };
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form. The rule asks the FILE, not the
@@ -1815,11 +1830,30 @@ export function PieceMatchModal({
               {foreignSizes.length > 0 && (
                 <CalloutBox tone='warning'>
                   <Text size='micro' component='p'>
-                    the converted file names sizes outside this card's size system —{' '}
-                    {foreignSizes.map((n) => formatSizeName(n)).join(', ')}. it was probably
-                    converted for another card: those sizes were not added, the sizes are read from
-                    the block names instead
+                    the converted file was made for another card or names sizes outside this
+                    card's size system — {foreignSizes.map((n) => formatSizeName(n)).join(', ')}.
+                    those sizes were not taken from it; the sizes are read from the block names
+                    instead
                   </Text>
+                </CalloutBox>
+              )}
+              {/* F14f: размеры, которые машина не вправе дописать сама — файл другой карточки
+                  или карточка без размеров. Предлагаются, добавляет человек. */}
+              {proposedSizes.length > 0 && (
+                <CalloutBox tone='warning'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Text size='micro' component='p'>
+                      the file has sizes this card does not:{' '}
+                      {proposedSizes.map((m) => formatSizeName(m.name)).join(', ')} —{' '}
+                      {cardSizeIds.length === 0
+                        ? 'the card has no size range yet to check them against'
+                        : 'read from the block names of a file converted for another card or size system'}
+                      . they are not added until you confirm
+                    </Text>
+                    <Button type='button' variant='secondary' size='xs' onClick={addProposedSizes}>
+                      add {proposedSizes.length === 1 ? 'this size' : 'these sizes'}
+                    </Button>
+                  </div>
                 </CalloutBox>
               )}
               {addedSizes.length > 0 && (

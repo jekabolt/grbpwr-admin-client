@@ -7,8 +7,17 @@
 import { isDeepStrictEqual } from 'node:util';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversionManifest, ManifestBlock, ManifestPiece } from 'lib/pattern-import/types';
+import type {
+  ConversionManifest,
+  ManifestBlock,
+  ManifestPiece,
+  PieceSpec,
+  PtMm,
+} from 'lib/pattern-import/types';
 import {
+  contourSigMatch,
+  contourSigProblem,
+  contourSignature,
   embedManifest,
   embedManifestAs,
   MANIFEST_MAX_JSON_BYTES,
@@ -21,7 +30,13 @@ import {
 import { readRawDxf } from 'lib/pattern-import/gate/reader';
 import type { PieceDTO } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
-import { parseSheets, type ParsedSheets } from 'lib/nesting/worker/parse-files';
+import {
+  manifestGeometryProblems,
+  parseFiles,
+  parseSheets,
+  type ParsedSheets,
+} from 'lib/nesting/worker/parse-files';
+import { writeDxfDetailed } from 'lib/pattern-import/write';
 import {
   normBlock,
   sizeTokensOf,
@@ -114,6 +129,8 @@ function geometryOf(text: string, block: string) {
     areaMm2: Math.round(Math.abs(a) / 2),
     notches: ents.filter((e) => e.layer === '4').length,
     drills: ents.filter(isDrill).length,
+    // F14f: the cut ring's signature, as the writer embeds it
+    contour: contourSignature(pts)!,
   };
 }
 
@@ -808,6 +825,265 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       false,
       distrusted(lessNotches, /FP_L_M: \d+ notches/),
     );
+    const unsigned = await parse([
+      {
+        name,
+        text: embedManifest(orig, {
+          ...m0,
+          blocks: m0.blocks.map(({ contour: _c, ...b }) => b),
+        }),
+      },
+    ]);
+    check(
+      'F14f: a manifest without contour signatures (pre-F14f) is not trusted — legacy parse',
+      false,
+      distrusted(unsigned, /no contour signature/),
+    );
+
+    // ── F14f (Codex R2): the manifest is bound to the SHAPE, and features are counted uncapped ───
+    {
+      const sizeM = { token: 'M', sizeId: plainSizeId('m'), name: 'm', sourceLabel: 'M', rank: 0 };
+      const scope = {
+        scopeKey: 'main',
+        fabricPurpose: 'main',
+        bomLineKey: '',
+        label: 'main',
+        isInterlining: false,
+      };
+      const pieceOf = (
+        identity: string,
+        cut: PtMm[],
+        seam: PtMm[] | null,
+        notchAt: PtMm[] = [],
+      ): PieceSpec => ({
+        identity,
+        code: identity,
+        mods: [],
+        displayName: identity.toLowerCase(),
+        nameOrigin: 'operator',
+        seed: 0,
+        variant: null,
+        pairHand: null,
+        pairOf: null,
+        unfoldedFold: false,
+        piecesPerGarment: 1,
+        allowance: { meaning: 'cut', allowanceMm: 10, origin: 'text', evidence: [] },
+        fabrics: ['main'],
+        fused: false,
+        ungraded: false,
+        sizes: [
+          {
+            rank: 0,
+            sizeToken: 'M',
+            sizeId: sizeM.sizeId,
+            cut,
+            seam,
+            grain: null,
+            notches: notchAt.map((at) => ({
+              kind: 'notch' as const,
+              at,
+              seg: [at, { x: at.x, y: at.y + 5 }] as [PtMm, PtMm],
+              depthMm: 5,
+              origin: 'detected' as const,
+              ranges: [],
+              confidence: 1,
+            })),
+            drills: [],
+            internal: [],
+            fold: null,
+            offset: null,
+            walls: [],
+            bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 } as never,
+            areaMm2: 0,
+          },
+        ],
+      });
+      const written = (p: PieceSpec) =>
+        writeDxfDetailed(
+          {
+            techCardId: 1,
+            scope,
+            pieces: [p],
+            sizes: [sizeM],
+            source: m0.source,
+            generator: 'f6b-probe',
+            dialect: 'r2000',
+          },
+          { embed: null, now: () => new Date(0) },
+        );
+      const passed = (m: ConversionManifest): ConversionManifest => ({
+        ...m,
+        gate: { passed: true, checks: [], durationMs: 0 },
+      });
+      const sheet = (text: string) => [{ name: 'w.dxf', text }];
+
+      // R2-A: Codex's triangle swap — same bbox, area, position, feature counts
+      const triA = [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 0, y: 100 },
+      ];
+      const triB = [
+        { x: 0, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ];
+      const wA = written(pieceOf('TRI', triA, null));
+      const wB = written(pieceOf('TRI', triB, null));
+      const [bA, bB] = [wA.manifest.blocks[0], wB.manifest.blocks[0]];
+      const sameFacts =
+        isDeepStrictEqual(bA.bboxMm, bB.bboxMm) &&
+        bA.areaMm2 === bB.areaMm2 &&
+        bA.notches === bB.notches &&
+        bA.drills === bB.drills;
+      const own = await parse(sheet(embedManifest(wA.bareText, passed(wA.manifest))));
+      const swapped = await parse(sheet(embedManifest(wB.bareText, passed(wA.manifest))));
+      check(
+        'F14f R2-A control: the written triangle with its own manifest is trusted',
+        false,
+        trusted(own),
+        (own as ParsedSheets).manifestDistrust,
+      );
+      check(
+        'F14f R2-A: triangle (0,0),(100,0),(0,100) swapped for (0,0),(100,100),(0,100) — same bbox/area/position/features — is NOT trusted',
+        false,
+        sameFacts && distrusted(swapped, /TRI_M: outline differs/),
+        { sameFacts, why: (swapped as ParsedSheets).manifestDistrust },
+      );
+      // the pre-F14f facts alone (no signature) could not tell the two apart — the signature is what
+      // catches it, not a side effect of the other checks
+      const rawsB = parseFiles(new TextEncoder().encode(wB.bareText).slice().buffer, opts, []).raws;
+      const noSig = passed({
+        ...wA.manifest,
+        blocks: wA.manifest.blocks.map(({ contour: _c, ...b }) => b),
+      });
+      const legacyProblems = manifestGeometryProblems(noSig, rawsB).filter(
+        (w) => !/contour signature/.test(w),
+      );
+      check(
+        'F14f R2-A: without the signature the swapped triangle passes every other C3 check (the bypass is real)',
+        false,
+        legacyProblems.length === 0,
+        legacyProblems,
+      );
+
+      // R2-B: genuine output, a 5001-vertex seam written before one notch
+      const W = 300;
+      const H = 200;
+      const cutR = [
+        { x: 0, y: 0 },
+        { x: W, y: 0 },
+        { x: W, y: H },
+        { x: 0, y: H },
+      ];
+      const seamR: PtMm[] = [];
+      const N = 5001;
+      const per = 2 * (W - 20 + H - 20);
+      for (let k = 0; k < N; k++) {
+        let d = (k / N) * per;
+        const j = k % 2 === 0 ? 0.05 : -0.05; // ±0.05 mm: survives the writer's 0.01 mm simplify
+        let p: PtMm;
+        if (d < W - 20) p = { x: 10 + d, y: 10 + j };
+        else if ((d -= W - 20) < H - 20) p = { x: W - 10 + j, y: 10 + d };
+        else if ((d -= H - 20) < W - 20) p = { x: W - 10 - d, y: H - 10 + j };
+        else p = { x: 10 + j, y: H - 10 - (d - (W - 20)) };
+        seamR.push(p);
+      }
+      const wS = written(pieceOf('SEAMY', cutR, seamR, [{ x: 150, y: 0 }]));
+      const seamWritten = wS.plan.blocks[0].seam?.length ?? 0;
+      const genuine = await parse(sheet(embedManifest(wS.bareText, passed(wS.manifest))));
+      const cutPiece = genuine.pieces.find((p) => p.layer === '1');
+      const shownNotches = cutPiece?.inner?.filter((c) => c.layer === '4').length ?? -1;
+      check(
+        'F14f R2-B: genuine output with a 5001-vertex seam + 1 notch IS trusted (the notch is counted past the display budget)',
+        false,
+        seamWritten > 4000 && wS.manifest.blocks[0].notches === 1 && trusted(genuine),
+        { seamWritten, why: (genuine as ParsedSheets).manifestDistrust },
+      );
+      check(
+        'F14f R2-B (not vacuous): the display geometry of that piece really lost the notch to the 4000-point budget',
+        false,
+        shownNotches === 0,
+        shownNotches,
+      );
+      const fakeNotch = await parse(
+        sheet(
+          embedManifest(
+            wS.bareText,
+            passed({
+              ...wS.manifest,
+              blocks: wS.manifest.blocks.map((b) => ({ ...b, notches: 2 })),
+            }),
+          ),
+        ),
+      );
+      check(
+        'F14f R2-B: the uncapped counter still catches a wrong notch count behind the budget',
+        false,
+        distrusted(fakeNotch, /SEAMY_M: 1 notches, declared 2/),
+        (fakeNotch as ParsedSheets).manifestDistrust,
+      );
+
+      // the signature does not depend on the ring's start vertex or winding
+      const ring = wS.plan.blocks[0].cut;
+      const sig = contourSignature(ring)!;
+      const rot = [...ring.slice(2), ...ring.slice(0, 2)];
+      const rev = [...ring].reverse();
+      const shifted = ring.map((p) => ({ x: p.x + 1234.5, y: p.y - 77 }));
+      check(
+        'F14f: signature check is start-vertex / winding / translation independent',
+        false,
+        [rot, rev, shifted].every((r) => contourSigProblem(sig, r) === null),
+      );
+      const moved = ring.map((p, i) => (i === 1 ? { x: p.x + 1, y: p.y } : p));
+      check(
+        'F14f: a 1 mm move of one corner is caught',
+        false,
+        contourSigProblem(sig, moved) !== null,
+        contourSigMatch(sig, moved),
+      );
+      // validator: strict and bounded — on embed AND on read (a hand-written v1 line)
+      const rawLine = (c: unknown) => {
+        const m = { ...m0, blocks: m0.blocks.map((b, i) => (i === 0 ? { ...b, contour: c } : b)) };
+        const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(m))));
+        return `999\nGRBPWR-MANIFEST v1 1/1 ${b64}\n${orig}`;
+      };
+      const bad: [string, unknown][] = [
+        ['odd length', { dev: 1, pts: [0, 0, 1, 1, 2] }],
+        ['two points', { dev: 1, pts: [0, 0, 1, 1] }],
+        ['non-integer', { dev: 1, pts: [0, 0, 1.5, 1, 2, 2] }],
+        ['negative coordinate', { dev: 1, pts: [0, 0, -1, 1, 2, 2] }],
+        ['too many points', { dev: 1, pts: new Array(82).fill(1) }],
+        ['huge dev', { dev: 1e9, pts: [0, 0, 1, 1, 2, 2] }],
+        ['not an object', [0, 0, 1]],
+        ['null', null],
+      ];
+      const refusedOn = (fn: () => unknown) => {
+        try {
+          fn();
+          return false;
+        } catch (e) {
+          return e instanceof ManifestError && e.code === 'shape';
+        }
+      };
+      const leaks = bad
+        .filter(
+          ([, c]) =>
+            !refusedOn(() =>
+              embedManifest(orig, {
+                ...m0,
+                blocks: m0.blocks.map((b, i) => (i === 0 ? { ...b, contour: c } : b)),
+              } as never),
+            ) || !refusedOn(() => readManifest(rawLine(c))),
+        )
+        .map(([n]) => n);
+      check(
+        'F14f: the validator refuses malformed or unbounded contour signatures (embed and read)',
+        false,
+        leaks.length === 0 && readManifest(rawLine(m0.blocks[0].contour)) !== null,
+        leaks,
+      );
+    }
   }
 
   // ═══ card paths on the K1 fixtures, with the manifest ═══════════════════════════════════════
@@ -830,21 +1106,21 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       true,
       v.contourPieces.every((p) => v.split.codeById.get(p.id)?.size === 'M'),
     );
-    const missing = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID);
+    const missing = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID, 1);
     check(
       'a: the card is offered size M from the manifest (structure alone finds none)',
       true,
       isDeepStrictEqual(
         missing.map((x) => x.sizeId),
         [plainSizeId('m')],
-      ),
+      ) && missing.every((x) => !x.confirm),
       missing,
     );
     // F14 MAJOR 4: the same manifest uploaded to card B whose range is in another size system
     // (ta_m): its plain M is not trusted, nothing is added, the refusal is reported
     const cardB = [DICT_NAMES.indexOf('s_46ta_m') + 1];
-    const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
-    const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+    const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID, 2);
+    const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID, 2);
     check(
       'a (F14): manifest from card A on card B (ta_m) → M not added, reported as foreign',
       true,
@@ -899,27 +1175,86 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
     {
       const id = (n: string) => DICT_NAMES.indexOf(n) + 1;
       const cardB = [id('s_46ta_m')];
-      const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
-      const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+      const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID, 2);
+      const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID, 2);
       check(
-        'b (F14): manifest from card A on card B (ta_m) → no foreign id, sizes derived in ta_m',
+        'b (F14): manifest from card A on card B (ta_m) → no foreign id, sizes derived in ta_m and only proposed',
         true,
         // what the legacy token path derives from the names (XL is on too few stems for it)
         isDeepStrictEqual(
           missingB.map((x) => x.sizeId).sort((a, b) => a - b),
           [id('m_48ta_m'), id('l_50ta_m')],
-        ) && isDeepStrictEqual([...foreignB].sort(), ['l', 'm', 's', 'xl']),
+        ) &&
+          missingB.every((x) => x.confirm === true) &&
+          isDeepStrictEqual([...foreignB].sort(), ['l', 'm', 's', 'xl']),
         { missingB, foreignB },
       );
-      const missingA = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID);
+      const missingA = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID, 1);
       check(
-        'b (F14 control): on its own card (plain system) the manifest sizes are trusted',
+        'b (F14 control): on its own card (plain system) the manifest sizes are trusted and written by themselves',
         true,
         isDeepStrictEqual(
           missingA.map((x) => x.sizeId).sort((a, b) => a - b),
           ['m', 'l', 'xl'].map(plainSizeId),
-        ) && foreignManifestSizes(v.pieces, [plainSizeId('s')], SIZE_BY_ID).length === 0,
+        ) &&
+          missingA.every((x) => !x.confirm) &&
+          foreignManifestSizes(v.pieces, [plainSizeId('s')], SIZE_BY_ID, 1).length === 0,
         missingA,
+      );
+      // ── F14f (Codex R6) ──
+      // card #2 in the SAME (plain) size system: the manifest of card #1 used to pass the system
+      // guard and append its ids. Now its ids are never taken: sizes come from the block names and
+      // are only proposed.
+      const sameSys = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID, 2);
+      check(
+        'b (F14f R6): foreign manifest (card #1) on card #2 in the SAME system → nothing auto-written, names-derived sizes proposed',
+        true,
+        sameSys.length > 0 &&
+          sameSys.every((x) => x.confirm === true) &&
+          isDeepStrictEqual(
+            sameSys.map((x) => x.sizeId).sort((a, b) => a - b),
+            ['m', 'l'].map(plainSizeId),
+          ) &&
+          isDeepStrictEqual(
+            [...foreignManifestSizes(v.pieces, [plainSizeId('s')], SIZE_BY_ID, 2)].sort(),
+            ['l', 'm', 'xl'],
+          ),
+        sameSys,
+      );
+      const unknownCard = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID);
+      check(
+        'b (F14f R6): an unknown card id is not "own" → nothing auto-written',
+        true,
+        unknownCard.length > 0 && unknownCard.every((x) => x.confirm === true),
+        unknownCard,
+      );
+      const emptyOwn = missingSizesIn(v.pieces, DICT_TOKENS, [], SIZE_BY_ID, 1);
+      check(
+        'b (F14f R6): own manifest on a card with NO sizes → all four proposed, none auto-written',
+        true,
+        isDeepStrictEqual(
+          emptyOwn.map((x) => x.sizeId).sort((a, b) => a - b),
+          ['s', 'm', 'l', 'xl'].map(plainSizeId),
+        ) && emptyOwn.every((x) => x.confirm === true),
+        emptyOwn,
+      );
+      const emptyForeign = missingSizesIn(v.pieces, DICT_TOKENS, [], SIZE_BY_ID, 2);
+      check(
+        // a safety invariant, not a manifest behaviour: it holds with the gate shut too (the
+        // names-derived plain tokens are ambiguous across systems on an empty card)
+        'b (F14f R6): foreign manifest on a card with NO sizes → nothing auto-written',
+        false,
+        emptyForeign.every((x) => x.confirm === true),
+        emptyForeign,
+      );
+      // control: the same drawing WITHOUT a manifest keeps the legacy rule (written by itself)
+      const vl = await parsedL('b-sml-pck-m-only.dxf');
+      const legacy = missingSizesIn(vl.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID, 2);
+      check(
+        'b (F14f R6 control): the same drawing without a manifest → derived sizes still written by themselves',
+        false,
+        legacy.length > 0 && legacy.every((x) => !('confirm' in x)),
+        legacy,
       );
     }
     check(
@@ -1277,6 +1612,21 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
         continue;
       }
       const v = view(await parse([{ name: f, text }]));
+      // F14f: a sample written before contour signatures (by a lane without F14f — the samples are
+      // shared) is legacy: the card must read it as any DXF, with the reason, and nothing else is
+      // asserted about it.
+      if (m.blocks.some((b) => !b.contour)) {
+        check(
+          `F6 sample ${f}: pre-F14f manifest (no contour signature) → not trusted, legacy parse`,
+          false,
+          v.parsed.failedFiles === 0 &&
+            v.pieces.length > 0 &&
+            v.pieces.every((p) => !p.manifest) &&
+            /no contour signature/.test(v.parsed.manifestDistrust[0] ?? ''),
+          v.parsed.manifestDistrust,
+        );
+        continue;
+      }
       const declared = new Set(
         m.blocks.map((b) => (/(^|_)UNI(_|$)/i.test(b.block) ? b.block : b.identity).toLowerCase()),
       );

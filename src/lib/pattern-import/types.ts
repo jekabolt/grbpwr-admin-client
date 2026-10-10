@@ -1074,7 +1074,20 @@ export type ManifestBlock = {
   drills: number;
   internal: number;
   hasSeam: boolean;
+  /**
+   * F14f (Codex R2): the cut ring, coarsened — what binds this entry to the drawn contour
+   * (manifest/contour-sig.ts). Absent in a manifest written before F14f: the card then treats the
+   * whole manifest as untrusted (legacy parse), never as matched.
+   */
+  contour?: ContourSignature;
 };
+
+/**
+ * Douglas–Peucker vertices of a cut ring, relative to its bbox min corner, in 0.1 mm integers,
+ * delta-coded `[x0, y0, dx1, dy1, …]`; `dev` = how far (0.1 mm, rounded up) the ring strays from
+ * this polyline. See manifest/contour-sig.ts.
+ */
+export type ContourSignature = { dev: number; pts: number[] };
 
 export type ManifestSource = {
   files: { name: string; sha256: string; bytes: number; kind: SourceKind; pages: number }[];

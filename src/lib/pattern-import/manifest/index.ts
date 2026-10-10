@@ -30,12 +30,14 @@
 // `corrupt` (a deflate bomb in a comment line must not take the card's parser down).
 //
 // Main-thread safe by contract: JSON, string and fflate (pure JS) operations only, no imports beyond
-// `types.ts` (and the sibling `identity.ts`, the G11 identity grammar the wizard and the gate share).
+// `types.ts` (and the siblings `identity.ts`, the G11 identity grammar the wizard and the gate share,
+// and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
 import { Inflate, deflateSync } from 'fflate';
 import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
   PATIMPORT,
+  type ContourSignature,
   type ConversionManifest,
   type EmbedManifestFn,
   type GateCheck,
@@ -61,6 +63,17 @@ export {
   sizeTokenTest,
   type IdentityRules,
 } from './identity';
+import { contourSigShapeProblem } from './contour-sig';
+export {
+  CONTOUR_SIG_MAX_PTS,
+  CONTOUR_SIG_Q_MM,
+  CONTOUR_SIG_TOL_MM,
+  contourSigCap,
+  contourSigMatch,
+  contourSigProblem,
+  contourSignature,
+  decodeContourSig,
+} from './contour-sig';
 
 export type ManifestErrorCode =
   /** A tagged line that is not `GRBPWR-MANIFEST v<n> <i>/<n> <base64>`, bad base64, bad UTF-8, bad JSON. */
@@ -534,6 +547,12 @@ export function validateManifest(x: unknown): ConversionManifest {
       if (!isInt(b[k]) || (b[k] as number) < 0) fail(`${p}.${k}`, 'not a non-negative integer');
     }
     if (!isBool(b.hasSeam)) fail(`${p}.hasSeam`, 'not a boolean');
+    // F14f: optional (a pre-F14f manifest has none and is then not trusted by the card), but
+    // when present it is checked strictly and bounded — it is read on the card's parse path.
+    if (b.contour !== undefined) {
+      const why = contourSigShapeProblem(b.contour);
+      if (why) fail(`${p}.contour`, why);
+    }
     const ci = b.block.trim().toLowerCase();
     if (blockNames.has(ci)) fail(`${p}.block`, `duplicate "${b.block}"`);
     blockNames.add(ci);
@@ -557,6 +576,14 @@ export function validateManifest(x: unknown): ConversionManifest {
       drills: b.drills as number,
       internal: b.internal as number,
       hasSeam: b.hasSeam,
+      ...(b.contour !== undefined
+        ? {
+            contour: {
+              dev: (b.contour as ContourSignature).dev,
+              pts: [...(b.contour as ContourSignature).pts],
+            },
+          }
+        : {}),
     };
   });
 
