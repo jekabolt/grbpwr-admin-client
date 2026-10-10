@@ -769,6 +769,8 @@ const same = (a, b, tol = 1e-3) =>
         'aspect differs (stretched)',
         'width="100mm" height="100mm" viewBox="0 0 200 100" preserveAspectRatio="none"',
       ],
+      // Codex П0: SVG 2 root transform rescales content the walker does not compose
+      ['root transform', 'width="200mm" height="200mm" viewBox="0 0 200 200" transform="scale(.5)"'],
     ]) {
       const d = await declared(head(attrs));
       check(
@@ -779,6 +781,24 @@ const same = (a, b, tol = 1e-3) =>
         { unit: null, best: 'not declared' },
       );
     }
+  }
+
+  // Codex П0: a labelled test square that disagrees with the declared units (96 mm drawn for
+  // «10 cm») is capped at 0.85 by the square reader — it must still pull 'declared' down to 0.5
+  {
+    const q = await sv(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297"><rect x="20" y="20" width="96" height="96" fill="none" stroke="#000"/><text x="25" y="130" font-size="5">Test square 10 cm</text></svg>',
+    );
+    const cs = m.detectScale(q.doc);
+    const dec = cs.find((c) => c.method === 'declared');
+    const best = cs[0];
+    check(
+      U,
+      'A0.1 declared units vs a disagreeing labelled square → declared 0.5, nothing at ≥ 0.9',
+      dec?.confidence === 0.5 && !(best.confidence >= 0.9),
+      { declared: dec?.confidence, best: `${best.method}/${best.confidence}` },
+      { declared: 0.5, best: '< 0.9' },
+    );
   }
 
   s = await sv(

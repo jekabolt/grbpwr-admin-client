@@ -642,6 +642,9 @@ export async function main(opts: { plans: string; corpus: string }): Promise<num
       ['2 ДЕТ.', 2],
       ['2 дет', 2],
       ['CUT & SEW', null],
+      // Codex П0: a count per fabric is not the piece's count — ask
+      ['Cut: 2 fabric, 1 lining', null],
+      ['cut 1 interfacing', null],
       ['PIECE NAME: 3', null],
       ['# 202', null],
       ['10 x 10 cm', null],

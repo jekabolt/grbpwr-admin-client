@@ -736,6 +736,9 @@ function declaredUnits(
 ): DeclaredUnits | undefined {
   const unit = W.unit;
   if (unit !== H.unit || (unit !== 'mm' && unit !== 'cm' && unit !== 'in')) return undefined;
+  // a transform on the root <svg> (SVG 2) rescales the content the walker does not compose: the
+  // declared size then says nothing about the drawing — leave it to the test square
+  if ((svg.attrs.transform ?? '').trim()) return undefined;
   const sx = W.mm / vb[2];
   const sy = H.mm / vb[3];
   if (!(sx > 0) || Math.abs(sx / sy - 1) > 0.001) return undefined;

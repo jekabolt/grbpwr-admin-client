@@ -415,10 +415,12 @@ export const detectScale: DetectScaleFn = (doc: SourceDoc) => {
 function declaredCandidate(doc: SourceDoc, squares: ScaleCandidate[]): ScaleCandidate | null {
   const u = doc.declaredUnits;
   if (!u) return null;
+  // Any labelled square counts against the file's word: a disagreeing one is already capped below
+  // 0.9 by squareCandidates (0.85, or 0.3 when implausible), so a ≥ 0.9 filter would never fire.
   const against = squares.find(
     (c) =>
       c.method === 'test-square' &&
-      c.confidence >= 0.9 &&
+      c.confidence >= 0.5 &&
       Math.abs(c.factor - 1) > PATIMPORT.scaleWarnRatio,
   );
   const page = doc.pages[0]?.page ?? 0;
