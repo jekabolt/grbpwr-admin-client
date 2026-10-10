@@ -6,7 +6,13 @@
 // merge (around several seeds) or split (inside a merged region), "not a piece", reseed. Each
 // region carries a strip of its sizes, so a piece closed in four sizes of six says which two.
 import { useMemo, useRef, useState } from 'react';
-import type { FillOutcome, PieceEdit, PieceFamily, PtMm } from 'lib/pattern-import/types';
+import type {
+  FillOutcome,
+  PieceCandidate,
+  PieceEdit,
+  PieceFamily,
+  PtMm,
+} from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -89,6 +95,17 @@ const OUTCOME: Record<FillOutcome, { word: string; tone: 'ok' | 'warn' | 'attent
   leak: { word: 'leak', tone: 'warn' },
   merged: { word: 'two seeds', tone: 'attention' },
   tiny: { word: 'tiny', tone: 'mut' },
+  refused: { word: 'sizes unclear', tone: 'attention' },
+};
+
+/** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
+const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
+  'sizes-not-distinguished':
+    'the sizes are drawn alike here and nothing on the sheet proves which line is which size. no outline is given for this size; closing a gap will not change that. trace it by hand, or drop it if it is not a piece.',
+  'size-count':
+    'how many sizes this sheet draws is not settled. answer it on the sizes step ("sizes drawn on this sheet").',
+  'grade-ambiguous':
+    'two size layouts fit these lines equally well. no outline is given until the sizes are told apart.',
 };
 
 const STYLE: Record<FillOutcome, { fill: string; stroke: string; dash: boolean }> = {
@@ -96,6 +113,7 @@ const STYLE: Record<FillOutcome, { fill: string; stroke: string; dash: boolean }
   leak: { fill: '#ffffff', stroke: SHEET_INK.red, dash: true },
   merged: { fill: '#ffffff', stroke: SHEET_INK.blue, dash: true },
   tiny: { fill: '#fafafa', stroke: SHEET_INK.mut, dash: true },
+  refused: { fill: '#ffffff', stroke: SHEET_INK.blue, dash: true },
 };
 
 const centre = (pts: PtMm[]) => {
@@ -152,9 +170,15 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
     f.candidates.find((c) => c.outcome !== 'closed')?.outcome ?? 'closed';
   const cand = (f: PieceFamily) => f.candidates[Math.min(rank, f.candidates.length - 1)];
   const selected = families.find((f) => f.seed === sel) ?? null;
+  const refusedSel = !!selected && cand(selected).outcome === 'refused';
+  // a refused size has no outline to close: an active bridge tool falls back to the default one
+  if (tool === 'bridge' && refusedSel) {
+    setGapA(null);
+    setTool('pan');
+  }
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
-    { closed: 0, leak: 0, merged: 0, tiny: 0 },
+    { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
   );
 
   const onLasso = (poly: PtMm[]) => {
@@ -200,7 +224,13 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                   selected={tool === t}
                   pressed={tool === t}
                   onClick={() => pickTool(t)}
-                  title={title}
+                  // a refused size has no outline to close: a bridge cannot prove which line is it
+                  disabled={t === 'bridge' && refusedSel}
+                  title={
+                    t === 'bridge' && refusedSel
+                      ? 'this size is held back (sizes unclear), not open: a gap closed here would not prove it'
+                      : title
+                  }
                 >
                   {word}
                 </Chip>
@@ -544,6 +574,7 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
               {counts.leak ? ` · ${counts.leak} leak` : ''}
               {counts.merged ? ` · ${counts.merged} two seeds` : ''}
               {counts.tiny ? ` · ${counts.tiny} tiny` : ''}
+              {counts.refused ? ` · ${counts.refused} sizes unclear` : ''}
             </Text>
           }
         >
@@ -553,6 +584,11 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
               one model — pick it above.
             </Text>
           )}
+          {(out.grade?.ambiguities ?? []).map((a, i) => (
+            <Text key={i} size='micro' component='p' className='mb-2 text-warning'>
+              ! {a.message}
+            </Text>
+          ))}
           <ul className='divide-y divide-hairline'>
             {families.map((f) => {
               const c = cand(f);
@@ -620,13 +656,15 @@ export function PiecesStep({ api }: { api: ImportSessionApi }) {
                 value={selected.monotone ? 'yes' : <span className='text-error'>no</span>}
               />
               <Text size='micro' variant='label' component='p' className='mt-1'>
-                {outcomeOf(selected) === 'leak'
-                  ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
-                  : outcomeOf(selected) === 'merged'
-                    ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
-                    : outcomeOf(selected) === 'tiny'
-                      ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
-                      : 'closed and snapped to the drawn lines.'}
+                {cand(selected).outcome === 'refused'
+                  ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${cand(selected).gradeDetail ? ` (${cand(selected).gradeDetail})` : ''}`
+                  : outcomeOf(selected) === 'leak'
+                    ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
+                    : outcomeOf(selected) === 'merged'
+                      ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
+                      : outcomeOf(selected) === 'tiny'
+                        ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
+                        : 'closed and snapped to the drawn lines.'}
               </Text>
               <div className='mt-2 flex flex-wrap gap-2'>
                 <Button
@@ -718,9 +756,11 @@ function RankCell({
             ? 'border-textColor bg-textColor text-bgColor'
             : outcome === 'leak'
               ? 'border-error text-error line-through'
-              : outcome === 'merged'
-                ? 'border-warning text-warning'
-                : 'border-borderColor text-labelColor',
+              : outcome === 'refused'
+                ? 'border-dashed border-warning text-warning'
+                : outcome === 'merged'
+                  ? 'border-warning text-warning'
+                  : 'border-borderColor text-labelColor',
         current && 'outline outline-1 outline-offset-1 outline-textColor',
       )}
     >

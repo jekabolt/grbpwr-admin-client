@@ -7,6 +7,7 @@
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
 import type {
+  ChainAmbiguity,
   ChainSet,
   DraftScope,
   ExtractOpts,
@@ -27,6 +28,8 @@ import type {
   SemanticsOutput,
   Sheet,
   SizeMap,
+  ExpectedSizes,
+  FillOpts,
   SizeRun,
   SourceDoc,
   SourceFileInfo,
@@ -39,8 +42,10 @@ import {
   dxfFastPath,
   dxfScaleCandidates,
   readDxf,
+  refuseSeamPair,
   segmentDxf,
   type DxfFastPath,
+  type DxfPieceCandidate,
   type DxfRead,
   type DxfSegmentation,
 } from '../adapters/dxf';
@@ -58,6 +63,7 @@ import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
+import { expectedSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
   applyPieceEdits,
@@ -196,6 +202,9 @@ export class Session {
   private pieceKey = '';
   private run: SizeRun | null = null;
   private sizeMap: SizeMap | null = null;
+  /** pieces/grade (H1): sizes the sheet draws (sizes stage); the pieces stage fails closed on it. */
+  private expected: ExpectedSizes | null = null;
+  private gradeAmbiguities: ChainAmbiguity[] = [];
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
   private seeds: Seed[] | null = null;
@@ -272,6 +281,7 @@ export class Session {
     if (at < ORDER.indexOf('sizes')) {
       this.run = null;
       this.sizeMap = null;
+      this.expected = null;
     }
     if (at < ORDER.indexOf('pieces')) {
       this.seeds = null;
@@ -682,13 +692,16 @@ export class Session {
   private sizesStage(input: StageIO['sizes']['in']): StageIO['sizes']['out'] {
     if (!this.sheet || !this.chains)
       throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
-    const run = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
+    const read = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
+    // H1: the sizes the sheet draws decide the run the pieces are ranked in
+    this.expected = expectedSizes(read, input.card, input.drawnSizes, this.chains);
+    const run = runForExpected(read, this.expected);
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    return { run, map };
+    return { run, map, expected: this.expected };
   }
 
   // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
@@ -703,11 +716,18 @@ export class Session {
           'the pieces of a DXF are its blocks — they are not re-seeded or edited here',
           'pieces',
         );
+      // H1: the operator says the drawing has exactly two sizes — a block whose outline holds one
+      // more alike at a uniform allowance may be those two sizes (the source's own count of two is
+      // refused by the fast path already)
+      const twoSizes = this.expected?.from === 'operator' && this.expected.n === 2;
       // F8 keeps the DXF's own features on `dxf.features`; the contract field is
       // `PieceCandidate.features` — copy them across so every reader finds them in one place.
       const families = this.fast.families.map((f) => ({
         ...f,
-        candidates: f.candidates.map((c) => {
+        candidates: f.candidates.map((c0) => {
+          const c = twoSizes
+            ? refuseSeamPair(c0 as DxfPieceCandidate, 'you said the drawing has two sizes')
+            : c0;
           const dx = (
             c as typeof c & { dxf?: { features?: PieceFamily['candidates'][number]['features'] } }
           ).dxf;
@@ -724,6 +744,11 @@ export class Session {
     if (!base) throw new ImportError('out-of-order', 'trace the lines first', 'pieces');
     const run = this.run ?? detectSizeRun(sheet, base, this.files);
     this.run = run;
+    // H1: the fill must know how many sizes the sheet draws — the wizard passes the sizes step's
+    // answer; without it, the session's own (sizes stage), else what the source alone says
+    const expected =
+      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null, base) ?? undefined;
+    const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
     // Wall edits (close gap / ignore line / use line) go through the F4b session: appended ones
     // refill only the seeds they reach; an undo, new seeds or another variant fill afresh with
@@ -732,7 +757,7 @@ export class Session {
     const wallEdits = input.edits.filter(isWallEdit);
     const key = JSON.stringify([
       seeds.map((x) => [x.id, x.at.x, x.at.y, x.variant, x.origin]),
-      input.opts,
+      opts,
     ]);
     const prev = this.pieceSession;
     const prior = this.pieceWallEdits;
@@ -753,7 +778,7 @@ export class Session {
         set: base,
         run,
         seeds,
-        opts: input.opts,
+        opts,
         walls: { exclude: [], include: [], bridges: [] },
         families: [],
       };
@@ -762,7 +787,7 @@ export class Session {
         base,
         run,
         seeds,
-        input.opts,
+        opts,
         wallEditsInto(empty, wallEdits).walls,
         (d, t, n) => {
           ctx.checkCancel();
@@ -781,14 +806,23 @@ export class Session {
         sheet,
         set,
         run,
-        opts: input.opts,
+        opts,
         walls: ps.walls,
       });
     this.wallSet = set;
     this.seeds = seeds;
     this.families = families;
     const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
-    return { seeds, families, variants };
+    // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
+    // fill's answer: the solver reads the whole sheet either way)
+    if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
+    else if (ps.diag?.grade) this.gradeAmbiguities = ps.diag.grade.ambiguities;
+    return {
+      seeds,
+      families,
+      variants,
+      grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
+    };
   }
 
   // ── semantics (F5) ────────────────────────────────────────────────────────────────────────

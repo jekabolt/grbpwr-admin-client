@@ -4,7 +4,13 @@
 // is blue until the operator looks at it. Two size rows given one label are one size (a size
 // drawn in two looks) — the worker merges them.
 import { useState } from 'react';
-import type { BoxMm, ChainRole, ChainAmbiguity, SizeMapEntry } from 'lib/pattern-import/types';
+import type {
+  BoxMm,
+  ChainRole,
+  ChainAmbiguity,
+  ExpectedSizes,
+  SizeMapEntry,
+} from 'lib/pattern-import/types';
 import { Chip } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
@@ -36,6 +42,7 @@ const FLAG: Record<ChainAmbiguity['kind'], string> = {
   'size-empty': 'size not drawn',
   unassigned: 'lines without a size',
   'bundle-overfull': 'too many lines',
+  'grade-ambiguous': 'which size is which',
 };
 
 /** A dash rhythm as the eye reads it: 7.78/1.66, not 7.781600531/1.659…. */
@@ -169,6 +176,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       }
       side={
         <Panel title='legend and sizes'>
+          {sizes.expected?.from !== 'source' && (
+            <DrawnSizes expected={sizes.expected} onCommit={(n) => void api.setDrawnSizes(n)} />
+          )}
           {flags.length > 0 && (
             <>
               <GroupLabel flush>
@@ -368,6 +378,76 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
         </Panel>
       }
     />
+  );
+}
+
+/**
+ * H1: how many sizes the sheet draws, when the file itself does not say (every size drawn alike).
+ * The card's size range is the default; the fill ranks each piece into that many sizes and holds
+ * back (never guesses) a piece it cannot rank. Empty = back to the card's range.
+ */
+function DrawnSizes({
+  expected,
+  onCommit,
+}: {
+  expected: ExpectedSizes | null;
+  onCommit: (n: number | null) => void;
+}) {
+  const note = !expected
+    ? 'the lines do not say how many sizes are drawn and the card has no size range. type the number.'
+    : expected.from === 'card'
+      ? `from the card's size range. each piece is ranked into ${expected.n} sizes; a piece that cannot be ranked is held back, not guessed. change it if the sheet draws fewer.`
+      : expected.n === 1
+        ? 'one size: each piece closes as a single outline.'
+        : `set by you. a piece that cannot be ranked into ${expected.n} sizes is held back, not guessed.`;
+  return (
+    <div className='mb-3'>
+      <GroupLabel flush>sizes drawn on this sheet</GroupLabel>
+      <span className='flex items-center gap-1.5'>
+        <Input
+          type='number'
+          min={1}
+          max={30}
+          step={1}
+          inputMode='numeric'
+          key={`${expected?.from}-${expected?.n ?? 'none'}`}
+          defaultValue={expected?.n ?? ''}
+          aria-label='sizes drawn on this sheet'
+          aria-describedby='drawn-sizes-note'
+          aria-invalid={!expected || undefined}
+          className='h-[22px] w-16 tabular-nums'
+          onBlur={(ev: React.FocusEvent<HTMLInputElement>) => {
+            const raw = ev.currentTarget.value.trim();
+            const n = raw === '' ? null : Math.round(Number(raw));
+            if (n !== null && (!Number.isFinite(n) || n < 1 || n > 30)) {
+              ev.currentTarget.value = expected ? String(expected.n) : '';
+              return;
+            }
+            if (n !== (expected?.from === 'operator' ? expected.n : null)) onCommit(n);
+          }}
+          onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
+            if (ev.key === 'Enter') ev.currentTarget.blur();
+          }}
+        />
+        {expected?.from === 'operator' ? (
+          <Pill tone='ink'>set</Pill>
+        ) : expected ? (
+          <Pill tone='attention' title="taken from the card's size range">
+            card
+          </Pill>
+        ) : (
+          <Pill tone='attention'>! needed</Pill>
+        )}
+      </span>
+      <Text
+        id='drawn-sizes-note'
+        size='micro'
+        component='p'
+        className={cn('mt-1', expected ? 'text-labelColor' : 'text-error')}
+      >
+        {note}
+      </Text>
+    </div>
   );
 }
 

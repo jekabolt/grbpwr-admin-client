@@ -266,11 +266,17 @@ export function buildPieceSpecsDetailed(
     }
     const bad = mapped.find((m) => m.c.outcome !== 'closed');
     if (bad) {
-      const r = bad.c.outcome as BlockReason;
+      // H1: a refused size names its own reason (sizes not told apart / count / ambiguous)
+      const r: BlockReason =
+        bad.c.outcome === 'refused'
+          ? bad.c.gradeRefusal ?? 'sizes-not-distinguished'
+          : (bad.c.outcome as BlockReason);
       block(
         seed,
         r,
-        r === 'leak'
+        bad.c.outcome === 'refused'
+          ? `size ${bad.card.token}: ${bad.c.gradeDetail ?? 'its outline could not be told apart from the other sizes'}`
+          : r === 'leak'
           ? `outline of size ${bad.card.token} is not closed${bad.c.leakAt ? ` near (${bad.c.leakAt.x.toFixed(0)}, ${bad.c.leakAt.y.toFixed(0)}) mm` : ''}`
           : r === 'merged'
             ? 'two seeds share one region — split them'

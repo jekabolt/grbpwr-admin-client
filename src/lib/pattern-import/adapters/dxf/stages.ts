@@ -258,7 +258,8 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
     const candidates: DxfPieceCandidate[] = ps.map((p) =>
       candidateOf(p, k, id.mode === 'A', seg, chainOf, range, read, pathById),
     );
-    const areas = candidates.map((c) => c.areaMm2);
+    // a refused size has no area: growth is judged over the outlines that are given
+    const areas = candidates.filter((c) => c.outcome !== 'refused').map((c) => c.areaMm2);
     families.push({
       seed: k,
       candidates,
@@ -308,6 +309,12 @@ function candidateOf(
   read: DxfRead,
   pathById: Map<PathId, IRPath>,
 ): DxfPieceCandidate {
+  const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
+  if (p.nested) return refusedNested(p, seed, Math.max(0, rank));
+  // one same-look loop at a uniform allowance reads as the sew line — unless the source draws
+  // exactly two sizes: then the two loops may be those two sizes, and nothing proves which
+  if (p.seamPair && seg.sizes.length === 2)
+    return refusedPair(p, seed, Math.max(0, rank), 'the drawing names two sizes');
   const outer = (outerIsSeam ? p.seam ?? p.cut : p.cut ?? p.seam) ?? null;
   const group = read.meta.groups[p.group];
   const wallIds = new Set(outer?.paths ?? []);
@@ -386,7 +393,6 @@ function candidateOf(
       } satisfies FoldFeature);
     }
   }
-  const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
   const area = outer?.areaMm2 ?? 0;
   return {
     seed,
@@ -411,7 +417,99 @@ function candidateOf(
       size: p.size,
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
+      ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
       ...(p.instances ? { instances: p.instances } : {}),
+    },
+  };
+}
+
+/**
+ * A block that stacks several outlines of one look (segment.ts `nestedSizeLoops`): which of them
+ * is the size the block claims cannot be proven, so the candidate is refused — no outline, no
+ * walls, no features (notches and drills placed against the largest loop would be wrong too) —
+ * with the pieces/grade (H1) contract the semantics stage already blocks on and words it.
+ */
+function refusedNested(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCandidate {
+  const n = p.nested!;
+  const ratios = n.areaRatios.map((r) => `${Math.round(r * 100)} %`).join(', ');
+  const what = n.line === 'both' ? 'cut- and seam-line outlines' : `${n.line}-line outlines`;
+  return refusedBlock(
+    p,
+    seed,
+    rank,
+    `block ${p.block} draws ${n.outlines} ${what} alike on layer ${n.layer}, one inside the ` +
+      `other (inner ones ${ratios} of the outer area) — several sizes in one block, or a line ` +
+      `nothing tells apart from them; which one is ${p.size ? `size ${p.size}` : 'this size'} ` +
+      `cannot be proven. Export one size per block, or trace the outline.`,
+  );
+}
+
+/**
+ * A block whose outline has one same-look loop inside at a uniform allowance (segment.ts
+ * `seamPair`) when the run expects exactly two sizes: a cut line with its sew line and two sizes
+ * graded by a uniform step look the same — refused, never the larger loop as "the" size.
+ */
+function refusedPair(p: DxfBlockPiece, seed: number, rank: number, why: string): DxfPieceCandidate {
+  return refusedBlock(p, seed, rank, pairDetail(p.block, p.size, p.seamPair?.offsetMm, why));
+}
+
+const pairDetail = (block: string, size: string, offsetMm: number | undefined, why: string) =>
+  `block ${block} draws its outline with one more outline alike inside it, ` +
+  `${offsetMm ?? '?'} mm in all round — a sew line, or the second of two sizes; ` +
+  `${why}, so which one is ${size ? `size ${size}` : 'this size'} cannot be proven. ` +
+  `Draw the sew line in another look, export one size per block, or trace the outline.`;
+
+/**
+ * The same refusal applied later, when the OPERATOR says the run draws two sizes (the sizes step
+ * comes after the fast path is built): a candidate whose block is a `seamPair` loses its outline.
+ */
+export function refuseSeamPair(c: DxfPieceCandidate, why: string): DxfPieceCandidate {
+  if (c.dxf.seamPairMm == null || c.outcome === 'refused') return c;
+  return {
+    ...c,
+    outer: [],
+    walls: [],
+    inside: [],
+    textsInside: [],
+    outcome: 'refused',
+    areaMm2: 0,
+    sourceCoverage: 0,
+    p95Mm: 0,
+    features: [],
+    gradeRefusal: 'sizes-not-distinguished',
+    gradeDetail: pairDetail(c.dxf.block, c.dxf.size, c.dxf.seamPairMm, why),
+    dxf: { ...c.dxf, features: [] },
+  };
+}
+
+function refusedBlock(
+  p: Pick<DxfBlockPiece, 'block' | 'group' | 'identity' | 'size' | 'cut' | 'seam'>,
+  seed: number,
+  rank: number,
+  detail: string,
+): DxfPieceCandidate {
+  return {
+    seed,
+    rank,
+    outer: [],
+    walls: [],
+    inside: [],
+    textsInside: [],
+    outcome: 'refused',
+    areaMm2: 0,
+    // where the block is, so the operator can find it; there is no outline
+    bbox: (p.cut ?? p.seam)?.bbox ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    sourceCoverage: 0,
+    p95Mm: 0,
+    gradeRefusal: 'sizes-not-distinguished',
+    gradeDetail: detail,
+    dxf: {
+      block: p.block,
+      group: p.group,
+      identity: p.identity,
+      size: p.size,
+      features: [],
+      outerIsSeam: false,
     },
   };
 }

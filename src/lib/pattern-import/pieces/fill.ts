@@ -46,6 +46,7 @@ import {
 import { pageMarginIds } from 'lib/pattern-import/chains/classify';
 
 import { type Bridge, wallBridges } from './bridges';
+import { gradeHook, type GradeHook } from './grade/hook';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
@@ -90,6 +91,8 @@ export type FillDiag = {
   split?: number;
   /** File-per-size: seed placements moved to the matching region of another size's file. */
   moved?: number;
+  /** pieces/grade (H1): the alike-drawn-sizes hook, when it ran. */
+  grade?: GradeHook;
   ms: number;
 };
 
@@ -406,6 +409,9 @@ export function fillPiecesDetailed(
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
+  // H1: sizes drawn alike — the solver's per-rank walls, or refusals (null = F4 as before)
+  const graded = gradeHook(sheet, set, run, use, model, opts, progress, edits.exclude);
+  const nRanks = graded?.n ?? model.n;
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
   // a variant's cutting line drawn once per size cuts only its own size (kombinezon's 4XL pants
@@ -414,6 +420,7 @@ export function fillPiecesDetailed(
   model.byRank.forEach((ids, r) => ids.forEach((id) => rankOfKnife.set(id, r)));
   const knivesOf = (r: number) =>
     knifeItems.filter((it) => {
+      if (graded?.notKnife.has(it.chain)) return false; // H1: a size line, not a knife
       const kr = rankOfKnife.get(it.chain);
       return kr === undefined || kr === r || model.mode === 'single';
     });
@@ -478,7 +485,9 @@ export function fillPiecesDetailed(
   const baseItems = (r: number, excl: Set<ChainId>) => {
     const ownIds = model.mode === 'single' ? [] : model.byRank[r];
     return [
-      ...itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)]),
+      ...(graded?.walls
+        ? graded.walls(r)
+        : itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)])),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
       ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
@@ -541,7 +550,7 @@ export function fillPiecesDetailed(
     const frames = new Set<ChainId>();
     for (let si = 0; si < use.length; si++) {
       const seed = use[si];
-      if (dropped.has(seed.id)) continue;
+      if (dropped.has(seed.id) || graded?.skip.has(seed.id)) continue;
       if (opts.only && !opts.only.has(seed.id)) continue;
       let ctx = base;
       let rankFrom: RankFrom = model.mode === 'single' ? 'single' : 'class';
@@ -966,8 +975,8 @@ export function fillPiecesDetailed(
   };
 
   const excl = new Set<ChainId>(userExcl);
-  for (let r = 0; r < model.n; r++) {
-    progress?.(r, model.n, `rank ${r}`);
+  for (let r = 0; r < nRanks && !(graded && graded.skip.size >= use.length); r++) {
+    progress?.(r, nRanks, `rank ${r}`);
     let res = rankPass(r, excl);
     // frames found around merged regions are not walls: drop them and fill this rank again
     for (let attempt = 0; attempt < 3 && res.frames.size; attempt++) {
@@ -983,10 +992,11 @@ export function fillPiecesDetailed(
     }
   }
   if (model.mode === 'file') correspond(excl);
-  if (opts.autoBridgeMm !== 0) bridgePass(excl);
+  // derived bridges are not the solver's lines: a graded fill closes on proven walls only
+  if (opts.autoBridgeMm !== 0 && !graded?.walls) bridgePass(excl);
   // leak mouths: per rank, walk from the seed until it leaves the piece as another rank closed it
   // (or, with no closed rank, the thickened-wall closure)
-  for (let r = 0; r < model.n; r++) {
+  for (let r = 0; r < nRanks; r++) {
     const leaks = use
       .map((s, si) => ({ s, si, c: cands.get(s.id)!.find((x) => x.rank === r) }))
       .filter((x) => x.c && x.c.outcome === 'leak');
@@ -1070,6 +1080,7 @@ export function fillPiecesDetailed(
     (diag.ungraded ??= []).push(c[0].seed);
     return true;
   };
+  graded?.finish(cands);
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;
@@ -1092,8 +1103,9 @@ export function fillPiecesDetailed(
     }
     families.push({ seed: s.id, candidates: c, monotone: isMonotone(c) || ungraded(c) });
   }
+  if (graded) diag.grade = graded;
   diag.ms = Date.now() - t0;
-  progress?.(model.n, model.n);
+  progress?.(nRanks, nRanks);
   return { families, diag };
 }
 

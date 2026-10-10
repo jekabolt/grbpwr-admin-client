@@ -87,6 +87,8 @@
     "patimport:f17": "node scripts/pattern-import/f17.mjs",
     "patimport:semantics": "node scripts/pattern-import/semantics.mjs",
     "patimport:fabrics": "node scripts/pattern-import/fabrics.mjs",
+    "patimport:grade": "node scripts/pattern-import/grade.mjs all",
+    "patimport:dxf-nested": "node scripts/pattern-import/dxf-nested.mjs",
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

@@ -206,6 +206,12 @@ export const applyPieceEdits: ApplyPieceEditsFn = (families, edits, ctx) => {
       for (const r of ranks) {
         const cs = parts.map((p) => p.candidates.find((c) => c.rank === r));
         const base = cs[0] ?? cs.find(Boolean)!;
+        // H1: a refused size stays refused (merging does not prove which line is which size)
+        const refused = cs.find((c) => c?.outcome === 'refused');
+        if (refused) {
+          cands.push({ ...refused, seed: head.seed });
+          continue;
+        }
         if (cs.some((c) => !c || c.outer.length < 3 || c.outcome === 'leak')) {
           cands.push({ ...base, seed: head.seed, outcome: 'leak', outer: [] });
           continue;

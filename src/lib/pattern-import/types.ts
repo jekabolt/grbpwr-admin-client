@@ -392,7 +392,8 @@ export type ChainAmbiguity = {
     | 'class-split' // one size drawn in several looks
     | 'size-empty' // a rank with no line
     | 'unassigned' // size-line chains without a rank
-    | 'bundle-overfull'; // parallel group wider than the size count after splitting
+    | 'bundle-overfull' // parallel group wider than the size count after splitting
+    | 'grade-ambiguous'; // pieces/grade (H1): two rank layouts of an unencoded graded piece fit
   message: string;
   classes: ClassId[];
   chains: ChainId[];
@@ -519,7 +520,29 @@ export type FillOutcome =
   | 'closed'
   | 'leak' // seed region touches the outside — contour has a gap
   | 'merged' // two seeds in one region
-  | 'tiny'; // area below MIN_PIECE_AREA
+  | 'tiny' // area below MIN_PIECE_AREA
+  /**
+   * pieces/grade (H1): the sheet draws several sizes alike and this size of this piece could not
+   * be PROVEN — no contour is given (`outer` empty), `gradeRefusal` says why. Not a gap: closing a
+   * gap does not help; the operator answers the size count, picks an orientation, or traces it.
+   */
+  | 'refused';
+
+/** pieces/grade (H1): why a candidate is 'refused'. */
+export type GradeRefusal =
+  /** several sizes are drawn alike here and nothing proves which line is which size */
+  | 'sizes-not-distinguished'
+  /** more than one size layout fits the drawn lines equally well */
+  | 'grade-ambiguous'
+  /** the size count is unknown, or the drawing shows a different number of lines side by side */
+  | 'size-count';
+
+/**
+ * How many sizes the sheet draws, and who says so. 'source' = the file encodes its sizes (legend,
+ * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step;
+ * 'card' = the card's size run (the converter runs inside the card), used when the source is silent.
+ */
+export type ExpectedSizes = { n: number; from: 'source' | 'operator' | 'card' };
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
@@ -549,7 +572,13 @@ export type PieceCandidate = {
    * 'bundleRank' = ranked locally by nesting inside the seed's region (F3 had no usable class);
    * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade';
+  /**
+   * pieces/grade (H1): why this candidate is 'refused' (set only with that outcome).
+   */
+  gradeRefusal?: GradeRefusal;
+  /** pieces/grade (H1): the refusal in words for the operator ("the drawing shows 5 lines …"). */
+  gradeDetail?: string;
   /**
    * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
    * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
@@ -590,6 +619,18 @@ export type FillOpts = {
   snapMm: Mm;
   /** Only this variant's seeds; null = all seeds. */
   variant: string | null;
+  /**
+   * pieces/grade (H1) on sheets whose sizes are drawn alike (no size class carries the piece's
+   * lines while more than one size is expected): 'solve' (default) ranks them and refuses what it
+   * cannot prove, 'guard' refuses every expected size of them, 'off' = the single-size fill as
+   * before (probes only — it can close a contour of no size).
+   */
+  grade?: 'solve' | 'guard' | 'off';
+  /**
+   * How many sizes the sheet draws (sizes stage `expected`). Absent = unknown: a piece that looks
+   * graded is refused ('size-count') rather than closed as one size.
+   */
+  expectedSizes?: ExpectedSizes;
   /** F4b: longest wall gap closed by a derived bridge, mm. Default 3; 0 = never. */
   autoBridgeMm?: Mm;
 };
@@ -826,6 +867,12 @@ export type BlockReason =
   /** Region below `minPieceAreaMm2` — not a piece unless the operator says so. */
   | 'tiny'
   | 'non-monotone'
+  /** pieces/grade (H1): the piece's sizes are drawn alike and could not be told apart */
+  | 'sizes-not-distinguished'
+  /** pieces/grade (H1): the size count is unknown or disputed by the drawing */
+  | 'size-count'
+  /** pieces/grade (H1): more than one size layout fits */
+  | 'grade-ambiguous'
   | 'grammar'
   | 'duplicate-identity'
   | 'size-unmapped'
@@ -1425,8 +1472,21 @@ export type StageIO = {
     };
   };
   sizes: {
-    in: { card: CardSize[]; operatorMap?: SizeMapEntry[] };
-    out: { run: SizeRun; map: SizeMap };
+    in: {
+      card: CardSize[];
+      operatorMap?: SizeMapEntry[];
+      /** pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet". */
+      drawnSizes?: number;
+    };
+    out: {
+      run: SizeRun;
+      map: SizeMap;
+      /**
+       * pieces/grade (H1): sizes the sheet draws — from the source when it encodes them, else the
+       * operator's answer, else the card's run; null = unknown (the sizes step asks).
+       */
+      expected: ExpectedSizes | null;
+    };
   };
   pieces: {
     in: { seeds?: Seed[]; edits: PieceEdit[]; opts: FillOpts };
@@ -1439,6 +1499,12 @@ export type StageIO = {
        * choice, and the chosen one's cutting lines become knives (FillOpts.variant).
        */
       variants?: string[];
+      /**
+       * pieces/grade (H1): what the size solver could not decide (kind 'size-count' /
+       * 'grade-ambiguous'), and the size count the fill assumed — the refused candidates carry
+       * the per-piece reason.
+       */
+      grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
     };
   };
   semantics: {
@@ -1557,6 +1623,8 @@ export type WizardEvent =
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
   | { type: 'size-map'; entries: SizeMapEntry[] }
+  /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
+  | { type: 'drawn-sizes'; n: number | null }
   | { type: 'variant'; variant: string | null }
   | { type: 'piece-edits'; edits: PieceEdit[] }
   | { type: 'names'; decisions: NameDecision[] }
