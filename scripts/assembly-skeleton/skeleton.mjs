@@ -525,10 +525,21 @@ console.log('\nTemplate smoke (names only, no seams)');
     for (const w of p.warnings) console.log(`    · ${w}`);
     if (c.facts.category !== 'generic')
       gate(`${c.facts.category}: sweep clean, one terminal`, bad.length === 0, bad.join('; '));
+    // 07 §4.3: not left outside every unit either — placed as a guess the step says (0.4, a
+    // decision with the other panels beside it), never as a confident join.
     else
       gate(
-        'generic: the nameless, seamless piece is reported, not invented',
-        p.warnings.some((w) => w.includes('P7')),
+        'generic: the nameless, seamless piece is placed only as a said guess',
+        p.steps.some(
+          (s) =>
+            s.decision?.id === 'orphan:P7' &&
+            s.confidence < SKELETON.accept &&
+            /P7: no role in its name and no seam found/.test(s.reason ?? ''),
+        ),
+        p.steps
+          .filter((s) => s.inputs.includes('P7'))
+          .map((s) => `${s.label} ${s.confidence} ${s.reason}`)
+          .join('; '),
       );
   }
 }
@@ -1474,6 +1485,13 @@ const partnerOf = (p, piece) => {
     with: s ? s.inputs.filter((k) => k !== piece).flatMap((k) => m.get(k) ?? [k]) : [],
   };
 };
+/** The first step whose unit holds every one of these pieces (−1: never). */
+const meetAt = (p, ...pieces) => {
+  const m = leavesOf(p);
+  return p.steps.findIndex(
+    (s) => s.outputUnitKey && pieces.every((k) => m.get(s.outputUnitKey)?.includes(k)),
+  );
+};
 /** «PIECE → what it first joins at step i (decision id)». */
 const placed = (p, piece) => {
   const j = partnerOf(p, piece);
@@ -1540,9 +1558,10 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
   {
     const p = run(synthCard(cards.bag));
     const belt = joinOf(p, ['BLT_1', 'BLT_2'], ['INNER']);
-    const bag = partnerOf(p, 'OUTER');
+    const border = partnerOf(p, 'BRDR');
+    const closed = meetAt(p, 'INNER', 'OUTER');
     console.log(
-      `  bag: belt onto INNER at ${belt.i} (${belt.step?.decision?.id ?? 'no decision'}); ${placed(p, 'OUTER')}`,
+      `  bag: belt onto INNER at ${belt.i} (${belt.step?.decision?.id ?? 'no decision'}); ${placed(p, 'BRDR')}; bag closed at ${closed}`,
     );
     gate(
       'bag: a belt fitting twin panels alike goes onto the first, as a decision with the other beside it',
@@ -1553,8 +1572,17 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
     );
     gate(
       'bag: … before the twin panels meet',
-      belt.i >= 0 && bag.i > belt.i,
-      `${belt.i} / ${bag.i}`,
+      belt.i >= 0 && closed > belt.i,
+      `${belt.i} / ${closed}`,
+    );
+    // §4.3: the border strip (no role, no seam) onto the panel with no parts yet, before the bag closes.
+    gate(
+      'bag: the seamless border strip goes onto the panel with no parts, as a guess, before the bag closes',
+      border.with.join() === 'OUTER' &&
+        border.step.decision?.id === 'orphan:BRDR' &&
+        border.step.confidence < SKELETON.accept &&
+        closed > border.i,
+      placed(p, 'BRDR'),
     );
     cleanGate('bag', p);
   }
@@ -1577,6 +1605,53 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
       'control: numbered halves with no panel in their names stay layers',
       joinOf(c, ['PCK_L'], ['PCK_B_L']).i >= 0,
       placed(c, 'PCK_L'),
+    );
+  }
+  // §4.3 orphans: a seamless, roleless left placket onto the left panel with the fewest parts
+  {
+    const p = run(synthCard(cards.orphans));
+    const j = partnerOf(p, 'FLP_L');
+    console.log(`  orphans: ${placed(p, 'FLP_L')}`);
+    gate(
+      'orphans: the placket goes onto the left panel with no parts (the sleeve), as a guess at 0.4',
+      j.with.join() === 'SLV_L' &&
+        j.step.decision?.id === 'orphan:FLP_L' &&
+        j.step.alternatives?.length >= 1 &&
+        j.step.confidence === 0.4,
+      placed(p, 'FLP_L'),
+    );
+    cleanGate('orphans', p);
+    // Mutation: without the pocket on the front, the parts are even — the larger panel takes it.
+    const m = run(
+      synthCard({
+        ...cards.orphans,
+        pieces: cards.orphans.pieces.filter(([n]) => n !== 'PCK_L'),
+        seams: cards.orphans.seams.filter(([a]) => a !== 'PCK_L'),
+      }),
+    );
+    gate(
+      'mutation: parts even → the larger left panel (the front)',
+      partnerOf(m, 'FLP_L').with.join() === 'FP_L',
+      placed(m, 'FLP_L'),
+    );
+    // Controls: a piece as large as the sleeve is a copy or a layer of it, not a part (onto the
+    // front instead); a bare number («7») says nothing to place it by and is not placed.
+    const big = run(
+      synthCard({
+        ...cards.orphans,
+        pieces: cards.orphans.pieces.map((x) => (x[0] === 'FLP_L' ? ['FLP_L', 30000] : x)),
+      }),
+    );
+    gate(
+      'control: an orphan as large as a panel is not placed on it',
+      [...partnerOf(big, 'FLP_L').with].sort().join() === 'FP_L,PCK_L',
+      placed(big, 'FLP_L'),
+    );
+    const bare = run(synthCard(cards.orphans, { FLP_L: '7' }));
+    gate(
+      'control: a bare number is not placed',
+      !bare.steps.some((s) => s.decision?.id === 'orphan:FLP_L'),
+      placed(bare, 'FLP_L'),
     );
   }
 }

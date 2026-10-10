@@ -16,13 +16,14 @@
       ]
     },
     "bag": {
-      "_why": "A bag of two identical panels (inner, outer; no body) and a belt of two layers whose seam fits both alike, each a rival of the other: the belt goes onto ONE panel now (the first on the card) as a decision, before the panels meet.",
+      "_why": "A bag of two identical panels (inner, outer; no body), a belt of two layers whose seam fits both alike (each the other's rival) and a border strip with no seam at all: the belt goes onto ONE panel now (the first on the card) as a decision; the border onto the panel with no parts; both before the panels meet.",
       "category": "generic",
       "pieces": [
         ["INNER", 60000, "OUTER", "identical"],
         ["OUTER", 60000],
         ["BLT_1", 3000, "BLT_2", "identical"],
-        ["BLT_2", 3000]
+        ["BLT_2", 3000],
+        ["BRDR", 8000]
       ],
       "seams": [
         ["INNER", "OUTER", 0.9],
@@ -47,6 +48,22 @@
       "seams": [
         ["FP_L", "BP_L", 0.9],
         ["PCK_L", "PCK_B_L", 0.97]
+      ]
+    },
+    "orphans": {
+      "_why": "A left sleeve placket with no role in its name and no seam: onto the left panel with the fewest parts (the sleeve; the larger front already carries a pocket), as a guess.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["BP", 90000],
+        ["SLV_L", 30000],
+        ["PCK_L", 4000],
+        ["FLP_L", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85],
+        ["PCK_L", "FP_L", 0.8]
       ]
     }
   }

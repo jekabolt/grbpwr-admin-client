@@ -130,6 +130,9 @@ export type Grouping = {
 
 const listNames = (es: Entity[]) => es.map((e) => e.name).join(', ');
 
+/** E3: an orphan this large against a host (by area) is not a part of it. */
+const ORPHAN_HOST_AREA = 0.9;
+
 /** F4: this many nameless pieces of one shape are a repeat (a ring), read by name, not by seams. */
 const REPEAT_MIN = 6;
 
@@ -227,10 +230,13 @@ export function groupDetailed(
   const warnings: string[] = [];
   const mergeHands = new Set(template.mergeHands);
   const areaOf = (e: Entity) => e.leaves.reduce((a, k) => a + (byKey.get(k)?.areaMm2 ?? 0), 0);
+  /** Pieces E3 placed with no role and no seam: parts of their host from then on. */
+  const orphaned = new Set<string>();
   /** Parts already sewn onto a thing (a front with two pockets: 2); a flap is not a part of its own. */
   const partCount = (e: Entity) =>
     e.leaves.filter((k) => {
       const p = byKey.get(k);
+      if (orphaned.has(k)) return true;
       return roleDef(p?.role ?? null)?.level === 'sub' && !isFlap(p?.name ?? '');
     }).length;
   /** Where a thing first stands on the card: its earliest piece. */
@@ -1140,6 +1146,12 @@ export function groupDetailed(
     }
   }
 
+  // ── E3. a piece with no role in its name and no seam at all (a border strip, a sleeve placket
+  // whose edges match nothing): not dropped to «what is left» but placed — onto a panel of its
+  // hand, or on a garment with no named panels onto any piece — as a guess (orphans below).
+  // Before the geometry pass, so it lands on a piece rather than on whatever that pass glues.
+  placeOrphans((e) => !e.unit);
+
   // ── 4. pieces whose names say nothing: geometry alone ─────────────────────────────────────────
   // Tiered, not one component: notch-confirmed seams first, then length-only, then the rest —
   // a blazer of 46 numbered pieces would otherwise become one 46-input «join».
@@ -1267,6 +1279,72 @@ export function groupDetailed(
       alternatives: withSeams(d.others),
       decision: d.decision,
     });
+  }
+
+  // A nameless group the geometry pass made that has no seam outward (two placket pieces sewn
+  // only to each other): placed the same way.
+  placeOrphans((e) => e.unit);
+
+  /**
+   * E3: a thing with no role and no usable seam to anything else on its table goes onto the host
+   * with the fewest parts on it, then the largest, then the first on the card — among the panels
+   * (front, back, sleeve …) of its own hand when it has one, or, on a garment with no named panel,
+   * among every piece and unit. A decision with the next hosts beside it, at 0.4: a guess said as
+   * one is still better than a piece outside every unit.
+   */
+  function placeOrphans(which: (e: Entity) => boolean) {
+    const panels = table.list().some((x) => roleDef(x.roles[0] ?? null)?.level === 'panel');
+    for (const e of table.list().filter((x) => x.roles.length === 0 && which(x))) {
+      if (!isLive(e)) continue;
+      // A bare number («7», «30») says nothing to go by — no word, no hand: the geometry pass and
+      // «what is left» keep it. A name with a word in it (BRDR, FLP_L) is placed.
+      if (!e.leaves.some((k) => byKey.get(k)?.family)) continue;
+      const others = table.list(e.tree).filter((t) => t !== e);
+      if (others.some((t) => bestScore(seams, e.leaves, t) > 0)) continue;
+      let hosts = others.filter((t) => {
+        // A part is smaller than what it is sewn onto: a piece as large as its host is a copy,
+        // a layer or the lining of it — lane A asks about those in words, it is not placed.
+        if (areaOf(t) > 0 && areaOf(e) >= ORPHAN_HOST_AREA * areaOf(t)) return false;
+        const d = roleDef(t.roles[0] ?? null);
+        if (panels) return d?.level === 'panel' && !d.wraps;
+        return t.unit || !(d?.attachTo?.length || d?.wraps);
+      });
+      if (e.hand && hosts.some((t) => t.hand === e.hand))
+        hosts = hosts.filter((t) => t.hand === e.hand);
+      if (!hosts.length) continue;
+      const ranked = [...hosts].sort(
+        (a, b) =>
+          partCount(a) - partCount(b) || areaOf(b) - areaOf(a) || cardOrder(a) - cardOrder(b),
+      );
+      const d = decide(
+        pins,
+        `orphan:${leafId([e])}`,
+        ranked.slice(0, 3).map((t, i) => ({
+          inputs: [t, e],
+          reason:
+            i === 0 ? `or onto ${display(t)} — the fewest parts on it` : `or onto ${display(t)}`,
+        })),
+        isLive,
+      );
+      const top = ranked[d.chosen] ?? ranked[0];
+      e.leaves.forEach((k) => orphaned.add(k));
+      record([top, e], {
+        name: `${display(top)} + ${e.name}`,
+        roles: top.roles,
+        kind: 'attach',
+        hand: top.hand,
+        why: '',
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        judgement: {
+          confidence: 0.4,
+          source: 'template',
+          reason: `${e.name}: no role in its name and no seam found — onto ${display(top)} ${
+            d.chosen ? 'by your reading' : `(${e.hand ? 'same hand, ' : ''}the fewest parts on it)`
+          } as a guess, check`,
+        },
+      });
+    }
   }
 
   return { units, table, pieces, seams, warnings, replay, existing };
