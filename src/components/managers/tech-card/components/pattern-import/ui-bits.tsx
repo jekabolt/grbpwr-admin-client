@@ -158,21 +158,34 @@ export function SplitStage({
   canvas,
   side,
   sideWidth = 360,
+  sideShare = 42,
 }: {
   canvas: React.ReactNode;
   side: React.ReactNode;
   sideWidth?: number;
+  /** The most of the stage the side column may take, %, on a narrow window (1024 px). */
+  sideShare?: number;
 }) {
   return (
     <div
       className='grid h-full min-h-0 gap-2 [&>*]:min-h-0 [&>*]:min-w-0'
-      style={{ gridTemplateColumns: `minmax(0,1fr) min(${sideWidth}px, 42%)` }}
+      style={{ gridTemplateColumns: `minmax(0,1fr) min(${sideWidth}px, ${sideShare}%)` }}
     >
       {canvas}
       {side}
     </div>
   );
 }
+
+/**
+ * The column that holds a row's required answer (confirm, draw, fold?) stays pinned to the right
+ * edge of a `DataTable` that scrolls sideways: at 1024 px the footer asks for an answer, and the
+ * answer must be on screen. Put it on the `th` and every `td` of that column, with the row's own
+ * background (`bg-bgColor`, or the zebra of a selected row) so the scrolled cells pass under it.
+ * The left rule is a pseudo-element: in `border-collapse` a sticky cell does not carry its border.
+ */
+export const STICKY_END =
+  'sticky right-0 z-[var(--z-sticky)] before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-hairline';
 
 export const fmtMm = (v: number | null | undefined, digits = 2) =>
   v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)} mm`;

@@ -44,7 +44,16 @@ import {
   rowOpen,
   useOpenQuestions,
 } from './details-confirm';
-import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtPct } from '../ui-bits';
+import {
+  Field,
+  NativeSelect,
+  NumberField,
+  Panel,
+  STICKY_END,
+  SplitStage,
+  fmtPct,
+} from '../ui-bits';
+import { PIECES_REASONS, focusFromBlocked, type PieceFocus } from '../piece-focus';
 
 const MEANING: { value: LineMeaning; label: string }[] = [
   { value: 'seam', label: 'seam line' },
@@ -83,7 +92,16 @@ function edgeAt(ask: FoldAsk, pt: PtMm): FoldAsk['edges'][number] | null {
   return best?.e ?? null;
 }
 
-export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
+export function DetailsStep({
+  api,
+  card,
+  onFixInPieces,
+}: {
+  api: ImportSessionApi;
+  card: CardContext;
+  /** Back to the pieces step with this piece selected and the reason on screen (M5). */
+  onFixInPieces?: (f: PieceFocus) => void;
+}) {
   const { session, inputs, patchInputs } = api;
   const sem = session.semantics;
   const families = useMemo(() => session.pieces?.families ?? [], [session.pieces]);
@@ -177,6 +195,35 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       : null;
 
   const rows = families.filter((f) => f.candidates.every((c) => c.outcome !== 'tiny'));
+  const startGrain = (seed: SeedId) => {
+    setSel(seed);
+    setPickingFold(false);
+    setGrainA(null);
+    setDrawing(true);
+  };
+  const startFold = (seed: SeedId) => {
+    setSel(seed);
+    setDrawing(false);
+    setGrainA(null);
+    setPickingFold(true);
+  };
+  const codeOf = (seed: SeedId) => {
+    const n = nameOf(seed);
+    return (n ? [n.code, ...n.mods].filter(Boolean).join('_') : '') || `piece ${mark(seed)}`;
+  };
+  /** A blocked row whose answer is on the pieces step: go there with the piece selected. */
+  const fixInPieces = (seed: SeedId) => {
+    const b = blockedOf(seed);
+    if (!b || !onFixInPieces) return;
+    onFixInPieces(
+      focusFromBlocked(
+        b,
+        codeOf(seed),
+        REASON[b.reason] ?? b.reason,
+        families.find((f) => f.seed === seed),
+      ),
+    );
+  };
 
   return (
     <SplitStage
@@ -264,14 +311,16 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                 <th>#</th>
                 <th data-align='left'>code</th>
                 <th data-align='left'>name</th>
+                <th data-align='left'>name from</th>
                 <th title='pieces per garment'>qty</th>
                 <th data-align='left'>pair</th>
                 <th data-align='left'>fold</th>
                 <th data-align='left'>grainline</th>
                 <th data-align='left'>line</th>
                 <th>allow., mm</th>
-                <th data-align='left'>name from</th>
-                <th data-align='left'>state</th>
+                <th data-align='left' className={cn(STICKY_END, 'bg-bgColor')}>
+                  state
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -339,6 +388,15 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                         }}
                       />
                     </td>
+                    <td data-align='left'>
+                      <NameSource
+                        n={n}
+                        note={nameNote(open, seed)?.detail ?? null}
+                        pending={pending}
+                        confirmed={inputs.confirmedNames.includes(seed)}
+                        onConfirm={() => confirm(seed)}
+                      />
+                    </td>
                     <td>
                       {!specs.length ? (
                         '—'
@@ -394,10 +452,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                           title={foldAskOf(seed)!.why}
                           onClick={(e: React.MouseEvent) => {
                             e.stopPropagation();
-                            setSel(seed);
-                            setDrawing(false);
-                            setGrainA(null);
-                            setPickingFold(true);
+                            startFold(seed);
                           }}
                         >
                           ! fold?
@@ -433,9 +488,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                           className='whitespace-nowrap border-error text-error'
                           onClick={(e: React.MouseEvent) => {
                             e.stopPropagation();
-                            setSel(seed);
-                            setGrainA(null);
-                            setDrawing(true);
+                            startGrain(seed);
                           }}
                         >
                           ! draw
@@ -472,20 +525,30 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                         }
                       />
                     </td>
-                    <td data-align='left'>
-                      <NameSource
-                        n={n}
-                        note={nameNote(open, seed)?.detail ?? null}
-                        pending={pending}
-                        confirmed={inputs.confirmedNames.includes(seed)}
-                        onConfirm={() => confirm(seed)}
-                      />
-                    </td>
-                    <td data-align='left'>
+                    {/* pinned to the right edge: the answer the footer asks for is always on
+                        screen, even when the table scrolls sideways (1024 px) */}
+                    <td
+                      data-align='left'
+                      className={cn(STICKY_END, on ? 'bg-bgZebra' : 'bg-bgColor')}
+                    >
                       {b ? (
-                        <Pill tone='warn' title={b.detail}>
-                          {REASON[b.reason] ?? b.reason}
-                        </Pill>
+                        <BlockedState
+                          reason={b.reason}
+                          detail={b.detail}
+                          word={REASON[b.reason] ?? b.reason}
+                          onGrain={() => startGrain(seed)}
+                          onFold={() => startFold(seed)}
+                          onPieces={
+                            onFixInPieces && PIECES_REASONS.has(b.reason)
+                              ? () => fixInPieces(seed)
+                              : undefined
+                          }
+                          onSizes={
+                            b.reason === 'size-unmapped' || b.reason === 'size-count'
+                              ? () => void api.dispatch({ type: 'back', to: 'sizes' })
+                              : undefined
+                          }
+                        />
                       ) : rowOpen(open, seed) ? (
                         <RowQuestions
                           api={api}
@@ -494,10 +557,7 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                           // this row: semantics asks for the edge, the drawing opens to pick it
                           onFold={() => {
                             override(seed, { unfoldedFold: true });
-                            setSel(seed);
-                            setDrawing(false);
-                            setGrainA(null);
-                            setPickingFold(true);
+                            startFold(seed);
                           }}
                         />
                       ) : (
@@ -697,10 +757,16 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                       </div>
                     )}
                     {blockedOf(sel) && !selAsk && (
-                      <Text size='micro' component='p' className='mt-1 text-error'>
-                        ! {blockedOf(sel)!.detail}
-                        {blockedOf(sel)!.reason === 'leak' ? ' — back to pieces to fix it' : ''}
-                      </Text>
+                      <div className='mt-1 flex flex-col items-start gap-1'>
+                        <Text size='micro' component='p' className='text-error'>
+                          ! {blockedOf(sel)!.detail}
+                        </Text>
+                        {onFixInPieces && PIECES_REASONS.has(blockedOf(sel)!.reason) && (
+                          <Button variant='secondary' size='xs' onClick={() => fixInPieces(sel)}>
+                            ← fix in pieces
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
@@ -716,6 +782,77 @@ export function DetailsStep({ api, card }: { api: ImportSessionApi; card: CardCo
         </Panel>
       }
     />
+  );
+}
+
+/**
+ * The state cell of a blocked row: the answer itself where it is one click (draw the grainline,
+ * the fold question), the way to the step that answers it otherwise (M5: "sizes do not grow" had
+ * no action). The reason stays a word next to it, never colour alone.
+ */
+function BlockedState({
+  reason,
+  detail,
+  word,
+  onGrain,
+  onFold,
+  onPieces,
+  onSizes,
+}: {
+  reason: string;
+  detail: string;
+  word: string;
+  onGrain: () => void;
+  onFold: () => void;
+  onPieces?: () => void;
+  onSizes?: () => void;
+}) {
+  const stop = (f: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    f();
+  };
+  if (reason === 'no-grain')
+    return (
+      <Button
+        variant='secondary'
+        size='xs'
+        className='whitespace-nowrap border-error text-error'
+        title={detail}
+        onClick={stop(onGrain)}
+      >
+        ! draw grainline
+      </Button>
+    );
+  if (reason === 'fold-question')
+    return (
+      <Button
+        variant='secondary'
+        size='xs'
+        className='whitespace-nowrap border-error text-error'
+        title={detail}
+        onClick={stop(onFold)}
+      >
+        ! fold?
+      </Button>
+    );
+  const go = onPieces ?? onSizes;
+  return (
+    <span className='flex flex-col items-start gap-1'>
+      <Pill tone='warn' title={detail}>
+        {word}
+      </Pill>
+      {go && (
+        <Button
+          variant='underline'
+          size='xs'
+          className='whitespace-nowrap'
+          title={detail}
+          onClick={stop(go)}
+        >
+          ← fix in {onPieces ? 'pieces' : 'sizes'}
+        </Button>
+      )}
+    </span>
   );
 }
 

@@ -3,7 +3,13 @@
 // by the card's OWN sheet component (nesting/piece-sheet.tsx) under their block names — what the
 // card will see once the files land, not a second opinion about it.
 import { useMemo, useState } from 'react';
-import type { DraftScope, GateCheckId, PieceSpec, WizardStep } from 'lib/pattern-import/types';
+import type {
+  DraftScope,
+  GateCheck,
+  GateCheckId,
+  PieceSpec,
+  WizardStep,
+} from 'lib/pattern-import/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -16,6 +22,8 @@ import { PieceSheet } from '../../nesting/piece-sheet';
 import type { ImportSessionApi } from '../use-import-session';
 import { STEPS } from '../use-import-session';
 import { Panel, SplitStage, fmtBytes } from '../ui-bits';
+import { focusFromGate, type PieceFocus } from '../piece-focus';
+import { NotInFile } from './not-in-file';
 
 const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G1-roundtrip': { what: 'reads back through the card parser', fix: null },
@@ -35,7 +43,21 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   'G15-derived': { what: 'closed gaps land on drawn lines and stay short', fix: 'pieces' },
 };
 
-export function CheckStep({ api }: { api: ImportSessionApi }) {
+/**
+ * G9's second report (the card derives no size WITHOUT the manifest — a single-size file, a rare
+ * size) is a note about the card's fallback, not about this file. On a run that passes it only
+ * read as a problem with a "fix in sizes" link that fixes nothing (FLY-final copy 14).
+ */
+const isG9Fallback = (c: GateCheck) => c.id === 'G9-sizes' && c.severity === 'warn';
+
+export function CheckStep({
+  api,
+  onFixInPieces,
+}: {
+  api: ImportSessionApi;
+  /** "fix in pieces": the pieces step with the named blocks selected and the reason (M1). */
+  onFixInPieces?: (f: PieceFocus) => void;
+}) {
   const { session } = api;
   const scopes = session.draft?.scopes ?? [];
   const [key, setKey] = useState<string | null>(scopes[0]?.target.scopeKey ?? null);
@@ -63,7 +85,13 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
     );
 
   const blocking = (r = report) => r?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
-  const warns = report?.checks.filter((c) => !c.ok && c.severity === 'warn') ?? [];
+  const quiet = (c: GateCheck) => !!report?.passed && isG9Fallback(c);
+  const warns = report?.checks.filter((c) => !c.ok && c.severity === 'warn' && !quiet(c)) ?? [];
+  const fix = (c: GateCheck, to: WizardStep) => {
+    const f = to === 'pieces' && onFixInPieces ? focusFromGate(c, CHECK[c.id].what, specs) : null;
+    if (f) onFixInPieces!(f);
+    else void api.dispatch({ type: 'back', to });
+  };
 
   return (
     <SplitStage
@@ -91,6 +119,7 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
             </ChipRow>
           }
         >
+          <NotInFile api={api} className='mb-2' />
           {scope && report && (
             <>
               <div className='mb-2 flex flex-wrap items-center gap-2'>
@@ -122,7 +151,6 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
                     <th>value</th>
                     <th>limit</th>
                     <th data-align='left'>blocks named</th>
-                    <th aria-label='fix' />
                   </tr>
                 </thead>
                 <tbody>
@@ -139,17 +167,40 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
                           {meta.what}
                           {!c.ok && (
                             <Text size='micro' variant='label' component='span' className='block'>
-                              {c.note}
+                              {quiet(c)
+                                ? 'single-size blocks: the card reads their size from the manifest'
+                                : c.note}
                             </Text>
                           )}
                         </td>
                         <td data-align='left'>
                           {c.ok ? (
                             <Pill tone='ok'>ok</Pill>
+                          ) : quiet(c) ? (
+                            <Pill tone='mut' title={c.note}>
+                              note
+                            </Pill>
                           ) : c.severity === 'block' ? (
                             <Pill tone='warn'>blocks export</Pill>
                           ) : (
                             <Pill tone='attention'>warning</Pill>
+                          )}
+                          {/* the way to the answer sits under the verdict, in a column that is
+                              on screen at 1024 px (it was the last, clipped column) */}
+                          {!c.ok && meta.fix && !quiet(c) && (
+                            <Button
+                              variant='underline'
+                              size='xs'
+                              className='mt-1 whitespace-nowrap text-labelColor hover:text-textColor'
+                              title={
+                                meta.fix === 'pieces' && c.blocks.length
+                                  ? `opens pieces with ${c.blocks.length === 1 ? c.blocks[0] : `${c.blocks.length} blocks`} selected`
+                                  : undefined
+                              }
+                              onClick={() => fix(c, meta.fix!)}
+                            >
+                              ← fix in {STEPS.find((s) => s.id === meta.fix)?.label}
+                            </Button>
                           )}
                         </td>
                         <td>{c.value ?? '—'}</td>
@@ -170,18 +221,6 @@ export function CheckStep({ api }: { api: ImportSessionApi }) {
                             </span>
                           ) : (
                             <span className='text-labelColor'>—</span>
-                          )}
-                        </td>
-                        <td>
-                          {!c.ok && meta.fix && (
-                            <Button
-                              variant='underline'
-                              size='xs'
-                              className='whitespace-nowrap text-labelColor hover:text-textColor'
-                              onClick={() => void api.dispatch({ type: 'back', to: meta.fix! })}
-                            >
-                              fix in {STEPS.find((s) => s.id === meta.fix)?.label} ←
-                            </Button>
                           )}
                         </td>
                       </tr>
@@ -234,12 +273,14 @@ function ScopeSummary({ scope }: { scope: DraftScope }) {
     <div>
       <Row label='file' value={`${scope.filename} · ${fmtBytes(bytes)}`} />
       <Row label='fabric scope' value={scope.target.label} />
-      <Row
-        label='blocks'
-        value={`${m.blocks.length} = ${m.pieces.length} pieces × ${m.sizes.length} sizes`}
-      />
+      <Row label='blocks' value={blockSum(m.blocks)} />
       <Row label='pairs as _L + _R' value={pairs || '—'} />
-      <Row label='layers' value='1 cut (final) · 14 seam · 7 grain · 4 notch · 8 internal' />
+      {/* the value wraps under its own edge instead of running over the label (1024 px) */}
+      <Row
+        label='layers'
+        value='1 cut (final) · 14 seam · 7 grain · 4 notch · 8 internal'
+        className='[&>span:first-child]:shrink-0 [&>span:last-child]:shrink [&>span:last-child]:text-right'
+      />
       <GroupLabel>manifest</GroupLabel>
       <Text size='micro' variant='label' component='p'>
         embedded as 999 comments: block → piece → card size → scope. the card reads it instead of
@@ -247,6 +288,25 @@ function ScopeSummary({ scope }: { scope: DraftScope }) {
       </Text>
     </div>
   );
+}
+
+/**
+ * "82 blocks · 10 pieces × 8 sizes + 2 one-size": blocks grouped by how many sizes each piece is
+ * written in. "12 pieces × 8 sizes" was wrong whenever a piece is one-size (UNI) — copy 8.
+ */
+function blockSum(blocks: readonly { identity: string }[]): string {
+  const per = new Map<string, number>();
+  for (const b of blocks) per.set(b.identity, (per.get(b.identity) ?? 0) + 1);
+  const bySizes = new Map<number, number>();
+  for (const n of per.values()) bySizes.set(n, (bySizes.get(n) ?? 0) + 1);
+  const parts = [...bySizes]
+    .sort((a, b) => b[0] - a[0])
+    .map(([sizes, pieces]) =>
+      sizes === 1
+        ? `${pieces} one-size`
+        : `${pieces} ${pieces === 1 ? 'piece' : 'pieces'} × ${sizes} sizes`,
+    );
+  return `${blocks.length} = ${parts.join(' + ')}`;
 }
 
 /** Specs of one size → PieceDTO (cm, y-up, bbox-normalised) laid out in a row, as the parser would. */
