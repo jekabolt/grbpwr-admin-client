@@ -2710,10 +2710,17 @@ export async function main(opts: { plans: string }): Promise<number> {
         const g = embedded(f);
         const c16 = g?.checks.find((x) => x.id === 'G16-glyphs');
         const b = blockedOf(fs.readFileSync(f, 'latin1'));
-        // a file written before G16 carries no G16 in its gate: then only the recount speaks
+        // a file written before G16 carries no G16 in its gate: then only the recount speaks.
+        // A2/A0.3: wm M alone now writes its outlines without the lettering (the legend sets the
+        // strokes aside) — G16 must then pass it; the 7-file wm still carries it and is blocked
+        const lettered = b.out.length > 0;
         ck(
-          b.out.length > 0 && (!c16 || (!g!.passed && !c16.ok && c16.severity === 'block')),
-          `e2e ${d}/${path.basename(f)}: G16 blocks (${b.out.length}/${b.n} blocks lettered${c16 ? ', written gate blocked' : ', file older than G16'})`,
+          lettered
+            ? !c16 || (!g!.passed && !c16.ok && c16.severity === 'block')
+            : d === 'wm-M' && !!c16 && c16.ok,
+          lettered
+            ? `e2e ${d}/${path.basename(f)}: G16 blocks (${b.out.length}/${b.n} blocks lettered${c16 ? ', written gate blocked' : ', file older than G16'})`
+            : `e2e ${d}/${path.basename(f)}: no lettering written (${b.n} blocks), G16 passes`,
           c16
             ? `${c16.value}; G18 ${g?.checks.find((x) => x.id === 'G18-grain-source')?.value}`
             : b.out[0],

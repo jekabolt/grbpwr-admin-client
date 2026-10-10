@@ -235,10 +235,13 @@ export async function wmSection() {
   const acc = await wmRun(ACCEPT_ALL);
   const before = liveChains(base);
   const after = liveChains(acc);
+  // A0.3: the legend by faces already sets the leftover lettering apart from the outline row
+  const outline = live(acc).find((k) => k.role === 'common');
+  const apart = !!outline && live(acc).every((k) => k === outline || k.lenM <= outline.lenM);
   check(
     'wm M · 3 clicks',
-    'accept stroke text + watermark + test square: the legend no longer lumps furniture with the pieces (live chains −60 %)',
-    after <= 0.4 * before,
+    'accept stroke text + watermark + test square: the legend no longer lumps furniture with the pieces (live chains −60 %, or the outline row apart from the rest)',
+    after <= 0.4 * before || apart,
     `live rows before ${JSON.stringify(live(base))} → defaults ${JSON.stringify(live(on))} → accepted ${JSON.stringify(live(acc))}`,
   );
   const rows = (acc.sheetClean?.items ?? []).filter((i) => i.kind === 'watermark');
