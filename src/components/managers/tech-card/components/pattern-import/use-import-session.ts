@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   ApplyResult,
+  AutopilotRecord,
   CardSize,
   ImportErrorCode,
   ChainRole,
@@ -48,6 +49,7 @@ import {
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
 import { singlePageSheet } from './sheet-skip';
+import { autopilotRecordOf, type Assumption } from './autopilot/types';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -152,6 +154,11 @@ export type Inputs = {
    * every reader goes through `liveAnswers`, so a stale one never counts (answers.ts).
    */
   answerCtx: AnswerCtx | null;
+  /**
+   * A10: what the autopilot answered in the operator's place (rule D5), one per question. Written
+   * into every manifest of the run (`autopilotRecordOf`); empty = the operator answered.
+   */
+  autopilot: Assumption[];
 };
 
 const EMPTY_INPUTS: Inputs = {
@@ -181,6 +188,7 @@ const EMPTY_INPUTS: Inputs = {
   confirmedQuantities: {},
   assignment: null,
   answerCtx: null,
+  autopilot: [],
 };
 
 const EMPTY_SESSION: ImportSession = {
@@ -729,7 +737,7 @@ export function useImportSession(deps: {
             generator: `grbpwr-admin pattern-import (${client.kind})`,
             techCardId: card.techCardId,
             // A10: an autopilot run's assumptions ride in every written manifest
-            ...(ev.autopilot ? { autopilot: ev.autopilot } : {}),
+            ...autopilotOf(ev.autopilot, iRef.current.autopilot, sem.pieces),
           });
           const draft = buildDraft(out, { card, semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
@@ -1420,4 +1428,15 @@ function downloadText(filename: string, text: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** A10: the write's autopilot record — given with the event, else the run's own assumptions. */
+function autopilotOf(
+  given: AutopilotRecord | undefined,
+  own: readonly Assumption[],
+  pieces: readonly { seed: SeedId }[],
+): { autopilot?: AutopilotRecord } {
+  if (given) return { autopilot: given };
+  if (!own.length) return {};
+  return { autopilot: autopilotRecordOf(own, new Set(pieces.map((p) => p.seed))) };
 }

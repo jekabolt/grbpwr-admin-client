@@ -1,26 +1,32 @@
 // A10 · AUTOPILOT POLICY (rule D5, auto/00-PLAN §A10) — "drop the files, it does it by itself".
 //
 // Every question the wizard asks (the `blocker` memo of use-import-session.ts, `openQuestions` of
-// answers.ts) gets an answer here — best evidence → the run's own proposal → a sensible default —
-// or a HARD STOP with the reason. Each answer is an ASSUMPTION (rule, evidence, confidence; `strong`
-// for the dangerous defaults) that travels to the manifest, so nothing is hidden.
+// answers.ts, and what a step offers without blocking on it — N1 `stepOffer`) gets an answer here —
+// best evidence → the run's own proposal → a sensible default — or a HARD STOP with the reason.
+// Each answer is an ASSUMPTION (rule, evidence, confidence; `strong` for the dangerous defaults)
+// that travels to the manifest (`Inputs.autopilot` → write), so nothing is hidden.
 //
-// Pure: a snapshot of the session (stage outputs) + the inputs + the card → one decision. The
-// decision's actions are the SAME answers the operator's clicks give (scaleConfirmed, the size map,
-// confirmedQuantities via "confirm as shown", operatorGrain with `accepted`, overrides, the fabric
-// assignment …), so the gate and the manifest see ordinary answers and no check is weakened. The
-// driver (run.ts) applies ONE action per tick and asks again on the new state: re-applied, the
-// policy reaches a fixpoint (no blocker → the step's "next") or a stop.
+// Pure: {session, inputs, step, question, card} → {patch, events, stop, assumptions} — the shape
+// of N1's `AutoResolver` (auto-advance.ts), so `api.advance({ resolve: autopilotResolver(card) })`
+// drives it. The answers are the SAME the operator's controls give (scaleConfirmed, the size map,
+// confirmedQuantities, operatorGrain with `accepted`, overrides, the fabric assignment …), so the
+// gate and the manifest see ordinary answers and no check is weakened. One question, one answer:
+// the step is checked again on the new outputs — a fixpoint (no question → the step's next) or a
+// stop.
 import type {
   AllowanceDecision,
+  BackgroundKind,
   FabricAssignment,
   ImportSession,
+  NameDecision,
+  PageMaskEdit,
   PieceEdit,
   PieceFamily,
   PtMm,
   Seed,
   SeedId,
   SizeMapEntry,
+  WizardEvent,
   WizardStep,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -29,30 +35,44 @@ import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { anisotropyOf, squareSidesOf } from '../formats';
-import { openQuestions, type AnswerCtx } from '../answers';
+import { answersNowOf, openQuestions, questionKey, type AnswerCtx } from '../answers';
 import type { CardContext } from '../client';
 import {
   exportedRanks,
   guessedSizes,
   legendKey,
+  textNameOf,
   variantsOf,
   type Inputs,
+  type LegendEdit,
 } from '../use-import-session';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
-import type { Assumption, AssumptionKind } from './types';
+import { seedPoints } from './seeds';
+import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 
+/** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
 export type AutopilotSnapshot = {
   session: ImportSession;
   inputs: Inputs;
   card: CardContext;
-  /** The first pieces run's seeds (every model on the sheet): the model choice reads them. */
+  /** Why the step stops: its blocker, else its offer (N1). null = it asks nothing. */
+  question?: string | null;
+  step?: WizardStep;
+  /** The first pieces run's seeds (`api.baseSeeds`); absent = the session's seeds. */
+  baseSeeds?: Seed[] | null;
+  /** The DXF fast path (`api.extracted.presegmented`); absent = read off the files' kind. */
+  presegmented?: boolean;
+};
+
+/** The policy's internal view: the snapshot made whole. */
+type Snap = {
+  session: ImportSession;
+  inputs: Inputs;
+  card: CardContext;
   baseSeeds: Seed[] | null;
-  /** The answers' fingerprint now (`api.answersNow`). */
   answersNow: AnswerCtx;
-  /** The DXF fast path: the pieces ARE its blocks — they cannot be set aside. */
   presegmented: boolean;
-  /** What the wizard says blocks "next" now (the hook's `blocker`). */
   blocker: string | null;
 };
 
@@ -62,6 +82,14 @@ export type AutopilotAction =
       kind: 'inputs';
       patch: Partial<Pick<Inputs, 'scaleConfirmed' | 'residualsAccepted' | 'legendConfirmed'>>;
     }
+  /** A8 "accept" on the clean stage's suggestions (files / sheet step). */
+  | { kind: 'clean'; edits: PageMaskEdit[] }
+  /** A legend answer (from the pieces step: back to the sizes step first). */
+  | { kind: 'legend'; edits: LegendEdit[]; back?: WizardStep; confirm?: string[] }
+  /** Click seeds (appended to the run's own seeds), the pieces run again. */
+  | { kind: 'seeds'; seeds: Seed[] }
+  /** Go on past an offer the run leaves as it is (pages set aside to check). */
+  | { kind: 'proceed' }
   | { kind: 'drawn-sizes'; n: number }
   | { kind: 'size-map'; entries: SizeMapEntry[] }
   | { kind: 'variant'; variant: string }
@@ -89,6 +117,21 @@ export type AutopilotDecision = {
   actions: AutopilotAction[];
   assumptions: Assumption[];
   stop?: AutopilotStop;
+};
+
+/**
+ * The answer in N1's `AutoAnswer` shape (structurally: patch → events, applied in order, then the
+ * step is checked again), plus what N1 does not carry: `proceed` (go on past an offer left as it
+ * is), the stop's reason, and the assumptions of this answer (already merged into
+ * `patch.autopilot`, listed again for the caller's log).
+ */
+export type AutopilotAnswer = {
+  patch?: Partial<Inputs>;
+  events?: WizardEvent[];
+  stop?: boolean;
+  proceed?: boolean;
+  reason?: AutopilotStop;
+  assumptions: Assumption[];
 };
 
 const NONE: AutopilotDecision = { actions: [], assumptions: [] };
@@ -123,19 +166,171 @@ function A(
   };
 }
 
+const snapOf = (x: AutopilotSnapshot): Snap => ({
+  session: x.session,
+  inputs: x.inputs,
+  card: x.card,
+  baseSeeds: x.baseSeeds ?? null,
+  answersNow: answersNowOf(x.session, x.inputs),
+  presegmented: x.presegmented ?? x.session.files.some((f) => f.kind === 'dxf'),
+  blocker: x.question ?? null,
+});
+
+/**
+ * The policy's answer to the question the step stops on, as patch + events (N1 `AutoAnswer`). A
+ * question the policy has no answer for is a stop (the reason says which).
+ */
+export function autopilotAnswer(x: AutopilotSnapshot): AutopilotAnswer {
+  const snap = snapOf(x);
+  const d = decideSnap(snap);
+  const autopilot = mergeAssumptions(x.inputs.autopilot ?? [], d.assumptions);
+  if (d.stop)
+    return { stop: true, reason: d.stop, assumptions: d.assumptions, patch: { autopilot } };
+  const act = d.actions[0];
+  if (!act) {
+    if (!snap.blocker) return { assumptions: d.assumptions, patch: { autopilot } };
+    return {
+      stop: true,
+      reason: { step: x.session.step, reason: `no answer for: ${snap.blocker}` },
+      assumptions: d.assumptions,
+      patch: { autopilot },
+    };
+  }
+  const { patch, events, proceed } = toWizard(snap, act);
+  return {
+    patch: { ...patch, autopilot },
+    events,
+    ...(proceed ? { proceed } : {}),
+    assumptions: d.assumptions,
+  };
+}
+
+/**
+ * N1's resolver: `api.advance({ resolve: autopilotResolver(card) })`. The assumptions accumulate in
+ * `Inputs.autopilot` through the patch; a stop's reason goes to `onStop` (N1 stops silently).
+ */
+export function autopilotResolver(
+  card: CardContext,
+  opts: {
+    onStop?: (stop: AutopilotStop) => void;
+    extra?: () => Pick<AutopilotSnapshot, 'baseSeeds' | 'presegmented'>;
+  } = {},
+) {
+  return (snap: {
+    session: ImportSession;
+    inputs: Inputs;
+    step: WizardStep;
+    question: string;
+  }): AutopilotAnswer => {
+    const a = autopilotAnswer({ ...snap, card, ...(opts.extra?.() ?? {}) });
+    if (a.stop && a.reason) opts.onStop?.(a.reason);
+    return a;
+  };
+}
+
+/** The same answer the operator's control gives, as an inputs patch and wizard events. */
+function toWizard(
+  snap: Snap,
+  a: AutopilotAction,
+): { patch?: Partial<Inputs>; events?: WizardEvent[]; proceed?: boolean } {
+  const { session: s, inputs: i } = snap;
+  // re-submitting the names table as it is re-runs semantics on the LIVE answers through the
+  // wizard's own `semanticsInput` (the AI's counts and fold hints included): the details answer
+  const rerunSemantics: WizardEvent = { type: 'names', decisions: s.names };
+  switch (a.kind) {
+    case 'inputs':
+      return { patch: a.patch };
+    case 'clean':
+      return { events: [{ type: 'clean', edits: a.edits }] };
+    case 'proceed':
+      return { proceed: true };
+    case 'seeds':
+      // `addSeed()` of the hook: the clicks join the first run's seeds, the fill runs again
+      return {
+        patch: { clickSeeds: [...i.clickSeeds, ...a.seeds] },
+        events: [{ type: 'piece-edits', edits: i.edits }],
+      };
+    case 'legend':
+      return {
+        ...(a.confirm ? { patch: { legendConfirmed: a.confirm } } : {}),
+        events: [
+          ...(a.back ? [{ type: 'back', to: a.back } as WizardEvent] : []),
+          { type: 'legend', edits: a.edits },
+        ],
+      };
+    case 'drawn-sizes':
+      return { events: [{ type: 'drawn-sizes', n: a.n }] };
+    case 'size-map':
+      return { events: [{ type: 'size-map', entries: a.entries }] };
+    case 'variant':
+      return { events: [{ type: 'variant', variant: a.variant }] };
+    case 'piece-edits':
+      return {
+        events: [
+          ...(s.step !== 'pieces' ? [{ type: 'back', to: 'pieces' } as WizardEvent] : []),
+          { type: 'piece-edits', edits: a.edits },
+        ],
+      };
+    case 'semantics':
+      return { patch: a.patch, events: [rerunSemantics] };
+    case 'confirm-shown': {
+      // `confirmShown()` of the hook: every open count keyed by its question, every open name
+      const now = snap.answersNow;
+      const open = openQuestions(s.semantics, s.names, i, now);
+      return {
+        patch: {
+          confirmedQuantities: {
+            ...i.confirmedQuantities,
+            ...Object.fromEntries(open.quantity.map((u) => [u.seed, questionKey(u, now)])),
+          },
+          confirmedNames: [
+            ...new Set([
+              ...i.confirmedNames,
+              ...open.name.map((u) => u.seed),
+              ...open.aiNames.map((n) => n.seed),
+            ]),
+          ],
+        },
+      };
+    }
+    case 'edit-name': {
+      // `editName()` of the hook: the name is typed (origin 'operator'), the AI's fabric call for
+      // the old name is dropped, the names table re-runs semantics
+      const staleFabric = !!i.assignment?.aiOnly?.some((x) => x.seed === a.seed);
+      const p = { code: a.code, mods: a.mods, displayName: a.displayName };
+      const decisions: NameDecision[] = s.names.some((n) => n.seed === a.seed)
+        ? s.names.map((n) => (n.seed === a.seed ? { ...n, ...p } : n))
+        : [...s.names, { ...textNameOf(a.seed, s.semantics, i.overrides[a.seed]), ...p }];
+      return {
+        patch: {
+          editedNames: [...new Set([...i.editedNames, a.seed])],
+          confirmedNames: [...new Set([...i.confirmedNames, a.seed])],
+          ...(staleFabric ? { assignment: null } : {}),
+        },
+        events: [{ type: 'names', decisions }],
+      };
+    }
+    case 'fabrics':
+      return { events: [{ type: 'fabrics', assignment: a.assignment }] };
+  }
+}
+
+/** The policy's decision on a snapshot (the actions, before they are put in wizard terms). */
+export function decide(x: AutopilotSnapshot): AutopilotDecision {
+  return decideSnap(snapOf(x));
+}
+
 /** Residuals up to this many times the limit are accepted (beyond: a stop). */
 export const RESIDUAL_ACCEPT_X = 3;
 
 /** The policy: what to answer on the current step (or why to stop). */
-export function decide(snap: AutopilotSnapshot): AutopilotDecision {
+function decideSnap(snap: Snap): AutopilotDecision {
   const s = snap.session;
   if (s.busy) return NONE;
   if (s.error) return stopAt(s.step, s.error);
   switch (s.step) {
     case 'files':
-      if (!s.files.length) return stopAt('files', 'no file was read');
-      if (!s.scale.candidates.length) return stopAt('files', 'the files could not be read');
-      return NONE;
+      return filesStep(snap);
     case 'scale':
       return scaleStep(snap);
     case 'sheet':
@@ -163,9 +358,106 @@ export function decide(snap: AutopilotSnapshot): AutopilotDecision {
   }
 }
 
+// ── files: the clean stage's offers ─────────────────────────────────────────────────────────────
+
+/** The edits with this kind's run-wide decision replaced (steps/files-clean.tsx `withKind`). */
+function withKind(edits: readonly PageMaskEdit[], kind: BackgroundKind, keep: boolean) {
+  return [
+    ...edits.filter((e) => !('kind' in e && e.kind === kind && e.file === undefined)),
+    { kind, keep },
+  ];
+}
+
+/** Suggested mask kinds nobody accepted yet, with what they cover. */
+function waitingKinds(
+  items: readonly {
+    kind: BackgroundKind;
+    status: string;
+    applied: boolean;
+    lines: number;
+    evidence: string[];
+  }[],
+) {
+  const by = new Map<BackgroundKind, { lines: number; evidence: string[] }>();
+  for (const it of items)
+    if (it.status === 'suggest' && !it.applied) {
+      const b = by.get(it.kind) ?? { lines: 0, evidence: [] };
+      b.lines += it.lines;
+      if (b.evidence.length < 2) b.evidence.push(...it.evidence.slice(0, 1));
+      by.set(it.kind, b);
+    }
+  return by;
+}
+
+/** An offer's suggested set-asides are accepted (the clean stage's proposal, D5 order). */
+function acceptWaiting(
+  step: WizardStep,
+  by: Map<BackgroundKind, { lines: number; evidence: string[] }>,
+  i: Inputs,
+): AutopilotDecision {
+  let edits: PageMaskEdit[] = [...i.cleanEdits];
+  for (const k of by.keys()) edits = withKind(edits, k, false);
+  return {
+    actions: [{ kind: 'clean', edits }],
+    assumptions: [...by].map(([k, b]) =>
+      A(
+        step,
+        'clean-accept',
+        `${k} (${b.lines} lines)`,
+        'set aside',
+        'what the clean stage suggests setting aside is accepted',
+        b.evidence,
+        0.6,
+        false,
+      ),
+    ),
+  };
+}
+
+function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): AutopilotDecision {
+  if (!s.files.length) return stopAt('files', 'no file was read');
+  if (!s.scale.candidates.length) return stopAt('files', 'the files could not be read');
+  if (!blocker || presegmented || !s.clean) return NONE;
+  const by = waitingKinds(s.clean.pages.flatMap((p) => p.items));
+  if (by.size) return acceptWaiting('files', by, i);
+  // pages set aside "to check", pages the reader could not place: left as the reader set them
+  const check = s.clean.dropped.filter((d) => d.status === 'suggest');
+  const unknown = s.pages.filter((p) => p.cls === 'unknown');
+  if (!check.length && !unknown.length) return NONE;
+  return {
+    actions: [{ kind: 'proceed' }],
+    assumptions: [
+      ...check.map((d) =>
+        A(
+          'files',
+          'pages-as-read',
+          `file ${d.file} page ${d.page + 1}`,
+          `set aside (${d.cls})`,
+          'a page the reader set aside stays aside',
+          [d.why.slice(0, 160)],
+          0.6,
+          false,
+        ),
+      ),
+      ...unknown.map((p) =>
+        A(
+          'files',
+          'pages-as-read',
+          `file ${p.file} page ${p.page + 1}`,
+          'role as read (unknown)',
+          'a page the reader could not place is read as it is',
+          [],
+          0.4,
+          false,
+        ),
+      ),
+    ],
+  };
+}
+
 // ── scale ───────────────────────────────────────────────────────────────────────────────────────
 
-function scaleStep({ session: s, inputs: i, blocker }: AutopilotSnapshot): AutopilotDecision {
+function scaleStep({ session: s, inputs: i, blocker }: Snap): AutopilotDecision {
   const c = s.scale.candidates[i.scaleIndex];
   if (!c) return stopAt('scale', 'no scale candidate: the file gives no size reference at all');
   if (!blocker || i.scaleConfirmed || i.manualMeasuredMm) return NONE;
@@ -216,7 +508,7 @@ function scaleStep({ session: s, inputs: i, blocker }: AutopilotSnapshot): Autop
 
 // ── sheet ───────────────────────────────────────────────────────────────────────────────────────
 
-function sheetStep({ session: s, inputs: i }: AutopilotSnapshot): AutopilotDecision {
+function sheetStep({ session: s, inputs: i }: Snap): AutopilotDecision {
   const sheets = new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet));
   const info: Assumption[] =
     sheets.size > 1
@@ -233,6 +525,11 @@ function sheetStep({ session: s, inputs: i }: AutopilotSnapshot): AutopilotDecis
           ),
         ]
       : [];
+  const waiting = waitingKinds(s.sheet?.clean?.items ?? []);
+  if (waiting.size) {
+    const d = acceptWaiting('sheet', waiting, i);
+    return { ...d, assumptions: [...info, ...d.assumptions] };
+  }
   const miss = s.sheet?.sheet.missing.length ?? 0;
   if (miss)
     return stopAt(
@@ -271,7 +568,47 @@ function sheetStep({ session: s, inputs: i }: AutopilotSnapshot): AutopilotDecis
 
 // ── sizes ───────────────────────────────────────────────────────────────────────────────────────
 
-function sizesStep({ session: s, inputs: i, card, blocker }: AutopilotSnapshot): AutopilotDecision {
+/**
+ * No legend row draws the outlines (no 'size', no 'common' row — a one-pen plot read as
+ * 'internal'): the longest row that is not set aside becomes the size line (the live smoke's own
+ * answer on inkscape-pieces-mm.svg). Asked once: a row already answered is not answered again.
+ */
+function outlineLegend(s: ImportSession, i: Inputs): AutopilotDecision | null {
+  const cls = s.chains?.classes ?? [];
+  if (!cls.length || cls.some((c) => c.role === 'size' || c.role === 'common')) return null;
+  const k = cls
+    .filter((c) => c.role !== 'ignore' && !i.legend.some((e) => e.classId === c.id))
+    .sort((a, b) => b.totalLengthMm - a.totalLengthMm)[0];
+  if (!k) return null;
+  return {
+    actions: [
+      {
+        kind: 'legend',
+        edits: [
+          ...i.legend,
+          { classId: k.id, role: 'size', sizeLabel: null, ...(k.sig ? { sig: k.sig } : {}) },
+        ],
+      },
+    ],
+    assumptions: [
+      A(
+        'sizes',
+        'legend-outline',
+        `legend row ${legendKey(k)}`,
+        `${k.role} → size line`,
+        'no legend row draws the outlines: the longest row kept is the size line',
+        [
+          `${k.chains.length} lines, ${Math.round(k.totalLengthMm)} mm`,
+          `read as ${k.role} (${k.confidence.toFixed(2)})`,
+        ],
+        0.4,
+        true,
+      ),
+    ],
+  };
+}
+
+function sizesStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotDecision {
   if (!card.sizes.length) return stopAt('sizes', 'the card has no size range');
   const sz = s.sizes;
   if (!sz || !blocker) return NONE;
@@ -279,7 +616,8 @@ function sizesStep({ session: s, inputs: i, card, blocker }: AutopilotSnapshot):
   if (sz.countAsk && !sz.expected) {
     const inf = sz.countAsk.inferred;
     const labelled = sz.run.sizes.filter((x) => x.label).length;
-    const n = inf?.n ?? (labelled >= 2 ? labelled : card.sizes.length === 1 ? 1 : null);
+    const one = sz.run.sizes.length === 1 || card.sizes.length === 1;
+    const n = inf?.n ?? (labelled >= 2 ? labelled : one ? 1 : null);
     if (n == null)
       return stopAt(
         'sizes',
@@ -297,7 +635,9 @@ function sizesStep({ session: s, inputs: i, card, blocker }: AutopilotSnapshot):
             ? 'the count the lines show (nesting of the outlines)'
             : labelled >= 2
               ? 'the count of size labels read off the sheet'
-              : 'a one-size card: one size drawn',
+              : card.sizes.length === 1
+                ? 'a one-size card: one size drawn'
+                : 'the sheet reads as one size: one size drawn',
           inf ? [inf.why] : [`${labelled} size labels`, `card run ${card.sizes.length}`],
           inf ? 0.6 : 0.4,
           !inf && labelled < 2,
@@ -309,30 +649,39 @@ function sizesStep({ session: s, inputs: i, card, blocker }: AutopilotSnapshot):
   const pending = (s.chains?.classes ?? []).filter(
     (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)),
   );
-  if (pending.length)
-    return {
-      actions: [
-        {
-          kind: 'inputs',
-          patch: { legendConfirmed: [...i.legendConfirmed, ...pending.map(legendKey)] },
-        },
-      ],
-      assumptions: pending.map((c) =>
-        A(
-          'sizes',
-          'legend-row',
-          `legend row ${legendKey(c)}`,
-          `${c.role}${c.sizeLabel ? ` ${c.sizeLabel}` : ''}`,
-          'a legend row below 0.6 is confirmed as read',
-          [
-            `${c.chains.length} lines, ${Math.round(c.totalLengthMm)} mm`,
-            ...c.evidence.slice(0, 3).map((e) => e.kind),
-          ],
-          c.confidence,
-          false,
-        ),
+  if (pending.length) {
+    const confirm = [...i.legendConfirmed, ...pending.map(legendKey)];
+    const rows = pending.map((c) =>
+      A(
+        'sizes',
+        'legend-row',
+        `legend row ${legendKey(c)}`,
+        `${c.role}${c.sizeLabel ? ` ${c.sizeLabel}` : ''}`,
+        'a legend row below 0.6 is confirmed as read',
+        [
+          `${c.chains.length} lines, ${Math.round(c.totalLengthMm)} mm`,
+          ...c.evidence.slice(0, 3).map((e) => e.kind),
+        ],
+        c.confidence,
+        false,
       ),
+    );
+    // the same answer: no row draws the outlines → the longest row kept is the size line
+    const outline = outlineLegend(s, i);
+    const edit = outline?.actions[0];
+    if (outline && edit?.kind === 'legend')
+      return {
+        actions: [{ ...edit, confirm }],
+        assumptions: [
+          ...rows.filter((r) => !outline.assumptions.some((o) => o.subject === r.subject)),
+          ...outline.assumptions,
+        ],
+      };
+    return {
+      actions: [{ kind: 'inputs', patch: { legendConfirmed: confirm } }],
+      assumptions: rows,
     };
+  }
   const entries = sz.map.entries;
   if (!entries.length) return stopAt('sizes', 'no size was read off the sheet');
   const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
@@ -445,7 +794,7 @@ const subjectOf = (seeds: readonly Seed[], seed: SeedId) => {
   return `seed ${seed}${l ? ` · ${l}` : ''}`;
 };
 
-function piecesStep(snap: AutopilotSnapshot): AutopilotDecision {
+function piecesStep(snap: Snap): AutopilotDecision {
   const { session: s, inputs: i, baseSeeds, presegmented, blocker } = snap;
   const fams = s.pieces?.families ?? [];
   const seeds = s.pieces?.seeds ?? [];
@@ -480,7 +829,44 @@ function piecesStep(snap: AutopilotSnapshot): AutopilotDecision {
       ],
     };
   }
-  if (!fams.length) return stopAt('pieces', 'no pieces found on the sheet');
+  if (!fams.length) {
+    // no line draws an outline: the legend is answered on the sizes step, then the pieces again
+    const outline = outlineLegend(s, i);
+    if (outline)
+      return {
+        ...outline,
+        actions: outline.actions.map((a) =>
+          a.kind === 'legend' ? { ...a, back: 'sizes' as const } : a,
+        ),
+      };
+    // nothing seeded: a click inside every closed outline (once)
+    const pts = i.clickSeeds.length ? [] : seedPoints(s.chains?.chainPreview ?? []);
+    if (!pts.length) return stopAt('pieces', 'no pieces found on the sheet');
+    const all = [...(baseSeeds ?? []), ...seeds, ...i.clickSeeds];
+    const id0 = Math.max(0, ...all.map((x) => x.id)) + 1;
+    const clicks: Seed[] = pts.map((at, k) => ({
+      id: id0 + k,
+      at,
+      origin: 'click',
+      variant: i.variant,
+    }));
+    return {
+      actions: [{ kind: 'seeds', seeds: clicks }],
+      assumptions: clicks.map((c) =>
+        A(
+          'pieces',
+          'seed-click',
+          `seed ${c.id}`,
+          `a piece at (${c.at.x.toFixed(0)}, ${c.at.y.toFixed(0)})`,
+          'nothing on the sheet seeds a piece: a click inside every closed outline',
+          [`${pts.length} closed outlines`],
+          0.4,
+          true,
+          c.id,
+        ),
+      ),
+    };
+  }
   if (!blocker) return NONE;
   const mapped = exportedRanks(s.sizes?.map);
   const open = fams.filter((f) =>
@@ -541,7 +927,7 @@ function outlineOf(f: PieceFamily | undefined, mapped: Set<number> | null): PtMm
   return cs[0]?.outer ?? f.candidates.find((c) => c.outer.length > 2)?.outer ?? null;
 }
 
-function meaningStep(snap: AutopilotSnapshot): AutopilotDecision {
+function meaningStep(snap: Snap): AutopilotDecision {
   const { session: s, inputs: i, card, presegmented, blocker } = snap;
   const sem = s.semantics;
   if (!sem) return NONE;
@@ -924,7 +1310,7 @@ function meaningStep(snap: AutopilotSnapshot): AutopilotDecision {
 
 // ── fabrics ─────────────────────────────────────────────────────────────────────────────────────
 
-function fabricsStep({ session: s, card, blocker }: AutopilotSnapshot): AutopilotDecision {
+function fabricsStep({ session: s, card, blocker }: Snap): AutopilotDecision {
   const a = s.fabrics;
   if (!a) return NONE;
   if (!card.scopes.length) return stopAt('fabrics', 'the BOM has no fabric lines');

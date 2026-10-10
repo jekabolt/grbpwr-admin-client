@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
+import { answersNowOf } from 'components/managers/tech-card/components/pattern-import/answers';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { toWireError } from 'lib/pattern-import/worker/errors';
 import type {
@@ -36,13 +37,15 @@ import {
 } from 'components/managers/tech-card/components/pattern-import/use-import-session';
 import {
   angleDiff180,
-  autopilotRecord,
+  autopilotAnswer,
+  autopilotRecordOf,
   autopilotTick,
-  decide,
   fallbackGrain,
+  longestStraight,
   newAutopilotRun,
+  principalAxis,
   type Assumption,
-  type AutopilotDecision,
+  type AutopilotAnswer,
   type AutopilotSnapshot,
 } from 'components/managers/tech-card/components/pattern-import/autopilot';
 
@@ -180,11 +183,14 @@ export async function runCase(c: Case, mutate: string | null) {
   };
   const run = newAutopilotRun();
   const mutated: string[] = [];
-  const wrapped = (snap: AutopilotSnapshot): AutopilotDecision => {
-    const d = decide(snap);
-    if (!mutate || d.stop || d.actions.length || snap.blocker) return d;
-    return mutateAnswer(mutate, snap, mutated, c) ?? d;
+  const wrapped = (snap: AutopilotSnapshot): AutopilotAnswer => {
+    // the policy's own fingerprint of "now" must be the wizard's (answers.ts answersNowOf)
+    const mine = JSON.stringify(answersNowOf(snap.session, snap.inputs));
+    if (mine !== JSON.stringify(api.answersNow)) fingerprintDrift++;
+    const a = autopilotAnswer(snap);
+    return mutate ? mutateAnswer(mutate, snap, a, mutated, c) : a;
   };
+  let fingerprintDrift = 0;
   const trace: string[] = [];
   let files: { name: string; bytes: ArrayBuffer }[] = [];
   try {
@@ -202,10 +208,10 @@ export async function runCase(c: Case, mutate: string | null) {
     await settle();
     for (let t = 0; t < 400; t++) {
       const step = api.session.step;
-      const r = await autopilotTick(api, card, run, { decide: wrapped });
+      const r = await autopilotTick(api, card, run, { answer: wrapped, offer: offerOf, settle });
       await settle();
       trace.push(
-        `${step}:${r.kind === 'acted' ? r.action : r.kind === 'advanced' ? 'next' : r.kind}`,
+        `${step}:${r.kind === 'answered' ? 'answer' : r.kind === 'advanced' ? 'next' : r.kind}`,
       );
       if (r.kind === 'done' || r.kind === 'stop') break;
     }
@@ -214,6 +220,18 @@ export async function runCase(c: Case, mutate: string | null) {
   }
   const s = api.session;
   rec.trace = compress(trace);
+  rec.sizesRead = s.sizes
+    ? {
+        labels: s.sizes.run.sizes.map((x) => x.label),
+        expected: s.sizes.expected,
+        countAsk: s.sizes.countAsk,
+        map: s.sizes.map.entries.map((e) => `${e.source.label || '∅'}→${e.card?.token ?? '—'}`),
+      }
+    : null;
+  rec.legend = (s.chains?.classes ?? []).map(
+    (k) =>
+      `${k.role}${k.sizeLabel ? ` ${k.sizeLabel}` : ''} ${k.confidence.toFixed(2)} ${Math.round(k.totalLengthMm)}mm`,
+  );
   rec.ticks = run.ticks;
   rec.clicks = 0;
   const done = run.done;
@@ -221,7 +239,9 @@ export async function runCase(c: Case, mutate: string | null) {
   if (done && !done.ok) rec.stop = done.stop;
   else if (!done) rec.stop = { step: s.step, reason: 'tick budget spent' };
   if (rec.verdict === 'stopped' && c.group === 'refusal') rec.expectedStop = true;
-  const as = [...run.assumptions.values()];
+  rec.fingerprintDrift = fingerprintDrift;
+  // the run's assumptions as the wizard keeps them (merged into its inputs, one per question)
+  const as = api.inputs.autopilot;
   rec.assumptions = {
     total: as.length,
     strong: as.filter((a) => a.strong).length,
@@ -234,7 +254,7 @@ export async function runCase(c: Case, mutate: string | null) {
   // the written files: gate, manifest round trip (the assumptions ride in every manifest)
   const wr = outs.write as StageIO['write']['out'] | undefined;
   if (wr && s.step !== 'fabrics') {
-    const want = autopilotRecord(run, new Set((s.semantics?.pieces ?? []).map((p) => p.seed)))
+    const want = autopilotRecordOf(as, new Set((s.semantics?.pieces ?? []).map((p) => p.seed)))
       .assumptions.length;
     rec.write = wr.scopes.map((sc) => {
       const m = readManifest(sc.dxfText);
@@ -413,21 +433,49 @@ export async function runCase(c: Case, mutate: string | null) {
     const mapped = exportedRanks(s.sizes?.map);
     const seen = new Set<SeedId>();
     const errs: number[] = [];
+    const grainRows: Record<string, unknown>[] = [];
     for (const p of sem.pieces) {
       if (seen.has(p.seed) || p.unfoldedFold) continue;
       seen.add(p.seed);
       const z = p.sizes[p.sizes.length - 1];
       const g = z?.grain;
-      if (!g || g.origin !== 'detected') continue;
-      const ring = ringOf(
-        s.pieces.families.find((f) => f.seed === p.seed),
-        mapped,
-        z.rank,
+      // a grain the sheet DRAWS: detected, or an accepted proposal resting on a drawn line
+      const drawnLine = (g?.evidence ?? []).some(
+        (e) => e !== 'geometry' && e !== 'accepted' && e !== 'operator',
       );
+      if (!g || (g.origin !== 'detected' && !drawnLine)) continue;
+      // the written cut line: the grain's own frame (a DXF block's outline may lie turned)
+      const ring =
+        z.cut.length > 2
+          ? z.cut
+          : ringOf(
+              s.pieces.families.find((f) => f.seed === p.seed),
+              mapped,
+              z.rank,
+            );
       const fb = ring ? fallbackGrain(ring) : null;
       if (!fb) continue;
       const ga = (Math.atan2(g.b.y - g.a.y, g.b.x - g.a.x) * 180) / Math.PI;
       errs.push(angleDiff180(fb.angleDeg, ga));
+      // the rule's parts, for tuning it: drawn grain vs the edge, the axis, the sheet vertical
+      const ax = principalAxis(ring!);
+      const ed = longestStraight(ring!);
+      let per = 0;
+      for (let k = 0; k < ring!.length; k++)
+        per += Math.hypot(
+          ring![(k + 1) % ring!.length].x - ring![k].x,
+          ring![(k + 1) % ring!.length].y - ring![k].y,
+        );
+      grainRows.push({
+        piece: `${p.identity}`,
+        drawn: +((ga + 360) % 180).toFixed(1),
+        rule: +fb.angleDeg.toFixed(1),
+        from: fb.from,
+        edge: ed ? +ed.angleDeg.toFixed(1) : null,
+        edgeShare: ed ? +(ed.lenMm / per).toFixed(2) : null,
+        axis: ax ? +ax.angleDeg.toFixed(1) : null,
+        elong: ax ? +ax.elongation.toFixed(2) : null,
+      });
     }
     errs.sort((a, b) => a - b);
     rec.grainRule = {
@@ -435,6 +483,9 @@ export async function runCase(c: Case, mutate: string | null) {
       within5: errs.filter((e) => e <= 5).length,
       within15: errs.filter((e) => e <= 15).length,
       median: errs.length ? +errs[Math.floor(errs.length / 2)].toFixed(1) : null,
+      rows: grainRows,
+      // a DXF always carries its grain (the rule never runs there); CLO lays its blocks turned
+      dxf: !!api.extracted.presegmented,
     };
   }
   rec.ms = Date.now() - T0;
@@ -452,18 +503,35 @@ function ringOf(f: PieceFamily | undefined, mapped: Set<number> | null, rank: nu
 }
 
 /**
- * The metric's own control: a WRONG answer injected where the policy would move on. `qty` — the
- * first truth-labelled piece's count + 1 (an operator-shaped override); `size` — the first two
- * mapped sizes swapped. The metric must count it.
+ * The metric's own control: a WRONG answer injected into the policy's answer. `qty` — with the
+ * details step's "confirm as shown", the first truth-labelled piece's count + 1 (an operator-shaped
+ * override); `size` — with the first answer on the sizes step, the first two mapped sizes swapped.
+ * The metric must count it, attributed to the assumption.
  */
 function mutateAnswer(
   kind: string,
   snap: AutopilotSnapshot,
+  a: AutopilotAnswer,
   mutated: string[],
   c: Case,
-): AutopilotDecision | null {
+): AutopilotAnswer {
   const s = snap.session;
-  if (kind === 'qty' && s.step === 'meaning' && !mutated.length && s.semantics) {
+  if (a.stop || mutated.length) return a;
+  const withA = (
+    x: Assumption[],
+    patch: AutopilotAnswer['patch'],
+    events: AutopilotAnswer['events'],
+  ) => ({
+    ...a,
+    patch: {
+      ...a.patch,
+      ...patch,
+      autopilot: [...(a.patch?.autopilot ?? snap.inputs.autopilot), ...x],
+    },
+    events: [...(a.events ?? []), ...(events ?? [])],
+    assumptions: [...a.assumptions, ...x],
+  });
+  if (kind === 'qty' && s.step === 'meaning' && a.patch?.confirmedQuantities && s.semantics) {
     const seeds = [...(snap.baseSeeds ?? []), ...(s.pieces?.seeds ?? [])];
     const lab = (sd: SeedId) => seeds.find((x: Seed) => x.id === sd)?.text?.text;
     const tps = truthOf(c)?.variants[c.truth?.variant ?? 0]?.pieces ?? [];
@@ -472,14 +540,14 @@ function mutateAnswer(
         const l = lab(x.seed);
         return l && tps.some((t) => norm(t.label) === norm(l));
       }) ?? s.semantics.pieces[0];
-    if (!p) return null;
+    if (!p) return a;
     const ppg = p.piecesPerGarment + 1;
     mutated.push(`qty seed ${p.seed}: ${p.piecesPerGarment} → ${ppg}`);
     const overrides = {
       ...snap.inputs.overrides,
       [p.seed]: { ...(snap.inputs.overrides[p.seed] ?? {}), piecesPerGarment: ppg },
     };
-    const a: Assumption = {
+    const x: Assumption = {
       step: 'meaning',
       kind: 'quantity',
       subject: `seed ${p.seed}${lab(p.seed) ? ` · ${lab(p.seed)}` : ''}`,
@@ -490,11 +558,11 @@ function mutateAnswer(
       strong: false,
       seed: p.seed,
     };
-    return { actions: [{ kind: 'semantics', patch: { overrides } }], assumptions: [a] };
+    return withA([x], { overrides }, [{ type: 'names', decisions: s.names }]);
   }
-  if (kind === 'size' && s.step === 'sizes' && !mutated.length && s.sizes) {
+  if (kind === 'size' && s.step === 'sizes' && s.sizes) {
     const m = s.sizes.map.entries.filter((e) => e.card);
-    if (m.length < 2) return null;
+    if (m.length < 2) return a;
     const [x, y] = m;
     mutated.push(`size ${x.source.label}→${y.card!.token}, ${y.source.label}→${x.card!.token}`);
     const entries: SizeMapEntry[] = s.sizes.map.entries.map((e) =>
@@ -515,11 +583,29 @@ function mutateAnswer(
       confidence: 0,
       strong: false,
     });
-    return {
-      actions: [{ kind: 'size-map', entries }],
-      assumptions: [mk(x, y.card!.token), mk(y, x.card!.token)],
-    };
+    return withA([mk(x, y.card!.token), mk(y, x.card!.token)], {}, [{ type: 'size-map', entries }]);
   }
+  return a;
+}
+
+/**
+ * What a step offers without blocking (N1 `stepOffer`, auto-advance.ts on pi/n1 — the same three
+ * offers): the clean stage's waiting suggestions, pages set aside to check, pages not placed.
+ */
+function offerOf(api: ImportSessionApi): string | null {
+  const s = api.session;
+  const waiting = (xs: readonly { status: string; applied: boolean }[]) =>
+    xs.some((it) => it.status === 'suggest' && !it.applied);
+  if (s.step === 'files' && !api.extracted.presegmented && s.clean) {
+    if (waiting(s.clean.pages.flatMap((p) => p.items)))
+      return 'suggested to set aside — accept, or go on with the lines kept';
+    if (s.clean.dropped.some((d) => d.status === 'suggest'))
+      return 'pages set aside to check — read one as a tile, or go on';
+    if (s.pages.some((p) => p.cls === 'unknown'))
+      return 'pages the reader could not place — check their role, or go on';
+  }
+  if (s.step === 'sheet' && waiting(s.sheet?.clean?.items ?? []))
+    return 'suggested to set aside on the sheet — accept, or go on with the lines kept';
   return null;
 }
 

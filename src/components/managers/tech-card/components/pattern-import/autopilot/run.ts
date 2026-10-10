@@ -1,66 +1,54 @@
-// A10 · AUTOPILOT DRIVER — one tick = one answer (or one "next") through the wizard's own API.
-//
-// The wizard (next lane) calls `autopilotTick` after every render while autopilot is on; the e2e
-// probe (scripts/pattern-import/autopilot-entry.ts) calls it in a loop over the same hook, so the
-// metric measures exactly what the wizard will run. A tick never answers on stale state: it
-// applies ONE action and returns — the caller re-renders and ticks again, and the policy decides
-// again on the new outputs (a fixpoint, or a stop).
-import type { AutopilotRecord, WizardStep } from 'lib/pattern-import/types';
+// A10 · AUTOPILOT DRIVE for the probe — N1's forward drive (auto-advance.ts, `api.advance`) run
+// tick by tick over the same hook API, with the policy as its resolver:
+//   · a step with no question (no blocker, no offer) → the step's "next";
+//   · a step that asks → `autopilotAnswer` once per (step, question): the patch, then the events,
+//     in order; the step is checked again — the same question back, or no answer, is a stop;
+//   · check: a gate block is a stop; a green gate goes on to apply (the wiring lane's "apply by
+//     itself", owner A10) — the card's apply is the probe's stub.
+// The wizard does not use this file: it calls `api.advance({ resolve: autopilotResolver(card) })`.
+// The metric measures the same policy through the same answers.
+import type { WizardStep } from 'lib/pattern-import/types';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
-import { decide, type AutopilotAction, type AutopilotDecision, type AutopilotStop } from './policy';
-import { assumptionKey, type Assumption } from './types';
+import {
+  autopilotAnswer,
+  type AutopilotAnswer,
+  type AutopilotSnapshot,
+  type AutopilotStop,
+} from './policy';
+import type { Assumption } from './types';
 
 export type AutopilotRun = {
-  /** Every answer given so far, one per question (`assumptionKey`), in the order first given. */
-  assumptions: Map<string, Assumption>;
-  /** Loop guard: how often the same (step, blocker, action) came back. */
-  seen: Map<string, number>;
+  /** (step, question) pairs already offered to the policy (N1: once each). */
+  asked: Set<string>;
   ticks: number;
   /** Set once the run stopped or reached the apply step. */
   done: null | { ok: true } | { ok: false; stop: AutopilotStop };
+  /** Every answer given, in order (also merged into `Inputs.autopilot`). */
+  log: Assumption[];
 };
 
 export const newAutopilotRun = (): AutopilotRun => ({
-  assumptions: new Map(),
-  seen: new Map(),
+  asked: new Set(),
   ticks: 0,
   done: null,
+  log: [],
 });
 
 export type TickResult =
-  | { kind: 'acted'; action: AutopilotAction['kind'] | 'apply' }
+  | { kind: 'answered'; question: string }
   | { kind: 'advanced'; from: WizardStep }
   | { kind: 'wait' }
   | { kind: 'done' }
   | { kind: 'stop'; stop: AutopilotStop };
 
-/** The same question asked this many times without the run moving is a stop, not a loop. */
-const MAX_REPEAT = 4;
-
-/**
- * The record the manifest carries: piece answers of pieces no longer written are left out (a piece
- * set aside keeps its "not a piece" answer).
- */
-export function autopilotRecord(
-  run: AutopilotRun,
-  exported?: ReadonlySet<number>,
-): AutopilotRecord {
-  const keep = (a: Assumption) =>
-    a.seed == null ||
-    !exported ||
-    exported.has(a.seed) ||
-    a.kind === 'not-a-piece' ||
-    a.kind === 'dropped-piece';
-  return {
-    v: 1,
-    assumptions: [...run.assumptions.values()].filter(keep).map(({ seed: _s, ...a }) => a),
-  };
-}
-
 export type TickOpts = {
   /** The policy (a probe may wrap it to inject a wrong answer and check the metric sees it). */
-  decide?: (snap: Parameters<typeof decide>[0]) => AutopilotDecision;
+  answer?: (snap: AutopilotSnapshot) => AutopilotAnswer;
+  /** What the step offers without blocking (N1 `stepOffer`); absent = blockers only. */
+  offer?: (api: ImportSessionApi) => string | null;
+  /** Lets the hook re-render between the patch and the events (N1 sets its ref directly). */
+  settle?: () => Promise<void>;
 };
 
 export async function autopilotTick(
@@ -81,7 +69,7 @@ export async function autopilotTick(
   if (s.step === 'apply') {
     if (api.apply.phase === 'idle' && !card.downloadOnly) {
       await api.dispatch({ type: 'apply' });
-      return { kind: 'acted', action: 'apply' };
+      return { kind: 'answered', question: 'apply' };
     }
     if (api.apply.phase === 'running') return { kind: 'wait' };
     if (api.apply.phase === 'done' && !api.apply.result.ok)
@@ -89,75 +77,46 @@ export async function autopilotTick(
     run.done = { ok: true };
     return { kind: 'done' };
   }
-  const d = (opts.decide ?? decide)({
+  if (s.step === 'check') {
+    const failing = Object.entries(s.gate).flatMap(([scope, g]) =>
+      g.checks
+        .filter((c) => !c.ok && c.severity === 'block')
+        .map((c) => `${scope.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()} ${c.id}`),
+    );
+    // a gate block is never answered: the export would be known wrong
+    if (failing.length)
+      return halt({ step: 'check', reason: `the gate blocks: ${failing.join(', ')}` });
+    await api.next();
+    return { kind: 'advanced', from: 'check' };
+  }
+  const question = api.blocker ?? opts.offer?.(api) ?? null;
+  if (!question) {
+    await api.next();
+    return { kind: 'advanced', from: s.step };
+  }
+  const key = `${s.step}|${question}`;
+  if (run.asked.has(key)) return halt({ step: s.step, reason: `asked again: ${question}` });
+  run.asked.add(key);
+  const a = (opts.answer ?? autopilotAnswer)({
     session: s,
     inputs: api.inputs,
     card,
+    step: s.step,
+    question,
     baseSeeds: api.baseSeeds,
-    answersNow: api.answersNow,
     presegmented: !!api.extracted.presegmented,
-    blocker: api.blocker,
   });
-  for (const a of d.assumptions) {
-    const k = assumptionKey(a);
-    run.assumptions.delete(k);
-    run.assumptions.set(k, a);
+  run.log.push(...a.assumptions);
+  if (a.stop) return halt(a.reason ?? { step: s.step, reason: `no answer for: ${question}` });
+  if (a.patch) {
+    api.patchInputs(a.patch);
+    await opts.settle?.();
   }
-  if (d.stop) return halt(d.stop);
-  const act = d.actions[0];
-  const key = `${s.step}|${api.blocker ?? ''}|${act ? JSON.stringify(act).slice(0, 400) : 'next'}`;
-  const n = (run.seen.get(key) ?? 0) + 1;
-  run.seen.set(key, n);
-  if (n > MAX_REPEAT)
-    return halt({
-      step: s.step,
-      reason: `no progress: ${api.blocker ?? `"${act?.kind ?? 'next'}" did not move the run`}`,
-    });
-  if (act) {
-    await execute(api, act);
-    return { kind: 'acted', action: act.kind };
+  for (const ev of a.events ?? []) {
+    await api.dispatch(ev);
+    await opts.settle?.();
+    if (api.session.error) break;
   }
-  if (api.blocker) return halt({ step: s.step, reason: `unanswered: ${api.blocker}` });
-  if (s.step === 'fabrics') {
-    const exported = new Set((s.semantics?.pieces ?? []).map((p) => p.seed));
-    await api.dispatch({ type: 'write', autopilot: autopilotRecord(run, exported) });
-  } else await api.next();
-  return { kind: 'advanced', from: s.step };
-}
-
-/** One action through the wizard's own API — the same calls its controls make. */
-async function execute(api: ImportSessionApi, a: AutopilotAction): Promise<void> {
-  switch (a.kind) {
-    case 'inputs':
-      api.patchInputs(a.patch);
-      return;
-    case 'drawn-sizes':
-      await api.setDrawnSizes(a.n);
-      return;
-    case 'size-map':
-      await api.dispatch({ type: 'size-map', entries: a.entries });
-      return;
-    case 'variant':
-      await api.dispatch({ type: 'variant', variant: a.variant });
-      return;
-    case 'piece-edits':
-      if (api.session.step !== 'pieces') await api.dispatch({ type: 'back', to: 'pieces' });
-      await api.dispatch({ type: 'piece-edits', edits: a.edits });
-      return;
-    case 'semantics':
-      await api.dispatch({
-        type: 'semantics',
-        input: api.semanticsInput({ ...api.inputs, ...a.patch }),
-      });
-      return;
-    case 'confirm-shown':
-      api.confirmShown();
-      return;
-    case 'edit-name':
-      await api.editName(a.seed, { code: a.code, mods: a.mods, displayName: a.displayName });
-      return;
-    case 'fabrics':
-      await api.dispatch({ type: 'fabrics', assignment: a.assignment });
-      return;
-  }
+  if (a.proceed) await api.next();
+  return { kind: 'answered', question };
 }

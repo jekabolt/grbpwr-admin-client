@@ -131,14 +131,21 @@ const summary = {
   assumptionsByKind: merge((r) => r.assumptions?.byKind),
   strongByKind: merge((r) => r.assumptions?.strongByKind),
   topStops: top(stopReasons),
+  // the rule runs on sheets only (a DXF carries its grain): scored there, DXF shown apart
   grainRule: {
-    n: sum((r) => r.grainRule?.n),
-    within5: sum((r) => r.grainRule?.within5),
-    within15: sum((r) => r.grainRule?.within15),
+    n: sum((r) => (r.grainRule?.dxf ? 0 : r.grainRule?.n)),
+    within5: sum((r) => (r.grainRule?.dxf ? 0 : r.grainRule?.within5)),
+    within15: sum((r) => (r.grainRule?.dxf ? 0 : r.grainRule?.within15)),
+  },
+  grainRuleDxf: {
+    n: sum((r) => (r.grainRule?.dxf ? r.grainRule?.n : 0)),
+    within5: sum((r) => (r.grainRule?.dxf ? r.grainRule?.within5 : 0)),
   },
   manifestProblems: results.flatMap((r) =>
     (r.write ?? []).filter((w) => !w.manifestOk).map((w) => `${r.id} ${w.scope}`),
   ),
+  // the policy's own "now" against the wizard's on every question (must be 0)
+  fingerprintDrift: sum((r) => r.fingerprintDrift),
   mutate: MUTATE || null,
   mutated: results.flatMap((r) => (r.mutated ?? []).map((m) => `${r.id}: ${m}`)),
 };
@@ -151,7 +158,7 @@ console.log(
 console.log(`wrong by kind (all cases): ${JSON.stringify(summary.wrongByKind)}`);
 console.log(`wrong by the assumption that gave it: ${JSON.stringify(summary.wrongByAssumption)}`);
 console.log(
-  `grain fallback vs drawn grainlines: ${summary.grainRule.within5}/${summary.grainRule.n} within 5°, ${summary.grainRule.within15}/${summary.grainRule.n} within 15°`,
+  `grain fallback vs drawn grainlines (sheets): ${summary.grainRule.within5}/${summary.grainRule.n} within 5°, ${summary.grainRule.within15}/${summary.grainRule.n} within 15° · (DXF blocks, never used there: ${summary.grainRuleDxf.within5}/${summary.grainRuleDxf.n})`,
 );
 console.log('top stop reasons:');
 for (const [k, v] of summary.topStops) console.log(`  ${String(v).padStart(3)}  ${k}`);
@@ -168,7 +175,11 @@ const out = resolve(
 writeFileSync(out, JSON.stringify({ summary, results }, null, 1));
 console.log(`→ ${out}`);
 
-let bad = summary.manifestProblems.length > 0;
+if (summary.fingerprintDrift)
+  console.log(
+    `✗ the policy's answer fingerprint drifted from the wizard's ${summary.fingerprintDrift}×`,
+  );
+let bad = summary.manifestProblems.length > 0 || summary.fingerprintDrift > 0;
 if (MUTATE) {
   // the control: every injected wrong answer must be counted wrong, attributed to an assumption
   const seen = results.filter((r) => r.mutated?.length);

@@ -1,9 +1,11 @@
 // A10 · AUTOPILOT — the assumption record (rule D5). The manifest carries `AutopilotAssumption`
 // (lib/pattern-import/types.ts); the wizard keeps the seed it was about, to drop the answers of a
 // piece that was set aside later and to show it on the piece.
-import type { AutopilotAssumption, SeedId } from 'lib/pattern-import/types';
+import type { AutopilotAssumption, AutopilotRecord, SeedId } from 'lib/pattern-import/types';
 
 export type AssumptionKind =
+  | 'clean-accept'
+  | 'pages-as-read'
   | 'scale-confirmed'
   | 'scale-1to1'
   | 'scale-anisotropic'
@@ -11,10 +13,12 @@ export type AssumptionKind =
   | 'residuals'
   | 'drawn-sizes'
   | 'legend-row'
+  | 'legend-outline'
   | 'size-guess'
   | 'size-ordinal'
   | 'size-dropped'
   | 'model'
+  | 'seed-click'
   | 'not-a-piece'
   | 'dropped-piece'
   | 'name-code'
@@ -32,3 +36,30 @@ export type Assumption = AutopilotAssumption & { kind: AssumptionKind; seed?: Se
 
 /** One record per question: a later answer to the same question replaces the earlier one. */
 export const assumptionKey = (a: Pick<Assumption, 'kind' | 'subject'>) => `${a.kind}|${a.subject}`;
+
+/**
+ * The record a manifest carries: piece answers of pieces no longer written are left out (a piece
+ * set aside keeps its "not a piece" answer), the seed is not written.
+ */
+export function autopilotRecordOf(
+  list: readonly Assumption[],
+  exported?: ReadonlySet<SeedId>,
+): AutopilotRecord {
+  const keep = (a: Assumption) =>
+    a.seed == null ||
+    !exported ||
+    exported.has(a.seed) ||
+    a.kind === 'not-a-piece' ||
+    a.kind === 'dropped-piece';
+  return { v: 1, assumptions: list.filter(keep).map(({ seed: _s, ...a }) => a) };
+}
+
+/** The list with these answers merged in: one per question, a later answer replaces the earlier. */
+export function mergeAssumptions(
+  list: readonly Assumption[],
+  more: readonly Assumption[],
+): Assumption[] {
+  if (!more.length) return [...list];
+  const keys = new Set(more.map(assumptionKey));
+  return [...list.filter((a) => !keys.has(assumptionKey(a))), ...more];
+}
