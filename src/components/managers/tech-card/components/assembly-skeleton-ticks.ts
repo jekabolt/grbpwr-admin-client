@@ -20,7 +20,34 @@ export type StepPick = {
   applied: boolean;
   /** Ticked by default only to close the order (a guess on the way to the garment). */
   closing?: boolean;
+  /**
+   * A guess ticked by default only because it rides on a ticked join (its press, its hem). Every
+   * guess the defaults tick carries one of the two marks; the panel shows it on the row and in the
+   * notice. A person's own tick clears both.
+   */
+  withJoin?: boolean;
 };
+
+/** A guess the default ticks took for the person — shown on its row and listed in the notice. */
+export const autoGuess = (p: StepPick | undefined): boolean =>
+  !!p && p.accepted && !p.applied && (!!p.closing || !!p.withJoin);
+
+/**
+ * The panel's notice, as lists of step indices: joins ticked to close the order, and the other
+ * guesses ticked by default (riding on a join read on its own evidence). Together they are EVERY
+ * auto-ticked guess — the probe holds the panel to that.
+ */
+export function autoTickedGuesses(
+  steps: readonly SkeletonStep[],
+  picks: readonly StepPick[],
+  shown: (s: SkeletonStep) => boolean = () => true,
+): { closing: number[]; withJoin: number[] } {
+  const idx = steps.map((_, i) => i).filter((i) => autoGuess(picks[i]) && shown(steps[i]));
+  return {
+    closing: idx.filter((i) => picks[i].closing),
+    withJoin: idx.filter((i) => !picks[i].closing),
+  };
+}
 
 /** A press or processing step that rides on the join it follows (its tick, its confidence). */
 export const isDerived = (s: SkeletonStep): boolean => s.derivedFrom != null && s.derivedFrom >= 0;
@@ -62,15 +89,19 @@ export const settlePicks = (
     const pick = { ...base[i] };
     if (isDerived(s) && followJoin(i) && picks[s.derivedFrom!]) {
       pick.accepted = picks[s.derivedFrom!].accepted;
-      if (picks[s.derivedFrom!].closing && pick.accepted && s.confidence < SKELETON.accept)
-        pick.closing = true;
+      // Following a ticked join is a default, not a person's pick: a guess so ticked is marked.
+      if (pick.accepted && !pick.applied && s.confidence < SKELETON.accept) pick.withJoin = true;
+      else delete pick.withJoin;
     }
     if (pick.accepted && !pick.applied)
       pick.accepted = s.inputs.every((k) => {
         const j = madeBy.get(k);
         return j === undefined || picks[j].accepted;
       });
-    if (!pick.accepted) delete pick.closing;
+    if (!pick.accepted) {
+      delete pick.closing;
+      delete pick.withJoin;
+    }
     picks.push(pick);
     if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
   });
@@ -127,8 +158,10 @@ export function orderClosure(steps: readonly SkeletonStep[]): OrderClosure {
 
 /**
  * Default picks completed so the order closes: every unticked join on the path to the proposal's
- * one end is ticked (`closing`), and its riders follow it. Picks a person made (`keep`) are never
- * overridden — only steps with no pick of their own are closed.
+ * one end is ticked (`closing`) — and NOTHING else. Its riders (press, side seams, hem, final
+ * press) are not needed for the order to converge, so they stay unticked guesses for the person to
+ * take; a rider is ticked only by a join that was ticked on its own evidence. Picks a person made
+ * (`keep`) are never overridden — only steps with no pick of their own are closed.
  */
 export function closeOrder(
   steps: readonly SkeletonStep[],
@@ -141,8 +174,18 @@ export function closeOrder(
   for (const i of path)
     if (!keep(i) && !next[i].accepted && !next[i].applied)
       next[i] = { ...next[i], accepted: true, closing: true };
-  // Riders follow a join the closure ticked (its press, its hem) unless a person picked them.
-  return settlePicks(steps, next, (i) => !keep(i));
+  // Riders follow their join unless a person picked them — but not a join the closure ticked: what
+  // rides on a guess is not structure, and is left for the person.
+  const closedHere = new Set(path.filter((i) => next[i].closing && !base[i].closing));
+  const underClosed = (i: number): boolean => {
+    for (let j = steps[i].derivedFrom; j != null && j >= 0; j = steps[j].derivedFrom)
+      if (closedHere.has(j) || next[j].closing) return true;
+    return false;
+  };
+  for (let i = 0; i < steps.length; i++)
+    if (isDerived(steps[i]) && !keep(i) && underClosed(i) && !next[i].applied)
+      next[i] = { accepted: false, applied: false };
+  return settlePicks(steps, next, (i) => !keep(i) && !underClosed(i));
 }
 
 /** The default ticks of a fresh proposal. */

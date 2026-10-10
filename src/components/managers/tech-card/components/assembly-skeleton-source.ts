@@ -13,7 +13,7 @@
 // Nothing here writes to the form. A proposal is data to look at; only `OperationsField`'s
 // `applyRequest` writes, and only on a pressed «apply».
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
-import { liningByName, readablePieceName } from 'lib/assembly-skeleton/names';
+import { liningByName, nameTokens, readablePieceName } from 'lib/assembly-skeleton/names';
 import { proposeSkeleton } from 'lib/assembly-skeleton/pipeline';
 import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import {
@@ -293,46 +293,96 @@ export type SkeletonCategoryReading = {
 
 const PURPOSE_AUXILIARY = 'TECH_CARD_PURPOSE_AUXILIARY';
 
+// Words that tell one garment from another when the card has no category — evidence only a
+// trouser, a tee or a jacket carries. Sleeves, a waistband or left / right panels do not: a dress,
+// a skirt and a shirt have them too.
+const CROTCH_WORDS = new Set([
+  'crotch',
+  'gusset',
+  'inseam',
+  'leg',
+  'legs',
+  'шаг',
+  'ластовица',
+  'штанина',
+  'штанины',
+  'krok',
+  'nogawka',
+  'nogawki',
+]);
+const NECK_RIB_WORDS = new Set([
+  'neckband',
+  'nb',
+  'neck',
+  'nck',
+  'горловина',
+  'горловины',
+  'dekolt',
+]);
+const JACKET_WORDS = new Set([
+  'lapel',
+  'lpl',
+  'undercollar',
+  'revers',
+  'лацкан',
+  'подворотник',
+  'klapa',
+]);
+
 /**
- * A card with NO category still has piece names: sleeves with a collar, placket or cuff are a shirt
- * (a jacket when lined), sleeves with a hood a hoodie, sleeves alone a tee; a fly, or a waistband
- * with left and right fronts or backs and no sleeve, are trousers; a skirt panel is a skirt. An
- * auxiliary card (a garment case, a dust bag) is no garment: generic. Anything else stays generic.
+ * A card with NO category still has piece names — read only for DISCRIMINATING evidence:
+ *   • trousers — a fly, or a crotch / gusset / leg piece (a waistband on left and right panels is
+ *     also a skirt);
+ *   • hoodie — sleeves and a hood;
+ *   • shirt — sleeves with a collar, placket or cuffs; a jacket (lined template) only when the card
+ *     is lined AND has a jacket's own pieces (lapel, facing, undercollar) — a lined shirt stays a
+ *     shirt;
+ *   • tee — sleeves with a neck rib or band (sleeves alone are also a dress);
+ *   • skirt — a skirt panel.
+ * An auxiliary card (a garment case, a dust bag) is no garment. Anything else is generic, and `why`
+ * says which evidence was missing.
  */
 export function skeletonCategoryFromPieces(
   pieceNames: ReadonlyArray<string>,
   hasLining: boolean,
   purpose?: string | null,
-): { category: SkeletonCategory; why: string } {
+): { category: SkeletonCategory; why: string; evidence: boolean } {
   if (purpose === PURPOSE_AUXILIARY)
-    return { category: 'generic', why: 'an auxiliary item, not a garment' };
+    return { category: 'generic', why: 'an auxiliary item, not a garment', evidence: true };
   const roles = new Set<string>();
-  const handed = new Set<string>();
+  const words = new Set<string>();
   for (const n of pieceNames) {
     const r = readName(n ?? '');
-    if (!r.role) continue;
-    roles.add(r.role);
-    if (r.hand) handed.add(`${r.role}:${r.hand}`);
+    if (r.role) roles.add(r.role);
+    for (const t of nameTokens(n ?? '')) words.add(t.replace(/^\d+|\d+$/g, ''));
   }
   const has = (r: string) => roles.has(r);
-  const pair = (r: string) => handed.has(`${r}:L`) && handed.has(`${r}:R`);
-  const neck = ['collar', 'stand'].find(has);
+  const any = (set: ReadonlySet<string>) => [...words].some((w) => set.has(w));
+  const found = (category: SkeletonCategory, why: string) => ({ category, why, evidence: true });
+  if (has('fly')) return found('trousers', 'a fly');
+  if (any(CROTCH_WORDS)) return found('trousers', 'a crotch or leg piece');
+  if (has('skirt')) return found('skirt', 'a skirt panel');
   if (has('sleeve')) {
-    if (has('hood')) return { category: 'hoodie', why: 'sleeves and a hood' };
+    if (has('hood')) return found('hoodie', 'sleeves and a hood');
+    const neck = has('collar') || (has('stand') && !any(NECK_RIB_WORDS));
     if (neck || has('placket') || has('cuff')) {
       const what = neck ? 'a collar' : has('placket') ? 'a placket' : 'cuffs';
-      return hasLining
-        ? { category: 'jacket-lined', why: `sleeves, ${what} and a lining` }
-        : { category: 'shirt', why: `sleeves and ${what}` };
+      if (hasLining && (has('facing') || any(JACKET_WORDS)))
+        return found('jacket-lined', `sleeves, ${what}, jacket facings or lapels and a lining`);
+      return found('shirt', `sleeves and ${what}`);
     }
-    return { category: 'tee', why: 'sleeves, no collar' };
+    if (has('rib') || any(NECK_RIB_WORDS)) return found('tee', 'sleeves and a neck rib');
+    return {
+      category: 'generic',
+      why: 'sleeves, but no collar, cuff, hood or neck rib to tell a shirt, a tee or a dress apart',
+      evidence: false,
+    };
   }
-  if (has('skirt')) return { category: 'skirt', why: 'a skirt panel' };
-  if (has('fly')) return { category: 'trousers', why: 'a fly' };
-  if (has('waistband') && (pair('front') || pair('back')))
-    return { category: 'trousers', why: 'a waistband on left and right panels, no sleeves' };
-  if (neck && has('placket')) return { category: 'shirt', why: 'a collar and a placket' };
-  return { category: 'generic', why: '' };
+  return {
+    category: 'generic',
+    why: 'no fly, crotch, sleeve or skirt piece to tell the garment by',
+    evidence: false,
+  };
 }
 
 /**
@@ -351,8 +401,12 @@ export function skeletonCategoryRead(args: {
       source: 'card',
       why: '',
     };
-  const r = skeletonCategoryFromPieces(args.pieceNames, args.hasLining, args.purpose);
-  const source = args.purpose === PURPOSE_AUXILIARY ? 'purpose' : r.why ? 'pieces' : 'none';
+  const { evidence, ...r } = skeletonCategoryFromPieces(
+    args.pieceNames,
+    args.hasLining,
+    args.purpose,
+  );
+  const source = args.purpose === PURPOSE_AUXILIARY ? 'purpose' : evidence ? 'pieces' : 'none';
   return { ...r, source };
 }
 

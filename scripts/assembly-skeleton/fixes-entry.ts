@@ -24,3 +24,8 @@ export { SKELETON } from '../../src/lib/assembly-skeleton/types';
 export { loadFacts } from './seams-entry';
 export { firstColorwayCloth } from '../../src/components/managers/tech-card/components/skeleton-card-inputs';
 export { unitPictures } from '../../src/lib/assembly-skeleton/union';
+export {
+  autoGuess,
+  autoTickedGuesses,
+  defaultPicks,
+} from '../../src/components/managers/tech-card/components/assembly-skeleton-ticks';

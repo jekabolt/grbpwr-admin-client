@@ -54,6 +54,8 @@ import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './asse
 import { SkeletonAIBar, useSkeletonAI } from './assembly-skeleton-ai';
 import { makeSkeletonDeps } from './assembly-skeleton-deps';
 import {
+  autoGuess,
+  autoTickedGuesses,
   closeOrder,
   defaultPick,
   defaultPicks,
@@ -854,9 +856,9 @@ function AssemblySkeletonPanel({
   // THE ORDER MUST CLOSE: where the proposal ends, which guesses the default ticks took to get there,
   // and which open reading the whole order hangs on — said above the steps, not found in them.
   const closure = useMemo(() => (proposal ? orderClosure(proposal.steps) : null), [proposal]);
-  const closingJoins = steps
-    .map((s, i) => i)
-    .filter((i) => picks[i]?.closing && !isDerived(steps[i]) && shown(steps[i]));
+  // Every guess the default ticks took — joins that close the order, and riders ticked with a join
+  // read on its own evidence — is listed here and marked on its row.
+  const { closing: closingJoins, withJoin: riderGuesses } = autoTickedGuesses(steps, picks, shown);
   const decidingJoins = (closure?.openDecisions ?? []).filter(
     (i) => picks[i]?.accepted && !picks[i]?.applied && !!steps[i]?.decision,
   );
@@ -990,7 +992,7 @@ function AssemblySkeletonPanel({
                         ? `· category not set: read as ${categoryReading.category} from the pieces (${categoryReading.why})`
                         : categoryReading.source === 'purpose'
                           ? '· category not set: an auxiliary item, so the generic order'
-                          : '· category not set, and the piece names do not say which garment'}
+                          : `· category not set, and the piece names do not say which garment (${categoryReading.why}), so the generic order: set the category`}
                     </Text>
                   )}
                   <Chip
@@ -1044,7 +1046,10 @@ function AssemblySkeletonPanel({
                   </Text>
                 ))}
 
-                {(closingJoins.length > 0 || decidingJoins.length > 0 || looseEnds.length > 0) && (
+                {(closingJoins.length > 0 ||
+                  riderGuesses.length > 0 ||
+                  decidingJoins.length > 0 ||
+                  looseEnds.length > 0) && (
                   <div
                     className='mb-1.5 flex flex-col gap-1 border border-borderColor px-2 py-1.5'
                     data-skeleton-closure={closure?.ends.length ?? 0}
@@ -1061,6 +1066,24 @@ function AssemblySkeletonPanel({
                           order, no seam read) on the way to one finished garment. Check{' '}
                           {closingJoins.length === 1 ? 'it' : 'them'}; unticked, the order stops
                           short of the garment.
+                        </span>
+                      </Text>
+                    )}
+                    {riderGuesses.length > 0 && (
+                      <Text
+                        size='micro'
+                        component='p'
+                        data-skeleton-rider-guesses={riderGuesses.length}
+                      >
+                        <b>
+                          ticked with their join: {riderGuesses.length === 1 ? 'step' : 'steps'}{' '}
+                          {listNumbers(riderGuesses)}
+                        </b>
+                        <span className='text-labelColor'>
+                          {' '}
+                          {riderGuesses.length === 1 ? 'is a guess' : 'are guesses'} riding on a
+                          join the pattern did read. Check{' '}
+                          {riderGuesses.length === 1 ? 'it' : 'them'}, or untick.
                         </span>
                       </Text>
                     )}
@@ -1690,19 +1713,24 @@ function SkeletonLine({
           </ChipRow>
         </div>
       )}
-      {pick.accepted && follows == null && step.confidence < SKELETON.accept && (
-        <Text
-          size='micro'
-          variant='label'
-          component='span'
-          className='w-full pl-[3.25rem]'
-          data-skeleton-step-closing={pick.closing ? index : undefined}
-        >
-          {pick.closing
-            ? 'a guess, ticked to close the order: check it'
-            : 'a guess — kept because you ticked it'}
-        </Text>
-      )}
+      {pick.accepted &&
+        step.confidence < SKELETON.accept &&
+        (follows == null || autoGuess(pick)) && (
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='w-full pl-[3.25rem]'
+            data-skeleton-step-closing={pick.closing ? index : undefined}
+            data-skeleton-step-autoguess={autoGuess(pick) ? index : undefined}
+          >
+            {pick.closing
+              ? 'a guess, ticked to close the order: check it'
+              : pick.withJoin
+                ? 'a guess, ticked with its join: check it'
+                : 'a guess — kept because you ticked it'}
+          </Text>
+        )}
       {ai?.warnings.map((m, wi) => (
         <Text
           key={`ai${wi}`}
