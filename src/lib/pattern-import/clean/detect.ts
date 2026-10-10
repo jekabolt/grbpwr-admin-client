@@ -5,6 +5,7 @@
 // The building blocks are the F3 furniture tests (chains/classify.ts): the lattice of
 // `backgroundGrid`, the square of `testSquareBoxes`, the glyph clusters and text lines of
 // `lettering` — run on ONE page instead of the assembled sheet.
+import { PATIMPORT } from 'lib/pattern-import/types';
 import type { BackgroundKind, BoxMm, IRText, PtMm, Style } from 'lib/pattern-import/types';
 
 import {
@@ -27,6 +28,12 @@ export type Found = {
   evidence: string[];
   /** Page-relative repetition on ≥ 3 tiles: enough alone (plan §A8 detector 3). */
   repeated?: boolean;
+  /**
+   * An explicit proof that is enough alone: the scale keyword of a test square, a 10 mm / 1 in
+   * lattice over the whole page. Until A9 brings an independent AI evidence, only this and
+   * repetition mask by themselves — every other find is a suggestion.
+   */
+  proof?: string;
   label?: string;
   /** Lines touching garment lines were left out (the wall guard): how many. */
   guarded?: number;
@@ -60,9 +67,21 @@ export const CLEAN = {
   /** Watermark letters stand close (gap ≤ 0.9 heights, a dot between two) and none is wider than 1.3 heights. */
   markMaxGap: 0.9,
   markMaxAspect: 1.3,
-  /** Wall guard: a line this long that a candidate touches end-on is garment line work. */
-  guardLongMm: 50,
+  /**
+   * Wall guard: a line at least this long (dots and ticks aside) that a candidate meets end-on,
+   * or runs along (collinear / tangent), is garment line work — whatever its length.
+   */
+  guardMinMm: 3,
   guardTouchMm: 0.3,
+  /** "Along": the two segments' directions differ by less than this sine (≈ 6°). */
+  guardAlongSin: 0.1,
+  /** A lattice proves itself on one page at these pitches (10 mm, 1 in) over the whole page. */
+  gridPitchesMm: [10, 25.4],
+  gridPitchTol: 0.03,
+  /** "The whole page": the lattice spans this share of the page's drawing both ways. */
+  gridWholePage: 0.9,
+  /** …and this share of the page itself (A4 minus a 10 mm printer margin is 0.9). */
+  gridWholePageMin: 0.85,
   /** A grid pen draws (almost) nothing but the lattice. */
   gridPenShare: 0.9,
   /** Watermark letterforms: a row this long with this many sharp-cornered glyphs. */
@@ -138,17 +157,13 @@ export function repetition(pages: PageChains[]): number[][] {
  * (wm's back and fold lines, clipped at the printable area) — unless that end is a CORNER: it
  * meets the end of another repeated chain (a tile frame's sides meet at its corners).
  */
-export function clippedByPage(pc: PageChains, i: number, rep: readonly number[]): boolean {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const b of pc.box) {
-    minX = Math.min(minX, b.minX);
-    minY = Math.min(minY, b.minY);
-    maxX = Math.max(maxX, b.maxX);
-    maxY = Math.max(maxY, b.maxY);
-  }
+export function clippedByPage(
+  pc: PageChains,
+  i: number,
+  rep: readonly number[],
+  drawn: BoxMm = drawingOf(pc),
+): boolean {
+  const { minX, minY, maxX, maxY } = drawn;
   const onEdge = (p: PtMm) =>
     p.x <= minX + 1 || p.y <= minY + 1 || p.x >= maxX - 1 || p.y >= maxY - 1;
   const c = pc.chains[i];
@@ -172,6 +187,41 @@ export function clippedByPage(pc: PageChains, i: number, rep: readonly number[])
   return false;
 }
 
+/** The box of everything drawn on the page (the printable area a tile clips its lines at). */
+export function drawingOf(pc: PageChains): BoxMm {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of pc.box) {
+    minX = Math.min(minX, b.minX);
+    minY = Math.min(minY, b.minY);
+    maxX = Math.max(maxX, b.maxX);
+    maxY = Math.max(maxY, b.maxY);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * A closed repeated shape the size of a piece (≥ `minPieceAreaMm2`, wider than a tile label) that
+ * is not the tile's frame (it spans < 70 % of the page drawing both ways): a small piece drawn at
+ * one page place on several tiles is still a piece — never chrome.
+ */
+export function pieceSized(pc: PageChains, i: number, drawn: BoxMm): boolean {
+  const c = pc.chains[i];
+  if (!c.closed) return false;
+  const b = pc.box[i];
+  if (extentOf(b) <= 30) return false;
+  const W = drawn.maxX - drawn.minX;
+  const H = drawn.maxY - drawn.minY;
+  if (b.maxX - b.minX >= 0.7 * W || b.maxY - b.minY >= 0.7 * H) return false;
+  let a = 0;
+  const q = c.pts;
+  for (let k = 0, j = q.length - 1; k < q.length; j = k++)
+    a += (q[j].x + q[k].x) * (q[j].y - q[k].y);
+  return Math.abs(a) / 2 >= PATIMPORT.minPieceAreaMm2;
+}
+
 /** The kind of a repeated chain by where it sits on the page and how big it is. */
 export function chromeKind(pc: PageChains, i: number): BackgroundKind {
   const b = pc.box[i];
@@ -189,8 +239,17 @@ export function chromeKind(pc: PageChains, i: number): BackgroundKind {
 
 // ── background grid ─────────────────────────────────────────────────────────────────────────────
 
-/** The 1 cm lattice under the drawing (`backgroundGrid`), with its pen evidence. */
-export function gridOf(pc: PageChains, styles: Map<number, Style>): Found[] {
+/**
+ * The 1 cm lattice under the drawing (`backgroundGrid`), with its pen evidence. It masks by itself
+ * only when it is PROVEN print furniture: the same lattice at one page place on ≥ 3 tiles (the
+ * print grid is identical on every tile), or — on one page — a 10 mm / 1 in pitch over the whole
+ * page. A lattice confined to a region (a quilting grid, a pleated panel) is a suggestion.
+ */
+export function gridOf(
+  pc: PageChains,
+  styles: Map<number, Style>,
+  rep: readonly number[],
+): Found[] {
   if (!CLEAN.on.grid) return [];
   const ids = backgroundGrid(pc.chains);
   if (!ids.length) return [];
@@ -209,9 +268,64 @@ export function gridOf(pc: PageChains, styles: Map<number, Style>): Found[] {
     if (inPen > 0 && onLat >= CLEAN.gridPenShare * inPen)
       ev.push(`its pen draws nothing else (${Math.round((100 * onLat) / inPen)} %)`);
     if (isLightGrey(styles.get(pen))) ev.push('light grey');
-    out.push({ kind: 'grid', chains: lat, evidence: ev });
+    const f: Found = { kind: 'grid', chains: lat, evidence: ev };
+    latticeProof(pc, lat, rep, f);
+    out.push(f);
   }
   return out;
+}
+
+/**
+ * Repetition or the whole-page pitch for a lattice / ruled table (`gridOf`, `tablesOf`): sets
+ * `repeated` (≥ 90 % of its lines at one page place on ≥ 3 tiles) or `proof` on `f`.
+ */
+function latticeProof(pc: PageChains, ids: readonly number[], rep: readonly number[], f: Found) {
+  const onTiles = ids.filter((i) => rep[i] >= CLEAN.repeatMinPages);
+  if (ids.length && onTiles.length >= 0.9 * ids.length) {
+    f.repeated = true;
+    f.evidence.push(
+      `repeats at one page place on ${Math.min(...onTiles.map((i) => rep[i]))} tiles`,
+    );
+    return;
+  }
+  const xs: number[] = [];
+  const ys: number[] = [];
+  let lat: BoxMm | null = null;
+  for (const i of ids) {
+    const b = pc.box[i];
+    lat = lat
+      ? {
+          minX: Math.min(lat.minX, b.minX),
+          minY: Math.min(lat.minY, b.minY),
+          maxX: Math.max(lat.maxX, b.maxX),
+          maxY: Math.max(lat.maxY, b.maxY),
+        }
+      : { ...b };
+    if (b.maxY - b.minY <= 0.5 && b.maxX - b.minX > 0.5) ys.push((b.minY + b.maxY) / 2);
+    else if (b.maxX - b.minX <= 0.5 && b.maxY - b.minY > 0.5) xs.push((b.minX + b.maxX) / 2);
+  }
+  if (!lat) return;
+  const pitch = (v: number[]) => {
+    const u = [...v].sort((a, b) => a - b).filter((x, k, a) => !k || x - a[k - 1] > 0.5);
+    if (u.length < 3) return NaN;
+    return med(u.slice(1).map((x, k) => x - u[k]));
+  };
+  const px = pitch(xs);
+  const py = pitch(ys);
+  const at = CLEAN.gridPitchesMm.find(
+    (m) => Math.abs(px - m) <= CLEAN.gridPitchTol * m && Math.abs(py - m) <= CLEAN.gridPitchTol * m,
+  );
+  // the whole PAGE (its printable area), not just the page's drawing: one quilted piece alone
+  // on a page is the whole drawing
+  const d = drawingOf(pc);
+  const W = pc.page.widthMm;
+  const H = pc.page.heightMm;
+  const whole =
+    lat.maxX - lat.minX >= CLEAN.gridWholePage * (d.maxX - d.minX) &&
+    lat.maxY - lat.minY >= CLEAN.gridWholePage * (d.maxY - d.minY) &&
+    lat.maxX - lat.minX >= CLEAN.gridWholePageMin * W &&
+    lat.maxY - lat.minY >= CLEAN.gridWholePageMin * H;
+  if (at && whole) f.proof = `a ${at === 10 ? '10 mm' : '1 in'} lattice over the whole page`;
 }
 
 // ── stroke text (8a) and outline lettering (8b) ─────────────────────────────────────────────────
@@ -428,13 +542,15 @@ export function squaresOf(
   return testSquareBoxes(pc.chains, sheet.poses, texts, known, true).map((q) => {
     const side = q.box.maxX - q.box.minX;
     const ev = [`a closed square ${side.toFixed(1)} mm, the printed ${q.nominalMm} mm`];
-    if (q.why === 'label') ev.push(`labelled "${q.text ?? ''}"`);
+    // only the scale keyword proves it (test / контроль / carré / "10 cm" …): a square with any
+    // other label, or lettering we cannot read, may be a small piece — a suggestion at most
     if (q.why === 'lettering') ev.push('lettering drawn inside it');
     if (q.why === 'copies') ev.push('drawn at one place in every overlaid file');
     return {
       kind: 'test-square' as const,
       chains: q.ids,
       evidence: ev,
+      ...(q.why === 'label' ? { proof: `the scale keyword "${q.text ?? ''}"` } : {}),
       square: { box: q.box, nominalMm: q.nominalMm, why: q.why },
     };
   });
@@ -453,6 +569,8 @@ export function tablesOf(
   texts: readonly IRText[],
   taken: ReadonlySet<number>,
   lettered: ReadonlySet<number>,
+  rep: readonly number[],
+  notes: string[] = [],
 ): Found[] {
   if (!CLEAN.on.table) return [];
   // a rule chain is made of axis-aligned runs only (a straight rule, or a cell drawn as a
@@ -533,11 +651,33 @@ export function tablesOf(
       const k = cellOf((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2);
       if (k) filled.add(k);
     }
+    // the cells are not a garment: no other line runs from inside the table out of it (a piece
+    // outline around a pleated or quilted panel, a seam line crossing the cells)
+    const mine = new Set(g);
+    const inside = (p: PtMm) =>
+      p.x > box.minX + 1 && p.x < box.maxX - 1 && p.y > box.minY + 1 && p.y < box.maxY - 1;
+    const outside = (p: PtMm) =>
+      p.x < box.minX - 1 || p.x > box.maxX + 1 || p.y < box.minY - 1 || p.y > box.maxY + 1;
+    const runsOut = pc.chains.findIndex(
+      (c, i) =>
+        !mine.has(i) &&
+        !taken.has(i) &&
+        !lettered.has(i) &&
+        c.lengthMm >= CLEAN.guardMinMm &&
+        c.pts.some(inside) &&
+        c.pts.some(outside),
+    );
+    if (runsOut >= 0) {
+      notes.push(
+        `page ${pc.page.page + 1}: a ruled grid ${rows.length} × ${cols.length} — a line runs out of it, read as a garment, not a table`,
+      );
+      continue;
+    }
     const ev = [`a ruled table, ${rows.length} × ${cols.length} lines (${cells} cells)`];
     if (filled.size >= Math.max(3, 0.3 * cells)) ev.push(`text in ${filled.size} of its cells`);
-    // the cells are not a garment: every rule stays inside the table's box
-    void box;
-    out.push({ kind: 'table', chains: g, evidence: ev });
+    const f: Found = { kind: 'table', chains: g, evidence: ev };
+    latticeProof(pc, g, rep, f);
+    out.push(f);
   }
   return out;
 }
@@ -545,43 +685,84 @@ export function tablesOf(
 // ── wall guard: never mask a line a garment line meets ──────────────────────────────────────────
 
 /**
- * Candidate chains a long non-candidate line MEETS end-on — its end lands on the candidate, or the
- * candidate's end lands on it. Text and furniture are printed over the drawing and cross it; a
- * piece's wall is met by its neighbours (the next wall, an internal line ending on it, a notch).
+ * Candidate chains that line work MEETS — a protector's end lands on the candidate, the candidate's
+ * end lands on a protector, or the two run ALONG each other (collinear or tangent within 0.3 mm:
+ * a CF on a tile frame, a curve grazing a grid line). Crossing is not contact: text and furniture
+ * are printed over the drawing and cross it. A protector is any non-candidate line ≥ 3 mm that
+ * `inert` does not set aside (lines already found as furniture, lettering, tile chrome) — its
+ * length does not matter (a notch, a short internal line ending on a wall protect it too).
  */
 export function touchingLineWork(
   polys: readonly (readonly PtMm[])[],
   lens: readonly number[],
   candidate: ReadonlySet<number>,
-  masked: ReadonlySet<number>,
-  /** Only the candidate's OWN ends count (a garment line ending ON it does not protect it). */
-  ownEndsOnly = false,
+  inert: (i: number) => boolean,
+  o: {
+    /** Only the candidate's OWN ends (and running along) count — a line ending ON it does not. */
+    ownEndsOnly?: boolean;
+    /** Collinear / tangent contact counts (default true). */
+    along?: boolean;
+    /**
+     * The page drawing's box: an end ON its edge is where the print stops (the tile clipped a
+     * lattice and a garment line at the same printable edge), not where a garment stops a line.
+     */
+    edge?: BoxMm;
+  } = {},
 ): Set<number> {
   const out = new Set<number>();
   if (!candidate.size || !CLEAN.on.guard) return out;
   const r = CLEAN.guardTouchMm;
-  const long = (i: number) => !candidate.has(i) && !masked.has(i) && lens[i] >= CLEAN.guardLongMm;
-  const gLong = new SegGrid(4);
+  const prot = (i: number) => !candidate.has(i) && lens[i] >= CLEAN.guardMinMm && !inert(i);
+  const gProt = new SegGrid(4);
   const gCand = new SegGrid(4);
   polys.forEach((c, i) => {
     if (c.length < 2) return;
-    if (long(i)) gLong.addPolyline(i, c as PtMm[]);
-    else if (candidate.has(i)) gCand.addPolyline(i, c as PtMm[]);
+    if (candidate.has(i)) gCand.addPolyline(i, c as PtMm[]);
+    else if (prot(i)) gProt.addPolyline(i, c as PtMm[]);
   });
+  const e = o.edge;
+  const onEdge = (p: PtMm) =>
+    !!e && (p.x <= e.minX + 1 || p.y <= e.minY + 1 || p.x >= e.maxX - 1 || p.y >= e.maxY - 1);
   const hits = (g: SegGrid, p: PtMm, visit: (o: number) => void) =>
-    g.near(p, r, (o, s) => {
-      const q = polys[o];
-      if (segNearest(p, q[s], q[s + 1]).d <= r) visit(o);
+    !onEdge(p) &&
+    g.near(p, r, (k, s) => {
+      const q = polys[k];
+      if (segNearest(p, q[s], q[s + 1]).d <= r) visit(k);
     });
   for (const i of candidate) {
     const c = polys[i];
     if (c.length < 2) continue;
-    for (const p of [c[0], c[c.length - 1]]) hits(gLong, p, () => out.add(i));
+    for (const p of [c[0], c[c.length - 1]]) hits(gProt, p, () => out.add(i));
   }
-  if (!ownEndsOnly)
+  if (!o.ownEndsOnly)
     polys.forEach((c, i) => {
-      if (c.length < 2 || !long(i)) return;
-      for (const p of [c[0], c[c.length - 1]]) hits(gCand, p, (o) => out.add(o));
+      if (c.length < 2 || !prot(i)) return;
+      for (const p of [c[0], c[c.length - 1]]) hits(gCand, p, (k) => out.add(k));
     });
+  if (o.along !== false)
+    for (const i of candidate) {
+      if (out.has(i)) continue;
+      const c = polys[i];
+      for (let k = 0; k + 1 < c.length && !out.has(i); k++) {
+        const a = c[k];
+        const b = c[k + 1];
+        const L = dist(a, b);
+        if (L < 0.5) continue;
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        if (onEdge(mid)) continue;
+        gProt.near(mid, L / 2 + r, (j, s) => {
+          if (out.has(i)) return;
+          const q = polys[j];
+          const u = q[s];
+          const v = q[s + 1];
+          const M = dist(u, v);
+          if (M < 0.5) return;
+          const sin = Math.abs((b.x - a.x) * (v.y - u.y) - (b.y - a.y) * (v.x - u.x)) / (L * M);
+          if (sin > CLEAN.guardAlongSin) return;
+          const qm = { x: (u.x + v.x) / 2, y: (u.y + v.y) / 2 };
+          if (segNearest(mid, u, v).d <= r || segNearest(qm, a, b).d <= r) out.add(i);
+        });
+      }
+    }
   return out;
 }

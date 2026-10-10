@@ -130,7 +130,13 @@ export function createStubClient(): ImportClient {
               pages: ex.pages.map((p) => ({ file: p.file, page: p.page, role: p.cls, items: [] })),
               dropped: ex.pages
                 .filter((p) => p.cls !== 'tile')
-                .map((p) => ({ file: p.file, page: p.page, cls: p.cls, why: p.why })),
+                .map((p) => ({
+                  file: p.file,
+                  page: p.page,
+                  cls: p.cls,
+                  why: p.why,
+                  status: 'auto' as const,
+                })),
               classes: ex.pages,
               summary: {},
               offered: {},

@@ -65,7 +65,7 @@ import {
   type ExtractorRegistry,
 } from '../adapters/sniff';
 import { assembleSheetDetailed, classifyPages } from '../assemble';
-import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale } from '../clean';
+import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale, srcKey } from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
@@ -170,8 +170,15 @@ const PREVIEW_PAGES_BUDGET = 250_000;
 
 /** A8: each masked page drawn — live lines and masked lines by kind (the files step's strip). */
 function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
-  const shown = masks.filter((m) => m.role === 'tile');
-  const per = Math.max(3000, Math.floor(PREVIEW_PAGES_BUDGET / Math.max(1, shown.length)));
+  // every page: the tiles with their mask, the pages set aside as thumbnails (their live lines)
+  const shown = masks;
+  const tilesN = masks.filter((m) => m.role === 'tile').length;
+  const asideN = masks.length - tilesN;
+  const thumb = Math.min(4000, Math.floor((0.2 * PREVIEW_PAGES_BUDGET) / Math.max(1, asideN)));
+  const per = Math.max(
+    3000,
+    Math.floor((PREVIEW_PAGES_BUDGET - thumb * asideN) / Math.max(1, tilesN)),
+  );
   const out: CleanPreview[] = [];
   for (const m of shown) {
     const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
@@ -199,7 +206,7 @@ function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
         pg.paths.filter((p) => !inItem.has(p.id)),
         pg.styles,
         ext,
-        per,
+        m.role === 'tile' ? per : Math.max(500, thumb),
       ),
       masked: [...masked.values()].map(({ item, paths }) => ({
         kind: item.kind,
@@ -236,6 +243,8 @@ export class Session {
   /** The page masks of the last clean run (re-applied whenever the docs are read again). */
   private masks: PageMask[] | null = null;
   private cleanEdits: PageMaskEdit[] = [];
+  /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
+  private offeredSrc = new Set<string>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -338,6 +347,7 @@ export class Session {
     if (at < ORDER.indexOf('clean')) {
       this.masks = null;
       this.cleanEdits = [];
+      this.offeredSrc = new Set();
     }
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
@@ -710,6 +720,7 @@ export class Session {
     this.cleanEdits = edits;
     if (this.dxf) {
       this.masks = [];
+      this.offeredSrc = new Set();
       this.pages = this.extractPages;
       this.scaleCands = this.extractScale;
       ctx.progress(1, 1);
@@ -730,6 +741,10 @@ export class Session {
     await this.ensureDocs(ctx);
     if (this.docsFactor !== 1) this.rescaleTo(1);
     const docs = this.docs!;
+    // Detect on the unmasked extract every time: the flags of the previous run (an operator edit
+    // re-runs clean) would hide those lines from the chains and their items would vanish.
+    applyMasks(docs, []);
+    this.masks = null;
     const out = cleanPages(docs, this.extractPages, input, {
       checkCancel: ctx.checkCancel,
       progress: (d, t, n) => {
@@ -739,6 +754,13 @@ export class Session {
     });
     applyMasks(docs, out.pages);
     this.masks = out.pages;
+    this.offeredSrc = new Set<string>();
+    for (const m of out.pages) {
+      const off = new Set(m.items.filter((it) => !it.applied).flatMap((it) => it.paths));
+      if (!off.size) continue;
+      const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
+      for (const p of pg?.paths ?? []) if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+    }
     this.pages = out.classes;
     this.scaleCands = mergeScale(this.extractScale, out.scaleHints);
     // the text of the pages set aside (cut layouts, F7) follows the roles
@@ -796,7 +818,8 @@ export class Session {
     if (!this.fast) {
       // A8 8b: the sheet-wide pass (a watermark the tile borders cut); masked texts leave the sheet
       ctx.checkCancel();
-      const items = cleanSheet(sheet, this.cleanEdits);
+      // the paths a page item offers (a stroke-text suggestion) are not offered again
+      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc);
       sheet = { ...sheet, texts: sheet.texts.filter((t) => !t.background) };
       const byKind = new Map<BackgroundKind, typeof sheet.paths>();
       for (const p of sheet.paths) {

@@ -13,6 +13,7 @@
 // wall guard has the last word: a line a garment line meets end-on is never masked. The mask is a
 // FLAG (`IRPath.background`), never a deletion: assembly still reads frames and marks, the files
 // step draws the mask tinted, and an undo is one edit.
+import { PATIMPORT } from 'lib/pattern-import/types';
 import type {
   BackgroundKind,
   CleanInput,
@@ -37,6 +38,8 @@ import {
   CLEAN,
   chromeKind,
   clippedByPage,
+  drawingOf,
+  pieceSized,
   crossedGlyphs,
   gridOf,
   memberIds,
@@ -72,6 +75,10 @@ const KIND_ORDER: BackgroundKind[] = [
 ];
 
 const pageKey = (file: string, page: number) => `${file}:${page}`;
+
+/** A path's source, the same on the page and on the sheet (assembly keeps `src`). */
+export const srcKey = (s: { file: string; page: number; op: number; sub: number }) =>
+  `${s.file}:${s.page}:${s.op}:${s.sub}`;
 
 /** Lexicon of text that is never part of a piece: URLs, copyright lines. */
 const COPYRIGHT =
@@ -139,9 +146,27 @@ export function cleanPages(
   const roles = rolesOf(classes, edits);
   const roleOf = new Map(roles.map((c) => [pageKey(c.file, c.page), c]));
   const edited = new Set(edits.flatMap((e) => ('role' in e ? [pageKey(e.file, e.page)] : [])));
-  const dropped = roles
+  // a page is set aside by itself only when it holds no line work that could be pattern; one
+  // that does (a long line, a closed contour of a piece's size) is set aside as the classifier
+  // said but flagged — the files step shows its thumbnail, one click reads it as a tile
+  const docPage = new Map(
+    docs.flatMap((d) => d.pages.map((pg) => [pageKey(d.file.id, pg.page), pg] as const)),
+  );
+  const dropped: CleanOutput['dropped'] = roles
     .filter((c) => c.cls !== 'tile')
-    .map((c) => ({ file: c.file, page: c.page, cls: c.cls, why: c.why }));
+    .map((c) => {
+      const pg = docPage.get(pageKey(c.file, c.page));
+      const art = pg && !edited.has(pageKey(c.file, c.page)) ? patternLike(pg) : null;
+      return {
+        file: c.file,
+        page: c.page,
+        cls: c.cls,
+        why: c.why,
+        status: art ? ('suggest' as const) : ('auto' as const),
+        ...(art ? { drawing: art } : {}),
+      };
+    });
+  const droppedOf = new Map(dropped.map((d) => [pageKey(d.file, d.page), d]));
   const notes: string[] = [];
   const pages: PageMask[] = [];
   const curveTexts: CurveText[] = [];
@@ -158,7 +183,7 @@ export function cleanPages(
     }
     // repetition counts only between tiles of ONE file: per-size files overlay at one place
     const rep =
-      CLEAN.on.chrome && pcs.length >= CLEAN.repeatMinPages
+      pcs.length >= CLEAN.repeatMinPages
         ? repetition(pcs)
         : pcs.map((pc) => pc.chains.map(() => 1));
     const textRep =
@@ -215,10 +240,11 @@ export function cleanPages(
           evidence: {
             page: pc.page.page,
             bbox: b,
-            text: `square drawn as lines, ${measured.toFixed(2)} mm (${f.evidence.slice(1).join('; ') || 'nothing labels it'})`,
+            text: `square drawn as lines, ${measured.toFixed(2)} mm (${it.evidence.slice(1).join('; ') || 'nothing labels it'})`,
           },
-          // two evidences (the geometry + a label, lettering inside or overlaid copies): certain
-          confidence: it.status === 'auto' ? 0.97 : 0.75,
+          // certain only with the scale keyword (or the operator's accept): a square with any
+          // other label may be a small piece
+          confidence: it.applied ? 0.97 : 0.6,
         });
       });
       pages.push({
@@ -238,6 +264,7 @@ export function cleanPages(
           page: pg.page,
           role: c.cls,
           roleEdited: edited.has(pageKey(doc.file.id, pg.page)) || undefined,
+          status: droppedOf.get(pageKey(doc.file.id, pg.page))?.status,
           items: [],
         });
     }
@@ -270,15 +297,30 @@ function detectPage(
   const out: Found[] = [];
   const polys = pc.chains.map((c) => c.pts);
   const lens = pc.chains.map((c) => c.lengthMm);
+  const drawn = drawingOf(pc);
+  const at = `page ${pc.page.page + 1}`;
+  // tile chrome: the same line at one page place on ≥ 3 tiles, that no tile clipped (a garment
+  // line cut at the printable area repeats too) and that is not a closed piece-sized shape
+  const furnitureMemo = new Map<number, boolean>();
+  const furniture = (i: number) => {
+    if (rep[i] < CLEAN.repeatMinPages) return false;
+    let v = furnitureMemo.get(i);
+    if (v === undefined) {
+      v = !clippedByPage(pc, i, rep, drawn) && !pieceSized(pc, i, drawn);
+      furnitureMemo.set(i, v);
+    }
+    return v;
+  };
   const take = (f: Found) => {
     f.chains = f.chains.filter((i) => !taken.has(i));
     if (!f.chains.length) return;
     for (const i of f.chains) taken.add(i);
     out.push(f);
   };
-  // 1 · the lattice (pen evidence; it is no garment line, the guard does not apply)
-  for (const f of gridOf(pc, styles)) take(f);
-  // 2 · stroke text: a band of glyphs; mostly repeated on every tile = the tile's label
+  // the lattice first (its long lines would glue every glyph into one cluster), then the stroke
+  // text — both found before any guard runs, so neither protects the other
+  const lattices = gridOf(pc, styles, rep);
+  const lattice = new Set(lattices.flatMap((f) => f.chains));
   const bands = !CLEAN.on.text
     ? []
     : textLines(
@@ -289,29 +331,58 @@ function detectPage(
           minGlyphs: CLEAN.textMinGlyphs,
           minStrokes: CLEAN.textMinStrokes,
         },
-        (i) => !taken.has(i),
+        (i) => !lattice.has(i),
       );
-  const lettered = new Set<number>();
+  const lettered = new Set(bands.flatMap(memberIds));
+  // test squares are found before any guard too: a square's corners on lattice lines (wm: the
+  // 100 mm square drawn on the 10 mm grid) are furniture meeting furniture
+  const squares = squaresOf(pc, pc.page.texts, lettered);
+  const squared = new Set(squares.flatMap((f) => f.chains));
+  // what never protects a candidate: what is already found, the lattice, lettering, the squares,
+  // tile chrome
+  const inert = (i: number) =>
+    taken.has(i) || lattice.has(i) || lettered.has(i) || squared.has(i) || furniture(i);
+  // 1 · the lattice: masks by itself only on repetition / a whole-page 10 mm pitch (gridOf).
+  //     An unproven lattice (a quilting grid inside a piece) is guarded to closure: what line
+  //     work meets stays line work — the walls its spacing swallowed with it — the rest is a
+  //     suggestion. A PROVEN print lattice is masked whole: the garment lines that end on its
+  //     lines (drawn snapped to the grid) are their own paths and stay; a full-page grid line
+  //     kept live would cross every piece it runs through (Redcafe: 9 such lines, one more
+  //     legend row) — the contacts go to the notes.
+  for (const f of lattices) {
+    const proven = !!(f.repeated || f.proof);
+    // a proven print lattice is clipped with the drawing at its own box: garment lines cut at
+    // that printable edge meet its ends there — no contact
+    const edge = proven ? bboxOf(f.chains.flatMap((i) => polys[i])) : undefined;
+    const g = guardNetwork(polys, lens, f.chains, inert, edge);
+    if (g.size) {
+      const n = f.chains.length;
+      f.guarded = g.size;
+      if (proven)
+        notes.push(
+          `${at}: line work ends on ${g.size} of ${n} lines of the print grid (snapped to it) — masked with the grid; the garment lines are their own paths`,
+        );
+      else {
+        f.chains = f.chains.filter((i) => !g.has(i));
+        notes.push(`${at}: ${g.size} of ${n} grid lines meet line work — kept as line work`);
+      }
+    }
+    take(f);
+  }
+  // 2 · stroke text: a band of glyphs; mostly repeated on every tile = the tile's label (auto);
+  //     any other text line is a suggestion (one geometric evidence)
   for (const b of bands) {
     const ids = memberIds(b).filter((i) => !taken.has(i));
     if (!ids.length) continue;
     const repeated = ids.filter((i) => rep[i] >= CLEAN.repeatMinPages);
     const isLabel = repeated.length >= 0.2 * ids.length;
-    const guarded = touchingLineWork(polys, lens, new Set(ids), taken);
+    const guarded = touchingLineWork(polys, lens, new Set(ids), inert);
     const keep = ids.filter((i) => !guarded.has(i));
-    for (const i of ids) lettered.add(i);
     const ev = [
       `a text line of ${b.glyphs.length} glyphs ${b.heightMm.toFixed(0)} mm high, ${runStrokes(b)} strokes`,
     ];
     if (isLabel)
       ev.push(`repeats at one place on ${Math.max(...repeated.map((i) => rep[i]))} tiles`);
-    // the strokes a garment line meets stay line work; the rest of the band is clear of the drawing
-    if (guarded.size <= 0.1 * ids.length)
-      ev.push(
-        guarded.size
-          ? `${ids.length - guarded.size} of ${ids.length} strokes clear of the garment lines`
-          : 'no garment line meets it',
-      );
     take({
       kind: isLabel ? 'tile-label' : 'curve-text',
       chains: keep,
@@ -321,25 +392,23 @@ function detectPage(
       band: b,
     });
   }
-  // 3 · the test square drawn as line work (lettering inside it is the second evidence)
-  for (const f of squaresOf(pc, pc.page.texts, lettered)) {
-    const g = touchingLineWork(polys, lens, new Set(f.chains), taken);
+  // 3 · the test square drawn as line work (auto only with the scale keyword: `squaresOf`)
+  for (const f of squares) {
+    const g = touchingLineWork(polys, lens, new Set(f.chains), inert);
     if (g.size) {
-      notes.push(
-        `page ${pc.page.page + 1}: a ${f.square!.nominalMm} mm square is met by garment lines — not masked`,
-      );
+      notes.push(`${at}: a ${f.square!.nominalMm} mm square is met by line work — not masked`);
       continue;
     }
     take(f);
   }
-  // 3b · ruled tables with text in their cells (a size table, the print-order map)
-  for (const f of tablesOf(pc, pc.page.texts, taken, lettered)) {
-    const g = touchingLineWork(polys, lens, new Set(f.chains), taken);
+  // 3b · ruled tables with text in their cells (a size table, the print-order map): auto only on
+  //      repetition / a whole-page pitch, like the lattice; a table line work meets is offered
+  for (const f of tablesOf(pc, pc.page.texts, taken, lettered, rep, notes)) {
+    const g = guardNetwork(polys, lens, f.chains, inert);
     if (g.size) {
-      // a garment line ends on it: offered at most, never applied by itself
-      f.evidence = f.evidence.slice(0, 1);
       f.chains = f.chains.filter((i) => !g.has(i));
       f.guarded = g.size;
+      demote(f, `line work meets ${g.size} of its lines`);
     }
     take(f);
   }
@@ -347,7 +416,11 @@ function detectPage(
   const byKind = new Map<BackgroundKind, number[]>();
   pc.chains.forEach((_, i) => {
     if (!CLEAN.on.chrome || taken.has(i) || rep[i] < CLEAN.repeatMinPages) return;
-    if (clippedByPage(pc, i, rep)) return;
+    if (!furniture(i)) {
+      if (pieceSized(pc, i, drawn))
+        notes.push(`${at}: a closed piece-sized shape repeats at one page place — kept as a piece`);
+      return;
+    }
     const k = chromeKind(pc, i);
     const a = byKind.get(k);
     if (a) a.push(i);
@@ -359,11 +432,15 @@ function detectPage(
   // A chain whose own end runs on into a garment line is that line's piece (Redcafe's outline
   // stubs at the same page place on a row of tiles).
   for (const [kind, ids] of byKind) {
-    const guarded = touchingLineWork(polys, lens, new Set(ids), taken, true);
+    const guarded = touchingLineWork(polys, lens, new Set(ids), inert, {
+      ownEndsOnly: true,
+      along: false,
+    });
     const keep = ids.filter((i) => !guarded.has(i));
     const n = Math.max(...keep.map((i) => rep[i]), 0);
-    // garment lines ending ON the chrome (the file-wide decision in cleanPages)
-    const met = touchingLineWork(polys, lens, new Set(keep), taken);
+    // garment lines ending ON the chrome, or running along it (a CF on the tile frame): the
+    // file-wide decision in cleanPages
+    const met = touchingLineWork(polys, lens, new Set(keep), inert);
     take({
       kind,
       chains: keep,
@@ -404,10 +481,65 @@ function detectPage(
       chains: [],
       evidence: t.ev,
       repeated: t.repeated,
+      // the URL / © lexicon is an explicit keyword: masks by itself (text only, never line work)
+      ...(t.kind === 'copyright' ? { proof: 'the URL / copyright lexicon' } : {}),
       label: pc.page.texts.find((x) => x.id === t.ids[0])?.text,
       textIds: t.ids,
     });
   return out;
+}
+
+/**
+ * The guard on a network of lines (a lattice, a ruled table) to closure: a line kept as line work
+ * protects the lines that meet it in turn — a quilting grid whose lines end on a piece's walls
+ * keeps the walls the lattice spacing swallowed (and then itself).
+ */
+function guardNetwork(
+  polys: readonly (readonly { x: number; y: number }[])[],
+  lens: readonly number[],
+  ids: readonly number[],
+  inert: (i: number) => boolean,
+  edge?: { minX: number; minY: number; maxX: number; maxY: number },
+): Set<number> {
+  const kept = new Set<number>();
+  const cand = new Set(ids);
+  for (let pass = 0; pass < 8 && cand.size; pass++) {
+    const g = touchingLineWork(polys, lens, cand, (i) => !kept.has(i) && inert(i), { edge });
+    if (!g.size) break;
+    for (const i of g) {
+      kept.add(i);
+      cand.delete(i);
+    }
+  }
+  return kept;
+}
+
+/** A find the guard cut into: no longer proven, offered at most. */
+function demote(f: Found, why: string) {
+  f.repeated = false;
+  f.proof = undefined;
+  f.evidence = [...f.evidence.filter((e) => !/repeats at one|whole page/.test(e)), why];
+}
+
+/**
+ * What on a page could be pattern line work: a line ≥ 100 mm or a closed contour of a piece's
+ * size (`minPieceAreaMm2`). Null = nothing (a text page, a cover with a photo) — safe to set aside.
+ */
+function patternLike(pg: IRPage): string | null {
+  if (!pg.paths.length) return null;
+  const { chains } = pageChains(pg);
+  const long = chains.reduce((a, c) => Math.max(a, c.lengthMm), 0);
+  if (long >= 100) return `a line ${Math.round(long)} mm long`;
+  for (const c of chains) {
+    if (!c.closed) continue;
+    let a = 0;
+    const q = c.pts;
+    for (let k = 0, j = q.length - 1; k < q.length; j = k++)
+      a += (q[j].x + q[k].x) * (q[j].y - q[k].y);
+    if (Math.abs(a) / 2 >= PATIMPORT.minPieceAreaMm2)
+      return `a closed contour of ${Math.round(Math.abs(a) / 200)} cm²`;
+  }
+  return null;
 }
 
 /** For each text of each tile page: on how many tiles the same words (digits aside) sit there. */
@@ -490,7 +622,10 @@ function itemsOf(
         j.bbox.maxY >= bbox.minY,
     );
     if (ai) evidence.push(`the AI reads it as ${ai.kind}${ai.text ? ` "${ai.text}"` : ''}`);
-    const status = f.repeated || evidence.length >= 2 ? 'auto' : 'suggest';
+    if (f.proof && !evidence.includes(f.proof)) evidence.push(f.proof);
+    // D3 until A9: repetition or an explicit keyword masks by itself; geometry alone (however many
+    // shapes agree) is one evidence — a suggestion. The AI's word is the independent second one.
+    const status = f.repeated || f.proof || (ai && evidence.length >= 2) ? 'auto' : 'suggest';
     const base = {
       id: `${file}:${pc.page.page}:${f.kind}:${n}`,
       kind: f.kind,
@@ -566,7 +701,12 @@ export function mergeScale(extracted: ScaleCandidate[], hints: ScaleCandidate[])
  *     watermark met — the 8a text rule (a text line + clear of the garment lines) on the sheet.
  * Sets the flags on the sheet's paths; returns what it masked for the sheet step.
  */
-export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['items'] {
+export function cleanSheet(
+  sheet: Sheet,
+  edits: PageMaskEdit[],
+  /** Source keys (`srcKey`) of the paths a page item already offers — not offered twice. */
+  offered: ReadonlySet<string> = new Set(),
+): SheetClean['items'] {
   // the sheet's line work linked as the chains stage links it (masked paths stay out): a PDF that
   // draws a curve as one-segment paths has an END every millimetre, and ends are what glues glyph
   // strokes together — path by path, every letter a curve crosses joins the curve
@@ -584,7 +724,19 @@ export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['ite
   );
   const pathById = new Map(sheet.paths.map((p) => [p.id, p]));
   const taken = new Set<number>();
+  // a chain every path of which a page item offers already (a stroke-text suggestion) is that
+  // item's: accepting the kind takes both
+  const pageOffered = (i: number) =>
+    offered.size > 0 &&
+    pathsOf[i].length > 0 &&
+    pathsOf[i].every((id) => {
+      const p = pathById.get(id);
+      return !!p && offered.has(srcKey(p.src));
+    });
   const live = (i: number) => !taken.has(i) && polys[i].length >= 2;
+  /** Lettering found on the sheet (rows, bands): never protects a candidate. */
+  const letters = new Set<number>();
+  const inert = (i: number) => taken.has(i) || letters.has(i);
   const out: SheetClean['items'] = [];
   const add = (
     kind: 'watermark' | 'curve-text',
@@ -636,6 +788,7 @@ export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['ite
         },
         live,
       );
+  for (const r of rows) for (const i of memberIds(r)) letters.add(i);
   if (rows.length) {
     const grid = new SegGrid(8);
     polys.forEach((p, i) => {
@@ -666,14 +819,16 @@ export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['ite
         evidence.push(
           `${sharp} of its ${r.glyphs.length} shapes have the sharp corners of letters`,
         );
-      // a stroke a garment line meets end-on stays line work whatever the row says
-      const guarded = touchingLineWork(polys, lens, mine, taken);
+      // a stroke line work meets stays line work whatever the row says
+      const guarded = touchingLineWork(polys, lens, mine, inert);
+      // letter shapes in a row are ONE geometric evidence however many agree: a suggestion
+      // until A9's AI reads the word (accepted per kind in one click)
       add(
         'watermark',
         n,
         ids.filter((i) => !guarded.has(i)),
         evidence,
-        evidence.length >= 2 ? 'auto' : 'suggest',
+        'suggest',
         r.box,
       );
     });
@@ -691,27 +846,23 @@ export function cleanSheet(sheet: Sheet, edits: PageMaskEdit[]): SheetClean['ite
         },
         live,
       );
-  bands.forEach((b, n) => {
-    const ids = memberIds(b).filter(live);
-    if (!ids.length) return;
-    const guarded = touchingLineWork(polys, lens, new Set(ids), taken);
+  for (const b of bands) for (const i of memberIds(b)) letters.add(i);
+  let nText = 0;
+  for (const b of bands) {
+    const ids = memberIds(b).filter((i) => live(i) && !pageOffered(i));
+    if (!ids.length) continue;
+    const guarded = touchingLineWork(polys, lens, new Set(ids), inert);
     const evidence = [
       `a text line of ${b.glyphs.length} glyphs ${b.heightMm.toFixed(0)} mm high, ${runStrokes(b)} strokes`,
     ];
-    if (guarded.size <= 0.1 * ids.length)
-      evidence.push(
-        guarded.size
-          ? `${ids.length - guarded.size} of ${ids.length} strokes clear of the garment lines`
-          : 'no garment line meets it',
-      );
     add(
       'curve-text',
-      n,
+      nText++,
       ids.filter((i) => !guarded.has(i)),
       evidence,
-      evidence.length >= 2 ? 'auto' : 'suggest',
+      'suggest',
       b.box,
     );
-  });
+  }
   return out;
 }

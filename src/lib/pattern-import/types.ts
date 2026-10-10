@@ -1919,6 +1919,8 @@ export type PageMask = {
   role: PageClass;
   /** The operator changed the role (re-included a page, or dropped one). */
   roleEdited?: boolean;
+  /** A page set aside: 'auto' = no line work that could be pattern; 'suggest' = has some — shown. */
+  status?: MaskStatus;
   items: MaskItem[];
 };
 
@@ -1967,7 +1969,18 @@ export type CleanPreview = {
 export type CleanOutput = {
   pages: PageMask[];
   /** Pages set aside before anything else (cover, instructions, overview, blank). */
-  dropped: { file: FileId; page: PageIndex; cls: PageClass; why: string }[];
+  dropped: {
+    file: FileId;
+    page: PageIndex;
+    cls: PageClass;
+    why: string;
+    /**
+     * 'auto' = the page holds no line work that could be pattern; 'suggest' = it does (`drawing`
+     * says what) — still set aside as the classifier said, shown with its thumbnail to check.
+     */
+    status: MaskStatus;
+    drawing?: string;
+  }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
   /** Lines masked per kind (applied items only) — the "removed: …" line. */
