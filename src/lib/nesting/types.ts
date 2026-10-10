@@ -424,6 +424,8 @@ export type WorkerResponse =
       blockNames: string[];
       // Манифест конвертации по индексу файла пачки; null — файл без манифеста (F6b).
       manifests: (ConversionManifest | null)[];
+      // Codex C3: почему манифест файла не принят (null — принят или его нет).
+      manifestDistrust?: (string | null)[];
     }
   | {
       type: 'progress';

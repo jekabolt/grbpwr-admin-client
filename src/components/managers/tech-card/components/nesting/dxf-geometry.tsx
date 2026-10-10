@@ -64,6 +64,8 @@ export type DxfBundle = {
    * недокачанные файлы сдвигают индексы пачки.
    */
   manifestByUrl?: Map<string, ConversionManifest>;
+  /** Codex C3: url → why its manifest was not trusted (geometry / gate mismatch). */
+  manifestDistrustByUrl?: Map<string, string>;
 };
 
 /** Ключ кэша = СОДЕРЖИМОЕ пачки. Родитель пересобирает массив на каждый рендер формы. */
@@ -130,11 +132,17 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
           const url = urlByFile.get(i);
           if (m && url) manifestByUrl.set(url, m);
         });
+        const manifestDistrustByUrl = new Map<string, string>();
+        (out.manifestDistrust ?? []).forEach((why, i) => {
+          const url = urlByFile.get(i);
+          if (why && url) manifestDistrustByUrl.set(url, why);
+        });
         return {
           pieces: out.pieces,
           scopeByFile,
           warnings: [...warnings, ...out.warnings],
           manifestByUrl,
+          manifestDistrustByUrl,
         };
       } finally {
         // Контуры уже уехали на главный поток вместе с ответом — держать воркер (а в нём всю

@@ -1391,6 +1391,17 @@ export async function main(): Promise<number> {
       ],
       { unit: 'auto', tol: NEST_DEFAULTS.tol, tolChain: NEST_DEFAULTS.tolChain },
     );
+    ck(
+      !parsed.manifestDistrust[0] && parsed.pieces.every((p) => !!p.manifest),
+      'G the written file (with INSERT copies) is trusted by the card: geometry matches its manifest (C3)',
+      parsed.manifestDistrust[0] ?? '',
+    );
+    const g1note = sc.manifest.gate?.checks.find((c) => c.id === 'G1-roundtrip')?.note ?? '';
+    ck(
+      !/not trusted/.test(g1note),
+      "G the gate's own round trip (pre-gate file) does not report the card's distrust as a parser warning",
+      g1note.slice(0, 160),
+    );
     const split = splitPiecesBySize(parsed.pieces, new Map());
     const layer = defaultContourLayer(layerOptions(parsed.pieces, split.codeById));
     const contour = parsed.pieces.filter((p) => (p.layer ?? '') === layer);
@@ -1574,14 +1585,32 @@ export async function main(): Promise<number> {
           now: () => new Date(0),
         },
       );
-      res[sp.target.scopeKey.replace('TECH_CARD_BOM_PURPOSE_', '')] = g.report.passed
-        ? `✓ ${g.detail.plan.blocks.length} blocks`
-        : `✗ ${failing(g.report).join(' ')}`;
-      ok &&= g.report.passed;
+      // Codex C3: the card trusts what the importer wrote (geometry = manifest, gate passed)
+      let distrust = '';
+      if (g.report.passed) {
+        const back = await parseSheets(
+          [
+            {
+              name: 'e.dxf',
+              open: async () => new TextEncoder().encode(g.dxfText).slice().buffer as ArrayBuffer,
+            },
+          ],
+          { unit: 'auto', tol: NEST_DEFAULTS.tol, tolChain: NEST_DEFAULTS.tolChain },
+        );
+        distrust =
+          back.manifestDistrust[0] ??
+          (back.pieces.every((p) => !!p.manifest) ? '' : 'facts missing');
+      }
+      res[sp.target.scopeKey.replace('TECH_CARD_BOM_PURPOSE_', '')] = !g.report.passed
+        ? `✗ ${failing(g.report).join(' ')}`
+        : distrust
+          ? `✗ card distrusts the manifest: ${distrust}`
+          : `✓ ${g.detail.plan.blocks.length} blocks, trusted`;
+      ok &&= g.report.passed && !distrust;
     }
     ck(
       ok,
-      `${f}: main + lining files pass the gate`,
+      `${f}: main + lining files pass the gate and the card trusts their manifests`,
       Object.entries(res)
         .map(([k, v]) => `${k} ${v}`)
         .join(' · ') + (plan.problems.length ? ` · ${plan.problems[0].message}` : ''),

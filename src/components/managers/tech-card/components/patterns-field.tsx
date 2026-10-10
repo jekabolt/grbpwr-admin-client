@@ -935,6 +935,7 @@ export function PatternsField({
     // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
     const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
+    const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
 
     return (
       <tr
@@ -987,6 +988,16 @@ export function PatternsField({
                 )}
                 {/* F14: манифест написан для ДРУГОЙ карточки — его размеры здесь не доверены
                     (use-block-sizes manifestSizeTrusted), сам лист читается. */}
+                {/* Codex C3: манифест не сошёлся с чертежом или с воротами — лист читается как любой
+                    DXF, и это должно быть видно, а не только в предупреждениях разбора. */}
+                {converted && distrust && (
+                  <Pill
+                    tone='warn'
+                    title={`the conversion manifest does not match this drawing (${distrust}) — the sheet is read as any DXF: sizes, cut layer and pairs are guessed, not taken from the manifest. re-export it from the importer`}
+                  >
+                    manifest not trusted
+                  </Pill>
+                )}
                 {converted && !!techCardId && converted.techCardId !== techCardId && (
                   <Pill
                     tone='warn'

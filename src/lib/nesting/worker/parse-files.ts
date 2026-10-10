@@ -76,6 +76,9 @@ export type ParsedSheets = {
   // Детали такого файла уже несут `manifest` — массив здесь для тех, кому нужен файл целиком
   // (значок «сконвертировано» на вкладке выкроек), а не для разбора деталей.
   manifests: (ConversionManifest | null)[];
+  // Codex C3: почему манифест файла НЕ принят (геометрия или ворота не сошлись), по индексу файла;
+  // null — принят или его нет. Детали такого файла разобраны как у любого DXF.
+  manifestDistrust: (string | null)[];
 };
 
 // Факты манифеста по имени блока (ci). Манифест обязан описывать файл ЦЕЛИКОМ: каждый
@@ -130,7 +133,9 @@ function manifestFactsByBlock(
       identity: piece.identity.trim(),
       size,
       sizeId: piece.ungraded ? 0 : b.sizeId,
-      cardName: hand ? [piece.code, ...mods].filter(Boolean).join('_') || piece.identity.trim() : piece.identity.trim(),
+      cardName: hand
+        ? [piece.code, ...mods].filter(Boolean).join('_') || piece.identity.trim()
+        : piece.identity.trim(),
       pairHand: hand,
       pairOf: piece.pairOf ? piece.pairOf.trim() : null,
       unfolded: piece.unfoldedFold,
@@ -139,6 +144,78 @@ function manifestFactsByBlock(
       grainLayer: m.layers.grain,
       cutAllowanceCm: m.allowanceMm / 10,
     });
+  }
+  return out;
+}
+
+// МАНИФЕСТ ПРИВЯЗАН К ГЕОМЕТРИИ (Codex C3). Совпадение ИМЁН блоков (manifestFactsByBlock) подделать
+// легко: манифест одного листа, вклеенный в другой с теми же именами, или лист, правленный после
+// конвертации, — и карточка поверит чужим размерам, слою кроя и парам. Поэтому факты принимаются,
+// только если отчёт ворот конвертера прошёл (`gate.passed`) и КАЖДЫЙ блок нарисован таким, каким он
+// заявлен: габарит на слое кроя (±0.5 мм, у одной из вставок — и положение), площадь (±0.5 %),
+// число надсечек и свёрл. Любое расхождение — манифест для этого листа считается отсутствующим
+// (разбор как у любого DXF) и причина едет в `manifestDistrust` (значок на вкладке выкроек).
+const GEOM_TOL_MM = 0.5;
+const AREA_TOL = 0.005;
+const DRILL_MM = 10; // write/plan.ts DRILL_SQUARE_MM — свёрла пишутся квадратом 10×10 на слое 8
+export function manifestGeometryProblems(
+  m: ConversionManifest,
+  raws: readonly RawPiece[],
+): string[] {
+  const out: string[] = [];
+  if (m.gate?.passed !== true)
+    out.push(m.gate ? 'its conversion gate did not pass' : 'it carries no conversion gate report');
+  const byBlock = new Map<string, RawPiece[]>();
+  for (const r of raws) {
+    if (r.layer !== m.layers.cut || !r.blockName) continue;
+    const k = r.blockName.trim().toLowerCase();
+    byBlock.set(k, [...(byBlock.get(k) ?? []), r]);
+  }
+  for (const b of m.blocks) {
+    if (out.length >= 4) break;
+    const inst = byBlock.get(b.block.trim().toLowerCase()) ?? [];
+    if (inst.length === 0) {
+      out.push(`${b.block}: no contour on layer ${m.layers.cut}`);
+      continue;
+    }
+    const [x0, y0, x1, y1] = b.bboxMm;
+    let placed = false;
+    let bad = '';
+    for (const r of inst) {
+      const bb = bounds(r.poly);
+      const w = (bb.maxX - bb.minX) * 10;
+      const h = (bb.maxY - bb.minY) * 10;
+      if (Math.abs(w - (x1 - x0)) > GEOM_TOL_MM || Math.abs(h - (y1 - y0)) > GEOM_TOL_MM) {
+        bad = `size ${w.toFixed(1)}×${h.toFixed(1)} mm, declared ${(x1 - x0).toFixed(1)}×${(y1 - y0).toFixed(1)}`;
+        break;
+      }
+      if (Math.abs(bb.minX * 10 - x0) <= GEOM_TOL_MM && Math.abs(bb.minY * 10 - y0) <= GEOM_TOL_MM)
+        placed = true;
+      const a = area(r.poly) * 100;
+      if (Math.abs(a - b.areaMm2) > Math.max(AREA_TOL * b.areaMm2, 1)) {
+        bad = `area ${a.toFixed(0)} mm², declared ${b.areaMm2}`;
+        break;
+      }
+      const notches = r.inner.filter((p) => p.layer === m.layers.notch).length;
+      if (notches !== b.notches) {
+        bad = `${notches} notches, declared ${b.notches}`;
+        break;
+      }
+      const drills = r.inner.filter((p) => {
+        if (p.layer !== m.layers.internal || !p.closed || p.pts.length !== 4) return false;
+        const q = bounds(p.pts);
+        return (
+          Math.abs((q.maxX - q.minX) * 10 - DRILL_MM) <= GEOM_TOL_MM &&
+          Math.abs((q.maxY - q.minY) * 10 - DRILL_MM) <= GEOM_TOL_MM
+        );
+      }).length;
+      if (drills !== b.drills) {
+        bad = `${drills} drills, declared ${b.drills}`;
+        break;
+      }
+    }
+    if (!bad && !placed) bad = 'not at its declared position';
+    if (bad) out.push(`${b.block}: ${bad}`);
   }
   return out;
 }
@@ -160,10 +237,12 @@ export async function parseSheets(
   // вопрос про ткань целиком, а не про отдельный лист.
   const blockNames = new Set<string>();
   const manifests: (ConversionManifest | null)[] = [];
+  const manifestDistrust: (string | null)[] = [];
   let fileIndex = 0;
 
   for (const sheet of sheets) {
     manifests.push(null);
+    manifestDistrust.push(null);
     try {
       const buf = await sheet.open();
       // МАНИФЕСТ ЧИТАЕТСЯ ДО РАЗБОРА и по тем же байтам. Битый манифест — отказ ЭТОГО листа, а не
@@ -177,18 +256,31 @@ export async function parseSheets(
         skippedBlocks: skipped,
         blockNames: seen,
       } = parseFiles(buf, opts, warnings);
-      const facts = manifest
+      const named = manifest
         ? manifestFactsByBlock(
             manifest,
             seen,
             raws.map((r) => r.blockName ?? ''),
           )
         : null;
+      const distrust = manifest ? manifestGeometryProblems(manifest, raws) : [];
+      const facts = distrust.length > 0 ? null : named;
+      if (distrust.length > 0) {
+        manifestDistrust[fileIndex] = distrust.join('; ');
+        // A file with no gate report at all is the converter's own pre-gate round trip (the gate
+        // parses the file before it can embed its verdict): distrusted and badged, but not a parser
+        // warning that would land in the gate's own G1 note.
+        if (manifest!.gate !== null || distrust.length > 1)
+          warnings.push(
+            `${sheet.name}: the conversion manifest is not trusted (${distrust.join('; ')}) — sizes, cut layer and pairs are read as for any DXF`,
+          );
+      }
       manifests[fileIndex] = manifest;
       skippedBlocks += skipped;
       for (const b of seen) blockNames.add(b);
       detectedUnit = unit;
-      if (unitGuessed) warnings.push(`${sheet.name}: units are not set in the file — ${unit} assumed`);
+      if (unitGuessed)
+        warnings.push(`${sheet.name}: units are not set in the file — ${unit} assumed`);
       for (const raw of raws) {
         const bb = bounds(raw.poly);
         // Normalize: local origin at bbox min corner — placement x/y then read naturally.
@@ -237,5 +329,6 @@ export async function parseSheets(
     skippedBlocks,
     blockNames: [...blockNames],
     manifests,
+    manifestDistrust,
   };
 }
