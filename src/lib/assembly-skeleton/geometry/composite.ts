@@ -678,7 +678,8 @@ export function compositeSeams(
       // 2. A weak seam (two short straight unnotched edges — the hems of two panels) that alone
       //    holds two parts of the unit together loses to a long partial fit from the same corner:
       //    the hems run on, the panels are sewn along their long edges.
-      for (const w of inside().filter((c) => isWeak(c, geom))) {
+      // A seam a person confirmed (`provenance`) never gives way.
+      for (const w of inside().filter((c) => isWeak(c, geom) && !c.provenance)) {
         const rest = inside().filter((c) => c !== w);
         const gs = groups(rest);
         if (gs.length < 2) continue;

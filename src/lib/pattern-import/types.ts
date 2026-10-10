@@ -185,6 +185,25 @@ export type SourceDoc = {
   file: SourceFileInfo;
   pages: IRPage[];
   warnings: string[];
+  /**
+   * A0.1 (AUTO): the file states its own physical size — an SVG whose root width/height are in
+   * mm / cm / in and agree with its viewBox (one user unit = `userUnitMm` on both axes). The scale
+   * step reports it as method 'declared' (confidence 1.0, no tick to give). Absent = the file does
+   * not say (px / unitless SVG, PDF, raster, HPGL): the test square decides as before.
+   */
+  declaredUnits?: DeclaredUnits;
+};
+
+/** A0.1: what the file says about its own units, and where (quoted to the operator). */
+export type DeclaredUnits = {
+  unit: 'mm' | 'cm' | 'in';
+  /** Page size the file declares, mm. */
+  widthMm: Mm;
+  heightMm: Mm;
+  /** mm per user unit (equal on both axes within 0.1 %, or the file is not declared). */
+  userUnitMm: Mm;
+  /** As written, e.g. `width="1000mm" height="700mm" viewBox="0 0 1000 700"`. */
+  evidence: string;
 };
 
 export type ExtractOpts = {
@@ -546,7 +565,15 @@ export type GradeRefusal =
  * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step. The
  * card's size run is never the count (H1c-4) — the sizes step only offers it as a quick answer.
  */
-export type ExpectedSizes = { n: number; from: 'source' | 'operator' };
+export type ExpectedSizes = {
+  n: number;
+  /**
+   * AUTO A6 (later phase): 'inferred' = two or more independent sheet evidences agree on n (legend
+   * text, nest depth, file count, AI). The size stage treats it like 'operator' (n known, ranks
+   * still proven). Not produced yet.
+   */
+  from: 'source' | 'operator' | 'inferred';
+};
 
 /**
  * The sizes step's "sizes drawn on this sheet" question (D1). Asked when the source does not state
@@ -720,7 +747,32 @@ export type NotchFeature = FeatureBase & {
   depthMm: Mm;
 };
 export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
-export type GrainFeature = FeatureBase & { kind: 'grain'; a: PtMm; b: PtMm; angleDeg: Deg };
+/**
+ * What made a grainline (G18, A8): `class` a grain-classed line, `arrowheads` short chains at an
+ * end, `word` a grain word beside it, `dxf-layer` the source DXF's own grain layer, `operator` two
+ * clicks, `borrowed` taken from another size of the piece. Recorded so the gate and the manifest
+ * can say which evidence a grain stands on.
+ */
+export type GrainEvidenceKind =
+  | 'class'
+  | 'arrowheads'
+  | 'word'
+  | 'dxf-layer'
+  | 'operator'
+  | 'borrowed';
+export type GrainFeature = Omit<FeatureBase, 'origin'> & {
+  kind: 'grain';
+  /**
+   * AUTO A1 (later phase): 'proposed' = a grainline the drawing suggests (strip axis, symmetry axis,
+   * straight CF/CB edge) with a single evidence: shown as a proposal, accepted only by a click.
+   */
+  origin: FeatureOrigin | 'proposed';
+  a: PtMm;
+  b: PtMm;
+  angleDeg: Deg;
+  /** G18: the evidence kinds behind it; absent on a grain made before the field existed. */
+  evidence?: GrainEvidenceKind[];
+};
 export type FoldFeature = FeatureBase & {
   kind: 'fold';
   /** The straight contour edge that is the fold. */
@@ -1231,6 +1283,8 @@ export type ManifestBlock = {
   drills: number;
   internal: number;
   hasSeam: boolean;
+  /** G18 (A8): where the block's grain came from — absent on a manifest written before it. */
+  grain?: { origin: GrainFeature['origin']; evidence: GrainEvidenceKind[] };
   /**
    * F14f (Codex R2): the cut ring, coarsened — what binds this entry to the drawn contour
    * (manifest/contour-sig.ts). Absent in a manifest written before F14f: the card then treats the
@@ -1275,7 +1329,12 @@ export type GateCheckId =
    * walls at both ends and stays short, per edge and per piece. G3/G4 measure against the drawn
    * walls only; the stretch of the written line on an edge that passes here is left to this check.
    */
-  | 'G15-derived';
+  | 'G15-derived'
+  /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
+  | 'G16-glyphs'
+  /** A8: internal-layer length against the outline length (warn). */
+  /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
+  | 'G18-grain-source';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1651,6 +1710,8 @@ export type StageIO = {
   };
   write: {
     in: {
+      /** The card the manifest is written for: the card trusts a manifest only with its own id. */
+      techCardId: number;
       scopes: DraftScopeTarget[];
       assignment: FabricAssignment;
       sizes: ManifestSize[];
@@ -1756,6 +1817,33 @@ export type WizardEvent =
   | { type: 'reset' };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
+// 11b. AUTO wave (tmp/plans/pdf-to-dxf/auto/00-PLAN.md) — types for the later phases, unused yet
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D3 stays: what the drawing does not prove is asked. 'auto' = two or more independent evidences
+ * agree (applied, shown with an AUTO pill, undoable); 'suggest' = one evidence (prefilled, one
+ * "accept all" click); 'ask' = none (a question).
+ */
+export type AutoOrigin = 'auto' | 'suggest' | 'ask';
+
+/** One decision the auto run took at a fork of the wizard (A4), with the evidence behind it. */
+export type AutoDecision = {
+  step: WizardStep;
+  /** What was decided: 'scale', 'legend', 'drawn-sizes', 'size-map', 'seed', 'grain', 'fold', … */
+  kind: string;
+  /** The piece it is about, when it is about one. */
+  seed?: SeedId;
+  value: unknown;
+  origin: AutoOrigin;
+  /** Human-readable evidences, each independent of the others ("layer «Cut lines»", …). */
+  evidence: string[];
+};
+
+/** A1: a grainline the geometry proposes (origin 'proposed' once it is a feature). */
+export type GrainProposal = { a: PtMm; b: PtMm; why: string };
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
 // 12. Card-side consumption (F6b) — the manifest-aware paths of existing functions
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1838,4 +1926,18 @@ export const PATIMPORT = {
   maxSvgElements: 500_000,
   /** C4: lines of one ASCII DXF (the tag stream is split whole). */
   maxDxfLines: 6_000_000,
+  /**
+   * G16 (A8 safety net): an internal-layer (8) item shorter than this is a "short stroke". Corpus
+   * per block — CLO DXF 0, robe ≤ 26, reef 11, leonie 10, palto 13; the owner's wm M DXF 144–157,
+   * wm ×7 493, r4454 66–76 (curve-drawn "2 ДЕТ." inside the pieces — junk, blocked on purpose).
+   */
+  glyphShortMm: 15,
+  /** G16: this many short strokes in one block blocks it. */
+  glyphMaxShortPerBlock: 40,
+  /** G16: side of the grid cell (absolute, by a stroke's first point) the density is counted in. */
+  glyphCellMm: 60,
+  /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
+  glyphMaxShortPerCell: 10,
+  /** G18: a grain end / line this close to a short internal stroke is "touching" it, mm. */
+  grainStrokeNearMm: 2,
 } as const;

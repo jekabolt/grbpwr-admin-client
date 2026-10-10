@@ -11,3 +11,5 @@ export {
 // C4 · bounded work: the run budget, the PDF operator walker (driven with a synthetic list).
 export { WorkBudget } from 'lib/pattern-import/adapters/budget';
 export { walkOperatorList } from 'lib/pattern-import/adapters/pdf/walk';
+// A0.1 · the scale step's reading of an SVG that declares its units.
+export { detectScale } from 'lib/pattern-import/adapters/pdf/scale';

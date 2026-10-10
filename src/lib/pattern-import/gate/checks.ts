@@ -1,4 +1,4 @@
-// G1–G13 + G15 (08-CONTRACT §5; G15 = F14b, Codex C1). Each check is a pure function of the gate
+// G1–G13 + G15 (08-CONTRACT §5; G15 = F14b, Codex C1) + G16–G18 (A8 safety net). Each check is a pure function of the gate
 // context and returns one (rarely two) GateCheck naming the blocks it failed.
 
 import type { PieceDTO } from 'lib/nesting/types';
@@ -1251,4 +1251,224 @@ export function g13(m: ConversionManifest, requireGate: boolean): GateCheck {
   if (requireGate && !m.gate) notes.push('gate report not embedded');
   if (notes.length && !failed.length) failed.push('*');
   return check('G13-manifest', failed, 'block', notes.join('; ') || 'manifest invariants hold');
+}
+
+// ── G16 / G18 (A8 safety net) ────────────────────────────────────────────────────────
+//
+// The owner's wm M import (10.10) passed a DXF whose pieces carried the watermark WWW.PAFAVE.PL
+// and stroke-font labels as ~300 layer-8 polylines per block, with grainlines taken from letter
+// strokes. The real fix cleans the input sheet (stage A8 `clean`); these checks only refuse to
+// vouch for such a file (D3: what the drawing does not prove, we ask).
+
+/** One layer-8 item as the gate counts it (drill squares excluded). */
+export type InternalStroke = { pts: PtMm[]; closed: boolean; lengthMm: number; cell: string };
+
+export type GlyphStats = {
+  strokes: InternalStroke[];
+  short: InternalStroke[];
+  /** Short strokes per 60 mm cell (absolute grid, by the stroke's first point). */
+  cells: Map<string, number>;
+  densest: { cell: string; n: number; at: PtMm } | null;
+  lengthMm: number;
+};
+
+const cellKey = (p: PtMm) =>
+  `${Math.floor(p.x / PATIMPORT.glyphCellMm)},${Math.floor(p.y / PATIMPORT.glyphCellMm)}`;
+
+/** Layer-8 strokes of one block, short ones (< `glyphShortMm`) and their densest cell. */
+export function glyphStats(ents: readonly RawEntity[]): GlyphStats {
+  const strokes: InternalStroke[] = [];
+  for (const e of ents) {
+    if (e.layer !== LAYERS.internal || e.pts.length < 2) continue;
+    if (!(isPoly(e) || e.type === 'LINE') || isDrill(e)) continue;
+    strokes.push({
+      pts: e.pts,
+      closed: e.closed,
+      lengthMm: polylineLength(e.pts, e.closed),
+      cell: cellKey(e.pts[0]),
+    });
+  }
+  const short = undashed(strokes.filter((s) => s.lengthMm < PATIMPORT.glyphShortMm));
+  const cells = new Map<string, number>();
+  for (const s of short) cells.set(s.cell, (cells.get(s.cell) ?? 0) + 1);
+  let densest: GlyphStats['densest'] = null;
+  for (const [cell, n] of cells) {
+    if (densest && n <= densest.n) continue;
+    const [i, j] = cell.split(',').map(Number);
+    densest = {
+      cell,
+      n,
+      at: { x: (i + 0.5) * PATIMPORT.glyphCellMm, y: (j + 0.5) * PATIMPORT.glyphCellMm },
+    };
+  }
+  return { strokes, short, cells, densest, lengthMm: strokes.reduce((a, s) => a + s.lengthMm, 0) };
+}
+
+/**
+ * Codex (G16 review): a dashed construction line (pocket placement, pleat, fold guide) drawn as
+ * separate dashes is many short strokes too. A dash belongs to a run of straight strokes on one
+ * line (direction ±3°, offset ≤ 0.5 mm) with lengths within ±30 % and gaps ≤ 3 × the dash — even
+ * spacing lettering does not have (≥ 4 dashes, gaps within ±35 % of their median); those runs are
+ * not counted as lettering.
+ */
+function undashed(short: InternalStroke[]): InternalStroke[] {
+  if (short.length > 2000) return short;
+  type Seg = { a: PtMm; ux: number; uy: number; len: number; t0: number; t1: number };
+  const segs: (Seg | null)[] = short.map((s) => {
+    const a = s.pts[0];
+    const b = s.pts[s.pts.length - 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    // straight only: the chord carries the stroke's length
+    if (s.closed || !(len > 0.5) || len < 0.97 * s.lengthMm) return null;
+    return { a, ux: (b.x - a.x) / len, uy: (b.y - a.y) / len, len, t0: 0, t1: len };
+  });
+  const dash = new Set<number>();
+  const cosTol = Math.cos((3 * Math.PI) / 180);
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    if (!s || dash.has(i)) continue;
+    // members on s's line, as intervals along it
+    const run: { i: number; t0: number; t1: number }[] = [{ i, t0: 0, t1: s.len }];
+    for (let j = 0; j < segs.length; j++) {
+      const o = segs[j];
+      if (!o || j === i) continue;
+      if (Math.abs(s.ux * o.ux + s.uy * o.uy) < cosTol) continue;
+      if (Math.abs(o.len / s.len - 1) > 0.3) continue;
+      const dx = o.a.x - s.a.x;
+      const dy = o.a.y - s.a.y;
+      if (Math.abs(dx * -s.uy + dy * s.ux) > 0.5) continue;
+      const ta = dx * s.ux + dy * s.uy;
+      const tb = ta + o.len * (s.ux * o.ux + s.uy * o.uy);
+      run.push({ i: j, t0: Math.min(ta, tb), t1: Math.max(ta, tb) });
+    }
+    if (run.length < 3) continue;
+    run.sort((x, y) => x.t0 - y.t0);
+    // keep the longest stretch whose gaps stay ≤ 3 × the dash
+    let best: typeof run = [];
+    let cur: typeof run = [run[0]];
+    for (let k = 1; k < run.length; k++) {
+      const gap = run[k].t0 - cur[cur.length - 1].t1;
+      if (gap >= -0.5 && gap <= 3 * s.len) cur.push(run[k]);
+      else {
+        if (cur.length > best.length) best = cur;
+        cur = [run[k]];
+      }
+    }
+    if (cur.length > best.length) best = cur;
+    if (best.length < 4) continue;
+    // a dash pattern repeats: the gaps agree (lettering baselines do not)
+    const gaps = best.slice(1).map((m, k) => m.t0 - best[k].t1);
+    const sorted = [...gaps].sort((x, y) => x - y);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    if (sorted[sorted.length - 1] - sorted[0] > 0.35 * Math.max(med, 0) + 0.5) continue;
+    for (const m of best) dash.add(m.i);
+  }
+  return dash.size ? short.filter((_, k) => !dash.has(k)) : short;
+}
+
+/** G16's verdict on one block's strokes: null = fine, else the reason (no block prefix). */
+export function glyphProblem(st: GlyphStats): string | null {
+  const nShort = st.short.length;
+  const d = st.densest;
+  const tooMany = nShort >= PATIMPORT.glyphMaxShortPerBlock;
+  const tooDense = !!d && d.n >= PATIMPORT.glyphMaxShortPerCell;
+  if (!tooMany && !tooDense) return null;
+  return `${nShort} short strokes (< ${PATIMPORT.glyphShortMm} mm) inside, densest ${PATIMPORT.glyphCellMm} mm cell ${d?.n ?? 0} around (${d ? `${d.at.x.toFixed(0)}, ${d.at.y.toFixed(0)}` : '—'})`;
+}
+
+const glyphCache = new WeakMap<GateCtx, Map<string, GlyphStats>>();
+function glyphsOf(ctx: GateCtx, block: string): GlyphStats {
+  let m = glyphCache.get(ctx);
+  if (!m) glyphCache.set(ctx, (m = new Map()));
+  let st = m.get(block);
+  if (!st) m.set(block, (st = glyphStats(rawOf(ctx, block))));
+  return st;
+}
+
+const GLYPH_WHY =
+  'lines inside the piece look like lettering or a watermark — the drawing has junk inside the piece';
+
+export function g16(ctx: GateCtx): GateCheck {
+  if (!ctx.raw) return check('G16-glyphs', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
+  const failed: string[] = [];
+  const notes: string[] = [];
+  let worstShort = 0;
+  let worstCell = 0;
+  for (const { block } of ctx.blocks) {
+    const st = glyphsOf(ctx, block);
+    worstShort = Math.max(worstShort, st.short.length);
+    worstCell = Math.max(worstCell, st.densest?.n ?? 0);
+    const why = glyphProblem(st);
+    if (!why) continue;
+    failed.push(block);
+    notes.push(`${block}: ${why}`);
+  }
+  return check(
+    'G16-glyphs',
+    failed,
+    'block',
+    failed.length
+      ? [GLYPH_WHY, ...notes].join('; ')
+      : 'no lettering-like strokes inside the pieces',
+    `${worstShort} short / ${worstCell} per cell`,
+    `< ${PATIMPORT.glyphMaxShortPerBlock} short per block, < ${PATIMPORT.glyphMaxShortPerCell} per ${PATIMPORT.glyphCellMm} mm cell`,
+  );
+}
+
+/** Distance from `p` to segment a–b. */
+function segDist(p: PtMm, a: PtMm, b: PtMm): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const L2 = dx * dx + dy * dy;
+  const t = L2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0;
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+export function g18(ctx: GateCtx): GateCheck {
+  const near = PATIMPORT.grainStrokeNearMm;
+  const dense = PATIMPORT.glyphMaxShortPerCell;
+  const hard: string[] = [];
+  const soft: string[] = [];
+  const notes: string[] = [];
+  for (const b of ctx.blocks) {
+    const g = b.size?.grain;
+    if (!g || g.origin === 'operator') continue; // two clicks are the operator's word
+    const st = glyphsOf(ctx, b.block);
+    if (!st.short.length) continue;
+    const ev = g.evidence?.length ? g.evidence.join('+') : 'unrecorded';
+    // the end's own cell, and the cells of the short strokes it touches (its "arrowheads")
+    let lettered: { at: PtMm; n: number } | null = null;
+    for (const end of [g.a, g.b]) {
+      const heads = st.short.filter((s) => closestOnPolyline(end, s.pts, s.closed).d <= near);
+      for (const c of [cellKey(end), ...heads.map((s) => s.cell)]) {
+        const n = st.cells.get(c) ?? 0;
+        if (n >= dense && (!lettered || n > lettered.n)) lettered = { at: end, n };
+      }
+    }
+    if (lettered) {
+      hard.push(b.block);
+      notes.push(
+        `${b.block}: the grainline (${g.origin}, ${ev}) ends among ${lettered.n} short strokes at (${lettered.at.x.toFixed(0)}, ${lettered.at.y.toFixed(0)}) — it was read from lettering; draw it in details`,
+      );
+      continue;
+    }
+    // a grain the source DXF draws on its own grain layer is its author's word: only lettering
+    // around its ends speaks against it (CLO's notch-side marks sit beside the grain)
+    if (g.evidence?.includes('dxf-layer')) continue;
+    const touching = st.short.filter((s) => s.pts.some((p) => segDist(p, g.a, g.b) <= near));
+    if (touching.length) {
+      soft.push(b.block);
+      notes.push(
+        `${b.block}: the grainline (${g.origin}, ${ev}) touches ${touching.length} short stroke(s) inside the piece`,
+      );
+    }
+  }
+  return check(
+    'G18-grain-source',
+    [...hard, ...soft],
+    hard.length ? 'block' : 'warn',
+    notes.join('; ') || 'no found grainline stands on lettering',
+    hard.length ? `${hard.length} from lettering` : soft.length ? `${soft.length} touching` : 0,
+    `ends not in a ${PATIMPORT.glyphCellMm} mm cell of ≥ ${dense} short strokes; ≥ ${near} mm from short strokes`,
+  );
 }

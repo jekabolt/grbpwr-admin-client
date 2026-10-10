@@ -10381,6 +10381,11 @@ export type common_TechCard = {
   // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
   // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
   guided: boolean | undefined;
+  // OUTPUT-ONLY: the technologist's seam decisions (confirmed / rejected / connected by hand), with
+  // the server's staleness verdict resolved on this read. Written ONLY through UpsertTechCardSeams /
+  // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
+  // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
+  seams: common_TechCardSeam[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -10937,6 +10942,98 @@ export type common_TechCardPieceArea = {
   // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
   // разные и ведут к разным фразам на экране.
   ambiguousPick: boolean | undefined;
+};
+
+// TechCardSeam is one stored seam decision, keyed by a client-minted ULID.
+export type common_TechCardSeam = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  seamKey: string | undefined;
+  status: common_TechCardSeamStatus | undefined;
+  kind: common_TechCardSeamKind | undefined;
+  direction: common_TechCardSeamDirection | undefined;
+  source: common_TechCardSeamSource | undefined;
+  sideA: common_TechCardSeamSide | undefined;
+  sideB: common_TechCardSeamSide | undefined;
+  // Size code the anchors were written on — honesty for display; the resolver compares by ratio.
+  anchoredSize: string | undefined;
+  // The technologist's words («eased at the yoke», «CF is a zip»), ≤ 255 chars.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance.
+  // stale = the SOURCE of the seam's pieces moved since the row was written: the fingerprint of the
+  // sheets AND block→piece links of the pieces' fabric scopes, computed now, differs from the one
+  // stamped on write (a DXF re-uploaded, a block re-aliased). A stale row must not be applied as is
+  // — the client shows it and offers re-confirm, which rewrites it and clears the flag.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSeamStatus is the technologist's decision on a seam.
+export type common_TechCardSeamStatus =
+  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
+  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
+  | "TECH_CARD_SEAM_STATUS_REJECTED";
+// TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
+// walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
+// closure (zip / button front) that is NOT sewn shut.
+export type common_TechCardSeamKind =
+  | "TECH_CARD_SEAM_KIND_UNKNOWN"
+  | "TECH_CARD_SEAM_KIND_EDGE"
+  | "TECH_CARD_SEAM_KIND_PARTIAL"
+  | "TECH_CARD_SEAM_KIND_COMPOSITE"
+  | "TECH_CARD_SEAM_KIND_SURFACE"
+  | "TECH_CARD_SEAM_KIND_CLOSURE";
+// TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
+// (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
+// is legal on write: the reader then picks the pairing itself.
+export type common_TechCardSeamDirection =
+  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
+  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
+  | "TECH_CARD_SEAM_DIRECTION_SAME";
+// TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
+export type common_TechCardSeamSource =
+  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
+  | "TECH_CARD_SEAM_SOURCE_GRAPH"
+  | "TECH_CARD_SEAM_SOURCE_DOLL"
+  | "TECH_CARD_SEAM_SOURCE_ORDER"
+  | "TECH_CARD_SEAM_SOURCE_MANUAL"
+  | "TECH_CARD_SEAM_SOURCE_AI";
+// TechCardSeamSide is one side of a seam: its anchors in walk order (1..8).
+export type common_TechCardSeamSide = {
+  parts: common_TechCardSeamAnchor[] | undefined;
+};
+
+// TechCardSeamAnchor is one run of one piece taking part in a seam side.
+export type common_TechCardSeamAnchor = {
+  // tech_card_piece.line_key — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
+  samples: common_TechCardSeamSample[] | undefined;
+  // Share of the sewing-line perimeter covered by the run, (0, 1].
+  perimShare: number | undefined;
+  // Run length at the size it was anchored on, mm (> 0).
+  lenMm: number | undefined;
+  // Notch count on the run, ends excluded.
+  notches: number | undefined;
+  // Signed turn of the run, degrees (+ convex).
+  turnDeg: number | undefined;
+  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
+  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
+  rangeFrom: number | undefined;
+  rangeTo: number | undefined;
+  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
+  // 'BP#3+4') and the piece contour's signature then.
+  edgeHint: string | undefined;
+  contourSig: string | undefined;
+};
+
+// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
+// (u, v ∈ [0, 1]).
+export type common_TechCardSeamSample = {
+  u: number | undefined;
+  v: number | undefined;
 };
 
 export type UpdateTechCardRequest = {
@@ -13531,6 +13628,27 @@ export type SaveTechCardPieceAreasRequest = {
 export type SaveTechCardPieceAreasResponse = {
   sheetFingerprint: string | undefined;
   stored: number | undefined;
+};
+
+export type UpsertTechCardSeamsRequest = {
+  techCardId: number | undefined;
+  // Rows to insert or replace whole, by seam_key. Output-only fields (stale, *_by, *_at) are ignored.
+  seams: common_TechCardSeam[] | undefined;
+};
+
+export type UpsertTechCardSeamsResponse = {
+  seams: common_TechCardSeam[] | undefined;
+  written: number | undefined;
+};
+
+export type DeleteTechCardSeamsRequest = {
+  techCardId: number | undefined;
+  seamKeys: string[] | undefined;
+};
+
+export type DeleteTechCardSeamsResponse = {
+  seams: common_TechCardSeam[] | undefined;
+  deleted: number | undefined;
 };
 
 export type ReceiveMaterialStockRequest = {
@@ -19785,6 +19903,22 @@ export interface AdminService {
   // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
   // patterns, from the patterns tab, and it feeds costing and the release gate.
   SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
+  // UpsertTechCardSeams stores the technologist's seam decisions — confirmed / rejected seams and
+  // seams connected by hand on the pieces map — so every reader resolves ONE list.
+  // KEYED AND PARTIAL: a row per seam_key is inserted or replaced whole; rows not named are
+  // untouched. A reviewer decides one seam at a time, and two reviewers on one card must not clobber
+  // each other's rows.
+  // The server stamps each row's source fingerprint from ITS OWN tables (sheets + block→piece links
+  // of the pieces' fabric scopes) — the client cannot supply it — and echoes the card's full current
+  // list with `stale` resolved, so the client re-syncs instead of trusting its optimistic copy.
+  // NO lock_version BUMP and NO section digest: seams are a side table; the form's autosave keeps
+  // working while somebody confirms a seam. A released card refuses (the frozen wording).
+  // wr(tech_cards), the same right as the piece areas.
+  UpsertTechCardSeams(request: UpsertTechCardSeamsRequest): Promise<UpsertTechCardSeamsResponse>;
+  // DeleteTechCardSeams removes seam decisions by seam_key (an orphan row whose piece left the card,
+  // or a decision the technologist takes back). Unknown keys are not an error. Same lock, same
+  // released-card refusal, same echo of the full list as UpsertTechCardSeams.
+  DeleteTechCardSeams(request: DeleteTechCardSeamsRequest): Promise<DeleteTechCardSeamsResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -26234,6 +26368,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SaveTechCardPieceAreas",
       }) as Promise<SaveTechCardPieceAreasResponse>;
+    },
+    UpsertTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seams`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardSeams",
+      }) as Promise<UpsertTechCardSeamsResponse>;
+    },
+    DeleteTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seams:delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardSeams",
+      }) as Promise<DeleteTechCardSeamsResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes

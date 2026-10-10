@@ -25,6 +25,7 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
+import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
 import {
   buildSkeletonFacts,
   skeletonCategoryRead,
@@ -137,9 +138,10 @@ export function CardUnitPicturesProvider({
     ...(patterns ?? []).map((p) => [p.bomLineKey, p.fabricPurpose].join('|')),
   ].join('~');
   const catSig = [...(categoryNames ?? []), purpose ?? ''].join('|');
+  const seamsSig = useCardSeamsSig(); // SEAMS Need A: a decision re-reads the graph
   const factsSig =
     hasUnits && shapes && contoured > 0 && contoured <= CAP_PIECES
-      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}`
+      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}#${seamsSig}`
       : '';
 
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
@@ -192,7 +194,7 @@ export function CardUnitPicturesProvider({
         let g: SeamGraph | null = null;
         if (facts.pieces.length > 0) {
           try {
-            g = readSeamGraph(facts);
+            g = readSeamGraph(facts, undefined, {}, cardSeamDecisions(facts));
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.
             g = null;

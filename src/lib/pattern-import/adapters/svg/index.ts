@@ -12,7 +12,14 @@
 // `fill:true` (letters-as-curves) unless `keepFills` is false. Layer = Inkscape layer label, else
 // the top-level group's data-name / decoded id (Illustrator), else null. <text>/<tspan> → IRText.
 
-import type { Affine, ExtractFn, PtMm, SourceDoc, WorkBudgetLike } from '../../types';
+import type {
+  Affine,
+  DeclaredUnits,
+  ExtractFn,
+  PtMm,
+  SourceDoc,
+  WorkBudgetLike,
+} from '../../types';
 import { PATIMPORT } from '../../types';
 import { budgetOf, inputTooLarge } from '../budget';
 import { apply, applyVec, meanScale, mul, scale, translate } from '../vector/affine';
@@ -506,6 +513,7 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
       file: await fileInfo(file, 'svg', producer.label),
       pages: [b.build(W, H)],
       warnings,
+      ...(vp.declared ? { declaredUnits: vp.declared } : {}),
     };
     return doc;
   };
@@ -663,19 +671,24 @@ type Viewport = {
   vw: number;
   vh: number;
   warnings: string[];
+  /** A0.1: width/height in mm/cm/in that agree with the viewBox — the file states its scale. */
+  declared?: DeclaredUnits;
 };
 
 /** width/height attribute → mm. `px`/unitless use pxMm and are flagged uncertain; `%`/missing → null. */
-function lengthMm(v: string | undefined, pxMm: number): { mm: number; certain: boolean } | null {
+function lengthMm(
+  v: string | undefined,
+  pxMm: number,
+): { mm: number; certain: boolean; unit: string } | null {
   if (v === undefined) return null;
   const m = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*([a-z%]*)\s*$/i.exec(v);
   if (!m) return null;
   const n = parseFloat(m[1]);
   const unit = m[2].toLowerCase();
   if (!(n > 0) || unit === '%' || unit === 'em' || unit === 'ex') return null;
-  if (unit === '' || unit === 'px') return { mm: n * pxMm, certain: false };
+  if (unit === '' || unit === 'px') return { mm: n * pxMm, certain: false, unit };
   const f = ABS_MM[unit];
-  return f ? { mm: n * f, certain: true } : null;
+  return f ? { mm: n * f, certain: true, unit } : null;
 }
 
 function parseViewBox(v: string | undefined): [number, number, number, number] | null {
@@ -709,14 +722,43 @@ function viewBoxMatrix(
   return mul(translate(tx, ty), mul(scale(sx, sy), translate(-minX, -minY)));
 }
 
+/**
+ * A0.1: the file states its own scale when BOTH width and height carry a physical unit the pattern
+ * world uses (mm, cm, in — the same unit; pt/pc/Q and px are left to the test square) and the
+ * viewBox maps one user unit to the same mm on both axes (0.1 %): nothing is letterboxed or
+ * stretched, so a length in the drawing IS its length on paper.
+ */
+function declaredUnits(
+  svg: XNode,
+  W: { mm: number; unit: string },
+  H: { mm: number; unit: string },
+  vb: [number, number, number, number],
+): DeclaredUnits | undefined {
+  const unit = W.unit;
+  if (unit !== H.unit || (unit !== 'mm' && unit !== 'cm' && unit !== 'in')) return undefined;
+  // a transform on the root <svg> (SVG 2) rescales the content the walker does not compose: the
+  // declared size then says nothing about the drawing — leave it to the test square
+  if ((svg.attrs.transform ?? '').trim()) return undefined;
+  const sx = W.mm / vb[2];
+  const sy = H.mm / vb[3];
+  if (!(sx > 0) || Math.abs(sx / sy - 1) > 0.001) return undefined;
+  return {
+    unit,
+    widthMm: W.mm,
+    heightMm: H.mm,
+    userUnitMm: (sx + sy) / 2,
+    evidence: `width="${svg.attrs.width}" height="${svg.attrs.height}" viewBox="${svg.attrs.viewBox}"`,
+  };
+}
+
 function rootViewport(svg: XNode, pxMm: number, producer: string): Viewport {
   const warnings: string[] = [];
   const vb = parseViewBox(svg.attrs.viewBox);
   let W = lengthMm(svg.attrs.width, pxMm);
   let H = lengthMm(svg.attrs.height, pxMm);
   if (vb) {
-    if (W && !H) H = { mm: (W.mm * vb[3]) / vb[2], certain: W.certain };
-    if (H && !W) W = { mm: (H.mm * vb[2]) / vb[3], certain: H.certain };
+    if (W && !H) H = { mm: (W.mm * vb[3]) / vb[2], certain: W.certain, unit: '' };
+    if (H && !W) W = { mm: (H.mm * vb[2]) / vb[3], certain: H.certain, unit: '' };
   }
   const dpi = Math.round(25.4 / pxMm);
   const pxNote = `assumed ${dpi} px per inch${producer !== 'unknown' ? ` (${producer})` : ''}`;
@@ -733,6 +775,7 @@ function rootViewport(svg: XNode, pxMm: number, producer: string): Viewport {
         vw: vb[2],
         vh: vb[3],
         warnings,
+        declared: declaredUnits(svg, W, H, vb),
       };
     return { m: scale(pxMm), pageW: W.mm, pageH: H.mm, vw: W.mm / pxMm, vh: H.mm / pxMm, warnings };
   }

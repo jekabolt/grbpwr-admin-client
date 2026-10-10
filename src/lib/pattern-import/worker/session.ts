@@ -1050,7 +1050,7 @@ export class Session {
       ctx.progress(k++, plan.scopes.length, scope.label);
       const res = await writeAndGate(
         {
-          techCardId: 0,
+          techCardId: input.techCardId,
           scope,
           pieces: sp.specs,
           sizes: input.sizes,

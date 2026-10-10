@@ -65,6 +65,11 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
     drills: b.drills.length,
     internal: b.internal.length,
     hasSeam: !!b.seam,
+    // G18 (A8): which evidence the grain stands on, so the card (and a reader) can tell a found
+    // grain from a drawn one
+    ...(b.size.grain
+      ? { grain: { origin: b.size.grain.origin, evidence: [...(b.size.grain.evidence ?? [])] } }
+      : {}),
     // F14f (Codex R2): binds this entry to the written cut ring (manifest/contour-sig.ts)
     ...(contour ? { contour } : {}),
   };

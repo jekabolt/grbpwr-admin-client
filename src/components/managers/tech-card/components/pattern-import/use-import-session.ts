@@ -45,6 +45,7 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
+import { singlePageSheet } from './sheet-skip';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -462,6 +463,12 @@ export function useImportSession(deps: {
             sheet: iRef.current.sheetIndex,
             override: iRef.current.gridOverride,
           });
+          // A0.2: one page is the sheet — nothing to assemble or pick; the step stays a door back
+          if (singlePageSheet(sRef.current.pages, out, iRef.current.gridOverride)) {
+            patch({ sheet: out });
+            sRef.current = { ...sRef.current, sheet: out };
+            return await toSizes();
+          }
           patch({ sheet: out, step: 'sheet' });
           return;
         }
@@ -642,6 +649,7 @@ export function useImportSession(deps: {
             ),
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
+            techCardId: card.techCardId,
           });
           const draft = buildDraft(out, { card, semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
@@ -774,6 +782,17 @@ export function useImportSession(deps: {
     await toDetails();
   }
 
+  /** sheet → sizes: the legend and the size map of the assembled sheet. */
+  async function toSizes() {
+    const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
+    const sizes = await run('sizes', {
+      card: card.sizes,
+      operatorMap: iRef.current.sizeMap ?? undefined,
+      drawnSizes: drawnNow() ?? undefined,
+    });
+    patch({ chains, sizes, step: 'sizes' });
+  }
+
   const chainOpts = () => ({
     joinGapMm: PATIMPORT.joinGapMm,
     joinAngleDeg: PATIMPORT.joinAngleDeg,
@@ -823,16 +842,9 @@ export function useImportSession(deps: {
           if (d) await dispatch({ type: 'scale', decision: d });
           return;
         }
-        case 'sheet': {
-          const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
-          const sizes = await run('sizes', {
-            card: card.sizes,
-            operatorMap: iRef.current.sizeMap ?? undefined,
-            drawnSizes: drawnNow() ?? undefined,
-          });
-          patch({ chains, sizes, step: 'sizes' });
+        case 'sheet':
+          await toSizes();
           return;
-        }
         case 'sizes': {
           // The first run shows every model on the sheet: the variant is picked on the pieces step.
           const first = !baseSeeds.current;
@@ -1170,6 +1182,9 @@ export function useImportSession(deps: {
     som,
     clientKind: client.kind,
     blocker,
+    /** A0.2: the sheet is one page — the stepper shows the step passed over ("1 page"). */
+    sheetSkipped:
+      !extracted.presegmented && singlePageSheet(session.pages, session.sheet, inputs.gridOverride),
     /** S3: the fingerprint answers are read against (pass to `openQuestions`). */
     answersNow: answersNow(session, inputs),
     sizeTokens,

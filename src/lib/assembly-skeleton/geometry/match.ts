@@ -38,6 +38,8 @@ import {
   type PieceGeom,
   type Pt2,
   type SeamCandidate,
+  type SeamDecisions,
+  type SeamDecisionsInput,
   type SeamEvidence,
   type SeamGraph,
   type SkeletonFacts,
@@ -655,8 +657,12 @@ export function matchSeams(
   pieces: readonly PieceGeom[],
   facts: SkeletonFacts,
   rules: MatchRules = ALL_RULES,
+  decisionsIn?: SeamDecisionsInput,
 ): SeamGraph {
   const warnings: string[] = [];
+  // Seams stored on the card (lib/seams). Absent = the engine alone, exactly as before.
+  const decisions: SeamDecisions | undefined =
+    typeof decisionsIn === 'function' ? decisionsIn(pieces) : decisionsIn;
   // CANONICAL ORDER. Pieces by key, candidates by score then by their edge ids: the graph must not
   // depend on the order the card lists its pieces in (ties — equal unnotched edges, the two sides of
   // a symmetric piece — were broken by input order, and a reversed card read 10/60 blazer seams
@@ -756,6 +762,22 @@ export function matchSeams(
     }
   }
 
+  // Stored «not this seam»: a candidate meeting both sides of a rejected pair is dropped with the
+  // person's words, before the greedy (and before an engine closure could take it).
+  const excludedSet = new Set<Cand>();
+  for (const x of decisions?.excluded ?? []) {
+    if (x.surface) continue;
+    const A = new Set(x.aIds);
+    const B = new Set(x.bIds);
+    const hits = (r: Run, S: Set<EdgeId>) => r.edges.some((e) => S.has(e.id));
+    for (const c of all) {
+      if ((hits(c.u, A) && hits(c.v, B)) || (hits(c.u, B) && hits(c.v, A))) {
+        c.dropped = x.rule;
+        excludedSet.add(c);
+      }
+    }
+  }
+
   // Greedy: closures first (they take their edges out of play), then seams. Each edge is sewn
   // once — except an edge of a mirrored block cut twice (×2 MIRRORED): its reflected copy is the
   // other hand, so it may meet a SECOND edge of the same single piece it already meets (FRONT_L's
@@ -788,14 +810,49 @@ export function matchSeams(
         );
       }),
     );
+  // Stored seams go FIRST: a confirmed seam never competes, its edges are out of play before the
+  // engine's closures and seams; a stored closure blocks its edges the same way.
+  const pieceOfId = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
+  const idsOfSide = (c: SeamCandidate, side: 'a' | 'b') =>
+    side === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b);
+  const forcedIn = (decisions?.forced ?? []).filter((c) => c.kind !== 'surface');
+  const forcedSurface = (decisions?.forced ?? []).filter((c) => c.kind === 'surface');
+  const decidedClosures = decisions?.closures ?? [];
+  const candById = new Map(all.map((c) => [candId(c), c]));
+  const forcedSame = new Set<Cand>();
+  const forced: SeamCandidate[] = [];
+  for (const c of [...forcedIn, ...decidedClosures]) {
+    const A = idsOfSide(c, 'a');
+    const B = idsOfSide(c, 'b');
+    for (const [x, y] of [
+      [A, B],
+      [B, A],
+    ])
+      for (const id of x)
+        usedBy.set(id, [...(usedBy.get(id) ?? []), { piece: pieceOfId(y[0]), edge: y[0] }]);
+    if (c.kind === 'closure-not-seam') continue;
+    // The engine scored the same two runs: keep its numbers (lengths, notches) under the human rule.
+    const same = candById.get([c.a, c.b].sort(cmp).join('~'));
+    if (same) forcedSame.add(same);
+    forced.push(
+      same && !c.aParts && !c.bParts
+        ? { ...c, evidence: { ...same.evidence, rule: c.evidence.rule } }
+        : c,
+    );
+  }
+  for (const c of decidedClosures)
+    warnings.push(`${c.a} ↔ ${c.b} is a closure, not a seam (${c.evidence.rule ?? 'stored'})`);
+
   const closures: Cand[] = [];
   for (const c of all) {
-    if (c.kind !== 'closure-not-seam' || !free(c)) continue;
+    if (c.kind !== 'closure-not-seam' || c.dropped || !free(c)) continue;
     closures.push(c);
     take(c);
     warnings.push(`${c.u.id} ↔ ${c.v.id} is a closure, not a seam (${c.evidence.rule})`);
   }
-  const eligible = all.filter((c) => c.kind !== 'closure-not-seam' && !c.dropped);
+  const eligible = all.filter(
+    (c) => c.kind !== 'closure-not-seam' && !c.dropped && !forcedSame.has(c),
+  );
   const chosenC: Cand[] = [];
   for (const c of eligible) {
     if (c.score < SKELETON.accept) break;
@@ -822,7 +879,7 @@ export function matchSeams(
     (c.v.id === q.u.id && sameAnswer(c.u, q.v)) ||
     (c.v.id === q.v.id && sameAnswer(c.u, q.u));
   const chosenSet = new Set(chosenC);
-  const chosen = chosenC.map((c) => {
+  const engineChosen = chosenC.map((c) => {
     const alts = eligible.filter(
       (q) =>
         q !== c &&
@@ -837,12 +894,19 @@ export function matchSeams(
       alts.map((q) => toCandidate(q)),
     );
   });
+  const chosen = forced.length ? [...forced, ...engineChosen] : engineChosen;
 
   const rejected = [
+    ...decidedClosures,
     ...closures.map((c) => toCandidate(c)),
     ...all
       .filter(
-        (c) => !chosenSet.has(c) && c.kind !== 'closure-not-seam' && c.score >= REJECTED_FLOOR,
+        (c) =>
+          excludedSet.has(c) ||
+          (!chosenSet.has(c) &&
+            !forcedSame.has(c) &&
+            c.kind !== 'closure-not-seam' &&
+            c.score >= REJECTED_FLOOR),
       )
       .map((c) => toCandidate(c)),
   ];
@@ -852,7 +916,36 @@ export function matchSeams(
   if (rules.surface) {
     const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
     const s = surfaceSeams(byKey, copies);
-    chosen.push(...s.chosen);
+    let surfaceChosen = s.chosen;
+    if (decisions) {
+      // A rejected surface join is not drawn; a confirmed one carries who said so (the part's
+      // placement is the engine's — a surface join takes no edge to force).
+      const noSurface = (decisions.excluded ?? []).filter((x) => x.surface);
+      const out: SeamCandidate[] = [];
+      for (const c of surfaceChosen) {
+        const x = noSurface.find(
+          (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+        );
+        if (x) rejected.push({ ...c, evidence: { ...c.evidence, rule: x.rule } });
+        else out.push(c);
+      }
+      surfaceChosen = out.map((c) => {
+        const f = forcedSurface.find(
+          (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+        );
+        return f?.provenance ? { ...c, provenance: f.provenance } : c;
+      });
+      for (const f of forcedSurface)
+        if (
+          !surfaceChosen.some(
+            (c) => c.surface?.host === f.surface?.host && c.surface?.part === f.surface?.part,
+          )
+        )
+          warnings.push(
+            `confirmed surface join ${f.surface?.part} on ${f.surface?.host} is not found on today's marks — not drawn`,
+          );
+    }
+    chosen.push(...surfaceChosen);
     warnings.push(...s.warnings);
   }
 
@@ -865,6 +958,12 @@ export function matchSeams(
     return r;
   };
   for (const c of chosenC) parent.set(find(c.u.piece.pieceKey), find(c.v.piece.pieceKey));
+  for (const c of forced) {
+    const ks = [...idsOfSide(c, 'a'), ...idsOfSide(c, 'b')]
+      .map(pieceOfId)
+      .filter((k) => parent.has(k));
+    for (const k of ks) parent.set(find(k), find(ks[0]));
+  }
   for (const c of chosen) if (c.surface) parent.set(find(c.surface.host), find(c.surface.part));
   const groups = new Map<string, string[]>();
   for (const p of pieces) {
@@ -878,6 +977,7 @@ export function matchSeams(
   } else if (unnotched > 0) {
     warnings.push(`${unnotched} of ${pieces.length} pieces carry no notches`);
   }
+  if (decisions) warnings.push(...decisions.words);
 
   return { pieces: [...pieces], chosen, rejected, components: [...groups.values()], warnings };
 }
