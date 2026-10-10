@@ -80,6 +80,7 @@ import {
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
+import { gradeView } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
@@ -973,7 +974,8 @@ export class Session {
       return null;
     const set = this.chains;
     if (!set || !this.sheet) return { inferred: null };
-    if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
+    if (this.inferred?.set !== set)
+      this.inferred = { set, v: inferDrawnSizes(this.sheet, gradeView(set)) };
     return { inferred: this.inferred.v };
   }
 

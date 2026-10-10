@@ -262,6 +262,33 @@ export function rolesByFaces(
   };
 }
 
+const gradeViews = new WeakMap<ChainSet, ChainSet>();
+
+/**
+ * What the size checks (pieces/grade: the hook, the drawn-size inference) may read of the face
+ * pass. Its stray row rests on "a sheet with no size row is one size": a line sticking outside
+ * every outline is a stray. On a sheet drawing several sizes in one pen that is every larger size's
+ * line (the stripped bench: kombinezon lost a whole size, the solver counted 7 bands for 8 and a
+ * 7-size control closed 6 wrong contours; palto 21 closed wrong). So until the operator says so
+ * (the row's role changed, confidence 1) those lines are what they were before the face pass — F3's
+ * unconfirmed 'internal', which stays size evidence and a wall the solver must account for. The
+ * view is cached per set: the solver's cache is keyed by the set it is given.
+ */
+export function gradeView(set: ChainSet): ChainSet {
+  const unsure = (c: LineClass) =>
+    c.role === 'ignore' && c.confidence < 0.9 && c.evidence.some((e) => e.kind === 'face-stray');
+  if (!set.classes.some(unsure)) return set;
+  let v = gradeViews.get(set);
+  if (!v) {
+    v = {
+      ...set,
+      classes: set.classes.map((c) => (unsure(c) ? { ...c, role: 'internal' as const } : c)),
+    };
+    gradeViews.set(set, v);
+  }
+  return v;
+}
+
 /** Per wall line: piece wall, stray or internal (see the header). */
 function classify(
   fr: FaceRaster,
