@@ -331,8 +331,8 @@ export const CLICKS = {
   'not-a-piece': 2,
   code: 2,
   grain: 3,
-  // A1: "accept N proposed grainlines" — one click for every proposal on the step
-  'grain-accept': 1,
+  // A1: "review N proposed grainlines" + "accept these N" in the overview that shows them all
+  'grain-accept': 2,
   'fold-suggested': 1,
   'fold-pick': 2,
   outline: 1,
