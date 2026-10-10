@@ -24,6 +24,7 @@ import type {
   StyleId,
 } from '../../types';
 import { PATIMPORT } from '../../types';
+import { budgetOf } from '../budget';
 import {
   buildAst,
   int,
@@ -244,6 +245,8 @@ class Builder {
   }
 
   pushPath(e: RawEntity, ctx: Ctx, em: Emit, key: string): PathId {
+    // C4: every point of every block instance is paid for (adapters/budget.ts)
+    this.opts.budget?.spend(em.pts.length, 'the DXF entities (with block copies)');
     const id = this.paths.length;
     this.paths.push({
       id,
@@ -1107,6 +1110,7 @@ export async function readDxf(
     sagittaMm: opts.sagittaMm || PATIMPORT.sagittaMm,
     keepFills: opts.keepFills,
     pages: opts.pages,
+    budget: budgetOf(opts),
   });
   b.warnings.push(...raw.warnings);
   if (dec.fallback) b.warnings.push(`the file is not UTF-8 — decoded as ${dec.encoding}`);

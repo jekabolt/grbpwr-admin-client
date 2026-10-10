@@ -194,7 +194,15 @@ export type ExtractOpts = {
   keepFills: boolean;
   /** Pages to extract; undefined = all. */
   pages?: PageIndex[];
+  /**
+   * C4: the work budget of this read (adapters/budget.ts). The session shares one across the
+   * files of a run; a caller without one gets a budget per file.
+   */
+  budget?: WorkBudgetLike;
 };
+
+/** Units of adapter work (points emitted, PDF operators, SVG elements); throws past the limit. */
+export type WorkBudgetLike = { spend(units: number, what: string): void };
 
 export type Progress = (done: number, total: number, note?: string) => void;
 
@@ -880,6 +888,13 @@ export type FabricAssignment = {
    * NOT refused — its seeds get `fused` (decision 14).
    */
   refused?: { label: string; purpose: FabricPurposeKey; seeds: SeedId[]; reason: string }[];
+  /**
+   * C7: pieces whose fabric rests on the AI alone (the sheet says nothing about them). A cloth other
+   * than the main fabric (lining, interlining → fused, rib …) waits for the operator: `needsConfirm`
+   * blocks the fabrics step until they confirm it or change the piece's ticks. A piece whose name
+   * the operator edits loses its AI fabric (the hint was for the AI's name).
+   */
+  aiOnly?: { seed: SeedId; purposes: FabricPurposeKey[]; needsConfirm: boolean }[];
 };
 
 export type ProposeFabricsFn = (
@@ -1601,6 +1616,19 @@ export const PATIMPORT = {
   maxInputBytes: 150 * 1024 * 1024,
   maxInputFiles: 40,
   maxPdfPages: 200,
-  /** Pixels of one raster page / image (RGBA decode ≈ 4 B per pixel in the worker). */
-  maxRasterPixels: 100_000_000,
+  /**
+   * Pixels of one raster page / image (C5): the tracer's peak grows ≈ 16 B per pixel — measured
+   * 345 MB at 18 MP (`yarn patimport:raster limit`, worker/limits.ts): A1 at 150 dpi, A2 at 200 dpi.
+   */
+  maxRasterPixels: 18_000_000,
+  /**
+   * C4: adapter work of one read (adapters/budget.ts) — points emitted + PDF operators + SVG
+   * elements visited, all files together. Corpus (10.10): polupalto.pdf, 91 pages, spends 0.74 M
+   * (the most of any file), a DXF ≤ 26 k; 8 M ≈ 11 polupaltos ≈ 300 MB of points.
+   */
+  maxWorkUnits: 8_000_000,
+  /** C4: elements one SVG may visit, <use> copies included (≈ 2 µs each: ~1 s at the cap). */
+  maxSvgElements: 500_000,
+  /** C4: lines of one ASCII DXF (the tag stream is split whole). */
+  maxDxfLines: 6_000_000,
 } as const;

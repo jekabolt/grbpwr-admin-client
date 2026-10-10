@@ -11,7 +11,9 @@
 //      Interlining lists add; any other secondary list makes the piece that cloth only UNLESS the
 //      number is also in a main list (r4454: back, front and sleeve are in the shell list AND the
 //      lining list → both files);
-//   4. the AI's `fabrics` for the piece (F10 suggestion), only where the sheet itself is silent;
+//   4. the AI's `fabrics` for the piece (F10 suggestion), only where the sheet itself is silent, only
+//      for an AI name auto-accepted at T (C7: `aiFabricHintsOf`) and never below T; a cloth other
+//      than main decided by the AI alone waits for the operator (`aiOnly[].needsConfirm`);
 //   5. nothing said → the main fabric (confidence 0.6, the operator sees it).
 //
 // Each fabric is then mapped to a live card scope (`scope.ts scopeFor`). Interlining without a BOM
@@ -20,6 +22,7 @@
 // ticks another fabric or adds the BOM line.
 
 import type {
+  NameDecision,
   DraftScopeTarget,
   FabricAssignment,
   FabricEvidence,
@@ -31,12 +34,36 @@ import type {
   SeedId,
   FabricPurposeKey,
 } from '../types';
+import { AI_AUTO_ACCEPT_T } from '../ai/threshold';
 import { codeWordsOf } from '../manifest/identity';
 import { type CutList, linesOf, pieceNumberText, readCutLists } from './layout';
 import { type FabricKind, fabricKindsIn, hasFuseVerb } from './lexicon';
 import { KIND_OF_PURPOSE, PURPOSE_OF_KIND, isInterliningScope, scopeFor } from './scope';
 
 export type FabricHint = { seed: SeedId; fabrics: FabricPurposeKey[]; confidence: number };
+
+/**
+ * C7: the AI fabric calls the proposal may use — the same bar as an auto-accepted NAME: the model's
+ * answer (not the sheet text's), combined confidence ≥ T, and the combiner's evidence gates passed
+ * (`autoAccepted`: text backs the code, unique, grammar, no bare collision). A piece whose name the
+ * operator typed has no AI fabric: the call was made for the AI's name, not theirs.
+ */
+export function aiFabricHintsOf(
+  names: readonly NameDecision[],
+  editedNames: readonly SeedId[],
+  threshold: number = AI_AUTO_ACCEPT_T,
+): FabricHint[] {
+  const edited = new Set(editedNames);
+  return names.flatMap((n) =>
+    n.source === 'ai' &&
+    n.autoAccepted &&
+    n.confidence >= threshold &&
+    !edited.has(n.seed) &&
+    n.suggestion?.fabrics.length
+      ? [{ seed: n.seed, fabrics: n.suggestion.fabrics, confidence: n.confidence }]
+      : [],
+  );
+}
 
 export type ProposeFabricsInput = {
   /** Sheet texts (labels inside pieces and any layout printed on the sheet itself). */
@@ -59,6 +86,8 @@ export type SeedFabrics = {
   confidence: number;
   why: string[];
   evidence: FabricEvidence[];
+  /** C7: the kinds came from the AI alone (the sheet was silent). */
+  aiOnly: boolean;
 };
 
 export type ProposeFabricsDetail = {
@@ -93,7 +122,11 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
   const lists = readCutLists(linesOf(layoutTexts, pageKey));
   const mainListExists = lists.some((l) => l.kind === 'main');
 
-  const hintBySeed = new Map((input.aiHints ?? []).map((h) => [h.seed, h]));
+  // C7: below the auto-accept bar the AI's fabric is not used at all (aiFabricHintsOf is the gate;
+  // this keeps any other caller to the same bar)
+  const hintBySeed = new Map(
+    (input.aiHints ?? []).filter((h) => h.confidence >= AI_AUTO_ACCEPT_T).map((h) => [h.seed, h]),
+  );
   const idBySeed = new Map<SeedId, string[]>();
   for (const x of input.identities ?? [])
     idBySeed.set(x.seed, [...(idBySeed.get(x.seed) ?? []), x.identity]);
@@ -125,6 +158,7 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
     let confidence = 0.6;
     let explicitMain = false;
     let said = false;
+    let aiOnly = false;
 
     // 1. labels inside the piece
     const labelKinds = new Set<FabricKind>();
@@ -205,6 +239,7 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
           kinds = new Set(aiKinds);
           confidence = Math.min(0.8, 0.8 * hint.confidence);
           why.push(`AI: ${aiKinds.join(' + ')}`);
+          aiOnly = true;
         } else if (
           aiKinds.every((k) => kinds.has(k)) &&
           [...kinds].every((k) => aiKinds.includes(k))
@@ -215,7 +250,7 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
       }
     }
     if (!said && !(hint && hint.fabrics.length)) why.push('no fabric named — main fabric');
-    perSeed.push({ seed, number, kinds: [...kinds], confidence, why, evidence });
+    perSeed.push({ seed, number, kinds: [...kinds], confidence, why, evidence, aiOnly });
   }
 
   return { assignment: assign(perSeed, input.bom, lists), perSeed, lists };
@@ -289,6 +324,13 @@ function assign(
       refused.set(kind, r);
     }
   }
+  const aiOnly = perSeed
+    .filter((s) => s.aiOnly)
+    .map((s) => ({
+      seed: s.seed,
+      purposes: s.kinds.map((k) => PURPOSE_OF_KIND[k]),
+      needsConfirm: s.kinds.some((k) => k !== 'main'),
+    }));
   return {
     byPurpose,
     interliningInBom,
@@ -297,6 +339,7 @@ function assign(
       evidence: dedupeEvidence(p.evidence),
     })),
     refused: [...refused.values()],
+    ...(aiOnly.length ? { aiOnly } : {}),
   };
 }
 

@@ -4,6 +4,7 @@
 // refused with a typed error: the importer does not interpret PostScript.
 
 import type { ExtractFn, SourceDoc } from '../../types';
+import { assertFiniteDoc, WorkBudget } from '../budget';
 import { sha256Hex } from '../vector/builder';
 import { UnsupportedFormat } from './errors';
 import { latin1, sniffFormat } from './sniff';
@@ -64,18 +65,45 @@ export type ExtractorRegistry = {
 
 /**
  * The extractor for this file, or a thrown `UnsupportedFormat`. PDF-compatible .ai (and a PDF
- * wrapped in PostScript) go through `makeExtractAi(registry.pdf)`.
+ * wrapped in PostScript) go through `makeExtractAi(registry.pdf)`. Every extractor it hands out is
+ * bounded (C4): it spends from the run's work budget (a fresh one when the caller brings none) and
+ * its output is refused when a coordinate is not a finite number.
  */
 export function pickExtractor(bytes: ArrayBuffer, name: string, reg: ExtractorRegistry): ExtractFn {
   const sn = sniffFormat(bytes, name);
   if (sn.route === null) throw new UnsupportedFormat(sn.refusal, sn.why);
   if (sn.route === 'pdf')
-    return refusePassword(
-      sn.kind === 'ai' || (sn.pdfOffset ?? 0) > 0 ? makeExtractAi(reg.pdf) : reg.pdf,
+    return bounded(
+      refusePassword(
+        sn.kind === 'ai' || (sn.pdfOffset ?? 0) > 0 ? makeExtractAi(reg.pdf) : reg.pdf,
+      ),
     );
   const fn = reg[sn.route];
   if (!fn) throw new UnsupportedFormat('unknown-format', `${sn.route} adapter not registered`);
-  return fn;
+  return bounded(fn);
+}
+
+function bounded(fn: ExtractFn): ExtractFn {
+  return async (file, opts, progress) => {
+    try {
+      const doc = await fn(
+        file,
+        opts.budget ? opts : { ...opts, budget: new WorkBudget() },
+        progress,
+      );
+      assertFiniteDoc(doc);
+      return doc;
+    } catch (e) {
+      // the adapters' named refusals do not know the file's name: the operator needs it
+      if (
+        e instanceof Error &&
+        (e.name === 'InputTooLarge' || e.name === 'CorruptInput') &&
+        !e.message.startsWith(file.name)
+      )
+        e.message = `${file.name}: ${e.message}`;
+      throw e;
+    }
+  };
 }
 
 /** pdf.js throws `PasswordException` ("No password given" / "Incorrect Password") for a PDF

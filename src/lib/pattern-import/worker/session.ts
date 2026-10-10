@@ -82,6 +82,7 @@ import { ImportError, cancelled, stageUnavailable } from './errors';
 import { chainPreviewOf, previewOf } from './preview';
 import { wallsUsedBy } from './walls-used';
 import { checkInputSet, imagePixelsRefusal } from './limits';
+import { WorkBudget } from '../adapters/budget';
 
 /** Hex SHA-256 of the bytes ('' where the runtime has no WebCrypto — an insecure origin). */
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -314,6 +315,8 @@ export class Session {
     const docs: SourceDoc[] = [];
     this.calibrations = [];
     this.dxf = null;
+    // C4: one work budget for all files of this read (adapters/budget.ts)
+    const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
     const n = this.files.length;
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
@@ -367,7 +370,7 @@ export class Session {
       const extract = pickExtractor(bytes, info.name, reg);
       let doc: SourceDoc;
       try {
-        doc = await extract({ id: info.id, name: info.name, bytes }, opts, (d, t, note) => {
+        doc = await extract({ id: info.id, name: info.name, bytes }, runOpts, (d, t, note) => {
           ctx.checkCancel();
           fileProgress(d, t, note);
         });

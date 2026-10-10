@@ -20,6 +20,7 @@ import {
   pieceModifiers,
 } from 'components/managers/tech-card/components/piece-codes';
 import { combineNames } from 'lib/pattern-import/ai/combine';
+import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import {
   buildMarks,
   languageOf,
@@ -47,6 +48,7 @@ import { isKnownCode, PIECE_CODES } from 'lib/pattern-import/dictionary/codes';
 import { readPieceText } from 'lib/pattern-import/dictionary/synonyms';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import type {
+  NameDecision,
   IRPath,
   IRText,
   PieceCandidate,
@@ -1364,6 +1366,58 @@ export async function main(opts: { plans: string; corpus: string }): Promise<num
     ck(
       none.every((x) => x.t.auto[iT] === 0),
       'no text → nothing is auto-accepted at the T in use (the model alone never is)',
+    );
+  }
+
+  // ── C7 · the AI's fabric call rides on the name's bar (negative controls) ──────────────
+  {
+    head('C7 · AI fabric hints');
+    const LINING = 'TECH_CARD_BOM_PURPOSE_LINING';
+    const dec = (seed: number, p: Partial<NameDecision>): NameDecision => ({
+      seed,
+      suggestion: {
+        mark: seed,
+        code: 'BP',
+        mods: [],
+        displayName: 'back',
+        fabrics: [LINING],
+        cutQty: 2,
+        onFold: false,
+        pair: false,
+        variant: null,
+        modelConfidence: 0.95,
+        evidence: [],
+      },
+      source: 'ai',
+      evidence: [],
+      confidence: 0.92,
+      autoAccepted: true,
+      code: 'BP',
+      mods: [],
+      displayName: 'back',
+      ...p,
+    });
+    const names = [
+      dec(1, {}),
+      dec(2, { confidence: 0.6, autoAccepted: false }),
+      dec(3, {}),
+      dec(4, { confidence: 0.9, autoAccepted: false }),
+      dec(5, { source: 'text' }),
+    ];
+    const hints = aiFabricHintsOf(names, [3]);
+    ck(
+      hints.length === 1 && hints[0].seed === 1,
+      'only an auto-accepted AI name at ≥ T carries its fabric (low 0.60, edited name, ≥ T but gates failed, sheet text → none)',
+      JSON.stringify(hints.map((h) => h.seed)),
+    );
+    ck(
+      !hints.some((h) => h.seed === 2),
+      `AI lining at 0.60 (< T ${AI_AUTO_ACCEPT_T}) is not a fabric hint`,
+    );
+    ck(!hints.some((h) => h.seed === 3), 'an edited name drops its AI fabric');
+    ck(
+      aiFabricHintsOf([dec(1, { confidence: AI_AUTO_ACCEPT_T - 0.01 })], []).length === 0,
+      'just below T: no hint even when flagged auto-accepted',
     );
   }
 

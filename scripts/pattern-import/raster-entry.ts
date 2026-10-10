@@ -630,3 +630,85 @@ export function compareToTruth(
     inkToTruth,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// C5: a scan at the pixel limit, for the peak-memory measurement behind PATIMPORT.maxRasterPixels.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export { PATIMPORT } from 'lib/pattern-import/types';
+
+/** A pattern-like scan, RGBA: paper 246, a sheet-wide outline (the largest component), piece
+ * outlines in black and red, notches, a grainline per piece, scattered short strokes. */
+export function synthScan(w: number, h: number): Uint8ClampedArray {
+  const d = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    d[i * 4] = 246;
+    d[i * 4 + 1] = 245;
+    d[i * 4 + 2] = 243;
+    d[i * 4 + 3] = 255;
+  }
+  const dot = (x: number, y: number, r: number, g: number, b: number) => {
+    x |= 0;
+    y |= 0;
+    for (let dy = 0; dy < 2; dy++)
+      for (let dx = 0; dx < 2; dx++) {
+        const xx = x + dx,
+          yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const k = (yy * w + xx) * 4;
+        d[k] = r;
+        d[k + 1] = g;
+        d[k + 2] = b;
+      }
+  };
+  const line = (x0: number, y0: number, x1: number, y1: number, c: [number, number, number]) => {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+    for (let i = 0; i <= n; i++) dot(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n, ...c);
+  };
+  const m = Math.round(Math.min(w, h) * 0.02);
+  // sheet-wide frame (one component as large as the image)
+  line(m, m, w - m, m, [20, 20, 20]);
+  line(w - m, m, w - m, h - m, [20, 20, 20]);
+  line(w - m, h - m, m, h - m, [20, 20, 20]);
+  line(m, h - m, m, m, [20, 20, 20]);
+  // pieces: 4 × 5 rounded outlines, alternating black / red, with a grainline and notches
+  const cols = 4,
+    rows = 5;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      const cx = m + ((c + 0.5) * (w - 2 * m)) / cols,
+        cy = m + ((r + 0.5) * (h - 2 * m)) / rows;
+      const rx = ((w - 2 * m) / cols) * 0.42,
+        ry = ((h - 2 * m) / rows) * 0.42;
+      const col: [number, number, number] = (r + c) % 2 ? [200, 30, 30] : [25, 25, 25];
+      const N = Math.ceil(2 * Math.PI * Math.max(rx, ry));
+      let px = cx + rx,
+        py = cy;
+      for (let i = 1; i <= N; i++) {
+        const t = (2 * Math.PI * i) / N;
+        const k = 1 + 0.08 * Math.sin(5 * t);
+        const x = cx + rx * k * Math.cos(t),
+          y = cy + ry * k * Math.sin(t);
+        line(px, py, x, y, col);
+        px = x;
+        py = y;
+      }
+      line(cx, cy - ry * 0.6, cx, cy + ry * 0.6, col);
+      for (let q = 0; q < 6; q++) {
+        const t = (q / 6) * 2 * Math.PI;
+        const x = cx + rx * Math.cos(t),
+          y = cy + ry * Math.sin(t);
+        line(x, y, x - 12 * Math.cos(t), y - 12 * Math.sin(t), col);
+      }
+    }
+  // scattered short strokes (text-like)
+  let s = 12345;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const strokes = Math.round((w * h) / 4000);
+  for (let i = 0; i < strokes; i++) {
+    const x = rnd() * w,
+      y = rnd() * h;
+    line(x, y, x + 6 + rnd() * 10, y + (rnd() - 0.5) * 8, [30, 30, 30]);
+  }
+  return d;
+}

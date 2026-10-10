@@ -8,3 +8,6 @@ export {
   isUnsupportedFormat,
   UnsupportedFormat,
 } from 'lib/pattern-import/adapters/sniff';
+// C4 · bounded work: the run budget, the PDF operator walker (driven with a synthetic list).
+export { WorkBudget } from 'lib/pattern-import/adapters/budget';
+export { walkOperatorList } from 'lib/pattern-import/adapters/pdf/walk';
