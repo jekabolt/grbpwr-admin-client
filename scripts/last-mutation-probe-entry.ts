@@ -14,6 +14,7 @@ export {
   dropForm,
   dropMove,
   dropRedoTop,
+  dropUndoTop,
   emptyHistory,
   insertLabel,
   isFormEntry,
@@ -26,6 +27,9 @@ export {
   redoTitle,
   renameLabel,
   resolvePending,
+  skeletonCanRedo,
+  skeletonCanUndo,
+  skeletonLabel,
   undoStep,
   undoTitle,
 } from '../src/components/managers/tech-card/components/last-mutation';

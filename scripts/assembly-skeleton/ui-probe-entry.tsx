@@ -22,6 +22,10 @@ import {
   assemblySweep,
   classifyAssemblyInputs,
 } from 'components/managers/tech-card/components/assembly-frontier';
+import {
+  SkeletonAIAskContext,
+  type SkeletonAIAsk,
+} from 'components/managers/tech-card/components/assembly-skeleton-ai';
 import { useSkeletonDoor } from 'components/managers/tech-card/components/assembly-skeleton-panel';
 import {
   DEFAULT_SKELETON_PROVIDER,
@@ -44,10 +48,13 @@ import {
 import { pieceRefKey } from 'components/managers/tech-card/components/piece-block-refs';
 import type { PieceCloth } from 'components/managers/tech-card/components/piece-cloth';
 import {
+  mapFormToTechCardInsert,
+  mapTechCardToForm,
   techCardDefaultData,
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
+import { settleFormAfterSave } from 'components/managers/tech-card/components/useTechCardAutosave';
 import type { PieceShapes } from 'components/managers/tech-card/components/use-piece-shapes';
 
 // ── fixtures: a tee ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +312,9 @@ type Mount = {
   unitless?: boolean;
   /** Clone the contour Map on every BOM change, as `usePieceShapes` does on the card. */
   churnShapes?: boolean;
+  /** Mount the STUB AI asker (scenario L; 'fail' = it refuses after being charged); without it the
+   *  AI bar is not there at all. */
+  ai?: boolean | 'fail';
 };
 
 type Probe = {
@@ -318,6 +328,18 @@ type Probe = {
   touch: (index: number) => void;
   /** Unmount and mount OperationsField again, with the same door state above it. */
   remountField: () => void;
+  /** How many times the stub AI was asked, and the requests it got. */
+  aiCalls: () => number;
+  /**
+   * ONE AUTOSAVE, AS THE PAGE SETTLES IT: the form goes to the wire (the real mapper), comes back as
+   * a server that echoes the payload would return it (the real reverse mapper), and the REAL
+   * `settleFormAfterSave` writes it into the form — the path index.tsx runs after every body save.
+   */
+  settleLikeAutosave: () => void;
+  /** `draft` of every operation as the WRITE would send it (the real mapper to the wire). */
+  wireDrafts: () => (boolean | undefined)[];
+  /** The operations as a reload would put them into the form: wire → DTO → the real read mapper. */
+  reloadedOps: () => Record<string, unknown>[];
 };
 declare global {
   interface Window {
@@ -330,6 +352,95 @@ let requests: string[] = [];
 let calls = 0;
 let root: Root | null = null;
 let remount: (() => void) | null = null;
+let aiCalls = 0;
+
+/**
+ * THE STUB AI (scenario L): answers like the server would after validation — the other reading of
+ * every decision, and a DIFFERENT valid order (the latest ready step first), a reason each, plus one
+ * doubt on the first ordered step. Pure function of the request: the same skeleton, the same answer.
+ */
+const stubAI: SkeletonAIAsk = async (req) => {
+  aiCalls += 1;
+  const steps = req.steps ?? [];
+  const byId = new Map(steps.map((st) => [st.id ?? '', st]));
+  const rootOf = (id: string): string => {
+    const f = byId.get(id)?.follows;
+    return f ? rootOf(f) : id;
+  };
+  const riders = new Map<string, string[]>();
+  for (const st of steps)
+    if (st.follows) riders.set(st.follows, [...(riders.get(st.follows) ?? []), st.id ?? '']);
+  const group = (id: string): string[] => [id, ...(riders.get(id) ?? []).flatMap(group)];
+  const maker = new Map(steps.filter((st) => st.outputUnit).map((st) => [st.outputUnit!, st.id!]));
+  const ordered = steps.filter((st) => !st.follows).map((st) => st.id ?? '');
+  const needs = new Map(
+    ordered.map((id) => [
+      id,
+      new Set(
+        group(id)
+          .flatMap((g) => byId.get(g)?.inputs ?? [])
+          .map((k) => maker.get(k))
+          .filter((m): m is string => !!m && rootOf(m) !== id)
+          .map(rootOf),
+      ),
+    ]),
+  );
+  const done = new Set<string>();
+  const order: { stepId: string; reason: string }[] = [];
+  while (order.length < ordered.length) {
+    const ready = ordered.filter(
+      (id) => !done.has(id) && [...needs.get(id)!].every((n) => done.has(n)),
+    );
+    if (!ready.length) break;
+    const pick = ready[ready.length - 1];
+    done.add(pick);
+    order.push({ stepId: pick, reason: 'stub: the latest ready step first' });
+  }
+  return {
+    order,
+    picks: (req.decisions ?? []).map((d) => ({
+      decisionId: d.id,
+      reading: ((d.chosen ?? 0) + 1) % (d.readings?.length ?? 1),
+      reason: 'stub: the other reading',
+    })),
+    warnings: [
+      {
+        kind: 'order',
+        message: 'stub doubt about the first step',
+        stepIds: ordered.slice(0, 1),
+        pieceKeys: [],
+      },
+    ],
+    model: 'stub/model',
+    promptTokens: 1200,
+    completionTokens: 300,
+    costUsd: '0.0123',
+    notes: [],
+    cached: false,
+    // A fallback after a hung first provider: two calls, one of them with no known charge.
+    calls: 2,
+    unknownCalls: 1,
+  };
+};
+
+/** The stub AI refusing after it was charged: the server's AI_SPEND detail on the error. */
+const stubAIRefusing: SkeletonAIAsk = async () => {
+  aiCalls += 1;
+  const err = new Error('the assistant answered nothing usable') as Error & {
+    status?: number;
+    details?: unknown[];
+  };
+  err.status = 500;
+  err.details = [
+    {
+      '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+      reason: 'AI_SPEND',
+      domain: 'ai.grbpwr.com',
+      metadata: { calls: '2', unknown_calls: '0', cost_usd: '0.02' },
+    },
+  ];
+  throw err;
+};
 
 const SHAPES_NONE: PieceShapes = {
   shapeByKey: null,
@@ -406,6 +517,9 @@ function Stand({ m }: { m: Mount }) {
           pieceShapes={shapes.shapeByKey}
           applyRequest={skeleton.applyRequest}
           onSkeletonApplied={skeleton.onSkeletonApplied}
+          skeletonUndoRequest={skeleton.skeletonUndoRequest}
+          onSkeletonUndone={skeleton.onSkeletonUndone}
+          onSkeletonUndoable={skeleton.onSkeletonUndoable}
           emptyAction={skeleton.emptyAction}
         />
       </CardUnitPicturesProvider>
@@ -454,11 +568,15 @@ function Harness({ m }: { m: Mount }) {
           value={{ ...AUTOSAVE_OFF, status: 'idle', request: (r) => void requests.push(r) }}
         >
           <SkeletonProviderContext.Provider value={m.noProvider ? null : provider}>
-            <FormProvider {...methods}>
-              <form className='bg-pageBg p-6'>
-                <Stand m={m} />
-              </form>
-            </FormProvider>
+            <SkeletonAIAskContext.Provider
+              value={m.ai === 'fail' ? stubAIRefusing : m.ai ? stubAI : null}
+            >
+              <FormProvider {...methods}>
+                <form className='bg-pageBg p-6'>
+                  <Stand m={m} />
+                </form>
+              </FormProvider>
+            </SkeletonAIAskContext.Provider>
           </SkeletonProviderContext.Provider>
         </AutosaveContext.Provider>
       </MemoryRouter>
@@ -470,6 +588,7 @@ window.__sk = {
   mount: (m) => {
     requests = [];
     calls = 0;
+    aiCalls = 0;
     root?.unmount();
     const host = document.getElementById('root')!;
     host.innerHTML = '';
@@ -508,4 +627,21 @@ window.__sk = {
     form!.setValue(`operations.${index}.smv`, '1.2', { shouldDirty: true });
   },
   remountField: () => remount?.(),
+  aiCalls: () => aiCalls,
+  wireDrafts: () =>
+    (mapFormToTechCardInsert(form!.getValues(), undefined, true).operations ?? []).map(
+      (o) => o.draft,
+    ),
+  reloadedOps: () =>
+    mapTechCardToForm({
+      id: 1,
+      techCard: mapFormToTechCardInsert(form!.getValues(), undefined, true),
+    } as never).operations as unknown as Record<string, unknown>[],
+  settleLikeAutosave: () => {
+    const f = form!;
+    const before = structuredClone(f.getValues());
+    const insert = mapFormToTechCardInsert(f.getValues(), undefined, true);
+    const server = mapTechCardToForm({ id: 1, techCard: insert } as never);
+    settleFormAfterSave(f, before, { values: server, server });
+  },
 };

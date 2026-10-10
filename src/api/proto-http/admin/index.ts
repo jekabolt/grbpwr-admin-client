@@ -9201,6 +9201,12 @@ export type common_TechCardOperation = {
   // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
   // жест, а не потеря.
   bomQuantities: common_TechCardOperationBomQty[] | undefined;
+  // ЧЕРНОВИК КАРКАСА СБОРКИ (0410). true = шаг записал каркас сборки (OPERATIONS → build from pattern
+  // → apply), и его ещё никто не проверил. Снимает первая смысловая правка строки или клик по чипу
+  // «draft» (reviewed). В ДАЙДЖЕСТ НЕ ВХОДИТ: проверка шага не меняет того, что карточка говорит цеху,
+  // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
+  // сборки — это пометка для команды, а не инструкция.
+  draft: boolean | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -13325,6 +13331,175 @@ export type PutTechCardPatternSizeIndexRequest = {
 export type PutTechCardPatternSizeIndexResponse = {
   sheetFingerprint: string | undefined;
   resolvedSizeCount: number | undefined;
+};
+
+// PatternPieceEvidence is what the client measured and read on one marked piece.
+export type PatternPieceEvidence = {
+  mark: number | undefined;
+  textInside: string[] | undefined;
+  quantityText: string | undefined;
+  areaCm2: number | undefined;
+  bboxWMm: number | undefined;
+  bboxHMm: number | undefined;
+  isSymmetricHint: boolean | undefined;
+  hasFoldLineHint: boolean | undefined;
+};
+
+// PatternPieceCrop is a close-up picture of one marked piece.
+export type PatternPieceCrop = {
+  mark: number | undefined;
+  mediaId: number | undefined;
+};
+
+// PatternPiecesContext is what the card and the pattern's own pages say around the pieces.
+export type PatternPiecesContext = {
+  sizeNames: string[] | undefined;
+  fabricPurposesInBom: string[] | undefined;
+  existingCardPieceNames: string[] | undefined;
+  instructionsTextExcerpt: string | undefined;
+  languageHint: string | undefined;
+};
+
+// PatternPieceCodeOption is one allowed code prefix and its English name.
+export type PatternPieceCodeOption = {
+  code: string | undefined;
+  name: string | undefined;
+};
+
+export type SuggestPatternPiecesRequest = {
+  techCardId: number | undefined;
+  overviewMediaId: number | undefined;
+  crops: PatternPieceCrop[] | undefined;
+  pieces: PatternPieceEvidence[] | undefined;
+  context: PatternPiecesContext | undefined;
+  // allowed_codes — the code prefixes the answer may use; empty = the server's default vocabulary
+  // (FP BP SL CLR CUF PLK WB PCK YK FAC LIN SP FL GST BLT WS).
+  allowedCodes: PatternPieceCodeOption[] | undefined;
+  // allowed_modifiers — the letter/symbol modifiers a code may carry; empty = L R F B #. A part
+  // number 1..20 is always allowed.
+  allowedModifiers: string[] | undefined;
+  force: boolean | undefined;
+};
+
+// PatternPieceSuggestion is the model's proposal for one marked piece, validated by the server.
+export type PatternPieceSuggestion = {
+  mark: number | undefined;
+  // code — PREFIX[_L|_R][_F|_B][_n][_#], uppercase, no size tail; "" when the model's code was
+  // refused (the reason is in warnings) or the model gave none.
+  code: string | undefined;
+  humanNameEn: string | undefined;
+  fabricPurposes: string[] | undefined;
+  cutQuantity: number | undefined;
+  fold: boolean | undefined;
+  pair: boolean | undefined;
+  variant: string | undefined;
+  confidence: number | undefined;
+  evidence: string[] | undefined;
+};
+
+export type SuggestPatternPiecesResponse = {
+  suggestions: PatternPieceSuggestion[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  warnings: string[] | undefined;
+  cached: boolean | undefined;
+};
+
+// AssemblySkeletonPiece is one cut piece of the garment as the skeleton read it.
+export type AssemblySkeletonPiece = {
+  key: string | undefined;
+  name: string | undefined;
+  cloth: string | undefined;
+  hand: string | undefined;
+  count: number | undefined;
+  fused: boolean | undefined;
+};
+
+// AssemblySkeletonSeam is one edge pair the client matched (or could not decide).
+export type AssemblySkeletonSeam = {
+  a: string | undefined;
+  b: string | undefined;
+  score: number | undefined;
+  kind: string | undefined;
+  evidence: string | undefined;
+};
+
+// AssemblySkeletonReading is one way an ambiguous join can be read.
+export type AssemblySkeletonReading = {
+  inputs: string[] | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonDecision is an ambiguous join: two or more readings, one chosen by the client.
+export type AssemblySkeletonDecision = {
+  id: string | undefined;
+  readings: AssemblySkeletonReading[] | undefined;
+  chosen: number | undefined;
+};
+
+// AssemblySkeletonStep is one step of the client's proposed order.
+export type AssemblySkeletonStep = {
+  id: string | undefined;
+  inputs: string[] | undefined;
+  outputUnit: string | undefined;
+  outputName: string | undefined;
+  operation: string | undefined;
+  label: string | undefined;
+  confidence: number | undefined;
+  decisionId: string | undefined;
+  follows: string | undefined;
+};
+
+export type SuggestAssemblySkeletonRequest = {
+  techCardId: number | undefined;
+  category: string | undefined;
+  templateStages: string[] | undefined;
+  pieces: AssemblySkeletonPiece[] | undefined;
+  seams: AssemblySkeletonSeam[] | undefined;
+  decisions: AssemblySkeletonDecision[] | undefined;
+  steps: AssemblySkeletonStep[] | undefined;
+  force: boolean | undefined;
+};
+
+// AssemblySkeletonOrderItem is one step in the model's suggested order.
+export type AssemblySkeletonOrderItem = {
+  stepId: string | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonPick is the model's reading of one decision.
+export type AssemblySkeletonPick = {
+  decisionId: string | undefined;
+  reading: number | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonWarning is one plausibility doubt about the skeleton.
+export type AssemblySkeletonWarning = {
+  // order (a step before what it needs: sleeve before shoulder), lining (lining or facing order),
+  // missing (a piece in no step, a step the garment needs), closure, pressing, other
+  kind: string | undefined;
+  message: string | undefined;
+  stepIds: string[] | undefined;
+  pieceKeys: string[] | undefined;
+};
+
+export type SuggestAssemblySkeletonResponse = {
+  // order — the ordered steps (every step without `follows`), each exactly once; EMPTY when the
+  // model gave no usable order (the reason is in notes). A rider follows its join.
+  order: AssemblySkeletonOrderItem[] | undefined;
+  picks: AssemblySkeletonPick[] | undefined;
+  warnings: AssemblySkeletonWarning[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  notes: string[] | undefined;
+  cached: boolean | undefined;
+  calls: number | undefined;
+  unknownCalls: number | undefined;
 };
 
 export type SaveTechCardPieceAreasRequest = {
@@ -19541,6 +19716,42 @@ export interface AdminService {
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
   PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
+  // SuggestPatternPieces (pattern import, F9) — ONE sync vision+JSON call (chat.pattern_pieces) that
+  // NAMES the pieces of an imported sewing pattern. The client finds the pieces itself (geometry is
+  // deterministic and never comes from the model), renders the assembled sheet with a number on
+  // every piece (Set-of-Mark, overview_media_id), optionally crops of single pieces, and sends its
+  // own evidence per mark (text inside the contour, quantity note, area, bbox, symmetry and fold
+  // hints) plus the card's context. The model proposes, per mark: a piece code of the card's grammar
+  // (PREFIX[_modifiers], uppercase, NO size tail), an English name, fabric purposes, cut quantity,
+  // fold, pair, a variant label, a confidence and short evidence quotes. The server validates the
+  // answer: unknown marks are dropped, the confidence is clamped to 0..1, the code is normalised to
+  // the grammar and refused (code "", a warning) when its prefix is not allowed or it carries a size
+  // tail or an unknown modifier. Nothing is stored; an identical request within an hour is answered
+  // from process memory (cached) unless force. tech_card_id is optional (0 = no card yet).
+  // InvalidArgument: no overview, 0 or more than 80 pieces, more than 12 crops, a duplicate mark, a
+  // crop of a mark not in pieces. FailedPrecondition: an image is not a picture.
+  SuggestPatternPieces(request: SuggestPatternPiecesRequest): Promise<SuggestPatternPiecesResponse>;
+  // SuggestAssemblySkeleton (assembly skeleton, lane E) — ONE sync JSON call (chat.assembly_skeleton)
+  // that gives a SECOND OPINION on the assembly skeleton the client read off the pattern. The client
+  // builds the skeleton itself (pieces → seams → units → order, deterministic) and sends it here as
+  // data: the pieces (name, cloth, hand, ×n), the seams it found with their scores, the ambiguous
+  // joins as decisions with their readings, the category and its template's stage order, and the
+  // steps in the order it proposes. Text only: no picture is sent. The model returns: a suggested
+  // order of the steps (each with a reason), a pick per decision (each with a reason) and
+  // plausibility warnings (a sleeve set before the shoulders are joined, a lining bagged
+  // before its facings, a piece in no step…). The server validates the answer against the request:
+  // unknown step, decision and piece ids are dropped, a pick outside a decision's readings is
+  // dropped, and an order that is not a complete permutation of the ordered steps or that sews a
+  // unit before the step that makes it is returned EMPTY with a note. Nothing is stored and nothing
+  // is applied: the client shows the answer marked AI and applies it only on a press. An identical
+  // request within an hour is answered from process memory (cached) unless force. One press may make
+  // more than one provider call (a fallback after an engaged timeout, one retry of an unusable
+  // answer): the response sums every call (calls, unknown_calls, cost_usd), and a refusal after a
+  // call carries the same figures as an ErrorInfo detail (reason AI_SPEND, metadata calls,
+  // unknown_calls, cost_usd).
+  // InvalidArgument: 0 or more than 80 pieces, 0 or more than 240 steps, more than 400 seams or 60
+  // decisions, a duplicate or unknown id, a field above its bound.
+  SuggestAssemblySkeleton(request: SuggestAssemblySkeletonRequest): Promise<SuggestAssemblySkeletonResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
   // type one.
@@ -25961,6 +26172,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "PutTechCardPatternSizeIndex",
       }) as Promise<PutTechCardPatternSizeIndexResponse>;
+    },
+    SuggestPatternPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/pattern-import/pieces:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPatternPieces",
+      }) as Promise<SuggestPatternPiecesResponse>;
+    },
+    SuggestAssemblySkeleton(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/assembly-skeleton:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestAssemblySkeleton",
+      }) as Promise<SuggestAssemblySkeletonResponse>;
     },
     SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

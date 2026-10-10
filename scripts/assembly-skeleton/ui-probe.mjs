@@ -11,6 +11,9 @@
 //                                                                    re-read the graph whenever the
 //                                                                    contour Map changes identity —
 //                                                                    the «BOM keystroke» check MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-undo-media   the undo of a skeleton apply
+//                                                                    forgets to restore mediaCleared
+//                                                                    — U2 MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -42,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 
 const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
 const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
+const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -110,6 +114,18 @@ const plugins = [
     },
   },
 ];
+const UNDO_MEDIA_FIX = `      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });\n`;
+if (MUTATE_UNDO_MEDIA)
+  plugins.push({
+    name: 'undo-media-mutation',
+    setup(b) {
+      b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(UNDO_MEDIA_FIX)) throw new Error('undo mutation did not find its line');
+        return { contents: src.replace(UNDO_MEDIA_FIX, ''), loader: 'tsx' };
+      });
+    },
+  });
 if (MUTATE_AUTOAPPLY)
   plugins.push({
     name: 'skeleton-mutation',
@@ -455,6 +471,248 @@ await closePanel();
   );
 }
 
+// ── M0 ──────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6 SUSPECTED DEFECT, MEASURED: «autosave re-mints row ids on a length change, so the draft
+// marks keyed by field id die seconds after apply». The apply changes the length BEFORE the save; the
+// save then lands the same length, and settle writes leaves. Measured on the real mapper both ways and
+// the real settleFormAfterSave: are the rows the same DOM nodes (React key = field id), and do the
+// draft marks survive?
+head('M0 — an autosave after apply: row ids and draft marks survive the settle');
+await mount({ machines: [{ machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK' }] });
+await openPanel();
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+await closePanel();
+await page.click('[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")');
+await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+{
+  const marksBefore = await page.locator('[data-rail-draft]').count();
+  await page.evaluate(() =>
+    document.querySelectorAll('[data-rail-step]').forEach((n) => (n.__probeTag = 1)),
+  );
+  await page.evaluate(() => window.__sk.settleLikeAutosave());
+  await page.waitForTimeout(400);
+  const sameNodes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-rail-step]')].every((n) => n.__probeTag === 1),
+  );
+  const marksAfter = await page.locator('[data-rail-draft]').count();
+  console.log(
+    `        measured: rows kept their DOM nodes (ids not re-minted): ${sameNodes}; draft marks ${marksBefore} → ${marksAfter}`,
+  );
+  ck(marksBefore === 5, 'five draft marks before the save', `${marksBefore}`);
+  ck(sameNodes, 'the settle does not re-mint the applied rows');
+  ck(
+    marksAfter === marksBefore,
+    'the draft marks survive the autosave settle',
+    `${marksBefore} → ${marksAfter}`,
+  );
+}
+
+// ── M ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §7: «draft» is a FIELD of the step (0410), not session state. It rides the write, comes back
+// on a reload, an edit takes it off, and a click on the chip says «reviewed» without touching the step.
+head('M — the draft mark is stored on the step: reload keeps it, edit or click takes it off');
+{
+  ck(
+    (await ops()).every((r) => r.draft === true),
+    'every applied row carries draft = true in the form',
+  );
+  const wire = await page.evaluate(() => window.__sk.wireDrafts());
+  ck(
+    wire.length === 5 && wire.every((d) => d === true),
+    'the write sends draft = true on every applied step',
+    JSON.stringify(wire),
+  );
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded });
+  const labels = await page.evaluate(
+    () => (document.body.textContent ?? '').match(/· draft/g)?.length ?? 0,
+  );
+  ck(labels === 5, 'a reload (mount from the DTO) keeps five «· draft» labels', `seen ${labels}`);
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === 5,
+    'the rail of the reloaded card marks five rows «draft»',
+  );
+  ck(!(await isDirty()), 'loading drafts does not dirty the form');
+  await page.evaluate(() => window.__sk.touch(1));
+  await page.waitForTimeout(250);
+  const afterEdit = await ops();
+  ck(
+    afterEdit[1].draft === false && afterEdit.filter((r) => r.draft).length === 4,
+    'an edit takes the mark off that row only, in the data',
+    afterEdit.map((r) => (r.draft ? 1 : 0)).join(''),
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 4, 'the rail shows four chips');
+  const beforeClick = JSON.stringify({ ...(await ops())[3], draft: null });
+  await page.click('[data-rail-draft="3"]');
+  await page.waitForTimeout(250);
+  const afterClick = await ops();
+  ck(afterClick[3].draft === false, 'a click on the chip marks the step reviewed');
+  ck(
+    JSON.stringify({ ...afterClick[3], draft: null }) === beforeClick,
+    'reviewing touches no other field of the step',
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 3, 'three chips left');
+  ck(await isDirty(), 'reviewing dirties the form, so the autosave carries it');
+  await shot('m-rail-reviewed', '[data-rail-step="0"]');
+}
+{
+  // A released card: the chip is there, but «reviewed» is an edit and does nothing.
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded, frozen: true });
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  const n = await page.locator('[data-rail-draft]').count();
+  await page.locator('[data-rail-draft]').first().click({ force: true });
+  await page.waitForTimeout(200);
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === n && n === 3,
+    'a frozen card keeps its marks: reviewing is an edit',
+    `${n}`,
+  );
+}
+
+// ── U ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6: one record kind 'skeleton' in the field's history; the panel's «undo» takes the whole
+// batch back while its rows are still draft — photos (mediaId) and mediaCleared included.
+head('U — undo of a skeleton apply: append, replace over photos, refused after an edit');
+const U_OWN = [
+  {
+    operationType: MACHINE,
+    machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+    zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+    inputKeys: ['PKT'],
+  },
+  {
+    operationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
+    zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+    inputKeys: ['LBL'],
+  },
+];
+{
+  // U1 append → undo: the card is exactly as before, no draft left; re-apply works again.
+  await mount({ ops: U_OWN });
+  const before = JSON.stringify(await ops());
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const added = (await ops()).length - 2;
+  ck(added > 0, 'append wrote the batch after the two own steps', `+${added}`);
+  ck((await page.locator('[data-skeleton-undo]').count()) === 1, 'the panel offers «undo»');
+  await shot('u-append-undo-offered', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  ck(after.length === 2, 'undo: the length is as before', `${after.length}`);
+  ck(JSON.stringify(after) === before, 'undo: the own steps are byte-identical');
+  ck(
+    after.every((r) => !r.draft),
+    'undo: no draft left',
+  );
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, '«undo» is gone after it ran');
+  ck(
+    (await page.locator('[data-skeleton-step-applied]').count()) === 0,
+    'the panel un-marks the steps it took back',
+  );
+  await shot('u-append-undone', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck((await ops()).length === 2 + added, 'the same batch applies again after an undo');
+  await closePanel();
+}
+{
+  // U2 replace over a step with photos → undo: the photos come back by mediaId, mediaCleared off.
+  const PH = { mediaId: 7, caption: 'cuff', annotations: [] };
+  await mount({
+    ops: [
+      {
+        operationType: MACHINE,
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+        inputKeys: ['PKT', 'FP'],
+        outputUnitKey: 'FRONT-P',
+        outputUnitName: 'Front with pocket',
+        media: [PH, { ...PH, mediaId: 8 }],
+      },
+    ],
+  });
+  const before = await ops();
+  await openPanel('header', 'replace');
+  await page.click('[data-skeleton-apply-all]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === true,
+    'replace over photos declared mediaCleared',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  const ids = (rows) => rows.flatMap((r) => (r.media ?? []).map((m) => m.mediaId)).join(',');
+  ck(
+    after.length === 1 && ids(after) === ids(before) && ids(after) === '7,8',
+    'undo: the step comes back with its photos (same mediaId)',
+    ids(after),
+  );
+  ck(after[0].outputUnitKey === 'FRONT-P', 'undo: its unit comes back');
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === false,
+    'undo: mediaCleared is off again — the save keeps the photos',
+  );
+  await closePanel();
+}
+{
+  // U3 an edit of one applied row: the record is no longer valid — the button goes, and a press
+  // that races the edit is refused in words, nothing written.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    window.__sk.touch(3);
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused]', { timeout: 5000 });
+  const t = await page.locator('[data-skeleton-undo-refused]').innerText();
+  ck(/applied steps were edited/.test(t), 'undo refused in words after an edit', t);
+  ck((await ops()).length === n, 'the refusal writes nothing');
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, 'no «undo» button any more');
+  await shot('u-refused', '[data-skeleton-panel]');
+  await closePanel();
+}
+{
+  // U4 «reviewed» on one applied row is a decision on the batch, too: undo goes.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'control: a reopened panel still offers «undo» for the untouched batch',
+  );
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-draft="2"]', { timeout: 5000 });
+  await page.click('[data-rail-draft="2"]');
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'a step marked reviewed takes «undo» away',
+  );
+  await closePanel();
+}
+
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
 await mount({});
@@ -785,6 +1043,136 @@ if (!blazer) {
   await closePanel();
 }
 
+// ── L ───────────────────────────────────────────────────────────────────────────────────────────
+head('L — the AI second opinion (stub asker): shown beside the steps, used only on a press');
+if (!blazer) {
+  ck(false, 'blazer DXF found (SKELETON_PLANS)', 'corpus missing');
+} else {
+  // The steps in their order, without the AI's own marks (its pills and its «AI:» lines).
+  const stepWords = async () =>
+    (await page.locator('[data-skeleton-step]').allInnerTexts()).map((t) =>
+      t
+        .split('\n')
+        .filter((l) => !/^AI\b/.test(l.trim()))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .replace(/ · AI\b/g, ''),
+    );
+  const aiCalls = () => page.evaluate(() => window.__sk.aiCalls());
+  await mount({ real: blazer, ai: true });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  ck((await page.locator('[data-skeleton-ai="idle"]').count()) === 1, 'the AI bar is there, idle');
+  ck((await aiCalls()) === 0, 'opening the panel asks the AI nothing');
+  const engineCalls = await page.evaluate(() => window.__sk.providerCalls());
+  const opsBefore = JSON.stringify(await ops());
+  const before = await stepWords();
+
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  ck((await aiCalls()) === 1, 'one press, one call');
+  ck(
+    JSON.stringify(await stepWords()) === JSON.stringify(before),
+    'the answer is SHOWN: the steps stay in the engine order',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'the form does not move');
+  ck((await requests()).length === 0, 'autosave never asked');
+  const places = await page.locator('[data-skeleton-ai-place]').count();
+  ck(places >= 10, 'each ordered step carries its AI place', `${places} AI places`);
+  const picksShown = await page.locator('[data-skeleton-ai-pick]').count();
+  ck(picksShown >= 1, 'the AI pick is marked on the reading chips', `${picksShown}`);
+  {
+    const cost = await page.locator('[data-skeleton-ai-cost="0.0123"]').innerText();
+    ck(
+      /2 calls/i.test(cost) && cost.includes('$0.0123') && /1 with no known charge/i.test(cost),
+      'every call of the press is printed, the unpriced one named',
+      cost,
+    );
+  }
+  ck(
+    (await page.locator('[data-skeleton-ai-warning]').count()) === 1,
+    'the AI doubt sits on its step',
+  );
+  const moved = Number(
+    await page.locator('[data-skeleton-ai-use-order]').getAttribute('data-skeleton-ai-use-order'),
+  );
+  ck(moved > 0, 'the AI order moves steps — offered, not applied', `${moved} would move`);
+  await shot('l-ai-shown', '[data-skeleton-panel]');
+
+  // Readings first: a rebuild, and the order read on the old readings is no longer offered.
+  await page.click('[data-skeleton-ai-use-readings]');
+  await page.waitForFunction((n) => window.__sk.providerCalls() > n, engineCalls, {
+    timeout: 10000,
+  });
+  await page.waitForSelector('[data-skeleton-ai-order-blocked]', { timeout: 10000 });
+  ck(
+    /changed since the AI read it/.test(
+      await page.locator('[data-skeleton-ai-order-blocked]').innerText(),
+    ),
+    'after the AI readings the old AI order is refused in words',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'still nothing in the form');
+
+  // Ask again on the rebuilt skeleton, then use its order.
+  await page.click('[data-skeleton-ai-again]');
+  await page.waitForFunction(() => window.__sk.aiCalls() === 2, null, { timeout: 10000 });
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  const beforeOrder = await stepWords();
+  await page.click('[data-skeleton-ai-use-order]');
+  await page.waitForFunction(
+    () => document.querySelector('[data-skeleton-ai-use-order]')?.textContent?.includes('in use'),
+    null,
+    { timeout: 10000 },
+  );
+  const afterOrder = await stepWords();
+  ck(
+    JSON.stringify(afterOrder) !== JSON.stringify(beforeOrder) &&
+      // Step numbers («30», «↳ with 30») follow the order; what each step IS does not.
+      JSON.stringify(afterOrder.map((t) => t.replace(/\d+/g, '#')).sort()) ===
+        JSON.stringify(beforeOrder.map((t) => t.replace(/\d+/g, '#')).sort()),
+    '«use AI order» reorders the same steps on screen',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'using the AI order writes nothing to the form');
+  for (;;) {
+    const off = page.locator(
+      '[data-skeleton-accepted="0"]:not([data-skeleton-step-applied]) [data-skeleton-check]',
+    );
+    if ((await off.count()) === 0) break;
+    await off.first().click();
+  }
+  const blocked = await page.locator('[data-skeleton-violation]').count();
+  ck(blocked === 0, 'the AI-ordered batch keeps the order', `${blocked} violations`);
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(
+    hard.length === 0,
+    'assemblySweep clean on the applied AI order',
+    JSON.stringify(hard).slice(0, 300),
+  );
+  await shot('l-ai-applied', '[data-skeleton-panel]');
+  await closePanel();
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
+  ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
+  await closePanel();
+
+  // A refusal after the provider was paid says so: the AI_SPEND detail is printed with the error.
+  await mount({ real: blazer, ai: 'fail' });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai-error]', { timeout: 10000 });
+  const refusal = await page.locator('[data-skeleton-ai-error]').innerText();
+  ck(
+    /charged anyway: 2 calls · \$0\.0200/i.test(refusal),
+    'a refused press still prints what it was charged',
+    refusal,
+  );
+  ck(JSON.stringify(await ops()) === '[]', 'the refusal writes nothing');
+  await closePanel();
+}
+
 // ── G ───────────────────────────────────────────────────────────────────────────────────────────
 head('G — the real engine on SS26-005: pictograms in the panel and on the schematic');
 const real = await loadRealCard();
@@ -832,6 +1220,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}`,
 );
 if (bad) process.exitCode = 1;

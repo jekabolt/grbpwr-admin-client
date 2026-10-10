@@ -190,6 +190,7 @@ import {
   dropForm,
   dropMove,
   dropRedoTop,
+  dropUndoTop,
   emptyHistory,
   insertLabel,
   moveLabel,
@@ -201,6 +202,8 @@ import {
   redoTitle,
   renameLabel,
   resolvePending,
+  skeletonCanUndo,
+  skeletonLabel,
   undoStep,
   undoTitle,
   type History,
@@ -646,6 +649,8 @@ export const emptyOperation = {
   zone: NONE_ZONE,
   calloutNumber: 0, // 0 = no sketch pin linked
   smv: '',
+  // A hand-made step is never a draft; only the assembly skeleton writes `true` (rowFromStep).
+  draft: false,
   seamClass: NONE_SEAM_CLASS,
   stitchesPerCm: '',
   seamAllowanceMm: '',
@@ -858,7 +863,9 @@ export function skeletonZoneOf(step: Pick<SkeletonStep, 'zone'>): string {
 export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): OperationRow {
   const operationType = enumOf(OP_TYPE_PREFIX, step.operationType);
   const isMachine = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-  return rowFromCreate({
+  // DRAFT (0410): the one writer of `draft: true`. Stored on the step, so the mark survives a reload
+  // and the whole team sees which steps nobody has checked.
+  const row = rowFromCreate({
     inputKeys: step.inputs.map((k) => k.trim()).filter(Boolean),
     outputUnitKey: step.outputUnitKey.trim(),
     outputUnitName: step.outputUnitKey.trim() ? step.outputUnitName.trim() : '',
@@ -869,6 +876,7 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
       ? { pressEquipment: skeletonPressOf(operationType, ctx).pressEquipment }
       : {}),
   });
+  return { ...row, draft: true };
 }
 
 /**
@@ -899,6 +907,20 @@ export type SkeletonApplyResult = {
   nonce: number;
   /** Rows written. 0 with `refused` set means nothing changed. */
   applied: number;
+  refused?: string;
+};
+
+/** The panel's «undo» of the apply `nonce`; `seq` dedupes presses. */
+export type SkeletonUndoRequest = { nonce: number; seq: number };
+
+/** What `OperationsField` reports after an undo or a redo of a skeleton apply. */
+export type SkeletonUndoResult = {
+  nonce: number;
+  /** Rows taken back by an undo (0 on a redo or a refusal). */
+  undone: number;
+  /** Rows written again by a redo. */
+  redone?: number;
+  /** Why nothing was undone, in words. */
   refused?: string;
 };
 
@@ -5829,6 +5851,9 @@ export function OperationsField({
   onAdded,
   applyRequest = null,
   onSkeletonApplied,
+  skeletonUndoRequest = null,
+  onSkeletonUndone,
+  onSkeletonUndoable,
   emptyAction,
   storedHasUnits = false,
   storedHasMedia = false,
@@ -5877,11 +5902,20 @@ export function OperationsField({
    * SKELETON STEPS TO WRITE — the only door through which the assembly skeleton reaches the form.
    * Modelled on `addRequest`: nothing happens until a new `nonce` arrives, so a proposal that is
    * only looked at changes nothing. Rows are built by `rowFromStep`; after the write they are
-   * ordinary steps, and only this session's rail remembers them as «draft».
+   * ordinary steps carrying `draft = true` (0410) until an edit or «reviewed».
    */
   applyRequest?: SkeletonApplyRequest | null;
   /** Answer to `applyRequest`: how many rows landed, or why none did. */
   onSkeletonApplied?: (r: SkeletonApplyResult) => void;
+  /**
+   * The panel's «undo» (03-P2 §6): take back the apply with this `nonce`. Same inversion as ⌘Z on
+   * the field's history, and only while that apply's record is on top and its rows are still draft.
+   */
+  skeletonUndoRequest?: SkeletonUndoRequest | null;
+  /** Answer to an undo or a redo of a skeleton apply (⌘Z, ⇧⌘Z, the panel's «undo»). */
+  onSkeletonUndone?: (r: SkeletonUndoResult) => void;
+  /** The nonce of the apply that ⌘Z would take back now, or null — the panel shows «undo» by it. */
+  onSkeletonUndoable?: (nonce: number | null) => void;
   /** A second door in the empty state, beside «+ operation» (the skeleton's «suggest»). */
   emptyAction?: ReactNode;
   /**
@@ -6181,13 +6215,8 @@ export function OperationsField({
   // ЕДИНСТВЕННАЯ ДВЕРЬ КАРКАСА В ФОРМУ, и открывается она только новым `nonce`: предложение, на
   // которое просто смотрят, не меняет ни одного поля (приёмка волны, п.5 — «ничего молча»).
   // Строки собирает `rowFromStep`, то есть тот же писатель, что и диалог создания: после записи это
-  // обычные шаги, и в данных нет следа, откуда они взялись. След — только пометка «draft» в рельсе
-  // этой сессии, до первого касания рукой.
+  // обычные шаги; след происхождения — только поле `draft` (0410), до первой правки или «reviewed».
   const autosave = useTechCardAutosave();
-  const [draftPrints, setDraftPrints] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const draftRef = useRef(draftPrints);
-  draftRef.current = draftPrints;
-  const pendingDraft = useRef<{ from: number; count: number; fresh: boolean } | null>(null);
 
   // Последний увиденный nonce: перемонтированное поле получает тот же `applyRequest` (состояние
   // живёт выше, у двери) и без этой памяти записало бы предложение второй раз.
@@ -6213,8 +6242,15 @@ export function OperationsField({
     const rows = steps.map((s) =>
       rowFromStep(s, { machines: park?.machines ?? [], presses: park?.presses ?? [] }),
     );
-    // Массив поехал не жестом полотна — формовые записи отмены протухли.
-    clearFormHistory();
+    // ОТМЕНА ЗАПИСИ (03-P2 §6): снимок «до» берётся ДО записи, глубоко — строки с `media[].mediaId`,
+    // флаги карточки и номера шагов в дефектах. Формовые записи старше этой не гасятся: после
+    // replace их щит по `fieldId` откажет сам, словами; после append они и так целы.
+    const before = {
+      rows: replacing ? structuredClone(current) : [],
+      mediaCleared: !!getValues('mediaCleared'),
+      assemblyCleared: !!getValues('assemblyCleared'),
+      issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+    };
     if (replacing) {
       // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
       remapIssues(() => null);
@@ -6238,7 +6274,23 @@ export function OperationsField({
       setValue('assemblyCleared', true, { shouldDirty: true });
     }
     const from = replacing ? 0 : current.length;
-    pendingDraft.current = { from, count: rows.length, fresh: replacing };
+    pendingAppend.current = null;
+    setHistory(
+      record(history.current, {
+        kind: 'skeleton',
+        nonce: applyRequest.nonce,
+        mode: replacing ? 'replace' : 'append',
+        from,
+        count: rows.length,
+        before,
+        after: {
+          rows: structuredClone(rows),
+          mediaCleared: !!getValues('mediaCleared'),
+          assemblyCleared: !!getValues('assemblyCleared'),
+        },
+        label: skeletonLabel(replacing ? 'replace' : 'append', rows.length),
+      }),
+    );
     setSelected(from);
     // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
     // человек был (кнопка «apply»).
@@ -6247,49 +6299,75 @@ export function OperationsField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyRequest?.nonce]);
 
-  // ВТОРОЙ ТАКТ: id строк появляются только с новым `fields`.
-  useEffect(() => {
-    const p = pendingDraft.current;
-    if (!p) return;
-    pendingDraft.current = null;
-    const values = (getValues('operations') ?? []) as Record<string, unknown>[];
-    setDraftPrints((prev) => {
-      const next = new Map(p.fresh ? [] : prev);
-      for (let i = p.from; i < p.from + p.count; i++) {
-        const id = fields[i]?.id;
-        if (id) next.set(id, draftPrint(values[i]));
-      }
-      return next;
-    });
-  }, [fields, getValues]);
-
-  // ПЕРВОЕ КАСАНИЕ СНИМАЕТ ПОМЕТКУ НАВСЕГДА: строка, чьи смысловые поля разошлись с записанными,
-  // уже не черновик — даже если потом вернуть как было. Удалённая строка уходит из карты тоже.
-  // Подписка только будит сверку; сама сверка идёт после рендера, когда `fields` уже знает новый
-  // порядок строк (перестановка и удаление шлют событие раньше, чем приезжают их id).
+  // --- ЧЕРНОВИК КАРКАСА (0410): МЕТКА — ПОЛЕ СТРОКИ `draft`, А НЕ СОСТОЯНИЕ СЕССИИ -------------------
+  //
+  // Правда одна — `operations[i].draft`: его ставит `rowFromStep`, его везёт автосейв, его читает
+  // перезагрузка, его видит вся команда. Здесь только ДЕТЕКТОР ПЕРВОГО КАСАНИЯ: у каждой строки-
+  // черновика запоминается отпечаток смысловых полей (`draftPrint`) в момент, когда метка впервые
+  // увидена (запись каркаса, загрузка карточки); строка, чьи поля разошлись с ним, теряет метку
+  // НАВСЕГДА (`draft = false`, грязное поле → автосейв), даже если потом вернуть как было.
+  //
+  // КЛЮЧ — id строки useFieldArray. Замер M0 (`yarn skeleton:ui`): автосейв после записи каркаса id НЕ
+  // перечеканивает (массив той же длины пишется по листьям) — подозрение 03-P2 §6 не подтвердилось.
+  // Но и перечеканка не страшна: строка с неизвестным id получает отпечаток заново, а метка живёт в
+  // данных, не в этой карте.
+  //
+  // ЗАПИСЬ — НЕ КАСАНИЕ. Если отпечаток разошёлся, а строка совпадает с сохранённой базой формы на
+  // том же месте, — это лёг автосейв (сервер мог канонизировать поле), и отпечаток берётся заново.
+  const [draftIds, setDraftIds] = useState<ReadonlySet<string>>(() => new Set());
+  const draftRef = useRef(draftIds);
+  draftRef.current = draftIds;
+  const draftBase = useRef(new Map<string, string>());
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
     const sub = watch((_, { name }) => {
-      if (draftRef.current.size === 0) return;
       if (name && !name.startsWith('operations')) return;
+      // Без черновиков будить сверку стоит только сменой самой метки (или всей формы — reset).
+      if (draftRef.current.size === 0 && name && !name.endsWith('.draft')) return;
       setTouchTick((t) => t + 1);
     });
     return () => sub.unsubscribe();
   }, [watch]);
   useEffect(() => {
-    if (draftPrints.size === 0) return;
     const ops = (getValues('operations') ?? []) as Record<string, unknown>[];
-    const ids = fields.map((f) => f.id);
-    let next: Map<string, string> | null = null;
-    for (const [id, print] of draftPrints) {
-      const i = ids.indexOf(id);
-      if (i >= 0 && draftPrint(ops[i]) === print) continue;
-      next ??= new Map(draftPrints);
-      next.delete(id);
-    }
-    if (next) setDraftPrints(next);
-  }, [touchTick, fields, draftPrints, getValues]);
-  const draftIds = useMemo(() => new Set(draftPrints.keys()), [draftPrints]);
+    const saved = ((control._defaultValues as { operations?: unknown[] }).operations ??
+      []) as Record<string, unknown>[];
+    const base = draftBase.current;
+    const next = new Set<string>();
+    const touched: number[] = [];
+    const live = new Set<string>();
+    fields.forEach((f, i) => {
+      live.add(f.id);
+      const row = ops[i];
+      if (!row?.draft) {
+        base.delete(f.id);
+        return;
+      }
+      const print = draftPrint(row);
+      const was = base.get(f.id);
+      if (was === undefined || was === print || draftPrint(saved[i]) === print) {
+        base.set(f.id, print);
+        next.add(f.id);
+        return;
+      }
+      base.delete(f.id);
+      touched.push(i);
+    });
+    for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
+    if (!frozen)
+      for (const index of touched)
+        setValue(`operations.${index}.draft`, false, { shouldDirty: true });
+    else for (const index of touched) next.add(fields[index].id);
+    setDraftIds((prev) =>
+      prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
+    );
+  }, [touchTick, fields, getValues, setValue, control, frozen]);
+  // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
+  // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
+  const markReviewed = (i: number) => {
+    if (frozen) return;
+    setValue(`operations.${i}.draft`, false, { shouldDirty: true, shouldTouch: true });
+  };
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -6957,6 +7035,75 @@ export function OperationsField({
   };
 
   /**
+   * ИНВЕРСИЯ ЗАПИСИ КАРКАСА — ОДНА НА ОБА РЕЖИМА ПО СМЫСЛУ: вернуть то, что стояло до записи.
+   * Хвостовая пачка снимается удалением СВОИХ строк (`remove` — id стоящих шагов живут), замена —
+   * снимком «до» целиком, с фото (`media[].mediaId`). Флаги `mediaCleared` / `assemblyCleared` —
+   * как стояли: без отката replace поверх фото оставил бы `mediaCleared`, и следующая запись сняла
+   * бы фото со шагов, которые отмена вернула. Номера шагов в дефектах — из снимка.
+   *
+   * Щит — `skeletonCanUndo`: длина та же и все строки пачки ещё draft. Отказ — словами, и запись
+   * снимается: тронутую пачку вернуть нельзя, не стерев чужую работу. Возвращает текст отказа.
+   */
+  const undoSkeleton = (rec: Extract<Hist['undo'][number], { kind: 'skeleton' }>) => {
+    if (frozen) return FROZEN_REFUSAL;
+    if (!skeletonCanUndo(rec, getValues('operations') ?? [])) {
+      setHistory(dropUndoTop(history.current));
+      return 'the applied steps were edited — nothing to undo';
+    }
+    applyToForm(() => {
+      if (rec.mode === 'replace') {
+        replace(structuredClone(rec.before.rows));
+      } else {
+        remove(Array.from({ length: rec.count }, (_, k) => rec.from + k));
+      }
+      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });
+      setValue('assemblyCleared', rec.before.assemblyCleared, { shouldDirty: true });
+      const issues = getValues('issues') ?? [];
+      if (issues.length === rec.before.issues.length)
+        rec.before.issues.forEach((n, ii) => {
+          if ((issues[ii]?.operationNumber ?? 0) !== n)
+            setValue(`issues.${ii}.operationNumber`, n, { shouldDirty: true });
+        });
+    });
+    setSelected(rec.mode === 'replace' ? 0 : Math.max(0, rec.from - 1));
+    setHistory(undoStep(history.current));
+    onSkeletonUndone?.({ nonce: rec.nonce, undone: rec.count });
+    return null;
+  };
+
+  // «undo» ПАНЕЛИ — та же инверсия, что ⌘Z, но только СВОЕЙ записи: на вершине чужая — отказ.
+  const seenUndo = useRef<number | null>(skeletonUndoRequest?.seq ?? null);
+  useEffect(() => {
+    if (!skeletonUndoRequest || skeletonUndoRequest.seq === seenUndo.current) return;
+    seenUndo.current = skeletonUndoRequest.seq;
+    const top = peekUndo(history.current);
+    if (top?.kind !== 'skeleton' || top.nonce !== skeletonUndoRequest.nonce) {
+      onSkeletonUndone?.({
+        nonce: skeletonUndoRequest.nonce,
+        undone: 0,
+        refused: 'a later change sits on top of it — undo that first',
+      });
+      return;
+    }
+    const refused = undoSkeleton(top);
+    if (refused) onSkeletonUndone?.({ nonce: top.nonce, undone: 0, refused });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skeletonUndoRequest?.seq]);
+
+  // Какую запись ⌘Z взял бы сейчас — панель показывает «undo» только ей и только пока щит пускает.
+  const lastUndoable = useRef<number | null>(null);
+  useEffect(() => {
+    const top = peekUndo(histView);
+    const n =
+      top?.kind === 'skeleton' && !frozen && skeletonCanUndo(top, getValues('operations') ?? [])
+        ? top.nonce
+        : null;
+    if (n === lastUndoable.current) return;
+    lastUndoable.current = n;
+    onSkeletonUndoable?.(n);
+  }, [histView, touchTick, fields, frozen, getValues, onSkeletonUndoable]);
+
+  /**
    * ⌘Z и чип отмены — ЕДИНСТВЕННЫЕ вызыватели инверсии (⇧⌘Z — её зеркало ниже).
    *
    * ГЕЙТ ЗАМОРОЗКИ — ПО-РОДОВОЙ. На выпущенной карточке (R10) раскладывать можно, править нельзя:
@@ -6974,6 +7121,14 @@ export function OperationsField({
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
     if (rec.kind !== 'move' && frozen) {
       showMessage(FROZEN_REFUSAL, 'error');
+      return;
+    }
+    if (rec.kind === 'skeleton') {
+      const refused = undoSkeleton(rec);
+      if (refused) {
+        showMessage(refused, 'error');
+        onSkeletonUndone?.({ nonce: rec.nonce, undone: 0, refused });
+      }
       return;
     }
     if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
@@ -7030,6 +7185,24 @@ export function OperationsField({
     if (rec.kind === 'move') {
       prefs.restore(rec.forward);
       setHistory(redoStep(history.current));
+      return;
+    }
+    if (rec.kind === 'skeleton') {
+      // ПОВТОР ЗАПИСИ КАРКАСА: те же строки (снова draft) и те же флаги, что ставила запись. Без
+      // двухтактного захвата — запись адресуется позицией и меткой, а не `fieldId`.
+      applyToForm(() => {
+        if (rec.mode === 'replace') {
+          remapIssues(() => null);
+          replace(structuredClone(rec.after.rows));
+        } else {
+          append(structuredClone(rec.after.rows));
+        }
+        setValue('mediaCleared', rec.after.mediaCleared, { shouldDirty: true });
+        setValue('assemblyCleared', rec.after.assemblyCleared, { shouldDirty: true });
+      });
+      setSelected(rec.from);
+      setHistory(redoStep(history.current));
+      onSkeletonUndone?.({ nonce: rec.nonce, undone: 0, redone: rec.count });
       return;
     }
     if (rec.kind === 'append') {
@@ -7571,8 +7744,10 @@ export function OperationsField({
                     readPieceDrag={readPieceDrag}
                     // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
                     workCatalog={workCatalog}
-                    // Шаги каркаса, которых ещё не касалась рука, — состояние сессии, не данные.
+                    // Шаги каркаса, которых ещё никто не проверил (поле `draft`, 0410), и жест
+                    // «проверено» — клик по чипу.
                     draftIds={draftIds}
+                    onReviewed={markReviewed}
                   />
                 </div>
               )}

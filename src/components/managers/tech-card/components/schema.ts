@@ -1271,6 +1271,10 @@ const operationSchema = z.object({
   // in the wrong one.
   smv: z.string().optional().default(''),
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
+  // DRAFT (0410): the assembly skeleton wrote this step and nobody has reviewed it yet. A team mark,
+  // not an instruction: the server keeps it out of the card digest. The first meaningful edit of the
+  // row, or a click on its «draft» chip in the rail, sets it false.
+  draft: z.boolean().optional().default(false),
 
   // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
   // inherited value. That is exactly what the old operation-type preset did, and it made «the
@@ -2711,6 +2715,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // разметку владельца обновлением бандла.
       work: (o.work ?? '').trim(),
       smv: decimalToInput(o.smv),
+      draft: !!o.draft,
       calloutNumber: o.calloutNumber || 0,
       // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
       // empty control, not as 0 — 0 is the separate, real setting «cut on the line as drawn».
@@ -3753,6 +3758,8 @@ export function mapFormToTechCardInsert(
         // вид с единственной размеченной строки» было бы неотличимо от «сохраняет старый бандл».
         work: (o.work ?? '').trim(),
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
+        // DRAFT rides every write as it stands: a reviewed step must reach the server as false.
+        draft: !!o.draft,
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,

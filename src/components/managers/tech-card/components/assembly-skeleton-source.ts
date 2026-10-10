@@ -67,6 +67,8 @@ export type SkeletonRun =
 export function useSkeletonProposal(): {
   available: boolean;
   run: (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => void;
+  /** Put a proposal derived from the one on screen (the AI order applied) in its place. */
+  adopt: (proposal: SkeletonProposal) => void;
   state: SkeletonRun;
 } {
   const provider = useContext(SkeletonProviderContext);
@@ -101,7 +103,11 @@ export function useSkeletonProposal(): {
     },
     [provider],
   );
-  return { available: !!provider, run, state };
+  const adopt = useCallback((proposal: SkeletonProposal) => {
+    gen.current += 1;
+    setState({ status: 'ready', proposal });
+  }, []);
+  return { available: !!provider, run, adopt, state };
 }
 
 // ── facts ───────────────────────────────────────────────────────────────────────────────────────
