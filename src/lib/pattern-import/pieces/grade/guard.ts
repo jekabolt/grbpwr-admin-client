@@ -28,6 +28,13 @@ export type GuardOpts = {
   minShare: number;
   /** and at least this much length, mm */
   minLenMm: number;
+  /**
+   * A neighbour that runs at a UNIFORM distance (spread ≤ max(1 mm, 10 % of the median), median
+   * 2–20 mm) all along the line is its sew line drawn alike, not another size: not a lane.
+   */
+  skipUniformPairs: boolean;
+  /** lines shorter than this are no lane (lettering, symbols and arrows drawn as strokes), mm */
+  minChainMm: number;
 };
 
 export const GUARD_OPTS: GuardOpts = {
@@ -37,7 +44,12 @@ export const GUARD_OPTS: GuardOpts = {
   angleDeg: 20,
   minShare: 0.2,
   minLenMm: 150,
+  skipUniformPairs: false,
+  minChainMm: 10,
 };
+
+/** Uniform pair (an allowance): median distance range and spread, mm / share of the median. */
+export const ALLOWANCE_PAIR = { minMm: 2, maxMm: 20, spreadMm: 1, spreadShare: 0.1 };
 
 export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
 
@@ -197,7 +209,9 @@ export function gradingEvidence(
     ...classes.filter((c) => c.role === 'size').flatMap((c) => c.chains),
     ...notEvidence(classes, chains),
   ]);
-  const cand = chains.filter((c) => !covered.has(c.id) && c.lengthMm >= 10 && c.pts.length >= 2);
+  const cand = chains.filter(
+    (c) => !covered.has(c.id) && c.lengthMm >= o.minChainMm && c.pts.length >= 2,
+  );
   const byId = new Map(cand.map((c) => [c.id, c]));
   const grid = new SegGrid(8);
   for (const c of cand) grid.addPolyline(c.id, c.pts, c.closed);
@@ -210,7 +224,9 @@ export function gradingEvidence(
   };
   const cosMin = Math.cos((o.angleDeg * Math.PI) / 180);
   let total = 0;
-  let nested = 0;
+  // per sample: the same-look neighbours it sees; per (line, neighbour): the distances
+  const seen: { self: ChainId; hits: ChainId[] }[] = [];
+  const pairD = new Map<string, number[]>();
   for (const c of cand) {
     for (const s of resampleT(c.pts, 4)) {
       total += 4;
@@ -218,7 +234,7 @@ export function gradingEvidence(
       const a = { x: s.p.x - nrm.x * o.reachMm, y: s.p.y - nrm.y * o.reachMm };
       const rx = 2 * nrm.x * o.reachMm;
       const ry = 2 * nrm.y * o.reachMm;
-      const hits = new Set<ChainId>();
+      const hits = new Map<ChainId, number>();
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
@@ -236,14 +252,43 @@ export function gradingEvidence(
         if (tt < 0 || tt > 1 || uu < 0 || uu > 1) return;
         const sl = Math.hypot(sx, sy) || 1;
         if (Math.abs((sx * s.t.x + sy * s.t.y) / sl) < cosMin) return;
-        if (Math.abs((tt - 0.5) * 2 * o.reachMm) < o.minGapMm) return;
-        hits.add(k);
+        const off = Math.abs((tt - 0.5) * 2 * o.reachMm);
+        if (off < o.minGapMm) return;
+        hits.set(k, off);
       };
       const steps = Math.ceil((2 * o.reachMm) / grid.cell) + 1;
       for (let k = 0; k <= steps; k++)
         grid.near({ x: a.x + (rx * k) / steps, y: a.y + (ry * k) / steps }, grid.cell * 0.5, visit);
-      if (hits.size + 1 >= o.minLanes) nested += 4;
+      for (const [k, off] of hits) {
+        if (!o.skipUniformPairs) continue;
+        const key = `${c.id}:${k}`;
+        const list = pairD.get(key);
+        if (list) list.push(off);
+        else pairD.set(key, [off]);
+      }
+      seen.push({ self: c.id, hits: [...hits.keys()] });
     }
+  }
+  const uniform = new Set<string>();
+  if (o.skipUniformPairs)
+    for (const [key, ds] of pairD) {
+      const q = [...ds].sort((x, y) => x - y);
+      const at = (f: number) => q[Math.min(q.length - 1, Math.floor(f * q.length))];
+      const med = at(0.5);
+      const P = ALLOWANCE_PAIR;
+      if (
+        q.length >= 3 &&
+        med >= P.minMm &&
+        med <= P.maxMm &&
+        at(0.9) - at(0.1) <= Math.max(P.spreadMm, P.spreadShare * med)
+      )
+        uniform.add(key);
+    }
+  let nested = 0;
+  for (const { self, hits } of seen) {
+    let lanes = 1;
+    for (const k of hits) if (!uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`)) lanes++;
+    if (lanes >= o.minLanes) nested += 4;
   }
   const share = total ? nested / total : 0;
   return {

@@ -72,6 +72,23 @@ export const mixedGuard = (n: number): Partial<GuardOpts> => ({
 });
 
 /**
+ * And the two-lane or short nest the rule above misses (two sizes nobody encoded, sizes that differ
+ * along a tab): a same-look neighbour ≤ 15 mm away along ≥ 80 mm of the region's lines that is NOT
+ * the line's sew line (a uniform 2–20 mm allowance all along), whatever its share. Lines under
+ * 40 mm are no lane (lettering, symbols and arrows drawn as strokes). Measured on the encoded
+ * corpus: no encoded seed flips (viola's nearest lettering pair: 64 mm of nest at ≤ 15 mm);
+ * polupalto (audited, not an encoding) refuses more.
+ */
+export const PAIR_GUARD: Partial<GuardOpts> = {
+  minLanes: 2,
+  minShare: 0,
+  minLenMm: 80,
+  minChainMm: 40,
+  reachMm: 15,
+  skipUniformPairs: true,
+};
+
+/**
  * Seeds whose region (every candidate line a wall, the envelope around the seed) holds a graded
  * nest of same-looking lines no size class covers.
  */
@@ -263,7 +280,9 @@ export function gradeHook(
     // size class covers is a graded piece nobody encoded (a mixed sheet) — refused
     const covered = new Set(model.graded);
     const ids = model.common.filter((id) => !covered.has(id) && !blocked.has(id));
-    const g = guardedSeeds(sheet, set, seeds, ids, cell, mixedGuard(model.n));
+    const wide = guardedSeeds(sheet, set, seeds, ids, cell, mixedGuard(model.n));
+    const pairs = guardedSeeds(sheet, set, seeds, ids, cell, PAIR_GUARD);
+    const g = seeds.map((s) => s.id).filter((id) => wide.includes(id) || pairs.includes(id));
     if (!g.length) return null;
     return refuseSeeds(
       g,

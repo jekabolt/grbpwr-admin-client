@@ -5,6 +5,8 @@
 //
 //   missing-count   graded nest, empty card run, nobody answered → the piece is refused, never one size
 //   mixed           a colour-encoded piece beside an unencoded (all black) graded piece
+//   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
+//                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
 //   grid-hatch      graded nest under a sheet grid (thin grey) and same-look hatching inside the piece
 //   equal-area      two layouts with equal areas but other regions → ambiguous (pickLayout, pure)
@@ -18,7 +20,8 @@ import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
 import { GRADE_TUNING } from 'lib/pattern-import/pieces/grade';
 import { pickLayout, scoreAreas } from 'lib/pattern-import/pieces/grade/choose';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
-import { notEvidence } from 'lib/pattern-import/pieces/grade/guard';
+import { gradingEvidence, notEvidence } from 'lib/pattern-import/pieces/grade/guard';
+import { mixedGuard, PAIR_GUARD } from 'lib/pattern-import/pieces/grade/hook';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { proposeSizeMap } from 'lib/pattern-import/sizes/map';
 import type { CardSize, Chain, IRPath, LineClass, PieceFamily, PtMm, Seed, Sheet, Style } from 'lib/pattern-import/types';
@@ -163,6 +166,43 @@ function mixed(): FixtureResult {
   };
 }
 
+/**
+ * The mixed-sheet guard on lines no size class covers (gradingEvidence, the hook's two rules): the
+ * wide rule (≥ min(n, 5) lanes over a third of the lines) misses an unencoded piece that draws TWO
+ * sizes (graded unevenly: 10 mm at the side, 3 mm at top and bottom) and one whose five sizes differ
+ * only along a 40 mm tab; the pair rule sees both. A cut line with its sew line drawn alike at a
+ * uniform 10 mm is no nest for either.
+ */
+function mixedNarrow(): FixtureResult {
+  let id = 0;
+  const chain = (pts: PtMm[], closed = false): Chain => {
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (closed) L += Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y);
+    return { id: id++, pts, closed, ranges: [], motif: null, style: 0, lengthMm: L };
+  };
+  const two = gradedPiece(0, 0, 2, () => 0, 240, 300, 10, 3).draws.map((d) => chain(d.pts));
+  const W = 300;
+  const tab = [chain([{ x: W, y: 120 }, { x: W, y: 200 }, { x: 0, y: 200 }, { x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: 80 }])];
+  for (let k = 0; k < 5; k++) tab.push(chain([{ x: W, y: 80 }, { x: W + 8 + 3 * k, y: 100 }, { x: W, y: 120 }]));
+  const rect = (i: number) => [{ x: i, y: i }, { x: 300 - i, y: i }, { x: 300 - i, y: 200 - i }, { x: i, y: 200 - i }];
+  const sew = [chain(rect(0), true), chain(rect(10), true)];
+  const cases = [
+    { name: 'two sizes', chains: two, wide: false, pair: true },
+    { name: 'tab', chains: tab, wide: false, pair: true },
+    { name: 'cut + sew line', chains: sew, wide: false, pair: false },
+  ];
+  let ok = true;
+  const notes = cases.map((k) => {
+    const w = gradingEvidence(k.chains, [], mixedGuard(5)).graded;
+    const p = gradingEvidence(k.chains, [], PAIR_GUARD).graded;
+    const good = w === k.wide && p === k.pair;
+    if (!good) ok = false;
+    return `${k.name}: wide ${w} pair ${p}${good ? '' : ' ✗'}`;
+  });
+  return { name: 'mixed-guard', ok, why: notes.join(' · ') };
+}
+
 function shortZone(): FixtureResult {
   // a 300 × 200 rectangle drawn once; on the right edge a 40 mm tab per size, fanning out
   const n = 5;
@@ -270,7 +310,7 @@ function fragmentIds(): FixtureResult {
 }
 
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), cardPrior(), fragmentIds(), mixedNarrow()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {
