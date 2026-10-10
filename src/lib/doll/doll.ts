@@ -455,6 +455,16 @@ export function solveDoll(input: DollInput): DollReport {
     N += mesh.pts.length;
   }
   const msMesh = now() - t0;
+  opt.onMesh?.({
+    vertices: N,
+    panels: panels.map((P) => ({
+      pieceKey: P.key,
+      group: P.group,
+      offset: P.offset,
+      count: P.count,
+      tris: Uint32Array.from(P.mesh.tris),
+    })),
+  });
   const pos = new Float64Array(3 * N);
   const uv = new Float64Array(2 * N);
   const cuv = new Float64Array(2 * N); // chart coords

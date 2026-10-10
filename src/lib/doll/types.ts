@@ -43,6 +43,11 @@ export type DollOptions = {
   /** Call every ~20 passes with the current positions (the worker posts frames from it). */
   onFrame?: (positions: Float32Array, pass: number) => void;
   /**
+   * Called once, after meshing and before the first pass: the panels' topology (vertex ranges and
+   * triangles), so a view can draw the frames of the doll closing before the report arrives.
+   */
+  onMesh?: (mesh: DollMesh) => void;
+  /**
    * L4 — seams stored on the card (lib/seams rows). With rows the doll re-reads the graph from
    * `facts` with them resolved for `size` (lib/seams resolveAcrossSizes; `sizes` = other sizes'
    * pieces when the rows were confirmed on another size): confirmed seams are FORCED (never released
@@ -270,6 +275,18 @@ export type DollCollarReport = {
   } | null;
   units: DollCollarUnit[];
   notes: string[];
+};
+
+/** Topology of the panels before solving: what `onFrame` positions are laid on. */
+export type DollMesh = {
+  vertices: number;
+  panels: {
+    pieceKey: string;
+    group: DollGroupId;
+    offset: number;
+    count: number;
+    tris: Uint32Array;
+  }[];
 };
 
 /** A measure line in pattern space (POM engine, lib/pom) → 3D polyline on the doll. */
