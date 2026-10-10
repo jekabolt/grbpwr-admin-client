@@ -118,6 +118,18 @@ export function withKind(edits: PageMaskEdit[], kind: BackgroundKind, keep: bool
   ];
 }
 
+/**
+ * N1: the edits with these mask items decided one by one (`{ item, keep }`, later wins in the clean
+ * stage) — the sheet pass answers its own items, never a kind across every page.
+ */
+export function withItems(edits: PageMaskEdit[], ids: readonly string[], keep: boolean) {
+  const set = new Set(ids);
+  return [
+    ...edits.filter((e) => !('item' in e && set.has(e.item))),
+    ...ids.map((item) => ({ item, keep })),
+  ];
+}
+
 /** N1: the edits with every waiting suggestion accepted at once (each kind's undo stays). */
 export function withAllAccepted(edits: PageMaskEdit[], rows: KindRow[]) {
   return rows.filter((r) => r.suggested > 0).reduce((e, r) => withKind(e, r.kind, false), edits);
@@ -449,8 +461,15 @@ export function SheetCleanRows({
 }) {
   const rows = kindRows(clean.items);
   if (!rows.length) return null;
+  // the sheet's own items only: a row answers the items it lists, accept-all the waiting ones —
+  // the page decisions and the run-wide kind decisions of the files step stay as they are
+  const idsOf = (kind: BackgroundKind) =>
+    clean.items.filter((it) => it.kind === kind).map((it) => it.id);
   const edit = (kind: BackgroundKind, keep: boolean) =>
-    void api.dispatch({ type: 'clean', edits: withKind(api.inputs.cleanEdits, kind, keep) });
+    void api.dispatch({
+      type: 'clean',
+      edits: withItems(api.inputs.cleanEdits, idsOf(kind), keep),
+    });
   return (
     <>
       <GroupLabel>set aside on the sheet</GroupLabel>
@@ -464,7 +483,11 @@ export function SheetCleanRows({
         onAcceptAll={() =>
           void api.dispatch({
             type: 'clean',
-            edits: withAllAccepted(api.inputs.cleanEdits, rows),
+            edits: withItems(
+              api.inputs.cleanEdits,
+              clean.items.filter((it) => it.status === 'suggest' && !it.applied).map((it) => it.id),
+              false,
+            ),
           })
         }
       />
