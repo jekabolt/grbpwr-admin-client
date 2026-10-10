@@ -71,14 +71,14 @@ export function runsInText(texts: string[]): TextRun[] {
       SIZE_WORD.test(t) ||
       (idx > 0 && SIZE_WORD.test(texts[idx - 1]) && texts[idx - 1].length < 40);
     // explicit lists: 44-46-48-50-52-54, 72, 76, 80, 84, 88
-    for (const m of t.matchAll(/\b(\d{1,3}(?:\s*[-–,]\s*\d{1,3}){2,})\b/g)) {
-      const vals = m[1].split(/\s*[-–,]\s*/).map(Number);
+    for (const m of t.matchAll(/\b(\d{1,3}(?:\s*[-–−,]\s*\d{1,3}){2,})\b/g)) {
+      const vals = m[1].split(/\s*[-–−,]\s*/).map(Number);
       const steps = new Set(vals.slice(1).map((v, i) => v - vals[i]));
       if (steps.size === 1 && [...steps][0] > 0 && [...steps][0] <= 6)
         push({ labels: vals.map(String), source: m[0], kind: 'list', keyword: kw });
     }
     // numeric ranges: 36-46, 34–48, 72..88, 36 to 46
-    for (const m of t.matchAll(/\b(\d{1,3})\s*(?:-|–|—|\.\.|…|to|bis|до|à)\s*(\d{1,3})\b/gi)) {
+    for (const m of t.matchAll(/\b(\d{1,3})\s*(?:-|–|—|−|\.\.|…|to|bis|до|à)\s*(\d{1,3})\b/gi)) {
       const a = Number(m[1]);
       const b = Number(m[2]);
       if (!(b > a) || b - a > 60 || a < 2) continue;
