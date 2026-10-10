@@ -1074,10 +1074,10 @@ async function bracketsOf(file: string) {
 }
 
 /** The written files of one e2e run: hairpins on cut / seam, 15 × 1 mm bars on layer 8, G19. */
-async function writtenOf(files: string[], id: string) {
+async function writtenOf(files: string[], id: string, cleanEdits?: PageMaskEdit[]) {
   const base = CASES.find((x) => x.id === 'redcafe')!;
   const sizes = files.map((f) => /(\d+)\.pdf$/.exec(f)![1]);
-  const r = await runCase({ ...base, id, files, card: sizes });
+  const r = await runCase({ ...base, id, files, card: sizes }, { cleanEdits });
   const writes = (r.write ?? []) as { file: string; blocking?: string[] }[];
   let hp = 0;
   let bars = 0;
@@ -1100,17 +1100,24 @@ async function writtenOf(files: string[], id: string) {
   return { hp, bars, g19, verdict: r.verdict, clicks: r.clicks?.total, write: writes };
 }
 
-/** Blocks of a DXF file the G19 hairpin test refuses (no chrome lines: the raw file alone). */
-function g19Blocks(file: string) {
+/** Blocks of a DXF file with a hairpin (the finder alone: a raw file carries no chrome). */
+function hairpinBlocks(file: string) {
   const raw = readRawDxf(readFileSync(file, 'latin1'));
   const out: string[] = [];
   for (const [name, ents] of raw.blocks) {
     if (name.startsWith('*')) continue;
-    const why = chromeProblems(ents, undefined);
-    if (why.length) out.push(`${name}: ${why[0]}`);
+    const n = ents
+      .filter((e) => (e.layer === '1' || e.layer === '14') && e.pts.length >= 4)
+      .reduce((a, e) => a + hairpins(e.pts, e.closed).length, 0);
+    if (n) out.push(`${name}: ${n}`);
   }
   return out;
 }
+
+const ents = (layer: string, ...rings: PtLike[][]) =>
+  rings.map((pts) => ({ type: 'LWPOLYLINE', layer, pts, closed: true })) as Parameters<
+    typeof chromeProblems
+  >[0];
 
 export async function marksSection() {
   // 1 · clean: the brackets are masked (auto) on every tile of every Redcafe size file
@@ -1123,6 +1130,68 @@ export async function marksSection() {
       b,
     );
   }
+  // 1b · Codex: a small closed shape repeated OUTSIDE the tile margin (a drill circle of a
+  // multi-page marker) is offered, never auto; the corner brackets of the same tiles are auto
+  const disc = (cx: number, cy: number, r: number) =>
+    Array.from({ length: 17 }, (_, k) => ({
+      x: cx + r * Math.cos((2 * Math.PI * k) / 16),
+      y: cy + r * Math.sin((2 * Math.PI * k) / 16),
+    }));
+  const bar = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+    { x: x0, y: y0 },
+  ];
+  const tilesDoc = synthDoc(
+    [0, 1, 2].map((k) => ({
+      lines: [
+        bar(12, 12, 27, 13),
+        bar(183, 12, 198, 13),
+        bar(12, 284, 27, 285),
+        disc(105, 150, 3),
+        [
+          { x: 40 + 10 * k, y: 60 },
+          { x: 90 + 10 * k, y: 150 + 5 * k },
+        ],
+      ],
+    })),
+  );
+  const zoneRun = () => {
+    const o = cleanPages(tilesDoc.docs, tilesDoc.classes, { edits: [] });
+    const items = o.pages
+      .flatMap((p) => p.items)
+      .filter((i) => i.kind === 'regmark' || i.kind === 'tile-label');
+    const drill = items.filter((i) => i.bbox.minX > 90 && i.bbox.maxX < 120);
+    const brackets = items.filter((i) => !drill.includes(i));
+    return { drill, brackets };
+  };
+  const z = zoneRun();
+  check(
+    'A8b marks',
+    'a drill circle at one place on 3 tiles, mid-page: offered, never auto; the corner brackets: auto',
+    z.drill.length > 0 &&
+      z.drill.every((i) => i.status === 'suggest' && !i.applied) &&
+      z.brackets.length > 0 &&
+      z.brackets.every((i) => i.status === 'auto' && i.applied),
+    {
+      drill: z.drill.map((i) => `${i.status} ${i.applied} ${i.lines}`),
+      brackets: z.brackets.map((i) => `${i.status} ${i.applied} ${i.lines}`),
+    },
+  );
+  CLEAN.on.markZone = false;
+  try {
+    const m = zoneRun();
+    check(
+      'mutations',
+      'mark zone off → the mid-page drill circle is auto-masked',
+      m.drill.some((i) => i.status === 'auto' && i.applied),
+      m.drill.map((i) => `${i.status} ${i.applied}`),
+    );
+  } finally {
+    CLEAN.on.markZone = true;
+  }
   // 2 · the owner's run (44 alone): no hairpin, no bar on layer 8, G19 quiet
   const w = await writtenOf(['pdf/44.pdf'], 'redcafe-44');
   check(
@@ -1131,96 +1200,134 @@ export async function marksSection() {
     w.write.length > 0 && w.hp === 0 && w.bars === 0 && w.g19.length === 0,
     { hairpins: w.hp, bars: w.bars, g19: w.g19, verdict: w.verdict, clicks: w.clicks },
   );
-  // 3 · the owner's DXF (beta, passed the gate): G19 refuses its traced blocks
+  // 3 · the owner's DXF (beta): the hairpin finder sees its traced blocks (a raw file has no
+  // chrome, so G19 itself judges them only at export, where the chrome is known — 5 below)
   if (existsSync(OWNER_REDCAFE_DXF)) {
-    const bad = g19Blocks(OWNER_REDCAFE_DXF);
+    const bad = hairpinBlocks(OWNER_REDCAFE_DXF);
     check(
       'A8b G19',
-      "the owner's Redcafe 44 DXF (passed on beta): G19 blocks the blocks traced round a bracket",
+      "the owner's Redcafe 44 DXF: the hairpin finder sees the blocks traced round a bracket",
       bad.length >= 3,
-      bad.slice(0, 3),
+      bad.slice(0, 4),
     );
-    const cap = CHROME_GATE.capMaxMm;
-    CHROME_GATE.capMaxMm = 0;
-    try {
-      check(
-        'mutations',
-        "hairpin test off → the owner's DXF passes G19",
-        g19Blocks(OWNER_REDCAFE_DXF).length === 0,
-        g19Blocks(OWNER_REDCAFE_DXF).slice(0, 2),
-      );
-    } finally {
-      CHROME_GATE.capMaxMm = cap;
-    }
   } else console.log(`  skip the owner's DXF (${OWNER_REDCAFE_DXF} not here)`);
-  // 3b · negatives: the CLO corpus DXFs (real 1 mm slit notches live on layer 4) — no hairpin
-  const clo = resolve(CORPUS, 'dxf-clo');
-  if (existsSync(clo)) {
-    const hit: string[] = [];
-    let n = 0;
-    for (const f of readdirSync(clo).filter((x) => x.endsWith('.dxf'))) {
-      n++;
-      for (const b of g19Blocks(resolve(clo, f))) hit.push(`${f} ${b}`);
-    }
-    check(
-      'A8b G19',
-      `corpus CLO DXFs (${n}): G19's hairpin test blocks no block`,
-      n > 0 && !hit.length,
-      hit.slice(0, 3),
-    );
-  }
-  // 4 · G19 on chrome: a cut line ON a frame line blocks; a shallow crossing / a tangent curve not
-  const ring = (pts: PtLike[]) =>
-    [{ type: 'LWPOLYLINE', layer: '1', pts, closed: true }] as Parameters<typeof chromeProblems>[0];
-  const frame = [
-    [
-      { x: 0, y: 0 },
-      { x: 0, y: 300 },
-    ],
+  // 4 · G19 units: a hairpin is judged only near chrome; marks block, frames warn
+  const outline = (extra: PtLike[]) => [
+    { x: 0, y: 0 },
+    ...extra,
+    { x: 200, y: 0 },
+    { x: 200, y: 300 },
+    { x: 0, y: 300 },
   ];
-  const along = ring([
-    { x: 0, y: 50 },
-    { x: 0, y: 90 },
-    { x: 60, y: 90 },
-    { x: 60, y: 50 },
+  // a 1 × 10 mm U notch, a slit notch (0.5 × 6) and a narrow dart (2 mm wide, 60 long) on the top
+  const clo = outline([
+    { x: 30, y: 0 },
+    { x: 30, y: 10 },
+    { x: 31, y: 10 },
+    { x: 31, y: 0 },
+    { x: 60, y: 0 },
+    { x: 60, y: 6 },
+    { x: 60.5, y: 6 },
+    { x: 60.5, y: 0 },
+    { x: 100, y: 0 },
+    { x: 101, y: 60 },
+    { x: 102, y: 0 },
   ]);
-  const crossing = ring([
-    { x: -0.4, y: 50 },
-    { x: 0.4, y: 70 },
-    { x: 60, y: 90 },
-    { x: 60, y: 50 },
+  const farFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: -50, y: -50 },
+        { x: -50, y: 400 },
+      ],
+    },
+  ];
+  // the Redcafe trace: out and back round a 1 × 15 mm bracket the clean stage masked
+  const traced = outline([
+    { x: 120, y: 0 },
+    { x: 120, y: -15 },
+    { x: 121, y: -15 },
+    { x: 121, y: 0 },
   ]);
-  const arc: PtLike[] = [];
-  for (let k = 0; k <= 40; k++) {
-    const t = -0.4 + (0.8 * k) / 40;
-    arc.push({ x: 200 * (1 - Math.cos(t)), y: 100 + 200 * Math.sin(t) });
-  }
-  const tangent = ring([...arc, { x: 80, y: 180 }, { x: 80, y: 20 }]);
+  const bracket = [
+    {
+      mark: true,
+      pts: [
+        { x: 120.1, y: 0 },
+        { x: 120.1, y: -14.9 },
+        { x: 120.9, y: -14.9 },
+        { x: 120.9, y: 0 },
+        { x: 120.1, y: 0 },
+      ],
+    },
+  ];
+  const along = ents('1', outline([]));
+  const onFrame = [
+    {
+      mark: false,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 250 },
+      ],
+    },
+  ];
+  const onMark = [
+    {
+      mark: true,
+      pts: [
+        { x: 0, y: 50 },
+        { x: 0, y: 70 },
+      ],
+    },
+  ];
+  const pb = (e: Parameters<typeof chromeProblems>[0], c: Parameters<typeof chromeProblems>[1]) =>
+    chromeProblems(e, c);
   check(
     'A8b G19',
-    'a cut line 40 mm ON a frame line blocks; one crossing it at 2° or touching it with a curve does not',
-    chromeProblems(along, frame).length > 0 &&
-      chromeProblems(crossing, frame).length === 0 &&
-      chromeProblems(tangent, frame).length === 0,
-    {
-      along: chromeProblems(along, frame),
-      crossing: chromeProblems(crossing, frame),
-      tangent: chromeProblems(tangent, frame),
-    },
+    'a CLO-style outline (1 × 10 U notch, slit notch, 2 mm dart): no block, with or without chrome near',
+    !pb(ents('1', clo), farFrame).block.length && !pb(ents('1', clo), undefined).block.length,
+    pb(ents('1', clo), farFrame),
   );
-  const alongMin = CHROME_GATE.alongMinMm;
-  CHROME_GATE.alongMinMm = Infinity;
+  check(
+    'A8b G19',
+    'the Redcafe trace round a masked bracket blocks; the same hairpin with no chrome near is not judged',
+    pb(ents('1', traced), bracket).block.length > 0 &&
+      !pb(ents('1', traced), farFrame).block.length,
+    { near: pb(ents('1', traced), bracket), far: pb(ents('1', traced), farFrame) },
+  );
+  check(
+    'A8b G19',
+    'a cut line ON a frame line (a CF on the tile edge) only warns; ON a mark it blocks',
+    !pb(along, onFrame).block.length &&
+      pb(along, onFrame).warn.length > 0 &&
+      pb(along, onMark).block.length > 0,
+    { frame: pb(along, onFrame), mark: pb(along, onMark) },
+  );
+  const nearMm = CHROME_GATE.hairpinNearMm;
+  CHROME_GATE.hairpinNearMm = 1e6;
   try {
     check(
       'mutations',
-      'on-chrome test off → the cut line ON a frame line passes',
-      chromeProblems(along, frame).length === 0,
-      chromeProblems(along, frame),
+      'hairpins judged anywhere → the CLO-style outline blocks',
+      pb(ents('1', clo), farFrame).block.length > 0,
+      pb(ents('1', clo), farFrame),
     );
   } finally {
-    CHROME_GATE.alongMinMm = alongMin;
+    CHROME_GATE.hairpinNearMm = nearMm;
   }
-  // 5 · mutation: marks treated like frames again (the 10.10 build) → offered, traced round
+  CHROME_GATE.frameBlocks = true;
+  try {
+    check(
+      'mutations',
+      'frames block again → the CF on the tile edge blocks',
+      pb(along, onFrame).block.length > 0,
+      pb(along, onFrame),
+    );
+  } finally {
+    CHROME_GATE.frameBlocks = false;
+  }
+  // 5 · marks treated like frames (the 10.10 build): brackets offered, traced round, G19 blocks;
+  //     the operator keeping the brackets as line work is the way out (G19 leaves kept chrome)
   CLEAN.on.marks = false;
   try {
     const b = await bracketsOf('pdf/44.pdf');
@@ -1230,6 +1337,17 @@ export async function marksSection() {
       'marks off → 44.pdf brackets only offered, the written cut line has hairpins / bars and G19 blocks',
       b.masked < b.tiles && (m.hp > 0 || m.bars > 0) && m.g19.length > 0,
       { brackets: b, hairpins: m.hp, bars: m.bars, g19: m.g19.map((x: string) => x.slice(0, 120)) },
+    );
+    // the brackets sit on the frame line: both are kept (two clicks in the files step)
+    const kept = await writtenOf(['pdf/44.pdf'], 'redcafe-44-kept', [
+      { kind: 'regmark', keep: true },
+      { kind: 'tile-frame', keep: true },
+    ]);
+    check(
+      'A8b G19',
+      'the operator keeps the brackets and frames as line work: G19 does not block on them (a way out)',
+      kept.g19.length === 0,
+      { hairpins: kept.hp, g19: kept.g19.map((x: string) => x.slice(0, 120)) },
     );
   } finally {
     CLEAN.on.marks = true;
