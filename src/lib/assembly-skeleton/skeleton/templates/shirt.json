@@ -2,7 +2,7 @@
   "id": "shirt",
   "category": "shirt",
   "garmentName": "Shirt",
-  "_note": "Woven shirt, flat construction: subassemblies (collar + stand, cuffs, pockets, plackets) → panels → shoulders → collar → sleeves set flat → side + underarm in one → cuffs → hem → buttons → final press. Industry order, not a workshop's: a draft. Collar before sleeves is kept as reading 0 (SS26-005 regression guard); sleeves first (4 of 5 technologists' shirts) is reading 1 of one decision (orFirst).",
+  "_note": "Woven shirt, flat construction: subassemblies (collar + stand, cuffs, pockets, plackets) → panels → shoulders → collar → sleeves set flat → side + underarm in one → cuffs → hem → buttons → final press. Industry order, not a workshop's: a draft. Sleeves before the collar is reading 0 (4 of 5 technologists' shirts: SS26-004, -006, -009, FW26-001; the owner's default, 07 §4.6); the collar first (SS26-005) is reading 1 of one decision (orFirst).",
   "pressOpen": true,
   "pressFlat": false,
   "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
@@ -44,18 +44,6 @@
       "press": "open"
     },
     {
-      "id": "collar",
-      "op": "attach",
-      "label": "Set collar into the neckline",
-      "roles": ["collar", "stand", "hood", "rib"],
-      "to": ["body"],
-      "together": true,
-      "name": "Body with collar",
-      "zone": "NECKLINE",
-      "press": "flat",
-      "orFirst": "sleeves"
-    },
-    {
       "id": "sleeves",
       "op": "attach",
       "label": "Set sleeves",
@@ -64,7 +52,19 @@
       "together": true,
       "name": "Body with sleeves",
       "zone": "SLEEVE",
-      "press": "open"
+      "press": "open",
+      "orFirst": "collar"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set collar into the neckline",
+      "roles": ["collar", "stand", "hood", "rib"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with collar",
+      "zone": "NECKLINE",
+      "press": "flat"
     },
     {
       "id": "sides",

@@ -6,7 +6,9 @@
 // input compared by the pieces it holds ({FP_L}, {FP_1_L}, {FP_2_L} → «Left front panel»). Order
 // of inputs, unit keys and names do not count; the partition does. Tee (hand-written truth):
 // 3 of 3 joins, ≤ 8 steps. Allsizes (CLO yoke shirt, truth in fixtures/allsizes.truth.json): 5 of 5
-// joins by inputs. Every proposal must pass the frontier sweep (rules 1–3, 6, 7) clean.
+// joins by inputs in its own order (the collar first — reading 1 since sleeves-first became the
+// default, 07 §4.6), ≥ 3 of 5 by default. Every proposal must pass the frontier sweep (rules 1–3,
+// 6, 7) clean.
 //
 // CONTROLS (the probe must be able to go red):
 //   • shuffled template stages → the joins that depend on order (collar before sleeves …) drop;
@@ -187,9 +189,11 @@ const teeGates = (fx, p) => {
 const alGates = (fx, p) => {
   const m = measure(fx, p);
   return [
+    // The hand truth sets the collar first; the default reading sets the sleeves first (07 §4.6),
+    // so the two joins after that order are reading 1's — checked with that reading below.
     [
-      `all ${m.joins} truth joins by inputs (allsizes.truth.json)`,
-      m.joins === 5 && m.byInputs === m.joins,
+      `≥ ${m.joins - 2} of ${m.joins} truth joins by inputs (allsizes.truth.json, sleeves first)`,
+      m.joins === 5 && m.byInputs >= m.joins - 2,
       `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
     ],
     // ≤ 8 decisions: joins and own steps; press riders ride on their join and are not decisions.
@@ -226,29 +230,40 @@ for (const w of ssP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(ss, ssP);
 gates('SS26-005', ssGates(ss, ssP));
 
-// F6: collar / sleeves is ONE order decision. Its other reading (sleeves first — 4 of 5 prod
-// technologists' shirts) rebuilds a clean order with the sleeves step before the collar step.
+// F6: sleeves / collar is ONE order decision. Reading 0 sets the sleeves first (4 of 5 prod
+// technologists' shirts; the owner's default, 07 §4.6) and costs SS26-005 its two order-dependent
+// joins (≥ 16/18); reading 1 — the collar first, SS26-005's own order — rebuilds a clean order with
+// the collar step before the sleeves step and gives all 18 back.
 {
-  const d = ssP.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
-  gate('SS26-005: collar / sleeves order is a decision', !!d && d.alternatives?.length === 1);
+  const d = ssP.steps.find((x) => x.decision?.id === 'order:sleeves-collar');
+  const at = (p, label) => p.steps.findIndex((x) => x.label?.startsWith(label));
+  gate(
+    'SS26-005: sleeves / collar order is a decision, sleeves first by default',
+    !!d && d.alternatives?.length === 1 && at(ssP, 'Set sleeves') < at(ssP, 'Set collar'),
+  );
+  gate(
+    'SS26-005: sleeves first costs only the two order-dependent joins (≥ 16/18 by inputs)',
+    ssM.byInputs >= 16,
+    `${ssM.byInputs}/${ssM.joins}`,
+  );
   if (d) {
     const f = ss.facts;
     const p = buildSkeleton(ss.graph, f, orderTemplate(f.category), skeletonDeps, {
-      pins: { 'order:collar-sleeves': 1 },
+      pins: { 'order:sleeves-collar': 1 },
     });
-    const at = (label) => p.steps.findIndex((x) => x.label?.startsWith(label));
-    const flipped = p.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
+    const flipped = p.steps.find((x) => x.decision?.id === 'order:sleeves-collar');
     const m = measure(ss, p);
     console.log(
-      `  sleeves-first reading: ${m.byInputs}/${m.joins} by inputs, ${m.byLeaves}/${m.joins} by contents`,
+      `  collar-first reading: ${m.byInputs}/${m.joins} by inputs, ${m.byLeaves}/${m.joins} by contents`,
     );
     gate(
-      'SS26-005: the sleeves-first reading is chosen and set before the collar, sweep clean',
+      'SS26-005: the collar-first reading is chosen, set before the sleeves, 18/18, sweep clean',
       flipped?.decision.chosen === 1 &&
-        at('Set sleeves') >= 0 &&
-        at('Set sleeves') < at('Set collar') &&
+        at(p, 'Set collar') >= 0 &&
+        at(p, 'Set collar') < at(p, 'Set sleeves') &&
+        m.byInputs === m.joins &&
         broken(p).length === 0,
-      broken(p).join('; '),
+      `${m.byInputs}/${m.joins}; ${broken(p).join('; ')}`,
     );
   }
 }
@@ -359,6 +374,17 @@ if (alM.miss.length) console.log(`  missed: ${alM.miss.join(', ')}`);
 for (const w of alP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(al, alP);
 gates('Allsizes', alGates(al, alP));
+{
+  const p = buildSkeleton(al.graph, al.facts, orderTemplate(al.facts.category), skeletonDeps, {
+    pins: { 'order:sleeves-collar': 1 },
+  });
+  const m = measure(al, p);
+  gate(
+    'Allsizes: the collar-first reading gives all 5 truth joins by inputs, sweep clean',
+    m.joins === 5 && m.byInputs === m.joins && broken(p).length === 0,
+    `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
+  );
+}
 
 // ── H. an outside structural reading (the AI's units, «use AI structure») ────────────────────
 // SkeletonOptions.units are made first, smallest first; a hint that cuts through a unit is said and
@@ -566,12 +592,19 @@ console.log('\nControls on SS26-005');
     scores.push(measure(ss, p).byInputs);
     if (broken(p).length) gate(`shuffle #${i}: sweep clean`, false, broken(p).join('; '));
   }
+  // Against the template read in this card's own order (the collar first, reading 1 since 07
+  // §4.6): a random stage order must do worse than the template's order, not than the default
+  // reading that was moved off this card on purpose.
+  const own = measure(
+    ss,
+    buildSkeleton(ss.graph, ss.facts, base, skeletonDeps, { pins: { 'order:sleeves-collar': 1 } }),
+  ).byInputs;
   const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-  const below = scores.filter((s) => s < ssM.byInputs).length;
+  const below = scores.filter((s) => s < own).length;
   console.log(
-    `  shuffled stages ×30: min ${Math.min(...scores)}, mean ${mean.toFixed(1)}, max ${Math.max(...scores)} (vs ${ssM.byInputs}); lower in ${below}/30`,
+    `  shuffled stages ×30: min ${Math.min(...scores)}, mean ${mean.toFixed(1)}, max ${Math.max(...scores)} (vs ${own} in the card's own order); lower in ${below}/30`,
   );
-  gate('control: shuffled stage order loses joins', mean < ssM.byInputs && below > 0);
+  gate('control: shuffled stage order loses joins', mean < own && below > 0);
 
   const stripped = structuredClone(ss);
   const rename = new Map(
