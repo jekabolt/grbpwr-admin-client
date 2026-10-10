@@ -360,6 +360,74 @@ for (const w of alP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(al, alP);
 gates('Allsizes', alGates(al, alP));
 
+// ── H. an outside structural reading (the AI's units, «use AI structure») ────────────────────
+// SkeletonOptions.units are made first, smallest first; a hint that cuts through a unit is said and
+// skipped. Mutation control: the same measures on the engine's own proposal must differ.
+{
+  const withHints = (units) =>
+    buildSkeleton(al.graph, al.facts, orderTemplate(al.facts.category), skeletonDeps, { units });
+  const leavesOf = (p) => {
+    const nm = new Map();
+    const pk = new Set(al.facts.pieces.map((x) => x.pieceKey));
+    for (const st of p.steps.filter((x) => x.outputUnitKey))
+      nm.set(
+        st.outputUnitKey,
+        st.inputs.flatMap((k) => (pk.has(k) ? [k] : nm.get(k) ?? [])),
+      );
+    return [...nm.values()].map((l) => [...l].sort().join('+'));
+  };
+  const yoke = [
+    { pieceKeys: ['BP_1', 'BP_2'], name: 'Back yoke' },
+    { pieceKeys: ['BP', 'BP_1', 'BP_2'], name: 'Back' },
+  ];
+  const hp = withHints(yoke);
+  const hm = measure({ ...al, truth: [{ name: 'Back yoke', inputs: ['BP_1', 'BP_2'] }] }, hp);
+  const base = leavesOf(alP);
+  gates('Allsizes hints', [
+    [
+      'a hinted unit the engine does not make (BP_1+BP_2 «Back yoke») is made',
+      hm.byInputs === 1,
+      hm,
+    ],
+    ['mutation: the engine alone does not make it', !base.includes('BP_1+BP_2'), base],
+    [
+      'the back is then the yoke + BP, every piece still in one garment',
+      leavesOf(hp).includes('BP+BP_1+BP_2') && broken(hp).length === 0,
+      broken(hp),
+    ],
+    [
+      "the hinted unit says it is the AI's",
+      hp.steps.some((x) => x.source === 'ai' && x.outputUnitName === 'Back yoke'),
+      hp.steps.map((x) => `${x.source}:${x.outputUnitName}`),
+    ],
+  ]);
+  const cut = withHints([
+    { pieceKeys: ['CLR_3', 'CLR_4'], name: 'Collar' },
+    { pieceKeys: ['CLR_3', 'FP_L'], name: 'Wrong' },
+  ]);
+  gates('Allsizes hints', [
+    [
+      'a hint that cuts through a made unit is said and not made',
+      cut.warnings.some((w) => /AI unit «Wrong» cuts through/.test(w)) &&
+        !leavesOf(cut).includes('CLR_3+FP_L'),
+      cut.warnings,
+    ],
+  ]);
+  const pk = new Set(al.facts.pieces.map((x) => x.pieceKey));
+  const truthHints = partitions(al.truth, pk).map((t) => ({
+    pieceKeys: t.leaves.split('+'),
+    name: t.name,
+  }));
+  const tm = measure(al, withHints(truthHints));
+  gates('Allsizes hints', [
+    [
+      `the technologist's own tree as hints: ${tm.byInputs}/${tm.joins} by inputs`,
+      tm.byInputs === tm.joins,
+      tm,
+    ],
+  ]);
+}
+
 // ── every category template on a name-only card: sweep clean, one terminal, nothing orphaned ──
 console.log('\nTemplate smoke (names only, no seams)');
 {

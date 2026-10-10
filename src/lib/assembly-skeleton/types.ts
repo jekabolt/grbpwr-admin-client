@@ -332,6 +332,12 @@ export type SkeletonProposal = {
   graph?: SeamGraph;
   /** Append mode: the card's steps it continues — their units are drawn from the same graph. */
   existing?: SkeletonCheckStep[];
+  /**
+   * The outside structure the proposal was built on («use AI structure»): absent = the engine's own.
+   * Kept ON the proposal so whoever rebuilds it (a chosen reading, the AI's readings, reopening the
+   * panel) rebuilds the same structure, and the AI is asked about the category it was read as.
+   */
+  structure?: Pick<SkeletonOptions, 'category' | 'units'>;
 };
 
 /** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */
@@ -359,7 +365,7 @@ export type SkeletonUnit = {
   seams: SeamCandidate[];
   confidence: number;
   reason: string;
-  source: 'geometry' | 'template';
+  source: 'geometry' | 'template' | 'ai';
   alternatives?: { inputs: string[]; seams: SeamCandidate[]; reason: string }[];
   decision?: SkeletonDecision;
 };
@@ -405,7 +411,21 @@ export type SkeletonOptions = {
   pins?: SkeletonPins;
   /** Seams stored on the card (confirmed / rejected / closures), resolved by lib/seams. */
   decisions?: SeamDecisionsInput;
+  /**
+   * The garment category the proposal is read with instead of the card's (the AI's structural
+   * reading, «use AI structure»): the template, its roles and stages follow it.
+   */
+  category?: SkeletonCategory;
+  /**
+   * Units someone else read off the pattern (the AI's structural reading): each a set of pieces
+   * made into one unit, nested or apart, never partly overlapping. B1 makes them first, smallest
+   * first, and continues from there — see `SkeletonUnitHint`.
+   */
+  units?: SkeletonUnitHint[];
 };
+
+/** One unit of an outside structural reading: its pieces (card piece keys) and its name. */
+export type SkeletonUnitHint = { pieceKeys: string[]; name: string; reason?: string };
 
 // ── Union pictogram (lane C) ────────────────────────────────────────────────────────────────
 

@@ -1513,6 +1513,42 @@ if (!blazer) {
   ck(moved > 0, 'the AI order moves steps — offered, not applied', `${moved} would move`);
   await shot('l-ai-shown', '[data-skeleton-panel]');
 
+  // Structure: the AI's category + units rebuild the skeleton; «back to the engine» restores it.
+  {
+    const label = await page.locator('[data-skeleton-ai-use-structure]').innerText();
+    ck(
+      /use AI structure \(as tee, 1 unit\)/i.test(label),
+      'the AI structure is offered with its category and units, not applied',
+      label,
+    );
+    const before = await stepWords();
+    const calls = await page.evaluate(() => window.__sk.providerCalls());
+    await page.click('[data-skeleton-ai-use-structure]');
+    await page.waitForFunction((n) => window.__sk.providerCalls() > n, calls, { timeout: 10000 });
+    await page.waitForSelector('[data-skeleton-ai-use-structure="in-use"]', { timeout: 10000 });
+    const after = await stepWords();
+    ck(
+      after.some((t) => t.includes('Stub unit')) && !before.some((t) => t.includes('Stub unit')),
+      '«use AI structure» rebuilds the skeleton with the AI unit',
+      after.slice(0, 4).join(' / '),
+    );
+    ck(
+      JSON.stringify(await ops()) === opsBefore,
+      'using the AI structure writes nothing to the form',
+    );
+    await page.click('[data-skeleton-ai-structure-back]');
+    await page.waitForSelector(
+      '[data-skeleton-ai-use-structure]:not([data-skeleton-ai-use-structure="in-use"])',
+      {
+        timeout: 10000,
+      },
+    );
+    ck(
+      JSON.stringify(await stepWords()) === JSON.stringify(before),
+      '«back to the engine» restores the engine’s skeleton',
+    );
+  }
+
   // Readings first: a rebuild, and the order read on the old readings is no longer offered.
   await page.click('[data-skeleton-ai-use-readings]');
   await page.waitForFunction((n) => window.__sk.providerCalls() > n, engineCalls, {

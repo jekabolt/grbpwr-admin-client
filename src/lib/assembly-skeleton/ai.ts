@@ -17,14 +17,17 @@ import type {
   SuggestAssemblySkeletonResponse,
 } from 'api/proto-http/admin';
 
+import { SKELETON_CATEGORIES } from './skeleton';
 import { pieceKeyOf } from './union';
 import type {
   ClothState,
   SeamCandidate,
+  SkeletonCategory,
   SkeletonFacts,
   SkeletonPins,
   SkeletonProposal,
   SkeletonStep,
+  SkeletonUnitHint,
 } from './types';
 
 /** The server's bounds (assembly_skeleton_ai.go) — a request over them is refused, so say it first. */
@@ -269,6 +272,8 @@ export function skeletonAIRequest(args: {
       decisions,
       steps: reqSteps,
       force: false,
+      // The categories the engine has a template for: the AI may read the garment as one of them.
+      categoryOptions: [...SKELETON_CATEGORIES],
     },
   };
 }
@@ -297,6 +302,43 @@ export function skeletonAIPins(
     pins[id] = reading;
   }
   return { pins, changed };
+}
+
+/**
+ * The AI's structural reading as the engine's options («use AI structure»): the category it reads
+ * the pieces as (only one the engine has a template for, and only when it differs from the one on
+ * screen) and its units, kept to the card's own pieces (a unit of fewer than two of them says
+ * nothing). `changes` = 0 → the AI keeps the structure on screen; the door stays shut.
+ */
+export function skeletonAIStructure(
+  facts: SkeletonFacts,
+  answer: SuggestAssemblySkeletonResponse,
+): {
+  category: SkeletonCategory | null;
+  categoryReason: string;
+  units: SkeletonUnitHint[];
+  changes: number;
+} {
+  const id = answer.aiCategory?.id?.trim() ?? '';
+  const known = (SKELETON_CATEGORIES as string[]).includes(id);
+  const category = known && id !== facts.category ? (id as SkeletonCategory) : null;
+  const pieces = new Set(facts.pieces.map((p) => p.pieceKey));
+  const units: SkeletonUnitHint[] = [];
+  for (const u of answer.units ?? []) {
+    const keys = [...new Set((u.pieceKeys ?? []).filter((k) => pieces.has(k)))];
+    if (keys.length < 2) continue;
+    units.push({
+      pieceKeys: keys,
+      name: cut(u.name ?? '', SKELETON_AI.nameRunes) || 'unit',
+      ...(u.reason ? { reason: cut(u.reason, SKELETON_AI.reasonRunes) } : {}),
+    });
+  }
+  return {
+    category,
+    categoryReason: category ? cut(answer.aiCategory?.reason ?? '', SKELETON_AI.reasonRunes) : '',
+    units,
+    changes: (category ? 1 : 0) + units.length,
+  };
 }
 
 export type SkeletonAIOrderResult =

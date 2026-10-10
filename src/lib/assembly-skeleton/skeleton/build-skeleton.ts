@@ -65,7 +65,7 @@ export function buildSkeleton(
   deps: SkeletonDeps,
   options: SkeletonOptions = {},
 ): SkeletonProposal {
-  const g = groupDetailed(graph, facts, template, options.pins);
+  const g = groupDetailed(graph, facts, template, options.pins, options.units);
   const { table, seams, pieces, replay } = g;
   const warnings = [...g.warnings];
   // Append mode: the card's own steps come first in every check and in zone inference.
