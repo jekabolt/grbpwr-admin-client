@@ -13,9 +13,18 @@ import type { ChainSet, IRText, PagePose, PtMm, Seed, Sheet } from 'lib/pattern-
 
 import { dist } from './geom';
 
+/**
+ * The piece-number grammar ("7", "21", "123", "2a"), shared with the cutting-list reader
+ * (semantics/fold.ts `foldListEntries`) so a number a seed accepts is never dropped from the list.
+ */
+export const PIECE_NO_SRC = String.raw`\d{1,3}[a-z]?`;
+
 const EXPLICIT = [
-  /^(?:pattern\s+)?piece\s*(?:no\.?|#)?\s*(\d{1,3}[a-z]?)$/i,
-  /^(?:teil|schnittteil|деталь|pièce|pieza)\s*(?:nr\.?|№|#)?\s*(\d{1,3}[a-z]?)$/i,
+  new RegExp(String.raw`^(?:pattern\s+)?piece\s*(?:no\.?|#)?\s*(${PIECE_NO_SRC})$`, 'i'),
+  new RegExp(
+    String.raw`^(?:teil|schnittteil|деталь|pièce|pieza)\s*(?:nr\.?|№|#)?\s*(${PIECE_NO_SRC})$`,
+    'i',
+  ),
   /^id\s*:?\s*(\d{1,3})(?:\s|$)/i,
 ];
 const LETTER_NAME = /^([A-Z]{1,2})\s*[-–—:]\s+\S.{1,60}$/;
