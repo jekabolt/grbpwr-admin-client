@@ -357,7 +357,9 @@ export type ClassEvidence =
   | { kind: 'color'; rgb: [number, number, number] }
   | { kind: 'file'; file: FileId; label: string }
   | { kind: 'text-label'; text: string; distanceMm: Mm }
-  | { kind: 'nesting-order'; rank: number };
+  | { kind: 'nesting-order'; rank: number }
+  /** A seam line drawn at this constant distance inside the cut line (role 'seam'). */
+  | { kind: 'seam-offset'; offsetMm: Mm };
 
 export type LineClass = {
   id: ClassId;
@@ -859,6 +861,51 @@ export type SemanticsInput = {
    * bare model call without that evidence does not.
    */
   aiQuantity?: Partial<Record<SeedId, { qty: number; pair: boolean }>>;
+  /**
+   * The fold edge the operator picked per seed (E1a): a straight edge of the outline in the rank of
+   * that seed's `FoldAsk`; every size unfolds across its own matching edge. "Not a fold" is
+   * `pieceOverrides[seed].unfoldedFold = false`.
+   */
+  operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /**
+   * Seeds the AI, reading the drawing, says are cut on fold (F10 `suggestion.onFold`) — the sheet's
+   * words may be curves. Asked, never unfolded on that alone (E1a, D3).
+   */
+  foldHints?: SeedId[];
+  /** The operator checked the cutting list's fold pieces against the sheet (`FoldListCheck`). */
+  foldListChecked?: boolean;
+  /** Text of the document's other pages (instructions, cutting list); the session fills it. */
+  docTexts?: string[];
+};
+
+/**
+ * The cutting list names more pieces "cut on fold" than the sheet has unfolded (E1a): the drawing
+ * does not say which regions they are, so the operator marks them or confirms the list.
+ */
+export type FoldListCheck = {
+  /** The list lines, as printed ("1 - Спинка со сгибом 1 дет."). */
+  entries: string[];
+  /** Pieces unfolded in this run (any evidence). */
+  unfolded: number;
+};
+
+/**
+ * An open fold question (E1a, decision D3): the sheet says "fold" for this piece but the drawing
+ * does not prove which edge — or unfolding across it does not give a believable whole piece. The
+ * piece is blocked ('fold-question') until the operator picks an edge or says "not a fold".
+ */
+export type FoldAsk = {
+  seed: SeedId;
+  /** Source rank the edges below lie on (the largest exported size). */
+  rank: number;
+  /** The fold words read in or beside the piece, as printed; empty when only the operator asked. */
+  evidence: string[];
+  /** Straight outline edges a half could be unfolded across, longest first. */
+  edges: { a: PtMm; b: PtMm; lenMm: number }[];
+  /** Index into `edges` of the edge the sheet points at or that unfolds cleanly; null = none. */
+  suggested: number | null;
+  /** One line for the operator. */
+  why: string;
 };
 
 export type SemanticsOutput = {
@@ -866,6 +913,10 @@ export type SemanticsOutput = {
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
   blocked: { seed: SeedId; reason: BlockReason; detail: string }[];
   warnings: string[];
+  /** Open fold questions, one per seed blocked 'fold-question' (absent = none). */
+  folds?: FoldAsk[];
+  /** The cutting list's fold pieces are not all unfolded and not yet checked (absent = fine). */
+  foldList?: FoldListCheck;
   /**
    * D3 (10.10): what the drawing does not prove. The piece is built as shown, but the export waits
    * for the operator — a per-piece answer (an override), or "confirm as shown" (the wizard keeps
@@ -910,7 +961,9 @@ export type BlockReason =
   | 'duplicate-identity'
   | 'size-unmapped'
   /** "On fold" declared/detected but no straight fold edge to mirror across — unfold by hand. */
-  | 'fold-unresolved';
+  | 'fold-unresolved'
+  /** The sheet says "fold" but no edge is proven (E1a, D3): pick the edge or say "not a fold". */
+  | 'fold-question';
 
 export type DetectAllowanceFn = (sheet: Sheet, families: PieceFamily[]) => AllowanceDecision;
 export type BuildPieceSpecsFn = (input: SemanticsInput, progress?: Progress) => SemanticsOutput;
@@ -1296,6 +1349,8 @@ export type GateExpectation = {
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
+  /** Open fold questions of the run (E1a): G6 blocks the whole file while any is unanswered. */
+  openFolds?: readonly string[];
 };
 
 export type RunGateFn = (dxfText: string, expect: GateExpectation) => Promise<GateReport>;
@@ -1543,7 +1598,10 @@ export type StageIO = {
     };
   };
   semantics: {
-    in: Omit<SemanticsInput, 'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced'>;
+    in: Omit<
+      SemanticsInput,
+      'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced' | 'docTexts'
+    >;
     out: SemanticsOutput;
   };
   fabrics: {

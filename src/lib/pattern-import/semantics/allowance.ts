@@ -402,6 +402,36 @@ export const detectAllowance: DetectAllowanceFn &
       ],
     };
   }
+  // a seam line in a pen of its own (chains/seam.ts: role 'seam', evidence `seam-offset`) inside
+  // most pieces: the drawn outline is the cut line even where the allowance changes edge by edge
+  // (BLAZER: 6–12 mm, the hem more), which the per-piece spread test above turns down
+  const seamCls = new Set(set?.classes.filter((k) => k.role === 'seam').map((k) => k.id) ?? []);
+  if (set && seamCls.size) {
+    const clsOf = new Map<number, number>();
+    for (const k of set.classes)
+      if (seamCls.has(k.id)) for (const ch of k.chains) clsOf.set(ch, k.id);
+    let holding = 0;
+    for (const f of families) {
+      const c = [...f.candidates].sort((a, b) => b.rank - a.rank)[0];
+      if (c && c.outcome === 'closed' && c.inside.some((id) => clsOf.has(id))) holding++;
+    }
+    const offs = set.classes
+      .filter((k) => seamCls.has(k.id))
+      .flatMap((k) => k.evidence.flatMap((e) => (e.kind === 'seam-offset' ? [e.offsetMm] : [])));
+    if (offs.length && holding * 2 >= Math.max(1, measuredOn)) {
+      const mm = offs.sort((a, b) => a - b)[offs.length >> 1];
+      return {
+        meaning: 'both',
+        allowanceMm: mm,
+        origin: 'measured',
+        evidence: [
+          `a seam line is drawn in its own pen about ${mm} mm inside the outline on ${holding}/${measuredOn} pieces (the allowance varies edge by edge); the outline is the cut line`,
+          ...textEv,
+          ...textual.conflicts,
+        ],
+      };
+    }
+  }
   if (textual.decision) {
     return { ...textual.decision, evidence: [...textual.decision.evidence, ...textual.conflicts] };
   }

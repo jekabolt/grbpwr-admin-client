@@ -32,6 +32,7 @@ import type {
   DerivedEdge,
   DrillFeature,
   Feature,
+  FoldAsk,
   FoldFeature,
   GrainFeature,
   InternalFeature,
@@ -49,6 +50,7 @@ import type {
   PtMm,
   SeedId,
   SemanticsInput,
+  Sheet,
   SemanticsOutput,
   SizeRun,
   Unproven,
@@ -57,12 +59,19 @@ import { PATIMPORT } from '../types';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
 import {
+  FOLD_TEXT_MAX_MM,
   FOLD_TOL_MM,
+  type FoldEdge,
   type FoldLine,
+  type FoldText,
+  type OtherLines,
+  foldWordRole,
+  foldEdges,
   foldLineOnCut,
-  mirrorOff,
+  foldListEntries,
+  foldShapeProblem,
+  matchFoldEdge,
   sideOf,
-  straightFoldEdge,
   unfold,
 } from './fold';
 import {
@@ -235,6 +244,163 @@ export function bandCutSupport(
   };
 }
 
+/** Fold words in or beside a family's outlines (E1a). `inside` = within its largest outline. */
+function foldWordsOf(fam: PieceFamily, sheet: Sheet): { t: FoldText; inside: boolean }[] {
+  const big = fam.candidates.reduce((a, c) => (c.areaMm2 > a.areaMm2 ? c : a), fam.candidates[0]);
+  if (!big) return [];
+  const insideIds = new Set(fam.candidates.flatMap((c) => c.textsInside));
+  const bb = big.bbox;
+  const R = FOLD_TEXT_MAX_MM;
+  const out: { t: FoldText; inside: boolean }[] = [];
+  for (const t of sheet.texts) {
+    if (!saysFold(t.text)) continue;
+    const at = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
+    const inside = insideIds.has(t.id);
+    if (!inside) {
+      if (at.x < bb.minX - R || at.x > bb.maxX + R || at.y < bb.minY - R || at.y > bb.maxY + R)
+        continue;
+      if (closestOnPolyline(at, big.outer, true).d > R) continue;
+    }
+    out.push({
+      t: { text: t.text.trim(), at, dirDeg: t.rotationDeg, sizeMm: t.fontSizeMm },
+      inside,
+    });
+  }
+  return out;
+}
+
+/**
+ * The drawn chains near a family that are not one of its own walls (any size): another piece's
+ * line, an internal, grain or symbol line — what a fold word may be labelling instead of an edge.
+ */
+function otherLinesNear(fam: PieceFamily, set: ChainSet): OtherLines {
+  const own = new Set(fam.candidates.flatMap((c) => c.walls));
+  const bb = bboxOf(
+    fam.candidates.flatMap((c) => [
+      { x: c.bbox.minX, y: c.bbox.minY },
+      { x: c.bbox.maxX, y: c.bbox.maxY },
+    ]),
+  );
+  const R = FOLD_TEXT_MAX_MM * 2;
+  const lines = set.chains
+    .filter((ch): ch is Chain => !!ch && !own.has(ch.id) && ch.pts.length >= 2)
+    .map((ch) => ({ ch, b: bboxOf(ch.pts) }))
+    .filter(
+      ({ b }) =>
+        !(
+          b.minX > bb.maxX + R ||
+          b.maxX < bb.minX - R ||
+          b.minY > bb.maxY + R ||
+          b.maxY < bb.minY - R
+        ),
+    );
+  const idx = new SegIndex(
+    lines.map((l) => l.ch),
+    10,
+  );
+  return {
+    nearer: (p, d, edge) => {
+      const f = idx.nearestFoot(p, Math.max(0, d - 1));
+      if (!f.q) return false;
+      // a line drawn ON the edge (a fold line over the cut line) is the edge itself
+      const L = Math.hypot(edge.b.x - edge.a.x, edge.b.y - edge.a.y);
+      const t =
+        ((f.q.x - edge.a.x) * (edge.b.x - edge.a.x) + (f.q.y - edge.a.y) * (edge.b.y - edge.a.y)) /
+        L;
+      return !(Math.abs(sideOf(edge, f.q)) <= 1 && t >= -1 && t <= L + 1);
+    },
+    nearest: (p, maxD) => {
+      let best: { pts: PtMm[]; closed: boolean; d: number; dirDeg: number } | null = null;
+      for (const { ch, b } of lines) {
+        if (
+          b.minX > p.x + maxD ||
+          b.maxX < p.x - maxD ||
+          b.minY > p.y + maxD ||
+          b.maxY < p.y - maxD
+        )
+          continue;
+        const f = closestOnPolyline(p, ch.pts, ch.closed);
+        if (f.d > maxD || (best && f.d >= best.d)) continue;
+        const a = ch.pts[f.seg];
+        const q = ch.pts[(f.seg + 1) % ch.pts.length];
+        best = {
+          pts: ch.pts,
+          closed: ch.closed,
+          d: f.d,
+          dirDeg: (Math.atan2(q.y - a.y, q.x - a.x) * 180) / Math.PI,
+        };
+      }
+      return best;
+    },
+  };
+}
+
+/**
+ * The question shown for a piece (on its largest exported size): its straight edges, and as the
+ * suggestion the one that unfolds cleanly — along the grainline first (a CB / CF fold is cut on
+ * the lengthwise grain: "нить основы, середина, сгиб"), then nearest to a fold word, then longest.
+ */
+function foldAskOf(
+  seed: SeedId,
+  c: PieceCandidate,
+  words: { t: FoldText; inside: boolean }[],
+  evidence: string[],
+  why: string,
+  grain: { a: PtMm; b: PtMm } | null,
+): FoldAsk {
+  const outer = ccw(c.outer);
+  const edges = foldEdges(outer);
+  const deg = (a: PtMm, b: PtMm) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+  const offGrain = (e: FoldEdge) => {
+    if (!grain) return 0;
+    const x = (((deg(e.a, e.b) - deg(grain.a, grain.b)) % 180) + 180) % 180;
+    return Math.min(x, 180 - x) <= 5 ? 0 : 1;
+  };
+  let suggested: number | null = null;
+  let best: [number, number, number] | null = null;
+  edges.forEach((e, i) => {
+    if (!tryUnfold(outer, e, e.lenMm).u) return;
+    const d = words.length
+      ? Math.min(...words.map((w) => closestOnPolyline(w.t.at, [e.a, e.b], false).d))
+      : 0;
+    const key: [number, number, number] = [offGrain(e), d, i];
+    if (
+      !best ||
+      key[0] < best[0] ||
+      (key[0] === best[0] && (key[1] < best[1] || (key[1] === best[1] && key[2] < best[2])))
+    ) {
+      best = key;
+      suggested = i;
+    }
+  });
+  return {
+    seed,
+    rank: c.rank,
+    evidence,
+    edges: edges.map((e) => ({ a: e.a, b: e.b, lenMm: e.lenMm })),
+    suggested,
+    why,
+  };
+}
+
+/** Unfold `outer` across `fold`, or say why that does not give a believable whole piece. */
+function tryUnfold(
+  outer: PtMm[],
+  fold: FoldLine,
+  edgeLen: number | null,
+): { u: NonNullable<ReturnType<typeof unfold>>; problem: null } | { u: null; problem: string } {
+  const u = unfold(outer, fold);
+  if (!u) return { u: null, problem: 'the fold line is not an edge of the outline' };
+  const run = Math.hypot(u.edge[1].x - u.edge[0].x, u.edge[1].y - u.edge[0].y);
+  if (edgeLen != null && run < 0.8 * edgeLen)
+    return {
+      u: null,
+      problem: `the outline follows only ${run.toFixed(0)} of the ${edgeLen.toFixed(0)} mm edge`,
+    };
+  const problem = foldShapeProblem(u.pts, u.edge, outer);
+  return problem ? { u: null, problem } : { u, problem: null };
+}
+
 export function buildPieceSpecsDetailed(
   input: SemanticsInput,
   progress?: Progress,
@@ -242,6 +408,9 @@ export function buildPieceSpecsDetailed(
   const { sheet, set, run, sizeMap, families, fileAllowance, pieceOverrides, operatorGrain } =
     input;
   const traced = !!input.traced;
+  const operatorFold = input.operatorFold ?? {};
+  const foldHints = new Set(input.foldHints ?? []);
+  const foldAsks: FoldAsk[] = [];
   const warnings: string[] = [];
   const blocked: Blocked[] = [];
   /** D3: what the drawing does not prove, per seed — see `Unproven`. */
@@ -409,9 +578,47 @@ export function buildPieceSpecsDetailed(
     // outline (a seam line by the format; decision 7 gives its amount). Else the run asks.
     const allowanceProven = A.origin !== 'default' || dxfSeamOuter;
 
-    // fold
-    const foldText = p.texts.some(saysFold);
+    // ── fold (E1a, D3): a fold word unfolds the piece only when it is bound to a straight edge of
+    // THIS outline and the result is a believable whole; otherwise the operator is asked.
     const wantFold = ov.unfoldedFold ?? null;
+    const opFold = wantFold === false ? null : operatorFold[seed] ?? null;
+    const foldWords = wantFold === false ? [] : foldWordsOf(p.fam, sheet);
+    let refEdge: FoldLine | null = opFold;
+    let refWhy: string | null = opFold ? 'picked by you' : null;
+    const internalWords = new Set<string>();
+    if (!refEdge && foldWords.length) {
+      const lines = otherLinesNear(p.fam, set);
+      for (const { c } of [...p.cands].reverse()) {
+        const edges = foldEdges(c.outer);
+        let best: { edge: FoldEdge; d: number; text: string; how: string } | null = null;
+        for (const w of foldWords) {
+          const r = foldWordRole(w.t, edges, c.outer, lines);
+          if (r.kind === 'internal') internalWords.add(w.t.text);
+          else if (r.kind === 'edge' && (!best || r.d < best.d))
+            best = { edge: r.edge, d: r.d, text: w.t.text, how: r.how };
+        }
+        if (best) {
+          refEdge = best.edge;
+          refWhy = `«${best.text}» ${best.how === 'symbol' ? 'on a line along' : `${best.d.toFixed(0)} mm from`} a ${best.edge.lenMm.toFixed(0)} mm straight edge`;
+          break;
+        }
+      }
+    }
+    if (internalWords.size)
+      pieceNotes.push(
+        `${[...internalWords].map((w) => `«${w}»`).join(', ')}: a fold line across the piece — kept as an internal line`,
+      );
+    const foldEvidence = [
+      ...new Set(
+        foldWords.filter((w) => w.inside && !internalWords.has(w.t.text)).map((w) => w.t.text),
+      ),
+      ...(foldHints.has(seed) ? ['AI: cut on fold'] : []),
+    ];
+    // fold words inside the piece, the AI's reading of the drawing, or the operator's "unfold"
+    // without an edge: nothing proves which edge — ask
+    const askFold =
+      wantFold !== false && !refEdge && (foldEvidence.length > 0 || wantFold === true);
+    let askWhy: string | null = null;
 
     // quantity / pair
     const qtyText = p.texts.map(parseQuantity).find((q) => q != null) ?? null;
@@ -442,15 +649,31 @@ export function buildPieceSpecsDetailed(
       // ── fold
       let fold: FoldLine | null = null;
       let foldFeat: FoldFeature | null = null;
+      let edgeLen: number | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
         if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
-        else if (wantFold === true || (foldText && !symmetric)) fold = straightFoldEdge(outer);
-        if ((foldFeat || wantFold === true) && !fold) {
-          blockedHere = {
-            reason: 'fold-unresolved',
-            detail: 'declared on fold, but no straight fold edge was found',
-          };
+        else if (refEdge) {
+          const e = matchFoldEdge(foldEdges(outer), refEdge);
+          if (!e) {
+            if (opFold) {
+              blockedHere = {
+                reason: 'fold-unresolved',
+                detail: `${card.token}: no straight edge of this size matches the fold edge you picked`,
+              };
+              break;
+            }
+            askWhy = `${card.token}: ${refWhy}, but this size has no such edge`;
+            blockedHere = { reason: 'fold-question', detail: askWhy };
+            break;
+          }
+          fold = e;
+          edgeLen = e.lenMm;
+        } else if (askFold) {
+          askWhy = foldEvidence.length
+            ? `«${foldEvidence[0]}» on the piece, but no edge is marked as the fold`
+            : 'unfold: pick the fold edge';
+          blockedHere = { reason: 'fold-question', detail: askWhy };
           break;
         }
       }
@@ -473,18 +696,24 @@ export function buildPieceSpecsDetailed(
       let drills = feats.filter((f): f is DrillFeature => f.kind === 'drill');
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');
       if (fold) {
-        const u = unfold(outer, fold);
-        if (!u) {
-          if (foldFeat || wantFold === true) {
+        const half = outer;
+        const t = tryUnfold(half, fold, edgeLen);
+        if (!t.u) {
+          if (foldFeat || opFold) {
             blockedHere = {
               reason: 'fold-unresolved',
-              detail: 'the fold line is not an edge of the outline — cannot unfold',
+              detail: `${card.token}: cannot unfold — ${t.problem}`,
             };
             break;
           }
-          fold = null; // text-only hint that does not fit: leave the piece as drawn
-          pieceNotes.push('"on fold" in the text, but the outline has no fold edge — not unfolded');
+          // a fold word bound to an edge, but the unfold is not a believable piece: ask
+          askWhy = `${card.token}: ${refWhy}, but unfolding there fails — ${t.problem}`;
+          blockedHere = { reason: 'fold-question', detail: askWhy };
+          break;
         } else {
+          const u = t.u;
+          if (c === p.cands[p.cands.length - 1].c)
+            pieceNotes.push(`unfolded: ${foldFeat ? 'fold line in the source' : refWhy}`);
           outer = u.pts;
           foldEdge = u.edge;
           anyFold = true;
@@ -639,6 +868,21 @@ export function buildPieceSpecsDetailed(
     }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
+      if (blockedHere.reason === 'fold-question')
+        foldAsks.push(
+          foldAskOf(
+            seed,
+            largest,
+            foldWords,
+            foldEvidence,
+            askWhy ?? blockedHere.detail,
+            opGrain ??
+              (classifyFeatures(largest, set, sheet).find((f) => f.kind === 'grain') as
+                | GrainFeature
+                | undefined) ??
+              null,
+          ),
+        );
       continue;
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
@@ -922,12 +1166,22 @@ export function buildPieceSpecsDetailed(
 
   // a blocked piece is not exported: its open questions wait until it is
   const written = new Set(unique.map((s) => s.seed));
+  // the cutting list (instruction pages) names fold pieces the sheet may draw with curves only: when
+  // it names more than were unfolded, the operator marks them or confirms the list (D3)
+  const listed = foldListEntries(input.docTexts ?? []);
+  const unfoldedSeeds = new Set(unique.filter((s) => s.unfoldedFold).map((s) => s.seed)).size;
+  const foldList =
+    listed.length > unfoldedSeeds && !input.foldListChecked
+      ? { entries: listed, unfolded: unfoldedSeeds }
+      : undefined;
   return {
     output: {
       pieces: unique,
       blocked,
       warnings,
       unproven: unproven.filter((u) => written.has(u.seed)),
+      ...(foldAsks.length ? { folds: foldAsks } : {}),
+      ...(foldList ? { foldList } : {}),
     },
     wallsOf,
     derivedOf,

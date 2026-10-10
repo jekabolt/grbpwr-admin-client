@@ -35,7 +35,7 @@ const LABEL_REACH_MM = 45;
 /** declared/measured beyond ±10 % is not a print scaling — most likely the wrong square. */
 const MAX_PLAUSIBLE_RATIO_ERR = 0.1;
 
-const KEYWORD =
+export const SQUARE_KEYWORD =
   /test\s*(square|box|quadrat)|testquadrat|kontroll\s*quadrat|kontroll?\s*m[åa]ll?|kontrollk(ä|ae)stchen|pr(ü|ue)f\s*quadrat|carr[ée]\s*(de\s*)?(test|contr[ôo]le)|carr[ée]\s*test|cuadrado|quadrato|kwadrat|контрольн|тестов|квадрат|square\s*(above|below|should)|should\s*measure|measure(s)?\s*\d|scale\s*check|massstab|maßstab|масштаб/i;
 
 /** "10cm x 10cm", "10 x 10 cm", "2 inches", "2\"", "5 cm", "50 mm", "8x8 см". */
@@ -201,7 +201,7 @@ function squareCandidates(page: IRPage): ScaleCandidate[] {
   if (!squares.length) return [];
   const labels = page.texts.map((t) => ({
     t,
-    kw: KEYWORD.test(t.text),
+    kw: SQUARE_KEYWORD.test(t.text),
     dims: dimensionsIn(t.text),
   }));
   const pageHasKeyword = labels.some((l) => l.kw);

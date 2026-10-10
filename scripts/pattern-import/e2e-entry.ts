@@ -332,7 +332,14 @@ function filesOf(c: Case): { name: string; bytes: ArrayBuffer }[] {
   return c.files.map((f) => ({ name: basename(f), bytes: enc(readFileSync(resolve(CORPUS, f))) }));
 }
 
-const OC: Record<string, string> = { closed: 'C', leak: 'L', merged: 'M', tiny: 't' };
+const OC: Record<string, string> = {
+  closed: 'C',
+  leak: 'L',
+  merged: 'M',
+  tiny: 't',
+  // pieces/grade (H1): a size held back, not guessed
+  refused: 'R',
+};
 
 function famStats(
   fams: PieceFamily[],
@@ -351,6 +358,8 @@ function famStats(
       derived: cs.flatMap((c) => (c.derived ?? []).map((d) => d.kind)),
       rankFrom: [...new Set(cs.map((c) => c.rankFrom ?? '-'))].join(','),
       areasCm2: cs.map((c) => Math.round(c.areaMm2 / 100)),
+      // pieces/grade (H1): why sizes were held back
+      refused: [...new Set(cs.flatMap((c) => (c.gradeRefusal ? [c.gradeRefusal] : [])))],
     };
   });
   const cands = per.flatMap((p) => p.outcomes.split(''));
@@ -484,10 +493,12 @@ export async function runCase(c: Case): Promise<Rec> {
     if (pending.length) rec.ops.push(`confirm ${pending.length} legend rows`);
     const CARD = card(c.card);
     let sz = await run('sizes', { card: CARD });
-    // H1c-4: a sheet that does not state its size count needs the operator's answer (the card's
-    // run is never the count). The operator answers from the drawing: `drawn`, else one size for a
-    // one-size card
-    const drawn = sz.expected ? undefined : c.drawn ?? (CARD.length === 1 ? 1 : undefined);
+    // H1c-3/4: a sheet that does not state its size count needs the operator's answer (the card's
+    // run is never the count). The operator answers from the drawing: `drawn`, else "1" where one
+    // size is drawn (one size read off the sheet, or a one-size card)
+    const drawn = sz.expected
+      ? undefined
+      : c.drawn ?? (sz.run.sizes.length === 1 || CARD.length === 1 ? 1 : undefined);
     const ask = drawn ? { drawnSizes: drawn } : {};
     if (!sz.expected) {
       if (drawn) {
@@ -696,10 +707,31 @@ export async function runCase(c: Case): Promise<Rec> {
     };
     const overrides: StageIO['semantics']['in']['pieceOverrides'] = {};
     const grain: StageIO['semantics']['in']['operatorGrain'] = {};
+    const foldPick: NonNullable<StageIO['semantics']['in']['operatorFold']> = {};
+    let foldListChecked = false;
+    // E1a: the simulated operator answers fold questions from K0 truth (corpus/truth.json) — the
+    // person at the wizard knows the garment; a piece truth does not list is "not a fold"
+    const truthFold = (() => {
+      if (!c.truth) return () => null;
+      try {
+        const t = JSON.parse(readFileSync(resolve(CORPUS, 'truth.json'), 'utf8')) as {
+          samples: { id: string; variants: { pieces: { label: string; fold: unknown }[] }[] }[];
+        };
+        const sample = t.samples.find((x) => x.id === c.truth!.id);
+        const pieces = sample?.variants[c.truth!.variant ?? 0]?.pieces ?? [];
+        return (label: string): boolean | null => {
+          const p = pieces.find((x) => x.label === label);
+          return p ? p.fold === true : null;
+        };
+      } catch {
+        return () => null;
+      }
+    })();
     let sem = await run('semantics', {
       fileAllowance,
       pieceOverrides: overrides,
       operatorGrain: grain,
+      operatorFold: foldPick,
     });
     // the wizard's details step shows the allowance it read; a found one becomes the file decision
     const found = sem.pieces.find(
@@ -721,10 +753,21 @@ export async function runCase(c: Case): Promise<Rec> {
         ),
       ],
       warnings: sem.warnings.slice(0, 5),
+      // E1a: the fold questions the wizard asks before any answer
+      folds: (sem.folds ?? []).map((q) => ({
+        piece: labelOf(seedsNow)(q.seed),
+        why: q.why,
+        evidence: q.evidence,
+        edges: q.edges.length,
+        suggested: q.suggested,
+        truthFold: truthFold(labelOf(seedsNow)(q.seed)),
+      })),
+      foldList: sem.foldList ?? null,
+      unfolded: sem.pieces.filter((p) => p.unfoldedFold).map((p) => p.identity),
     };
     const fams = pc.families;
     const dropped: string[] = [];
-    for (let pass = 0; pass < 4 && sem.blocked.length; pass++) {
+    for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
       for (const b of sem.blocked)
         byReason.set(b.reason, [...(byReason.get(b.reason) ?? []), b.seed]);
@@ -751,8 +794,36 @@ export async function runCase(c: Case): Promise<Rec> {
         };
       });
       if (named.length) rec.ops.push(`type a code for ${named.length} pieces (grammar/duplicate)`);
+      // E1a fold question: a fold piece (truth) takes the suggested edge, anything else "not a fold"
+      const asks = sem.folds ?? [];
+      for (const q of asks) {
+        const lab = labelOf(seedsNow)(q.seed);
+        const fold = truthFold(lab) === true;
+        const e = fold && q.suggested != null ? q.edges[q.suggested] : null;
+        if (e) foldPick[q.seed] = { a: e.a, b: e.b };
+        else overrides[q.seed] = { ...(overrides[q.seed] ?? {}), unfoldedFold: false };
+        rec.ops.push(
+          `fold? ${lab}: ${e ? `pick the suggested ${e.lenMm.toFixed(0)} mm edge` : fold ? 'fold, but NO suggested edge → "not a fold"' : '"not a fold"'}`,
+        );
+      }
+      // E1a cutting list: mark the list's pieces (truth) as fold — they come back as questions
+      if (sem.foldList && !foldListChecked) {
+        const marked = fams.filter(
+          (f) =>
+            truthFold(labelOf(seedsNow)(f.seed)) === true &&
+            overrides[f.seed]?.unfoldedFold === undefined &&
+            !foldPick[f.seed] &&
+            !sem.pieces.some((p) => p.seed === f.seed && p.unfoldedFold),
+        );
+        for (const f of marked)
+          overrides[f.seed] = { ...(overrides[f.seed] ?? {}), unfoldedFold: true };
+        foldListChecked = true;
+        rec.ops.push(
+          `cutting list names ${sem.foldList.entries.length} fold pieces, ${sem.foldList.unfolded} unfolded → mark ${marked.map((f) => labelOf(seedsNow)(f.seed)).join(',') || 'none'}, confirm the list`,
+        );
+      }
       const other = sem.blocked.filter(
-        (b) => !['no-grain', 'grammar', 'duplicate-identity'].includes(b.reason),
+        (b) => !['no-grain', 'grammar', 'duplicate-identity', 'fold-question'].includes(b.reason),
       );
       if (other.length) {
         dropped.push(...other.map((b) => `${b.reason}:${labelOf(seedsNow)(b.seed)}`));
@@ -766,6 +837,8 @@ export async function runCase(c: Case): Promise<Rec> {
         fileAllowance: c.meaning ? fileAllowance : found ?? fileAllowance,
         pieceOverrides: overrides,
         operatorGrain: grain,
+        operatorFold: foldPick,
+        foldListChecked,
       });
     }
     rec.droppedAtMeaning = dropped;
@@ -792,6 +865,8 @@ export async function runCase(c: Case): Promise<Rec> {
         fileAllowance,
         pieceOverrides: overrides,
         operatorGrain: grain,
+        operatorFold: foldPick,
+        foldListChecked,
       });
     }
     const asks = sem.unproven.filter((u) => u.kind !== 'allowance');
@@ -812,6 +887,7 @@ export async function runCase(c: Case): Promise<Rec> {
       pieces: new Set(sem.pieces.map((p) => p.seed)).size,
       specs: sem.pieces.length,
       blocked: sem.blocked.map((b) => `${b.reason}:${b.detail.slice(0, 80)}`),
+      foldList: sem.foldList ?? null,
       pieceInfo: sem.pieces.map((p) => ({
         identity: p.identity,
         seed: p.seed,
