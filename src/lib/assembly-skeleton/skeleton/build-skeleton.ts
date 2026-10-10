@@ -29,7 +29,7 @@ import {
   zoneEnum,
   type Entity,
 } from './model';
-import { display, groupDetailed } from './group-units';
+import { display, groupDetailed, withPart } from './group-units';
 import { planButtons, ventEvidence, zipSeats } from '../geometry/closures';
 import { SKELETON } from '../types';
 import type { SkeletonTemplate, TemplateStage } from './template';
@@ -537,7 +537,7 @@ export function buildSkeleton(
           {
             name:
               stage.name ??
-              `${display(t)} with ${batch.map((e) => display(e).toLowerCase()).join(', ')}`,
+              batch.reduce((n, e) => withPart(n, display(e).toLowerCase()), display(t)),
             roles: mergeRoles(t.roles, ...batch.map((e) => e.roles)),
             tree: t.tree,
             hand: t.hand,

@@ -94,7 +94,7 @@ export class Table {
     // ×2 mirrored blocks says it is two («Sleeve ×2»).
     const lined =
       tree === 'lining' && !/^lining\b/i.test(out.name)
-        ? `Lining ${out.name[0].toLowerCase()}${out.name.slice(1)}`
+        ? `Lining ${/^[A-Z][a-z]/.test(out.name) ? out.name[0].toLowerCase() : out.name[0]}${out.name.slice(1)}`
         : out.name;
     // One «×2» at the end, never «Front ×2 with placket ×2».
     const name = mult >= 2 ? `${lined.replace(/ ×\d+/g, '')}${multWord(mult)}` : lined;
@@ -582,7 +582,7 @@ export function groupDetailed(
       if (rivalled || cands.some((x) => x !== cands[0] && x.score >= score - SKELETON.ambiguity))
         continue;
       const made = record([e, t], {
-        name: `${display(t)} with ${def.name.toLowerCase()}`,
+        name: withPart(display(t), def.name.toLowerCase()),
         // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
         roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
         kind: 'attach',
@@ -668,7 +668,7 @@ export function groupDetailed(
       laid.add(pick.seam.surface?.part ?? c.surface.part);
       const mark = (pick.seam.evidence.rule ?? '').replace(/^surface: /, '');
       record([pick.e, host], {
-        name: `${display(host)} with ${short(pick.e)}`,
+        name: withPart(display(host), short(pick.e)),
         roles: host.roles,
         kind: 'attach',
         hand: host.hand,
@@ -768,7 +768,7 @@ export function groupDetailed(
         );
         const t = readings[d.chosen].t;
         record([e, t], {
-          name: `${display(t)} with ${def.name.toLowerCase()}`,
+          name: withPart(display(t), def.name.toLowerCase()),
           roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
           kind: 'attach',
           hand: t.hand,
@@ -809,7 +809,7 @@ export function groupDetailed(
           ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)}`
           : `${roleName(def.id, e.hand)} goes onto ${display(top.t)} by name (${attachTo.join(' / ')})`;
       record([e, top.t], {
-        name: `${display(top.t)} with ${def.name.toLowerCase()}`,
+        name: withPart(display(top.t), def.name.toLowerCase()),
         roles: mergeRoles(top.t.roles, [def.id]),
         kind: 'attach',
         hand: top.t.hand,
@@ -1093,6 +1093,22 @@ function sameStem(a: string, b: string): boolean {
       .filter((t) => !INTERFACING_TOKENS.has(t))
       .join('_');
   return stem(a) !== '' && stem(a) === stem(b);
+}
+
+/**
+ * «Left front with pocket» + pocket → «Left front with pockets», + placket → «Left front with
+ * pocket, placket»: a unit name says each part once, never «with pocket with pocket».
+ */
+export function withPart(name: string, part: string): string {
+  // «Left front with pocket 2» is a uniqueness suffix, not part of what the unit holds.
+  const base = name.replace(/ \d+$/, '');
+  const at = base.indexOf(' with ');
+  if (at < 0) return `${base} with ${part}`;
+  const parts = base.slice(at + 6).split(', ');
+  const i = parts.findIndex((x) => x === part || x === `${part}s`);
+  if (i >= 0) parts[i] = parts[i].endsWith('s') ? parts[i] : `${part}s`;
+  else parts.push(part);
+  return `${base.slice(0, at)} with ${parts.join(', ')}`;
 }
 
 /** How a thing is called in a unit name: a unit by its name, a lone piece by its role (Left front). */

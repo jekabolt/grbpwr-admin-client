@@ -627,6 +627,31 @@ export async function runCard(input: CardInput) {
     out.unresolvedEdgePairs = proposal.unresolved.length;
     const used = new Set(steps.flatMap((s) => s.inputs));
     out.leftOut = built.facts.pieces.filter((p) => !used.has(p.pieceKey)).map((p) => p.name);
+    // Does the proposal finish ONE garment? Every card piece should land in the one terminal unit
+    // (or be named as left out with a reason in the warnings).
+    {
+      const leavesOf = new Map<string, string[]>();
+      const consumed = new Set<string>();
+      for (const s of steps) {
+        if (!s.outputUnitKey) continue;
+        const ls = s.inputs.flatMap((k) => leavesOf.get(k) ?? [k]);
+        s.inputs.forEach((k) => consumed.add(k));
+        leavesOf.set(s.outputUnitKey, [...new Set(ls)]);
+      }
+      const terminals = [...leavesOf.keys()].filter((k) => !consumed.has(k));
+      const inTerminal = new Set(terminals.length === 1 ? leavesOf.get(terminals[0]) : []);
+      const outside = built.facts.pieces
+        .filter((p) => p.pieceKey && !inTerminal.has(p.pieceKey))
+        .map((p) => p.name);
+      const said = outside.filter((n) => proposal.warnings.some((w) => w.includes(n)));
+      out.terminal = {
+        units: terminals.length,
+        pieces: built.facts.pieces.filter((p) => p.pieceKey).length,
+        inTerminal: inTerminal.size,
+        outside,
+        outsideUnsaid: outside.filter((n) => !said.includes(n)),
+      };
+    }
     out.warnings = proposal.warnings;
     out.engineRuleBroken = proposal.warnings.filter((w) => /^rule \d+ broken/.test(w));
     const sources = steps.reduce<Record<string, number>>(
