@@ -16,6 +16,7 @@ import { readPieceText } from 'lib/pattern-import/dictionary';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
+import { readManifest } from 'lib/pattern-import/manifest';
 import type {
   CardSize,
   DraftScopeTarget,
@@ -43,6 +44,7 @@ const CORPUS =
   process.env.PATIMPORT_CORPUS ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
 const OUT =
+  process.env.PATIMPORT_E2E_OUT ??
   process.env.E2E_OUT ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/reports/E2E-out';
 const LEGACY = pathToFileURL(resolve(REPO, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs')).href;
@@ -83,6 +85,14 @@ type Case = {
    * the sheet draws with curves only (redcafe спинка: ЗАДНЯЯ СЕРЕДИНА СГИБ).
    */
   foldOnCount?: string[];
+  /**
+   * The operator's legend edit: the class that draws the piece outlines (the longest class that is
+   * not set aside) is a size line — the live smoke's answer on inkscape-pieces-mm.svg, whose cut
+   * lines the legend read as `internal`.
+   */
+  outlinesAreSize?: boolean;
+  /** The operator maps the source sizes, in rank order, to these card tokens (smoke: 38 → M). */
+  mapTo?: string[];
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -283,10 +293,69 @@ export const CASES: Case[] = [
   ].map(
     (f): Case => ({ id: `syn:${f}`, group: 'synthetic', files: [`synthetic/${f}`], card: ['M'] }),
   ),
+  // A7: the live beta smoke of 10.10 (auto/01-TASKS Журнал): card #55 S/M/L, the operator's answers
+  // as given there — outlines → size line, 1 size drawn, 38 → M, a seed per piece, grainlines, the
+  // outline is the cut line as drawn
+  {
+    id: 'syn:inkscape-smoke-SML',
+    group: 'synthetic',
+    files: ['synthetic/inkscape-pieces-mm.svg'],
+    card: ['S', 'M', 'L'],
+    outlinesAreSize: true,
+    drawn: 1,
+    mapTo: ['M'],
+    outline: 'cut',
+  },
   ...['binary-garbage.plt', 'not-really.svg', 'postscript-only.eps', 'dos-binary-header.eps'].map(
     (f): Case => ({ id: `syn:${f}`, group: 'refusal', files: [`synthetic/${f}`], card: ['M'] }),
   ),
 ];
+
+// ── A7 click metric ─────────────────────────────────────────────────────────────────────
+// One unit = one operator action (auto/00-PLAN §1, A7): a click, a pick, a typed code = 2, a
+// grainline = 3 (the row + its two ends), "not a piece" = 2, a size map = 1 per size. Navigation of
+// the linear wizard = file 1 + read 1 + next ×7 + apply 1 + download 1 = 11; a screen the run skips
+// (the DXF fast path: scale, sheet, sizes, pieces; A0.2: a one-page sheet) takes its "next" away.
+
+export const CLICKS = {
+  scale: 1,
+  'legend-row': 1,
+  'size-guess': 1,
+  'size-map': 1,
+  'drawn-sizes': 1,
+  model: 1,
+  seed: 1,
+  'use-line': 2,
+  'not-a-piece': 2,
+  code: 2,
+  grain: 3,
+  'fold-suggested': 1,
+  'fold-pick': 2,
+  outline: 1,
+  'bulk-confirm': 1,
+  fabrics: 1,
+  // answers the simulated operator gives that the plan's table does not name
+  residual: 1, // "accept tile residual" tick
+  'fold-no': 1, // "not a fold"
+  'cutting-list': 1, // confirm the cutting list + 1 per piece marked
+  'count-answer': 1, // "cut on fold" in a count row
+  blocker: 0,
+  note: 0,
+} as const;
+export type OpKind = keyof typeof CLICKS;
+export type Op = { label: string; kind: OpKind; clicks: number };
+export type Clicks = { total: number; byKind: Partial<Record<OpKind, number>>; nav: number };
+export const NAV_LINEAR = 11;
+
+export function clicksOf(ops: readonly Op[], skippedScreens: number): Clicks {
+  const byKind: Partial<Record<OpKind, number>> = {};
+  for (const o of ops) if (o.clicks) byKind[o.kind] = (byKind[o.kind] ?? 0) + o.clicks;
+  const nav = NAV_LINEAR - skippedScreens;
+  return { total: nav + ops.reduce((a, o) => a + o.clicks, 0), byKind, nav };
+}
+
+/** The card id every case writes for (nonzero: B1 wrote 0 and the e2e did not see it). */
+export const CARD_ID = 4242;
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────
 
@@ -407,10 +476,20 @@ function nearestChain(preview: Float32Array[], at: PtMm): number {
 
 // ── one case ────────────────────────────────────────────────────────────────────────────
 
-type Rec = Record<string, unknown> & { id: string; ops: string[]; ms: Record<string, number> };
+type Rec = Record<string, unknown> & {
+  id: string;
+  ops: Op[];
+  ms: Record<string, number>;
+  clicks?: Clicks;
+};
 
 export async function runCase(c: Case): Promise<Rec> {
   const rec: Rec = { id: c.id, group: c.group, files: c.files, ops: [], ms: {} };
+  /** One operator answer: `count` units of `kind` (A7: clicks = CLICKS[kind] × count). */
+  const op = (kind: OpKind, label: string, count = 1) =>
+    rec.ops.push({ label, kind, clicks: CLICKS[kind] * count });
+  /** A7: the wizard screens the run skipped (nav = NAV_LINEAR − skipped). */
+  const skipped: string[] = [];
   const dir = resolve(OUT, c.id.replace(/[^\w.-]+/g, '_'));
   mkdirSync(dir, { recursive: true });
   const T0 = Date.now();
@@ -454,12 +533,15 @@ export async function runCase(c: Case): Promise<Rec> {
     const needsHuman =
       best.confidence < 0.9 || Math.abs(best.factor - 1) > PATIMPORT.scaleWarnRatio;
     if (needsHuman && !ex.presegmented)
-      rec.ops.push(
+      op(
+        'scale',
         `confirm scale (${best.method}, conf ${best.confidence.toFixed(2)}, ×${best.factor.toFixed(4)})`,
       );
     await run('scale', {
       decision: { factor: best.factor, method: best.method, operatorConfirmed: needsHuman },
     });
+    // the DXF fast path: a certain scale is not shown, the sheet never is (use-import-session)
+    if (ex.presegmented) skipped.push(...(needsHuman ? [] : ['scale']), 'sheet');
     // 3 · sheet
     const as = await run('assemble', { sheet: c.sheet ?? 0 });
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
@@ -474,11 +556,11 @@ export async function runCase(c: Case): Promise<Rec> {
       originMm: [Math.round(as.sheet.bbox.minX), Math.round(as.sheet.bbox.maxY)],
     };
     if (as.sheet.missing.length)
-      rec.ops.push(`BLOCKER: ${as.sheet.missing.length} pages missing → set the grid by hand`);
+      op('blocker', `BLOCKER: ${as.sheet.missing.length} pages missing → set the grid by hand`);
     if (worst > PATIMPORT.registrationMaxResidualMm)
-      rec.ops.push(`accept tile residual ${worst.toFixed(2)} mm`);
+      op('residual', `accept tile residual ${worst.toFixed(2)} mm`);
     // 4 · legend + sizes
-    const ch = await run('chains', {
+    let ch = await run('chains', {
       opts: {
         joinGapMm: PATIMPORT.joinGapMm,
         joinAngleDeg: PATIMPORT.joinAngleDeg,
@@ -496,7 +578,26 @@ export async function runCase(c: Case): Promise<Rec> {
       flags: ch.ambiguities?.length ?? 0,
       chains: ch.chainPreview.length,
     };
-    if (pending.length) rec.ops.push(`confirm ${pending.length} legend rows`);
+    let legendRows = pending.length;
+    if (c.outlinesAreSize) {
+      const k = ch.classes
+        .filter((x) => x.role !== 'ignore')
+        .sort((a, b) => b.totalLengthMm - a.totalLengthMm)[0];
+      if (k && k.role !== 'size') {
+        if (!pending.some((x) => x.id === k.id)) legendRows++;
+        ch = await run('chains', {
+          opts: {
+            joinGapMm: PATIMPORT.joinGapMm,
+            joinAngleDeg: PATIMPORT.joinAngleDeg,
+            joinLateralMm: PATIMPORT.joinLateralMm,
+          },
+          legend: [{ classId: k.id, role: 'size', sizeLabel: null }],
+        });
+        (rec.legend as Record<string, unknown>).edited =
+          `${k.role}→size (${k.chains.length} chains)`;
+      }
+    }
+    if (legendRows) op('legend-row', `confirm ${legendRows} legend rows`, legendRows);
     const CARD = card(c.card);
     let sz = await run('sizes', { card: CARD });
     // D1: what the sizes step asks, and what the lines suggest (offered, never applied)
@@ -512,9 +613,9 @@ export async function runCase(c: Case): Promise<Rec> {
     const ask = drawn ? { drawnSizes: drawn } : {};
     if (!sz.expected) {
       if (drawn) {
-        rec.ops.push(`answer ${drawn} for "sizes drawn on this sheet"`);
+        op('drawn-sizes', `answer ${drawn} for "sizes drawn on this sheet"`);
         sz = await run('sizes', { card: CARD, ...ask });
-      } else rec.ops.push('"sizes drawn on this sheet" not answered (no ground truth in the case)');
+      } else op('note', '"sizes drawn on this sheet" not answered (no ground truth in the case)');
     }
     const guesses = sz.map.entries.filter(
       (e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9,
@@ -529,8 +630,28 @@ export async function runCase(c: Case): Promise<Rec> {
       unmappedCard: sz.map.unmapped.length,
       countAsk: ask0,
     };
-    if (guesses.length) {
-      rec.ops.push(`confirm ${guesses.length} size guesses`);
+    if (c.mapTo) {
+      const to = c.mapTo;
+      const n = Math.min(to.length, sz.map.entries.length);
+      op(
+        'size-map',
+        `map ${n} source sizes by hand: ${sz.map.entries
+          .slice(0, n)
+          .map((e, i) => `${e.source.label || '∅'}→${to[i]}`)
+          .join(', ')}`,
+        n,
+      );
+      sz = await run('sizes', {
+        card: CARD,
+        ...ask,
+        operatorMap: sz.map.entries.map((e, i) => ({
+          ...e,
+          card: i < n ? CARD.find((k) => k.token === to[i]) ?? null : null,
+          origin: 'operator',
+        })),
+      });
+    } else if (guesses.length) {
+      op('size-guess', `confirm ${guesses.length} size guesses`, guesses.length);
       sz = await run('sizes', {
         card: CARD,
         ...ask,
@@ -540,8 +661,10 @@ export async function runCase(c: Case): Promise<Rec> {
     if (!sz.map.entries.some((e) => e.card) && sz.map.entries.length) {
       // the operator maps the source sizes to the card by hand, in rank order
       const n = Math.min(sz.map.entries.length, CARD.length);
-      rec.ops.push(
+      op(
+        'size-map',
         `map ${n} of ${sz.map.entries.length} source sizes to the card by hand (labels: [${sz.map.entries.map((e) => e.source.label || '∅').join(',')}])`,
+        n,
       );
       sz = await run('sizes', {
         card: CARD,
@@ -555,7 +678,7 @@ export async function runCase(c: Case): Promise<Rec> {
     }
     if (c.notExported?.length) {
       const drop = new Set(c.notExported);
-      rec.ops.push(`size(s) ${c.notExported.join(', ')} not exported`);
+      op('size-map', `size(s) ${c.notExported.join(', ')} not exported`, c.notExported.length);
       sz = await run('sizes', {
         card: CARD,
         ...ask,
@@ -567,11 +690,17 @@ export async function runCase(c: Case): Promise<Rec> {
       });
     }
     if (!sz.map.entries.some((e) => e.card)) {
-      rec.ops.push('BLOCKER: no source size maps to the card');
+      op('blocker', 'BLOCKER: no source size maps to the card');
       rec.verdict = 'fails';
       rec.reason = 'no size maps to the card';
       return rec;
     }
+    // the fast path stops on the sizes step only when something there needs an answer
+    if (
+      ex.presegmented &&
+      !rec.ops.some((o) => ['legend-row', 'drawn-sizes', 'size-guess', 'size-map'].includes(o.kind))
+    )
+      skipped.push('sizes', 'pieces');
     const exported = new Set(sz.map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model
     const FILL = { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm };
@@ -593,7 +722,7 @@ export async function runCase(c: Case): Promise<Rec> {
     const variants = pc.variants ?? [];
     if (variants.length > 1) {
       variant = variants.find((v) => c.variant?.test(v)) ?? variants[0];
-      rec.ops.push(`pick model "${variant}" of [${variants.join(' | ')}]`);
+      op('model', `pick model "${variant}" of [${variants.join(' | ')}]`);
       pc = await run('pieces', { edits: [], opts: { ...FILL, variant } });
     } else if (variants.length === 1) variant = null;
     rec.variant = variant;
@@ -665,9 +794,14 @@ export async function runCase(c: Case): Promise<Rec> {
         opts: { ...FILL, variant },
       });
       seedsNow = pc.seeds;
-      rec.ops.push(
-        `${clickSeeds.length} seed clicks${c.clicks ? ' (F4 fixture)' : ' (oracle: one per closed outline)'}${wallEdits.length ? ` + ${wallEdits.length} "use line"` : ''}${textDrops.length ? ` + "not a piece" on ${textDrops.length} text seeds` : ''}`,
+      op(
+        'seed',
+        `${clickSeeds.length} seed clicks${c.clicks ? ' (F4 fixture)' : ' (oracle: one per closed outline)'}`,
+        clickSeeds.length,
       );
+      if (wallEdits.length) op('use-line', `${wallEdits.length} "use line"`, wallEdits.length);
+      if (textDrops.length)
+        op('not-a-piece', `"not a piece" on ${textDrops.length} text seeds`, textDrops.length);
       rec.withClicks = famStats(pc.families, exported, labelOf(seedsNow));
       wallEdits = [...textDrops, ...wallEdits];
     }
@@ -677,15 +811,17 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.verdict = 'fails';
       rec.reason =
         'no pieces seeded automatically (no text seeds) — operator must click every piece';
-      rec.ops.push('BLOCKER: click inside every piece');
+      op('blocker', 'BLOCKER: click inside every piece');
       return rec;
     }
     // open regions → "not a piece" (the cheapest answer that lets the wizard move on)
     const open = lastStats.per.filter((p) => !p.closed);
     let edits: PieceEdit[] = [...wallEdits];
     if (open.length) {
-      rec.ops.push(
+      op(
+        'not-a-piece',
         `"not a piece" on ${open.length} open regions (${open.map((p) => `${p.label}:${p.outcomes}`).join(' ')})`,
+        open.length,
       );
       edits = [...edits, ...open.map((p): PieceEdit => ({ kind: 'not-a-piece', seed: p.seed }))];
       pc = await run('pieces', { seeds: seedsIn ?? pc.seeds, edits, opts: { ...FILL, variant } });
@@ -790,7 +926,8 @@ export async function runCase(c: Case): Promise<Rec> {
         const cx = (bb.minX + bb.maxX) / 2;
         grain[sd] = { a: { x: cx, y: bb.minY + 30 }, b: { x: cx, y: bb.maxY - 30 } };
       }
-      if (noGrain.length) rec.ops.push(`draw grain on ${noGrain.length} pieces (2 clicks each)`);
+      if (noGrain.length)
+        op('grain', `draw grain on ${noGrain.length} pieces (row + 2 ends each)`, noGrain.length);
       const named = [
         ...(byReason.get('grammar') ?? []),
         ...(byReason.get('duplicate-identity') ?? []),
@@ -804,7 +941,8 @@ export async function runCase(c: Case): Promise<Rec> {
           nameOrigin: 'operator',
         };
       });
-      if (named.length) rec.ops.push(`type a code for ${named.length} pieces (grammar/duplicate)`);
+      if (named.length)
+        op('code', `type a code for ${named.length} pieces (grammar/duplicate)`, named.length);
       // E1a fold question: a fold piece (truth) takes the suggested edge, anything else "not a fold"
       const asks = sem.folds ?? [];
       for (const q of asks) {
@@ -813,7 +951,8 @@ export async function runCase(c: Case): Promise<Rec> {
         const e = fold && q.suggested != null ? q.edges[q.suggested] : null;
         if (e) foldPick[q.seed] = { a: e.a, b: e.b };
         else overrides[q.seed] = { ...(overrides[q.seed] ?? {}), unfoldedFold: false };
-        rec.ops.push(
+        op(
+          e ? 'fold-suggested' : 'fold-no',
           `fold? ${lab}: ${e ? `pick the suggested ${e.lenMm.toFixed(0)} mm edge` : fold ? 'fold, but NO suggested edge → "not a fold"' : '"not a fold"'}`,
         );
       }
@@ -836,8 +975,10 @@ export async function runCase(c: Case): Promise<Rec> {
         for (const f of marked)
           overrides[f.seed] = { ...(overrides[f.seed] ?? {}), unfoldedFold: true };
         foldListChecked = [...new Set([...foldListChecked, ...sem.foldList.entries])];
-        rec.ops.push(
+        op(
+          'cutting-list',
           `cutting list names ${sem.foldList.entries.length} fold pieces, ${sem.foldList.unfolded} unfolded → mark ${marked.map((f) => labelOf(seedsNow)(f.seed)).join(',') || 'none'}, confirm the list`,
+          1 + marked.length,
         );
       }
       const other = sem.blocked.filter(
@@ -845,8 +986,10 @@ export async function runCase(c: Case): Promise<Rec> {
       );
       if (other.length) {
         dropped.push(...other.map((b) => `${b.reason}:${labelOf(seedsNow)(b.seed)}`));
-        rec.ops.push(
+        op(
+          'not-a-piece',
           `drop ${other.length} blocked pieces (${[...new Set(other.map((b) => b.reason))].join(',')})`,
+          other.length,
         );
         edits = [...edits, ...other.map((b): PieceEdit => ({ kind: 'not-a-piece', seed: b.seed }))];
         pc = await run('pieces', { seeds: seedsIn ?? pc.seeds, edits, opts: { ...FILL, variant } });
@@ -870,7 +1013,8 @@ export async function runCase(c: Case): Promise<Rec> {
       const shown = askAllowance[0].shown;
       const meaning = c.outline ?? (shown.startsWith('cut') ? 'cut' : 'seam');
       confirm.allowance = { pieces: askAllowance.length, shown, answer: meaning };
-      rec.ops.push(
+      op(
+        'outline',
         `answer the outline question: ${meaning === 'cut' ? 'cut line' : `seam line + ${PATIMPORT.defaultAllowanceMm} mm`} (shown ${shown}, ${askAllowance.length} pieces)`,
       );
       fileAllowance = {
@@ -911,8 +1055,13 @@ export async function runCase(c: Case): Promise<Rec> {
         const q = sem.folds?.find((x) => x.seed === u.seed);
         const e = q && q.suggested != null ? q.edges[q.suggested] : null;
         if (e) foldPick[u.seed] = { a: e.a, b: e.b };
-        rec.ops.push(
-          `count question on ${lab(u.seed)}${u.foldAlt ? ' (cut on fold suggested)' : ''}: "cut on fold" → ${e ? `pick the suggested ${e.lenMm.toFixed(0)} mm edge` : 'NO edge to pick'}`,
+        op(
+          'count-answer',
+          `count question on ${lab(u.seed)}${u.foldAlt ? ' (cut on fold suggested)' : ''}: "cut on fold"`,
+        );
+        op(
+          e ? 'fold-suggested' : 'note',
+          e ? `pick the suggested ${e.lenMm.toFixed(0)} mm fold edge` : 'NO fold edge to pick',
         );
       }
       sem = await run('semantics', semIn());
@@ -928,7 +1077,8 @@ export async function runCase(c: Case): Promise<Rec> {
     confirm.clicks = (askAllowance.length ? 1 : 0) + (asks.length ? 1 : 0);
     rec.confirm = confirm;
     if (asks.length)
-      rec.ops.push(
+      op(
+        'bulk-confirm',
         `confirm all as shown: ${(confirm.quantity as string[]).length} quantities, ${(confirm.name as string[]).length} names (1 click)`,
       );
     rec.semFinal = {
@@ -998,7 +1148,8 @@ export async function runCase(c: Case): Promise<Rec> {
       problems: plan.problems.map((p) => p.message),
     };
     if (plan.problems.length) {
-      rec.ops.push(
+      op(
+        'fabrics',
         `fabrics step blocks: ${plan.problems[0].message.slice(0, 80)} → all pieces to main`,
       );
       fab = {
@@ -1007,26 +1158,53 @@ export async function runCase(c: Case): Promise<Rec> {
       };
     }
     // 8 · write + gate
+    const writeSizes = sz.map.entries.flatMap((e) =>
+      e.card
+        ? [
+            {
+              token: e.card.token,
+              sizeId: e.card.sizeId,
+              name: e.card.name,
+              sourceLabel: e.source.label,
+              rank: e.source.rank,
+            },
+          ]
+        : [],
+    );
     const wr = await run('write', {
-      techCardId: 0,
+      techCardId: CARD_ID,
       scopes: SCOPES,
       assignment: fab,
-      sizes: sz.map.entries.flatMap((e) =>
-        e.card
-          ? [
-              {
-                token: e.card.token,
-                sizeId: e.card.sizeId,
-                name: e.card.name,
-                sourceLabel: e.source.label,
-                rank: e.source.rank,
-              },
-            ]
-          : [],
-      ),
+      sizes: writeSizes,
       dialect: 'r12',
       generator: 'e2e-probe',
     });
+    // A0.5 (B1): what the card will read back from each written file — the manifest embedded in
+    // the DXF — must be the card, the scope and the sizes this run was given
+    const manifestProblems: string[] = [];
+    for (const sc of wr.scopes) {
+      const want = SCOPES.find((x) => x.scopeKey === sc.target.scopeKey);
+      const m = readManifest(sc.dxfText);
+      const at = sc.target.scopeKey.replace('TECH_CARD_BOM_PURPOSE_', '');
+      if (!want) manifestProblems.push(`${at}: scope not among the run's scopes`);
+      if (!m) {
+        manifestProblems.push(`${at}: no manifest in the written file`);
+        continue;
+      }
+      if (m.techCardId !== CARD_ID)
+        manifestProblems.push(`${at}: techCardId ${m.techCardId} ≠ ${CARD_ID}`);
+      if (
+        want &&
+        (m.scope.fabricPurpose !== want.fabricPurpose || m.scope.bomLineKey !== want.bomLineKey)
+      )
+        manifestProblems.push(
+          `${at}: scope ${m.scope.fabricPurpose}/${m.scope.bomLineKey} ≠ ${want.fabricPurpose}/${want.bomLineKey}`,
+        );
+      const got = m.sizes.map((z) => `${z.token}#${z.sizeId}`).join(',');
+      const exp = writeSizes.map((z) => `${z.token}#${z.sizeId}`).join(',');
+      if (got !== exp) manifestProblems.push(`${at}: sizes [${got}] ≠ [${exp}]`);
+    }
+    rec.manifestCheck = { ok: manifestProblems.length === 0, problems: manifestProblems };
     const scopes = [];
     for (const sc of wr.scopes) {
       const g = wr.gate[sc.target.scopeKey];
@@ -1067,6 +1245,11 @@ export async function runCase(c: Case): Promise<Rec> {
       });
     }
     rec.write = scopes;
+    const tc = truthCheckOf(c, (rec.semFinal as { pieceInfo: PieceInfo[] }).pieceInfo);
+    if (tc) {
+      rec.truthCheck = tc;
+      rec.wrongPassing = scopes.length && scopes.every((x) => x.passed) ? tc.wrong.length : 0;
+    }
     // traced (scan) sources: per written size, the cleaned line over the traced outline and the
     // source walls — the proof that the outline the offset ran on stays on the scan (E3)
     if ((rec.read as { scanPages?: number })?.scanPages)
@@ -1082,8 +1265,9 @@ export async function runCase(c: Case): Promise<Rec> {
               .map((t) => t.pts)
           : undefined,
       );
-    const allPassed = scopes.length > 0 && scopes.every((x) => x.passed);
-    const hard = rec.ops.filter((o) => o.startsWith('BLOCKER'));
+    const allPassed =
+      scopes.length > 0 && scopes.every((x) => x.passed) && manifestProblems.length === 0;
+    const hard = rec.ops.filter((o) => o.kind === 'blocker');
     rec.verdict = !allPassed
       ? 'fails'
       : rec.ops.length === 0
@@ -1091,12 +1275,15 @@ export async function runCase(c: Case): Promise<Rec> {
         : hard.length
           ? 'fails'
           : 'needs operator';
-    if (!allPassed)
+    if (manifestProblems.length) rec.reason = `manifest round trip: ${manifestProblems.join('; ')}`;
+    else if (!allPassed)
       rec.reason = `gate blocks: ${scopes.flatMap((x) => x.blocking.map((b) => b.split('[')[0])).join(',')}`;
   } catch (e) {
     rec.verdict = 'fails';
     rec.error = String((e as Error)?.stack ?? e).slice(0, 600);
   } finally {
+    rec.clicks = clicksOf(rec.ops, skipped.length);
+    rec.skippedScreens = skipped;
     rec.totalMs = Date.now() - T0;
     rec.peakRssMb = peakMb();
     s.close();
@@ -1314,6 +1501,49 @@ function oracleClicks(preview: Float32Array[]): { label: string; at: [number, nu
     }
   });
   return out;
+}
+
+// ── A7 truth check (light) ──────────────────────────────────────────────────────────────
+// Per written piece whose seed label names a K0 truth piece (corpus/truth.json): the count per
+// garment (Σ pieces per garment over its identities, a pair = 2) against `qty`, and `fold` truth ⇒
+// the piece was unfolded. A piece the gate passes with either wrong is "wrong but passing".
+// TODO(A7): area ±20 % to `bbox_mm_est` (the estimate is of the largest size, ±10–15 %).
+
+type PieceInfo = { seed: number; label: string; ppg: number; fold: boolean };
+
+export function truthCheckOf(c: Case, info: readonly PieceInfo[]) {
+  if (!c.truth) return null;
+  let pieces: { label: string; qty: unknown; fold: unknown }[] = [];
+  try {
+    const t = JSON.parse(readFileSync(resolve(CORPUS, 'truth.json'), 'utf8')) as {
+      samples: { id: string; variants: { pieces: typeof pieces }[] }[];
+    };
+    pieces =
+      t.samples.find((x) => x.id === c.truth!.id)?.variants[c.truth.variant ?? 0]?.pieces ?? [];
+  } catch {
+    return null;
+  }
+  const norm = (x: string) =>
+    x
+      .toLowerCase()
+      .replace(/^piece\s+/, '')
+      .replace(/\.$/, '')
+      .trim();
+  const bySeed = new Map<number, PieceInfo[]>();
+  for (const p of info) bySeed.set(p.seed, [...(bySeed.get(p.seed) ?? []), p]);
+  const wrong: string[] = [];
+  let matched = 0;
+  for (const [, ps] of bySeed) {
+    const lab = norm(ps[0].label);
+    const t = pieces.find((x) => norm(x.label) === lab || norm(x.label.split(' / ')[0]) === lab);
+    if (!t) continue;
+    matched++;
+    const qty = typeof t.qty === 'number' ? t.qty : parseInt(String(t.qty), 10);
+    const got = ps.reduce((a, p) => a + p.ppg, 0);
+    if (Number.isFinite(qty) && got !== qty) wrong.push(`${ps[0].label}: qty ${got} ≠ ${qty}`);
+    if (t.fold === true && !ps.some((p) => p.fold)) wrong.push(`${ps[0].label}: not unfolded`);
+  }
+  return { truthPieces: pieces.length, matched, wrong };
 }
 
 // ── renders ─────────────────────────────────────────────────────────────────────────────
