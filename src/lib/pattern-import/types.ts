@@ -1651,6 +1651,8 @@ export type StageIO = {
   };
   write: {
     in: {
+      /** The card the manifest is written for: the card trusts a manifest only with its own id. */
+      techCardId: number;
       scopes: DraftScopeTarget[];
       assignment: FabricAssignment;
       sizes: ManifestSize[];

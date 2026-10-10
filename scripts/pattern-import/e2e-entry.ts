@@ -1008,6 +1008,7 @@ export async function runCase(c: Case): Promise<Rec> {
     }
     // 8 · write + gate
     const wr = await run('write', {
+      techCardId: 0,
       scopes: SCOPES,
       assignment: fab,
       sizes: sz.map.entries.flatMap((e) =>
