@@ -4,6 +4,7 @@
 //
 // It is still a pictogram: outlines are simplified and nothing here is a cutting coordinate.
 
+import { dartsOf } from '../geometry/darts';
 import type { ClothState, PieceGeom, Pt2, UnionLayout } from '../types';
 import { apply } from './affine';
 import { resolveEdge } from './layout';
@@ -21,6 +22,11 @@ export type UnionShape = {
   mark: Pt2 | null;
   /** Share of the unit's drawn area — tiny pieces are not labelled (§G: < 3 %). */
   share: number;
+  /**
+   * Thin open lines drawn over the silhouette (dart legs, P2 §4), same frame as `pts`. The shape is
+   * never changed by them; a renderer drops the ones too short to read at its size.
+   */
+  lines: Pt2[][];
 };
 
 export type UnionPicture = {
@@ -181,6 +187,9 @@ export function unionPicture(
         mark = [(mid[0] + near[0]) / 2, (mid[1] + near[1]) / 2];
       }
     }
+    // Lines the layout carries for the piece, else the piece's own darts (read off its marks).
+    const own = layout.marks?.[p.pieceKey] ?? dartsOf(g).map((d) => d.legs);
+    const lines = own.filter((l) => l.length >= 2).map((l) => l.map((q) => flip(apply(p.T, q))));
     shapes.push({
       pieceKey: p.pieceKey,
       pts,
@@ -190,6 +199,7 @@ export function unionPicture(
       surface: surface.has(p.pieceKey),
       mark,
       share: 0,
+      lines,
     });
   }
   const areas = shapes.map((s) => (s.surface ? 0 : ringArea(s.pts)));
