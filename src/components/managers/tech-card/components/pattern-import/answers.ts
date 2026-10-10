@@ -99,6 +99,8 @@ export function answerCtxOf(
     variant: string | null;
     /** A8: the mask the sheet was read with (`maskRevOf`): another mask is another drawing. */
     maskRev?: string;
+    /** The legend answers the lines were read with: another legend is another reading. */
+    legendRev?: string;
   },
   families: readonly PieceFamily[] | null | undefined,
 ): AnswerCtx {
@@ -107,6 +109,7 @@ export function answerCtxOf(
     at.gridOverride ?? null,
     at.variant ?? null,
     ...(at.maskRev ? [at.maskRev] : []),
+    ...(at.legendRev ? [`L${at.legendRev}`] : []),
   ]);
   const revs: Partial<Record<SeedId, string>> = {};
   for (const f of families ?? []) revs[f.seed] = `${scope}#${f.seed}@${pieceRev(f)}`;
