@@ -121,6 +121,11 @@ export type RoleBook = {
   /** Tokens that mark a piece as lining by name (no role, no family). */
   liningTokens?: string[];
   roles: RoleDef[];
+  /**
+   * F3: a family token that names a role only on a card with no piece of that role at all
+   * (P_L_U is a front when nothing else is). Context, not dictionary — kept as data.
+   */
+  contextRoles?: { tokens: string[]; role: string }[];
 };
 
 const OPS: ReadonlySet<string> = new Set([

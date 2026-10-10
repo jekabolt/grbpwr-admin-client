@@ -98,7 +98,19 @@
     },
     {
       "id": "waistband",
-      "tokens": ["wb", "waistband", "blt", "belt", "ws", "waist", "пояс", "pas", "pasek"],
+      "tokens": [
+        "wb",
+        "waistband",
+        "blt",
+        "belt",
+        "ws",
+        "wst",
+        "wstb",
+        "waist",
+        "пояс",
+        "pas",
+        "pasek"
+      ],
       "zone": "WAIST",
       "name": "Waistband",
       "level": "sub"
@@ -266,6 +278,12 @@
       "name": "Sleeve",
       "level": "panel"
     }
+  ],
+  "_contextRolesNote": "F3: a family token that names a role ONLY on a card with no piece of that role (P_L_U, PU_LIN, PD_LIN are fronts when nothing else is a front; BPU a back; MP a side panel). Draft, one team's abbreviations — a brand dictionary edited in the admin is the place for these.",
+  "contextRoles": [
+    { "tokens": ["p", "pu", "pd"], "role": "front" },
+    { "tokens": ["bpu"], "role": "back" },
+    { "tokens": ["mp"], "role": "side" }
   ],
   "liningTokens": [
     "lining",
