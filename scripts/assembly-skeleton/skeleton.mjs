@@ -541,6 +541,17 @@ console.log('\nTemplate smoke (names only, no seams)');
           .map((s) => `${s.label} ${s.confidence} ${s.reason}`)
           .join('; '),
       );
+    // 07 §4.4: trousers by the panel method — the backs into one, the fronts into one, then the
+    // two in one (side seams, inseams, crotch), and only then the waistband.
+    if (c.facts.category === 'trousers') {
+      const at = (name) => p.steps.findIndex((s) => s.outputUnitName === name);
+      const wb = p.steps.findIndex((s) => s.label?.startsWith('Attach the waistband'));
+      gate(
+        'trousers: Back → Front → Body (back + front) → waistband',
+        at('Back') >= 0 && at('Back') < at('Front') && at('Front') < at('Body') && at('Body') < wb,
+        `Back ${at('Back')}, Front ${at('Front')}, Body ${at('Body')}, waistband ${wb}`,
+      );
+    }
   }
 }
 

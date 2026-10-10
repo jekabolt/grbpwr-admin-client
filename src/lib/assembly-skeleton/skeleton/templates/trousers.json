@@ -2,7 +2,7 @@
   "id": "trousers",
   "category": "trousers",
   "garmentName": "Trousers",
-  "_note": "Trousers: pockets, fly and waistband built first \u2192 pockets set on the fronts \u2192 side seams per leg \u2192 inseam \u2192 crotch \u2192 zipper \u2192 waistband \u2192 belt loops \u2192 hem \u2192 buttons \u2192 final press. Back legs stay separate until the crotch seam (back is NOT merged across hands here).",
+  "_note": "Trousers, panel method (2 of 2 technologists' cards): pockets, fly and waistband built first \u2192 pockets set on their panels \u2192 the backs into one back (seat seam, yoke) \u2192 the fronts into one front (fly) \u2192 back and front in one (side seams, inseams, crotch) \u2192 zipper \u2192 waistband \u2192 belt loops \u2192 hem \u2192 buttons \u2192 final press. Sewing leg by leg (side seam, inseam, then the crotch) is the other industrial method; it is not offered as a reading.",
   "pressOpen": true,
   "pressFlat": false,
   "mergeHands": ["waistband", "yoke"],
@@ -27,33 +27,36 @@
       "roles": ["front", "back", "yoke", "side", "*"]
     },
     {
-      "id": "sides",
+      "id": "back",
       "op": "combine",
-      "label": "Join side seams",
-      "roles": ["front", "back", "yoke", "side"],
+      "label": "Join the back panels",
+      "roles": ["back", "yoke"],
+      "requireAll": ["back"],
+      "as": "back",
+      "name": "Back",
+      "zone": "BACK",
+      "press": "open"
+    },
+    {
+      "id": "front",
+      "op": "combine",
+      "label": "Join the front panels",
+      "roles": ["front"],
+      "requireAll": ["front"],
+      "as": "front",
+      "name": "Front",
+      "zone": "FRONT",
+      "press": "open"
+    },
+    {
+      "id": "body",
+      "op": "combine",
+      "label": "Join back and front: side seams, inseams, crotch",
+      "roles": ["front", "back", "side"],
       "requireAll": ["front", "back"],
-      "byHand": true,
-      "as": "leg",
-      "name": "leg",
-      "zone": "OUTER",
-      "press": "open"
-    },
-    {
-      "id": "inseam",
-      "op": "process",
-      "label": "Close the inseam",
-      "roles": ["leg"],
-      "zone": "OUTER",
-      "press": "open"
-    },
-    {
-      "id": "crotch",
-      "op": "combine",
-      "label": "Join the crotch seam",
-      "roles": ["leg", "front", "back"],
       "as": "body",
       "name": "Body",
-      "zone": "HIP",
+      "zone": "OUTER",
       "press": "open"
     },
     {
