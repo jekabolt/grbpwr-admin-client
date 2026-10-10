@@ -1,0 +1,94 @@
+{
+  "id": "darts-trouser",
+  "note": "Trouser backs: each waist dart drawn as TWO straight legs meeting at the apex (glued into one V); fronts plain.",
+  "category": "trousers",
+  "pieces": [
+    {
+      "key": "TROUSER_BACK_L",
+      "poly": [
+        [0, 0],
+        [22, 0],
+        [26, 100],
+        [0, 100]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [8, 100],
+            [9.25, 88]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [10.5, 100],
+            [9.25, 88]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "TROUSER_BACK_R",
+      "poly": [
+        [26, 100],
+        [0, 100],
+        [4, 0],
+        [26, 0]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [18, 100],
+            [16.75, 88]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [15.5, 100],
+            [16.75, 88]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "TROUSER_FRONT_L",
+      "poly": [
+        [0, 0],
+        [20, 0],
+        [22, 100],
+        [0, 100]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "TROUSER_FRONT_R",
+      "poly": [
+        [22, 100],
+        [0, 100],
+        [2, 0],
+        [22, 0]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {
+    "TROUSER_BACK_L": 1,
+    "TROUSER_BACK_R": 1
+  },
+  "notchWarnings": 0
+}

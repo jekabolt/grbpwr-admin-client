@@ -11,10 +11,12 @@ import {
   type Edge,
   type Mm,
   type PieceGeom,
+  type PieceMark,
   type Pt2,
   type SkeletonPieceInput,
 } from '../types';
 import { liningByName } from '../names';
+import { collectMarks } from './marks';
 import { handOf } from './twins';
 
 const MM_PER_CM = 10;
@@ -341,7 +343,7 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
   }
 
   const rect = corners.length === 4 && edges.every((e) => e.chordMm / e.lenMm > RECT_STRAIGHT);
-  return {
+  const geom: PieceGeom = {
     pieceKey: input.pieceKey,
     name: input.name,
     hand: handOf(input.name, input.piece) ?? handOf(input.pieceKey, input.piece),
@@ -356,4 +358,21 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
     perimMm: polyLength(loop, true),
     twinOf: [],
   };
+  // P2 step 0: the internal marks, read against this sewing line (03-P2-DESIGN §2).
+  geom.marks = marksOf(input, geom);
+  return geom;
+}
+
+/**
+ * Marks depend on the PieceDTO alone (its contour → `rs` and edges, its inner paths) and on the key
+ * in their ids, so a rebuild over the same facts (a chosen reading re-runs the whole seam graph)
+ * reuses them: ~1.5 ms a piece on a lined blazer. Shared between graphs — read-only.
+ */
+const MARKS = new WeakMap<PieceDTO, Map<string, PieceMark[]>>();
+function marksOf(input: SkeletonPieceInput, geom: PieceGeom): PieceMark[] {
+  let byKey = MARKS.get(input.piece);
+  if (!byKey) MARKS.set(input.piece, (byKey = new Map()));
+  let marks = byKey.get(input.pieceKey);
+  if (!marks) byKey.set(input.pieceKey, (marks = collectMarks(input, geom)));
+  return marks;
 }

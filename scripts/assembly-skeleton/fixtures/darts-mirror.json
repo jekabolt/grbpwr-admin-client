@@ -1,0 +1,51 @@
+{
+  "id": "darts-mirror",
+  "note": "Mirror pair: the left back carries the waist dart, the right back no internal lines at all \u2014 it takes its twin's count.",
+  "category": "dress",
+  "pieces": [
+    {
+      "key": "BODICE_BACK_L",
+      "poly": [
+        [0, 0],
+        [22, 0],
+        [22, 40],
+        [16, 55],
+        [0, 52]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [9, 0],
+            [10.25, 13],
+            [11.5, 0]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "BODICE_BACK_R",
+      "poly": [
+        [22, 52],
+        [6, 55],
+        [0, 40],
+        [0, 0],
+        [22, 0]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {
+    "BODICE_BACK_L": 1,
+    "BODICE_BACK_R": 1
+  },
+  "inherited": {
+    "BODICE_BACK_R": "BODICE_BACK_L"
+  },
+  "notchWarnings": 0
+}

@@ -1,0 +1,67 @@
+{
+  "id": "darts-bodice",
+  "note": "Bodice: the front carries two V darts (waist + side bust), the back one waist dart.",
+  "category": "dress",
+  "pieces": [
+    {
+      "key": "BODICE_FRONT",
+      "poly": [
+        [0, 0],
+        [24, 0],
+        [24, 40],
+        [18, 55],
+        [0, 50]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [8, 0],
+            [9.5, 14],
+            [11, 0]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [24, 20],
+            [14, 21.25],
+            [24, 22.5]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "BODICE_BACK",
+      "poly": [
+        [0, 0],
+        [22, 0],
+        [22, 40],
+        [16, 55],
+        [0, 52]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [9, 0],
+            [10.25, 13],
+            [11.5, 0]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {
+    "BODICE_FRONT": 2,
+    "BODICE_BACK": 1
+  },
+  "notchWarnings": 0
+}

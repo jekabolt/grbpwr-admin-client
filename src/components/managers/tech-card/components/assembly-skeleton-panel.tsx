@@ -15,6 +15,15 @@
 //     for is listed as a gap; the machine the server demands is a card default and says «check».
 //   * NOT THE ENGINE. The proposal comes from `useSkeletonProposal` (assembly-skeleton-source.ts).
 import * as Dialog from '@radix-ui/react-dialog';
+import {
+  applySkeletonAIOrder,
+  skeletonAIPins,
+  skeletonAIPlaces,
+  skeletonAIRequest,
+  skeletonAIStepIndex,
+  skeletonStepSignatures,
+} from 'lib/assembly-skeleton/ai';
+import { orderTemplate } from 'lib/assembly-skeleton/skeleton';
 import { namesIn } from 'lib/assembly-skeleton/skeleton/build-skeleton';
 import { replayExisting } from 'lib/assembly-skeleton/skeleton/existing';
 import {
@@ -35,10 +44,12 @@ import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './assembly-frontier';
+import { SkeletonAIBar, useSkeletonAI } from './assembly-skeleton-ai';
 import { makeSkeletonDeps } from './assembly-skeleton-deps';
 import {
   buildSkeletonFacts,
@@ -58,7 +69,17 @@ import {
   type SkeletonApplyRequest,
   type SkeletonApplyResult,
   type SkeletonRowContext,
+  type SkeletonUndoRequest,
+  type SkeletonUndoResult,
 } from './operations-field';
+
+/** The footer's last word: an apply's answer, or what its undo did. */
+type PanelResult = SkeletonApplyResult & {
+  /** Rows an undo took back. */
+  undone?: number;
+  /** Why an undo did nothing, in words. */
+  undoRefused?: string;
+};
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
@@ -86,6 +107,9 @@ const mm = (v: number) => String(Math.round(v));
 /** One seam's evidence, in words: «518 = 518 mm · 2 notches · curves fit». */
 export function seamWords(s: SeamCandidate): string {
   const e = s.evidence;
+  // A part laid on a placement mark: its evidence is the mark, not two edge lengths.
+  if (s.kind === 'surface')
+    return (e.rule ?? 'laid on its placement mark').replace(/^surface: /, '');
   const parts: string[] = [];
   if (s.kind === 'closure-not-seam') parts.push('a closure, not a seam');
   if (s.kind === 'partial') parts.push('partial seam');
@@ -232,24 +256,6 @@ const settlePicks = (
 const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] =>
   settlePicks(steps, steps.map(defaultPick), () => true);
 
-/**
- * A step by WHAT it does, not where it sits or which code its unit got: operation, label and the
- * pieces each input holds. Two proposals of one card (before and after a chosen reading) share
- * every step the choice did not touch, and those keep the person's ticks.
- */
-const stepSignatures = (steps: readonly SkeletonStep[]): string[] => {
-  const leaves = new Map<string, string>();
-  const seen = new Map<string, number>();
-  return steps.map((s) => {
-    const parts = s.inputs.map((k) => leaves.get(k) ?? k).sort();
-    if (s.outputUnitKey) leaves.set(s.outputUnitKey, parts.join('+').split('+').sort().join('+'));
-    const base = `${s.operationType}|${s.label ?? ''}|${parts.join(' | ')}`;
-    const n = (seen.get(base) ?? 0) + 1;
-    seen.set(base, n);
-    return `${base}#${n}`;
-  });
-};
-
 /** The person's ticks carried from the proposal they were made on to its rebuild. */
 const carryPicks = (
   prev: SkeletonProposal | null,
@@ -257,8 +263,8 @@ const carryPicks = (
   next: SkeletonProposal,
 ): StepPick[] => {
   if (!prev || prevPicks.length !== prev.steps.length) return defaultPicks(next.steps);
-  const old = new Map(stepSignatures(prev.steps).map((sig, i) => [sig, prevPicks[i]]));
-  const carried = stepSignatures(next.steps).map((sig) => old.get(sig));
+  const old = new Map(skeletonStepSignatures(prev.steps).map((sig, i) => [sig, prevPicks[i]]));
+  const carried = skeletonStepSignatures(next.steps).map((sig) => old.get(sig));
   return settlePicks(
     next.steps,
     next.steps.map((s, i) => carried[i] ?? defaultPick(s)),
@@ -279,6 +285,7 @@ export function useSkeletonDoor({
   cloth,
   categoryNames,
   renderUnit,
+  techCardId,
 }: {
   frozen: boolean;
   shapes: PieceShapes;
@@ -287,14 +294,21 @@ export function useSkeletonDoor({
   /** The card's category chain, leaf first — picks the order template. */
   categoryNames: ReadonlyArray<string>;
   renderUnit?: RenderUnit;
+  /** The card asked about, for the AI call's log (0 / absent = a card not saved yet). */
+  techCardId?: number;
 }): {
   headerAction: ReactNode;
   emptyAction: ReactNode;
   panel: ReactNode;
   applyRequest: SkeletonApplyRequest | null;
   onSkeletonApplied: (r: SkeletonApplyResult) => void;
+  skeletonUndoRequest: SkeletonUndoRequest | null;
+  onSkeletonUndone: (r: SkeletonUndoResult) => void;
+  onSkeletonUndoable: (nonce: number | null) => void;
 } {
   const proposal = useSkeletonProposal();
+  // The AI's answer outlives the panel like the proposal does: reopening shows it again for free.
+  const ai = useSkeletonAI();
   const gate = skeletonGate({
     frozen,
     hasDxf: shapes.hasDxf,
@@ -309,7 +323,15 @@ export function useSkeletonDoor({
   const [mode, setMode] = useState<SkeletonMode | null>(null);
   const [readFor, setReadFor] = useState<SkeletonMode | null>(null);
   const [applyRequest, setApplyRequest] = useState<SkeletonApplyRequest | null>(null);
-  const [result, setResult] = useState<SkeletonApplyResult | null>(null);
+  const [result, setResult] = useState<PanelResult | null>(null);
+  // UNDO (03-P2 §6). The field owns the history; the door only asks («undo» = this apply's nonce)
+  // and listens: which apply ⌘Z would take back now, and what an undo / a redo did. The picks of
+  // each apply are kept before/after, so an undo un-marks exactly what it took back and a redo
+  // (⇧⌘Z) marks it again.
+  const [undoable, setUndoable] = useState<number | null>(null);
+  const [undoRequest, setUndoRequest] = useState<SkeletonUndoRequest | null>(null);
+  const undoSeq = useRef(0);
+  const pickSnaps = useRef(new Map<number, { before: StepPick[]; after: StepPick[] }>());
   const [picks, setPicks] = useState<StepPick[]>([]);
 
   // A fresh proposal gets fresh picks; the same proposal keeps them across close/open; a rebuild
@@ -403,6 +425,9 @@ export function useSkeletonDoor({
         <AssemblySkeletonPanel
           run={proposal.state}
           onRun={proposal.run}
+          onAdopt={proposal.adopt}
+          ai={ai}
+          techCardId={techCardId}
           shapes={shapes}
           cloth={cloth}
           categoryNames={categoryNames}
@@ -414,6 +439,10 @@ export function useSkeletonDoor({
           onReadFor={setReadFor}
           onApply={request}
           result={result}
+          undoable={!!result && result.applied > 0 && undoable === result.nonce}
+          onUndo={() =>
+            result && setUndoRequest({ nonce: result.nonce, seq: (undoSeq.current += 1) })
+          }
           renderUnit={renderUnit}
           onClose={() => setOpen(false)}
         />
@@ -424,12 +453,28 @@ export function useSkeletonDoor({
       if (r.applied === 0 || !carried || carried.nonce !== r.nonce) return;
       const done = new Set(carried.idx);
       // A replace wipes what earlier applies wrote; only this batch stands in the form now.
-      setPicks((prev) =>
-        prev.map((p, i) =>
+      setPicks((prev) => {
+        const next = prev.map((p, i) =>
           done.has(i) ? { ...p, applied: true } : carried.replace ? { ...p, applied: false } : p,
-        ),
-      );
+        );
+        pickSnaps.current.set(r.nonce, { before: prev, after: next });
+        return next;
+      });
     },
+    skeletonUndoRequest: undoRequest,
+    onSkeletonUndone: (r) => {
+      const snap = pickSnaps.current.get(r.nonce);
+      if (r.refused) {
+        setResult({ nonce: r.nonce, applied: 0, undoRefused: r.refused });
+      } else if (r.undone > 0) {
+        setResult({ nonce: r.nonce, applied: 0, undone: r.undone });
+        if (snap) setPicks(snap.before);
+      } else if (r.redone) {
+        setResult({ nonce: r.nonce, applied: r.redone });
+        if (snap) setPicks(snap.after);
+      }
+    },
+    onSkeletonUndoable: setUndoable,
   };
 }
 
@@ -441,6 +486,9 @@ type SkeletonMode = 'append' | 'replace';
 function AssemblySkeletonPanel({
   run,
   onRun,
+  onAdopt,
+  ai,
+  techCardId,
   shapes,
   cloth,
   categoryNames,
@@ -452,11 +500,16 @@ function AssemblySkeletonPanel({
   onReadFor,
   onApply,
   result,
+  undoable,
+  onUndo,
   renderUnit,
   onClose,
 }: {
   run: SkeletonRun;
   onRun: (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => void;
+  onAdopt: (p: SkeletonProposal) => void;
+  ai: ReturnType<typeof useSkeletonAI>;
+  techCardId?: number;
   shapes: PieceShapes;
   cloth: ReadonlyMap<string, PieceCloth> | null;
   categoryNames: ReadonlyArray<string>;
@@ -474,7 +527,10 @@ function AssemblySkeletonPanel({
     mode: 'append' | 'replace',
     confirmedReplace?: boolean,
   ) => void;
-  result: SkeletonApplyResult | null;
+  result: PanelResult | null;
+  /** The last apply can still be taken back (its record is on top, its rows untouched). */
+  undoable: boolean;
+  onUndo: () => void;
   renderUnit?: RenderUnit;
   onClose: () => void;
 }) {
@@ -686,6 +742,63 @@ function AssemblySkeletonPanel({
     onRun(built.facts, deps, { pins });
   };
 
+  // ── THE AI SECOND OPINION (lane E). Asked only on a press; its order and readings are shown
+  // beside the engine's and reach the steps only through «use AI order» / «use AI readings».
+  const aiRequest = useMemo(
+    () =>
+      proposal
+        ? skeletonAIRequest({
+            proposal,
+            facts: built.facts,
+            templateStages: orderTemplate(built.facts.category).stages.map((st) => st.label),
+            seamWords,
+            techCardId,
+          })
+        : null,
+    [proposal, built.facts, techCardId],
+  );
+  const aiResult = ai.state.status === 'ready' ? ai.state.result : null;
+  const aiView = useMemo(() => {
+    if (!proposal || !aiResult) return null;
+    const answer = aiResult.answer;
+    const indexOf = skeletonAIStepIndex(proposal, aiResult.sent);
+    const places = skeletonAIPlaces(proposal, answer.order ?? [], aiResult.sent);
+    const warningsAt = new Map<number, string[]>();
+    for (const w of answer.warnings ?? [])
+      for (const id of w.stepIds ?? []) {
+        const i = indexOf(id);
+        if (i != null) warningsAt.set(i, [...(warningsAt.get(i) ?? []), w.message ?? '']);
+      }
+    const picks = new Map((answer.picks ?? []).map((p) => [p.decisionId ?? '', p]));
+    const order =
+      (answer.order?.length ?? 0) > 0
+        ? applySkeletonAIOrder(proposal, answer.order ?? [], aiResult.sent)
+        : null;
+    return { indexOf, places, warningsAt, picks, order, pins: skeletonAIPins(proposal, answer) };
+  }, [proposal, aiResult]);
+  const [adopted, setAdopted] = useState<SkeletonProposal | null>(null);
+  // Each step's place among the steps that stand on their own (riders follow their join).
+  const ownPlace = useMemo(() => {
+    let n = 0;
+    return (proposal?.steps ?? []).map((st) => (isDerived(st) ? null : (n += 1)));
+  }, [proposal]);
+  const lockedWhy = readingsLocked
+    ? 'a step of this skeleton is already in the order; switch to «replace» to change it'
+    : '';
+  const askAI = (again = false) => {
+    if (aiRequest?.ok) ai.ask(aiRequest.request, aiRequest.signatures, again);
+  };
+  const useAIOrder = () => {
+    const o = aiView?.order;
+    if (!o?.ok || readingsLocked) return;
+    setAdopted(o.proposal);
+    onAdopt(o.proposal);
+  };
+  const useAIReadings = () => {
+    if (!aiView || readingsLocked || aiView.pins.changed === 0) return;
+    onRun(built.facts, deps, { pins: aiView.pins.pins });
+  };
+
   // What a confirmed replace takes with the old steps, said before the confirming press.
   const photosInForm = operations.reduce(
     (n, o) => n + ((o as { media?: unknown[] }).media?.length ?? 0),
@@ -869,6 +982,34 @@ function AssemblySkeletonPanel({
                     {pressOpen ? '✓ ' : ''}press open after joins
                   </Chip>
                 </ChipRow>
+                <SkeletonAIBar
+                  state={ai.state}
+                  available={ai.available}
+                  canAsk={!!aiRequest?.ok}
+                  whyNot={aiRequest && !aiRequest.ok ? aiRequest.why : ''}
+                  onAsk={() => askAI(false)}
+                  onAskAgain={() => askAI(true)}
+                  readings={{
+                    changed: aiView?.pins.changed ?? 0,
+                    total: aiView?.picks.size ?? 0,
+                    locked: lockedWhy,
+                    onUse: useAIReadings,
+                  }}
+                  order={{
+                    moved: aiView?.order?.ok ? aiView.order.moved : 0,
+                    blocked:
+                      lockedWhy || (aiView?.order && !aiView.order.ok ? aiView.order.why : ''),
+                    inUse: !!adopted && adopted === proposal,
+                    onUse: useAIOrder,
+                  }}
+                  stepName={(id) => {
+                    const i = aiView?.indexOf(id);
+                    if (i == null) return null;
+                    const st = steps[i];
+                    const n = numbers.get(i);
+                    return [n, st.label || st.outputUnitName || 'a step'].filter(Boolean).join(' ');
+                  }}
+                />
                 {proposal.warnings.map((w, i) => (
                   <Text
                     key={i}
@@ -931,6 +1072,19 @@ function AssemblySkeletonPanel({
                         }
                         follows={isDerived(raw) ? stepNumber(raw.derivedFrom!) : null}
                         readingsLocked={readingsLocked}
+                        ai={
+                          aiView
+                            ? {
+                                place: aiView.places[i]?.place ?? null,
+                                now: ownPlace[i],
+                                reason: aiView.places[i]?.reason ?? '',
+                                warnings: aiView.warningsAt.get(i) ?? [],
+                                pick: raw.decision
+                                  ? aiView.picks.get(raw.decision.id) ?? null
+                                  : null,
+                              }
+                            : null
+                        }
                         onAccept={(v) => setAccepted(i, v)}
                         onVariant={(v) => chooseReading(raw, v)}
                         onApplyOne={() => onApply([s], [i], 'append')}
@@ -1018,20 +1172,43 @@ function AssemblySkeletonPanel({
                 <span data-skeleton-replace-loses={photosInForm}>
                   goes for good: {replaceLoses.join(' · ')}
                   {unitsGo ? ' (the new steps make no units)' : ''}
+                  {' · undo is available until the next save'}
                 </span>
               ) : result?.refused ? (
                 <span className='text-error' data-skeleton-refused='1'>
                   not applied — {result.refused}
                 </span>
+              ) : result?.undoRefused ? (
+                <span className='text-error' data-skeleton-undo-refused='1'>
+                  not undone — {result.undoRefused}
+                </span>
+              ) : result?.undone ? (
+                <span data-skeleton-undone={result.undone}>
+                  {result.undone} {result.undone === 1 ? 'step' : 'steps'} taken back — the steps,
+                  photos and units are as they were before the apply
+                </span>
               ) : result && result.applied > 0 ? (
                 <span data-skeleton-applied={result.applied}>
-                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added — ordinary steps
-                  now; the rail marks them “draft” until you change them
+                  {result.applied} {result.applied === 1 ? 'step' : 'steps'} added — the rail marks
+                  them “draft” until you change them or mark them reviewed
+                  {undoable ? ' · undo takes the whole batch back' : ''}
                 </span>
               ) : (
                 'seam types, work and minutes stay empty — they are yours to fill · esc — close'
               )}
             </Text>
+            {undoable && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={onUndo}
+                data-skeleton-undo={result?.nonce}
+                title='take back every step this apply wrote; photos and units come back as they were'
+              >
+                undo
+              </Button>
+            )}
             {batchViolations.size > 0 && (
               <Text
                 size='micro'
@@ -1181,6 +1358,7 @@ function SkeletonLine({
   unitInput,
   follows,
   readingsLocked,
+  ai,
   onAccept,
   onVariant,
   onApplyOne,
@@ -1204,6 +1382,8 @@ function SkeletonLine({
   follows: string | null;
   /** A step of this proposal is already in the order: the readings can no longer change. */
   readingsLocked: boolean;
+  /** The AI's second opinion on this step, or null when none was asked. */
+  ai: SkeletonLineAI | null;
   onAccept: (v: boolean) => void;
   onVariant: (v: number) => void;
   onApplyOne: () => void;
@@ -1314,6 +1494,20 @@ function SkeletonLine({
           {word}
         </Text>
       )}
+      {ai?.place != null && (
+        <Pill
+          tone={ai.place !== ai.now ? 'attention' : 'mut'}
+          className='shrink-0'
+          data-skeleton-ai-place={`${index}:${ai.place}`}
+          title={`${
+            ai.place !== ai.now
+              ? `the AI sews this ${ordinal(ai.place)} (now ${ordinal(ai.now ?? 0)})`
+              : 'the AI keeps it here'
+          }${ai.reason ? `: ${ai.reason}` : ''}`}
+        >
+          AI {ai.place !== ai.now ? `→ ${ai.place}` : '='}
+        </Pill>
+      )}
       {ambiguous && (
         <Text
           size='control'
@@ -1372,17 +1566,20 @@ function SkeletonLine({
               <Chip
                 key={vi}
                 nonForm
+                tone={ai?.pick?.reading === vi ? 'attention' : undefined}
                 selected={(raw.decision?.chosen ?? 0) === vi}
                 disabled={!raw.decision || readingsLocked}
                 onClick={() => onVariant(vi)}
                 title={
                   readingsLocked
                     ? 'a step of this skeleton is already in the order; switch to «replace» to choose again'
-                    : `${v.reason} · choosing it re-reads the steps after it`
+                    : `${ai?.pick?.reading === vi ? `the AI picks this: ${ai.pick.reason ?? ''} · ` : ''}${v.reason} · choosing it re-reads the steps after it`
                 }
                 data-skeleton-variant={`${index}.${vi}`}
+                data-skeleton-ai-pick={ai?.pick?.reading === vi ? '1' : undefined}
               >
                 {v.inputs.map(nameOf).join(' + ')}
+                {ai?.pick?.reading === vi ? ' · AI' : ''}
               </Chip>
             ))}
           </ChipRow>
@@ -1393,6 +1590,17 @@ function SkeletonLine({
           a guess — kept because you ticked it
         </Text>
       )}
+      {ai?.warnings.map((m, wi) => (
+        <Text
+          key={`ai${wi}`}
+          size='micro'
+          component='span'
+          className='w-full pl-[3.25rem] text-warning'
+          data-skeleton-ai-warning={index}
+        >
+          AI: {m}
+        </Text>
+      ))}
       {violations.map((m, vi) => (
         <Text
           key={vi}
@@ -1408,3 +1616,20 @@ function SkeletonLine({
     </div>
   );
 }
+
+/** The AI's second opinion on one step line. */
+type SkeletonLineAI = {
+  /** The AI's place for the step among the steps that stand on their own; null = not placed. */
+  place: number | null;
+  /** The step's place now, on the same count; null for a rider. */
+  now: number | null;
+  reason: string;
+  warnings: string[];
+  pick: { reading?: number; reason?: string } | null;
+};
+
+const ordinal = (n: number) => {
+  const t = n % 100;
+  const suf = t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
+  return `${n}${suf}`;
+};

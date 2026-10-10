@@ -11,6 +11,9 @@
 //                                                                    re-read the graph whenever the
 //                                                                    contour Map changes identity —
 //                                                                    the «BOM keystroke» check MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-undo-media   the undo of a skeleton apply
+//                                                                    forgets to restore mediaCleared
+//                                                                    — U2 MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -42,6 +45,13 @@ import { fileURLToPath } from 'node:url';
 
 const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
 const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
+const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
+const MUTATE_DRAFT_PRINT = process.argv.includes('--mutate-draft-print');
+const MUTATE_ROW_WIDE = process.argv.includes('--mutate-suggestion-row-wide');
+const MUTATE_UNDO_REBASE = process.argv.includes('--mutate-undo-rebase');
+const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array');
+const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
+const MUTATE_SNAPSHOT_SUGG = process.argv.includes('--mutate-snapshot-suggestion');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -110,6 +120,90 @@ const plugins = [
     },
   },
 ];
+const UNDO_MEDIA_FIX = `      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });\n`;
+// The pre-review print: only the «what the step is» fields — an allowance edit slipped through.
+const PRINT_FIX = `  return JSON.stringify(canonRow(row ?? {}, true));`;
+const PRINT_BROKEN = `  const r = (row ?? {}) as Record<string, unknown>;
+  return JSON.stringify(['inputKeys', 'outputUnitKey', 'outputUnitName', 'operationType', 'zone',
+    'machineType', 'pressEquipment', 'work', 'seamClass', 'smv', 'calloutNumber', 'note'].map((f) => r[f] ?? null));`;
+if (MUTATE_DRAFT_PRINT)
+  plugins.push({
+    name: 'draft-print-mutation',
+    setup(b) {
+      b.onLoad({ filter: /last-mutation\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(PRINT_FIX)) throw new Error('print mutation did not find its line');
+        return { contents: src.replace(PRINT_FIX, PRINT_BROKEN), loader: 'ts' };
+      });
+    },
+  });
+// The pre-re-review exemption: any suggestion on a row accepted the WHOLE row as not-a-touch.
+const EXEMPT_FIX = `      const bySuggestion =
+        sugg !== undefined && (ref === undefined || draftPrint(withSuggested(ref, sugg)) === print);`;
+const EXEMPT_BROKEN = `      const bySuggestion = sugg !== undefined;`;
+// The thread recorded as the WHOLE array it ended as (pre-review): a hand link beside it is covered.
+const EXEMPT_THREAD_ARRAY = `      const bySuggestion =
+        sugg !== undefined && (ref === undefined || draftPrint({ ...withSuggested(ref, sugg),
+          ...(sugg.thread.length ? { bomLineKeys: row.bomLineKeys } : {}) }) === print);`;
+// Undo forgives what the draft detector forgives (pre-orchestrator decision): the batch snapshot is
+// rebased onto every row that is still draft.
+const REBASE_FIX = `    if (!frozen)\n      for (const index of touched)`;
+const REBASE_BROKEN = `    {
+      const t = peekUndo(history.current);
+      if (t?.kind === 'skeleton') {
+        const rows = [...t.after.rows];
+        for (let i = t.from; i < t.from + t.count; i++)
+          if (next.has(fields[i]?.id ?? '')) rows[i - t.from] = structuredClone(ops[i]) as never;
+        setHistory({ undo: [...history.current.undo.slice(0, -1), { ...t, after: { ...t.after, rows, all: structuredClone(ops) as never } }], redo: history.current.redo });
+      }
+    }
+    if (!frozen)
+      for (const index of touched)`;
+// The apply snapshots the open step WITH its live suggestion (pre-fix): undo restores it unmarked.
+const REVOKE_FIX = `    revokeSuggestions.current?.();\n`;
+if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY || MUTATE_SNAPSHOT_SUGG)
+  plugins.push({
+    name: 'draft-exemption-mutations',
+    setup(b) {
+      b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        const swap = (fix, broken) => {
+          if (!src.includes(fix)) throw new Error('mutation did not find its line');
+          src = src.replace(fix, broken);
+        };
+        if (MUTATE_ROW_WIDE) swap(EXEMPT_FIX, EXEMPT_BROKEN);
+        if (MUTATE_THREAD_ARRAY) swap(EXEMPT_FIX, EXEMPT_THREAD_ARRAY);
+        if (MUTATE_UNDO_REBASE) swap(REBASE_FIX, REBASE_BROKEN);
+        if (MUTATE_SNAPSHOT_SUGG) swap(REVOKE_FIX, '');
+        return { contents: src, loader: 'tsx' };
+      });
+    },
+  });
+// The pre-review guard: only the batch rows are compared, not the rest of what undo writes.
+const WHOLE_CARD_FIX = `  if (!sameCardAsApplied(rec, st)) return false;\n`;
+if (MUTATE_BATCH_ONLY)
+  plugins.push({
+    name: 'undo-batch-only-mutation',
+    setup(b) {
+      b.onLoad({ filter: /last-mutation\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(WHOLE_CARD_FIX))
+          throw new Error('batch-only mutation did not find its line');
+        return { contents: src.replace(WHOLE_CARD_FIX, ''), loader: 'ts' };
+      });
+    },
+  });
+if (MUTATE_UNDO_MEDIA)
+  plugins.push({
+    name: 'undo-media-mutation',
+    setup(b) {
+      b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(UNDO_MEDIA_FIX)) throw new Error('undo mutation did not find its line');
+        return { contents: src.replace(UNDO_MEDIA_FIX, ''), loader: 'tsx' };
+      });
+    },
+  });
 if (MUTATE_AUTOAPPLY)
   plugins.push({
     name: 'skeleton-mutation',
@@ -455,6 +549,583 @@ await closePanel();
   );
 }
 
+// ── M0 ──────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6 SUSPECTED DEFECT, MEASURED: «autosave re-mints row ids on a length change, so the draft
+// marks keyed by field id die seconds after apply». The apply changes the length BEFORE the save; the
+// save then lands the same length, and settle writes leaves. Measured on the real mapper both ways and
+// the real settleFormAfterSave: are the rows the same DOM nodes (React key = field id), and do the
+// draft marks survive?
+head('M0 — an autosave after apply: row ids and draft marks survive the settle');
+await mount({ machines: [{ machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK' }] });
+await openPanel();
+await page.click('[data-skeleton-apply-all]');
+await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+await closePanel();
+await page.click('[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")');
+await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+{
+  const marksBefore = await page.locator('[data-rail-draft]').count();
+  await page.evaluate(() =>
+    document.querySelectorAll('[data-rail-step]').forEach((n) => (n.__probeTag = 1)),
+  );
+  await page.evaluate(() => window.__sk.settleLikeAutosave());
+  await page.waitForTimeout(400);
+  const sameNodes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-rail-step]')].every((n) => n.__probeTag === 1),
+  );
+  const marksAfter = await page.locator('[data-rail-draft]').count();
+  console.log(
+    `        measured: rows kept their DOM nodes (ids not re-minted): ${sameNodes}; draft marks ${marksBefore} → ${marksAfter}`,
+  );
+  ck(marksBefore === 5, 'five draft marks before the save', `${marksBefore}`);
+  ck(sameNodes, 'the settle does not re-mint the applied rows');
+  ck(
+    marksAfter === marksBefore,
+    'the draft marks survive the autosave settle',
+    `${marksBefore} → ${marksAfter}`,
+  );
+}
+
+// ── M ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §7: «draft» is a FIELD of the step (0410), not session state. It rides the write, comes back
+// on a reload, an edit takes it off, and a click on the chip says «reviewed» without touching the step.
+head('M — the draft mark is stored on the step: reload keeps it, edit or click takes it off');
+{
+  ck(
+    (await ops()).every((r) => r.draft === true),
+    'every applied row carries draft = true in the form',
+  );
+  const wire = await page.evaluate(() => window.__sk.wireDrafts());
+  ck(
+    wire.length === 5 && wire.every((d) => d === true),
+    'the write sends draft = true on every applied step',
+    JSON.stringify(wire),
+  );
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded });
+  const labels = await page.evaluate(
+    () => (document.body.textContent ?? '').match(/· draft/g)?.length ?? 0,
+  );
+  ck(labels === 5, 'a reload (mount from the DTO) keeps five «· draft» labels', `seen ${labels}`);
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === 5,
+    'the rail of the reloaded card marks five rows «draft»',
+  );
+  ck(!(await isDirty()), 'loading drafts does not dirty the form');
+  await page.evaluate(() => window.__sk.touch(1));
+  await page.waitForTimeout(250);
+  const afterEdit = await ops();
+  ck(
+    afterEdit[1].draft === false && afterEdit.filter((r) => r.draft).length === 4,
+    'an edit takes the mark off that row only, in the data',
+    afterEdit.map((r) => (r.draft ? 1 : 0)).join(''),
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 4, 'the rail shows four chips');
+  const beforeClick = JSON.stringify({ ...(await ops())[3], draft: null });
+  await page.click('[data-rail-draft="3"]');
+  await page.waitForTimeout(250);
+  const afterClick = await ops();
+  ck(afterClick[3].draft === false, 'a click on the chip marks the step reviewed');
+  ck(
+    JSON.stringify({ ...afterClick[3], draft: null }) === beforeClick,
+    'reviewing touches no other field of the step',
+  );
+  ck((await page.locator('[data-rail-draft]').count()) === 3, 'three chips left');
+  ck(await isDirty(), 'reviewing dirties the form, so the autosave carries it');
+  await shot('m-rail-reviewed', '[data-rail-step="0"]');
+}
+{
+  // A released card: the chip is there, but «reviewed» is an edit and does nothing.
+  const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
+  await mount({ ops: reloaded, frozen: true });
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  const n = await page.locator('[data-rail-draft]').count();
+  await page.locator('[data-rail-draft]').first().click({ force: true });
+  await page.waitForTimeout(200);
+  ck(
+    (await page.locator('[data-rail-draft]').count()) === n && n === 3,
+    'a frozen card keeps its marks: reviewing is an edit',
+    `${n}`,
+  );
+}
+
+// ── U ───────────────────────────────────────────────────────────────────────────────────────────
+// 03-P2 §6: one record kind 'skeleton' in the field's history; the panel's «undo» takes the whole
+// batch back while its rows are still draft — photos (mediaId) and mediaCleared included.
+head('U — undo of a skeleton apply: append, replace over photos, refused after an edit');
+const U_OWN = [
+  {
+    operationType: MACHINE,
+    machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+    zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+    inputKeys: ['PKT'],
+  },
+  {
+    operationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
+    zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+    inputKeys: ['LBL'],
+  },
+];
+{
+  // U1 append → undo: the card is exactly as before, no draft left; re-apply works again.
+  await mount({ ops: U_OWN });
+  const before = JSON.stringify(await ops());
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const added = (await ops()).length - 2;
+  ck(added > 0, 'append wrote the batch after the two own steps', `+${added}`);
+  ck((await page.locator('[data-skeleton-undo]').count()) === 1, 'the panel offers «undo»');
+  await shot('u-append-undo-offered', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  ck(after.length === 2, 'undo: the length is as before', `${after.length}`);
+  ck(JSON.stringify(after) === before, 'undo: the own steps are byte-identical');
+  ck(
+    after.every((r) => !r.draft),
+    'undo: no draft left',
+  );
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, '«undo» is gone after it ran');
+  ck(
+    (await page.locator('[data-skeleton-step-applied]').count()) === 0,
+    'the panel un-marks the steps it took back',
+  );
+  await shot('u-append-undone', '[data-skeleton-panel]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck((await ops()).length === 2 + added, 'the same batch applies again after an undo');
+  await closePanel();
+}
+{
+  // U2 replace over a step with photos → undo: the photos come back by mediaId, mediaCleared off.
+  const PH = { mediaId: 7, caption: 'cuff', annotations: [] };
+  await mount({
+    ops: [
+      {
+        operationType: MACHINE,
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        zone: 'TECH_CARD_GARMENT_ZONE_POCKET',
+        inputKeys: ['PKT', 'FP'],
+        outputUnitKey: 'FRONT-P',
+        outputUnitName: 'Front with pocket',
+        media: [PH, { ...PH, mediaId: 8 }],
+      },
+    ],
+  });
+  const before = await ops();
+  await openPanel('header', 'replace');
+  await page.click('[data-skeleton-apply-all]');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === true,
+    'replace over photos declared mediaCleared',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  const after = await ops();
+  const ids = (rows) => rows.flatMap((r) => (r.media ?? []).map((m) => m.mediaId)).join(',');
+  ck(
+    after.length === 1 && ids(after) === ids(before) && ids(after) === '7,8',
+    'undo: the step comes back with its photos (same mediaId)',
+    ids(after),
+  );
+  ck(after[0].outputUnitKey === 'FRONT-P', 'undo: its unit comes back');
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === false,
+    'undo: mediaCleared is off again — the save keeps the photos',
+  );
+  await closePanel();
+}
+{
+  // U3 an edit of one applied row: the record is no longer valid — the button goes, and a press
+  // that races the edit is refused in words, nothing written.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    window.__sk.touch(3);
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused]', { timeout: 5000 });
+  const t = await page.locator('[data-skeleton-undo-refused]').innerText();
+  ck(/card changed since the apply/.test(t), 'undo refused in words after an edit', t);
+  ck((await ops()).length === n, 'the refusal writes nothing');
+  ck((await page.locator('[data-skeleton-undo]').count()) === 0, 'no «undo» button any more');
+  await shot('u-refused', '[data-skeleton-panel]');
+  await closePanel();
+}
+{
+  // U4 «reviewed» on one applied row is a decision on the batch, too: undo goes.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'control: a reopened panel still offers «undo» for the untouched batch',
+  );
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-draft="2"]', { timeout: 5000 });
+  await page.click('[data-rail-draft="2"]');
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'a step marked reviewed takes «undo» away',
+  );
+  await closePanel();
+}
+
+{
+  // U5 (Codex P2) an edit OUTSIDE the old «what the step is» fields — the seam allowance — is an
+  // edit of the batch: the mark goes, and undo is refused in words (it would erase the allowance).
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    window.__sk.form().setValue('operations.3.seamAllowanceMm', '8', { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  const refused = await page.locator('[data-skeleton-undo-refused]').count();
+  const r = await ops();
+  ck(refused === 1, 'an allowance edit on an applied row: undo refused in words');
+  ck(
+    r.length === n && r[3].seamAllowanceMm === '8',
+    'the allowance survives — nothing was taken back',
+    `${r.length} rows, allowance ${r[3]?.seamAllowanceMm}`,
+  );
+  ck(r[3].draft === false, 'the allowance edit takes the draft mark off');
+  await closePanel();
+}
+{
+  // U6 an autosave in between (the real mappers + settle): the batch is still the apply's own.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.evaluate(() => window.__sk.settleLikeAutosave());
+  await page.waitForTimeout(300);
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'after an autosave settle «undo» is still offered',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  ck((await ops()).length === 2, 'and it takes the batch back');
+  await closePanel();
+}
+{
+  // U7 the step editor's suggestion (one sewing thread on the card) is not a human edit for the
+  // DRAFT mark (a wrong label loses nothing) — but UNDO is strict (orchestrator, 10.10): the batch
+  // is no longer exactly what the apply wrote, so undo goes. Revoking the suggestion (another step
+  // opened) brings the batch back to its snapshot, and undo with it.
+  await mount({
+    ops: U_OWN,
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const r = await ops();
+  const opened = r.findIndex((x, i) => i >= 2 && (x.bomLineKeys ?? []).includes('TH1'));
+  ck(opened >= 2, 'control: the editor suggested the thread on an applied step', `row ${opened}`);
+  ck(opened >= 2 && r[opened].draft === true, 'a suggestion does not take the draft mark off');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'strict undo: a suggestion on an applied row takes «undo» away',
+  );
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="3"]', { timeout: 5000 });
+  await page.click('[data-rail-step="3"]');
+  await page.waitForTimeout(300);
+  await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'another step opened: the suggestion is revoked, the batch is as applied, «undo» is back',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  ck((await ops()).length === 2, 'and it takes the batch back');
+  await closePanel();
+}
+
+{
+  // U8 (Codex re-check) a suggestion and a HUMAN edit of another field land in one commit: the
+  // person turns the applied press step into a machine step, and the editor suggests the card's
+  // only thread for it. The exemption covers the thread only — the type change is an edit: the mark
+  // goes, the batch snapshot is not rewritten, and undo is refused in words.
+  await mount({
+    ops: U_OWN,
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="3"]', { timeout: 5000 });
+  await page.click('[data-rail-step="3"]');
+  await page.waitForTimeout(300);
+  const pressRow = (await ops())[3];
+  ck(
+    pressRow.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' && pressRow.draft === true,
+    'control: row 3 is the applied press step, still draft',
+    `${pressRow.operationType}`,
+  );
+  await openPanel('header');
+  ck((await page.locator('[data-skeleton-undo]').count()) === 1, 'control: «undo» offered');
+  await page.evaluate((MACHINE) => {
+    window.__sk.form().setValue('operations.3.operationType', MACHINE, { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  }, MACHINE);
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  await page.waitForTimeout(300);
+  const r = await ops();
+  ck(
+    (r[3]?.bomLineKeys ?? []).includes('TH1'),
+    'control: the thread was suggested in that commit',
+    JSON.stringify(r[3]?.bomLineKeys),
+  );
+  ck(
+    (await page.locator('[data-skeleton-undo-refused]').count()) === 1,
+    'suggestion + human type change: undo refused in words',
+  );
+  ck(
+    r.length === 7 && r[3]?.operationType === MACHINE,
+    'the human type change survives',
+    `${r.length} rows, ${r[3]?.operationType}`,
+  );
+  ck(r[3]?.draft === false, 'the human type change takes the draft mark off');
+  await closePanel();
+}
+
+{
+  // U9 (Codex) the auto thread TH1 is suggested on an applied overlock step; the person links TH2 by
+  // hand — the editor revokes TH1 in the same commit (a thread is linked now). The revocation is a
+  // DELTA (remove TH1), not «the list is [TH2]»: the hand TH2 is an edit — draft off; undo stays gone.
+  await mount({
+    ops: U_OWN,
+    machines: [{ machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK' }],
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'overlock thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_OVERLOCK_THREAD',
+      },
+      {
+        lineKey: 'TH2',
+        name: 'sewing thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  let r = await ops();
+  ck(
+    JSON.stringify(r[2]?.bomLineKeys) === '["TH1"]' && r[2]?.draft === true,
+    'control: TH1 suggested on the opened applied step, draft kept',
+    JSON.stringify(r[2]?.bomLineKeys),
+  );
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'strict undo: gone while the suggestion stands',
+  );
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue('operations.2.bomLineKeys', [...f.getValues('operations.2.bomLineKeys'), 'TH2'], {
+      shouldDirty: true,
+    });
+  });
+  await page.waitForTimeout(400);
+  r = await ops();
+  ck(
+    JSON.stringify(r[2]?.bomLineKeys) === '["TH2"]',
+    'control: the editor revoked TH1 once a thread was linked by hand',
+    JSON.stringify(r[2]?.bomLineKeys),
+  );
+  ck(r[2]?.draft === false, 'a hand thread link takes the draft mark off');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'undo is refused (not offered) — it would delete the hand TH2',
+  );
+  await closePanel();
+}
+
+{
+  // U10 (Codex) undo writes the WHOLE card it remembers — the older steps and the flags too. After
+  // an append, the person clears the photos of an OLDER step: the batch rows are untouched, but undo
+  // would put the photos back over that intent. Refused in words, nothing written.
+  const PHOTO = { mediaId: 9, caption: '', annotations: [] };
+  await mount({ ops: [{ ...U_OWN[0], media: [PHOTO] }, U_OWN[1]] });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue('operations.0.media', [], { shouldDirty: true });
+    f.setValue('mediaCleared', true, { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  const t = await page
+    .locator('[data-skeleton-undo-refused]')
+    .innerText()
+    .catch(() => '');
+  ck(/card changed since the apply/.test(t), 'photos cleared on an older step: undo refused', t);
+  const r = await ops();
+  ck(r.length === n, 'nothing taken back', `${r.length} of ${n}`);
+  ck(
+    (r[0]?.media ?? []).length === 0 &&
+      (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === true,
+    'the clearing intent stands',
+  );
+  await closePanel();
+}
+{
+  // U11 an issue flagged on an applied step after the apply: undo would leave it pointing at a step
+  // that is gone (or rewrite the issue list). Refused in words.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue(
+      'issues',
+      [...(f.getValues('issues') ?? []), { operationNumber: 40, description: 'seam puckers' }],
+      { shouldDirty: true },
+    );
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  ck(
+    (await page.locator('[data-skeleton-undo-refused]').count()) === 1,
+    'an issue on an applied step: undo refused in words',
+  );
+  ck((await ops()).length === n, 'the step the issue points at is still there');
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('issues').length)) === 1,
+    'the issue stands',
+  );
+  await closePanel();
+}
+
+{
+  // U12 the open step shows an auto-suggested thread (marked «suggested») when the person replaces
+  // the steps. The snapshot «before» takes the step as the PERSON left it — the suggestion revoked —
+  // so undo brings the step back and the editor suggests the thread again, WITH its mark, instead of
+  // restoring it as a plain, unmarked link. The replace confirmation says how long undo lives.
+  await mount({
+    ops: [U_OWN[0]],
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'TECH_CARD_BOM_SECTION_THREAD',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
+  await page.click('[data-rail-step="0"]');
+  await page.waitForTimeout(300);
+  ck(
+    JSON.stringify((await ops())[0]?.bomLineKeys) === '["TH1"]' &&
+      (await page.locator('[data-suggested="thread"]').count()) === 1,
+    'control: the open step shows the thread as a marked suggestion',
+  );
+  await openPanel('header', 'replace');
+  await page.click('[data-skeleton-apply-all]');
+  {
+    const t = await page.locator('[data-skeleton-replace-loses]').innerText();
+    ck(
+      /undo is available until the next save/.test(t),
+      'the replace confirmation says how long undo lives',
+      t,
+    );
+  }
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  // The applied machine step opens and gets the thread suggested too (strict undo: gone); open the
+  // applied press step instead — the suggestion is revoked and the batch is as applied again.
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="1"]', { timeout: 5000 });
+  await page.click('[data-rail-step="1"]');
+  await page.waitForTimeout(300);
+  await openPanel('header');
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  await page.waitForTimeout(300);
+  const r = await ops();
+  ck(r.length === 1, 'undo brings the one step back');
+  ck(
+    JSON.stringify(r[0]?.bomLineKeys) === '["TH1"]' &&
+      (await page.locator('[data-suggested="thread"]').count()) === 1,
+    'the thread is back as a MARKED suggestion, not a plain link',
+    `${JSON.stringify(r[0]?.bomLineKeys)}, marks ${await page.locator('[data-suggested="thread"]').count()}`,
+  );
+  await closePanel();
+}
+
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
 await mount({});
@@ -785,6 +1456,136 @@ if (!blazer) {
   await closePanel();
 }
 
+// ── L ───────────────────────────────────────────────────────────────────────────────────────────
+head('L — the AI second opinion (stub asker): shown beside the steps, used only on a press');
+if (!blazer) {
+  ck(false, 'blazer DXF found (SKELETON_PLANS)', 'corpus missing');
+} else {
+  // The steps in their order, without the AI's own marks (its pills and its «AI:» lines).
+  const stepWords = async () =>
+    (await page.locator('[data-skeleton-step]').allInnerTexts()).map((t) =>
+      t
+        .split('\n')
+        .filter((l) => !/^AI\b/.test(l.trim()))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .replace(/ · AI\b/g, ''),
+    );
+  const aiCalls = () => page.evaluate(() => window.__sk.aiCalls());
+  await mount({ real: blazer, ai: true });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  ck((await page.locator('[data-skeleton-ai="idle"]').count()) === 1, 'the AI bar is there, idle');
+  ck((await aiCalls()) === 0, 'opening the panel asks the AI nothing');
+  const engineCalls = await page.evaluate(() => window.__sk.providerCalls());
+  const opsBefore = JSON.stringify(await ops());
+  const before = await stepWords();
+
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  ck((await aiCalls()) === 1, 'one press, one call');
+  ck(
+    JSON.stringify(await stepWords()) === JSON.stringify(before),
+    'the answer is SHOWN: the steps stay in the engine order',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'the form does not move');
+  ck((await requests()).length === 0, 'autosave never asked');
+  const places = await page.locator('[data-skeleton-ai-place]').count();
+  ck(places >= 10, 'each ordered step carries its AI place', `${places} AI places`);
+  const picksShown = await page.locator('[data-skeleton-ai-pick]').count();
+  ck(picksShown >= 1, 'the AI pick is marked on the reading chips', `${picksShown}`);
+  {
+    const cost = await page.locator('[data-skeleton-ai-cost="0.0123"]').innerText();
+    ck(
+      /2 calls/i.test(cost) && cost.includes('$0.0123') && /1 with no known charge/i.test(cost),
+      'every call of the press is printed, the unpriced one named',
+      cost,
+    );
+  }
+  ck(
+    (await page.locator('[data-skeleton-ai-warning]').count()) === 1,
+    'the AI doubt sits on its step',
+  );
+  const moved = Number(
+    await page.locator('[data-skeleton-ai-use-order]').getAttribute('data-skeleton-ai-use-order'),
+  );
+  ck(moved > 0, 'the AI order moves steps — offered, not applied', `${moved} would move`);
+  await shot('l-ai-shown', '[data-skeleton-panel]');
+
+  // Readings first: a rebuild, and the order read on the old readings is no longer offered.
+  await page.click('[data-skeleton-ai-use-readings]');
+  await page.waitForFunction((n) => window.__sk.providerCalls() > n, engineCalls, {
+    timeout: 10000,
+  });
+  await page.waitForSelector('[data-skeleton-ai-order-blocked]', { timeout: 10000 });
+  ck(
+    /changed since the AI read it/.test(
+      await page.locator('[data-skeleton-ai-order-blocked]').innerText(),
+    ),
+    'after the AI readings the old AI order is refused in words',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'still nothing in the form');
+
+  // Ask again on the rebuilt skeleton, then use its order.
+  await page.click('[data-skeleton-ai-again]');
+  await page.waitForFunction(() => window.__sk.aiCalls() === 2, null, { timeout: 10000 });
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 10000 });
+  const beforeOrder = await stepWords();
+  await page.click('[data-skeleton-ai-use-order]');
+  await page.waitForFunction(
+    () => document.querySelector('[data-skeleton-ai-use-order]')?.textContent?.includes('in use'),
+    null,
+    { timeout: 10000 },
+  );
+  const afterOrder = await stepWords();
+  ck(
+    JSON.stringify(afterOrder) !== JSON.stringify(beforeOrder) &&
+      // Step numbers («30», «↳ with 30») follow the order; what each step IS does not.
+      JSON.stringify(afterOrder.map((t) => t.replace(/\d+/g, '#')).sort()) ===
+        JSON.stringify(beforeOrder.map((t) => t.replace(/\d+/g, '#')).sort()),
+    '«use AI order» reorders the same steps on screen',
+  );
+  ck(JSON.stringify(await ops()) === opsBefore, 'using the AI order writes nothing to the form');
+  for (;;) {
+    const off = page.locator(
+      '[data-skeleton-accepted="0"]:not([data-skeleton-step-applied]) [data-skeleton-check]',
+    );
+    if ((await off.count()) === 0) break;
+    await off.first().click();
+  }
+  const blocked = await page.locator('[data-skeleton-violation]').count();
+  ck(blocked === 0, 'the AI-ordered batch keeps the order', `${blocked} violations`);
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(
+    hard.length === 0,
+    'assemblySweep clean on the applied AI order',
+    JSON.stringify(hard).slice(0, 300),
+  );
+  await shot('l-ai-applied', '[data-skeleton-panel]');
+  await closePanel();
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
+  ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
+  await closePanel();
+
+  // A refusal after the provider was paid says so: the AI_SPEND detail is printed with the error.
+  await mount({ real: blazer, ai: 'fail' });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai-error]', { timeout: 10000 });
+  const refusal = await page.locator('[data-skeleton-ai-error]').innerText();
+  ck(
+    /charged anyway: 2 calls · \$0\.0200/i.test(refusal),
+    'a refused press still prints what it was charged',
+    refusal,
+  );
+  ck(JSON.stringify(await ops()) === '[]', 'the refusal writes nothing');
+  await closePanel();
+}
+
 // ── G ───────────────────────────────────────────────────────────────────────────────────────────
 head('G — the real engine on SS26-005: pictograms in the panel and on the schematic');
 const real = await loadRealCard();
@@ -801,8 +1602,10 @@ if (!real) {
     const n = Number(await head.getAttribute('data-skeleton-to-decide'));
     const riders = await page.locator('[data-skeleton-follows]').count();
     console.log(`        header: ${(await head.innerText()).replace(/\s+/g, ' ')}`);
-    // The genuine guesses of SS26-005: collar with stand, collar into the neckline, set sleeves.
-    ck(n <= 5, 'only the genuine guesses are left to decide', `${n} to decide, ${riders} riders`);
+    // The genuine guesses of SS26-005: collar with stand, collar into the neckline, set sleeves —
+    // + 3 closure steps of P2 lane Z whose side CLO does not draw (buttonholes / buttons ×6 on the
+    // plackets, the collar band's two slits): counted from the pattern, the side is a decision.
+    ck(n <= 8, 'only the genuine guesses are left to decide', `${n} to decide, ${riders} riders`);
     ck(riders >= 15, 'presses and processing ride on their joins', `${riders} riders`);
   }
   const outPics = await page.locator('[data-skeleton-unit] svg[role="img"]').count();
@@ -830,6 +1633,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}`,
 );
 if (bad) process.exitCode = 1;

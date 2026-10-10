@@ -36,9 +36,12 @@ import { CardUnitPicturesProvider } from '../components/card-unit-pictures';
 import { firstColorwayCloth, useCardCategoryNames } from '../components/skeleton-card-inputs';
 import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
+import { useCardSeamGraph } from '../components/card-unit-pictures';
 import {
   typesetMap,
   typesetRoute,
+  typesetSeams,
+  type SeamSheet,
   type PaperDoc,
   type SheetMeta,
   type ShapeLookup,
@@ -56,8 +59,9 @@ import {
   type PdfTarget,
 } from './paper-pdf';
 import { PaperPages } from './paper-svg';
+import { seamSheetOf } from './seam-sheet';
 
-type Form = 'route' | 'map';
+type Form = 'route' | 'map' | 'seams';
 
 const PX_PER_MM = 96 / 25.4;
 
@@ -179,15 +183,24 @@ function Document({
   onDoc: (doc: PaperDoc, key: string) => void;
   docKey: string;
 }) {
-  const { shapeByKey, hasDxf, isLoading, error } = usePieceShapes(shapes);
+  // SEAM MAP читает выкройку всегда: без контуров листу нечего показать, тумблер силуэтов не про него.
+  const wantShapes = shapes || form === 'seams';
+  const { shapeByKey, hasDxf, isLoading, error } = usePieceShapes(wantShapes);
+  const { graph: seamGraph, settling } = useCardSeamGraph();
   useEffect(() => onShapesAvailable(hasDxf), [hasDxf, onShapesAvailable]);
   useEffect(() => {
     // Контуры входят в гейт только когда их просили И есть чем рисовать: без DXF ждать нечего, а
     // отказ разбора — degraded, не блокировка (правило 1 гейта).
-    onDeps(
-      shapes && hasDxf ? [{ label: 'piece contours', status: depStatus(isLoading, !!error) }] : [],
-    );
-  }, [shapes, hasDxf, isLoading, error, onDeps]);
+    onDeps([
+      ...(wantShapes && hasDxf
+        ? [{ label: 'piece contours', status: depStatus(isLoading, !!error) }]
+        : []),
+      // Граф швов отстаивается 400 мс и читается в простое: кнопка ждёт его, а не печатает пустой лист.
+      ...(form === 'seams' && hasDxf
+        ? [{ label: 'seam graph', status: depStatus(isLoading || settling, false) }]
+        : []),
+    ]);
+  }, [wantShapes, hasDxf, isLoading, error, onDeps, form, settling]);
 
   const M = useMemo(
     () => assemblyPrintModel(printInput(techCard.techCard, workCatalog)),
@@ -203,9 +216,41 @@ function Document({
     () => (unitPictures ? (key) => unitPictures.get(key) ?? null : null),
     [unitPictures],
   );
+  // SEAM MAP — тот же граф и та же арифметика, что PIECES на экране (lib/assembly-skeleton/map);
+  // «как шьют» — из формы-снимка сохранённой карточки той же функцией, что полоса STEP на вкладке.
+  const formOps = useWatch<TechCardFormData>({ name: 'operations' }) as
+    | TechCardFormData['operations']
+    | undefined;
+  const construction = useWatch<TechCardFormData>({ name: 'construction' }) as
+    | TechCardFormData['construction']
+    | undefined;
+  const seamSheet = useMemo<SeamSheet>(
+    () =>
+      form === 'seams'
+        ? seamSheetOf(
+            seamGraph,
+            (formOps ?? []).map((o) => ({
+              ...o,
+              inputKeys: o.inputKeys ?? [],
+              outputUnitKey: o.outputUnitKey ?? '',
+              sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+            })),
+            M,
+            {
+              defaultSeamClass: construction?.defaultSeamClass,
+              machines: construction?.equipmentDefaults?.machines ?? [],
+            },
+          )
+        : null,
+    [form, seamGraph, formOps, construction, M],
+  );
   const doc = useMemo(() => {
     const set = (m: SheetMeta) =>
-      form === 'map' ? typesetMap(M, m, shapeOf, unionOf) : typesetRoute(M, m, shapeOf, unionOf);
+      form === 'seams'
+        ? typesetSeams(M, m, seamSheet)
+        : form === 'map'
+          ? typesetMap(M, m, shapeOf, unionOf)
+          : typesetRoute(M, m, shapeOf, unionOf);
     let d = set(meta);
     if (!target) return d;
     // Подвал масштабированного листа длиннее (размер файла, процент, формат и число страниц) и может
@@ -224,7 +269,7 @@ function Document({
     if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
       d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
-  }, [M, meta, shapeOf, unionOf, form, target]);
+  }, [M, meta, shapeOf, unionOf, form, target, seamSheet]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
   // Экран и ⌘P показывают ФАЙЛ: те же страницы в физическом размере, разбивка — сеткой склейки.
   const out = pdfSize(doc, target);
@@ -274,7 +319,8 @@ export function TechCardAssemblyPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
   const [searchParams, setSearchParams] = useSearchParams();
-  const form: Form = searchParams.get('form') === 'map' ? 'map' : 'route';
+  const formParam = searchParams.get('form');
+  const form: Form = formParam === 'map' || formParam === 'seams' ? formParam : 'route';
   const shapes = searchParams.get('shapes') !== 'off';
   const sizeParam = searchParams.get('size');
   // Мемо по строке адреса: объект цели входит в зависимости набора листа.
@@ -455,6 +501,15 @@ export function TechCardAssemblyPrint() {
               >
                 map tree
               </Chip>
+              <Chip
+                nonForm
+                pressed={form === 'seams'}
+                selected={form === 'seams'}
+                onClick={() => setChoice({ form: 'seams' })}
+                title='every piece once at 1:12, each sewn edge numbered by the step that sews it — A4 landscape, grows to A3 when the pieces do not fit'
+              >
+                seam map
+              </Chip>
             </ChipRow>
           </div>
           <div className='flex items-center gap-2'>
@@ -634,7 +689,7 @@ export function TechCardAssemblyPrint() {
             style={{ transform: `scale(${k})`, width: `${stageWmm}mm` }}
           >
             <FormProvider {...methods}>
-              <PrintUnitPictures enabled={shapes} techCard={techCard}>
+              <PrintUnitPictures enabled={shapes || form === 'seams'} techCard={techCard}>
                 <Document
                   techCard={techCard}
                   form={form}

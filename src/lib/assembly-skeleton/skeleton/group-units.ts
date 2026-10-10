@@ -10,6 +10,7 @@
 
 import {
   SKELETON,
+  type SeamCandidate,
   type SeamGraph,
   type SkeletonDecision,
   type SkeletonFacts,
@@ -171,7 +172,19 @@ export function groupDetailed(
   pins: SkeletonPins = {},
 ): Grouping {
   const pieces = readPieces(graph, facts);
-  const seams = new SeamIndex(graph, pieces, template);
+  // Surface joins (P2 lane S) are not edge evidence: a pocket laid on a front links nothing along
+  // their edges. They are read by step S alone; every other step sees the edge seams only.
+  const surfaces = graph.chosen.filter(
+    (c): c is SeamCandidate & { surface: NonNullable<SeamCandidate['surface']> } =>
+      c.kind === 'surface' && !!c.surface,
+  );
+  const seams = new SeamIndex(
+    surfaces.length
+      ? { ...graph, chosen: graph.chosen.filter((c) => c.kind !== 'surface') }
+      : graph,
+    pieces,
+    template,
+  );
   const byKey = new Map(pieces.map((p) => [p.key, p]));
   // APPEND MODE: what the card's own joins consumed is out of play; its live units are on the table.
   const replay = replayExisting(facts.existing, new Set(pieces.map((p) => p.key)));
@@ -228,6 +241,8 @@ export function groupDetailed(
       alternatives?: SkeletonUnit['alternatives'];
       decision?: SkeletonDecision;
       judgement?: Pick<SkeletonUnit, 'confidence' | 'reason' | 'source'>;
+      /** The seams the join stands on, when they are not edge seams between its inputs (surface). */
+      seams?: SeamCandidate[];
     },
   ): Entity => {
     const j = judge(inputs, seams, spec.why);
@@ -247,7 +262,7 @@ export function groupDetailed(
       tree: e.tree,
       ...((e.mult ?? 1) >= 2 ? { mult: e.mult } : {}),
       kind: spec.kind,
-      seams: j.seams,
+      seams: spec.seams ?? j.seams,
       confidence: spec.judgement?.confidence ?? j.confidence,
       reason: spec.judgement?.reason ?? j.reason,
       source: spec.judgement?.source ?? j.source,
@@ -341,6 +356,20 @@ export function groupDetailed(
       crowd.set(ck, (crowd.get(ck) ?? 0) + 1);
     }
   }
+  // Two parts of one family that the pattern lays on DIFFERENT marks (the flap of the left pocket
+  // and the flap of the right one) are copies going two ways, not layers of one thing: step S
+  // places each on its own host, so the family does not sew them to each other first.
+  const surfacePart = new Map<string, number>();
+  for (const c of surfaces)
+    surfacePart.set(c.surface.part, (surfacePart.get(c.surface.part) ?? 0) + 1);
+  for (const [k, group] of families) {
+    const parts = group.filter((e) => e.leaves.some((l) => surfacePart.has(l)));
+    if (parts.length >= 2)
+      families.set(
+        k,
+        group.filter((e) => !parts.includes(e)),
+      );
+  }
   for (const group of families.values()) {
     if (group.length < 2) continue;
     const [head] = group;
@@ -356,6 +385,83 @@ export function groupDetailed(
         ? `Layers of one shape, sewn into one: ${listNames(group)}`
         : `One family by name: ${listNames(group)}`,
     });
+  }
+
+  // ── S. laid on a host: patch pockets, appliqués, a flap on a pocket (P2 lane S) ───────────────
+  // A part goes onto the thing that carries its placement mark, whatever the names say, while the
+  // host is still flat — before it is merged into a panel, before any body seam. A part that is
+  // itself a host (the pocket the flap sits on) takes its own parts first. The unit is the host
+  // with something on it: it keeps the host's roles (a front with a pocket is still a front; a
+  // nameless host stays nameless for the geometry pass).
+  {
+    const level = new Map<SeamCandidate, number>();
+    const levelOf = (c: (typeof surfaces)[number], seen: Set<string> = new Set()): number => {
+      const known = level.get(c);
+      if (known !== undefined) return known;
+      if (seen.has(c.surface.part)) return 0;
+      seen.add(c.surface.part);
+      const below = surfaces.filter((q) => q.surface.host === c.surface.part);
+      const l = below.length ? 1 + Math.max(...below.map((q) => levelOf(q, seen))) : 0;
+      level.set(c, l);
+      return l;
+    };
+    const holder = (leaf: string) => table.list().find((e) => e.leaves.includes(leaf));
+    const short = (e: Entity) => {
+      const base = e.unit ? e.name.replace(/ with .*$/, '') : e.name;
+      return e.unit ? `${base[0].toLowerCase()}${base.slice(1)}` : base;
+    };
+    const ordered = [...surfaces].sort(
+      (x, y) => levelOf(x) - levelOf(y) || (x.surface.mark < y.surface.mark ? -1 : 1),
+    );
+    const laid = new Set<string>();
+    for (const c of ordered) {
+      // Already laid (a chosen reading put it on another mark) — never pull its host along.
+      if (laid.has(c.surface.part)) continue;
+      const host = holder(c.surface.host);
+      const part = holder(c.surface.part);
+      // Already one thing (a family step joined them).
+      if (!host || !part || host === part || host.tree !== part.tree) continue;
+      // The other parts whose outline fits this mark equally well (two equal flaps, hands not told).
+      const rivals: { e: Entity; seam: SeamCandidate }[] = [];
+      for (const q of c.ambiguousWith ?? []) {
+        const e = q.surface ? holder(q.surface.part) : undefined;
+        if (e && e !== host && e !== part && !rivals.some((r) => r.e === e))
+          rivals.push({ e, seam: q });
+      }
+      const options = [{ e: part, seam: c as SeamCandidate }, ...rivals];
+      const readings: Reading[] = options.map((o, i) => ({
+        inputs: [o.e, host],
+        reason:
+          i === 0
+            ? `or ${o.e.name} — the pattern's first reading`
+            : `or ${o.e.name} — its outline fits the same mark`,
+      }));
+      const d = decide(pins, `surface:${c.surface.mark}`, readings, isLive);
+      const pick = options[d.chosen];
+      laid.add(pick.seam.surface?.part ?? c.surface.part);
+      const mark = (pick.seam.evidence.rule ?? '').replace(/^surface: /, '');
+      record([pick.e, host], {
+        name: `${display(host)} with ${short(pick.e)}`,
+        roles: host.roles,
+        kind: 'attach',
+        hand: host.hand,
+        why: '',
+        alternatives: d.others?.map((a) => ({
+          ...a,
+          seams: [options.find((o) => o.e.key === a.inputs[0])?.seam ?? c],
+        })),
+        decision: d.decision,
+        // The mark, and any edge seam the two already share (a flap's top stitched to the pocket).
+        seams: [pick.seam, ...seams.crossing([pick.e.leaves, host.leaves])],
+        judgement: {
+          confidence: d.chosen ? 0.6 : 0.8,
+          source: 'geometry',
+          reason: d.chosen
+            ? `${pick.e.name} goes onto ${display(host)} — your reading`
+            : `${pick.e.name} is laid on ${display(host)}: ${mark}`,
+        },
+      });
+    }
   }
 
   // ── 2a. one role, one hand: FRONT_L + the FP_L panel → «Left front» ──────────────────────────

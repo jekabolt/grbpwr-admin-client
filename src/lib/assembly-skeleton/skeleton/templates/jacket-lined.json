@@ -13,6 +13,7 @@
       "op": "fuse",
       "label": "Fuse interlining"
     },
+    { "id": "features", "op": "features", "label": "Darts" },
     {
       "id": "subassemblies",
       "op": "units",
@@ -24,6 +25,22 @@
       "op": "units",
       "label": "Shell and lining panels",
       "roles": ["front", "back", "yoke", "side", "sleeve", "*"]
+    },
+    {
+      "id": "sleeve-vent",
+      "op": "process",
+      "label": "Sleeve vent",
+      "roles": ["sleeve"],
+      "check": true,
+      "zone": "SLEEVE"
+    },
+    {
+      "id": "back-vent",
+      "op": "process",
+      "label": "Back vent",
+      "roles": ["back"],
+      "check": true,
+      "zone": "BACK"
     },
     {
       "id": "body",
