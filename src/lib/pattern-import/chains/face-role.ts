@@ -11,9 +11,10 @@
 //                background and the operator has not taken (a watermark, stroke text, a stray);
 //   internal     the rest — lines inside the outlines (grain, darts, placement).
 // The piece walls become one row — 'common' (a sheet with no size row is one size) — AUTO only with
-// evidence: it closes the largest faces AND (the layer is named cut / Schnitt / крой / … OR a second
-// independent cue: the outlines are drawn double (cut + seam rings) or in a pen the other lines are
-// not). Otherwise the row is pre-filled and asked (confidence < 0.6). The strays are an 'ignore' row,
+// evidence from another source than the geometry: it closes the largest faces (drawn double or not —
+// the same evidence) AND the layer is named cut / Schnitt / крой / …, OR the outlines are in a pen the
+// other lines are not, OR the sheet prints a key naming the cut line. Otherwise the row is
+// pre-filled and asked (confidence < 0.6). The strays are an 'ignore' row,
 // always asked (D3: a suggestion one click away); 'internal' is sure only for lines inside faces.
 import type {
   Chain,
@@ -31,6 +32,10 @@ import { faceRaster, judgeBlobs, type FaceBlob, type FaceRaster } from '../piece
 import { testSquareBoxes, turnOf } from './classify';
 import { resample, SegGrid, segNearest } from './geom';
 import type { WallItem } from '../pieces/snap';
+
+/** A printed key that names the cut line (a legend entry, not "cut 2" on a piece). */
+export const CUT_LINE_TEXT =
+  /(?:cut(?:ting)?[\s-]*line|линия\s+кроя|schnitt-?\s*linie|ligne\s+de\s+coupe|l[ií]nea\s+de\s+corte|linea\s+di\s+taglio)/i;
 
 /** Layer names that say "the cut line" (SVG/DXF layers, PDF OCGs). */
 export const CUT_LAYER =
@@ -55,7 +60,7 @@ const sameStyle = (a: Style | undefined, b: Style | undefined) =>
 /** Probe switches (mutation): a cue or a stray rule off. */
 export type FaceRoleOpts = {
   off?: ReadonlySet<
-    'layer' | 'ring' | 'pen' | 'outside' | 'junk' | 'offered' | 'square' | 'inside' | 'all'
+    'layer' | 'ring' | 'pen' | 'text' | 'outside' | 'junk' | 'offered' | 'square' | 'inside' | 'all'
   >;
 };
 
@@ -97,7 +102,7 @@ export function rolesByFaces(
   // a coarse raster (walls ~4.5 mm thick): a seam line broken at its notches still closes its
   // ring, a stroke glyph closes no face of its own
   const fr = faceRaster(sheet.bbox, items, [], ROLE_CELL_MM);
-  const blobs = judgeBlobs(fr, sheet, set.chains, items, [], { off: new Set(['nested']) });
+  const blobs = judgeBlobs(fr, sheet, set.chains, items, [], { off: new Set(['nested', 'units']) });
   const kept = new Set(blobs.filter((b) => !b.junk).map((b) => b.id));
   if (!kept.size) return set;
   const { verdict, rim, rimStyle } = classify(
@@ -185,7 +190,15 @@ export function rolesByFaces(
     const own = rest.filter((id) => sameStyle(styles.get(set.chains[id].style), pieceStyle));
     if (len(own) <= 0.2 * len(rest)) cues.push('a pen the other lines are not drawn in');
   }
-  const auto = cues.length >= 2;
+  // a printed key naming the cut line (not "cut 2" on a piece)
+  if (!off.has('text')) {
+    const t = sheet.texts.find((x) => CUT_LINE_TEXT.test(x.text));
+    if (t) cues.push(`the sheet says “${t.text.trim().slice(0, 40)}”`);
+  }
+  // closing faces and being drawn double are one kind of evidence (the geometry); AUTO needs a cue
+  // from another source — the layer's name, a pen of its own, a printed key (Codex A0.3 review)
+  const independent = cues.filter((c) => !c.startsWith('closes ') && !c.startsWith('drawn double'));
+  const auto = independent.length >= 1;
   // the rows: piece outlines, the lines inside them, the strays
   const internal = rest.filter((id) => verdict.get(id)?.kind === 'internal');
   const stray = rest.filter((id) => verdict.get(id)?.kind === 'stray');
