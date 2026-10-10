@@ -952,7 +952,7 @@ export async function runCard(input: CardInput) {
         families: sheet?.families.length ?? 0,
         keyRows: sheet?.key.length ?? 0,
         unreadKeyRows: sheet?.key.filter((k) => k.unread).length ?? 0,
-        legendRows: sheet?.legend.length ?? 0,
+        legendRows: sheet?.legend?.length ?? 0,
         // the largest sheet is A1; landing on it with more height than A1 = it did not fit
         fits: !(doc.w >= A1.w && doc.h > A1.h + 0.01),
         overWidth: doc.report.overWidth,
