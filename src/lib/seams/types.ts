@@ -135,7 +135,7 @@ export type AnchorHit = {
   /** Length of each of `edges`, mm. */
   edgeLens: Mm[];
   lenMm: Mm;
-  how: 'hint' | 'shape';
+  how: 'hint' | 'shape' | 'topology';
   /** The piece's frame against the anchor's: as is, turned 180°, mirrored across u or v. */
   frame: Frame;
   /** RMS of the five samples in the unit square (0 on the fast path). */
@@ -197,4 +197,12 @@ export type ResolveOptions = {
   thresholds?: Partial<typeof SEAMS>;
   /** Display names for the words («FP L» instead of a ULID). */
   nameOf?: (pieceKey: string) => string;
+  /**
+   * An anchor already placed by other means (lib/seams `resolveAcrossSizes`: carried from the size
+   * it was confirmed on by the piece's edge sequence). Tried before the fast path and the shape
+   * search; undefined = resolve this anchor as usual.
+   */
+  preHit?: (a: EdgeAnchor) => AnchorHit | undefined;
+  /** The size these pieces are, for the words («… on XL»). */
+  size?: string;
 };

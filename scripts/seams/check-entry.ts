@@ -272,3 +272,18 @@ export function placeVerdict(
     ? 'resegmented'
     : 'wrong';
 }
+
+// ── G7: every size ───────────────────────────────────────────────────────────────────────────
+export { resolveAcrossSizes, edgeMapOf, resolveSeamDecisions } from '../../src/lib/seams';
+
+/** Each size as the resolver sees it (segmented pieces + grain), optionally with one piece redrawn. */
+export function sizePieces(
+  sizes: { size: string; facts: SkeletonFacts }[],
+  redraw?: { size: string; key: string; k: number },
+) {
+  return sizes.map((s) => {
+    const facts =
+      redraw && redraw.size === s.size ? perturb(s.facts, scaleBy(redraw.k), redraw.key) : s.facts;
+    return { size: s.size, pieces: segmentAll(facts), grainDeg: grainDegOf(facts) };
+  });
+}

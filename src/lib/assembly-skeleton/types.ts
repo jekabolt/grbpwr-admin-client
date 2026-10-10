@@ -232,8 +232,11 @@ export type SeamProvenance = {
   direction: 'reversed' | 'same' | 'unknown';
   by: string;
   at: string;
-  /** hint = the stored edge id still fits the same contour; shape = found by its shape. */
-  how: 'hint' | 'shape';
+  /**
+   * hint = the stored edge id still fits the same contour; shape = found by its shape; topology =
+   * carried from the size it was confirmed on by the piece's edge sequence.
+   */
+  how: 'hint' | 'shape' | 'topology';
 };
 
 /** One stored «not this seam»: any candidate meeting both sides is dropped with `rule`. */

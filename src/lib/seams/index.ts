@@ -18,6 +18,14 @@ export { anchorOf, anchorOfRunId, newSeamKey, seamFromCandidate, storedKindOf } 
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';
 export { fromWire, seamsSig, toWire } from './wire';
+export {
+  TRANSFER,
+  edgeMapOf,
+  resolveAcrossSizes,
+  type EdgeMap,
+  type SizePieces,
+  type SizeResolved,
+} from './transfer';
 
 /**
  * The decisions input of readSeamGraph / proposeSkeleton: resolves `rows` against the pieces the

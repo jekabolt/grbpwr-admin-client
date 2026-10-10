@@ -107,7 +107,7 @@ export function resolveSeamDecisions(
 
   const label = (s: StoredSeam) => {
     const side = (xs: EdgeAnchor[]) => [...new Set(xs.map((a) => name(a.piece)))].join(' + ');
-    return `${s.kind === 'closure' ? 'closure' : 'seam'} ${side(s.sideA)} ↔ ${side(s.sideB)} (${s.status})`;
+    return `${s.kind === 'closure' ? 'closure' : 'seam'} ${side(s.sideA)} ↔ ${side(s.sideB)} (${s.status})${opts.size ? ` on ${opts.size}` : ''}`;
   };
 
   // ── 1. orphans ──
@@ -194,6 +194,8 @@ export function resolveSeamDecisions(
 
   // ── 4. each searched anchor in its piece's frame ──
   const verdictOf = (a: EdgeAnchor): AnchorVerdict => {
+    const carried = opts.preHit?.(a);
+    if (carried) return { ok: true, hit: carried };
     const hitFast = fast.get(a);
     if (hitFast) return { ok: true, hit: hitFast };
     const c = ctxOf(a.piece);
@@ -343,7 +345,17 @@ export function resolveSeamDecisions(
     const lenB = sum(hb.map((h) => h.lenMm));
     const thenRatio = sum(s.sideA.map((a) => a.lenMm)) / sum(s.sideB.map((a) => a.lenMm));
     const moved = lenA / lenB / thenRatio - 1;
-    if (Math.abs(moved) > T.ratioDrift) {
+    // A partial sews its short side onto PART of a longer run, and on another size the two grade
+    // apart (a pocket facing onto a front edge, measured 4–5 % on cards 6 / 7 / 8): there it holds
+    // up to the eased band while the short side still fits on the long run. On the size it was
+    // confirmed on the strict drift applies (a redrawn piece).
+    const graded = !!opts.size && opts.size !== s.anchoredSize;
+    const partialHolds =
+      graded &&
+      s.kind === 'partial' &&
+      Math.abs(moved) <= SKELETON.lenRelEased &&
+      Math.min(lenA, lenB) <= Math.max(lenA, lenB);
+    if (Math.abs(moved) > T.ratioDrift && !partialHolds) {
       const longer = moved > 0 ? s.sideA : s.sideB;
       const w = `${label(s)}: stale · ${[...new Set(longer.map((a) => name(a.piece)))].join(' + ')} is now ${Math.abs(moved * 100).toFixed(1)} % longer against its partner than when ${s.status} — re-confirm`;
       stale.push({ seam: s, reason: 'drift', stillFits: false, words: w });
@@ -369,7 +381,8 @@ export function resolveSeamDecisions(
       continue;
     }
 
-    const how = [...ha, ...hb].some((h) => h.how === 'shape') ? 'shape' : 'hint';
+    const hows = new Set([...ha, ...hb].map((h) => h.how));
+    const how = hows.has('shape') ? 'shape' : hows.has('topology') ? 'topology' : 'hint';
     const cand = candidateOf(s, ha, hb, ruleWords, provenanceOf(s, by, at, how));
     if (s.kind === 'closure') closures.push(cand);
     else forced.push(cand);
@@ -383,10 +396,10 @@ export function resolveSeamDecisions(
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 
-function hitOf(
+export function hitOf(
   a: EdgeAnchor,
   run: SeamRun,
-  how: 'hint' | 'shape',
+  how: AnchorHit['how'],
   frame: Frame,
   fit: number,
 ): AnchorHit {
@@ -411,7 +424,7 @@ function provenanceOf(
   s: StoredSeam,
   by: string,
   at: string,
-  how: 'hint' | 'shape',
+  how: SeamProvenance['how'],
 ): SeamProvenance {
   return {
     seamKey: s.seamKey,

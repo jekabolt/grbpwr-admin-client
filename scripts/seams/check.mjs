@@ -553,21 +553,110 @@ for (const f of loaded) {
   );
 }
 
-// ── info: Allsizes-style re-segmentation across graded sizes ─────────────────────────────────
-console.log('\n── info: anchors of the base size resolved on every other size');
+// ── G7 every size ────────────────────────────────────────────────────────────────────────────
+// Rows are confirmed on the base size (anchoredSize); every other size gets them by the piece's
+// edge sequence (topology), shape fit at 0.02 only where the sequence differs, else stale naming the
+// size. Cross-check (info): a carried run vs what a loose shape fit (0.06) would pick on that size.
+// NEGATIVE CONTROL: one piece redrawn 5 % bigger on ONE size → its shared seams stale on that size
+// only, every other size exactly as before.
+console.log('\n── G7 every size (resolved on the base size, carried by topology)');
+const sizeTable = [];
 for (const f of loaded) {
-  const rows = f.rows.map((x) => x.row);
-  const line = [];
+  const rows = f.rows.map((x) => ({ ...x.row, anchoredSize: f.baseSize }));
+  const sp = mod.sizePieces(f.sizes);
+  const res = mod.resolveAcrossSizes(rows, sp);
+  const cells = [];
+  const staleLines = [];
+  let all = true;
+  let disagree = 0;
+  let checked = 0;
   for (const s of f.sizes) {
-    if (s.size === f.baseSize) continue;
-    const r = mod.resolve(rows, s.facts);
-    line.push(
-      `${s.size} ${r.applied.length}/${rows.length}${r.stale.length ? ` (${r.stale.length} stale)` : ''}`,
+    const r = res.get(s.size);
+    const ok = r.applied.length === rows.length;
+    all &&= ok;
+    cells.push(
+      `${s.size}${s.size === f.baseSize ? '*' : ''} ${r.applied.length}/${rows.length}${s.size === f.baseSize ? '' : ` (${r.carried} topo, ${r.byShape} shape)`}`,
     );
-    if (verbose) for (const x of r.stale) console.log(`        ${s.size}: ${x.reason} ${x.words}`);
+    for (const x of [...r.stale, ...r.orphan]) staleLines.push({ size: s.size, x });
+    if (s.size === f.baseSize) continue;
+    // Cross-check carried runs against a loose shape fit on the same size.
+    const loose = mod.resolveSeamDecisions(rows, sp.find((q) => q.size === s.size).pieces, {
+      grainDeg: sp.find((q) => q.size === s.size).grainDeg,
+      thresholds: { fitMax: 0.06 },
+    });
+    const looseOf = new Map(loose.applied.map((a) => [a.seam.seamKey, a]));
+    for (const a of r.applied) {
+      const l = looseOf.get(a.seam.seamKey);
+      if (!l || a.seam.kind === 'surface') continue;
+      checked++;
+      const runs = (x) => [...x.a, ...x.b].map((h) => h.run).join('|');
+      if (runs(a) !== runs(l)) {
+        disagree++;
+        if (verbose)
+          console.log(`        ${s.size}: topology ${runs(a)} vs loose shape ${runs(l)}`);
+      }
+    }
   }
-  console.log(`  ${f.label}: ${line.join(' · ') || 'one size'}`);
+  sizeTable.push(`  ${f.label.padEnd(26)} ${cells.join(' · ')}`);
+  // SS26-005 must resolve on every size; elsewhere a row not placed must be stale in words that
+  // name the size (a seam whose two sides grade apart is a finding, not a resolver failure).
+  const named = staleLines.every(({ size, x }) => x.words.includes(`on ${size}`));
+  const strict = f.id === 'ss26';
+  gate(
+    (strict ? all : named) && disagree === 0,
+    `${f.label}: ${all ? 'every size resolves every row' : `${staleLines.length} row×size stale, each in words naming the size`} — ${cells.join(' · ')}`,
+  );
+  for (const { size, x } of staleLines)
+    console.log(
+      `        ${size} ${x.reason ?? 'orphan'}: ${x.words.replace(/^.*?: stale · /, '')}`,
+    );
+  console.log(
+    `        info: carried runs agreeing with a loose shape fit (0.06) where it finds one: ${checked - disagree}/${checked}`,
+  );
 }
+// Negative control: the most-shared piece redrawn ×1.05 on one non-base size.
+for (const f of loaded) {
+  const rows = f.rows.map((x) => ({ ...x.row, anchoredSize: f.baseSize }));
+  const touch = new Map();
+  for (const r of rows) {
+    const ks = new Set([...r.sideA, ...r.sideB].map((a) => a.piece));
+    if (ks.size > 1) for (const k of ks) touch.set(k, (touch.get(k) ?? 0) + 1);
+  }
+  const key = [...touch.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
+  const other =
+    f.sizes.find((s) => s.size !== f.baseSize && s.size !== f.sizes[0].size) ??
+    f.sizes.find((s) => s.size !== f.baseSize);
+  if (!other) continue;
+  const clean = mod.resolveAcrossSizes(rows, mod.sizePieces(f.sizes));
+  const bent = mod.resolveAcrossSizes(
+    rows,
+    mod.sizePieces(f.sizes, { size: other.size, key, k: 1.05 }),
+  );
+  // Partials are graded apart by design on other sizes (they hold up to the eased band there), so
+  // a 5 % redraw is not a signal on them: counted for edge / composite / closure seams, partials info.
+  const sharedAll = rows.filter((r) => {
+    const ks = new Set([...r.sideA, ...r.sideB].map((a) => a.piece));
+    return ks.has(key) && ks.size > 1;
+  });
+  const shared = sharedAll.filter((r) => r.kind !== 'partial');
+  const partialsHere = sharedAll.length - shared.length;
+  const sig = (r) =>
+    JSON.stringify(r.applied.map((a) => [a.seam.seamKey, [...a.a, ...a.b].map((h) => h.run)]));
+  const staleThere = bent.get(other.size).stale.filter((x) => shared.includes(x.seam)).length;
+  const restSame = f.sizes
+    .filter((s) => s.size !== other.size)
+    .every((s) => sig(clean.get(s.size)) === sig(bent.get(s.size)));
+  const appliedThere = bent
+    .get(other.size)
+    .applied.filter((a) => !sharedAll.includes(a.seam) || a.seam.kind === 'partial').length;
+  const cleanThere = clean.get(other.size).applied.filter((a) => !shared.includes(a.seam)).length;
+  gate(
+    staleThere === shared.length && restSame && appliedThere === cleanThere,
+    `NEG ${f.label}: ${f.facts.pieces.find((p) => p.pieceKey === key)?.name} ×1.05 on ${other.size} only → ${staleThere}/${shared.length} of its seams stale on ${other.size}${partialsHere ? ` (+${partialsHere} partial, info: ${bent.get(other.size).stale.filter((x) => sharedAll.includes(x.seam) && x.seam.kind === 'partial').length} stale)` : ''}, ${appliedThere} others applied there as without the redraw, other sizes ${restSame ? 'unchanged' : 'CHANGED'} — «${bent.get(other.size).stale[0]?.words ?? '—'}»`,
+  );
+}
+console.log('\n  per-size table (* = base size the rows were confirmed on):');
+for (const l of sizeTable) console.log(l);
 
 // ── timing ───────────────────────────────────────────────────────────────────────────────────
 {
