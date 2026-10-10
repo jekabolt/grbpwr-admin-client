@@ -17,9 +17,12 @@ import {
   type SkeletonTree,
   type SkeletonUnit,
 } from '../types';
+import { replayExisting, type ExistingReplay } from './existing';
 import {
   SeamIndex,
   commonHand,
+  commonMult,
+  multWord,
   judge,
   mergeLeaves,
   mergeRoles,
@@ -53,8 +56,14 @@ export class Table {
         hand: p.hand,
         tree: p.tree,
         leaves: [p.key],
+        mult: p.mult,
       });
     }
+  }
+
+  /** A name already taken by the card's own order (append mode): new units do not repeat it. */
+  reserve(name: string) {
+    this.names.add(name);
   }
 
   list(tree?: SkeletonTree): Entity[] {
@@ -79,11 +88,15 @@ export class Table {
     out: { name: string; roles: string[]; hand?: Entity['hand']; tree?: SkeletonTree },
   ): Entity {
     const tree = out.tree ?? inputs[0].tree;
-    // The lining subtree reads as lining in every name («Lining body»), not as «Body 2».
-    const name =
+    const mult = commonMult(inputs);
+    // The lining subtree reads as lining in every name («Lining body»), not as «Body 2»; a unit of
+    // ×2 mirrored blocks says it is two («Sleeve ×2»).
+    const lined =
       tree === 'lining' && !/^lining\b/i.test(out.name)
         ? `Lining ${out.name[0].toLowerCase()}${out.name.slice(1)}`
         : out.name;
+    // One «×2» at the end, never «Front ×2 with placket ×2».
+    const name = mult >= 2 ? `${lined.replace(/ ×\d+/g, '')}${multWord(mult)}` : lined;
     const e: Entity = {
       key: `~u${++this.n}`,
       name: this.uniqueName(name),
@@ -93,6 +106,7 @@ export class Table {
       hand: out.hand === undefined ? commonHand(inputs) : out.hand,
       tree,
       leaves: mergeLeaves(inputs, this.order),
+      mult,
     };
     for (const i of inputs) this.live.delete(i.key);
     this.live.set(e.key, e);
@@ -106,6 +120,10 @@ export type Grouping = {
   pieces: PieceFact[];
   seams: SeamIndex;
   warnings: string[];
+  /** Append mode: the card's order replayed (consumed pieces, its unit codes). */
+  replay: ExistingReplay;
+  /** The card's own units still on the table, as entities the stages may sew on. */
+  existing: Map<string, Entity>;
 };
 
 const listNames = (es: Entity[]) => es.map((e) => e.name).join(', ');
@@ -155,7 +173,38 @@ export function groupDetailed(
   const pieces = readPieces(graph, facts);
   const seams = new SeamIndex(graph, pieces, template);
   const byKey = new Map(pieces.map((p) => [p.key, p]));
-  const table = new Table(pieces.filter((p) => p.cloth !== 'interfacing'));
+  // APPEND MODE: what the card's own joins consumed is out of play; its live units are on the table.
+  const replay = replayExisting(facts.existing, new Set(pieces.map((p) => p.key)));
+  const table = new Table(
+    pieces.filter((p) => p.cloth !== 'interfacing' && !replay.consumed.has(p.key)),
+  );
+  const existing = new Map<string, Entity>();
+  for (const u of replay.live) {
+    const leaves = u.leaves.map((k) => byKey.get(k)).filter((p): p is PieceFact => !!p);
+    // Its own role is a PANEL's when it holds one («left panel with placket» is a front, not a
+    // placket waiting to be sewn onto a front).
+    const level = (r: string) => (roleDef(r)?.level === 'panel' ? 0 : 1);
+    const own = mergeRoles(...leaves.map((p) => (p.role ? [p.role] : []))).sort(
+      (a, b) => level(a) - level(b),
+    );
+    // A unit holding a front and a back IS the body the template sews collars and sleeves onto.
+    const roles = own.includes('front') && own.includes('back') ? ['body', ...own] : own;
+    const hands = new Set(leaves.map((p) => p.hand));
+    const e: Entity = {
+      key: u.key,
+      name: u.name,
+      unit: true,
+      roles,
+      family: null,
+      hand: hands.size === 1 ? [...hands][0] : null,
+      tree: leaves.length && leaves.every((p) => p.tree === 'lining') ? 'lining' : 'shell',
+      leaves: [...u.leaves].sort((a, b) => (byKey.get(a)?.order ?? 0) - (byKey.get(b)?.order ?? 0)),
+      mult: leaves.length ? Math.min(...leaves.map((p) => p.mult)) : 1,
+    };
+    table.reserve(u.name);
+    table.live.set(u.key, e);
+    existing.set(u.key, e);
+  }
   const units: SkeletonUnit[] = [];
   const warnings: string[] = [];
   const mergeHands = new Set(template.mergeHands);
@@ -194,6 +243,7 @@ export function groupDetailed(
       roles: e.roles,
       hand: e.hand,
       tree: e.tree,
+      ...((e.mult ?? 1) >= 2 ? { mult: e.mult } : {}),
       kind: spec.kind,
       seams: j.seams,
       confidence: spec.judgement?.confidence ?? j.confidence,
@@ -213,7 +263,7 @@ export function groupDetailed(
     });
 
   // ── 0. interfacing as a separate card piece enters ONLY through a FUSING join (§G) ────────────
-  for (const p of pieces.filter((x) => x.cloth === 'interfacing')) {
+  for (const p of pieces.filter((x) => x.cloth === 'interfacing' && !replay.consumed.has(x.key))) {
     const hosts = table.list().filter((e) => !e.unit && e.hand === p.hand);
     const host =
       hosts.find((e) => sameStem(e.name, p.name)) ??
@@ -236,6 +286,7 @@ export function groupDetailed(
       hand: p.hand,
       tree: p.tree,
       leaves: [p.key],
+      mult: p.mult,
     };
     if (!host) {
       warnings.push(
@@ -292,7 +343,7 @@ export function groupDetailed(
     if (group.length < 2) continue;
     const [head] = group;
     const role = head.roles[0];
-    const layers = isLayers(group, graph, byKey);
+    const layers = isLayers(group, graph);
     const base = roleName(role, head.hand);
     const crowded = (crowd.get(crowdKey(role, head.hand, head.tree)) ?? 0) > 1;
     record(group, {
@@ -478,7 +529,10 @@ export function groupDetailed(
     const targets = [best.t, ...best.others];
     const d = decide(
       pins,
-      `attach:${leafId([u])}`,
+      // Keyed by the group's first piece, not its whole leaf set: a chosen reading re-reads the
+      // composite seams, the nameless group may come back larger, and a pin keyed by every leaf
+      // would no longer find its own decision.
+      `attach:${[...u.leaves].sort()[0]}`,
       targets.map((o, i) => ({
         inputs: [o, u],
         reason:
@@ -566,7 +620,7 @@ export function groupDetailed(
     }
   }
 
-  return { units, table, pieces, seams, warnings };
+  return { units, table, pieces, seams, warnings, replay, existing };
 }
 
 /** B1: the units before the body, in dependency order (inputs always come first). */
@@ -611,17 +665,15 @@ function bestScore(seams: SeamIndex, leaves: string[], t: Entity): number {
 }
 
 /**
- * Layers = pieces of ONE shape (collar and under-collar, yoke and yoke facing): the graph calls
- * them identical twins; without lane A's twins, areas within 1.5 % say the same.
+ * Layers = pieces of ONE shape in ONE fabric (collar and under-collar, yoke and yoke facing): only
+ * when lane A calls them identical twins — congruent edge sequences and one cloth (or, with no cloth
+ * known, one name family). Never by area alone: a shell piece and its lining twin have one area.
  */
-function isLayers(group: Entity[], graph: SeamGraph, byKey: Map<string, PieceFact>): boolean {
+function isLayers(group: Entity[], graph: SeamGraph): boolean {
   const geo = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
   const [head, ...rest] = group;
-  return rest.every((e) => {
-    const twin = geo.get(head.key)?.twinOf.some((t) => t.key === e.key && t.kind === 'identical');
-    if (twin) return true;
-    const a = byKey.get(head.key)?.areaMm2;
-    const b = byKey.get(e.key)?.areaMm2;
-    return !!a && !!b && round2(Math.abs(a - b) / Math.max(a, b)) <= 0.015;
-  });
+  return rest.every(
+    (e) =>
+      geo.get(head.key)?.twinOf.some((t) => t.key === e.key && t.kind === 'identical') ?? false,
+  );
 }

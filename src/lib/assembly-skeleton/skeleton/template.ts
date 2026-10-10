@@ -6,10 +6,15 @@
 // table lives in JSON so the technologist's corrections are a data edit, not a code change.
 
 import type { SkeletonBomFacts, SkeletonCategory, SkeletonOperationType } from '../types';
+import coatLined from './templates/coat-lined.json';
+import dress from './templates/dress.json';
 import generic from './templates/generic.json';
+import hoodie from './templates/hoodie.json';
 import jacketLined from './templates/jacket-lined.json';
+import jumpsuit from './templates/jumpsuit.json';
 import roles from './templates/roles.json';
 import shirt from './templates/shirt.json';
+import skirt from './templates/skirt.json';
 import sweat from './templates/sweat.json';
 import tee from './templates/tee.json';
 import trousers from './templates/trousers.json';
@@ -92,6 +97,8 @@ export type RoleDef = {
 export type RoleBook = {
   hands: { L: string[]; R: string[] };
   ignoreTokens: string[];
+  /** Tokens that mark a piece as lining by name (no role, no family). */
+  liningTokens?: string[];
   roles: RoleDef[];
 };
 
@@ -175,9 +182,14 @@ export const ROLE_BOOK: RoleBook = roles as RoleBook;
 const TEMPLATES: Record<SkeletonCategory, unknown> = {
   tee,
   sweat,
+  hoodie,
   trousers,
+  skirt,
+  dress,
+  jumpsuit,
   shirt,
   'jacket-lined': jacketLined,
+  'coat-lined': coatLined,
   generic,
 };
 
@@ -191,8 +203,13 @@ export function orderTemplate(category: SkeletonCategory | string): SkeletonTemp
 export const SKELETON_CATEGORIES: SkeletonCategory[] = [
   'tee',
   'sweat',
+  'hoodie',
   'trousers',
+  'skirt',
+  'dress',
+  'jumpsuit',
   'shirt',
   'jacket-lined',
+  'coat-lined',
   'generic',
 ];

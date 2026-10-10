@@ -6,6 +6,7 @@
 // cloth is not a twin at all — it is the lining's own piece (00-FEASIBILITY §G).
 
 import type { PieceDTO } from 'lib/nesting/types';
+import { isLiningToken, nameTokens } from '../names';
 import type { Hand, PieceGeom } from '../types';
 
 /** Area within ±1.5 % and perimeter within ±1 %: one shape (probe values). */
@@ -27,6 +28,22 @@ const HAND_WORD: Record<string, 'L' | 'R'> = {
   rh: 'R',
   left: 'L',
   right: 'R',
+  л: 'L',
+  лев: 'L',
+  левый: 'L',
+  левая: 'L',
+  левое: 'L',
+  lewy: 'L',
+  lewa: 'L',
+  lewe: 'L',
+  п: 'R',
+  прав: 'R',
+  правый: 'R',
+  правая: 'R',
+  правое: 'R',
+  prawy: 'R',
+  prawa: 'R',
+  prawe: 'R',
 };
 
 function handTokenIndex(tokens: string[]): number {
@@ -82,23 +99,64 @@ export function shapeRelation(a: PieceGeom, b: PieceGeom): 'same' | 'mirror' | '
   return same && mirror ? 'both' : same ? 'same' : mirror ? 'mirror' : null;
 }
 
-const sameCloth = (a: PieceGeom, b: PieceGeom) => !a.cloth || !b.cloth || a.cloth === b.cloth;
+/** The name's family: the first token that is neither a hand, nor a number, nor «lining». */
+function familyStem(name: string): string | null {
+  for (const t of nameTokens(name)) {
+    if (HAND_WORD[t] || /^\d+$/.test(t) || isLiningToken(t)) continue;
+    return t;
+  }
+  return null;
+}
+
+/**
+ * May two pieces be LAYERS of one fabric? Equal KNOWN cloth — or, with no cloth on either, one name
+ * family (CLR / CLR_1, 2CLR / 2CLR_1). An unknown cloth is not «the same cloth»: a shell front and
+ * its lining front are one shape, and stacking them as layers would sew the lining into the shell.
+ */
+function oneFabric(a: PieceGeom, b: PieceGeom): boolean {
+  if (a.cloth && b.cloth) return a.cloth === b.cloth;
+  if (a.cloth || b.cloth) return false;
+  const fa = familyStem(a.name);
+  return !!fa && fa === familyStem(b.name);
+}
 
 /** Twin kind of two pieces, or null. Pure; `twins()` caches it on `twinOf`. */
 export function twinKind(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' | null {
   if (a.pieceKey === b.pieceKey) return null;
   // A different cloth is never a twin, whatever the shape: lining is its own subtree.
-  if (!sameCloth(a, b)) return null;
+  if (a.cloth && b.cloth && a.cloth !== b.cloth) return null;
   const sa = handStem(a.name) ?? handStem(a.pieceKey);
   const sb = handStem(b.name) ?? handStem(b.pieceKey);
   if (sa && sa === sb && a.hand && b.hand && a.hand !== b.hand) return 'mirror';
   const geomTwin =
     relDiff(a.areaMm2, b.areaMm2) < TWIN_AREA_REL && relDiff(a.perimMm, b.perimMm) < TWIN_PERIM_REL;
   if (!geomTwin) return null;
-  if (a.hand && b.hand) return a.hand !== b.hand ? 'mirror' : 'identical';
-  if (a.hand || b.hand) return 'mirror';
-  // No hands anywhere (numbered blazer pieces): the shape says which.
-  return shapeRelation(a, b) === 'mirror' ? 'mirror' : 'identical';
+  // Area and perimeter only shortlist: the edge sequence must agree too, or it is not one shape.
+  const rel = shapeRelation(a, b);
+  if (rel === null) return null;
+  if (a.hand && b.hand && a.hand !== b.hand) return 'mirror';
+  if (!a.hand !== !b.hand) return 'mirror';
+  // No hands (numbered blazer pieces), or one hand on both: the shape says which.
+  if (rel === 'mirror') return a.hand ? null : 'mirror';
+  return oneFabric(a, b) ? 'identical' : null;
+}
+
+/**
+ * One shape, as far as the card can tell them apart: no two different KNOWN cloths, area and
+ * perimeter alike, and edge sequences congruent (not only by reflection). Weaker than identical
+ * twins — no claim that they are layers of one fabric; a seam alternative on such a piece is the
+ * same answer to the pattern (shell or lining is the cloth's question).
+ */
+export function congruent(a: PieceGeom, b: PieceGeom): boolean {
+  if (a.pieceKey === b.pieceKey) return false;
+  if (a.cloth && b.cloth && a.cloth !== b.cloth) return false;
+  if (
+    relDiff(a.areaMm2, b.areaMm2) >= TWIN_AREA_REL ||
+    relDiff(a.perimMm, b.perimMm) >= TWIN_PERIM_REL
+  )
+    return false;
+  const rel = shapeRelation(a, b);
+  return rel === 'same' || rel === 'both';
 }
 
 /** A2: fill `twinOf` on every piece (returns new objects; input untouched). */

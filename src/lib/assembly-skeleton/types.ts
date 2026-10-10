@@ -53,7 +53,28 @@ export type SkeletonBomFacts = {
   interlining: number;
 };
 
-export type SkeletonCategory = 'tee' | 'sweat' | 'trousers' | 'shirt' | 'jacket-lined' | 'generic';
+export type SkeletonCategory =
+  | 'tee'
+  | 'sweat'
+  | 'hoodie'
+  | 'trousers'
+  | 'skirt'
+  | 'dress'
+  | 'jumpsuit'
+  | 'shirt'
+  | 'jacket-lined'
+  | 'coat-lined'
+  | 'generic';
+
+/**
+ * The order already on the card, for a proposal APPENDED to it: the skeleton is built only over the
+ * pieces no existing join has consumed, the existing units still on the table are inputs it may
+ * sew on, and its unit codes never collide with the card's.
+ */
+export type SkeletonExistingOrder = {
+  /** The card's steps as they stand (inputs are piece keys or unit codes). */
+  steps: SkeletonCheckStep[];
+};
 
 export type SkeletonFacts = {
   pieces: SkeletonPieceInput[];
@@ -61,6 +82,8 @@ export type SkeletonFacts = {
   bom: SkeletonBomFacts;
   /** Default machine of the card's profile; the draft falls back to 'lockstitch'. */
   defaultMachineType: string | null;
+  /** Append mode: the card's own order the proposal continues (absent = a fresh order). */
+  existing?: SkeletonExistingOrder;
 };
 
 // ── Geometry (lane A) ───────────────────────────────────────────────────────────────────────
@@ -193,6 +216,8 @@ export type SkeletonProposal = {
   warnings: string[];
   /** The seam graph the proposal was read from — pieces' geometry and seams for the pictograms. */
   graph?: SeamGraph;
+  /** Append mode: the card's steps it continues — their units are drawn from the same graph. */
+  existing?: SkeletonCheckStep[];
 };
 
 /** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */
@@ -214,6 +239,8 @@ export type SkeletonUnit = {
   roles: string[];
   hand: Hand;
   tree: SkeletonTree;
+  /** Physical copies (a unit of ×2 mirrored blocks is two units): absent = one. */
+  mult?: number;
   kind: 'fuse' | 'layers' | 'panel' | 'merge' | 'wrap' | 'attach' | 'geometry';
   seams: SeamCandidate[];
   confidence: number;
@@ -313,4 +340,9 @@ export const SKELETON = {
   accept: 0.6,
   ambiguity: 0.05,
   overlapMax: 0.15,
+  /**
+   * Above this many contoured pieces the proposal is not computed at all: the all-pairs edge pass
+   * is O(n²) on the main thread (541 pieces of a marker file took > 5 s). A garment has 10–60.
+   */
+  maxPieces: 150,
 } as const;

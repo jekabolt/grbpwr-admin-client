@@ -1,8 +1,36 @@
 {
-  "_note": "Piece roles read from piece names (tokens split on anything that is not a letter or digit, lower-cased; leading/trailing digits dropped for the lookup, so 2CLR reads as clr but stays its own family). Roles are tried IN ORDER: the first role with a matching token wins (FRONT_POCKET_L is a pocket, NECK_RIB a rib, CUFF_RIB a cuff, COLLAR_STAND a stand). level 'sub' = small subassembly built before the body, 'panel' = body panel. wraps = the role's layers are sewn around a unit of the named role in ONE step (stand layers + collar). attachTo = the unit is sewn onto a panel of that role before the body is assembled. noGroup = pieces of this role are never joined to each other (belt loops). Draft dictionary: the same caveat as PIECE_NAME_ZONE_DRAFT in operation-inference.ts — check with the technologist.",
+  "_note": "Piece roles read from piece names (tokens split on anything that is not a letter or digit, lower-cased; leading/trailing digits dropped for the lookup, so 2CLR reads as clr but stays its own family). Roles are tried IN ORDER: the first role with a matching token wins (FRONT_POCKET_L is a pocket, NECK_RIB a rib, CUFF_RIB a cuff, COLLAR_STAND a stand). level 'sub' = small subassembly built before the body, 'panel' = body panel. wraps = the role's layers are sewn around a unit of the named role in ONE step (stand layers + collar). attachTo = the unit is sewn onto a panel of that role before the body is assembled. noGroup = pieces of this role are never joined to each other (belt loops). Draft dictionary: the same caveat as PIECE_NAME_ZONE_DRAFT in operation-inference.ts — check with the technologist. Tokens are any letters (Latin, Cyrillic, Polish): Russian and Polish piece names read the same roles (рукав = sleeve, przód = front). liningTokens mark a piece as lining by name when the card gives it no cloth (LIN_FRONT, подклад спинки); they never name a role or a family.",
   "hands": {
-    "L": ["l", "left", "lt", "lft", "lh"],
-    "R": ["r", "right", "rt", "rgt", "rh"]
+    "L": [
+      "l",
+      "left",
+      "lt",
+      "lft",
+      "lh",
+      "л",
+      "лев",
+      "левый",
+      "левая",
+      "левое",
+      "lewy",
+      "lewa",
+      "lewe"
+    ],
+    "R": [
+      "r",
+      "right",
+      "rt",
+      "rgt",
+      "rh",
+      "п",
+      "прав",
+      "правый",
+      "правая",
+      "правое",
+      "prawy",
+      "prawa",
+      "prawe"
+    ]
   },
   "ignoreTokens": [
     "m",
@@ -24,19 +52,39 @@
     "pc",
     "pcs",
     "piece",
-    "cut"
+    "cut",
+    "верх",
+    "верхний",
+    "верхняя",
+    "нижний",
+    "нижняя",
+    "деталь",
+    "górny",
+    "gorny",
+    "dolny",
+    "dolna"
   ],
   "roles": [
     {
       "id": "facing",
-      "tokens": ["fac", "facing", "fcg"],
+      "tokens": [
+        "fac",
+        "facing",
+        "fcg",
+        "подборт",
+        "подборта",
+        "обтачка",
+        "обтачки",
+        "odszycie",
+        "odszycia"
+      ],
       "zone": "FRONT",
       "name": "Facing",
       "level": "sub"
     },
     {
       "id": "cuff",
-      "tokens": ["cuff", "cuf", "cff"],
+      "tokens": ["cuff", "cuf", "cff", "манжета", "манжеты", "манжет", "mankiet", "mankiety"],
       "zone": "SLEEVE",
       "name": "Cuff",
       "level": "sub"
@@ -50,14 +98,14 @@
     },
     {
       "id": "waistband",
-      "tokens": ["wb", "waistband", "blt", "belt", "ws", "waist"],
+      "tokens": ["wb", "waistband", "blt", "belt", "ws", "waist", "пояс", "pas", "pasek"],
       "zone": "WAIST",
       "name": "Waistband",
       "level": "sub"
     },
     {
       "id": "loop",
-      "tokens": ["loop", "loops", "beltloop"],
+      "tokens": ["loop", "loops", "beltloop", "шлевка", "шлевки", "szlufka", "szlufki"],
       "zone": "WAIST",
       "name": "Belt loops",
       "level": "sub",
@@ -65,14 +113,36 @@
     },
     {
       "id": "rib",
-      "tokens": ["rib", "ribbing", "rb", "bnd", "binding", "nr"],
+      "tokens": [
+        "rib",
+        "ribbing",
+        "rb",
+        "bnd",
+        "binding",
+        "nr",
+        "бейка",
+        "рибана",
+        "ściągacz",
+        "sciagacz"
+      ],
       "zone": "NECKLINE",
       "name": "Neck rib",
       "level": "sub"
     },
     {
       "id": "stand",
-      "tokens": ["nck", "neck", "stand", "std", "neckband", "nb"],
+      "tokens": [
+        "nck",
+        "neck",
+        "stand",
+        "std",
+        "neckband",
+        "nb",
+        "стойка",
+        "стойки",
+        "stójka",
+        "stojka"
+      ],
       "zone": "COLLAR",
       "name": "Collar stand",
       "level": "sub",
@@ -80,21 +150,41 @@
     },
     {
       "id": "collar",
-      "tokens": ["clr", "collar", "col"],
+      "tokens": ["clr", "collar", "col", "воротник", "воротника", "kołnierz", "kolnierz"],
       "zone": "COLLAR",
       "name": "Collar",
       "level": "sub"
     },
     {
       "id": "hood",
-      "tokens": ["hood", "hd"],
+      "tokens": ["hood", "hd", "капюшон", "kaptur"],
       "zone": "COLLAR",
       "name": "Hood",
       "level": "sub"
     },
     {
       "id": "pocket",
-      "tokens": ["pck", "pkt", "pocket", "welt", "pb", "bag", "pocketbag", "fl", "flap", "jet"],
+      "tokens": [
+        "pck",
+        "pkt",
+        "pocket",
+        "welt",
+        "pb",
+        "bag",
+        "pocketbag",
+        "fl",
+        "flap",
+        "jet",
+        "карман",
+        "кармана",
+        "мешковина",
+        "листочка",
+        "клапан",
+        "kieszeń",
+        "kieszen",
+        "kieszeni",
+        "patka"
+      ],
       "zone": "POCKET",
       "name": "Pocket",
       "level": "sub",
@@ -103,7 +193,7 @@
     },
     {
       "id": "placket",
-      "tokens": ["plck", "plk", "placket"],
+      "tokens": ["plck", "plk", "placket", "планка", "планки", "listwa", "plisa"],
       "zone": "CLOSURE",
       "name": "Placket",
       "level": "sub",
@@ -112,7 +202,7 @@
     },
     {
       "id": "fly",
-      "tokens": ["fly", "flyguard", "guard"],
+      "tokens": ["fly", "flyguard", "guard", "гульфик", "откоска", "rozporek"],
       "zone": "CLOSURE",
       "name": "Fly",
       "level": "sub",
@@ -120,39 +210,68 @@
       "sameHand": false
     },
     {
+      "id": "skirt",
+      "tokens": ["skirt", "skt", "юбка", "юбки", "spódnica", "spodnica"],
+      "zone": "WAIST",
+      "name": "Skirt",
+      "level": "panel"
+    },
+    {
       "id": "yoke",
-      "tokens": ["yoke", "yk"],
+      "tokens": ["yoke", "yk", "кокетка", "кокетки", "karczek"],
       "zone": "BACK",
       "name": "Yoke",
       "level": "panel"
     },
     {
       "id": "front",
-      "tokens": ["fp", "front", "fr", "frt", "fnt"],
+      "tokens": [
+        "fp",
+        "front",
+        "fr",
+        "frt",
+        "fnt",
+        "перед",
+        "переда",
+        "полочка",
+        "полочки",
+        "przód",
+        "przod"
+      ],
       "zone": "FRONT",
       "name": "Front",
       "level": "panel"
     },
     {
       "id": "back",
-      "tokens": ["bp", "back", "bk", "bck"],
+      "tokens": ["bp", "back", "bk", "bck", "спинка", "спинки", "спина", "tył", "tyl"],
       "zone": "BACK",
       "name": "Back",
       "level": "panel"
     },
     {
       "id": "side",
-      "tokens": ["side", "sd"],
+      "tokens": ["side", "sd", "бочок", "бочка", "bok", "boczek"],
       "zone": "OUTER",
       "name": "Side panel",
       "level": "panel"
     },
     {
       "id": "sleeve",
-      "tokens": ["sl", "slv", "sleeve"],
+      "tokens": ["sl", "slv", "sleeve", "рукав", "рукава", "rękaw", "rekaw"],
       "zone": "SLEEVE",
       "name": "Sleeve",
       "level": "panel"
     }
+  ],
+  "liningTokens": [
+    "lining",
+    "lin",
+    "lng",
+    "подклад",
+    "подкладка",
+    "подкладки",
+    "podszewka",
+    "podszewki"
   ]
 }

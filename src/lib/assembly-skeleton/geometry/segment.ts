@@ -14,6 +14,7 @@ import {
   type Pt2,
   type SkeletonPieceInput,
 } from '../types';
+import { liningByName } from '../names';
 import { handOf } from './twins';
 
 const MM_PER_CM = 10;
@@ -344,7 +345,8 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
     pieceKey: input.pieceKey,
     name: input.name,
     hand: handOf(input.name, input.piece) ?? handOf(input.pieceKey, input.piece),
-    cloth: input.cloth,
+    // No cloth on the card: a name that says «lining» is lining (the same rule lane B reads).
+    cloth: input.cloth ?? (liningByName(input.name) ? 'lining' : null),
     rs,
     corners,
     notchIdx,

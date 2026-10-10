@@ -360,6 +360,32 @@ check(
   'blazer ambiguity gate holds in reverse order',
   pct(reversed[2].s.ambiguousShare).trim(),
 );
+// Not only the gates: the SAME seams. A greedy assignment that breaks ties by input order changes
+// which edges it sews when the card lists its pieces the other way round (Codex fuzz 10.10: 10 of
+// 60 blazer seams). Candidates are ranked canonically (score, then edge ids) — 0 seams may move,
+// on the A3 graph and on the product pipeline (A3 → units → A4).
+{
+  const seamSet = (g) => new Set(g.chosen.map((c) => [c.a, c.b].sort().join('~')));
+  const moved = (x, y) => {
+    const a = seamSet(x);
+    const b = seamSet(y);
+    return [...a].filter((k) => !b.has(k)).length + [...b].filter((k) => !a.has(k)).length;
+  };
+  for (const [i, label] of [
+    [0, 'SS26-005'],
+    [2, 'blazer'],
+  ]) {
+    const f = loaded[i];
+    const rev = { ...f.facts, pieces: [...f.facts.pieces].reverse() };
+    const a3 = moved(mod.run(f.facts, ALL, false).graph, mod.run(rev, ALL, false).graph);
+    const a4 = moved(mod.run(f.facts, ALL, true).graph, mod.run(rev, ALL, true).graph);
+    check(
+      a3 === 0 && a4 === 0,
+      `${label}: reversed input sews the same seams (A3 and A3+A4)`,
+      `${a3} / ${a4} seams differ`,
+    );
+  }
+}
 const strict = results.get('  └ amb. strict (no equivalence)')[2].s;
 console.log(
   `   info: blazer ambiguity with NO equivalence (rect sides / identical layers count as choices): ${strict.ambiguous}/${strict.chosen} = ${pct(strict.ambiguousShare).trim()}`,

@@ -18,7 +18,7 @@ import type {
   SkeletonTree,
   SkeletonUnit,
 } from '../types';
-import { handWord, judge, mergeRoles, roleDef, zoneEnum, type Entity } from './model';
+import { handWord, judge, mergeRoles, multWord, roleDef, zoneEnum, type Entity } from './model';
 import { display, groupDetailed } from './group-units';
 import type { SkeletonTemplate, TemplateStage } from './template';
 
@@ -54,8 +54,21 @@ export function buildSkeleton(
   options: SkeletonOptions = {},
 ): SkeletonProposal {
   const g = groupDetailed(graph, facts, template, options.pins);
-  const { table, seams, pieces } = g;
+  const { table, seams, pieces, replay } = g;
   const warnings = [...g.warnings];
+  // Append mode: the card's own steps come first in every check and in zone inference.
+  const before = facts.existing?.steps ?? [];
+  const beforeDraft: SkeletonStep[] = before.map((s) => ({
+    inputs: s.inputs.map((i) => i.key),
+    outputUnitKey: s.outputUnitKey,
+    outputUnitName: s.outputUnitName,
+    operationType: 'MACHINE',
+    zone: '',
+    seams: [],
+    confidence: 1,
+    reason: '',
+    source: 'template',
+  }));
   const steps: SkeletonStep[] = [];
   const pressOpen = options.pressOpen ?? template.pressOpen;
   const pressFlat = options.pressFlat ?? template.pressFlat;
@@ -63,7 +76,7 @@ export function buildSkeleton(
   const machineOf = (short: string) =>
     defaultMachine.startsWith(MACHINE_PREFIX) ? `${MACHINE_PREFIX}${short.toUpperCase()}` : short;
   const draftPieces = pieces.map((p) => ({ lineKey: p.key, name: p.name }));
-  const draft = { pieces: draftPieces, steps };
+  const pieceName = new Map(pieces.map((p) => [p.key, p.name]));
   const roleOfPiece = new Map(pieces.map((p) => [p.key, p.role]));
   const hasRole = (role: string) => pieces.some((p) => p.role === role);
 
@@ -81,10 +94,13 @@ export function buildSkeleton(
     hand: u.hand,
     tree: u.tree,
     leaves: u.pieceKeys,
+    mult: u.mult,
   });
   const anyEntity = (key: string): Entity => {
     const u = unitByKey.get(key);
     if (u) return unitEntity(u);
+    const own = g.existing.get(key);
+    if (own) return own;
     const p = pieces.find((x) => x.key === key);
     return {
       key,
@@ -95,11 +111,18 @@ export function buildSkeleton(
       hand: p?.hand ?? null,
       tree: p?.tree ?? 'shell',
       leaves: [key],
+      mult: p?.mult,
     };
   };
 
   const resolveZone = (index: number, preferred: string, fallback: string, inferFirst: boolean) => {
-    const inferred = inferFirst || !preferred ? deps.zoneOf(draft, index) : '';
+    const inferred =
+      inferFirst || !preferred
+        ? deps.zoneOf(
+            { pieces: draftPieces, steps: [...beforeDraft, ...steps] },
+            beforeDraft.length + index,
+          )
+        : '';
     return (inferFirst ? inferred || preferred : preferred || inferred) || fallback || OUTER;
   };
 
@@ -271,12 +294,13 @@ export function buildSkeleton(
     inputs: Entity[],
     out: { name: string; roles: string[]; tree?: SkeletonTree; hand?: Entity['hand'] },
     alternatives?: SkeletonStep['alternatives'],
+    label: string = stage.label,
   ) => {
     const j = judge(inputs, seams, why(stage));
     const output = table.join(inputs, out);
     pushJoin(inputs, output, {
       stage: stage.id,
-      label: stage.label,
+      label,
       operationType: 'MACHINE',
       zone: zoneEnum(stage.zone),
       roleZone: OUTER,
@@ -340,6 +364,8 @@ export function buildSkeleton(
         ? pieces.filter((p) => p.role && template.fuseRoles.includes(p.role))
         : [];
     for (const p of [...marked, ...byBom]) {
+      // Already sewn by the card's own order (append mode): its fusing is the card's business.
+      if (replay.consumed.has(p.key)) continue;
       if (consumedByEmitted.has(p.key)) {
         warnings.push(`${p.name} is fused after its first seam — move the fusing step up`);
         continue;
@@ -405,14 +431,22 @@ export function buildSkeleton(
       const batches = stage.together ? [attachers] : attachers.map((a) => [a]);
       for (const batch of batches) {
         const t = target()!;
-        bodyJoin(stage, [...batch, t], {
-          name:
-            stage.name ??
-            `${display(t)} with ${batch.map((e) => display(e).toLowerCase()).join(', ')}`,
-          roles: mergeRoles(t.roles, ...batch.map((e) => e.roles)),
-          tree: t.tree,
-          hand: t.hand,
-        });
+        // «Set sleeves ×2»: what is sewn on is two copies under one key (both hands at once).
+        const copies = Math.max(...batch.map((e) => e.mult ?? 1));
+        bodyJoin(
+          stage,
+          [...batch, t],
+          {
+            name:
+              stage.name ??
+              `${display(t)} with ${batch.map((e) => display(e).toLowerCase()).join(', ')}`,
+            roles: mergeRoles(t.roles, ...batch.map((e) => e.roles)),
+            tree: t.tree,
+            hand: t.hand,
+          },
+          undefined,
+          `${stage.label}${multWord(copies)}`,
+        );
       }
     }
   }
@@ -529,6 +563,12 @@ export function buildSkeleton(
         `${o.name} is outside every unit: no role in its name and no seam found — place it by hand`,
       );
     }
+    if (sewn.length === 1 && !sewn[0].unit) {
+      // One piece with a role and nothing to sew it to: no step — but said, not swallowed.
+      warnings.push(
+        `${sewn[0].name} is the only piece to assemble — there is nothing to join it to; add its steps by hand`,
+      );
+    }
     if (sewn.length >= 2) {
       const order = [...sewn].sort((a, b) => b.leaves.length - a.leaves.length);
       const extra = order.slice(1).map((e) => e.name);
@@ -561,7 +601,9 @@ export function buildSkeleton(
   }
 
   // ── unit codes: provisional keys → zone codes (the same rule the step editor offers) ────────
-  const taken = new Set(pieces.map((p) => p.key));
+  // Taken: every piece key and every unit code the card already uses (append mode) — a new unit
+  // never takes a code of the card's own order.
+  const taken = new Set([...pieces.map((p) => p.key), ...replay.unitKeys]);
   const code = new Map<string, string>();
   const terminalKey =
     table.list().filter((e) => e.unit).length === 1
@@ -584,9 +626,9 @@ export function buildSkeleton(
 
   // ── the card's own rules: 1–3, 6, 7 must hold; rule 4 is reported, not enforced ─────────────
   const pieceKeys = new Set(pieces.map((p) => p.key));
-  const check = deps.checkAssembly(
-    draftPieces,
-    steps.map((s) => ({
+  const check = deps.checkAssembly(draftPieces, [
+    ...before,
+    ...steps.map((s) => ({
       inputs: s.inputs.map((key) => ({
         kind: pieceKeys.has(key) ? ('piece' as const) : ('unit' as const),
         key,
@@ -594,19 +636,37 @@ export function buildSkeleton(
       outputUnitKey: s.outputUnitKey,
       outputUnitName: s.outputUnitName,
     })),
-  );
+  ]);
+  // The card's own order is the card's: only the draft's steps are reported, numbered as the draft.
   for (const v of check.violations) {
+    if (v.step >= 0 && v.step < before.length) continue;
     warnings.push(
-      `rule ${v.rule} broken at step ${v.step + 1}: ${v.message} — a defect of the draft, report it`,
+      `rule ${v.rule} broken at step ${v.step - before.length + 1}: ${namesIn(v.message, pieceName)} — a defect of the draft, report it`,
     );
   }
-  for (const v of check.release) warnings.push(v.message);
+  for (const v of check.release) warnings.push(namesIn(v.message, pieceName));
 
   // ── seams no step stands on ──────────────────────────────────────────────────────────────────
   const used = new Set(steps.flatMap((s) => s.seams.map(seamId)));
-  const unresolved = graph.chosen.filter((c) => !used.has(seamId(c)));
+  // A seam between two pieces the card's own order has already sewn is the card's, not a gap.
+  const sewnByCard = (id: string) => replay.consumed.has(id.slice(0, id.lastIndexOf('#')));
+  const unresolved = graph.chosen.filter(
+    (c) => !used.has(seamId(c)) && !(sewnByCard(c.a) && sewnByCard(c.b)),
+  );
 
   return { steps, unresolved, template: template.id, warnings: dedupe(warnings) };
+}
+
+/**
+ * A rule message quotes keys; a piece key is a 26-character id nobody reads («01M1M1S2WR…»). Every
+ * piece key in it is replaced by the piece's name — longest first, so no key is cut inside another.
+ */
+export function namesIn(message: string, names: ReadonlyMap<string, string>): string {
+  let out = message;
+  const keys = [...names.keys()].filter((k) => k && names.get(k) !== k);
+  keys.sort((a, b) => b.length - a.length);
+  for (const k of keys) if (out.includes(k)) out = out.split(k).join(names.get(k)!);
+  return out;
 }
 
 function seamId(c: SeamCandidate): string {

@@ -42,7 +42,9 @@ import {
   type SeamGraph,
   type SkeletonFacts,
 } from '../types';
+import { isMirroredPair } from '../cut';
 import { angleAt, dist, drillPoints } from './segment';
+import { congruent } from './twins';
 
 export type MatchRules = {
   hand: boolean;
@@ -422,6 +424,8 @@ type PairCtx = {
   designated: ReadonlySet<EdgeId>;
   /** Pieces cut as a mirrored pair from one pattern (card cut symmetry MIRRORED). */
   mirroredCut: ReadonlySet<string>;
+  /** Mirrored blocks cut twice (×2 MIRRORED): one key, both hands — so no hand of its own. */
+  bothHands?: ReadonlySet<string>;
 };
 
 function scorePair(u: Run, v: Run, rules: MatchRules, ctx: PairCtx): Cand | null {
@@ -433,8 +437,8 @@ function scorePair(u: Run, v: Run, rules: MatchRules, ctx: PairCtx): Cand | null
     if (u.edges[0].e === v.edges[0].s || v.edges[0].e === u.edges[0].s) return null;
   }
   const tk = self ? null : twinKindOf(u.piece, v.piece);
-  const hu = u.piece.hand;
-  const hv = v.piece.hand;
+  const hu = ctx.bothHands?.has(u.piece.pieceKey) ? null : u.piece.hand;
+  const hv = ctx.bothHands?.has(v.piece.pieceKey) ? null : v.piece.hand;
   const cross = !!hu && !!hv && hu !== hv;
   if (rules.hand && cross && tk !== 'mirror') return null;
 
@@ -647,6 +651,10 @@ function closureReason(c: Cand, facts: SkeletonFacts, drills: Map<string, Pt2[]>
 
 // ── A3 ──────────────────────────────────────────────────────────────────────────────────────
 
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** A candidate's identity regardless of which side was read first. */
+const candId = (c: Cand) => [c.u.id, c.v.id].sort(cmp).join('~');
+
 const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate => ({
   a: c.u.id,
   b: c.v.id,
@@ -662,7 +670,12 @@ export function matchSeams(
   rules: MatchRules = ALL_RULES,
 ): SeamGraph {
   const warnings: string[] = [];
-  const runs = pieces.flatMap((p) => runsOf(p, rules.softChain));
+  // CANONICAL ORDER. Pieces by key, candidates by score then by their edge ids: the graph must not
+  // depend on the order the card lists its pieces in (ties — equal unnotched edges, the two sides of
+  // a symmetric piece — were broken by input order, and a reversed card read 10/60 blazer seams
+  // differently).
+  const byKey = [...pieces].sort((a, b) => cmp(a.pieceKey, b.pieceKey));
+  const runs = byKey.flatMap((p) => runsOf(p, rules.softChain));
 
   // Identical layers: one designated edge per piece that has an identical twin.
   const designated = new Set<EdgeId>();
@@ -677,16 +690,20 @@ export function matchSeams(
   const mirroredCut = new Set(
     facts.pieces.filter((p) => /MIRROR/i.test(p.cutSymmetry ?? '')).map((p) => p.pieceKey),
   );
+  const bothHands = new Set(facts.pieces.filter(isMirroredPair).map((p) => p.pieceKey));
   const all: Cand[] = [];
   for (let i = 0; i < runs.length; i++) {
     for (let j = i + 1; j < runs.length; j++) {
-      const c = scorePair(runs[i], runs[j], rules, { designated, mirroredCut });
+      const c = scorePair(runs[i], runs[j], rules, { designated, mirroredCut, bothHands });
       if (c) all.push(c);
     }
   }
-  all.sort((a, b) => b.score - a.score);
+  all.sort((a, b) => b.score - a.score || cmp(candId(a), candId(b)));
   if (rules.sides && rules.hand) {
-    const sameSide = inferSides(pieces, all);
+    const sameSide = inferSides(
+      byKey.map((p) => (bothHands.has(p.pieceKey) ? { ...p, hand: null } : p)),
+      all,
+    );
     for (const c of all) {
       if (c.evidence.twin === 'mirror' || c.evidence.self || c.evidence.hand === 'cross') continue;
       if (sameSide(c.u.piece.pieceKey, c.v.piece.pieceKey) === false) {
@@ -739,10 +756,38 @@ export function matchSeams(
     }
   }
 
-  // Greedy: closures first (they take their edges out of play), then seams.
-  const used = new Set<EdgeId>();
-  const take = (c: Cand) => [...c.u.edges, ...c.v.edges].forEach((e) => used.add(e.id));
-  const free = (c: Cand) => [...c.u.edges, ...c.v.edges].every((e) => !used.has(e.id));
+  // Greedy: closures first (they take their edges out of play), then seams. Each edge is sewn
+  // once — except an edge of a mirrored block cut twice (×2 MIRRORED): its reflected copy is the
+  // other hand, so it may meet a SECOND edge of the same single piece it already meets (FRONT_L's
+  // shoulder onto both shoulders of the back). Never twice onto another ×2 block: two copies of a
+  // sleeve meet two copies of a cuff in one pair of edges, not two.
+  const usedBy = new Map<EdgeId, { piece: string; edge: EdgeId }[]>();
+  const sides = (c: Cand): [Run, Run][] => [
+    [c.u, c.v],
+    [c.v, c.u],
+  ];
+  const take = (c: Cand) => {
+    for (const [r, other] of sides(c))
+      for (const e of r.edges)
+        usedBy.set(e.id, [
+          ...(usedBy.get(e.id) ?? []),
+          { piece: other.piece.pieceKey, edge: other.edges[0].id },
+        ]);
+  };
+  const free = (c: Cand) =>
+    sides(c).every(([r, other]) =>
+      r.edges.every((e) => {
+        const uses = usedBy.get(e.id) ?? [];
+        if (uses.length === 0) return true;
+        return (
+          uses.length === 1 &&
+          bothHands.has(r.piece.pieceKey) &&
+          !bothHands.has(other.piece.pieceKey) &&
+          uses[0].piece === other.piece.pieceKey &&
+          uses[0].edge !== other.edges[0].id
+        );
+      }),
+    );
   const closures: Cand[] = [];
   for (const c of all) {
     if (c.kind !== 'closure-not-seam' || !free(c)) continue;
@@ -768,17 +813,22 @@ export function matchSeams(
     if (Math.abs(x.lenMm - y.lenMm) > SKELETON.lenAbsMm) return false;
     if (x.notchesMm.length !== y.notchesMm.length) return false;
     if (x.piece === y.piece) return rules.equivRect && x.piece.rect;
-    return rules.equivLayers && twinKindOf(x.piece, y.piece) === 'identical';
+    // Another piece of the same shape and (as far as the card knows) the same cloth: the pattern
+    // cannot tell the two apart from this edge — which one is a question of cloth, not of seams.
+    return rules.equivLayers && congruent(x.piece, y.piece);
   };
   const equivalent = (c: Cand, q: Cand) =>
     (c.u.id === q.u.id && sameAnswer(c.v, q.v)) ||
     (c.u.id === q.v.id && sameAnswer(c.v, q.u)) ||
     (c.v.id === q.u.id && sameAnswer(c.u, q.v)) ||
     (c.v.id === q.v.id && sameAnswer(c.u, q.u));
+  const chosenSet = new Set(chosenC);
   const chosen = chosenC.map((c) => {
     const alts = eligible.filter(
       (q) =>
         q !== c &&
+        // The other hand's copy of a ×2 mirrored block is sewn too, not an alternative.
+        !chosenSet.has(q) &&
         Math.abs(q.score - c.score) <= SKELETON.ambiguity &&
         touches(c, q) &&
         !equivalent(c, q),
@@ -789,7 +839,6 @@ export function matchSeams(
     );
   });
 
-  const chosenSet = new Set(chosenC);
   const rejected = [
     ...closures.map((c) => toCandidate(c)),
     ...all

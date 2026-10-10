@@ -11,17 +11,13 @@ import {
   type SkeletonFacts,
   type SkeletonTree,
 } from '../types';
+import { isMirroredPair, pieceMultiplicity } from '../cut';
+import { isLiningToken, liningByName, nameTokens } from '../names';
 import { ROLE_BOOK, type RoleBook, type RoleDef, type SkeletonTemplate } from './template';
 
 // ── names ───────────────────────────────────────────────────────────────────────────────────
 
-/** Same split as `pieceNameTokens` in operation-inference.ts: whole tokens, case-insensitive. */
-export function nameTokens(name: string): string[] {
-  return (name ?? '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
+export { nameTokens };
 
 export type NameReading = {
   role: string | null;
@@ -47,7 +43,8 @@ export function readName(name: string, book: RoleBook = ROLE_BOOK): NameReading 
       hand = hand ?? h;
       continue;
     }
-    if (/^\d+$/.test(t) || book.ignoreTokens.includes(t)) continue;
+    // «Lining» says which cloth, not which piece: LIN_FRONT and FRONT are one family per subtree.
+    if (/^\d+$/.test(t) || book.ignoreTokens.includes(t) || isLiningToken(t)) continue;
     family = family ?? t;
   }
   const bare = new Set(tokens.map((t) => t.replace(/^\d+|\d+$/g, '')).filter(Boolean));
@@ -93,6 +90,8 @@ export type PieceFact = {
   areaMm2: number | null;
   /** Card order — the order every leaf list is kept in. */
   order: number;
+  /** Physical pieces behind the key (×2 MIRRORED sleeve = 2; FOLD = 1). */
+  mult: number;
 };
 
 /** A thing on the table: a piece, or a unit made by an earlier step. */
@@ -106,6 +105,8 @@ export type Entity = {
   hand: Hand;
   tree: SkeletonTree;
   leaves: string[];
+  /** Physical copies of the thing (a ×2 mirrored sleeve, a unit made only of such): «×2». */
+  mult?: number;
 };
 
 export function readPieces(graph: SeamGraph, facts: SkeletonFacts, book: RoleBook = ROLE_BOOK) {
@@ -117,20 +118,24 @@ export function readPieces(graph: SeamGraph, facts: SkeletonFacts, book: RoleBoo
     seen.add(p.pieceKey);
     const g = geom.get(p.pieceKey);
     const reading = readName(p.name, book);
-    const cloth = p.cloth ?? g?.cloth ?? null;
+    // No cloth on the card: a name that says «lining» puts the piece in the lining subtree.
+    const cloth = p.cloth ?? g?.cloth ?? (liningByName(p.name) ? 'lining' : null);
     // A pocket bag of pocketing cloth is a pocket whatever it is called.
     const role = reading.role ?? (cloth === 'pocketing' ? 'pocket' : null);
+    // A mirrored block cut twice is BOTH hands under one key: it has no hand of its own.
+    const bothHands = isMirroredPair(p);
     pieces.push({
       key: p.pieceKey,
       name: p.name,
       role,
       family: reading.family,
-      hand: g?.hand ?? reading.hand,
+      hand: bothHands ? null : g?.hand ?? reading.hand,
       cloth,
       tree: cloth === 'lining' ? 'lining' : 'shell',
       fused: p.fused,
       areaMm2: g?.areaMm2 ?? null,
       order,
+      mult: pieceMultiplicity(p),
     });
   });
   return pieces;
@@ -316,6 +321,16 @@ export function round2(x: number): number {
 export function mergeLeaves(entities: Entity[], order: Map<string, number>): string[] {
   const out = [...new Set(entities.flatMap((e) => e.leaves))];
   return out.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+}
+
+/** Copies of a joined thing: the fewest of its inputs (sleeve ×2 + body = one body). */
+export function commonMult(entities: Entity[]): number {
+  return entities.length ? Math.min(...entities.map((e) => e.mult ?? 1)) : 1;
+}
+
+/** «Set sleeves ×2» — the copy count in words, or nothing for one. */
+export function multWord(mult: number | undefined): string {
+  return (mult ?? 1) >= 2 ? ` ×${mult}` : '';
 }
 
 export function commonHand(entities: Entity[]): Hand {

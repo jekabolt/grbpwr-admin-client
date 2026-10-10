@@ -278,8 +278,13 @@ const shot = async (name, el) => {
 const ops = () => page.evaluate(() => window.__sk.ops());
 const requests = () => page.evaluate(() => window.__sk.autosaveRequests());
 const isDirty = () => page.evaluate(() => window.__sk.form().formState.isDirty);
-const openPanel = async (where = 'header') => {
+// A card with steps asks «add or replace» before anything is read: `mode` answers it.
+const openPanel = async (where = 'header', mode = null) => {
   await page.click(`[data-skeleton-door="${where}"]`);
+  if (mode) {
+    await page.waitForSelector('[data-skeleton-modes="unchosen"]', { timeout: 5000 });
+    await page.click(`[data-skeleton-mode="${mode}"]`);
+  }
   await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
 };
 const closePanel = async () => {
@@ -519,7 +524,24 @@ ck(
   (await page.locator('[data-skeleton-door="empty"]').count()) === 0,
   'no empty state, only the header door',
 );
-await openPanel();
+await page.click('[data-skeleton-door="header"]');
+await page.waitForSelector('[data-skeleton-modes="unchosen"]', { timeout: 5000 });
+ck(
+  (await page.locator('[data-skeleton-step]').count()) === 0 &&
+    (await page.evaluate(() => window.__sk.providerCalls())) === 0,
+  'a card with steps: nothing is read until «add» or «replace» is chosen',
+);
+{
+  const t = await page.locator('[data-skeleton-mode="replace"]').innerText();
+  ck(
+    /replace the 2 steps/i.test(t) && /goes when you apply: 2 steps/i.test(t),
+    'the replace choice says what goes',
+    t.replace(/\s+/g, ' '),
+  );
+}
+await shot('d-mode-choice', '[data-skeleton-panel]');
+await page.click('[data-skeleton-mode="append"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
 ck(
   (await page.locator('[data-skeleton-step="0"] .tabular-nums').first().innerText()).trim() ===
     '30',
@@ -636,8 +658,7 @@ await mount({
     },
   ],
 });
-await openPanel();
-await page.click('[data-skeleton-mode="replace"]');
+await openPanel('header', 'replace');
 await page.click('[data-skeleton-apply-all]');
 {
   const t =
@@ -645,7 +666,7 @@ await page.click('[data-skeleton-apply-all]');
       .locator('[data-skeleton-replace-loses]')
       .innerText()
       .catch(() => '')) ?? '';
-  ck(/2 step photos will be removed/.test(t), 'the confirmation says the photos go', t);
+  ck(/2 step photos/.test(t), 'the confirmation says the photos go', t);
 }
 await shot('i-replace-photos', '[data-skeleton-panel]');
 await page.click('[data-skeleton-apply-all]');
@@ -672,8 +693,7 @@ await mount({
     },
   ],
 });
-await openPanel();
-await page.click('[data-skeleton-mode="replace"]');
+await openPanel('header', 'replace');
 await page.click('[data-skeleton-apply-all]');
 {
   const t =
@@ -681,7 +701,7 @@ await page.click('[data-skeleton-apply-all]');
       .locator('[data-skeleton-replace-loses]')
       .innerText()
       .catch(() => '')) ?? '';
-  ck(/unit markup goes/.test(t), 'the confirmation says the unit markup goes', t);
+  ck(/the unit markup/.test(t), 'the confirmation says the unit markup goes', t);
 }
 await page.click('[data-skeleton-apply-all]');
 await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });

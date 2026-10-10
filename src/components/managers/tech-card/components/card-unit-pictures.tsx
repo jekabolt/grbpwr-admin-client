@@ -25,7 +25,7 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
-import { buildSkeletonFacts, skeletonCategoryOf } from './assembly-skeleton-source';
+import { buildSkeletonFacts, skeletonCategoryOf, skeletonLined } from './assembly-skeleton-source';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
@@ -38,11 +38,16 @@ const cache = new WeakMap<SkeletonProposal, Map<string, UnionPicture>>();
 export function proposalUnitPictures(proposal: SkeletonProposal): Map<string, UnionPicture> {
   const hit = cache.get(proposal);
   if (hit) return hit;
+  // Append mode: the card's own units (taken as inputs) are drawn from the same graph.
+  const before = (proposal.existing ?? []).map((s) => ({
+    inputs: s.inputs.map((i) => i.key),
+    outputUnitKey: s.outputUnitKey,
+  }));
   const map = proposal.graph
-    ? unitPictures(
-        proposal.graph,
-        proposal.steps.map((s) => ({ inputs: s.inputs, outputUnitKey: s.outputUnitKey })),
-      )
+    ? unitPictures(proposal.graph, [
+        ...before,
+        ...proposal.steps.map((s) => ({ inputs: s.inputs, outputUnitKey: s.outputUnitKey })),
+      ])
     : new Map<string, UnionPicture>();
   cache.set(proposal, map);
   return map;
@@ -92,6 +97,10 @@ export function CardUnitPicturesProvider({
   const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ??
     []) as TechCardFormData['bomItems'];
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
+  const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
+    []) as TechCardFormData['pieceDxfAliases'];
+  const patterns = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
+    []) as TechCardFormData['patterns'];
 
   // (а) Нет ни одного объявленного узла — рисовать нечего, граф не нужен.
   const hasUnits = operations.some((o) => (o?.outputUnitKey ?? '').trim() !== '');
@@ -112,16 +121,21 @@ export function CardUnitPicturesProvider({
       );
     })
     .join('~');
-  const bomSig = (bomItems ?? []).map((l) => [l.kind, l.purpose].join('|')).join('~');
+  const bomSig = (bomItems ?? []).map((l) => [l.kind, l.purpose, l.lineKey].join('|')).join('~');
+  // Lining is read from the block links and pattern files too (skeletonLined): they are facts.
+  const linkSig = [
+    ...(aliases ?? []).map((a) => [a.pieceLineKey, a.bomLineKey, a.fabricPurpose].join('|')),
+    ...(patterns ?? []).map((p) => [p.bomLineKey, p.fabricPurpose].join('|')),
+  ].join('~');
   const catSig = (categoryNames ?? []).join('|');
   const factsSig =
     hasUnits && shapes && contoured > 0 && contoured <= CAP_PIECES
-      ? `${pieceSig}#${bomSig}#${catSig}`
+      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}`
       : '';
 
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
   const [graph, setGraph] = useState<{ sig: string; graph: SeamGraph | null } | null>(null);
-  const live = useLatest({ pieces, bomItems, shapes, cloth, categoryNames });
+  const live = useLatest({ pieces, bomItems, shapes, cloth, categoryNames, aliases, patterns });
   useEffect(() => {
     if (!factsSig) {
       setGraph(null);
@@ -133,14 +147,24 @@ export function CardUnitPicturesProvider({
       const read = () => {
         if (cancelled) return;
         const v = live.current;
-        const hasLining = [...(v.cloth?.values() ?? [])].some((c) => c.state === 'lining');
+        const bomLines = (v.bomItems ?? []) as Parameters<typeof buildSkeletonFacts>[0]['bomLines'];
+        // The panel's own reading of category and lining — one graph for the proposal, the
+        // assembly surfaces and the print sheet.
+        const lined = skeletonLined({
+          cloth: v.cloth,
+          pieces: v.pieces,
+          aliases: v.aliases ?? [],
+          patterns: v.patterns ?? [],
+          bomLines,
+        });
         const { facts } = buildSkeletonFacts({
           pieces: v.pieces,
           shapes: v.shapes,
           cloth: v.cloth,
-          bomLines: (v.bomItems ?? []) as Parameters<typeof buildSkeletonFacts>[0]['bomLines'],
-          category: skeletonCategoryOf(v.categoryNames ?? [], hasLining),
+          bomLines,
+          category: skeletonCategoryOf(v.categoryNames ?? [], lined),
           defaultMachineType: null,
+          aliases: v.aliases ?? [],
         });
         let g: SeamGraph | null = null;
         if (facts.pieces.length > 0) {

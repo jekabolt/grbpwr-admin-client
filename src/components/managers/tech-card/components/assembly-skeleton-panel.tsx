@@ -15,10 +15,13 @@
 //     for is listed as a gap; the machine the server demands is a card default and says «check».
 //   * NOT THE ENGINE. The proposal comes from `useSkeletonProposal` (assembly-skeleton-source.ts).
 import * as Dialog from '@radix-ui/react-dialog';
+import { namesIn } from 'lib/assembly-skeleton/skeleton/build-skeleton';
+import { replayExisting } from 'lib/assembly-skeleton/skeleton/existing';
 import {
   SKELETON,
   type SeamCandidate,
   type SkeletonDeps,
+  type SkeletonExistingOrder,
   type SkeletonFacts,
   type SkeletonOptions,
   type SkeletonPins,
@@ -41,6 +44,7 @@ import {
   buildSkeletonFacts,
   skeletonCategoryOf,
   skeletonGate,
+  skeletonLined,
   useSkeletonProposal,
   type SkeletonRun,
 } from './assembly-skeleton-source';
@@ -296,8 +300,14 @@ export function useSkeletonDoor({
     hasDxf: shapes.hasDxf,
     shapes: shapes.shapeByKey,
     available: proposal.available,
+    parsedPieces: shapes.parsedPieces,
+    namedBlocks: shapes.namedBlocks,
   });
   const [open, setOpen] = useState(false);
+  // With steps on the card the person CHOOSES add or replace before anything is read; the choice
+  // and the mode the proposal on screen was read for outlive the panel, like the proposal itself.
+  const [mode, setMode] = useState<SkeletonMode | null>(null);
+  const [readFor, setReadFor] = useState<SkeletonMode | null>(null);
   const [applyRequest, setApplyRequest] = useState<SkeletonApplyRequest | null>(null);
   const [result, setResult] = useState<SkeletonApplyResult | null>(null);
   const [picks, setPicks] = useState<StepPick[]>([]);
@@ -398,6 +408,10 @@ export function useSkeletonDoor({
           categoryNames={categoryNames}
           picks={picks}
           onPicks={setPicks}
+          mode={mode}
+          onMode={setMode}
+          readFor={readFor}
+          onReadFor={setReadFor}
           onApply={request}
           result={result}
           renderUnit={renderUnit}
@@ -421,6 +435,9 @@ export function useSkeletonDoor({
 
 // ── the panel ───────────────────────────────────────────────────────────────────────────────────
 
+/** Add the skeleton after the card's own steps, or replace them with it. */
+type SkeletonMode = 'append' | 'replace';
+
 function AssemblySkeletonPanel({
   run,
   onRun,
@@ -429,6 +446,10 @@ function AssemblySkeletonPanel({
   categoryNames,
   picks,
   onPicks,
+  mode: chosenMode,
+  onMode,
+  readFor,
+  onReadFor,
   onApply,
   result,
   renderUnit,
@@ -441,6 +462,12 @@ function AssemblySkeletonPanel({
   categoryNames: ReadonlyArray<string>;
   picks: StepPick[];
   onPicks: (next: StepPick[] | ((prev: StepPick[]) => StepPick[])) => void;
+  /** null = not chosen yet (only possible while the card has steps). */
+  mode: SkeletonMode | null;
+  onMode: (m: SkeletonMode) => void;
+  /** The mode the proposal on screen was read for. */
+  readFor: SkeletonMode | null;
+  onReadFor: (m: SkeletonMode) => void;
   onApply: (
     steps: SkeletonStep[],
     idx: number[],
@@ -469,20 +496,22 @@ function AssemblySkeletonPanel({
     [park],
   );
 
-  const built = useMemo(() => {
-    const hasLining = [...(cloth?.values() ?? [])].some((c) => c.state === 'lining');
-    return buildSkeletonFacts({
-      pieces: formPieces ?? [],
-      shapes: shapes.shapeByKey,
-      cloth,
-      bomLines: (bomItems ?? []) as Parameters<typeof buildSkeletonFacts>[0]['bomLines'],
-      category: skeletonCategoryOf(categoryNames, hasLining),
-      defaultMachineType:
-        (park?.machines ?? []).find(
-          (m) => m.machineType && m.machineType !== 'TECH_CARD_MACHINE_TYPE_UNKNOWN',
-        )?.machineType ?? null,
-    });
-  }, [formPieces, bomItems, shapes.shapeByKey, cloth, categoryNames, park]);
+  const patterns = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
+    []) as TechCardFormData['patterns'];
+  const category = useMemo(
+    () =>
+      skeletonCategoryOf(
+        categoryNames,
+        skeletonLined({
+          cloth,
+          pieces: formPieces ?? [],
+          aliases,
+          patterns: patterns ?? [],
+          bomLines: (bomItems ?? []) as Parameters<typeof skeletonLined>[0]['bomLines'],
+        }),
+      ),
+    [categoryNames, cloth, formPieces, aliases, patterns, bomItems],
+  );
 
   // The card's own deps: zones read its BOM and piece↔block links (lining steps → LINING zone).
   const deps = useMemo(
@@ -493,12 +522,6 @@ function AssemblySkeletonPanel({
       }),
     [bomItems, aliases],
   );
-
-  // Opening the panel the first time reads the pattern; reopening shows what was read.
-  useEffect(() => {
-    if (run.status === 'idle') onRun(built.facts, deps);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const pieceName = useMemo(() => {
     const m = new Map<string, string>();
@@ -520,13 +543,62 @@ function AssemblySkeletonPanel({
     [operations, pieceKeys],
   );
 
-  const proposal = run.status === 'ready' ? run.proposal : null;
   const [pressOpen, setPressOpen] = useState(true);
-  const [mode, setMode] = useState<'append' | 'replace'>('append');
   const [confirmReplace, setConfirmReplace] = useState(false);
   const existing = operations.length;
-  const effectiveMode = existing === 0 ? 'append' : mode;
+  // An empty order has nothing to choose about; with steps, nothing is read until a mode is chosen.
+  const mode: SkeletonMode | null = existing === 0 ? 'append' : chosenMode;
+  const effectiveMode: SkeletonMode = mode ?? 'append';
   const replacing = effectiveMode === 'replace';
+
+  // APPEND = the skeleton continues the card's order: built over the pieces its joins have not
+  // consumed, with its live units on the table. REPLACE = the whole pattern, from scratch.
+  const existingOrder: SkeletonExistingOrder | undefined = useMemo(
+    () => (effectiveMode === 'append' && formSteps.length ? { steps: formSteps } : undefined),
+    [effectiveMode, formSteps],
+  );
+  const built = useMemo(
+    () =>
+      buildSkeletonFacts({
+        pieces: formPieces ?? [],
+        shapes: shapes.shapeByKey,
+        cloth,
+        bomLines: (bomItems ?? []) as Parameters<typeof buildSkeletonFacts>[0]['bomLines'],
+        category,
+        defaultMachineType:
+          (park?.machines ?? []).find(
+            (m) => m.machineType && m.machineType !== 'TECH_CARD_MACHINE_TYPE_UNKNOWN',
+          )?.machineType ?? null,
+        aliases,
+        existing: existingOrder,
+      }),
+    [formPieces, bomItems, shapes.shapeByKey, cloth, category, park, aliases, existingOrder],
+  );
+  // What the card's own joins have already sewn: out of an appended skeleton, and out of its gaps.
+  const consumed = useMemo(
+    () => replayExisting({ steps: formSteps }, pieceKeys).consumed,
+    [formSteps, pieceKeys],
+  );
+  const openPieces = built.facts.pieces.filter((p) => !consumed.has(p.pieceKey)).length;
+  // Every piece is in the order already: an appended skeleton has nothing to read.
+  const nothingToAdd = existing > 0 && openPieces === 0;
+
+  // The pattern is read once per chosen mode: opening reads it, reopening shows what was read,
+  // switching add ↔ replace reads it again for the other mode.
+  useEffect(() => {
+    if (!mode) return;
+    // An empty order chose «add» by itself: keep it chosen once the first apply fills the order.
+    if (!chosenMode) onMode(mode);
+    if (mode === 'append' && nothingToAdd) return;
+    if (run.status !== 'idle' && readFor === mode) return;
+    onReadFor(mode);
+    onRun(built.facts, deps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+  const proposal =
+    run.status === 'ready' && readFor === mode && !(mode === 'append' && nothingToAdd)
+      ? run.proposal
+      : null;
 
   const unitName = useMemo(() => {
     const m = new Map<string, string>();
@@ -569,11 +641,11 @@ function AssemblySkeletonPanel({
       if (v.rule === 4 || v.step < before.length) continue;
       const i = batch.idx[v.step - before.length];
       if (i === undefined) continue;
-      byStep.set(i, [...(byStep.get(i) ?? []), v.message]);
+      byStep.set(i, [...(byStep.get(i) ?? []), namesIn(v.message, pieceName)]);
     }
     return byStep;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batch, formSteps, sweepPieces, effectiveMode]);
+  }, [batch, formSteps, sweepPieces, effectiveMode, pieceName]);
 
   /** Why «apply this step» alone would break the order now, or '' when it would not. */
   const singleRefusal = (i: number): string => {
@@ -581,7 +653,7 @@ function AssemblySkeletonPanel({
     const s = proposal.steps[i];
     const res = assemblySweep(sweepPieces, [...formSteps, asAssembly(s)]);
     const v = res.violations.find((x) => x.rule !== 4 && x.step === formSteps.length);
-    return v ? v.message : '';
+    return v ? namesIn(v.message, pieceName) : '';
   };
 
   const usedPieces = useMemo(() => {
@@ -589,7 +661,10 @@ function AssemblySkeletonPanel({
     proposal?.steps.forEach((s) => s.inputs.forEach((k) => used.add(k)));
     return used;
   }, [proposal]);
-  const leftOut = built.facts.pieces.map((p) => p.pieceKey).filter((k) => !usedPieces.has(k));
+  // Pieces the card's own order has sewn are not «left out» of an appended skeleton.
+  const leftOut = built.facts.pieces
+    .map((p) => p.pieceKey)
+    .filter((k) => !usedPieces.has(k) && !(existingOrder && consumed.has(k)));
 
   // Ticking a join ticks what rides on it (its press, the hem on the unit it made); unticking it
   // unticks them. A rider may still be dropped on its own.
@@ -619,6 +694,27 @@ function AssemblySkeletonPanel({
   const unitsGo =
     operations.some((o) => (o.outputUnitKey ?? '').trim() !== '') &&
     !batch.steps.some((s) => s.outputUnitKey);
+  // Steps a person has filled beyond what a skeleton writes: seam type, work, minutes.
+  const filledInForm = operations.filter(
+    (o) =>
+      (o.work ?? '').trim() !== '' ||
+      (o.smv ?? '').trim() !== '' ||
+      (!!o.seamClass && o.seamClass !== 'TECH_CARD_SEAM_CLASS_UNKNOWN'),
+  ).length;
+  const hasUnitsInForm = operations.some((o) => (o.outputUnitKey ?? '').trim() !== '');
+  /** What «replace» takes with the card's steps, in words: «47 steps · 3 step photos · …». */
+  const replaceLoses = [
+    `${existing} ${existing === 1 ? 'step' : 'steps'}`,
+    photosInForm > 0 ? `${photosInForm} step ${photosInForm === 1 ? 'photo' : 'photos'}` : '',
+    filledInForm > 0
+      ? `seam types, work or minutes on ${filledInForm} ${filledInForm === 1 ? 'step' : 'steps'}`
+      : '',
+    hasUnitsInForm ? 'the unit markup' : '',
+  ].filter(Boolean);
+  const chooseMode = (m: SkeletonMode) => {
+    setConfirmReplace(false);
+    onMode(m);
+  };
 
   const applyAll = () => {
     if (batch.steps.length === 0) return;
@@ -708,12 +804,33 @@ function AssemblySkeletonPanel({
           </Dialog.Description>
 
           <div className='min-h-0 flex-1 overflow-y-auto p-2.5'>
-            {run.status === 'running' && (
+            {existing > 0 && (
+              <ModeChoice
+                mode={mode}
+                existing={existing}
+                openPieces={openPieces}
+                replaceLoses={replaceLoses}
+                onChoose={chooseMode}
+              />
+            )}
+            {mode === 'append' && nothingToAdd && (
+              <Text
+                size='micro'
+                variant='label'
+                component='p'
+                className='mb-1.5'
+                data-skeleton-nothing-to-add='1'
+              >
+                to read the pattern again, replace the {existing}{' '}
+                {existing === 1 ? 'step' : 'steps'}: the skeleton then starts over from every piece.
+              </Text>
+            )}
+            {mode && run.status === 'running' && (
               <Text size='micro' variant='label' component='p' data-skeleton-state='running'>
                 reading the pattern — edges, notches, mirror pairs…
               </Text>
             )}
-            {run.status === 'error' && (
+            {mode && run.status === 'error' && (
               <div className='flex items-center gap-2' data-skeleton-state='error'>
                 <Text size='micro' variant='error' component='span'>
                   the pattern could not be read: {run.message}
@@ -722,7 +839,10 @@ function AssemblySkeletonPanel({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  onClick={() => onRun(built.facts, deps)}
+                  onClick={() => {
+                    if (mode) onReadFor(mode);
+                    onRun(built.facts, deps);
+                  }}
                 >
                   try again
                 </Button>
@@ -748,29 +868,6 @@ function AssemblySkeletonPanel({
                   >
                     {pressOpen ? '✓ ' : ''}press open after joins
                   </Chip>
-                  {existing > 0 && (
-                    <>
-                      <Chip
-                        nonForm
-                        selected={mode === 'append'}
-                        onClick={() => {
-                          setMode('append');
-                          setConfirmReplace(false);
-                        }}
-                        data-skeleton-mode='append'
-                      >
-                        add after step {existing * 10}
-                      </Chip>
-                      <Chip
-                        nonForm
-                        selected={mode === 'replace'}
-                        onClick={() => setMode('replace')}
-                        data-skeleton-mode='replace'
-                      >
-                        replace the {existing} {existing === 1 ? 'step' : 'steps'}
-                      </Chip>
-                    </>
-                  )}
                 </ChipRow>
                 {proposal.warnings.map((w, i) => (
                   <Text
@@ -785,6 +882,11 @@ function AssemblySkeletonPanel({
                   </Text>
                 ))}
 
+                {steps.length === 0 && (
+                  <Text size='micro' variant='label' component='p' data-skeleton-empty='1'>
+                    no step to propose: the pattern gave nothing to join. The reasons are above
+                  </Text>
+                )}
                 <div className='flex flex-col divide-y divide-hairline'>
                   {steps.map((raw, i) => {
                     if (!shown(raw)) return null;
@@ -840,6 +942,7 @@ function AssemblySkeletonPanel({
                 {/* THE HONEST GAP. What the pattern did not give evidence for is named, not filled. */}
                 {(leftOut.length > 0 ||
                   built.withoutContour.length > 0 ||
+                  built.withoutKey.length > 0 ||
                   proposal.unresolved.length > 0) && (
                   <>
                     <GroupLabel>not in the skeleton</GroupLabel>
@@ -873,6 +976,17 @@ function AssemblySkeletonPanel({
                           match them to pattern blocks on the PATTERNS tab
                         </Text>
                       )}
+                      {built.withoutKey.length > 0 && (
+                        <Text
+                          size='micro'
+                          variant='label'
+                          component='p'
+                          data-skeleton-nokey={built.withoutKey.length}
+                        >
+                          no piece key yet, so no step can refer to them:{' '}
+                          {built.withoutKey.join(', ')}. Save the card to give them keys
+                        </Text>
+                      )}
                       {proposal.unresolved.length > 0 && (
                         <Text
                           size='micro'
@@ -902,11 +1016,8 @@ function AssemblySkeletonPanel({
             >
               {confirmReplace ? (
                 <span data-skeleton-replace-loses={photosInForm}>
-                  the {existing} {existing === 1 ? 'step goes' : 'steps go'}
-                  {photosInForm > 0
-                    ? ` · ${photosInForm} step ${photosInForm === 1 ? 'photo' : 'photos'} will be removed`
-                    : ''}
-                  {unitsGo ? ' · the unit markup goes with them' : ''}
+                  goes for good: {replaceLoses.join(' · ')}
+                  {unitsGo ? ' (the new steps make no units)' : ''}
                 </span>
               ) : result?.refused ? (
                 <span className='text-error' data-skeleton-refused='1'>
@@ -960,6 +1071,90 @@ function AssemblySkeletonPanel({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+// ── add or replace ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE CHOICE A CARD WITH STEPS ASKS FIRST. Two ruled lines, one per mode, each saying what it reads
+ * and what it costs; nothing is read until one is pressed, and the chosen one stays inked as the
+ * switch. «Add» names how many pieces are still out of the order; «replace» names what goes.
+ */
+function ModeChoice({
+  mode,
+  existing,
+  openPieces,
+  replaceLoses,
+  onChoose,
+}: {
+  mode: SkeletonMode | null;
+  existing: number;
+  openPieces: number;
+  replaceLoses: string[];
+  onChoose: (m: SkeletonMode) => void;
+}) {
+  const steps = `${existing} ${existing === 1 ? 'step' : 'steps'}`;
+  const options: { id: SkeletonMode; title: string; detail: string }[] = [
+    {
+      id: 'append',
+      title: `add to the ${steps}`,
+      detail:
+        openPieces === 0
+          ? 'every piece is already in the order: nothing to add'
+          : `reads only the ${openPieces} ${openPieces === 1 ? 'piece' : 'pieces'} not in the order yet; your steps and units stay as they are`,
+    },
+    {
+      id: 'replace',
+      title: `replace the ${steps}`,
+      detail: `reads the whole pattern and starts over. Goes when you apply: ${replaceLoses.join(' · ')}`,
+    },
+  ];
+  return (
+    <div className='mb-2' data-skeleton-modes={mode ?? 'unchosen'}>
+      {!mode && (
+        <Text size='micro' variant='label' component='p' className='mb-1'>
+          the card already has an order. Choose how the skeleton meets it:
+        </Text>
+      )}
+      <div
+        role='radiogroup'
+        aria-label='add or replace'
+        className='flex flex-col gap-1 sm:flex-row'
+      >
+        {options.map((o) => {
+          const on = mode === o.id;
+          return (
+            <button
+              key={o.id}
+              type='button'
+              role='radio'
+              aria-checked={on}
+              onClick={() => onChoose(o.id)}
+              data-skeleton-mode={o.id}
+              className={cn(
+                'flex flex-1 flex-col items-start gap-0.5 border px-2 py-1 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                on
+                  ? 'border-textColor bg-textColor text-bgColor'
+                  : 'border-borderColor hover:border-textColor',
+              )}
+            >
+              <Text size='micro' variant='uppercase' component='span' className='font-bold'>
+                {on ? '● ' : '○ '}
+                {o.title}
+              </Text>
+              <Text
+                size='micro'
+                component='span'
+                className={on ? 'text-bgColor' : 'text-labelColor'}
+              >
+                {o.detail}
+              </Text>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
