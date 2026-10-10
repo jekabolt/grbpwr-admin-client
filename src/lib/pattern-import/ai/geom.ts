@@ -176,7 +176,12 @@ const reflect = (p: PtMm, c: PtMm, ang: number): PtMm => {
  * scale. A piece drawn half (on fold) is NOT symmetric — that is the fold hint's job.
  */
 export function isMirrorSymmetric(poly: readonly PtMm[], tol = 0.012): boolean {
-  if (poly.length < 3) return false;
+  return mirrorAxis(poly, tol) != null;
+}
+
+/** The first axis (through the centroid, angle in radians) the outline is mirror-symmetric about. */
+export function mirrorAxis(poly: readonly PtMm[], tol = 0.012): { c: PtMm; angle: number } | null {
+  if (poly.length < 3) return null;
   const s = resample(poly, 96);
   const dense = resample(poly, 384);
   const c = centroidOf(poly);
@@ -185,9 +190,9 @@ export function isMirrorSymmetric(poly: readonly PtMm[], tol = 0.012): boolean {
   const pa = principalAngle(s, c);
   for (const ang of [pa, pa + Math.PI / 2, 0, Math.PI / 2]) {
     const r = s.map((p) => reflect(p, c, ang));
-    if (p90NearDist(r, dense) <= tol * diag) return true;
+    if (p90NearDist(r, dense) <= tol * diag) return { c, angle: ang };
   }
-  return false;
+  return null;
 }
 
 /** The outline in its principal frame: centroid at 0, principal axis on x. */
