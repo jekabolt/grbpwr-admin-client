@@ -137,6 +137,14 @@ export type SemanticsDetail = {
   notes: Record<PieceKey, string[]>;
 };
 
+/** A1: per-size grains closer than this agree, degrees. */
+const GRAIN_AGREE_DEG = 2;
+/** Smallest angle between two line directions, degrees, 0..90. */
+const lineAngleDiff = (a: number, b: number) => {
+  const d = (((a - b) % 180) + 180) % 180;
+  return Math.min(d, 180 - d);
+};
+
 /** Two segments are the same line (either direction, ends within 2 mm). */
 const sameLine = (g: { a: PtMm; b: PtMm }, h: { a: PtMm; b: PtMm }) => {
   const d = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y);
@@ -1085,6 +1093,39 @@ export function buildPieceSpecsDetailed(
         ...(fold && foldEdge && foldTol ? { foldTol } : {}),
         t: IDENTITY,
       });
+    }
+    // A1: grains found per size, each on its own evidence, must agree (±2°) — S vertical and M
+    // horizontal from a placement line would export a piece whose sizes lie crosswise in the
+    // marker. Disagreement demotes them all: the majority's strongest is proposed, else none.
+    if (!blockedHere && !opGrain) {
+      const found = sizes.filter((s) => s.grain?.origin === 'detected');
+      const agree = (x: PieceSizeSpec, y: PieceSizeSpec) =>
+        lineAngleDiff(x.grain!.angleDeg, y.grain!.angleDeg) <= GRAIN_AGREE_DEG;
+      if (found.some((s) => !agree(s, found[0]))) {
+        let group: PieceSizeSpec[] = [];
+        for (const s of found) {
+          const g = found.filter((o) => agree(o, s));
+          if (g.length > group.length) group = g;
+        }
+        const top =
+          group.length * 2 > found.length
+            ? [...group].sort(
+                (x, y) => (y.grain!.evidence?.length ?? 0) - (x.grain!.evidence?.length ?? 0),
+              )[0].grain!
+            : null;
+        if (top)
+          grainProposals.push({
+            seed,
+            a: top.a,
+            b: top.b,
+            why: 'most sizes agree',
+            evidence: [...(top.evidence ?? [])],
+          });
+        blockedHere = {
+          reason: 'no-grain',
+          detail: `grainlines found per size disagree (${found.map((s) => `${s.sizeToken} ${s.grain!.angleDeg.toFixed(0)}°`).join(', ')})${top ? ' — the majority is proposed' : ''}`,
+        };
+      }
     }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);

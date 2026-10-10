@@ -53,6 +53,24 @@ export const GRAIN_DASH_MAX = 6;
 /** A1: a size copy of the line: length within ±1 mm, direction within ±2°. */
 export const GRAIN_COPY_LEN_MM = 1;
 export const GRAIN_COPY_DEG = 2;
+/** A1: a size copy of a nested sheet's shared line lies on it, ≤ this across, mm. */
+export const GRAIN_COPY_ON_LINE_MM = 1;
+/**
+ * A1: how strong each evidence is when two lines compete (never length first): a grain class, then
+ * arrowheads, then the word, then the ungraded copies, then the dashes.
+ */
+const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
+  class: 8,
+  arrowheads: 4,
+  word: 2,
+  ungraded: 1,
+  dashes: 0.5,
+  'dxf-layer': 8,
+  operator: 8,
+  borrowed: 0,
+  geometry: 0,
+  accepted: 0,
+};
 
 /** What the caller knows beyond the candidate: the sheet's size count and the family's box. */
 export type FeatureOpts = { sizeCount?: number; region?: BoxMm };
@@ -311,6 +329,9 @@ function grainLines(inner: readonly Chain[], isGrainClass: (id: number) => boole
     if (!run || run.length < 2) continue;
     for (const m of run) used.add(m.o.ch.id);
     if (run.length > GRAIN_DASH_MAX) continue; // a long dashed line: a fold, a stitch line
+    // dashes follow one another; strokes that overlap are copies of one line (sizes, duplicates)
+    if (run.some((m, i) => i > 0 && m.lo < Math.max(...run.slice(0, i).map((x) => x.hi)) - 0.5))
+      continue;
     // a dashed line repeats: dash lengths alike (lettering strokes on one baseline are not)
     const lens = run.map((m) => m.hi - m.lo);
     if (Math.min(...lens) < 0.3 * Math.max(...lens)) continue;
@@ -470,13 +491,24 @@ function bestGrain(
         cand.textsInside.includes(t.id)),
   );
 
-  // (c) ungraded: the same line (±1 mm, ±2°) in ≥ n − 1 size copies inside the family's box
+  // (c) ungraded: the same line (±1 mm, ±2°) in ≥ n − 1 size copies inside the family's box —
+  // and each copy provably another size's: on its own per-size layer / OCG (kombinezon draws one
+  // per size), or lying ON the line (≤ 1 mm across, a nested sheet's shared line) in at least
+  // max(3, n − 1) copies (two coincident strokes may be a fill + stroke duplicate). A long CF /
+  // placket line beside the grain, equal in every size, is neither.
   const n = opts.sizeCount ?? 0;
   const box = opts.region ?? cand.bbox;
-  const copiesOf = (l: GrainLine): number => {
-    if (n < 3 || l.dashed) return 0;
+  const styleLayer = new Map((sheet?.styles ?? []).map((st) => [st.id, st.layer]));
+  const ungradedOf = (l: GrainLine): boolean => {
+    if (n < 3 || l.dashed) return false;
     const ang = angleDeg(l.a, l.b);
-    let k = 0;
+    const ux = (l.b.x - l.a.x) / l.len;
+    const uy = (l.b.y - l.a.y) / l.len;
+    const own = set.chains[l.ids[0]];
+    const layers = new Set<string>();
+    const ownLayer = own ? styleLayer.get(own.style) : null;
+    if (ownLayer) layers.add(ownLayer);
+    let onLine = 1;
     for (const o of set.chains) {
       if (o.id === l.ids[0] || o.closed || Math.abs(o.lengthMm - l.len) > GRAIN_COPY_LEN_MM + 0.5)
         continue;
@@ -490,36 +522,49 @@ function bestGrain(
       if (straightness(o.pts) > 0.5) continue;
       // a size copy lies BESIDE the line (graded placement), not further along it: the two
       // overlap along the line's direction by at least half (a collinear stroke is not a copy)
-      const ux = (l.b.x - l.a.x) / l.len;
-      const uy = (l.b.y - l.a.y) / l.len;
       const t0 = (a.x - l.a.x) * ux + (a.y - l.a.y) * uy;
       const t1 = (z.x - l.a.x) * ux + (z.y - l.a.y) * uy;
       if (Math.min(l.len, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) < 0.5 * l.len) continue;
-      k++;
+      const lay = styleLayer.get(o.style);
+      if (lay) layers.add(lay);
+      if (Math.abs((m.x - l.a.x) * -uy + (m.y - l.a.y) * ux) <= GRAIN_COPY_ON_LINE_MM) onLine++;
     }
-    return k;
+    return layers.size >= Math.max(2, n - 1) || onLine >= Math.max(3, n - 1);
   };
 
   let best: {
     l: GrainLine;
     evidence: GrainEvidenceKind[];
     weight: number;
+    strength: number;
     heads: number[];
   } | null = null;
-  for (const l of lines) {
-    // a line among lettering (its ends or middle in a cell as dense as G18 refuses) is a stroke
+  // a line among lettering (its ends or middle in a cell as dense as G18 refuses) is a stroke
+  const live = lines.filter((l) => {
     const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
-    if (lettered(l.a) || lettered(l.b) || lettered(mid)) continue;
-    const heads = arrowheads(l, headChains, lettered);
-    const ang = angleDeg(l.a, l.b);
-    const word = grainTexts.some((t) => {
-      const c = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
+    return !(lettered(l.a) || lettered(l.b) || lettered(mid));
+  });
+  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it)
+  const worded = new Set<GrainLine>();
+  for (const t of grainTexts) {
+    const c = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
+    let near: { l: GrainLine; d: number } | null = null;
+    for (const l of live) {
       const d = footOnSegment(c, l.a, l.b).d;
-      return (
-        d <= GRAIN_TEXT_MM || (d <= GRAIN_TEXT_ALONG_MM && lineAngleDiff(t.rotationDeg, ang) <= 10)
-      );
-    });
-    const ungraded = copiesOf(l) + 1 >= n - 1 && n >= 3;
+      if (!near || d < near.d) near = { l, d };
+    }
+    if (
+      near &&
+      (near.d <= GRAIN_TEXT_MM ||
+        (near.d <= GRAIN_TEXT_ALONG_MM &&
+          lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10))
+    )
+      worded.add(near.l);
+  }
+  for (const l of live) {
+    const heads = arrowheads(l, headChains, lettered);
+    const word = worded.has(l);
+    const ungraded = ungradedOf(l);
     const evidence: GrainEvidenceKind[] = [
       ...(l.grainClass ? (['class'] as const) : []),
       ...(heads ? (['arrowheads'] as const) : []),
@@ -530,8 +575,10 @@ function bestGrain(
     // a grain class is the legend's (operator's, a DXF layer's) word: it counts two
     const weight = evidence.length + (l.grainClass ? 1 : 0);
     if (!weight) continue;
-    if (!best || weight > best.weight || (weight === best.weight && l.len > best.l.len))
-      best = { l, evidence, weight, heads: heads ?? [] };
+    // competing lines: the stronger evidence wins, length only breaks a tie
+    const strength = evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0);
+    if (!best || strength > best.strength || (strength === best.strength && l.len > best.l.len))
+      best = { l, evidence, weight, strength, heads: heads ?? [] };
   }
   if (!best) return null;
   const { l, evidence, weight, heads } = best;

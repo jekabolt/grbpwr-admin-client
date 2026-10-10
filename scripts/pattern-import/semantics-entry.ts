@@ -1520,11 +1520,31 @@ export async function main(): Promise<number> {
       closed: false,
       role: 'internal',
     });
-    const run1 = (extras: Extra[], texts: { t: string; at: PtMm }[] = []) => {
+    const run1 = (
+      extras: Extra[],
+      texts: { t: string; at: PtMm }[] = [],
+      /** per extra: its source layer / OCG (the extras are the first chains of the fixture) */
+      layers?: (string | null)[],
+    ) => {
       const F = fx();
       addFamily(F, 1, bodice, 0, extras, ['FRONT']);
       for (const t of texts) F.text(t.t, t.at);
       const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
+      if (layers) {
+        layers.forEach((_, i) => (F.chains[i].style = i + 1));
+        inp.sheet = {
+          ...inp.sheet,
+          styles: layers.map((layer, i) => ({
+            id: i + 1,
+            strokeRgb: [0, 0, 0],
+            widthMm: 0.2,
+            dash: null,
+            layer,
+            fill: false,
+            clip: null,
+          })),
+        };
+      }
       return { inp, d: buildPieceSpecsDetailed(inp) };
     };
     const grainOf = (d: ReturnType<typeof buildPieceSpecsDetailed>) =>
@@ -1697,15 +1717,33 @@ export async function main(): Promise<number> {
         JSON.stringify(odd.d.output.grainProposals),
       );
     }
-    // (c) ungraded: the same line in every size copy (3 copies, ±0.4 mm, shifted) → proposed;
-    // + a word → detected
+    // (c) ungraded: the same line in every size copy (3 copies on the line, ±0.4 mm) → proposed;
+    // + a word → detected. Copies must prove they are sizes: on the line, or one per size layer.
     {
-      const copies = [line(90), line(96, 120.4, 420.4), line(102, 119.8, 419.8)];
+      const copies = [line(90), line(90.3, 120.4, 420.4), line(89.8, 119.8, 419.8)];
       const alone = run1(copies);
       ck(
         alone.d.output.grainProposals?.[0]?.why === 'line in every size',
-        'the same line in every size copy → proposed (line in every size)',
+        'the same line in every size copy (on the line) → proposed (line in every size)',
         JSON.stringify(alone.d.output.grainProposals),
+      );
+      const beside = [line(90), line(96, 120.4, 420.4), line(102, 119.8, 419.8)];
+      ck(
+        run1(beside).d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'equal lines beside each other, one layer: not proven size copies',
+        JSON.stringify(run1(beside).d.output.grainProposals),
+      );
+      const perLayer = run1(beside, [], ['size S', 'size M', 'size L']);
+      ck(
+        perLayer.d.output.grainProposals?.[0]?.why === 'line in every size',
+        'equal lines beside each other, one per size layer (OCG) → size copies',
+        JSON.stringify(perLayer.d.output.grainProposals),
+      );
+      const twoOnLine = run1([line(90), line(90.3, 120.4, 420.4)]);
+      ck(
+        twoOnLine.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
+        'two coincident strokes (a duplicate) are not size copies',
+        JSON.stringify(twoOnLine.d.output.grainProposals),
       );
       const graded = run1([line(90), line(96, 120, 440), line(102, 120, 460)]);
       ck(
@@ -1720,6 +1758,89 @@ export async function main(): Promise<number> {
         'ungraded + word → detected',
         JSON.stringify(grainOf(both.d)?.evidence),
       );
+    }
+    // a three-size front: a long CF / placket line equal in every size near the true arrowed
+    // grain + a «grain» label beside the arrow → the arrowed line wins, the CF line is internal
+    {
+      const cf = [line(40, 60, 480), line(40.2, 60, 480), line(39.8, 60, 480)];
+      const arrowed = [line(150, 150, 400), ...barbs(150, 150, 400)];
+      const { d } = run1([...cf, ...arrowed], [{ t: 'grain', at: { x: 120, y: 260 } }]);
+      const g = grainOf(d);
+      ck(
+        g?.origin === 'detected' &&
+          Math.abs(g.a.x - 150) < 1e-6 &&
+          (g.evidence ?? []).join('+') === 'arrowheads+word' &&
+          d.output.pieces[0].sizes[1].internal.some((f) => Math.abs(f.pts[0].x - 40) < 1),
+        'CF line equal in every size vs arrowed grain + label → the arrowed line, CF stays internal',
+        JSON.stringify(g && [g.a, g.evidence]),
+      );
+      // no label: the shorter arrowed line still beats the longer ungraded CF (never length first)
+      const noWord = run1([...cf, ...arrowed]);
+      const pr = noWord.d.output.grainProposals?.[0];
+      ck(
+        !!pr && Math.abs(pr.a.x - 150) < 1e-6 && pr.evidence.join() === 'arrowheads',
+        'arrowheads outrank a longer ungraded line',
+        JSON.stringify(pr),
+      );
+      // the word labels ONE line: the nearest (CF 40 mm, grain 20 mm away — only the grain)
+      const between = run1([line(40, 60, 480), line(100)], [{ t: 'grain', at: { x: 75, y: 260 } }]);
+      ck(
+        between.d.output.grainProposals?.[0]?.why === 'line by a grain word' &&
+          Math.abs(between.d.output.grainProposals[0].a.x - 100) < 1e-6,
+        'a grain word between two lines labels only the nearest',
+        JSON.stringify(between.d.output.grainProposals),
+      );
+    }
+    // per-size grains that disagree (S, L vertical; M horizontal from a placement line): never
+    // exported mixed — the majority is proposed; with no majority, nothing is
+    {
+      const mixed = (dirs: ('v' | 'h' | 'd')[]) => {
+        const F = fx();
+        const grainCls = F.cls('grain');
+        const lines = {
+          v: F.chain(grainLine(120, 100, 400), false, grainCls),
+          h: F.chain(
+            [
+              { x: 60, y: 250 },
+              { x: 120, y: 250 },
+              { x: 180, y: 250 },
+            ],
+            false,
+            grainCls,
+          ),
+          d: F.chain(
+            [
+              { x: 60, y: 150 },
+              { x: 180, y: 300 },
+            ],
+            false,
+            grainCls,
+          ),
+        };
+        addFamily(F, 1, bodice, 0, [], ['FRONT']);
+        F.families[0].candidates.forEach((c, i) => (c.inside = [lines[dirs[i]]]));
+        const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
+        return buildPieceSpecsDetailed(inp).output;
+      };
+      const vhv = mixed(['v', 'h', 'v']);
+      const pr = vhv.grainProposals?.[0];
+      ck(
+        vhv.pieces.length === 0 &&
+          vhv.blocked[0]?.reason === 'no-grain' &&
+          !!pr &&
+          Math.abs(pr.a.x - pr.b.x) < 1e-6 &&
+          pr.why === 'most sizes agree',
+        'sizes disagree (S, L vertical, M horizontal) → not exported, the vertical majority proposed',
+        JSON.stringify({ b: vhv.blocked, pr }),
+      );
+      const vhd = mixed(['v', 'h', 'd']);
+      ck(
+        vhd.pieces.length === 0 && !vhd.grainProposals?.length,
+        'three directions, no majority → no grain, no proposal',
+        JSON.stringify(vhd.blocked),
+      );
+      const vvv = mixed(['v', 'v', 'v']);
+      ck(vvv.pieces.length === 1, 'sizes that agree → exported', JSON.stringify(vvv.blocked));
     }
     // geometric proposals: a strip (aspect ≥ 3) along its length; a straight CF edge
     {
