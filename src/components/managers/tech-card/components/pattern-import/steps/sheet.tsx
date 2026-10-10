@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 import { SHEET_INK, SheetViewport, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtMm } from '../ui-bits';
+import { SheetCleanRows } from './files-clean';
 
 const keyOf = (p: { file: string; page: number }) => `${p.file}:${p.page}`;
 
@@ -56,6 +57,11 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
     },
   );
   const preview = useMemo(() => (out ? pathData(out.previewPaths) : ''), [out]);
+  // A8: what the clean stage set aside, drawn under the line work in the sheet's light grey
+  const masked = useMemo(
+    () => (out?.clean ? pathData(out.clean.masked.flatMap((m) => m.lines)) : ''),
+    [out],
+  );
   // Tile sheets of the files (a Burda file carries two; r4454 a main sheet + interfacing).
   const sheets = useMemo(
     () =>
@@ -127,6 +133,17 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                     </g>
                   );
                 })}
+                {masked && (
+                  <path
+                    d={masked}
+                    pointerEvents='none'
+                    fill='none'
+                    stroke={SHEET_INK.source}
+                    strokeOpacity={0.6}
+                    strokeWidth={0.5}
+                    vectorEffect='non-scaling-stroke'
+                  />
+                )}
                 <path
                   d={preview}
                   pointerEvents='none'
@@ -221,6 +238,8 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
               value={`p. ${sheet.overview.page + 1} · drawn at 1 : ${sheet.overview.factor.toFixed(2)}`}
             />
           )}
+
+          {out.clean && <SheetCleanRows api={api} clean={out.clean} />}
 
           {sheet.warnings.length > 0 && (
             <CalloutBox tone='warning' className='mt-2 max-h-40 overflow-y-auto'>

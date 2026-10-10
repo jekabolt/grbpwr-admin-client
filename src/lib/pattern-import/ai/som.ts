@@ -190,7 +190,8 @@ function drawView(
   ctx.fillStyle = '#7a7a7a';
   ctx.lineWidth = 1;
   sheet.paths.forEach((p, i) => {
-    if (p.pts.length < 2 || !meets(pathBoxes[i], v.boxMm)) return;
+    // A8: the AI is not shown what the clean stage masked (grid, labels, watermark)
+    if (p.background || p.pts.length < 2 || !meets(pathBoxes[i], v.boxMm)) return;
     ctx.beginPath();
     ctx.moveTo(X(p.pts[0].x), Y(p.pts[0].y));
     for (let j = 1; j < p.pts.length; j++) ctx.lineTo(X(p.pts[j].x), Y(p.pts[j].y));

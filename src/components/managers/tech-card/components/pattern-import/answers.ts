@@ -72,14 +72,42 @@ export function pieceRev(f: PieceFamily): string {
 }
 
 /**
+ * A8: the revision of the mask a sheet was read with — the masked items (by id, page pass and
+ * sheet pass) and the operator's mask edits, as one 64-bit FNV-1a pair of hex words. An answer
+ * given on one mask does not survive another (a line set aside or back changes the pieces).
+ */
+export function maskRevOf(masked: readonly string[], edits: readonly unknown[]): string {
+  const text = `${[...masked].sort().join(',')}|${JSON.stringify(edits)}`;
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ text.length;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c ^ (i & 0xff), 0x5bd1e995) >>> 0;
+  }
+  return `m${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}`;
+}
+
+/**
  * The fingerprint of "now": the sheet (index + grid), the model and every piece the fill returned.
  * A piece's revision carries the scope, so the same outline on another sheet is another question.
  */
 export function answerCtxOf(
-  at: { sheetIndex: number; gridOverride: unknown; variant: string | null },
+  at: {
+    sheetIndex: number;
+    gridOverride: unknown;
+    variant: string | null;
+    /** A8: the mask the sheet was read with (`maskRevOf`): another mask is another drawing. */
+    maskRev?: string;
+  },
   families: readonly PieceFamily[] | null | undefined,
 ): AnswerCtx {
-  const scope = JSON.stringify([at.sheetIndex, at.gridOverride ?? null, at.variant ?? null]);
+  const scope = JSON.stringify([
+    at.sheetIndex,
+    at.gridOverride ?? null,
+    at.variant ?? null,
+    ...(at.maskRev ? [at.maskRev] : []),
+  ]);
   const revs: Partial<Record<SeedId, string>> = {};
   for (const f of families ?? []) revs[f.seed] = `${scope}#${f.seed}@${pieceRev(f)}`;
   return { scope, revs };
