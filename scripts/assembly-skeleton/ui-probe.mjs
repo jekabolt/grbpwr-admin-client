@@ -99,8 +99,9 @@ const outfile = resolve(tmpdir(), `skeleton-ui-${process.pid}.js`);
 const AUTOAPPLY_FIX = `    applyRequest,\n    onSkeletonApplied: (r) => {`;
 const AUTOAPPLY_BROKEN = `    applyRequest: applyRequest ?? (ready ? { steps: ready.steps, mode: 'append', nonce: -1 } : null),\n    onSkeletonApplied: (r) => {`;
 // Instrumentation (always on, in memory): count the card pictures' seam-graph reads.
-const GRAPH_READ = `g = readSeamGraph(facts);`;
-const GRAPH_READ_COUNTED = `g = ((window.__graphReads = (window.__graphReads || 0) + 1), readSeamGraph(facts));`;
+// Any argument list: the SEAMS wave passes the card's seam decisions too.
+const GRAPH_READ = /g = readSeamGraph\(/;
+const GRAPH_READ_COUNTED = `g = ((window.__graphReads = (window.__graphReads || 0) + 1), readSeamGraph)(`;
 const CHURN_FIX = `}, [factsSig, live]);`;
 const CHURN_BROKEN = `}, [factsSig, live, shapes]);`;
 const plugins = [
@@ -109,7 +110,7 @@ const plugins = [
     setup(b) {
       b.onLoad({ filter: /card-unit-pictures\.tsx$/ }, async (args) => {
         let src = await readFile(args.path, 'utf8');
-        if (!src.includes(GRAPH_READ)) throw new Error('instrumentation did not find its line');
+        if (!GRAPH_READ.test(src)) throw new Error('instrumentation did not find its line');
         src = src.replace(GRAPH_READ, GRAPH_READ_COUNTED);
         if (MUTATE_CHURN) {
           if (!src.includes(CHURN_FIX)) throw new Error('churn mutation did not find its line');
@@ -1511,6 +1512,42 @@ if (!blazer) {
   );
   ck(moved > 0, 'the AI order moves steps — offered, not applied', `${moved} would move`);
   await shot('l-ai-shown', '[data-skeleton-panel]');
+
+  // Structure: the AI's category + units rebuild the skeleton; «back to the engine» restores it.
+  {
+    const label = await page.locator('[data-skeleton-ai-use-structure]').innerText();
+    ck(
+      /use AI structure \(as tee, 1 unit\)/i.test(label),
+      'the AI structure is offered with its category and units, not applied',
+      label,
+    );
+    const before = await stepWords();
+    const calls = await page.evaluate(() => window.__sk.providerCalls());
+    await page.click('[data-skeleton-ai-use-structure]');
+    await page.waitForFunction((n) => window.__sk.providerCalls() > n, calls, { timeout: 10000 });
+    await page.waitForSelector('[data-skeleton-ai-use-structure="in-use"]', { timeout: 10000 });
+    const after = await stepWords();
+    ck(
+      after.some((t) => t.includes('Stub unit')) && !before.some((t) => t.includes('Stub unit')),
+      '«use AI structure» rebuilds the skeleton with the AI unit',
+      after.slice(0, 4).join(' / '),
+    );
+    ck(
+      JSON.stringify(await ops()) === opsBefore,
+      'using the AI structure writes nothing to the form',
+    );
+    await page.click('[data-skeleton-ai-structure-back]');
+    await page.waitForSelector(
+      '[data-skeleton-ai-use-structure]:not([data-skeleton-ai-use-structure="in-use"])',
+      {
+        timeout: 10000,
+      },
+    );
+    ck(
+      JSON.stringify(await stepWords()) === JSON.stringify(before),
+      '«back to the engine» restores the engine’s skeleton',
+    );
+  }
 
   // Readings first: a rebuild, and the order read on the old readings is no longer offered.
   await page.click('[data-skeleton-ai-use-readings]');

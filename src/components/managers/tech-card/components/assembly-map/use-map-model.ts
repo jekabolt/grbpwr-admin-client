@@ -2,6 +2,7 @@
 // лист со своей подпиской, как эскиз: вкладка `operations` не смотрит, чтобы набор в редакторе шага
 // не перерисовывал всю колонку операций.
 import { readMap, type MapRead, type MapStep } from 'lib/assembly-skeleton/map';
+import { readablePieceName } from 'lib/assembly-skeleton/names';
 import type { SeamGraph } from 'lib/assembly-skeleton/types';
 import { useMemo, useRef } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -60,7 +61,7 @@ export function useMapModel(): MapModel {
   }, [shown, sig]);
 
   const pieceNames = useMemo(
-    () => new Map(pieces.map((p) => [(p.lineKey ?? '').trim(), p.name ?? ''])),
+    () => new Map(pieces.map((p) => [(p.lineKey ?? '').trim(), readablePieceName(p.name ?? '')])),
     [pieces],
   );
   const unitNames = useMemo(() => {

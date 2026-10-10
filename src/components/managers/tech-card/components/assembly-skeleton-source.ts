@@ -13,8 +13,9 @@
 // Nothing here writes to the form. A proposal is data to look at; only `OperationsField`'s
 // `applyRequest` writes, and only on a pressed «apply».
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
-import { liningByName } from 'lib/assembly-skeleton/names';
+import { liningByName, nameTokens, readablePieceName } from 'lib/assembly-skeleton/names';
 import { proposeSkeleton } from 'lib/assembly-skeleton/pipeline';
+import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import {
   SKELETON,
   type SkeletonCategory,
@@ -157,14 +158,43 @@ export function skeletonBomFacts(lines: ReadonlyArray<FormBomLine>): SkeletonFac
 }
 
 // Category words → template, most specific first WITHIN one name («t-shirts» is a tee before it is
-// a shirt; «koszulka» a tee before «koszula» a shirt; «sweatpants» trousers before a sweat). English, Russian, Polish. A name is lowered
-// and read as whole words (any letters), so «Tops» never matches inside «Topshop».
-type CategoryRule = { re: RegExp; category: SkeletonCategory | 'jacket' | 'coat' };
+// a shirt; «koszulka» a tee before «koszula» a shirt; «sweatpants» trousers before a sweat; «dress
+// shoes» are shoes before a dress). English, Russian, Polish. A name is lowered and read as WHOLE
+// words: anything that is not a letter or digit splits words, so «short_sleeve» is «short» +
+// «sleeve» and «short» alone is no garment (shorts are plural), «Tops» never matches inside
+// «Topshop», «high_top» sneakers are «high» + «top» and lose to «sneakers».
+type CategoryWord = SkeletonCategory | 'jacket' | 'coat' | 'other';
+type CategoryRule = { re: RegExp; category: CategoryWord };
+/** Families: a deeper name overrides its parent only inside one family (§F5). */
+const FAMILY: Record<CategoryWord, string> = {
+  tee: 'top',
+  sweat: 'top',
+  hoodie: 'top',
+  shirt: 'top',
+  trousers: 'bottom',
+  skirt: 'bottom',
+  jacket: 'outer',
+  coat: 'outer',
+  'jacket-lined': 'outer',
+  'coat-lined': 'outer',
+  dress: 'one-piece',
+  jumpsuit: 'one-piece',
+  generic: 'other',
+  other: 'other',
+};
 const W = (body: string) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${body})(?![\\p{L}\\p{N}])`, 'u');
 const CATEGORY_RULES: CategoryRule[] = [
+  // Not a sewn garment the templates know: footwear, accessories, bags, small goods. Read FIRST so
+  // «dress shoes», «high top sneakers», «belt bags» never become a dress, a tee or a waistband.
   {
     re: W(
-      'jumpsuits?|overalls?|rompers?|playsuits?|boilersuits?|комбинезон\\p{L}*|kombinezon\\p{L}*',
+      'shoes?|sneakers?|boots?|heels?|sandals?|flats|slippers?|mules?|clogs?|loafers?|accessories|bags?|backpacks?|clutch(?:es)?|pouch(?:es)?|totes?|wallets?|cardholders?|keychains?|jewell?ery|rings?|earrings?|necklaces?|bracelets?|eyewear|sunglasses|hats?|caps?|beanies?|gloves?|mittens?|socks?|scarves|scarf|shawls?|bandanas?|ties|belts|objects|home|обувь|сумк\\p{L}*|рюкзак\\p{L}*|аксессуар\\p{L}*|torb\\p{L}*|plecak\\p{L}*|buty',
+    ),
+    category: 'other',
+  },
+  {
+    re: W(
+      'jumpsuits?|overalls?|rompers?|playsuits?|boilersuits?|boiler suits?|комбинезон\\p{L}*|kombinezon\\p{L}*',
     ),
     category: 'jumpsuit',
   },
@@ -176,19 +206,19 @@ const CATEGORY_RULES: CategoryRule[] = [
   { re: W('hoodies?|hoody|hooded|худи|bluz[ay]? z kapturem'), category: 'hoodie' },
   {
     re: W(
-      't-?shirts?|tees?|tops?|tanks?|tank tops?|longsleeves?|футболк\\p{L}*|майк\\p{L}*|лонгслив\\p{L}*|топы?|koszulk\\p{L}*|topy?',
+      't-?shirts?|tees?|tops?|tanks?|tank tops?|longsleeves?|bodysuits?|polos?|футболк\\p{L}*|майк\\p{L}*|лонгслив\\p{L}*|топы?|koszulk\\p{L}*|topy?',
     ),
     category: 'tee',
   },
   {
     re: W(
-      'trousers?|sweatpants?|trackpants?|pants?|shorts?|jeans?|joggers?|chinos?|leggings?|брюк\\p{L}*|штан\\p{L}*|шорт\\p{L}*|джинс\\p{L}*|spodni\\p{L}*|spodenk\\p{L}*|jeansy',
+      'trousers?|sweatpants?|trackpants?|pants?|shorts|jeans?|joggers?|chinos?|leggings?|брюк\\p{L}*|штан\\p{L}*|шорт\\p{L}*|джинс\\p{L}*|spodni\\p{L}*|spodenk\\p{L}*|jeansy',
     ),
     category: 'trousers',
   },
   {
     re: W(
-      'sweat\\p{L}*|jumpers?|pullovers?|sweaters?|crewnecks?|толстовк\\p{L}*|свитшот\\p{L}*|свитер\\p{L}*|джемпер\\p{L}*|bluz[ay]|swetr\\p{L}*',
+      'sweat\\p{L}*|jumpers?|pullovers?|sweaters?|crewnecks?|cardigans?|turtlenecks?|knits?|толстовк\\p{L}*|свитшот\\p{L}*|свитер\\p{L}*|джемпер\\p{L}*|bluz[ay]|swetr\\p{L}*',
     ),
     category: 'sweat',
   },
@@ -200,40 +230,189 @@ const CATEGORY_RULES: CategoryRule[] = [
   },
   {
     re: W(
-      'coats?|overcoats?|parkas?|trench\\p{L}*|пальто|плащ\\p{L}*|парк[аи]|płaszcz\\p{L}*|plaszcz\\p{L}*',
+      'coats?|overcoats?|peacoats?|parkas?|trench\\p{L}*|пальто|плащ\\p{L}*|парк[аи]|płaszcz\\p{L}*|plaszcz\\p{L}*',
     ),
     category: 'coat',
   },
   {
     re: W(
-      'jackets?|blazers?|bombers?|outerwear|пиджак\\p{L}*|жакет\\p{L}*|куртк\\p{L}*|kurtk\\p{L}*|marynark\\p{L}*',
+      'jackets?|blazers?|bombers?|vests?|outerwear|пиджак\\p{L}*|жакет\\p{L}*|куртк\\p{L}*|kurtk\\p{L}*|marynark\\p{L}*',
     ),
     category: 'jacket',
   },
 ];
 
+/** One name of the chain read as words: `_` and `-` split words like a space does. */
+const categoryWordOf = (raw: string): CategoryWord | null => {
+  const name = (raw ?? '')
+    .toLowerCase()
+    .replace(/[_\s]+/g, ' ')
+    .trim();
+  if (!name) return null;
+  return CATEGORY_RULES.find((r) => r.re.test(name))?.category ?? null;
+};
+
+const finish = (w: CategoryWord, hasLining: boolean): SkeletonCategory => {
+  if (w === 'other') return 'generic';
+  if (w === 'jacket') return hasLining ? 'jacket-lined' : 'generic';
+  if (w === 'coat') return hasLining ? 'coat-lined' : 'generic';
+  return w;
+};
+
 /**
- * The card's category, from the names of its category chain, LEAF FIRST: the most specific name
- * that says anything decides («shirts < tops» is a shirt, not a tee — a parent's word only speaks
- * when the leaf is silent). The order template is picked by it (default answer 4: «category from
- * the card»); anything unrecognised is `generic`, and the proposal screen names the template it
- * used, so a wrong guess is visible before apply. Jackets and coats take the lined template only
- * when the card is lined (`skeletonLined`); unlined they stay generic.
+ * The card's category, from the names of its category chain, LEAF FIRST. The ROOT-most name that
+ * says anything sets the family (tops / bottoms / outerwear / one-piece / not a garment); inside that
+ * family the most specific name decides («shirts < tops» is a shirt, not a tee). A deeper name of
+ * ANOTHER family is a modifier, not the garment: «sweat < shorts» are shorts, «shirt < dresses» a
+ * dress, «short_sleeve < shirts» a shirt. The order template is picked by it (default answer 4:
+ * «category from the card»); anything unrecognised is `generic`, and the proposal screen names the
+ * template it used, so a wrong guess is visible before apply. Jackets and coats take the lined
+ * template only when the card is lined (`skeletonLined`); unlined they stay generic.
  */
 export function skeletonCategoryOf(
   categoryNames: ReadonlyArray<string>,
   hasLining: boolean,
 ): SkeletonCategory {
-  for (const raw of categoryNames) {
-    const name = (raw ?? '').toLowerCase().trim();
-    if (!name) continue;
-    const hit = CATEGORY_RULES.find((r) => r.re.test(name));
-    if (!hit) continue;
-    if (hit.category === 'jacket') return hasLining ? 'jacket-lined' : 'generic';
-    if (hit.category === 'coat') return hasLining ? 'coat-lined' : 'generic';
-    return hit.category;
+  const hits = categoryNames.map(categoryWordOf).filter((w): w is CategoryWord => w != null);
+  if (!hits.length) return 'generic';
+  const family = FAMILY[hits[hits.length - 1]];
+  return finish(hits.find((w) => FAMILY[w] === family)!, hasLining);
+}
+
+/** How the template was chosen, for the panel to say so. */
+export type SkeletonCategoryReading = {
+  category: SkeletonCategory;
+  /**
+   * 'card' = the card's category chain; 'purpose' = no category, an auxiliary item (generic);
+   * 'pieces' = no category, read from the piece names; 'none' = nothing said which garment.
+   */
+  source: 'card' | 'purpose' | 'pieces' | 'none';
+  /** For 'pieces': what in the names gave it away, in words («sleeves and a collar»). */
+  why: string;
+};
+
+const PURPOSE_AUXILIARY = 'TECH_CARD_PURPOSE_AUXILIARY';
+
+// Words that tell one garment from another when the card has no category — evidence only a
+// trouser, a tee or a jacket carries. Sleeves, a waistband or left / right panels do not: a dress,
+// a skirt and a shirt have them too.
+const CROTCH_WORDS = new Set([
+  'crotch',
+  'gusset',
+  'inseam',
+  'leg',
+  'legs',
+  'шаг',
+  'ластовица',
+  'штанина',
+  'штанины',
+  'krok',
+  'nogawka',
+  'nogawki',
+]);
+const NECK_RIB_WORDS = new Set([
+  'neckband',
+  'nb',
+  'neck',
+  'nck',
+  'горловина',
+  'горловины',
+  'dekolt',
+]);
+const JACKET_WORDS = new Set([
+  'lapel',
+  'lpl',
+  'undercollar',
+  'revers',
+  'лацкан',
+  'подворотник',
+  'klapa',
+]);
+
+/**
+ * A card with NO category still has piece names — read only for DISCRIMINATING evidence:
+ *   • trousers — a fly, or a crotch / gusset / leg piece (a waistband on left and right panels is
+ *     also a skirt);
+ *   • hoodie — sleeves and a hood;
+ *   • shirt — sleeves with a placket (a collar or cuffs alone are a dress's too); a jacket (lined
+ *     template) only when the card is lined AND has a jacket's own pieces (lapel, undercollar) — a
+ *     facing alone is a lined shirt's too;
+ *   • tee — sleeves with a neck rib or band (sleeves alone are also a dress);
+ *   • skirt — a skirt panel.
+ * An auxiliary card (a garment case, a dust bag) is no garment. Anything else is generic, and `why`
+ * says which evidence was missing.
+ */
+export function skeletonCategoryFromPieces(
+  pieceNames: ReadonlyArray<string>,
+  hasLining: boolean,
+  purpose?: string | null,
+): { category: SkeletonCategory; why: string; evidence: boolean } {
+  if (purpose === PURPOSE_AUXILIARY)
+    return { category: 'generic', why: 'an auxiliary item, not a garment', evidence: true };
+  const roles = new Set<string>();
+  const words = new Set<string>();
+  for (const n of pieceNames) {
+    const r = readName(n ?? '');
+    if (r.role) roles.add(r.role);
+    for (const t of nameTokens(n ?? '')) words.add(t.replace(/^\d+|\d+$/g, ''));
   }
-  return 'generic';
+  const has = (r: string) => roles.has(r);
+  const any = (set: ReadonlySet<string>) => [...words].some((w) => set.has(w));
+  const found = (category: SkeletonCategory, why: string) => ({ category, why, evidence: true });
+  if (has('fly')) return found('trousers', 'a fly');
+  if (any(CROTCH_WORDS)) return found('trousers', 'a crotch or leg piece');
+  if (has('skirt')) return found('skirt', 'a skirt panel');
+  if (has('sleeve')) {
+    if (has('hood')) return found('hoodie', 'sleeves and a hood');
+    // A collar or cuffs alone are a dress's too, and a facing is a lined shirt's too: a jacket needs
+    // its own pieces (lapel, undercollar), a shirt its placket.
+    if (hasLining && any(JACKET_WORDS))
+      return found('jacket-lined', 'sleeves, lapels or an undercollar, and a lining');
+    if (has('placket')) return found('shirt', 'sleeves and a placket');
+    const neck = has('collar') || (has('stand') && !any(NECK_RIB_WORDS));
+    if (neck || has('cuff'))
+      return {
+        category: 'generic',
+        why: `sleeves and ${neck ? 'a collar' : 'cuffs'}, but no placket or lapel to tell a shirt, a dress or a jacket apart`,
+        evidence: false,
+      };
+    if (has('rib') || any(NECK_RIB_WORDS)) return found('tee', 'sleeves and a neck rib');
+    return {
+      category: 'generic',
+      why: 'sleeves, but no collar, cuff, hood or neck rib to tell a shirt, a tee or a dress apart',
+      evidence: false,
+    };
+  }
+  return {
+    category: 'generic',
+    why: 'no fly, crotch, sleeve or skirt piece to tell the garment by',
+    evidence: false,
+  };
+}
+
+/**
+ * The template the proposal is read with: the card's category when it has one; with none, a reading
+ * of the piece names the panel names as such («category not set: read as shirt from the pieces»).
+ */
+export function skeletonCategoryRead(args: {
+  categoryNames: ReadonlyArray<string>;
+  hasLining: boolean;
+  pieceNames: ReadonlyArray<string>;
+  purpose?: string | null;
+}): SkeletonCategoryReading {
+  if (args.categoryNames.some((n) => (n ?? '').trim()))
+    return {
+      category: skeletonCategoryOf(args.categoryNames, args.hasLining),
+      source: 'card',
+      why: '',
+    };
+  const { evidence, ...r } = skeletonCategoryFromPieces(
+    args.pieceNames,
+    args.hasLining,
+    args.purpose,
+  );
+  const source = args.purpose === PURPOSE_AUXILIARY ? 'purpose' : evidence ? 'pieces' : 'none';
+  return { ...r, source };
 }
 
 const LINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_LINING';
@@ -323,7 +502,9 @@ export function buildSkeletonFacts(args: {
       args.cloth?.get(key)?.state ?? (liningScoped.has(pieceRefKey(key)) ? 'lining' : null);
     inputs.push({
       pieceKey: key,
-      name: (p.name ?? '').trim() || key,
+      // A name the database garbled (double-encoded UTF-8) is not guessed at: «unnamed piece 8
+      // (name unreadable)» in every step, message and picture. The card keeps its own value.
+      name: readablePieceName((p.name ?? '').trim()) || key,
       // The SEWING line, read from every layer of the block (mode-B files draw it on its own
       // layer); the tile's drawn contour when the index did not keep the layers.
       piece: seamPieceOf(found.layers?.length ? found.layers : [found.piece]) ?? found.piece,

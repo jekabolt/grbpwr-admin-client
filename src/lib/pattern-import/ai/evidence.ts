@@ -31,8 +31,8 @@ const QTY_RULES: { re: RegExp; times?: number; pairGroup?: number }[] = [
   {
     re: /(?:quantity|qty|anzahl|кол-?во|количество|ilość|quantité|cantidad|aantal)\s*[:=]?\s*(\d{1,2})(?!\d)/iu,
   },
-  // "cut 2", "Cut 1 on fold", "cut x1 pair", "CUT 2 ON FOLD"
-  { re: /\bcut\s*(?:x\s*)?(\d{1,2})(?:\s*(pairs?|пар))?/iu, pairGroup: 2 },
+  // "cut 2", "Cut 1 on fold", "cut x1 pair", "CUT 2 ON FOLD", "CUT & 2", "Cut: 2", "cut × 2" (A0.4)
+  { re: /\bcut\s*(?:[x×х&:]\s*)?(\d{1,2})(?!\d)(?:\s*(pairs?|пар))?/iu, pairGroup: 2 },
   // "1 пара", "2 пары"
   { re: new RegExp(`(\\d{1,2})\\s*пар(?:а|ы|у)?(?!${L})`, 'iu'), times: 2 },
   // "2 дет.", "КАРМАН 2 ДЕТ.", "2 шт"
@@ -49,7 +49,17 @@ const QTY_RULES: { re: RegExp; times?: number; pairGroup?: number }[] = [
 const PAIR_ONLY = /\bpaarig\b|\b(?:1|ein|one)\s*(?:paar|pair)\b/iu;
 
 /** Printed quantity of one text item: pieces per garment (a pair = 2), 1..20; null = none. */
+/**
+ * A count given per fabric ("Cut: 2 fabric, 1 lining", "cut 1 interfacing") is not one count of the
+ * piece: one number would be applied to every fabric the piece is cut from — ask instead (D3).
+ */
+const PER_FABRIC = new RegExp(
+  `(?:\\d{1,2}\\s*(?:x\\s*)?(?:lining|interfacing|fusing|contrast|futter|einlage|vlies${L}*|podszewk${L}*|flizelin${L}*|подклад${L}*|дублерин${L}*|флизелин${L}*))|(?:(?:lining|interfacing|fusing|futter|einlage|подклад${L}*|дублерин${L}*)\\s*[:=x×]?\\s*\\d{1,2})`,
+  'iu',
+);
+
 export function parseQuantity(text: string): number | null {
+  if (PER_FABRIC.test(text)) return null;
   for (const r of QTY_RULES) {
     const m = r.re.exec(text);
     if (!m) continue;

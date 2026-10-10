@@ -49,6 +49,7 @@ import type {
   PieceSpec,
   Progress,
   PtMm,
+  SeedGrainProposal,
   SeedId,
   SemanticsInput,
   Sheet,
@@ -60,6 +61,7 @@ import { PATIMPORT } from '../types';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
+import { drawnProposal, proposeGrain } from './grain-propose';
 import {
   FOLD_TEXT_MAX_MM,
   FOLD_TOL_MM,
@@ -133,6 +135,20 @@ export type SemanticsDetail = {
   derivedOf: (identity: string, rank: number) => DerivedEdge[] | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
+};
+
+/** A1: per-size grains closer than this agree, degrees. */
+const GRAIN_AGREE_DEG = 2;
+/** Smallest angle between two line directions, degrees, 0..90. */
+const lineAngleDiff = (a: number, b: number) => {
+  const d = (((a - b) % 180) + 180) % 180;
+  return Math.min(d, 180 - d);
+};
+
+/** Two segments are the same line (either direction, ends within 2 mm). */
+const sameLine = (g: { a: PtMm; b: PtMm }, h: { a: PtMm; b: PtMm }) => {
+  const d = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y);
+  return (d(g.a, h.a) <= 2 && d(g.b, h.b) <= 2) || (d(g.a, h.b) <= 2 && d(g.b, h.a) <= 2);
 };
 
 const blockOffset = (r: OffsetReport): BlockReason =>
@@ -510,6 +526,8 @@ export function buildPieceSpecsDetailed(
   const operatorFold = input.operatorFold ?? {};
   const foldHints = new Set(input.foldHints ?? []);
   const foldAsks: FoldAsk[] = [];
+  /** A1: per seed blocked 'no-grain', what the drawing or the outline proposes (D3: a click). */
+  const grainProposals: SeedGrainProposal[] = [];
   const warnings: string[] = [];
   const blocked: Blocked[] = [];
   /** D3: what the drawing does not prove, per seed — see `Unproven`. */
@@ -766,9 +784,20 @@ export function buildPieceSpecsDetailed(
     let anyFold = false;
     let lastGrain: GrainFeature | null = null;
     const opGrain = operatorGrain[seed];
+    // A1: the family's box (the ungraded-line test looks for the size copies inside it)
+    const famBox = bboxOf(
+      p.cands.flatMap(({ c }) => [
+        { x: c.bbox.minX, y: c.bbox.minY },
+        { x: c.bbox.maxX, y: c.bbox.maxY },
+      ]),
+    );
+    const featOpts = { sizeCount: run.sizes.length, region: famBox };
 
     for (const { c, card } of p.cands) {
-      const feats = classifyFeatures(c, set, sheet);
+      const feats = classifyFeatures(c, set, sheet, featOpts);
+      // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
+      const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
+      const proposedLine = found?.origin === 'proposed' ? found : null;
       let outer = ccw(c.outer);
       // Every candidate outline (F4 fill, operator refill, DXF fast path) passes here before fold
       // and offset: a stretch that runs out and back along itself — a corner overshot and retraced
@@ -860,6 +889,16 @@ export function buildPieceSpecsDetailed(
       let notches = feats.filter((f): f is NotchFeature => f.kind === 'notch');
       let drills = feats.filter((f): f is DrillFeature => f.kind === 'drill');
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');
+      // A1: a proposed line the operator did not take as the grain stays an internal line
+      if (proposedLine && opGrain && !sameLine(proposedLine, opGrain))
+        internal.push({
+          kind: 'internal',
+          pts: [proposedLine.a, proposedLine.b],
+          closed: false,
+          origin: 'detected',
+          ranges: proposedLine.ranges,
+          confidence: 0.5,
+        });
       if (fold) {
         const half = outer;
         const t = tryUnfold(half, fold, edgeLen, foldTol);
@@ -977,8 +1016,10 @@ export function buildPieceSpecsDetailed(
           notchesOut.push(n);
 
       // ── grain
-      let grain = (feats.find((f) => f.kind === 'grain') as GrainFeature | undefined) ?? null;
-      if (!grain && opGrain)
+      // the operator's two clicks win over a found grain (the details step shows theirs, and a
+      // found grain the gate refuses — G18, lettering — has no other way out)
+      let grain: GrainFeature | null = null;
+      if (opGrain)
         grain = {
           kind: 'grain',
           a: opGrain.a,
@@ -988,14 +1029,30 @@ export function buildPieceSpecsDetailed(
           origin: 'operator',
           ranges: [],
           confidence: 1,
+          // A1: an accepted proposal is the operator's word, with what it was proposed on
+          evidence: opGrain.accepted
+            ? [...new Set(['operator' as const, 'accepted' as const, ...opGrain.accepted])]
+            : ['operator'],
         };
+      grain ??= found && !proposedLine ? found : null;
       const borrowed = lastGrain as GrainFeature | null;
       if (!grain && borrowed)
-        grain = { ...borrowed, origin: 'derived', confidence: borrowed.confidence * 0.9 };
+        grain = {
+          ...borrowed,
+          origin: 'derived',
+          confidence: borrowed.confidence * 0.9,
+          evidence: [...new Set([...(borrowed.evidence ?? []), 'borrowed' as const])],
+        };
       if (!grain) {
+        const pr = proposedLine
+          ? drawnProposal(proposedLine)
+          : proposeGrain(outer, { fold: foldEdge });
+        if (pr) grainProposals.push({ seed, ...pr });
         blockedHere = {
           reason: 'no-grain',
-          detail: `${card.token}: no grainline found — click two points on the piece`,
+          detail: pr
+            ? `${card.token}: grainline proposed (${pr.why}) — accept it or click two points`
+            : `${card.token}: no grainline found — click two points on the piece`,
         };
         break;
       }
@@ -1036,6 +1093,39 @@ export function buildPieceSpecsDetailed(
         ...(fold && foldEdge && foldTol ? { foldTol } : {}),
         t: IDENTITY,
       });
+    }
+    // A1: grains found per size, each on its own evidence, must agree (±2°) — S vertical and M
+    // horizontal from a placement line would export a piece whose sizes lie crosswise in the
+    // marker. Disagreement demotes them all: the majority's strongest is proposed, else none.
+    if (!blockedHere && !opGrain) {
+      const found = sizes.filter((s) => s.grain?.origin === 'detected');
+      const agree = (x: PieceSizeSpec, y: PieceSizeSpec) =>
+        lineAngleDiff(x.grain!.angleDeg, y.grain!.angleDeg) <= GRAIN_AGREE_DEG;
+      if (found.some((s) => !agree(s, found[0]))) {
+        let group: PieceSizeSpec[] = [];
+        for (const s of found) {
+          const g = found.filter((o) => agree(o, s));
+          if (g.length > group.length) group = g;
+        }
+        const top =
+          group.length * 2 > found.length
+            ? [...group].sort(
+                (x, y) => (y.grain!.evidence?.length ?? 0) - (x.grain!.evidence?.length ?? 0),
+              )[0].grain!
+            : null;
+        if (top)
+          grainProposals.push({
+            seed,
+            a: top.a,
+            b: top.b,
+            why: 'most sizes agree',
+            evidence: [...(top.evidence ?? [])],
+          });
+        blockedHere = {
+          reason: 'no-grain',
+          detail: `grainlines found per size disagree (${found.map((s) => `${s.sizeToken} ${s.grain!.angleDeg.toFixed(0)}°`).join(', ')})${top ? ' — the majority is proposed' : ''}`,
+        };
+      }
     }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
@@ -1371,6 +1461,13 @@ export function buildPieceSpecsDetailed(
       unproven: unproven.filter((u) => written.has(u.seed)),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
       ...(foldList ? { foldList } : {}),
+      ...(grainProposals.length
+        ? {
+            grainProposals: grainProposals.filter((g) =>
+              blocked.some((b) => b.seed === g.seed && b.reason === 'no-grain'),
+            ),
+          }
+        : {}),
     },
     wallsOf,
     derivedOf,

@@ -1,5 +1,5 @@
 {
-  "_note": "Piece roles read from piece names (tokens split on anything that is not a letter or digit, lower-cased; leading/trailing digits dropped for the lookup, so 2CLR reads as clr but stays its own family). Roles are tried IN ORDER: the first role with a matching token wins (FRONT_POCKET_L is a pocket, NECK_RIB a rib, CUFF_RIB a cuff, COLLAR_STAND a stand). level 'sub' = small subassembly built before the body, 'panel' = body panel. wraps = the role's layers are sewn around a unit of the named role in ONE step (stand layers + collar). attachTo = the unit is sewn onto a panel of that role before the body is assembled. noGroup = pieces of this role are never joined to each other (belt loops). Draft dictionary: the same caveat as PIECE_NAME_ZONE_DRAFT in operation-inference.ts — check with the technologist. Tokens are any letters (Latin, Cyrillic, Polish): Russian and Polish piece names read the same roles (рукав = sleeve, przód = front). liningTokens mark a piece as lining by name when the card gives it no cloth (LIN_FRONT, подклад спинки); they never name a role or a family.",
+  "_note": "Piece roles read from piece names (tokens split on anything that is not a letter or digit, lower-cased; leading/trailing digits dropped for the lookup, so 2CLR reads as clr but stays its own family). Roles are tried IN ORDER: the first role with a matching token wins (FRONT_POCKET_L is a pocket, NECK_RIB a rib, CUFF_RIB a cuff, COLLAR_STAND a stand). level 'sub' = small subassembly built before the body, 'panel' = body panel. wraps = the role's layers are sewn around a unit of the named role in ONE step (stand layers + collar). attachTo = the unit is sewn onto a panel of that role before the body is assembled. noGroup = pieces of this role are never joined to each other (belt loops). attachEarly = a part whose edge seam names its host piece is sewn onto that piece while it is still flat, before the piece meets its family or any panel; with no seam it waits until the panel is assembled (05-PROD-DIAGNOSIS F2). layersWrap = identical layers in a family of this role are a yoke and its facing, sewn around the rest of the family in one step (the burrito) — layer pairs of every other role are joined first (05-PROD-DIAGNOSIS F1). Draft dictionary: the same caveat as PIECE_NAME_ZONE_DRAFT in operation-inference.ts — check with the technologist. Tokens are any letters (Latin, Cyrillic, Polish): Russian and Polish piece names read the same roles (рукав = sleeve, przód = front). liningTokens mark a piece as lining by name when the card gives it no cloth (LIN_FRONT, подклад спинки); they never name a role or a family.",
   "hands": {
     "L": [
       "l",
@@ -98,7 +98,19 @@
     },
     {
       "id": "waistband",
-      "tokens": ["wb", "waistband", "blt", "belt", "ws", "waist", "пояс", "pas", "pasek"],
+      "tokens": [
+        "wb",
+        "waistband",
+        "blt",
+        "belt",
+        "ws",
+        "wst",
+        "wstb",
+        "waist",
+        "пояс",
+        "pas",
+        "pasek"
+      ],
       "zone": "WAIST",
       "name": "Waistband",
       "level": "sub"
@@ -189,7 +201,8 @@
       "name": "Pocket",
       "level": "sub",
       "attachTo": ["front", "back"],
-      "sameHand": true
+      "sameHand": true,
+      "attachEarly": true
     },
     {
       "id": "placket",
@@ -221,7 +234,8 @@
       "tokens": ["yoke", "yk", "кокетка", "кокетки", "karczek"],
       "zone": "BACK",
       "name": "Yoke",
-      "level": "panel"
+      "level": "panel",
+      "layersWrap": true
     },
     {
       "id": "front",
@@ -247,7 +261,8 @@
       "tokens": ["bp", "back", "bk", "bck", "спинка", "спинки", "спина", "tył", "tyl"],
       "zone": "BACK",
       "name": "Back",
-      "level": "panel"
+      "level": "panel",
+      "layersWrap": true
     },
     {
       "id": "side",
@@ -263,6 +278,12 @@
       "name": "Sleeve",
       "level": "panel"
     }
+  ],
+  "_contextRolesNote": "F3: a family token that names a role ONLY on a card with no piece of that role (P_L_U, PU_LIN, PD_LIN are fronts when nothing else is a front; BPU a back; MP a side panel). Draft, one team's abbreviations — a brand dictionary edited in the admin is the place for these.",
+  "contextRoles": [
+    { "tokens": ["p", "pu", "pd"], "role": "front" },
+    { "tokens": ["bpu"], "role": "back" },
+    { "tokens": ["mp"], "role": "side" }
   ],
   "liningTokens": [
     "lining",

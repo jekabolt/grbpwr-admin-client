@@ -105,10 +105,17 @@ export function ScaleStep({ api }: { api: ImportSessionApi }) {
                       component='span'
                       className='block tabular-nums'
                     >
-                      {c.measuredMm != null && c.declaredMm != null
-                        ? `measured ${fmtMm(c.measuredMm)} · nominal ${fmtMm(c.declaredMm, 0)}`
-                        : 'no evidence on the sheet'}
-                      {c.evidence?.text ? ` · “${c.evidence.text}”` : ''}
+                      {[
+                        c.measuredMm != null && c.declaredMm != null
+                          ? `measured ${fmtMm(c.measuredMm)} · nominal ${fmtMm(c.declaredMm, 0)}`
+                          : // A0.1: the file's own units are the evidence, quoted below
+                            c.method === 'declared' && c.evidence?.text
+                            ? ''
+                            : 'no evidence on the sheet',
+                        c.evidence?.text ? `“${c.evidence.text}”` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </Text>
                   </span>
                   <Pill tone={c.confidence >= 0.9 ? 'ok' : c.confidence > 0 ? 'attention' : 'mut'}>

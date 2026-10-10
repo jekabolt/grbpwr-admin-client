@@ -17,15 +17,19 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   applySkeletonAIOrder,
+  skeletonAIDecisionKey,
   skeletonAIPins,
   skeletonAIPlaces,
   skeletonAIRequest,
   skeletonAIStepIndex,
+  skeletonAIStructure,
   skeletonStepSignatures,
 } from 'lib/assembly-skeleton/ai';
+import { readablePieceName } from 'lib/assembly-skeleton/names';
 import { orderTemplate } from 'lib/assembly-skeleton/skeleton';
 import { namesIn } from 'lib/assembly-skeleton/skeleton/build-skeleton';
 import { replayExisting } from 'lib/assembly-skeleton/skeleton/existing';
+import { unitLeaves } from 'lib/assembly-skeleton/union';
 import {
   SKELETON,
   type SeamCandidate,
@@ -52,8 +56,20 @@ import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './asse
 import { SkeletonAIBar, useSkeletonAI } from './assembly-skeleton-ai';
 import { makeSkeletonDeps } from './assembly-skeleton-deps';
 import {
+  autoGuess,
+  autoTickedGuesses,
+  closeOrder,
+  defaultPick,
+  defaultPicks,
+  isDerived,
+  orderClosure,
+  ridersOf,
+  settlePicks,
+  type StepPick,
+} from './assembly-skeleton-ticks';
+import {
   buildSkeletonFacts,
-  skeletonCategoryOf,
+  skeletonCategoryRead,
   skeletonGate,
   skeletonLined,
   useSkeletonProposal,
@@ -73,6 +89,9 @@ import {
   type SkeletonUndoResult,
 } from './operations-field';
 
+/** The unit pictograms' cap (`unitPictures` maxPieces): a bigger unit is said in numbers. */
+const UNIT_PICTO_MAX = 16;
+
 /** The footer's last word: an apply's answer, or what its undo did. */
 type PanelResult = SkeletonApplyResult & {
   /** Rows an undo took back. */
@@ -83,7 +102,7 @@ type PanelResult = SkeletonApplyResult & {
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
-import type { TechCardFormData } from './schema';
+import { toPurposeEnum, type TechCardFormData } from './schema';
 import type { PieceShapes } from './use-piece-shapes';
 
 /**
@@ -201,61 +220,6 @@ const pinsOf = (p: SkeletonProposal): Record<string, number> => {
   return pins;
 };
 
-/** A press or processing step that rides on the join it follows (its tick, its confidence). */
-const isDerived = (s: SkeletonStep): boolean => s.derivedFrom != null && s.derivedFrom >= 0;
-
-/** Steps that ride on step `i`, directly or through another derived step. */
-const ridersOf = (steps: readonly SkeletonStep[], i: number): number[] => {
-  const out: number[] = [];
-  const parents = new Set([i]);
-  steps.forEach((s, j) => {
-    if (isDerived(s) && parents.has(s.derivedFrom!)) {
-      out.push(j);
-      parents.add(j);
-    }
-  });
-  return out;
-};
-
-type StepPick = { accepted: boolean; applied: boolean };
-
-const defaultPick = (s: SkeletonStep): StepPick => ({
-  // A guess is shown, not applied: it stays unticked until a person ticks it.
-  accepted: s.confidence >= SKELETON.accept,
-  applied: false,
-});
-
-/**
- * Picks made consistent with the order: a derived step follows its join's tick, and a step whose
- * input is a unit made by an UNTICKED step (the final press on «Shirt» when «Set sleeves» is a
- * guess) is unticked too — ticked, it would refer to a unit the batch never makes, and «apply all
- * accepted» would refuse the whole batch.
- */
-const settlePicks = (
-  steps: readonly SkeletonStep[],
-  base: readonly StepPick[],
-  followJoin: (i: number) => boolean,
-): StepPick[] => {
-  const madeBy = new Map<string, number>();
-  const picks: StepPick[] = [];
-  steps.forEach((s, i) => {
-    const pick = { ...base[i] };
-    if (isDerived(s) && followJoin(i) && picks[s.derivedFrom!])
-      pick.accepted = picks[s.derivedFrom!].accepted;
-    if (pick.accepted && !pick.applied)
-      pick.accepted = s.inputs.every((k) => {
-        const j = madeBy.get(k);
-        return j === undefined || picks[j].accepted;
-      });
-    picks.push(pick);
-    if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
-  });
-  return picks;
-};
-
-const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] =>
-  settlePicks(steps, steps.map(defaultPick), () => true);
-
 /** The person's ticks carried from the proposal they were made on to its rebuild. */
 const carryPicks = (
   prev: SkeletonProposal | null,
@@ -265,11 +229,14 @@ const carryPicks = (
   if (!prev || prevPicks.length !== prev.steps.length) return defaultPicks(next.steps);
   const old = new Map(skeletonStepSignatures(prev.steps).map((sig, i) => [sig, prevPicks[i]]));
   const carried = skeletonStepSignatures(next.steps).map((sig) => old.get(sig));
-  return settlePicks(
+  const settled = settlePicks(
     next.steps,
     next.steps.map((s, i) => carried[i] ?? defaultPick(s)),
     (i) => !carried[i],
   );
+  // A new step (a rebuild's) gets the default ticks, the order-closing ones included; a step the
+  // person already had keeps their tick.
+  return closeOrder(next.steps, settled, (i) => !!carried[i]);
 };
 
 // ── the door ────────────────────────────────────────────────────────────────────────────────────
@@ -554,20 +521,26 @@ function AssemblySkeletonPanel({
 
   const patterns = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
     []) as TechCardFormData['patterns'];
-  const category = useMemo(
+  const purpose = useWatch<TechCardFormData>({ name: 'purpose' }) as string | undefined;
+  // The template: the card's category; with none set, what the piece names say (and the panel says
+  // it read them).
+  const categoryReading = useMemo(
     () =>
-      skeletonCategoryOf(
+      skeletonCategoryRead({
         categoryNames,
-        skeletonLined({
+        hasLining: skeletonLined({
           cloth,
           pieces: formPieces ?? [],
           aliases,
           patterns: patterns ?? [],
           bomLines: (bomItems ?? []) as Parameters<typeof skeletonLined>[0]['bomLines'],
         }),
-      ),
-    [categoryNames, cloth, formPieces, aliases, patterns, bomItems],
+        pieceNames: (formPieces ?? []).map((p) => p.name ?? ''),
+        purpose: toPurposeEnum(purpose),
+      }),
+    [categoryNames, cloth, formPieces, aliases, patterns, bomItems, purpose],
   );
+  const category = categoryReading.category;
 
   // The card's own deps: zones read its BOM and piece↔block links (lining steps → LINING zone).
   const deps = useMemo(
@@ -581,7 +554,8 @@ function AssemblySkeletonPanel({
 
   const pieceName = useMemo(() => {
     const m = new Map<string, string>();
-    for (const p of formPieces ?? []) if (p.lineKey) m.set(p.lineKey, p.name?.trim() || p.lineKey);
+    for (const p of formPieces ?? [])
+      if (p.lineKey) m.set(p.lineKey, readablePieceName(p.name?.trim() ?? '') || p.lineKey);
     return m;
   }, [formPieces]);
   const pieceKeys = useMemo(() => new Set(pieceName.keys()), [pieceName]);
@@ -655,6 +629,10 @@ function AssemblySkeletonPanel({
     run.status === 'ready' && readFor === mode && !(mode === 'append' && nothingToAdd)
       ? run.proposal
       : null;
+  // «use AI structure» in force: the category and units the skeleton on screen was built on, kept on
+  // the proposal itself — every rebuild of it (a chosen reading, the AI's readings) keeps them, and
+  // closing / reopening the panel cannot lose them. null = the engine's own structure.
+  const aiStructure = proposal?.structure ?? null;
 
   const unitName = useMemo(() => {
     const m = new Map<string, string>();
@@ -717,6 +695,23 @@ function AssemblySkeletonPanel({
     proposal?.steps.forEach((s) => s.inputs.forEach((k) => used.add(k)));
     return used;
   }, [proposal]);
+  // How many pieces each unit of the proposal holds — the pictograms stop at UNIT_PICTO_MAX.
+  const unitLeafCount = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!proposal) return m;
+    for (const [k, l] of unitLeaves(
+      [
+        ...formSteps.map((s) => ({
+          inputs: s.inputs.map((x) => x.key),
+          outputUnitKey: s.outputUnitKey,
+        })),
+        ...proposal.steps,
+      ],
+      (k) => pieceKeys.has(k),
+    ))
+      m.set(k, l.length);
+    return m;
+  }, [proposal, formSteps, pieceKeys]);
   // Pieces the card's own order has sewn are not «left out» of an appended skeleton.
   const leftOut = built.facts.pieces
     .map((p) => p.pieceKey)
@@ -727,7 +722,10 @@ function AssemblySkeletonPanel({
   const setAccepted = (i: number, accepted: boolean) => {
     const riders = new Set(proposal ? ridersOf(proposal.steps, i) : []);
     onPicks((prev) =>
-      prev.map((p, j) => (j === i || (riders.has(j) && !p.applied) ? { ...p, accepted } : p)),
+      // A person's tick is theirs: it is no longer «ticked to close the order».
+      prev.map((p, j) =>
+        j === i || (riders.has(j) && !p.applied) ? { accepted, applied: p.applied } : p,
+      ),
     );
   };
 
@@ -739,7 +737,7 @@ function AssemblySkeletonPanel({
   const chooseReading = (step: SkeletonStep, v: number) => {
     if (!proposal || !step.decision || step.decision.chosen === v || readingsLocked) return;
     const pins: SkeletonPins = { ...pinsOf(proposal), [step.decision.id]: v };
-    onRun(built.facts, deps, { pins });
+    onRun(built.facts, deps, { ...aiStructure, pins });
   };
 
   // ── THE AI SECOND OPINION (lane E). Asked only on a press; its order and readings are shown
@@ -749,8 +747,13 @@ function AssemblySkeletonPanel({
       proposal
         ? skeletonAIRequest({
             proposal,
-            facts: built.facts,
-            templateStages: orderTemplate(built.facts.category).stages.map((st) => st.label),
+            // the category the skeleton on screen was read as (the AI's, once its structure is used)
+            facts: proposal.structure?.category
+              ? { ...built.facts, category: proposal.structure.category }
+              : built.facts,
+            templateStages: orderTemplate(
+              proposal.structure?.category ?? built.facts.category,
+            ).stages.map((st) => st.label),
             seamWords,
             techCardId,
           })
@@ -774,8 +777,16 @@ function AssemblySkeletonPanel({
       (answer.order?.length ?? 0) > 0
         ? applySkeletonAIOrder(proposal, answer.order ?? [], aiResult.sent)
         : null;
-    return { indexOf, places, warningsAt, picks, order, pins: skeletonAIPins(proposal, answer) };
-  }, [proposal, aiResult]);
+    return {
+      indexOf,
+      places,
+      warningsAt,
+      picks,
+      order,
+      pins: skeletonAIPins(proposal, answer),
+      structure: skeletonAIStructure(built.facts, answer),
+    };
+  }, [proposal, aiResult, built.facts]);
   const [adopted, setAdopted] = useState<SkeletonProposal | null>(null);
   // Each step's place among the steps that stand on their own (riders follow their join).
   const ownPlace = useMemo(() => {
@@ -796,7 +807,20 @@ function AssemblySkeletonPanel({
   };
   const useAIReadings = () => {
     if (!aiView || readingsLocked || aiView.pins.changed === 0) return;
-    onRun(built.facts, deps, { pins: aiView.pins.pins });
+    onRun(built.facts, deps, { ...aiStructure, pins: aiView.pins.pins });
+  };
+  // The AI's structure replaces the engine's: its readings (pins) belonged to the old structure.
+  const useAIStructure = () => {
+    if (!aiView || readingsLocked || aiView.structure.changes === 0) return;
+    const next = {
+      ...(aiView.structure.category ? { category: aiView.structure.category } : {}),
+      ...(aiView.structure.units.length ? { units: aiView.structure.units } : {}),
+    };
+    onRun(built.facts, deps, next);
+  };
+  const backToEngine = () => {
+    if (readingsLocked) return;
+    onRun(built.facts, deps);
   };
 
   // What a confirmed replace takes with the old steps, said before the confirming press.
@@ -859,6 +883,22 @@ function AssemblySkeletonPanel({
     const n = numbers.get(i);
     if (n != null) return String(n);
     return picks[i]?.applied && !replacing ? 'an applied step' : 'an unticked step';
+  };
+
+  // THE ORDER MUST CLOSE: where the proposal ends, which guesses the default ticks took to get there,
+  // and which open reading the whole order hangs on — said above the steps, not found in them.
+  const closure = useMemo(() => (proposal ? orderClosure(proposal.steps) : null), [proposal]);
+  // Every guess the default ticks took — joins that close the order, and riders ticked with a join
+  // read on its own evidence — is listed here and marked on its row.
+  const { closing: closingJoins, withJoin: riderGuesses } = autoTickedGuesses(steps, picks, shown);
+  const decidingJoins = (closure?.openDecisions ?? []).filter(
+    (i) => picks[i]?.accepted && !picks[i]?.applied && !!steps[i]?.decision,
+  );
+  const looseEnds = closure && closure.ends.length > 1 ? closure.ends : [];
+  const listNumbers = (idx: number[]) => {
+    const ns = idx.map((i) => numbers.get(i)).filter((n): n is number => n != null);
+    if (ns.length > 8) return `${ns.slice(0, 7).join(', ')} and ${ns.length - 7} more`;
+    return ns.length > 1 ? `${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}` : String(ns[0]);
   };
 
   return (
@@ -972,6 +1012,21 @@ function AssemblySkeletonPanel({
                   >
                     order from the “{proposal.template}” template
                   </Text>
+                  {categoryReading.source !== 'card' && (
+                    <Text
+                      size='micro'
+                      variant='label'
+                      component='span'
+                      data-skeleton-category-read={categoryReading.source}
+                      title='set the category on the card to choose the order template yourself'
+                    >
+                      {categoryReading.source === 'pieces'
+                        ? `· category not set: read as ${categoryReading.category} from the pieces (${categoryReading.why})`
+                        : categoryReading.source === 'purpose'
+                          ? '· category not set: an auxiliary item, so the generic order'
+                          : `· category not set, and the piece names do not say which garment (${categoryReading.why}), so the generic order: set the category`}
+                    </Text>
+                  )}
                   <Chip
                     nonForm
                     selected={pressOpen}
@@ -1002,6 +1057,16 @@ function AssemblySkeletonPanel({
                     inUse: !!adopted && adopted === proposal,
                     onUse: useAIOrder,
                   }}
+                  structure={{
+                    category: aiView?.structure.category ?? null,
+                    from: built.facts.category,
+                    reason: aiView?.structure.categoryReason ?? '',
+                    units: aiView?.structure.units.length ?? 0,
+                    inUse: !!aiStructure,
+                    locked: lockedWhy,
+                    onUse: useAIStructure,
+                    onBack: backToEngine,
+                  }}
                   stepName={(id) => {
                     const i = aiView?.indexOf(id);
                     if (i == null) return null;
@@ -1023,6 +1088,90 @@ function AssemblySkeletonPanel({
                   </Text>
                 ))}
 
+                {(closingJoins.length > 0 ||
+                  riderGuesses.length > 0 ||
+                  decidingJoins.length > 0 ||
+                  looseEnds.length > 0) && (
+                  <div
+                    className='mb-1.5 flex flex-col gap-1 border border-borderColor px-2 py-1.5'
+                    data-skeleton-closure={closure?.ends.length ?? 0}
+                  >
+                    {closingJoins.length > 0 && (
+                      <Text size='micro' component='p' data-skeleton-closing={closingJoins.length}>
+                        <b>
+                          ticked to close the order: {closingJoins.length === 1 ? 'step' : 'steps'}{' '}
+                          {listNumbers(closingJoins)}
+                        </b>
+                        <span className='text-labelColor'>
+                          {' '}
+                          {closingJoins.length === 1 ? 'is a guess' : 'are guesses'} (the standard
+                          order, no seam read) on the way to one finished garment. Check{' '}
+                          {closingJoins.length === 1 ? 'it' : 'them'}; unticked, the order stops
+                          short of the garment.
+                        </span>
+                      </Text>
+                    )}
+                    {riderGuesses.length > 0 && (
+                      <Text
+                        size='micro'
+                        component='p'
+                        data-skeleton-rider-guesses={riderGuesses.length}
+                      >
+                        <b>
+                          ticked with their join: {riderGuesses.length === 1 ? 'step' : 'steps'}{' '}
+                          {listNumbers(riderGuesses)}
+                        </b>
+                        <span className='text-labelColor'>
+                          {' '}
+                          {riderGuesses.length === 1 ? 'is a guess' : 'are guesses'} riding on a
+                          join the pattern did read. Check{' '}
+                          {riderGuesses.length === 1 ? 'it' : 'them'}, or untick.
+                        </span>
+                      </Text>
+                    )}
+                    {decidingJoins.map((i) => {
+                      const st = steps[i];
+                      const vs = variantsOf(st);
+                      return (
+                        <div key={i} data-skeleton-deciding={i}>
+                          <Text size='micro' component='p'>
+                            <b>step {numbers.get(i) ?? stepNumber(i)} decides the order:</b>
+                            <span className='text-labelColor'>
+                              {' '}
+                              {vs.length} readings are as likely as each other, and every step after
+                              it follows the one picked. Pick it first:
+                            </span>
+                          </Text>
+                          <ChipRow className='mt-0.5'>
+                            {vs.map((v, vi) => (
+                              <Chip
+                                key={vi}
+                                nonForm
+                                selected={(st.decision?.chosen ?? 0) === vi}
+                                disabled={readingsLocked}
+                                onClick={() => chooseReading(st, vi)}
+                                title={`${v.reason} · choosing it re-reads the steps after it`}
+                                data-skeleton-deciding-variant={`${i}.${vi}`}
+                              >
+                                {v.inputs.map(nameOf).join(' + ')}
+                              </Chip>
+                            ))}
+                          </ChipRow>
+                        </div>
+                      );
+                    })}
+                    {looseEnds.length > 0 && (
+                      <Text size='micro' component='p' data-skeleton-loose-ends={looseEnds.length}>
+                        <b>the proposal ends in {looseEnds.length} units, not one garment:</b>
+                        <span className='text-labelColor'>
+                          {' '}
+                          {looseEnds.map(nameOf).join(', ')}. The pattern did not say how they meet;
+                          join them by hand after applying.
+                        </span>
+                      </Text>
+                    )}
+                  </div>
+                )}
                 {steps.length === 0 && (
                   <Text size='micro' variant='label' component='p' data-skeleton-empty='1'>
                     no step to propose: the pattern gave nothing to join. The reasons are above
@@ -1070,6 +1219,7 @@ function AssemblySkeletonPanel({
                         unitInput={
                           renderUnit ? (k: string) => renderUnit(k, nameOf(k), proposal) : undefined
                         }
+                        unitSize={(k) => unitLeafCount.get(k) ?? 0}
                         follows={isDerived(raw) ? stepNumber(raw.derivedFrom!) : null}
                         readingsLocked={readingsLocked}
                         ai={
@@ -1080,7 +1230,7 @@ function AssemblySkeletonPanel({
                                 reason: aiView.places[i]?.reason ?? '',
                                 warnings: aiView.warningsAt.get(i) ?? [],
                                 pick: raw.decision
-                                  ? aiView.picks.get(raw.decision.id) ?? null
+                                  ? aiView.picks.get(skeletonAIDecisionKey(raw.decision.id)) ?? null
                                   : null,
                               }
                             : null
@@ -1356,6 +1506,7 @@ function SkeletonLine({
   singleRefusal,
   unitSlot,
   unitInput,
+  unitSize,
   follows,
   readingsLocked,
   ai,
@@ -1378,6 +1529,8 @@ function SkeletonLine({
   unitSlot: ReactNode;
   /** An earlier unit taken as an input, drawn as its pictogram; null → the plain «▣ key» tile. */
   unitInput?: (unitKey: string) => ReactNode;
+  /** How many pieces an earlier unit holds (a unit above the pictogram cap is said, not blank). */
+  unitSize?: (unitKey: string) => number;
   /** The number of the join this step rides on («30»), or null for a step of its own. */
   follows: string | null;
   /** A step of this proposal is already in the order: the readings can no longer change. */
@@ -1441,6 +1594,23 @@ function SkeletonLine({
             ) : unitInput?.(k) ? (
               <span className='contents' data-skeleton-unit-input={k}>
                 {unitInput(k)}
+              </span>
+            ) : (unitSize?.(k) ?? 0) > UNIT_PICTO_MAX ? (
+              // Too many pieces for a glyph (the pictograms stop at 16): said, not left blank.
+              <span
+                className='relative flex size-14 shrink-0 flex-col items-center justify-center border border-dashed border-borderColor bg-bgColor pb-3'
+                title={`${nameOf(k)} (${k}): ${unitSize!(k)} pieces, too many for a pictogram`}
+                data-skeleton-unit-big={k}
+              >
+                <Text size='control' component='span' className='font-bold tabular-nums'>
+                  {unitSize!(k)}
+                </Text>
+                <Text size='nano' variant='label' component='span' className='uppercase'>
+                  pieces
+                </Text>
+                <span className='absolute inset-x-0 bottom-0 truncate px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase'>
+                  ▣ {k}
+                </span>
               </span>
             ) : (
               // Unit codes are short and the schematic prints them with «▣» — the same mark here.
@@ -1585,11 +1755,24 @@ function SkeletonLine({
           </ChipRow>
         </div>
       )}
-      {pick.accepted && follows == null && step.confidence < SKELETON.accept && (
-        <Text size='micro' variant='label' component='span' className='w-full pl-[3.25rem]'>
-          a guess — kept because you ticked it
-        </Text>
-      )}
+      {pick.accepted &&
+        step.confidence < SKELETON.accept &&
+        (follows == null || autoGuess(pick)) && (
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='w-full pl-[3.25rem]'
+            data-skeleton-step-closing={pick.closing ? index : undefined}
+            data-skeleton-step-autoguess={autoGuess(pick) ? index : undefined}
+          >
+            {pick.closing
+              ? 'a guess, ticked to close the order: check it'
+              : pick.withJoin
+                ? 'a guess, ticked with its join: check it'
+                : 'a guess — kept because you ticked it'}
+          </Text>
+        )}
       {ai?.warnings.map((m, wi) => (
         <Text
           key={`ai${wi}`}

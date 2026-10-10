@@ -117,6 +117,100 @@ console.log('\n1 · category and lining');
       )
       .join('; '),
   );
+  // The WHOLE category dictionary (fixtures/category-map.json): every chain reads as the template
+  // the fixture names, unlined and lined. Whole words, families: «short_sleeve < shirts» is a
+  // shirt (not shorts), «sweat < shorts» shorts (not a sweat), «dress_shoes» / «high_top < sneakers»
+  // shoes (not a dress, not a tee), «shirt < dresses» a dress.
+  const catMap = JSON.parse(readFileSync(resolve(here, 'fixtures/category-map.json'), 'utf8')).rows;
+  const badMap = catMap.filter(
+    ([n, un, li]) => E.skeletonCategoryOf(n, false) !== un || E.skeletonCategoryOf(n, true) !== li,
+  );
+  const must = [
+    ['short_sleeve', 'shirts', 'tops'],
+    ['sweat', 'shorts', 'bottoms'],
+    ['high_top', 'sneakers', 'shoes'],
+    ['dress_shoes', 'shoes'],
+    ['shirt', 'dresses'],
+  ];
+  const mustWant = ['shirt', 'trousers', 'generic', 'generic', 'dress'];
+  const mapRows = new Map(catMap.map(([n, un]) => [n.join('<'), un]));
+  const badMust = must.filter((n, i) => mapRows.get(n.join('<')) !== mustWant[i]);
+  gate(
+    `category dictionary: ${catMap.length} categories → template as the fixture says (whole words, one family)`,
+    catMap.length >= 200 && badMap.length === 0 && badMust.length === 0,
+    [
+      ...badMap.map(
+        ([n, un, li]) =>
+          `${n.join(' < ')} → ${E.skeletonCategoryOf(n, false)}/${E.skeletonCategoryOf(n, true)} (want ${un}/${li})`,
+      ),
+      ...badMust.map((n) => `fixture says ${n.join(' < ')} → ${mapRows.get(n.join('<'))}`),
+    ].join('; '),
+  );
+  // No category on the card: the piece names say what it is, and the panel says it read them.
+  // Only DISCRIMINATING evidence reads a garment: sleeves alone are a dress too, a waistband on
+  // left / right panels a skirt too, a lining with a collar a lined shirt too.
+  const byPieces = [
+    // A collar alone is a dress's too, a facing alone a lined shirt's too: generic, said in words.
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], false, null, 'generic'], // collared dress?
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], true, null, 'generic'], // lined, no placket
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'PLACKET_L', 'PLACKET_R'], false, null, 'shirt'],
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'PLACKET_L'], true, null, 'shirt'], // lined shirt
+    [
+      ['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'FACING_L', 'FACING_R'],
+      true,
+      null,
+      'generic', // lined shirt with facings, or a jacket — no lapel to tell
+    ],
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR', 'LAPEL_L'], true, null, 'jacket-lined'],
+    [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECK_RIB'], false, null, 'tee'],
+    [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECKBAND'], false, null, 'tee'],
+    [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R'], false, null, 'generic'], // collarless dress
+    [['BACK', 'FRONT', 'SLEEVE', 'HOOD_L', 'HOOD_R'], false, null, 'hoodie'],
+    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'generic'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'generic'], // panelled skirt
+    [['FRONT', 'BACK', 'FLY', 'WB'], false, null, 'trousers'],
+    [['FRONT_L', 'FRONT_R', 'BACK_L', 'BACK_R', 'WB', 'GUSSET'], false, null, 'trousers'],
+    [['BP', 'LP_1', 'RP_1', 'plank', 'CLR'], false, null, 'generic'],
+    [['BLT_L', 'BLT_R', 'BP', 'FP'], false, 'TECH_CARD_PURPOSE_AUXILIARY', 'generic'],
+    [['inner_panel', 'outer_panel'], false, null, 'generic'],
+  ];
+  const badP = byPieces.filter(
+    ([n, l, p, want]) => E.skeletonCategoryFromPieces(n, l, p).category !== want,
+  );
+  const readP = E.skeletonCategoryRead({
+    categoryNames: [],
+    hasLining: false,
+    pieceNames: byPieces[2][0], // sleeves, collar and plackets: a shirt
+  });
+  const readC = E.skeletonCategoryRead({
+    categoryNames: ['shirts', 'tops'],
+    hasLining: false,
+    pieceNames: byPieces[4][0],
+  });
+  const readN = E.skeletonCategoryRead({
+    categoryNames: [],
+    hasLining: false,
+    pieceNames: ['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R'],
+  });
+  gate(
+    `no category: ${byPieces.length} piece sets read only on discriminating evidence (else generic, said); a card's own category wins`,
+    badP.length === 0 &&
+      readP.source === 'pieces' &&
+      readP.category === 'shirt' &&
+      /sleeves/.test(readP.why) &&
+      readC.source === 'card' &&
+      readN.source === 'none' &&
+      readN.category === 'generic' &&
+      /no collar, cuff, hood or neck rib/.test(readN.why) &&
+      readC.category === 'shirt',
+    [
+      ...badP.map(
+        ([n, l, p, w]) =>
+          `${n.join(',')}${l ? ' lined' : ''} → ${E.skeletonCategoryFromPieces(n, l, p).category} (want ${w})`,
+      ),
+      `read ${JSON.stringify(readP)} / ${JSON.stringify(readC)} / ${JSON.stringify(readN)}`,
+    ].join('; '),
+  );
   const pieces = [{ name: 'FRONT' }, { name: 'BACK' }];
   const lined = [
     ['no signal', { cloth: null, pieces }, false],
@@ -161,6 +255,54 @@ console.log('\n1 · category and lining');
 }
 
 // ── 2. append mode on SS26-005: an order in progress ──────────────────────────────────────────
+// ── 1b. default ticks: only what convergence needs; every auto-ticked guess said ────────────────
+console.log('\n1b · default ticks close the order, and say every guess they took');
+{
+  const st = (inputs, out, confidence, derivedFrom) => ({
+    inputs,
+    outputUnitKey: out,
+    outputUnitName: out,
+    operationType: derivedFrom == null ? 'MACHINE' : 'PRESS_OPEN',
+    zone: 'X',
+    seams: [],
+    confidence,
+    reason: '',
+    source: 'template',
+    ...(derivedFrom == null ? {} : { derivedFrom }),
+  });
+  const steps = [
+    st(['A', 'B'], 'U1', 0.9), //            0 sure join
+    st(['U1'], '', 0.9, 0), //                1 its press (sure)
+    st(['U1'], '', 0.4, 0), //                2 a guessed hem riding on the sure join
+    st(['U1', 'C'], 'U2', 0.25), //           3 guessed body join — the order needs it
+    st(['U2'], '', 0.25, 3), //               4 its press
+    st(['U2'], '', 0.25, 3), //               5 its side seams
+    st(['U2'], '', 0.25, 5), //               6 a press riding on the side seams
+  ];
+  const picks = E.defaultPicks(steps);
+  const ticked = picks.map((p) => p.accepted);
+  const guessTicked = steps
+    .map((s, i) => i)
+    .filter((i) => picks[i].accepted && steps[i].confidence < E.SKELETON.accept);
+  const unmarked = guessTicked.filter((i) => !E.autoGuess(picks[i]));
+  const listed = E.autoTickedGuesses(steps, picks);
+  const all = [...listed.closing, ...listed.withJoin].sort();
+  gate(
+    'closing ticks the guessed join the order needs, not the riders on it',
+    ticked[3] && !ticked[4] && !ticked[5] && !ticked[6] && picks[3].closing === true,
+    JSON.stringify(picks),
+  );
+  gate(
+    'every guess the defaults tick is marked on its row and listed in the notice (riders too)',
+    guessTicked.length === 2 &&
+      unmarked.length === 0 &&
+      JSON.stringify(all) === JSON.stringify(guessTicked) &&
+      listed.closing.join() === '3' &&
+      listed.withJoin.join() === '2',
+    `ticked guesses ${guessTicked} · unmarked ${unmarked} · listed ${JSON.stringify(listed)}`,
+  );
+}
+
 console.log('\n2 · append mode (SS26-005)');
 {
   const ssFacts = { ...ssRaw, category: 'shirt' };

@@ -14,6 +14,8 @@
 import { readSeamGraph } from '../../src/lib/assembly-skeleton/pipeline';
 import {
   SKELETON,
+  type SkeletonDeps,
+  type SkeletonFacts,
   type SkeletonProposal,
   type SkeletonStep,
 } from '../../src/lib/assembly-skeleton/types';
@@ -43,10 +45,37 @@ import {
   buildSkeletonFacts,
   DEFAULT_SKELETON_PROVIDER,
   skeletonCategoryOf,
+  skeletonCategoryRead,
   skeletonGate,
   skeletonLined,
 } from '../../src/components/managers/tech-card/components/assembly-skeleton-source';
 import { namesIn } from '../../src/lib/assembly-skeleton/skeleton/build-skeleton';
+import { orderTemplate } from '../../src/lib/assembly-skeleton/skeleton';
+import {
+  isJoin,
+  pairPicture,
+  pieceFamilies,
+  readMap,
+  type MapRead,
+  type MapStep,
+} from '../../src/lib/assembly-skeleton/map';
+import {
+  applySkeletonAIOrder,
+  SKELETON_AI,
+  skeletonAIDecisionKey,
+  skeletonAIPins,
+  skeletonAIStructure,
+  skeletonAIRequest,
+} from '../../src/lib/assembly-skeleton/ai';
+import {
+  createAdminServiceClient,
+  type SuggestAssemblySkeletonRequest,
+  type SuggestAssemblySkeletonResponse,
+} from '../../src/api/proto-http/admin';
+import { skeletonAISpendOfError } from '../../src/components/managers/tech-card/components/assembly-skeleton-ai';
+import { seamSheetOf } from '../../src/components/managers/tech-card/assembly-print/seam-sheet';
+import { typesetSeams } from '../../src/components/managers/tech-card/assembly-print/paper';
+import { seamWords } from '../../src/components/managers/tech-card/components/assembly-skeleton-panel';
 import { replayExisting } from '../../src/lib/assembly-skeleton/skeleton/existing';
 import { scopeKeyOfBinding } from '../../src/components/managers/tech-card/components/bom-purpose';
 import {
@@ -84,8 +113,13 @@ import {
   type PieceCloth,
 } from '../../src/components/managers/tech-card/components/piece-cloth';
 import {
+  defaultPicks,
+  orderClosure,
+} from '../../src/components/managers/tech-card/components/assembly-skeleton-ticks';
+import {
   mapTechCardToForm,
   techCardSchema,
+  toPurposeEnum,
   type TechCardFormData,
 } from '../../src/components/managers/tech-card/components/schema';
 
@@ -102,6 +136,8 @@ export type CardInput = {
   files: Record<string, ArrayBuffer>;
   /** Size dictionary id → name (the prod dictionary). */
   sizeNames: Record<string, string>;
+  /** --ai-answers: the raw JSON SuggestAssemblySkeleton returned for this card's request. */
+  aiAnswer?: Json;
 };
 
 // ── the DXF chain (usePieceShapes) ─────────────────────────────────────────────────────────────
@@ -226,6 +262,15 @@ function partitions(joins: { name: string; inputs: string[] }[], pieceKeys: Set<
   });
 }
 
+/** Two partitions of one set nest: every part of one lies inside a part of the other or is a union of them. */
+function laminar(a: string[][], b: string[][]): boolean {
+  const sets = a.map((p) => new Set(p));
+  return b.every((part) => {
+    const hit = sets.filter((s) => part.some((k) => s.has(k)));
+    return hit.length === 1 || hit.every((s) => [...s].every((k) => part.includes(k)));
+  });
+}
+
 const isDerived = (s: SkeletonStep) => s.derivedFrom != null && s.derivedFrom >= 0;
 const isAmbiguous = (s: SkeletonStep) =>
   (s.alternatives?.length ?? 0) > 0 || s.seams.some((c) => (c.ambiguousWith?.length ?? 0) > 0);
@@ -245,6 +290,52 @@ function picStats(pics: Map<string, UnionPicture>, leaves: Map<string, string[]>
     over15: [...pics.entries()]
       .filter(([, p]) => p.overlap > 0.15)
       .map(([k, p]) => `${k} ${(100 * p.overlap).toFixed(0)}%`),
+  };
+}
+
+/** ASSEMBLY MAP over one order: STEP coverage, pair pictures, PIECES numbering. */
+function mapStats(read: MapRead, nameOf: (k: string) => string) {
+  const joins = read.steps.map((_, i) => i).filter((i) => read.steps[i].sews && isJoin(read, i));
+  const withEdges = joins.filter((i) => (read.seams[i] ?? []).length > 0);
+  let pics = 0;
+  let maxOv = 0;
+  let oneSided = 0;
+  let overflow = 0;
+  for (const i of withEdges) {
+    const p = pairPicture(read, i);
+    if (!p) continue;
+    pics++;
+    maxOv = Math.max(maxOv, p.overlap);
+    if (p.sides.length < 2) oneSided++;
+    overflow += p.overflow.length;
+  }
+  const fams = pieceFamilies(read);
+  const members = fams.flatMap((f) => f.members);
+  const numbered = fams.reduce(
+    (a, f) => a + f.picture.edges.filter((e) => e.steps.length).length,
+    0,
+  );
+  const sewnSteps = new Set(fams.flatMap((f) => f.picture.edges.flatMap((e) => e.steps)));
+  return {
+    joinIdx: withEdges,
+    unreadIdx: joins.filter((i) => !(read.seams[i] ?? []).length),
+    machineJoins: joins.length,
+    joinsWithEdges: withEdges.length,
+    coveragePct: joins.length ? Math.round((100 * withEdges.length) / joins.length) : null,
+    unreadJoins: joins
+      .filter((i) => !(read.seams[i] ?? []).length)
+      .slice(0, 8)
+      .map((i) => `${(i + 1) * 10}: ${read.steps[i].inputs.map((k) => nameOf(k)).join(' + ')}`),
+    pairPictures: pics,
+    pairMaxOverlapPct: +(100 * maxOv).toFixed(1),
+    pairOneSided: oneSided,
+    pairOverflowPieces: overflow,
+    families: fams.length,
+    familyNames: fams.map((f) => f.name + (f.tag ? ` ${f.tag}` : '')).join(', '),
+    familiesCoverEveryPieceOnce:
+      members.length === read.graph.pieces.length && new Set(members).size === members.length,
+    numberedEdges: numbered,
+    stepsNumberedOnPieces: sewnSteps.size,
   };
 }
 
@@ -293,27 +384,89 @@ function printInput(insert: Json): PrintCardInput {
   return { pieces, steps };
 }
 
-/**
- * The panel's default ticks: defaultPicks = settlePicks(defaultPick) (module-private there, copied):
- * a rider follows its join; a step taking a unit an unticked step makes is unticked.
- */
+/** The panel's default ticks (assembly-skeleton-ticks.ts — the panel's own module, not a copy). */
 function defaultTicks(steps: SkeletonStep[]): boolean[] {
-  const ticks: boolean[] = [];
-  const madeBy = new Map<string, number>();
-  steps.forEach((s, i) => {
-    let t = s.confidence >= SKELETON.accept;
-    if (isDerived(s) && ticks[s.derivedFrom!] !== undefined) t = ticks[s.derivedFrom!];
-    if (t) t = s.inputs.every((k) => (madeBy.has(k) ? ticks[madeBy.get(k)!] : true));
-    ticks.push(t);
-    if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
-  });
-  return ticks;
+  return defaultPicks(steps).map((p) => p.accepted);
+}
+
+/** The server's request doors (assembly_skeleton_ai.go), as scripts/assembly-skeleton/ai.mjs restates them. */
+function serverRefusal(req: Json): string | null {
+  const B = SKELETON_AI as Json;
+  const runes = (x: string) => [...(x ?? '')].length;
+  if (!req.pieces.length || req.pieces.length > B.maxPieces) return 'pieces count';
+  if (!req.steps.length || req.steps.length > B.maxSteps) return 'steps count';
+  if (req.seams.length > B.maxSeams) return 'seams count';
+  if (req.decisions.length > B.maxDecisions) return 'decisions count';
+  const CLOTH = new Set([
+    '',
+    'main',
+    'lining',
+    'pocketing',
+    'interfacing',
+    'insulation',
+    'contrast',
+    'mesh',
+    'other',
+  ]);
+  const pieces = new Set<string>();
+  for (const p of req.pieces) {
+    if (!p.key || pieces.has(p.key) || runes(p.key) > B.keyRunes) return `piece key ${p.key}`;
+    if (runes(p.name) > B.nameRunes) return `piece name ${p.key}`;
+    if (!CLOTH.has(p.cloth)) return `cloth ${p.cloth}`;
+    if (!['', 'L', 'R'].includes(p.hand)) return `hand ${p.hand}`;
+    if (p.count < 0 || p.count > 20) return `count ${p.count}`;
+    pieces.add(p.key);
+  }
+  for (const x of req.seams) {
+    if (!pieces.has(x.a) || !pieces.has(x.b)) return `seam ${x.a}/${x.b}`;
+    if (!(x.score >= 0 && x.score <= 1)) return `seam score ${x.score}`;
+    if (!['edge', 'partial', 'composite', 'surface', 'closure'].includes(x.kind))
+      return `seam kind ${x.kind}`;
+    if (runes(x.evidence) > B.evidenceRunes) return 'seam evidence';
+  }
+  const inputsOk = (ins: string[]) =>
+    ins.length >= 1 && ins.length <= B.maxInputs && ins.every((k) => k && runes(k) <= B.keyRunes);
+  const decisions = new Set<string>();
+  for (const d of req.decisions) {
+    if (!d.id || decisions.has(d.id)) return `decision ${d.id}`;
+    if (d.readings.length < 2 || d.readings.length > B.maxReadings) return `readings of ${d.id}`;
+    if (d.chosen < 0 || d.chosen >= d.readings.length) return `chosen of ${d.id}`;
+    if (!d.readings.every((r: Json) => inputsOk(r.inputs) && runes(r.reason) <= B.reasonRunes))
+      return `reading of ${d.id}`;
+    decisions.add(d.id);
+  }
+  const ids = new Map<string, number>();
+  const units = new Set<string>();
+  for (const [i, x] of (req.steps as Json[]).entries()) {
+    if (ids.has(x.id)) return `step id ${x.id} twice`;
+    ids.set(x.id, i);
+  }
+  let ordered = 0;
+  for (const [i, x] of (req.steps as Json[]).entries()) {
+    if (!['MACHINE', 'PRESS', 'PRESS_OPEN', 'FUSING', 'HANDWORK'].includes(x.operation))
+      return `operation ${x.operation}`;
+    if (x.outputUnit && (units.has(x.outputUnit) || pieces.has(x.outputUnit)))
+      return `unit ${x.outputUnit}`;
+    if (x.outputUnit) units.add(x.outputUnit);
+    if (x.decisionId && !decisions.has(x.decisionId)) return `decision of ${x.id}`;
+    if (!inputsOk(x.inputs)) return `inputs of ${x.id}`;
+    if (runes(x.label) > B.labelRunes || runes(x.outputName) > B.nameRunes)
+      return `words of ${x.id}`;
+    if (x.follows) {
+      const j = ids.get(x.follows);
+      if (j == null || j >= i) return `${x.id} follows ${x.follows}`;
+    } else ordered++;
+  }
+  if (!ordered) return 'no ordered step';
+  return JSON.stringify(req).length >= 128 * 1024 ? 'over 128 KiB' : null;
 }
 
 // ── one card ───────────────────────────────────────────────────────────────────────────────────
 
 export async function runCard(input: CardInput) {
   const out: Json = { code: input.code, source: input.source, errors: [] as string[] };
+  // --ai-dump: the request exactly as the generated client sends it, and the panel's signatures
+  let aiDump: AIWire | null = null;
   const T0 = performance.now();
   const insert = input.card.techCard ?? {};
   const form = mapTechCardToForm(input.card as never);
@@ -359,7 +512,14 @@ export async function runCard(input: CardInput) {
     patterns: (form.patterns ?? []) as never,
     bomLines: (form.bomItems ?? []) as never,
   });
-  const category = skeletonCategoryOf(input.categoryNames, hasLining);
+  const categoryRead = skeletonCategoryRead({
+    categoryNames: input.categoryNames,
+    hasLining,
+    pieceNames: formPieces.map((p) => p.name ?? ''),
+    purpose: toPurposeEnum((input.card as Json)?.techCard?.purpose),
+  });
+  const category = categoryRead.category;
+  out.categoryRead = categoryRead;
   out.gate = skeletonGate({
     frozen: false,
     hasDxf: S.pack.length > 0,
@@ -487,6 +647,31 @@ export async function runCard(input: CardInput) {
     out.unresolvedEdgePairs = proposal.unresolved.length;
     const used = new Set(steps.flatMap((s) => s.inputs));
     out.leftOut = built.facts.pieces.filter((p) => !used.has(p.pieceKey)).map((p) => p.name);
+    // Does the proposal finish ONE garment? Every card piece should land in the one terminal unit
+    // (or be named as left out with a reason in the warnings).
+    {
+      const leavesOf = new Map<string, string[]>();
+      const consumed = new Set<string>();
+      for (const s of steps) {
+        if (!s.outputUnitKey) continue;
+        const ls = s.inputs.flatMap((k) => leavesOf.get(k) ?? [k]);
+        s.inputs.forEach((k) => consumed.add(k));
+        leavesOf.set(s.outputUnitKey, [...new Set(ls)]);
+      }
+      const terminals = [...leavesOf.keys()].filter((k) => !consumed.has(k));
+      const inTerminal = new Set(terminals.length === 1 ? leavesOf.get(terminals[0]) : []);
+      const outside = built.facts.pieces
+        .filter((p) => p.pieceKey && !inTerminal.has(p.pieceKey))
+        .map((p) => p.name);
+      const said = outside.filter((n) => proposal.warnings.some((w) => w.includes(n)));
+      out.terminal = {
+        units: terminals.length,
+        pieces: built.facts.pieces.filter((p) => p.pieceKey).length,
+        inTerminal: inTerminal.size,
+        outside,
+        outsideUnsaid: outside.filter((n) => !said.includes(n)),
+      };
+    }
     out.warnings = proposal.warnings;
     out.engineRuleBroken = proposal.warnings.filter((w) => /^rule \d+ broken/.test(w));
     const sources = steps.reduce<Record<string, number>>(
@@ -540,6 +725,21 @@ export async function runCard(input: CardInput) {
         releaseSample: rel.slice(0, 2).map((v) => v.message),
       };
     }
+    // F8: do the default ticks reach one finished garment, and does the proposal (every join)?
+    {
+      const all = steps.map((s) => asA(s.inputs, s.outputUnitKey, s.outputUnitName));
+      const relAll = assemblyReleaseCheck(sweepPieces, all, assemblySweep(sweepPieces, all));
+      const picks = defaultPicks(steps);
+      const closure = orderClosure(steps);
+      out.ticks = {
+        reachOne: steps.length > 0 && (out.sweep_replace as Json).release === 0,
+        proposalReachesOne: steps.length > 0 && relAll.length === 0,
+        proposalEnds: closure.ends.length,
+        closing: picks.filter((p, i) => p.closing && !isDerived(steps[i])).length,
+        deciding: closure.openDecisions.length,
+        proposalRelease: relAll.slice(0, 2).map((v) => namesIn(v.message, nameOfPiece)),
+      };
+    }
     // the technologist's own order, for reference (is the card itself clean?)
     {
       const res = assemblySweep(sweepPieces, formSteps);
@@ -579,49 +779,41 @@ export async function runCard(input: CardInput) {
     }
 
     // 5. the technologist's truth (cards that already carry units)
-    const truthJoins = existingOps
-      .filter((o) => (o.outputUnitKey ?? '').trim())
-      .map((o) => ({
-        name: (o.outputUnitKey ?? '').trim(),
-        inputs: (o.inputKeys ?? []).filter(Boolean),
-      }));
-    if (truthJoins.length) {
-      const truth = partitions(truthJoins, pieceKeys);
-      const ours = partitions(
-        steps
-          .filter((s) => s.outputUnitKey)
-          .map((s) => ({ name: s.outputUnitKey, inputs: s.inputs })),
+    const cmp = compareTruth(steps, existingOps, pieceKeys, nameOfPiece);
+    if (cmp) out.compare = cmp;
+
+    // 5b. the ORACLE of the structural lever: the technologist's own units fed as hints
+    // (SkeletonOptions.units, what «use AI structure» passes) — how much of their tree the engine
+    // rebuilds when the structure is right. A ceiling for the AI's units, not a score of the AI.
+    if (cmp) {
+      const truth = partitions(
+        existingOps
+          .filter((o) => (o.outputUnitKey ?? '').trim())
+          .map((o) => ({
+            name: (o.outputUnitKey ?? '').trim(),
+            inputs: (o.inputKeys ?? []).filter(Boolean),
+          })),
         pieceKeys,
       );
-      const byInputs = new Set(ours.map((o) => o.key));
-      const byLeaves = new Set(ours.map((o) => o.leaves));
-      const word = (leaves: string) =>
-        leaves
-          .split('+')
-          .map((k) => nameOfPiece.get(k) || k)
-          .join('+');
-      out.compare = {
-        technologistJoins: truth.length,
-        ourJoins: ours.length,
-        byInputs: truth.filter((t) => byInputs.has(t.key)).length,
-        byContents: truth.filter((t) => byLeaves.has(t.leaves)).length,
-        mismatches: truth
-          .filter((t) => !byInputs.has(t.key))
-          .map((t) => {
-            const near = ours.find((o) => o.leaves === t.leaves);
-            const tw = t.parts.map((p) => word(p.sort().join('+'))).join(' | ');
-            return near
-              ? `${t.name}: same pieces, other grouping — tech {${tw}} vs ours {${near.parts.map((p) => word(p.sort().join('+'))).join(' | ')}}`
-              : `${t.name}: {${tw}} — not made by any of our joins`;
-          }),
+      const units = truth
+        .map((t) => ({
+          pieceKeys: t.leaves.split('+').filter((k) => pieceKeys.has(k)),
+          name: t.name,
+        }))
+        .filter((u) => u.pieceKeys.length >= 2);
+      const op = await DEFAULT_SKELETON_PROVIDER!(built.facts, deps, { units });
+      const oc = compareTruth(op.steps, existingOps, pieceKeys, nameOfPiece);
+      out.oracle = {
+        hints: units.length,
+        steps: op.steps.length,
+        compare: oc ?? null,
+        sweep: sweepHard(
+          op.steps,
+          formPieces.map((p) => ({ lineKey: p.lineKey ?? '', name: p.name ?? '' })),
+          pieceKeys,
+        ),
+        warnings: op.warnings.filter((w) => w.startsWith('AI unit')).slice(0, 5),
       };
-      // order: the rank of reproduced joins in ours vs the technologist's
-      const ourRank = new Map(ours.map((o, i) => [o.key, i]));
-      const hits = truth.filter((t) => ourRank.has(t.key)).map((t) => ourRank.get(t.key)!);
-      let inv = 0;
-      for (let i = 0; i < hits.length; i++)
-        for (let j = i + 1; j < hits.length; j++) if (hits[i] > hits[j]) inv++;
-      out.compare.orderInversions = `${inv} of ${(hits.length * (hits.length - 1)) / 2} pairs`;
     }
   }
 
@@ -670,7 +862,7 @@ export async function runCard(input: CardInput) {
 
   // 7. print sheets (assembly-print/page.tsx Document): route and map, shapes on, unionOf from the
   //    print reader's pictures
-  let print: { route: string; map: string; report: Json } | null = null;
+  let print: { route: string; map: string; report: Json; seams?: string } | null = null;
   if ((insert.operations ?? []).length) {
     try {
       const M = assemblyPrintModel(printInput(insert));
@@ -702,6 +894,118 @@ export async function runCard(input: CardInput) {
       out.errors.push(`print threw: ${(e as Error).stack?.split('\n').slice(0, 5).join(' | ')}`);
     }
   }
+  // 8. ASSEMBLY MAP (STEP + PIECES) over the card's own order (use-map-model: the form's ops, the
+  //    card seam graph) and over the proposal; the print SEAM MAP (seam-sheet.ts + typesetSeams);
+  //    the AI request (the panel's useMemo) against the server's doors — no call is made.
+  let seams: string | null = null;
+  try {
+    const t3 = performance.now();
+    const graph = built.facts.pieces.length ? readSeamGraph(built.facts) : null;
+    const nameOf = (k: string) => nameOfPiece.get(k) || `[${k}]`;
+    if (graph) {
+      const cardSteps: MapStep[] = existingOps.map((o) => ({
+        inputs: (o.inputKeys ?? []).filter(Boolean),
+        outputUnitKey: (o.outputUnitKey ?? '').trim(),
+        sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      }));
+      if (cardSteps.length) out.mapCard = mapStats(readMap(graph, cardSteps), nameOf);
+      if (proposal) {
+        const pSteps: MapStep[] = proposal.steps.map((s) => ({
+          inputs: s.inputs,
+          outputUnitKey: s.outputUnitKey,
+          sews: s.operationType === 'MACHINE',
+          seams: s.seams,
+        }));
+        out.mapProposal = mapStats(readMap(proposal.graph ?? graph, pSteps), nameOf);
+      }
+      out.mapMs = Math.round(performance.now() - t3);
+    }
+    if ((insert.operations ?? []).length) {
+      const M = assemblyPrintModel(printInput(insert));
+      const sheet = seamSheetOf(
+        graph,
+        existingOps.map((o) => ({
+          ...(o as Json),
+          inputKeys: o.inputKeys ?? [],
+          outputUnitKey: o.outputUnitKey ?? '',
+          sews: o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        })) as never,
+        M,
+        {
+          defaultSeamClass: form.construction?.defaultSeamClass,
+          machines: form.construction?.equipmentDefaults?.machines ?? [],
+        } as never,
+      );
+      const doc = typesetSeams(
+        M,
+        {
+          code: insert.styleNumber ?? input.code,
+          name: insert.name ?? '',
+          season: '',
+          revision: '',
+          unreleased: true,
+          warnings: [],
+          printedOn: '2026-10-10',
+        },
+        sheet,
+      );
+      seams = paperSvgString(doc);
+      const A1 = { w: 841, h: 594 };
+      out.seamSheet = {
+        size: `${doc.w.toFixed(0)}×${doc.h.toFixed(0)} mm`,
+        families: sheet?.families.length ?? 0,
+        keyRows: sheet?.key.length ?? 0,
+        unreadKeyRows: sheet?.key.filter((k) => k.unread).length ?? 0,
+        legendRows: sheet?.legend?.length ?? 0,
+        // the largest sheet is A1; landing on it with more height than A1 = it did not fit
+        fits: !(doc.w >= A1.w && doc.h > A1.h + 0.01),
+        overWidth: doc.report.overWidth,
+      };
+    }
+    if (proposal) {
+      const r = skeletonAIRequest({
+        proposal,
+        facts: built.facts,
+        templateStages: orderTemplate(built.facts.category).stages.map((st) => st.label),
+        seamWords,
+        // the panel sends the card's own id (0 for a card not saved yet)
+        techCardId: Number((input.card as Json).id) || 0,
+      });
+      if (!r.ok) out.ai = { ok: false, why: r.why };
+      else {
+        aiDump = await aiWire(r.request, r.signatures);
+        const req = r.request as Json;
+        out.ai = {
+          ok: true,
+          pieces: req.pieces.length,
+          steps: req.steps.length,
+          ordered: req.steps.filter((s: Json) => !s.follows).length,
+          seams: req.seams.length,
+          decisions: req.decisions.length,
+          bytes: JSON.stringify(req).length,
+          serverRefusal: serverRefusal(req),
+        };
+        if (input.aiAnswer)
+          out.aiVariants = await aiVariants({
+            proposal,
+            answer: input.aiAnswer,
+            sent: r.signatures,
+            facts: built.facts,
+            deps,
+            existingOps,
+            pieceKeys,
+            nameOfPiece,
+            sweepPieces: formPieces.map((p) => ({ lineKey: p.lineKey ?? '', name: p.name ?? '' })),
+          });
+      }
+    }
+  } catch (e) {
+    out.errors.push(
+      `map/seams/ai threw: ${(e as Error).stack?.split('\n').slice(0, 6).join(' | ')}`,
+    );
+  }
+  if (print && seams) (print as Json).seams = seams;
+  else if (seams) print = { route: '', map: '', report: {}, seams } as never;
   out.totalMs = Math.round(performance.now() - T0);
 
   // the stand needs the form and the contour map as the card would hold them
@@ -711,8 +1015,251 @@ export async function runCard(input: CardInput) {
     categoryNames: input.categoryNames,
     shapes: [...S.shapeByKey.entries()],
     cloth: cloth ? [...cloth.entries()] : null,
+    mapPick: out.mapCard ? { withEdges: out.mapCard.joinIdx, unread: out.mapCard.unreadIdx } : null,
   };
-  return { report: out, stand, print, proposal };
+  // indexes are for the UI stand only; the report keeps counts
+  for (const k of ['mapCard', 'mapProposal']) {
+    if (out[k]) {
+      delete out[k].joinIdx;
+      delete out[k].unreadIdx;
+    }
+  }
+  return { report: out, stand, print, proposal, aiDump };
+}
+
+// ── the AI second opinion, offline (--ai-dump / --ai-answers) ─────────────────────────────────
+
+/** What the generated client puts on the wire for SuggestAssemblySkeleton, and the panel's map back. */
+export type AIWire = { path: string; method: string; body: string; signatures: string[] };
+
+/**
+ * The request through the GENERATED client with a capturing handler — nothing leaves the process.
+ * The body is the client's own JSON.stringify, as the panel's first press sends it
+ * (`asker({ ...req, force: again })`, again = false).
+ */
+async function aiWire(req: SuggestAssemblySkeletonRequest, signatures: string[]): Promise<AIWire> {
+  let seen: { path: string; method: string; body: string | null } | null = null;
+  const client = createAdminServiceClient((r) => {
+    seen = r;
+    return Promise.resolve({});
+  });
+  await client.SuggestAssemblySkeleton({ ...req, force: false });
+  const w = seen as unknown as { path: string; method: string; body: string | null };
+  return { path: w.path, method: w.method, body: w.body ?? '', signatures };
+}
+
+/** Hard sweep violations (rule 4 = a release warning, not a refusal) of a list of skeleton steps. */
+function sweepHard(
+  steps: readonly SkeletonStep[],
+  sweepPieces: { lineKey: string; name: string }[],
+  pieceKeys: Set<string>,
+): { hard: number; rules: number[]; sample: string[] } {
+  const res = assemblySweep(
+    sweepPieces,
+    steps.map((s) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, s.inputs),
+      outputUnitKey: s.outputUnitKey,
+      outputUnitName: s.outputUnitName,
+    })),
+  );
+  const hard = res.violations.filter((v) => v.rule !== 4);
+  return {
+    hard: hard.length,
+    rules: [...new Set(hard.map((v) => v.rule))],
+    sample: hard.slice(0, 3).map((v) => `r${v.rule} step ${v.step + 1}: ${v.message}`),
+  };
+}
+
+/**
+ * The answer read back exactly as the panel acts on it, measured against the technologist:
+ *   a = the engine as is;
+ *   b = «use AI readings» — skeletonAIPins → onRun(facts, deps, { pins }) (only when a pick differs;
+ *       the panel's door is shut at 0 changed, so b = a then);
+ *   c = b + «use AI order» — applySkeletonAIOrder(b, order, sent) as aiView recomputes it on the
+ *       proposal on screen (the door is shut when the order is blocked or moves nothing: c = b).
+ * A refusal (grpc-gateway error JSON) is recorded with its AI_SPEND detail, as the bar shows it.
+ */
+async function aiVariants(args: {
+  proposal: SkeletonProposal;
+  answer: Json;
+  sent: string[];
+  facts: SkeletonFacts;
+  deps: SkeletonDeps;
+  existingOps: NonNullable<TechCardFormData['operations']>;
+  pieceKeys: Set<string>;
+  nameOfPiece: Map<string, string>;
+  sweepPieces: { lineKey: string; name: string }[];
+}): Promise<Json> {
+  const { proposal, sent, facts, deps, existingOps, pieceKeys, nameOfPiece, sweepPieces } = args;
+  const raw = args.answer;
+  const metric = (p: SkeletonProposal) => {
+    const c = compareTruth(p.steps, existingOps, pieceKeys, nameOfPiece);
+    return {
+      steps: p.steps.length,
+      inputs: c?.byInputs ?? null,
+      contents: c?.byContents ?? null,
+      tree: c?.treeRefinement ?? null,
+      joins: c?.technologistJoins ?? null,
+      orderInversions: c?.orderInversions ?? null,
+    };
+  };
+  const out: Json = { a: metric(proposal) };
+  // A refused press: no order / picks / warnings, a status with details (AI_SPEND = still charged).
+  const refused =
+    raw &&
+    typeof raw.message === 'string' &&
+    raw.order == null &&
+    raw.picks == null &&
+    raw.warnings == null;
+  if (refused) {
+    const sp = skeletonAISpendOfError(raw);
+    out.refused = raw.message;
+    out.cost = {
+      costUsd: sp?.costUsd ?? '',
+      calls: sp?.calls ?? 0,
+      unknownCalls: sp?.unknownCalls ?? 0,
+    };
+    out.b = out.a;
+    out.c = out.a;
+    return out;
+  }
+  const answer = raw as SuggestAssemblySkeletonResponse;
+  out.model = answer.model ?? '';
+  out.cached = !!answer.cached;
+  out.cost = {
+    costUsd: answer.costUsd ?? '',
+    // an older server reports no count: one call is the floor of a non-cached answer (skeletonAICost)
+    calls: Number(answer.calls ?? 0) || (answer.cached ? 0 : 1),
+    unknownCalls: Number(answer.unknownCalls ?? 0) || 0,
+  };
+  out.warnings = (answer.warnings ?? []).length;
+  out.warningKinds = (answer.warnings ?? []).map((w) => w.kind ?? '');
+  out.notes = answer.notes ?? [];
+  out.orderItems = (answer.order ?? []).length;
+
+  // b — «use AI readings»
+  const { pins, changed } = skeletonAIPins(proposal, answer);
+  out.picks = (answer.picks ?? []).length;
+  const keys = new Set(Object.keys(pins).map(skeletonAIDecisionKey));
+  out.picksMapped = (answer.picks ?? []).filter((p) => keys.has(p.decisionId ?? '')).length;
+  out.picksUsed = changed;
+  let b = proposal;
+  if (changed > 0) b = await DEFAULT_SKELETON_PROVIDER!(facts, deps, { pins });
+  out.b = metric(b);
+  out.b.rebuilt = changed > 0;
+
+  // the order on the engine's own proposal (what «use AI order» would do WITHOUT the readings)
+  if ((answer.order?.length ?? 0) > 0) {
+    const onA = applySkeletonAIOrder(proposal, answer.order ?? [], sent);
+    out.orderOnEngine = onA.ok ? { moved: onA.moved } : { refused: onA.why };
+  }
+
+  // c — «use AI order» on the proposal on screen after b
+  let c = b;
+  if ((answer.order?.length ?? 0) === 0) out.orderRefusal = 'no AI order';
+  else {
+    const o = applySkeletonAIOrder(b, answer.order ?? [], sent);
+    if (!o.ok) out.orderRefusal = o.why;
+    else {
+      out.moved = o.moved;
+      if (o.moved > 0) c = o.proposal;
+    }
+  }
+  out.c = metric(c);
+  out.c.applied = c !== b;
+  // the sweep over what c would write: every step, and the default-ticked batch (replace mode)
+  out.c.sweepAll = sweepHard(c.steps, sweepPieces, pieceKeys);
+  const ticks = defaultTicks(c.steps);
+  out.c.sweepBatch = sweepHard(
+    c.steps.filter((_, i) => ticks[i]),
+    sweepPieces,
+    pieceKeys,
+  );
+  out.b.sweepAll = sweepHard(b.steps, sweepPieces, pieceKeys).hard;
+
+  // d — «use AI structure»: the AI's category + units on the engine (pins dropped, as the panel)
+  const st = skeletonAIStructure(facts, answer);
+  out.structure = {
+    category: st.category,
+    units: st.units.length,
+    unitsOffered: (answer.units ?? []).length,
+  };
+  let d = proposal;
+  if (st.changes > 0)
+    d = await DEFAULT_SKELETON_PROVIDER!(facts, deps, {
+      ...(st.category ? { category: st.category } : {}),
+      ...(st.units.length ? { units: st.units } : {}),
+    });
+  out.d = metric(d);
+  out.d.rebuilt = st.changes > 0;
+  out.d.sweepAll = sweepHard(d.steps, sweepPieces, pieceKeys);
+  out.d.unmet = d.warnings.filter((w) => w.startsWith('AI unit')).length;
+  return out;
+}
+
+// ── the technologist's truth ───────────────────────────────────────────────────────────────────
+
+/** Our joins vs the card's own joins (cards that already carry units); null when it has none. */
+function compareTruth(
+  steps: readonly SkeletonStep[],
+  existingOps: NonNullable<TechCardFormData['operations']>,
+  pieceKeys: Set<string>,
+  nameOfPiece: Map<string, string>,
+): Json | null {
+  const out: Json = {};
+  const truthJoins = existingOps
+    .filter((o) => (o.outputUnitKey ?? '').trim())
+    .map((o) => ({
+      name: (o.outputUnitKey ?? '').trim(),
+      inputs: (o.inputKeys ?? []).filter(Boolean),
+    }));
+  if (!truthJoins.length) return null;
+  {
+    const truth = partitions(truthJoins, pieceKeys);
+    const ours = partitions(
+      steps
+        .filter((s) => s.outputUnitKey)
+        .map((s) => ({ name: s.outputUnitKey, inputs: s.inputs })),
+      pieceKeys,
+    );
+    const byInputs = new Set(ours.map((o) => o.key));
+    const byLeaves = new Set(ours.map((o) => o.leaves));
+    const word = (leaves: string) =>
+      leaves
+        .split('+')
+        .map((k) => nameOfPiece.get(k) || k)
+        .join('+');
+    out.compare = {
+      technologistJoins: truth.length,
+      ourJoins: ours.length,
+      byInputs: truth.filter((t) => byInputs.has(t.key)).length,
+      byContents: truth.filter((t) => byLeaves.has(t.leaves)).length,
+      // 05-PROD-DIAGNOSIS §2: a technologist join counts when one of our joins has the same
+      // pieces AND its inputs are compatible with theirs (each of our inputs lies inside one of
+      // theirs or is a union of theirs) — one tree refines the other there, so granularity
+      // (three in one step vs two steps) is an alternative, a different grouping is an error.
+      treeRefinement: truth.filter((t) =>
+        ours.some((o) => o.leaves === t.leaves && laminar(t.parts, o.parts)),
+      ).length,
+      mismatches: truth
+        .filter((t) => !byInputs.has(t.key))
+        .map((t) => {
+          const near = ours.find((o) => o.leaves === t.leaves);
+          const tw = t.parts.map((p) => word(p.sort().join('+'))).join(' | ');
+          return near
+            ? `${t.name}: same pieces, other grouping — tech {${tw}} vs ours {${near.parts.map((p) => word(p.sort().join('+'))).join(' | ')}}`
+            : `${t.name}: {${tw}} — not made by any of our joins`;
+        }),
+    };
+    // order: the rank of reproduced joins in ours vs the technologist's
+    const ourRank = new Map(ours.map((o, i) => [o.key, i]));
+    const hits = truth.filter((t) => ourRank.has(t.key)).map((t) => ourRank.get(t.key)!);
+    let inv = 0;
+    for (let i = 0; i < hits.length; i++)
+      for (let j = i + 1; j < hits.length; j++) if (hits[i] > hits[j]) inv++;
+    out.compare.orderInversions = `${inv} of ${(hits.length * (hits.length - 1)) / 2} pairs`;
+  }
+  return out.compare;
 }
 
 // ── a corpus DXF as a card (no prod card behind it): one piece per block identity ──────────────

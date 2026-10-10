@@ -10,6 +10,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
 import { SectionHeader } from 'ui/components/section-header';
+import { AssemblyMap } from 'components/managers/tech-card/components/assembly-map/assembly-map';
+import { ActiveStepProvider } from 'components/managers/tech-card/components/assembly-map/active-step';
 
 import { useSkeletonDoor } from 'components/managers/tech-card/components/assembly-skeleton-panel';
 import {
@@ -62,33 +64,45 @@ function Stand({ c }: { c: StandCard }) {
     categoryNames,
     renderUnit: renderProposalUnit,
   });
+  // as construction-tab: ONE seam-graph provider and ONE active-step store over the map column
+  // and the rail (the sketch is a placeholder — no media in the stand)
   return (
-    <section className='border border-borderColor bg-bgColor p-4' data-stand-section>
-      <SectionHeader
-        title={`operations — assembly order · ${c.code}`}
-        question='— what each step does, where, on which pieces, and how long it takes'
-        action={skeleton.headerAction}
-      />
+    <ActiveStepProvider>
       <CardUnitPicturesProvider
         shapes={shapes.shapeByKey}
         cloth={cloth}
         categoryNames={categoryNames}
       >
-        <OperationsField
-          storedHasMedia={false}
-          storedHasUnits={(c.form.operations ?? []).some((o) => !!o.outputUnitKey)}
-          frozen={false}
-          pieceShapes={shapes.shapeByKey}
-          applyRequest={skeleton.applyRequest}
-          onSkeletonApplied={skeleton.onSkeletonApplied}
-          skeletonUndoRequest={skeleton.skeletonUndoRequest}
-          onSkeletonUndone={skeleton.onSkeletonUndone}
-          onSkeletonUndoable={skeleton.onSkeletonUndoable}
-          emptyAction={skeleton.emptyAction}
-        />
+        <div className='flex flex-row items-start gap-3.5'>
+          <div className='w-[320px] shrink-0 space-y-2.5' data-stand-map>
+            <AssemblyMap sketch={<div className='p-4 text-12'>sketch (not in the stand)</div>} />
+          </div>
+          <section
+            className='min-w-0 flex-1 border border-borderColor bg-bgColor p-4'
+            data-stand-section
+          >
+            <SectionHeader
+              title={`operations — assembly order · ${c.code}`}
+              question='— what each step does, where, on which pieces, and how long it takes'
+              action={skeleton.headerAction}
+            />
+            <OperationsField
+              storedHasMedia={false}
+              storedHasUnits={(c.form.operations ?? []).some((o) => !!o.outputUnitKey)}
+              frozen={false}
+              pieceShapes={shapes.shapeByKey}
+              applyRequest={skeleton.applyRequest}
+              onSkeletonApplied={skeleton.onSkeletonApplied}
+              skeletonUndoRequest={skeleton.skeletonUndoRequest}
+              onSkeletonUndone={skeleton.onSkeletonUndone}
+              onSkeletonUndoable={skeleton.onSkeletonUndoable}
+              emptyAction={skeleton.emptyAction}
+            />
+            {skeleton.panel}
+          </section>
+        </div>
       </CardUnitPicturesProvider>
-      {skeleton.panel}
-    </section>
+    </ActiveStepProvider>
   );
 }
 
