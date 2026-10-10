@@ -167,7 +167,9 @@ export class Session {
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
-  /** Several DXF files, one per size, merged into one drawing at open (owner decision 5). */
+  /** Several DXF files, one per size (owner decision 5): merged into one drawing by the first read
+   * (R4: in the cancellable read stage, never at open), kept for the rereads. */
+  private isDxfSet = false;
   private dxfSet: DxfSet | null = null;
   /** The set's sizes as the reader saw them in the merged drawing (`settleDxfSet`). */
   private setSizes: DxfSetSize[] = [];
@@ -229,11 +231,10 @@ export class Session {
         'unsupported-format',
         `one run reads one format — got ${[...kinds].join(' + ')}. Import each format on its own.`,
       );
-    // Several DXF files = one file per size: merged into one drawing here, read as one DXF after.
-    if (routes[0].route === 'dxf' && files.length > 1)
-      this.dxfSet = mergeDxfSet(
-        files.map((f, i) => ({ id: String(i), name: f.name, bytes: f.bytes })),
-      );
+    // Several DXF files = one file per size: merged into one drawing by the read stage (R4: the
+    // set is guarded, decoded and merged there — cancellable, after its size checks), read as one
+    // DXF after.
+    this.isDxfSet = routes[0].route === 'dxf' && files.length > 1;
     this.files = files.map((f, i) => ({
       id: String(i),
       name: f.name,
@@ -330,7 +331,7 @@ export class Session {
     this.dxf = null;
     // C4: one work budget for all files of this read (adapters/budget.ts)
     const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
-    if (this.dxfSet) return [await this.readDxfSet(this.dxfSet, ctx, runOpts)];
+    if (this.isDxfSet) return [await this.readDxfSet(ctx, runOpts)];
     const n = this.files.length;
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
@@ -404,32 +405,44 @@ export class Session {
   }
 
   /**
-   * A per-size DXF set: every file is hashed (provenance), the merged drawing is read as the one
-   * DXF of the run, and the reader must see one size per file (`settleDxfSet`).
+   * A per-size DXF set: every file is hashed (provenance); the first read merges the files into one
+   * drawing (`mergeDxfSet`: raw-byte guards before any decoding, a cancel check between files) and
+   * keeps it for the rereads; the merged drawing is read as the one DXF of the run on the run's
+   * work budget, and the reader must see one size per file (`settleDxfSet`).
    */
-  private async readDxfSet(set: DxfSet, ctx: StageCtx, opts: ExtractOpts): Promise<SourceDoc> {
+  private async readDxfSet(ctx: StageCtx, opts: ExtractOpts): Promise<SourceDoc> {
     const n = this.files.length;
+    const total = 3; // one unit each: hash the files · merge them · read the merged drawing
+    const members: { id: string; name: string; bytes: ArrayBuffer }[] = [];
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
       const info = this.files[i];
+      if (this.dxfSet && this.sha.has(info.id)) continue;
       const blob = this.blobs.get(`file:${i}`);
       if (!blob)
         throw new ImportError('no-session', 'the session lost its files — read them again');
-      if (!this.sha.has(info.id)) this.sha.set(info.id, await sha256Hex(await blob.arrayBuffer()));
-      ctx.progress(i, n + 1, info.name);
+      const bytes = await blob.arrayBuffer();
+      if (!this.sha.has(info.id)) this.sha.set(info.id, await sha256Hex(bytes));
+      if (!this.dxfSet) members.push({ id: info.id, name: info.name, bytes });
+      ctx.progress(i / n, total, info.name);
     }
+    const set = (this.dxfSet ??= await mergeDxfSet(members, {
+      checkCancel: ctx.checkCancel,
+      progress: (d, t, note) => ctx.progress(1 + d / Math.max(1, t), total, note),
+    }));
+    members.length = 0;
     const bytes = set.bytes.slice().buffer;
     const read = await readDxf({ id: '0', name: set.name, bytes }, opts, (d, t, note) => {
       ctx.checkCancel();
-      ctx.progress(n + d / Math.max(1, t), n + 1, `${set.name}${note ? ` · ${note}` : ''}`);
+      ctx.progress(2 + d / Math.max(1, t), total, `${set.name}${note ? ` · ${note}` : ''}`);
     });
     assertFiniteDoc(read.doc); // C4: the set path bypasses pickExtractor's boundary check
     const seg = segmentDxf(read);
     if (!seg.presegmented)
       throw new ImportError('corrupt', `${set.name}: the merged drawing has no block inserts`);
-    this.setSizes = settleDxfSet(set, seg);
+    this.setSizes = settleDxfSet(set, seg, read.meta.encoding);
     this.dxf = { read, seg };
-    ctx.progress(n + 1, n + 1);
+    ctx.progress(total, total);
     return read.doc;
   }
 

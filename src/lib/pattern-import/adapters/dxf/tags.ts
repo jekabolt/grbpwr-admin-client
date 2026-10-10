@@ -116,12 +116,22 @@ export function loadDxf(bytes: ArrayBuffer): LoadedDxf {
  * — counted on the bytes, ~1 ms per MB. The largest CLO export of the corpus has 0.23 M lines.
  */
 export function refuseLongDxf(u8: Uint8Array, max: number = PATIMPORT.maxDxfLines): void {
+  if (countDxfLines(u8, max) > max)
+    throw inputTooLarge(
+      `the DXF has more than ${max / 1e6} million lines, more than the importer reads (a graded CLO export of a whole garment is well under 1 million). Export fewer sizes or only the pattern pieces per file.`,
+    );
+}
+
+/**
+ * Line feeds in the raw bytes (no decoding), counting stops once past `stopAfter` — so the scan of
+ * a hostile file costs at most `stopAfter` lines. Shared by the single-file guard above and the
+ * per-size set intake (worker/dxf-set.ts), which bounds the SUM over its files.
+ */
+export function countDxfLines(u8: Uint8Array, stopAfter = Infinity): number {
   let lines = 0;
   for (let i = u8.indexOf(10); i !== -1; i = u8.indexOf(10, i + 1))
-    if (++lines > max)
-      throw inputTooLarge(
-        `the DXF has more than ${max / 1e6} million lines, more than the importer reads (a graded CLO export of a whole garment is well under 1 million). Export fewer sizes or only the pattern pieces per file.`,
-      );
+    if (++lines > stopAfter) return lines;
+  return lines;
 }
 
 /** Pairs of lines → tags. Throws a typed `corrupt` / `not-dxf` on a broken stream. */
