@@ -1,0 +1,994 @@
+// A10 · AUTOPILOT POLICY (rule D5, auto/00-PLAN §A10) — "drop the files, it does it by itself".
+//
+// Every question the wizard asks (the `blocker` memo of use-import-session.ts, `openQuestions` of
+// answers.ts) gets an answer here — best evidence → the run's own proposal → a sensible default —
+// or a HARD STOP with the reason. Each answer is an ASSUMPTION (rule, evidence, confidence; `strong`
+// for the dangerous defaults) that travels to the manifest, so nothing is hidden.
+//
+// Pure: a snapshot of the session (stage outputs) + the inputs + the card → one decision. The
+// decision's actions are the SAME answers the operator's clicks give (scaleConfirmed, the size map,
+// confirmedQuantities via "confirm as shown", operatorGrain with `accepted`, overrides, the fabric
+// assignment …), so the gate and the manifest see ordinary answers and no check is weakened. The
+// driver (run.ts) applies ONE action per tick and asks again on the new state: re-applied, the
+// policy reaches a fixpoint (no blocker → the step's "next") or a stop.
+import type {
+  AllowanceDecision,
+  FabricAssignment,
+  ImportSession,
+  PieceEdit,
+  PieceFamily,
+  PtMm,
+  Seed,
+  SeedId,
+  SizeMapEntry,
+  WizardStep,
+} from 'lib/pattern-import/types';
+import { PATIMPORT } from 'lib/pattern-import/types';
+import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
+import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
+import { planScopes } from 'lib/pattern-import/fabrics/scope';
+import { anisotropyOf, squareSidesOf } from '../formats';
+import { openQuestions, type AnswerCtx } from '../answers';
+import type { CardContext } from '../client';
+import {
+  exportedRanks,
+  guessedSizes,
+  legendKey,
+  variantsOf,
+  type Inputs,
+} from '../use-import-session';
+import { fallbackGrain } from './grain';
+import { deterministicCodes } from './names';
+import type { Assumption, AssumptionKind } from './types';
+
+export type AutopilotSnapshot = {
+  session: ImportSession;
+  inputs: Inputs;
+  card: CardContext;
+  /** The first pieces run's seeds (every model on the sheet): the model choice reads them. */
+  baseSeeds: Seed[] | null;
+  /** The answers' fingerprint now (`api.answersNow`). */
+  answersNow: AnswerCtx;
+  /** The DXF fast path: the pieces ARE its blocks — they cannot be set aside. */
+  presegmented: boolean;
+  /** What the wizard says blocks "next" now (the hook's `blocker`). */
+  blocker: string | null;
+};
+
+/** The answers the autopilot gives — each is one the operator's UI gives the same way. */
+export type AutopilotAction =
+  | {
+      kind: 'inputs';
+      patch: Partial<Pick<Inputs, 'scaleConfirmed' | 'residualsAccepted' | 'legendConfirmed'>>;
+    }
+  | { kind: 'drawn-sizes'; n: number }
+  | { kind: 'size-map'; entries: SizeMapEntry[] }
+  | { kind: 'variant'; variant: string }
+  /** The full piece-edit list (the run goes back to the pieces step first when past it). */
+  | { kind: 'piece-edits'; edits: PieceEdit[] }
+  /** A details answer: these inputs merged over the current ones, then semantics re-runs. */
+  | {
+      kind: 'semantics';
+      patch: Partial<
+        Pick<
+          Inputs,
+          'fileAllowance' | 'overrides' | 'operatorGrain' | 'operatorFold' | 'foldListChecked'
+        >
+      >;
+    }
+  /** D3 "confirm all as shown" (counts, sheet-note names, AI names below the threshold). */
+  | { kind: 'confirm-shown' }
+  /** A name typed over an AI / DXF name the identity rule refuses. */
+  | { kind: 'edit-name'; seed: SeedId; code: string; mods: string[]; displayName: string }
+  | { kind: 'fabrics'; assignment: FabricAssignment };
+
+export type AutopilotStop = { step: WizardStep; reason: string };
+
+export type AutopilotDecision = {
+  actions: AutopilotAction[];
+  assumptions: Assumption[];
+  stop?: AutopilotStop;
+};
+
+const NONE: AutopilotDecision = { actions: [], assumptions: [] };
+const stopAt = (step: WizardStep, reason: string, assumptions: Assumption[] = []) => ({
+  actions: [],
+  assumptions,
+  stop: { step, reason },
+});
+
+/** One assumption (the record the manifest carries, plus the seed it is about). */
+function A(
+  step: WizardStep,
+  kind: AssumptionKind,
+  subject: string,
+  answer: string,
+  rule: string,
+  evidence: string[],
+  confidence: number,
+  strong: boolean,
+  seed?: SeedId,
+): Assumption {
+  return {
+    step,
+    kind,
+    subject,
+    answer,
+    rule,
+    evidence,
+    confidence: Math.round(confidence * 100) / 100,
+    strong,
+    ...(seed != null ? { seed } : {}),
+  };
+}
+
+/** Residuals up to this many times the limit are accepted (beyond: a stop). */
+export const RESIDUAL_ACCEPT_X = 3;
+
+/** The policy: what to answer on the current step (or why to stop). */
+export function decide(snap: AutopilotSnapshot): AutopilotDecision {
+  const s = snap.session;
+  if (s.busy) return NONE;
+  if (s.error) return stopAt(s.step, s.error);
+  switch (s.step) {
+    case 'files':
+      if (!s.files.length) return stopAt('files', 'no file was read');
+      if (!s.scale.candidates.length) return stopAt('files', 'the files could not be read');
+      return NONE;
+    case 'scale':
+      return scaleStep(snap);
+    case 'sheet':
+      return sheetStep(snap);
+    case 'sizes':
+      return sizesStep(snap);
+    case 'pieces':
+      return piecesStep(snap);
+    case 'meaning':
+      return meaningStep(snap);
+    case 'fabrics':
+      return fabricsStep(snap);
+    case 'check': {
+      const failing = Object.entries(s.gate).flatMap(([scope, g]) =>
+        g.checks
+          .filter((c) => !c.ok && c.severity === 'block')
+          .map((c) => `${scope.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()} ${c.id}`),
+      );
+      // a gate block is never answered: the export would be known wrong
+      if (failing.length) return stopAt('check', `the gate blocks: ${failing.join(', ')}`);
+      return NONE;
+    }
+    default:
+      return NONE;
+  }
+}
+
+// ── scale ───────────────────────────────────────────────────────────────────────────────────────
+
+function scaleStep({ session: s, inputs: i, blocker }: AutopilotSnapshot): AutopilotDecision {
+  const c = s.scale.candidates[i.scaleIndex];
+  if (!c) return stopAt('scale', 'no scale candidate: the file gives no size reference at all');
+  if (!blocker || i.scaleConfirmed || i.manualMeasuredMm) return NONE;
+  const sides = squareSidesOf(c.evidence?.text);
+  const anis = sides ? anisotropyOf(sides) : 0;
+  const answer = `×${c.factor.toFixed(4)} (${c.method})`;
+  const ev = [
+    `method ${c.method}, confidence ${c.confidence.toFixed(2)}`,
+    ...(c.declaredMm ? [`declared ${c.declaredMm} mm`] : []),
+    ...(c.measuredMm ? [`measured ${c.measuredMm.toFixed(2)} mm`] : []),
+    ...(c.evidence?.text ? [`«${c.evidence.text.slice(0, 80)}»`] : []),
+  ];
+  const a =
+    c.method === 'none'
+      ? A(
+          'scale',
+          'scale-1to1',
+          'the file',
+          '1:1 as drawn',
+          'no test square and no declared scale: the file is taken at 1:1',
+          ev,
+          0.3,
+          true,
+        )
+      : anis > PATIMPORT.scaleWarnRatio
+        ? A(
+            'scale',
+            'scale-anisotropic',
+            'the file',
+            answer,
+            'the test square is not square in the file: the best candidate is taken as it is',
+            [...ev, `anisotropy ${(anis * 100).toFixed(1)} %`],
+            0.4,
+            true,
+          )
+        : A(
+            'scale',
+            'scale-confirmed',
+            'the file',
+            answer,
+            'the best scale candidate is confirmed',
+            ev,
+            Math.max(0.5, c.confidence),
+            Math.abs(c.factor - 1) > 0.05,
+          );
+  return { actions: [{ kind: 'inputs', patch: { scaleConfirmed: true } }], assumptions: [a] };
+}
+
+// ── sheet ───────────────────────────────────────────────────────────────────────────────────────
+
+function sheetStep({ session: s, inputs: i }: AutopilotSnapshot): AutopilotDecision {
+  const sheets = new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet));
+  const info: Assumption[] =
+    sheets.size > 1
+      ? [
+          A(
+            'sheet',
+            'sheet-choice',
+            'the file',
+            `tile sheet ${i.sheetIndex + 1} of ${sheets.size}`,
+            'a file with several tile sheets: the first is imported (one run imports one sheet)',
+            [`${sheets.size} tile sheets`],
+            0.5,
+            false,
+          ),
+        ]
+      : [];
+  const miss = s.sheet?.sheet.missing.length ?? 0;
+  if (miss)
+    return stopAt(
+      'sheet',
+      `${miss} pages are missing — the grid cannot be closed without them`,
+      info,
+    );
+  const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
+  const lim = PATIMPORT.registrationMaxResidualMm;
+  if (worst > lim && !i.residualsAccepted) {
+    if (worst > RESIDUAL_ACCEPT_X * lim)
+      return stopAt(
+        'sheet',
+        `the tiles do not close: ${worst.toFixed(2)} mm > ${RESIDUAL_ACCEPT_X} × ${lim} mm`,
+        info,
+      );
+    return {
+      actions: [{ kind: 'inputs', patch: { residualsAccepted: true } }],
+      assumptions: [
+        ...info,
+        A(
+          'sheet',
+          'residuals',
+          'the tile grid',
+          `accepted ${worst.toFixed(2)} mm`,
+          `a tile residual over the limit but within ${RESIDUAL_ACCEPT_X}× of it is accepted`,
+          [`worst residual ${worst.toFixed(2)} mm, limit ${lim} mm`],
+          0.5,
+          false,
+        ),
+      ],
+    };
+  }
+  return { actions: [], assumptions: info };
+}
+
+// ── sizes ───────────────────────────────────────────────────────────────────────────────────────
+
+function sizesStep({ session: s, inputs: i, card, blocker }: AutopilotSnapshot): AutopilotDecision {
+  if (!card.sizes.length) return stopAt('sizes', 'the card has no size range');
+  const sz = s.sizes;
+  if (!sz || !blocker) return NONE;
+  // H1: how many sizes the sheet draws
+  if (sz.countAsk && !sz.expected) {
+    const inf = sz.countAsk.inferred;
+    const labelled = sz.run.sizes.filter((x) => x.label).length;
+    const n = inf?.n ?? (labelled >= 2 ? labelled : card.sizes.length === 1 ? 1 : null);
+    if (n == null)
+      return stopAt(
+        'sizes',
+        'how many sizes the sheet draws is not shown by its lines, labels or the card',
+      );
+    return {
+      actions: [{ kind: 'drawn-sizes', n }],
+      assumptions: [
+        A(
+          'sizes',
+          'drawn-sizes',
+          'the sheet',
+          `${n} ${n === 1 ? 'size' : 'sizes'} drawn`,
+          inf
+            ? 'the count the lines show (nesting of the outlines)'
+            : labelled >= 2
+              ? 'the count of size labels read off the sheet'
+              : 'a one-size card: one size drawn',
+          inf ? [inf.why] : [`${labelled} size labels`, `card run ${card.sizes.length}`],
+          inf ? 0.6 : 0.4,
+          !inf && labelled < 2,
+        ),
+      ],
+    };
+  }
+  // legend rows below 0.6
+  const pending = (s.chains?.classes ?? []).filter(
+    (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)),
+  );
+  if (pending.length)
+    return {
+      actions: [
+        {
+          kind: 'inputs',
+          patch: { legendConfirmed: [...i.legendConfirmed, ...pending.map(legendKey)] },
+        },
+      ],
+      assumptions: pending.map((c) =>
+        A(
+          'sizes',
+          'legend-row',
+          `legend row ${legendKey(c)}`,
+          `${c.role}${c.sizeLabel ? ` ${c.sizeLabel}` : ''}`,
+          'a legend row below 0.6 is confirmed as read',
+          [
+            `${c.chains.length} lines, ${Math.round(c.totalLengthMm)} mm`,
+            ...c.evidence.slice(0, 3).map((e) => e.kind),
+          ],
+          c.confidence,
+          false,
+        ),
+      ),
+    };
+  const entries = sz.map.entries;
+  if (!entries.length) return stopAt('sizes', 'no size was read off the sheet');
+  const cards = [...card.sizes].sort((a, b) => a.rank - b.rank);
+  // nothing reaches the card: by order, from the middle of the card's run
+  if (!entries.some((e) => e.card)) {
+    const src = [...entries].sort((a, b) => a.source.rank - b.source.rank);
+    const k = src.length;
+    const m = cards.length;
+    const map = new Map<number, (typeof cards)[number]>();
+    if (k <= m) src.forEach((e, j) => map.set(e.source.rank, cards[Math.floor((m - k) / 2) + j]));
+    else
+      for (let j = 0; j < m; j++) map.set(src[Math.floor((k - m) / 2) + j].source.rank, cards[j]);
+    const next = entries.map(
+      (e): SizeMapEntry => ({
+        ...e,
+        card: map.get(e.source.rank) ?? null,
+        origin: 'operator',
+      }),
+    );
+    return {
+      actions: [{ kind: 'size-map', entries: next }],
+      assumptions: next.map((e) =>
+        A(
+          'sizes',
+          'size-ordinal',
+          `source ${e.source.label || `rank ${e.source.rank}`}`,
+          e.card ? `→ ${e.card.token}` : 'not exported',
+          'no source size spells a card size: mapped by order from the middle of the card run',
+          [`${k} source sizes, card run ${cards.map((c) => c.token).join(' ')}`],
+          0.25,
+          true,
+        ),
+      ),
+    };
+  }
+  // two source sizes on one card size: the stronger keeps it
+  const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
+  if (new Set(ids).size !== ids.length) {
+    const best = new Map<number, SizeMapEntry>();
+    for (const e of entries)
+      if (e.card) {
+        const b = best.get(e.card.sizeId);
+        if (!b || (e.confidence ?? 1) > (b.confidence ?? 1)) best.set(e.card.sizeId, e);
+      }
+    const dropped = entries.filter((e) => e.card && best.get(e.card.sizeId) !== e);
+    const next = entries.map(
+      (e): SizeMapEntry =>
+        dropped.includes(e)
+          ? { ...e, card: null, origin: 'operator' }
+          : { ...e, origin: 'operator' },
+    );
+    return {
+      actions: [{ kind: 'size-map', entries: next }],
+      assumptions: dropped.map((e) =>
+        A(
+          'sizes',
+          'size-dropped',
+          `source ${e.source.label || `rank ${e.source.rank}`}`,
+          'not exported',
+          'two source sizes point at one card size: the weaker match is not exported',
+          [`${e.card!.token} kept for ${best.get(e.card!.sizeId)!.source.label || '?'}`],
+          0.5,
+          false,
+        ),
+      ),
+    };
+  }
+  // the guesses (< 0.9) are confirmed as matched
+  const guesses = guessedSizes(entries);
+  if (guesses.length) {
+    const own = (i.sizeMap ?? []).filter(
+      (e) => !guesses.some((g) => g.source.rank === e.source.rank),
+    );
+    return {
+      actions: [
+        {
+          kind: 'size-map',
+          entries: [...own, ...guesses.map((g): SizeMapEntry => ({ ...g, origin: 'operator' }))],
+        },
+      ],
+      assumptions: guesses.map((g) => {
+        const ordinal =
+          (g.confidence ?? 0) <= 0.3 || (g.evidence ?? []).some((x) => /by rank|order/i.test(x));
+        return A(
+          'sizes',
+          ordinal ? 'size-ordinal' : 'size-guess',
+          `source ${g.source.label || `rank ${g.source.rank}`}`,
+          `→ ${g.card!.token}`,
+          ordinal
+            ? 'the run aligned by rank only (same length): confirmed by order'
+            : 'the automatic match below 0.9 is confirmed',
+          g.evidence ?? [],
+          g.confidence ?? 0,
+          ordinal,
+        );
+      }),
+    };
+  }
+  return NONE;
+}
+
+// ── pieces ──────────────────────────────────────────────────────────────────────────────────────
+
+const labelOf = (seeds: readonly Seed[], seed: SeedId) => {
+  const sd = seeds.find((x) => x.id === seed);
+  return sd?.text?.text?.slice(0, 32) ?? null;
+};
+const subjectOf = (seeds: readonly Seed[], seed: SeedId) => {
+  const l = labelOf(seeds, seed);
+  return `seed ${seed}${l ? ` · ${l}` : ''}`;
+};
+
+function piecesStep(snap: AutopilotSnapshot): AutopilotDecision {
+  const { session: s, inputs: i, baseSeeds, presegmented, blocker } = snap;
+  const fams = s.pieces?.families ?? [];
+  const seeds = s.pieces?.seeds ?? [];
+  const variants = variantsOf(seeds, baseSeeds, s.pieces?.variants);
+  if (variants.length > 1 && !s.variant) {
+    // the model with the most pieces that close
+    const all = [...(baseSeeds ?? []), ...seeds];
+    const count = (v: string) =>
+      fams.filter(
+        (f) =>
+          all.find((x) => x.id === f.seed)?.variant === v &&
+          f.candidates.some((c) => c.outcome === 'closed'),
+      ).length;
+    const ranked = variants
+      .map((v) => ({ v, n: count(v) }))
+      .sort((a, b) => b.n - a.n || a.v.localeCompare(b.v));
+    const pick = ranked[0];
+    const total = ranked.reduce((a, r) => a + r.n, 0) || 1;
+    return {
+      actions: [{ kind: 'variant', variant: pick.v }],
+      assumptions: [
+        A(
+          'pieces',
+          'model',
+          'the sheet',
+          `model "${pick.v}"`,
+          'several models on the sheet: the one with the most closed pieces',
+          ranked.map((r) => `${r.v}: ${r.n} pieces`),
+          pick.n / total,
+          false,
+        ),
+      ],
+    };
+  }
+  if (!fams.length) return stopAt('pieces', 'no pieces found on the sheet');
+  if (!blocker) return NONE;
+  const mapped = exportedRanks(s.sizes?.map);
+  const open = fams.filter((f) =>
+    f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
+  );
+  if (!open.length) return NONE;
+  if (presegmented)
+    return stopAt(
+      'pieces',
+      `${open.length} DXF ${open.length === 1 ? 'block does' : 'blocks do'} not close (a DXF block cannot be set aside)`,
+    );
+  if (open.length === fams.length)
+    return stopAt('pieces', `no piece closes (${fams.length} open or held-back regions)`);
+  return {
+    actions: [
+      {
+        kind: 'piece-edits',
+        edits: [...i.edits, ...open.map((f): PieceEdit => ({ kind: 'not-a-piece', seed: f.seed }))],
+      },
+    ],
+    assumptions: open.map((f) => {
+      const outs = f.candidates
+        .filter((c) => !mapped || mapped.has(c.rank))
+        .map((c) => `${c.rank}:${c.outcome}${c.gradeRefusal ? `(${c.gradeRefusal})` : ''}`);
+      const named = labelOf(seeds, f.seed) != null;
+      return A(
+        'pieces',
+        'not-a-piece',
+        subjectOf(seeds, f.seed),
+        'not a piece',
+        'a region that does not close (or whose sizes are held back) is set aside',
+        outs.slice(0, 4),
+        named ? 0.3 : 0.6,
+        named,
+        f.seed,
+      );
+    }),
+  };
+}
+
+// ── details ─────────────────────────────────────────────────────────────────────────────────────
+
+/** Blocked reasons answered on the details step; every other one sets the piece aside. */
+const ANSWERED = new Set([
+  'no-grain',
+  'grammar',
+  'duplicate-identity',
+  'fold-question',
+  'fold-unresolved',
+]);
+
+/** The outline a seed's answers are drawn on: its largest exported size. */
+function outlineOf(f: PieceFamily | undefined, mapped: Set<number> | null): PtMm[] | null {
+  if (!f) return null;
+  const cs = f.candidates
+    .filter((c) => c.outcome === 'closed' && c.outer.length > 2 && (!mapped || mapped.has(c.rank)))
+    .sort((a, b) => b.areaMm2 - a.areaMm2);
+  return cs[0]?.outer ?? f.candidates.find((c) => c.outer.length > 2)?.outer ?? null;
+}
+
+function meaningStep(snap: AutopilotSnapshot): AutopilotDecision {
+  const { session: s, inputs: i, card, presegmented, blocker } = snap;
+  const sem = s.semantics;
+  if (!sem) return NONE;
+  if (!blocker) return NONE;
+  const seeds = [...(snap.baseSeeds ?? []), ...(s.pieces?.seeds ?? [])];
+  const fams = s.pieces?.families ?? [];
+  const famOf = (sd: SeedId) => fams.find((f) => f.seed === sd);
+  const mapped = exportedRanks(s.sizes?.map);
+  const subj = (sd: SeedId) => subjectOf(seeds, sd);
+
+  // 1 · pieces that cannot be built (offset, leak, sizes not told apart …): set aside
+  const drop = sem.blocked.filter((b) => !ANSWERED.has(b.reason));
+  if (drop.length) {
+    if (presegmented)
+      return stopAt(
+        'meaning',
+        `${drop.length} DXF ${drop.length === 1 ? 'block is' : 'blocks are'} blocked: ${[...new Set(drop.map((b) => b.reason))].join(', ')}`,
+      );
+    const left = new Set(sem.pieces.map((p) => p.seed));
+    for (const b of sem.blocked) left.add(b.seed);
+    for (const b of drop) left.delete(b.seed);
+    if (!left.size)
+      return stopAt(
+        'meaning',
+        `no piece can be built: ${[...new Set(drop.map((b) => b.reason))].join(', ')}`,
+      );
+    return {
+      actions: [
+        {
+          kind: 'piece-edits',
+          edits: [
+            ...i.edits,
+            ...[...new Set(drop.map((b) => b.seed))].map(
+              (seed): PieceEdit => ({ kind: 'not-a-piece', seed }),
+            ),
+          ],
+        },
+      ],
+      assumptions: drop.map((b) =>
+        A(
+          'meaning',
+          'dropped-piece',
+          subj(b.seed),
+          'not a piece',
+          'a piece that cannot be built is set aside (the rest is exported)',
+          [`${b.reason}: ${b.detail.slice(0, 140)}`],
+          0.3,
+          true,
+          b.seed,
+        ),
+      ),
+    };
+  }
+
+  // 2 · names, grainlines, folds: one semantics answer for every blocked piece
+  const overrides = { ...i.overrides };
+  const operatorGrain = { ...i.operatorGrain };
+  const operatorFold = { ...i.operatorFold };
+  const out: Assumption[] = [];
+  let touched = false;
+  const unnamed = sem.blocked.filter(
+    (b) => b.reason === 'grammar' || b.reason === 'duplicate-identity',
+  );
+  if (unnamed.length) {
+    const named = new Set(s.names.map((n) => n.seed));
+    const codes = deterministicCodes(
+      unnamed.flatMap((b) => {
+        const f = famOf(b.seed);
+        const c = f?.candidates[f.candidates.length - 1];
+        return c ? [{ seed: b.seed, box: c.bbox }] : [];
+      }),
+      sem.pieces.map((p) => p.identity),
+      card.sizes.map((c) => c.token),
+    );
+    // a seed with a name decision (AI / DXF) is renamed through the names table: one per tick
+    const viaNames = unnamed.find((b) => named.has(b.seed) && codes.has(b.seed));
+    if (viaNames) {
+      const code = codes.get(viaNames.seed)!;
+      return {
+        actions: [
+          {
+            kind: 'edit-name',
+            seed: viaNames.seed,
+            code,
+            mods: [],
+            displayName: `piece ${code.slice(1)}`,
+          },
+        ],
+        assumptions: [
+          A(
+            'meaning',
+            'name-code',
+            subj(viaNames.seed),
+            code,
+            'the name the run had is refused by the identity rule: a deterministic code in reading order',
+            [viaNames.detail.slice(0, 140)],
+            0.5,
+            false,
+            viaNames.seed,
+          ),
+        ],
+      };
+    }
+    for (const b of unnamed) {
+      const code = codes.get(b.seed);
+      if (!code) continue;
+      overrides[b.seed] = {
+        ...(overrides[b.seed] ?? {}),
+        code,
+        mods: [],
+        displayName: `piece ${code.slice(1)}`,
+        nameOrigin: 'operator',
+      };
+      touched = true;
+      out.push(
+        A(
+          'meaning',
+          'name-code',
+          subj(b.seed),
+          code,
+          b.reason === 'duplicate-identity'
+            ? 'a name another piece already has: a deterministic code in reading order'
+            : 'nothing names the piece (no AI, no DXF block, no title on the sheet): a deterministic code in reading order',
+          [b.detail.slice(0, 140)],
+          0.5,
+          false,
+          b.seed,
+        ),
+      );
+    }
+  }
+  for (const b of sem.blocked.filter((x) => x.reason === 'no-grain')) {
+    const pr = sem.grainProposals?.find((g) => g.seed === b.seed);
+    if (pr) {
+      operatorGrain[b.seed] = { a: pr.a, b: pr.b, accepted: pr.evidence };
+      const ang = ((Math.atan2(pr.b.y - pr.a.y, pr.b.x - pr.a.x) * 180) / Math.PI + 360) % 180;
+      const geometryOnly = pr.evidence.every((e) => e === 'geometry');
+      out.push(
+        A(
+          'meaning',
+          'grain-proposal',
+          subj(b.seed),
+          `${ang.toFixed(0)}° (${pr.why})`,
+          'the proposed grainline (A1) is accepted',
+          [pr.why, ...pr.evidence],
+          geometryOnly ? 0.45 : 0.7,
+          geometryOnly,
+          b.seed,
+        ),
+      );
+      touched = true;
+      continue;
+    }
+    const ring = outlineOf(famOf(b.seed), mapped);
+    const g = ring ? fallbackGrain(ring) : null;
+    if (!g) return stopAt('meaning', `${subj(b.seed)}: no outline to lay a grainline on`);
+    operatorGrain[b.seed] = { a: g.a, b: g.b };
+    out.push(
+      A(
+        'meaning',
+        'grain-axis',
+        subj(b.seed),
+        `${g.angleDeg.toFixed(0)}° (${g.from})`,
+        'no grainline drawn or proposed: along the longest straight edge or the long axis, the one nearer the sheet vertical when they disagree',
+        [g.why],
+        g.confidence,
+        true,
+        b.seed,
+      ),
+    );
+    touched = true;
+  }
+  for (const b of sem.blocked.filter(
+    (x) => x.reason === 'fold-question' || x.reason === 'fold-unresolved',
+  )) {
+    const q = sem.folds?.find((f) => f.seed === b.seed);
+    const e = q && q.suggested != null ? q.edges[q.suggested] : null;
+    if (e) {
+      operatorFold[b.seed] = { a: e.a, b: e.b };
+      out.push(
+        A(
+          'meaning',
+          'fold-edge',
+          subj(b.seed),
+          `unfolded across the ${e.lenMm.toFixed(0)} mm edge`,
+          'the fold edge the sheet points at (or that unfolds cleanly) is taken',
+          [q!.why, ...q!.evidence.slice(0, 2)],
+          0.6,
+          false,
+          b.seed,
+        ),
+      );
+    } else {
+      overrides[b.seed] = { ...(overrides[b.seed] ?? {}), unfoldedFold: false };
+      out.push(
+        A(
+          'meaning',
+          'not-a-fold',
+          subj(b.seed),
+          'not a fold (written as drawn)',
+          'a fold no edge can be proven for is written as drawn',
+          [q?.why ?? b.detail.slice(0, 140), ...(q?.evidence ?? []).slice(0, 2)],
+          0.3,
+          true,
+          b.seed,
+        ),
+      );
+    }
+    touched = true;
+  }
+  if (touched)
+    return {
+      actions: [{ kind: 'semantics', patch: { overrides, operatorGrain, operatorFold } }],
+      assumptions: out,
+    };
+
+  // 3 · the cutting list's fold pieces the sheet does not mark
+  if (sem.foldList) {
+    const entries = sem.foldList.entries;
+    return {
+      actions: [
+        {
+          kind: 'semantics',
+          patch: { foldListChecked: [...new Set([...i.foldListChecked, ...entries])] },
+        },
+      ],
+      assumptions: entries.map((e) =>
+        A(
+          'meaning',
+          'cutting-list',
+          `cutting list «${e.slice(0, 60)}»`,
+          'checked, nothing unfolded for it',
+          'a cutting-list fold entry no piece is bound to is checked as listed',
+          [`${sem.foldList!.unfolded} pieces unfolded in this run`],
+          0.3,
+          true,
+        ),
+      ),
+    };
+  }
+
+  // 4 · the outline: what the text says, else the cut line
+  const open = openQuestions(sem, s.names, i, snap.answersNow);
+  if (open.allowance.length) {
+    const said = sem.pieces.find((p) => p.allowance.origin === 'text')?.allowance;
+    const fileAllowance: AllowanceDecision = said
+      ? { ...said, origin: 'operator', evidence: [...said.evidence] }
+      : {
+          meaning: 'cut',
+          allowanceMm: PATIMPORT.defaultAllowanceMm,
+          origin: 'operator',
+          evidence: ['autopilot: no text says what the drawn outline is'],
+        };
+    return {
+      actions: [{ kind: 'semantics', patch: { fileAllowance } }],
+      assumptions: [
+        A(
+          'meaning',
+          'outline',
+          'the file',
+          fileAllowance.meaning === 'cut'
+            ? 'the drawn outline is the cut line'
+            : `the drawn outline is the seam line + ${fileAllowance.allowanceMm} mm`,
+          said
+            ? 'the allowance the sheet states for some pieces holds for the rest'
+            : 'no text and no second drawn line: the outline is taken as the cut line',
+          said ? said.evidence.slice(0, 3) : open.allowance.slice(0, 2).map((u) => u.detail),
+          said ? 0.6 : 0.4,
+          !said,
+        ),
+      ],
+    };
+  }
+
+  // 5 · counts and names as shown
+  if (open.total)
+    return {
+      actions: [{ kind: 'confirm-shown' }],
+      assumptions: [
+        ...open.quantity.map((u) =>
+          A(
+            'meaning',
+            'quantity',
+            subj(u.seed),
+            u.shown,
+            u.foldAlt
+              ? 'the count as shown (cut on fold was the alternative)'
+              : 'the count as shown',
+            [u.detail.slice(0, 160)],
+            0.5,
+            false,
+            u.seed,
+          ),
+        ),
+        ...open.name.map((u) =>
+          A(
+            'meaning',
+            'name-confirmed',
+            subj(u.seed),
+            u.shown,
+            'the name read from a sheet note is kept',
+            [u.detail.slice(0, 160)],
+            0.5,
+            false,
+            u.seed,
+          ),
+        ),
+        ...open.aiNames.map((n) =>
+          A(
+            'meaning',
+            'name-confirmed',
+            subj(n.seed),
+            [n.code, ...n.mods].join('_'),
+            'the AI name below the auto-accept threshold is kept',
+            [`AI confidence ${n.confidence.toFixed(2)}`],
+            n.confidence,
+            false,
+            n.seed,
+          ),
+        ),
+      ],
+    };
+
+  // 6 · a name the identity rule refuses (the blocker's own check, on the names table)
+  const isSizeToken = sizeTokenTest(card.sizes.map((c) => c.token));
+  const edited = new Set(i.editedNames);
+  const exported = new Set(sem.pieces.map((p) => p.seed));
+  for (const n of s.names) {
+    if (!exported.has(n.seed)) continue;
+    const origin = nameOriginOf(n, edited.has(n.seed));
+    const known = origin === 'ai' || origin === 'ai-auto' ? isKnownCode : undefined;
+    const hand =
+      i.overrides[n.seed]?.pairHand !== undefined
+        ? i.overrides[n.seed]!.pairHand!
+        : sem.pieces.find((p) => p.seed === n.seed)?.pairHand ?? null;
+    const bad = identitiesOf(n.code, n.mods, hand).find((w) =>
+      identityProblem(w.identity, {
+        isSizeToken,
+        pair: { hand: w.pairHand, of: w.pairOf },
+        isKnownCode: known,
+      }),
+    );
+    if (!bad) continue;
+    const f = famOf(n.seed);
+    const c = f?.candidates[f.candidates.length - 1];
+    const code = deterministicCodes(
+      c
+        ? [{ seed: n.seed, box: c.bbox }]
+        : [{ seed: n.seed, box: { minX: 0, minY: 0, maxX: 0, maxY: 0 } }],
+      sem.pieces.map((p) => p.identity),
+      card.sizes.map((x) => x.token),
+    ).get(n.seed)!;
+    return {
+      actions: [
+        {
+          kind: 'edit-name',
+          seed: n.seed,
+          code,
+          mods: [],
+          displayName: n.displayName || `piece ${code.slice(1)}`,
+        },
+      ],
+      assumptions: [
+        A(
+          'meaning',
+          'name-code',
+          subj(n.seed),
+          code,
+          'the name is refused by the identity rule: a deterministic code in reading order',
+          [`${bad.identity || 'empty'}: refused`],
+          0.5,
+          false,
+          n.seed,
+        ),
+      ],
+    };
+  }
+  return NONE;
+}
+
+// ── fabrics ─────────────────────────────────────────────────────────────────────────────────────
+
+function fabricsStep({ session: s, card, blocker }: AutopilotSnapshot): AutopilotDecision {
+  const a = s.fabrics;
+  if (!a) return NONE;
+  if (!card.scopes.length) return stopAt('fabrics', 'the BOM has no fabric lines');
+  if (!blocker) return NONE;
+  const main =
+    card.scopes.find((x) => /MAIN$/.test(x.fabricPurpose))?.fabricPurpose ??
+    card.scopes[0].fabricPurpose;
+  const seeds = [...(s.pieces?.seeds ?? [])];
+  // C7: a cloth on the AI's word alone → main (lining only by the sheet's layer or name)
+  const ai = (a.aiOnly ?? []).filter((x) => x.needsConfirm);
+  if (ai.length) {
+    const move = new Set(ai.map((x) => x.seed));
+    const byPurpose: FabricAssignment['byPurpose'] = {};
+    for (const [k, v] of Object.entries(a.byPurpose))
+      byPurpose[k] = k === main ? [...v] : v.filter((sd) => !move.has(sd));
+    byPurpose[main] = [...new Set([...(byPurpose[main] ?? []), ...move])];
+    return {
+      actions: [
+        {
+          kind: 'fabrics',
+          assignment: {
+            ...a,
+            byPurpose,
+            aiOnly: (a.aiOnly ?? []).map((x) =>
+              move.has(x.seed) ? { ...x, purposes: [main], needsConfirm: false } : x,
+            ),
+          },
+        },
+      ],
+      assumptions: ai.map((x) =>
+        A(
+          'fabrics',
+          'fabric',
+          subjectOf(seeds, x.seed),
+          'main fabric',
+          "a cloth other than main on the AI's word alone is cut from main (lining only by the sheet)",
+          [
+            `AI: ${x.purposes.map((p) => p.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()).join(', ')}`,
+          ],
+          0.5,
+          false,
+          x.seed,
+        ),
+      ),
+    };
+  }
+  const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
+  if (problem) {
+    const all = [...new Set((s.semantics?.pieces ?? []).map((p) => p.seed))];
+    return {
+      actions: [{ kind: 'fabrics', assignment: { ...a, byPurpose: { [main]: all } } }],
+      assumptions: [
+        A(
+          'fabrics',
+          'fabric',
+          'every piece',
+          'main fabric',
+          'the proposed fabrics do not fit the BOM: every piece is cut from main',
+          [problem.message.slice(0, 160)],
+          0.4,
+          false,
+        ),
+      ],
+    };
+  }
+  return NONE;
+}
