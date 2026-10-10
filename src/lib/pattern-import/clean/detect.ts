@@ -75,6 +75,10 @@ export const CLEAN = {
   guardTouchMm: 0.3,
   /** "Along": the two segments' directions differ by less than this sine (≈ 6°). */
   guardAlongSin: 0.1,
+  /** A8b: a mark masks by itself within this distance (mm) of the page / tile frame edge … */
+  markMarginMm: 20,
+  /** … repeated on this share of the file's tiles. */
+  markTileShare: 0.8,
   /** A lattice proves itself on one page at these pitches (10 mm, 1 in) over the whole page. */
   gridPitchesMm: [10, 25.4],
   gridPitchTol: 0.03,
@@ -103,6 +107,8 @@ export const CLEAN = {
     guard: true,
     /** A8b: small closed repeated marks (corner brackets) are masked whatever touches them. */
     marks: true,
+    /** A8b (Codex): …only in the tile margin, on ≥ 80 % of the tiles. */
+    markZone: true,
   },
 };
 
