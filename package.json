@@ -129,7 +129,8 @@
     "note:format-bar": "node scripts/format-bar-probe.mjs",
     "vector:strokes": "node scripts/vector-strokes-probe.mjs",
     "ai:providers": "node scripts/ai-providers-probe.mjs",
-    "patimport:faces": "node scripts/pattern-import/faces.mjs"
+    "patimport:faces": "node scripts/pattern-import/faces.mjs",
+    "patimport:count": "node scripts/pattern-import/count-evidence.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

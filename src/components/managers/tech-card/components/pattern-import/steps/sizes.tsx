@@ -18,6 +18,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
 import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
@@ -441,10 +442,13 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
 
 /**
  * H1 / D1: how many sizes the sheet draws, when the file itself does not say. Required: the step
- * does not continue until it is answered, and nothing is filled in for the operator. Quick answers,
- * one click each: what the lines show (suggested, not chosen), then the card's size count, then any
- * number. The fill ranks each piece into that many sizes and holds back (never guesses) a piece it
- * cannot rank. Clearing the field takes the answer back.
+ * does not continue until it is answered — unless two or more independent evidences of the sheet
+ * agree on it (A6: a size named in text, the nesting of the outlines, one file per size): then it
+ * is pre-answered with an AUTO pill naming them, and a click on the pill takes it back (asked as
+ * before, the count stays one click away). Quick answers, one click each: what the lines show
+ * (suggested, not chosen), then the card's size count, then any number. The fill ranks each piece
+ * into that many sizes and holds back (never guesses) a piece it cannot rank. Clearing the field
+ * takes the answer back.
  */
 function DrawnSizes({
   ask,
@@ -458,18 +462,51 @@ function DrawnSizes({
   onCommit: (n: number | null) => void;
 }) {
   const answer = expected?.from === 'operator' ? expected.n : null;
-  const inferred = ask.inferred;
-  const card = cardCount > 0 && cardCount !== inferred?.n ? cardCount : null;
+  const auto = ask.auto;
+  const autoOn = expected?.from === 'inferred' && auto?.applied ? expected.n : null;
+  // the sheet's evidences agree but the operator took the count back: a quick answer like the rest
+  const autoQuick = autoOn == null && auto?.n != null ? auto.n : null;
+  const inferred = autoOn == null && ask.inferred?.n !== autoQuick ? ask.inferred : null;
+  const card =
+    cardCount > 0 && cardCount !== inferred?.n && cardCount !== autoQuick ? cardCount : null;
+  const why = [
+    ...(auto?.evidence ?? []).map((e) => `${e.detail}${e.counts ? '' : ' (not counted)'}`),
+    ...(auto?.blocked ? [auto.blocked] : []),
+  ].join(' · ');
   const note =
-    answer == null
-      ? 'the file does not say how many sizes it draws. count the outlines of one piece.'
-      : answer === 1
-        ? 'one size: each piece closes as a single outline.'
-        : `set by you. a piece that cannot be ranked into ${answer} sizes is held back, not guessed.`;
+    autoOn != null
+      ? `${autoOn === 1 ? 'one size' : `${autoOn} sizes`}, read off the sheet: ${why}. click AUTO to answer it yourself.`
+      : answer == null
+        ? `the file does not say how many sizes it draws. count the outlines of one piece.${auto?.evidence.length && auto.n == null ? ` (read off the sheet, not enough to set it: ${why})` : ''}`
+        : answer === 1
+          ? 'one size: each piece closes as a single outline.'
+          : `set by you. a piece that cannot be ranked into ${answer} sizes is held back, not guessed.`;
   return (
     <div className='mb-3'>
       <GroupLabel flush>sizes drawn on this sheet</GroupLabel>
       <span className='flex flex-wrap items-center gap-1.5'>
+        {autoOn != null && auto && (
+          <Chip
+            selected
+            pressed
+            className='h-[22px]'
+            title={`read off the sheet: ${why} — click to take it back and answer yourself`}
+            onClick={() => onCommit(0)}
+          >
+            {autoOn} · AUTO · {evidenceKinds(auto.evidence)}
+          </Chip>
+        )}
+        {autoQuick != null && auto && (
+          <Chip
+            selected={answer === autoQuick}
+            pressed={answer === autoQuick}
+            className='h-[22px]'
+            title={`the sheet says so: ${why}`}
+            onClick={() => answer !== autoQuick && onCommit(autoQuick)}
+          >
+            {autoQuick} · {evidenceKinds(auto.evidence)}
+          </Chip>
+        )}
         {inferred && (
           <Chip
             tone={answer === inferred.n ? 'default' : 'attention'}
@@ -501,10 +538,10 @@ function DrawnSizes({
           inputMode='numeric'
           key={answer ?? 'none'}
           defaultValue={answer ?? ''}
-          placeholder='n'
+          placeholder={autoOn != null ? String(autoOn) : 'n'}
           aria-label='sizes drawn on this sheet'
           aria-describedby='drawn-sizes-note'
-          aria-invalid={answer == null || undefined}
+          aria-invalid={(answer == null && autoOn == null) || undefined}
           className='h-[22px] w-16 tabular-nums'
           onBlur={(ev: React.FocusEvent<HTMLInputElement>) => {
             const raw = ev.currentTarget.value.trim();
@@ -519,13 +556,19 @@ function DrawnSizes({
             if (ev.key === 'Enter') ev.currentTarget.blur();
           }}
         />
-        {answer != null ? <Pill tone='ink'>set</Pill> : <Pill tone='attention'>! needed</Pill>}
+        {answer != null ? (
+          <Pill tone='ink'>set</Pill>
+        ) : autoOn != null ? (
+          <Pill tone='ink'>auto</Pill>
+        ) : (
+          <Pill tone='attention'>! needed</Pill>
+        )}
       </span>
       <Text
         id='drawn-sizes-note'
         size='micro'
         component='p'
-        className={cn('mt-1', answer != null ? 'text-labelColor' : 'text-error')}
+        className={cn('mt-1', answer != null || autoOn != null ? 'text-labelColor' : 'text-error')}
       >
         {note}
       </Text>

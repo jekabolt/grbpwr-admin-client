@@ -706,15 +706,39 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     let sz = await run('sizes', { card: CARD });
     // D1: what the sizes step asks, and what the lines suggest (offered, never applied)
     const askOf = (a: typeof sz.countAsk) =>
-      !a ? 'not asked' : a.inferred ? `${a.inferred.n} · from the lines` : 'asked, no suggestion';
+      !a
+        ? 'not asked'
+        : a.auto?.applied
+          ? `${sz.expected?.n} · AUTO · ${a.auto.evidence
+              .filter((e) => e.counts)
+              .map((e) => e.kind)
+              .join(' + ')}`
+          : a.inferred
+            ? `${a.inferred.n} · from the lines`
+            : 'asked, no suggestion';
     const ask0 = askOf(sz.countAsk);
+    // A6: the count the sheet's evidences agree on is pre-answered (0 clicks); where the case's
+    // truth says otherwise the operator takes the AUTO pill back and answers (2)
+    const truthDrawn = c.drawn ?? (CARD.length === 1 ? 1 : undefined);
+    let autoWrong = false;
+    if (sz.expected?.from === 'inferred') {
+      if (truthDrawn != null && truthDrawn !== sz.expected.n) {
+        autoWrong = true;
+        op(
+          'drawn-sizes',
+          `AUTO ${sz.expected.n} is wrong (truth ${truthDrawn}): take it back, answer ${truthDrawn}`,
+          2,
+        );
+        sz = await run('sizes', { card: CARD, drawnSizes: truthDrawn });
+      } else op('note', `"sizes drawn on this sheet" pre-answered: ${ask0}`);
+    }
     // H1c-3/4: a sheet that does not state its size count needs the operator's answer (the card's
     // run is never the count). The operator answers from the drawing: `drawn`, else "1" where one
     // size is drawn (one size read off the sheet, or a one-size card)
     const drawn = sz.expected
       ? undefined
       : c.drawn ?? (sz.run.sizes.length === 1 || CARD.length === 1 ? 1 : undefined);
-    const ask = drawn ? { drawnSizes: drawn } : {};
+    const ask = drawn ? { drawnSizes: drawn } : autoWrong ? { drawnSizes: truthDrawn } : {};
     if (!sz.expected) {
       if (drawn) {
         op('drawn-sizes', `answer ${drawn} for "sizes drawn on this sheet"`);
@@ -735,18 +759,39 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       ),
       unmappedCard: sz.map.unmapped.length,
       countAsk: ask0,
+      ...(sz.countAsk?.auto
+        ? {
+            countEvidence: sz.countAsk.auto.evidence.map(
+              (e) => `${e.kind} ${e.n.join('/')}${e.counts ? '' : ' (not counted)'}: ${e.detail}`,
+            ),
+          }
+        : {}),
+      ...(autoWrong ? { autoWrong: true } : {}),
     };
     if (c.mapTo) {
       const to = c.mapTo;
       const n = Math.min(to.length, sz.map.entries.length);
-      op(
-        'size-map',
-        `map ${n} source sizes by hand: ${sz.map.entries
-          .slice(0, n)
-          .map((e, i) => `${e.source.label || '∅'}→${to[i]}`)
-          .join(', ')}`,
-        n,
+      // a suggestion already on the answer is one confirm click; a map already on it is none
+      const head = sz.map.entries.slice(0, n);
+      const hand = head.filter((e, i) => e.card?.token !== to[i]);
+      const onIt = head.filter(
+        (e, i) => e.card?.token === to[i] && e.origin === 'auto' && (e.confidence ?? 1) < 0.9,
       );
+      if (onIt.length)
+        op(
+          'size-guess',
+          `confirm ${onIt.length} suggested sizes: ${onIt.map((e) => `${e.source.label || '∅'}→${e.card?.token}`).join(', ')}`,
+          onIt.length,
+        );
+      if (hand.length)
+        op(
+          'size-map',
+          `map ${hand.length} source sizes by hand: ${head
+            .map((e, i) => (hand.includes(e) ? `${e.source.label || '∅'}→${to[i]}` : null))
+            .filter(Boolean)
+            .join(', ')}`,
+          hand.length,
+        );
       sz = await run('sizes', {
         card: CARD,
         ...ask,
