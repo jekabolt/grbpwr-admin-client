@@ -210,7 +210,7 @@ export default function DollOverlay({
           data-doll-first-frame-ms={solve?.firstFrameMs?.toFixed(0) ?? ''}
           data-doll-done-ms={solve?.doneMs?.toFixed(0) ?? ''}
           data-doll-vertices={report?.stats.vertices ?? ''}
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col gap-gutter bg-pageBg p-4 text-textColor focus:outline-none'
+          className='fixed inset-0 z-[var(--z-modal)] flex flex-col gap-gutter overflow-y-auto bg-pageBg p-4 text-textColor focus:outline-none lg:overflow-hidden'
         >
           <Dialog.Title className='sr-only'>paper doll</Dialog.Title>
           <Dialog.Description className='sr-only'>
@@ -267,7 +267,7 @@ export default function DollOverlay({
             )}
           </Section>
 
-          <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px] gap-gutter'>
+          <div className='grid shrink-0 grid-cols-1 gap-gutter lg:min-h-0 lg:flex-1 lg:shrink lg:grid-cols-[minmax(0,1fr)_360px]'>
             <Section
               title='doll'
               question='— drag to turn it, scroll to zoom'
@@ -280,7 +280,7 @@ export default function DollOverlay({
                   options={CAMERAS}
                 />
               }
-              className='flex min-h-0 flex-col overflow-hidden'
+              className='flex h-[60vh] min-h-[360px] flex-col overflow-hidden lg:h-auto lg:min-h-0'
             >
               <div className='min-h-0 flex-1'>
                 <DollCanvas
@@ -301,7 +301,7 @@ export default function DollOverlay({
             <Section
               title='measures'
               question={`— size ${at}, from the pattern laid flat`}
-              className='flex min-h-0 flex-col overflow-hidden'
+              className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
             >
               <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
                 <GroupLabel flush>
