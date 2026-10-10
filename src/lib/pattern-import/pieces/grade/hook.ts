@@ -381,15 +381,38 @@ export function gradeHook(
   const rankPs = G.portions.map((p) => ({ track: p.chain, ranks: p.ranks, pts: p.pts }));
   const gradedKnives = new Set(G.gradedKnives);
   const solverKnives = kIds.flatMap((kid, i) => (gradedKnives.has(kid) ? [] : [knives[i]]));
+  const rankWalls = (g: Grid, r: number) => {
+    const w = new Uint8Array(g.W * g.H);
+    for (const p of rankPs) if (p.ranks.includes(r)) drawPolyline(g, w, p.pts);
+    for (const k of solverKnives) drawPolyline(g, w, k);
+    return w;
+  };
+  // per seed: every rank's solver region, opened and traced (the neighbours' lines for D3)
+  const solverEdges = new Map<SeedId, (PtMm[] | null)[]>();
+  const edgesOf = (s: GradeResult['seeds'][number], sd: Seed) => {
+    let e = solverEdges.get(sd.id);
+    if (!e) {
+      e = Array.from({ length: n }, (_, r) => {
+        const f = fillRank(s.box, cell, rankPs, r, sd.at, solverKnives, [], true);
+        if (!f.closed || !f.mask || !f.grid) return null;
+        const k0 = f.grid.iy(sd.at.y) * f.grid.W + f.grid.ix(sd.at.x);
+        const grown = withWalls(f.grid, f.mask, rankWalls(f.grid, r), GRADE_STRAY_MAX_MM);
+        return traceOuter(f.grid, openMask(f.grid, grown, 2, k0));
+      });
+      solverEdges.set(sd.id, e);
+    }
+    return e;
+  };
   const regionDiff = (
     c: PieceCandidate,
     s: GradeResult['seeds'][number],
     sd: Seed,
     r: number,
-  ): { xor: number; haus: number } => {
+  ): { xor: number; stray: Stray } => {
+    const none: Stray = { worstRatio: Infinity, runMm: Infinity, at: null };
     const f = fillRank(s.box, cell, rankPs, r, sd.at, solverKnives, [], true);
     if (!f.closed || !f.mask || !f.grid || c.outer.length < 3)
-      return { xor: Infinity, haus: Infinity };
+      return { xor: Infinity, stray: none };
     const g = f.grid;
     const wall = new Uint8Array(g.W * g.H);
     drawPolyline(g, wall, c.outer, true);
@@ -402,14 +425,21 @@ export function gradeHook(
     }
     // both boundaries traced the same way (pixel edges of the region, walls included), so the rim
     // cancels; both opened as F4 opens its region (narrow spurs and slits under ~2 mm are not
-    // outline), so what is left is how far F4's outline strays from the solver's anywhere
+    // outline), so what is left is where F4's outline strays from the solver's
     const k0 = g.iy(sd.at.y) * g.W + g.ix(sd.at.x);
-    const haus = hausdorffMm(
-      traceOuter(g, openMask(g, f.mask, 2, k0)),
-      traceOuter(g, openMask(g, mine, 2, k0)),
-      HAUS_REACH_MM,
-    );
-    return { xor: d * g.cell * g.cell, haus };
+    const edges = edgesOf(s, sd);
+    const own = edges[r];
+    const neighbours = [edges[r - 1], edges[r + 1]].filter((x): x is PtMm[] => !!x);
+    if (!own) return { xor: d * g.cell * g.cell, stray: none };
+    // the raster disagrees with itself along line bundles: a knife's cut leaves the knife's pixels
+    // out of the solver's region (a 1–1.5 mm band along the cut edge), and the solver's region
+    // holds every wall pixel it touches (a bundle of lines crossing the outline survives the
+    // opening as a stub, where F4's single outline line does not). Both regions therefore grow
+    // through the rank's line and knife pixels they touch (≤ the bound's cap), never through
+    // open paper — what is left is outline, not raster
+    const grown = withWalls(g, mine, rankWalls(g, r), GRADE_STRAY_MAX_MM);
+    const stray = strayOf(traceOuter(g, openMask(g, grown, 2, k0)), own, neighbours, g.cell);
+    return { xor: d * g.cell * g.cell, stray };
   };
   const skip = new Set(
     G.seeds.filter((s) => !s.accepted || !s.rankOk.some(Boolean)).map((s) => s.seed),
@@ -487,10 +517,10 @@ export function gradeHook(
             // taken for the cut line) moves no rank off the median
             xor[k] > GRADE_XOR_AREA_MAX * c.areaMm2 ||
             xor[k] / perimeter(c.outer) > GRADE_XOR_STRIP_MM ||
-            diff[k].haus > hausMax(step, c.outer, cell);
+            diff[k].stray.runMm > GRADE_STRAY_RUN_MM;
           if (HOOK_DEBUG.on)
             HOOK_DEBUG.log(
-              `    region seed ${id} r${c.rank}: haus ${diff[k].haus.toFixed(2)} mm (bound ${hausMax(step, c.outer, cell).toFixed(2)}, grade offset ${(step / perimeter(c.outer)).toFixed(2)} mm), strip ${(xor[k] / perimeter(c.outer)).toFixed(3)} mm, area ${((100 * xor[k]) / c.areaMm2).toFixed(3)} %, xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
+              `    region seed ${id} r${c.rank}: stray ratio ${diff[k].stray.worstRatio.toFixed(2)} run ${diff[k].stray.runMm.toFixed(0)} mm${diff[k].stray.at ? ` at ${diff[k].stray.at!.x.toFixed(1)},${diff[k].stray.at!.y.toFixed(1)}` : ''}, strip ${(xor[k] / perimeter(c.outer)).toFixed(3)} mm, area ${((100 * xor[k]) / c.areaMm2).toFixed(3)} %, xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
             );
           if (bad) {
             if (HOOK_DEBUG.on)
@@ -541,62 +571,137 @@ export const GRADE_XOR_STRIP_MM = 2;
 export const GRADE_XOR_AREA_MAX = 0.04;
 
 /**
- * And the farthest F4's outline strays from the solver's region anywhere (symmetric Hausdorff of the
- * two traced boundaries, sampled every 1 mm): at most min(3 mm, half the piece's mean grade offset
- * = area step / perimeter) — a tab or a corner that took the neighbour size's line moves a whole
- * grade offset there. Accepted residual: an all-round inset of ~1.5 mm stays under the 2 mm strip
- * and may stay under this bound too (on pieces graded by ≥ 3 mm + the raster's resolution floor);
- * it is not caught on purpose — it cannot be another drawn size line at realistic grade steps (the
- * nearest line of another size is a whole grade offset away).
+ * And WHERE F4's outline strays from the solver's (D3). A wrong contour can only follow another
+ * size's drawn line, which lies at the local distance to the neighbour ranks' lines; where sizes
+ * coincide (near a pivot) following the neighbour is harmless. So at each boundary point (both
+ * outlines sampled every 1 mm, both directions) the deviation from the other outline is bounded by
+ * max(0.75 mm, min(3 mm, half the distance from that point to the nearest neighbour-rank line)),
+ * with one raster cell of slack; a rank is refused when the excess runs on for more than 5 mm (a
+ * single-pixel spike is noise, a tab that took the next size's line is not). Accepted residual: an
+ * all-round inset of ~1.5 mm may pass where the sizes are ≥ 3 mm apart — it cannot be another
+ * drawn size line at realistic grade steps (that line is a whole grade offset away).
  */
-export const GRADE_HAUS_MAX_MM = 3;
-export const GRADE_HAUS_STEP_SHARE = 0.5;
-const HAUS_REACH_MM = 20;
-/**
- * The measurement's own resolution: both boundaries are traced on the solver's raster, so two
- * identical outlines already differ by up to one pixel diagonal (bench: 0.50 / 0.71 mm at 0.5 mm
- * cells). Below that the bound would refuse correct ranks of pieces whose mean grade offset is
- * under ~1.4 mm (robe's small pieces: 0.65–0.92 mm) — the floor is that resolution, 1.5 cells.
- */
-const HAUS_FLOOR_CELLS = 1.5;
-const hausMax = (stepMm2: number, outer: readonly PtMm[], cellMm: number) =>
-  Math.min(
-    GRADE_HAUS_MAX_MM,
-    Math.max(HAUS_FLOOR_CELLS * cellMm, GRADE_HAUS_STEP_SHARE * (stepMm2 / perimeter(outer))),
-  );
+export const GRADE_STRAY_MAX_MM = 3;
+export const GRADE_STRAY_FLOOR_MM = 0.75;
+export const GRADE_STRAY_SHARE = 0.5;
+export const GRADE_STRAY_RUN_MM = 5;
+const STRAY_REACH_MM = 20;
 
-/** Symmetric Hausdorff distance of two closed outlines, sampled every 1 mm (capped at `reach`). */
-function hausdorffMm(a: readonly PtMm[], b: readonly PtMm[], reach: number): number {
-  if (a.length < 3 || b.length < 3) return Infinity;
-  const one = (p: readonly PtMm[], q: readonly PtMm[]) => {
-    const grid = new SegGrid(4);
-    grid.addPolyline(0, q, true);
+type Stray = {
+  /** worst deviation / local bound over both outlines */
+  worstRatio: number;
+  /** longest run (mm) of consecutive samples over their bound + one cell */
+  runMm: number;
+  /** the middle of that run (or the worst sample when there is none) */
+  at: PtMm | null;
+};
+
+const samplesOf = (pts: readonly PtMm[], step = 1): PtMm[] => {
+  const out: PtMm[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const u = pts[i];
+    const v = pts[(i + 1) % pts.length];
+    const L = Math.hypot(v.x - u.x, v.y - u.y);
+    const m = Math.max(1, Math.ceil(L / step));
+    for (let k = 0; k < m; k++)
+      out.push({ x: u.x + ((v.x - u.x) * k) / m, y: u.y + ((v.y - u.y) * k) / m });
+  }
+  return out;
+};
+
+const gridOf = (lines: readonly (readonly PtMm[])[]) => {
+  const g = new SegGrid(4);
+  lines.forEach((q, i) => g.addPolyline(i, q, true));
+  return { g, lines };
+};
+
+function nearest(G: ReturnType<typeof gridOf>, t: PtMm, reach: number): number {
+  let best = reach;
+  G.g.near(t, reach, (o, j) => {
+    const q = G.lines[o];
+    const s0 = q[j];
+    const s1 = q[(j + 1) % q.length];
+    const sx = s1.x - s0.x;
+    const sy = s1.y - s0.y;
+    const L2 = sx * sx + sy * sy;
+    const w = L2 > 0 ? Math.max(0, Math.min(1, ((t.x - s0.x) * sx + (t.y - s0.y) * sy) / L2)) : 0;
+    best = Math.min(best, Math.hypot(t.x - s0.x - sx * w, t.y - s0.y - sy * w));
+  });
+  return best;
+}
+
+/** `mask` grown through `walls` pixels only (4-connected), at most `reachMm` from where it was. */
+function withWalls(g: Grid, mask: Uint8Array, walls: Uint8Array, reachMm: number): Uint8Array {
+  const out = mask.slice();
+  const W = g.W;
+  let front: number[] = [];
+  for (let k = 0; k < out.length; k++) if (out[k]) front.push(k);
+  for (let step = Math.ceil(reachMm / g.cell); step > 0 && front.length; step--) {
+    const next: number[] = [];
+    for (const k of front) {
+      const x = k % W;
+      const nb = [x > 0 ? k - 1 : -1, x < W - 1 ? k + 1 : -1, k - W, k + W];
+      for (const j of nb)
+        if (j >= 0 && j < out.length && !out[j] && walls[j]) {
+          out[j] = 1;
+          next.push(j);
+        }
+    }
+    front = next;
+  }
+  return out;
+}
+
+/** D3: the deviation of two outlines against the per-location bound (both directions). */
+function strayOf(
+  f4: readonly PtMm[],
+  solver: readonly PtMm[],
+  neighbours: readonly (readonly PtMm[])[],
+  cellMm: number,
+): Stray {
+  if (f4.length < 3 || solver.length < 3)
+    return { worstRatio: Infinity, runMm: Infinity, at: null };
+  const N = neighbours.length ? gridOf(neighbours) : null;
+  const one = (from: readonly PtMm[], to: readonly PtMm[]): Stray => {
+    const T = gridOf([to]);
+    const pts = samplesOf(from);
+    const over: boolean[] = [];
     let worst = 0;
-    for (let i = 0; i < p.length; i++) {
-      const u = p[i];
-      const v = p[(i + 1) % p.length];
-      const L = Math.hypot(v.x - u.x, v.y - u.y);
-      const n = Math.max(1, Math.ceil(L));
-      for (let k = 0; k < n; k++) {
-        const t = { x: u.x + ((v.x - u.x) * k) / n, y: u.y + ((v.y - u.y) * k) / n };
-        let best = reach;
-        grid.near(t, reach, (_, j) => {
-          const s0 = q[j];
-          const s1 = q[(j + 1) % q.length];
-          const sx = s1.x - s0.x;
-          const sy = s1.y - s0.y;
-          const L2 = sx * sx + sy * sy;
-          const w =
-            L2 > 0 ? Math.max(0, Math.min(1, ((t.x - s0.x) * sx + (t.y - s0.y) * sy) / L2)) : 0;
-          best = Math.min(best, Math.hypot(t.x - s0.x - sx * w, t.y - s0.y - sy * w));
-        });
-        if (best > worst) worst = best;
-        if (worst >= reach) return reach;
+    let at: PtMm | null = null;
+    for (const t of pts) {
+      const dev = nearest(T, t, STRAY_REACH_MM);
+      const dn = N ? nearest(N, t, 2 * GRADE_STRAY_MAX_MM) : 2 * GRADE_STRAY_MAX_MM;
+      const bound = Math.max(
+        GRADE_STRAY_FLOOR_MM,
+        Math.min(GRADE_STRAY_MAX_MM, GRADE_STRAY_SHARE * dn),
+      );
+      if (dev / bound > worst) {
+        worst = dev / bound;
+        at = t;
+      }
+      over.push(dev > bound + cellMm);
+    }
+    // longest run of consecutive over-bound samples on the closed outline (1 sample ≈ 1 mm)
+    let run = 0;
+    let longest = 0;
+    let end = 0;
+    for (let i = 0; i < 2 * over.length && longest < over.length; i++) {
+      run = over[i % over.length] ? run + 1 : 0;
+      if (run > longest) {
+        longest = run;
+        end = i % over.length;
       }
     }
-    return worst;
+    if (longest) at = pts[(end - (longest >> 1) + over.length) % over.length];
+    return { worstRatio: worst, runMm: Math.min(longest, over.length), at };
   };
-  return Math.max(one(a, b), one(b, a));
+  const a = one(f4, solver);
+  const b = one(solver, f4);
+  return {
+    worstRatio: Math.max(a.worstRatio, b.worstRatio),
+    runMm: Math.max(a.runMm, b.runMm),
+    at: a.runMm >= b.runMm ? a.at : b.at,
+  };
 }
 
 function perimeter(pts: readonly PtMm[]): number {

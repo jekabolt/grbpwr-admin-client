@@ -7,7 +7,8 @@
 //   mixed           a colour-encoded piece beside an unencoded (all black) graded piece
 //   region-check    the hook's final check is region-based: an equal-area other shape is refused,
 //                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm) or by
-//                   a 10 mm tab over 10 % of it (a 1.5 mm inset is the documented residual)
+//                   a 10 mm tab over 10 % of it, or a rank on its neighbour's line along 20 % (a
+//                   1.5 mm inset is the documented residual)
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
@@ -301,8 +302,37 @@ function regionCheck(): FixtureResult {
     hook.finish(cands);
     return cands.get(0)!.map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0])).join('');
   };
+  // rank 2 follows rank 3's line (6 mm out) along 20 % of its outline
+  const follow = () => {
+    const list = p.truth.map((t, r) => {
+      if (r !== 2) return cand(r, t);
+      const xs = t.map((q) => q.x);
+      const ys = t.map((q) => q.y);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const nx = Math.max(...p.truth[3].map((q) => q.x));
+      const run = 0.2 * 2 * (x1 - x0 + (y1 - y0));
+      const ym = (y0 + y1 - run) / 2;
+      return cand(r, [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: ym },
+        { x: nx, y: ym },
+        { x: nx, y: ym + run },
+        { x: x1, y: ym + run },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ]);
+    });
+    const cands = new Map<number, PieceCandidate[]>([[0, list]]);
+    hook.finish(cands);
+    return cands
+      .get(0)!
+      .map((c) => (c.outcome === 'closed' ? 'C' : c.outcome === 'refused' ? 'r' : c.outcome[0]))
+      .join('');
+  };
   const kept = pass(false);
   const swapped = pass(true);
+  const f20 = follow();
   const s10 = strip(10);
   const s25 = strip(2.5);
   const t10 = tab();
@@ -311,8 +341,8 @@ function regionCheck(): FixtureResult {
   const s15 = strip(1.5);
   return {
     name: 'region-check',
-    ok: kept === 'CCCCC' && swapped[2] === 'r' && s10 === 'rrrrr' && s25 === 'rrrrr' && t10 === 'rrrrr',
-    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}; every rank 10 mm in ${s10}, 2.5 mm in ${s25}; a 10 mm tab on 10 % of every outline ${t10}; 1.5 mm in (residual, not required) ${s15}`,
+    ok: kept === 'CCCCC' && swapped[2] === 'r' && s10 === 'rrrrr' && s25 === 'rrrrr' && t10 === 'rrrrr' && f20[2] === 'r',
+    why: `true outlines ${kept}; rank 2 swapped for an equal-area other shape ${swapped}; every rank 10 mm in ${s10}, 2.5 mm in ${s25}; a 10 mm tab on 10 % of every outline ${t10}; rank 2 on rank 3's line along 20 % ${f20}; 1.5 mm in (residual, not required) ${s15}`,
   };
 }
 
