@@ -88,6 +88,8 @@ function pdfWithImage(
   h: number,
   vectors: boolean,
   dims: 'direct' | 'indirect' | 'hidden' = 'direct',
+  /** F14 T1: rewrites the image dictionary (PDF-lexer-legal spellings of the same keys). */
+  spell: (dict: string) => string = (d) => d,
 ): ArrayBuffer {
   const content = `${vectors ? '10 10 m 500 500 l S\n' : ''}q 595 0 0 842 0 0 cm /Im1 Do Q\n`;
   const size = dims === 'direct' ? `/Width ${w} /Height ${h}` : '/Width 6 0 R /Height 7 0 R';
@@ -97,7 +99,7 @@ function pdfWithImage(
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',
     `<< /Length ${content.length} >>\nstream\n${content}endstream`,
-    `<< /Type /XObject /Subtype /Image ${size} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${data.length} >>\nstream\n${data}\nendstream`,
+    `${spell(`<< /Type /XObject /Subtype /Image ${size} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${data.length} >>`)}\nstream\n${data}\nendstream`,
     ...(dims === 'direct'
       ? []
       : dims === 'indirect'
@@ -1429,6 +1431,41 @@ async function guardsCase() {
       'pages' in decoysOnly &&
       !decoysOnly.warnings.some((w) => /embedded image/.test(w)),
     `${'code' in exploitAlone ? exploitAlone.code : 'read'} · ${'code' in decoysHidden ? decoysHidden.code : 'read'} · ${'code' in decoysOnly ? `${decoysOnly.code}: ${decoysOnly.message.slice(0, 80)}` : 'read'}`,
+  );
+  // F14 T1: the image dictionary spelled as the PDF lexer allows — a comment between /Subtype and
+  // /Image, NUL / form feed as whitespace, `#xx` in names. The scan reads it like pdf.js does: the
+  // 6000 × 6000 image is named (beside vectors) or refused (alone); a 64 × 64 one is read quietly.
+  const commented = (d: string) => d.replace('/Subtype /Image', '/Subtype % legal comment\n/Image');
+  const lexed = (d: string) =>
+    d
+      .replace('/Subtype /Image', '/Subtype\x00\x0c% c\r/Im#61ge')
+      .replace('/Width ', '/W#69dth\x0c% w\n')
+      .replace('/Height ', '/Height\x00');
+  const t1 = async (name: string, w: number, vectors: boolean, spell: (d: string) => string) =>
+    extractOf(name, pdfWithImage(w, w, vectors, 'direct', spell));
+  const cMixed = await t1('t1-comment-mixed.pdf', 6000, true, commented);
+  const cOnly = await t1('t1-comment-only.pdf', 6000, false, commented);
+  const lMixed = await t1('t1-lexed-mixed.pdf', 6000, true, lexed);
+  const cSmall = await t1('t1-comment-small.pdf', 64, true, commented);
+  const noted = (r: typeof cMixed) =>
+    'warnings' in r && r.warnings.some((w) => /6000 × 6000/.test(w));
+  check(
+    C,
+    'T1: `/Subtype % comment\\n/Image` (and NUL / form feed / #xx spellings) + vectors → the 6000 × 6000 image is named; alone → too-large; 64 × 64 → read, no note',
+    noted(cMixed) &&
+      'code' in cOnly &&
+      cOnly.code === 'too-large' &&
+      /6000 × 6000/.test(cOnly.message) &&
+      noted(lMixed) &&
+      'warnings' in cSmall &&
+      !cSmall.warnings.some((w) => /embedded image/.test(w)),
+    [cMixed, cOnly, lMixed, cSmall]
+      .map((r) =>
+        'code' in r
+          ? `${r.code}: ${r.message.slice(0, 50)}`
+          : r.warnings.find((w) => /embedded image/.test(w))?.slice(0, 50) ?? 'read, no note',
+      )
+      .join(' · '),
   );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);
