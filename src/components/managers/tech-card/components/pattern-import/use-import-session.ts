@@ -19,6 +19,7 @@ import type {
   PtMm,
   ScaleDecision,
   Seed,
+  SetAside,
   SeedId,
   SizeMap,
   SizeMapEntry,
@@ -88,7 +89,16 @@ export const STEPS: { id: WizardStep; label: string }[] = [
 ];
 export const stepIndex = (s: WizardStep) => STEPS.findIndex((x) => x.id === s);
 
-export type LegendEdit = { classId: ClassId; role: ChainRole; sizeLabel: string | null };
+export type LegendEdit = {
+  classId: ClassId;
+  role: ChainRole;
+  sizeLabel: string | null;
+  /** The row's signature (LineClass.sig) the answer was given to. */
+  sig?: string;
+};
+
+/** The key a legend answer is bound to: the row's signature, else its number (older rows). */
+export const legendKey = (c: { id: ClassId; sig?: string }) => c.sig ?? `#${c.id}`;
 export type PieceOverride = NonNullable<StageIO['semantics']['in']['pieceOverrides'][SeedId]>;
 
 /** What the operator decided. Survives `back`; cleared only by `reset`. */
@@ -106,8 +116,8 @@ export type Inputs = {
   /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
   residualsAccepted: boolean;
   legend: LegendEdit[];
-  /** Low-confidence legend rows the operator has looked at and accepted. */
-  legendConfirmed: ClassId[];
+  /** Low-confidence legend rows the operator has looked at and accepted (`legendKey`). */
+  legendConfirmed: string[];
   sizeMap: SizeMapEntry[] | null;
   /** H1: the operator's "sizes drawn on this sheet" (null = not answered). */
   drawnSizes: number | null;
@@ -403,6 +413,13 @@ export function useImportSession(deps: {
         gridOverride: i.gridOverride,
         variant: s.variant,
         maskRev: maskRevNow(s, i),
+        legendRev:
+          i.legend.length || i.legendConfirmed.length
+            ? maskRevOf(
+                [...i.legendConfirmed],
+                i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
+              )
+            : undefined,
       },
       s.pieces?.families,
     );
@@ -989,7 +1006,7 @@ export function useImportSession(deps: {
         if (s.sizes?.countAsk && !s.sizes.expected)
           return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
-          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
+          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(legendKey(c)),
         );
         if (pending.length)
           return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
@@ -1109,20 +1126,32 @@ export function useImportSession(deps: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, inputs, card]);
 
+  /**
+   * A2 "this is a piece" on a set-aside outline: its held text seed comes back, else a click at its
+   * point that does not supersede the outline seed it lies in (another piece there).
+   */
+  async function promoteAside(a: SetAside) {
+    return addSeed(a.at, a);
+  }
+
   /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
-  async function addSeed(at: PtMm) {
+  async function addSeed(at: PtMm, aside?: SetAside) {
     try {
       const i = iRef.current;
       const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
       const id = Math.max(0, ...all.map((s) => s.id)) + 1;
-      const seed: Seed = { id, at, origin: 'click', variant: i.variant };
+      const seed: Seed = aside?.seed
+        ? aside.seed
+        : aside
+          ? { id, at, origin: 'click', variant: i.variant, aside: aside.id }
+          : { id, at, origin: 'click', variant: i.variant };
       const next = { ...i, clickSeeds: [...i.clickSeeds, seed] };
       iRef.current = next;
       patchInputs({ clickSeeds: next.clickSeeds });
       const out = await run('pieces', piecesInput(next));
       patch({ pieces: out });
       settleToPieces();
-      return id;
+      return seed.id;
     } catch (e) {
       fail(e);
       return null;
@@ -1253,6 +1282,7 @@ export function useImportSession(deps: {
     dispatch,
     next,
     addSeed,
+    promoteAside,
     editPieces,
     editName,
     confirmSize,

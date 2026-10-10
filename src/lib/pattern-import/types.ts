@@ -409,6 +409,12 @@ export type LineClass = {
   totalLengthMm: Mm;
   evidence: ClassEvidence[];
   confidence: number;
+  /**
+   * What the row IS, apart from its number (pen, width, dash, layer, how it was found): the
+   * operator's legend answers are bound to it, so a rebuild that renumbers the rows (a clean edit, a
+   * grid change) does not hand an answer to another row (Codex A2 review).
+   */
+  sig?: string;
 };
 
 /** N parallel chains, one per size, ordered from the seed side outward (rank 0 = innermost). */
@@ -470,7 +476,7 @@ export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress)
 /** Operator edits to the legend: class → role/size. Returns a new ChainSet with roles applied. */
 export type ApplyLegendFn = (
   set: ChainSet,
-  edits: { classId: ClassId; role: ChainRole; sizeLabel: string | null }[],
+  edits: { classId: ClassId; role: ChainRole; sizeLabel: string | null; sig?: string }[],
 ) => ChainSet;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -558,8 +564,57 @@ export type Seed = {
   text?: IRText;
   /** A face seed's outline: area inside its outer wall, nesting depth of the seeded face, box. */
   face?: { areaMm2: number; depth: number; box: BoxMm };
+  /**
+   * A2: the set-aside outline (SetAside.id) the operator made a piece with "this is a piece" — such
+   * a click does not supersede the face seed of the outline it lies in (it is another piece there).
+   */
+  aside?: number;
   /** Variant filter the seed belongs to (Mod. 125 / Style A). null = all. */
   variant: string | null;
+};
+
+/**
+ * A2 (pieces/faces): why a closed outline got no seed. Outlines big enough to be a piece are never
+ * dropped silently: every one comes back as a SetAside, one click from being a piece (D3).
+ */
+export type FaceJunk =
+  | 'small'
+  | 'sheet'
+  | 'tile-frame'
+  | 'test-square'
+  | 'legend'
+  | 'table'
+  | 'logo'
+  | 'background'
+  /** A sheet whose text labels its pieces: an outline without a label is not seeded. */
+  | 'unlabelled'
+  /** File-per-size side by side: seeds go on the first size's drawing (the fill moves them). */
+  | 'other-size'
+  /** Inside a seeded outline, of its shape: another size of the same piece (a graded nest). */
+  | 'size-copy'
+  /** Inside a seeded outline, of its shape, one size drawn: its seam line (or a lining copy). */
+  | 'seam-line'
+  /** Drawn against a seeded outline along an edge (a strip of it, or a piece drawn touching it). */
+  | 'joined'
+  /** Split off a seeded outline by one of its inner lines (a yoke line, a dart drawn closed). */
+  | 'inner-line'
+  /** Drawn inside a seeded outline in another pen or in short strokes (a label box, a mark). */
+  | 'other-pen';
+
+/**
+ * A2: a closed outline the pieces stage did not seed, or a text seed it held back because it sits
+ * in junk (a "10" in the test square or a table cell). The pieces step lists them as "set aside:
+ * N outlines · reason"; "this is a piece" makes one a seed (`seed` restored, else a click at `at`
+ * carrying `aside`).
+ */
+export type SetAside = {
+  id: number;
+  at: PtMm;
+  box: BoxMm;
+  areaMm2: number;
+  reason: Exclude<FaceJunk, 'small'>;
+  /** The text seed held back. */
+  seed?: Seed;
 };
 
 export type FillOutcome =
@@ -1373,6 +1428,8 @@ export type GateCheckId =
   | 'G15-derived'
   /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
   | 'G16-glyphs'
+  /** A2: a closed outline big enough to be a piece written on another piece's layer 8. */
+  | 'G19-nested-piece'
   /** A8: internal-layer length against the outline length (warn). */
   /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
   | 'G18-grain-source';
@@ -1729,6 +1786,8 @@ export type StageIO = {
        * the per-piece reason.
        */
       grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
+      /** A2: closed outlines (and text seeds in junk) not seeded — shown, one click from a piece. */
+      setAside?: SetAside[];
     };
   };
   semantics: {
@@ -2135,6 +2194,12 @@ export const PATIMPORT = {
   glyphCellMm: 60,
   /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
   glyphMaxShortPerCell: 10,
+  /**
+   * G19 (A2): a closed layer-8 contour of another shape (≤ 45 % of the cut's area) from this area is
+   * a piece drawn inside the block (wm's collar inside the back, 160 cm²). Corpus negatives: CLO
+   * blazer pocket welt 41 cm², the SVG smoke's placement box 66 cm², reef / kombinezon ≤ 10 cm².
+   */
+  nestedPieceMinMm2: 10000,
   /** G18: a grain end / line this close to a short internal stroke is "touching" it, mm. */
   grainStrokeNearMm: 2,
 } as const;

@@ -3,12 +3,43 @@
 // Edits change the class row only; chains, bundles and ambiguities stay as built. A class moved
 // out of role 'size' loses its size label; ambiguities naming an edited class are dropped (the
 // operator answered them). Orphans are recomputed: size-line chains no class claims as size/common.
-import type { ApplyLegendFn, ChainSet, LineClass } from 'lib/pattern-import/types';
+import type { ApplyLegendFn, ChainSet, LineClass, Style } from 'lib/pattern-import/types';
+
+/**
+ * Every row's signature (LineClass.sig): the dominant pen of its lines (colour, width, dash,
+ * layer) and how it was found (its evidence kinds); rows alike in all of that are told apart by
+ * their order.
+ */
+export function withClassSigs(set: ChainSet, styles: readonly Style[]): ChainSet {
+  const byId = new Map(styles.map((s) => [s.id, s]));
+  const seen = new Map<string, number>();
+  const classes = set.classes.map((c) => {
+    const len = new Map<number, number>();
+    for (const id of c.chains) {
+      const ch = set.chains[id];
+      if (ch) len.set(ch.style, (len.get(ch.style) ?? 0) + ch.lengthMm);
+    }
+    const top = [...len].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const st = top != null ? byId.get(top) : undefined;
+    const pen = st
+      ? `${st.strokeRgb ? st.strokeRgb.join(',') : '-'}|${st.widthMm.toFixed(2)}|${st.dash ? st.dash.join(',') : '-'}|${st.layer ?? '-'}`
+      : '-';
+    const how = [...new Set(c.evidence.map((e) => e.kind))].sort().join(',');
+    const base = `${pen}|${how}|${c.sizeLabel ?? ''}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return { ...c, sig: `${base}#${n}` };
+  });
+  return { ...set, classes };
+}
 
 export const applyLegend: ApplyLegendFn = (set, edits) => {
-  const byId = new Map(edits.map((e) => [e.classId, e]));
+  // an answer bound to a row signature finds that row whatever its number now, and is dropped when
+  // no row carries it any more; an unbound (older) answer goes by the number
+  const editOf = (c: LineClass) =>
+    edits.find((e) => (e.sig ? e.sig === c.sig : e.classId === c.id));
   const classes: LineClass[] = set.classes.map((c) => {
-    const e = byId.get(c.id);
+    const e = editOf(c);
     if (!e) return c;
     const sizeLabel = e.role === 'size' ? e.sizeLabel : null;
     // an edit that changes nothing is no answer (T3): the row keeps its confidence and its question

@@ -1149,6 +1149,52 @@ export function isMonotone(c: PieceCandidate[]): boolean {
   return true;
 }
 
+/**
+ * A2: a piece drawn inside another (wm's collar inside the back) is a piece of its own — its outline
+ * and the lines inside it are not the host's internal lines (they were written on the host's
+ * layer 8 as a rectangle). Per size, a closed candidate lying wholly inside a larger closed one of
+ * another family gives the host back none of its chains.
+ */
+export function exceptNested(families: PieceFamily[]): PieceFamily[] {
+  const ranks = new Set(families.flatMap((f) => f.candidates.map((c) => c.rank)));
+  let out = families;
+  for (const r of ranks) {
+    const cs = out.flatMap((f) =>
+      f.candidates.filter((c) => c.rank === r && c.outcome === 'closed' && c.outer.length > 2),
+    );
+    if (cs.length < 2) continue;
+    const drop = new Map<PieceCandidate, Set<ChainId>>();
+    for (const h of cs)
+      for (const n of cs) {
+        if (n === h || n.seed === h.seed || n.areaMm2 >= h.areaMm2) continue;
+        const b = n.bbox;
+        if (
+          b.minX < h.bbox.minX ||
+          b.maxX > h.bbox.maxX ||
+          b.minY < h.bbox.minY ||
+          b.maxY > h.bbox.maxY
+        )
+          continue;
+        const step = Math.max(1, Math.floor(n.outer.length / 16));
+        let ok = true;
+        for (let i = 0; i < n.outer.length && ok; i += step) ok = pointInPoly(n.outer[i], h.outer);
+        if (!ok) continue;
+        const set = drop.get(h) ?? new Set<ChainId>();
+        for (const id of [...n.walls, ...n.inside]) set.add(id);
+        drop.set(h, set);
+      }
+    if (!drop.size) continue;
+    out = out.map((f) => ({
+      ...f,
+      candidates: f.candidates.map((c) => {
+        const d = drop.get(c);
+        return d ? { ...c, inside: c.inside.filter((id) => !d.has(id)) } : c;
+      }),
+    }));
+  }
+  return out;
+}
+
 export const fillPieces: FillPiecesFn = (sheet, set, run, seeds, opts, progress) =>
   fillPiecesDetailed(sheet, set, run, seeds, opts, progress).families;
 

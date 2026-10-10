@@ -29,7 +29,9 @@ import type {
   ScaleCandidate,
   ScaleDecision,
   Seed,
+  SeedId,
   SemanticsOutput,
+  SetAside,
   Sheet,
   SizeMap,
   ExpectedSizes,
@@ -69,6 +71,7 @@ import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale, srcKey } from
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
+import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
@@ -84,7 +87,8 @@ import {
   type WallPieceEdit,
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
-import { blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { exceptNested } from '../pieces/fill';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -286,7 +290,15 @@ export class Session {
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
   /** A2: the sheet's closed faces for this chain set and size run (face seeds, click placement). */
-  private faces: { set: ChainSet; run: SizeRun; map: FaceMap; seeds: Seed[] } | null = null;
+  private faces: {
+    set: ChainSet;
+    run: SizeRun;
+    map: FaceMap;
+    seeds: Seed[];
+    /** Text seeds held back in junk (a "10" in the test square), and every outline set aside. */
+    held: Set<SeedId>;
+    asides: SetAside[];
+  } | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
   private semantics: SemanticsOutput | null = null;
@@ -886,6 +898,7 @@ export class Session {
       ).set;
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
+      set = withClassSigs(set, sheet.styles);
       if (input.legend?.length) set = mergeSameSize(applyLegend(set, input.legend));
     }
     this.chains = set;
@@ -980,20 +993,26 @@ export class Session {
     if (this.faces?.set !== base || this.faces.run !== run) {
       const map = faceMap(sheet, base, run, text, { cellMm: input.opts.cellMm });
       const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
-      this.faces = { set: base, run, map, seeds: faceSeedsOf(map, first) };
+      const { held, asides } = asidesOf(map, text);
+      this.faces = { set: base, run, map, seeds: faceSeedsOf(map, first), held, asides };
     }
     const fm = this.faces.map;
+    const held = this.faces.held;
     // A click is the operator's own point and stays where it is; it supersedes the face seed of
-    // the outline it falls in (one seed per region) — unless the operator drew walls of his own
-    // (a "use line" makes a region inside it the face map does not know: both seeds stay).
-    const given = input.seeds ?? [...text, ...this.faces.seeds];
-    const ownWalls = input.edits.some((e) => isWallEdit(e));
+    // the outline it falls in (one seed per region) — unless the operator drew walls of his own in
+    // that region (a "use line" makes a region inside it the face map does not know: both seeds
+    // stay), or made a set-aside outline there a piece ("this is a piece": another piece).
+    const given = input.seeds ?? [...text.filter((x) => !held.has(x.id)), ...this.faces.seeds];
+    const walled = new Set<number>();
+    for (const e of input.edits) {
+      if (!isWallEdit(e)) continue;
+      const pts = e.kind === 'bridge' ? [e.from, e.to] : base.chains[e.chain]?.pts ?? [];
+      for (const p of pts) walled.add(blobOf(fm, p));
+    }
     const clicked = new Set(
-      ownWalls
-        ? []
-        : given
-            .flatMap((x) => (x.origin === 'click' ? [blobOf(fm, x.at)] : []))
-            .filter((b) => b >= 0),
+      given
+        .flatMap((x) => (x.origin === 'click' && x.aside == null ? [blobOf(fm, x.at)] : []))
+        .filter((b) => b >= 0 && !walled.has(b)),
     );
     const superseded = new Set(
       given.filter((x) => x.origin === 'face' && clicked.has(blobOf(fm, x.at))).map((x) => x.id),
@@ -1081,20 +1100,18 @@ export class Session {
         opts,
         walls: ps.walls,
       });
-    // A2: a face seed whose region the fill finds open in every size is no closed outline after
-    // all (the face pass closed a gap the fill does not): it goes, as if never offered
-    const open = new Set(
-      families
-        .filter(
-          (f) =>
-            seeds.find((x) => x.id === f.seed)?.origin === 'face' &&
-            f.candidates.length > 0 &&
-            f.candidates.every((c) => c.outcome === 'leak' || c.outcome === 'tiny'),
-        )
-        .map((f) => f.seed),
-    );
-    if (open.size) families = families.filter((f) => !open.has(f.seed));
-    const shown = open.size ? seeds.filter((x) => !open.has(x.id)) : seeds;
+    // A2: a face seed whose region the fill finds open in every size stays — an open outline is a
+    // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
+    // own piece: its lines are not the host's internal lines.
+    families = exceptNested(families);
+    const shown = seeds;
+    // what was set aside and is not a piece now
+    const taken = new Set<number>();
+    for (const x of given) {
+      if (x.aside != null) taken.add(x.aside);
+      if (held.has(x.id)) taken.add(-1 - x.id);
+    }
+    const setAside = this.faces.asides.filter((a) => !taken.has(a.id));
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
@@ -1108,6 +1125,7 @@ export class Session {
       families,
       variants,
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
+      setAside,
     };
   }
 

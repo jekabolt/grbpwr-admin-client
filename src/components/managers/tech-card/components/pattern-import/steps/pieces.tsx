@@ -13,6 +13,7 @@ import type {
   PieceFamily,
   PtMm,
   Seed,
+  SetAside,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
@@ -110,6 +111,24 @@ const SEED_WORD: Record<Seed['origin'], string> = {
   face: 'outline seed',
 };
 
+/** A2: why a closed outline was set aside (D3: shown, one click from a piece). */
+const ASIDE_WORD: Record<SetAside['reason'], string> = {
+  sheet: 'a border round the whole sheet',
+  'tile-frame': 'a page frame',
+  'test-square': 'the test square',
+  legend: 'a legend box (line samples with sizes)',
+  table: 'a table',
+  logo: 'a logo or a hatching',
+  background: 'drawn in lines set aside as background',
+  unlabelled: 'no piece label inside (this sheet labels its pieces)',
+  'other-size': "another size's drawing (the first size's seed covers it)",
+  'size-copy': 'another size of a piece already seeded',
+  'seam-line': 'a seam line or a seam strip of a piece already seeded',
+  joined: 'drawn against a piece already seeded',
+  'inner-line': 'split off a seeded piece by an inner line',
+  'other-pen': 'inside a piece, in another pen (a label box, a mark)',
+};
+
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
 const REFUSED: Record<NonNullable<PieceCandidate['gradeRefusal']>, string> = {
   'sizes-not-distinguished':
@@ -197,6 +216,9 @@ export function PiecesStep({
     lastFocus.current = focus;
   }, [focus]);
   const [hint, setHint] = useState<string | null>(null);
+  /** A2: the set-aside group opened in the list, and the outline the sheet zooms to. */
+  const [asideOpen, setAsideOpen] = useState<string | null>(null);
+  const [asideAt, setAsideAt] = useState<SetAside | null>(null);
   /** First end of a bridge being drawn. */
   const [gapA, setGapA] = useState<PtMm | null>(null);
   /** A bridge closes this size only, or every size (a gap in a line all sizes share). */
@@ -248,7 +270,21 @@ export function PiecesStep({
   const zoomCand = zoomFam
     ? zoomFam.candidates.find((c) => c.rank === (zoomTo?.rank ?? rank)) ?? cand(zoomFam)
     : undefined;
-  const zoomBox = zoomCand && zoomCand.outer.length > 2 ? zoomCand.bbox : null;
+  const zoomBox = asideAt
+    ? asideAt.box
+    : zoomCand && zoomCand.outer.length > 2
+      ? zoomCand.bbox
+      : null;
+  const asides = out.setAside ?? [];
+  const asideKey = (a: SetAside) => (a.seed ? `label:${a.reason}` : a.reason);
+  const asideGroups = [...new Set(asides.map(asideKey))].map((k) => ({
+    key: k,
+    list: asides.filter((a) => asideKey(a) === k),
+  }));
+  const asideWords = (a: SetAside) =>
+    a.seed
+      ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
+      : ASIDE_WORD[a.reason];
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
@@ -587,6 +623,22 @@ export function PiecesStep({
                       pointerEvents='none'
                     />
                   )}
+                  {asides
+                    .filter((a) => asideKey(a) === asideOpen || a === asideAt)
+                    .map((a) => (
+                      <rect
+                        key={`a${a.id}`}
+                        x={a.box.minX}
+                        y={vy(a.box.maxY)}
+                        width={a.box.maxX - a.box.minX}
+                        height={a.box.maxY - a.box.minY}
+                        fill='none'
+                        stroke={a === asideAt ? SHEET_INK.ink : SHEET_INK.mut}
+                        strokeWidth={unit * (a === asideAt ? 1.8 : 1)}
+                        strokeDasharray={`${unit * 3} ${unit * 3}`}
+                        pointerEvents='none'
+                      />
+                    ))}
                   {out.seeds.map((s0) => {
                     const m = markOf.get(s0.id);
                     if (!m) return null;
@@ -799,6 +851,71 @@ export function PiecesStep({
             })}
           </ul>
 
+          {asideGroups.length > 0 && (
+            <>
+              <GroupLabel>set aside</GroupLabel>
+              <ul className='divide-y divide-hairline'>
+                {asideGroups.map(({ key: k, list }) => (
+                  <li key={k} className='pb-1'>
+                    <button
+                      type='button'
+                      aria-expanded={asideOpen === k}
+                      onClick={() => {
+                        setAsideOpen(asideOpen === k ? null : k);
+                        setAsideAt(null);
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 px-1 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                        asideOpen === k ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                      )}
+                    >
+                      <Text size='micro' component='span' className='min-w-0 flex-1'>
+                        {list.length} {list.length === 1 ? 'outline' : 'outlines'} ·{' '}
+                        {asideWords(list[0])}
+                      </Text>
+                      <Text size='micro' variant='label' component='span'>
+                        {asideOpen === k ? 'hide' : 'show'}
+                      </Text>
+                    </button>
+                    {asideOpen === k && (
+                      <ul className='flex flex-col pl-3'>
+                        {list.map((a) => (
+                          <li key={a.id} className='flex items-center gap-2 py-0.5'>
+                            <button
+                              type='button'
+                              onClick={() => setAsideAt(a === asideAt ? null : a)}
+                              className={cn(
+                                'min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+                                a === asideAt ? 'bg-bgZebra' : 'hover:bg-bgZebra',
+                              )}
+                            >
+                              <Text size='micro' component='span' className='tabular-nums'>
+                                {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}” · ` : ''}
+                                {(a.areaMm2 / 100).toFixed(0)} cm²
+                              </Text>
+                            </button>
+                            <Button
+                              variant='underline'
+                              size='xs'
+                              disabled={!!session.busy}
+                              onClick={() => {
+                                setAsideAt(null);
+                                void api.promoteAside(a).then((id) => id != null && setSel(id));
+                                setHint('made a piece — the fill runs from it');
+                              }}
+                            >
+                              this is a piece
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
           {selected && (
             <>
               <GroupLabel>region {markOf.get(selected.seed)}</GroupLabel>
@@ -830,13 +947,17 @@ export function PiecesStep({
               <Text size='micro' variant='label' component='p' className='mt-1'>
                 {cand(selected).outcome === 'refused'
                   ? `${REFUSED[cand(selected).gradeRefusal ?? 'sizes-not-distinguished']}${refusalExtra(cand(selected).gradeDetail) ? ` (${refusalExtra(cand(selected).gradeDetail)})` : ''}`
-                  : outcomeOf(selected) === 'leak'
-                    ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
-                    : outcomeOf(selected) === 'merged'
-                      ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
-                      : outcomeOf(selected) === 'tiny'
-                        ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
-                        : 'closed and snapped to the drawn lines.'}
+                  : outcomeOf(selected) === 'leak' &&
+                      seedAt(selected.seed)?.origin === 'face' &&
+                      selected.candidates.every((c) => c.outcome === 'leak' || c.outcome === 'tiny')
+                    ? 'an open outline: the drawing closes it nowhere in any size — the fill ran out through a gap (the red ring). close gap at the ring if it is a piece, or not a piece.'
+                    : outcomeOf(selected) === 'leak'
+                      ? 'the outline has a gap and the fill ran outside (the red ring). close gap: click the two line ends at the ring. or drop it if it is not a piece.'
+                      : outcomeOf(selected) === 'merged'
+                        ? 'two seeds share one region: the pieces touch. draw a lasso around one of them to split.'
+                        : outcomeOf(selected) === 'tiny'
+                          ? `smaller than ${PATIMPORT.minPieceAreaMm2 / 100} cm² — a label or a mark, not a piece.`
+                          : 'closed and snapped to the drawn lines.'}
               </Text>
               <div className='mt-2 flex flex-wrap gap-2'>
                 <Button
