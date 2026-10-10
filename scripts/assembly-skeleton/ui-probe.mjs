@@ -99,8 +99,9 @@ const outfile = resolve(tmpdir(), `skeleton-ui-${process.pid}.js`);
 const AUTOAPPLY_FIX = `    applyRequest,\n    onSkeletonApplied: (r) => {`;
 const AUTOAPPLY_BROKEN = `    applyRequest: applyRequest ?? (ready ? { steps: ready.steps, mode: 'append', nonce: -1 } : null),\n    onSkeletonApplied: (r) => {`;
 // Instrumentation (always on, in memory): count the card pictures' seam-graph reads.
-const GRAPH_READ = `g = readSeamGraph(facts);`;
-const GRAPH_READ_COUNTED = `g = ((window.__graphReads = (window.__graphReads || 0) + 1), readSeamGraph(facts));`;
+// Any argument list: the SEAMS wave passes the card's seam decisions too.
+const GRAPH_READ = /g = readSeamGraph\(/;
+const GRAPH_READ_COUNTED = `g = ((window.__graphReads = (window.__graphReads || 0) + 1), readSeamGraph)(`;
 const CHURN_FIX = `}, [factsSig, live]);`;
 const CHURN_BROKEN = `}, [factsSig, live, shapes]);`;
 const plugins = [
@@ -109,7 +110,7 @@ const plugins = [
     setup(b) {
       b.onLoad({ filter: /card-unit-pictures\.tsx$/ }, async (args) => {
         let src = await readFile(args.path, 'utf8');
-        if (!src.includes(GRAPH_READ)) throw new Error('instrumentation did not find its line');
+        if (!GRAPH_READ.test(src)) throw new Error('instrumentation did not find its line');
         src = src.replace(GRAPH_READ, GRAPH_READ_COUNTED);
         if (MUTATE_CHURN) {
           if (!src.includes(CHURN_FIX)) throw new Error('churn mutation did not find its line');
