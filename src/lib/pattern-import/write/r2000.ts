@@ -43,6 +43,36 @@ export function labelLines(b: PlannedBlock): string[] {
   return lines;
 }
 
+/** Gap between the drawing and its next copy column (mm). */
+export const COPY_GAP_MM = 100;
+
+/**
+ * F14 MAJOR 3 — ONE INSERT PER CUT PIECE. The card counts a piece by its INSERT instances: the
+ * marker places every instance once per garment (piece-selection `unitsOfPieces`, × per garment is
+ * never consulted), the piece-match modal recounts × per garment from them (`perGarmentFromBlocks`)
+ * and the backend lay checks count placements against × per garment. So a contour cut `quantity`
+ * times per garment ("cut 2" of a symmetric piece, 2 pairs) is inserted `quantity` times (F6b §4:
+ * "a contour that is cut ×2 is drawn as two INSERTs"). Every block's first instance sits at the
+ * origin, in the order of `blocks` (the gate reads that one); copy k ≥ 1 is shifted right by k
+ * drawing widths + COPY_GAP_MM, so no copy overlaps any piece.
+ */
+export function insertsOf(blocks: readonly PlannedBlock[]): { name: string; x: number }[] {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const b of blocks)
+    for (const p of [...b.cut, ...(b.seam ?? [])]) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+    }
+  const step = Number.isFinite(maxX - minX) ? maxX - minX + COPY_GAP_MM : COPY_GAP_MM;
+  const out = blocks.map((b) => ({ name: b.name, x: 0 }));
+  const most = Math.max(1, ...blocks.map((b) => Math.floor(b.quantity) || 1));
+  for (let k = 1; k < most; k++)
+    for (const b of blocks)
+      if ((Math.floor(b.quantity) || 1) > k) out.push({ name: b.name, x: k * step });
+  return out;
+}
+
 export function labelAnchor(b: PlannedBlock): PtMm {
   if (b.grain) {
     return { x: (b.grain.tail.x + b.grain.tip.x) / 2, y: (b.grain.tail.y + b.grain.tip.y) / 2 };
@@ -327,18 +357,18 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
   });
   E(0, 'ENDSEC');
 
-  // ENTITIES — one INSERT per block at the origin, no scale/rotation/extrusion.
+  // ENTITIES — one INSERT per cut piece (`insertsOf`), no scale/rotation/extrusion.
   E(0, 'SECTION');
   E(2, 'ENTITIES');
-  for (const b of blocks) {
+  for (const ins of insertsOf(blocks)) {
     E(0, 'INSERT');
     E(5, hex(h++));
     E(330, 'A');
     E(100, 'AcDbEntity');
     E(8, '0');
     E(100, 'AcDbBlockReference');
-    E(2, txt(b.name));
-    E(10, num(0));
+    E(2, txt(ins.name));
+    E(10, num(ins.x));
     E(20, num(0));
     E(30, num(0));
   }

@@ -17,8 +17,10 @@
 //     piece; else an existing piece with the same name (case-insensitive) — the server allows one
 //     name per card, so minting a second «FP» would only fail the save. A lining piece never matches
 //     a shell piece: its name is `LIN_…`.
-//   · SYMMETRY: always IDENTICAL (D1'); an existing piece that says otherwise gets a point write with
-//     the reason ("both hands drawn" / "unfolded") — never a root rewrite.
+//   · SYMMETRY: a new piece is IDENTICAL (D1'). An existing piece follows the modal's one rule
+//     (`importedCutSymmetry`): IDENTICAL only on the manifest's proof (pair / unfolded fold), when
+//     unmarked, or when the new count makes its MIRRORED impossible — an explicit MIRRORED/FOLD is
+//     kept otherwise (F14 MAJOR 2). A rewrite is a point write with the reason, never a root rewrite.
 //   · FUSED: any interlining copy (file or `fused` flag) → `fused` + fusing mode FULL on a new piece;
 //     an existing piece's own fusing mode is kept.
 //   · RE-IMPORT (MF-C, M4): a scope that already holds a sheet THIS importer wrote (manifest on the
@@ -43,6 +45,7 @@ import type {
 } from '../types';
 import { MANIFEST_TAG } from '../types';
 import { isInterliningScope, purposeWord } from './scope';
+import { importedCutSymmetry } from 'components/managers/tech-card/components/piece-codes';
 
 export const IDENTICAL = 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 export const FUSING_FULL = 'TECH_CARD_PIECE_FUSING_MODE_FULL';
@@ -138,7 +141,7 @@ export function scopeFileName(
   scope: Pick<DraftScope, 'target' | 'dxfText' | 'manifest'>,
   styleLabel: string,
 ) {
-  const src = scope.manifest.source.files[0]?.name.replace(/\.[^.]+$/, '') ?? '';
+  const src = (scope.manifest.source?.files?.[0]?.name ?? '').replace(/\.[^.]+$/, '');
   const base = slug(styleLabel) || slug(src) || 'pattern';
   const word = purposeWord(scope.target);
   const fp = fingerprint(bareOf(scope.dxfText, scope.manifest.createdAt));
@@ -263,11 +266,14 @@ export function buildDraft(
     );
     const key = existing?.lineKey ?? mint();
     taken.add(key);
+    const force = g.pair ? 'pair' : g.unfolded ? 'unfolded' : undefined;
+    const symmetry = existing ? importedCutSymmetry(existing.cutSymmetry, ppg, force) : IDENTICAL;
     pieces.push({
       lineKey: key,
       name: existing?.name ?? g.name,
       piecesPerGarment: ppg,
-      cutSymmetry: IDENTICAL,
+      cutSymmetry: symmetry ?? (existing?.cutSymmetry || IDENTICAL),
+      ...(force ? { symmetryForce: force } : {}),
       grainline: '',
       fused: g.fused,
       existingLineKey: existing?.lineKey ?? null,
@@ -277,20 +283,20 @@ export function buildDraft(
       scopeKeys: [...g.byScope.keys()],
     });
     if (existing) {
-      const u: DraftPieceUpdate = {
-        lineKey: existing.lineKey,
-        cutSymmetry: IDENTICAL,
-        reason: '',
-      };
+      const u: DraftPieceUpdate = { lineKey: existing.lineKey, reason: '' };
       const why: string[] = [];
-      if ((existing.cutSymmetry ?? '') !== IDENTICAL)
+      if (symmetry) {
+        u.cutSymmetry = symmetry;
         why.push(
           g.pair
             ? 'the drawing carries both hands as separate pieces — cut as drawn'
             : g.unfolded
               ? 'the drawing carries the unfolded piece — cut flat, not on the fold'
-              : 'the drawing carries every contour — cut as drawn',
+              : (existing.cutSymmetry ?? '').trim().endsWith('MIRRORED')
+                ? `a mirrored pair cannot be ${ppg} per garment — cut as drawn`
+                : 'not marked — the drawing carries every contour, cut as drawn',
         );
+      }
       if ((existing.piecesPerGarment ?? 1) !== ppg) {
         u.piecesPerGarment = ppg;
         why.push(`× per garment ${existing.piecesPerGarment ?? 1} → ${ppg} from the drawing`);
@@ -353,13 +359,18 @@ export function replaceTargetOf(
     (p) => p.scopeKey === sc.target.scopeKey && !!p.manifest && !!(p.lineKey ?? '').trim(),
   );
   if (!rows.length) return null;
-  const sha = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.sha256)));
-  const src = new Set(nonEmpty(sc.manifest.source.files.map((f) => f.name)));
+  // Codex C8: a manifest from the card's read is validated, but these rows also come from callers
+  // and older reads — a missing `source.files` must cost the match, not the apply.
+  const filesOf = (m: ConversionManifest | null | undefined) =>
+    Array.isArray(m?.source?.files) ? m.source.files : [];
+  const strs = (xs: unknown[]) => xs.filter((v): v is string => typeof v === 'string');
+  const sha = new Set(nonEmpty(strs(filesOf(sc.manifest).map((f) => f?.sha256))));
+  const src = new Set(nonEmpty(strs(filesOf(sc.manifest).map((f) => f?.name))));
   const score = (p: (typeof rows)[number]): [number, DraftReplaceTarget['matchedBy']] => {
-    const files = p.manifest!.source.files;
-    if (sha.size && nonEmpty(files.map((f) => f.sha256)).some((h) => sha.has(h)))
+    const files = filesOf(p.manifest);
+    if (sha.size && nonEmpty(strs(files.map((f) => f?.sha256))).some((h) => sha.has(h)))
       return [2, 'sha256'];
-    if (src.size && nonEmpty(files.map((f) => f.name)).some((n) => src.has(n)))
+    if (src.size && nonEmpty(strs(files.map((f) => f?.name))).some((n) => src.has(n)))
       return [1, 'source'];
     return [0, 'scope'];
   };

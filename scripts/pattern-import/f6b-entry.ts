@@ -14,9 +14,11 @@ import {
   MANIFEST_MAX_JSON_BYTES,
   readManifest,
   readManifestBytes,
+  MANIFEST_MAX_PROLOGUE_BYTES,
   trustedSheetOf,
   ManifestError,
 } from 'lib/pattern-import/manifest';
+import { readRawDxf } from 'lib/pattern-import/gate/reader';
 import type { PieceDTO } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { parseSheets, type ParsedSheets } from 'lib/nesting/worker/parse-files';
@@ -28,7 +30,10 @@ import {
   splitPiecesBySize,
   type BlockSplit,
 } from 'components/managers/tech-card/components/nesting/split-pieces';
-import { missingSizesIn } from 'components/managers/tech-card/components/nesting/use-block-sizes';
+import {
+  foreignManifestSizes,
+  missingSizesIn,
+} from 'components/managers/tech-card/components/nesting/use-block-sizes';
 import {
   contourIsCutLine,
   defaultContourLayer,
@@ -49,7 +54,7 @@ import {
 import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
 import type { DxfIndex } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import * as modal from 'components/managers/tech-card/components/nesting/piece-match-modal';
-import { DICT_TOKENS, SIZE_BY_ID, plainSizeId } from './f6b-fingerprint-entry';
+import { DICT_NAMES, DICT_TOKENS, SIZE_BY_ID, plainSizeId } from './f6b-fingerprint-entry';
 
 type M = Record<string, any>;
 const M_ = modal as unknown as M;
@@ -74,6 +79,42 @@ export function blocksOf(text: string): string[] {
   const re = /\nBLOCK\n8\n0\n2\n([^\n]+)\n/g;
   for (let m = re.exec(text); m; m = re.exec(text)) out.push(m[1]);
   return out;
+}
+
+// Codex C3: the card trusts a manifest only when every block is drawn as declared — the fixture
+// manifests carry the fixture's real geometry (cut-line bbox and area, notches, drills).
+function geometryOf(text: string, block: string) {
+  const ents = readRawDxf(text).blocks.get(block) ?? [];
+  const cut = ents.find(
+    (e) => e.layer === '1' && e.closed && (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE'),
+  );
+  const pts = cut?.pts ?? [];
+  const xs = pts.map((q) => q.x);
+  const ys = pts.map((q) => q.y);
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const isDrill = (e: (typeof ents)[number]) => {
+    if (e.layer !== '8' || !e.closed || e.pts.length !== 4) return false;
+    const w = Math.max(...e.pts.map((q) => q.x)) - Math.min(...e.pts.map((q) => q.x));
+    const h = Math.max(...e.pts.map((q) => q.y)) - Math.min(...e.pts.map((q) => q.y));
+    return Math.abs(w - 10) <= 0.5 && Math.abs(h - 10) <= 0.5;
+  };
+  return {
+    bboxMm: [
+      r1(Math.min(...xs)),
+      r1(Math.min(...ys)),
+      r1(Math.max(...xs)),
+      r1(Math.max(...ys)),
+    ] as [number, number, number, number],
+    areaMm2: Math.round(Math.abs(a) / 2),
+    notches: ents.filter((e) => e.layer === '4').length,
+    drills: ents.filter(isDrill).length,
+  };
 }
 
 export function manifestFor(text: string, spec: Spec): ConversionManifest {
@@ -120,11 +161,8 @@ export function manifestFor(text: string, spec: Spec): ConversionManifest {
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.ungraded ? 0 : plainSizeId(b.sizeToken),
-    bboxMm: [0, 0, 1, 1],
-    areaMm2: 1,
+    ...geometryOf(text, b.block),
     hasGrain: true,
-    notches: 2,
-    drills: 0,
     internal: (spec.unfolded ?? []).includes(b.identity) ? 1 : 0,
     hasSeam: !spec.noSeam,
   }));
@@ -442,6 +480,162 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
       false,
       throwsCode(() => readManifest(raw(brokenPair)), 'shape'),
     );
+    // ── Codex C6: chunk headers bounded, no hang; prologue scanned, not the whole sheet ──────────
+    {
+      const fast = (fn: () => unknown, code: string) => {
+        const t0 = Date.now();
+        const ok = throwsCode(fn, code);
+        return { ok: ok && Date.now() - t0 < 200, ms: Date.now() - t0 };
+      };
+      const huge = fast(
+        () => readManifest(`999\nGRBPWR-MANIFEST v1 1/1${'0'.repeat(300)} ${b64(m)}\n${legacy}`),
+        'corrupt',
+      );
+      check('manifest (C6): total = 1e300 → fast typed error (corrupt)', false, huge.ok, huge);
+      const million = fast(
+        () => readManifest(`999\nGRBPWR-MANIFEST v1 1/999999 ${b64(m)}\n${legacy}`),
+        'corrupt',
+      );
+      check(
+        'manifest (C6): total = 999999 → fast typed error (corrupt)',
+        false,
+        million.ok,
+        million,
+      );
+      let partialMsg = '';
+      const few = fast(() => {
+        try {
+          readManifest(`999\nGRBPWR-MANIFEST v1 1/3000 ${b64(m)}\n${legacy}`);
+        } catch (e) {
+          partialMsg = e instanceof Error ? e.message : '';
+          throw e;
+        }
+      }, 'partial');
+      check(
+        'manifest (C6): 2999 missing chunks → partial, reported as a count + the first few',
+        false,
+        few.ok && /2999 of 3000 chunk\(s\) missing \(first: 2, 3, 4, 5, 6\)/.test(partialMsg),
+        partialMsg,
+      );
+      check(
+        'manifest (C6 control): a manifest still reads after the bounds',
+        false,
+        isDeepStrictEqual(readManifest(embedManifest(legacy, m)), m),
+      );
+      // a 40 MB sheet behind the manifest: only the prologue is decoded
+      const big = embedManifest(legacy, m) + `999\n${'x'.repeat(40 * 1024 * 1024)}\n`;
+      const bigBuf = enc(big).slice().buffer as ArrayBuffer;
+      const t0 = Date.now();
+      const got = readManifestBytes(bigBuf);
+      check(
+        'manifest (C6): readManifestBytes on a 40 MB sheet reads the prologue only (< 100 ms)',
+        false,
+        isDeepStrictEqual(got, m) && Date.now() - t0 < 100,
+        { ms: Date.now() - t0 },
+      );
+      // a foreign file whose leading comments exceed the bound is still foreign; ours is refused
+      const pad = `999\n${'c'.repeat(150)}\n`.repeat(
+        Math.ceil(MANIFEST_MAX_PROLOGUE_BYTES / 150) + 10,
+      );
+      check(
+        'manifest (C6): an oversized foreign comment prologue → null (not a manifest)',
+        false,
+        readManifestBytes(enc(pad + legacy).slice().buffer as ArrayBuffer) === null,
+      );
+      check(
+        'manifest (C6): an oversized prologue carrying our tag → corrupt',
+        false,
+        throwsCode(
+          () =>
+            readManifestBytes(
+              enc(embedManifest(legacy, m).replace(/\n0\nSECTION/, `\n${pad}0\nSECTION`)).slice()
+                .buffer as ArrayBuffer,
+            ),
+          'corrupt',
+        ),
+      );
+    }
+    // ── Codex C8: nested source and gate fully validated ───────────────────────────────────────
+    {
+      const shape = (o: unknown) => throwsCode(() => readManifest(raw(o)), 'shape');
+      const gate0 = {
+        passed: true,
+        durationMs: 1,
+        checks: [
+          {
+            id: 'G1-roundtrip',
+            ok: true,
+            severity: 'block',
+            value: 3,
+            threshold: null,
+            blocks: [],
+            note: 'ok',
+          },
+        ],
+      };
+      check('manifest (C8): source: {} → shape', false, shape({ ...m, source: {} }));
+      check(
+        'manifest (C8): source.files[0].sha256 not a string → shape',
+        false,
+        shape({ ...m, source: { ...m.source, files: [{ ...m.source.files[0], sha256: 5 }] } }),
+      );
+      check(
+        'manifest (C8): source.scale.factor not finite (null) → shape',
+        false,
+        shape({ ...m, source: { ...m.source, scale: { ...m.source.scale, factor: null } } }),
+      );
+      check(
+        'manifest (C8): unknown source kind → shape',
+        false,
+        shape({ ...m, source: { ...m.source, files: [{ ...m.source.files[0], kind: 'exe' }] } }),
+      );
+      check(
+        'manifest (C8): gate check with an unknown id → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], id: 'G99' }] } }),
+      );
+      check(
+        'manifest (C8): gate check with a 100 KB note → shape',
+        false,
+        shape({
+          ...m,
+          gate: { ...gate0, checks: [{ ...gate0.checks[0], note: 'n'.repeat(100_000) }] },
+        }),
+      );
+      check(
+        'manifest (C8): gate passed=true over a failed blocking check → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], ok: false }] } }),
+      );
+      const der = {
+        block: 'FP_L_M',
+        kind: 'operator-bridge',
+        lengthMm: 4.7,
+        offSourceMm: 4.7,
+        a: [1, 2],
+        b: [3, 4],
+      };
+      const okDerived = readManifest(raw({ ...m, gate: { ...gate0, derived: [der] } }));
+      check(
+        'manifest (C8 control): a valid gate report with F14b G15/derived is accepted and kept',
+        false,
+        isDeepStrictEqual((okDerived?.gate as unknown as { derived: unknown[] })?.derived, [der]) &&
+          !!readManifest(
+            raw({ ...m, gate: { ...gate0, checks: [{ ...gate0.checks[0], id: 'G15-derived' }] } }),
+          ),
+      );
+      check(
+        'manifest (C8): derived entry with an unknown kind / non-finite end → shape',
+        false,
+        shape({ ...m, gate: { ...gate0, derived: [{ ...der, kind: 'glue' }] } }) &&
+          shape({ ...m, gate: { ...gate0, derived: [{ ...der, a: [1, null] }] } }),
+      );
+      check(
+        'manifest (C8): extra unknown fields are not carried into the result',
+        false,
+        !('evil' in (readManifest(raw({ ...m, evil: 'x'.repeat(10) })) ?? {})),
+      );
+    }
     const strayBlock = {
       ...m,
       blocks: [...m.blocks, { ...m.blocks[0], block: 'ZZ_M', identity: 'ZZ' }],
@@ -529,6 +723,92 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
         pMismatch.warnings.some((w) => w.includes('does not describe this drawing')),
     );
   }
+  // ── Codex C3: the manifest is trusted only when bound to the drawn geometry ─────────────────────
+  {
+    const name = 'a-single-M.dxf';
+    const orig = fixture(name);
+    const m0 = manifestFor(orig, SPECS[name]);
+    const trusted = (p: ParsedSheets) =>
+      p.failedFiles === 0 &&
+      p.pieces.length > 0 &&
+      p.pieces.every((x) => !!x.manifest) &&
+      !(p as ParsedSheets & { manifestDistrust: (string | null)[] }).manifestDistrust[0];
+    const distrusted = (p: ParsedSheets, why: RegExp, warned = true) => {
+      const d = (p as ParsedSheets & { manifestDistrust: (string | null)[] }).manifestDistrust[0];
+      return (
+        p.failedFiles === 0 &&
+        p.pieces.length > 0 &&
+        p.pieces.every((x) => !x.manifest) &&
+        !!d &&
+        why.test(d) &&
+        p.warnings.some((w) => w.includes('manifest is not trusted')) === warned
+      );
+    };
+    const ok = await parse([{ name, text: embedManifest(orig, m0) }]);
+    check('C3 control: the fixture with its own manifest is trusted', false, trusted(ok));
+    // forged: same block names, BP_M and CLR_M contours swapped (names swapped in the drawing)
+    const swapped = orig
+      .replace(/\bBP_M\b/g, '__T__')
+      .replace(/\bCLR_M\b/g, 'BP_M')
+      .replace(/__T__/g, 'CLR_M');
+    const forged = await parse([{ name, text: embedManifest(swapped, m0) }]);
+    check(
+      'C3: a manifest with matching block names but swapped contours is not trusted (legacy parse + reason)',
+      false,
+      swapped !== orig && distrusted(forged, /BP_M|CLR_M/),
+      (forged as ParsedSheets & { manifestDistrust: unknown[] }).manifestDistrust,
+    );
+    const blocked = await parse([
+      {
+        name,
+        text: embedManifest(orig, {
+          ...m0,
+          gate: {
+            passed: false,
+            durationMs: 0,
+            checks: [
+              {
+                id: 'G3-coverage',
+                ok: false,
+                severity: 'block',
+                value: 0.9,
+                threshold: 0.99,
+                blocks: ['BP_M'],
+                note: 'x',
+              },
+            ],
+          },
+        }),
+      },
+    ]);
+    check(
+      'C3: a manifest whose gate did not pass is not trusted',
+      false,
+      distrusted(blocked, /gate did not pass/),
+    );
+    const noGate = await parse([{ name, text: embedManifest(orig, { ...m0, gate: null }) }]);
+    check(
+      'C3: a manifest without a gate report is not trusted (badge only: it is also the pre-gate round trip)',
+      false,
+      distrusted(noGate, /no conversion gate/, false),
+    );
+    const lessNotches = await parse([
+      {
+        name,
+        text: embedManifest(orig, {
+          ...m0,
+          blocks: m0.blocks.map((b) =>
+            b.block === 'FP_L_M' ? { ...b, notches: b.notches + 1 } : b,
+          ),
+        }),
+      },
+    ]);
+    check(
+      'C3: a notch count that differs from the drawing → not trusted',
+      false,
+      distrusted(lessNotches, /FP_L_M: \d+ notches/),
+    );
+  }
 
   // ═══ card paths on the K1 fixtures, with the manifest ═══════════════════════════════════════
   const parsedM = async (name: string) => view(await parse([withManifest(name)]));
@@ -559,6 +839,17 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
         [plainSizeId('m')],
       ),
       missing,
+    );
+    // F14 MAJOR 4: the same manifest uploaded to card B whose range is in another size system
+    // (ta_m): its plain M is not trusted, nothing is added, the refusal is reported
+    const cardB = [DICT_NAMES.indexOf('s_46ta_m') + 1];
+    const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
+    const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+    check(
+      'a (F14): manifest from card A on card B (ta_m) → M not added, reported as foreign',
+      true,
+      missingB.length === 0 && isDeepStrictEqual(foreignB, ['m']),
+      { missingB, foreignB },
     );
     const created = createAll(v.counted);
     check(
@@ -603,6 +894,34 @@ export async function runTests(ctx: { k1: string; plans: string }): Promise<Resu
         isDeepStrictEqual(sorted(sizesOf(v, 'clr')), ['L', 'M', 'S', 'XL']),
       { bp: sizesOf(v, 'bp'), clr: sizesOf(v, 'clr') },
     );
+    // F14 MAJOR 4: card B in the ta_m system — the manifest's plain S/M/L/XL are foreign; the sizes
+    // come from the block names (legacy token path), resolved in the card's own system
+    {
+      const id = (n: string) => DICT_NAMES.indexOf(n) + 1;
+      const cardB = [id('s_46ta_m')];
+      const missingB = missingSizesIn(v.pieces, DICT_TOKENS, cardB, SIZE_BY_ID);
+      const foreignB = foreignManifestSizes(v.pieces, cardB, SIZE_BY_ID);
+      check(
+        'b (F14): manifest from card A on card B (ta_m) → no foreign id, sizes derived in ta_m',
+        true,
+        // what the legacy token path derives from the names (XL is on too few stems for it)
+        isDeepStrictEqual(
+          missingB.map((x) => x.sizeId).sort((a, b) => a - b),
+          [id('m_48ta_m'), id('l_50ta_m')],
+        ) && isDeepStrictEqual([...foreignB].sort(), ['l', 'm', 's', 'xl']),
+        { missingB, foreignB },
+      );
+      const missingA = missingSizesIn(v.pieces, DICT_TOKENS, [plainSizeId('s')], SIZE_BY_ID);
+      check(
+        'b (F14 control): on its own card (plain system) the manifest sizes are trusted',
+        true,
+        isDeepStrictEqual(
+          missingA.map((x) => x.sizeId).sort((a, b) => a - b),
+          ['m', 'l', 'xl'].map(plainSizeId),
+        ) && foreignManifestSizes(v.pieces, [plainSizeId('s')], SIZE_BY_ID).length === 0,
+        missingA,
+      );
+    }
     check(
       'b: PCK is a piece of size M, not a sizeless piece',
       true,

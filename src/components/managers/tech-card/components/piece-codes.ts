@@ -176,6 +176,27 @@ export function cutSymmetryCountInvalid(
   return !Number.isInteger(n) || n < 2 || n % 2 !== 0;
 }
 
+/**
+ * What an import (the piece-match modal's recount AND the pattern-import apply) writes into a
+ * piece's cut symmetry — ONE rule for both writers, `undefined` = leave the piece as it is.
+ *
+ *   · `force` (from the conversion manifest only: both hands drawn / the fold unfolded) → IDENTICAL;
+ *   · not marked (empty / `_UNKNOWN`) → IDENTICAL: the drawing carries every contour;
+ *   · a MIRRORED pair the new count makes impossible (odd / < 2) → IDENTICAL (the DB CHECK);
+ *   · any other explicit mark (MIRRORED, FOLD) stays: a person stated it and nothing contradicts it.
+ */
+export function importedCutSymmetry(
+  current: string | undefined,
+  piecesPerGarment: number,
+  force?: 'pair' | 'unfolded',
+): string | undefined {
+  const v = (current ?? '').trim();
+  if (v === IDENTICAL_CUT_SYMMETRY) return undefined;
+  if (force || !isCutSymmetryMarked(v) || cutSymmetryCountInvalid(v, piecesPerGarment))
+    return IDENTICAL_CUT_SYMMETRY;
+  return undefined;
+}
+
 // Текста ошибки про чётность здесь больше нет: он объяснял ОПЕРАТОРУ, что исправить в селекте,
 // которого не осталось. Невалидную пару теперь молча нормализует отправка (`schema.ts`), а не
 // отказ формы — зод-ошибка на путь несуществующего контрола была бы невидимой блокировкой

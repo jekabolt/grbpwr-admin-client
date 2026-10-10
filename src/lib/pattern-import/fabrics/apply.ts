@@ -25,6 +25,7 @@
 
 import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
+import { importedCutSymmetry } from 'components/managers/tech-card/components/piece-codes';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -233,8 +234,10 @@ export function planFormWrites(
     const key = (cur.lineKey ?? '').trim();
     taken.add(key.toLowerCase());
     if (key !== p.lineKey) remap.set(p.lineKey, key);
-    if ((cur.cutSymmetry ?? '') !== IDENTICAL)
-      points.push({ path: `pieces.${i}.cutSymmetry`, value: IDENTICAL });
+    // F14 MAJOR 2: the modal's rule on the LIVE value — an explicit MIRRORED/FOLD is rewritten only
+    // on the manifest's proof (pair / unfolded fold) or when the new count makes the pair impossible.
+    const symmetry = importedCutSymmetry(cur.cutSymmetry, p.piecesPerGarment, p.symmetryForce);
+    if (symmetry) points.push({ path: `pieces.${i}.cutSymmetry`, value: symmetry });
     if ((cur.piecesPerGarment ?? 1) !== p.piecesPerGarment)
       points.push({ path: `pieces.${i}.piecesPerGarment`, value: p.piecesPerGarment });
     if (p.fused && !cur.fused) {
