@@ -13,6 +13,9 @@
 //   0.90  the source number is the card size's numeric equivalent   44 ↔ XS (xs_44ta_m)
 //   0.60  Burda tall/short size of a numeric card size              72 ↔ 36, 18 ↔ 36
 //   0.30  nothing spells alike and both runs have the same length → aligned by rank
+//   0.50  the source draws ONE size it names ("SIZE 38") and the card has a run without it → the
+//         card's middle size is suggested (A6 smoke: 38 on an S/M/L card → M); a suggestion the
+//         operator confirms with one click, never accepted silently (D3: the map is a decision)
 // Each card size takes at most one source size. Whatever does not match is EXPLICITLY unmapped
 // (card null + why) — never dropped silently, never guessed onto a neighbour.
 
@@ -138,6 +141,16 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
           why: `no card size spells ${s.label}; same run length → aligned by rank (confirm)`,
         };
       });
+    }
+    // one named size, no card size spells it: the card's middle size, as a suggestion
+    const only = run.sizes.length === 1 ? run.sizes[0].label.trim() : '';
+    if (only && !hits[0] && cards.length >= 2) {
+      const mid = cards[Math.floor((cards.length - 1) / 2)];
+      hits[0] = {
+        card: mid,
+        confidence: 0.5,
+        why: `the sheet draws one size, ${only}; the card has no ${only} — its middle size ${mid.token} is suggested (confirm or change)`,
+      };
     }
     // one source per card size: the stronger claim wins, the other is explicit
     const owner = new Map<number, number>();
