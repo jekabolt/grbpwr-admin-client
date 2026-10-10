@@ -193,6 +193,8 @@ function WizardBody({
   // the last step of a download-only run is the download
   // A0.2: a one-page sheet is passed over — the step reads "1 page", greyed, and stays a door back
   const passedOver = (s: (typeof STEPS)[number]) => s.id === 'sheet' && api.sheetSkipped;
+  // N1: a step the wizard went through by itself (nothing asked there): "auto ✓", still a door
+  const autoPassed = (s: (typeof STEPS)[number]) => api.autoPassed.includes(s.id);
   const labelOf = (s: (typeof STEPS)[number]) =>
     card.downloadOnly && s.id === 'apply'
       ? 'download'
@@ -351,18 +353,28 @@ function WizardBody({
                   current: i === at,
                   label:
                     i < at && !session.busy && !applied ? (
-                      <button
-                        type='button'
-                        className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) ? ' text-labelColor' : ''}`}
-                        onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                        title={
-                          passedOver(s)
-                            ? 'one page is the whole sheet — passed over; open it to check'
-                            : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
-                        }
-                      >
+                      <>
+                        <button
+                          type='button'
+                          className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) || autoPassed(s) ? ' text-labelColor' : ''}`}
+                          onClick={() => void api.dispatch({ type: 'back', to: s.id })}
+                          title={
+                            passedOver(s)
+                              ? 'one page is the whole sheet — passed over; open it to check'
+                              : autoPassed(s)
+                                ? `${labelOf(s)} asked nothing — passed by itself; open it to check`
+                                : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
+                          }
+                        >
+                          {labelOf(s)}
+                        </button>
+                        {autoPassed(s) && <AutoMark />}
+                      </>
+                    ) : i < at && autoPassed(s) ? (
+                      <span className='text-labelColor'>
                         {labelOf(s)}
-                      </button>
+                        <AutoMark />
+                      </span>
                     ) : passedOver(s) && i !== at ? (
                       <span className='text-labelColor'>{labelOf(s)}</span>
                     ) : (
@@ -407,6 +419,11 @@ function WizardBody({
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}
                   </Text>
+                ) : api.offer ? (
+                  // N1: why the run stopped on a step that does not block — an offer to look at
+                  <Text size='micro' variant='label' component='p'>
+                    {api.offer}
+                  </Text>
                 ) : null}
                 {/* A8: what the clean stage set aside, seen before the run goes on */}
                 {session.step === 'files' && session.clean && !api.extracted.presegmented && (
@@ -449,6 +466,15 @@ function WizardBody({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** N1: the mark of a step the wizard passed by itself. */
+function AutoMark() {
+  return (
+    <span aria-label='passed automatically' className='ml-1 text-labelColor'>
+      auto ✓
+    </span>
   );
 }
 
