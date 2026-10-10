@@ -980,14 +980,72 @@ export function solveDoll(input: DollInput): DollReport {
     const used = [...ch.used][0];
     const us = used ? G.seams.find((x) => `${x.seam.a}~${x.seam.b}` === used) : undefined;
     const up = us ? pathOf(us.a) : null;
+    const eEnds = extent(crossings(main, vCr - 40));
+    let endsInside = false;
     if (up) uRef = [...up.v].reduce((t, v) => t + cuv[2 * v], 0) / up.v.length;
-    else {
-      const e = extent(crossings(main, vCr - 40));
-      uRef = e ? e[0] : 0;
+    else uRef = eEnds ? eEnds[0] : 0;
+    // The inseam is the side the rise seams (left leg ↔ right leg) start from: when they sit at the
+    // strip's ends rather than at the chart seam, the strip's ends meet on the inside.
+    {
+      const keys = new Set(main.map((P) => P.key));
+      const riseU: number[] = [];
+      for (const sm of G.seams) {
+        const ga = panelByKey.get(pk(sm.a[0]))?.group;
+        const gb = panelByKey.get(pk(sm.b[0]))?.group;
+        if (!((ga === 'LEG_L' && gb === 'LEG_R') || (ga === 'LEG_R' && gb === 'LEG_L'))) continue;
+        for (const side of [sm.a, sm.b])
+          if (keys.has(pk(side[0]))) {
+            const P0 = pathOf(side);
+            if (P0) {
+              // The rise's crotch end (its lowest point) is where the inseam starts.
+              let low = P0.v[0];
+              for (const v of P0.v) if (cuv[2 * v + 1] < cuv[2 * low + 1]) low = v;
+              riseU.push(cuv[2 * low]);
+            }
+          }
+      }
+      if (riseU.length && eEnds) {
+        let vote = 0;
+        for (const ru of riseU)
+          vote +=
+            Math.min(Math.abs(ru - eEnds[0]), Math.abs(ru - eEnds[1])) < Math.abs(ru - uRef)
+              ? 1
+              : -1;
+        if (vote > 0) {
+          uRef = eEnds[0];
+          endsInside = true;
+        }
+      }
+      if (opt.debug)
+        warnings.push(
+          `debug: ${gid} inseam uRef ${uRef.toFixed(0)} ends ${eEnds?.map((x) => x.toFixed(0)).join('..')} rise u ${riseU.map((x) => x.toFixed(0)).join(',')} chart seam ${used ?? '-'}`,
+        );
     }
+    // Pelvis: above the crotch both legs wrap ONE elliptic body (the rise seams meet at x = 0 front
+    // and back); below it each leg is its own capsule.
+    const pelvis = (y: number) => {
+      const half = (W(Math.min(y + lo, hi)) * (1 - EPS_WRAP)) / 2; // this leg's arc = half the pelvis
+      // Half-perimeter of an ellipse a = 1.25 b ≈ π/2 (3(a+b) − √((3a+b)(a+3b))).
+      const k = (Math.PI / 2) * (3 * 2.25 - Math.sqrt((3 * 1.25 + 1) * (1.25 + 3)));
+      const b = (2 * half) / (2 * k);
+      return { a: 1.25 * b, b };
+    };
     const legProxy: Proxy = {
       push(p, i) {
         const y = p[3 * i + 1] - lo;
+        if (y > vCr - lo + 30 && y <= H + 10) {
+          // Own half of the pelvis: never past the mid-plane, never inside the ellipse.
+          if (p[3 * i] * s < 0) p[3 * i] = 0;
+          const { a, b } = pelvis(y);
+          const x = p[3 * i];
+          const z = p[3 * i + 2];
+          const q = (x / (a * 0.8)) ** 2 + (z / (b * 0.8)) ** 2; // darts take in the waist: a looser guide
+          if (q >= 1 || q < 1e-9) return;
+          const f = 1 / Math.sqrt(q);
+          p[3 * i] = x * f;
+          p[3 * i + 2] = z * f;
+          return;
+        }
         const dx = p[3 * i] - xAxis;
         const dz = p[3 * i + 2];
         const d = Math.hypot(dx, dz);
@@ -1016,6 +1074,13 @@ export function solveDoll(input: DollInput): DollReport {
       origin: [xAxis, 0, 0],
       axis: [0, 1, 0],
     });
+    const extCache = new Map<number, [number, number] | null>();
+    const extAt = (y: number) => {
+      const k = Math.round(Math.max(lo + 2, Math.min(hi - 2, y)) / 5);
+      if (!extCache.has(k))
+        extCache.set(k, extent(crossings(main, k * 5)) as [number, number] | null);
+      return extCache.get(k) ?? null;
+    };
     for (const P of list) {
       const inMain = main.includes(P);
       for (let i = 0; i < P.count; i++) {
@@ -1024,8 +1089,24 @@ export function solveDoll(input: DollInput): DollReport {
         const y = cuv[2 * v + 1];
         const Wv = W(y);
         const R = (Wv * (1 - EPS_WRAP)) / TAU + CLEAR + (inMain ? 0 : 3);
-        const th = (TAU * (u - uRef)) / Wv;
-        setPos(v, [xAxis - s * R * Math.cos(th), y - lo, s * R * Math.sin(th)]);
+        // When the strip's ends meet on the inside, each height wraps its own extent end to end
+        // (the rise runs beyond the crotch-level ends).
+        const ext = endsInside && inMain ? extAt(y) : null;
+        const th = ext
+          ? (TAU * (u - ext[0])) / Math.max(1, ext[1] - ext[0])
+          : (TAU * (u - uRef)) / Wv;
+        const leg: Vec3 = [xAxis - s * R * Math.cos(th), y - lo, s * R * Math.sin(th)];
+        // Above the crotch: the leg's arc becomes this side's half of the pelvis — the inseam end
+        // splits into the front rise (x = 0, z > 0) and the back rise; blended over 60 mm.
+        const yy = y - lo;
+        const t = Math.max(0, Math.min(1, (yy - (vCr - lo)) / 60));
+        if (t > 0) {
+          const { a, b } = pelvis(yy);
+          const thn = ((th % TAU) + TAU) % TAU;
+          const phi = Math.PI / 2 - thn / 2;
+          const pel: Vec3 = [s * a * Math.cos(phi), yy, s * b * Math.sin(phi)];
+          setPos(v, [leg[0] + (pel[0] - leg[0]) * t, yy, leg[2] + (pel[2] - leg[2]) * t]);
+        } else setPos(v, leg);
         proxyOf[v] = pi;
         placed[v] = 1;
       }
@@ -1033,6 +1114,21 @@ export function solveDoll(input: DollInput): DollReport {
     legInfo.push({ gid, s, x: xAxis, R: Rcr });
     vLo = 0;
   }
+  if (opt.debug && legInfo.length === 2)
+    for (const sm of G.seams) {
+      const ga = panelByKey.get(pk(sm.a[0]))?.group;
+      const gb = panelByKey.get(pk(sm.b[0]))?.group;
+      if (!((ga === 'LEG_L' && gb === 'LEG_R') || (ga === 'LEG_R' && gb === 'LEG_L'))) continue;
+      const c = (ids: EdgeId[]) => {
+        const P0 = pathOf(ids);
+        if (!P0) return '-';
+        const q = [0, 1, 2].map(
+          (k) => [...P0.v].reduce((t, v) => t + pos[3 * v + k], 0) / P0.v.length,
+        );
+        return q.map((x) => x.toFixed(0)).join(',');
+      };
+      warnings.push(`debug: rise ${sm.seam.a}~${sm.seam.b} placed at ${c(sm.a)} / ${c(sm.b)}`);
+    }
 
   // ── constraints (distances) ─────────────────────────────────────────────────────────────
   const di: number[] = [];
@@ -1496,9 +1592,64 @@ export function solveDoll(input: DollInput): DollReport {
       return true;
     });
   };
+  // Declared joins still without any seam between their two sides: when two free edges of those
+  // pieces face each other once placed, that IS the declared seam (the order says these pieces are
+  // sewn; the placement says along which edges).
+  const declaredOpen = new Map<string, string>();
+  {
+    const linkedP = new Set<string>();
+    for (const sc of graph.chosen)
+      for (const a of (sc.aParts ?? [sc.a]).map(pk))
+        for (const b of (sc.bParts ?? [sc.b]).map(pk)) linkedP.add(`${a}|${b}`).add(`${b}|${a}`);
+    for (const J of opt.joins ?? [])
+      J.parts.forEach((X, i) =>
+        J.parts.forEach((Y, j) => {
+          if (j <= i) return;
+          if (X.some((a) => Y.some((b) => linkedP.has(`${a}|${b}`)))) return;
+          for (const a of X)
+            for (const b of Y) declaredOpen.set(`${a}|${b}`, J.label).set(`${b}|${a}`, J.label);
+        }),
+      );
+  }
   for (const f of facingPairs(new Set(['BODY']), 100, 0.15)) {
     const A = pathOf([f.x.e.id])!;
     const B = pathOf([f.y.e.id])!;
+    const declared = declaredOpen.get(`${pk(f.x.e.id)}|${pk(f.y.e.id)}`);
+    const Px = panelByKey.get(pk(f.x.e.id));
+    const Py = panelByKey.get(pk(f.y.e.id));
+    // Two fronts facing each other: the front opening, never a declared seam.
+    const frontPair =
+      !!Px &&
+      !!Py &&
+      Px.role !== 'back' &&
+      Py.role !== 'back' &&
+      Px.geom.hand !== null &&
+      Py.geom.hand !== null &&
+      Px.geom.hand !== Py.geom.hand;
+    if (declared && !frontPair) {
+      addWork(
+        {
+          id: `${f.x.e.id}~${f.y.e.id}`,
+          a: [f.x.e.id],
+          b: [f.y.e.id],
+          kind: 'proposed-composite',
+          origin: 'doll-proposed',
+          A,
+          B,
+          target: 0.8,
+          note: `proposed (from the technologist's order «${declared}») · ${f.x.e.id} (${f.x.e.lenMm.toFixed(0)} mm) and ${f.y.e.id} (${f.y.e.lenMm.toFixed(0)} mm) face each other ${f.gap.toFixed(0)} mm apart once placed`,
+          forceSame: f.same,
+        },
+        passes,
+        200,
+      );
+      orderJoins.push({
+        join: declared,
+        seam: `${f.x.e.id}~${f.y.e.id}`,
+        note: 'free edges facing each other once placed',
+      });
+      continue;
+    }
     const w = addWork(
       {
         id: `${f.x.e.id}~${f.y.e.id}`,

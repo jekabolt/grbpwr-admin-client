@@ -160,7 +160,15 @@ export function completeFromJoins(
   // layer is sewn to its partner along the same edge.
   const twins = (s: SeamCandidate) => {
     const a = geomOf.get(pk(s.a));
-    return s.evidence.twin !== 'none' || !!a?.twinOf.some((t) => t.key === pk(s.b));
+    const b = geomOf.get(pk(s.b));
+    if (!a || !b) return false;
+    // Same shape (a yoke and its facing, collar layers): drawn as one layer; the seam between
+    // them does not use the edge up.
+    const same =
+      Math.abs(Math.abs(a.areaMm2) - Math.abs(b.areaMm2)) < 0.03 * Math.abs(a.areaMm2) &&
+      Math.abs(a.perimMm - b.perimMm) < 0.03 * a.perimMm;
+    if (a.pieceKey === b.pieceKey) return false; // a dart uses its legs up
+    return s.evidence.twin !== 'none' || a.twinOf.some((t) => t.key === b.pieceKey) || same;
   };
   for (const s of [...graph.chosen, ...graph.rejected.filter((x) => x.kind === 'closure-not-seam')])
     if (!twins(s) && !ignore.has(`${s.a}~${s.b}`)) for (const id of sides(s)) markUsed(id);
@@ -315,8 +323,10 @@ export function completeFromJoins(
                 // Left leg onto right leg only at the rise; left front onto right front only as the
                 // front opening (a closure, not a seam).
                 if (lr && legs && Math.max(A.len, B.len) > 450) continue;
+                // …and the rise is in the upper half of both pieces (never two hems).
+                if (lr && legs && (A.yMid < 0.5 || B.yMid < 0.5)) continue;
                 if (lr && !legs && fronts && Math.max(A.len, B.len) > 300) continue;
-                let score = (1 - ratio) * 2;
+                let score = (1 - ratio) * 1.5;
                 if (A.notches && B.notches)
                   score += A.notches === B.notches ? -0.05 : 0.04 * Math.abs(A.notches - B.notches);
                 score += Math.min(0.15, 0.003 * Math.abs(A.turn + B.turn));
@@ -355,7 +365,7 @@ export function completeFromJoins(
           continue;
         }
         left.push(
-          `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides`,
+          `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides${best ? ` (closest: ${best.A.id} ↔ ${best.B.id}, ${best.A.len.toFixed(0)} vs ${best.B.len.toFixed(0)} mm, score ${best.score.toFixed(2)})` : ''}`,
         );
         continue;
       }

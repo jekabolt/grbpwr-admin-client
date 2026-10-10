@@ -113,7 +113,6 @@ for (const f of spec.files) {
   let ops: DeclaredOp[] = [];
   let pieceOf: (k: string) => string | null = () => null;
   let opsSource = '';
-  if (spec.noOps) f.noOps = true;
   if (card && !f.noOps) {
     const nameOf = new Map(card.pieces.map((p) => [p[0], p[1]]));
     const keys = card.pieces.map((p) => p[0]);
@@ -152,7 +151,8 @@ for (const f of spec.files) {
     options: {
       debug: true,
       dropSeams: f.drop,
-      joins,
+      // DOLL_NOOPS: the joins are still read (for the table) but not given to the doll — the «before».
+      joins: spec.noOps ? undefined : joins,
       ...(spec.maxPasses !== undefined ? { maxPasses: spec.maxPasses } : {}),
     },
   });
