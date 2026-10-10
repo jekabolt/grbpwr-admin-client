@@ -93,6 +93,35 @@ export function answerCtxOf(
   return { scope, revs };
 }
 
+/** Where a "sizes drawn on this sheet" answer (H1) was given: the sheet, its grid, the model. */
+export type DrawnAt = { sheetIndex: number; gridOverride: unknown; variant: string | null };
+export const drawnSizesKey = (at: DrawnAt) =>
+  JSON.stringify([at.sheetIndex, at.gridOverride ?? null, at.variant ?? null]);
+
+/**
+ * The drawn-size count, if it was answered on THIS sheet (and grid) and for THIS model. An answer
+ * given before any model was picked (every model shown) holds for the model picked from that run;
+ * one given for a model does not hold for another. Not live = not answered (null).
+ */
+export function liveDrawnSizes(
+  i: { drawnSizes: number | null; drawnSizesAt: string | null },
+  now: DrawnAt,
+): number | null {
+  if (i.drawnSizes == null || !i.drawnSizesAt) return null;
+  let at: unknown;
+  try {
+    at = JSON.parse(i.drawnSizesAt);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(at) || at.length !== 3) return null;
+  const [sheet, grid, variant] = at as [number, unknown, string | null];
+  const sameSheet =
+    sheet === now.sheetIndex && JSON.stringify(grid) === JSON.stringify(now.gridOverride ?? null);
+  const sameModel = variant === null || variant === (now.variant ?? null);
+  return sameSheet && sameModel ? i.drawnSizes : null;
+}
+
 const sameRevs = (a: AnswerCtx['revs'], b: AnswerCtx['revs']) => {
   const ka = Object.keys(a);
   return ka.length === Object.keys(b).length && ka.every((k) => a[+k] === b[+k]);

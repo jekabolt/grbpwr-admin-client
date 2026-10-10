@@ -59,6 +59,8 @@ import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
   answerCtxOf,
   countWords,
+  drawnSizesKey,
+  liveDrawnSizes,
   liveAnswers,
   openQuestions,
   questionKey,
@@ -100,8 +102,10 @@ export type Inputs = {
   /** Low-confidence legend rows the operator has looked at and accepted. */
   legendConfirmed: ClassId[];
   sizeMap: SizeMapEntry[] | null;
-  /** H1: the operator's "sizes drawn on this sheet" (null = the card's run decides). */
+  /** H1: the operator's "sizes drawn on this sheet" (null = not answered). */
   drawnSizes: number | null;
+  /** Where `drawnSizes` was answered (`drawnSizesKey`): read only through `liveDrawnSizes` (S3). */
+  drawnSizesAt: string | null;
   variant: string | null;
   /** Seeds the operator added by clicking (appended to the text seeds of the first run). */
   clickSeeds: Seed[];
@@ -144,6 +148,7 @@ const EMPTY_INPUTS: Inputs = {
   legendConfirmed: [],
   sizeMap: null,
   drawnSizes: null,
+  drawnSizesAt: null,
   variant: null,
   clickSeeds: [],
   edits: [],
@@ -364,6 +369,8 @@ export function useImportSession(deps: {
     },
   });
 
+  /** H1 drawn-size count — only as answered on this sheet for this model (S3). */
+  const drawnNow = (i: Inputs = iRef.current) => liveDrawnSizes(i, i);
   /** S3: the fingerprint of what is on screen now — the sheet, its grid, the model, the pieces. */
   const answersNow = (s: ImportSession = sRef.current, i: Inputs = iRef.current): AnswerCtx =>
     answerCtxOf(
@@ -467,6 +474,7 @@ export function useImportSession(deps: {
                 legendConfirmed: [],
                 sizeMap: null,
                 drawnSizes: null,
+                drawnSizesAt: null,
                 variant: null,
                 clickSeeds: [],
                 edits: [],
@@ -500,7 +508,7 @@ export function useImportSession(deps: {
           });
           const sizes = await run('sizes', {
             card: card.sizes,
-            drawnSizes: iRef.current.drawnSizes ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
           });
           patchInputs({ sizeMap: null });
           patch({ chains, sizes });
@@ -511,21 +519,33 @@ export function useImportSession(deps: {
           const sizes = await run('sizes', {
             card: card.sizes,
             operatorMap: ev.entries,
-            drawnSizes: iRef.current.drawnSizes ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
           });
           patch({ sizes });
           return;
         }
         case 'drawn-sizes': {
           // H1: how many sizes the sheet draws re-reads the run; the operator's map starts over
-          patchInputs({ drawnSizes: ev.n, sizeMap: null });
-          iRef.current = { ...iRef.current, drawnSizes: ev.n, sizeMap: null };
+          const drawnSizesAt = ev.n == null ? null : drawnSizesKey(iRef.current);
+          patchInputs({ drawnSizes: ev.n, drawnSizesAt, sizeMap: null });
+          iRef.current = { ...iRef.current, drawnSizes: ev.n, drawnSizesAt, sizeMap: null };
           const sizes = await run('sizes', { card: card.sizes, drawnSizes: ev.n ?? undefined });
           patch({ sizes });
           return;
         }
         case 'variant': {
           patchInputs({ variant: ev.variant });
+          // S3: a drawn-size count answered for another model is not this model's answer: the
+          // sizes step asks again (the map starts over with it, as on any drawn-sizes answer)
+          const i0 = iRef.current;
+          if (i0.drawnSizes != null && liveDrawnSizes(i0, { ...i0, variant: ev.variant }) == null) {
+            const cleared = { drawnSizes: null, drawnSizesAt: null, sizeMap: null };
+            iRef.current = { ...i0, ...cleared, variant: ev.variant };
+            patchInputs(cleared);
+            const sizes = await run('sizes', { card: card.sizes });
+            patch(dropAfter({ ...sRef.current, sizes }, 'sizes'));
+            return;
+          }
           iRef.current = { ...iRef.current, variant: ev.variant };
           const out = await run('pieces', piecesInput(iRef.current));
           patch({ pieces: out, variant: ev.variant });
@@ -729,7 +749,7 @@ export function useImportSession(deps: {
     const sizes = await run('sizes', {
       card: card.sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
-      drawnSizes: iRef.current.drawnSizes ?? undefined,
+      drawnSizes: drawnNow() ?? undefined,
     });
     patch({ sizes });
     const pieces = await run('pieces', piecesInput({ ...iRef.current, variant: null }));
@@ -800,7 +820,7 @@ export function useImportSession(deps: {
           const sizes = await run('sizes', {
             card: card.sizes,
             operatorMap: iRef.current.sizeMap ?? undefined,
-            drawnSizes: iRef.current.drawnSizes ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
           });
           patch({ chains, sizes, step: 'sizes' });
           return;
@@ -885,6 +905,8 @@ export function useImportSession(deps: {
       }
       case 'sizes': {
         if (!card.sizes.length) return 'the card has no size range — set it on the card first';
+        if (s.sizes?.countAsk && !s.sizes.expected)
+          return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
           (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
         );

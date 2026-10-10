@@ -46,7 +46,7 @@ import {
 import { pageMarginIds } from 'lib/pattern-import/chains/classify';
 
 import { type Bridge, wallBridges } from './bridges';
-import { gradeHook, type GradeHook } from './grade/hook';
+import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
@@ -93,6 +93,8 @@ export type FillDiag = {
   moved?: number;
   /** pieces/grade (H1): the alike-drawn-sizes hook, when it ran. */
   grade?: GradeHook;
+  /** D4: the sub-fill of a mixed sheet's guarded seeds (on the solver's walls). */
+  subGrade?: FillDiag[];
   ms: number;
 };
 
@@ -402,15 +404,17 @@ export function fillPiecesDetailed(
   opts: FillOpts & { splitTouching?: boolean; only?: ReadonlySet<number> },
   progress?: (done: number, total: number, note?: string) => void,
   edits: WallEdits = {},
+  /** D4: a sub-fill of a mixed sheet's guarded seeds, on the solver's walls only */
+  solved?: GradeHook,
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = wallModel(set, run, sheet.texts);
+  const model = solved ? SOLVER_MODEL : wallModel(set, run, sheet.texts);
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
   // H1: sizes drawn alike — the solver's per-rank walls, or refusals (null = F4 as before)
-  const graded = gradeHook(sheet, set, run, use, model, opts, progress, edits.exclude);
+  const graded = solved ?? gradeHook(sheet, set, run, use, model, opts, progress, edits.exclude);
   const nRanks = graded?.n ?? model.n;
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);
@@ -1081,6 +1085,23 @@ export function fillPiecesDetailed(
     return true;
   };
   graded?.finish(cands);
+  for (const part of graded?.sub ?? []) {
+    // D4: the guarded seeds of a mixed sheet, filled again on the solver's walls; its proven ranks
+    // (and its own refusals) replace the refusals `finish` gave them
+    const ids = new Set(part.seeds);
+    const sub = fillPiecesDetailed(
+      sheet,
+      set,
+      run,
+      use.filter((s) => ids.has(s.id)),
+      opts,
+      progress,
+      edits,
+      part.hook,
+    );
+    for (const f of sub.families) if (cands.has(f.seed)) cands.set(f.seed, f.candidates);
+    (diag.subGrade ??= []).push(sub.diag);
+  }
   const families: PieceFamily[] = [];
   for (const s of use) {
     if (dropped.has(s.id)) continue;

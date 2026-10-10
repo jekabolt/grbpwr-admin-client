@@ -53,6 +53,8 @@ import {
   questionKey,
   settleAnswers,
   unansweredAtWrite,
+  drawnSizesKey,
+  liveDrawnSizes,
   type Answers,
 } from 'components/managers/tech-card/components/pattern-import/answers';
 import { mountHook, rerender } from './react-hook-shim';
@@ -237,8 +239,9 @@ async function mount() {
 type W = Awaited<ReturnType<typeof mount>>;
 
 /** sheet step → details for `model`, the regions that do not close dropped as "not a piece". */
-async function sheetToDetails(w: W, model: string) {
+async function sheetToDetails(w: W, model: string, drawn?: number) {
   await w.step((a) => a.next()); // sheet → sizes
+  if (drawn != null) await w.step((a) => a.setDrawnSizes(drawn)); // H1: "sizes drawn: n"
   await w.step((a) => a.next()); // sizes → pieces (first run: every model)
   await w.step((a) => a.dispatch({ type: 'variant', variant: model }));
   const open = (w.get().session.pieces?.families ?? []).filter((f) =>
@@ -296,7 +299,7 @@ async function scenario() {
   check(w.get().session.step === 'sheet', 'on the sheet step', w.get().session.step);
 
   // ── sheet A ──
-  await sheetToDetails(w, 'MOD. 125');
+  await sheetToDetails(w, 'MOD. 125', 5);
   check(w.get().session.step === 'meaning', 'sheet A: on details', w.get().session.step);
   const before = openOf(w.get());
   check(
@@ -317,6 +320,7 @@ async function scenario() {
     fileAllowance: a.inputs.fileAllowance,
     foldListChecked: a.inputs.foldListChecked,
     answerCtx: a.inputs.answerCtx,
+    drawnSizes: a.inputs.drawnSizes,
   };
   check(
     answersA.foldListChecked.includes(LIST_ENTRY) &&
@@ -350,6 +354,11 @@ async function scenario() {
       k.inputs.fileAllowance?.origin === 'operator',
     'control: the kept answers are the same answers',
   );
+  check(
+    k.inputs.drawnSizes === 5 && answersA.drawnSizes === 5,
+    'control: the drawn-size answer of this sheet is kept',
+    k.inputs.drawnSizes,
+  );
   check(k.blocker === null, 'control: details footer is clear', k.blocker);
   const wA = await writeFromDetails(w);
   check(wA.written && !wA.error && wA.step === 'check', 'control: the write goes through', wA);
@@ -371,13 +380,15 @@ async function scenario() {
     b.inputs.confirmedNames.length === 0 &&
       Object.keys(b.inputs.confirmedQuantities).length === 0 &&
       b.inputs.fileAllowance === null &&
-      b.inputs.foldListChecked.length === 0,
+      b.inputs.foldListChecked.length === 0 &&
+      b.inputs.drawnSizes === null,
     'sheet B: sheet A answers were dropped when the pieces settled',
     {
       names: b.inputs.confirmedNames,
       qty: b.inputs.confirmedQuantities,
       allowance: b.inputs.fileAllowance?.origin ?? null,
       list: b.inputs.foldListChecked,
+      drawn: b.inputs.drawnSizes,
     },
   );
   const openB = openOf(b);
@@ -566,6 +577,18 @@ function units() {
     w2.join() === '2 cutting-list entries to check',
     'write: a checked entry stops counting once a piece moved',
     w2,
+  );
+  const atA = { sheetIndex: 0, gridOverride: undefined, variant: 'MOD. 125' };
+  const drawnA = { drawnSizes: 3, drawnSizesAt: drawnSizesKey(atA) };
+  const drawnAll = { drawnSizes: 3, drawnSizesAt: drawnSizesKey({ ...atA, variant: null }) };
+  check(
+    liveDrawnSizes(drawnA, atA) === 3 &&
+      liveDrawnSizes(drawnA, { ...atA, variant: 'MOD. 126' }) === null &&
+      liveDrawnSizes(drawnA, { ...atA, sheetIndex: 1 }) === null &&
+      liveDrawnSizes(drawnA, { ...atA, gridOverride: { rows: 2 } }) === null &&
+      liveDrawnSizes(drawnAll, { ...atA, variant: 'MOD. 126' }) === 3 &&
+      liveDrawnSizes({ drawnSizes: 3, drawnSizesAt: null }, atA) === null,
+    'drawn sizes: live on the same sheet + model only (an all-models answer holds for any model)',
   );
   const q = openQuestions(sem, [], answers, ctx);
   check(

@@ -9,6 +9,6 @@
 export { extractDxf, readDxf } from './extract';
 export { isOurDxf } from './tags';
 export { segmentDxf, layerKind, bareSize } from './segment';
-export { dxfFastPath, dxfScaleCandidates, refuseSeamPair, type DxfFastPath } from './stages';
+export { dxfFastPath, dxfScaleCandidates, settleSeamPair, type DxfFastPath } from './stages';
 export { DxfImportError, isDxfImportError, type DxfImportErrorKind } from './errors';
 export type * from './dxf-types';

@@ -27,6 +27,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 import { CORPUS, REPORTS, type Prepared, type Sample } from './pieces-entry';
 import {
   clickSeeds,
+  fillOptsOf,
   fillSample,
   renderRun,
   type ClickFile,
@@ -62,7 +63,7 @@ function operate(sr: SampleRun, ops: OperatorOp[]): { s: PieceSession; log: stri
     set: sr.p.set,
     run: sr.p.run,
     seeds: sr.seeds,
-    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+    opts: fillOptsOf(sr.p, sr.variant),
     walls: { exclude: [], include: [], bridges: [] },
     families: sr.families,
   };
@@ -278,7 +279,7 @@ function negative(p: Prepared, sr: SampleRun, label: string) {
     p.set,
     p.run,
     [seed],
-    { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+    fillOptsOf(sr.p, sr.variant),
     undefined,
     { exclude: [wall] },
   );
@@ -356,11 +357,13 @@ function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
       k.chains.includes(wall) ? { ...k, chains: [...k.chains, nid] } : k,
     ),
   };
-  const { families } = fillPiecesDetailed(p.sheet, set, p.run, [seed], {
-    cellMm: PATIMPORT.fillCellMm,
-    snapMm: PATIMPORT.snapMm,
-    variant: sr.variant,
-  });
+  const { families } = fillPiecesDetailed(
+    p.sheet,
+    set,
+    p.run,
+    [seed],
+    fillOptsOf(sr.p, sr.variant),
+  );
   const after = families[0]?.candidates.find((x) => x.rank === cand.rank);
   const bridged = !!after?.derived?.some((d) => d.kind === 'bridge');
   const res = after
@@ -375,7 +378,7 @@ function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
       set,
       run: p.run,
       seeds: [seed],
-      opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+      opts: fillOptsOf(sr.p, sr.variant),
       walls: { exclude: [], include: [], bridges: [] },
       families,
     };
@@ -404,11 +407,13 @@ function gapControl(p: Prepared, sr: SampleRun, label: string, gapMm: number) {
 function bandControl(p: Prepared, sr: SampleRun) {
   const prev = process.env.F4_NOBANDS;
   process.env.F4_NOBANDS = '1';
-  const { families } = fillPiecesDetailed(p.sheet, p.set, p.run, sr.seeds, {
-    cellMm: PATIMPORT.fillCellMm,
-    snapMm: PATIMPORT.snapMm,
-    variant: sr.variant,
-  });
+  const { families } = fillPiecesDetailed(
+    p.sheet,
+    p.set,
+    p.run,
+    sr.seeds,
+    fillOptsOf(sr.p, sr.variant),
+  );
   if (prev === undefined) delete process.env.F4_NOBANDS;
   else process.env.F4_NOBANDS = prev;
   const sig = (f: PieceFamily) =>
@@ -428,7 +433,7 @@ function editChecks(p: Prepared, sr: SampleRun) {
     sheet: p.sheet,
     set: p.set,
     run: p.run,
-    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: sr.variant },
+    opts: fillOptsOf(sr.p, sr.variant),
   };
   const byLabel = (l: string) =>
     sr.seeds.find((s) => normLabel(seedLabel(s) ?? '') === normLabel(l));

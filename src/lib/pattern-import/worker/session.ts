@@ -30,6 +30,7 @@ import type {
   SizeMap,
   ExpectedSizes,
   FillOpts,
+  SizeCountAsk,
   SizeRun,
   SourceDoc,
   SourceFileInfo,
@@ -42,7 +43,7 @@ import {
   dxfFastPath,
   dxfScaleCandidates,
   readDxf,
-  refuseSeamPair,
+  settleSeamPair,
   segmentDxf,
   type DxfFastPath,
   type DxfPieceCandidate,
@@ -63,7 +64,7 @@ import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
 import { detectSizeRun } from '../sizes';
-import { expectedSizes, runForExpected } from '../pieces/grade/expected';
+import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
   applyPieceEdits,
@@ -695,14 +696,33 @@ export class Session {
       throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
     const read = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
     // H1: the sizes the sheet draws decide the run the pieces are ranked in
-    this.expected = expectedSizes(read, input.card, input.drawnSizes, this.chains);
+    this.expected = expectedSizes(read, input.drawnSizes, this.chains);
     const run = runForExpected(read, this.expected);
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    return { run, map, expected: this.expected };
+    return { run, map, expected: this.expected, countAsk: this.countAsk(read) };
+  }
+
+  /**
+   * D1: the sizes step asks "sizes drawn on this sheet" unless the source states it. A DXF's blocks
+   * are its pieces, so there it is asked only for blocks drawn as outline + sew line alike (they
+   * close only as one size). The lines' own suggestion is computed once per chain set.
+   */
+  private inferred: { set: ChainSet; v: SizeCountAsk['inferred'] } | null = null;
+  private countAsk(read: SizeRun): SizeCountAsk | null {
+    if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
+    if (
+      this.fast &&
+      !this.fast.families.some((f) => f.candidates.some((c) => (c as DxfPieceCandidate).oneSize))
+    )
+      return null;
+    const set = this.chains;
+    if (!set || !this.sheet) return { inferred: null };
+    if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
+    return { inferred: this.inferred.v };
   }
 
   // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
@@ -717,18 +737,15 @@ export class Session {
           'the pieces of a DXF are its blocks — they are not re-seeded or edited here',
           'pieces',
         );
-      // H1: the operator says the drawing has exactly two sizes — a block whose outline holds one
-      // more alike at a uniform allowance may be those two sizes (the source's own count of two is
-      // refused by the fast path already)
-      const twoSizes = this.expected?.from === 'operator' && this.expected.n === 2;
+      // H1c-4: a block read as outline + sew line alike stays refused unless one size is drawn
+      // (the source names it, or the operator answered 1 on the sizes step)
+      const oneSize = this.expected?.n === 1;
       // F8 keeps the DXF's own features on `dxf.features`; the contract field is
       // `PieceCandidate.features` — copy them across so every reader finds them in one place.
       const families = this.fast.families.map((f) => ({
         ...f,
         candidates: f.candidates.map((c0) => {
-          const c = twoSizes
-            ? refuseSeamPair(c0 as DxfPieceCandidate, 'you said the drawing has two sizes')
-            : c0;
+          const c = settleSeamPair(c0 as DxfPieceCandidate, oneSize);
           const dx = (
             c as typeof c & { dxf?: { features?: PieceFamily['candidates'][number]['features'] } }
           ).dxf;
@@ -748,7 +765,7 @@ export class Session {
     // H1: the fill must know how many sizes the sheet draws — the wizard passes the sizes step's
     // answer; without it, the session's own (sizes stage), else what the source alone says
     const expected =
-      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null, base) ?? undefined;
+      input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, null, base) ?? undefined;
     const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
     // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or

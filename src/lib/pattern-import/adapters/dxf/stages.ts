@@ -311,10 +311,6 @@ function candidateOf(
 ): DxfPieceCandidate {
   const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
   if (p.nested) return refusedNested(p, seed, Math.max(0, rank));
-  // one same-look loop at a uniform allowance reads as the sew line — unless the source draws
-  // exactly two sizes: then the two loops may be those two sizes, and nothing proves which
-  if (p.seamPair && seg.sizes.length === 2)
-    return refusedPair(p, seed, Math.max(0, rank), 'the drawing names two sizes');
   const outer = (outerIsSeam ? p.seam ?? p.cut : p.cut ?? p.seam) ?? null;
   const group = read.meta.groups[p.group];
   const wallIds = new Set(outer?.paths ?? []);
@@ -394,7 +390,7 @@ function candidateOf(
     }
   }
   const area = outer?.areaMm2 ?? 0;
-  return {
+  const cand: DxfPieceCandidate = {
     seed,
     rank: Math.max(0, rank),
     outer: outer?.pts ?? [],
@@ -423,6 +419,14 @@ function candidateOf(
       ...(p.labels.quantity != null ? { quantity: p.labels.quantity } : {}),
     },
   };
+  // H1c-4: one same-look loop inside the outline at a uniform offset reads as the sew line ONLY
+  // when one size is drawn: a pocket graded +4 mm all round is the same picture (2 mm in all
+  // round). The source naming its one size says so; otherwise the block waits for the operator's
+  // count ("sizes drawn on this sheet" = 1 restores `oneSize`). A sew line in another look (CLO's
+  // layer 14) never gets here — it is not a same-look loop.
+  if (p.seamPair && !(seg.sizes.length === 1 && seg.sizes[0].token))
+    return { ...refusedPair(p, seed, Math.max(0, rank)), oneSize: cand };
+  return cand;
 }
 
 /**
@@ -448,40 +452,27 @@ function refusedNested(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCa
 
 /**
  * A block whose outline has one same-look loop inside at a uniform allowance (segment.ts
- * `seamPair`) when the run expects exactly two sizes: a cut line with its sew line and two sizes
- * graded by a uniform step look the same — refused, never the larger loop as "the" size.
+ * `seamPair`) while the count of sizes is not one: a cut line with its sew line and two sizes
+ * graded by a uniform step are the same picture — refused, never the larger loop as "the" size.
  */
-function refusedPair(p: DxfBlockPiece, seed: number, rank: number, why: string): DxfPieceCandidate {
-  return refusedBlock(p, seed, rank, pairDetail(p.block, p.size, p.seamPair?.offsetMm, why));
+function refusedPair(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCandidate {
+  return refusedBlock(
+    p,
+    seed,
+    rank,
+    `block ${p.block} draws its outline with one more outline alike inside it, ` +
+      `${p.seamPair?.offsetMm ?? '?'} mm in all round — a sew line, or a second size graded ` +
+      `evenly. If the drawing holds ONE size, answer 1 for "sizes drawn on this sheet"; otherwise ` +
+      `draw the sew line in another look, export one size per block, or trace the outline.`,
+  );
 }
 
-const pairDetail = (block: string, size: string, offsetMm: number | undefined, why: string) =>
-  `block ${block} draws its outline with one more outline alike inside it, ` +
-  `${offsetMm ?? '?'} mm in all round — a sew line, or the second of two sizes; ` +
-  `${why}, so which one is ${size ? `size ${size}` : 'this size'} cannot be proven. ` +
-  `Draw the sew line in another look, export one size per block, or trace the outline.`;
-
 /**
- * The same refusal applied later, when the OPERATOR says the run draws two sizes (the sizes step
- * comes after the fast path is built): a candidate whose block is a `seamPair` loses its outline.
+ * The count the sizes step settled decides a refused `seamPair` block: one size → its cut + sew
+ * reading (the candidate the fast path set aside), anything else → it stays refused.
  */
-export function refuseSeamPair(c: DxfPieceCandidate, why: string): DxfPieceCandidate {
-  if (c.dxf.seamPairMm == null || c.outcome === 'refused') return c;
-  return {
-    ...c,
-    outer: [],
-    walls: [],
-    inside: [],
-    textsInside: [],
-    outcome: 'refused',
-    areaMm2: 0,
-    sourceCoverage: 0,
-    p95Mm: 0,
-    features: [],
-    gradeRefusal: 'sizes-not-distinguished',
-    gradeDetail: pairDetail(c.dxf.block, c.dxf.size, c.dxf.seamPairMm, why),
-    dxf: { ...c.dxf, features: [] },
-  };
+export function settleSeamPair(c: DxfPieceCandidate, oneSize: boolean): DxfPieceCandidate {
+  return oneSize && c.oneSize ? c.oneSize : c;
 }
 
 function refusedBlock(

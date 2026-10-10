@@ -812,7 +812,7 @@ export function fixtureSizes(
   }
   const used = new Set(entries.flatMap((e) => (e.card ? [e.card.sizeId] : [])));
   const map: SizeMap = { entries, unmapped: card.filter((c) => !used.has(c.sizeId)) };
-  return { run, map, expected: { n: run.sizes.length, from: 'source' } };
+  return { run, map, expected: { n: run.sizes.length, from: 'source' }, countAsk: null };
 }
 
 // ── stage 5: pieces ─────────────────────────────────────────────────────────────────────────

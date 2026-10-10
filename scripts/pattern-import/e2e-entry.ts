@@ -66,6 +66,8 @@ type Case = {
   clicks?: string;
   /** Card sizes the operator answers "not exported" on the sizes step (a size whose lines leak). */
   notExported?: string[];
+  /** The operator's "sizes drawn on this sheet" answer when the file does not say (default: 1 for a one-size card). */
+  drawn?: number;
   /** The operator's "the drawn outline is" answer on the details step (default: the seam line). */
   meaning?: 'seam' | 'cut';
   /** The F11 synthetic scan: its vector truth is drawn under the overlays (not registered). */
@@ -497,6 +499,23 @@ export async function runCase(c: Case): Promise<Rec> {
     if (pending.length) rec.ops.push(`confirm ${pending.length} legend rows`);
     const CARD = card(c.card);
     let sz = await run('sizes', { card: CARD });
+    // D1: what the sizes step asks, and what the lines suggest (offered, never applied)
+    const askOf = (a: typeof sz.countAsk) =>
+      !a ? 'not asked' : a.inferred ? `${a.inferred.n} · from the lines` : 'asked, no suggestion';
+    const ask0 = askOf(sz.countAsk);
+    // H1c-3/4: a sheet that does not state its size count needs the operator's answer (the card's
+    // run is never the count). The operator answers from the drawing: `drawn`, else "1" where one
+    // size is drawn (one size read off the sheet, or a one-size card)
+    const drawn = sz.expected
+      ? undefined
+      : c.drawn ?? (sz.run.sizes.length === 1 || CARD.length === 1 ? 1 : undefined);
+    const ask = drawn ? { drawnSizes: drawn } : {};
+    if (!sz.expected) {
+      if (drawn) {
+        rec.ops.push(`answer ${drawn} for "sizes drawn on this sheet"`);
+        sz = await run('sizes', { card: CARD, ...ask });
+      } else rec.ops.push('"sizes drawn on this sheet" not answered (no ground truth in the case)');
+    }
     const guesses = sz.map.entries.filter(
       (e) => e.origin === 'auto' && !!e.card && (e.confidence ?? 1) < 0.9,
     );
@@ -508,11 +527,13 @@ export async function runCase(c: Case): Promise<Rec> {
           `${e.source.label}→${e.card?.token ?? '—'}${e.origin === 'auto' && e.card && (e.confidence ?? 1) < 0.9 ? '?' : ''}`,
       ),
       unmappedCard: sz.map.unmapped.length,
+      countAsk: ask0,
     };
     if (guesses.length) {
       rec.ops.push(`confirm ${guesses.length} size guesses`);
       sz = await run('sizes', {
         card: CARD,
+        ...ask,
         operatorMap: sz.map.entries.map((e) => ({ ...e, origin: e.card ? 'operator' : e.origin })),
       });
     }
@@ -524,6 +545,7 @@ export async function runCase(c: Case): Promise<Rec> {
       );
       sz = await run('sizes', {
         card: CARD,
+        ...ask,
         operatorMap: sz.map.entries.map((e, i) => ({
           ...e,
           card: i < n ? CARD[i] : null,
@@ -536,6 +558,7 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.ops.push(`size(s) ${c.notExported.join(', ')} not exported`);
       sz = await run('sizes', {
         card: CARD,
+        ...ask,
         operatorMap: sz.map.entries.map((e) => ({
           ...e,
           card: e.card && drop.has(e.card.token) ? null : e.card,
@@ -548,18 +571,6 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.verdict = 'fails';
       rec.reason = 'no size maps to the card';
       return rec;
-    }
-    // HARD-SIZES H1c-3: a sheet that draws ONE size and says nothing about it — the operator
-    // answers "1" on the sizes step (the count is the operator's, never the card's guess)
-    if (
-      sz.run.sizes.length === 1 &&
-      sz.expected?.from !== 'source' &&
-      sz.expected?.from !== 'operator'
-    ) {
-      rec.ops.push(
-        `answer "sizes drawn: 1" (was ${sz.expected ? `${sz.expected.n} from the ${sz.expected.from}` : 'unknown'})`,
-      );
-      sz = await run('sizes', { card: CARD, operatorMap: sz.map.entries, drawnSizes: 1 });
     }
     const exported = new Set(sz.map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model

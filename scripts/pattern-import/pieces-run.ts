@@ -15,7 +15,7 @@ import {
   sheetModule,
   wallModel,
 } from 'lib/pattern-import/pieces/walls';
-import type { BoxMm, ChainSet, PieceFamily, PtMm, Seed } from 'lib/pattern-import/types';
+import type { BoxMm, ChainSet, FillOpts, PieceFamily, PtMm, Seed } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import type { Prepared, Sample } from './pieces-entry';
@@ -125,12 +125,31 @@ export type SampleRun = {
   variant: string | null;
 };
 
-export function fillSample(p: Prepared, seeds: Seed[], variant: string | null): SampleRun {
-  const { families, diag } = fillPiecesDetailed(p.sheet, p.set, p.run, seeds, {
+/**
+ * The sizes step's answer for samples whose file does not say how many sizes it draws (H1c-4: the
+ * count is required there; the wizard asks the operator). Ground truth: TRUTH.md.
+ */
+export const DRAWN_SIZES: Record<string, number> = { blazer: 1 };
+
+/** Fill options as the wizard sends them: the operator's count where the file is silent. */
+export function fillOptsOf(p: Prepared, variant: string | null): FillOpts {
+  const drawn = DRAWN_SIZES[p.sample.id];
+  return {
     cellMm: PATIMPORT.fillCellMm,
     snapMm: PATIMPORT.snapMm,
     variant,
-  });
+    ...(drawn ? { expectedSizes: { n: drawn, from: 'operator' as const } } : {}),
+  };
+}
+
+export function fillSample(p: Prepared, seeds: Seed[], variant: string | null): SampleRun {
+  const { families, diag } = fillPiecesDetailed(
+    p.sheet,
+    p.set,
+    p.run,
+    seeds,
+    fillOptsOf(p, variant),
+  );
   return { p, seeds, families, diag, variant };
 }
 

@@ -33,8 +33,6 @@ export type GuardOpts = {
    * 2–20 mm) all along the line is its sew line drawn alike, not another size: not a lane.
    */
   skipUniformPairs: boolean;
-  /** neighbours of any look are lanes (the solver's band count does not look at the line) */
-  anyLook: boolean;
   /** lines shorter than this are no lane (lettering, symbols and arrows drawn as strokes), mm */
   minChainMm: number;
 };
@@ -47,7 +45,6 @@ export const GUARD_OPTS: GuardOpts = {
   minShare: 0.2,
   minLenMm: 150,
   skipUniformPairs: false,
-  anyLook: false,
   minChainMm: 10,
 };
 
@@ -71,7 +68,14 @@ export function isAllowancePair(offsets: readonly number[], shorterMm: number): 
   return sd <= P.stdMm;
 }
 
-export type GuardEvidence = { graded: boolean; share: number; nestedMm: number; totalMm: number };
+export type GuardEvidence = {
+  graded: boolean;
+  share: number;
+  nestedMm: number;
+  totalMm: number;
+  /** line length (mm) by the number of lanes it sits in (index = lanes, self included) */
+  lanesMm: number[];
+};
 
 /** Roles whose lines never count as size evidence (and never become graded walls). */
 export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore', 'notch']);
@@ -277,7 +281,7 @@ export function gradingEvidence(
       const visit = (k: number, i: number) => {
         if (k === c.id || hits.has(k)) return;
         const d = byId.get(k);
-        if (!d || (!o.anyLook && !sameLook(c, d, styles)) || copyOf(c, d)) return;
+        if (!d || !sameLook(c, d, styles) || copyOf(c, d)) return;
         const p = d.pts[i];
         const q = d.pts[(i + 1) % d.pts.length];
         const sx = q.x - p.x;
@@ -317,10 +321,12 @@ export function gradingEvidence(
       if (isAllowancePair(ds, Math.min(la, lb))) uniform.add(key);
     }
   let nested = 0;
+  const lanesMm: number[] = [];
   for (const { self, hits } of seen) {
     let lanes = 1;
     for (const k of hits) if (!uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`)) lanes++;
     if (lanes >= o.minLanes) nested += 4;
+    lanesMm[lanes] = (lanesMm[lanes] ?? 0) + 4;
   }
   const share = total ? nested / total : 0;
   return {
@@ -328,6 +334,7 @@ export function gradingEvidence(
     share,
     nestedMm: nested,
     totalMm: total,
+    lanesMm: Array.from(lanesMm, (v) => v ?? 0),
   };
 }
 

@@ -10,12 +10,14 @@
 //       FRONT_M  — control: one outline + a pocket cut-out on the cut layer + drill + internal
 //                  line → 'closed' on the outline, the pocket stays a hole;
 //       YOKE_M   — control: one outline + its sew line drawn alike at a uniform 10 mm → 'closed'
-//                  (reported as a seam pair; refused when the operator says the run has 2 sizes);
+//                  (reported as a seam pair; it closes because the drawing names ONE size, M);
 //       STACK_M  — 3 nested same-look rectangles at a uniform 8 mm step → refused (three alike are
 //                  sizes, however uniform);
 //       WIDE_M   — an outline + one alike 25 mm inside (more than an allowance) → refused;
 //     and a second fixture whose blocks name exactly two sizes (PANEL_S, PANEL_M, each an outline
-//     + a uniform 10 mm sew line alike) → refused: with two sizes, the pair may be the sizes;
+//     + a uniform 10 mm sew line alike) → refused: with two sizes, the pair may be the sizes; and a
+//     third with no size named (POCKET, graded +4 mm = an exact 2 mm inner loop) → refused until the
+//     count is one (settleSeamPair restores the cut + sew reading);
 //   * corpus/dxf-clo: no block is flagged and no candidate is refused (the guard is silent on
 //     real CLO exports), and — with --baseline FILE — the canonical fast-path output of every
 //     file equals the baseline taken before the change.
@@ -160,7 +162,15 @@ function fixtureDxf(kind = 'main') {
     });
   }
   const names = [];
-  if (kind === 'two-sizes') {
+  if (kind === 'no-size') {
+    // no size token anywhere: a patch pocket graded +4 mm all round = an exact 2 mm inner loop
+    block('POCKET', () => {
+      poly('1', rect(8000, 0, 8164, 184));
+      poly('1', rect(8002, 2, 8162, 182));
+      line('7', [8082, 30], [8082, 150]);
+    });
+    names.push('POCKET');
+  } else if (kind === 'two-sizes') {
     // the drawing names exactly two sizes; each block: an outline + one alike 10 mm inside
     for (const [i, z] of ['S', 'M'].entries()) {
       const x = 5000 + i * 1000;
@@ -270,14 +280,7 @@ console.log('# fixture: nested sizes in one block');
       'YOKE_M: reported as a cut line + sew line pair (10 mm)',
       JSON.stringify(p?.seamPair ?? null),
     );
-    const r = m.refuseSeamPair(c, 'you said the drawing has two sizes');
-    ck(
-      r.outcome === 'refused' &&
-        r.outer.length === 0 &&
-        r.gradeRefusal === 'sizes-not-distinguished',
-      'YOKE_M: refused when the operator says the run has two sizes',
-      r.gradeDetail ?? r.outcome,
-    );
+    ck(seg.sizes.length === 1, 'YOKE_M closes because the drawing names ONE size (M)');
   });
   refused('STACK_M', 3);
   refused('WIDE_M', 2);
@@ -300,6 +303,28 @@ console.log('\n# fixture: an outline + a sew line alike, the drawing names two s
     'PANEL_S / PANEL_M: refused (the pair may be the two sizes)',
     cs.map((c) => `${c.dxf.block}=${c.outcome}`).join(' '),
   );
+}
+
+console.log('\n# fixture: a centred pocket graded +4 mm (2 mm all round), no size named');
+{
+  const { seg, fast } = await m.fastPathOf('no-size.dxf', enc(fixtureDxf('no-size')));
+  const c = (fast?.families ?? [])
+    .flatMap((f) => f.candidates)
+    .find((x) => x.dxf.block === 'POCKET');
+  const p = seg.pieces.find((x) => x.block === 'POCKET');
+  ck(
+    !!c && c.outcome === 'refused' && c.outer.length === 0,
+    'POCKET: refused while the count is unknown (cut + sew line, or two sizes)',
+    `${c?.outcome} seamPair=${JSON.stringify(p?.seamPair ?? null)} nested=${JSON.stringify(p?.nested ?? null)}`,
+  );
+  const one = c && m.settleSeamPair(c, true);
+  const many = c && m.settleSeamPair(c, false);
+  ck(
+    !!p?.seamPair && one?.outcome === 'closed' && Math.abs(one.areaMm2 - 164 * 184) < 1,
+    'POCKET: answered "1 size" → the outer loop with its sew line',
+    `${one?.outcome} ${one ? Math.round(one.areaMm2) : '-'} mm²`,
+  );
+  ck(many?.outcome === 'refused', 'POCKET: any other count → stays refused', many?.outcome);
 }
 
 function area(pts) {
