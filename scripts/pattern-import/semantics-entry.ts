@@ -1033,6 +1033,24 @@ export async function main(): Promise<number> {
       'a new unbound entry asks again',
       JSON.stringify(w.foldList?.entries),
     );
+    // T4: a 3-digit piece number (the seeds' grammar) binds; a list-shaped line the grammar
+    // cannot read is never dropped — it stays a named file-level entry
+    const t3 = build(['123 BACK cut on fold'], { seedLabels: { 1: '123' } });
+    ck(
+      (t3.folds ?? []).some(
+        (q) => q.seed === 1 && q.evidence.some((e) => e.includes('123 BACK')),
+      ) && !t3.foldList,
+      '«123 BACK cut on fold» binds to the piece labelled 123 (3-digit number, as seeds read it)',
+      JSON.stringify({ folds: t3.folds?.map((q) => [q.seed, q.evidence]), list: t3.foldList }),
+    );
+    const t4 = build(['1234 BACK cut on fold'], { seedLabels: { 1: '1234' } });
+    ck(
+      !!t4.foldList &&
+        t4.foldList.entries.includes('1234 BACK cut on fold') &&
+        !t4.foldList.bound.length,
+      'an unparseable list-shaped fold line («1234 BACK …») stays an unbound file-level entry',
+      JSON.stringify(t4.foldList),
+    );
   }
 
   head('D2q a pair suggested by asymmetry, with a long straight edge: "cut on fold" offered (E4)');

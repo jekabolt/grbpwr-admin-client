@@ -5,6 +5,7 @@
 // offset, so the derived cut/seam line simply runs across where the fold was.
 
 import type { BoxMm, FoldFeature, PtMm } from '../types';
+import { PIECE_NO_SRC } from '../pieces/seeds';
 import {
   SegIndex,
   applyAffine,
@@ -478,7 +479,9 @@ export function foldShapeProblem(
 const CUT_ON_FOLD =
   /on\s+(?:the\s+)?fold|mod\s+fold|im\s*(?:stoff)?bruch|stoffbruch|со\s+сгибом|по\s+сгибу|au\s+pli|na\s+zgi[eę]ciu|al\s+doblez|sulla\s+piega|op\s+de\s+vouw|(?:centre|center|cb)\s+(?:back\s+)?fold/iu;
 /** A numbered cutting-list line: "26 Обтачка горловины спинки со сгибом 1х", "67. Forstykke, 1 gang mod fold". */
-const LIST_LINE = /^\s*(\d{1,2}[a-z]?)\s*[.\-–:)]?\s+\S/iu;
+const LIST_LINE = new RegExp(String.raw`^\s*(${PIECE_NO_SRC})\s*[.\-–:)]?\s+\S`, 'iu');
+/** List-shaped: a line that starts with a digit (a piece number the grammar may not take). */
+const LIST_SHAPED = /^\s*\d/u;
 
 /** One "cut on fold" line of the cutting list. */
 export type FoldListEntry = {
@@ -488,6 +491,11 @@ export type FoldListEntry = {
   no: string;
   /** The piece's name words, lower case, without the number, the fold phrase and the count. */
   words: string[];
+  /**
+   * T4 backstop: a list-shaped "cut on fold" line the number grammar does not take ("1234 BACK
+   * …"). Never bound to a piece, never dropped — an unbound file-level entry.
+   */
+  unparsed?: boolean;
 };
 
 const LIST_NOISE =
@@ -500,10 +508,16 @@ const LIST_NOISE =
  */
 export function foldListEntries(texts: readonly string[]): FoldListEntry[] {
   const byNo = new Map<string, FoldListEntry>();
+  const unparsed = new Map<string, FoldListEntry>();
   for (const raw of texts) {
     const t = raw.replace(/\s+/g, ' ').trim();
+    if (!CUT_ON_FOLD.test(t)) continue;
     const m = LIST_LINE.exec(t);
-    if (!m || !CUT_ON_FOLD.test(t)) continue;
+    if (!m) {
+      if (LIST_SHAPED.test(t) && !unparsed.has(t))
+        unparsed.set(t, { text: t, no: '', words: [], unparsed: true });
+      continue;
+    }
     const no = m[1].toLowerCase();
     if (byNo.has(no)) continue;
     const words = t
@@ -514,7 +528,7 @@ export function foldListEntries(texts: readonly string[]): FoldListEntry[] {
       .filter((w) => w.length >= 3);
     byNo.set(no, { text: t, no, words });
   }
-  return [...byNo.values()];
+  return [...byNo.values(), ...unparsed.values()];
 }
 
 const normLabel = (s: string) =>
@@ -534,6 +548,7 @@ export function bindFoldListEntry<S>(
   e: FoldListEntry,
   pieces: readonly { seed: S; labels: readonly string[] }[],
 ): S | null {
+  if (e.unparsed || !e.no) return null;
   const byNo = pieces.filter((p) => p.labels.some((l) => normLabel(l) === e.no));
   if (byNo.length === 1) return byNo[0].seed;
   if (byNo.length > 1 || !e.words.length) return null;
