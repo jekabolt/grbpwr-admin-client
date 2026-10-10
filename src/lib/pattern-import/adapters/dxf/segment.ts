@@ -247,6 +247,24 @@ function median(xs: number[]): number | null {
 }
 
 /** Sampled distances from contour a's vertices to contour b (≤ 400 samples). */
+/** Points every `step` mm along a closed polyline (arc length). */
+function arcSamples(pts: readonly PtMm[], step: number): PtMm[] {
+  const out: PtMm[] = [];
+  let carry = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    let t = carry;
+    while (t < L) {
+      out.push({ x: a.x + ((b.x - a.x) * t) / L, y: a.y + ((b.y - a.y) * t) / L });
+      t += step;
+    }
+    carry = t - L;
+  }
+  return out;
+}
+
 function sampleDistances(a: DxfContour, b: DxfContour): number[] {
   const step = Math.max(1, Math.floor(a.pts.length / 400));
   const out: number[] = [];
@@ -283,7 +301,8 @@ const unit = (v: PtMm): PtMm => {
  *    copy of the outline, not some other shape inside the piece;
  *  - not the same contour drawn twice (≤ 0.5 mm apart everywhere: harmless, the same line).
  * Of the loops that pass, ONE inside the outline at a uniform offset (distance spread ≤ max(1 mm,
- * 10 % of the median), 2 mm ≤ median ≤ 20 mm) is the sew line drawn alike at one allowance — the
+ * the inner loop's distance to the outline, sampled every 2 mm of its length, has a standard
+ * deviation ≤ 0.5 mm and a median of 2–20 mm) is the sew line drawn alike at one allowance — the
  * block keeps its outline, and the pair is reported (`seamPair`) so a run that expects exactly two
  * sizes (the source or the operator says 2) can still refuse it. TWO or more such loops are never a
  * cut line with its sew line: three same-look outlines one inside the other are sizes (a uniformly
@@ -297,8 +316,9 @@ const NEST = {
   inside: 0.95,
   closeness: 0.15,
   dupMm: 0.5,
-  uniformMm: 1,
-  uniformShare: 0.1,
+  /** uniform allowance: standard deviation of the inner loop's distance to the outline, mm */
+  uniformStdMm: 0.5,
+  sampleMm: 2,
   minOffsetMm: 2,
   /** a sew line lies at most this far inside the cut line (an allowance, not a size step) */
   maxAllowanceMm: 20,
@@ -354,10 +374,17 @@ function nestedSizeLoops(
     if (inside < NEST.inside * n) continue;
     if (quantile(toOuter, 0.95) > near || quantile(sampleDistances(outer, c), 0.95) > near)
       continue;
-    const med = quantile(toOuter, 0.5);
-    const spread = quantile(toOuter, 0.9) - quantile(toOuter, 0.1);
-    const uniform =
-      med >= NEST.minOffsetMm && spread <= Math.max(NEST.uniformMm, NEST.uniformShare * med);
+    // the allowance test, measured all along the inner loop (every 2 mm of its length, not its
+    // vertices): median 2–20 mm, standard deviation ≤ 0.5 mm — grading is never that even
+    const along = arcSamples(c.pts, NEST.sampleMm).map(
+      (q) => nearestOnPolyline(q, outer.pts, true).dist,
+    );
+    const med = quantile(along, 0.5);
+    const mean = along.reduce((a, b) => a + b, 0) / Math.max(1, along.length);
+    const sd = Math.sqrt(
+      along.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, along.length),
+    );
+    const uniform = along.length >= 3 && med >= NEST.minOffsetMm && sd <= NEST.uniformStdMm;
     copies.push({ loop: c, uniform, med });
   }
   // one near copy at a uniform allowance: the sew line. Two or more: sizes, however spaced

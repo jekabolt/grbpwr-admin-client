@@ -80,6 +80,20 @@ export const mixedGuard = (n: number): Partial<GuardOpts> => ({
  * corpus: no encoded seed flips (viola's nearest lettering pair: 64 mm of nest at ≤ 15 mm);
  * polupalto (audited, not an encoding) refuses more.
  */
+/**
+ * The card's run is a weak prior: a sheet the card alone says is graded fills as ONE size only when
+ * every pair of lines side by side (any look — the solver's band count does not look at the line)
+ * is a cut / sew line pair at one allowance, a near-exact registration copy, or a line under 40 mm.
+ */
+export const CARD_SINGLE: Partial<GuardOpts> = {
+  minLanes: 2,
+  minShare: 0,
+  minLenMm: 4,
+  minChainMm: 40,
+  anyLook: true,
+  skipUniformPairs: true,
+};
+
 export const PAIR_GUARD: Partial<GuardOpts> = {
   minLanes: 2,
   minShare: 0,
@@ -370,7 +384,15 @@ export function gradeHook(
     cache.set(key, G);
   }
   if (G.diag.bandMode !== n) {
-    if (weakCard) return null;
+    // the card alone said n: one size when the drawing shows at most two lines side by side and
+    // every such pair is a cut / sew line at one allowance (a third line, or a pair that is not,
+    // goes to the operator: how many sizes does the sheet draw)
+    if (
+      weakCard &&
+      G.diag.bandMode <= 2 &&
+      (G.diag.bandMode < 2 || !guardedSeeds(sheet, set, seeds, lineIds, cell, CARD_SINGLE).length)
+    )
+      return null;
     const message =
       G.diag.bandMode > 0
         ? `the drawing shows ${G.diag.bandMode} line(s) side by side, ${exp.from === 'card' ? "the card's size run" : exp.from === 'operator' ? 'you said' : 'the source says'} ${n}`
@@ -472,10 +494,14 @@ export function gradeHook(
             Math.abs(off[k] - mo) > GRADE_STEP_TOL * step ||
             Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2 ||
             xor[k] - mx > GRADE_XOR_TOL * step ||
-            mx > GRADE_XOR_MAX * c.areaMm2;
+            mx > GRADE_XOR_MAX * c.areaMm2 ||
+            // absolute, per rank: a contour wrong by the same strip in EVERY rank (a sew line
+            // taken for the cut line) moves no rank off the median
+            xor[k] > GRADE_XOR_AREA_MAX * c.areaMm2 ||
+            xor[k] / perimeter(c.outer) > GRADE_XOR_STRIP_MM;
           if (HOOK_DEBUG.on)
             HOOK_DEBUG.log(
-              `    region seed ${id} r${c.rank}: xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
+              `    region seed ${id} r${c.rank}: strip ${(xor[k] / perimeter(c.outer)).toFixed(3)} mm, area ${((100 * xor[k]) / c.areaMm2).toFixed(3)} %, xor ${(xor[k] / 100).toFixed(2)} cm² (median ${(mx / 100).toFixed(2)}, ${((100 * mx) / c.areaMm2).toFixed(2)} % of the area), step ${(step / 100).toFixed(2)} cm² → ${((xor[k] - mx) / (step || 1)).toFixed(2)} step${bad ? ' BAD' : ''}`,
             );
           if (bad) {
             if (HOOK_DEBUG.on)
@@ -516,3 +542,21 @@ export const GRADE_RIM_MAX = 0.06;
  */
 export const GRADE_XOR_TOL = 0.25;
 export const GRADE_XOR_MAX = 0.04;
+/**
+ * Absolute per-rank bounds of the same check: the mean strip between F4's contour and the solver's
+ * region (XOR area / contour length) and the XOR as a share of the area. Bench (144 accepted ranks):
+ * strip ≤ 0.58 mm, XOR ≤ 2.69 % of the area (a small kombinezon piece, where the rim weighs most) —
+ * 2 % refused three correct ranks of it, hence 4 %.
+ */
+export const GRADE_XOR_STRIP_MM = 2;
+export const GRADE_XOR_AREA_MAX = 0.04;
+
+function perimeter(pts: readonly PtMm[]): number {
+  let L = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    L += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return L || 1;
+}
