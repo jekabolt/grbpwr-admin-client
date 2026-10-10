@@ -312,6 +312,8 @@ type Mount = {
   unitless?: boolean;
   /** Clone the contour Map on every BOM change, as `usePieceShapes` does on the card. */
   churnShapes?: boolean;
+  /** BOM lines of the card (U7: one sewing thread → the step editor suggests it). */
+  bom?: Record<string, unknown>[];
   /** Mount the STUB AI asker (scenario L; 'fail' = it refuses after being charged); without it the
    *  AI bar is not there at all. */
   ai?: boolean | 'fail';
@@ -554,6 +556,7 @@ function Harness({ m }: { m: Mount }) {
         ...emptyOperation,
         ...o,
       })) as unknown as TechCardFormData['operations'],
+      ...(m.bom ? { bomItems: m.bom as unknown as TechCardFormData['bomItems'] } : {}),
       construction: {
         ...techCardDefaultData.construction,
         equipmentDefaults: { machines: (m.machines ?? []) as never, presses: [] },

@@ -63,6 +63,7 @@ const {
   redoTitle,
   renameLabel,
   resolvePending,
+  operationRowPrint,
   skeletonCanRedo,
   skeletonCanUndo,
   skeletonLabel,
@@ -1640,15 +1641,34 @@ console.log('\nсброс раскладки против переименова
       assemblyCleared: false,
       issues: [],
     },
-    after: { rows: [], mediaCleared: false, assemblyCleared: false },
+    after: {
+      rows: Array.from({ length: count }, () => ({ draft: true, seamAllowanceMm: '' })),
+      mediaCleared: false,
+      assemblyCleared: false,
+    },
     label: skeletonLabel(mode, count),
   });
-  const D = { draft: true };
+  const D = { draft: true, seamAllowanceMm: '' };
   const N = { draft: false };
   const app = rec('append', 2, 3);
   yes('append: хвост из трёх draft — отменяется', skeletonCanUndo(app, [N, N, D, D, D]));
   no('append: одна строка пачки проверена — нет', skeletonCanUndo(app, [N, N, D, N, D]));
   no('append: длина поехала — нет', skeletonCanUndo(app, [N, N, D, D, D, N]));
+  // Ревью Codex P2: правка поля ВНЕ прежних тринадцати (припуск) — всё равно правка пачки.
+  no(
+    'append: припуск на строке пачки поправлен, метка ещё стоит — всё равно нет',
+    skeletonCanUndo(app, [N, N, D, { ...D, seamAllowanceMm: '8' }, D]),
+  );
+  yes(
+    'отпечаток: номер шага и сама метка — не факты строки',
+    operationRowPrint({ draft: true, operationNumber: 30, a: 1 }) ===
+      operationRowPrint({ draft: false, operationNumber: 10, a: 1 }),
+  );
+  yes(
+    'отпечаток: undefined/null ключа = нет ключа, порядок ключей не важен',
+    operationRowPrint({ b: [1], a: undefined, c: null }) === operationRowPrint({ b: [1] }),
+  );
+  no('отпечаток: любое поле шага — факт', operationRowPrint({ x: '' }) === operationRowPrint({ x: '1' }));
   yes('append: правка СВОИХ шагов до пачки не мешает', skeletonCanUndo(app, [D, N, D, D, D]));
   const rep = rec('replace', 0, 2, 4);
   yes('replace: обе draft — отменяется', skeletonCanUndo(rep, [D, D]));

@@ -202,6 +202,7 @@ import {
   redoTitle,
   renameLabel,
   resolvePending,
+  operationRowPrint,
   skeletonCanUndo,
   skeletonLabel,
   undoStep,
@@ -880,27 +881,11 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
 }
 
 /**
- * The fields that say WHAT a step is. A draft row keeps its «draft» mark in the rail while these
- * read as they were applied; the first hand that changes one of them takes the mark off for good.
- * Positional and server-stamped fields (`operationNumber`) are not here: a save re-stamps them, and
- * a save is not a touch.
+ * The print a draft row is judged by: the WHOLE persisted step (`operationRowPrint`), less `draft`
+ * itself and the server-stamped `operationNumber` — a save re-stamps it, and a save is not a touch.
+ * Any edit of any field (allowance, topstitch, a kind block, BOM links, photos) takes the mark off.
  */
-const DRAFT_FIELDS = [
-  'inputKeys',
-  'outputUnitKey',
-  'outputUnitName',
-  'operationType',
-  'zone',
-  'machineType',
-  'pressEquipment',
-  'work',
-  'seamClass',
-  'smv',
-  'calloutNumber',
-  'note',
-] as const;
-const draftPrint = (row: Record<string, unknown> | undefined): string =>
-  JSON.stringify(DRAFT_FIELDS.map((f) => row?.[f] ?? null));
+const draftPrint = (row: Record<string, unknown> | undefined): string => operationRowPrint(row);
 
 /** What `OperationsField` reports back after an apply request. */
 export type SkeletonApplyResult = {
@@ -2459,7 +2444,14 @@ function OperationEditor({
   mediaUrls,
   onEdit,
   frozen = false,
+  noteSuggested,
 }: {
+  /**
+   * «Эту строку сейчас переписала подстановка, а не человек» (зона, нитка, утюг — `shouldDirty:
+   * false`). Детектор черновика берёт отпечаток заново и метку не снимает; пачка каркаса на вершине
+   * истории принимает значение как своё (ревью Codex P2).
+   */
+  noteSuggested?: (index: number) => void;
   index: number;
   bomLines: BomLine[];
   pieces: PieceRef[];
@@ -3931,6 +3923,7 @@ function OperationEditor({
     if (zoneSuggested) {
       wroteRef.current.zone = zoneSuggested;
       if (zoneValue !== zoneSuggested) {
+        noteSuggested?.(index);
         setValue(`operations.${index}.zone`, zoneSuggested, { shouldDirty: false });
       }
       if (applied.zone !== zoneSuggested) setApplied((prev) => ({ ...prev, zone: zoneSuggested }));
@@ -3939,6 +3932,7 @@ function OperationEditor({
     if (ours === undefined) return;
     delete wroteRef.current.zone;
     if (!zoneIsUnset(zoneValue)) {
+      noteSuggested?.(index);
       setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
     }
     setApplied((prev) => {
@@ -3956,6 +3950,7 @@ function OperationEditor({
       if (ours === threadSuggested && selectedBomKeys.includes(threadSuggested)) return;
       wroteRef.current.thread = threadSuggested;
       const others = selectedBomKeys.filter((k) => k !== ours && k !== threadSuggested);
+      noteSuggested?.(index);
       setValue(`operations.${index}.bomLineKeys`, [...others, threadSuggested], {
         shouldDirty: false,
       });
@@ -4001,9 +3996,11 @@ function OperationEditor({
     if (pressSuggested) {
       wroteRef.current.press = { equipment: pressSuggested, profileKey: pressProfileSuggested };
       if (pressEquipment !== pressSuggested) {
+        noteSuggested?.(index);
         setValue(`operations.${index}.pressEquipment`, pressSuggested, { shouldDirty: false });
       }
       if (pressProfileSuggested && pressProfileKey !== pressProfileSuggested) {
+        noteSuggested?.(index);
         setValue(`operations.${index}.pressProfileKey`, pressProfileSuggested, {
           shouldDirty: false,
         });
@@ -4019,9 +4016,11 @@ function OperationEditor({
     if (!ours) return;
     delete wroteRef.current.press;
     if (eqSet) {
+      noteSuggested?.(index);
       setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
     }
     if (ours.profileKey && pressProfileKey) {
+      noteSuggested?.(index);
       setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
     }
     setApplied((prev) => {
@@ -4071,6 +4070,7 @@ function OperationEditor({
       if (wrote.zone !== undefined) {
         const cur = getValues(`operations.${index}.zone`);
         if (cur === wrote.zone && base.zone !== wrote.zone) {
+          noteSuggested?.(index);
           setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
         }
       }
@@ -4087,6 +4087,7 @@ function OperationEditor({
       if (wrote.press) {
         const eq = getValues(`operations.${index}.pressEquipment`);
         if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
+          noteSuggested?.(index);
           setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, {
             shouldDirty: false,
           });
@@ -4095,6 +4096,7 @@ function OperationEditor({
             getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
             base.pressProfileKey !== wrote.press.profileKey
           ) {
+            noteSuggested?.(index);
             setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
           }
         }
@@ -4109,7 +4111,10 @@ function OperationEditor({
   /** Снять подставленное касанием: значение уходит, подсказка на этом шаге гаснет. */
   const dropSuggested = (field: SuggestedField) => {
     const wrote = wroteRef.current;
-    if (field === 'zone') setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+    if (field === 'zone') {
+      noteSuggested?.(index);
+      setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
+    }
     if (field === 'thread') {
       setValue(
         `operations.${index}.bomLineKeys`,
@@ -4118,9 +4123,10 @@ function OperationEditor({
       );
     }
     if (field === 'press') {
+      noteSuggested?.(index);
       setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
-      if (wrote.press?.profileKey)
-        setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
+      if (wrote.press?.profileKey) noteSuggested?.(index);
+      setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
     }
     dismiss(field);
   };
@@ -6303,7 +6309,7 @@ export function OperationsField({
   //
   // Правда одна — `operations[i].draft`: его ставит `rowFromStep`, его везёт автосейв, его читает
   // перезагрузка, его видит вся команда. Здесь только ДЕТЕКТОР ПЕРВОГО КАСАНИЯ: у каждой строки-
-  // черновика запоминается отпечаток смысловых полей (`draftPrint`) в момент, когда метка впервые
+  // черновика запоминается отпечаток ВСЕГО шага (`draftPrint`) в момент, когда метка впервые
   // увидена (запись каркаса, загрузка карточки); строка, чьи поля разошлись с ним, теряет метку
   // НАВСЕГДА (`draft = false`, грязное поле → автосейв), даже если потом вернуть как было.
   //
@@ -6318,6 +6324,10 @@ export function OperationsField({
   const draftRef = useRef(draftIds);
   draftRef.current = draftIds;
   const draftBase = useRef(new Map<string, string>());
+  const suggestedRows = useRef(new Set<number>());
+  const noteSuggested = useCallback((index: number) => {
+    suggestedRows.current.add(index);
+  }, []);
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
     const sub = watch((_, { name }) => {
@@ -6335,6 +6345,7 @@ export function OperationsField({
     const base = draftBase.current;
     const next = new Set<string>();
     const touched: number[] = [];
+    const rebased: number[] = [];
     const live = new Set<string>();
     fields.forEach((f, i) => {
       live.add(f.id);
@@ -6345,7 +6356,18 @@ export function OperationsField({
       }
       const print = draftPrint(row);
       const was = base.get(f.id);
-      if (was === undefined || was === print || draftPrint(saved[i]) === print) {
+      // Отпечаток берётся заново, а метка остаётся: впервые увиденная строка; лёгшая запись
+      // (строка = сохранённой базе на том же месте); подстановка редактора (не жест человека).
+      if (
+        was === undefined ||
+        was === print ||
+        draftPrint(saved[i]) === print ||
+        suggestedRows.current.has(i)
+      ) {
+        // Подстановка может лечь РАНЬШЕ первого взгляда детектора (эффекты редактора — ребёнка —
+        // идут до эффектов поля в том же коммите, что и запись каркаса): её строка всё равно
+        // уходит в снимок пачки.
+        if ((was !== undefined && was !== print) || suggestedRows.current.has(i)) rebased.push(i);
         base.set(f.id, print);
         next.add(f.id);
         return;
@@ -6354,6 +6376,21 @@ export function OperationsField({
       touched.push(i);
     });
     for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
+    suggestedRows.current.clear();
+    // Строка пачки каркаса, переписанная НЕ человеком (подстановка, лёгшая запись), — всё ещё то,
+    // что положила запись: снимок `after` принимает её, иначе щит отмены счёл бы её правкой.
+    const top = peekUndo(history.current);
+    if (top?.kind === 'skeleton') {
+      const own = rebased.filter((i) => i >= top.from && i < top.from + top.count);
+      if (own.length > 0) {
+        const rows = [...top.after.rows];
+        for (const i of own) rows[i - top.from] = structuredClone(ops[i]) as (typeof rows)[number];
+        setHistory({
+          undo: [...history.current.undo.slice(0, -1), { ...top, after: { ...top.after, rows } }],
+          redo: history.current.redo,
+        });
+      }
+    }
     if (!frozen)
       for (const index of touched)
         setValue(`operations.${index}.draft`, false, { shouldDirty: true });
@@ -6361,7 +6398,7 @@ export function OperationsField({
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
-  }, [touchTick, fields, getValues, setValue, control, frozen]);
+  }, [touchTick, fields, getValues, setValue, control, frozen, setHistory]);
   // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
   // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
   const markReviewed = (i: number) => {
@@ -7798,6 +7835,7 @@ export function OperationsField({
                   // operation-type preset and the thread-from-BOM fill as if the user had just picked
                   // them — quietly writing into blank machine / stitch / thread fields on a drag.
                   key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
+                  noteSuggested={noteSuggested}
                   index={selectedIndex}
                   bomLines={bomItems}
                   pieces={pieces}
@@ -7896,6 +7934,7 @@ export function OperationsField({
           renderDockEditor={(addPiece) =>
             selectedIndex >= 0 ? (
               <OperationEditor
+                noteSuggested={noteSuggested}
                 // ТОТ ЖЕ KEY-КОНТРАКТ, что у инлайна, и упрощать его нельзя: оба «пропусти первый
                 // прогон» сторожа редактора привязаны к монтированию, а их эффекты зависят от
                 // `index`. Пере-сортировка открытого шага меняет индекс без ремаунта — и пресет

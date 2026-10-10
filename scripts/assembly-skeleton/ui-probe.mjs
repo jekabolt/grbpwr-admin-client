@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 const MUTATE_AUTOAPPLY = process.argv.includes('--mutate-autoapply');
 const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
 const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
+const MUTATE_DRAFT_PRINT = process.argv.includes('--mutate-draft-print');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -115,6 +116,22 @@ const plugins = [
   },
 ];
 const UNDO_MEDIA_FIX = `      setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });\n`;
+// The pre-review print: only the «what the step is» fields — an allowance edit slipped through.
+const PRINT_FIX = `  return JSON.stringify(canonRow(row ?? {}, true));`;
+const PRINT_BROKEN = `  const r = (row ?? {}) as Record<string, unknown>;
+  return JSON.stringify(['inputKeys', 'outputUnitKey', 'outputUnitName', 'operationType', 'zone',
+    'machineType', 'pressEquipment', 'work', 'seamClass', 'smv', 'calloutNumber', 'note'].map((f) => r[f] ?? null));`;
+if (MUTATE_DRAFT_PRINT)
+  plugins.push({
+    name: 'draft-print-mutation',
+    setup(b) {
+      b.onLoad({ filter: /last-mutation\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(PRINT_FIX)) throw new Error('print mutation did not find its line');
+        return { contents: src.replace(PRINT_FIX, PRINT_BROKEN), loader: 'ts' };
+      });
+    },
+  });
 if (MUTATE_UNDO_MEDIA)
   plugins.push({
     name: 'undo-media-mutation',
@@ -713,6 +730,81 @@ const U_OWN = [
   await closePanel();
 }
 
+{
+  // U5 (Codex P2) an edit OUTSIDE the old «what the step is» fields — the seam allowance — is an
+  // edit of the batch: the mark goes, and undo is refused in words (it would erase the allowance).
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    window.__sk.form().setValue('operations.3.seamAllowanceMm', '8', { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  const refused = await page.locator('[data-skeleton-undo-refused]').count();
+  const r = await ops();
+  ck(refused === 1, 'an allowance edit on an applied row: undo refused in words');
+  ck(
+    r.length === n && r[3].seamAllowanceMm === '8',
+    'the allowance survives — nothing was taken back',
+    `${r.length} rows, allowance ${r[3]?.seamAllowanceMm}`,
+  );
+  ck(r[3].draft === false, 'the allowance edit takes the draft mark off');
+  await closePanel();
+}
+{
+  // U6 an autosave in between (the real mappers + settle): the batch is still the apply's own.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.evaluate(() => window.__sk.settleLikeAutosave());
+  await page.waitForTimeout(300);
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'after an autosave settle «undo» is still offered',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  ck((await ops()).length === 2, 'and it takes the batch back');
+  await closePanel();
+}
+{
+  // U7 the step editor's suggestion (one sewing thread on the card) is not a human edit: the
+  // opened applied step gets the thread, keeps «draft», and the batch stays undoable.
+  await mount({
+    ops: U_OWN,
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'sewing thread',
+        section: 'thread',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const r = await ops();
+  const opened = r.findIndex((x, i) => i >= 2 && (x.bomLineKeys ?? []).includes('TH1'));
+  ck(opened >= 2, 'control: the editor suggested the thread on an applied step', `row ${opened}`);
+  ck(opened >= 2 && r[opened].draft === true, 'a suggestion does not take the draft mark off');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'a suggestion does not take «undo» away',
+  );
+  await page.click('[data-skeleton-undo]');
+  await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
+  ck((await ops()).length === 2, 'undo takes the batch back with its suggestion');
+  await closePanel();
+}
+
 // ── C ───────────────────────────────────────────────────────────────────────────────────────────
 head('C — apply this step, readings, a ticked guess');
 await mount({});
@@ -1220,6 +1312,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}`,
 );
 if (bad) process.exitCode = 1;

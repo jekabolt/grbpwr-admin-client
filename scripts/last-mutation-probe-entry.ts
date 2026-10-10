@@ -27,6 +27,7 @@ export {
   redoTitle,
   renameLabel,
   resolvePending,
+  operationRowPrint,
   skeletonCanRedo,
   skeletonCanUndo,
   skeletonLabel,

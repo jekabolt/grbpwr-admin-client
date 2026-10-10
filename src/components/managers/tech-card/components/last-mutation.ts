@@ -302,15 +302,54 @@ export function skeletonLabel(mode: 'append' | 'replace', count: number): string
 }
 
 /**
- * Щит отмены записи каркаса. Длина — ровно та, что запись оставила, и каждая строка пачки ещё
- * `draft`: правка любой из них снимает метку (детектор первого касания), «reviewed» — тоже.
+ * Поля строки шага, которые НЕ факт шага: метка «не проверено» (её и судят этим отпечатком) и
+ * номер, который сервер перештамповывает на каждой записи. Всё остальное — факт, и правка любого
+ * из них — правка шага.
+ */
+const NOT_A_ROW_FACT: ReadonlySet<string> = new Set(['draft', 'operationNumber']);
+
+function canonRow(v: unknown, top: boolean): unknown {
+  if (Array.isArray(v)) return v.map((x) => canonRow(x, false));
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+      if (top && NOT_A_ROW_FACT.has(k)) continue;
+      const x = (v as Record<string, unknown>)[k];
+      // undefined и null — «нет значения», как их видит сравнение автосейва: ключ, присутствующий
+      // со значением undefined, и отсутствующий — одна и та же строка.
+      if (x === undefined || x === null) continue;
+      out[k] = canonRow(x, false);
+    }
+    return out;
+  }
+  return v;
+}
+
+/**
+ * ОТПЕЧАТОК ШАГА ЦЕЛИКОМ (ревью Codex P2): все сохраняемые поля строки, нормализованные, кроме
+ * `NOT_A_ROW_FACT`. Им судят и первое касание черновика (снимает `draft`), и щит отмены каркаса.
+ * Тринадцать «смысловых» полей прежнего отпечатка пропускали правку припуска, отстрочки, полей
+ * вида, связей BOM — и отмена стирала такую правку как нетронутую.
+ */
+export function operationRowPrint(row: unknown): string {
+  return JSON.stringify(canonRow(row ?? {}, true));
+}
+
+/**
+ * Щит отмены записи каркаса. Длина — ровно та, что запись оставила; каждая строка пачки ещё
+ * `draft` («reviewed» снимает метку) И совпадает с тем, что запись положила (`after.rows`, тем же
+ * отпечатком): любая правка любого поля пачки — уже чужая работа, и отмена её не сотрёт.
  */
 export function skeletonCanUndo<TRow>(
   rec: Extract<HistoryEntry<TRow>, { kind: 'skeleton' }>,
   rows: ReadonlyArray<{ draft?: boolean } | undefined>,
 ): boolean {
   if (rows.length !== rec.from + rec.count) return false;
-  for (let i = rec.from; i < rec.from + rec.count; i++) if (rows[i]?.draft !== true) return false;
+  for (let i = 0; i < rec.count; i++) {
+    const row = rows[rec.from + i];
+    if (row?.draft !== true) return false;
+    if (operationRowPrint(row) !== operationRowPrint(rec.after.rows[i])) return false;
+  }
   return true;
 }
 

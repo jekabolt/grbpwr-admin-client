@@ -3558,6 +3558,10 @@ export function mapFormToTechCardInsert(
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
     operationWorkAware: true,
+    // ШЕСТОЙ — черновик каркаса (0410). Ставится ВСЕГДА: этот бандл везёт `draft` каждого шага, и
+    // `false` здесь — «проверено», а не «не знаю про поле». Без флага сервер отказывает записи
+    // поверх карточки с draft-шагами (старая вкладка стёрла бы метки полной заменой).
+    operationDraftAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
