@@ -11,6 +11,7 @@
 //
 // ФИЗИКА ПЕЧАТИ (разбор SCHEME-UNFOLDED.pdf): только 100 % K, ничего мельче 10 pt, линейки
 // 0,3 / 0,35 / 0,53 мм, дорожки 0,3 мм, силуэт 0,5 мм, мерная линейка 50 мм в подвале.
+import type { PieceFamily } from 'lib/assembly-skeleton/map';
 import type { UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { mapCrossings, mapLayout, routeCrossings, routeGeometry, type CardMeasure } from './layout';
@@ -102,7 +103,7 @@ export type ShapeLookup = ((pieceKey: string) => PieceDTO | null) | null;
 export type UnionLookup = ((unitKey: string) => UnionPicture | null) | null;
 
 export type SheetReport = {
-  form: 'route' | 'map';
+  form: 'route' | 'map' | 'seams';
   sheetW: number;
   sheetH: number;
   crossings: number;
@@ -967,5 +968,268 @@ export function typesetMap(
       cols,
       colW: Math.round(colW * 10) / 10,
     },
+  };
+}
+
+// ======================= SEAM MAP: детали с номерами шагов у кромок =======================
+//
+// Третий лист (04-ASSEMBLY-MAP-DESIGN §5, D8): каждое семейство деталей один раз в масштабе 1:12,
+// сшиваемые кромки 0,8 мм с номером шага снаружи, надсечки штрихом 3 мм, несшиваемое — контуром
+// 0,35 мм; под деталями — ключ шагов в пять колонок, внизу подвал с линейкой. A4 альбомом; не
+// влезает — A3, A2, A1 (то же правило «лист растёт», что у ROUTE / MAP). Кегль — 10 pt везде:
+// физика печати этого модуля не знает текста мельче (шапка файла), и макет §5 с его 8 pt уступает ей.
+//
+// Числа — те же, что на экране (PIECES): номера шагов из того же графа, через тот же lib.
+
+/** Что лист SEAM MAP берёт из карты сборки; null — у карточки нет контуров (нет DXF). */
+export type SeamSheet = {
+  families: PieceFamily[];
+  /** Номер шага по индексу (как в ROUTE). */
+  numberOf: (index: number) => number;
+  /** Ключ: каждый сшивающий шаг-соединение; `unread` — кромки не прочитаны из выкройки. */
+  key: { number: number; text: string; unread: boolean }[];
+} | null;
+
+const SM = { MARGIN: 10, SCALE: 1 / 12, PAD: 5, GAP: 3, NUM_GAP: 1.2, NOTCH: 3, COLS: 5 };
+const SEAM_SIZES: [number, number, string][] = [
+  [297, 210, 'A4'],
+  [420, 297, 'A3'],
+  [594, 420, 'A2'],
+  [841, 594, 'A1'],
+];
+const SEAM_LEGEND = 'NUMBER AT AN EDGE = STEP THAT SEWS IT · TICK = NOTCH · 1:12';
+
+type LabelBox = { x0: number; y0: number; x1: number; y1: number };
+const hits = (a: LabelBox, b: LabelBox) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+/**
+ * Одна деталь листа в своих координатах (0,0 — левый верх карточки): контур, сшиваемые кромки,
+ * надсечки, номера и имя. Рамка карточки включает номера, поэтому соседняя деталь их не накроет.
+ */
+function seamCard(
+  f: PieceFamily,
+  numberOf: (index: number) => number,
+): { prims: Prim[]; w: number; h: number } {
+  const S = SM.SCALE;
+  const pic = f.picture;
+  const C = new Painter();
+  const at = (p: readonly [number, number]): [number, number] => [p[0] * S, p[1] * S];
+  const line = (pts: readonly [number, number][]) =>
+    simplify(
+      pts.map(([px, py]) => ({ x: px, y: py })),
+      0.25 / S,
+    ).map((p) => at([p.x, p.y]));
+  C.prims.push({ k: 'poly', pts: line(pic.outline), sw: RULE_MID, closed: true, join: 'round' });
+  for (const n of pic.notches) {
+    const a = at(n.at);
+    C.prims.push({
+      k: 'line',
+      x1: a[0],
+      y1: a[1],
+      x2: a[0] + n.inward[0] * SM.NOTCH,
+      y2: a[1] + n.inward[1] * SM.NOTCH,
+      w: RULE_MID,
+    });
+  }
+  let x0 = 0;
+  let y0 = 0;
+  let x1 = pic.w * S;
+  let y1 = pic.h * S;
+  const labels: LabelBox[] = [];
+  for (const e of pic.edges) {
+    C.prims.push({ k: 'poly', pts: line(e.pts), sw: 0.8, closed: false, join: 'round' });
+    const s = e.steps.map(numberOf).join('·');
+    const tw = textW(s, 10);
+    const th = 0.75 * mmOf(10);
+    const mid = at(e.mid);
+    const hx = Math.abs(e.out[0]) * (tw / 2) + Math.abs(e.out[1]) * (th / 2);
+    // Два номера на соседних кромках тонкого воротника ложатся друг на друга (нит прототипа):
+    // номер отходит дальше наружу, потом — внутрь детали, пока не встанет свободно.
+    const tries = [0, th * 1.3, th * 2.6, tw * 0.9]
+      .map((k) => SM.NUM_GAP + hx + k)
+      .concat([-(SM.NUM_GAP + hx + 0.5)]);
+    let best: LabelBox | null = null;
+    for (const d of tries) {
+      const cx = mid[0] + e.out[0] * d;
+      const cy = mid[1] + e.out[1] * d;
+      const box = { x0: cx - tw / 2, y0: cy - th / 2, x1: cx + tw / 2, y1: cy + th / 2 };
+      if (!best) best = box;
+      if (!labels.some((l) => hits(l, box))) {
+        best = box;
+        break;
+      }
+    }
+    labels.push(best!);
+    C.text(best!.x0, best!.y1, s, 10, true);
+    x0 = Math.min(x0, best!.x0);
+    y0 = Math.min(y0, best!.y0);
+    x1 = Math.max(x1, best!.x1);
+    y1 = Math.max(y1, best!.y1);
+  }
+  const name = `${f.name}${f.tag ? ` ${f.tag}` : ''}`;
+  const nw = textW(name, 10);
+  const cx = (pic.w * S) / 2;
+  C.text(cx - nw / 2, y1 + 1 + BASE * mmOf(10), name, 10);
+  x0 = Math.min(x0, cx - nw / 2);
+  x1 = Math.max(x1, cx + nw / 2);
+  y1 += 1 + lineH(10);
+  const pad = 1;
+  return {
+    prims: C.prims.map((p) => shift(p, pad - x0, pad - y0)),
+    w: x1 - x0 + 2 * pad,
+    h: y1 - y0 + 2 * pad,
+  };
+}
+
+function seamsAttempt(
+  M: PrintModel,
+  meta: SheetMeta,
+  sheet: NonNullable<SeamSheet>,
+  W: number,
+  Hmin: number,
+): { P: Painter; H: number; fits: boolean } {
+  const m = SM.MARGIN;
+  const inner = W - 2 * m;
+  const P = new Painter();
+  // ── шапка: одна строка, легенда справа (или второй строкой) ──
+  const title = `${[meta.code, meta.name].filter(Boolean).join(' · ') || 'TECH CARD'} · SEAM MAP`;
+  const sub = [meta.season, meta.unreleased ? '' : meta.revision].filter(Boolean).join(' · ');
+  let y = m;
+  const titleRuns: Run[] = [{ s: title, size: 11, bold: true }];
+  const legendW = textW(SEAM_LEGEND, 10);
+  const titleW = Math.min(inner, textW(title, 11));
+  if (titleW + 6 + legendW <= inner) {
+    P.para(m, y, titleW + 1, titleRuns);
+    P.para(W - m - legendW - 1, y, legendW + 1, [{ s: SEAM_LEGEND, size: 10 }], 'right');
+    y += lineH(11);
+  } else {
+    y += P.para(m, y, inner, titleRuns);
+    y += P.para(m, y, inner, [{ s: SEAM_LEGEND, size: 10 }]);
+  }
+  if (sub) y += P.para(m, y, inner, [{ s: sub, size: 10 }]);
+  y += 1;
+  P.hline(m, W - m, y, RULE_HEAVY);
+  const banners = [
+    meta.unreleased ? 'UNRELEASED CARD — NOT FOR PRODUCTION' : '',
+    meta.warnings.length
+      ? `SOME DATA HAD NOT ARRIVED WHEN THIS WAS PRINTED — ${meta.warnings.join(', ')}`
+      : '',
+  ].filter(Boolean);
+  for (const b of banners) {
+    y += 1.5;
+    y += P.para(m, y, inner, [{ s: b, size: 10, bold: true }]);
+  }
+  y += 4;
+
+  // ── детали рядами: от высоких к низким, чтобы ряд не тратил высоту на воротник ──
+  const cards = sheet.families.map((f) => seamCard(f, sheet.numberOf));
+  const order = cards.map((_, i) => i).sort((p, q) => cards[q].h - cards[p].h);
+  // Ряд по высоте первой (самой высокой) детали; низкие детали встают столбиком друг под другом в
+  // колонке, где под предыдущей осталось место, — полоса воротников не тратит целый ряд.
+  let rowTop = y;
+  let rowH = 0;
+  let cols: { x: number; w: number; used: number }[] = [];
+  let x = m;
+  for (const i of order) {
+    const c = cards[i];
+    const col = cols.find((k) => c.w <= k.w + 0.01 && k.used + SM.GAP + c.h <= rowH + 0.01);
+    if (col) {
+      P.place(c.prims, col.x, rowTop + col.used + SM.GAP);
+      col.used += SM.GAP + c.h;
+      continue;
+    }
+    if (x > m && x + c.w > W - m) {
+      rowTop += rowH + SM.GAP;
+      rowH = 0;
+      cols = [];
+      x = m;
+    }
+    P.place(c.prims, x, rowTop);
+    rowH = Math.max(rowH, c.h);
+    cols.push({ x, w: c.w, used: c.h });
+    x += c.w + SM.GAP;
+  }
+  y = rowTop + rowH + 3;
+
+  // ── ключ шагов в пять колонок ──
+  const fh = footHeight(meta, W, m);
+  const keyTop = y;
+  P.hline(m, W - m, keyTop, RULE);
+  const colGap = 4;
+  const colW = (inner - (SM.COLS - 1) * colGap) / SM.COLS;
+  const runsOf = (r: NonNullable<SeamSheet>['key'][number]): Run[] => [
+    { s: `${r.number} `, size: 10, bold: true },
+    { s: r.text + (r.unread ? ' · EDGES NOT READ' : ''), size: 10 },
+  ];
+  const heights = sheet.key.map((r) => paraHeight(colW, runsOf(r)));
+  // Колонки равной высоты: наименьшая высота, при которой жадная раскладка влезает в пять колонок.
+  const colsAt = (limit: number) => {
+    let c = 0;
+    let h = 0;
+    for (const v of heights) {
+      if (h > 0 && h + v > limit + 0.01) {
+        c += 1;
+        h = 0;
+      }
+      h += v;
+    }
+    return c + 1;
+  };
+  let limit = Math.max(0, ...heights);
+  while (colsAt(limit) > SM.COLS) limit += 0.5;
+  let col = 0;
+  let ky = keyTop + 1.5;
+  let keyBottom = ky;
+  sheet.key.forEach((r, i) => {
+    if (ky > keyTop + 1.5 && ky - (keyTop + 1.5) + heights[i] > limit + 0.01) {
+      col += 1;
+      ky = keyTop + 1.5;
+    }
+    ky += P.para(m + col * (colW + colGap), ky, colW, runsOf(r));
+    keyBottom = Math.max(keyBottom, ky);
+  });
+  const H = Math.max(Hmin, Math.ceil(keyBottom + 3 + fh + m));
+  foot(P, meta, W, H, m, H - m - fh);
+  return { P, H, fits: H <= Hmin + 0.01 };
+}
+
+export function typesetSeams(M: PrintModel, meta: SheetMeta, sheet: SeamSheet): PaperDoc {
+  const fileStem = `${meta.code || 'tech-card'}-seam-map`.replace(/[^\w.-]+/g, '-');
+  if (!sheet || sheet.families.length === 0) {
+    const [W, H] = SEAM_SIZES[0];
+    const P = new Painter();
+    P.para(SM.MARGIN, SM.MARGIN, W - 2 * SM.MARGIN, [
+      { s: `${meta.code || 'TECH CARD'} · SEAM MAP`, size: 11, bold: true },
+    ]);
+    P.hline(SM.MARGIN, W - SM.MARGIN, SM.MARGIN + lineH(11) + 1, RULE_HEAVY);
+    P.para(SM.MARGIN, SM.MARGIN + lineH(11) + 5, W - 2 * SM.MARGIN, [
+      {
+        s: 'No piece contours on this card — the seam map is read off the pattern (DXF). Attach the pattern on the PATTERNS tab.',
+        size: 10,
+      },
+    ]);
+    const fh = footHeight(meta, W, SM.MARGIN);
+    foot(P, meta, W, H, SM.MARGIN, H - SM.MARGIN - fh);
+    return {
+      w: W,
+      h: H,
+      prims: P.prims,
+      fileStem,
+      report: { form: 'seams', sheetW: W, sheetH: H, crossings: 0, overWidth: false },
+    };
+  }
+  let out: { P: Painter; H: number; W: number } | null = null;
+  for (const [W, H] of SEAM_SIZES) {
+    const a = seamsAttempt(M, meta, sheet, W, H);
+    out = { P: a.P, H: a.H, W };
+    if (a.fits) break;
+  }
+  const { P, H, W } = out!;
+  return {
+    w: W,
+    h: H,
+    prims: P.prims,
+    fileStem,
+    report: { form: 'seams', sheetW: W, sheetH: H, crossings: 0, overWidth: W > 841 },
   };
 }

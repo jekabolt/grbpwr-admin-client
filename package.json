@@ -50,6 +50,7 @@
     "skeleton:order": "node scripts/assembly-skeleton/skeleton.mjs",
     "skeleton:fixes": "node scripts/assembly-skeleton/fixes.mjs",
     "skeleton:ui": "node scripts/assembly-skeleton/ui-probe.mjs",
+    "skeleton:map": "node scripts/assembly-skeleton/map-probe.mjs",
     "stitch:type": "node scripts/stitch-type-probe.mjs",
     "annotation:shapes": "node scripts/annotation-shape-probe.mjs",
     "draft:shape": "node scripts/draft-shape-probe.mjs",
