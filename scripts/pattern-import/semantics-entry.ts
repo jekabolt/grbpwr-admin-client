@@ -1863,44 +1863,31 @@ export async function main(): Promise<number> {
         JSON.stringify(far.d.output.grainProposals),
       );
     }
-    // N3 (gerber «GRAIN»): a word written ALONG the line (turned to it, ≤ 10 mm) is two evidences
+    // N3 + Codex (gerber «GRAIN»): a word written ALONG its line (turned to it, ≤ 10 mm) is still
+    // ONE evidence — the direction is the same text's; 'detected' needs another source
     {
-      const on = run1(
-        [line(90)],
-        [{ t: 'GRAIN', at: { x: 96, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
-      );
-      const g = grainOf(on.d);
+      const turned = (x: number) => [{ t: 'GRAIN', at: { x, y: 200 }, rot: 90 }];
+      const on = run1([line(90)], turned(96));
+      const pr = on.d.output.grainProposals?.[0];
       ck(
-        g?.origin === 'detected' && (g.evidence ?? []).join('+') === 'word+along',
-        'N3: «GRAIN» turned along the line 3.5 mm off it → detected (word+along)',
-        JSON.stringify({ g: g?.evidence, pr: on.d.output.grainProposals }),
+        !grainOf(on.d) && pr?.why === 'line by a grain word' && pr.evidence.join('+') === 'word',
+        'Codex N3: «GRAIN» turned along the line 3.5 mm off → one evidence (word) → proposed',
+        JSON.stringify({ g: grainOf(on.d)?.evidence, pr }),
       );
-      const off = run1(
-        [line(90)],
-        [{ t: 'GRAIN', at: { x: 110, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
-      );
+      const headed = run1([line(90), ...barbs(90, 120, 420)], turned(96));
       ck(
-        off.d.output.grainProposals?.[0]?.why === 'line by a grain word',
-        'N3: turned along but 17.5 mm off → the word only (proposed)',
-        JSON.stringify(off.d.output.grainProposals),
-      );
-      // written across the line (not turned), centred on it
-      const flat = run1([line(90)], [{ t: 'GRAIN', at: { x: 75, y: 200 } }]);
-      ck(
-        flat.d.output.grainProposals?.[0]?.why === 'line by a grain word',
-        'N3: across the line (not turned) → the word only (proposed)',
-        JSON.stringify(flat.d.output.grainProposals),
+        grainOf(headed.d)?.origin === 'detected' &&
+          (grainOf(headed.d)?.evidence ?? []).join('+') === 'arrowheads+word',
+        'Codex N3: the same word + arrowheads (a separate source) → detected',
+        JSON.stringify(grainOf(headed.d)?.evidence),
       );
       // A1: the word labels only the NEAREST line: a second line 3 mm the other side takes it
-      const two = run1(
-        [line(90), line(103, 130, 400)],
-        [{ t: 'GRAIN', at: { x: 101, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
-      );
-      const g2 = grainOf(two.d);
+      const two = run1([line(90), line(103, 130, 400)], turned(101));
+      const p2 = two.d.output.grainProposals?.[0];
       ck(
-        !!g2 && Math.abs(g2.a.x - 103) < 1e-6 && (g2.evidence ?? []).join('+') === 'word+along',
+        !!p2 && Math.abs(p2.a.x - 103) < 1e-6 && p2.evidence.join('+') === 'word',
         'N3: two lines, the word nearer the second → only the second is labelled (A1)',
-        JSON.stringify({ a: g2?.a, ev: g2?.evidence, pr: two.d.output.grainProposals }),
+        JSON.stringify(two.d.output.grainProposals),
       );
     }
     // N3 (SVG smoke): a piece with no name yet gets its grain proposal in the SAME pass

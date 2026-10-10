@@ -842,9 +842,6 @@ export type GrainEvidenceKind =
   | 'ungraded'
   // A1: 2–6 collinear dashes of one style read as one line (a dashed grainline)
   | 'dashes'
-  // N3: the grain word is written ALONG this line (turned to its angle ± 10°, ≤ 10 mm from it) —
-  // the word's own direction binds it to this line, a second evidence beside the word
-  | 'along'
   // A1: proposed from the outline alone (fold line, symmetry axis, straight edge, strip axis)
   | 'geometry'
   // A1: the operator accepted a proposal (with the proposal's own evidence beside it)

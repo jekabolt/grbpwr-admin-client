@@ -43,10 +43,13 @@ export const GRAIN_TEXT_MM = 60;
 /** A1: a grain word turned along the line (±10°) counts this far, mm. */
 export const GRAIN_TEXT_ALONG_MM = 120;
 /**
- * N3: a grain word turned along the line (±10°) this close to it (its box centre to the segment) is
- * written ON the line — its direction is a second evidence beside the word, mm.
+ * N3 (Codex): a grain word turned along the line (±10°) this close to it (its box centre to the
+ * segment) is written ON the line. Its direction is the SAME text's testimony, not a second
+ * evidence: it only strengthens that line against competing lines (never 'detected' alone), mm.
  */
 export const GRAIN_TEXT_ON_LINE_MM = 10;
+/** …by this much strength (below every evidence kind but dashes' tie-breaker weight). */
+const GRAIN_ALONG_BONUS = 0.25;
 /** A1: an arrowhead barb: a chain this short, its tip this close to a line end, at 15–60°. */
 export const GRAIN_HEAD_MAX_MM = 25;
 export const GRAIN_HEAD_END_MM = 6;
@@ -70,7 +73,6 @@ const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
   class: 8,
   arrowheads: 4,
   word: 2,
-  along: 1,
   ungraded: 1,
   dashes: 0.5,
   'dxf-layer': 8,
@@ -586,7 +588,7 @@ function bestGrain(
     return !(lettered(l.a) || lettered(l.b) || lettered(mid));
   });
   // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it); written
-  // along that line (± 10°) within 10 mm, its direction is a second evidence (N3, gerber «GRAIN»)
+  // along that line (± 10°) within 10 mm it strengthens that line only — one text, one evidence
   const worded = new Set<GrainLine>();
   const along = new Set<GrainLine>();
   for (const t of grainTexts) {
@@ -609,7 +611,6 @@ function bestGrain(
       ...(l.grainClass ? (['class'] as const) : []),
       ...(heads ? (['arrowheads'] as const) : []),
       ...(word ? (['word'] as const) : []),
-      ...(word && along.has(l) ? (['along'] as const) : []),
       ...(ungraded ? (['ungraded'] as const) : []),
       ...(l.dashed ? (['dashes'] as const) : []),
     ];
@@ -617,7 +618,9 @@ function bestGrain(
     const weight = evidence.length + (l.grainClass ? 1 : 0);
     if (!weight) continue;
     // competing lines: the stronger evidence wins, length only breaks a tie
-    const strength = evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0);
+    const strength =
+      evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0) +
+      (word && along.has(l) ? GRAIN_ALONG_BONUS : 0);
     if (!best || strength > best.strength || (strength === best.strength && l.len > best.l.len))
       best = { l, evidence, weight, strength, heads: heads ?? [] };
   }
