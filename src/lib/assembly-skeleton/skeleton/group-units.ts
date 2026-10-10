@@ -250,8 +250,14 @@ export function groupDetailed(
   const panelScore = (e: Entity, t: Entity) =>
     seams.between(e.leaves, panelLeaves(t))[0]?.score ?? 0;
 
-  // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them).
-  for (const w of graph.warnings) if (w.includes('have the same shape')) warnings.push(w);
+  // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them)
+  // — once per pair of name families, not per pair of pieces.
+  warnings.push(
+    ...sameShapeByFamily(
+      graph.warnings.filter((w) => w.includes(SAME_SHAPE)),
+      graph.pieces.map((p) => p.name),
+    ),
+  );
   for (const p of graph.pieces) {
     if (!byKey.has(p.pieceKey))
       warnings.push(`piece ${p.name} is in the pattern but not on the card — left out`);
@@ -1429,6 +1435,64 @@ function panelHint(name: string): 'back' | 'front' | null {
 const FLAP_TOKENS = new Set(['fl', 'flp', 'flap', 'клапан', 'patka']);
 function isFlap(name: string): boolean {
   return bareTokens(name).some((x) => FLAP_TOKENS.has(x));
+}
+
+const SAME_SHAPE = ' have the same shape';
+
+/**
+ * Lane A says «A and B have the same shape — …» for every such pair: eight inner and eight outer
+ * panels of one shape are 64 lines of one question. Pairs are grouped by the name stems of both
+ * sides (layerStem: inner_trapezoid_3 → inner_trapezoid) and each group is said once —
+ * «inner_trapezoid ×8 and outer_trapezoid ×8 have the same shape — …». A group of one pair keeps
+ * lane A's own words. The names are split where both halves are piece names (a name may hold «and»).
+ */
+function sameShapeByFamily(lines: string[], names: string[]): string[] {
+  const known = new Set(names);
+  const stemOf = (n: string) => layerStem(n) || n;
+  type Group = { stems: string[]; pieces: Map<string, Set<string>>; lines: string[]; tail: string };
+  const groups = new Map<string, Group>();
+  const out: string[] = [];
+  const splitPair = (head: string): [string, string] | null => {
+    for (let i = head.indexOf(' and '); i >= 0; i = head.indexOf(' and ', i + 1)) {
+      const [a, b] = [head.slice(0, i), head.slice(i + 5)];
+      if (known.has(a) && known.has(b)) return [a, b];
+    }
+    return null;
+  };
+  for (const line of lines) {
+    const at = line.indexOf(SAME_SHAPE);
+    const pair = splitPair(line.slice(0, at));
+    if (!pair) {
+      out.push(line);
+      continue;
+    }
+    const stems = [...new Set(pair.map(stemOf))].sort();
+    const key = stems.join('\u0000');
+    const g: Group = groups.get(key) ?? {
+      stems,
+      pieces: new Map(),
+      lines: [],
+      tail: line.slice(at),
+    };
+    for (const n of pair) {
+      const st = stemOf(n);
+      g.pieces.set(st, (g.pieces.get(st) ?? new Set()).add(n));
+    }
+    g.lines.push(line);
+    groups.set(key, g);
+  }
+  for (const g of groups.values()) {
+    if (g.lines.length === 1) {
+      out.push(g.lines[0]);
+      continue;
+    }
+    const side = (st: string) => {
+      const ps = [...(g.pieces.get(st) ?? [])];
+      return ps.length === 1 ? ps[0] : `${st} ×${ps.length}`;
+    };
+    out.push(`${g.stems.map(side).join(' and ')}${g.tail}`);
+  }
+  return out;
 }
 
 /** The number a layer carries in its name (BLT_3_M → 3, CLR_MAIN → 0): the last number token. */

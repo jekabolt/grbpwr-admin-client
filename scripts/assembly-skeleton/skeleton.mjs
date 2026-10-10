@@ -1656,6 +1656,35 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
   }
 }
 
+// ── same-shape warnings once per pair of name families (07-ENGINE-QUALITY §4.8) ──────────────
+// Lane A says every unproven same-shape pair: 8 inner and 8 outer panels of one shape were 64 lines
+// on the screen. Grouped by name stems they are one question; a lone pair keeps lane A's words.
+console.log('\nSame-shape warnings by family (synthetic)');
+{
+  const inner = Array.from({ length: 8 }, (_, i) => [`inner_trapezoid_${i + 1}`, 20000]);
+  const outer = Array.from({ length: 8 }, (_, i) => [`outer_trapezoid_${i + 1}`, 20000]);
+  const card = synthCard({
+    category: 'generic',
+    pieces: [...inner, ...outer, ['BP', 90000], ['17', 90000]],
+    seams: [],
+  });
+  const tail = ' have the same shape — a layer, the lining or a copy? not joined to each other';
+  card.graph.warnings = [
+    ...inner.flatMap(([a]) => outer.map(([b]) => `${a} and ${b}${tail}`)),
+    `17 and BP${tail}`,
+  ];
+  const p = run(card);
+  const said = p.warnings.filter((w) => w.includes('have the same shape'));
+  for (const w of said) console.log(`  · ${w}`);
+  gate(
+    "64 inner × outer pairs are said once by family, the lone pair in lane A's words",
+    said.length === 2 &&
+      said.includes(`inner_trapezoid ×8 and outer_trapezoid ×8${tail}`) &&
+      said.includes(`17 and BP${tail}`),
+    `${said.length} lines`,
+  );
+}
+
 // ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────
 console.log('\nMutation: the empty proposal');
 {
