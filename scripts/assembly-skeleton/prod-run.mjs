@@ -247,6 +247,9 @@ for (const input of inputs) {
       (r.compare
         ? `\n  vs technologist: ${r.compare.byInputs}/${r.compare.technologistJoins} by inputs, ${r.compare.byContents} by contents; order ${r.compare.orderInversions}`
         : '') +
+      (r.oracle?.compare
+        ? `\n  oracle (their units as hints): ${r.oracle.compare.byInputs}/${r.oracle.compare.technologistJoins} by inputs, ${r.oracle.compare.byContents} by contents${r.oracle.warnings.length ? ' · ' + r.oracle.warnings.join('; ') : ''}`
+        : '') +
       (r.pictures
         ? `\n  pictures ${JSON.stringify(r.pictures)}; print differs ${r.printDiffers?.length}`
         : '') +
@@ -272,6 +275,9 @@ function aiLine(v) {
     `a ${m(v.a)}`,
     `b ${m(v.b)}${v.b.rebuilt ? '' : ' (=a)'}`,
     `c ${m(v.c)}${v.c.applied ? '' : ' (=b)'} inv ${v.c.orderInversions ?? '-'}`,
+    v.d
+      ? `d ${m(v.d)}${v.d.rebuilt ? '' : ' (=a)'} [cat ${v.structure?.category ?? '='} units ${v.structure?.units}/${v.structure?.unitsOffered} unmet ${v.d.unmet} sweep ${v.d.sweepAll.hard}]`
+      : 'd -',
     `warn ${v.warnings} picks ${v.picksUsed}/${v.picksMapped}/${v.picks}`,
     `moved ${v.moved ?? '-'}${v.orderRefusal ? ` order refused «${v.orderRefusal}»` : ''}` +
       (v.orderOnEngine
@@ -299,10 +305,10 @@ function aiTotals(rows) {
     usd += Number(v.cost?.costUsd) || 0;
     calls += v.cost?.calls ?? 0;
     unknown += v.cost?.unknownCalls ?? 0;
-    violations += v.c?.sweepAll?.hard ?? 0;
+    violations += (v.c?.sweepAll?.hard ?? 0) + (v.d?.sweepAll?.hard ?? 0);
   }
   for (const [name, codes] of Object.entries(AI_SETS)) {
-    const t = { a: [0, 0, 0], b: [0, 0, 0], c: [0, 0, 0] };
+    const t = { a: [0, 0, 0], b: [0, 0, 0], c: [0, 0, 0], d: [0, 0, 0] };
     let joins = 0;
     let n = 0;
     for (const c of codes) {
@@ -310,13 +316,13 @@ function aiTotals(rows) {
       if (!v || v.a.joins == null) continue;
       n++;
       joins += v.a.joins;
-      for (const k of ['a', 'b', 'c'])
-        ['inputs', 'contents', 'tree'].forEach((f, i) => (t[k][i] += v[k][f] ?? 0));
+      for (const k of ['a', 'b', 'c', 'd'])
+        ['inputs', 'contents', 'tree'].forEach((f, i) => (t[k][i] += v[k]?.[f] ?? 0));
     }
     const pct = (x) => (joins ? `${((100 * x) / joins).toFixed(0)}%` : '-');
     lines.push(
       `== ${name} (${n}/${codes.length} answered): ` +
-        ['a', 'b', 'c']
+        ['a', 'b', 'c', 'd']
           .map(
             (k) =>
               `${k} in ${t[k][0]} (${pct(t[k][0])}) cont ${t[k][1]} (${pct(t[k][1])}) tree ${t[k][2]} (${pct(t[k][2])})`,
@@ -326,7 +332,7 @@ function aiTotals(rows) {
     );
   }
   lines.push(
-    `== AI cost: $${usd.toFixed(4)} · ${calls} calls · ${unknown} with no known charge · c sweep violations ${violations} (must be 0)`,
+    `== AI cost: $${usd.toFixed(4)} · ${calls} calls · ${unknown} with no known charge · c+d sweep violations ${violations} (must be 0)`,
   );
   return lines.join('\n');
 }

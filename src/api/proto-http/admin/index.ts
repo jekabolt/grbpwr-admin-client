@@ -13566,6 +13566,10 @@ export type SuggestAssemblySkeletonRequest = {
   decisions: AssemblySkeletonDecision[] | undefined;
   steps: AssemblySkeletonStep[] | undefined;
   force: boolean | undefined;
+  // the garment category ids the client has a template for (tee, sweat, hoodie, trousers, skirt,
+  // dress, jumpsuit, shirt, jacket-lined, coat-lined, generic), ≤ 24 × 32 runes, unique; empty = the
+  // model is not asked for a category
+  categoryOptions: string[] | undefined;
 };
 
 // AssemblySkeletonOrderItem is one step in the model's suggested order.
@@ -13591,6 +13595,20 @@ export type AssemblySkeletonWarning = {
   pieceKeys: string[] | undefined;
 };
 
+// AssemblySkeletonCategoryPick is the model's reading of the garment category, judged by the pieces.
+export type AssemblySkeletonCategoryPick = {
+  id: string | undefined;
+  reason: string | undefined;
+};
+
+// AssemblySkeletonUnitHint is one subassembly a workshop makes: a set of piece keys that is a single
+// join's result. Two hints of one answer are nested or disjoint, never partially overlapping.
+export type AssemblySkeletonUnitHint = {
+  pieceKeys: string[] | undefined;
+  name: string | undefined;
+  reason: string | undefined;
+};
+
 export type SuggestAssemblySkeletonResponse = {
   // order — the ordered steps (every step without `follows`), each exactly once; EMPTY when the
   // model gave no usable order (the reason is in notes). A rider follows its join.
@@ -13605,6 +13623,13 @@ export type SuggestAssemblySkeletonResponse = {
   cached: boolean | undefined;
   calls: number | undefined;
   unknownCalls: number | undefined;
+  // ai_category — the category the model reads off the pieces; unset = keep the draft's (no options
+  // offered, none given, or not one of the options — the reason is in notes)
+  aiCategory: AssemblySkeletonCategoryPick | undefined;
+  // units — the model's subassemblies, smallest set first, nested or disjoint; EMPTY = keep the
+  // draft's grouping. Unknown keys, sets of < 2 pieces, repeats and partial overlaps are dropped
+  // with a note.
+  units: AssemblySkeletonUnitHint[] | undefined;
 };
 
 export type SaveTechCardPieceAreasRequest = {

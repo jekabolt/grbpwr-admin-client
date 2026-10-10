@@ -433,6 +433,13 @@ const stubAI: SkeletonAIAsk = async (req) => {
     // A fallback after a hung first provider: two calls, one of them with no known charge.
     calls: 2,
     unknownCalls: 1,
+    // A structural reading: another category and one unit of two pieces with a seam between them.
+    aiCategory: { id: 'tee', reason: 'stub: read as a tee' },
+    units: (req.seams ?? []).slice(0, 1).map((sm) => ({
+      pieceKeys: [sm.a ?? '', sm.b ?? ''],
+      name: 'Stub unit',
+      reason: 'stub: these two first',
+    })),
   };
 };
 

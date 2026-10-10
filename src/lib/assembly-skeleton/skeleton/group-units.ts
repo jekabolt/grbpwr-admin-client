@@ -17,6 +17,7 @@ import {
   type SkeletonPins,
   type SkeletonTree,
   type SkeletonUnit,
+  type SkeletonUnitHint,
 } from '../types';
 import { replayExisting, type ExistingReplay } from './existing';
 import {
@@ -173,6 +174,7 @@ export function groupDetailed(
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
+  hints: readonly SkeletonUnitHint[] = [],
 ): Grouping {
   const pieces = readPieces(graph, facts);
   // Surface joins (P2 lane S) are not edge evidence: a pocket laid on a front links nothing along
@@ -451,6 +453,52 @@ export function groupDetailed(
         reason: `Interfacing ${p.name} is fused onto ${host.name} (${sameFamily ? 'same name' : 'same shape'}) before its first seam`,
       },
     });
+  }
+
+  // ── H. an outside structural reading first (the AI's units, «use AI structure») ───────────────
+  // Each hint is a set of pieces made into one unit; nested hints build a tree, smallest first, so
+  // a unit is always made before the unit that takes it. A hint is met only when the things now on
+  // the table inside it cover exactly its pieces (a fused interfacing rides along with its host);
+  // one that cuts through a unit already made, or holds fewer than two things, is said and skipped.
+  // Everything after this is the engine as is, on the units the hints made.
+  if (hints.length) {
+    const fusedOnto = new Set(pieces.filter((p) => p.cloth === 'interfacing').map((p) => p.key));
+    const sorted = hints
+      .map((h, i) => ({ h, i, keys: new Set(h.pieceKeys.filter((k) => byKey.has(k))) }))
+      .filter((x) => x.keys.size >= 2)
+      .sort((x, y) => x.keys.size - y.keys.size || x.i - y.i);
+    for (const { h, keys } of sorted) {
+      const label = h.name.trim() || 'unit';
+      const live = table.list();
+      const inside = live.filter((e) => e.leaves.some((k) => keys.has(k)));
+      const cut = inside.find((e) => e.leaves.some((k) => !keys.has(k) && !fusedOnto.has(k)));
+      if (cut) {
+        warnings.push(`AI unit «${label}» cuts through ${cut.name} — not made`);
+        continue;
+      }
+      if (inside.length < 2) {
+        if (inside.length === 0 || inside[0].leaves.length < keys.size)
+          warnings.push(`AI unit «${label}»: its pieces are not on the table — not made`);
+        continue;
+      }
+      const leaves = mergeRoles(...inside.map((e) => e.roles));
+      const level = (r: string) => (roleDef(r)?.level === 'panel' ? 0 : 1);
+      const own = [...leaves].sort((a, b) => level(a) - level(b));
+      const roles =
+        own.includes('front') && own.includes('back')
+          ? ['body', ...own.filter((r) => r !== 'body')]
+          : own;
+      const trees = new Set(inside.map((e) => e.tree));
+      const j = judge(inside, seams, `AI: ${h.reason?.trim() || label}`);
+      record(inside, {
+        name: label,
+        roles,
+        kind: 'merge',
+        why: '',
+        tree: trees.size === 1 ? [...trees][0] : 'shell',
+        judgement: { confidence: j.confidence, reason: j.reason, source: 'ai' },
+      });
+    }
   }
 
   // ── 1. one family, one hand: FP_L + FP_1_L + FP_2_L, CLR + CLR_1 ─────────────────────────────
@@ -1048,8 +1096,9 @@ export function groupUnits(
   facts: SkeletonFacts,
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
+  hints: readonly SkeletonUnitHint[] = [],
 ): SkeletonUnit[] {
-  return groupDetailed(graph, facts, template, pins).units;
+  return groupDetailed(graph, facts, template, pins, hints).units;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────

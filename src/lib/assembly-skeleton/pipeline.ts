@@ -23,6 +23,7 @@ import {
   type SkeletonPins,
   type SkeletonProposal,
   type SkeletonStep,
+  type SkeletonUnitHint,
 } from './types';
 
 const EMPTY_GRAPH = (warnings: string[]): SeamGraph => ({
@@ -57,19 +58,23 @@ export function readSeamGraph(
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
   decisions?: SeamDecisionsInput,
+  hints?: readonly SkeletonUnitHint[],
 ): SeamGraph {
   const refused = skeletonRefusal(facts);
   if (refused) return EMPTY_GRAPH([refused]);
   if (!decisions) {
     const first = buildSeamGraph(facts);
-    return compositeSeams(first, groupUnits(first, facts, template, pins));
+    return compositeSeams(first, groupUnits(first, facts, template, pins, hints));
   }
   let resolved: SeamDecisions | undefined;
   const first = buildSeamGraph(facts, ALL_RULES, (pieces) => {
     resolved = typeof decisions === 'function' ? decisions(pieces) : decisions;
     return resolved;
   });
-  return dropRejectedA4(compositeSeams(first, groupUnits(first, facts, template, pins)), resolved);
+  return dropRejectedA4(
+    compositeSeams(first, groupUnits(first, facts, template, pins, hints)),
+    resolved,
+  );
 }
 
 /**
@@ -122,6 +127,9 @@ export function proposeSkeleton(
   deps: SkeletonDeps,
   options: SkeletonOptions = {},
 ): SkeletonProposal {
+  // «use AI structure»: the proposal is read as the category the AI chose, not the card's.
+  if (options.category && options.category !== facts.category)
+    facts = { ...facts, category: options.category };
   const template = orderTemplate(facts.category);
   const refused = skeletonRefusal(facts);
   if (refused) {
@@ -133,7 +141,7 @@ export function proposeSkeleton(
       graph: EMPTY_GRAPH([refused]),
     };
   }
-  const graph = readSeamGraph(facts, template, options.pins, options.decisions);
+  const graph = readSeamGraph(facts, template, options.pins, options.decisions, options.units);
   const built = buildSkeleton(graph, facts, template, deps, options);
   return {
     ...built,

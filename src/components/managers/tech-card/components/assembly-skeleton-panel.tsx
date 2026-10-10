@@ -22,6 +22,7 @@ import {
   skeletonAIPlaces,
   skeletonAIRequest,
   skeletonAIStepIndex,
+  skeletonAIStructure,
   skeletonStepSignatures,
 } from 'lib/assembly-skeleton/ai';
 import { readablePieceName } from 'lib/assembly-skeleton/names';
@@ -611,6 +612,12 @@ function AssemblySkeletonPanel({
   const openPieces = built.facts.pieces.filter((p) => !consumed.has(p.pieceKey)).length;
   // Every piece is in the order already: an appended skeleton has nothing to read.
   const nothingToAdd = existing > 0 && openPieces === 0;
+  // «use AI structure» in force: the category and units every rebuild of this read keeps (a chosen
+  // reading is a reading OF that structure); null = the engine's own structure.
+  const [aiStructure, setAIStructure] = useState<Pick<
+    SkeletonOptions,
+    'category' | 'units'
+  > | null>(null);
 
   // The pattern is read once per chosen mode: opening reads it, reopening shows what was read,
   // switching add ↔ replace reads it again for the other mode.
@@ -621,6 +628,7 @@ function AssemblySkeletonPanel({
     if (mode === 'append' && nothingToAdd) return;
     if (run.status !== 'idle' && readFor === mode) return;
     onReadFor(mode);
+    setAIStructure(null);
     onRun(built.facts, deps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -732,7 +740,7 @@ function AssemblySkeletonPanel({
   const chooseReading = (step: SkeletonStep, v: number) => {
     if (!proposal || !step.decision || step.decision.chosen === v || readingsLocked) return;
     const pins: SkeletonPins = { ...pinsOf(proposal), [step.decision.id]: v };
-    onRun(built.facts, deps, { pins });
+    onRun(built.facts, deps, { ...aiStructure, pins });
   };
 
   // ── THE AI SECOND OPINION (lane E). Asked only on a press; its order and readings are shown
@@ -767,8 +775,16 @@ function AssemblySkeletonPanel({
       (answer.order?.length ?? 0) > 0
         ? applySkeletonAIOrder(proposal, answer.order ?? [], aiResult.sent)
         : null;
-    return { indexOf, places, warningsAt, picks, order, pins: skeletonAIPins(proposal, answer) };
-  }, [proposal, aiResult]);
+    return {
+      indexOf,
+      places,
+      warningsAt,
+      picks,
+      order,
+      pins: skeletonAIPins(proposal, answer),
+      structure: skeletonAIStructure(built.facts, answer),
+    };
+  }, [proposal, aiResult, built.facts]);
   const [adopted, setAdopted] = useState<SkeletonProposal | null>(null);
   // Each step's place among the steps that stand on their own (riders follow their join).
   const ownPlace = useMemo(() => {
@@ -789,7 +805,22 @@ function AssemblySkeletonPanel({
   };
   const useAIReadings = () => {
     if (!aiView || readingsLocked || aiView.pins.changed === 0) return;
-    onRun(built.facts, deps, { pins: aiView.pins.pins });
+    onRun(built.facts, deps, { ...aiStructure, pins: aiView.pins.pins });
+  };
+  // The AI's structure replaces the engine's: its readings (pins) belonged to the old structure.
+  const useAIStructure = () => {
+    if (!aiView || readingsLocked || aiView.structure.changes === 0) return;
+    const next = {
+      ...(aiView.structure.category ? { category: aiView.structure.category } : {}),
+      ...(aiView.structure.units.length ? { units: aiView.structure.units } : {}),
+    };
+    setAIStructure(next);
+    onRun(built.facts, deps, next);
+  };
+  const backToEngine = () => {
+    if (readingsLocked) return;
+    setAIStructure(null);
+    onRun(built.facts, deps);
   };
 
   // What a confirmed replace takes with the old steps, said before the confirming press.
@@ -963,7 +994,7 @@ function AssemblySkeletonPanel({
                   size='xs'
                   onClick={() => {
                     if (mode) onReadFor(mode);
-                    onRun(built.facts, deps);
+                    onRun(built.facts, deps, aiStructure ?? {});
                   }}
                 >
                   try again
@@ -1025,6 +1056,16 @@ function AssemblySkeletonPanel({
                       lockedWhy || (aiView?.order && !aiView.order.ok ? aiView.order.why : ''),
                     inUse: !!adopted && adopted === proposal,
                     onUse: useAIOrder,
+                  }}
+                  structure={{
+                    category: aiView?.structure.category ?? null,
+                    from: built.facts.category,
+                    reason: aiView?.structure.categoryReason ?? '',
+                    units: aiView?.structure.units.length ?? 0,
+                    inUse: !!aiStructure,
+                    locked: lockedWhy,
+                    onUse: useAIStructure,
+                    onBack: backToEngine,
                   }}
                   stepName={(id) => {
                     const i = aiView?.indexOf(id);

@@ -64,6 +64,7 @@ import {
   SKELETON_AI,
   skeletonAIDecisionKey,
   skeletonAIPins,
+  skeletonAIStructure,
   skeletonAIRequest,
 } from '../../src/lib/assembly-skeleton/ai';
 import {
@@ -780,6 +781,40 @@ export async function runCard(input: CardInput) {
     // 5. the technologist's truth (cards that already carry units)
     const cmp = compareTruth(steps, existingOps, pieceKeys, nameOfPiece);
     if (cmp) out.compare = cmp;
+
+    // 5b. the ORACLE of the structural lever: the technologist's own units fed as hints
+    // (SkeletonOptions.units, what «use AI structure» passes) — how much of their tree the engine
+    // rebuilds when the structure is right. A ceiling for the AI's units, not a score of the AI.
+    if (cmp) {
+      const truth = partitions(
+        existingOps
+          .filter((o) => (o.outputUnitKey ?? '').trim())
+          .map((o) => ({
+            name: (o.outputUnitKey ?? '').trim(),
+            inputs: (o.inputKeys ?? []).filter(Boolean),
+          })),
+        pieceKeys,
+      );
+      const units = truth
+        .map((t) => ({
+          pieceKeys: t.leaves.split('+').filter((k) => pieceKeys.has(k)),
+          name: t.name,
+        }))
+        .filter((u) => u.pieceKeys.length >= 2);
+      const op = await DEFAULT_SKELETON_PROVIDER!(built.facts, deps, { units });
+      const oc = compareTruth(op.steps, existingOps, pieceKeys, nameOfPiece);
+      out.oracle = {
+        hints: units.length,
+        steps: op.steps.length,
+        compare: oc ?? null,
+        sweep: sweepHard(
+          op.steps,
+          formPieces.map((p) => ({ lineKey: p.lineKey ?? '', name: p.name ?? '' })),
+          pieceKeys,
+        ),
+        warnings: op.warnings.filter((w) => w.startsWith('AI unit')).slice(0, 5),
+      };
+    }
   }
 
   // 6. unit pictures of the card's OWN units (CardUnitPicturesProvider): screen and print readers
@@ -1141,6 +1176,24 @@ async function aiVariants(args: {
     pieceKeys,
   );
   out.b.sweepAll = sweepHard(b.steps, sweepPieces, pieceKeys).hard;
+
+  // d — «use AI structure»: the AI's category + units on the engine (pins dropped, as the panel)
+  const st = skeletonAIStructure(facts, answer);
+  out.structure = {
+    category: st.category,
+    units: st.units.length,
+    unitsOffered: (answer.units ?? []).length,
+  };
+  let d = proposal;
+  if (st.changes > 0)
+    d = await DEFAULT_SKELETON_PROVIDER!(facts, deps, {
+      ...(st.category ? { category: st.category } : {}),
+      ...(st.units.length ? { units: st.units } : {}),
+    });
+  out.d = metric(d);
+  out.d.rebuilt = st.changes > 0;
+  out.d.sweepAll = sweepHard(d.steps, sweepPieces, pieceKeys);
+  out.d.unmet = d.warnings.filter((w) => w.startsWith('AI unit')).length;
   return out;
 }
 

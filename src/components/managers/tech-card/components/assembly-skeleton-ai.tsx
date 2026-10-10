@@ -166,6 +166,7 @@ export function SkeletonAIBar({
   onAskAgain,
   readings,
   order,
+  structure,
   stepName,
 }: {
   state: SkeletonAIState;
@@ -179,6 +180,21 @@ export function SkeletonAIBar({
   readings: { changed: number; total: number; locked: string; onUse: () => void };
   /** The order door: how many steps the AI moves, why it cannot apply, and the press. */
   order: { moved: number; blocked: string; inUse: boolean; onUse: () => void };
+  /**
+   * The structure door: the category the AI reads the pieces as (null = the one on screen) and how
+   * many units it makes; `inUse` = the skeleton on screen is built on it, `onBack` returns to the
+   * engine's own structure.
+   */
+  structure: {
+    category: string | null;
+    from: string;
+    reason: string;
+    units: number;
+    inUse: boolean;
+    locked: string;
+    onUse: () => void;
+    onBack: () => void;
+  };
   /** A step id of the answer → its words on screen («Set sleeves»), or null when not on screen. */
   stepName: (stepId: string) => string | null;
 }) {
@@ -209,7 +225,7 @@ export function SkeletonAIBar({
             data-skeleton-ai-ask='1'
             title={
               canAsk
-                ? 'a paid request, usually one model call (about $0.05–0.50); a provider fallback or one retry of an unusable answer adds calls, and every call is shown here. The model suggests an order, a reading per open join and doubts; nothing changes until you use it'
+                ? 'a paid request, usually one model call (about $0.05–0.50); a provider fallback or one retry of an unusable answer adds calls, and every call is shown here. The model suggests an order, a reading per open join, the garment category and units it reads off the pieces, and doubts; nothing changes until you use it'
                 : whyNot
             }
           >
@@ -255,6 +271,56 @@ export function SkeletonAIBar({
                     ? 'AI keeps this order'
                     : `use AI order (${order.moved} moved)`}
             </Button>
+            {(structure.inUse || structure.category || structure.units > 0) && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={structure.inUse || !!structure.locked}
+                onClick={structure.onUse}
+                data-skeleton-ai-use-structure={structure.inUse ? 'in-use' : structure.units}
+                title={
+                  structure.locked ||
+                  (structure.inUse
+                    ? 'the skeleton on screen is built on the AI’s structure'
+                    : [
+                        structure.category
+                          ? `read the pattern as ${structure.category}, not ${structure.from}${structure.reason ? ` — ${structure.reason}` : ''}`
+                          : '',
+                        structure.units > 0
+                          ? `make the AI’s ${structure.units} unit${structure.units === 1 ? '' : 's'} first, then the engine goes on from them`
+                          : '',
+                        'the skeleton is rebuilt; nothing is written until you apply',
+                      ]
+                        .filter(Boolean)
+                        .join('. '))
+                }
+              >
+                {structure.inUse
+                  ? 'AI structure in use'
+                  : `use AI structure (${[
+                      structure.category ? `as ${structure.category}` : '',
+                      structure.units > 0
+                        ? `${structure.units} unit${structure.units === 1 ? '' : 's'}`
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(', ')})`}
+              </Button>
+            )}
+            {structure.inUse && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                disabled={!!structure.locked}
+                onClick={structure.onBack}
+                data-skeleton-ai-structure-back='1'
+                title={structure.locked || 'rebuild the skeleton on the engine’s own structure'}
+              >
+                back to the engine
+              </Button>
+            )}
             {readings.total > 0 && (
               <Button
                 type='button'
