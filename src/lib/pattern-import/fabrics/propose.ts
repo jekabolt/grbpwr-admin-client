@@ -88,6 +88,8 @@ export type SeedFabrics = {
   evidence: FabricEvidence[];
   /** C7: the kinds came from the AI alone (the sheet was silent). */
   aiOnly: boolean;
+  /** N1: nothing named a fabric — main by default. */
+  defaulted?: boolean;
 };
 
 export type ProposeFabricsDetail = {
@@ -249,8 +251,18 @@ export function proposeFabricsDetailed(input: ProposeFabricsInput): ProposeFabri
         }
       }
     }
-    if (!said && !(hint && hint.fabrics.length)) why.push('no fabric named — main fabric');
-    perSeed.push({ seed, number, kinds: [...kinds], confidence, why, evidence, aiOnly });
+    const defaulted = !said && !(hint && hint.fabrics.length);
+    if (defaulted) why.push('no fabric named — main fabric');
+    perSeed.push({
+      seed,
+      number,
+      kinds: [...kinds],
+      confidence,
+      why,
+      evidence,
+      aiOnly,
+      ...(defaulted ? { defaulted } : {}),
+    });
   }
 
   return { assignment: assign(perSeed, input.bom, lists), perSeed, lists };
@@ -324,6 +336,7 @@ function assign(
       refused.set(kind, r);
     }
   }
+  const defaulted = perSeed.filter((s) => s.defaulted).map((s) => s.seed);
   const aiOnly = perSeed
     .filter((s) => s.aiOnly)
     .map((s) => ({
@@ -340,6 +353,7 @@ function assign(
     })),
     refused: [...refused.values()],
     ...(aiOnly.length ? { aiOnly } : {}),
+    ...(defaulted.length ? { defaulted } : {}),
   };
 }
 
