@@ -10,6 +10,8 @@
 // (scripts/doll/*). The main thread imports ONLY this file.
 
 import type { EdgeId, SeamCandidate, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
+import type { SizePieces } from 'lib/seams/transfer';
+import type { StoredSeam } from 'lib/seams/types';
 
 import type { DeclaredJoin } from './joins';
 
@@ -40,6 +42,18 @@ export type DollOptions = {
   joins?: DeclaredJoin[];
   /** Call every ~20 passes with the current positions (the worker posts frames from it). */
   onFrame?: (positions: Float32Array, pass: number) => void;
+  /**
+   * L4 — seams stored on the card (lib/seams rows). With rows the doll re-reads the graph from
+   * `facts` with them resolved for `size` (lib/seams resolveAcrossSizes; `sizes` = other sizes'
+   * pieces when the rows were confirmed on another size): confirmed seams are FORCED (never released
+   * as a wrong pairing — one that cannot close is reported as a contradiction), rejected pairs are
+   * never proposed, closures are drawn overlapped at the button line, a confirmed seam onto a
+   * collar unit gives the neck path (tucks / pleats on it folded), a strip sewn by a confirmed seam
+   * onto the top of the body is the waistband ring. No rows → the doll exactly as before.
+   */
+  seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
+  /** The card's gender (front closure: left over right for men, the default; right over left for women). */
+  gender?: 'MALE' | 'FEMALE' | null;
 };
 
 export type DollInput = {
@@ -111,6 +125,9 @@ export type DollSeamReport = {
   state: DollSeamState;
   /** Released by the solver because it could only close by tearing the paper. */
   released?: boolean;
+  /** L4 (rows given): who says this seam exists — confirmed by a person (stored row), proposed by the
+   *  doll, or read by the engine and not decided. Absent without rows. */
+  decidedBy?: 'person' | 'doll' | 'engine';
   /** In words, with millimetres. */
   note: string;
   /** Global vertex ids of side A / side B polylines (for drawing). */
@@ -171,6 +188,37 @@ export type DollReport = {
   collar?: DollCollarReport;
   /** The honesty line every view carries. */
   honesty: string;
+  /** L4 only: confirmed seams that cannot be what they say, in words (never silently dropped). */
+  contradictions?: string[];
+  /** L4 only: closures drawn overlapped at the button line. */
+  closures?: DollClosureReport[];
+  /** L4 only: the stored rows as resolved for this size (stale / orphan in words). */
+  rows?: {
+    applied: number;
+    confirmed: number;
+    rejected: number;
+    closures: number;
+    words: string[];
+  };
+};
+
+/** A front closure drawn buttoned: the two centre-front lines on top of each other. */
+export type DollClosureReport = {
+  id: string;
+  /** The piece on top (left for men, right for women) and the one under it. */
+  top: string;
+  under: string;
+  /** Centre-front line in from each closure edge, mm, and where that came from. */
+  offTopMm: number;
+  offUnderMm: number;
+  how: string;
+  /** Distance between the two centre-front lines after solving (p95), mm. */
+  cfGapP95Mm: number;
+  /** How far the two closure edges cross over each other, mm (≈ offTop + offUnder). */
+  overlapMm: number;
+  /** Share of the top's overlap zone lying outside the under piece, %. */
+  outsidePct: number;
+  ok: boolean;
 };
 
 export type DollCollarUnit = {
@@ -184,7 +232,7 @@ export type DollCollarUnit = {
   seam: string | null;
   /** proposed: by the doll onto its base · graph: the pattern sews it to the base · stacked: sewn
    *  by the graph to another collar unit that is on the base (K4) · not sewn: base far off. */
-  attached: 'proposed' | 'graph' | 'stacked' | 'not sewn';
+  attached: 'proposed' | 'graph' | 'stacked' | 'not sewn' | 'confirmed';
   /** Length of the unit's edge that is sewn (between its anchor marks), mm. */
   sewnMm: number;
   /** Length of the base it is sewn onto, mm. */
@@ -195,6 +243,8 @@ export type DollCollarUnit = {
   extMm: number;
   /** Anchors in words (CB by notch / middle, SNP, CF by notches / ends). */
   anchors: string;
+  /** L4: tucks / pleats folded on the base before mapping (mm each), and what the base was. */
+  folds?: number[];
   /** Layer order outward on a shared base (stacked units, K4): 0 = innermost. */
   layer: number;
   /** Fall only: mean height of the outer free edge vs mean height of the stand top it hangs from,

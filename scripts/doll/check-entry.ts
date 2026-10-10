@@ -13,6 +13,7 @@ import type { SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
 import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
+import { anchorOfRunId, grainDegOf, type StoredSeam } from '../../src/lib/seams';
 import { neckFixtures } from './neck-fixture';
 
 type FileSpec = {
@@ -33,6 +34,11 @@ type FileSpec = {
   /** Synthetic graft: `drop` pieces leave this pattern, `keep` pieces (+ their own seams) of the
    *  donor DXF come in — a clean body with another garment's collar. */
   graft?: { dxf: string; keep: string[]; drop: string[] };
+  /** L4: stored seam rows (scripts/doll/gold/<file>.seams.json) handed to the doll. */
+  gold?: string;
+  /** L4 NEGATIVE CONTROL: one gold row deliberately wrong — `row` (edge hints a ↔ b) re-pointed
+   *  from its b to `to` (an edge id of today's segmentation). */
+  wrong?: { a: string; b: string; to: string };
 };
 
 const [specPath, outDir] = process.argv.slice(2);
@@ -184,6 +190,32 @@ for (const f of spec.files) {
     opsSource = "the skeleton's own units (no card order)";
   }
   const joins = joinsFromOps(ops, pieceOf);
+  let rows: StoredSeam[] | undefined;
+  let wrongWords = '';
+  if (f.gold) {
+    const gj = JSON.parse(await readFile(f.gold, 'utf8')) as { rows: { row: StoredSeam }[] };
+    rows = gj.rows.map((r) => r.row);
+    if (f.wrong) {
+      const W = f.wrong;
+      const i = rows.findIndex(
+        (r) =>
+          r.sideA.length === 1 &&
+          r.sideB.length === 1 &&
+          ((r.sideA[0].edgeHint === W.a && r.sideB[0].edgeHint === W.b) ||
+            (r.sideA[0].edgeHint === W.b && r.sideB[0].edgeHint === W.a)),
+      );
+      const an = anchorOfRunId(graph.pieces, W.to, grainDegOf(facts));
+      if (i < 0 || !an) throw new Error(`${f.id}: wrong-row target not found`);
+      const r = rows[i];
+      const bSide = r.sideB[0].edgeHint === W.b ? 'sideB' : 'sideA';
+      rows[i] = {
+        ...r,
+        [bSide]: [an],
+        note: `DELIBERATELY WRONG (negative control): ${W.a} ↔ ${W.to} instead of ${W.b}`,
+      };
+      wrongWords = `${W.a} ↔ ${W.to} (was ${W.b})`;
+    }
+  }
   const report: DollReport = solveDoll({
     graph,
     facts,
@@ -193,6 +225,7 @@ for (const f of spec.files) {
       // DOLL_NOOPS: the joins are still read (for the table) but not given to the doll — the «before».
       joins: spec.noOps ? undefined : joins,
       ...(spec.maxPasses !== undefined ? { maxPasses: spec.maxPasses } : {}),
+      ...(rows ? { seams: { rows, size: f.size ?? 'M' }, gender: f.gender ?? null } : {}),
     },
   });
 
@@ -336,7 +369,24 @@ for (const f of spec.files) {
   for (const s of report.seams.filter((x) => x.origin !== 'layer')) {
     const t = truthOf.get(s.id);
     lines.push(
-      `- [${s.state}${t ? ` · ${t}` : ''}${s.origin === 'doll-proposed' ? ' · doll' : ''}] ${s.id.length > 60 ? s.id.slice(0, 60) + '…' : s.id} — gap p95 ${fmt(s.residualP95Mm)} / max ${fmt(s.residualMaxMm)} mm (mean ${fmt(s.residualMeanMm)}), strain ${fmt(s.stretchPct)} % · ${s.note}`,
+      `- [${s.state}${t ? ` · ${t}` : ''}${s.origin === 'doll-proposed' ? ' · doll' : ''}${s.decidedBy === 'person' ? ' · confirmed by a person' : s.decidedBy === 'engine' ? ' · engine, not decided' : ''}] ${s.id.length > 60 ? s.id.slice(0, 60) + '…' : s.id} — gap p95 ${fmt(s.residualP95Mm)} / max ${fmt(s.residualMaxMm)} mm (mean ${fmt(s.residualMeanMm)}), strain ${fmt(s.stretchPct)} % · ${s.note}`,
+    );
+  }
+  if (report.rows) {
+    lines.push(
+      '',
+      '## stored rows (L4)',
+      `- ${rows?.length ?? 0} rows: ${report.rows.confirmed} confirmed seams applied (forced), ${report.rows.closures} closures, ${report.rows.rejected} rejected pairs excluded${wrongWords ? ` · NEGATIVE CONTROL: ${wrongWords}` : ''}`,
+      ...report.rows.words.map((w) => `- not applied: ${w}`),
+      '',
+      `## contradictions (${report.contradictions?.length ?? 0})`,
+      ...(report.contradictions ?? []).map((w) => `- ${w}`),
+      '',
+      '## front closures',
+      ...(report.closures ?? []).map(
+        (c) =>
+          `- ${c.ok ? 'OK' : 'NOT OK'} ${c.id}: ${c.top} over ${c.under} · ${c.how} · CF lines meet p95 ${fmt(c.cfGapP95Mm)} mm · edges cross ${fmt(c.overlapMm, 0)} mm (expected ${fmt(c.offTopMm + c.offUnderMm, 0)}) · overlap outside ${fmt(c.outsidePct, 0)} %`,
+      ),
     );
   }
   if (report.floating.length)
@@ -403,6 +453,7 @@ for (const f of spec.files) {
       outsidePct: u.outsidePct,
       anchors: u.anchors,
       layer: u.layer,
+      ...(u.folds ? { folds: u.folds } : {}),
     };
   });
   if (C) {
@@ -414,7 +465,7 @@ for (const f of spec.files) {
     else lines.push('- neck path: none');
     for (const u of unitRows)
       lines.push(
-        `- ${u.role} ${u.keys} on the ${u.base}: sewn ${fmt(u.sewnMm, 0)} mm / base ${fmt(u.baseMm, 0)} mm = ease ${fmt(u.ease, 3)} · extensions ${fmt(u.extMm, 0)} mm · gap p95 ${fmt(u.gapP95)} / max ${fmt(u.gapMax)} mm (${u.state}${u.via ? ` via ${u.via}` : ''}) · layer ${u.layer}${u.outerY !== undefined ? ` · outer edge y ${fmt(u.outerY!, 0)} vs ${u.role === 'fall' ? 'stand top' : 'roll line'} y ${fmt(u.baseY!, 0)} (${u.outerY! < u.baseY! ? 'turned DOWN' : 'NOT turned down'}) · ${fmt(u.outsidePct!, 1)} % of its free vertices outside the ${u.role === 'fall' ? 'stand' : 'standing part'}` : ''} · ${u.anchors}`,
+        `- ${u.role} ${u.keys} on the ${u.base}: sewn ${fmt(u.sewnMm, 0)} mm / base ${fmt(u.baseMm, 0)} mm = ease ${fmt(u.ease, 3)} · extensions ${fmt(u.extMm, 0)} mm · gap p95 ${fmt(u.gapP95)} / max ${fmt(u.gapMax)} mm (${u.state}${u.via ? ` via ${u.via}` : ''}) · layer ${u.layer}${u.folds?.length ? ` · folded ${u.folds.join(' + ')} mm` : ''}${u.outerY !== undefined ? ` · outer edge y ${fmt(u.outerY!, 0)} vs ${u.role === 'fall' ? 'stand top' : 'roll line'} y ${fmt(u.baseY!, 0)} (${u.outerY! < u.baseY! ? 'turned DOWN' : 'NOT turned down'}) · ${fmt(u.outsidePct!, 1)} % of its free vertices outside the ${u.role === 'fall' ? 'stand' : 'standing part'}` : ''} · ${u.anchors}`,
       );
     lines.push(
       `- open collar seams: ${openCollar.length}${openCollar.length ? ` (${openCollar.map((s) => s.id).join(', ')})` : ''}`,
@@ -482,6 +533,59 @@ for (const f of spec.files) {
       .length,
     travelP99: Number(/travel p99 ([\d.]+)/.exec(report.warnings.join('\n'))?.[1] ?? NaN),
     closedGraph: count('closed') + count('eased'),
+    ...(report.rows
+      ? (() => {
+          const grp = new Map(report.panels.map((p) => [p.pieceKey, p.group]));
+          for (const p of report.panels) for (const l of p.layers) grp.set(l, p.group);
+          const gOf = (ids: string[]) => new Set<string>(ids.map((id) => grp.get(pk(id)) ?? ''));
+          const live = report.seams.filter((x) => x.origin !== 'layer');
+          const isOpen = (x: (typeof live)[number]) => x.state === 'open' || x.state === 'twisted';
+          // Attached = the cap seam is sewn shut (p95 gap ≤ 3 mm, not open / twisted); the strain
+          // it takes (paper cannot ease a cap) is reported next to it, not hidden.
+          const sleeveOn = (side: 'SLEEVE_L' | 'SLEEVE_R') => {
+            const caps = live.filter((x) => {
+              const A = gOf(x.a);
+              const B = gOf(x.b);
+              return (A.has(side) && B.has('BODY')) || (B.has(side) && A.has('BODY'));
+            });
+            const on = caps.some((x) => !isOpen(x) && x.residualP95Mm <= 3);
+            const words = caps
+              .map(
+                (x) =>
+                  `${x.state}, gap p95 ${x.residualP95Mm.toFixed(1)} mm, strain ${x.stretchPct.toFixed(1)} %`,
+              )
+              .join('; ');
+            return { on, words: words || 'no cap seam' };
+          };
+          const between = (g1: string, g2: string) =>
+            live.filter((x) => {
+              const A = gOf(x.a);
+              const B = gOf(x.b);
+              return (A.has(g1) && B.has(g2)) || (A.has(g2) && B.has(g1));
+            });
+          const legsJoined = between('LEG_L', 'LEG_R');
+          const band = live.filter((x) => gOf(x.a).has('WAISTBAND') || gOf(x.b).has('WAISTBAND'));
+          return {
+            gold: {
+              rows: rows?.length ?? 0,
+              open: live.filter(isOpen).map((x) => `${x.id} (${x.state}, ${x.decidedBy ?? '-'})`),
+              stretched: live.filter((x) => x.state === 'stretched').map((x) => x.id),
+              confirmedOpen: live.filter((x) => x.decidedBy === 'person' && isOpen(x)).length,
+              contradictions: report.contradictions ?? [],
+              closures: report.closures ?? [],
+              sleeves: { L: sleeveOn('SLEEVE_L'), R: sleeveOn('SLEEVE_R') },
+              rise: legsJoined.map((x) => `${x.id}: ${x.state}`),
+              riseOk: legsJoined.length > 0 && legsJoined.every((x) => !isOpen(x)),
+              band: band.map((x) => `${x.id}: ${x.state}`),
+              bandOk:
+                report.panels.some((p) => p.group === 'WAISTBAND') &&
+                band.some((x) => x.decidedBy === 'person') &&
+                band.every((x) => !isOpen(x)),
+              wrong: wrongWords,
+            },
+          };
+        })()
+      : {}),
     collar: C
       ? {
           neckMm: C.neck?.lenMm ?? null,

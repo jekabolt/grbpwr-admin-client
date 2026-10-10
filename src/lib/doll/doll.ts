@@ -4,7 +4,10 @@
 // close by tearing the paper → report in words.
 
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
-import type { Edge, EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
+import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { grainDegOf } from 'lib/seams/frame';
+import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
 import {
@@ -12,6 +15,7 @@ import {
   closedNeckPath,
   findNeckPath,
   makeMap,
+  neckFromRun,
   restPath,
   runMarks,
   smoothest,
@@ -36,9 +40,12 @@ import {
   type SeamRows,
   type SolverSeam,
   type SolverState,
+  type Tie,
+  tieGap,
 } from './solve';
 import type {
   DollCollarReport,
+  DollClosureReport,
   DollCollarUnit,
   DollGroupId,
   DollInput,
@@ -95,6 +102,12 @@ type Work = {
   virtual?: boolean;
   /** Found from the technologist's order (a declared join the graph had no seam for). */
   fromOrder?: boolean;
+  /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
+  confirmed?: boolean;
+  /** L4: a doll proposal on a pair a person rejected — not sewn, not reported as a seam. */
+  rejectedByPerson?: boolean;
+  /** L4: a closure drawn overlapped (the buttoned centre fronts). */
+  overlap?: DollClosureReport;
 };
 
 const HONESTY =
@@ -104,8 +117,41 @@ export function solveDoll(input: DollInput): DollReport {
   const t0 = now();
   const opt = input.options ?? {};
   const warnings: string[] = [];
+  // L4: stored seams. The graph is re-read with them resolved for this size (confirmed seams taken
+  // first, rejected pairs dropped, closures blocking their edges). No rows → exactly as before.
+  const l4 = !!opt.seams?.rows.length;
+  let resolvedRows: SizeResolved | undefined;
+  let graphIn = input.graph;
+  if (l4) {
+    const S = opt.seams!;
+    const grain = grainDegOf(input.facts);
+    graphIn = readSeamGraph(input.facts, undefined, undefined, (pieces) => {
+      const r = resolveAcrossSizes(S.rows, [
+        { size: S.size, pieces, grainDeg: grain },
+        ...(S.sizes ?? []).filter((x) => x.size !== S.size),
+      ]).get(S.size)!;
+      resolvedRows = r;
+      return r;
+    });
+  }
+  const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed';
+  const excludedPairs = (resolvedRows?.excluded ?? []).filter((x) => !x.surface);
+  /** A pair of runs a person rejected (any edge of a on one side, any of b on the other). */
+  const isExcluded = (a: readonly EdgeId[], b: readonly EdgeId[]) => {
+    if (!excludedPairs.length) return false;
+    const ea = a.flatMap((x) => edgeIdsOf(x));
+    const eb = b.flatMap((x) => edgeIdsOf(x));
+    return excludedPairs.some((x) => {
+      const A = new Set(x.aIds);
+      const B = new Set(x.bIds);
+      return (
+        (ea.some((e) => A.has(e)) && eb.some((e) => B.has(e))) ||
+        (ea.some((e) => B.has(e)) && eb.some((e) => A.has(e)))
+      );
+    });
+  };
   // Mirrored ×2 blocks become two panels (the block and its mirror).
-  const inst = instanceMirrored(input.graph, input.facts);
+  const inst = instanceMirrored(graphIn, input.facts);
   warnings.push(...inst.notes);
   const facts = inst.facts;
   // Suspect graph seams: joins that make the wrap topology impossible are not sewn as drawn.
@@ -126,6 +172,8 @@ export function solveDoll(input: DollInput): DollReport {
       const a = gp.get(pk(s.a[0]));
       const b = gp.get(pk(s.b[0]));
       if (!a || !b || a.key === b.key) continue;
+      // A seam a person confirmed is never suspect.
+      if (isConf(s.seam)) continue;
       const id = `${s.seam.a}~${s.seam.b}`;
       const hands = new Set([handOf(a.key), handOf(b.key)]);
       const lr = hands.has('L') && hands.has('R');
@@ -196,6 +244,15 @@ export function solveDoll(input: DollInput): DollReport {
       new Set([...suspect0].filter(([, v]) => v.kind === 'drop').map(([k]) => k)),
       facts.category === 'trousers' || facts.category === 'jumpsuit',
     );
+    if (l4)
+      r.added = r.added.filter((x) => {
+        const no = isExcluded(x.seam.aParts ?? [x.seam.a], x.seam.bParts ?? [x.seam.b]);
+        if (no)
+          warnings.push(
+            `technologist's order «${x.join}»: ${x.seam.a} ↔ ${x.seam.b} not proposed — a person rejected this pair`,
+          );
+        return !no;
+      });
     graph = { ...graph, chosen: [...graph.chosen, ...r.added.map((x) => x.seam)] };
     for (const x of r.added) {
       orderNote.set(`${x.seam.a}~${x.seam.b}`, x.note);
@@ -234,6 +291,139 @@ export function solveDoll(input: DollInput): DollReport {
       } else suspects.push({ s, note: v.note });
     }
     G.seams.splice(0, G.seams.length, ...keep);
+  }
+
+  // L4 — groups by CONFIRMED seams, not by names, where they disagree.
+  if (l4) {
+    const gp = new Map(G.pieces.map((p) => [p.key, p]));
+    const confSeams = G.seams.filter((s) => isConf(s.seam));
+    // The waistband by EDGE ROLE: a long strip whose long edge a confirmed seam sews onto two or
+    // more pieces of the body / legs (the top path), whatever its name says.
+    const bodyish = new Set<DollGroupId>(['BODY', 'LEG_L', 'LEG_R']);
+    const legsCat =
+      facts.category === 'trousers' || facts.category === 'jumpsuit' || facts.category === 'skirt';
+    for (const P of G.pieces) {
+      if (P.group === 'WAISTBAND' || !legsCat) continue;
+      // A strip: mean width (2·area / perimeter) small against its length (half the perimeter).
+      const long = P.geom.perimMm / 2;
+      const short = (2 * Math.abs(P.geom.areaMm2)) / Math.max(1, P.geom.perimMm);
+      if (long < 250 || short > 0.15 * long) continue;
+      const onTop = confSeams.some((s) => {
+        const A = s.a.map(pk);
+        const B = s.b.map(pk);
+        const other = A.every((k) => k === P.key) ? B : B.every((k) => k === P.key) ? A : null;
+        if (!other) return false;
+        const ks = new Set(other.filter((k) => bodyish.has(gp.get(k)?.group as DollGroupId)));
+        return ks.size >= 2;
+      });
+      if (!onTop) continue;
+      warnings.push(
+        `${P.key}: a strip ${long.toFixed(0)} × ${short.toFixed(0)} mm whose long edge a confirmed seam sews onto the top of the legs — drawn as the waistband ring (by its edge, not its name)`,
+      );
+      P.group = 'WAISTBAND';
+    }
+    // A leg piece whose name says one hand but whose confirmed seams sew it into the other leg
+    // (a back yoke named «…_R» sewn to the left back): the seams win. A vote counts a seam whose
+    // other side is ONE leg piece (an inseam, an outseam, a yoke seam); seams onto several pieces
+    // (the waistband, a rise through the yoke) say nothing about the hand. Two rounds.
+    for (let round = 0; round < 2; round++)
+      for (const P of G.pieces) {
+        // A handless back / yoke piece of trousers lands in BODY by its name: its seams say which leg.
+        const handless = legsCat && P.group === 'BODY';
+        if (P.group !== 'LEG_L' && P.group !== 'LEG_R' && !handless) continue;
+        const votes: Record<string, number> = { LEG_L: 0, LEG_R: 0, BODY: 0 };
+        for (const s of confSeams) {
+          const A = [...new Set(s.a.map(pk))];
+          const B = [...new Set(s.b.map(pk))];
+          const other = A.includes(P.key) ? B : B.includes(P.key) ? A : null;
+          if (!other || other.length !== 1 || other[0] === P.key) continue;
+          const g = gp.get(other[0])?.group;
+          if (g !== 'LEG_L' && g !== 'LEG_R') continue;
+          votes[g] += Math.max(s.seam.evidence.aLenMm ?? 0, s.seam.evidence.bLenMm ?? 0, 50);
+        }
+        if (handless) {
+          const best = votes.LEG_L >= votes.LEG_R ? 'LEG_L' : 'LEG_R';
+          if (votes[best] > 0 && votes[best] > 1.5 * Math.min(votes.LEG_L, votes.LEG_R)) {
+            warnings.push(
+              `${P.key}: no hand in its name — its confirmed seams sew it into the ${best === 'LEG_L' ? 'left' : 'right'} leg`,
+            );
+            P.group = best;
+          }
+          continue;
+        }
+        const cur = P.group as 'LEG_L' | 'LEG_R';
+        const alt = cur === 'LEG_L' ? 'LEG_R' : 'LEG_L';
+        if (votes[alt] > 1.5 * votes[cur] && votes[alt] > 0) {
+          warnings.push(
+            `${P.key}: its name reads ${cur === 'LEG_L' ? 'left' : 'right'}, its confirmed seams sew it into the ${alt === 'LEG_L' ? 'left' : 'right'} leg — placed there`,
+          );
+          P.group = alt;
+        }
+      }
+  }
+
+  // L4: confirmed rows that cannot be what they say, before solving (lengths, an edge sewn twice).
+  const preContradictions: string[] = [];
+  if (l4) {
+    const lenOfEdge = new Map<string, number>();
+    for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
+    const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
+      const ids = side === 'a' ? g.a : g.b;
+      const pr = g.seam.partRange ?? {};
+      const rg = g.seam.range && ids.length === 1 ? g.seam.range[side] : null;
+      if (rg) return rg[1] - rg[0];
+      return ids.reduce((t, id) => {
+        const r = pr[id];
+        return t + (r ? r[1] - r[0] : lenOfEdge.get(id) ?? 0);
+      }, 0);
+    };
+    const usedBy = new Map<string, string[]>();
+    for (const g of [...G.seams, ...G.closures]) {
+      if (!isConf(g.seam)) continue;
+      const id = `${g.seam.a}~${g.seam.b}`;
+      const la = sideLen(g, 'a');
+      const lb = sideLen(g, 'b');
+      const diff = 1 - Math.min(la, lb) / Math.max(la, lb, 1e-9);
+      if (diff > 0.35)
+        preContradictions.push(
+          `${id}: confirmed by a person, but its sides are ${la.toFixed(0)} and ${lb.toFixed(0)} mm — ${(diff * 100).toFixed(0)} % apart, more than any ease: not one seam`,
+        );
+      // The stretch of each edge this seam takes (mm): partial ranges and composite part ranges.
+      const span = (e: string, side: 'a' | 'b'): [number, number] => {
+        const ids = side === 'a' ? g.a : g.b;
+        const r =
+          g.seam.partRange?.[e] ?? (g.seam.range && ids.length === 1 ? g.seam.range[side] : null);
+        return r ?? [0, lenOfEdge.get(e) ?? 0];
+      };
+      for (const side of ['a', 'b'] as const)
+        for (const e of side === 'a' ? g.a : g.b)
+          usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
+    }
+    const ringish = new Set<DollGroupId>(['COLLAR', 'STAND']);
+    const groupOfKey = new Map(G.pieces.map((P) => [P.key, P.group]));
+    for (const [e, list] of usedBy) {
+      // Collar plies / stacked collars sandwich one edge between two layers: not a contradiction.
+      if (ringish.has(groupOfKey.get(pk(e)) as DollGroupId)) continue;
+      const items = list.map((x) => {
+        const [id, r] = x.split('|');
+        const [r0, r1] = r.split(',').map(Number);
+        return { id, r0, r1 };
+      });
+      const clash = new Set<string>();
+      for (let i = 0; i < items.length; i++)
+        for (let j = i + 1; j < items.length; j++) {
+          const A = items[i];
+          const B = items[j];
+          if (A.id === B.id) continue;
+          // Two seams on one edge are fine when they take different stretches of it.
+          if (Math.min(A.r1, B.r1) - Math.max(A.r0, B.r0) > 5) clash.add(A.id).add(B.id);
+        }
+      if (clash.size)
+        preContradictions.push(
+          `${e} is sewn by ${clash.size} confirmed seams over the same stretch (${[...clash].join(', ')}) — an edge takes one seam`,
+        );
+    }
+    for (const w of preContradictions) warnings.push(`contradiction: ${w}`);
   }
 
   // ── meshes ───────────────────────────────────────────────────────────────────────────────
@@ -320,6 +510,96 @@ export function solveDoll(input: DollInput): DollReport {
     return { v: Int32Array.from(v), s: Float64Array.from(s), len: s[s.length - 1] };
   };
 
+  /** A path cut to the stretch [r0, r1] mm of its rest arc (a part sewn over part of its edge). */
+  const cropPath = (P: Path, r: [number, number]): Path => {
+    const keep: number[] = [];
+    for (let k = 0; k < P.v.length; k++) if (P.s[k] >= r[0] - 1 && P.s[k] <= r[1] + 1) keep.push(k);
+    if (keep.length < 2) {
+      let k0 = 0;
+      for (let k = 0; k < P.v.length; k++)
+        if (Math.abs(P.s[k] - (r[0] + r[1]) / 2) < Math.abs(P.s[k0] - (r[0] + r[1]) / 2)) k0 = k;
+      keep.splice(0, keep.length, Math.max(0, k0 - 1), Math.min(P.v.length - 1, Math.max(1, k0)));
+    }
+    const s0 = P.s[keep[0]];
+    return {
+      v: Int32Array.from(keep.map((k) => P.v[k])),
+      s: Float64Array.from(keep.map((k) => P.s[k] - s0)),
+      len: P.s[keep[keep.length - 1]] - s0,
+    };
+  };
+  const revPath = (P: Path): Path => ({
+    v: Int32Array.from([...P.v].reverse()),
+    s: Float64Array.from([...P.s].reverse().map((x) => P.len - x)),
+    len: P.len,
+  });
+  /**
+   * L4: a CONFIRMED side as one path — its parts in the stored walk order, each oriented to meet the
+   * previous one where they lie now (parts on different pieces meet through other seams), each cut
+   * to its sewn stretch when the row says so. One-piece contiguous sides keep `pathOf`.
+   */
+  const sidePath = (g: GroupedSeam, side: 'a' | 'b'): Path | null => {
+    const ids = side === 'a' ? g.a : g.b;
+    const orig = (
+      side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
+    ).flatMap((x) => edgeIdsOf(x));
+    const pr = g.seam.partRange ?? {};
+    const multi = new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
+    if (!multi) return pathOf(ids);
+    const parts: Path[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const P = pathOf([ids[i]]);
+      if (!P) return null;
+      const r = pr[orig[i]] ?? pr[ids[i]];
+      parts.push(r ? cropPath(P, r) : P);
+    }
+    const d3 = (a: number, b: number) =>
+      Math.hypot(
+        pos[3 * a] - pos[3 * b],
+        pos[3 * a + 1] - pos[3 * b + 1],
+        pos[3 * a + 2] - pos[3 * b + 2],
+      );
+    const first = (P: Path) => P.v[0];
+    const last = (P: Path) => P.v[P.v.length - 1];
+    // Each part's direction: the one set of directions whose consecutive parts meet best where
+    // they lie now (the sum of the joins), ties to the stored walk. Greedy, part by part, fails on
+    // an armhole: the bottom of the back armhole can lie nearer the front princess point than the
+    // shoulder does before the body is closed.
+    const n = parts.length;
+    let bestMask = 0;
+    if (n <= 12) {
+      let bestCost = Infinity;
+      let bestRev = Infinity;
+      for (let mask = 0; mask < 1 << n; mask++) {
+        let cost = 0;
+        let rev = 0;
+        for (let i = 0; i < n; i++) {
+          const r = (mask >> i) & 1;
+          rev += r;
+          if (i === 0) continue;
+          const rp = (mask >> (i - 1)) & 1;
+          const endPrev = rp ? first(parts[i - 1]) : last(parts[i - 1]);
+          const startCur = r ? last(parts[i]) : first(parts[i]);
+          cost += d3(endPrev, startCur);
+        }
+        if (cost < bestCost - 2 || (Math.abs(cost - bestCost) <= 2 && rev < bestRev))
+          [bestCost, bestRev, bestMask] = [cost, rev, mask];
+      }
+    }
+    const out: Path[] = parts.map((P, i) => ((bestMask >> i) & 1 ? revPath(P) : P));
+    const v: number[] = [];
+    const sv: number[] = [];
+    let base = 0;
+    for (const P of out) {
+      for (let k = 0; k < P.v.length; k++) {
+        if (k === 0 && v.length && v[v.length - 1] === P.v[0]) continue;
+        v.push(P.v[k]);
+        sv.push(base + P.s[k]);
+      }
+      base += P.len;
+    }
+    return { v: Int32Array.from(v), s: Float64Array.from(sv), len: base };
+  };
+
   // ── charts ───────────────────────────────────────────────────────────────────────────────
   const groups = new Map<DollGroupId, Panel[]>();
   for (const P of panels) {
@@ -341,6 +621,116 @@ export function solveDoll(input: DollInput): DollReport {
       .filter((s) => keys.has(pk(s.a[0])) && keys.has(pk(s.b[0])))
       .map(chartSeamOf)
       .filter((x): x is ChartSeam => !!x);
+    // L4: a confirmed composite (one edge ↔ parts on two or more pieces of this group) lays each
+    // part along its stretch of the single edge. Which end of the edge the stored walk starts at is
+    // not in the row: each composite is laid both ways and keeps the one whose parts land on their
+    // stretches in the chart (one fixed way twisted card6's placket or opened card11's left leg).
+    const comps: { parts: ChartSeam[]; flip: ChartSeam[]; fixed: boolean | null }[] = [];
+    if (l4)
+      for (const g of G.seams) {
+        if (!isConf(g.seam)) continue;
+        for (const [one, many, oneIsA] of [
+          [g.a, g.b, true],
+          [g.b, g.a, false],
+        ] as const) {
+          if (one.length !== 1 || new Set(many.map(pk)).size < 2) continue;
+          if (![...one, ...many].every((id) => keys.has(pk(id)))) continue;
+          const e1 = edgeById.get(one[0]);
+          const parts = many.map((id) => edgeById.get(id));
+          if (!e1 || parts.some((e) => !e)) continue;
+          const pr = g.seam.partRange ?? {};
+          const lens = many.map((id, i) => {
+            const r = pr[id];
+            return r ? r[1] - r[0] : parts[i]!.lenMm;
+          });
+          const L = lens.reduce((t, x) => t + x, 0) || 1;
+          const mk = (against: boolean) => {
+            let c = 0;
+            return many.map((id, i): ChartSeam => {
+              const r = pr[id];
+              const e = parts[i]!;
+              const f0 = against ? 1 - (c + lens[i]) / L : c / L;
+              const f1 = against ? 1 - c / L : (c + lens[i]) / L;
+              c += lens[i];
+              const own: [number, number] = r ? [r[0] / e.lenMm, r[1] / e.lenMm] : [0, 1];
+              return {
+                id: `${g.seam.a}~${g.seam.b}@${i}`,
+                a: oneIsA ? [e1] : [e],
+                b: oneIsA ? [e] : [e1],
+                partial: true,
+                ranges: oneIsA ? { a: [f0, f1], b: own } : { a: own, b: [f0, f1] },
+              };
+            });
+          };
+          // Pieces lie upright in the chart, so height says which part comes first along a
+          // vertical edge: the first part sits above the second when the seam joining their pieces
+          // lies below it on its own piece. Along a level edge the chart's fit decides.
+          let fixed: boolean | null = null;
+          const k0 = pk(many[0]);
+          const k1 = pk(many[1]);
+          const join = G.seams.find(
+            (sm) =>
+              (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
+              (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0)),
+          );
+          const my = (pts: readonly Pt2[]) =>
+            pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
+          if (join) {
+            const jIds = [...join.a, ...join.b].filter((id) => pk(id) === k0);
+            const jy = my(jIds.flatMap((id) => edgeById.get(id)?.pts ?? []));
+            const py = my(parts[0]!.pts);
+            const ey = e1.pts[e1.pts.length - 1][1] - e1.pts[0][1];
+            if (Math.abs(jy - py) > 20 && Math.abs(ey) > 0.5 * e1.lenMm) {
+              const firstOnTop = jy < py;
+              const e1Down = ey < 0;
+              fixed = firstOnTop !== e1Down; // along when the edge starts at the first part's end
+            }
+          }
+          comps.push({ parts: mk(false), flip: mk(true), fixed });
+        }
+      }
+    const sampleOn = (pts: readonly Pt2[], f0: number, f1: number, K: number): Pt2[] => {
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++)
+        cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      const T = cum[cum.length - 1] || 1;
+      const out: Pt2[] = [];
+      for (let k = 0; k <= K; k++) {
+        const t = (f0 + ((f1 - f0) * k) / K) * T;
+        let i = 1;
+        while (i < pts.length - 1 && cum[i] < t) i++;
+        const u = (t - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+        out.push([
+          pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * u,
+          pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * u,
+        ]);
+      }
+      return out;
+    };
+    /** How far the composites' parts land from their stretches in a chart (mean mm). */
+    const compMiss = (ch: Chart, sel: ChartSeam[][]) => {
+      let t = 0;
+      let n = 0;
+      for (const list2 of sel)
+        for (const cs2 of list2) {
+          const pa = ch.place.get(cs2.a[0].pieceKey);
+          const pb = ch.place.get(cs2.b[0].pieceKey);
+          if (!pa || !pb || !cs2.ranges) continue;
+          const A = sampleOn(cs2.a[0].pts, ...cs2.ranges.a, 8).map((q) => toChart(pa, q));
+          const B = sampleOn(cs2.b[0].pts, ...cs2.ranges.b, 8).map((q) => toChart(pb, q));
+          let fw = 0;
+          let bw = 0;
+          for (let k = 0; k <= 8; k++) {
+            fw += Math.hypot(A[k][0] - B[k][0], A[k][1] - B[k][1]);
+            bw += Math.hypot(A[k][0] - B[8 - k][0], A[k][1] - B[8 - k][1]);
+          }
+          t += Math.min(fw, bw) / 9;
+          n++;
+        }
+      return n ? t / n : 0;
+    };
+    const flips = comps.map(() => false);
+    const csWith = () => [...cs, ...comps.flatMap((c, k) => (flips[k] ? c.flip : c.parts))];
     const byArea = [...list].sort(
       (x, y) => Math.abs(y.geom.areaMm2) - Math.abs(x.geom.areaMm2) || x.key.localeCompare(y.key),
     );
@@ -353,6 +743,47 @@ export function solveDoll(input: DollInput): DollReport {
       ).key;
     } else if (gid === 'LEG_L' || gid === 'LEG_R') {
       root = (byArea.find((P) => P.role === 'front') ?? byArea[0]).key;
+    }
+    if (comps.length) {
+      const sel = () => comps.map((c, k) => (flips[k] ? c.flip : c.parts));
+      let best = compMiss(
+        buildChart(
+          list.map((P) => P.geom),
+          csWith(),
+          root,
+        ),
+        sel(),
+      );
+      comps.forEach((c, k) => {
+        if (c.fixed !== null) flips[k] = c.fixed;
+      });
+      best = compMiss(
+        buildChart(
+          list.map((P) => P.geom),
+          csWith(),
+          root,
+        ),
+        sel(),
+      );
+      for (let k = 0; k < comps.length; k++) {
+        if (comps[k].fixed !== null) continue;
+        flips[k] = true;
+        const m = compMiss(
+          buildChart(
+            list.map((P) => P.geom),
+            csWith(),
+            root,
+          ),
+          sel(),
+        );
+        if (m < best - 1) best = m;
+        else flips[k] = false;
+      }
+      if (opt.debug)
+        warnings.push(
+          `debug: chart ${gid}: composites laid ${comps.map((c, k) => `${c.parts[0].id.split('@')[0]} ${flips[k] ? 'against' : 'along'}${c.fixed === null ? ' (chart fit)' : ' (by height)'}`).join(' · ')} (miss ${best.toFixed(0)} mm)`,
+        );
+      cs.splice(0, cs.length, ...csWith());
     }
     let chart = buildChart(
       list.map((P) => P.geom),
@@ -442,6 +873,9 @@ export function solveDoll(input: DollInput): DollReport {
         );
       }
     }
+    if (l4)
+      for (const id of [...chart.used])
+        if (id.includes('@')) chart.used.add(id.slice(0, id.lastIndexOf('@')));
     charts.set(gid, chart);
     for (const P of list) {
       const pl = chart.place.get(P.key)!;
@@ -561,15 +995,20 @@ export function solveDoll(input: DollInput): DollReport {
       partial?: boolean;
       gap?: number;
       forceSame?: boolean;
+      /** L4: the sewn stretch of each side, shares of its path (a stored partial). */
+      ranges?: { aR: [number, number]; bR: [number, number] };
     },
     passNow: number,
     ramp: number,
   ) => {
     const options: { same: boolean; aR: [number, number]; bR: [number, number] }[] = [];
+    if (w.ranges)
+      for (const same of w.forceSame === undefined ? [false, true] : [w.forceSame])
+        options.push({ same, aR: w.ranges.aR, bR: w.ranges.bR });
     const ratio = Math.min(w.A.len, w.B.len) / Math.max(w.A.len, w.B.len, 1e-9);
     const sames = w.forceSame === undefined ? [false, true] : [w.forceSame];
     // (graph seams pass forceSame: face-up pieces are sewn with their edges running opposite ways)
-    for (const same of sames) {
+    for (const same of w.ranges ? [] : sames) {
       if (w.partial && ratio < 0.97) {
         const aShort = w.A.len < w.B.len;
         for (const anchor of [0, 1]) {
@@ -597,6 +1036,18 @@ export function solveDoll(input: DollInput): DollReport {
       ramp,
     };
     works.push(item);
+    // L4: the doll never proposes a pair a person rejected (kept out of the solve and the report).
+    if (
+      l4 &&
+      item.origin === 'doll-proposed' &&
+      item.kind !== 'facing-free' &&
+      isExcluded(item.a, item.b)
+    ) {
+      item.rejectedByPerson = true;
+      item.released = true;
+      item.solver.active = false;
+      warnings.push(`${item.id}: not proposed — a person rejected this pair`);
+    }
     return item;
   };
 
@@ -1240,6 +1691,7 @@ export function solveDoll(input: DollInput): DollReport {
 
   let state: SolverState | null = null;
   const contacts: NonNullable<SolverState['contacts']> = [];
+  const ties: Tie[] = [];
   const anchor = new Float64Array(3 * N);
   const anchorK = new Float32Array(N);
   const moving = new Uint8Array(N);
@@ -1264,6 +1716,7 @@ export function solveDoll(input: DollInput): DollReport {
       anchor,
       anchorK,
       contacts,
+      ...(ties.length ? { ties } : {}),
     };
     return state;
   };
@@ -1328,7 +1781,8 @@ export function solveDoll(input: DollInput): DollReport {
       let ws = 0;
       let worstSp = 0;
       for (const w of works) {
-        if (w.released || w.origin !== 'graph' || w.closure || !w.solver.active) continue;
+        if (w.released || w.origin !== 'graph' || w.closure || !w.solver.active || w.confirmed)
+          continue;
         if (!w.A.v.every((v) => moving[v]) && !w.B.v.every((v) => moving[v])) continue;
         const m = measure(w);
         // Strain beyond the seam's own ease (paper cannot gather a sleeve cap or a pleat).
@@ -1359,12 +1813,26 @@ export function solveDoll(input: DollInput): DollReport {
   const edgeUsed = (id: EdgeId) =>
     works.some((w) => !w.released && (w.a.includes(id) || w.b.includes(id)));
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
-    const A = pathOf(s.a);
-    const B = pathOf(s.b);
+    const conf = isConf(s.seam);
+    const A = conf ? sidePath(s, 'a') : pathOf(s.a);
+    const B = conf ? sidePath(s, 'b') : pathOf(s.b);
     if (!A || !B) return null;
     const lenA = A.len;
     const lenB = B.len;
-    return addWork(
+    // A stored partial carries its sewn stretch (mm along each run): no guessing the aligned end.
+    const rg = conf && s.seam.range && s.a.length === 1 && s.b.length === 1 ? s.seam.range : null;
+    const ranges = rg
+      ? {
+          aR: [rg.a[0] / Math.max(1e-9, lenA), rg.a[1] / Math.max(1e-9, lenA)].map((x) =>
+            Math.max(0, Math.min(1, x)),
+          ) as [number, number],
+          bR: [rg.b[0] / Math.max(1e-9, lenB), rg.b[1] / Math.max(1e-9, lenB)].map((x) =>
+            Math.max(0, Math.min(1, x)),
+          ) as [number, number],
+        }
+      : undefined;
+    const multi = conf && (s.a.length > 1 || s.b.length > 1);
+    const w0 = addWork(
       {
         id: `${s.seam.a}~${s.seam.b}`,
         a: s.a,
@@ -1380,11 +1848,17 @@ export function solveDoll(input: DollInput): DollReport {
           : orderNote.get(`${s.seam.a}~${s.seam.b}`) ?? '',
         fromOrder: orderNote.has(`${s.seam.a}~${s.seam.b}`),
         closure,
-        partial: s.seam.kind === 'partial' || Math.min(lenA, lenB) / Math.max(lenA, lenB) < 0.9,
+        // A confirmed seam is sewn as stored (whole, or its stored stretch) — never re-guessed.
+        partial: conf
+          ? false
+          : s.seam.kind === 'partial' || Math.min(lenA, lenB) / Math.max(lenA, lenB) < 0.9,
         gap: closure ? 4 : 0,
-        forceSame:
-          (panelByKey.get(pk(s.a[0]))?.mirrored ?? false) !==
-          (panelByKey.get(pk(s.b[0]))?.mirrored ?? false),
+        // A composite side spans pieces laid either way round: its direction by the smaller gap.
+        forceSame: multi
+          ? undefined
+          : (panelByKey.get(pk(s.a[0]))?.mirrored ?? false) !==
+            (panelByKey.get(pk(s.b[0]))?.mirrored ?? false),
+        ...(ranges ? { ranges } : {}),
       },
       born,
       closure
@@ -1393,13 +1867,259 @@ export function solveDoll(input: DollInput): DollReport {
           ? 40
           : 380,
     );
+    if (conf) w0.confirmed = true;
+    if (conf && multi && opt.debug)
+      for (const [side, P] of [
+        ['A', A],
+        ['B', B],
+      ] as const) {
+        const jumps: string[] = [];
+        for (let k = 1; k < P.v.length; k++)
+          if (panelOf[P.v[k]] !== panelOf[P.v[k - 1]]) {
+            const a = P.v[k - 1];
+            const b = P.v[k];
+            jumps.push(
+              `${panels[panelOf[a]].key}→${panels[panelOf[b]].key} ${Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]).toFixed(0)} mm`,
+            );
+          }
+        warnings.push(
+          `debug: ${w0.id} side ${side} ${P.len.toFixed(0)} mm, part joins at placement: ${jumps.join(' · ') || '—'}`,
+        );
+      }
+    if (conf && multi && opt.debug) {
+      const md = (same: boolean) => meanDist(A, B, same, [0, 1], [0, 1]).toFixed(0);
+      // where the A-side part joins land on B (arc mm), under the chosen direction
+      const lands: string[] = [];
+      for (let k = 1; k < A.v.length; k++)
+        if (panelOf[A.v[k]] !== panelOf[A.v[k - 1]]) {
+          const t = A.s[k] / A.len;
+          lands.push(
+            `${panels[panelOf[A.v[k - 1]]].key}|${panels[panelOf[A.v[k]]].key} at ${(t * A.len).toFixed(0)} → B ${((w0.same ? t : 1 - t) * B.len).toFixed(0)}`,
+          );
+        }
+      const low = (P: Path) => {
+        let b = 0;
+        for (let k = 0; k < P.v.length; k++) if (pos[3 * P.v[k] + 1] < pos[3 * P.v[b] + 1]) b = k;
+        return P.s[b];
+      };
+      const la = low(A) / A.len;
+      lands.push(
+        `lowest A ${low(A).toFixed(0)} → B ${((w0.same ? la : 1 - la) * B.len).toFixed(0)} vs lowest B ${low(B).toFixed(0)}`,
+      );
+      warnings.push(
+        `debug: ${w0.id} same=${w0.same} meanDist same ${md(true)} / opp ${md(false)} mm · ${lands.join(' · ')}`,
+      );
+    }
+    return w0;
   };
+  // ── L4 front closure: the two centre-front lines on top of each other (buttoned) ──────────
+  const DEFAULT_CF_MM = 15;
+  const segDist = (p: [number, number], a: [number, number], b: [number, number]) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+  };
+  const edgePts = (ids: EdgeId[]) =>
+    ids.flatMap((id) => edgeIdsOf(id)).flatMap((id) => edgeById.get(id)?.pts ?? []);
+  const distToEdge = (q: [number, number], pts: [number, number][]) => {
+    let d = Infinity;
+    for (let i = 1; i < pts.length; i++) d = Math.min(d, segDist(q, pts[i - 1], pts[i]));
+    return d;
+  };
+  /** The button line of a closure side: the nearest column of drill / buttonhole marks, mm in. */
+  const buttonLine = (P: Panel, ids: EdgeId[]): number | null => {
+    const pts = edgePts(ids);
+    if (pts.length < 2) return null;
+    const ds: number[] = [];
+    for (const m of P.geom.marks ?? []) {
+      if (m.kind !== 'drill' && m.kind !== 'buttonhole') continue;
+      const d = distToEdge([m.bbox.cx, m.bbox.cy], pts);
+      if (d <= 90 && d >= 3) ds.push(d);
+    }
+    if (!ds.length) return null;
+    ds.sort((x, y) => x - y);
+    const col = ds.filter((d) => d <= ds[0] + 6);
+    return col[Math.floor(col.length / 2)];
+  };
+  /** Barycentric location of a pattern point in a panel's mesh (nearest triangle when outside). */
+  const locate = (P: Panel, q: [number, number]) => {
+    const T = P.mesh.tris;
+    const X = P.mesh.pts;
+    let best: { i: number[]; w: number[] } | null = null;
+    let bd = Infinity;
+    for (let t = 0; t < T.length; t += 3) {
+      const a = X[T[t]];
+      const b = X[T[t + 1]];
+      const c = X[T[t + 2]];
+      const den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+      if (Math.abs(den) < 1e-9) continue;
+      const l1 = ((b[1] - c[1]) * (q[0] - c[0]) + (c[0] - b[0]) * (q[1] - c[1])) / den;
+      const l2 = ((c[1] - a[1]) * (q[0] - c[0]) + (a[0] - c[0]) * (q[1] - c[1])) / den;
+      const l3 = 1 - l1 - l2;
+      const out = Math.max(0, -l1, -l2, -l3);
+      if (out < bd) {
+        bd = out;
+        const cl = [Math.max(0, l1), Math.max(0, l2), Math.max(0, l3)];
+        const sum = cl[0] + cl[1] + cl[2] || 1;
+        best = {
+          i: [P.offset + T[t], P.offset + T[t + 1], P.offset + T[t + 2]],
+          w: cl.map((x) => x / sum),
+        };
+        if (out === 0) break;
+      }
+    }
+    return best;
+  };
+  /** Point and inward normal (pattern) at arc s of a one-panel path. */
+  const atArc = (A: Path, s0: number) => {
+    const sArc = Math.max(0, Math.min(A.len, s0));
+    let k = 1;
+    while (k < A.v.length - 1 && A.s[k] < sArc) k++;
+    const a = A.v[k - 1];
+    const b = A.v[k];
+    const t = A.s[k] > A.s[k - 1] ? (sArc - A.s[k - 1]) / (A.s[k] - A.s[k - 1]) : 0;
+    const x = uv[2 * a] + (uv[2 * b] - uv[2 * a]) * t;
+    const y = uv[2 * a + 1] + (uv[2 * b + 1] - uv[2 * a + 1]) * t;
+    let dx = uv[2 * b] - uv[2 * a];
+    let dy = uv[2 * b + 1] - uv[2 * a + 1];
+    const dl = Math.hypot(dx, dy) || 1;
+    dx /= dl;
+    dy /= dl;
+    // The contour runs CCW: the inside is on the left of the walk.
+    return { p: [x, y] as [number, number], n: [-dy, dx] as [number, number] };
+  };
+  const overlapClosure = (s: GroupedSeam, w: Work) => {
+    const PA = panelByKey.get(pk(s.a[0]));
+    const PB = panelByKey.get(pk(s.b[0]));
+    if (!PA || !PB || PA === PB || w.A.v.length < 2 || w.B.v.length < 2) return;
+    if (new Set(s.a.map(pk)).size > 1 || new Set(s.b.map(pk)).size > 1) return;
+    const meanX = (P: Panel) => {
+      let t = 0;
+      for (let i = 0; i < P.count; i++) t += pos[3 * (P.offset + i)];
+      return t / Math.max(1, P.count);
+    };
+    // Men: the wearer's left front (the doll's left, +x) on top; women: the right.
+    const women = opt.gender === 'FEMALE';
+    const aTop = women ? meanX(PA) < meanX(PB) : meanX(PA) > meanX(PB);
+    const [Pt, Pu, At, Au, idsT, idsU] = aTop
+      ? [PA, PB, w.A, w.B, s.a, s.b]
+      : [PB, PA, w.B, w.A, s.b, s.a];
+    const mT = buttonLine(Pt, idsT);
+    const mU = buttonLine(Pu, idsU);
+    const offT = mT ?? mU ?? DEFAULT_CF_MM;
+    const offU = mU ?? mT ?? DEFAULT_CF_MM;
+    const how =
+      mT !== null && mU !== null
+        ? 'both sides by their button / buttonhole marks'
+        : mT !== null || mU !== null
+          ? `by the marks of ${mT !== null ? Pt.key : Pu.key} (the other side has none)`
+          : `no marks — ${DEFAULT_CF_MM} mm assumed each side`;
+    // Ends meet ends: the pairing whose ends lie nearer now.
+    const d3 = (a: number, b: number) =>
+      Math.hypot(
+        pos[3 * a] - pos[3 * b],
+        pos[3 * a + 1] - pos[3 * b + 1],
+        pos[3 * a + 2] - pos[3 * b + 2],
+      );
+    const t0 = At.v[0];
+    const t1 = At.v[At.v.length - 1];
+    const u0 = Au.v[0];
+    const u1 = Au.v[Au.v.length - 1];
+    const same = d3(t0, u0) + d3(t1, u1) <= d3(t0, u1) + d3(t1, u0);
+    const N = 24;
+    const ia: number[] = [];
+    const wa: number[] = [];
+    const ib: number[] = [];
+    const wb: number[] = [];
+    for (let k = 0; k < N; k++) {
+      const f = 0.03 + (0.94 * k) / (N - 1);
+      const qt = atArc(At, f * At.len);
+      const qu = atArc(Au, (same ? f : 1 - f) * Au.len);
+      const lt = locate(Pt, [qt.p[0] + qt.n[0] * offT, qt.p[1] + qt.n[1] * offT]);
+      const lu = locate(Pu, [qu.p[0] + qu.n[0] * offU, qu.p[1] + qu.n[1] * offU]);
+      if (!lt || !lu) continue;
+      ia.push(...lt.i);
+      wa.push(...lt.w);
+      ib.push(...lu.i);
+      wb.push(...lu.w);
+    }
+    if (!ia.length) return;
+    ties.push({
+      ia: Int32Array.from(ia),
+      wa: Float64Array.from(wa),
+      ib: Int32Array.from(ib),
+      wb: Float64Array.from(wb),
+      k: 0.5,
+      lift: 2.5,
+      ax: 0,
+      az: 0,
+      active: true,
+    });
+    // The top's extension lies over the under piece: one-sided contacts, pattern-paired.
+    const zone = offT + offU + 6;
+    const ptsT = edgePts(idsT);
+    const ptsU = edgePts(idsU);
+    const ci: number[] = [];
+    const cj: number[] = [];
+    for (let i = 0; i < Pt.count; i++) {
+      const v = Pt.offset + i;
+      const q: [number, number] = [uv[2 * v], uv[2 * v + 1]];
+      const d = distToEdge(q, ptsT);
+      if (d > zone) continue;
+      // Where along the edge, and the under point at the mirrored depth.
+      let bestS = 0;
+      let bd = Infinity;
+      for (let k = 0; k < At.v.length; k++) {
+        const a = At.v[k];
+        const dd = Math.hypot(uv[2 * a] - q[0], uv[2 * a + 1] - q[1]);
+        if (dd < bd) [bd, bestS] = [dd, At.s[k]];
+      }
+      const f = bestS / Math.max(1, At.len);
+      const qu = atArc(Au, (same ? f : 1 - f) * Au.len);
+      const depth = Math.max(0, offT + offU - d);
+      const target: [number, number] = [qu.p[0] + qu.n[0] * depth, qu.p[1] + qu.n[1] * depth];
+      let j = -1;
+      let bj = Infinity;
+      for (let m = 0; m < Pu.count; m++) {
+        const u = Pu.offset + m;
+        const dd = Math.hypot(uv[2 * u] - target[0], uv[2 * u + 1] - target[1]);
+        if (dd < bj) [bj, j] = [dd, u];
+      }
+      if (j >= 0 && bj < 2 * h && distToEdge([uv[2 * j], uv[2 * j + 1]], ptsU) <= zone) {
+        ci.push(v);
+        cj.push(j);
+      }
+    }
+    if (ci.length)
+      contacts.push({ i: Int32Array.from(ci), j: Int32Array.from(cj), gap: 2, ax: 0, az: 0 });
+    w.virtual = true;
+    w.solver.active = false;
+    w.overlap = {
+      id: w.id,
+      top: Pt.key,
+      under: Pu.key,
+      offTopMm: offT,
+      offUnderMm: offU,
+      how: `${women ? 'right over left (women)' : 'left over right (men' + (opt.gender ? ')' : ', the default)')} · centre-front lines ${offT.toFixed(0)} / ${offU.toFixed(0)} mm in — ${how}`,
+      cfGapP95Mm: NaN,
+      overlapMm: NaN,
+      outsidePct: NaN,
+      ok: false,
+    };
+    (w as Work & { contactIdx?: number; tieIdx?: number }).tieIdx = ties.length - 1;
+    (w as Work & { contactIdx?: number }).contactIdx = ci.length ? contacts.length - 1 : -1;
+  };
+
   for (const P of panels) if (bodyLike.has(P.group)) buildPanel(P);
   const crossing: { s: GroupedSeam; xa: number; xb: number }[] = [];
   for (const s of G.seams) {
     if (!inGroups(s.a, bodyLike) || !inGroups(s.b, bodyLike)) continue;
     const w = graphWork(s, 0);
     if (!w || !groups.has('BODY')) continue;
+    // A confirmed seam is sewn as a person said, however it lies now (an open end = contradiction).
+    if (w.confirmed) continue;
     // A seam that crosses the doll from its left to its right (the back's left shoulder onto the
     // right front) cannot close without tearing paper: released, and the mirror reading proposed.
     const cx = (P: Path) => [...P.v].reduce((t, v) => t + pos[3 * v], 0) / P.v.length;
@@ -1462,7 +2182,10 @@ export function solveDoll(input: DollInput): DollReport {
     }
   }
   for (const s of G.closures)
-    if (inGroups(s.a, bodyLike) && inGroups(s.b, bodyLike)) graphWork(s, 0, true);
+    if (inGroups(s.a, bodyLike) && inGroups(s.b, bodyLike)) {
+      const w = graphWork(s, 0, true);
+      if (w && l4) overlapClosure(s, w);
+    }
 
   const freeEdges = (P: Panel) => P.geom.edges.filter((e) => !edgeUsed(e.id));
   // Proposed closures of open strips (CF of the body, underarm of a one-piece sleeve, outseam of a leg).
@@ -1844,6 +2567,8 @@ export function solveDoll(input: DollInput): DollReport {
     attach: 'bottom' | 'top',
     th0: number,
     layer: number,
+    /** L4: the strip is laid turned 180° (its attach run is the chart's top; the rest goes up). */
+    flip = false,
   ) => {
     const list = groups.get(gid);
     const ch = charts.get(gid);
@@ -1917,8 +2642,8 @@ export function solveDoll(input: DollInput): DollReport {
         const v = P.offset + i;
         const u = cuv[2 * v];
         const vv = cuv[2 * v + 1];
-        const th = thAt(s0 + (u - uC));
-        const above = attach === 'bottom' ? vv - runV(u) : vv - runV(u);
+        const th = thAt(s0 + (flip ? uC - u : u - uC));
+        const above = flip ? runV(u) - vv : attach === 'bottom' ? vv - runV(u) : vv - runV(u);
         const hh = (B ? B.h(th) : 0) + above;
         setPos(v, fromFrame(F, th, hh, rad(th)));
         proxyOf[v] = pi;
@@ -2176,6 +2901,17 @@ export function solveDoll(input: DollInput): DollReport {
       passes,
     );
     if (sewnNear(gid, 'BODY') || opt.proposeComposite === false) continue;
+    // L4: a sleeve a person sewed to the body by a confirmed seam is not proposed again.
+    if (
+      l4 &&
+      G.seams.some(
+        (sm) =>
+          isConf(sm.seam) &&
+          ((inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set(['BODY']))) ||
+            (inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY'])))),
+      )
+    )
+      continue;
     const loops = loopsOf(new Set([gid]));
     const F = sleeveFrames[s]!;
     const capTop = fromFrame(F, 0, 0, 0);
@@ -2247,7 +2983,48 @@ export function solveDoll(input: DollInput): DollReport {
     : 0;
   let neck: NeckPath | null = null;
   const neckGroups = (['STAND', 'COLLAR'] as DollGroupId[]).filter((g) => groups.has(g));
-  if (neckGroups.length && groups.has('BODY') && opt.proposeComposite !== false) {
+  // L4: a CONFIRMED seam between a collar unit and the body says where the neckline is: its body
+  // side IS the neck path (no walk along free loops).
+  const handled = new Set<GroupedSeam>();
+  let confNeck: { g: GroupedSeam; unit: 'a' | 'b'; N0: NeckPath; N1: NeckPath } | null = null;
+  if (l4 && neckGroups.length && groups.has('BODY')) {
+    const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
+    for (const g of G.seams) {
+      if (!isConf(g.seam)) continue;
+      const ga = grp(g.a);
+      const gb = grp(g.b);
+      const ringA = [...ga].every((x) => x === 'STAND' || x === 'COLLAR');
+      const ringB = [...gb].every((x) => x === 'STAND' || x === 'COLLAR');
+      const unit =
+        ringA && gb.size === 1 && gb.has('BODY')
+          ? 'a'
+          : ringB && ga.size === 1 && ga.has('BODY')
+            ? 'b'
+            : null;
+      if (!unit) continue;
+      // The stand sits on the neckline; a fall on a stand is K3's.
+      const bp = sidePath(g, unit === 'a' ? 'b' : 'a');
+      if (!bp || bp.v.length < 4) continue;
+      const how = `the body side of the confirmed seam ${g.seam.a} ↔ ${g.seam.b}`;
+      const N0 = neckFromRun(cctx, [...bp.v], vArm, false, how);
+      const N1 = neckFromRun(cctx, [...bp.v], vArm, true, how);
+      confNeck = { g, unit, N0, N1 };
+      break;
+    }
+    if (confNeck) {
+      neck = confNeck.N0;
+      collarRep.neck = {
+        lenMm: neck.path.len,
+        closed: false,
+        chestMm,
+        ratio: chestMm > 0 ? neck.path.len / chestMm : NaN,
+        extMm: [0, 0],
+        ok: true,
+        how: `${neck.how} (confirmed by a person)`,
+      };
+    }
+  }
+  if (!confNeck && neckGroups.length && groups.has('BODY') && opt.proposeComposite !== false) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
@@ -2641,21 +3418,179 @@ export function solveDoll(input: DollInput): DollReport {
     }) - 1;
   let standTop: number[] | null = null;
   let standList: Panel[] | null = null;
+  /** Edge of the panel's geometry a boundary segment (two ring vertices) lies on. */
+  const edgeOfSeg = (a: number, b: number): Edge | null => {
+    if (panelOf[a] !== panelOf[b] || ringOf[a] < 0 || ringOf[b] < 0) return null;
+    const P = panels[panelOf[a]];
+    const n = P.geom.rs.length;
+    const ia = P.mesh.bRs[ringOf[a]];
+    const ib = P.mesh.bRs[ringOf[b]];
+    const inE = (e: Edge, i: number) => (((i - e.s) % n) + n) % n <= (((e.e - e.s) % n) + n) % n;
+    return P.geom.edges.find((e) => inE(e, ia) && inE(e, ib)) ?? null;
+  };
+  /**
+   * L4 (04-COLLAR K2 + intake): tucks and pleats ON the neck path folded closed before the unit is
+   * mapped — notch pairs 15–80 mm apart on one piece, and runs of short edges (< 35 mm, two or more:
+   * a stepped tuck drawn in the outline). Which folds, whether the path is cut at its CF notches and
+   * which notch pair of the unit is sewn: the reading whose length ratio is nearest 1 within
+   * 0.90–1.15. None → the mismatch is reported, never crammed.
+   */
+  const foldedPlan = (U: Unit, cn: NonNullable<typeof confNeck>) => {
+    const m = runMarks(cctx, U.attach);
+    const foldsOf = (N: NeckPath) => {
+      const P = N.path;
+      const notchK: number[] = [];
+      for (let k = 0; k < P.v.length; k++)
+        if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
+          notchK.push(k);
+      const pairs: [number, number][] = [];
+      for (let i = 0; i + 1 < notchK.length; i++) {
+        const a = notchK[i];
+        const b = notchK[i + 1];
+        const d = P.s[b] - P.s[a];
+        if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
+          pairs.push([P.s[a], P.s[b]]);
+          i++;
+        }
+      }
+      const stairs: [number, number][] = [];
+      let run: { s0: number; s1: number; edges: Set<string> } | null = null;
+      const flush = () => {
+        if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) stairs.push([run.s0, run.s1]);
+        run = null;
+      };
+      for (let k = 1; k < P.v.length; k++) {
+        const e = edgeOfSeg(P.v[k - 1], P.v[k]);
+        if (e && e.lenMm < 35) {
+          if (!run) run = { s0: P.s[k - 1], s1: P.s[k], edges: new Set([e.id]) };
+          else {
+            run.s1 = P.s[k];
+            run.edges.add(e.id);
+          }
+        } else flush();
+      }
+      flush();
+      return { pairs, stairs };
+    };
+    type Opt = {
+      N: NeckPath;
+      folds: [number, number][];
+      lo: number;
+      hi: number;
+      Le: number;
+      score: number;
+      cut: boolean;
+    };
+    let best: Opt | null = null;
+    const tried: string[] = [];
+    for (const [N, cut] of [
+      [cn.N0, false],
+      [cn.N1, true],
+    ] as const) {
+      const f = foldsOf(N);
+      const sets: [number, number][][] = [[], f.pairs, f.stairs, [...f.pairs, ...f.stairs]];
+      sets.forEach((F, si) => {
+        if (si > 0 && !F.length) return;
+        if (si === 3 && (!f.pairs.length || !f.stairs.length)) return;
+        const Fs = [...F].sort((x, y) => x[0] - y[0]);
+        const Le = N.path.len - Fs.reduce((t, x) => t + x[1] - x[0], 0);
+        const spans: [number, number][] = [[0, m.path.len]];
+        for (const a of m.notches)
+          for (const b of m.notches)
+            if (
+              a < m.cb - 5 &&
+              b > m.cb + 5 &&
+              Math.abs((a + b) / 2 - m.cb) <= Math.max(4, 0.015 * m.path.len)
+            )
+              spans.push([a, b]);
+        for (const [lo, hi] of spans) {
+          const r = (hi - lo) / Math.max(1, Le);
+          const score = Math.abs(Math.log(r)) + (cut ? 0.01 : 0) + 0.003 * si;
+          if (r < 0.9 || r > 1.15) continue;
+          if (!best || score < best.score) best = { N, folds: Fs, lo, hi, Le, score, cut };
+        }
+        tried.push(
+          `${cut ? 'cut at CF notches' : 'whole'} ${N.path.len.toFixed(0)} − ${(N.path.len - Le).toFixed(0)} folded = ${Le.toFixed(0)}`,
+        );
+      });
+    }
+    if (!best) return { m, tried, ok: false as const };
+    const B = best as Opt;
+    const eff = (sv: number) => {
+      let out = sv;
+      for (const [f0, f1] of B.folds) {
+        if (sv >= f1) out -= f1 - f0;
+        else if (sv > f0) out -= sv - f0;
+      }
+      return out;
+    };
+    const real = (e: number) => {
+      let sv = e;
+      for (const [f0, f1] of B.folds) if (sv >= f0) sv += f1 - f0;
+      return sv;
+    };
+    // The unit's [lo, hi] onto the folded path [0, Le], its CB onto the path's CB.
+    const effA: [number, number][] = [[B.lo, 0]];
+    const cbE = eff(B.N.cb);
+    if (m.cb > B.lo + 5 && m.cb < B.hi - 5 && cbE > 5 && cbE < B.Le - 5) effA.push([m.cb, cbE]);
+    effA.push([B.hi, B.Le]);
+    const xOfE = makeMap(effA.map(([x, e]) => [e, x] as [number, number]));
+    let an: [number, number][] = effA.map(([x, e]) => [x, real(e)]);
+    for (const [f0, f1] of B.folds) {
+      const xf = xOfE(eff(f0));
+      an = an.filter(([x]) => Math.abs(x - xf) > 1);
+      an.push([xf - 0.3, f0], [xf + 0.3, f1]);
+    }
+    an.sort((x, y) => x[0] - y[0]);
+    const anchors: [number, number][] = [];
+    for (const a of an)
+      if (
+        !anchors.length ||
+        (a[0] > anchors[anchors.length - 1][0] + 0.1 && a[1] > anchors[anchors.length - 1][1] + 0.1)
+      )
+        anchors.push(a);
+    const words = `${B.cut ? 'cut at its CF notches' : 'whole'} (${B.N.path.len.toFixed(0)} mm)${B.folds.length ? ` · ${B.folds.length} tuck${B.folds.length > 1 ? 's' : ''} / pleat${B.folds.length > 1 ? 's' : ''} folded closed (${B.folds.map((f) => (f[1] - f[0]).toFixed(0)).join(' + ')} mm) → ${B.Le.toFixed(0)} mm` : ''} · the unit sewn ${B.lo.toFixed(0)}–${B.hi.toFixed(0)} of its ${m.path.len.toFixed(0)} mm (${B.lo > 1 || B.hi < m.path.len - 1 ? 'between its CF notches' : 'whole'}) · CB ${m.cbByNotch ? 'notch' : 'middle'} ↔ CB`;
+    return {
+      ok: true as const,
+      m,
+      N: B.N,
+      anchors,
+      sewn: [B.lo, B.hi] as [number, number],
+      Le: B.Le,
+      folds: B.folds.map((f) => Math.round(f[1] - f[0])),
+      words,
+      tried,
+    };
+  };
   const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
     if (!neck) return;
-    const N = neck;
-    const base = baseCurve(cctx, N.path);
+    const N0n = neck;
     const ordered = [...units].sort((x, y) => y.area - x.area);
     ordered.forEach((U, idx) => {
       const layer = 3 * (ordered.length - 1 - idx);
-      const plan = neckAnchors(U, N);
+      // L4: the unit the confirmed neck seam names is mapped by the folded plan on ITS base.
+      const cn =
+        confNeck && U.keys.has(pk((confNeck.unit === 'a' ? confNeck.g.a : confNeck.g.b)[0]))
+          ? confNeck
+          : null;
+      const fp = cn ? foldedPlan(U, cn) : null;
+      const N = fp && fp.ok ? fp.N : N0n;
+      const base = baseCurve(cctx, N.path);
+      const plan =
+        fp && fp.ok
+          ? { m: fp.m, anchors: fp.anchors, sewn: fp.sewn, words: fp.words }
+          : neckAnchors(U, N);
       const pi = ringProxyAt(layer);
       const sewnMm = plan.sewn[1] - plan.sewn[0];
       const ext = plan.m.path.len - sewnMm;
       // A base far off the unit's length (a neck path that is not a neckline): placed at its own
       // length centred on the CB, not sewn — never crammed.
-      const off = sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
-      if (off)
+      const off = fp ? !fp.ok : sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
+      if (fp && !fp.ok) {
+        const wds = `${cn!.g.seam.a}~${cn!.g.seam.b}: confirmed by a person, but the unit (${fp.m.path.len.toFixed(0)} mm) does not fit its neck path with any reading of the tucks / CF notches (${fp.tried.join('; ')}) — the intake is not identified: placed at its own length, not crammed`;
+        preContradictions.push(wds);
+        warnings.push(`contradiction: ${wds}`);
+      } else if (off)
         warnings.push(
           `${label}: not proposed — ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %); placed at its own length, centred at the CB`,
         );
@@ -2713,8 +3648,25 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const graphSewn = graphTouches(U.gid, new Set(['BODY']));
       const id = idx === 0 ? label : `${label} (layer ${idx + 1})`;
-      const work =
-        graphSewn || off
+      let confWork: Work | null = null;
+      if (cn) {
+        handled.add(cn.g);
+        if (fp && fp.ok) {
+          confWork = anchoredWork(
+            `${cn.g.seam.a}~${cn.g.seam.b}`,
+            plan.m.path,
+            N.path,
+            plan.anchors,
+            `${label} · ${sewnMm.toFixed(0)} mm of the unit onto the neck path ${fp.Le.toFixed(0)} mm (ease ${(sewnMm / fp.Le).toFixed(3)}) · ${plan.words}`,
+            0.8,
+          );
+          confWork.origin = 'graph';
+          confWork.confirmed = true;
+        }
+      }
+      const work = cn
+        ? confWork
+        : graphSewn || off
           ? null
           : anchoredWork(
               id,
@@ -2730,10 +3682,19 @@ export function solveDoll(input: DollInput): DollReport {
           role,
           base: 'neck path',
           seam: work?.id ?? null,
-          attached: work ? 'proposed' : graphSewn ? 'graph' : 'not sewn',
+          attached: cn
+            ? work
+              ? 'confirmed'
+              : 'not sewn'
+            : work
+              ? 'proposed'
+              : graphSewn
+                ? 'graph'
+                : 'not sewn',
           sewnMm,
-          baseMm: N.path.len,
-          ease: sewnMm / N.path.len,
+          baseMm: fp && fp.ok ? fp.Le : N.path.len,
+          ease: sewnMm / (fp && fp.ok ? fp.Le : N.path.len),
+          ...(fp && fp.ok ? { folds: fp.folds } : {}),
           extMm: ext,
           anchors: plan.words,
           layer,
@@ -2886,27 +3847,55 @@ export function solveDoll(input: DollInput): DollReport {
         const sewnMm = plan.mf.path.len;
         const baseMm = plan.range[1] - plan.range[0];
         const label = idx === 0 ? 'collar ↔ stand top' : `collar ↔ stand top (layer ${idx + 1})`;
-        const work = graphSewn
-          ? null
-          : anchoredWork(
-              label,
-              plan.mf.path,
-              plan.mt.path,
-              plan.anchors,
-              `proposed by the doll · collar ↔ stand top · ${sewnMm.toFixed(0)} ≈ ${baseMm.toFixed(0)} mm of the stand top (${Math.abs(1 - sewnMm / Math.max(1, baseMm)) < 0.015 ? 'equal' : `eased ${(Math.abs(1 - sewnMm / Math.max(1, baseMm)) * 100).toFixed(0)} %`}) · turned down over the stand · ${plan.words} · not in the pattern`,
-              0.7,
-            );
+        // L4: a confirmed seam of this unit onto the stand — sewn by the K3 map, as the person's seam.
+        const confFall = l4
+          ? G.seams.find(
+              (sm) =>
+                isConf(sm.seam) &&
+                !handled.has(sm) &&
+                ((U.keys.has(pk(sm.a[0])) && stand.some((P) => P.key === pk(sm.b[0]))) ||
+                  (U.keys.has(pk(sm.b[0])) && stand.some((P) => P.key === pk(sm.a[0])))),
+            )
+          : undefined;
+        let confW: Work | null = null;
+        if (confFall) {
+          handled.add(confFall);
+          confW = anchoredWork(
+            `${confFall.seam.a}~${confFall.seam.b}`,
+            plan.mf.path,
+            plan.mt.path,
+            plan.anchors,
+            `collar ↔ stand top · ${plan.mf.path.len.toFixed(0)} ≈ ${(plan.range[1] - plan.range[0]).toFixed(0)} mm of the stand top · turned down over the stand · ${plan.words}`,
+            0.7,
+          );
+          confW.origin = 'graph';
+          confW.confirmed = true;
+        }
+        const work = confFall
+          ? confW
+          : graphSewn
+            ? null
+            : anchoredWork(
+                label,
+                plan.mf.path,
+                plan.mt.path,
+                plan.anchors,
+                `proposed by the doll · collar ↔ stand top · ${sewnMm.toFixed(0)} ≈ ${baseMm.toFixed(0)} mm of the stand top (${Math.abs(1 - sewnMm / Math.max(1, baseMm)) < 0.015 ? 'equal' : `eased ${(Math.abs(1 - sewnMm / Math.max(1, baseMm)) * 100).toFixed(0)} %`}) · turned down over the stand · ${plan.words} · not in the pattern`,
+                0.7,
+              );
         collarPlans.push({
           rep: {
             keys: U.list.map((P) => P.key),
             role: 'fall',
             base: 'stand top',
             seam: work?.id ?? null,
-            attached: work
-              ? 'proposed'
-              : graphTouches(U.gid, new Set(['STAND']))
-                ? 'graph'
-                : 'stacked',
+            attached: confFall
+              ? 'confirmed'
+              : work
+                ? 'proposed'
+                : graphTouches(U.gid, new Set(['STAND']))
+                  ? 'graph'
+                  : 'stacked',
             sewnMm,
             baseMm,
             ease: sewnMm / Math.max(1, baseMm),
@@ -2971,6 +3960,49 @@ export function solveDoll(input: DollInput): DollReport {
   // Waistband / hem band.
   for (const gid of ['WAISTBAND', 'HEMBAND'] as DollGroupId[]) {
     if (!groups.has(gid)) continue;
+    // L4: a band a confirmed seam sews onto the body / legs sits on THAT path (the body side of the
+    // seam), attached by the run the seam names.
+    if (l4) {
+      const band = new Set([gid]);
+      const conf = G.seams
+        .filter((sm) => isConf(sm.seam))
+        .map((sm) =>
+          inGroups(sm.a, band) && inGroups(sm.b, bodyLike)
+            ? { sm, bandSide: 'a' as const }
+            : inGroups(sm.b, band) && inGroups(sm.a, bodyLike)
+              ? { sm, bandSide: 'b' as const }
+              : null,
+        )
+        .filter((x): x is NonNullable<typeof x> => !!x);
+      const runs0 = conf.length ? stripRuns(groups.get(gid)!) : null;
+      if (conf.length && runs0) {
+        const baseV: number[] = [];
+        const bandV = new Set<number>();
+        for (const { sm, bandSide } of conf) {
+          const bp = sidePath(sm, bandSide === 'a' ? 'b' : 'a');
+          const up = sidePath(sm, bandSide);
+          if (bp) baseV.push(...bp.v);
+          if (up) for (const v of up.v) bandV.add(v);
+        }
+        const onTop =
+          runs0.top.filter((v) => bandV.has(v)).length >
+          runs0.bottom.filter((v) => bandV.has(v)).length;
+        const F: Frame = {
+          c: baseV.length ? centroid(baseV) : [0, 0, 0],
+          up: [0, 1, 0],
+          e0: [0, 0, 1],
+          e90: [1, 0, 0],
+        };
+        placeRing(gid, F, baseV, ringLen(gid) / TAU, onTop ? 'top' : 'bottom', Math.PI, 2, onTop);
+        for (const P of groups.get(gid)!) buildPanel(P);
+        for (const sm of G.seams)
+          if (inGroups(sm.a, band) && inGroups(sm.b, band)) graphWork(sm, passes);
+        warnings.push(
+          `${gid === 'WAISTBAND' ? 'waistband' : 'hem band'}: on the path its confirmed seam${conf.length > 1 ? 's' : ''} name${conf.length > 1 ? '' : 's'} (${conf.map((x) => `${x.sm.seam.a}~${x.sm.seam.b}`).join(', ')}), by its ${onTop ? 'top' : 'bottom'} run`,
+        );
+        continue;
+      }
+    }
     const host = loopsOf(bodyLike)
       .filter((l) => l.len > 200)
       .map((l) => ({ l, c: centroid(l.verts) }));
@@ -3002,13 +4034,14 @@ export function solveDoll(input: DollInput): DollReport {
   }
   // Graph seams between groups (whatever the graph found across them).
   for (const sm of G.seams) {
+    if (handled.has(sm)) continue;
     const ga = panelByKey.get(pk(sm.a[0]))?.group;
     const gb = panelByKey.get(pk(sm.b[0]))?.group;
     if (!ga || !gb || ga === gb || ga === 'FLOAT' || gb === 'FLOAT') continue;
     if (bodyLike.has(ga) && bodyLike.has(gb)) continue;
     const far = gapNow(sm);
     const w = graphWork(sm, passes);
-    if (w && far >= FAR) {
+    if (w && far >= FAR && !w.confirmed) {
       w.released = true;
       w.solver.active = false;
       w.note = `its two edges are ${far.toFixed(0)} mm apart once the pieces are placed (${ga} ↔ ${gb}) — a wrong pairing? not sewn`;
@@ -3145,7 +4178,64 @@ export function solveDoll(input: DollInput): DollReport {
     return Math.abs(a - b) / Math.max(a, b, 1e-9);
   };
   const seams: DollSeamReport[] = [];
+  const contradictions: string[] = [];
+  const closureReps: DollClosureReport[] = [];
+  // L4 closures drawn overlapped: how close the centre-front lines are, how far the edges cross.
   for (const w of works) {
+    const ov = w.overlap;
+    if (!ov) continue;
+    const ti = (w as Work & { tieIdx?: number }).tieIdx ?? -1;
+    const T = ties[ti];
+    const gaps: number[] = [];
+    if (T) for (let q = 0; q < T.ia.length / 3; q++) gaps.push(Math.hypot(...tieGap(pos, T, q)));
+    gaps.sort((x, y) => x - y);
+    ov.cfGapP95Mm = gaps.length ? gaps[Math.floor(0.95 * (gaps.length - 1))] : NaN;
+    // The two closure edges: mean distance between paired points (≈ offTop + offUnder).
+    const At = ov.top === pk(w.a[0]) ? w.A : w.B;
+    const Au = At === w.A ? w.B : w.A;
+    const dd: number[] = [];
+    const d3 = (a: number, b: number) =>
+      Math.hypot(
+        pos[3 * a] - pos[3 * b],
+        pos[3 * a + 1] - pos[3 * b + 1],
+        pos[3 * a + 2] - pos[3 * b + 2],
+      );
+    const same =
+      d3(At.v[0], Au.v[0]) + d3(At.v[At.v.length - 1], Au.v[Au.v.length - 1]) <=
+      d3(At.v[0], Au.v[Au.v.length - 1]) + d3(At.v[At.v.length - 1], Au.v[0]);
+    for (let k = 2; k <= 18; k++) {
+      const f = k / 20;
+      const ia = At.v[Math.min(At.v.length - 1, Math.round(f * (At.v.length - 1)))];
+      const ib =
+        Au.v[Math.min(Au.v.length - 1, Math.round((same ? f : 1 - f) * (Au.v.length - 1)))];
+      dd.push(d3(ia, ib));
+    }
+    ov.overlapMm = dd.length ? dd.reduce((x, y) => x + y, 0) / dd.length : NaN;
+    const ci = (w as Work & { contactIdx?: number }).contactIdx ?? -1;
+    const C = ci >= 0 ? contacts[ci] : undefined;
+    if (C) {
+      let out = 0;
+      for (let q = 0; q < C.i.length; q++) {
+        const i = C.i[q];
+        const j = C.j[q];
+        let nx = pos[3 * j];
+        let nz = pos[3 * j + 2];
+        const nl = Math.hypot(nx, nz) || 1;
+        nx /= nl;
+        nz /= nl;
+        if ((pos[3 * i] - pos[3 * j]) * nx + (pos[3 * i + 2] - pos[3 * j + 2]) * nz >= -1) out++;
+      }
+      ov.outsidePct = (100 * out) / Math.max(1, C.i.length);
+    }
+    const expect = ov.offTopMm + ov.offUnderMm;
+    ov.ok =
+      ov.cfGapP95Mm <= 4 &&
+      Math.abs(ov.overlapMm - expect) <= Math.max(8, 0.35 * expect) &&
+      (Number.isNaN(ov.outsidePct) || ov.outsidePct >= 90);
+    closureReps.push(ov);
+  }
+  for (const w of works) {
+    if (w.rejectedByPerson) continue;
     const m = measure(w);
     const sp = seamStretch(w, st, SF) * 100;
     // Twist: the other direction would fit the solved shape much better.
@@ -3156,7 +4246,8 @@ export function solveDoll(input: DollInput): DollReport {
     const lenA = w.A.len;
     const lenB = w.B.len;
     let state: DollSeamState;
-    if (w.released || w.virtual) state = 'open';
+    if (w.overlap) state = w.overlap.ok ? 'closed' : 'open';
+    else if (w.released || w.virtual) state = 'open';
     else if (w.origin === 'doll-proposed' || w.fromOrder) state = 'proposed';
     else if (twisted) state = 'twisted';
     // Open = a stretch of the seam stays apart (p95), not one corner point that lags.
@@ -3182,6 +4273,18 @@ export function solveDoll(input: DollInput): DollReport {
         note += ` · partial (${Math.min(lenA, lenB).toFixed(0)} onto ${Math.max(lenA, lenB).toFixed(0)} mm)`;
     } else if (w.origin === 'doll-proposed' || w.fromOrder)
       note += ` · gap after solving ${m.max.toFixed(0)} mm`;
+    if (w.overlap) {
+      const o = w.overlap;
+      note = `closure, buttoned: ${o.top} over ${o.under} · ${o.how} · centre-front lines meet within ${o.cfGapP95Mm.toFixed(1)} mm (p95) · the edges cross ${o.overlapMm.toFixed(0)} mm (expected ${(o.offTopMm + o.offUnderMm).toFixed(0)}) · ${Number.isNaN(o.outsidePct) ? 'no overlap zone' : `${o.outsidePct.toFixed(0)} % of the top's overlap outside`}`;
+    }
+    // L4: a confirmed seam that does not close is a contradiction — said, never dropped.
+    if (w.confirmed && !w.overlap) {
+      if (state === 'open' || state === 'twisted') {
+        const words = `${w.id}: confirmed by a person but it does not close — ${state}, gap p95 ${m.p95.toFixed(0)} / max ${m.max.toFixed(0)} mm, strain ${sp.toFixed(0)} %, lengths ${lenA.toFixed(0)} vs ${lenB.toFixed(0)} mm: the row contradicts the pattern (or the rest of the rows)`;
+        contradictions.push(words);
+        note = `CONTRADICTION — ${words}`;
+      } else note = `confirmed by a person · ${note}`;
+    } else if (w.confirmed && w.overlap) note = `confirmed by a person · ${note}`;
     seams.push({
       id: w.id,
       a: w.a,
@@ -3200,6 +4303,15 @@ export function solveDoll(input: DollInput): DollReport {
       note,
       pathA: Uint32Array.from(w.A.v),
       pathB: Uint32Array.from(w.B.v),
+      ...(l4
+        ? {
+            decidedBy: w.confirmed
+              ? ('person' as const)
+              : w.origin === 'graph' && !w.fromOrder
+                ? ('engine' as const)
+                : ('doll' as const),
+          }
+        : {}),
     });
   }
   for (const s of G.layerSeams)
@@ -3455,6 +4567,22 @@ export function solveDoll(input: DollInput): DollReport {
     orderJoins,
     orderSurface,
     honesty: HONESTY,
+    ...(l4
+      ? {
+          contradictions: [...preContradictions, ...contradictions],
+          closures: closureReps,
+          rows: {
+            applied: resolvedRows?.applied.length ?? 0,
+            confirmed: resolvedRows?.forced.length ?? 0,
+            rejected: excludedPairs.length,
+            closures: resolvedRows?.closures.length ?? 0,
+            words: [
+              ...(resolvedRows?.stale ?? []).map((x) => x.words),
+              ...(resolvedRows?.orphan ?? []).map((x) => x.words),
+            ],
+          },
+        }
+      : {}),
   };
 }
 

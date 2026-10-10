@@ -26,7 +26,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -35,153 +34,43 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { dollFiles } from './files.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const plans = process.env.SKELETON_PLANS ?? resolve(here, '../../../tmp/plans');
-const out = process.env.DOLL_OUT ?? resolve(plans, 'assembly-3d-doll/p2-doll');
+// L4 GOLD mode (DOLL_GOLD=1): the doll on the gold seam rows (scripts/doll/gold/<id>.seams.json),
+// each file also without rows (<id>-none) side by side, plus the negative control ss26-wrong (one
+// gold row deliberately re-pointed shoulder → armhole). Output: p4-gold/.
+const GOLD = !!process.env.DOLL_GOLD;
+const GOLD_IDS = ['ss26', 'card4', 'card6', 'card16', 'card11', 'card7'];
+const out =
+  process.env.DOLL_OUT ?? resolve(plans, `assembly-3d-doll/${GOLD ? 'p4-gold' : 'p2-doll'}`);
 mkdirSync(out, { recursive: true });
 const chrome = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
-const prod = resolve(plans, 'assembly-3d-doll/prod-data/dxf');
-const prodFile = (prefix) => {
-  if (!existsSync(prod)) return null;
-  const f = readdirSync(prod).find((x) => x.startsWith(prefix));
-  return f ? resolve(prod, f) : null;
-};
-const corpus = resolve(plans, 'pdf-to-dxf/corpus/dxf-clo');
-const SIDE_SEAMS = ['BP_2_R#0~FP_1_R#1', 'BP_1_L#2~FP_2_L#0'];
-const ALL = [
-  {
-    id: 'ss26',
-    label: 'SS26-005 shirt',
-    dxf: resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'),
-    category: 'shirt',
-    truth: 'shirt-M',
-    card: '5',
-    gender: 'FEMALE',
-  },
-  {
-    id: 'ss26-neg',
-    label: 'SS26-005 NEGATIVE CONTROL (side seams dropped)',
-    dxf: resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'),
-    category: 'shirt',
-    truth: 'shirt-M',
-    drop: SIDE_SEAMS,
-    gender: 'FEMALE',
-  },
-  {
-    id: 'allsizes',
-    label: 'Allsizes (yoke shirt, CLO)',
-    dxf: resolve(corpus, 'Allsizes_with_notches.dxf'),
-    category: 'shirt',
-    truth: 'allsizes-M',
-    gender: 'MALE',
-  },
-  {
-    id: 'summer',
-    label: 'summer men (shirt)',
-    dxf: resolve(corpus, 'summer men.dxf'),
-    category: 'shirt',
-    gender: 'MALE',
-  },
-  {
-    id: 'summer-x2',
-    label: 'summer men — ×2 TEST (SL_R removed, SL_L cut ×2 mirrored)',
-    dxf: resolve(corpus, 'summer men.dxf'),
-    category: 'shirt',
-    gender: 'MALE',
-    x2: { keep: 'SL_L', drop: 'SL_R' },
-  },
-  {
-    id: 'card6',
-    label: 'prod card 6 SS26-006 shirt with pockets (MAIN)',
-    dxf: prodFile('card6-MAIN'),
-    category: 'shirt',
-    card: '6',
-    gender: 'MALE',
-  },
-  {
-    id: 'card6-shuf',
-    label: 'prod card 6 NEGATIVE CONTROL (order inputs shuffled)',
-    dxf: prodFile('card6-MAIN'),
-    category: 'shirt',
-    card: '6',
-    shuffleOps: true,
-    gender: 'MALE',
-  },
-  {
-    id: 'card4',
-    label: 'prod card 4 SS26-004 short-sleeve shirt',
-    dxf: prodFile('card4-'),
-    category: 'shirt',
-    card: '4',
-    gender: 'MALE',
-  },
-  {
-    id: 'card4-graft',
-    label: 'SYNTHETIC card 4 body + SS26-005 stand and fall (collar module on a clean body)',
-    dxf: prodFile('card4-'),
-    category: 'shirt',
-    gender: 'MALE',
-    graft: {
-      dxf: resolve(plans, 'assembly-from-pattern/probe/data/ss26-005-shirt.dxf'),
-      keep: ['NCK', 'NCK_1', 'CLR', 'CLR_1', '2CLR', '2CLR_1'],
-      drop: ['CLR_3', 'CLR_4'],
-    },
-  },
-  {
-    id: 'card4-graft6',
-    label: 'SYNTHETIC card 4 body + card 6 stand and two stacked collar units (K4 on a clean body)',
-    dxf: prodFile('card4-'),
-    category: 'shirt',
-    gender: 'MALE',
-    graft: {
-      dxf: prodFile('card6-MAIN'),
-      keep: ['nck', 'nck_1', 'clr_main', 'clr_main_1', 'CLR_SECOND', 'CLR_SECOND_1'],
-      drop: ['CLR_3', 'CLR_4'],
-    },
-  },
-  {
-    id: 'card9',
-    label: 'prod card 9 SS26-009 summer shirt',
-    dxf: prodFile('card9-'),
-    category: 'shirt',
-    card: '9',
-    gender: 'FEMALE',
-    size: 'm',
-  },
-  {
-    id: 'card16',
-    label: 'prod card 16 FW26-001 shirt (MAIN)',
-    dxf: prodFile('card16-MAIN'),
-    category: 'shirt',
-    card: '16',
-    gender: 'FEMALE',
-  },
-  {
-    id: 'card11',
-    label: 'prod card 11 SS26-011 pants (MAIN)',
-    dxf: prodFile('card11-MAIN'),
-    category: 'trousers',
-    card: '11',
-    gender: 'MALE',
-  },
-  {
-    id: 'card7',
-    label: 'prod card 7 SS26-007 pants (MAIN)',
-    dxf: prodFile('card7-MAIN'),
-    category: 'trousers',
-    card: '7',
-    gender: 'FEMALE',
-  },
-  {
-    id: 'card8',
-    label: 'prod card 8 SS26-008 blazer shell (MAIN, lining off)',
-    dxf: prodFile('card8-MAIN'),
-    category: 'jacket-lined',
-    card: '8',
-    gender: 'MALE',
-  },
-];
+const ALL0 = dollFiles(plans);
+const goldOf = (id) => resolve(here, 'gold', `${id}.seams.json`);
+const ALL = GOLD
+  ? GOLD_IDS.flatMap((id) => {
+      const f = ALL0.find((x) => x.id === id);
+      if (!f) return [];
+      return [
+        { ...f, gold: goldOf(id), label: `${f.label} — GOLD seam rows` },
+        { ...f, id: `${id}-none`, label: `${f.label} — no rows (as before)` },
+        ...(id === 'ss26'
+          ? [
+              {
+                ...f,
+                id: 'ss26-wrong',
+                label: `${f.label} — NEGATIVE CONTROL: one gold row wrong (shoulder BP#13 ↔ front armhole FRONT_L#0)`,
+                gold: goldOf(id),
+                wrong: { a: 'BP#13', b: 'FRONT_L#1', to: 'FRONT_L#0' },
+              },
+            ]
+          : []),
+      ];
+    })
+  : ALL0;
 const want = (process.env.DOLL_FILES ?? '').split(',').filter(Boolean);
 const files = ALL.filter(
   (f) => f.dxf && existsSync(f.dxf) && (!want.length || want.includes(f.id)),
@@ -313,12 +202,19 @@ for (const s of summary) {
   );
   gate(`${s.id}: 0 NaN`, s.nan === 0);
   gate(`${s.id}: settles (travel p99 ≤ 1 mm per 20 passes)`, s.converged, `p99 ${s.travelP99} mm`);
-  if (s.lacks > 0 && !s.id.endsWith('-shuf') && !s.id.endsWith('-neg'))
+  if (s.lacks > 0 && !GOLD && !s.id.endsWith('-shuf') && !s.id.endsWith('-neg'))
     gate(
       `${s.id}: declared joins the graph lacks — doll proposes ≥ 70 %`,
       s.proposed >= 0.7 * s.lacks,
       `${s.proposed} of ${s.lacks} (${Math.round((100 * s.proposed) / s.lacks)} %), ${s.fromOrderClosed}/${s.fromOrder} from the order closed`,
     );
+}
+if (GOLD) {
+  goldGates();
+  sideBySide();
+  console.log(`\nscreenshots:\n${shots.map((s) => `  ${s}`).join('\n')}\nreports: ${out}/*.txt`);
+  rmSync(dist, { recursive: true, force: true });
+  process.exit(failed ? 1 : 0);
 }
 const real6 = summary.find((s) => s.id === 'card6');
 const shuf6 = summary.find((s) => s.id === 'card6-shuf');
@@ -434,3 +330,114 @@ if (existsSync(resolve(out, 'neck-fixture.json'))) {
 console.log(`\nscreenshots:\n${shots.map((s) => `  ${s}`).join('\n')}\nreports: ${out}/*.txt`);
 rmSync(dist, { recursive: true, force: true });
 process.exit(failed ? 1 : 0);
+
+// ── L4 gold gates ────────────────────────────────────────────────────────────────────────────
+function goldGates() {
+  const f1 = (x) =>
+    x === null || x === undefined || Number.isNaN(x) ? 'n/a' : Number(x).toFixed(1);
+  const SHIRTS = ['ss26', 'card4', 'card6', 'card16'];
+  const PANTS = ['card11', 'card7'];
+  for (const s of summary) {
+    const G = s.gold;
+    if (!G || s.id === 'ss26-wrong') continue;
+    gate(`${s.id} GOLD: zero open seams`, G.open.length === 0, G.open.join(', ') || '0');
+    gate(
+      `${s.id} GOLD: no contradiction`,
+      G.contradictions.length === 0,
+      G.contradictions.join(' | ') || '0',
+    );
+    if (SHIRTS.includes(s.id)) {
+      const cl = G.closures;
+      gate(
+        `${s.id} GOLD: fronts closed at CF with overlap`,
+        cl.length > 0 && cl.every((c) => c.ok),
+        cl
+          .map(
+            (c) =>
+              `${c.top} over ${c.under}: CF p95 ${f1(c.cfGapP95Mm)} mm, edges cross ${f1(c.overlapMm)} (exp ${f1(c.offTopMm + c.offUnderMm)}), outside ${f1(c.outsidePct)} %`,
+          )
+          .join(' · ') || 'no closure',
+      );
+      gate(
+        `${s.id} GOLD: sleeves attached at both armholes`,
+        G.sleeves.L.on && G.sleeves.R.on,
+        `L ${G.sleeves.L.on} (${G.sleeves.L.words}) · R ${G.sleeves.R.on} (${G.sleeves.R.words})`,
+      );
+      const C = s.collar;
+      const units = C?.units ?? [];
+      const onNeck = units.filter((u) => u.base === 'neck path');
+      gate(
+        `${s.id} GOLD: unit on the neck path attached, gap p95 ≤ 3 mm, ease 0.90–1.15 after intake`,
+        onNeck.length > 0 &&
+          onNeck.every(
+            (u) => u.attached !== 'not sewn' && u.gapP95 <= 3 && u.ease >= 0.9 && u.ease <= 1.15,
+          ),
+        `neck ${f1(C?.neckMm)} mm · ` +
+          onNeck
+            .map(
+              (u) =>
+                `${u.role} ${u.keys}: ${u.attached}, gap p95 ${f1(u.gapP95)} mm, ease ${f1(u.ease * 100)} %${u.folds?.length ? `, folded ${u.folds.join('+')} mm` : ''}`,
+            )
+            .join(' · '),
+      );
+      for (const u of units.filter((x) => x.role === 'fall' || x.role === 'collar'))
+        gate(
+          `${s.id} GOLD: ${u.role} ${u.keys} turned down (≥ 95 % outside)`,
+          u.outerY < u.baseY && u.outsidePct >= 95,
+          `outer y ${f1(u.outerY)} vs ${f1(u.baseY)} · ${f1(u.outsidePct)} % outside · gap p95 ${f1(u.gapP95)} mm (${u.attached})`,
+        );
+    }
+    if (PANTS.includes(s.id)) {
+      gate(`${s.id} GOLD: rise / crotch joined`, G.riseOk, G.rise.join(' · ') || 'no rise seam');
+      gate(
+        `${s.id} GOLD: waist closed, waistband ring on`,
+        G.bandOk,
+        G.band.join(' · ') || 'no waistband seam',
+      );
+    }
+  }
+  const w = summary.find((s) => s.id === 'ss26-wrong');
+  if (w)
+    gate(
+      'NEG ss26-wrong: the deliberately wrong row is reported as a contradiction in words',
+      (w.gold?.contradictions ?? []).some((c) => /BP#13|FRONT_L#0/.test(c)),
+      (w.gold?.contradictions ?? []).join(' | ') || 'none reported',
+    );
+}
+
+function sideBySide() {
+  const prof = mkdtempSync(resolve(tmpdir(), 'doll-pair-'));
+  for (const id of GOLD_IDS)
+    for (const v of ['', '-collar']) {
+      const a = resolve(out, `${id}${v}.png`);
+      const b = resolve(out, `${id}-none${v}.png`);
+      if (!existsSync(a) || !existsSync(b)) continue;
+      const html = resolve(dist, `${id}${v}-pair.html`);
+      writeFileSync(
+        html,
+        `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font:16px sans-serif;display:flex}div{flex:1;text-align:center}img{width:100%}</style></head><body><div><b>${id} — GOLD seam rows</b><br><img src="${pathToFileURL(a).href}"></div><div><b>${id} — no rows (as before)</b><br><img src="${pathToFileURL(b).href}"></div></body></html>`,
+      );
+      const png = resolve(out, `${id}${v}-vs-none.png`);
+      try {
+        execFileSync(
+          chrome,
+          [
+            '--headless=new',
+            '--no-sandbox',
+            '--hide-scrollbars',
+            '--allow-file-access-from-files',
+            `--window-size=2400,${v ? 720 : 1080}`,
+            '--force-device-scale-factor=1',
+            `--user-data-dir=${prof}`,
+            `--screenshot=${png}`,
+            pathToFileURL(html).href,
+          ],
+          { stdio: 'ignore', timeout: 60_000 },
+        );
+        shots.push(png);
+      } catch (e) {
+        console.log(`pair screenshot failed ${id}${v}: ${e.message}`);
+      }
+    }
+  rmSync(prof, { recursive: true, force: true });
+}

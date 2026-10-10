@@ -509,6 +509,15 @@ function candidateOf(
       ? { a: rangeOf(ha[0]), b: rangeOf(hb[0]) }
       : undefined;
   const isWhole = (r: [number, number], len: number) => r[0] <= 0.05 && r[1] >= len - 0.05;
+  // A composite part sewn over only a stretch of its run (one edge per anchor; a chain keeps whole).
+  let partRange: Record<EdgeId, [number, number]> | undefined;
+  if (s.kind === 'composite')
+    for (const h of [...ha, ...hb]) {
+      if (h.edges.length !== 1) continue;
+      const r = rangeOf(h);
+      if (isWhole(r, h.lenMm)) continue;
+      (partRange ??= {})[h.edges[0]] = r;
+    }
   return {
     a: A.id,
     b: B.id,
@@ -524,6 +533,7 @@ function candidateOf(
     !(isWhole(partialRange.a, ha[0].lenMm) && isWhole(partialRange.b, hb[0].lenMm))
       ? { range: partialRange }
       : {}),
+    ...(partRange ? { partRange } : {}),
     provenance,
   };
 }

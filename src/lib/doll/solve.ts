@@ -59,6 +59,25 @@ export type SolverState = {
    * `j`, measured along the horizontal direction from the vertical axis through (ax, az) to `j`.
    */
   contacts?: { i: Int32Array; j: Int32Array; gap: number; ax: number; az: number }[];
+  /** Point-to-point ties between two cloth points inside triangles (a buttoned overlap). */
+  ties?: Tie[];
+};
+
+/**
+ * Ties (L4 front closure): point A_q = Σ wa·x (three vertices of one panel) meets point B_q of the
+ * other panel, A lying `lift` mm OUTSIDE B along the horizontal direction from the vertical axis
+ * through (ax, az) — the centre-front lines of two fronts on top of each other, left over right.
+ */
+export type Tie = {
+  ia: Int32Array;
+  wa: Float64Array;
+  ib: Int32Array;
+  wb: Float64Array;
+  k: number;
+  lift: number;
+  ax: number;
+  az: number;
+  active: boolean;
 };
 
 /** Rows of a seam: every vertex of A onto B's polyline and every vertex of B onto A's. */
@@ -312,6 +331,8 @@ export function pass(S: SolverState, ramp: number): void {
     if (S.pullK > 0) pr.pull(p, i, S.pullK);
     if (!(globalThis as { __DOLL_NOPROXY?: boolean }).__DOLL_NOPROXY) pr.push(p, i);
   }
+  // Ties (only when a closure overlap is drawn — absent otherwise).
+  if (S.ties) for (const T of S.ties) tiePass(S, T);
   // One-sided contacts (last: nothing after them in the pass pushes back through).
   for (const C of S.contacts ?? []) {
     for (let q = 0; q < C.i.length; q++) {
@@ -354,4 +375,65 @@ export function strains(S: SolverState): Float64Array {
     out[c] = S.rest[c] > 0 ? Math.abs(d / S.rest[c] - 1) : 0;
   }
   return out;
+}
+
+/** Current A − B − lift·n of tie q, and the outward unit n at B. */
+export function tieGap(p: Float64Array, T: Tie, q: number): [number, number, number] {
+  let ax = 0;
+  let ay = 0;
+  let az = 0;
+  let bx = 0;
+  let by = 0;
+  let bz = 0;
+  for (let m = 0; m < 3; m++) {
+    const i = T.ia[3 * q + m] * 3;
+    const w = T.wa[3 * q + m];
+    ax += p[i] * w;
+    ay += p[i + 1] * w;
+    az += p[i + 2] * w;
+    const j = T.ib[3 * q + m] * 3;
+    const u = T.wb[3 * q + m];
+    bx += p[j] * u;
+    by += p[j + 1] * u;
+    bz += p[j + 2] * u;
+  }
+  let nx = bx - T.ax;
+  let nz = bz - T.az;
+  const nl = Math.sqrt(nx * nx + nz * nz) || 1;
+  nx /= nl;
+  nz /= nl;
+  return [ax - bx - T.lift * nx, ay - by, az - bz - T.lift * nz];
+}
+
+function tiePass(S: SolverState, T: Tie): void {
+  if (!T.active || T.k <= 0) return;
+  const p = S.pos;
+  const mv = S.moving;
+  const n = T.ia.length / 3;
+  for (let q = 0; q < n; q++) {
+    const [cx, cy, cz] = tieGap(p, T, q);
+    let den = 0;
+    for (let m = 0; m < 3; m++) {
+      den += mv[T.ia[3 * q + m]] * T.wa[3 * q + m] ** 2;
+      den += mv[T.ib[3 * q + m]] * T.wb[3 * q + m] ** 2;
+    }
+    if (den <= 1e-12) continue;
+    const f = T.k / den;
+    for (let m = 0; m < 3; m++) {
+      const i = T.ia[3 * q + m];
+      if (mv[i]) {
+        const g = f * T.wa[3 * q + m];
+        p[3 * i] -= cx * g;
+        p[3 * i + 1] -= cy * g;
+        p[3 * i + 2] -= cz * g;
+      }
+      const j = T.ib[3 * q + m];
+      if (mv[j]) {
+        const g = f * T.wb[3 * q + m];
+        p[3 * j] += cx * g;
+        p[3 * j + 1] += cy * g;
+        p[3 * j + 2] += cz * g;
+      }
+    }
+  }
 }

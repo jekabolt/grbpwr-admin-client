@@ -27,7 +27,14 @@ export type Chart = {
   rejected: string[];
 };
 
-export type ChartSeam = { id: string; a: Edge[]; b: Edge[]; partial: boolean };
+export type ChartSeam = {
+  id: string;
+  a: Edge[];
+  b: Edge[];
+  partial: boolean;
+  /** L4: the stretch of each side the seam sews, shares of its length (one part of a composite). */
+  ranges?: { a: [number, number]; b: [number, number] };
+};
 
 export const toChart = (p: ChartPlace, q: Pt2): Pt2 => {
   const x = (p.mirror ? 2 * p.cx - q[0] : q[0]) - p.cx;
@@ -212,7 +219,14 @@ export function buildChart(
   links.sort((p, q) => q.len - p.len || p.s.id.localeCompare(q.s.id));
 
   /** Translation (and mirror) that lays `to` against `from` already placed. */
-  const fit = (from: Edge[], fromP: ChartPlace, to: Edge[], toKey: string, partial: boolean) => {
+  const fit = (
+    from: Edge[],
+    fromP: ChartPlace,
+    to: Edge[],
+    toKey: string,
+    partial: boolean,
+    ranges?: { from: [number, number]; to: [number, number] },
+  ) => {
     const K = 24;
     const A0 = sample(from, K);
     const B0 = sample(to, K);
@@ -225,7 +239,7 @@ export function buildChart(
         const B = rev ? [...Bm].reverse() : Bm;
         // Partial: the short side lies on a sub-range of the long one, from either end.
         const anchors: [number, number][] = [[0, 1]];
-        if (partial) {
+        if (partial && !ranges) {
           const r = Math.min(A0.len, B0.len) / Math.max(A0.len, B0.len);
           anchors.push([0, r], [1 - r, 1]);
         }
@@ -245,6 +259,13 @@ export function buildChart(
                 arr[i][1] + (arr[i + 1][1] - arr[i][1]) * w,
               ];
             };
+            if (ranges) {
+              // Known stretches: `from` over its range, `to` over its own (walked as B is).
+              const rt = rev ? [1 - ranges.to[1], 1 - ranges.to[0]] : ranges.to;
+              pa.push(at(A, ranges.from[0] + t * (ranges.from[1] - ranges.from[0])));
+              pb.push(at(B, rt[0] + t * (rt[1] - rt[0])));
+              continue;
+            }
             pa.push(aShort || (t0 === 0 && t1 === 1) ? at(A, t) : at(A, tl));
             pb.push(aShort ? at(B, tl) : at(B, t));
           }
@@ -337,8 +358,20 @@ export function buildChart(
           to,
           toKey,
           s.partial || Math.min(la, lb) / Math.max(la, lb) < 0.97,
+          s.ranges
+            ? inA
+              ? { from: s.ranges.a, to: s.ranges.b }
+              : { from: s.ranges.b, to: s.ranges.a }
+            : undefined,
         );
-        const len = Math.max(la, lb);
+        const len = s.ranges
+          ? Math.max(
+              la *
+                Math.abs((inA ? s.ranges.a : s.ranges.b)[1] - (inA ? s.ranges.a : s.ranges.b)[0]),
+              lb *
+                Math.abs((inA ? s.ranges.b : s.ranges.a)[1] - (inA ? s.ranges.b : s.ranges.a)[0]),
+            )
+          : Math.max(la, lb);
         let f: (typeof opts)[number] | null = null;
         let why = '';
         for (const o of opts) {

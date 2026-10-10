@@ -113,6 +113,7 @@ function finishPath(
   isClosed: boolean,
   cbV: number,
   how0: string,
+  noCut = false,
 ): NeckPath {
   let verts = verts0;
   let how = how0;
@@ -140,7 +141,7 @@ function finishPath(
       if (k0 < 0) k0 = 0;
       if (k1 < 0) k1 = verts.length - 1;
     }
-    if (k0 >= 0 && k1 >= 0 && k1 - k0 > 4 && (k0 > 0 || k1 < verts.length - 1)) {
+    if (!noCut && k0 >= 0 && k1 >= 0 && k1 - k0 > 4 && (k0 > 0 || k1 < verts.length - 1)) {
       ext[0] = P0.s[k0];
       ext[1] = P0.len - P0.s[k1];
       verts = verts.slice(k0, k1 + 1);
@@ -191,6 +192,28 @@ function finishPath(
       ? [sL, sR]
       : null;
   return { verts, path, closed, cb, snp, ext, how };
+}
+
+/**
+ * L4: the neck path given by a CONFIRMED seam — the body side of the seam a person said the stand /
+ * collar is sewn to, walked as stored (`verts`, any direction). Left end first, CB on it; cut at the
+ * CF notches near its ends (`cut`) or whole.
+ */
+export function neckFromRun(
+  c: CollarCtx,
+  verts0: number[],
+  vArm: number,
+  cut: boolean,
+  how: string,
+): NeckPath {
+  let verts = verts0;
+  // Left end first: the first third of the walk runs round the doll's left (+x) — the ends
+  // themselves sit near x = 0 at the centre front and cannot tell.
+  const n3 = Math.max(1, Math.floor(verts.length / 3));
+  const mx = (vs: number[]) => vs.reduce((t, v) => t + p3(c, v)[0], 0) / vs.length;
+  if (mx(verts.slice(0, n3)) < mx(verts.slice(verts.length - n3))) verts = [...verts].reverse();
+  const k = cbIndex(c, verts, vArm);
+  return finishPath(c, verts, false, k >= 0 ? verts[k] : -1, how, !cut);
 }
 
 /** The neck as a closed loop cut at the centre front (pullovers; the fallback of K1). */
