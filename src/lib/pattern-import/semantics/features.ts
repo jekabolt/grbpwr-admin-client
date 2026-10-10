@@ -42,6 +42,11 @@ export const GRAIN_MIN_MM = 40;
 export const GRAIN_TEXT_MM = 60;
 /** A1: a grain word turned along the line (±10°) counts this far, mm. */
 export const GRAIN_TEXT_ALONG_MM = 120;
+/**
+ * N3: a grain word turned along the line (±10°) this close to it (its box centre to the segment) is
+ * written ON the line — its direction is a second evidence beside the word, mm.
+ */
+export const GRAIN_TEXT_ON_LINE_MM = 10;
 /** A1: an arrowhead barb: a chain this short, its tip this close to a line end, at 15–60°. */
 export const GRAIN_HEAD_MAX_MM = 25;
 export const GRAIN_HEAD_END_MM = 6;
@@ -65,6 +70,7 @@ const GRAIN_STRENGTH: Record<GrainEvidenceKind, number> = {
   class: 8,
   arrowheads: 4,
   word: 2,
+  along: 1,
   ungraded: 1,
   dashes: 0.5,
   'dxf-layer': 8,
@@ -569,8 +575,10 @@ function bestGrain(
     const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
     return !(lettered(l.a) || lettered(l.b) || lettered(mid));
   });
-  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it)
+  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it); written
+  // along that line (± 10°) within 10 mm, its direction is a second evidence (N3, gerber «GRAIN»)
   const worded = new Set<GrainLine>();
+  const along = new Set<GrainLine>();
   for (const t of grainTexts) {
     const c = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
     let near: { l: GrainLine; d: number } | null = null;
@@ -578,13 +586,10 @@ function bestGrain(
       const d = footOnSegment(c, l.a, l.b).d;
       if (!near || d < near.d) near = { l, d };
     }
-    if (
-      near &&
-      (near.d <= GRAIN_TEXT_MM ||
-        (near.d <= GRAIN_TEXT_ALONG_MM &&
-          lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10))
-    )
-      worded.add(near.l);
+    if (!near) continue;
+    const turned = lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10;
+    if (near.d <= GRAIN_TEXT_MM || (near.d <= GRAIN_TEXT_ALONG_MM && turned)) worded.add(near.l);
+    if (turned && near.d <= GRAIN_TEXT_ON_LINE_MM) along.add(near.l);
   }
   for (const l of live) {
     const heads = arrowheads(l, headChains, lettered);
@@ -594,6 +599,7 @@ function bestGrain(
       ...(l.grainClass ? (['class'] as const) : []),
       ...(heads ? (['arrowheads'] as const) : []),
       ...(word ? (['word'] as const) : []),
+      ...(word && along.has(l) ? (['along'] as const) : []),
       ...(ungraded ? (['ungraded'] as const) : []),
       ...(l.dashed ? (['dashes'] as const) : []),
     ];

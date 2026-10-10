@@ -1699,13 +1699,22 @@ export async function main(): Promise<number> {
     });
     const run1 = (
       extras: Extra[],
-      texts: { t: string; at: PtMm }[] = [],
+      texts: { t: string; at: PtMm; rot?: number }[] = [],
       /** per extra: its source layer / OCG (the extras are the first chains of the fixture) */
       layers?: (string | null)[],
     ) => {
       const F = fx();
       addFamily(F, 1, bodice, 0, extras, ['FRONT']);
-      for (const t of texts) F.text(t.t, t.at);
+      for (const t of texts) {
+        const id = F.text(t.t, t.at);
+        // turned 90°: the word runs up from its anchor (a 5 × 30 mm box)
+        if (t.rot === 90)
+          F.texts[id] = {
+            ...F.texts[id],
+            rotationDeg: 90,
+            bbox: { minX: t.at.x - 5, minY: t.at.y, maxX: t.at.x, maxY: t.at.y + 30 },
+          };
+      }
       const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
       if (layers) {
         layers.forEach((_, i) => (F.chains[i].style = i + 1));
@@ -1775,6 +1784,46 @@ export async function main(): Promise<number> {
         far.d.output.grainProposals?.[0]?.evidence.join() === 'geometry',
         'a grain word 80 mm away is not the line’s',
         JSON.stringify(far.d.output.grainProposals),
+      );
+    }
+    // N3 (gerber «GRAIN»): a word written ALONG the line (turned to it, ≤ 10 mm) is two evidences
+    {
+      const on = run1(
+        [line(90)],
+        [{ t: 'GRAIN', at: { x: 96, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
+      );
+      const g = grainOf(on.d);
+      ck(
+        g?.origin === 'detected' && (g.evidence ?? []).join('+') === 'word+along',
+        'N3: «GRAIN» turned along the line 3.5 mm off it → detected (word+along)',
+        JSON.stringify({ g: g?.evidence, pr: on.d.output.grainProposals }),
+      );
+      const off = run1(
+        [line(90)],
+        [{ t: 'GRAIN', at: { x: 110, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
+      );
+      ck(
+        off.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: turned along but 17.5 mm off → the word only (proposed)',
+        JSON.stringify(off.d.output.grainProposals),
+      );
+      // written across the line (not turned), centred on it
+      const flat = run1([line(90)], [{ t: 'GRAIN', at: { x: 75, y: 200 } }]);
+      ck(
+        flat.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: across the line (not turned) → the word only (proposed)',
+        JSON.stringify(flat.d.output.grainProposals),
+      );
+      // A1: the word labels only the NEAREST line: a second line 3 mm the other side takes it
+      const two = run1(
+        [line(90), line(103, 130, 400)],
+        [{ t: 'GRAIN', at: { x: 101, y: 200 } }].map((t) => ({ ...t, rot: 90 })),
+      );
+      const g2 = grainOf(two.d);
+      ck(
+        !!g2 && Math.abs(g2.a.x - 103) < 1e-6 && (g2.evidence ?? []).join('+') === 'word+along',
+        'N3: two lines, the word nearer the second → only the second is labelled (A1)',
+        JSON.stringify({ a: g2?.a, ev: g2?.evidence, pr: two.d.output.grainProposals }),
       );
     }
     // (a) arrowheads + word → detected; one barb at one end → not arrowheads
