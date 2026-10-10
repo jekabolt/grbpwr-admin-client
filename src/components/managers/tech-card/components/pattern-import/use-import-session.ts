@@ -1105,8 +1105,13 @@ export function openQuestions(
     (u) => u.kind === 'quantity' && i.confirmedQuantities[u.seed] !== u.shown,
   );
   const name = un.filter((u) => u.kind === 'name' && !named.has(u.seed));
+  // a DXF block name (lane E3: source 'dxf') is the file's own word, never an AI name to confirm
   const aiNames = names.filter(
-    (n) => !n.autoAccepted && !named.has(n.seed) && exported.has(n.seed),
+    (n) =>
+      !n.autoAccepted &&
+      (n.source as string) !== 'dxf' &&
+      !named.has(n.seed) &&
+      exported.has(n.seed),
   );
   return {
     allowance,
