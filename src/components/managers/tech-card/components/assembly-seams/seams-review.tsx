@@ -89,6 +89,9 @@ export function SeamsReview({
   size: string;
 }) {
   const { graph, geoms, review, settling } = useSeamReview();
+  // While the provider re-reads (a decision or a pattern edit, 400 ms + an idle read) the graph on
+  // screen is the previous one: nothing is anchored on it until the new read lands.
+  const rereading = settling;
   const facts = useSeamsStore((s) => s.facts);
   const grainDeg = useSeamsStore((s) => s.grainDeg);
   const unreadable = useSeamsStore((s) => s.unreadable);
@@ -143,10 +146,20 @@ export function SeamsReview({
   const gone = () =>
     showMessage('this seam is not on today’s pattern any more — wait for the re-read', 'error');
 
+  /** A write door is shut: released card, the row in flight, or the graph being re-read. */
+  const shut = (it?: ReviewItem) => {
+    if (frozen) {
+      showMessage(FROZEN_REFUSAL, 'error');
+      return true;
+    }
+    return !!it?.pending || rereading;
+  };
+
   const doors: RowDoors = {
     select: (it) => select(it),
     hover: (it) => setHoverId(it?.id ?? null),
     accept: (it, alt) => {
+      if (shut(it)) return;
       const c = alt ?? it.candidate;
       if (!c || !ctx) return;
       const row = rowFromProposal(c, ctx, { status: 'confirmed', direction: dirOf(it) });
@@ -155,6 +168,7 @@ export function SeamsReview({
       advance(it);
     },
     reject: (it, note) => {
+      if (shut(it)) return;
       setWords(null);
       if (!it.candidate || !ctx) return;
       const row = rowFromProposal(it.candidate, ctx, {
@@ -168,9 +182,13 @@ export function SeamsReview({
     },
     flip: (it) => {
       if (it.group === 'decide') setDirs((d) => ({ ...d, [it.id]: flipped(dirOf(it)) }));
-      else if (it.row) void writes.upsert([{ ...it.row, direction: flipped(it.row.direction) }]);
+      // Only a confirmed row is rewritten: a stale, rejected or orphan row is re-confirmed, undone
+      // or removed — never refreshed on the server by a flip (that would clear its stale flag).
+      else if (it.group === 'confirmed' && it.row && !it.pending && !rereading)
+        void writes.upsert([{ ...it.row, direction: flipped(it.row.direction) }]);
     },
     closure: (it) => {
+      if (shut(it)) return;
       if (it.group !== 'decide' || !it.candidate || !ctx) return;
       const row = rowFromProposal(it.candidate, ctx, {
         status: 'confirmed',
@@ -182,14 +200,17 @@ export function SeamsReview({
       advance(it);
     },
     undo: (it) => {
+      if (shut(it)) return;
       if (it.row && (it.group === 'confirmed' || it.group === 'rejected'))
         void writes.remove([it.row]);
     },
     note: (it, note) => {
+      if (shut(it)) return;
       setWords(null);
       if (it.row) void writes.upsert([{ ...it.row, note: note.trim().slice(0, 255) }]);
     },
     reconfirm: (it) => {
+      if (shut(it)) return;
       if (!ctx) return;
       const row = reconfirmRow(it, ctx);
       if (!row) {
@@ -199,6 +220,7 @@ export function SeamsReview({
       void writes.upsert([row]);
     },
     remove: (it) => {
+      if (shut(it)) return;
       if (it.row) void writes.remove([it.row]);
     },
     connectAgain: (it) => {
@@ -214,7 +236,7 @@ export function SeamsReview({
   };
 
   const acceptAllSure = () => {
-    if (!review || !ctx) return;
+    if (!review || !ctx || shut()) return;
     const rows = review.sure
       .map((it) =>
         it.candidate
@@ -256,7 +278,7 @@ export function SeamsReview({
   };
 
   const connect = () => {
-    if (!hand || !ctx || hand.a.length === 0 || hand.b.length === 0) return;
+    if (!hand || !ctx || hand.a.length === 0 || hand.b.length === 0 || shut()) return;
     const row = rowFromHand(hand.a, hand.b, geoms, ctx, {
       direction: hand.direction,
       ...(hand.replace ? { seamKey: hand.replace.seamKey, note: hand.replace.note } : {}),
@@ -275,7 +297,7 @@ export function SeamsReview({
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
     const it = selected;
     const k = e.key;
@@ -364,7 +386,7 @@ export function SeamsReview({
                 <Chip
                   quiet
                   onClick={acceptAllSure}
-                  disabled={frozen || sure === 0}
+                  disabled={frozen || sure === 0 || rereading}
                   title='confirm every proposal the engine is sure of and reads one way only; likely and check are looked at one by one'
                   data-seams-door='accept-sure'
                 >
@@ -459,6 +481,7 @@ export function SeamsReview({
                     roles={roles}
                     selectedId={selectedId}
                     frozen={frozen}
+                    rereading={rereading}
                     directionOf={dirOf}
                     wordsFor={(it) => (words?.id === it.id ? words.kind : null)}
                     doors={doors}
@@ -475,6 +498,7 @@ export function SeamsReview({
                 geoms={geoms}
                 roles={roles}
                 direction={hand.direction}
+                rereading={rereading}
                 replacing={
                   hand.replace ? `#${review?.byId.get(`s:${hand.replace.seamKey}`)?.n ?? ''}` : null
                 }

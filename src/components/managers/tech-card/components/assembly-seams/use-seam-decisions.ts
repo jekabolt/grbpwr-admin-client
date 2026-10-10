@@ -124,6 +124,8 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       }
       const keys = Object.keys(ops);
       const s = useSeamsStore.getState();
+      // One write per row at a time: a second intent on a row in flight is dropped, never raced.
+      if (keys.some((k) => s.pending[k])) return false;
       const errors = { ...s.errors };
       for (const k of [...keys, ...(errorAt ? [errorAt] : [])]) delete errors[k];
       useSeamsStore.setState({ pending: { ...s.pending, ...ops }, errors });

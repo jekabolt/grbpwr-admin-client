@@ -75,6 +75,7 @@ export function SeamRow({
   roles,
   selected,
   frozen,
+  rereading,
   direction,
   words,
   doors,
@@ -84,6 +85,7 @@ export function SeamRow({
   roles: RoleWords;
   selected: boolean;
   frozen: boolean;
+  rereading: boolean;
   /** The direction this row will be written with (a proposal's local flip, or the row's own). */
   direction: StoredSeamDirection;
   /** The row's words field is open for this. */
@@ -101,7 +103,7 @@ export function SeamRow({
 
   const g = item.group;
   const busy = item.pending;
-  const off = frozen || busy;
+  const off = frozen || busy || rereading;
   const kind = item.row?.kind ?? item.candidate?.kind;
   const alts = g === 'decide' ? item.candidate?.ambiguousWith ?? [] : [];
   const [allReadings, setAllReadings] = useState(false);
@@ -163,7 +165,9 @@ export function SeamRow({
     <Chip
       onClick={onClick}
       disabled={off}
-      title={frozen ? FROZEN_REFUSAL : busy ? 'saving…' : title}
+      title={
+        frozen ? FROZEN_REFUSAL : busy ? 'saving…' : rereading ? 're-reading the pattern…' : title
+      }
       className='disabled:border-hairline disabled:text-textInactiveColor'
       {...extra}
     >
@@ -317,7 +321,7 @@ export function SeamRow({
                 </>
               )}
               {g === 'stale' &&
-                ((item.stale ? item.stale.stillFits : true)
+                (item.stale?.stillFits === true
                   ? chip(
                       're-confirm',
                       () => doors.reconfirm(item),

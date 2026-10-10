@@ -32,6 +32,7 @@ export function SeamRail({
   roles,
   selectedId,
   frozen,
+  rereading,
   directionOf,
   wordsFor,
   doors,
@@ -42,6 +43,8 @@ export function SeamRail({
   roles: RoleWords;
   selectedId: string | null;
   frozen: boolean;
+  /** The graph is being re-read: write doors wait. */
+  rereading: boolean;
   directionOf: (it: ReviewItem) => StoredSeamDirection;
   wordsFor: (it: ReviewItem) => 'reject' | 'note' | null;
   doors: RowDoors;
@@ -83,6 +86,7 @@ export function SeamRail({
                 roles={roles}
                 selected={it.id === selectedId}
                 frozen={frozen}
+                rereading={rereading}
                 direction={directionOf(it)}
                 words={wordsFor(it)}
                 doors={doors}

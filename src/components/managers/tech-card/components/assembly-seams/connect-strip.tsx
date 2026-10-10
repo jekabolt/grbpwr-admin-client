@@ -26,6 +26,7 @@ export function ConnectStrip({
   direction,
   replacing,
   frozen,
+  rereading,
   onConnect,
   onFlip,
   onCancel,
@@ -37,6 +38,7 @@ export function ConnectStrip({
   /** «connect again» of a stale row: the new pair replaces it under the same key. */
   replacing: string | null;
   frozen: boolean;
+  rereading: boolean;
   onConnect: () => void;
   onFlip: () => void;
   onCancel: () => void;
@@ -88,7 +90,7 @@ export function ConnectStrip({
         <Button
           variant='main'
           size='sm'
-          disabled={!ready || frozen}
+          disabled={!ready || frozen || rereading}
           onClick={onConnect}
           data-connect-door='connect'
         >

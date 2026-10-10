@@ -113,7 +113,10 @@ export function hydrateSeams(cardId: number | null, wire: readonly TechCardSeamW
     useSeamsStore.setState({ ...EMPTY, cardId, server: rows, unreadable });
     return;
   }
-  useSeamsStore.setState({ server: rows, unreadable });
+  // Another list (a re-upload stamped rows stale, a colleague decided): the last verdict was read
+  // on the old rows and must not vouch for the new ones until the provider re-reads.
+  const changed = rowsSig(rows) !== rowsSig(s.server);
+  useSeamsStore.setState({ server: rows, unreadable, ...(changed ? { resolved: null } : {}) });
 }
 
 export function resetSeams() {
