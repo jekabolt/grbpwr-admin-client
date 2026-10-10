@@ -185,6 +185,25 @@ export type SourceDoc = {
   file: SourceFileInfo;
   pages: IRPage[];
   warnings: string[];
+  /**
+   * A0.1 (AUTO): the file states its own physical size — an SVG whose root width/height are in
+   * mm / cm / in and agree with its viewBox (one user unit = `userUnitMm` on both axes). The scale
+   * step reports it as method 'declared' (confidence 1.0, no tick to give). Absent = the file does
+   * not say (px / unitless SVG, PDF, raster, HPGL): the test square decides as before.
+   */
+  declaredUnits?: DeclaredUnits;
+};
+
+/** A0.1: what the file says about its own units, and where (quoted to the operator). */
+export type DeclaredUnits = {
+  unit: 'mm' | 'cm' | 'in';
+  /** Page size the file declares, mm. */
+  widthMm: Mm;
+  heightMm: Mm;
+  /** mm per user unit (equal on both axes within 0.1 %, or the file is not declared). */
+  userUnitMm: Mm;
+  /** As written, e.g. `width="1000mm" height="700mm" viewBox="0 0 1000 700"`. */
+  evidence: string;
 };
 
 export type ExtractOpts = {
@@ -546,7 +565,15 @@ export type GradeRefusal =
  * layers, colours, a size label on a one-size file); 'operator' = answered on the sizes step. The
  * card's size run is never the count (H1c-4) — the sizes step only offers it as a quick answer.
  */
-export type ExpectedSizes = { n: number; from: 'source' | 'operator' };
+export type ExpectedSizes = {
+  n: number;
+  /**
+   * AUTO A6 (later phase): 'inferred' = two or more independent sheet evidences agree on n (legend
+   * text, nest depth, file count, AI). The size stage treats it like 'operator' (n known, ranks
+   * still proven). Not produced yet.
+   */
+  from: 'source' | 'operator' | 'inferred';
+};
 
 /**
  * The sizes step's "sizes drawn on this sheet" question (D1). Asked when the source does not state
@@ -720,7 +747,17 @@ export type NotchFeature = FeatureBase & {
   depthMm: Mm;
 };
 export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
-export type GrainFeature = FeatureBase & { kind: 'grain'; a: PtMm; b: PtMm; angleDeg: Deg };
+export type GrainFeature = Omit<FeatureBase, 'origin'> & {
+  kind: 'grain';
+  /**
+   * AUTO A1 (later phase): 'proposed' = a grainline the drawing suggests (strip axis, symmetry axis,
+   * straight CF/CB edge) with a single evidence: shown as a proposal, accepted only by a click.
+   */
+  origin: FeatureOrigin | 'proposed';
+  a: PtMm;
+  b: PtMm;
+  angleDeg: Deg;
+};
 export type FoldFeature = FeatureBase & {
   kind: 'fold';
   /** The straight contour edge that is the fold. */
@@ -1756,6 +1793,33 @@ export type WizardEvent =
   | { type: 'download' }
   | { type: 'back'; to: WizardStep }
   | { type: 'reset' };
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 11b. AUTO wave (tmp/plans/pdf-to-dxf/auto/00-PLAN.md) — types for the later phases, unused yet
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * D3 stays: what the drawing does not prove is asked. 'auto' = two or more independent evidences
+ * agree (applied, shown with an AUTO pill, undoable); 'suggest' = one evidence (prefilled, one
+ * "accept all" click); 'ask' = none (a question).
+ */
+export type AutoOrigin = 'auto' | 'suggest' | 'ask';
+
+/** One decision the auto run took at a fork of the wizard (A4), with the evidence behind it. */
+export type AutoDecision = {
+  step: WizardStep;
+  /** What was decided: 'scale', 'legend', 'drawn-sizes', 'size-map', 'seed', 'grain', 'fold', … */
+  kind: string;
+  /** The piece it is about, when it is about one. */
+  seed?: SeedId;
+  value: unknown;
+  origin: AutoOrigin;
+  /** Human-readable evidences, each independent of the others ("layer «Cut lines»", …). */
+  evidence: string[];
+};
+
+/** A1: a grainline the geometry proposes (origin 'proposed' once it is a feature). */
+export type GrainProposal = { a: PtMm; b: PtMm; why: string };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 12. Card-side consumption (F6b) — the manifest-aware paths of existing functions
