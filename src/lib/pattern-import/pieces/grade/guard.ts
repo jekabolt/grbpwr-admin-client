@@ -49,15 +49,43 @@ export const NOT_EVIDENCE: ReadonlySet<ChainRole> = new Set<ChainRole>(['ignore'
  * look alike that is every outline, so an unconfirmed 'internal' stays evidence (the solver's
  * acceptance checks still have to prove it).
  */
-export const NOT_EVIDENCE_CONFIRMED: ReadonlySet<ChainRole> = new Set<ChainRole>(['seam', 'grain', 'internal']);
+export const NOT_EVIDENCE_CONFIRMED: ReadonlySet<ChainRole> = new Set<ChainRole>([
+  'seam',
+  'grain',
+  'internal',
+]);
 
-/** Chains of the classes above. */
-export function notEvidence(classes: readonly LineClass[]): Set<ChainId> {
-  return new Set(
-    classes
-      .filter((c) => NOT_EVIDENCE.has(c.role) || (NOT_EVIDENCE_CONFIRMED.has(c.role) && c.confidence >= 0.9))
-      .flatMap((c) => c.chains),
-  );
+/** F3's own 'ignore' below this length is a FRAGMENT of a drawn line (lines cut at every crossing). */
+export const FRAGMENT_MM = 8;
+
+/**
+ * Chains of the classes above. With `chains`, F3's automatic 'ignore' keeps its fragments
+ * (< FRAGMENT_MM, not confirmed by the operator): where every crossing cuts the lines those are the
+ * outline between two crossings, not a frame or a grid. Frames, grids, duplicates, the operator's
+ * ignore — never.
+ */
+export function notEvidence(
+  classes: readonly LineClass[],
+  chains?: readonly Chain[],
+): Set<ChainId> {
+  const out = new Set<ChainId>();
+  for (const c of classes) {
+    const confirmed = c.confidence >= 0.9;
+    if (NOT_EVIDENCE.has(c.role)) {
+      for (const id of c.chains)
+        if (
+          !(
+            c.role === 'ignore' &&
+            !confirmed &&
+            chains &&
+            (chains[id]?.lengthMm ?? Infinity) < FRAGMENT_MM
+          )
+        )
+          out.add(id);
+    } else if (NOT_EVIDENCE_CONFIRMED.has(c.role) && confirmed)
+      for (const id of c.chains) out.add(id);
+  }
+  return out;
 }
 
 /** Two lines look alike: colour (Σ|ΔRGB| ≤ 60), width (±0.1 mm or ×1.5), dash (both solid, or motifs within 0.5 mm). */
@@ -70,7 +98,8 @@ export function sameLook(a: Chain, b: Chain, styles?: StyleMap): boolean {
   if (sa && sb) {
     const ca = sa.strokeRgb ?? [0, 0, 0];
     const cb = sb.strokeRgb ?? [0, 0, 0];
-    if (Math.abs(ca[0] - cb[0]) + Math.abs(ca[1] - cb[1]) + Math.abs(ca[2] - cb[2]) > 60) return false;
+    if (Math.abs(ca[0] - cb[0]) + Math.abs(ca[1] - cb[1]) + Math.abs(ca[2] - cb[2]) > 60)
+      return false;
     const wa = sa.widthMm || 0;
     const wb = sb.widthMm || 0;
     if (Math.abs(wa - wb) > 0.1 && Math.max(wa, wb) > 1.5 * Math.min(wa, wb)) return false;
@@ -93,7 +122,7 @@ export function gradingEvidence(
   const o = { ...GUARD_OPTS, ...opts };
   const covered = new Set<ChainId>([
     ...classes.filter((c) => c.role === 'size').flatMap((c) => c.chains),
-    ...notEvidence(classes),
+    ...notEvidence(classes, chains),
   ]);
   const cand = chains.filter((c) => !covered.has(c.id) && c.lengthMm >= 10 && c.pts.length >= 2);
   const byId = new Map(cand.map((c) => [c.id, c]));
@@ -137,7 +166,12 @@ export function gradingEvidence(
     }
   }
   const share = total ? nested / total : 0;
-  return { graded: share >= o.minShare && nested >= o.minLenMm, share, nestedMm: nested, totalMm: total };
+  return {
+    graded: share >= o.minShare && nested >= o.minLenMm,
+    share,
+    nestedMm: nested,
+    totalMm: total,
+  };
 }
 
 /**

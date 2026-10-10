@@ -72,14 +72,21 @@ class PointGrid {
     const cx = Math.floor(p.x / this.cell);
     const cy = Math.floor(p.y / this.cell);
     for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 1; dy++) for (const id of this.cells.get(`${cx + dx}:${cy + dy}`) ?? []) f(id);
+      for (let dy = -1; dy <= 1; dy++)
+        for (const id of this.cells.get(`${cx + dx}:${cy + dy}`) ?? []) f(id);
   }
 }
 
 /** Chains cut at their junction points (see header). */
-export function elementsOf(sheet: Sheet, set: ChainSet, use: readonly ChainId[], o: TrackOpts = TRACK_OPTS): Element[] {
+export function elementsOf(
+  sheet: Sheet,
+  set: ChainSet,
+  use: readonly ChainId[],
+  o: TrackOpts = TRACK_OPTS,
+): Element[] {
   const pathById = new Map<PathId, V[]>();
-  for (const p of sheet.paths) pathById.set(p.id, p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts);
+  for (const p of sheet.paths)
+    pathById.set(p.id, p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts);
   type Cut = { chain: ChainId; u: number; p: V };
   const cand: Cut[] = [];
   const accOf = new Map<ChainId, number[]>();
@@ -176,7 +183,8 @@ export function buildTracks(els: readonly Element[], o: TrackOpts = TRACK_OPTS):
   const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])));
   ends.forEach((e, i) =>
     grid.near(e.p, (j) => {
-      if (j > i && ends[j].el !== e.el && dist(ends[j].p, e.p) <= o.junctionMm) parent[find(i)] = find(j);
+      if (j > i && ends[j].el !== e.el && dist(ends[j].p, e.p) <= o.junctionMm)
+        parent[find(i)] = find(j);
     }),
   );
   const clusters = new Map<number, number[]>();
@@ -205,7 +213,10 @@ export function buildTracks(els: readonly Element[], o: TrackOpts = TRACK_OPTS):
       // readable from the drawing — neither chains
       const ang = deg(p.c);
       const rival = all.some(
-        (q) => q !== p && (q.a === p.a || q.b === p.a || q.a === p.b || q.b === p.b) && deg(q.c) - ang < o.junctionMarginDeg,
+        (q) =>
+          q !== p &&
+          (q.a === p.a || q.b === p.a || q.a === p.b || q.b === p.b) &&
+          deg(q.c) - ang < o.junctionMarginDeg,
       );
       if (rival) continue;
       pairUp(p.a, p.b);
@@ -308,7 +319,8 @@ export function buildTracks(els: readonly Element[], o: TrackOpts = TRACK_OPTS):
     }
     if (closed && pts.length > 2 && dist(pts[0], pts[pts.length - 1]) > 1e-6) pts.push(pts[0]);
     if (!closed && pts.length > 3 && dist(pts[0], pts[pts.length - 1]) < 0.1) closed = true;
-    if (pts.length >= 2) tracks.push({ id: tracks.length, pts, items, lengthMm: polyLen(pts), closed });
+    if (pts.length >= 2)
+      tracks.push({ id: tracks.length, pts, items, lengthMm: polyLen(pts), closed });
   };
   for (let k = 0; k < els.length; k++) {
     if (used[k]) continue;

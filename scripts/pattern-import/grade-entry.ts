@@ -629,15 +629,24 @@ function encoded() {
     const p = JSON.parse(readFileSync(file, 'utf8')) as { sheet: Sheet; set: ChainSet; run: SizeRun };
     const v = VARIANT[id] ?? null;
     const seeds = proposeSeeds(p.sheet, p.set).filter((s) => !v || !s.variant || s.variant === v);
+    // the worker's expected count for this source (no card: what the file itself says)
+    const expected = expectedSizes(p.run, [], null, p.set) ?? undefined;
     const run = (mode: FillOpts['grade']) => {
-      const { families, diag } = fillPiecesDetailed(p.sheet, p.set, p.run, seeds, fillOpts(VARIANT[id] ?? null, mode));
+      const { families, diag } = fillPiecesDetailed(p.sheet, p.set, p.run, seeds, fillOpts(VARIANT[id] ?? null, mode, expected));
+      if (diag.grade && process.env.ENCDBG)
+        console.log(`   ${label} hook: n=${diag.grade.n} guarded ${diag.grade.guarded.join(',')} skip ${[...diag.grade.skip].join(',')} expected ${JSON.stringify(expected)} run ${p.run.encoding}/${p.run.sizes.length}`);
       return { json: JSON.stringify(families), hook: !!diag.grade, mode: diag.model.mode };
     };
     const a = run('off');
     const c = run('solve');
     const same = a.json === c.json;
-    console.log(`${label.padEnd(30)} encoded: F4 mode ${a.mode}, hook invoked ${c.hook}, families byte-identical ${same} (${a.json.length} bytes)`);
-    out.push({ sample: label, mode: a.mode, hook: c.hook, identical: same });
+    console.log(`${label.padEnd(30)} encoded: F4 mode ${a.mode}, expected ${expected ? `${expected.n} (${expected.from})` : 'unknown'}, hook invoked ${c.hook}, families byte-identical ${same} (${a.json.length} bytes)`);
+    // the byte-identity promise covers sources that ENCODE their sizes (expected from the source,
+    // > 1). A source that does not (one size, no label) is fail-closed by design; polupalto is
+    // audited: F3 reads its piece numbers as size labels (H0), its "encoding" is not one
+    const encodes = expected?.from === 'source' && expected.n > 1;
+    const audited = id === 'polupalto' ? 'F3 reads piece numbers as size labels: an unencoded graded sheet' : undefined;
+    out.push({ sample: label, mode: a.mode, hook: c.hook, identical: same, encodes, ...(audited ? { audited } : {}) });
   }
   return out;
 }
@@ -899,7 +908,7 @@ export async function main(argv: string[]) {
     const sol = data.solve as RunRow[];
     const guard = (data.baseline as RunRow[]).filter((r) => r.mode === 'guard');
     const ctl = data.controls as { mode: string; score?: Score; sizeCountAmb?: boolean; real?: { correct: number }; shuffled?: { correct: number } }[];
-    const enc = data.encoded as { sample: string; hook: boolean; identical: boolean }[];
+    const enc = (data.encoded as { sample: string; hook: boolean; identical: boolean; encodes: boolean; audited?: string }[]).filter((r) => r.encodes && !r.audited);
     const wrong = [...sol, ...guard].reduce((a, r) => a + r.score.wrong, 0);
     const ctlWrong = ctl.reduce((a, r) => a + (r.score?.wrong ?? 0), 0);
     const ctlNoAmb = ctl.filter((r) => r.score && !r.sizeCountAmb).length;

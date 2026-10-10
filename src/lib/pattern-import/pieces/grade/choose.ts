@@ -37,7 +37,7 @@ export function maskHash(mask: Uint8Array, W: number): number {
       h ^= j;
       h = Math.imul(h, 0x01000193);
     }
-  return (h >>> 0) || 1;
+  return h >>> 0 || 1;
 }
 
 export const sameLayout = (a: { hashes: number[] }, b: { hashes: number[] }) =>
@@ -74,7 +74,12 @@ function accOf(M: GradeModel, tr: number) {
   return a;
 }
 
-export function portionPts(M: GradeModel, bits: readonly number[], only?: Set<number>, flipSub = -1): PortionPts[] {
+export function portionPts(
+  M: GradeModel,
+  bits: readonly number[],
+  only?: Set<number>,
+  flipSub = -1,
+): PortionPts[] {
   const out: PortionPts[] = [];
   for (const p of trackPortions(M, bits, only, flipSub)) {
     const pts = subPolyline(M.tracks[p.track].pts, accOf(M, p.track), p.from, p.to);
@@ -138,9 +143,16 @@ export function fillRank(
     // the knife's whole cutting line (its collinear pieces, cut apart at crossings) would cut
     // this region where the knife alone does not: F4's contour will miss the cut
     const k2 = cutBy([...knives, ...carriers]);
-    if (k2.onSeed || (k2.cuts && (!k1.cuts || Math.abs(k2.count - k1.count) > 0.002 * area))) incomplete = true;
+    if (k2.onSeed || (k2.cuts && (!k1.cuts || Math.abs(k2.count - k1.count) > 0.002 * area)))
+      incomplete = true;
   }
-  return { closed: true, area: a, cutArea: k1.cuts ? k1.count * g.cell * g.cell : a, knifeIncomplete: incomplete, hash };
+  return {
+    closed: true,
+    area: a,
+    cutArea: k1.cuts ? k1.count * g.cell * g.cell : a,
+    knifeIncomplete: incomplete,
+    hash,
+  };
 }
 
 /** Rank regions (masks) of one combination. */
@@ -164,7 +176,14 @@ export function rankMasks(
     // the same walls give the same region: a combination that does not touch rank r's walls
     // reuses the region another one already filled
     const mine = ps.filter((p) => p.ranks.includes(r));
-    const key = memo ? mine.map((p) => { const e = p.pts[p.pts.length - 1]; return `${p.track}:${p.pts.length}:${p.pts[0].x.toFixed(2)},${p.pts[0].y.toFixed(2)}:${e.x.toFixed(2)},${e.y.toFixed(2)}`; }).join('|') : '';
+    const key = memo
+      ? mine
+          .map((p) => {
+            const e = p.pts[p.pts.length - 1];
+            return `${p.track}:${p.pts.length}:${p.pts[0].x.toFixed(2)},${p.pts[0].y.toFixed(2)}:${e.x.toFixed(2)},${e.y.toFixed(2)}`;
+          })
+          .join('|')
+      : '';
     const hit = memo?.get(key);
     if (hit) {
       masks.push(null);
@@ -197,7 +216,9 @@ export function rankMasks(
  * cross. excess = Σ |R_r ∖ R_r+1| over Σ |R_r+1 ∖ R_r| (consecutive closed ranks); a component
  * whose rank direction is flipped puts a whole edge of the small size outside the big one.
  */
-export function nestPairs(masks: readonly (Uint8Array | null)[]): { r: number; excess: number; growth: number }[] {
+export function nestPairs(
+  masks: readonly (Uint8Array | null)[],
+): { r: number; excess: number; growth: number }[] {
   const out: { r: number; excess: number; growth: number }[] = [];
   let prev: Uint8Array | null = null;
   let pr = -1;
@@ -254,7 +275,12 @@ function evalCombo(
 /** Score penalty per unit of nesting excess (see nestExcess). */
 export const NEST_WEIGHT = 0;
 
-export function scoreAreas(bits: number[], areas: number[], n: number, hashes: number[] = []): Combo {
+export function scoreAreas(
+  bits: number[],
+  areas: number[],
+  n: number,
+  hashes: number[] = [],
+): Combo {
   let closed = 0;
   for (const a of areas) if (a >= 0) closed++;
   let monotone = closed === n;
@@ -265,7 +291,10 @@ export function scoreAreas(bits: number[], areas: number[], n: number, hashes: n
     steps.push(areas[r] - areas[r - 1]);
   }
   const m = steps.length ? steps.reduce((a, b) => a + b, 0) / steps.length : 0;
-  const cv = steps.length > 1 && m > 0 ? Math.sqrt(steps.reduce((a, s) => a + (s - m) ** 2, 0) / steps.length) / m : 9;
+  const cv =
+    steps.length > 1 && m > 0
+      ? Math.sqrt(steps.reduce((a, s) => a + (s - m) ** 2, 0) / steps.length) / m
+      : 9;
   const up = steps.filter((s) => s > 0).length;
   const down = steps.filter((s) => s < 0).length;
   const score = closed * 10 + (monotone ? 5 : 0) + 2 * (up - down) - Math.min(cv, 3);
@@ -296,13 +325,24 @@ export function markFrames(M: GradeModel, seeds: readonly Seed[]) {
     if (t.lengthMm > 250 || dist(t.pts[0], t.pts[t.pts.length - 1]) > 1.5) continue;
     const bb = bboxOfPts(t.pts);
     if (bb.maxX - bb.minX > 90 || bb.maxY - bb.minY > 90) continue;
-    if (seeds.some((sd) => sd.at.x >= bb.minX && sd.at.x <= bb.maxX && sd.at.y >= bb.minY && sd.at.y <= bb.maxY))
+    if (
+      seeds.some(
+        (sd) =>
+          sd.at.x >= bb.minX && sd.at.x <= bb.maxX && sd.at.y >= bb.minY && sd.at.y <= bb.maxY,
+      )
+    )
       M.frames.add(t.id);
   }
 }
 
 /** Second frame pass (prototype): all walls → a region under 100 cm² around the seed = a label box. */
-function dropFramesAround(M: GradeModel, seed: Seed, box: BoxMm, inBox: Set<number>, cellMm: number) {
+function dropFramesAround(
+  M: GradeModel,
+  seed: Seed,
+  box: BoxMm,
+  inBox: Set<number>,
+  cellMm: number,
+) {
   for (let pass = 0; pass < 2; pass++) {
     const g = new Grid(box, cellMm);
     const wall = new Uint8Array(g.W * g.H);
@@ -318,7 +358,8 @@ function dropFramesAround(M: GradeModel, seed: Seed, box: BoxMm, inBox: Set<numb
       if (t.lengthMm > 250) continue;
       const bb = bboxOfPts(t.pts);
       if (bb.maxX - bb.minX > 90 || bb.maxY - bb.minY > 90) continue;
-      if (seed.at.x < bb.minX || seed.at.x > bb.maxX || seed.at.y < bb.minY || seed.at.y > bb.maxY) continue;
+      if (seed.at.x < bb.minX || seed.at.x > bb.maxX || seed.at.y < bb.minY || seed.at.y > bb.maxY)
+        continue;
       inBox.delete(id);
       M.frames.add(id);
       dropped++;
@@ -361,8 +402,10 @@ export function solveSeed(M: GradeModel, seed: Seed, box: BoxMm, o: ChooseOpts):
     return m;
   };
   const tol = (c: Combo) => layoutTol(c.areas, o.cellMm);
-  const { top, ambiguous, reason } = pickLayout(combos, M.n, (a, b) =>
-    sameLayout(a, b) || sameRegions(regions(a), regions(b), tol(a)),
+  const { top, ambiguous, reason } = pickLayout(
+    combos,
+    M.n,
+    (a, b) => sameLayout(a, b) || sameRegions(regions(a), regions(b), tol(a)),
   );
   return { seed, box, inBox, comps: compList, free, compLen, top, all, ambiguous, reason };
 }
@@ -383,7 +426,9 @@ export function pickLayout(
   for (const c of sorted) if (!byHash.some((d) => sameLayout(c, d))) byHash.push(c);
   const best = byHash[0];
   const contenders = best
-    ? byHash.filter((c) => c === best || (c.closed === n && c.monotone && c.score >= best.score - 0.5))
+    ? byHash.filter(
+        (c) => c === best || (c.closed === n && c.monotone && c.score >= best.score - 0.5),
+      )
     : [];
   const distinct: Combo[] = [];
   for (const c of contenders) if (!distinct.some((d) => same(c, d))) distinct.push(c);
@@ -394,7 +439,9 @@ export function pickLayout(
   else if (best.closed < n) reason = `only ${best.closed}/${n} closed`;
   else if (!best.monotone) reason = 'not monotone';
   const rival = best
-    ? distinct.find((c) => c !== best && c.closed === n && c.monotone && c.score >= best.score - 0.5)
+    ? distinct.find(
+        (c) => c !== best && c.closed === n && c.monotone && c.score >= best.score - 0.5,
+      )
     : undefined;
   if (best && rival) {
     ambiguous = true;
@@ -414,13 +461,21 @@ export function maskDiff(a: Uint8Array | null, b: Uint8Array | null): number {
 /** Per rank, the pixels two layouts may differ by and still be one: a quarter of a grade step. */
 export function layoutTol(areas: readonly number[], cellMm: number): number {
   const fa = areas.filter((a) => a >= 0);
-  const steps = fa.slice(1).map((a, k) => a - fa[k]).filter((d) => d > 0).sort((x, y) => x - y);
+  const steps = fa
+    .slice(1)
+    .map((a, k) => a - fa[k])
+    .filter((d) => d > 0)
+    .sort((x, y) => x - y);
   const step = steps.length ? steps[steps.length >> 1] : 0;
   const big = fa.length ? Math.max(...fa) : 0;
   return Math.max(0.25 * step, 0.001 * big) / (cellMm * cellMm);
 }
 
-export function sameRegions(a: readonly (Uint8Array | null)[], b: readonly (Uint8Array | null)[], tolPx: number): boolean {
+export function sameRegions(
+  a: readonly (Uint8Array | null)[],
+  b: readonly (Uint8Array | null)[],
+  tolPx: number,
+): boolean {
   return a.length === b.length && a.every((m, r) => maskDiff(m, b[r]) <= tolPx);
 }
 

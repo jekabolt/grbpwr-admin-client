@@ -57,8 +57,17 @@ export type GradeHook = {
   ambiguities: ChainAmbiguity[];
 };
 
-/** Guard evidence for an ENCODED sheet: a nest needs self + 2 same-looking lines (cut + seam is 2). */
-const MIXED_GUARD: Partial<GuardOpts> = { minLanes: 3 };
+/**
+ * Guard evidence for an ENCODED sheet (a graded piece nobody encoded beside encoded ones): its nest
+ * shows the sheet's sizes side by side — at least min(n, 5), never fewer than 3, same-looking lines
+ * (a cut line with its seam line is 2, a hem with fold and facing 3), over a third of the region's
+ * lines. Measured on the encoded corpus: 4 lanes still fired on reef (declared-dash, 9 sizes) and 3
+ * on viola; 5 fires only on polupalto, whose "encoding" is F3 reading piece numbers as size labels.
+ */
+export const mixedGuard = (n: number): Partial<GuardOpts> => ({
+  minLanes: Math.max(3, Math.min(n, 5)),
+  minShare: 0.33,
+});
 
 /**
  * Seeds whose region (every candidate line a wall, the envelope around the seed) holds a graded
@@ -105,7 +114,12 @@ function guardedSeeds(
           }
       const a = g.centre(x0, y0);
       const b = g.centre(x1, y1);
-      region = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+      region = {
+        minX: Math.min(a.x, b.x),
+        minY: Math.min(a.y, b.y),
+        maxX: Math.max(a.x, b.x),
+        maxY: Math.max(a.y, b.y),
+      };
     }
     const near = common.filter((c, i) => {
       if (!boxOverlap(boxes[i], region)) return false;
@@ -123,7 +137,12 @@ function guardedSeeds(
 }
 
 /** A refused candidate: no contour, the reason and the words for the operator. */
-export function refusedCandidate(seed: Seed, rank: number, why: GradeRefusal, detail: string): PieceCandidate {
+export function refusedCandidate(
+  seed: Seed,
+  rank: number,
+  why: GradeRefusal,
+  detail: string,
+): PieceCandidate {
   return {
     seed: seed.id,
     rank,
@@ -182,7 +201,8 @@ function knifeCarriers(set: ChainSet, knives: readonly number[]): PtMm[][] {
 }
 
 const DETAIL: Record<GradeRefusal, string> = {
-  'sizes-not-distinguished': 'several sizes are drawn alike here and nothing proves which line is which size',
+  'sizes-not-distinguished':
+    'several sizes are drawn alike here and nothing proves which line is which size',
   'grade-ambiguous': 'more than one size layout fits these lines',
   'size-count': 'how many sizes this sheet draws is not known — answer it on the sizes step',
 };
@@ -205,7 +225,7 @@ export function gradeHook(
   const exp = opts.expectedSizes ?? null;
   const cell = opts.cellMm || 0.5;
   const byId = new Map(seeds.map((s) => [s.id, s]));
-  const blocked = new Set<ChainId>([...notEvidence(set.classes), ...exclude]);
+  const blocked = new Set<ChainId>([...notEvidence(set.classes, set.chains), ...exclude]);
 
   /** Every listed seed refused at every one of n ranks; F4 fills the rest with its own walls. */
   const refuseSeeds = (
@@ -227,7 +247,11 @@ export function gradeHook(
     finish: (cands) => {
       for (const id of ids) {
         const s = byId.get(id);
-        if (s) cands.set(id, Array.from({ length: n }, (_, r) => refusedCandidate(s, r, why, detail)));
+        if (s)
+          cands.set(
+            id,
+            Array.from({ length: n }, (_, r) => refusedCandidate(s, r, why, detail)),
+          );
       }
     },
   });
@@ -237,9 +261,16 @@ export function gradeHook(
     // size class covers is a graded piece nobody encoded (a mixed sheet) — refused
     const covered = new Set(model.graded);
     const ids = model.common.filter((id) => !covered.has(id) && !blocked.has(id));
-    const g = guardedSeeds(sheet, set, seeds, ids, cell, MIXED_GUARD);
+    const g = guardedSeeds(sheet, set, seeds, ids, cell, mixedGuard(model.n));
     if (!g.length) return null;
-    return refuseSeeds(g, model.n, 'sizes-not-distinguished', DETAIL['sizes-not-distinguished'], null, []);
+    return refuseSeeds(
+      g,
+      model.n,
+      'sizes-not-distinguished',
+      DETAIL['sizes-not-distinguished'],
+      null,
+      [],
+    );
   }
 
   const lineIds = model.common.filter((id) => !blocked.has(id));
@@ -260,7 +291,15 @@ export function gradeHook(
   const n = exp.n;
   const all = seeds.map((s) => s.id);
   if (mode === 'guard')
-    return refuseSeeds(all, n, 'sizes-not-distinguished', DETAIL['sizes-not-distinguished'], null, [], () => []);
+    return refuseSeeds(
+      all,
+      n,
+      'sizes-not-distinguished',
+      DETAIL['sizes-not-distinguished'],
+      null,
+      [],
+      () => [],
+    );
 
   const kIds = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knives = itemsOf(set, kIds).map((it) => it.pts);
@@ -290,7 +329,14 @@ export function gradeHook(
       set,
       seeds,
       n,
-      { cellMm: cell, knives, knifeIds: kIds, knifeCarriers: knifeCarriers(set, kIds), exclude: [...blocked], tick },
+      {
+        cellMm: cell,
+        knives,
+        knifeIds: kIds,
+        knifeCarriers: knifeCarriers(set, kIds),
+        exclude: [...blocked],
+        tick,
+      },
       progress,
     );
     cache.set(key, G);
@@ -304,13 +350,18 @@ export function gradeHook(
     return refuseSeeds(all, n, 'size-count', message, G, [amb], () => []);
   }
   const byRank: WallItem[][] = Array.from({ length: n }, () => []);
-  for (const p of G.portions) for (const r of p.ranks) byRank[r].push({ chain: p.chain, pts: p.pts });
+  for (const p of G.portions)
+    for (const r of p.ranks) byRank[r].push({ chain: p.chain, pts: p.pts });
   const res = new Map(G.seeds.map((s) => [s.seed, s]));
-  const skip = new Set(G.seeds.filter((s) => !s.accepted || !s.rankOk.some(Boolean)).map((s) => s.seed));
+  const skip = new Set(
+    G.seeds.filter((s) => !s.accepted || !s.rankOk.some(Boolean)).map((s) => s.seed),
+  );
   for (const s of seeds) if (!res.has(s.id)) skip.add(s.id);
   const detailOf = (id: SeedId) => {
     const s = res.get(id);
-    return s?.reason ? `${DETAIL[s.refusal ?? 'sizes-not-distinguished']} (${s.reason})` : DETAIL['sizes-not-distinguished'];
+    return s?.reason
+      ? `${DETAIL[s.refusal ?? 'sizes-not-distinguished']} (${s.reason})`
+      : DETAIL['sizes-not-distinguished'];
   };
   return {
     n,
@@ -325,16 +376,28 @@ export function gradeHook(
         const sd = byId.get(id);
         if (!sd) continue;
         const why = res.get(id)?.refusal ?? 'sizes-not-distinguished';
-        cands.set(id, Array.from({ length: n }, (_, r) => refusedCandidate(sd, r, why, detailOf(id))));
+        cands.set(
+          id,
+          Array.from({ length: n }, (_, r) => refusedCandidate(sd, r, why, detailOf(id))),
+        );
       }
       for (const [id, list] of cands) {
         if (skip.has(id)) continue;
         const s = res.get(id)!;
         for (const c of list) {
           c.rankFrom = 'grade';
-          if (!s.rankOk[c.rank]) refuse(c, 'sizes-not-distinguished', `this size is not proven (${s.reason || 'its outline does not close on the size lines'})`);
+          if (!s.rankOk[c.rank])
+            refuse(
+              c,
+              'sizes-not-distinguished',
+              `this size is not proven (${s.reason || 'its outline does not close on the size lines'})`,
+            );
           else if (c.outcome !== 'closed' && c.outcome !== 'refused')
-            refuse(c, 'sizes-not-distinguished', `F4 could not close the proven size lines (${c.outcome})`);
+            refuse(
+              c,
+              'sizes-not-distinguished',
+              `F4 could not close the proven size lines (${c.outcome})`,
+            );
         }
         // F4's contours on the sheet-wide walls must be the solver's regions. The raster region
         // also holds the wall pixels and F4 opens narrow spurs, so the two differ by a rim that
@@ -343,21 +406,36 @@ export function gradeHook(
         const live = list.filter((c) => c.outcome === 'closed' && s.finalAreasMm2[c.rank] >= 0);
         const off = live.map((c) => s.finalAreasMm2[c.rank] - c.areaMm2);
         const fa = s.finalAreasMm2.filter((a) => a >= 0);
-        const steps = fa.slice(1).map((a, k) => a - fa[k]).filter((d) => d > 0);
+        const steps = fa
+          .slice(1)
+          .map((a, k) => a - fa[k])
+          .filter((d) => d > 0);
         const step = steps.length ? median(steps) : 0;
         const mo = off.length ? median(off) : 0;
         live.forEach((c, k) => {
-          const bad = !step || Math.abs(off[k] - mo) > GRADE_STEP_TOL * step || Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2;
+          const bad =
+            !step ||
+            Math.abs(off[k] - mo) > GRADE_STEP_TOL * step ||
+            Math.abs(mo) > GRADE_RIM_MAX * c.areaMm2;
           if (bad) {
             if (HOOK_DEBUG.on)
-              HOOK_DEBUG.log(`    crosscheck seed ${id} r${c.rank}: solver ${(s.finalAreasMm2[c.rank] / 100).toFixed(1)} vs F4 ${(c.areaMm2 / 100).toFixed(1)} cm², offset ${(off[k] / 100).toFixed(2)} vs median ${(mo / 100).toFixed(2)}, step ${(step / 100).toFixed(2)} cm²`);
-            refuse(c, 'grade-ambiguous', "the closed outline does not match the solver's region for this size");
+              HOOK_DEBUG.log(
+                `    crosscheck seed ${id} r${c.rank}: solver ${(s.finalAreasMm2[c.rank] / 100).toFixed(1)} vs F4 ${(c.areaMm2 / 100).toFixed(1)} cm², offset ${(off[k] / 100).toFixed(2)} vs median ${(mo / 100).toFixed(2)}, step ${(step / 100).toFixed(2)} cm²`,
+              );
+            refuse(
+              c,
+              'grade-ambiguous',
+              "the closed outline does not match the solver's region for this size",
+            );
           }
         });
         // and F4's own family still grows rank by rank
         let prev = -1;
-        for (const c of list.filter((x) => x.outcome === 'closed').sort((x, y) => x.rank - y.rank)) {
-          if (c.areaMm2 <= prev) refuse(c, 'grade-ambiguous', 'this size is not larger than the size below it');
+        for (const c of list
+          .filter((x) => x.outcome === 'closed')
+          .sort((x, y) => x.rank - y.rank)) {
+          if (c.areaMm2 <= prev)
+            refuse(c, 'grade-ambiguous', 'this size is not larger than the size below it');
           else prev = c.areaMm2;
         }
       }

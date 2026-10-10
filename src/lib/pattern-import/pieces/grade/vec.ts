@@ -50,13 +50,19 @@ export function pointAt(pts: readonly V[], acc: readonly number[], d: number): V
 }
 
 /** Sub-polyline between arc lengths from..to (clamped); [] when shorter than 0.05 mm. */
-export function subPolyline(pts: readonly V[], acc: readonly number[], from: number, to: number): V[] {
+export function subPolyline(
+  pts: readonly V[],
+  acc: readonly number[],
+  from: number,
+  to: number,
+): V[] {
   const total = acc[acc.length - 1];
   from = Math.max(0, from);
   to = Math.min(total, to);
   if (to - from < 0.05) return [];
   const out: V[] = [pointAt(pts, acc, from)];
-  for (let i = 0; i < pts.length; i++) if (acc[i] > from + 1e-9 && acc[i] < to - 1e-9) out.push(pts[i]);
+  for (let i = 0; i < pts.length; i++)
+    if (acc[i] > from + 1e-9 && acc[i] < to - 1e-9) out.push(pts[i]);
   out.push(pointAt(pts, acc, to));
   return out;
 }
@@ -75,7 +81,11 @@ export function endTangent(pts: readonly V[], end: 0 | 1, span = 3): V {
 }
 
 /** Samples every `step` mm (first at step/2) with the local unit tangent and arc position. */
-export function resampleT(pts: readonly V[], step: number, phase = 0.5): { p: V; t: V; u: number }[] {
+export function resampleT(
+  pts: readonly V[],
+  step: number,
+  phase = 0.5,
+): { p: V; t: V; u: number }[] {
   const out: { p: V; t: V; u: number }[] = [];
   let acc = 0;
   const total = polyLen(pts);
@@ -128,7 +138,11 @@ export const unionBox = (a: BoxMm, b: BoxMm): BoxMm => ({
 });
 
 /** Nearest point of a polyline to p: arc position and distance. */
-export function projectOn(pts: readonly V[], acc: readonly number[], p: V): { u: number; d: number; i: number } {
+export function projectOn(
+  pts: readonly V[],
+  acc: readonly number[],
+  p: V,
+): { u: number; d: number; i: number } {
   let best = { u: 0, d: Infinity, i: 0 };
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i];

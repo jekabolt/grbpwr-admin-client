@@ -18,9 +18,14 @@ export function expectedSizes(
   set?: ChainSet,
 ): ExpectedSizes | null {
   const carried = set
-    ? run.sizes.filter((z) => z.classId != null && (set.classes.find((c) => c.id === z.classId)?.chains.length ?? 0) > 0).length
+    ? run.sizes.filter(
+        (z) =>
+          z.classId != null &&
+          (set.classes.find((c) => c.id === z.classId)?.chains.length ?? 0) > 0,
+      ).length
     : run.sizes.length;
-  if (run.encoding !== 'single' && run.sizes.length > 1 && carried >= 2) return { n: run.sizes.length, from: 'source' };
+  if (run.encoding !== 'single' && run.sizes.length > 1 && carried >= 2)
+    return { n: run.sizes.length, from: 'source' };
   if (drawnSizes != null && drawnSizes >= 1) return { n: Math.round(drawnSizes), from: 'operator' };
   if (run.encoding === 'single' && run.sizes.length === 1 && run.sizes[0].label.trim())
     return { n: 1, from: 'source' };
@@ -38,7 +43,12 @@ export function runForExpected(run: SizeRun, expected: ExpectedSizes | null): Si
   if (!expected || expected.from === 'source' || expected.n <= 1) return run;
   return {
     encoding: 'single',
-    sizes: Array.from({ length: expected.n }, (_, r) => ({ label: '', rank: r, classId: null, file: run.sizes[0]?.file ?? null })),
+    sizes: Array.from({ length: expected.n }, (_, r) => ({
+      label: '',
+      rank: r,
+      classId: null,
+      file: run.sizes[0]?.file ?? null,
+    })),
     evidence: run.evidence,
   };
 }

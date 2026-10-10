@@ -14,7 +14,14 @@ import type { ChainSet, Sheet } from 'lib/pattern-import/types';
 
 import { SegGrid } from '../geom';
 
-import { buildTracks, elementsOf, TRACK_OPTS, type Element, type Track, type TrackOpts } from './tracks';
+import {
+  buildTracks,
+  elementsOf,
+  TRACK_OPTS,
+  type Element,
+  type Track,
+  type TrackOpts,
+} from './tracks';
 import { arcLengths, dist, dot, endTangent, median, resampleT, sub, unit, type V } from './vec';
 
 /** A parallel track met by a sample's normal ray: offset s (mm) and |cos| of its angle to the track. */
@@ -97,7 +104,16 @@ class Parity {
 }
 
 /** Parallel tracks crossed by the normal ray at p (|s| ≤ reach), nearest hit per track, sorted by s. */
-function rayHits(grid: SegGrid, tracks: Track[], p: V, nrm: V, reach: number, self: number, t: V, cosMin: number): Lane[] {
+function rayHits(
+  grid: SegGrid,
+  tracks: Track[],
+  p: V,
+  nrm: V,
+  reach: number,
+  self: number,
+  t: V,
+  cosMin: number,
+): Lane[] {
   const a = { x: p.x - nrm.x * reach, y: p.y - nrm.y * reach };
   const b = { x: p.x + nrm.x * reach, y: p.y + nrm.y * reach };
   const best = new Map<number, number>();
@@ -137,7 +153,9 @@ function rayHits(grid: SegGrid, tracks: Track[], p: V, nrm: V, reach: number, se
     const u = k / steps;
     grid.near({ x: a.x + rx * u, y: a.y + ry * u }, grid.cell * 0.5, visit);
   }
-  const sorted = [...best].map(([track, s]) => ({ track, s, c: cosOf.get(track) ?? 1 })).sort((x, y) => x.s - y.s);
+  const sorted = [...best]
+    .map(([track, s]) => ({ track, s, c: cosOf.get(track) ?? 1 }))
+    .sort((x, y) => x.s - y.s);
   const out: Lane[] = [];
   for (const h of sorted) {
     const last = out[out.length - 1];
@@ -193,7 +211,13 @@ export const PROPAGATE_PASSES = 3;
 
 export const MODEL_OPTS: ModelOpts = { pitchMm: 4, laneAngleDeg: 30 };
 
-export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number, mo: ModelOpts = MODEL_OPTS): GradeModel {
+export function buildModel(
+  sheet: Sheet,
+  set: ChainSet,
+  use: number[],
+  n: number,
+  mo: ModelOpts = MODEL_OPTS,
+): GradeModel {
   const log = mo.log ?? (() => {});
   const els = elementsOf(sheet, set, use, mo.track ?? TRACK_OPTS);
   const tracks = buildTracks(els, mo.track ?? TRACK_OPTS);
@@ -225,7 +249,9 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
       step0 = k;
     }
   const reach = Math.min(90, Math.max(10, (n - 1) * step0 * 1.4 + 3));
-  log(`  elements ${els.length} tracks ${tracks.length} (long ${long.length}) step0=${step0} reach=${reach.toFixed(0)}`);
+  log(
+    `  elements ${els.length} tracks ${tracks.length} (long ${long.length}) step0=${step0} reach=${reach.toFixed(0)}`,
+  );
   // samples with the real reach; the lane run around self is cut at gaps > 2.5·step0
   const samplesOf = new Map<number, Sample[]>();
   for (const t of long) {
@@ -234,13 +260,24 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
       const nrm = { x: -s.t.y, y: s.t.x };
       const hits = rayHits(grid, tracks, s.p, nrm, reach, t.id, s.t, cosLane);
       const coincident = hits.some((h) => Math.abs(h.s) < 0.3);
-      const all = [...hits.filter((h) => Math.abs(h.s) >= 0.3), { track: t.id, s: 0, c: 1 }].sort((x, y) => x.s - y.s);
+      const all = [...hits.filter((h) => Math.abs(h.s) >= 0.3), { track: t.id, s: 0, c: 1 }].sort(
+        (x, y) => x.s - y.s,
+      );
       const si = all.findIndex((l) => l.track === t.id);
       let lo = si;
       while (lo > 0 && all[lo].s - all[lo - 1].s <= 2.5 * step0) lo--;
       let hi = si;
       while (hi + 1 < all.length && all[hi + 1].s - all[hi].s <= 2.5 * step0) hi++;
-      list.push({ track: t.id, idx, p: s.p, t: s.t, n: nrm, u: s.u, lanes: splitRun(all.slice(lo, hi + 1), t.id, mo.splitRatio ?? SPLIT_RATIO), coincident });
+      list.push({
+        track: t.id,
+        idx,
+        p: s.p,
+        t: s.t,
+        n: nrm,
+        u: s.u,
+        lanes: splitRun(all.slice(lo, hi + 1), t.id, mo.splitRatio ?? SPLIT_RATIO),
+        coincident,
+      });
     });
     samplesOf.set(t.id, list);
   }
@@ -268,7 +305,9 @@ export function buildModel(sheet: Sheet, set: ChainSet, use: number[], n: number
     nSubs: 0,
   };
   for (const [, ss] of samplesOf)
-    for (const s of ss) if (s.lanes.length > 1) M.bandHist.set(s.lanes.length, (M.bandHist.get(s.lanes.length) ?? 0) + 1);
+    for (const s of ss)
+      if (s.lanes.length > 1)
+        M.bandHist.set(s.lanes.length, (M.bandHist.get(s.lanes.length) ?? 0) + 1);
   rankTracks(M, log);
   return M;
 }
@@ -339,8 +378,7 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
       if (c.lane === a.lane) {
         par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 0);
         subUf[subFind(nodeOf.get(a.key)!)] = subFind(nodeOf.get(c.key)!);
-      }
-      else if (c.lane === n - 1 - a.lane) par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 1);
+      } else if (c.lane === n - 1 - a.lane) par.union(nodeOf.get(a.key)!, nodeOf.get(c.key)!, 1);
       else M.laneConflicts++;
     }
   }
@@ -519,7 +557,10 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
     const coinc = ss.filter((s) => s.coincident).length;
     if (alone >= 0.6 * ss.length || coinc >= 0.6 * ss.length) {
       M.common.add(tr);
-      M.sets.set(tr, ss.map(() => [{ comp: -1, ranks: ALL }]));
+      M.sets.set(
+        tr,
+        ss.map(() => [{ comp: -1, ranks: ALL }]),
+      );
     }
   }
   const single = (tr: number, i: number): Entry | null => {
@@ -601,7 +642,9 @@ function rankTracks(M: GradeModel, log: (s: string) => void) {
     if (!cast && !assigned) break;
   }
   landings(M, log);
-  log(`  full ${full.length} comps ${M.nComps} ranked ${votes.size} common ${M.common.size} parity ${par.conflicts} lane ${M.laneConflicts}`);
+  log(
+    `  full ${full.length} comps ${M.nComps} ranked ${votes.size} common ${M.common.size} parity ${par.conflicts} lane ${M.laneConflicts}`,
+  );
   void step0;
   void tracks;
 }
@@ -706,7 +749,9 @@ function landings(M: GradeModel, log: (s: string) => void) {
               }
               if (isFinite(w)) wrapStop = w;
             }
-            const order = ss.map((s, i) => ({ u: s.u, i })).sort((a, b) => (e.dir > 0 ? a.u - b.u : b.u - a.u));
+            const order = ss
+              .map((s, i) => ({ u: s.u, i }))
+              .sort((a, b) => (e.dir > 0 ? a.u - b.u : b.u - a.u));
             const walk = (list: { u: number; i: number }[]) => {
               for (const { u, i } of list) {
                 const cur = m[i];
@@ -724,7 +769,9 @@ function landings(M: GradeModel, log: (s: string) => void) {
                 }
               }
             };
-            walk(order.filter(({ u }) => (e.dir > 0 ? u >= e.u && u <= stop : u <= e.u && u >= stop)));
+            walk(
+              order.filter(({ u }) => (e.dir > 0 ? u >= e.u && u <= stop : u <= e.u && u >= stop)),
+            );
             if (wrapStop != null) {
               const ws = wrapStop;
               walk(order.filter(({ u }) => (e.dir > 0 ? u <= ws : u >= ws)).reverse());
@@ -742,24 +789,43 @@ function landings(M: GradeModel, log: (s: string) => void) {
 // ── evaluation under component bits ──────────────────────────────────────────────────────────
 
 export const compOfTrack = (M: GradeModel, tr: number) =>
-  M.compOf[tr] >= 0 ? M.compOf[tr] : (M.compOfSet.get(tr) ?? -1);
+  M.compOf[tr] >= 0 ? M.compOf[tr] : M.compOfSet.get(tr) ?? -1;
 
 const flip = (ranks: number[], n: number, bit: number) =>
   bit ? ranks.map((r) => n - 1 - r).sort((a, b) => a - b) : ranks;
 
-export function ranksAt(M: GradeModel, tr: number, i: number, bits: readonly number[], flipSub = -1): number[] {
+export function ranksAt(
+  M: GradeModel,
+  tr: number,
+  i: number,
+  bits: readonly number[],
+  flipSub = -1,
+): number[] {
   const m = M.sets.get(tr);
   if (!m) return [];
   const out = new Set<number>();
   const extra = flipSub >= 0 && M.subOf[tr] === flipSub ? 1 : 0;
-  for (const e of m[i] ?? []) for (const r of e.comp >= 0 ? flip(e.ranks, M.n, (bits[e.comp] ?? 0) ^ extra) : e.ranks) out.add(r);
+  for (const e of m[i] ?? [])
+    for (const r of e.comp >= 0 ? flip(e.ranks, M.n, (bits[e.comp] ?? 0) ^ extra) : e.ranks)
+      out.add(r);
   return [...out].sort((a, b) => a - b);
 }
 
-export type TrackPortion = { track: number; from: number; to: number; ranks: number[]; comps: number[] };
+export type TrackPortion = {
+  track: number;
+  from: number;
+  to: number;
+  ranks: number[];
+  comps: number[];
+};
 
 /** Maximal runs of equal rank sets along each track (boundaries halfway between samples). */
-export function trackPortions(M: GradeModel, bits: readonly number[], only?: Set<number>, flipSub = -1): TrackPortion[] {
+export function trackPortions(
+  M: GradeModel,
+  bits: readonly number[],
+  only?: Set<number>,
+  flipSub = -1,
+): TrackPortion[] {
   const out: TrackPortion[] = [];
   for (const [tr, ss] of M.samplesOf) {
     if (M.frames.has(tr) || (only && !only.has(tr))) continue;
@@ -773,7 +839,9 @@ export function trackPortions(M: GradeModel, bits: readonly number[], only?: Set
       const from = i === 0 ? 0 : (ss[i - 1].u + ss[i].u) / 2;
       const to = j === ss.length - 1 ? total : (ss[j].u + ss[j + 1].u) / 2;
       if (rs.length) {
-        const comps = [...new Set((M.sets.get(tr)?.[i] ?? []).map((e) => e.comp).filter((c) => c >= 0))];
+        const comps = [
+          ...new Set((M.sets.get(tr)?.[i] ?? []).map((e) => e.comp).filter((c) => c >= 0)),
+        ];
         out.push({ track: tr, from, to, ranks: rs, comps });
       }
       i = j + 1;

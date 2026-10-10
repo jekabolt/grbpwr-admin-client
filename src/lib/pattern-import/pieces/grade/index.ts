@@ -147,22 +147,33 @@ export const MAX_REGION_CELLS = 12_000_000;
  * and evenly: every per-rank area step within ±35 % of the median step. A flipped component or a
  * foreign line closing a rank breaks exactly this.
  */
-export function familyCheck(areas: readonly number[]): { ok: boolean; why: string; leaks: number[] } {
+export function familyCheck(areas: readonly number[]): {
+  ok: boolean;
+  why: string;
+  leaks: number[];
+} {
   const n = areas.length;
   const closed = areas.map((a, r) => (a >= 0 ? r : -1)).filter((r) => r >= 0);
   const leaks = areas.map((a, r) => (a < 0 ? r : -1)).filter((r) => r >= 0);
-  if (closed.length < Math.max(2, n - 2)) return { ok: false, why: `only ${closed.length}/${n} ranks close`, leaks };
+  if (closed.length < Math.max(2, n - 2))
+    return { ok: false, why: `only ${closed.length}/${n} ranks close`, leaks };
   const steps: number[] = [];
   for (let k = 1; k < closed.length; k++) {
     const a = closed[k - 1];
     const b = closed[k];
     const d = (areas[b] - areas[a]) / (b - a);
-    if (d <= areas[a] * 0.0005) return { ok: false, why: `area does not grow from rank ${a} to ${b}`, leaks };
+    if (d <= areas[a] * 0.0005)
+      return { ok: false, why: `area does not grow from rank ${a} to ${b}`, leaks };
     steps.push(d);
   }
   const med = median(steps);
   for (const d of steps)
-    if (Math.abs(d - med) > 0.35 * med) return { ok: false, why: `uneven area steps (${steps.map((x) => (x / 100).toFixed(1)).join('/')} cm²)`, leaks };
+    if (Math.abs(d - med) > 0.35 * med)
+      return {
+        ok: false,
+        why: `uneven area steps (${steps.map((x) => (x / 100).toFixed(1)).join('/')} cm²)`,
+        leaks,
+      };
   return { ok: true, why: '', leaks };
 }
 
@@ -190,7 +201,11 @@ function envelopeBox(M: GradeModel, seed: Seed, cellMm: number, sheetBox: BoxMm)
       maxX: Math.min(full.maxX, seed.at.x + R),
       maxY: Math.min(full.maxY, seed.at.y + R),
     };
-    const whole = box.minX <= full.minX && box.minY <= full.minY && box.maxX >= full.maxX && box.maxY >= full.maxY;
+    const whole =
+      box.minX <= full.minX &&
+      box.minY <= full.minY &&
+      box.maxX >= full.maxX &&
+      box.maxY >= full.maxY;
     const g = new Grid(box, Math.max(cellMm, 1));
     const wall = new Uint8Array(g.W * g.H);
     for (const t of M.tracks) if (!M.frames.has(t.id)) drawPolyline(g, wall, t.pts);
@@ -207,7 +222,12 @@ function envelopeBox(M: GradeModel, seed: Seed, cellMm: number, sheetBox: BoxMm)
     if (touches && !whole) continue;
     const a = g.centre(mb.x0, mb.y0);
     const b = g.centre(mb.x1, mb.y1);
-    return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+    return {
+      minX: Math.min(a.x, b.x),
+      minY: Math.min(a.y, b.y),
+      maxX: Math.max(a.x, b.x),
+      maxY: Math.max(a.y, b.y),
+    };
   }
 }
 
@@ -222,7 +242,12 @@ function floodFree(g: Grid, blocked: Uint8Array, k0: number, out: Uint8Array) {
     const c = q[h++];
     const y = (c / W) | 0;
     const x = c - y * W;
-    const nb = [x > 0 ? c - 1 : -1, x + 1 < W ? c + 1 : -1, y > 0 ? c - W : -1, y + 1 < g.H ? c + W : -1];
+    const nb = [
+      x > 0 ? c - 1 : -1,
+      x + 1 < W ? c + 1 : -1,
+      y > 0 ? c - W : -1,
+      y + 1 < g.H ? c + W : -1,
+    ];
     for (const j of nb) {
       if (j < 0 || out[j] || blocked[j]) continue;
       out[j] = 1;
@@ -232,7 +257,13 @@ function floodFree(g: Grid, blocked: Uint8Array, k0: number, out: Uint8Array) {
 }
 
 /** Region (bbox) of rank r under the given bits. */
-function rankRegionBox(box: BoxMm, cellMm: number, ps: readonly PortionPts[], r: number, at: PtMm): BoxMm | null {
+function rankRegionBox(
+  box: BoxMm,
+  cellMm: number,
+  ps: readonly PortionPts[],
+  r: number,
+  at: PtMm,
+): BoxMm | null {
   const g = new Grid(box, cellMm);
   const wall = new Uint8Array(g.W * g.H);
   for (const p of ps) if (p.ranks.includes(r)) drawPolyline(g, wall, p.pts);
@@ -244,11 +275,19 @@ function rankRegionBox(box: BoxMm, cellMm: number, ps: readonly PortionPts[], r:
   const mb = maskBox(g, mask);
   const a = g.centre(mb.x0, mb.y0);
   const b = g.centre(mb.x1, mb.y1);
-  return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+  return {
+    minX: Math.min(a.x, b.x),
+    minY: Math.min(a.y, b.y),
+    maxX: Math.max(a.x, b.x),
+    maxY: Math.max(a.y, b.y),
+  };
 }
 
 const inside = (a: BoxMm, b: BoxMm, tol = 1) =>
-  a.minX >= b.minX - tol && a.minY >= b.minY - tol && a.maxX <= b.maxX + tol && a.maxY <= b.maxY + tol;
+  a.minX >= b.minX - tol &&
+  a.minY >= b.minY - tol &&
+  a.maxX <= b.maxX + tol &&
+  a.maxY <= b.maxY + tol;
 
 /** Seed region = its envelope + a margin; solved once there. */
 function growSolve(
@@ -260,7 +299,8 @@ function growSolve(
   const env = envelopeBox(M, seed, o.cellMm, sheetBox);
   if (!env) return null;
   const box = growBox(env, 8 + 2 * M.step0);
-  if (((box.maxX - box.minX) * (box.maxY - box.minY)) / (o.cellMm * o.cellMm) > MAX_REGION_CELLS) return 'too-large';
+  if (((box.maxX - box.minX) * (box.maxY - box.minY)) / (o.cellMm * o.cellMm) > MAX_REGION_CELLS)
+    return 'too-large';
   return solveSeed(M, seed, box, o);
 }
 
@@ -276,7 +316,14 @@ export const ALT_READING: ModelOpts = {
   phase: 0.15,
   laneAngleDeg: 24,
   splitRatio: 2.1,
-  track: { gapMm: 2.5, angleDeg: 18, lateralMm: 0.4, junctionMm: 0.3, junctionAngleDeg: 16, junctionMarginDeg: 2 },
+  track: {
+    gapMm: 2.5,
+    angleDeg: 18,
+    lateralMm: 0.4,
+    junctionMm: 0.3,
+    junctionAngleDeg: 16,
+    junctionMarginDeg: 2,
+  },
 };
 /** A component built from fewer full cross-sections than this has an unproven orientation. */
 export const WEAK_SUPPORT = 60;
@@ -295,20 +342,36 @@ export function gradeRanks(
   const base = gradeOnce(sheet, set, seeds, n, opts, BASE_READING, progress);
   if (!(opts.twoReadings ?? GRADE_TUNING.twoReadings) || base.diag.bandMode !== n) return base;
   // the second reading only re-checks what the first accepted (a refused seed stays refused)
-  const live = new Set(base.seeds.filter((s) => s.accepted && s.rankOk.some(Boolean)).map((s) => s.seed));
+  const live = new Set(
+    base.seeds.filter((s) => s.accepted && s.rankOk.some(Boolean)).map((s) => s.seed),
+  );
   if (!live.size) return base;
-  const alt = gradeOnce(sheet, set, seeds.filter((s) => live.has(s.id)), n, { ...opts, keepModel: false }, ALT_READING);
+  const alt = gradeOnce(
+    sheet,
+    set,
+    seeds.filter((s) => live.has(s.id)),
+    n,
+    { ...opts, keepModel: false },
+    ALT_READING,
+  );
   const other = new Map(alt.seeds.map((x) => [x.seed, x]));
   for (const s of base.seeds) {
     if (!s.accepted) continue;
     const a = other.get(s.seed);
     const fa = s.finalAreasMm2.filter((x) => x >= 0);
-    const steps = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+    const steps = fa
+      .slice(1)
+      .map((x, k) => x - fa[k])
+      .filter((d) => d > 0);
     const step = steps.length ? median(steps) : 0;
     let lost = 0;
     s.rankOk = s.rankOk.map((ok, r) => {
       if (!ok) return false;
-      const agree = !!a && a.rankOk[r] && step > 0 && Math.abs(a.finalAreasMm2[r] - s.finalAreasMm2[r]) <= READING_AGREE * step;
+      const agree =
+        !!a &&
+        a.rankOk[r] &&
+        step > 0 &&
+        Math.abs(a.finalAreasMm2[r] - s.finalAreasMm2[r]) <= READING_AGREE * step;
       if (!agree) lost++;
       return agree;
     });
@@ -329,7 +392,7 @@ function gradeOnce(
 ): GradeResult {
   const t0 = Date.now();
   const log = opts.log ?? (() => {});
-  const skip = new Set(opts.exclude ?? notEvidence(set.classes));
+  const skip = new Set(opts.exclude ?? notEvidence(set.classes, set.chains));
   const use = set.chains.filter((c) => !skip.has(c.id) && c.pts.length >= 2).map((c) => c.id);
   const M = buildModel(sheet, set, use, n, { ...reading, log });
   markFrames(M, seeds);
@@ -449,7 +512,9 @@ function gradeOnce(
         finalAreasMm2: none,
         rankOk: new Array(n).fill(false),
         box: { minX: sd.at.x, minY: sd.at.y, maxX: sd.at.x, maxY: sd.at.y },
-        reason: tooLarge.has(i) ? 'the region around the seed is too large to check' : 'no region around the seed',
+        reason: tooLarge.has(i)
+          ? 'the region around the seed is too large to check'
+          : 'no region around the seed',
       });
       return;
     }
@@ -482,12 +547,17 @@ function gradeOnce(
       refusal = 'sizes-not-distinguished';
       reason = fam.why;
     }
-    const rankOk = fills.map((f, r) => refusal == null && f.closed && !f.knifeIncomplete && !fam.leaks.includes(r));
+    const rankOk = fills.map(
+      (f, r) => refusal == null && f.closed && !f.knifeIncomplete && !fam.leaks.includes(r),
+    );
     // a component built from a handful of cross-sections has a barely evidenced orientation: a
     // rank whose region changes when such a component flips is not trusted
     if (refusal == null) {
       const fa = areas.filter((x) => x >= 0);
-      const st = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+      const st = fa
+        .slice(1)
+        .map((x, k) => x - fa[k])
+        .filter((d) => d > 0);
       const step = st.length ? median(st) : 0;
       for (const c of S.free) {
         if (M.compSupport[c] >= WEAK_SUPPORT) continue;
@@ -503,7 +573,8 @@ function gradeOnce(
             hit++;
           }
         }
-        if (hit) reason += `${reason ? '; ' : ''}${hit} rank(s) hang on weakly evidenced component ${c} (${M.compSupport[c]} cross-sections)`;
+        if (hit)
+          reason += `${reason ? '; ' : ''}${hit} rank(s) hang on weakly evidenced component ${c} (${M.compSupport[c]} cross-sections)`;
       }
     }
     // components beyond the search (more than maxFree around the seed) kept their global bit
@@ -517,7 +588,13 @@ function gradeOnce(
         opts.tick?.();
         const flipped = bits.slice();
         flipped[c] ^= 1;
-        const there = rankMasks(S.box, opts.cellMm, portionPts(M, flipped, S.inBox), n, sd.at).masks;
+        const there = rankMasks(
+          S.box,
+          opts.cellMm,
+          portionPts(M, flipped, S.inBox),
+          n,
+          sd.at,
+        ).masks;
         const moves = rankOk.some((ok, r) => ok && maskDiff(here[r], there[r]) > tolPx);
         if (moves) {
           refusal = 'grade-ambiguous';
@@ -532,15 +609,23 @@ function gradeOnce(
     // fork is which — the piece goes to the operator
     if (refusal == null && rankOk.some((x) => x)) {
       const fa = areas.filter((x) => x >= 0);
-      const st = fa.slice(1).map((x, k) => x - fa[k]).filter((d) => d > 0);
+      const st = fa
+        .slice(1)
+        .map((x, k) => x - fa[k])
+        .filter((d) => d > 0);
       const step = st.length ? median(st) : 0;
       const subs = new Set<number>();
       for (const tr of S.inBox) if (M.subOf[tr] >= 0) subs.add(M.subOf[tr]);
       for (const sub of subs) {
         const ps2 = portionPts(M, bits, S.inBox, sub);
-        const a2 = Array.from({ length: n }, (_, r) => fillRank(S.box, opts.cellMm, ps2, r, sd.at).area);
+        const a2 = Array.from(
+          { length: n },
+          (_, r) => fillRank(S.box, opts.cellMm, ps2, r, sd.at).area,
+        );
         if (!familyCheck(a2).ok) continue;
-        const differs = rankOk.some((ok, r) => ok && (a2[r] < 0 || Math.abs(a2[r] - areas[r]) > 0.3 * step));
+        const differs = rankOk.some(
+          (ok, r) => ok && (a2[r] < 0 || Math.abs(a2[r] - areas[r]) > 0.3 * step),
+        );
         const keeps = rankOk.every((ok, r) => !ok || a2[r] >= 0);
         if (differs && keeps) {
           refusal = 'grade-ambiguous';
@@ -552,7 +637,8 @@ function gradeOnce(
     }
     if (refusal == null && fam.leaks.length) reason = `ranks ${fam.leaks.join(',')} do not close`;
     const knifeBad = fills.map((f, r) => (f.knifeIncomplete ? r : -1)).filter((r) => r >= 0);
-    if (refusal == null && knifeBad.length) reason += `${reason ? '; ' : ''}the variant's cutting line does not reach ranks ${knifeBad.join(',')}`;
+    if (refusal == null && knifeBad.length)
+      reason += `${reason ? '; ' : ''}the variant's cutting line does not reach ranks ${knifeBad.join(',')}`;
     results.push({
       seed: sd.id,
       components: S.comps,
@@ -585,7 +671,12 @@ function gradeOnce(
       const acc = arcAcc(c.pts);
       const pts = subPts(c.pts, acc, sp.fromMm, sp.toMm);
       if (pts.length < 2) continue;
-      portions.push({ ...sp, ranks: p.ranks, component: p.comps.length === 1 ? p.comps[0] : null, pts });
+      portions.push({
+        ...sp,
+        ranks: p.ranks,
+        component: p.comps.length === 1 ? p.comps[0] : null,
+        pts,
+      });
     }
   }
   progress?.(seeds.length, seeds.length);
