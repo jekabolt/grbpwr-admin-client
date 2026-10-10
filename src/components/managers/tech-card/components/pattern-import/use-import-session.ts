@@ -98,6 +98,10 @@ export type Inputs = {
   fileAllowance: AllowanceDecision | null;
   overrides: StageIO['semantics']['in']['pieceOverrides'];
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /** Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`. */
+  operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /** The operator checked the cutting list's fold pieces against the sheet. */
+  foldListChecked: boolean;
   /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */
   confirmedNames: SeedId[];
   /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
@@ -128,6 +132,8 @@ const EMPTY_INPUTS: Inputs = {
   fileAllowance: null,
   overrides: {},
   operatorGrain: {},
+  operatorFold: {},
+  foldListChecked: false,
   confirmedNames: [],
   editedNames: [],
   confirmedQuantities: {},
@@ -343,6 +349,10 @@ export function useImportSession(deps: {
     pieceOverrides: i.overrides,
     operatorGrain: i.operatorGrain,
     aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
+    operatorFold: i.operatorFold,
+    foldListChecked: i.foldListChecked,
+    // the AI read "on fold" off the drawing (the sheet's words may be curves): asked, not unfolded
+    foldHints: sRef.current.names.filter((n) => n.suggestion?.onFold).map((n) => n.seed),
   });
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
@@ -477,6 +487,8 @@ export function useImportSession(deps: {
             fileAllowance: ev.input.fileAllowance,
             overrides: ev.input.pieceOverrides,
             operatorGrain: ev.input.operatorGrain,
+            operatorFold: ev.input.operatorFold ?? iRef.current.operatorFold,
+            foldListChecked: ev.input.foldListChecked ?? iRef.current.foldListChecked,
           });
           const out = await run('semantics', ev.input);
           patch({ semantics: out });
@@ -835,10 +847,15 @@ export function useImportSession(deps: {
         const blocked = s.semantics.blocked;
         if (blocked.length) {
           const grain = blocked.filter((b) => b.reason === 'no-grain').length;
+          const fold = blocked.filter((b) => b.reason === 'fold-question').length;
           return grain
             ? `${grain} ${grain === 1 ? 'piece has' : 'pieces have'} no grainline — draw it (two clicks)`
-            : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
+            : fold
+              ? `${fold} fold ${fold === 1 ? 'question' : 'questions'}: pick the fold edge or "not a fold"`
+              : `${blocked.length} ${blocked.length === 1 ? 'piece is' : 'pieces are'} blocked`;
         }
+        if (s.semantics.foldList)
+          return 'the cutting list names fold pieces the sheet does not mark: mark them or confirm the list';
         // D3: what the drawing does not prove waits for the operator, like the grainline; a DXF
         // block name (E3) is the file's own word and is never in it (openQuestions)
         const open = openQuestions(s.semantics, s.names, inputs);

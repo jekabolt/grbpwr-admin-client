@@ -266,6 +266,12 @@ export type WriteAndGateCtx = {
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
   overview?: GateExpectation['overview'];
+  /**
+   * Fold questions still open in this run (E1a, D3): a piece the sheet says is cut on fold, with no
+   * proven edge, or the cutting list's fold pieces unchecked. Non-empty = G6 blocks every block of
+   * the file until the operator answers in Details.
+   */
+  openFolds?: readonly string[];
   /** Vector 0.3 (default) / raster 0.5. */
   hausdorffP95Mm?: number;
   embed?: EmbedManifestFn;
@@ -295,6 +301,7 @@ export async function writeAndGate(
     derivedByBlock: ctx.derivedOf ? derivedByBlockFor(detail, ctx.derivedOf) : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
+    ...(ctx.openFolds?.length ? { openFolds: ctx.openFolds } : {}),
   };
   const report = await createRunGate(ctx.rules, { read })(text0, expect);
   let m1 = { ...m0, gate: report };
