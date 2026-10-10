@@ -50,6 +50,7 @@ const MUTATE_DRAFT_PRINT = process.argv.includes('--mutate-draft-print');
 const MUTATE_ROW_WIDE = process.argv.includes('--mutate-suggestion-row-wide');
 const MUTATE_UNDO_REBASE = process.argv.includes('--mutate-undo-rebase');
 const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array');
+const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -145,15 +146,18 @@ const EXEMPT_THREAD_ARRAY = `      const bySuggestion =
           ...(sugg.thread.length ? { bomLineKeys: row.bomLineKeys } : {}) }) === print);`;
 // Undo forgives what the draft detector forgives (pre-orchestrator decision): the batch snapshot is
 // rebased onto every row that is still draft.
-const REBASE_FIX = `    suggestedWrites.current.clear();\n`;
-const REBASE_BROKEN = `    suggestedWrites.current.clear();
-    if (batch) {
-      const rows = [...batch.after.rows];
-      for (let i = batch.from; i < batch.from + batch.count; i++)
-        if (next.has(fields[i]?.id ?? '')) rows[i - batch.from] = structuredClone(ops[i]) as never;
-      setHistory({ undo: [...history.current.undo.slice(0, -1), { ...batch, after: { ...batch.after, rows } }], redo: history.current.redo });
+const REBASE_FIX = `    if (!frozen)\n      for (const index of touched)`;
+const REBASE_BROKEN = `    {
+      const t = peekUndo(history.current);
+      if (t?.kind === 'skeleton') {
+        const rows = [...t.after.rows];
+        for (let i = t.from; i < t.from + t.count; i++)
+          if (next.has(fields[i]?.id ?? '')) rows[i - t.from] = structuredClone(ops[i]) as never;
+        setHistory({ undo: [...history.current.undo.slice(0, -1), { ...t, after: { ...t.after, rows, all: structuredClone(ops) as never } }], redo: history.current.redo });
+      }
     }
-`;
+    if (!frozen)
+      for (const index of touched)`;
 if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY)
   plugins.push({
     name: 'draft-exemption-mutations',
@@ -168,6 +172,20 @@ if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY)
         if (MUTATE_THREAD_ARRAY) swap(EXEMPT_FIX, EXEMPT_THREAD_ARRAY);
         if (MUTATE_UNDO_REBASE) swap(REBASE_FIX, REBASE_BROKEN);
         return { contents: src, loader: 'tsx' };
+      });
+    },
+  });
+// The pre-review guard: only the batch rows are compared, not the rest of what undo writes.
+const WHOLE_CARD_FIX = `  if (!sameCardAsApplied(rec, st)) return false;\n`;
+if (MUTATE_BATCH_ONLY)
+  plugins.push({
+    name: 'undo-batch-only-mutation',
+    setup(b) {
+      b.onLoad({ filter: /last-mutation\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(WHOLE_CARD_FIX))
+          throw new Error('batch-only mutation did not find its line');
+        return { contents: src.replace(WHOLE_CARD_FIX, ''), loader: 'ts' };
       });
     },
   });
@@ -737,7 +755,7 @@ const U_OWN = [
   });
   await page.waitForSelector('[data-skeleton-undo-refused]', { timeout: 5000 });
   const t = await page.locator('[data-skeleton-undo-refused]').innerText();
-  ck(/applied steps changed/.test(t), 'undo refused in words after an edit', t);
+  ck(/card changed since the apply/.test(t), 'undo refused in words after an edit', t);
   ck((await ops()).length === n, 'the refusal writes nothing');
   ck((await page.locator('[data-skeleton-undo]').count()) === 0, 'no «undo» button any more');
   await shot('u-refused', '[data-skeleton-panel]');
@@ -972,6 +990,71 @@ const U_OWN = [
   ck(
     (await page.locator('[data-skeleton-undo]').count()) === 0,
     'undo is refused (not offered) — it would delete the hand TH2',
+  );
+  await closePanel();
+}
+
+{
+  // U10 (Codex) undo writes the WHOLE card it remembers — the older steps and the flags too. After
+  // an append, the person clears the photos of an OLDER step: the batch rows are untouched, but undo
+  // would put the photos back over that intent. Refused in words, nothing written.
+  const PHOTO = { mediaId: 9, caption: '', annotations: [] };
+  await mount({ ops: [{ ...U_OWN[0], media: [PHOTO] }, U_OWN[1]] });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue('operations.0.media', [], { shouldDirty: true });
+    f.setValue('mediaCleared', true, { shouldDirty: true });
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  const t = await page
+    .locator('[data-skeleton-undo-refused]')
+    .innerText()
+    .catch(() => '');
+  ck(/card changed since the apply/.test(t), 'photos cleared on an older step: undo refused', t);
+  const r = await ops();
+  ck(r.length === n, 'nothing taken back', `${r.length} of ${n}`);
+  ck(
+    (r[0]?.media ?? []).length === 0 &&
+      (await page.evaluate(() => window.__sk.form().getValues('mediaCleared'))) === true,
+    'the clearing intent stands',
+  );
+  await closePanel();
+}
+{
+  // U11 an issue flagged on an applied step after the apply: undo would leave it pointing at a step
+  // that is gone (or rewrite the issue list). Refused in words.
+  await mount({ ops: U_OWN });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const n = (await ops()).length;
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue(
+      'issues',
+      [...(f.getValues('issues') ?? []), { operationNumber: 40, description: 'seam puckers' }],
+      { shouldDirty: true },
+    );
+    document.querySelector('[data-skeleton-undo]')?.click();
+  });
+  await page.waitForSelector('[data-skeleton-undo-refused], [data-skeleton-undone]', {
+    timeout: 5000,
+  });
+  ck(
+    (await page.locator('[data-skeleton-undo-refused]').count()) === 1,
+    'an issue on an applied step: undo refused in words',
+  );
+  ck((await ops()).length === n, 'the step the issue points at is still there');
+  ck(
+    (await page.evaluate(() => window.__sk.form().getValues('issues').length)) === 1,
+    'the issue stands',
   );
   await closePanel();
 }
@@ -1483,6 +1566,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}`,
 );
 if (bad) process.exitCode = 1;

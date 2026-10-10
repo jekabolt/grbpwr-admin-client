@@ -1643,21 +1643,46 @@ console.log('\nсброс раскладки против переименова
     },
     after: {
       rows: Array.from({ length: count }, () => ({ draft: true, seamAllowanceMm: '' })),
+      all: [
+        ...Array.from({ length: from }, () => ({ draft: false })),
+        ...Array.from({ length: count }, () => ({ draft: true, seamAllowanceMm: '' })),
+      ],
       mediaCleared: false,
       assemblyCleared: false,
+      issues: [],
     },
     label: skeletonLabel(mode, count),
+  });
+  const st = (rows, extra = {}) => ({
+    rows,
+    mediaCleared: false,
+    assemblyCleared: false,
+    issues: [],
+    ...extra,
   });
   const D = { draft: true, seamAllowanceMm: '' };
   const N = { draft: false };
   const app = rec('append', 2, 3);
-  yes('append: хвост из трёх draft — отменяется', skeletonCanUndo(app, [N, N, D, D, D]));
-  no('append: одна строка пачки проверена — нет', skeletonCanUndo(app, [N, N, D, N, D]));
-  no('append: длина поехала — нет', skeletonCanUndo(app, [N, N, D, D, D, N]));
+  yes('append: хвост из трёх draft — отменяется', skeletonCanUndo(app, st([N, N, D, D, D])));
+  no('append: одна строка пачки проверена — нет', skeletonCanUndo(app, st([N, N, D, N, D])));
+  no('append: длина поехала — нет', skeletonCanUndo(app, st([N, N, D, D, D, N])));
+  // Ревью Codex P2: отмена пишет ВСЮ карточку — правка старого шага, флаг, дефект — уже не её.
+  no(
+    'append: старый шаг поправлен — нет',
+    skeletonCanUndo(app, st([{ draft: false, note: 'x' }, N, D, D, D])),
+  );
+  no(
+    'append: mediaCleared взведён после записи — нет',
+    skeletonCanUndo(app, st([N, N, D, D, D], { mediaCleared: true })),
+  );
+  no(
+    'append: дефект добавлен — нет',
+    skeletonCanUndo(app, st([N, N, D, D, D], { issues: [30] })),
+  );
   // Ревью Codex P2: правка поля ВНЕ прежних тринадцати (припуск) — всё равно правка пачки.
   no(
     'append: припуск на строке пачки поправлен, метка ещё стоит — всё равно нет',
-    skeletonCanUndo(app, [N, N, D, { ...D, seamAllowanceMm: '8' }, D]),
+    skeletonCanUndo(app, st([N, N, D, { ...D, seamAllowanceMm: '8' }, D])),
   );
   yes(
     'отпечаток: номер шага и сама метка — не факты строки',
@@ -1669,9 +1694,12 @@ console.log('\nсброс раскладки против переименова
     operationRowPrint({ b: [1], a: undefined, c: null }) === operationRowPrint({ b: [1] }),
   );
   no('отпечаток: любое поле шага — факт', operationRowPrint({ x: '' }) === operationRowPrint({ x: '1' }));
-  yes('append: правка СВОИХ шагов до пачки не мешает', skeletonCanUndo(app, [D, N, D, D, D]));
+  yes(
+    'append: метка draft старого шага — не факт, отмена жива',
+    skeletonCanUndo(app, st([{ draft: true }, N, D, D, D])),
+  );
   const rep = rec('replace', 0, 2, 4);
-  yes('replace: обе draft — отменяется', skeletonCanUndo(rep, [D, D]));
+  yes('replace: обе draft — отменяется', skeletonCanUndo(rep, st([D, D])));
   yes('replace: повтор при длине снимка «до»', skeletonCanRedo(rep, 4));
   no('replace: повтор при другой длине — нет', skeletonCanRedo(rep, 3));
   yes('append: повтор при длине = from', skeletonCanRedo(app, 2));

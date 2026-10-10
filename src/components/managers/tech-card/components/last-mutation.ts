@@ -221,7 +221,18 @@ export type HistoryEntry<TRow = unknown> =
         issues: number[];
       };
       /** Что вернуть повтором (⇧⌘Z): строки, как их построил каркас, и флаги после записи. */
-      after: { rows: TRow[]; mediaCleared: boolean; assemblyCleared: boolean };
+      /**
+       * Что запись оставила после себя — ВСЁ, что пишет отмена (ревью Codex P2): строки пачки (для
+       * повтора), весь массив шагов (`all`), флаги карточки и номера шагов в дефектах. Отмена
+       * предлагается, только пока карточка по всем этим пунктам та же.
+       */
+      after: {
+        rows: TRow[];
+        all: TRow[];
+        mediaCleared: boolean;
+        assemblyCleared: boolean;
+        issues: number[];
+      };
       label: string;
     };
 
@@ -335,21 +346,48 @@ export function operationRowPrint(row: unknown): string {
   return JSON.stringify(canonRow(row ?? {}, true));
 }
 
+/** Состояние карточки, которое пишет отмена записи каркаса, — ровно его и сверяет щит. */
+export type SkeletonUndoState = {
+  rows: ReadonlyArray<({ draft?: boolean } & Record<string, unknown>) | undefined>;
+  mediaCleared: boolean;
+  assemblyCleared: boolean;
+  issues: ReadonlyArray<number>;
+};
+
+/** Карточка по всем пунктам, которые пишет отмена, та же, что оставила запись. */
+function sameCardAsApplied<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'skeleton' }>,
+  st: SkeletonUndoState,
+): boolean {
+  if (st.rows.length !== rec.after.all.length) return false;
+  for (let i = 0; i < st.rows.length; i++)
+    if (operationRowPrint(st.rows[i]) !== operationRowPrint(rec.after.all[i])) return false;
+  return (
+    st.mediaCleared === rec.after.mediaCleared &&
+    st.assemblyCleared === rec.after.assemblyCleared &&
+    JSON.stringify(st.issues) === JSON.stringify(rec.after.issues)
+  );
+}
+
 /**
- * Щит отмены записи каркаса. Длина — ровно та, что запись оставила; каждая строка пачки ещё
- * `draft` («reviewed» снимает метку) И совпадает с тем, что запись положила (`after.rows`, тем же
- * отпечатком): любая правка любого поля пачки — уже чужая работа, и отмена её не сотрёт.
+ * Щит отмены записи каркаса — СТРОГИЙ и не перебазируется никогда. Длина та, что запись оставила;
+ * каждая строка пачки ещё `draft` («reviewed» снимает метку) и совпадает с тем, что положила
+ * запись; И ВСЯ КАРТОЧКА в том, что пишет отмена, — те же: каждый шаг (не только пачки), флаги
+ * `mediaCleared` / `assemblyCleared`, номера шагов в дефектах. Любое отличие, подстановка
+ * редактора тоже, — отмены нет: она перезаписала бы чужое намерение.
  */
 export function skeletonCanUndo<TRow>(
   rec: Extract<HistoryEntry<TRow>, { kind: 'skeleton' }>,
-  rows: ReadonlyArray<{ draft?: boolean } | undefined>,
+  st: SkeletonUndoState,
 ): boolean {
+  const rows = st.rows;
   if (rows.length !== rec.from + rec.count) return false;
   for (let i = 0; i < rec.count; i++) {
     const row = rows[rec.from + i];
     if (row?.draft !== true) return false;
     if (operationRowPrint(row) !== operationRowPrint(rec.after.rows[i])) return false;
   }
+  if (!sameCardAsApplied(rec, st)) return false;
   return true;
 }
 

@@ -205,6 +205,7 @@ import {
   operationRowPrint,
   skeletonCanUndo,
   skeletonLabel,
+  type SkeletonUndoState,
   undoStep,
   undoTitle,
   type History,
@@ -6304,6 +6305,7 @@ export function OperationsField({
     }
     const from = replacing ? 0 : current.length;
     pendingAppend.current = null;
+    snapshotPending.current = applyRequest.nonce;
     setHistory(
       record(history.current, {
         kind: 'skeleton',
@@ -6314,8 +6316,13 @@ export function OperationsField({
         before,
         after: {
           rows: structuredClone(rows),
+          // Чужие шаги — какими они стоят сейчас; пачка — как построена. Чужая часть уточняется
+          // первым проходом детектора после записи (`snapshotPending`): открытый до записи шаг
+          // мог нести живую подстановку редактора, которую его размонтирование тут же отзовёт.
+          all: structuredClone([...(replacing ? [] : current), ...rows]),
           mediaCleared: !!getValues('mediaCleared'),
           assemblyCleared: !!getValues('assemblyCleared'),
+          issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
         },
         label: skeletonLabel(replacing ? 'replace' : 'append', rows.length),
       }),
@@ -6354,6 +6361,8 @@ export function OperationsField({
   // каркаса подстановку не прощает (строгий, см. skeletonCanUndo).
   type Suggested = { fields: Record<string, unknown>; thread: ThreadDelta[] };
   const suggestedWrites = useRef(new Map<number, Suggested>());
+  // Nonce записи каркаса, чей снимок «после» ещё не уточнён по осевшей карточке (см. запись).
+  const snapshotPending = useRef<number | null>(null);
   const noteSuggested = useCallback((index: number, field: string, value: unknown) => {
     const m = suggestedWrites.current;
     const cur = m.get(index) ?? { fields: {}, thread: [] };
@@ -6364,6 +6373,11 @@ export function OperationsField({
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
     const sub = watch((_, { name }) => {
+      // Флаги карточки и дефекты сверяет щит отмены каркаса — их правка тоже будит пересчёт.
+      if (name && /^(issues|mediaCleared|assemblyCleared)/.test(name)) {
+        setTouchTick((t) => t + 1);
+        return;
+      }
       if (name && !name.startsWith('operations')) return;
       // Без черновиков будить сверку стоит только сменой самой метки (или всей формы — reset).
       if (draftRef.current.size === 0 && name && !name.endsWith('.draft')) return;
@@ -6416,6 +6430,29 @@ export function OperationsField({
     });
     for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
     suggestedWrites.current.clear();
+    // ПЕРВЫЙ ПРОХОД ПОСЛЕ ЗАПИСИ КАРКАСА: карточка осела (редактор прежнего шага размонтирован и
+    // отозвал свою подстановку) — снимок «после» берёт чужие шаги, флаги и дефекты ОТСЮДА, а
+    // пачку — как построена (подстановка на ней — уже отличие, отмены не будет). Это не rebase:
+    // один раз, в том же такте, что запись, без единого жеста человека между ними.
+    if (batch && snapshotPending.current === batch.nonce) {
+      snapshotPending.current = null;
+      setHistory({
+        undo: [
+          ...history.current.undo.slice(0, -1),
+          {
+            ...batch,
+            after: {
+              ...batch.after,
+              all: structuredClone([...ops.slice(0, batch.from), ...batch.after.rows]),
+              mediaCleared: !!getValues('mediaCleared'),
+              assemblyCleared: !!getValues('assemblyCleared'),
+              issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+            },
+          },
+        ],
+        redo: history.current.redo,
+      });
+    }
     if (!frozen)
       for (const index of touched)
         setValue(`operations.${index}.draft`, false, { shouldDirty: true });
@@ -6423,7 +6460,7 @@ export function OperationsField({
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
-  }, [touchTick, fields, getValues, setValue, control, frozen]);
+  }, [touchTick, fields, getValues, setValue, control, frozen, setHistory]);
   // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
   // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
   const markReviewed = (i: number) => {
@@ -7103,14 +7140,21 @@ export function OperationsField({
    * как стояли: без отката replace поверх фото оставил бы `mediaCleared`, и следующая запись сняла
    * бы фото со шагов, которые отмена вернула. Номера шагов в дефектах — из снимка.
    *
-   * Щит — `skeletonCanUndo`: длина та же и все строки пачки ещё draft. Отказ — словами, и запись
+   * Щит — `skeletonCanUndo`: вся карточка в том, что пишет отмена, та же, что оставила запись. Отказ — словами, и запись
    * снимается: тронутую пачку вернуть нельзя, не стерев чужую работу. Возвращает текст отказа.
    */
+  /** Всё, что пишет отмена записи каркаса, — как оно стоит сейчас. */
+  const undoStateNow = () => ({
+    rows: (getValues('operations') ?? []) as unknown as SkeletonUndoState['rows'],
+    mediaCleared: !!getValues('mediaCleared'),
+    assemblyCleared: !!getValues('assemblyCleared'),
+    issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+  });
   const undoSkeleton = (rec: Extract<Hist['undo'][number], { kind: 'skeleton' }>) => {
     if (frozen) return FROZEN_REFUSAL;
-    if (!skeletonCanUndo(rec, getValues('operations') ?? [])) {
+    if (!skeletonCanUndo(rec, undoStateNow())) {
       setHistory(dropUndoTop(history.current));
-      return 'the applied steps changed — nothing to undo';
+      return 'the card changed since the apply — nothing to undo';
     }
     applyToForm(() => {
       if (rec.mode === 'replace') {
@@ -7157,7 +7201,7 @@ export function OperationsField({
   useEffect(() => {
     const top = peekUndo(histView);
     const n =
-      top?.kind === 'skeleton' && !frozen && skeletonCanUndo(top, getValues('operations') ?? [])
+      top?.kind === 'skeleton' && !frozen && skeletonCanUndo(top, undoStateNow())
         ? top.nonce
         : null;
     if (n === lastUndoable.current) return;
