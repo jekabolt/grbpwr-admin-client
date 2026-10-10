@@ -34,6 +34,8 @@ import {
   sampleAlong,
 } from 'lib/pattern-import/semantics/geom';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
+import { drawnSeamChains, measuredAllowance } from 'lib/pattern-import/semantics/allowance';
+import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import {
   createProposeSizeMap,
   needsConfirmation,
@@ -1304,6 +1306,102 @@ export async function main(): Promise<number> {
     json.d3 = { ids, gate: g.report.checks.map((c) => [c.id, c.ok, c.value]) };
   }
 
+  head('D1s N3 one pen: the seam line drawn inside the cut line is the seam, not layer 8 (wm M)');
+  {
+    // a 300 × 400 cut line; its seam line 7 mm inside in the SAME row (the legend's "seam line
+    // inside"), broken into 3 pieces; a hem fold 20 mm up and a dart, also in the outline's pen
+    const F = fx();
+    const row = F.cls('common');
+    const outer = [
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      { x: 300, y: 400 },
+      { x: 0, y: 400 },
+    ];
+    const wall = F.chain(outer, true, row);
+    const seam = [
+      F.chain(
+        [
+          { x: 7, y: 60 },
+          { x: 7, y: 393 },
+          { x: 150, y: 393 },
+        ],
+        false,
+        row,
+      ),
+      F.chain(
+        [
+          { x: 160, y: 393 },
+          { x: 293, y: 393 },
+          { x: 293, y: 60 },
+        ],
+        false,
+        row,
+      ),
+      F.chain(
+        [
+          { x: 293, y: 50 },
+          { x: 293, y: 7 },
+          { x: 7, y: 7 },
+          { x: 7, y: 50 },
+        ],
+        false,
+        row,
+      ),
+    ];
+    const hem = F.chain(
+      [
+        { x: 30, y: 20 },
+        { x: 270, y: 20 },
+      ],
+      false,
+      row,
+    );
+    const dart = F.chain(
+      [
+        { x: 120, y: 393 },
+        { x: 140, y: 300 },
+        { x: 160, y: 393 },
+      ],
+      false,
+      row,
+    );
+    const cand: PieceCandidate = {
+      seed: 1,
+      rank: 0,
+      outer,
+      walls: [wall],
+      inside: [...seam, hem, dart],
+      textsInside: [],
+      outcome: 'closed',
+      areaMm2: 120000,
+      bbox: { minX: 0, minY: 0, maxX: 300, maxY: 400 },
+      sourceCoverage: 1,
+      p95Mm: 0,
+    };
+    const set: ChainSet = {
+      chains: F.chains,
+      classes: F.classes,
+      bundles: [],
+      orphans: [],
+      warnings: [],
+    };
+    const got = drawnSeamChains(cand, set);
+    ck(
+      got.length === 3 && seam.every((id) => got.includes(id)),
+      'the three seam pieces at 7 mm are the drawn seam line; the hem fold (20 mm) and the dart are not',
+      JSON.stringify(got),
+    );
+    const m = measuredAllowance(cand, set);
+    ck(!!m && Math.abs(m.mm - 7) < 0.2, 'measured allowance 7 mm', JSON.stringify(m));
+    const internal = classifyFeatures(cand, set).filter((f) => f.kind === 'internal');
+    ck(
+      internal.length === 2,
+      'layer 8 keeps the hem fold and the dart only (the seam line is not an internal line)',
+      `${internal.length} internal`,
+    );
+  }
+
   head("D3l N3 the cutting list's count of a piece (robe «69. Ærme, 4 gange»)");
   {
     const build = (
@@ -1714,6 +1812,34 @@ export async function main(): Promise<number> {
         grainOf(pair.d)?.origin === 'detected',
         'a symmetric pair at one end counts as arrowheads',
         JSON.stringify(pair.d.output.blocked),
+      );
+      // N3 (wm M back): strokes at a line's end that do not mirror each other, or a crowd of them
+      // (a tile label's corner), are no head
+      const stroke = (side: number, deg: number, len: number): Extra => ({
+        pts: [
+          { x: 90, y: 120 },
+          {
+            x: 90 + side * len * Math.sin((deg * Math.PI) / 180),
+            y: 120 + len * Math.cos((deg * Math.PI) / 180),
+          },
+        ],
+        closed: false,
+        role: 'internal',
+      });
+      const skew = run1([line(90), stroke(1, 20, 6), stroke(-1, 45, 6)], word);
+      ck(
+        skew.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: a pair at one end at 20° / 45° is no head (angles differ)',
+        JSON.stringify(skew.d.output.grainProposals),
+      );
+      const crowd = run1(
+        [line(90), ...[25, 30, 35, 40].flatMap((a) => [stroke(1, a, 4), stroke(-1, a, 4)])],
+        word,
+      );
+      ck(
+        crowd.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: 8 strokes at one end (a tile label the line runs into) are no head',
+        JSON.stringify(crowd.d.output.grainProposals),
       );
       // the same arrow among lettering: 12 short strokes in the cell of its top end (wm, G18)
       const letters: Extra[] = Array.from({ length: 12 }, (_, i) => ({

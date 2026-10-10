@@ -31,7 +31,7 @@ import type {
   Sheet,
 } from '../types';
 import { PATIMPORT } from '../types';
-import { featuresOf } from './allowance';
+import { drawnSeamChains, featuresOf } from './allowance';
 import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
 import { glyphCellKey, undashed } from './glyphs';
 
@@ -47,6 +47,8 @@ export const GRAIN_HEAD_MAX_MM = 25;
 export const GRAIN_HEAD_END_MM = 6;
 export const GRAIN_HEAD_MIN_DEG = 15;
 export const GRAIN_HEAD_MAX_DEG = 60;
+/** N3: each barb of a one-end pair is at least this long, mm. */
+export const GRAIN_PAIR_BARB_MIN_MM = 2.5;
 /** A1: dashes of one dashed grainline: 2–6 of them, gaps up to this, mm. */
 export const GRAIN_DASH_GAP_MM = 20;
 export const GRAIN_DASH_MAX = 6;
@@ -174,10 +176,12 @@ export function classifyFeatures(
   }
 
   // the chains inside that may carry a feature (another size's line, a seam, ignored: never)
+  // N3: the seam line drawn in the outlines' own pen (one-pen sheets, wm M) is the seam, measured
+  const drawnSeam = new Set(drawnSeamChains(cand, set));
   const inner: Chain[] = [];
   for (const id of new Set(cand.inside)) {
     const ch = set.chains[id];
-    if (!ch || notchChains.has(id)) continue;
+    if (!ch || notchChains.has(id) || drawnSeam.has(id)) continue;
     const k = clsOf.get(id);
     const role = k?.role;
     if (role === 'size' && !wallCls.has(k?.id)) continue; // another size's line
@@ -398,6 +402,7 @@ function arrowheads(
 ): number[] | null {
   const ends = [line.a, line.b];
   const sides: Set<number>[] = [new Set(), new Set()];
+  const barbsAt: { side: number; deg: number; len: number }[][] = [[], []];
   const ids = new Set<number>();
   const own = new Set(line.ids);
   const integral: Chain[] = line.barbs.map(([p, q]) => ({
@@ -433,13 +438,33 @@ function arrowheads(
         const cos = (vx * ix + vy * iy) / (vl * il);
         if (cos < cosLo || cos > cosHi) continue;
         if (lettered(tip) || lettered(far)) continue;
-        sides[e].add(Math.sign(ix * vy - iy * vx));
+        const side = Math.sign(ix * vy - iy * vx);
+        sides[e].add(side);
+        barbsAt[e].push({ side, deg: (Math.acos(Math.min(1, cos)) * 180) / Math.PI, len: vl });
         if (h.id >= 0) ids.add(h.id);
       }
     }
   }
   const both = sides[0].size > 0 && sides[1].size > 0;
-  const pair = sides[0].size === 2 || sides[1].size === 2;
+  // N3 (wm M back): a pair at ONE end is a drawn head only when its two barbs mirror each other —
+  // like angles (± 10°), like lengths (≤ 1.6 ×), each ≥ 2.5 mm — and stand alone (≤ 4 strokes at
+  // the tip, a head drawn twice at most). A diagonal running into a tile label («KOLUMNA 5») meets 8
+  // short horizontal / vertical strokes there: lettering, no head.
+  const pair = barbsAt.some(
+    (bs) =>
+      bs.length <= 4 &&
+      bs.some(
+        (p) =>
+          p.len >= GRAIN_PAIR_BARB_MIN_MM &&
+          bs.some(
+            (q) =>
+              q.side !== p.side &&
+              q.len >= GRAIN_PAIR_BARB_MIN_MM &&
+              Math.abs(q.deg - p.deg) <= 10 &&
+              Math.max(p.len, q.len) <= 1.6 * Math.min(p.len, q.len),
+          ),
+      ),
+  );
   if (!both && !pair) return null;
   if (lettered(line.a) || lettered(line.b)) return null;
   return [...ids];

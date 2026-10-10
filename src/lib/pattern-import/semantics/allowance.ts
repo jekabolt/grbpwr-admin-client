@@ -424,7 +424,59 @@ export function innerSeamLines(c: PieceCandidate, set?: ChainSet): PtMm[][] {
     if (!ch.pts.every((p) => pointInPolygon(p, c.outer))) continue;
     out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
   }
+  if (!out.length)
+    for (const id of drawnSeamChains(c, set)) {
+      const ch = set.chains[id];
+      out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
+    }
   return out;
+}
+
+/**
+ * N3 (wm M): one pen draws the cut line AND the seam line inside it, so the legend files the seam
+ * line with the outlines ('common', A0.3 "the seam line inside") or, a piece of it, as 'internal'.
+ * Its pieces inside this outline, in the outline's pen, each at a constant distance (3–30 mm,
+ * spread ≤ 1.5 mm) are the drawn seam line when they agree on ONE distance: the outline-row pieces
+ * within 1 mm of their length-weighted median, covering ≥ 40 % of the outline together (spread ≤
+ * 1.5 mm), plus same-pen 'internal' pieces within 0.3 mm of it (≥ 40 mm, spread ≤ 0.5 mm). A line at
+ * another distance (a hem fold 20 mm up, a dart) is not; a set that agrees on nothing gives none.
+ */
+export function drawnSeamChains(c: PieceCandidate, set: ChainSet): number[] {
+  const clsOf = new Map<number, (typeof set.classes)[number]>();
+  for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, k);
+  const walls = new Set(c.walls);
+  const wallCls = new Set(c.walls.map((w) => clsOf.get(w)?.id));
+  const wallStyles = new Set(c.walls.map((w) => set.chains[w]?.style));
+  type Cand = { id: number; pts: PtMm[]; mm: number; spread: number; len: number; row: boolean };
+  const cands: Cand[] = [];
+  for (const id of new Set(c.inside)) {
+    const ch = set.chains[id];
+    const k = clsOf.get(id);
+    if (!ch || !k || walls.has(id) || ch.lengthMm < 20) continue;
+    const row = k.role === 'common' && wallCls.has(k.id);
+    if (!row && !(k.role === 'internal' && wallStyles.has(ch.style))) continue;
+    if (!ch.pts.every((p) => pointInPolygon(p, c.outer))) continue;
+    const pts = ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts;
+    const g = measureGap(c.outer, [pts]);
+    if (!g || g.mm < 3 || g.mm > 30 || g.spreadMm > 1.5) continue;
+    cands.push({ id, pts, mm: g.mm, spread: g.spreadMm, len: ch.lengthMm, row });
+  }
+  const rows = cands.filter((x) => x.row).sort((a, b) => a.mm - b.mm);
+  if (!rows.length) return [];
+  // the length-weighted median distance of the outline-row pieces
+  const total = rows.reduce((a, x) => a + x.len, 0);
+  let acc = 0;
+  const med = rows.find((x) => (acc += x.len) >= total / 2)!.mm;
+  const kept = [
+    ...rows.filter((x) => Math.abs(x.mm - med) <= 1),
+    ...cands.filter((x) => !x.row && x.len >= 40 && x.spread <= 0.5 && Math.abs(x.mm - med) <= 0.3),
+  ];
+  const all = measureGap(
+    c.outer,
+    kept.map((x) => x.pts),
+  );
+  if (!all || all.mm < 3 || all.mm > 30 || all.spreadMm > 1.5 || all.coverage < 0.4) return [];
+  return kept.map((x) => x.id);
 }
 
 /** The measured allowance of one candidate, when a seam line is drawn inside it. */
