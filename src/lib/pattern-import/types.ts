@@ -1441,6 +1441,9 @@ export type EmbedManifestFn = (dxfText: string, manifest: ConversionManifest) =>
 /** null when the text carries no manifest (a foreign DXF); throws on a corrupt one. */
 export type ReadManifestFn = (dxfText: string) => ConversionManifest | null;
 
+/** A8b (G19): one tile-chrome line — a mark (bracket, tile label: blocks) or a frame (warns). */
+export type ChromeLine = { mark: boolean; pts: PtMm[] };
+
 /** What the gate compares the written file against. */
 export type GateExpectation = {
   pieces: PieceSpec[];
@@ -1464,7 +1467,7 @@ export type GateExpectation = {
    * A8b (G19): tile chrome near each block, written frame — the clean stage's masked frames,
    * marks and tile labels and the chrome it only offered. A cut / seam line on it is traced chrome.
    */
-  chromeByBlock?: Record<string, PtMm[][]>;
+  chromeByBlock?: Record<string, ChromeLine[]>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;

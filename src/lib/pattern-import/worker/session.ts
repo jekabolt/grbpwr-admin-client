@@ -9,6 +9,7 @@
 import type {
   BackgroundKind,
   ChainAmbiguity,
+  ChromeLine,
   CleanPreview,
   ChainSet,
   DraftScope,
@@ -65,7 +66,15 @@ import {
   type ExtractorRegistry,
 } from '../adapters/sniff';
 import { assembleSheetDetailed, classifyPages } from '../assemble';
-import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale, srcKey } from '../clean';
+import {
+  applyMasks,
+  cleanPages,
+  cleanSheet,
+  countsOf,
+  keptByOperator,
+  mergeScale,
+  srcKey,
+} from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
@@ -249,7 +258,7 @@ export class Session {
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
   /** A8b: sources of the tile chrome page items offer but do not apply (G19 measures against them). */
-  private chromeSrc = new Set<string>();
+  private chromeSrc = new Map<string, BackgroundKind>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -353,7 +362,7 @@ export class Session {
       this.masks = null;
       this.cleanEdits = [];
       this.offeredSrc = new Set();
-      this.chromeSrc = new Set();
+      this.chromeSrc = new Map();
     }
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
@@ -727,7 +736,7 @@ export class Session {
     if (this.dxf) {
       this.masks = [];
       this.offeredSrc = new Set();
-      this.chromeSrc = new Set();
+      this.chromeSrc = new Map();
       this.pages = this.extractPages;
       this.scaleCands = this.extractScale;
       ctx.progress(1, 1);
@@ -762,18 +771,25 @@ export class Session {
     applyMasks(docs, out.pages);
     this.masks = out.pages;
     this.offeredSrc = new Set<string>();
-    this.chromeSrc = new Set<string>();
+    this.chromeSrc = new Map<string, BackgroundKind>();
     for (const m of out.pages) {
       const unapplied = m.items.filter((it) => !it.applied);
       const off = new Set(unapplied.flatMap((it) => it.paths));
       if (!off.size) continue;
-      const chrome = new Set(
-        unapplied.filter((it) => CHROME_KINDS.has(it.kind)).flatMap((it) => it.paths),
+      // the chrome offered and not refused: what the operator explicitly kept is out of G19
+      const chrome = new Map<number, BackgroundKind>(
+        unapplied
+          .filter(
+            (it) =>
+              CHROME_KINDS.has(it.kind) && !keptByOperator(it, m.file, m.page, this.cleanEdits),
+          )
+          .flatMap((it) => it.paths.map((id) => [id, it.kind] as const)),
       );
       const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
       for (const p of pg?.paths ?? []) {
         if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
-        if (chrome.has(p.id)) this.chromeSrc.add(srcKey(p.src));
+        const kind = chrome.get(p.id);
+        if (kind) this.chromeSrc.set(srcKey(p.src), kind);
       }
     }
     this.pages = out.classes;
@@ -1251,14 +1267,17 @@ export class Session {
     ];
     // A8b (G19): the sheet's tile chrome — masked frames, marks, tile labels, and the chrome the
     // clean stage only offered — in the walls' frame
-    const chrome =
-      this.sheet && !this.fast
-        ? this.sheet.paths
-            .filter((p) =>
-              p.background ? CHROME_KINDS.has(p.background) : this.chromeSrc.has(srcKey(p.src)),
-            )
-            .map((p) => (p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts))
-        : [];
+    // (a kind the operator kept is out: G19 always has a way out); marks block, frames warn
+    const chrome: ChromeLine[] = [];
+    if (this.sheet && !this.fast)
+      for (const p of this.sheet.paths) {
+        const kind = p.background ?? this.chromeSrc.get(srcKey(p.src));
+        if (!kind || !CHROME_KINDS.has(kind)) continue;
+        chrome.push({
+          mark: kind !== 'tile-frame',
+          pts: p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts,
+        });
+      }
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;

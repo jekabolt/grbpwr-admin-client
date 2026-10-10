@@ -3,6 +3,7 @@
 
 import type { PieceDTO } from 'lib/nesting/types';
 import type {
+  ChromeLine,
   ConversionManifest,
   DerivedEdge,
   DerivedEdgeAudit,
@@ -43,7 +44,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { foldShapeProblem } from '../semantics/fold';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
-import { ChromeIndex, hairpins, onChrome } from './chrome';
+import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
 import { contourMm } from './roundtrip';
 import type { CardBlockRules } from './rules';
@@ -1416,27 +1417,42 @@ export function g18(ctx: GateCtx): GateCheck {
 
 const CHROME_WHY = 'the cut line runs around a registration mark / tile chrome';
 
-/** One block's written ring (cut, seam): its hairpins and its stretches on chrome, in words. */
+/**
+ * One block's written rings (cut, seam) against the tile chrome near it, in words:
+ *  - `block`: a hairpin round a 1 mm bar within 1 mm of chrome (the bracket-trace signature — a
+ *    standalone hairpin, a slit notch, a narrow dart, a belt loop, is not judged), and a stretch
+ *    ≥ 5 mm ON a mark (a bracket, a tile label);
+ *  - `warn`: a stretch ≥ 5 mm ON a frame line — a CF / fold / hem may lie on a tile edge.
+ * Chrome the operator kept as line work never reaches here: there is always a way out.
+ */
 export function chromeProblems(
   ents: readonly RawEntity[],
-  chrome: readonly PtMm[][] | undefined,
+  chrome: readonly ChromeLine[] | undefined,
   /** A traced scan: its line wobbles in 2 mm steps (leonie), and a scan has no vector chrome. */
   raster = false,
-): string[] {
-  const out: string[] = [];
-  const idx = chrome?.length ? new ChromeIndex([...chrome]) : null;
+): { block: string[]; warn: string[] } {
+  const out = { block: [] as string[], warn: [] as string[] };
+  if (!chrome?.length) return out;
+  const marks = new ChromeIndex(chrome.filter((c) => c.mark).map((c) => c.pts));
+  const frames = new ChromeIndex(chrome.filter((c) => !c.mark).map((c) => c.pts));
+  const r = CHROME_GATE.hairpinNearMm;
+  const nearChrome = (p: PtMm) => marks.near(p, r) || frames.near(p, r);
   for (const layer of [LAYERS.cut, LAYERS.seam]) {
     for (const e of ents) {
       if (e.layer !== layer || !isPoly(e) || e.pts.length < 4) continue;
       const word = layer === LAYERS.cut ? 'cut' : 'seam';
       for (const h of raster ? [] : hairpins(e.pts, e.closed))
-        out.push(
-          `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
-        );
-      if (idx)
-        for (const r of onChrome(e.pts, e.closed, idx))
-          out.push(
-            `the ${word} line runs ${r.lengthMm.toFixed(0)} mm on tile chrome from (${r.from.x.toFixed(0)}, ${r.from.y.toFixed(0)})`,
+        if ([h.at, ...h.pts].some(nearChrome))
+          out.block.push(
+            `the ${word} line goes out and back round a ${h.capMm.toFixed(1)} mm bar ${h.legMm.toFixed(0)} mm long at (${h.at.x.toFixed(0)}, ${h.at.y.toFixed(0)})`,
+          );
+      for (const [idx, list, what] of [
+        [marks, out.block, 'a registration mark'],
+        [frames, CHROME_GATE.frameBlocks ? out.block : out.warn, 'a tile frame'],
+      ] as const)
+        for (const run of onChrome(e.pts, e.closed, idx))
+          list.push(
+            `the ${word} line runs ${run.lengthMm.toFixed(0)} mm on ${what} from (${run.from.x.toFixed(0)}, ${run.from.y.toFixed(0)})`,
           );
     }
   }
@@ -1445,7 +1461,8 @@ export function chromeProblems(
 
 export function g19(ctx: GateCtx): GateCheck {
   if (!ctx.raw) return check('G19-chrome', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
-  const failed: string[] = [];
+  const hard: string[] = [];
+  const soft: string[] = [];
   const notes: string[] = [];
   let n = 0;
   for (const { block } of ctx.blocks) {
@@ -1454,21 +1471,27 @@ export function g19(ctx: GateCtx): GateCheck {
       ctx.expect.chromeByBlock?.[block],
       ctx.expect.hausdorffP95Mm > PATIMPORT.hausdorffP95VectorMm,
     );
-    if (!why.length) continue;
-    n += why.length;
-    failed.push(block);
+    const all = [...why.block, ...why.warn];
+    if (!all.length) continue;
+    n += all.length;
+    (why.block.length ? hard : soft).push(block);
     notes.push(
-      `${block}: ${why.slice(0, 3).join('; ')}${why.length > 3 ? ` (+${why.length - 3})` : ''}`,
+      `${block}: ${all.slice(0, 3).join('; ')}${all.length > 3 ? ` (+${all.length - 3})` : ''}`,
     );
   }
   return check(
     'G19-chrome',
-    failed,
-    'block',
-    failed.length
-      ? [CHROME_WHY, ...notes].join('; ')
+    [...hard, ...soft],
+    hard.length ? 'block' : 'warn',
+    hard.length || soft.length
+      ? [
+          hard.length
+            ? CHROME_WHY
+            : 'a cut line lies on a tile frame — check it is the garment edge (a CF / fold on the tile edge), not the frame',
+          ...notes,
+        ].join('; ')
       : 'no cut or seam line traced around tile chrome',
     n,
-    'no hairpin ≤ 2 mm wide, 3–25 mm long; no stretch ≥ 5 mm within 0.3 mm of tile chrome',
+    'no hairpin ≤ 2 mm wide, 3–25 mm long within 1 mm of tile chrome; no stretch ≥ 5 mm on a mark (block) or a frame (warn)',
   );
 }

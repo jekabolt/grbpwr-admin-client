@@ -21,6 +21,10 @@ export const CHROME_GATE = {
   /** An edge ON chrome: within this distance (mm), near-parallel, along at least this length (mm). */
   touchMm: 0.3,
   alongMinMm: 5,
+  /** A hairpin is judged only this close (mm) to a chrome item: a standalone one may be a notch. */
+  hairpinNearMm: 1,
+  /** A stretch on a FRAME line warns (a CF / fold may lie on a tile edge); true = blocks (mutation). */
+  frameBlocks: false,
   /** … following it: the offset spreads at most this much (mm) over the stretch. */
   followSpreadMm: 0.1,
 };
@@ -106,9 +110,15 @@ export function hairpins(pts: readonly PtMm[], closed: boolean): Hairpin[] {
 
 type Seg = { a: PtMm; b: PtMm; ux: number; uy: number; L: number };
 
+const segD = (p: PtMm, s: Seg) => {
+  const t = Math.max(0, Math.min(s.L, (p.x - s.a.x) * s.ux + (p.y - s.a.y) * s.uy));
+  return Math.hypot(p.x - s.a.x - t * s.ux, p.y - s.a.y - t * s.uy);
+};
+
 /** Chrome lines as a cell index of segments (2 mm cells). */
 export class ChromeIndex {
   private cells = new Map<string, Seg[]>();
+  private all: Seg[] = [];
   readonly size: number;
   constructor(lines: readonly PtMm[][]) {
     let n = 0;
@@ -119,6 +129,7 @@ export class ChromeIndex {
         const L = len(a, b);
         if (L < 0.05) continue;
         const s = { a, b, ux: (b.x - a.x) / L, uy: (b.y - a.y) / L, L };
+        this.all.push(s);
         n++;
         const x0 = Math.floor((Math.min(a.x, b.x) - 0.5) / 2);
         const x1 = Math.floor((Math.max(a.x, b.x) + 0.5) / 2);
@@ -133,6 +144,19 @@ export class ChromeIndex {
           }
       }
     this.size = n;
+  }
+  /** A chrome segment within `r` (≤ 2 mm) of p, any direction. */
+  near(p: PtMm, r: number): boolean {
+    if (r > 2) return this.all.some((s) => segD(p, s) <= r);
+    const cx = Math.floor(p.x / 2);
+    const cy = Math.floor(p.y / 2);
+    for (let x = cx - 1; x <= cx + 1; x++)
+      for (let y = cy - 1; y <= cy + 1; y++)
+        for (const s of this.cells.get(`${x},${y}`) ?? []) {
+          const t = Math.max(0, Math.min(s.L, (p.x - s.a.x) * s.ux + (p.y - s.a.y) * s.uy));
+          if (Math.hypot(p.x - s.a.x - t * s.ux, p.y - s.a.y - t * s.uy) <= r) return true;
+        }
+    return false;
   }
   /**
    * The signed offset (mm) of p from a chrome segment within `r` running along direction (dx, dy)

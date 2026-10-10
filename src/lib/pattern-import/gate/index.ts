@@ -13,6 +13,7 @@
 // (`derivedByBlockFor`) and are judged by G15, never measured against (F14b, Codex C1).
 
 import type {
+  ChromeLine,
   DerivedEdge,
   EmbedManifestFn,
   GateCheck,
@@ -264,11 +265,11 @@ export function derivedByBlockFor(
 export function chromeByBlockFor(
   detail: WriteDetail,
   wallsOf: (sourceIdentity: string, rank: number) => PtMm[][] | undefined,
-  chrome: readonly PtMm[][],
-): Record<string, PtMm[][]> {
-  const out: Record<string, PtMm[][]> = {};
+  chrome: readonly ChromeLine[],
+): Record<string, ChromeLine[]> {
+  const out: Record<string, ChromeLine[]> = {};
   if (!chrome.length) return out;
-  const boxes = chrome.map((l) => bboxOf(l));
+  const boxes = chrome.map((l) => bboxOf(l.pts));
   for (const b of detail.plan.blocks) {
     const w = wallsOf(b.derivedFrom ?? b.identity, b.rank);
     if (!w?.length) continue;
@@ -284,7 +285,7 @@ export function chromeByBlockFor(
     });
     if (!near.length) continue;
     const T = detail.transforms[b.name];
-    out[b.name] = near.map((line) => line.map((p) => applyAffine(T, p)));
+    out[b.name] = near.map((l) => ({ mark: l.mark, pts: l.pts.map((p) => applyAffine(T, p)) }));
   }
   return out;
 }
@@ -305,7 +306,7 @@ export type WriteAndGateCtx = {
    */
   derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
   /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
-  chrome?: readonly PtMm[][];
+  chrome?: readonly ChromeLine[];
   overview?: GateExpectation['overview'];
   /**
    * Fold questions still open in this run (E1a, D3): a piece the sheet says is cut on fold, with no
