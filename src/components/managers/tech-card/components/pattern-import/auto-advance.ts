@@ -38,8 +38,8 @@ export const WEAK_ASIDE: ReadonlySet<SetAside['reason']> = new Set([
   'inner-line',
   'other-pen',
 ]);
-/** 25 cm²: a belt loop is smaller, a pocket bag or a collar stand is bigger. */
-export const PIECE_SIZED_MM2 = 2500;
+/** The piece detector's own floor (4 cm²): a belt loop or a tab set aside unlabelled is still a piece to look at. */
+export const PIECE_SIZED_MM2 = PATIMPORT.minPieceAreaMm2;
 
 /** Mask items offered but not applied — a suggestion waiting for "accept". */
 export const waitingItems = (items: readonly Pick<MaskItem, 'status' | 'applied'>[]) =>
