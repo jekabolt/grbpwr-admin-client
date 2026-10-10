@@ -74,8 +74,19 @@ const FOLD_STRAIGHT = 0.99;
 const FOLD_ANGLE_DEG = 3;
 /** placement: bbox at least this both ways. */
 const PLACEMENT_MIN_MM = 40;
-/** Path sampling step for distance work, mm. */
+/** Path sampling step for distance work, mm; a long path is sampled at most this many times. */
 const SAMPLE_MM = 2;
+const PARALLEL_SAMPLES = 80;
+/**
+ * The farthest any rule looks for the sewing line: fold / parallel reach (+ the RMS band), the
+ * drill-to-edge reach of closures, a vee's ends. A nearest-point search never goes further — a mark
+ * beyond it has no `nearEdge` (it is not «at» any edge for any lane).
+ */
+const NEAR_MAX_MM = Math.max(
+  SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM,
+  SKELETON.drillEdgeMm,
+  VEE_END_MM,
+);
 
 // ── small geometry ──────────────────────────────────────────────────────────────────────────
 
@@ -114,6 +125,9 @@ function bboxOf(pts: readonly Pt2[]): BBox {
 }
 const bw = (b: BBox) => b.x1 - b.x0;
 const bh = (b: BBox) => b.y1 - b.y0;
+/** Distance from a point to a bbox (0 inside): a lower bound of its distance to anything in it. */
+const boxDist = (p: Pt2, b: BBox) =>
+  Math.hypot(Math.max(b.x0 - p[0], 0, p[0] - b.x1), Math.max(b.y0 - p[1], 0, p[1] - b.y1));
 const bboxNear = (a: BBox, b: BBox, pad: number) =>
   a.x0 - pad <= b.x1 && b.x0 - pad <= a.x1 && a.y0 - pad <= b.y1 && b.y0 - pad <= a.y1;
 
@@ -195,8 +209,8 @@ class SewLine {
   private readonly grid = new Map<number, number[]>();
   private readonly edgeOf: Int32Array;
   private readonly alongOf: Float64Array;
-  /** No point of the line is further than this from any query inside the line's bbox ± reach. */
-  private readonly reach: number;
+  /** The line's bbox: a path wholly outside it ± a threshold cannot be near the line. */
+  readonly box: BBox;
   /** The line every 8 mm: distances far from it (cut line 10–80 mm out) without the grid's cost. */
   private readonly coarse: Pt2[];
   constructor(
@@ -219,8 +233,7 @@ class SewLine {
       }
     });
     this.coarse = rs.filter((_, i) => i % 8 === 0);
-    const b = bboxOf(rs);
-    this.reach = rs.length ? 2 * Math.hypot(bw(b), bh(b)) + 1e4 : 0;
+    this.box = bboxOf(rs);
     rs.forEach((p, i) => {
       const key = cellKey(Math.floor(p[0] / CELL_MM), Math.floor(p[1] / CELL_MM));
       const cell = this.grid.get(key);
@@ -229,18 +242,25 @@ class SewLine {
     });
   }
 
-  /** Nearest resample index and its distance. */
-  /** Nearest resample index and its distance; past `maxD` the search stops (idx −1, d ∞). */
-  nearest(p: Pt2, maxD = Infinity): { idx: number; d: number } {
+  /**
+   * Nearest resample index within `maxD` (never beyond NEAR_MAX_MM), else idx −1 and d ∞. The
+   * search grows rings of grid cells, so its cost is (radius / cell)²: an annotation a metre or two
+   * away from the piece (a title block, a size table on the same block) must not walk hundreds of
+   * empty rings per sample — the CONSTRUCTION tab runs this on the main thread.
+   */
+  nearest(p: Pt2, maxD = NEAR_MAX_MM): { idx: number; d: number } {
     if (!this.rs.length) return { idx: -1, d: Infinity };
+    const limit = Math.min(maxD, NEAR_MAX_MM);
+    // Further from the line's bbox than the limit: nothing to find, no ring walked.
+    if (boxDist(p, this.box) > limit) return { idx: -1, d: Infinity };
     const cx = Math.floor(p[0] / CELL_MM);
     const cy = Math.floor(p[1] / CELL_MM);
     let idx = -1;
     let d = Infinity;
-    for (let r = 0; r < 4096; r++) {
+    const rings = Math.ceil(limit / CELL_MM) + 1;
+    for (let r = 0; r <= rings; r++) {
       // Ring r: once a hit is closer than the ring's inner reach, no farther ring can beat it.
       if (idx >= 0 && d <= (r - 1) * CELL_MM) break;
-      if ((r - 1) * CELL_MM > maxD || (r - 1) * CELL_MM > this.reach) break;
       const visit = (gx: number, gy: number) => {
         for (const i of this.grid.get(cellKey(gx, gy)) ?? []) {
           const di = dist(p, this.rs[i]);
@@ -261,7 +281,7 @@ class SewLine {
         visit(cx + r, gy);
       }
     }
-    return d <= maxD ? { idx, d } : { idx: -1, d: Infinity };
+    return d <= limit ? { idx, d } : { idx: -1, d: Infinity };
   }
 
   /** Distance to the line through its 8 mm chords (≤ 0.1 mm off on garment curves). */
@@ -269,9 +289,9 @@ class SewLine {
     return polyDist(p, this.coarse, true);
   }
 
-  /** Nearest edge of a point: its id, the distance and the foot's position along the edge. */
-  nearEdge(p: Pt2): { k: number; offsetMm: Mm; alongMm: Mm } | null {
-    const { idx, d } = this.nearest(p);
+  /** Nearest edge of a point within `maxD` (≤ NEAR_MAX_MM): its id, distance, foot along it. */
+  nearEdge(p: Pt2, maxD = NEAR_MAX_MM): { k: number; offsetMm: Mm; alongMm: Mm } | null {
+    const { idx, d } = this.nearest(p, maxD);
     if (idx < 0) return null;
     let k = this.edgeOf[idx];
     let along = this.alongOf[idx];
@@ -725,8 +745,8 @@ function veeOf(p: Path, sew: SewLine, geom: PieceGeom): PieceMark['vee'] | null 
   if (cs.length !== 1) return null;
   const [e0, e1] = ends(p);
   const apex = rs[cs[0]];
-  if (sew.nearest(e0).d > VEE_END_MM || sew.nearest(e1).d > VEE_END_MM) return null;
-  if (sew.nearest(apex).d <= VEE_END_MM) return null;
+  if (sew.nearest(e0, VEE_END_MM).idx < 0 || sew.nearest(e1, VEE_END_MM).idx < 0) return null;
+  if (sew.nearest(apex, VEE_END_MM).idx >= 0) return null;
   const intakeMm = dist(e0, e1);
   const depthMm = intakeMm > 1e-6 ? segDistLine(apex, e0, e1) : dist(apex, e0);
   const ux = e0[0] - apex[0];
@@ -742,7 +762,8 @@ function veeOf(p: Path, sew: SewLine, geom: PieceGeom): PieceMark['vee'] | null 
     ) *
       180) /
     Math.PI;
-  const ne = sew.nearEdge([(e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2]);
+  // The edge it opens on: at the chord's middle, or (a wide chord across a curve) at an end.
+  const ne = sew.nearEdge([(e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2]) ?? sew.nearEdge(e0);
   if (!ne) return null;
   return { intakeMm, depthMm, apexDeg, edge: geom.edges[ne.k].id };
 }
@@ -800,7 +821,9 @@ function parallelOf(
   sew: SewLine,
   geom: PieceGeom,
 ): { nearEdge: NonNullable<PieceMark['nearEdge']>; angleDeg: number } | null {
-  const sp = sample(p.pts, false, Math.max(SAMPLE_MM, p.len / 80));
+  // Outside the fold-distance envelope of the sewing line: no edge can be within reach.
+  if (!bboxNear(p.box, sew.box, SKELETON.markFoldOffsetMm)) return null;
+  const sp = sample(p.pts, false, Math.max(SAMPLE_MM, p.len / PARALLEL_SAMPLES));
   type Foot = { q: Pt2; d: number; foot: Pt2; along: number };
   type Fit = { k: number; cover: number; offset: number; on: Foot[] };
   /** The samples at one constant offset from `feet`, or null when they are not enough. */
@@ -818,10 +841,15 @@ function parallelOf(
   for (let k = 0; k < geom.edges.length; k++) {
     const e = geom.edges[k];
     // Cheap reject: the line's bbox must come within reach of the edge's.
-    if (!bboxNear(p.box, bboxOf(e.pts), SKELETON.markFoldOffsetMm)) continue;
+    const eb = bboxOf(e.pts);
+    if (!bboxNear(p.box, eb, SKELETON.markFoldOffsetMm)) continue;
+    // A sample out of reach of this edge's bbox cannot sit at a fold offset from it: not scanned.
+    const reach = SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM;
     const fit = fitOf(
       k,
-      sp.map((q) => ({ q, ...edgeFoot(q, e) })),
+      sp.map((q) =>
+        boxDist(q, eb) > reach ? { q, d: Infinity, foot: q, along: 0 } : { q, ...edgeFoot(q, e) },
+      ),
     );
     if (
       fit &&
@@ -846,7 +874,7 @@ function parallelOf(
   const feet: Foot[] = [];
   const edgeCount = new Map<number, number>();
   for (const q of sp) {
-    const ne = sew.nearEdge(q);
+    const ne = sew.nearEdge(q, SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM);
     if (!ne) continue;
     feet.push({ q, d: ne.offsetMm, foot: q, along: ne.alongMm });
     edgeCount.set(ne.k, (edgeCount.get(ne.k) ?? 0) + 1);
