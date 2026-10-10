@@ -14,7 +14,7 @@ import { baseModel, POM } from 'lib/pom';
 import type { EdgeId, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
 import type { StoredSeam, StoredSeamDirection } from 'lib/seams';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip } from 'ui/components/chip';
 import { Progress } from 'ui/components/progress';
 import { Section } from 'ui/components/section';
@@ -78,6 +78,7 @@ export function SeamsReview({
   frozen,
   title,
   size,
+  focus,
 }: {
   open: boolean;
   onClose: () => void;
@@ -87,6 +88,11 @@ export function SeamsReview({
   title: string;
   /** Size code the pieces were read on. */
   size: string;
+  /**
+   * Open on this seam (the 3D doll's «fix in seams review»): its row is selected; a seam the
+   * engine does not give is laid in the connect strip, edges picked, nothing written.
+   */
+  focus?: { a: EdgeId[]; b: EdgeId[] } | null;
 }) {
   const { graph, geoms, review, settling } = useSeamReview();
   // While the provider re-reads (a decision or a pattern edit, 400 ms + an idle read) the graph on
@@ -345,6 +351,24 @@ export function SeamsReview({
       doors.undo(it);
     }
   };
+
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focus || focused.current || !review || !graph) return;
+    focused.current = true;
+    const known = new Set(graph.pieces.flatMap((p) => p.edges.map((e) => e.id)));
+    const fa = focus.a.filter((e) => known.has(e));
+    const fb = focus.b.filter((e) => known.has(e));
+    const meets = (x: readonly EdgeId[], y: readonly EdgeId[]) => x.some((e) => y.includes(e));
+    const it = review.items.find(
+      (x) => (meets(x.a, fa) && meets(x.b, fb)) || (meets(x.a, fb) && meets(x.b, fa)),
+    );
+    if (it) {
+      setFilter('all');
+      select(it);
+    } else if (!frozen && fa.length && fb.length)
+      setHand({ a: fa, b: fb, direction: 'reversed', replace: null });
+  }, [focus, review, graph, frozen, select]);
 
   const pct = review && review.total > 0 ? (review.decided / review.total) * 100 : 0;
   const sure = review?.sure.length ?? 0;

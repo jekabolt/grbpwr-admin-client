@@ -7,7 +7,9 @@
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
 import type {
+  BackgroundKind,
   ChainAmbiguity,
+  CleanPreview,
   ChainSet,
   DraftScope,
   ExtractOpts,
@@ -18,6 +20,8 @@ import type {
   ManifestSource,
   PageClassification,
   PageIndex,
+  PageMask,
+  PageMaskEdit,
   PieceFamily,
   Progress,
   PtMm,
@@ -33,6 +37,7 @@ import type {
   SizeCountAsk,
   SizeRun,
   SourceDoc,
+  SheetClean,
   SourceFileInfo,
   StageIO,
   StageName,
@@ -60,6 +65,7 @@ import {
   type ExtractorRegistry,
 } from '../adapters/sniff';
 import { assembleSheetDetailed, classifyPages } from '../assemble';
+import { applyMasks, cleanPages, cleanSheet, countsOf, mergeScale, srcKey } from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
@@ -124,6 +130,7 @@ const proposeCardSizeMap = createProposeSizeMap({
 /** Stage order (08-CONTRACT §4.1); render-som is a side stage and invalidates nothing. */
 const ORDER: StageName[] = [
   'extract',
+  'clean',
   'scale',
   'assemble',
   'chains',
@@ -156,6 +163,62 @@ function isScanPage(p: IRPage): boolean {
   return stroked <= 3 && p.paths.length <= 20;
 }
 
+/** Points the masked lines of the sheet view may carry (the live lines keep the full budget). */
+const PREVIEW_MASK_BUDGET = 60_000;
+/** Points all page previews of the files step carry together. */
+const PREVIEW_PAGES_BUDGET = 250_000;
+
+/** A8: each masked page drawn — live lines and masked lines by kind (the files step's strip). */
+function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
+  // every page: the tiles with their mask, the pages set aside as thumbnails (their live lines)
+  const shown = masks;
+  const tilesN = masks.filter((m) => m.role === 'tile').length;
+  const asideN = masks.length - tilesN;
+  const thumb = Math.min(4000, Math.floor((0.2 * PREVIEW_PAGES_BUDGET) / Math.max(1, asideN)));
+  const per = Math.max(
+    3000,
+    Math.floor((PREVIEW_PAGES_BUDGET - thumb * asideN) / Math.max(1, tilesN)),
+  );
+  const out: CleanPreview[] = [];
+  for (const m of shown) {
+    const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
+    if (!pg) continue;
+    const ext = Math.max(pg.widthMm, pg.heightMm);
+    const byId = new Map(pg.paths.map((p) => [p.id, p]));
+    const inItem = new Set(m.items.flatMap((it) => it.paths));
+    const masked = new Map<string, { item: (typeof m.items)[number]; paths: typeof pg.paths }>();
+    for (const it of m.items) {
+      if (!it.paths.length) continue;
+      const k = `${it.kind}|${it.status}|${it.applied}`;
+      const e = masked.get(k) ?? { item: it, paths: [] };
+      for (const id of it.paths) {
+        const p = byId.get(id);
+        if (p) e.paths.push(p);
+      }
+      masked.set(k, e);
+    }
+    out.push({
+      file: m.file,
+      page: m.page,
+      widthMm: pg.widthMm,
+      heightMm: pg.heightMm,
+      live: previewOf(
+        pg.paths.filter((p) => !inItem.has(p.id)),
+        pg.styles,
+        ext,
+        m.role === 'tile' ? per : Math.max(500, thumb),
+      ),
+      masked: [...masked.values()].map(({ item, paths }) => ({
+        kind: item.kind,
+        status: item.status,
+        applied: item.applied,
+        lines: previewOf(paths, pg.styles, ext, Math.max(1000, per >> 1)),
+      })),
+    });
+  }
+  return out;
+}
+
 const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   const { paths: _p, texts: _t, rasters: _r, styles: _s, ...rest } = s;
   return rest;
@@ -172,7 +235,16 @@ export class Session {
   /** Factor already applied to `docs` (1 = as extracted). */
   private docsFactor = 1;
   private pages: PageClassification[] = [];
+  /** The page classes as extract found them (`pages` is them after the clean stage's role edits). */
+  private extractPages: PageClassification[] = [];
+  private extractScale: ScaleCandidate[] = [];
   private calibrations: Calib[] = [];
+  // clean (A8)
+  /** The page masks of the last clean run (re-applied whenever the docs are read again). */
+  private masks: PageMask[] | null = null;
+  private cleanEdits: PageMaskEdit[] = [];
+  /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
+  private offeredSrc = new Set<string>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -272,6 +344,11 @@ export class Session {
   private invalidateAfter(stage: StageName) {
     const at = ORDER.indexOf(stage);
     if (at < 0) return;
+    if (at < ORDER.indexOf('clean')) {
+      this.masks = null;
+      this.cleanEdits = [];
+      this.offeredSrc = new Set();
+    }
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
       this.fast = null;
@@ -311,6 +388,8 @@ export class Session {
       switch (stage) {
         case 'extract':
           return this.extract(input as StageIO['extract']['in'], ctx);
+        case 'clean':
+          return this.clean(input as StageIO['clean']['in'], ctx);
         case 'scale':
           return this.scale(input as StageIO['scale']['in'], ctx);
         case 'assemble':
@@ -547,6 +626,8 @@ export class Session {
         },
       ];
     this.scaleCands = scale;
+    this.extractScale = scale;
+    this.extractPages = this.pages;
     this.extractWarnings = warnings;
     // Cut layouts live on the instruction pages, which the sheet drops (F7 reads them): keep only
     // their text, a few kB, before the docs go.
@@ -577,6 +658,7 @@ export class Session {
       throw new ImportError('out-of-order', `scale factor ${d.factor} is not usable`, 'scale');
     if (!this.docs && !this.dxf && !this.pages.length)
       throw new ImportError('out-of-order', 'read the files first', 'scale');
+    await this.ensureClean(ctx);
     if (this.dxf) {
       // The fast path is built in the confirmed units; the docs are only re-scaled when needed.
       const { read, seg } = this.dxf;
@@ -615,7 +697,86 @@ export class Session {
     const note: Progress = (d, t, n) => ctx.progress(d, t, `re-reading · ${n ?? ''}`);
     this.docs = await this.readAll({ ...ctx, progress: note });
     this.docsFactor = 1;
+    // A8: the mask is a flag on the docs — a re-read carries it again
+    if (this.masks) applyMasks(this.docs, this.masks);
     if (this.decision) this.rescaleTo(this.decision.factor);
+  }
+
+  // ── clean (A8) ────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The input pages cleaned before anything is parsed (clean/): page roles, the masks of every
+   * tile page as flags on the docs, the test square's scale candidate. A DXF read by its blocks
+   * has nothing to clean (its blocks are the pieces). Runs on its own (no edits) when a caller
+   * goes from extract straight to the scale (the probes, an old wizard).
+   */
+  private async clean(
+    input: StageIO['clean']['in'],
+    ctx: StageCtx,
+  ): Promise<StageIO['clean']['out']> {
+    if (!this.docs && !this.dxf && !this.extractPages.length)
+      throw new ImportError('out-of-order', 'read the files first', 'clean');
+    const edits = input.edits ?? [];
+    this.cleanEdits = edits;
+    if (this.dxf) {
+      this.masks = [];
+      this.offeredSrc = new Set();
+      this.pages = this.extractPages;
+      this.scaleCands = this.extractScale;
+      ctx.progress(1, 1);
+      return {
+        pages: this.pages.map((p) => ({ file: p.file, page: p.page, role: p.cls, items: [] })),
+        dropped: [],
+        classes: this.pages,
+        summary: {},
+        offered: {},
+        scaleHints: [],
+        scale: this.scaleCands,
+        curveTexts: [],
+        previews: [],
+        notes: ['the DXF carries its pieces as blocks — nothing to clean'],
+      };
+    }
+    // the docs at extraction scale: masks are found in page frame before any scale is applied
+    await this.ensureDocs(ctx);
+    if (this.docsFactor !== 1) this.rescaleTo(1);
+    const docs = this.docs!;
+    // Detect on the unmasked extract every time: the flags of the previous run (an operator edit
+    // re-runs clean) would hide those lines from the chains and their items would vanish.
+    applyMasks(docs, []);
+    this.masks = null;
+    const out = cleanPages(docs, this.extractPages, input, {
+      checkCancel: ctx.checkCancel,
+      progress: (d, t, n) => {
+        ctx.checkCancel();
+        ctx.progress(d, t, n);
+      },
+    });
+    applyMasks(docs, out.pages);
+    this.masks = out.pages;
+    this.offeredSrc = new Set<string>();
+    for (const m of out.pages) {
+      const off = new Set(m.items.filter((it) => !it.applied).flatMap((it) => it.paths));
+      if (!off.size) continue;
+      const pg = docs.find((d) => d.file.id === m.file)?.pages.find((p) => p.page === m.page);
+      for (const p of pg?.paths ?? []) if (off.has(p.id)) this.offeredSrc.add(srcKey(p.src));
+    }
+    this.pages = out.classes;
+    this.scaleCands = mergeScale(this.extractScale, out.scaleHints);
+    // the text of the pages set aside (cut layouts, F7) follows the roles
+    const tilePage = new Set(
+      this.pages.filter((p) => p.cls === 'tile').map((p) => `${p.file}:${p.page}`),
+    );
+    this.pageTexts = docs.flatMap((d) =>
+      d.pages.filter((p) => !tilePage.has(`${d.file.id}:${p.page}`)).flatMap((p) => p.texts),
+    );
+    return { ...out, scale: this.scaleCands, previews: cleanPreviews(docs, out.pages) };
+  }
+
+  /** extract → scale without a clean run: clean with no edits first (D3 autos only). */
+  private async ensureClean(ctx: StageCtx) {
+    if (this.masks || this.dxf) return;
+    await this.clean({ edits: [] }, ctx);
   }
 
   // ── assemble ──────────────────────────────────────────────────────────────────────────────
@@ -640,8 +801,11 @@ export class Session {
           'assemble',
         );
       ctx.checkCancel();
-      // Instruction pages carry the size run and the legend; keep their text past the docs.
-      this.docTexts = docs.flatMap((d) => d.pages.flatMap((p) => p.texts.map((t) => t.text)));
+      // Instruction pages carry the size run and the legend; keep their text past the docs (the
+      // tile labels and copyright lines the clean stage masked are not read).
+      this.docTexts = docs.flatMap((d) =>
+        d.pages.flatMap((p) => p.texts.filter((t) => !t.background).map((t) => t.text)),
+      );
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
@@ -649,9 +813,38 @@ export class Session {
       // Page geometry is no longer needed once the sheet exists (memory hygiene, see the header).
       this.docs = null;
     }
-    this.sheet = sheet;
     const ext = Math.max(sheet.bbox.maxX - sheet.bbox.minX, sheet.bbox.maxY - sheet.bbox.minY);
-    return { sheet: sheetOnly(sheet), previewPaths: previewOf(sheet.paths, sheet.styles, ext) };
+    let clean: SheetClean | undefined;
+    if (!this.fast) {
+      // A8 8b: the sheet-wide pass (a watermark the tile borders cut); masked texts leave the sheet
+      ctx.checkCancel();
+      // the paths a page item offers (a stroke-text suggestion) are not offered again
+      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc);
+      sheet = { ...sheet, texts: sheet.texts.filter((t) => !t.background) };
+      const byKind = new Map<BackgroundKind, typeof sheet.paths>();
+      for (const p of sheet.paths) {
+        if (!p.background) continue;
+        const a = byKind.get(p.background);
+        if (a) a.push(p);
+        else byKind.set(p.background, [p]);
+      }
+      const { summary } = countsOf(items);
+      clean = {
+        items,
+        summary,
+        masked: [...byKind].map(([kind, ps]) => ({
+          kind,
+          lines: previewOf(ps, sheet.styles, ext, PREVIEW_MASK_BUDGET),
+        })),
+      };
+    }
+    this.sheet = sheet;
+    const live = clean ? sheet.paths.filter((p) => !p.background) : sheet.paths;
+    return {
+      sheet: sheetOnly(sheet),
+      previewPaths: previewOf(live, sheet.styles, ext),
+      ...(clean ? { clean } : {}),
+    };
   }
 
   // ── chains + sizes (F3 / F5; the DXF fast path answers from its segmentation) ─────────

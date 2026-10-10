@@ -52,7 +52,17 @@ const heapMb = (): number | undefined => {
 const post = (m: WorkerMessage, transfer: Transferable[] = []) => scope.postMessage(m, transfer);
 
 function transferOf(stage: StageName, out: StageIO[StageName]['out']): Transferable[] {
-  if (stage === 'assemble') return buffersOf((out as StageIO['assemble']['out']).previewPaths);
+  if (stage === 'assemble') {
+    const a = out as StageIO['assemble']['out'];
+    return buffersOf([...a.previewPaths, ...(a.clean?.masked.flatMap((m) => m.lines) ?? [])]);
+  }
+  if (stage === 'clean')
+    return buffersOf(
+      (out as StageIO['clean']['out']).previews.flatMap((p) => [
+        ...p.live,
+        ...p.masked.flatMap((m) => m.lines),
+      ]),
+    );
   if (stage === 'chains') return buffersOf((out as StageIO['chains']['out']).chainPreview);
   return [];
 }

@@ -54,6 +54,7 @@ type Session = {
 
 const LATENCY: Record<StageName, number> = {
   extract: 900,
+  clean: 300,
   scale: 250,
   assemble: 1100,
   chains: 700,
@@ -122,6 +123,30 @@ export function createStubClient(): ImportClient {
         switch (stage) {
           case 'extract':
             return fixtureExtract(s.files);
+          case 'clean': {
+            // the fixture's pages are clean: nothing masked, the extract's scale as is
+            const ex = fixtureExtract(s.files);
+            return {
+              pages: ex.pages.map((p) => ({ file: p.file, page: p.page, role: p.cls, items: [] })),
+              dropped: ex.pages
+                .filter((p) => p.cls !== 'tile')
+                .map((p) => ({
+                  file: p.file,
+                  page: p.page,
+                  cls: p.cls,
+                  why: p.why,
+                  status: 'auto' as const,
+                })),
+              classes: ex.pages,
+              summary: {},
+              offered: {},
+              scaleHints: [],
+              scale: ex.scale,
+              curveTexts: [],
+              previews: [],
+              notes: [],
+            };
+          }
           case 'scale': {
             const i = input as StageIO['scale']['in'];
             s.scale = i.decision;

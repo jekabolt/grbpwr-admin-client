@@ -12,6 +12,8 @@ export type ModelSeam = {
   a: EdgeId[];
   b: EdgeId[];
   kind: 'edge' | 'partial' | 'composite' | 'closure-not-seam';
+  /** A seam a person confirmed (stored on the card) — partner evidence on its own word. */
+  confirmed?: boolean;
 };
 
 export type Model = {
@@ -44,11 +46,21 @@ export function seamsOfGraph(graph: SeamGraph): ModelSeam[] {
   const out: ModelSeam[] = [];
   for (const c of graph.chosen) {
     if (c.kind === 'surface' || c.kind === 'closure-not-seam') continue;
-    out.push({ a: c.aParts ?? edgeIdsOf(c.a), b: c.bParts ?? edgeIdsOf(c.b), kind: c.kind });
+    out.push({
+      a: c.aParts ?? edgeIdsOf(c.a),
+      b: c.bParts ?? edgeIdsOf(c.b),
+      kind: c.kind,
+      ...(c.provenance?.status === 'confirmed' ? { confirmed: true } : {}),
+    });
   }
   for (const c of graph.rejected) {
     if (c.kind !== 'closure-not-seam') continue;
-    out.push({ a: edgeIdsOf(c.a), b: edgeIdsOf(c.b), kind: 'closure-not-seam' });
+    out.push({
+      a: edgeIdsOf(c.a),
+      b: edgeIdsOf(c.b),
+      kind: 'closure-not-seam',
+      ...(c.provenance?.status === 'confirmed' ? { confirmed: true } : {}),
+    });
   }
   return out;
 }

@@ -222,6 +222,12 @@ export type SeamCandidate = {
    * range). Absent = the whole run.
    */
   range?: { a: [Mm, Mm]; b: [Mm, Mm] };
+  /**
+   * Composite side whose parts are not all sewn whole (an armhole that runs over the free top of a
+   * partial seam): the sewn stretch of each part, mm along that EDGE from its start, keyed by edge
+   * id. Edges not named are sewn whole. Absent on the engine's own readings.
+   */
+  partRange?: Record<EdgeId, [Mm, Mm]>;
 };
 
 /** Who decided a stored seam, and how its edges were found today. */

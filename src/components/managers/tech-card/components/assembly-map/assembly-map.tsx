@@ -19,8 +19,10 @@ import { PiecesView } from './pieces-view';
 import { StepView } from './step-view';
 import type { SewnField } from './sewn';
 import { useMapModel } from './use-map-model';
+import { DollColumn } from '../assembly-doll/doll-column';
+import { openDoll } from '../assembly-doll/doll-store';
 
-export type MapView = 'step' | 'pieces' | 'sketch';
+export type MapView = 'step' | 'pieces' | 'sketch' | '3d';
 
 const VIEWS = [
   { value: 'step', label: 'step', hint: 'the active step: its inputs pulled apart at the seam' },
@@ -30,12 +32,14 @@ const VIEWS = [
     hint: 'every piece once, each sewn edge numbered by its step',
   },
   { value: 'sketch', label: 'sketch', hint: 'the technical sketch with callout pins' },
+  { value: '3d', label: '3d', hint: 'the paper doll: the pieces pulled shut along the seams' },
 ] as const satisfies readonly ViewSwitchOption<MapView>[];
 
 const QUESTION: Record<MapView, string> = {
   step: '— what joins what, at which edge',
   pieces: '— sewn edges, numbered by step',
   sketch: '— hovering an operation lights its pin, and the other way round',
+  '3d': '— does the pattern close into a garment',
 };
 
 // Выбор вида — ПРЕЗЕНТАЦИЯ, а не данные карточки: localStorage на карточку, форма не грязнеет.
@@ -43,7 +47,7 @@ const viewKey = (id: string | undefined) => `plm.techcard.assembly-map.view.${id
 function readView(id: string | undefined): MapView {
   try {
     const v = localStorage.getItem(viewKey(id));
-    return v === 'pieces' || v === 'sketch' ? v : 'step';
+    return v === 'pieces' || v === 'sketch' || v === '3d' ? v : 'step';
   } catch {
     return 'step';
   }
@@ -142,7 +146,11 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
         <ViewSwitch<MapView>
           label='assembly map view'
           value={view}
-          onChange={setView}
+          onChange={(v) => {
+            setView(v);
+            // 3D is a door as well as a view: the doll is read fullscreen (§6).
+            if (v === '3d') openDoll();
+          }}
           options={VIEWS}
         />
       </div>
@@ -164,6 +172,8 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
           onHoverMany={(list) => store?.hoverMany(list)}
           onPick={pick}
         />
+      ) : view === '3d' ? (
+        <DollColumn />
       ) : (
         sketch
       )}

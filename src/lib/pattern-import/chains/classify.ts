@@ -21,7 +21,7 @@ import { cosine, type Signature } from './motif';
 
 export const LOOK = { minCos: 0.88, attachCos: 0.93 };
 
-function straightAxis(c: Chain): { axis: 'x' | 'y' | null; straight: boolean } {
+export function straightAxis(c: Chain): { axis: 'x' | 'y' | null; straight: boolean } {
   const a = c.pts[0];
   const b = c.pts[c.pts.length - 1];
   const L = dist(a, b);
@@ -157,26 +157,53 @@ export function furniture(
   return out;
 }
 
+/** A glyph cluster: polylines that touch (an end within `touchMm` of another's segment). */
+export type GlyphCluster = {
+  ids: number[];
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  /** Total turning inside the member polylines, rad (corners BETWEEN members are not counted). */
+  turn: number;
+};
+
+/** Total turning of a polyline, rad: glyphs are full of corners and bowls, rules and ticks are not. */
+export function turnOf(p: readonly PtMm[]): number {
+  let t = 0;
+  for (let k = 1; k + 1 < p.length; k++) {
+    const a = Math.atan2(p[k].y - p[k - 1].y, p[k].x - p[k - 1].x);
+    const b = Math.atan2(p[k + 1].y - p[k].y, p[k + 1].x - p[k].x);
+    let d = Math.abs(b - a);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    t += d;
+  }
+  return t;
+}
+
 /**
- * Lettering drawn as line work (wm's "WWW.PAFAVERO.PL" watermark, 60 mm outline glyphs in every
- * size file; "ID: 1 PRZÓD" stencil text): chain indices. Small chains (≤ 120 mm across) that touch
- * form glyph clusters; a TEXT LINE is ≥ 4 clusters of one height (± 15 %) on one baseline band,
- * each within 1.2 heights of the next, along x or (rotated text) along y — and not all of one width
- * (a row of identical belt loops or labels is not text), and glyphs are two-dimensional (median
- * width ≥ ¼ height, lower median: a legend's stacked line swatches are not) and turn (median ≥ 3 rad per glyph: band
- * end ticks are straight). Smaller clusters inside a text line's band
- * between its glyphs (the dot of ".PL") go with it.
+ * Glyph clusters among polylines (lettering(), A8 clean): every polyline at most `maxExtentMm`
+ * across is a candidate; candidates whose end lies within `touchMm` of another candidate's segment
+ * are one cluster. Index = position in `polys`.
  */
-export function lettering(chains: Chain[]): number[] {
+export function glyphClusters(
+  polys: readonly (readonly PtMm[])[],
+  maxExtentMm: number,
+  touchMm = 0.6,
+  keep: (i: number) => boolean = () => true,
+  /** Join only END to END (outline letters close at corners; a T-joint or a crossing never joins). */
+  endsOnly = false,
+): GlyphCluster[] {
   const small: number[] = [];
-  const bb = chains.map((c) => bboxOf(c.pts));
-  chains.forEach((c, i) => {
+  const bb = polys.map((p) => bboxOf(p as PtMm[]));
+  polys.forEach((p, i) => {
     const b = bb[i];
-    if (c.pts.length >= 2 && Math.max(b.maxX - b.minX, b.maxY - b.minY) <= 120) small.push(i);
+    if (p.length >= 2 && keep(i) && Math.max(b.maxX - b.minX, b.maxY - b.minY) <= maxExtentMm)
+      small.push(i);
   });
   if (small.length < 4) return [];
   const grid = new SegGrid(4);
-  for (const i of small) grid.addPolyline(i, chains[i].pts);
+  for (const i of small) grid.addPolyline(i, polys[i] as PtMm[]);
   const parent = new Map<number, number>(small.map((i) => [i, i]));
   const find = (i: number): number => {
     let r = i;
@@ -190,62 +217,83 @@ export function lettering(chains: Chain[]): number[] {
     return r;
   };
   for (const i of small) {
-    const pts = chains[i].pts;
+    const pts = polys[i];
     for (const p of [pts[0], pts[pts.length - 1]])
-      grid.near(p, 0.6, (o, sIdx) => {
+      grid.near(p, touchMm, (o, sIdx) => {
         if (o === i) return;
-        const q = chains[o].pts;
-        if (segNearest(p, q[sIdx], q[sIdx + 1]).d <= 0.6) parent.set(find(o), find(i));
+        const q = polys[o];
+        if (endsOnly) {
+          const e0 = q[0];
+          const e1 = q[q.length - 1];
+          if (dist(p, e0) > touchMm && dist(p, e1) > touchMm) return;
+        } else if (segNearest(p, q[sIdx], q[sIdx + 1]).d > touchMm) return;
+        parent.set(find(o), find(i));
       });
   }
-  // total turning of a chain (rad): glyphs are full of corners and bowls, rules and ticks are not
-  const turn = (i: number) => {
-    const p = chains[i].pts;
-    let t = 0;
-    for (let k = 1; k + 1 < p.length; k++) {
-      const a = Math.atan2(p[k].y - p[k - 1].y, p[k].x - p[k - 1].x);
-      const b = Math.atan2(p[k + 1].y - p[k].y, p[k + 1].x - p[k].x);
-      let d = Math.abs(b - a);
-      if (d > Math.PI) d = 2 * Math.PI - d;
-      t += d;
-    }
-    return t;
-  };
-  type Cl = {
-    ids: number[];
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    turn: number;
-  };
-  const cls = new Map<number, Cl>();
+  const cls = new Map<number, GlyphCluster>();
   for (const i of small) {
     const r = find(i);
     const b = bb[i];
     const c = cls.get(r);
-    if (!c) cls.set(r, { ids: [i], ...b, turn: turn(i) });
+    if (!c) cls.set(r, { ids: [i], ...b, turn: turnOf(polys[i]) });
     else {
       c.ids.push(i);
-      c.turn += turn(i);
+      c.turn += turnOf(polys[i]);
       c.minX = Math.min(c.minX, b.minX);
       c.minY = Math.min(c.minY, b.minY);
       c.maxX = Math.max(c.maxX, b.maxX);
       c.maxY = Math.max(c.maxY, b.maxY);
     }
   }
-  const all = [...cls.values()].filter((c) => Math.max(c.maxX - c.minX, c.maxY - c.minY) <= 110);
-  const text = new Set<number>();
+  return [...cls.values()];
+}
+
+/** One text line found among glyph clusters, in its own frame (u along, v across). */
+export type GlyphRun = {
+  along: 'x' | 'y';
+  /** The clusters that make the line, in reading order. */
+  glyphs: GlyphCluster[];
+  /** Every cluster inside the line's band (the dot of ".PL", an inner bowl) — includes `glyphs`. */
+  members: GlyphCluster[];
+  /** Glyph height (across the line) of the first glyph, mm. */
+  heightMm: number;
+  box: { minX: number; minY: number; maxX: number; maxY: number };
+};
+
+export type GlyphRunOpts = {
+  /** Glyphs in a line, at least. */
+  minRun: number;
+  /** Height tolerance (share of the first glyph's height). */
+  hTol: number;
+  /** Centre-line tolerance (share of the height). */
+  vcTol: number;
+  /** Largest gap between glyphs (share of the height). */
+  maxGap: number;
+  /** Smallest gap (negative = overlap allowed, share of the height). */
+  minGap: number;
+  /** Clusters lower than this are not glyphs that start or extend a line (they may sit inside one). */
+  minHeightMm: number;
+  /** Extra test on a candidate line (widths, turning, stroke count). */
+  accept: (run: { glyph: GlyphCluster; u0: number; u1: number; h: number; w: number }[]) => boolean;
+};
+
+/**
+ * Text lines among glyph clusters: ≥ `minRun` clusters of one height (± hTol) on one centre line
+ * (± vcTol of the height), each within `maxGap` heights of the next, along x or (rotated text)
+ * along y — the caller's `accept` adds what makes the row a WORD and not a row of equal parts.
+ */
+export function glyphRuns(clusters: readonly GlyphCluster[], o: GlyphRunOpts): GlyphRun[] {
+  const out: GlyphRun[] = [];
   for (const along of ['x', 'y'] as const) {
     // glyph frame: u along the line, v across (height)
-    const g = all.map((c) => {
+    const g = clusters.map((c) => {
       const u0 = along === 'x' ? c.minX : c.minY;
       const u1 = along === 'x' ? c.maxX : c.maxY;
       const v0 = along === 'x' ? c.minY : c.minX;
       const v1 = along === 'x' ? c.maxY : c.maxX;
-      return { c, u0, u1, v0, v1, h: v1 - v0, w: u1 - u0, vc: (v0 + v1) / 2 };
+      return { glyph: c, u0, u1, v0, v1, h: v1 - v0, w: u1 - u0, vc: (v0 + v1) / 2 };
     });
-    const tall = g.filter((x) => x.h >= 3).sort((a, b) => a.u0 - b.u0);
+    const tall = g.filter((x) => x.h >= o.minHeightMm).sort((a, b) => a.u0 - b.u0);
     const used = new Set<(typeof g)[number]>();
     for (const start of tall) {
       if (used.has(start)) continue;
@@ -253,33 +301,75 @@ export function lettering(chains: Chain[]): number[] {
       let last = start;
       for (const x of tall) {
         if (x.u0 <= last.u0 || used.has(x)) continue;
-        if (Math.abs(x.h - start.h) > 0.15 * start.h) continue;
-        if (Math.abs(x.vc - start.vc) > 0.2 * start.h) continue;
+        if (Math.abs(x.h - start.h) > o.hTol * start.h) continue;
+        if (Math.abs(x.vc - start.vc) > o.vcTol * start.h) continue;
         const gap = x.u0 - last.u1;
-        if (gap > 1.2 * start.h) continue;
-        if (gap < -0.2 * start.h) continue;
+        if (gap > o.maxGap * start.h) continue;
+        if (gap < o.minGap * start.h) continue;
         run.push(x);
         last = x;
       }
-      if (run.length < 4) continue;
-      const ws = run.map((x) => x.w);
-      if (Math.max(...ws) < 1.15 * Math.min(...ws)) continue;
-      // glyphs are two-dimensional: a legend's stacked line swatches are flat
-      const med = (v: number[]) => v.slice().sort((a, b) => a - b)[(v.length - 1) >> 1];
-      if (med(ws) < 0.25 * start.h) continue;
-      // and they turn: median ≥ 3 rad per glyph (an "E" stroke has four corners, an "O" a
-      // full turn); a row of straight ticks or swatches does not turn at all
-      if (med(run.map((x) => x.c.turn)) < 3) continue;
+      if (run.length < o.minRun) continue;
+      if (!o.accept(run)) continue;
       for (const x of run) used.add(x);
       const u0 = run[0].u0;
       const u1 = last.u1;
       const v0 = Math.min(...run.map((x) => x.v0));
       const v1 = Math.max(...run.map((x) => x.v1));
-      for (const x of g)
-        if (x.u0 >= u0 - 0.5 && x.u1 <= u1 + 0.5 && x.v0 >= v0 - 0.5 && x.v1 <= v1 + 0.5)
-          for (const i of x.c.ids) text.add(i);
+      const members = g
+        .filter((x) => x.u0 >= u0 - 0.5 && x.u1 <= u1 + 0.5 && x.v0 >= v0 - 0.5 && x.v1 <= v1 + 0.5)
+        .map((x) => x.glyph);
+      out.push({
+        along,
+        glyphs: run.map((x) => x.glyph),
+        members,
+        heightMm: start.h,
+        box:
+          along === 'x'
+            ? { minX: u0, maxX: u1, minY: v0, maxY: v1 }
+            : { minX: v0, maxX: v1, minY: u0, maxY: u1 },
+      });
     }
   }
+  return out;
+}
+
+const med = (v: number[]) => v.slice().sort((a, b) => a - b)[(v.length - 1) >> 1];
+
+/**
+ * Lettering drawn as line work (wm's "WWW.PAFAVERO.PL" watermark, 60 mm outline glyphs in every
+ * size file; "ID: 1 PRZÓD" stencil text): chain indices. Small chains (≤ 120 mm across) that touch
+ * form glyph clusters; a TEXT LINE is ≥ 4 clusters of one height (± 15 %) on one baseline band,
+ * each within 1.2 heights of the next, along x or (rotated text) along y — and not all of one width
+ * (a row of identical belt loops or labels is not text), and glyphs are two-dimensional (median
+ * width ≥ ¼ height, lower median: a legend's stacked line swatches are not) and turn (median ≥ 3 rad per glyph: band
+ * end ticks are straight). Smaller clusters inside a text line's band
+ * between its glyphs (the dot of ".PL") go with it.
+ */
+export function lettering(chains: Chain[]): number[] {
+  const all = glyphClusters(
+    chains.map((c) => c.pts),
+    120,
+  ).filter((c) => Math.max(c.maxX - c.minX, c.maxY - c.minY) <= 110);
+  const text = new Set<number>();
+  const runs = glyphRuns(all, {
+    minRun: 4,
+    hTol: 0.15,
+    vcTol: 0.2,
+    maxGap: 1.2,
+    minGap: -0.2,
+    minHeightMm: 3,
+    accept: (run) => {
+      const ws = run.map((x) => x.w);
+      if (Math.max(...ws) < 1.15 * Math.min(...ws)) return false;
+      // glyphs are two-dimensional: a legend's stacked line swatches are flat
+      if (med(ws) < 0.25 * run[0].h) return false;
+      // and they turn: median ≥ 3 rad per glyph (an "E" stroke has four corners, an "O" a
+      // full turn); a row of straight ticks or swatches does not turn at all
+      return med(run.map((x) => x.glyph.turn)) >= 3;
+    },
+  });
+  for (const r of runs) for (const c of r.members) for (const i of c.ids) text.add(i);
   return [...text];
 }
 
@@ -354,8 +444,8 @@ function pageMarginLines(chains: Chain[], poses: PagePose[], out: (string | null
 }
 
 /** Axis-aligned straight runs of a polyline (collinear edges merged), at least `minMm` long. */
-type Run = { axis: 'x' | 'y'; at: number; lo: number; hi: number; len: number };
-function axisRuns(pts: readonly PtMm[], closed: boolean, minMm: number): Run[] {
+export type Run = { axis: 'x' | 'y'; at: number; lo: number; hi: number; len: number };
+export function axisRuns(pts: readonly PtMm[], closed: boolean, minMm: number): Run[] {
   const out: Run[] = [];
   const P = closed && pts.length > 2 ? [...pts, pts[0]] : pts;
   let cur: Run | null = null;
@@ -561,6 +651,33 @@ export function testSquares(
   texts: readonly IRText[],
   known: readonly (string | null)[] = [],
 ): number[] {
+  return [...new Set(testSquareBoxes(chains, poses, texts, known).flatMap((q) => q.ids))];
+}
+
+/** A test square drawn as line work (`testSquares`), with what proved it. */
+export type DrawnSquare = {
+  /** Its sides (and every overlaid copy of a side). */
+  ids: number[];
+  box: { minX: number; minY: number; maxX: number; maxY: number };
+  /** The nominal side it is drawn at, mm. */
+  nominalMm: number;
+  /** What, besides the geometry, says it is the test square. */
+  why: 'label' | 'lettering' | 'copies' | 'geometry';
+  /** The label text, when a text named it. */
+  text?: string;
+};
+
+/**
+ * `testSquares` with the boxes: `geometryOnly` also returns squares nothing labels (why
+ * 'geometry' — one evidence, the A8 clean stage offers them, never applies them alone).
+ */
+export function testSquareBoxes(
+  chains: Chain[],
+  poses: PagePose[],
+  texts: readonly IRText[],
+  known: readonly (string | null)[] = [],
+  geometryOnly = false,
+): DrawnSquare[] {
   type Side = { i: number; run: Run };
   const h: Side[] = [];
   const v: Side[] = [];
@@ -605,11 +722,11 @@ export function testSquares(
     }
   }
   if (!boxes.length) return [];
-  const out: number[] = [];
+  const out: DrawnSquare[] = [];
   for (const q of boxes) {
     const s = q.box.maxX - q.box.minX;
     const reach = 45;
-    const labelled = texts.some((t) => {
+    const label = texts.find((t) => {
       const b = t.bbox;
       const d = Math.hypot(
         Math.max(0, q.box.minX - b.maxX, b.minX - q.box.maxX),
@@ -621,6 +738,7 @@ export function testSquares(
           dimensionsIn(t.text).some((x) => Math.abs(x - s) <= 0.02 * s))
       );
     });
+    const labelled = !!label;
     const lettered =
       !labelled &&
       known.some((w, i) => {
@@ -641,8 +759,9 @@ export function testSquares(
         near(o.box.maxX, q.box.maxX) &&
         near(o.box.maxY, q.box.maxY),
     ).length;
-    if (!(labelled || lettered || (copies >= 1 && poses.length > 0))) continue;
-    out.push(...q.ids);
+    const copied = copies >= 1 && poses.length > 0;
+    if (!(labelled || lettered || copied || geometryOnly)) continue;
+    const ids = [...q.ids];
     // every copy of a side (one per overlaid file) goes with it
     const b = q.box;
     for (const x of h)
@@ -651,16 +770,23 @@ export function testSquares(
         near(x.run.lo, b.minX) &&
         near(x.run.hi, b.maxX)
       )
-        out.push(x.i);
+        ids.push(x.i);
     for (const x of v)
       if (
         (near(x.run.at, b.minX) || near(x.run.at, b.maxX)) &&
         near(x.run.lo, b.minY) &&
         near(x.run.hi, b.maxY)
       )
-        out.push(x.i);
+        ids.push(x.i);
+    out.push({
+      ids: [...new Set(ids)],
+      box: q.box,
+      nominalMm: SQUARE_MM.reduce((a, n) => (Math.abs(n - s) < Math.abs(a - s) ? n : a)),
+      why: labelled ? 'label' : lettered ? 'lettering' : copied ? 'copies' : 'geometry',
+      text: label?.text,
+    });
   }
-  return [...new Set(out)];
+  return out;
 }
 
 /**
