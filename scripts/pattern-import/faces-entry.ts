@@ -6,7 +6,7 @@
 // the r4454 M2 trap (two clicks in the back → one seed point) and a mutation check of every filter.
 //   node scripts/pattern-import/faces.mjs [case…]     (yarn patimport:faces)
 //   env PATIMPORT_CORPUS, PATIMPORT_REPORTS, PATIMPORT_E2E_OUT, FACES_BASE (base E2E json)
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -16,11 +16,15 @@ import {
   judgeBlobs,
   type FaceBlob,
   type FaceJunk,
+  type FaceSwitch,
 } from 'lib/pattern-import/pieces/faces';
 import { rolesByFaces, type FaceRoleOpts } from 'lib/pattern-import/chains/face-role';
+import { readRawDxf } from 'lib/pattern-import/gate';
+import { nestedPieces } from 'lib/pattern-import/gate/checks';
 import type {
   BoxMm,
   Chain,
+  ChainRole,
   ChainSet,
   IRText,
   PagePose,
@@ -69,6 +73,8 @@ type Auto = {
   junkBy: Record<string, number>;
   legend: { role: string; chains: number; lenM: number; conf: number; why: string }[];
   families: { seed: number; origin: string; outcomes: string; areasCm2: number[] }[];
+  /** A2 r2: what the pieces step lists as set aside, by reason. */
+  setAside: Record<string, number>;
 };
 
 function render(file: string, inn: Inner, pc: StageIO['pieces']['out'], title: string) {
@@ -190,6 +196,11 @@ function autoOf(inn: Inner, pc: StageIO['pieces']['out']): Auto {
       conf: k.confidence,
       why: k.evidence.map((e) => e.kind + ('name' in e ? `:${e.name}` : '')).join(','),
     })),
+    setAside: (pc.setAside ?? []).reduce<Record<string, number>>((m, a) => {
+      const k = a.seed ? `label:${a.reason}` : a.reason;
+      m[k] = (m[k] ?? 0) + 1;
+      return m;
+    }, {}),
     families: pc.families.map((f: PieceFamily) => ({
       seed: f.seed,
       origin: pc.seeds.find((s) => s.id === f.seed)?.origin ?? '?',
@@ -514,6 +525,188 @@ function synthFaces() {
   );
 }
 
+/**
+ * Outlines inside one blob (A2 r2): a collar drawn inside the back, a graded nest with a pocket
+ * between two size lines, two pieces touching at a corner, a piece split by an inner line, two
+ * pieces drawn sharing an edge, a label box in another pen — each rule, and its mutation.
+ */
+function synthUnits() {
+  type It = { pts: PtMm[]; closed: boolean; cls: number };
+  const run = (
+    its: It[],
+    o: {
+      graded?: boolean;
+      roles?: Record<number, ChainRole>;
+      off?: Set<FaceSwitch>;
+      texts?: IRText[];
+    } = {},
+  ) => {
+    const wallItems = its.map((it, i) => ({ chain: i, pts: it.pts, closed: it.closed }));
+    const chains = its.map((it, i) => chainOf(i, it.pts, it.closed));
+    let b: BoxMm = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const it of its)
+      for (const p of it.pts)
+        b = {
+          minX: Math.min(b.minX, p.x),
+          minY: Math.min(b.minY, p.y),
+          maxX: Math.max(b.maxX, p.x),
+          maxY: Math.max(b.maxY, p.y),
+        };
+    // a sheet much larger than the drawing (no 'sheet' border verdict)
+    const pad = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+    const sheet = sheetOf(
+      { minX: b.minX - pad, minY: b.minY - pad, maxX: b.maxX + pad, maxY: b.maxY + pad },
+      [],
+      o.texts ?? [],
+      [STYLE(0, null)],
+    );
+    const classOf = new Map(its.map((it, i) => [i, it.cls]));
+    const roleOf = new Map<number, ChainRole>(
+      its.map((it, i) => [i, o.roles?.[it.cls] ?? (o.graded ? 'size' : 'common')]),
+    );
+    const fr = faceRaster(sheet.bbox, wallItems, [], 0.5);
+    const bs = judgeBlobs(fr, sheet, chains, wallItems, [], {
+      off: o.off,
+      classOf,
+      roleOf,
+      graded: !!o.graded,
+      sizeLine: new Set(o.graded ? its.map((_, i) => i) : []),
+    });
+    return {
+      seeds: bs.filter((x) => !x.junk && x.areaMm2 >= PATIMPORT.minPieceAreaMm2),
+      asides: bs.filter(
+        (x) => x.junk && x.junk !== 'small' && x.areaMm2 >= PATIMPORT.minPieceAreaMm2,
+      ),
+    };
+  };
+  const R = (x0: number, y0: number, x1: number, y1: number, cls = 0): It => ({
+    pts: rect(x0, y0, x1, y1),
+    closed: true,
+    cls,
+  });
+  const L = (a: PtMm, b: PtMm, cls = 0): It => ({ pts: [a, b], closed: false, cls });
+  const sum = (r: ReturnType<typeof run>) => ({
+    seeds: r.seeds.length,
+    asides: r.asides.map((x) => x.junk).sort(),
+  });
+  const S = 'synthetic outlines';
+  // U1 one size: back (cut + seam 10 mm in), collar inside it (cut + seam 8 mm in)
+  const u1 = [R(0, 0, 300, 700), R(10, 10, 290, 690), R(200, 100, 260, 500), R(208, 108, 252, 492)];
+  const a1 = sum(run(u1));
+  check(
+    S,
+    'collar inside the back: 2 pieces, both seam lines set aside',
+    a1.seeds === 2 && a1.asides.join() === 'seam-line,seam-line',
+    a1,
+  );
+  const a1n = sum(run(u1, { off: new Set(['nested']) }));
+  check(S, 'nested off: the collar is lost in the back (mutation)', a1n.seeds === 1, a1n);
+  const a1c = sum(run(u1, { off: new Set(['seam-line']) }));
+  check(S, 'seam-line off: seam lines seeded as pieces (mutation)', a1c.seeds > 2, a1c);
+  // U2 graded nest of 3 sizes (classes S 0, M 1, L 2; hem graded 40 mm) + a pocket between the L
+  // and M lines and one inside S, each drawn in two sizes (its own nest)
+  const u2 = [
+    R(0, 0, 200, 300, 0),
+    R(-10, -40, 210, 310, 1),
+    R(-20, -80, 220, 320, 2),
+    R(50, -70, 120, -50, 2),
+    R(53, -67, 117, -53, 1),
+    R(60, 100, 130, 160, 2),
+    R(63, 103, 127, 157, 1),
+  ];
+  const a2 = sum(run(u2, { graded: true }));
+  check(
+    S,
+    'graded nest: 1 piece + its size copies; the pocket between two size lines and the one inside are pieces',
+    a2.seeds === 3 && a2.asides.every((x) => x === 'size-copy'),
+    a2,
+  );
+  // a shape of one size's line with no copy of itself in another size: where sizes cross
+  const u2f = [
+    R(0, 0, 200, 300, 0),
+    R(-10, -40, 210, 310, 1),
+    R(-20, -80, 220, 320, 2),
+    R(50, -70, 120, -50, 2),
+  ];
+  const a2f = sum(run(u2f, { graded: true }));
+  check(
+    S,
+    'graded: a lone shape of one size line, no copy in another size → not seeded',
+    a2f.seeds === 1,
+    a2f,
+  );
+  const a2fo = sum(run(u2f, { graded: true, off: new Set(['fragments']) }));
+  check(S, 'fragments off: it is seeded (mutation)', a2fo.seeds === 2, a2fo);
+  const a2c = sum(run(u2, { graded: true, off: new Set(['size-copy']) }));
+  check(
+    S,
+    'size-copy off: the sizes are no longer held as copies of the piece (mutation)',
+    !a2c.asides.includes('size-copy') && a2c.asides.length + a2c.seeds > 3,
+    a2c,
+  );
+  // U3 two pieces touching at a corner
+  const u3 = [R(0, 0, 100, 130), R(100, 130, 190, 250)];
+  const a3 = sum(run(u3));
+  check(S, 'touching at a corner: 2 pieces', a3.seeds === 2 && !a3.asides.length, a3);
+  const a3u = sum(run(u3, { off: new Set(['units']) }));
+  check(S, 'units off: one seed for both (mutation)', a3u.seeds === 1, a3u);
+  // U4 a piece split by an inner line edge to edge
+  const u4 = [R(0, 0, 200, 300), L({ x: 0, y: 150 }, { x: 200, y: 150 }, 1)];
+  const a4 = sum(run(u4, { roles: { 0: 'common', 1: 'internal' } }));
+  check(
+    S,
+    'split by an inner line: 1 piece, the other half set aside',
+    a4.seeds === 1 && a4.asides.join() === 'inner-line',
+    a4,
+  );
+  const a4o = sum(run(u4, { roles: { 0: 'common', 1: 'internal' }, off: new Set(['inner-line']) }));
+  check(S, 'inner-line off: two halves seeded (mutation)', a4o.seeds === 2, a4o);
+  // U5 two outlines drawn sharing an edge (one pen): which is a piece is the operator's word
+  const u5 = [R(0, 0, 100, 150), R(100, 0, 200, 140)];
+  const a5 = sum(run(u5));
+  check(
+    S,
+    'sharing an edge: 1 seeded, the other set aside (joined)',
+    a5.seeds === 1 && a5.asides.join() === 'joined',
+    a5,
+  );
+  const a5o = sum(run(u5, { off: new Set(['joined']) }));
+  check(S, 'joined off: both seeded (mutation)', a5o.seeds === 2, a5o);
+  // U7 a strap whose size ends cross it edge to edge, each with its size printed by it: a piece,
+  // not a legend box (r4454's band)
+  const u7 = [R(0, 0, 140, 45)];
+  const t7: IRText[] = [];
+  for (let i = 0; i < 4; i++) {
+    u7.push(L({ x: 80 + 8 * i, y: 0 }, { x: 80 + 8 * i, y: 45 }, 1));
+    t7.push(textAt(300 + i, 80 + 8 * i, 34, String(44 + 2 * i)));
+  }
+  const a7 = run(u7, { texts: t7 });
+  check(
+    S,
+    'a strap with size ends across it: not a legend',
+    !a7.asides.some((x) => x.junk === 'legend'),
+    sum(a7),
+  );
+  const a7o = run(u7, { texts: t7, off: new Set(['free-ends']) });
+  check(
+    S,
+    'free-ends off: the strap is a legend (mutation)',
+    a7o.asides.some((x) => x.junk === 'legend'),
+    sum(a7o),
+  );
+  // U6 a label box in another pen inside a piece
+  const u6 = [R(0, 0, 300, 400), R(100, 100, 180, 140, 1)];
+  const a6 = sum(run(u6));
+  check(
+    S,
+    'label box in another pen: set aside',
+    a6.seeds === 1 && a6.asides.join() === 'other-pen',
+    a6,
+  );
+  const a6o = sum(run(u6, { off: new Set(['other-pen']) }));
+  check(S, 'other-pen off: seeded (mutation)', a6o.seeds === 2, a6o);
+}
+
 /** The legend by faces on a synthetic one-pen sheet: each rule, and its mutation. */
 function synthRoles() {
   const lines: { pts: PtMm[]; closed: boolean; style?: number; tag: string }[] = [];
@@ -599,8 +792,8 @@ function synthRoles() {
   };
   const offered = new Set(lines.flatMap((l, i) => (l.tag === 'offered' ? [i] : [])));
   type Off = NonNullable<FaceRoleOpts['off']>;
-  const roleOf = (off?: Off) => {
-    const out = rolesByFaces(sheet, set, styles, offered, { off });
+  const roleOf = (off?: Off, sh: Sheet = sheet) => {
+    const out = rolesByFaces(sh, set, styles, offered, { off });
     const by = new Map<string, Set<string>>();
     for (const c of out.classes)
       for (const id of c.chains) {
@@ -663,9 +856,24 @@ function synthRoles() {
   const noLayer = roleOf(new Set(['layer']));
   check(
     'synthetic legend',
-    'layer off: faces + drawn double still auto',
-    noLayer.auto,
+    'layer off: faces + drawn double are one source (geometry) → asked, not auto',
+    !noLayer.auto && noLayer.conf < 0.6,
     noLayer.cues,
+  );
+  const keyed = { ...sheet, texts: [textAt(900, -40, 430, 'Cutting line')] };
+  const byKey = roleOf(new Set(['layer']), keyed);
+  check(
+    'synthetic legend',
+    'layer off, a printed “cutting line” key → auto',
+    byKey.auto,
+    byKey.cues,
+  );
+  const noKey = roleOf(new Set(['layer', 'text']), keyed);
+  check(
+    'synthetic legend',
+    'text off: the key does not count → asked (mutation)',
+    !noKey.auto,
+    noKey.cues,
   );
   const all = roleOf(new Set(['all']));
   check(
@@ -681,6 +889,7 @@ export async function main(args: string[]): Promise<number> {
   const id = args[1];
   if (mode === 'synth') {
     synthFaces();
+    synthUnits();
     synthRoles();
     console.log(`@@RESULT ${JSON.stringify({ id: 'synthetic', checks })}`);
     return 0;
@@ -705,7 +914,7 @@ export async function main(args: string[]): Promise<number> {
     if (snap && args.includes('--mutate')) {
       const s = snap as { inn: Inner; pc: StageIO['pieces']['out'] };
       const text = s.pc.seeds.filter((x) => x.origin === 'text');
-      const count = (off?: Set<FaceJunk | 'peel' | 'nested'>) =>
+      const count = (off?: Set<FaceSwitch>) =>
         faceSeedsOf(faceMap(s.inn.sheet, s.inn.chains, s.inn.run, text, { off }), 1000).length;
       const base = count();
       const mut: Record<string, number> = {};
@@ -722,6 +931,8 @@ export async function main(args: string[]): Promise<number> {
         'other-size',
         'peel',
         'nested',
+        'units',
+        'fragments',
       ] as const)
         mut[k] = count(new Set([k])) - base;
       out.mutation = mut;
@@ -777,6 +988,33 @@ export async function main(args: string[]): Promise<number> {
         { edited: svg.legendEdited, clicks: svg.clicks },
       );
     }
+    // D3: every closed outline is a seed or set aside with its reason (nothing silent)
+    if (wm) {
+      const a = A(wm)!;
+      check(
+        'wm M',
+        "the collar is its own piece: no piece-sized outline on any written block's layer 8 (G19)",
+        (() => {
+          const dir = resolve(process.env.PATIMPORT_E2E_OUT ?? resolve(REPORTS, 'E2E-out'), 'wm-M');
+          if (!existsSync(dir)) return false;
+          const f = readdirSync(dir).find((x) => x.endsWith('-main.dxf'));
+          if (!f) return false;
+          const raw = readRawDxf(readFileSync(resolve(dir, f), 'latin1'));
+          return [...raw.blocks.values()].every((e) => !nestedPieces(e).length);
+        })(),
+        a.setAside,
+      );
+    }
+    const r44 = by.get('r4454');
+    if (r44) {
+      const a = A(r44)!;
+      check(
+        'r4454',
+        'the band (piece 10) is not a legend box: no outline set aside as legend',
+        !a.junkBy.legend && !a.setAside.legend,
+        { junk: a.junkBy, setAside: a.setAside },
+      );
+    }
     for (const [k, n] of Object.entries(FIXTURE)) {
       const r = by.get(k);
       if (!r) continue;
@@ -811,6 +1049,14 @@ export async function main(args: string[]): Promise<number> {
     for (const r of rows) {
       const mut = r.mutation as Record<string, number> | undefined;
       if (mut) check('mutation', `${r.id}`, true, mut);
+      const wmMut = by.get('wm')?.mutation as Record<string, number> | undefined;
+      if (wmMut)
+        check(
+          'mutation',
+          'wm: fragments off → fragments of the nest seeded (the rule holds them back)',
+          (wmMut.fragments ?? 0) > 0,
+          wmMut,
+        );
     }
     const bad = checks.filter((c) => !c.ok);
     for (const c of checks)

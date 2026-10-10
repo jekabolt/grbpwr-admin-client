@@ -87,6 +87,8 @@ for (const id of ids) {
         ? ['synth']
         : ['case', id, ...(MUTATE.has(id) ? ['--mutate'] : [])],
   );
+  if (process.env.FACES_DEBUG)
+    process.stdout.write((r.stdout ?? '').replace(/^@@RESULT .*$/m, '') + (r.stderr ?? ''));
   const line = (r.stdout ?? '').split('\n').find((l) => l.startsWith('@@RESULT '));
   const row = line
     ? JSON.parse(line.slice(9))
