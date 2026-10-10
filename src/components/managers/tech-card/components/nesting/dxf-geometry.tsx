@@ -29,6 +29,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
+import type { ConversionManifest } from 'lib/pattern-import/types';
 import { memo, useId, useMemo } from 'react';
 import { clothPatternDefs, hatchId } from '../cloth-hatch';
 import type { PieceClothState } from '../piece-cloth';
@@ -56,6 +57,15 @@ export type DxfBundle = {
   // значит приписать деталям чужую ткань, то есть ровно ту ошибку, от которой скоуп и спасает.
   scopeByFile: Map<number, string>;
   warnings: string[];
+  /**
+   * Манифест конвертации по url листа (MF-C): только у листов, которые написал наш импорт
+   * (lib/pattern-import). Нужен вкладке выкроек целиком — бейдж «converted» и повторный импорт
+   * («заменить лист»); детали несут свои факты сами (PieceDTO.manifest). Ключ — url, а не индекс:
+   * недокачанные файлы сдвигают индексы пачки.
+   */
+  manifestByUrl?: Map<string, ConversionManifest>;
+  /** Codex C3: url → why its manifest was not trusted (geometry / gate mismatch). */
+  manifestDistrustByUrl?: Map<string, string>;
 };
 
 /** Ключ кэша = СОДЕРЖИМОЕ пачки. Родитель пересобирает массив на каждый рендер формы. */
@@ -95,10 +105,12 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
         );
         const fetched: File[] = [];
         const scopeByFile = new Map<number, string>();
+        const urlByFile = new Map<number, string>();
         const warnings: string[] = [];
         settled.forEach((s, i) => {
           if (s.status === 'fulfilled') {
             scopeByFile.set(fetched.length, snapshot[i].scopeKey);
+            urlByFile.set(fetched.length, snapshot[i].url);
             fetched.push(s.value);
           } else {
             warnings.push(sheetDownloadFailed(snapshot[i].name));
@@ -115,7 +127,23 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
           tol: NEST_DEFAULTS.tol,
           tolChain: NEST_DEFAULTS.tolChain,
         });
-        return { pieces: out.pieces, scopeByFile, warnings: [...warnings, ...out.warnings] };
+        const manifestByUrl = new Map<string, ConversionManifest>();
+        (out.manifests ?? []).forEach((m, i) => {
+          const url = urlByFile.get(i);
+          if (m && url) manifestByUrl.set(url, m);
+        });
+        const manifestDistrustByUrl = new Map<string, string>();
+        (out.manifestDistrust ?? []).forEach((why, i) => {
+          const url = urlByFile.get(i);
+          if (why && url) manifestDistrustByUrl.set(url, why);
+        });
+        return {
+          pieces: out.pieces,
+          scopeByFile,
+          warnings: [...warnings, ...out.warnings],
+          manifestByUrl,
+          manifestDistrustByUrl,
+        };
       } finally {
         // Контуры уже уехали на главный поток вместе с ответом — держать воркер (а в нём всю
         // разобранную геометрию) до перезагрузки страницы незачем. `terminate()` идемпотентен.

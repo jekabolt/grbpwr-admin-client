@@ -1,6 +1,7 @@
 // Main-thread handle on the nesting worker: spawn lazily, promise-based parse/nest with
 // live progress, cancel via message + terminate() as the hard fallback, safe respawn.
 import type { NestConfig, NestResult, ParseOpts, PieceDTO, Unit, WorkerResponse } from '../types';
+import type { ConversionManifest } from 'lib/pattern-import/types';
 
 export type ParseOutcome = {
   // Names this parse inside the worker — nest() must present it back (stale-parse guard).
@@ -18,6 +19,11 @@ export type ParseOutcome = {
   // «Блок есть в чертеже» и «из блока построился контур» — разные факты, и второй молчит там, где
   // геометрия не сошлась.
   blockNames: string[];
+  // Манифест конвертации по индексу файла пачки (F6b); null — файл без манифеста. Детали несут
+  // свои факты сами (PieceDTO.manifest) — это для тех, кому нужен файл целиком.
+  manifests: (ConversionManifest | null)[];
+  // Codex C3: почему манифест файла не принят, по индексу (null — принят или его нет).
+  manifestDistrust: (string | null)[];
 };
 
 export type NestProgressMsg = {
@@ -81,6 +87,8 @@ export class NestingWorkerClient {
               failedFiles: msg.failedFiles,
               skippedBlocks: msg.skippedBlocks,
               blockNames: msg.blockNames,
+              manifests: msg.manifests,
+              manifestDistrust: msg.manifestDistrust ?? [],
             });
           } else reject(new Error('unexpected worker reply'));
         },

@@ -9,7 +9,7 @@ import { formatTechCardDate } from 'components/managers/tech-cards/components/ut
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import type { PieceDTO } from 'lib/nesting/types';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -39,8 +39,10 @@ import {
   type FabricScope,
   type ScopeDirection,
   aliasInScope,
+  aliasScopeKey,
   bindingForScope,
   bomPurposeLabel,
+  fabricScopeKey,
   fabricScopes,
   scopeKeyOfBinding,
   strictestDirection,
@@ -49,12 +51,26 @@ import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
-import { publishPatternSizeIndex } from './pattern-size-index';
+import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
 import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
 import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
+import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
+import { createCardApply } from './pattern-import/card-apply';
+import type { ApplyDraftFn } from './pattern-import/client';
+import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import {
+  followUpPending,
+  followUpTargets,
+  initialRows,
+  retryRows,
+  type FollowUpStep,
+} from 'lib/pattern-import/fabrics/followup';
+import type { ConversionManifest } from 'lib/pattern-import/types';
+import type { FollowUpJob } from './pattern-import/follow-up';
+import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -75,10 +91,35 @@ const PieceMatchModal = lazy(() =>
 const MergeSizesModal = lazy(() =>
   import('./nesting/merge-sizes-modal').then((m) => ({ default: m.MergeSizesModal })),
 );
+// Импорт выкройки любого формата (F13) — свой ленивый чанк: мастер с воркером и фикстурой не
+// грузится, пока его не открыли.
+const ImportWizard = lazy(() =>
+  import('./pattern-import/import-wizard').then((m) => ({ default: m.ImportWizard })),
+);
 // Замер площадей деталей — тот же ленивый чанк по той же причине: он тянет разбор геометрии и
 // офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
 // открытый диалог второй раз ничего не качает.
 const PieceAreasDialog = lazy(() => import('./piece-areas-dialog'));
+// Замер площадей + индекс размеров сразу после импорта (MF-C): тот же ленивый чанк разбора.
+const ImportFollowUpRunner = lazy(() =>
+  import('./pattern-import/follow-up').then((m) => ({ default: m.ImportFollowUpRunner })),
+);
+
+/** «converted» badge tooltip: what the importer wrote into the sheet (MF-C, M10). */
+function convertedTitle(m: ConversionManifest): string {
+  const src =
+    (m.source?.files ?? [])
+      .map((f) => f.name)
+      .filter(Boolean)
+      .join(', ') || 'unknown source';
+  const at = formatTechCardDate(m.createdAt);
+  const gate = !m.gate
+    ? 'no gate report'
+    : m.gate.passed
+      ? `gate passed${m.gate.checks.some((c) => !c.ok) ? ' with warnings' : ''}`
+      : `gate blocked (${m.gate.checks.filter((c) => !c.ok && c.severity === 'block').length})`;
+  return `converted by the pattern importer from ${src}${at !== '—' ? ` on ${at}` : ''} · ${gate} · layer ${m.layers.cut} is the final cut line, sizes and pieces come from the file's manifest`;
+}
 
 // Секции BOM, к которым МОЖНО привязать выкройку. Это ровно те же четыре «рулонные» семьи,
 // что стор гросс-апит вейстеджем и что кладёт маркер (rollGoodsSections): подклад, бортовку и
@@ -245,7 +286,9 @@ export function PatternsField({
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  // The import wizard's apply ends in the card's own save (F7): the page has no save button.
+  const autosave = useTechCardAutosave();
   const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
@@ -258,6 +301,15 @@ export function PatternsField({
   const { isSubmitting } = useFormState({ control });
   // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
   const season = (useWatch({ control, name: 'season' }) ?? '') as string;
+  // Детали кроя карточки — мастеру импорта, чтобы ИИ не привязал имя к чужой детали (Codex C10).
+  const cardPieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
+    lineKey?: string;
+    name?: string;
+    cutSymmetry?: string;
+    piecesPerGarment?: number;
+    fused?: boolean;
+    fusingMode?: string;
+  }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
   const sizeById = useSizeNames();
@@ -292,6 +344,8 @@ export function PatternsField({
   // Открыта склейка по-размерных выгрузок. Готовый файл она отдаёт в ту же модалку названия и
   // материала, что и обычная загрузка: склейка отвечает за ЧЕРТЁЖ, а не за то, куда он ляжет.
   const [merging, setMerging] = useState(false);
+  // Открыт мастер «import pattern» (F13).
+  const [importing, setImporting] = useState(false);
   // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
   // this state and split into the two viewers at the bottom.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
@@ -314,6 +368,9 @@ export function PatternsField({
   // фоном, и рассказывать про удавшуюся запись, которую никто не заказывал, — это отчёт о работе,
   // о которой не спрашивали. А вот «карточку надо сохранить» — руководство к действию.
   const [indexFailures, setIndexFailures] = useState<Record<string, string>>({});
+  // Замер площадей и индекс размеров после импорта (MF-C, M3): работа живёт здесь, а не в мастере —
+  // она переживает его закрытие и показывает отказ строкой под шапкой с повтором.
+  const [followUp, setFollowUp] = useState<FollowUpJob | null>(null);
   // Раскладка modal: the DXF files of one fabric, pooled (null = closed).
   const [nesting, setNesting] = useState<{
     sizeId: number;
@@ -699,6 +756,43 @@ export function PatternsField({
   // градацию, и ряд из этих же файлов потом и набирают.
   const canUpload = canEdit && uploadScopes.length > 0;
 
+  // Дверь импорта (F13, J1). Импорт раскладывает размеры файла по РЯДУ карточки (шаг 4), и без
+  // ряда прогон упирался в стену после всей работы — поэтому без ряда дверь закрыта и говорит, где
+  // его задать. Отсутствие ткани в BOM дверь НЕ закрывает: прогон тогда кончается скачиванием DXF
+  // (forRun в pattern-import/client.ts), а это и есть основной выход импорта.
+  const importNoteId = useId();
+  const importDoor = () => {
+    if (!PATTERN_IMPORT_ENABLED || !techCardId || !canEdit) return null;
+    const needsSizes = sizeIds.length === 0;
+    return (
+      <span className='flex items-center gap-1.5'>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor disabled:hover:text-textInactiveColor'
+          disabled={needsSizes}
+          aria-describedby={needsSizes ? importNoteId : undefined}
+          onClick={() => setImporting(true)}
+          title={
+            needsSizes
+              ? 'the import maps the sizes of the file onto the card range: set the range first'
+              : scopes.length === 0
+                ? 'no fabric line in the BOM: the import converts the pattern and ends in a DXF download'
+                : 'convert a pattern in any format (PDF, foreign DXF, PLT, SVG, scan) into a DXF with named pieces and the card sizes'
+          }
+        >
+          import pattern
+        </Button>
+        {needsSizes && (
+          <Text id={importNoteId} size='nano' variant='label' component='span'>
+            import needs the size range: set it above
+          </Text>
+        )}
+      </span>
+    );
+  };
+
   // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
   // server enforces), then stage the good files for naming + upload.
   function stageDrop(scopeKey: string, list: FileList | null) {
@@ -733,44 +827,88 @@ export function PatternsField({
   // фоновую запись был бы отчётом о работе, о которой не спрашивали; ответ, за которым сюда
   // пришли, стоит на плитках. Отказ пишется строкой под шапкой: «сохраните карточку» — это
   // руководство к действию, а не отчёт.
-  const publishedRef = useRef<Set<string>>(new Set());
+  //
+  // Запись по ключу хранит ОБЕЩАНИЕ, а не галку (MF-C): замер после импорта публикует индекс своих
+  // скоупов сам, следом за площадями, и обязан не дублировать уже улетевший PUT, а дождаться его.
+  // Пока его работа открыта, этот эффект её скоупы пропускает — порядок «сохранение → площади →
+  // индекс» держит она.
+  const publishedRef = useRef<Map<string, Promise<PublishSizeIndexResult>>>(new Map());
+  const recordIndex = (sig: string, res: PublishSizeIndexResult) =>
+    setIndexFailures((f) => {
+      if (res.ok) {
+        if (!(sig in f)) return f;
+        const { [sig]: _dropped, ...rest } = f;
+        return rest;
+      }
+      return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
+    });
+  const indexOnce = (
+    g: (typeof scopeGroups)[number],
+    force = false,
+  ):
+    | { sig: string; run: Promise<PublishSizeIndexResult>; fresh: boolean }
+    | { sig: string; skip: string } => {
+    const sig = sigOf(g.entries);
+    const a = audits[sig];
+    if (!techCardId) return { sig, skip: "the card isn't saved yet" };
+    if (a?.phase !== 'ready') return { sig, skip: 'the sheets of this fabric are not parsed yet' };
+    const tokens = [...a.found];
+    const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
+    const had = publishedRef.current.get(key);
+    if (had && !force) return { sig, run: had, fresh: false };
+    const run = publishPatternSizeIndex({
+      techCardId,
+      sheets: g.entries.map((e) => ({
+        lineKey: e.row.lineKey,
+        fabricPurpose: e.row.fabricPurpose,
+        bomLineKey: e.row.bomLineKey,
+      })),
+      sizeTokens: tokens,
+    });
+    publishedRef.current.set(key, run);
+    return { sig, run, fresh: true };
+  };
+  // Публикация индекса одного скоупа для замера после импорта: тот же ключ, та же запись отказа.
+  const publishIndexForRef = useRef<
+    (scopeKey: string, force: boolean) => Promise<PublishSizeIndexResult>
+  >(async () => ({ ok: false, reason: 'not ready' }));
+  publishIndexForRef.current = async (scopeKey, force) => {
+    if (!canPublishIndex) return { ok: false, reason: 'publishing is not allowed on this card' };
+    const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+    if (!g || g.entries.length === 0) return { ok: false, reason: 'no DXF sheet in this fabric' };
+    const o = indexOnce(g, force);
+    if ('skip' in o) return { ok: false, reason: o.skip };
+    const res = await o.run;
+    recordIndex(o.sig, res);
+    return res;
+  };
+  const followUpScopes = useMemo(
+    () =>
+      new Set(
+        followUp && followUpPending(followUp.rows) ? followUp.rows.map((r) => r.scopeKey) : [],
+      ),
+    [followUp],
+  );
   useEffect(() => {
     if (!canPublishIndex || !techCardId || !bundle) return;
     let cancelled = false;
     (async () => {
       for (const g of scopeGroups) {
         if (g.entries.length === 0) continue;
-        const sig = sigOf(g.entries);
-        const a = audits[sig];
-        if (a?.phase !== 'ready') continue;
-        const tokens = [...a.found];
-        const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
-        if (publishedRef.current.has(key)) continue;
-        publishedRef.current.add(key);
-        const res = await publishPatternSizeIndex({
-          techCardId,
-          sheets: g.entries.map((e) => ({
-            lineKey: e.row.lineKey,
-            fabricPurpose: e.row.fabricPurpose,
-            bomLineKey: e.row.bomLineKey,
-          })),
-          sizeTokens: tokens,
-        });
+        if (followUpScopes.has(g.scope.key)) continue;
+        const o = indexOnce(g);
+        if ('skip' in o || !o.fresh) continue;
+        const res = await o.run;
         if (cancelled) return;
-        setIndexFailures((f) => {
-          if (res.ok) {
-            if (!(sig in f)) return f;
-            const { [sig]: _dropped, ...rest } = f;
-            return rest;
-          }
-          return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
-        });
+        recordIndex(o.sig, res);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt]);
+    // indexOnce/recordIndex read this render's audits/scopeGroups — exactly the deps below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt, followUpScopes]);
 
   // Загрузчик возвращает НЕПРОЗРАЧНЫЙ ключ скоупа: контрол живёт в ui/ и не обязан знать ни про
   // назначения, ни про строки BOM. Разворачивает его в два поля провода здесь — в одном месте, тем
@@ -797,6 +935,27 @@ export function PatternsField({
     setEditing(null);
   }
 
+  // Применение импорта + запуск замера после него (MF-C, M3). Замер стартует ТОЛЬКО на сохранении
+  // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
+  // нулевым (F7).
+  function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
+    return async (draft, onProgress) => {
+      const result = await apply(draft, onProgress);
+      const targets = followUpTargets(draft, result);
+      if (targets && result.ok) {
+        const urls = [
+          ...result.uploaded.map((u) => u.url),
+          ...draft.scopes.flatMap((sc) => (sc.alreadyOnCard ? [sc.alreadyOnCard.url] : [])),
+        ];
+        setFollowUp({ id: Date.now(), rows: initialRows(targets), urls, nonce: 0 });
+      }
+      return result;
+    };
+  }
+  function retryFollowUp(only?: { scopeKey?: string; step?: FollowUpStep }) {
+    setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
+  }
+
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
     const rev = revisionOf(row);
@@ -812,6 +971,8 @@ export function PatternsField({
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM — и с поправкой на то, что
     // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
+    const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
 
     return (
       <tr
@@ -854,6 +1015,34 @@ export function PatternsField({
                 {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
                     котором заводят выкройки. Серый нейтральный тон, а не красный. */}
                 {!dxf && <Pill tone='mut'>legacy format</Pill>}
+                {/* Лист написан импортом (манифест прочитан разбором карточки): слой 1 — линия
+                    кроя, размеры и детали — из манифеста. Серый, потому что это факт о
+                    происхождении, а не состояние, требующее действия. */}
+                {converted && (
+                  <Pill tone='mut' title={convertedTitle(converted)}>
+                    converted
+                  </Pill>
+                )}
+                {/* F14: манифест написан для ДРУГОЙ карточки — его размеры здесь не доверены
+                    (use-block-sizes manifestSizeTrusted), сам лист читается. */}
+                {/* Codex C3: манифест не сошёлся с чертежом или с воротами — лист читается как любой
+                    DXF, и это должно быть видно, а не только в предупреждениях разбора. */}
+                {converted && distrust && (
+                  <Pill
+                    tone='warn'
+                    title={`the conversion manifest does not match this drawing (${distrust}) — the sheet is read as any DXF: sizes, cut layer and pairs are guessed, not taken from the manifest. re-export it from the importer`}
+                  >
+                    manifest not trusted
+                  </Pill>
+                )}
+                {converted && !!techCardId && converted.techCardId !== techCardId && (
+                  <Pill
+                    tone='warn'
+                    title={`this sheet was converted for tech card #${converted.techCardId}, not this one — its sizes are never added to this card by themselves: the cut-pieces dialog reads them from the block names and asks you to confirm`}
+                  >
+                    converted for another card
+                  </Pill>
+                )}
                 {stray && <Pill tone='warn'>size out of range</Pill>}
               </span>
               {/* When a name is set the filename still matters (it is what the factory's CAD
@@ -864,14 +1053,15 @@ export function PatternsField({
               {stray && (
                 <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
                   <Text size='nano' component='span' className='text-error'>
-                    the size of this row is not in the card's range — the server will refuse the save
+                    the size of this row is not in the card's range — the server will refuse the
+                    save
                   </Text>
                   {canEdit && storageSizeId > 0 && (
                     <Button
                       type='button'
                       variant='secondary'
                       size='xs'
-                      title="re-file the row onto a size that is in the range (the size is only a storage slot)"
+                      title='re-file the row onto a size that is in the range (the size is only a storage slot)'
                       onClick={() =>
                         // Смена size_id — это keyed replacement: сервер перенумерует ревизию
                         // (MAX+1). Файл при этом тот же, и ни один потребитель размер строки не
@@ -1304,7 +1494,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   title={`automatic marker of “${label}” pieces on a strip`}
                   onClick={() =>
                     setNesting({
@@ -1362,7 +1553,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   data-field='patterns.match'
                   title={`match the DXF pieces to the cut pieces of “${label}”`}
                   onClick={() =>
@@ -1390,7 +1582,8 @@ export function PatternsField({
                 <Button
                   type='button'
                   variant='underline'
-                  size='xs' className='text-labelColor hover:text-textColor'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
                   onClick={() =>
                     setMeasuring({
@@ -1444,14 +1637,89 @@ export function PatternsField({
     );
   }
 
+  // Мастер импорта монтируется из обеих веток: из полной панели и из пустой (нет ни ткани, ни
+  // выкроек — тогда прогон кончается скачиванием).
+  const renderImportWizard = () =>
+    techCardId ? (
+      <Suspense fallback={null}>
+        <ImportWizard
+          card={buildCardContext({
+            techCardId,
+            orderedSizeIds: orderSizes(sizeIds),
+            sizeName: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+            rawSizeName: (id) => sizeById.get(id),
+            scopes: scopes.map((sc) => ({
+              key: sc.key,
+              byPurpose: sc.byPurpose,
+              label: scopeLabel(sc),
+              binding: bindingForScope(sc),
+              sections: sc.lines.map((l) => l.section),
+            })),
+            pieces: cardPieces,
+            aliases: pieceDxfAliases.map((a) => ({
+              scopeKey: aliasScopeKey(a),
+              blockName: a.blockName,
+              pieceLineKey: a.pieceLineKey,
+            })),
+            patterns: liveRows.map((p) => ({
+              scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+              filename: p.filename,
+              url: p.url,
+              lineKey: p.lineKey,
+              name: p.name,
+              manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
+            })),
+            styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+          })}
+          // F7: upload every file, then ONE batch into this form, then the card's own save.
+          applyDraft={followUpApply(
+            createCardApply({
+              read: () => ({
+                patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],
+                pieces: (getValues('pieces') ?? []) as LiveCard['pieces'],
+                aliases: (getValues('pieceDxfAliases') ?? []) as LiveCard['aliases'],
+              }),
+              write: (path, value) =>
+                setValue(path as Parameters<typeof setValue>[0], value as never, {
+                  shouldDirty: true,
+                }),
+              storageSizeId,
+              save: (reason) => autosave.flush(reason),
+            }),
+          )}
+          followUp={followUp?.rows ?? null}
+          onRetryFollowUp={retryFollowUp}
+          onReviewPieces={(scopeKey) => {
+            const g = scopeGroups.find((x) => x.scope.key === scopeKey);
+            if (!g || g.entries.length === 0) return;
+            setImporting(false);
+            setSelectedKey(scopeKey);
+            setMatching({
+              scope: g.scope,
+              fabricName: scopeLabel(g.scope),
+              files: filesOf(g.entries),
+            });
+          }}
+          onClose={() => setImporting(false)}
+        />
+      </Suspense>
+    ) : null;
+
   if (fields.length === 0 && fabricBomLines.length === 0) {
+    const door = importDoor();
     return (
-      <Text size='micro' variant='label'>
-        add fabric lines in the BOM — a pattern binds to a material.
-        {sizeIds.length === 0
-          ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
-          : ''}
-      </Text>
+      <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5'>
+        <Text size='micro' variant='label'>
+          add fabric lines in the BOM — a pattern binds to a material.
+          {/* door D (FLY-final copy 7): "no range needed" next to an import that is disabled for
+              want of a range read as a contradiction. Said only where no import door stands. */}
+          {sizeIds.length === 0 && !door
+            ? ' a size range is not needed for uploading: the sizes are read from the file itself.'
+            : ''}
+        </Text>
+        {door}
+        {door && importing && renderImportWizard()}
+      </div>
     );
   }
 
@@ -1465,7 +1733,10 @@ export function PatternsField({
           materials: {scopeGroups.length}
         </Text>
         {materialsWithoutDxf.length > 0 && (
-          <HeaderNote tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
+          <HeaderNote
+            tone='warn'
+            title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}
+          >
             without DXF: {materialsWithoutDxf.length}
           </HeaderNote>
         )}
@@ -1498,15 +1769,21 @@ export function PatternsField({
               >
                 merge sizes
               </Button>
-              <PatternUploadButton
-                label='+ DXF'
-                dxfOnly
-                fabricScopes={uploadScopes}
-                defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
-                onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-                quiet
-              />
             </>
+          )}
+          {/* Импорт выкройки ЛЮБОГО формата — третий вход рядом с загрузкой и склейкой: не
+              «положить готовый DXF», а «сделать его» из PDF, чужого DXF, PLT, SVG или скана. Стоит
+              вне `canUpload`: без ткани в BOM он всё равно отдаёт файл на скачивание. */}
+          {importDoor()}
+          {canUpload && (
+            <PatternUploadButton
+              label='+ DXF'
+              dxfOnly
+              fabricScopes={uploadScopes}
+              defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
+              onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+              quiet
+            />
           )}
         </div>
       </div>
@@ -1548,6 +1825,47 @@ export function PatternsField({
             the size index was not saved — {reason}
           </Text>
         ))}
+
+      {/* После импорта: что не записалось из площадей и индекса, с повтором (MF-C). Пока мастер
+          открыт, то же показывает его шаг apply. */}
+      {!importing &&
+        followUp?.rows.flatMap((r) =>
+          (['areas', 'sizeIndex'] as const)
+            .filter((step) => r[step].state === 'failed')
+            .map((step) => (
+              <span key={`${r.scopeKey}|${step}`} className='flex flex-wrap items-baseline gap-1.5'>
+                <Text size='nano' component='span' className='text-error'>
+                  ! after the import, {step === 'areas' ? 'the piece areas' : 'the size index'} of “
+                  {r.label}” were not saved: {r[step].detail}
+                </Text>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => retryFollowUp({ scopeKey: r.scopeKey, step })}
+                >
+                  retry
+                </Button>
+              </span>
+            )),
+        )}
+      {followUp && techCardId && followUpPending(followUp.rows) && (
+        <Suspense fallback={null}>
+          <ImportFollowUpRunner
+            job={followUp}
+            techCardId={techCardId}
+            scopes={scopes}
+            sheetsOfScope={sheetsOfScope}
+            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc))}
+            sizeIds={sizeIds}
+            savedSizeIds={savedSizeIds}
+            sizeNameById={sizeById}
+            sourceDirty={sourceDirty}
+            publishIndex={(k, force) => publishIndexForRef.current(k, force)}
+            onRows={(id, rows) => setFollowUp((j) => (j && j.id === id ? { ...j, rows } : j))}
+          />
+        </Suspense>
+      )}
 
       {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
           карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
@@ -1634,6 +1952,8 @@ export function PatternsField({
         and the pocketing are two different BOM lines). the colourway does not affect the file — the
         pattern pieces are shared — but the article and its width are substituted per colourway.
       </Text>
+
+      {importing && renderImportWizard()}
 
       {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
           материала — грузится он как любая другая выкройка, потому что после склейки он и есть
@@ -1810,6 +2130,7 @@ export function PatternsField({
             // из которого панель выкроек читает состояние замера.
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
+            techCardId={techCardId}
             onClose={() => setMatching(null)}
           />
         </Suspense>

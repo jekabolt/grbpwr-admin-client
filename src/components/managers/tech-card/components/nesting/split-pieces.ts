@@ -14,6 +14,7 @@ import {
   uniOf,
   type BlockCode,
 } from './block-code';
+import { manifestFactsOf } from './manifest-facts';
 
 export type SizeGroup = {
   // Размер, как он написан в файле; '' — блоки без размерного хвоста.
@@ -57,8 +58,15 @@ export function splitPiecesBySize(
   // Что именно резать, решает структура файла, а не список токенов: см. deriveBlockSizes —
   // хвост обязан быть размером из словаря И меняться у своей основы, иначе «FP_L» слилась бы
   // с «FP_R» в одну деталь.
+  //
+  // ФАЙЛ С МАНИФЕСТОМ КОНВЕРТАЦИИ (F6b) В ЭТОМ ВЫВОДЕ НЕ УЧАСТВУЕТ НИ ОДНИМ БЛОКОМ: размер и
+  // идентичность у него ЗАЯВЛЕНЫ, а не выведены. Это чинит ровно то, на чём вывод по структуре
+  // отказывает законно (K1, Codex C2): одноразмерный файл (хвостов меньше двух — «размера нет»),
+  // файл из одной основы, редкий размер, срезанный частотным порогом, и деталь, которой нет в части
+  // размеров. Исключение из ВХОДА, а не только из вердикта, — потому что чужие блоки сдвигали бы
+  // частотный порог у блоков без манифеста, лежащих в той же пачке.
   const verdict = deriveBlockSizes(
-    pieces.map((p) => p.blockName ?? ''),
+    pieces.filter((p) => !manifestFactsOf(p)).map((p) => p.blockName ?? ''),
     (t) => dictTokens.has(t),
   );
 
@@ -66,18 +74,28 @@ export function splitPiecesBySize(
   const bySize = new Map<string, PieceDTO[]>();
   const identities = new Set<string>();
   const identityByBlock = new Map<string, string>();
+  const manifestSizes = new Set<string>();
   for (const p of pieces) {
     const raw = (p.blockName ?? '').trim();
-    const size = verdict.get(raw) ?? '';
+    const declared = manifestFactsOf(p);
+    const size = declared ? declared.size : verdict.get(raw) ?? '';
     // Признак и ключ считаются ТЕМИ ЖЕ функциями, что внутри вердикта, и на обеих ветках: ветка
     // «размер опознан» у uni-имени сегодня недостижима (deriveBlockSizes их пропускает), но
     // построена она не на этом факте, а на общем правиле — иначе первое же ослабление пропуска
     // тихо вернуло бы uni-блоку размер.
     const uni = uniOf(raw);
     const uniBase = uniBaseOf(raw, (t) => dictTokens.has(t));
-    const code: BlockCode = size
-      ? { raw, identity: raw.slice(0, raw.length - size.length - 1), size, uni, uniBase }
-      : { raw, identity: raw, size: '', uni, uniBase };
+    // Блок с манифестом: идентичность — заявленная конвертером, размер — заявленный. Исключение одно
+    // и то же, что у разбора имён: uni-блок остаётся под СЫРЫМ именем (см. BlockCode.uniBase — под
+    // идентичностью лежат алиасы, и подменять ключ uni-копии нельзя).
+    const code: BlockCode = declared
+      ? uni
+        ? { raw, identity: raw, size: '', uni, uniBase }
+        : { raw, identity: declared.identity, size, uni, uniBase }
+      : size
+        ? { raw, identity: raw.slice(0, raw.length - size.length - 1), size, uni, uniBase }
+        : { raw, identity: raw, size: '', uni, uniBase };
+    if (declared && code.size) manifestSizes.add(code.size);
     codeById.set(p.id, code);
     const ident = normBlock(code.identity);
     if (ident) {
@@ -101,7 +119,9 @@ export function splitPiecesBySize(
     );
   const orderOfSize = new Map(groups.map((g, i) => [g.size, g.size === '' ? 1e6 : i]));
   const sizeTokenSet = new Set(
-    [...verdict.values()].map((raw) => raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()),
+    [...verdict.values(), ...manifestSizes].map((raw) =>
+      raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase(),
+    ),
   );
   return { codeById, groups, orderOfSize, sizeTokenSet, identities, identityByBlock };
 }

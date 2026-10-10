@@ -64,6 +64,7 @@ import {
   layerOptions,
   seamAllowancePrefill,
   seamLineLayer,
+  contourIsCutLine as contourCarriesCutLine,
 } from './contour-layer';
 import {
   allowanceLabel,
@@ -560,11 +561,14 @@ export function NestingModal({
   // одно и то же, и клиентская проверка нужна затем, чтобы отказ не приходил ПОСЛЕ оплаченного
   // бюджета — на прогон уходят десятки секунд, и узнать в конце, что норму не примут, значит
   // выбросить их.
-  const contourIsCutLine =
-    contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
+  const contourIsCutLine = contourCarriesCutLine(contourMeasure);
   const doubleAllowanceRefusal =
     !viewData && contourIsCutLine && allowanceMm > 0 && contourMeasure
-      ? `layer ${contourMeasure.layer || '—'} is the CUT LINE: it was measured lying ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm outside the seam line (agreed on ${contourMeasure.stats.accepted} blocks). the marker will add another ${allowanceMm.toFixed(1)} mm of offset — the allowance would be counted TWICE, and the length overstated by roughly ${allowanceMm.toFixed(1)} mm around the perimeter of every piece. there are two ways out: set the allowance to 0 (the contour already carries it) or ${
+      ? `layer ${contourMeasure.layer || '—'} is the CUT LINE: ${
+          contourMeasure.source === 'manifest'
+            ? `the converter's manifest declares it final, with ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm of allowance already in it`
+            : `it was measured lying ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} mm outside the seam line (agreed on ${contourMeasure.stats.accepted} blocks)`
+        }. the marker will add another ${allowanceMm.toFixed(1)} mm of offset — the allowance would be counted TWICE, and the length overstated by roughly ${allowanceMm.toFixed(1)} mm around the perimeter of every piece. there are two ways out: set the allowance to 0 (the contour already carries it) or ${
           seamLayerPick
             ? `pick contour layer ${seamLayerPick} — the seam line was measured on it`
             : 'pick a contour layer with the seam line'
@@ -614,6 +618,9 @@ export function NestingModal({
   const allowanceSourceText = (() => {
     const m = contourMeasure;
     if (!m || parse.phase !== 'ready') return 'the DXF contour is the seam line; the cut line is what gets laid';
+    if (m.verdict === 'cut' && m.source === 'manifest') {
+      return `layer ${m.layer}: FINAL CUT LINE — declared by the converter's manifest, the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour`;
+    }
     if (m.verdict === 'cut') {
       return `layer ${m.layer}: CUT LINE — the ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} mm allowance is already in the contour (measured on ${m.stats.accepted} blocks)`;
     }

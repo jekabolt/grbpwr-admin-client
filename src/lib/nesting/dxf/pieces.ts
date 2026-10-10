@@ -38,6 +38,26 @@ export type InnerPath = { layer: string; closed: boolean; pts: Pt[] };
 // геометрия для движка. Что не поместилось — честно считается и называется.
 const MAX_INNER_POINTS = 4000;
 
+// Свёрла конвертера — квадрат 1×1 см на слое внутренних линий (pattern-import write/plan.ts
+// DRILL_SQUARE_MM = 10). Здесь только чтобы СЧИТАТЬ их, не рисовать.
+export const DRILL_SQUARE_CM = 1;
+const DRILL_SQUARE_TOL_CM = 0.05;
+
+// СЧЁТ ВНУТРЕННЕЙ ГЕОМЕТРИИ БЕЗ ПОТОЛКА (F14f, Codex R2). `inner` — картинка, урезанная бюджетом
+// MAX_INNER_POINTS: шов на 5001 вершину съедает его целиком, и надсечка за ним в `inner` не попадает.
+// Кто СУДИТ по числу надсечек и свёрл (сверка манифеста с чертежом), считает здесь: те же пути, что
+// пошли бы в `inner` без бюджета, по слою — сколько путей и сколько из них квадратов свёрл.
+export type InnerTally = Record<string, { paths: number; drillSquares: number }>;
+
+function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
+  if (!c.closed || c.pts.length !== 4) return false;
+  const q = bounds(c.pts);
+  return (
+    Math.abs(q.maxX - q.minX - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM &&
+    Math.abs(q.maxY - q.minY - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM
+  );
+}
+
 export type RawPiece = {
   name: string;
   // The DXF block this piece came from, or null for the loose-entity pool. Kept SEPARATE from
@@ -60,6 +80,8 @@ export type RawPiece = {
   // получал маркер без единой надсечки. Координаты АБСОЛЮТНЫЕ чертёжные, как у poly до
   // нормализации.
   inner: InnerPath[];
+  // Число путей `inner` по слоям БЕЗ бюджета точек (см. InnerTally).
+  innerTally: InnerTally;
   poly: Pt[]; // CCW, cm, absolute drawing coords (normalized later)
 };
 
@@ -171,6 +193,19 @@ export function groupToPieces(
     if (all.length > 0) perLayer = [all];
   }
 
+  // Счёт всей внутренней геометрии группы — один раз; у детали из него вычитаются её собственный
+  // слой и её близнецы надсечек (ровно те пути, что цикл ниже не кладёт в `inner`).
+  const groupTally: InnerTally = {};
+  const drillAt: boolean[] = [];
+  for (let ci = 0; ci < group.chains.length; ci++) {
+    const c = group.chains[ci];
+    drillAt.push(isDrillSquare(c));
+    if (c.pts.length < 2) continue;
+    const t = (groupTally[c.layer] ??= { paths: 0, drillSquares: 0 });
+    t.paths++;
+    if (drillAt[ci]) t.drillSquares++;
+  }
+
   const pieces: RawPiece[] = [];
   let small = 0;
   for (const group0 of perLayer) {
@@ -205,6 +240,16 @@ export function groupToPieces(
       // Одна надсечка — один путь: CLO пишет её дважды (на линии кроя и на линии шва, или точной
       // копией). Остаётся та, что лежит на контуре ЭТОЙ детали (notch.ts).
       const twins = duplicateNotches(group.chains, cleaned);
+      const innerTally: InnerTally = {};
+      for (const [layer, t] of Object.entries(groupTally))
+        if (layer !== loop.layer) innerTally[layer] = { ...t };
+      for (const ci of twins) {
+        const c = group.chains[ci];
+        const t = innerTally[c.layer];
+        if (!t || c.pts.length < 2) continue;
+        t.paths--;
+        if (drillAt[ci]) t.drillSquares--;
+      }
       for (let ci = 0; ci < group.chains.length; ci++) {
         const c = group.chains[ci];
         if (c.layer === loop.layer || c.pts.length < 2 || twins.has(ci)) continue;
@@ -219,6 +264,7 @@ export function groupToPieces(
         layer: loop.layer,
         grain,
         inner,
+        innerTally,
         poly: ensureCCW(cleaned),
       });
     }
