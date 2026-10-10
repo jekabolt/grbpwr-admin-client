@@ -823,6 +823,7 @@ export class Session {
         families: this.families,
         ...input,
         fileAllowance,
+        traced: this.traced(),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
@@ -830,6 +831,11 @@ export class Session {
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
     return detail.output;
+  }
+
+  /** Traced pages in the run (F11): their outlines are cleaned before any offset (E3). */
+  private traced(): boolean {
+    return this.files.some((f) => f.kind === 'raster') || this.calibrations.length > 0;
   }
 
   // ── render-som (F10) ──────────────────────────────────────────────────────────────────────
@@ -916,6 +922,7 @@ export class Session {
     const drawnOfSeed = new Map<number, string>();
     for (const p of sem.pieces) if (!drawnOfSeed.has(p.seed)) drawnOfSeed.set(p.seed, p.identity);
     const famBySeed = new Map((this.families ?? []).map((f) => [f.seed, f]));
+    const traced = this.traced();
     const wallsUsed = rawWalls
       ? (identity: string, rank: number): PtMm[][] | undefined => {
           const w = rawWalls(identity, rank);
@@ -923,8 +930,12 @@ export class Session {
           const size = spec?.sizes.find((z) => z.rank === rank) ?? spec?.sizes[0];
           if (!w || !spec || !size || this.fast) return w;
           const written = spec.allowance.meaning === 'seam' ? size.seam : size.cut;
+          // A traced outline was cleaned before it was written (spurs, twin-trace slivers out, E3):
+          // the fill's raw outline would vote in the spur and sliver segments the written line
+          // rightly leaves, so on a scan the written line votes — still whole junction-to-junction
+          // segments only, never a trim (walls-used.ts).
           const outline =
-            !spec.unfoldedFold && drawnOfSeed.get(spec.seed) === identity
+            !traced && !spec.unfoldedFold && drawnOfSeed.get(spec.seed) === identity
               ? famBySeed.get(spec.seed)?.candidates.find((c) => c.rank === size.rank)?.outer
               : undefined;
           return wallsUsedBy(w, outline && overlaps(outline, w) ? outline : written);

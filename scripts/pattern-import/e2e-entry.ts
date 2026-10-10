@@ -28,6 +28,9 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 import { toWireError } from 'lib/pattern-import/worker/errors';
 import { guardPdfjs } from 'lib/pattern-import/worker/pdf-guard';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
+import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
+
+import { synthDrawables, synthTruth } from './raster-entry';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 import { splitSize } from './worker-entry';
@@ -58,6 +61,12 @@ type Case = {
   truth?: TruthRef;
   /** F4 click fixture id (scripts/pattern-import/fixtures/pieces-clicks.json) for the operator pass. */
   clicks?: string;
+  /** Card sizes the operator answers "not exported" on the sizes step (a size whose lines leak). */
+  notExported?: string[];
+  /** The operator's "the drawn outline is" answer on the details step (default: the seam line). */
+  meaning?: 'seam' | 'cut';
+  /** The F11 synthetic scan: its vector truth is drawn under the overlays (not registered). */
+  scanTruth?: boolean;
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -119,6 +128,44 @@ export const CASES: Case[] = [
     files: ['pdf/leonie.pdf'],
     card: NUM(36, 46),
     truth: { id: 'leonie' },
+    clicks: 'leonie',
+    // the browser run (E2E-1010 §4): the back leg leaks only in 38 → 38 is not exported
+    notExported: ['38'],
+  },
+  // E3: the F11 synthetic scan (300 dpi PNG: 0.3° rotation, +0.5 % x stretch, blur, noise) —
+  // a 5-size graded piece with known geometry (reports/F11-work: the PNG `patimport:raster` makes,
+  // wrapped as a one-page A4 PDF by `sips -s format pdf`, as a scanner's PDF would carry it)
+  {
+    id: 'scan:synth',
+    group: 'synthetic',
+    files: ['../reports/F11-work/synth-scan.pdf'],
+    card: NUM(34, 46),
+    clicks: 'synth-scan',
+    // 7 colour classes: ranks 0–1 carry only the arcs; the largest size (purple) does not close
+    notExported: ['34', '36', '46'],
+    scanTruth: true,
+  },
+  // E3: the same scan with "the drawn outline is the cut line" (the seam line is derived inward).
+  // 36 is not exported: its outline carries a strip the fill merged in through a neck narrower
+  // than 2 × 10 mm, so the inward seam line splits there (2 loops) — G6 refuses it, rightly.
+  {
+    id: 'leonie:cut',
+    group: 'pdf',
+    files: ['pdf/leonie.pdf'],
+    card: NUM(36, 46),
+    clicks: 'leonie',
+    notExported: ['36', '38'],
+    meaning: 'cut',
+  },
+  // E3: the operator also drops 36 (the fill merged a strip into the leg) and 46 (the outline
+  // follows the size digits for 13 mm) — what is left must pass the gate
+  {
+    id: 'leonie:40-44',
+    group: 'pdf',
+    files: ['pdf/leonie.pdf'],
+    card: NUM(36, 46),
+    clicks: 'leonie',
+    notExported: ['36', '38', '46'],
   },
   {
     id: 'blazer',
@@ -396,6 +443,7 @@ export async function runCase(c: Case): Promise<Rec> {
         Math.round(as.sheet.bbox.maxX - as.sheet.bbox.minX),
         Math.round(as.sheet.bbox.maxY - as.sheet.bbox.minY),
       ],
+      originMm: [Math.round(as.sheet.bbox.minX), Math.round(as.sheet.bbox.maxY)],
     };
     if (as.sheet.missing.length)
       rec.ops.push(`BLOCKER: ${as.sheet.missing.length} pages missing → set the grid by hand`);
@@ -453,6 +501,18 @@ export async function runCase(c: Case): Promise<Rec> {
         operatorMap: sz.map.entries.map((e, i) => ({
           ...e,
           card: i < n ? CARD[i] : null,
+          origin: 'operator',
+        })),
+      });
+    }
+    if (c.notExported?.length) {
+      const drop = new Set(c.notExported);
+      rec.ops.push(`size(s) ${c.notExported.join(', ')} not exported`);
+      sz = await run('sizes', {
+        card: CARD,
+        operatorMap: sz.map.entries.map((e) => ({
+          ...e,
+          card: e.card && drop.has(e.card.token) ? null : e.card,
           origin: 'operator',
         })),
       });
@@ -586,11 +646,25 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.reason = 'no region closes';
       return rec;
     }
+    if (process.env.E2E_DUMP)
+      writeFileSync(
+        resolve(dir, 'families.json'),
+        JSON.stringify(
+          pc.families.map((f) => ({
+            seed: f.seed,
+            candidates: f.candidates.map((x) => ({
+              rank: x.rank,
+              outcome: x.outcome,
+              outer: x.outer,
+            })),
+          })),
+        ),
+      );
     // 6 · meaning (no AI names in a headless run: printed text names only)
     const fileAllowance = {
-      meaning: 'seam' as const,
+      meaning: c.meaning ?? ('seam' as const),
       allowanceMm: PATIMPORT.defaultAllowanceMm,
-      origin: 'default' as const,
+      origin: c.meaning ? ('operator' as const) : ('default' as const),
       evidence: [],
     };
     const overrides: StageIO['semantics']['in']['pieceOverrides'] = {};
@@ -662,7 +736,7 @@ export async function runCase(c: Case): Promise<Rec> {
         pc = await run('pieces', { seeds: seedsIn ?? pc.seeds, edits, opts: { ...FILL, variant } });
       }
       sem = await run('semantics', {
-        fileAllowance: found ?? fileAllowance,
+        fileAllowance: c.meaning ? fileAllowance : found ?? fileAllowance,
         pieceOverrides: overrides,
         operatorGrain: grain,
       });
@@ -784,6 +858,21 @@ export async function runCase(c: Case): Promise<Rec> {
       });
     }
     rec.write = scopes;
+    // traced (scan) sources: per written size, the cleaned line over the traced outline and the
+    // source walls — the proof that the outline the offset ran on stays on the scan (E3)
+    if ((rec.read as { scanPages?: number })?.scanPages)
+      rec.traced = tracedOverlays(
+        dir,
+        sem,
+        pc.families,
+        (s as unknown as { wallsOf: ((id: string, rank: number) => PtMm[][] | undefined) | null })
+          .wallsOf,
+        c.scanTruth
+          ? synthTruth(synthDrawables())
+              .filter((t) => t.group === 'piece')
+              .map((t) => t.pts)
+          : undefined,
+      );
     const allPassed = scopes.length > 0 && scopes.every((x) => x.passed);
     const hard = rec.ops.filter((o) => o.startsWith('BLOCKER'));
     rec.verdict = !allPassed
@@ -804,6 +893,148 @@ export async function runCase(c: Case): Promise<Rec> {
     s.close();
   }
   return rec;
+}
+
+/** Distances from samples of `a` (every 0.5 mm) to the nearest of `lines`, mm. */
+function distsTo(
+  a: PtMm[],
+  lines: PtMm[][],
+  closed: boolean,
+  aClosed = true,
+): { p: PtMm; d: number }[] {
+  const segs: [PtMm, PtMm][] = [];
+  for (const l of lines)
+    for (let i = 0; i < (closed ? l.length : l.length - 1); i++)
+      segs.push([l[i], l[(i + 1) % l.length]]);
+  const C = 5;
+  const grid = new Map<string, number[]>();
+  segs.forEach(([p, q], k) => {
+    for (let x = Math.floor(Math.min(p.x, q.x) / C); x <= Math.floor(Math.max(p.x, q.x) / C); x++)
+      for (let y = Math.floor(Math.min(p.y, q.y) / C); y <= Math.floor(Math.max(p.y, q.y) / C); y++)
+        grid.set(`${x},${y}`, [...(grid.get(`${x},${y}`) ?? []), k]);
+  });
+  const out: { p: PtMm; d: number }[] = [];
+  for (let i = 0; i < (aClosed ? a.length : a.length - 1); i++) {
+    const p0 = a[i];
+    const p1 = a[(i + 1) % a.length];
+    const n = Math.max(1, Math.ceil(Math.hypot(p1.x - p0.x, p1.y - p0.y) / 0.5));
+    for (let j = 0; j < n; j++) {
+      const p = { x: p0.x + ((p1.x - p0.x) * j) / n, y: p0.y + ((p1.y - p0.y) * j) / n };
+      let best = Infinity;
+      const cx = Math.floor(p.x / C);
+      const cy = Math.floor(p.y / C);
+      for (let x = cx - 1; x <= cx + 1; x++)
+        for (let y = cy - 1; y <= cy + 1; y++)
+          for (const k of grid.get(`${x},${y}`) ?? []) {
+            const [u, v] = segs[k];
+            const dx = v.x - u.x;
+            const dy = v.y - u.y;
+            const L2 = dx * dx + dy * dy;
+            const t = L2 ? Math.max(0, Math.min(1, ((p.x - u.x) * dx + (p.y - u.y) * dy) / L2)) : 0;
+            best = Math.min(best, Math.hypot(p.x - u.x - t * dx, p.y - u.y - t * dy));
+          }
+      out.push({ p, d: best });
+    }
+  }
+  return out;
+}
+
+function tracedOverlays(
+  dir: string,
+  sem: StageIO['semantics']['out'],
+  fams: PieceFamily[],
+  wallsOf: ((id: string, rank: number) => PtMm[][] | undefined) | null,
+  truth?: PtMm[][],
+) {
+  const rows: Record<string, unknown>[] = [];
+  const q = (xs: number[], k: number) => {
+    const v = xs.filter(Number.isFinite).sort((a, b) => a - b);
+    return v.length ? +v[Math.min(v.length - 1, Math.floor(k * v.length))].toFixed(3) : null;
+  };
+  for (const sp of sem.pieces) {
+    for (const z of sp.sizes) {
+      const raw = fams.find((f) => f.seed === sp.seed)?.candidates.find((c) => c.rank === z.rank);
+      if (!raw?.outer.length) continue;
+      const drawn = sp.allowance.meaning === 'seam' ? z.seam ?? z.cut : z.cut;
+      const other = sp.allowance.meaning === 'seam' ? z.cut : z.seam;
+      const walls = wallsOf?.(sp.identity, z.rank) ?? [];
+      const toRaw = distsTo(drawn, [raw.outer], true).map((x) => x.d);
+      const toWalls = walls.length ? distsTo(drawn, walls, false) : [];
+      const far = toWalls.filter((x) => x.d > PATIMPORT.snapMm);
+      // G3's side: the used wall stretches (voted by the written line, as the write stage does on
+      // a scan) that the written line leaves
+      const used = walls.length ? wallsUsedBy(walls, drawn) : [];
+      const left = used
+        .flatMap((w) => distsTo(w, [drawn], true, false))
+        .filter((x) => x.d > PATIMPORT.snapMm);
+      const xs = raw.outer.map((p) => p.x);
+      const ys = raw.outer.map((p) => p.y);
+      const box = {
+        minX: Math.min(...xs) - 15,
+        maxX: Math.max(...xs) + 15,
+        minY: Math.min(...ys) - 15,
+        maxY: Math.max(...ys) + 15,
+      };
+      const file = resolve(dir, `traced-${sp.identity}-${z.sizeToken}.png`);
+      renderPng(
+        file,
+        box,
+        [
+          ...walls.map((w) => ({ pts: w, color: '#bbbbbb', width: 2.4 })),
+          ...(truth ?? []).map((t) => ({ pts: t, closed: true, color: '#000000', width: 0.4 })),
+          { pts: raw.outer, closed: true, color: '#e03030', width: 0.8, dash: '3 2' },
+          { pts: drawn, closed: true, color: '#1050d0', width: 0.9 },
+          ...(other ? [{ pts: other, closed: true, color: '#20a050', width: 0.9 }] : []),
+        ],
+        [
+          ...far
+            .filter((_, i) => i % 4 === 0)
+            .map((x) => ({ at: x.p, text: '•', color: '#d00', size: 8 })),
+          ...left
+            .filter((_, i) => i % 4 === 0)
+            .map((x) => ({ at: x.p, text: '◦', color: '#a0a', size: 8 })),
+        ],
+        Math.min(10, Math.max(2, 1400 / Math.max(box.maxX - box.minX, box.maxY - box.minY))),
+        [
+          { color: '#bbbbbb', text: 'source walls (traced chains)' },
+          { color: '#e03030', text: 'traced outline (fill)' },
+          { color: '#1050d0', text: `written ${sp.allowance.meaning} line (cleaned)` },
+          { color: '#20a050', text: 'derived line (offset)' },
+          ...(truth
+            ? [
+                {
+                  color: '#000000',
+                  text: 'vector truth, all sizes (printed frame, not registered)',
+                },
+              ]
+            : []),
+        ],
+      );
+      rows.push({
+        block: `${sp.identity}_${z.sizeToken}`,
+        png: file,
+        writtenToTracedMaxMm: q(toRaw, 1),
+        writtenToWallsP95Mm: q(
+          toWalls.map((x) => x.d),
+          0.95,
+        ),
+        writtenToWallsMaxMm: q(
+          toWalls.map((x) => x.d),
+          1,
+        ),
+        writtenOffWallsMm: +(far.length * 0.5).toFixed(1),
+        usedWallsOffLineMm: +(left.length * 0.5).toFixed(1),
+        usedWallsOffHist: [0.5, 0.75, 1, 2, Infinity].map(
+          (t, i, a) => left.filter((x) => x.d <= t && (i === 0 || x.d > a[i - 1])).length * 0.5,
+        ),
+        usedWallsOffAt: left.length ? [Math.round(left[0].p.x), Math.round(left[0].p.y)] : null,
+        offset: z.offset
+          ? { ok: z.offset.ok, loops: z.offset.loops, devMm: +z.offset.maxDeviationMm.toFixed(3) }
+          : null,
+      });
+    }
+  }
+  return rows;
 }
 
 /** One interior point per nest of closed lines (the innermost loop of the nest ≥ 50 % of its area). */

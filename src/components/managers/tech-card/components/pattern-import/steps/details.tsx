@@ -604,6 +604,12 @@ function NameSource({
   onConfirm: () => void;
 }) {
   if (!n) return <span className='text-labelColor'>—</span>;
+  if (n.source === 'dxf' && !confirmed)
+    return (
+      <Pill tone='ok' title='the name of the source DXF block — the AI is not asked about it'>
+        DXF block
+      </Pill>
+    );
   const text = n.source === 'text';
   if (text && !confirmed) return <Pill tone='mut'>sheet text</Pill>;
   if (confirmed) return <Pill tone='ink'>you</Pill>;
