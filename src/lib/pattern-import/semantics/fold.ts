@@ -482,8 +482,14 @@ const CUT_ON_FOLD =
 // R5: a list line may lead with a bullet (• · * - –), a piece word (Piece / Pc. / Teil / Деталь /
 // Det. / № / No. / Nr.) and a parenthesised number: "• 123 BACK cut on fold", "Piece 123 BACK …",
 // "(12) Spinka со сгибом".
-const LIST_LINE = new RegExp(
-  String.raw`^\s*(?:[•·*\-–]\s*)?(?:(?:piece|pc\.?|teil|деталь|дет\.?|det\.?|№|no\.?|nr\.?)\s*)?\(?(${PIECE_NO_SRC})\)?\s*[.\-–:)]?\s+\S`,
+const LIST_HEAD = String.raw`^\s*(?:[•·*\-–]\s*)?(?:(?:piece|pc\.?|teil|деталь|дет\.?|det\.?|№|no\.?|nr\.?)\s*)?\(?(${PIECE_NO_SRC})\)?\s*[.\-–:)]?`;
+const LIST_LINE = new RegExp(String.raw`${LIST_HEAD}\s+\S`, 'iu');
+/**
+ * A text item that is only a list number WITH list punctuation ("67.", "4 -", "(12)"): the PDF split
+ * it off its line. A bare "0" or "7" (a ruler, a tile) is not joined.
+ */
+const LIST_NO_ONLY = new RegExp(
+  String.raw`^\s*(?:[•·*\-–]\s*)?(?:(?:piece|pc\.?|teil|деталь|дет\.?|det\.?|№|no\.?|nr\.?)\s*)?(?:\((${PIECE_NO_SRC})\)|(${PIECE_NO_SRC})\s*[.\-–:)])\s*$`,
   'iu',
 );
 
@@ -521,9 +527,12 @@ export function foldListEntries(
 ): FoldListEntry[] {
   const byNo = new Map<string, FoldListEntry>();
   const unparsed = new Map<string, FoldListEntry>();
-  for (const raw of texts) {
-    const t = normFoldLine(raw);
+  for (let i = 0; i < texts.length; i++) {
+    let t = normFoldLine(texts[i]);
     if (!CUT_ON_FOLD.test(t)) continue;
+    // "67." + "Forstykke, 1 gang mod fold": a number item right before the line is its number
+    const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
+    if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
     const m = LIST_LINE.exec(t);
     if (!m) {
       if (!consumed.has(t) && !unparsed.has(t))
