@@ -1423,6 +1423,9 @@ export function g18(ctx: GateCtx): GateCheck {
       );
       continue;
     }
+    // a grain the source DXF draws on its own grain layer is its author's word: only lettering
+    // around its ends speaks against it (CLO's notch-side marks sit beside the grain)
+    if (g.evidence?.includes('dxf-layer')) continue;
     const touching = st.short.filter((s) => s.pts.some((p) => segDist(p, g.a, g.b) <= near));
     if (touching.length) {
       soft.push(b.block);
