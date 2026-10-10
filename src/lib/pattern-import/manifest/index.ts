@@ -284,7 +284,6 @@ const GATE_CHECK_IDS = new Set([
   'G15-derived',
   // A8 safety net: lettering inside pieces, internal length, grain provenance
   'G16-glyphs',
-  'G17-internal-length',
   'G18-grain-source',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name

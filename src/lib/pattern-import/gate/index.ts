@@ -42,7 +42,6 @@ import {
   g13,
   g15,
   g16,
-  g17,
   g18,
   g2From,
   g3g4,
@@ -207,7 +206,6 @@ export function createRunGate(
       g13(expect.manifest, false),
       derived.check,
       g16(ctx),
-      g17(ctx),
       g18(ctx),
     ];
     return {

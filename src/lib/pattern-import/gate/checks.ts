@@ -1253,7 +1253,7 @@ export function g13(m: ConversionManifest, requireGate: boolean): GateCheck {
   return check('G13-manifest', failed, 'block', notes.join('; ') || 'manifest invariants hold');
 }
 
-// ── G16 / G17 / G18 (A8 safety net) ────────────────────────────────────────────────────────
+// ── G16 / G18 (A8 safety net) ────────────────────────────────────────────────────────
 //
 // The owner's wm M import (10.10) passed a DXF whose pieces carried the watermark WWW.PAFAVE.PL
 // and stroke-font labels as ~300 layer-8 polylines per block, with grainlines taken from letter
@@ -1350,39 +1350,6 @@ export function g16(ctx: GateCtx): GateCheck {
       : 'no lettering-like strokes inside the pieces',
     `${worstShort} short / ${worstCell} per cell`,
     `< ${PATIMPORT.glyphMaxShortPerBlock} short per block, < ${PATIMPORT.glyphMaxShortPerCell} per ${PATIMPORT.glyphCellMm} mm cell`,
-  );
-}
-
-export function g17(ctx: GateCtx): GateCheck {
-  const failed: string[] = [];
-  const notes: string[] = [];
-  let worst = 0;
-  for (const { block } of ctx.blocks) {
-    const cut = rawCut(ctx, block);
-    if (!cut) continue; // G1 names a block with no cut line
-    const outline = polylineLength(cut, true);
-    if (!(outline > 0)) continue;
-    const inside = glyphsOf(ctx, block).lengthMm;
-    const r = inside / outline;
-    worst = Math.max(worst, r);
-    if (r > PATIMPORT.internalLengthWarnRatio) {
-      failed.push(block);
-      notes.push(
-        `${block}: ${(inside / 1000).toFixed(2)} m of lines inside a ${(outline / 1000).toFixed(2)} m outline (×${r.toFixed(1)})`,
-      );
-    }
-  }
-  return check(
-    'G17-internal-length',
-    failed,
-    'warn',
-    failed.length
-      ? ['more line inside the piece than around it — check the drawing for junk', ...notes].join(
-          '; ',
-        )
-      : 'internal lines are in proportion to the outline',
-    fmt(worst, 2),
-    `≤ ${PATIMPORT.internalLengthWarnRatio} × outline length`,
   );
 }
 

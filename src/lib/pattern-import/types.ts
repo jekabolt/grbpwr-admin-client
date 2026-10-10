@@ -1301,7 +1301,6 @@ export type GateCheckId =
   /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
   | 'G16-glyphs'
   /** A8: internal-layer length against the outline length (warn). */
-  | 'G17-internal-length'
   /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
   | 'G18-grain-source';
 
@@ -1880,8 +1879,6 @@ export const PATIMPORT = {
   glyphCellMm: 60,
   /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
   glyphMaxShortPerCell: 10,
-  /** G17: internal-layer length / cut-line length above this warns (palto FAC ≈ 13 m inside). */
-  internalLengthWarnRatio: 2,
   /** G18: a grain end / line this close to a short internal stroke is "touching" it, mm. */
   grainStrokeNearMm: 2,
 } as const;

@@ -2506,16 +2506,14 @@ export async function main(opts: { plans: string }): Promise<number> {
   }
 
   // A8 ─────────────────────────────────────────────────────────────────────────────────────
-  head('A8 · G16 lettering inside pieces · G17 internal length · G18 grain provenance');
+  head('A8 · G16 lettering inside pieces · G18 grain provenance');
   {
     const one = (r: GateReport, id: GateCheckId) => checkOf(r, id)[0];
     const c0 = main.report;
     ck(
-      one(c0, 'G16-glyphs').ok &&
-        one(c0, 'G17-internal-length').ok &&
-        one(c0, 'G18-grain-source').ok,
-      'control: the T2 main scope passes G16, G17, G18',
-      `${one(c0, 'G16-glyphs').value} · ${one(c0, 'G17-internal-length').value}`,
+      one(c0, 'G16-glyphs').ok && one(c0, 'G18-grain-source').ok,
+      'control: the T2 main scope passes G16, G18',
+      `${one(c0, 'G16-glyphs').value} · ${one(c0, 'G18-grain-source').value}`,
     );
     const mb = main.detail.manifest.blocks;
     ck(
@@ -2654,17 +2652,6 @@ export async function main(opts: { plans: string }): Promise<number> {
       'one short stroke touching a found grain: G18 warns, gate passes',
       g18c.note,
     );
-    // a 12 m zig-zag inside: G17 warns, the gate passes
-    const zz: PtMm[] = [];
-    for (let i = 0; i < 120; i++) zz.push({ x: ga.x - 50 + (i % 2) * 100, y: ga.y + i });
-    const rD = await gateOn(inject([zz]));
-    const g17 = one(rD, 'G17-internal-length');
-    ck(
-      rD.passed && !g17.ok && g17.severity === 'warn' && g17.blocks.includes('BP_M'),
-      `12 m of line inside BP_M: G17 warns (> ${PATIMPORT.internalLengthWarnRatio} × outline), gate passes`,
-      g17.note,
-    );
-
     // real files ─ the owner's beta DXF (wm M, 10.10) must block on G16; the corpus must not
     const blockedOf = (text: string) => {
       const raw = readRawDxf(text);
