@@ -2,7 +2,10 @@
 // type), the name, how many per garment, fold, the L/R pair, the grainline, the line meaning and
 // the allowance. AI names above the threshold arrive accepted but FLAGGED (owner decision 11);
 // below it they wait for a click. A piece without a grainline cannot be exported until the
-// two-click tool draws one (decision 12).
+// two-click tool draws one (decision 12) or the operator accepts the proposed one (A1: a line
+// drawn with one evidence, or the outline's fold / symmetry axis / straight edge). D3: proposals
+// are accepted only from the overview that shows every one of them on its piece — "review N"
+// opens it, "accept these N" there applies them (two clicks, nothing accepted unseen).
 import { useMemo, useState } from 'react';
 import type {
   AllowanceDecision,
@@ -109,6 +112,8 @@ export function DetailsStep({
     () => sem?.blocked.find((b) => b.reason === 'no-grain')?.seed ?? null,
   );
   const [grainA, setGrainA] = useState<PtMm | null>(null);
+  // A1: the overview of every proposed grainline (accepting happens only there)
+  const [reviewing, setReviewing] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const open = useOpenQuestions(api);
   // E1a: the fold question's click tool (pick the edge the half is unfolded across)
@@ -126,6 +131,34 @@ export function DetailsStep({
   const nameOf = (seed: SeedId) => session.names.find((n) => n.seed === seed);
   const specsOf = (seed: SeedId) => sem.pieces.filter((p) => p.seed === seed);
   const blockedOf = (seed: SeedId) => sem.blocked.find((b) => b.seed === seed);
+  // A1: the grainlines proposed for pieces that have none yet
+  const proposals = (sem.grainProposals ?? []).filter((g) => !inputs.operatorGrain[g.seed]);
+  const proposalOf = (seed: SeedId) => proposals.find((g) => g.seed === seed);
+  const acceptProposals = () => {
+    setReviewing(false);
+    rerun({
+      operatorGrain: {
+        ...inputs.operatorGrain,
+        ...Object.fromEntries(
+          proposals.map((g) => [g.seed, { a: g.a, b: g.b, accepted: g.evidence }]),
+        ),
+      },
+    });
+  };
+  // the overview frames the pieces that carry a proposal
+  const reviewBox = (() => {
+    const boxes = proposals.flatMap((g) => {
+      const c = families.find((f) => f.seed === g.seed)?.candidates;
+      return c?.length ? [c[c.length - 1].bbox] : [];
+    });
+    if (!boxes.length) return null;
+    return {
+      minX: Math.min(...boxes.map((b) => b.minX)),
+      minY: Math.min(...boxes.map((b) => b.minY)),
+      maxX: Math.max(...boxes.map((b) => b.maxX)),
+      maxY: Math.max(...boxes.map((b) => b.maxY)),
+    };
+  })();
   const mark = (seed: SeedId) => families.findIndex((f) => f.seed === seed) + 1;
 
   /** Re-run semantics with a patch to the operator's answers. */
@@ -202,6 +235,7 @@ export function DetailsStep({
       ? inputs.operatorGrain[sel] ??
         (selSpec && selSpec.pairHand !== 'R' ? selSpec.sizes[0]?.grain : null)
       : null;
+  const selProposal = sel != null && !selGrain ? proposalOf(sel) : undefined;
 
   const rows = families.filter((f) => f.candidates.every((c) => c.outcome !== 'tiny'));
   const startGrain = (seed: SeedId) => {
@@ -238,352 +272,439 @@ export function DetailsStep({
     <SplitStage
       sideWidth={340}
       canvas={
-        <Panel
-          title='pieces'
-          aside={
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              {sem.pieces.length} blocks · {sem.blocked.length} blocked
+        reviewing && proposals.length && reviewBox ? (
+          <Panel
+            title='proposed grainlines'
+            aside={
+              <span className='flex items-center gap-2'>
+                <Chip quiet onClick={() => setReviewing(false)}>
+                  back
+                </Chip>
+                <Chip onClick={acceptProposals}>accept these {proposals.length}</Chip>
+              </span>
+            }
+            bodyClassName='p-0 flex flex-col'
+          >
+            <Text size='micro' variant='label' component='p' className='shrink-0 px-2 py-1'>
+              every proposal on its piece (blue, dashed) with why it was proposed — accept them all
+              here, or go back and draw the wrong ones by hand
             </Text>
-          }
-        >
-          <div className='flex flex-wrap items-end gap-2'>
-            <Field label='the drawn outline is' className='w-40'>
-              <NativeSelect
-                value={fileAllowance.meaning}
-                onChange={(v) =>
-                  rerun({
-                    fileAllowance: {
-                      ...fileAllowance,
-                      meaning: v as LineMeaning,
-                      origin: 'operator',
-                    },
-                  })
-                }
-                options={MEANING}
-              />
-            </Field>
-            <Field label='allowance, mm' className='w-40'>
-              <NumberField
-                value={fileAllowance.allowanceMm}
-                min={0}
-                onCommit={(v) =>
-                  rerun({
-                    fileAllowance: { ...fileAllowance, allowanceMm: v ?? 0, origin: 'operator' },
-                  })
-                }
-              />
-            </Field>
-            <Text size='micro' variant='label' component='p' className='min-w-0 flex-1 pb-1'>
-              {fileAllowance.origin === 'operator'
-                ? 'set by you'
-                : // the reader's evidence already says where it looked ("text: «…»")
-                  fileAllowance.evidence.join(' · ') || fileAllowance.origin}
-              {' — '}
-              {outlineNote(fileAllowance)}
-            </Text>
-          </div>
-          <OutlineQuestion api={api} current={fileAllowance} />
-          <ConfirmStrip api={api} />
-
-          {sem.foldList && (
-            <div className='mt-2 flex flex-wrap items-center gap-2'>
-              <Text size='micro' component='p' className='min-w-0 flex-1 text-error'>
-                ! cutting list: cut on fold, no piece found for{' '}
-                {sem.foldList.entries.map((e) => `«${e}»`).join(', ')}
-                {sem.foldList.bound.length
-                  ? ` (${sem.foldList.bound.length} other ${sem.foldList.bound.length === 1 ? 'entry is' : 'entries are'} asked on ${sem.foldList.bound.length === 1 ? 'its piece' : 'their pieces'})`
-                  : ''}
-                . Tick unfold on the piece it names, then confirm.
-              </Text>
-              <Chip
-                onClick={() =>
-                  rerun({
-                    foldListChecked: [
-                      ...new Set([...inputs.foldListChecked, ...sem.foldList!.entries]),
-                    ],
-                  })
-                }
-              >
-                list checked
-              </Chip>
+            <div className='min-h-[480px] flex-1'>
+              <SheetViewport bbox={reviewBox} focus={null}>
+                {({ unit }) => (
+                  <>
+                    {families.map((f) => {
+                      const c = f.candidates[f.candidates.length - 1];
+                      if (!c || c.outer.length < 3) return null;
+                      return (
+                        <polygon
+                          key={f.seed}
+                          points={ptsAttr(c.outer)}
+                          fill={proposalOf(f.seed) ? SHEET_INK.fill : 'none'}
+                          stroke={proposalOf(f.seed) ? SHEET_INK.ink : '#dddddd'}
+                          strokeWidth={unit * 1.2}
+                        />
+                      );
+                    })}
+                    {proposals.map((g) => {
+                      const m = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
+                      return (
+                        <g key={g.seed}>
+                          <GrainMark a={g.a} b={g.b} unit={unit} tone={SHEET_INK.blue} dashed />
+                          <text
+                            x={m.x + unit * 10}
+                            y={vy(m.y)}
+                            fontSize={unit * 12}
+                            fill={SHEET_INK.blue}
+                            dominantBaseline='middle'
+                          >
+                            {mark(g.seed)} · {g.why}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </>
+                )}
+              </SheetViewport>
             </div>
-          )}
+          </Panel>
+        ) : (
+          <Panel
+            title='pieces'
+            aside={
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='uppercase tracking-label'
+              >
+                {sem.pieces.length} blocks · {sem.blocked.length} blocked
+              </Text>
+            }
+          >
+            <div className='flex flex-wrap items-end gap-2'>
+              <Field label='the drawn outline is' className='w-40'>
+                <NativeSelect
+                  value={fileAllowance.meaning}
+                  onChange={(v) =>
+                    rerun({
+                      fileAllowance: {
+                        ...fileAllowance,
+                        meaning: v as LineMeaning,
+                        origin: 'operator',
+                      },
+                    })
+                  }
+                  options={MEANING}
+                />
+              </Field>
+              <Field label='allowance, mm' className='w-40'>
+                <NumberField
+                  value={fileAllowance.allowanceMm}
+                  min={0}
+                  onCommit={(v) =>
+                    rerun({
+                      fileAllowance: { ...fileAllowance, allowanceMm: v ?? 0, origin: 'operator' },
+                    })
+                  }
+                />
+              </Field>
+              <Text size='micro' variant='label' component='p' className='min-w-0 flex-1 pb-1'>
+                {fileAllowance.origin === 'operator'
+                  ? 'set by you'
+                  : // the reader's evidence already says where it looked ("text: «…»")
+                    fileAllowance.evidence.join(' · ') || fileAllowance.origin}
+                {' — '}
+                {outlineNote(fileAllowance)}
+              </Text>
+            </div>
+            <OutlineQuestion api={api} current={fileAllowance} />
+            <ConfirmStrip api={api} />
 
-          <DataTable className='mt-2'>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th data-align='left'>code</th>
-                <th data-align='left'>name</th>
-                <th data-align='left'>name from</th>
-                <th title='pieces per garment'>qty</th>
-                <th data-align='left'>pair</th>
-                <th data-align='left'>fold</th>
-                <th data-align='left'>grainline</th>
-                <th data-align='left'>line</th>
-                <th>allow., mm</th>
-                <th data-align='left' className={cn(STICKY_END, 'bg-bgColor')}>
-                  state
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((f) => {
-                const seed = f.seed;
-                const specs = specsOf(seed);
-                // No AI answer for this piece (not logged in, AI off): show what the sheet text
-                // gave the spec; typing a code makes it the operator's.
-                const ov0 = inputs.overrides[seed];
-                const n =
-                  nameOf(seed) ??
-                  (specs.length || ov0?.code ? textNameOf(seed, sem, ov0) : undefined);
-                const b = blockedOf(seed);
-                const ov = inputs.overrides[seed] ?? {};
-                // A blocked piece has no spec yet: fall back to what the namer read off the sheet.
-                const pair =
-                  ov.pairHand !== undefined
-                    ? ov.pairHand
-                    : specs.length
-                      ? specs[0].pairHand ?? null
-                      : n?.suggestion?.pair
-                        ? 'L'
-                        : null;
-                const unfolded =
-                  ov.unfoldedFold ??
-                  (specs.length ? specs[0].unfoldedFold : !!n?.suggestion?.onFold);
-                const allowance = ov.allowance ?? specs[0]?.allowance ?? fileAllowance;
-                const grainOrigin = inputs.operatorGrain[seed]
-                  ? 'operator'
-                  : specs[0]?.sizes[0]?.grain
-                    ? 'found'
-                    : null;
-                const pending = !!n && !n.autoAccepted && !inputs.confirmedNames.includes(seed);
-                const on = sel === seed;
-                return (
-                  <tr
-                    key={seed}
-                    onClick={() => setSel(seed)}
-                    className={cn('cursor-pointer', on && 'bg-bgZebra')}
-                  >
-                    <td>
-                      <span className='inline-flex size-4 items-center justify-center bg-textColor text-nano text-bgColor'>
-                        {mark(seed)}
-                      </span>
-                    </td>
-                    <td data-align='left'>
-                      <CodeCell
-                        value={n ? [n.code, ...n.mods].filter(Boolean).join('_') : ''}
-                        hand={pair}
-                        blocks={specs.map((s) => s.identity).join(' + ')}
-                        sizeTokens={api.sizeTokens}
-                        aiName={!!n && n.source === 'ai' && !inputs.editedNames.includes(seed)}
-                        onCommit={(v) => setName(seed, splitCode(v))}
-                      />
-                    </td>
-                    <td data-align='left'>
-                      <Input
-                        key={n?.displayName ?? ''}
-                        defaultValue={n?.displayName ?? ''}
-                        aria-label={`name of piece ${mark(seed)}`}
-                        className='h-[22px] w-28'
-                        onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
-                          const v = e.currentTarget.value.trim();
-                          if (v !== (n?.displayName ?? '')) setName(seed, { displayName: v });
-                        }}
-                      />
-                    </td>
-                    <td data-align='left'>
-                      <NameSource
-                        n={n}
-                        note={nameNote(open, seed)?.detail ?? null}
-                        pending={pending}
-                        confirmed={inputs.confirmedNames.includes(seed)}
-                        onConfirm={() => confirm(seed)}
-                      />
-                    </td>
-                    <td>
-                      {!specs.length ? (
-                        '—'
-                      ) : (
-                        // A pair counts PER HAND (PieceSpec): 2 = two _L and two _R per garment.
-                        // D3: a count no sheet text gives is marked until confirmed or edited.
-                        <span
-                          className='flex items-center gap-1'
-                          title={
-                            qtyOpen(open, seed)?.detail ??
-                            (pair ? 'per hand: one _L and one _R each' : undefined)
+            {proposals.length > 0 && (
+              <div className='mt-2 flex flex-wrap items-center gap-2'>
+                <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                  ! {proposals.length} grainline{proposals.length === 1 ? '' : 's'} proposed — a
+                  wrong grain turns the piece in the marker: review them all on the sheet, or draw
+                  your own
+                </Text>
+                <Chip onClick={() => setReviewing(true)}>
+                  review {proposals.length} proposed grainline{proposals.length === 1 ? '' : 's'}
+                </Chip>
+              </div>
+            )}
+
+            {sem.foldList && (
+              <div className='mt-2 flex flex-wrap items-center gap-2'>
+                <Text size='micro' component='p' className='min-w-0 flex-1 text-error'>
+                  ! cutting list: cut on fold, no piece found for{' '}
+                  {sem.foldList.entries.map((e) => `«${e}»`).join(', ')}
+                  {sem.foldList.bound.length
+                    ? ` (${sem.foldList.bound.length} other ${sem.foldList.bound.length === 1 ? 'entry is' : 'entries are'} asked on ${sem.foldList.bound.length === 1 ? 'its piece' : 'their pieces'})`
+                    : ''}
+                  . Tick unfold on the piece it names, then confirm.
+                </Text>
+                <Chip
+                  onClick={() =>
+                    rerun({
+                      foldListChecked: [
+                        ...new Set([...inputs.foldListChecked, ...sem.foldList!.entries]),
+                      ],
+                    })
+                  }
+                >
+                  list checked
+                </Chip>
+              </div>
+            )}
+
+            <DataTable className='mt-2'>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th data-align='left'>code</th>
+                  <th data-align='left'>name</th>
+                  <th data-align='left'>name from</th>
+                  <th title='pieces per garment'>qty</th>
+                  <th data-align='left'>pair</th>
+                  <th data-align='left'>fold</th>
+                  <th data-align='left'>grainline</th>
+                  <th data-align='left'>line</th>
+                  <th>allow., mm</th>
+                  <th data-align='left' className={cn(STICKY_END, 'bg-bgColor')}>
+                    state
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((f) => {
+                  const seed = f.seed;
+                  const specs = specsOf(seed);
+                  // No AI answer for this piece (not logged in, AI off): show what the sheet text
+                  // gave the spec; typing a code makes it the operator's.
+                  const ov0 = inputs.overrides[seed];
+                  const n =
+                    nameOf(seed) ??
+                    (specs.length || ov0?.code ? textNameOf(seed, sem, ov0) : undefined);
+                  const b = blockedOf(seed);
+                  const ov = inputs.overrides[seed] ?? {};
+                  // A blocked piece has no spec yet: fall back to what the namer read off the sheet.
+                  const pair =
+                    ov.pairHand !== undefined
+                      ? ov.pairHand
+                      : specs.length
+                        ? specs[0].pairHand ?? null
+                        : n?.suggestion?.pair
+                          ? 'L'
+                          : null;
+                  const unfolded =
+                    ov.unfoldedFold ??
+                    (specs.length ? specs[0].unfoldedFold : !!n?.suggestion?.onFold);
+                  const allowance = ov.allowance ?? specs[0]?.allowance ?? fileAllowance;
+                  const grainOrigin = inputs.operatorGrain[seed]
+                    ? inputs.operatorGrain[seed]?.accepted
+                      ? 'accepted'
+                      : 'operator'
+                    : specs[0]?.sizes[0]?.grain
+                      ? 'found'
+                      : null;
+                  const proposal = proposalOf(seed);
+                  const pending = !!n && !n.autoAccepted && !inputs.confirmedNames.includes(seed);
+                  const on = sel === seed;
+                  return (
+                    <tr
+                      key={seed}
+                      onClick={() => setSel(seed)}
+                      className={cn('cursor-pointer', on && 'bg-bgZebra')}
+                    >
+                      <td>
+                        <span className='inline-flex size-4 items-center justify-center bg-textColor text-nano text-bgColor'>
+                          {mark(seed)}
+                        </span>
+                      </td>
+                      <td data-align='left'>
+                        <CodeCell
+                          value={n ? [n.code, ...n.mods].filter(Boolean).join('_') : ''}
+                          hand={pair}
+                          blocks={specs.map((s) => s.identity).join(' + ')}
+                          sizeTokens={api.sizeTokens}
+                          aiName={!!n && n.source === 'ai' && !inputs.editedNames.includes(seed)}
+                          onCommit={(v) => setName(seed, splitCode(v))}
+                        />
+                      </td>
+                      <td data-align='left'>
+                        <Input
+                          key={n?.displayName ?? ''}
+                          defaultValue={n?.displayName ?? ''}
+                          aria-label={`name of piece ${mark(seed)}`}
+                          className='h-[22px] w-28'
+                          onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                            const v = e.currentTarget.value.trim();
+                            if (v !== (n?.displayName ?? '')) setName(seed, { displayName: v });
+                          }}
+                        />
+                      </td>
+                      <td data-align='left'>
+                        <NameSource
+                          n={n}
+                          note={nameNote(open, seed)?.detail ?? null}
+                          pending={pending}
+                          confirmed={inputs.confirmedNames.includes(seed)}
+                          onConfirm={() => confirm(seed)}
+                        />
+                      </td>
+                      <td>
+                        {!specs.length ? (
+                          '—'
+                        ) : (
+                          // A pair counts PER HAND (PieceSpec): 2 = two _L and two _R per garment.
+                          // D3: a count no sheet text gives is marked until confirmed or edited.
+                          <span
+                            className='flex items-center gap-1'
+                            title={
+                              qtyOpen(open, seed)?.detail ??
+                              (pair ? 'per hand: one _L and one _R each' : undefined)
+                            }
+                          >
+                            {/* fixed slots: the inputs line up whether or not a row is marked */}
+                            <span className='w-2 text-warning'>
+                              {qtyOpen(open, seed) ? '?' : ''}
+                            </span>
+                            <NumberField
+                              value={specs[0].piecesPerGarment}
+                              min={1}
+                              aria-label={`pieces per garment${pair ? ' per hand' : ''} of piece ${mark(seed)}`}
+                              className={cn('w-12', qtyOpen(open, seed) && 'border-warning')}
+                              onCommit={(v) =>
+                                v && v !== specs[0].piecesPerGarment
+                                  ? override(seed, { piecesPerGarment: Math.round(v) })
+                                  : undefined
+                              }
+                            />
+                            <Text size='nano' variant='label' component='span' className='w-7'>
+                              {pair ? '/hand' : ''}
+                            </Text>
+                          </span>
+                        )}
+                      </td>
+                      <td data-align='left'>
+                        <NativeSelect
+                          value={pair ?? ''}
+                          onChange={(v) =>
+                            override(seed, { pairHand: v ? (v as 'L' | 'R') : null })
                           }
-                        >
-                          {/* fixed slots: the inputs line up whether or not a row is marked */}
-                          <span className='w-2 text-warning'>{qtyOpen(open, seed) ? '?' : ''}</span>
-                          <NumberField
-                            value={specs[0].piecesPerGarment}
-                            min={1}
-                            aria-label={`pieces per garment${pair ? ' per hand' : ''} of piece ${mark(seed)}`}
-                            className={cn('w-12', qtyOpen(open, seed) && 'border-warning')}
-                            onCommit={(v) =>
-                              v && v !== specs[0].piecesPerGarment
-                                ? override(seed, { piecesPerGarment: Math.round(v) })
+                          aria-label={`pair of piece ${mark(seed)}`}
+                          className='w-24'
+                          title='a pair is written as two blocks, _L and _R; say which hand is drawn'
+                          options={[
+                            { value: '', label: 'single' },
+                            { value: 'L', label: 'L+R · L' },
+                            { value: 'R', label: 'L+R · R' },
+                          ]}
+                        />
+                      </td>
+                      <td data-align='left'>
+                        {foldAskOf(seed) ? (
+                          <Button
+                            variant='secondary'
+                            size='xs'
+                            className='whitespace-nowrap border-error text-error'
+                            title={foldAskOf(seed)!.why}
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              startFold(seed);
+                            }}
+                          >
+                            ! fold?
+                          </Button>
+                        ) : (
+                          <label
+                            className='flex items-center gap-1.5'
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <CheckboxCommon
+                              name={`fold-${seed}`}
+                              checked={unfolded}
+                              // ticked: semantics asks which edge (E1a); unticked: "not a fold"
+                              onChange={(v) =>
+                                v ? override(seed, { unfoldedFold: true }) : notFold(seed)
+                              }
+                            />
+                            <Text size='micro' variant='label' component='span'>
+                              unfold
+                            </Text>
+                          </label>
+                        )}
+                      </td>
+                      <td data-align='left'>
+                        {grainOrigin ? (
+                          <Pill tone={grainOrigin === 'found' ? 'ok' : 'ink'}>
+                            {grainOrigin === 'operator' ? 'drawn' : grainOrigin}
+                          </Pill>
+                        ) : proposal ? (
+                          <Pill
+                            tone='attention'
+                            title={`proposed · ${proposal.why} — review above, or draw your own`}
+                          >
+                            proposed
+                          </Pill>
+                        ) : (
+                          <Button
+                            variant='secondary'
+                            size='xs'
+                            className='whitespace-nowrap border-error text-error'
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              startGrain(seed);
+                            }}
+                          >
+                            ! draw
+                          </Button>
+                        )}
+                      </td>
+                      <td data-align='left'>
+                        <NativeSelect
+                          value={allowance.meaning}
+                          onChange={(v) =>
+                            override(seed, {
+                              allowance: {
+                                ...allowance,
+                                meaning: v as LineMeaning,
+                                origin: 'operator',
+                              },
+                            })
+                          }
+                          aria-label={`line meaning of piece ${mark(seed)}`}
+                          className='w-24'
+                          options={MEANING}
+                        />
+                      </td>
+                      <td>
+                        <NumberField
+                          value={allowance.allowanceMm}
+                          min={0}
+                          aria-label={`allowance of piece ${mark(seed)}`}
+                          className='ml-auto w-16'
+                          onCommit={(v) =>
+                            override(seed, {
+                              allowance: { ...allowance, allowanceMm: v ?? 0, origin: 'operator' },
+                            })
+                          }
+                        />
+                      </td>
+                      {/* pinned to the right edge: the answer the footer asks for is always on
+                        screen, even when the table scrolls sideways (1024 px) */}
+                      <td
+                        data-align='left'
+                        className={cn(STICKY_END, on ? 'bg-bgZebra' : 'bg-bgColor')}
+                      >
+                        {b ? (
+                          <BlockedState
+                            reason={b.reason}
+                            proposed={!!proposal}
+                            onReview={() => setReviewing(true)}
+                            detail={b.detail}
+                            word={REASON[b.reason] ?? b.reason}
+                            onGrain={() => startGrain(seed)}
+                            onFold={() => startFold(seed)}
+                            onPieces={
+                              onFixInPieces && PIECES_REASONS.has(b.reason)
+                                ? () => fixInPieces(seed)
+                                : undefined
+                            }
+                            onSizes={
+                              b.reason === 'size-unmapped' || b.reason === 'size-count'
+                                ? () => void api.dispatch({ type: 'back', to: 'sizes' })
                                 : undefined
                             }
                           />
-                          <Text size='nano' variant='label' component='span' className='w-7'>
-                            {pair ? '/hand' : ''}
-                          </Text>
-                        </span>
-                      )}
-                    </td>
-                    <td data-align='left'>
-                      <NativeSelect
-                        value={pair ?? ''}
-                        onChange={(v) => override(seed, { pairHand: v ? (v as 'L' | 'R') : null })}
-                        aria-label={`pair of piece ${mark(seed)}`}
-                        className='w-24'
-                        title='a pair is written as two blocks, _L and _R; say which hand is drawn'
-                        options={[
-                          { value: '', label: 'single' },
-                          { value: 'L', label: 'L+R · L' },
-                          { value: 'R', label: 'L+R · R' },
-                        ]}
-                      />
-                    </td>
-                    <td data-align='left'>
-                      {foldAskOf(seed) ? (
-                        <Button
-                          variant='secondary'
-                          size='xs'
-                          className='whitespace-nowrap border-error text-error'
-                          title={foldAskOf(seed)!.why}
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            startFold(seed);
-                          }}
-                        >
-                          ! fold?
-                        </Button>
-                      ) : (
-                        <label
-                          className='flex items-center gap-1.5'
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <CheckboxCommon
-                            name={`fold-${seed}`}
-                            checked={unfolded}
-                            // ticked: semantics asks which edge (E1a); unticked: "not a fold"
-                            onChange={(v) =>
-                              v ? override(seed, { unfoldedFold: true }) : notFold(seed)
-                            }
+                        ) : rowOpen(open, seed) ? (
+                          <RowQuestions
+                            api={api}
+                            seed={seed}
+                            // E4: "cut on fold" from the count question → the fold question of
+                            // this row: semantics asks for the edge, the drawing opens to pick it
+                            onFold={() => {
+                              override(seed, { unfoldedFold: true });
+                              startFold(seed);
+                            }}
                           />
-                          <Text size='micro' variant='label' component='span'>
-                            unfold
-                          </Text>
-                        </label>
-                      )}
-                    </td>
-                    <td data-align='left'>
-                      {grainOrigin ? (
-                        <Pill tone={grainOrigin === 'operator' ? 'ink' : 'ok'}>
-                          {grainOrigin === 'operator' ? 'drawn' : 'found'}
-                        </Pill>
-                      ) : (
-                        <Button
-                          variant='secondary'
-                          size='xs'
-                          className='whitespace-nowrap border-error text-error'
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            startGrain(seed);
-                          }}
-                        >
-                          ! draw
-                        </Button>
-                      )}
-                    </td>
-                    <td data-align='left'>
-                      <NativeSelect
-                        value={allowance.meaning}
-                        onChange={(v) =>
-                          override(seed, {
-                            allowance: {
-                              ...allowance,
-                              meaning: v as LineMeaning,
-                              origin: 'operator',
-                            },
-                          })
-                        }
-                        aria-label={`line meaning of piece ${mark(seed)}`}
-                        className='w-24'
-                        options={MEANING}
-                      />
-                    </td>
-                    <td>
-                      <NumberField
-                        value={allowance.allowanceMm}
-                        min={0}
-                        aria-label={`allowance of piece ${mark(seed)}`}
-                        className='ml-auto w-16'
-                        onCommit={(v) =>
-                          override(seed, {
-                            allowance: { ...allowance, allowanceMm: v ?? 0, origin: 'operator' },
-                          })
-                        }
-                      />
-                    </td>
-                    {/* pinned to the right edge: the answer the footer asks for is always on
-                        screen, even when the table scrolls sideways (1024 px) */}
-                    <td
-                      data-align='left'
-                      className={cn(STICKY_END, on ? 'bg-bgZebra' : 'bg-bgColor')}
-                    >
-                      {b ? (
-                        <BlockedState
-                          reason={b.reason}
-                          detail={b.detail}
-                          word={REASON[b.reason] ?? b.reason}
-                          onGrain={() => startGrain(seed)}
-                          onFold={() => startFold(seed)}
-                          onPieces={
-                            onFixInPieces && PIECES_REASONS.has(b.reason)
-                              ? () => fixInPieces(seed)
-                              : undefined
-                          }
-                          onSizes={
-                            b.reason === 'size-unmapped' || b.reason === 'size-count'
-                              ? () => void api.dispatch({ type: 'back', to: 'sizes' })
-                              : undefined
-                          }
-                        />
-                      ) : rowOpen(open, seed) ? (
-                        <RowQuestions
-                          api={api}
-                          seed={seed}
-                          // E4: "cut on fold" from the count question → the fold question of
-                          // this row: semantics asks for the edge, the drawing opens to pick it
-                          onFold={() => {
-                            override(seed, { unfoldedFold: true });
-                            startFold(seed);
-                          }}
-                        />
-                      ) : (
-                        <Pill tone='ok'>ready</Pill>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
-          {sem.warnings.map((w) => (
-            <Text key={w} size='micro' variant='label' component='p' className='mt-1'>
-              {w}
-            </Text>
-          ))}
-        </Panel>
+                        ) : (
+                          <Pill tone='ok'>ready</Pill>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </DataTable>
+            {sem.warnings.map((w) => (
+              <Text key={w} size='micro' variant='label' component='p' className='mt-1'>
+                {w}
+              </Text>
+            ))}
+          </Panel>
+        )
       }
       side={
         <Panel
@@ -678,6 +799,15 @@ export function DetailsStep({
                           tone={inputs.operatorGrain[sel] ? SHEET_INK.blue : SHEET_INK.red}
                         />
                       )}
+                      {selProposal && (
+                        <GrainMark
+                          a={selProposal.a}
+                          b={selProposal.b}
+                          unit={unit}
+                          tone={SHEET_INK.blue}
+                          dashed
+                        />
+                      )}
                       {grainA && (
                         <circle
                           cx={grainA.x}
@@ -724,6 +854,9 @@ export function DetailsStep({
                           .join(' ') || '—'
                       }
                     />
+                    {selProposal && (
+                      <Row label='grainline' value={`proposed · ${selProposal.why}`} />
+                    )}
                     <Row
                       label='fabrics (proposed)'
                       value={nameOf(sel)?.suggestion?.fabrics.length ?? '—'}
@@ -801,6 +934,8 @@ export function DetailsStep({
  */
 function BlockedState({
   reason,
+  proposed,
+  onReview,
   detail,
   word,
   onGrain,
@@ -809,6 +944,9 @@ function BlockedState({
   onSizes,
 }: {
   reason: string;
+  /** A1: a grainline is proposed for this piece — the answer is to review it, or draw one. */
+  proposed?: boolean;
+  onReview?: () => void;
   detail: string;
   word: string;
   onGrain: () => void;
@@ -820,6 +958,18 @@ function BlockedState({
     e.stopPropagation();
     f();
   };
+  if (reason === 'no-grain' && proposed && onReview)
+    return (
+      <Button
+        variant='secondary'
+        size='xs'
+        className='whitespace-nowrap border-warning text-warning'
+        title={detail}
+        onClick={stop(onReview)}
+      >
+        proposed — accept or draw
+      </Button>
+    );
   if (reason === 'no-grain')
     return (
       <Button
@@ -996,7 +1146,20 @@ function NameSource({
   return <Pill tone='mut'>AI</Pill>;
 }
 
-function GrainMark({ a, b, unit, tone }: { a: PtMm; b: PtMm; unit: number; tone: string }) {
+function GrainMark({
+  a,
+  b,
+  unit,
+  tone,
+  dashed,
+}: {
+  a: PtMm;
+  b: PtMm;
+  unit: number;
+  tone: string;
+  /** A1: a proposal, not yet the piece's grain. */
+  dashed?: boolean;
+}) {
   const ang = Math.atan2(vy(b.y) - vy(a.y), b.x - a.x);
   const h = unit * 10;
   const tip = (p: PtMm, dir: number) => {
@@ -1006,7 +1169,15 @@ function GrainMark({ a, b, unit, tone }: { a: PtMm; b: PtMm; unit: number; tone:
   };
   return (
     <g pointerEvents='none'>
-      <line x1={a.x} y1={vy(a.y)} x2={b.x} y2={vy(b.y)} stroke={tone} strokeWidth={unit * 1.8} />
+      <line
+        x1={a.x}
+        y1={vy(a.y)}
+        x2={b.x}
+        y2={vy(b.y)}
+        stroke={tone}
+        strokeWidth={unit * 1.8}
+        strokeDasharray={dashed ? `${unit * 8} ${unit * 5}` : undefined}
+      />
       <polygon points={tip(b, 1)} fill={tone} />
       <polygon points={tip(a, -1)} fill={tone} />
     </g>

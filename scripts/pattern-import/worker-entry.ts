@@ -1106,11 +1106,18 @@ async function pipelineCase(
   );
   const sem = await run('semantics', { ...SEM_DEFAULT, pieceOverrides: names });
   const reasons = [...new Set(sem.blocked.map((b) => b.reason))];
+  // A1 (D3): a grain on one evidence is only proposed — a sheet whose every piece waits on a
+  // proposed grain (robe: «Fadenlauf» lines without arrowheads) builds nothing before that click
+  const allProposed =
+    sem.blocked.length > 0 &&
+    sem.blocked.every(
+      (b) => b.reason === 'no-grain' && sem.grainProposals?.some((g) => g.seed === b.seed),
+    );
   check(
     name,
-    'semantics: specs built',
-    sem.pieces.length > 0,
-    `${sem.pieces.length} specs, ${sem.blocked.length} blocked (${reasons.join(', ')})`,
+    'semantics: specs built (or every piece waits on a proposed grain)',
+    sem.pieces.length > 0 || allProposed,
+    `${sem.pieces.length} specs, ${sem.blocked.length} blocked (${reasons.join(', ')}), ${sem.grainProposals?.length ?? 0} grain proposals`,
   );
   // grain by two clicks for the pieces without one
   const grain: StageIO['semantics']['in']['operatorGrain'] = {};
