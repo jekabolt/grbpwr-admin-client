@@ -136,6 +136,40 @@ export type LinkResult = {
   ignoredPaths: number;
 };
 
+/**
+ * ≥ 2 source files whose pages cover the same part of the sheet (≥ half of the smaller file's
+ * extent): the files are overlays — one drawing per file (file per size) — not tiles of one drawing.
+ */
+export function overlaidFiles(sheet: Sheet): boolean {
+  const boxes = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+  for (const p of sheet.poses) {
+    const t = p.toSheet;
+    const xs = [0, p.widthMm].flatMap((x) => [0, p.heightMm].map((y) => t.a * x + t.c * y + t.e));
+    const ys = [0, p.widthMm].flatMap((x) => [0, p.heightMm].map((y) => t.b * x + t.d * y + t.f));
+    const b = boxes.get(p.file);
+    const nb = {
+      minX: Math.min(...xs, b?.minX ?? Infinity),
+      minY: Math.min(...ys, b?.minY ?? Infinity),
+      maxX: Math.max(...xs, b?.maxX ?? -Infinity),
+      maxY: Math.max(...ys, b?.maxY ?? -Infinity),
+    };
+    boxes.set(p.file, nb);
+  }
+  const bs = [...boxes.values()];
+  const area = (b: (typeof bs)[number]) =>
+    Math.max(0, b.maxX - b.minX) * Math.max(0, b.maxY - b.minY);
+  for (let i = 0; i < bs.length; i++)
+    for (let j = i + 1; j < bs.length; j++) {
+      const a = bs[i];
+      const b = bs[j];
+      const ov =
+        Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX)) *
+        Math.max(0, Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY));
+      if (ov > 0 && ov >= 0.5 * Math.min(area(a), area(b))) return true;
+    }
+  return false;
+}
+
 export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   const styles = new Map(sheet.styles.map((s) => [s.id, s]));
   const keyOf = new Map(sheet.styles.map((s) => [s.id, styleKey(s)]));
@@ -217,12 +251,22 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
 
   // ── pass 2: tracker ─────────────────────────────────────────────────────────────────────────
   const cosMax = Math.cos((opts.joinAngleDeg * Math.PI) / 180);
+  // Files laid OVER each other (file per size: wm, redcafe) are different drawings of one sheet: a
+  // line never runs on from one file into another. wm's XS neck cut line was joined end-to-end to
+  // XL's shoulder line, took XL's rank, and XS lost the neck of its cut line (its outline then
+  // jogged between the cut and the seam line). Tiles of ONE drawing split over files sit side by
+  // side and still join.
+  const fileSep = overlaidFiles(sheet);
   const backbone = (ch: WChain, end: 0 | 1) => {
     // style of the end-most non-bead item
     const n = ch.items.length;
     for (let k = 0; k < n; k++) {
       const l = ch.items[end ? n - 1 - k : k];
-      if (l.it.kind !== 'bead') return keyOf.get(l.it.style) ?? '';
+      if (l.it.kind !== 'bead')
+        return (
+          (keyOf.get(l.it.style) ?? '') +
+          (fileSep ? `|${l.it.op.slice(0, l.it.op.indexOf('|'))}` : '')
+        );
     }
     return '';
   };

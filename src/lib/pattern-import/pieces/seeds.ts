@@ -36,19 +36,29 @@ function poseOf(sheet: Sheet, t: IRText): PagePose | undefined {
   return sheet.poses.find((p) => p.file === t.src.file && p.page === t.src.page);
 }
 
-/** Sheet → page frame for one text (inverse of its page's pose). */
+/**
+ * Sheet → page frame for one text (inverse of its page's pose), at the CENTRE of its box: a tile
+ * number centred on its page has one spot whether it prints "9" or "19" (the anchor is the left
+ * edge and moves by a digit).
+ */
 function pageRel(sheet: Sheet, t: IRText): PtMm | null {
   const pose = poseOf(sheet, t);
   if (!pose) return null;
   const { a, b, c, d, e, f } = pose.toSheet;
   const det = a * d - b * c;
   if (Math.abs(det) < 1e-12) return null;
-  const x = t.anchor.x - e;
-  const y = t.anchor.y - f;
+  const m = centre(t);
+  const x = m.x - e;
+  const y = m.y - f;
   return { x: (d * x - c * y) / det, y: (-b * x + a * y) / det };
 }
 
-/** Numbers printed once per page at one page-relative spot = tile labels. */
+/**
+ * Numbers printed once per page at one page-relative spot = tile labels: a group of one print size
+ * whose page-relative centres lie within 20 mm of each other on ≥ 4 pages and ≥ half the pages
+ * that print such numbers — or whose values follow the page order (n = page + k on ≥ 4 pages,
+ * BLAZER: 1 … 24, one per tile, 80 mm tall in the middle of the tile).
+ */
 function tileLabelIds(sheet: Sheet, nums: IRText[]): Set<number> {
   const out = new Set<number>();
   const groups = new Map<number, IRText[]>();
@@ -58,22 +68,35 @@ function tileLabelIds(sheet: Sheet, nums: IRText[]): Set<number> {
     if (g) g.push(t);
     else groups.set(k, [t]);
   }
+  const pageOf = (t: IRText) => `${t.src.file}:${t.src.page}`;
   for (const g of groups.values()) {
     if (g.length < 4) continue;
     const rel = g.map((t) => ({ t, p: pageRel(sheet, t) })).filter((x) => x.p);
-    // the most common page-relative spot (15 mm cells)
-    const votes = new Map<string, IRText[]>();
+    // spots: page-relative centres within 20 mm of a spot's first member
+    const spots: { at: PtMm; ts: IRText[] }[] = [];
     for (const { t, p } of rel) {
-      const key = `${Math.round(p!.x / 15)},${Math.round(p!.y / 15)}`;
-      const v = votes.get(key);
-      if (v) v.push(t);
-      else votes.set(key, [t]);
+      const s = spots.find((q) => dist(q.at, p!) <= 20);
+      if (s) s.ts.push(t);
+      else spots.push({ at: p!, ts: [t] });
     }
-    const pages = new Set(rel.map(({ t }) => `${t.src.file}:${t.src.page}`)).size;
-    for (const v of votes.values()) {
-      const vp = new Set(v.map((t) => `${t.src.file}:${t.src.page}`)).size;
-      if (vp >= 4 && vp >= 0.5 * pages) for (const t of v) out.add(t.id);
+    const pages = new Set(rel.map(({ t }) => pageOf(t))).size;
+    for (const v of spots) {
+      const vp = new Set(v.ts.map(pageOf)).size;
+      if (vp >= 4 && vp >= 0.5 * pages) for (const t of v.ts) out.add(t.id);
     }
+    // the page sequence: the number minus the page index is one constant on ≥ 4 pages
+    const k = new Map<string, IRText[]>();
+    for (const t of g) {
+      const n = parseInt(t.text.trim(), 10);
+      if (!Number.isFinite(n)) continue;
+      const key = `${t.src.file}|${n - t.src.page}`;
+      const a = k.get(key);
+      if (a) a.push(t);
+      else k.set(key, [t]);
+    }
+    for (const a of k.values())
+      if (new Set(a.map(pageOf)).size >= 4 && a.length >= 0.5 * g.length)
+        for (const t of a) out.add(t.id);
   }
   return out;
 }

@@ -207,6 +207,34 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   }
   const texts = [...allTexts.map((t) => t.text), ...(inp.extraTexts ?? [])];
   const runs: TextRun[] = [...runsInText(texts), ...runsInTokens(allTexts.map((t) => t.text))];
+  /** The sheet's printed run whose labels sit next to its lines (≥ 3): a size count to keep. */
+  let linesRun: TextRun | null = null;
+  {
+    // an even step among PIECE NUMBERS is not a size run (polupalto: pieces 1, 7 and 13 print their
+    // number on their own outline; the lines are labelled 44 … 54 and the sheet says «44−54»): a
+    // run along lines loses to the printed run whose labels the lines carry best (≥ 3 of them
+    // next to lines) when the two share no label
+    const near = new Set(hits0.map((h) => h.label));
+    const support = (r: TextRun) => r.labels.filter((l) => near.has(l)).length;
+    // the SHEET's own runs: instruction pages count sewing steps too («3 bis 10»)
+    const best = runsInText(allTexts.map((t) => t.text))
+      .filter((r) => r.labels.length >= 3)
+      // fully carried runs first («44−54» by 2: every label next to a line), then the most labels
+      .sort(
+        (a, b) =>
+          support(b) / b.labels.length - support(a) / a.labels.length || support(b) - support(a),
+      )[0];
+    if (best && support(best) >= 3) linesRun = best;
+    if (
+      hits.length &&
+      best &&
+      support(best) >= 3 &&
+      ![...hitRun].some((l) => best.labels.includes(l))
+    ) {
+      diag.labelRunDropped = [...hitRun];
+      hits = hits0.filter((h) => best.labels.includes(h.label));
+    }
+  }
   // the legend's labels: a run among the sample labels — or, when some samples are not chains
   // (reef draws S and 3XL as loose marks), the size run the file states that holds them all
   let legendRun = labelRun(legendHits0, 1, 2);
@@ -646,6 +674,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         .map((r) => r.labels.length),
     );
     if (legendRun.size >= 3) runN.add(legendRun.size);
+    // the sheet prints «44−54» and labels its lines 44 … 54: a geometry count equal to that run
+    // stands (polupalto's instructions say «46 bis 54» for another model)
+    if (linesRun && linesRun.labels.length === n) runN.add(n);
     if (runN.size && !runN.has(n)) {
       // a printed legend / "sizes 72, 76, 80, 84, 88" outranks geometry when geometry supports it at all
       const alt = scores.filter(([k]) => runN.has(k)).sort((a, b) => b[1] - a[1])[0];

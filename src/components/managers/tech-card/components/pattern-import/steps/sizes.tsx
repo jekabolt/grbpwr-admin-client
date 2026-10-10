@@ -110,6 +110,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `text “${e.text}” ${e.distanceMm} mm away`;
           case 'nesting-order':
             return `nesting rank ${e.rank}`;
+          case 'seam-offset':
+            return `${e.offsetMm} mm inside the cut line`;
         }
       })
       .join(' · ');

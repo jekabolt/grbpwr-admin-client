@@ -76,6 +76,7 @@ import {
   type PieceSession,
   type WallPieceEdit,
 } from '../pieces';
+import { pointInPoly } from '../pieces/geom';
 import {
   allowanceFromTexts,
   buildPieceSpecsDetailed,
@@ -750,13 +751,36 @@ export class Session {
       input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, [], null, base) ?? undefined;
     const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
     const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
+    // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or
+    // shared another seed's region), or it sits inside another piece's outline — takes it out of
+    // the FILL, not only out of the result: such a seed makes its neighbour "merged", drops
+    // frame-like walls around it and splits it by cells (BLAZER's page numbers answered "not a
+    // piece" still moved the front's outline). A seed that closed a region of its own stays as a
+    // separator: the touching piece beside it (Redcafe's sleeve beside the front) must not grow
+    // into it.
+    const prevFams = this.pieceSession?.families ?? [];
+    const separator = (seed: number) => {
+      const f = prevFams.find((x) => x.seed === seed);
+      const at = seeds.find((x) => x.id === seed)?.at;
+      if (!f || !at || !f.candidates.length) return false;
+      if (!f.candidates.every((c) => c.outcome === 'closed')) return false;
+      return !prevFams.some(
+        (o) =>
+          o.seed !== seed &&
+          o.candidates.some((c) => c.outer.length > 2 && pointInPoly(at, c.outer)),
+      );
+    };
+    const notPiece = new Set(
+      input.edits.flatMap((e) => (e.kind === 'not-a-piece' && !separator(e.seed) ? [e.seed] : [])),
+    );
+    const fillSeeds = notPiece.size ? seeds.filter((s) => !notPiece.has(s.id)) : seeds;
     // Wall edits (close gap / ignore line / use line) go through the F4b session: appended ones
     // refill only the seeds they reach; an undo, new seeds or another variant fill afresh with
     // every wall edit so far. The other edits (not a piece, reseed, merge, split) apply after, on
     // the session's families, keeping the operator's walls.
     const wallEdits = input.edits.filter(isWallEdit);
     const key = JSON.stringify([
-      seeds.map((x) => [x.id, x.at.x, x.at.y, x.variant, x.origin]),
+      fillSeeds.map((x) => [x.id, x.at.x, x.at.y, x.variant, x.origin]),
       opts,
     ]);
     const prev = this.pieceSession;
@@ -777,8 +801,8 @@ export class Session {
         sheet,
         set: base,
         run,
-        seeds,
-        opts,
+        seeds: fillSeeds,
+        opts: opts,
         walls: { exclude: [], include: [], bridges: [] },
         families: [],
       };
@@ -786,7 +810,7 @@ export class Session {
         sheet,
         base,
         run,
-        seeds,
+        fillSeeds,
         opts,
         wallEditsInto(empty, wallEdits).walls,
         (d, t, n) => {

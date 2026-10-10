@@ -3,9 +3,11 @@
 // A look is NOT a size: palto's 5 sizes show up as more looks (one style fragments when dash phase
 // or decorations differ) and two sizes can share a look; viola draws 8 sizes in ~8 looks of 3
 // line weights. Looks are evidence; sizes are decided in sizes/recover.ts with bundles.
+import { dimensionsIn, SQUARE_KEYWORD } from 'lib/pattern-import/adapters/pdf/scale';
 import type {
   Chain,
   ClassEvidence,
+  IRText,
   LineClass,
   PagePose,
   PtMm,
@@ -44,10 +46,14 @@ export function furniture(
   chains: Chain[],
   styles: Map<number, Style>,
   poses: PagePose[] = [],
+  texts: readonly IRText[] = [],
 ): (string | null)[] {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
+  for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
+  for (const i of backgroundGrid(chains)) out[i] = out[i] ?? 'background grid';
+  for (const i of testSquares(chains, poses, texts, out)) out[i] = out[i] ?? 'test square';
   const rects = new Map<string, number[]>();
   const lines = new Map<string, number[]>();
   // pens that also draw curves are garment pens: reef draws every size dashed (dash-dot, dash-dot-
@@ -340,11 +346,406 @@ function pageMarginLines(chains: Chain[], poses: PagePose[], out: (string | null
     if (s.size >= 3) for (const i of s) out[i] = out[i] ?? 'page margin line';
 }
 
+/** Axis-aligned straight runs of a polyline (collinear edges merged), at least `minMm` long. */
+type Run = { axis: 'x' | 'y'; at: number; lo: number; hi: number; len: number };
+function axisRuns(pts: readonly PtMm[], closed: boolean, minMm: number): Run[] {
+  const out: Run[] = [];
+  const P = closed && pts.length > 2 ? [...pts, pts[0]] : pts;
+  let cur: Run | null = null;
+  const flush = () => {
+    if (cur && cur.len >= minMm) out.push(cur);
+    cur = null;
+  };
+  for (let i = 1; i < P.length; i++) {
+    const a = P[i - 1];
+    const b = P[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1e-6) continue;
+    const axis =
+      Math.abs(dy) <= 0.3 && Math.abs(dy) <= 0.01 * L
+        ? 'x'
+        : Math.abs(dx) <= 0.3 && Math.abs(dx) <= 0.01 * L
+          ? 'y'
+          : null;
+    if (!axis) {
+      flush();
+      continue;
+    }
+    const at = axis === 'x' ? (a.y + b.y) / 2 : (a.x + b.x) / 2;
+    const lo = axis === 'x' ? Math.min(a.x, b.x) : Math.min(a.y, b.y);
+    const hi = axis === 'x' ? Math.max(a.x, b.x) : Math.max(a.y, b.y);
+    const c = cur as Run | null;
+    if (
+      c &&
+      c.axis === axis &&
+      Math.abs(c.at - at) <= 0.3 &&
+      lo <= c.hi + 0.3 &&
+      hi >= c.lo - 0.3
+    ) {
+      c.lo = Math.min(c.lo, lo);
+      c.hi = Math.max(c.hi, hi);
+      c.len = c.hi - c.lo;
+      continue;
+    }
+    flush();
+    cur = { axis, at, lo, hi, len: hi - lo };
+  }
+  flush();
+  return out;
+}
+
+/**
+ * TILE FRAMES drawn as line work (BLAZER: a 190 × 280 mm frame inside every 210 × 297 page, in the
+ * cut-line pen; where tiles meet, the frames share sides and the linker draws them as L, U and
+ * staircase chains, so the closed-rectangle test above never sees them). A frame line sits at one
+ * page-relative inset that ≥ 3 page POSITIONS share (overlaid per-size files sit at one position
+ * and do not vote twice), and runs from frame corner to frame corner: both ends of every run land on
+ * a frame line of the other axis. A chain made (≥ 95 %) of such runs is a frame. Garment edges
+ * share neither the inset on three tiles nor corner-to-corner ends.
+ */
+export function tileFrameLines(chains: Chain[], poses: PagePose[]): number[] {
+  if (poses.length < 3) return [];
+  const rects = poses.map(pageRect);
+  const posKey = (r: (typeof rects)[number]) => `${Math.round(r.minX)},${Math.round(r.minY)}`;
+  const positions = new Set(rects.map(posKey)).size;
+  if (positions < 3) return [];
+  const MAXIN = 30;
+  const runsOf = chains.map((c) =>
+    c.lengthMm >= 20 && c.pts.length >= 2 ? axisRuns(c.pts, c.closed, 15) : [],
+  );
+  // insets: axis | side (0 = from the low edge, 1 = from the high edge) | inset (0.5 mm) → positions
+  const votes = new Map<string, Set<string>>();
+  const insetsOf = (run: Run, r: (typeof rects)[number]) => {
+    const lo = run.axis === 'x' ? r.minX : r.minY;
+    const hi = run.axis === 'x' ? r.maxX : r.maxY;
+    if (Math.min(run.hi, hi) - Math.max(run.lo, lo) < 15) return [];
+    const e0 = run.axis === 'x' ? r.minY : r.minX;
+    const e1 = run.axis === 'x' ? r.maxY : r.maxX;
+    const out: { side: 0 | 1; off: number }[] = [];
+    for (const [side, off] of [
+      [0, run.at - e0],
+      [1, e1 - run.at],
+    ] as [0 | 1, number][])
+      if (off >= 0.5 && off <= MAXIN) out.push({ side, off });
+    return out;
+  };
+  runsOf.forEach((runs) => {
+    for (const run of runs)
+      for (const r of rects)
+        for (const { side, off } of insetsOf(run, r)) {
+          const k = `${run.axis}|${side}|${Math.round(off * 2) / 2}`;
+          const s = votes.get(k);
+          if (s) s.add(posKey(r));
+          else votes.set(k, new Set([posKey(r)]));
+        }
+  });
+  const need = Math.max(3, Math.ceil(0.25 * positions));
+  const frameIns: { axis: 'x' | 'y'; side: 0 | 1; off: number }[] = [];
+  for (const [k, s] of votes) {
+    if (s.size < need) continue;
+    const [axis, side, off] = k.split('|');
+    frameIns.push({ axis: axis as 'x' | 'y', side: Number(side) as 0 | 1, off: Number(off) });
+  }
+  if (!frameIns.length) return [];
+  // the frame lines' coordinates in sheet frame: x of vertical lines, y of horizontal ones
+  const lineAt: Record<'x' | 'y', number[]> = { x: [], y: [] };
+  for (const f of frameIns)
+    for (const r of rects) {
+      const e0 = f.axis === 'x' ? r.minY : r.minX;
+      const e1 = f.axis === 'x' ? r.maxY : r.maxX;
+      lineAt[f.axis].push(f.side === 0 ? e0 + f.off : e1 - f.off);
+    }
+  const onLine = (axis: 'x' | 'y', v: number) => lineAt[axis].some((w) => Math.abs(w - v) <= 1);
+  const isFrameRun = (run: Run) =>
+    onLine(run.axis, run.at) &&
+    // its ends are frame corners: on a frame line of the other axis
+    onLine(run.axis === 'x' ? 'y' : 'x', run.lo) &&
+    onLine(run.axis === 'x' ? 'y' : 'x', run.hi);
+  const out: number[] = [];
+  chains.forEach((c, i) => {
+    const runs = runsOf[i];
+    if (!runs.length) return;
+    let framed = 0;
+    let longest = 0;
+    for (const run of runs)
+      if (isFrameRun(run)) {
+        framed += run.len;
+        longest = Math.max(longest, run.len);
+      }
+    if (longest >= 60 && framed >= 0.95 * c.lengthMm) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * A BACKGROUND GRID drawn as line work (a 1 cm lattice under the pattern, often thin and light but
+ * not always): straight axis-aligned lines of ONE pen at ≥ 8 equally spaced positions (4–26 mm
+ * apart) in BOTH directions. Quilting rows run one way; a graded ladder is 1–3 mm apart.
+ */
+export function backgroundGrid(chains: Chain[]): number[] {
+  type Pos = { at: number; ids: number[]; len: number };
+  const byPen = new Map<string, Map<number, Pos>>();
+  chains.forEach((c, i) => {
+    if (c.pts.length < 2 || c.lengthMm < 20) return;
+    const { axis, straight } = straightAxis(c);
+    if (!straight || !axis) return;
+    const a = c.pts[0];
+    const at = axis === 'x' ? a.y : a.x;
+    const k = `${c.style}|${axis}`;
+    let m = byPen.get(k);
+    if (!m) byPen.set(k, (m = new Map()));
+    const q = Math.round(at * 5);
+    const p = m.get(q) ?? m.get(q - 1) ?? m.get(q + 1);
+    if (p) {
+      p.ids.push(i);
+      p.len += c.lengthMm;
+    } else m.set(q, { at, ids: [i], len: c.lengthMm });
+  });
+  const latticeOf = (m: Map<number, Pos>): number[] => {
+    const ps = [...m.values()].filter((p) => p.len >= 60).sort((a, b) => a.at - b.at);
+    if (ps.length < 8) return [];
+    const d: number[] = [];
+    for (let k = 1; k < ps.length; k++) d.push(ps[k].at - ps[k - 1].at);
+    const per = d.filter((v) => v >= 4 && v <= 26).sort((a, b) => a - b)[
+      Math.floor(d.filter((v) => v >= 4 && v <= 26).length / 2)
+    ];
+    if (!per) return [];
+    // the longest run of consecutive positions at that spacing
+    let best: Pos[] = [];
+    let run: Pos[] = [ps[0]];
+    for (let k = 1; k < ps.length; k++) {
+      if (Math.abs(d[k - 1] - per) <= Math.max(0.3, 0.03 * per)) run.push(ps[k]);
+      else {
+        if (run.length > best.length) best = run;
+        run = [ps[k]];
+      }
+    }
+    if (run.length > best.length) best = run;
+    return best.length >= 8 ? best.flatMap((p) => p.ids) : [];
+  };
+  const out: number[] = [];
+  const pens = new Set([...byPen.keys()].map((k) => k.slice(0, k.lastIndexOf('|'))));
+  for (const pen of pens) {
+    const gx = byPen.get(`${pen}|x`);
+    const gy = byPen.get(`${pen}|y`);
+    if (!gx || !gy) continue;
+    const a = latticeOf(gx);
+    const b = latticeOf(gy);
+    if (a.length && b.length) out.push(...a, ...b);
+  }
+  return out;
+}
+
+/** Nominal sides a printed test square is drawn at (mm). */
+const SQUARE_MM = [25.4, 30, 40, 50, 50.8, 80, 100, 101.6];
+
+/**
+ * The TEST SQUARE drawn as line work (wm: 4 sides of a 100 mm square in every per-size file, in the
+ * size pen, with «10 CM» as outline glyphs inside; the front's neck ran out into it). An axis-
+ * aligned square of a nominal side (± 0.6 mm), its sides whole chains (or one closed chain), with
+ * a label (its dimension or a "test square" word within 45 mm, or drawn lettering inside) or the
+ * same square drawn at one place in ≥ 2 overlaid files.
+ */
+export function testSquares(
+  chains: Chain[],
+  poses: PagePose[],
+  texts: readonly IRText[],
+  known: readonly (string | null)[] = [],
+): number[] {
+  type Side = { i: number; run: Run };
+  const h: Side[] = [];
+  const v: Side[] = [];
+  const closedSq: { i: number; box: { minX: number; minY: number; maxX: number; maxY: number } }[] =
+    [];
+  chains.forEach((c, i) => {
+    if (c.pts.length < 2 || c.lengthMm < 20 || c.lengthMm > 4 * 102 + 2) return;
+    const runs = axisRuns(c.pts, c.closed, 20);
+    if (runs.length === 1 && Math.abs(runs[0].len - c.lengthMm) <= 1)
+      (runs[0].axis === 'x' ? h : v).push({ i, run: runs[0] });
+    else if (runs.length === 4 && c.closed) {
+      const b = bboxOf(c.pts);
+      closedSq.push({ i, box: b });
+    }
+  });
+  const nominal = (s: number) => SQUARE_MM.some((n) => Math.abs(n - s) <= 0.6);
+  const boxes: {
+    ids: number[];
+    box: { minX: number; minY: number; maxX: number; maxY: number };
+  }[] = [];
+  for (const q of closedSq) {
+    const w = q.box.maxX - q.box.minX;
+    const hh = q.box.maxY - q.box.minY;
+    if (Math.abs(w - hh) <= 0.6 && nominal(w)) boxes.push({ ids: [q.i], box: q.box });
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) <= 0.6;
+  for (const a of h) {
+    const s = a.run.len;
+    if (!nominal(s)) continue;
+    for (const b of h) {
+      if (b === a || b.run.at <= a.run.at || !near(b.run.at - a.run.at, s)) continue;
+      if (!near(a.run.lo, b.run.lo) || !near(a.run.hi, b.run.hi)) continue;
+      const side = (x: number) =>
+        v.find((q) => near(q.run.at, x) && near(q.run.lo, a.run.at) && near(q.run.hi, b.run.at));
+      const l = side(a.run.lo);
+      const r = side(a.run.hi);
+      if (!l || !r) continue;
+      boxes.push({
+        ids: [a.i, b.i, l.i, r.i],
+        box: { minX: a.run.lo, minY: a.run.at, maxX: a.run.hi, maxY: b.run.at },
+      });
+    }
+  }
+  if (!boxes.length) return [];
+  const out: number[] = [];
+  for (const q of boxes) {
+    const s = q.box.maxX - q.box.minX;
+    const reach = 45;
+    const labelled = texts.some((t) => {
+      const b = t.bbox;
+      const d = Math.hypot(
+        Math.max(0, q.box.minX - b.maxX, b.minX - q.box.maxX),
+        Math.max(0, q.box.minY - b.maxY, b.minY - q.box.maxY),
+      );
+      return (
+        d <= reach &&
+        (SQUARE_KEYWORD.test(t.text) ||
+          dimensionsIn(t.text).some((x) => Math.abs(x - s) <= 0.02 * s))
+      );
+    });
+    const lettered =
+      !labelled &&
+      known.some((w, i) => {
+        if (w !== 'lettering') return false;
+        const b = bboxOf(chains[i].pts);
+        return (
+          b.minX >= q.box.minX &&
+          b.maxX <= q.box.maxX &&
+          b.minY >= q.box.minY &&
+          b.maxY <= q.box.maxY
+        );
+      });
+    const copies = boxes.filter(
+      (o) =>
+        o !== q &&
+        near(o.box.minX, q.box.minX) &&
+        near(o.box.minY, q.box.minY) &&
+        near(o.box.maxX, q.box.maxX) &&
+        near(o.box.maxY, q.box.maxY),
+    ).length;
+    if (!(labelled || lettered || (copies >= 1 && poses.length > 0))) continue;
+    out.push(...q.ids);
+    // every copy of a side (one per overlaid file) goes with it
+    const b = q.box;
+    for (const x of h)
+      if (
+        (near(x.run.at, b.minY) || near(x.run.at, b.maxY)) &&
+        near(x.run.lo, b.minX) &&
+        near(x.run.hi, b.maxX)
+      )
+        out.push(x.i);
+    for (const x of v)
+      if (
+        (near(x.run.at, b.minX) || near(x.run.at, b.maxX)) &&
+        near(x.run.lo, b.minY) &&
+        near(x.run.hi, b.maxY)
+      )
+        out.push(x.i);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * OVERPRINT in files laid over each other (file per size): a line drawn identically (ends within
+ * 1 mm) in ≥ 3 files — and in ≥ half of them — that CROSSES a line of its own file which is not
+ * drawn that way (a graded outline: it runs on ≥ 2 mm past the crossing on both sides). wm prints
+ * «WWW.PAFAVERO.PL» in 60 mm outline letters over every size's front; the strokes crossing the
+ * neck curves were walls of every size and spiked the neckline. A shared garment edge (the centre
+ * front every size ends on) meets graded lines in T-junctions, never crosses them; notches
+ * (< 30 mm) are left to the notch test.
+ */
+export function overprintLines(chains: Chain[], fileOf: (i: number) => string): number[] {
+  const files = new Set(chains.map((_, i) => fileOf(i)));
+  if (files.size < 3) return [];
+  const key = (c: Chain) => {
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    const k1 = `${Math.round(a.x)},${Math.round(a.y)}`;
+    const k2 = `${Math.round(b.x)},${Math.round(b.y)}`;
+    return `${k1 < k2 ? k1 : k2}|${k1 < k2 ? k2 : k1}|${Math.round(c.lengthMm)}`;
+  };
+  const byKey = new Map<string, number[]>();
+  chains.forEach((c, i) => {
+    if (c.pts.length < 2 || c.lengthMm < 30) return;
+    const k = key(c);
+    const a = byKey.get(k);
+    if (a) a.push(i);
+    else byKey.set(k, [i]);
+  });
+  const same = new Set<number>();
+  for (const ids of byKey.values()) {
+    const fs = new Set(ids.map(fileOf));
+    if (fs.size >= 3 && fs.size >= 0.5 * files.size) for (const i of ids) same.add(i);
+  }
+  if (!same.size) return [];
+  const grid = new SegGrid(8);
+  chains.forEach((c, i) => {
+    if (!same.has(i) && c.pts.length >= 2) grid.addPolyline(i, c.pts);
+  });
+  const out: number[] = [];
+  for (const i of same) {
+    const c = chains[i];
+    const f = fileOf(i);
+    let crossed = false;
+    for (let k = 0; k + 1 < c.pts.length && !crossed; k++) {
+      const a = c.pts[k];
+      const b = c.pts[k + 1];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      grid.near(mid, dist(a, b) / 2 + 1, (o, si) => {
+        if (crossed || fileOf(o) !== f) return;
+        const q = chains[o].pts;
+        const x = segCross(a, b, q[si], q[si + 1]);
+        if (!x) return;
+        // both lines run on past the crossing (an X, not a T)
+        const run = (pts: PtMm[], s: number, t: number) => {
+          const L = dist(pts[s], pts[s + 1]);
+          let before = t * L;
+          let after = (1 - t) * L;
+          for (let j = s; j > 0 && before < 2; j--) before += dist(pts[j - 1], pts[j]);
+          for (let j = s + 2; j < pts.length && after < 2; j++) after += dist(pts[j - 1], pts[j]);
+          return before >= 2 && after >= 2;
+        };
+        if (run(c.pts, k, x.t) && run(q, si, x.u)) crossed = true;
+      });
+    }
+    if (crossed) out.push(i);
+  }
+  return out;
+}
+
+function segCross(a: PtMm, b: PtMm, c: PtMm, d: PtMm) {
+  const rx = b.x - a.x;
+  const ry = b.y - a.y;
+  const sx = d.x - c.x;
+  const sy = d.y - c.y;
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const qx = c.x - a.x;
+  const qy = c.y - a.y;
+  const t = (qx * sy - qy * sx) / den;
+  const u = (qx * ry - qy * rx) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { t, u };
+}
+
 /** Chain ids that are page margin lines (pieces/ keeps them out of rescued walls). */
 export function pageMarginIds(chains: Chain[], poses: PagePose[]): Set<number> {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
+  for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
+  for (const i of backgroundGrid(chains)) out[i] = out[i] ?? 'background grid';
   const ids = new Set<number>();
   out.forEach((w, i) => w && ids.add(chains[i].id));
   return ids;
