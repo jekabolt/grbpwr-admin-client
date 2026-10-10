@@ -113,8 +113,12 @@ import {
   type PieceCloth,
 } from '../../src/components/managers/tech-card/components/piece-cloth';
 import {
+  AUTO_KINDS,
+  autoKindOf,
+  autoPicks,
   defaultPicks,
   orderClosure,
+  type StepPick,
 } from '../../src/components/managers/tech-card/components/assembly-skeleton-ticks';
 import {
   mapTechCardToForm,
@@ -690,6 +694,7 @@ export async function runCard(input: CardInput) {
     //    rowFromStep, the form through techCardSchema, the order through assemblySweep —
     //    appended after the technologist's steps (the default mode) and as a replace.
     const ctx = { machines: park?.machines ?? [], presses: park?.presses ?? [] };
+    let autoPicked: StepPick[] = [];
     const ticks = defaultTicks(steps);
     const batch = steps.filter((_, i) => ticks[i]);
     // and the naive batch (every step ≥ accept) — what «tick everything sure» would give
@@ -741,6 +746,29 @@ export async function runCard(input: CardInput) {
         deciding: closure.openDecisions.length,
         proposalRelease: relAll.slice(0, 2).map((v) => namesIn(v.message, nameOfPiece)),
       };
+      // 07 §5: AUTO mode — every step ticked (the panel's autoPicks), each open choice marked.
+      // Gate: wherever the whole proposal reaches one garment, the auto batch does too.
+      const auto = autoPicks(steps);
+      const autoBatch = steps
+        .filter((_, i) => auto[i].accepted)
+        .map((s) => asA(s.inputs, s.outputUnitKey, s.outputUnitName));
+      const autoSweep = assemblySweep(sweepPieces, autoBatch);
+      const autoHard = autoSweep.violations.filter((v) => v.rule !== 4);
+      const autoRel = assemblyReleaseCheck(sweepPieces, autoBatch, autoSweep);
+      const guesses = steps.flatMap((s, i) => (auto[i].auto && !isDerived(s) ? [i] : []));
+      const byKind: Record<string, number> = {};
+      for (const i of guesses)
+        byKind[autoKindOf(steps[i])] = (byKind[autoKindOf(steps[i])] ?? 0) + 1;
+      out.auto = {
+        picked: steps.filter((s, i) => auto[i].accepted && !isDerived(s)).length,
+        unpicked: steps.filter((s, i) => !auto[i].accepted && !isDerived(s)).length,
+        guesses: guesses.length,
+        byKind,
+        hard: autoHard.length,
+        reachOne: steps.length > 0 && autoHard.length === 0 && autoRel.length === 0,
+        release: autoRel.slice(0, 2).map((v) => namesIn(v.message, nameOfPiece)),
+      };
+      autoPicked = auto;
     }
     // the technologist's own order, for reference (is the card itself clean?)
     {
@@ -782,7 +810,10 @@ export async function runCard(input: CardInput) {
 
     // 5. the technologist's truth (cards that already carry units)
     const cmp = compareTruth(steps, existingOps, pieceKeys, nameOfPiece);
-    if (cmp) out.compare = cmp;
+    if (cmp) {
+      out.compare = cmp;
+      cmp.decisions = decisionStats(steps, autoPicked, existingOps, pieceKeys);
+    }
 
     // 5a. the technologist's tree as a HOUSE-STYLE example in the wire shape of
     // SuggestAssemblySkeletonRequest.examples (names, not keys): parts are piece names or the names of
@@ -1291,6 +1322,63 @@ function compareTruth(
   return out.compare;
 }
 
+/**
+ * 07 §5.2: per kind of auto-picked step (autoKindOf — the panel's own grouping), how often the
+ * engine's default reading IS the technologist's join: by inputs (`hit`), by one of the readings
+ * beside it (`alt`), by contents (`contents`); `notJoin` counts steps that join nothing (closures,
+ * processing) and cannot be checked against joins.
+ */
+function decisionStats(
+  steps: readonly SkeletonStep[],
+  picks: readonly StepPick[],
+  existingOps: NonNullable<TechCardFormData['operations']>,
+  pieceKeys: Set<string>,
+): Record<string, { n: number; hit: number; alt: number; contents: number; notJoin: number }> {
+  const truth = partitions(
+    existingOps
+      .filter((o) => (o.outputUnitKey ?? '').trim())
+      .map((o) => ({
+        name: (o.outputUnitKey ?? '').trim(),
+        inputs: (o.inputKeys ?? []).filter(Boolean),
+      })),
+    pieceKeys,
+  );
+  const keys = new Set(truth.map((t) => t.key));
+  const leaves = new Set(truth.map((t) => t.leaves));
+  // Our units' pieces, so an input that is a unit reads as what it holds.
+  const held = new Map<string, string[]>();
+  for (const s of steps)
+    if (s.outputUnitKey)
+      held.set(
+        s.outputUnitKey,
+        s.inputs.flatMap((k) => (pieceKeys.has(k) ? [k] : held.get(k) ?? [`?${k}`])),
+      );
+  const parts = (inputs: readonly string[]) =>
+    inputs.map((k) => (pieceKeys.has(k) ? [k] : held.get(k) ?? [`?${k}`]));
+  const keyOf = (inputs: readonly string[]) =>
+    parts(inputs)
+      .map((p) => [...p].sort().join('+'))
+      .sort()
+      .join(' | ');
+  const leavesOf = (inputs: readonly string[]) => parts(inputs).flat().sort().join('+');
+  const out: ReturnType<typeof decisionStats> = {};
+  steps.forEach((s, i) => {
+    if (!picks[i]?.auto || isDerived(s)) return;
+    const k = autoKindOf(s);
+    const x = (out[k] ??= { n: 0, hit: 0, alt: 0, contents: 0, notJoin: 0 });
+    x.n++;
+    if (!s.outputUnitKey) {
+      x.notJoin++;
+      return;
+    }
+    if (keys.has(keyOf(s.inputs))) x.hit++;
+    else if ((s.alternatives ?? []).some((a) => keys.has(keyOf(a.inputs)))) x.alt++;
+    if (leaves.has(leavesOf(s.inputs))) x.contents++;
+  });
+  // AUTO_KINDS order, so every card's JSON lists the kinds alike.
+  return Object.fromEntries(AUTO_KINDS.filter((k) => out[k]).map((k) => [k, out[k]]));
+}
+
 // ── a corpus DXF as a card (no prod card behind it): one piece per block identity ──────────────
 
 export async function synthCard(
@@ -1362,3 +1450,5 @@ export async function synthCard(
 }
 
 export { skeletonCategoryOf };
+/** The auto-picked kinds in the panel's order, for the summary's table (prod-run.mjs). */
+export { AUTO_KINDS };

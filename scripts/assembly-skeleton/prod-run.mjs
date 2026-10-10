@@ -245,6 +245,7 @@ for (const input of inputs) {
       (r.ticks
         ? `\n  ticks ${JSON.stringify(r.ticks)}; category ${JSON.stringify(r.categoryRead)}`
         : '') +
+      (r.auto ? `\n  auto ${JSON.stringify(r.auto)}` : '') +
       (r.append?.length
         ? `\n  APPEND ${JSON.stringify(r.append.map(({ stepList, ...x }) => x))}`
         : '') +
@@ -292,7 +293,8 @@ function aiLine(v) {
     cost + (v.cached ? ' cached' : ''),
   ].join(' · ');
 }
-const AI_SETS = {
+/** The bench's card sets (07-ENGINE-QUALITY §1): rules are made on TRAIN, TEST is looked at once. */
+const SETS = {
   TRAIN: ['SS26-006', 'SS26-007', 'SS26-011', 'SS26-012', 'SS26-016', 'FW26-001'],
   TEST: ['SS26-004', 'SS26-008', 'SS26-009', 'SS26-013', 'SS26-014', 'SS26-015'],
   'SS26-005': ['SS26-005'],
@@ -312,7 +314,7 @@ function aiTotals(rows) {
     unknown += v.cost?.unknownCalls ?? 0;
     violations += (v.c?.sweepAll?.hard ?? 0) + (v.d?.sweepAll?.hard ?? 0);
   }
-  for (const [name, codes] of Object.entries(AI_SETS)) {
+  for (const [name, codes] of Object.entries(SETS)) {
     const t = { a: [0, 0, 0], b: [0, 0, 0], c: [0, 0, 0], d: [0, 0, 0] };
     let joins = 0;
     let n = 0;
@@ -376,13 +378,53 @@ const row = (r) =>
       : '-',
     `${r.proposalMs ?? '-'}`,
     r.errors?.length ?? 0,
+    // last, so the columns before it keep their places for anything that reads this table
+    r.auto
+      ? `${r.auto.reachOne ? 'ok' : 'NO'}/${r.auto.picked}/${r.auto.guesses}${r.auto.unpicked ? ` -${r.auto.unpicked}` : ''}`
+      : '-',
   ].join(' | ');
 const table = [
-  'code | template | matched/pieces | dxf | seams ch/amb/rej | units | steps | to decide | left out | sweep rep/app(cuts) | zod rep/app | tech in/cont/joins | pics/units maxov | map(card) cov/fam/edges ov | seam sheet | AI req | ms | err',
+  'code | template | matched/pieces | dxf | seams ch/amb/rej | units | steps | to decide | left out | sweep rep/app(cuts) | zod rep/app | tech in/cont/joins | pics/units maxov | map(card) cov/fam/edges ov | seam sheet | AI req | ms | err | auto one/picked/guesses',
   ...summary.map(row),
 ].join('\n');
-writeFileSync(resolve(OUT, 'summary.txt'), table + '\n');
-console.log(`\n${table}\n\nout → ${OUT}`);
+
+// ── AUTO mode (07 §5): what the auto-picked guesses are, and how often the default is the
+// technologist's join, per set and kind; the gate — the auto batch reaches one garment wherever
+// the whole proposal does.
+function autoTotals(rows) {
+  const by = new Map(rows.map((r) => [r.code, r]));
+  const lines = [
+    'set | kind | n | default = tech (inputs) | a reading beside it | contents | not a join',
+  ];
+  for (const [name, codes] of [...Object.entries(SETS), ['ALL', rows.map((r) => r.code)]]) {
+    const t = {};
+    for (const c of new Set(codes)) {
+      for (const [k, x] of Object.entries(by.get(c)?.compare?.decisions ?? {})) {
+        const y = (t[k] ??= { n: 0, hit: 0, alt: 0, contents: 0, notJoin: 0 });
+        for (const f of Object.keys(y)) y[f] += x[f];
+      }
+    }
+    const sum = { n: 0, hit: 0, alt: 0, contents: 0, notJoin: 0 };
+    for (const [k, x] of E.AUTO_KINDS.filter((k) => t[k]).map((k) => [k, t[k]])) {
+      lines.push(`${name} | ${k} | ${x.n} | ${x.hit} | ${x.alt} | ${x.contents} | ${x.notJoin}`);
+      for (const f of Object.keys(sum)) sum[f] += x[f];
+    }
+    const joins = sum.n - sum.notJoin;
+    const pct = (x) => (joins ? ` (${Math.round((100 * x) / joins)} %)` : '');
+    lines.push(
+      `${name} | ALL | ${sum.n} | ${sum.hit}${pct(sum.hit)} | ${sum.alt} | ${sum.contents}${pct(sum.contents)} | ${sum.notJoin}`,
+    );
+  }
+  const due = rows.filter((r) => r.ticks?.proposalReachesOne);
+  const miss = due.filter((r) => !r.auto?.reachOne).map((r) => r.code);
+  lines.push(
+    `== AUTO: the auto batch reaches one garment on ${due.length - miss.length}/${due.length} cards where the proposal does${miss.length ? ` — NOT on ${miss.join(', ')}` : ''}; ${rows.reduce((a, r) => a + (r.auto?.guesses ?? 0), 0)} auto-picked guesses`,
+  );
+  return { text: lines.join('\n'), ok: miss.length === 0 };
+}
+const autoT = autoTotals(summary);
+writeFileSync(resolve(OUT, 'summary.txt'), `${table}\n\n${autoT.text}\n`);
+console.log(`\n${table}\n\n${autoT.text}\n\nout → ${OUT}`);
 if (AI_DUMP) {
   console.log(
     `\nAI dump → ${AI_DUMP}\nRPC SuggestAssemblySkeleton: ${aiRoute ?? '(no request built)'}`,
