@@ -9,7 +9,8 @@
 //                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm) or by
 //                   a 10 mm tab over 10 % of it, or a rank on its neighbour's line along 20 % (a
 //                   1.5 mm inset is the documented residual)
-//   mixed-solve     D4: a mixed sheet's uncovered graded piece solved with the encoding's n
+//   mixed-solve     D4: a mixed sheet's uncovered graded piece solved with the encoding's n (as
+//                   common lines, and as orphans — H1c-5)
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
@@ -183,7 +184,7 @@ function mixed(): FixtureResult {
  * 5 sizes → nothing proven, it stays refused as before ('sizes-not-distinguished').
  */
 function mixedSolve(): FixtureResult {
-  const one = (nb: number) => {
+  const one = (nb: number, asOrphans = false) => {
     const a = gradedPiece(0, 0, 5, (s) => 2 + s);
     const b = gradedPiece(600, 0, nb, () => 0);
     const sheet = sheetOf([...a.draws, ...b.draws]);
@@ -197,8 +198,11 @@ function mixedSolve(): FixtureResult {
     const classes = set0.classes
       .map((c) => ({ ...c, chains: c.chains.filter((id) => !black.has(id)) }))
       .filter((c) => c.chains.length);
-    classes.push({ id: Math.max(...classes.map((c) => c.id)) + 1, role: 'common', sizeLabel: null, chains: [...black], totalLengthMm: 0, evidence: [], confidence: 0.6 });
-    const set = { ...set0, classes, orphans: set0.orphans.filter((id) => !black.has(id)) };
+    // H1c-5: or as orphans (F3 put them in no class)
+    if (!asOrphans)
+      classes.push({ id: Math.max(...classes.map((c) => c.id)) + 1, role: 'common', sizeLabel: null, chains: [...black], totalLengthMm: 0, evidence: [], confidence: 0.6 });
+    const orphans = set0.orphans.filter((id) => !black.has(id));
+    const set = { ...set0, classes, orphans: asOrphans ? [...orphans, ...black] : orphans };
     const read = detectSizeRun(sheet, set, [{ id: 'fx', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never]);
     const expected = expectedSizes(read, null, set) ?? undefined;
     const sd: Seed[] = [a.seed, b.seed].map((at, i) => ({ id: i, at, origin: 'click', variant: null }));
@@ -214,7 +218,13 @@ function mixedSolve(): FixtureResult {
   };
   const five = one(5);
   const three = one(3);
+  const orphan5 = one(5, true);
+  const orphan3 = one(3, true);
   const ok =
+    !orphan5.wrong.length &&
+    !orphan3.wrong.length &&
+    orphan5.bOut.every((c) => c.outcome === 'closed') &&
+    orphan3.bOut.every((c) => c.outcome === 'refused') &&
     five.read.sizes.length === 5 &&
     !five.wrong.length &&
     !three.wrong.length &&
@@ -224,7 +234,7 @@ function mixedSolve(): FixtureResult {
   return {
     name: 'mixed-solve',
     ok,
-    why: `encoding ${five.read.encoding} n=${five.read.sizes.length}: black piece with 5 lines ${tally(five.families)}; with 3 lines ${tally(three.families)}${[...five.wrong, ...three.wrong].length ? ` wrong ${[...five.wrong, ...three.wrong].join(', ')}` : ''}`,
+    why: `encoding ${five.read.encoding} n=${five.read.sizes.length}: black piece with 5 lines ${tally(five.families)}; with 3 lines ${tally(three.families)}; drawn as orphans (H1c-5) ${tally(orphan5.families)} / ${tally(orphan3.families)}${[...five.wrong, ...three.wrong, ...orphan5.wrong, ...orphan3.wrong].length ? ` wrong ${[...five.wrong, ...three.wrong, ...orphan5.wrong, ...orphan3.wrong].join(', ')}` : ''}`,
   };
 }
 

@@ -296,8 +296,24 @@ export function gradeHook(
     // size class covers is a graded piece nobody encoded (a mixed sheet) — refused
     const covered = new Set(model.graded);
     const ids = model.common.filter((id) => !covered.has(id) && !blocked.has(id));
-    const wide = guardedSeeds(sheet, set, seeds, ids, cell, mixedGuard(model.n));
-    const pairs = guardedSeeds(sheet, set, seeds, ids, cell, PAIR_GUARD);
+    // H1c-5: an orphan (a line F3 put in no class) is in `graded` only for F4's local nesting
+    // fallback — no class says which size it is. Unless the wall model ranked it (continuity,
+    // labels, bands), it is as uncovered as a common line: a nest of orphans is guarded too. A
+    // second look, never instead of the first: orphans drawn as walls also cut regions smaller
+    // (polupalto A's seed 3 lost its nest that way), so they only ADD guarded seeds
+    const ranked = new Set(model.byRank.flat());
+    const orphans = set.orphans.filter((id) => !ranked.has(id) && !blocked.has(id));
+    const withOrphans = orphans.length ? [...new Set([...ids, ...orphans])] : null;
+    const wide = [
+      ...guardedSeeds(sheet, set, seeds, ids, cell, mixedGuard(model.n)),
+      ...(withOrphans
+        ? guardedSeeds(sheet, set, seeds, withOrphans, cell, mixedGuard(model.n))
+        : []),
+    ];
+    const pairs = [
+      ...guardedSeeds(sheet, set, seeds, ids, cell, PAIR_GUARD),
+      ...(withOrphans ? guardedSeeds(sheet, set, seeds, withOrphans, cell, PAIR_GUARD) : []),
+    ];
     const g = seeds.map((s) => s.id).filter((id) => wide.includes(id) || pairs.includes(id));
     if (!g.length) return null;
     const held = refuseSeeds(
