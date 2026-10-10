@@ -18,6 +18,7 @@ import type {
   RoundTrip,
 } from '../types';
 import { PATIMPORT } from '../types';
+import { SPIKE_GATE_TURN_DEG, SPIKE_GATE_WIDTH_MM, findSpikes } from '../spikes';
 import {
   SegmentIndex,
   applyAffine,
@@ -241,7 +242,26 @@ export function g3g4(
   const notes4: string[] = [];
   let excusedMm = 0;
   let excusedBlocks = 0;
+  let spiked = 0;
   for (const b of ctx.blocks) {
+    // a written ring that folds back on itself (a zero-width out-and-back spike) is a needle on
+    // the line, whatever the walls say — checked on both written lines, walls or not
+    // the RAW written rings (the card parser drops a collinear needle tip, the file keeps it)
+    for (const lay of [LAYERS.cut, LAYERS.seam]) {
+      const rings = onLayer(rawOf(ctx, b.block), lay)
+        .filter((e) => (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') && e.closed)
+        .map((e) => e.pts);
+      const parsed = ctx.contours.get(b.block)?.get(lay);
+      if (parsed) rings.push(parsed);
+      const sp = rings.flatMap((r) => findSpikes(r));
+      if (!sp.length) continue;
+      spiked++;
+      if (!hd.includes(b.block)) hd.push(b.block);
+      const s0 = sp[0];
+      notes4.push(
+        `${b.block}: ${sp.length} zero-width spike(s) on layer ${lay} (at ${s0.at.x.toFixed(1)}, ${s0.at.y.toFixed(1)}: turns ${s0.turnDeg.toFixed(1)}°, ${s0.widthMm.toFixed(3)} mm wide)`,
+      );
+    }
     const walls = ctx.expect.wallsByBlock[b.block];
     const used = ctx.expect.coverageWallsByBlock?.[b.block] ?? walls;
     const { line, layer } = linesFor(ctx, b);
@@ -251,7 +271,7 @@ export function g3g4(
     }
     if (!line) {
       hard.push(b.block);
-      hd.push(b.block);
+      if (!hd.includes(b.block)) hd.push(b.block);
       notes3.push(`${b.block}: no written line on layer ${layer}`);
       continue;
     }
@@ -330,7 +350,7 @@ export function g3g4(
     worstP95 = Math.max(worstP95, p95);
     worstMax = Math.max(worstMax, mx);
     if (!(p95 <= p95Max) || !(mx <= PATIMPORT.hausdorffMaxMm)) {
-      hd.push(b.block);
+      if (!hd.includes(b.block)) hd.push(b.block);
       notes4.push(
         `${b.block}: p95 ${p95.toFixed(3)} max ${Number.isFinite(mx) ? mx.toFixed(3) : '∞'} mm`,
       );
@@ -358,8 +378,8 @@ export function g3g4(
     unverified.length && !hd.length ? unverified : hd,
     hd.length ? 'block' : unverified.length ? 'warn' : 'block',
     notes4.join('; ') || `p95 ≤ ${p95Max} mm, max ≤ ${PATIMPORT.hausdorffMaxMm} mm`,
-    `p95 ${fmt(worstP95)} / max ${fmt(worstMax)}`,
-    `p95 ≤ ${p95Max}; max ≤ ${PATIMPORT.hausdorffMaxMm}`,
+    `p95 ${fmt(worstP95)} / max ${fmt(worstMax)}${spiked ? ` / ${spiked} spiked line(s)` : ''}`,
+    `p95 ≤ ${p95Max}; max ≤ ${PATIMPORT.hausdorffMaxMm}; no line folding back ≥ ${SPIKE_GATE_TURN_DEG}° within ${SPIKE_GATE_WIDTH_MM} mm`,
   );
   return [c3, c4];
 }
