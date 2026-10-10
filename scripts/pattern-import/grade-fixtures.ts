@@ -9,6 +9,7 @@
 //                   and so is a contour wrong by the same strip in every rank (10 mm, 2.5 mm) or by
 //                   a 10 mm tab over 10 % of it, or a rank on its neighbour's line along 20 % (a
 //                   1.5 mm inset is the documented residual)
+//   mixed-solve     D4: a mixed sheet's uncovered graded piece solved with the encoding's n
 //   mixed-guard     the mixed-sheet guard: an unencoded two-size piece and a 40 mm tab nest are seen
 //                   by the pair rule (the wide rule misses them); a uniform cut + sew pair is not
 //   short-zone      sizes differ only along a 40 mm tab (below the guard's 150 mm / 20 % heuristic)
@@ -172,6 +173,58 @@ function mixed(): FixtureResult {
     // and the unencoded piece never closes as some size
     ok: !wrong.length && !families.find((f) => f.seed === 1)?.candidates.some((c) => c.outcome === 'closed'),
     why: `encoding ${r.encoding} n=${r.sizes.length}, size map: ${sure.size} sure, ${guessed} guessed (operator confirms); ${tally(families)}${wrong.length ? ` wrong ${wrong.join(', ')}` : ''}`,
+  };
+}
+
+/**
+ * D4: a mixed sheet whose encoding states n — a colour-encoded piece beside a piece drawn in black
+ * that no size class covers (the black class taken out of the run, as on polupalto). The black
+ * piece is solved with the encoding's n: n nested lines → every rank proven and right; 3 lines for
+ * 5 sizes → nothing proven, it stays refused as before ('sizes-not-distinguished').
+ */
+function mixedSolve(): FixtureResult {
+  const one = (nb: number) => {
+    const a = gradedPiece(0, 0, 5, (s) => 2 + s);
+    const b = gradedPiece(600, 0, nb, () => 0);
+    const sheet = sheetOf([...a.draws, ...b.draws]);
+    const { set: set0 } = buildChainsDetailed(
+      sheet,
+      { joinGapMm: PATIMPORT.joinGapMm, joinAngleDeg: PATIMPORT.joinAngleDeg, joinLateralMm: PATIMPORT.joinLateralMm },
+      { extraTexts: [] },
+    );
+    // the black lines are not a size: every black chain to one common class
+    const black = new Set(set0.chains.filter((c) => sheet.styles[c.style]?.strokeRgb?.every((v) => v === 0)).map((c) => c.id));
+    const classes = set0.classes
+      .map((c) => ({ ...c, chains: c.chains.filter((id) => !black.has(id)) }))
+      .filter((c) => c.chains.length);
+    classes.push({ id: Math.max(...classes.map((c) => c.id)) + 1, role: 'common', sizeLabel: null, chains: [...black], totalLengthMm: 0, evidence: [], confidence: 0.6 });
+    const set = { ...set0, classes, orphans: set0.orphans.filter((id) => !black.has(id)) };
+    const read = detectSizeRun(sheet, set, [{ id: 'fx', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never]);
+    const expected = expectedSizes(read, null, set) ?? undefined;
+    const sd: Seed[] = [a.seed, b.seed].map((at, i) => ({ id: i, at, origin: 'click', variant: null }));
+    const { families } = fillPiecesDetailed(sheet, set, read, sd, {
+      cellMm: PATIMPORT.fillCellMm,
+      snapMm: PATIMPORT.snapMm,
+      variant: null,
+      ...(expected ? { expectedSizes: expected } : {}),
+    });
+    const wrong = wrongOf(families, [a.truth, b.truth]);
+    const bOut = families.find((f) => f.seed === 1)?.candidates ?? [];
+    return { families, wrong, read, bOut };
+  };
+  const five = one(5);
+  const three = one(3);
+  const ok =
+    five.read.sizes.length === 5 &&
+    !five.wrong.length &&
+    !three.wrong.length &&
+    five.bOut.length === 5 &&
+    five.bOut.every((c) => c.outcome === 'closed') &&
+    three.bOut.every((c) => c.outcome === 'refused' && c.gradeRefusal === 'sizes-not-distinguished');
+  return {
+    name: 'mixed-solve',
+    ok,
+    why: `encoding ${five.read.encoding} n=${five.read.sizes.length}: black piece with 5 lines ${tally(five.families)}; with 3 lines ${tally(three.families)}${[...five.wrong, ...three.wrong].length ? ` wrong ${[...five.wrong, ...three.wrong].join(', ')}` : ''}`,
   };
 }
 
@@ -489,7 +542,7 @@ function fragmentIds(): FixtureResult {
 }
 
 export function runFixtures(benchOverMaxFree?: () => { name: string; wrong: string[]; note: string }[]): FixtureResult[] {
-  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), countRequired(), fragmentIds(), mixedNarrow(), regionCheck()];
+  const out: FixtureResult[] = [missingCount(), mixed(), shortZone(), gridHatch(), equalArea(), countRequired(), fragmentIds(), mixedNarrow(), regionCheck(), mixedSolve()];
   if (benchOverMaxFree) {
     const keep = GRADE_TUNING.maxFree;
     try {

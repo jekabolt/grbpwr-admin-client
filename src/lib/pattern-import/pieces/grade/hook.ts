@@ -56,6 +56,23 @@ export type GradeHook = {
   /** seeds the hook protects (refused or proven) */
   guarded: SeedId[];
   ambiguities: ChainAmbiguity[];
+  /**
+   * D4 (mixed sheet): the guarded seeds solved as an unencoded sheet with the encoding's n — F4
+   * fills them again on the solver's walls only (`fillPiecesDetailed`'s sub-fill) and their proven
+   * ranks replace the refusals `finish` gave them; the rest stay refused.
+   */
+  sub?: { seeds: SeedId[]; hook: GradeHook }[];
+};
+
+/** The wall model a sub-fill runs on: every wall comes from the solver (H1 single mode). */
+export const SOLVER_MODEL: WallModel = {
+  mode: 'single',
+  n: 1,
+  common: [],
+  byRank: [[]],
+  emptyRanks: [],
+  graded: [],
+  fileOfRank: [null],
 };
 
 /**
@@ -283,7 +300,7 @@ export function gradeHook(
     const pairs = guardedSeeds(sheet, set, seeds, ids, cell, PAIR_GUARD);
     const g = seeds.map((s) => s.id).filter((id) => wide.includes(id) || pairs.includes(id));
     if (!g.length) return null;
-    return refuseSeeds(
+    const held = refuseSeeds(
       g,
       model.n,
       'sizes-not-distinguished',
@@ -291,6 +308,26 @@ export function gradeHook(
       null,
       [],
     );
+    if (mode !== 'solve') return held;
+    // D4: the encoding states n — the guarded seeds go through the solver with that n, under the
+    // same proof obligations as an unencoded sheet (band count = n, orientation, region and D3
+    // bounds); what it proves is filled on its walls, the rest stays refused
+    const gs = new Set(g);
+    const sub = gradeHook(
+      sheet,
+      set,
+      run,
+      seeds.filter((s) => gs.has(s.id)),
+      SOLVER_MODEL,
+      { ...opts, expectedSizes: { n: model.n, from: 'source' } },
+      progress,
+      exclude,
+    );
+    // nothing proven (polupalto: the uncovered stretches show 2 lines side by side, the encoding
+    // says 6) — the seeds keep the mixed-sheet refusal, not a size-count question the operator
+    // cannot answer on an encoded sheet
+    if (!sub?.result?.seeds.some((x) => x.accepted && x.rankOk.some(Boolean))) return held;
+    return { ...held, sub: [{ seeds: g, hook: sub }] };
   }
 
   if (exp && exp.n <= 1) return null; // one size, and someone who knows says so
