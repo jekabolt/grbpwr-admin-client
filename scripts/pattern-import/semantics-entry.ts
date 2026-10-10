@@ -320,6 +320,7 @@ async function gate(
   wallsOf: (id: string, rank: number) => PtMm[][] | undefined,
   src = SOURCE,
   dialect: WriteJob['dialect'] = 'r2000',
+  openFolds?: string[],
 ) {
   const sizes: ManifestSize[] = map.entries.flatMap((e) =>
     e.card
@@ -349,7 +350,13 @@ async function gate(
       ...map.unmapped.map((c) => c.token),
     ].map((t) => t.toLowerCase()),
   );
-  return writeAndGate(job, { rules, sizeTokens: tokens, wallsOf, now: () => new Date(0) });
+  return writeAndGate(job, {
+    rules,
+    sizeTokens: tokens,
+    wallsOf,
+    now: () => new Date(0),
+    ...(openFolds ? { openFolds } : {}),
+  });
 }
 
 const CUT10: AllowanceDecision = {
@@ -782,14 +789,90 @@ export async function main(): Promise<number> {
       [{ pts: grainLine(100, 80, 420), closed: false, role: 'grain' }],
       ['BACK', 'CUT 1 ON FOLD'],
     );
-    const inp = input(F, CUT10);
+    const inp0 = input(F, CUT10);
+    // E1a (D3): a label «CUT 1 ON FOLD» says nothing about WHICH edge — the piece is asked, with
+    // the straight edge on x = 0 (along the grain) as the suggestion; the operator's pick unfolds
+    const d0 = buildPieceSpecsDetailed(inp0);
+    const ask = d0.output.folds?.[0];
+    const sug = ask && ask.suggested != null ? ask.edges[ask.suggested] : null;
+    ck(
+      !d0.output.pieces.length &&
+        d0.output.blocked[0]?.reason === 'fold-question' &&
+        !!sug &&
+        Math.abs(sug.a.x) < 1e-6 &&
+        Math.abs(sug.b.x) < 1e-6,
+      'label-only «CUT 1 ON FOLD» → fold question, suggested edge x = 0',
+      JSON.stringify({ blocked: d0.output.blocked, sug }),
+    );
+    const inp: typeof inp0 = { ...inp0, operatorFold: sug ? { 1: { a: sug.a, b: sug.b } } : {} };
     const d = buildPieceSpecsDetailed(inp);
     const p = d.output.pieces[0];
     ck(
       !!p && p.unfoldedFold && p.identity === 'BP',
-      'BP unfolded from «CUT 1 ON FOLD» + straight fold edge',
+      'BP unfolded across the picked edge',
       `${p?.identity} unfolded=${p?.unfoldedFold} ${JSON.stringify(d.output.blocked)}`,
     );
+    // a fold word printed ALONG the edge (rotated 90°, 6 mm off it) is bound: unfolds by itself
+    {
+      const G = fx();
+      addFamily(
+        G,
+        1,
+        backHalf,
+        0,
+        [{ pts: grainLine(100, 80, 420), closed: false, role: 'grain' }],
+        ['BACK'],
+      );
+      const id = G.text('PLACE ON FOLD', { x: 4, y: 300 });
+      G.texts[id] = {
+        ...G.texts[id],
+        rotationDeg: 90,
+        bbox: { minX: 4, minY: 300, maxX: 9, maxY: 360 },
+      };
+      for (const c of G.families[0].candidates) c.textsInside.push(id);
+      const db = buildPieceSpecsDetailed(input(G, CUT10));
+      const pb = db.output.pieces[0];
+      ck(
+        !!pb && pb.unfoldedFold && pb.sizes.every((z) => !!z.fold && Math.abs(z.fold.a.x) < 1e-6),
+        'fold word along the x = 0 edge → unfolded without a question',
+        `${pb?.unfoldedFold} ${JSON.stringify(db.output.blocked)}`,
+      );
+    }
+    // negative: a fold word that labels ANOTHER line (palto 22) never unfolds by itself
+    {
+      const G = fx();
+      addFamily(
+        G,
+        1,
+        backHalf,
+        0,
+        [
+          { pts: grainLine(100, 80, 420), closed: false, role: 'grain' },
+          {
+            pts: [
+              { x: 160, y: 0 },
+              { x: 160, y: 300 },
+            ],
+            closed: false,
+            role: 'internal',
+          },
+        ],
+        ['BACK'],
+      );
+      const id = G.text('facing fold', { x: 150, y: 120 });
+      G.texts[id] = {
+        ...G.texts[id],
+        rotationDeg: 90,
+        bbox: { minX: 150, minY: 120, maxX: 155, maxY: 170 },
+      };
+      for (const c of G.families[0].candidates) c.textsInside.push(id);
+      const dn = buildPieceSpecsDetailed(input(G, CUT10));
+      ck(
+        !dn.output.pieces.some((x) => x.unfoldedFold),
+        'fold word labelling an internal line → not unfolded',
+        `${JSON.stringify(dn.output.blocked)} ${dn.output.pieces.map((x) => x.unfoldedFold)}`,
+      );
+    }
     for (const s of p?.sizes ?? []) {
       const half = backHalf(SCALE3[s.rank]);
       const err = unfoldAreaError(half, s.cut);
@@ -811,8 +894,30 @@ export async function main(): Promise<number> {
       'gate passes (fold ends on the cut line, written as ≥3-vertex L8)',
       gateLine(g.report),
     );
+    // negative controls (E1a): a fold line that is not the mirror axis, and an open fold question
+    const skew = d.output.pieces.map((x) => ({
+      ...x,
+      sizes: x.sizes.map((z) => ({
+        ...z,
+        fold: z.fold && { ...z.fold, b: { x: z.fold.b.x + 40, y: z.fold.b.y } },
+      })),
+    }));
+    const gs = await gate(skew, inp.sizeMap, d.wallsOf);
+    ck(
+      failing(gs.report).includes('G6-offset'),
+      'negative control: fold line off the mirror axis → G6 blocks',
+      checkOf(gs.report, 'G6-offset')?.note.slice(0, 120) ?? '',
+    );
+    const go = await gate(d.output.pieces, inp.sizeMap, d.wallsOf, SOURCE, 'r2000', [
+      'piece 7: «fold» with no edge',
+    ]);
+    ck(
+      failing(go.report).includes('G6-offset'),
+      'negative control: an open fold question → G6 blocks the file',
+      checkOf(go.report, 'G6-offset')?.note.slice(0, 120) ?? '',
+    );
     // b) seam meaning + fold: unfold FIRST, then +10 (fold edge gets 0 allowance)
-    const d2 = buildPieceSpecsDetailed(input(F, SEAM10));
+    const d2 = buildPieceSpecsDetailed({ ...input(F, SEAM10), operatorFold: inp.operatorFold });
     const p2 = d2.output.pieces[0];
     const s2 = p2.sizes[1];
     const seamW = bboxOf(s2.seam!);
