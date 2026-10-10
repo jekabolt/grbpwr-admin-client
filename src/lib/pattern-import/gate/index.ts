@@ -1,5 +1,5 @@
-// gate/ — the export self-check (08-CONTRACT §5). `runGate(dxfText, expect)` = G1–G13 + G15 against
-// the card's own parser, the gate's tag reader, the source walls and the manifest.
+// gate/ — the export self-check (08-CONTRACT §5). `runGate(dxfText, expect)` = G1–G13 + G15–G18
+// against the card's own parser, the gate's tag reader, the source walls and the manifest.
 //
 //   createRunGate(rules)   → RunGateFn   (card block-name rules injected: see rules.ts)
 //   roundTrip(text)        → card parser view (G1)
@@ -41,6 +41,8 @@ import {
   g12,
   g13,
   g15,
+  g16,
+  g18,
   g2From,
   g3g4,
   g5,
@@ -57,6 +59,7 @@ import type { CardBlockRules } from './rules';
 export { roundTrip } from './roundtrip';
 export type { CardBlockRules } from './rules';
 export { readRawDxf } from './reader';
+export { glyphProblem, glyphStats } from './checks';
 export { identityGrammarProblem, identityProblem } from '../manifest/identity';
 
 export const passedOf = (checks: readonly GateCheck[]) =>
@@ -202,6 +205,8 @@ export function createRunGate(
       g12(ctx),
       g13(expect.manifest, false),
       derived.check,
+      g16(ctx),
+      g18(ctx),
     ];
     return {
       passed: passedOf(checks),

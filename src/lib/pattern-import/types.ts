@@ -747,6 +747,19 @@ export type NotchFeature = FeatureBase & {
   depthMm: Mm;
 };
 export type DrillFeature = FeatureBase & { kind: 'drill'; at: PtMm };
+/**
+ * What made a grainline (G18, A8): `class` a grain-classed line, `arrowheads` short chains at an
+ * end, `word` a grain word beside it, `dxf-layer` the source DXF's own grain layer, `operator` two
+ * clicks, `borrowed` taken from another size of the piece. Recorded so the gate and the manifest
+ * can say which evidence a grain stands on.
+ */
+export type GrainEvidenceKind =
+  | 'class'
+  | 'arrowheads'
+  | 'word'
+  | 'dxf-layer'
+  | 'operator'
+  | 'borrowed';
 export type GrainFeature = Omit<FeatureBase, 'origin'> & {
   kind: 'grain';
   /**
@@ -757,6 +770,8 @@ export type GrainFeature = Omit<FeatureBase, 'origin'> & {
   a: PtMm;
   b: PtMm;
   angleDeg: Deg;
+  /** G18: the evidence kinds behind it; absent on a grain made before the field existed. */
+  evidence?: GrainEvidenceKind[];
 };
 export type FoldFeature = FeatureBase & {
   kind: 'fold';
@@ -1268,6 +1283,8 @@ export type ManifestBlock = {
   drills: number;
   internal: number;
   hasSeam: boolean;
+  /** G18 (A8): where the block's grain came from — absent on a manifest written before it. */
+  grain?: { origin: GrainFeature['origin']; evidence: GrainEvidenceKind[] };
   /**
    * F14f (Codex R2): the cut ring, coarsened — what binds this entry to the drawn contour
    * (manifest/contour-sig.ts). Absent in a manifest written before F14f: the card then treats the
@@ -1312,7 +1329,12 @@ export type GateCheckId =
    * walls at both ends and stays short, per edge and per piece. G3/G4 measure against the drawn
    * walls only; the stretch of the written line on an edge that passes here is left to this check.
    */
-  | 'G15-derived';
+  | 'G15-derived'
+  /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
+  | 'G16-glyphs'
+  /** A8: internal-layer length against the outline length (warn). */
+  /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
+  | 'G18-grain-source';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1904,4 +1926,18 @@ export const PATIMPORT = {
   maxSvgElements: 500_000,
   /** C4: lines of one ASCII DXF (the tag stream is split whole). */
   maxDxfLines: 6_000_000,
+  /**
+   * G16 (A8 safety net): an internal-layer (8) item shorter than this is a "short stroke". Corpus
+   * per block — CLO DXF 0, robe ≤ 26, reef 11, leonie 10, palto 13; the owner's wm M DXF 144–157,
+   * wm ×7 493, r4454 66–76 (curve-drawn "2 ДЕТ." inside the pieces — junk, blocked on purpose).
+   */
+  glyphShortMm: 15,
+  /** G16: this many short strokes in one block blocks it. */
+  glyphMaxShortPerBlock: 40,
+  /** G16: side of the grid cell (absolute, by a stroke's first point) the density is counted in. */
+  glyphCellMm: 60,
+  /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
+  glyphMaxShortPerCell: 10,
+  /** G18: a grain end / line this close to a short internal stroke is "touching" it, mm. */
+  grainStrokeNearMm: 2,
 } as const;
