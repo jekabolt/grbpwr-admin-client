@@ -48,6 +48,8 @@ const MUTATE_CHURN = process.argv.includes('--mutate-pictures-churn');
 const MUTATE_UNDO_MEDIA = process.argv.includes('--mutate-undo-media');
 const MUTATE_DRAFT_PRINT = process.argv.includes('--mutate-draft-print');
 const MUTATE_ROW_WIDE = process.argv.includes('--mutate-suggestion-row-wide');
+const MUTATE_UNDO_REBASE = process.argv.includes('--mutate-undo-rebase');
+const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -135,16 +137,37 @@ if (MUTATE_DRAFT_PRINT)
   });
 // The pre-re-review exemption: any suggestion on a row accepted the WHOLE row as not-a-touch.
 const EXEMPT_FIX = `      const bySuggestion =
-        sugg !== undefined && (ref === undefined || draftPrint({ ...ref, ...sugg }) === print);`;
+        sugg !== undefined && (ref === undefined || draftPrint(withSuggested(ref, sugg)) === print);`;
 const EXEMPT_BROKEN = `      const bySuggestion = sugg !== undefined;`;
-if (MUTATE_ROW_WIDE)
+// The thread recorded as the WHOLE array it ended as (pre-review): a hand link beside it is covered.
+const EXEMPT_THREAD_ARRAY = `      const bySuggestion =
+        sugg !== undefined && (ref === undefined || draftPrint({ ...withSuggested(ref, sugg),
+          ...(sugg.thread.length ? { bomLineKeys: row.bomLineKeys } : {}) }) === print);`;
+// Undo forgives what the draft detector forgives (pre-orchestrator decision): the batch snapshot is
+// rebased onto every row that is still draft.
+const REBASE_FIX = `    suggestedWrites.current.clear();\n`;
+const REBASE_BROKEN = `    suggestedWrites.current.clear();
+    if (batch) {
+      const rows = [...batch.after.rows];
+      for (let i = batch.from; i < batch.from + batch.count; i++)
+        if (next.has(fields[i]?.id ?? '')) rows[i - batch.from] = structuredClone(ops[i]) as never;
+      setHistory({ undo: [...history.current.undo.slice(0, -1), { ...batch, after: { ...batch.after, rows } }], redo: history.current.redo });
+    }
+`;
+if (MUTATE_ROW_WIDE || MUTATE_UNDO_REBASE || MUTATE_THREAD_ARRAY)
   plugins.push({
-    name: 'row-wide-suggestion-mutation',
+    name: 'draft-exemption-mutations',
     setup(b) {
       b.onLoad({ filter: /operations-field\.tsx$/ }, async (args) => {
-        const src = await readFile(args.path, 'utf8');
-        if (!src.includes(EXEMPT_FIX)) throw new Error('row-wide mutation did not find its line');
-        return { contents: src.replace(EXEMPT_FIX, EXEMPT_BROKEN), loader: 'tsx' };
+        let src = await readFile(args.path, 'utf8');
+        const swap = (fix, broken) => {
+          if (!src.includes(fix)) throw new Error('mutation did not find its line');
+          src = src.replace(fix, broken);
+        };
+        if (MUTATE_ROW_WIDE) swap(EXEMPT_FIX, EXEMPT_BROKEN);
+        if (MUTATE_THREAD_ARRAY) swap(EXEMPT_FIX, EXEMPT_THREAD_ARRAY);
+        if (MUTATE_UNDO_REBASE) swap(REBASE_FIX, REBASE_BROKEN);
+        return { contents: src, loader: 'tsx' };
       });
     },
   });
@@ -714,7 +737,7 @@ const U_OWN = [
   });
   await page.waitForSelector('[data-skeleton-undo-refused]', { timeout: 5000 });
   const t = await page.locator('[data-skeleton-undo-refused]').innerText();
-  ck(/applied steps were edited/.test(t), 'undo refused in words after an edit', t);
+  ck(/applied steps changed/.test(t), 'undo refused in words after an edit', t);
   ck((await ops()).length === n, 'the refusal writes nothing');
   ck((await page.locator('[data-skeleton-undo]').count()) === 0, 'no «undo» button any more');
   await shot('u-refused', '[data-skeleton-panel]');
@@ -790,8 +813,10 @@ const U_OWN = [
   await closePanel();
 }
 {
-  // U7 the step editor's suggestion (one sewing thread on the card) is not a human edit: the
-  // opened applied step gets the thread, keeps «draft», and the batch stays undoable.
+  // U7 the step editor's suggestion (one sewing thread on the card) is not a human edit for the
+  // DRAFT mark (a wrong label loses nothing) — but UNDO is strict (orchestrator, 10.10): the batch
+  // is no longer exactly what the apply wrote, so undo goes. Revoking the suggestion (another step
+  // opened) brings the batch back to its snapshot, and undo with it.
   await mount({
     ops: U_OWN,
     bom: [
@@ -812,12 +837,24 @@ const U_OWN = [
   ck(opened >= 2, 'control: the editor suggested the thread on an applied step', `row ${opened}`);
   ck(opened >= 2 && r[opened].draft === true, 'a suggestion does not take the draft mark off');
   ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'strict undo: a suggestion on an applied row takes «undo» away',
+  );
+  await closePanel();
+  await page.click(
+    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
+  );
+  await page.waitForSelector('[data-rail-step="3"]', { timeout: 5000 });
+  await page.click('[data-rail-step="3"]');
+  await page.waitForTimeout(300);
+  await openPanel('header');
+  ck(
     (await page.locator('[data-skeleton-undo]').count()) === 1,
-    'a suggestion does not take «undo» away',
+    'another step opened: the suggestion is revoked, the batch is as applied, «undo» is back',
   );
   await page.click('[data-skeleton-undo]');
   await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
-  ck((await ops()).length === 2, 'undo takes the batch back with its suggestion');
+  ck((await ops()).length === 2, 'and it takes the batch back');
   await closePanel();
 }
 
@@ -879,6 +916,63 @@ const U_OWN = [
     `${r.length} rows, ${r[3]?.operationType}`,
   );
   ck(r[3]?.draft === false, 'the human type change takes the draft mark off');
+  await closePanel();
+}
+
+{
+  // U9 (Codex) the auto thread TH1 is suggested on an applied overlock step; the person links TH2 by
+  // hand — the editor revokes TH1 in the same commit (a thread is linked now). The revocation is a
+  // DELTA (remove TH1), not «the list is [TH2]»: the hand TH2 is an edit — draft off; undo stays gone.
+  await mount({
+    ops: U_OWN,
+    machines: [{ machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK' }],
+    bom: [
+      {
+        lineKey: 'TH1',
+        name: 'overlock thread',
+        section: 'thread',
+        kind: 'TECH_CARD_BOM_KIND_OVERLOCK_THREAD',
+      },
+      {
+        lineKey: 'TH2',
+        name: 'sewing thread',
+        section: 'thread',
+        kind: 'TECH_CARD_BOM_KIND_SEWING_THREAD',
+      },
+    ],
+  });
+  await openPanel('header', 'append');
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  let r = await ops();
+  ck(
+    JSON.stringify(r[2]?.bomLineKeys) === '["TH1"]' && r[2]?.draft === true,
+    'control: TH1 suggested on the opened applied step, draft kept',
+    JSON.stringify(r[2]?.bomLineKeys),
+  );
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'strict undo: gone while the suggestion stands',
+  );
+  await page.evaluate(() => {
+    const f = window.__sk.form();
+    f.setValue('operations.2.bomLineKeys', [...f.getValues('operations.2.bomLineKeys'), 'TH2'], {
+      shouldDirty: true,
+    });
+  });
+  await page.waitForTimeout(400);
+  r = await ops();
+  ck(
+    JSON.stringify(r[2]?.bomLineKeys) === '["TH2"]',
+    'control: the editor revoked TH1 once a thread was linked by hand',
+    JSON.stringify(r[2]?.bomLineKeys),
+  );
+  ck(r[2]?.draft === false, 'a hand thread link takes the draft mark off');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 0,
+    'undo is refused (not offered) — it would delete the hand TH2',
+  );
   await closePanel();
 }
 
@@ -1389,6 +1483,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}`,
 );
 if (bad) process.exitCode = 1;

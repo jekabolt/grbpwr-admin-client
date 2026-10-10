@@ -887,6 +887,22 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
  */
 const draftPrint = (row: Record<string, unknown> | undefined): string => operationRowPrint(row);
 
+/** Дельта подстановки нитки над `bomLineKeys` — ровно то, что делает эффект редактора. */
+type ThreadDelta = { remove?: string; add?: string };
+
+/** Строка, какой её сделала бы ОДНА подстановка поверх `ref`: поля значением, нитка — дельтами. */
+function withSuggested(
+  ref: Record<string, unknown>,
+  sugg: { fields: Record<string, unknown>; thread: ThreadDelta[] },
+): Record<string, unknown> {
+  let keys = [...((ref.bomLineKeys as string[] | undefined) ?? [])];
+  for (const d of sugg.thread) {
+    keys = keys.filter((k) => k !== d.remove && k !== d.add);
+    if (d.add) keys.push(d.add);
+  }
+  return { ...ref, ...sugg.fields, bomLineKeys: keys };
+}
+
 /** What `OperationsField` reports back after an apply request. */
 export type SkeletonApplyResult = {
   nonce: number;
@@ -2452,6 +2468,8 @@ function OperationEditor({
    * истории принимает значение как своё (ревью Codex P2).
    */
   noteSuggested?: (index: number, field: string, value: unknown) => void;
+  // У нитки — ДЕЛЬТА ({ remove?, add? }), а не весь список: ссылку, добавленную рукой рядом
+  // с подставленной, подстановка не «покрывает».
   index: number;
   bomLines: BomLine[];
   pieces: PieceRef[];
@@ -3950,7 +3968,7 @@ function OperationEditor({
       if (ours === threadSuggested && selectedBomKeys.includes(threadSuggested)) return;
       wroteRef.current.thread = threadSuggested;
       const others = selectedBomKeys.filter((k) => k !== ours && k !== threadSuggested);
-      noteSuggested?.(index, 'bomLineKeys', [...others, threadSuggested]);
+      noteSuggested?.(index, 'bomLineKeys', { remove: ours, add: threadSuggested });
       setValue(`operations.${index}.bomLineKeys`, [...others, threadSuggested], {
         shouldDirty: false,
       });
@@ -3962,11 +3980,7 @@ function OperationEditor({
     if (ours === undefined) return;
     delete wroteRef.current.thread;
     if (selectedBomKeys.includes(ours)) {
-      noteSuggested?.(
-        index,
-        'bomLineKeys',
-        selectedBomKeys.filter((k) => k !== ours),
-      );
+      noteSuggested?.(index, 'bomLineKeys', { remove: ours });
       setValue(
         `operations.${index}.bomLineKeys`,
         selectedBomKeys.filter((k) => k !== ours),
@@ -4082,11 +4096,7 @@ function OperationEditor({
       if (wrote.thread) {
         const keys = (getValues(`operations.${index}.bomLineKeys`) ?? []) as string[];
         if (keys.includes(wrote.thread) && !(base.bomLineKeys ?? []).includes(wrote.thread)) {
-          noteSuggested?.(
-            index,
-            'bomLineKeys',
-            keys.filter((k) => k !== wrote.thread),
-          );
+          noteSuggested?.(index, 'bomLineKeys', { remove: wrote.thread });
           setValue(
             `operations.${index}.bomLineKeys`,
             keys.filter((k) => k !== wrote.thread),
@@ -4126,11 +4136,7 @@ function OperationEditor({
       setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
     }
     if (field === 'thread') {
-      noteSuggested?.(
-        index,
-        'bomLineKeys',
-        selectedBomKeys.filter((k) => k !== wrote.thread),
-      );
+      noteSuggested?.(index, 'bomLineKeys', { remove: wrote.thread });
       setValue(
         `operations.${index}.bomLineKeys`,
         selectedBomKeys.filter((k) => k !== wrote.thread),
@@ -6341,13 +6347,19 @@ export function OperationsField({
   const draftRef = useRef(draftIds);
   draftRef.current = draftIds;
   const draftBase = useRef(new Map<string, { print: string; row: Record<string, unknown> }>());
-  // ТОЧНЫЕ ЗАПИСИ ПОДСТАНОВКИ (ревью Codex P2, повтор): строка → поле → значение. Освобождается от
-  // «касания» только то, что подстановка написала, и ровно тем значением; человеческая правка
-  // другого поля в том же коммите остаётся правкой.
-  const suggestedWrites = useRef(new Map<number, Record<string, unknown>>());
+  // ТОЧНЫЕ ЗАПИСИ ПОДСТАНОВКИ (ревью Codex P2): строка → поле → значение, а у нитки — цепочка
+  // дельт { remove?, add? } над списком связей. От «касания» освобождается только то, что
+  // подстановка написала, и ровно так; человеческая правка в том же коммите (другое поле, ДРУГАЯ
+  // нитка рядом с подставленной) остаётся правкой и снимает draft. Только для draft: щит отмены
+  // каркаса подстановку не прощает (строгий, см. skeletonCanUndo).
+  type Suggested = { fields: Record<string, unknown>; thread: ThreadDelta[] };
+  const suggestedWrites = useRef(new Map<number, Suggested>());
   const noteSuggested = useCallback((index: number, field: string, value: unknown) => {
     const m = suggestedWrites.current;
-    m.set(index, { ...(m.get(index) ?? {}), [field]: structuredClone(value) });
+    const cur = m.get(index) ?? { fields: {}, thread: [] };
+    if (field === 'bomLineKeys') cur.thread.push(value as ThreadDelta);
+    else cur.fields[field] = structuredClone(value);
+    m.set(index, cur);
   }, []);
   const [touchTick, setTouchTick] = useState(0);
   useEffect(() => {
@@ -6368,7 +6380,6 @@ export function OperationsField({
     const batch = top?.kind === 'skeleton' ? top : null;
     const next = new Set<string>();
     const touched: number[] = [];
-    const rebased: number[] = [];
     const live = new Set<string>();
     fields.forEach((f, i) => {
       live.add(f.id);
@@ -6379,12 +6390,11 @@ export function OperationsField({
       }
       const print = draftPrint(row);
       const was = base.get(f.id);
-      const keep = (intoBatch: boolean) => {
-        if (intoBatch) rebased.push(i);
+      const keep = () => {
         base.set(f.id, { print, row: structuredClone(row) });
         next.add(f.id);
       };
-      if (was?.print === print) return keep(false);
+      if (was?.print === print) return keep();
       // С чем сверять подстановку: прежний вид строки, а при первом взгляде — то, что положила
       // запись каркаса (подстановка может лечь раньше первого взгляда детектора: эффекты
       // редактора-ребёнка идут до эффектов поля в том же коммите).
@@ -6396,34 +6406,16 @@ export function OperationsField({
       const sugg = suggestedWrites.current.get(i);
       // Подстановка принимается, только если строка = прежний вид + ЕЁ поля с ЕЁ значениями.
       const bySuggestion =
-        sugg !== undefined && (ref === undefined || draftPrint({ ...ref, ...sugg }) === print);
-      if (bySuggestion) return keep(ref !== undefined);
-      if (was === undefined) return keep(false); // впервые увиденная строка
+        sugg !== undefined && (ref === undefined || draftPrint(withSuggested(ref, sugg)) === print);
+      if (bySuggestion) return keep();
+      if (was === undefined) return keep(); // впервые увиденная строка
       // Лёгшая запись: строка = сохранённой базе на том же месте (сервер мог канонизировать поле).
-      if (draftPrint(saved[i]) === print) return keep(true);
+      if (draftPrint(saved[i]) === print) return keep();
       base.delete(f.id);
       touched.push(i);
     });
     for (const id of [...base.keys()]) if (!live.has(id)) base.delete(id);
     suggestedWrites.current.clear();
-    // Строка пачки каркаса, переписанная НЕ человеком (подстановка, лёгшая запись), — всё ещё то,
-    // что положила запись: снимок `after` принимает её. Тронутая человеком — нет: щит отмены
-    // обязан увидеть правку.
-    if (batch) {
-      const own = rebased.filter((i) => i >= batch.from && i < batch.from + batch.count);
-      if (own.length > 0) {
-        const rows = [...batch.after.rows];
-        for (const i of own)
-          rows[i - batch.from] = structuredClone(ops[i]) as (typeof rows)[number];
-        setHistory({
-          undo: [
-            ...history.current.undo.slice(0, -1),
-            { ...batch, after: { ...batch.after, rows } },
-          ],
-          redo: history.current.redo,
-        });
-      }
-    }
     if (!frozen)
       for (const index of touched)
         setValue(`operations.${index}.draft`, false, { shouldDirty: true });
@@ -6431,7 +6423,7 @@ export function OperationsField({
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
-  }, [touchTick, fields, getValues, setValue, control, frozen, setHistory]);
+  }, [touchTick, fields, getValues, setValue, control, frozen]);
   // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
   // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
   const markReviewed = (i: number) => {
@@ -7118,7 +7110,7 @@ export function OperationsField({
     if (frozen) return FROZEN_REFUSAL;
     if (!skeletonCanUndo(rec, getValues('operations') ?? [])) {
       setHistory(dropUndoTop(history.current));
-      return 'the applied steps were edited — nothing to undo';
+      return 'the applied steps changed — nothing to undo';
     }
     applyToForm(() => {
       if (rec.mode === 'replace') {
