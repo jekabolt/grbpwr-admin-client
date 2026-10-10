@@ -1826,6 +1826,27 @@ export async function main(): Promise<number> {
         JSON.stringify({ a: g2?.a, ev: g2?.evidence, pr: two.d.output.grainProposals }),
       );
     }
+    // N3 (SVG smoke): a piece with no name yet gets its grain proposal in the SAME pass
+    {
+      const F = fx();
+      addFamily(F, 1, bodice, 0, [line(90)], ['FRONT']);
+      addFamily(F, 2, bodice, 600, [], []);
+      F.text('Fadenlauf', { x: 92, y: 250 });
+      const o = buildPieceSpecsDetailed(
+        input(F, CUT10, { pieceOverrides: { 1: { pairHand: null }, 2: { pairHand: null } } }),
+      ).output;
+      const seeds = (o.grainProposals ?? []).map((g) => g.seed).sort();
+      ck(
+        seeds.join() === '1,2' &&
+          o.blocked.some((b) => b.seed === 2 && b.reason === 'grammar') &&
+          o.grainProposals!.find((g) => g.seed === 2)?.why !== undefined,
+        'N3: the unnamed piece (blocked grammar) is proposed beside the named one — one review',
+        JSON.stringify({
+          props: o.grainProposals?.map((g) => [g.seed, g.why]),
+          blocked: o.blocked,
+        }),
+      );
+    }
     // (a) arrowheads + word → detected; one barb at one end → not arrowheads
     {
       const { d } = run1([line(90), ...barbs(90, 120, 420)], word);

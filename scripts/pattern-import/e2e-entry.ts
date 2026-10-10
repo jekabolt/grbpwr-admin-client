@@ -1032,8 +1032,12 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       const noGrain = byReason.get('no-grain') ?? [];
       for (const g of sem.grainProposals ?? [])
         if (!firstProposal.has(g.seed)) firstProposal.set(g.seed, g);
-      // A1: the proposals first — one click accepts them all; the rest are drawn by hand
-      const proposals = (sem.grainProposals ?? []).filter((g) => noGrain.includes(g.seed));
+      // A1: the proposals first — one click accepts them all; the rest are drawn by hand. N3: the
+      // review sheet lists every proposal not taken yet, an unnamed piece's too (details.tsx)
+      const unnamed = byReason.get('grammar') ?? [];
+      const proposals = (sem.grainProposals ?? []).filter(
+        (g) => (noGrain.includes(g.seed) || unnamed.includes(g.seed)) && !grain[g.seed],
+      );
       for (const g of proposals) grain[g.seed] = { a: g.a, b: g.b, accepted: g.evidence };
       if (proposals.length)
         op(

@@ -613,6 +613,26 @@ export function buildPieceSpecsDetailed(
         'grammar',
         'no name: neither the operator, the AI, the DXF block nor the printed text gives a code',
       );
+      // N3 (SVG smoke): its grainline is proposed NOW, beside the named pieces' — one "review N
+      // proposed grainlines" covers every piece, not a second round after a code is typed. Only
+      // when the drawing proves none (a detected grain needs no click once the piece is named).
+      if (!operatorGrain[seed]) {
+        const c0 = mapped[0].c;
+        const famBox = bboxOf(
+          mapped.flatMap(({ c }) => [
+            { x: c.bbox.minX, y: c.bbox.minY },
+            { x: c.bbox.maxX, y: c.bbox.maxY },
+          ]),
+        );
+        const g = classifyFeatures(c0, set, sheet, {
+          sizeCount: run.sizes.length,
+          region: famBox,
+        }).find((f): f is GrainFeature => f.kind === 'grain');
+        if (!g || g.origin === 'proposed') {
+          const pr = g ? drawnProposal(g) : proposeGrain(c0.outer);
+          if (pr) grainProposals.push({ seed, ...pr });
+        }
+      }
       continue;
     }
     // ungraded: declared UNI, one contour in a multi-size run, or the same contour in every size
@@ -1517,7 +1537,9 @@ export function buildPieceSpecsDetailed(
       ...(grainProposals.length
         ? {
             grainProposals: grainProposals.filter((g) =>
-              blocked.some((b) => b.seed === g.seed && b.reason === 'no-grain'),
+              blocked.some(
+                (b) => b.seed === g.seed && (b.reason === 'no-grain' || b.reason === 'grammar'),
+              ),
             ),
           }
         : {}),
