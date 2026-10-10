@@ -2667,7 +2667,7 @@ export async function main(opts: { plans: string }): Promise<number> {
       'one short stroke touching a found grain: G18 warns, gate passes',
       g18c.note,
     );
-    // A2 · G19: a closed outline of another shape ≥ 100 cm² on BP_M's layer 8 is a piece drawn
+    // A2 · G20: a closed outline of another shape ≥ 100 cm² on BP_M's layer 8 is a piece drawn
     // inside it (wm's collar in the back); a 36 cm² placement box is not
     {
       const box = (cx: number, cy: number, w: number, h: number): PtMm[] => [
@@ -2678,29 +2678,29 @@ export async function main(opts: { plans: string }): Promise<number> {
         { x: cx - w / 2, y: cy - h / 2 },
       ];
       const big = await gateOn(inject([box(mid.x, mid.y, 40, 300)]));
-      await neg('a closed 120 cm² rectangle (a collar) on BP_M layer 8', 'G19-nested-piece', big);
+      await neg('a closed 120 cm² rectangle (a collar) on BP_M layer 8', 'G20-nested-piece', big);
       ck(
-        one(big, 'G19-nested-piece').blocks.includes('BP_M') &&
-          one(big, 'G19-nested-piece').note.startsWith('a piece seems drawn inside another piece'),
-        'G19 names the block and says why in plain words',
-        one(big, 'G19-nested-piece').note,
+        one(big, 'G20-nested-piece').blocks.includes('BP_M') &&
+          one(big, 'G20-nested-piece').note.startsWith('a piece seems drawn inside another piece'),
+        'G20 names the block and says why in plain words',
+        one(big, 'G20-nested-piece').note,
       );
       const small = await gateOn(inject([box(mid.x, mid.y, 60, 60)]));
       ck(
-        one(small, 'G19-nested-piece').ok,
-        'a closed 36 cm² placement box on layer 8: G19 ok',
-        one(small, 'G19-nested-piece').note,
+        one(small, 'G20-nested-piece').ok,
+        'a closed 36 cm² placement box on layer 8: G20 ok',
+        one(small, 'G20-nested-piece').note,
       );
       const open = await gateOn(inject([box(mid.x, mid.y, 40, 300).slice(0, 4)]));
       ck(
-        one(open, 'G19-nested-piece').ok,
-        'the same rectangle left open (three sides): G19 ok',
-        one(open, 'G19-nested-piece').note,
+        one(open, 'G20-nested-piece').ok,
+        'the same rectangle left open (three sides): G20 ok',
+        one(open, 'G20-nested-piece').note,
       );
       ck(
-        one(c0, 'G19-nested-piece').ok,
-        'control: the T2 main scope passes G19',
-        String(one(c0, 'G19-nested-piece').value),
+        one(c0, 'G20-nested-piece').ok,
+        'control: the T2 main scope passes G20',
+        String(one(c0, 'G20-nested-piece').value),
       );
     }
     // real files ─ the owner's beta DXF (wm M, 10.10) must block on G16; the corpus must not
@@ -2794,7 +2794,7 @@ export async function main(opts: { plans: string }): Promise<number> {
       'e2e negatives present (CLO DXF, robe, reef, leonie)',
       negDirs.join(' '),
     );
-    // A2 · G19 on the same negatives and the CLO corpus: no piece-sized outline of another shape on
+    // A2 · G20 on the same negatives and the CLO corpus: no piece-sized outline of another shape on
     // any block's layer 8
     {
       const g19Of = (file: string) => {
@@ -2828,7 +2828,7 @@ export async function main(opts: { plans: string }): Promise<number> {
       }
       ck(
         !bad.length,
-        `G19 passes ${files.length} negative files (CLO corpus, robe, reef, leonie, DXF cases)`,
+        `G20 passes ${files.length} negative files (CLO corpus, robe, reef, leonie, DXF cases)`,
         bad.slice(0, 3).join(' | '),
       );
     }

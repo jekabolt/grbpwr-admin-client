@@ -993,7 +993,7 @@ export async function main(args: string[]): Promise<number> {
       const a = A(wm)!;
       check(
         'wm M',
-        "the collar is its own piece: no piece-sized outline on any written block's layer 8 (G19)",
+        "the collar is its own piece: no piece-sized outline on any written block's layer 8 (G20)",
         (() => {
           const dir = resolve(process.env.PATIMPORT_E2E_OUT ?? resolve(REPORTS, 'E2E-out'), 'wm-M');
           if (!existsSync(dir)) return false;

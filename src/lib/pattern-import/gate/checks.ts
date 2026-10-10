@@ -1353,7 +1353,7 @@ export function g16(ctx: GateCtx): GateCheck {
   );
 }
 
-// ── G19 (A2) ─────────────────────────────────────────────────────────────────────────────
+// ── G20 (A2) ─────────────────────────────────────────────────────────────────────────────
 //
 // wm M (10.10): the collar drawn inside the back was written as a rectangle on the back's layer 8
 // — a piece lost and a line cut into the back. The pieces stage now seeds such an outline and keeps
@@ -1393,7 +1393,7 @@ export function nestedPieces(ents: readonly RawEntity[]): { areaMm2: number; at:
 
 export function g19(ctx: GateCtx): GateCheck {
   if (!ctx.raw)
-    return check('G19-nested-piece', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
+    return check('G20-nested-piece', ['*'], 'block', `own reader failed: ${ctx.rawError}`);
   const failed: string[] = [];
   const notes: string[] = [];
   let worst = 0;
@@ -1408,7 +1408,7 @@ export function g19(ctx: GateCtx): GateCheck {
     );
   }
   return check(
-    'G19-nested-piece',
+    'G20-nested-piece',
     failed,
     'block',
     failed.length

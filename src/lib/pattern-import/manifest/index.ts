@@ -286,7 +286,7 @@ const GATE_CHECK_IDS = new Set([
   'G16-glyphs',
   'G18-grain-source',
   // A2: a piece drawn inside another written as its internal line
-  'G19-nested-piece',
+  'G20-nested-piece',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([

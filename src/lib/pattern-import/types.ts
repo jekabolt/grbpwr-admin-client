@@ -1429,7 +1429,7 @@ export type GateCheckId =
   /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
   | 'G16-glyphs'
   /** A2: a closed outline big enough to be a piece written on another piece's layer 8. */
-  | 'G19-nested-piece'
+  | 'G20-nested-piece'
   /** A8: internal-layer length against the outline length (warn). */
   /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
   | 'G18-grain-source';
@@ -2195,7 +2195,7 @@ export const PATIMPORT = {
   /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
   glyphMaxShortPerCell: 10,
   /**
-   * G19 (A2): a closed layer-8 contour of another shape (≤ 45 % of the cut's area) from this area is
+   * G20 (A2): a closed layer-8 contour of another shape (≤ 45 % of the cut's area) from this area is
    * a piece drawn inside the block (wm's collar inside the back, 160 cm²). Corpus negatives: CLO
    * blazer pocket welt 41 cm², the SVG smoke's placement box 66 cm², reef / kombinezon ≤ 10 cm².
    */

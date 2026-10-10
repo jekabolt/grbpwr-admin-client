@@ -44,7 +44,7 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
   // A8 safety net: nothing in the wizard removes lines inside a piece yet — the note says why
   'G16-glyphs': { what: 'no lettering or watermark inside the pieces', fix: null },
   'G18-grain-source': { what: 'grainline not read from lettering', fix: 'meaning' },
-  'G19-nested-piece': { what: 'no piece drawn inside another piece', fix: 'pieces' },
+  'G20-nested-piece': { what: 'no piece drawn inside another piece', fix: 'pieces' },
 };
 
 /**
