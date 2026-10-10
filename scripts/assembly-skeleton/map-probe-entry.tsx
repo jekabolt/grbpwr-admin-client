@@ -33,7 +33,7 @@ import { AssemblyMap } from 'components/managers/tech-card/components/assembly-m
 import { skeletonDeps } from 'components/managers/tech-card/components/assembly-skeleton-deps';
 import {
   buildSkeletonFacts,
-  skeletonCategoryOf,
+  skeletonCategoryRead,
   skeletonLined,
 } from 'components/managers/tech-card/components/assembly-skeleton-source';
 import {
@@ -50,7 +50,10 @@ import {
   rowFromStep,
 } from 'components/managers/tech-card/components/operations-field';
 import type { PieceCloth } from 'components/managers/tech-card/components/piece-cloth';
-import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
+import {
+  toPurposeEnum,
+  type TechCardFormData,
+} from 'components/managers/tech-card/components/schema';
 import type { PieceShapeMap } from 'components/managers/tech-card/components/use-piece-shapes';
 
 type StandCard = {
@@ -144,7 +147,12 @@ function proposeInto(c: StandCard): StandCard {
     shapes,
     cloth,
     bomLines,
-    category: skeletonCategoryOf(c.categoryNames, lined),
+    category: skeletonCategoryRead({
+      categoryNames: c.categoryNames,
+      hasLining: lined,
+      pieceNames: c.form.pieces.map((p) => p.name ?? ''),
+      purpose: toPurposeEnum(c.form.purpose),
+    }).category,
     defaultMachineType: null,
     aliases: c.form.pieceDxfAliases ?? [],
   });

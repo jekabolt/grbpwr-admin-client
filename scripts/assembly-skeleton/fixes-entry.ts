@@ -2,7 +2,9 @@
 // modelled — category, lining, facts, gate (card side) and the engine (lib).
 export {
   buildSkeletonFacts,
+  skeletonCategoryFromPieces,
   skeletonCategoryOf,
+  skeletonCategoryRead,
   skeletonGate,
   skeletonLined,
 } from '../../src/components/managers/tech-card/components/assembly-skeleton-source';

@@ -8,6 +8,7 @@
 // Pure TS: lib/** only; the tech card injects its own deps (zone inference, unit codes, rules).
 
 import { buildSeamGraph, compositeSeams } from './geometry';
+import { tidyUnitName } from './names';
 import { buildSkeleton, groupUnits, orderTemplate, type SkeletonTemplate } from './skeleton';
 import {
   SKELETON,
@@ -17,6 +18,7 @@ import {
   type SkeletonOptions,
   type SkeletonPins,
   type SkeletonProposal,
+  type SkeletonStep,
 } from './types';
 
 const EMPTY_GRAPH = (warnings: string[]): SeamGraph => ({
@@ -75,9 +77,25 @@ export function proposeSkeleton(
     };
   }
   const graph = readSeamGraph(facts, template, options.pins);
+  const built = buildSkeleton(graph, facts, template, deps, options);
   return {
-    ...buildSkeleton(graph, facts, template, deps, options),
+    ...built,
+    steps: built.steps.map(tidyStepNames),
     graph,
     ...(facts.existing ? { existing: facts.existing.steps } : {}),
   };
+}
+
+/**
+ * Unit names as the card will keep them: a clause attached twice is said once («Left front with
+ * pockets», not «… with pocket with pocket»), a piece code keeps its capital («Lining MP_LIN_L_1»).
+ * The label and the reason repeat unit names, so they are tidied the same way.
+ */
+function tidyStepNames(s: SkeletonStep): SkeletonStep {
+  const name = tidyUnitName(s.outputUnitName);
+  const label = s.label ? tidyUnitName(s.label) : s.label;
+  const reason = tidyUnitName(s.reason);
+  return name === s.outputUnitName && label === s.label && reason === s.reason
+    ? s
+    : { ...s, outputUnitName: name, reason, ...(s.label != null ? { label } : {}) };
 }

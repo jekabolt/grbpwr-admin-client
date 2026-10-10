@@ -117,6 +117,77 @@ console.log('\n1 · category and lining');
       )
       .join('; '),
   );
+  // The WHOLE category dictionary (fixtures/category-map.json): every chain reads as the template
+  // the fixture names, unlined and lined. Whole words, families: «short_sleeve < shirts» is a
+  // shirt (not shorts), «sweat < shorts» shorts (not a sweat), «dress_shoes» / «high_top < sneakers»
+  // shoes (not a dress, not a tee), «shirt < dresses» a dress.
+  const catMap = JSON.parse(readFileSync(resolve(here, 'fixtures/category-map.json'), 'utf8')).rows;
+  const badMap = catMap.filter(
+    ([n, un, li]) => E.skeletonCategoryOf(n, false) !== un || E.skeletonCategoryOf(n, true) !== li,
+  );
+  const must = [
+    ['short_sleeve', 'shirts', 'tops'],
+    ['sweat', 'shorts', 'bottoms'],
+    ['high_top', 'sneakers', 'shoes'],
+    ['dress_shoes', 'shoes'],
+    ['shirt', 'dresses'],
+  ];
+  const mustWant = ['shirt', 'trousers', 'generic', 'generic', 'dress'];
+  const mapRows = new Map(catMap.map(([n, un]) => [n.join('<'), un]));
+  const badMust = must.filter((n, i) => mapRows.get(n.join('<')) !== mustWant[i]);
+  gate(
+    `category dictionary: ${catMap.length} categories → template as the fixture says (whole words, one family)`,
+    catMap.length >= 200 && badMap.length === 0 && badMust.length === 0,
+    [
+      ...badMap.map(
+        ([n, un, li]) =>
+          `${n.join(' < ')} → ${E.skeletonCategoryOf(n, false)}/${E.skeletonCategoryOf(n, true)} (want ${un}/${li})`,
+      ),
+      ...badMust.map((n) => `fixture says ${n.join(' < ')} → ${mapRows.get(n.join('<'))}`),
+    ].join('; '),
+  );
+  // No category on the card: the piece names say what it is, and the panel says it read them.
+  const byPieces = [
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], false, null, 'shirt'],
+    [['BP', 'FP_L', 'FP_R', 'SL_L', 'SL_R', 'CLR'], true, null, 'jacket-lined'],
+    [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECK_RIB'], false, null, 'tee'],
+    [['BACK', 'FRONT', 'SLEEVE', 'HOOD_L', 'HOOD_R'], false, null, 'hoodie'],
+    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'trousers'],
+    [['FRONT', 'BACK', 'FLY', 'WB'], false, null, 'trousers'],
+    [['BP', 'LP_1', 'RP_1', 'plank', 'CLR'], false, null, 'generic'],
+    [['BP', 'LP_1', 'RP_1', 'PLCK', 'CLR'], false, null, 'shirt'],
+    [['BLT_L', 'BLT_R', 'BP', 'FP'], false, 'TECH_CARD_PURPOSE_AUXILIARY', 'generic'],
+    [['inner_panel', 'outer_panel'], false, null, 'generic'],
+  ];
+  const badP = byPieces.filter(
+    ([n, l, p, want]) => E.skeletonCategoryFromPieces(n, l, p).category !== want,
+  );
+  const readP = E.skeletonCategoryRead({
+    categoryNames: [],
+    hasLining: false,
+    pieceNames: byPieces[0][0],
+  });
+  const readC = E.skeletonCategoryRead({
+    categoryNames: ['shirts', 'tops'],
+    hasLining: false,
+    pieceNames: byPieces[4][0],
+  });
+  gate(
+    `no category: ${byPieces.length} piece sets read as their garment; a card's own category wins`,
+    badP.length === 0 &&
+      readP.source === 'pieces' &&
+      readP.category === 'shirt' &&
+      /sleeves/.test(readP.why) &&
+      readC.source === 'card' &&
+      readC.category === 'shirt',
+    [
+      ...badP.map(
+        ([n, l, p, w]) =>
+          `${n.join(',')}${l ? ' lined' : ''} → ${E.skeletonCategoryFromPieces(n, l, p).category} (want ${w})`,
+      ),
+      `read ${JSON.stringify(readP)} / ${JSON.stringify(readC)}`,
+    ].join('; '),
+  );
   const pieces = [{ name: 'FRONT' }, { name: 'BACK' }];
   const lined = [
     ['no signal', { cloth: null, pieces }, false],

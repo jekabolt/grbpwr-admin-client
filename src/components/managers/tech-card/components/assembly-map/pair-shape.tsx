@@ -10,6 +10,53 @@ const NAME_PX = 9;
 const NOTCH_PX = 9;
 const SEAM_PX = 4;
 
+/** Bold 9px caps run ~0.62 em per character. */
+const CHAR_PX = NAME_PX * 0.62;
+
+/** A name never runs longer than a piece tile's caption holds (PieceTile cuts at the tile). */
+const LABEL_MAX_CHARS = 16;
+
+/**
+ * An input's name fitted to the width of its own group and to LABEL_MAX_CHARS: cut with «…» like
+ * a piece tile's caption, the count kept, the full name in the <title>. A long name used to run
+ * across the next input's shapes and over its name.
+ */
+export function fitLabel(name: string, count: string, groupPx: number): string {
+  const fits = Math.min(
+    LABEL_MAX_CHARS + count.length,
+    Math.max(6, Math.floor(Math.max(groupPx, 48) / CHAR_PX)),
+  );
+  if ((name + count).length <= fits) return name + count;
+  const room = Math.max(3, fits - count.length - 1);
+  return `${name.slice(0, room).trimEnd()}…${count}`;
+}
+
+/**
+ * Label anchors moved apart: two names whose boxes would overlap are stacked, the later one a line
+ * lower (or higher, if that runs off the picture), so neither is printed over the other.
+ */
+function placeLabels(
+  items: { at: [number, number]; chars: number }[],
+  u: number,
+  h: number,
+): [number, number][] {
+  const lineH = NAME_PX * 1.6 * u;
+  const placed: { x: number; y: number; w: number }[] = [];
+  return items.map(({ at, chars }) => {
+    const w = chars * CHAR_PX * u;
+    let y = at[1];
+    for (let guard = 0; guard < 8; guard++) {
+      const hit = placed.find(
+        (p) => Math.abs(p.y - y) < lineH && Math.abs(p.x - at[0]) < (p.w + w) / 2,
+      );
+      if (!hit) break;
+      y = hit.y + lineH <= h ? hit.y + lineH : hit.y - lineH;
+    }
+    placed.push({ x: at[0], y, w });
+    return [at[0], y];
+  });
+}
+
 const ptsAttr = (pts: readonly [number, number][]) =>
   pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
 
@@ -93,24 +140,37 @@ export const PairShape = memo(function PairShape({
           ))}
         </g>
       ))}
-      {picture.labels.map((l) => (
-        <text
-          key={l.input}
-          x={l.at[0]}
-          y={l.at[1]}
-          textAnchor='middle'
-          dominantBaseline='central'
-          style={{
-            fontSize: NAME_PX * u,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            fill: '#000',
-            ...halo,
-          }}
-        >
-          {(names[l.input] ?? '') + (l.pieces > 1 ? ` · ${l.pieces}` : '')}
-        </text>
-      ))}
+      {(() => {
+        const texts = picture.labels.map((l) => {
+          const full = names[l.input] ?? '';
+          const count = l.pieces > 1 ? ` · ${l.pieces}` : '';
+          return { full: full + count, text: fitLabel(full, count, l.w / u) };
+        });
+        const at = placeLabels(
+          picture.labels.map((l, i) => ({ at: l.at, chars: texts[i].text.length })),
+          u,
+          picture.h,
+        );
+        return picture.labels.map((l, i) => (
+          <text
+            key={l.input}
+            x={at[i][0]}
+            y={at[i][1]}
+            textAnchor='middle'
+            dominantBaseline='central'
+            style={{
+              fontSize: NAME_PX * u,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              fill: '#000',
+              ...halo,
+            }}
+          >
+            {texts[i].text !== texts[i].full && <title>{texts[i].full}</title>}
+            {texts[i].text}
+          </text>
+        ));
+      })()}
     </svg>
   );
 });

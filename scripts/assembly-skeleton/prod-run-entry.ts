@@ -43,6 +43,7 @@ import {
   buildSkeletonFacts,
   DEFAULT_SKELETON_PROVIDER,
   skeletonCategoryOf,
+  skeletonCategoryRead,
   skeletonGate,
   skeletonLined,
 } from '../../src/components/managers/tech-card/components/assembly-skeleton-source';
@@ -97,8 +98,13 @@ import {
   type PieceCloth,
 } from '../../src/components/managers/tech-card/components/piece-cloth';
 import {
+  defaultPicks,
+  orderClosure,
+} from '../../src/components/managers/tech-card/components/assembly-skeleton-ticks';
+import {
   mapTechCardToForm,
   techCardSchema,
+  toPurposeEnum,
   type TechCardFormData,
 } from '../../src/components/managers/tech-card/components/schema';
 
@@ -361,21 +367,9 @@ function printInput(insert: Json): PrintCardInput {
   return { pieces, steps };
 }
 
-/**
- * The panel's default ticks: defaultPicks = settlePicks(defaultPick) (module-private there, copied):
- * a rider follows its join; a step taking a unit an unticked step makes is unticked.
- */
+/** The panel's default ticks (assembly-skeleton-ticks.ts — the panel's own module, not a copy). */
 function defaultTicks(steps: SkeletonStep[]): boolean[] {
-  const ticks: boolean[] = [];
-  const madeBy = new Map<string, number>();
-  steps.forEach((s, i) => {
-    let t = s.confidence >= SKELETON.accept;
-    if (isDerived(s) && ticks[s.derivedFrom!] !== undefined) t = ticks[s.derivedFrom!];
-    if (t) t = s.inputs.every((k) => (madeBy.has(k) ? ticks[madeBy.get(k)!] : true));
-    ticks.push(t);
-    if (s.outputUnitKey) madeBy.set(s.outputUnitKey, i);
-  });
-  return ticks;
+  return defaultPicks(steps).map((p) => p.accepted);
 }
 
 /** The server's request doors (assembly_skeleton_ai.go), as scripts/assembly-skeleton/ai.mjs restates them. */
@@ -499,7 +493,14 @@ export async function runCard(input: CardInput) {
     patterns: (form.patterns ?? []) as never,
     bomLines: (form.bomItems ?? []) as never,
   });
-  const category = skeletonCategoryOf(input.categoryNames, hasLining);
+  const categoryRead = skeletonCategoryRead({
+    categoryNames: input.categoryNames,
+    hasLining,
+    pieceNames: formPieces.map((p) => p.name ?? ''),
+    purpose: toPurposeEnum((input.card as Json)?.techCard?.purpose),
+  });
+  const category = categoryRead.category;
+  out.categoryRead = categoryRead;
   out.gate = skeletonGate({
     frozen: false,
     hasDxf: S.pack.length > 0,
@@ -703,6 +704,21 @@ export async function runCard(input: CardInput) {
         sample: hard.slice(0, 3).map((v) => `r${v.rule} step ${v.step + 1}: ${v.message}`),
         release: rel.length,
         releaseSample: rel.slice(0, 2).map((v) => v.message),
+      };
+    }
+    // F8: do the default ticks reach one finished garment, and does the proposal (every join)?
+    {
+      const all = steps.map((s) => asA(s.inputs, s.outputUnitKey, s.outputUnitName));
+      const relAll = assemblyReleaseCheck(sweepPieces, all, assemblySweep(sweepPieces, all));
+      const picks = defaultPicks(steps);
+      const closure = orderClosure(steps);
+      out.ticks = {
+        reachOne: steps.length > 0 && (out.sweep_replace as Json).release === 0,
+        proposalReachesOne: steps.length > 0 && relAll.length === 0,
+        proposalEnds: closure.ends.length,
+        closing: picks.filter((p, i) => p.closing && !isDerived(steps[i])).length,
+        deciding: closure.openDecisions.length,
+        proposalRelease: relAll.slice(0, 2).map((v) => namesIn(v.message, nameOfPiece)),
       };
     }
     // the technologist's own order, for reference (is the card itself clean?)
