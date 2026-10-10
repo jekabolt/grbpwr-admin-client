@@ -46,6 +46,13 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
+import {
+  PAGE_SURE,
+  defaultedFabrics,
+  sizeFlags,
+  tileSheets,
+  weakAsides,
+} from '../auto-advance';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
@@ -88,6 +95,8 @@ export type AutopilotAction =
   | { kind: 'legend'; edits: LegendEdit[]; back?: WizardStep; confirm?: string[] }
   /** Click seeds (appended to the run's own seeds), the pieces run again. */
   | { kind: 'seeds'; seeds: Seed[] }
+  /** The tile sheet to import (sheet step). */
+  | { kind: 'sheet'; sheet: number }
   /** Go on past an offer the run leaves as it is (pages set aside to check). */
   | { kind: 'proceed' }
   | { kind: 'drawn-sizes'; n: number }
@@ -244,6 +253,8 @@ function toWizard(
       return { events: [{ type: 'clean', edits: a.edits }] };
     case 'proceed':
       return { proceed: true };
+    case 'sheet':
+      return { events: [{ type: 'sheet', sheet: a.sheet, override: i.gridOverride }] };
     case 'seeds':
       // `addSeed()` of the hook: the clicks join the first run's seeds, the fill runs again
       return {
@@ -420,10 +431,16 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
   if (!blocker || presegmented || !s.clean) return NONE;
   const by = waitingKinds(s.clean.pages.flatMap((p) => p.items));
   if (by.size) return acceptWaiting('files', by, i);
-  // pages set aside "to check", pages the reader could not place: left as the reader set them
+  // pages set aside "to check", pages read without certainty: the clean stage's reading is taken
+  // as it is (the proceed answer), each page an assumption
   const check = s.clean.dropped.filter((d) => d.status === 'suggest');
-  const unknown = s.pages.filter((p) => p.cls === 'unknown');
-  if (!check.length && !unknown.length) return NONE;
+  const roleSet = new Set(
+    i.cleanEdits.flatMap((e) => ('role' in e ? [`${e.file}:${e.page}`] : [])),
+  );
+  const unsure = s.pages.filter(
+    (p) => !roleSet.has(`${p.file}:${p.page}`) && (p.cls === 'unknown' || p.confidence < PAGE_SURE),
+  );
+  if (!check.length && !unsure.length) return NONE;
   return {
     actions: [{ kind: 'proceed' }],
     assumptions: [
@@ -439,19 +456,87 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
           false,
         ),
       ),
-      ...unknown.map((p) =>
+      ...unsure.map((p) =>
         A(
           'files',
           'pages-as-read',
           `file ${p.file} page ${p.page + 1}`,
-          'role as read (unknown)',
-          'a page the reader could not place is read as it is',
-          [],
-          0.4,
+          `read as ${p.cls}`,
+          'a page read without certainty is taken as the reader read it',
+          [`${p.cls} ${p.confidence.toFixed(2)}`, p.why.slice(0, 120)],
+          p.confidence,
           false,
         ),
       ),
     ],
+  };
+}
+
+// ── which sheet, which model: only on evidence (Codex #2, #4) ─────────────────────────────────
+
+/** Words and numbers of a label ("Mod. 123" → mod, 123; "Style A" → style, a). */
+const tokensOf = (x: string) =>
+  x
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+
+/** What the card says it is: its style label and the file names it was given. */
+function cardWords(s: ImportSession, card: CardContext): Set<string> {
+  return new Set([
+    ...tokensOf(card.styleLabel ?? ''),
+    ...s.files.flatMap((f) => tokensOf(f.name.replace(/\.[^.]+$/, ''))),
+  ]);
+}
+
+/**
+ * The distinctive part of a model label: a number of 2+ digits ("123"), or the letter after
+ * model / style / mod / модель ("Style A" → "a"). Generic words never match.
+ */
+function distinctive(label: string): string[] {
+  const t = tokensOf(label);
+  const out = t.filter((w) => /^\d{2,}$/.test(w));
+  t.forEach((w, k) => {
+    if (/^(model|style|mod|модель|мод|variant|view|ansicht)$/.test(w) && t[k + 1]?.length === 1)
+      out.push(t[k + 1]);
+  });
+  return out;
+}
+
+/** The one model whose label the card (or the file name) names; null = none or several. */
+function modelByEvidence(
+  variants: readonly string[],
+  s: ImportSession,
+  card: CardContext,
+): { variant: string; evidence: string[] } | null {
+  const words = cardWords(s, card);
+  const hits = variants.filter((v) => distinctive(v).some((w) => words.has(w)));
+  if (hits.length !== 1) return null;
+  return {
+    variant: hits[0],
+    evidence: [
+      `"${hits[0]}" is named by «${card.styleLabel}» / ${s.files.map((f) => f.name).join(', ')}`,
+    ],
+  };
+}
+
+/**
+ * The tile sheet the card names. The pages carry no model labels before a sheet is assembled, so
+ * today only a file name naming the sheet counts ("…_sheet_B.pdf"); none = the operator picks.
+ */
+function sheetByEvidence(
+  s: ImportSession,
+  card: CardContext,
+): { sheet: number; evidence: string[] } | null {
+  const words = cardWords(s, card);
+  const sheets = [
+    ...new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0)),
+  ].sort((a, b) => a - b);
+  const named = sheets.filter((k) => words.has(String.fromCharCode(97 + k)) && words.has('sheet'));
+  if (named.length !== 1) return null;
+  return {
+    sheet: named[0],
+    evidence: [`the file name names sheet ${String.fromCharCode(65 + named[0])}`],
   };
 }
 
@@ -508,23 +593,33 @@ function scaleStep({ session: s, inputs: i, blocker }: Snap): AutopilotDecision 
 
 // ── sheet ───────────────────────────────────────────────────────────────────────────────────────
 
-function sheetStep({ session: s, inputs: i }: Snap): AutopilotDecision {
-  const sheets = new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet));
-  const info: Assumption[] =
-    sheets.size > 1
-      ? [
-          A(
-            'sheet',
-            'sheet-choice',
-            'the file',
-            `tile sheet ${i.sheetIndex + 1} of ${sheets.size}`,
-            'a file with several tile sheets: the first is imported (one run imports one sheet)',
-            [`${sheets.size} tile sheets`],
-            0.5,
-            false,
-          ),
-        ]
-      : [];
+function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
+  const info: Assumption[] = [];
+  // Codex #2: which of several tile sheets is a question — answered only on evidence
+  const n = tileSheets(s.pages);
+  if (n > 1 && i.sheetPicked === null) {
+    const pick = sheetByEvidence(s, card);
+    if (!pick)
+      return stopAt(
+        'sheet',
+        `the file carries ${n} tile sheets and nothing on the card names one — pick the sheet to import`,
+      );
+    return {
+      actions: [{ kind: 'sheet', sheet: pick.sheet }],
+      assumptions: [
+        A(
+          'sheet',
+          'sheet-choice',
+          'the file',
+          `tile sheet ${pick.sheet + 1} of ${n}`,
+          'the sheet whose labels match the card',
+          pick.evidence,
+          0.6,
+          true,
+        ),
+      ],
+    };
+  }
   const waiting = waitingKinds(s.sheet?.clean?.items ?? []);
   if (waiting.size) {
     const d = acceptWaiting('sheet', waiting, i);
@@ -608,7 +703,8 @@ function outlineLegend(s: ImportSession, i: Inputs): AutopilotDecision | null {
   };
 }
 
-function sizesStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotDecision {
+function sizesStep(snap: Snap): AutopilotDecision {
+  const { session: s, inputs: i, card, blocker } = snap;
   if (!card.sizes.length) return stopAt('sizes', 'the card has no size range');
   const sz = s.sizes;
   if (!sz || !blocker) return NONE;
@@ -780,7 +876,24 @@ function sizesStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotDec
       }),
     };
   }
-  return NONE;
+  // the offer: flags the reader could not settle — gone on with, each a strong assumption
+  const flags = sizeFlags(s.chains?.ambiguities, sz.expected?.n);
+  if (!flags.length) return NONE;
+  return {
+    actions: [{ kind: 'proceed' }],
+    assumptions: flags.map((f, k) =>
+      A(
+        'sizes',
+        'size-flag',
+        `flag ${k + 1} · ${f.kind}`,
+        'gone on as read',
+        'a reader flag on the sizes step is left as the reader settled it',
+        [JSON.stringify(f).slice(0, 160)],
+        0.4,
+        true,
+      ),
+    ),
+  };
 }
 
 // ── pieces ──────────────────────────────────────────────────────────────────────────────────────
@@ -800,45 +913,30 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const seeds = s.pieces?.seeds ?? [];
   const variants = variantsOf(seeds, baseSeeds, s.pieces?.variants);
   if (variants.length > 1 && !s.variant) {
-    // the model with the most pieces that close
-    const all = [...(baseSeeds ?? []), ...seeds];
-    const count = (v: string) =>
-      fams.filter(
-        (f) =>
-          all.find((x) => x.id === f.seed)?.variant === v &&
-          f.candidates.some((c) => c.outcome === 'closed'),
-      ).length;
-    const ranked = variants
-      .map((v) => ({ v, n: count(v) }))
-      .sort((a, b) => b.n - a.n || a.v.localeCompare(b.v));
-    const pick = ranked[0];
-    const total = ranked.reduce((a, r) => a + r.n, 0) || 1;
+    // Codex #4: the model the card names — never "the one with the most pieces"
+    const pick = modelByEvidence(variants, s, snap.card);
+    if (!pick)
+      return stopAt(
+        'pieces',
+        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and nothing on the card names one — pick the model`,
+      );
     return {
-      actions: [{ kind: 'variant', variant: pick.v }],
+      actions: [{ kind: 'variant', variant: pick.variant }],
       assumptions: [
         A(
           'pieces',
           'model',
           'the sheet',
-          `model "${pick.v}"`,
-          'several models on the sheet: the one with the most closed pieces',
-          ranked.map((r) => `${r.v}: ${r.n} pieces`),
-          pick.n / total,
-          false,
+          `model "${pick.variant}"`,
+          'the model whose label the card names',
+          pick.evidence,
+          0.6,
+          true,
         ),
       ],
     };
   }
   if (!fams.length) {
-    // no line draws an outline: the legend is answered on the sizes step, then the pieces again
-    const outline = outlineLegend(s, i);
-    if (outline)
-      return {
-        ...outline,
-        actions: outline.actions.map((a) =>
-          a.kind === 'legend' ? { ...a, back: 'sizes' as const } : a,
-        ),
-      };
     // nothing seeded: a click inside every closed outline (once)
     const pts = i.clickSeeds.length ? [] : seedPoints(s.chains?.chainPreview ?? []);
     if (!pts.length) return stopAt('pieces', 'no pieces found on the sheet');
@@ -872,40 +970,76 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const open = fams.filter((f) =>
     f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
   );
-  if (!open.length) return NONE;
-  if (presegmented)
+  // Codex #3: a region of piece size that does not close (or whose sizes are held back) is never
+  // made "not a piece" to silence the question — it is a stop
+  if (open.length) {
+    const what = open
+      .slice(0, 4)
+      .map((f) => {
+        const c = f.candidates.find((x) => x.outcome !== 'closed');
+        return `${labelOf(seeds, f.seed) ?? `seed ${f.seed}`}: ${c?.outcome}${c?.gradeRefusal ? ` (${c.gradeRefusal})` : ''}`;
+      })
+      .join('; ');
     return stopAt(
       'pieces',
-      `${open.length} DXF ${open.length === 1 ? 'block does' : 'blocks do'} not close (a DXF block cannot be set aside)`,
+      `${open.length} ${open.length === 1 ? 'region does' : 'regions do'} not close or ${open.length === 1 ? 'has' : 'have'} sizes held back — ${what}`,
     );
-  if (open.length === fams.length)
-    return stopAt('pieces', `no piece closes (${fams.length} open or held-back regions)`);
+  }
+  // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
+  const weak = weakAsides(s.pieces?.setAside);
+  if (!weak.length) return NONE;
+  const host = (box: { minX: number; minY: number; maxX: number; maxY: number }) =>
+    Math.max(
+      0,
+      ...fams.flatMap((f) =>
+        f.candidates
+          .filter(
+            (c) =>
+              c.outcome === 'closed' &&
+              c.bbox.minX <= box.maxX + 1 &&
+              c.bbox.maxX >= box.minX - 1 &&
+              c.bbox.minY <= box.maxY + 1 &&
+              c.bbox.maxY >= box.minY - 1,
+          )
+          .map((c) => c.areaMm2),
+      ),
+    );
+  const why = weak.map((a) => {
+    if (a.reason === 'other-pen')
+      return { a, ev: 'drawn inside a seeded piece in another pen or short strokes (a mark)' };
+    const h = host(a.box);
+    if (a.reason === 'joined' && h > 0 && a.areaMm2 <= STRIP_SHARE * h)
+      return {
+        a,
+        ev: `a strip along a piece: ${Math.round(a.areaMm2 / 100)} cm² against ${Math.round(h / 100)} cm²`,
+      };
+    return { a, ev: null };
+  });
+  const unproven = why.filter((w) => !w.ev);
+  if (unproven.length)
+    return stopAt(
+      'pieces',
+      `${unproven.length} piece-sized ${unproven.length === 1 ? 'outline' : 'outlines'} set aside on a guess (${[...new Set(unproven.map((w) => w.a.reason))].join(', ')}) — is it a piece?`,
+    );
   return {
-    actions: [
-      {
-        kind: 'piece-edits',
-        edits: [...i.edits, ...open.map((f): PieceEdit => ({ kind: 'not-a-piece', seed: f.seed }))],
-      },
-    ],
-    assumptions: open.map((f) => {
-      const outs = f.candidates
-        .filter((c) => !mapped || mapped.has(c.rank))
-        .map((c) => `${c.rank}:${c.outcome}${c.gradeRefusal ? `(${c.gradeRefusal})` : ''}`);
-      const named = labelOf(seeds, f.seed) != null;
-      return A(
+    actions: [{ kind: 'proceed' }],
+    assumptions: why.map(({ a, ev }) =>
+      A(
         'pieces',
-        'not-a-piece',
-        subjectOf(seeds, f.seed),
+        'set-aside',
+        `outline ${a.id} (${Math.round(a.areaMm2 / 100)} cm²${a.seed?.text ? ` · ${a.seed.text.text.slice(0, 24)}` : ''})`,
         'not a piece',
-        'a region that does not close (or whose sizes are held back) is set aside',
-        outs.slice(0, 4),
-        named ? 0.3 : 0.6,
-        named,
-        f.seed,
-      );
-    }),
+        'a piece-sized outline is kept aside only on positive evidence that it is not a piece',
+        [a.reason, ev!],
+        0.5,
+        true,
+      ),
+    ),
   };
 }
+
+/** A strip joined to a piece is part of it when it is at most this share of the piece. */
+const STRIP_SHARE = 0.05;
 
 // ── details ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -938,49 +1072,18 @@ function meaningStep(snap: Snap): AutopilotDecision {
   const mapped = exportedRanks(s.sizes?.map);
   const subj = (sd: SeedId) => subjectOf(seeds, sd);
 
-  // 1 · pieces that cannot be built (offset, leak, sizes not told apart …): set aside
-  const drop = sem.blocked.filter((b) => !ANSWERED.has(b.reason));
-  if (drop.length) {
-    if (presegmented)
-      return stopAt(
-        'meaning',
-        `${drop.length} DXF ${drop.length === 1 ? 'block is' : 'blocks are'} blocked: ${[...new Set(drop.map((b) => b.reason))].join(', ')}`,
-      );
-    const left = new Set(sem.pieces.map((p) => p.seed));
-    for (const b of sem.blocked) left.add(b.seed);
-    for (const b of drop) left.delete(b.seed);
-    if (!left.size)
-      return stopAt(
-        'meaning',
-        `no piece can be built: ${[...new Set(drop.map((b) => b.reason))].join(', ')}`,
-      );
-    return {
-      actions: [
-        {
-          kind: 'piece-edits',
-          edits: [
-            ...i.edits,
-            ...[...new Set(drop.map((b) => b.seed))].map(
-              (seed): PieceEdit => ({ kind: 'not-a-piece', seed }),
-            ),
-          ],
-        },
-      ],
-      assumptions: drop.map((b) =>
-        A(
-          'meaning',
-          'dropped-piece',
-          subj(b.seed),
-          'not a piece',
-          'a piece that cannot be built is set aside (the rest is exported)',
-          [`${b.reason}: ${b.detail.slice(0, 140)}`],
-          0.3,
-          true,
-          b.seed,
-        ),
-      ),
-    };
-  }
+  // 1 · a piece that cannot be built (offset, leak, merged, sizes not told apart …) is a stop:
+  //     a geometry failure is never answered by dropping the piece (Codex #3)
+  const fail = sem.blocked.filter((b) => !ANSWERED.has(b.reason));
+  if (fail.length)
+    return stopAt(
+      'meaning',
+      `${fail.length} ${fail.length === 1 ? 'piece cannot' : 'pieces cannot'} be built: ${fail
+        .slice(0, 3)
+        .map((b) => `${subj(b.seed)} ${b.reason}`)
+        .join('; ')}`,
+    );
+  void presegmented;
 
   // 2 · names, grainlines, folds: one semantics answer for every blocked piece
   const overrides = { ...i.overrides };
@@ -1100,42 +1203,39 @@ function meaningStep(snap: Snap): AutopilotDecision {
     );
     touched = true;
   }
+  // Codex #4: a fold is unfolded only on two evidences — the edge the sheet points at AND a word
+  // or the cutting list; one evidence is a one-click question
+  const listed = new Set((sem.foldList?.bound ?? []).map((b) => b.seed));
+  const hinted = new Set(s.names.filter((n) => n.suggestion?.onFold).map((n) => n.seed));
   for (const b of sem.blocked.filter(
     (x) => x.reason === 'fold-question' || x.reason === 'fold-unresolved',
   )) {
     const q = sem.folds?.find((f) => f.seed === b.seed);
     const e = q && q.suggested != null ? q.edges[q.suggested] : null;
-    if (e) {
-      operatorFold[b.seed] = { a: e.a, b: e.b };
-      out.push(
-        A(
-          'meaning',
-          'fold-edge',
-          subj(b.seed),
-          `unfolded across the ${e.lenMm.toFixed(0)} mm edge`,
-          'the fold edge the sheet points at (or that unfolds cleanly) is taken',
-          [q!.why, ...q!.evidence.slice(0, 2)],
-          0.6,
-          false,
-          b.seed,
-        ),
+    const second = [
+      ...(q?.evidence.length ? [`the sheet says «${q.evidence[0].slice(0, 40)}»`] : []),
+      ...(listed.has(b.seed) ? ['the cutting list'] : []),
+      ...(hinted.has(b.seed) ? ['the AI read "on fold"'] : []),
+    ];
+    if (!e || !second.length)
+      return stopAt(
+        'meaning',
+        `${subj(b.seed)}: is it cut on fold? ${e ? 'only the edge suggests it' : 'no edge is proven'}${q?.evidence.length ? ` (the sheet says «${q.evidence[0].slice(0, 30)}»)` : ''}`,
       );
-    } else {
-      overrides[b.seed] = { ...(overrides[b.seed] ?? {}), unfoldedFold: false };
-      out.push(
-        A(
-          'meaning',
-          'not-a-fold',
-          subj(b.seed),
-          'not a fold (written as drawn)',
-          'a fold no edge can be proven for is written as drawn',
-          [q?.why ?? b.detail.slice(0, 140), ...(q?.evidence ?? []).slice(0, 2)],
-          0.3,
-          true,
-          b.seed,
-        ),
-      );
-    }
+    operatorFold[b.seed] = { a: e.a, b: e.b };
+    out.push(
+      A(
+        'meaning',
+        'fold-edge',
+        subj(b.seed),
+        `unfolded across the ${e.lenMm.toFixed(0)} mm edge`,
+        'a fold with two evidences: the edge the sheet points at, and a word or the cutting list',
+        [q!.why, ...second],
+        0.7,
+        false,
+        b.seed,
+      ),
+    );
     touched = true;
   }
   if (touched)
@@ -1144,43 +1244,33 @@ function meaningStep(snap: Snap): AutopilotDecision {
       assumptions: out,
     };
 
-  // 3 · the cutting list's fold pieces the sheet does not mark
-  if (sem.foldList) {
-    const entries = sem.foldList.entries;
-    return {
-      actions: [
-        {
-          kind: 'semantics',
-          patch: { foldListChecked: [...new Set([...i.foldListChecked, ...entries])] },
-        },
-      ],
-      assumptions: entries.map((e) =>
-        A(
-          'meaning',
-          'cutting-list',
-          `cutting list «${e.slice(0, 60)}»`,
-          'checked, nothing unfolded for it',
-          'a cutting-list fold entry no piece is bound to is checked as listed',
-          [`${sem.foldList!.unfolded} pieces unfolded in this run`],
-          0.3,
-          true,
-        ),
-      ),
-    };
-  }
+  // 3 · the cutting list names fold pieces the sheet does not mark: one evidence → a question
+  if (sem.foldList)
+    return stopAt(
+      'meaning',
+      `the cutting list names pieces cut on fold that the sheet does not mark: ${sem.foldList.entries
+        .slice(0, 2)
+        .map((e) => `«${e.slice(0, 40)}»`)
+        .join(', ')}`,
+    );
 
-  // 4 · the outline: what the text says, else the cut line
+  // 4 · the outline: what the sheet says (text, or a drawn seam line inside the cut line) for
+  //     some pieces holds for the rest; nothing said → a one-click question (prefilled "cut line")
   const open = openQuestions(sem, s.names, i, snap.answersNow);
   if (open.allowance.length) {
-    const said = sem.pieces.find((p) => p.allowance.origin === 'text')?.allowance;
-    const fileAllowance: AllowanceDecision = said
-      ? { ...said, origin: 'operator', evidence: [...said.evidence] }
-      : {
-          meaning: 'cut',
-          allowanceMm: PATIMPORT.defaultAllowanceMm,
-          origin: 'operator',
-          evidence: ['autopilot: no text says what the drawn outline is'],
-        };
+    const said = sem.pieces.find(
+      (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
+    )?.allowance;
+    if (!said)
+      return stopAt(
+        'meaning',
+        'nothing on the sheet says what the drawn outline is — the cut line (allowance included) or the seam line?',
+      );
+    const fileAllowance: AllowanceDecision = {
+      ...said,
+      origin: 'operator',
+      evidence: [...said.evidence],
+    };
     return {
       actions: [{ kind: 'semantics', patch: { fileAllowance } }],
       assumptions: [
@@ -1191,12 +1281,12 @@ function meaningStep(snap: Snap): AutopilotDecision {
           fileAllowance.meaning === 'cut'
             ? 'the drawn outline is the cut line'
             : `the drawn outline is the seam line + ${fileAllowance.allowanceMm} mm`,
-          said
-            ? 'the allowance the sheet states for some pieces holds for the rest'
-            : 'no text and no second drawn line: the outline is taken as the cut line',
-          said ? said.evidence.slice(0, 3) : open.allowance.slice(0, 2).map((u) => u.detail),
-          said ? 0.6 : 0.4,
-          !said,
+          said.origin === 'text'
+            ? 'what the sheet text says for some pieces holds for the rest'
+            : 'the seam line drawn inside the cut line on some pieces holds for the rest',
+          said.evidence.slice(0, 3),
+          0.6,
+          false,
         ),
       ],
     };
@@ -1310,7 +1400,7 @@ function meaningStep(snap: Snap): AutopilotDecision {
 
 // ── fabrics ─────────────────────────────────────────────────────────────────────────────────────
 
-function fabricsStep({ session: s, card, blocker }: Snap): AutopilotDecision {
+function fabricsStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotDecision {
   const a = s.fabrics;
   if (!a) return NONE;
   if (!card.scopes.length) return stopAt('fabrics', 'the BOM has no fabric lines');
@@ -1319,23 +1409,20 @@ function fabricsStep({ session: s, card, blocker }: Snap): AutopilotDecision {
     card.scopes.find((x) => /MAIN$/.test(x.fabricPurpose))?.fabricPurpose ??
     card.scopes[0].fabricPurpose;
   const seeds = [...(s.pieces?.seeds ?? [])];
-  // C7: a cloth on the AI's word alone → main (lining only by the sheet's layer or name)
+  const many = card.scopes.length > 1;
+  const word = (p: string) => p.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase();
+  // C7 + Codex #4: a cloth on the AI's word alone is taken as the AI said (the proven assignments
+  // stay as they are) — a strong assumption when the card has more than one fabric
   const ai = (a.aiOnly ?? []).filter((x) => x.needsConfirm);
-  if (ai.length) {
-    const move = new Set(ai.map((x) => x.seed));
-    const byPurpose: FabricAssignment['byPurpose'] = {};
-    for (const [k, v] of Object.entries(a.byPurpose))
-      byPurpose[k] = k === main ? [...v] : v.filter((sd) => !move.has(sd));
-    byPurpose[main] = [...new Set([...(byPurpose[main] ?? []), ...move])];
+  if (ai.length)
     return {
       actions: [
         {
           kind: 'fabrics',
           assignment: {
             ...a,
-            byPurpose,
             aiOnly: (a.aiOnly ?? []).map((x) =>
-              move.has(x.seed) ? { ...x, purposes: [main], needsConfirm: false } : x,
+              x.needsConfirm ? { ...x, needsConfirm: false } : x,
             ),
           },
         },
@@ -1345,36 +1432,37 @@ function fabricsStep({ session: s, card, blocker }: Snap): AutopilotDecision {
           'fabrics',
           'fabric',
           subjectOf(seeds, x.seed),
-          'main fabric',
-          "a cloth other than main on the AI's word alone is cut from main (lining only by the sheet)",
-          [
-            `AI: ${x.purposes.map((p) => p.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase()).join(', ')}`,
-          ],
+          x.purposes.map(word).join(' + '),
+          "the AI's fabric for a piece the sheet says nothing about",
+          ['AI only'],
           0.5,
-          false,
+          many,
           x.seed,
         ),
       ),
     };
-  }
+  // the plan does not fit the BOM: never reset the whole set — a stop
   const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
-  if (problem) {
-    const all = [...new Set((s.semantics?.pieces ?? []).map((p) => p.seed))];
+  if (problem) return stopAt('fabrics', problem.message);
+  // the offer: main only because nothing names a fabric — kept, strong on a card with several
+  const exported = [...new Set((s.semantics?.pieces ?? []).map((p) => p.seed))];
+  const dflt = defaultedFabrics(a, card.scopes.length, i.assignment != null, exported);
+  if (dflt.length)
     return {
-      actions: [{ kind: 'fabrics', assignment: { ...a, byPurpose: { [main]: all } } }],
-      assumptions: [
+      actions: [{ kind: 'proceed' }],
+      assumptions: dflt.map((sd) =>
         A(
           'fabrics',
           'fabric',
-          'every piece',
-          'main fabric',
-          'the proposed fabrics do not fit the BOM: every piece is cut from main',
-          [problem.message.slice(0, 160)],
+          subjectOf(seeds, sd),
+          'main',
+          'nothing names a fabric for the piece: it is cut from main',
+          ['defaulted'],
           0.4,
-          false,
+          many,
+          sd,
         ),
-      ],
+      ),
     };
-  }
   return NONE;
 }

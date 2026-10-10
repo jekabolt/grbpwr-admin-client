@@ -19,6 +19,8 @@ export type AssumptionKind =
   | 'size-dropped'
   | 'model'
   | 'seed-click'
+  | 'set-aside'
+  | 'size-flag'
   | 'not-a-piece'
   | 'dropped-piece'
   | 'name-code'

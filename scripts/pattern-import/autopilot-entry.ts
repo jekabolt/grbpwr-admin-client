@@ -331,12 +331,28 @@ export async function runCase(c: Case, mutate: string | null) {
     };
     const bySeed = new Map<SeedId, typeof sem.pieces>();
     for (const p of sem.pieces) bySeed.set(p.seed, [...(bySeed.get(p.seed) ?? []), p]);
+    // Codex #6: a BIJECTIVE match truth ↔ export (by the piece's printed label): one exported
+    // piece per truth piece; a second one on the same label is an extra
+    const taken = new Set<TPiece>();
     let matched = 0;
+    let extra = 0;
     for (const [sd, ps] of bySeed) {
-      const t = match(sd);
-      if (!t) continue;
+      const t0 = match(sd);
+      const t = t0 && !taken.has(t0) ? t0 : null;
+      const subject = `seed ${sd}${labelOf(sd) ? ` · ${labelOf(sd)}` : ''}`;
+      if (!t) {
+        extra++;
+        wrong.push({
+          kind: 'piece-set',
+          subject,
+          got: 'exported',
+          want: t0 ? 'one piece per label' : 'no such piece (no truth label)',
+          assumed: assumedOn(sd, ['seed-click', 'name-code']),
+        });
+        continue;
+      }
+      taken.add(t);
       matched++;
-      const subject = `seed ${sd} · ${labelOf(sd)}`;
       const qty = typeof t.qty === 'number' ? t.qty : parseInt(String(t.qty), 10);
       const got = ps.reduce((a, p) => a + p.piecesPerGarment, 0);
       if (Number.isFinite(qty) && got !== qty)
@@ -347,14 +363,17 @@ export async function runCase(c: Case, mutate: string | null) {
           want: String(qty),
           assumed: assumedOn(sd, ['quantity', 'fold-edge', 'not-a-fold']),
         });
-      if (t.fold === true && !ps.some((p) => p.unfoldedFold))
+      // the fold, both ways: a fold piece not unfolded, a piece unfolded that is not cut on fold
+      const unfolded = ps.some((p) => p.unfoldedFold);
+      if ((t.fold === true) !== unfolded && (t.fold === true || t.fold === false))
         wrong.push({
           kind: 'fold',
           subject,
-          got: 'not unfolded',
-          want: 'unfolded',
+          got: unfolded ? 'unfolded' : 'not unfolded',
+          want: t.fold === true ? 'unfolded' : 'as drawn',
           assumed:
-            assumedOn(sd, ['not-a-fold', 'cutting-list']) ?? assumedOn(null, ['cutting-list']),
+            assumedOn(sd, ['fold-edge', 'not-a-fold', 'cutting-list']) ??
+            assumedOn(null, ['cutting-list']),
         });
       const fab = fabricOf(t.fabric);
       const inFab = (s.fabrics?.byPurpose[fab] ?? []).includes(sd);
@@ -370,25 +389,30 @@ export async function runCase(c: Case, mutate: string | null) {
           assumed: assumedOn(sd, ['fabric']) ?? assumedOn(null, ['fabric'], 'every piece'),
         });
     }
-    // a real piece set aside
-    for (const a of as)
-      if (
-        (a.kind === 'not-a-piece' || a.kind === 'dropped-piece') &&
-        a.seed != null &&
-        match(a.seed)
-      )
-        wrong.push({
-          kind: 'piece',
-          subject: a.subject,
-          got: 'not exported',
-          want: 'a piece',
-          assumed: a.kind,
-        });
+    // a truth piece the export misses: set aside by the autopilot (with or without a label), by
+    // the reader, or never found
+    const want = c.truth?.expect ?? tps.length;
+    const asides = as.filter((a) => ['set-aside', 'not-a-piece', 'dropped-piece'].includes(a.kind));
+    const labelled = (a: Assumption) =>
+      tps.find((t) => a.subject.toLowerCase().includes(` · ${norm(t.label)}`)) ?? null;
+    for (let k = 0; k < Math.max(0, want - matched); k++) {
+      const a = asides[k] ?? null;
+      wrong.push({
+        kind: 'piece-set',
+        subject: a
+          ? `${a.subject}${labelled(a) ? ' (a truth label)' : ''}`
+          : `truth piece ${k + 1}`,
+        got: 'missing',
+        want: 'exported',
+        assumed: a ? a.kind : null,
+      });
+    }
     rec.truth = {
-      pieces: c.truth?.expect ?? tps.length,
+      pieces: want,
       matched,
       exported: bySeed.size,
-      unmatchedExported: bySeed.size - matched,
+      extra,
+      missing: Math.max(0, want - matched),
     };
     // the outline
     const inc = truth.seam_allowance?.included;

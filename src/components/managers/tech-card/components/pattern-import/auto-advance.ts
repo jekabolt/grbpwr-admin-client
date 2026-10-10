@@ -125,7 +125,13 @@ export type OfferCtx = Pick<
   scopes: number;
   /** The operator changed the fabrics assignment (inputs.assignment). */
   fabricsEdited: boolean;
+  /** A10: the tile sheet picked on the sheet step (inputs.sheetPicked); absent = not asked. */
+  sheetPicked?: number | null;
 };
+
+/** The tile sheets a file carries (a Burda file: several; most files: one). */
+export const tileSheets = (pages: readonly Pick<PageClassification, 'cls' | 'sheet'>[]) =>
+  new Set(pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0)).size;
 
 /**
  * What a step OFFERS without blocking "next" on it, worded — null when there is nothing. The
@@ -143,10 +149,15 @@ export function stepOffer(s: OfferCtx): string | null {
         return `${w.uncertain} ${w.uncertain === 1 ? 'page' : 'pages'} read without certainty — check the role, or go on`;
       return null;
     }
-    case 'sheet':
+    case 'sheet': {
+      // A10 (Codex #2): which of several tile sheets is never passed silently
+      const n = tileSheets(s.pages);
+      if (n > 1 && s.sheetPicked === null)
+        return `the file carries ${n} tile sheets — pick the one this card is`;
       return waitingItems(s.sheet?.clean?.items ?? [])
         ? 'suggested to set aside on the sheet — accept, or go on with the lines kept'
         : null;
+    }
     case 'sizes': {
       const n = sizeFlags(s.chains?.ambiguities, s.sizes?.expected?.n).length;
       return n

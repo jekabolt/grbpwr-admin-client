@@ -117,6 +117,11 @@ export type Inputs = {
   gridOverride: GridOverride | undefined;
   /** The tile sheet being assembled (a Burda file carries several). */
   sheetIndex: number;
+  /**
+   * A10 (Codex #2): the tile sheet was PICKED (the sheet step's own control, or the autopilot on
+   * evidence) — a file with several tile sheets asks which one until then; null = not picked.
+   */
+  sheetPicked: number | null;
   /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
   residualsAccepted: boolean;
   legend: LegendEdit[];
@@ -171,6 +176,7 @@ const EMPTY_INPUTS: Inputs = {
   scaleConfirmed: false,
   gridOverride: undefined,
   sheetIndex: 0,
+  sheetPicked: null,
   residualsAccepted: false,
   legend: [],
   legendConfirmed: [],
@@ -612,6 +618,7 @@ export function useImportSession(deps: {
           patchInputs({
             gridOverride: ev.override,
             sheetIndex: ev.sheet,
+            sheetPicked: ev.sheet,
             residualsAccepted: false,
             ...sheetInputs,
           });
@@ -619,6 +626,7 @@ export function useImportSession(deps: {
             ...iRef.current,
             gridOverride: ev.override,
             sheetIndex: ev.sheet,
+            sheetPicked: ev.sheet,
             ...sheetInputs,
           };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
@@ -1180,6 +1188,7 @@ export function useImportSession(deps: {
         cleanEdits: inputs.cleanEdits,
         scopes: card.scopes.length,
         fabricsEdited: inputs.assignment != null,
+        sheetPicked: inputs.sheetPicked,
       });
 
   // ── N1 auto-advance: forward through every step that asks nothing ─────────────────────

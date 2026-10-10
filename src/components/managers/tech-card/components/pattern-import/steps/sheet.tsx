@@ -198,6 +198,24 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                   label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
                 }))}
               />
+              {/* A10: a file with several sheets asks which one — this one is one click */}
+              {inputs.sheetPicked === null && (
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  className='mt-1'
+                  disabled={!!session.busy}
+                  onClick={() =>
+                    void api.dispatch({
+                      type: 'sheet',
+                      sheet: sheet.id,
+                      override: inputs.gridOverride,
+                    })
+                  }
+                >
+                  import sheet {sheet.id + 1}
+                </Button>
+              )}
             </Field>
           )}
           <Row label='tiles placed' value={sheet.poses.length} />
