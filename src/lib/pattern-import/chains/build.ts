@@ -19,7 +19,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
-import { furniture, overprintLines } from './classify';
+import { furniture, GREY_COLOUR_ONLY, overprintLines } from './classify';
 import { overlaidFiles } from './link';
 import { makeChains } from './make';
 import { seamPens, type SeamPen } from './seam';
@@ -47,13 +47,14 @@ export function buildChainsDetailed(
   const mk = makeChains(sheet, opts);
   progress?.(1, 3, 'classes');
   const styles = new Map<number, Style>(sheet.styles.map((s) => [s.id, s]));
-  const furn = furniture(mk.chains, styles, sheet.poses, sheet.texts);
-  if (overlaidFiles(sheet)) {
-    const pathFile = new Map(sheet.paths.map((p) => [p.id, p.src.file]));
-    const fileOf = (i: number) => pathFile.get(mk.chains[i].ranges[0]?.path ?? -1) ?? '';
-    for (const i of overprintLines(mk.chains, fileOf))
+  const pathFile = new Map(sheet.paths.map((p) => [p.id, p.src.file]));
+  const fileOf = overlaidFiles(sheet)
+    ? (i: number) => pathFile.get(mk.chains[i].ranges[0]?.path ?? -1) ?? ''
+    : undefined;
+  const furn = furniture(mk.chains, styles, sheet.poses, sheet.texts, fileOf);
+  if (fileOf)
+    for (const i of overprintLines(mk.chains, fileOf, furn))
       furn[i] = furn[i] ?? 'overprint (drawn over every file)';
-  }
   const opLinked = mk.work.map((w) => {
     const ops = new Set(w.items.map((l) => l.it.op));
     return w.items.length >= 3 && ops.size < w.items.length / 2;
@@ -69,7 +70,7 @@ export function buildChainsDetailed(
     fileNames: extras.fileNames,
   });
   progress?.(2, 3, 'legend');
-  const set = toChainSet(rec, mk.stats, seamPens(rec, styles));
+  const set = toChainSet(rec, mk.stats, seamPens(rec, styles), styles);
   progress?.(3, 3);
   return { set, recover: rec };
 }
@@ -81,6 +82,7 @@ function toChainSet(
   rec: RecoverOut,
   stats: { items: number; freeBeads: number; ignoredPaths: number },
   seam: SeamPen[] = [],
+  styles?: ReadonlyMap<number, Style>,
 ): ChainSet {
   const chains: Chain[] = rec.chains;
   const classes: LineClass[] = [];
@@ -186,16 +188,20 @@ function toChainSet(
     if (a) a.push(id);
     else byWhy.set(key, [id]);
   }
-  for (const [, ids] of byWhy)
+  for (const [why, ids] of byWhy) {
+    const greyOnly = why.startsWith(GREY_COLOUR_ONLY);
+    const rgb = greyOnly ? styles?.get(chains[ids[0]].style)?.strokeRgb : null;
     classes.push({
       id: classes.length,
       role: 'ignore',
       sizeLabel: null,
       chains: ids,
       totalLengthMm: total(ids),
-      evidence: [],
-      confidence: 0.8,
+      evidence: rgb ? [{ kind: 'colour-only', rgb }] : [],
+      // colour alone is no proof (a grey cut line): the legend asks
+      confidence: greyOnly ? 0.4 : 0.8,
     });
+  }
   const warnings = [
     `chains ${chains.length} from ${stats.items} items (${stats.ignoredPaths} paths not line work, ${stats.freeBeads} loose beads)`,
     noSizes
