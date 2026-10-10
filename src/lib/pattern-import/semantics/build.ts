@@ -51,6 +51,7 @@ import type {
   SemanticsInput,
   SemanticsOutput,
   SizeRun,
+  Unproven,
 } from '../types';
 import { PATIMPORT } from '../types';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
@@ -75,12 +76,19 @@ import {
   compose,
   reflection,
 } from './geom';
-import { identityCheck, readName } from './names';
+import { identityCheck, isTitleLabel, readName } from './names';
 import { cleanTracedOutline, offsetContour } from './offset';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
 type DxfExtra = {
-  dxf?: { identity?: string; outerIsSeam?: boolean; features?: Feature[]; instances?: number };
+  dxf?: {
+    identity?: string;
+    outerIsSeam?: boolean;
+    features?: Feature[];
+    instances?: number;
+    /** The block's own QUANTITY label (AAMA/CLO), if it carries one. */
+    quantity?: number | null;
+  };
 };
 type Blocked = SemanticsOutput['blocked'][number];
 
@@ -114,6 +122,21 @@ function textsOf(c: PieceCandidate, byId: Map<number, IRText>): string[] {
     if (t && !out.includes(t.text)) out.push(t.text);
   }
   return out;
+}
+
+/**
+ * D3: which texts inside the candidate are its title label (`isTitleLabel`), by text. Lazy: only a
+ * piece named from its printed text pays for it (a DXF block or an override never asks).
+ */
+function titleTest(c: PieceCandidate, byId: Map<number, IRText>): (text: string) => boolean {
+  let titles: Set<string> | null = null;
+  return (text) => {
+    if (!titles) {
+      const inside = c.textsInside.flatMap((id) => byId.get(id) ?? []);
+      titles = new Set(inside.filter((t) => isTitleLabel(t, inside, c.bbox)).map((t) => t.text));
+    }
+    return titles.has(text);
+  };
 }
 
 /** Points of the fold edge removed from a wall polyline (they are interior once unfolded). */
@@ -221,6 +244,8 @@ export function buildPieceSpecsDetailed(
   const traced = !!input.traced;
   const warnings: string[] = [];
   const blocked: Blocked[] = [];
+  /** D3: what the drawing does not prove, per seed — see `Unproven`. */
+  const unproven: Unproven[] = [];
   const notes: Record<PieceKey, string[]> = {};
   const textById = new Map(sheet.texts.map((t) => [t.id, t]));
 
@@ -278,10 +303,10 @@ export function buildPieceSpecsDetailed(
         bad.c.outcome === 'refused'
           ? `size ${bad.card.token}: ${bad.c.gradeDetail ?? 'its outline could not be told apart from the other sizes'}`
           : r === 'leak'
-          ? `outline of size ${bad.card.token} is not closed${bad.c.leakAt ? ` near (${bad.c.leakAt.x.toFixed(0)}, ${bad.c.leakAt.y.toFixed(0)}) mm` : ''}`
-          : r === 'merged'
-            ? 'two seeds share one region — split them'
-            : `area ${(bad.c.areaMm2 / 100).toFixed(1)} cm² is below ${PATIMPORT.minPieceAreaMm2 / 100} cm²`,
+            ? `outline of size ${bad.card.token} is not closed${bad.c.leakAt ? ` near (${bad.c.leakAt.x.toFixed(0)}, ${bad.c.leakAt.y.toFixed(0)}) mm` : ''}`
+            : r === 'merged'
+              ? 'two seeds share one region — split them'
+              : `area ${(bad.c.areaMm2 / 100).toFixed(1)} cm² is below ${PATIMPORT.minPieceAreaMm2 / 100} cm²`,
       );
       continue;
     }
@@ -291,6 +316,7 @@ export function buildPieceSpecsDetailed(
       dxfIdentity: sorted[0].dxf?.identity ?? null,
       texts,
       isSizeToken,
+      isTitle: titleTest(sorted[sorted.length - 1], textById),
     });
     if (!name) {
       block(
@@ -379,6 +405,9 @@ export function buildPieceSpecsDetailed(
     let allowMm = A.allowanceMm > 0 ? A.allowanceMm : PATIMPORT.defaultAllowanceMm;
     if (!(A.allowanceMm > 0))
       pieceNotes.push(`no allowance known: the other line is ${allowMm} mm (default)`);
+    // D3: the sheet's word (text), two drawn lines (measured), the operator, or a DXF layer 14
+    // outline (a seam line by the format; decision 7 gives its amount). Else the run asks.
+    const allowanceProven = A.origin !== 'default' || dxfSeamOuter;
 
     // fold
     const foldText = p.texts.some(saysFold);
@@ -634,16 +663,23 @@ export function buildPieceSpecsDetailed(
     // times per WRITTEN identity — what our writer emits for × per garment n and what the card
     // counts. That count is the drawing's own statement, so it is not re-read as a pair.
     const drawnCopies = Math.max(1, ...p.cands.map(({ c }) => c.dxf?.instances ?? 1));
+    // D3: a count the sheet proves — printed "cut n" / "pair", else the DXF block's QUANTITY label
+    // (a CAD file draws every cut piece, so an unlabelled block is cut once), else an AI name
+    // auto-accepted on printed "cut n" evidence. Nothing → the shape suggests, the operator says.
+    const isDxf = !!largest.dxf;
+    const aiQ = qtyText == null && !saysPair ? input.aiQuantity?.[seed] : undefined;
+    const qty = qtyText ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
     const pp =
       drawnCopies >= 2
         ? {
             pair: false,
             perIdentity: drawnCopies,
             why: `block inserted ${drawnCopies} times — cut ${drawnCopies}`,
+            proven: true,
           }
         : planPair({
-            qty: qtyText,
-            saysPair,
+            qty,
+            saysPair: saysPair || !!aiQ?.pair,
             symmetric,
             onFold: anyFold,
             namedHand: !!name.hand,
@@ -661,6 +697,32 @@ export function buildPieceSpecsDetailed(
       hand = 'L';
       mode = 'derived';
     } else mode = 'single';
+    const ppg = ov.piecesPerGarment ?? pp.perIdentity;
+    const unprovenHere: Unproven[] = [];
+    if (!allowanceProven)
+      unprovenHere.push({
+        seed,
+        kind: 'allowance',
+        shown: `${A.meaning}+${allowMm}`,
+        detail:
+          'no allowance text and no second drawn line: is the outline the cut or the seam line?',
+      });
+    const qtyProven =
+      pp.proven || mode === 'drawn' || ov.pairHand !== undefined || ov.piecesPerGarment != null;
+    if (!qtyProven)
+      unprovenHere.push({
+        seed,
+        kind: 'quantity',
+        shown: mode === 'derived' ? `pair×${ppg}` : `×${ppg}`,
+        detail: pp.why,
+      });
+    if (name.fromNote)
+      unprovenHere.push({
+        seed,
+        kind: 'name',
+        shown: [name.code, ...name.mods].join('_'),
+        detail: `read from the note «${name.fromNote}», not a title label`,
+      });
 
     const base = {
       code: name.code,
@@ -671,7 +733,7 @@ export function buildPieceSpecsDetailed(
       variant: null,
       unfoldedFold: anyFold,
       // per WRITTEN identity: both hands of a pair count for one hand each (contract §3)
-      piecesPerGarment: ov.piecesPerGarment ?? pp.perIdentity,
+      piecesPerGarment: ppg,
       allowance: { ...A, allowanceMm: allowMm },
       // fabrics/ (F7) assigns the fabric purposes; semantics does not guess them
       fabrics: [] as string[],
@@ -765,6 +827,7 @@ export function buildPieceSpecsDetailed(
       notes[s.identity] = pieceNotes;
       pieces.push(s);
     }
+    unproven.push(...unprovenHere);
   }
   progress?.(preps.length, preps.length);
 
@@ -857,8 +920,15 @@ export function buildPieceSpecsDetailed(
     return out.length ? out : undefined;
   };
 
+  // a blocked piece is not exported: its open questions wait until it is
+  const written = new Set(unique.map((s) => s.seed));
   return {
-    output: { pieces: unique, blocked, warnings },
+    output: {
+      pieces: unique,
+      blocked,
+      warnings,
+      unproven: unproven.filter((u) => written.has(u.seed)),
+    },
     wallsOf,
     derivedOf,
     notes,

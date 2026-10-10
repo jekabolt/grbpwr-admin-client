@@ -852,6 +852,12 @@ export type SemanticsInput = {
     >
   >;
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /**
+   * D3: per seed, the quantity an AI name auto-accepted at T backs with printed evidence
+   * (`cut-qty`) — "cut n" read off the sheet next to the piece. It counts as the sheet's word; a
+   * bare model call without that evidence does not.
+   */
+  aiQuantity?: Partial<Record<SeedId, { qty: number; pair: boolean }>>;
 };
 
 export type SemanticsOutput = {
@@ -859,6 +865,27 @@ export type SemanticsOutput = {
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
   blocked: { seed: SeedId; reason: BlockReason; detail: string }[];
   warnings: string[];
+  /**
+   * D3 (10.10): what the drawing does not prove. The piece is built as shown, but the export waits
+   * for the operator — a per-piece answer (an override), or "confirm as shown" (the wizard keeps
+   * those confirmations, keyed by `shown`, so a value that changes asks again).
+   */
+  unproven: Unproven[];
+};
+
+/**
+ * One answer the sheet does not give (D3):
+ *   allowance — no text, no drawn cut + seam pair, no DXF layer says what the outline is;
+ *   quantity  — no "cut n" / "pair", no DXF block count, no operator answer;
+ *   name      — the code comes from sheet text that is not the piece's title (a construction note).
+ */
+export type Unproven = {
+  seed: SeedId;
+  kind: 'allowance' | 'quantity' | 'name';
+  /** What the piece is built with now ("seam+10", "pair×1", "PCK") — a confirmation is of this. */
+  shown: string;
+  /** Why it is a question, in words (the note quoted, the shape that suggests a pair). */
+  detail: string;
 };
 
 export type BlockReason =

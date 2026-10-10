@@ -73,6 +73,12 @@ export type PairPlan = {
   /** Pieces per garment of EACH written identity. */
   perIdentity: number;
   why: string;
+  /**
+   * D3: the count is the sheet's word (a printed "cut n" / "pair"). False = a suggestion from the
+   * shape the operator confirms: no quantity printed → an asymmetric outline is offered as a pair
+   * (fronts, sleeves), a symmetric one or a fold piece as one.
+   */
+  proven: boolean;
 };
 
 /**
@@ -94,22 +100,43 @@ export function planPair(opts: {
       pair: false,
       perIdentity: Math.max(1, qty && qty % 2 === 0 ? qty / 2 : 1),
       why: 'hand in the name',
+      proven: qty != null,
     };
   if (saysPair) {
     const n = qty && qty >= 2 ? qty : 2;
-    return { pair: true, perIdentity: Math.max(1, Math.floor(n / 2)), why: 'the note says pair' };
+    return {
+      pair: true,
+      perIdentity: Math.max(1, Math.floor(n / 2)),
+      why: 'the note says pair',
+      proven: true,
+    };
   }
-  if (qty == null) return { pair: false, perIdentity: 1, why: 'no quantity printed — 1' };
+  if (qty == null)
+    return !symmetric && !onFold
+      ? {
+          pair: true,
+          perIdentity: 1,
+          why: 'no quantity printed — the outline is not symmetric: a pair? (suggested)',
+          proven: false,
+        }
+      : {
+          pair: false,
+          perIdentity: 1,
+          why: `no quantity printed — 1? (suggested${onFold ? ', on fold' : ', symmetric outline'})`,
+          proven: false,
+        };
   if (qty >= 2 && qty % 2 === 0 && !symmetric && !onFold)
     return {
       pair: true,
       perIdentity: qty / 2,
       why: `cut ${qty} of an asymmetric piece = ${qty / 2} pair(s)`,
+      proven: true,
     };
   return {
     pair: false,
     perIdentity: qty,
     why: `cut ${qty}${symmetric ? ' (symmetric piece)' : ''}${onFold ? ' (on fold)' : ''}`,
+    proven: true,
   };
 }
 

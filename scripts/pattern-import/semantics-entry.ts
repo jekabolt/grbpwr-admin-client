@@ -33,6 +33,7 @@ import {
   applyAffine,
   sampleAlong,
 } from 'lib/pattern-import/semantics/geom';
+import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import {
   createProposeSizeMap,
   needsConfirmation,
@@ -728,10 +729,28 @@ export async function main(): Promise<number> {
       [{ pts: grainLine(120, 100, 450), closed: false, role: 'grain' }],
       ['FRONT'],
     );
-    const d = buildPieceSpecsDetailed(input(F, SEAM10));
+    // D3: no quantity printed on an asymmetric outline → a PAIR is suggested, unproven
+    const d0 = buildPieceSpecsDetailed(input(F, SEAM10));
+    const q0 = d0.output.unproven.find((u) => u.kind === 'quantity');
     ck(
-      d.output.pieces.length === 1 && d.output.blocked.length === 0,
-      'one piece, nothing blocked',
+      d0.output.pieces.map((x) => x.identity).join(',') === 'FP_L,FP_R' && q0?.shown === 'pair×1',
+      'D3: no "cut n", asymmetric outline → pair suggested (FP_L + FP_R), quantity unproven',
+      `${d0.output.pieces.map((x) => x.identity)} ${JSON.stringify(q0)}`,
+    );
+    ck(
+      !d0.output.unproven.some((u) => u.kind === 'allowance' || u.kind === 'name'),
+      'D3: operator allowance and the title «FRONT» → no allowance / name question',
+      JSON.stringify(d0.output.unproven),
+    );
+    // the operator answers "single": that is the piece's count now (proven)
+    const d = buildPieceSpecsDetailed(
+      input(F, SEAM10, { pieceOverrides: { 1: { pairHand: null } } }),
+    );
+    ck(
+      d.output.pieces.length === 1 &&
+        d.output.blocked.length === 0 &&
+        !d.output.unproven.some((u) => u.kind === 'quantity'),
+      'one piece, nothing blocked (operator: single — no question left)',
       JSON.stringify(d.output.blocked),
     );
     const p = d.output.pieces[0];
@@ -910,6 +929,72 @@ export async function main(): Promise<number> {
     json.d3 = { ids, gate: g.report.checks.map((c) => [c.id, c.ok, c.value]) };
   }
 
+  head('D3q what the drawing does not prove is asked (10.10): allowance, title vs note');
+  {
+    // title labels vs construction notes, on the corpus' own words
+    const T = (text: string, x: number, y: number, f = 3.5) => ({
+      text,
+      fontSizeMm: f,
+      anchor: { x, y },
+      bbox: { minX: x, minY: y, maxX: x + text.length * f * 0.6, maxY: y + f },
+    });
+    const box = { minX: 0, minY: 0, maxX: 400, maxY: 600 };
+    const title = (t: ReturnType<typeof T>, all: ReturnType<typeof T>[]) =>
+      isTitleLabel(t, all, box);
+    const front = [T('FRONT', 150, 300, 14)];
+    ck(title(front[0], front), 'D3: «FRONT» alone in the piece → its title');
+    const palto = [
+      T('Tascheneingriff', 50, 200),
+      T('Besatz', 250, 100),
+      T('Taschenbeutel', 60, 400),
+    ];
+    ck(
+      !palto.some((t) => title(t, palto)),
+      'D3: palto front — «Tascheneingriff» (note), «Besatz» vs «Taschenbeutel» (two pieces named) → no title',
+    );
+    const cb = [T('ЗАДНЯЯ', 100, 300, 3.3), T('СЕРЕДИНА СГИБ', 100, 304.5, 3.3)];
+    ck(
+      !title(cb[0], cb),
+      'D3: «ЗАДНЯЯ» printed over «СЕРЕДИНА СГИБ» is one note (centre back), not «back»',
+    );
+    const fac = [T('Besatz Umbruch', 100, 100)];
+    ck(!title(fac[0], fac), 'D3: «Besatz Umbruch» (facing fold line) → note');
+    const back = [T('Спинка со сгибом', 100, 300, 5)];
+    ck(title(back[0], back), 'D3: «Спинка со сгибом» → title (on fold is a cut instruction)');
+    const wb = [T('Outer Waistband', 100, 100, 4.7), T('CENTRE BACK FOLD', 100, 200)];
+    ck(title(wb[0], wb), 'D3: «Outer Waistband» stays the title next to «CENTRE BACK FOLD»');
+
+    // allowance: nothing on the sheet → every written piece asks; the operator's answer closes it
+    const F = fx();
+    addFamily(
+      F,
+      1,
+      bodice,
+      0,
+      [{ pts: grainLine(120, 100, 450), closed: false, role: 'grain' }],
+      ['Tascheneingriff'],
+    );
+    const DEFAULT: AllowanceDecision = { ...SEAM10, origin: 'default' };
+    const d = buildPieceSpecsDetailed(input(F, DEFAULT));
+    const kinds = d.output.unproven
+      .map((u) => u.kind)
+      .sort()
+      .join(',');
+    ck(
+      kinds === 'allowance,name,quantity',
+      'D3: no allowance evidence, a name off a note, no count → three questions on the piece',
+      JSON.stringify(d.output.unproven),
+    );
+    const d2 = buildPieceSpecsDetailed(
+      input(F, SEAM10, { pieceOverrides: { 1: { piecesPerGarment: 1, pairHand: null } } }),
+    );
+    ck(
+      d2.output.unproven.map((u) => u.kind).join(',') === 'name',
+      'D3: operator allowance + an operator count → only the note name still asks',
+      JSON.stringify(d2.output.unproven),
+    );
+  }
+
   head('D4 grain: missing → blocked until two clicks; one per block');
   {
     const F = fx();
@@ -923,6 +1008,7 @@ export async function main(): Promise<number> {
     );
     const d2 = buildPieceSpecsDetailed({
       ...inp,
+      pieceOverrides: { 1: { pairHand: null } },
       operatorGrain: { 1: { a: { x: 120, y: 100 }, b: { x: 120, y: 400 } } },
     });
     ck(
@@ -1078,7 +1164,7 @@ export async function main(): Promise<number> {
           aiConfidence: 0.91,
           displayName: 'sleeve M',
         },
-        2: { code: 'SL', mods: [], nameOrigin: 'operator' },
+        2: { code: 'SL', mods: [], nameOrigin: 'operator', pairHand: null },
       },
     });
     const d = buildPieceSpecsDetailed(inp);

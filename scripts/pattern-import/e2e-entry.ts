@@ -12,11 +12,14 @@ import { pathToFileURL } from 'node:url';
 
 import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
 import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
+import { readPieceText } from 'lib/pattern-import/dictionary';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
+import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import type {
   CardSize,
   DraftScopeTarget,
+  IRText,
   PieceEdit,
   PieceFamily,
   PtMm,
@@ -67,6 +70,12 @@ type Case = {
   meaning?: 'seam' | 'cut';
   /** The F11 synthetic scan: its vector truth is drawn under the overlays (not registered). */
   scanTruth?: boolean;
+  /**
+   * D3: the operator's answer when the run asks what the drawn outline is (no allowance evidence).
+   * From the E2E-1010 truth: blazer, wm and leonie draw the cut line (allowance included).
+   * Absent = the operator confirms what is shown.
+   */
+  outline?: 'cut' | 'seam';
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -174,6 +183,7 @@ export const CASES: Case[] = [
     card: ['M'],
     truth: { id: 'blazer' },
     clicks: 'blazer',
+    outline: 'cut',
   },
   {
     id: 'r4454',
@@ -202,6 +212,7 @@ export const CASES: Case[] = [
     card: ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
     truth: { id: 'wm_kka_15_01' },
     clicks: 'wm',
+    outline: 'cut',
   },
   {
     id: 'polupalto-sheetA',
@@ -661,7 +672,7 @@ export async function runCase(c: Case): Promise<Rec> {
         ),
       );
     // 6 · meaning (no AI names in a headless run: printed text names only)
-    const fileAllowance = {
+    let fileAllowance: StageIO['semantics']['in']['fileAllowance'] = {
       meaning: c.meaning ?? ('seam' as const),
       allowanceMm: PATIMPORT.defaultAllowanceMm,
       origin: c.meaning ? ('operator' as const) : ('default' as const),
@@ -742,12 +753,69 @@ export async function runCase(c: Case): Promise<Rec> {
       });
     }
     rec.droppedAtMeaning = dropped;
+    // D3: what the drawing does not prove — the wizard stops on it (footer) until answered.
+    // Allowance: one explicit answer for the file ("cut line" / "seam line + N mm"); quantities and
+    // sheet-note names: one bulk "confirm all as shown" (per-piece corrections are the operator's).
+    const lab = labelOf(seedsNow);
+    const askAllowance = sem.unproven.filter((u) => u.kind === 'allowance');
+    const confirm: Record<string, unknown> = {};
+    if (askAllowance.length) {
+      const shown = askAllowance[0].shown;
+      const meaning = c.outline ?? (shown.startsWith('cut') ? 'cut' : 'seam');
+      confirm.allowance = { pieces: askAllowance.length, shown, answer: meaning };
+      rec.ops.push(
+        `answer the outline question: ${meaning === 'cut' ? 'cut line' : `seam line + ${PATIMPORT.defaultAllowanceMm} mm`} (shown ${shown}, ${askAllowance.length} pieces)`,
+      );
+      fileAllowance = {
+        meaning,
+        allowanceMm: PATIMPORT.defaultAllowanceMm,
+        origin: 'operator',
+        evidence: [],
+      };
+      sem = await run('semantics', {
+        fileAllowance,
+        pieceOverrides: overrides,
+        operatorGrain: grain,
+      });
+    }
+    const asks = sem.unproven.filter((u) => u.kind !== 'allowance');
+    confirm.quantity = asks
+      .filter((u) => u.kind === 'quantity')
+      .map((u) => `${lab(u.seed)}=${u.shown}`);
+    confirm.name = asks
+      .filter((u) => u.kind === 'name')
+      .map((u) => `${lab(u.seed)}=${u.shown} (${u.detail})`);
+    confirm.leftAfterAllowance = sem.unproven.filter((u) => u.kind === 'allowance').length;
+    confirm.clicks = (askAllowance.length ? 1 : 0) + (asks.length ? 1 : 0);
+    rec.confirm = confirm;
+    if (asks.length)
+      rec.ops.push(
+        `confirm all as shown: ${(confirm.quantity as string[]).length} quantities, ${(confirm.name as string[]).length} names (1 click)`,
+      );
     rec.semFinal = {
       pieces: new Set(sem.pieces.map((p) => p.seed)).size,
       specs: sem.pieces.length,
       blocked: sem.blocked.map((b) => `${b.reason}:${b.detail.slice(0, 80)}`),
       pieceInfo: sem.pieces.map((p) => ({
         identity: p.identity,
+        seed: p.seed,
+        label: labelOf(seedsNow)(p.seed),
+        // D3 probe: every text inside the piece that names one, T = title label, N = a note
+        texts: (() => {
+          const f = pc.families.find((x) => x.seed === p.seed);
+          const cand = f?.candidates[f.candidates.length - 1];
+          // the session's own sheet (the stage output omits texts): a probe may look inside
+          const texts = (s as unknown as { sheet: { texts: IRText[] } }).sheet?.texts ?? [];
+          const byId = new Map(texts.map((t) => [t.id, t]));
+          const inside = (cand?.textsInside ?? []).flatMap((id) => byId.get(id) ?? []);
+          return inside
+            .filter((t) => process.env.E2E_TEXTS_ALL || readPieceText(t.text).code)
+            .map(
+              (t) =>
+                `${isTitleLabel(t, inside, cand!.bbox) ? 'T' : 'N'}:${readPieceText(t.text).code}:${t.text.slice(0, 40)}@${t.fontSizeMm.toFixed(1)}`,
+            )
+            .slice(0, process.env.E2E_TEXTS_ALL ? 60 : 8);
+        })(),
         name: p.displayName,
         nameOrigin: p.nameOrigin,
         ppg: p.piecesPerGarment,
