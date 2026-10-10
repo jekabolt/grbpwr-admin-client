@@ -39,6 +39,7 @@ import {
   PATIMPORT,
   type AutopilotAssumption,
   type AutopilotRecord,
+  type AutopilotValue,
   type ContourSignature,
   type ConversionManifest,
   type EmbedManifestFn,
@@ -461,6 +462,16 @@ function validateAutopilot(x: unknown): AutopilotRecord | undefined {
       !isBool(a.strong)
     )
       continue;
+    // the replayable value: plain JSON, bounded; anything else is left out (the entry stays)
+    let value: AutopilotValue | undefined;
+    if (a.value !== undefined) {
+      try {
+        const text = JSON.stringify(a.value);
+        if (text !== undefined && text.length <= 2048) value = JSON.parse(text) as AutopilotValue;
+      } catch {
+        value = undefined;
+      }
+    }
     assumptions.push({
       step: a.step,
       kind: a.kind,
@@ -470,6 +481,7 @@ function validateAutopilot(x: unknown): AutopilotRecord | undefined {
       evidence: [...(a.evidence as string[])],
       confidence: a.confidence,
       strong: a.strong,
+      ...(value !== undefined ? { value } : {}),
     });
   }
   return { v: 1, assumptions };

@@ -1528,7 +1528,20 @@ export type AutopilotAssumption = {
   /** 0..1, the policy's own confidence in the answer. */
   confidence: number;
   strong: boolean;
+  /**
+   * The answer itself, replayable: the value the wizard input took (a factor, a size map entry, a
+   * grain's two ends, a code …), keyed by `kind` + `subject`. Plain JSON, ≤ 2 KB written.
+   */
+  value?: AutopilotValue;
 };
+
+export type AutopilotValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AutopilotValue[]
+  | { [k: string]: AutopilotValue };
 
 export type AutopilotRecord = { v: 1; assumptions: AutopilotAssumption[] };
 

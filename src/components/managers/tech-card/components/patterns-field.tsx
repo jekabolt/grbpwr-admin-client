@@ -70,6 +70,7 @@ import {
 } from 'lib/pattern-import/fabrics/followup';
 import type { ConversionManifest } from 'lib/pattern-import/types';
 import type { FollowUpJob } from './pattern-import/follow-up';
+import { AutopilotPill } from './pattern-import/autopilot/view';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 
@@ -1022,6 +1023,11 @@ export function PatternsField({
                   <Pill tone='mut' title={convertedTitle(converted)}>
                     converted
                   </Pill>
+                )}
+                {/* A10: the importer's autopilot answered in the operator's place — what it assumed,
+                    read-only, strong ones first. */}
+                {converted?.autopilot && (
+                  <AutopilotPill assumptions={converted.autopilot.assumptions} />
                 )}
                 {/* F14: манифест написан для ДРУГОЙ карточки — его размеры здесь не доверены
                     (use-block-sizes manifestSizeTrusted), сам лист читается. */}

@@ -15,6 +15,7 @@
 // stop.
 import type {
   AllowanceDecision,
+  AutopilotValue,
   BackgroundKind,
   FabricAssignment,
   ImportSession,
@@ -46,13 +47,7 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import {
-  PAGE_SURE,
-  defaultedFabrics,
-  sizeFlags,
-  tileSheets,
-  weakAsides,
-} from '../auto-advance';
+import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '../auto-advance';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
@@ -191,7 +186,14 @@ const snapOf = (x: AutopilotSnapshot): Snap => ({
  */
 export function autopilotAnswer(x: AutopilotSnapshot): AutopilotAnswer {
   const snap = snapOf(x);
-  const d = decideSnap(snap);
+  const d0 = decideSnap(snap);
+  // every answer carries its replayable value (kind + subject + value), not only its words
+  const d = {
+    ...d0,
+    assumptions: d0.assumptions.map((a) =>
+      a.value !== undefined ? a : { ...a, value: valueOf(a, d0.actions[0], snap) },
+    ),
+  };
   const autopilot = mergeAssumptions(x.inputs.autopilot ?? [], d.assumptions);
   if (d.stop)
     return { stop: true, reason: d.stop, assumptions: d.assumptions, patch: { autopilot } };
@@ -323,6 +325,89 @@ function toWizard(
     }
     case 'fabrics':
       return { events: [{ type: 'fabrics', assignment: a.assignment }] };
+  }
+}
+
+/**
+ * The value an answer set, read back off the action that set it (and the snapshot): what a replay
+ * puts into the same wizard input. null = nothing to replay (a stop's record).
+ */
+function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): AutopilotValue {
+  const pt = (p: PtMm) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 });
+  const sd = a.seed;
+  const c = snap.session.scale.candidates[snap.inputs.scaleIndex];
+  switch (a.kind) {
+    case 'scale-confirmed':
+    case 'scale-1to1':
+    case 'scale-anisotropic':
+      return c ? { scaleIndex: snap.inputs.scaleIndex, factor: c.factor, method: c.method } : null;
+    case 'clean-accept':
+      return { kind: a.subject.split(' ')[0], keep: false };
+    case 'pages-as-read': {
+      const m = a.subject.match(/^file (\S+) page (\d+)$/);
+      return m ? { file: m[1], page: +m[2] - 1, as: a.answer } : null;
+    }
+    case 'sheet-choice':
+      return act?.kind === 'sheet' ? { sheet: act.sheet } : null;
+    case 'residuals':
+      return { residualsAccepted: true };
+    case 'drawn-sizes':
+      return act?.kind === 'drawn-sizes' ? { n: act.n } : null;
+    case 'legend-row':
+      return { legendConfirmed: a.subject.replace(/^legend row /, '') };
+    case 'legend-outline':
+      return act?.kind === 'legend'
+        ? (JSON.parse(JSON.stringify(act.edits[act.edits.length - 1])) as AutopilotValue)
+        : null;
+    case 'size-ordinal':
+    case 'size-guess':
+    case 'size-dropped': {
+      if (act?.kind !== 'size-map') return null;
+      const lab = a.subject.replace(/^source /, '');
+      const e = act.entries.find((x) => (x.source.label || `rank ${x.source.rank}`) === lab);
+      return e
+        ? {
+            rank: e.source.rank,
+            label: e.source.label,
+            card: e.card ? { sizeId: e.card.sizeId, token: e.card.token } : null,
+          }
+        : null;
+    }
+    case 'size-flag':
+      return { goOn: true };
+    case 'model':
+      return act?.kind === 'variant' ? { variant: act.variant } : null;
+    case 'seed-click': {
+      const k = act?.kind === 'seeds' ? act.seeds.find((x) => x.id === sd) : undefined;
+      return k ? { seed: k.id, at: pt(k.at) } : null;
+    }
+    case 'set-aside':
+      return { aside: +(a.subject.match(/^outline (\d+)/)?.[1] ?? -1), keepAside: true };
+    case 'name-code':
+      return { seed: sd ?? null, code: a.answer };
+    case 'grain-proposal':
+    case 'grain-axis': {
+      const g = act?.kind === 'semantics' && sd != null ? act.patch.operatorGrain?.[sd] : undefined;
+      return g
+        ? { seed: sd!, a: pt(g.a), b: pt(g.b), accepted: (g.accepted ?? []) as string[] }
+        : null;
+    }
+    case 'fold-edge': {
+      const f = act?.kind === 'semantics' && sd != null ? act.patch.operatorFold?.[sd] : undefined;
+      return f ? { seed: sd!, a: pt(f.a), b: pt(f.b) } : null;
+    }
+    case 'outline': {
+      const f = act?.kind === 'semantics' ? act.patch.fileAllowance : undefined;
+      return f ? { meaning: f.meaning, allowanceMm: f.allowanceMm } : null;
+    }
+    case 'quantity':
+      return { seed: sd ?? null, shown: a.answer };
+    case 'name-confirmed':
+      return { seed: sd ?? null, name: a.answer };
+    case 'fabric':
+      return { seed: sd ?? null, fabrics: a.answer };
+    default:
+      return null;
   }
 }
 

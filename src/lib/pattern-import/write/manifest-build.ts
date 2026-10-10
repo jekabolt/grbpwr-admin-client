@@ -133,9 +133,14 @@ export function autopilotForManifest(r: AutopilotRecord): AutopilotRecord {
       evidence: a.evidence.slice(0, 4).map((e) => clip(e, 160)),
       confidence: Math.max(0, Math.min(1, Math.round(a.confidence * 100) / 100)),
       strong: a.strong,
+      ...(a.value !== undefined && JSON.stringify(a.value).length <= AUTOPILOT_VALUE_MAX
+        ? { value: a.value }
+        : {}),
     })),
   };
 }
 
 /** A10: at most this many assumptions are written into one manifest. */
 export const AUTOPILOT_MAX = 400;
+/** A10: an assumption's replayable value is written up to this many JSON characters. */
+export const AUTOPILOT_VALUE_MAX = 2048;
