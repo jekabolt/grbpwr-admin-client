@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { proposeSkeleton, readSeamGraph } from '../../src/lib/assembly-skeleton/pipeline';
-import type { SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
+import type { SkeletonBomFacts, SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
 import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
@@ -43,7 +43,9 @@ type FileSpec = {
   betaCard?: string;
   /** Also hand the doll the rows that card had stored on beta (edge pairs in its JSON, written
    *  here the way the review writes them: seamFromCandidate on today's graph). */
-  betaRows?: boolean;
+  betaRows?: 'live' | 'hem';
+  /** BOM facts as the card has them (buttons decide closures). */
+  bom?: Partial<SkeletonBomFacts>;
 };
 
 const [specPath, outDir] = process.argv.slice(2);
@@ -103,7 +105,9 @@ for (const f of spec.files) {
   const buf = await readFile(f.dxf);
   const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   const tParse = performance.now();
-  const { facts, origin } = await quiet(() => loadFacts(bytes, f.size ?? 'M', f.category));
+  const { facts, origin } = await quiet(() =>
+    loadFacts(bytes, f.size ?? 'M', f.category, f.bom ?? {}),
+  );
   const tGraph = performance.now();
   let graph = await quiet(() => readSeamGraph(facts));
   if (f.x2) {
@@ -213,7 +217,11 @@ for (const f of spec.files) {
   let wrongWords = '';
   if (beta && f.betaRows) {
     const grain = grainDegOf(facts);
-    rows = (beta['stored_seams_on_beta_2026-10-10_18:02'] ?? []).flatMap((line, i) => {
+    // 'live': the hem ↔ hem row was removed on the owner's request — the 5 rows beta keeps.
+    const lines = (beta['stored_seams_on_beta_2026-10-10_18:02'] ?? []).filter(
+      (l) => f.betaRows === 'hem' || !/FP_L#4 <-> FP_R#5/.test(l),
+    );
+    rows = lines.flatMap((line, i) => {
       const m = /(\S+#[\d+]+)\s*<->\s*(\S+#[\d+]+)/.exec(line);
       if (!m) return [];
       const r = seamFromCandidate(
@@ -223,6 +231,8 @@ for (const f of spec.files) {
           seamKey: `BETA${String(i).padStart(22, '0')}`,
           status: 'confirmed',
           source: /manual/.test(line) ? 'manual' : 'graph',
+          // as stored on beta: the underarm was connected by hand and flipped to «same way»
+          direction: /underarm/.test(line) ? 'same' : 'reversed',
           anchoredSize: f.size ?? 'M',
           grainDeg: grain,
         },

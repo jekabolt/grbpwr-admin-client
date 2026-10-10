@@ -1093,8 +1093,24 @@ console.log('\nClosures (P2 lane Z)');
       tmplButtons(p).length === 0,
       show(tmplButtons(p)),
     );
+    // The shirt opens along its plackets: each front's centre edge is sewn to its placket, so no
+    // FRONT_L ~ FRONT_R pair is a closure. (Until 10.10 this gate passed on the two 77 mm hem
+    // ends, taken as a «closure» on BOM buttons alone — the bug that glued card 49's fronts.)
     const cs = closureSet(p.graph, nm);
-    gate('SS26-005: closure-not-seam = the centre front only', cs === 'FRONT_L~FRONT_R', cs);
+    const cfToPlacket = ['FRONT_L', 'FRONT_R'].every((f) =>
+      p.graph.chosen.some(
+        (c) =>
+          [c.a, c.b]
+            .map((id) => nm(id.slice(0, id.lastIndexOf('#'))))
+            .sort()
+            .join('~') === `${f}~PLCK_${f.slice(-1)}`,
+      ),
+    );
+    gate(
+      'SS26-005: no closure off the centre front (the fronts open along the plackets)',
+      cs === '' && cfToPlacket,
+      `closures «${cs}» · fronts sewn to plackets ${cfToPlacket}`,
+    );
 
     // control: marks stripped — Z1 silent, the template's BOM steps come back
     const bare = { ...p.graph, pieces: p.graph.pieces.map((g) => ({ ...g, marks: [] })) };

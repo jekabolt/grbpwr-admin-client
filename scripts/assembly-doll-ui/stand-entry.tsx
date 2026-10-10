@@ -247,7 +247,7 @@ declare global {
       /** Rows the way the review writes them (seamFromCandidate on the live graph), by piece NAME
        *  pairs «BP_2#5» ↔ «BP#5». */
       rowsFor: (
-        pairs: [string, string, 'graph' | 'manual'][],
+        pairs: [string, string, 'graph' | 'manual', ('same' | 'reversed')?][],
         size: string,
         keys?: string[],
       ) => TechCardSeamWire[];
@@ -325,7 +325,7 @@ window.__doll = {
       return `${byName.get(x.slice(0, at)) ?? x.slice(0, at)}#${x.slice(at + 1)}`;
     };
     const grainDeg = useSeamsStore.getState().grainDeg ?? undefined;
-    return pairs.flatMap(([a, b, source], i) => {
+    return pairs.flatMap(([a, b, source, direction], i) => {
       const r = seamFromCandidate(
         { a: id(a), b: id(b), kind: 'edge', score: 1, evidence: {} as never },
         graph?.pieces ?? [],
@@ -334,6 +334,7 @@ window.__doll = {
           status: 'confirmed',
           source,
           anchoredSize: size,
+          ...(direction ? { direction } : {}),
           ...(grainDeg ? { grainDeg } : {}),
         },
       );

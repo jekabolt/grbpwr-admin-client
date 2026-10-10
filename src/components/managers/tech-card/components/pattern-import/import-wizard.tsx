@@ -193,6 +193,10 @@ function WizardBody({
   // the last step of a download-only run is the download
   // A0.2: a one-page sheet is passed over — the step reads "1 page", greyed, and stays a door back
   const passedOver = (s: (typeof STEPS)[number]) => s.id === 'sheet' && api.sheetSkipped;
+  // N1: how the wizard went through a step without the operator — "auto ✓" (shown, nothing asked)
+  // or "skipped" (the fast path jumped it unseen); either stays a door. The one-page sheet keeps
+  // its own word ("1 page").
+  const markOf = (s: (typeof STEPS)[number]) => (passedOver(s) ? undefined : api.passed[s.id]);
   const labelOf = (s: (typeof STEPS)[number]) =>
     card.downloadOnly && s.id === 'apply'
       ? 'download'
@@ -351,18 +355,30 @@ function WizardBody({
                   current: i === at,
                   label:
                     i < at && !session.busy && !applied ? (
-                      <button
-                        type='button'
-                        className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) ? ' text-labelColor' : ''}`}
-                        onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                        title={
-                          passedOver(s)
-                            ? 'one page is the whole sheet — passed over; open it to check'
-                            : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
-                        }
-                      >
+                      <>
+                        <button
+                          type='button'
+                          className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) || markOf(s) ? ' text-labelColor' : ''}`}
+                          onClick={() => void api.dispatch({ type: 'back', to: s.id })}
+                          title={
+                            passedOver(s)
+                              ? 'one page is the whole sheet — passed over; open it to check'
+                              : markOf(s) === 'auto'
+                                ? `${labelOf(s)} asked nothing — passed by itself; open it to check`
+                                : markOf(s) === 'skipped'
+                                  ? `${labelOf(s)} was skipped — the file answers it; open it to check`
+                                  : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
+                          }
+                        >
+                          {labelOf(s)}
+                        </button>
+                        <PassMark mark={markOf(s)} />
+                      </>
+                    ) : i < at && markOf(s) ? (
+                      <span className='text-labelColor'>
                         {labelOf(s)}
-                      </button>
+                        <PassMark mark={markOf(s)} />
+                      </span>
                     ) : passedOver(s) && i !== at ? (
                       <span className='text-labelColor'>{labelOf(s)}</span>
                     ) : (
@@ -407,6 +423,11 @@ function WizardBody({
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}
                   </Text>
+                ) : api.offer ? (
+                  // N1: why the run stopped on a step that does not block — an offer to look at
+                  <Text size='micro' variant='label' component='p'>
+                    {api.offer}
+                  </Text>
                 ) : null}
                 {/* A8: what the clean stage set aside, seen before the run goes on */}
                 {session.step === 'files' && session.clean && !api.extracted.presegmented && (
@@ -449,6 +470,19 @@ function WizardBody({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** N1: the mark of a step the wizard passed by itself ("auto ✓") or jumped unseen ("skipped"). */
+function PassMark({ mark }: { mark: 'auto' | 'skipped' | undefined }) {
+  if (!mark) return null;
+  return (
+    <span
+      aria-label={mark === 'auto' ? 'passed automatically' : 'skipped'}
+      className='ml-1 text-labelColor'
+    >
+      {mark === 'auto' ? 'auto ✓' : 'skipped'}
+    </span>
   );
 }
 

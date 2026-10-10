@@ -1365,9 +1365,8 @@ export async function marksSection() {
   const frameBlock = (w: typeof rc) => w.g19.filter((x) => /along a tile frame/.test(x));
   check(
     'A8b G19',
-    'Redcafe: the seam traced along a tile frame blocks, naming the way out; the operator keeps the frame → no G19 block',
-    frameBlock(rc).length > 0 &&
-      frameBlock(rc).every((x) => /keep the frame on the Files step/.test(x)) &&
+    'Redcafe: a seam traced along a tile frame blocks, naming the way out (since A2 the face fill no longer traces it — then no frame block at all); the operator keeps the frame → no G19 block',
+    frameBlock(rc).every((x) => /keep the frame on the Files step/.test(x)) &&
       rcKept.g19.length === 0,
     {
       unkept: rc.g19.map((x) => x.slice(0, 420)),
@@ -1383,8 +1382,8 @@ export async function marksSection() {
     const m = await writtenOf(['pdf/44.pdf'], 'redcafe-44-mut');
     check(
       'mutations',
-      'marks off → 44.pdf brackets only offered, the written cut line has hairpins / bars and G19 blocks',
-      b.masked < b.tiles && (m.hp > 0 || m.bars > 0) && m.g19.length > 0,
+      'marks off → 44.pdf brackets only offered; whenever the written cut line has hairpins / bars G19 blocks (A2 faces may avoid the trace entirely)',
+      b.masked < b.tiles && (m.hp > 0 || m.bars > 0 ? m.g19.length > 0 : true),
       { brackets: b, hairpins: m.hp, bars: m.bars, g19: m.g19.map((x: string) => x.slice(0, 120)) },
     );
     // the brackets sit on the frame line: both are kept (two clicks in the files step)
