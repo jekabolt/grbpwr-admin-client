@@ -118,6 +118,57 @@ function pdfWithImage(
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 }
 
+/**
+ * F14 S2: one page with several image XObjects (each `dims` as in `pdfWithImage`), the last one
+ * painted over the page, the others as 10 pt tiles, plus an optional small closed vector loop
+ * (a plausible "piece"). Indirect sizes get their own integer objects, distinct per image.
+ */
+function pdfWithImages(
+  imgs: { w: number; h: number; dims: 'direct' | 'indirect' | 'hidden' }[],
+  loop: boolean,
+): ArrayBuffer {
+  const objs: string[] = ['', '', '', ''];
+  const xo: string[] = [];
+  let paint = '';
+  imgs.forEach((im, k) => {
+    const id = objs.length + 1;
+    objs.push('');
+    let size = `/Width ${im.w} /Height ${im.h}`;
+    if (im.dims !== 'direct') {
+      const wId = objs.length + 1;
+      objs.push(im.dims === 'indirect' ? `${im.w}` : `% width\n${im.w}`);
+      const hId = objs.length + 1;
+      objs.push(im.dims === 'indirect' ? `${im.h}` : `% height\n${im.h}`);
+      size = `/Width ${wId} 0 R /Height ${hId} 0 R`;
+    }
+    const data = im.w * im.h <= 1e6 ? '\x80'.repeat(im.w * im.h) : '\x00';
+    objs[id - 1] =
+      `<< /Type /XObject /Subtype /Image ${size} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${data.length} >>\nstream\n${data}\nendstream`;
+    xo.push(`/Im${k} ${id} 0 R`);
+    paint +=
+      k === imgs.length - 1
+        ? `q 595 0 0 842 0 0 cm /Im${k} Do Q\n`
+        : `q 10 0 0 10 ${10 + (k % 40) * 12} 800 cm /Im${k} Do Q\n`;
+  });
+  const content = `${paint}${loop ? '100 100 m 260 100 l 260 300 l 100 300 l h S\n' : ''}`;
+  objs[0] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[1] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+  objs[2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << ${xo.join(' ')} >> >> /Contents 4 0 R >>`;
+  objs[3] = `<< /Length ${content.length} >>\nstream\n${content}endstream`;
+  let pdf = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs) pdf += `${String(o).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b = Buffer.from(pdf, 'latin1');
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+}
+
 /** A PNG signature + IHDR claiming w × h (no pixel data: for the header readers). */
 const pngOf = (w: number, h: number) => {
   const b = new Uint8Array(33);
@@ -1325,16 +1376,59 @@ async function guardsCase() {
       ? `${indMixed.pages.map((p) => p.cls).join(',')} · ${indNote ?? 'no note'}`
       : JSON.stringify(indMixed).slice(0, 140),
   );
+  // F14 S2: a size the raw scan cannot read (a comment inside the integer object — pdf.js reads
+  // it) is refused whatever else is drawn: pdf.js may have dropped a scan there. Small or large,
+  // alone or beside vectors.
   const hidden = await extractOf('hidden36.pdf', pdfWithImage(6000, 6000, false, 'hidden'));
   const hiddenSmall = await extractOf('hidden-small.pdf', pdfWithImage(64, 64, false, 'hidden'));
+  const hiddenMixed = await extractOf('hidden-mixed.pdf', pdfWithImage(6000, 6000, true, 'hidden'));
+  const tooLarge = (r: typeof hidden) =>
+    'code' in r && r.code === 'too-large' && /cannot read/.test(r.message) && /dpi/.test(r.message);
   check(
     C,
-    'R8 backstop: size unreadable by the scan, image dropped, page empty → too-large; a small one is drawn → not refused',
-    'code' in hidden &&
-      hidden.code === 'too-large' &&
-      /dpi/.test(hidden.message) &&
-      !('code' in hiddenSmall && hiddenSmall.code === 'too-large'),
-    `${'code' in hidden ? `${hidden.code}: ${hidden.message.slice(0, 100)}` : 'read'} · small: ${'code' in hiddenSmall ? hiddenSmall.code : 'read'}`,
+    'S2: unreadable image size → too-large (image only, small image, image + vectors)',
+    tooLarge(hidden) && tooLarge(hiddenSmall) && tooLarge(hiddenMixed),
+    [hidden, hiddenSmall, hiddenMixed]
+      .map((r) => ('code' in r ? `${r.code}: ${r.message.slice(0, 60)}` : 'read'))
+      .join(' · '),
+  );
+  // the exact exploit: 32 tiny images with distinct indirect sizes (64 integer objects) ahead of a
+  // 6000 × 6000 scan with indirect size, beside a small vector loop. The one-pass index resolves
+  // all 66: the scan is named in a visible note (as a direct-size one is), never silently missing.
+  const decoys = Array.from({ length: 32 }, () => ({ w: 2, h: 2, dims: 'indirect' as const }));
+  const exploit = await extractOf(
+    'decoys33.pdf',
+    pdfWithImages([...decoys, { w: 6000, h: 6000, dims: 'indirect' }], true),
+  );
+  const exploitNote =
+    'warnings' in exploit ? exploit.warnings.find((w) => /6000 × 6000/.test(w)) : undefined;
+  check(
+    C,
+    'S2 exploit: 32 decoy images with indirect sizes + a 6000 × 6000 scan + a vector loop → the scan is named in a visible note',
+    'pages' in exploit && !!exploitNote,
+    'pages' in exploit
+      ? exploitNote ?? `no note (${exploit.warnings.length} warnings)`
+      : JSON.stringify(exploit).slice(0, 160),
+  );
+  const exploitAlone = await extractOf(
+    'decoys33-only.pdf',
+    pdfWithImages([...decoys, { w: 6000, h: 6000, dims: 'indirect' }], false),
+  );
+  const decoysHidden = await extractOf(
+    'decoys33-hidden.pdf',
+    pdfWithImages([...decoys, { w: 6000, h: 6000, dims: 'hidden' }], true),
+  );
+  const decoysOnly = await extractOf('decoys32.pdf', pdfWithImages(decoys, true));
+  check(
+    C,
+    'S2 exploit: the same without the loop → too-large naming 6000 × 6000; with the scan size hidden → too-large; 32 decoys alone + loop → read, no note',
+    'code' in exploitAlone &&
+      exploitAlone.code === 'too-large' &&
+      /6000 × 6000/.test(exploitAlone.message) &&
+      tooLarge(decoysHidden) &&
+      'pages' in decoysOnly &&
+      !decoysOnly.warnings.some((w) => /embedded image/.test(w)),
+    `${'code' in exploitAlone ? exploitAlone.code : 'read'} · ${'code' in decoysHidden ? decoysHidden.code : 'read'} · ${'code' in decoysOnly ? `${decoysOnly.code}: ${decoysOnly.message.slice(0, 80)}` : 'read'}`,
   );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);

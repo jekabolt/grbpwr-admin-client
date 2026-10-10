@@ -15,7 +15,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, SegGrid, segNearest } from './geom';
+import { bboxOf, dist, PtGrid, SegGrid, segNearest } from './geom';
 import { normDash } from './link';
 import { cosine, type Signature } from './motif';
 
@@ -47,13 +47,25 @@ export function furniture(
   styles: Map<number, Style>,
   poses: PagePose[] = [],
   texts: readonly IRText[] = [],
+  /** Source file per chain when the files are overlays (file per size): repetition evidence. */
+  fileOf?: (i: number) => string,
 ): (string | null)[] {
   const out: (string | null)[] = chains.map(() => null);
   pageMarginLines(chains, poses, out);
   for (const i of lettering(chains)) out[i] = out[i] ?? 'lettering';
   for (const i of tileFrameLines(chains, poses)) out[i] = out[i] ?? 'tile frame';
-  for (const i of backgroundGrid(chains)) out[i] = out[i] ?? 'background grid';
+  const grid = backgroundGrid(chains);
+  for (const i of grid) out[i] = out[i] ?? 'background grid';
   for (const i of testSquares(chains, poses, texts, out)) out[i] = out[i] ?? 'test square';
+  const greyWhy = lightGrey(
+    chains,
+    styles,
+    texts,
+    out,
+    new Set(grid.map((i) => chains[i].style)),
+    fileOf,
+    poses,
+  );
   const rects = new Map<string, number[]>();
   const lines = new Map<string, number[]>();
   // pens that also draw curves are garment pens: reef draws every size dashed (dash-dot, dash-dot-
@@ -71,14 +83,9 @@ export function furniture(
   });
   chains.forEach((c, i) => {
     const st = styles.get(c.style);
-    if (st?.strokeRgb) {
-      const [r, g, b] = st.strokeRgb;
-      const mn = Math.min(r, g, b);
-      const mx = Math.max(r, g, b);
-      if (mn >= 140 && mx - mn < 40) {
-        out[i] = 'light grey (grid / watermark)';
-        return;
-      }
+    if (greyWhy[i]) {
+      out[i] = out[i] ?? (greyWhy[i] as string);
+      return;
     }
     const { axis, straight } = straightAxis(c);
     if (straight && axis && c.lengthMm >= 40) {
@@ -665,7 +672,11 @@ export function testSquares(
  * front every size ends on) meets graded lines in T-junctions, never crosses them; notches
  * (< 30 mm) are left to the notch test.
  */
-export function overprintLines(chains: Chain[], fileOf: (i: number) => string): number[] {
+export function overprintLines(
+  chains: Chain[],
+  fileOf: (i: number) => string,
+  known: readonly (string | null)[] = [],
+): number[] {
   const files = new Set(chains.map((_, i) => fileOf(i)));
   if (files.size < 3) return [];
   const key = (c: Chain) => {
@@ -693,9 +704,45 @@ export function overprintLines(chains: Chain[], fileOf: (i: number) => string): 
   chains.forEach((c, i) => {
     if (!same.has(i) && c.pts.length >= 2) grid.addPolyline(i, c.pts);
   });
+  // glyph evidence: a STROKE (≤ 120 mm across) with ≥ 3 other repeated strokes of its file within
+  // 1.5 × its extent — letters come in clusters; a lone repeated edge is not text
+  const extent = (i: number) => {
+    const b = bboxOf(chains[i].pts);
+    return Math.max(b.maxX - b.minX, b.maxY - b.minY);
+  };
+  const mid = (i: number) => {
+    const b = bboxOf(chains[i].pts);
+    return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+  };
+  const strokes = [...same].filter((i) => extent(i) <= 120);
+  const sGrid = new PtGrid(60);
+  for (const i of strokes) sGrid.add(i, mid(i));
+  const glyphy = (i: number) => {
+    const f = fileOf(i);
+    const r = 1.5 * extent(i);
+    let n = 0;
+    sGrid.near(mid(i), r, (o) => {
+      if (o !== i && fileOf(o) === f && dist(mid(o), mid(i)) <= r) n++;
+    });
+    return n >= 3;
+  };
+  // part of a piece boundary: BOTH ends land on line work of its own file that is not repeated
+  // (a shared cut edge the graded hems and necklines end on) — never overprint
+  const onGarment = (i: number, p: PtMm) => {
+    const f = fileOf(i);
+    let hit = false;
+    grid.near(p, 1, (o, si) => {
+      if (hit || o === i || fileOf(o) !== f || known[o]) return;
+      const q = chains[o].pts;
+      if (segNearest(p, q[si], q[si + 1]).d <= 1) hit = true;
+    });
+    return hit;
+  };
   const out: number[] = [];
-  for (const i of same) {
+  for (const i of strokes) {
+    if (!glyphy(i)) continue;
     const c = chains[i];
+    if (onGarment(i, c.pts[0]) && onGarment(i, c.pts[c.pts.length - 1])) continue;
     const f = fileOf(i);
     let crossed = false;
     for (let k = 0; k + 1 < c.pts.length && !crossed; k++) {
@@ -737,6 +784,156 @@ function segCross(a: PtMm, b: PtMm, c: PtMm, d: PtMm) {
   const u = (qx * ry - qy * rx) / den;
   if (t < 0 || t > 1 || u < 0 || u > 1) return null;
   return { t, u };
+}
+
+/** A neutral light-grey pen (RGB ≥ 140, spread < 40): grids and watermarks are usually drawn so. */
+export function isLightGrey(st: Style | undefined): boolean {
+  if (!st?.strokeRgb) return false;
+  const [r, g, b] = st.strokeRgb;
+  return Math.min(r, g, b) >= 140 && Math.max(r, g, b) - Math.min(r, g, b) < 40;
+}
+
+/** Reason prefix of grey lines nothing but their colour sets apart: the legend asks about them. */
+export const GREY_COLOUR_ONLY = 'light grey (colour only — confirm)';
+
+/**
+ * LIGHT GREY is not proof of furniture (a pattern may draw its cut line grey): per light-grey
+ * chain the evidence that it is background, else `null` (line work) or the colour-only reason.
+ *   - topology already found (lettering, frame, margin, test square: `known`);
+ *   - a straight axis-aligned stretch of a pen that draws a background lattice (wm's 1 cm grid,
+ *     cut into tile pieces);
+ *   - drawn identically in ≥ 3 overlaid files (a watermark printed on every size), or at one
+ *     page-relative spot on ≥ 3 tiles (registration ticks, a tile logo);
+ * else a closed piece-sized loop (≥ 15 cm²) or a loop around a label stays line work — it may be
+ * the cut line around the seed; what is left is colour-only: ignored, but a low-confidence legend
+ * row the operator confirms. Returns undefined for chains that are not light grey.
+ */
+export function lightGrey(
+  chains: Chain[],
+  styles: Map<number, Style>,
+  texts: readonly IRText[],
+  known: readonly (string | null)[],
+  gridPens: ReadonlySet<number>,
+  fileOf?: (i: number) => string,
+  poses: readonly PagePose[] = [],
+): (string | null | undefined)[] {
+  const out: (string | null | undefined)[] = chains.map(() => undefined);
+  const grey = chains.map((c) => isLightGrey(styles.get(c.style)));
+  if (!grey.some(Boolean)) return out;
+  const gridKeys = new Set(
+    [...gridPens].map((id) => {
+      const st = styles.get(id);
+      return st ? `${st.strokeRgb?.join(',')}|${st.widthMm.toFixed(2)}` : '';
+    }),
+  );
+  const penKey = (c: Chain) => {
+    const st = styles.get(c.style);
+    return st ? `${st.strokeRgb?.join(',')}|${st.widthMm.toFixed(2)}` : '';
+  };
+  // repetition over overlaid files: same ends (1 mm) and length
+  const repeated = new Set<number>();
+  if (fileOf) {
+    const by = new Map<string, Set<string>>();
+    const keyOf = (c: Chain) => {
+      const a = c.pts[0];
+      const b = c.pts[c.pts.length - 1];
+      const k1 = `${Math.round(a.x)},${Math.round(a.y)}`;
+      const k2 = `${Math.round(b.x)},${Math.round(b.y)}`;
+      return `${k1 < k2 ? k1 : k2}|${k1 < k2 ? k2 : k1}|${Math.round(c.lengthMm)}`;
+    };
+    chains.forEach((c, i) => {
+      if (!grey[i] || c.pts.length < 2) return;
+      const k = keyOf(c);
+      const s = by.get(k) ?? new Set<string>();
+      s.add(fileOf(i));
+      by.set(k, s);
+    });
+    chains.forEach((c, i) => {
+      if (grey[i] && c.pts.length >= 2 && (by.get(keyOf(c))?.size ?? 0) >= 3) repeated.add(i);
+    });
+  }
+  // repetition over tiles: the same mark at one page-relative spot on ≥ 3 pages (robe's 15 mm
+  // registration ticks, a tile's logo)
+  const onPages = new Set<number>();
+  if (poses.length >= 3) {
+    const rects = poses.map(pageRect);
+    const by = new Map<string, Set<number>>();
+    const keys = chains.map((c, i) => {
+      if (!grey[i] || c.pts.length < 2) return null;
+      const b = bboxOf(c.pts);
+      const m = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+      const k = rects.findIndex(
+        (r) => m.x >= r.minX && m.x <= r.maxX && m.y >= r.minY && m.y <= r.maxY,
+      );
+      if (k < 0) return null;
+      const r = rects[k];
+      const key = `${Math.round(b.minX - r.minX)},${Math.round(b.minY - r.minY)},${Math.round(b.maxX - r.minX)},${Math.round(b.maxY - r.minY)},${Math.round(c.lengthMm)}`;
+      const set = by.get(key) ?? new Set<number>();
+      set.add(Math.round(r.minX) * 100003 + Math.round(r.minY));
+      by.set(key, set);
+      return key;
+    });
+    keys.forEach((k, i) => {
+      if (k && (by.get(k)?.size ?? 0) >= 3) onPages.add(i);
+    });
+  }
+  const area = (pts: readonly PtMm[]) => {
+    let a = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const p = pts[k];
+      const q = pts[(k + 1) % pts.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return Math.abs(a) / 2;
+  };
+  const inside = (p: PtMm, poly: readonly PtMm[]) => {
+    let r = false;
+    for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+      const a = poly[k];
+      const b = poly[j];
+      if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) r = !r;
+    }
+    return r;
+  };
+  chains.forEach((c, i) => {
+    if (!grey[i]) return;
+    if (known[i]) {
+      out[i] = known[i];
+      return;
+    }
+    const { axis, straight } = straightAxis(c);
+    if (straight && axis && gridKeys.has(penKey(c))) {
+      out[i] = 'background grid';
+      return;
+    }
+    if (repeated.has(i)) {
+      out[i] = 'light grey watermark (every file)';
+      return;
+    }
+    if (onPages.has(i)) {
+      out[i] = 'light grey page mark (every tile)';
+      return;
+    }
+    const n = c.pts.length;
+    const loop = n > 3 && (c.closed || dist(c.pts[0], c.pts[n - 1]) <= 1);
+    if (loop) {
+      if (area(c.pts) >= 1500) {
+        out[i] = null;
+        return;
+      }
+      const b = bboxOf(c.pts);
+      const labelled = texts.some((t) => {
+        const m = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
+        return m.x > b.minX && m.x < b.maxX && m.y > b.minY && m.y < b.maxY && inside(m, c.pts);
+      });
+      if (labelled) {
+        out[i] = null;
+        return;
+      }
+    }
+    out[i] = GREY_COLOUR_ONLY;
+  });
+  return out;
 }
 
 /** Chain ids that are page margin lines (pieces/ keeps them out of rescued walls). */

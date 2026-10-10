@@ -227,11 +227,11 @@ export async function extractPdfWith(
       const msg = oversizedPdfImagesMessage(big);
       if (empty) throw inputTooLarge(msg);
       warnings.push(msg);
-    } else if (scan.unknown && empty && pages.every((pg) => pg.rasters.length === 0)) {
-      // F14 R8 backstop: an image whose size the raw scan could not read, never drawn, nothing
-      // else on the pages — pdf.js dropped it (it hands over every image it keeps)
-      throw inputTooLarge(unreadablePdfImagesMessage(scan.unknown));
     }
+    // F14 R8 / S2: an image whose size cannot be read even with every plain integer object
+    // indexed may be a scan pdf.js dropped — vectors beside it would then import as a wrong
+    // piece with nothing to say so. Refused whatever else the pages carry (see the message).
+    if (scan.unknown) throw inputTooLarge(unreadablePdfImagesMessage(scan.unknown));
     progress?.(pageList.length, pageList.length);
     return {
       file: {

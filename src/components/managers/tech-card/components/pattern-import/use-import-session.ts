@@ -56,6 +56,17 @@ import type {
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
+import {
+  answerCtxOf,
+  countWords,
+  liveAnswers,
+  openQuestions,
+  questionKey,
+  settleAnswers,
+  UnansweredQuestionsError,
+  unansweredAtWrite,
+  type AnswerCtx,
+} from './answers';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
   { id: 'files', label: 'files' },
@@ -100,18 +111,25 @@ export type Inputs = {
   operatorGrain: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
   /** Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`. */
   operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
-  /** The operator checked the cutting list's fold pieces against the sheet. */
-  foldListChecked: boolean;
+  /** The unbound cutting-list entries the operator has seen named and checked (S5). */
+  foldListChecked: string[];
   /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */
   confirmedNames: SeedId[];
   /** Names the operator TYPED (code or display name) — their `nameOrigin` is 'operator'. */
   editedNames: SeedId[];
   /**
-   * D3: quantities the operator confirmed AS SHOWN, keyed by what was shown (`Unproven.shown`): a
-   * count that changes afterwards (a fold, a pair answer) is a new question.
+   * D3: quantities the operator confirmed AS SHOWN, keyed by the question (`questionKey`: the
+   * piece's revision, kind, what was shown, why): a count that changes afterwards (a fold, a pair
+   * answer, another sheet or outline) is a new question.
    */
   confirmedQuantities: Partial<Record<SeedId, string>>;
   assignment: FabricAssignment | null;
+  /**
+   * S3: the fingerprint (sheet, grid, model, each piece's outline) the answers above were given
+   * against. Settled after every pieces run; an answer whose piece or sheet moved is dropped, and
+   * every reader goes through `liveAnswers`, so a stale one never counts (answers.ts).
+   */
+  answerCtx: AnswerCtx | null;
 };
 
 const EMPTY_INPUTS: Inputs = {
@@ -133,11 +151,12 @@ const EMPTY_INPUTS: Inputs = {
   overrides: {},
   operatorGrain: {},
   operatorFold: {},
-  foldListChecked: false,
+  foldListChecked: [],
   confirmedNames: [],
   editedNames: [],
   confirmedQuantities: {},
   assignment: null,
+  answerCtx: null,
 };
 
 const EMPTY_SESSION: ImportSession = {
@@ -231,6 +250,12 @@ export function useImportSession(deps: {
   // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
   // because `pieces.in.seeds` replaces the whole list (no 'add' edit kind in the contract).
   const baseSeeds = useRef<Seed[] | null>(null);
+  /**
+   * The names on screen when the operator last went back past details (`dropAfter` clears them):
+   * a name confirmed for a piece that did not move comes back as it was confirmed, not re-asked
+   * of the AI (S3). A piece that moved lost its confirmation when the answers settled.
+   */
+  const heldNames = useRef<NameDecision[]>([]);
   const sRef = useRef(session);
   sRef.current = session;
   const iRef = useRef(inputs);
@@ -339,7 +364,25 @@ export function useImportSession(deps: {
     },
   });
 
-  const semanticsInput = (i: Inputs = iRef.current): StageIO['semantics']['in'] => ({
+  /** S3: the fingerprint of what is on screen now — the sheet, its grid, the model, the pieces. */
+  const answersNow = (s: ImportSession = sRef.current, i: Inputs = iRef.current): AnswerCtx =>
+    answerCtxOf(
+      { sheetIndex: i.sheetIndex, gridOverride: i.gridOverride, variant: s.variant },
+      s.pieces?.families,
+    );
+  /** S3: after the pieces changed, drop the answers whose question moved and re-stamp the rest. */
+  const settleToPieces = () => {
+    const now = answersNow();
+    iRef.current = settleAnswers(iRef.current, now);
+    setInputs((i) => settleAnswers(i, now));
+  };
+
+  // Only LIVE answers reach semantics (S3): one given on another sheet, model or outline is not one.
+  const semanticsInput = (raw: Inputs = iRef.current): StageIO['semantics']['in'] => {
+    const i = liveAnswers(raw, answersNow(sRef.current, raw));
+    return semanticsInputOf(i);
+  };
+  const semanticsInputOf = (i: Inputs): StageIO['semantics']['in'] => ({
     fileAllowance: i.fileAllowance ?? {
       meaning: 'seam',
       allowanceMm: PATIMPORT.defaultAllowanceMm,
@@ -362,6 +405,7 @@ export function useImportSession(deps: {
         case 'files': {
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
+          heldNames.current = [];
           setSom(null);
           setExtracted(NO_EXTRACT);
           const old = sRef.current.sessionId;
@@ -413,12 +457,37 @@ export function useImportSession(deps: {
           return;
         }
         case 'sheet': {
+          // S3: another sheet of the file is another drawing — its legend, size map, model, seeds
+          // and piece edits are asked again; the first pieces run shows every model on it again.
+          // (Answers on the pieces are settled against the new sheet after its pieces run.)
+          const other = ev.sheet !== iRef.current.sheetIndex;
+          const sheetInputs: Partial<Inputs> = other
+            ? {
+                legend: [],
+                legendConfirmed: [],
+                sizeMap: null,
+                drawnSizes: null,
+                variant: null,
+                clickSeeds: [],
+                edits: [],
+              }
+            : {};
+          if (other) {
+            baseSeeds.current = null;
+            heldNames.current = [];
+          }
           patchInputs({
             gridOverride: ev.override,
             sheetIndex: ev.sheet,
             residualsAccepted: false,
+            ...sheetInputs,
           });
-          iRef.current = { ...iRef.current, gridOverride: ev.override, sheetIndex: ev.sheet };
+          iRef.current = {
+            ...iRef.current,
+            gridOverride: ev.override,
+            sheetIndex: ev.sheet,
+            ...sheetInputs,
+          };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
           patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
           return;
@@ -457,8 +526,10 @@ export function useImportSession(deps: {
         }
         case 'variant': {
           patchInputs({ variant: ev.variant });
-          const out = await run('pieces', piecesInput({ ...iRef.current, variant: ev.variant }));
+          iRef.current = { ...iRef.current, variant: ev.variant };
+          const out = await run('pieces', piecesInput(iRef.current));
           patch({ pieces: out, variant: ev.variant });
+          settleToPieces();
           return;
         }
         case 'piece-edits': {
@@ -466,6 +537,7 @@ export function useImportSession(deps: {
           patchInputs({ edits: ev.edits });
           const out = await run('pieces', piecesInput(next));
           patch({ pieces: out });
+          settleToPieces();
           return;
         }
         case 'names': {
@@ -488,7 +560,9 @@ export function useImportSession(deps: {
             overrides: ev.input.pieceOverrides,
             operatorGrain: ev.input.operatorGrain,
             operatorFold: ev.input.operatorFold ?? iRef.current.operatorFold,
-            foldListChecked: ev.input.foldListChecked ?? iRef.current.foldListChecked,
+            foldListChecked: Array.isArray(ev.input.foldListChecked)
+              ? ev.input.foldListChecked
+              : iRef.current.foldListChecked,
           });
           const out = await run('semantics', ev.input);
           patch({ semantics: out });
@@ -504,8 +578,8 @@ export function useImportSession(deps: {
           let sem = sRef.current.semantics;
           if (!a || !sizes || !sem) return;
           // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
-          // but is a PieceSpec field: hand it to semantics as an override and re-run when it moved,
-          // so the manifest, the draft and the card read the same flag.
+          // but is a PieceSpec field: hand it to semantics as an override, so the manifest, the
+          // draft and the card read the same flag.
           const fused = fusedSeeds(a, card.scopes);
           if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
             const overrides = { ...iRef.current.overrides };
@@ -514,9 +588,14 @@ export function useImportSession(deps: {
             const next = { ...iRef.current, overrides };
             iRef.current = next;
             patchInputs({ overrides });
-            sem = await run('semantics', semanticsInput(next));
-            patch({ semantics: sem });
           }
+          // S3: the write does not trust what the details step showed. Semantics runs again on the
+          // LIVE answers only (the worker writes from its last run), and every question it still
+          // asks — folds, the cutting list, the outline, counts, names — refuses the write.
+          sem = await run('semantics', semanticsInput(iRef.current));
+          patch({ semantics: sem });
+          const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
+          if (open.length) throw new UnansweredQuestionsError(open);
           const out = await run('write', {
             scopes: card.scopes,
             assignment: a,
@@ -574,6 +653,7 @@ export function useImportSession(deps: {
           return;
         }
         case 'back':
+          if (sRef.current.names.length) heldNames.current = sRef.current.names;
           setApply({ phase: 'idle' });
           setNotice(null);
           setErrorCode(null);
@@ -583,9 +663,11 @@ export function useImportSession(deps: {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
           baseSeeds.current = null;
+          heldNames.current = [];
           setSom(null);
           setNotice(null);
           setExtracted(NO_EXTRACT);
+          iRef.current = EMPTY_INPUTS;
           setInputs(EMPTY_INPUTS);
           setApply({ phase: 'idle' });
           setSession(EMPTY_SESSION);
@@ -654,6 +736,7 @@ export function useImportSession(deps: {
     baseSeeds.current = pieces.seeds;
     patch({ pieces, variant: null });
     sRef.current = { ...sRef.current, sheet, chains, sizes, pieces };
+    settleToPieces();
     // A guessed match, or a size the card does not carry, stops on the sizes step: the gate
     // refuses an exported size without a card id, so the operator answers it first.
     if (sizeMapOpen(sizes.map)) {
@@ -671,8 +754,11 @@ export function useImportSession(deps: {
 
   /** Seed names from the namer, keeping what the operator already decided for surviving seeds. */
   function mergeNames(fresh: NameDecision[]): NameDecision[] {
-    const prev = new Map(sRef.current.names.map((n) => [n.seed, n]));
-    const kept = new Set(iRef.current.confirmedNames);
+    const prev = new Map(
+      [...heldNames.current, ...sRef.current.names].map((n) => [n.seed, n] as const),
+    );
+    // only LIVE confirmations (S3): a piece that moved since is a new question
+    const kept = new Set(liveAnswers(iRef.current, answersNow()).confirmedNames);
     return fresh.map((n) => (kept.has(n.seed) && prev.get(n.seed) ? prev.get(n.seed)! : n));
   }
 
@@ -728,6 +814,7 @@ export function useImportSession(deps: {
           );
           if (first) baseSeeds.current = out.seeds;
           patch({ pieces: out, variant: first ? null : iRef.current.variant, step: 'pieces' });
+          settleToPieces();
           return;
         }
         case 'pieces':
@@ -860,7 +947,7 @@ export function useImportSession(deps: {
           return 'the cutting list names fold pieces the sheet does not mark: mark them or confirm the list';
         // D3: what the drawing does not prove waits for the operator, like the grainline; a DXF
         // block name (E3) is the file's own word and is never in it (openQuestions)
-        const open = openQuestions(s.semantics, s.names, inputs);
+        const open = openQuestions(s.semantics, s.names, inputs, answersNow(s, inputs));
         if (open.allowance.length || open.total)
           return [
             open.allowance.length ? 'say what the drawn outline is (cut or seam line)' : '',
@@ -933,6 +1020,7 @@ export function useImportSession(deps: {
       patchInputs({ clickSeeds: next.clickSeeds });
       const out = await run('pieces', piecesInput(next));
       patch({ pieces: out });
+      settleToPieces();
       return id;
     } catch (e) {
       fail(e);
@@ -1009,7 +1097,8 @@ export function useImportSession(deps: {
    * answered explicitly (`answerOutline`).
    */
   function confirmShown(seed?: SeedId) {
-    const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current);
+    const now = answersNow();
+    const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current, now);
     const mine = <T extends { seed: SeedId }>(xs: T[]) =>
       seed == null ? xs : xs.filter((x) => x.seed === seed);
     const qty = mine(open.quantity);
@@ -1018,7 +1107,7 @@ export function useImportSession(deps: {
       const next = {
         confirmedQuantities: {
           ...i.confirmedQuantities,
-          ...Object.fromEntries(qty.map((u) => [u.seed, u.shown])),
+          ...Object.fromEntries(qty.map((u) => [u.seed, questionKey(u, now)])),
         },
         confirmedNames: [...new Set([...i.confirmedNames, ...names])],
       };
@@ -1053,6 +1142,8 @@ export function useImportSession(deps: {
     som,
     clientKind: client.kind,
     blocker,
+    /** S3: the fingerprint answers are read against (pass to `openQuestions`). */
+    answersNow: answersNow(session, inputs),
     sizeTokens,
     baseSeeds: baseSeeds.current,
     dispatch,
@@ -1143,49 +1234,8 @@ export function textNameOf(
   };
 }
 
-/**
- * D3: the details step's open questions — what semantics found unproven, minus what the operator
- * already confirmed as shown, plus the AI names below the auto-accept threshold (decision 11).
- * The outline (allowance) is answered by setting the file's allowance, so it closes in semantics.
- */
-export function openQuestions(
-  sem: ImportSession['semantics'],
-  names: readonly NameDecision[],
-  i: Pick<Inputs, 'confirmedQuantities' | 'confirmedNames' | 'editedNames'>,
-) {
-  const un = sem?.unproven ?? [];
-  const named = new Set([...i.confirmedNames, ...i.editedNames]);
-  const exported = new Set((sem?.pieces ?? []).map((p) => p.seed));
-  const allowance = un.filter((u) => u.kind === 'allowance');
-  const quantity = un.filter(
-    (u) => u.kind === 'quantity' && i.confirmedQuantities[u.seed] !== u.shown,
-  );
-  const name = un.filter((u) => u.kind === 'name' && !named.has(u.seed));
-  // a DXF block name (lane E3: source 'dxf') is the file's own word, never an AI name to confirm
-  const aiNames = names.filter(
-    (n) => !n.autoAccepted && n.source !== 'dxf' && !named.has(n.seed) && exported.has(n.seed),
-  );
-  return {
-    allowance,
-    quantity,
-    name,
-    aiNames,
-    total: quantity.length + name.length + aiNames.length,
-  };
-}
-
-/** "3 quantities, 2 names" for the footer and the confirm strip. */
-export function countWords(o: ReturnType<typeof openQuestions>): string {
-  const n = o.name.length + o.aiNames.length;
-  return [
-    o.quantity.length
-      ? `${o.quantity.length} ${o.quantity.length === 1 ? 'quantity' : 'quantities'}`
-      : '',
-    n ? `${n} ${n === 1 ? 'name' : 'names'}` : '',
-  ]
-    .filter(Boolean)
-    .join(', ');
-}
+/** D3 open questions, read through the live answers (S3, answers.ts). */
+export { countWords, openQuestions, UnansweredQuestionsError } from './answers';
 
 /**
  * D3: the count an AI name auto-accepted at T backs with the sheet's own "cut n" (`cut-qty`

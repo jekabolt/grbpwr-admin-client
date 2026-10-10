@@ -38,7 +38,7 @@ export type WallModel = {
   /** The long edges of band ladders, walls of every rank (also in `common`). */
   bandEdges?: Set<ChainId>;
   /** Band rungs carried across the band (derived 'band-cut' walls of their rank). */
-  bandCuts?: { rank: number; from: PtMm; to: PtMm }[];
+  bandCuts?: { rank: number; from: PtMm; to: PtMm; ticks: ChainId[] }[];
   /** Rank by continuity: chains moved to their outline's rank, and undecided components. */
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
 };
@@ -895,11 +895,11 @@ export function bandTicks(
 ): {
   ticks: Map<ChainId, number>;
   edges: Set<ChainId>;
-  cuts: { rank: number; from: PtMm; to: PtMm }[];
+  cuts: { rank: number; from: PtMm; to: PtMm; ticks: ChainId[] }[];
 } {
   const out = new Map<ChainId, number>();
   const edges = new Set<ChainId>();
-  const cuts: { rank: number; from: PtMm; to: PtMm }[] = [];
+  const cuts: { rank: number; from: PtMm; to: PtMm; ticks: ChainId[] }[] = [];
   if (n < 3) return { ticks: out, edges, cuts };
   type Tick = { id: ChainId; a: PtMm; b: PtMm; L: number; dir: PtMm };
   const ticks: Tick[] = [];
@@ -1040,6 +1040,8 @@ export function bandTicks(
           rank: r,
           from: { x: base.x + t0.dir.x * lo, y: base.y + t0.dir.y * lo },
           to: { x: base.x + t0.dir.x * hi, y: base.y + t0.dir.y * hi },
+          // the rung(s) this cut carries: its provenance, the only lines that may carry it (G15)
+          ticks: g.map((x) => x.id),
         });
       });
     }

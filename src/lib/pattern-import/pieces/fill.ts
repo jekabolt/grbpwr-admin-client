@@ -775,7 +775,7 @@ export function fillPiecesDetailed(
         ...usedOp.map((b) => ({ kind: 'operator-bridge' as const, pts: [b.from, b.to] })),
         ...bandCuts(r)
           .filter(onOutline)
-          .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to] })),
+          .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to], chains: [...b.ticks] })),
       ];
       if (der.length) cand.derived = der;
       cand.areaMm2 = Math.abs(signedArea(outer));

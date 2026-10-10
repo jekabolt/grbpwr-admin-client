@@ -111,6 +111,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `text “${e.text}” ${e.distanceMm} mm away`;
           case 'nesting-order':
             return `nesting rank ${e.rank}`;
+          case 'colour-only':
+            return `light grey only (rgb ${e.rgb.join(',')}) — background or a cut line?`;
           case 'seam-offset':
             return `${e.offsetMm} mm inside the cut line`;
         }
@@ -310,7 +312,11 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           onClick={() =>
                             patchInputs((i) => ({ legendConfirmed: [...i.legendConfirmed, c.id] }))
                           }
-                          title={`${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`}
+                          title={
+                            c.evidence.some((x) => x.kind === 'colour-only')
+                              ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
+                              : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
+                          }
                         >
                           ! confirm
                         </Chip>

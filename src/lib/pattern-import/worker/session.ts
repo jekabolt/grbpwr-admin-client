@@ -900,6 +900,12 @@ export class Session {
         fileAllowance,
         traced: this.traced(),
         docTexts: this.docTexts,
+        // the text label of each text seed: the cutting list binds its entries to them (S5)
+        seedLabels: Object.fromEntries(
+          (this.seeds ?? []).flatMap((sd) =>
+            sd.origin === 'text' && sd.text ? [[sd.id, sd.text.text.trim()]] : [],
+          ),
+        ),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
@@ -1023,7 +1029,7 @@ export class Session {
       ...sem.blocked.filter((b) => b.reason === 'fold-question').map((b) => b.detail),
       ...(sem.foldList
         ? [
-            `the cutting list names ${sem.foldList.entries.length} pieces cut on fold, ${sem.foldList.unfolded} unfolded`,
+            `the cutting list names pieces cut on fold that no piece on the sheet matches: ${sem.foldList.entries.join('; ')}`,
           ]
         : []),
     ];

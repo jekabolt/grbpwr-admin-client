@@ -15,8 +15,9 @@ import {
   assertRasterPagePixels,
   assertRasterPixels,
   inputTooLarge,
-  oversizedPdfImages,
   oversizedPdfImagesMessage,
+  pdfImageScan,
+  unreadablePdfImagesMessage,
 } from '../budget';
 import { applyCalibration, calibrate } from './calibrate';
 import {
@@ -228,8 +229,9 @@ export async function extractRasterPdfDetailed(
 ): Promise<RasterExtractResult> {
   // C5: a scan pdf.js would drop for its size (the guard's maxImageSize) is refused, not traced
   // as an empty page
-  const big = oversizedPdfImages(file.bytes);
-  if (big.length) throw inputTooLarge(oversizedPdfImagesMessage(big));
+  const scan = pdfImageScan(file.bytes);
+  if (scan.oversized.length) throw inputTooLarge(oversizedPdfImagesMessage(scan.oversized));
+  if (scan.unknown) throw inputTooLarge(unreadablePdfImagesMessage(scan.unknown));
   const sha = await sha256Hex(file.bytes);
   const pdf = await openRasterPdf(file.bytes);
   const warnings: string[] = [];
