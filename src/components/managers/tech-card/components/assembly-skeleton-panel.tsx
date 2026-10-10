@@ -56,15 +56,18 @@ import { assemblySweep, classifyAssemblyInputs, type AssemblyStep } from './asse
 import { SkeletonAIBar, useSkeletonAI } from './assembly-skeleton-ai';
 import { makeSkeletonDeps } from './assembly-skeleton-deps';
 import {
+  AUTO_KIND_WORDS,
+  autoGroups,
   autoGuess,
+  autoKindOf,
   autoTickedGuesses,
-  closeOrder,
   defaultPick,
-  defaultPicks,
   isDerived,
+  isOpenChoice,
   orderClosure,
+  personalPick,
+  picksFor,
   ridersOf,
-  settlePicks,
   type StepPick,
 } from './assembly-skeleton-ticks';
 import {
@@ -220,23 +223,38 @@ const pinsOf = (p: SkeletonProposal): Record<string, number> => {
   return pins;
 };
 
-/** The person's ticks carried from the proposal they were made on to its rebuild. */
+/**
+ * The person's ticks carried from the proposal they were made on to its rebuild. A new step (a
+ * rebuild's) gets the mode's default ticks — in manual the order-closing ones included, in auto a
+ * tick and its AUTO mark; a step the person already had keeps their tick. In auto mode the join
+ * whose reading was just chosen is the person's decision now: ticked, and no longer marked AUTO.
+ */
 const carryPicks = (
   prev: SkeletonProposal | null,
   prevPicks: readonly StepPick[],
   next: SkeletonProposal,
+  auto: boolean,
 ): StepPick[] => {
-  if (!prev || prevPicks.length !== prev.steps.length) return defaultPicks(next.steps);
+  if (!prev || prevPicks.length !== prev.steps.length)
+    return picksFor(next.steps, auto, () => undefined);
   const old = new Map(skeletonStepSignatures(prev.steps).map((sig, i) => [sig, prevPicks[i]]));
   const carried = skeletonStepSignatures(next.steps).map((sig) => old.get(sig));
-  const settled = settlePicks(
-    next.steps,
-    next.steps.map((s, i) => carried[i] ?? defaultPick(s)),
-    (i) => !carried[i],
+  const chosenBefore = new Map(
+    prev.steps.flatMap((s) => (s.decision ? [[s.decision.id, s.decision.chosen] as const] : [])),
   );
-  // A new step (a rebuild's) gets the default ticks, the order-closing ones included; a step the
-  // person already had keeps their tick.
-  return closeOrder(next.steps, settled, (i) => !!carried[i]);
+  const chosenNow = (s: SkeletonStep): boolean =>
+    !!s.decision &&
+    chosenBefore.has(s.decision.id) &&
+    chosenBefore.get(s.decision.id) !== s.decision.chosen;
+  return picksFor(
+    next.steps,
+    auto,
+    (i) =>
+      carried[i] ??
+      (auto && chosenNow(next.steps[i])
+        ? { accepted: true, applied: false, own: true }
+        : undefined),
+  );
 };
 
 // ── the door ────────────────────────────────────────────────────────────────────────────────────
@@ -300,6 +318,10 @@ export function useSkeletonDoor({
   const undoSeq = useRef(0);
   const pickSnaps = useRef(new Map<number, { before: StepPick[]; after: StepPick[] }>());
   const [picks, setPicks] = useState<StepPick[]>([]);
+  // AUTO MODE (07 §5): on by default, and it outlives the panel like the proposal does. The ref is
+  // what the rebuild effect reads, so a switch does not re-run it.
+  const [autoMode, setAutoMode] = useState(true);
+  const autoRef = useRef(true);
 
   // A fresh proposal gets fresh picks; the same proposal keeps them across close/open; a rebuild
   // around a chosen reading keeps the ticks of every step the choice did not touch.
@@ -308,8 +330,19 @@ export function useSkeletonDoor({
   useEffect(() => {
     const prev = pickedOn.current;
     pickedOn.current = ready;
-    setPicks((before) => (ready ? carryPicks(prev, before, ready) : []));
+    setPicks((before) => (ready ? carryPicks(prev, before, ready, autoRef.current) : []));
   }, [ready]);
+  // Switching auto ↔ manual re-picks every step but the ones a person ticked or unticked and the
+  // ones already applied.
+  const switchAuto = (on: boolean) => {
+    autoRef.current = on;
+    setAutoMode(on);
+    const steps = pickedOn.current?.steps;
+    if (steps)
+      setPicks((prev) =>
+        prev.length === steps.length ? picksFor(steps, on, (i) => personalPick(prev[i])) : prev,
+      );
+  };
 
   // Which proposal steps each request carried, so its answer marks exactly those as applied.
   const [carried, setCarried] = useState<{ nonce: number; idx: number[]; replace: boolean } | null>(
@@ -400,6 +433,8 @@ export function useSkeletonDoor({
           categoryNames={categoryNames}
           picks={picks}
           onPicks={setPicks}
+          autoMode={autoMode}
+          onAutoMode={switchAuto}
           mode={mode}
           onMode={setMode}
           readFor={readFor}
@@ -461,6 +496,8 @@ function AssemblySkeletonPanel({
   categoryNames,
   picks,
   onPicks,
+  autoMode,
+  onAutoMode,
   mode: chosenMode,
   onMode,
   readFor,
@@ -482,6 +519,9 @@ function AssemblySkeletonPanel({
   categoryNames: ReadonlyArray<string>;
   picks: StepPick[];
   onPicks: (next: StepPick[] | ((prev: StepPick[]) => StepPick[])) => void;
+  /** Auto mode: every step ticked, each guess and open reading taken at the engine's reading. */
+  autoMode: boolean;
+  onAutoMode: (on: boolean) => void;
   /** null = not chosen yet (only possible while the card has steps). */
   mode: SkeletonMode | null;
   onMode: (m: SkeletonMode) => void;
@@ -722,9 +762,10 @@ function AssemblySkeletonPanel({
   const setAccepted = (i: number, accepted: boolean) => {
     const riders = new Set(proposal ? ridersOf(proposal.steps, i) : []);
     onPicks((prev) =>
-      // A person's tick is theirs: it is no longer «ticked to close the order».
+      // A person's tick is theirs: it is no longer «ticked to close the order» nor AUTO, and an
+      // auto ↔ manual switch keeps it.
       prev.map((p, j) =>
-        j === i || (riders.has(j) && !p.applied) ? { accepted, applied: p.applied } : p,
+        j === i || (riders.has(j) && !p.applied) ? { accepted, applied: p.applied, own: true } : p,
       ),
     );
   };
@@ -866,9 +907,12 @@ function AssemblySkeletonPanel({
   const steps = proposal?.steps ?? [];
   // To decide = the engine's own doubts: a join it guessed or read two ways. A press or a hem that
   // rides on a join is decided with it; a step unticked only because its join is a guess is too.
-  const toCheck = steps.filter(
-    (s) => shown(s) && !isDerived(s) && (isAmbiguous(s) || s.confidence < SKELETON.accept),
-  ).length;
+  // In auto mode nothing is left to decide: each such step is picked, marked AUTO, and listed.
+  const toCheck = autoMode
+    ? 0
+    : steps.filter((s) => shown(s) && !isDerived(s) && isOpenChoice(s)).length;
+  // Auto mode's header: how many shown steps a person unticked (none = «all picked»).
+  const unticked = steps.filter((s, i) => shown(s) && picks[i] && !picks[i].accepted).length;
   // The number each counted step will get, for «with 30» on the steps that ride on it.
   const numbers = new Map<number, number>();
   {
@@ -890,7 +934,12 @@ function AssemblySkeletonPanel({
   const closure = useMemo(() => (proposal ? orderClosure(proposal.steps) : null), [proposal]);
   // Every guess the default ticks took — joins that close the order, and riders ticked with a join
   // read on its own evidence — is listed here and marked on its row.
-  const { closing: closingJoins, withJoin: riderGuesses } = autoTickedGuesses(steps, picks, shown);
+  const {
+    closing: closingJoins,
+    withJoin: riderGuesses,
+    auto: autoPicked,
+  } = autoTickedGuesses(steps, picks, shown);
+  const autoKinds = autoGroups(steps, autoPicked);
   const decidingJoins = (closure?.openDecisions ?? []).filter(
     (i) => picks[i]?.accepted && !picks[i]?.applied && !!steps[i]?.decision,
   );
@@ -936,10 +985,17 @@ function AssemblySkeletonPanel({
                 className='tabular-nums'
                 data-skeleton-count={steps.length}
                 data-skeleton-to-decide={toCheck}
+                data-skeleton-auto-picked={autoMode ? autoPicked.length : undefined}
               >
                 {steps.length} {steps.length === 1 ? 'step' : 'steps'}
-                {toCheck > 0 ? ` · ${toCheck} to decide` : ''} · read off the pattern, nothing
-                written yet
+                {autoMode
+                  ? `${unticked > 0 ? ` · ${unticked} unticked` : ' · all picked'}${
+                      autoPicked.length > 0 ? ` · ${autoPicked.length} auto-picked` : ''
+                    }`
+                  : toCheck > 0
+                    ? ` · ${toCheck} to decide`
+                    : ''}{' '}
+                · read off the pattern, nothing written yet
               </Text>
             )}
             <Dialog.Close asChild>
@@ -1036,6 +1092,19 @@ function AssemblySkeletonPanel({
                   >
                     {pressOpen ? '✓ ' : ''}press open after joins
                   </Chip>
+                  <Chip
+                    nonForm
+                    selected={autoMode}
+                    onClick={() => onAutoMode(!autoMode)}
+                    title={
+                      autoMode
+                        ? 'auto: every step is ticked and each guess takes the engine’s reading, marked AUTO — press for manual, where guesses wait for you'
+                        : 'manual: only what the pattern showed is ticked, guesses wait for you — press to tick every step at the engine’s reading'
+                    }
+                    data-skeleton-auto={autoMode ? 'on' : 'off'}
+                  >
+                    {autoMode ? '✓ ' : ''}auto: every step picked
+                  </Chip>
                 </ChipRow>
                 <SkeletonAIBar
                   state={ai.state}
@@ -1089,6 +1158,7 @@ function AssemblySkeletonPanel({
                 ))}
 
                 {(closingJoins.length > 0 ||
+                  autoPicked.length > 0 ||
                   riderGuesses.length > 0 ||
                   decidingJoins.length > 0 ||
                   looseEnds.length > 0) && (
@@ -1111,6 +1181,36 @@ function AssemblySkeletonPanel({
                         </span>
                       </Text>
                     )}
+                    {autoPicked.length > 0 && (
+                      <div className='flex flex-col' data-skeleton-auto-notice={autoPicked.length}>
+                        <Text size='micro' component='p'>
+                          <b>
+                            auto-picked: {autoPicked.length}{' '}
+                            {autoPicked.length === 1 ? 'step' : 'steps'}
+                          </b>
+                          <span className='text-labelColor'>
+                            {' '}
+                            {autoPicked.length === 1 ? 'takes' : 'take'} the engine’s reading and{' '}
+                            {autoPicked.length === 1 ? 'is' : 'are'} marked AUTO on the line. Check
+                            them: flip a reading or untick to change.
+                          </span>
+                        </Text>
+                        {autoKinds.map((g) => (
+                          <Text
+                            key={g.kind}
+                            size='micro'
+                            component='p'
+                            data-skeleton-auto-kind={g.kind}
+                            data-skeleton-auto-kind-n={g.idx.length}
+                          >
+                            <b className='tabular-nums'>
+                              {g.idx.length === 1 ? 'step' : 'steps'} {listNumbers(g.idx)}
+                            </b>
+                            <span className='text-labelColor'> — {AUTO_KIND_WORDS[g.kind]}</span>
+                          </Text>
+                        ))}
+                      </div>
+                    )}
                     {riderGuesses.length > 0 && (
                       <Text
                         size='micro'
@@ -1123,8 +1223,8 @@ function AssemblySkeletonPanel({
                         </b>
                         <span className='text-labelColor'>
                           {' '}
-                          {riderGuesses.length === 1 ? 'is a guess' : 'are guesses'} riding on a
-                          join the pattern did read. Check{' '}
+                          {riderGuesses.length === 1 ? 'is a guess' : 'are guesses'} riding on{' '}
+                          {autoMode ? 'their join' : 'a join the pattern did read'}. Check{' '}
                           {riderGuesses.length === 1 ? 'it' : 'them'}, or untick.
                         </span>
                       </Text>
@@ -1688,6 +1788,16 @@ function SkeletonLine({
           ?
         </Text>
       )}
+      {pick.auto && pick.accepted && !pick.applied && (
+        <Pill
+          tone='mut'
+          className='shrink-0'
+          data-skeleton-step-auto={index}
+          title='picked by auto mode at the engine’s reading — untick or flip a reading to change'
+        >
+          auto
+        </Pill>
+      )}
       <Button
         type='button'
         variant='secondary'
@@ -1756,8 +1866,8 @@ function SkeletonLine({
         </div>
       )}
       {pick.accepted &&
-        step.confidence < SKELETON.accept &&
-        (follows == null || autoGuess(pick)) && (
+        ((pick.auto && !pick.applied) ||
+          (step.confidence < SKELETON.accept && (follows == null || autoGuess(pick)))) && (
           <Text
             size='micro'
             variant='label'
@@ -1766,11 +1876,13 @@ function SkeletonLine({
             data-skeleton-step-closing={pick.closing ? index : undefined}
             data-skeleton-step-autoguess={autoGuess(pick) ? index : undefined}
           >
-            {pick.closing
-              ? 'a guess, ticked to close the order: check it'
-              : pick.withJoin
-                ? 'a guess, ticked with its join: check it'
-                : 'a guess — kept because you ticked it'}
+            {pick.auto
+              ? `auto-picked: ${AUTO_KIND_WORDS[autoKindOf(step)]} — check it`
+              : pick.closing
+                ? 'a guess, ticked to close the order: check it'
+                : pick.withJoin
+                  ? 'a guess, ticked with its join: check it'
+                  : 'a guess — kept because you ticked it'}
           </Text>
         )}
       {ai?.warnings.map((m, wi) => (
