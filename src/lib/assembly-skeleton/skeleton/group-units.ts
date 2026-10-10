@@ -488,6 +488,7 @@ export function groupDetailed(
         group.filter((e) => !parts.includes(e)),
       );
   }
+  const later: { group: Entity[]; layers: boolean; name: string }[] = [];
   for (const group of families.values()) {
     if (group.length < 2) continue;
     const [head] = group;
@@ -525,13 +526,88 @@ export function groupDetailed(
       continue;
     }
     const layers = isLayers(group, graph);
-    record(group, {
-      name: crowded ? `${base} (${head.family?.toUpperCase()})` : base,
-      roles: [role],
-      kind: layers ? 'layers' : 'panel',
+    // Parts of a pocket, flap or placket that are not layers of one shape are separate things,
+    // each going onto its own panel (PCK_R_MAIN on the upper front, PCK_R_BTTM on the lower one).
+    if (!layers && roleDef(role)?.attachTo?.length) continue;
+    later.push({ group, layers, name: crowded ? `${base} (${head.family?.toUpperCase()})` : base });
+  }
+
+  // ── E. onto its panel first: a pocket (or, on a garment with no body, a belt) whose seam says
+  // which piece it goes onto is sewn there while that piece is still flat — before the piece
+  // meets the rest of its family, before any panel seam (F2, 05-PROD-DIAGNOSIS §4 P2: 10/10
+  // cards). A part laid by a placement mark is step S's; a part with no seam waits for step 5.
+  {
+    const bodyless = !pieces.some((p) => p.role === 'front' || p.role === 'back');
+    const toBody = new Set(
+      template.stages
+        .filter((st) => st.op === 'attach' && st.to?.includes('body'))
+        .flatMap((st) => st.roles ?? []),
+    );
+    const early = (e: Entity) => {
+      const def = roleDef(e.roles[0] ?? null);
+      if (!def || e.leaves.some((l) => surfacePart.has(l))) return false;
+      if (def.attachEarly) return true;
+      return bodyless && def.level === 'sub' && toBody.has(def.id);
+    };
+    for (const e of table.list().filter(early)) {
+      if (!isLive(e)) continue;
+      const def = roleDef(e.roles[0])!;
+      const attachTo = def.attachTo ?? [];
+      const host = (t: Entity) => {
+        const tdef = roleDef(t.roles[0] ?? null);
+        if (!tdef) return true; // a nameless piece: the geometry pass names nothing anyway
+        if (tdef.attachTo?.length || tdef.wraps || early(t)) return false;
+        return t.roles.some((r) => attachTo.includes(r)) || (bodyless && tdef.level === 'panel');
+      };
+      const cands = table
+        .list(e.tree)
+        .filter((t) => t !== e && host(t))
+        // A seam read before any panel is assembled is only trusted between pieces of one hand:
+        // a left pocket «matching» a centre-back yoke is the rectangles' noise, not its host.
+        .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand)
+        .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
+        .filter((x) => x.score >= SKELETON.accept)
+        .sort((a, b) => b.score - a.score);
+      if (!cands.length) continue;
+      // ONE host: a seam the part could equally make with another piece (a rival within
+      // SKELETON.ambiguity, here or in lane A's own reading) is no host yet — step 5 decides.
+      const { t, score } = cands[0];
+      const own = seams.between(e.leaves, t.leaves)[0];
+      const rivalled = (own?.ambiguousWith ?? []).some((q) =>
+        [q.a, q.b].some((k) => e.leaves.includes(pieceOf(k))),
+      );
+      if (rivalled || cands.some((x) => x !== cands[0] && x.score >= score - SKELETON.ambiguity))
+        continue;
+      const made = record([e, t], {
+        name: `${display(t)} with ${def.name.toLowerCase()}`,
+        // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
+        roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
+        kind: 'attach',
+        hand: t.hand,
+        why: `${roleName(def.id, e.hand)} goes onto ${display(t)} while it is still flat`,
+      });
+      made.family = t.family;
+    }
+  }
+
+  // ── 1b. the rest of a family in one step (strips of one panel: FP_L + FP_1_L + FP_2_L) ───────
+  for (const { group, layers, name } of later) {
+    const holders = [
+      ...new Set(
+        group.map((m) => table.list().find((e) => e.leaves.includes(m.key))).filter(Boolean),
+      ),
+    ] as Entity[];
+    if (holders.length < 2) continue;
+    const role = group[0].roles[0];
+    record(holders, {
+      name,
+      roles: holders.every((h) => !h.unit)
+        ? [role]
+        : mergeRoles([role], ...holders.map((h) => h.roles)),
+      kind: layers && holders.every((h) => !h.unit) ? 'layers' : 'panel',
       why: layers
-        ? `Layers of one shape, sewn into one: ${listNames(group)}`
-        : `One family by name: ${listNames(group)}`,
+        ? `Layers of one shape, sewn into one: ${listNames(holders)}`
+        : `One family by name: ${listNames(holders)}`,
     });
   }
 
@@ -613,10 +689,13 @@ export function groupDetailed(
   }
 
   // ── 2a. one role, one hand: FRONT_L + the FP_L panel → «Left front» ──────────────────────────
+  // Not for what is sewn ONTO a panel (pockets, plackets, fly): two pockets of one hand are two
+  // pockets, each on its own host (step 5), never one «Left pocket» first.
   const byRole = (keyOf: (e: Entity) => string | null) => {
     const m = new Map<string, Entity[]>();
     for (const e of table.list()) {
       if (!groupable(e) || e.roles.length !== 1) continue;
+      if (roleDef(e.roles[0])?.attachTo?.length) continue;
       const k = keyOf(e);
       if (k) m.set(k, [...(m.get(k) ?? []), e]);
     }
@@ -630,6 +709,112 @@ export function groupDetailed(
       kind: 'merge',
       why: `${roleName(role, group[0].hand)} from its parts: ${listNames(group)}`,
     });
+  }
+
+  // ── 5. sewn onto a panel before the body: plackets, pockets, fly ─────────────────────────────
+  for (const def of ROLE_BOOK.roles.filter((d) => d.attachTo?.length)) {
+    const attachTo = def.attachTo ?? [];
+    for (const e of table.list().filter((x) => x.roles[0] === def.id)) {
+      if (!table.live.has(e.key)) continue;
+      const cands = table
+        .list(e.tree)
+        .filter((t) => t !== e && t.roles.some((r) => attachTo.includes(r)))
+        .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand || t.hand === null)
+        .map((t) => ({
+          t,
+          score: bestScore(seams, e.leaves, t),
+          // With no seam to tell, the name may: PCK_BACK_L goes onto the back (F2).
+          hint: hintsAt(e, t, attachTo) ? 0 : 1,
+          rank: Math.min(...t.roles.map((r) => (attachTo.includes(r) ? attachTo.indexOf(r) : 99))),
+          handMatch: t.hand === e.hand ? 0 : 1,
+        }))
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            a.hint - b.hint ||
+            a.rank - b.rank ||
+            a.handMatch - b.handMatch ||
+            b.t.leaves.length - a.t.leaves.length,
+        );
+      if (!cands.length) {
+        // No panel of those roles (a bag, names that say nothing): its best seam names the host
+        // rather than the end of the order (F2 — «no front to sew it onto» was the dead end).
+        const partner = table
+          .list(e.tree)
+          .filter((t) => t !== e && !roleDef(t.roles[0] ?? null)?.wraps)
+          .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score);
+        if (!partner.length) {
+          warnings.push(`${e.name}: no ${attachTo.join(' or ')} to sew it onto — left for the end`);
+          continue;
+        }
+        const top = partner[0].score;
+        const readings = partner.filter((x) => x.score >= top - SKELETON.ambiguity).slice(0, 3);
+        const d = decide(
+          pins,
+          `onto:${leafId([e])}`,
+          readings.map((o, i) => ({
+            inputs: [e, o.t],
+            reason:
+              i === 0
+                ? `or onto ${o.t.name} — its best seam`
+                : `or onto ${o.t.name} — a seam almost as good`,
+          })),
+          isLive,
+        );
+        const t = readings[d.chosen].t;
+        record([e, t], {
+          name: `${display(t)} with ${def.name.toLowerCase()}`,
+          roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
+          kind: 'attach',
+          hand: t.hand,
+          why: `${roleName(def.id, e.hand)}: no ${attachTo.join(' or ')} in the names — ${
+            d.chosen ? 'your reading sews it' : 'its best seam goes'
+          } onto ${display(t)}`,
+          alternatives: withSeams(d.others),
+          decision: d.decision,
+        });
+        continue;
+      }
+      const [first] = cands;
+      const readings = [
+        first,
+        ...cands
+          .slice(1)
+          .filter((x) => (first.score > 0 ? x.score >= first.score - SKELETON.ambiguity : true))
+          .slice(0, 2),
+      ];
+      const d = decide(
+        pins,
+        `onto:${leafId([e])}`,
+        readings.map((o, i) => ({
+          inputs: [e, o.t],
+          reason:
+            i === 0
+              ? `or onto ${o.t.name} — the pattern's first reading`
+              : o.score
+                ? `or onto ${o.t.name} — a seam almost as good`
+                : `or onto ${o.t.name}`,
+        })),
+        isLive,
+      );
+      const top = readings[d.chosen];
+      const why = d.chosen
+        ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)} — your reading`
+        : top.score
+          ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)}`
+          : `${roleName(def.id, e.hand)} goes onto ${display(top.t)} by name (${attachTo.join(' / ')})`;
+      record([e, top.t], {
+        name: `${display(top.t)} with ${def.name.toLowerCase()}`,
+        roles: mergeRoles(top.t.roles, [def.id]),
+        kind: 'attach',
+        hand: top.t.hand,
+        why,
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+      });
+    }
   }
 
   // ── 2b. roles with a centre seam merge across hands: left back + BP + right back → «Back» ────
@@ -810,72 +995,6 @@ export function groupDetailed(
     });
   }
 
-  // ── 5. sewn onto a panel before the body: plackets, pockets, fly ─────────────────────────────
-  for (const def of ROLE_BOOK.roles.filter((d) => d.attachTo?.length)) {
-    const attachTo = def.attachTo ?? [];
-    for (const e of table.list().filter((x) => x.roles[0] === def.id)) {
-      if (!table.live.has(e.key)) continue;
-      const cands = table
-        .list(e.tree)
-        .filter((t) => t !== e && t.roles.some((r) => attachTo.includes(r)))
-        .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand || t.hand === null)
-        .map((t) => ({
-          t,
-          score: bestScore(seams, e.leaves, t),
-          rank: Math.min(...t.roles.map((r) => (attachTo.includes(r) ? attachTo.indexOf(r) : 99))),
-          handMatch: t.hand === e.hand ? 0 : 1,
-        }))
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            a.rank - b.rank ||
-            a.handMatch - b.handMatch ||
-            b.t.leaves.length - a.t.leaves.length,
-        );
-      if (!cands.length) {
-        warnings.push(`${e.name}: no ${attachTo.join(' or ')} to sew it onto — left for the end`);
-        continue;
-      }
-      const [first] = cands;
-      const readings = [
-        first,
-        ...cands
-          .slice(1)
-          .filter((x) => (first.score > 0 ? x.score >= first.score - SKELETON.ambiguity : true))
-          .slice(0, 2),
-      ];
-      const d = decide(
-        pins,
-        `onto:${leafId([e])}`,
-        readings.map((o, i) => ({
-          inputs: [e, o.t],
-          reason:
-            i === 0
-              ? `or onto ${o.t.name} — the pattern's first reading`
-              : o.score
-                ? `or onto ${o.t.name} — a seam almost as good`
-                : `or onto ${o.t.name}`,
-        })),
-        isLive,
-      );
-      const top = readings[d.chosen];
-      const why = d.chosen
-        ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)} — your reading`
-        : top.score
-          ? `${roleName(def.id, e.hand)} goes onto ${display(top.t)}`
-          : `${roleName(def.id, e.hand)} goes onto ${display(top.t)} by name (${attachTo.join(' / ')})`;
-      record([e, top.t], {
-        name: `${display(top.t)} with ${def.name.toLowerCase()}`,
-        roles: mergeRoles(top.t.roles, [def.id]),
-        kind: 'attach',
-        hand: top.t.hand,
-        why,
-        alternatives: withSeams(d.others),
-        decision: d.decision,
-      });
-    }
-  }
-
   return { units, table, pieces, seams, warnings, replay, existing };
 }
 
@@ -890,6 +1009,17 @@ export function groupUnits(
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The attacher's own name points at this host's role: PCK_BACK_L carries a back token, so with no
+ * seam to tell, it goes onto the back rather than the first role of `attachTo`.
+ */
+function hintsAt(e: Entity, t: Entity, attachTo: string[]): boolean {
+  const own = new Set(nameTokens(e.name).map((x) => x.replace(/^\d+|\d+$/g, '')));
+  return attachTo.some(
+    (r) => t.roles.includes(r) && (roleDef(r)?.tokens ?? []).some((x) => own.has(x)),
+  );
+}
 
 /** The number a layer carries in its name (BLT_3_M → 3, CLR_MAIN → 0): the last number token. */
 function nameIndex(name: string): number {

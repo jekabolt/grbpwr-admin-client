@@ -108,6 +108,11 @@ export type RoleDef = {
    * step (yoke + yoke facing around the back), not paired first like collar or cuff layers.
    */
   layersWrap?: boolean;
+  /**
+   * attachTo roles only: a part whose edge seam names the piece it goes onto is sewn there while
+   * that piece is still flat — before the piece meets its own family or any panel (pockets).
+   */
+  attachEarly?: boolean;
 };
 
 export type RoleBook = {
