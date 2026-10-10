@@ -26,6 +26,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
+import { budgetOf, inputTooLarge, oversizedPdfImages, oversizedPdfImagesMessage } from '../budget';
 import { boxArea, intersectBox, type M6 } from './geom';
 import { loadPdfjs, openPdf, type PdfDocument, type PdfPage } from './pdfjs';
 import { textsOf } from './text';
@@ -122,6 +123,7 @@ export async function extractPdfWith(
   const sha256 = await sha256Hex(file.bytes);
   const doc = await openPdf(file.bytes);
   const warnings: string[] = [];
+  const budget = budgetOf(opts);
   try {
     let producer: string | undefined;
     try {
@@ -151,6 +153,8 @@ export async function extractPdfWith(
         if (page.rotate)
           warnings.push(`page ${p + 1}: /Rotate ${page.rotate} — kept in unrotated user space`);
         const ol = await page.getOperatorList();
+        // C4: the operators are paid for before they are walked, the points while they are made
+        budget.spend(ol.fnArray.length, `the drawing operators of page ${p + 1}`);
         const w = walkOperatorList(ol, {
           ops: OPS,
           file: file.id,
@@ -159,8 +163,10 @@ export async function extractPdfWith(
           sagittaMm: sagitta,
           keepFills: opts.keepFills,
           ocName: resolve,
+          budget,
         });
         const tc = await page.getTextContent();
+        budget.spend(tc.items.length, `the text items of page ${p + 1}`);
         const texts = textsOf(tc.items, base, w.textRuns, file.id, p, ol.fnArray.length);
         for (const t of texts) if (t.layer) w.layersUsed.add(t.layer);
 
@@ -205,6 +211,14 @@ export async function extractPdfWith(
       } finally {
         page.cleanup();
       }
+    }
+    // C5: pdf.js drops an image over the raster limit without a trace. Nothing drawn besides it →
+    // the file is that scan: refuse it; vectors drawn → keep them and say the image was skipped.
+    const big = oversizedPdfImages(file.bytes);
+    if (big.length) {
+      const msg = oversizedPdfImagesMessage(big);
+      if (pages.every((pg) => pg.paths.length === 0)) throw inputTooLarge(msg);
+      warnings.push(msg);
     }
     progress?.(pageList.length, pageList.length);
     return {

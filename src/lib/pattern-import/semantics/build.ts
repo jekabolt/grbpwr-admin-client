@@ -26,6 +26,7 @@ import type {
   BlockReason,
   BuildPieceSpecsFn,
   CardSize,
+  DerivedEdge,
   DrillFeature,
   Feature,
   FoldFeature,
@@ -87,6 +88,11 @@ export type SemanticsDetail = {
    * The write stage passes this as `wallsOf` to `writeAndGate` (G3/G4).
    */
   wallsOf: (identity: string, rank: number) => PtMm[][] | undefined;
+  /**
+   * The outline's derived edges (F4b bridges, operator bridges, band cuts) in the same frame — never
+   * walls (F14b, Codex C1): the write stage passes this as `derivedOf` to `writeAndGate` (G15).
+   */
+  derivedOf: (identity: string, rank: number) => DerivedEdge[] | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -693,7 +699,8 @@ export function buildPieceSpecsDetailed(
 
   // ── walls for the gate ──────────────────────────────────────────────────────────────────
   const famBySeed = new Map(families.map((f) => [f.seed, f]));
-  const wallsOf = (identity: string, rank: number): PtMm[][] | undefined => {
+  /** The source candidate behind a written identity × rank and the map into its frame. */
+  const sourceOf = (identity: string, rank: number) => {
     const maps = walls.get(identity);
     if (!maps) return undefined;
     const spec = unique.find((s) => s.identity === identity);
@@ -701,18 +708,10 @@ export function buildPieceSpecsDetailed(
     const w = maps.find((m) => m.rank === rank) ?? (spec.ungraded ? maps[0] : undefined);
     if (!w) return undefined;
     const cand = famBySeed.get(w.seed)?.candidates.find((c) => c.rank === w.rank);
-    if (!cand) return undefined;
-    // a closed chain's polyline does not repeat its first vertex: close it, or the gate's walls
-    // (open polylines) miss the closing edge
-    let lines = cand.walls
-      .map((id) => set.chains[id])
-      .filter((ch) => !!ch && ch.pts.length > 1)
-      .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
-    // the outline's derived stretches (F4b: an auto or operator bridge over a gap, a band cut) are
-    // walls the fill was told to use — the written line follows them, so G3/G4 measure it against
-    // them too (a 4.7 mm operator bridge is 2.35 mm from any drawn line at its middle: G4 blocked)
-    for (const d of cand.derived ?? []) if (d.pts.length > 1) lines.push(d.pts);
-    if (!lines.length) return undefined;
+    return cand ? { w, cand } : undefined;
+  };
+  /** Source-frame lines → the identity's frame: the fold edge dropped and mirrored, then `t`. */
+  const toFrame = (w: WallMap, lines: PtMm[][]): PtMm[][] => {
     if (w.fold) {
       const M = reflection(w.fold.a, w.fold.b);
       const clipped = lines.flatMap((l) => clipFold(l, w.fold!));
@@ -720,10 +719,68 @@ export function buildPieceSpecsDetailed(
     }
     return lines.map((l) => l.map((q) => applyAffine(w.t, q)));
   };
+  const wallsOf = (identity: string, rank: number): PtMm[][] | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src) return undefined;
+    // a closed chain's polyline does not repeat its first vertex: close it, or the gate's walls
+    // (open polylines) miss the closing edge
+    const lines = src.cand.walls
+      .map((id) => set.chains[id])
+      .filter((ch) => !!ch && ch.pts.length > 1)
+      .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
+    // Source chains ONLY (F14b, Codex C1): the outline's derived stretches (an auto or operator
+    // bridge, a band cut) are never walls — measured against them, G3/G4 certified edges the
+    // pipeline itself drew. They go to the gate separately (`derivedOf` → G15).
+    if (!lines.length) return undefined;
+    return toFrame(src.w, lines);
+  };
+  /** Drawn chains passing within `snapMm` of a derived edge (sampled every 1 mm), closed ones closed. */
+  const chainBox = new Map<number, ReturnType<typeof bboxOf>>();
+  const alongOf = (pts: PtMm[]): PtMm[][] => {
+    const snap = PATIMPORT.snapMm;
+    const eb = bboxOf(pts);
+    const samples: PtMm[] = [];
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const k = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
+      for (let j = 0; j <= k; j++)
+        samples.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
+    }
+    const out: PtMm[][] = [];
+    for (const ch of set.chains) {
+      if (!ch || ch.pts.length < 2) continue;
+      let cb = chainBox.get(ch.id);
+      if (!cb) chainBox.set(ch.id, (cb = bboxOf(ch.pts)));
+      if (
+        cb.minX > eb.maxX + snap ||
+        cb.maxX < eb.minX - snap ||
+        cb.minY > eb.maxY + snap ||
+        cb.maxY < eb.minY - snap
+      )
+        continue;
+      if (samples.some((q) => closestOnPolyline(q, ch.pts, ch.closed).d <= snap))
+        out.push(ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts);
+    }
+    return out;
+  };
+  const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src) return undefined;
+    const out: DerivedEdge[] = [];
+    for (const d of src.cand.derived ?? []) {
+      if (d.kind === 'shared-rank' || d.pts.length < 2) continue;
+      const along = toFrame(src.w, alongOf(d.pts));
+      for (const pts of toFrame(src.w, [d.pts]))
+        if (pts.length > 1) out.push({ kind: d.kind, pts, ...(along.length ? { along } : {}) });
+    }
+    return out.length ? out : undefined;
+  };
 
   return {
     output: { pieces: unique, blocked, warnings },
     wallsOf,
+    derivedOf,
     notes,
   };
 }

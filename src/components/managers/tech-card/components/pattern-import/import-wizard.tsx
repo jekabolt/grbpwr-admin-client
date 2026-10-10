@@ -15,12 +15,13 @@ import { Progress } from 'ui/components/progress';
 import { HeaderNote } from 'ui/components/section-header';
 import { Stepper } from 'ui/components/stepper';
 import Text from 'ui/components/text';
-import type {
-  ApplyDraftFn,
-  CardContext,
-  DraftBuilder,
-  ImportClient,
-  NameSuggester,
+import {
+  forRun,
+  type ApplyDraftFn,
+  type CardContext,
+  type DraftBuilder,
+  type ImportClient,
+  type NameSuggester,
 } from './client';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
@@ -115,7 +116,7 @@ const noCardApply: ApplyDraftFn = async (draft) => ({
 });
 
 function WizardBody({
-  card,
+  card: cardProp,
   onClose,
   client: clientProp,
   namer: namerProp,
@@ -127,6 +128,8 @@ function WizardBody({
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
+  // No fabric line in the BOM: the run still converts, into one main file that is downloaded.
+  const card = useMemo(() => forRun(cardProp), [cardProp]);
   // One client per wizard run. useState, not useMemo: the client owns the worker session and must
   // outlive any re-render (React may drop a memo; fast refresh re-runs one).
   const [client] = useState<ImportClient>(
@@ -165,6 +168,9 @@ function WizardBody({
 
   const at = stepIndex(session.step);
   const nextStep = STEPS[at + 1];
+  // the last step of a download-only run is the download
+  const labelOf = (s: (typeof STEPS)[number]) =>
+    card.downloadOnly && s.id === 'apply' ? 'download' : s.label;
   const applied = api.apply.phase === 'done' && api.apply.result.ok;
   // Leaving discards the run. Nothing is on the card yet (apply is the only writer), but a run
   // with a sheet assembled and pieces named is work — so leaving past the first step asks.
@@ -254,6 +260,14 @@ function WizardBody({
                     {card.styleLabel}
                   </Text>
                 )}
+                {card.downloadOnly && (
+                  <HeaderNote
+                    tone='mut'
+                    title='the BOM has no fabric line, so nothing can be bound to the card: the run ends in a DXF download. add a fabric line on the BOM tab to apply an import.'
+                  >
+                    download only · no fabric in the BOM
+                  </HeaderNote>
+                )}
                 {session.files.length > 0 && (
                   <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
                     {session.files.map((f) => f.name).join(', ')}
@@ -313,12 +327,12 @@ function WizardBody({
                         type='button'
                         className='uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                         onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                        title={`back to ${s.label} — its answers are kept, later steps re-run`}
+                        title={`back to ${labelOf(s)} — its answers are kept, later steps re-run`}
                       >
-                        {s.label}
+                        {labelOf(s)}
                       </button>
                     ) : (
-                      s.label
+                      labelOf(s)
                     ),
                 }))}
               />
@@ -367,7 +381,7 @@ function WizardBody({
                   loading={!!session.busy}
                   onClick={() => void api.next()}
                 >
-                  next: {nextStep.label} →
+                  next: {labelOf(nextStep)} →
                 </Button>
               )}
             </footer>

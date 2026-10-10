@@ -11,6 +11,7 @@
 
 import type { ExtractFn, ExtractOpts, PtMm, SourceDoc } from '../../types';
 import { PATIMPORT } from '../../types';
+import { budgetOf } from '../budget';
 import { bboxOf, fileInfo, PageBuilder, type StyleSpec } from '../vector/builder';
 import { latin1 } from '../sniff/sniff';
 import { UnsupportedFormat } from '../sniff/errors';
@@ -64,7 +65,7 @@ export function makeExtractHpgl(options: HpglOptions = {}): ExtractFn {
     }
 
     progress?.(1, 2, 'interpret');
-    const res = interpret(tok.cmds, unitsPerMm, sag);
+    const res = interpret(tok.cmds, unitsPerMm, sag, budgetOf(opts));
     if (res.peError && res.runs.length === 0)
       throw new UnsupportedFormat('hpgl-pe-malformed', res.peError);
     if (res.drawn === 0) throw new UnsupportedFormat('hpgl-no-geometry');

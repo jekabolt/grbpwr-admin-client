@@ -48,6 +48,7 @@ import type {
   NameSuggester,
 } from './client';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, planScopes } from 'lib/pattern-import/fabrics/scope';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
@@ -516,7 +517,8 @@ export function useImportSession(deps: {
         }
         case 'apply': {
           const built = sRef.current.draft;
-          if (!built) return;
+          // a download-only run has no BOM line to bind a file to: nothing is applied
+          if (!built || card.downloadOnly) return;
           // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
           const draft = {
             ...built,
@@ -712,12 +714,9 @@ export function useImportSession(deps: {
           return;
         case 'meaning': {
           setNotice(null);
-          // The AI's fabric calls ride along; the worker uses them only where the sheet is silent.
-          const aiHints = s.names.flatMap((n) =>
-            n.suggestion?.fabrics.length
-              ? [{ seed: n.seed, fabrics: n.suggestion.fabrics, confidence: n.confidence }]
-              : [],
-          );
+          // The AI's fabric calls ride along; the worker uses them only where the sheet is silent,
+          // only for names auto-accepted at T and never for a name the operator typed (C7).
+          const aiHints = aiFabricHintsOf(s.names, iRef.current.editedNames);
           const out = await run('fabrics', { bom: card.scopes, aiHints });
           // An assignment the operator already edited survives a round trip through `back`.
           const a = iRef.current.assignment ?? out;
@@ -850,6 +849,10 @@ export function useImportSession(deps: {
         const a = s.fabrics;
         if (!a) return 'fabrics are not proposed yet';
         if (!card.scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
+        // C7: a cloth other than main on the AI's word alone is the operator's call
+        const ai = (a.aiOnly ?? []).filter((x) => x.needsConfirm).length;
+        if (ai)
+          return `${ai} ${ai === 1 ? 'piece is' : 'pieces are'} cut from lining, interlining or another cloth on the AI's word alone — confirm or change the ticks`;
         // The same planner the write stage cuts the files with: what blocks here blocks there.
         const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
         return problem ? problem.message : null;
@@ -894,13 +897,21 @@ export function useImportSession(deps: {
     p: Partial<Pick<NameDecision, 'code' | 'mods' | 'displayName'>>,
   ) {
     const i = iRef.current;
+    // C7: the AI's fabric call was for the AI's name — an edited name drops it, and an assignment
+    // the operator already kept is proposed again without it
+    const staleFabric = !!i.assignment?.aiOnly?.some((x) => x.seed === seed);
     const next = {
       ...i,
       editedNames: [...new Set([...i.editedNames, seed])],
       confirmedNames: [...new Set([...i.confirmedNames, seed])],
+      ...(staleFabric ? { assignment: null } : {}),
     };
     iRef.current = next;
-    patchInputs({ editedNames: next.editedNames, confirmedNames: next.confirmedNames });
+    patchInputs({
+      editedNames: next.editedNames,
+      confirmedNames: next.confirmedNames,
+      ...(staleFabric ? { assignment: null } : {}),
+    });
     const names = sRef.current.names;
     // A piece nobody named yet (no AI answer — not logged in, or the AI is off) gets its first
     // name from what the operator typed, on top of what the sheet text gave the spec.

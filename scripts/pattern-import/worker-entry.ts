@@ -9,7 +9,10 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
-import { setRasterPdfjsLoader } from 'lib/pattern-import/adapters/raster';
+import {
+  extractRasterImageDetailed,
+  setRasterPdfjsLoader,
+} from 'lib/pattern-import/adapters/raster';
 import type {
   CardSize,
   DraftScopeTarget,
@@ -24,6 +27,7 @@ import { checkInputSet, imageSize, imagePixelsRefusal } from 'lib/pattern-import
 import { buildErrorReport, ImportLog } from 'lib/pattern-import/worker/report';
 import { zipEntryNames } from 'lib/pattern-import/adapters/sniff/native';
 import { PATIMPORT, type ImportSession } from 'lib/pattern-import/types';
+import { readManifest } from 'lib/pattern-import/manifest';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -71,6 +75,40 @@ function ctx(stopAfter?: number): StageCtx {
     },
   };
 }
+
+/** A one-page PDF painting a w × h image XObject (8-bit gray, no data: pdf.js drops it for its
+ * size before decoding), optionally with a stroked vector line. */
+function pdfWithImage(w: number, h: number, vectors: boolean): ArrayBuffer {
+  const content = `${vectors ? '10 10 m 500 500 l S\n' : ''}q 595 0 0 842 0 0 cm /Im1 Do Q\n`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}endstream`,
+    `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\x00\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs) pdf += `${String(o).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b = Buffer.from(pdf, 'latin1');
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+}
+
+/** A PNG signature + IHDR claiming w × h (no pixel data: for the header readers). */
+const pngOf = (w: number, h: number) => {
+  const b = new Uint8Array(33);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  return b;
+};
 
 const errCode = async (p: Promise<unknown> | (() => unknown)) => {
   try {
@@ -169,6 +207,13 @@ async function vectorCase(
 
 export async function main(): Promise<number> {
   const perf: unknown[] = [];
+  // the per-size DXF set alone (no report file: the full run owns F13c-<date>.json)
+  if (process.env.PI_SET_ONLY) {
+    await dxfSetCase();
+    const failed = rows.filter((r) => !r.ok).length;
+    console.log(`\n${rows.length - failed}/${rows.length} PASS`);
+    return failed ? 1 : 0;
+  }
   if (!process.env.PI_SKIP_E2E) {
     await pipelineCase('robe', ['pdf/robe.pdf'], {
       sizes: ['36', '38', '40', '42', '44', '46'],
@@ -458,10 +503,11 @@ export async function main(): Promise<number> {
   );
   check(
     '2 × dxf',
-    'several DXF refused',
+    'a per-size DXF set of two size-M files refused (one file per size)',
     (await refusal(['dxf-clo/allsizes.dxf', 'dxf-clo/POCKETS.dxf'])) === 'unsupported-format',
     'unsupported-format',
   );
+  await dxfSetCase();
   check(
     'garbage plt',
     'refused at open',
@@ -638,8 +684,10 @@ const shaOf = new Map<string, string[]>();
  * I2: the operator's "close gap" through the F4b API, end to end on palto (Mod. 125, size 72 not
  * exported — its raster neck splits under the offset): one 4.7 mm bridge "for all sizes" at piece
  * 27's corner closes the region in every size, the two foreign-model leaks are "not a piece", and
- * the gate passes. G4 measures the written line against the walls INCLUDING the bridge (a derived
- * stretch, `PieceCandidate.derived`) — without it SL_76 blocked at max 1.42 mm.
+ * the gate passes. F14b (Codex C1): the bridge is NOT a wall — G4 measures against the drawn
+ * walls only and leaves out just the written stretch on the bridge, which G15 audits (lands on
+ * drawn lines, short) and the manifest lists. Negative control: the same gap closed by a 44.7 mm
+ * line drawn across it (the bridge carried 20 mm past each end) must block on G15.
  */
 async function operatorBridgeGateCase() {
   const name = 'palto bridge';
@@ -711,8 +759,87 @@ async function operatorBridgeGateCase() {
     `${open0.length} open before, ${drop.length} dropped, ${sem.pieces.length} specs, ${sem.blocked.length} blocked`,
   );
   const w = await writeCase(name, run, sem, sz.map, { mustPass: true });
-  const g4 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G4-hausdorff');
-  check(name, 'G4 measures the bridged stretch against the bridge', !!g4?.ok, `${g4?.value}`);
+  const g = w.gate[MAIN.scopeKey];
+  const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
+  const g15 = g?.checks.find((c) => c.id === 'G15-derived');
+  const audited = (g?.derived ?? []).filter((d) => d.kind === 'operator-bridge');
+  const inFile = readManifest(w.scopes[0]?.dxfText ?? '')?.gate?.derived?.length ?? 0;
+  check(
+    name,
+    'G4 on drawn walls only passes; G15 audits the 4.7 mm bridge; the manifest lists it',
+    !!g4?.ok && !!g15?.ok && audited.length > 0 && inFile === (g?.derived?.length ?? -1),
+    `G4 ${g4?.value} · ${g4?.note} · G15 ${g15?.value} · audited ${audited.map((d) => `${d.block} ${d.lengthMm}/${d.offSourceMm} mm`).join(', ')} · in file ${inFile}`,
+  );
+
+  // negative control: the same gap closed by a long line drawn across it
+  const ux = 1.1 / Math.hypot(1.1, 4.6);
+  const uy = -4.6 / Math.hypot(1.1, 4.6);
+  const long: PieceEdit[] = [
+    {
+      kind: 'bridge',
+      seed: null,
+      rank: null,
+      from: { x: 996.6 - 20 * ux, y: 1194.1 - 20 * uy },
+      to: { x: 997.7 + 20 * ux, y: 1189.5 + 20 * uy },
+    },
+  ];
+  const pl1 = await run('pieces', { seeds: pc0.seeds, edits: long, opts });
+  const dropL = pl1.families
+    .filter((f) => f.candidates.some((c) => c.outcome !== 'closed'))
+    .map((f): PieceEdit => ({ kind: 'not-a-piece', seed: f.seed }));
+  const pl = await run('pieces', { seeds: pc0.seeds, edits: [...long, ...dropL], opts });
+  const longUsed = pl.families.some((f) =>
+    f.candidates.some((c) =>
+      c.derived?.some(
+        (d) =>
+          d.kind === 'operator-bridge' &&
+          Math.hypot(d.pts[1].x - d.pts[0].x, d.pts[1].y - d.pts[0].y) > 30,
+      ),
+    ),
+  );
+  const semL = await run('semantics', {
+    fileAllowance: { meaning: 'seam', allowanceMm: 15, origin: 'operator', evidence: [] },
+    pieceOverrides: Object.fromEntries(
+      pl.families.map((f, i) => [
+        f.seed,
+        {
+          code: codes[i] ?? 'BP',
+          mods: [],
+          displayName: `p${i + 1}`,
+          nameOrigin: 'operator' as const,
+        },
+      ]),
+    ),
+    operatorGrain: {},
+  });
+  const seedsL = [...new Set(semL.pieces.map((p) => p.seed))];
+  const wl = await run('write', {
+    scopes: [MAIN],
+    assignment: { byPurpose: { [MAIN.scopeKey]: seedsL }, interliningInBom: false, proposals: [] },
+    sizes: sz.map.entries.flatMap((e) =>
+      e.card
+        ? [
+            {
+              token: e.card.token,
+              sizeId: e.card.sizeId,
+              name: e.card.name,
+              sourceLabel: e.source.label,
+              rank: e.source.rank,
+            },
+          ]
+        : [],
+    ),
+    dialect: 'r12',
+    generator: 'probe',
+  });
+  const gl = wl.gate[MAIN.scopeKey];
+  const g15l = gl?.checks.find((c) => c.id === 'G15-derived');
+  check(
+    name,
+    'negative: a 44.7 mm line across the same gap is outlined on, and G15 blocks the export',
+    longUsed && !!gl && !gl.passed && !!g15l && !g15l.ok && g15l.severity === 'block',
+    `outline uses it ${longUsed} · passed ${gl?.passed} · G15 ${g15l?.note?.slice(0, 240)}`,
+  );
 }
 
 async function pipelineCase(
@@ -1027,6 +1154,100 @@ async function guardsCase() {
     scanErr === 'too-large' && !!imagePixelsRefusal(png.buffer, 'giant.png'),
     imagePixelsRefusal(png.buffer, 'giant.png')?.message ?? String(scanErr),
   );
+  // C5 negative controls: no header → refused, never decoded on trust; a header past the first
+  // MiB is still read; the decoder's own answer is checked again before the tracer allocates
+  const deep = new Uint8Array((1 << 20) + 70000);
+  deep.set([0xff, 0xd8]);
+  let at = 2;
+  for (; at < 1 << 20; at += 2 + 65533) {
+    deep.set([0xff, 0xe1], at); // APP1 segments (EXIF/XMP) pushing SOF past 1 MiB
+    new DataView(deep.buffer).setUint16(at + 2, 65533);
+  }
+  deep.set([0xff, 0xc0, 0, 17, 8], at);
+  new DataView(deep.buffer).setUint16(at + 5, 20000);
+  new DataView(deep.buffer).setUint16(at + 7, 20000);
+  const deepErr = await errCode(
+    new Session(3, [{ name: 'deep.jpg', bytes: deep.buffer.slice(0) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  check(
+    C,
+    `C5: JPEG whose SOF (20000 × 20000) sits at ${(at / 1048576).toFixed(2)} MiB → too-large before decoding`,
+    deepErr === 'too-large' &&
+      imageSize(deep.buffer)?.width === 20000 &&
+      imageSize(deep.buffer)?.height === 20000,
+    `${deepErr} · ${JSON.stringify(imageSize(deep.buffer))}`,
+  );
+  const blind = png.slice(0);
+  blind.set([0x69, 0x48, 0x44, 0x52], 12); // not an IHDR chunk: the size is unknown
+  const blindErr = await errCode(
+    new Session(4, [{ name: 'blind.png', bytes: blind.buffer.slice(0) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  check(
+    C,
+    'C5: PNG whose size cannot be read from its header → refused, not decoded',
+    blindErr === 'unsupported-format' &&
+      imagePixelsRefusal(blind.buffer, 'blind.png')?.code === 'unsupported-format',
+    `${blindErr} · ${imagePixelsRefusal(blind.buffer, 'blind.png')?.message ?? 'accepted'}`,
+  );
+  let decoderAsked = 0;
+  const lying = await errCode(
+    extractRasterImageDetailed(
+      { id: '0', name: 'lying.png', bytes: png.buffer.slice(0) },
+      { sagittaMm: 0.05, keepFills: true },
+      {
+        dpi: 300,
+        // a decoder that answers more pixels than the limit (a header that lied); it hands no
+        // pixel buffer: the check must come before anything reads one
+        decode: async () => {
+          decoderAsked++;
+          return { data: new Uint8Array(0), width: 6000, height: 6000, channels: 4 };
+        },
+      },
+    ),
+  );
+  check(
+    C,
+    `C5: decoded 6000 × 6000 (> ${PATIMPORT.maxRasterPixels / 1e6} MP) → too-large before tracing`,
+    lying === 'too-large' && decoderAsked === 1,
+    `${lying}, decoder called ${decoderAsked}×`,
+  );
+  check(
+    C,
+    'C5: limit ≤ 18 MP (345 MB measured peak, patimport:raster limit) and A1 @ 150 dpi fits',
+    PATIMPORT.maxRasterPixels <= 18e6 &&
+      imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png') === null,
+    `${PATIMPORT.maxRasterPixels / 1e6} MP; A1@150 ${imagePixelsRefusal(pngOf(3508, 4967).buffer, 'a1-150.png')?.message ?? 'accepted'}`,
+  );
+  // C5 follow-up: pdf.js drops an image over the limit without a trace — a 6000 × 6000 scan
+  // (36 MP) must not import as an empty page. Alone on its page → too-large; next to vectors →
+  // the vectors are kept and a visible note names the skipped image.
+  const scanOnly = await errCode(
+    new Session(5, [{ name: 'scan36.pdf', bytes: pdfWithImage(6000, 6000, false) }]).runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true } },
+      ctx(),
+    ),
+  );
+  const mixed = new Session(6, [{ name: 'mixed36.pdf', bytes: pdfWithImage(6000, 6000, true) }]);
+  const mixedOut = await mixed
+    .runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx())
+    .catch((e: unknown) => toWireError(e));
+  const note =
+    'warnings' in mixedOut ? mixedOut.warnings.find((w) => /6000 × 6000/.test(w)) : undefined;
+  check(
+    C,
+    'C5: raster PDF whose 36 MP image pdf.js would drop → too-large; with vectors → kept + visible note',
+    scanOnly === 'too-large' && !!note,
+    `${scanOnly} · ${note ?? JSON.stringify(mixedOut).slice(0, 120)}`,
+  );
   // zip listing: a forged central directory count cannot make the walk unbounded
   const z = new Uint8Array(22 + 46 * 3 + 9);
   const dv = new DataView(z.buffer);
@@ -1115,5 +1336,352 @@ async function guardsCase() {
       json.includes('"bytes":1000') &&
       json.includes('bridge'),
     `${json.length} bytes of JSON`,
+  );
+}
+
+// ── J4: a per-size DXF set (owner decision 5: file per size → one DXF) ─────────────────────
+
+/**
+ * One size of a graded R2000 drawing as its own file — what CLO gives out per size. Blocks of other
+ * sizes leave with their BLOCK_RECORD and INSERT; `stripTail` also drops `_<size>` from the names
+ * (an exporter that names pieces without the size); `drop` removes pieces (negative control).
+ */
+function splitSize(
+  text: string,
+  size: string,
+  opt: { stripTail?: boolean; drop?: string[]; as?: string } = {},
+): string {
+  const lines = text.split('\n');
+  type Ent = { section: string; tags: [string, string][] };
+  const ents: Ent[] = [];
+  let section = '';
+  let cur: Ent | null = null;
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].replace(/\r$/, '');
+    if (code === '0') {
+      cur = { section, tags: [] };
+      ents.push(cur);
+    }
+    if (!cur) {
+      cur = { section, tags: [] };
+      ents.push(cur);
+    }
+    cur.tags.push([lines[i], value]);
+    if (code === '2' && cur.tags[0][1] === 'SECTION') section = value;
+    if (code === '0' && value === 'ENDSEC') section = '';
+  }
+  const nameOf = (e: Ent) => e.tags.find(([c]) => c.trim() === '2')?.[1] ?? '';
+  const tail = (b: string) => b.split('_').pop()!.toUpperCase();
+  const keep = (b: string) =>
+    b.startsWith('*') || (tail(b) === size && !(opt.drop ?? []).includes(b));
+  const rename = (b: string) => {
+    if (b.startsWith('*')) return b;
+    const stem = b.slice(0, b.lastIndexOf('_'));
+    return opt.stripTail ? stem : opt.as ? `${stem}_${opt.as}` : b;
+  };
+  const out: string[] = [];
+  let inDropped = false;
+  for (const e of ents) {
+    const kind = e.tags[0][1];
+    if (e.section === 'BLOCKS' && kind === 'BLOCK') inDropped = !keep(nameOf(e));
+    const dropped =
+      (e.section === 'BLOCKS' && inDropped && (kind === 'BLOCK' || kind !== 'ENDSEC')) ||
+      (e.section === 'TABLES' && kind === 'BLOCK_RECORD' && !keep(nameOf(e))) ||
+      (kind === 'INSERT' && !keep(nameOf(e)));
+    if (e.section === 'BLOCKS' && kind === 'ENDBLK') {
+      const was = inDropped;
+      inDropped = false;
+      if (was) continue;
+    }
+    if (dropped) continue;
+    for (const [c, v] of e.tags) {
+      const code = c.trim();
+      const isName =
+        (code === '2' && (kind === 'INSERT' || kind === 'BLOCK_RECORD')) ||
+        ((code === '2' || code === '3') && kind === 'BLOCK');
+      out.push(c.replace(/\r$/, ''), isName ? rename(v) : v);
+    }
+  }
+  return out.join('\r\n') + '\r\n';
+}
+
+const errOf = async (f: () => unknown) => {
+  try {
+    await f();
+    return { code: null as string | null, message: '' };
+  } catch (e) {
+    return toWireError(e);
+  }
+};
+
+async function dxfSetCase() {
+  const C = 'dxf set';
+  const graded = readFileSync(resolve(CORPUS, 'dxf-clo/allsizes-merged.dxf')).toString('latin1');
+  const SIZES = ['XS', 'S', 'M', 'L', 'XL'];
+  const enc = (t: string) => {
+    const b = Buffer.from(t, 'latin1');
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+  };
+  const set = (
+    named: (s: string, i: number) => string,
+    opt: Parameters<typeof splitSize>[2] = {},
+    sizes = SIZES,
+  ) => sizes.map((s, i) => ({ name: named(s, i), bytes: enc(splitSize(graded, s, opt)) }));
+  const CARD5 = card(SIZES);
+
+  /** open → … → write + gate through the session, as the wizard drives a DXF. */
+  async function walk(
+    label: string,
+    files: { name: string; bytes: ArrayBuffer }[],
+    operatorMap?: (map: StageIO['sizes']['out']['map']) => StageIO['sizes']['in']['operatorMap'],
+  ) {
+    const s = new Session(1, files);
+    const run: Run = (st, input) => s.runStage(st, input, ctx());
+    const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    await run('scale', {
+      decision: {
+        factor: ex.scale[0].factor,
+        method: ex.scale[0].method,
+        operatorConfirmed: false,
+      },
+    });
+    await run('assemble', { sheet: 0 });
+    await run('chains', { opts: CHAIN_OPTS });
+    const sz0 = await run('sizes', { card: CARD5 });
+    const sz = operatorMap
+      ? await run('sizes', { card: CARD5, operatorMap: operatorMap(sz0.map) })
+      : sz0;
+    const pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
+    const sem = await run('semantics', {
+      fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+      pieceOverrides: {},
+      operatorGrain: {},
+    });
+    const w = await writeCase(label, run, sem, sz.map);
+    s.close();
+    return { ex, sz0, sz, pc, sem, w };
+  }
+
+  // control: the graded drawing as one file
+  const one = await walk(`${C} · control allsizes-merged.dxf`, [
+    { name: 'allsizes-merged.dxf', bytes: enc(graded) },
+  ]);
+  const blocksOf = (w: Awaited<ReturnType<typeof walk>>['w']) =>
+    w.scopes.flatMap((x) => x.manifest.blocks.map((b) => b.block)).sort();
+
+  // A: five CLO per-size files (sizes in the block names), dropped in shuffled order
+  {
+    const files = set((s) => `coat_${s.toLowerCase()}.dxf`);
+    const shuffled = [files[3], files[0], files[4], files[1], files[2]];
+    const r = await walk(`${C} · 5 files`, shuffled);
+    check(
+      `${C} · 5 files`,
+      'opens as one presegmented drawing; 5 files, one page each',
+      !!r.ex.presegmented && r.ex.files.length === 5 && r.ex.pages.length === 5,
+      `${r.ex.files.map((f) => f.name).join(',')} · ${r.ex.pages.map((p) => p.why).join(' | ')}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'file sha256 kept per source file',
+      r.ex.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256)) &&
+        new Set(r.ex.files.map((f) => f.sha256)).size === 5,
+      r.ex.files.map((f) => f.sha256.slice(0, 8)).join(','),
+    );
+    const run = r.sz.run;
+    const fileOfSize = run.sizes.map(
+      (x) => `${x.label}←${r.ex.files.find((f) => f.id === x.file)?.name}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'run = one file per size, XS…XL in rank order, each size from its own file',
+      run.encoding === 'file-per-size' &&
+        run.sizes.map((x) => x.label).join() === SIZES.join() &&
+        run.sizes.every(
+          (x) =>
+            r.ex.files.find((f) => f.id === x.file)?.name === `coat_${x.label.toLowerCase()}.dxf`,
+        ),
+      fileOfSize.join(' '),
+    );
+    check(
+      `${C} · 5 files`,
+      'every size auto-mapped to the same card size, no guess',
+      r.sz.map.entries.every(
+        (e) =>
+          e.card?.token === e.source.label && e.origin === 'auto' && (e.confidence ?? 1) >= 0.9,
+      ),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    check(
+      `${C} · 5 files`,
+      '9 pieces × 5 sizes, as the single graded file',
+      r.pc.families.length === 9 &&
+        r.pc.families.every((f) => f.candidates.length === 5) &&
+        r.sem.pieces.length === one.sem.pieces.length &&
+        !r.sem.blocked.length,
+      `${r.pc.families.length} families × ${r.pc.families.map((f) => f.candidates.length).join('')}, ${r.sem.pieces.length} specs (control ${one.sem.pieces.length})`,
+    );
+    check(
+      `${C} · 5 files`,
+      'written blocks = the control (allsizes-merged.dxf) block for block',
+      blocksOf(r.w).join() === blocksOf(one.w).join() && blocksOf(r.w).length === 45,
+      `${blocksOf(r.w).length} blocks, control ${blocksOf(one.w).length}`,
+    );
+    check(
+      `${C} · 5 files`,
+      'manifest source names the 5 files, not the merged drawing',
+      r.w.scopes[0].manifest.source.files.map((f) => f.name).join() ===
+        shuffled.map((f) => f.name).join(),
+      r.w.scopes[0].manifest.source.files.map((f) => f.name).join(','),
+    );
+  }
+
+  // B: pieces named without the size, the size only in the file names
+  {
+    const r = await walk(
+      `${C} · sizes in file names`,
+      set((s) => `jacket ${s}.dxf`, { stripTail: true }),
+    );
+    check(
+      `${C} · sizes in file names`,
+      'sizes read from the file names, mapped to the card',
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token}`).join(' ') ===
+        SIZES.map((s) => `${s}→${s}`).join(' ') &&
+        r.ex.pages.every((p) => /, from the file name$/.test(p.why)),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
+    );
+    check(
+      `${C} · sizes in file names`,
+      'written blocks = the control',
+      blocksOf(r.w).join() === blocksOf(one.w).join(),
+      `${blocksOf(r.w).length} blocks`,
+    );
+  }
+
+  // C: no size anywhere — the operator assigns each file on the sizes step
+  {
+    const names = ['part a.dxf', 'part b.dxf', 'part c.dxf', 'part d.dxf', 'part e.dxf'];
+    let before = '';
+    const r = await walk(
+      `${C} · operator assigns`,
+      set((_, i) => names[i], { stripTail: true }),
+      (map) => {
+        before = map.entries
+          .map((e) => `${e.source.label}→${e.card?.token ?? '—'}@${(e.confidence ?? 1).toFixed(1)}`)
+          .join(' ');
+        // the operator's answer: file i is SIZES[i] (the guess is confirmed by setting it)
+        return map.entries.map((e, i) => ({ ...e, card: CARD5[i], origin: 'operator' as const }));
+      },
+    );
+    check(
+      `${C} · operator assigns`,
+      'no size readable: every row is a guess the wizard makes the operator confirm',
+      r.sz0.map.entries.length === 5 &&
+        r.sz0.map.entries.every((e) => e.origin === 'auto' && (e.confidence ?? 1) < 0.9) &&
+        r.sz0.map.entries.every((e) =>
+          e.evidence?.some((x) => /no size in the block names/.test(x)),
+        ),
+      before,
+    );
+    check(
+      `${C} · operator assigns`,
+      'each file shows on its size row (legend evidence = the file)',
+      r.sz0.run.sizes.every(
+        (x) => r.ex.files.find((f) => f.id === x.file)?.name === names[Number(x.label) - 1],
+      ),
+      r.sz0.run.sizes
+        .map((x) => `${x.label}←${r.ex.files.find((f) => f.id === x.file)?.name}`)
+        .join(' '),
+    );
+    check(
+      `${C} · operator assigns`,
+      "operator's map wins; written blocks = the control",
+      r.sz.map.entries.every((e) => e.origin === 'operator') &&
+        blocksOf(r.w).join() === blocksOf(one.w).join(),
+      r.sz.map.entries.map((e) => `${e.source.label}→${e.card?.token}`).join(' '),
+    );
+  }
+
+  // negative controls — refused at open, the reason in words
+  const refusedBy = async (
+    label: string,
+    files: { name: string; bytes: ArrayBuffer }[],
+    re: RegExp,
+  ) => {
+    const e = await errOf(() => new Session(1, files));
+    check(
+      `${C} · refuse`,
+      label,
+      e.code === 'unsupported-format' && re.test(e.message),
+      `${e.code}: ${e.message}`,
+    );
+  };
+  await refusedBy(
+    'the files do not carry the same pieces',
+    SIZES.map((s) => ({
+      name: `coat_${s}.dxf`,
+      bytes: enc(splitSize(graded, s, s === 'L' ? { drop: ['CLR_4_L'] } : {})),
+    })),
+    /coat_L\.dxf has no CLR_4/,
+  );
+  await refusedBy(
+    'two files of one size (CLO repeating the previous size)',
+    [
+      { name: 'coat_m.dxf', bytes: enc(splitSize(graded, 'M')) },
+      { name: 'coat_l.dxf', bytes: enc(splitSize(graded, 'M')) },
+    ],
+    /coat_m\.dxf and coat_l\.dxf are both size M\. A set is one file per size/,
+  );
+  await refusedBy(
+    'a duplicate size spelled in the file names only',
+    [
+      { name: 'jacket M.dxf', bytes: enc(splitSize(graded, 'M', { stripTail: true })) },
+      { name: 'jacket M (1).dxf', bytes: enc(splitSize(graded, 'L', { stripTail: true })) },
+    ],
+    /are both size M/,
+  );
+  await refusedBy(
+    'an all-sizes file inside a set',
+    [fileOf('dxf-clo/ALLSIZES_DXF.dxf'), fileOf('dxf-clo/allsizes.dxf')],
+    /ALLSIZES_DXF\.dxf carries several sizes/,
+  );
+  await refusedBy(
+    'R12 files (the merger does not invent R2000 handles)',
+    [fileOf('dxf-clo/blazer.dxf'), fileOf('dxf-clo/summer men.dxf')],
+    /R2000/,
+  );
+  // post-check on what the reader saw: one piece per file and numeric sizes from the file names —
+  // the DXF reader takes a number for a size only when two pieces share it, so the merged drawing
+  // reads with no sizes at all. Opening is fine; reading refuses instead of guessing.
+  {
+    const files = ['XS', 'S'].map((s, i) => ({
+      name: `coat ${44 + i * 2}.dxf`,
+      bytes: enc(
+        splitSize(graded, s, {
+          stripTail: true,
+          drop: ['FP_R', 'SL_R', 'SL_L', 'BP_1', 'CLR_3', 'FP_L', 'BP_2', 'CLR_4'].map(
+            (b) => `${b}_${s}`,
+          ),
+        }),
+      ),
+    }));
+    const opened = await errOf(() => new Session(1, files));
+    const s = opened.code ? null : new Session(1, files);
+    const e = s
+      ? await errOf(() =>
+          s.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx()),
+        )
+      : opened;
+    check(
+      `${C} · refuse`,
+      'the merged drawing must READ as one size per file (checked after reading)',
+      e.code === 'unsupported-format' && /did not read as one size/.test(e.message),
+      `${e.code}: ${e.message}`,
+    );
+  }
+  await refusedBy(
+    'DXF + PDF in one run',
+    [fileOf('dxf-clo/allsizes.dxf'), fileOf('pdf/robe.pdf')],
+    /one run reads one format/,
   );
 }

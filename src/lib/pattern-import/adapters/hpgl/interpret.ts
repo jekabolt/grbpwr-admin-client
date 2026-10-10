@@ -5,9 +5,10 @@
 // RA RR IP SC. Ignored with a warning: RO, EW/WG (wedges), DV. Everything else (VS, FS, PS, BP,
 // NP, CR, TR, MC, PG, WU, …) changes nothing geometric for an importer and is skipped silently.
 
+import type { WorkBudgetLike } from '../../types';
 import type { HpglCmd } from './tokenize';
 import { decodePe, PeError } from './pe';
-import { flattenCubic } from '../vector/flatten';
+import { curveSegments, flattenCubic, MAX_CURVE_SEGMENTS } from '../vector/flatten';
 
 export type Pt = { x: number; y: number };
 
@@ -83,7 +84,12 @@ export function lineTypePercents(type: number): number[] | null {
 
 const DEFAULT_SI = { wCm: 0.285, hCm: 0.375 }; // HP-GL absolute character size default
 
-export function interpret(cmds: HpglCmd[], unitsPerMm: number, sagittaMm: number): Interpreted {
+export function interpret(
+  cmds: HpglCmd[],
+  unitsPerMm: number,
+  sagittaMm: number,
+  budget?: WorkBudgetLike,
+): Interpreted {
   const warnings = new Set<string>();
   const runs: RawRun[] = [];
   const labels: RawLabel[] = [];
@@ -154,7 +160,9 @@ export function interpret(cmds: HpglCmd[], unitsPerMm: number, sagittaMm: number
   /** A length in user units along x (radii, chord). */
   const lenPu = (v: number): number => v * Math.abs(scaleFactors().sx);
 
+  const spend = (n: number) => budget?.spend(n, 'the plotter moves');
   const lineTo = (q: Pt) => {
+    spend(1);
     if (down) ensureRun().pts.push(q);
     pos = q;
   };
@@ -180,7 +188,8 @@ export function interpret(cmds: HpglCmd[], unitsPerMm: number, sagittaMm: number
     const a0 = Math.atan2(pos.y - c.y, pos.x - c.x);
     const dt = (sweepDeg * Math.PI) / 180;
     const step = Math.min(Math.PI / 4, Math.sqrt((8 * sagPu) / r));
-    const n = Math.max(1, Math.ceil(Math.abs(dt) / step - 1e-9));
+    const n = curveSegments(Math.abs(dt) / step);
+    spend(n);
     const pts: Pt[] = [];
     for (let i = 1; i <= n; i++) {
       const t = a0 + (dt * i) / n;
@@ -222,6 +231,7 @@ export function interpret(cmds: HpglCmd[], unitsPerMm: number, sagittaMm: number
   const cubic = (c1: Pt, c2: Pt, end: Pt) => {
     const out: Pt[] = [];
     flattenCubic(pos, c1, c2, end, sagPu, out);
+    spend(out.length);
     if (down) {
       const run = ensureRun();
       for (const q of out) run.pts.push(q);
@@ -432,7 +442,8 @@ export function interpret(cmds: HpglCmd[], unitsPerMm: number, sagittaMm: number
         const cx = pos.x;
         const cy = pos.y;
         const step = Math.min(Math.PI / 4, Math.sqrt((8 * sagPu) / r));
-        const n = Math.max(8, Math.ceil((2 * Math.PI) / step));
+        const n = Math.min(MAX_CURVE_SEGMENTS, Math.max(8, Math.ceil((2 * Math.PI) / step)));
+        spend(n);
         const pts: Pt[] = [];
         for (let i = 0; i < n; i++) {
           const t = (2 * Math.PI * i) / n;

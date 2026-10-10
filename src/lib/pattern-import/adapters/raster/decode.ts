@@ -13,6 +13,7 @@ import type * as Pdfjs from 'pdfjs-dist';
 
 import type { Affine } from '../../types';
 import { PATIMPORT } from '../../types';
+import { assertRasterPixels } from '../budget';
 import { compose } from './affine';
 import type { RasterImage } from './types';
 
@@ -241,15 +242,22 @@ export type DecodedImage = {
 };
 export type ImageDecoder = (bytes: ArrayBuffer) => Promise<DecodedImage>;
 
-/** Browser/worker decoder: createImageBitmap + OffscreenCanvas (RGBA). */
+/**
+ * Browser/worker decoder: createImageBitmap + OffscreenCanvas (RGBA). C5: the decoded size is
+ * checked before the canvas and the pixel copy are allocated, and the canvas is emptied as soon as
+ * the pixels are out, so only the RGBA copy reaches the tracer.
+ */
 export const decodeWithBitmap: ImageDecoder = async (bytes) => {
   const bmp = await createImageBitmap(new Blob([bytes]));
   try {
+    assertRasterPixels(bmp.width, bmp.height, 'the scan');
     const cv = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = cv.getContext('2d');
     if (!ctx) throw new Error('raster: no 2d context in this worker');
     ctx.drawImage(bmp, 0, 0);
     const id = ctx.getImageData(0, 0, bmp.width, bmp.height);
+    cv.width = 0;
+    cv.height = 0;
     return { data: id.data, width: bmp.width, height: bmp.height, channels: 4 };
   } finally {
     bmp.close();

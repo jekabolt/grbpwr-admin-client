@@ -20,6 +20,8 @@ import { Panel, SplitStage, fmtPct } from '../ui-bits';
 
 const INTERLINING = PURPOSE.interfacing;
 
+const purposeName = (p: string) => p.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase();
+
 /** One short line per kind of evidence: what the sheet (or the AI) said about this fabric. */
 function evidenceLine(ev: readonly FabricEvidence[]): string {
   const labels = ev.filter((e) => e.kind === 'label').length;
@@ -64,11 +66,25 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
     card.scopes.find((s) => s.scopeKey === key)?.label ?? null;
 
   const set = (next: FabricAssignment) => void api.dispatch({ type: 'fabrics', assignment: next });
+  // C7: a cloth other than main on the AI's word alone waits for the operator; confirming it, or
+  // changing that piece's ticks, is their answer
+  const aiPending = new Map(
+    (a.aiOnly ?? []).filter((x) => x.needsConfirm).map((x) => [x.seed, x.purposes]),
+  );
+  const answered = (seed: SeedId, from: FabricAssignment = a): FabricAssignment =>
+    aiPending.has(seed)
+      ? {
+          ...from,
+          aiOnly: (from.aiOnly ?? []).map((x) =>
+            x.seed === seed ? { ...x, needsConfirm: false } : x,
+          ),
+        }
+      : from;
   const toggle = (scopeKey: string, seed: SeedId, on: boolean) => {
     const cur = new Set(a.byPurpose[scopeKey] ?? []);
     if (on) cur.add(seed);
     else cur.delete(seed);
-    set({ ...a, byPurpose: { ...a.byPurpose, [scopeKey]: [...cur] } });
+    set(answered(seed, { ...a, byPurpose: { ...a.byPurpose, [scopeKey]: [...cur] } }));
   };
   const toggleFused = (seed: SeedId, on: boolean) => {
     const proposals = a.proposals.map((p) =>
@@ -84,7 +100,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
         evidence: [],
         confidence: 1,
       });
-    set({ ...a, proposals });
+    set(answered(seed, { ...a, proposals }));
   };
   const inScope = new Set(focusScope ? a.byPurpose[focusScope] ?? [] : []);
   const rank = Math.min(2, (families[0]?.candidates.length ?? 1) - 1);
@@ -94,6 +110,14 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       sideWidth={420}
       canvas={
         <Panel title='fabric → pieces' bodyClassName='flex flex-col gap-2'>
+          {card.downloadOnly && (
+            <CalloutBox tone='note'>
+              <Text size='micro' component='p'>
+                <b>download only.</b> the BOM has no fabric line: every piece goes into one
+                main-fabric DXF that you download. nothing is written to the card.
+              </Text>
+            </CalloutBox>
+          )}
           <div>
             <GroupLabel flush>what the sheet says</GroupLabel>
             <DataTable>
@@ -202,6 +226,19 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
                           <span className='ml-1 text-labelColor'>
                             (also {refused.map((r) => r.label).join(', ')}: not in BOM)
                           </span>
+                        )}
+                        {aiPending.has(seed) && (
+                          <Chip
+                            tone='attention'
+                            className='ml-1'
+                            onClick={() => set(answered(seed))}
+                            title={`the sheet says nothing about this piece's fabric; the AI says ${aiPending
+                              .get(seed)!
+                              .map(purposeName)
+                              .join(' + ')}. Confirm it, or change the ticks.`}
+                          >
+                            ! AI only · confirm
+                          </Chip>
                         )}
                       </td>
                       <td data-align='left' className='text-labelColor'>

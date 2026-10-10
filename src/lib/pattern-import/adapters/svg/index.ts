@@ -12,8 +12,9 @@
 // `fill:true` (letters-as-curves) unless `keepFills` is false. Layer = Inkscape layer label, else
 // the top-level group's data-name / decoded id (Illustrator), else null. <text>/<tspan> → IRText.
 
-import type { Affine, ExtractFn, PtMm, SourceDoc } from '../../types';
+import type { Affine, ExtractFn, PtMm, SourceDoc, WorkBudgetLike } from '../../types';
 import { PATIMPORT } from '../../types';
+import { budgetOf, inputTooLarge } from '../budget';
 import { apply, applyVec, meanScale, mul, scale, translate } from '../vector/affine';
 import { bboxOf, fileInfo, PageBuilder, type StyleSpec } from '../vector/builder';
 import { flattenCubic, flattenEllipseArc, flattenQuad } from '../vector/flatten';
@@ -85,6 +86,8 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
   return async (file, opts, progress) => {
     const sag = opts?.sagittaMm ?? PATIMPORT.sagittaMm;
     const keepFills = opts?.keepFills !== false;
+    const budget = budgetOf(opts);
+    let visited = 0;
     let u = new Uint8Array(file.bytes);
     if (u.length === 0) throw new UnsupportedFormat('empty');
     if (u[0] === 0x1f && u[1] === 0x8b) u = await gunzip(u);
@@ -161,7 +164,7 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
         invisible++;
         return;
       }
-      const sink = new FlatSink(ctx.m, sag);
+      const sink = new FlatSink(ctx.m, sag, budget);
       draw(sink);
       if (sink.error) parseErrors++;
       const subs = sink.finish();
@@ -197,6 +200,14 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
     const walk = (el: XNode, parent: Ctx) => {
       if (!isSvgNs(el) || SKIP.has(el.local)) return;
       if (parent.depth > 64) return;
+      // C4: every element visited counts, so a <use> fan-out (each level referencing the one below
+      // ten times) is refused instead of expanded 10^k times. Visiting one costs ~2 µs (style
+      // cascade), so elements have their own, tighter cap: about a second, not forty.
+      if (++visited > PATIMPORT.maxSvgElements)
+        throw inputTooLarge(
+          `the SVG has more than ${PATIMPORT.maxSvgElements.toLocaleString('en-US')} elements once its <use> copies are expanded. Export only the pattern pieces (no repeated symbols or patterns), or export PDF/DXF.`,
+        );
+      budget.spend(1, 'the SVG elements (with <use> copies)');
       const props = computeProps(el, parent.props, sheet);
       resolveFontSize(props, parent.props);
       if ((props.display ?? '').trim() === 'none') return;
@@ -409,6 +420,7 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
             continue;
           }
           if (!isSvgNs(c) || !['tspan', 'textPath', 'a', 'tref'].includes(c.local)) continue;
+          budget.spend(1, 'the SVG elements (with <use> copies)');
           const p = computeProps(c, props, sheet);
           resolveFontSize(p, props);
           if (p.display === 'none' || (c.attrs.display ?? '') === 'none') continue;
@@ -515,7 +527,12 @@ class FlatSink implements PathSink {
   constructor(
     private m: Affine,
     private s: number,
+    private budget: WorkBudgetLike,
   ) {}
+
+  private spend(n: number): void {
+    this.budget.spend(n, 'the SVG paths');
+  }
 
   private ensure(): PtMm[] {
     if (!this.cur) {
@@ -528,18 +545,21 @@ class FlatSink implements PathSink {
   }
 
   moveTo(x: number, y: number): void {
+    this.spend(1);
     this.cur = { pts: [apply(this.m, x, y)], closed: false };
     this.subs.push(this.cur);
     this.ux = this.sx = x;
     this.uy = this.sy = y;
   }
   lineTo(x: number, y: number): void {
+    this.spend(1);
     this.ensure().push(apply(this.m, x, y));
     this.ux = x;
     this.uy = y;
   }
   cubicTo(x1: number, y1: number, x2: number, y2: number, x: number, y: number): void {
     const pts = this.ensure();
+    const n0 = pts.length;
     flattenCubic(
       pts[pts.length - 1],
       apply(this.m, x1, y1),
@@ -548,12 +568,15 @@ class FlatSink implements PathSink {
       this.s,
       pts,
     );
+    this.spend(pts.length - n0);
     this.ux = x;
     this.uy = y;
   }
   quadTo(x1: number, y1: number, x: number, y: number): void {
     const pts = this.ensure();
+    const n0 = pts.length;
     flattenQuad(pts[pts.length - 1], apply(this.m, x1, y1), apply(this.m, x, y), this.s, pts);
+    this.spend(pts.length - n0);
     this.ux = x;
     this.uy = y;
   }
@@ -567,8 +590,10 @@ class FlatSink implements PathSink {
     y: number,
   ): void {
     const pts = this.ensure();
+    const n0 = pts.length;
     const c = arcCenter(this.ux, this.uy, rx, ry, phiDeg, large, sweep, x, y);
-    if (!c) {
+    // a radius so large its square overflows leaves no centre: the arc is its chord
+    if (!c || ![c.cx, c.cy, c.rx, c.ry, c.t1, c.dt].every(Number.isFinite)) {
       if (this.ux !== x || this.uy !== y) pts.push(apply(this.m, x, y));
     } else
       flattenEllipseArc(
@@ -584,6 +609,7 @@ class FlatSink implements PathSink {
         pts,
         apply(this.m, x, y),
       );
+    this.spend(pts.length - n0);
     this.ux = x;
     this.uy = y;
   }
@@ -591,6 +617,7 @@ class FlatSink implements PathSink {
   ellipse(cx: number, cy: number, rx: number, ry: number): void {
     this.moveTo(cx + rx, cy);
     const pts = this.cur!.pts;
+    const n0 = pts.length;
     flattenEllipseArc(
       cx,
       cy,
@@ -604,6 +631,7 @@ class FlatSink implements PathSink {
       pts,
       apply(this.m, cx + rx, cy),
     );
+    this.spend(pts.length - n0);
     this.close();
   }
   close(): void {

@@ -5,12 +5,14 @@
 //   T3  lining scope (distinct names)            T4  `_R` derived by the writer from `_L`
 //   T5  R12 dialect                              T6  file framing, merge, manifest round trip
 //   N*  negative controls: every mutation must turn its check red and fail the gate
+//   D   F14b: G3/G4 on source walls only, derived edges audited by G15; G12 outline mirror
 import fs from 'node:fs';
 import path from 'node:path';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
 import { mergeDxfSheets } from 'lib/nesting/dxf/merge';
 import type {
   CardSize,
+  DerivedEdge,
   DraftScopeTarget,
   FoldFeature,
   GateCheckId,
@@ -50,7 +52,7 @@ import {
   roundTrip,
   writeAndGate,
 } from 'lib/pattern-import/gate';
-import { sameManifest } from 'lib/pattern-import/gate/checks';
+import { type GateCtx, g12, sameManifest } from 'lib/pattern-import/gate/checks';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import * as fx from 'components/managers/tech-card/components/pattern-import/fixture';
 
@@ -1381,6 +1383,278 @@ export async function main(opts: { plans: string }): Promise<number> {
       r.passed && !c3.ok && c3.severity === 'warn',
       'no source walls → G3/G4 WARN (not verified), gate still passes',
       c3.note,
+    );
+  }
+
+  // D ──────────────────────────────────────────────────────────────────────────────────────
+  head('D · F14b: derived edges never walls (G3/G4 source only, G15 audits them) · G12 outline');
+  {
+    // PCK (160 × 180, cut meaning, UNI): its drawn wall is ONE open chain round the outline with a
+    // gap on the right side (x = 160) from y = 90 − g/2 to 90 + g/2. The written cut runs straight
+    // across the gap — exactly what a fill closed by a bridge writes.
+    const pck = pckSpec();
+    const rank = pck.sizes[0].rank;
+    const gapWalls = (g: number): PtMm[][] => [
+      [
+        { x: 160, y: 90 + g / 2 },
+        { x: 160, y: 180 },
+        { x: 0, y: 180 },
+        { x: 0, y: 0 },
+        { x: 160, y: 0 },
+        { x: 160, y: 90 - g / 2 },
+      ],
+    ];
+    /** A bridge over the gap as F4b draws it: snapped to both ends, operator ones 0.6 mm past. */
+    const bridge = (
+      g: number,
+      kind: DerivedEdge['kind'],
+      over = kind === 'operator-bridge' ? 0.6 : 0,
+    ) => ({
+      kind,
+      pts: [
+        { x: 160, y: 90 - g / 2 - over },
+        { x: 160, y: 90 + g / 2 + over },
+      ],
+    });
+    const ctxOf = (g: number, derived: DerivedEdge[] | undefined) => ({
+      ...gateCtx([pck]),
+      wallsOf: (_id: string, r: number) => (r === rank ? gapWalls(g) : undefined),
+      derivedOf: derived
+        ? (_id: string, r: number) => (r === rank ? derived : undefined)
+        : undefined,
+    });
+    const gateOf = async (g: number, derived?: DerivedEdge[]) =>
+      writeAndGate(job(MAIN, [pck]), ctxOf(g, derived));
+    const one = (r: GateReport, id: GateCheckId) => checkOf(r, id)[0];
+
+    // source-only, no gap: passes, G15 has nothing to audit
+    {
+      const r = await gateOf(0);
+      ck(
+        r.report.passed &&
+          one(r.report, 'G15-derived')?.ok &&
+          one(r.report, 'G4-hausdorff').ok &&
+          !r.report.derived,
+        'source-only correct piece passes (G4 ✓, G15 ✓ no derived edges, nothing audited)',
+        `${summary(r.report)} · ${one(r.report, 'G15-derived')?.note}`,
+      );
+    }
+    // the gap with NO derived edge: G4 is source-only, the 2.35 mm mid-gap distance blocks
+    await neg(
+      '4.7 mm gap in the drawn wall, no bridge declared',
+      'G4-hausdorff',
+      (await gateOf(4.7)).report,
+    );
+    // palto's case: a 4.7 mm operator bridge — G15 audits it, G4 leaves exactly that stretch out
+    {
+      const r = await gateOf(4.7, [bridge(4.7, 'operator-bridge')]);
+      const back = readManifestLocal(r.dxfText);
+      const audit = back?.gate?.derived ?? [];
+      ck(
+        r.report.passed &&
+          one(r.report, 'G15-derived').ok &&
+          one(r.report, 'G4-hausdorff').ok &&
+          audit.length === 1 &&
+          audit[0].kind === 'operator-bridge' &&
+          audit[0].block === 'PCK_UNI',
+        '4.7 mm operator bridge: passes; the manifest in the file lists it (audited)',
+        `${summary(r.report)} · audit ${JSON.stringify(audit)} · G4 ${one(r.report, 'G4-hausdorff').note}`,
+      );
+    }
+    // a 2.5 mm automatic bridge passes too (≤ 3 mm, as F4b draws them)
+    {
+      const r = await gateOf(2.5, [bridge(2.5, 'bridge')]);
+      ck(
+        r.report.passed && one(r.report, 'G15-derived').ok,
+        '2.5 mm automatic bridge passes',
+        summary(r.report),
+      );
+    }
+    // fabricated long bridges across a leak: blocked, and G4 does not excuse them
+    {
+      const r = (await gateOf(40, [bridge(40, 'operator-bridge')])).report;
+      await neg('40 mm operator bridge across a leak', 'G15-derived', r);
+      ck(
+        failing(r).includes('G4-hausdorff'),
+        '… and G4 measures it against the drawn walls (red)',
+        failing(r).join(','),
+      );
+    }
+    await neg(
+      '8 mm "automatic" bridge (> 3 mm)',
+      'G15-derived',
+      (await gateOf(8, [bridge(8, 'bridge')])).report,
+    );
+    await neg('40 mm band cut', 'G15-derived', (await gateOf(40, [bridge(40, 'band-cut')])).report);
+    // an end that lands nowhere (2 mm inside the piece)
+    await neg(
+      'bridge end 2 mm off any drawn wall',
+      'G15-derived',
+      (
+        await gateOf(4.7, [
+          {
+            kind: 'operator-bridge',
+            pts: [
+              { x: 160, y: 90 - 2.35 },
+              { x: 158, y: 90 + 2.35 },
+            ],
+          },
+        ])
+      ).report,
+    );
+    // per-piece aggregate: seven short bridges (each fine on its own) are too many
+    await neg(
+      'seven derived edges on one piece',
+      'G15-derived',
+      (
+        await gateOf(
+          2,
+          Array.from({ length: 7 }, (_, i) => ({
+            kind: 'bridge' as const,
+            pts: [
+              { x: 160, y: 89 - i * 0.1 },
+              { x: 160, y: 91 + i * 0.1 },
+            ],
+          })),
+        )
+      ).report,
+    );
+    // per-piece aggregate: off-wall share of the line — 25 mm of a 680 mm line is 3.7 % (ok);
+    // two such gaps = 7.4 % (> 5 %)
+    {
+      const walls2: PtMm[][] = [
+        [
+          { x: 160, y: 50 + 12.5 },
+          { x: 160, y: 130 - 12.5 },
+        ],
+        [
+          { x: 160, y: 130 + 12.5 },
+          { x: 160, y: 180 },
+          { x: 0, y: 180 },
+          { x: 0, y: 0 },
+          { x: 160, y: 0 },
+          { x: 160, y: 50 - 12.5 },
+        ],
+      ];
+      const br = (y: number): DerivedEdge => ({
+        kind: 'operator-bridge',
+        pts: [
+          { x: 160, y: y - 13.1 },
+          { x: 160, y: y + 13.1 },
+        ],
+      });
+      const r = (
+        await writeAndGate(job(MAIN, [pck]), {
+          ...gateCtx([pck]),
+          wallsOf: (_id: string, rr: number) => (rr === rank ? walls2 : undefined),
+          derivedOf: (_id: string, rr: number) => (rr === rank ? [br(50), br(130)] : undefined),
+        })
+      ).report;
+      await neg(
+        'two 25 mm operator bridges = 7.4 % of the line off the drawn walls',
+        'G15-derived',
+        r,
+      );
+    }
+  }
+  {
+    // G12: an `_R` with `_L`'s area and box but another outline. One vertex of each R size slides
+    // 5 mm along the chord of its neighbours — the triangle on that chord keeps its height, so the
+    // area is EXACTLY equal; the vertex is picked so the bbox does not move.
+    const Lx = fpLSpec();
+    const R = fpRFrom(Lx);
+    const slid = (cut: PtMm[]): PtMm[] | null => {
+      const b0 = bboxOf(cut);
+      for (let i = 0; i < cut.length; i++) {
+        const a = cut[(i + cut.length - 1) % cut.length];
+        const c = cut[(i + 1) % cut.length];
+        const L = Math.hypot(c.x - a.x, c.y - a.y);
+        for (const sg of [5, -5]) {
+          const out = cut.map((p, k) =>
+            k === i ? { x: p.x + ((c.x - a.x) / L) * sg, y: p.y + ((c.y - a.y) / L) * sg } : p,
+          );
+          const b1 = bboxOf(out);
+          if (
+            Math.max(
+              Math.abs(b1.minX - b0.minX),
+              Math.abs(b1.minY - b0.minY),
+              Math.abs(b1.maxX - b0.maxX),
+              Math.abs(b1.maxY - b0.maxY),
+            ) < 1e-9
+          )
+            return out;
+        }
+      }
+      return null;
+    };
+    let made = true;
+    R.sizes = R.sizes.map((s) => {
+      const cut = slid(s.cut);
+      if (!cut) made = false;
+      return cut ? { ...s, cut, bbox: bboxOf(cut) } : s;
+    });
+    const dArea = Math.max(
+      ...R.sizes.map((s, i) => Math.abs(areaOf(s.cut) - areaOf(fpRFrom(Lx).sizes[i].cut))),
+    );
+    ck(
+      made && dArea < 1e-6,
+      'tampered _R: same area, same bbox as the true mirror',
+      `Δarea ${dArea.toExponential(1)} mm²`,
+    );
+    const specs = [Lx, R];
+    const r = (await writeAndGate(job(MAIN, specs), gateCtx(specs))).report;
+    await neg('_R with equal area / bbox / notches but another outline', 'G12-pair', r);
+    const n12 = checkOf(r, 'G12-pair')[0].note;
+    ck(
+      /off the mirror of L/.test(n12) && !/area differs|bbox off/.test(n12),
+      '… caught by the outline Hausdorff alone (area and bbox agree)',
+      n12.slice(0, 200),
+    );
+  }
+  {
+    // G12 on a zero-area pair: the ratio was 0/0 = NaN and NaN passed. Straight on g12 — the writer
+    // would not lay out a degenerate piece.
+    const flat = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 200, y: 0 },
+    ];
+    const grain = [
+      { x: 0, y: -10 },
+      { x: 0, y: 10 },
+    ];
+    const raw = new Map(
+      ['FP_L_M', 'FP_R_M'].map((b) => [
+        b,
+        [
+          { type: 'LWPOLYLINE', layer: '1', closed: true, pts: flat },
+          { type: 'LWPOLYLINE', layer: '7', closed: false, pts: grain },
+        ],
+      ]),
+    );
+    const piece = (identity: string, hand: 'L' | 'R', of: string) => ({
+      identity,
+      pairHand: hand,
+      pairOf: of,
+    });
+    const block = (b: string, identity: string) => ({
+      block: b,
+      identity,
+      sizeToken: 'M',
+      notches: 0,
+    });
+    const ctx = {
+      m: {
+        pieces: [piece('FP_L', 'L', 'FP_R'), piece('FP_R', 'R', 'FP_L')],
+        blocks: [block('FP_L_M', 'FP_L'), block('FP_R_M', 'FP_R')],
+      },
+      raw: { blocks: raw },
+    } as unknown as GateCtx;
+    const c = g12(ctx);
+    ck(
+      !c.ok && c.severity === 'block' && /area not a positive number/.test(c.note),
+      'zero-area L/R pair → G12 red (not NaN-green)',
+      c.note,
     );
   }
 

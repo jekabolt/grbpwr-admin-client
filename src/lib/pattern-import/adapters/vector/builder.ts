@@ -65,8 +65,9 @@ export class PageBuilder {
    */
   path(raw: PtMm[], closed: boolean, style: StyleId, src: PathSource): IRPath | null {
     const pts: PtMm[] = [];
+    // A non-finite point is kept: the adapter boundary (budget.ts assertFiniteDoc) refuses the file
+    // instead of drawing a silently different line (C4).
     for (const p of raw) {
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       const last = pts[pts.length - 1];
       if (
         last &&

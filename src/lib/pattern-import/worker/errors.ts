@@ -53,8 +53,11 @@ export function toWireError(
       message: e.message,
     };
   // adapters cannot import ImportError (worker graph): a size guard there names its error
+  // (adapters/budget.ts: InputTooLarge, CorruptInput)
   if (e instanceof Error && e.name === 'InputTooLarge')
     return { code: 'too-large', message: e.message };
+  if (e instanceof Error && e.name === 'CorruptInput')
+    return { code: 'corrupt', message: e.message };
   if (e instanceof RangeError && /memory|allocation|Array buffer/i.test(e.message))
     return {
       code: 'crashed',

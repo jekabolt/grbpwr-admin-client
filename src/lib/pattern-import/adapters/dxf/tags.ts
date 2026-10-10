@@ -3,7 +3,8 @@
 // ATTRIB, MTEXT continuation, entity order and handles for provenance) — 05-CODEX-REVIEW item 8,
 // 10-CLO-DXF-FORMAT §2.4-2.
 
-import { MANIFEST_TAG } from '../../types';
+import { MANIFEST_TAG, PATIMPORT } from '../../types';
+import { inputTooLarge } from '../budget';
 import { dwgRelease, refusalHint } from '../sniff/errors';
 import { isBinaryDxf, readBinaryDxf, type BinaryDxfMode } from './binary';
 import { DxfImportError } from './errors';
@@ -98,6 +99,7 @@ export function loadDxf(bytes: ArrayBuffer): LoadedDxf {
       binary: b.mode,
     };
   }
+  refuseLongDxf(u8);
   const dec = decodeDxf(bytes);
   return {
     tok: tokenize(dec.text),
@@ -107,6 +109,19 @@ export function loadDxf(bytes: ArrayBuffer): LoadedDxf {
     probeText: dec.text.slice(0, 200_000),
     binary: null,
   };
+}
+
+/**
+ * C4: the ASCII stream is split whole (tokenize), so its line count is bounded BEFORE it is decoded
+ * — counted on the bytes, ~1 ms per MB. The largest CLO export of the corpus has 0.23 M lines.
+ */
+export function refuseLongDxf(u8: Uint8Array, max: number = PATIMPORT.maxDxfLines): void {
+  let lines = 0;
+  for (let i = u8.indexOf(10); i !== -1; i = u8.indexOf(10, i + 1))
+    if (++lines > max)
+      throw inputTooLarge(
+        `the DXF has more than ${max / 1e6} million lines, more than the importer reads (a graded CLO export of a whole garment is well under 1 million). Export fewer sizes or only the pattern pieces per file.`,
+      );
 }
 
 /** Pairs of lines → tags. Throws a typed `corrupt` / `not-dxf` on a broken stream. */

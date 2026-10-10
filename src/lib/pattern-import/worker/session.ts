@@ -86,6 +86,15 @@ import { ImportError, cancelled, stageUnavailable } from './errors';
 import { chainPreviewOf, previewOf } from './preview';
 import { wallsUsedBy } from './walls-used';
 import { checkInputSet, imagePixelsRefusal } from './limits';
+import { assertFiniteDoc, WorkBudget } from '../adapters/budget';
+import {
+  attributeSizes,
+  mergeDxfSet,
+  reviewPlaceholderSizes,
+  settleDxfSet,
+  type DxfSet,
+  type DxfSetSize,
+} from './dxf-set';
 
 /** Hex SHA-256 of the bytes ('' where the runtime has no WebCrypto — an insecure origin). */
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -162,6 +171,10 @@ export class Session {
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
+  /** Several DXF files, one per size, merged into one drawing at open (owner decision 5). */
+  private dxfSet: DxfSet | null = null;
+  /** The set's sizes as the reader saw them in the merged drawing (`settleDxfSet`). */
+  private setSizes: DxfSetSize[] = [];
   // scale
   private decision: ScaleDecision | null = null;
   private fast: DxfFastPath | null = null;
@@ -195,6 +208,8 @@ export class Session {
   private semantics: SemanticsOutput | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
+  /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
+  private derivedOf: SemanticsDetail['derivedOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -221,10 +236,10 @@ export class Session {
         'unsupported-format',
         `one run reads one format — got ${[...kinds].join(' + ')}. Import each format on its own.`,
       );
+    // Several DXF files = one file per size: merged into one drawing here, read as one DXF after.
     if (routes[0].route === 'dxf' && files.length > 1)
-      throw new ImportError(
-        'unsupported-format',
-        'several DXF files are not merged yet — export all sizes into one DXF (or use "merge sizes").',
+      this.dxfSet = mergeDxfSet(
+        files.map((f, i) => ({ id: String(i), name: f.name, bytes: f.bytes })),
       );
     this.files = files.map((f, i) => ({
       id: String(i),
@@ -244,6 +259,7 @@ export class Session {
     this.sheet = null;
     this.fast = null;
     this.dxf = null;
+    this.dxfSet = null;
   }
 
   /** Running stage S drops every output after S (render-som drops nothing). */
@@ -275,6 +291,7 @@ export class Session {
     if (at < ORDER.indexOf('semantics')) {
       this.semantics = null;
       this.wallsOf = null;
+      this.derivedOf = null;
     }
   }
 
@@ -319,6 +336,9 @@ export class Session {
     const docs: SourceDoc[] = [];
     this.calibrations = [];
     this.dxf = null;
+    // C4: one work budget for all files of this read (adapters/budget.ts)
+    const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
+    if (this.dxfSet) return [await this.readDxfSet(this.dxfSet, ctx, runOpts)];
     const n = this.files.length;
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
@@ -372,7 +392,7 @@ export class Session {
       const extract = pickExtractor(bytes, info.name, reg);
       let doc: SourceDoc;
       try {
-        doc = await extract({ id: info.id, name: info.name, bytes }, opts, (d, t, note) => {
+        doc = await extract({ id: info.id, name: info.name, bytes }, runOpts, (d, t, note) => {
           ctx.checkCancel();
           fileProgress(d, t, note);
         });
@@ -391,6 +411,36 @@ export class Session {
     return docs;
   }
 
+  /**
+   * A per-size DXF set: every file is hashed (provenance), the merged drawing is read as the one
+   * DXF of the run, and the reader must see one size per file (`settleDxfSet`).
+   */
+  private async readDxfSet(set: DxfSet, ctx: StageCtx, opts: ExtractOpts): Promise<SourceDoc> {
+    const n = this.files.length;
+    for (let i = 0; i < n; i++) {
+      ctx.checkCancel();
+      const info = this.files[i];
+      const blob = this.blobs.get(`file:${i}`);
+      if (!blob)
+        throw new ImportError('no-session', 'the session lost its files — read them again');
+      if (!this.sha.has(info.id)) this.sha.set(info.id, await sha256Hex(await blob.arrayBuffer()));
+      ctx.progress(i, n + 1, info.name);
+    }
+    const bytes = set.bytes.slice().buffer;
+    const read = await readDxf({ id: '0', name: set.name, bytes }, opts, (d, t, note) => {
+      ctx.checkCancel();
+      ctx.progress(n + d / Math.max(1, t), n + 1, `${set.name}${note ? ` · ${note}` : ''}`);
+    });
+    assertFiniteDoc(read.doc); // C4: the set path bypasses pickExtractor's boundary check
+    const seg = segmentDxf(read);
+    if (!seg.presegmented)
+      throw new ImportError('corrupt', `${set.name}: the merged drawing has no block inserts`);
+    this.setSizes = settleDxfSet(set, seg);
+    this.dxf = { read, seg };
+    ctx.progress(n + 1, n + 1);
+    return read.doc;
+  }
+
   private async extract(
     input: StageIO['extract']['in'],
     ctx: StageCtx,
@@ -399,8 +449,12 @@ export class Session {
     const docs = await this.readAll(ctx, opts);
     this.docs = docs;
     this.docsFactor = 1;
-    this.files = docs.map((d) => d.file);
+    // A merged set keeps its own files: the operator dropped them, the manifest names them.
+    this.files = this.dxfSet
+      ? this.files.map((f) => ({ ...f, sha256: this.sha.get(f.id) ?? '', pages: 1 }))
+      : docs.map((d) => d.file);
     const warnings = docs.flatMap((d) => d.warnings.map((w) => `${d.file.name}: ${w}`));
+    if (this.dxfSet) warnings.unshift(...this.dxfSet.notes);
 
     // Page classes: PDFs are sorted by F2; a one-page drawing (DXF, SVG, PLT, a scan image) is
     // its own sheet.
@@ -426,6 +480,20 @@ export class Session {
         ),
       ),
     ];
+    if (this.dxfSet)
+      this.pages = this.setSizes.map(
+        (s): PageClassification => ({
+          file: s.file,
+          page: 0,
+          cls: 'tile',
+          sheet: 0,
+          confidence: 1,
+          why:
+            s.from === 'placeholder'
+              ? 'DXF · size unknown: map it on the sizes step'
+              : `DXF · size ${s.token}, from the ${s.from === 'blocks' ? 'block names' : 'file name'}`,
+        }),
+      );
 
     // Scale candidates by kind.
     let scale: ScaleCandidate[];
@@ -502,6 +570,7 @@ export class Session {
               return { read: r2, seg: segmentDxf(r2) };
             })();
       this.fast = dxfFastPath(scaled.read, scaled.seg);
+      if (this.dxfSet) this.fast = attributeSizes(this.fast, this.setSizes);
       ctx.progress(1, 1);
     } else {
       await this.ensureDocs(ctx);
@@ -613,6 +682,7 @@ export class Session {
     this.expected = expectedSizes(read, input.card, input.drawnSizes, this.chains);
     const run = runForExpected(read, this.expected);
     let map = proposeCardSizeMap(run, input.card);
+    if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
@@ -770,6 +840,7 @@ export class Session {
     );
     this.semantics = detail.output;
     this.wallsOf = detail.wallsOf;
+    this.derivedOf = detail.derivedOf;
     return detail.output;
   }
 
@@ -850,6 +921,7 @@ export class Session {
     // chains' own topology, never trimmed by the output (walls-used.ts, M7). A DXF's walls are its
     // own blocks.
     const rawWalls = this.wallsOf;
+    const derived = this.derivedOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -893,6 +965,7 @@ export class Session {
           sizeTokens,
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
+          derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );

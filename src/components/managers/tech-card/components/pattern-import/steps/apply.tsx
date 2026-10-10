@@ -9,6 +9,7 @@
 // the save, piece areas and the size index are measured (run by the card, shown here with retry).
 import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import type { DraftScope } from 'lib/pattern-import/types';
+import { useState } from 'react';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -79,6 +80,7 @@ export function ApplyStep({
   const { session, apply, sheetModes, setSheetMode } = api;
   const draft = session.draft;
   if (!draft) return null;
+  if (card.downloadOnly) return <DownloadOnly api={api} onClose={onClose} />;
   const running = apply.phase === 'running';
   const done = apply.phase === 'done' ? apply.result : null;
   const progress = apply.phase === 'idle' ? {} : apply.progress;
@@ -474,6 +476,70 @@ export function ApplyStep({
           >
             download .dxf ({draft.downloads.length})
           </Button>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+/**
+ * The last step when the BOM has no fabric line (J1): the converted file is the outcome. Nothing
+ * is bound or uploaded, so the card-side tables (pieces, links, previous imports) are not shown.
+ */
+function DownloadOnly({ api, onClose }: { api: ImportSessionApi; onClose: () => void }) {
+  const draft = api.session.draft!;
+  const pieces = new Set(draft.scopes.flatMap((s) => s.identities)).size;
+  // leaving discards the run: the quiet exit appears once the file is saved
+  const [saved, setSaved] = useState(false);
+  return (
+    <div className='grid h-full min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-2 [&>*]:min-h-0 [&>*]:min-w-0'>
+      <Panel title='what you download'>
+        <GroupLabel flush>files · {pieces} pieces</GroupLabel>
+        <DataTable>
+          <thead>
+            <tr>
+              <th>file</th>
+              <th data-align='left'>fabric</th>
+              <th>blocks</th>
+              <th>size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.scopes.map((s) => (
+              <tr key={s.target.scopeKey}>
+                <td>{s.filename}</td>
+                <td data-align='left'>{s.target.label}</td>
+                <td>{s.manifest.blocks.length}</td>
+                <td>{fmtBytes(new Blob([s.dxfText]).size)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      </Panel>
+
+      <Panel title='download'>
+        <CalloutBox tone='note' className='mb-2'>
+          <Text size='micro' component='p'>
+            <b>download only.</b> the BOM has no fabric line, so this import is not applied to the
+            card. to apply one, add the fabric on the BOM tab and import again.
+          </Text>
+        </CalloutBox>
+        <div className='flex flex-col gap-2'>
+          <Button
+            variant='main'
+            size='lg'
+            onClick={() => {
+              void api.dispatch({ type: 'download' });
+              setSaved(true);
+            }}
+          >
+            download .dxf ({draft.downloads.length})
+          </Button>
+          {saved && (
+            <Button variant='secondary' size='sm' onClick={onClose}>
+              back to the card
+            </Button>
+          )}
         </div>
       </Panel>
     </div>

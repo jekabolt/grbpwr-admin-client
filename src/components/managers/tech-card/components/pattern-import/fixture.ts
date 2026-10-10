@@ -1388,6 +1388,7 @@ function gateOf(
       '_R is the mirror of _L',
     ),
     c('G13-manifest', true, 'block', 'ok', '—', [], `manifest scope ${scope.label}`),
+    c('G15-derived', true, 'block', '0 edge(s) / 0 %', '—', [], 'no derived edges'),
   ];
   return {
     passed: checks.every((x) => x.ok || x.severity === 'warn'),

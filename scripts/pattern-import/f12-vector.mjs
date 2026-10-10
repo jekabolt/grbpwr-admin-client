@@ -847,6 +847,181 @@ const same = (a, b, tol = 1e-3) =>
   );
 }
 
+// ── C4 · bounded work (negative controls) ──────────────────────────────────────────────────
+{
+  const B = 'C4 bounded work';
+  const { gzipSync } = await import('node:zlib');
+  const reg = {
+    pdf: async () => {
+      throw new Error('no pdf here');
+    },
+    svg: m.extractSvg,
+    hpgl: m.extractHpgl,
+  };
+  /** Through pickExtractor (the session's path): budget + finite boundary + file name. */
+  const run = async (name, bytes, opts = OPTS) => {
+    const t0 = performance.now();
+    try {
+      const doc = await m.pickExtractor(bytes, name, reg)({ id: '0', name, bytes }, opts);
+      return { doc, ms: performance.now() - t0 };
+    } catch (e) {
+      return { err: e, ms: performance.now() - t0 };
+    }
+  };
+  const refused = (res, errName) =>
+    !!res.err && res.err.name === errName && String(res.err.message).length > 20;
+  const svg = (body) =>
+    enc(
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100mm" height="100mm" viewBox="0 0 100 100">${body}</svg>`,
+    );
+
+  let res = await run('inf.svg', svg('<path d="M0,0 L1e309,5" stroke="#000"/>'));
+  check(
+    B,
+    '1e309 path coordinate → refused as corrupt (named, with the file name)',
+    refused(res, 'CorruptInput') && res.err.message.startsWith('inf.svg'),
+    res.err ? `${res.err.name}: ${res.err.message.slice(0, 90)}` : 'accepted',
+    'CorruptInput',
+  );
+  res = await run('infc.svg', svg('<circle cx="50" cy="50" r="1e309" stroke="#000" fill="none"/>'));
+  check(
+    B,
+    'circle r=1e309 → bounded flattening, refused as corrupt',
+    refused(res, 'CorruptInput') && res.ms < 2000,
+    `${res.err?.name ?? 'accepted'} in ${Math.round(res.ms)} ms`,
+    'CorruptInput < 2 s',
+  );
+  res = await run(
+    'infw.svg',
+    enc(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1e309mm" height="100mm"><path d="M0,0 L10,5" stroke="#000"/></svg>',
+    ),
+  );
+  check(
+    B,
+    'page width 1e309mm → refused as corrupt',
+    refused(res, 'CorruptInput'),
+    res.err?.name ?? 'accepted',
+    'CorruptInput',
+  );
+
+  res = await run(
+    'huge-r.svg',
+    svg(
+      '<ellipse cx="50" cy="50" rx="1e12" ry="1e12" stroke="#000" fill="none"/><path d="M0,0 A1e12,1e12 0 1 1 1,0" stroke="#000" fill="none"/>',
+    ),
+  );
+  const maxPts = res.doc ? Math.max(...res.doc.pages[0].paths.map((p) => p.pts.length)) : -1;
+  check(
+    B,
+    'ellipse / arc with radius 1e12 → at most 4096 segments per curve, < 1 s',
+    !!res.doc && maxPts <= 4097 && res.ms < 1000,
+    `${maxPts} pts max, ${Math.round(res.ms)} ms${res.err ? ` ${res.err.name}` : ''}`,
+    '≤ 4097 pts',
+  );
+  res = await run('huge-ci.plt', enc('IN;SP1;PA0,0;PD;CI100000000;PU;'));
+  const ciPts = res.doc ? Math.max(...res.doc.pages[0].paths.map((p) => p.pts.length)) : -1;
+  check(
+    B,
+    'HPGL circle of a 2.5 km radius → at most 4096 segments',
+    !!res.doc && ciPts <= 4097,
+    `${ciPts} pts${res.err ? ` ${res.err.name}: ${res.err.message}` : ''}`,
+    '≤ 4097 pts',
+  );
+
+  // <use> fan-out: 9 levels, each using the one below 10 times → 10^9 copies
+  let defs = '<path id="u0" d="M0,0 L1,1" stroke="#000"/>';
+  for (let k = 1; k <= 9; k++)
+    defs += `<g id="u${k}">${Array.from({ length: 10 }, () => `<use href="#u${k - 1}"/>`).join('')}</g>`;
+  res = await run('fanout.svg', svg(`<defs>${defs}</defs><use href="#u9"/>`));
+  check(
+    B,
+    '<use> fan-out (10^9 copies) → refused as too large, < 5 s',
+    refused(res, 'InputTooLarge') && res.ms < 5000,
+    `${res.err?.name ?? 'accepted'} in ${Math.round(res.ms)} ms: ${res.err?.message.slice(0, 80) ?? ''}`,
+    'InputTooLarge',
+  );
+
+  // svgz bomb: 96 MB of spaces inside an <svg> → ~100 kB gzip
+  const bomb = gzipSync(
+    Buffer.concat([
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg">'),
+      Buffer.alloc(96 * 1048576, 0x20),
+      Buffer.from('</svg>'),
+    ]),
+    { level: 9 },
+  );
+  res = await run('bomb.svgz', ab(bomb));
+  check(
+    B,
+    `svgz bomb (${Math.round(bomb.length / 1024)} kB → 96 MB) → refused as too large, < 5 s`,
+    refused(res, 'InputTooLarge') && res.ms < 5000,
+    `${res.err?.name ?? 'accepted'} in ${Math.round(res.ms)} ms`,
+    'InputTooLarge',
+  );
+
+  // one budget across files: two files of 600 points each against a budget of 1000
+  const lines = (n) =>
+    svg(
+      `<path d="M0,0 ${Array.from({ length: n }, (_, i) => `L${i % 100},${(i * 7) % 100}`).join(' ')}" stroke="#000"/>`,
+    );
+  const shared = { ...OPTS, budget: new m.WorkBudget(1000) };
+  const r1 = await run('a.svg', lines(600), shared);
+  const r2 = await run('b.svg', lines(600), shared);
+  check(
+    B,
+    'the run budget is shared by the files of a run (2nd file refused)',
+    !!r1.doc && refused(r2, 'InputTooLarge'),
+    `${r1.err?.name ?? 'ok'} / ${r2.err?.name ?? 'ok'}`,
+    'ok / InputTooLarge',
+  );
+
+  // PDF operators: a constructPath with 100 000 curves of 4096 points each is paid as it is made
+  const OPS = {
+    constructPath: 91,
+    moveTo: 13,
+    lineTo: 14,
+    curveTo: 15,
+    curveTo2: 16,
+    curveTo3: 17,
+    closePath: 18,
+    rectangle: 19,
+    stroke: 20,
+  };
+  const N = 100000;
+  const pathOps = new Uint8Array(N + 1).fill(OPS.curveTo);
+  pathOps[0] = OPS.moveTo;
+  const flat = new Float32Array(2 + N * 6);
+  for (let k = 0; k < N; k++) flat.set([0, 1e7, 1e7, -1e7, 1, 0], 2 + k * 6);
+  const t0 = performance.now();
+  let walkErr = null;
+  try {
+    m.walkOperatorList(
+      { fnArray: [OPS.constructPath, OPS.stroke], argsArray: [[pathOps, flat, null], []] },
+      {
+        ops: OPS,
+        file: '0',
+        page: 0,
+        base: [1, 0, 0, 1, 0, 0],
+        sagittaMm: 0.05,
+        keepFills: true,
+        ocName: () => null,
+        budget: new m.WorkBudget(2_000_000),
+      },
+    );
+  } catch (e) {
+    walkErr = e;
+  }
+  const wms = performance.now() - t0;
+  check(
+    B,
+    'PDF walk: 100 000 wild curves (4·10^8 points) → refused by the budget, < 5 s',
+    walkErr?.name === 'InputTooLarge' && wms < 5000,
+    `${walkErr?.name ?? 'accepted'} in ${Math.round(wms)} ms`,
+    'InputTooLarge',
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 const pass = results.filter((x) => x.ok).length;
 console.log(`\nF12 vector adapters — ${pass}/${results.length} checks pass\n`);

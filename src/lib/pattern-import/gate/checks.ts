@@ -1,9 +1,12 @@
-// G1–G13 (08-CONTRACT §5). Each check is a pure function of the gate context and returns one
-// (rarely two) GateCheck naming the blocks it failed.
+// G1–G13 + G15 (08-CONTRACT §5; G15 = F14b, Codex C1). Each check is a pure function of the gate
+// context and returns one (rarely two) GateCheck naming the blocks it failed.
 
 import type { PieceDTO } from 'lib/nesting/types';
 import type {
   ConversionManifest,
+  DerivedEdge,
+  DerivedEdgeAudit,
+  DerivedEdgeKind,
   GateCheck,
   GateCheckId,
   GateExpectation,
@@ -23,6 +26,7 @@ import {
   closestOnPolyline,
   dist,
   hullRatio,
+  polylineLength,
   quantile,
   reflection,
   sampleAlong,
@@ -211,7 +215,17 @@ function linesFor(ctx: GateCtx, b: BlockInfo): { line: PtMm[] | null; layer: str
   return { line: ctx.contours.get(b.block)?.get(layer) ?? null, layer };
 }
 
-export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
+/**
+ * G3/G4 measure the written line against SOURCE geometry only (F14b, Codex C1): `wallsByBlock`
+ * holds drawn chains, never a bridge or band cut. `derivedOk` = the derived edges G15 passed, per
+ * block: where the written line runs on one, G4 also measures against the drawn chains that edge
+ * runs along (`along`, IR), and what is still off every drawn line there — the part G15 bounded —
+ * is left out of G4's distances and named in the note. Nothing else is excused; G3 is untouched.
+ */
+export function g3g4(
+  ctx: GateCtx,
+  derivedOk: ReadonlyMap<string, readonly DerivedEdge[]> = new Map(),
+): [GateCheck, GateCheck] {
   const snap = PATIMPORT.snapMm;
   const p95Max = ctx.expect.hausdorffP95Mm;
   const hard: string[] = [];
@@ -223,6 +237,8 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
   let worstMax = 0;
   const notes3: string[] = [];
   const notes4: string[] = [];
+  let excusedMm = 0;
+  let excusedBlocks = 0;
   for (const b of ctx.blocks) {
     const walls = ctx.expect.wallsByBlock[b.block];
     const used = ctx.expect.coverageWallsByBlock?.[b.block] ?? walls;
@@ -275,7 +291,38 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
       walls.map((w) => ({ pts: w, closed: false })),
       5,
     );
-    const d = sampleAlong(line, true, 0.5).map((p) => wallIdx.nearest(p, 20));
+    // on a derived edge G15 passed, the written line is measured against the walls AND the drawn
+    // chains that edge runs along (IR both); what is still off them there is the bounded invention
+    const ok = derivedOk.get(b.block) ?? [];
+    const onDerived = ok.length
+      ? new SegmentIndex(
+          ok.map((e) => ({ pts: e.pts, closed: false })),
+          5,
+        )
+      : null;
+    const alongIdx = ok.some((e) => e.along?.length)
+      ? new SegmentIndex(
+          ok.flatMap((e) => e.along ?? []).map((w) => ({ pts: w, closed: false })),
+          5,
+        )
+      : null;
+    const d: number[] = [];
+    let excused = 0;
+    for (const p of sampleAlong(line, true, 0.5)) {
+      let dw = wallIdx.nearest(p, 20);
+      if (dw > snap && onDerived && onDerived.nearest(p, snap) <= snap) {
+        if (alongIdx) dw = Math.min(dw, alongIdx.nearest(p, 20));
+        if (dw > snap) {
+          excused++;
+          continue;
+        }
+      }
+      d.push(dw);
+    }
+    if (excused) {
+      excusedMm += excused * 0.5;
+      excusedBlocks++;
+    }
     const p95 = quantile(d, 0.95);
     const mx = Math.max(...d);
     worstP95 = Math.max(worstP95, p95);
@@ -291,6 +338,10 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
     notes3.push(`no source walls for ${unverified.length} block(s) — not verified`);
     notes4.push(`no source walls for ${unverified.length} block(s) — not verified`);
   }
+  if (excusedMm)
+    notes4.push(
+      `≈ ${excusedMm.toFixed(1)} mm of written line in ${excusedBlocks} block(s) runs on derived edges G15 audited — not measured here`,
+    );
   // Any hard miss blocks; soft misses and unverified blocks only warn.
   const c3 = check(
     'G3-coverage',
@@ -309,6 +360,158 @@ export function g3g4(ctx: GateCtx): [GateCheck, GateCheck] {
     `p95 ≤ ${p95Max}; max ≤ ${PATIMPORT.hausdorffMaxMm}`,
   );
   return [c3, c4];
+}
+
+// ── G15 (F14b, Codex C1) ───────────────────────────────────────────────────────────────────
+
+/**
+ * The most one derived edge may add OFF the drawing (its length farther than `snapMm` from every
+ * wall and every drawn chain it runs along), mm, by kind:
+ *   bridge          — the fill's own gap close: `FillOpts.autoBridgeMm` default 3 (pieces/bridges.ts);
+ *   operator-bridge — the wizard's "close gap": 30 mm. The tool is for a junction the drawing leaves
+ *                     open (a dash phase, a line stopping short: palto 4.7 mm); 30 mm is 10× the
+ *                     automatic close and still well under any real piece edge — a longer gap is an
+ *                     outline the source does not draw, which only a drawn line ("use a line") may
+ *                     supply, never a straight chord the operator invents;
+ *   band-cut        — a size tick carried across its band where it stops short (reef's L: 9 mm): the
+ *                     same 30 mm bound; the band is never wider than a tick (≤ 250 mm), the
+ *                     carried part is what the drawing left out.
+ */
+export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
+  bridge: 3,
+  'operator-bridge': 30,
+  'band-cut': 30,
+};
+/** An end lands when the edge comes within `snapMm` of one of the piece's walls this close to that
+ * end, mm (operator bridges overshoot their landing by 0.6 mm, pieces/operator.ts). */
+export const DERIVED_LAND_REACH_MM = 1;
+/**
+ * Per block: at most this many derived edges, adding at most this share of the written line's
+ * length off the drawing. The corpus (F4 fill, every sample) has at most 3 per candidate (reef) and
+ * ≤ 0.32 % off the drawing (reef's auto bridges, palto's 4.7 mm operator bridge): 2× and ~15×
+ * headroom, while a piece can still never be 1/20 invented.
+ */
+export const DERIVED_MAX_PER_BLOCK = 6;
+export const DERIVED_MAX_SHARE = 0.05;
+
+const r1 = (v: number) => Math.round(v * 10) / 10;
+
+export type DerivedVerdict = {
+  check: GateCheck;
+  /** Per block: the derived edges that passed (the whole block passed) — G4 may excuse them. */
+  ok: Map<string, DerivedEdge[]>;
+  audit: DerivedEdgeAudit[];
+};
+
+/**
+ * G15: every derived edge is anchored and short. Both ends land on the block's walls (≤ `snapMm`
+ * within `DERIVED_LAND_REACH_MM` of the end); the stretch off the drawing (farther than `snapMm`
+ * from the walls and from the drawn chains the edge runs along) is ≤ its kind's
+ * `DERIVED_OFF_MAX_MM`; per block ≤ `DERIVED_MAX_PER_BLOCK` edges whose off-drawing stretches total
+ * ≤ `DERIVED_MAX_SHARE` of the written line. A block whose edges cannot be checked (no walls)
+ * fails. The edges of a block that passes are the audited list the manifest carries.
+ */
+export function g15(ctx: GateCtx): DerivedVerdict {
+  const snap = PATIMPORT.snapMm;
+  const failed: string[] = [];
+  const notes: string[] = [];
+  const ok = new Map<string, DerivedEdge[]>();
+  const audit: DerivedEdgeAudit[] = [];
+  let edges = 0;
+  let worstShare = 0;
+  for (const b of ctx.blocks) {
+    const list = ctx.expect.derivedByBlock?.[b.block] ?? [];
+    if (!list.length) continue;
+    edges += list.length;
+    const bad = (why: string) => {
+      failed.push(b.block);
+      notes.push(`${b.block}: ${why}`);
+    };
+    const walls = ctx.expect.wallsByBlock[b.block];
+    if (!walls?.length) {
+      bad(`${list.length} derived edge(s) and no drawn walls to land them on`);
+      continue;
+    }
+    // ends land on the piece's own walls; "off the drawing" = off the walls AND off the drawn
+    // chains the edge runs along (a band cut follows its size tick) — IR lines, never derived ones
+    const open = (ls: PtMm[][]) => ls.map((w) => ({ pts: w, closed: false }));
+    const wallIdx = new SegmentIndex(open(walls), 5);
+    const drawnIdx = new SegmentIndex(open([...walls, ...list.flatMap((e) => e.along ?? [])]), 5);
+    const before = failed.length;
+    let offSum = 0;
+    const rows: DerivedEdgeAudit[] = [];
+    for (const e of list) {
+      const len = polylineLength(e.pts, false);
+      const s = sampleAlong(e.pts, false, 0.25);
+      const d = s.map((p) => drawnIdx.nearest(p, 5));
+      const dw = s.map((p) => wallIdx.nearest(p, 5));
+      let off = 0;
+      let arc = 0;
+      const arcs: number[] = [0];
+      for (let i = 1; i < s.length; i++) {
+        const l = dist(s[i - 1], s[i]);
+        arc += l;
+        arcs.push(arc);
+        off += l * (((d[i - 1] > snap ? 1 : 0) + (d[i] > snap ? 1 : 0)) / 2);
+      }
+      // nearest approach to a wall within reach of each end
+      let landA = Infinity;
+      let landB = Infinity;
+      for (let i = 0; i < s.length; i++) {
+        if (arcs[i] <= DERIVED_LAND_REACH_MM) landA = Math.min(landA, dw[i]);
+        if (arc - arcs[i] <= DERIVED_LAND_REACH_MM) landB = Math.min(landB, dw[i]);
+      }
+      const what = `${e.kind} ${len.toFixed(1)} mm`;
+      if (!Number.isFinite(len) || !(len > 0) || s.some((p) => !Number.isFinite(p.x + p.y)))
+        bad(`${what}: not a finite edge`);
+      else if (!(landA <= snap) || !(landB <= snap))
+        bad(
+          `${what}: an end does not land on a drawn wall (${fmt(landA, 2) ?? '∞'} / ${fmt(landB, 2) ?? '∞'} mm)`,
+        );
+      else if (!(off <= DERIVED_OFF_MAX_MM[e.kind]))
+        bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${DERIVED_OFF_MAX_MM[e.kind]} mm)`);
+      const a = e.pts[0];
+      const z = e.pts[e.pts.length - 1];
+      offSum += off;
+      rows.push({
+        block: b.block,
+        kind: e.kind,
+        lengthMm: r1(len),
+        offSourceMm: r1(off),
+        a: [r1(a.x), r1(a.y)],
+        b: [r1(z.x), r1(z.y)],
+      });
+    }
+    if (list.length > DERIVED_MAX_PER_BLOCK)
+      bad(`${list.length} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
+    const { line } = linesFor(ctx, b);
+    const per = line ? polylineLength(line, true) : NaN;
+    const share = offSum / per;
+    if (Number.isFinite(share)) worstShare = Math.max(worstShare, share);
+    if (!(share <= DERIVED_MAX_SHARE))
+      bad(
+        `derived edges add ${offSum.toFixed(1)} mm off the drawing${line ? ` = ${(share * 100).toFixed(1)} % of the line` : ' and there is no written line'} (≤ ${DERIVED_MAX_SHARE * 100} %)`,
+      );
+    if (failed.length === before) {
+      ok.set(b.block, [...list]);
+      audit.push(...rows);
+    }
+  }
+  return {
+    check: check(
+      'G15-derived',
+      failed,
+      'block',
+      notes.join('; ') ||
+        (edges
+          ? `${edges} derived edge(s) land on drawn walls and stay short — listed in the manifest`
+          : 'no derived edges'),
+      `${edges} edge(s) / ${fmt(worstShare * 100, 2)} %`,
+      `ends ≤ ${snap} mm on a wall; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} (auto) / ${DERIVED_OFF_MAX_MM['operator-bridge']} (operator, band cut) mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block, ≤ ${DERIVED_MAX_SHARE * 100} % of the line`,
+    ),
+    ok,
+    audit,
+  };
 }
 
 // ── G5 ─────────────────────────────────────────────────────────────────────────────────────
@@ -817,6 +1020,7 @@ export function g12(ctx: GateCtx): GateCheck {
   const pieces = new Map(ctx.m.pieces.map((p) => [p.identity, p]));
   let worstArea = 0;
   let worstBox = 0;
+  let worstHd = 0;
   for (const L of ctx.m.pieces) {
     if (!L.pairHand) continue;
     const R = L.pairOf ? pieces.get(L.pairOf) : undefined;
@@ -844,66 +1048,65 @@ export function g12(ctx: GateCtx): GateCheck {
       if (!r) continue;
       const lc = rawCut(ctx, l.block);
       const rc = rawCut(ctx, r.block);
-      if (!lc || !rc) {
+      const bad = (why: string) => {
         failed.push(l.block, r.block);
-        notes.push(`${l.block}/${r.block}: cut line missing`);
+        notes.push(`${l.block}/${r.block}: ${why}`);
+      };
+      if (!lc || !rc) {
+        bad('cut line missing');
         continue;
       }
+      // F14b (Codex C2): a zero / non-finite area made the ratio NaN, and NaN passed every `>`.
       const la = areaOf(lc);
       const ra = areaOf(rc);
+      if (!(Number.isFinite(la) && la > 0 && Number.isFinite(ra) && ra > 0)) {
+        bad(`cut area not a positive number (${fmt(la, 1)} / ${fmt(ra, 1)} mm²)`);
+        continue;
+      }
       const dA = Math.abs(la - ra) / Math.max(la, ra);
       worstArea = Math.max(worstArea, dA);
-      if (dA > PATIMPORT.pairAreaTol) {
-        failed.push(l.block, r.block);
-        notes.push(`${l.block}/${r.block}: area differs ${(dA * 100).toFixed(3)} %`);
-      }
-      if (l.notches !== r.notches) {
-        failed.push(l.block, r.block);
-        notes.push(`${l.block}/${r.block}: notches ${l.notches} ≠ ${r.notches}`);
-      }
+      if (!(dA <= PATIMPORT.pairAreaTol)) bad(`area differs ${(dA * 100).toFixed(3)} %`);
+      if (l.notches !== r.notches) bad(`notches ${l.notches} ≠ ${r.notches}`);
       const lg = grainOf(ctx, l.block);
       const rg = grainOf(ctx, r.block);
-      let box: number;
-      if (lg && rg) {
-        // Mirror L across its own grain, then align the grain tails (layout translates hands apart).
-        const T = reflection(lg[0], lg[1]);
-        const dx = rg[0].x - lg[0].x;
-        const dy = rg[0].y - lg[0].y;
-        const M = lc.map((p) => {
-          const q = applyAffine(T, p);
-          return { x: q.x + dx, y: q.y + dy };
-        });
-        const bm = bboxOf(M);
-        const br = bboxOf(rc);
-        box = Math.max(
-          Math.abs(bm.minX - br.minX),
-          Math.abs(bm.minY - br.minY),
-          Math.abs(bm.maxX - br.maxX),
-          Math.abs(bm.maxY - br.maxY),
-        );
-        const ang = (g: [PtMm, PtMm]) => Math.atan2(g[1].y - g[0].y, g[1].x - g[0].x);
-        let dd = Math.abs(ang(lg) - ang(rg)) % (2 * Math.PI);
-        if (dd > Math.PI) dd = 2 * Math.PI - dd;
-        if ((dd * 180) / Math.PI > 0.5) {
-          failed.push(l.block, r.block);
-          notes.push(`${l.block}/${r.block}: grain directions differ`);
-        }
-      } else {
-        const bl = bboxOf(lc);
-        const brr = bboxOf(rc);
-        box = Math.max(
-          Math.abs(bl.maxX - bl.minX - (brr.maxX - brr.minX)),
-          Math.abs(bl.maxY - bl.minY - (brr.maxY - brr.minY)),
-        );
-        notes.push(`${l.block}/${r.block}: no grain axis — compared bbox sizes only`);
+      if (!lg || !rg || !(dist(lg[0], lg[1]) > 0) || !(dist(rg[0], rg[1]) > 0)) {
+        // the mirror axis IS the grain (semantics/pairs.ts mirrorSizeAcrossGrain): without it the
+        // mirror cannot be checked — G5 blocks a missing grain too
+        bad('no grain axis — the mirror cannot be verified');
+        continue;
       }
+      // The writer's own transform (semantics/pairs.ts): `_R` = `_L` reflected across `_L`'s grain;
+      // layout then translates the hands apart, so align the grain tails.
+      const T = reflection(lg[0], lg[1]);
+      const dx = rg[0].x - lg[0].x;
+      const dy = rg[0].y - lg[0].y;
+      const M = lc.map((p) => {
+        const q = applyAffine(T, p);
+        return { x: q.x + dx, y: q.y + dy };
+      });
+      const bm = bboxOf(M);
+      const br = bboxOf(rc);
+      const box = Math.max(
+        Math.abs(bm.minX - br.minX),
+        Math.abs(bm.minY - br.minY),
+        Math.abs(bm.maxX - br.maxX),
+        Math.abs(bm.maxY - br.maxY),
+      );
+      const ang = (g: [PtMm, PtMm]) => Math.atan2(g[1].y - g[0].y, g[1].x - g[0].x);
+      let dd = Math.abs(ang(lg) - ang(rg)) % (2 * Math.PI);
+      if (dd > Math.PI) dd = 2 * Math.PI - dd;
+      if (!((dd * 180) / Math.PI <= 0.5)) bad('grain directions differ');
       worstBox = Math.max(worstBox, box);
-      if (box > PATIMPORT.pairBboxTolMm) {
-        failed.push(l.block, r.block);
-        notes.push(
-          `${l.block}/${r.block}: R is not the mirror of L across the grain (bbox off ${box.toFixed(3)} mm)`,
+      if (!(box <= PATIMPORT.pairBboxTolMm))
+        bad(`R is not the mirror of L across the grain (bbox off ${box.toFixed(3)} mm)`);
+      // The whole outline, not just its box (F14b, Codex C2): symmetric Hausdorff of mirrored L vs
+      // R, both ways, sampled every 0.5 mm — an R with L's area and box but another shape fails.
+      const h = pairHausdorff(M, rc);
+      worstHd = Math.max(worstHd, Number.isFinite(h) ? h : Infinity);
+      if (!(h <= PATIMPORT.pairHausdorffMm))
+        bad(
+          `R's outline is ${Number.isFinite(h) ? h.toFixed(3) : '∞'} mm off the mirror of L (≤ ${PATIMPORT.pairHausdorffMm})`,
         );
-      }
     }
   }
   return check(
@@ -911,9 +1114,26 @@ export function g12(ctx: GateCtx): GateCheck {
     failed,
     'block',
     notes.join('; ') || 'every _R is the mirror of its _L',
-    `area ${fmt(worstArea * 100, 4)} % / bbox ${fmt(worstBox)} mm`,
-    `area ±${PATIMPORT.pairAreaTol * 100} %, bbox ±${PATIMPORT.pairBboxTolMm} mm`,
+    `area ${fmt(worstArea * 100, 4)} % / bbox ${fmt(worstBox)} mm / outline ${fmt(worstHd)} mm`,
+    `area ±${PATIMPORT.pairAreaTol * 100} %, bbox ±${PATIMPORT.pairBboxTolMm} mm, outline ≤ ${PATIMPORT.pairHausdorffMm} mm`,
   );
+}
+
+/** Symmetric Hausdorff distance of two closed lines, sampled every 0.5 mm (Infinity if far). */
+function pairHausdorff(a: readonly PtMm[], b: readonly PtMm[]): number {
+  const reach = 20;
+  let h = 0;
+  for (const [x, y] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    const idx = new SegmentIndex([{ pts: y, closed: true }], 5);
+    for (const p of sampleAlong(x, true, 0.5)) {
+      h = Math.max(h, idx.nearest(p, reach));
+      if (!(h <= reach)) return Infinity;
+    }
+  }
+  return h;
 }
 
 // ── G13 ────────────────────────────────────────────────────────────────────────────────────
