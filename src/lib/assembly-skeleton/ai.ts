@@ -251,7 +251,6 @@ export function skeletonAIRequest(args: {
       seams,
       decisions,
       steps: reqSteps,
-      mediaIds: [],
       force: false,
     },
   };

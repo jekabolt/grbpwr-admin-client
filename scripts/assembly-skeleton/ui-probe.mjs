@@ -823,10 +823,14 @@ if (!blazer) {
   ck(places >= 10, 'each ordered step carries its AI place', `${places} AI places`);
   const picksShown = await page.locator('[data-skeleton-ai-pick]').count();
   ck(picksShown >= 1, 'the AI pick is marked on the reading chips', `${picksShown}`);
-  ck(
-    (await page.locator('[data-skeleton-ai-cost="0.0123"]').innerText()).includes('$0.0123'),
-    'the cost is printed',
-  );
+  {
+    const cost = await page.locator('[data-skeleton-ai-cost="0.0123"]').innerText();
+    ck(
+      /2 calls/i.test(cost) && cost.includes('$0.0123') && /1 with no known charge/i.test(cost),
+      'every call of the press is printed, the unpriced one named',
+      cost,
+    );
+  }
   ck(
     (await page.locator('[data-skeleton-ai-warning]').count()) === 1,
     'the AI doubt sits on its step',
@@ -893,6 +897,21 @@ if (!blazer) {
   await page.click('[data-skeleton-door="header"]');
   await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
   ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
+  await closePanel();
+
+  // A refusal after the provider was paid says so: the AI_SPEND detail is printed with the error.
+  await mount({ real: blazer, ai: 'fail' });
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
+  await page.click('[data-skeleton-ai-ask]');
+  await page.waitForSelector('[data-skeleton-ai-error]', { timeout: 10000 });
+  const refusal = await page.locator('[data-skeleton-ai-error]').innerText();
+  ck(
+    /charged anyway: 2 calls · \$0\.0200/i.test(refusal),
+    'a refused press still prints what it was charged',
+    refusal,
+  );
+  ck(JSON.stringify(await ops()) === '[]', 'the refusal writes nothing');
   await closePanel();
 }
 

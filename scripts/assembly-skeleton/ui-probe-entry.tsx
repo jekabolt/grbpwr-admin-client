@@ -309,8 +309,9 @@ type Mount = {
   unitless?: boolean;
   /** Clone the contour Map on every BOM change, as `usePieceShapes` does on the card. */
   churnShapes?: boolean;
-  /** Mount the STUB AI asker (scenario L); without it the AI bar is not there at all. */
-  ai?: boolean;
+  /** Mount the STUB AI asker (scenario L; 'fail' = it refuses after being charged); without it the
+   *  AI bar is not there at all. */
+  ai?: boolean | 'fail';
 };
 
 type Probe = {
@@ -403,7 +404,29 @@ const stubAI: SkeletonAIAsk = async (req) => {
     costUsd: '0.0123',
     notes: [],
     cached: false,
+    // A fallback after a hung first provider: two calls, one of them with no known charge.
+    calls: 2,
+    unknownCalls: 1,
   };
+};
+
+/** The stub AI refusing after it was charged: the server's AI_SPEND detail on the error. */
+const stubAIRefusing: SkeletonAIAsk = async () => {
+  aiCalls += 1;
+  const err = new Error('the assistant answered nothing usable') as Error & {
+    status?: number;
+    details?: unknown[];
+  };
+  err.status = 500;
+  err.details = [
+    {
+      '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+      reason: 'AI_SPEND',
+      domain: 'ai.grbpwr.com',
+      metadata: { calls: '2', unknown_calls: '0', cost_usd: '0.02' },
+    },
+  ];
+  throw err;
 };
 
 const SHAPES_NONE: PieceShapes = {
@@ -529,7 +552,9 @@ function Harness({ m }: { m: Mount }) {
           value={{ ...AUTOSAVE_OFF, status: 'idle', request: (r) => void requests.push(r) }}
         >
           <SkeletonProviderContext.Provider value={m.noProvider ? null : provider}>
-            <SkeletonAIAskContext.Provider value={m.ai ? stubAI : null}>
+            <SkeletonAIAskContext.Provider
+              value={m.ai === 'fail' ? stubAIRefusing : m.ai ? stubAI : null}
+            >
               <FormProvider {...methods}>
                 <form className='bg-pageBg p-6'>
                   <Stand m={m} />

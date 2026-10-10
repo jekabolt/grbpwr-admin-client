@@ -1,6 +1,9 @@
 // THE AI SECOND OPINION IN THE SKELETON PANEL (lane E) — the asking half and its bar.
 //
-// One press = one paid call (SuggestAssemblySkeleton, chat.assembly_skeleton): the model reads the
+// One press = one paid request (SuggestAssemblySkeleton, chat.assembly_skeleton) — usually one model
+// call, but a provider fallback or the one retry of an unusable answer adds calls, and the server
+// reports every one of them (calls, unknown_calls, cost_usd; on a refusal as an AI_SPEND detail),
+// which the bar prints, the refusal included. The model reads the
 // skeleton on screen as data and answers an order, a reading per ambiguous join and doubts. The
 // answer is SHOWN, marked AI, beside the engine's own reading — the steps, their order and the form
 // do not move until «use AI order» or «use AI readings» is pressed (and the form only on «apply»).
@@ -8,7 +11,7 @@
 // THE ASKER IS INJECTED (`SkeletonAIAskContext`), like the skeleton provider: production asks the
 // server; the UI probe mounts a stub through the same seam. Answers are kept for the session
 // (module memory, keyed by the request), so reopening the panel or pressing again on the same
-// skeleton costs nothing; «ask again» is a new, paid call.
+// skeleton costs nothing; «ask again» is a new, paid request.
 import { adminService } from 'api/api';
 import type {
   SuggestAssemblySkeletonRequest,
@@ -41,7 +44,45 @@ export type SkeletonAIState =
   | { status: 'idle' }
   | { status: 'asking' }
   | { status: 'ready'; result: SkeletonAIAnswer }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string; spend: SkeletonAISpend | null };
+
+/** What a press was charged, as the server reports it (the answer, or a refusal's AI_SPEND detail). */
+export type SkeletonAISpend = { calls: number; unknownCalls: number; costUsd: string };
+
+/** The AI_SPEND detail of a refused press (grpc-gateway `details`), or null when nothing was called. */
+export function skeletonAISpendOfError(e: unknown): SkeletonAISpend | null {
+  const details = (e as { details?: unknown[] })?.details;
+  if (!Array.isArray(details)) return null;
+  for (const d of details) {
+    const info = d as { reason?: string; metadata?: Record<string, string> };
+    if (info?.reason !== 'AI_SPEND' || !info.metadata) continue;
+    const calls = Number(info.metadata.calls ?? 0);
+    if (!Number.isFinite(calls) || calls <= 0) return null;
+    return {
+      calls,
+      unknownCalls: Number(info.metadata.unknown_calls ?? 0) || 0,
+      costUsd: info.metadata.cost_usd ?? '',
+    };
+  }
+  return null;
+}
+
+/** «2 calls · $0.0300 · 1 with no known charge» — what a press cost, never a silent zero. */
+export function skeletonAISpendWords(sp: SkeletonAISpend): string {
+  const n = Number(sp.costUsd);
+  const money = sp.costUsd && Number.isFinite(n) ? `$${n < 0.1 ? n.toFixed(4) : n.toFixed(3)}` : '';
+  return [
+    `${sp.calls} ${sp.calls === 1 ? 'call' : 'calls'}`,
+    money || (sp.unknownCalls > 0 ? '' : 'cost not reported'),
+    sp.unknownCalls > 0
+      ? sp.unknownCalls === sp.calls
+        ? 'charge not known'
+        : `${sp.unknownCalls} with no known charge`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 // The session's answers, by request (the card id and force are not part of the question).
 const sessionAnswers = new Map<string, SuggestAssemblySkeletonResponse>();
@@ -79,6 +120,7 @@ export function useSkeletonAI(): {
             setState({
               status: 'error',
               message: techCardErrorMessage(e, 'the AI did not answer'),
+              spend: skeletonAISpendOfError(e),
             });
         });
     },
@@ -91,12 +133,15 @@ export function useSkeletonAI(): {
   return { available: !!asker, state, ask, clear };
 }
 
-/** «$0.0123», or why there is no figure. */
+/** What the answer on screen cost: every call of the press, or why nothing was charged. */
 export function skeletonAICost(r: SkeletonAIAnswer): string {
   if (r.free) return 'no charge: the same skeleton was answered earlier';
-  const n = Number(r.answer.costUsd ?? '');
-  if (!r.answer.costUsd || !Number.isFinite(n)) return 'cost not reported';
-  return `$${n < 0.1 ? n.toFixed(4) : n.toFixed(3)}`;
+  return skeletonAISpendWords({
+    // An older server reports no count: one call is the floor of a non-cached answer.
+    calls: r.answer.calls || 1,
+    unknownCalls: r.answer.unknownCalls ?? 0,
+    costUsd: r.answer.costUsd ?? '',
+  });
 }
 
 const KIND_WORD: Record<string, string> = {
@@ -164,7 +209,7 @@ export function SkeletonAIBar({
             data-skeleton-ai-ask='1'
             title={
               canAsk
-                ? 'one paid call (about $0.05–0.50): the model reads this skeleton and suggests an order, a reading per open join and doubts; nothing changes until you use it'
+                ? 'a paid request, usually one model call (about $0.05–0.50); a provider fallback or one retry of an unusable answer adds calls, and every call is shown here. The model suggests an order, a reading per open join and doubts; nothing changes until you use it'
                 : whyNot
             }
           >
@@ -236,7 +281,7 @@ export function SkeletonAIBar({
               size='xs'
               onClick={onAskAgain}
               data-skeleton-ai-again='1'
-              title='a new paid call on the skeleton as it is now'
+              title='a new paid request on the skeleton as it is now (every call it makes is shown)'
             >
               ask again
             </Button>
@@ -245,6 +290,12 @@ export function SkeletonAIBar({
         {state.status === 'error' && (
           <Text size='micro' variant='error' component='span' data-skeleton-ai-error='1'>
             {state.message}
+            {state.spend && (
+              <span data-skeleton-ai-error-spend={state.spend.calls}>
+                {' '}
+                · charged anyway: {skeletonAISpendWords(state.spend)}
+              </span>
+            )}
           </Text>
         )}
       </div>

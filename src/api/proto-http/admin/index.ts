@@ -13454,7 +13454,6 @@ export type SuggestAssemblySkeletonRequest = {
   seams: AssemblySkeletonSeam[] | undefined;
   decisions: AssemblySkeletonDecision[] | undefined;
   steps: AssemblySkeletonStep[] | undefined;
-  mediaIds: number[] | undefined;
   force: boolean | undefined;
 };
 
@@ -13493,6 +13492,8 @@ export type SuggestAssemblySkeletonResponse = {
   costUsd: string | undefined;
   notes: string[] | undefined;
   cached: boolean | undefined;
+  calls: number | undefined;
+  unknownCalls: number | undefined;
 };
 
 export type SaveTechCardPieceAreasRequest = {
@@ -19729,18 +19730,21 @@ export interface AdminService {
   // builds the skeleton itself (pieces → seams → units → order, deterministic) and sends it here as
   // data: the pieces (name, cloth, hand, ×n), the seams it found with their scores, the ambiguous
   // joins as decisions with their readings, the category and its template's stage order, and the
-  // steps in the order it proposes. Up to 3 pictures (Set-of-Mark renders) are optional. The model
-  // returns: a suggested order of the steps (each with a reason), a pick per decision (each with a
-  // reason) and plausibility warnings (a sleeve set before the shoulders are joined, a lining bagged
+  // steps in the order it proposes. Text only: no picture is sent. The model returns: a suggested
+  // order of the steps (each with a reason), a pick per decision (each with a reason) and
+  // plausibility warnings (a sleeve set before the shoulders are joined, a lining bagged
   // before its facings, a piece in no step…). The server validates the answer against the request:
   // unknown step, decision and piece ids are dropped, a pick outside a decision's readings is
   // dropped, and an order that is not a complete permutation of the ordered steps or that sews a
   // unit before the step that makes it is returned EMPTY with a note. Nothing is stored and nothing
   // is applied: the client shows the answer marked AI and applies it only on a press. An identical
-  // request within an hour is answered from process memory (cached) unless force.
-  // InvalidArgument: 0 or more than 80 pieces, 0 or more than 240 steps, more than 400 seams, 60
-  // decisions or 3 pictures, a duplicate or unknown id, a field above its bound. FailedPrecondition:
-  // a picture is not a picture.
+  // request within an hour is answered from process memory (cached) unless force. One press may make
+  // more than one provider call (a fallback after an engaged timeout, one retry of an unusable
+  // answer): the response sums every call (calls, unknown_calls, cost_usd), and a refusal after a
+  // call carries the same figures as an ErrorInfo detail (reason AI_SPEND, metadata calls,
+  // unknown_calls, cost_usd).
+  // InvalidArgument: 0 or more than 80 pieces, 0 or more than 240 steps, more than 400 seams or 60
+  // decisions, a duplicate or unknown id, a field above its bound.
   SuggestAssemblySkeleton(request: SuggestAssemblySkeletonRequest): Promise<SuggestAssemblySkeletonResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
