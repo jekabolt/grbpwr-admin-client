@@ -8,6 +8,7 @@
 import type { BackgroundKind, BoxMm, IRText, PtMm, Style } from 'lib/pattern-import/types';
 
 import {
+  axisRuns,
   backgroundGrid,
   glyphClusters,
   glyphRuns,
@@ -70,6 +71,7 @@ export const CLEAN = {
     square: true,
     chrome: true,
     texts: true,
+    table: true,
     watermark: true,
     sheetText: true,
     guard: true,
@@ -256,6 +258,10 @@ function growLines(runs: GlyphRun[], clusters: readonly GlyphCluster[]): GlyphRu
   return runs;
 }
 
+/** A closed chain's polyline with its closing edge. */
+const closedPts = (c: { pts: PtMm[]; closed: boolean }) =>
+  c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts;
+
 export const runStrokes = (r: GlyphRun) => r.members.reduce((a, c) => a + c.ids.length, 0);
 export const memberIds = (r: GlyphRun) => r.members.flatMap((c: GlyphCluster) => c.ids);
 
@@ -382,6 +388,100 @@ export function squaresOf(
       square: { box: q.box, nominalMm: q.nominalMm, why: q.why },
     };
   });
+}
+
+// ── tables: a ruled grid of cells with text in them (size tables, the print-order map) ─────────
+
+/**
+ * Ruled tables: clusters of axis-aligned straight lines that touch each other, spanning ≥ 3
+ * positions on each axis (≥ 6 cells). Evidence: the ruling itself, and text in its cells (real
+ * text, or stroke text the page detectors found). A quilted panel or a pleated piece has no text
+ * in a grid of cells.
+ */
+export function tablesOf(
+  pc: PageChains,
+  texts: readonly IRText[],
+  taken: ReadonlySet<number>,
+  lettered: ReadonlySet<number>,
+): Found[] {
+  if (!CLEAN.on.table) return [];
+  // a rule chain is made of axis-aligned runs only (a straight rule, or a cell drawn as a
+  // closed rectangle)
+  const runs = pc.chains.map((c, i) => {
+    if (taken.has(i) || c.lengthMm < 5) return null;
+    const rs = axisRuns(c.pts, c.closed, 2);
+    const L = rs.reduce((a, r) => a + r.len, 0);
+    return rs.length && L >= 0.98 * c.lengthMm ? rs : null;
+  });
+  const ids = runs.flatMap((r, i) => (r ? [i] : []));
+  if (ids.length < 4) return [];
+  // touching rules are one table (an end on another rule, or a crossing)
+  const parent = new Map<number, number>(ids.map((i) => [i, i]));
+  const find = (i: number): number => {
+    while (parent.get(i) !== i) i = parent.get(i)!;
+    return i;
+  };
+  const grid = new SegGrid(4);
+  for (const i of ids) grid.addPolyline(i, closedPts(pc.chains[i]));
+  for (const i of ids) {
+    const c = closedPts(pc.chains[i]);
+    for (const p of c)
+      grid.near(p, 0.6, (o, sIdx) => {
+        if (o === i || find(o) === find(i)) return;
+        const q = closedPts(pc.chains[o]);
+        if (segNearest(p, q[sIdx], q[sIdx + 1]).d <= 0.6) parent.set(find(o), find(i));
+      });
+  }
+  const groups = new Map<number, number[]>();
+  for (const i of ids) {
+    const r = find(i);
+    const a = groups.get(r);
+    if (a) a.push(i);
+    else groups.set(r, [i]);
+  }
+  const out: Found[] = [];
+  for (const g of groups.values()) {
+    const pos = (ax: 'x' | 'y') => {
+      const v = g
+        .flatMap((i) => runs[i]!.filter((r) => r.axis === ax && r.len >= 3).map((r) => r.at))
+        .sort((a, b) => a - b);
+      const out: number[] = [];
+      for (const x of v) if (!out.length || x - out[out.length - 1] > 0.5) out.push(x);
+      return out;
+    };
+    const rows = pos('x');
+    const cols = pos('y');
+    if (rows.length < 3 || cols.length < 3) continue;
+    const cells = (rows.length - 1) * (cols.length - 1);
+    if (cells < 6) continue;
+    const box = {
+      minX: cols[0],
+      maxX: cols[cols.length - 1],
+      minY: rows[0],
+      maxY: rows[rows.length - 1],
+    };
+    const cellOf = (x: number, y: number) => {
+      const c = cols.findIndex((v, k) => k + 1 < cols.length && x >= v && x <= cols[k + 1]);
+      const r = rows.findIndex((v, k) => k + 1 < rows.length && y >= v && y <= rows[k + 1]);
+      return c < 0 || r < 0 ? null : `${r}:${c}`;
+    };
+    const filled = new Set<string>();
+    for (const t of texts) {
+      const k = cellOf((t.bbox.minX + t.bbox.maxX) / 2, (t.bbox.minY + t.bbox.maxY) / 2);
+      if (k) filled.add(k);
+    }
+    for (const i of lettered) {
+      const b = pc.box[i];
+      const k = cellOf((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2);
+      if (k) filled.add(k);
+    }
+    const ev = [`a ruled table, ${rows.length} × ${cols.length} lines (${cells} cells)`];
+    if (filled.size >= Math.max(3, 0.3 * cells)) ev.push(`text in ${filled.size} of its cells`);
+    // the cells are not a garment: every rule stays inside the table's box
+    void box;
+    out.push({ kind: 'table', chains: g, evidence: ev });
+  }
+  return out;
 }
 
 // ── wall guard: never mask a line a garment line meets ──────────────────────────────────────────

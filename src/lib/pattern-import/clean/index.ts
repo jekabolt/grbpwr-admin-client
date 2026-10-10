@@ -43,6 +43,7 @@ import {
   runStrokes,
   sharpGlyphs,
   squaresOf,
+  tablesOf,
   textLines,
   touchingLineWork,
   type Found,
@@ -178,10 +179,11 @@ export function cleanPages(
             heightMm: f.band.heightMm,
           });
       const items = itemsOf(pc, found, doc.file.id, edits, input);
-      for (const f of found) {
-        if (!f.square) continue;
-        const it = items.find((x) => x.kind === 'test-square' && sameBox(x.bbox, f.square!.box));
-        if (it && !it.applied && it.status === 'auto') continue; // the operator said it is not one
+      found.forEach((f, k) => {
+        if (!f.square) return;
+        // itemsOf keeps the order of `found`
+        const it = items[k];
+        if (!it.applied && it.status === 'auto') return; // the operator said it is not one
         const b = f.square.box;
         const measured = (b.maxX - b.minX + (b.maxY - b.minY)) / 2;
         scaleHints.push({
@@ -195,9 +197,9 @@ export function cleanPages(
             text: `square drawn as lines, ${measured.toFixed(2)} mm (${f.evidence.slice(1).join('; ') || 'nothing labels it'})`,
           },
           // two evidences (the geometry + a label, lettering inside or overlaid copies): certain
-          confidence: it?.status === 'auto' ? 0.97 : 0.75,
+          confidence: it.status === 'auto' ? 0.97 : 0.75,
         });
-      }
+      });
       pages.push({
         file: doc.file.id,
         page: pc.page.page,
@@ -225,12 +227,6 @@ export function cleanPages(
   const { summary, offered } = countsOf(pages.flatMap((p) => p.items));
   return { pages, dropped, classes: roles, summary, offered, scaleHints, curveTexts, notes };
 }
-
-const sameBox = (a: { minX: number; minY: number; maxX: number; maxY: number }, b: typeof a) =>
-  Math.abs(a.minX - b.minX) < 0.01 &&
-  Math.abs(a.minY - b.minY) < 0.01 &&
-  Math.abs(a.maxX - b.maxX) < 0.01 &&
-  Math.abs(a.maxY - b.maxY) < 0.01;
 
 /** The detectors of one tile page, in priority order (a line goes to the first that takes it). */
 function detectPage(
@@ -306,6 +302,17 @@ function detectPage(
     }
     take(f);
   }
+  // 3b · ruled tables with text in their cells (a size table, the print-order map)
+  for (const f of tablesOf(pc, pc.page.texts, taken, lettered)) {
+    const g = touchingLineWork(polys, lens, new Set(f.chains), taken);
+    if (g.size) {
+      // a garment line ends on it: offered at most, never applied by itself
+      f.evidence = f.evidence.slice(0, 1);
+      f.chains = f.chains.filter((i) => !g.has(i));
+      f.guarded = g.size;
+    }
+    take(f);
+  }
   // 4 · tile chrome: the same line at one page place on ≥ 3 tiles of the file
   const byKind = new Map<BackgroundKind, number[]>();
   pc.chains.forEach((_, i) => {
@@ -337,7 +344,9 @@ function detectPage(
     texts.push({
       kind: 'tile-label',
       ids: repT.map((t) => t.id),
-      ev: [`${repT.length} texts repeat at one page place on every tile`],
+      ev: [
+        `${repT.length} ${repT.length === 1 ? 'text repeats' : 'texts repeat'} at one page place on ${Math.max(...repT.map((t) => textRep.get(t.id) ?? 0))} tiles`,
+      ],
       repeated: true,
     });
   const copy = !CLEAN.on.texts
