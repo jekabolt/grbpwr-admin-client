@@ -39,6 +39,7 @@ import { singlePageSheet } from 'components/managers/tech-card/components/patter
 import {
   scaleUncertain,
   stepOffer,
+  type OfferCtx,
 } from 'components/managers/tech-card/components/pattern-import/auto-advance';
 
 import { synthDrawables, synthTruth } from './raster-entry';
@@ -330,8 +331,8 @@ export const CASES: Case[] = [
 // ── A7 click metric ─────────────────────────────────────────────────────────────────────
 // One unit = one operator action (auto/00-PLAN §1, A7): a click, a pick, a typed code = 2, a
 // grainline = 3 (the row + its two ends), "not a piece" = 2, a size map = 1 per size. Navigation of
-// the linear wizard = file 1 + read 1 + next ×7 + apply 1 + download 1 = 11; a screen the run skips
-// takes its "next" away. N1: the wizard runs forward by itself (auto-advance.ts) through every
+// the linear wizard = file 1 + read 1 + next ×7 (files…fabrics) + next to apply 1 + apply 1 +
+// download 1 = 12; a screen the run skips takes its "next" away. N1: the wizard runs forward by itself (auto-advance.ts) through every
 // screen of files…fabrics that asks nothing — no answer here, no offer waiting (`stepOffer`) — so
 // such a screen costs 0; the screen it lands on costs its one "next" after the answers. The DXF
 // fast path never shows the sheet, nor the pieces unless the sizes stopped it; A0.2 passes a
@@ -380,7 +381,7 @@ export const AUTO_SCREENS = [
 export type Screen = (typeof AUTO_SCREENS)[number] | 'check';
 export type Op = { label: string; kind: OpKind; clicks: number; screen?: Screen };
 export type Clicks = { total: number; byKind: Partial<Record<OpKind, number>>; nav: number };
-export const NAV_LINEAR = 11;
+export const NAV_LINEAR = 12;
 
 export function clicksOf(ops: readonly Op[], skippedScreens: number): Clicks {
   const byKind: Partial<Record<OpKind, number>> = {};
@@ -548,6 +549,24 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
   const skipped: string[] = [];
   /** N1: screens passed whatever they hold (the fast path, a one-page sheet). */
   const passed = new Set<Screen>();
+  /** N1: the wizard's own offer rule (auto-advance.ts) on what this run holds so far. */
+  const offerOn = (step: OfferCtx['step'], part: Partial<OfferCtx>, presegmented = false) =>
+    stepOffer({
+      step,
+      clean: null,
+      pages: [],
+      sheet: null,
+      chains: null,
+      sizes: null,
+      pieces: null,
+      fabrics: null,
+      semantics: null,
+      presegmented,
+      cleanEdits: hooks.cleanEdits ?? [],
+      scopes: SCOPES.length,
+      fabricsEdited: false,
+      ...part,
+    });
   const dir = resolve(OUT, c.id.replace(/[^\w.-]+/g, '_'));
   mkdirSync(dir, { recursive: true });
   const T0 = Date.now();
@@ -585,10 +604,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     {
       const accepted = (hooks.cleanEdits ?? []).filter((e) => 'keep' in e && !e.keep).length;
       if (accepted) op('clean-accept', `accept all ${accepted} suggested kinds (one click)`);
-      const offer = stepOffer(
-        { step: 'files', clean: cl, pages: cl.classes, sheet: null },
-        !!ex.presegmented,
-      );
+      const offer = offerOn('files', { clean: cl, pages: cl.classes }, !!ex.presegmented);
       if (offer) stop(offer);
     }
     const best = cl.scale[0];
@@ -608,10 +624,10 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     if (!best) throw new Error('no scale candidate');
     // 2 · scale (the wizard asks for a confirmation when the detection is not certain)
     at('scale');
-    const needsHuman = scaleUncertain(best, best.factor);
-    // the fast path shows an uncertain scale too (priced as before: not counted)
-    if (needsHuman) stop('scale');
-    if (needsHuman && !ex.presegmented)
+    // the scale blocker's rule: a page calibration below sure (an inherited one) asks too
+    const needsHuman = scaleUncertain(best, best.factor, ex.calibrations);
+    // the fast path shows an uncertain scale too, and asks the same confirmation
+    if (needsHuman)
       op(
         'scale',
         `confirm scale (${best.method}, conf ${best.confidence.toFixed(2)}, ×${best.factor.toFixed(4)})`,
@@ -627,7 +643,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
     if (!ex.presegmented && singlePageSheet(ex.pages, as)) passed.add('sheet');
     {
-      const offer = stepOffer({ step: 'sheet', clean: cl, pages: cl.classes, sheet: as }, false);
+      const offer = offerOn('sheet', { sheet: as });
       if (offer) stop(offer);
     }
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
@@ -788,6 +804,11 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // the fast path stops on the sizes step only when something there needs an answer; else it
     // lands on details without showing the pieces
     if (ex.presegmented && !stops.has('sizes')) passed.add('pieces');
+    {
+      // N1: the flags the legend could not settle stop the run on the sizes step
+      const offer = offerOn('sizes', { chains: ch, sizes: sz });
+      if (offer) stop(offer);
+    }
     const exported = new Set(sz.map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model
     at('pieces');
@@ -981,6 +1002,11 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       return rec;
     }
     hooks.onPieces?.(s);
+    {
+      // N1: piece-sized outlines set aside on a guess stop the run on the pieces step
+      const offer = offerOn('pieces', { pieces: pc });
+      if (offer) stop(offer);
+    }
     if (process.env.E2E_DUMP)
       writeFileSync(
         resolve(dir, 'families.json'),
@@ -1362,6 +1388,11 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 7 · fabrics
     at('fabrics');
     let fab = await run('fabrics', { bom: SCOPES });
+    {
+      // N1: pieces on main by default (several fabric scopes) stop the run on the fabrics step
+      const offer = offerOn('fabrics', { fabrics: fab, semantics: sem });
+      if (offer) stop(offer);
+    }
     const plan = planScopes(sem.pieces, fab, SCOPES);
     rec.fabrics = {
       byPurpose: Object.fromEntries(
