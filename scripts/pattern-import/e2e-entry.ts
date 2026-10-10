@@ -330,7 +330,14 @@ function filesOf(c: Case): { name: string; bytes: ArrayBuffer }[] {
   return c.files.map((f) => ({ name: basename(f), bytes: enc(readFileSync(resolve(CORPUS, f))) }));
 }
 
-const OC: Record<string, string> = { closed: 'C', leak: 'L', merged: 'M', tiny: 't' };
+const OC: Record<string, string> = {
+  closed: 'C',
+  leak: 'L',
+  merged: 'M',
+  tiny: 't',
+  // pieces/grade (H1): a size held back, not guessed
+  refused: 'R',
+};
 
 function famStats(
   fams: PieceFamily[],
@@ -349,6 +356,8 @@ function famStats(
       derived: cs.flatMap((c) => (c.derived ?? []).map((d) => d.kind)),
       rankFrom: [...new Set(cs.map((c) => c.rankFrom ?? '-'))].join(','),
       areasCm2: cs.map((c) => Math.round(c.areaMm2 / 100)),
+      // pieces/grade (H1): why sizes were held back
+      refused: [...new Set(cs.flatMap((c) => (c.gradeRefusal ? [c.gradeRefusal] : [])))],
     };
   });
   const cands = per.flatMap((p) => p.outcomes.split(''));
@@ -533,6 +542,18 @@ export async function runCase(c: Case): Promise<Rec> {
       rec.verdict = 'fails';
       rec.reason = 'no size maps to the card';
       return rec;
+    }
+    // HARD-SIZES H1c-3: a sheet that draws ONE size and says nothing about it — the operator
+    // answers "1" on the sizes step (the count is the operator's, never the card's guess)
+    if (
+      sz.run.sizes.length === 1 &&
+      sz.expected?.from !== 'source' &&
+      sz.expected?.from !== 'operator'
+    ) {
+      rec.ops.push(
+        `answer "sizes drawn: 1" (was ${sz.expected ? `${sz.expected.n} from the ${sz.expected.from}` : 'unknown'})`,
+      );
+      sz = await run('sizes', { card: CARD, operatorMap: sz.map.entries, drawnSizes: 1 });
     }
     const exported = new Set(sz.map.entries.flatMap((e) => (e.card ? [e.source.rank] : [])));
     // 5 · pieces — automatic seeds (text / DXF blocks), first run shows every model
