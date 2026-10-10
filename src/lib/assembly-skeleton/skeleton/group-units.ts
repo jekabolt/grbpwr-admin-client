@@ -279,6 +279,124 @@ export function groupDetailed(
       return { ...a, seams: seams.between(x ?? [], rest.flat()) };
     });
 
+  /**
+   * F1: layer pairs inside one family, in this order of trust:
+   *   1. three or more pieces of ONE shape (belts ×4): the seams between congruent layers say
+   *      nothing about which two go together, so they pair by name — the same stem first
+   *      (CLR_MAIN with CLR_MAIN_1, not with CLR_SECOND), then neighbouring numbers (BLT_1 + BLT_2,
+   *      BLT_3 + BLT_4) — and every pair is a decision with the other reading beside it;
+   *   2. two pieces with a seam between them that are layers of one thing: identical twins (lane
+   *      A), or — for a part built before the body (pocket, flap, cuff, collar) — numbered
+   *      siblings of one family (FL_1 + FL_2, PCK_#_1 + PCK_#_2). Best seam first; seams within
+   *      SKELETON.ambiguity are told apart by the stem, then by neighbouring numbers, then by both
+   *      being numbered (the unnumbered piece is the family's own: FL is the flap the pair is not).
+   * Panel strips (FP_1_L + FP_2_L + FP_L) are not layers: only identical twins pair among them.
+   */
+  type LayerPair = {
+    pair: Entity[];
+    decision?: SkeletonDecision;
+    alternatives?: SkeletonUnit['alternatives'];
+    confidence?: number;
+  };
+  const geoOf = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  const identical = (a: Entity, b: Entity) =>
+    !a.unit &&
+    !b.unit &&
+    (geoOf.get(a.key)?.twinOf.some((t) => t.key === b.key && t.kind === 'identical') ?? false);
+  function layerPairs(group: Entity[]): LayerPair[] {
+    const out: LayerPair[] = [];
+    const used = new Set<string>();
+    const idx = (e: Entity) => nameIndex(e.name);
+    // 1. one shape ×3 or more
+    const clique = group.filter(
+      (a) => group.filter((b) => b === a || identical(a, b)).length === group.length,
+    );
+    if (group.length >= 3 && clique.length === group.length) {
+      const ordered = [...group].sort(
+        (x, y) =>
+          (layerStem(x.name) < layerStem(y.name)
+            ? -1
+            : layerStem(x.name) > layerStem(y.name)
+              ? 1
+              : 0) || idx(x) - idx(y),
+      );
+      for (let i = 0; i + 1 < ordered.length; i += 2) {
+        const pair = [ordered[i], ordered[i + 1]];
+        const other = ordered[i + 2] ?? ordered[i - 1];
+        const readings: Reading[] = [
+          { inputs: pair, reason: `or ${listNames(pair)} — one name, neighbouring numbers` },
+          ...(other
+            ? [{ inputs: [ordered[i], other], reason: `or ${ordered[i].name} with ${other.name}` }]
+            : []),
+        ];
+        const d = decide(pins, `layers:${ordered[i].key}`, readings, isLive);
+        const pick = readings[d.chosen].inputs;
+        const seamed = bestScore(seams, pick[0].leaves, pick[1]) > 0;
+        out.push({
+          pair: pick,
+          decision: d.decision,
+          alternatives: d.others,
+          ...(seamed ? {} : { confidence: 0.5 }),
+        });
+      }
+      return out;
+    }
+    // 2. pairs with a seam
+    const sub = roleDef(group[0].roles[0] ?? null)?.level === 'sub';
+    type Cand = { a: Entity; b: Entity; s: number; stem: boolean; adj: boolean; numbered: boolean };
+    const cands: Cand[] = [];
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const [a, b] = [group[i], group[j]];
+        const adj = Math.abs(idx(a) - idx(b)) === 1;
+        if (!identical(a, b) && !(sub && adj)) continue;
+        const s = bestScore(seams, a.leaves, b);
+        if (s <= 0) continue;
+        cands.push({
+          a,
+          b,
+          s,
+          stem: layerStem(a.name) === layerStem(b.name),
+          adj,
+          numbered: idx(a) > 0 && idx(b) > 0,
+        });
+      }
+    }
+    for (;;) {
+      const open = cands.filter((c) => !used.has(c.a.key) && !used.has(c.b.key));
+      if (!open.length) break;
+      const top = Math.max(...open.map((c) => c.s));
+      const tied = open
+        .filter((c) => c.s >= top - SKELETON.ambiguity)
+        .sort(
+          (x, y) =>
+            Number(y.stem) - Number(x.stem) ||
+            Number(y.adj) - Number(x.adj) ||
+            Number(y.numbered) - Number(x.numbered) ||
+            y.s - x.s,
+        );
+      const [best] = tied;
+      const head = best.a;
+      const readings: Reading[] = [
+        best,
+        ...tied.filter((c) => c !== best && (c.a === head || c.b === head)),
+      ]
+        .slice(0, 3)
+        .map((c, i) => ({
+          inputs: [c.a, c.b],
+          reason:
+            i === 0
+              ? `or ${c.a.name} with ${c.b.name} — the pattern's first reading`
+              : `or ${c.a.name} with ${c.b.name} — a seam almost as good`,
+        }));
+      const d = decide(pins, `layers:${head.key}`, readings, isLive);
+      const pick = readings[d.chosen].inputs;
+      pick.forEach((e) => used.add(e.key));
+      out.push({ pair: pick, decision: d.decision, alternatives: d.others });
+    }
+    return out;
+  }
+
   // ── 0. interfacing as a separate card piece enters ONLY through a FUSING join (§G) ────────────
   for (const p of pieces.filter((x) => x.cloth === 'interfacing' && !replay.consumed.has(x.key))) {
     const hosts = table.list().filter((e) => !e.unit && e.hand === p.hand);
@@ -374,9 +492,39 @@ export function groupDetailed(
     if (group.length < 2) continue;
     const [head] = group;
     const role = head.roles[0];
-    const layers = isLayers(group, graph);
     const base = roleName(role, head.hand);
     const crowded = (crowd.get(crowdKey(role, head.hand, head.tree)) ?? 0) > 1;
+    // F1 (05-PROD-DIAGNOSIS §6): layer PAIRS first. A family of three or more (four collar layers,
+    // a sleeve and its two cuff layers, two pocket bags and a facing) is not one seam: identical
+    // twins with a seam between them are joined pairwise, and the rest of the family stays apart —
+    // the panel it belongs to (or the template) takes it later. Never four layers in one step.
+    // A back family with two identical layers is a yoke and its facing: they are sewn AROUND the
+    // back in one step (the burrito), not paired first (roles.json `layersWrap`).
+    const pairs = roleDef(role)?.layersWrap && group.length > 2 ? [] : layerPairs(group);
+    if (pairs.length) {
+      for (const { pair, decision, alternatives, confidence } of pairs) {
+        if (!pair.every(isLive)) continue;
+        record(pair, {
+          name: crowded ? `${base} (${pair[0].family?.toUpperCase()})` : base,
+          roles: [role],
+          kind: 'layers',
+          why: `Layers of one shape, sewn into one first: ${listNames(pair)}`,
+          alternatives: withSeams(alternatives),
+          decision,
+          ...(confidence !== undefined
+            ? {
+                judgement: {
+                  confidence,
+                  source: 'geometry' as const,
+                  reason: `${listNames(pair)} are ${group.length} layers of one shape with no seam told apart — paired by their numbers, check`,
+                },
+              }
+            : {}),
+        });
+      }
+      continue;
+    }
+    const layers = isLayers(group, graph);
     record(group, {
       name: crowded ? `${base} (${head.family?.toUpperCase()})` : base,
       roles: [role],
@@ -742,6 +890,20 @@ export function groupUnits(
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────
+
+/** The number a layer carries in its name (BLT_3_M → 3, CLR_MAIN → 0): the last number token. */
+function nameIndex(name: string): number {
+  const nums = nameTokens(name).filter((t) => /^\d+$/.test(t));
+  return nums.length ? Number(nums[nums.length - 1]) : 0;
+}
+
+/** A name without its numbers and size tokens: CLR_MAIN_1 and CLR_MAIN are one layer stem. */
+const SIZE_TOKENS = new Set(['xxs', 'xs', 's', 'm', 'xl', 'xxl', 'os']);
+function layerStem(name: string): string {
+  return nameTokens(name)
+    .filter((t) => !/^\d+$/.test(t) && !SIZE_TOKENS.has(t))
+    .join('_');
+}
 
 /** Tokens that only say «this is the interfacing of …». */
 const INTERFACING_TOKENS = new Set([

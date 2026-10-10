@@ -103,6 +103,11 @@ export type RoleDef = {
   attachTo?: string[];
   sameHand?: boolean;
   noGroup?: boolean;
+  /**
+   * Identical layers inside a family of this role are sewn AROUND the rest of the family in one
+   * step (yoke + yoke facing around the back), not paired first like collar or cuff layers.
+   */
+  layersWrap?: boolean;
 };
 
 export type RoleBook = {
