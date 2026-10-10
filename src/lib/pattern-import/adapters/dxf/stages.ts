@@ -411,6 +411,7 @@ function candidateOf(
       size: p.size,
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
+      ...(p.instances ? { instances: p.instances } : {}),
     },
   };
 }

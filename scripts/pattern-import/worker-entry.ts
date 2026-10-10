@@ -208,6 +208,12 @@ async function vectorCase(
 export async function main(): Promise<number> {
   const perf: unknown[] = [];
   // the per-size DXF set alone (no report file: the full run owns F13c-<date>.json)
+  if (process.env.PI_RT_ONLY) {
+    await roundTripCase();
+    const failed = rows.filter((r) => !r.ok).length;
+    console.log(`\n${rows.length - failed}/${rows.length} PASS`);
+    return failed ? 1 : 0;
+  }
   if (process.env.PI_SET_ONLY) {
     await dxfSetCase();
     const failed = rows.filter((r) => !r.ok).length;
@@ -508,6 +514,7 @@ export async function main(): Promise<number> {
     'unsupported-format',
   );
   await dxfSetCase();
+  await roundTripCase();
   check(
     'garbage plt',
     'refused at open',
@@ -552,7 +559,7 @@ async function writeCase(
   run: Run,
   sem: StageIO['semantics']['out'],
   map: StageIO['sizes']['out']['map'],
-  opt: { mustPass?: boolean } = { mustPass: true },
+  opt: { mustPass?: boolean; dialect?: 'r12' | 'r2000' } = { mustPass: true },
 ) {
   const seeds = [...new Set(sem.pieces.map((p) => p.seed))];
   const w = await run('write', {
@@ -571,7 +578,7 @@ async function writeCase(
           ]
         : [],
     ),
-    dialect: 'r12',
+    dialect: opt.dialect ?? 'r12',
     generator: 'probe',
   });
   const g = w.gate[MAIN.scopeKey];
@@ -1684,4 +1691,246 @@ async function dxfSetCase() {
     [fileOf('dxf-clo/allsizes.dxf'), fileOf('pdf/robe.pdf')],
     /one run reads one format/,
   );
+}
+
+// ── F14 R5: our own DXF re-imports as written ─────────────────────────────────────────────
+
+/**
+ * The writer inserts a block once per cut piece (F14 MAJOR 3). Re-importing that file must read
+ * the copies as ONE piece × size cut n times — not as size candidates [S,S,M,M] (non-monotone) and,
+ * in a single-size file, not as "the same outline in every size" (→ `_UNI`). write → re-import →
+ * write must be identical, for a pair drawn twice per hand (SL_L/SL_R × 2 = 2 pairs), a «cut 2»
+ * single (BP_1 × 2) and the ×1 pieces, in a multi-size and a single-size file, both dialects.
+ */
+async function roundTripCase() {
+  const C = 'R5 round trip';
+  const graded = readFileSync(resolve(CORPUS, 'dxf-clo/allsizes-merged.dxf')).toString('latin1');
+  const enc = (t: string) => {
+    const b = Buffer.from(t, 'latin1');
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+  };
+  const PPG: Record<string, number> = { SL_L: 2, SL_R: 2, BP_1: 2 };
+  const SEM_IN: Omit<StageIO['semantics']['in'], 'pieceOverrides'> = {
+    fileAllowance: { meaning: 'cut', allowanceMm: 0, origin: 'default', evidence: [] },
+    operatorGrain: {},
+  };
+
+  async function importAndWrite(
+    label: string,
+    name: string,
+    text: string,
+    sizes: string[],
+    dialect: 'r12' | 'r2000',
+    ppg: Record<string, number>,
+  ) {
+    const s = new Session(1, [{ name, bytes: enc(text) }]);
+    const run: Run = (st, input) => s.runStage(st, input, ctx());
+    const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    await run('scale', {
+      decision: {
+        factor: ex.scale[0].factor,
+        method: ex.scale[0].method,
+        operatorConfirmed: false,
+      },
+    });
+    await run('assemble', { sheet: 0 });
+    await run('chains', { opts: CHAIN_OPTS });
+    const sz = await run('sizes', { card: card(sizes) });
+    const pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
+    let sem = await run('semantics', { ...SEM_IN, pieceOverrides: {} });
+    if (Object.keys(ppg).length) {
+      const pieceOverrides: StageIO['semantics']['in']['pieceOverrides'] = {};
+      for (const p of sem.pieces)
+        if (ppg[p.identity]) pieceOverrides[p.seed] = { piecesPerGarment: ppg[p.identity] };
+      sem = await run('semantics', { ...SEM_IN, pieceOverrides });
+    }
+    const w = await writeCase(label, run, sem, sz.map, { mustPass: true, dialect });
+    s.close();
+    return { ex, pc, sem, w, text: w.scopes[0]?.dxfText ?? '' };
+  }
+
+  /** The DXF without the manifest comments and the clock (CREATION DATE / TIME). */
+  const body = (t: string) => {
+    const L = t.split(/\r?\n/);
+    const out: string[] = [];
+    for (let i = 0; i + 1 < L.length; i += 2) {
+      if (L[i].trim() === '999') continue;
+      out.push(L[i], L[i + 1].replace(/^(CREATION (DATE|TIME)): .*/, '$1: —'));
+    }
+    return out.join('\n');
+  };
+  const inserts = (t: string) => {
+    const L = t.split(/\r?\n/);
+    const n = new Map<string, number>();
+    for (let i = 0; i + 1 < L.length; i += 2)
+      if (L[i].trim() === '0' && L[i + 1] === 'INSERT') {
+        for (let j = i + 2; j + 1 < L.length && L[j].trim() !== '0'; j += 2)
+          if (L[j].trim() === '2') n.set(L[j + 1], (n.get(L[j + 1]) ?? 0) + 1);
+      }
+    return n;
+  };
+  const ppgOf = (sem: StageIO['semantics']['out']) =>
+    sem.pieces
+      .map((p) => `${p.identity}×${p.piecesPerGarment}`)
+      .sort()
+      .join(' ');
+
+  const cases: { label: string; text: string; sizes: string[]; dialect: 'r12' | 'r2000' }[] = [
+    { label: 'multi-size r12', text: graded, sizes: ['XS', 'S', 'M', 'L', 'XL'], dialect: 'r12' },
+    {
+      label: 'multi-size r2000',
+      text: graded,
+      sizes: ['XS', 'S', 'M', 'L', 'XL'],
+      dialect: 'r2000',
+    },
+    { label: 'single-size r12', text: splitSize(graded, 'M'), sizes: ['M'], dialect: 'r12' },
+    { label: 'single-size r2000', text: splitSize(graded, 'M'), sizes: ['M'], dialect: 'r2000' },
+  ];
+  for (const k of cases) {
+    const L = `${C} · ${k.label}`;
+    const a = await importAndWrite(`${L} · source`, 'src.dxf', k.text, k.sizes, k.dialect, PPG);
+    const ia = inserts(a.text);
+    const want = Object.entries(PPG).every(([id, n]) =>
+      [...ia].some(([b, c]) => b.startsWith(`${id}_`) && c === n),
+    );
+    check(
+      L,
+      'first write: SL_L / SL_R / BP_1 inserted twice per size',
+      want,
+      [...ia]
+        .filter(([, c]) => c > 1)
+        .map(([b, c]) => `${b}×${c}`)
+        .join(' '),
+    );
+    const b = await importAndWrite(
+      `${L} · re-import`,
+      'written.dxf',
+      a.text,
+      k.sizes,
+      k.dialect,
+      {},
+    );
+    check(
+      L,
+      're-import: one candidate per size, nothing blocked, no UNI',
+      b.pc.families.every((f) => f.candidates.length === k.sizes.length) &&
+        !b.sem.blocked.length &&
+        !b.sem.pieces.some((p) => p.ungraded) &&
+        !b.w.scopes[0]?.manifest.blocks.some((x) => /_UNI$/.test(x.block)),
+      `${b.pc.families.map((f) => f.candidates.length).join('')} · blocked ${b.sem.blocked.map((x) => `${x.seed}:${x.reason}`).join(',') || '—'} · ungraded ${
+        b.sem.pieces
+          .filter((p) => p.ungraded)
+          .map((p) => p.identity)
+          .join(',') || '—'
+      }`,
+    );
+    check(
+      L,
+      're-import: × per garment as written (no operator override)',
+      ppgOf(b.sem) === ppgOf(a.sem),
+      `${ppgOf(b.sem)}${ppgOf(b.sem) === ppgOf(a.sem) ? '' : ` ≠ ${ppgOf(a.sem)}`}`,
+    );
+    const c = await importAndWrite(`${L} · twice`, 'written2.dxf', b.text, k.sizes, k.dialect, {});
+    // INSERTs (block @ x) and every text value (labels) in order: what R5 is about
+    const skeleton = (t: string) => {
+      const L2 = t.split(/\r?\n/);
+      const out: string[] = [];
+      let ent = '';
+      for (let q = 0; q + 1 < L2.length; q += 2) {
+        const code = L2[q].trim();
+        const v = L2[q + 1];
+        if (code === '0') ent = v;
+        if (code === '999') continue;
+        if (ent === 'INSERT' && code === '2') out.push(`INSERT ${v}`);
+        if (ent === 'INSERT' && code === '10') out[out.length - 1] += ` @${Number(v).toFixed(1)}`;
+        if (code === '1') out.push(v.replace(/^(CREATION (DATE|TIME)): .*/, '$1: —'));
+      }
+      return out;
+    };
+    const sa = skeleton(a.text);
+    const sb = skeleton(b.text);
+    const firstDiff = sa.findIndex((x, q) => x !== sb[q]);
+    check(
+      L,
+      'write → re-import → write: the same INSERTs (block, count, place) and the same labels',
+      sa.length === sb.length && firstDiff < 0,
+      firstDiff < 0
+        ? `${sa.filter((x) => x.startsWith('INSERT')).length} INSERTs, ${sa.length} items`
+        : `#${firstDiff}: ${sa[firstDiff]} → ${sb[firstDiff]}`,
+    );
+    check(
+      L,
+      'a second re-import writes byte-for-byte the same DXF (fixed point; manifest and clock aside)',
+      body(c.text) === body(b.text),
+      body(c.text) === body(b.text) ? `${body(b.text).length} chars` : 'differs',
+    );
+    // the first re-import may re-simplify a nearly collinear seam vertex (≤ 1 µm off its line):
+    // geometry is compared through the manifest (bbox, area, feature counts per block) below
+    check(
+      L,
+      'the manifest pieces and blocks are the same',
+      JSON.stringify(b.w.scopes[0]?.manifest.pieces) ===
+        JSON.stringify(a.w.scopes[0]?.manifest.pieces) &&
+        JSON.stringify(b.w.scopes[0]?.manifest.blocks) ===
+          JSON.stringify(a.w.scopes[0]?.manifest.blocks),
+      `${b.w.scopes[0]?.manifest.pieces.length} pieces · ${b.w.scopes[0]?.manifest.blocks.length} blocks`,
+    );
+  }
+  // controls on BP_1 «cut 2» (single size, R12): (a) without its QUANTITY label the two INSERTs
+  // alone carry the cut quantity; (b) the second INSERT mirrored (x scale −1) is NOT a copy — it
+  // stays a candidate of its own, as before
+  {
+    const L = `${C} · control`;
+    const a = await importAndWrite(
+      `${L} · source`,
+      'src.dxf',
+      splitSize(graded, 'M'),
+      ['M'],
+      'r12',
+      {
+        BP_1: 2,
+      },
+    );
+    const noLabel = a.text.replace(/QUANTITY: 2/g, 'NOTE: copy');
+    const lines = noLabel.split(/\r?\n/);
+    let seen = 0;
+    let at = -1;
+    for (let i = 0; i + 1 < lines.length && at < 0; i += 2)
+      if (lines[i].trim() === '0' && lines[i + 1] === 'INSERT')
+        for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2)
+          if (lines[j].trim() === '2' && lines[j + 1] === 'BP_1_M' && ++seen === 2) at = j + 2;
+    const mirrored = [...lines.slice(0, at), ' 41', '-1.0', ...lines.slice(at)].join('\r\n');
+    const r1 = await importAndWrite(`${L} · no label`, 'w.dxf', noLabel, ['M'], 'r12', {});
+    const bp1 = r1.sem.pieces.find((p) => p.identity === 'BP_1');
+    check(
+      L,
+      '(a) no QUANTITY label: two identical INSERTs alone read as cut 2',
+      !/QUANTITY: 2/.test(noLabel) && bp1?.piecesPerGarment === 2,
+      `BP_1 ×${bp1?.piecesPerGarment}`,
+    );
+    const s = new Session(1, [{ name: 'm.dxf', bytes: enc(mirrored) }]);
+    const run: Run = (st, input) => s.runStage(st, input, ctx());
+    const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    await run('scale', {
+      decision: {
+        factor: ex.scale[0].factor,
+        method: ex.scale[0].method,
+        operatorConfirmed: false,
+      },
+    });
+    await run('assemble', { sheet: 0 });
+    await run('chains', { opts: CHAIN_OPTS });
+    await run('sizes', { card: card(['M']) });
+    const pc = await run('pieces', { edits: [], opts: { ...FILL, variant: null } });
+    const fam = pc.families.find((f) =>
+      f.candidates.some((c) => (c as { dxf?: { identity?: string } }).dxf?.identity === 'BP_1'),
+    );
+    s.close();
+    check(
+      L,
+      '(b) the second INSERT mirrored: not a copy, two candidates',
+      at > 0 && fam?.candidates.length === 2,
+      `${fam?.candidates.length} candidate(s)`,
+    );
+  }
 }
