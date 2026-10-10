@@ -143,11 +143,16 @@ export function proposeSkeleton(
   }
   const graph = readSeamGraph(facts, template, options.pins, options.decisions, options.units);
   const built = buildSkeleton(graph, facts, template, deps, options);
+  const structure = {
+    ...(options.category ? { category: options.category } : {}),
+    ...(options.units?.length ? { units: options.units } : {}),
+  };
   return {
     ...built,
     steps: built.steps.map(tidyStepNames),
     graph,
     ...(facts.existing ? { existing: facts.existing.steps } : {}),
+    ...(Object.keys(structure).length ? { structure } : {}),
   };
 }
 

@@ -332,6 +332,12 @@ export type SkeletonProposal = {
   graph?: SeamGraph;
   /** Append mode: the card's steps it continues — their units are drawn from the same graph. */
   existing?: SkeletonCheckStep[];
+  /**
+   * The outside structure the proposal was built on («use AI structure»): absent = the engine's own.
+   * Kept ON the proposal so whoever rebuilds it (a chosen reading, the AI's readings, reopening the
+   * panel) rebuilds the same structure, and the AI is asked about the category it was read as.
+   */
+  structure?: Pick<SkeletonOptions, 'category' | 'units'>;
 };
 
 /** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */

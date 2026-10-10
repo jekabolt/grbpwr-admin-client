@@ -457,10 +457,12 @@ export function groupDetailed(
 
   // ── H. an outside structural reading first (the AI's units, «use AI structure») ───────────────
   // Each hint is a set of pieces made into one unit; nested hints build a tree, smallest first, so
-  // a unit is always made before the unit that takes it. A hint is met only when the things now on
-  // the table inside it cover exactly its pieces (a fused interfacing rides along with its host);
-  // one that cuts through a unit already made, or holds fewer than two things, is said and skipped.
-  // Everything after this is the engine as is, on the units the hints made.
+  // a unit is always made before the unit that takes it. A hint is made from the things now on the
+  // table inside it (a fused interfacing rides along with its host); one that cuts through a unit
+  // already made, or holds fewer than two things, is said and skipped, and pieces of it that are on
+  // no table (left out, consumed by the card's own order) are said. A hint that puts the lining
+  // body into the shell IS the bag: it is left to the template's bag stage, which sews it as one
+  // (facings checked, the bag operation) at its place. Then the engine goes on as is.
   if (hints.length) {
     const fusedOnto = new Set(pieces.filter((p) => p.cloth === 'interfacing').map((p) => p.key));
     const sorted = hints
@@ -481,14 +483,27 @@ export function groupDetailed(
           warnings.push(`AI unit «${label}»: its pieces are not on the table — not made`);
         continue;
       }
-      const leaves = mergeRoles(...inside.map((e) => e.roles));
+      const trees = new Set(inside.map((e) => e.tree));
+      if (trees.size > 1) {
+        const onTable = new Set(live.flatMap((e) => e.leaves));
+        const liningBody = pieces.filter(
+          (p) => p.tree === 'lining' && onTable.has(p.key) && roleDef(p.role)?.level === 'panel',
+        );
+        if (liningBody.length && liningBody.every((p) => keys.has(p.key))) continue;
+      }
+      const held = new Set(inside.flatMap((e) => e.leaves));
+      const absent = [...keys].filter((k) => !held.has(k));
+      if (absent.length)
+        warnings.push(
+          `AI unit «${label}» is made without ${absent.map((k) => byKey.get(k)?.name ?? k).join(', ')} — not on the table`,
+        );
+      const merged = mergeRoles(...inside.map((e) => e.roles));
       const level = (r: string) => (roleDef(r)?.level === 'panel' ? 0 : 1);
-      const own = [...leaves].sort((a, b) => level(a) - level(b));
+      const own = [...merged].sort((a, b) => level(a) - level(b));
       const roles =
         own.includes('front') && own.includes('back')
           ? ['body', ...own.filter((r) => r !== 'body')]
           : own;
-      const trees = new Set(inside.map((e) => e.tree));
       const j = judge(inside, seams, `AI: ${h.reason?.trim() || label}`);
       record(inside, {
         name: label,

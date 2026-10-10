@@ -612,12 +612,6 @@ function AssemblySkeletonPanel({
   const openPieces = built.facts.pieces.filter((p) => !consumed.has(p.pieceKey)).length;
   // Every piece is in the order already: an appended skeleton has nothing to read.
   const nothingToAdd = existing > 0 && openPieces === 0;
-  // «use AI structure» in force: the category and units every rebuild of this read keeps (a chosen
-  // reading is a reading OF that structure); null = the engine's own structure.
-  const [aiStructure, setAIStructure] = useState<Pick<
-    SkeletonOptions,
-    'category' | 'units'
-  > | null>(null);
 
   // The pattern is read once per chosen mode: opening reads it, reopening shows what was read,
   // switching add ↔ replace reads it again for the other mode.
@@ -628,7 +622,6 @@ function AssemblySkeletonPanel({
     if (mode === 'append' && nothingToAdd) return;
     if (run.status !== 'idle' && readFor === mode) return;
     onReadFor(mode);
-    setAIStructure(null);
     onRun(built.facts, deps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -636,6 +629,10 @@ function AssemblySkeletonPanel({
     run.status === 'ready' && readFor === mode && !(mode === 'append' && nothingToAdd)
       ? run.proposal
       : null;
+  // «use AI structure» in force: the category and units the skeleton on screen was built on, kept on
+  // the proposal itself — every rebuild of it (a chosen reading, the AI's readings) keeps them, and
+  // closing / reopening the panel cannot lose them. null = the engine's own structure.
+  const aiStructure = proposal?.structure ?? null;
 
   const unitName = useMemo(() => {
     const m = new Map<string, string>();
@@ -750,8 +747,13 @@ function AssemblySkeletonPanel({
       proposal
         ? skeletonAIRequest({
             proposal,
-            facts: built.facts,
-            templateStages: orderTemplate(built.facts.category).stages.map((st) => st.label),
+            // the category the skeleton on screen was read as (the AI's, once its structure is used)
+            facts: proposal.structure?.category
+              ? { ...built.facts, category: proposal.structure.category }
+              : built.facts,
+            templateStages: orderTemplate(
+              proposal.structure?.category ?? built.facts.category,
+            ).stages.map((st) => st.label),
             seamWords,
             techCardId,
           })
@@ -814,12 +816,10 @@ function AssemblySkeletonPanel({
       ...(aiView.structure.category ? { category: aiView.structure.category } : {}),
       ...(aiView.structure.units.length ? { units: aiView.structure.units } : {}),
     };
-    setAIStructure(next);
     onRun(built.facts, deps, next);
   };
   const backToEngine = () => {
     if (readingsLocked) return;
-    setAIStructure(null);
     onRun(built.facts, deps);
   };
 
@@ -994,7 +994,7 @@ function AssemblySkeletonPanel({
                   size='xs'
                   onClick={() => {
                     if (mode) onReadFor(mode);
-                    onRun(built.facts, deps, aiStructure ?? {});
+                    onRun(built.facts, deps);
                   }}
                 >
                   try again
