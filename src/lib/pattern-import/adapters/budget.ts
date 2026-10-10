@@ -109,8 +109,9 @@ export function assertRasterPagePixels(pixels: number, where: string): void {
  * C5 follow-up: image XObjects of a PDF larger than the raster limit, read off the raw bytes. The
  * pdf.js guard (`maxImageSize`) drops such an image without a trace — its paint operator never
  * reaches the walkers — so a scan PDF at 300 dpi would import as an empty page. An image is a
- * stream, so its dictionary is never inside an object stream: `/Subtype /Image` with `/Width` /
- * `/Height` between the object header and its `stream` keyword.
+ * stream, so its dictionary is never inside an object stream: it sits between the object header
+ * and its `stream` keyword, read with the PDF lexer (F14 T1: comments and any PDF whitespace may
+ * separate `/Subtype` from `/Image`, names may be `#xx`-escaped).
  *
  * F14 R8 / S2: a size may be indirect (`/Width 12 0 R`). Such a reference is resolved from an
  * index of EVERY plain integer object written uncompressed (`12 0 obj 6000 endobj`, the last
@@ -126,30 +127,39 @@ export function pdfImageScan(
   const u = new Uint8Array(bytes);
   const out: { width: number; height: number }[] = [];
   let unknown = 0;
-  const IMG = [0x2f, 0x49, 0x6d, 0x61, 0x67, 0x65]; // "/Image"
-  const word = (c: number) =>
-    (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
-  // pass 1: every image's size, direct or as a reference "num gen"
+  // pass 1: the dictionary of every stream object, read with the PDF lexer (whitespace incl. NUL
+  // and form feed, `%` comments, `#xx` in names, strings, nested containers) — every image's size,
+  // direct or as a reference "num gen". A stream whose dictionary cannot be read counts as an image
+  // of unknown size (refused), never as "no image".
   type Size = number | string | null;
-  const sizeOf = (dict: string, key: string): Size => {
-    const ref = new RegExp(`/${key}\\s+(\\d+)\\s+(\\d+)\\s+R(?![A-Za-z0-9])`).exec(dict);
-    if (ref) return `${+ref[1]} ${+ref[2]}`;
-    const direct = new RegExp(`/${key}\\s+(\\d+)(?![\\d.])`).exec(dict);
-    return direct ? +direct[1] : null;
-  };
   const images: [Size, Size][] = [];
-  for (let i = u.indexOf(0x2f); i !== -1 && i + 6 < u.length; i = u.indexOf(0x2f, i + 1)) {
-    let hit = true;
-    for (let k = 1; k < 6 && hit; k++) hit = u[i + k] === IMG[k];
-    if (!hit || word(u[i + 6])) continue; // /ImageB, /ImageMask …
-    const a = Math.max(0, i - 2048);
-    const head = latin1Of(u.subarray(a, i));
-    const tail = latin1Of(u.subarray(i, Math.min(u.length, i + 2048)));
-    if (!/\/Subtype\s*$/.test(head)) continue;
-    const from = Math.max(head.lastIndexOf(' obj'), head.lastIndexOf('\nobj'), 0);
-    const to = tail.indexOf('stream');
-    const dict = head.slice(from) + (to === -1 ? tail : tail.slice(0, to));
-    images.push([sizeOf(dict, 'Width'), sizeOf(dict, 'Height')]);
+  let prev = 0;
+  for (let i = findBytes(u, STREAM, 0); i !== -1; i = findBytes(u, STREAM, i + STREAM.length)) {
+    const after = u[i + STREAM.length];
+    const isKw = (i === 0 || !isRegular(u[i - 1])) && !isRegular(after); // not endstream
+    if (!isKw) continue;
+    const lo = Math.max(prev, i - STREAM_DICT_MAX);
+    prev = i + STREAM.length;
+    const head = lastObjKeyword(u, lo, i);
+    const dict = head < 0 ? null : streamDict(u, head, i);
+    if (!dict) {
+      images.push([null, null]); // unreadable: it may be an image (`/Im#61ge` …) — unknown
+      continue;
+    }
+    const sub = dict.get('Subtype');
+    // pdf.js paints an XObject by its /Subtype name, resolving a reference: an indirect subtype
+    // with a size key may be an image
+    const isImage =
+      sub?.t === 'name'
+        ? sub.v === 'Image'
+        : sub?.t === 'ref' &&
+          (dict.has('Width') || dict.has('Height') || dict.has('W') || dict.has('H'));
+    if (!isImage) continue;
+    const size = (k: string, short: string): Size => {
+      const v = dict.get(k) ?? dict.get(short);
+      return v?.t === 'num' ? v.n : v?.t === 'ref' ? v.v : null;
+    };
+    images.push([size('Width', 'W'), size('Height', 'H')]);
   }
   // pass 2 (only when a size is indirect): ONE linear pass indexing the referenced integers
   const refs = new Set(images.flat().filter((x): x is string => typeof x === 'string'));
@@ -230,6 +240,176 @@ function plainIntObjects(u: Uint8Array, wanted: ReadonlySet<string>): Map<string
     if (wanted.has(key)) out.set(key, value);
   }
   return out;
+}
+
+// ── a minimal PDF lexer for one stream dictionary (F14 T1) ──────────────────────────────────
+
+const STREAM = Array.from('stream', (c) => c.charCodeAt(0));
+/** Bytes looked back from a `stream` keyword for its object header. */
+const STREAM_DICT_MAX = 65536;
+
+const isPdfWs = (c: number) =>
+  c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09 || c === 0x0c || c === 0x00;
+const isDelim = (c: number) =>
+  c === 0x28 ||
+  c === 0x29 ||
+  c === 0x3c ||
+  c === 0x3e ||
+  c === 0x5b ||
+  c === 0x5d ||
+  c === 0x7b ||
+  c === 0x7d ||
+  c === 0x2f ||
+  c === 0x25;
+const isRegular = (c: number | undefined) => c !== undefined && !isPdfWs(c) && !isDelim(c);
+
+function findBytes(u: Uint8Array, pat: number[], from: number, to = u.length): number {
+  for (
+    let i = u.indexOf(pat[0], from);
+    i !== -1 && i + pat.length <= to;
+    i = u.indexOf(pat[0], i + 1)
+  ) {
+    let ok = true;
+    for (let k = 1; k < pat.length && ok; k++) ok = u[i + k] === pat[k];
+    if (ok) return i;
+  }
+  return -1;
+}
+
+/** Start of the last `obj` keyword token in [lo, hi) (just past it), or -1. */
+function lastObjKeyword(u: Uint8Array, lo: number, hi: number): number {
+  for (let i = hi - 3; i >= lo; i--) {
+    if (u[i] !== 0x6f || u[i + 1] !== 0x62 || u[i + 2] !== 0x6a) continue;
+    if (isRegular(u[i - 1]) || isRegular(u[i + 3])) continue; // "endobj", "objx"
+    return i + 3;
+  }
+  return -1;
+}
+
+type PdfVal =
+  | { t: 'name'; v: string }
+  | { t: 'num'; n: number }
+  | { t: 'ref'; v: string }
+  | { t: 'other' };
+type PdfTok =
+  | { t: 'name'; v: string }
+  | { t: 'num'; n: number; raw: string }
+  | { t: 'kw'; v: string }
+  | { t: '<<' | '>>' | '[' | ']' | 'str' };
+
+/** Tokens of u[a, b) by the PDF lexer; null when a string or hex string runs past b. */
+function pdfTokens(u: Uint8Array, a: number, b: number): PdfTok[] | null {
+  const out: PdfTok[] = [];
+  let i = a;
+  while (i < b) {
+    const c = u[i];
+    if (isPdfWs(c)) i++;
+    else if (c === 0x25) {
+      while (i < b && u[i] !== 0x0a && u[i] !== 0x0d) i++;
+    } else if (c === 0x2f) {
+      let v = '';
+      i++;
+      while (i < b && isRegular(u[i])) {
+        const hex = u[i] === 0x23 && i + 2 < b ? String.fromCharCode(u[i + 1], u[i + 2]) : '';
+        if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+          v += String.fromCharCode(parseInt(hex, 16));
+          i += 3;
+          continue;
+        }
+        v += String.fromCharCode(u[i++]);
+      }
+      out.push({ t: 'name', v });
+    } else if (c === 0x3c && u[i + 1] === 0x3c) {
+      out.push({ t: '<<' });
+      i += 2;
+    } else if (c === 0x3e && u[i + 1] === 0x3e) {
+      out.push({ t: '>>' });
+      i += 2;
+    } else if (c === 0x3c) {
+      const e = u.indexOf(0x3e, i + 1);
+      if (e === -1 || e >= b) return null;
+      out.push({ t: 'str' });
+      i = e + 1;
+    } else if (c === 0x28) {
+      let depth = 1;
+      i++;
+      while (i < b && depth > 0) {
+        if (u[i] === 0x5c) i += 2;
+        else {
+          if (u[i] === 0x28) depth++;
+          else if (u[i] === 0x29) depth--;
+          i++;
+        }
+      }
+      if (depth > 0) return null;
+      out.push({ t: 'str' });
+    } else if (c === 0x5b || c === 0x5d) {
+      out.push({ t: c === 0x5b ? '[' : ']' });
+      i++;
+    } else if (isDelim(c))
+      i++; // stray ) > { }
+    else {
+      const s0 = i;
+      while (i < b && isRegular(u[i])) i++;
+      const raw = latin1Of(u.subarray(s0, i));
+      if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(raw)) out.push({ t: 'num', n: Number(raw), raw });
+      else out.push({ t: 'kw', v: raw });
+    }
+  }
+  return out;
+}
+
+/**
+ * The top-level entries of the dictionary between an object header and its `stream` keyword:
+ * `<< … >>` must close right before `stream`. null when it does not read as one dictionary.
+ */
+function streamDict(u: Uint8Array, a: number, b: number): Map<string, PdfVal> | null {
+  const tk = pdfTokens(u, a, b);
+  if (!tk || tk.length < 2 || tk[0].t !== '<<' || tk[tk.length - 1].t !== '>>') return null;
+  const out = new Map<string, PdfVal>();
+  let k = 1;
+  const skip = (open: string, close: string) => {
+    let d = 1;
+    k++;
+    while (k < tk.length && d > 0) {
+      if (tk[k].t === open) d++;
+      else if (tk[k].t === close) d--;
+      k++;
+    }
+    return d === 0;
+  };
+  while (k < tk.length - 1) {
+    const key = tk[k];
+    if (key.t !== 'name') return null;
+    k++;
+    const v = tk[k];
+    if (!v || k >= tk.length - 1) return null;
+    if (v.t === 'name') {
+      out.set(key.v, { t: 'name', v: v.v });
+      k++;
+    } else if (
+      v.t === 'num' &&
+      tk[k + 1]?.t === 'num' &&
+      tk[k + 2]?.t === 'kw' &&
+      (tk[k + 2] as { v: string }).v === 'R'
+    ) {
+      out.set(key.v, { t: 'ref', v: `${v.n} ${(tk[k + 1] as { n: number }).n}` });
+      k += 3;
+    } else if (v.t === 'num') {
+      out.set(key.v, { t: 'num', n: v.n });
+      k++;
+    } else if (v.t === '<<') {
+      if (!skip('<<', '>>')) return null;
+      out.set(key.v, { t: 'other' });
+    } else if (v.t === '[') {
+      if (!skip('[', ']')) return null;
+      out.set(key.v, { t: 'other' });
+    } else if (v.t === 'str' || v.t === 'kw') {
+      out.set(key.v, { t: 'other' });
+      k++;
+    } else return null;
+  }
+  return k === tk.length - 1 ? out : null;
 }
 
 function latin1Of(u: Uint8Array): string {
