@@ -1,0 +1,508 @@
+// DXF fast path: a garment DXF already has pieces, sizes and features, so the wizard does not
+// need to assemble tiles, chain dashes or flood-fill seeds. This builds the outputs of the
+// `assemble`, `chains`, `sizes` and `pieces` stages directly from the DXF segmentation, typed by
+// the contract, so `semantics/` (F5) receives the same shapes it receives from the PDF path —
+// plus the features the DXF already declares (DxfPieceCandidate.dxf.features).
+//
+// Contract gap this fills (proposed for 08-CONTRACT §4.1 in reports/F8.md): for kind 'dxf' with
+// `presegmented`, the worker runs `dxfFastPath` instead of assemble → chains → pieces.
+
+import type {
+  AllowanceDecision,
+  Chain,
+  ChainRole,
+  ChainSet,
+  CutLineFeature,
+  DrillFeature,
+  Feature,
+  FoldFeature,
+  GrainFeature,
+  InternalFeature,
+  IRPath,
+  LineClass,
+  NotchFeature,
+  PathId,
+  PathRange,
+  PieceFamily,
+  ScaleCandidate,
+  SeamLineFeature,
+  Seed,
+  Sheet,
+  SizeRun,
+} from '../../types';
+import { PATIMPORT } from '../../types';
+import type {
+  DxfBlockPiece,
+  DxfPieceCandidate,
+  DxfRead,
+  DxfSegmentation,
+  PathRole,
+} from './dxf-types';
+import { IDENTITY, bboxOf, pathLength } from './geometry';
+import { layerKind } from './segment';
+
+export type DxfFastPath = {
+  sheet: Sheet;
+  chains: ChainSet;
+  run: SizeRun;
+  seeds: Seed[];
+  /** One family per identity; candidates are DxfPieceCandidate (structurally PieceCandidate). */
+  families: PieceFamily[];
+  scale: ScaleCandidate[];
+  /** File-level allowance as drawn (SemanticsInput.fileAllowance default). */
+  allowance: AllowanceDecision | null;
+};
+
+const ROLE_OF: Record<PathRole, ChainRole> = {
+  cut: 'size',
+  'cut-extra': 'ignore',
+  hole: 'internal',
+  seam: 'seam',
+  'seam-extra': 'ignore',
+  grain: 'grain',
+  notch: 'notch',
+  drill: 'internal',
+  internal: 'internal',
+  fold: 'common',
+  'grade-point': 'ignore',
+  'qv-copy': 'ignore',
+  other: 'ignore',
+};
+
+export function dxfScaleCandidates(read: DxfRead): ScaleCandidate[] {
+  const u = read.meta.units;
+  const ev = { page: 0, bbox: read.meta.extents, text: u.evidence };
+  if (u.source === 'insunits' || u.source === 'units-text') {
+    return [
+      {
+        method: 'declared',
+        factor: 1,
+        measuredMm: null,
+        declaredMm: null,
+        evidence: ev,
+        confidence: 1,
+      },
+    ];
+  }
+  if (u.source === 'measurement') {
+    return [
+      {
+        method: 'declared',
+        factor: 1,
+        measuredMm: null,
+        declaredMm: null,
+        evidence: ev,
+        confidence: 0.6,
+      },
+      {
+        method: 'manual',
+        factor: 1 / 25.4,
+        measuredMm: null,
+        declaredMm: null,
+        evidence: ev,
+        confidence: 0.3,
+      },
+    ];
+  }
+  // guessed millimetres: offer the usual alternatives for the operator
+  return [
+    {
+      method: 'none',
+      factor: 1,
+      measuredMm: null,
+      declaredMm: null,
+      evidence: ev,
+      confidence: 0.4,
+    },
+    {
+      method: 'manual',
+      factor: 10,
+      measuredMm: null,
+      declaredMm: null,
+      evidence: { ...ev, text: 'centimetres' },
+      confidence: 0.2,
+    },
+    {
+      method: 'manual',
+      factor: 25.4,
+      measuredMm: null,
+      declaredMm: null,
+      evidence: { ...ev, text: 'inches' },
+      confidence: 0.2,
+    },
+  ];
+}
+
+export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
+  const page = read.doc.pages[0];
+  const pathById = new Map(page.paths.map((p) => [p.id, p]));
+  const edges = (id: PathId) => {
+    const p = pathById.get(id);
+    if (!p) return 0;
+    return p.closed ? p.pts.length : Math.max(0, p.pts.length - 1);
+  };
+  const range = (id: PathId): PathRange => ({ path: id, from: 0, to: edges(id) });
+
+  // chains: one per IR path, same order (chain id = index; map kept for paths)
+  const chainOf = new Map<PathId, number>();
+  const chains: Chain[] = page.paths.map((p, i) => {
+    chainOf.set(p.id, i);
+    return {
+      id: i,
+      pts: p.pts,
+      closed: p.closed,
+      ranges: [range(p.id)],
+      motif: page.styles[p.style]?.dash ?? null,
+      style: p.style,
+      lengthMm: pathLength(p.pts, p.closed),
+    };
+  });
+
+  // roles per path from the segmentation; loose paths by layer
+  const roleOfPath = new Map<
+    PathId,
+    { role: ChainRole; size: string | null; layer: string | null }
+  >();
+  for (const pc of seg.pieces) {
+    for (const [id, r] of Object.entries(pc.roles)) {
+      roleOfPath.set(Number(id), {
+        role: ROLE_OF[r],
+        size: ROLE_OF[r] === 'size' ? pc.size || null : null,
+        layer: null,
+      });
+    }
+  }
+  for (const p of page.paths) {
+    const layer = page.styles[p.style]?.layer ?? null;
+    const r = roleOfPath.get(p.id);
+    if (r) r.layer = layer;
+    else {
+      const k = layerKind(layer);
+      const role: ChainRole =
+        k === 'cut'
+          ? 'common'
+          : k === 'seam'
+            ? 'seam'
+            : k === 'grain'
+              ? 'grain'
+              : k === 'notch'
+                ? 'notch'
+                : k === 'internal' || k === 'drill' || k === 'cutout'
+                  ? 'internal'
+                  : k === 'mirror'
+                    ? 'common'
+                    : 'ignore';
+      roleOfPath.set(p.id, { role, size: null, layer });
+    }
+  }
+  const classKey = new Map<string, LineClass>();
+  for (const p of page.paths) {
+    const r = roleOfPath.get(p.id)!;
+    const key = `${r.role}|${r.size ?? ''}|${r.layer ?? ''}`;
+    let c = classKey.get(key);
+    if (!c) {
+      c = {
+        id: classKey.size,
+        role: r.role,
+        sizeLabel: r.size,
+        chains: [],
+        totalLengthMm: 0,
+        evidence: [{ kind: 'ocg', name: r.layer ?? '' }],
+        confidence: 1,
+      };
+      classKey.set(key, c);
+    }
+    const ch = chains[chainOf.get(p.id)!];
+    c.chains.push(ch.id);
+    c.totalLengthMm += ch.lengthMm;
+  }
+  const classes = [...classKey.values()];
+  const chainSet: ChainSet = { chains, classes, bundles: [], orphans: [], warnings: [] };
+
+  // size run
+  const run: SizeRun = {
+    encoding: seg.sizes.length <= 1 ? 'single' : 'text-label',
+    sizes: seg.sizes.map((s) => ({
+      label: s.token,
+      rank: s.rank,
+      classId: classes.find((c) => c.role === 'size' && c.sizeLabel === s.token)?.id ?? null,
+      file: read.doc.file.id,
+    })),
+    evidence: [
+      `dxf ${seg.dialect}: size = ${seg.pieces.some((p) => p.sizeSource === 'label') ? 'AAMA SIZE label' : 'last block-name token'}`,
+      ...seg.sizes
+        .filter((s) => s.raw.some((r) => r !== s.token))
+        .map((s) => `${s.raw.join('/')} = ${s.token}`),
+      ...(seg.sampleSize ? [`sample size ${seg.sampleSize.token} (${seg.sampleSize.source})`] : []),
+    ],
+  };
+
+  // seeds + families
+  const seeds: Seed[] = [];
+  const families: PieceFamily[] = [];
+  seg.identities.forEach((id, k) => {
+    const ps = id.pieces.map((i) => seg.pieces[i]);
+    const ref = (seg.sampleSize && ps.find((p) => p.size === seg.sampleSize!.token)) || ps[0];
+    const outerRef = ref.cut ?? ref.seam;
+    const bb = outerRef?.bbox ?? read.meta.extents;
+    const labelText = ref.labels.texts
+      .map((t) => page.texts.find((x) => x.id === t))
+      .find((t) => t && /piece|name/i.test(t.text));
+    seeds.push({
+      id: k,
+      at: { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 },
+      origin: 'text',
+      text: labelText,
+      variant: null,
+    });
+    const candidates: DxfPieceCandidate[] = ps.map((p) =>
+      candidateOf(p, k, id.mode === 'A', seg, chainOf, range, read, pathById),
+    );
+    // a refused size has no area: growth is judged over the outlines that are given
+    const areas = candidates.filter((c) => c.outcome !== 'refused').map((c) => c.areaMm2);
+    families.push({
+      seed: k,
+      candidates,
+      monotone: id.uni || areas.length < 2 || areas.every((a, i) => i === 0 || a > areas[i - 1]),
+    });
+  });
+
+  const sheet: Sheet = {
+    id: 0,
+    poses: [
+      {
+        file: read.doc.file.id,
+        page: 0,
+        toSheet: IDENTITY,
+        widthMm: page.widthMm,
+        heightMm: page.heightMm,
+        residualMm: 0,
+      },
+    ],
+    pairs: [],
+    bbox: read.meta.extents,
+    missing: [],
+    paths: page.paths,
+    texts: page.texts,
+    rasters: page.rasters,
+    styles: page.styles,
+    warnings: [...read.doc.warnings, ...seg.warnings],
+  };
+  return {
+    sheet,
+    chains: chainSet,
+    run,
+    seeds,
+    families,
+    scale: dxfScaleCandidates(read),
+    allowance: seg.allowance,
+  };
+}
+
+function candidateOf(
+  p: DxfBlockPiece,
+  seed: number,
+  outerIsSeam: boolean,
+  seg: DxfSegmentation,
+  chainOf: Map<PathId, number>,
+  range: (id: PathId) => PathRange,
+  read: DxfRead,
+  pathById: Map<PathId, IRPath>,
+): DxfPieceCandidate {
+  const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
+  if (p.nested) return refusedNested(p, seed, Math.max(0, rank));
+  const outer = (outerIsSeam ? p.seam ?? p.cut : p.cut ?? p.seam) ?? null;
+  const group = read.meta.groups[p.group];
+  const wallIds = new Set(outer?.paths ?? []);
+  const features: Feature[] = [];
+  const ranges = (ids: PathId[]) => ids.map(range);
+  if (p.cut)
+    features.push({
+      kind: 'cut',
+      pts: p.cut.pts,
+      origin: 'detected',
+      ranges: ranges(p.cut.paths),
+      confidence: outerIsSeam ? 0.3 : 1,
+    } satisfies CutLineFeature);
+  if (p.seam)
+    features.push({
+      kind: 'seam',
+      pts: p.seam.pts,
+      origin: 'detected',
+      ranges: ranges(p.seam.paths),
+      confidence: 1,
+    } satisfies SeamLineFeature);
+  if (p.grain) {
+    features.push({
+      kind: 'grain',
+      a: p.grain.a,
+      b: p.grain.b,
+      angleDeg: p.grain.angleDeg,
+      origin: 'detected',
+      ranges: [range(p.grain.path)],
+      confidence: p.grain.form === 'clo-arrow' ? 1 : p.grain.form === 'axis' ? 0.9 : 0.6,
+    } satisfies GrainFeature);
+  }
+  for (const n of p.notches) {
+    features.push({
+      kind: 'notch',
+      at: n.at,
+      seg: [n.at, { x: n.at.x + n.dir.x * n.depthMm, y: n.at.y + n.dir.y * n.depthMm }],
+      depthMm: n.depthMm,
+      origin: n.source === 'derived' ? 'derived' : 'detected',
+      ranges: n.paths.map(range),
+      confidence: n.source === 'derived' ? 0.5 : n.on === 'none' ? 0.6 : 1,
+    } satisfies NotchFeature);
+  }
+  for (const d of p.drills)
+    features.push({
+      kind: 'drill',
+      at: d.at,
+      origin: 'detected',
+      ranges: [range(d.path)],
+      confidence: 1,
+    } satisfies DrillFeature);
+  const page = read.doc.pages[0];
+  for (const [ids, role] of Object.entries(p.roles)) {
+    const id = Number(ids);
+    const path = pathById.get(id);
+    if (!path) continue;
+    if (role === 'internal' || role === 'hole') {
+      features.push({
+        kind: 'internal',
+        pts: path.pts,
+        closed: path.closed,
+        label: role === 'hole' ? 'hole' : undefined,
+        origin: 'detected',
+        ranges: [range(id)],
+        confidence: 1,
+      } satisfies InternalFeature);
+    } else if (role === 'fold' && path.pts.length >= 2) {
+      features.push({
+        kind: 'fold',
+        a: path.pts[0],
+        b: path.pts[path.pts.length - 1],
+        label: 'mirror line (AAMA layer 6) — unfold',
+        origin: 'detected',
+        ranges: [range(id)],
+        confidence: 1,
+      } satisfies FoldFeature);
+    }
+  }
+  const area = outer?.areaMm2 ?? 0;
+  const cand: DxfPieceCandidate = {
+    seed,
+    rank: Math.max(0, rank),
+    outer: outer?.pts ?? [],
+    walls: [...wallIds].map((id) => chainOf.get(id)!).filter((x) => x != null),
+    inside: group.paths
+      .filter((id) => !wallIds.has(id))
+      .map((id) => chainOf.get(id)!)
+      .filter((x) => x != null),
+    textsInside: group.texts,
+    outcome: !outer ? 'leak' : area < PATIMPORT.minPieceAreaMm2 ? 'tiny' : 'closed',
+    areaMm2: area,
+    bbox:
+      outer?.bbox ?? bboxOf(group.paths.flatMap((id) => pathById.get(id)?.pts ?? [{ x: 0, y: 0 }])),
+    sourceCoverage: outer ? 1 : 0,
+    p95Mm: 0,
+    dxf: {
+      block: p.block,
+      group: p.group,
+      identity: p.identity,
+      size: p.size,
+      features,
+      outerIsSeam: outerIsSeam && !!p.seam,
+      ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),
+      ...(p.instances ? { instances: p.instances } : {}),
+      // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)
+      ...(p.labels.quantity != null ? { quantity: p.labels.quantity } : {}),
+    },
+  };
+  // H1c-4: one same-look loop inside the outline at a uniform offset reads as the sew line ONLY
+  // when one size is drawn: a pocket graded +4 mm all round is the same picture (2 mm in all
+  // round). The source naming its one size says so; otherwise the block waits for the operator's
+  // count ("sizes drawn on this sheet" = 1 restores `oneSize`). A sew line in another look (CLO's
+  // layer 14) never gets here — it is not a same-look loop.
+  if (p.seamPair && !(seg.sizes.length === 1 && seg.sizes[0].token))
+    return { ...refusedPair(p, seed, Math.max(0, rank)), oneSize: cand };
+  return cand;
+}
+
+/**
+ * A block that stacks several outlines of one look (segment.ts `nestedSizeLoops`): which of them
+ * is the size the block claims cannot be proven, so the candidate is refused — no outline, no
+ * walls, no features (notches and drills placed against the largest loop would be wrong too) —
+ * with the pieces/grade (H1) contract the semantics stage already blocks on and words it.
+ */
+function refusedNested(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCandidate {
+  const n = p.nested!;
+  const ratios = n.areaRatios.map((r) => `${Math.round(r * 100)} %`).join(', ');
+  const what = n.line === 'both' ? 'cut- and seam-line outlines' : `${n.line}-line outlines`;
+  return refusedBlock(
+    p,
+    seed,
+    rank,
+    `block ${p.block} draws ${n.outlines} ${what} alike on layer ${n.layer}, one inside the ` +
+      `other (inner ones ${ratios} of the outer area) — several sizes in one block, or a line ` +
+      `nothing tells apart from them; which one is ${p.size ? `size ${p.size}` : 'this size'} ` +
+      `cannot be proven. Export one size per block, or trace the outline.`,
+  );
+}
+
+/**
+ * A block whose outline has one same-look loop inside at a uniform allowance (segment.ts
+ * `seamPair`) while the count of sizes is not one: a cut line with its sew line and two sizes
+ * graded by a uniform step are the same picture — refused, never the larger loop as "the" size.
+ */
+function refusedPair(p: DxfBlockPiece, seed: number, rank: number): DxfPieceCandidate {
+  return refusedBlock(
+    p,
+    seed,
+    rank,
+    `block ${p.block} draws its outline with one more outline alike inside it, ` +
+      `${p.seamPair?.offsetMm ?? '?'} mm in all round — a sew line, or a second size graded ` +
+      `evenly. If the drawing holds ONE size, answer 1 for "sizes drawn on this sheet"; otherwise ` +
+      `draw the sew line in another look, export one size per block, or trace the outline.`,
+  );
+}
+
+/**
+ * The count the sizes step settled decides a refused `seamPair` block: one size → its cut + sew
+ * reading (the candidate the fast path set aside), anything else → it stays refused.
+ */
+export function settleSeamPair(c: DxfPieceCandidate, oneSize: boolean): DxfPieceCandidate {
+  return oneSize && c.oneSize ? c.oneSize : c;
+}
+
+function refusedBlock(
+  p: Pick<DxfBlockPiece, 'block' | 'group' | 'identity' | 'size' | 'cut' | 'seam'>,
+  seed: number,
+  rank: number,
+  detail: string,
+): DxfPieceCandidate {
+  return {
+    seed,
+    rank,
+    outer: [],
+    walls: [],
+    inside: [],
+    textsInside: [],
+    outcome: 'refused',
+    areaMm2: 0,
+    // where the block is, so the operator can find it; there is no outline
+    bbox: (p.cut ?? p.seam)?.bbox ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    sourceCoverage: 0,
+    p95Mm: 0,
+    gradeRefusal: 'sizes-not-distinguished',
+    gradeDetail: detail,
+    dxf: {
+      block: p.block,
+      group: p.group,
+      identity: p.identity,
+      size: p.size,
+      features: [],
+      outerIsSeam: false,
+    },
+  };
+}

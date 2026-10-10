@@ -491,6 +491,8 @@ const FILLED = {
   pressToward: T.TOWARD_FRONT,
   outputUnitKey: 'SHELL',
   outputUnitName: 'shell unit',
+  // ЧЕРНОВИК КАРКАСА (0410): `true` нарочно — дефолт `false` круг довёз бы и пустым маппером.
+  draft: true,
 };
 
 // Поля, которые эта проба НЕ ведёт, и почему. Список ЗАКРЫТЫЙ: всё остальное обязано быть в
@@ -557,6 +559,7 @@ const EFFECT_WRITE_WHITELIST = new Map([
   ['bomLineKeys', 'R5: подсказанная нитка — единственная подходящая строка BOM'],
   ['pressEquipment', 'R5: подсказанный утюг — единственный профиль процесса в парке'],
   ['pressProfileKey', 'R5: ключ профиля едет ПАРОЙ с оборудованием, иначе сервер отвергнет'],
+  ['draft', '0410: метка «не проверено» снимается ПОСЛЕ правки строки человеком — факт шага не стирается'],
 ]);
 
 /** Поля, которым подстановка разрешена — и только с `shouldDirty: false`. */
@@ -608,7 +611,14 @@ function destructiveEffectWrites(file) {
       found = true;
       writes.push({ line: m.range.start.line + 1, field: hit[1], dirtyBody });
     }
-    if (!found) writes.push({ line: m.range.start.line + 1, field: '<не разобрано>', dirtyBody });
+    // Запись НЕ ПО ШАГУ (флаги карточки `mediaCleared` / `assemblyCleared` у записи каркаса) —
+    // строковый литерал первым аргументом, не начинающийся с `operations`: факта шага она не
+    // стирает. Всё прочее без разбора — по-прежнему нарушение.
+    const calls = [...text.matchAll(/setValue\(\s*([^,)]*)/g)].map((c) => c[1].trim());
+    const cardOnly =
+      calls.length > 0 && calls.every((a) => /^(['"])(?!operations)[A-Za-z0-9_.]+\1$/.test(a));
+    if (!found && !cardOnly)
+      writes.push({ line: m.range.start.line + 1, field: '<не разобрано>', dirtyBody });
   }
   return writes;
 }

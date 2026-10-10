@@ -1764,6 +1764,36 @@ export type AssemblyResolutionBasis =
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
   | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
+// TechCardSeamStatus is the technologist's decision on a seam.
+export type TechCardSeamStatus =
+  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
+  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
+  | "TECH_CARD_SEAM_STATUS_REJECTED";
+// TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
+// walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
+// closure (zip / button front) that is NOT sewn shut.
+export type TechCardSeamKind =
+  | "TECH_CARD_SEAM_KIND_UNKNOWN"
+  | "TECH_CARD_SEAM_KIND_EDGE"
+  | "TECH_CARD_SEAM_KIND_PARTIAL"
+  | "TECH_CARD_SEAM_KIND_COMPOSITE"
+  | "TECH_CARD_SEAM_KIND_SURFACE"
+  | "TECH_CARD_SEAM_KIND_CLOSURE";
+// TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
+// (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
+// is legal on write: the reader then picks the pairing itself.
+export type TechCardSeamDirection =
+  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
+  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
+  | "TECH_CARD_SEAM_DIRECTION_SAME";
+// TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
+export type TechCardSeamSource =
+  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
+  | "TECH_CARD_SEAM_SOURCE_GRAPH"
+  | "TECH_CARD_SEAM_SOURCE_DOLL"
+  | "TECH_CARD_SEAM_SOURCE_ORDER"
+  | "TECH_CARD_SEAM_SOURCE_MANUAL"
+  | "TECH_CARD_SEAM_SOURCE_AI";
 // TechCardMarkerPieceSetStatus compares a раскладка's stored fingerprint of the card's cut-piece set
 // against the set the card carries TODAY (Ф3.6).
 // Three states and not a bool, because two are not enough: a marker taken before Ф3 carries no
@@ -3333,6 +3363,12 @@ export type TechCardOperation = {
   // значит ОДНОЗНАЧНО «на этом шаге количеств нет», и стереть их осведомлённой записью — честный
   // жест, а не потеря.
   bomQuantities: TechCardOperationBomQty[] | undefined;
+  // ЧЕРНОВИК КАРКАСА СБОРКИ (0410). true = шаг записал каркас сборки (OPERATIONS → build from pattern
+  // → apply), и его ещё никто не проверил. Снимает первая смысловая правка строки или клик по чипу
+  // «draft» (reviewed). В ДАЙДЖЕСТ НЕ ВХОДИТ: проверка шага не меняет того, что карточка говорит цеху,
+  // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
+  // сборки — это пометка для команды, а не инструкция.
+  draft: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -3999,6 +4035,14 @@ export type TechCardInsert = {
   // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
   labelsAware: boolean | undefined;
+  // ЩИТ ЧЕРНОВИКА КАРКАСА (0410) для TechCardOperation.draft (68). draft — bool без присутствия, а
+  // операции пишутся полной заменой без стабильного ключа: payload бандла, который поля не знает,
+  // неотличим от «все шаги проверены», и открытая старая вкладка стёрла бы каждую метку первой же
+  // правкой. Без флага UpdateTechCard ОТКАЗЫВАЕТ (FailedPrecondition, «обнови админку»), если у
+  // сохранённой карточки есть хоть один draft-шаг, и любая запись отказывает, если payload без
+  // флага несёт draft = true (эхо). Флаг не фильтрует разбор. Серверные пути (клон сезона,
+  // импорт архива) ставят его явно. ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест.
+  operationDraftAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -4100,6 +4144,11 @@ export type TechCard = {
   // (CreateTechCardRequest.guided) and the guide has not been left yet. Cleared only by
   // ExitTechCardGuide, which does not bump lock_version. Ignored on write.
   guided: boolean | undefined;
+  // OUTPUT-ONLY: the technologist's seam decisions (confirmed / rejected / connected by hand), with
+  // the server's staleness verdict resolved on this read. Written ONLY through UpsertTechCardSeams /
+  // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
+  // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
+  seams: TechCardSeam[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -4363,6 +4412,68 @@ export type TechCardPieceArea = {
   // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
   // разные и ведут к разным фразам на экране.
   ambiguousPick: boolean | undefined;
+};
+
+// TechCardSeam is one stored seam decision, keyed by a client-minted ULID.
+export type TechCardSeam = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  seamKey: string | undefined;
+  status: TechCardSeamStatus | undefined;
+  kind: TechCardSeamKind | undefined;
+  direction: TechCardSeamDirection | undefined;
+  source: TechCardSeamSource | undefined;
+  sideA: TechCardSeamSide | undefined;
+  sideB: TechCardSeamSide | undefined;
+  // Size code the anchors were written on — honesty for display; the resolver compares by ratio.
+  anchoredSize: string | undefined;
+  // The technologist's words («eased at the yoke», «CF is a zip»), ≤ 255 chars.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance.
+  // stale = the SOURCE of the seam's pieces moved since the row was written: the fingerprint of the
+  // sheets AND block→piece links of the pieces' fabric scopes, computed now, differs from the one
+  // stamped on write (a DXF re-uploaded, a block re-aliased). A stale row must not be applied as is
+  // — the client shows it and offers re-confirm, which rewrites it and clears the flag.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSeamSide is one side of a seam: its anchors in walk order (1..8).
+export type TechCardSeamSide = {
+  parts: TechCardSeamAnchor[] | undefined;
+};
+
+// TechCardSeamAnchor is one run of one piece taking part in a seam side.
+export type TechCardSeamAnchor = {
+  // tech_card_piece.line_key — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
+  samples: TechCardSeamSample[] | undefined;
+  // Share of the sewing-line perimeter covered by the run, (0, 1].
+  perimShare: number | undefined;
+  // Run length at the size it was anchored on, mm (> 0).
+  lenMm: number | undefined;
+  // Notch count on the run, ends excluded.
+  notches: number | undefined;
+  // Signed turn of the run, degrees (+ convex).
+  turnDeg: number | undefined;
+  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
+  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
+  rangeFrom: number | undefined;
+  rangeTo: number | undefined;
+  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
+  // 'BP#3+4') and the piece contour's signature then.
+  edgeHint: string | undefined;
+  contourSig: string | undefined;
+};
+
+// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
+// (u, v ∈ [0, 1]).
+export type TechCardSeamSample = {
+  u: number | undefined;
+  v: number | undefined;
 };
 
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.

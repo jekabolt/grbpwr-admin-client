@@ -122,6 +122,50 @@ export type PieceGeom = {
   areaMm2: number;
   perimMm: Mm;
   twinOf: { key: string; kind: 'mirror' | 'identical' }[];
+  /** Internal marks of the piece, classified (geometry/marks.ts); seam-line copies left out. */
+  marks?: PieceMark[];
+};
+
+// ── Internal marks (P2 step 0, 03-P2-DESIGN §2) ─────────────────────────────────────────────
+// What the pattern draws INSIDE a piece, read once for the three geometric lanes (surface joins,
+// darts, closures). CLO writes the sewing line on layer 8 and Gerber duplicates every internal line
+// on L8/L85, so copies of the sewing line, twins and lines parallel to an edge are told apart here
+// before anything is called a mark.
+
+export type PieceMarkKind =
+  /** A copy of the sewing / cut line (closed, an offset of the contour). Filtered: never returned. */
+  | 'seam-copy'
+  /** A drill hole: a closed loop ≤ markDrillMaxMm, or a cross of short segments. */
+  | 'drill'
+  /** A straight open segment 12–40 mm, with end ticks (Gerber) or alone. */
+  | 'buttonhole'
+  /** A straight line ≥ markFoldMinMm parallel to an edge, ≤ markFoldOffsetMm in. */
+  | 'fold'
+  /** A line that follows an edge at a constant offset: topstitch, hem, facing turn. */
+  | 'parallel'
+  /** A path inside, bbox ≥ 40 mm both ways, not fold / parallel: a pocket or part placed on top. */
+  | 'placement'
+  /** Open, exactly one sharp corner, both ends on the sewing line: a dart — or a vent. */
+  | 'vee'
+  | 'other';
+
+export type PieceMark = {
+  /** `${pieceKey}@${i}` — stable for one piece geometry. */
+  id: string;
+  kind: PieceMarkKind;
+  layer: string;
+  closed: boolean;
+  /** mm, in the piece's `rs` frame (the same as PieceGeom.rs). */
+  pts: Pt2[];
+  bbox: { w: Mm; h: Mm; cx: Mm; cy: Mm };
+  lenMm: Mm;
+  /** vee: the opening at the contour (intake), the depth from it, the apex angle, the edge it opens on. */
+  vee?: { intakeMm: Mm; depthMm: Mm; apexDeg: number; edge: EdgeId };
+  /**
+   * drill / buttonhole / fold / parallel: the nearest edge, the offset from it, the foot along it.
+   * Absent when no edge is within the classifier's search reach (66 mm): not «at» an edge.
+   */
+  nearEdge?: { edge: EdgeId; offsetMm: Mm; alongMm: Mm };
 };
 
 export type SeamEvidence = {
@@ -148,6 +192,19 @@ export type SeamCandidate = {
   evidence: SeamEvidence;
   kind: 'edge' | 'partial' | 'composite' | 'surface' | 'closure-not-seam';
   /**
+   * Surface join (P2 lane S): part `part` laid on host `host` along placement mark `mark`; `T` puts
+   * the part's `rs` onto the mark in the host's `rs` frame; `fit` 0..1 of the bbox match.
+   */
+  surface?: { host: string; part: string; mark: string; T: Affine; fit: number };
+  /** Closure (P2 lane Z): what closes this edge and why it is believed. */
+  closure?: {
+    kind: 'buttons' | 'zip' | 'snaps' | 'unknown';
+    evidence: string;
+    lengthMm?: Mm;
+    open: 'full' | 'to-notch';
+    count?: number;
+  };
+  /**
    * Composite side (A4): every edge of the glued run, in walk order, across pieces. `a` / `b` is
    * then the run's longest part — the edge a pictogram hangs the other side on.
    */
@@ -155,7 +212,56 @@ export type SeamCandidate = {
   bParts?: EdgeId[];
   /** Alternatives within SKELETON.ambiguity of this score. */
   ambiguousWith?: SeamCandidate[];
+  /**
+   * A seam a person decided on (stored on the card, resolved by lib/seams): where it came from and
+   * who said so. Absent on the engine's own readings.
+   */
+  provenance?: SeamProvenance;
+  /**
+   * Sewn sub-range of each side, mm along the run from its start (a partial seam stored with its
+   * range). Absent = the whole run.
+   */
+  range?: { a: [Mm, Mm]; b: [Mm, Mm] };
 };
+
+/** Who decided a stored seam, and how its edges were found today. */
+export type SeamProvenance = {
+  seamKey: string;
+  status: 'confirmed' | 'rejected';
+  source: 'graph' | 'doll' | 'order' | 'manual' | 'ai';
+  direction: 'reversed' | 'same' | 'unknown';
+  by: string;
+  at: string;
+  /**
+   * hint = the stored edge id still fits the same contour; shape = found by its shape; topology =
+   * carried from the size it was confirmed on by the piece's edge sequence.
+   */
+  how: 'hint' | 'shape' | 'topology';
+};
+
+/** One stored «not this seam»: any candidate meeting both sides is dropped with `rule`. */
+export type ExcludedPair = {
+  aIds: EdgeId[];
+  bIds: EdgeId[];
+  rule: string;
+  /** A rejected surface join: the part is not laid on the host. */
+  surface?: { host: string; part: string };
+};
+
+/**
+ * Stored seam decisions resolved against today's pieces (lib/seams `resolveSeamDecisions`).
+ * `forced` seams are taken before the engine's greedy (their edges out of play), `closures` block
+ * their edges, `excluded` pairs are dropped with the person's words, `words` go to the warnings.
+ */
+export type SeamDecisions = {
+  forced: SeamCandidate[];
+  closures: SeamCandidate[];
+  excluded: ExcludedPair[];
+  words: string[];
+};
+
+/** Decisions as a value, or resolved against the pieces the graph is about to match. */
+export type SeamDecisionsInput = SeamDecisions | ((pieces: readonly PieceGeom[]) => SeamDecisions);
 
 export type SeamGraph = {
   pieces: PieceGeom[];
@@ -201,6 +307,14 @@ export type SkeletonStep = {
   derivedFrom?: number;
   /** What the step does, in words («Join shoulders», «Press seams open») — the row's title in D2. */
   label?: string;
+  /** A feature sewn on one piece / unit, read off its internal marks (P2 lanes D, Z, S). */
+  feature?: {
+    kind: 'dart' | 'buttonholes' | 'buttons' | 'zip' | 'vent' | 'surface';
+    pieceKey: string;
+    count?: number;
+    /** PieceMark ids the step stands on. */
+    marks: string[];
+  };
 };
 
 export type SkeletonDecision = { id: string; chosen: number };
@@ -289,6 +403,8 @@ export type SkeletonOptions = {
   pressFlat?: boolean;
   /** Readings the person chose for ambiguous joins; the proposal is rebuilt around them. */
   pins?: SkeletonPins;
+  /** Seams stored on the card (confirmed / rejected / closures), resolved by lib/seams. */
+  decisions?: SeamDecisionsInput;
 };
 
 // ── Union pictogram (lane C) ────────────────────────────────────────────────────────────────
@@ -320,6 +436,8 @@ export type UnionLayout = {
   underlay?: string[];
   /** Largest pairwise overlap of the drawn shapes, share of the smaller piece (0..1). */
   overlap?: number;
+  /** Thin lines drawn over a piece's silhouette (dart legs …), per pieceKey, in its `rs` frame. */
+  marks?: Record<string, Pt2[][]>;
 };
 
 // ── Thresholds ──────────────────────────────────────────────────────────────────────────────
@@ -345,4 +463,24 @@ export const SKELETON = {
    * is O(n²) on the main thread (541 pieces of a marker file took > 5 s). A garment has 10–60.
    */
   maxPieces: 150,
+
+  // ── internal marks (P2 step 0, 03-P2-DESIGN §2) ──
+  /** A closed loop is a sewing-line copy when its bbox is the contour's ± 2·offset within this. */
+  markSeamCopyTolMm: 4,
+  /** Drill: a loop / cross no bigger than this both ways. */
+  markDrillMaxMm: 15,
+  /** Fold: a straight line at least this long… */
+  markFoldMinMm: 150,
+  /** …no further than this from the edge it runs along (also the reach of `parallel`). */
+  markFoldOffsetMm: 60,
+  /** Darts (lane D): intake range at the contour, minimum depth, depth / intake, widest apex. */
+  dartIntakeMm: [8, 60] as readonly [number, number],
+  dartDepthMin: 40,
+  dartDepthRatio: 1.5,
+  dartApexDeg: 35,
+  /** Surface joins (lane S): bbox tolerance (share of the larger side), part / host area cap. */
+  surfaceBboxTol: 0.1,
+  surfaceAreaMax: 0.35,
+  /** Closures (lane Z): a drill this close to an edge belongs to it (= DRILL_EDGE_MM in match.ts). */
+  drillEdgeMm: 40,
 } as const;

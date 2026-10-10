@@ -22,9 +22,10 @@ import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
 import type { SeamGraph, SkeletonProposal } from 'lib/assembly-skeleton/types';
 import { unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO } from 'lib/nesting/types';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
+import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
 import { buildSkeletonFacts, skeletonCategoryOf, skeletonLined } from './assembly-skeleton-source';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
@@ -102,8 +103,11 @@ export function CardUnitPicturesProvider({
   const patterns = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
     []) as TechCardFormData['patterns'];
 
-  // (а) Нет ни одного объявленного узла — рисовать нечего, граф не нужен.
-  const hasUnits = operations.some((o) => (o?.outputUnitKey ?? '').trim() !== '');
+  // (а) Нет ни одного шага, который что-то соединяет или объявляет узел, — граф не нужен никому:
+  // ни пиктограммам (им нужны узлы), ни карте сборки (ей нужны входы шагов).
+  const hasUnits = operations.some(
+    (o) => (o?.outputUnitKey ?? '').trim() !== '' || (o?.inputKeys ?? []).length > 1,
+  );
 
   // (б) Подписи, а не ссылки: форма пересобирает массивы на каждую правку любого поля, а карта
   // контуров меняет ссылку на каждую правку BOM. В подпись входит ровно то, что читает граф.
@@ -128,9 +132,10 @@ export function CardUnitPicturesProvider({
     ...(patterns ?? []).map((p) => [p.bomLineKey, p.fabricPurpose].join('|')),
   ].join('~');
   const catSig = (categoryNames ?? []).join('|');
+  const seamsSig = useCardSeamsSig(); // SEAMS Need A: a decision re-reads the graph
   const factsSig =
     hasUnits && shapes && contoured > 0 && contoured <= CAP_PIECES
-      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}`
+      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}#${seamsSig}`
       : '';
 
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
@@ -169,7 +174,7 @@ export function CardUnitPicturesProvider({
         let g: SeamGraph | null = null;
         if (facts.pieces.length > 0) {
           try {
-            g = readSeamGraph(facts);
+            g = readSeamGraph(facts, undefined, {}, cardSeamDecisions(facts));
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.
             g = null;
@@ -213,7 +218,25 @@ export function CardUnitPicturesProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, unitSig]);
 
-  return <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>;
+  // Граф — и карте сборки: она читает ТОТ ЖЕ экземпляр, второго чтения выкройки нет (§4 «Data»).
+  // `settling` — новая подпись ещё отстаивается: карта держит прежнюю картинку, а не мигает.
+  const seam = useMemo<CardSeamGraph>(
+    () => ({ graph: current, settling: !!factsSig && graph?.sig !== factsSig }),
+    [current, factsSig, graph?.sig],
+  );
+  return (
+    <SeamGraphContext.Provider value={seam}>
+      <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>
+    </SeamGraphContext.Provider>
+  );
+}
+
+export type CardSeamGraph = { graph: SeamGraph | null; settling: boolean };
+const SeamGraphContext = createContext<CardSeamGraph>({ graph: null, settling: false });
+
+/** Граф швов карточки, прочитанный провайдером пиктограмм; null — DXF нет / деталей больше CAP. */
+export function useCardSeamGraph(): CardSeamGraph {
+  return useContext(SeamGraphContext);
 }
 
 /** The latest render's values, readable from a deferred callback without re-arming it. */

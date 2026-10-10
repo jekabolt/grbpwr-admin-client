@@ -40,6 +40,7 @@ import {
   pieceAreaSheetsRefusal,
   pieceAreaSizeRangeRefusal,
   publishPieceAreas,
+  scopeAreaPieces,
 } from './piece-areas';
 import { serverKeyOfScope, type ScopeAreaState } from './piece-areas-state';
 import type { TechCardFormData } from './schema';
@@ -131,34 +132,10 @@ export default function PieceAreasDialog({
   // Детали ЭТОГО скоупа: те, у кого есть связь с блоком его чертежа. Дедуп по имени блока — тот же,
   // что в useFabricDxfPieces: одна деталь законно названа несколькими блоками (разные листы), и
   // побеждает первая нашедшаяся связь.
-  const pieces = useMemo<DxfNormPiece[]>(() => {
-    const byPiece = new Map<string, { block: string; scopeKey: string }[]>();
-    for (const a of aliases) {
-      const key = (a.pieceLineKey ?? '').trim().toLowerCase();
-      const block = (a.blockName ?? '').trim();
-      if (!key || !block) continue;
-      const list = byPiece.get(key) ?? [];
-      if (!list.some((r) => r.block === block)) list.push({ block, scopeKey: scope.key });
-      byPiece.set(key, list);
-    }
-    const out: DxfNormPiece[] = [];
-    for (const p of pieceRows) {
-      const key = (p.lineKey ?? '').trim().toLowerCase();
-      if (!key) continue;
-      const refs = byPiece.get(key);
-      if (!refs || refs.length === 0) continue;
-      out.push({
-        name: p.name?.trim() || key,
-        lineKey: (p.lineKey ?? '').trim(),
-        // Количество на изделие в ПЛОЩАДИ ОДНОГО КОНТУРА не участвует (её умножает читатель), но
-        // входит в объяснение разбора ниже — поэтому берётся честное, а не единица.
-        perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
-        refs,
-        ungraded: !!p.ungraded,
-      });
-    }
-    return out;
-  }, [aliases, pieceRows, scope.key]);
+  const pieces = useMemo<DxfNormPiece[]>(
+    () => scopeAreaPieces(aliases, pieceRows, scope.key),
+    [aliases, pieceRows, scope.key],
+  );
 
   const outcome = useMemo(() => {
     if (!conditions.index) return null;
@@ -286,10 +263,10 @@ export default function PieceAreasDialog({
           the area of every cut piece of this fabric is measured from its patterns. ONLY areas are
           written: neither the consumption norm nor the colourway recipe changes. what it buys you —
           costing computes a lower-bound estimate from the piece area: a slot that has cut pieces
-          assigned to it gets a price even WITHOUT a “per garment” line — piece area ÷ cutting width.
-          this is NET and a lower bound: the waste between pieces is not in it, only a marker knows
-          that, and a marker will replace the estimate once there is one. the measurement fully
-          replaces the previous one for this fabric.
+          assigned to it gets a price even WITHOUT a “per garment” line — piece area ÷ cutting
+          width. this is NET and a lower bound: the waste between pieces is not in it, only a marker
+          knows that, and a marker will replace the estimate once there is one. the measurement
+          fully replaces the previous one for this fabric.
         </CalloutBox>
 
         {current.phase !== 'none' && (
@@ -333,8 +310,8 @@ export default function PieceAreasDialog({
             checks the set against the SAVED links, so it will not count the unsaved ones: if the
             links of this fabric were edited it refuses, citing the absence of block→piece links; if
             the edits touched another fabric the measurement is written, but against the old links.
-            there is nothing here to tell those two cases apart, and the cost of the mistake is areas
-            recorded for the wrong geometry. retry the measurement once the card has saved.
+            there is nothing here to tell those two cases apart, and the cost of the mistake is
+            areas recorded for the wrong geometry. retry the measurement once the card has saved.
           </CalloutBox>
         )}
 
@@ -362,8 +339,8 @@ export default function PieceAreasDialog({
         {pieces.length === 0 && (
           <CalloutBox tone='warning'>
             no cut piece is linked to a drawing block of this fabric — there is nothing to measure.
-            link them with the “↔ cut pieces” button right here: the block→piece link is exactly what
-            makes an area land on a piece.
+            link them with the “↔ cut pieces” button right here: the block→piece link is exactly
+            what makes an area land on a piece.
           </CalloutBox>
         )}
 
@@ -394,9 +371,7 @@ export default function PieceAreasDialog({
                   // Длина считается ОБЩЕЙ функцией (nettoLengthCm: площадь ÷ раскройную ширину) —
                   // той же, которой считает норму диалог применения и пересчёт. Своё деление здесь
                   // было бы вторым определением одного числа.
-                  const lengthCm = cuttingWidthCm
-                    ? nettoLengthCm(r.areaCm2, cuttingWidthCm)
-                    : null;
+                  const lengthCm = cuttingWidthCm ? nettoLengthCm(r.areaCm2, cuttingWidthCm) : null;
                   return (
                     <tr key={r.sizeId}>
                       <td>{sizeName(r.sizeId)}</td>

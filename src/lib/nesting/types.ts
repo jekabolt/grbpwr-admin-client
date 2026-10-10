@@ -3,6 +3,8 @@
 // clipper2-js, the geometry) must stay reachable only from the worker graph so none of it
 // lands in the main bundle.
 
+import type { ConversionManifest } from 'lib/pattern-import/types';
+
 export type Pt = { x: number; y: number };
 
 export type Unit = 'auto' | 'mm' | 'cm' | 'in';
@@ -73,6 +75,37 @@ export type ParseOpts = {
   tolChain: number;
 };
 
+// ЧТО КОНВЕРТЕР ЗАЯВИЛ ПРО ЭТУ ДЕТАЛЬ (F6b, 08-CONTRACT §3.1). Есть ТОЛЬКО у деталей из файла, несущего
+// манифест конвертации (`lib/pattern-import/manifest`), и ставится воркером разбора — один раз, у
+// источника. Едет на самой детали, а не отдельным каналом рядом с разбором, потому что детали
+// проходят через десяток потребителей (модалка сопоставления, раскладка, очередь партии, норма,
+// продолжение раскладки, вкладка выкроек), и каждый из них, забывший переслать боковой канал, молча
+// вернулся бы к угадыванию — то есть один и тот же файл резался бы по-разному на разных экранах.
+// Отсутствует — значит «манифеста нет, ведём себя ровно как до F6b».
+export type PieceManifestFacts = {
+  // Карточка, для которой файл сконвертирован (manifest.techCardId). Размеры манифеста ДРУГОЙ
+  // карточки сами в ряд не пишутся (F14f, use-block-sizes ownManifest).
+  techCardId: number;
+  // Идентичность детали, как её написал конвертер («FP_L», «BP»).
+  identity: string;
+  // Размерный хвост, как он написан в имени блока; '' у неградуируемой детали.
+  size: string;
+  // Размер карточки (size id), под который блок выгружен; 0 у неградуируемой.
+  sizeId: number;
+  // Имя детали КАРТОЧКИ по умолчанию: у пары — без руки («FP» для FP_L и FP_R), иначе идентичность.
+  cardName: string;
+  pairHand: 'L' | 'R' | null;
+  pairOf: string | null;
+  // Деталь со сгиба, развёрнутая конвертером в полную: линия сгиба лежит на слое 8 как справка.
+  unfolded: boolean;
+  // Слои, как их записал конвертер: крой (финальный), шов, долевая.
+  cutLayer: string;
+  seamLayer: string;
+  grainLayer: string;
+  // Припуск, уже вложенный в линию кроя, СМ (единица движка).
+  cutAllowanceCm: number;
+};
+
 export type PieceDTO = {
   id: number;
   // Block name from the DXF when the file is AAMA-shaped, else «деталь N».
@@ -121,6 +154,8 @@ export type PieceDTO = {
   // and read as a parser bug.
   originX?: number;
   originY?: number;
+  // См. PieceManifestFacts. Только у деталей файла с манифестом конвертации.
+  manifest?: PieceManifestFacts;
 };
 
 export type NestPieceConfig = {
@@ -390,6 +425,10 @@ export type WorkerResponse =
       // правильно отсутствует, для вопроса «деталь исчезла из чертежа» — присутствует, и путать эти
       // два ответа значит предлагать к удалению живую деталь со всем, что на ней держится.
       blockNames: string[];
+      // Манифест конвертации по индексу файла пачки; null — файл без манифеста (F6b).
+      manifests: (ConversionManifest | null)[];
+      // Codex C3: почему манифест файла не принят (null — принят или его нет).
+      manifestDistrust?: (string | null)[];
     }
   | {
       type: 'progress';

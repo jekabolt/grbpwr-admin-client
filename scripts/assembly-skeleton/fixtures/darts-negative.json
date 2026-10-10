@@ -1,0 +1,73 @@
+{
+  "id": "darts-negative",
+  "note": "Vees that are NOT darts, each failing one rule: a vent (intake 190, depth 65), intake 70 > 60, depth 35 < 40, depth 45 < 1.5 \u00d7 intake 40. And a dart CUT OUT of the outline (no line inside): no step, one warning.",
+  "category": "generic",
+  "pieces": [
+    {
+      "key": "PANEL",
+      "poly": [
+        [0, 0],
+        [60, 0],
+        [60, 40],
+        [0, 40]
+      ],
+      "inner": [
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [2, 40],
+            [11.5, 33.5],
+            [21, 40]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [24, 40],
+            [27.5, 28],
+            [31, 40]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [34, 40],
+            [34.6, 36.5],
+            [35.2, 40]
+          ]
+        },
+        {
+          "layer": "8",
+          "closed": false,
+          "pts": [
+            [40, 40],
+            [42, 35.5],
+            [44, 40]
+          ]
+        }
+      ],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    },
+    {
+      "key": "NOTCHED",
+      "poly": [
+        [0, 0],
+        [40, 0],
+        [40, 30],
+        [21.25, 30],
+        [20, 19],
+        [18.75, 30],
+        [0, 30]
+      ],
+      "inner": [],
+      "piecesPerGarment": 1,
+      "cutSymmetry": null
+    }
+  ],
+  "expect": {},
+  "notchWarnings": 1
+}
