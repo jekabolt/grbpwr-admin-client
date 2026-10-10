@@ -301,11 +301,15 @@ export function groupDetailed(
     alternatives?: SkeletonUnit['alternatives'];
     confidence?: number;
   };
-  const geoOf = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  // Identical twins indexed once: `identical` is asked for every pair of a family or a repeat, and
+  // a linear scan of `twinOf` there made a set of n identical pieces Θ(n³) (150 pieces: millions).
+  const twinsOf = new Map<string, Set<string>>();
+  for (const p of graph.pieces) {
+    const ids = p.twinOf.filter((t) => t.kind === 'identical').map((t) => t.key);
+    if (ids.length) twinsOf.set(p.pieceKey, new Set(ids));
+  }
   const identical = (a: Entity, b: Entity) =>
-    !a.unit &&
-    !b.unit &&
-    (geoOf.get(a.key)?.twinOf.some((t) => t.key === b.key && t.kind === 'identical') ?? false);
+    !a.unit && !b.unit && (twinsOf.get(a.key)?.has(b.key) ?? false);
   function layerPairs(group: Entity[]): LayerPair[] {
     const out: LayerPair[] = [];
     const used = new Set<string>();

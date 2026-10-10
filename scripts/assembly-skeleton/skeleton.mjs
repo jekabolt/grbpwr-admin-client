@@ -47,6 +47,7 @@ await build({
 });
 const {
   buildSkeleton,
+  groupUnits,
   orderTemplate,
   skeletonDeps,
   readSeamGraph,
@@ -550,6 +551,75 @@ console.log('\nChosen readings on the blazer (pins → rebuild)');
     );
     gate('blazer: the skeleton offers readings', decisions.length > 0, `${decisions.length}`);
     gate('blazer: every chosen reading rebuilds a clean order', bad.length === 0, bad.join(' | '));
+  }
+}
+
+// ── grouping cost on a pile of identical pieces (16 triangles of a bag, ×10) ──────────────────
+// Layer pairs (F1) and repeats (F4) ask «identical?» for every pair of a family; a linear scan of
+// twinOf there is Θ(n³) — 600 such pieces took ~1 s on the main thread. With twins indexed it is
+// ~n²: 150 pieces well under 200 ms, 600 under 900 ms (the old scan, 1.2–1.6 s, goes red there).
+console.log('\nGrouping cost: n pieces of one shape (synthetic, every pair identical twins)');
+{
+  const synth = (n, base) => {
+    const keys = Array.from({ length: n }, (_, i) => `K${String(i).padStart(4, '0')}`);
+    const name = (i) => `${base}_${i + 1}`;
+    return {
+      graph: {
+        pieces: keys.map((k, i) => ({
+          pieceKey: k,
+          name: name(i),
+          hand: null,
+          cloth: 'main',
+          rs: [],
+          corners: [],
+          notchIdx: [],
+          edges: [],
+          rect: false,
+          areaMm2: 1000,
+          perimMm: 100,
+          twinOf: keys.filter((x) => x !== k).map((x) => ({ key: x, kind: 'identical' })),
+        })),
+        chosen: [],
+        rejected: [],
+        components: [],
+        warnings: [],
+      },
+      facts: {
+        pieces: keys.map((k, i) => ({
+          pieceKey: k,
+          name: name(i),
+          piecesPerGarment: 1,
+          cutSymmetry: 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL',
+          cloth: 'main',
+          fused: false,
+        })),
+        category: 'generic',
+        bom: {},
+        defaultMachineType: null,
+      },
+    };
+  };
+  const time = (n, base) => {
+    const { graph, facts } = synth(n, base);
+    const t0 = performance.now();
+    const units = groupUnits(graph, facts, orderTemplate('generic'));
+    return { ms: performance.now() - t0, units: units.length };
+  };
+  for (const [n, budget] of [
+    [150, 200],
+    [600, 900],
+  ]) {
+    // nameless (a repeat → one ring) and named (BLT_* → layer pairs by number)
+    const ring = time(n, 'triangle');
+    const pairs = time(n, 'BLT');
+    console.log(
+      `  ${n}: repeat ${ring.ms.toFixed(0)} ms (${ring.units} unit), pairs ${pairs.ms.toFixed(0)} ms (${pairs.units} units)`,
+    );
+    gate(
+      `${n} identical pieces group in < ${budget} ms (repeat and layer pairs)`,
+      ring.ms < budget && pairs.ms < budget && ring.units === 1 && pairs.units === n / 2 + 1,
+      `${ring.ms.toFixed(0)} / ${pairs.ms.toFixed(0)} ms`,
+    );
   }
 }
 
