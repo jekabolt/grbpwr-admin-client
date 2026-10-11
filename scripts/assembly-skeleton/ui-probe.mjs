@@ -17,6 +17,8 @@
 //   node scripts/assembly-skeleton/ui-probe.mjs --mutate-auto-default  auto mode hands out the manual
 //                                                                    defaults (guesses unticked, no
 //                                                                    AUTO marks) — AU and G MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-tie-autopick  auto mode ticks a tie like any
+//                                                                    other reading — AT MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -39,6 +41,9 @@
 //      off and survives auto ↔ manual; manual = the old default ticks; a chosen reading rebuilds and
 //      is the person's; apply all writes the whole skeleton. Every other scenario switches the
 //      panel to manual first, so their counts stay the manual defaults they were written for.
+//   AT A TIE (07 review): a decision the engine broke by name only is NOT auto-picked — unticked,
+//      «1 tie to decide», listed with its readings, the steps built on it waiting; taking a reading
+//      ticks it and the rest of the order again.
 //   G  THE REAL ENGINE on SS26-005 (25 pieces, sewing lines from the DXF): the production provider
 //      reads the pattern; unit inputs and outputs carry real pictograms; after apply the schematic
 //      shows unit glyphs through CardUnitPicturesProvider. Skipped, loudly, without the plans folder.
@@ -61,6 +66,7 @@ const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array')
 const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
 const MUTATE_SNAPSHOT_SUGG = process.argv.includes('--mutate-snapshot-suggestion');
 const MUTATE_AUTO_DEFAULT = process.argv.includes('--mutate-auto-default');
+const MUTATE_TIE_AUTOPICK = process.argv.includes('--mutate-tie-autopick');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -241,6 +247,26 @@ if (MUTATE_AUTO_DEFAULT)
           contents: src
             .replace(AUTO_BASE_FIX, 'kept(i) ?? defaultPick(s)')
             .replace(AUTO_RETURN_FIX, 'return closeOrder(steps, settled, keep);'),
+          loader: 'ts',
+        };
+      });
+    },
+  });
+
+// Auto mode that ticks a tie like any other reading (pre-review): autoPick ignores `decision.tie`.
+const TIE_FIX = `  !isDerived(s) && isTie(s)\n    ? { accepted: false, applied: false, tie: true }`;
+if (MUTATE_TIE_AUTOPICK)
+  plugins.push({
+    name: 'tie-autopick-mutation',
+    setup(b) {
+      b.onLoad({ filter: /assembly-skeleton-ticks\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(TIE_FIX)) throw new Error('tie mutation did not find its line');
+        return {
+          contents: src.replace(
+            TIE_FIX,
+            `  false && isTie(s)\n    ? { accepted: false, applied: false, tie: true }`,
+          ),
           loader: 'ts',
         };
       });
@@ -1368,6 +1394,72 @@ await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
   await closePanel();
 }
 
+// ── AT ──────────────────────────────────────────────────────────────────────────────────────────
+head('AT — a tie is not auto-picked: it waits «to decide», with what is built on it');
+await mount({ tie: true });
+await page.click('[data-skeleton-door="empty"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+{
+  const acc = (i) =>
+    page.locator(`[data-skeleton-step="${i}"]`).getAttribute('data-skeleton-accepted');
+  ck((await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on', 'auto mode');
+  ck(
+    (await acc(2)) === '0' && (await acc(3)) === '0' && (await acc(4)) === '0',
+    'the tie (step 2) is unticked, and so are the joins built on its unit',
+    `${await acc(2)} ${await acc(3)} ${await acc(4)}`,
+  );
+  ck((await acc(0)) === '1', 'the steps before it stay ticked');
+  ck((await headAttr('to-decide')) === '1', 'the header counts 1 to decide');
+  const headText = (await page.locator('[data-skeleton-to-decide]').innerText()).replace(
+    /\s+/g,
+    ' ',
+  );
+  ck(/1 tie to decide/.test(headText), 'the header says «1 tie to decide»', headText);
+  ck(
+    !(await autoSteps()).includes(2),
+    'the tie is not marked AUTO',
+    JSON.stringify(await autoSteps()),
+  );
+  const notice = (await page.locator('[data-skeleton-tie="2"]').count())
+    ? await page.locator('[data-skeleton-tie="2"]').innerText()
+    : '';
+  ck(
+    /is a tie/.test(notice) && /fit the body alike/.test(notice),
+    'the notice names the tie and why, in words',
+    notice.replace(/\s+/g, ' '),
+  );
+  ck(
+    (await page.locator('[data-skeleton-step-tie="2"]').count()) === 1,
+    'its line says it is a tie left for the person',
+  );
+  await shot('auto-tie-mock', '[data-skeleton-panel]');
+  // Taking the engine's reading from the notice ticks it — and the order waiting on it.
+  await page.click('[data-skeleton-tie-variant="2.0"]');
+  await page.waitForTimeout(150);
+  ck(
+    (await acc(2)) === '1' && (await acc(3)) === '1' && (await acc(4)) === '1',
+    'taking the first reading ticks the tie and the joins built on it',
+    `${await acc(2)} ${await acc(3)} ${await acc(4)}`,
+  );
+  ck(
+    (await headAttr('to-decide')) === '0' &&
+      (await page.locator('[data-skeleton-tie]').count()) === 0,
+    'nothing is left to decide',
+  );
+  await closePanel();
+  // The other reading: a rebuild with it pinned is the person's — no tie, ticked.
+  await mount({ tie: true });
+  await page.click('[data-skeleton-door="empty"]');
+  await page.waitForSelector('[data-skeleton-tie-variant="2.1"]', { timeout: 5000 });
+  await page.click('[data-skeleton-tie-variant="2.1"]');
+  await page.waitForSelector('[data-skeleton-tie]', { state: 'detached', timeout: 5000 });
+  ck(
+    (await acc(2)) === '1' && (await headAttr('to-decide')) === '0',
+    'choosing the other reading rebuilds it as the person’s pick: ticked, nothing to decide',
+  );
+  await closePanel();
+}
+
 // ── D ───────────────────────────────────────────────────────────────────────────────────────────
 head('D — a card that already has steps');
 const EXIST = [
@@ -1943,6 +2035,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}${MUTATE_AUTO_DEFAULT ? '  (mutation: auto mode hands out the manual defaults)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}${MUTATE_AUTO_DEFAULT ? '  (mutation: auto mode hands out the manual defaults)' : ''}${MUTATE_TIE_AUTOPICK ? '  (mutation: auto mode ticks a tie)' : ''}`,
 );
 if (bad) process.exitCode = 1;

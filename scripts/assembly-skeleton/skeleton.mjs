@@ -1619,7 +1619,7 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
       `  bag: belt onto INNER at ${belt.i} (${belt.step?.decision?.id ?? 'no decision'}); ${placed(p, 'BRDR')}; bag closed at ${closed}`,
     );
     gate(
-      'bag: a belt fitting twin panels alike goes onto the first, as a decision with the other beside it',
+      'bag: a belt fitting twin panels alike goes onto INNER (first by name), as a decision with the other beside it',
       belt.i >= 0 &&
         belt.step.decision?.id === 'place:BLT_1+BLT_2' &&
         belt.step.alternatives?.some((a) => a.inputs.includes('OUTER')),
@@ -1709,6 +1709,94 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
       placed(bare, 'FLP_L'),
     );
   }
+}
+
+// ── placement does not depend on the order of the pieces on the card (07 review, major 2) ──────
+// E, E2 and E3 rank hosts by evidence (seam, name, position, parts, size); where the evidence ties,
+// the last word is the name, then the piece key — never where a piece stands on the card. A tie
+// that only the name or key broke is said as a TIE: auto mode leaves it «to decide».
+console.log('\nPlacement under reversed and shuffled pieces (synthetic, fixtures/placement.json)');
+{
+  const { cards } = load('placement.json');
+  /** The proposal as a set: each join's inputs (by leaves), its unit, its decision, and a tie. */
+  const signature = (p) => {
+    const m = leavesOf(p);
+    return p.steps
+      .filter((s) => s.outputUnitKey)
+      .map(
+        (s) =>
+          `${s.outputUnitName} ← ${s.inputs
+            .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
+            .sort()
+            .join(
+              ' | ',
+            )}${s.decision ? ` [${s.decision.id}=${s.decision.chosen}${s.decision.tie ? ' tie' : ''}]` : ''}`,
+      )
+      .sort();
+  };
+  const r = rng(7041);
+  for (const [name, spec] of Object.entries(cards)) {
+    const base = signature(run(synthCard(spec)));
+    const orders = [
+      ['reversed', [...spec.pieces].reverse()],
+      ...Array.from({ length: 5 }, (_, i) => [`shuffle #${i + 1}`, shuffled(spec.pieces, r)]),
+    ];
+    const differ = [];
+    for (const [how, pieces] of orders) {
+      const sig = signature(run(synthCard({ ...spec, pieces })));
+      const only = (a, b) => a.filter((x) => !b.includes(x));
+      if (sig.join('\n') !== base.join('\n'))
+        differ.push(`${how}: ${only(sig, base).join('; ')} (was ${only(base, sig).join('; ')})`);
+    }
+    gate(
+      `${name}: the same joins, units and decisions under reversed and 5 shuffled piece orders`,
+      differ.length === 0,
+      differ.join(' · '),
+    );
+  }
+  // The bag's belt fits INNER and OUTER alike (twins, no parts on either): the engine's reading is
+  // INNER by name, said as a tie — not a pick auto mode may tick.
+  const p = run(synthCard(cards.bag));
+  const belt = p.steps.find((s) => s.decision?.id === 'place:BLT_1+BLT_2');
+  gate(
+    'bag: the belt on twin panels is a tie decision (INNER by name, OUTER beside it)',
+    !!belt?.decision?.tie && belt.inputs.includes('INNER'),
+    belt ? JSON.stringify(belt.decision) : 'no place decision',
+  );
+  // E2 and E3 ties of their own: twin strips for a seamless pocket, twin panels for an orphan.
+  for (const [card, id] of [
+    ['twinStrips', 'place:PCK_L'],
+    ['twinOrphan', 'orphan:TAB_L'],
+  ]) {
+    const t = run(synthCard(cards[card]));
+    const st = t.steps.find((s) => s.decision?.id === id);
+    gate(
+      `${card}: ${id} is a tie decision, said in words, the other host beside it`,
+      !!st?.decision?.tie && /alike/.test(st.decision.tie) && (st.alternatives?.length ?? 0) >= 1,
+      st ? JSON.stringify(st.decision) : `no ${id}`,
+    );
+  }
+  // A pinned reading 0 is a person's: no longer a tie.
+  {
+    const c = synthCard(cards.bag);
+    const pinned = buildSkeleton(c.graph, c.facts, orderTemplate('generic'), skeletonDeps, {
+      pins: { 'place:BLT_1+BLT_2': 0 },
+    });
+    const belt = pinned.steps.find((s) => s.decision?.id === 'place:BLT_1+BLT_2');
+    gate(
+      'bag: reading 0 pinned by a person is not a tie',
+      !!belt && !belt.decision.tie,
+      JSON.stringify(belt?.decision),
+    );
+  }
+  // Control: the strips' pocket is placed by its position word — evidence, not a tie.
+  const st = run(synthCard(cards.strips));
+  const pocket = st.steps.find((s) => s.decision?.id === 'place:PCK_BTTM_L');
+  gate(
+    'control: a placement by evidence (position word) is no tie',
+    !!pocket && !pocket.decision.tie,
+    pocket ? JSON.stringify(pocket.decision) : 'no place decision',
+  );
 }
 
 // ── same-shape warnings once per pair of name families (07-ENGINE-QUALITY §4.8) ──────────────

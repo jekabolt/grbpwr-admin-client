@@ -328,7 +328,16 @@ export type SkeletonStep = {
   };
 };
 
-export type SkeletonDecision = { id: string; chosen: number };
+export type SkeletonDecision = {
+  id: string;
+  chosen: number;
+  /**
+   * The engine's own reading was not told apart by evidence: the hosts tie on every rule (seam,
+   * name, position, parts, size) and only the name or the piece key put this one first — said in
+   * words. Auto mode does not tick it; it waits for a person. Absent once a person pins a reading.
+   */
+  tie?: string;
+};
 
 /** Pinned readings: decision id → reading index (0 = the engine's own). */
 export type SkeletonPins = Readonly<Record<string, number>>;

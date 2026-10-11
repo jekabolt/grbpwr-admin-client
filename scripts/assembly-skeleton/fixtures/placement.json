@@ -65,6 +65,34 @@
         ["SLV_L", "BP", 0.85],
         ["PCK_L", "FP_L", 0.8]
       ]
+    },
+    "twinStrips": {
+      "_why": "E2 tie (07 review): a pocket with no seam and two strips of the left front alike in name, position and size: onto the first strip by name, said as a tie, never by where the pieces stand on the card.",
+      "category": "generic",
+      "pieces": [
+        ["FP_1_L", 50000],
+        ["FP_2_L", 50000],
+        ["BP", 90000],
+        ["PCK_L", 4000]
+      ],
+      "seams": [
+        ["FP_1_L", "FP_2_L", 0.9],
+        ["FP_2_L", "BP", 0.9]
+      ]
+    },
+    "twinOrphan": {
+      "_why": "E3 tie (07 review): a left piece with no role and no seam, and two left panels with no parts and one size: onto the first by name, said as a tie.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["SLV_L", 50000],
+        ["BP", 90000],
+        ["TAB_L", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85]
+      ]
     }
   }
 }

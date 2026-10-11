@@ -168,6 +168,8 @@ const MACHINE = (
 export function mockProposal(
   facts: SkeletonFacts,
   options: SkeletonOptions = {},
+  /** The neck decision is a TIE the engine broke by name (scenario AT) — until a person pins it. */
+  tie = false,
 ): SkeletonProposal {
   const has = (k: string) => facts.pieces.some((p) => p.pieceKey === k);
   const neck = options.pins?.neck === 1 ? 1 : 0;
@@ -227,7 +229,13 @@ export function mockProposal(
         zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
         confidence: 0.66,
         alternatives: [readings[1 - neck]],
-        decision: { id: 'neck', chosen: neck },
+        decision: {
+          id: 'neck',
+          chosen: neck,
+          ...(tie && options.pins?.neck === undefined
+            ? { tie: 'the neckband and the pocket fit the body alike — nothing tells them apart' }
+            : {}),
+        },
       }),
       MACHINE({
         inputs: ['NECK', 'SL_L'],
@@ -314,6 +322,8 @@ type Mount = {
   churnShapes?: boolean;
   /** BOM lines of the card (U7: one sewing thread → the step editor suggests it). */
   bom?: Record<string, unknown>[];
+  /** The neck decision is a tie (scenario AT): auto mode must leave it to the person. */
+  tie?: boolean;
   /** Mount the STUB AI asker (scenario L; 'fail' = it refuses after being charged); without it the
    *  AI bar is not there at all. */
   ai?: boolean | 'fail';
@@ -577,7 +587,7 @@ function Harness({ m }: { m: Mount }) {
     // Scenario G runs the PRODUCTION provider — the one the tech card's context defaults to.
     if (m.real && DEFAULT_SKELETON_PROVIDER) return DEFAULT_SKELETON_PROVIDER(facts, deps, options);
     if (m.unitless) return unitlessProposal();
-    return mockProposal(facts, options);
+    return mockProposal(facts, options, !!m.tie);
   };
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },

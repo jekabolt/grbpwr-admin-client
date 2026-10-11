@@ -19,6 +19,11 @@
 // and each step that is a guess or an open reading is marked `auto` — on its line, in the notice
 // (grouped by `autoKindOf`), and in the header count. Nothing is written until the person applies,
 // same as manual; manual mode is `defaultPicks` above, unchanged.
+//
+// A TIE IS NOT AUTO-PICKED (07 review). A decision whose hosts tie on every rule — only the name or
+// the piece key put the engine's reading first (`decision.tie`) — is no reading at all: auto mode
+// leaves it unticked and marked `tie`, «to decide», and with it everything built on its unit. A
+// person's tick, or a reading they choose, settles it; the rest of the order is ticked again then.
 import { SKELETON, type SkeletonStep } from 'lib/assembly-skeleton/types';
 
 export type StepPick = {
@@ -39,7 +44,15 @@ export type StepPick = {
   auto?: true;
   /** Ticked or unticked by a person: kept through a rebuild and through an auto ↔ manual switch. */
   own?: true;
+  /**
+   * Left unticked by auto mode: a tie the engine broke by name only (`decision.tie`). Waits for a
+   * person — the panel lists it «to decide». A person's own tick clears it.
+   */
+  tie?: true;
 };
+
+/** The engine's reading of this step is a tie it broke by name only — not a pick to take for granted. */
+export const isTie = (s: SkeletonStep): boolean => !!s.decision?.tie;
 
 /** A guess the default ticks took for the person — shown on its row and listed in the notice. */
 export const autoGuess = (p: StepPick | undefined): boolean =>
@@ -221,12 +234,28 @@ export const defaultPicks = (steps: readonly SkeletonStep[]): StepPick[] =>
 
 // ── auto mode ───────────────────────────────────────────────────────────────────────────────────
 
-/** Auto mode's pick of a fresh step: ticked; marked when the engine could not settle it alone. */
-export const autoPick = (s: SkeletonStep): StepPick => ({
-  accepted: true,
-  applied: false,
-  ...(!isDerived(s) && isOpenChoice(s) ? { auto: true as const } : {}),
-});
+/**
+ * Auto mode's pick of a fresh step: ticked; marked when the engine could not settle it alone — but a
+ * tie (`isTie`) is left unticked, marked, for a person.
+ */
+export const autoPick = (s: SkeletonStep): StepPick =>
+  !isDerived(s) && isTie(s)
+    ? { accepted: false, applied: false, tie: true }
+    : {
+        accepted: true,
+        applied: false,
+        ...(!isDerived(s) && isOpenChoice(s) ? { auto: true as const } : {}),
+      };
+
+/** Auto mode's ties left to a person: the tie steps (indices) still unticked. */
+export const openTies = (
+  steps: readonly SkeletonStep[],
+  picks: readonly StepPick[],
+  shown: (s: SkeletonStep) => boolean = () => true,
+): number[] =>
+  steps
+    .map((_, i) => i)
+    .filter((i) => !!picks[i]?.tie && !picks[i].accepted && !picks[i].applied && shown(steps[i]));
 
 /**
  * The ticks of a fresh proposal in auto mode: every step, riders with their join, each open choice

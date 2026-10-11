@@ -64,6 +64,7 @@ import {
   defaultPick,
   isDerived,
   isOpenChoice,
+  openTies,
   orderClosure,
   personalPick,
   picksFor,
@@ -761,13 +762,21 @@ function AssemblySkeletonPanel({
   // unticks them. A rider may still be dropped on its own.
   const setAccepted = (i: number, accepted: boolean) => {
     const riders = new Set(proposal ? ridersOf(proposal.steps, i) : []);
-    onPicks((prev) =>
+    onPicks((prev) => {
       // A person's tick is theirs: it is no longer «ticked to close the order» nor AUTO, and an
       // auto ↔ manual switch keeps it.
-      prev.map((p, j) =>
-        j === i || (riders.has(j) && !p.applied) ? { accepted, applied: p.applied, own: true } : p,
-      ),
-    );
+      const next = prev.map(
+        (p, j): StepPick =>
+          j === i || (riders.has(j) && !p.applied)
+            ? { accepted, applied: p.applied, own: true }
+            : p,
+      );
+      // Auto mode: a tick settles what waited on it (a tie and the steps built on its unit) — every
+      // step but a person's own picks takes auto mode's pick again.
+      return autoMode && accepted && proposal && next.length === proposal.steps.length
+        ? picksFor(proposal.steps, true, (j) => personalPick(next[j]))
+        : next;
+    });
   };
 
   // CHOOSING A READING REBUILDS THE PROPOSAL around it: the steps after an ambiguous join depend on
@@ -908,11 +917,15 @@ function AssemblySkeletonPanel({
   // To decide = the engine's own doubts: a join it guessed or read two ways. A press or a hem that
   // rides on a join is decided with it; a step unticked only because its join is a guess is too.
   // In auto mode nothing is left to decide: each such step is picked, marked AUTO, and listed.
+  // Except a TIE: the engine's reading won by name only, so auto mode leaves it to the person.
+  const ties = autoMode ? openTies(steps, picks, shown) : [];
   const toCheck = autoMode
-    ? 0
+    ? ties.length
     : steps.filter((s) => shown(s) && !isDerived(s) && isOpenChoice(s)).length;
-  // Auto mode's header: how many shown steps a person unticked (none = «all picked»).
-  const unticked = steps.filter((s, i) => shown(s) && picks[i] && !picks[i].accepted).length;
+  // Auto mode's header: how many shown steps are unticked (none = «all picked»), ties apart.
+  const unticked = steps.filter(
+    (s, i) => shown(s) && picks[i] && !picks[i].accepted && !picks[i].tie,
+  ).length;
   // The number each counted step will get, for «with 30» on the steps that ride on it.
   const numbers = new Map<number, number>();
   {
@@ -989,7 +1002,11 @@ function AssemblySkeletonPanel({
               >
                 {steps.length} {steps.length === 1 ? 'step' : 'steps'}
                 {autoMode
-                  ? `${unticked > 0 ? ` · ${unticked} unticked` : ' · all picked'}${
+                  ? `${
+                      ties.length > 0
+                        ? ` · ${ties.length} ${ties.length === 1 ? 'tie' : 'ties'} to decide`
+                        : ''
+                    }${unticked > 0 ? ` · ${unticked} unticked` : ties.length ? '' : ' · all picked'}${
                       autoPicked.length > 0 ? ` · ${autoPicked.length} auto-picked` : ''
                     }`
                   : toCheck > 0
@@ -1158,6 +1175,7 @@ function AssemblySkeletonPanel({
                 ))}
 
                 {(closingJoins.length > 0 ||
+                  ties.length > 0 ||
                   autoPicked.length > 0 ||
                   riderGuesses.length > 0 ||
                   decidingJoins.length > 0 ||
@@ -1181,6 +1199,47 @@ function AssemblySkeletonPanel({
                         </span>
                       </Text>
                     )}
+                    {ties.map((i) => {
+                      const st = steps[i];
+                      const vs = variantsOf(st);
+                      return (
+                        <div key={`tie${i}`} data-skeleton-tie={i}>
+                          <Text size='micro' component='p'>
+                            <b>to decide: «{st.label || st.outputUnitName}» is a tie</b>
+                            <span className='text-labelColor'>
+                              {' '}
+                              — {st.decision?.tie}. Auto mode does not pick it, and the steps built
+                              on it wait unticked: choose one, or tick the step to take the first.
+                            </span>
+                          </Text>
+                          {vs.length > 1 && (
+                            <ChipRow className='mt-0.5'>
+                              {vs.map((v, vi) => (
+                                <Chip
+                                  key={vi}
+                                  nonForm
+                                  selected={false}
+                                  disabled={readingsLocked}
+                                  onClick={() =>
+                                    vi === (st.decision?.chosen ?? 0)
+                                      ? setAccepted(i, true)
+                                      : chooseReading(st, vi)
+                                  }
+                                  title={`${v.reason} · choosing it ${
+                                    vi === (st.decision?.chosen ?? 0)
+                                      ? 'ticks this step'
+                                      : 're-reads the steps after it'
+                                  }`}
+                                  data-skeleton-tie-variant={`${i}.${vi}`}
+                                >
+                                  {v.inputs.map(nameOf).join(' + ')}
+                                </Chip>
+                              ))}
+                            </ChipRow>
+                          )}
+                        </div>
+                      );
+                    })}
                     {autoPicked.length > 0 && (
                       <div className='flex flex-col' data-skeleton-auto-notice={autoPicked.length}>
                         <Text size='micro' component='p'>
@@ -1864,6 +1923,18 @@ function SkeletonLine({
             ))}
           </ChipRow>
         </div>
+      )}
+      {pick.tie && !pick.accepted && !pick.applied && (
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className='w-full pl-[3.25rem]'
+          data-skeleton-step-tie={index}
+        >
+          a tie, left for you: {raw.decision?.tie ?? 'the readings are alike'} — tick it, or choose
+          a reading
+        </Text>
       )}
       {pick.accepted &&
         ((pick.auto && !pick.applied) ||

@@ -416,11 +416,18 @@ function autoTotals(rows) {
     );
   }
   const due = rows.filter((r) => r.ticks?.proposalReachesOne);
-  const miss = due.filter((r) => !r.auto?.reachOne).map((r) => r.code);
-  lines.push(
-    `== AUTO: the auto batch reaches one garment on ${due.length - miss.length}/${due.length} cards where the proposal does${miss.length ? ` — NOT on ${miss.join(', ')}` : ''}; ${rows.reduce((a, r) => a + (r.auto?.guesses ?? 0), 0)} auto-picked guesses`,
+  const missed = due.filter((r) => !r.auto?.reachOne);
+  const miss = missed.map(
+    (r) =>
+      `${r.code}${r.auto?.ties ? ` (${r.auto.ties} ${r.auto.ties === 1 ? 'tie' : 'ties'} left to decide)` : ''}`,
   );
-  return { text: lines.join('\n'), ok: miss.length === 0 };
+  // A card stopped only by a tie the engine broke by name stops by design (07 review): the gate
+  // holds the rest.
+  const hard = missed.filter((r) => !r.auto?.ties);
+  lines.push(
+    `== AUTO: the auto batch reaches one garment on ${due.length - miss.length}/${due.length} cards where the proposal does${miss.length ? ` — NOT on ${miss.join(', ')}` : ''}; ${rows.reduce((a, r) => a + (r.auto?.guesses ?? 0), 0)} auto-picked guesses; ${rows.reduce((a, r) => a + (r.auto?.ties ?? 0), 0)} ties left to decide`,
+  );
+  return { text: lines.join('\n'), ok: hard.length === 0 };
 }
 const autoT = autoTotals(summary);
 writeFileSync(resolve(OUT, 'summary.txt'), `${table}\n\n${autoT.text}\n`);

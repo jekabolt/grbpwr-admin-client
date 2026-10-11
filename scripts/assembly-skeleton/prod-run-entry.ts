@@ -763,6 +763,9 @@ export async function runCard(input: CardInput) {
         picked: steps.filter((s, i) => auto[i].accepted && !isDerived(s)).length,
         unpicked: steps.filter((s, i) => !auto[i].accepted && !isDerived(s)).length,
         guesses: guesses.length,
+        // 07 review: a tie (only the name broke it) is left unticked for a person, with what
+        // builds on it — the auto batch stops there by design.
+        ties: steps.filter((s, i) => !!auto[i].tie && !isDerived(s)).length,
         byKind,
         hard: autoHard.length,
         reachOne: steps.length > 0 && autoHard.length === 0 && autoRel.length === 0,

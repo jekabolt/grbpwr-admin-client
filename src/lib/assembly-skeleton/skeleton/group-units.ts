@@ -150,6 +150,8 @@ function decide(
   id: string,
   readings: Reading[],
   live: (e: Entity) => boolean,
+  /** Reading 0 won only on the name / key tie-breaker: why, in words (absent = by evidence). */
+  tie?: string,
 ): { chosen: number; decision?: SkeletonDecision; others: SkeletonUnit['alternatives'] } {
   const want = pins[id] ?? 0;
   // A pin that no longer fits (the reading vanished, or one of its inputs is already sewn
@@ -158,7 +160,8 @@ function decide(
   if (readings.length < 2) return { chosen, others: undefined };
   return {
     chosen,
-    decision: { id, chosen },
+    // A tie is the engine's default only: a pinned reading (even reading 0) is a person's.
+    decision: { id, chosen, ...(tie && pins[id] === undefined ? { tie } : {}) },
     others: readings
       .filter((_, i) => i !== chosen)
       .map((r) => ({ inputs: r.inputs.map((e) => e.key), seams: [], reason: r.reason })),
@@ -170,6 +173,17 @@ const leafId = (es: Entity[]) =>
     .flatMap((e) => e.leaves)
     .sort()
     .join('+');
+
+const cmpText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/**
+ * THE LAST WORD where evidence ties: the name, then the piece keys — never where a piece stands on
+ * the card. Hosts ranked by it come out the same whatever order the card lists its
+ * pieces in (07 review: twin panels of a bag swapped their belt when the pieces were reversed).
+ */
+const byNameThenKey = (a: Entity, b: Entity) =>
+  cmpText(a.name, b.name) || cmpText(leafId([a]), leafId([b]));
+/** Two areas a pattern cannot tell apart (twins cut from one block differ by rounding). */
+const sameArea = (a: number, b: number) => Math.abs(a - b) <= 0.02 * Math.max(a, b, 1);
 
 /** B1 with the state `buildSkeleton` continues from. */
 export function groupDetailed(
@@ -239,8 +253,6 @@ export function groupDetailed(
       if (orphaned.has(k)) return true;
       return roleDef(p?.role ?? null)?.level === 'sub' && !isFlap(p?.name ?? '');
     }).length;
-  /** Where a thing first stands on the card: its earliest piece. */
-  const cardOrder = (e: Entity) => Math.min(...e.leaves.map((k) => byKey.get(k)?.order ?? 1e9));
   /** A flap, or a unit of flap layers only. */
   const flapEntity = (e: Entity) => e.leaves.every((k) => isFlap(byKey.get(k)?.name ?? ''));
   /** A thing's own panel pieces — not the pockets or plackets already sewn on it. */
@@ -418,7 +430,9 @@ export function groupDetailed(
             Number(y.stem) - Number(x.stem) ||
             Number(y.adj) - Number(x.adj) ||
             Number(y.numbered) - Number(x.numbered) ||
-            y.s - x.s,
+            y.s - x.s ||
+            byNameThenKey(x.a, y.a) ||
+            byNameThenKey(x.b, y.b),
         );
       const [best] = tied;
       const head = best.a;
@@ -455,7 +469,7 @@ export function groupDetailed(
         .sort(
           (x, y) =>
             Math.abs((byKey.get(x.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)) -
-            Math.abs((byKey.get(y.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)),
+              Math.abs((byKey.get(y.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)) || byNameThenKey(x, y),
         )[0];
     const self: Entity = {
       key: p.key,
@@ -695,7 +709,7 @@ export function groupDetailed(
         // To the panel itself: a seam to a pocket already on it says nothing about this one.
         .map((t) => ({ t, score: panelScore(e, t) }))
         .filter((x) => x.score >= SKELETON.accept)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
       if (!cands.length) continue;
       // ONE host: a seam the part could equally make with another piece (a rival within
       // SKELETON.ambiguity, here or in lane A's own reading) is no host yet — step 5 decides.
@@ -717,8 +731,13 @@ export function groupDetailed(
       const twinTie = tied.every((x) => x.t === t || twinned(x.t, t));
       if (rivalled || (tied.length > 1 && !twinTie && !bodyless)) continue;
       const ordered = [...tied].sort(
-        (x, y) => partCount(x.t) - partCount(y.t) || cardOrder(x.t) - cardOrder(y.t),
+        (x, y) => partCount(x.t) - partCount(y.t) || byNameThenKey(x.t, y.t),
       );
+      // As many parts on the next host too: only the name put the first one first — a tie.
+      const tie =
+        ordered.length > 1 && partCount(ordered[0].t) === partCount(ordered[1].t)
+          ? `${roleName(def.id, e.hand)} fits ${apart(ordered[0].t, ordered[1].t).join(' and ')} alike, with as many parts on each — nothing tells them apart`
+          : undefined;
       const d = decide(
         pins,
         `place:${leafId([e])}`,
@@ -726,10 +745,11 @@ export function groupDetailed(
           inputs: [e, o.t],
           reason:
             i === 0
-              ? `or onto ${display(o.t)} — the same seam, the fewest parts on it`
+              ? `or onto ${display(o.t)} — the same seam, ${tie ? 'first by name' : 'the fewest parts on it'}`
               : `or onto ${display(o.t)} — the same seam`,
         })),
         isLive,
+        tie,
       );
       const pick = (ordered[d.chosen] ?? ordered[0]).t;
       const made = record([e, pick], {
@@ -746,7 +766,7 @@ export function groupDetailed(
               judgement: {
                 confidence: 0.55,
                 source: 'geometry' as const,
-                reason: `${roleName(def.id, e.hand)} fits ${tied.map((x) => display(x.t)).join(' and ')} alike — onto ${display(pick)} ${d.chosen ? 'by your reading' : 'with the fewest parts on it'}, check`,
+                reason: `${roleName(def.id, e.hand)} fits ${tied.map((x) => display(x.t)).join(' and ')} alike — onto ${display(pick)} ${d.chosen ? 'by your reading' : tie ? 'first by name: a tie, pick one' : 'with the fewest parts on it'}, check`,
               },
             }
           : {}),
@@ -779,12 +799,15 @@ export function groupDetailed(
       const oneRole = new Set(hosts.map((t) => t.roles[0])).size === 1;
       const pos = positionOf(e.name);
       const flap = flapEntity(e);
+      // A half of a pocket bag (a lone piece with a twin) may name its panel by a bare B / F.
+      const half =
+        !e.unit && (geomOf.get(e.key)?.twinOf.length ?? 0) > 0 ? panelHint(e.name) : null;
       const ranked = hosts
         .map((t) => {
           const at = positionOf(t.name);
           return {
             t,
-            hint: hintsAt(e, t, attachTo) ? 0 : 1,
+            hint: hintsAt(e, t, attachTo) || (!!half && t.roles.includes(half)) ? 0 : 1,
             position: pos === null || at === null ? 1 : at === pos ? 0 : 2,
             parts: oneRole ? 0 : flap ? -partCount(t) : partCount(t),
             rank: Math.min(
@@ -799,8 +822,20 @@ export function groupDetailed(
             a.position - b.position ||
             a.parts - b.parts ||
             a.rank - b.rank ||
-            b.area - a.area,
+            b.area - a.area ||
+            byNameThenKey(a.t, b.t),
         );
+      // The next host ties on every rule (its size within a rounding): only the name decided.
+      const [r0, r1] = ranked;
+      const tie =
+        r1 &&
+        r0.hint === r1.hint &&
+        r0.position === r1.position &&
+        r0.parts === r1.parts &&
+        r0.rank === r1.rank &&
+        sameArea(r0.area, r1.area)
+          ? `${roleName(def.id, e.hand)} could go onto ${apart(r0.t, r1.t).join(' or ')} alike — no seam, name, position or size tells them apart`
+          : undefined;
       const because = (o: (typeof ranked)[number]) =>
         o.hint === 0
           ? 'its name points there'
@@ -816,9 +851,13 @@ export function groupDetailed(
         `place:${leafId([e])}`,
         ranked.slice(0, 3).map((o, i) => ({
           inputs: [e, o.t],
-          reason: i === 0 ? `or onto ${display(o.t)} — ${because(o)}` : `or onto ${display(o.t)}`,
+          reason:
+            i === 0
+              ? `or onto ${display(o.t)} — ${tie ? 'first by name' : because(o)}`
+              : `or onto ${display(o.t)}`,
         })),
         isLive,
+        tie,
       );
       const top = ranked[d.chosen] ?? ranked[0];
       const made = record([e, top.t], {
@@ -832,7 +871,7 @@ export function groupDetailed(
         judgement: {
           confidence: top.hint === 0 || top.position === 0 ? 0.55 : 0.45,
           source: 'template',
-          reason: `${roleName(def.id, e.hand)}: the pattern gives no seam to a panel — onto ${display(top.t)} by ${d.chosen ? 'your reading' : because(top)}, while it is flat; check`,
+          reason: `${roleName(def.id, e.hand)}: the pattern gives no seam to a panel — onto ${display(top.t)} by ${d.chosen ? 'your reading' : tie ? 'name only (a tie, pick one)' : because(top)}, while it is flat; check`,
         },
       });
       made.family = top.t.family;
@@ -983,7 +1022,8 @@ export function groupDetailed(
             a.hint - b.hint ||
             a.rank - b.rank ||
             a.handMatch - b.handMatch ||
-            b.t.leaves.length - a.t.leaves.length,
+            b.t.leaves.length - a.t.leaves.length ||
+            byNameThenKey(a.t, b.t),
         );
       if (!cands.length) {
         // No panel of those roles (a bag, names that say nothing): its best seam names the host
@@ -993,7 +1033,7 @@ export function groupDetailed(
           .filter((t) => t !== e && !roleDef(t.roles[0] ?? null)?.wraps)
           .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
           .filter((x) => x.score > 0)
-          .sort((a, b) => b.score - a.score);
+          .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
         if (!partner.length) {
           warnings.push(`${e.name}: no ${attachTo.join(' or ')} to sew it onto — left for the end`);
           continue;
@@ -1089,7 +1129,10 @@ export function groupDetailed(
       const target = table
         .list(tree)
         .filter((e) => e.roles[0] === def.wraps)
-        .sort((x, y) => bestScore(seams, leaves, y) - bestScore(seams, leaves, x))[0];
+        .sort(
+          (x, y) =>
+            bestScore(seams, leaves, y) - bestScore(seams, leaves, x) || byNameThenKey(x, y),
+        )[0];
       if (!target) {
         if (layers.length >= 2) {
           record(layers, {
@@ -1242,7 +1285,7 @@ export function groupDetailed(
         .filter((t) => t !== u && t.roles.length > 0)
         .map((t) => ({ t, score: bestScore(seams, u.leaves, t) }))
         .filter((x) => x.score > 0)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
       if (!targets.length) continue;
       if (!best || targets[0].score > best.score) {
         best = {
@@ -1319,18 +1362,27 @@ export function groupDetailed(
         hosts = hosts.filter((t) => t.hand === e.hand);
       if (!hosts.length) continue;
       const ranked = [...hosts].sort(
-        (a, b) =>
-          partCount(a) - partCount(b) || areaOf(b) - areaOf(a) || cardOrder(a) - cardOrder(b),
+        (a, b) => partCount(a) - partCount(b) || areaOf(b) - areaOf(a) || byNameThenKey(a, b),
       );
+      // As many parts and the same size on the next host: only the name decided — a tie.
+      const tie =
+        ranked.length > 1 &&
+        partCount(ranked[0]) === partCount(ranked[1]) &&
+        sameArea(areaOf(ranked[0]), areaOf(ranked[1]))
+          ? `${e.name} could go onto ${apart(ranked[0], ranked[1]).join(' or ')} alike — as many parts and the same size on each`
+          : undefined;
       const d = decide(
         pins,
         `orphan:${leafId([e])}`,
         ranked.slice(0, 3).map((t, i) => ({
           inputs: [t, e],
           reason:
-            i === 0 ? `or onto ${display(t)} — the fewest parts on it` : `or onto ${display(t)}`,
+            i === 0
+              ? `or onto ${display(t)} — ${tie ? 'first by name' : 'the fewest parts on it'}`
+              : `or onto ${display(t)}`,
         })),
         isLive,
+        tie,
       );
       const top = ranked[d.chosen] ?? ranked[0];
       e.leaves.forEach((k) => orphaned.add(k));
@@ -1346,7 +1398,11 @@ export function groupDetailed(
           confidence: 0.4,
           source: 'template',
           reason: `${e.name}: no role in its name and no seam found — onto ${display(top)} ${
-            d.chosen ? 'by your reading' : `(${e.hand ? 'same hand, ' : ''}the fewest parts on it)`
+            d.chosen
+              ? 'by your reading'
+              : tie
+                ? '(first by name: a tie, pick one)'
+                : `(${e.hand ? 'same hand, ' : ''}the fewest parts on it)`
           } as a guess, check`,
         },
       });
@@ -1546,6 +1602,12 @@ export function withPart(name: string, part: string): string {
 }
 
 /** How a thing is called in a unit name: a unit by its name, a lone piece by its role (Left front). */
+/** Two hosts in words that tell them apart: their piece names where both read the same. */
+function apart(a: Entity, b: Entity): [string, string] {
+  const [x, y] = [display(a), display(b)];
+  return x === y ? [a.name, b.name] : [x, y];
+}
+
 export function display(e: Entity): string {
   return e.unit || !e.roles[0] ? e.name : roleName(e.roles[0], e.hand);
 }
