@@ -348,8 +348,10 @@ export function DollCanvas({
     if (a.fitted !== fitKey && !(sameSolve && a.moved)) {
       const b = new THREE.Box3();
       const v = new THREE.Vector3();
+      // Nothing but floating pieces (an item laid out flat — not a garment): frame them all.
+      const allFloat = topo.panels.every((p) => p.float);
       for (const p of topo.panels) {
-        if (p.float) continue;
+        if (p.float && !allFloat) continue;
         for (let i = p.offset; i < p.offset + p.count; i++)
           b.expandByPoint(v.set(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]));
       }

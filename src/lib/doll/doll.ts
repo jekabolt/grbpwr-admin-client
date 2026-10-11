@@ -27,6 +27,7 @@ import { groupPieces, type GroupedPiece, type GroupedSeam } from './groups';
 import { instanceMirrored } from './instance';
 import { completeFromJoins } from './joins';
 import { liningByName } from 'lib/assembly-skeleton/names';
+import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
 import {
@@ -108,7 +109,55 @@ type Work = {
   rejectedByPerson?: boolean;
   /** L4: a closure drawn overlapped (the buttoned centre fronts). */
   overlap?: DollClosureReport;
+  /** Not reported as a seam: replaced by its mirror-twin reading, or refused (said in notSewn). */
+  hidden?: boolean;
 };
+
+/**
+ * Trouser legs read from shape alone (no names): a tall, narrow piece whose top end is a straight,
+ * near-level waist running into a concave crotch curve (the curve below the waist widens the piece
+ * — a front / back leg). A dress or a shirt front has a short slanted shoulder above its armhole,
+ * never a level waist as wide as half the piece. Returns the leg pieces' names, or null unless a
+ * front and a back pair of them are found.
+ */
+function trouserLegs(pieces: readonly PieceGeom[]): string | null {
+  const legs = new Set<string>();
+  for (const g of pieces) {
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const [x, y] of g.rs) {
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y);
+      y1 = Math.max(y1, y);
+    }
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (h < 700 || w > 0.5 * h) continue;
+    const ends = (e: Edge) => [e.pts[0], e.pts[e.pts.length - 1]];
+    const near = (a: Pt2, b: Pt2) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 3;
+    const plain = g.edges.filter((e) => e.kind === 'edge');
+    const ok = plain.some((c) => {
+      if (c.turnDeg > -120 || c.chordMm / c.lenMm > 0.98 || c.lenMm < 150) return false;
+      const top = ends(c).reduce((m, q) => (q[1] > m[1] ? q : m));
+      if (top[1] < y1 - 0.15 * h) return false;
+      return plain.some((e) => {
+        if (e === c || !ends(e).some((q) => near(q, top))) return false;
+        const [a, b] = ends(e);
+        const off = Math.atan2(Math.abs(b[1] - a[1]), Math.abs(b[0] - a[0]));
+        return e.chordMm / e.lenMm >= 0.97 && off <= Math.PI / 12 && e.lenMm >= 0.5 * w;
+      });
+    });
+    if (ok) legs.add(g.pieceKey);
+  }
+  const named = pieces.filter(
+    (g) => legs.has(g.pieceKey) && g.twinOf.some((t) => t.kind === 'mirror' && legs.has(t.key)),
+  );
+  // Two mirror pairs (front legs and back legs): one tall pair alone could be a dress's panels.
+  return named.length >= 4 ? named.map((g) => g.name).join(', ') : null;
+}
 
 const HONESTY =
   'paper doll — shape approximate, no fabric, no body · seams pulled shut along the pattern · measures come from the pattern laid flat, never from this shape';
@@ -153,13 +202,33 @@ export function solveDoll(input: DollInput): DollReport {
   // Mirrored ×2 blocks become two panels (the block and its mirror).
   const inst = instanceMirrored(graphIn, input.facts);
   warnings.push(...inst.notes);
-  const facts = inst.facts;
+  // A card with no garment named whose pattern carries trouser legs (by shape) is read as trousers:
+  // the legs are wrapped as legs, not left floating beside a torso (11.10 corpus: SS26-011).
+  // (a «bottom» — a waistband on paired panels read from the names — may be a skirt or trousers:
+  // the leg shape decides)
+  const legsByShape =
+    inst.facts.category === 'generic' || inst.facts.category === 'bottom'
+      ? trouserLegs(inst.graph.pieces)
+      : null;
+  if (legsByShape)
+    warnings.push(
+      `the card names no trousers — read as trousers from the pattern: ${legsByShape} carry a crotch curve under a straight waist (leg panels)`,
+    );
+  const facts = legsByShape ? { ...inst.facts, category: 'trousers' as const } : inst.facts;
   // Suspect graph seams: joins that make the wrap topology impossible are not sewn as drawn.
   //  · the two fronts of a top sewn along their centre-front edges: that is the opening — a
   //    closure (buttons), drawn closed like one;
   //  · the left leg sewn to the right leg along more than a rise: legs meet only at the crotch.
   const suspectsIn = (Gx: ReturnType<typeof groupPieces>) => {
     const gp = new Map(Gx.pieces.map((p) => [p.key, p]));
+    /** An edge running up its piece (pieces are drawn upright): chord within 30° of vertical. */
+    const upright = (id: string) => {
+      const e = gp.get(pk(id))?.geom.edges.find((x) => x.id === id);
+      if (!e || e.pts.length < 2) return true;
+      const p = e.pts[0];
+      const q = e.pts[e.pts.length - 1];
+      return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= Math.PI / 6;
+    };
     const handOf = (k: string) => gp.get(k)?.geom.hand ?? null;
     const edgeLen = (id: string) =>
       edgeIdsOf(id).reduce(
@@ -171,9 +240,19 @@ export function solveDoll(input: DollInput): DollReport {
     for (const s of Gx.seams) {
       const a = gp.get(pk(s.a[0]));
       const b = gp.get(pk(s.b[0]));
-      if (!a || !b || a.key === b.key) continue;
+      if (!a || !b) continue;
       // A seam a person confirmed is never suspect.
       if (isConf(s.seam)) continue;
+      if (a.key === b.key) {
+        // A piece onto itself: only a tube seam running its length (the matcher's rule, kept here
+        // for seams that reach the doll another way).
+        if ([...s.a, ...s.b].some((e) => !upright(e)))
+          out.set(`${s.seam.a}~${s.seam.b}`, {
+            kind: 'drop',
+            note: `not sewn — the graph sews ${a.key} to itself across its width; a piece is sewn to itself only along a tube seam running its length`,
+          });
+        continue;
+      }
       const id = `${s.seam.a}~${s.seam.b}`;
       const hands = new Set([handOf(a.key), handOf(b.key)]);
       const lr = hands.has('L') && hands.has('R');
@@ -196,12 +275,78 @@ export function solveDoll(input: DollInput): DollReport {
           kind: 'closure',
           note: `suspect — the graph sews the left front to the right front along ${lenOf(s).toFixed(0)} mm: that is the front opening (a closure), drawn closed, not a seam`,
         });
-      const legs = new Set([a.group, b.group]);
+      // The left and the right sleeve (cuff) are never sewn to each other: limbs meet the body.
+      const gs = new Set([a.group, b.group]);
+      const limb = (['SLEEVE', 'CUFF'] as const).find((x) => gs.has(`${x}_L`) && gs.has(`${x}_R`));
+      if (limb) {
+        out.set(id, {
+          kind: 'drop',
+          note: `not sewn — the graph sews the left ${limb.toLowerCase()} to the right one (${lenOf(s).toFixed(0)} mm); the two ${limb === 'SLEEVE' ? 'sleeves' : 'cuffs'} never meet`,
+        });
+        continue;
+      }
+      // Mirror halves meet only on their centre line (a centre front / back running up the
+      // pieces): two hems, two wrists, two waists, two shoulders of mirror twins are not a seam.
+      const mirrorTwins = a.geom.twinOf.some((t) => t.key === b.key && t.kind === 'mirror');
+      const across = [...s.a, ...s.b].some((e) => !upright(e));
+      if (mirrorTwins && across && !(gs.has('LEG_L') && gs.has('LEG_R'))) {
+        out.set(id, {
+          kind: 'drop',
+          note: `not sewn — the graph sews two mirror halves to each other across them (${lenOf(s).toFixed(0)} mm, not their centre line); mirror halves meet only along a centre front / back`,
+        });
+        continue;
+      }
+      const legs = gs;
       if (legs.has('LEG_L') && legs.has('LEG_R') && lenOf(s) > 450)
         out.set(id, {
           kind: 'drop',
           note: `suspect — the graph sews the left leg to the right leg along ${lenOf(s).toFixed(0)} mm; legs meet only at the rise (crotch) — not sewn`,
         });
+    }
+    // A piece sewn along its centre to BOTH mirror halves (a placket strip between the two fronts,
+    // each seam the fronts' full centre length): the front would be sewn shut — one of the two is
+    // the opening. The weaker reading (by the matcher's score) is drawn as the closure (11.10
+    // corpus: FW26-001's PLCK took FL and FR; the doll then tore a shoulder to make room).
+    for (const Q of Gx.pieces) {
+      // A strip (a placket): its mean width (2·area / perimeter) small — never a back whose two
+      // side seams take the two fronts.
+      if (Q.group !== 'BODY' || (2 * Math.abs(Q.geom.areaMm2)) / Q.geom.perimMm > 80) continue;
+      const onQ = Gx.seams.filter((s) => {
+        if (isConf(s.seam) || out.has(`${s.seam.a}~${s.seam.b}`)) return false;
+        const qa = s.a.every((e) => pk(e) === Q.key);
+        const qb = s.b.every((e) => pk(e) === Q.key);
+        if (qa === qb) return false;
+        const other = qa ? s.b : s.a;
+        const X = gp.get(pk(other[0]));
+        return (
+          !!X &&
+          X.group === 'BODY' &&
+          other.every((e) => pk(e) === X.key) &&
+          lenOf(s) > 300 &&
+          (qa ? s.a : s.b).every(upright)
+        );
+      });
+      const xOf = (s: GroupedSeam) =>
+        gp.get(pk((s.a.every((e) => pk(e) === Q.key) ? s.b : s.a)[0]))!;
+      for (let i = 0; i < onQ.length; i++)
+        for (let j = i + 1; j < onQ.length; j++) {
+          const X1 = xOf(onQ[i]);
+          const X2 = xOf(onQ[j]);
+          const halves =
+            X1.geom.twinOf.some((t) => t.key === X2.key && t.kind === 'mirror') ||
+            (handOf(X1.key) && handOf(X2.key) && handOf(X1.key) !== handOf(X2.key));
+          if (!halves) continue;
+          const weak =
+            onQ[i].seam.score < onQ[j].seam.score ||
+            (onQ[i].seam.score === onQ[j].seam.score &&
+              `${onQ[i].seam.a}~${onQ[i].seam.b}` > `${onQ[j].seam.a}~${onQ[j].seam.b}`)
+              ? onQ[i]
+              : onQ[j];
+          out.set(`${weak.seam.a}~${weak.seam.b}`, {
+            kind: 'closure',
+            note: `suspect — ${Q.key} is sewn along its centre to both ${X1.key} and ${X2.key} (${lenOf(weak).toFixed(0)} mm): the front would be sewn shut — this side is the front opening (a closure), drawn closed`,
+          });
+        }
     }
     // One front opening at most: the longest; any other long left/right seam across the body is
     // not sewn (side panels sewn to each other across the doll?).
@@ -220,9 +365,20 @@ export function solveDoll(input: DollInput): DollReport {
     }
     return out;
   };
-  const suspect0 = suspectsIn(
-    groupPieces(inst.graph, facts, { lining: opt.lining, dropSeams: opt.dropSeams }),
-  );
+  // Every piece cut from the lining (a card whose only fabric line says «lining»): there is no
+  // shell to solve without it — the lining pieces are drawn as the shell, and said so.
+  const clothOf = (p: (typeof facts.pieces)[number]) =>
+    p.cloth ?? (liningByName(p.name) ? 'lining' : null);
+  const allLining =
+    !opt.lining &&
+    facts.pieces.some((p) => clothOf(p) === 'lining') &&
+    facts.pieces.every((p) => clothOf(p) === 'lining' || clothOf(p) === 'interfacing');
+  const lining = !!opt.lining || allLining;
+  if (allLining)
+    warnings.push(
+      'every piece is cut from the lining fabric — no shell to solve without it: the lining pieces are drawn as the shell',
+    );
+  const suspect0 = suspectsIn(groupPieces(inst.graph, facts, { lining, dropSeams: opt.dropSeams }));
   // Declared joins (the technologist's order) complete the graph where it has no seam.
   let graph = inst.graph;
   const orderNote = new Map<string, string>();
@@ -233,7 +389,7 @@ export function solveDoll(input: DollInput): DollReport {
       facts.pieces
         .filter((p) => {
           const cloth = p.cloth ?? (liningByName(p.name) ? 'lining' : null);
-          return cloth === 'interfacing' || (cloth === 'lining' && !opt.lining);
+          return cloth === 'interfacing' || (cloth === 'lining' && !lining);
         })
         .flatMap((p) => [p.pieceKey, p.name]),
     );
@@ -269,8 +425,34 @@ export function solveDoll(input: DollInput): DollReport {
         `technologist's order «${x.join}»: ${x.part.join('+')} is sewn onto a panel's face (a flap / welt / patch), not edge to edge — not drawn as a seam`,
       );
   }
-  const G = groupPieces(graph, facts, { lining: opt.lining, dropSeams: opt.dropSeams });
+  const G = groupPieces(graph, facts, { lining, dropSeams: opt.dropSeams });
   warnings.push(...G.warnings);
+  // NOT A GARMENT (bags, covers, flat accessories): the card names no garment and no piece reads as
+  // a sleeve, cuff, collar, stand, leg or hem band. The doll's model — a torso wrapped by panels,
+  // with tubes and rings sewn on its loops — has nothing to hold on to: the pieces are laid out flat,
+  // unsolved, and the report says so in words (never a «closing the seams…» that does not end, never
+  // a tote torn open round a torso). A belt or a strap reads as a band, so a band alone does not
+  // make a garment.
+  const GARMENT_GROUPS = new Set<DollGroupId>([
+    'SLEEVE_L',
+    'SLEEVE_R',
+    'CUFF_L',
+    'CUFF_R',
+    'COLLAR',
+    'STAND',
+    'LEG_L',
+    'LEG_R',
+    'HEMBAND',
+  ]);
+  const notGarment =
+    facts.category === 'generic' &&
+    // positive evidence of an accessory: drawn in one size (a garment is graded)
+    !!opt.oneSize &&
+    G.pieces.length > 0 &&
+    !G.pieces.some((p) => GARMENT_GROUPS.has(p.group))
+      ? `the paper doll cannot wrap this item — the card names no garment and no piece reads as a sleeve, collar, cuff or leg: its ${G.pieces.length} ${G.pieces.length === 1 ? 'piece is' : 'pieces are'} shown flat, the ${G.seams.length} ${G.seams.length === 1 ? 'seam' : 'seams'} between them ${G.seams.length === 1 ? 'is' : 'are'} in the seams review`
+      : undefined;
+  if (notGarment) for (const p of G.pieces) p.group = 'FLOAT';
 
   const suspectNote = new Map<string, string>();
   const suspects: { s: GroupedSeam; note: string }[] = [];
@@ -2126,7 +2308,8 @@ export function solveDoll(input: DollInput): DollReport {
   };
 
   for (const P of panels) if (bodyLike.has(P.group)) buildPanel(P);
-  const crossing: { s: GroupedSeam; xa: number; xb: number }[] = [];
+  const crossing: { s: GroupedSeam; xa: number; xb: number; w: Work }[] = [];
+  const refusedMirror: NonNullable<DollReport['notSewn']> = [];
   for (const s of G.seams) {
     if (!inGroups(s.a, bodyLike) || !inGroups(s.b, bodyLike)) continue;
     const w = graphWork(s, 0);
@@ -2143,10 +2326,45 @@ export function solveDoll(input: DollInput): DollReport {
     w.released = true;
     w.solver.active = false;
     const side = (x: number) => (x > 0 ? "the doll's left" : "the doll's right");
-    w.note = `wrong reading (direction) — proposed mirror reading: as drawn ${s.a[0]} sits on ${side(xa)} and ${s.b[0]} on ${side(xb)}, the seam would cross the doll (a cross-back by design?) — not sewn as drawn`;
-    crossing.push({ s, xa, xb });
+    // Mirror halves (or a piece and itself) across the doll: no reading of it is a seam.
+    const Pa = panelByKey.get(pk(s.a[0]));
+    const Pb = panelByKey.get(pk(s.b[0]));
+    // (A centre seam of mirror halves — both edges running up the pieces — is a real seam the
+    // placement got wrong: it stays, released, as before.)
+    const upEdge = (id: string) => {
+      const e = edgeById.get(id);
+      if (!e || e.pts.length < 2) return true;
+      const p = e.pts[0];
+      const q = e.pts[e.pts.length - 1];
+      return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= Math.PI / 6;
+    };
+    // (The crotch: the left and the right leg meet at the rise — a real seam, kept, released.)
+    const legPair =
+      !!Pa &&
+      !!Pb &&
+      new Set([Pa.group, Pb.group]).size === 2 &&
+      [Pa.group, Pb.group].every((g) => g === 'LEG_L' || g === 'LEG_R');
+    if (
+      Pa &&
+      Pb &&
+      !legPair &&
+      (Pa.key === Pb.key ||
+        (Pa.geom.twinOf.some((t) => t.key === Pb.key && t.kind === 'mirror') &&
+          ![...s.a, ...s.b].every(upEdge)))
+    ) {
+      w.hidden = true;
+      refusedMirror.push({
+        id: w.id,
+        a: s.a,
+        b: s.b,
+        note: `not sewn — the graph sews ${Pa.key === Pb.key ? `${Pa.key} to itself` : 'two mirror halves to each other'} across the doll (${s.a[0]} on ${side(xa)}, ${s.b[0]} on ${side(xb)}): mirror halves meet only on their centre line`,
+      });
+      continue;
+    }
+    w.note = `wrong reading (direction) — as drawn ${s.a[0]} sits on ${side(xa)} and ${s.b[0]} on ${side(xb)}, the seam would cross the doll (a cross-back by design?) — not sewn as drawn`;
+    crossing.push({ s, xa, xb, w });
   }
-  for (const { s, xa, xb } of crossing) {
+  for (const { s, xa, xb, w: w0 } of crossing) {
     // Mirror reading: on the side without a hand, the edge mirrored across the piece's centre.
     for (const [mine, other, xm] of [
       [s.a, s.b, xa],
@@ -2170,27 +2388,32 @@ export function solveDoll(input: DollInput): DollReport {
           Math.abs(mid(x)[0] + mid(e)[0] - 2 * c) < 20 &&
           Math.abs(mid(x)[1] - mid(e)[1]) < 20,
       );
-      if (!twin || edgeUsed(twin.id)) continue;
+      if (!twin || edgeUsed(twin.id) || other.includes(twin.id)) continue;
       const A2 = pathOf([twin.id]);
       const B2 = pathOf([...other]);
       if (!A2 || !B2) continue;
       void xm;
+      // The same seam on the twin edge (a symmetric piece's two shoulders are one edge flat: the
+      // graph cannot tell them apart, the doll's placement can) — the graph's seam, re-read, solved
+      // and reported as such; the crossing reading is replaced, not listed beside it.
       addWork(
         {
           id: `${twin.id}~${other[0]}`,
           a: [twin.id],
           b: [...other],
-          kind: 'proposed-composite',
-          origin: 'doll-proposed',
+          kind: s.seam.kind,
+          origin: 'graph',
+          fromOrder: w0.fromOrder,
           A: A2,
           B: B2,
           target: 1,
-          note: `mirror reading of ${s.seam.a} ↔ ${s.seam.b}: ${twin.id} ↔ ${other[0]} (${twin.lenMm.toFixed(0)} ≈ ${B2.len.toFixed(0)} mm) — if the shoulders are not crossed`,
+          note: `the graph's seam ${s.seam.a} ↔ ${s.seam.b} read on the mirror twin edge ${twin.id} (${twin.lenMm.toFixed(0)} ≈ ${B2.len.toFixed(0)} mm): as drawn it crossed the doll — a symmetric piece's two sides are the same edge flat`,
           forceSame: false,
         },
         0,
         380,
       );
+      w0.hidden = true;
       break;
     }
   }
@@ -2402,6 +2625,45 @@ export function solveDoll(input: DollInput): DollReport {
         seam: `${f.x.e.id}~${f.y.e.id}`,
         note: 'free edges facing each other once placed',
       });
+      continue;
+    }
+    // Mirror halves facing on their centre lines (both running up the pieces): the opening of the
+    // garment left free — a closure (buttons / zip), said as such, not «a seam the pattern has not
+    // got» (11.10 corpus: SS26-006's two fronts, 544 mm, reported open).
+    const upE = (e: Edge) => {
+      const p = e.pts[0];
+      const q = e.pts[e.pts.length - 1];
+      return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= Math.PI / 6;
+    };
+    const opening =
+      frontPair &&
+      !!Px &&
+      !!Py &&
+      // a front's opening runs the garment's length (never a yoke's or a back's short edge)
+      ![Px.role, Py.role].some((r) => r === 'back' || r === 'yoke') &&
+      Math.min(f.x.e.lenMm, f.y.e.lenMm) >= 300 &&
+      Px.geom.twinOf.some((t) => t.key === Py.key && t.kind === 'mirror') &&
+      upE(f.x.e) &&
+      upE(f.y.e);
+    if (opening) {
+      const w = addWork(
+        {
+          id: `${f.x.e.id}~${f.y.e.id}`,
+          a: [f.x.e.id],
+          b: [f.y.e.id],
+          kind: 'proposed-closure',
+          origin: 'doll-proposed',
+          A,
+          B,
+          target: 0,
+          note: `the front opening — ${f.x.e.id} and ${f.y.e.id} (${f.x.e.lenMm.toFixed(0)} mm) are the mirror halves' centre lines, facing ${f.gap.toFixed(0)} mm apart, free: a closure (buttons / zip), drawn open — not a seam`,
+          forceSame: f.same,
+        },
+        passes,
+        1,
+      );
+      w.virtual = true;
+      w.solver.active = false;
       continue;
     }
     const w = addWork(
@@ -4077,6 +4339,12 @@ export function solveDoll(input: DollInput): DollReport {
   let xMax = 0;
   for (let v = 0; v < N; v++) if (placed[v]) xMax = Math.max(xMax, pos[3 * v]);
   let xCursor = xMax + 200;
+  const flatRow = {
+    w: Math.max(1200, 1.6 * Math.sqrt(area)),
+    x: -Math.max(1200, 1.6 * Math.sqrt(area)) / 2,
+    y: 1600,
+    h: 0,
+  };
   const floating: DollReport['floating'] = [];
   for (const P of panels) {
     if (P.group !== 'FLOAT' && placed[P.offset]) continue;
@@ -4088,12 +4356,30 @@ export function solveDoll(input: DollInput): DollReport {
       x1 = Math.max(x1, uv[2 * (P.offset + i)]);
       y0 = Math.min(y0, uv[2 * (P.offset + i) + 1]);
     }
-    for (let i = 0; i < P.count; i++) {
-      const v = P.offset + i;
-      setPos(v, [xCursor + uv[2 * v] - x0, vLo + 200 + uv[2 * v + 1] - y0, 0]);
-      placed[v] = 1;
+    let y1 = -Infinity;
+    for (let i = 0; i < P.count; i++) y1 = Math.max(y1, uv[2 * (P.offset + i) + 1]);
+    // Not a garment: every piece laid out flat in rows around the origin (no doll to stand beside).
+    if (notGarment) {
+      if (flatRow.x > -flatRow.w / 2 && flatRow.x + (x1 - x0) > flatRow.w / 2) {
+        flatRow.y -= flatRow.h + 60;
+        flatRow.x = -flatRow.w / 2;
+        flatRow.h = 0;
+      }
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, [flatRow.x + uv[2 * v] - x0, flatRow.y - (y1 - y0) + uv[2 * v + 1] - y0, 0]);
+        placed[v] = 1;
+      }
+      flatRow.x += x1 - x0 + 60;
+      flatRow.h = Math.max(flatRow.h, y1 - y0);
+    } else {
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, [xCursor + uv[2 * v] - x0, vLo + 200 + uv[2 * v + 1] - y0, 0]);
+        placed[v] = 1;
+      }
+      xCursor += x1 - x0 + 60;
     }
-    xCursor += x1 - x0 + 60;
     const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
     floating.push({
       pieceKey: P.key,
@@ -4146,7 +4432,10 @@ export function solveDoll(input: DollInput): DollReport {
     }
     ds.sort((x, y) => x - y);
     travelP99 = ds.length ? ds[Math.floor(0.99 * (ds.length - 1))] : 0;
-    if (travel < 1.5) break;
+    // Settled when the slowest point stops (max < 1.5 mm) — or when 99 % of the cloth moves under
+    // three quarters of the «converged» bar and only a corner still creeps (11.10 corpus: SS26-005 ran its
+    // whole 2400-pass budget for a 2.7 mm corner with p99 at 0.19 mm — the hot spot of the solve).
+    if (travel < 1.5 || travelP99 <= 0.75) break;
   }
   if (!Number.isFinite(travel)) travel = 0;
   if (opt.debug)
@@ -4263,7 +4552,7 @@ export function solveDoll(input: DollInput): DollReport {
     closureReps.push(ov);
   }
   for (const w of works) {
-    if (w.rejectedByPerson) continue;
+    if (w.rejectedByPerson || w.hidden) continue;
     const m = measure(w);
     const sp = seamStretch(w, st, SF) * 100;
     // Twist: the other direction would fit the solved shape much better.
@@ -4275,6 +4564,7 @@ export function solveDoll(input: DollInput): DollReport {
     const lenB = w.B.len;
     let state: DollSeamState;
     if (w.overlap) state = w.overlap.ok ? 'closed' : 'open';
+    else if (w.virtual && w.kind === 'proposed-closure') state = 'proposed';
     else if (w.released || w.virtual) state = 'open';
     else if (w.origin === 'doll-proposed' || w.fromOrder) state = 'proposed';
     else if (twisted) state = 'twisted';
@@ -4380,26 +4670,16 @@ export function solveDoll(input: DollInput): DollReport {
       pathB: new Uint32Array(0),
     });
 
-  for (const { s: sm, note } of suspects)
-    seams.push({
+  // Graph pairings the doll will not sew: words, not seams (never counted open).
+  const notSewn: NonNullable<DollReport['notSewn']> = [
+    ...suspects.map(({ s: sm, note }) => ({
       id: `${sm.seam.a}~${sm.seam.b}`,
       a: sm.a,
       b: sm.b,
-      kind: sm.seam.kind,
-      origin: 'graph',
-      lenA: sm.seam.evidence.aLenMm ?? 0,
-      lenB: sm.seam.evidence.bLenMm ?? 0,
-      residualMeanMm: 0,
-      residualMaxMm: 0,
-      residualP95Mm: 0,
-      stretchPct: 0,
-      twisted: false,
-      state: 'open',
-      released: true,
       note,
-      pathA: new Uint32Array(0),
-      pathB: new Uint32Array(0),
-    });
+    })),
+    ...refusedMirror,
+  ];
   // Free edges facing each other (a seam the pattern has not got): reported open, never solved.
   const freeAll = panels
     .filter((P) => P.group !== 'FLOAT')
@@ -4416,6 +4696,19 @@ export function solveDoll(input: DollInput): DollReport {
       if (x.P === y.P || x.P.group !== y.P.group || taken.has(x.e.id) || taken.has(y.e.id))
         continue;
       if (Math.abs(x.e.lenMm - y.e.lenMm) / Math.max(x.e.lenMm, y.e.lenMm) > 0.08) continue;
+      // The same two edges as a seam already reported open (released): said once, not twice.
+      const pairKey = [x.e.id, y.e.id].sort().join('~');
+      if (
+        works.some(
+          (w) =>
+            w.released &&
+            !w.hidden &&
+            w.a.length === 1 &&
+            w.b.length === 1 &&
+            [w.a[0], w.b[0]].sort().join('~') === pairKey,
+        )
+      )
+        continue;
       const A = pathOf([x.e.id]);
       const B = pathOf([y.e.id]);
       if (!A || !B) continue;
@@ -4426,6 +4719,44 @@ export function solveDoll(input: DollInput): DollReport {
       if (gap > 40) continue;
       taken.add(x.e.id);
       taken.add(y.e.id);
+      // Mirror halves facing on their centre line (both edges running up the pieces): the centre
+      // opening left free — a closure (buttons / zip), not a seam the pattern forgot.
+      const upE = (e: Edge) => {
+        const p = e.pts[0];
+        const q = e.pts[e.pts.length - 1];
+        return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= Math.PI / 6;
+      };
+      const handOfP = (P: Panel) => P.geom.hand ?? readName(P.geom.name).hand;
+      const centre =
+        x.P.group === 'BODY' &&
+        y.P.group === 'BODY' &&
+        Math.min(x.e.lenMm, y.e.lenMm) >= 300 &&
+        ![x.P.role, y.P.role].some((r) => r === 'back' || r === 'yoke') &&
+        (x.P.geom.twinOf.some((t) => t.key === y.P.key && t.kind === 'mirror') ||
+          (!!handOfP(x.P) && !!handOfP(y.P) && handOfP(x.P) !== handOfP(y.P))) &&
+        upE(x.e) &&
+        upE(y.e);
+      if (centre) {
+        seams.push({
+          id: `${x.e.id}~${y.e.id}`,
+          a: [x.e.id],
+          b: [y.e.id],
+          kind: 'proposed-closure',
+          origin: 'doll-proposed',
+          lenA: A.len,
+          lenB: B.len,
+          residualMeanMm: gap,
+          residualMaxMm: gap,
+          residualP95Mm: gap,
+          stretchPct: 0,
+          twisted: false,
+          state: 'proposed',
+          note: `the centre opening — ${x.e.id} and ${y.e.id} (${x.e.lenMm.toFixed(0)} mm) are the mirror halves' centre lines, left free ${gap.toFixed(0)} mm apart: a closure (buttons / zip), not a seam`,
+          pathA: Uint32Array.from(A.v),
+          pathB: Uint32Array.from(B.v),
+        });
+        continue;
+      }
       seams.push({
         id: `${x.e.id}~${y.e.id}`,
         a: [x.e.id],
@@ -4613,6 +4944,9 @@ export function solveDoll(input: DollInput): DollReport {
     orderJoins,
     orderSurface,
     honesty: HONESTY,
+    ...(notSewn.length ? { notSewn } : {}),
+    ...(notGarment ? { notGarment } : {}),
+    ...(allLining ? { liningAsShell: true } : {}),
     ...(l4
       ? {
           contradictions: [...preContradictions, ...contradictions],

@@ -57,13 +57,13 @@ export function DollColumn() {
         type='button'
         onClick={openDoll}
         className='group block w-full border border-borderColor bg-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-        aria-label={`open the paper doll, size ${card.baseSize}`}
+        aria-label={`open the paper doll, size ${card.sizeLabel(card.baseSize)}`}
         data-doll-still=''
       >
         {solve?.thumbUrl ? (
           <img
             src={solve.thumbUrl}
-            alt={`paper doll, size ${card.baseSize}, front`}
+            alt={`paper doll, size ${card.sizeLabel(card.baseSize)}, front`}
             width={240}
             height={300}
             draggable={false}
@@ -90,7 +90,7 @@ export function DollColumn() {
           className='min-w-0 flex-1 tabular-nums'
           data-doll-column-state=''
         >
-          {words} · size {card.baseSize}
+          {words} · size {card.sizeLabel(card.baseSize)}
         </Text>
         <Chip quiet onClick={openDoll} data-doll-door='open'>
           open 3d

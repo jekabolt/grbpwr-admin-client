@@ -54,10 +54,15 @@ type StandCard = {
   files: Record<string, string>;
   /** STAND DATA: size chart cells (size name, measurement name, value in the card's unit). */
   chart?: { size: string; name: string; value: number }[];
+  /** The card's own dictionary (an archive's id maps): sizes and the category chain. */
+  dictionary?: {
+    sizes: { id: number; name: string; skuOrd: number }[];
+    categories: { id: number; name: string; parentId?: number }[];
+  };
 };
 
 // ── the fake backend ────────────────────────────────────────────────────────────────────────────
-const SIZES = ['xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'os'].map((name, i) => ({
+const SIZES0 = ['xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'os'].map((name, i) => ({
   id: i + 1,
   name,
   skuOrd: i + 1,
@@ -76,6 +81,8 @@ const MEASURES = [
   'hip',
   'bottom-width',
 ].map((name, i) => ({ id: 100 + i, name }));
+let SIZES = SIZES0;
+let CATEGORIES: { id: number; name: string; parentId?: number }[] = [];
 
 const table = new Map<string, TechCardSeamWire>();
 const calls: { method: string; path: string }[] = [];
@@ -92,7 +99,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const json = (v: unknown, status = 200) =>
     new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
   if (/\/api\/admin\/dictionary$/.test(url.pathname))
-    return json({ dictionary: { sizes: SIZES, measurements: MEASURES } });
+    return json({ dictionary: { sizes: SIZES, measurements: MEASURES, categories: CATEGORIES } });
   if (/\/size-chart$/.test(url.pathname)) return json({ chart: { cells: chartCells } });
   if (/\/tech-card\/\d+\/seams:delete$/.test(url.pathname)) {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -280,6 +287,8 @@ window.__doll = {
     graph = null;
     table.clear();
     useDollStore.setState({ solves: {}, poms: {}, live: null, hoverPom: null, open: false });
+    SIZES = c.dictionary?.sizes ?? SIZES0;
+    CATEGORIES = c.dictionary?.categories ?? [];
     const form = c.form ?? mapTechCardToForm(c.card!);
     const t0 = performance.now();
     const files = (form.patterns ?? []).filter((p) => p.url && c.files[p.url]);
