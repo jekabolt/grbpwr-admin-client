@@ -38,6 +38,10 @@ import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
 
 import { singlePageSheet } from 'components/managers/tech-card/components/pattern-import/sheet-skip';
 import {
+  bulkNames,
+  codeBlocked,
+} from 'components/managers/tech-card/components/pattern-import/bulk-names';
+import {
   scaleUncertain,
   stepOffer,
   type OfferCtx,
@@ -373,6 +377,8 @@ export const CLICKS = {
   'use-line': 2,
   'not-a-piece': 2,
   code: 2,
+  // CODE lane: "name N pieces P01…" on the details step (bulk-names.ts) — one click for all
+  'code-bulk': 1,
   grain: 3,
   // A1: "review N proposed grainlines" + "accept these N" in the overview that shows them all
   'grain-accept': 2,
@@ -1182,6 +1188,9 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     };
     const fams = pc.families;
     const dropped: string[] = [];
+    /** CODE lane: what "name N pieces" gave each piece, per pass (the code probe reads it). */
+    const codeBulk: { seed: number; pass: number; label: string; code: string; mods: string[] }[] =
+      [];
     const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
     for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
@@ -1212,21 +1221,55 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       }
       if (drawn.length)
         op('grain', `draw grain on ${drawn.length} pieces (row + 2 ends each)`, drawn.length);
-      const named = [
-        ...(byReason.get('grammar') ?? []),
-        ...(byReason.get('duplicate-identity') ?? []),
-      ];
-      named.forEach((sd, i) => {
+      // CODE lane: the details step's one "name N pieces P01…" click (bulk-names.ts, the same call
+      // the step makes): every piece without a usable code gets one in sheet order. The seed's own
+      // text is the step's too — a harness click seed's label is TRUTH, not the sheet's, so it is not
+      // passed. A piece the bulk cannot name (no outline box) is typed by hand: 2 clicks each.
+      const unnamedNow = codeBlocked(sem.blocked);
+      const bulk = bulkNames(
+        sem.blocked,
+        (sd) => {
+          const cs = fams.find((x) => x.seed === sd)?.candidates;
+          return cs?.length ? cs[cs.length - 1].bbox : null;
+        },
+        [
+          ...sem.pieces.map((p) => p.identity),
+          ...Object.entries(overrides).flatMap(([sd, o]) =>
+            o?.code && !unnamedNow.some((b) => b.seed === Number(sd)) ? [o.code] : [],
+          ),
+        ],
+        c.card,
+        (sd) => {
+          const t = seedsNow.find((x) => x.id === sd)?.text;
+          return t && t.src.file !== 'click' ? t.text : null;
+        },
+      );
+      for (const [sd, n] of bulk)
         overrides[sd] = {
           ...(overrides[sd] ?? {}),
-          code: 'BP',
-          mods: [String(50 + pass * 20 + i)],
+          code: n.code,
+          mods: n.mods,
+          displayName: n.displayName,
+          nameOrigin: 'operator',
+        };
+      if (bulk.size) {
+        op('code-bulk', `name ${bulk.size} pieces automatically (grammar/duplicate)`);
+        codeBulk.push(
+          ...[...bulk].map(([sd, n]) => ({ seed: sd, pass, label: labelOf(seedsNow)(sd), ...n })),
+        );
+      }
+      const typed = unnamedNow.filter((b) => !bulk.has(b.seed)).map((b) => b.seed);
+      typed.forEach((sd, i) => {
+        overrides[sd] = {
+          ...(overrides[sd] ?? {}),
+          code: `T${String(pass * 20 + i + 1).padStart(2, '0')}X`,
+          mods: [],
           displayName: `piece ${sd}`,
           nameOrigin: 'operator',
         };
       });
-      if (named.length)
-        op('code', `type a code for ${named.length} pieces (grammar/duplicate)`, named.length);
+      if (typed.length)
+        op('code', `type a code for ${typed.length} pieces (grammar/duplicate)`, typed.length);
       // E1a fold question: a fold piece (truth) takes the suggested edge, anything else "not a fold"
       const asks = sem.folds ?? [];
       for (const q of asks) {
@@ -1287,6 +1330,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       });
     }
     rec.droppedAtMeaning = dropped;
+    if (codeBulk.length) rec.codeBulk = codeBulk;
     // D3: what the drawing does not prove — the wizard stops on it (footer) until answered.
     // Allowance: one explicit answer for the file ("cut line" / "seam line + N mm"); quantities and
     // sheet-note names: one bulk "confirm all as shown" (per-piece corrections are the operator's).
