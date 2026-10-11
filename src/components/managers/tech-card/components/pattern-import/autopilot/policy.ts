@@ -1537,12 +1537,16 @@ function meaningStep(snap: Snap): AutopilotDecision {
             'quantity',
             subj(u.seed),
             u.shown,
-            u.foldAlt
-              ? 'the count as shown (cut on fold was the alternative)'
-              : 'the count as shown',
+            // Codex r5 #5: a piece drawn once, no count printed, defaulted to a mirrored pair —
+            // the usual right answer, but a default: strong
+            /^pair×/.test(u.shown)
+              ? `drawn once, cut as a mirrored pair (industry default)${u.foldAlt ? ' — cut on fold was the alternative' : ''}`
+              : u.foldAlt
+                ? 'the count as shown (cut on fold was the alternative)'
+                : 'the count as shown',
             [u.detail.slice(0, 160)],
             0.5,
-            false,
+            /^pair×/.test(u.shown),
             u.seed,
           ),
         ),
