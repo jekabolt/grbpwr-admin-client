@@ -183,6 +183,7 @@ function A(
   confidence: number,
   strong: boolean,
   seed?: SeedId,
+  ref?: string,
 ): Assumption {
   return {
     step,
@@ -194,8 +195,23 @@ function A(
     confidence: Math.round(confidence * 100) / 100,
     strong,
     ...(seed != null ? { seed } : {}),
+    ...(ref != null ? { ref } : {}),
   };
 }
+
+// ── subjects people can find (Codex re-check #6): the piece's code / name + seed, the file and
+//    page, the size's label; the machine handle rides in `seed` / `ref` ─────────────────────────
+
+const mm = (p: PtMm) => `(${Math.round(p.x)}, ${Math.round(p.y)}) mm`;
+const fileName = (s: ImportSession, id: ImportSession['files'][number]['id']) =>
+  s.files.find((f) => f.id === id)?.name ?? `file ${id}`;
+const pageSubject = (s: ImportSession, file: ImportSession['files'][number]['id'], page: number) =>
+  `${fileName(s, file)} · page ${page + 1}`;
+const sizeSubject = (e: { source: { label: string; rank: number } }) =>
+  e.source.label ? `size ${e.source.label}` : `drawn size ${e.source.rank + 1} (no label)`;
+const sizeRef = (e: { source: { rank: number } }) => `rank:${e.source.rank}`;
+const legendSubject = (c: { role: string; sizeLabel?: string | null; totalLengthMm: number }) =>
+  `legend row ${c.role}${c.sizeLabel ? ` ${c.sizeLabel}` : ''} (${Math.round(c.totalLengthMm / 10)} cm of line)`;
 
 const snapOf = (x: AutopilotSnapshot): Snap => ({
   session: x.session,
@@ -369,10 +385,10 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     case 'scale-anisotropic':
       return c ? { scaleIndex: snap.inputs.scaleIndex, factor: c.factor, method: c.method } : null;
     case 'clean-accept':
-      return { kind: a.subject.split(' ')[0], keep: false };
+      return { kind: a.ref ?? a.subject.split(' ')[0], keep: false };
     case 'pages-as-read': {
-      const m = a.subject.match(/^file (\S+) page (\d+)$/);
-      return m ? { file: m[1], page: +m[2] - 1, as: a.answer } : null;
+      const m = a.ref?.match(/^(\d+):(\d+)$/);
+      return m ? { file: +m[1], page: +m[2], as: a.answer } : null;
     }
     case 'sheet-choice':
       return act?.kind === 'sheet' ? { sheet: act.sheet } : null;
@@ -381,7 +397,7 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     case 'drawn-sizes':
       return act?.kind === 'drawn-sizes' ? { n: act.n } : null;
     case 'legend-row':
-      return { legendConfirmed: a.subject.replace(/^legend row /, '') };
+      return { legendConfirmed: a.ref ?? null };
     case 'legend-outline':
       return act?.kind === 'legend'
         ? (JSON.parse(JSON.stringify(act.edits[act.edits.length - 1])) as AutopilotValue)
@@ -390,8 +406,7 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     case 'size-guess':
     case 'size-dropped': {
       if (act?.kind !== 'size-map') return null;
-      const lab = a.subject.replace(/^source /, '');
-      const e = act.entries.find((x) => (x.source.label || `rank ${x.source.rank}`) === lab);
+      const e = act.entries.find((x) => sizeRef(x) === a.ref);
       return e
         ? {
             rank: e.source.rank,
@@ -409,7 +424,7 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
       return k ? { seed: k.id, at: pt(k.at) } : null;
     }
     case 'set-aside':
-      return { aside: +(a.subject.match(/^outline (\d+)/)?.[1] ?? -1), keepAside: true };
+      return { aside: +(a.ref?.match(/^aside:(\d+)/)?.[1] ?? -1), keepAside: true };
     case 'name-code':
       return { seed: sd ?? null, code: a.answer };
     case 'grain-proposal':
@@ -532,6 +547,8 @@ function acceptWaiting(
         b.evidence,
         0.6,
         false,
+        undefined,
+        k,
       ),
     ),
   };
@@ -589,24 +606,28 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
         A(
           'files',
           'pages-as-read',
-          `file ${d.file} page ${d.page + 1}`,
+          pageSubject(s, d.file, d.page),
           `set aside (${d.cls})`,
           'a page the reader set aside stays aside on evidence it is not pattern',
           [notPatternEvidence(d, s.pages)!, d.why.slice(0, 120)],
           0.6,
           false,
+          undefined,
+          `${d.file}:${d.page}`,
         ),
       ),
       ...unsure.map((p) =>
         A(
           'files',
           'pages-as-read',
-          `file ${p.file} page ${p.page + 1}`,
+          pageSubject(s, p.file, p.page),
           `read as ${p.cls}`,
           'a page read without certainty is taken as the reader read it',
           [`${p.cls} ${p.confidence.toFixed(2)}`, p.why.slice(0, 120)],
           p.confidence,
           false,
+          undefined,
+          `${p.file}:${p.page}`,
         ),
       ),
     ],
@@ -830,7 +851,7 @@ function outlineLegend(s: ImportSession, i: Inputs): AutopilotDecision | null {
       A(
         'sizes',
         'legend-outline',
-        `legend row ${legendKey(k)}`,
+        legendSubject(k),
         `${k.role} → size line`,
         'no legend row draws the outlines: the longest row kept is the size line',
         [
@@ -839,6 +860,8 @@ function outlineLegend(s: ImportSession, i: Inputs): AutopilotDecision | null {
         ],
         0.4,
         true,
+        undefined,
+        legendKey(k),
       ),
     ],
   };
@@ -892,7 +915,7 @@ function sizesStep(snap: Snap): AutopilotDecision {
       A(
         'sizes',
         'legend-row',
-        `legend row ${legendKey(c)}`,
+        legendSubject(c),
         `${c.role}${c.sizeLabel ? ` ${c.sizeLabel}` : ''}`,
         'a legend row below 0.6 is confirmed as read',
         [
@@ -901,6 +924,8 @@ function sizesStep(snap: Snap): AutopilotDecision {
         ],
         c.confidence,
         false,
+        undefined,
+        legendKey(c),
       ),
     );
     // the same answer: no row draws the outlines → the longest row kept is the size line
@@ -910,7 +935,7 @@ function sizesStep(snap: Snap): AutopilotDecision {
       return {
         actions: [{ ...edit, confirm }],
         assumptions: [
-          ...rows.filter((r) => !outline.assumptions.some((o) => o.subject === r.subject)),
+          ...rows.filter((r) => !outline.assumptions.some((o) => o.ref === r.ref)),
           ...outline.assumptions,
         ],
       };
@@ -944,12 +969,14 @@ function sizesStep(snap: Snap): AutopilotDecision {
         A(
           'sizes',
           'size-ordinal',
-          `source ${e.source.label || `rank ${e.source.rank}`}`,
+          sizeSubject(e),
           e.card ? `→ ${e.card.token}` : 'not exported',
           'no source size spells a card size: mapped by order from the middle of the card run',
           [`${k} source sizes, card run ${cards.map((c) => c.token).join(' ')}`],
           0.25,
           true,
+          undefined,
+          sizeRef(e),
         ),
       ),
     };
@@ -988,7 +1015,7 @@ function sizesStep(snap: Snap): AutopilotDecision {
         return A(
           'sizes',
           ordinal ? 'size-ordinal' : 'size-guess',
-          `source ${g.source.label || `rank ${g.source.rank}`}`,
+          sizeSubject(g),
           `→ ${g.card!.token}`,
           ordinal
             ? 'the run aligned by rank only (same length): confirmed by order'
@@ -996,6 +1023,8 @@ function sizesStep(snap: Snap): AutopilotDecision {
           g.evidence ?? [],
           g.confidence ?? 0,
           ordinal,
+          undefined,
+          sizeRef(g),
         );
       }),
     };
@@ -1026,9 +1055,18 @@ const labelOf = (seeds: readonly Seed[], seed: SeedId) => {
   const sd = seeds.find((x) => x.id === seed);
   return sd?.text?.text?.slice(0, 32) ?? null;
 };
-const subjectOf = (seeds: readonly Seed[], seed: SeedId) => {
+/** "P01 front (seed 3)" · "«2 BACK» (seed 3)" · "piece at (120, 40) mm (seed 3)". */
+const subjectOf = (
+  seeds: readonly Seed[],
+  seed: SeedId,
+  names: readonly { seed: SeedId; code: string; displayName: string }[] = [],
+) => {
+  const n = names.find((x) => x.seed === seed && (x.code || x.displayName));
+  const named = n ? [n.code, n.displayName].filter(Boolean).join(' ') : null;
   const l = labelOf(seeds, seed);
-  return `seed ${seed}${l ? ` · ${l}` : ''}`;
+  const at = seeds.find((x) => x.id === seed)?.at;
+  const who = named ?? (l ? `«${l}»` : at ? `piece at ${mm(at)}` : 'piece');
+  return `${who} (seed ${seed})`;
 };
 
 function piecesStep(snap: Snap): AutopilotDecision {
@@ -1078,7 +1116,7 @@ function piecesStep(snap: Snap): AutopilotDecision {
         A(
           'pieces',
           'seed-click',
-          `seed ${c.id}`,
+          `outline at ${mm(c.at)} (seed ${c.id})`,
           `a piece at (${c.at.x.toFixed(0)}, ${c.at.y.toFixed(0)})`,
           'nothing on the sheet seeds a piece: a click inside every closed outline',
           [`${pts.length} closed outlines`],
@@ -1151,12 +1189,14 @@ function piecesStep(snap: Snap): AutopilotDecision {
       A(
         'pieces',
         'set-aside',
-        `outline ${a.id} (${Math.round(a.areaMm2 / 100)} cm²${a.seed?.text ? ` · ${a.seed.text.text.slice(0, 24)}` : ''})`,
+        `outline ${a.id} at ${mm(a.at)} (${Math.round(a.areaMm2 / 100)} cm²${a.seed?.text ? ` · «${a.seed.text.text.slice(0, 24)}»` : ''})`,
         'not a piece',
         'a piece-sized outline is kept aside only on positive evidence that it is not a piece',
         [a.reason, ev!],
         0.5,
         true,
+        undefined,
+        `aside:${a.id}`,
       ),
     ),
   };
@@ -1194,7 +1234,8 @@ function meaningStep(snap: Snap): AutopilotDecision {
   const fams = s.pieces?.families ?? [];
   const famOf = (sd: SeedId) => fams.find((f) => f.seed === sd);
   const mapped = exportedRanks(s.sizes?.map);
-  const subj = (sd: SeedId) => subjectOf(seeds, sd);
+  // the piece as it is named now (the export's code), else as the namer read it
+  const subj = (sd: SeedId) => subjectOf(seeds, sd, [...sem.pieces, ...s.names]);
 
   // 1 · a piece that cannot be built (offset, leak, merged, sizes not told apart …) is a stop:
   //     a geometry failure is never answered by dropping the piece (Codex #3)
@@ -1583,7 +1624,7 @@ function fabricsStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotD
         A(
           'fabrics',
           'fabric',
-          subjectOf(seeds, x.seed),
+          subjectOf(seeds, x.seed, [...(s.semantics?.pieces ?? []), ...s.names]),
           x.purposes.map(word).join(' + '),
           "the AI's fabric for a piece the sheet says nothing about",
           ['AI only'],
@@ -1606,7 +1647,7 @@ function fabricsStep({ session: s, inputs: i, card, blocker }: Snap): AutopilotD
         A(
           'fabrics',
           'fabric',
-          subjectOf(seeds, sd),
+          subjectOf(seeds, sd, [...(s.semantics?.pieces ?? []), ...s.names]),
           'main',
           'nothing names a fabric for the piece: it is cut from main',
           ['defaulted'],

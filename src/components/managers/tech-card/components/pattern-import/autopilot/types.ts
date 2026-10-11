@@ -34,10 +34,19 @@ export type AssumptionKind =
   | 'quantity'
   | 'fabric';
 
-export type Assumption = AutopilotAssumption & { kind: AssumptionKind; seed?: SeedId };
+/**
+ * `seed` and `ref` are the machine handles of the subject (a piece, a page "file:page", a source
+ * size "rank:n", a legend row, an outline); the subject itself is for people. Neither is written.
+ */
+export type Assumption = AutopilotAssumption & {
+  kind: AssumptionKind;
+  seed?: SeedId;
+  ref?: string;
+};
 
 /** One record per question: a later answer to the same question replaces the earlier one. */
-export const assumptionKey = (a: Pick<Assumption, 'kind' | 'subject'>) => `${a.kind}|${a.subject}`;
+export const assumptionKey = (a: Pick<Assumption, 'kind' | 'subject' | 'seed' | 'ref'>) =>
+  `${a.kind}|${a.seed != null ? `#${a.seed}` : a.ref ?? a.subject}`;
 
 /**
  * The record a manifest carries: piece answers of pieces no longer written are left out (a piece
@@ -53,7 +62,7 @@ export function autopilotRecordOf(
     exported.has(a.seed) ||
     a.kind === 'not-a-piece' ||
     a.kind === 'dropped-piece';
-  return { v: 1, assumptions: list.filter(keep).map(({ seed: _s, ...a }) => a) };
+  return { v: 1, assumptions: list.filter(keep).map(({ seed: _s, ref: _r, ...a }) => a) };
 }
 
 /** The list with these answers merged in: one per question, a later answer replaces the earlier. */

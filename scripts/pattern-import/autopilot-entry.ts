@@ -394,7 +394,7 @@ export async function runCase(c: Case, mutate: string | null) {
     const want = c.truth?.expect ?? tps.length;
     const asides = as.filter((a) => ['set-aside', 'not-a-piece', 'dropped-piece'].includes(a.kind));
     const labelled = (a: Assumption) =>
-      tps.find((t) => a.subject.toLowerCase().includes(` · ${norm(t.label)}`)) ?? null;
+      tps.find((t) => a.subject.toLowerCase().includes(`«${norm(t.label)}`)) ?? null;
     for (let k = 0; k < Math.max(0, want - matched); k++) {
       const a = asides[k] ?? null;
       wrong.push({
