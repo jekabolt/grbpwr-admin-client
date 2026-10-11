@@ -14,6 +14,19 @@
 // cm; the gate converts at its boundary and nowhere else.
 
 import type { PieceDTO } from 'lib/nesting/types';
+import type { GarmentPassport, PassportDigest } from './passport/types';
+
+// The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
+export type {
+  CutQty,
+  EvidenceClass,
+  ExpectedPiece,
+  Fact,
+  GarmentPassport,
+  OutlineMeaning,
+  PassportDigest,
+  SourceRef,
+} from './passport/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 0. Scalars and identifiers
@@ -1168,6 +1181,12 @@ export type SemanticsOutput = {
    * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
+  /**
+   * PASSPORT Ф1: what the document says (text layer, layer names), bound to these pieces — the
+   * outline word of the pieces' own wall layers, the cutting list bound by printed label. Evidence
+   * a policy weighs, never geometry (absent = the reader found nothing / an old worker).
+   */
+  passport?: GarmentPassport;
 };
 
 /**
@@ -1583,6 +1602,11 @@ export type ConversionManifest = {
    * sheet), so a manifest written before or after this field reads the same.
    */
   autopilot?: AutopilotRecord;
+  /**
+   * PASSPORT Ф1: what the document said about the garment (≤ 2 KB digest). Optional and
+   * shape-tolerant on read like `autopilot`.
+   */
+  passport?: PassportDigest;
 };
 
 /**
@@ -1634,6 +1658,8 @@ export type WriteJob = {
   dialect: 'r12' | 'r2000';
   /** A10: the autopilot's assumptions, carried into the manifest as they are. */
   autopilot?: AutopilotRecord;
+  /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */
+  passport?: PassportDigest;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -1865,6 +1891,8 @@ export type StageIO = {
       presegmented?: boolean;
       /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
+      /** PASSPORT Ф1: what the document says, as read before any piece (absent = nothing read). */
+      passport?: GarmentPassport;
     };
   };
   /** A8: the input pages cleaned before anything is parsed (masks, dropped pages, scale hints). */

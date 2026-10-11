@@ -46,6 +46,14 @@ import type {
   StageName,
 } from '../types';
 import { PATIMPORT } from '../types';
+import type { GarmentPassport } from '../passport/types';
+import {
+  bindPassport,
+  passportDigest,
+  passportSourceDigest,
+  readPassport,
+  type BindPiece,
+} from '../passport';
 import { applyScale, detectScale, detectScaleSet, extractPdfWith } from '../adapters/pdf';
 import {
   dxfFastPath,
@@ -356,6 +364,9 @@ export class Session {
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
   private semantics: SemanticsOutput | null = null;
+  /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
+  private passport: GarmentPassport | null = null;
+  private passportBound: GarmentPassport | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
@@ -727,6 +738,16 @@ export class Session {
     this.pageTexts = docs.flatMap((d) =>
       d.pages.filter((p) => !tilePage.has(`${d.file.id}:${p.page}`)).flatMap((p) => p.texts),
     );
+    // PASSPORT Ф1: one pass over every page and layer name — evidence, never a failure of the read
+    this.passport = null;
+    this.passportBound = null;
+    try {
+      this.passport = readPassport(docs, {
+        sourceDigest: await passportSourceDigest(this.files.map((f) => f.sha256)),
+      });
+    } catch (e) {
+      warnings.push(`the document's passport could not be read: ${String(e).slice(0, 120)}`);
+    }
     return {
       files: this.files,
       pages: this.pages,
@@ -734,6 +755,7 @@ export class Session {
       warnings,
       presegmented: !!this.dxf,
       calibrations: this.calibrations.length ? this.calibrations : undefined,
+      ...(this.passport ? { passport: this.passport } : {}),
     };
   }
 
@@ -1379,10 +1401,40 @@ export class Session {
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
-    this.semantics = detail.output;
+    this.passportBound = this.passport
+      ? bindPassport(this.passport, this.bindPieces(detail.output, set, sheet))
+      : null;
+    const output = this.passportBound
+      ? { ...detail.output, passport: this.passportBound }
+      : detail.output;
+    this.semantics = output;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
-    return detail.output;
+    return output;
+  }
+
+  /**
+   * PASSPORT Ф1: each piece as the passport binds it — its exported identities, the layer of every
+   * wall chain of its outline (every size), the printed label it was seeded from.
+   */
+  private bindPieces(out: SemanticsOutput, set: ChainSet, sheet: Sheet): BindPiece[] {
+    const chainById = new Map(set.chains.map((c) => [c.id, c]));
+    const layerOf = new Map(sheet.styles.map((st) => [st.id, st.layer]));
+    const label = new Map(
+      (this.seeds ?? []).flatMap((sd) =>
+        sd.origin === 'text' && sd.text ? [[sd.id, sd.text.text.trim()] as const] : [],
+      ),
+    );
+    return (this.families ?? []).map((f) => {
+      const identities = out.pieces.filter((p) => p.seed === f.seed).map((p) => p.identity);
+      const wallLayers = f.candidates.flatMap((c) =>
+        c.walls.map((id) => {
+          const ch = chainById.get(id);
+          return ch ? layerOf.get(ch.style) ?? null : null;
+        }),
+      );
+      return { seed: f.seed, identities, wallLayers, label: label.get(f.seed) ?? null };
+    });
   }
 
   /** Traced pages in the run (F11): their outlines are cleaned before any offset (E3). */
@@ -1578,6 +1630,7 @@ export class Session {
           generator: input.generator,
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
+          ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
         },
         {
           rules: cardRules,
