@@ -596,9 +596,9 @@ export type QtyListEntry = {
   words: string[];
   qty: number;
   /**
-   * It sits in a cutting-list section: under a cutting header («Klippevejledning», «Раскрой
-   * деталей…», «Cutting layout») or in a run of ≥ 3 such lines (the list layout), and names no
-   * fabric of its own. Only such a line may answer a count by itself; any other numbered line with
+   * It sits in a cutting-list section: the run of list lines right under an explicit cutting
+   * header («Klippevejledning», «Раскрой деталей…», «Cutting layout»; ended by the next header),
+   * and names no fabric of its own. Only such a line may answer a count by itself; any other numbered line with
    * a count ("69. Pres sømmen 4 gange", a sewing step) is a pre-filled question at most.
    */
   section: boolean;
@@ -629,6 +629,7 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
   const raws: Raw[] = [];
   let scope = 0;
   const headerAt: number[] = [];
+  const cutHeader = new Set<number>();
   for (let i = 0; i < texts.length; i++) {
     let t = normFoldLine(texts[i]);
     // "69." + "Ærme, 4 gange": a number item right before the line is its number
@@ -636,7 +637,15 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
     if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
     const m = LIST_LINE.exec(t);
     if (!m) {
-      if (CUT_HEADER.test(t) && t.split(/\s+/).length <= 8) {
+      const short = t.split(/\s+/).length;
+      // a header is a title, not a sentence («Alle dele klippes med 1 cm sømrum.» is none)
+      if (CUT_HEADER.test(t) && short <= 6 && !/[.!?]\s*$/.test(t)) {
+        scope++;
+        headerAt.push(i);
+        cutHeader.add(i);
+      } else if (/:\s*$/.test(t) && short <= 4 && !(cutHeader.has(i - 1) && /^\p{Ll}/u.test(t))) {
+        // another section's title («Syning:», «Strygeindlæg:») ends the cutting section; a short
+        // lower-case «ткани:» right under a cutting header is that header's own second line
         scope++;
         headerAt.push(i);
       }
@@ -662,8 +671,11 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
     let e = k;
     while (e + 1 < raws.length && raws[e + 1].at - raws[e].at <= 2) e++;
     const run = raws.slice(k, e + 1);
-    const head = headerAt.some((h) => h < run[0].at && run[0].at - h <= CUT_HEADER_REACH);
-    if (run.length >= 3 || head) for (const r of run) inSection.add(r);
+    // Codex: only an explicit cutting header opens a section (a run of numbered steps with counts
+    // does not); the section is the list run right under it and ends at the next header
+    const last = headerAt.filter((h) => h < run[0].at).pop();
+    const head = last != null && cutHeader.has(last) && run[0].at - last <= CUT_HEADER_REACH;
+    if (head) for (const r of run) inSection.add(r);
     k = e + 1;
   }
   // per number: one entry per scope (a scope whose copies disagree is dropped)
