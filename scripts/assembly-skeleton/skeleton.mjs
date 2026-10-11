@@ -41,7 +41,17 @@ const outfile = resolve(tmpdir(), `assembly-skeleton-${process.pid}.mjs`);
 // --mutate-pin-settles (in the bundler's memory, never in the file): the pre-re-review rule — any
 // pin clears a tie, so a rebuild that keeps every reading by its pin settles every tie.
 const MUTATE_PIN_SETTLES = process.argv.includes('--mutate-pin-settles');
-const TIE_RULE = 'tie && !resolved.has(id)';
+// --mutate-ai-id-only: the pre-re-review AI pins — a pick matched by its decision id alone, whatever
+// that decision reads now.
+const MUTATE_AI_ID_ONLY = process.argv.includes('--mutate-ai-id-only');
+const swaps = [
+  ...(MUTATE_PIN_SETTLES
+    ? [[/group-units\.ts$/, 'tie && !resolved.has(id)', 'tie && pins[id] === undefined']]
+    : []),
+  ...(MUTATE_AI_ID_ONLY
+    ? [[/assembly-skeleton\/ai\.ts$/, 'asSent.get(key) !== asNow.get(key)', 'asSent !== asSent']]
+    : []),
+];
 await build({
   entryPoints: [resolve(here, 'skeleton-entry.ts')],
   bundle: true,
@@ -50,23 +60,16 @@ await build({
   absWorkingDir: root,
   outfile,
   logLevel: 'silent',
-  plugins: MUTATE_PIN_SETTLES
-    ? [
-        {
-          name: 'pin-settles-mutation',
-          setup(b) {
-            b.onLoad({ filter: /group-units\.ts$/ }, async (a) => {
-              const src = readFileSync(a.path, 'utf8');
-              if (!src.includes(TIE_RULE)) throw new Error('pin mutation did not find its line');
-              return {
-                contents: src.replace(TIE_RULE, 'tie && pins[id] === undefined'),
-                loader: 'ts',
-              };
-            });
-          },
-        },
-      ]
-    : [],
+  plugins: swaps.map(([filter, from, to]) => ({
+    name: `mutation ${from}`,
+    setup(b) {
+      b.onLoad({ filter }, async (a) => {
+        const src = readFileSync(a.path, 'utf8');
+        if (!src.includes(from)) throw new Error(`mutation did not find «${from}»`);
+        return { contents: src.replace(from, to), loader: 'ts' };
+      });
+    },
+  })),
 });
 const {
   buildSkeleton,
@@ -80,6 +83,8 @@ const {
   autoPicks,
   personalPick,
   picksFor,
+  skeletonAIPins,
+  skeletonAIRequest,
 } = await import(pathToFileURL(outfile).href);
 
 const args = process.argv.slice(2);
@@ -1869,6 +1874,58 @@ console.log('\nPlacement under reversed and shuffled pieces (synthetic, fixtures
         !!back[iR]?.tie &&
         !writes(back) &&
         !writes(auto),
+      said,
+    );
+  }
+  // A STALE AI ANSWER (07 re-review): the AI picked reading 1 of the left tab's tie; then an AI
+  // structure (FP_L + SLV_L + BP in one unit) rebuilt it, and the same id now names OTHER readings.
+  // The old pick must pin and settle nothing there — said as stale — and the tie stays.
+  {
+    const c = synthCard(cards.twoTies);
+    const tpl = orderTemplate('generic');
+    const L = 'orphan:TAB_L';
+    const p0 = run(c);
+    const req = skeletonAIRequest({
+      proposal: p0,
+      facts: c.facts,
+      templateStages: [],
+      seamWords: () => '',
+    });
+    const answer = { picks: [{ decisionId: L, reading: 1, reason: 'the sleeve' }] };
+    const fresh = req.ok ? skeletonAIPins(p0, answer, req.request) : null;
+    const units = [{ pieceKeys: ['FP_L', 'SLV_L', 'BP'], name: 'Body' }];
+    const p1 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, { units });
+    const readings = (p, id) => {
+      const s = p.steps.find((x) => x.decision?.id === id);
+      return s
+        ? [s.inputs, ...(s.alternatives ?? []).map((a) => a.inputs)].map((x) => x.join('+'))
+        : [];
+    };
+    const r = req.ok ? skeletonAIPins(p1, answer, req.request) : null;
+    // «use AI readings» exactly as the panel does it.
+    const p2 = r
+      ? buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+          units,
+          pins: r.pins,
+          resolved: r.picked,
+        })
+      : null;
+    const d2 = p2?.steps.find((x) => x.decision?.id === L)?.decision;
+    const said = `request ${req.ok ? 'ok' : req.why} · sent ${readings(p0, L).join(' / ')} · now ${readings(p1, L).join(' / ')} · stale ${JSON.stringify(r?.stale)} picked ${JSON.stringify(r?.picked)} → ${JSON.stringify(d2)}`;
+    console.log(`  stale AI pick: ${said}`);
+    gate(
+      'AI pick on the decision as sent: it pins and settles it',
+      !!fresh && fresh.pins[L] === 1 && fresh.picked.includes(L) && fresh.stale.length === 0,
+      JSON.stringify(fresh),
+    );
+    gate(
+      'AI pick on a decision that reads otherwise now: stale — no pin, no resolve, the tie stays',
+      readings(p0, L).join() !== readings(p1, L).join() &&
+        !!r?.stale.includes(L) &&
+        !r.picked.includes(L) &&
+        r.pins[L] !== 1 &&
+        d2?.chosen === 0 &&
+        !!d2?.tie,
       said,
     );
   }

@@ -21,6 +21,8 @@ export {
 export { segmentPiece, twins } from '../../src/lib/assembly-skeleton/geometry';
 export { unionLayout, unionPicture } from '../../src/lib/assembly-skeleton/union';
 export { SKELETON } from '../../src/lib/assembly-skeleton/types';
+// The AI door's request and its picks (a stale answer must not settle a decision).
+export { skeletonAIPins, skeletonAIRequest } from '../../src/lib/assembly-skeleton/ai';
 // The panel's ticks (auto / manual picks): the tie lifecycle is gated on the real ones.
 export {
   autoPicks,

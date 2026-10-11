@@ -855,7 +855,7 @@ function AssemblySkeletonPanel({
       warningsAt,
       picks,
       order,
-      pins: skeletonAIPins(proposal, answer),
+      pins: skeletonAIPins(proposal, answer, aiResult.request),
       structure: skeletonAIStructure(built.facts, answer),
     };
   }, [proposal, aiResult, built.facts]);
@@ -1165,6 +1165,7 @@ function AssemblySkeletonPanel({
                   readings={{
                     changed: aiView?.pins.changed ?? 0,
                     total: aiView?.picks.size ?? 0,
+                    stale: aiView?.pins.stale.length ?? 0,
                     locked: lockedWhy,
                     onUse: useAIReadings,
                   }}
@@ -1420,9 +1421,13 @@ function AssemblySkeletonPanel({
                                 now: ownPlace[i],
                                 reason: aiView.places[i]?.reason ?? '',
                                 warnings: aiView.warningsAt.get(i) ?? [],
-                                pick: raw.decision
-                                  ? aiView.picks.get(skeletonAIDecisionKey(raw.decision.id)) ?? null
-                                  : null,
+                                // A pick on a decision that reads otherwise since the AI
+                                // answered is not shown on any of its readings.
+                                pick:
+                                  raw.decision && !aiView.pins.stale.includes(raw.decision.id)
+                                    ? aiView.picks.get(skeletonAIDecisionKey(raw.decision.id)) ??
+                                      null
+                                    : null,
                               }
                             : null
                         }
