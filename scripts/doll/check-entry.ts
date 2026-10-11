@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 
 import { proposeSkeleton, readSeamGraph } from '../../src/lib/assembly-skeleton/pipeline';
 import type { SkeletonBomFacts, SkeletonCategory } from '../../src/lib/assembly-skeleton/types';
-import { joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
+import { hardwareFromOps, joinsFromOps, solveDoll, type DeclaredOp } from '../../src/lib/doll';
 import type { DollReport } from '../../src/lib/doll/types';
 import { labelMapper, loadFacts } from '../assembly-skeleton/seams-entry';
 import { anchorOfRunId, grainDegOf, seamFromCandidate, type StoredSeam } from '../../src/lib/seams';
@@ -213,6 +213,8 @@ for (const f of spec.files) {
     opsSource = "the skeleton's own units (no card order)";
   }
   const joins = joinsFromOps(ops, pieceOf);
+  // The order's hardware (HARDWARE_SET: an elastic) — given to the doll as the live card gives it.
+  const hardware = hardwareFromOps(ops, pieceOf);
   let rows: StoredSeam[] | undefined;
   let wrongWords = '';
   if (beta && f.betaRows) {
@@ -272,6 +274,7 @@ for (const f of spec.files) {
       dropSeams: f.drop,
       // DOLL_NOOPS: the joins are still read (for the table) but not given to the doll — the «before».
       joins: spec.noOps ? undefined : joins,
+      ...(!spec.noOps && hardware.length ? { hardware } : {}),
       ...(spec.maxPasses !== undefined ? { maxPasses: spec.maxPasses } : {}),
       ...(rows ? { seams: { rows, size: f.size ?? 'M' }, gender: f.gender ?? null } : {}),
     },
@@ -316,10 +319,20 @@ for (const f of spec.files) {
     for (const a of (sc.aParts ?? [sc.a]).map(pk))
       for (const b of (sc.bParts ?? [sc.b]).map(pk)) graphLinks.add(`${a}|${b}`).add(`${b}|${a}`);
   const dollLinks = new Set<string>();
-  for (const sm of report.seams)
-    if (sm.origin === 'doll-proposed' && sm.kind !== 'facing-free' && sm.state !== 'open')
+  const unitLinks = new Set<string>();
+  // (a unit the order sews first — yoke halves onto the back — is a graph seam the doll itself
+  // added from the order (units.ts), listed in orderJoins: the check's graph has no such link, so
+  // a part it lacks that a unit seam closes counts as linked. Other graph seams do not count.)
+  const unitSeams = new Set(report.orderJoins.map((o) => o.seam));
+  for (const sm of report.seams) {
+    const unit = sm.origin === 'graph' && unitSeams.has(sm.id);
+    if ((sm.origin === 'doll-proposed' || unit) && sm.kind !== 'facing-free' && sm.state !== 'open')
       for (const a of sm.a.map(pk))
-        for (const b of sm.b.map(pk)) dollLinks.add(`${a}|${b}`).add(`${b}|${a}`);
+        for (const b of sm.b.map(pk)) {
+          dollLinks.add(`${a}|${b}`).add(`${b}|${a}`);
+          if (unit) unitLinks.add(`${a}|${b}`).add(`${b}|${a}`);
+        }
+  }
   const touches = (L: Set<string>, X: string[], Y: string[]) =>
     X.some((a) => Y.some((b) => L.has(`${a}|${b}`)));
   // Only pieces the doll draws count (lining is off at level 0, pockets are not placed).
@@ -356,7 +369,7 @@ for (const f of spec.files) {
         (o) => o.join === J.label && X.some((k) => o.seam.includes(`${k}#`)),
       );
       rows.push(
-        `${X.join('+')}: graph ✗ · ${d ? `doll PROPOSES${how.length ? ` — ${how.map((o) => o.note).join('; ')}` : ' (free-loop proposal)'}` : 'doll ✗'}`,
+        `${X.join('+')}: graph ✗ · ${d ? `doll PROPOSES${how.length ? ` — ${how.map((o) => o.note).join('; ')}` : others.some((Y) => touches(unitLinks, X, Y)) ? " (the order's unit, sewn as one)" : ' (free-loop proposal)'}` : 'doll ✗'}`,
       );
     });
     opsLines.push(

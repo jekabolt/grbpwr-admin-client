@@ -1523,13 +1523,45 @@ function measureBottom(ctx: Ctx) {
           },
     );
   }
+  // A rise / outseam that runs on across a unit sewn first (a yoke on the back leg: the graph sews
+  // [back rise + yoke CB] to the other side as ONE composite) is measured to the waist along it.
+  const RUN_ON = new Set(['yoke', 'back', 'front', 'side', 'unknown']);
+  const runOn = (k: string, es: Edge[]): { k: string; e: Edge }[] => {
+    const ids = new Set(es.map((e) => e.id));
+    const seen = new Set<string>();
+    const extra: { k: string; e: Edge }[] = [];
+    for (const s of m.seams) {
+      if (s.kind !== 'composite') continue;
+      for (const side of [s.a, s.b]) {
+        if (!side.some((id) => ids.has(id))) continue;
+        for (const id of side) {
+          const pk = pieceOf(id);
+          if (ids.has(id) || seen.has(id) || pk === k) continue;
+          if (!RUN_ON.has(m.info.get(pk)?.kind ?? '')) continue;
+          const e = m.edges.get(id);
+          if (!e) continue;
+          seen.add(id);
+          extra.push({ k: pk, e });
+        }
+      }
+    }
+    return extra;
+  };
   const edgeLen = (code: PomCode, ks: string[], role: EdgeRole, why: string) => {
-    const per = ks.map((k) => ({ k, es: edgesOf(m, k, role) })).filter((x) => x.es.length);
+    const per = ks
+      .map((k) => {
+        const own = edgesOf(m, k, role);
+        const more = role === 'rise' || role === 'outseam' ? runOn(k, own) : [];
+        return { k, es: own, more };
+      })
+      .filter((x) => x.es.length);
     if (!per.length) {
       out.set(code, notFound(ks.length ? `no ${role} edge read` : why));
       return null;
     }
-    const vs = per.map((x) => x.es.reduce((s, e) => s + e.lenMm, 0));
+    const vs = per.map(
+      (x) => x.es.reduce((s, e) => s + e.lenMm, 0) + x.more.reduce((s, y) => s + y.e.lenMm, 0),
+    );
     const v = mean(vs);
     const spread = Math.max(...vs) - Math.min(...vs);
     out.set(code, {
@@ -1540,13 +1572,24 @@ function measureBottom(ctx: Ctx) {
           ? 'to the waist seam (waistband not added)'
           : undefined,
       detail: [
-        ...per.map((x, i) => `${x.k}: ${vs[i].toFixed(1)}`),
+        ...per.map(
+          (x, i) =>
+            `${x.k}: ${vs[i].toFixed(1)}${x.more.length ? ` (with ${x.more.map((y) => `${y.e.id} ${y.e.lenMm.toFixed(0)}`).join(' + ')} — sewn on as one unit)` : ''}`,
+        ),
         ...(spread > 5 ? [`pieces differ by ${spread.toFixed(1)} mm (ease?)`] : []),
       ],
+      // What it rests on: the leg's own edges. A run-on edge is backed by the composite seam it is
+      // part of (the other side's partner), whatever role its own shape reads.
+      ...(per.some((x) => x.more.length)
+        ? { basis: per.flatMap((x) => x.es.map((e) => e.id)) }
+        : {}),
       path: {
         landmarks: [],
-        edges: per.flatMap((x) => x.es.map((e) => e.id)),
-        lines: per.flatMap((x) => x.es.map((e) => ({ pieceKey: x.k, pts: e.pts }))),
+        edges: per.flatMap((x) => [...x.es.map((e) => e.id), ...x.more.map((y) => y.e.id)]),
+        lines: per.flatMap((x) => [
+          ...x.es.map((e) => ({ pieceKey: x.k, pts: e.pts })),
+          ...x.more.map((y) => ({ pieceKey: y.k, pts: y.e.pts })),
+        ]),
       },
     });
     return v;
