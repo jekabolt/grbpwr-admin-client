@@ -925,37 +925,20 @@ function sizesStep(snap: Snap): AutopilotDecision {
       ),
     };
   }
-  // two source sizes on one card size: the stronger keeps it
+  // two source sizes on one card size: the operator's call — a source size is never dropped to
+  // clear the question (Codex re-check #4)
   const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
   if (new Set(ids).size !== ids.length) {
-    const best = new Map<number, SizeMapEntry>();
-    for (const e of entries)
-      if (e.card) {
-        const b = best.get(e.card.sizeId);
-        if (!b || (e.confidence ?? 1) > (b.confidence ?? 1)) best.set(e.card.sizeId, e);
-      }
-    const dropped = entries.filter((e) => e.card && best.get(e.card.sizeId) !== e);
-    const next = entries.map(
-      (e): SizeMapEntry =>
-        dropped.includes(e)
-          ? { ...e, card: null, origin: 'operator' }
-          : { ...e, origin: 'operator' },
+    const twice = entries.filter(
+      (e) => e.card && entries.some((o) => o !== e && o.card?.sizeId === e.card!.sizeId),
     );
-    return {
-      actions: [{ kind: 'size-map', entries: next }],
-      assumptions: dropped.map((e) =>
-        A(
-          'sizes',
-          'size-dropped',
-          `source ${e.source.label || `rank ${e.source.rank}`}`,
-          'not exported',
-          'two source sizes point at one card size: the weaker match is not exported',
-          [`${e.card!.token} kept for ${best.get(e.card!.sizeId)!.source.label || '?'}`],
-          0.5,
-          false,
-        ),
-      ),
-    };
+    return stopAt(
+      'sizes',
+      `two source sizes point at one card size — ${twice
+        .slice(0, 4)
+        .map((e) => `${e.source.label || `rank ${e.source.rank}`} → ${e.card!.token}`)
+        .join(', ')}: map each to its own card size or leave one out`,
+    );
   }
   // the guesses (< 0.9) are confirmed as matched
   const guesses = guessedSizes(entries);
