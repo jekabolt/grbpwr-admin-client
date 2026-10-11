@@ -139,28 +139,28 @@ export type AutopilotAnswer = {
 };
 
 const NONE: AutopilotDecision = { actions: [], assumptions: [] };
-/** Production / pattern-CAD tools, as a file's producer metadata names them. */
+/** Pattern-CAD tools, as an SVG's own metadata names them (root title/desc, generator). */
 const CAD_PRODUCER =
   /\b(seamly2d|valentina|clo3d|clo|marvelous|gerber|accumark|lectra|modaris|optitex|gemini|audaces|tukatech|polypattern|grafis|assyst|richpeace)\b/i;
 
 /**
- * The outline prior from what made the file (format, producer metadata, A8 page roles): every file
- * a CAD export and no print layout (tile sheets, an overview page) → the evidence for "cut line";
- * else null (a question). No classifier: what the adapters already read.
+ * The outline prior from what made the file (Codex final #4): only a NATIVE pattern-CAD format —
+ * DXF (AAMA / ASTM), HP-GL / PLT — or an SVG whose own metadata names a pattern CAD (Seamly2D …)
+ * reads as a CAD export; a PDF's producer string or a plain Inkscape drawing never does. Every file
+ * such and no print layout (tile sheets, an overview page) → the evidence for "cut line"; else null
+ * (a question). A drawn inner seam line or the sheet's text decide before this, everywhere.
  */
-export function cadExport(s: ImportSession, i: Pick<Inputs, 'scaleIndex'>): string[] | null {
+export function cadExport(s: ImportSession): string[] | null {
   if (!s.files.length) return null;
   const tiles = s.pages.filter((p) => p.cls === 'tile').length;
   if (tiles > 1 || s.pages.some((p) => p.cls === 'overview')) return null;
-  const declared = s.scale.candidates[i.scaleIndex]?.method === 'declared';
   const why: string[] = [];
   for (const f of s.files) {
     const by = f.producer ?? '';
     if (f.kind === 'hpgl') why.push(`${f.name}: HP-GL plot file (a cutter/plotter export)`);
     else if (f.kind === 'dxf') why.push(`${f.name}: DXF export`);
-    else if (CAD_PRODUCER.test(by)) why.push(`${f.name}: made by ${by}`);
-    else if (f.kind === 'svg' && /inkscape/i.test(by) && declared)
-      why.push(`${f.name}: ${by} drawing in true mm`);
+    else if (f.kind === 'svg' && CAD_PRODUCER.test(by))
+      why.push(`${f.name}: an SVG exported by ${by}`);
     else return null;
   }
   return why;
@@ -1456,7 +1456,7 @@ function meaningStep(snap: Snap): AutopilotDecision {
       // the source's own prior: a production / pattern-CAD export draws the cut line (its pieces
       // carry their allowance); a printed home-sewing sheet (tiles, an overview page) does not say
       // — a question. Text or a drawn seam line (above) always wins over both.
-      const cad = cadExport(s, i);
+      const cad = cadExport(s);
       if (!cad)
         return stopAt(
           'meaning',
