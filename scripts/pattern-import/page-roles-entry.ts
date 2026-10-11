@@ -19,6 +19,7 @@ import {
   type PageRoleDeps,
 } from 'lib/pattern-import/ai/pages';
 import { AI_PAGES } from 'lib/pattern-import/clean/page-roles';
+import { mediaLeftovers } from 'lib/pattern-import/ai/discard';
 import type {
   AiPageHint,
   IRPage,
@@ -403,12 +404,33 @@ async function staleSection(f: string) {
   await client.close(1);
 }
 
-/** Codex #5: every uploaded thumbnail is deleted after the call — answered or failed. */
+/**
+ * Codex #5 + re-check #2: every uploaded thumbnail is deleted after the call — answered, failed,
+ * or timed out with an upload still in flight (deleted when it settles); a failed delete is
+ * retried once, and what is still left is logged (`mediaLeftovers`) for the backend sweep.
+ */
 async function discardSection() {
-  for (const fails of [false, true]) {
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+  type Case = {
+    label: string;
+    fails?: boolean;
+    slowUpload?: number;
+    timeoutMs?: number;
+    delFails?: number;
+  };
+  const cases: Case[] = [
+    { label: 'answered' },
+    { label: 'the call failed', fails: true },
+    { label: 'timed out with uploads still in flight', slowUpload: 60, timeoutMs: 20 },
+    { label: 'a delete failing once is retried', delFails: 1 },
+    { label: 'a delete failing twice is logged as left', delFails: 2 },
+  ];
+  for (const c of cases) {
     const up: number[] = [];
     const gone: number[] = [];
-    let n = 100;
+    let n = 100 + cases.indexOf(c) * 10;
+    let delCalls = 0;
+    const leftBefore = mediaLeftovers().length;
     const thumbs = [0, 1, 2].map((page) => ({
       file: '0',
       page,
@@ -422,28 +444,43 @@ async function discardSection() {
     }));
     clearPageRoleCache();
     const r = await classifyFilePages(
-      { key: `discard:${fails}`, file: '0', fileName: 'x.pdf', thumbs },
+      { key: `discard:${c.label}`, file: '0', fileName: 'x.pdf', thumbs, timeoutMs: c.timeoutMs },
       {
         upload: async () => {
+          if (c.slowUpload) await sleep(c.slowUpload);
           up.push(++n);
           return n;
         },
         classify: async () => {
-          if (fails) throw new Error('server down');
+          if (c.fails) throw new Error('server down');
           return { pages: [{ pageNo: 1, role: 'cover', confidence: 0.9, evidence: [] }] };
         },
-        discard: async (ids) => gone.push(...ids),
+        discard: async (ids) => {
+          delCalls++;
+          if (c.delFails && delCalls <= c.delFails) return ids;
+          gone.push(...ids);
+          return [];
+        },
       },
     );
-    await new Promise((res) => setTimeout(res, 0));
-    check(
-      'synthetic',
-      `every uploaded thumbnail is deleted after the call (${fails ? 'the call failed' : 'answered'})`,
-      up.length === 3 &&
-        JSON.stringify([...gone].sort()) === JSON.stringify([...up].sort()) &&
-        r.status === (fails ? 'error' : 'ok'),
-      { up, gone, status: r.status },
-    );
+    await sleep((c.slowUpload ?? 0) * 3 + 30);
+    const left = mediaLeftovers().slice(leftBefore);
+    const all = (x: number[]) => JSON.stringify([...x].sort());
+    const ok =
+      c.delFails === 2
+        ? left.length === up.length && gone.length === 0 && delCalls === 2
+        : up.length > 0 &&
+          all(gone) === all(up) &&
+          left.length === 0 &&
+          (c.delFails !== 1 || delCalls === 2) &&
+          r.status === (c.fails ? 'error' : c.timeoutMs ? 'timeout' : 'ok');
+    check('synthetic', `uploads deleted — ${c.label}`, ok, {
+      up,
+      gone,
+      left,
+      delCalls,
+      status: r.status,
+    });
   }
 }
 
@@ -669,6 +706,12 @@ async function mutationsSection() {
 }
 
 export async function main(args: string[]): Promise<number> {
+  if (args[0] === 'discard') {
+    await discardSection();
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
+    return checks.every((c) => c.ok) ? 0 : 1;
+  }
   if (args[0] === 'mutations') {
     await mutationsSection();
     for (const c of checks)

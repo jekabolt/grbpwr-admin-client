@@ -34,11 +34,13 @@ export const apiNamerDeps: NamerDeps = {
 
 /**
  * Codex (A9 #5): the renders sent to an AI call are not kept — deleted from the media library once
- * the call is over, best effort (DeleteFromBucket; a media another row references is refused by
- * the FK and stays).
+ * the call is over (DeleteFromBucket; a media another row references is refused by the FK and is
+ * reported back as not deleted).
  */
-export function discardMedia(ids: number[]) {
-  return Promise.allSettled(ids.map((id) => adminService.DeleteFromBucket({ id })));
+export async function discardMedia(ids: number[]): Promise<number[]> {
+  const r = await Promise.allSettled(ids.map((id) => adminService.DeleteFromBucket({ id })));
+  // the ids it could NOT delete: retried once, then logged for the sweep (lib/…/ai/discard.ts)
+  return ids.filter((_, k) => r[k].status === 'rejected');
 }
 
 /** The card facts the namer sends — sizes, BOM purposes, pieces already on the card. */

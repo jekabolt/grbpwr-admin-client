@@ -9,6 +9,7 @@ import type {
   SuggestPatternPiecesResponse,
 } from 'api/proto-http/admin';
 import { isKnownCode } from '../dictionary/codes';
+import { UploadTracker, type Discard } from './discard';
 import type {
   NameDecision,
   StageIO,
@@ -24,8 +25,8 @@ export type NamerDeps = {
   upload: (picture: Blob, what: string) => Promise<number>;
   /** POST /api/admin/pattern-import/pieces:suggest. */
   suggest: (req: SuggestPatternPiecesRequest) => Promise<SuggestPatternPiecesResponse>;
-  /** A9 Codex #5: delete the uploaded renders once the call is over (best effort). */
-  discard?: (mediaIds: number[]) => Promise<unknown>;
+  /** A9 Codex #5: delete the uploaded renders once the call is over (retried once, logged). */
+  discard?: Discard;
 };
 
 export type NamerResult = {
@@ -50,29 +51,32 @@ export async function suggestNames(
   deps: NamerDeps,
 ): Promise<NamerResult> {
   if (!som.marks.length) return { decisions: [], input: null, output: null, droppedCrops: [] };
-  // The overview is the call: without it there is nothing to ask about.
-  const overview = await deps.upload(som.sheetPng, 'pattern overview');
-  if (!(overview > 0)) throw new Error('the pattern overview went up but came back without an id');
-  const droppedCrops: number[] = [];
-  const crops = (
-    await inBatches(som.crops.slice(0, WIRE_LIMITS.crops), 4, async (c) => {
-      try {
-        const id = await deps.upload(c.png, `pattern piece ${c.mark}`);
-        return id > 0 ? { mark: c.mark, mediaId: id } : null;
-      } catch {
-        droppedCrops.push(c.mark);
-        return null;
-      }
-    })
-  ).filter((c): c is { mark: number; mediaId: number } => !!c);
-
-  const input = buildSuggestInput(som, card, { overview, crops }, !!opts.force);
+  // A9 Codex re-check #2: every render uploaded is tracked and deleted once the call is over —
+  // whatever happens (a throw anywhere below included)
+  const uploads = new UploadTracker(deps.discard, 'AI piece names');
   let output: SuggestPatternPiecesOutput;
+  let input: ReturnType<typeof buildSuggestInput>;
+  const droppedCrops: number[] = [];
   try {
+    // The overview is the call: without it there is nothing to ask about.
+    const overview = await uploads.track(deps.upload(som.sheetPng, 'pattern overview'));
+    if (!(overview > 0))
+      throw new Error('the pattern overview went up but came back without an id');
+    const crops = (
+      await inBatches(som.crops.slice(0, WIRE_LIMITS.crops), 4, async (c) => {
+        try {
+          const id = await uploads.track(deps.upload(c.png, `pattern piece ${c.mark}`));
+          return id > 0 ? { mark: c.mark, mediaId: id } : null;
+        } catch {
+          droppedCrops.push(c.mark);
+          return null;
+        }
+      })
+    ).filter((c): c is { mark: number; mediaId: number } => !!c);
+    input = buildSuggestInput(som, card, { overview, crops }, !!opts.force);
     output = fromWireResponse(await deps.suggest(toWireRequest(input)));
   } finally {
-    // the renders served the call: not kept in the media library (best effort)
-    if (deps.discard) void deps.discard([overview, ...crops.map((c) => c.mediaId)]).catch(() => {});
+    uploads.close();
   }
   const decisions = combineNames(output.suggestions, som.marks, {
     existingPieceNames: card.existingPieceNames,

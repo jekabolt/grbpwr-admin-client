@@ -12,6 +12,7 @@
 // here imports `api/api`, and no probe reaches the network.
 import type { AiPageHint, FileId, PageIndex, PageStats } from '../types';
 import { AI_PAGES, aiRoleOf } from '../clean/page-roles';
+import { UploadTracker, type Discard } from './discard';
 
 // ── wire (mirrors the generated client's shape: camelCase, every field `| undefined`) ─────────
 
@@ -72,7 +73,7 @@ export type PageRoleDeps = {
    * Codex #5: delete the uploaded thumbnails once the call is over (best effort, never awaited by
    * the result) — they are not kept in the media library.
    */
-  discard?: (mediaIds: number[]) => Promise<unknown>;
+  discard?: Discard;
 };
 
 /** One file's pages as the worker drew them (render-pages). */
@@ -271,13 +272,17 @@ async function run(
     more,
   });
   if (!thumbs.length) return none('skipped', null);
-  const uploaded: number[] = [];
+  // Codex re-check #2: every upload tracked — deleted when the call is over, or when it settles
+  // after a timeout; no new upload starts once the call is over
+  const uploads = new UploadTracker(deps.discard, `AI page roles, ${args.fileName}`);
   try {
     return await withTimeout(
       (async (): Promise<CachedCall> => {
         const ids = await inBatches(thumbs, 4, async (t) => {
-          const id = pics ? await deps.upload(t.png!, `${args.fileName} page ${t.page + 1}`) : 0;
-          if (id > 0) uploaded.push(id);
+          const id =
+            pics && !uploads.closed
+              ? await uploads.track(deps.upload(t.png!, `${args.fileName} page ${t.page + 1}`))
+              : 0;
           return { t, id };
         });
         // server rule: every page its own media id — an upload the store deduplicated to an id
@@ -328,8 +333,6 @@ async function run(
       `AI page roles: ${timeout ? (e as Error).message : `unavailable (${e instanceof Error ? e.message : String(e)})`} — pages judged by their geometry`,
     );
   } finally {
-    // the thumbnails served the call: not kept (an upload still running after a timeout is not
-    // in the list yet — the backend sweep takes it)
-    if (uploaded.length && deps.discard) void deps.discard([...new Set(uploaded)]).catch(() => {});
+    uploads.close();
   }
 }
