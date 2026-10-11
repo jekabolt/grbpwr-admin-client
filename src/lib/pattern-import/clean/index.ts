@@ -424,6 +424,7 @@ function aiPass(
         role: h.role,
         confidence: h.confidence,
         evidence: (h.evidence ?? []).slice(0, 3).map((e) => [...e].slice(0, 120).join('')),
+        ...(h.stale ? { stale: true } : {}),
       };
     if (d.status !== 'suggest') continue;
     const pg = docPage.get(k);

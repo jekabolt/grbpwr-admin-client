@@ -348,6 +348,8 @@ export function useImportSession(deps: {
    * what the call did in words — a note on the files step, never a stop.
    */
   const pageHints = useRef<AiPageHint[]>([]);
+  /** A9 (Codex #4): per file, what its answers were asked against (`basisOf`). */
+  const pageBasis = useRef(new Map<string, string>());
   const [pageRoleNote, setPageRoleNote] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
@@ -621,7 +623,10 @@ export function useImportSession(deps: {
           const decision = sRef.current.scale.decision;
           patchInputs({ cleanEdits: ev.edits });
           iRef.current = { ...iRef.current, cleanEdits: ev.edits };
-          const cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
+          let cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
+          // A9 (Codex #4): an edit that changed a file's render or its tile reference set makes
+          // that file's AI answers stale — they only suggest until asked again
+          if (staleAfter(cl)) cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
           const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best, scaleConfirmed: false });
           iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
@@ -975,10 +980,33 @@ export function useImportSession(deps: {
           }
           return;
         }
+        case 'page-roles': {
+          // A9: "ask the AI again" — fresh answers for the pages as they are now (edits kept)
+          const now = sRef.current.clean;
+          if (!now) return;
+          const cl = await askPageRoles(now, sRef.current.files, iRef.current.cleanEdits);
+          if (!cl) return;
+          const best = bestScale(cl.scale);
+          patchInputs({ scaleIndex: best, scaleConfirmed: false });
+          iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
+          patch(
+            dropAfter(
+              {
+                ...sRef.current,
+                clean: cl,
+                pages: cl.classes,
+                scale: { candidates: cl.scale, decision: null },
+              },
+              'files',
+            ),
+          );
+          return;
+        }
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
           pageHints.current = [];
+          pageBasis.current = new Map();
           setPageRoleNote(null);
           baseSeeds.current = null;
           heldNames.current = [];
@@ -1007,17 +1035,50 @@ export function useImportSession(deps: {
    * geometry settles costs nothing). The answer re-runs clean with the hints; any failure leaves
    * the run as it was (a note, never a stop). Null = clean need not run again.
    */
+  /**
+   * A9 (Codex #4): what a file's AI answers depend on — the mask its thumbnails were drawn with
+   * (file-neutral item ids) and its tile reference set. A change of either makes them stale.
+   */
+  const basisOf = (cl: StageIO['clean']['out'], file: string) =>
+    `${maskRevOf(
+      cl.pages
+        .filter((p) => p.file === file)
+        .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
+      [],
+    )}|${cl.classes
+      .filter((c) => c.file === file && c.cls === 'tile')
+      .map((c) => c.page)
+      .join(',')}`;
+
+  /** Marks the answers of every file whose basis moved stale; true = clean must run again. */
+  const staleAfter = (cl: StageIO['clean']['out']) => {
+    let moved = false;
+    pageHints.current = pageHints.current.map((h) => {
+      if (h.stale || basisOf(cl, h.file) === pageBasis.current.get(h.file)) return h;
+      moved = true;
+      return { ...h, stale: true };
+    });
+    if (moved)
+      setPageRoleNote(
+        'AI page roles: asked before your edits — they only suggest now; ask the AI again to use them',
+      );
+    return moved;
+  };
+
   async function askPageRoles(
     cl: StageIO['clean']['out'],
     files: StageIO['extract']['out']['files'],
+    edits: PageMaskEdit[] = [],
   ): Promise<StageIO['clean']['out'] | null> {
     pageHints.current = [];
+    pageBasis.current = new Map();
     setPageRoleNote(null);
     const roles = deps.pageRoles;
     if (!roles) return null;
     const asked = new Map<string, Set<number>>();
+    // the pages in question: set aside holding line work (also those the AI set aside before)
     for (const d of cl.dropped)
-      if (d.status === 'suggest') {
+      if (d.status === 'suggest' || d.aiAside) {
         const set = asked.get(d.file) ?? new Set<number>();
         set.add(d.page);
         asked.set(d.file, set);
@@ -1074,8 +1135,9 @@ export function useImportSession(deps: {
     }
     pageHints.current = hints;
     setPageRoleNote(notes.join(' · ') || null);
-    if (!hints.length) return null;
-    return await run('clean', { edits: [], aiHints: { pages: hints } });
+    for (const file of asked.keys()) pageBasis.current.set(file, basisOf(cl, file));
+    if (!hints.length) return edits.length ? await run('clean', { edits }) : null;
+    return await run('clean', { edits, aiHints: { pages: hints } });
   }
 
   /**
@@ -1758,6 +1820,8 @@ export function useImportSession(deps: {
     notice,
     /** A9: what the AI page-role call did (answered, unavailable, timed out) — a note, not a stop. */
     pageRoleNote,
+    /** A9 (Codex #4): some AI answers were asked before an edit — "ask the AI again" refreshes them. */
+    pageRolesStale: pageHints.current.some((h) => h.stale),
     som,
     clientKind: client.kind,
     blocker,

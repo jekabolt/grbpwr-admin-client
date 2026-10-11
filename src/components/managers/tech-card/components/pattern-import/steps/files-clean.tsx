@@ -378,7 +378,7 @@ function AsideThumb({
         )}
         {d.status === 'suggest' && d.ai && (
           <Text size='micro' component='span' className='w-full' title={ev}>
-            AI: {aiWords(d.ai)}
+            AI{d.ai.stale ? ' (before your edits)' : ''}: {aiWords(d.ai)}
           </Text>
         )}
         {d.status === 'suggest' && (
@@ -452,6 +452,19 @@ export function CleanBlock({
           {api.pageRoleNote && (
             <Text size='micro' component='p' className='mb-0.5'>
               {api.pageRoleNote}
+              {api.pageRolesStale && (
+                <>
+                  {' '}
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    disabled={!!session.busy}
+                    onClick={() => void api.dispatch({ type: 'page-roles' })}
+                  >
+                    ask the AI again
+                  </Button>
+                </>
+              )}
             </Text>
           )}
           <div className='flex flex-wrap gap-2'>

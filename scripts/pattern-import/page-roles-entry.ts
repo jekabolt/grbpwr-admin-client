@@ -23,6 +23,13 @@ import type { AiPageHint, StageIO } from 'lib/pattern-import/types';
 // the e2e entry installs pdf.js' legacy build (setPdfjsLoader)
 import './e2e-entry';
 import { fixturePageRoleDeps } from './page-roles-fixture';
+import { mountHook, rerender } from './react-hook-shim';
+import {
+  useImportSession,
+  type ImportSessionApi,
+} from 'components/managers/tech-card/components/pattern-import/use-import-session';
+import type { ImportClient } from 'components/managers/tech-card/components/pattern-import/client';
+import { stubBuildDraft } from 'components/managers/tech-card/components/pattern-import/stub-client';
 
 const CORPUS =
   process.env.PATIMPORT_CORPUS ??
@@ -269,7 +276,108 @@ async function oneFile(f: string) {
   }
 }
 
+/**
+ * Codex #4 through the REAL wizard hook: an edit that changes the tile reference set makes the
+ * file's AI answers stale (they only suggest); "keep aside" (a role edit to the class it has)
+ * changes nothing; "ask the AI again" makes them count again.
+ */
+async function staleSection(f: string) {
+  let sess: Session | null = null;
+  const ctx2 = { checkCancel: () => {}, progress: () => {} };
+  const client: ImportClient = {
+    kind: 'worker',
+    async open(files) {
+      sess = new Session(1, files);
+      return { sessionId: 1, files: sess.files };
+    },
+    async run(_id, stage, input) {
+      if (!sess) throw new Error('no session');
+      const i =
+        stage === 'render-pages'
+          ? { ...(input as StageIO['render-pages']['in']), pictures: false }
+          : input;
+      return (await sess.runStage(stage, i as never, ctx2)) as never;
+    },
+    cancel() {},
+    async close() {
+      sess?.close();
+      sess = null;
+    },
+    alive: () => true,
+  };
+  const fx = fixturePageRoleDeps();
+  clearPageRoleCache();
+  let api!: ImportSessionApi;
+  mountHook(() => {
+    api = useImportSession({
+      client,
+      card: { techCardId: 1, sizes: [], scopes: [], existingPieces: [], styleLabel: 'probe' },
+      namer: async () => [],
+      buildDraft: stubBuildDraft,
+      applyDraft: async () => ({ ok: true, uploaded: [] }),
+      pageRoles: fx.deps,
+    });
+  });
+  const settle = async () => {
+    for (let k = 0; k < 4; k++) await Promise.resolve();
+    rerender();
+  };
+  const b = readFileSync(resolve(CORPUS, `pdf/${f}`));
+  await api.dispatch({ type: 'files', files: [new File([b], f)] });
+  await settle();
+  const asideNow = () =>
+    (api.session.clean?.dropped ?? []).filter((d) => d.aiAside).map((d) => d.page);
+  const first = asideNow();
+  check(f, 'hook: the AI + a reduced copy sets the overview aside', first.length > 0, first);
+  // "keep aside" on an instruction page: its role stays, nothing the answers depend on moved
+  const instr = api.session.clean!.dropped.find(
+    (d) => d.cls === 'instructions' && d.status === 'suggest',
+  )!;
+  await api.dispatch({
+    type: 'clean',
+    edits: [{ file: instr.file, page: instr.page, role: instr.cls }],
+  });
+  await settle();
+  check(
+    f,
+    'hook: "keep aside" does not make the answers stale',
+    !api.pageRolesStale && JSON.stringify(asideNow()) === JSON.stringify(first),
+    { stale: api.pageRolesStale, aside: asideNow() },
+  );
+  // a tile set aside by the operator: the tile reference set moved — stale, only a suggestion
+  const tile = api.session.clean!.classes.find((c) => c.cls === 'tile')!;
+  const edits = [
+    ...api.inputs.cleanEdits,
+    { file: tile.file, page: tile.page, role: 'instructions' as const },
+  ];
+  await api.dispatch({ type: 'clean', edits });
+  await settle();
+  check(
+    f,
+    'hook: a tile set aside makes the answers stale — nothing set aside on them',
+    api.pageRolesStale &&
+      asideNow().length === 0 &&
+      (api.session.clean?.dropped ?? []).some((d) => d.ai?.stale),
+    { stale: api.pageRolesStale, aside: asideNow() },
+  );
+  await api.dispatch({ type: 'page-roles' });
+  await settle();
+  check(
+    f,
+    'hook: "ask the AI again" — fresh answers count again, the edits kept',
+    !api.pageRolesStale && asideNow().length > 0 && api.inputs.cleanEdits.length === 2,
+    { stale: api.pageRolesStale, aside: asideNow(), calls: fx.log.calls.length },
+  );
+  await client.close(1);
+}
+
 export async function main(args: string[]): Promise<number> {
+  if (args[0] === 'stale') {
+    await staleSection(args[1] ?? 'robe.pdf');
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
+    return checks.every((c) => c.ok) ? 0 : 1;
+  }
   if (args[0] === 'dump') {
     await dump(args.slice(1));
     return 0;
@@ -280,6 +388,7 @@ export async function main(args: string[]): Promise<number> {
         .filter((f) => f.endsWith('.pdf'))
         .sort();
   const rows = [];
+  if (!args.length) await staleSection('robe.pdf');
   for (const f of files) {
     const t = Date.now();
     try {

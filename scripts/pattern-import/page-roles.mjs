@@ -24,6 +24,8 @@ await esbuild({
   // pdf.js is loaded at run time from node_modules (legacy build), never bundled.
   external: ['pdfjs-dist', 'pdfjs-dist/*'],
   alias: {
+    // the wizard hook runs under the one-component shim (the stale-answers check)
+    react: resolve(HERE, 'react-hook-shim.ts'),
     lib: resolve(REPO, 'src/lib'),
     components: resolve(REPO, 'src/components'),
     utils: resolve(REPO, 'src/utils'),

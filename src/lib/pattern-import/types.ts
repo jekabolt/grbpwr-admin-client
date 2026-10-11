@@ -2053,6 +2053,8 @@ export type WizardEvent =
   | { type: 'files'; files: File[] }
   /** A8: the operator's mask edits (undo a kind, accept a suggestion, re-include a page). */
   | { type: 'clean'; edits: PageMaskEdit[] }
+  /** A9: ask the AI the page roles again (fresh answers for the pages as they are now). */
+  | { type: 'page-roles' }
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
@@ -2283,7 +2285,7 @@ export type CleanOutput = {
      * holding line work: not pattern = the pre-filled "keep it aside", `pattern_*` = "read it as a
      * tile" offered.
      */
-    ai?: { role: AiPageRole; confidence: number; evidence: string[] };
+    ai?: { role: AiPageRole; confidence: number; evidence: string[]; stale?: boolean };
     /**
      * A9: SUGGESTIVE geometric facts that the page is not pattern (another format, no tile chrome,
      * text-dominant, no registration) — never enough to set it aside, even with the AI.
