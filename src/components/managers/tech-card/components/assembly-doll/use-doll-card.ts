@@ -214,7 +214,7 @@ export function useDollCard(): DollCard | null {
     for (const s of sized.sizes) {
       if (s === '') continue;
       const t = s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
-      const hits = cardSizes.filter((n) => n.toLowerCase() === t || sizeTokensOf(n)[0] === t);
+      const hits = cardSizes.filter((n) => n.toLowerCase() === t || sizeTokensOf(n).includes(t));
       if (hits.length === 1 && hits[0].toLowerCase() !== t) labelOf.set(s, hits[0]);
     }
     const sizes = sized.sizes.map(keyOf);
@@ -254,6 +254,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
     facts,
     options: {
       lining,
+      oneSize: c.sizes.length === 1,
       joins: c.joins,
       gender: c.gender,
       ...(c.rows.length ? { seams: { rows: c.rows, size } } : {}),

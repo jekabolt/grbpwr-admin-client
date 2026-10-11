@@ -118,7 +118,7 @@ type Work = {
  * near-level waist running into a concave crotch curve (the curve below the waist widens the piece
  * — a front / back leg). A dress or a shirt front has a short slanted shoulder above its armhole,
  * never a level waist as wide as half the piece. Returns the leg pieces' names, or null unless a
- * mirror pair of them is found.
+ * front and a back pair of them are found.
  */
 function trouserLegs(pieces: readonly PieceGeom[]): string | null {
   const legs = new Set<string>();
@@ -155,7 +155,8 @@ function trouserLegs(pieces: readonly PieceGeom[]): string | null {
   const named = pieces.filter(
     (g) => legs.has(g.pieceKey) && g.twinOf.some((t) => t.kind === 'mirror' && legs.has(t.key)),
   );
-  return named.length >= 2 ? named.map((g) => g.name).join(', ') : null;
+  // Two mirror pairs (front legs and back legs): one tall pair alone could be a dress's panels.
+  return named.length >= 4 ? named.map((g) => g.name).join(', ') : null;
 }
 
 const HONESTY =
@@ -440,6 +441,8 @@ export function solveDoll(input: DollInput): DollReport {
   ]);
   const notGarment =
     facts.category === 'generic' &&
+    // positive evidence of an accessory: drawn in one size (a garment is graded)
+    !!opt.oneSize &&
     G.pieces.length > 0 &&
     !G.pieces.some((p) => GARMENT_GROUPS.has(p.group))
       ? `the paper doll cannot wrap this item — the card names no garment and no piece reads as a sleeve, collar, cuff or leg: its ${G.pieces.length} ${G.pieces.length === 1 ? 'piece is' : 'pieces are'} shown flat, the ${G.seams.length} ${G.seams.length === 1 ? 'seam' : 'seams'} between them ${G.seams.length === 1 ? 'is' : 'are'} in the seams review`
@@ -4928,6 +4931,7 @@ export function solveDoll(input: DollInput): DollReport {
     honesty: HONESTY,
     ...(notSewn.length ? { notSewn } : {}),
     ...(notGarment ? { notGarment } : {}),
+    ...(allLining ? { liningAsShell: true } : {}),
     ...(l4
       ? {
           contradictions: [...preContradictions, ...contradictions],

@@ -26,6 +26,8 @@ export type DollOptions = {
   proposeComposite?: boolean;
   /** Lining pieces are listed, not solved, unless this is set (design §8 q5). Default false. */
   lining?: boolean;
+  /** The card is read in one size only (one-size / ungraded): evidence of an accessory. */
+  oneSize?: boolean;
   /** Cap of solver passes before the settle check (determinism + time budget). Default 1800. */
   maxPasses?: number;
   /** Extra passes the settle loop may spend until travel < 1.5 mm per 20 passes. Default 2400. */
@@ -204,6 +206,8 @@ export type DollReport = {
    * names no garment): the pieces are laid out flat, unsolved, and this says so in words.
    */
   notGarment?: string;
+  /** Every piece is cut from the lining: the lining is drawn as the shell (said in the view). */
+  liningAsShell?: boolean;
   /** L4 only: confirmed seams that cannot be what they say, in words (never silently dropped). */
   contradictions?: string[];
   /** L4 only: closures drawn overlapped at the button line. */

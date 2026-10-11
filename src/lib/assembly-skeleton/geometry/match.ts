@@ -410,10 +410,10 @@ const isCentreLong = (r: Run) =>
   r.lenMm >= CENTRE_MIN_SHARE * Math.max(...r.piece.edges.map((e) => e.lenMm));
 /** A centre / tube edge runs UP the piece: its chord within this of the drawing's vertical. */
 const LENGTHWISE_DEG = 25;
-/** Straight enough for a tube seam (an underarm is a slightly shaped line). */
-const r95 = (r: Run) => r.chordMm / r.lenMm >= 0.95;
+/** Straight enough for a tube seam (an underarm, a flared side is a slightly shaped line). */
+const r95 = (r: Run) => r.chordMm / r.lenMm >= 0.9;
 /** A tube seam (a piece sewn to itself) spans at least this share of the piece's height. */
-const TUBE_MIN_SHARE = 0.6;
+const TUBE_MIN_SHARE = 0.4;
 const yBox = (p: PieceGeom) => {
   let y0 = Infinity;
   let y1 = -Infinity;
@@ -445,6 +445,12 @@ const isLengthwise = (r: Run) => {
  * most of the piece's height, on opposite sides of it (a sleeve's underarm, a one-piece body's side).
  * Never two armholes, two halves of a waist round a dart, a hem onto a neckline.
  */
+const TUBE_DEG = 35;
+const isTubeRun = (r: Run) => {
+  const a = r.pts[0];
+  const b = r.pts[r.pts.length - 1];
+  return Math.atan2(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) <= (TUBE_DEG * Math.PI) / 180;
+};
 const isTubePair = (u: Run, v: Run) => {
   if (u.piece !== v.piece) return false;
   const b = yBox(u.piece);
@@ -463,8 +469,8 @@ const isTubePair = (u: Run, v: Run) => {
   return (
     r95(u) &&
     r95(v) &&
-    isLengthwise(u) &&
-    isLengthwise(v) &&
+    isTubeRun(u) &&
+    isTubeRun(v) &&
     span(u) >= TUBE_MIN_SHARE &&
     span(v) >= TUBE_MIN_SHARE &&
     Math.sign(mx(u) - cx) * Math.sign(mx(v) - cx) < 0
@@ -801,7 +807,10 @@ export function matchSeams(
       // on that evidence alone only the centre front qualifies — a straight edge running the
       // piece — never the two hems or the two shoulders of the left and right fronts.
       const why =
-        why0?.closure.evidence === 'bom+name' && !(isCentreLong(c.u) && isCentreLong(c.v))
+        (why0?.closure.evidence === 'bom+name' && !(isCentreLong(c.u) && isCentreLong(c.v))) ||
+        // an opening runs up the garment: never two hems or two shoulders of mirror halves
+        !isLengthwise(c.u) ||
+        !isLengthwise(c.v)
           ? null
           : why0;
       // A closure is judged on the base score: the twin penalty is what makes it a closure.
@@ -977,6 +986,12 @@ export function matchSeams(
         byX.set(k, [...(byX.get(k) ?? []), { c, pr, xr }]);
       }
       for (const list of byX.values()) {
+        // Only a piece that sits on ONE side of the host itself (its seams there all on one side
+        // of it — a half front: side seam and shoulder): a whole front spanning the host's two
+        // side seams is sewn on both sides by design.
+        const X = list[0].xr.piece;
+        const xSides = new Set(list.map((x) => xSideOf(X, x.xr.edges[0])));
+        if (!X.hand && (xSides.size !== 1 || xSides.has(0))) continue;
         const sided = list
           .map((x) => ({ ...x, side: xSideOf(P, x.pr.edges[0]) }))
           .filter((x) => x.side !== 0);
@@ -994,6 +1009,7 @@ export function matchSeams(
                 (q.v.id === x.xr.id && q.u.id === twin.id)),
           );
           if (!to || to.score < x.c.score - SKELETON.ambiguity) continue;
+          if (moves.some((m) => m.from === x.c || m.to === to)) continue;
           moves.push({ from: x.c, to, on: P.name });
         }
       }
@@ -1008,7 +1024,8 @@ export function matchSeams(
             if (left.length) usedBy.set(e.id, left);
             else usedBy.delete(e.id);
           }
-        chosenC.splice(chosenC.indexOf(c), 1);
+        const at = chosenC.indexOf(c);
+        if (at >= 0) chosenC.splice(at, 1);
       };
       for (const m of moves) drop(m.from);
       for (const m of moves) {

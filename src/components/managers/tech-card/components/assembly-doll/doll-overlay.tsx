@@ -304,7 +304,7 @@ export default function DollOverlay({
             </Section>
             <Section
               title='measures'
-              question={`— size ${at}, from the pattern laid flat`}
+              question={`— size ${card ? card.sizeLabel(at) : at}, from the pattern laid flat`}
               className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
             >
               <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
@@ -354,7 +354,12 @@ export default function DollOverlay({
                 >
                   pom lines
                 </Chip>
-                {hasLining && (
+                {hasLining && report?.liningAsShell && (
+                  <Text component='span' size='micro' variant='label' data-doll-lining-shell=''>
+                    every piece is cut from the lining — drawn as the shell
+                  </Text>
+                )}
+                {hasLining && !report?.liningAsShell && (
                   <Chip
                     selected={lining}
                     pressed={lining}
