@@ -45,7 +45,9 @@ import {
   resolverFor,
   fallbackGrain,
   longestStraight,
+  modelFromCard,
   principalAxis,
+  sheetFromCard,
   type Assumption,
   type AutopilotAnswer,
   type AutopilotSnapshot,
@@ -59,7 +61,47 @@ import {
 } from 'components/managers/tech-card/components/pattern-import/auto-drive';
 import { splitSize } from './worker-entry';
 
-type Case = (typeof CASES)[number];
+type Case = (typeof CASES)[number] & {
+  /** A10 card controls: the run must stop at this step (the card names nothing usable). */
+  expectStop?: 'sheet' | 'pieces';
+};
+
+/**
+ * A10 negative controls of the card match: a card that names nothing, a model not on the sheet,
+ * two models, two sheets — each must STOP on the question, never pick (yarn patimport:autopilot
+ * fails otherwise). Not counted in "reached apply".
+ */
+const CONTROLS: Case[] = [
+  ['none', 'Phoebe Jumpsuit'],
+  ['foreign', 'Phoebe Jumpsuit · Style C'],
+  ['two', 'Phoebe Jumpsuit · Style A / Style B'],
+].flatMap(([k, name]) => {
+  const base = CASES.find((c) => c.id === 'kombinezon-B');
+  return base
+    ? [
+        {
+          ...base,
+          id: `control:kombinezon-card-${k}`,
+          cardName: name,
+          expectStop: 'pieces' as const,
+        },
+      ]
+    : [];
+});
+for (const [k, name] of [
+  ['none', 'Mantel & Jacke 44-54'],
+  ['two', 'Mantel & Jacke · Bogen A + Bogen B'],
+]) {
+  const base = CASES.find((c) => c.id === 'polupalto-sheetB');
+  if (base)
+    CONTROLS.push({
+      ...base,
+      id: `control:polupalto-card-${k}`,
+      cardName: name,
+      expectStop: 'sheet',
+    });
+}
+const ALL: Case[] = [...CASES, ...CONTROLS];
 
 /** Labelled points inside the truth pieces (sheet mm), from the click fixture of the truth id. */
 function truthPoints(c: Case): { label: string; at: { x: number; y: number } }[] {
@@ -232,13 +274,14 @@ type Wrong = { kind: string; subject: string; got: string; want: string; assumed
 
 export async function runCase(c: Case, mutate: string | null) {
   const T0 = Date.now();
-  const rec: Record<string, unknown> = { id: c.id, group: c.group };
+  const rec: Record<string, unknown> = { id: c.id, group: c.expectStop ? 'control' : c.group };
   const card: CardContext = {
     techCardId: CARD_ID,
     sizes: cardSizes(c.card),
     scopes: SCOPES,
     existingPieces: [],
     styleLabel: 'autopilot',
+    ...(c.cardName ? { cardName: c.cardName } : {}),
   };
   const { client, outs } = sessionClient();
   let api!: ImportSessionApi;
@@ -349,6 +392,45 @@ export async function runCase(c: Case, mutate: string | null) {
   if (done && !done.ok) rec.stop = done.stop;
   else if (!done) rec.stop = { step: s.step, reason: 'tick budget spent' };
   if (rec.verdict === 'stopped' && c.group === 'refusal') rec.expectedStop = true;
+  // A10 card match, dry: what the card names against the pages' own labels (models, sheet
+  // letters) as read at extraction — scored even when the run stopped before the question
+  const fileNames = s.files.map((f) => f.name);
+  const tileIds = new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0));
+  const pageModels = [...new Set(s.pages.flatMap((p) => p.labels?.models ?? []))].sort();
+  const dry: {
+    sheet?: number | null;
+    model?: string | null;
+    why: string[];
+    wrong: string[];
+  } = { why: [], wrong: [] };
+  if (tileIds.size > 1) {
+    const r = sheetFromCard(s.pages, card, fileNames);
+    dry.sheet = r.pick;
+    dry.why.push(...(r.evidence ?? (r.why ? [r.why] : [])));
+    if (r.pick != null && c.sheet != null && r.pick !== c.sheet)
+      dry.wrong.push(`sheet ${r.pick} ≠ ${c.sheet}`);
+  }
+  if (pageModels.length > 1) {
+    const r = modelFromCard(pageModels, card, fileNames);
+    dry.model = r.pick;
+    dry.why.push(...(r.evidence ?? (r.why ? [r.why] : [])));
+    const want = c.variant ?? c.cardModel;
+    if (r.pick != null && want && !want.test(r.pick)) dry.wrong.push(`model ${r.pick} ≠ ${want}`);
+  }
+  rec.cardMatch = dry;
+  if (c.expectStop) {
+    const st = rec.stop as { step: string; reason: string } | undefined;
+    const picked =
+      (api.inputs.autopilot ?? []).some((a) => a.kind === 'model' || a.kind === 'sheet-choice') ||
+      dry.sheet != null ||
+      dry.model != null;
+    // a control never picks; one that stopped before the question is "not reached", not a pass
+    rec.control = {
+      expect: c.expectStop,
+      ok: !picked && rec.verdict === 'stopped',
+      reached: st?.step === c.expectStop,
+    };
+  }
   rec.fingerprintDrift = fingerprintDrift;
   // the run's assumptions as the wizard keeps them (merged into its inputs, one per question)
   const as = api.inputs.autopilot;
@@ -593,15 +675,17 @@ export async function runCase(c: Case, mutate: string | null) {
     }
   }
   // the model / the sheet
-  if (c.variant && s.variant && !c.variant.test(s.variant))
+  const wantModel = c.variant ?? c.cardModel;
+  if (wantModel && s.variant && !wantModel.test(s.variant))
     wrong.push({
       kind: 'model',
       subject: 'the sheet',
       got: s.variant,
-      want: String(c.variant),
+      want: String(wantModel),
       assumed: assumedOn(null, ['model']),
     });
-  if (c.sheet && c.sheet !== api.inputs.sheetIndex)
+  // the sheet is scored once one was picked (a run stopped before the question picked none)
+  if (c.sheet != null && api.inputs.sheetPicked != null && c.sheet !== api.inputs.sheetIndex)
     wrong.push({
       kind: 'sheet',
       subject: 'the file',
@@ -798,11 +882,11 @@ function compress(xs: string[]): string[] {
 
 export async function main(args: string[]): Promise<number> {
   if (args[0] === 'list') {
-    console.log(JSON.stringify(CASES.map((c) => c.id)));
+    console.log(JSON.stringify(ALL.map((c) => c.id)));
     return 0;
   }
   const mutate = process.env.AUTOPILOT_MUTATE || null;
-  const want = args.length ? CASES.filter((c) => args.includes(c.id)) : CASES;
+  const want = args.length ? ALL.filter((c) => args.includes(c.id)) : ALL;
   for (const c of want) {
     let r: Record<string, unknown>;
     try {

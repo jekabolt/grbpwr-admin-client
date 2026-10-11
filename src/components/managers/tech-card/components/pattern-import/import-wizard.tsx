@@ -266,11 +266,13 @@ function WizardBody({
         return <ScaleStep api={api} />;
       case 'sheet':
         // Keyed by sheet: the hand-grid form starts from THIS sheet's tiles.
-        return <SheetStep key={session.sheet?.sheet.id ?? -1} api={api} />;
+        return <SheetStep key={session.sheet?.sheet.id ?? -1} api={api} card={card} />;
       case 'sizes':
         return <SizesStep api={api} card={card} />;
       case 'pieces':
-        return <PiecesStep api={api} focus={focus} onDismissFocus={() => setFocus(null)} />;
+        return (
+          <PiecesStep api={api} card={card} focus={focus} onDismissFocus={() => setFocus(null)} />
+        );
       case 'meaning':
         return <DetailsStep api={api} card={card} onFixInPieces={fixInPieces} />;
       case 'fabrics':

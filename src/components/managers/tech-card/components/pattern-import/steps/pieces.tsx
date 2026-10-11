@@ -29,6 +29,8 @@ import type { ImportSessionApi } from '../use-import-session';
 import { exportedRanks, variantsOf } from '../use-import-session';
 import { Panel, SplitStage, fmtMm, fmtPct } from '../ui-bits';
 import type { PieceFocus } from '../piece-focus';
+import { modelFromCard } from '../autopilot/card-match';
+import type { CardContext } from '../client';
 import { DroppedLabels } from './not-in-file';
 
 type Tool = 'pan' | 'seed' | 'bridge' | 'wall' | 'ignore' | 'lasso' | 'reseed';
@@ -183,10 +185,13 @@ const centre = (pts: PtMm[]) => {
 
 export function PiecesStep({
   api,
+  card,
   focus = null,
   onDismissFocus,
 }: {
   api: ImportSessionApi;
+  /** A10: the card, whose name / style number may name the model (a one-click suggestion). */
+  card?: CardContext;
   /** Sent from check / details ("fix in pieces"): select it, zoom to it, say why. */
   focus?: PieceFocus | null;
   onDismissFocus?: () => void;
@@ -226,6 +231,14 @@ export function PiecesStep({
   /** mm per screen pixel of the last render: a click picks a line within a few pixels. */
   const unitRef = useRef(1);
   const variants = variantsOf(out?.seeds ?? [], api.baseSeeds, out?.variants);
+  const named =
+    card && variants.length > 1 && !session.variant
+      ? modelFromCard(
+          variants,
+          card,
+          session.files.map((f) => f.name),
+        )
+      : null;
   const families = useMemo(() => out?.families ?? [], [out]);
   const markOf = useMemo(() => new Map(families.map((f, i) => [f.seed, i + 1])), [families]);
   if (!out || !session.sheet || !session.chains) return null;
@@ -790,7 +803,23 @@ export function PiecesStep({
             <Text size='micro' component='p' className='mb-2 text-warning'>
               ! the sheet carries {variants.length} models ({variants.join(', ')}). one run imports
               one model — pick it above.
+              {named?.pick == null && named?.why ? ` ${named.why}.` : ''}
             </Text>
+          )}
+          {named?.pick != null && (
+            <div className='mb-2'>
+              <Button
+                variant='secondary'
+                size='sm'
+                disabled={!!session.busy}
+                onClick={() => void api.dispatch({ type: 'variant', variant: named.pick })}
+              >
+                use {named.pick} · the card names it
+              </Button>
+              <Text size='micro' variant='label' component='p' className='mt-1'>
+                {named.evidence.join(' · ')}
+              </Text>
+            </div>
           )}
           {(out.grade?.ambiguities ?? []).map((a, i) => (
             <Text key={i} size='micro' component='p' className='mb-2 text-warning'>

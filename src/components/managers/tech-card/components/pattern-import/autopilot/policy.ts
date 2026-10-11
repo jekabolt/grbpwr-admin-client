@@ -51,6 +51,7 @@ import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
+import { modelFromCard, sheetFromCard } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 
 /** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
@@ -668,72 +669,10 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
 }
 
 // ── which sheet, which model: only on evidence (Codex #2, #4) ─────────────────────────────────
+// card-match.ts: the card's name / style number / file names against the models and sheets the
+// file prints — a UNIQUE token-exact match, else the stop names why.
 
-/** Words and numbers of a label ("Mod. 123" → mod, 123; "Style A" → style, a). */
-const tokensOf = (x: string) =>
-  x
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
-
-/** What the card says it is: its style label and the file names it was given. */
-function cardWords(s: ImportSession, card: CardContext): Set<string> {
-  return new Set([
-    ...tokensOf(card.styleLabel ?? ''),
-    ...s.files.flatMap((f) => tokensOf(f.name.replace(/\.[^.]+$/, ''))),
-  ]);
-}
-
-/**
- * The distinctive part of a model label: a number of 2+ digits ("123"), or the letter after
- * model / style / mod / модель ("Style A" → "a"). Generic words never match.
- */
-function distinctive(label: string): string[] {
-  const t = tokensOf(label);
-  const out = t.filter((w) => /^\d{2,}$/.test(w));
-  t.forEach((w, k) => {
-    if (/^(model|style|mod|модель|мод|variant|view|ansicht)$/.test(w) && t[k + 1]?.length === 1)
-      out.push(t[k + 1]);
-  });
-  return out;
-}
-
-/** The one model whose label the card (or the file name) names; null = none or several. */
-function modelByEvidence(
-  variants: readonly string[],
-  s: ImportSession,
-  card: CardContext,
-): { variant: string; evidence: string[] } | null {
-  const words = cardWords(s, card);
-  const hits = variants.filter((v) => distinctive(v).some((w) => words.has(w)));
-  if (hits.length !== 1) return null;
-  return {
-    variant: hits[0],
-    evidence: [
-      `"${hits[0]}" is named by «${card.styleLabel}» / ${s.files.map((f) => f.name).join(', ')}`,
-    ],
-  };
-}
-
-/**
- * The tile sheet the card names. The pages carry no model labels before a sheet is assembled, so
- * today only a file name naming the sheet counts ("…_sheet_B.pdf"); none = the operator picks.
- */
-function sheetByEvidence(
-  s: ImportSession,
-  card: CardContext,
-): { sheet: number; evidence: string[] } | null {
-  const words = cardWords(s, card);
-  const sheets = [
-    ...new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0)),
-  ].sort((a, b) => a - b);
-  const named = sheets.filter((k) => words.has(String.fromCharCode(97 + k)) && words.has('sheet'));
-  if (named.length !== 1) return null;
-  return {
-    sheet: named[0],
-    evidence: [`the file name names sheet ${String.fromCharCode(65 + named[0])}`],
-  };
-}
+const fileNamesOf = (s: ImportSession) => s.files.map((f) => f.name);
 
 // ── scale ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -793,21 +732,21 @@ function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
   // Codex #2: which of several tile sheets is a question — answered only on evidence
   const n = tileSheets(s.pages);
   if (n > 1 && i.sheetPicked === null) {
-    const pick = sheetByEvidence(s, card);
-    if (!pick)
+    const pick = sheetFromCard(s.pages, card, fileNamesOf(s));
+    if (pick.pick == null)
       return stopAt(
         'sheet',
-        `the file carries ${n} tile sheets and nothing on the card names one — pick the sheet to import`,
+        `the file carries ${n} tile sheets and ${pick.why ?? 'nothing on the card names one'} — pick the sheet to import`,
       );
     return {
-      actions: [{ kind: 'sheet', sheet: pick.sheet }],
+      actions: [{ kind: 'sheet', sheet: pick.pick }],
       assumptions: [
         A(
           'sheet',
           'sheet-choice',
           'the file',
-          `tile sheet ${pick.sheet + 1} of ${n}`,
-          'the sheet whose labels match the card',
+          `tile sheet ${pick.pick + 1} of ${n}`,
+          'the one sheet the card names (a unique token-exact match)',
           pick.evidence,
           0.6,
           true,
@@ -1109,21 +1048,21 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const variants = variantsOf(seeds, baseSeeds, s.pieces?.variants);
   if (variants.length > 1 && !s.variant) {
     // Codex #4: the model the card names — never "the one with the most pieces"
-    const pick = modelByEvidence(variants, s, snap.card);
-    if (!pick)
+    const pick = modelFromCard(variants, snap.card, fileNamesOf(s));
+    if (pick.pick == null)
       return stopAt(
         'pieces',
-        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and nothing on the card names one — pick the model`,
+        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and ${pick.why ?? 'nothing on the card names one'} — pick the model`,
       );
     return {
-      actions: [{ kind: 'variant', variant: pick.variant }],
+      actions: [{ kind: 'variant', variant: pick.pick }],
       assumptions: [
         A(
           'pieces',
           'model',
           'the sheet',
-          `model "${pick.variant}"`,
-          'the model whose label the card names',
+          `model "${pick.pick}"`,
+          'the one model the card names (a unique token-exact match)',
           pick.evidence,
           0.6,
           true,

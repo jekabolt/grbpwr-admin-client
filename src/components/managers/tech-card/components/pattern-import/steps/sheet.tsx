@@ -11,6 +11,8 @@ import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
+import { sheetFromCard } from '../autopilot/card-match';
+import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtMm } from '../ui-bits';
@@ -30,8 +32,21 @@ function pathData(arrays: readonly Float32Array[]): string {
   return parts.join('');
 }
 
-export function SheetStep({ api }: { api: ImportSessionApi }) {
+export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardContext }) {
   const { session, inputs, patchInputs } = api;
+  // A10: the sheet the card names (its name / style number / the file names) — a suggestion,
+  // one click to import it; nothing is picked silently
+  const named = useMemo(
+    () =>
+      card && inputs.sheetPicked === null
+        ? sheetFromCard(
+            session.pages,
+            card,
+            session.files.map((f) => f.name),
+          )
+        : null,
+    [card, inputs.sheetPicked, session.pages, session.files],
+  );
   const out = session.sheet;
   const [picked, setPicked] = useState<string | null>(null);
   const multiFile = new Set(out?.sheet.poses.map((p) => p.file) ?? []).size > 1;
@@ -199,7 +214,34 @@ export function SheetStep({ api }: { api: ImportSessionApi }) {
                 }))}
               />
               {/* A10: a file with several sheets asks which one — this one is one click */}
-              {inputs.sheetPicked === null && (
+              {named?.pick != null && (
+                <>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    className='mt-1'
+                    disabled={!!session.busy}
+                    onClick={() =>
+                      void api.dispatch({
+                        type: 'sheet',
+                        sheet: named.pick,
+                        override: named.pick === sheet.id ? inputs.gridOverride : undefined,
+                      })
+                    }
+                  >
+                    import sheet {named.pick + 1} · the card names it
+                  </Button>
+                  <Text size='micro' variant='label' component='p' className='mt-1'>
+                    {named.evidence.join(' · ')}
+                  </Text>
+                </>
+              )}
+              {named?.pick == null && named?.why && (
+                <Text size='micro' component='p' className='mt-1 text-warning'>
+                  ! {named.why}
+                </Text>
+              )}
+              {inputs.sheetPicked === null && named?.pick !== sheet.id && (
                 <Button
                   variant='secondary'
                   size='sm'

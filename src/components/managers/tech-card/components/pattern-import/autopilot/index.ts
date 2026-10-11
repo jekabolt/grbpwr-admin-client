@@ -11,5 +11,7 @@ export { autopilotApply, gateBlocks, hookDriveCtx, resolverFor } from './run';
 export type { ApplyOutcome } from './run';
 export { fallbackGrain, angleDiff180, longestStraight, principalAxis } from './grain';
 export { deterministicCodes } from './names';
+export { cardStrings, modelFromCard, sheetFromCard } from './card-match';
+export type { CardPick } from './card-match';
 export { assumptionKey, autopilotRecordOf, mergeAssumptions } from './types';
 export type { Assumption, AssumptionKind } from './types';

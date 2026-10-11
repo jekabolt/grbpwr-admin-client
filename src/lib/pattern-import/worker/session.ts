@@ -96,6 +96,7 @@ import {
   applyPieceEdits,
   applyWallEdits,
   isWallEdit,
+  pageLabels,
   proposeSeeds,
   startSession,
   variantLabels,
@@ -641,6 +642,19 @@ export class Session {
         ),
       ),
     ];
+    // A10: what each page prints that tells the sheets apart (models, a sheet letter) — the
+    // autopilot matches the card against it before a sheet is assembled
+    if (multiPage.length) {
+      const textOf = new Map(
+        multiPage.flatMap((d) =>
+          d.pages.map((p) => [`${d.file.id}:${p.page}`, p.texts.map((t) => t.text)] as const),
+        ),
+      );
+      this.pages = this.pages.map((c) => {
+        const l = pageLabels(textOf.get(`${c.file}:${c.page}`) ?? []);
+        return l.models || l.sheets ? { ...c, labels: l } : c;
+      });
+    }
     if (this.dxfSet)
       this.pages = this.setSizes.map(
         (s): PageClassification => ({
