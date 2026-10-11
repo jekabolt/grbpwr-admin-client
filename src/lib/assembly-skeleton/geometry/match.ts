@@ -408,6 +408,68 @@ type Cand = {
 const isStraight = (r: Run) => r.chordMm / r.lenMm >= STRAIGHT;
 const isCentreLong = (r: Run) =>
   r.lenMm >= CENTRE_MIN_SHARE * Math.max(...r.piece.edges.map((e) => e.lenMm));
+/** A centre / tube edge runs UP the piece: its chord within this of the drawing's vertical. */
+const LENGTHWISE_DEG = 25;
+/** Straight enough for a tube seam (an underarm is a slightly shaped line). */
+const r95 = (r: Run) => r.chordMm / r.lenMm >= 0.95;
+/** A tube seam (a piece sewn to itself) spans at least this share of the piece's height. */
+const TUBE_MIN_SHARE = 0.6;
+const yBox = (p: PieceGeom) => {
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  for (const [x, y] of p.rs) {
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+  }
+  return { x0, x1, y0, y1 };
+};
+/**
+ * Pieces are drawn upright (grain up — the convention lib/pom and the doll read pieces in): an
+ * edge that runs the piece lengthwise is near-vertical. A centre front / back is one; a hem, a
+ * wrist, a waist, a shoulder are not (11.10 corpus: FW26-001's two fronts were paired at the hem,
+ * its two sleeves at the wrist — straight, long, mirror twins, every other rule passed).
+ */
+const isLengthwise = (r: Run) => {
+  const a = r.pts[0];
+  const b = r.pts[r.pts.length - 1];
+  return (
+    Math.atan2(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) <= (LENGTHWISE_DEG * Math.PI) / 180
+  );
+};
+/**
+ * A piece sewn to itself only along a TUBE seam: both runs straight-ish, lengthwise, each spanning
+ * most of the piece's height, on opposite sides of it (a sleeve's underarm, a one-piece body's side).
+ * Never two armholes, two halves of a waist round a dart, a hem onto a neckline.
+ */
+const isTubePair = (u: Run, v: Run) => {
+  if (u.piece !== v.piece) return false;
+  const b = yBox(u.piece);
+  const h = b.y1 - b.y0;
+  const cx = (b.x0 + b.x1) / 2;
+  const span = (r: Run) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [, y] of r.pts) {
+      lo = Math.min(lo, y);
+      hi = Math.max(hi, y);
+    }
+    return h > 0 ? (hi - lo) / h : 0;
+  };
+  const mx = (r: Run) => r.pts.reduce((t, q) => t + q[0], 0) / Math.max(1, r.pts.length);
+  return (
+    r95(u) &&
+    r95(v) &&
+    isLengthwise(u) &&
+    isLengthwise(v) &&
+    span(u) >= TUBE_MIN_SHARE &&
+    span(v) >= TUBE_MIN_SHARE &&
+    Math.sign(mx(u) - cx) * Math.sign(mx(v) - cx) < 0
+  );
+};
 
 function twinKindOf(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' | null {
   return a.twinOf.find((t) => t.key === b.pieceKey)?.kind ?? null;
@@ -762,6 +824,16 @@ export function matchSeams(
       c.dropped = 'mirror twins meet only along a centre edge that runs the piece';
       continue;
     }
+    if (mirror && (!isLengthwise(c.u) || !isLengthwise(c.v))) {
+      c.dropped =
+        'mirror twins meet only along a centre edge that runs UP the piece — never two hems, two wrists, two waists or two shoulders';
+      continue;
+    }
+    if (c.evidence.self && !isTubePair(c.u, c.v)) {
+      c.dropped =
+        'a piece is sewn to itself only along a tube seam that runs its length (an underarm) — not across it';
+      continue;
+    }
     const rival = [...c.u.edges, ...c.v.edges].some(
       (e) => (bestRegular.get(e.id) ?? -Infinity) >= SKELETON.accept,
     );
@@ -867,6 +939,92 @@ export function matchSeams(
     if (!free(c)) continue;
     chosenC.push(c);
     take(c);
+  }
+  // ONE SIDE OF A SYMMETRIC PIECE (11.10 prod corpus: SS26-004/005/006, FW26-001). A piece with
+  // no hand (a back, a yoke) carries its two shoulders — two armholes, two side seams — as mirror
+  // twins of one edge: flat, the greedy cannot tell which one a front's shoulder goes to, and on
+  // every shirt it took the far one (the front's side seam on the back's right, its shoulder on the
+  // back's left: a seam across the garment, 280–390 mm apart on the doll). A piece sewn to a
+  // handless piece along two or more edges sits on ONE side of it: its longest seam there sets the
+  // side (read from the drawing, plies.ts), and a seam on the other side moves to the mirror twin
+  // edge — when that pairing is a candidate as good and its edge is free, or freed by the twin's own
+  // move (the two fronts swap together).
+  if (rules.hand) {
+    const midOf = (e: Edge) => e.pts[Math.floor(e.pts.length / 2)] ?? [0, 0];
+    const twinEdgeOf = (P: PieceGeom, e: Edge): Edge | undefined => {
+      const b = yBox(P);
+      const c = (b.x0 + b.x1) / 2;
+      const m = midOf(e);
+      return P.edges.find((x) => {
+        if (x.id === e.id || x.kind !== 'edge') return false;
+        const q = midOf(x);
+        return (
+          Math.abs(x.lenMm - e.lenMm) <= Math.max(4, 0.02 * e.lenMm) &&
+          Math.abs(q[0] + m[0] - 2 * c) < 20 &&
+          Math.abs(q[1] - m[1]) < 20
+        );
+      });
+    };
+    const moves: { from: Cand; to: Cand; on: string }[] = [];
+    for (const P of byKey) {
+      if (P.hand || bothHands.has(P.pieceKey)) continue;
+      const byX = new Map<string, { c: Cand; pr: Run; xr: Run }[]>();
+      for (const c of chosenC) {
+        const [pr, xr] = c.u.piece === P ? [c.u, c.v] : c.v.piece === P ? [c.v, c.u] : [null, null];
+        if (!pr || !xr || xr.piece === P || pr.chain || xr.chain) continue;
+        if (twinKindOf(P, xr.piece)) continue;
+        const k = xr.piece.pieceKey;
+        byX.set(k, [...(byX.get(k) ?? []), { c, pr, xr }]);
+      }
+      for (const list of byX.values()) {
+        const sided = list
+          .map((x) => ({ ...x, side: xSideOf(P, x.pr.edges[0]) }))
+          .filter((x) => x.side !== 0);
+        if (sided.length < 2) continue;
+        const anchor = sided.reduce((m, x) => (x.pr.lenMm > m.pr.lenMm ? x : m));
+        for (const x of sided) {
+          if (x === anchor || x.side === anchor.side) continue;
+          const twin = twinEdgeOf(P, x.pr.edges[0]);
+          if (!twin) continue;
+          const to = all.find(
+            (q) =>
+              !q.dropped &&
+              q.kind !== 'closure-not-seam' &&
+              ((q.u.id === x.xr.id && q.v.id === twin.id) ||
+                (q.v.id === x.xr.id && q.u.id === twin.id)),
+          );
+          if (!to || to.score < x.c.score - SKELETON.ambiguity) continue;
+          moves.push({ from: x.c, to, on: P.name });
+        }
+      }
+    }
+    if (moves.length) {
+      const drop = (c: Cand) => {
+        for (const [r, other] of sides(c))
+          for (const e of r.edges) {
+            const left = (usedBy.get(e.id) ?? []).filter(
+              (u) => !(u.piece === other.piece.pieceKey && u.edge === other.edges[0].id),
+            );
+            if (left.length) usedBy.set(e.id, left);
+            else usedBy.delete(e.id);
+          }
+        chosenC.splice(chosenC.indexOf(c), 1);
+      };
+      for (const m of moves) drop(m.from);
+      for (const m of moves) {
+        if (free(m.to)) {
+          m.to.evidence = {
+            ...m.to.evidence,
+            rule: `one side of ${m.on}: ${m.from.u.id} ↔ ${m.from.v.id} crossed to its far side (the mirror twin edge, flat the same) — moved next to the piece's other seam there`,
+          };
+          chosenC.push(m.to);
+          take(m.to);
+        } else if (free(m.from)) {
+          chosenC.push(m.from);
+          take(m.from);
+        }
+      }
+    }
   }
   const touches = (a: Cand, b: Cand) => {
     const ea = new Set([...a.u.edges, ...a.v.edges].map((e) => e.id));

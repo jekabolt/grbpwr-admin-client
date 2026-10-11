@@ -7,6 +7,15 @@
 //   • the stored seam rows (server + optimistic, as the provider reads them) and the technologist's
 //     order (MACHINE steps → declared joins), the card's gender for the front closure.
 //
+// SIZES (corpus of prod cards, 11.10): a DXF drawn in ONE size carries no size the splitter can
+// read (a lone «_OS» / «_XS» tail is not a size until a sibling size changes it — split-pieces.ts),
+// so its blocks sit in the ungraded group ''. Such a piece is the same in every size: it joins
+// every graded size of the doll (pockets drawn once in XS beside a graded body), and a card whose
+// pieces are ALL ungraded (bags, one size) is read in that one group, named by the size the
+// blocks' common tail says («OS», «M») or the card's own single size — never «base». A graded
+// size is shown under the card's own size it stands for (DXF «M» → «m_32bo_m»: its first token),
+// the way the size tokens of the rest of the app read it.
+//
 // No DXF read or no graph → null: the 3D chip is not there (the map has no switch then anyway).
 
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
@@ -19,15 +28,19 @@ import { useWatch } from 'react-hook-form';
 import { rowsOf, rowsSig, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardDxfPack } from '../nesting/card-dxf-pack';
 import { findPiece, useDxfGeometry, useDxfIndex } from '../nesting/dxf-geometry';
+import { sizeTokensOf } from '../nesting/block-code';
 import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-refs';
+import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
 
 export type DollCard = {
   cardId: number | null;
   /** The size the provider read the graph on (the median of the DXF, as the tiles show). */
   baseSize: string;
-  /** Sizes the doll can be built on, grade order. */
+  /** Sizes the doll can be built on, grade order (DXF size tokens; '' read as `oneSize`). */
   sizes: string[];
+  /** The card's size a doll size stands for, else the size as the DXF writes it. */
+  sizeLabel: (size: string) => string;
   /** Facts of a size; null when no piece has a contour in it. */
   factsOf: (size: string) => SkeletonFacts | null;
   /** Pieces without a contour in that size (left out of its doll, said so). */
@@ -69,6 +82,12 @@ export function useDollCard(): DollCard | null {
     []) as TechCardFormData['bomItems'];
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
   const gender = useWatch<TechCardFormData>({ name: 'targetGender' }) as string | undefined;
+  const sizeIds = (useWatch<TechCardFormData>({ name: 'sizeIds' }) ?? []) as number[];
+  const sizeById = useSizeNames();
+  const cardSizes = useMemo(
+    () => sizeIds.map((id) => sizeById.get(id) ?? '').filter(Boolean),
+    [sizeIds, sizeById],
+  );
 
   // The same parse the piece tiles drew from — passive: a cold card downloads nothing here.
   const pack = useCardDxfPack();
@@ -81,8 +100,11 @@ export function useDollCard(): DollCard | null {
 
   const sized = useMemo(() => {
     if (!facts) return null;
-    // Per piece of the read: its contour in every size.
+    // Per piece of the read: its contour in every size. A piece found only in the ungraded group
+    // ('' — a block drawn in one size) is kept aside and joins every graded size below.
     const bySize = new Map<string, Map<string, SkeletonPieceInput>>();
+    const ungraded = new Map<string, SkeletonPieceInput>();
+    const blocks: string[] = [];
     const order: string[] = [];
     const baseCount = new Map<string, number>();
     if (index) {
@@ -90,8 +112,15 @@ export function useDollCard(): DollCard | null {
         const r = refs.get(pieceRefKey(p.pieceKey)) ?? [];
         const median = findPiece(index, r);
         if (!median) continue;
+        blocks.push(median.block);
+        const graded = median.sizes.filter((s) => s !== '');
+        if (graded.length === 0) {
+          // The read's own input (byte for byte the provider's: the median IS the '' group).
+          ungraded.set(p.pieceKey, p);
+          continue;
+        }
         baseCount.set(median.size, (baseCount.get(median.size) ?? 0) + 1);
-        for (const s of median.sizes) {
+        for (const s of graded) {
           if (!order.includes(s)) order.push(s);
           // The read's own input where the read is this size (byte for byte the provider's).
           const f = s === median.size ? null : findPiece(index, r, s);
@@ -108,8 +137,33 @@ export function useDollCard(): DollCard | null {
     for (const [s, n] of baseCount) if (n > most) [base, most] = [s, n];
     const rank = (s: string) => index?.split.orderOfSize.get(s) ?? 1e6;
     const sizes = order.sort((a, b) => rank(a) - rank(b));
-    return { bySize, base, sizes: sizes.length ? sizes : base ? [base] : [] };
-  }, [facts, index, refs]);
+    if (ungraded.size) {
+      if (sizes.length)
+        for (const s of sizes) for (const [k, p] of ungraded) bySize.get(s)?.set(k, p);
+      else {
+        // Nothing graded: the one size the pattern is drawn in.
+        bySize.set('', new Map(ungraded));
+        sizes.push('');
+        base = '';
+      }
+    }
+    // The one size of an ungraded pattern, in words: the tail every block shares when it is a
+    // size of the dictionary («BP_OS», «BLT_1_OS» → OS), else the card's single size.
+    let oneSize = '';
+    if (sizes.length === 1 && sizes[0] === '') {
+      const tails = new Set(blocks.map((b) => (b.match(/[_\s-]([^_\s-]+)\s*$/)?.[1] ?? '').trim()));
+      const tail = tails.size === 1 ? [...tails][0] : '';
+      oneSize =
+        tail &&
+        sizeById.size &&
+        [...sizeById.values()].some((n) => sizeTokensOf(n)[0] === tail.toLowerCase())
+          ? tail.toUpperCase()
+          : cardSizes.length === 1
+            ? cardSizes[0]
+            : 'one size';
+    }
+    return { bySize, base, sizes, oneSize };
+  }, [facts, index, refs, sizeById, cardSizes]);
 
   const joins = useMemo(() => {
     if (!facts) return [];
@@ -126,14 +180,19 @@ export function useDollCard(): DollCard | null {
 
   return useMemo(() => {
     if (!facts || !sized) return null;
-    const base = sized.base || rows.find((r) => r.anchoredSize)?.anchoredSize || 'base';
+    // '' is the size of an ungraded pattern: its key is its words (no «base» that finds nothing).
+    const keyOf = (s: string) => (s === '' ? sized.oneSize || 'one size' : s);
+    const rawOf = (s: string) => (sized.sizes.includes('') && s === keyOf('') ? '' : s);
+    const base = sized.bySize.size
+      ? keyOf(sized.base)
+      : rows.find((r) => r.anchoredSize)?.anchoredSize || 'base';
     const cache = new Map<string, SkeletonFacts | null>();
     const factsOf = (size: string): SkeletonFacts | null => {
       // Every size — the read's one too — from the per-size map: a block whose median is another
       // size than most pieces' is read at THIS size, or left out and said so.
       if (!sized.bySize.size) return facts;
       if (cache.has(size)) return cache.get(size)!;
-      const m = sized.bySize.get(size);
+      const m = sized.bySize.get(rawOf(size));
       const out =
         m && m.size
           ? {
@@ -146,13 +205,24 @@ export function useDollCard(): DollCard | null {
     };
     const missingOf = (size: string) => {
       if (!sized.bySize.size) return [];
-      const m = sized.bySize.get(size);
+      const m = sized.bySize.get(rawOf(size));
       return facts.pieces.filter((p) => !m?.has(p.pieceKey)).map((p) => p.name || p.pieceKey);
     };
+    // A DXF size → the card's size it stands for: the card size whose first token it is (the
+    // tokens the rest of the app reads block tails by), when exactly one is.
+    const labelOf = new Map<string, string>();
+    for (const s of sized.sizes) {
+      if (s === '') continue;
+      const t = s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+      const hits = cardSizes.filter((n) => n.toLowerCase() === t || sizeTokensOf(n)[0] === t);
+      if (hits.length === 1 && hits[0].toLowerCase() !== t) labelOf.set(s, hits[0]);
+    }
+    const sizes = sized.sizes.map(keyOf);
     return {
       cardId,
       baseSize: base,
-      sizes: sized.sizes.length ? sized.sizes : [base],
+      sizes: sizes.length ? sizes : [base],
+      sizeLabel: (s: string) => labelOf.get(s) ?? s,
       factsOf,
       missingOf,
       rows,
@@ -163,7 +233,7 @@ export function useDollCard(): DollCard | null {
       readId: idOf(facts),
       inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}`,
     };
-  }, [facts, sized, rows, sig, joins, gender, cardId]);
+  }, [facts, sized, rows, sig, joins, gender, cardId, cardSizes]);
 }
 
 /** The key a solve is cached under: the read, the size, the rows, lining. */

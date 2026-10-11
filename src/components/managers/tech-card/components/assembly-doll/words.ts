@@ -30,6 +30,7 @@ export function dollCounts(r: DollReport): DollCounts {
 
 /** «21 seams closed · 3 stretched · 2 proposed · 1 open» — zero terms after the first left out. */
 export function stateLine(r: DollReport): string {
+  if (r.notGarment) return r.notGarment;
   const c = dollCounts(r);
   const parts = [`${c.closed} ${c.closed === 1 ? 'seam' : 'seams'} closed`];
   if (c.stretched) parts.push(`${c.stretched} stretched`);
@@ -97,6 +98,14 @@ export function reportRows(
 ): ReportRow[] {
   const rows: ReportRow[] = [];
   const say = (t: string) => namedKeys(t, names);
+  if (r.notGarment)
+    rows.push({
+      kind: 'words',
+      key: 'g',
+      label: 'not a garment',
+      text: r.notGarment,
+      check: false,
+    });
   for (const w of r.contradictions ?? [])
     rows.push({ kind: 'words', key: `c:${w}`, label: 'contradiction', text: say(w), check: true });
   const seams = seamsOf(r)
@@ -115,14 +124,26 @@ export function reportRows(
       seam: { ...s, note: say(s.note) },
     });
   }
-  for (const f of r.floating)
+  for (const x of r.notSewn ?? [])
     rows.push({
       kind: 'words',
-      key: `f:${f.pieceKey}`,
-      label: 'floating',
-      text: `${(names.get(f.pieceKey) ?? geoms.get(f.pieceKey)?.name ?? f.pieceKey).replace(/_/g, ' ')} · ${say(f.reason)}`,
-      check: true,
+      key: `n:${x.id}`,
+      label: 'not sewn',
+      text: say(
+        `${sideWords(x.a, geoms, roles)} ↔ ${sideWords(x.b, geoms, roles)} · ${x.note.replace(/^not sewn — /, '')}`,
+      ),
+      check: false,
     });
+  // Laid out flat (not a garment): every piece is «floating» by construction — not a defect.
+  if (!r.notGarment)
+    for (const f of r.floating)
+      rows.push({
+        kind: 'words',
+        key: `f:${f.pieceKey}`,
+        label: 'floating',
+        text: `${(names.get(f.pieceKey) ?? geoms.get(f.pieceKey)?.name ?? f.pieceKey).replace(/_/g, ' ')} · ${say(f.reason)}`,
+        check: true,
+      });
   for (const w of r.rows?.words ?? [])
     rows.push({
       kind: 'words',

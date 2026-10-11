@@ -136,8 +136,11 @@ export default function DollOverlay({
       cells.push({ size: s, name: n, value: v });
     }
     const norm = (s: string) => s.replace(/[<>\s]/g, '').toLowerCase();
-    return compareToSizeChart(pom.report, cells, unit).filter((c) => norm(c.size) === norm(at));
-  }, [pom, chart.data, dictionary, unit, at]);
+    // The chart is in the card's sizes; the doll's sizes are the DXF's («M» for «m_32bo_m»).
+    const keyOf = new Map((card?.sizes ?? []).map((s) => [norm(card!.sizeLabel(s)), s]));
+    const mapped = cells.map((c) => ({ ...c, size: keyOf.get(norm(c.size)) ?? c.size }));
+    return compareToSizeChart(pom.report, mapped, unit).filter((c) => norm(c.size) === norm(at));
+  }, [pom, chart.data, dictionary, unit, at, card]);
   const chartCells = chart.data?.chart?.cells?.length ?? 0;
 
   // ── POM lines lifted onto the doll on screen ──
@@ -243,11 +246,11 @@ export default function DollOverlay({
                   }}
                   options={card.sizes.map((s) => ({
                     value: s,
-                    label: s,
+                    label: card.sizeLabel(s),
                     hint:
                       s === card.baseSize
-                        ? `size ${s}, the size the pattern is read on`
-                        : `size ${s}`,
+                        ? `size ${card.sizeLabel(s)}, the size the pattern is read on`
+                        : `size ${card.sizeLabel(s)}`,
                   }))}
                 />
               )}
@@ -257,12 +260,13 @@ export default function DollOverlay({
             </div>
             <Text size='micro' variant='label' component='p' data-doll-honesty=''>
               paper doll — shape approximate, no fabric or body · measures from the pattern laid
-              flat (seam lines) · size {at}
+              flat (seam lines) · size {card ? card.sizeLabel(at) : at}
             </Text>
             {missing.length > 0 && (
               <Text size='micro' variant='label' component='p'>
                 {missing.length} {missing.length === 1 ? 'piece has' : 'pieces have'} no contour in
-                size {at} and {missing.length === 1 ? 'is' : 'are'} left out: {missing.join(', ')}
+                size {card ? card.sizeLabel(at) : at} and {missing.length === 1 ? 'is' : 'are'} left
+                out: {missing.join(', ')}
               </Text>
             )}
           </Section>
