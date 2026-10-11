@@ -676,7 +676,7 @@ const CORPUS =
   process.env.PATIMPORT_CORPUS ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
 
-const SCOPES: DraftScopeTarget[] = [
+export const SCOPES: DraftScopeTarget[] = [
   ['MAIN', 'L1', 'main', false, 'FABRIC'],
   ['LINING', 'L2', 'lining', false, 'LINING'],
   ['INTERLINING', 'L3', 'interlining', true, 'INTERLINING'],
@@ -689,10 +689,10 @@ const SCOPES: DraftScopeTarget[] = [
   sections: [`TECH_CARD_BOM_SECTION_${sec}`],
 }));
 
-const cardSizes = (tokens: string[]): CardSize[] =>
+export const cardSizes = (tokens: string[]): CardSize[] =>
   tokens.map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i, spellings: [t] }));
 
-function filesOf(c: Case): { name: string; bytes: ArrayBuffer }[] {
+export function filesOf(c: Pick<Case, 'files'>): { name: string; bytes: ArrayBuffer }[] {
   const enc = (b: Buffer) =>
     b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
   if (c.files[0]?.startsWith('split:')) {
@@ -709,7 +709,7 @@ function filesOf(c: Case): { name: string; bytes: ArrayBuffer }[] {
 }
 
 /** The worker session in-process, behind the wizard's client seam; every stage output kept. */
-function sessionClient() {
+export function sessionClient() {
   let s: Session | null = null;
   const outs: Partial<Record<StageName, unknown>> = {};
   const ctx: StageCtx = { checkCancel: () => {}, progress: () => {} };
