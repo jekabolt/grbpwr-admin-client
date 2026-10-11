@@ -111,7 +111,7 @@ import {
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { exceptNested } from '../pieces/fill';
-import { wallModel } from '../pieces/walls';
+import { sheetModule, undrawnRanks } from '../pieces/walls';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -1015,7 +1015,17 @@ export class Session {
     // a size the sheet lists but draws no line of its own for is not drawn here: never written,
     // never filled from its neighbour (cause E, viola's 34)
     if (!this.fast && run.encoding !== 'single' && run.sizes.length > 1)
-      map = markNotDrawn(map, wallModel(this.chains, run, this.sheet.texts).emptyRanks, input.card);
+      map = markNotDrawn(
+        map,
+        undrawnRanks(
+          this.chains,
+          run,
+          this.sheet.texts,
+          sheetModule(this.sheet),
+          PATIMPORT.minPieceAreaMm2,
+        ),
+        input.card,
+      );
     this.run = run;
     this.sizeMap = map;
     return { run, map, expected, countAsk };

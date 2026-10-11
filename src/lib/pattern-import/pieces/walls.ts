@@ -246,6 +246,73 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
   };
 }
 
+/**
+ * Cause E: the ranks a sheet lists but does NOT draw — from the ORIGINAL source evidence only. A
+ * rank is not drawn when its own size class carried no chain as read (before continuity, labels
+ * or bundles moved any line to it), it is still empty after them, other ranks are drawn, and no
+ * verified family covers it: a piece drawn once for every size (a closed common outline, piece
+ * sized, not a page frame) or drawn identically in every drawn size layer. A rank that originally
+ * carried chains is never "not drawn".
+ */
+export function undrawnRanks(
+  set: ChainSet,
+  run: SizeRun,
+  texts: readonly IRText[] = [],
+  module: number[] = [],
+  minAreaMm2 = 2000,
+): number[] {
+  if (run.encoding === 'single' || run.sizes.length < 2) return [];
+  const byId = new Map(set.classes.map((c) => [c.id, c]));
+  const origDrawn = run.sizes.map((s) => {
+    const c = s.classId != null ? byId.get(s.classId) : undefined;
+    return !!c && c.role === 'size' && c.chains.length > 0;
+  });
+  const drawnN = origDrawn.filter(Boolean).length;
+  if (!drawnN) return [];
+  const empty = new Set(wallModel(set, run, texts).emptyRanks);
+  const cand = run.sizes.map((_, r) => r).filter((r) => !origDrawn[r] && empty.has(r));
+  if (!cand.length) return [];
+  // a verified family covering every size: a closed common outline, or a loop drawn alike in
+  // every drawn size layer
+  const role = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) role.set(id, k.role);
+  const loops = set.chains.filter(
+    (c) =>
+      c.pts.length > 3 &&
+      (c.closed || dist(c.pts[0], c.pts[c.pts.length - 1]) <= 0.5) &&
+      Math.abs(polyArea(c.pts)) >= minAreaMm2 &&
+      !frameLike(c.pts, 60, module),
+  );
+  if (loops.some((c) => role.get(c.id) === 'common')) return [];
+  const sized = loops.filter((c) => role.get(c.id) === 'size');
+  for (const c of sized) {
+    const b = bboxOf(c.pts);
+    let copies = 0;
+    for (const o of sized) {
+      if (Math.abs(o.lengthMm - c.lengthMm) > 0.2) continue;
+      const q = bboxOf(o.pts);
+      if (
+        Math.abs(q.minX - b.minX) < 0.2 &&
+        Math.abs(q.minY - b.minY) < 0.2 &&
+        Math.abs(q.maxX - b.maxX) < 0.2 &&
+        Math.abs(q.maxY - b.maxY) < 0.2
+      )
+        copies++;
+    }
+    if (copies >= drawnN) return [];
+  }
+  return cand;
+}
+
+function polyArea(p: readonly PtMm[]): number {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[(i + 1) % p.length];
+    a += p[i].x * q.y - q.x * p[i].y;
+  }
+  return a / 2;
+}
+
 export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
   const out: WallItem[] = [];
   for (const id of ids) {

@@ -1543,6 +1543,26 @@ export function useImportSession(deps: {
     });
   }
 
+  /**
+   * Cause E override: "this size is drawn — use the common outline". The size the sheet reads as
+   * not drawn is mapped back (to the card size it would have taken) and filled on its walls as they
+   * are; nothing is copied from a neighbour.
+   */
+  async function drawnAnyway(rank: number) {
+    const entries = sRef.current.sizes?.map.entries ?? [];
+    const own = (iRef.current.sizeMap ?? []).filter((e) => e.source.rank !== rank);
+    const hit = entries.find((e) => e.source.rank === rank);
+    if (!hit?.notDrawn) return;
+    const { notDrawn, ...rest } = hit;
+    await dispatch({
+      type: 'size-map',
+      entries: [
+        ...own,
+        { ...rest, card: notDrawn.wouldMap, origin: 'operator', drawnAnyway: true },
+      ],
+    });
+  }
+
   /** Append (or, with `undo`, drop the last) piece edit and re-run the fill. */
   async function editPieces(e: PieceEdit | 'undo') {
     const cur = iRef.current.edits;
@@ -1666,6 +1686,7 @@ export function useImportSession(deps: {
     editName,
     confirmSize,
     setSize,
+    drawnAnyway,
     setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
     confirmShown,
     answerOutline,

@@ -424,14 +424,18 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           {sizes.map.entries
             .filter((e) => e.notDrawn)
             .map((e) => (
-              <Text
-                key={`nd-${e.source.rank}`}
-                size='micro'
-                component='p'
-                className='mt-1 text-warning'
-              >
-                ! {notDrawnLine(e.source.label)}
-              </Text>
+              <span key={`nd-${e.source.rank}`} className='mt-1 flex items-center gap-1.5'>
+                <Text size='micro' component='span' className='text-warning'>
+                  ! {notDrawnLine(e.source.label)}
+                </Text>
+                <Chip
+                  className='h-[22px]'
+                  title='the sheet draws this size on the shared (common) lines — fill it on them; a piece they do not close stays open'
+                  onClick={() => void api.drawnAnyway(e.source.rank)}
+                >
+                  this size is drawn — use the common outline
+                </Chip>
+              </span>
             ))}
           {sizes.map.unmapped.length > 0 && (
             <Text size='micro' component='p' className='mt-1 text-warning'>

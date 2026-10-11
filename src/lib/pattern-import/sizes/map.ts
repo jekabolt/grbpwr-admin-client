@@ -241,7 +241,11 @@ export const notDrawnLine = (label: string) =>
  */
 export function markNotDrawn(map: SizeMap, ranks: readonly number[], card: CardSize[]): SizeMap {
   if (!ranks.length) return map;
-  const out = new Set(ranks);
+  // the operator's "this size is drawn" stands
+  const out = new Set(
+    ranks.filter((r) => !map.entries.some((e) => e.source.rank === r && e.drawnAnyway)),
+  );
+  if (!out.size) return map;
   const entries = map.entries.map((e): SizeMapEntry => {
     if (!out.has(e.source.rank)) return e;
     return {

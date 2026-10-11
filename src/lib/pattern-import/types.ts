@@ -553,6 +553,12 @@ export type SizeMapEntry = {
    * is the card size it would have taken (that card size gets no pattern from this sheet).
    */
   notDrawn?: { wouldMap: CardSize | null };
+  /**
+   * The operator's override of `notDrawn`: "this size is drawn — use the common outline". The rank
+   * is mapped and filled on its walls as they are (the common lines); a piece it does not close
+   * stays open — nothing is copied from a neighbour.
+   */
+  drawnAnyway?: true;
 };
 
 export type SizeMap = {
