@@ -306,12 +306,17 @@ export function geoEvidence(
 export function exclusionOf(
   pc: PageChains,
   st: PageStats,
-  copy: { matches: number; of: number; scale: number; pieces?: number } | null,
+  copy: { matches: number; of: number; scale: number; pieces?: number; clustered?: boolean } | null,
   grid: 'registers' | 'apart' | null,
 ): string | null {
   if (grid === 'registers') return null;
-  if (copy && copy.scale <= AI_PAGES.copyMaxScale && (copy.pieces ?? 0) >= AI_PAGES.copyMinPieces)
-    return `its outlines are the file's tile pieces at 1:${Math.round(1 / copy.scale)} (${copy.matches} of ${copy.of} matched, ${copy.pieces} different pieces, none of piece size unexplained) — a reduced copy`;
+  if (
+    copy &&
+    copy.scale <= AI_PAGES.copyMaxScale &&
+    copy.clustered === true &&
+    (copy.pieces ?? 0) >= AI_PAGES.copyMinPieces
+  )
+    return `its outlines are the file's tile pieces at 1:${Math.round(1 / copy.scale)} (${copy.matches} of ${copy.of} matched, ${copy.pieces} different pieces at one scale, none of piece size unexplained) — a reduced copy`;
   // (b): a rectangle of piece size counts as a piece here (a waistband, a pocket bag is one)
   const longest = pc.chains.reduce((a, c) => Math.max(a, c.lengthMm), 0);
   if (closedPieceSized(pc) === 0 && longest <= AI_PAGES.longLineMm && st.hasTileMarks !== true)

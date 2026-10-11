@@ -18,7 +18,9 @@ import {
   pagesForCall,
   type PageRoleDeps,
 } from 'lib/pattern-import/ai/pages';
-import { AI_PAGES } from 'lib/pattern-import/clean/page-roles';
+import { AI_PAGES, aiAsides, exclusionOf } from 'lib/pattern-import/clean/page-roles';
+import { reducedCopy } from 'lib/pattern-import/clean/reduced-copy';
+import { PATIMPORT } from 'lib/pattern-import/types';
 import { mediaLeftovers } from 'lib/pattern-import/ai/discard';
 import type {
   AiPageHint,
@@ -705,7 +707,78 @@ async function mutationsSection() {
   }
 }
 
+/**
+ * Codex re-check #3: the pieces of a reduced copy are counted only inside the accepted scale
+ * cluster. Four copies of ONE tile piece at 0.30 + a DIFFERENT piece at 0.60: one piece at the
+ * copy's scale, and a piece-sized outline outside it — no exclusion (MUTATION: a real page the AI
+ * calls an overview 0.99 stays a question). Control: both pieces at 0.30 — a reduced copy.
+ */
+function clusterSection() {
+  const A = { hu: [1, 2, 3, 4], areaMm2: 40000 };
+  const B = { hu: [5, 6, 7, 8], areaMm2: 40000 };
+  const tiles = [A, A, A, A, B].map((t) => ({ ...t, hu: [...t.hu] }));
+  const at = (t: typeof A, k: number) => ({ hu: [...t.hu], areaMm2: t.areaMm2 * k * k });
+  const st = {
+    file: '0',
+    page: 0,
+    widthMm: 210,
+    heightMm: 297,
+    lineLengthM: 5,
+    pieceSizedOutlines: 5,
+    textChars: 0,
+    textExcerpt: '',
+  };
+  // the page draws a piece-sized closed outline (so rule (b) cannot apply: only the copy decides)
+  const sq = [
+    { x: 0, y: 0 },
+    { x: 60, y: 0 },
+    { x: 60, y: 60 },
+    { x: 0, y: 60 },
+  ];
+  const pc = {
+    chains: [{ closed: true, pts: sq, lengthMm: 240 }],
+  } as unknown as Parameters<typeof exclusionOf>[0];
+  const mixed = reducedCopy(
+    [at(A, 0.3), at(A, 0.3), at(A, 0.3), at(A, 0.3), at(B, 0.6)],
+    tiles,
+    PATIMPORT.minPieceAreaMm2,
+  );
+  check(
+    'synthetic',
+    'cluster: 4 × piece A at 0.30 + piece B at 0.60 → 1 piece in the cluster, B outside it',
+    !!mixed && mixed.scale === 0.3 && mixed.pieces === 1 && mixed.clustered === false,
+    mixed,
+  );
+  const ex = exclusionOf(pc, st, mixed, 'apart');
+  check(
+    'mutation',
+    'cluster: that page with the AI at overview 0.99 → no exclusion (a question)',
+    ex === null && !aiAsides({ status: 'suggest' }, { role: 'overview', confidence: 0.99 }, ex),
+    { mixed, ex },
+  );
+  const both = reducedCopy(
+    [at(A, 0.3), at(A, 0.3), at(A, 0.3), at(B, 0.3)],
+    tiles,
+    PATIMPORT.minPieceAreaMm2,
+  );
+  check(
+    'synthetic',
+    'cluster control: A and B both at 0.30 → a reduced copy of 2 pieces',
+    !!both &&
+      both.pieces === 2 &&
+      both.clustered === true &&
+      exclusionOf(pc, st, both, 'apart') !== null,
+    both,
+  );
+}
+
 export async function main(args: string[]): Promise<number> {
+  if (args[0] === 'cluster') {
+    clusterSection();
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
+    return checks.every((c) => c.ok) ? 0 : 1;
+  }
   if (args[0] === 'discard') {
     await discardSection();
     for (const c of checks)
@@ -736,6 +809,7 @@ export async function main(args: string[]): Promise<number> {
   const rows = [];
   if (!args.length) await staleSection('robe.pdf');
   await discardSection();
+  clusterSection();
   if (!args.length) await mutationsSection();
   for (const f of files) {
     const t = Date.now();
