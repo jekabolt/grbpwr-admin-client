@@ -60,6 +60,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
+import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
 
 import { CASES, runCase } from './e2e-entry';
 import { renderPng, type Label, type Stroke } from './sizes-render';
@@ -1500,7 +1501,77 @@ async function synthStrayGate() {
       s0.countAsk != null,
     { row: cRow?.confidence, expected: s0.expected, ask: s0.countAsk != null },
   );
+  // the autopilot on that sizes step: it stops with the count (never takes the file name's one
+  // size, never confirms the clash row); answered 3, it does not confirm the clash row either
+  const apOn = (
+    sizes: StageIO['sizes']['out'],
+    chains: StageIO['chains']['out'],
+    confirmed: string[],
+  ) =>
+    decide({
+      session: {
+        step: 'sizes',
+        busy: null,
+        error: null,
+        files: [],
+        variant: null,
+        chains,
+        sizes,
+      } as never,
+      inputs: {
+        sheetIndex: 0,
+        gridOverride: null,
+        cleanEdits: [],
+        legend: [],
+        legendConfirmed: confirmed,
+      } as never,
+      card: { sizes: CARD3 } as never,
+      question: 'the sizes step',
+    });
+  const clashKey = cRow ? cRow.sig ?? `#${cRow.id}` : '';
+  const confirmsClash = (d: ReturnType<typeof decide>) =>
+    d.actions.some(
+      (a) =>
+        (a.kind === 'inputs' && (a.patch.legendConfirmed ?? []).includes(clashKey)) ||
+        (a.kind === 'legend' && (a.confirm ?? []).includes(clashKey)),
+    );
+  const ap0 = apOn(s0, c0, []);
+  check(
+    S,
+    'autopilot, pattern_38.svg: stops on the size count (pre-filled from the look, not 1), never confirms the clash row',
+    ap0.stop?.step === 'sizes' &&
+      !confirmsClash(ap0) &&
+      !ap0.actions.some((a) => a.kind === 'drawn-sizes' && a.n === 1),
+    {
+      stop: ap0.stop,
+      actions: ap0.actions.map((a) => a.kind),
+      assume: ap0.assumptions.map((a) => a.answer),
+    },
+  );
+  // mutation: the clash row read as an ordinary low row — the autopilot would confirm it
+  const plain = {
+    ...c0,
+    classes: c0.classes.map((c) => ({
+      ...c,
+      evidence: c.evidence.map((e) =>
+        e.kind === 'face-graded' ? { kind: 'face-graded' as const, why: e.why } : e,
+      ),
+    })),
+  };
+  check(
+    S,
+    'clash mark off: the autopilot confirms the row as ignore (mutation)',
+    confirmsClash(apOn(s0, plain, [])),
+    apOn(s0, plain, []).actions.map((a) => a.kind),
+  );
   const s1 = await w2.run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const ap1 = apOn(s1, c0, []);
+  check(
+    S,
+    'autopilot, 3 sizes answered: the clash row is still not confirmed',
+    !confirmsClash(ap1) && ap1.stop?.reason?.includes('file name') !== true,
+    { stop: ap1.stop, actions: ap1.actions.map((a) => a.kind) },
+  );
   const p1 = await w2.run1('pieces', {
     seeds: [{ id: 0, at, origin: 'click', variant: null }],
     edits: [],

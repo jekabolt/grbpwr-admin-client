@@ -1073,8 +1073,8 @@ export class Session {
           blobs: faces.map.blobs,
           shapes: blobShapes(faces.map, cands),
           files: feed.files,
-          // the models it names are read as the pieces stage reads them (its model choice)
-          models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+          // the models the sheet's own feed names (another file's models say nothing here)
+          models: variantLabels(feed.texts.map((t) => t.text)).length,
         }),
       };
     }

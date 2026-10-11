@@ -17,6 +17,7 @@ import type {
   AllowanceDecision,
   AutopilotValue,
   BackgroundKind,
+  ClassEvidence,
   FabricAssignment,
   ImportSession,
   NameDecision,
@@ -938,9 +939,38 @@ function sizesStep(snap: Snap): AutopilotDecision {
       ],
     };
   }
-  // legend rows below 0.6
+  // gb2: the file name says one size while the lines look graded (chains/face-role sourceClash):
+  // the count is the operator's — stop with it, pre-filled from the graded look (A6 over the size
+  // checks' geometry), never from the file name; the clash row is never confirmed by the autopilot
+  const clash = (c: { evidence: readonly ClassEvidence[] }) =>
+    c.evidence.some((e) => e.kind === 'face-graded' && !!e.sourceOne);
+  const clashRow = (s.chains?.classes ?? []).find(
+    (c) => clash(c) && c.confidence < 0.9 && !i.legendConfirmed.includes(legendKey(c)),
+  );
+  if (clashRow && sz.expected?.from !== 'operator') {
+    const n = sz.countAsk?.auto?.n;
+    const look = n != null && n > 1 ? n : null;
+    const why = clashRow.evidence.find((e) => e.kind === 'face-graded');
+    return stopAt(
+      'sizes',
+      `these lines look like other sizes, but the file name says one size — how many sizes does the sheet draw?${look ? ` (the lines suggest ${look})` : ''}`,
+      [
+        A(
+          'sizes',
+          'drawn-sizes',
+          'the sheet',
+          look ? `${look} sizes drawn?` : 'several sizes drawn?',
+          'a file name naming one size against lines that look graded: asked, never taken',
+          [why && why.kind === 'face-graded' ? why.why : 'face-graded'],
+          0.3,
+          true,
+        ),
+      ],
+    );
+  }
+  // legend rows below 0.6 (a clash row never: answered by the count, or by the operator)
   const pending = (s.chains?.classes ?? []).filter(
-    (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)),
+    (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)) && !clash(c),
   );
   if (pending.length) {
     const confirm = [...i.legendConfirmed, ...pending.map(legendKey)];
