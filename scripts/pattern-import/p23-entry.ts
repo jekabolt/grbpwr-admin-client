@@ -91,9 +91,9 @@ function mkSet(
     chainOf(
       4,
       [
-        { x: 300, y: 300 },
-        { x: 300, y: 480 },
-        { x: 306, y: 456 },
+        { x: 150, y: 200 },
+        { x: 150, y: 380 },
+        { x: 156, y: 356 },
       ],
       false,
       3,
@@ -351,12 +351,37 @@ function synthLayers() {
       JSON.stringify(got[0]),
     );
     ck(!got[1].layerLoop, 'P2 autopilot: an outline on the cut layer never does');
-    const half = layerLoopAsides(out, [aside(3, [201, 101, 399, 699])]);
+    const half = layerLoopAsides(out, [
+      { ...aside(3, [201, 101, 399, 699]), at: { x: 300, y: 250 } },
+    ]);
     ck(
       /part of a cut piece/.test(half[0].layerLoop ?? ''),
       'P2 autopilot: the half of a piece split off by the pleat carries the evidence',
       JSON.stringify(half[0]),
     );
+    {
+      // a lining drawn on a layer of no known meaning inside the piece stays a question
+      const lined: ChainSet = {
+        ...set,
+        chains: [...set.chains, chainOf(set.chains.length, rect(120, 520, 190, 680), true, 4)],
+        classes: set.classes.map((c) =>
+          c.id === 1 ? { ...c, chains: [...c.chains, set.chains.length] } : c,
+        ),
+      };
+      const st2 = new Map(styles);
+      st2.set(4, style(4, 'LINING'));
+      const lo = run(lined, st2);
+      const la = [aside(5, [121, 521, 189, 679])];
+      ck(
+        !layerLoopAsides(lo, la)[0].layerLoop,
+        'P2 fix B: an outline bounded by a line on an unknown layer (a lining) stays a question',
+        JSON.stringify(layerLoopAsides(lo, la)[0]),
+      );
+      ck(
+        !!layerLoopAsides(lo, la, { off: new Set(['bounds']) })[0].layerLoop,
+        'P2 mutation bounds off: the lining is dismissed as part of the piece',
+      );
+    }
     ck(
       !layerLoopAsides(out, [aside(4, [801, 801, 899, 899])])[0].layerLoop,
       'P2 autopilot negative: an outline outside every cut piece → no evidence',
@@ -406,7 +431,13 @@ function synthFaces() {
   const same = (p: PtMm) => p;
   const scales = [0.9, 0.95, 1];
   // three size files on one frame (wm): the sleeve grows from its hem; a front panel beside it
-  const files = scales.map((s) => [sleeve(300, s), ellipse(750, 400, 150 * s, 250 * s)]);
+  // an internal mark off the sleeve's axis (a notch line): left / right pieces differ by it
+  const mark = (cx: number, s: number, side = -1): PtMm[] => [
+    { x: cx + side * 40 * s, y: 400 },
+    { x: cx + side * 40 * s, y: 440 },
+  ];
+  const sl = (cx: number, s: number, side = -1) => [sleeve(cx, s), mark(cx, s, side)];
+  const files = scales.map((s) => [...sl(300, s), ellipse(750, 400, 150 * s, 250 * s)]);
   // the click sits 4 mm under the largest cap: inside the largest size only
   const click: Seed = { id: 7, at: { x: 300, y: 696 }, origin: 'click', variant: null };
   const run = (polys: PtMm[][][], o?: Parameters<typeof seedFaces>[5]) =>
@@ -426,8 +457,21 @@ function synthFaces() {
   const t = seedFaces(3, [nowhere], (r) => ctxOf(files[r]), pixel, same);
   ck(t.at.size === 0, 'P3 negative: a click in no piece of any size file moves nowhere');
   // negative: two equally good matches (two strips 13 mm either side of the reference strip)
-  const strip = (cy: number, w: number): PtMm[] => rect(300 - w / 2, cy - 10, 300 + w / 2, cy + 10);
-  const twins = [[strip(593, 560)], [strip(593, 560), strip(619, 560)], [strip(606, 600)]];
+  // a strip narrower at its top (no top–bottom twin), its mark off the left–right axis
+  const strip1 = (cy: number, w: number): PtMm[] => [
+    { x: 300 - w / 2, y: cy - 10 },
+    { x: 300 + w / 2, y: cy - 10 },
+    { x: 300 + w / 2 - 60, y: cy + 10 },
+    { x: 300 - w / 2 + 60, y: cy + 10 },
+  ];
+  const strip = (cy: number, w: number): PtMm[][] => [
+    strip1(cy, w),
+    [
+      { x: 300 - 0.3 * w, y: cy - 4 },
+      { x: 300 - 0.3 * w, y: cy + 4 },
+    ],
+  ];
+  const twins = [strip(593, 590), [...strip(593, 590), ...strip(619, 590)], strip(606, 600)];
   const tclick: Seed = { id: 7, at: { x: 300, y: 606 }, origin: 'click', variant: null };
   const trun = (o?: Parameters<typeof seedFaces>[5]) =>
     seedFaces(3, [tclick], (r) => ctxOf(twins[r]), pixel, same, o);
@@ -451,7 +495,7 @@ function synthFaces() {
   };
   const other = scales.map((s, r) =>
     r === 2
-      ? [sleeve(300, s)]
+      ? sl(300, s)
       : [ellipse(300, 480, Math.sqrt(area(s) / Math.PI), Math.sqrt(area(s) / Math.PI))],
   );
   const o = run(other);
@@ -485,7 +529,7 @@ function synthFaces() {
     'P3 mutation hand off: the mirrored twin is taken',
   );
   // absolute bound: the only candidate passes every gate but scores > 0.3 for one size step
-  const far = scales.map((s, r) => (r === 2 ? [sleeve(300, 1)] : [sleeve(336, 0.923)]));
+  const far = scales.map((s, r) => (r === 2 ? sl(300, 1) : sl(336, 0.923)));
   const fr = run(far);
   ck(
     !fr.at.has('7:1') && fr.diag.some((d) => d.rank === 1 && d.verdict === 'weak'),
@@ -496,8 +540,25 @@ function synthFaces() {
     run(far, { off: new Set(['bound']) }).at.has('7:1'),
     'P3 mutation bound off: the weak match moves the seed',
   );
+  // a symmetric silhouette told only by its marks: the smaller sizes hold the right-hand piece
+  const mirrorMarks = scales.map((s, r) => sl(300, s, r === 2 ? -1 : 1));
+  const mm = run(mirrorMarks);
+  ck(
+    mm.at.size === 0,
+    'P3 fix 5: a symmetric outline whose marks sit mirrored is no match',
+    JSON.stringify(mm.diag),
+  );
+  ck(
+    run(mirrorMarks, { off: new Set(['marks']) }).at.size > 0,
+    'P3 mutation marks off: the mirrored-marks twin is taken',
+  );
+  const bare = scales.map((s) => [sleeve(300, s)]);
+  ck(
+    run(bare).at.size === 0,
+    "P3 fix 5: a symmetric outline with no marks to tell → no move (today's behaviour)",
+  );
   // reciprocal: the smaller size's strip matches back to ANOTHER strip of the reference size
-  const rec = [[strip(593, 560)], [strip(593, 560)], [strip(606, 600), strip(580, 560)]];
+  const rec = [strip(593, 590), strip(593, 590), [...strip(606, 600), ...strip(580, 590)]];
   const sclick: Seed = { id: 7, at: { x: 300, y: 612 }, origin: 'click', variant: null };
   const rrun = (o?: Parameters<typeof seedFaces>[5]) =>
     seedFaces(3, [sclick], (r) => ctxOf(rec[r]), pixel, same, o);
