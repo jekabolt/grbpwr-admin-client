@@ -34,6 +34,8 @@ import {
   sampleAlong,
 } from 'lib/pattern-import/semantics/geom';
 import { isTitleLabel } from 'lib/pattern-import/semantics/names';
+import { drawnSeam, measuredAllowance } from 'lib/pattern-import/semantics/allowance';
+import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import {
   createProposeSizeMap,
   needsConfirmation,
@@ -1304,6 +1306,342 @@ export async function main(): Promise<number> {
     json.d3 = { ids, gate: g.report.checks.map((c) => [c.id, c.ok, c.value]) };
   }
 
+  head('D1s N3 one pen: the seam line drawn inside the cut line is the seam, not layer 8 (wm M)');
+  {
+    // a 300 × 400 cut line; its seam line 7 mm inside in the SAME row (the legend's "seam line
+    // inside"), broken into 3 pieces; a hem fold 20 mm up and a dart, also in the outline's pen
+    const F = fx();
+    const row = F.cls('common');
+    const outer = [
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      { x: 300, y: 400 },
+      { x: 0, y: 400 },
+    ];
+    const wall = F.chain(outer, true, row);
+    const seam = [
+      F.chain(
+        [
+          { x: 7, y: 60 },
+          { x: 7, y: 393 },
+          { x: 150, y: 393 },
+        ],
+        false,
+        row,
+      ),
+      F.chain(
+        [
+          { x: 160, y: 393 },
+          { x: 293, y: 393 },
+          { x: 293, y: 60 },
+        ],
+        false,
+        row,
+      ),
+      F.chain(
+        [
+          { x: 293, y: 50 },
+          { x: 293, y: 7 },
+          { x: 7, y: 7 },
+          { x: 7, y: 50 },
+        ],
+        false,
+        row,
+      ),
+    ];
+    const hem = F.chain(
+      [
+        { x: 30, y: 20 },
+        { x: 270, y: 20 },
+      ],
+      false,
+      row,
+    );
+    const dart = F.chain(
+      [
+        { x: 120, y: 393 },
+        { x: 140, y: 300 },
+        { x: 160, y: 393 },
+      ],
+      false,
+      row,
+    );
+    const cand: PieceCandidate = {
+      seed: 1,
+      rank: 0,
+      outer,
+      walls: [wall],
+      inside: [...seam, hem, dart],
+      textsInside: [],
+      outcome: 'closed',
+      areaMm2: 120000,
+      bbox: { minX: 0, minY: 0, maxX: 300, maxY: 400 },
+      sourceCoverage: 1,
+      p95Mm: 0,
+    };
+    const set: ChainSet = {
+      chains: F.chains,
+      classes: F.classes,
+      bundles: [],
+      orphans: [],
+      warnings: [],
+    };
+    const got = drawnSeam(cand, set)?.ids ?? [];
+    ck(
+      got.length === 3 && seam.every((id) => got.includes(id)),
+      'the three seam pieces at 7 mm, joined end to end, are the drawn seam line; the hem fold (20 mm) and the dart are not',
+      JSON.stringify(got),
+    );
+    const m = measuredAllowance(cand, set);
+    ck(!!m && Math.abs(m.mm - 7) < 0.2, 'measured allowance 7 mm', JSON.stringify(m));
+    const internal = classifyFeatures(cand, set).filter((f) => f.kind === 'internal');
+    ck(
+      internal.length === 2,
+      'layer 8 keeps the hem fold and the dart only (the seam line is not an internal line)',
+      `${internal.length} internal`,
+    );
+    // Codex N3: a disconnected line at the same 7 mm (a topstitch / placement on the top edge,
+    // 40+ mm from the seam run's ends) is no seam fragment: it stays on layer 8
+    const top = F.chain(
+      [
+        { x: 100, y: 7 },
+        { x: 200, y: 7 },
+      ],
+      false,
+      row,
+    );
+    const cand2: PieceCandidate = { ...cand, inside: [seam[0], seam[1], hem, dart, top] };
+    const got2 = drawnSeam(cand2, set)?.ids ?? [];
+    const int2 = classifyFeatures(cand2, set).filter((f) => f.kind === 'internal');
+    ck(
+      got2.length === 2 && !got2.includes(top) && int2.length === 3,
+      'Codex N3: a disconnected 100 mm line at the same gap stays an internal line (the run of 2 is the seam)',
+      JSON.stringify({ got2, internal: int2.length }),
+    );
+    // Codex N3: two disconnected runs (34 % + a 20 % inner line on the right, 140 mm apart) never
+    // add up to the 50 % — only ONE chain joined end to end counts
+    const right = F.chain(
+      [
+        { x: 293, y: 100 },
+        { x: 293, y: 380 },
+      ],
+      false,
+      row,
+    );
+    const cand4: PieceCandidate = { ...cand, inside: [seam[0], right, hem, dart] };
+    const int4 = classifyFeatures(cand4, set).filter((f) => f.kind === 'internal');
+    ck(
+      !drawnSeam(cand4, set) && !measuredAllowance(cand4, set) && int4.length === 4,
+      'Codex N3: 34 % + a disconnected 20 % run → no seam, nothing measured, all 4 stay on layer 8',
+      JSON.stringify({ seam: drawnSeam(cand4, set)?.ids, internal: int4.length }),
+    );
+    // one result for both: a run covering < 50 % neither measures nor leaves layer 8
+    const cand3: PieceCandidate = { ...cand, inside: [seam[0], hem, dart] };
+    const int3 = classifyFeatures(cand3, set).filter((f) => f.kind === 'internal');
+    ck(
+      !measuredAllowance(cand3, set) && !drawnSeam(cand3, set) && int3.length === 3,
+      'Codex N3: one fragment covering 34 % — not measured, so not suppressed either (stays on layer 8)',
+      JSON.stringify({ m: measuredAllowance(cand3, set), internal: int3.length }),
+    );
+  }
+
+  head("D3l N3 the cutting list's count of a piece (robe «69. Ærme, 4 gange»)");
+  {
+    const build = (
+      docTexts: string[],
+      texts = ['SLEEVE'],
+      seedLabels: Record<number, string> = { 1: '69' },
+      extraCard?: string,
+    ) => {
+      const F = fx();
+      addFamily(
+        F,
+        1,
+        bodice,
+        0,
+        [{ pts: grainLine(120, 100, 450), closed: false, role: 'grain' }],
+        texts,
+      );
+      const sm = proposeSizeMap(RUN3, CARD3);
+      const sizeMap = extraCard
+        ? {
+            ...sm,
+            unmapped: [...sm.unmapped, { sizeId: 99, name: extraCard, token: extraCard, rank: 3 }],
+          }
+        : sm;
+      return buildPieceSpecsDetailed(input(F, CUT10, { docTexts, seedLabels, sizeMap })).output;
+    };
+    const qOf = (o: ReturnType<typeof build>) => o.unproven.find((u) => u.kind === 'quantity');
+    const ids = (o: ReturnType<typeof build>) =>
+      o.pieces.map((p) => `${p.identity}×${p.piecesPerGarment}`).join(' ');
+    const a = build([
+      'Klippevejledning:',
+      'Mønsteret er inkl. 3 cm opsøm forneden i kjolen.',
+      '67.',
+      'Forstykke, 1 gang mod fold',
+      '69.',
+      'Ærme, 4 gange',
+      '69.',
+      'Erme, 4 ganger',
+      '69. Ärm, 4 ggr',
+    ]);
+    ck(
+      ids(a) === 'SL_L×2 SL_R×2' && !qOf(a),
+      'bound by its printed number: «69. Ærme, 4 gange» → 2 pairs (4), no question',
+      `${ids(a)} ${JSON.stringify(qOf(a))}`,
+    );
+    // Codex N3: three numbered steps with counts in a row, no cutting header → no section
+    const run3 = build(['67. Forstykke, 1 gang', '68. Bagstykke, 2 gange', '69. Ærme, 4 gange']);
+    ck(
+      qOf(run3)?.shown === 'pair×2' && /not in a cutting list/.test(qOf(run3)?.detail ?? ''),
+      'Codex N3: a run of 3 numbered lines with counts but no cutting header → shown ×4, asked',
+      JSON.stringify(qOf(run3)),
+    );
+    // …and a header further up ends at the next header (a sewing section with its own title)
+    const later = build([
+      'Klippevejledning:',
+      'Alle dele klippes med 1 cm sømrum.',
+      'Syning:',
+      'a',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(later),
+      'Codex N3: a list line after another header than the cutting one → asked',
+      JSON.stringify(qOf(later)),
+    );
+    // Codex N3: a section title ends the cutting run hard — on its own line, or leading a line
+    const ownLine = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning:',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(ownLine) && /not in a cutting list/.test(qOf(ownLine)?.detail ?? ''),
+      'Codex N3: «Syning:» between two list lines → the line after it is asked',
+      JSON.stringify(qOf(ownLine)),
+    );
+    const leading = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning: 69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(leading) && !/cutting list/.test(qOf(leading)?.detail ?? ''),
+      'Codex N3: «Syning: 69. Ærme, 4 gange» (title leading the line) → no count taken, asked',
+      JSON.stringify(qOf(leading)),
+    );
+    const leadNext = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning: brug tråd',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(leadNext) && /not in a cutting list/.test(qOf(leadNext)?.detail ?? ''),
+      'Codex N3: «Syning: brug tråd» (title leading a line) ends the section → the next list line is asked',
+      JSON.stringify(qOf(leadNext)),
+    );
+    // Codex N3: a heading without a colon («SYNING») and a sewing verb in the line: not the name
+    const verb = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'SYNING',
+      '69. Sy ærme 4 gange',
+    ]);
+    ck(
+      qOf(verb)?.shown === 'pair×2' && /«sy ærme» is not this piece/.test(qOf(verb)?.detail ?? ''),
+      'Codex N3: «SYNING» + «69. Sy ærme 4 gange» → «sy» is no name → shown ×4, asked',
+      JSON.stringify(qOf(verb)),
+    );
+    const none = build([]);
+    ck(
+      ids(none) === 'SL_L×1 SL_R×1' && qOf(none)?.shown === 'pair×1',
+      'no list → the pair default stays a question (pair×1)',
+      `${ids(none)} ${JSON.stringify(qOf(none))}`,
+    );
+    const split = build(['69. Ærme, 4 gange', '69. Ærme (for), 2 gange']);
+    ck(
+      qOf(split)?.shown === 'pair×1',
+      'copies of «69» that disagree (4 / 2) prove nothing → asked as before',
+      JSON.stringify(qOf(split)),
+    );
+    const byName = build(['5 - Sleeve - 4 дет.'], ['SLEEVE'], {});
+    ck(
+      qOf(byName)?.shown === 'pair×2' && /title only/.test(qOf(byName)?.detail ?? ''),
+      'bound by its name only → the list count is the answer shown, still asked',
+      JSON.stringify(qOf(byName)),
+    );
+    const clash = build(['69. Ærme, 4 gange'], ['SLEEVE', 'Cut 2']);
+    ck(
+      !!qOf(clash) && /cutting list/.test(qOf(clash)?.detail ?? ''),
+      'the piece prints «Cut 2», the list ×4 → asked, both quoted',
+      JSON.stringify(qOf(clash)),
+    );
+    const byCode = build(['7 - Карман - 4 дет.', '8 - Обтачка - 2 дет.'], ['POCKET'], {});
+    ck(
+      qOf(byCode)?.shown === 'pair×2' && /read as a code/.test(qOf(byCode)?.detail ?? ''),
+      'no label (number drawn as curves): «Карман» read as PCK → the one PCK piece, shown ×4, still asked',
+      JSON.stringify(qOf(byCode)),
+    );
+    const twoPck = build(['7 - Карман - 4 дет.', '12 - Карман - 2 дет.'], ['POCKET'], {});
+    ck(
+      qOf(twoPck)?.shown === 'pair×1' && !/cutting list/.test(qOf(twoPck)?.detail ?? ''),
+      'two entries read as PCK with different counts → no answer shown from the list',
+      JSON.stringify(qOf(twoPck)),
+    );
+    // Codex N3: only a cutting-list line that names THIS piece answers by itself
+    const step = build(['69. Pres sømmen 4 gange']);
+    ck(
+      qOf(step)?.shown === 'pair×2' && /not in a cutting list/.test(qOf(step)?.detail ?? ''),
+      'Codex N3: «69. Pres sømmen 4 gange» (a numbered step, no list around it) → shown ×4, asked',
+      JSON.stringify(qOf(step)),
+    );
+    const notNamed = build(['Klippevejledning:', '69. Pres sømmen 4 gange']);
+    ck(
+      qOf(notNamed)?.shown === 'pair×2' &&
+        /is not this piece's name/.test(qOf(notNamed)?.detail ?? ''),
+      'Codex N3: under a cutting header but its words do not name the sleeve → asked',
+      JSON.stringify(qOf(notNamed)),
+    );
+    const scopes = build([
+      'Klippevejledning:',
+      '69. Ærme, 4 gange',
+      'Cutting lining:',
+      '69. Ærme, 2 gange',
+    ]);
+    ck(
+      qOf(scopes)?.shown === 'pair×1' && /disagree/.test(qOf(scopes)?.detail ?? ''),
+      'Codex N3: two lists (scopes) printing 4 and 2 for «69» → no count taken, both quoted',
+      JSON.stringify(qOf(scopes)),
+    );
+    const lining = build(['Klippevejledning:', '69. Ærme lining, 4 gange']);
+    ck(
+      !!qOf(lining) && /not in a cutting list/.test(qOf(lining)?.detail ?? ''),
+      'Codex N3: a list line naming a fabric of its own («lining») → asked',
+      JSON.stringify(qOf(lining)),
+    );
+    const sized = build(['Klippevejledning:', '46. Ærme, 4 gange'], ['SLEEVE'], { 1: '46' }, '46');
+    ck(
+      qOf(sized)?.shown === 'pair×2' && /is a size/.test(qOf(sized)?.detail ?? ''),
+      'Codex N3: the list number 46 is a card size → asked',
+      JSON.stringify(qOf(sized)),
+    );
+    const headed = build(['Klippevejledning:', '69. Ærme, 4 gange']);
+    ck(
+      !qOf(headed),
+      'Codex N3: one line under a cutting header, naming the sleeve, bound by 69 → answers by itself',
+      JSON.stringify(qOf(headed)),
+    );
+    const steps = build(['69 Læg ærmerne sammen to og to og sy 2 x langs kanten forneden']);
+    ck(
+      qOf(steps)?.shown === 'pair×1',
+      'a numbered sewing step with a count in it is not a list line',
+      JSON.stringify(qOf(steps)),
+    );
+  }
+
   head('D3q what the drawing does not prove is asked (10.10): allowance, title vs note');
   {
     // title labels vs construction notes, on the corpus' own words
@@ -1522,13 +1860,22 @@ export async function main(): Promise<number> {
     });
     const run1 = (
       extras: Extra[],
-      texts: { t: string; at: PtMm }[] = [],
+      texts: { t: string; at: PtMm; rot?: number }[] = [],
       /** per extra: its source layer / OCG (the extras are the first chains of the fixture) */
       layers?: (string | null)[],
     ) => {
       const F = fx();
       addFamily(F, 1, bodice, 0, extras, ['FRONT']);
-      for (const t of texts) F.text(t.t, t.at);
+      for (const t of texts) {
+        const id = F.text(t.t, t.at);
+        // turned 90°: the word runs up from its anchor (a 5 × 30 mm box)
+        if (t.rot === 90)
+          F.texts[id] = {
+            ...F.texts[id],
+            rotationDeg: 90,
+            bbox: { minX: t.at.x - 5, minY: t.at.y, maxX: t.at.x, maxY: t.at.y + 30 },
+          };
+      }
       const inp = input(F, CUT10, { pieceOverrides: { 1: { pairHand: null } } });
       if (layers) {
         layers.forEach((_, i) => (F.chains[i].style = i + 1));
@@ -1600,6 +1947,54 @@ export async function main(): Promise<number> {
         JSON.stringify(far.d.output.grainProposals),
       );
     }
+    // N3 + Codex (gerber «GRAIN»): a word written ALONG its line (turned to it, ≤ 10 mm) is still
+    // ONE evidence — the direction is the same text's; 'detected' needs another source
+    {
+      const turned = (x: number) => [{ t: 'GRAIN', at: { x, y: 200 }, rot: 90 }];
+      const on = run1([line(90)], turned(96));
+      const pr = on.d.output.grainProposals?.[0];
+      ck(
+        !grainOf(on.d) && pr?.why === 'line by a grain word' && pr.evidence.join('+') === 'word',
+        'Codex N3: «GRAIN» turned along the line 3.5 mm off → one evidence (word) → proposed',
+        JSON.stringify({ g: grainOf(on.d)?.evidence, pr }),
+      );
+      const headed = run1([line(90), ...barbs(90, 120, 420)], turned(96));
+      ck(
+        grainOf(headed.d)?.origin === 'detected' &&
+          (grainOf(headed.d)?.evidence ?? []).join('+') === 'arrowheads+word',
+        'Codex N3: the same word + arrowheads (a separate source) → detected',
+        JSON.stringify(grainOf(headed.d)?.evidence),
+      );
+      // A1: the word labels only the NEAREST line: a second line 3 mm the other side takes it
+      const two = run1([line(90), line(103, 130, 400)], turned(101));
+      const p2 = two.d.output.grainProposals?.[0];
+      ck(
+        !!p2 && Math.abs(p2.a.x - 103) < 1e-6 && p2.evidence.join('+') === 'word',
+        'N3: two lines, the word nearer the second → only the second is labelled (A1)',
+        JSON.stringify(two.d.output.grainProposals),
+      );
+    }
+    // N3 (SVG smoke): a piece with no name yet gets its grain proposal in the SAME pass
+    {
+      const F = fx();
+      addFamily(F, 1, bodice, 0, [line(90)], ['FRONT']);
+      addFamily(F, 2, bodice, 600, [], []);
+      F.text('Fadenlauf', { x: 92, y: 250 });
+      const o = buildPieceSpecsDetailed(
+        input(F, CUT10, { pieceOverrides: { 1: { pairHand: null }, 2: { pairHand: null } } }),
+      ).output;
+      const seeds = (o.grainProposals ?? []).map((g) => g.seed).sort();
+      ck(
+        seeds.join() === '1,2' &&
+          o.blocked.some((b) => b.seed === 2 && b.reason === 'grammar') &&
+          o.grainProposals!.find((g) => g.seed === 2)?.why !== undefined,
+        'N3: the unnamed piece (blocked grammar) is proposed beside the named one — one review',
+        JSON.stringify({
+          props: o.grainProposals?.map((g) => [g.seed, g.why]),
+          blocked: o.blocked,
+        }),
+      );
+    }
     // (a) arrowheads + word → detected; one barb at one end → not arrowheads
     {
       const { d } = run1([line(90), ...barbs(90, 120, 420)], word);
@@ -1635,6 +2030,45 @@ export async function main(): Promise<number> {
         grainOf(pair.d)?.origin === 'detected',
         'a symmetric pair at one end counts as arrowheads',
         JSON.stringify(pair.d.output.blocked),
+      );
+      // N3 (wm M back): strokes at a line's end that do not mirror each other, or a crowd of them
+      // (a tile label's corner), are no head
+      const stroke = (side: number, deg: number, len: number): Extra => ({
+        pts: [
+          { x: 90, y: 120 },
+          {
+            x: 90 + side * len * Math.sin((deg * Math.PI) / 180),
+            y: 120 + len * Math.cos((deg * Math.PI) / 180),
+          },
+        ],
+        closed: false,
+        role: 'internal',
+      });
+      const skew = run1([line(90), stroke(1, 20, 6), stroke(-1, 45, 6)], word);
+      ck(
+        skew.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: a pair at one end at 20° / 45° is no head (angles differ)',
+        JSON.stringify(skew.d.output.grainProposals),
+      );
+      const crowd = run1(
+        [line(90), ...[25, 30, 35, 40].flatMap((a) => [stroke(1, a, 4), stroke(-1, a, 4)])],
+        word,
+      );
+      ck(
+        crowd.d.output.grainProposals?.[0]?.why === 'line by a grain word',
+        'N3: 8 strokes at one end (a tile label the line runs into) are no head',
+        JSON.stringify(crowd.d.output.grainProposals),
+      );
+      // palto: one head per size — the same V (barb → tip → barb, one polyline) drawn 3 times
+      const vee = (): Extra => {
+        const [l, r] = [stroke(-1, 28, 7), stroke(1, 28, 7)];
+        return { pts: [l.pts[1], { x: 90, y: 120 }, r.pts[1]], closed: false, role: 'internal' };
+      };
+      const copies = run1([line(90), vee(), vee(), vee()], word);
+      ck(
+        grainOf(copies.d)?.origin === 'detected',
+        'N3: a mirrored head drawn 3 times over (one per size, palto) is still a head',
+        JSON.stringify(copies.d.output.grainProposals),
       );
       // the same arrow among lettering: 12 short strokes in the cell of its top end (wm, G18)
       const letters: Extra[] = Array.from({ length: 12 }, (_, i) => ({
@@ -2000,6 +2434,41 @@ export async function main(): Promise<number> {
         'FP_L~FP_R,FP_R~FP_L' && g.report.passed,
       'with a grain click both hands pass (G12)',
       gateLine(g.report),
+    );
+  }
+
+  head('D6c Codex N3: the two sides of a drawn pair agree on the count, or both are asked');
+  {
+    const F = fx();
+    const g = (dx: number) => [
+      { pts: grainLine(120 + dx, 100, 450), closed: false, role: 'grain' as const },
+    ];
+    const mirrorBodice = (k: number) =>
+      bodice(k)
+        .map((q) => ({ x: -q.x, y: q.y }))
+        .reverse();
+    addFamily(F, 1, bodice, 0, g(0), ['Cut 4']);
+    addFamily(
+      F,
+      2,
+      mirrorBodice,
+      900,
+      [{ pts: grainLine(-120, 100, 450), closed: false, role: 'grain' }],
+      ['Cut 2'],
+    );
+    const d = buildPieceSpecsDetailed(
+      input(F, CUT10, {
+        pieceOverrides: { 1: { code: 'FP', mods: ['L'] }, 2: { code: 'FP', mods: ['R'] } },
+      }),
+    );
+    const qs = d.output.unproven.filter((u) => u.kind === 'quantity');
+    ck(
+      qs.length === 2 && qs.every((u) => /drawn pair disagrees/.test(u.detail)),
+      'FP_L ×2 / FP_R ×1 (cut 4 vs cut 2) → both sides asked, not exported silently',
+      JSON.stringify({
+        pieces: d.output.pieces.map((p) => `${p.identity}×${p.piecesPerGarment}`),
+        qs,
+      }),
     );
   }
 

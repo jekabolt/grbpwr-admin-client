@@ -5,6 +5,7 @@
 // offset, so the derived cut/seam line simply runs across where the fold was.
 
 import type { BoxMm, FoldFeature, PtMm } from '../types';
+import { parseQuantity } from '../ai/evidence';
 import { PIECE_NO_SRC } from '../pieces/seeds';
 import {
   SegIndex,
@@ -582,6 +583,191 @@ export function bindFoldListEntry<S>(
     }),
   );
   return byName.length === 1 ? byName[0].seed : null;
+}
+
+/**
+ * N3: one numbered cutting-list line that prints a count ("69. Ærme, 4 gange", "7 - Карман - 2
+ * дет."). The count is the line's own statement about ITS piece; it is bound by the printed number
+ * (`bindListEntry`) before it says anything about a piece on the sheet.
+ */
+export type QtyListEntry = {
+  text: string;
+  no: string;
+  words: string[];
+  qty: number;
+  /**
+   * It sits in a cutting-list section: the run of list lines right under an explicit cutting
+   * header («Klippevejledning», «Раскрой деталей…», «Cutting layout»; ended by the next header),
+   * and names no fabric of its own. Only such a line may answer a count by itself; any other numbered line with
+   * a count ("69. Pres sømmen 4 gange", a sewing step) is a pre-filled question at most.
+   */
+  section: boolean;
+  /** Lists (scopes) that print another count for this number — no count is taken from them. */
+  conflict?: string[];
+  /**
+   * Codex N3: every word after the number that is NOT cut vocabulary (cut / klip / zuschneiden /
+   * кроить, × / gange / mal / раз, pair / Paar / пар, on fold…), any length — «Sy ærme» keeps «sy».
+   * The count answers by itself only when these are all the piece's own title or code.
+   */
+  rest: string[];
+};
+
+/** Cut vocabulary: the words a cutting-list line may hold beside the piece's name. */
+const CUT_VOCAB = new Set(
+  (
+    'cut cutting klip klippes klippe klippet tilskjær zuschneiden zuschnitt schneiden кроить кроят ' +
+    'выкроить раскроить coupez couper couper taglia tagliare cortar corte knip wytnij x х gang gange ' +
+    'ganger gånger ggr mal раз fois volte veces keer razy times pair pairs paar paarig пар пара пары ' +
+    'дет деталь детали деталей шт mod mot fold on the im bruch stoffbruch со сгибом по сгибу au pli ' +
+    'na zgięciu al doblez sulla piega op de vouw'
+  ).split(' '),
+);
+
+/** The words of a list line's rest (after its number) that are not cut vocabulary. */
+function restWords(rest: string): string[] {
+  return rest
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter((w) => w && !CUT_VOCAB.has(w));
+}
+
+/** A list line names its piece in a few words; a longer line is an instruction step. */
+const QTY_LIST_MAX_WORDS = 4;
+/** A cutting-list header: a short line naming the cutting (DA/NO/SE/DE/EN/RU/PL/FR/ES/NL/IT). */
+const CUT_HEADER =
+  /klipp|tilskj[æa]r|tillsk[äa]r|zuschn|zuschneid|\bcut(?:ting)?\b|раскро|кроить|(?<!\p{L})крой|wykr[oó]j|kroj|\bcoupe|\bcorte\b|\bknip|taglio/iu;
+/** A header counts for the list run starting this many text items after it. */
+const CUT_HEADER_REACH = 8;
+/** A list line naming a fabric of its own ("2 x lining") counts per fabric: never one count. */
+const FABRIC_WORD =
+  /lining|interfacing|fusing|futter|einlage|vlies|подклад|дублерин|флизелин|podszewk|flizelin|doublure|entoilage|forro|entretela|vlieseline|mellemlæg|indlæg|innlegg|mellanlägg|foer/iu;
+
+/**
+ * The cutting list's counts, from the document's text: numbered lines whose remainder (after the
+ * number) prints a count. Each cutting header opens a scope (main fabric, lining, interfacing —
+ * r4454 numbers its interfacing list 1..4 again): copies of a number inside one scope that disagree
+ * prove nothing (dropped); scopes that disagree are kept apart and the entry carries the others as
+ * `conflict` (asked, never applied).
+ */
+export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
+  type Raw = {
+    at: number;
+    scope: number;
+    text: string;
+    no: string;
+    words: string[];
+    rest: string[];
+    qty: number;
+  };
+  const raws: Raw[] = [];
+  let scope = 0;
+  const headerAt: number[] = [];
+  const cutHeader = new Set<number>();
+  for (let i = 0; i < texts.length; i++) {
+    let t = normFoldLine(texts[i]);
+    // Codex: a section title at the START of a line («Syning: 69. Pres sømmen 4 gange») ends the
+    // cutting section as hard as one on its own line; nothing on that line counts
+    const lead = /^(\p{L}[\p{L}\s/-]{0,40}):\s*\S/u.exec(t);
+    if (lead && lead[1].trim().split(/\s+/).length <= 3) {
+      scope++;
+      headerAt.push(i);
+      if (CUT_HEADER.test(lead[1])) cutHeader.add(i);
+      continue;
+    }
+    // "69." + "Ærme, 4 gange": a number item right before the line is its number
+    const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
+    if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
+    const m = LIST_LINE.exec(t);
+    if (!m) {
+      const short = t.split(/\s+/).length;
+      // a header is a title, not a sentence («Alle dele klippes med 1 cm sømrum.» is none)
+      if (CUT_HEADER.test(t) && short <= 6 && !/[.!?]\s*$/.test(t)) {
+        scope++;
+        headerAt.push(i);
+        cutHeader.add(i);
+      } else if (/:\s*$/.test(t) && short <= 4 && !(cutHeader.has(i - 1) && /^\p{Ll}/u.test(t))) {
+        // another section's title («Syning:», «Strygeindlæg:») ends the cutting section; a short
+        // lower-case «ткани:» right under a cutting header is that header's own second line
+        scope++;
+        headerAt.push(i);
+      }
+      continue;
+    }
+    const rest = t.slice(m[0].length - 1);
+    const qty = parseQuantity(rest);
+    if (qty == null) continue;
+    const words = rest
+      .replace(LIST_NOISE, ' ')
+      .toLowerCase()
+      .split(/[^\p{L}]+/u)
+      .filter(
+        (w) =>
+          w.length >= 3 && !/^(?:gange?r?|gånger|ggr|mal|fois|razy|keer|veces|дет|шт)$/u.test(w),
+      );
+    if (!words.length || words.length > QTY_LIST_MAX_WORDS) continue;
+    raws.push({ at: i, scope, text: t, no: m[1].toLowerCase(), words, rest: restWords(rest), qty });
+  }
+  // runs: list lines one after another (a split-off number item between them)
+  const inSection = new Set<Raw>();
+  for (let k = 0; k < raws.length; ) {
+    let e = k;
+    // a header between two list lines ends the run hard (Codex: «…4 gange» / «Syning:» / «69. …»)
+    while (
+      e + 1 < raws.length &&
+      raws[e + 1].at - raws[e].at <= 2 &&
+      !headerAt.some((h) => h > raws[e].at && h < raws[e + 1].at)
+    )
+      e++;
+    const run = raws.slice(k, e + 1);
+    // Codex: only an explicit cutting header opens a section (a run of numbered steps with counts
+    // does not); the section is the list run right under it and ends at the next header
+    const last = headerAt.filter((h) => h < run[0].at).pop();
+    const head = last != null && cutHeader.has(last) && run[0].at - last <= CUT_HEADER_REACH;
+    if (head) for (const r of run) inSection.add(r);
+    k = e + 1;
+  }
+  // per number: one entry per scope (a scope whose copies disagree is dropped)
+  const byNo = new Map<string, Map<number, Raw | null>>();
+  for (const r of raws) {
+    const sc = byNo.get(r.no) ?? new Map<number, Raw | null>();
+    byNo.set(r.no, sc);
+    const was = sc.get(r.scope);
+    if (was === undefined) sc.set(r.scope, r);
+    else if (was && was.qty !== r.qty) sc.set(r.scope, null);
+  }
+  const out: QtyListEntry[] = [];
+  for (const [no, sc] of byNo) {
+    const live = [...sc.values()].filter((r): r is Raw => !!r);
+    if (!live.length) continue;
+    const first = live.find((r) => inSection.has(r)) ?? live[0];
+    const others = live.filter((r) => r.qty !== first.qty);
+    out.push({
+      text: first.text,
+      no,
+      words: first.words,
+      rest: first.rest,
+      qty: first.qty,
+      section: inSection.has(first) && !FABRIC_WORD.test(first.text),
+      ...(others.length ? { conflict: others.map((r) => r.text) } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * The piece a list entry names and HOW: 'no' = the only piece labelled with the entry's printed
+ * number (the number is printed twice — on the piece and in the list), 'name' = the only piece whose
+ * title holds every name word (a weaker link: shown as the answer, still asked).
+ */
+export function bindListEntry<S>(
+  e: { no: string; words: readonly string[] },
+  pieces: readonly { seed: S; labels: readonly string[] }[],
+): { seed: S; by: 'no' | 'name' } | null {
+  const byNo = pieces.filter((p) => p.labels.some((l) => normLabel(l) === e.no));
+  if (byNo.length === 1) return { seed: byNo[0].seed, by: 'no' };
+  if (byNo.length > 1 || !e.words.length) return null;
+  const s = bindFoldListEntry({ text: '', no: e.no, words: [...e.words] }, pieces);
+  return s == null ? null : { seed: s, by: 'name' };
 }
 
 /** The drawn lines around a piece that are not its own outline (any size): see `foldWordRole`. */

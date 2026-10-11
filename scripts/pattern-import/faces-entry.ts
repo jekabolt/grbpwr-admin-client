@@ -743,6 +743,32 @@ function synthRoles() {
   const zig: PtMm[] = [];
   for (let i = 0; i <= 24; i++) zig.push({ x: 450 + i * 6, y: 150 + (i % 2) * 8 });
   L('wiggle', zig);
+  // N3: the wiggle goes on past a gap a letter took: a curved run of two short pieces
+  L('handrun', [
+    { x: 601, y: 152 },
+    { x: 606, y: 162 },
+    { x: 611, y: 154 },
+  ]);
+  L('handrun', [
+    { x: 611, y: 154 },
+    { x: 616, y: 166 },
+    { x: 621, y: 156 },
+  ]);
+  // N3: a straight diagonal inside A from free space into a tile label's strokes (offered)
+  L('intolabel', [
+    { x: 40, y: 330 },
+    { x: 150, y: 200 },
+  ]);
+  for (const [dx, dy, ex, ey] of [
+    [150, 200, 154, 200],
+    [150, 200, 150, 196],
+    [150, 202, 153, 202],
+    [151, 199, 151, 203],
+  ])
+    L('tlabel', [
+      { x: dx, y: dy },
+      { x: ex, y: ey },
+    ]);
   // a curve mostly outside B
   L('outside', [
     { x: 560, y: 300 },
@@ -796,7 +822,9 @@ function synthRoles() {
     orphans: [],
     warnings: [],
   };
-  const offered = new Set(lines.flatMap((l, i) => (l.tag === 'offered' ? [i] : [])));
+  const offered = new Set(
+    lines.flatMap((l, i) => (l.tag === 'offered' || l.tag === 'tlabel' ? [i] : [])),
+  );
   type Off = NonNullable<FaceRoleOpts['off']>;
   const roleOf = (off?: Off, sh: Sheet = sheet) => {
     const out = rolesByFaces(sh, set, styles, offered, { off });
@@ -828,6 +856,8 @@ function synthRoles() {
     ['offered', 'ignore'],
     ['square', 'ignore'],
     ['table', 'ignore'],
+    ['handrun', 'ignore'],
+    ['intolabel', 'ignore'],
   ];
   for (const [t, want] of expect)
     check('synthetic legend', `${t} → ${want}`, r.role(t) === want, r.role(t));
@@ -845,6 +875,8 @@ function synthRoles() {
     ['offered', 'offered', 'internal'],
     ['square', 'square', 'common'],
     ['junk', 'table', 'internal'],
+    ['runs', 'handrun', 'internal'],
+    ['lettering', 'intolabel', 'internal'],
   ];
   for (const [k, t, want] of mut) {
     const m = roleOf(new Set([k]));

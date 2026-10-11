@@ -1131,8 +1131,10 @@ export type SemanticsOutput = {
    */
   unproven: Unproven[];
   /**
-   * A1: per seed blocked 'no-grain', the grainline the drawing or the outline proposes (absent =
-   * none). Never applied without the operator's click ("accept N proposed grainlines", D3).
+   * A1: per seed blocked 'no-grain' — and (N3) per seed still blocked 'grammar' (no name yet) whose
+   * drawing proves no grain — the grainline the drawing or the outline proposes (absent = none), so
+   * one review covers every piece. Never applied without the operator's click ("accept N proposed
+   * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
 };
