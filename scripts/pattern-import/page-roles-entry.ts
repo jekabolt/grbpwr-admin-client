@@ -120,6 +120,32 @@ async function oneFile(f: string) {
       base.dropped.filter((d) => d.aiAside).map((d) => d.page + 1),
     );
     if (!asked.length) return { file: f, called: false };
+    // Codex #2: "does not register" only against a connected reference covering the page's sheet —
+    // a page of no sheet in a file of two (polupalto's instructions before Bogen A / B), or tiles
+    // that do not register by recurrence (r4454, stitched at their edges), give no such evidence
+    const apart = (d: (typeof asked)[number]) =>
+      (d.geo ?? []).some((g) => /^registers with none/.test(g));
+    if (name === 'polupalto.pdf')
+      check(
+        name,
+        'mixed reference (2 sheets, page in none) → no registration evidence',
+        asked.filter((d) => d.page <= 3).every((d) => !apart(d)),
+        asked.map((d) => [d.page + 1, d.geo]),
+      );
+    if (name === 'r4454.pdf')
+      check(
+        name,
+        'tiles that do not register by recurrence → no registration evidence',
+        asked.every((d) => !apart(d)),
+        asked.map((d) => [d.page + 1, d.geo]),
+      );
+    if (name === 'robe.pdf')
+      check(
+        name,
+        'one connected sheet → "registers with none" on the instruction pages',
+        asked.every((d) => apart(d)),
+        asked.map((d) => [d.page + 1, d.geo]),
+      );
     const fx = fixturePageRoleDeps();
     const hints = await ask(s, base, name, fx.deps);
     const call = fx.log.calls[0];

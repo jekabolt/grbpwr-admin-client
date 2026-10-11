@@ -36,8 +36,10 @@ export const AI_PAGES = {
   /** One call per file: at most this many pages (F9-style limit; the rest go without the AI). */
   maxPages: 40,
   excerptRunes: 600,
-  /** The tiles nearest the page its registration is tested against (`tileGrid`). */
-  gridTiles: 8,
+  /** Tiles a reference sheet is built from at most (`tileGridTester`). */
+  gridMaxTiles: 60,
+  /** The reference's registered component must cover this share of its sheet. */
+  gridCover: 0.6,
   /** Thumbnail long side, px. */
   thumbPx: 1024,
   /** (a): a reduced copy draws the pieces at most at this scale. */
@@ -171,24 +173,74 @@ export function textOf(pg: IRPage): { chars: number; excerpt: string } {
 
 export type FileMarks = NonNullable<CleanOutput['tileMarks']>[number];
 
+export type GridVerdict = 'registers' | 'apart' | null;
+
 /**
- * Is the page in the tile grid? Registration by recurrence (assemble/recurrence.ts) of the page
- * with the file's nearest tiles: 'registers' = it shares a long drawing operation with a tile (it
- * may BE one — the AI never sets it aside); 'apart' = the tiles register with each other this way
- * and the page with none of them; null = the test says nothing (too few tiles, or tiles that do
- * not register by recurrence — clipped tiles, stitched at their edges instead).
+ * Is the page in the tile grid? Registration by recurrence (assemble/recurrence.ts) against a
+ * REFERENCE (Codex #2): the tiles of the page's own sheet (its classification's, else the file's
+ * only sheet), whose recurrence links must form ONE connected component covering ≥ 60 % of that
+ * sheet (≥ 3 tiles). 'registers' = the page shares a long drawing operation with a tile (it may BE
+ * one: never set aside); 'apart' = the reference holds and the page links to none of it; null = no
+ * evidence (no tiles, a partial reference, several sheets and the page in none of them).
+ * One tester per clean run: the tiles' registration pages are built once per sheet.
  */
-export function tileGrid(pg: IRPage, tiles: readonly IRPage[]): 'registers' | 'apart' | null {
-  if (tiles.length < 2) return null;
-  const near = [...tiles]
-    .sort((a, b) => Math.abs(a.page - pg.page) - Math.abs(b.page - pg.page))
-    .slice(0, AI_PAGES.gridTiles);
-  const run = [pg, ...near];
-  const fur = furnitureOf(run);
-  const regs = run.map((p, i) => buildRegPage(p, i, 0, fur));
-  const links = recurrenceLinks(regs);
-  if (links.some((l) => l.a === regs[0] || l.b === regs[0])) return 'registers';
-  return links.length ? 'apart' : null;
+export function tileGridTester(tiles: readonly { pg: IRPage; sheet?: number }[]) {
+  type Ref = { pages: IRPage[]; ok: boolean; why: string };
+  const refs = new Map<string, Ref>();
+  const sheetsOf = (file: string) =>
+    [...new Set(tiles.filter((t) => t.pg.file === file).map((t) => t.sheet ?? -1))].sort();
+  const refOf = (file: string, sheet: number): Ref => {
+    const k = `${file}:${sheet}`;
+    let r = refs.get(k);
+    if (r) return r;
+    const pages = tiles
+      .filter((t) => t.pg.file === file && (t.sheet ?? -1) === sheet)
+      .map((t) => t.pg)
+      .slice(0, AI_PAGES.gridMaxTiles);
+    let ok = false;
+    let why = 'too few tiles';
+    if (pages.length >= 3) {
+      const fur = furnitureOf(pages);
+      const regs = pages.map((p, i) => buildRegPage(p, i + 1, 0, fur));
+      const parent = regs.map((_, i) => i);
+      const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])));
+      const at = new Map(regs.map((g, i) => [g, i]));
+      for (const l of recurrenceLinks(regs)) parent[find(at.get(l.a)!)] = find(at.get(l.b)!);
+      const size = new Map<number, number>();
+      regs.forEach((_, i) => size.set(find(i), (size.get(find(i)) ?? 0) + 1));
+      const big = Math.max(...size.values());
+      ok = big >= Math.max(3, AI_PAGES.gridCover * pages.length);
+      why = `${big} of ${pages.length} tiles in one registered component`;
+    }
+    r = { pages, ok, why };
+    refs.set(k, r);
+    return r;
+  };
+  return (pg: IRPage, sheet: number | undefined): { verdict: GridVerdict; why: string } => {
+    const all = sheetsOf(pg.file);
+    if (!all.length) return { verdict: null, why: 'no tiles in the file' };
+    // the page's sheet; a page of no sheet in a file of several: the reference is mixed
+    const s = sheet ?? (all.length === 1 ? all[0] : null);
+    const candidates =
+      s === null
+        ? tiles.filter((t) => t.pg.file === pg.file).map((t) => t.pg)
+        : refOf(pg.file, s).pages;
+    // registration is tested against every candidate tile (sharing a line with one is enough)
+    const near = [...candidates]
+      .sort((a, b) => Math.abs(a.page - pg.page) - Math.abs(b.page - pg.page))
+      .slice(0, AI_PAGES.gridMaxTiles);
+    const run = [pg, ...near];
+    const fur = furnitureOf(run);
+    const regs = run.map((p, i) => buildRegPage(p, i, 0, fur));
+    if (recurrenceLinks(regs).some((l) => l.a === regs[0] || l.b === regs[0]))
+      return { verdict: 'registers', why: 'shares a long drawing operation with a tile' };
+    if (s === null)
+      return { verdict: null, why: 'the file has several sheets — a mixed reference' };
+    const r = refOf(pg.file, s);
+    return r.ok
+      ? { verdict: 'apart', why: r.why }
+      : { verdict: null, why: `partial reference: ${r.why}` };
+  };
 }
 
 /** The stats a page's thumbnail is sent with (PatternPageEvidence) — and the rule reads. */

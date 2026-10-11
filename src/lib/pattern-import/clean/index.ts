@@ -61,7 +61,7 @@ import {
   exclusionOf,
   geoEvidence,
   pageStats,
-  tileGrid,
+  tileGridTester,
   tileMarkSigs,
 } from './page-roles';
 import { REDUCED_COPY, reducedCopy, shapesOf } from './reduced-copy';
@@ -407,6 +407,14 @@ function aiPass(
       );
   }
   const marksOf = new Map(tileMarks.map((m) => [m.file, m]));
+  const gridOf = tileGridTester(
+    roles
+      .filter((c) => c.cls === 'tile')
+      .flatMap((c) => {
+        const pg = docPage.get(pageKey(c.file, c.page));
+        return pg ? [{ pg, sheet: c.sheet }] : [];
+      }),
+  );
   for (const d of dropped) {
     const k = pageKey(d.file, d.page);
     if (edited.has(k)) continue;
@@ -421,11 +429,8 @@ function aiPass(
     const pg = docPage.get(k);
     if (!pg) continue;
     const marks = marksOf.get(d.file) ?? null;
-    const tiles = roles
-      .filter((c) => c.cls === 'tile' && c.file === d.file)
-      .map((c) => docPage.get(pageKey(c.file, c.page)))
-      .filter((p): p is IRPage => !!p);
-    const grid = tileGrid(pg, tiles);
+    const sheet = roles.find((c) => c.file === d.file && c.page === d.page)?.sheet;
+    const { verdict: grid } = gridOf(pg, sheet);
     if (grid === 'registers') {
       // it shares line work with a tile: it may be one — a question whatever the AI says
       d.geo = ['registers with a tile by shared line work — it may be one'];
@@ -438,7 +443,6 @@ function aiPass(
     if (!h) continue;
     // the exclusionary fact: a reduced copy of THIS file's own 1:1 tile sheet (the page's sheet when
     // it has one), or a page with no piece-sized outline and no long line outside the tile grid
-    const sheet = roles.find((c) => c.file === d.file && c.page === d.page)?.sheet;
     const own = (tilePcs.get(d.file) ?? []).filter(
       (t) => sheet === undefined || t.sheet === undefined || t.sheet === sheet,
     );
