@@ -20,7 +20,9 @@ export const REDUCED_COPY = {
   /** Overview outlines smaller than this (mm²) are lettering / marks. */
   minOverviewMm2: 60,
   /** Matched outlines needed, and how far their scales may spread (max / min). */
-  minMatches: 2,
+  minMatches: 3,
+  /** Share of the overview's outlines that must be matched tile pieces. */
+  minShare: 0.8,
   maxSpread: 1.3,
   /** Outlines compared per page side (largest first). */
   cap: 40,
@@ -148,20 +150,23 @@ export function shapesOf(chains: readonly Chain[], minMm2: number): Shape[] {
   return out;
 }
 
-export type ReducedCopy = { matches: number; scale: number };
+export type ReducedCopy = { matches: number; of: number; scale: number };
 
 /**
  * The overview's outlines that are a whole tile piece at a smaller scale: each overview outline
  * matched to a distinct tile outline of the same shape, scale √(area ratio) within
  * [minScale, maxScale]; evidence when at least `minMatches` agree on one scale (spread ≤
- * `maxSpread`). Null = no such evidence.
+ * `maxSpread`) and they are at least `minShare` of the page's outlines, and no outline of real
+ * piece size (`pieceMm2`) is left unexplained. Null = no such evidence.
  */
 export function reducedCopy(
   overview: readonly Shape[],
   tiles: readonly Shape[],
+  pieceMm2 = Infinity,
 ): ReducedCopy | null {
   const used = new Set<number>();
   const scales: number[] = [];
+  const matched = new Set<Shape>();
   for (const o of overview) {
     let best = -1;
     let bestD = Infinity;
@@ -177,9 +182,12 @@ export function reducedCopy(
     }
     if (best >= 0) {
       used.add(best);
+      matched.add(o);
       scales.push(Math.sqrt(o.areaMm2 / tiles[best].areaMm2));
     }
   }
+  // Codex r5 #2: an outline of real piece size the tiles do not explain may be a piece itself
+  if (overview.some((o) => o.areaMm2 >= pieceMm2 && !matched.has(o))) return null;
   if (scales.length < REDUCED_COPY.minMatches) return null;
   scales.sort((a, b) => a - b);
   const med = scales[Math.floor(scales.length / 2)];
@@ -188,5 +196,7 @@ export function reducedCopy(
     (s) => s / med <= REDUCED_COPY.maxSpread && med / s <= REDUCED_COPY.maxSpread,
   );
   if (agree.length < REDUCED_COPY.minMatches) return null;
-  return { matches: agree.length, scale: Math.round(med * 1000) / 1000 };
+  // … and nearly all the page's outlines are such reduced pieces
+  if (agree.length < REDUCED_COPY.minShare * overview.length) return null;
+  return { matches: agree.length, of: overview.length, scale: Math.round(med * 1000) / 1000 };
 }

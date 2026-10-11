@@ -207,6 +207,7 @@ export function cleanPages(
       const rc = reducedCopy(
         shapesOf(pageChains(pg).chains, REDUCED_COPY.minOverviewMm2),
         tileShapes,
+        PATIMPORT.minPieceAreaMm2,
       );
       if (rc) d.reducedCopy = rc;
     }

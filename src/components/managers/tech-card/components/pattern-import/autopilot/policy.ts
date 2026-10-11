@@ -596,7 +596,7 @@ function notPatternEvidence(
   // an overview: the classifier AND a second, independent fact — its outlines are the tiles'
   // whole pieces at a smaller scale (a shape match, not the classifier's lattice; Codex final #5)
   if (c && c.cls === 'overview' && c.confidence >= 0.7 && d.reducedCopy)
-    return `overview ${c.confidence.toFixed(2)} + ${d.reducedCopy.matches} outlines are tile pieces at 1:${Math.round(1 / d.reducedCopy.scale)} (shape match)`;
+    return `overview ${c.confidence.toFixed(2)} + ${d.reducedCopy.matches} of its ${d.reducedCopy.of} outlines are tile pieces at 1:${Math.round(1 / d.reducedCopy.scale)} (shape match)`;
   const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;

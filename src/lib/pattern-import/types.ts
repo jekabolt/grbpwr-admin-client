@@ -2216,7 +2216,7 @@ export type CleanOutput = {
      * A10: an overview whose outlines are the tile pages' whole pieces at a smaller scale (Hu shape
      * match): how many matched, at what scale (clean/reduced-copy.ts).
      */
-    reducedCopy?: { matches: number; scale: number };
+    reducedCopy?: { matches: number; of: number; scale: number };
   }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
