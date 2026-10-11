@@ -209,7 +209,7 @@ const AUTO_KINDS: Record<string, string[]> = {
   'size-flags': ['size-flag'],
   model: ['model'],
   'seed-clicks': ['seed-click'],
-  'piece-edits': ['piece-edits'],
+  'piece-edit': ['piece-edits'],
   'asides-passed': ['set-aside'],
   outline: ['outline'],
   'fold-list': ['cutting-list'],
@@ -324,6 +324,12 @@ export function answerRecordOf(
       p: g.originPage.page,
     });
   }
+  // the drawing every later answer was given on: the tile sheet, its grid, the model
+  push('sheet', 'scope', 'the drawing', {
+    sheet: i.sheetIndex,
+    grid: gridPrint(i.gridOverride),
+    variant: s.variant ?? null,
+  });
   if (i.residualsAccepted) {
     const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
     push('sheet', 'residuals', 'the tile grid', { worstMm: worst });
@@ -409,20 +415,25 @@ export function answerRecordOf(
         loop: loopAt(preview, c.at),
       })),
     });
+  // one answer per edit (a split's lasso is long: each is bounded on its own), each knowing how
+  // many there are — a record missing one replays none of them
   if (i.edits.length) {
     const all = [...(baseSeeds ?? []), ...i.clickSeeds];
-    const sd: Record<string, { at: PtMm; click: boolean }> = {};
-    for (const e of i.edits)
+    i.edits.forEach((e, k) => {
+      const sd: Record<string, { at: PtMm; click: boolean }> = {};
       for (const id of editSeeds(e)) {
-        const k = all.find((x) => x.id === id);
-        if (k) sd[id] = { at: { x: k.at.x, y: k.at.y }, click: i.clickSeeds.includes(k) };
+        const x = all.find((y) => y.id === id);
+        if (x) sd[id] = { at: { x: x.at.x, y: x.at.y }, click: i.clickSeeds.includes(x) };
       }
-    const ch: Record<string, ReturnType<typeof chainPrint>> = {};
-    for (const e of i.edits) for (const id of editChains(e)) ch[id] = chainPrint(preview, id);
-    push('pieces', 'piece-edits', `${i.edits.length} piece edits`, {
-      edits: JSON.parse(JSON.stringify(i.edits)),
-      seeds: sd,
-      chains: ch,
+      const ch: Record<string, ReturnType<typeof chainPrint>> = {};
+      for (const id of editChains(e)) ch[id] = chainPrint(preview, id);
+      push('pieces', 'piece-edit', `piece edit ${k + 1} of ${i.edits.length} (${e.kind})`, {
+        n: i.edits.length,
+        k,
+        edit: e,
+        seeds: sd,
+        chains: ch,
+      });
     });
   }
   const weak = weakAsides(s.pieces?.setAside);
@@ -517,8 +528,22 @@ export function answerRecordOf(
       ) as ReplayAnswer['value'],
     });
   }
-  return out.length ? { v: 1, answers: out } : undefined;
+  return out.some((a) => a.kind !== 'scope') ? { v: 1, answers: out } : undefined;
 }
+
+/** A hand-set tile grid as the record writes it (its first page's file by index); null = none. */
+export const gridPrint = (g: Inputs['gridOverride']) =>
+  g
+    ? {
+        rows: g.rows,
+        cols: g.cols,
+        sx: g.stepXMm,
+        sy: g.stepYMm,
+        order: g.order,
+        f: fileIndex(g.originPage.file),
+        p: g.originPage.page,
+      }
+    : null;
 
 /** A reader flag as one string (what a replay must find again to go on past it). */
 export const flagPrint = (f: {

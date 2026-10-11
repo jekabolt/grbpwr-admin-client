@@ -45,7 +45,7 @@ import type { Inputs, LegendEdit } from '../use-import-session';
 import { PAGE_SURE, sizeFlags, tileSheets, weakAsides, type AutoResolver } from '../auto-advance';
 import { PREFILL_QUESTION } from '../auto-drive';
 import { answersNowOf, liveAnswers, liveDrawnSizes, openQuestions, questionKey } from '../answers';
-import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
+import { assumptionKey, mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 import {
   BY_AUTOPILOT,
   BY_OPERATOR,
@@ -55,6 +55,8 @@ import {
   editChains,
   editSeeds,
   flagPrint,
+  gridPrint,
+  isReplayed,
   inside,
   legendKeyOf,
   loopAt,
@@ -331,6 +333,11 @@ type Ctx = ReplaySnapshot & {
   get: (kind: string) => ReplayAnswer | undefined;
   fileOf: (k: number) => FileId | null;
   miss: (key: string, why: string) => void;
+  /**
+   * Fill-only, once (Codex review): an answer this run already replayed (its assumption is in the
+   * list) is never given again — the operator may have changed it since, and that stands.
+   */
+  fresh: (kind: AssumptionKind, o: { seed?: SeedId; ref?: string; subject?: string }) => boolean;
 };
 
 const near = (a: PtMm, b: PtMm, tol: number) => Math.hypot(a.x - b.x, a.y - b.y) <= tol;
@@ -344,6 +351,7 @@ const landsOn = (now: Anchor, was: Anchor) =>
 /** Replays what the previous import answered on the session's step (null answer = nothing). */
 export function replayAnswer(x: ReplaySnapshot, prior: Prior): ReplayResult {
   const misses: ReplayMiss[] = [];
+  const done = new Set(x.inputs.autopilot.filter(isReplayed).map(assumptionKey));
   const c: Ctx = {
     ...x,
     s: x.session,
@@ -355,6 +363,8 @@ export function replayAnswer(x: ReplaySnapshot, prior: Prior): ReplayResult {
     miss: (key, why) => {
       if (!misses.some((m) => m.key === key)) misses.push({ key, why });
     },
+    fresh: (kind, o) =>
+      !done.has(assumptionKey({ kind, subject: o.subject ?? '', seed: o.seed, ref: o.ref })),
   };
   for (const k of prior.skipped) c.miss(`legacy|${k}`, k);
   const s = x.session;
@@ -464,15 +474,17 @@ const editKey = (e: PageMaskEdit) =>
       ? `i:${e.item}`
       : `k:${e.kind}:${e.file ?? ''}:${e.page ?? ''}`;
 
-/** The edits with these replacing the ones of the same target (later wins, as `withKind`). */
+/**
+ * The edits with these added — fill-only: a target this run already has an edit for keeps it (the
+ * operator's, or one replayed before). null = nothing to add.
+ */
 function mergeEdits(
   cur: readonly PageMaskEdit[],
   add: readonly PageMaskEdit[],
 ): PageMaskEdit[] | null {
-  if (!add.length) return null;
-  const keys = new Set(add.map(editKey));
-  const next = [...cur.filter((e) => !keys.has(editKey(e))), ...add];
-  return same(next, cur) ? null : next;
+  const have = new Set(cur.map(editKey));
+  const more = add.filter((e) => !have.has(editKey(e)));
+  return more.length ? [...cur, ...more] : null;
 }
 
 /**
@@ -524,7 +536,7 @@ function filesStep(c: Ctx): Out | null {
   const { s, i } = c;
   if (!s.clean) return null;
   const e = c.get('clean-edits');
-  if (e) {
+  if (e && c.fresh('clean-accept', { ref: 'mask' })) {
     const landed = landedEdits(c, e, 'page');
     const next = mergeEdits(i.cleanEdits, landed);
     if (next)
@@ -616,7 +628,8 @@ const fileLabel = (s: ImportSession, id: FileId) =>
 function scaleStep(c: Ctx): Out | null {
   const { s, i } = c;
   const e = c.get('scale');
-  if (!e) return null;
+  // fill-only: a scale the operator confirmed or measured in this run stands
+  if (!e || i.scaleConfirmed || i.manualMeasuredMm || !c.fresh('scale-confirmed', e)) return null;
   const v = e.value as {
     factor: number;
     method: string;
@@ -697,7 +710,7 @@ function sheetStep(c: Ctx): Out | null {
   const n = tileSheets(s.pages);
   if (n > 1 && i.sheetPicked === null) {
     const e = c.get('sheet-choice');
-    if (!e) return null;
+    if (!e || !c.fresh('sheet-choice', e)) return null;
     const sheet = (e.value as { sheet: number }).sheet;
     const valid =
       s.pages.some((p) => p.cls === 'tile' && (p.sheet ?? 0) === sheet) ||
@@ -716,7 +729,7 @@ function sheetStep(c: Ctx): Out | null {
       ],
     };
   }
-  if (grid && !same(i.gridOverride ?? null, grid.grid))
+  if (grid && !i.gridOverride && c.fresh('sheet-grid', grid.e))
     return {
       events: [{ type: 'sheet', sheet: i.sheetIndex, override: grid.grid }],
       as: [
@@ -726,7 +739,7 @@ function sheetStep(c: Ctx): Out | null {
       ],
     };
   const ce = c.get('clean-edits');
-  if (ce) {
+  if (ce && c.fresh('clean-accept', { ref: 'sheet-mask' })) {
     const landed = landedEdits(c, ce, 'sheet');
     const next = mergeEdits(i.cleanEdits, landed);
     if (next)
@@ -784,18 +797,61 @@ function sheetStep(c: Ctx): Out | null {
   };
 }
 
+// ── the drawing the answers were given on ─────────────────────────────────────────────────────
+
+/**
+ * Codex review: the answers after the sheet step (legend, sizes, pieces, details, fabrics) were
+ * given on ONE drawing — a tile sheet, its grid and, from the model on, a model. Another drawing of
+ * the same files is another set of questions: why not, or null = the same drawing.
+ */
+function offScope(c: Ctx, model: boolean): string | null {
+  const e = c.get('scope');
+  const v = (e?.value ?? null) as {
+    sheet: number;
+    grid: ReturnType<typeof gridPrint>;
+    variant: string | null;
+  } | null;
+  const sheet = v
+    ? v.sheet
+    : (c.get('sheet-choice')?.value as { sheet?: number } | undefined)?.sheet ?? 0;
+  if (sheet !== c.i.sheetIndex)
+    return `the previous answers were given on tile sheet ${sheet + 1}, this run is on sheet ${c.i.sheetIndex + 1}`;
+  if (v) {
+    const now = gridPrint(c.i.gridOverride);
+    const was = v.grid ? { ...v.grid, f: c.fileOf(v.grid.f) } : null;
+    const cur = now && c.i.gridOverride ? { ...now, f: c.i.gridOverride.originPage.file } : null;
+    if (!same(was, cur)) return 'the previous answers were given on another tile grid';
+  }
+  if (model) {
+    const variant = v
+      ? v.variant
+      : (c.get('model')?.value as { variant?: string } | undefined)?.variant ?? null;
+    if ((c.s.variant ?? null) !== variant)
+      return `the previous answers were given for ${variant ? `model "${variant}"` : 'every model'}, this run is on ${c.s.variant ? `model "${c.s.variant}"` : 'every model'}`;
+  }
+  return null;
+}
+
+/** Off scope: said once (on a question), nothing replayed. */
+const outOfScope = (c: Ctx, model: boolean) => {
+  const why = offScope(c, model);
+  if (why) c.miss('scope', why);
+  return !!why;
+};
+
 // ── sizes ───────────────────────────────────────────────────────────────────────────────────────
 
 function sizesStep(c: Ctx): Out | null {
   const { s, i, card } = c;
   const classes = s.chains?.classes ?? [];
   if (!s.sizes || !s.chains) return null;
+  if (outOfScope(c, false)) return null;
   const lc = c.get('legend-confirmed');
   const lcv = (lc?.value ?? {}) as { rebuilt?: string[]; asked?: string[] };
   const keys = new Set(classes.map(legendKeyOf));
   // 1 · the legend rows the previous import changed (by the row's signature)
   const le = c.get('legend');
-  if (le) {
+  if (le && c.fresh('legend-outline', { ref: 'legend' })) {
     const target: LegendEdit[] = [];
     for (const x of (le.value as unknown as {
       c: number;
@@ -820,18 +876,20 @@ function sizesStep(c: Ctx): Out | null {
         ...(x.s ? { sig: x.s } : {}),
       });
     }
-    const was = (e: LegendEdit) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel];
-    if (target.length && !same(target.map(was), i.legend.map(was))) {
+    // fill-only: a row this run already answered keeps its answer
+    const have = new Set(i.legend.map((e) => e.sig ?? `#${e.classId}`));
+    const more = target.filter((e) => !have.has(e.sig ?? `#${e.classId}`));
+    if (more.length) {
       const add = (lcv.rebuilt ?? []).filter((k) => keys.has(k) && !i.legendConfirmed.includes(k));
       return {
         ...(add.length ? { patch: { legendConfirmed: [...i.legendConfirmed, ...add] } } : {}),
-        events: [{ type: 'legend', edits: target }],
+        events: [{ type: 'legend', edits: [...i.legend, ...more] }],
         as: [
           R(
             c,
             le,
             'legend-outline',
-            `${target.length} legend rows as answered before`,
+            `${more.length} legend rows as answered before`,
             [sameFiles(c), 'the same rows (signature)'],
             { ref: 'legend' },
           ),
@@ -900,7 +958,7 @@ function sizesStep(c: Ctx): Out | null {
     const v = de.value as { n: number; sheet: number };
     if (v.sheet !== i.sheetIndex)
       c.miss('drawn-sizes', `the size count was answered for tile sheet ${v.sheet + 1}`);
-    else if (liveDrawnSizes(i, i) !== v.n)
+    else if (liveDrawnSizes(i, i) == null && c.fresh('drawn-sizes', de))
       return {
         events: [{ type: 'drawn-sizes', n: v.n }],
         as: [
@@ -928,7 +986,9 @@ function sizesStep(c: Ctx): Out | null {
         );
         continue;
       }
-      if (e.origin === 'operator' && (e.card?.sizeId ?? null) === (want?.sizeId ?? null)) continue;
+      // fill-only: a size this run answered keeps its answer; one replayed before is not again
+      if (e.origin === 'operator' || !c.fresh('size-guess', { ref: `rank:${e.source.rank}` }))
+        continue;
       replayed.push({ ...e, card: want, origin: 'operator' });
     }
     if (replayed.length)
@@ -996,16 +1056,55 @@ function sizesStep(c: Ctx): Out | null {
 
 // ── pieces ──────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The piece edits of the previous import, put back together from their one-per-edit answers (a
+ * record missing one of them — dropped as too long — replays none).
+ */
+function editsOf(c: Ctx): ReplayAnswer | undefined {
+  const parts = c.prior.answers.filter((a) => a.kind === 'piece-edit');
+  if (!parts.length) return undefined;
+  const vs = parts.map(
+    (a) =>
+      a.value as unknown as {
+        n: number;
+        k: number;
+        edit: PieceEdit;
+        seeds: Record<string, { at: PtMm; click: boolean }>;
+        chains: Record<string, number[] | null>;
+      },
+  );
+  const n = vs[0].n;
+  const byK = new Map(vs.map((v) => [v.k, v] as const));
+  if (byK.size !== n || vs.some((v) => v.n !== n) || [...byK.keys()].some((k) => k < 0 || k >= n)) {
+    c.miss('piece-edits', `the record holds ${byK.size} of the ${n} piece edits — none is reused`);
+    return undefined;
+  }
+  const ordered = [...byK.values()].sort((a, b) => a.k - b.k);
+  return {
+    step: 'pieces',
+    kind: 'piece-edits',
+    subject: `${n} piece edits`,
+    value: {
+      edits: ordered.map((v) => v.edit),
+      seeds: Object.assign({}, ...ordered.map((v) => v.seeds)),
+      chains: Object.assign({}, ...ordered.map((v) => v.chains)),
+    } as unknown as ReplayAnswer['value'],
+    ...(parts.some((a) => a.strong) ? { strong: true } : {}),
+    ...(parts.some((a) => a.auto) ? { auto: true } : {}),
+  };
+}
+
 type ClickRec = { id: number; at: PtMm; text?: boolean; aside?: number; loop?: Anchor | null };
 
 function piecesStep(c: Ctx): Out | null {
   const { s, i } = c;
   if (!s.pieces) return null;
+  if (outOfScope(c, false)) return null;
   const seeds = s.pieces.seeds ?? [];
   const variants = variantsAt(seeds, c.baseSeeds, s.pieces.variants);
   if (variants.length > 1 && !s.variant) {
     const e = c.get('model');
-    if (!e) return null;
+    if (!e || !c.fresh('model', e)) return null;
     const variant = (e.value as { variant: string }).variant;
     if (!variants.includes(variant)) {
       c.miss('model', `the model "${variant}" is not on the sheet now`);
@@ -1019,9 +1118,13 @@ function piecesStep(c: Ctx): Out | null {
     };
   }
   const preview = s.chains?.chainPreview;
+  if (outOfScope(c, true)) return null;
   // the clicks and the piece edits, put back together as the previous import ended with them
-  const ce = c.get('seed-clicks');
-  const ee = c.get('piece-edits');
+  // (once each: the operator may click or undo afterwards, and that stands)
+  const ce0 = c.get('seed-clicks');
+  const ce = ce0 && c.fresh('seed-click', { ref: 'seed-clicks' }) ? ce0 : undefined;
+  const ee0 = editsOf(c);
+  const ee = ee0 && c.fresh('piece-edits', { ref: 'piece-edits' }) ? ee0 : undefined;
   if (ce || ee) {
     const base = c.baseSeeds ?? [];
     const asides = s.pieces.setAside ?? [];
@@ -1064,6 +1167,7 @@ function piecesStep(c: Ctx): Out | null {
     // the clicks already made in this run must be the start of the same list
     const sig = (x: Seed) => [x.id, x.at.x, x.at.y, x.origin, x.aside ?? null];
     if (
+      ce &&
       i.clickSeeds.length &&
       !same(i.clickSeeds.map(sig), target.slice(0, i.clickSeeds.length).map(sig))
     ) {
@@ -1125,7 +1229,7 @@ function piecesStep(c: Ctx): Out | null {
         else if (!same(i.edits, all)) edits = all;
       }
     }
-    const clicks = same(i.clickSeeds, target) ? i.clickSeeds : target;
+    const clicks = !ce || same(i.clickSeeds, target) ? i.clickSeeds : target;
     if (clicks !== i.clickSeeds || edits !== i.edits) {
       const as: Assumption[] = [];
       if (ce && clicks !== i.clickSeeds)
@@ -1265,6 +1369,7 @@ function meaningStep(c: Ctx): Out | null {
   const { s, i } = c;
   const sem = s.semantics;
   if (!sem) return null;
+  if (outOfScope(c, true)) return null;
   const now = answersNowOf(s, i);
   const live = liveAnswers(i, now);
   const open = openQuestions(sem, s.names, i, now);
@@ -1298,7 +1403,14 @@ function meaningStep(c: Ctx): Out | null {
       value: ReplayAnswer['value'],
       ev: string[] = [],
     ) => as.push(R(c, rec, kind, answer, [landed, ...ev], { seed: sd, subject, value, ...by(f) }));
-    if (v.name) {
+    // fill-only, once: a name the operator typed in this run (or one replayed before) stands
+    const typed = overrides[sd]?.nameOrigin === 'operator' || editedNames.has(sd);
+    if (
+      v.name &&
+      !typed &&
+      c.fresh('name-typed', { seed: sd }) &&
+      c.fresh('name-code', { seed: sd })
+    ) {
       const row = names.find((n) => n.seed === sd);
       if (row) {
         if (nameString(row) !== nameString(v.name) || !editedNames.has(sd)) {
@@ -1365,7 +1477,10 @@ function meaningStep(c: Ctx): Out | null {
     }
     if (v.ov) {
       const o = { ...(overrides[sd] ?? {}) } as Record<string, unknown>;
-      const diff = Object.entries(v.ov).filter(([k, x]) => !same(o[k], x));
+      // fill-only: an answer the run already has (the operator's, or one replayed) stands
+      const diff = c.fresh('piece-override', { seed: sd })
+        ? Object.entries(v.ov).filter(([k]) => o[k] === undefined)
+        : [];
       if (diff.length) {
         for (const [k, x] of diff) o[k] = x;
         overrides[sd] = o as (typeof overrides)[number];
@@ -1380,7 +1495,7 @@ function meaningStep(c: Ctx): Out | null {
     }
     if (v.grain) {
       const g = operatorGrain[sd];
-      if (!g || !same([g.a, g.b], [v.grain.a, v.grain.b])) {
+      if (!g && c.fresh('grain-proposal', { seed: sd }) && c.fresh('grain-axis', { seed: sd })) {
         // an accepted proposal lands when the run proposes the very same line (a fold piece's
         // proposal spans the unfolded piece, off the drawn half); a drawn one lies on the piece
         const pr = sem.grainProposals?.find((x) => x.seed === sd);
@@ -1417,7 +1532,8 @@ function meaningStep(c: Ctx): Out | null {
     }
     if (v.fold) {
       const f = operatorFold[sd];
-      if (!f || !same([f.a, f.b], [v.fold.a, v.fold.b])) {
+      // "not a fold" answered in this run stands
+      if (!f && overrides[sd]?.unfoldedFold !== false && c.fresh('fold-edge', { seed: sd })) {
         const ask = sem.folds?.find((q) => q.seed === sd);
         const fold = v.fold;
         const ok = ask
@@ -1448,12 +1564,7 @@ function meaningStep(c: Ctx): Out | null {
   const oe = c.get('outline');
   if (oe) {
     const v = oe.value as { meaning: 'cut' | 'seam'; allowanceMm: number };
-    if (
-      !fileAllowance ||
-      fileAllowance.origin !== 'operator' ||
-      fileAllowance.meaning !== v.meaning ||
-      fileAllowance.allowanceMm !== v.allowanceMm
-    ) {
+    if (fileAllowance?.origin !== 'operator' && c.fresh('outline', oe)) {
       fileAllowance = {
         meaning: v.meaning,
         allowanceMm: v.allowanceMm,
@@ -1510,8 +1621,9 @@ function meaningStep(c: Ctx): Out | null {
 function fabricsStep(c: Ctx): Out | null {
   const { s, i, card } = c;
   const a = s.fabrics;
-  if (!a) return null;
-  if (!c.get('fabrics')) return null;
+  // fill-only: an assignment the operator touched in this run (or one replayed) stands
+  if (!a || i.assignment != null || !c.get('fabrics')) return null;
+  if (outOfScope(c, true)) return null;
   const exported = new Set((s.semantics?.pieces ?? []).map((p) => p.seed));
   const known = new Set<string>([
     ...card.scopes.map((x) => x.fabricPurpose),

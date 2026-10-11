@@ -1611,7 +1611,7 @@ export type ReplayAnswer = {
 export type ReplayRecord = { v: 1; answers: ReplayAnswer[] };
 /** AP-replay: at most this many answers per manifest; a value up to this many JSON characters. */
 export const REPLAY_MAX = 400;
-export const REPLAY_VALUE_MAX = 4096;
+export const REPLAY_VALUE_MAX = 16384;
 
 /**
  * A10 (D5): one answer the autopilot gave in the operator's place. `strong` = a dangerous default

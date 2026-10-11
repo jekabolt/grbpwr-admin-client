@@ -69,6 +69,8 @@ type ImportRun = {
   ops: string[];
   prior: { label: string; exact: boolean; answers: number } | null;
   replayed: number;
+  /** Fill-only: an operator's answer over a replayed one stood (undefined = not tried). */
+  kept?: boolean;
   /** The run's assumptions as the wizard lists them (replayed ones first word "R"). */
   list: string[];
   ticks: number;
@@ -236,7 +238,7 @@ async function runImport(
   card: CardContext,
   mode: Mode,
   files: Files,
-  opts: { typedName?: boolean; tweak?: (p: Prior) => Prior } = {},
+  opts: { typedName?: boolean; retype?: boolean; tweak?: (p: Prior) => Prior } = {},
 ): Promise<ImportRun> {
   const { client, outs } = sessionClient();
   let api!: ImportSessionApi;
@@ -331,6 +333,21 @@ async function runImport(
       }
     }
     rec.scopes = rec.reached ? scopesOf(outs as Record<string, unknown>) : [];
+    // fill-only: the operator types over a REPLAYED name, the drive (replay standing) runs on —
+    // the operator's name must stand
+    if (rec.reached && opts.retype) {
+      const p = api.session.semantics?.pieces.find((x) => x.code === 'ZZ');
+      if (p) {
+        await api.dispatch({ type: 'back', to: 'meaning' });
+        await settle();
+        await api.editName(p.seed, { code: 'YY', mods: [], displayName: 'operator again' });
+        await settle();
+        const again = await drive(false);
+        rec.kept =
+          again &&
+          !!api.session.semantics?.pieces.some((x) => x.seed === p.seed && x.code === 'YY');
+      }
+    }
     rec.replayed = api.inputs.autopilot.filter(isReplayed).length;
     rec.list = api.inputs.autopilot.map(
       (a) =>
@@ -439,7 +456,7 @@ export async function runCase(c: Case) {
   const out: Record<string, unknown> = {};
   const failures: string[] = [];
   for (const mode of ['manual', 'auto'] as const) {
-    const r = await runImport(c, card2, mode, files);
+    const r = await runImport(c, card2, mode, files, { retype: mode === 'manual' });
     const diff = r.reached ? diffOf(first.scopes, r.scopes) : ['did not reach check'];
     out[mode] = {
       reached: r.reached,
@@ -452,6 +469,7 @@ export async function runCase(c: Case) {
       prior: r.prior,
       misses: r.misses.slice(0, 8),
       identical: !diff.length,
+      kept: r.kept,
       diff: diff.slice(0, 4),
       error: r.error,
     };
@@ -459,6 +477,8 @@ export async function runCase(c: Case) {
     if (r.asked.length) failures.push(`${mode}: ${r.asked.length} questions (${r.asked[0]})`);
     if (diff.length) failures.push(`${mode}: export differs (${diff[0]})`);
     if (r.error) failures.push(`${mode}: ${r.error.split('\n')[0]}`);
+    if (r.kept === false)
+      failures.push(`${mode}: the replay overwrote the operator's later answer`);
   }
   // 3 · a mutated file: another sha256, nothing replayed
   const mutated = files.map((f, k) =>
