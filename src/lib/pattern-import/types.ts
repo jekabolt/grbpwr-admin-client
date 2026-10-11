@@ -739,9 +739,19 @@ export type PieceCandidate = {
    * How this rank's walls were chosen (F4): 'class' = the F3 size class of this rank + common;
    * 'innerPlug' = + the smaller ranks' lines (this rank coincides with one where it is not drawn);
    * 'bundleRank' = ranked locally by nesting inside the seed's region (F3 had no usable class);
-   * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
+   * 'single' = one-size source, every line a wall; 'continuity' (P1) = + continuity walls: lines
+   * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
+   * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity';
+  /**
+   * P1 provenance: the continuity walls this closed outline runs along — drawn lines of another
+   * class or size that close this rank between its own dangling ends (R0 a chain path, R1 the
+   * stretch of one line both ends lie on, R2 a spine several sizes end on). Kept only when the
+   * family stayed consistent (areas monotone, outline within the grade spread of its neighbouring
+   * ranks, same shape); `pts` is the stretch used, `chains` the drawn chains it lies on.
+   */
+  continuity?: { rule: 'R0' | 'R1' | 'R2'; chains: ChainId[]; pts: PtMm[] }[];
   /**
    * pieces/grade (H1): why this candidate is 'refused' (set only with that outcome).
    */

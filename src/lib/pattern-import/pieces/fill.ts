@@ -31,7 +31,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { bboxOf, dist, pointInPoly, segNearest, signedArea } from './geom';
+import { bboxOf, dist, pointInPoly, resample, SegGrid, segNearest, signedArea } from './geom';
 import {
   components,
   drawPolyline,
@@ -53,6 +53,8 @@ import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
 import { localRanks } from './bundle-rank';
 import {
+  continuityWalls,
+  type ContinuityWall,
   frameLike,
   itemsOf,
   landingPlugs,
@@ -96,6 +98,21 @@ export type FillDiag = {
   grade?: GradeHook;
   /** D4: the sub-fill of a mixed sheet's guarded seeds (on the solver's walls). */
   subGrade?: FillDiag[];
+  /**
+   * P1: candidates closed through continuity walls — kept (the family stayed consistent) and
+   * refused (left as the leak they were, with the reason).
+   */
+  continuity?: {
+    kept: number;
+    refused: {
+      seed: number;
+      rank: number;
+      why: string;
+      areaMm2: number;
+      outer: PtMm[];
+      continuity: PieceCandidate['continuity'];
+    }[];
+  };
   ms: number;
 };
 
@@ -397,6 +414,37 @@ export type WallEdits = {
   bridges?: { rank: number; from: PtMm; to: PtMm }[];
 };
 
+/** Probe switch (node only): P1_NOCONT turns continuity walls off (negative control). */
+function contOff(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.P1_NOCONT;
+}
+
+/** Share of a polyline (sampled every 0.5 mm) within `tol` of a closed outline. */
+function alongShare(pts: readonly PtMm[], outer: readonly PtMm[], tol: number): number {
+  if (pts.length < 2 || outer.length < 3) return 0;
+  const g = new SegGrid(4);
+  g.addPolyline(0, outer, true);
+  let n = 0;
+  let hit = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const m = Math.max(1, Math.ceil(dist(a, b) / 0.5));
+    for (let k = 0; k < m; k++) {
+      const p = { x: a.x + ((b.x - a.x) * k) / m, y: a.y + ((b.y - a.y) * k) / m };
+      n++;
+      let ok = false;
+      g.near(p, tol, (_o, s) => {
+        if (ok) return;
+        const q1 = outer[(s + 1) % outer.length];
+        if (segNearest(p, outer[s], q1).d <= tol) ok = true;
+      });
+      if (ok) hit++;
+    }
+  }
+  return n ? hit / n : 0;
+}
+
 export function fillPiecesDetailed(
   sheet: Sheet,
   set: ChainSet,
@@ -446,14 +494,10 @@ export function fillPiecesDetailed(
   const box = grow(sheet.bbox, 15);
   const lone = lonePortions(set, model);
   const module = sheetModule(sheet);
-  const rescued = rescuedIgnored(
-    set,
-    model,
-    1.5,
-    15,
-    module,
-    pageMarginIds(set.chains, sheet.poses),
-  );
+  const margins = pageMarginIds(set.chains, sheet.poses);
+  const rescued = rescuedIgnored(set, model, 1.5, 15, module, margins);
+  /** P1: chains never continuity walls — page margins and every chain the fill excludes. */
+  const contSkip = (excl: ReadonlySet<ChainId>) => new Set<ChainId>([...margins, ...excl]);
   diag.rescued = rescued.length;
   const textCentres = sheet.texts.map((t) => ({
     id: t.id,
@@ -509,6 +553,11 @@ export function fillPiecesDetailed(
     /** Seeds to bridge, with the least area the family's trend allows (0: none known). */
     bridgeFor?: Map<number, number>,
   ) => {
+    // P1: continuity walls — a graded rank closed only through lines the source draws between its
+    // own dangling ends (never on the solver's walls, never in the derived-bridge pass, whose
+    // closures are judged by the area trend instead)
+    const continuity = model.mode === 'graded' && !graded?.walls && !bridgeFor && !contOff();
+    let contWalls: ContinuityWall[] = [];
     // knives stay walls where they are this rank's lines: the variant's cutting line is the
     // piece's edge (taken out, kombinezon's 4XL front leaked through it); the cut below still
     // trims any region that crosses one
@@ -545,6 +594,20 @@ export function fillPiecesDetailed(
                 return buildRank(box, cell, [...items, ...plugs].filter(keep));
               },
             },
+            ...(continuity
+              ? [
+                  {
+                    from: 'continuity' as RankFrom,
+                    build: () => {
+                      const plugged = built[0] ?? (built[0] = later[0].build());
+                      contWalls = continuityWalls(set, model, r, plugged.items, contSkip(excl));
+                      return contWalls.length
+                        ? buildRank(box, cell, [...plugged.items, ...contWalls])
+                        : plugged;
+                    },
+                  },
+                ]
+              : []),
           ];
     const built: (RankCtx | null)[] = later.map(() => null);
     const bridgedCache = new Map<RankCtx, Bridge[]>();
@@ -563,7 +626,7 @@ export function fillPiecesDetailed(
       let rankFrom: RankFrom = model.mode === 'single' ? 'single' : 'class';
       let { k, movedMm } = px[si];
       for (let pi = 0; pi < later.length && ctx.ext[k]; pi++) {
-        if (pi === 1 && !rerank().model.byRank[r].length) break;
+        if (later[pi].from === 'bundleRank' && !rerank().model.byRank[r].length) continue;
         const c = built[pi] ?? (built[pi] = later[pi].build());
         const p2 = seedPixel(c.g, c.wall, c.ext, pts[si]);
         if (!c.ext[p2.k]) {
@@ -730,7 +793,7 @@ export function fillPiecesDetailed(
       const lab = seedLabel(seed);
       for (const sj of others) {
         const lj = seedLabel(use[sj]);
-        if (lab && lj && lab === lj && r === 0) {
+        if (lab && lj && lab === lj && r === 0 && rankFrom !== 'continuity') {
           // the same piece labelled twice: keep the first seed
           dropped.add(use[sj].id);
           diag.duplicates.push({ seed: use[sj].id, of: seed.id });
@@ -781,6 +844,11 @@ export function fillPiecesDetailed(
           .map((b) => ({ kind: 'band-cut' as const, pts: [b.from, b.to], chains: [...b.ticks] })),
       ];
       if (der.length) cand.derived = der;
+      if (rankFrom === 'continuity') {
+        // provenance: the continuity walls the outline runs along (half their length within 1 mm)
+        const used = contWalls.filter((w) => alongShare(w.pts, outer, 1) >= 0.5);
+        cand.continuity = used.map((w) => ({ rule: w.rule, chains: [...w.chains], pts: w.pts }));
+      }
       cand.areaMm2 = Math.abs(signedArea(outer));
       cand.bbox = bboxOf(outer);
       cand.sourceCoverage = sn.coverage;
@@ -790,13 +858,14 @@ export function fillPiecesDetailed(
         : cand.areaMm2 < PATIMPORT.minPieceAreaMm2
           ? 'tiny'
           : 'closed';
-      if (merged)
+      if (merged && rankFrom !== 'continuity')
         // a region holding several pieces bounded by frame-like lines: tile frames / a border
         for (const id of sn.walls)
           if (!userExcl.has(id) && frameLike(set.chains[id].pts, 60, module)) frames.add(id);
       // a label frame: the text seed sits in a small closed loop drawn around it (an oval round
       // "Piece 8 / cut x1 pair") — a decoration, not the piece; fill again without it
       if (
+        rankFrom !== 'continuity' &&
         seed.origin === 'text' &&
         sn.walls.length === 1 &&
         set.chains[sn.walls[0]]?.closed &&
@@ -982,6 +1051,53 @@ export function fillPiecesDetailed(
   };
 
   const excl = new Set<ChainId>(userExcl);
+  /**
+   * D3: per family, every candidate closed through continuity walls is checked against its
+   * neighbouring closed ranks (areas monotone, outline within the grade spread, same shape). One
+   * that fails — the worst first, then the family again — goes back to the leak it was: a stop,
+   * never a wrong closed piece.
+   */
+  const continuityPass = () => {
+    for (const s of use) {
+      const list = cands.get(s.id);
+      if (!list?.some((c) => c.rankFrom === 'continuity')) continue;
+      const refused = continuityVerdicts(list);
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (c.rankFrom !== 'continuity') continue;
+        const why = refused.get(c.rank);
+        diag.continuity ??= { kept: 0, refused: [] };
+        if (!why) {
+          diag.continuity.kept++;
+          continue;
+        }
+        diag.continuity.refused.push({
+          seed: s.id,
+          rank: c.rank,
+          why,
+          areaMm2: c.areaMm2,
+          outer: c.outer,
+          continuity: c.continuity,
+        });
+        list[i] = {
+          seed: s.id,
+          rank: c.rank,
+          outer: [],
+          walls: [],
+          inside: [],
+          textsInside: [],
+          outcome: 'leak',
+          areaMm2: 0,
+          bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+          sourceCoverage: 0,
+          p95Mm: 0,
+          rankFrom: 'class',
+          leakAt: shift(s.at, c.rank),
+        };
+        diag.cand.delete(key(s.id, c.rank));
+      }
+    }
+  };
   for (let r = 0; r < nRanks && !(graded && graded.skip.size >= use.length); r++) {
     progress?.(r, nRanks, `rank ${r}`);
     let res = rankPass(r, excl);
@@ -998,6 +1114,8 @@ export function fillPiecesDetailed(
       if (c) cands.get(s.id)!.push(c);
     }
   }
+  // P1 · D3: a closure through continuity walls stands only when the family stays consistent
+  continuityPass();
   if (model.mode === 'file') correspond(excl);
   // derived bridges are not the solver's lines: a graded fill closes on proven walls only
   if (opts.autoBridgeMm !== 0 && !graded?.walls) bridgePass(excl);
@@ -1202,3 +1320,267 @@ export const fillPieces: FillPiecesFn = (sheet, set, run, seeds, opts, progress)
   fillPiecesDetailed(sheet, set, run, seeds, opts, progress).families;
 
 export { dist };
+
+// ── P1 · D3: is a continuity closure consistent with its family? ──────────────────────────────
+
+/** Symmetric Hausdorff distance between two closed outlines (sampled every 2 mm), mm. */
+export function hausdorffMm(a: readonly PtMm[], b: readonly PtMm[]): number {
+  const directed = (p: readonly PtMm[], q: readonly PtMm[]) => {
+    const g = new SegGrid(8);
+    g.addPolyline(0, q, true);
+    let worst = 0;
+    for (const x of resample(p as PtMm[], 2, true)) {
+      let best = Infinity;
+      for (let r = 8; r <= 4096 && best === Infinity; r *= 4)
+        g.near(x, r, (_o, s) => {
+          const d = segNearest(x, q[s], q[(s + 1) % q.length]).d;
+          if (d <= r && d < best) best = d;
+        });
+      if (best === Infinity) best = 4096;
+      if (best > worst) worst = best;
+    }
+    return worst;
+  };
+  if (a.length < 3 || b.length < 3) return Infinity;
+  return Math.max(directed(a, b), directed(b, a));
+}
+
+/** Hu's first four moment invariants of a simple polygon (exact polygon moments, centred). */
+export function huInvariants(poly: readonly PtMm[]): number[] {
+  const n = poly.length;
+  let A = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < n; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % n];
+    const c = p.x * q.y - q.x * p.y;
+    A += c;
+    cx += (p.x + q.x) * c;
+    cy += (p.y + q.y) * c;
+  }
+  A /= 2;
+  if (Math.abs(A) < 1e-9) return [0, 0, 0, 0];
+  cx /= 6 * A;
+  cy /= 6 * A;
+  let m00 = 0;
+  let m20 = 0;
+  let m02 = 0;
+  let m11 = 0;
+  let m30 = 0;
+  let m03 = 0;
+  let m21 = 0;
+  let m12 = 0;
+  for (let i = 0; i < n; i++) {
+    const x0 = poly[i].x - cx;
+    const y0 = poly[i].y - cy;
+    const x1 = poly[(i + 1) % n].x - cx;
+    const y1 = poly[(i + 1) % n].y - cy;
+    const a = x0 * y1 - x1 * y0;
+    m00 += a / 2;
+    m20 += (a * (x0 * x0 + x0 * x1 + x1 * x1)) / 12;
+    m02 += (a * (y0 * y0 + y0 * y1 + y1 * y1)) / 12;
+    m11 += (a * (2 * x0 * y0 + x0 * y1 + x1 * y0 + 2 * x1 * y1)) / 24;
+    m30 += (a * (x0 ** 3 + x0 * x0 * x1 + x0 * x1 * x1 + x1 ** 3)) / 20;
+    m03 += (a * (y0 ** 3 + y0 * y0 * y1 + y0 * y1 * y1 + y1 ** 3)) / 20;
+    m21 += (a * (x0 * x0 * (3 * y0 + y1) + 2 * x0 * x1 * (y0 + y1) + x1 * x1 * (y0 + 3 * y1))) / 60;
+    m12 += (a * (y0 * y0 * (3 * x0 + x1) + 2 * y0 * y1 * (x0 + x1) + y1 * y1 * (x0 + 3 * x1))) / 60;
+  }
+  const s = Math.sign(m00);
+  const mu = Math.abs(m00);
+  const e2 = (v: number) => (s * v) / mu ** 2;
+  const e3 = (v: number) => (s * v) / mu ** 2.5;
+  const n20 = e2(m20);
+  const n02 = e2(m02);
+  const n11 = e2(m11);
+  const n30 = e3(m30);
+  const n03 = e3(m03);
+  const n21 = e3(m21);
+  const n12 = e3(m12);
+  return [
+    n20 + n02,
+    (n20 - n02) ** 2 + 4 * n11 * n11,
+    (n30 - 3 * n12) ** 2 + (3 * n21 - n03) ** 2,
+    (n30 + n12) ** 2 + (n21 + n03) ** 2,
+  ];
+}
+
+/**
+ * How unlike two outlines' shapes are: the Hu invariants compared on a log scale, each relative
+ * to the size of the leading one (h2…h4 of a near-symmetric piece are tiny and noisy alone).
+ */
+export function huDistance(a: readonly PtMm[], b: readonly PtMm[]): number {
+  const ha = huInvariants(a);
+  const hb = huInvariants(b);
+  if (ha[0] <= 0 || hb[0] <= 0) return Infinity;
+  let d = Math.abs(Math.log(ha[0] / hb[0]));
+  // the higher invariants in units of h1^k: a floor keeps noise on a symmetric piece from counting
+  for (const [i, k] of [
+    [1, 2],
+    [2, 3],
+    [3, 3],
+  ] as const) {
+    const f = 0.01 * ((ha[0] + hb[0]) / 2) ** k;
+    d += 0.5 * Math.abs(Math.log((ha[i] + f) / (hb[i] + f)));
+  }
+  return d;
+}
+
+/**
+ * D3 per-step allowances when the family has no two natively closed ranks that grade cleanly
+ * (measured on the corpus' native neighbours, viola / leonie / synth: Hausdorff ≤ 24 mm per step,
+ * Hu distance ≤ 0.4 per step, compactness ≤ 0.07 apart).
+ */
+export const CONT_FALLBACK = { hMm: 10, hu: 0.3 };
+/** D3: the most two neighbouring ranks' compactness (perimeter / √area) may differ, |ln ratio|. */
+export const CONT_K_MAX = 0.08;
+
+function perimeterOf(o: readonly PtMm[]): number {
+  let L = 0;
+  for (let i = 0; i < o.length; i++) L += dist(o[i], o[(i + 1) % o.length]);
+  return L;
+}
+
+/**
+ * P1 · D3: the ranks of a family whose continuity closure is refused, with why. A closure stands
+ * only beside closed neighbouring ranks (the nearest below and above): its area between theirs
+ * (strictly growing, ≤ 25 % per step — `isMonotone`'s rule), its outline within the grade spread
+ * of theirs (Hausdorff and Hu shape distance per step, measured between the family's own natively
+ * closed ranks that grade cleanly, else `CONT_FALLBACK`), and as compact as they are (a closure
+ * that runs into teeth or slivers grows its perimeter, not its area: `CONT_K_MAX`). First against
+ * the native ranks alone; then the survivors together — the worst violator refused first and the
+ * family judged again.
+ */
+export function continuityVerdicts(list: readonly PieceCandidate[]): Map<number, string> {
+  const refused = new Map<number, string>();
+  if (typeof process !== 'undefined' && process.env?.P1_NOCHECK) return refused; // mutation (1)
+  const conts = list.filter((c) => c.rankFrom === 'continuity');
+  for (const c of conts)
+    if (c.outcome !== 'closed' || c.outer.length < 3)
+      refused.set(c.rank, `not closed (${c.outcome})`);
+  const hd = new Map<string, number>();
+  const H = (a: PieceCandidate, b: PieceCandidate) => {
+    const k = a.rank < b.rank ? `${a.rank}:${b.rank}` : `${b.rank}:${a.rank}`;
+    let v = hd.get(k);
+    if (v === undefined) hd.set(k, (v = hausdorffMm(a.outer, b.outer)));
+    return v;
+  };
+  const kOf = (c: PieceCandidate) => perimeterOf(c.outer) / Math.sqrt(Math.max(1, c.areaMm2));
+  const ok = (x: PieceCandidate) =>
+    x.outcome === 'closed' &&
+    x.outer.length > 2 &&
+    !refused.has(x.rank) &&
+    !x.derived?.some((d) => d.kind === 'shared-rank');
+  const natives = list
+    .filter((x) => x.rankFrom !== 'continuity' && ok(x))
+    .sort((a, b) => a.rank - b.rank);
+  // the family's own grade spread, from neighbouring native ranks that grade cleanly
+  let hStep = 0;
+  let huStep = 0;
+  let pairs = 0;
+  let growth = 0;
+  for (let i = 1; i < natives.length; i++) {
+    const a = natives[i - 1];
+    const b = natives[i];
+    const st = b.rank - a.rank;
+    const ratio = b.areaMm2 / Math.max(1, a.areaMm2);
+    if (ratio <= 1.0005 || ratio > 1 + 0.25 * st) continue;
+    hStep = Math.max(hStep, H(a, b) / st);
+    huStep = Math.max(huStep, huDistance(a.outer, b.outer) / st);
+    growth += Math.log(ratio) / st;
+    pairs++;
+  }
+  // a size step grows the piece: at least a quarter of the family's own native growth per step
+  // (0.5 % without a clean native pair) — a closure that comes out the size of its neighbour
+  // closed the neighbour's region
+  const minGrowth = pairs ? 0.25 * (growth / pairs) : Math.log(1.005);
+  const allowH = pairs ? 1.5 * hStep + 1 : CONT_FALLBACK.hMm;
+  const allowHu = pairs ? 1.5 * huStep + 0.05 : CONT_FALLBACK.hu;
+  /** how badly c fails against neighbour n (> 1 fails), and why */
+  const judge = (c: PieceCandidate, n: PieceCandidate): [number, string] => {
+    const steps = Math.abs(c.rank - n.rank);
+    const [lo, hi] = n.rank < c.rank ? [n, c] : [c, n];
+    const ratio = hi.areaMm2 / Math.max(1, lo.areaMm2);
+    let score = 0;
+    let why = '';
+    const fail = (v: number, w: string) => {
+      if (v > score) {
+        score = v;
+        why = w;
+      }
+    };
+    const a = (x: PieceCandidate) => `rank ${x.rank} ${(x.areaMm2 / 100).toFixed(0)} cm²`;
+    if (ratio <= 1.0005) fail(2 + 100 * (1.0005 - ratio), `area not growing: ${a(lo)} ≥ ${a(hi)}`);
+    else if (Math.log(ratio) < minGrowth * steps)
+      fail(
+        2 + (minGrowth * steps - Math.log(ratio)) * 100,
+        `area grows ×${ratio.toFixed(3)} over ${steps} size(s): ${a(lo)} → ${a(hi)} (the family grows ≥ ×${Math.exp(minGrowth * steps).toFixed(3)})`,
+      );
+    else if (ratio > 1 + 0.25 * steps)
+      fail(
+        2 + 10 * (ratio - 1 - 0.25 * steps),
+        `area jumps ×${ratio.toFixed(2)}: ${a(lo)} → ${a(hi)}`,
+      );
+    const h = H(c, n);
+    const ah = allowH * steps + 2;
+    if (h > ah)
+      fail(h / ah, `outline ${h.toFixed(1)} mm from rank ${n.rank} (spread ${ah.toFixed(1)} mm)`);
+    const hu = huDistance(c.outer, n.outer);
+    const au = allowHu * steps + 0.1;
+    if (hu > au)
+      fail(hu / au, `shape unlike rank ${n.rank} (Hu ${hu.toFixed(3)} > ${au.toFixed(3)})`);
+    const dk = Math.abs(Math.log(kOf(c) / kOf(n)));
+    if (dk > CONT_K_MAX)
+      fail(
+        dk / CONT_K_MAX,
+        `perimeter / √area ${dk.toFixed(3)} off rank ${n.rank} (teeth or slivers)`,
+      );
+    return [score, why];
+  };
+  const nearest = (c: PieceCandidate, pool: PieceCandidate[]) => {
+    const below = pool.filter((x) => x.rank < c.rank).pop();
+    const above = pool.find((x) => x.rank > c.rank);
+    return [below, above].filter(Boolean) as PieceCandidate[];
+  };
+  // no natively closed rank in the family: nothing anchors it — every guess could share one error
+  if (!natives.length) {
+    for (const c of conts)
+      if (!refused.has(c.rank))
+        refused.set(c.rank, 'no rank of this piece closes on its own lines');
+    return refused;
+  }
+  // 1) against the native ranks
+  if (natives.length)
+    for (const c of conts) {
+      if (refused.has(c.rank)) continue;
+      for (const n of nearest(c, natives)) {
+        const [score, why] = judge(c, n);
+        if (score > 1) {
+          refused.set(c.rank, why);
+          break;
+        }
+      }
+    }
+  // 2) the survivors together, worst first
+  for (let round = 0; round <= conts.length; round++) {
+    const live = list.filter((x) => ok(x)).sort((a, b) => a.rank - b.rank);
+    let worst: { rank: number; score: number; why: string } | null = null;
+    for (const c of live) {
+      if (c.rankFrom !== 'continuity') continue;
+      const nb = nearest(
+        c,
+        live.filter((x) => x !== c),
+      );
+      let score = nb.length ? 0 : 100;
+      let why = 'no closed neighbouring rank to compare with';
+      for (const n of nb) {
+        const [s2, w2] = judge(c, n);
+        if (s2 > score) [score, why] = [s2, w2];
+      }
+      if (score > 1 && (!worst || score > worst.score)) worst = { rank: c.rank, score, why };
+    }
+    if (!worst) break;
+    refused.set(worst.rank, worst.why);
+  }
+  return refused;
+}
