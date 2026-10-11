@@ -208,6 +208,35 @@ async function oneFile(f: string) {
       }),
       p.dropped.map((d) => [d.page + 1, d.status, d.ai?.role]),
     );
+    // Codex #3: the cache is file-neutral — the same file read again as file 2 gets the cached
+    // answer remapped to its current index, with no second call
+    {
+      const fx2 = fixturePageRoleDeps();
+      const thumbs = (
+        await s.runStage(
+          'render-pages',
+          { pages: asked.map((d) => ({ file: '0', page: d.page })), maxPx: 256, pictures: false },
+          ctx,
+        )
+      ).pages;
+      const key = `cache-probe:${name}`;
+      const a = await classifyFilePages({ key, file: '0', fileName: name, thumbs }, fx2.deps);
+      const b = await classifyFilePages({ key, file: '1', fileName: name, thumbs }, fx2.deps);
+      check(
+        name,
+        'cache: one call; the second read as file 2 is remapped to file 2',
+        fx2.log.calls.length === 1 &&
+          !!b.cached &&
+          b.hints.length === a.hints.length &&
+          b.hints.every((h) => h.file === '1') &&
+          a.hints.every((h) => h.file === '0'),
+        {
+          calls: fx2.log.calls.length,
+          a: a.hints.map((h) => h.file),
+          b: b.hints.map((h) => h.file),
+        },
+      );
+    }
     // MUTATION: a real tile answered "instructions" 0.99 stays in the tile grid
     const mu = fixturePageRoleDeps('tile-instructions');
     const mh = await ask(s, base, name, mu.deps);

@@ -1030,10 +1030,11 @@ export function useImportSession(deps: {
       const all = cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page);
       const { pages, left } = pagesForCall(all, pagesAsked);
       // the thumbnails show the page after the mask: the answer is cached per file + mask
+      // file-neutral (Codex #3): the item ids without the file's index (`${file}:…`)
       const rev = maskRevOf(
         cl.pages
           .filter((p) => p.file === file)
-          .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id)),
+          .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
         [],
       );
       let thumbs: StageIO['render-pages']['out'];

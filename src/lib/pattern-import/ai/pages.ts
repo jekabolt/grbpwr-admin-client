@@ -155,7 +155,21 @@ export function hintsOf(
   return out;
 }
 
-const cache = new Map<string, Promise<PageRoleResult>>();
+/**
+ * Codex #3: what the cache keeps is FILE-NEUTRAL — the wire answer and the pages it was asked
+ * about (page indices within the file), never hints bound to a file id: the same file read again
+ * as the second of two files gets its answer remapped to its current index on every read.
+ */
+type CachedCall = {
+  status: PageRoleStatus;
+  res: ClassifyPatternPagesResponseWire | null;
+  /** 0-based page indices actually sent. */
+  sent: number[];
+  note: string | null;
+  more: string;
+};
+
+const cache = new Map<string, Promise<CachedCall>>();
 /** Tests and the probes: forget every cached answer. */
 export const clearPageRoleCache = () => cache.clear();
 
@@ -178,9 +192,13 @@ async function inBatches<T, R>(xs: readonly T[], n: number, f: (x: T) => Promise
   return out;
 }
 
+/** The cache key: sha256 + mask revision (`args.key`) + the ORDERED page set asked about. */
+export const pageRoleKey = (key: string, pages: readonly { page: PageIndex }[]) =>
+  `${key}|${pages.map((p) => p.page).join(',')}`;
+
 /**
- * One file's call. `key` = the file's sha256 + the mask revision the thumbnails were drawn with:
- * the same key answers from the cache (one paid call per file and mask).
+ * One file's call. `key` = the file's sha256 + the mask revision the thumbnails were drawn with;
+ * with the ordered page set it answers from the cache (one paid call per file, mask and pages).
  */
 export function classifyFilePages(
   args: {
@@ -195,30 +213,54 @@ export function classifyFilePages(
   },
   deps: PageRoleDeps,
 ): Promise<PageRoleResult> {
-  const hit = cache.get(args.key);
-  if (hit) return hit.then((r) => ({ ...r, cached: true }));
-  const p = run(args, deps);
-  cache.set(args.key, p);
-  // a failure is not cached: the next run asks again
-  void p.then((r) => {
-    if (r.status !== 'ok') cache.delete(args.key);
-  });
-  return p;
+  const key = pageRoleKey(args.key, args.thumbs);
+  let p = cache.get(key);
+  const hit = !!p;
+  if (!p) {
+    p = run(args, deps);
+    cache.set(key, p);
+    // a failure is not cached: the next run asks again
+    void p.then((r) => {
+      if (r.status !== 'ok') cache.delete(key);
+    });
+  }
+  return p.then((c) => resultOf(c, args.file, hit));
+}
+
+/** A cached call → this read's result, its hints bound to the file's CURRENT index. */
+function resultOf(c: CachedCall, file: FileId, hit: boolean): PageRoleResult {
+  if (c.status !== 'ok' || !c.res) return { status: c.status, hints: [], note: c.note };
+  const hints = hintsOf(file, c.res, new Set(c.sent));
+  return {
+    status: 'ok',
+    hints,
+    note: `AI page roles: ${hints.length} of ${c.sent.length} pages read${c.more}${hit ? ' (cached)' : ''}`,
+    cached: hit || !!c.res.cached,
+    ...(c.res.costUsd != null ? { costUsd: c.res.costUsd } : {}),
+    ...(c.res.model ? { model: c.res.model } : {}),
+  };
 }
 
 async function run(
   args: Parameters<typeof classifyFilePages>[0],
   deps: PageRoleDeps,
-): Promise<PageRoleResult> {
+): Promise<CachedCall> {
   const pics = deps.pictures !== false;
   const thumbs = pics ? args.thumbs.filter((t) => t.png) : [...args.thumbs];
-  if (!thumbs.length) return { status: 'skipped', hints: [], note: null };
   const more = args.left
     ? ` — ${args.left} more ${args.left === 1 ? 'page' : 'pages'} of the file went without the AI (${AI_PAGES.maxPages} per call)`
     : '';
+  const none = (status: PageRoleStatus, note: string | null): CachedCall => ({
+    status,
+    res: null,
+    sent: [],
+    note,
+    more,
+  });
+  if (!thumbs.length) return none('skipped', null);
   try {
     return await withTimeout(
-      (async (): Promise<PageRoleResult> => {
+      (async (): Promise<CachedCall> => {
         const ids = await inBatches(thumbs, 4, async (t) => ({
           t,
           id: pics ? await deps.upload(t.png!, `${args.fileName} page ${t.page + 1}`) : 0,
@@ -255,30 +297,20 @@ async function run(
           force: false,
         });
         if (call === 'unavailable')
-          return {
-            status: 'unavailable',
-            hints: [],
-            note: 'AI page roles: not available on this server yet — pages judged by their geometry',
-          };
+          return none(
+            'unavailable',
+            'AI page roles: not available on this server yet — pages judged by their geometry',
+          );
         const res = await call;
-        const hints = hintsOf(args.file, res, new Set(pages.map((p) => p.pageNo - 1)));
-        return {
-          status: 'ok',
-          hints,
-          note: `AI page roles: ${hints.length} of ${pages.length} pages read${more}`,
-          cached: !!res.cached,
-          ...(res.costUsd != null ? { costUsd: res.costUsd } : {}),
-          ...(res.model ? { model: res.model } : {}),
-        };
+        return { status: 'ok', res, sent: pages.map((p) => p.pageNo - 1), note: null, more };
       })(),
       args.timeoutMs ?? PAGE_ROLE_TIMEOUT_MS,
     );
   } catch (e) {
     const timeout = e instanceof Timeout;
-    return {
-      status: timeout ? 'timeout' : 'error',
-      hints: [],
-      note: `AI page roles: ${timeout ? (e as Error).message : `unavailable (${e instanceof Error ? e.message : String(e)})`} — pages judged by their geometry`,
-    };
+    return none(
+      timeout ? 'timeout' : 'error',
+      `AI page roles: ${timeout ? (e as Error).message : `unavailable (${e instanceof Error ? e.message : String(e)})`} — pages judged by their geometry`,
+    );
   }
 }
