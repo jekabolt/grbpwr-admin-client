@@ -1225,6 +1225,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       // the step makes): every piece without a usable code gets one in sheet order. The seed's own
       // text is the step's too — a harness click seed's label is TRUTH, not the sheet's, so it is not
       // passed. A piece the bulk cannot name (no outline box) is typed by hand: 2 clicks each.
+      // Codex CODE-3: the step re-reads the pieces after a grainline answer, and the chip is computed
+      // on THAT reading (a hand freed by its grainline shows up with its twin) — so does the harness
+      if ((proposals.length || drawn.length) && codeBlocked(sem.blocked).length)
+        sem = await run('semantics', {
+          fileAllowance: c.meaning ? fileAllowance : found ?? fileAllowance,
+          pieceOverrides: overrides,
+          operatorGrain: grain,
+          operatorFold: foldPick,
+          foldListChecked,
+        });
       const unnamedNow = codeBlocked(sem.blocked);
       const bulk = bulkNames(
         sem.blocked,

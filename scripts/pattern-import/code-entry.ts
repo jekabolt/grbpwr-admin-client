@@ -169,6 +169,29 @@ export async function main(): Promise<number> {
   const shuffled = [...blocked].reverse();
   const b = bulkNames(shuffled, boxOf, [...taken].reverse(), card);
   ck(JSON.stringify(show(a)) === JSON.stringify(show(b)), 'stable under input order', show(b));
+  // Codex CODE-1: one hand asked (duplicate), its twin blocked for a grainline only → renamed together
+  const lone = bulkNames(
+    [
+      {
+        seed: 3,
+        reason: 'duplicate-identity',
+        detail: 'SL_L',
+        name: { source: 'sleeve', hand: 'L', twin: 5 },
+      },
+      { seed: 5, reason: 'no-grain', detail: 'no grain' },
+    ],
+    boxOf,
+    taken,
+    card,
+  );
+  ck(
+    lone.get(3)?.code != null &&
+      lone.get(3)?.code === lone.get(5)?.code &&
+      lone.get(3)?.mods[0] === 'L' &&
+      lone.get(5)?.mods[0] === 'R',
+    'a hand asked alone takes its twin (blocked for a grainline) along: one code, both hands',
+    show(lone),
+  );
   // a pair whose other hand has no box: neither hand is guessed
   const c = bulkNames(blocked, (sd) => (sd === 5 ? null : boxOf(sd)), taken, card);
   ck(!c.has(3) && !c.has(5), 'a pair with one hand unplaced is left to the operator', show(c));

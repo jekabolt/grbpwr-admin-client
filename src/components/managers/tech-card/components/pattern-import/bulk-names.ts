@@ -6,8 +6,9 @@
 // title, the DXF block name) become the display name; a bare number ("3", "67") reads «piece 3».
 //
 // Never a merge: every seed gets its own code — except the two hands of a DRAWN pair (FP_L beside
-// FP_R, blocked together), which get ONE code with their hands, so they stay one pair (renamed
-// apart, each hand would be re-read alone, a pair of its own — a doubled cut).
+// FP_R), which get ONE code with their hands, so they stay one pair (renamed apart, each hand
+// would be re-read alone, a pair of its own — a doubled cut); a hand asked for a code takes its
+// twin along even when the twin is blocked for another reason only.
 //
 // Each name stays editable in the table; the operator's click makes them the operator's.
 // Main-thread safe: plain data.
@@ -56,6 +57,20 @@ export function bulkNames(
   sourceOf?: (seed: SeedId) => string | null | undefined,
 ): Map<SeedId, BulkName> {
   const want = codeBlocked(blocked);
+  // a drawn hand asked while its twin waits on another answer (a grainline): the twin is renamed
+  // WITH it — one code, both hands — or the asked hand would be re-read alone (Codex CODE-1)
+  const asked = new Set(want.map((b) => b.seed));
+  for (const b of [...want]) {
+    const n = b.name;
+    if (!n?.hand || n.twin == null || asked.has(n.twin)) continue;
+    asked.add(n.twin);
+    want.push({
+      seed: n.twin,
+      reason: b.reason,
+      detail: `the other hand of piece ${b.seed}`,
+      name: { source: n.source, hand: opposite(n.hand), twin: b.seed },
+    });
+  }
   const bySeed = new Map(want.map((b) => [b.seed, b] as const));
   // a drawn pair: both hands asked, each naming the other as its twin, opposite hands
   const twinOf = new Map<SeedId, SeedId>();
