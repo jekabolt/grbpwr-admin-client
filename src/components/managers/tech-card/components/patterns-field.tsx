@@ -834,6 +834,8 @@ export function PatternsField({
   // Пока его работа открыта, этот эффект её скоупы пропускает — порядок «сохранение → площади →
   // индекс» держит она.
   const publishedRef = useRef<Map<string, Promise<PublishSizeIndexResult>>>(new Map());
+  // A10 (Codex r5 #3): rows an import wrote whose save was not confirmed — a retry saves them
+  const importUnsaved = useRef(false);
   const recordIndex = (sig: string, res: PublishSizeIndexResult) =>
     setIndexFailures((f) => {
       if (res.ok) {
@@ -1691,6 +1693,12 @@ export function PatternsField({
                 }),
               storageSizeId,
               save: (reason) => autosave.flush(reason),
+              unsaved: {
+                get: () => importUnsaved.current,
+                set: (v) => {
+                  importUnsaved.current = v;
+                },
+              },
             }),
           )}
           followUp={followUp?.rows ?? null}

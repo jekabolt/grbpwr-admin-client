@@ -443,7 +443,7 @@ export function ApplyStep({
         {done && !done.ok && (
           <CalloutBox tone='error' className='mb-2'>
             <Text size='micro' component='p'>
-              <b>! {done.failedScope}:</b> {done.message}. nothing was written to the card.
+              <b>! {done.failedScope}:</b> {done.message}. the card was not saved.
             </Text>
             {done.uploaded.length > 0 && (
               <Text size='micro' component='p' className='mt-1'>

@@ -79,6 +79,11 @@ export type ApplyDeps = {
   storageSizeId: number;
   /** The card's save (autosave `flush`); its answer is returned as `save`. */
   save?: (reason: string) => Promise<string>;
+  /**
+   * Codex r5 #3: rows an earlier try wrote into the form whose save was not confirmed ('ok') — a
+   * retry finds them there (nothing to write) and must still save. Kept by the caller across tries.
+   */
+  unsaved?: { get: () => boolean; set: (v: boolean) => void };
   mintKey?: () => string;
 };
 
@@ -337,9 +342,24 @@ export async function applyDraft(
     mintKey,
   });
   for (const w of plan.writes) deps.write(w.path, w.value);
+  const retry = !plan.writes.length && !!deps.unsaved?.get();
+  if (plan.writes.length) deps.unsaved?.set(true);
 
-  // 3. the card's own save (the only transaction)
-  const save = plan.writes.length && deps.save ? await deps.save('pattern-import') : undefined;
+  // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
+  //    save refused; success only on what the save answered
+  const save =
+    (plan.writes.length || retry) && deps.save ? await deps.save('pattern-import') : undefined;
+  if (save !== undefined) {
+    const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
+    if (!fine)
+      return {
+        ok: false,
+        failedScope: '',
+        message: `the card did not save (${save}) — the rows are in the form; apply again to save them`,
+        uploaded,
+      };
+    deps.unsaved?.set(false);
+  }
   return {
     ok: true,
     uploaded,

@@ -28,6 +28,8 @@ export function createCardApply(deps: {
   storageSizeId: number;
   /** The card's autosave `flush` (the one save path the page has). */
   save?: (reason: string) => Promise<string>;
+  /** Rows a try wrote whose save was not confirmed — held by the card across the wizard's tries. */
+  unsaved?: { get: () => boolean; set: (v: boolean) => void };
 }): ApplyDraftFn {
   return (draft, onProgress) =>
     applyDraft(
@@ -51,6 +53,7 @@ export function createCardApply(deps: {
         write: deps.write,
         storageSizeId: deps.storageSizeId,
         save: deps.save,
+        unsaved: deps.unsaved,
       },
       onProgress,
     );
