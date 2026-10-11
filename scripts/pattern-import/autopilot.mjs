@@ -114,7 +114,19 @@ const top = (o, n = 12) =>
   Object.entries(o)
     .sort((a, b) => b[1] - a[1])
     .slice(0, n);
-const real = results.filter((r) => r.group !== 'refusal');
+const real = results.filter((r) => r.group !== 'refusal' && r.group !== 'control');
+// A10 card controls: a card that names nothing / a model not on the sheet / two — must stop
+const controls = results.filter((r) => r.group === 'control');
+// a control that picked, did not reach its question (Codex #7: unreached FAILS) or crashed
+const controlsFailed = controls
+  .filter((r) => !r.control?.ok)
+  .map(
+    (r) =>
+      `${r.id} (${!r.control ? r.verdict : r.control.picked ? 'picked' : !r.control.reached ? `not reached: ${r.stop?.step}` : r.control.bypassed ? 'next imported a sheet' : (r.control.failed ?? []).join('; ') || 'rename not re-chosen'})`,
+  );
+// the dry card match (the pages' labels at extraction) on the truth cases that name a model/sheet
+const cardMatched = real.filter((r) => r.cardMatch?.sheet != null || r.cardMatch?.model != null);
+const cardWrong = real.flatMap((r) => (r.cardMatch?.wrong ?? []).map((w) => `${r.id}: ${w}`));
 const reached = real.filter((r) => r.verdict === 'apply');
 const stopReasons = {};
 for (const r of real)
@@ -156,6 +168,13 @@ const summary = {
   ),
   // the policy's own "now" against the wizard's on every question (must be 0)
   fingerprintDrift: sum((r) => r.fingerprintDrift),
+  controls: controls.length,
+  controlsFailed,
+  cardMatch: cardMatched.map(
+    (r) =>
+      `${r.id}: ${r.cardMatch.sheet != null ? `sheet ${r.cardMatch.sheet}` : ''}${r.cardMatch.model != null ? ` model ${r.cardMatch.model}` : ''}`,
+  ),
+  cardWrong,
   mutate: MUTATE || null,
   pageRoles: !!PAGE_ROLES || MUTATE === 'page-role',
   mutated: results.flatMap((r) => (r.mutated ?? []).map((m) => `${r.id}: ${m}`)),
@@ -177,6 +196,15 @@ console.log(`assumptions by kind: ${JSON.stringify(summary.assumptionsByKind)}`)
 console.log(`strong by kind: ${JSON.stringify(summary.strongByKind)}`);
 if (summary.manifestProblems.length)
   console.log(`✗ manifest does not carry the assumptions: ${summary.manifestProblems.join(', ')}`);
+if (controls.length)
+  console.log(
+    controlsFailed.length
+      ? `✗ card controls failed${MUTATE === 'card' ? ' (expected under --mutate=card)' : ''}: ${controlsFailed.join(', ')}`
+      : `✓ card controls: every one stopped on its question, picked nothing ${controls.length}/${controls.length}`,
+  );
+console.log(
+  `card match (dry, pages' labels): ${summary.cardMatch.join(' · ') || 'none'} · wrong ${cardWrong.length}${cardWrong.length ? ` ✗ ${cardWrong.join(', ')}` : ''}`,
+);
 
 const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 const out = resolve(
@@ -190,8 +218,20 @@ if (summary.fingerprintDrift)
   console.log(
     `✗ the policy's answer fingerprint drifted from the wizard's ${summary.fingerprintDrift}×`,
   );
-let bad = summary.manifestProblems.length > 0 || summary.fingerprintDrift > 0;
-if (MUTATE) {
+let bad =
+  summary.manifestProblems.length > 0 ||
+  summary.fingerprintDrift > 0 ||
+  (MUTATE !== 'card' && controlsFailed.length > 0) ||
+  cardWrong.length > 0;
+if (MUTATE === 'card') {
+  // the control: a pick injected at each control's question must make that control fail
+  const injected = controls.filter((r) => r.mutated?.length);
+  const caught = injected.filter((r) => !r.control?.ok);
+  console.log(
+    `mutation card: injected in ${injected.length} control(s), caught in ${caught.length}`,
+  );
+  if (!injected.length || caught.length !== injected.length) bad = true;
+} else if (MUTATE) {
   // the control: every injected wrong answer must be counted wrong, attributed to an assumption
   // only a case that wrote its export can show the wrong answer (a stop before the write is not
   // a miss of the control — it is reported apart)

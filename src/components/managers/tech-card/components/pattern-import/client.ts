@@ -77,6 +77,12 @@ export type CardContext = {
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
   /**
+   * A10: the card's identifying strings apart — its name and style number. The autopilot matches
+   * them (and the uploaded file names) against the models / tile sheets the file prints.
+   */
+  cardName?: string;
+  styleNumber?: string;
+  /**
    * The BOM has no fabric line: the run converts into one main-fabric file that is only
    * downloaded, never applied (J1). Set by `forRun`, not by the card.
    */

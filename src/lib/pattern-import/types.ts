@@ -281,6 +281,11 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
+  /**
+   * A10: what the page prints that tells the sheets apart — the models it names ("Mod. 125",
+   * "Style B") and a sheet letter ("Bogen A"); absent = none. Read by the autopilot's card match.
+   */
+  labels?: { models?: string[]; sheets?: string[] };
   /** For 'cover' / 'instructions': line length (m), text items, characters, raster share. */
   ink?: { strokeM: number; texts: number; chars: number; raster: number };
   confidence: number;

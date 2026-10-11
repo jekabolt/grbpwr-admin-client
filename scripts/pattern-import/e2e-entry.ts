@@ -104,6 +104,14 @@ type Case = {
   outlinesAreSize?: boolean;
   /** The operator maps the source sizes, in rank order, to these card tokens (smoke: 38 → M). */
   mapTo?: string[];
+  /**
+   * A10: the card's name — set ONLY where corpus/TRUTH.md says which model / sheet the card is
+   * (the autopilot matches it against the models and sheets the file prints). Absent = a card
+   * that names nothing (the synthetic "autopilot" card).
+   */
+  cardName?: string;
+  /** The model the card is per TRUTH, scored by the autopilot metric when `variant` is absent. */
+  cardModel?: RegExp;
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -120,6 +128,8 @@ export const CASES: Case[] = [
     files: ['pdf/palto.pdf'],
     card: NUM(72, 88, 4),
     variant: /125/,
+    // TRUTH: "в файле только Mod. 125" (123/124 are other models' lines)
+    cardName: 'burda Пальто Mod. 125',
     truth: { id: 'palto', expect: 7, note: '9 listed, 2 are "trace from 21" (no own outline)' },
   },
   {
@@ -128,6 +138,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /A/,
+    // TRUTH: variant 0 = Style A (high waisted)
+    cardName: 'Phoebe Jumpsuit · Style A',
     truth: { id: 'kombinezon', variant: 0 },
   },
   {
@@ -136,6 +148,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /B/,
+    // TRUTH: variant 1 = Style B (low waisted)
+    cardName: 'Phoebe Jumpsuit · Style B',
     truth: { id: 'kombinezon', variant: 1 },
   },
   {
@@ -157,6 +171,9 @@ export const CASES: Case[] = [
     group: 'pdf',
     files: ['pdf/zhaket.pdf'],
     card: NUM(36, 44),
+    // TRUTH: Mod. 126 ("Mod. 125" lines belong to another model)
+    cardName: 'burda Жакет Mod. 126',
+    cardModel: /126/,
     truth: { id: 'zhaket' },
   },
   {
@@ -259,6 +276,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 0,
     variant: /A/,
+    // TRUTH grid: sheet 1 = "Bogen A" (p6–55)
+    cardName: 'Mantel & Jacke · Bogen A',
     truth: { id: 'polupalto' },
   },
   {
@@ -268,6 +287,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 1,
     variant: /B/,
+    // TRUTH grid: sheet 2 = "Bogen B" (p57–91)
+    cardName: 'Mantel & Jacke · Bogen B',
     truth: { id: 'polupalto' },
   },
   // DXF (CLO, lekalo, Gerber) — fast path

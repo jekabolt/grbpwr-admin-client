@@ -100,6 +100,7 @@ import {
   applyPieceEdits,
   applyWallEdits,
   isWallEdit,
+  pageLabels,
   proposeSeeds,
   startSession,
   variantLabels,
@@ -653,6 +654,19 @@ export class Session {
         ),
       ),
     ];
+    // A10: what each page prints that tells the sheets apart (models, a sheet letter) — the
+    // autopilot matches the card against it before a sheet is assembled
+    if (multiPage.length) {
+      const textOf = new Map(
+        multiPage.flatMap((d) =>
+          d.pages.map((p) => [`${d.file.id}:${p.page}`, p.texts.map((t) => t.text)] as const),
+        ),
+      );
+      this.pages = this.pages.map((c) => {
+        const l = pageLabels(textOf.get(`${c.file}:${c.page}`) ?? []);
+        return l.models || l.sheets ? { ...c, labels: l } : c;
+      });
+    }
     if (this.dxfSet)
       this.pages = this.setSizes.map(
         (s): PageClassification => ({
@@ -1093,8 +1107,8 @@ export class Session {
           blobs: faces.map.blobs,
           shapes: blobShapes(faces.map, cands),
           files: feed.files,
-          // the models the sheet's own feed names (another file's models say nothing here)
-          models: variantLabels(feed.texts.map((t) => t.text)).length,
+          // the models it names are read as the pieces stage reads them (its model choice)
+          models: variantLabels(sheet.texts.map((t) => t.text)).length,
         }),
       };
     }
@@ -1299,7 +1313,9 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
-    const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
+    // A10 (Codex #1): the models THIS sheet prints — never the text of every page (another
+    // sheet's tiles, an instruction or overview page naming every model of the magazine)
+    const variants = variantLabels(sheet.texts.map((t) => t.text));
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
