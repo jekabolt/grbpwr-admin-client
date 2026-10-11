@@ -794,6 +794,8 @@ export function cleanSheet(
   edits: PageMaskEdit[],
   /** Source keys (`srcKey`) of the paths a page item already offers — not offered twice. */
   offered: ReadonlySet<string> = new Set(),
+  /** A0.3: the sheet path ids this pass offers and the operator did not take (legend evidence). */
+  offeredOut?: Set<PathId>,
 ): SheetClean['items'] {
   // the sheet's line work linked as the chains stage links it (masked paths stay out): a PDF that
   // draws a curve as one-segment paths has an END every millimetre, and ends are what glues glyph
@@ -851,6 +853,7 @@ export function cleanSheet(
       for (const id of pathsOf[c]) {
         const p = pathById.get(id);
         if (!p) continue;
+        if (!applied) offeredOut?.add(id);
         pages.set(pageKey(p.src.file, p.src.page), { file: p.src.file, page: p.src.page });
         // a path is masked only when every chain it feeds is (a path split into a garment line
         // and a letter stays)

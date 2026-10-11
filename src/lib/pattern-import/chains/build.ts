@@ -12,6 +12,7 @@ import type {
   ChainSet,
   ClassEvidence,
   LineClass,
+  PathId,
   Progress,
   Sheet,
   Style,
@@ -20,6 +21,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
 import { furniture, GREY_COLOUR_ONLY, overprintLines } from './classify';
+import { rolesByFaces } from './face-role';
 import { overlaidFiles } from './link';
 import { makeChains } from './make';
 import { seamPens, type SeamPen } from './seam';
@@ -34,6 +36,8 @@ export type BuildExtras = {
   /** Instruction-page texts (size runs, legends) — the worker passes every page's text. */
   extraTexts?: string[];
   fileNames?: Map<string, string>;
+  /** A0.3: sheet path ids the clean stage offered as background and the operator did not take. */
+  offeredPaths?: ReadonlySet<PathId>;
 };
 
 /** Full pipeline with its diagnostics (the probe and the worker stage use this). */
@@ -70,7 +74,13 @@ export function buildChainsDetailed(
     fileNames: extras.fileNames,
   });
   progress?.(2, 3, 'legend');
-  const set = toChainSet(rec, mk.stats, seamPens(rec, styles), styles);
+  // A0.3: where no row carries the outlines, the faces they close (and the layer name) decide
+  const set = rolesByFaces(
+    sheet,
+    toChainSet(rec, mk.stats, seamPens(rec, styles), styles),
+    styles,
+    extras.offeredPaths,
+  );
   progress?.(3, 3);
   return { set, recover: rec };
 }

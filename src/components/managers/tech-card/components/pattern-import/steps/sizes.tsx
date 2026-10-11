@@ -22,6 +22,7 @@ import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, LegendEdit } from '../use-import-session';
+import { legendKey } from '../use-import-session';
 import { guessedSizes } from '../use-import-session';
 import { DashSample, NativeSelect, Panel, STICKY_END, SplitStage, fmtPct } from '../ui-bits';
 
@@ -75,14 +76,16 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const edit = (classId: number, p: Partial<LegendEdit>) => {
     const row = chains.classes.find((c) => c.id === classId);
     if (!row) return;
-    const prev: LegendEdit = inputs.legend.find((e) => e.classId === classId) ?? {
+    const mine = (e: LegendEdit) => (e.sig ? e.sig === row.sig : e.classId === classId);
+    const prev: LegendEdit = inputs.legend.find(mine) ?? {
       classId,
       role: row.role,
       sizeLabel: row.sizeLabel,
+      ...(row.sig ? { sig: row.sig } : {}),
     };
     void api.dispatch({
       type: 'legend',
-      edits: [...inputs.legend.filter((e) => e.classId !== classId), { ...prev, ...p }],
+      edits: [...inputs.legend.filter((e) => !mine(e)), { ...prev, ...p, classId }],
     });
   };
   const setCard = (e: SizeMapEntry, sizeId: string) =>
@@ -128,6 +131,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `light grey only (rgb ${e.rgb.join(',')}) — background or a cut line?`;
           case 'seam-offset':
             return `${e.offsetMm} mm inside the cut line`;
+          case 'faces':
+            return `closes ${e.pieces} outline${e.pieces === 1 ? '' : 's'}${e.cues.length > 1 ? ` · ${e.cues.slice(1).join(' · ')}` : ''}`;
+          case 'inside-faces':
+            return `inside the outlines`;
+          case 'face-stray':
+            return `not an outline: ${e.why}`;
         }
       })
       .join(' · ');
@@ -253,7 +262,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             <tbody>
               {chains.classes.map((c) => {
                 const low = c.confidence < 0.6;
-                const confirmed = inputs.legendConfirmed.includes(c.id);
+                const confirmed = inputs.legendConfirmed.includes(legendKey(c));
                 const e = c.role === 'size' ? entryOfClass(c.id) : undefined;
                 const rowBg = hover === c.id ? 'bg-bgZebra' : 'bg-bgColor';
                 return (
@@ -334,13 +343,17 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                             tone='attention'
                             onClick={() =>
                               patchInputs((i) => ({
-                                legendConfirmed: [...i.legendConfirmed, c.id],
+                                legendConfirmed: [...i.legendConfirmed, legendKey(c)],
                               }))
                             }
                             title={
                               c.evidence.some((x) => x.kind === 'colour-only')
                                 ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
-                                : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
+                                : c.evidence.some((x) => x.kind === 'face-stray')
+                                  ? `${fmtPct(c.confidence, 0)} sure — these lines close no outline (strays, lettering, a watermark); set aside unless one is a piece line`
+                                  : c.evidence.some((x) => x.kind === 'faces')
+                                    ? `${fmtPct(c.confidence, 0)} sure — these lines close the outlines, but only that says so; confirm they are the cut lines`
+                                    : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
                             }
                           >
                             ! confirm
