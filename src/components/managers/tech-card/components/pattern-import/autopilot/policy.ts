@@ -139,6 +139,33 @@ export type AutopilotAnswer = {
 };
 
 const NONE: AutopilotDecision = { actions: [], assumptions: [] };
+/** Production / pattern-CAD tools, as a file's producer metadata names them. */
+const CAD_PRODUCER =
+  /\b(seamly2d|valentina|clo3d|clo|marvelous|gerber|accumark|lectra|modaris|optitex|gemini|audaces|tukatech|polypattern|grafis|assyst|richpeace)\b/i;
+
+/**
+ * The outline prior from what made the file (format, producer metadata, A8 page roles): every file
+ * a CAD export and no print layout (tile sheets, an overview page) → the evidence for "cut line";
+ * else null (a question). No classifier: what the adapters already read.
+ */
+export function cadExport(s: ImportSession, i: Pick<Inputs, 'scaleIndex'>): string[] | null {
+  if (!s.files.length) return null;
+  const tiles = s.pages.filter((p) => p.cls === 'tile').length;
+  if (tiles > 1 || s.pages.some((p) => p.cls === 'overview')) return null;
+  const declared = s.scale.candidates[i.scaleIndex]?.method === 'declared';
+  const why: string[] = [];
+  for (const f of s.files) {
+    const by = f.producer ?? '';
+    if (f.kind === 'hpgl') why.push(`${f.name}: HP-GL plot file (a cutter/plotter export)`);
+    else if (f.kind === 'dxf') why.push(`${f.name}: DXF export`);
+    else if (CAD_PRODUCER.test(by)) why.push(`${f.name}: made by ${by}`);
+    else if (f.kind === 'svg' && /inkscape/i.test(by) && declared)
+      why.push(`${f.name}: ${by} drawing in true mm`);
+    else return null;
+  }
+  return why;
+}
+
 const stopAt = (step: WizardStep, reason: string, assumptions: Assumption[] = []) => ({
   actions: [],
   assumptions,
@@ -1346,11 +1373,39 @@ function meaningStep(snap: Snap): AutopilotDecision {
     const said = sem.pieces.find(
       (p) => p.allowance.origin === 'text' || p.allowance.origin === 'measured',
     )?.allowance;
-    if (!said)
-      return stopAt(
-        'meaning',
-        'nothing on the sheet says what the drawn outline is — the cut line (allowance included) or the seam line?',
-      );
+    if (!said) {
+      // the source's own prior: a production / pattern-CAD export draws the cut line (its pieces
+      // carry their allowance); a printed home-sewing sheet (tiles, an overview page) does not say
+      // — a question. Text or a drawn seam line (above) always wins over both.
+      const cad = cadExport(s, i);
+      if (!cad)
+        return stopAt(
+          'meaning',
+          'nothing on the sheet says what the drawn outline is — the cut line (allowance included) or the seam line?',
+        );
+      const fileAllowance: AllowanceDecision = {
+        meaning: 'cut',
+        // what the one-click "cut line · as drawn" answer sends
+        allowanceMm: PATIMPORT.defaultAllowanceMm,
+        origin: 'operator',
+        evidence: cad,
+      };
+      return {
+        actions: [{ kind: 'semantics', patch: { fileAllowance } }],
+        assumptions: [
+          A(
+            'meaning',
+            'outline',
+            'the file',
+            'the drawn outline is the cut line',
+            'CAD export → cut line',
+            cad,
+            0.6,
+            true,
+          ),
+        ],
+      };
+    }
     const fileAllowance: AllowanceDecision = {
       ...said,
       origin: 'operator',
