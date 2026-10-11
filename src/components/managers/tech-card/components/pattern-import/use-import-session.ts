@@ -307,7 +307,7 @@ export function useImportSession(deps: {
    * Codex re-check #2: one apply per draft. Taken synchronously — by the autopilot before its
    * check → apply move (`lockApply`), by the apply itself otherwise — and never handed twice: a
    * concurrent or repeated apply of the same draft is refused. A new draft (a re-write) is a new
-   * lock; an apply that failed before anything went up gives it back.
+   * lock; an apply that did not complete the card write (failed, threw, card changed) gives it back.
    */
   const applyLock = useRef<{ draft: unknown; token: number; used: boolean } | null>(null);
   const lockSeq = useRef(0);
@@ -850,6 +850,7 @@ export function useImportSession(deps: {
           // Codex re-check #1: the card changed since the run read it — nothing goes up
           const stale = cardStale();
           if (stale) {
+            applyLock.current = null;
             setApply({
               phase: 'done',
               result: { ok: false, failedScope: '', message: stale, uploaded: [] },
@@ -868,13 +869,25 @@ export function useImportSession(deps: {
           };
           const progress: Record<string, ApplyProgress['state']> = {};
           setApply({ phase: 'running', progress });
-          const result = await applyDraft(draft, (p) => {
-            progress[p.scopeKey] = p.state;
-            setApply({ phase: 'running', progress: { ...progress } });
-          });
-          // nothing went up: the same draft may be applied again (the operator's retry)
-          if (!result.ok && !result.uploaded.length && applyLock.current === lock)
-            applyLock.current = null;
+          // Codex final #2: whatever the apply throws (a rejected save, an upload) lands as a
+          // failed result with its reason — the step never stays 'running'
+          let result: ApplyResult;
+          try {
+            result = await applyDraft(draft, (p) => {
+              progress[p.scopeKey] = p.state;
+              setApply({ phase: 'running', progress: { ...progress } });
+            });
+          } catch (e) {
+            result = {
+              ok: false,
+              failedScope: '',
+              message: `the apply failed: ${e instanceof Error ? e.message : String(e)}`,
+              uploaded: [],
+            };
+          }
+          // the card write did not complete: the operator may apply again (files a failed try
+          // uploaded are orphans — a known tail); the lock only holds a running or DONE apply
+          if (!result.ok && applyLock.current === lock) applyLock.current = null;
           // the apply step's "download report" carries what the card refused (M5)
           if (!result.ok)
             failureRef.current = {
