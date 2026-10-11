@@ -185,11 +185,14 @@ if (MUTATE) {
   // only a case that wrote its export can show the wrong answer (a stop before the write is not
   // a miss of the control — it is reported apart)
   const injected = results.filter((r) => r.mutated?.length);
-  const seen = injected.filter((r) => r.write);
+  // 'drop' tests the truth matcher itself: every case it was injected in counts
+  const seen = MUTATE === 'drop' ? injected : injected.filter((r) => r.write);
   const caught = seen.filter((r) =>
-    (r.wrong?.items ?? []).some(
-      (x) =>
-        x.startsWith(MUTATE === 'qty' ? 'quantity' : 'size') && /\[(quantity|size-guess)\]/.test(x),
+    (r.wrong?.items ?? []).some((x) =>
+      MUTATE === 'drop'
+        ? x.startsWith('piece-set') && /missing/.test(x)
+        : x.startsWith(MUTATE === 'qty' ? 'quantity' : 'size') &&
+          /\[(quantity|size-guess)\]/.test(x),
     ),
   );
   console.log(

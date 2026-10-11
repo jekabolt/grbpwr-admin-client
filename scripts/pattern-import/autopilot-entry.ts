@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
+import { PATIMPORT } from 'lib/pattern-import/types';
 import { answersNowOf } from 'components/managers/tech-card/components/pattern-import/answers';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import { toWireError } from 'lib/pattern-import/worker/errors';
@@ -62,6 +63,24 @@ type Case = (typeof CASES)[number];
 
 /** Labelled points inside the truth pieces (sheet mm), from the click fixture of the truth id. */
 function truthPoints(c: Case): { label: string; at: { x: number; y: number } }[] {
+  // per-case truth points first (fixtures/truth-points.json: a case whose sheet frame differs from
+  // the click fixture's), else the click fixture of the truth id
+  try {
+    const own = JSON.parse(
+      readFileSync(
+        resolve(
+          process.env.PATIMPORT_REPO ?? process.cwd(),
+          'scripts/pattern-import/fixtures/truth-points.json',
+        ),
+        'utf8',
+      ),
+    ) as Record<string, { label: string; at: [number, number] }[] | string>;
+    const mine = own[c.id];
+    if (Array.isArray(mine))
+      return mine.map((k) => ({ label: k.label, at: { x: k.at[0], y: k.at[1] } }));
+  } catch {
+    /* no per-case points */
+  }
   const tid = c.truth?.id;
   const key =
     c.clicks ?? (tid ? CASES.find((x) => x.truth?.id === tid && x.clicks)?.clicks : undefined);
@@ -82,22 +101,20 @@ function truthPoints(c: Case): { label: string; at: { x: number; y: number } }[]
   }
 }
 
-/** A truth point this close (mm) to an exported outline it is not inside still names it. */
-const GEO_NEAR_MM = 40;
-
-/** Distance (mm) from a point to a closed polygon's edges. */
-function distToPoly(p: { x: number; y: number }, q: readonly { x: number; y: number }[]): number {
-  let best = Infinity;
-  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
-    const a = q[j];
-    const b = q[i];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const L = dx * dx + dy * dy;
-    const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
-    best = Math.min(best, Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)));
-  }
-  return best;
+/** A point inside an outline (the middle of the longest inside run of the box's middle row). */
+function innerPoint(q: readonly { x: number; y: number }[] | undefined): string {
+  if (!q?.length) return '—';
+  const ys = q.map((p) => p.y);
+  const y = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const xs: number[] = [];
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++)
+    if (q[i].y > y !== q[j].y > y)
+      xs.push(q[i].x + ((y - q[i].y) / (q[j].y - q[i].y)) * (q[j].x - q[i].x));
+  xs.sort((a, b) => a - b);
+  let best = [0, 0];
+  for (let k = 0; k + 1 < xs.length; k += 2)
+    if (xs[k + 1] - xs[k] > best[1] - best[0]) best = [xs[k], xs[k + 1]];
+  return `${Math.round((best[0] + best[1]) / 2)},${Math.round(y)}`;
 }
 
 /** Even-odd point in polygon. */
@@ -399,45 +416,35 @@ export async function runCase(c: Case, mutate: string | null) {
         .sort((x, y) => y.areaMm2 - x.areaMm2)[0];
       return best ? { outer: best.outer, area: best.areaMm2 } : null;
     };
-    // one truth point per exported piece: a point inside several outlines (a piece drawn inside
-    // another — wm's collar on the back) goes to the smallest; a piece with no point inside takes
-    // the nearest free point within GEO_NEAR_MM of its outline (a fixture point clicked on a
-    // larger size of the nest); a label breaks a tie only
+    // one truth point per exported piece: the point must lie INSIDE a piece-sized exported
+    // outline; inside several (a piece drawn inside another — wm's collar on the back) it goes to
+    // the smallest; a label breaks a tie only. No 'near' credit: a stray outline next to a missing
+    // piece's point never counts as that piece
     const geo = new Map<SeedId, string>();
-    const nearBy = new Map<SeedId, number>();
     if (pts.length) {
       const seedsAll = [...new Set(sem.pieces.map((p) => p.seed))];
       const outs = new Map(seedsAll.map((sd) => [sd, outerOf(sd)] as const));
-      const free = new Set(pts.map((p) => p.label));
       for (const p of pts) {
+        // only a piece-sized outline can be a truth piece (a stray loop around the point is not)
         const owners = seedsAll
           .filter((sd) => {
             const o = outs.get(sd);
-            return !!o && !geo.has(sd) && insidePoly(p.at, o.outer);
+            return (
+              !!o &&
+              !geo.has(sd) &&
+              o.area >= PATIMPORT.minPieceAreaMm2 &&
+              insidePoly(p.at, o.outer)
+            );
           })
           .sort((x, y) => outs.get(x)!.area - outs.get(y)!.area);
         const lab = owners.find((sd) => byLabel(sd) && norm(byLabel(sd)!.label) === norm(p.label));
         const sd = lab ?? owners[0];
         if (sd == null) continue;
         geo.set(sd, p.label);
-        free.delete(p.label);
-      }
-      for (const sd of seedsAll) {
-        const o = outs.get(sd);
-        if (geo.has(sd) || !o) continue;
-        const near = pts
-          .filter((p) => free.has(p.label))
-          .map((p) => ({ p, d: distToPoly(p.at, o.outer) }))
-          .sort((x, y) => x.d - y.d)[0];
-        if (near && near.d <= GEO_NEAR_MM) {
-          nearBy.set(sd, Math.round(near.d));
-          geo.set(sd, near.p.label);
-          free.delete(near.p.label);
-        }
       }
       rec.geo = seedsAll.map(
         (sd) =>
-          `seed ${sd} → ${geo.get(sd) ?? '—'}${nearBy.has(sd) ? ` (near, ${nearBy.get(sd)} mm off)` : ''}`,
+          `seed ${sd} → ${geo.get(sd) ?? '—'}${geo.has(sd) ? '' : ` (an inner point ${innerPoint(outs.get(sd)?.outer)})`}`,
       );
     }
     const match = (sd: SeedId) => {
@@ -447,6 +454,16 @@ export async function runCase(c: Case, mutate: string | null) {
     };
     const bySeed = new Map<SeedId, typeof sem.pieces>();
     for (const p of sem.pieces) bySeed.set(p.seed, [...(bySeed.get(p.seed) ?? []), p]);
+    // mutation control 'drop' (a check of this matcher, so on every case with truth pieces): one
+    // truth-matched piece left out of the export → must count missing
+    if (mutate === 'drop') {
+      const sd = [...bySeed.keys()].find((k) => match(k));
+      if (sd != null) {
+        bySeed.delete(sd);
+        mutated.push(`drop seed ${sd}`);
+        rec.mutated = mutated;
+      }
+    }
     // Codex #6: a BIJECTIVE match truth ↔ export (by the piece's printed label): one exported
     // piece per truth piece; a second one on the same label is an extra
     const taken = new Set<TPiece>();
