@@ -68,6 +68,11 @@ export type PageRoleDeps = {
   classify: (
     req: ClassifyPatternPagesRequestWire,
   ) => Promise<ClassifyPatternPagesResponseWire> | 'unavailable';
+  /**
+   * Codex #5: delete the uploaded thumbnails once the call is over (best effort, never awaited by
+   * the result) — they are not kept in the media library.
+   */
+  discard?: (mediaIds: number[]) => Promise<unknown>;
 };
 
 /** One file's pages as the worker drew them (render-pages). */
@@ -112,18 +117,26 @@ export function languageOf(text: string): string {
 }
 
 /**
- * The pages one call sends: the pages in question first (set aside holding line work), then the
- * rest in page order, at most `maxPages`; sent in page order.
+ * The pages one call sends (Codex #5): ONLY the pages in question (set aside holding line work, at
+ * most `maxPages − 1`) plus ONE tile page of the file as the reference of what its pattern looks
+ * like — the tile nearest the first page in question. Sent in page order. `left` = pages in
+ * question left out.
  */
-export function pagesForCall<T extends { page: PageIndex }>(
+export function pagesForCall<T extends { page: PageIndex; cls?: string }>(
   pages: readonly T[],
   asked: ReadonlySet<PageIndex>,
   maxPages = AI_PAGES.maxPages,
 ): { pages: T[]; left: number } {
-  const first = pages.filter((p) => asked.has(p.page));
-  const rest = pages.filter((p) => !asked.has(p.page));
-  const take = [...first, ...rest].slice(0, maxPages).sort((a, b) => a.page - b.page);
-  return { pages: take, left: pages.length - take.length };
+  const q = pages.filter((p) => asked.has(p.page)).sort((a, b) => a.page - b.page);
+  const take = q.slice(0, Math.max(1, maxPages - 1));
+  const at = take[0]?.page ?? 0;
+  const ref = pages
+    .filter((p) => p.cls === 'tile' && !asked.has(p.page))
+    .sort((a, b) => Math.abs(a.page - at) - Math.abs(b.page - at))[0];
+  return {
+    pages: [...take, ...(ref ? [ref] : [])].sort((a, b) => a.page - b.page),
+    left: q.length - take.length,
+  };
 }
 
 const clamp01 = (x: unknown) => {
@@ -258,13 +271,15 @@ async function run(
     more,
   });
   if (!thumbs.length) return none('skipped', null);
+  const uploaded: number[] = [];
   try {
     return await withTimeout(
       (async (): Promise<CachedCall> => {
-        const ids = await inBatches(thumbs, 4, async (t) => ({
-          t,
-          id: pics ? await deps.upload(t.png!, `${args.fileName} page ${t.page + 1}`) : 0,
-        }));
+        const ids = await inBatches(thumbs, 4, async (t) => {
+          const id = pics ? await deps.upload(t.png!, `${args.fileName} page ${t.page + 1}`) : 0;
+          if (id > 0) uploaded.push(id);
+          return { t, id };
+        });
         // server rule: every page its own media id — an upload the store deduplicated to an id
         // already sent (two identical blank tiles) goes without the AI
         const used = new Set<number>();
@@ -312,5 +327,9 @@ async function run(
       timeout ? 'timeout' : 'error',
       `AI page roles: ${timeout ? (e as Error).message : `unavailable (${e instanceof Error ? e.message : String(e)})`} — pages judged by their geometry`,
     );
+  } finally {
+    // the thumbnails served the call: not kept (an upload still running after a timeout is not
+    // in the list yet — the backend sweep takes it)
+    if (uploaded.length && deps.discard) void deps.discard([...new Set(uploaded)]).catch(() => {});
   }
 }

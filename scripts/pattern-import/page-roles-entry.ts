@@ -156,6 +156,17 @@ async function oneFile(f: string) {
     const fx = fixturePageRoleDeps();
     const hints = await ask(s, base, name, fx.deps);
     const call = fx.log.calls[0];
+    // Codex #5: the call sends only the pages in question and one reference tile
+    {
+      const tilesSent = (call?.sent ?? []).filter((n) => tiles(base).includes(n - 1));
+      const askedSent = (call?.sent ?? []).filter((n) => asked.some((d) => d.page === n - 1));
+      check(
+        name,
+        'the call sends only the pages in question + one reference tile',
+        !!call && tilesSent.length === 1 && askedSent.length + 1 === call.sent.length,
+        { sent: call?.sent, tiles: tilesSent },
+      );
+    }
     check(
       name,
       'every page the call sends has a recorded answer',
@@ -371,6 +382,50 @@ async function staleSection(f: string) {
   await client.close(1);
 }
 
+/** Codex #5: every uploaded thumbnail is deleted after the call — answered or failed. */
+async function discardSection() {
+  for (const fails of [false, true]) {
+    const up: number[] = [];
+    const gone: number[] = [];
+    let n = 100;
+    const thumbs = [0, 1, 2].map((page) => ({
+      file: '0',
+      page,
+      widthMm: 210,
+      heightMm: 297,
+      lineLengthM: 0,
+      pieceSizedOutlines: 0,
+      textChars: 0,
+      textExcerpt: '',
+      png: new Blob([`page ${page}`], { type: 'image/png' }),
+    }));
+    clearPageRoleCache();
+    const r = await classifyFilePages(
+      { key: `discard:${fails}`, file: '0', fileName: 'x.pdf', thumbs },
+      {
+        upload: async () => {
+          up.push(++n);
+          return n;
+        },
+        classify: async () => {
+          if (fails) throw new Error('server down');
+          return { pages: [{ pageNo: 1, role: 'cover', confidence: 0.9, evidence: [] }] };
+        },
+        discard: async (ids) => gone.push(...ids),
+      },
+    );
+    await new Promise((res) => setTimeout(res, 0));
+    check(
+      'synthetic',
+      `every uploaded thumbnail is deleted after the call (${fails ? 'the call failed' : 'answered'})`,
+      up.length === 3 &&
+        JSON.stringify([...gone].sort()) === JSON.stringify([...up].sort()) &&
+        r.status === (fails ? 'error' : 'ok'),
+      { up, gone, status: r.status },
+    );
+  }
+}
+
 export async function main(args: string[]): Promise<number> {
   if (args[0] === 'stale') {
     await staleSection(args[1] ?? 'robe.pdf');
@@ -389,6 +444,7 @@ export async function main(args: string[]): Promise<number> {
         .sort();
   const rows = [];
   if (!args.length) await staleSection('robe.pdf');
+  await discardSection();
   for (const f of files) {
     const t = Date.now();
     try {

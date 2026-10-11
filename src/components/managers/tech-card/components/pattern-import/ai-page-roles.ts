@@ -20,7 +20,7 @@ import type {
   ClassifyPatternPagesResponseWire,
   PageRoleDeps,
 } from 'lib/pattern-import/ai/pages';
-import { apiNamerDeps } from './ai-namer';
+import { asDataUrl, discardMedia } from './ai-namer';
 
 type Classify = (req: ClassifyPatternPagesRequestWire) => Promise<ClassifyPatternPagesResponseWire>;
 
@@ -30,6 +30,16 @@ const rpc: Classify | null = (() => {
 })();
 
 export const apiPageRoleDeps: PageRoleDeps = {
-  upload: (picture, what) => apiNamerDeps.upload(picture, what),
+  // Codex #5: the ordinary upload path (no preserveOriginal: nothing here is kept), deleted after
+  upload: async (picture) => {
+    const res = await adminService.UploadContentImage({
+      rawB64Image: await asDataUrl(picture),
+      preserveOriginal: undefined,
+    });
+    const id = res.media?.id ?? 0;
+    if (!id) throw new Error('the page went up but came back without an id');
+    return id;
+  },
   classify: (req) => (rpc ? rpc(req) : 'unavailable'),
+  discard: discardMedia,
 };

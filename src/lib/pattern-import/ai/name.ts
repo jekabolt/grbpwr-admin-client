@@ -24,6 +24,8 @@ export type NamerDeps = {
   upload: (picture: Blob, what: string) => Promise<number>;
   /** POST /api/admin/pattern-import/pieces:suggest. */
   suggest: (req: SuggestPatternPiecesRequest) => Promise<SuggestPatternPiecesResponse>;
+  /** A9 Codex #5: delete the uploaded renders once the call is over (best effort). */
+  discard?: (mediaIds: number[]) => Promise<unknown>;
 };
 
 export type NamerResult = {
@@ -65,7 +67,13 @@ export async function suggestNames(
   ).filter((c): c is { mark: number; mediaId: number } => !!c);
 
   const input = buildSuggestInput(som, card, { overview, crops }, !!opts.force);
-  const output = fromWireResponse(await deps.suggest(toWireRequest(input)));
+  let output: SuggestPatternPiecesOutput;
+  try {
+    output = fromWireResponse(await deps.suggest(toWireRequest(input)));
+  } finally {
+    // the renders served the call: not kept in the media library (best effort)
+    if (deps.discard) void deps.discard([overview, ...crops.map((c) => c.mediaId)]).catch(() => {});
+  }
   const decisions = combineNames(output.suggestions, som.marks, {
     existingPieceNames: card.existingPieceNames,
     threshold: opts.threshold,
