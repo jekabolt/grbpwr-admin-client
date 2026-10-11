@@ -56,6 +56,13 @@ export type DriveCtx<I> = {
   /** Something is running (a stage, the namer, a write): the tick waits. */
   busy: boolean;
   resolve?: AutoResolver<I>;
+  /**
+   * AP-replay: offered every step that asks NOTHING, once per (step, outputs revision), before the
+   * drive goes on — the answers a previous import of the same files gave without being asked (a
+   * typed name, a fabric tick). null / no patch and no events = nothing to add, the drive goes on.
+   * Its answer is taken under the same rules as the resolver's (the step's own answers only).
+   */
+  prefill?: AutoResolver<I>;
   /** The latest session and inputs (refs), read when the resolver is asked. */
   current: () => { session: ImportSession; inputs: I };
   /** One forward move of the wizard; true = the step moved. */
@@ -105,6 +112,9 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
   if (AUTO_STOPS.includes(step)) return { kind: 'stopped', why: 'auto-stop', step };
   const question = c.blocker ?? c.offer;
   if (!question) {
+    // AP-replay: what the previous import answered unasked on this step, once per outputs revision
+    const pre = c.prefill ? await prefillTick(st, c, step) : null;
+    if (pre) return pre;
     const moved = await c.forward();
     return moved ? { kind: 'moved', from: step } : { kind: 'stopped', why: 'not-moved', step };
   }
@@ -166,4 +176,56 @@ export async function driveTick<I>(st: DriveState, c: DriveCtx<I>): Promise<Driv
     if (!moved) return { kind: 'stopped', why: 'not-moved', step, question };
   }
   return { kind: 'answered', step, question };
+}
+
+/** The prefill's question (a step that asks nothing): what the tick reports it answered. */
+export const PREFILL_QUESTION = '(prefill)';
+
+/**
+ * AP-replay: one prefill offer on a step that asks nothing — null = nothing taken (the drive goes
+ * on). An answer goes through the same refusal rules as a resolver answer; a refused one stops.
+ */
+async function prefillTick<I>(
+  st: DriveState,
+  c: DriveCtx<I>,
+  step: WizardStep,
+): Promise<DriveTick | null> {
+  // once per outputs revision — and again after each answer taken (an inputs-only answer leaves
+  // the revision as it was, and what it made possible is offered next)
+  const key = `${step}|${PREFILL_QUESTION}|${outputsRev(st, c.session)}|${st.perStep[step] ?? 0}`;
+  if (st.asked.has(key)) return null;
+  st.asked.add(key);
+  const now = c.current();
+  const a = (await c.prefill!({
+    session: now.session,
+    inputs: now.inputs,
+    step,
+    question: PREFILL_QUESTION,
+  })) as DriveAnswer<I> | null;
+  if (!c.live()) return { kind: 'stopped', why: 'stale', step };
+  if (!a || a.stop || (!a.patch && !a.events?.length)) return null;
+  const n = (st.perStep[step] = (st.perStep[step] ?? 0) + 1);
+  if (n > MAX_ANSWERS_PER_STEP)
+    return {
+      kind: 'stopped',
+      why: 'cap',
+      step,
+      reason: `more than ${MAX_ANSWERS_PER_STEP} answers on ${step}`,
+    };
+  const problem = answerProblem(step, a);
+  if (problem)
+    return {
+      kind: 'stopped',
+      why: 'refused',
+      step,
+      question: PREFILL_QUESTION,
+      reason: `the replayed answer was refused — ${problem}`,
+    };
+  if (a.patch) await c.patch(a.patch);
+  for (const ev of a.events ?? []) {
+    if (!c.live()) return { kind: 'stopped', why: 'stale', step };
+    await c.dispatch(ev);
+    if (c.failed()) break;
+  }
+  return { kind: 'answered', step, question: PREFILL_QUESTION };
 }

@@ -8,6 +8,7 @@ import type {
   AllowanceDecision,
   ApplyResult,
   AutopilotRecord,
+  ReplayRecord,
   CardSize,
   ImportErrorCode,
   ChainRole,
@@ -60,6 +61,7 @@ import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
+import { answerRecordOf } from './autopilot/replay-record';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -371,9 +373,24 @@ export function useImportSession(deps: {
    * N1: the forward drive — armed by the operator's next / read, dropped where a step asks. `gen`
    * tells a stale drive (or a stale resolver answer) from the live one.
    */
-  const drive = useRef<{ gen: number; resolve?: AutoResolver<Inputs>; state: DriveState } | null>(
-    null,
-  );
+  const drive = useRef<{
+    gen: number;
+    resolve?: AutoResolver<Inputs>;
+    /** AP-replay: the previous import's unasked answers, offered on a step that asks nothing. */
+    prefill?: AutoResolver<Inputs>;
+    /** Armed with the standing pair (the operator's "next", reading files), not by `advance`. */
+    standing: boolean;
+    state: DriveState;
+  } | null>(null);
+  /**
+   * AP-replay: what arms the drive when nothing else does (the operator's "next", reading the
+   * files) — the replay of a previous import of the same files, so manual mode reuses its answers
+   * too. Its resolver stops on a question it cannot answer (the operator's, as without it).
+   */
+  const standing = useRef<{
+    resolve?: AutoResolver<Inputs>;
+    prefill?: AutoResolver<Inputs>;
+  } | null>(null);
   /** A10: where and why the last armed resolver (the autopilot) stopped; null = it did not. */
   const [driveStop, setDriveStop] = useState<{
     step: WizardStep;
@@ -881,7 +898,7 @@ export function useImportSession(deps: {
             // pages the AI + geometry set aside, when the autopilot asked nothing to record them)
             ...autopilotOf(
               ev.autopilot,
-              drive.current?.resolve || iRef.current.autopilot.length
+              (drive.current?.resolve && !drive.current.standing) || iRef.current.autopilot.length
                 ? mergeAssumptions(
                     iRef.current.autopilot,
                     aiAsideAssumptions(sRef.current, iRef.current.autopilot),
@@ -889,6 +906,9 @@ export function useImportSession(deps: {
                 : iRef.current.autopilot,
               sem.pieces,
             ),
+            // AP-replay: every answer the run ends with, reproducible — a re-import of the same
+            // files reuses them (autopilot/replay.ts); never a reason not to write
+            ...replayOf(),
           });
           const draft = buildDraft(out, { card: rc(), semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
@@ -1052,6 +1072,22 @@ export function useImportSession(deps: {
       fail(e);
     }
   }
+
+  /** AP-replay: the run's answers for the manifest (absent when none, or when it cannot be read). */
+  const replayOf = (): { replay?: ReplayRecord } => {
+    try {
+      const r = answerRecordOf(
+        sRef.current,
+        iRef.current,
+        baseSeeds.current,
+        rc(),
+        !!exRef.current.presegmented,
+      );
+      return r ? { replay: r } : {};
+    } catch {
+      return {};
+    }
+  };
 
   /** A9: the AI page roles of this run as the clean stage's input (none = absent). */
   const aiHintsNow = () =>
@@ -1543,8 +1579,15 @@ export function useImportSession(deps: {
       setFlight((n) => n - 1);
     }
   }
-  const arm = (resolve?: AutoResolver<Inputs>) => {
-    drive.current = { gen: ++driveGen.current, resolve, state: newDriveState() };
+  const arm = (resolve?: AutoResolver<Inputs>, prefill?: AutoResolver<Inputs>) => {
+    const st = resolve ? null : standing.current;
+    drive.current = {
+      gen: ++driveGen.current,
+      resolve: resolve ?? st?.resolve,
+      prefill: resolve ? prefill : st?.prefill,
+      standing: !resolve && !!st,
+      state: newDriveState(),
+    };
     setDriveStop(null);
     setDriveTick((t) => t + 1);
   };
@@ -1614,6 +1657,7 @@ export function useImportSession(deps: {
           notice: notice && notice === ackedNote.current ? null : notice,
           busy: false,
           resolve: d.resolve,
+          prefill: d.prefill,
           current: () => ({ session: sRef.current, inputs: iRef.current }),
           forward: async () => {
             const rev = opRev.current;
@@ -1672,12 +1716,12 @@ export function useImportSession(deps: {
    * asks is offered to it first (AUTOPILOT's policy) — its answer is applied and the step checked
    * again; no answer = the run stops there for the operator.
    */
-  function advance(opts: { resolve?: AutoResolver<Inputs> } = {}) {
+  function advance(opts: { resolve?: AutoResolver<Inputs>; prefill?: AutoResolver<Inputs> } = {}) {
     if (refusal.current && notice === refusal.current) setNotice(null);
     refusal.current = null;
     // a resume past the namer's outage: acknowledged — the codes are typed without the AI
     if (opts.resolve && notice && notice === namerNote.current) ackedNote.current = notice;
-    arm(opts.resolve);
+    arm(opts.resolve, opts.prefill);
   }
 
   /**
@@ -1878,6 +1922,13 @@ export function useImportSession(deps: {
     advance,
     /** A10: where and why the autopilot's drive stopped (the footer line); null = it did not. */
     driveStop,
+    /**
+     * AP-replay: what arms the drive when the operator moves on (manual mode) — the replay of a
+     * previous import; null = nothing (a step that asks stops for the operator).
+     */
+    setStanding: (x: { resolve?: AutoResolver<Inputs>; prefill?: AutoResolver<Inputs> } | null) => {
+      standing.current = x;
+    },
     /** A0.2: the sheet is one page — the stepper shows the step passed over ("1 page"). */
     sheetSkipped:
       !extracted.presegmented && singlePageSheet(session.pages, session.sheet, inputs.gridOverride),

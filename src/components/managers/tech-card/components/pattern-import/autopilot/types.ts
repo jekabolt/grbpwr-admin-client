@@ -32,7 +32,13 @@ export type AssumptionKind =
   | 'cutting-list'
   | 'outline'
   | 'quantity'
-  | 'fabric';
+  | 'fabric'
+  // AP-replay: answers only a replay gives (the operator's own, reused)
+  | 'sheet-grid'
+  | 'sheet-passed'
+  | 'piece-edits'
+  | 'piece-override'
+  | 'name-typed';
 
 /**
  * `seed` and `ref` are the machine handles of the subject (a piece, a page "file:page", a source

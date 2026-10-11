@@ -15,3 +15,6 @@ export { cardStrings, modelFromCard, sheetFromCard } from './card-match';
 export type { CardPick } from './card-match';
 export { assumptionKey, autopilotRecordOf, mergeAssumptions } from './types';
 export type { Assumption, AssumptionKind } from './types';
+export { priorOf, replayAnswer, replayDrive } from './replay';
+export type { Prior, ReplayLog, ReplayMiss, ReplaySource } from './replay';
+export { answerRecordOf, isReplayed, REPLAY_RULE } from './replay-record';
