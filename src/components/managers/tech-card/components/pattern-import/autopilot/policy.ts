@@ -1510,7 +1510,15 @@ function meaningStep(snap: Snap): AutopilotDecision {
     };
   }
 
-  // 5 · counts and names as shown
+  // 5 · counts and names as shown — but a piece shown ONCE, unpaired and not on fold, with no word
+  //     on the sheet about its count, is a stop: ×1, ×2 (sleeves) or on fold are all as likely
+  //     (wm-M's sleeve exported ×1 against 2 expected; A10 r4)
+  const single = open.quantity.find((u) => u.shown === '×1' && !u.foldAlt);
+  if (single)
+    return stopAt(
+      'meaning',
+      `${subj(single.seed)} is drawn once and nothing on the sheet says how many to cut — ×1, ×2 or on fold?`,
+    );
   if (open.total)
     return {
       actions: [{ kind: 'confirm-shown' }],
