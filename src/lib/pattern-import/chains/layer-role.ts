@@ -32,8 +32,10 @@
 //
 // layerLoopAsides (the autopilot's set-aside question): an outline the face pass set aside inside a
 // cut piece — a closed loop on the internal layer, or a part split off by internal lines — on a file
-// whose layers proved their meaning and every cut outline closed, is positive evidence of no piece;
-// never an outline on the cut layer.
+// whose layers proved their meaning and every cut outline closed, is positive evidence of no piece
+// when every line bounding it lies on the cut layer or a proven internal layer (re-flooded locally
+// from its point); never an outline on the cut layer, never one with a boundary on another layer
+// (a lining or facing drawn on a proprietary layer stays a question).
 import type {
   BoxMm,
   Chain,
@@ -51,6 +53,7 @@ import { isGrainArrow } from 'lib/nesting/dxf/grain-arrow';
 
 import { layerKind } from '../adapters/dxf/segment';
 import { pointInPoly } from '../pieces/geom';
+import { drawPolyline, flood, Grid } from '../pieces/raster';
 import { bboxOf, median, resample, SegGrid, segNearest } from './geom';
 
 type LayerKind = ReturnType<typeof layerKind>;
@@ -340,9 +343,10 @@ const layersOf = (c: LineClass) => c.evidence.flatMap((e) => (e.kind === 'layer'
 export function layerLoopAsides(
   set: ChainSet,
   asides: SetAside[],
-  o: { off?: boolean } = {},
+  o: { off?: boolean | ReadonlySet<'all' | 'bounds'> } = {},
 ): SetAside[] {
-  if (o.off || !asides.length) return asides;
+  const off: ReadonlySet<string> = o.off === true ? new Set(['all']) : o.off ? o.off : new Set();
+  if (off.has('all') || !asides.length) return asides;
   const cutRow = set.classes.find(
     (c) =>
       c.role === 'common' && c.evidence.some((e) => e.kind === 'layer' && e.meaning === 'cut line'),
@@ -374,6 +378,82 @@ export function layerLoopAsides(
     b.maxX <= c.maxX + TOL &&
     b.minY >= c.minY - TOL &&
     b.maxY <= c.maxY + TOL;
+  // the lines the face pass draws as walls, and which of them the layers proved (cut + internal)
+  const classOf = new Map<ChainId, LineClass>();
+  for (const c of set.classes) for (const id of c.chains) classOf.set(id, c);
+  const walls = set.chains.filter((ch) => {
+    const r = classOf.get(ch.id)?.role;
+    return ch && ch.pts.length >= 2 && r !== 'ignore' && r !== 'notch';
+  });
+  const proven = (id: ChainId) => {
+    const c = classOf.get(id);
+    return !!c && layersOf(c).length > 0;
+  };
+  const wallGrid = new SegGrid(8);
+  const wallPts = new Map<ChainId, PtMm[]>();
+  for (const ch of walls) {
+    const pts = ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts;
+    wallPts.set(ch.id, pts);
+    wallGrid.addPolyline(ch.id, pts);
+  }
+  /** Every line bounding the aside's region drawn on the cut layer or a proven internal layer. */
+  const boundedByProven = (a: SetAside): boolean => {
+    const cell = Math.max(0.5, Math.sqrt(a.areaMm2) / 300);
+    const box = {
+      minX: a.box.minX - 6,
+      minY: a.box.minY - 6,
+      maxX: a.box.maxX + 6,
+      maxY: a.box.maxY + 6,
+    };
+    const g = new Grid(box, cell);
+    const wall = new Uint8Array(g.W * g.H);
+    for (const ch of walls) {
+      const b = bboxOf(ch.pts);
+      if (b.maxX < box.minX || b.minX > box.maxX || b.maxY < box.minY || b.minY > box.maxY)
+        continue;
+      drawPolyline(g, wall, ch.pts, ch.closed);
+    }
+    const k = g.iy(a.at.y) * g.W + g.ix(a.at.x);
+    if (wall[k]) return false;
+    const reg = new Uint8Array(g.W * g.H);
+    const n = flood(g, wall, [k], reg);
+    // it must close inside its box, at about its own area
+    for (let x = 0; x < g.W; x++) if (reg[x] || reg[(g.H - 1) * g.W + x]) return false;
+    for (let y = 0; y < g.H; y++) if (reg[y * g.W] || reg[y * g.W + g.W - 1]) return false;
+    const area = n * cell * cell;
+    if (Math.abs(area - a.areaMm2) > 0.25 * a.areaMm2) return false;
+    // the wall pixels round it, each attributed to its nearest line
+    const W = g.W;
+    const rim: number[] = [];
+    for (let q = 0; q < reg.length; q++) {
+      if (!wall[q]) continue;
+      const x = q % W;
+      if (
+        (x > 0 && reg[q - 1]) ||
+        (x + 1 < W && reg[q + 1]) ||
+        (q >= W && reg[q - W]) ||
+        (q + W < reg.length && reg[q + W])
+      )
+        rim.push(q);
+    }
+    const step = Math.max(1, Math.floor(rim.length / 600));
+    for (let i = 0; i < rim.length; i += step) {
+      const y = (rim[i] / W) | 0;
+      const p = g.centre(rim[i] - y * W, y);
+      let best = -1;
+      let bd = Infinity;
+      wallGrid.near(p, 3 * cell + 1, (owner, seg) => {
+        const pts = wallPts.get(owner)!;
+        const d = segNearest(p, pts[seg], pts[seg + 1]).d;
+        if (d < bd) {
+          bd = d;
+          best = owner;
+        }
+      });
+      if (best >= 0 && !proven(best)) return false;
+    }
+    return rim.length > 0;
+  };
   return asides.map((a) => {
     // an outline on the cut layer is a piece of its own: never
     if (cuts.some((q) => near(q.box, a.box))) return a;
@@ -382,6 +462,9 @@ export function layerLoopAsides(
       (q) => pointInPoly(a.at, q.p) && within(a.box, q.box) && q.a > 1.02 * a.areaMm2,
     );
     if (!host) return a;
+    // a subdivision of the cut piece: bounded only by the cut line and proven internal lines (a
+    // lining / facing outline on another layer stays a question)
+    if (!off.has('bounds') && !boundedByProven(a)) return a;
     const loop = loops.find((l) => near(l.box, a.box) && pointInPoly(a.at, l.ch.pts));
     return {
       ...a,
