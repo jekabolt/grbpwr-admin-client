@@ -396,8 +396,11 @@ export type ClassEvidence =
   | { kind: 'faces'; pieces: number; cues: string[]; auto: boolean }
   /** A0.3: lines inside the closed outlines (grain, darts, placement). */
   | { kind: 'inside-faces'; pieces: number }
-  /** A0.3: lines that are no outline — outside them, in a junk face, offered as background. */
-  | { kind: 'face-stray'; why: string };
+  /**
+   * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
+   * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
+   */
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
 
 export type LineClass = {
   id: ClassId;
@@ -1798,7 +1801,15 @@ export type StageIO = {
     };
   };
   chains: {
-    in: { opts: ChainOpts; legend?: Parameters<ApplyLegendFn>[1] };
+    in: {
+      opts: ChainOpts;
+      legend?: Parameters<ApplyLegendFn>[1];
+      /**
+       * Rows the operator confirmed as proposed (keys: the row's sig, or `#id`): confidence 1 in the
+       * built set (chains/legend confirmRows). Absent = no row confirmed.
+       */
+      confirmed?: string[];
+    };
     out: {
       classes: LineClass[];
       bundles: Bundle[];
@@ -1977,6 +1988,8 @@ export type WizardEvent =
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
+  /** A low-confidence legend row confirmed as proposed (its key: sig, or `#id`). */
+  | { type: 'legend-confirm'; key: string }
   | { type: 'size-map'; entries: SizeMapEntry[] }
   /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
   | { type: 'drawn-sizes'; n: number | null }

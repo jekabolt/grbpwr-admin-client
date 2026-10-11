@@ -79,7 +79,8 @@ import {
 } from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
-import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
+import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
+import { gradeView } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
 import {
@@ -966,6 +967,8 @@ export class Session {
       // size (a size drawn in two looks).
       set = withClassSigs(set, sheet.styles);
       if (input.legend?.length) set = mergeSameSize(applyLegend(set, input.legend));
+      // rows confirmed as proposed are answered (confidence 1): the size checks read the answer
+      if (input.confirmed?.length) set = confirmRows(set, input.confirmed);
     }
     this.chains = set;
     return {
@@ -1023,7 +1026,8 @@ export class Session {
       return null;
     const set = this.chains;
     if (!set || !this.sheet) return { inferred: null };
-    if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
+    if (this.inferred?.set !== set)
+      this.inferred = { set, v: inferDrawnSizes(this.sheet, gradeView(set)) };
     // A6 (not on the DXF fast path: its blocks are its pieces, the faces are not read)
     if (this.fast) return { inferred: this.inferred.v };
     // A6: only what feeds THIS sheet — its texts, its files' instruction texts, its faces, its files

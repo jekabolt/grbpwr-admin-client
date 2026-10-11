@@ -621,12 +621,32 @@ export function useImportSession(deps: {
           const chains = await run('chains', {
             opts: chainOpts(),
             legend: ev.edits,
+            confirmed: iRef.current.legendConfirmed,
           });
           const sizes = await run('sizes', {
             card: card.sizes,
             drawnSizes: drawnNow() ?? undefined,
           });
           patchInputs({ sizeMap: null });
+          patch({ chains, sizes });
+          return;
+        }
+        case 'legend-confirm': {
+          // an answer the worker needs too (the size checks): the chains are rebuilt with it; the
+          // roles do not change, so the operator's size map stays
+          const legendConfirmed = [...iRef.current.legendConfirmed, ev.key];
+          iRef.current = { ...iRef.current, legendConfirmed };
+          patchInputs({ legendConfirmed });
+          const chains = await run('chains', {
+            opts: chainOpts(),
+            legend: iRef.current.legend,
+            confirmed: legendConfirmed,
+          });
+          const sizes = await run('sizes', {
+            card: card.sizes,
+            operatorMap: iRef.current.sizeMap ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
+          });
           patch({ chains, sizes });
           return;
         }
@@ -898,7 +918,11 @@ export function useImportSession(deps: {
 
   /** sheet → sizes: the legend and the size map of the assembled sheet. */
   async function toSizes() {
-    const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
+    const chains = await run('chains', {
+      opts: chainOpts(),
+      legend: iRef.current.legend,
+      confirmed: iRef.current.legendConfirmed,
+    });
     const sizes = await run('sizes', {
       card: card.sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
