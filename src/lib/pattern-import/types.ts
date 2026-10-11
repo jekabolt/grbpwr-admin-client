@@ -407,7 +407,9 @@ export type ClassEvidence =
    * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
    * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
    */
-  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] }
+  /** P2: the AAMA/ASTM meaning of the line's layer (chains/layer-role.ts). */
+  | { kind: 'layer'; layer: string; meaning: string };
 
 export type LineClass = {
   id: ClassId;
