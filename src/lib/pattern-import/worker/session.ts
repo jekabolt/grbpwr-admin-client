@@ -355,6 +355,7 @@ export class Session {
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
+  private continuityOf: SemanticsDetail['continuityOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -445,6 +446,7 @@ export class Session {
       this.semantics = null;
       this.wallsOf = null;
       this.derivedOf = null;
+      this.continuityOf = null;
     }
   }
 
@@ -1326,6 +1328,7 @@ export class Session {
     this.semantics = detail.output;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
+    this.continuityOf = detail.continuityOf;
     return detail.output;
   }
 
@@ -1412,6 +1415,7 @@ export class Session {
     // own blocks.
     const rawWalls = this.wallsOf;
     const derived = this.derivedOf;
+    const continuity = this.continuityOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -1484,6 +1488,9 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          continuityOf: continuity
+            ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
+            : undefined,
           chrome,
           openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,

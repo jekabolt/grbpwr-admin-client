@@ -30,6 +30,8 @@ import type {
   CardSize,
   Chain,
   ChainId,
+  ContinuityGeometry,
+  ContinuityRecord,
   ChainSet,
   DerivedEdge,
   DrillFeature,
@@ -136,6 +138,8 @@ export type SemanticsDetail = {
    * walls (F14b, Codex C1): the write stage passes this as `derivedOf` to `writeAndGate` (G15).
    */
   derivedOf: (identity: string, rank: number) => DerivedEdge[] | undefined;
+  /** P1 (G21): the continuity stretches of a size closed through them, and their chains. */
+  continuityOf: (identity: string, rank: number) => ContinuityGeometry | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -797,6 +801,25 @@ export function buildPieceSpecsDetailed(
     }
   }
 
+  // P1 (G21): a continuity closure's provenance — roles as read, never a line of its own size
+  const roleOfChain = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) roleOfChain.set(id, k.role);
+  const continuityRecord = (c: PieceCandidate): ContinuityRecord => {
+    const cls = set.classes.find((k) => k.id === run.sizes[c.rank]?.classId);
+    const own = new Set(cls?.role === 'size' ? cls.chains : []);
+    return {
+      rank: c.rank,
+      edges: (c.continuity ?? []).map((e) => ({
+        rule: e.rule,
+        chains: [...e.chains],
+        roles: e.chains.map((id) => roleOfChain.get(id) ?? 'unclassified'),
+        ...(e.bracket ? { bracket: true } : {}),
+        ownRank: e.chains.some((id) => own.has(id)),
+      })),
+      verdict: c.continuityVerdict ?? null,
+    };
+  };
+
   // ── pass 2: geometry per family ─────────────────────────────────────────────────────────
   const pieces: PieceSpec[] = [];
   const walls = new Map<string, WallMap[]>(); // identity → per rank
@@ -1194,6 +1217,7 @@ export function buildPieceSpecsDetailed(
         walls: c.walls,
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
+        ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
       });
       wallMaps.push({
         seed,
@@ -1570,6 +1594,24 @@ export function buildPieceSpecsDetailed(
     if (!lines.length) return undefined;
     return toFrame(src.w, lines);
   };
+  /** P1 (G21): the continuity stretches of an identity × rank and their chains, its own frame. */
+  const continuityOf = (identity: string, rank: number): ContinuityGeometry | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || src.cand.rankFrom !== 'continuity' || !src.cand.continuity?.length)
+      return undefined;
+    return {
+      edges: src.cand.continuity.map((e) => ({
+        pts: toFrame(src.w, [e.pts]).filter((l) => l.length > 1),
+        chainLines: toFrame(
+          src.w,
+          e.chains
+            .map((id) => set.chains[id])
+            .filter((ch) => !!ch && ch.pts.length > 1)
+            .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts)),
+        ),
+      })),
+    };
+  };
   const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
     const src = sourceOf(identity, rank);
@@ -1616,6 +1658,7 @@ export function buildPieceSpecsDetailed(
     },
     wallsOf,
     derivedOf,
+    continuityOf,
     notes,
   };
 }

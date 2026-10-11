@@ -292,6 +292,8 @@ const GATE_CHECK_IDS = new Set([
   'G19-chrome',
   // A2: a piece drawn inside another written as its internal line
   'G20-nested-piece',
+  // P1: a size closed through continuity walls keeps its provenance and verdict
+  'G21-continuity',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
@@ -635,6 +637,24 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.grain`, 'needs origin and a short evidence list');
+    // P1: optional continuity provenance — rules, chain ids, anchor ranks; bounded
+    const cont = b.continuity;
+    if (
+      cont !== undefined &&
+      !(
+        isObj(cont) &&
+        Array.isArray(cont.rules) &&
+        cont.rules.length <= 64 &&
+        cont.rules.every((x) => x === 'R0' || x === 'R1' || x === 'R2') &&
+        Array.isArray(cont.chains) &&
+        cont.chains.length <= 256 &&
+        cont.chains.every((x) => isInt(x) && (x as number) >= 0) &&
+        Array.isArray(cont.anchors) &&
+        cont.anchors.length <= 64 &&
+        cont.anchors.every((x) => isInt(x) && (x as number) >= 0)
+      )
+    )
+      fail(`${p}.continuity`, 'needs rules R0–R2, chain ids and anchor ranks');
     const ci = b.block.trim().toLowerCase();
     if (blockNames.has(ci)) fail(`${p}.block`, `duplicate "${b.block}"`);
     blockNames.add(ci);
@@ -671,6 +691,15 @@ export function validateManifest(x: unknown): ConversionManifest {
             contour: {
               dev: (b.contour as ContourSignature).dev,
               pts: [...(b.contour as ContourSignature).pts],
+            },
+          }
+        : {}),
+      ...(isObj(cont)
+        ? {
+            continuity: {
+              rules: [...(cont.rules as ('R0' | 'R1' | 'R2')[])],
+              chains: [...(cont.chains as number[])],
+              anchors: [...(cont.anchors as number[])],
             },
           }
         : {}),

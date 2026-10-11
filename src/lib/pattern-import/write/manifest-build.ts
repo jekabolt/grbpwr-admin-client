@@ -73,6 +73,19 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
       : {}),
     // F14f (Codex R2): binds this entry to the written cut ring (manifest/contour-sig.ts)
     ...(contour ? { contour } : {}),
+    // P1: closed through continuity walls — the rules, chains and anchors (G21 checks them)
+    ...(b.size.continuity ? { continuity: continuityOfBlock(b.size.continuity) } : {}),
+  };
+}
+
+/** The manifest's continuity entry of a size: rules in edge order, chains sorted, anchors. */
+export function continuityOfBlock(
+  c: NonNullable<PlannedBlock['size']['continuity']>,
+): NonNullable<ManifestBlock['continuity']> {
+  return {
+    rules: c.edges.map((e) => e.rule),
+    chains: [...new Set(c.edges.flatMap((e) => e.chains))].sort((a, b) => a - b),
+    anchors: [...(c.verdict?.anchors ?? [])],
   };
 }
 

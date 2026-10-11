@@ -1065,7 +1065,30 @@ export type PieceSizeSpec = {
   walls: ChainId[];
   bbox: BoxMm;
   areaMm2: Mm2;
+  /** P1: this size closed through continuity walls — what, and the D3 verdict (gate G21). */
+  continuity?: ContinuityRecord;
 };
+
+/**
+ * P1 provenance of a continuity closure, without geometry (the geometry rides in the gate's
+ * `continuityByBlock`, written frame). Per edge: its rule, the drawn chains it lies on with their
+ * roles as read, `ownRank` = one of them is a line of this size's own class as read (the wall model
+ * gave it to another rank; recorded for the audit — it is the size's own drawn line).
+ */
+export type ContinuityRecord = {
+  rank: number;
+  edges: {
+    rule: ContinuityEdge['rule'];
+    chains: ChainId[];
+    roles: string[];
+    bracket?: boolean;
+    ownRank: boolean;
+  }[];
+  verdict: ContinuityVerdict | null;
+};
+
+/** P1: per continuity edge (same order as the record), its stretch and its chains, written frame. */
+export type ContinuityGeometry = { edges: { pts: PtMm[][]; chainLines: PtMm[][] }[] };
 
 export type SemanticsInput = {
   sheet: Sheet;
@@ -1495,6 +1518,12 @@ export type ManifestBlock = {
    * whole manifest as untrusted (legacy parse), never as matched.
    */
   contour?: ContourSignature;
+  /**
+   * P1: this size closed through continuity walls (drawn lines of another class or size between
+   * its own ends): the rules, the chains, and the anchor ranks the D3 verdict stood on. G21 checks
+   * it against the run; absent = closed on its own lines.
+   */
+  continuity?: { rules: ContinuityEdge['rule'][]; chains: ChainId[]; anchors: number[] };
 };
 
 /**
@@ -1545,7 +1574,13 @@ export type GateCheckId =
    * A8b: the cut / seam line traced around tile chrome — a hairpin round a 1 mm bar (a corner
    * bracket), or a stretch ≥ 5 mm ON a masked / offered chrome line (block).
    */
-  | 'G19-chrome';
+  | 'G19-chrome'
+  /**
+   * P1: a size closed through continuity walls carries its provenance and D3 verdict; the stretch
+   * lies on the chains it names, the written line runs along it, the rule's constraints hold, and
+   * the verdict's checks are within what it allowed (block on any mismatch).
+   */
+  | 'G21-continuity';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1690,6 +1725,8 @@ export type GateExpectation = {
    * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
    */
   derivedByBlock?: Record<string, DerivedEdge[]>;
+  /** P1 (G21): per block closed through continuity walls, the used stretches and their chains. */
+  continuityByBlock?: Record<string, ContinuityGeometry>;
   /**
    * A8b (G19): tile chrome near each block, written frame — the clean stage's masked frames,
    * marks and tile labels and the chrome it only offered. A cut / seam line on it is traced chrome.
