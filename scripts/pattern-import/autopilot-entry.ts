@@ -194,6 +194,114 @@ const pg = (
 const M3 = ['Mod. 112', 'Mod. 113', 'Mod. 2026'];
 const AB = ['Style A', 'Style B'];
 const ROWS: Row[] = [
+  // an article / SKU / ref number in any spelling is never a model token (style field and name)
+  {
+    id: 'article-style-1',
+    style: 'Art.-Nr. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-1',
+    name: 'Coat Art.-Nr. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-2',
+    style: 'Article No. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-2',
+    name: 'Coat Article No. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-3',
+    style: 'Art-Nr 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-3',
+    name: 'Coat Art-Nr 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-4',
+    style: 'Artikelnummer 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-4',
+    name: 'Coat Artikelnummer 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-5',
+    style: 'SKU 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-5',
+    name: 'Coat SKU 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-6',
+    style: 'Ref. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-6',
+    name: 'Coat Ref. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-7',
+    style: 'артикул 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-7',
+    name: 'Coat артикул 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  // a style-number field with more than the bare value: a suggestion only
+  {
+    id: 'style-field-not-bare',
+    style: 'FW26 112',
+    labels: M3,
+    expect: 'weak',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+
   // Codex re-check #2: an article number is another namespace; prefixes match within their family
   {
     id: 'article-explicit',

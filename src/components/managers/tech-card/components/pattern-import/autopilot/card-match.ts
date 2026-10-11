@@ -34,7 +34,17 @@ export type CardPick<T> =
 // "Artikel", "Article") is another namespace — never a model
 const MOD_WORD = String.raw`(?:modell?s?|mod[eè]les?|modelos?|mod|модел[ьи]|мод)`;
 const STYLE_WORD = String.raw`(?:styles?|views?|version|variante?n?|ansicht|вариант|фасон)`;
-const ART_WORD = String.raw`(?:art(?:ikel|icle)?|арт(?:икул)?)`;
+/**
+ * An article / SKU / reference number in any spelling ("Art.-Nr. 112", "Article No. 112",
+ * "Art-Nr 112", "Artikelnummer 112", "SKU 112", "Ref. 112", "артикул 112"): the prefix, an
+ * optional "No./Nr./Nummer/#", then the number — the whole span is an article number, in any
+ * field, and never a model token (Codex re-check of 14f4f959).
+ */
+const ART_WORD = String.raw`(?:art(?:ikel|icle)?(?:nummer|number|nr|no)?|артикул|арт|sku|ref(?:erence|erenz)?|item)`;
+const ARTICLE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])${ART_WORD}\.?(?:[\s_#№:.\-]*(?:nummer|number|num|nr|no|n°|#)(?![\p{L}])\.?)?[\s_#№:.\-]*\d[\d./\-]*`,
+  'giu',
+);
 const MODEL_WORD = String.raw`(?:${MOD_WORD}|${STYLE_WORD})`;
 const familyOf = (word: string): Family =>
   new RegExp(String.raw`^${MOD_WORD}\.?$`, 'iu').test(word.trim()) ? 'mod' : 'style';
@@ -49,7 +59,6 @@ const said = (word: string) =>
     'giu',
   );
 const MODEL_SAID = said(MODEL_WORD);
-const ART_SAID = said(ART_WORD);
 const SHEET_SAID = said(SHEET_WORD);
 /** A compact list after a mention: "Style A/B", "Bogen A & B", "Mod. 112, 113 und 114". */
 const MORE = new RegExp(String.raw`^\s*(?:[/,&+]|and|und|или|и|or|oder|et|y)\s*${VALUE}`, 'iu');
@@ -101,7 +110,7 @@ function mentions(strings: readonly CardString[], re: RegExp, sizes: Set<string>
     const taken: [number, number][] = [];
     // an article number is not a bare model number either: its span is taken, nothing said
     if (bare)
-      for (const m of from.text.matchAll(ART_SAID))
+      for (const m of from.text.matchAll(ARTICLE))
         taken.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
     for (const m of from.text.matchAll(re)) {
       const at = m.index ?? 0;
@@ -154,7 +163,10 @@ const matches = (k: Key, m: Mention) =>
   same(k, m) && (m.explicit ? m.family === k.family : k.v.length >= 3);
 /** The autopilot acts on: an explicit prefix in a card field, or the style-number field itself. */
 const proves = (m: Mention) =>
-  m.from.source !== 'file' && (m.explicit || m.from.source === 'style');
+  m.from.source !== 'file' &&
+  (m.explicit ||
+    // the style-number field that holds the bare value and nothing else ("112", not "FW26 112")
+    (m.from.source === 'style' && m.from.text.trim() === m.said.trim()));
 
 const quote = (m: Mention) => `${m.from.field} «${m.from.text}» says "${m.said}"`;
 
