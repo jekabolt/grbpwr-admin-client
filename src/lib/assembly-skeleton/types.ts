@@ -58,6 +58,11 @@ export type SkeletonCategory =
   | 'sweat'
   | 'hoodie'
   | 'trousers'
+  /**
+   * A bottom read from the pieces alone (no category on the card, no fly or crotch piece): trousers
+   * or a panelled skirt — the panel method with words both share, never an inseam or a crotch.
+   */
+  | 'bottom'
   | 'skirt'
   | 'dress'
   | 'jumpsuit'
@@ -323,7 +328,17 @@ export type SkeletonStep = {
   };
 };
 
-export type SkeletonDecision = { id: string; chosen: number };
+export type SkeletonDecision = {
+  id: string;
+  chosen: number;
+  /**
+   * The engine's own reading was not told apart by evidence: the hosts tie on every rule (seam,
+   * name, position, parts, size) and only the name or the piece key put this one first — said in
+   * words. Auto mode does not tick it; it waits for a person. Absent once a person settles it
+   * (`SkeletonOptions.resolved`) — not merely because a rebuild kept its reading by a pin.
+   */
+  tie?: string;
+};
 
 /** Pinned readings: decision id → reading index (0 = the engine's own). */
 export type SkeletonPins = Readonly<Record<string, number>>;
@@ -344,6 +359,8 @@ export type SkeletonProposal = {
    * panel) rebuilds the same structure, and the AI is asked about the category it was read as.
    */
   structure?: Pick<SkeletonOptions, 'category' | 'units'>;
+  /** The decisions a person settled (SkeletonOptions.resolved), kept for whoever rebuilds it. */
+  resolved?: string[];
 };
 
 /** Shell and lining are two parallel subtrees (§G); a piece is lining when its cloth is. */
@@ -413,8 +430,16 @@ export type SkeletonOptions = {
   pressOpen?: boolean;
   /** PRESS (flat) after a turned subassembly (collar, cuff, placket …). Off unless asked for. */
   pressFlat?: boolean;
-  /** Readings the person chose for ambiguous joins; the proposal is rebuilt around them. */
+  /**
+   * Readings kept for ambiguous joins; the proposal is rebuilt around them. A rebuild pins EVERY
+   * decision to keep its reading — that alone settles nothing (see `resolved`).
+   */
   pins?: SkeletonPins;
+  /**
+   * Decision ids a PERSON settled: a reading they chose, or an AI pick they took. Only these clear
+   * a decision's `tie`; a tie merely carried through a rebuild by its pin stays a tie.
+   */
+  resolved?: readonly string[];
   /** Seams stored on the card (confirmed / rejected / closures), resolved by lib/seams. */
   decisions?: SeamDecisionsInput;
   /**

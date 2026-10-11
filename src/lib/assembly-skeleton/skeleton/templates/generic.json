@@ -2,7 +2,7 @@
   "id": "generic",
   "category": "generic",
   "garmentName": "Garment",
-  "_note": "Any garment without a category template: subassemblies \u2192 panels \u2192 shoulders \u2192 neckline \u2192 sleeves \u2192 sides \u2192 cuffs \u2192 hem \u2192 closures from the BOM \u2192 final press. Lining, if any, is a parallel subtree bagged at the end. Collar before sleeves is kept as reading 0 (SS26-005 regression guard); sleeves first (4 of 5 technologists' shirts) is reading 1 of one decision (orFirst).",
+  "_note": "Any garment without a category template: subassemblies \u2192 panels \u2192 shoulders \u2192 neckline \u2192 sleeves \u2192 sides \u2192 cuffs \u2192 hem \u2192 closures from the BOM \u2192 final press. Lining, if any, is a parallel subtree bagged at the end. Sleeves before the collar is reading 0 (4 of 5 technologists' shirts: SS26-004, -006, -009, FW26-001; the owner's default, 07 §4.6); the collar first (SS26-005) is reading 1 of one decision (orFirst).",
   "pressOpen": true,
   "pressFlat": false,
   "mergeHands": ["back", "yoke", "collar", "stand", "hood", "waistband"],
@@ -51,18 +51,6 @@
       "press": "open"
     },
     {
-      "id": "collar",
-      "op": "attach",
-      "label": "Set the collar, rib or hood",
-      "roles": ["collar", "stand", "hood", "rib"],
-      "to": ["body"],
-      "together": true,
-      "name": "Body with neckline",
-      "zone": "NECKLINE",
-      "press": "flat",
-      "orFirst": "sleeves"
-    },
-    {
       "id": "sleeves",
       "op": "attach",
       "label": "Set sleeves",
@@ -71,7 +59,19 @@
       "together": true,
       "name": "Body with sleeves",
       "zone": "SLEEVE",
-      "press": "open"
+      "press": "open",
+      "orFirst": "collar"
+    },
+    {
+      "id": "collar",
+      "op": "attach",
+      "label": "Set the collar, rib or hood",
+      "roles": ["collar", "stand", "hood", "rib"],
+      "to": ["body"],
+      "together": true,
+      "name": "Body with neckline",
+      "zone": "NECKLINE",
+      "press": "flat"
     },
     {
       "id": "sides",

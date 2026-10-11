@@ -1,8 +1,8 @@
 {
-  "id": "trousers",
-  "category": "trousers",
-  "garmentName": "Trousers",
-  "_note": "Trousers, panel method (2 of 2 technologists' cards): pockets, fly and waistband built first \u2192 pockets set on their panels \u2192 the backs into one back (seat seam, yoke) \u2192 the fronts into one front (fly) \u2192 back and front in one (side seams, inseams, crotch) \u2192 zipper \u2192 waistband \u2192 belt loops \u2192 hem \u2192 buttons \u2192 final press. Sewing leg by leg (side seam, inseam, then the crotch) is the other industrial method; it is not offered as a reading.",
+  "id": "bottom",
+  "category": "bottom",
+  "garmentName": "Garment",
+  "_note": "A bottom read from the PIECES (no category on the card): a waistband on left and right fronts and backs, no sleeve, collar or hood, and nothing that only trousers have (fly, crotch, inseam, leg, rise). Trousers or a panelled skirt: the panel method of the trousers template (pockets and waistband built first → the backs into one back → the fronts into one front → back and front in one → waistband → hem) with words both garments share — side seams, no inseam or crotch. A card with its category set, or a fly / crotch piece, reads trousers instead.",
   "pressOpen": true,
   "pressFlat": false,
   "mergeHands": ["waistband", "yoke"],
@@ -13,17 +13,21 @@
       "op": "fuse",
       "label": "Fuse interlining"
     },
-    { "id": "features", "op": "features", "label": "Darts" },
+    {
+      "id": "features",
+      "op": "features",
+      "label": "Darts"
+    },
     {
       "id": "subassemblies",
       "op": "units",
-      "label": "Pockets, fly, waistband",
+      "label": "Pockets, waistband, facings",
       "roles": ["pocket", "fly", "waistband", "facing", "loop"]
     },
     {
       "id": "panels",
       "op": "units",
-      "label": "Front and back legs",
+      "label": "Front and back panels",
       "roles": ["front", "back", "yoke", "side", "*"]
     },
     {
@@ -51,7 +55,7 @@
     {
       "id": "body",
       "op": "combine",
-      "label": "Join back and front: side seams, inseams, crotch",
+      "label": "Join back and front: side seams",
       "roles": ["front", "back", "side"],
       "requireAll": ["front", "back"],
       "as": "body",
@@ -74,7 +78,7 @@
       "roles": ["waistband"],
       "to": ["body"],
       "together": true,
-      "name": "Body with waistband",
+      "name": "Garment with waistband",
       "zone": "WAIST",
       "press": "flat"
     },
@@ -93,7 +97,7 @@
       "roles": ["loop"],
       "to": ["body"],
       "together": true,
-      "name": "Body with belt loops",
+      "name": "Garment with belt loops",
       "zone": "WAIST"
     },
     {

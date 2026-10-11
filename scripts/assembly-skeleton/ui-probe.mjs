@@ -14,6 +14,14 @@
 //   node scripts/assembly-skeleton/ui-probe.mjs --mutate-undo-media   the undo of a skeleton apply
 //                                                                    forgets to restore mediaCleared
 //                                                                    — U2 MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-auto-default  auto mode hands out the manual
+//                                                                    defaults (guesses unticked, no
+//                                                                    AUTO marks) — AU and G MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-tie-autopick  auto mode ticks a tie like any
+//                                                                    other reading — AT MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-stale-apply   apply stays live while a chosen
+//                                                                    reading is read in, and the door
+//                                                                    takes any generation — RB MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -31,6 +39,17 @@
 //   J  typing in the BOM (contour Map churns identity) does NOT re-read the seam graph
 //   K  THE REAL ENGINE on the blazer: every step ticked, the second reading of an ambiguous join
 //      chosen, «apply all» — the order stays clean (skipped, loudly, without the corpus)
+//   AU AUTO MODE (07-ENGINE-QUALITY §5, the panel's default): every step ticked, each guess and
+//      open reading marked AUTO and listed by kind, «to decide» 0; a person's untick takes the mark
+//      off and survives auto ↔ manual; manual = the old default ticks; a chosen reading rebuilds and
+//      is the person's; apply all writes the whole skeleton. Every other scenario switches the
+//      panel to manual first, so their counts stay the manual defaults they were written for.
+//   AT A TIE (07 review): a decision the engine broke by name only is NOT auto-picked — unticked,
+//      «1 tie to decide», listed with its readings, the steps built on it waiting; taking a reading
+//      ticks it and the rest of the order again.
+//   RB A REBUILD IN FLIGHT (07 review): a chosen reading is read in by a slow provider — apply one /
+//      apply all are disabled and say «rebuilding…», a press writes nothing; once it lands, apply
+//      all writes the NEW reading.
 //   G  THE REAL ENGINE on SS26-005 (25 pieces, sewing lines from the DXF): the production provider
 //      reads the pattern; unit inputs and outputs carry real pictograms; after apply the schematic
 //      shows unit glyphs through CardUnitPicturesProvider. Skipped, loudly, without the plans folder.
@@ -52,6 +71,9 @@ const MUTATE_UNDO_REBASE = process.argv.includes('--mutate-undo-rebase');
 const MUTATE_THREAD_ARRAY = process.argv.includes('--mutate-thread-whole-array');
 const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
 const MUTATE_SNAPSHOT_SUGG = process.argv.includes('--mutate-snapshot-suggestion');
+const MUTATE_AUTO_DEFAULT = process.argv.includes('--mutate-auto-default');
+const MUTATE_TIE_AUTOPICK = process.argv.includes('--mutate-tie-autopick');
+const MUTATE_STALE_APPLY = process.argv.includes('--mutate-stale-apply');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -217,6 +239,69 @@ if (MUTATE_AUTOAPPLY)
     },
   });
 
+// Auto mode that silently hands out the manual defaults: picksFor ignores `auto`.
+const AUTO_BASE_FIX = `kept(i) ?? (auto ? autoPick(s) : defaultPick(s))`;
+const AUTO_RETURN_FIX = `return auto ? settled : closeOrder(steps, settled, keep);`;
+if (MUTATE_AUTO_DEFAULT)
+  plugins.push({
+    name: 'auto-default-mutation',
+    setup(b) {
+      b.onLoad({ filter: /assembly-skeleton-ticks\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(AUTO_BASE_FIX) || !src.includes(AUTO_RETURN_FIX))
+          throw new Error('auto mutation did not find its lines');
+        return {
+          contents: src
+            .replace(AUTO_BASE_FIX, 'kept(i) ?? defaultPick(s)')
+            .replace(AUTO_RETURN_FIX, 'return closeOrder(steps, settled, keep);'),
+          loader: 'ts',
+        };
+      });
+    },
+  });
+
+// Auto mode that ticks a tie like any other reading (pre-review): autoPick ignores `decision.tie`.
+const TIE_FIX = `  !isDerived(s) && isTie(s)\n    ? { accepted: false, applied: false, tie: true }`;
+if (MUTATE_TIE_AUTOPICK)
+  plugins.push({
+    name: 'tie-autopick-mutation',
+    setup(b) {
+      b.onLoad({ filter: /assembly-skeleton-ticks\.ts$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(TIE_FIX)) throw new Error('tie mutation did not find its line');
+        return {
+          contents: src.replace(
+            TIE_FIX,
+            `  false && isTie(s)\n    ? { accepted: false, applied: false, tie: true }`,
+          ),
+          loader: 'ts',
+        };
+      });
+    },
+  });
+
+// The pre-review panel: the old proposal stays `ready` and applicable during a rebuild, and the
+// door writes whatever steps it is handed.
+const REBUILD_FIX = `const rebuilding = run.status === 'ready' && !!run.rebuilding;`;
+const GEN_FIX = `if (!isCurrent(gen)) {`;
+if (MUTATE_STALE_APPLY)
+  plugins.push({
+    name: 'stale-apply-mutation',
+    setup(b) {
+      b.onLoad({ filter: /assembly-skeleton-panel\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(REBUILD_FIX) || !src.includes(GEN_FIX))
+          throw new Error('stale-apply mutation did not find its lines');
+        return {
+          contents: src
+            .replace(REBUILD_FIX, 'const rebuilding = run.status !== run.status;')
+            .replace(GEN_FIX, 'if (!isCurrent(gen) && gen < 0) {'),
+          loader: 'tsx',
+        };
+      });
+    },
+  });
+
 await esbuild({
   entryPoints: [resolve(HERE, 'ui-probe-entry.tsx')],
   bundle: true,
@@ -373,15 +458,32 @@ const shot = async (name, el) => {
 const ops = () => page.evaluate(() => window.__sk.ops());
 const requests = () => page.evaluate(() => window.__sk.autosaveRequests());
 const isDirty = () => page.evaluate(() => window.__sk.form().formState.isDirty);
-// A card with steps asks «add or replace» before anything is read: `mode` answers it.
-const openPanel = async (where = 'header', mode = null) => {
+// The auto ↔ manual switch (07 §5). The panel opens in auto; the switch outlives a close.
+const setAuto = async (on) => {
+  const want = on ? 'on' : 'off';
+  await page.waitForSelector('[data-skeleton-auto]', { timeout: 5000 });
+  if ((await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === want) return;
+  await page.click('[data-skeleton-auto]');
+  await page.waitForSelector(`[data-skeleton-auto="${want}"]`, { timeout: 5000 });
+};
+// A card with steps asks «add or replace» before anything is read: `mode` answers it. The scenarios
+// written before auto mode count the MANUAL default ticks, so the panel is switched to manual unless
+// a scenario asks for auto.
+const openPanel = async (where = 'header', mode = null, { auto = false } = {}) => {
   await page.click(`[data-skeleton-door="${where}"]`);
   if (mode) {
     await page.waitForSelector('[data-skeleton-modes="unchosen"]', { timeout: 5000 });
     await page.click(`[data-skeleton-mode="${mode}"]`);
   }
   await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+  await setAuto(auto);
 };
+const autoSteps = () =>
+  page
+    .locator('[data-skeleton-step-auto]')
+    .evaluateAll((n) => n.map((x) => Number(x.getAttribute('data-skeleton-step-auto'))));
+const headAttr = async (a) =>
+  page.locator('[data-skeleton-to-decide]').getAttribute(`data-skeleton-${a}`);
 const closePanel = async () => {
   await page.keyboard.press('Escape');
   await page.waitForSelector('[data-skeleton-panel]', { state: 'detached', timeout: 5000 });
@@ -1176,6 +1278,278 @@ ck(
 );
 await closePanel();
 
+// ── AU ──────────────────────────────────────────────────────────────────────────────────────────
+head('AU — auto mode: one press, the whole skeleton picked, every guess marked');
+await mount({});
+await page.click('[data-skeleton-door="empty"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+{
+  const stepsShown = await page.locator('[data-skeleton-step]').count();
+  ck(
+    (await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on',
+    'the panel opens in auto mode',
+  );
+  ck(
+    (await page.locator('[data-skeleton-accepted="1"]').count()) === stepsShown,
+    'every step is ticked, the 0.4 hem guess included',
+    `${await page.locator('[data-skeleton-accepted="1"]').count()} of ${stepsShown}`,
+  );
+  ck((await headAttr('to-decide')) === '0', 'nothing is left «to decide»');
+  ck(
+    JSON.stringify(await autoSteps()) === '[2,5]',
+    'AUTO on exactly the open reading and the guess',
+    JSON.stringify(await autoSteps()),
+  );
+  ck((await headAttr('auto-picked')) === '2', 'the header counts 2 auto-picked');
+  const headText = (await page.locator('[data-skeleton-to-decide]').innerText()).replace(
+    /\s+/g,
+    ' ',
+  );
+  ck(/all picked · 2 auto-picked/.test(headText), 'the header says it in words', headText);
+  const kinds = await page
+    .locator('[data-skeleton-auto-kind]')
+    .evaluateAll((n) =>
+      n.map(
+        (x) =>
+          `${x.getAttribute('data-skeleton-auto-kind')}:${x.getAttribute('data-skeleton-auto-kind-n')}`,
+      ),
+    );
+  ck(
+    (await page.locator('[data-skeleton-auto-notice="2"]').count()) === 1 &&
+      kinds.join() === 'decision:reading:1,guess:process:1',
+    'the notice lists the guesses by kind',
+    kinds.join(),
+  );
+  ck(
+    (await page.locator('[data-skeleton-step-autoguess]').count()) === 2,
+    'each auto-picked line says it is a guess to check',
+  );
+  ck(
+    Number(await page.getAttribute('[data-skeleton-apply-all]', 'data-skeleton-apply-all')) ===
+      stepsShown,
+    '«apply all accepted» would write the whole skeleton',
+  );
+  ck(JSON.stringify(await ops()) === '[]', 'auto picks write nothing to the form');
+  ck((await requests()).length === 0, 'autosave never asked');
+  await shot('auto-mode-mock', '[data-skeleton-panel]');
+
+  // A person's untick: the mark goes, the count drops, and it survives auto → manual → auto.
+  await page.click('[data-skeleton-check="5"]');
+  ck(
+    JSON.stringify(await autoSteps()) === '[2]' && (await headAttr('auto-picked')) === '1',
+    'unticking an auto step takes its mark off and the count down',
+    `${JSON.stringify(await autoSteps())} · ${await headAttr('auto-picked')}`,
+  );
+  ck(
+    /1 unticked · 1 auto-picked/.test(await page.locator('[data-skeleton-to-decide]').innerText()),
+    'the header says one is unticked',
+  );
+  await setAuto(false);
+  ck((await headAttr('to-decide')) === '2', 'manual: the 2 open choices are «to decide» again');
+  ck(
+    (await autoSteps()).length === 0 && (await headAttr('auto-picked')) === null,
+    'manual: no AUTO marks',
+  );
+  ck(
+    (await page.locator('[data-skeleton-step="2"]').getAttribute('data-skeleton-accepted')) ===
+      '1' &&
+      (await page.locator('[data-skeleton-step="5"]').getAttribute('data-skeleton-accepted')) ===
+        '0',
+    'manual: the default ticks (sure and likely ticked, the guess not)',
+  );
+  await setAuto(true);
+  ck(
+    (await page.locator('[data-skeleton-step="5"]').getAttribute('data-skeleton-accepted')) ===
+      '0' && JSON.stringify(await autoSteps()) === '[2]',
+    'back in auto: the person’s untick is kept, the rest auto again',
+    JSON.stringify(await autoSteps()),
+  );
+  await page.click('[data-skeleton-check="5"]');
+  ck(
+    (await page.locator('[data-skeleton-step="5"]').getAttribute('data-skeleton-accepted')) ===
+      '1' && JSON.stringify(await autoSteps()) === '[2]',
+    'ticked by hand it is the person’s: no AUTO mark',
+  );
+
+  // Flipping a reading still rebuilds through the pins; the chosen reading is the person's now.
+  await page.click('[data-skeleton-variant="2.1"]');
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-skeleton-variant="2.1"]')?.className.includes('bg-textColor'),
+    null,
+    { timeout: 5000 },
+  );
+  ck(
+    /Body with pocket/.test(await page.locator('[data-skeleton-step="2"]').innerText()) &&
+      (await page.evaluate(() => window.__sk.providerCalls())) === 2,
+    'the second reading rebuilt the proposal',
+  );
+  {
+    // The flipped join is the person's decision; the steps it rebuilt are new, so auto again.
+    const marked = await autoSteps();
+    ck(
+      !marked.includes(2) && Number(await headAttr('auto-picked')) === marked.length,
+      'the chosen reading is the person’s: no AUTO on it',
+      JSON.stringify(marked),
+    );
+  }
+  ck(
+    (await page.locator('[data-skeleton-accepted="0"]').count()) === 0 &&
+      (await headAttr('to-decide')) === '0',
+    'still every step ticked, nothing to decide',
+  );
+  ck((await page.locator('[data-skeleton-violation]').count()) === 0, 'no step breaks the order');
+  const n = await page.locator('[data-skeleton-step]').count();
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck(
+    (await ops()).length === n,
+    'apply all writes the whole skeleton',
+    `${(await ops()).length} of ${n}`,
+  );
+  const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+  ck(hard.length === 0, 'assemblySweep clean on the auto skeleton', JSON.stringify(hard));
+  ck(
+    (await page.locator('[data-skeleton-step-applied]').count()) === n,
+    'every applied line is marked applied',
+  );
+  await closePanel();
+  await openPanel('header', null, { auto: true });
+  ck(
+    (await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on' &&
+      (await page.locator('[data-skeleton-step-applied]').count()) === n,
+    'reopened: still auto, the applied marks kept',
+  );
+  await closePanel();
+}
+
+// ── AT ──────────────────────────────────────────────────────────────────────────────────────────
+head('AT — a tie is not auto-picked: it waits «to decide», with what is built on it');
+await mount({ tie: true });
+await page.click('[data-skeleton-door="empty"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+{
+  const acc = (i) =>
+    page.locator(`[data-skeleton-step="${i}"]`).getAttribute('data-skeleton-accepted');
+  ck((await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on', 'auto mode');
+  ck(
+    (await acc(2)) === '0' && (await acc(3)) === '0' && (await acc(4)) === '0',
+    'the tie (step 2) is unticked, and so are the joins built on its unit',
+    `${await acc(2)} ${await acc(3)} ${await acc(4)}`,
+  );
+  ck((await acc(0)) === '1', 'the steps before it stay ticked');
+  ck((await headAttr('to-decide')) === '1', 'the header counts 1 to decide');
+  const headText = (await page.locator('[data-skeleton-to-decide]').innerText()).replace(
+    /\s+/g,
+    ' ',
+  );
+  ck(/1 tie to decide/.test(headText), 'the header says «1 tie to decide»', headText);
+  ck(
+    !(await autoSteps()).includes(2),
+    'the tie is not marked AUTO',
+    JSON.stringify(await autoSteps()),
+  );
+  const notice = (await page.locator('[data-skeleton-tie="2"]').count())
+    ? await page.locator('[data-skeleton-tie="2"]').innerText()
+    : '';
+  ck(
+    /is a tie/.test(notice) && /fit the body alike/.test(notice),
+    'the notice names the tie and why, in words',
+    notice.replace(/\s+/g, ' '),
+  );
+  ck(
+    (await page.locator('[data-skeleton-step-tie="2"]').count()) === 1,
+    'its line says it is a tie left for the person',
+  );
+  await shot('auto-tie-mock', '[data-skeleton-panel]');
+  // Taking the engine's reading from the notice ticks it — and the order waiting on it.
+  await page.click('[data-skeleton-tie-variant="2.0"]');
+  await page.waitForTimeout(150);
+  ck(
+    (await acc(2)) === '1' && (await acc(3)) === '1' && (await acc(4)) === '1',
+    'taking the first reading ticks the tie and the joins built on it',
+    `${await acc(2)} ${await acc(3)} ${await acc(4)}`,
+  );
+  ck(
+    (await headAttr('to-decide')) === '0' &&
+      (await page.locator('[data-skeleton-tie]').count()) === 0,
+    'nothing is left to decide',
+  );
+  await closePanel();
+  // The other reading: a rebuild with it pinned is the person's — no tie, ticked.
+  await mount({ tie: true });
+  await page.click('[data-skeleton-door="empty"]');
+  await page.waitForSelector('[data-skeleton-tie-variant="2.1"]', { timeout: 5000 });
+  await page.click('[data-skeleton-tie-variant="2.1"]');
+  await page.waitForSelector('[data-skeleton-tie]', { state: 'detached', timeout: 5000 });
+  ck(
+    (await acc(2)) === '1' && (await headAttr('to-decide')) === '0',
+    'choosing the other reading rebuilds it as the person’s pick: ticked, nothing to decide',
+  );
+  await closePanel();
+}
+
+// ── RB ──────────────────────────────────────────────────────────────────────────────────────────
+head('RB — a rebuild in flight: nothing applies from the old reading, then the new one applies');
+await mount({ holdRebuilds: true });
+await page.click('[data-skeleton-door="empty"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+{
+  const allDisabled = () => page.locator('[data-skeleton-apply-all]').isDisabled();
+  const liveOnes = () =>
+    page
+      .locator('[data-skeleton-apply-one]')
+      .evaluateAll((n) => n.filter((b) => !b.disabled && b.textContent !== 'applied').length);
+  ck(!(await allDisabled()), 'before: «apply all» is live');
+  await page.click('[data-skeleton-variant="2.1"]');
+  await page.waitForTimeout(200);
+  ck(
+    (await page.evaluate(() => window.__sk.heldRebuilds())) === 1,
+    'the chosen reading is being read in (the provider holds it)',
+  );
+  ck(
+    (await page.locator('[data-skeleton-state="rebuilding"]').count()) === 1,
+    'the panel says it is rebuilding',
+  );
+  ck(await allDisabled(), '«apply all» is disabled while it rebuilds');
+  ck((await liveOnes()) === 0, 'every «apply this step» is disabled while it rebuilds');
+  ck(
+    /rebuilding…/i.test(await page.locator('[data-skeleton-apply-all]').innerText()),
+    '«apply all» says «rebuilding…»',
+  );
+  // A press on either now writes nothing (forced: a disabled button takes no click).
+  await page
+    .locator('[data-skeleton-apply-all]')
+    .click({ force: true, timeout: 2000 })
+    .catch(() => {});
+  await page
+    .locator('[data-skeleton-apply-one="0"]')
+    .click({ force: true, timeout: 2000 })
+    .catch(() => {});
+  await page.waitForTimeout(200);
+  ck(
+    JSON.stringify(await ops()) === '[]',
+    'nothing written from the old reading while it rebuilds',
+    JSON.stringify((await ops()).map((o) => o.outputUnitName)),
+  );
+  await page.evaluate(() => window.__sk.release());
+  await page.waitForSelector('[data-skeleton-state="rebuilding"]', {
+    state: 'detached',
+    timeout: 5000,
+  });
+  ck(!(await allDisabled()), 'after it lands: «apply all» is live again');
+  const before = (await ops()).length;
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const names = (await ops()).slice(before).map((o) => o.outputUnitName);
+  ck(
+    names.includes('Body with pocket') && !names.includes('Body with neckband'),
+    'apply all writes the NEW reading (the pocket), not the old one (the neckband)',
+    JSON.stringify(names),
+  );
+  await closePanel();
+}
+
 // ── D ───────────────────────────────────────────────────────────────────────────────────────────
 head('D — a card that already has steps');
 const EXIST = [
@@ -1214,6 +1588,7 @@ ck(
 await shot('d-mode-choice', '[data-skeleton-panel]');
 await page.click('[data-skeleton-mode="append"]');
 await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+await setAuto(false);
 ck(
   (await page.locator('[data-skeleton-step="0"] .tabular-nums').first().innerText()).trim() ===
     '30',
@@ -1592,6 +1967,12 @@ if (!blazer) {
   }
   const blocked = await page.locator('[data-skeleton-violation]').count();
   ck(blocked === 0, 'the AI-ordered batch keeps the order', `${blocked} violations`);
+  // Asked BEFORE the apply: once every piece is in the order an appended skeleton has nothing left
+  // to read, so the reopened panel shows no proposal (and no AI bar) at all.
+  await closePanel();
+  await page.click('[data-skeleton-door="header"]');
+  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
+  ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
   await page.click('[data-skeleton-apply-all]');
   await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
   const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
@@ -1601,10 +1982,6 @@ if (!blazer) {
     JSON.stringify(hard).slice(0, 300),
   );
   await shot('l-ai-applied', '[data-skeleton-panel]');
-  await closePanel();
-  await page.click('[data-skeleton-door="header"]');
-  await page.waitForSelector('[data-skeleton-ai="ready"]', { timeout: 5000 });
-  ck((await aiCalls()) === 2, 'reopening shows the answer again without asking');
   await closePanel();
 
   // A refusal after the provider was paid says so: the AI_SPEND detail is printed with the error.
@@ -1634,6 +2011,48 @@ if (!real) {
   await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 20000 });
   const steps = await page.locator('[data-skeleton-step]').count();
   ck(steps >= 18, 'the real engine proposes the order', `${steps} steps`);
+  // AUTO MODE on the real card — relations, not the engine's numbers (another lane moves them).
+  const autoK = Number(await headAttr('auto-picked'));
+  {
+    console.log(
+      `        auto header: ${(await page.locator('[data-skeleton-to-decide]').innerText()).replace(/\s+/g, ' ')}`,
+    );
+    ck((await headAttr('to-decide')) === '0', 'auto: nothing left to decide');
+    ck(
+      (await page.locator('[data-skeleton-accepted="1"]').count()) === steps,
+      'auto: every step ticked',
+      `${await page.locator('[data-skeleton-accepted="1"]').count()} of ${steps}`,
+    );
+    ck(
+      autoK > 0 && (await autoSteps()).length === autoK,
+      'auto: each auto-picked step carries its AUTO mark',
+      `${autoK} counted, ${(await autoSteps()).length} marked`,
+    );
+    const listed = await page
+      .locator('[data-skeleton-auto-kind]')
+      .evaluateAll((n) =>
+        n.reduce((a, x) => a + Number(x.getAttribute('data-skeleton-auto-kind-n')), 0),
+      );
+    const kinds = await page
+      .locator('[data-skeleton-auto-kind]')
+      .evaluateAll((n) =>
+        n.map(
+          (x) =>
+            `${x.getAttribute('data-skeleton-auto-kind')}×${x.getAttribute('data-skeleton-auto-kind-n')}`,
+        ),
+      );
+    console.log(`        auto kinds: ${kinds.join(' · ')}`);
+    ck(listed === autoK, 'auto: the notice lists every one of them by kind', `${listed} listed`);
+    const blockedAuto = await page.locator('[data-skeleton-violation]').count();
+    ck(blockedAuto === 0, 'auto: the whole skeleton keeps the order', `${blockedAuto} violations`);
+    await shot('auto-mode-real', '[data-skeleton-panel]');
+    await setAuto(false);
+    ck(
+      Number(await headAttr('to-decide')) === autoK,
+      'manual: exactly the auto-picked steps are «to decide»',
+      `${await headAttr('to-decide')} to decide vs ${autoK} auto-picked`,
+    );
+  }
   {
     const head = page.locator('[data-skeleton-to-decide]');
     const n = Number(await head.getAttribute('data-skeleton-to-decide'));
@@ -1658,8 +2077,44 @@ if (!real) {
     for (const t of await page.locator('[data-skeleton-step]').allInnerTexts())
       console.log('   STEP', t.replace(/\s+/g, ' ').slice(0, 220));
   }
+  // Back to auto: a person's untick takes one mark off; their tick back is theirs, not AUTO.
+  await setAuto(true);
+  ck(Number(await headAttr('auto-picked')) === autoK, 'auto again: the same auto-picked count');
+  {
+    const first = (await autoSteps())[0];
+    if (first === undefined) ck(false, 'auto: a step marked AUTO to untick', 'none marked');
+    else {
+      await page.click(`[data-skeleton-check="${first}"]`);
+      ck(
+        Number(await headAttr('auto-picked')) === autoK - 1 && !(await autoSteps()).includes(first),
+        'unticking an auto step: its mark off, the count −1',
+      );
+      await page.click(`[data-skeleton-check="${first}"]`);
+      ck(
+        Number(await headAttr('auto-picked')) === autoK - 1 &&
+          (await page
+            .locator(`[data-skeleton-step="${first}"]`)
+            .getAttribute('data-skeleton-accepted')) === '1',
+        'ticked back by hand: the person’s, not AUTO',
+      );
+    }
+  }
+  ck((await page.locator('[data-skeleton-violation]').count()) === 0, 'auto: still no violation');
   await page.click('[data-skeleton-apply-all]');
   await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  ck(
+    Number(await page.getAttribute('[data-skeleton-applied]', 'data-skeleton-applied')) === steps,
+    'auto: apply all writes every step',
+    `${await page.getAttribute('[data-skeleton-applied]', 'data-skeleton-applied')} of ${steps}`,
+  );
+  {
+    const hard = (await page.evaluate(() => window.__sk.sweep())).filter((v) => v.rule !== 4);
+    ck(
+      hard.length === 0,
+      'assemblySweep clean on the applied auto skeleton',
+      JSON.stringify(hard).slice(0, 300),
+    );
+  }
   await closePanel();
   await page.waitForTimeout(500);
   const glyphs = await page.locator('section svg[role="img"][aria-label*=" pieces · "]').count();
@@ -1670,6 +2125,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}${MUTATE_AUTO_DEFAULT ? '  (mutation: auto mode hands out the manual defaults)' : ''}${MUTATE_TIE_AUTOPICK ? '  (mutation: auto mode ticks a tie)' : ''}${MUTATE_STALE_APPLY ? '  (mutation: apply live during a rebuild)' : ''}`,
 );
 if (bad) process.exitCode = 1;

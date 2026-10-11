@@ -56,7 +56,17 @@ export const SkeletonProviderContext = createContext<SkeletonProvider | null>(
 export type SkeletonRun =
   | { status: 'idle' }
   | { status: 'running' }
-  | { status: 'ready'; proposal: SkeletonProposal }
+  | {
+      status: 'ready';
+      proposal: SkeletonProposal;
+      /** The run that made this proposal: an apply carries it, a stale one is refused. */
+      gen: number;
+      /**
+       * A newer run (a chosen reading) is in flight: this proposal stays on screen, but its steps
+       * are the OLD reading's — nothing may be applied from it until the rebuild lands.
+       */
+      rebuilding?: boolean;
+    }
   | { status: 'error'; message: string };
 
 /**
@@ -71,6 +81,11 @@ export function useSkeletonProposal(): {
   /** Put a proposal derived from the one on screen (the AI order applied) in its place. */
   adopt: (proposal: SkeletonProposal) => void;
   state: SkeletonRun;
+  /**
+   * Is the proposal of run `gen` the one that stands — no newer run started since? An apply
+   * rendered from an older proposal (or during a rebuild) is refused by it.
+   */
+  isCurrent: (gen: number) => boolean;
 } {
   const provider = useContext(SkeletonProviderContext);
   const [state, setState] = useState<SkeletonRun>({ status: 'idle' });
@@ -85,15 +100,16 @@ export function useSkeletonProposal(): {
     (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => {
       if (!provider) return;
       const my = ++gen.current;
-      // A rebuild (a chosen reading) keeps the proposal on screen until the new one replaces it.
-      setState((s) => (s.status === 'ready' ? s : { status: 'running' }));
+      // A rebuild (a chosen reading) keeps the proposal on screen until the new one replaces it —
+      // marked, so nothing is applied from the old reading's steps meanwhile.
+      setState((s) => (s.status === 'ready' ? { ...s, rebuilding: true } : { status: 'running' }));
       // One frame for «reading the pattern…» to paint before the pass blocks the thread.
       window.setTimeout(() => {
         Promise.resolve()
           .then(() => provider(facts, deps, options))
           .then(
             (proposal) => {
-              if (gen.current === my) setState({ status: 'ready', proposal });
+              if (gen.current === my) setState({ status: 'ready', proposal, gen: my });
             },
             (e: unknown) => {
               if (gen.current === my)
@@ -105,10 +121,11 @@ export function useSkeletonProposal(): {
     [provider],
   );
   const adopt = useCallback((proposal: SkeletonProposal) => {
-    gen.current += 1;
-    setState({ status: 'ready', proposal });
+    const my = ++gen.current;
+    setState({ status: 'ready', proposal, gen: my });
   }, []);
-  return { available: !!provider, run, adopt, state };
+  const isCurrent = useCallback((g: number) => g === gen.current, []);
+  return { available: !!provider, run, adopt, state, isCurrent };
 }
 
 // ── facts ───────────────────────────────────────────────────────────────────────────────────────
@@ -119,7 +136,7 @@ type FormPiece = {
   piecesPerGarment?: number;
   cutSymmetry?: string;
 };
-type FormBomLine = { kind?: string; purpose?: string; lineKey?: string };
+type FormBomLine = { kind?: string; purpose?: string; lineKey?: string; section?: string };
 type FormAlias = {
   pieceLineKey?: string;
   bomLineKey?: string;
@@ -172,6 +189,7 @@ const FAMILY: Record<CategoryWord, string> = {
   hoodie: 'top',
   shirt: 'top',
   trousers: 'bottom',
+  bottom: 'bottom',
   skirt: 'bottom',
   jacket: 'outer',
   coat: 'outer',
@@ -302,6 +320,7 @@ const CROTCH_WORDS = new Set([
   'inseam',
   'leg',
   'legs',
+  'rise',
   'шаг',
   'ластовица',
   'штанина',
@@ -319,6 +338,21 @@ const NECK_RIB_WORDS = new Set([
   'горловины',
   'dekolt',
 ]);
+// A bag's own pieces: panels and a «belt» (waistband token) on left and right are a bag's too.
+const BAG_WORDS = new Set([
+  'strap',
+  'straps',
+  'handle',
+  'handles',
+  'tote',
+  'ручка',
+  'ручки',
+  'лямка',
+  'лямки',
+  'rączka',
+  'raczka',
+  'uchwyt',
+]);
 const JACKET_WORDS = new Set([
   'lapel',
   'lpl',
@@ -331,8 +365,11 @@ const JACKET_WORDS = new Set([
 
 /**
  * A card with NO category still has piece names — read only for DISCRIMINATING evidence:
- *   • trousers — a fly, or a crotch / gusset / leg piece (a waistband on left and right panels is
- *     also a skirt);
+ *   • trousers — a fly, or a crotch / gusset / inseam / leg / rise piece;
+ *   • bottom — a waistband on LEFT and RIGHT fronts AND backs with no sleeve, collar or hood, and
+ *     none of the trousers' own pieces: trousers or a panelled skirt, so the trousers' panel method
+ *     (back, front, then the two in one) in words both share — side seams, never an inseam or a
+ *     crotch; a strap or a handle (a bag's) keeps it generic;
  *   • hoodie — sleeves and a hood;
  *   • shirt — sleeves with a placket (a collar or cuffs alone are a dress's too); a jacket (lined
  *     template) only when the card is lined AND has a jacket's own pieces (lapel, undercollar) — a
@@ -351,9 +388,12 @@ export function skeletonCategoryFromPieces(
     return { category: 'generic', why: 'an auxiliary item, not a garment', evidence: true };
   const roles = new Set<string>();
   const words = new Set<string>();
+  /** The hands each role comes in (FP_L, FP_R → front: L, R). */
+  const hands = new Map<string, Set<string>>();
   for (const n of pieceNames) {
     const r = readName(n ?? '');
     if (r.role) roles.add(r.role);
+    if (r.role && r.hand) hands.set(r.role, (hands.get(r.role) ?? new Set()).add(r.hand));
     for (const t of nameTokens(n ?? '')) words.add(t.replace(/^\d+|\d+$/g, ''));
   }
   const has = (r: string) => roles.has(r);
@@ -362,6 +402,26 @@ export function skeletonCategoryFromPieces(
   if (has('fly')) return found('trousers', 'a fly');
   if (any(CROTCH_WORDS)) return found('trousers', 'a crotch or leg piece');
   if (has('skirt')) return found('skirt', 'a skirt panel');
+  const pair = (r: string) => (hands.get(r)?.size ?? 0) === 2;
+  if (
+    has('waistband') &&
+    pair('front') &&
+    pair('back') &&
+    !has('sleeve') &&
+    !has('collar') &&
+    !has('hood')
+  ) {
+    if (any(BAG_WORDS))
+      return {
+        category: 'generic',
+        why: 'panels and a band with straps or handles — a bag’s, not a garment the templates know',
+        evidence: false,
+      };
+    return found(
+      'bottom',
+      'a waistband on left and right fronts and backs, no sleeve or collar — trousers or a skirt: no fly or crotch piece to tell',
+    );
+  }
   if (has('sleeve')) {
     if (has('hood')) return found('hoodie', 'sleeves and a hood');
     // A collar or cuffs alone are a dress's too, and a facing is a lined shirt's too: a jacket needs
@@ -421,9 +481,12 @@ const LINING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_LINING';
  * Is the garment lined? Any one of four signals — the colourway's cloth is only one of them, and a
  * card without a colourway yet (most cards while the pattern is being worked) has none:
  *   • a piece cut from a lining slot of the first colourway;
- *   • a piece↔block link scoped to a lining fabric (its BOM line or its own purpose is lining);
+ *   • a piece whose every piece↔block link is scoped to a lining fabric (its BOM line or its own
+ *     purpose is lining) — a piece linked to the main file too is the shell's, cut also in lining;
  *   • a pattern file attached to a lining fabric;
  *   • a piece NAME that says lining (LIN_FRONT, подклад спинки, podszewka).
+ * None of them on a card whose every fabric line is lining (`liningOnlyCard`): its one cloth was
+ * filed as lining — there is nothing for a lining to line.
  */
 export function skeletonLined(args: {
   cloth: ReadonlyMap<string, PieceCloth> | null;
@@ -432,9 +495,10 @@ export function skeletonLined(args: {
   patterns?: ReadonlyArray<FormPattern>;
   bomLines?: ReadonlyArray<FormBomLine>;
 }): boolean {
+  if (liningOnlyCard(args.bomLines ?? [])) return false;
   if ([...(args.cloth?.values() ?? [])].some((c) => c.state === 'lining')) return true;
   const liningLines = liningLineKeys(args.bomLines ?? []);
-  if ((args.aliases ?? []).some((a) => aliasIsLining(a, liningLines))) return true;
+  if (liningScopedPieces(args.aliases ?? [], liningLines).size) return true;
   if (
     (args.patterns ?? []).some(
       (p) => p.fabricPurpose === LINING_PURPOSE || liningLines.has((p.bomLineKey ?? '').trim()),
@@ -456,14 +520,43 @@ function liningLineKeys(lines: ReadonlyArray<FormBomLine>): Set<string> {
 const aliasIsLining = (a: FormAlias, liningLines: ReadonlySet<string>) =>
   a.fabricPurpose === LINING_PURPOSE || liningLines.has((a.bomLineKey ?? '').trim());
 
+const FABRIC_SECTION = 'TECH_CARD_BOM_SECTION_FABRIC';
+
+/**
+ * A card whose every FABRIC line is lining (and there is one) has no lining: its one cloth was
+ * filed as lining, and reading it so would make every piece «Lining …» with no shell to bag into.
+ */
+export function liningOnlyCard(lines: ReadonlyArray<FormBomLine>): boolean {
+  const fabric = lines.filter((l) => l.section === FABRIC_SECTION);
+  return fabric.length > 0 && fabric.every((l) => l.purpose === LINING_PURPOSE);
+}
+
+/**
+ * The pieces (by ref key) that are lining by their block links: EVERY link of the piece is scoped
+ * to a lining fabric. A piece linked to the main file as well (a pocket bag cut in both) is the
+ * shell's — read as lining it would leave the shell for the lining's subtree.
+ */
+export function liningScopedPieces(
+  aliases: ReadonlyArray<FormAlias>,
+  liningLines: ReadonlySet<string>,
+): Set<string> {
+  const lining = new Map<string, boolean>();
+  for (const a of aliases) {
+    const k = pieceRefKey((a.pieceLineKey ?? '').trim());
+    lining.set(k, (lining.get(k) ?? true) && aliasIsLining(a, liningLines));
+  }
+  return new Set([...lining].filter(([, all]) => all).map(([k]) => k));
+}
+
 /**
  * Card → `SkeletonFacts`. Only pieces with a found contour go in: the engine reads geometry, and a
  * piece without one is reported back by the screen as a gap («no contour»), not guessed at — as is
  * a piece the card has not given a key yet (nothing can refer to it in a step).
  *
- * Cloth: the first colourway's, else LINING when the piece's block link is scoped to a lining
- * fabric (a card without a colourway still knows which file its lining comes from); the engine adds
- * the name rule (LIN_FRONT) itself.
+ * Cloth: the first colourway's, else LINING when every block link of the piece is scoped to a
+ * lining fabric (a card without a colourway still knows which file its lining comes from); the
+ * engine adds the name rule (LIN_FRONT) itself. On a card whose only fabric is lining
+ * (`liningOnlyCard`) nothing is lining, the colourway's slot included.
  *
  * `existing` (append mode): the card's own steps — the engine builds only over what they have not
  * consumed and never reuses their unit codes.
@@ -481,12 +574,10 @@ export function buildSkeletonFacts(args: {
   const inputs: SkeletonPieceInput[] = [];
   const withoutContour: string[] = [];
   const withoutKey: string[] = [];
-  const liningLines = liningLineKeys(args.bomLines);
-  const liningScoped = new Set(
-    (args.aliases ?? [])
-      .filter((a) => aliasIsLining(a, liningLines))
-      .map((a) => pieceRefKey((a.pieceLineKey ?? '').trim())),
-  );
+  const liningOnly = liningOnlyCard(args.bomLines);
+  const liningScoped = liningOnly
+    ? new Set<string>()
+    : liningScopedPieces(args.aliases ?? [], liningLineKeys(args.bomLines));
   args.pieces.forEach((p, i) => {
     const key = (p.lineKey ?? '').trim();
     if (!key) {
@@ -498,8 +589,10 @@ export function buildSkeletonFacts(args: {
       withoutContour.push(key);
       return;
     }
+    const own = args.cloth?.get(key)?.state;
     const state =
-      args.cloth?.get(key)?.state ?? (liningScoped.has(pieceRefKey(key)) ? 'lining' : null);
+      (liningOnly && own === 'lining' ? null : own) ??
+      (liningScoped.has(pieceRefKey(key)) ? 'lining' : null);
     inputs.push({
       pieceKey: key,
       // A name the database garbled (double-encoded UTF-8) is not guessed at: «unnamed piece 8
