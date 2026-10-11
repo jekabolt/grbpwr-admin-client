@@ -25,6 +25,7 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
+import { seamAssignmentInputOf } from './assembly-seams/seam-assignment';
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
 import {
   buildSkeletonFacts,
@@ -147,6 +148,7 @@ export function CardUnitPicturesProvider({
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
   const [graph, setGraph] = useState<{ sig: string; graph: SeamGraph | null } | null>(null);
   const live = useLatest({
+    operations,
     pieces,
     bomItems,
     shapes,
@@ -194,7 +196,14 @@ export function CardUnitPicturesProvider({
         let g: SeamGraph | null = null;
         if (facts.pieces.length > 0) {
           try {
-            g = readSeamGraph(facts, undefined, {}, cardSeamDecisions(facts));
+            g = readSeamGraph(
+              facts,
+              undefined,
+              {},
+              cardSeamDecisions(facts),
+              undefined,
+              seamAssignmentInputOf(v.operations, new Set(facts.pieces.map((p) => p.pieceKey))),
+            );
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.
             g = null;

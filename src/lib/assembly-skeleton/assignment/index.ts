@@ -16,6 +16,7 @@ import type {
   SeamCandidate,
   SeamGraph,
 } from '../types';
+import { liningByName } from '../names';
 import { graphOf, sameAs } from './adapt';
 import { variablesOf } from './candidates';
 import { MS_BUDGET, NODE_BUDGET } from './model';
@@ -24,6 +25,13 @@ import { Board, solveCard } from './solve';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
+/**
+ * VITE_SEAM_ASSIGNMENT. Default `global` since 12.10 (yarn seams:score on the 14-card corpus with
+ * the cards' orders: doll precision 85 → 87 %, recall 43 → 44 %, no garment card worse by > 2 pp,
+ * p95 191 ms). The solver is measured WITH an order: a card whose steps are not written yet reads
+ * no better than the greedy without one (doll 86 / 41), so the callers hand the solver nothing when
+ * there are no joins (`inputFor`) and the greedy runs as before. `greedy` switches it off.
+ */
 export function assignmentMode(): SeamAssignmentInput['mode'] {
   // import.meta.env exists under Vite; a node bundle (the probes) reads the process env.
   const env =
@@ -31,7 +39,22 @@ export function assignmentMode(): SeamAssignmentInput['mode'] {
       (import.meta as unknown as { env?: Record<string, string | undefined> }).env) ||
     (typeof process !== 'undefined' ? process.env : undefined);
   const v = env?.VITE_SEAM_ASSIGNMENT;
-  return v === 'global' || v === 'shadow' ? v : 'greedy';
+  return v === 'greedy' || v === 'shadow' ? v : 'global';
+}
+
+/**
+ * The assignment input a caller hands readSeamGraph / the doll for a card: undefined (the greedy)
+ * when the flag says so or when the card has no order to assign by — `global` is measured only
+ * with the technologist's steps (`shadow` compares on every card).
+ */
+export function inputFor(
+  joins: SeamAssignmentInput['joins'],
+  hardware?: SeamAssignmentInput['hardware'],
+): SeamAssignmentInput | undefined {
+  const mode = assignmentMode();
+  if (mode === 'greedy') return undefined;
+  if (mode === 'global' && !joins?.length) return undefined;
+  return { mode, joins: joins ?? [], ...(hardware?.length ? { hardware } : {}) };
 }
 
 export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamGraph {
@@ -46,7 +69,12 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   for (const h of input.hardware ?? []) for (const k of h.pieces) skip.add(k);
   for (const p of P.facts.pieces) if (p.cloth === 'interfacing') skip.add(p.pieceKey);
   const surface = surfacePieces(P.pieces);
-  const { ops, words } = buildOperations(P.pieces, input.joins, skip, surface);
+  const lining = new Set(
+    P.facts.pieces
+      .filter((p) => p.cloth === 'lining' || (!p.cloth && liningByName(p.name)))
+      .map((p) => p.pieceKey),
+  );
+  const { ops, words } = buildOperations(P.pieces, input.joins, skip, surface, lining);
   warnings.push(...words);
   const board = new Board(P, ops);
 
@@ -94,10 +122,13 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   }
 
   const vars = variablesOf(P, ops, board, forcedSame, skip, surface);
-  // ASSIGN_DEBUG=<edge id substring> (node probes): every pool candidate touching it, and its fate.
+  const sol = solveCard(vars, ops, board, nodeBudget, () => now() - t0 < msBudget, now);
+  // ASSIGN_DEBUG=<edge name substring> (node probes): every pool candidate touching it, its fate
+  // and the board's answer after the solve.
   const dbg = typeof process !== 'undefined' ? process.env?.ASSIGN_DEBUG : undefined;
   if (dbg) {
     const byId = new Map(vars.map((v) => [v.id, v]));
+    const chosenSet = new Set(sol.chosen);
     const nm = (id: string) => {
       const at = id.lastIndexOf('#');
       const g = P.pieces.find((p) => p.pieceKey === id.slice(0, at));
@@ -107,11 +138,10 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
       if (!nm(c.u.id).includes(dbg) && !nm(c.v.id).includes(dbg)) continue;
       const v = byId.get([c.u.id, c.v.id].sort().join('~'));
       warnings.push(
-        `debug ${nm(c.u.id)} ↔ ${nm(c.v.id)} score ${c.score.toFixed(3)} kind ${c.kind}${c.dropped ? ` DROPPED: ${c.dropped}` : ''}${v ? ` → variable op ${v.op} benefit ${v.benefit} free ${board.free(v)} feasible ${board.feasible(v)}` : ' → no variable'}`,
+        `debug ${nm(c.u.id)} ↔ ${nm(c.v.id)} score ${c.score.toFixed(3)} kind ${c.kind}${c.dropped ? ` DROPPED: ${c.dropped}` : ''}${v ? ` → variable op ${v.op} benefit ${v.benefit} ${chosenSet.has(v) ? 'CHOSEN' : `not chosen (now free ${board.free(v)} feasible ${board.feasible(v)})`}` : ' → no variable'}`,
       );
     }
   }
-  const sol = solveCard(vars, ops, board, nodeBudget, () => now() - t0 < msBudget, now);
   for (const s of sol.perOp) warnings.push(...s.words);
 
   const summary: SeamAssignmentSummary = {
@@ -135,7 +165,9 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     ms: Math.round((now() - t0) * 10) / 10,
   };
   warnings.push(...conflicts);
-  return graphOf(P, sol, forced, forcedSame, engineClosures, warnings, summary);
+  return graphOf(P, sol, forced, forcedSame, engineClosures, warnings, summary, (e) =>
+    board.plyMateOf(e),
+  );
 }
 
 export type { SeamAssignmentInput };

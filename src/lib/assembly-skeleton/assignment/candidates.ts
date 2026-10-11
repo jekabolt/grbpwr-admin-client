@@ -52,7 +52,9 @@ export function variablesOf(
     const floor = op.slack > 0 ? FORCE_FLOOR : SKELETON.accept;
     if (c.score < floor - 1e-9) continue;
     const self = pa === pb;
-    if (!self && surface.has(pa) !== surface.has(pb)) continue;
+    // (a pocket piece onto a panel is allowed as EVIDENCE — the bag's edge caught in a seam — but
+    // never forced: operations.ts gives such a step no slack)
+    void surface;
     if (!self && roleVeto(c.u.piece, c.v.piece)) continue;
     const v: Variable = {
       id: candId(c),
@@ -75,6 +77,8 @@ export function variablesOf(
     // Static facts (layout, ply mates, parity links) once; a variable the layout refuses is none.
     if (!board.annotate(v)) continue;
     if (!board.free(v)) continue;
+    // A third piece onto a ply pair: both plies take it; reported on the first-named ply.
+    if (!v.ply && !self && board.isSecondPly(pa) !== board.isSecondPly(pb)) v.benefit -= 1;
     out.push(v);
   }
   // Best first, ties by id: the search order and the greedy incumbent are deterministic.

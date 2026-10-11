@@ -65,13 +65,44 @@ export function graphOf(
   engineClosures: readonly PoolCand[],
   warnings: string[],
   summary: SeamAssignmentSummary,
+  /** The corresponding edge on the other ply of a pair (solve.ts Board.plyMateOf). */
+  plyMateOf: (e: EdgeId) => EdgeId | undefined = () => undefined,
 ): SeamGraph {
   const { pieces, decisions, rules } = P;
   const chosenC = new Set<PoolCand>();
   for (const v of sol.chosen) chosenC.add(v.cand);
+  const byId = new Map(P.all.map((c) => [candId(c), c]));
   const assigned: SeamCandidate[] = [];
   for (const s of sol.perOp)
     for (const v of s.chosen) {
+      // A ply pair sewn onto another ply pair (a second collar on the collar): the second plies
+      // take the same seam — said as a seam of their own, as the greedy says it (the doll draws
+      // both as layers; the pool scored the pair the same way).
+      if (!v.ply && !v.self && v.ea.length === 1 && v.eb.length === 1) {
+        const ma = plyMateOf(v.ea[0]);
+        const mb = plyMateOf(v.eb[0]);
+        const twin = ma && mb ? byId.get([ma, mb].sort().join('~')) : undefined;
+        if (twin && !chosenC.has(twin)) {
+          chosenC.add(twin);
+          const c = toCandidate(twin);
+          assigned.push({
+            ...c,
+            operationId: s.op.id,
+            ...(sol.margin.has(v)
+              ? {
+                  assignment: {
+                    margin: sol.margin.get(v)!,
+                    confidence: confidenceOf(sol.margin.get(v)!),
+                  },
+                }
+              : {}),
+            evidence: {
+              ...c.evidence,
+              rule: `${c.evidence.rule ? `${c.evidence.rule} · ` : ''}the second plies take the same seam as ${v.cand.u.id} ↔ ${v.cand.v.id} (assigned in «${s.op.label}»)`,
+            },
+          });
+        }
+      }
       const margin = sol.margin.get(v);
       const alts = alternativesOf(P, v.cand, chosenC).map((q) => toCandidate(q));
       const c = toCandidate(v.cand, alts);

@@ -18,6 +18,7 @@
 //
 // No DXF read or no graph → null: the 3D chip is not there (the map has no switch then anyway).
 
+import { inputFor } from 'lib/assembly-skeleton/assignment';
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
 import type { SkeletonFacts, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
 import {
@@ -257,6 +258,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
   const anchors = anchorSizes
     .map((s) => ({ size: s, facts: c.factsOf(s) }))
     .filter((a): a is { size: string; facts: SkeletonFacts } => !!a.facts);
+  const assignment = inputFor(c.joins, c.hardware);
   return {
     facts,
     options: {
@@ -266,6 +268,8 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
       ...(c.rows.length ? { seams: { rows: c.rows, size } } : {}),
+      // VITE_SEAM_ASSIGNMENT: the worker reads the graph the way the flag says (greedy = as before).
+      ...(assignment ? { assignment } : {}),
     },
     ...(anchors.length ? { anchors } : {}),
   };

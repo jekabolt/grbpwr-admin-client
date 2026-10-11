@@ -960,11 +960,13 @@ for (const c of spec.cards) {
   const msGraph = performance.now() - t0;
   const G = new Geo(graph.pieces);
   const grain = grainDegOf(L.facts);
-  // The same facts assigned by the global solver over the card's order.
+  // The same facts assigned by the global solver over the card's order (SCORE_NO_ORDER=1: without
+  // the order — the proposal's case, a card whose steps are not written yet).
+  const noOrder = process.env.SCORE_NO_ORDER === '1';
   const assign = {
     mode: 'global' as const,
-    joins: L.options.joins ?? [],
-    ...(L.options.hardware ? { hardware: L.options.hardware } : {}),
+    joins: noOrder ? [] : L.options.joins ?? [],
+    ...(L.options.hardware && !noOrder ? { hardware: L.options.hardware } : {}),
   };
   const tg0 = performance.now();
   const graphG = await quiet(() =>
@@ -1128,6 +1130,17 @@ for (const c of spec.cards) {
     for (const f of report.floating)
       console.log(`  floating ${N.nameOf(f.pieceKey)} · ${f.reason.slice(0, 100)}`);
     if (report.notGarment) console.log(`  NOT GARMENT: ${report.notGarment.slice(0, 160)}`);
+    console.log('--- doll seams, GLOBAL assignment:');
+    for (const s of [...dollSeamsG, ...dollLayerG])
+      console.log(
+        `  ${(s.state ?? '').padEnd(9)} ${String(s.kind).padEnd(18)} ${s.origin.padEnd(13)} ${dollSewn(s, G, N).words} · ${s.note.slice(0, 100)}`,
+      );
+    for (const x of reportG.notSewn ?? [])
+      console.log(
+        `  NOT SEWN  ${x.a.map((q) => nmId(N, q)).join('+')} ↔ ${x.b.map((q) => nmId(N, q)).join('+')} · ${x.note.slice(0, 100)}`,
+      );
+    for (const f of reportG.floating)
+      console.log(`  floating ${N.nameOf(f.pieceKey)} · ${f.reason.slice(0, 100)}`);
     continue;
   }
 

@@ -26,7 +26,7 @@
 //     symmetric piece (a back, a yoke, a collar) has one orientation: the pieces sewn on its two
 //     drawing sides are of opposite parity.
 
-import { xSideOf } from '../geometry/plies';
+import { xSideOf, yMidOf } from '../geometry/plies';
 import { isStraight, type CandidatePool } from '../geometry/match';
 import type { Edge, EdgeId, PieceGeom } from '../types';
 import {
@@ -49,6 +49,19 @@ const chordAngle = (e: Edge) => {
 const upright = (e: Edge) => chordAngle(e) <= (25 * Math.PI) / 180;
 const level = (e: Edge) => chordAngle(e) >= (65 * Math.PI) / 180;
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
+const boxOf = (p: PieceGeom) => {
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of p.rs) {
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+  }
+  return { w: x1 - x0, h: y1 - y0 };
+};
 
 /**
  * Edge correspondence of two identical twins: b's edge sequence fits a's at one rotation (twins.ts
@@ -83,6 +96,8 @@ export class Board {
   private readonly geom: Map<string, PieceGeom>;
   /** Ply pairs: edge → the corresponding edge of the other ply. */
   private readonly plyMate = new Map<EdgeId, EdgeId>();
+  /** The second ply of each pair (CLR_1 to CLR): a tie between the plies goes to the first. */
+  private readonly secondPly = new Set<string>();
   /** Every edge of the card by index, and how many seams hold it (the search bound reads these). */
   readonly edgeIndex = new Map<EdgeId, number>();
   readonly useCount: Int32Array;
@@ -132,7 +147,21 @@ export class Board {
       if (!q || q.twinOf.filter((t) => t.kind === 'identical').length !== 1) continue;
       if (p.pieceKey > q.pieceKey || !together(p.pieceKey, q.pieceKey)) continue;
       const m = plyCorrespondence(p, q);
-      if (m) for (const [k, v] of m) this.plyMate.set(k, v);
+      if (!m) continue;
+      for (const [k, v] of m) this.plyMate.set(k, v);
+      // One piece: the plies share their orientation.
+      this.link(`\u0000O:${p.pieceKey}`, `\u0000O:${q.pieceKey}`, 0);
+      // Both plies take every seam onto the pair; the seam is REPORTED on the ply the card names
+      // first (CLR, not CLR_1) — the one with the shorter name, then the smaller.
+      const second =
+        p.name.length !== q.name.length
+          ? p.name.length > q.name.length
+            ? p
+            : q
+          : p.name > q.name
+            ? p
+            : q;
+      this.secondPly.add(second.pieceKey);
     }
     this.trail.length = 0;
   }
@@ -279,6 +308,22 @@ export class Board {
     }
     const long = (e: Edge) => e.lenMm >= 150 && e.chordMm / e.lenMm >= 0.95;
     if (long(ea) && long(eb) && ((ua && level(eb)) || (ub && level(ea)))) return false;
+    // Hems. Two level edges at the BOTTOM of their pieces are two hems — never sewn to each other
+    // (face up, two pieces stacked meet top to bottom; only a shoulder meets top to top, folded).
+    // And the bottom edge of a TALL piece (a front, a back panel) is its hem: sewn to a band or a
+    // facing, never to the top of another tall piece (a panel seam runs between a short upper piece
+    // and the panel below it).
+    if (level(ea) && level(eb)) {
+      const la = yMidOf(a, ea);
+      const lb = yMidOf(b, eb);
+      if (la < 0.25 && lb < 0.25) return false;
+      const tall = (p: PieceGeom) => {
+        const bx = boxOf(p);
+        return bx.h >= 500 && bx.h >= 1.5 * bx.w;
+      };
+      if (la < 0.25 && lb > 0.75 && tall(a) && tall(b)) return false;
+      if (lb < 0.25 && la > 0.75 && tall(a) && tall(b)) return false;
+    }
     return true;
   }
 
@@ -340,6 +385,15 @@ export class Board {
         });
       }
     for (const [a, b, rel] of v.links) this.link(a, b, rel);
+  }
+
+  /** The second ply of a pair (a tie between the plies goes to the first). */
+  isSecondPly(k: string): boolean {
+    return this.secondPly.has(k);
+  }
+  /** The corresponding edge on the other ply of a pair, if the edge is on one. */
+  plyMateOf(e: EdgeId): EdgeId | undefined {
+    return this.plyMate.get(e);
   }
 
   /** Mark edges used by a seam outside the search (a forced seam, a closure). */

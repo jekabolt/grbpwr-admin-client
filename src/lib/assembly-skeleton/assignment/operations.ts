@@ -50,6 +50,8 @@ export function buildOperations(
   /** Pieces never sewn as shell (hardware, interfacing). */
   skip: ReadonlySet<string>,
   surface: ReadonlySet<string>,
+  /** Lining pieces (by cloth or by name): the lining meets the shell along facings, not pair edges. */
+  lining: ReadonlySet<string> = new Set(),
 ): { ops: Operation[]; words: string[] } {
   const keys = new Set(pieces.map((p) => p.pieceKey));
   const name = (k: string) => pieces.find((p) => p.pieceKey === k)?.name ?? k;
@@ -94,13 +96,17 @@ export function buildOperations(
       classes.some((c, k) =>
         classes.some((d, l) => k < l && c !== d && (TUBE.has(c) || TUBE.has(d))),
       );
+    // The lining onto the shell (the last steps of a lined jacket): along the facings' edges and
+    // the hem, which the pair candidates read as coincidences — not forced.
+    const liningOf = inputs.map((X) => X.every((k) => lining.has(k)));
+    const crossCloth = liningOf.some(Boolean) && liningOf.some((x) => !x);
     ops.push({
       id: `op:${i}`,
       label: J.label,
       index: i,
       inputs,
       kind: 'order',
-      slack: mixed || composite ? 0 : SLACK,
+      slack: mixed || composite || crossCloth ? 0 : SLACK,
     });
   });
   const left = [...keys].filter((k) => !skip.has(k) && !mentioned.has(k));

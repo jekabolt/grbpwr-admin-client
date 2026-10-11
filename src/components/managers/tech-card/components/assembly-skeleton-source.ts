@@ -28,6 +28,7 @@ import {
 } from 'lib/assembly-skeleton/types';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
+import { useSeamAssignmentInput } from './assembly-seams/seam-assignment';
 import { skeletonDeps } from './assembly-skeleton-deps';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -90,6 +91,8 @@ export function useSkeletonProposal(): {
   const provider = useContext(SkeletonProviderContext);
   const [state, setState] = useState<SkeletonRun>({ status: 'idle' });
   const gen = useRef(0);
+  // VITE_SEAM_ASSIGNMENT: the proposal's graph is assigned the way the flag says (greedy = as before).
+  const assignment = useSeamAssignmentInput();
   useEffect(
     () => () => {
       gen.current += 1;
@@ -104,9 +107,11 @@ export function useSkeletonProposal(): {
       // marked, so nothing is applied from the old reading's steps meanwhile.
       setState((s) => (s.status === 'ready' ? { ...s, rebuilding: true } : { status: 'running' }));
       // One frame for «reading the pattern…» to paint before the pass blocks the thread.
+      const opts: SkeletonOptions | undefined =
+        assignment && !options?.assignment ? { ...options, assignment } : options;
       window.setTimeout(() => {
         Promise.resolve()
-          .then(() => provider(facts, deps, options))
+          .then(() => provider(facts, deps, opts))
           .then(
             (proposal) => {
               if (gen.current === my) setState({ status: 'ready', proposal, gen: my });
@@ -118,7 +123,7 @@ export function useSkeletonProposal(): {
           );
       }, 0);
     },
-    [provider],
+    [provider, assignment],
   );
   const adopt = useCallback((proposal: SkeletonProposal) => {
     const my = ++gen.current;

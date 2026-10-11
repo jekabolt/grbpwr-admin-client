@@ -20,7 +20,10 @@ import type { PoolCand } from '../geometry/match';
  */
 export const benefitOf = (c: PoolCand): number =>
   Math.round(100 * (c.score - SKELETON.accept)) +
-  Math.min(8, Math.floor(Math.min(c.u.lenMm, c.v.lenMm) / 80));
+  Math.min(8, Math.floor(Math.min(c.u.lenMm, c.v.lenMm) / 80)) -
+  // …and the two edges are one sewing line: a straight edge onto a strongly curved one (a shoulder
+  // onto an armhole top, 164 = 164) pays by the RMS of their profiles (mm / 3, at most 10).
+  Math.min(10, Math.round(c.parts.shapeRmsMm / 3));
 
 /**
  * Candidates below this score are never taken, not even to join an operation's inputs: the order's
