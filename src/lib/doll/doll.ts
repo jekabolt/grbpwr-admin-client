@@ -188,14 +188,22 @@ export function solveDoll(input: DollInput): DollReport {
   if (l4) {
     const S = opt.seams!;
     const grain = grainDegOf(input.facts);
-    graphIn = readSeamGraph(input.facts, undefined, undefined, (pieces) => {
-      const r = resolveAcrossSizes(S.rows, [
-        { size: S.size, pieces, grainDeg: grain },
-        ...(S.sizes ?? []).filter((x) => x.size !== S.size),
-      ]).get(S.size)!;
-      resolvedRows = r;
-      return r;
-    });
+    graphIn = readSeamGraph(
+      input.facts,
+      undefined,
+      undefined,
+      (pieces) => {
+        const r = resolveAcrossSizes(S.rows, [
+          { size: S.size, pieces, grainDeg: grain },
+          ...(S.sizes ?? []).filter((x) => x.size !== S.size),
+        ]).get(S.size)!;
+        resolvedRows = r;
+        return r;
+      },
+      undefined,
+      // the same assignment (greedy / global) the caller's graph was read with
+      opt.assignment,
+    );
   }
   const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed';
   const excludedPairs = (resolvedRows?.excluded ?? []).filter((x) => !x.surface);

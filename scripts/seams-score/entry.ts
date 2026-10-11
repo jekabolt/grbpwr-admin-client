@@ -3,8 +3,10 @@
 // the facts the live app hands the doll at the read size) and for beta card 49, run
 //   (a) the seam graph alone (readSeamGraph, the path the screen uses) and
 //   (b) the doll's final seam set (solveDoll with the card's joins: graph + order joins + proposals,
-//       «not sewn» pairs excluded)
-// and score both against the TRUTH seam list (scripts/seams-score/truth/<id>.seams.json, built from
+//       «not sewn» pairs excluded),
+// each twice — with the GREEDY assignment as shipped and with the operation-driven GLOBAL solver
+// (lib/assembly-skeleton/assignment, VITE_SEAM_ASSIGNMENT=global) — and score all four against the
+// TRUTH seam list (scripts/seams-score/truth/<id>.seams.json, built from
 // truth/specs.ts) by edge identity, tolerant to segmentation:
 //   · a seam is a pair of SEWN STRETCHES on the pieces' contours (mm along the resampled ring);
 //   · a prediction is SOUND when ≥ 70 % of each of its sides lies on stretches the truth sews (any
@@ -936,9 +938,13 @@ type CardOut = {
   };
   graph: Verdict;
   doll: Verdict;
+  /** The same two readings with the operation-driven global assignment. */
+  graphG: Verdict;
+  dollG: Verdict;
   dollStates: Record<string, number>;
   notSewnByDoll: string[];
-  ms: { graph: number; doll: number };
+  ms: { graph: number; doll: number; graphG: number; dollG: number; assign: number };
+  assignment?: SeamGraph['assignment'];
 };
 
 const outCards: CardOut[] = [];
@@ -954,6 +960,18 @@ for (const c of spec.cards) {
   const msGraph = performance.now() - t0;
   const G = new Geo(graph.pieces);
   const grain = grainDegOf(L.facts);
+  // The same facts assigned by the global solver over the card's order.
+  const assign = {
+    mode: 'global' as const,
+    joins: L.options.joins ?? [],
+    ...(L.options.hardware ? { hardware: L.options.hardware } : {}),
+  };
+  const tg0 = performance.now();
+  const graphG = await quiet(() =>
+    readSeamGraph(L.facts, undefined, undefined, undefined, undefined, assign),
+  );
+  const msGraphG = performance.now() - tg0;
+  const msAssign = graphG.assignment?.ms ?? 0;
 
   if (mode === 'build') {
     if (!TRUTH[c.id]) {
@@ -999,21 +1017,49 @@ for (const c of spec.cards) {
     }),
   );
   const msDoll = performance.now() - t1;
-  const notSewnIds = new Set((report.notSewn ?? []).map((x) => x.id));
-  const isSeam = (s: DollReport['seams'][number]) =>
-    !notSewnIds.has(s.id) &&
-    s.kind !== 'facing-free' &&
-    s.kind !== 'closure-not-seam' &&
-    s.kind !== 'proposed-closure' &&
-    s.kind !== 'surface' &&
-    (s.a.length || s.b.length);
-  const dollSeams = report.seams.filter((s) => s.origin !== 'layer' && isSeam(s));
-  const dollLayer = report.seams.filter((s) => s.origin === 'layer' && isSeam(s));
+  const t2 = performance.now();
+  const reportG = await quiet(() =>
+    solveDoll({
+      graph: graphG,
+      facts: L.facts,
+      options: {
+        ...L.options,
+        onFrame: undefined,
+        onMesh: undefined,
+        assignment: assign,
+        ...(seamsOpt
+          ? { seams: { ...seamsOpt, sizes: [...(seamsOpt.sizes ?? []), ...anchors] } }
+          : {}),
+      },
+    }),
+  );
+  const msDollG = performance.now() - t2;
+  const seamsOfReport = (rep: DollReport) => {
+    const notSewnIds = new Set((rep.notSewn ?? []).map((x) => x.id));
+    const isSeam = (s: DollReport['seams'][number]) =>
+      !notSewnIds.has(s.id) &&
+      s.kind !== 'facing-free' &&
+      s.kind !== 'closure-not-seam' &&
+      s.kind !== 'proposed-closure' &&
+      s.kind !== 'surface' &&
+      (s.a.length || s.b.length);
+    return {
+      seams: rep.seams.filter((s) => s.origin !== 'layer' && isSeam(s)),
+      layer: rep.seams.filter((s) => s.origin === 'layer' && isSeam(s)),
+    };
+  };
+  const { seams: dollSeams, layer: dollLayer } = seamsOfReport(report);
+  const { seams: dollSeamsG, layer: dollLayerG } = seamsOfReport(reportG);
   const graphPreds = graph.chosen
+    .filter((x) => x.kind !== 'surface')
+    .map((x) => candidateSewn(x, G, N));
+  const graphPredsG = graphG.chosen
     .filter((x) => x.kind !== 'surface')
     .map((x) => candidateSewn(x, G, N));
   const dollPreds = dollSeams.map((s) => dollSewn(s, G, N));
   const dollLayerPreds = dollLayer.map((s) => dollSewn(s, G, N));
+  const dollPredsG = dollSeamsG.map((s) => dollSewn(s, G, N));
+  const dollLayerPredsG = dollLayerG.map((s) => dollSewn(s, G, N));
 
   if (mode === 'edges') {
     console.log(
@@ -1059,6 +1105,17 @@ for (const c of spec.cards) {
     for (const p of graphPreds) console.log(`  ${p.kind.padEnd(9)} ${p.words}`);
     for (const x of graph.rejected.filter((q) => q.kind === 'closure-not-seam'))
       console.log(`  CLOSURE   ${nmId(N, x.a)} ↔ ${nmId(N, x.b)}`);
+    console.log('--- engine seams, GLOBAL assignment (graph.chosen):');
+    for (const c of graphG.chosen.filter((x) => x.kind !== 'surface'))
+      console.log(
+        `  ${c.kind.padEnd(9)} ${candidateSewn(c, G, N).words}${c.operationId ? ` · ${c.operationId}` : ''}${c.assignment ? ` · ${c.assignment.confidence} (margin ${c.assignment.margin})` : ''}`,
+      );
+    for (const w of graphG.assignment?.words ?? []) console.log(`  · ${w}`);
+    for (const w of graphG.warnings.filter((x) => x.startsWith('debug '))) console.log(`  ${w}`);
+    for (const o of graphG.assignment?.operations ?? [])
+      console.log(
+        `  op ${o.id} «${o.label.slice(0, 50)}»: ${o.inputs} inputs · ${o.seams} seams · ${o.connected ? 'joined' : 'APART'} · ${o.exact ? 'exact' : 'budget'} · ${o.nodes} nodes · ${o.ms} ms`,
+      );
     console.log('--- doll seams:');
     for (const s of [...dollSeams, ...dollLayer])
       console.log(
@@ -1121,6 +1178,8 @@ for (const c of spec.cards) {
   // score
   const vg = score(graphPreds, [], truths, patterns, G, N);
   const vd = score(dollPreds, dollLayerPreds, truths, patterns, G, N);
+  const vgG = score(graphPredsG, [], truths, patterns, G, N);
+  const vdG = score(dollPredsG, dollLayerPredsG, truths, patterns, G, N);
   const states: Record<string, number> = {};
   for (const s of dollSeams) states[s.state] = (states[s.state] ?? 0) + 1;
   const mainRows = truthRows.filter(
@@ -1145,11 +1204,20 @@ for (const c of spec.cards) {
     },
     graph: vg,
     doll: vd,
+    graphG: vgG,
+    dollG: vdG,
     dollStates: states,
     notSewnByDoll: (report.notSewn ?? []).map(
       (x) => `${x.a.map((q) => nmId(N, q)).join('+')} ↔ ${x.b.map((q) => nmId(N, q)).join('+')}`,
     ),
-    ms: { graph: Math.round(msGraph), doll: Math.round(msDoll) },
+    ms: {
+      graph: Math.round(msGraph),
+      doll: Math.round(msDoll),
+      graphG: Math.round(msGraphG),
+      dollG: Math.round(msDollG),
+      assign: Math.round(msAssign),
+    },
+    assignment: graphG.assignment,
   };
   outCards.push(out);
   console.log(
@@ -1157,27 +1225,45 @@ for (const c of spec.cards) {
   );
   if (!truthRows.length) console.log('  (no truth yet)');
   for (const [name, v] of [
-    ['graph', vg],
-    ['doll ', vd],
+    ['graph        ', vg],
+    ['graph GLOBAL ', vgG],
+    ['doll         ', vd],
+    ['doll GLOBAL  ', vdG],
   ] as const)
     console.log(
       `  ${name}: found ${v.found}/${v.rows} · TP ${v.tpPreds} FP ${v.fp} FN ${v.fn} · precision ${pct(v.precision)} · recall ${pct(v.recall)} · sure ${v.sure.found}/${v.sure.rows} ${pct(v.sure.recall)} · ply ${v.ply.found}/${v.ply.rows} · lining ${v.lining.found}/${v.lining.rows} · closures drawn ${v.closuresDrawn}`,
     );
-  for (const x of vd.fps)
+  console.log(
+    `  assignment: ${out.ms.assign} ms · ${graphG.assignment?.operations.length ?? 0} operations${graphG.assignment?.unconnected.length ? ` · apart: ${graphG.assignment.unconnected.map((x) => `«${x.slice(0, 40)}»`).join(' ')}` : ''}${graphG.assignment?.operations.some((o) => !o.exact) ? ' · BUDGET HIT' : ''}`,
+  );
+  for (const x of vdG.fps)
     console.log(
-      `    doll FP  ${x.words} — ${x.cls}${x.detail ? ` · ${x.detail.slice(0, 120)}` : ''}`,
+      `    dollG FP  ${x.words} — ${x.cls}${x.detail ? ` · ${x.detail.slice(0, 120)}` : ''}`,
     );
-  for (const x of vd.fns)
-    console.log(`    doll FN  ${x.words} [${x.cls}, ${x.confidence}] — ${x.detail.slice(0, 170)}`);
-  const onlyGraph = vg.fps.filter((x) => !vd.fps.some((y) => y.words === x.words));
-  for (const x of onlyGraph) console.log(`    graph-only FP ${x.words} — ${x.cls}`);
-  const onlyGraphFn = vg.fns.filter((x) => !vd.fns.some((y) => y.words === x.words));
-  for (const x of onlyGraphFn) console.log(`    graph-only FN ${x.words} [${x.cls}]`);
+  for (const x of vdG.fns)
+    console.log(`    dollG FN  ${x.words} [${x.cls}, ${x.confidence}] — ${x.detail.slice(0, 170)}`);
+  const onlyGraphG = vgG.fps.filter((x) => !vdG.fps.some((y) => y.words === x.words));
+  for (const x of onlyGraphG) console.log(`    graphG-only FP ${x.words} — ${x.cls}`);
+  const onlyGraphGFn = vgG.fns.filter((x) => !vdG.fns.some((y) => y.words === x.words));
+  for (const x of onlyGraphGFn) console.log(`    graphG-only FN ${x.words} [${x.cls}]`);
+  // what changed against the greedy, in words
+  const diff = (a: Verdict, b: Verdict, tag: string) => {
+    for (const x of b.fps.filter((x) => !a.fps.some((y) => y.words === x.words)))
+      console.log(`    ${tag} NEW FP ${x.words} — ${x.cls}`);
+    for (const x of a.fps.filter((x) => !b.fps.some((y) => y.words === x.words)))
+      console.log(`    ${tag} FIXED FP ${x.words} — ${x.cls}`);
+    for (const x of b.fns.filter((x) => !a.fns.some((y) => y.words === x.words)))
+      console.log(`    ${tag} NEW FN ${x.words} [${x.cls}]`);
+    for (const x of a.fns.filter((x) => !b.fns.some((y) => y.words === x.words)))
+      console.log(`    ${tag} FIXED FN ${x.words} [${x.cls}]`);
+  };
+  diff(vg, vgG, 'graph→global');
+  diff(vd, vdG, 'doll→global');
   for (const u of unresolved) console.log(`    UNRESOLVED truth: ${u}`);
 }
 
 if (mode === 'score') {
-  const sum = (k: 'graph' | 'doll') => {
+  const sum = (k: 'graph' | 'doll' | 'graphG' | 'dollG') => {
     const tp = outCards.reduce((t, c) => t + c[k].tpPreds, 0);
     const fp = outCards.reduce((t, c) => t + c[k].fp, 0);
     const rows = outCards.reduce((t, c) => t + c[k].rows, 0);
@@ -1209,19 +1295,71 @@ if (mode === 'score') {
       classes: Object.fromEntries(Object.entries(classes).sort((a, b) => b[1] - a[1])),
     };
   };
-  const total = { graph: sum('graph'), doll: sum('doll') };
+  const total = {
+    graph: sum('graph'),
+    doll: sum('doll'),
+    graphG: sum('graphG'),
+    dollG: sum('dollG'),
+  };
   console.log(
     `\n══ TOTAL (${outCards.length} cards · main truth rows ${total.graph.rows}, sure ${total.graph.sure.rows}, unsure ${outCards.reduce((t, c) => t + c.truth.unsure, 0)} · ply ${total.graph.ply.rows} · lining ${total.graph.lining.rows})`,
   );
-  for (const k of ['graph', 'doll'] as const)
+  for (const k of ['graph', 'graphG', 'doll', 'dollG'] as const)
     console.log(
-      `  ${k.padEnd(5)}: found ${total[k].found}/${total[k].rows} · TP ${total[k].tpPreds} FP ${total[k].fp} FN ${total[k].fn} · precision ${pct(total[k].precision)} · recall ${pct(total[k].recall)} · sure recall ${pct(total[k].sure.recall)} · ply ${total[k].ply.found}/${total[k].ply.rows}`,
+      `  ${k.padEnd(6)}: found ${total[k].found}/${total[k].rows} · TP ${total[k].tpPreds} FP ${total[k].fp} FN ${total[k].fn} · precision ${pct(total[k].precision)} · recall ${pct(total[k].recall)} · sure recall ${pct(total[k].sure.recall)} · ply ${total[k].ply.found}/${total[k].ply.rows}`,
     );
-  for (const k of ['graph', 'doll'] as const) {
+  for (const k of ['graph', 'graphG', 'doll', 'dollG'] as const) {
     console.log(`  ${k} error classes:`);
     for (const [cls, v] of Object.entries(total[k].classes).slice(0, 18))
       console.log(`    ${String(v).padStart(3)}  ${cls}`);
   }
+  // ── greedy vs global, per card and by kind of card ──
+  const BAGS = new Set(['1', '12', '13', '14', '15']);
+  const TROUSERS = new Set(['7', '11']);
+  const kindOf = (id: string) => (BAGS.has(id) ? 'bags' : TROUSERS.has(id) ? 'trousers' : 'shirts');
+  const P = (v: Verdict) => `${String(Math.round(100 * v.precision)).padStart(3)}`;
+  const R = (v: Verdict) => `${String(Math.round(100 * v.recall)).padStart(3)}`;
+  console.log('\n══ GREEDY vs GLOBAL (main bucket, precision / recall %)');
+  console.log(
+    `  ${'card'.padEnd(46)} ${'graph'.padEnd(9)} ${'global'.padEnd(9)} ${'doll'.padEnd(9)} ${'global'.padEnd(9)} assign ms`,
+  );
+  for (const c of outCards)
+    console.log(
+      `  ${`${c.id} ${c.label}`.slice(0, 45).padEnd(46)} ${P(c.graph)}/${R(c.graph)}   ${P(c.graphG)}/${R(c.graphG)}   ${P(c.doll)}/${R(c.doll)}   ${P(c.dollG)}/${R(c.dollG)}   ${String(c.ms.assign).padStart(5)}${c.assignment?.operations.some((o) => !o.exact) ? ' budget' : ''}`,
+    );
+  const agg = (cards: CardOut[], k: 'graph' | 'doll' | 'graphG' | 'dollG') => {
+    const tp = cards.reduce((t, c) => t + c[k].tpPreds, 0);
+    const fp = cards.reduce((t, c) => t + c[k].fp, 0);
+    const rows = cards.reduce((t, c) => t + c[k].rows, 0);
+    const found = cards.reduce((t, c) => t + c[k].found, 0);
+    return `${String(Math.round((100 * tp) / Math.max(1, tp + fp))).padStart(3)}/${String(Math.round((100 * found) / Math.max(1, rows))).padStart(3)}`;
+  };
+  for (const kind of ['shirts', 'trousers', 'bags'] as const) {
+    const cs = outCards.filter((c) => kindOf(c.id) === kind);
+    if (!cs.length) continue;
+    console.log(
+      `  ${`${kind} (${cs.length})`.padEnd(46)} ${agg(cs, 'graph')}   ${agg(cs, 'graphG')}   ${agg(cs, 'doll')}   ${agg(cs, 'dollG')}`,
+    );
+  }
+  console.log(
+    `  ${'ALL'.padEnd(46)} ${agg(outCards, 'graph')}   ${agg(outCards, 'graphG')}   ${agg(outCards, 'doll')}   ${agg(outCards, 'dollG')}`,
+  );
+  const ms = outCards.map((c) => c.ms.assign).sort((a, b) => a - b);
+  const p95 = ms[Math.min(ms.length - 1, Math.floor(0.95 * (ms.length - 1)))] ?? 0;
+  const worse = outCards
+    .filter((c) => kindOf(c.id) !== 'bags')
+    .filter(
+      (c) =>
+        c.dollG.precision < c.doll.precision - 0.02 + 1e-9 ||
+        c.dollG.recall < c.doll.recall - 0.02 + 1e-9,
+    )
+    .map((c) => c.id);
+  const okTotals =
+    total.dollG.precision >= total.doll.precision - 1e-9 &&
+    total.dollG.recall >= total.doll.recall - 1e-9;
+  console.log(
+    `  ACCEPTANCE (flip the default to global): totals ${okTotals ? 'OK' : 'NOT MET'} (doll P ${pct(total.doll.precision)} → ${pct(total.dollG.precision)}, R ${pct(total.doll.recall)} → ${pct(total.dollG.recall)}) · garment cards worse by > 2 pp: ${worse.length ? worse.join(', ') : 'none'} · assignment p95 ${p95} ms (≤ 750 ${p95 <= 750 ? 'OK' : 'NOT MET'})`,
+  );
   await mkdir(outDir, { recursive: true });
   const json = {
     sha: spec.sha,
@@ -1233,6 +1371,8 @@ if (mode === 'score') {
       ...c,
       graph: { ...c.graph, tps: undefined },
       doll: { ...c.doll, tps: undefined },
+      graphG: { ...c.graphG, tps: undefined },
+      dollG: { ...c.dollG, tps: undefined },
     })),
   };
   await writeFile(resolve(outDir, 'latest.json'), JSON.stringify(json, null, 1) + '\n');

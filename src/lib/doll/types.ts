@@ -9,7 +9,13 @@
 // Pure TS, no DOM, no React: the solver runs in a worker (worker/doll.worker.ts) and in node probes
 // (scripts/doll/*). The main thread imports ONLY this file.
 
-import type { EdgeId, SeamCandidate, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
+import type {
+  EdgeId,
+  SeamAssignmentInput,
+  SeamCandidate,
+  SeamGraph,
+  SkeletonFacts,
+} from 'lib/assembly-skeleton/types';
 import type { SizePieces } from 'lib/seams/transfer';
 import type { StoredSeam } from 'lib/seams/types';
 
@@ -66,6 +72,11 @@ export type DollOptions = {
   seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
+  /**
+   * Who assigned the graph's edges (lib/assembly-skeleton/assignment): handed to readSeamGraph when
+   * the doll re-reads the graph itself (L4, stored rows), so the re-read matches `input.graph`.
+   */
+  assignment?: SeamAssignmentInput;
 };
 
 export type DollInput = {

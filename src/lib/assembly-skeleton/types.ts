@@ -233,6 +233,40 @@ export type SeamCandidate = {
    * id. Edges not named are sewn whole. Absent on the engine's own readings.
    */
   partRange?: Record<EdgeId, [Mm, Mm]>;
+  /**
+   * Operation-driven assignment (assignment/): the operation of the technologist's order this seam
+   * was assigned in (`op:<index>`; `op:whole` when the card has no order, `op:residual` for pieces
+   * the order leaves out). Absent on the greedy's readings.
+   */
+  operationId?: string;
+  /**
+   * How sure the global solver is: `margin` = how much the operation's objective drops when this
+   * seam is forbidden and the operation is solved again (integer units of the cost table);
+   * `confidence` reads it as words. Absent on the greedy's readings.
+   */
+  assignment?: { margin: number; confidence: 'sure' | 'likely' | 'ambiguous' };
+};
+
+/** What the operation-driven global assignment did, in numbers and words (assignment/). */
+export type SeamAssignmentSummary = {
+  operations: {
+    id: string;
+    label: string;
+    inputs: number;
+    seams: number;
+    /** Every input of the operation is joined to the others by the seams assigned. */
+    connected: boolean;
+    /** The exact search finished within its node budget (else the best found stands). */
+    exact: boolean;
+    nodes: number;
+    ms: number;
+  }[];
+  /** Labels of operations whose inputs no candidate could join (said in words, left to later readers). */
+  unconnected: string[];
+  /** Stored decisions the solver could not honour (two confirmed seams on one edge, …). */
+  conflicts: string[];
+  words: string[];
+  ms: number;
 };
 
 /** Who decided a stored seam, and how its edges were found today. */
@@ -281,6 +315,13 @@ export type SeamGraph = {
   /** Connected components by pieceKey. */
   components: string[][];
   warnings: string[];
+  /** Set when `chosen` was assigned by the operation-driven global solver (VITE_SEAM_ASSIGNMENT=global). */
+  assignment?: SeamAssignmentSummary;
+  /**
+   * Shadow mode (VITE_SEAM_ASSIGNMENT=shadow): `chosen` is the greedy's; the global solver's
+   * reading of the same pool rides along for comparison, never drawn.
+   */
+  shadow?: { chosen: SeamCandidate[]; assignment: SeamAssignmentSummary };
 };
 
 // ── Skeleton (lane B) ───────────────────────────────────────────────────────────────────────
@@ -453,6 +494,24 @@ export type SkeletonOptions = {
    * first, and continues from there — see `SkeletonUnitHint`.
    */
   units?: SkeletonUnitHint[];
+  /**
+   * How the seam graph's edges are assigned (assignment/): the greedy as shipped, or the
+   * operation-driven global solver over the technologist's order (`joins`). Absent = greedy.
+   */
+  assignment?: SeamAssignmentInput;
+};
+
+/** Input of the operation-driven global assignment (assignment/): the mode and the order. */
+export type SeamAssignmentInput = {
+  mode: 'greedy' | 'shadow' | 'global';
+  /** The technologist's order: MACHINE operations as parts of piece keys, in order (doll/joins.ts). */
+  joins?: readonly { label: string; parts: readonly (readonly string[])[] }[];
+  /** Pieces the order sets as hardware (an elastic, a tape): never a shell seam. */
+  hardware?: readonly { label: string; pieces: readonly string[] }[];
+  /** Node budget of the exact search per operation (default 40 000). */
+  nodeBudget?: number;
+  /** Time budget (ms) for the whole assignment; past it the remaining operations are solved greedily. */
+  msBudget?: number;
 };
 
 /** One unit of an outside structural reading: its pieces (card piece keys) and its name. */
