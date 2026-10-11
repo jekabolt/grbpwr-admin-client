@@ -21,7 +21,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
 import { furniture, GREY_COLOUR_ONLY, overprintLines } from './classify';
-import { rolesByFaces, type FaceRoleOpts } from './face-role';
+import { rolesByFaces, type FaceRoleOpts, type FaceSizeCtx } from './face-role';
 import { overlaidFiles } from './link';
 import { makeChains } from './make';
 import { seamPens, type SeamPen } from './seam';
@@ -38,6 +38,8 @@ export type BuildExtras = {
   fileNames?: Map<string, string>;
   /** A0.3: sheet path ids the clean stage offered as background and the operator did not take. */
   offeredPaths?: ReadonlySet<PathId>;
+  /** gb2: what feeds the selected sheet (count-evidence sheetFeed) — the face pass's size count. */
+  countFeed?: FaceSizeCtx;
   /** Probe switches of the face pass (mutation; the worker never sets them). */
   faceOpts?: FaceRoleOpts;
 };
@@ -83,7 +85,7 @@ export function buildChainsDetailed(
     styles,
     extras.offeredPaths,
     extras.faceOpts,
-    { extraTexts: extras.extraTexts, fileNames: extras.fileNames },
+    extras.countFeed,
   );
   progress?.(3, 3);
   return { set, recover: rec };

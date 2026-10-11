@@ -410,8 +410,9 @@ export type ClassEvidence =
   | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] }
   /**
    * gb2: lines the face pass would call strays on a sheet NOT proven one size (another size's line,
-   * an edge drawn once for every size): an 'internal' row the size checks read, not asked. `why` =
-   * the evidence that the sheet may draw several sizes.
+   * an edge drawn once for every size): candidate size lines — an 'ignore' row (no wall, no
+   * feature), not asked; chains/face-role gradeView hands them to the size checks. `why` = the
+   * evidence that the sheet may draw several sizes.
    */
   | { kind: 'face-graded'; why: string };
 

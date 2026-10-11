@@ -23,12 +23,15 @@ import {
   gradeView,
   rolesByFaces,
   STRAY_LANES,
+  strayLanes,
   type FaceRoleOpts,
+  type FaceSizeCtx,
 } from 'lib/pattern-import/chains/face-role';
 import { confirmRows, withClassSigs } from 'lib/pattern-import/chains/legend';
 import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
+import { sheetFeed } from 'lib/pattern-import/sizes/count-evidence';
 import { readRawDxf } from 'lib/pattern-import/gate';
 import { srcKey } from 'lib/pattern-import/clean';
 import { nestedPieces } from 'lib/pattern-import/gate/checks';
@@ -1148,12 +1151,16 @@ async function synthStrayGate() {
     [...new Set(cs.flatMap((c) => c.chains.map(g.tagOf)))].sort();
   const sizeTags = [`size${GV.n - 1}`, 'position'];
   const graded = g.set.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const roleIn = (v: ChainSet, t: string) =>
+    [...new Set(v.classes.filter((c) => c.chains.includes(g.chainOfTag(t))).map((c) => c.role))]
+      .sort()
+      .join('+');
   check(
     S,
-    'graded one-pen sheet: the largest size and the positioning line are size lines (internal, not asked), only the square a stray',
+    'graded one-pen sheet: the largest size and the positioning line are candidate size lines (ignore, not asked), only the square a stray',
     tagsIn(g.set, strayRows(g.set)).join() === 'square' &&
       graded.length === 1 &&
-      graded[0].role === 'internal' &&
+      graded[0].role === 'ignore' &&
       graded[0].confidence >= 0.6 &&
       sizeTags.every((t) => tagsIn(g.set, graded).includes(t)),
     {
@@ -1164,10 +1171,16 @@ async function synthStrayGate() {
   );
   check(
     S,
-    'no question about a size line: no asked row holds one; the size checks read the set as built',
+    'no question about a size line; no wall in the canonical set, a line of some size only in gradeView',
     !tagsIn(g.set, asked(g.set)).some((t) => t.startsWith('size') || t === 'position') &&
-      gradeView(g.set) === g.set,
-    { asked: tagsIn(g.set, asked(g.set)) },
+      sizeTags.every(
+        (t) => roleIn(g.set, t) === 'ignore' && roleIn(gradeView(g.set), t) === 'internal',
+      ),
+    {
+      asked: tagsIn(g.set, asked(g.set)),
+      canonical: sizeTags.map((t) => roleIn(g.set, t)),
+      view: sizeTags.map((t) => roleIn(gradeView(g.set), t)),
+    },
   );
   // the operator confirms every row asked, as proposed: the walls stay, 3 sizes close true
   const read = detectSizeRun(g.sheet, g.set, [
@@ -1224,11 +1237,18 @@ async function synthStrayGate() {
     tagsIn(nl.set, strayRows(nl.set)).includes(`size${GV.n - 1}`),
     tagsIn(nl.set, strayRows(nl.set)),
   );
-  // the count: a one-size proof offers the strays whatever they look like; a run in text withholds
-  const roles = (
-    o: FaceRoleOpts | undefined,
-    extras: Parameters<typeof buildChainsDetailed>[2],
-  ) => {
+  // the candidate row confirmed by the operator (confidence 1) is his: not handed back, the size lost
+  const gr = graded[0];
+  const held = fillAll(confirmRows(confirmAll(g.set), gr ? [gr.sig ?? `#${gr.id}`] : []));
+  check(
+    S,
+    'the candidate row confirmed as ignore: gradeView leaves it out → refused (mutation: only gradeView promotes)',
+    held.closed === 0,
+    held,
+  );
+  // the count (A6 over what feeds the sheet, two groups agreeing): a size in a file name and a lone
+  // size run in text prove nothing; a run in text and the files agreeing say 6 → withheld
+  const roles = (o: FaceRoleOpts | undefined, countFeed: FaceSizeCtx) => {
     const { set } = buildChainsDetailed(
       g.sheet,
       {
@@ -1236,35 +1256,91 @@ async function synthStrayGate() {
         joinAngleDeg: PATIMPORT.joinAngleDeg,
         joinLateralMm: PATIMPORT.joinLateralMm,
       },
-      { ...extras, faceOpts: o },
+      { extraTexts: [], faceOpts: o, countFeed },
     );
     return tagsIn(set, strayRows(set));
   };
-  const named = { extraTexts: [], fileNames: new Map([['syn', 'robe_44.svg']]) };
-  const one = roles(undefined, named);
+  const big = `size${GV.n - 1}`;
+  const named = roles(undefined, { texts: [], files: [{ id: 'syn', name: 'robe_44.svg' }] });
   check(
     S,
-    'one size proven (one file, its name carries the size): the size line is offered as a stray',
-    one.includes(`size${GV.n - 1}`),
-    one,
+    'a size in the file name ("robe_44.svg") is a label, not one size: still withheld',
+    !named.includes(big),
+    named,
   );
-  const oneOff = roles({ off: new Set(['proof']) }, named);
-  check(
-    S,
-    'proof off: the same sheet withholds it (mutation)',
-    !oneOff.includes(`size${GV.n - 1}`),
-    oneOff,
+  const lone = roles(
+    { off: new Set(['lanes']) },
+    { texts: [{ text: 'SIZES 36-46', file: 'syn' }], files: [{ id: 'syn', name: 'robe.svg' }] },
   );
-  const run = { extraTexts: ['SIZES 36-46'] };
-  const many = roles({ off: new Set(['lanes']) }, run);
   check(
     S,
-    'a size run in text ("SIZES 36-46"), the lane check off: withheld by the count',
-    !many.includes(`size${GV.n - 1}`),
+    'a lone size run in text (one group, A6 n unknown), the lane check off: offered as before',
+    lone.includes(big),
+    lone,
+  );
+  const sixFiles = ['36', '38', '40', '42', '44', '46'].map((z, k) => ({
+    id: `f${k}`,
+    name: `robe_${z}.pdf`,
+  }));
+  const agree: FaceSizeCtx = {
+    texts: [{ text: 'SIZES 36-46', file: 'f0' }],
+    files: sixFiles,
+  };
+  const many = roles({ off: new Set(['lanes']) }, agree);
+  check(
+    S,
+    'a size run in text and six size files agree (A6 n = 6), the lane check off: withheld by the count',
+    !many.includes(big),
     many,
   );
-  const manyOff = roles({ off: new Set(['lanes', 'proof']) }, run);
-  check(S, 'the count off too: offered (mutation)', manyOff.includes(`size${GV.n - 1}`), manyOff);
+  const manyOff = roles({ off: new Set(['lanes', 'proof']) }, agree);
+  check(S, 'the count off too: offered (mutation)', manyOff.includes(big), manyOff);
+
+  // per chain: a line partly beside an outline counts its parallel part; lines beside nothing add
+  // nothing and dilute nothing
+  const outl = rect(0, 0, 300, 400);
+  const ch = [
+    chainOf(0, [...outl, outl[0]], false),
+    // 400 mm straight, 100 mm of it 5 mm outside the bottom edge, the rest leaves at 45°
+    chainOf(
+      1,
+      [
+        { x: 100, y: -5 },
+        { x: 200, y: -5 },
+        { x: 412, y: -217 },
+      ],
+      false,
+    ),
+    // a 3 m hatching far away (lines beside each other, beside no outline)
+    ...Array.from({ length: 10 }, (_, k) =>
+      chainOf(
+        2 + k,
+        [
+          { x: 1000, y: k * 6 },
+          { x: 1300, y: k * 6 },
+        ],
+        false,
+      ),
+    ),
+  ];
+  const st = new Map<number, Style>([[0, STYLE(0, null)]]);
+  const one = strayLanes(ch, [0], [], [1], st);
+  const diluted = strayLanes(
+    ch,
+    [0],
+    [],
+    ch.slice(1).map((c) => c.id),
+    st,
+  );
+  check(
+    S,
+    'per chain: a line partly beside the outline counts ~100 mm, not its 400 mm; the hatching joins nothing and changes nothing',
+    Math.abs(one.laneMm - 100) <= 12 &&
+      one.inLane.join() === '1' &&
+      diluted.laneMm === one.laneMm &&
+      diluted.inLane.join() === '1',
+    { one: [one.laneMm, one.inLane], diluted: [diluted.laneMm, diluted.inLane] },
+  );
 
   // the worker: the same sheet as an SVG in mm (its page = the sheet's box) — chains → the asked
   // rows confirmed → 3 sizes answered → a click in the piece: the pieces close, no size refusal
@@ -1380,14 +1456,14 @@ async function synthStrayGate() {
 }
 
 /**
- * gb2: Redcafe 44 alone (one file whose name carries its size: one size, proven) — the face pass
- * still offers its strays; with the proof and the lane threshold off (every stray "graded") they
- * would be withheld (mutation: the gate decides by the proof here).
+ * gb2: Redcafe 44 alone (one size; its file name is a label, not a proof) — its strays do not run
+ * beside the outlines like graded copies, so the face pass still offers them; with the lane
+ * thresholds at zero (every stray "graded") they would be held as candidate size lines (mutation).
  */
 async function redcafeGate() {
   const S = 'stray gate · Redcafe 44';
   const base = CASES.find((x) => x.id === 'redcafe')!;
-  let got: { set: ChainSet; mut: ChainSet; one: ChainSet } | null = null;
+  let got: { set: ChainSet; mut: ChainSet } | null = null;
   await runCase(
     { ...base, id: 'redcafe-44-gate', files: ['pdf/44.pdf'], card: ['44'] },
     {
@@ -1395,7 +1471,10 @@ async function redcafeGate() {
         const w = s as unknown as {
           sheet: Sheet;
           docTexts: string[];
+          docTextSrc: { file: string; page: number; text: string }[];
           fileNames: Map<string, string>;
+          files: { id: string; name: string }[];
+          pages: Parameters<typeof sheetFeed>[3];
           sheetOffered: Set<number>;
           offeredSrc: Set<string>;
         };
@@ -1410,26 +1489,26 @@ async function redcafeGate() {
           joinAngleDeg: PATIMPORT.joinAngleDeg,
           joinLateralMm: PATIMPORT.joinLateralMm,
         };
-        const ex = { extraTexts: w.docTexts, fileNames: w.fileNames, offeredPaths };
-        const lanesAll = { minMm: STRAY_LANES.minMm, share: STRAY_LANES.share };
+        const feed = sheetFeed(sheet, w.files, w.docTextSrc, w.pages);
+        const ex = {
+          extraTexts: w.docTexts,
+          fileNames: w.fileNames,
+          offeredPaths,
+          countFeed: { texts: feed.texts, files: feed.files },
+        };
+        const saved = { ...STRAY_LANES };
         const set = buildChainsDetailed(sheet, opts, ex).set;
-        // every stray "graded": the lane threshold at zero
-        STRAY_LANES.minMm = 0;
-        STRAY_LANES.share = 0;
+        // every stray "graded": the lane thresholds at zero
+        Object.assign(STRAY_LANES, { minMm: 0, share: 0, joinMm: 0 });
         try {
-          const one = buildChainsDetailed(sheet, opts, ex).set;
-          const mut = buildChainsDetailed(sheet, opts, {
-            ...ex,
-            faceOpts: { off: new Set(['proof']) },
-          }).set;
-          got = { set, mut, one };
+          got = { set, mut: buildChainsDetailed(sheet, opts, ex).set };
         } finally {
-          Object.assign(STRAY_LANES, lanesAll);
+          Object.assign(STRAY_LANES, saved);
         }
       },
     },
   );
-  const g = got as { set: ChainSet; mut: ChainSet; one: ChainSet } | null;
+  const g = got as { set: ChainSet; mut: ChainSet } | null;
   const strayMm = (v: ChainSet | undefined) =>
     Math.round(
       (v?.classes ?? [])
@@ -1449,19 +1528,13 @@ async function redcafeGate() {
   });
   check(
     S,
-    'single size (44.pdf): strays offered, none withheld as size lines',
+    'single size (44.pdf): strays offered, none held as candidate size lines',
     !!g && strayMm(g.set) > 0 && gradedMm(g.set) === 0,
     row(g?.set),
   );
   check(
     S,
-    'every stray made "graded" (lane threshold 0): the file name still proves one size → offered',
-    !!g && strayMm(g.one) === strayMm(g.set) && gradedMm(g.one) === 0,
-    row(g?.one),
-  );
-  check(
-    S,
-    'the same with the proof off: withheld as size lines (mutation)',
+    'every stray made "graded" (lane thresholds 0): held as candidate size lines (mutation)',
     !!g && gradedMm(g.mut) > 0 && strayMm(g.mut) < strayMm(g.set),
     row(g?.mut),
   );

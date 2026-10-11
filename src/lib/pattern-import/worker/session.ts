@@ -954,10 +954,17 @@ export class Session {
           .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
           .map((p) => p.id),
       );
+      // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
+      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
+      const countFeed = {
+        texts: feed.texts,
+        files: feed.files,
+        models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+      };
       set = buildChainsDetailed(
         sheet,
         { ...input.opts },
-        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths },
+        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths, countFeed },
         (d, t, n) => {
           ctx.checkCancel();
           ctx.progress(d, t, n);

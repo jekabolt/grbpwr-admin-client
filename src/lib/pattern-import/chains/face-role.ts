@@ -20,11 +20,12 @@
 // "No size row = one size" holds only where the sheet is one size. On a sheet drawing every size in
 // one pen the strays are the larger sizes' lines and the edges drawn once for all of them (the
 // stripped bench), and the operator confirming that row would take the size checks' walls away.
-// So the stray row is proposed only when the sheet is PROVEN one size (sizeCountAtFaces: the file
-// the solver reads as one size by its name, one file per size, A6 count evidence = 1) or, with the
-// count unknown, when the strays do not run beside the outlines like graded copies (strayLanes)
-// and the outlines are not drawn three or more lines deep (nestedWalls). Otherwise those lines are an 'internal' row of size lines (not asked) — only the drawn test
-// square and what the clean step offered stay strays (they are never a size's line).
+// So the stray row is proposed only when the sheet's A6 count evidence (what feeds the sheet, two
+// groups agreeing) says one size or, with the count unknown, when the strays do not run beside the
+// outlines like graded copies (strayLanes) and the outlines are not drawn three or more lines deep
+// (nestedWalls). Otherwise those lines are candidate size lines: an 'ignore' row (no wall for the
+// fill, no feature) that is not asked, and that gradeView alone hands to the size checks. The drawn
+// test square and what the clean step offered stay strays (they are never a size's line).
 import type {
   Chain,
   ChainId,
@@ -40,8 +41,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 import { faceRaster, judgeBlobs, type FaceBlob, type FaceRaster } from '../pieces/faces';
 import { sameLook } from '../pieces/grade/guard';
 import { resampleT } from '../pieces/grade/vec';
-import { countEvidence } from '../sizes/count-evidence';
-import { fileSizeLabel } from '../sizes/recover';
+import { countEvidence, type TextObs } from '../sizes/count-evidence';
 import { testSquareBoxes, turnOf } from './classify';
 import { resample, SegGrid, segNearest } from './geom';
 import type { WallItem } from '../pieces/snap';
@@ -93,12 +93,15 @@ export type FaceRoleOpts = {
   >;
 };
 
-/** What the sheet says about its size count beyond its lines (the chains stage's extras). */
+/**
+ * What feeds the selected sheet (sizes/count-evidence sheetFeed: its own texts, the instruction /
+ * cover texts of ITS files, its files) — the A6 count evidence reads nothing else.
+ */
 export type FaceSizeCtx = {
-  /** Instruction-page texts of the files (size runs, legends). */
-  extraTexts?: readonly string[];
-  /** Every uploaded file: id → name. */
-  fileNames?: ReadonlyMap<string, string>;
+  texts?: readonly TextObs[];
+  files?: readonly { id: string; name: string }[];
+  /** Models the sheet names (more than one → the count is never inferred). */
+  models?: number;
 };
 
 /**
@@ -325,9 +328,10 @@ export function rolesByFaces(
     });
   }
   if (sizeLines.length)
-    // not asked (≥ 0.6): the size checks read them as lines of some size (unconfirmed internal)
+    // candidate size lines: no wall for the fill, no feature for semantics (role 'ignore'), not
+    // asked (≥ 0.6); gradeView hands them to the size checks as unconfirmed lines of some size
     push({
-      role: 'internal',
+      role: 'ignore',
       sizeLabel: null,
       chains: sizeLines,
       totalLengthMm: len(sizeLines),
@@ -360,8 +364,8 @@ export type GradeViewOpts = { off?: ReadonlySet<'why'> };
 /**
  * What the size checks (pieces/grade: the hook, the drawn-size inference) may read of the face
  * pass. Since gb2 the face pass offers a stray row only on a sheet proven one size or not looking
- * graded (rolesByFaces: sizeCountAtFaces, strayLanes, nestedWalls), so on the stripped bench this is
- * the set as built; it stays as the guard for a sheet the gate let through. The stray row rests on
+ * graded (rolesByFaces: sizeCountAtFaces, strayLanes, nestedWalls); elsewhere its candidate size
+ * row ('face-graded', not asked) is handed back here and nowhere else. The stray row rests on
  * "a sheet with no size row is one size": a line sticking outside every outline is a stray. On a
  * sheet drawing several sizes in one pen that is every larger size's line (the stripped bench:
  * kombinezon lost a whole size, the solver counted 7 bands for 8 and a 7-size control closed 6 wrong
@@ -383,7 +387,9 @@ export type GradeViewOpts = { off?: ReadonlySet<'why'> };
 export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
   const off = o.off ?? new Set();
   const unsure = (c: LineClass) =>
-    c.role === 'ignore' && c.confidence < 0.9 && c.evidence.some((e) => e.kind === 'face-stray');
+    c.role === 'ignore' &&
+    c.confidence < 0.9 &&
+    c.evidence.some((e) => e.kind === 'face-stray' || e.kind === 'face-graded');
   if (!set.classes.some(unsure)) return set;
   const cached = !o.off && gradeViews.get(set);
   if (cached) return cached;
@@ -430,79 +436,62 @@ export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
 }
 
 /**
- * gb2: what the sheet says about its size count beyond its lines — `one` when it is proven one size,
- * `many` when an evidence that counts says more (null = not known):
- *   the file name   one uploaded file whose name carries a size ("44.pdf", "BLAZER M"): the solver
- *                   reads it as one size too (sizes/detect, pieces/grade/expected 'source');
- *   one file/size   the sheet is drawn from one of several files, each naming a size of its own;
- *   A6 evidence     sizes/count-evidence over the sheet's texts, the instruction texts and its
- *                   files (not its faces, see below): 1 from two groups → one; a counting evidence
- *                   allowing only n > 1 (a size run in text, a legend, files of different sizes
- *                   overlaid) → many.
- * The card's size run is the garment's, not the sheet's (H1c-4): it is not read here.
+ * gb2: the sheet's size count as A6 infers it (sizes/count-evidence) from what feeds the selected
+ * sheet: `one` / `many` only where counting evidences of two or more groups agree (ev.n) — a lone
+ * size run in text, a size in a file name ("pattern_38.pdf" may draw 36–46: a label, not a count)
+ * prove nothing. Not its faces: the nest evidence needs the fill's faces (another size's copy told
+ * from a seam line); on this pass's coarse raster nested sizes merge into one thick wall and would
+ * read "one line round each outline" on a graded sheet. The card's size run is the garment's, not
+ * the sheet's (H1c-4): not read here.
  */
 export function sizeCountAtFaces(
   sheet: Sheet,
   ctx: FaceSizeCtx,
 ): { one: string | null; many: string | null } {
-  const names = ctx.fileNames ?? new Map<string, string>();
-  const feeding = [...new Set(sheet.poses.map((p) => p.file))];
-  if (names.size === 1) {
-    const name = [...names.values()][0];
-    const l = fileSizeLabel(name);
-    if (l) return { one: `the file “${name}” names one size (${l})`, many: null };
-  }
-  const labels = [...names.values()].map((n) => fileSizeLabel(n));
-  if (
-    feeding.length === 1 &&
-    names.size >= 2 &&
-    labels.every((l) => !!l) &&
-    new Set(labels).size === labels.length
-  ) {
-    const l = fileSizeLabel(names.get(feeding[0]) ?? '');
-    if (l) return { one: `one file per size (this sheet: ${l})`, many: null };
-  }
-  // no faces: the nest evidence needs the fill's faces (another size's copy told from a seam line);
-  // on this pass's coarse raster nested sizes merge into one thick wall and would read "one line
-  // round each outline" on a graded sheet
   const ev = countEvidence({
-    texts: [
-      ...sheet.texts.map((t) => ({ text: t.text, file: t.src?.file ?? null })),
-      ...(ctx.extraTexts ?? []).map((text) => ({ text, file: null })),
-    ],
+    texts: ctx.texts ?? sheet.texts.map((t) => ({ text: t.text, file: t.src?.file ?? null })),
     blobs: null,
-    files: feeding.map((id) => ({ id, name: names.get(id) ?? '' })),
+    files: ctx.files ?? [],
+    models: ctx.models,
   });
-  if (ev.n === 1)
-    return {
-      one: `the count evidence says one (${ev.evidence
-        .filter((e) => e.counts)
-        .map((e) => e.detail)
-        .join('; ')})`,
-      many: null,
-    };
-  const many = ev.evidence.find((e) => e.counts && e.n.length > 0 && e.n.every((n) => n > 1));
-  return { one: null, many: many ? `${many.kind}: ${many.detail}` : null };
+  if (ev.n == null) return { one: null, many: null };
+  const why = `${ev.n} by ${ev.evidence
+    .filter((e) => e.counts)
+    .map((e) => e.detail)
+    .join('; ')}`;
+  return ev.n === 1 ? { one: why, many: null } : { one: null, many: why };
 }
 
 /**
- * gb2: strays that run beside the outlines like graded copies — another size's line. A stray joins
- * the outlines when ≥ max(20 mm, 30 %) of it runs beside a line already joined (the outline and
- * inside lines first, then the strays joined), in the same look, 1–15 mm away, within 20°; to a
- * fixpoint, so a nest of sizes outside the outline joins size by size. Graded from STRAY_LANES.minMm
- * joined AND STRAY_LANES.share of the strays' length. A table, a grid, hatching (lines beside each
- * other but not beside an outline), a positioning bracket, a watermark, a line crossing the nest:
- * none joins.
+ * gb2: strays that run beside the outlines like graded copies — another size's line. Per chain, per
+ * sample (every 4 mm): a sample is in lane when a line already joined runs beside it (same look,
+ * 1–15 mm away, within 20°) — any joined line, so an outline broken into pieces covers as one. A
+ * stray joins when ≥ STRAY_LANES.joinMm of it is in lane (the outline and inside lines are joined
+ * first, then the strays joined, to a fixpoint: a nest of sizes outside the outline joins size by
+ * size). The lane length is the in-lane samples of the joined strays only (a line partly beside an
+ * outline counts that part); graded from STRAY_LANES.minMm AND STRAY_LANES.share of the outline and
+ * inside lines' length — strays that run beside nothing (a watermark, a grid, a table, a bracket, a
+ * line across the nest) add nothing and dilute nothing.
  */
-export const STRAY_LANES = { minMm: 150, share: 0.4, reachMm: 15, gapMm: 1, angleDeg: 20 };
+export const STRAY_LANES = {
+  minMm: 150,
+  share: 0.2,
+  joinMm: 20,
+  reachMm: 15,
+  gapMm: 1,
+  angleDeg: 20,
+};
 
-/** Per line of `of`: the samples (every 4 mm) running beside each other line of `among`. */
+/** A line's samples (every 4 mm): how many, how many with ≥ 2 lines beside, the lines beside each. */
+type Lanes = { n: number; multi: number; hits: ChainId[][] };
+
+/** Per line of `of`: the samples (every 4 mm) running beside lines of `among`. */
 function lanesBeside(
   chains: readonly Chain[],
   of: readonly ChainId[],
   among: readonly ChainId[],
   styles: ReadonlyMap<number, Style>,
-): Map<ChainId, { n: number; by: Map<ChainId, number>; multi: number }> {
+): Map<ChainId, Lanes> {
   const L = STRAY_LANES;
   const pts = (c: Chain) => (c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts);
   const grid = new SegGrid(8);
@@ -510,10 +499,10 @@ function lanesBeside(
     if (chains[id].pts.length >= 2) grid.addPolyline(id, pts(chains[id]));
   const amongSet = new Set(among);
   const cosMin = Math.cos((L.angleDeg * Math.PI) / 180);
-  const out = new Map<ChainId, { n: number; by: Map<ChainId, number>; multi: number }>();
+  const out = new Map<ChainId, Lanes>();
   for (const id of of) {
     const c = chains[id];
-    const r = { n: 0, by: new Map<ChainId, number>(), multi: 0 };
+    const r: Lanes = { n: 0, multi: 0, hits: [] };
     out.set(id, r);
     if (c.lengthMm < 10 || c.pts.length < 2) continue;
     for (const smp of resampleT(pts(c), 4)) {
@@ -530,7 +519,7 @@ function lanesBeside(
         if (Math.abs(((b.x - a.x) * smp.t.x + (b.y - a.y) * smp.t.y) / sl) < cosMin) return;
         hit.add(o);
       });
-      for (const o of hit) r.by.set(o, (r.by.get(o) ?? 0) + 1);
+      if (hit.size) r.hits.push([...hit]);
       if (hit.size >= 2) r.multi++;
     }
   }
@@ -565,33 +554,32 @@ export function strayLanes(
   internal: readonly ChainId[],
   strays: readonly ChainId[],
   styles: ReadonlyMap<number, Style>,
-): { graded: boolean; laneMm: number; strayMm: number; why: string } {
+): { graded: boolean; laneMm: number; baseMm: number; inLane: ChainId[]; why: string } {
   const L = STRAY_LANES;
   const lanes = lanesBeside(chains, strays, [...piece, ...internal, ...strays], styles);
-  const beside = new Map([...lanes].map(([id, r]) => [id, r.by]));
   const joined = new Set<ChainId>([...piece, ...internal]);
+  const inLaneMm = (id: ChainId) =>
+    4 * (lanes.get(id)?.hits ?? []).filter((h) => h.some((o) => joined.has(o))).length;
   const left = new Set(strays);
-  let laneMm = 0;
   for (let moved = true; moved; ) {
     moved = false;
     for (const id of left) {
-      const c = chains[id];
-      let n = 0;
-      for (const [o, k] of beside.get(id) ?? []) if (joined.has(o)) n = Math.max(n, k);
-      if (n * 4 < Math.max(20, 0.3 * c.lengthMm)) continue;
+      if (inLaneMm(id) < L.joinMm) continue;
       joined.add(id);
       left.delete(id);
-      laneMm += c.lengthMm;
       moved = true;
     }
   }
-  const strayMm = strays.reduce((a, id) => a + chains[id].lengthMm, 0);
-  const graded = laneMm >= L.minMm && laneMm >= L.share * strayMm;
+  const inLane = strays.filter((id) => joined.has(id));
+  const laneMm = inLane.reduce((a, id) => a + inLaneMm(id), 0);
+  const baseMm = [...piece, ...internal].reduce((a, id) => a + chains[id].lengthMm, 0);
+  const graded = laneMm >= L.minMm && laneMm >= L.share * baseMm;
   return {
     graded,
     laneMm,
-    strayMm,
-    why: `${Math.round(laneMm)} of ${Math.round(strayMm)} mm run beside the outlines like graded copies`,
+    baseMm,
+    inLane,
+    why: `${inLane.length} strays run ${Math.round(laneMm)} mm beside the outlines like graded copies (outlines and inside lines ${Math.round(baseMm)} mm)`,
   };
 }
 
