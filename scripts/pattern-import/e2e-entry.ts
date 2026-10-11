@@ -18,6 +18,7 @@ import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
+  AiPageHint,
   CardSize,
   DraftScopeTarget,
   IRText,
@@ -46,6 +47,8 @@ import { synthDrawables, synthTruth } from './raster-entry';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 import { splitSize } from './worker-entry';
+import { fixturePageRoleDeps } from './page-roles-fixture';
+import { classifyFilePages, pagesForCall } from 'lib/pattern-import/ai/pages';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -590,7 +593,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 1 · files
     const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
     // A8: the input pages cleaned before anything is parsed (no operator edit on the e2e pass)
-    const cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    let cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    // A9 (`--page-roles`): the recorded AI page roles, asked as the wizard asks them, read by clean
+    if (process.env.E2E_PAGE_ROLES) {
+      const hints = await recordedPageRoles(s, cl, ex.files);
+      if (hints.length)
+        cl = await run('clean', { edits: hooks.cleanEdits ?? [], aiHints: { pages: hints } });
+      rec.pageRolesAside = cl.dropped
+        .filter((d) => d.aiAside)
+        .map((d) => `${d.file}:p${d.page + 1}`);
+    }
     const pageCls: Record<string, number> = {};
     for (const p of cl.classes) pageCls[p.cls] = (pageCls[p.cls] ?? 0) + 1;
     rec.clean = {
@@ -2116,4 +2128,36 @@ function insidePoly(p: PtMm, poly: readonly PtMm[]): boolean {
     if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
   }
   return c;
+}
+
+/** A9: the wizard's page-role call (use-import-session.ts askPageRoles) over the recorded answers. */
+async function recordedPageRoles(
+  s: Session,
+  cl: StageIO['clean']['out'],
+  files: StageIO['extract']['out']['files'],
+): Promise<AiPageHint[]> {
+  const { deps } = fixturePageRoleDeps();
+  const out: AiPageHint[] = [];
+  const files_ = new Set(cl.dropped.filter((d) => d.status === 'suggest').map((d) => d.file));
+  for (const file of files_) {
+    const asked = new Set(
+      cl.dropped.filter((d) => d.status === 'suggest' && d.file === file).map((d) => d.page),
+    );
+    const { pages, left } = pagesForCall(
+      cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page),
+      asked,
+    );
+    const thumbs = await s.runStage(
+      'render-pages',
+      { pages: pages.map((p) => ({ file, page: p.page })), maxPx: 1024, pictures: false },
+      { checkCancel: () => {}, progress: () => {} },
+    );
+    const name = files.find((f) => f.id === file)?.name ?? '';
+    const r = await classifyFilePages(
+      { key: `e2e:${name}`, file, fileName: name, thumbs: thumbs.pages, left },
+      deps,
+    );
+    out.push(...r.hints);
+  }
+  return out;
 }

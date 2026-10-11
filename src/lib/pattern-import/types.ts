@@ -1839,6 +1839,8 @@ export type StageName =
   | 'semantics'
   | 'fabrics'
   | 'render-som'
+  /** A9 side stage: page thumbnails + stats for the AI page-role call (invalidates nothing). */
+  | 'render-pages'
   | 'write';
 
 /** Input/output of each stage as the worker sees them (session-held artifacts by id). */
@@ -1965,6 +1967,14 @@ export type StageIO = {
       context?: { instructionsExcerpt: string; languageHint: string };
     };
   };
+  /**
+   * A9: the pages the AI page-role call sends — each drawn after the clean stage's mask (PNG, long
+   * side ≤ `maxPx`) with its stats. `pictures: false` = stats only (the probes: no canvas, no AI).
+   */
+  'render-pages': {
+    in: { pages: { file: FileId; page: PageIndex }[]; maxPx: number; pictures?: boolean };
+    out: { pages: (PageStats & { png: Blob | null })[] };
+  };
   write: {
     in: {
       /** The card the manifest is written for: the card trusts a manifest only with its own id. */
@@ -2062,6 +2072,8 @@ export type WizardEvent =
   | { type: 'files'; files: File[] }
   /** A8: the operator's mask edits (undo a kind, accept a suggestion, re-include a page). */
   | { type: 'clean'; edits: PageMaskEdit[] }
+  /** A9: ask the AI the page roles again (fresh answers for the pages as they are now). */
+  | { type: 'page-roles' }
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
@@ -2192,9 +2204,60 @@ export type CurveText = {
   heightMm: Mm;
 };
 
-/** A9 hook (the early AI page call, later phase): one evidence each where it is given. Empty today. */
+/**
+ * A9: what the AI reads a page as (ClassifyPatternPages, one call per file over its thumbnails).
+ * `pattern_tile` — a part of a tiled sheet at 1:1; `pattern_sheet` — a whole sheet at 1:1;
+ * `overview` — a reduced layout; `instructions` — sewing steps, diagrams; `cutting_layout` — the
+ * layout on the fabric; `cover`; `table` — sizes / yardage; `other`.
+ */
+export type AiPageRole =
+  | 'pattern_tile'
+  | 'pattern_sheet'
+  | 'overview'
+  | 'instructions'
+  | 'cutting_layout'
+  | 'cover'
+  | 'table'
+  | 'other';
+
+/** A9: one page's AI answer as the clean stage reads it (evidence №1; geometry is №2). */
+export type AiPageHint = {
+  file: FileId;
+  page: PageIndex;
+  role: AiPageRole;
+  confidence: number;
+  /** The model's own words (≤ 3 × 120 runes). */
+  evidence?: string[];
+  /**
+   * A9 (Codex #4): asked before an edit that changed the page's render or the tile reference set —
+   * it only suggests until asked again.
+   */
+  stale?: boolean;
+};
+
+/** A9 (clean/page-roles.ts): a chain of the tile chrome at one page place, as `repetition` reads it. */
+export type TileMarkSig = { cx: Mm; cy: Mm; w: Mm; h: Mm; len: Mm };
+
+/** A9: what a page is made of, sent with its thumbnail (PatternPageEvidence) and read by the rule. */
+export type PageStats = {
+  file: FileId;
+  page: PageIndex;
+  widthMm: Mm;
+  heightMm: Mm;
+  /** Line work on the page after the mask, m. */
+  lineLengthM: number;
+  /** Closed outlines of piece size that are not rectangles (`shapesOf`). */
+  pieceSizedOutlines: number;
+  /** The file's tile chrome at its page place on this page; undefined = unknown (no chrome on the tiles, other orientation). */
+  hasTileMarks?: boolean;
+  textChars: number;
+  /** The page's words in reading order, ≤ 600 runes. */
+  textExcerpt: string;
+};
+
+/** A9: the early AI page call (one evidence each where it is given). */
 export type CleanAiHints = {
-  pages?: { file: FileId; page: PageIndex; role: PageClass; confidence: number }[];
+  pages?: AiPageHint[];
   /** Junk boxes on a page, page frame, with what the AI read there ("WWW.PAPAVERO.PL"). */
   junk?: { file: FileId; page: PageIndex; bbox: BoxMm; kind: BackgroundKind; text?: string }[];
 };
@@ -2236,7 +2299,30 @@ export type CleanOutput = {
      * match): how many matched, at what scale (clean/reduced-copy.ts).
      */
     reducedCopy?: { matches: number; of: number; scale: number };
+    /**
+     * A9: the AI's reading of the page (evidence №1), when the call answered for it — on a page
+     * holding line work: not pattern = the pre-filled "keep it aside", `pattern_*` = "read it as a
+     * tile" offered.
+     */
+    ai?: { role: AiPageRole; confidence: number; evidence: string[]; stale?: boolean };
+    /**
+     * A9: SUGGESTIVE geometric facts that the page is not pattern (another format, no tile chrome,
+     * text-dominant, no registration) — never enough to set it aside, even with the AI.
+     */
+    geo?: string[];
+    /**
+     * A9: the EXCLUSIONARY geometric fact (clean/page-roles.ts `exclusionOf`: a reduced copy of the
+     * file's tile pieces, or no piece-sized outline / long line and not in the tile grid).
+     */
+    exclusion?: string;
+    /**
+     * A9: set aside by the AI (≥ 0.85, a non-pattern role) AND the exclusionary fact although it
+     * holds line work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
+     */
+    aiAside?: boolean;
   }[];
+  /** A9: per file, the tile chrome the page stats test a page against (`PageStats.hasTileMarks`). */
+  tileMarks?: { file: FileId; tile: { widthMm: Mm; heightMm: Mm }; sigs: TileMarkSig[] }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
   /** Lines masked per kind (applied items only) — the "removed: …" line. */

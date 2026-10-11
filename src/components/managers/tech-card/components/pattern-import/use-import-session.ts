@@ -4,6 +4,7 @@
 // re-enters a step with its previous inputs; outputs after it are dropped").
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AiPageHint,
   AllowanceDecision,
   ApplyResult,
   AutopilotRecord,
@@ -31,6 +32,12 @@ import type {
 } from 'lib/pattern-import/types';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import {
+  classifyFilePages,
+  pagesForCall,
+  thumbPxFor,
+  type PageRoleDeps,
+} from 'lib/pattern-import/ai/pages';
+import {
   nameOriginOf,
   overridesFromNames as namesToOverrides,
   planNaming,
@@ -51,7 +58,8 @@ import { anisotropyOf, squareSidesOf } from './formats';
 import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
-import { autopilotRecordOf, type Assumption } from './autopilot/types';
+import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
+import { aiAsideAssumptions } from './autopilot/ai-pages';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -286,6 +294,11 @@ export function useImportSession(deps: {
   namer: NameSuggester;
   buildDraft: DraftBuilder;
   applyDraft: ApplyDraftFn;
+  /**
+   * A9: the AI page-role call (ai-page-roles.ts on the real worker; the recorded fixture in the
+   * probes). Absent = no call: the pages are judged by their geometry alone, as before.
+   */
+  pageRoles?: PageRoleDeps;
 }) {
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
@@ -330,6 +343,14 @@ export function useImportSession(deps: {
    * be reached (not logged in, offline): the pieces are named by hand instead.
    */
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * A9: the AI's page roles of this run (evidence the clean stage reads on every run of it), and
+   * what the call did in words — a note on the files step, never a stop.
+   */
+  const pageHints = useRef<AiPageHint[]>([]);
+  /** A9 (Codex #4): per file, what its answers were asked against (`basisOf`). */
+  const pageBasis = useRef(new Map<string, string>());
+  const [pageRoleNote, setPageRoleNote] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
   /**
@@ -569,7 +590,10 @@ export function useImportSession(deps: {
           });
           // A8: the pages are cleaned before anything is parsed — furniture masked, the pages
           // that are not pattern set aside, a test square drawn as lines offered as the scale
-          const cl = await run('clean', { edits: [] });
+          const cl0 = await run('clean', { edits: [] });
+          // A9: the AI's page roles (one call per file with a page set aside that holds line work),
+          // read by the clean stage as the evidence it lacked
+          const cl = (await askPageRoles(cl0, out.files)) ?? cl0;
           // The best candidate is preselected; the operator confirms on the scale step.
           const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best });
@@ -599,7 +623,10 @@ export function useImportSession(deps: {
           const decision = sRef.current.scale.decision;
           patchInputs({ cleanEdits: ev.edits });
           iRef.current = { ...iRef.current, cleanEdits: ev.edits };
-          const cl = await run('clean', { edits: ev.edits });
+          let cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
+          // A9 (Codex #4): an edit that changed a file's render or its tile reference set makes
+          // that file's AI answers stale — they only suggest until asked again
+          if (staleAfter(cl)) cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
           const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best, scaleConfirmed: false });
           iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
@@ -842,8 +869,18 @@ export function useImportSession(deps: {
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
             techCardId: rc().techCardId,
-            // A10: an autopilot run's assumptions ride in every written manifest
-            ...autopilotOf(ev.autopilot, iRef.current.autopilot, sem.pieces),
+            // A10: an autopilot run's assumptions ride in every written manifest (A9: with the
+            // pages the AI + geometry set aside, when the autopilot asked nothing to record them)
+            ...autopilotOf(
+              ev.autopilot,
+              drive.current?.resolve || iRef.current.autopilot.length
+                ? mergeAssumptions(
+                    iRef.current.autopilot,
+                    aiAsideAssumptions(sRef.current, iRef.current.autopilot),
+                  )
+                : iRef.current.autopilot,
+              sem.pieces,
+            ),
           });
           const draft = buildDraft(out, { card: rc(), semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
@@ -943,9 +980,34 @@ export function useImportSession(deps: {
           }
           return;
         }
+        case 'page-roles': {
+          // A9: "ask the AI again" — fresh answers for the pages as they are now (edits kept)
+          const now = sRef.current.clean;
+          if (!now) return;
+          const cl = await askPageRoles(now, sRef.current.files, iRef.current.cleanEdits);
+          if (!cl) return;
+          const best = bestScale(cl.scale);
+          patchInputs({ scaleIndex: best, scaleConfirmed: false });
+          iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
+          patch(
+            dropAfter(
+              {
+                ...sRef.current,
+                clean: cl,
+                pages: cl.classes,
+                scale: { candidates: cl.scale, decision: null },
+              },
+              'files',
+            ),
+          );
+          return;
+        }
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
+          pageHints.current = [];
+          pageBasis.current = new Map();
+          setPageRoleNote(null);
           baseSeeds.current = null;
           heldNames.current = [];
           setSom(null);
@@ -961,6 +1023,121 @@ export function useImportSession(deps: {
     } catch (e) {
       fail(e);
     }
+  }
+
+  /** A9: the AI page roles of this run as the clean stage's input (none = absent). */
+  const aiHintsNow = () =>
+    pageHints.current.length ? { aiHints: { pages: pageHints.current } } : {};
+
+  /**
+   * A9: render → upload → ClassifyPatternPages, one call per file that has a page set aside
+   * holding line work (plan question 10: the call is conditional — a file whose pages the
+   * geometry settles costs nothing). The answer re-runs clean with the hints; any failure leaves
+   * the run as it was (a note, never a stop). Null = clean need not run again.
+   */
+  /**
+   * A9 (Codex #4): what a file's AI answers depend on — the mask its thumbnails were drawn with
+   * (file-neutral item ids) and its tile reference set. A change of either makes them stale.
+   */
+  const basisOf = (cl: StageIO['clean']['out'], file: string) =>
+    `${maskRevOf(
+      cl.pages
+        .filter((p) => p.file === file)
+        .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
+      [],
+    )}|${cl.classes
+      .filter((c) => c.file === file && c.cls === 'tile')
+      .map((c) => c.page)
+      .join(',')}`;
+
+  /** Marks the answers of every file whose basis moved stale; true = clean must run again. */
+  const staleAfter = (cl: StageIO['clean']['out']) => {
+    let moved = false;
+    pageHints.current = pageHints.current.map((h) => {
+      if (h.stale || basisOf(cl, h.file) === pageBasis.current.get(h.file)) return h;
+      moved = true;
+      return { ...h, stale: true };
+    });
+    if (moved)
+      setPageRoleNote(
+        'AI page roles: asked before your edits — they only suggest now; ask the AI again to use them',
+      );
+    return moved;
+  };
+
+  async function askPageRoles(
+    cl: StageIO['clean']['out'],
+    files: StageIO['extract']['out']['files'],
+    edits: PageMaskEdit[] = [],
+  ): Promise<StageIO['clean']['out'] | null> {
+    pageHints.current = [];
+    pageBasis.current = new Map();
+    setPageRoleNote(null);
+    const roles = deps.pageRoles;
+    if (!roles) return null;
+    const asked = new Map<string, Set<number>>();
+    // the pages in question: set aside holding line work (also those the AI set aside before)
+    for (const d of cl.dropped)
+      if (d.status === 'suggest' || d.aiAside) {
+        const set = asked.get(d.file) ?? new Set<number>();
+        set.add(d.page);
+        asked.set(d.file, set);
+      }
+    if (!asked.size) return null;
+    const hints: AiPageHint[] = [];
+    const notes: string[] = [];
+    for (const [file, pagesAsked] of asked) {
+      const info = files.find((f) => f.id === file);
+      const all = cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page);
+      const { pages, left } = pagesForCall(all, pagesAsked);
+      // the thumbnails show the page after the mask: the answer is cached per file + mask
+      // file-neutral (Codex #3): the item ids without the file's index (`${file}:…`)
+      const rev = maskRevOf(
+        cl.pages
+          .filter((p) => p.file === file)
+          .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
+        [],
+      );
+      let thumbs: StageIO['render-pages']['out'];
+      try {
+        thumbs = await run('render-pages', {
+          pages: pages.map((p) => ({ file, page: p.page })),
+          // ≤ 1024 px each, ≤ 32 Mpx a call (the server's rules)
+          maxPx: thumbPxFor(pages.length),
+          pictures: roles.pictures !== false,
+        });
+      } catch (e) {
+        notes.push(
+          `AI page roles: the pages could not be drawn (${e instanceof Error ? e.message : String(e)})`,
+        );
+        continue;
+      }
+      patch({
+        busy: { stage: 'render-pages', done: 1, total: 2, note: 'asking the AI what each page is' },
+      });
+      try {
+        const r = await classifyFilePages(
+          {
+            key: `${info?.sha256 || info?.name || file}:${rev}`,
+            file,
+            fileName: info?.name ?? `file ${Number(file) + 1}`,
+            techCardId: rc().techCardId,
+            thumbs: thumbs.pages,
+            left,
+          },
+          roles,
+        );
+        hints.push(...r.hints);
+        if (r.note) notes.push(`${files.length > 1 ? `${info?.name}: ` : ''}${r.note}`);
+      } finally {
+        patch({ busy: null });
+      }
+    }
+    pageHints.current = hints;
+    setPageRoleNote(notes.join(' · ') || null);
+    for (const file of asked.keys()) pageBasis.current.set(file, basisOf(cl, file));
+    if (!hints.length) return edits.length ? await run('clean', { edits }) : null;
+    return await run('clean', { edits, aiHints: { pages: hints } });
   }
 
   /**
@@ -1649,6 +1826,10 @@ export function useImportSession(deps: {
     extracted,
     errorCode,
     notice,
+    /** A9: what the AI page-role call did (answered, unavailable, timed out) — a note, not a stop. */
+    pageRoleNote,
+    /** A9 (Codex #4): some AI answers were asked before an edit — "ask the AI again" refreshes them. */
+    pageRolesStale: pageHints.current.some((h) => h.stale),
     som,
     clientKind: client.kind,
     blocker,

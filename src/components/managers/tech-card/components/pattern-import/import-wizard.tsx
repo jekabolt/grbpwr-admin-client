@@ -23,6 +23,7 @@ import {
   type ImportClient,
   type NameSuggester,
 } from './client';
+import { apiPageRoleDeps } from './ai-page-roles';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
@@ -57,6 +58,7 @@ const STAGE_WORD: Record<string, string> = {
   sizes: 'reading sizes',
   pieces: 'finding pieces',
   'render-som': 'naming pieces',
+  'render-pages': 'drawing the pages for the AI',
   semantics: 'building pieces',
   fabrics: 'proposing fabrics',
   write: 'writing DXF + gate',
@@ -172,7 +174,16 @@ function WizardBody({
           : noNames),
     [namerProp, client, kit],
   );
-  const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
+  // A9: the AI page roles ride with the real worker and the real namer (its renders are real);
+  // VITE_PATTERN_IMPORT_AI=stub turns them off with the names
+  const pageRoles = useMemo(
+    () =>
+      client.kind === 'worker' && import.meta.env.VITE_PATTERN_IMPORT_AI !== 'stub'
+        ? apiPageRoleDeps
+        : undefined,
+    [client],
+  );
+  const api = useImportSession({ client, card, namer, buildDraft, applyDraft, pageRoles });
   latest.current = api.session;
   const { session, blocker } = api;
 
