@@ -324,6 +324,11 @@ type Mount = {
   bom?: Record<string, unknown>[];
   /** The neck decision is a tie (scenario AT): auto mode must leave it to the person. */
   tie?: boolean;
+  /**
+   * Scenario RB: every call after the first (a rebuild around a chosen reading) is HELD until
+   * `release()` — the old proposal stays on screen meanwhile, as on a slow engine.
+   */
+  holdRebuilds?: boolean;
   /** Mount the STUB AI asker (scenario L; 'fail' = it refuses after being charged); without it the
    *  AI bar is not there at all. */
   ai?: boolean | 'fail';
@@ -342,6 +347,9 @@ type Probe = {
   remountField: () => void;
   /** How many times the stub AI was asked, and the requests it got. */
   aiCalls: () => number;
+  /** Scenario RB: rebuilds waiting, and letting them land. */
+  heldRebuilds: () => number;
+  release: () => void;
   /**
    * ONE AUTOSAVE, AS THE PAGE SETTLES IT: the form goes to the wire (the real mapper), comes back as
    * a server that echoes the payload would return it (the real reverse mapper), and the REAL
@@ -365,6 +373,7 @@ let calls = 0;
 let root: Root | null = null;
 let remount: (() => void) | null = null;
 let aiCalls = 0;
+let held: (() => void)[] = [];
 
 /**
  * THE STUB AI (scenario L): answers like the server would after validation — the other reading of
@@ -587,6 +596,10 @@ function Harness({ m }: { m: Mount }) {
     // Scenario G runs the PRODUCTION provider — the one the tech card's context defaults to.
     if (m.real && DEFAULT_SKELETON_PROVIDER) return DEFAULT_SKELETON_PROVIDER(facts, deps, options);
     if (m.unitless) return unitlessProposal();
+    if (m.holdRebuilds && calls > 1)
+      return new Promise<SkeletonProposal>((done) => {
+        held.push(() => done(mockProposal(facts, options, !!m.tie)));
+      });
     return mockProposal(facts, options, !!m.tie);
   };
   const qc = new QueryClient({
@@ -620,6 +633,7 @@ window.__sk = {
     requests = [];
     calls = 0;
     aiCalls = 0;
+    held = [];
     root?.unmount();
     const host = document.getElementById('root')!;
     host.innerHTML = '';
@@ -659,6 +673,10 @@ window.__sk = {
   },
   remountField: () => remount?.(),
   aiCalls: () => aiCalls,
+  heldRebuilds: () => held.length,
+  release: () => {
+    for (const f of held.splice(0)) f();
+  },
   wireDrafts: () =>
     (mapFormToTechCardInsert(form!.getValues(), undefined, true).operations ?? []).map(
       (o) => o.draft,

@@ -19,6 +19,9 @@
 //                                                                    AUTO marks) — AU and G MUST fail
 //   node scripts/assembly-skeleton/ui-probe.mjs --mutate-tie-autopick  auto mode ticks a tie like any
 //                                                                    other reading — AT MUST fail
+//   node scripts/assembly-skeleton/ui-probe.mjs --mutate-stale-apply   apply stays live while a chosen
+//                                                                    reading is read in, and the door
+//                                                                    takes any generation — RB MUST fail
 //   SHOT_DIR=/path node … — where the screenshots go (default tmp/plans/assembly-from-pattern/shots/d)
 //
 // Scenarios:
@@ -44,6 +47,9 @@
 //   AT A TIE (07 review): a decision the engine broke by name only is NOT auto-picked — unticked,
 //      «1 tie to decide», listed with its readings, the steps built on it waiting; taking a reading
 //      ticks it and the rest of the order again.
+//   RB A REBUILD IN FLIGHT (07 review): a chosen reading is read in by a slow provider — apply one /
+//      apply all are disabled and say «rebuilding…», a press writes nothing; once it lands, apply
+//      all writes the NEW reading.
 //   G  THE REAL ENGINE on SS26-005 (25 pieces, sewing lines from the DXF): the production provider
 //      reads the pattern; unit inputs and outputs carry real pictograms; after apply the schematic
 //      shows unit glyphs through CardUnitPicturesProvider. Skipped, loudly, without the plans folder.
@@ -67,6 +73,7 @@ const MUTATE_BATCH_ONLY = process.argv.includes('--mutate-undo-batch-only');
 const MUTATE_SNAPSHOT_SUGG = process.argv.includes('--mutate-snapshot-suggestion');
 const MUTATE_AUTO_DEFAULT = process.argv.includes('--mutate-auto-default');
 const MUTATE_TIE_AUTOPICK = process.argv.includes('--mutate-tie-autopick');
+const MUTATE_STALE_APPLY = process.argv.includes('--mutate-stale-apply');
 
 function resolvePlaywright() {
   const req = createRequire(import.meta.url);
@@ -268,6 +275,28 @@ if (MUTATE_TIE_AUTOPICK)
             `  false && isTie(s)\n    ? { accepted: false, applied: false, tie: true }`,
           ),
           loader: 'ts',
+        };
+      });
+    },
+  });
+
+// The pre-review panel: the old proposal stays `ready` and applicable during a rebuild, and the
+// door writes whatever steps it is handed.
+const REBUILD_FIX = `const rebuilding = run.status === 'ready' && !!run.rebuilding;`;
+const GEN_FIX = `if (!isCurrent(gen)) {`;
+if (MUTATE_STALE_APPLY)
+  plugins.push({
+    name: 'stale-apply-mutation',
+    setup(b) {
+      b.onLoad({ filter: /assembly-skeleton-panel\.tsx$/ }, async (args) => {
+        const src = await readFile(args.path, 'utf8');
+        if (!src.includes(REBUILD_FIX) || !src.includes(GEN_FIX))
+          throw new Error('stale-apply mutation did not find its lines');
+        return {
+          contents: src
+            .replace(REBUILD_FIX, 'const rebuilding = run.status !== run.status;')
+            .replace(GEN_FIX, 'if (!isCurrent(gen) && gen < 0) {'),
+          loader: 'tsx',
         };
       });
     },
@@ -1460,6 +1489,67 @@ await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
   await closePanel();
 }
 
+// ── RB ──────────────────────────────────────────────────────────────────────────────────────────
+head('RB — a rebuild in flight: nothing applies from the old reading, then the new one applies');
+await mount({ holdRebuilds: true });
+await page.click('[data-skeleton-door="empty"]');
+await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
+{
+  const allDisabled = () => page.locator('[data-skeleton-apply-all]').isDisabled();
+  const liveOnes = () =>
+    page
+      .locator('[data-skeleton-apply-one]')
+      .evaluateAll((n) => n.filter((b) => !b.disabled && b.textContent !== 'applied').length);
+  ck(!(await allDisabled()), 'before: «apply all» is live');
+  await page.click('[data-skeleton-variant="2.1"]');
+  await page.waitForTimeout(200);
+  ck(
+    (await page.evaluate(() => window.__sk.heldRebuilds())) === 1,
+    'the chosen reading is being read in (the provider holds it)',
+  );
+  ck(
+    (await page.locator('[data-skeleton-state="rebuilding"]').count()) === 1,
+    'the panel says it is rebuilding',
+  );
+  ck(await allDisabled(), '«apply all» is disabled while it rebuilds');
+  ck((await liveOnes()) === 0, 'every «apply this step» is disabled while it rebuilds');
+  ck(
+    /rebuilding…/i.test(await page.locator('[data-skeleton-apply-all]').innerText()),
+    '«apply all» says «rebuilding…»',
+  );
+  // A press on either now writes nothing (forced: a disabled button takes no click).
+  await page
+    .locator('[data-skeleton-apply-all]')
+    .click({ force: true, timeout: 2000 })
+    .catch(() => {});
+  await page
+    .locator('[data-skeleton-apply-one="0"]')
+    .click({ force: true, timeout: 2000 })
+    .catch(() => {});
+  await page.waitForTimeout(200);
+  ck(
+    JSON.stringify(await ops()) === '[]',
+    'nothing written from the old reading while it rebuilds',
+    JSON.stringify((await ops()).map((o) => o.outputUnitName)),
+  );
+  await page.evaluate(() => window.__sk.release());
+  await page.waitForSelector('[data-skeleton-state="rebuilding"]', {
+    state: 'detached',
+    timeout: 5000,
+  });
+  ck(!(await allDisabled()), 'after it lands: «apply all» is live again');
+  const before = (await ops()).length;
+  await page.click('[data-skeleton-apply-all]');
+  await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
+  const names = (await ops()).slice(before).map((o) => o.outputUnitName);
+  ck(
+    names.includes('Body with pocket') && !names.includes('Body with neckband'),
+    'apply all writes the NEW reading (the pocket), not the old one (the neckband)',
+    JSON.stringify(names),
+  );
+  await closePanel();
+}
+
 // ── D ───────────────────────────────────────────────────────────────────────────────────────────
 head('D — a card that already has steps');
 const EXIST = [
@@ -2035,6 +2125,6 @@ if (!real) {
 ck(pageErrors.length === 0, 'the page threw nothing', pageErrors.join(' | '));
 await browser.close();
 console.log(
-  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}${MUTATE_AUTO_DEFAULT ? '  (mutation: auto mode hands out the manual defaults)' : ''}${MUTATE_TIE_AUTOPICK ? '  (mutation: auto mode ticks a tie)' : ''}`,
+  `\n${bad === 0 ? 'all checks passed' : `${bad} checks FAILED`}${MUTATE_AUTOAPPLY ? '  (mutation: autoapply)' : ''}${MUTATE_UNDO_MEDIA ? '  (mutation: undo forgets mediaCleared)' : ''}${MUTATE_DRAFT_PRINT ? '  (mutation: 12-field draft print)' : ''}${MUTATE_ROW_WIDE ? '  (mutation: row-wide suggestion exemption)' : ''}${MUTATE_UNDO_REBASE ? '  (mutation: undo rebased)' : ''}${MUTATE_THREAD_ARRAY ? '  (mutation: thread as whole array)' : ''}${MUTATE_BATCH_ONLY ? '  (mutation: undo guards the batch rows only)' : ''}${MUTATE_SNAPSHOT_SUGG ? '  (mutation: suggestion baked into the snapshot)' : ''}${MUTATE_AUTO_DEFAULT ? '  (mutation: auto mode hands out the manual defaults)' : ''}${MUTATE_TIE_AUTOPICK ? '  (mutation: auto mode ticks a tie)' : ''}${MUTATE_STALE_APPLY ? '  (mutation: apply live during a rebuild)' : ''}`,
 );
 if (bad) process.exitCode = 1;

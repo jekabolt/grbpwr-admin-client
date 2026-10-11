@@ -56,7 +56,17 @@ export const SkeletonProviderContext = createContext<SkeletonProvider | null>(
 export type SkeletonRun =
   | { status: 'idle' }
   | { status: 'running' }
-  | { status: 'ready'; proposal: SkeletonProposal }
+  | {
+      status: 'ready';
+      proposal: SkeletonProposal;
+      /** The run that made this proposal: an apply carries it, a stale one is refused. */
+      gen: number;
+      /**
+       * A newer run (a chosen reading) is in flight: this proposal stays on screen, but its steps
+       * are the OLD reading's — nothing may be applied from it until the rebuild lands.
+       */
+      rebuilding?: boolean;
+    }
   | { status: 'error'; message: string };
 
 /**
@@ -71,6 +81,11 @@ export function useSkeletonProposal(): {
   /** Put a proposal derived from the one on screen (the AI order applied) in its place. */
   adopt: (proposal: SkeletonProposal) => void;
   state: SkeletonRun;
+  /**
+   * Is the proposal of run `gen` the one that stands — no newer run started since? An apply
+   * rendered from an older proposal (or during a rebuild) is refused by it.
+   */
+  isCurrent: (gen: number) => boolean;
 } {
   const provider = useContext(SkeletonProviderContext);
   const [state, setState] = useState<SkeletonRun>({ status: 'idle' });
@@ -85,15 +100,16 @@ export function useSkeletonProposal(): {
     (facts: SkeletonFacts, deps?: SkeletonDeps, options?: SkeletonOptions) => {
       if (!provider) return;
       const my = ++gen.current;
-      // A rebuild (a chosen reading) keeps the proposal on screen until the new one replaces it.
-      setState((s) => (s.status === 'ready' ? s : { status: 'running' }));
+      // A rebuild (a chosen reading) keeps the proposal on screen until the new one replaces it —
+      // marked, so nothing is applied from the old reading's steps meanwhile.
+      setState((s) => (s.status === 'ready' ? { ...s, rebuilding: true } : { status: 'running' }));
       // One frame for «reading the pattern…» to paint before the pass blocks the thread.
       window.setTimeout(() => {
         Promise.resolve()
           .then(() => provider(facts, deps, options))
           .then(
             (proposal) => {
-              if (gen.current === my) setState({ status: 'ready', proposal });
+              if (gen.current === my) setState({ status: 'ready', proposal, gen: my });
             },
             (e: unknown) => {
               if (gen.current === my)
@@ -105,10 +121,11 @@ export function useSkeletonProposal(): {
     [provider],
   );
   const adopt = useCallback((proposal: SkeletonProposal) => {
-    gen.current += 1;
-    setState({ status: 'ready', proposal });
+    const my = ++gen.current;
+    setState({ status: 'ready', proposal, gen: my });
   }, []);
-  return { available: !!provider, run, adopt, state };
+  const isCurrent = useCallback((g: number) => g === gen.current, []);
+  return { available: !!provider, run, adopt, state, isCurrent };
 }
 
 // ── facts ───────────────────────────────────────────────────────────────────────────────────────

@@ -350,19 +350,33 @@ export function useSkeletonDoor({
     null,
   );
   const nonceRef = useRef(0);
+  const { isCurrent } = proposal;
   const request = useCallback(
     (
       steps: SkeletonStep[],
       idx: number[],
       mode: 'append' | 'replace',
+      /** The run whose proposal these steps were rendered from (SkeletonRun.gen). */
+      gen: number,
       confirmedReplace = false,
     ) => {
       setResult(null);
       const nonce = (nonceRef.current += 1);
+      // A reading was chosen since these steps were drawn: they are the OLD reading's. Nothing is
+      // written; the person applies again from the steps on screen now.
+      if (!isCurrent(gen)) {
+        setResult({
+          nonce,
+          applied: 0,
+          refused:
+            'the skeleton was re-read around a chosen reading since — check the new steps and apply again',
+        });
+        return;
+      }
       setCarried({ nonce, idx, replace: mode === 'replace' });
       setApplyRequest({ steps, mode, confirmedReplace, nonce });
     },
-    [],
+    [isCurrent],
   );
 
   const door = (where: 'header' | 'empty') => {
@@ -533,6 +547,7 @@ function AssemblySkeletonPanel({
     steps: SkeletonStep[],
     idx: number[],
     mode: 'append' | 'replace',
+    gen: number,
     confirmedReplace?: boolean,
   ) => void;
   result: PanelResult | null;
@@ -670,6 +685,11 @@ function AssemblySkeletonPanel({
     run.status === 'ready' && readFor === mode && !(mode === 'append' && nothingToAdd)
       ? run.proposal
       : null;
+  // A chosen reading is being read in: the steps on screen are the old reading's until it lands, so
+  // no apply — one press, one step or all — may write them. Every apply carries the run it was drawn
+  // from; the door refuses one that is no longer current.
+  const rebuilding = run.status === 'ready' && !!run.rebuilding;
+  const shownGen = run.status === 'ready' ? run.gen : -1;
   // «use AI structure» in force: the category and units the skeleton on screen was built on, kept on
   // the proposal itself — every rebuild of it (a chosen reading, the AI's readings) keeps them, and
   // closing / reopening the panel cannot lose them. null = the engine's own structure.
@@ -904,12 +924,12 @@ function AssemblySkeletonPanel({
   };
 
   const applyAll = () => {
-    if (batch.steps.length === 0) return;
+    if (batch.steps.length === 0 || rebuilding) return;
     if (effectiveMode === 'replace' && !confirmReplace) {
       setConfirmReplace(true);
       return;
     }
-    onApply(batch.steps, batch.idx, effectiveMode, effectiveMode === 'replace');
+    onApply(batch.steps, batch.idx, effectiveMode, shownGen, effectiveMode === 'replace');
     setConfirmReplace(false);
   };
 
@@ -1054,6 +1074,12 @@ function AssemblySkeletonPanel({
             {mode && run.status === 'running' && (
               <Text size='micro' variant='label' component='p' data-skeleton-state='running'>
                 reading the pattern — edges, notches, mirror pairs…
+              </Text>
+            )}
+            {mode && rebuilding && (
+              <Text size='micro' variant='label' component='p' data-skeleton-state='rebuilding'>
+                rebuilding around the chosen reading — the steps below are the old ones until it
+                lands; nothing can be applied meanwhile…
               </Text>
             )}
             {mode && run.status === 'error' && (
@@ -1396,7 +1422,10 @@ function AssemblySkeletonPanel({
                         }
                         onAccept={(v) => setAccepted(i, v)}
                         onVariant={(v) => chooseReading(raw, v)}
-                        onApplyOne={() => onApply([s], [i], 'append')}
+                        rebuilding={rebuilding}
+                        onApplyOne={() => {
+                          if (!rebuilding) onApply([s], [i], 'append', shownGen);
+                        }}
                       />
                     );
                   })}
@@ -1543,15 +1572,21 @@ function AssemblySkeletonPanel({
               type='button'
               variant='main'
               size='sm'
-              disabled={!proposal || batch.steps.length === 0 || batchViolations.size > 0}
+              disabled={
+                !proposal || rebuilding || batch.steps.length === 0 || batchViolations.size > 0
+              }
               onClick={applyAll}
               data-skeleton-apply-all={batch.steps.length}
+              data-skeleton-rebuilding={rebuilding ? '1' : undefined}
+              title={rebuilding ? 'rebuilding around the chosen reading…' : undefined}
             >
-              {confirmReplace
-                ? `replace ${existing} with ${batch.steps.length} — confirm`
-                : effectiveMode === 'replace'
-                  ? `replace with ${batch.steps.length} accepted`
-                  : `apply all accepted (${batch.steps.length})`}
+              {rebuilding
+                ? 'rebuilding…'
+                : confirmReplace
+                  ? `replace ${existing} with ${batch.steps.length} — confirm`
+                  : effectiveMode === 'replace'
+                    ? `replace with ${batch.steps.length} accepted`
+                    : `apply all accepted (${batch.steps.length})`}
             </Button>
           </div>
         </Dialog.Content>
@@ -1672,6 +1707,7 @@ function SkeletonLine({
   onAccept,
   onVariant,
   onApplyOne,
+  rebuilding,
 }: {
   index: number;
   raw: SkeletonStep;
@@ -1699,6 +1735,8 @@ function SkeletonLine({
   onAccept: (v: boolean) => void;
   onVariant: (v: number) => void;
   onApplyOne: () => void;
+  /** A chosen reading is being read in: this line is the old reading's, not to be applied. */
+  rebuilding: boolean;
 }) {
   const ambiguous = isAmbiguous(raw);
   const variants = variantsOf(raw);
@@ -1861,8 +1899,12 @@ function SkeletonLine({
         type='button'
         variant='secondary'
         size='xs'
-        disabled={pick.applied || !!singleRefusal}
-        title={singleRefusal || 'add only this step at the end of the order'}
+        disabled={pick.applied || !!singleRefusal || rebuilding}
+        title={
+          rebuilding
+            ? 'rebuilding around the chosen reading…'
+            : singleRefusal || 'add only this step at the end of the order'
+        }
         onClick={onApplyOne}
         data-skeleton-apply-one={index}
       >
