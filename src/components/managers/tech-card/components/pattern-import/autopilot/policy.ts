@@ -537,6 +537,27 @@ function acceptWaiting(
   };
 }
 
+/** Words that name a page that is not pattern (instructions, legend, cover, contents). */
+const NOT_PATTERN_WORDS =
+  /\b(instructions?|anleitung|legend|legende|key|symbols?|zeichenerkl\w*|cover|contents|inhalt|инструкц\w*|условн\w*|обложк\w*|содержан\w*)\b/i;
+
+/**
+ * Positive evidence that a page set aside "to check" is not pattern: the classifier's
+ * instructions / cover role at 0.7 or more, or a word on the page that names it. (A text-only page
+ * is never "to check": clean sets it aside by itself.) Null = none (the page-role question).
+ */
+function notPatternEvidence(
+  d: NonNullable<ImportSession['clean']>['dropped'][number],
+  pages: ImportSession['pages'],
+): string | null {
+  const c = pages.find((p) => p.file === d.file && p.page === d.page);
+  if (c && (c.cls === 'instructions' || c.cls === 'cover') && c.confidence >= 0.7)
+    return `${c.cls} ${c.confidence.toFixed(2)}`;
+  const w = NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
+  if (w) return `the page says «${w[0]}»`;
+  return null;
+}
+
 function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): AutopilotDecision {
   if (!s.files.length) return stopAt('files', 'no file was read');
   if (!s.scale.candidates.length) return stopAt('files', 'the files could not be read');
@@ -545,7 +566,15 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
   if (by.size) return acceptWaiting('files', by, i);
   // pages set aside "to check", pages read without certainty: the clean stage's reading is taken
   // as it is (the proceed answer), each page an assumption
+  // a page set aside that holds line work stays aside only on positive evidence it is not
+  // pattern (Codex re-check #5): else the page-role question
   const check = s.clean.dropped.filter((d) => d.status === 'suggest');
+  const blind = check.find((d) => !notPatternEvidence(d, s.pages));
+  if (blind)
+    return stopAt(
+      'files',
+      `file ${blind.file} page ${blind.page + 1} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing})` : ''} — is it a pattern page?`,
+    );
   const roleSet = new Set(
     i.cleanEdits.flatMap((e) => ('role' in e ? [`${e.file}:${e.page}`] : [])),
   );
@@ -562,8 +591,8 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
           'pages-as-read',
           `file ${d.file} page ${d.page + 1}`,
           `set aside (${d.cls})`,
-          'a page the reader set aside stays aside',
-          [d.why.slice(0, 160)],
+          'a page the reader set aside stays aside on evidence it is not pattern',
+          [notPatternEvidence(d, s.pages)!, d.why.slice(0, 120)],
           0.6,
           false,
         ),
