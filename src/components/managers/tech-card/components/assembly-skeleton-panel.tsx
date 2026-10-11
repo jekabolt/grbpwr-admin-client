@@ -806,8 +806,10 @@ function AssemblySkeletonPanel({
   const readingsLocked = !replacing && picks.some((p) => p.applied);
   const chooseReading = (step: SkeletonStep, v: number) => {
     if (!proposal || !step.decision || step.decision.chosen === v || readingsLocked) return;
+    // Every reading on screen is kept (pinned); only THIS one is the person's decision.
     const pins: SkeletonPins = { ...pinsOf(proposal), [step.decision.id]: v };
-    onRun(built.facts, deps, { ...aiStructure, pins });
+    const resolved = [...(proposal.resolved ?? []), step.decision.id];
+    onRun(built.facts, deps, { ...aiStructure, pins, resolved });
   };
 
   // ── THE AI SECOND OPINION (lane E). Asked only on a press; its order and readings are shown
@@ -877,7 +879,11 @@ function AssemblySkeletonPanel({
   };
   const useAIReadings = () => {
     if (!aiView || readingsLocked || aiView.pins.changed === 0) return;
-    onRun(built.facts, deps, { ...aiStructure, pins: aiView.pins.pins });
+    onRun(built.facts, deps, {
+      ...aiStructure,
+      pins: aiView.pins.pins,
+      resolved: [...(proposal?.resolved ?? []), ...aiView.pins.picked],
+    });
   };
   // The AI's structure replaces the engine's: its readings (pins) belonged to the old structure.
   const useAIStructure = () => {

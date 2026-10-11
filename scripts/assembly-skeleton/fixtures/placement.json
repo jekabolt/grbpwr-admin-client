@@ -80,6 +80,25 @@
         ["FP_2_L", "BP", 0.9]
       ]
     },
+    "twoTies": {
+      "_why": "Two INDEPENDENT E3 ties (07 re-review): a left and a right roleless, seamless tab, each with two panels of its hand alike. Settling the left one must not settle the right one.",
+      "category": "generic",
+      "pieces": [
+        ["FP_L", 50000],
+        ["SLV_L", 50000],
+        ["FP_R", 50000],
+        ["SLV_R", 50000],
+        ["BP", 90000],
+        ["TAB_L", 2000],
+        ["TAB_R", 2000]
+      ],
+      "seams": [
+        ["FP_L", "BP", 0.9],
+        ["SLV_L", "BP", 0.85],
+        ["FP_R", "BP", 0.9],
+        ["SLV_R", "BP", 0.85]
+      ]
+    },
     "twinOrphan": {
       "_why": "E3 tie (07 review): a left piece with no role and no seam, and two left panels with no parts and one size: onto the first by name, said as a tie.",
       "category": "generic",

@@ -38,6 +38,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 const outfile = resolve(tmpdir(), `assembly-skeleton-${process.pid}.mjs`);
+// --mutate-pin-settles (in the bundler's memory, never in the file): the pre-re-review rule — any
+// pin clears a tie, so a rebuild that keeps every reading by its pin settles every tie.
+const MUTATE_PIN_SETTLES = process.argv.includes('--mutate-pin-settles');
+const TIE_RULE = 'tie && !resolved.has(id)';
 await build({
   entryPoints: [resolve(here, 'skeleton-entry.ts')],
   bundle: true,
@@ -46,6 +50,23 @@ await build({
   absWorkingDir: root,
   outfile,
   logLevel: 'silent',
+  plugins: MUTATE_PIN_SETTLES
+    ? [
+        {
+          name: 'pin-settles-mutation',
+          setup(b) {
+            b.onLoad({ filter: /group-units\.ts$/ }, async (a) => {
+              const src = readFileSync(a.path, 'utf8');
+              if (!src.includes(TIE_RULE)) throw new Error('pin mutation did not find its line');
+              return {
+                contents: src.replace(TIE_RULE, 'tie && pins[id] === undefined'),
+                loader: 'ts',
+              };
+            });
+          },
+        },
+      ]
+    : [],
 });
 const {
   buildSkeleton,
@@ -56,6 +77,9 @@ const {
   proposeSkeleton,
   loadFacts,
   SKELETON,
+  autoPicks,
+  personalPick,
+  picksFor,
 } = await import(pathToFileURL(outfile).href);
 
 const args = process.argv.slice(2);
@@ -1776,17 +1800,76 @@ console.log('\nPlacement under reversed and shuffled pieces (synthetic, fixtures
       st ? JSON.stringify(st.decision) : `no ${id}`,
     );
   }
-  // A pinned reading 0 is a person's: no longer a tie.
+  // Reading 0 SETTLED by a person is no longer a tie; merely kept by a pin, it still is.
   {
     const c = synthCard(cards.bag);
-    const pinned = buildSkeleton(c.graph, c.facts, orderTemplate('generic'), skeletonDeps, {
-      pins: { 'place:BLT_1+BLT_2': 0 },
-    });
-    const belt = pinned.steps.find((s) => s.decision?.id === 'place:BLT_1+BLT_2');
+    const id = 'place:BLT_1+BLT_2';
+    const build = (o) =>
+      buildSkeleton(c.graph, c.facts, orderTemplate('generic'), skeletonDeps, o).steps.find(
+        (s) => s.decision?.id === id,
+      );
+    const settled = build({ pins: { [id]: 0 }, resolved: [id] });
+    const kept = build({ pins: { [id]: 0 } });
     gate(
-      'bag: reading 0 pinned by a person is not a tie',
-      !!belt && !belt.decision.tie,
-      JSON.stringify(belt?.decision),
+      'bag: reading 0 settled by a person is not a tie; only kept by a pin, it is',
+      !!settled && !settled.decision.tie && !!kept?.decision.tie,
+      `${JSON.stringify(settled?.decision)} / ${JSON.stringify(kept?.decision)}`,
+    );
+  }
+  // TWO INDEPENDENT TIES (07 re-review). The panel rebuilds around a chosen reading by pinning
+  // EVERY decision on screen; only the chosen one is resolved. The other tie must stay a tie through
+  // that rebuild and the next, stay unticked through auto → manual → auto, and stay out of the batch.
+  {
+    const c = synthCard(cards.twoTies);
+    const tpl = orderTemplate('generic');
+    const L = 'orphan:TAB_L';
+    const R = 'orphan:TAB_R';
+    const at = (p, id) => p.steps.findIndex((s) => s.decision?.id === id);
+    const pinsOf = (p) =>
+      Object.fromEntries(
+        p.steps.filter((s) => s.decision).map((s) => [s.decision.id, s.decision.chosen]),
+      );
+    const p0 = run(c);
+    const both = [L, R].every((id) => p0.steps[at(p0, id)]?.decision.tie);
+    // The person takes the OTHER reading of the left tab (exactly the panel's chooseReading).
+    const p1 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+      pins: { ...pinsOf(p0), [L]: 1 },
+      resolved: [L],
+    });
+    // Any later rebuild keeps every reading by its pin and the resolved list as it was.
+    const p2 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+      pins: pinsOf(p1),
+      resolved: [L],
+    });
+    const iL = at(p2, L);
+    const iR = at(p2, R);
+    const auto = autoPicks(p2.steps);
+    const manual = picksFor(p2.steps, false, (i) => personalPick(auto[i]));
+    const back = picksFor(p2.steps, true, (i) => personalPick(manual[i]));
+    const writes = (picks) =>
+      p2.steps.some((s, i) => picks[i]?.accepted && s.inputs.includes('TAB_R'));
+    const said = `L ${JSON.stringify(p2.steps[iL]?.decision)} · R ${JSON.stringify(p2.steps[iR]?.decision)} · R ticked: auto ${auto[iR]?.accepted}, after the round trip ${back[iR]?.accepted}`;
+    console.log(`  two ties: ${said}`);
+    gate(
+      'twoTies: both tabs start as ties',
+      both,
+      JSON.stringify(p0.steps.filter((s) => s.decision).map((s) => s.decision)),
+    );
+    gate(
+      'twoTies: settling the left tie leaves the right one a tie through two rebuilds',
+      p2.steps[iL]?.decision.chosen === 1 &&
+        !p2.steps[iL].decision.tie &&
+        !!p2.steps[iR]?.decision.tie,
+      said,
+    );
+    gate(
+      'twoTies: auto mode keeps the right tie unticked through auto → manual → auto; apply all does not write it',
+      !auto[iR]?.accepted &&
+        !back[iR]?.accepted &&
+        !!back[iR]?.tie &&
+        !writes(back) &&
+        !writes(auto),
+      said,
     );
   }
   // Control: the strips' pocket is placed by its position word — evidence, not a tie.

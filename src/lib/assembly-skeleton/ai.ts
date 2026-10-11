@@ -288,8 +288,11 @@ export function skeletonAIRequest(args: {
 export function skeletonAIPins(
   proposal: SkeletonProposal,
   answer: SuggestAssemblySkeletonResponse,
-): { pins: SkeletonPins; changed: number } {
+): { pins: SkeletonPins; changed: number; picked: string[] } {
   const pins: Record<string, number> = {};
+  // The decisions the AI answered: taking its readings is the person settling THEM — the other
+  // pins only keep the readings on screen and settle nothing (a tie stays a tie).
+  const picked: string[] = [];
   const byKey = new Map<string, string>();
   for (const s of proposal.steps)
     if (s.decision) {
@@ -303,8 +306,9 @@ export function skeletonAIPins(
     const reading = p.reading ?? 0;
     if (pins[id] !== reading) changed += 1;
     pins[id] = reading;
+    picked.push(id);
   }
-  return { pins, changed };
+  return { pins, changed, picked };
 }
 
 /**

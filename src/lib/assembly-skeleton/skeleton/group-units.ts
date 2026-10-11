@@ -152,6 +152,8 @@ function decide(
   live: (e: Entity) => boolean,
   /** Reading 0 won only on the name / key tie-breaker: why, in words (absent = by evidence). */
   tie?: string,
+  /** Decisions a person settled: only these lose their tie (a kept pin settles nothing). */
+  resolved: ReadonlySet<string> = new Set(),
 ): { chosen: number; decision?: SkeletonDecision; others: SkeletonUnit['alternatives'] } {
   const want = pins[id] ?? 0;
   // A pin that no longer fits (the reading vanished, or one of its inputs is already sewn
@@ -160,8 +162,9 @@ function decide(
   if (readings.length < 2) return { chosen, others: undefined };
   return {
     chosen,
-    // A tie is the engine's default only: a pinned reading (even reading 0) is a person's.
-    decision: { id, chosen, ...(tie && pins[id] === undefined ? { tie } : {}) },
+    // A tie stands until a person settles it — a pin that only kept the reading through a rebuild
+    // (every decision is pinned so) settles nothing.
+    decision: { id, chosen, ...(tie && !resolved.has(id) ? { tie } : {}) },
     others: readings
       .filter((_, i) => i !== chosen)
       .map((r) => ({ inputs: r.inputs.map((e) => e.key), seams: [], reason: r.reason })),
@@ -192,7 +195,10 @@ export function groupDetailed(
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
   hints: readonly SkeletonUnitHint[] = [],
+  /** Decision ids a person settled (SkeletonOptions.resolved). */
+  resolved: readonly string[] = [],
 ): Grouping {
+  const settled = new Set(resolved);
   const pieces = readPieces(graph, facts);
   // Surface joins (P2 lane S) are not edge evidence: a pocket laid on a front links nothing along
   // their edges. They are read by step S alone; every other step sees the edge seams only.
@@ -750,6 +756,7 @@ export function groupDetailed(
         })),
         isLive,
         tie,
+        settled,
       );
       const pick = (ordered[d.chosen] ?? ordered[0]).t;
       const made = record([e, pick], {
@@ -858,6 +865,7 @@ export function groupDetailed(
         })),
         isLive,
         tie,
+        settled,
       );
       const top = ranked[d.chosen] ?? ranked[0];
       const made = record([e, top.t], {
@@ -1383,6 +1391,7 @@ export function groupDetailed(
         })),
         isLive,
         tie,
+        settled,
       );
       const top = ranked[d.chosen] ?? ranked[0];
       e.leaves.forEach((k) => orphaned.add(k));

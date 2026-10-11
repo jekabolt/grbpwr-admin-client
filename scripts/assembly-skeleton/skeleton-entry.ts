@@ -21,6 +21,12 @@ export {
 export { segmentPiece, twins } from '../../src/lib/assembly-skeleton/geometry';
 export { unionLayout, unionPicture } from '../../src/lib/assembly-skeleton/union';
 export { SKELETON } from '../../src/lib/assembly-skeleton/types';
+// The panel's ticks (auto / manual picks): the tie lifecycle is gated on the real ones.
+export {
+  autoPicks,
+  personalPick,
+  picksFor,
+} from '../../src/components/managers/tech-card/components/assembly-skeleton-ticks';
 export { loadInputs } from './marks-entry';
 export {
   buttonColumns,

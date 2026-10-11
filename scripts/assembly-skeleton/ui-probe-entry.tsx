@@ -232,7 +232,7 @@ export function mockProposal(
         decision: {
           id: 'neck',
           chosen: neck,
-          ...(tie && options.pins?.neck === undefined
+          ...(tie && !options.resolved?.includes('neck')
             ? { tie: 'the neckband and the pocket fit the body alike — nothing tells them apart' }
             : {}),
         },

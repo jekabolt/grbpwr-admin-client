@@ -153,6 +153,7 @@ export function proposeSkeleton(
     graph,
     ...(facts.existing ? { existing: facts.existing.steps } : {}),
     ...(Object.keys(structure).length ? { structure } : {}),
+    ...(options.resolved?.length ? { resolved: [...new Set(options.resolved)] } : {}),
   };
 }
 
