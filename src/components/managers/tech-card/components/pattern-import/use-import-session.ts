@@ -708,7 +708,7 @@ export function useImportSession(deps: {
             confirmed: legendConfirmed,
           });
           const sizes = await run('sizes', {
-            card: card.sizes,
+            card: rc().sizes,
             operatorMap: iRef.current.sizeMap ?? undefined,
             drawnSizes: drawnNow() ?? undefined,
           });
