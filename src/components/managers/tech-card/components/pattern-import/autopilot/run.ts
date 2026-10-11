@@ -42,12 +42,24 @@ export async function autopilotApply(
   const blocks = gateBlocks(get());
   if (blocks.length)
     return { ok: false, step: 'check', reason: `the gate blocks: ${blocks.join(', ')}` };
+  if (card.downloadOnly) {
+    await get().next();
+    await settle();
+    if (step() !== 'apply')
+      return { ok: false, step: 'check', reason: get().session.error ?? 'did not reach apply' };
+    return { ok: true, downloadOnly: true };
+  }
+  // the lock first (synchronous): an apply already running or done for this draft refuses this one
+  const token = get().lockApply();
+  if (token == null)
+    return { ok: false, step: 'check', reason: 'this draft is already being applied, or was' };
   await get().next();
   await settle();
-  if (step() !== 'apply')
+  if (step() !== 'apply') {
+    get().unlockApply(token);
     return { ok: false, step: 'check', reason: get().session.error ?? 'did not reach apply' };
-  if (card.downloadOnly) return { ok: true, downloadOnly: true };
-  await get().dispatch({ type: 'apply' });
+  }
+  await get().dispatch({ type: 'apply', token });
   await settle();
   const a = get().apply;
   if (a.phase !== 'done') return { ok: false, step: 'apply', reason: 'the apply did not finish' };

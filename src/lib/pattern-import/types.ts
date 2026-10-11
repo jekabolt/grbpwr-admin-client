@@ -1991,7 +1991,8 @@ export type WizardEvent =
   | { type: 'fabrics'; assignment: FabricAssignment }
   /** A10: an autopilot run hands its assumptions to the written manifests. */
   | { type: 'write'; autopilot?: AutopilotRecord }
-  | { type: 'apply' }
+  /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
+  | { type: 'apply'; token?: number }
   | { type: 'download' }
   | { type: 'back'; to: WizardStep }
   | { type: 'reset' };

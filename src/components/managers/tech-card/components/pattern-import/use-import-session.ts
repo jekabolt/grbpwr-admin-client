@@ -297,6 +297,14 @@ export function useImportSession(deps: {
    * uploads nothing.
    */
   const cardAt = useRef<string | null>(null);
+  /**
+   * Codex re-check #2: one apply per draft. Taken synchronously — by the autopilot before its
+   * check → apply move (`lockApply`), by the apply itself otherwise — and never handed twice: a
+   * concurrent or repeated apply of the same draft is refused. A new draft (a re-write) is a new
+   * lock; an apply that failed before anything went up gives it back.
+   */
+  const applyLock = useRef<{ draft: unknown; token: number; used: boolean } | null>(null);
+  const lockSeq = useRef(0);
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
@@ -820,6 +828,13 @@ export function useImportSession(deps: {
             )
           )
             return;
+          // Codex re-check #2: the lock, before anything else can await
+          const held = applyLock.current;
+          if (held && held.draft === built) {
+            if (held.used || ev.token !== held.token) return;
+          } else if (ev.token != null) return; // a lock taken for another draft
+          const lock = { draft: built as unknown, token: ev.token ?? -1, used: true };
+          applyLock.current = lock;
           // Codex re-check #1: the card changed since the run read it — nothing goes up
           const stale = cardStale();
           if (stale) {
@@ -845,6 +860,9 @@ export function useImportSession(deps: {
             progress[p.scopeKey] = p.state;
             setApply({ phase: 'running', progress: { ...progress } });
           });
+          // nothing went up: the same draft may be applied again (the operator's retry)
+          if (!result.ok && !result.uploaded.length && applyLock.current === lock)
+            applyLock.current = null;
           // the apply step's "download report" carries what the card refused (M5)
           if (!result.ok)
             failureRef.current = {
@@ -1510,6 +1528,26 @@ export function useImportSession(deps: {
     await dispatch({ type: 'semantics', input: semanticsInput(next) });
   }
 
+  /**
+   * The apply lock for the current draft, taken before the check → apply move (the autopilot);
+   * null = no draft, or the lock is already held (an apply is running or done for this draft).
+   */
+  function lockApply(): number | null {
+    const draft = sRef.current.draft;
+    if (!draft) return null;
+    const held = applyLock.current;
+    if (held && held.draft === draft) return null;
+    const token = ++lockSeq.current;
+    applyLock.current = { draft, token, used: false };
+    return token;
+  }
+
+  /** Give back a lock `lockApply` took and no apply used (the move to apply did not happen). */
+  function unlockApply(token: number) {
+    const held = applyLock.current;
+    if (held && held.token === token && !held.used) applyLock.current = null;
+  }
+
   /** Why the card is no longer the one this run read (null = the same card). */
   function cardStale(): string | null {
     if (cardAt.current == null) return null;
@@ -1524,6 +1562,9 @@ export function useImportSession(deps: {
     apply,
     /** Codex re-check #1: the card changed since the run read it (the reason), else null. */
     cardStale,
+    /** Codex re-check #2: take the apply lock of this draft (null = held already). */
+    lockApply,
+    unlockApply,
     sheetModes,
     setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
       operatorActs();
