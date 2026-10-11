@@ -350,6 +350,12 @@ export function useImportSession(deps: {
   const opRev = useRef(0);
   /** N1: the notice a refused resolver answer left (the next `advance` clears it, no other). */
   const refusal = useRef<string | null>(null);
+  /**
+   * Codex re-check #3: the AI-namer outage notice of this run, and the one a resume acknowledged —
+   * the drive goes on past it (the autopilot types its P-codes); the notice stays on screen.
+   */
+  const namerNote = useRef<string | null>(null);
+  const ackedNote = useRef<string | null>(null);
   const [driveTick_, setDriveTick] = useState(0);
   /** Transitions in flight (a stage, the namer, a write): the drive waits for all of them. */
   const flightRef = useRef(0);
@@ -936,6 +942,7 @@ export function useImportSession(deps: {
     iRef.current = { ...iRef.current, overrides };
     const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
     patch({ semantics: sem });
+    namerNote.current = namerError;
     setNotice(namerError);
   }
 
@@ -1326,7 +1333,7 @@ export function useImportSession(deps: {
           inputs: iRef.current,
           blocker,
           offer,
-          notice,
+          notice: notice && notice === ackedNote.current ? null : notice,
           busy: false,
           resolve: d.resolve,
           current: () => ({ session: sRef.current, inputs: iRef.current }),
@@ -1390,6 +1397,8 @@ export function useImportSession(deps: {
   function advance(opts: { resolve?: AutoResolver<Inputs> } = {}) {
     if (refusal.current && notice === refusal.current) setNotice(null);
     refusal.current = null;
+    // a resume past the namer's outage: acknowledged — the codes are typed without the AI
+    if (opts.resolve && notice && notice === namerNote.current) ackedNote.current = notice;
     arm(opts.resolve);
   }
 
