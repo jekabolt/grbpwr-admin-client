@@ -251,15 +251,16 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
  * rank is not drawn when its own size class carried no chain as read (before continuity, labels
  * or bundles moved any line to it), it is still empty after them, other ranks are drawn, and no
  * verified family covers it: a piece drawn once for every size (a closed common outline, piece
- * sized, not a page frame) or drawn identically in every drawn size layer. A rank that originally
- * carried chains is never "not drawn".
+ * sized — ≥ `minAreaMm2`, 50 cm²: a collar, a pocket, not a buttonhole, a label or a mark — and not
+ * a page frame) or drawn identically in every drawn size layer. A rank that originally carried
+ * chains is never "not drawn".
  */
 export function undrawnRanks(
   set: ChainSet,
   run: SizeRun,
   texts: readonly IRText[] = [],
   module: number[] = [],
-  minAreaMm2 = 2000,
+  minAreaMm2 = 5000,
 ): number[] {
   if (run.encoding === 'single' || run.sizes.length < 2) return [];
   const byId = new Map(set.classes.map((c) => [c.id, c]));

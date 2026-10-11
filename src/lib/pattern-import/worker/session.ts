@@ -1017,13 +1017,7 @@ export class Session {
     if (!this.fast && run.encoding !== 'single' && run.sizes.length > 1)
       map = markNotDrawn(
         map,
-        undrawnRanks(
-          this.chains,
-          run,
-          this.sheet.texts,
-          sheetModule(this.sheet),
-          PATIMPORT.minPieceAreaMm2,
-        ),
+        undrawnRanks(this.chains, run, this.sheet.texts, sheetModule(this.sheet)),
         input.card,
       );
     this.run = run;

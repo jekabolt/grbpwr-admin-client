@@ -597,7 +597,8 @@ export async function main(args: string[] = []): Promise<number> {
       '6 · a size class that carried chains is never not drawn',
       undrawnRanks(set, run).length === 0,
     );
-    const loop = [P(100, 0), P(150, 10), P(170, 50), P(130, 80), P(95, 45), P(100, 0)];
+    const loop = [P(100, 0), P(200, 10), P(220, 60), P(150, 110), P(95, 60), P(100, 0)];
+    const mark = [P(300, 0), P(320, 0), P(320, 20), P(300, 20), P(300, 0)];
     set = setOf(
       [...lines, loop],
       [
@@ -609,7 +610,21 @@ export async function main(args: string[] = []): Promise<number> {
     );
     check(
       '6 · a closed common outline (a collar for every size) covers it: drawn',
-      undrawnRanks(set, run, [], [], 2000).length === 0,
+      undrawnRanks(set, run).length === 0,
+    );
+    set = setOf(
+      [...lines, mark],
+      [
+        { role: 'size', chains: [] },
+        { role: 'size', chains: [0] },
+        { role: 'size', chains: [1] },
+        { role: 'common', chains: [2] },
+      ],
+    );
+    check(
+      '6 · a small common mark (a buttonhole, 4 cm²) covers nothing: still not drawn',
+      JSON.stringify(undrawnRanks(set, run)) === '[0]',
+      JSON.stringify(undrawnRanks(set, run)),
     );
     const card = [34, 36, 38].map((t, i) => ({
       sizeId: i + 1,
