@@ -59,7 +59,7 @@ const around = (p: { x: number; y: number }, r = 60): BoxMm => ({
 });
 
 export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
-  const { session, inputs, patchInputs } = api;
+  const { session, inputs } = api;
   const chains = session.chains;
   const sizes = session.sizes;
   const [hover, setHover] = useState<number | null>(null);
@@ -342,9 +342,7 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                           <Chip
                             tone='attention'
                             onClick={() =>
-                              patchInputs((i) => ({
-                                legendConfirmed: [...i.legendConfirmed, legendKey(c)],
-                              }))
+                              void api.dispatch({ type: 'legend-confirm', key: legendKey(c) })
                             }
                             title={
                               c.evidence.some((x) => x.kind === 'colour-only')

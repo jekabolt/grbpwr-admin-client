@@ -18,7 +18,12 @@ import {
   type FaceJunk,
   type FaceSwitch,
 } from 'lib/pattern-import/pieces/faces';
-import { rolesByFaces, type FaceRoleOpts } from 'lib/pattern-import/chains/face-role';
+import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
+import { gradeView, rolesByFaces, type FaceRoleOpts } from 'lib/pattern-import/chains/face-role';
+import { confirmRows, withClassSigs } from 'lib/pattern-import/chains/legend';
+import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
+import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
+import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
 import { readRawDxf } from 'lib/pattern-import/gate';
 import { nestedPieces } from 'lib/pattern-import/gate/checks';
 import type {
@@ -26,6 +31,7 @@ import type {
   Chain,
   ChainRole,
   ChainSet,
+  IRPath,
   IRText,
   PagePose,
   Style,
@@ -884,6 +890,267 @@ function synthRoles() {
   );
 }
 
+/**
+ * The face pass's strays as the size checks see them (chains/face-role gradeView), on a sheet that
+ * draws 3 sizes in one pen: a fold drawn once, each size's outline bottom → right → top (6 mm wider,
+ * 5 mm taller per size), a positioning line straight across the nest, 100 mm out on both sides, and
+ * a drawn test square. The face pass files the largest size, the positioning line and the square as
+ * strays. Per chain: the size line and the positioning line are handed back (a laneless line may as
+ * well be an edge drawn once for every size — the bench needs those as walls), the square stays out
+ * by its reason. The solver makes the positioning line a wall of every size, and its checks still
+ * close the true outlines only.
+ */
+const GV = { n: 3, W: 240, H: 300, d: 6, e: 5, lineY: 100, ext: 100 };
+function gradeViewSheet() {
+  const { n, W, H, d, e, lineY, ext } = GV;
+  const draws: { tag: string; pts: PtMm[] }[] = [
+    {
+      tag: 'fold',
+      pts: [
+        { x: 0, y: -n * e - 5 },
+        { x: 0, y: H + n * e + 5 },
+      ],
+    },
+  ];
+  const truth: PtMm[][] = [];
+  for (let r = 0; r < n; r++) {
+    const o = rect(0, -r * e, W + r * d, H + r * e);
+    draws.push({ tag: `size${r}`, pts: o });
+    truth.push(o);
+  }
+  draws.push({ tag: 'square', pts: [...rect(500, 0, 600, 100), { x: 500, y: 0 }] });
+  draws.push({
+    tag: 'position',
+    pts: [
+      { x: -ext, y: lineY },
+      { x: W + n * d + ext, y: lineY },
+    ],
+  });
+  const styles = [STYLE(0, null)];
+  const paths: IRPath[] = draws.map((x, i) => ({
+    id: i,
+    pts: x.pts,
+    closed: false,
+    style: 0,
+    src: { file: 'syn', page: 0, op: i, sub: 0 },
+  }));
+  const sheet: Sheet = {
+    ...sheetOf({ minX: -ext - 20, minY: -40, maxX: 620, maxY: H + 40 }, [], [], styles),
+    paths,
+  };
+  const { set: built } = buildChainsDetailed(
+    sheet,
+    {
+      joinGapMm: PATIMPORT.joinGapMm,
+      joinAngleDeg: PATIMPORT.joinAngleDeg,
+      joinLateralMm: PATIMPORT.joinLateralMm,
+    },
+    { extraTexts: [] },
+  );
+  const set = withClassSigs(built, styles);
+  const tagOf = (id: number) => draws[set.chains[id].ranges[0].path].tag;
+  const chainOfTag = (t: string) => set.chains.find((c) => tagOf(c.id) === t)?.id ?? -1;
+  return { sheet, set, truth, tagOf, chainOfTag, draws };
+}
+
+function synthGradeView() {
+  const S = 'grade view';
+  const { sheet, set, truth, tagOf, chainOfTag } = gradeViewSheet();
+  const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const strayTags = (stray?.chains ?? []).map(tagOf).sort();
+  check(
+    S,
+    'premise: the face pass files the largest size, the positioning line and the square as strays',
+    ['position', 'square', `size${GV.n - 1}`].every((t) => strayTags.includes(t)),
+    strayTags,
+  );
+  const roleIn = (v: ChainSet, t: string) =>
+    v.classes
+      .filter((c) => c.chains.includes(chainOfTag(t)))
+      .map((c) => c.role)
+      .join('+');
+  const v = gradeView(set);
+  for (const [t, want] of [
+    [`size${GV.n - 1}`, 'internal'],
+    ['position', 'internal'],
+    ['square', 'ignore'],
+  ] as const)
+    check(S, `per chain: ${t} → ${want}`, roleIn(v, t) === want, roleIn(v, t));
+  const mut = gradeView(set, { off: new Set(['why']) });
+  check(
+    S,
+    'why off: the test square is handed back too (mutation)',
+    roleIn(mut, 'square') === 'internal',
+    roleIn(mut, 'square'),
+  );
+  // through the fill with 3 sizes answered: the solver ranks the restored size line; the positioning
+  // line is a wall of every size, and no closed contour is wrong
+  const read = detectSizeRun(sheet, set, [
+    { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+  ]);
+  const expected = expectedSizes(read, GV.n, set)!;
+  const run = runForExpected(read, expected);
+  const seeds: Seed[] = [
+    { id: 0, at: { x: GV.W / 2, y: GV.H / 2 + 50 }, origin: 'click', variant: null },
+  ];
+  const fill = (ss: ChainSet) => {
+    const { families, diag } = fillPiecesDetailed(sheet, ss, run, seeds, {
+      cellMm: PATIMPORT.fillCellMm,
+      snapMm: PATIMPORT.snapMm,
+      variant: null,
+      expectedSizes: expected,
+    });
+    const portions = diag.grade?.result?.portions ?? [];
+    const ranksOf = (t: string) =>
+      portions.filter((p) => p.chain === chainOfTag(t)).map((p) => p.ranks.join(''));
+    const wrong = families.flatMap((f) =>
+      f.candidates
+        .filter((c) => c.outcome === 'closed' && hausdorffP95(c.outer, truth[c.rank]) > 1)
+        .map((c) => `r${c.rank}`),
+    );
+    const closed = families.flatMap((f) =>
+      f.candidates.filter((c) => c.outcome === 'closed'),
+    ).length;
+    const refusals = [
+      ...new Set(families.flatMap((f) => f.candidates.map((c) => c.gradeRefusal ?? ''))),
+    ].join(',');
+    return {
+      position: ranksOf('position'),
+      largest: ranksOf(`size${GV.n - 1}`),
+      wrong,
+      closed,
+      refusals,
+    };
+  };
+  const all = Array.from({ length: GV.n }, (_, r) => r).join('');
+  const f = fill(set);
+  check(
+    S,
+    'fill, 3 sizes: the restored size line is ranked as its own size',
+    f.largest.includes(String(GV.n - 1)),
+    f,
+  );
+  check(
+    S,
+    'fill, 3 sizes: the positioning line is a wall of every size, every size closes true, none wrong',
+    f.position.includes(all) && f.closed === GV.n && !f.wrong.length,
+    f,
+  );
+  // the strays kept out (the operator confirmed the row as proposed): the largest size is lost —
+  // the solver sees 2 lines for 3 sizes and refuses, never a wrong contour
+  const stayed = fill(confirmRows(set, [stray?.sig ?? `#${stray?.id}`]));
+  check(
+    S,
+    'strays kept out (row confirmed): a size lost → refused, nothing closes (mutation)',
+    stayed.closed === 0 && !stayed.wrong.length && stayed.largest.length === 0,
+    stayed,
+  );
+}
+
+/**
+ * The operator confirming the proposed stray row (the sizes step's "! confirm") is an answer: through
+ * the chains stage contract (`confirmed`) the row comes back at confidence 1 in a new set, and the
+ * size checks leave it alone. Rows nobody touched stay as built (the restore keeps working).
+ */
+async function synthConfirm() {
+  const S = 'legend confirm';
+  const { set, chainOfTag, draws } = gradeViewSheet();
+  const largest = chainOfTag(`size${GV.n - 1}`);
+  const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'))!;
+  const key = stray.sig ?? `#${stray.id}`;
+  const roleOfLargest = (v: ChainSet) =>
+    v.classes
+      .filter((c) => c.chains.includes(largest))
+      .map((c) => c.role)
+      .join('+');
+  const conf = confirmRows(set, [key]);
+  const row = conf.classes.find((c) => c.id === stray.id)!;
+  check(
+    S,
+    'confirmed as proposed → confidence 1, a new set, the other rows untouched',
+    row.confidence === 1 &&
+      row.role === stray.role &&
+      conf !== set &&
+      conf.classes.every((c, k) => c.id === stray.id || c === set.classes[k]),
+    { conf: row.confidence, newSet: conf !== set },
+  );
+  check(
+    S,
+    'a confirmed stray row stays out of the size checks',
+    roleOfLargest(gradeView(conf)) === 'ignore',
+    roleOfLargest(gradeView(conf)),
+  );
+  check(
+    S,
+    'not confirmed: the row is handed back as before (mutation)',
+    roleOfLargest(gradeView(confirmRows(set, []))) === 'internal',
+    roleOfLargest(gradeView(set)),
+  );
+  // the worker's chains stage: the same sheet as an SVG in mm, chains with and without `confirmed`
+  const box = { x: -GV.ext - 20, y: -40, w: GV.W + GV.n * GV.d + 2 * GV.ext + 40, h: GV.H + 80 };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${box.w}mm" height="${box.h}mm" viewBox="${box.x} ${box.y} ${box.w} ${box.h}">${draws
+    .map(
+      (x) =>
+        `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x.pts.map((q) => `${q.x},${q.y}`).join(' ')}"/>`,
+    )
+    .join('')}</svg>`;
+  const chainsVia = async (confirmed?: (cs: StageIO['chains']['out']) => string[]) => {
+    const bytes = new TextEncoder().encode(svg);
+    const s = new Session(1, [
+      { name: 'fixture.svg', bytes: bytes.buffer.slice(0) as ArrayBuffer },
+    ]);
+    const run = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
+      s.runStage(st, input, ctx());
+    await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    const cl = await run('clean', { edits: [] });
+    const best = cl.scale[0];
+    if (best)
+      await run('scale', {
+        decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
+      });
+    await run('assemble', { sheet: 0 });
+    const opts = {
+      joinGapMm: PATIMPORT.joinGapMm,
+      joinAngleDeg: PATIMPORT.joinAngleDeg,
+      joinLateralMm: PATIMPORT.joinLateralMm,
+    };
+    let out = await run('chains', { opts });
+    if (confirmed) out = await run('chains', { opts, confirmed: confirmed(out) });
+    const inn = inner(s);
+    const st = out.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+    const v = gradeView(inn.chains);
+    const backs = v.classes
+      .filter((c) => c.role === 'internal' && c.evidence.some((x) => x.kind === 'face-stray'))
+      .flatMap((c) => c.chains).length;
+    return { strayConf: st?.confidence ?? null, handedBack: backs };
+  };
+  const keyOf = (cs: StageIO['chains']['out']) =>
+    cs.classes
+      .filter((c) => c.evidence.some((x) => x.kind === 'face-stray'))
+      .map((c) => c.sig ?? `#${c.id}`);
+  const untouched = await chainsVia();
+  const confirmed = await chainsVia(keyOf);
+  check(
+    S,
+    'worker, confirmation omitted: the row stays proposed and is handed back (mutation)',
+    untouched.strayConf != null && untouched.strayConf < 0.9 && untouched.handedBack > 0,
+    untouched,
+  );
+  check(
+    S,
+    'worker, the row confirmed through the chains stage: confidence 1, not handed back',
+    confirmed.strayConf === 1 && confirmed.handedBack === 0,
+    confirmed,
+  );
+  const ignored = await chainsVia(() => ['no-such-row']);
+  check(
+    S,
+    'worker, a key of no row changes nothing',
+    ignored.strayConf === untouched.strayConf && ignored.handedBack === untouched.handedBack,
+    ignored,
+  );
+}
+
 export async function main(args: string[]): Promise<number> {
   const mode = args[0];
   const id = args[1];
@@ -891,6 +1158,8 @@ export async function main(args: string[]): Promise<number> {
     synthFaces();
     synthUnits();
     synthRoles();
+    synthGradeView();
+    await synthConfirm();
     console.log(`@@RESULT ${JSON.stringify({ id: 'synthetic', checks })}`);
     return 0;
   }

@@ -225,10 +225,10 @@ export function rolesByFaces(
     });
   }
   if (stray.length) {
-    const whys = new Map<string, number>();
+    const whys = new Map<string, ChainId[]>();
     for (const id of stray) {
       const w = verdict.get(id)!.why;
-      whys.set(w, (whys.get(w) ?? 0) + 1);
+      whys.set(w, [...(whys.get(w) ?? []), id]);
     }
     push({
       role: 'ignore',
@@ -239,9 +239,10 @@ export function rolesByFaces(
         {
           kind: 'face-stray',
           why: [...whys]
-            .sort((a, b) => b[1] - a[1])
-            .map(([w, n]) => `${n} ${w}`)
+            .sort((a, b) => b[1].length - a[1].length)
+            .map(([w, ids]) => `${ids.length} ${w}`)
             .join(', '),
+          byWhy: [...whys].map(([why, chains]) => ({ why, chains })),
         },
       ],
       confidence: 0.4,
@@ -264,28 +265,78 @@ export function rolesByFaces(
 
 const gradeViews = new WeakMap<ChainSet, ChainSet>();
 
+/** Strays that are never line work of a size (per-chain `byWhy`): left out of the size checks. */
+const NEVER_A_SIZE = new Set(['the test square', 'offered as background by the clean step']);
+
+/** Probe switch (mutation): hand back every stray, whatever its reason. */
+export type GradeViewOpts = { off?: ReadonlySet<'why'> };
+
 /**
  * What the size checks (pieces/grade: the hook, the drawn-size inference) may read of the face
  * pass. Its stray row rests on "a sheet with no size row is one size": a line sticking outside
  * every outline is a stray. On a sheet drawing several sizes in one pen that is every larger size's
  * line (the stripped bench: kombinezon lost a whole size, the solver counted 7 bands for 8 and a
- * 7-size control closed 6 wrong contours; palto 21 closed wrong). So until the operator says so
- * (the row's role changed, confidence 1) those lines are what they were before the face pass — F3's
- * unconfirmed 'internal', which stays size evidence and a wall the solver must account for. The
- * view is cached per set: the solver's cache is keyed by the set it is given.
+ * 7-size control closed 6 wrong contours; palto 21 closed wrong). So, per chain, an unconfirmed stray
+ * is handed back as F3's unconfirmed 'internal' — size evidence and a wall, what it was before the
+ * face pass — unless its own reason says it is no line work (the drawn test square, what the clean
+ * step offered as background).
+ *
+ * Every other stray comes back, with lanes or without: a line no other line runs beside is either a
+ * positioning / grid line across the nest or an edge drawn once for every size (a fold, a CF), and
+ * nothing here tells the two apart — the bench's laneless strays hold 1.3–2.7 m of shared edges per
+ * sheet. Leaving them out took those walls from every size (palto L1 closed a wrong contour,
+ * kombinezon L2 fell 33 → 23 correct); a line across the nest as a wall of every size is what the
+ * solver had before the face pass, and its checks hold there (faces probe: «grade view»).
+ *
+ * A row the operator answered (confidence 1: its role changed, or confirmed as proposed —
+ * chains/legend confirmRows) is the operator's. Cached per set: the solver's cache is keyed by it.
  */
-export function gradeView(set: ChainSet): ChainSet {
+export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
+  const off = o.off ?? new Set();
   const unsure = (c: LineClass) =>
     c.role === 'ignore' && c.confidence < 0.9 && c.evidence.some((e) => e.kind === 'face-stray');
   if (!set.classes.some(unsure)) return set;
-  let v = gradeViews.get(set);
-  if (!v) {
-    v = {
-      ...set,
-      classes: set.classes.map((c) => (unsure(c) ? { ...c, role: 'internal' as const } : c)),
-    };
-    gradeViews.set(set, v);
+  const cached = !o.off && gradeViews.get(set);
+  if (cached) return cached;
+  const whyOf = new Map<ChainId, string>();
+  for (const c of set.classes)
+    if (unsure(c))
+      for (const e of c.evidence)
+        if (e.kind === 'face-stray')
+          for (const g of e.byWhy ?? []) for (const id of g.chains) whyOf.set(id, g.why);
+  const classes: LineClass[] = [];
+  const back: ChainId[] = [];
+  for (const c of set.classes) {
+    if (!unsure(c)) {
+      classes.push(c);
+      continue;
+    }
+    const out = c.chains.filter((id) => !off.has('why') && NEVER_A_SIZE.has(whyOf.get(id) ?? ''));
+    const keep = new Set(out);
+    back.push(...c.chains.filter((id) => !keep.has(id)));
+    if (out.length)
+      classes.push({
+        ...c,
+        chains: out,
+        totalLengthMm: out.reduce((a, id) => a + set.chains[id].lengthMm, 0),
+      });
   }
+  let v = set;
+  if (back.length) {
+    classes.push({
+      id: Math.max(-1, ...set.classes.map((c) => c.id)) + 1,
+      role: 'internal',
+      sizeLabel: null,
+      chains: back,
+      totalLengthMm: back.reduce((a, id) => a + set.chains[id].lengthMm, 0),
+      evidence: [
+        { kind: 'face-stray', why: `${back.length} strays handed back to the size checks` },
+      ],
+      confidence: Math.min(...set.classes.filter(unsure).map((c) => c.confidence)),
+    });
+    v = { ...set, classes };
+  }
+  if (!o.off) gradeViews.set(set, v);
   return v;
 }
 
