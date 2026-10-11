@@ -1173,6 +1173,10 @@ export async function readDxf(
   const tally = tallyOf(raw, b, tok.innerComments);
   if (!tally.balanced) b.warnings.push('entity tally does not balance — see meta.tally');
   const dialect = detectDialect(raw, modelLabels, manifest, version);
+  // A10: piece blocks with a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line)
+  const cutBlocks = raw.blockOrder.filter((bl) =>
+    bl.entities.some((e) => (e.type === 'POLYLINE' || e.type === 'LWPOLYLINE') && e.layer === '1'),
+  ).length;
   const author = modelLabels.find((l) => l.key === 'author')?.value;
   const product = modelLabels.find((l) => l.key === 'product')?.value;
   const ezdxf = /EZDXF/i.test(dec.probeText);
@@ -1199,6 +1203,7 @@ export async function readDxf(
       kind: 'dxf',
       pages: 1,
       producer: producer ?? undefined,
+      dxf: { dialect, cutBlocks },
     },
     pages: [page],
     warnings: b.warnings,

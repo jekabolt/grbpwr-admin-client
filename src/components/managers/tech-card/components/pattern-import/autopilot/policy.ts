@@ -144,8 +144,10 @@ const CAD_PRODUCER =
   /\b(seamly2d|valentina|clo3d|clo|marvelous|gerber|accumark|lectra|modaris|optitex|gemini|audaces|tukatech|polypattern|grafis|assyst|richpeace)\b/i;
 
 /**
- * The outline prior from what made the file (Codex final #4): only a NATIVE pattern-CAD format —
- * DXF (AAMA / ASTM), HP-GL / PLT — or an SVG whose own metadata names a pattern CAD (Seamly2D …)
+ * The outline prior from what made the file (Codex final #4, r5): an AAMA / ASTM / CLO-structured
+ * DXF (piece blocks with a boundary on layer 1 = the cut line; a free-drawn DXF is not), HP-GL / PLT
+ * (industry plotter output — a residual accepted under D4), or an SVG whose own metadata names a
+ * pattern CAD (Seamly2D …)
  * reads as a CAD export; a PDF's producer string or a plain Inkscape drawing never does. Every file
  * such and no print layout (tile sheets, an overview page) → the evidence for "cut line"; else null
  * (a question). A drawn inner seam line or the sheet's text decide before this, everywhere.
@@ -157,8 +159,14 @@ export function cadExport(s: ImportSession): string[] | null {
   const why: string[] = [];
   for (const f of s.files) {
     const by = f.producer ?? '';
-    if (f.kind === 'hpgl') why.push(`${f.name}: HP-GL plot file (a cutter/plotter export)`);
-    else if (f.kind === 'dxf') why.push(`${f.name}: DXF export`);
+    if (f.kind === 'hpgl')
+      why.push(
+        `${f.name}: HP-GL plot file — plotter files come from industry CAD, which plots the cut line (a residual accepted under D4)`,
+      );
+    else if (f.kind === 'dxf' && f.dxf && f.dxf.dialect !== 'generic' && f.dxf.cutBlocks > 0)
+      why.push(
+        `${f.name}: ${f.dxf.dialect} DXF, ${f.dxf.cutBlocks} piece ${f.dxf.cutBlocks === 1 ? 'block' : 'blocks'} with a boundary on layer 1 (the standard's cut line; 14 = sew line)`,
+      );
     else if (f.kind === 'svg' && CAD_PRODUCER.test(by))
       why.push(`${f.name}: an SVG exported by ${by}`);
     else return null;

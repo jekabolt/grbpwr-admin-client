@@ -186,6 +186,11 @@ export type SourceFileInfo = {
   pages: number;
   /** Producer string when the format carries one (PDF /Producer, DXF $ACADVER). */
   producer?: string;
+  /**
+   * A10, DXF only: the dialect the reader recognised (aama, clo-…, grbpwr, generic) and how many
+   * blocks carry a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line).
+   */
+  dxf?: { dialect: string; cutBlocks: number };
 };
 
 /** Everything an adapter returns for one file. */
