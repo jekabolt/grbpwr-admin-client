@@ -604,7 +604,32 @@ export type QtyListEntry = {
   section: boolean;
   /** Lists (scopes) that print another count for this number — no count is taken from them. */
   conflict?: string[];
+  /**
+   * Codex N3: every word after the number that is NOT cut vocabulary (cut / klip / zuschneiden /
+   * кроить, × / gange / mal / раз, pair / Paar / пар, on fold…), any length — «Sy ærme» keeps «sy».
+   * The count answers by itself only when these are all the piece's own title or code.
+   */
+  rest: string[];
 };
+
+/** Cut vocabulary: the words a cutting-list line may hold beside the piece's name. */
+const CUT_VOCAB = new Set(
+  (
+    'cut cutting klip klippes klippe klippet tilskjær zuschneiden zuschnitt schneiden кроить кроят ' +
+    'выкроить раскроить coupez couper couper taglia tagliare cortar corte knip wytnij x х gang gange ' +
+    'ganger gånger ggr mal раз fois volte veces keer razy times pair pairs paar paarig пар пара пары ' +
+    'дет деталь детали деталей шт mod mot fold on the im bruch stoffbruch со сгибом по сгибу au pli ' +
+    'na zgięciu al doblez sulla piega op de vouw'
+  ).split(' '),
+);
+
+/** The words of a list line's rest (after its number) that are not cut vocabulary. */
+function restWords(rest: string): string[] {
+  return rest
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter((w) => w && !CUT_VOCAB.has(w));
+}
 
 /** A list line names its piece in a few words; a longer line is an instruction step. */
 const QTY_LIST_MAX_WORDS = 4;
@@ -625,7 +650,15 @@ const FABRIC_WORD =
  * `conflict` (asked, never applied).
  */
 export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
-  type Raw = { at: number; scope: number; text: string; no: string; words: string[]; qty: number };
+  type Raw = {
+    at: number;
+    scope: number;
+    text: string;
+    no: string;
+    words: string[];
+    rest: string[];
+    qty: number;
+  };
   const raws: Raw[] = [];
   let scope = 0;
   const headerAt: number[] = [];
@@ -672,7 +705,7 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
           w.length >= 3 && !/^(?:gange?r?|gånger|ggr|mal|fois|razy|keer|veces|дет|шт)$/u.test(w),
       );
     if (!words.length || words.length > QTY_LIST_MAX_WORDS) continue;
-    raws.push({ at: i, scope, text: t, no: m[1].toLowerCase(), words, qty });
+    raws.push({ at: i, scope, text: t, no: m[1].toLowerCase(), words, rest: restWords(rest), qty });
   }
   // runs: list lines one after another (a split-off number item between them)
   const inSection = new Set<Raw>();
@@ -712,6 +745,7 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
       text: first.text,
       no,
       words: first.words,
+      rest: first.rest,
       qty: first.qty,
       section: inSection.has(first) && !FABRIC_WORD.test(first.text),
       ...(others.length ? { conflict: others.map((r) => r.text) } : {}),

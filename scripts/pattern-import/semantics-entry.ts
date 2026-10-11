@@ -1543,6 +1543,18 @@ export async function main(): Promise<number> {
       'Codex N3: «Syning: brug tråd» (title leading a line) ends the section → the next list line is asked',
       JSON.stringify(qOf(leadNext)),
     );
+    // Codex N3: a heading without a colon («SYNING») and a sewing verb in the line: not the name
+    const verb = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'SYNING',
+      '69. Sy ærme 4 gange',
+    ]);
+    ck(
+      qOf(verb)?.shown === 'pair×2' && /«sy ærme» is not this piece/.test(qOf(verb)?.detail ?? ''),
+      'Codex N3: «SYNING» + «69. Sy ærme 4 gange» → «sy» is no name → shown ×4, asked',
+      JSON.stringify(qOf(verb)),
+    );
     const none = build([]);
     ck(
       ids(none) === 'SL_L×1 SL_R×1' && qOf(none)?.shown === 'pair×1',
@@ -1589,7 +1601,7 @@ export async function main(): Promise<number> {
     const notNamed = build(['Klippevejledning:', '69. Pres sømmen 4 gange']);
     ck(
       qOf(notNamed)?.shown === 'pair×2' &&
-        /does not name this piece/.test(qOf(notNamed)?.detail ?? ''),
+        /is not this piece's name/.test(qOf(notNamed)?.detail ?? ''),
       'Codex N3: under a cutting header but its words do not name the sleeve → asked',
       JSON.stringify(qOf(notNamed)),
     );

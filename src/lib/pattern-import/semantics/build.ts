@@ -726,13 +726,20 @@ export function buildPieceSpecsDetailed(
     // no size token, with no other list printing another count. Anything else is the answer shown.
     const prepOf = new Map(preps.map((p) => [p.seed, p]));
     const titlesOf = new Map(pieceLabels.map((p) => [p.seed, p.labels]));
+    // Codex N3: EVERY word beside the cut vocabulary is the piece's own name — its code read from
+    // the word, or a word of its title; a verb («sy», «pres», «nähen») or a fabric asks
     const namesPiece = (seed: SeedId, words: readonly string[]) => {
-      const code = readPieceText(words.join(' ')).code;
       const pr = prepOf.get(seed);
-      if (code && pr && pr.name.code === code) return true;
       const ws = (titlesOf.get(seed) ?? []).flatMap((l) => l.toLowerCase().split(/[^\p{L}]+/u));
-      return words.every((w) =>
-        ws.some((x) => x.length >= 3 && (x.startsWith(w) || w.startsWith(x))),
+      return (
+        words.length > 0 &&
+        words.every((w) => {
+          const code = readPieceText(w).code;
+          if (code && pr && pr.name.code === code) return true;
+          return ws.some(
+            (x) => x.length >= 3 && w.length >= 3 && (x.startsWith(w) || w.startsWith(x)),
+          );
+        })
       );
     };
     // two entries landing on one piece (a number and another line's name) prove nothing: dropped
@@ -751,8 +758,8 @@ export function buildPieceSpecsDetailed(
             ? 'is not in a cutting list (no cutting header, no list of counts around it)'
             : isSizeToken(e.no)
               ? `its number ${e.no} is a size`
-              : !namesPiece(b.seed, e.words)
-                ? `«${e.words.join(' ')}» does not name this piece`
+              : !namesPiece(b.seed, e.rest)
+                ? `«${e.rest.join(' ')}» is not this piece's name (nor cut vocabulary)`
                 : null;
       const was = listQty.get(b.seed);
       if (was && was.qty !== e.qty) twice.add(b.seed);
