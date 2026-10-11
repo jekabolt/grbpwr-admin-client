@@ -736,6 +736,32 @@ function units() {
     'legend: changing the grey row answers it and leaves the others as they were',
     l2.classes.map((c) => c.confidence),
   );
+  // A2 (Codex): a legend answer is bound to the row's signature — a rebuild that renumbers the rows
+  // (a clean edit, a grid change) hands it to the same row, and a row that is gone takes it along
+  const signed = {
+    ...set,
+    classes: set.classes.map((c, i) => ({ ...c, sig: i === 0 ? 'size44' : 'grey' })),
+  };
+  const renumbered = {
+    ...signed,
+    classes: [...signed.classes].reverse().map((c, i) => ({ ...c, id: i })),
+  };
+  const l3 = applyLegend(renumbered, [
+    { classId: 1, role: 'common', sizeLabel: null, sig: 'grey' },
+  ]);
+  check(
+    l3.classes.find((c) => c.sig === 'grey')?.role === 'common' &&
+      l3.classes.find((c) => c.sig === 'size44')?.role === 'size',
+    'legend: an answer bound to a row signature follows the row when the rows are renumbered',
+    l3.classes.map((c) => [c.id, c.sig, c.role]),
+  );
+  const gone = { ...signed, classes: signed.classes.filter((c) => c.sig !== 'grey') };
+  const l4 = applyLegend(gone, [{ classId: 0, role: 'ignore', sizeLabel: null, sig: 'grey' }]);
+  check(
+    l4.classes[0].role === 'size',
+    'legend: an answer whose row is gone answers no other row (same number, other signature)',
+    l4.classes.map((c) => [c.id, c.sig, c.role]),
+  );
   const q = openQuestions(sem, [], answers, ctx);
   check(
     q.quantity.map((u) => u.seed).join() === '2',

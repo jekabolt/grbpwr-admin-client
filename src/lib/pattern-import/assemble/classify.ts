@@ -100,6 +100,16 @@ function overviewLattice(p: IRPage, tileAspect: number): boolean {
   return len >= 4 * (lat.sx + lat.sy);
 }
 
+/** A10: what a cover / instructions page is made of (the autopilot asks text- or image-led). */
+const inkOf = (f: PageFeatures) => ({
+  ink: {
+    strokeM: Math.round(f.strokeLenM * 100) / 100,
+    texts: f.texts,
+    chars: f.chars,
+    raster: Math.round(f.rasterCover * 100) / 100,
+  },
+});
+
 const textHeavy = (f: PageFeatures) => f.texts >= 40 || f.chars >= 1500;
 const isScan = (f: PageFeatures) => f.rasterCover >= 0.9 && f.strokes <= 2;
 
@@ -326,6 +336,7 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
           cls: 'cover',
           confidence: 0.7,
           why: f.rasterCover >= 0.3 ? 'picture page before the tiles' : 'first page, little text',
+          ...inkOf(f),
         });
       else if (f.texts >= 10)
         cls.set(p.page, {
@@ -333,6 +344,7 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
           cls: 'instructions',
           confidence: 0.8,
           why: `${f.texts} text items, no tile evidence`,
+          ...inkOf(f),
         });
       else
         cls.set(p.page, {

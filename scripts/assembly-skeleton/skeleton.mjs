@@ -6,7 +6,9 @@
 // input compared by the pieces it holds ({FP_L}, {FP_1_L}, {FP_2_L} → «Left front panel»). Order
 // of inputs, unit keys and names do not count; the partition does. Tee (hand-written truth):
 // 3 of 3 joins, ≤ 8 steps. Allsizes (CLO yoke shirt, truth in fixtures/allsizes.truth.json): 5 of 5
-// joins by inputs. Every proposal must pass the frontier sweep (rules 1–3, 6, 7) clean.
+// joins by inputs in its own order (the collar first — reading 1 since sleeves-first became the
+// default, 07 §4.6), ≥ 3 of 5 by default. Every proposal must pass the frontier sweep (rules 1–3,
+// 6, 7) clean.
 //
 // CONTROLS (the probe must be able to go red):
 //   • shuffled template stages → the joins that depend on order (collar before sleeves …) drop;
@@ -36,6 +38,20 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 const outfile = resolve(tmpdir(), `assembly-skeleton-${process.pid}.mjs`);
+// --mutate-pin-settles (in the bundler's memory, never in the file): the pre-re-review rule — any
+// pin clears a tie, so a rebuild that keeps every reading by its pin settles every tie.
+const MUTATE_PIN_SETTLES = process.argv.includes('--mutate-pin-settles');
+// --mutate-ai-id-only: the pre-re-review AI pins — a pick matched by its decision id alone, whatever
+// that decision reads now.
+const MUTATE_AI_ID_ONLY = process.argv.includes('--mutate-ai-id-only');
+const swaps = [
+  ...(MUTATE_PIN_SETTLES
+    ? [[/group-units\.ts$/, 'tie && !resolved.has(id)', 'tie && pins[id] === undefined']]
+    : []),
+  ...(MUTATE_AI_ID_ONLY
+    ? [[/assembly-skeleton\/ai\.ts$/, 'asSent.get(key) !== asNow.get(key)', 'asSent !== asSent']]
+    : []),
+];
 await build({
   entryPoints: [resolve(here, 'skeleton-entry.ts')],
   bundle: true,
@@ -44,6 +60,16 @@ await build({
   absWorkingDir: root,
   outfile,
   logLevel: 'silent',
+  plugins: swaps.map(([filter, from, to]) => ({
+    name: `mutation ${from}`,
+    setup(b) {
+      b.onLoad({ filter }, async (a) => {
+        const src = readFileSync(a.path, 'utf8');
+        if (!src.includes(from)) throw new Error(`mutation did not find «${from}»`);
+        return { contents: src.replace(from, to), loader: 'ts' };
+      });
+    },
+  })),
 });
 const {
   buildSkeleton,
@@ -54,6 +80,11 @@ const {
   proposeSkeleton,
   loadFacts,
   SKELETON,
+  autoPicks,
+  personalPick,
+  picksFor,
+  skeletonAIPins,
+  skeletonAIRequest,
 } = await import(pathToFileURL(outfile).href);
 
 const args = process.argv.slice(2);
@@ -187,9 +218,11 @@ const teeGates = (fx, p) => {
 const alGates = (fx, p) => {
   const m = measure(fx, p);
   return [
+    // The hand truth sets the collar first; the default reading sets the sleeves first (07 §4.6),
+    // so the two joins after that order are reading 1's — checked with that reading below.
     [
-      `all ${m.joins} truth joins by inputs (allsizes.truth.json)`,
-      m.joins === 5 && m.byInputs === m.joins,
+      `≥ ${m.joins - 2} of ${m.joins} truth joins by inputs (allsizes.truth.json, sleeves first)`,
+      m.joins === 5 && m.byInputs >= m.joins - 2,
       `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
     ],
     // ≤ 8 decisions: joins and own steps; press riders ride on their join and are not decisions.
@@ -226,29 +259,40 @@ for (const w of ssP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(ss, ssP);
 gates('SS26-005', ssGates(ss, ssP));
 
-// F6: collar / sleeves is ONE order decision. Its other reading (sleeves first — 4 of 5 prod
-// technologists' shirts) rebuilds a clean order with the sleeves step before the collar step.
+// F6: sleeves / collar is ONE order decision. Reading 0 sets the sleeves first (4 of 5 prod
+// technologists' shirts; the owner's default, 07 §4.6) and costs SS26-005 its two order-dependent
+// joins (≥ 16/18); reading 1 — the collar first, SS26-005's own order — rebuilds a clean order with
+// the collar step before the sleeves step and gives all 18 back.
 {
-  const d = ssP.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
-  gate('SS26-005: collar / sleeves order is a decision', !!d && d.alternatives?.length === 1);
+  const d = ssP.steps.find((x) => x.decision?.id === 'order:sleeves-collar');
+  const at = (p, label) => p.steps.findIndex((x) => x.label?.startsWith(label));
+  gate(
+    'SS26-005: sleeves / collar order is a decision, sleeves first by default',
+    !!d && d.alternatives?.length === 1 && at(ssP, 'Set sleeves') < at(ssP, 'Set collar'),
+  );
+  gate(
+    'SS26-005: sleeves first costs only the two order-dependent joins (≥ 16/18 by inputs)',
+    ssM.byInputs >= 16,
+    `${ssM.byInputs}/${ssM.joins}`,
+  );
   if (d) {
     const f = ss.facts;
     const p = buildSkeleton(ss.graph, f, orderTemplate(f.category), skeletonDeps, {
-      pins: { 'order:collar-sleeves': 1 },
+      pins: { 'order:sleeves-collar': 1 },
     });
-    const at = (label) => p.steps.findIndex((x) => x.label?.startsWith(label));
-    const flipped = p.steps.find((x) => x.decision?.id === 'order:collar-sleeves');
+    const flipped = p.steps.find((x) => x.decision?.id === 'order:sleeves-collar');
     const m = measure(ss, p);
     console.log(
-      `  sleeves-first reading: ${m.byInputs}/${m.joins} by inputs, ${m.byLeaves}/${m.joins} by contents`,
+      `  collar-first reading: ${m.byInputs}/${m.joins} by inputs, ${m.byLeaves}/${m.joins} by contents`,
     );
     gate(
-      'SS26-005: the sleeves-first reading is chosen and set before the collar, sweep clean',
+      'SS26-005: the collar-first reading is chosen, set before the sleeves, 18/18, sweep clean',
       flipped?.decision.chosen === 1 &&
-        at('Set sleeves') >= 0 &&
-        at('Set sleeves') < at('Set collar') &&
+        at(p, 'Set collar') >= 0 &&
+        at(p, 'Set collar') < at(p, 'Set sleeves') &&
+        m.byInputs === m.joins &&
         broken(p).length === 0,
-      broken(p).join('; '),
+      `${m.byInputs}/${m.joins}; ${broken(p).join('; ')}`,
     );
   }
 }
@@ -359,6 +403,17 @@ if (alM.miss.length) console.log(`  missed: ${alM.miss.join(', ')}`);
 for (const w of alP.warnings) console.log(`    · ${w}`);
 if (verbose) printSteps(al, alP);
 gates('Allsizes', alGates(al, alP));
+{
+  const p = buildSkeleton(al.graph, al.facts, orderTemplate(al.facts.category), skeletonDeps, {
+    pins: { 'order:sleeves-collar': 1 },
+  });
+  const m = measure(al, p);
+  gate(
+    'Allsizes: the collar-first reading gives all 5 truth joins by inputs, sweep clean',
+    m.joins === 5 && m.byInputs === m.joins && broken(p).length === 0,
+    `${m.byInputs}/${m.joins}${m.miss.length ? `, missed ${m.miss.join(', ')}` : ''}`,
+  );
+}
 
 // ── H. an outside structural reading (the AI's units, «use AI structure») ────────────────────
 // SkeletonOptions.units are made first, smallest first; a hint that cuts through a unit is said and
@@ -511,6 +566,10 @@ console.log('\nTemplate smoke (names only, no seams)');
       ],
       { buttons: 1, interlining: 1 },
     ),
+    // 07 §4.7 (review): a bottom read from the pieces — the trousers' panel method, a skirt's words.
+    card('bottom', ['FRONT_L', 'FRONT_R', 'BACK_L', 'BACK_R', 'WB', 'POCKET_L', 'POCKET_R'], {
+      zipper: 1,
+    }),
     card('generic', ['FRONT', 'BACK', 'SLEEVE', 'COLLAR', 'P7'], {}),
   ];
   for (const c of cards) {
@@ -525,11 +584,40 @@ console.log('\nTemplate smoke (names only, no seams)');
     for (const w of p.warnings) console.log(`    · ${w}`);
     if (c.facts.category !== 'generic')
       gate(`${c.facts.category}: sweep clean, one terminal`, bad.length === 0, bad.join('; '));
+    // 07 §4.3: not left outside every unit either — placed as a guess the step says (0.4, a
+    // decision with the other panels beside it), never as a confident join.
     else
       gate(
-        'generic: the nameless, seamless piece is reported, not invented',
-        p.warnings.some((w) => w.includes('P7')),
+        'generic: the nameless, seamless piece is placed only as a said guess',
+        p.steps.some(
+          (s) =>
+            s.decision?.id === 'orphan:P7' &&
+            s.confidence < SKELETON.accept &&
+            /P7: no role in its name and no seam found/.test(s.reason ?? ''),
+        ),
+        p.steps
+          .filter((s) => s.inputs.includes('P7'))
+          .map((s) => `${s.label} ${s.confidence} ${s.reason}`)
+          .join('; '),
       );
+    // 07 §4.4: trousers by the panel method — the backs into one, the fronts into one, then the
+    // two in one (side seams, inseams, crotch), and only then the waistband.
+    if (c.facts.category === 'trousers' || c.facts.category === 'bottom') {
+      const at = (name) => p.steps.findIndex((s) => s.outputUnitName === name);
+      const wb = p.steps.findIndex((s) => s.label?.startsWith('Attach the waistband'));
+      gate(
+        `${c.facts.category}: Back → Front → Body (back + front) → waistband`,
+        at('Back') >= 0 && at('Back') < at('Front') && at('Front') < at('Body') && at('Body') < wb,
+        `Back ${at('Back')}, Front ${at('Front')}, Body ${at('Body')}, waistband ${wb}`,
+      );
+    }
+    // A bottom read from the pieces may be a skirt: no step claims what only trousers have.
+    if (c.facts.category === 'bottom') {
+      const claims = p.steps
+        .map((s) => `${s.label} ${s.outputUnitName ?? ''}`)
+        .filter((t) => /inseam|crotch|\bleg/i.test(t));
+      gate('bottom: no inseam, crotch or leg in any step', claims.length === 0, claims.join('; '));
+    }
   }
 }
 
@@ -544,12 +632,19 @@ console.log('\nControls on SS26-005');
     scores.push(measure(ss, p).byInputs);
     if (broken(p).length) gate(`shuffle #${i}: sweep clean`, false, broken(p).join('; '));
   }
+  // Against the template read in this card's own order (the collar first, reading 1 since 07
+  // §4.6): a random stage order must do worse than the template's order, not than the default
+  // reading that was moved off this card on purpose.
+  const own = measure(
+    ss,
+    buildSkeleton(ss.graph, ss.facts, base, skeletonDeps, { pins: { 'order:sleeves-collar': 1 } }),
+  ).byInputs;
   const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-  const below = scores.filter((s) => s < ssM.byInputs).length;
+  const below = scores.filter((s) => s < own).length;
   console.log(
-    `  shuffled stages ×30: min ${Math.min(...scores)}, mean ${mean.toFixed(1)}, max ${Math.max(...scores)} (vs ${ssM.byInputs}); lower in ${below}/30`,
+    `  shuffled stages ×30: min ${Math.min(...scores)}, mean ${mean.toFixed(1)}, max ${Math.max(...scores)} (vs ${own} in the card's own order); lower in ${below}/30`,
   );
-  gate('control: shuffled stage order loses joins', mean < ssM.byInputs && below > 0);
+  gate('control: shuffled stage order loses joins', mean < own && below > 0);
 
   const stripped = structuredClone(ss);
   const rename = new Map(
@@ -1367,6 +1462,510 @@ console.log('\nClosures (P2 lane Z)');
       show(zs),
     );
   }
+}
+
+/** Compact card → { graph, facts }: one fresh edge per seam end, twins both ways. */
+const synthCard = (spec, rename = {}) => {
+  const nm = (n) => rename[n] ?? n;
+  const twins = new Map();
+  for (const [n, , t, kind] of spec.pieces) {
+    if (!t) continue;
+    twins.set(n, [...(twins.get(n) ?? []), { key: t, kind }]);
+    twins.set(t, [...(twins.get(t) ?? []), { key: n, kind }]);
+  }
+  const edges = new Map(spec.pieces.map(([n]) => [n, 0]));
+  const edge = (n) => {
+    const k = edges.get(n);
+    edges.set(n, k + 1);
+    return `${n}#${k}`;
+  };
+  const chosen = spec.seams.map(([a, b, score]) => ({
+    a: edge(a),
+    b: edge(b),
+    score,
+    evidence: {
+      dLenMm: 0,
+      relLen: 0,
+      notchScore: 0,
+      curvature: 'flat',
+      hand: 'neutral',
+      self: false,
+    },
+    kind: 'edge',
+  }));
+  for (const [i, j] of spec.rivals ?? [])
+    chosen[i].ambiguousWith = [...(chosen[i].ambiguousWith ?? []), chosen[j]];
+  return {
+    graph: {
+      pieces: spec.pieces.map(([n, area]) => ({
+        pieceKey: n,
+        name: nm(n),
+        hand: null,
+        cloth: 'main',
+        rs: [],
+        corners: [],
+        notchIdx: [],
+        edges: [],
+        rect: false,
+        areaMm2: area,
+        perimMm: 0,
+        twinOf: twins.get(n) ?? [],
+      })),
+      chosen,
+      rejected: [],
+      components: [],
+      warnings: [],
+    },
+    facts: {
+      pieces: spec.pieces.map(([n]) => ({
+        pieceKey: n,
+        name: nm(n),
+        piecesPerGarment: 1,
+        cutSymmetry: null,
+        cloth: 'main',
+        fused: false,
+      })),
+      category: spec.category,
+      bom: {},
+      defaultMachineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+    },
+  };
+};
+/** What each unit of a proposal holds, by its output key. */
+const leavesOf = (p) => {
+  const m = new Map();
+  for (const s of p.steps.filter((x) => x.outputUnitKey))
+    m.set(
+      s.outputUnitKey,
+      s.inputs.flatMap((k) => m.get(k) ?? [k]),
+    );
+  return m;
+};
+/** The join whose inputs hold exactly these piece sets (any order), with its step index. */
+const joinOf = (p, ...sets) => {
+  const m = leavesOf(p);
+  const want = sets
+    .map((s) => [...s].sort().join('+'))
+    .sort()
+    .join(' | ');
+  const i = p.steps.findIndex(
+    (s) =>
+      s.outputUnitKey &&
+      s.inputs
+        .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
+        .sort()
+        .join(' | ') === want,
+  );
+  return { i, step: p.steps[i] };
+};
+/** The first join that takes `piece` together with something else, and what that is. */
+const partnerOf = (p, piece) => {
+  const m = leavesOf(p);
+  const i = p.steps.findIndex((s) => s.outputUnitKey && s.inputs.some((k) => k === piece));
+  const s = p.steps[i];
+  return {
+    i,
+    step: s,
+    with: s ? s.inputs.filter((k) => k !== piece).flatMap((k) => m.get(k) ?? [k]) : [],
+  };
+};
+/** The first step whose unit holds every one of these pieces (−1: never). */
+const meetAt = (p, ...pieces) => {
+  const m = leavesOf(p);
+  return p.steps.findIndex(
+    (s) => s.outputUnitKey && pieces.every((k) => m.get(s.outputUnitKey)?.includes(k)),
+  );
+};
+/** «PIECE → what it first joins at step i (decision id)». */
+const placed = (p, piece) => {
+  const j = partnerOf(p, piece);
+  return `${piece} → ${j.with.join('+') || 'nothing'} at ${j.i}${j.step?.decision ? ` (${j.step.decision.id})` : ''}`;
+};
+const cleanGate = (name, p) =>
+  gate(
+    `${name}: sweep clean, one terminal`,
+    !p.warnings.some((w) => /rule \d+ broken|terminal|never reach/.test(w)),
+    p.warnings.filter((w) => /rule \d+ broken|terminal|never reach/.test(w)).join('; '),
+  );
+
+// ── placement without a seam (07-ENGINE-QUALITY §4.1–4.3) ─────────────────────────────────────
+// A part the pattern gives no seam to its panel for (a patch pocket, a bag half, a border strip) is
+// still placed while the panel is flat — by name, position word and balance — as a decision, never
+// left for the end. Synthetic cards (fixtures/placement.json), each with a mutation or a control.
+console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
+{
+  const { cards } = load('placement.json');
+
+  // §4.1 strips: a BOTTOM pocket onto the main strip (not the larger upper one) before the strips meet
+  {
+    const c = synthCard(cards.strips);
+    const p = run(c);
+    const pocket = partnerOf(p, 'PCK_BTTM_L');
+    const strips = joinOf(p, ['FP_U_L'], ['FP_L', 'PCK_BTTM_L']);
+    console.log(`  strips: ${placed(p, 'PCK_BTTM_L')}; strips joined at ${strips.i}`);
+    gate(
+      'strips: the bottom pocket goes onto the main strip by its position word, as a decision',
+      pocket.with.join() === 'FP_L' &&
+        pocket.step.decision?.id === 'place:PCK_BTTM_L' &&
+        pocket.step.alternatives?.some((a) => a.inputs.includes('FP_U_L')) &&
+        pocket.step.confidence < SKELETON.accept,
+      placed(p, 'PCK_BTTM_L'),
+    );
+    gate(
+      'strips: … before the two strips meet',
+      pocket.i >= 0 && strips.i > pocket.i,
+      `${pocket.i} / ${strips.i}`,
+    );
+    cleanGate('strips', p);
+    // Mutation: the position word gone, the pocket goes onto the larger strip (the upper one).
+    const m = run(synthCard(cards.strips, { PCK_BTTM_L: 'PCK_L' }));
+    gate(
+      'mutation: no position word → the larger strip',
+      partnerOf(m, 'PCK_BTTM_L').with.join() === 'FP_U_L',
+      placed(m, 'PCK_BTTM_L'),
+    );
+    // Control: a pocket WITH a seam to a strip is step E's — onto that strip, no placement decision.
+    const s = synthCard({
+      ...cards.strips,
+      seams: [...cards.strips.seams, ['PCK_BTTM_L', 'FP_U_L', 0.8]],
+    });
+    const ps = run(s);
+    const js = partnerOf(ps, 'PCK_BTTM_L');
+    gate(
+      'control: a pocket with a seam to a strip is not placed by name',
+      js.with.join() === 'FP_U_L' && !js.step.decision,
+      placed(ps, 'PCK_BTTM_L'),
+    );
+  }
+
+  // §4.2 bag: the belt's seam fits the inner and the outer panel alike (each the other's rival)
+  {
+    const p = run(synthCard(cards.bag));
+    const belt = joinOf(p, ['BLT_1', 'BLT_2'], ['INNER']);
+    const border = partnerOf(p, 'BRDR');
+    const closed = meetAt(p, 'INNER', 'OUTER');
+    console.log(
+      `  bag: belt onto INNER at ${belt.i} (${belt.step?.decision?.id ?? 'no decision'}); ${placed(p, 'BRDR')}; bag closed at ${closed}`,
+    );
+    gate(
+      'bag: a belt fitting twin panels alike goes onto INNER (first by name), as a decision with the other beside it',
+      belt.i >= 0 &&
+        belt.step.decision?.id === 'place:BLT_1+BLT_2' &&
+        belt.step.alternatives?.some((a) => a.inputs.includes('OUTER')),
+      belt.step ? `${belt.step.decision?.id} ${belt.step.confidence}` : placed(p, 'BLT_1'),
+    );
+    gate(
+      'bag: … before the twin panels meet',
+      belt.i >= 0 && closed > belt.i,
+      `${belt.i} / ${closed}`,
+    );
+    // §4.3: the border strip (no role, no seam) onto the panel with no parts yet, before the bag closes.
+    gate(
+      'bag: the seamless border strip goes onto the panel with no parts, as a guess, before the bag closes',
+      border.with.join() === 'OUTER' &&
+        border.step.decision?.id === 'orphan:BRDR' &&
+        border.step.confidence < SKELETON.accept &&
+        closed > border.i,
+      placed(p, 'BRDR'),
+    );
+    cleanGate('bag', p);
+  }
+  // §4.2 halves: identical bag halves, one named for the back — each on its own panel
+  {
+    const p = run(synthCard(cards.halves));
+    const layered = joinOf(p, ['PCK_L'], ['PCK_B_L']);
+    const front = partnerOf(p, 'PCK_L');
+    const back = partnerOf(p, 'PCK_B_L');
+    console.log(`  halves: ${placed(p, 'PCK_L')}; ${placed(p, 'PCK_B_L')}`);
+    gate(
+      'halves: PCK_L and PCK_B_L are not joined as layers; one onto the front, one onto the back',
+      layered.i < 0 && front.with.join() === 'FP_L' && back.with.join() === 'BP_L',
+      `${placed(p, 'PCK_L')}; ${placed(p, 'PCK_B_L')}`,
+    );
+    cleanGate('halves', p);
+    // Control: halves whose names point at no panel (PCK_1_L, PCK_2_L) are still layers of one bag.
+    const c = run(synthCard(cards.halves, { PCK_L: 'PCK_1_L', PCK_B_L: 'PCK_2_L' }));
+    gate(
+      'control: numbered halves with no panel in their names stay layers',
+      joinOf(c, ['PCK_L'], ['PCK_B_L']).i >= 0,
+      placed(c, 'PCK_L'),
+    );
+  }
+  // §4.3 orphans: a seamless, roleless left placket onto the left panel with the fewest parts
+  {
+    const p = run(synthCard(cards.orphans));
+    const j = partnerOf(p, 'FLP_L');
+    console.log(`  orphans: ${placed(p, 'FLP_L')}`);
+    gate(
+      'orphans: the placket goes onto the left panel with no parts (the sleeve), as a guess at 0.4',
+      j.with.join() === 'SLV_L' &&
+        j.step.decision?.id === 'orphan:FLP_L' &&
+        j.step.alternatives?.length >= 1 &&
+        j.step.confidence === 0.4,
+      placed(p, 'FLP_L'),
+    );
+    cleanGate('orphans', p);
+    // Mutation: without the pocket on the front, the parts are even — the larger panel takes it.
+    const m = run(
+      synthCard({
+        ...cards.orphans,
+        pieces: cards.orphans.pieces.filter(([n]) => n !== 'PCK_L'),
+        seams: cards.orphans.seams.filter(([a]) => a !== 'PCK_L'),
+      }),
+    );
+    gate(
+      'mutation: parts even → the larger left panel (the front)',
+      partnerOf(m, 'FLP_L').with.join() === 'FP_L',
+      placed(m, 'FLP_L'),
+    );
+    // Controls: a piece as large as the sleeve is a copy or a layer of it, not a part (onto the
+    // front instead); a bare number («7») says nothing to place it by and is not placed.
+    const big = run(
+      synthCard({
+        ...cards.orphans,
+        pieces: cards.orphans.pieces.map((x) => (x[0] === 'FLP_L' ? ['FLP_L', 30000] : x)),
+      }),
+    );
+    gate(
+      'control: an orphan as large as a panel is not placed on it',
+      [...partnerOf(big, 'FLP_L').with].sort().join() === 'FP_L,PCK_L',
+      placed(big, 'FLP_L'),
+    );
+    const bare = run(synthCard(cards.orphans, { FLP_L: '7' }));
+    gate(
+      'control: a bare number is not placed',
+      !bare.steps.some((s) => s.decision?.id === 'orphan:FLP_L'),
+      placed(bare, 'FLP_L'),
+    );
+  }
+}
+
+// ── placement does not depend on the order of the pieces on the card (07 review, major 2) ──────
+// E, E2 and E3 rank hosts by evidence (seam, name, position, parts, size); where the evidence ties,
+// the last word is the name, then the piece key — never where a piece stands on the card. A tie
+// that only the name or key broke is said as a TIE: auto mode leaves it «to decide».
+console.log('\nPlacement under reversed and shuffled pieces (synthetic, fixtures/placement.json)');
+{
+  const { cards } = load('placement.json');
+  /** The proposal as a set: each join's inputs (by leaves), its unit, its decision, and a tie. */
+  const signature = (p) => {
+    const m = leavesOf(p);
+    return p.steps
+      .filter((s) => s.outputUnitKey)
+      .map(
+        (s) =>
+          `${s.outputUnitName} ← ${s.inputs
+            .map((k) => [...(m.get(k) ?? [k])].sort().join('+'))
+            .sort()
+            .join(
+              ' | ',
+            )}${s.decision ? ` [${s.decision.id}=${s.decision.chosen}${s.decision.tie ? ' tie' : ''}]` : ''}`,
+      )
+      .sort();
+  };
+  const r = rng(7041);
+  for (const [name, spec] of Object.entries(cards)) {
+    const base = signature(run(synthCard(spec)));
+    const orders = [
+      ['reversed', [...spec.pieces].reverse()],
+      ...Array.from({ length: 5 }, (_, i) => [`shuffle #${i + 1}`, shuffled(spec.pieces, r)]),
+    ];
+    const differ = [];
+    for (const [how, pieces] of orders) {
+      const sig = signature(run(synthCard({ ...spec, pieces })));
+      const only = (a, b) => a.filter((x) => !b.includes(x));
+      if (sig.join('\n') !== base.join('\n'))
+        differ.push(`${how}: ${only(sig, base).join('; ')} (was ${only(base, sig).join('; ')})`);
+    }
+    gate(
+      `${name}: the same joins, units and decisions under reversed and 5 shuffled piece orders`,
+      differ.length === 0,
+      differ.join(' · '),
+    );
+  }
+  // The bag's belt fits INNER and OUTER alike (twins, no parts on either): the engine's reading is
+  // INNER by name, said as a tie — not a pick auto mode may tick.
+  const p = run(synthCard(cards.bag));
+  const belt = p.steps.find((s) => s.decision?.id === 'place:BLT_1+BLT_2');
+  gate(
+    'bag: the belt on twin panels is a tie decision (INNER by name, OUTER beside it)',
+    !!belt?.decision?.tie && belt.inputs.includes('INNER'),
+    belt ? JSON.stringify(belt.decision) : 'no place decision',
+  );
+  // E2 and E3 ties of their own: twin strips for a seamless pocket, twin panels for an orphan.
+  for (const [card, id] of [
+    ['twinStrips', 'place:PCK_L'],
+    ['twinOrphan', 'orphan:TAB_L'],
+  ]) {
+    const t = run(synthCard(cards[card]));
+    const st = t.steps.find((s) => s.decision?.id === id);
+    gate(
+      `${card}: ${id} is a tie decision, said in words, the other host beside it`,
+      !!st?.decision?.tie && /alike/.test(st.decision.tie) && (st.alternatives?.length ?? 0) >= 1,
+      st ? JSON.stringify(st.decision) : `no ${id}`,
+    );
+  }
+  // Reading 0 SETTLED by a person is no longer a tie; merely kept by a pin, it still is.
+  {
+    const c = synthCard(cards.bag);
+    const id = 'place:BLT_1+BLT_2';
+    const build = (o) =>
+      buildSkeleton(c.graph, c.facts, orderTemplate('generic'), skeletonDeps, o).steps.find(
+        (s) => s.decision?.id === id,
+      );
+    const settled = build({ pins: { [id]: 0 }, resolved: [id] });
+    const kept = build({ pins: { [id]: 0 } });
+    gate(
+      'bag: reading 0 settled by a person is not a tie; only kept by a pin, it is',
+      !!settled && !settled.decision.tie && !!kept?.decision.tie,
+      `${JSON.stringify(settled?.decision)} / ${JSON.stringify(kept?.decision)}`,
+    );
+  }
+  // TWO INDEPENDENT TIES (07 re-review). The panel rebuilds around a chosen reading by pinning
+  // EVERY decision on screen; only the chosen one is resolved. The other tie must stay a tie through
+  // that rebuild and the next, stay unticked through auto → manual → auto, and stay out of the batch.
+  {
+    const c = synthCard(cards.twoTies);
+    const tpl = orderTemplate('generic');
+    const L = 'orphan:TAB_L';
+    const R = 'orphan:TAB_R';
+    const at = (p, id) => p.steps.findIndex((s) => s.decision?.id === id);
+    const pinsOf = (p) =>
+      Object.fromEntries(
+        p.steps.filter((s) => s.decision).map((s) => [s.decision.id, s.decision.chosen]),
+      );
+    const p0 = run(c);
+    const both = [L, R].every((id) => p0.steps[at(p0, id)]?.decision.tie);
+    // The person takes the OTHER reading of the left tab (exactly the panel's chooseReading).
+    const p1 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+      pins: { ...pinsOf(p0), [L]: 1 },
+      resolved: [L],
+    });
+    // Any later rebuild keeps every reading by its pin and the resolved list as it was.
+    const p2 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+      pins: pinsOf(p1),
+      resolved: [L],
+    });
+    const iL = at(p2, L);
+    const iR = at(p2, R);
+    const auto = autoPicks(p2.steps);
+    const manual = picksFor(p2.steps, false, (i) => personalPick(auto[i]));
+    const back = picksFor(p2.steps, true, (i) => personalPick(manual[i]));
+    const writes = (picks) =>
+      p2.steps.some((s, i) => picks[i]?.accepted && s.inputs.includes('TAB_R'));
+    const said = `L ${JSON.stringify(p2.steps[iL]?.decision)} · R ${JSON.stringify(p2.steps[iR]?.decision)} · R ticked: auto ${auto[iR]?.accepted}, after the round trip ${back[iR]?.accepted}`;
+    console.log(`  two ties: ${said}`);
+    gate(
+      'twoTies: both tabs start as ties',
+      both,
+      JSON.stringify(p0.steps.filter((s) => s.decision).map((s) => s.decision)),
+    );
+    gate(
+      'twoTies: settling the left tie leaves the right one a tie through two rebuilds',
+      p2.steps[iL]?.decision.chosen === 1 &&
+        !p2.steps[iL].decision.tie &&
+        !!p2.steps[iR]?.decision.tie,
+      said,
+    );
+    gate(
+      'twoTies: auto mode keeps the right tie unticked through auto → manual → auto; apply all does not write it',
+      !auto[iR]?.accepted &&
+        !back[iR]?.accepted &&
+        !!back[iR]?.tie &&
+        !writes(back) &&
+        !writes(auto),
+      said,
+    );
+  }
+  // A STALE AI ANSWER (07 re-review): the AI picked reading 1 of the left tab's tie; then an AI
+  // structure (FP_L + SLV_L + BP in one unit) rebuilt it, and the same id now names OTHER readings.
+  // The old pick must pin and settle nothing there — said as stale — and the tie stays.
+  {
+    const c = synthCard(cards.twoTies);
+    const tpl = orderTemplate('generic');
+    const L = 'orphan:TAB_L';
+    const p0 = run(c);
+    const req = skeletonAIRequest({
+      proposal: p0,
+      facts: c.facts,
+      templateStages: [],
+      seamWords: () => '',
+    });
+    const answer = { picks: [{ decisionId: L, reading: 1, reason: 'the sleeve' }] };
+    const fresh = req.ok ? skeletonAIPins(p0, answer, req.request) : null;
+    const units = [{ pieceKeys: ['FP_L', 'SLV_L', 'BP'], name: 'Body' }];
+    const p1 = buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, { units });
+    const readings = (p, id) => {
+      const s = p.steps.find((x) => x.decision?.id === id);
+      return s
+        ? [s.inputs, ...(s.alternatives ?? []).map((a) => a.inputs)].map((x) => x.join('+'))
+        : [];
+    };
+    const r = req.ok ? skeletonAIPins(p1, answer, req.request) : null;
+    // «use AI readings» exactly as the panel does it.
+    const p2 = r
+      ? buildSkeleton(c.graph, c.facts, tpl, skeletonDeps, {
+          units,
+          pins: r.pins,
+          resolved: r.picked,
+        })
+      : null;
+    const d2 = p2?.steps.find((x) => x.decision?.id === L)?.decision;
+    const said = `request ${req.ok ? 'ok' : req.why} · sent ${readings(p0, L).join(' / ')} · now ${readings(p1, L).join(' / ')} · stale ${JSON.stringify(r?.stale)} picked ${JSON.stringify(r?.picked)} → ${JSON.stringify(d2)}`;
+    console.log(`  stale AI pick: ${said}`);
+    gate(
+      'AI pick on the decision as sent: it pins and settles it',
+      !!fresh && fresh.pins[L] === 1 && fresh.picked.includes(L) && fresh.stale.length === 0,
+      JSON.stringify(fresh),
+    );
+    gate(
+      'AI pick on a decision that reads otherwise now: stale — no pin, no resolve, the tie stays',
+      readings(p0, L).join() !== readings(p1, L).join() &&
+        !!r?.stale.includes(L) &&
+        !r.picked.includes(L) &&
+        r.pins[L] !== 1 &&
+        d2?.chosen === 0 &&
+        !!d2?.tie,
+      said,
+    );
+  }
+  // Control: the strips' pocket is placed by its position word — evidence, not a tie.
+  const st = run(synthCard(cards.strips));
+  const pocket = st.steps.find((s) => s.decision?.id === 'place:PCK_BTTM_L');
+  gate(
+    'control: a placement by evidence (position word) is no tie',
+    !!pocket && !pocket.decision.tie,
+    pocket ? JSON.stringify(pocket.decision) : 'no place decision',
+  );
+}
+
+// ── same-shape warnings once per pair of name families (07-ENGINE-QUALITY §4.8) ──────────────
+// Lane A says every unproven same-shape pair: 8 inner and 8 outer panels of one shape were 64 lines
+// on the screen. Grouped by name stems they are one question; a lone pair keeps lane A's words.
+console.log('\nSame-shape warnings by family (synthetic)');
+{
+  const inner = Array.from({ length: 8 }, (_, i) => [`inner_trapezoid_${i + 1}`, 20000]);
+  const outer = Array.from({ length: 8 }, (_, i) => [`outer_trapezoid_${i + 1}`, 20000]);
+  const card = synthCard({
+    category: 'generic',
+    pieces: [...inner, ...outer, ['BP', 90000], ['17', 90000]],
+    seams: [],
+  });
+  const tail = ' have the same shape — a layer, the lining or a copy? not joined to each other';
+  card.graph.warnings = [
+    ...inner.flatMap(([a]) => outer.map(([b]) => `${a} and ${b}${tail}`)),
+    `17 and BP${tail}`,
+  ];
+  const p = run(card);
+  const said = p.warnings.filter((w) => w.includes('have the same shape'));
+  for (const w of said) console.log(`  · ${w}`);
+  gate(
+    "64 inner × outer pairs are said once by family, the lone pair in lane A's words",
+    said.length === 2 &&
+      said.includes(`inner_trapezoid ×8 and outer_trapezoid ×8${tail}`) &&
+      said.includes(`17 and BP${tail}`),
+    `${said.length} lines`,
+  );
 }
 
 // ── mutation: an EMPTY proposal must fail every fixture's gate set ────────────────────────────

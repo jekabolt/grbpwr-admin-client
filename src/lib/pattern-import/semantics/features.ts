@@ -31,7 +31,7 @@ import type {
   Sheet,
 } from '../types';
 import { PATIMPORT } from '../types';
-import { featuresOf } from './allowance';
+import { drawnSeam, featuresOf } from './allowance';
 import { bboxOf, centroidOf, closestOnPolyline, dist, footOnSegment, pointInPolygon } from './geom';
 import { glyphCellKey, undashed } from './glyphs';
 
@@ -42,11 +42,21 @@ export const GRAIN_MIN_MM = 40;
 export const GRAIN_TEXT_MM = 60;
 /** A1: a grain word turned along the line (±10°) counts this far, mm. */
 export const GRAIN_TEXT_ALONG_MM = 120;
+/**
+ * N3 (Codex): a grain word turned along the line (±10°) this close to it (its box centre to the
+ * segment) is written ON the line. Its direction is the SAME text's testimony, not a second
+ * evidence: it only strengthens that line against competing lines (never 'detected' alone), mm.
+ */
+export const GRAIN_TEXT_ON_LINE_MM = 10;
+/** …by this much strength (below every evidence kind but dashes' tie-breaker weight). */
+const GRAIN_ALONG_BONUS = 0.25;
 /** A1: an arrowhead barb: a chain this short, its tip this close to a line end, at 15–60°. */
 export const GRAIN_HEAD_MAX_MM = 25;
 export const GRAIN_HEAD_END_MM = 6;
 export const GRAIN_HEAD_MIN_DEG = 15;
 export const GRAIN_HEAD_MAX_DEG = 60;
+/** N3: each barb of a one-end pair is at least this long, mm. */
+export const GRAIN_PAIR_BARB_MIN_MM = 2.5;
 /** A1: dashes of one dashed grainline: 2–6 of them, gaps up to this, mm. */
 export const GRAIN_DASH_GAP_MM = 20;
 export const GRAIN_DASH_MAX = 6;
@@ -174,10 +184,12 @@ export function classifyFeatures(
   }
 
   // the chains inside that may carry a feature (another size's line, a seam, ignored: never)
+  // N3: the seam line drawn in the outlines' own pen (one-pen sheets, wm M) is the seam, measured
+  const seamIds = new Set(drawnSeam(cand, set)?.ids ?? []);
   const inner: Chain[] = [];
   for (const id of new Set(cand.inside)) {
     const ch = set.chains[id];
-    if (!ch || notchChains.has(id)) continue;
+    if (!ch || notchChains.has(id) || seamIds.has(id)) continue;
     const k = clsOf.get(id);
     const role = k?.role;
     if (role === 'size' && !wallCls.has(k?.id)) continue; // another size's line
@@ -398,6 +410,7 @@ function arrowheads(
 ): number[] | null {
   const ends = [line.a, line.b];
   const sides: Set<number>[] = [new Set(), new Set()];
+  const barbsAt: { side: number; deg: number; len: number }[][] = [[], []];
   const ids = new Set<number>();
   const own = new Set(line.ids);
   const integral: Chain[] = line.barbs.map(([p, q]) => ({
@@ -433,13 +446,43 @@ function arrowheads(
         const cos = (vx * ix + vy * iy) / (vl * il);
         if (cos < cosLo || cos > cosHi) continue;
         if (lettered(tip) || lettered(far)) continue;
-        sides[e].add(Math.sign(ix * vy - iy * vx));
+        const side = Math.sign(ix * vy - iy * vx);
+        sides[e].add(side);
+        barbsAt[e].push({ side, deg: (Math.acos(Math.min(1, cos)) * 180) / Math.PI, len: vl });
         if (h.id >= 0) ids.add(h.id);
       }
     }
   }
   const both = sides[0].size > 0 && sides[1].size > 0;
-  const pair = sides[0].size === 2 || sides[1].size === 2;
+  // N3 (wm M back): a pair at ONE end is a drawn head only when its two barbs mirror each other —
+  // like angles (± 10°), like lengths (≤ 1.6 ×), each ≥ 2.5 mm — and stand alone (≤ 4 DIFFERENT
+  // strokes at the tip; palto draws one head per size, 5 identical copies). A diagonal running into
+  // a tile label («KOLUMNA 5») meets short horizontal / vertical strokes of all lengths: no head.
+  const distinct = (bs: { side: number; deg: number; len: number }[]) =>
+    bs.filter(
+      (b, i) =>
+        !bs
+          .slice(0, i)
+          .some(
+            (o) =>
+              o.side === b.side && Math.abs(o.deg - b.deg) <= 2 && Math.abs(o.len - b.len) <= 0.5,
+          ),
+    ).length;
+  const pair = barbsAt.some(
+    (bs) =>
+      distinct(bs) <= 4 &&
+      bs.some(
+        (p) =>
+          p.len >= GRAIN_PAIR_BARB_MIN_MM &&
+          bs.some(
+            (q) =>
+              q.side !== p.side &&
+              q.len >= GRAIN_PAIR_BARB_MIN_MM &&
+              Math.abs(q.deg - p.deg) <= 10 &&
+              Math.max(p.len, q.len) <= 1.6 * Math.min(p.len, q.len),
+          ),
+      ),
+  );
   if (!both && !pair) return null;
   if (lettered(line.a) || lettered(line.b)) return null;
   return [...ids];
@@ -544,8 +587,10 @@ function bestGrain(
     const mid = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 };
     return !(lettered(l.a) || lettered(l.b) || lettered(mid));
   });
-  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it)
+  // (b) each grain word labels ONE line: the nearest (≤ 60 mm, ≤ 120 mm turned along it); written
+  // along that line (± 10°) within 10 mm it strengthens that line only — one text, one evidence
   const worded = new Set<GrainLine>();
+  const along = new Set<GrainLine>();
   for (const t of grainTexts) {
     const c = { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 };
     let near: { l: GrainLine; d: number } | null = null;
@@ -553,13 +598,10 @@ function bestGrain(
       const d = footOnSegment(c, l.a, l.b).d;
       if (!near || d < near.d) near = { l, d };
     }
-    if (
-      near &&
-      (near.d <= GRAIN_TEXT_MM ||
-        (near.d <= GRAIN_TEXT_ALONG_MM &&
-          lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10))
-    )
-      worded.add(near.l);
+    if (!near) continue;
+    const turned = lineAngleDiff(t.rotationDeg, angleDeg(near.l.a, near.l.b)) <= 10;
+    if (near.d <= GRAIN_TEXT_MM || (near.d <= GRAIN_TEXT_ALONG_MM && turned)) worded.add(near.l);
+    if (turned && near.d <= GRAIN_TEXT_ON_LINE_MM) along.add(near.l);
   }
   for (const l of live) {
     const heads = arrowheads(l, headChains, lettered);
@@ -576,7 +618,9 @@ function bestGrain(
     const weight = evidence.length + (l.grainClass ? 1 : 0);
     if (!weight) continue;
     // competing lines: the stronger evidence wins, length only breaks a tie
-    const strength = evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0);
+    const strength =
+      evidence.reduce((s, e) => s + GRAIN_STRENGTH[e], 0) +
+      (word && along.has(l) ? GRAIN_ALONG_BONUS : 0);
     if (!best || strength > best.strength || (strength === best.strength && l.len > best.l.len))
       best = { l, evidence, weight, strength, heads: heads ?? [] };
   }

@@ -6,6 +6,7 @@
 // table lives in JSON so the technologist's corrections are a data edit, not a code change.
 
 import type { SkeletonBomFacts, SkeletonCategory, SkeletonOperationType } from '../types';
+import bottom from './templates/bottom.json';
 import coatLined from './templates/coat-lined.json';
 import dress from './templates/dress.json';
 import generic from './templates/generic.json';
@@ -223,6 +224,7 @@ const TEMPLATES: Record<SkeletonCategory, unknown> = {
   sweat,
   hoodie,
   trousers,
+  bottom,
   skirt,
   dress,
   jumpsuit,
@@ -244,6 +246,7 @@ export const SKELETON_CATEGORIES: SkeletonCategory[] = [
   'sweat',
   'hoodie',
   'trousers',
+  'bottom',
   'skirt',
   'dress',
   'jumpsuit',

@@ -130,6 +130,49 @@ export function skeletonStepSignatures(steps: readonly SkeletonStep[]): string[]
   });
 }
 
+/** A decision's readings in their stable order: the chosen one spliced back in at its place. */
+function readingsOf(s: SkeletonStep): { inputs: string[]; reason?: string }[] {
+  const readings: { inputs: string[]; reason?: string }[] = [...(s.alternatives ?? [])];
+  readings.splice(Math.min(s.decision?.chosen ?? 0, readings.length), 0, {
+    inputs: s.inputs,
+    reason: s.reason,
+  });
+  return readings;
+}
+
+/**
+ * Each decision AS IT READS (07 re-review): its key and its ordered readings, every reading by the
+ * pieces its inputs hold — unit codes resolved through the steps that made them, so a rebuild that
+ * recodes units keeps the print, and one that changes what a reading joins does not. Read off a
+ * proposal or off the request an answer belongs to, the two compare.
+ */
+function decisionPrints(
+  steps: readonly { inputs?: string[]; out?: string }[],
+  decisions: readonly { id?: string; readings?: { inputs?: string[] }[] }[],
+): Map<string, string> {
+  const leaves = new Map<string, string[]>();
+  for (const st of steps) {
+    const held = (st.inputs ?? []).flatMap((k) => leaves.get(k) ?? [k]);
+    if (st.out) leaves.set(st.out, held);
+  }
+  const of = (k: string) => [...(leaves.get(k) ?? [k])].sort().join('+');
+  return new Map(
+    decisions.map((d) => [
+      d.id ?? '',
+      (d.readings ?? []).map((r) => (r.inputs ?? []).map(of).sort().join(' | ')).join(' ‖ '),
+    ]),
+  );
+}
+
+/** The prints of a proposal's decisions, keyed as the request keys them. */
+const proposalPrints = (proposal: SkeletonProposal) =>
+  decisionPrints(
+    proposal.steps.map((st) => ({ inputs: st.inputs, out: st.outputUnitKey })),
+    proposal.steps
+      .filter((st) => st.decision)
+      .map((st) => ({ id: skeletonAIDecisionKey(st.decision!.id), readings: readingsOf(st) })),
+  );
+
 export type SkeletonAIRequestResult =
   | { ok: true; request: SuggestAssemblySkeletonRequest; signatures: string[] }
   | { ok: false; why: string };
@@ -211,13 +254,7 @@ export function skeletonAIRequest(args: {
   const decisions: NonNullable<SuggestAssemblySkeletonRequest['decisions']> = [];
   for (const s of steps) {
     if (!s.decision) continue;
-    // The readings in their stable order: the chosen one spliced back in at its place.
-    const readings = [...(s.alternatives ?? [])];
-    readings.splice(Math.min(s.decision.chosen, readings.length), 0, {
-      inputs: s.inputs,
-      seams: s.seams,
-      reason: s.reason,
-    });
+    const readings = readingsOf(s);
     if (readings.length < 2) continue;
     if (decisions.length === SKELETON_AI.maxDecisions)
       return { ok: false, why: `more than ${SKELETON_AI.maxDecisions} open decisions for the AI` };
@@ -272,8 +309,9 @@ export function skeletonAIRequest(args: {
       decisions,
       steps: reqSteps,
       force: false,
-      // The categories the engine has a template for: the AI may read the garment as one of them.
-      categoryOptions: [...SKELETON_CATEGORIES],
+      // The categories the engine has a template for: the AI may read the garment as one of them —
+      // a garment, so not «bottom» (the pieces' «trousers or a skirt»): that is what it settles.
+      categoryOptions: SKELETON_CATEGORIES.filter((c) => c !== 'bottom'),
       // none from the panel: the server shows the model the workshop's own trees (house style)
       examples: [],
     },
@@ -283,27 +321,50 @@ export function skeletonAIRequest(args: {
 /**
  * The AI's picks as pins over the readings the proposal was built with. `changed` = how many picks
  * differ from the reading on screen (0 = the AI agrees; nothing to apply).
+ *
+ * `sent` = the request the answer belongs to. A pick counts only where the decision still reads as
+ * it was SENT (same readings, in order, joining the same pieces): after a structure change one id
+ * may name other readings, and «reading 1» would put the piece somewhere the AI never saw. Such a
+ * pick pins and settles nothing; it is listed in `stale` for the AI door to say so.
  */
 export function skeletonAIPins(
   proposal: SkeletonProposal,
   answer: SuggestAssemblySkeletonResponse,
-): { pins: SkeletonPins; changed: number } {
+  sent?: SuggestAssemblySkeletonRequest,
+): { pins: SkeletonPins; changed: number; picked: string[]; stale: string[] } {
   const pins: Record<string, number> = {};
+  // The decisions the AI answered: taking its readings is the person settling THEM — the other
+  // pins only keep the readings on screen and settle nothing (a tie stays a tie).
+  const picked: string[] = [];
   const byKey = new Map<string, string>();
   for (const s of proposal.steps)
     if (s.decision) {
       pins[s.decision.id] = s.decision.chosen;
       byKey.set(skeletonAIDecisionKey(s.decision.id), s.decision.id);
     }
+  const asSent = sent
+    ? decisionPrints(
+        (sent.steps ?? []).map((st) => ({ inputs: st.inputs, out: st.outputUnit })),
+        sent.decisions ?? [],
+      )
+    : null;
+  const asNow = asSent ? proposalPrints(proposal) : null;
+  const stale: string[] = [];
   let changed = 0;
   for (const p of answer.picks ?? []) {
     const id = byKey.get(p.decisionId ?? '');
     if (id == null) continue;
+    const key = p.decisionId ?? '';
+    if (asSent && asNow && asSent.get(key) !== asNow.get(key)) {
+      stale.push(id);
+      continue;
+    }
     const reading = p.reading ?? 0;
     if (pins[id] !== reading) changed += 1;
     pins[id] = reading;
+    picked.push(id);
   }
-  return { pins, changed };
+  return { pins, changed, picked, stale };
 }
 
 /**

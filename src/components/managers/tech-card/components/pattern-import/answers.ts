@@ -16,6 +16,7 @@
 // footer, the write gate), so an answer that was not settled away still cannot be used.
 import type {
   FabricAssignment,
+  ImportSession,
   NameDecision,
   PieceFamily,
   SeedId,
@@ -99,6 +100,8 @@ export function answerCtxOf(
     variant: string | null;
     /** A8: the mask the sheet was read with (`maskRevOf`): another mask is another drawing. */
     maskRev?: string;
+    /** The legend answers the lines were read with: another legend is another reading. */
+    legendRev?: string;
   },
   families: readonly PieceFamily[] | null | undefined,
 ): AnswerCtx {
@@ -107,6 +110,7 @@ export function answerCtxOf(
     at.gridOverride ?? null,
     at.variant ?? null,
     ...(at.maskRev ? [at.maskRev] : []),
+    ...(at.legendRev ? [`L${at.legendRev}`] : []),
   ]);
   const revs: Partial<Record<SeedId, string>> = {};
   for (const f of families ?? []) revs[f.seed] = `${scope}#${f.seed}@${pieceRev(f)}`;
@@ -306,4 +310,45 @@ export class UnansweredQuestionsError extends Error {
     );
     this.name = 'UnansweredQuestionsError';
   }
+}
+
+/**
+ * A10: "now" from the session and the inputs alone — the same fingerprint the wizard's
+ * `answersNow` computes (the mask the sheet was read with, the legend answers, the sheet, the grid,
+ * the model, every piece), for a pure caller (the autopilot policy) that has no hook. The e2e
+ * autopilot probe checks the two agree on every tick.
+ */
+export function answersNowOf(
+  s: Pick<ImportSession, 'clean' | 'sheet' | 'variant' | 'pieces'>,
+  i: {
+    sheetIndex: number;
+    gridOverride: unknown;
+    cleanEdits: readonly unknown[];
+    legend: readonly { classId: number; sig?: string; role: string; sizeLabel: string | null }[];
+    legendConfirmed: readonly string[];
+  },
+): AnswerCtx {
+  const ids = [
+    ...(s.clean?.pages ?? []).flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id)),
+    ...(s.clean?.dropped ?? []).map((d) => `drop:${d.file}:${d.page}`),
+    ...(s.sheet?.clean?.items ?? []).filter((m) => m.applied).map((m) => m.id),
+  ];
+  const maskRev = ids.length || i.cleanEdits.length ? maskRevOf(ids, i.cleanEdits) : undefined;
+  const legendRev =
+    i.legend.length || i.legendConfirmed.length
+      ? maskRevOf(
+          [...i.legendConfirmed],
+          i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
+        )
+      : undefined;
+  return answerCtxOf(
+    {
+      sheetIndex: i.sheetIndex,
+      gridOverride: i.gridOverride,
+      variant: s.variant,
+      maskRev,
+      legendRev,
+    },
+    s.pieces?.families,
+  );
 }

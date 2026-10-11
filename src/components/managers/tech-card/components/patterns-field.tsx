@@ -70,6 +70,7 @@ import {
 } from 'lib/pattern-import/fabrics/followup';
 import type { ConversionManifest } from 'lib/pattern-import/types';
 import type { FollowUpJob } from './pattern-import/follow-up';
+import { AutopilotPill } from './pattern-import/autopilot/view';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
 
@@ -833,6 +834,8 @@ export function PatternsField({
   // Пока его работа открыта, этот эффект её скоупы пропускает — порядок «сохранение → площади →
   // индекс» держит она.
   const publishedRef = useRef<Map<string, Promise<PublishSizeIndexResult>>>(new Map());
+  // A10 (Codex r5 #3): rows an import wrote whose save was not confirmed — a retry saves them
+  const importUnsaved = useRef(false);
   const recordIndex = (sig: string, res: PublishSizeIndexResult) =>
     setIndexFailures((f) => {
       if (res.ok) {
@@ -1022,6 +1025,11 @@ export function PatternsField({
                   <Pill tone='mut' title={convertedTitle(converted)}>
                     converted
                   </Pill>
+                )}
+                {/* A10: the importer's autopilot answered in the operator's place — what it assumed,
+                    read-only, strong ones first. */}
+                {converted?.autopilot && (
+                  <AutopilotPill assumptions={converted.autopilot.assumptions} />
                 )}
                 {/* F14: манифест написан для ДРУГОЙ карточки — его размеры здесь не доверены
                     (use-block-sizes manifestSizeTrusted), сам лист читается. */}
@@ -1685,6 +1693,12 @@ export function PatternsField({
                 }),
               storageSizeId,
               save: (reason) => autosave.flush(reason),
+              unsaved: {
+                get: () => importUnsaved.current,
+                set: (v) => {
+                  importUnsaved.current = v;
+                },
+              },
             }),
           )}
           followUp={followUp?.rows ?? null}

@@ -40,6 +40,13 @@ import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
+import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { autopilotApply, resolverFor } from './autopilot/run';
+import { readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+
+/** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
+const nextFrames = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 const STAGE_WORD: Record<string, string> = {
   extract: 'reading files',
@@ -168,6 +175,46 @@ function WizardBody({
   const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
   latest.current = api.session;
   const { session, blocker } = api;
+
+  // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
+  // explicit gated apply. A stop says why in the footer, with "resume autopilot".
+  const [autopilot, setAutopilot] = useState(readAutopilotPref);
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const resolve = useMemo(() => resolverFor(card, () => apiRef.current), [card]);
+  const started = useRef<number | null>(null);
+  const applying = useRef<number | null>(null);
+  const [apStop, setApStop] = useState<string | null>(null);
+  useEffect(() => {
+    // a new run (files read) starts the autopilot once
+    if (!autopilot || session.busy || session.error || session.sessionId == null) return;
+    if (!session.scale.candidates.length || started.current === session.sessionId) return;
+    started.current = session.sessionId;
+    setApStop(null);
+    api.advance({ resolve });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot, session.busy, session.error, session.sessionId, session.scale.candidates.length]);
+  useEffect(() => {
+    // the drive stops on check: a green gate goes to the card by the explicit gated path
+    const d = api.driveStop;
+    if (!autopilot || !d || d.why !== 'auto-stop' || session.step !== 'check' || session.busy)
+      return;
+    if (applying.current === session.sessionId) return;
+    applying.current = session.sessionId;
+    void autopilotApply(() => apiRef.current, card, nextFrames).then((o) => {
+      if (!o.ok) setApStop(o.reason);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
+  const autopilotStop =
+    autopilot && started.current === session.sessionId
+      ? apStop ?? (api.driveStop && api.driveStop.why !== 'auto-stop' ? api.driveStop.reason : null)
+      : null;
+  const resumeAutopilot = () => {
+    setApStop(null);
+    applying.current = null;
+    api.advance({ resolve });
+  };
   const [askClose, setAskClose] = useState(false);
   // "fix in pieces" from check / details: the piece and size to show, and why (M1, M5). It lives
   // while the pieces step is open and is dropped when the operator leaves it.
@@ -193,6 +240,10 @@ function WizardBody({
   // the last step of a download-only run is the download
   // A0.2: a one-page sheet is passed over — the step reads "1 page", greyed, and stays a door back
   const passedOver = (s: (typeof STEPS)[number]) => s.id === 'sheet' && api.sheetSkipped;
+  // N1: how the wizard went through a step without the operator — "auto ✓" (shown, nothing asked)
+  // or "skipped" (the fast path jumped it unseen); either stays a door. The one-page sheet keeps
+  // its own word ("1 page").
+  const markOf = (s: (typeof STEPS)[number]) => (passedOver(s) ? undefined : api.passed[s.id]);
   const labelOf = (s: (typeof STEPS)[number]) =>
     card.downloadOnly && s.id === 'apply'
       ? 'download'
@@ -351,18 +402,30 @@ function WizardBody({
                   current: i === at,
                   label:
                     i < at && !session.busy && !applied ? (
-                      <button
-                        type='button'
-                        className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) ? ' text-labelColor' : ''}`}
-                        onClick={() => void api.dispatch({ type: 'back', to: s.id })}
-                        title={
-                          passedOver(s)
-                            ? 'one page is the whole sheet — passed over; open it to check'
-                            : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
-                        }
-                      >
+                      <>
+                        <button
+                          type='button'
+                          className={`uppercase underline decoration-borderColor underline-offset-2 hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor${passedOver(s) || markOf(s) ? ' text-labelColor' : ''}`}
+                          onClick={() => void api.dispatch({ type: 'back', to: s.id })}
+                          title={
+                            passedOver(s)
+                              ? 'one page is the whole sheet — passed over; open it to check'
+                              : markOf(s) === 'auto'
+                                ? `${labelOf(s)} asked nothing — passed by itself; open it to check`
+                                : markOf(s) === 'skipped'
+                                  ? `${labelOf(s)} was skipped — the file answers it; open it to check`
+                                  : `back to ${labelOf(s)} — its answers are kept, later steps re-run`
+                          }
+                        >
+                          {labelOf(s)}
+                        </button>
+                        <PassMark mark={markOf(s)} />
+                      </>
+                    ) : i < at && markOf(s) ? (
+                      <span className='text-labelColor'>
                         {labelOf(s)}
-                      </button>
+                        <PassMark mark={markOf(s)} />
+                      </span>
                     ) : passedOver(s) && i !== at ? (
                       <span className='text-labelColor'>{labelOf(s)}</span>
                     ) : (
@@ -397,6 +460,17 @@ function WizardBody({
                     </Text>
                   </CalloutBox>
                 )}
+                {autopilotStop && !session.busy && (
+                  // A10: where the autopilot stopped and why — the operator answers, then resumes
+                  <span className='flex flex-wrap items-center gap-2' data-autopilot-stop=''>
+                    <Text size='micro' component='span' className='text-warning'>
+                      autopilot stopped · {autopilotStop}
+                    </Text>
+                    <Button variant='secondary' size='sm' onClick={resumeAutopilot}>
+                      resume autopilot
+                    </Button>
+                  </span>
+                )}
                 {session.error ? (
                   <StageMessage
                     code={api.errorCode}
@@ -407,7 +481,23 @@ function WizardBody({
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}
                   </Text>
+                ) : api.offer ? (
+                  // N1: why the run stopped on a step that does not block — an offer to look at
+                  <Text size='micro' variant='label' component='p'>
+                    {api.offer}
+                  </Text>
                 ) : null}
+                {session.step === 'files' && (
+                  // A10: the autopilot switch — on by default, remembered per viewer
+                  <ToggleSwitch
+                    checked={autopilot}
+                    label='autopilot'
+                    onCheckedChange={(on) => {
+                      setAutopilot(on);
+                      writeAutopilotPref(on);
+                    }}
+                  />
+                )}
                 {/* A8: what the clean stage set aside, seen before the run goes on */}
                 {session.step === 'files' && session.clean && !api.extracted.presegmented && (
                   <Text size='micro' variant='label' component='p'>
@@ -449,6 +539,19 @@ function WizardBody({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** N1: the mark of a step the wizard passed by itself ("auto ✓") or jumped unseen ("skipped"). */
+function PassMark({ mark }: { mark: 'auto' | 'skipped' | undefined }) {
+  if (!mark) return null;
+  return (
+    <span
+      aria-label={mark === 'auto' ? 'passed automatically' : 'skipped'}
+      className='ml-1 text-labelColor'
+    >
+      {mark === 'auto' ? 'auto ✓' : 'skipped'}
+    </span>
   );
 }
 

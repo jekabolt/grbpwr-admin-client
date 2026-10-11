@@ -19,6 +19,7 @@
 
 import { isMirrorSymmetric } from '../ai/geom';
 import { parseQuantity, saysFold } from '../ai/evidence';
+import { readPieceText } from '../dictionary';
 import { identitiesOf, sizeTokenTest } from '../manifest/identity';
 import type {
   Affine,
@@ -73,6 +74,8 @@ import {
   foldEdges,
   foldLineOnCut,
   bindFoldListEntry,
+  bindListEntry,
+  quantityListEntries,
   foldListEntries,
   normFoldLine,
   foldShapeProblem,
@@ -610,6 +613,26 @@ export function buildPieceSpecsDetailed(
         'grammar',
         'no name: neither the operator, the AI, the DXF block nor the printed text gives a code',
       );
+      // N3 (SVG smoke): its grainline is proposed NOW, beside the named pieces' — one "review N
+      // proposed grainlines" covers every piece, not a second round after a code is typed. Only
+      // when the drawing proves none (a detected grain needs no click once the piece is named).
+      if (!operatorGrain[seed]) {
+        const c0 = mapped[0].c;
+        const famBox = bboxOf(
+          mapped.flatMap(({ c }) => [
+            { x: c.bbox.minX, y: c.bbox.minY },
+            { x: c.bbox.maxX, y: c.bbox.maxY },
+          ]),
+        );
+        const g = classifyFeatures(c0, set, sheet, {
+          sizeCount: run.sizes.length,
+          region: famBox,
+        }).find((f): f is GrainFeature => f.kind === 'grain');
+        if (!g || g.origin === 'proposed') {
+          const pr = g ? drawnProposal(g) : proposeGrain(c0.outer);
+          if (pr) grainProposals.push({ seed, ...pr });
+        }
+      }
       continue;
     }
     // ungraded: declared UNI, one contour in a multi-size run, or the same contour in every size
@@ -667,7 +690,19 @@ export function buildPieceSpecsDetailed(
   const listEntries = foldListEntries(input.docTexts ?? [], consumedFold);
   const listBound: { entry: string; seed: SeedId }[] = [];
   const listUnbound: string[] = [];
-  if (listEntries.length) {
+  // N3: the cutting list's printed counts ("69. Ærme, 4 gange"), bound to their pieces the same way
+  const qtyEntries = quantityListEntries(input.docTexts ?? []);
+  type ListQty = {
+    qty: number;
+    entry: string;
+    by: 'no' | 'name';
+    /** Codex N3: why the count is only the answer shown (asked), null = it answers by itself. */
+    ask: string | null;
+  };
+  const listQty = new Map<SeedId, ListQty>();
+  /** Lists that print different counts for one piece: quoted, no count taken. */
+  const listSplit = new Map<SeedId, string[]>();
+  if (listEntries.length || qtyEntries.length) {
     // every piece on the sheet, including one blocked before naming (no code yet): its label is
     // still on the sheet, and a list entry it names must not fall back to the file level
     const pieceLabels = families.map((f) => {
@@ -685,6 +720,80 @@ export function buildPieceSpecsDetailed(
       const seed = bindFoldListEntry(e, pieceLabels);
       if (seed != null) listBound.push({ entry: e.text, seed });
       else listUnbound.push(e.text);
+    }
+    // Codex N3: a count answers by itself only from a cutting-list line (its section), bound by
+    // the piece's printed number, whose words name THIS piece (its code or title), whose number is
+    // no size token, with no other list printing another count. Anything else is the answer shown.
+    const prepOf = new Map(preps.map((p) => [p.seed, p]));
+    const titlesOf = new Map(pieceLabels.map((p) => [p.seed, p.labels]));
+    // Codex N3: EVERY word beside the cut vocabulary is the piece's own name — its code read from
+    // the word, or a word of its title; a verb («sy», «pres», «nähen») or a fabric asks
+    const namesPiece = (seed: SeedId, words: readonly string[]) => {
+      const pr = prepOf.get(seed);
+      const ws = (titlesOf.get(seed) ?? []).flatMap((l) => l.toLowerCase().split(/[^\p{L}]+/u));
+      return (
+        words.length > 0 &&
+        words.every((w) => {
+          const code = readPieceText(w).code;
+          if (code && pr && pr.name.code === code) return true;
+          return ws.some(
+            (x) => x.length >= 3 && w.length >= 3 && (x.startsWith(w) || w.startsWith(x)),
+          );
+        })
+      );
+    };
+    // two entries landing on one piece (a number and another line's name) prove nothing: dropped
+    const twice = new Set<SeedId>();
+    for (const e of qtyEntries) {
+      const b = bindListEntry(e, pieceLabels);
+      if (!b) continue;
+      if (e.conflict) {
+        listSplit.set(b.seed, [e.text, ...e.conflict]);
+        continue;
+      }
+      const ask =
+        b.by === 'name'
+          ? 'bound by title only'
+          : !e.section
+            ? 'is not in a cutting list (no cutting header, no list of counts around it)'
+            : isSizeToken(e.no)
+              ? `its number ${e.no} is a size`
+              : !namesPiece(b.seed, e.rest)
+                ? `«${e.rest.join(' ')}» is not this piece's name (nor cut vocabulary)`
+                : null;
+      const was = listQty.get(b.seed);
+      if (was && was.qty !== e.qty) twice.add(b.seed);
+      else if (!was || (was.by === 'name' && b.by === 'no'))
+        listQty.set(b.seed, { qty: e.qty, entry: e.text, by: b.by, ask });
+    }
+    for (const sd of twice) listQty.delete(sd);
+  }
+  // N3 (r4454 «7 - Карман - 2 дет.»): pieces whose number is drawn as curves (no text label) are
+  // named by the operator or the AI. An entry no label took is bound by its name read as a code
+  // (Карман → PCK) to the ONLY piece of that code — a weak link: the count is the answer shown,
+  // still asked. Two entries reading the same code with different counts bind nothing.
+  if (qtyEntries.length) {
+    const byNo = new Set([...listQty.values()].filter((q) => q.by === 'no').map((q) => q.entry));
+    const keyed = new Map<string, { e: (typeof qtyEntries)[number]; side: string | null }[]>();
+    for (const e of qtyEntries) {
+      if (byNo.has(e.text) || e.conflict) continue;
+      const r = readPieceText(e.words.join(' '));
+      if (!r.code) continue;
+      const k = `${r.code}|${r.side ?? ''}`;
+      keyed.set(k, [...(keyed.get(k) ?? []), { e, side: r.side }]);
+    }
+    for (const [k, es] of keyed) {
+      if (new Set(es.map((x) => x.e.qty)).size !== 1) continue;
+      const [code, side] = k.split('|');
+      let fit = preps.filter((p) => p.name.code === code && !listQty.has(p.seed));
+      if (fit.length > 1 && side) fit = fit.filter((p) => p.name.mods.includes(side));
+      if (fit.length !== 1) continue;
+      listQty.set(fit[0].seed, {
+        qty: es[0].e.qty,
+        entry: es[0].e.text,
+        by: 'name',
+        ask: 'bound by its name (read as a code) only',
+      });
     }
   }
 
@@ -1172,8 +1281,15 @@ export function buildPieceSpecsDetailed(
     // (a CAD file draws every cut piece, so an unlabelled block is cut once), else an AI name
     // auto-accepted on printed "cut n" evidence. Nothing → the shape suggests, the operator says.
     const isDxf = !!largest.dxf;
-    const aiQ = qtyText == null && !saysPair ? input.aiQuantity?.[seed] : undefined;
-    const qty = qtyText ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
+    // N3 (robe 69 "4 gange"): the cutting list's count of THIS piece. Bound by its printed number
+    // it is a printed count like "cut n" on the piece; bound by name only, or disagreeing with the
+    // piece's own text, it is the answer shown — still asked (D3)
+    const lq = !isDxf ? listQty.get(seed) : undefined;
+    const listConflict = lq != null && qtyText != null && qtyText !== lq.qty;
+    const listAsk = lq != null && (lq.ask != null || listConflict);
+    const aiQ = qtyText == null && !saysPair && !lq ? input.aiQuantity?.[seed] : undefined;
+    const qty =
+      qtyText ?? lq?.qty ?? (isDxf ? largest.dxf?.quantity ?? 1 : null) ?? aiQ?.qty ?? null;
     const pp =
       drawnCopies >= 2
         ? {
@@ -1189,6 +1305,14 @@ export function buildPieceSpecsDetailed(
             onFold: anyFold,
             namedHand: !!name.hand,
           });
+    if (lq && !listAsk && qtyText == null) pp.why = `cutting list «${lq.entry}»: ${pp.why}`;
+    if (listConflict)
+      pp.why = `the piece says ×${qtyText}, the cutting list «${lq!.entry}» ×${lq!.qty}: which?`;
+    else if (lq && listAsk) pp.why = `${pp.why} — «${lq.entry}»: ${lq.ask}`;
+    const split = !isDxf ? listSplit.get(seed) : undefined;
+    if (split)
+      pp.why = `${pp.why} — the cutting lists disagree: ${split.map((x) => `«${x}»`).join(' / ')}`;
+    if (listAsk) pp.proven = false;
     pieceNotes.push(`quantity: ${pp.why}`);
     // pairHand override: undefined = no answer, null = "not a pair", L/R = the DRAWN hand of a pair
     let hand: PairHand | null = name.hand;
@@ -1217,7 +1341,8 @@ export function buildPieceSpecsDetailed(
     // whole piece per garment unless the sheet prints otherwise
     const qtyProven =
       pp.proven ||
-      mode === 'drawn' ||
+      // a drawn L/R twin proves the pair, not a count the list gave by title only or split
+      (mode === 'drawn' && !listAsk && !split) ||
       ov.pairHand !== undefined ||
       ov.piecesPerGarment != null ||
       (ov.unfoldedFold === true && anyFold);
@@ -1355,6 +1480,24 @@ export function buildPieceSpecsDetailed(
 
   // ── unique identities (the card's alias index is case-insensitive) ─────────────────────
   const seen = new Map<string, SeedId>();
+  // Codex N3: the two sides of a drawn pair must agree on the count (a left ×2 / right ×1 export
+  // would cut a garment wrong silently) — else both are asked
+  for (const [a, b] of twinOf) {
+    if (a > b) continue;
+    const pa = pieces.find((p) => p.seed === a);
+    const pb = pieces.find((p) => p.seed === b);
+    if (!pa || !pb || pa.piecesPerGarment === pb.piecesPerGarment) continue;
+    if (pieceOverrides[a]?.piecesPerGarment != null && pieceOverrides[b]?.piecesPerGarment != null)
+      continue;
+    for (const p of [pa, pb])
+      if (!unproven.some((u) => u.seed === p.seed && u.kind === 'quantity'))
+        unproven.push({
+          seed: p.seed,
+          kind: 'quantity',
+          shown: `×${p.piecesPerGarment}`,
+          detail: `the drawn pair disagrees: ${pa.identity} ×${pa.piecesPerGarment}, ${pb.identity} ×${pb.piecesPerGarment}`,
+        });
+  }
   const unique: PieceSpec[] = [];
   const dupSeeds = new Set<SeedId>();
   for (const s of pieces) {
@@ -1464,7 +1607,9 @@ export function buildPieceSpecsDetailed(
       ...(grainProposals.length
         ? {
             grainProposals: grainProposals.filter((g) =>
-              blocked.some((b) => b.seed === g.seed && b.reason === 'no-grain'),
+              blocked.some(
+                (b) => b.seed === g.seed && (b.reason === 'no-grain' || b.reason === 'grammar'),
+              ),
             ),
           }
         : {}),

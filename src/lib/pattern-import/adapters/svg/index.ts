@@ -801,6 +801,10 @@ type Producer = {
   pxPerInch: number;
 };
 
+/** Pattern-drafting / production CAD tools that export SVG (named in the file's title/desc). */
+const PATTERN_CAD =
+  /\b(seamly2d|valentina|clo3d|clo|gerber|accumark|lectra|modaris|optitex|gemini|audaces|tukatech)\b/i;
+
 function detectProducer(svg: XNode, comments: string[]): Producer {
   const gen = comments.map((c) => /Generator:\s*([^\n]*?)\s*$/m.exec(c)?.[1]).find(Boolean);
   if (gen && /Illustrator/i.test(gen))
@@ -811,6 +815,12 @@ function detectProducer(svg: XNode, comments: string[]): Producer {
     const old = m ? +m[1] === 0 && +m[2] < 92 : false;
     return { name: 'inkscape', label: `Inkscape ${iv.split(' ')[0]}`, pxPerInch: old ? 90 : 96 };
   }
+  // A10: a pattern-CAD export names itself in the root <title>/<desc> ("Exported by Seamly2D")
+  const said = svg.children
+    .filter((c): c is XNode => typeof c !== 'string' && (c.local === 'title' || c.local === 'desc'))
+    .map((c) => textOf(c).trim())
+    .find((t) => PATTERN_CAD.test(t));
+  if (said) return { name: 'pattern-cad', label: said.slice(0, 80), pxPerInch: 96 };
   if (gen) return { name: 'unknown', label: gen, pxPerInch: 96 };
   return { name: 'unknown', pxPerInch: 96 };
 }

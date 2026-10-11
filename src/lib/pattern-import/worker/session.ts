@@ -30,7 +30,9 @@ import type {
   ScaleCandidate,
   ScaleDecision,
   Seed,
+  SeedId,
   SemanticsOutput,
+  SetAside,
   Sheet,
   SizeMap,
   ExpectedSizes,
@@ -77,8 +79,17 @@ import {
 } from '../clean';
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
-import { applyLegend, buildChainsDetailed, mergeSameSize } from '../chains';
+import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
+import { gradeView } from '../chains/face-role';
+import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
+import {
+  blobShapes,
+  countEvidence,
+  labelSingleRun,
+  shapeCandidates,
+  sheetFeed,
+} from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
 import {
@@ -93,6 +104,8 @@ import {
   type WallPieceEdit,
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
+import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { exceptNested } from '../pieces/fill';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -236,6 +249,28 @@ const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   return rest;
 };
 
+/** A2: the sheet's closed faces for one chain set and size-run shape (face seeds, click placement). */
+type FacesEntry = {
+  set: ChainSet;
+  /** `facesKey`: the run's shape and the raster cell. */
+  key: string;
+  map: FaceMap;
+  seeds: Seed[];
+  /** Text seeds held back in junk (a "10" in the test square), and every outline set aside. */
+  held: Set<SeedId>;
+  asides: SetAside[];
+};
+
+/** What the face walls depend on: encoding, ranks, classes, files — and labels once two or more. */
+const facesKey = (run: SizeRun, cellMm: number | undefined) =>
+  [
+    run.encoding,
+    cellMm ?? '',
+    ...run.sizes.map(
+      (z) => `${z.rank}/${z.classId}/${z.file}${run.sizes.length > 1 ? `/${z.label}` : ''}`,
+    ),
+  ].join('|');
+
 export class Session {
   readonly id: number;
   files: SourceFileInfo[];
@@ -259,6 +294,8 @@ export class Session {
   private offeredSrc = new Set<string>();
   /** A8b: sources of the tile chrome page items offer but do not apply (G19 measures against them). */
   private chromeSrc = new Map<string, BackgroundKind>();
+  /** A0.3: sheet path ids the sheet pass (8b) offers and the operator did not take. */
+  private sheetOffered = new Set<number>();
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -275,6 +312,8 @@ export class Session {
   private sheet: Sheet | null = null;
   /** Every page's text and the file names, kept past the docs: the legend reads size runs there. */
   private docTexts: string[] = [];
+  /** `docTexts` with the file each was printed in (A6: only the selected sheet's files count). */
+  private docTextSrc: { file: FileId; page: PageIndex; text: string }[] = [];
   private fileNames = new Map<string, string>();
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
@@ -296,6 +335,13 @@ export class Session {
   private gradeAmbiguities: ChainAmbiguity[] = [];
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
+  /** A2: the sheet's closed faces for this chain set and size run (face seeds, click placement). */
+  private faces: FacesEntry | null = null;
+  /**
+   * A6: the faces the sizes stage read the nest evidence off — kept across sizes re-runs (a size
+   * map click) for this chain set; the pieces stage adopts them when its run has the same shape.
+   */
+  private sizeFaces: FacesEntry | null = null;
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
   private semantics: SemanticsOutput | null = null;
@@ -372,6 +418,8 @@ export class Session {
     if (at < ORDER.indexOf('chains')) {
       this.chains = null;
       this.textSeeds = null;
+      this.sizeFaces = null;
+      this.countEv = null;
     }
     if (at < ORDER.indexOf('sizes')) {
       this.run = null;
@@ -380,6 +428,7 @@ export class Session {
     }
     if (at < ORDER.indexOf('pieces')) {
       this.seeds = null;
+      this.faces = null;
       this.families = null;
       this.wallSet = null;
       this.pieceSession = null;
@@ -834,9 +883,14 @@ export class Session {
       ctx.checkCancel();
       // Instruction pages carry the size run and the legend; keep their text past the docs (the
       // tile labels and copyright lines the clean stage masked are not read).
-      this.docTexts = docs.flatMap((d) =>
-        d.pages.flatMap((p) => p.texts.filter((t) => !t.background).map((t) => t.text)),
+      this.docTextSrc = docs.flatMap((d) =>
+        d.pages.flatMap((p) =>
+          p.texts
+            .filter((t) => !t.background)
+            .map((t) => ({ file: d.file.id, page: p.page, text: t.text })),
+        ),
       );
+      this.docTexts = this.docTextSrc.map((t) => t.text);
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
@@ -850,7 +904,8 @@ export class Session {
       // A8 8b: the sheet-wide pass (a watermark the tile borders cut); masked texts leave the sheet
       ctx.checkCancel();
       // the paths a page item offers (a stroke-text suggestion) are not offered again
-      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc);
+      this.sheetOffered = new Set();
+      const items = cleanSheet(sheet, this.cleanEdits, this.offeredSrc, this.sheetOffered);
       sheet = { ...sheet, texts: sheet.texts.filter((t) => !t.background) };
       const byKind = new Map<BackgroundKind, typeof sheet.paths>();
       for (const p of sheet.paths) {
@@ -892,10 +947,17 @@ export class Session {
       set = this.fast.chains;
     } else {
       ctx.checkCancel();
+      // A0.3: what the clean stage offers as background (and the operator did not take) is
+      // evidence for the legend's stray row
+      const offeredPaths = new Set(
+        sheet.paths
+          .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
+          .map((p) => p.id),
+      );
       set = buildChainsDetailed(
         sheet,
         { ...input.opts },
-        { extraTexts: this.docTexts, fileNames: this.fileNames },
+        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths },
         (d, t, n) => {
           ctx.checkCancel();
           ctx.progress(d, t, n);
@@ -903,7 +965,10 @@ export class Session {
       ).set;
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
+      set = withClassSigs(set, sheet.styles);
       if (input.legend?.length) set = mergeSameSize(applyLegend(set, input.legend));
+      // rows confirmed as proposed are answered (confidence 1): the size checks read the answer
+      if (input.confirmed?.length) set = confirmRows(set, input.confirmed);
     }
     this.chains = set;
     return {
@@ -921,14 +986,27 @@ export class Session {
       throw new ImportError('out-of-order', 'trace the lines first', 'sizes');
     const read = this.fast ? this.fast.run : detectSizeRun(this.sheet, this.chains, this.files);
     // H1: the sizes the sheet draws decide the run the pieces are ranked in
-    this.expected = expectedSizes(read, input.drawnSizes, this.chains);
-    const run = runForExpected(read, this.expected);
+    let expected = expectedSizes(read, input.drawnSizes, this.chains);
+    const countAsk = this.countAsk(read);
+    // A6: two or more independent evidences agree on the count → 'inferred' (taken like the
+    // operator's answer; `drawnSizes: 0` = the operator took it back, and he is asked)
+    const auto = countAsk?.auto;
+    if (!expected && auto?.n != null && input.drawnSizes !== 0) {
+      expected = { n: auto.n, from: 'inferred' };
+      auto.applied = true;
+    }
+    this.expected = expected;
+    // one size drawn and the sheet names it ("SIZE 38"): the run carries the label for the map
+    const label = this.countEv?.set === this.chains ? this.countEv.v.label : null;
+    const named =
+      expected?.n === 1 && expected.from !== 'source' ? labelSingleRun(read, label) : read;
+    const run = runForExpected(named, expected);
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     this.run = run;
     this.sizeMap = map;
-    return { run, map, expected: this.expected, countAsk: this.countAsk(read) };
+    return { run, map, expected, countAsk };
   }
 
   /**
@@ -937,6 +1015,8 @@ export class Session {
    * close only as one size). The lines' own suggestion is computed once per chain set.
    */
   private inferred: { set: ChainSet; v: SizeCountAsk['inferred'] } | null = null;
+  private countEv: { key: string; set: ChainSet; v: ReturnType<typeof countEvidence> } | null =
+    null;
   private countAsk(read: SizeRun): SizeCountAsk | null {
     if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
     if (
@@ -946,8 +1026,63 @@ export class Session {
       return null;
     const set = this.chains;
     if (!set || !this.sheet) return { inferred: null };
-    if (this.inferred?.set !== set) this.inferred = { set, v: inferDrawnSizes(this.sheet, set) };
-    return { inferred: this.inferred.v };
+    if (this.inferred?.set !== set)
+      this.inferred = { set, v: inferDrawnSizes(this.sheet, gradeView(set)) };
+    // A6 (not on the DXF fast path: its blocks are its pieces, the faces are not read)
+    if (this.fast) return { inferred: this.inferred.v };
+    // A6: only what feeds THIS sheet — its texts, its files' instruction texts, its faces, its files
+    const sheet = this.sheet;
+    const key = `${sheet.id}`;
+    if (this.countEv?.set !== set || this.countEv.key !== key) {
+      const faces = this.facesOf(set, read, PATIMPORT.fillCellMm);
+      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
+      const cands = new Set(shapeCandidates(faces.map.blobs).map((b) => b.id));
+      this.countEv = {
+        key,
+        set,
+        v: countEvidence({
+          texts: feed.texts,
+          blobs: faces.map.blobs,
+          shapes: blobShapes(faces.map, cands),
+          files: feed.files,
+          // the models it names are read as the pieces stage reads them (its model choice)
+          models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+        }),
+      };
+    }
+    const ev = this.countEv.v;
+    return {
+      inferred: this.inferred.v,
+      auto: ev.evidence.length
+        ? {
+            n: ev.n,
+            evidence: ev.evidence,
+            applied: false,
+            ...(ev.blocked ? { blocked: ev.blocked } : {}),
+          }
+        : undefined,
+    };
+  }
+
+  /**
+   * A2 faces of a chain set for a size run (seeds, set-asides, click placement) — computed once:
+   * the sizes stage reads its nest evidence off them (A6), the pieces stage seeds from them. Labels
+   * of a one-size run do not change the walls, so they are not part of the key.
+   */
+  private facesOf(base: ChainSet, run: SizeRun, cellMm: number | undefined): FacesEntry {
+    const key = facesKey(run, cellMm);
+    if (this.faces?.set === base && this.faces.key === key) return this.faces;
+    if (this.sizeFaces?.set === base && this.sizeFaces.key === key)
+      return (this.faces = this.sizeFaces);
+    const sheet = this.sheet!;
+    const text = (this.textSeeds ??= proposeSeeds(sheet, base));
+    const map = faceMap(sheet, base, run, text, { cellMm });
+    const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
+    const { held, asides } = asidesOf(map, text);
+    const entry = { set: base, key, map, seeds: faceSeedsOf(map, first), held, asides };
+    this.faces = entry;
+    this.sizeFaces = entry;
+    return entry;
   }
 
   // ── pieces (F4; the DXF fast path answers from its segmentation) ─────────────────────────
@@ -992,7 +1127,31 @@ export class Session {
     const expected =
       input.opts.expectedSizes ?? this.expected ?? expectedSizes(run, null, base) ?? undefined;
     const opts: FillOpts = expected ? { ...input.opts, expectedSizes: expected } : input.opts;
-    const seeds = input.seeds ?? (this.textSeeds ??= proposeSeeds(sheet, base));
+    // A2: text seeds, then one face seed per closed outline no text seed is in (junk filtered)
+    const text = (this.textSeeds ??= proposeSeeds(sheet, base));
+    const faces = this.facesOf(base, run, input.opts.cellMm);
+    const fm = faces.map;
+    const held = faces.held;
+    // A click is the operator's own point and stays where it is; it supersedes the face seed of
+    // the outline it falls in (one seed per region) — unless the operator drew walls of his own in
+    // that region (a "use line" makes a region inside it the face map does not know: both seeds
+    // stay), or made a set-aside outline there a piece ("this is a piece": another piece).
+    const given = input.seeds ?? [...text.filter((x) => !held.has(x.id)), ...faces.seeds];
+    const walled = new Set<number>();
+    for (const e of input.edits) {
+      if (!isWallEdit(e)) continue;
+      const pts = e.kind === 'bridge' ? [e.from, e.to] : base.chains[e.chain]?.pts ?? [];
+      for (const p of pts) walled.add(blobOf(fm, p));
+    }
+    const clicked = new Set(
+      given
+        .flatMap((x) => (x.origin === 'click' && x.aside == null ? [blobOf(fm, x.at)] : []))
+        .filter((b) => b >= 0 && !walled.has(b)),
+    );
+    const superseded = new Set(
+      given.filter((x) => x.origin === 'face' && clicked.has(blobOf(fm, x.at))).map((x) => x.id),
+    );
+    const seeds = given.filter((x) => !superseded.has(x.id));
     // "Not a piece" on a seed that is junk — its region never closed on its own (it leaked, or
     // shared another seed's region), or it sits inside another piece's outline — takes it out of
     // the FILL, not only out of the result: such a seed makes its neighbour "merged", drops
@@ -1075,8 +1234,20 @@ export class Session {
         opts,
         walls: ps.walls,
       });
+    // A2: a face seed whose region the fill finds open in every size stays — an open outline is a
+    // question (close the gap, or not a piece), not a deletion. A piece drawn inside another is its
+    // own piece: its lines are not the host's internal lines.
+    families = exceptNested(families);
+    const shown = seeds;
+    // what was set aside and is not a piece now
+    const taken = new Set<number>();
+    for (const x of given) {
+      if (x.aside != null) taken.add(x.aside);
+      if (held.has(x.id)) taken.add(-1 - x.id);
+    }
+    const setAside = faces.asides.filter((a) => !taken.has(a.id));
     this.wallSet = set;
-    this.seeds = seeds;
+    this.seeds = shown;
     this.families = families;
     const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
@@ -1084,10 +1255,11 @@ export class Session {
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
     else if (ps.diag?.grade) this.gradeAmbiguities = ps.diag.grade.ambiguities;
     return {
-      seeds,
+      seeds: shown,
       families,
       variants,
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
+      setAside,
     };
   }
 
@@ -1294,6 +1466,7 @@ export class Session {
           source,
           generator: input.generator,
           dialect: input.dialect,
+          ...(input.autopilot ? { autopilot: input.autopilot } : {}),
         },
         {
           rules: cardRules,

@@ -12,6 +12,7 @@ import type {
   StageIO,
 } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
+import { Chip } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -117,8 +118,63 @@ export function withKind(edits: PageMaskEdit[], kind: BackgroundKind, keep: bool
   ];
 }
 
+/**
+ * N1: the edits with these mask items decided one by one (`{ item, keep }`, later wins in the clean
+ * stage) — the sheet pass answers its own items, never a kind across every page.
+ */
+export function withItems(edits: PageMaskEdit[], ids: readonly string[], keep: boolean) {
+  const set = new Set(ids);
+  return [
+    ...edits.filter((e) => !('item' in e && set.has(e.item))),
+    ...ids.map((item) => ({ item, keep })),
+  ];
+}
+
+/** N1: the edits with every waiting suggestion accepted at once (each kind's undo stays). */
+export function withAllAccepted(edits: PageMaskEdit[], rows: KindRow[]) {
+  return rows.filter((r) => r.suggested > 0).reduce((e, r) => withKind(e, r.kind, false), edits);
+}
+
 /** The kind table: a row per kind, its state as a worded pill and the one action it allows. */
 export function KindTable({
+  rows,
+  busy,
+  onEdit,
+  onAcceptAll,
+  onHover,
+}: {
+  rows: KindRow[];
+  busy: boolean;
+  onEdit: (kind: BackgroundKind, keep: boolean) => void;
+  /** N1: accept every waiting suggestion in one click (offered from two kinds up). */
+  onAcceptAll?: () => void;
+  onHover?: (kind: BackgroundKind | null) => void;
+}) {
+  if (!rows.length) return null;
+  const waiting = rows.filter((r) => r.suggested > 0);
+  return (
+    <>
+      {onAcceptAll && waiting.length > 1 && (
+        <div className='mb-1 flex flex-wrap items-center gap-2'>
+          <Text size='micro' variant='label' component='span'>
+            {waiting.length} suggested: {waiting.map((r) => KIND_LABEL[r.kind]).join(', ')}
+          </Text>
+          <Chip
+            tone='attention'
+            disabled={busy}
+            onClick={onAcceptAll}
+            title='set every suggested kind aside — the page below shows them dashed blue; each row keeps its "keep" to undo'
+          >
+            accept all {waiting.length}
+          </Chip>
+        </div>
+      )}
+      <KindRowsTable rows={rows} busy={busy} onEdit={onEdit} onHover={onHover} />
+    </>
+  );
+}
+
+function KindRowsTable({
   rows,
   busy,
   onEdit,
@@ -129,7 +185,6 @@ export function KindTable({
   onEdit: (kind: BackgroundKind, keep: boolean) => void;
   onHover?: (kind: BackgroundKind | null) => void;
 }) {
-  if (!rows.length) return null;
   return (
     <DataTable>
       <thead>
@@ -334,7 +389,15 @@ export function CleanBlock({
       <Text size='micro' component='p' className='mb-1'>
         {cleanLine(clean)}
       </Text>
-      <KindTable rows={rows} busy={!!session.busy} onEdit={edit} onHover={setHover} />
+      <KindTable
+        rows={rows}
+        busy={!!session.busy}
+        onEdit={edit}
+        onAcceptAll={() =>
+          void api.dispatch({ type: 'clean', edits: withAllAccepted(inputs.cleanEdits, rows) })
+        }
+        onHover={setHover}
+      />
       {clean.dropped.length > 0 && (
         <div className='mt-2'>
           <Text size='micro' variant='label' component='p' className='mb-0.5'>
@@ -398,15 +461,36 @@ export function SheetCleanRows({
 }) {
   const rows = kindRows(clean.items);
   if (!rows.length) return null;
+  // the sheet's own items only: a row answers the items it lists, accept-all the waiting ones —
+  // the page decisions and the run-wide kind decisions of the files step stay as they are
+  const idsOf = (kind: BackgroundKind) =>
+    clean.items.filter((it) => it.kind === kind).map((it) => it.id);
   const edit = (kind: BackgroundKind, keep: boolean) =>
-    void api.dispatch({ type: 'clean', edits: withKind(api.inputs.cleanEdits, kind, keep) });
+    void api.dispatch({
+      type: 'clean',
+      edits: withItems(api.inputs.cleanEdits, idsOf(kind), keep),
+    });
   return (
     <>
       <GroupLabel>set aside on the sheet</GroupLabel>
       <Text size='micro' component='p' className='mb-1'>
         {removedLine(rows)}
       </Text>
-      <KindTable rows={rows} busy={!!api.session.busy} onEdit={edit} />
+      <KindTable
+        rows={rows}
+        busy={!!api.session.busy}
+        onEdit={edit}
+        onAcceptAll={() =>
+          void api.dispatch({
+            type: 'clean',
+            edits: withItems(
+              api.inputs.cleanEdits,
+              clean.items.filter((it) => it.status === 'suggest' && !it.applied).map((it) => it.id),
+              false,
+            ),
+          })
+        }
+      />
     </>
   );
 }

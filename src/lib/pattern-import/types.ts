@@ -186,6 +186,11 @@ export type SourceFileInfo = {
   pages: number;
   /** Producer string when the format carries one (PDF /Producer, DXF $ACADVER). */
   producer?: string;
+  /**
+   * A10, DXF only: the dialect the reader recognised (aama, clo-…, grbpwr, generic) and how many
+   * blocks carry a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line).
+   */
+  dxf?: { dialect: string; cutBlocks: number };
 };
 
 /** Everything an adapter returns for one file. */
@@ -276,6 +281,8 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
+  /** For 'cover' / 'instructions': line length (m), text items, characters, raster share. */
+  ink?: { strokeM: number; texts: number; chars: number; raster: number };
   confidence: number;
   why: string;
 };
@@ -388,7 +395,19 @@ export type ClassEvidence =
   /** A seam line drawn at this constant distance inside the cut line (role 'seam'). */
   | { kind: 'seam-offset'; offsetMm: Mm }
   /** Set aside only for its light-grey colour (no grid, frame or watermark evidence): confirm. */
-  | { kind: 'colour-only'; rgb: [number, number, number] };
+  | { kind: 'colour-only'; rgb: [number, number, number] }
+  /**
+   * A0.3: the lines close these closed outlines (chains/face-role.ts); `cues` are the independent
+   * evidences, `auto` = enough of them to assign the row without asking.
+   */
+  | { kind: 'faces'; pieces: number; cues: string[]; auto: boolean }
+  /** A0.3: lines inside the closed outlines (grain, darts, placement). */
+  | { kind: 'inside-faces'; pieces: number }
+  /**
+   * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
+   * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
+   */
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
 
 export type LineClass = {
   id: ClassId;
@@ -400,6 +419,12 @@ export type LineClass = {
   totalLengthMm: Mm;
   evidence: ClassEvidence[];
   confidence: number;
+  /**
+   * What the row IS, apart from its number (pen, width, dash, layer, how it was found): the
+   * operator's legend answers are bound to it, so a rebuild that renumbers the rows (a clean edit, a
+   * grid change) does not hand an answer to another row (Codex A2 review).
+   */
+  sig?: string;
 };
 
 /** N parallel chains, one per size, ordered from the seed side outward (rank 0 = innermost). */
@@ -461,7 +486,7 @@ export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress)
 /** Operator edits to the legend: class → role/size. Returns a new ChainSet with roles applied. */
 export type ApplyLegendFn = (
   set: ChainSet,
-  edits: { classId: ClassId; role: ChainRole; sizeLabel: string | null }[],
+  edits: { classId: ClassId; role: ChainRole; sizeLabel: string | null; sig?: string }[],
 ) => ChainSet;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -540,11 +565,66 @@ export type ProposeSizeMapFn = (run: SizeRun, card: CardSize[]) => SizeMap;
 export type Seed = {
   id: SeedId;
   at: PtMm;
-  origin: 'text' | 'click' | 'ai';
+  /**
+   * 'face' (A2): one per closed outline the sheet draws (pieces/faces.ts) — not a decision: the
+   * piece still goes through the fill, the H1 guard and the gate, and "not a piece" drops it.
+   */
+  origin: 'text' | 'click' | 'ai' | 'face';
   /** Text that produced the seed (piece number / name), when origin = 'text'. */
   text?: IRText;
+  /** A face seed's outline: area inside its outer wall, nesting depth of the seeded face, box. */
+  face?: { areaMm2: number; depth: number; box: BoxMm };
+  /**
+   * A2: the set-aside outline (SetAside.id) the operator made a piece with "this is a piece" — such
+   * a click does not supersede the face seed of the outline it lies in (it is another piece there).
+   */
+  aside?: number;
   /** Variant filter the seed belongs to (Mod. 125 / Style A). null = all. */
   variant: string | null;
+};
+
+/**
+ * A2 (pieces/faces): why a closed outline got no seed. Outlines big enough to be a piece are never
+ * dropped silently: every one comes back as a SetAside, one click from being a piece (D3).
+ */
+export type FaceJunk =
+  | 'small'
+  | 'sheet'
+  | 'tile-frame'
+  | 'test-square'
+  | 'legend'
+  | 'table'
+  | 'logo'
+  | 'background'
+  /** A sheet whose text labels its pieces: an outline without a label is not seeded. */
+  | 'unlabelled'
+  /** File-per-size side by side: seeds go on the first size's drawing (the fill moves them). */
+  | 'other-size'
+  /** Inside a seeded outline, of its shape: another size of the same piece (a graded nest). */
+  | 'size-copy'
+  /** Inside a seeded outline, of its shape, one size drawn: its seam line (or a lining copy). */
+  | 'seam-line'
+  /** Drawn against a seeded outline along an edge (a strip of it, or a piece drawn touching it). */
+  | 'joined'
+  /** Split off a seeded outline by one of its inner lines (a yoke line, a dart drawn closed). */
+  | 'inner-line'
+  /** Drawn inside a seeded outline in another pen or in short strokes (a label box, a mark). */
+  | 'other-pen';
+
+/**
+ * A2: a closed outline the pieces stage did not seed, or a text seed it held back because it sits
+ * in junk (a "10" in the test square or a table cell). The pieces step lists them as "set aside:
+ * N outlines · reason"; "this is a piece" makes one a seed (`seed` restored, else a click at `at`
+ * carrying `aside`).
+ */
+export type SetAside = {
+  id: number;
+  at: PtMm;
+  box: BoxMm;
+  areaMm2: number;
+  reason: Exclude<FaceJunk, 'small'>;
+  /** The text seed held back. */
+  seed?: Seed;
 };
 
 export type FillOutcome =
@@ -576,9 +656,9 @@ export type GradeRefusal =
 export type ExpectedSizes = {
   n: number;
   /**
-   * AUTO A6 (later phase): 'inferred' = two or more independent sheet evidences agree on n (legend
-   * text, nest depth, file count, AI). The size stage treats it like 'operator' (n known, ranks
-   * still proven). Not produced yet.
+   * AUTO A6: 'inferred' = two or more independent sheet evidences agree on n (size text, nest
+   * depth, file count, AI — `sizes/count-evidence.ts`). The size stage treats it like 'operator'
+   * (n known, ranks still proven); the sizes step shows it as AUTO, one click takes it back.
    */
   from: 'source' | 'operator' | 'inferred';
 };
@@ -589,7 +669,49 @@ export type ExpectedSizes = {
  * while `expected` is null. `inferred` = what the lines alone show, offered first as a suggestion,
  * never applied.
  */
-export type SizeCountAsk = { inferred: { n: number; why: string } | null };
+export type SizeCountAsk = {
+  inferred: { n: number; why: string } | null;
+  /**
+   * A6: what the sheet's independent evidences say about the count (every one found, agreeing or
+   * not), and `n` when two or more agree and none disagrees. `applied` = it is the sizes stage's
+   * `expected` (from 'inferred'); false when the operator took it back (`drawnSizes: 0`) or
+   * answered himself.
+   */
+  auto?: {
+    n: number | null;
+    evidence: CountEvidence[];
+    applied: boolean;
+    /** Why AUTO is off whatever the evidences say ("2 models on this sheet"). */
+    blocked?: string;
+  };
+};
+
+/** A6: one evidence of how many sizes a sheet draws (`sizes/count-evidence.ts`). */
+export type CountEvidence = {
+  /**
+   * 'label' = one size named in text ("SIZE 38", "Gr. 40"); 'text-run' = a size run in text
+   * ("36–46", a legend); 'nests' = the rings around the largest closed outlines (A2 faces);
+   * 'files' = one file per size; 'ai' = the AI read the count off the sheet (A3).
+   */
+  kind: 'label' | 'text-run' | 'nests' | 'files' | 'ai';
+  /** The counts it allows (a range "36–46" reads as 6 at step 2 or 11 at step 1; [] = none). */
+  n: number[];
+  /**
+   * Independence group: two evidences of one group are one fact (a size printed on each file and
+   * the file's own name; the sheet's text; the geometry; the AI). AUTO needs two groups.
+   */
+  group: 'text' | 'files' | 'geometry' | 'ai';
+  /**
+   * It counts toward AUTO. False = shown as a suggestion only: a lone "SIZE 38" the geometry does
+   * not back (a sample-size title sits on side-by-side graded sheets too), rings not proven to be
+   * sizes, one outline drawn at two scales.
+   */
+  counts: boolean;
+  /** Human-readable: "SIZE 38", "one line around each of 2 outlines, no scaled copies". */
+  detail: string;
+  /** 'label': the size token it names ("38", "M"). */
+  label?: string;
+};
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
@@ -1016,8 +1138,10 @@ export type SemanticsOutput = {
    */
   unproven: Unproven[];
   /**
-   * A1: per seed blocked 'no-grain', the grainline the drawing or the outline proposes (absent =
-   * none). Never applied without the operator's click ("accept N proposed grainlines", D3).
+   * A1: per seed blocked 'no-grain' — and (N3) per seed still blocked 'grammar' (no name yet) whose
+   * drawing proves no grain — the grainline the drawing or the outline proposes (absent = none), so
+   * one review covers every piece. Never applied without the operator's click ("accept N proposed
+   * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
 };
@@ -1130,6 +1254,11 @@ export type FabricAssignment = {
    * the operator edits loses its AI fabric (the hint was for the AI's name).
    */
   aiOnly?: { seed: SeedId; purposes: FabricPurposeKey[]; needsConfirm: boolean }[];
+  /**
+   * N1: pieces nothing names a fabric for (no label, list, hatch or AI word) — main by default.
+   * With more than one fabric scope on the card the fabrics step shows them before the run goes on.
+   */
+  defaulted?: SeedId[];
 };
 
 export type ProposeFabricsFn = (
@@ -1358,6 +1487,8 @@ export type GateCheckId =
   | 'G15-derived'
   /** A8 safety net: lettering / watermark strokes on the internal layer (block). */
   | 'G16-glyphs'
+  /** A2: a closed outline big enough to be a piece written on another piece's layer 8. */
+  | 'G20-nested-piece'
   /** A8: internal-layer length against the outline length (warn). */
   /** A8: a found grainline that stands on lettering strokes (block) or touches one (warn). */
   | 'G18-grain-source'
@@ -1421,7 +1552,52 @@ export type ConversionManifest = {
   blocks: ManifestBlock[];
   source: ManifestSource;
   gate: GateReport | null;
+  /**
+   * A10 (D5): what the autopilot answered instead of the operator — every answer the drawing did
+   * not prove, with its rule, evidence and confidence. Absent = a run the operator answered.
+   * Optional and shape-tolerant on read (an entry that does not validate is left out, never the
+   * sheet), so a manifest written before or after this field reads the same.
+   */
+  autopilot?: AutopilotRecord;
 };
+
+/**
+ * A10 (D5): one answer the autopilot gave in the operator's place. `strong` = a dangerous default
+ * the drawing gives no evidence for (grain from the piece's axis, the outline taken as the cut
+ * line, 1:1 without a square, sizes mapped by order): the card shows these first.
+ */
+export type AutopilotAssumption = {
+  /** The wizard step the question was on ('scale', 'sizes', 'meaning', …). */
+  step: string;
+  /** What kind of question (kebab-case: 'grain-axis', 'size-ordinal', 'outline', 'quantity' …). */
+  kind: string;
+  /** What it is about: a piece ('seed 12 · 21'), a size ('source 38'), the file, a page … */
+  subject: string;
+  /** The answer given, in words ('cut line', '×2', '38 → M', '90°'). */
+  answer: string;
+  /** The policy rule that gave it (one line). */
+  rule: string;
+  /** What it rests on (short lines). */
+  evidence: string[];
+  /** 0..1, the policy's own confidence in the answer. */
+  confidence: number;
+  strong: boolean;
+  /**
+   * The answer itself, replayable: the value the wizard input took (a factor, a size map entry, a
+   * grain's two ends, a code …), keyed by `kind` + `subject`. Plain JSON, ≤ 2 KB written.
+   */
+  value?: AutopilotValue;
+};
+
+export type AutopilotValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AutopilotValue[]
+  | { [k: string]: AutopilotValue };
+
+export type AutopilotRecord = { v: 1; assumptions: AutopilotAssumption[] };
 
 export type WriteJob = {
   techCardId: number;
@@ -1432,6 +1608,8 @@ export type WriteJob = {
   generator: string;
   /** Which CLO dialect to emit (K2 decides the default; both must read back through our parser). */
   dialect: 'r12' | 'r2000';
+  /** A10: the autopilot's assumptions, carried into the manifest as they are. */
+  autopilot?: AutopilotRecord;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -1679,7 +1857,15 @@ export type StageIO = {
     };
   };
   chains: {
-    in: { opts: ChainOpts; legend?: Parameters<ApplyLegendFn>[1] };
+    in: {
+      opts: ChainOpts;
+      legend?: Parameters<ApplyLegendFn>[1];
+      /**
+       * Rows the operator confirmed as proposed (keys: the row's sig, or `#id`): confidence 1 in the
+       * built set (chains/legend confirmRows). Absent = no row confirmed.
+       */
+      confirmed?: string[];
+    };
     out: {
       classes: LineClass[];
       bundles: Bundle[];
@@ -1695,7 +1881,10 @@ export type StageIO = {
     in: {
       card: CardSize[];
       operatorMap?: SizeMapEntry[];
-      /** pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet". */
+      /**
+       * pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet".
+       * 0 = he took the count the sheet's evidences agree on (A6 AUTO) back: asked as without it.
+       */
       drawnSizes?: number;
     };
     out: {
@@ -1727,6 +1916,8 @@ export type StageIO = {
        * the per-piece reason.
        */
       grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
+      /** A2: closed outlines (and text seeds in junk) not seeded — shown, one click from a piece. */
+      setAside?: SetAside[];
     };
   };
   semantics: {
@@ -1764,6 +1955,8 @@ export type StageIO = {
       sizes: ManifestSize[];
       dialect: WriteJob['dialect'];
       generator: string;
+      /** A10: the autopilot's assumptions (absent = the operator answered) → every manifest. */
+      autopilot?: AutopilotRecord;
     };
     out: { scopes: DraftScope[]; gate: Record<string, GateReport> };
   };
@@ -1853,6 +2046,8 @@ export type WizardEvent =
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
+  /** A low-confidence legend row confirmed as proposed (its key: sig, or `#id`). */
+  | { type: 'legend-confirm'; key: string }
   | { type: 'size-map'; entries: SizeMapEntry[] }
   /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
   | { type: 'drawn-sizes'; n: number | null }
@@ -1861,8 +2056,10 @@ export type WizardEvent =
   | { type: 'names'; decisions: NameDecision[] }
   | { type: 'semantics'; input: StageIO['semantics']['in'] }
   | { type: 'fabrics'; assignment: FabricAssignment }
-  | { type: 'write' }
-  | { type: 'apply' }
+  /** A10: an autopilot run hands its assumptions to the written manifests. */
+  | { type: 'write'; autopilot?: AutopilotRecord }
+  /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
+  | { type: 'apply'; token?: number }
   | { type: 'download' }
   | { type: 'back'; to: WizardStep }
   | { type: 'reset' };
@@ -2013,6 +2210,13 @@ export type CleanOutput = {
      */
     status: MaskStatus;
     drawing?: string;
+    /** A10: the page draws a closed outline of piece size (it may be a piece). */
+    face?: boolean;
+    /**
+     * A10: an overview whose outlines are the tile pages' whole pieces at a smaller scale (Hu shape
+     * match): how many matched, at what scale (clean/reduced-copy.ts).
+     */
+    reducedCopy?: { matches: number; of: number; scale: number };
   }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
@@ -2133,6 +2337,12 @@ export const PATIMPORT = {
   glyphCellMm: 60,
   /** G16: this many short strokes in one cell blocks (robe/reef/leonie 4, owner 16–20, r4454 16). */
   glyphMaxShortPerCell: 10,
+  /**
+   * G20 (A2): a closed layer-8 contour of another shape (≤ 45 % of the cut's area) from this area is
+   * a piece drawn inside the block (wm's collar inside the back, 160 cm²). Corpus negatives: CLO
+   * blazer pocket welt 41 cm², the SVG smoke's placement box 66 cm², reef / kombinezon ≤ 10 cm².
+   */
+  nestedPieceMinMm2: 10000,
   /** G18: a grain end / line this close to a short internal stroke is "touching" it, mm. */
   grainStrokeNearMm: 2,
 } as const;

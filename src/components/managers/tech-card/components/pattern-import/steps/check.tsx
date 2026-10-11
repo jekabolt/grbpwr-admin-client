@@ -48,6 +48,7 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
     what: 'no cut line traced around a registration mark or tile chrome',
     fix: 'files',
   },
+  'G20-nested-piece': { what: 'no piece drawn inside another piece', fix: 'pieces' },
 };
 
 /**

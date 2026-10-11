@@ -45,6 +45,7 @@ import {
   g16,
   g18,
   g19,
+  g20,
   g2From,
   g3g4,
   g5,
@@ -210,6 +211,7 @@ export function createRunGate(
       g16(ctx),
       g18(ctx),
       g19(ctx),
+      g20(ctx),
     ];
     return {
       passed: passedOf(checks),

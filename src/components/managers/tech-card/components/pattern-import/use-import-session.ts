@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AllowanceDecision,
   ApplyResult,
+  AutopilotRecord,
   CardSize,
   ImportErrorCode,
   ChainRole,
@@ -19,6 +20,7 @@ import type {
   PtMm,
   ScaleDecision,
   Seed,
+  SetAside,
   SeedId,
   SizeMap,
   SizeMapEntry,
@@ -46,7 +48,10 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
+import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
+import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
+import { autopilotRecordOf, type Assumption } from './autopilot/types';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -88,7 +93,16 @@ export const STEPS: { id: WizardStep; label: string }[] = [
 ];
 export const stepIndex = (s: WizardStep) => STEPS.findIndex((x) => x.id === s);
 
-export type LegendEdit = { classId: ClassId; role: ChainRole; sizeLabel: string | null };
+export type LegendEdit = {
+  classId: ClassId;
+  role: ChainRole;
+  sizeLabel: string | null;
+  /** The row's signature (LineClass.sig) the answer was given to. */
+  sig?: string;
+};
+
+/** The key a legend answer is bound to: the row's signature, else its number (older rows). */
+export const legendKey = (c: { id: ClassId; sig?: string }) => c.sig ?? `#${c.id}`;
 export type PieceOverride = NonNullable<StageIO['semantics']['in']['pieceOverrides'][SeedId]>;
 
 /** What the operator decided. Survives `back`; cleared only by `reset`. */
@@ -103,11 +117,16 @@ export type Inputs = {
   gridOverride: GridOverride | undefined;
   /** The tile sheet being assembled (a Burda file carries several). */
   sheetIndex: number;
+  /**
+   * A10 (Codex #2): the tile sheet was PICKED (the sheet step's own control, or the autopilot on
+   * evidence) — a file with several tile sheets asks which one until then; null = not picked.
+   */
+  sheetPicked: number | null;
   /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
   residualsAccepted: boolean;
   legend: LegendEdit[];
-  /** Low-confidence legend rows the operator has looked at and accepted. */
-  legendConfirmed: ClassId[];
+  /** Low-confidence legend rows the operator has looked at and accepted (`legendKey`). */
+  legendConfirmed: string[];
   sizeMap: SizeMapEntry[] | null;
   /** H1: the operator's "sizes drawn on this sheet" (null = not answered). */
   drawnSizes: number | null;
@@ -142,6 +161,11 @@ export type Inputs = {
    * every reader goes through `liveAnswers`, so a stale one never counts (answers.ts).
    */
   answerCtx: AnswerCtx | null;
+  /**
+   * A10: what the autopilot answered in the operator's place (rule D5), one per question. Written
+   * into every manifest of the run (`autopilotRecordOf`); empty = the operator answered.
+   */
+  autopilot: Assumption[];
 };
 
 const EMPTY_INPUTS: Inputs = {
@@ -152,6 +176,7 @@ const EMPTY_INPUTS: Inputs = {
   scaleConfirmed: false,
   gridOverride: undefined,
   sheetIndex: 0,
+  sheetPicked: null,
   residualsAccepted: false,
   legend: [],
   legendConfirmed: [],
@@ -171,6 +196,7 @@ const EMPTY_INPUTS: Inputs = {
   confirmedQuantities: {},
   assignment: null,
   answerCtx: null,
+  autopilot: [],
 };
 
 const EMPTY_SESSION: ImportSession = {
@@ -237,6 +263,23 @@ export type ApplyState =
   | { phase: 'running'; progress: Record<string, ApplyProgress['state']> }
   | { phase: 'done'; result: ApplyResult; progress: Record<string, ApplyProgress['state']> };
 
+/**
+ * What a run reads off the card, as one string: the size run, the BOM fabric scopes, the pieces,
+ * patterns and block links it already holds (the draft binds to them). Not the manifests (read
+ * late, asynchronously) nor the style label (file names only).
+ */
+export function cardFingerprint(c: CardContext): string {
+  return JSON.stringify([
+    c.techCardId,
+    !!c.downloadOnly,
+    c.sizes.map((x) => [x.sizeId, x.token, x.rank]),
+    c.scopes.map((x) => [x.scopeKey, x.bomLineKey, x.fabricPurpose, x.isInterlining]),
+    c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
+    (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
+    (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+  ]);
+}
+
 export function useImportSession(deps: {
   client: ImportClient;
   card: CardContext;
@@ -244,7 +287,30 @@ export function useImportSession(deps: {
   buildDraft: DraftBuilder;
   applyDraft: ApplyDraftFn;
 }) {
-  const { client, card, namer, buildDraft, applyDraft } = deps;
+  const { client, namer, buildDraft, applyDraft } = deps;
+  /** The LIVE card as the latest render sees it (only the freshness check reads it). */
+  const cardRef = useRef(deps.card);
+  cardRef.current = deps.card;
+  /**
+   * Codex re-check #1 (r4): the card snapshot THIS run reads — taken once when the files are read
+   * (refreshed when the operator goes back to sizes or earlier); every stage, blocker and the draft
+   * read it through `rc()`, and its fingerprint is what the live card is compared with before apply.
+   */
+  const runCard = useRef<CardContext | null>(null);
+  const rc = (): CardContext => runCard.current ?? cardRef.current;
+  const cardAt = useRef<string | null>(null);
+  const takeCard = () => {
+    runCard.current = cardRef.current;
+    cardAt.current = cardFingerprint(runCard.current);
+  };
+  /**
+   * Codex re-check #2: one apply per draft. Taken synchronously — by the autopilot before its
+   * check → apply move (`lockApply`), by the apply itself otherwise — and never handed twice: a
+   * concurrent or repeated apply of the same draft is refused. A new draft (a re-write) is a new
+   * lock; an apply that did not complete the card write (failed, threw, card changed) gives it back.
+   */
+  const applyLock = useRef<{ draft: unknown; token: number; used: boolean } | null>(null);
+  const lockSeq = useRef(0);
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
@@ -266,6 +332,40 @@ export function useImportSession(deps: {
   const [notice, setNotice] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
+  /**
+   * N1: the steps the wizard went through without the operator — 'auto' = shown, checked, nothing
+   * asked (the stepper: "auto ✓"); 'skipped' = jumped over unseen (the DXF fast path, a one-page
+   * sheet). Each stays a door back. Pruned to the steps before the current one on every move.
+   */
+  const [passed, setPassed] = useState<Partial<Record<WizardStep, 'auto' | 'skipped'>>>({});
+  /**
+   * N1: the forward drive — armed by the operator's next / read, dropped where a step asks. `gen`
+   * tells a stale drive (or a stale resolver answer) from the live one.
+   */
+  const drive = useRef<{ gen: number; resolve?: AutoResolver<Inputs>; state: DriveState } | null>(
+    null,
+  );
+  /** A10: where and why the last armed resolver (the autopilot) stopped; null = it did not. */
+  const [driveStop, setDriveStop] = useState<{
+    step: WizardStep;
+    why: DriveStopWhy;
+    reason: string;
+  } | null>(null);
+  const driveGen = useRef(0);
+  /** N1: bumped by every operator action — an answer computed before it is stale. */
+  const opRev = useRef(0);
+  /** N1: the notice a refused resolver answer left (the next `advance` clears it, no other). */
+  const refusal = useRef<string | null>(null);
+  /**
+   * Codex re-check #3: the AI-namer outage notice of this run, and the one a resume acknowledged —
+   * the drive goes on past it (the autopilot types its P-codes); the notice stays on screen.
+   */
+  const namerNote = useRef<string | null>(null);
+  const ackedNote = useRef<string | null>(null);
+  const [driveTick_, setDriveTick] = useState(0);
+  /** Transitions in flight (a stage, the namer, a write): the drive waits for all of them. */
+  const flightRef = useRef(0);
+  const [flight, setFlight] = useState(0);
   // Text seeds of the FIRST pieces run (all models visible): click seeds are appended to these,
   // because `pieces.in.seeds` replaces the whole list (no 'add' edit kind in the contract).
   const baseSeeds = useRef<Seed[] | null>(null);
@@ -305,6 +405,7 @@ export function useImportSession(deps: {
   async function run<S extends StageName>(stage: S, input: StageIO[S]['in']) {
     const id = sRef.current.sessionId;
     if (id == null) throw new Error('no session — read the files first');
+    // the stage that reads the card's run: what everything after it was built against
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
     failureRef.current = null;
@@ -403,6 +504,13 @@ export function useImportSession(deps: {
         gridOverride: i.gridOverride,
         variant: s.variant,
         maskRev: maskRevNow(s, i),
+        legendRev:
+          i.legend.length || i.legendConfirmed.length
+            ? maskRevOf(
+                [...i.legendConfirmed],
+                i.legend.map((e) => [e.sig ?? `#${e.classId}`, e.role, e.sizeLabel]),
+              )
+            : undefined,
       },
       s.pieces?.families,
     );
@@ -435,10 +543,11 @@ export function useImportSession(deps: {
   });
 
   // ── events (08-CONTRACT WizardEvent) ─────────────────────────────────────────────────────
-  async function dispatch(ev: WizardEvent): Promise<void> {
+  async function dispatchRaw(ev: WizardEvent): Promise<void> {
     try {
       switch (ev.type) {
         case 'files': {
+          takeCard();
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
           heldNames.current = [];
@@ -557,6 +666,7 @@ export function useImportSession(deps: {
           patchInputs({
             gridOverride: ev.override,
             sheetIndex: ev.sheet,
+            sheetPicked: ev.sheet,
             residualsAccepted: false,
             ...sheetInputs,
           });
@@ -564,6 +674,7 @@ export function useImportSession(deps: {
             ...iRef.current,
             gridOverride: ev.override,
             sheetIndex: ev.sheet,
+            sheetPicked: ev.sheet,
             ...sheetInputs,
           };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
@@ -575,19 +686,39 @@ export function useImportSession(deps: {
           const chains = await run('chains', {
             opts: chainOpts(),
             legend: ev.edits,
+            confirmed: iRef.current.legendConfirmed,
           });
           const sizes = await run('sizes', {
-            card: card.sizes,
+            card: rc().sizes,
             drawnSizes: drawnNow() ?? undefined,
           });
           patchInputs({ sizeMap: null });
           patch({ chains, sizes });
           return;
         }
+        case 'legend-confirm': {
+          // an answer the worker needs too (the size checks): the chains are rebuilt with it; the
+          // roles do not change, so the operator's size map stays
+          const legendConfirmed = [...iRef.current.legendConfirmed, ev.key];
+          iRef.current = { ...iRef.current, legendConfirmed };
+          patchInputs({ legendConfirmed });
+          const chains = await run('chains', {
+            opts: chainOpts(),
+            legend: iRef.current.legend,
+            confirmed: legendConfirmed,
+          });
+          const sizes = await run('sizes', {
+            card: rc().sizes,
+            operatorMap: iRef.current.sizeMap ?? undefined,
+            drawnSizes: drawnNow() ?? undefined,
+          });
+          patch({ chains, sizes });
+          return;
+        }
         case 'size-map': {
           patchInputs({ sizeMap: ev.entries });
           const sizes = await run('sizes', {
-            card: card.sizes,
+            card: rc().sizes,
             operatorMap: ev.entries,
             drawnSizes: drawnNow() ?? undefined,
           });
@@ -599,7 +730,7 @@ export function useImportSession(deps: {
           const drawnSizesAt = ev.n == null ? null : drawnSizesKey(iRef.current);
           patchInputs({ drawnSizes: ev.n, drawnSizesAt, sizeMap: null });
           iRef.current = { ...iRef.current, drawnSizes: ev.n, drawnSizesAt, sizeMap: null };
-          const sizes = await run('sizes', { card: card.sizes, drawnSizes: ev.n ?? undefined });
+          const sizes = await run('sizes', { card: rc().sizes, drawnSizes: ev.n ?? undefined });
           patch({ sizes });
           return;
         }
@@ -618,7 +749,7 @@ export function useImportSession(deps: {
             const cleared = { drawnSizes: null, drawnSizesAt: null, sizeMap: null };
             iRef.current = { ...i0, ...cleared, variant: ev.variant };
             patchInputs(cleared);
-            const sizes = await run('sizes', { card: card.sizes });
+            const sizes = await run('sizes', { card: rc().sizes });
             patch(dropAfter({ ...sRef.current, sizes }, 'sizes'));
             return;
           }
@@ -676,7 +807,7 @@ export function useImportSession(deps: {
           // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
           // but is a PieceSpec field: hand it to semantics as an override, so the manifest, the
           // draft and the card read the same flag.
-          const fused = fusedSeeds(a, card.scopes);
+          const fused = fusedSeeds(a, rc().scopes);
           if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
             const overrides = { ...iRef.current.overrides };
             for (const sd of new Set(sem.pieces.map((p) => p.seed)))
@@ -693,7 +824,7 @@ export function useImportSession(deps: {
           const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
           if (open.length) throw new UnansweredQuestionsError(open);
           const out = await run('write', {
-            scopes: card.scopes,
+            scopes: rc().scopes,
             assignment: a,
             sizes: sizes.map.entries.flatMap((e) =>
               e.card
@@ -710,16 +841,43 @@ export function useImportSession(deps: {
             ),
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
-            techCardId: card.techCardId,
+            techCardId: rc().techCardId,
+            // A10: an autopilot run's assumptions ride in every written manifest
+            ...autopilotOf(ev.autopilot, iRef.current.autopilot, sem.pieces),
           });
-          const draft = buildDraft(out, { card, semantics: sem });
+          const draft = buildDraft(out, { card: rc(), semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
           return;
         }
         case 'apply': {
           const built = sRef.current.draft;
-          // a download-only run has no BOM line to bind a file to: nothing is applied
-          if (!built || card.downloadOnly) return;
+          // a download-only run has no BOM line to bind a file to: nothing is applied; and only
+          // from the apply step, past a gate that blocks nothing (never on the way there)
+          if (!built || rc().downloadOnly || sRef.current.step !== 'apply') return;
+          if (
+            Object.values(sRef.current.gate).some((g) =>
+              g.checks.some((c) => !c.ok && c.severity === 'block'),
+            )
+          )
+            return;
+          // Codex re-check #2: the lock, before anything else can await
+          const held = applyLock.current;
+          if (held && held.draft === built) {
+            if (held.used || ev.token !== held.token) return;
+          } else if (ev.token != null) return; // a lock taken for another draft
+          const lock = { draft: built as unknown, token: ev.token ?? -1, used: true };
+          applyLock.current = lock;
+          // Codex re-check #1: the card changed since the run read it — nothing goes up
+          const stale = cardStale();
+          if (stale) {
+            applyLock.current = null;
+            setApply({
+              phase: 'done',
+              result: { ok: false, failedScope: '', message: stale, uploaded: [] },
+              progress: {},
+            });
+            return;
+          }
           // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
           const draft = {
             ...built,
@@ -731,10 +889,25 @@ export function useImportSession(deps: {
           };
           const progress: Record<string, ApplyProgress['state']> = {};
           setApply({ phase: 'running', progress });
-          const result = await applyDraft(draft, (p) => {
-            progress[p.scopeKey] = p.state;
-            setApply({ phase: 'running', progress: { ...progress } });
-          });
+          // Codex final #2: whatever the apply throws (a rejected save, an upload) lands as a
+          // failed result with its reason — the step never stays 'running'
+          let result: ApplyResult;
+          try {
+            result = await applyDraft(draft, (p) => {
+              progress[p.scopeKey] = p.state;
+              setApply({ phase: 'running', progress: { ...progress } });
+            });
+          } catch (e) {
+            result = {
+              ok: false,
+              failedScope: '',
+              message: `the apply failed: ${e instanceof Error ? e.message : String(e)}`,
+              uploaded: [],
+            };
+          }
+          // the card write did not complete: the operator may apply again (files a failed try
+          // uploaded are orphans — a known tail); the lock only holds a running or DONE apply
+          if (!result.ok && applyLock.current === lock) applyLock.current = null;
           // the apply step's "download report" carries what the card refused (M5)
           if (!result.ok)
             failureRef.current = {
@@ -749,13 +922,27 @@ export function useImportSession(deps: {
           for (const d of sRef.current.draft?.downloads ?? []) downloadText(d.filename, d.dxfText);
           return;
         }
-        case 'back':
+        case 'back': {
+          // back to sizes or before: the stages run again — against the card as it is now
+          const changed = stepIndex(ev.to) <= stepIndex('sizes') && !!cardStale();
+          if (stepIndex(ev.to) <= stepIndex('sizes')) takeCard();
           if (sRef.current.names.length) heldNames.current = sRef.current.names;
           setApply({ phase: 'idle' });
           setNotice(null);
           setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
+          // the card's size run changed under the map: the map is read again from the new run
+          if (changed && ev.to === 'sizes' && sRef.current.sizes) {
+            iRef.current = { ...iRef.current, sizeMap: null };
+            patchInputs({ sizeMap: null });
+            const sizes = await run('sizes', {
+              card: rc().sizes,
+              drawnSizes: drawnNow() ?? undefined,
+            });
+            patch({ sizes });
+          }
           return;
+        }
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
@@ -787,7 +974,7 @@ export function useImportSession(deps: {
     // outrank it; only unnamed / numeric / placeholder blocks are asked. Nothing to ask = no call.
     const plan = planNaming(
       fams,
-      card.sizes.map((c) => c.token),
+      rc().sizes.map((c) => c.token),
     );
     let names: NameDecision[] = [];
     let namerError: string | null = null;
@@ -796,7 +983,7 @@ export function useImportSession(deps: {
       setSom(out);
       patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
       try {
-        names = await namer(out, { card, threshold: AI_AUTO_ACCEPT_T });
+        names = await namer(out, { card: rc(), threshold: AI_AUTO_ACCEPT_T });
       } catch (e) {
         namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
       }
@@ -808,6 +995,7 @@ export function useImportSession(deps: {
     iRef.current = { ...iRef.current, overrides };
     const sem = await run('semantics', semanticsInput({ ...iRef.current, overrides }));
     patch({ semantics: sem });
+    namerNote.current = namerError;
     setNotice(namerError);
   }
 
@@ -824,7 +1012,7 @@ export function useImportSession(deps: {
     // The DXF knows its sizes (block names); they are mapped to the card's run here, before any
     // block name is written (owner decision 6). Going back to "sizes" edits this map.
     const sizes = await run('sizes', {
-      card: card.sizes,
+      card: rc().sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
       drawnSizes: drawnNow() ?? undefined,
     });
@@ -845,9 +1033,13 @@ export function useImportSession(deps: {
 
   /** sheet → sizes: the legend and the size map of the assembled sheet. */
   async function toSizes() {
-    const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
+    const chains = await run('chains', {
+      opts: chainOpts(),
+      legend: iRef.current.legend,
+      confirmed: iRef.current.legendConfirmed,
+    });
     const sizes = await run('sizes', {
-      card: card.sizes,
+      card: rc().sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
       drawnSizes: drawnNow() ?? undefined,
     });
@@ -880,7 +1072,7 @@ export function useImportSession(deps: {
   }
 
   // ── forward transitions: run what the NEXT step shows, then move ────────────────────────
-  async function next(): Promise<void> {
+  async function forward(): Promise<void> {
     const s = sRef.current;
     try {
       switch (s.step) {
@@ -889,7 +1081,7 @@ export function useImportSession(deps: {
           // and go straight to the pieces it already carries.
           const best = s.scale.candidates[iRef.current.scaleIndex];
           if (exRef.current.presegmented && certainScale(best)) {
-            await dispatch({
+            await dispatchRaw({
               type: 'scale',
               decision: { factor: best.factor, method: best.method, operatorConfirmed: false },
             });
@@ -900,7 +1092,7 @@ export function useImportSession(deps: {
         }
         case 'scale': {
           const d = scaleDecision();
-          if (d) await dispatch({ type: 'scale', decision: d });
+          if (d) await dispatchRaw({ type: 'scale', decision: d });
           return;
         }
         case 'sheet':
@@ -926,14 +1118,14 @@ export function useImportSession(deps: {
           // The AI's fabric calls ride along; the worker uses them only where the sheet is silent,
           // only for names auto-accepted at T and never for a name the operator typed (C7).
           const aiHints = aiFabricHintsOf(s.names, iRef.current.editedNames);
-          const out = await run('fabrics', { bom: card.scopes, aiHints });
+          const out = await run('fabrics', { bom: rc().scopes, aiHints });
           // An assignment the operator already edited survives a round trip through `back`.
           const a = iRef.current.assignment ?? out;
           patch({ fabrics: a, step: 'fabrics' });
           return;
         }
         case 'fabrics':
-          await dispatch({ type: 'write' });
+          await dispatchRaw({ type: 'write' });
           return;
         case 'check':
           patch({ step: 'apply' });
@@ -947,8 +1139,8 @@ export function useImportSession(deps: {
   }
 
   const sizeTokens = useMemo(
-    () => new Set(card.sizes.map((c) => c.token.toLowerCase())),
-    [card.sizes],
+    () => new Set(rc().sizes.map((c) => c.token.toLowerCase())),
+    [deps.card, session.sessionId],
   );
 
   // ── what blocks "next" — said in words, in the footer, before the click ─────────────────
@@ -964,16 +1156,14 @@ export function useImportSession(deps: {
         const c = s.scale.candidates[inputs.scaleIndex];
         if (!c) return 'pick how the scale is known';
         const d = scaleDecision(inputs);
-        const off = d ? Math.abs(d.factor - 1) : 0;
         const sides = squareSidesOf(c.evidence?.text);
-        const needsHuman =
-          c.confidence < 0.9 ||
-          off > PATIMPORT.scaleWarnRatio ||
-          (!!sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio);
+        const needsHuman = scaleUncertain(c, d?.factor ?? 1, extracted.calibrations);
         if (needsHuman && !inputs.scaleConfirmed && !inputs.manualMeasuredMm)
           return sides && anisotropyOf(sides) > PATIMPORT.scaleWarnRatio
             ? 'the test square is not square in the file — measure it on paper or confirm'
-            : 'confirm the scale — the detection is not certain';
+            : !scaleUncertain(c, d?.factor ?? 1)
+              ? 'a page has no certain scale of its own (inherited or none) — check it, then confirm'
+              : 'confirm the scale — the detection is not certain';
         return null;
       }
       case 'sheet': {
@@ -985,11 +1175,11 @@ export function useImportSession(deps: {
         return null;
       }
       case 'sizes': {
-        if (!card.sizes.length) return 'the card has no size range — set it on the card first';
+        if (!rc().sizes.length) return 'the card has no size range — set it on the card first';
         if (s.sizes?.countAsk && !s.sizes.expected)
           return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
-          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(c.id),
+          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(legendKey(c)),
         );
         if (pending.length)
           return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
@@ -1085,13 +1275,13 @@ export function useImportSession(deps: {
       case 'fabrics': {
         const a = s.fabrics;
         if (!a) return 'fabrics are not proposed yet';
-        if (!card.scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
+        if (!rc().scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
         // C7: a cloth other than main on the AI's word alone is the operator's call
         const ai = (a.aiOnly ?? []).filter((x) => x.needsConfirm).length;
         if (ai)
           return `${ai} ${ai === 1 ? 'piece is' : 'pieces are'} cut from lining, interlining or another cloth on the AI's word alone — confirm or change the ticks`;
         // The same planner the write stage cuts the files with: what blocks here blocks there.
-        const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
+        const problem = planScopes(s.semantics?.pieces ?? [], a, rc().scopes).problems[0];
         return problem ? problem.message : null;
       }
       case 'check': {
@@ -1107,22 +1297,195 @@ export function useImportSession(deps: {
     }
     // exportedSeed/sizeTokens are derived from session/card on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, inputs, card]);
+  }, [session, inputs, deps.card, extracted]);
+
+  /** N1: what the step offers without blocking on it (a suggestion waiting for accept). */
+  const offer = session.busy
+    ? null
+    : stepOffer({
+        ...session,
+        presegmented: !!extracted.presegmented,
+        cleanEdits: inputs.cleanEdits,
+        scopes: rc().scopes.length,
+        fabricsEdited: inputs.assignment != null,
+        sheetPicked: inputs.sheetPicked,
+      });
+
+  // ── N1 auto-advance: forward through every step that asks nothing ─────────────────────
+  async function tracked<T>(f: () => Promise<T>): Promise<T> {
+    flightRef.current++;
+    setFlight((n) => n + 1);
+    try {
+      return await f();
+    } finally {
+      flightRef.current--;
+      setFlight((n) => n - 1);
+    }
+  }
+  const arm = (resolve?: AutoResolver<Inputs>) => {
+    drive.current = { gen: ++driveGen.current, resolve, state: newDriveState() };
+    setDriveStop(null);
+    setDriveTick((t) => t + 1);
+  };
+  const disarm = () => {
+    drive.current = null;
+  };
+  /** An operator action: whatever the drive or a resolver was about to do is stale now. */
+  const operatorActs = () => {
+    opRev.current++;
+    disarm();
+  };
+  /** Only the steps before the current one can be "passed". */
+  const prunePassed = () => {
+    const at = stepIndex(sRef.current.step);
+    setPassed((p) => {
+      const stale = (Object.keys(p) as WizardStep[]).filter((x) => stepIndex(x) >= at);
+      if (!stale.length) return p;
+      const next = { ...p };
+      for (const x of stale) delete next[x];
+      return next;
+    });
+  };
+  /**
+   * One forward move. The step it left is 'auto' when the drive left it (checked, nothing asked);
+   * the steps it jumped over unseen (fast path, one-page sheet) are 'skipped'.
+   */
+  async function forwardMarked(auto: boolean) {
+    const from = sRef.current.step;
+    const rev = opRev.current;
+    await tracked(forward);
+    // the operator acted meanwhile (a door back): what moved is theirs, nothing is marked
+    if (opRev.current !== rev) return false;
+    const a = stepIndex(from);
+    const b = stepIndex(sRef.current.step);
+    if (b <= a) return false;
+    const marks: Partial<Record<WizardStep, 'auto' | 'skipped'>> = {};
+    if (auto) marks[from] = 'auto';
+    for (const x of STEPS.slice(a + 1, b)) marks[x.id] = 'skipped';
+    setPassed((p) => {
+      const next = { ...p, ...marks };
+      if (!auto) delete next[from];
+      return next;
+    });
+    return true;
+  }
+
+  // The drive: armed by "next" / "read files" (or `advance`), one tick at a time — the SAME tick
+  // the autopilot metric runs (auto-drive.ts `driveTick`): forward while a step asks nothing; a
+  // step that asks goes to the resolver (AUTOPILOT) once per (step, question, outputs revision),
+  // its answer taken only as the step's own and only while nothing moved; stopped = disarmed.
+  useEffect(() => {
+    const d = drive.current;
+    if (!d || flight > 0 || flightRef.current > 0 || session.busy) return;
+    const at = { gen: d.gen, sid: sRef.current.sessionId, step: session.step, rev: opRev.current };
+    const live = () =>
+      drive.current?.gen === at.gen &&
+      sRef.current.sessionId === at.sid &&
+      sRef.current.step === at.step &&
+      opRev.current === at.rev;
+    void tracked(async () => {
+      try {
+        const t = await driveTick(d.state, {
+          session: sRef.current,
+          inputs: iRef.current,
+          blocker,
+          offer,
+          notice: notice && notice === ackedNote.current ? null : notice,
+          busy: false,
+          resolve: d.resolve,
+          current: () => ({ session: sRef.current, inputs: iRef.current }),
+          forward: async () => {
+            const rev = opRev.current;
+            const moved = await forwardMarked(true);
+            return moved && opRev.current === rev;
+          },
+          patch: (p) => {
+            iRef.current = { ...iRef.current, ...p };
+            patchInputs(p);
+          },
+          dispatch: (ev) => dispatchRaw(ev),
+          live,
+          failed: () => !!sRef.current.error,
+        });
+        if (t.kind !== 'stopped' || drive.current !== d) return;
+        disarm();
+        if (t.why === 'refused' && t.reason) {
+          refusal.current = t.reason;
+          setNotice(t.reason);
+        }
+        // A10: why an armed resolver (the autopilot) stopped — the footer's "autopilot stopped"
+        if (d.resolve && t.why !== 'stale' && t.why !== 'not-moved')
+          setDriveStop({
+            step: t.step,
+            why: t.why,
+            reason:
+              t.reason ?? t.question ?? (t.why === 'auto-stop' ? 'the gate is read here' : ''),
+          });
+      } catch (e) {
+        if (!live()) return;
+        disarm();
+        fail(e);
+      }
+    });
+    // the drive reads the latest refs; these are what can change the answer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driveTick_, flight, session, blocker, offer, notice]);
+
+  /** Operator events. Reading files arms the drive; any other event stops it (the operator looks). */
+  async function dispatch(ev: WizardEvent): Promise<void> {
+    operatorActs();
+    if (ev.type === 'files' || ev.type === 'reset') setPassed({});
+    await tracked(() => dispatchRaw(ev));
+    prunePassed();
+    if (ev.type === 'files' && !sRef.current.error && sRef.current.sessionId != null) arm();
+  }
+
+  /** The operator's "next": this step, then on through every step that asks nothing. */
+  async function next(): Promise<void> {
+    operatorActs();
+    if (await forwardMarked(false)) arm();
+  }
+
+  /**
+   * N1: run forward from the current step while no step asks anything; with `resolve`, a step that
+   * asks is offered to it first (AUTOPILOT's policy) — its answer is applied and the step checked
+   * again; no answer = the run stops there for the operator.
+   */
+  function advance(opts: { resolve?: AutoResolver<Inputs> } = {}) {
+    if (refusal.current && notice === refusal.current) setNotice(null);
+    refusal.current = null;
+    // a resume past the namer's outage: acknowledged — the codes are typed without the AI
+    if (opts.resolve && notice && notice === namerNote.current) ackedNote.current = notice;
+    arm(opts.resolve);
+  }
+
+  /**
+   * A2 "this is a piece" on a set-aside outline: its held text seed comes back, else a click at its
+   * point that does not supersede the outline seed it lies in (another piece there).
+   */
+  async function promoteAside(a: SetAside) {
+    return addSeed(a.at, a);
+  }
 
   /** A click seed: appended to the first run's text seeds (the contract has no 'add' edit). */
-  async function addSeed(at: PtMm) {
+  async function addSeed(at: PtMm, aside?: SetAside) {
+    operatorActs();
     try {
       const i = iRef.current;
       const all = [...(baseSeeds.current ?? []), ...i.clickSeeds];
       const id = Math.max(0, ...all.map((s) => s.id)) + 1;
-      const seed: Seed = { id, at, origin: 'click', variant: i.variant };
+      const seed: Seed = aside?.seed
+        ? aside.seed
+        : aside
+          ? { id, at, origin: 'click', variant: i.variant, aside: aside.id }
+          : { id, at, origin: 'click', variant: i.variant };
       const next = { ...i, clickSeeds: [...i.clickSeeds, seed] };
       iRef.current = next;
       patchInputs({ clickSeeds: next.clickSeeds });
       const out = await run('pieces', piecesInput(next));
       patch({ pieces: out });
       settleToPieces();
-      return id;
+      return seed.id;
     } catch (e) {
       fail(e);
       return null;
@@ -1198,6 +1561,7 @@ export function useImportSession(deps: {
    * answered explicitly (`answerOutline`).
    */
   function confirmShown(seed?: SeedId) {
+    operatorActs();
     const now = answersNow();
     const open = openQuestions(sRef.current.semantics, sRef.current.names, iRef.current, now);
     const mine = <T extends { seed: SeedId }>(xs: T[]) =>
@@ -1230,19 +1594,63 @@ export function useImportSession(deps: {
     await dispatch({ type: 'semantics', input: semanticsInput(next) });
   }
 
+  /**
+   * The apply lock for the current draft, taken before the check → apply move (the autopilot);
+   * null = no draft, or the lock is already held (an apply is running or done for this draft).
+   */
+  function lockApply(): number | null {
+    const draft = sRef.current.draft;
+    if (!draft) return null;
+    const held = applyLock.current;
+    if (held && held.draft === draft) return null;
+    const token = ++lockSeq.current;
+    applyLock.current = { draft, token, used: false };
+    return token;
+  }
+
+  /** Give back a lock `lockApply` took and no apply used (the move to apply did not happen). */
+  function unlockApply(token: number) {
+    const held = applyLock.current;
+    if (held && held.token === token && !held.used) applyLock.current = null;
+  }
+
+  /** Why the card is no longer the one this run read (null = the same card). */
+  function cardStale(): string | null {
+    if (cardAt.current == null) return null;
+    return cardFingerprint(cardRef.current) === cardAt.current
+      ? null
+      : 'the card changed since this run read it (sizes, BOM fabrics or its pieces / patterns) — nothing was uploaded: go back to sizes to run against the card as it is now';
+  }
+
   return {
     session,
     inputs,
     apply,
+    /** Codex re-check #1 (r4): the card snapshot this run reads (the autopilot reads it too). */
+    runCard: rc(),
+    /** Codex re-check #1: the card changed since the run read it (the reason), else null. */
+    cardStale,
+    /** Codex re-check #2: take the apply lock of this draft (null = held already). */
+    lockApply,
+    unlockApply,
     sheetModes,
-    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') =>
-      setSheetModes((m) => ({ ...m, [scopeKey]: mode })),
+    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
+      operatorActs();
+      setSheetModes((m) => ({ ...m, [scopeKey]: mode }));
+    },
     extracted,
     errorCode,
     notice,
     som,
     clientKind: client.kind,
     blocker,
+    /** N1: what the step offers without blocking on it — why the drive stopped here. */
+    offer,
+    /** N1: how each step was passed without the operator ('auto' ✓ / 'skipped'), still doors. */
+    passed,
+    advance,
+    /** A10: where and why the autopilot's drive stopped (the footer line); null = it did not. */
+    driveStop,
     /** A0.2: the sheet is one page — the stepper shows the step passed over ("1 page"). */
     sheetSkipped:
       !extracted.presegmented && singlePageSheet(session.pages, session.sheet, inputs.gridOverride),
@@ -1253,6 +1661,7 @@ export function useImportSession(deps: {
     dispatch,
     next,
     addSeed,
+    promoteAside,
     editPieces,
     editName,
     confirmSize,
@@ -1260,7 +1669,11 @@ export function useImportSession(deps: {
     setDrawnSizes: (n: number | null) => dispatch({ type: 'drawn-sizes', n }),
     confirmShown,
     answerOutline,
-    patchInputs,
+    /** The steps' own input answers (an operator action: a running drive stops). */
+    patchInputs: (p: Partial<Inputs> | ((i: Inputs) => Partial<Inputs>)) => {
+      operatorActs();
+      patchInputs(p);
+    },
     scaleDecision: () => scaleDecision(inputs),
     piecesInput,
     semanticsInput,
@@ -1388,4 +1801,15 @@ function downloadText(filename: string, text: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** A10: the write's autopilot record — given with the event, else the run's own assumptions. */
+function autopilotOf(
+  given: AutopilotRecord | undefined,
+  own: readonly Assumption[],
+  pieces: readonly { seed: SeedId }[],
+): { autopilot?: AutopilotRecord } {
+  if (given) return { autopilot: given };
+  if (!own.length) return {};
+  return { autopilot: autopilotRecordOf(own, new Set(pieces.map((p) => p.seed))) };
 }
