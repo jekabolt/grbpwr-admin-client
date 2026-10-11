@@ -276,6 +276,8 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
+  /** For 'overview': the tile grid it draws, as a share of the tile size (0.2 = 1:5). */
+  reduced?: number;
   confidence: number;
   why: string;
 };

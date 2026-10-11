@@ -563,6 +563,9 @@ const NOT_PATTERN_WORDS =
  * instructions / cover role at 0.7 or more, or a word on the page that names it. (A text-only page
  * is never "to check": clean sets it aside by itself.) Null = none (the page-role question).
  */
+/** An overview's tile grid at most this share of the tile size reads as a reduced drawing. */
+const OVERVIEW_REDUCED_MAX = 0.7;
+
 function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
@@ -570,6 +573,17 @@ function notPatternEvidence(
   const c = pages.find((p) => p.file === d.file && p.page === d.page);
   if (c && (c.cls === 'instructions' || c.cls === 'cover') && c.confidence >= 0.7)
     return `${c.cls} ${c.confidence.toFixed(2)}`;
+  // an overview: the classifier AND a second, independent fact — the tile grid it draws is at a
+  // reduced scale, or its page format is not the tiles' (it cannot sit in their grid)
+  if (c && c.cls === 'overview' && c.confidence >= 0.7) {
+    const second =
+      c.reduced != null && c.reduced <= OVERVIEW_REDUCED_MAX
+        ? `its tile grid is drawn at ${c.reduced.toFixed(2)} of the tile size (1:${Math.round(1 / c.reduced)})`
+        : /other page format/.test(c.why)
+          ? "its page format is not the tiles' (it cannot sit in their grid)"
+          : null;
+    if (second) return `overview ${c.confidence.toFixed(2)} + ${second}`;
+  }
   const w = NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;
@@ -611,7 +625,8 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
           'a page the reader set aside stays aside on evidence it is not pattern',
           [notPatternEvidence(d, s.pages)!, d.why.slice(0, 120)],
           0.6,
-          false,
+          // an overview set aside holds pattern-like line work: a strong assumption
+          d.cls === 'overview',
           undefined,
           `${d.file}:${d.page}`,
         ),
