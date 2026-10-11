@@ -58,6 +58,7 @@ import {
   NOT_PATTERN_ROLES,
   aiAsides,
   aiWords,
+  exclusionOf,
   geoEvidence,
   pageStats,
   tileGrid,
@@ -237,6 +238,8 @@ export function cleanPages(
   const curveTexts: CurveText[] = [];
   const scaleHints: ScaleCandidate[] = [];
   const tileMarks: NonNullable<CleanOutput['tileMarks']> = [];
+  /** A9: the tile pages' line work per file (the reduced-copy test against the file's own sheet). */
+  const tilePcs = new Map<string, TilePc[]>();
   const total = docs.reduce((a, d) => a + d.pages.length, 0);
   let done = 0;
   for (const doc of docs) {
@@ -277,6 +280,10 @@ export function cleanPages(
           );
         }
     // A9: the file's tile chrome (what a page set aside is tested against) and its tile format
+    tilePcs.set(
+      doc.file.id,
+      pcs.map((pc) => ({ pc, sheet: roleOf.get(pageKey(doc.file.id, pc.page.page))?.sheet })),
+    );
     if (tiles.length) {
       const fmts = new Map<string, { widthMm: number; heightMm: number; n: number }>();
       for (const t of tiles) {
@@ -351,7 +358,7 @@ export function cleanPages(
         });
     }
   }
-  aiPass(dropped, pages, roles, input, edited, docPage, pcOf, tileMarks, notes);
+  aiPass(dropped, pages, roles, input, edited, docPage, pcOf, tileMarks, tilePcs, notes);
   pages.sort((a, b) => Number(a.file) - Number(b.file) || a.page - b.page);
   const { summary, offered } = countsOf(pages.flatMap((p) => p.items));
   return {
@@ -373,6 +380,9 @@ export function cleanPages(
  * geometry → set aside by itself; less → stays a suggestion. A page in the tile grid is never
  * touched (the AI's word on a tile is a note). The operator's role edits are their own answer.
  */
+/** A tile page's line work, its sheet, and its piece shapes (computed once, when a rule asks). */
+type TilePc = { pc: PageChains; sheet?: number; shapes?: ReturnType<typeof shapesOf> };
+
 function aiPass(
   dropped: CleanOutput['dropped'],
   pages: PageMask[],
@@ -382,6 +392,7 @@ function aiPass(
   docPage: ReadonlyMap<string, IRPage>,
   pcOf: (pg: IRPage) => PageChains,
   tileMarks: NonNullable<CleanOutput['tileMarks']>,
+  tilePcs: ReadonlyMap<string, TilePc[]>,
   notes: string[],
 ) {
   const hints = new Map(
@@ -420,9 +431,27 @@ function aiPass(
       d.geo = ['registers with a tile by shared line work — it may be one'];
       continue;
     }
-    const geo = geoEvidence(pageStats(pg, pcOf(pg), marks), marks, d.reducedCopy, grid);
+    const pc = pcOf(pg);
+    const st = pageStats(pg, pc, marks);
+    const geo = geoEvidence(st, marks, grid);
     if (geo.length) d.geo = geo;
-    if (!aiAsides(d, h, geo)) continue;
+    if (!h) continue;
+    // the exclusionary fact: a reduced copy of THIS file's own 1:1 tile sheet (the page's sheet when
+    // it has one), or a page with no piece-sized outline and no long line outside the tile grid
+    const sheet = roles.find((c) => c.file === d.file && c.page === d.page)?.sheet;
+    const own = (tilePcs.get(d.file) ?? []).filter(
+      (t) => sheet === undefined || t.sheet === undefined || t.sheet === sheet,
+    );
+    const copy = own.length
+      ? reducedCopy(
+          shapesOf(pc.chains, REDUCED_COPY.minOverviewMm2),
+          own.flatMap((t) => (t.shapes ??= shapesOf(t.pc.chains, PATIMPORT.minPieceAreaMm2))),
+          PATIMPORT.minPieceAreaMm2,
+        )
+      : null;
+    const exclusion = exclusionOf(pc, st, copy, grid);
+    if (exclusion) d.exclusion = exclusion;
+    if (!aiAsides(d, h, exclusion ?? null)) continue;
     d.status = 'auto';
     d.aiAside = true;
     const m = pages.find((p) => p.file === d.file && p.page === d.page);

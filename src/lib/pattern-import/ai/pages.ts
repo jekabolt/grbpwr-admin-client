@@ -239,10 +239,12 @@ async function run(
             widthMm: Math.round(t.widthMm * 10) / 10,
             heightMm: Math.round(t.heightMm * 10) / 10,
             textExcerpt: t.textExcerpt,
-            lineLengthM: t.lineLengthM,
-            pieceSizedOutlines: t.pieceSizedOutlines,
-            hasTileMarks: !!t.hasTileMarks,
-            textChars: t.textChars,
+            // Codex #1: none of our geometry goes to the AI — its answer must stay independent of
+            // the geometric evidence it is combined with (the server fields are optional)
+            lineLengthM: undefined,
+            pieceSizedOutlines: undefined,
+            hasTileMarks: undefined,
+            textChars: undefined,
           }));
         if (!pages.length) throw new Error('no page thumbnail went up');
         const call = deps.classify({

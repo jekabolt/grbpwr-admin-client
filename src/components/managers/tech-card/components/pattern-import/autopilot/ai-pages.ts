@@ -22,10 +22,10 @@ export function aiAsideAssumptions(
         kind: 'pages-as-read',
         subject: `${name} · page ${d.page + 1}`,
         answer: `set aside (${d.cls})`,
-        rule: 'the AI (≥ 0.85) and the page geometry agree it is not pattern',
-        evidence: [`AI: ${aiWords(d.ai)}`, ...d.ai.evidence.slice(0, 1), ...(d.geo ?? [])].map(
-          (e) => e.slice(0, 160),
-        ),
+        rule: 'the AI (≥ 0.85, not pattern) and an exclusionary geometric fact agree',
+        evidence: [`AI: ${aiWords(d.ai)}`, ...d.ai.evidence.slice(0, 1), d.exclusion ?? '']
+          .filter(Boolean)
+          .map((e) => e.slice(0, 160)),
         confidence: Math.round(d.ai.confidence * 100) / 100,
         strong: true,
         value: { file: +d.file, page: d.page, as: `set aside (${d.cls})` },

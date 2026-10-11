@@ -139,10 +139,10 @@ async function oneFile(f: string) {
     );
     const aside = withAi.dropped.filter((d) => d.aiAside).map((d) => d.page + 1);
     const still = withAi.dropped.filter((d) => d.status === 'suggest');
-    // every page set aside by AI + geometry: AI ≥ 0.85, a non-pattern role, ≥ 1 geometric evidence
+    // every page set aside by AI + geometry: AI ≥ 0.85, a non-pattern role, an EXCLUSIONARY fact
     check(
       name,
-      'set aside only on AI ≥ 0.85 (not pattern) + a geometric evidence',
+      'set aside only on AI ≥ 0.85 (not pattern) + an exclusionary geometric fact',
       withAi.dropped
         .filter((d) => d.aiAside)
         .every(
@@ -150,9 +150,9 @@ async function oneFile(f: string) {
             !!d.ai &&
             d.ai.confidence >= AI_PAGES.autoMin &&
             !/^pattern/.test(d.ai.role) &&
-            (d.geo?.length ?? 0) > 0,
+            !!d.exclusion,
         ),
-      withAi.dropped.filter((d) => d.aiAside).map((d) => [d.page + 1, d.ai, d.geo]),
+      withAi.dropped.filter((d) => d.aiAside).map((d) => [d.page + 1, d.ai, d.exclusion]),
     );
     // the AI alone: the same answers at 0.8 set nothing aside
     const weak = hints.map((h) => ({ ...h, confidence: 0.8 }));

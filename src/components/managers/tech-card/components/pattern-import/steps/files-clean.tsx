@@ -310,8 +310,9 @@ export function asideEvidence(d: StageIO['clean']['out']['dropped'][number]): st
   const ai = d.ai
     ? `AI: ${aiWords(d.ai)}${d.ai.evidence.length ? ` («${d.ai.evidence[0]}»)` : ''}`
     : '';
-  const geo = d.geo?.length ? `geometry: ${d.geo.join('; ')}` : '';
-  return [ai, geo].filter(Boolean).join(' · ');
+  const ex = d.exclusion ? `geometry: ${d.exclusion}` : '';
+  const geo = d.geo?.length ? `geometry suggests: ${d.geo.join('; ')}` : '';
+  return [ai, ex, geo].filter(Boolean).join(' · ');
 }
 
 /** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */

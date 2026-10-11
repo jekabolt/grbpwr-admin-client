@@ -638,7 +638,7 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
     // A9: the AI alone (below 0.85, or no geometry agrees) — the stop carries its answer pre-filled
     const ai =
       blind.ai && blind.ai.role !== 'other'
-        ? ` The AI reads it as ${aiWords(blind.ai)}${blind.geo?.length ? '' : ' and nothing in its geometry agrees'} — pre-filled: keep it aside.`
+        ? ` The AI reads it as ${aiWords(blind.ai)}${blind.geo?.length ? ` (geometry suggests the same: ${blind.geo[0]})` : ''}, but nothing in its geometry excludes a piece — pre-filled: keep it aside (one click).`
         : '';
     return stopAt(
       'files',

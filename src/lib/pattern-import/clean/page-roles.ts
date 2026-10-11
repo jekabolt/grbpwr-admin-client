@@ -1,18 +1,19 @@
 // clean/ (A9) — the AI's page roles as evidence on the pages the classifier set aside (plan
-// auto/00-PLAN §A9; owner 11.10). In autopilot every real PDF of the corpus stopped on "page N was
-// set aside as instructions / overview but holds line work": the classifier's word alone is one
-// evidence. The AI reading the page's thumbnail is evidence №1, the page's OWN geometry №2:
+// auto/00-PLAN §A9; owner 11.10). The AI reads ONLY the page (its picture, its words, its size —
+// none of our geometry, so its answer is independent of it): evidence №1. The page's own geometry
+// is №2, in two strengths:
 //
-//   · another page format than the file's tiles — the page cannot sit in the tile grid;
-//   · no tile chrome where the tiles carry it (the marks / frame / labels every tile repeats at one
-//     page place are not on this page);
-//   · text-dominant (≥ 300 characters and ≥ 150 per metre of line work);
-//   · a reduced copy of the tiles' pieces (clean/reduced-copy.ts, an overview).
+//   EXCLUSIONARY (with the AI ≥ 0.85 in a non-pattern role → set aside by itself, "AI + geometry"):
+//     (a) every piece-sized closed outline on the page is a reduced copy (scale ≤ 0.5) of the
+//         pieces of this file's own 1:1 tile sheet — ≥ 80 % of its outlines matched, none of piece
+//         size unexplained (clean/reduced-copy.ts);
+//     (b) the page draws no piece-sized outline and no line longer than 100 mm, and it is not part
+//         of the tile grid (it carries no tile chrome, it registers with no tile);
+//   SUGGESTIVE (never enough, even with the AI — a suggestion, the autopilot's pre-filled stop):
+//     another page format than the tiles, no tile chrome, text-dominant, does not register.
 //
-// D3 still holds: both → the page is set aside by itself ('auto', shown "set aside · AI +
-// geometry", one click undoes it); the AI alone or the geometry alone → a suggestion; the AI's
-// `pattern_*` on a page set aside → "read it as a tile" offered. The AI never removes a page the
-// classifier placed in the tile grid — such pages are not set aside here at all.
+// The AI never removes a page the classifier placed in the tile grid, and never a page holding a
+// piece-sized outline that is not a reduced copy.
 import { PATIMPORT } from '../types';
 import type { AiPageHint, AiPageRole, CleanOutput, IRPage, PageStats, TileMarkSig } from '../types';
 import { buildRegPage, furnitureOf } from '../assemble/regpage';
@@ -39,6 +40,10 @@ export const AI_PAGES = {
   gridTiles: 8,
   /** Thumbnail long side, px. */
   thumbPx: 1024,
+  /** (a): a reduced copy draws the pieces at most at this scale. */
+  copyMaxScale: 0.5,
+  /** (b): no line longer than this (mm) — the classifier's "pattern-like" line. */
+  longLineMm: 100,
 };
 
 export const NOT_PATTERN_ROLES: ReadonlySet<AiPageRole> = new Set<AiPageRole>([
@@ -200,31 +205,30 @@ export function pageStats(pg: IRPage, pc: PageChains, marks?: FileMarks | null):
     hasTileMarks:
       marks && marks.sigs.length && sameOrientation(pg, marks.tile)
         ? marksOn(pc, marks.sigs) > 0
-        : null,
+        : undefined,
     textChars: chars,
     textExcerpt: excerpt,
   };
 }
 
 /**
- * Geometric evidence (№2) that a page set aside is not pattern — each independent of the AI. Empty
- * = the geometry does not say.
+ * SUGGESTIVE geometric facts that a page set aside is not pattern — never enough to set it aside,
+ * even with the AI (another format, no chrome, text-dominant, no registration). Empty = silent.
  */
 export function geoEvidence(
   st: PageStats,
   marks: FileMarks | null | undefined,
-  reducedCopy?: { matches: number; of: number; scale: number },
   grid: 'registers' | 'apart' | null = null,
 ): string[] {
   const out: string[] = [];
   if (grid === 'apart')
     out.push(
-      'registers with none of the tiles (they register with each other by shared line work) — not in the tile grid',
+      'registers with none of the tiles (the tiles register with each other by shared line work)',
     );
   const fmt = (w: number, h: number) => `${Math.round(w)}×${Math.round(h)} mm`;
   if (marks && !sameFormat(st, marks.tile))
     out.push(
-      `another page format (${fmt(st.widthMm, st.heightMm)}) than the tiles (${fmt(marks.tile.widthMm, marks.tile.heightMm)}) — not in the tile grid`,
+      `another page format (${fmt(st.widthMm, st.heightMm)}) than the tiles (${fmt(marks.tile.widthMm, marks.tile.heightMm)})`,
     );
   if (st.hasTileMarks === false && marks)
     out.push(
@@ -235,11 +239,41 @@ export function geoEvidence(
     st.textChars >= AI_PAGES.textCharsPerM * st.lineLengthM
   )
     out.push(`text-dominant: ${st.textChars} characters on ${st.lineLengthM} m of line`);
-  if (reducedCopy)
-    out.push(
-      `${reducedCopy.matches} of its ${reducedCopy.of} outlines are tile pieces at 1:${Math.round(1 / reducedCopy.scale)} (a reduced copy)`,
-    );
   return out;
+}
+
+/**
+ * The EXCLUSIONARY fact (a) or (b) — the only geometry that, with the AI, sets a page aside. Null =
+ * none: the page may hold a piece.
+ */
+export function exclusionOf(
+  pc: PageChains,
+  st: PageStats,
+  copy: { matches: number; of: number; scale: number } | null,
+  grid: 'registers' | 'apart' | null,
+): string | null {
+  if (grid === 'registers') return null;
+  if (copy && copy.scale <= AI_PAGES.copyMaxScale)
+    return `its outlines are the file's tile pieces at 1:${Math.round(1 / copy.scale)} (${copy.matches} of ${copy.of} matched, none of piece size unexplained) — a reduced copy`;
+  // (b): a rectangle of piece size counts as a piece here (a waistband, a pocket bag is one)
+  const longest = pc.chains.reduce((a, c) => Math.max(a, c.lengthMm), 0);
+  if (closedPieceSized(pc) === 0 && longest <= AI_PAGES.longLineMm && st.hasTileMarks !== true)
+    return `no piece-sized outline, no line over ${AI_PAGES.longLineMm} mm (longest ${Math.round(longest)} mm), no tile chrome — not part of the tile grid`;
+  return null;
+}
+
+/** Closed outlines of piece size, rectangles included (`minPieceAreaMm2`). */
+export function closedPieceSized(pc: PageChains): number {
+  let n = 0;
+  for (const c of pc.chains) {
+    if (!c.closed) continue;
+    let a = 0;
+    const q = c.pts;
+    for (let k = 0, j = q.length - 1; k < q.length; j = k++)
+      a += (q[j].x + q[k].x) * (q[j].y - q[k].y);
+    if (Math.abs(a) / 2 >= PATIMPORT.minPieceAreaMm2) n++;
+  }
+  return n;
 }
 
 /** "instructions 0.92" */
@@ -248,19 +282,20 @@ export const aiWords = (a: { role: AiPageRole; confidence: number }) =>
 
 /**
  * The rule on one page set aside (it holds line work: status 'suggest'): AI ≥ 0.85 in a non-pattern
- * role AND a geometric evidence → set aside by itself. Anything less stays a suggestion (the
- * operator's one click; the autopilot's stop with the answer pre-filled).
+ * role (a fresh answer) AND an exclusionary geometric fact → set aside by itself. Anything less
+ * stays a suggestion (the operator's one click; the autopilot's stop with the answer pre-filled).
  */
 export function aiAsides(
   d: Pick<CleanOutput['dropped'][number], 'status'>,
-  ai: Pick<AiPageHint, 'role' | 'confidence'> | undefined,
-  geo: readonly string[],
+  ai: Pick<AiPageHint, 'role' | 'confidence' | 'stale'> | undefined,
+  exclusion: string | null,
 ): boolean {
   return (
     d.status === 'suggest' &&
     !!ai &&
+    !ai.stale &&
     NOT_PATTERN_ROLES.has(ai.role) &&
     ai.confidence >= AI_PAGES.autoMin &&
-    geo.length > 0
+    !!exclusion
   );
 }

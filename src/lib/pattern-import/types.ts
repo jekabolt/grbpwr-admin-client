@@ -2207,6 +2207,11 @@ export type AiPageHint = {
   confidence: number;
   /** The model's own words (≤ 3 × 120 runes). */
   evidence?: string[];
+  /**
+   * A9 (Codex #4): asked before an edit that changed the page's render or the tile reference set —
+   * it only suggests until asked again.
+   */
+  stale?: boolean;
 };
 
 /** A9 (clean/page-roles.ts): a chain of the tile chrome at one page place, as `repetition` reads it. */
@@ -2222,8 +2227,8 @@ export type PageStats = {
   lineLengthM: number;
   /** Closed outlines of piece size that are not rectangles (`shapesOf`). */
   pieceSizedOutlines: number;
-  /** The file's tile chrome at its page place on this page; null = unknown (no chrome on the tiles, other orientation). */
-  hasTileMarks: boolean | null;
+  /** The file's tile chrome at its page place on this page; undefined = unknown (no chrome on the tiles, other orientation). */
+  hasTileMarks?: boolean;
   textChars: number;
   /** The page's words in reading order, ≤ 600 runes. */
   textExcerpt: string;
@@ -2280,13 +2285,18 @@ export type CleanOutput = {
      */
     ai?: { role: AiPageRole; confidence: number; evidence: string[] };
     /**
-     * A9: independent geometric evidence that the page is not pattern (evidence №2): another page
-     * format than the tiles, no tile chrome where the tiles carry it, text-dominant, a reduced copy.
+     * A9: SUGGESTIVE geometric facts that the page is not pattern (another format, no tile chrome,
+     * text-dominant, no registration) — never enough to set it aside, even with the AI.
      */
     geo?: string[];
     /**
-     * A9: set aside by the AI (≥ 0.85, a non-pattern role) AND geometry although it holds line
-     * work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
+     * A9: the EXCLUSIONARY geometric fact (clean/page-roles.ts `exclusionOf`: a reduced copy of the
+     * file's tile pieces, or no piece-sized outline / long line and not in the tile grid).
+     */
+    exclusion?: string;
+    /**
+     * A9: set aside by the AI (≥ 0.85, a non-pattern role) AND the exclusionary fact although it
+     * holds line work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
      */
     aiAside?: boolean;
   }[];
