@@ -24,6 +24,8 @@ export const REDUCED_COPY = {
   /** Share of the overview's outlines that must be matched tile pieces. */
   minShare: 0.8,
   maxSpread: 1.3,
+  /** A9: a match belongs to the accepted scale cluster within ± this share of its scale. */
+  clusterTol: 0.1,
   /** Outlines compared per page side (largest first). */
   cap: 40,
 };
@@ -150,7 +152,18 @@ export function shapesOf(chains: readonly Chain[], minMm2: number): Shape[] {
   return out;
 }
 
-export type ReducedCopy = { matches: number; of: number; scale: number };
+export type ReducedCopy = {
+  matches: number;
+  of: number;
+  scale: number;
+  /**
+   * A9 (Codex re-check #1/#3): how many DIFFERENT tile pieces (Hu-distinct) the matches INSIDE the
+   * accepted scale cluster (± `clusterTol` of `scale`) are.
+   */
+  pieces?: number;
+  /** A9 (Codex re-check #3): every piece-sized outline of the page is a match inside that cluster. */
+  clustered?: boolean;
+};
 
 /**
  * The overview's outlines that are a whole tile piece at a smaller scale: each overview outline
@@ -166,6 +179,7 @@ export function reducedCopy(
 ): ReducedCopy | null {
   const used = new Set<number>();
   const scales: number[] = [];
+  const hits: { o: Shape; t: number; s: number }[] = [];
   const matched = new Set<Shape>();
   for (const o of overview) {
     let best = -1;
@@ -182,6 +196,7 @@ export function reducedCopy(
     }
     if (best >= 0) {
       used.add(best);
+      hits.push({ o, t: best, s: Math.sqrt(o.areaMm2 / tiles[best].areaMm2) });
       matched.add(o);
       scales.push(Math.sqrt(o.areaMm2 / tiles[best].areaMm2));
     }
@@ -198,5 +213,25 @@ export function reducedCopy(
   if (agree.length < REDUCED_COPY.minMatches) return null;
   // … and nearly all the page's outlines are such reduced pieces
   if (agree.length < REDUCED_COPY.minShare * overview.length) return null;
-  return { matches: agree.length, of: overview.length, scale: Math.round(med * 1000) / 1000 };
+  // A9 (Codex re-check #3): only the matches inside the accepted scale cluster count — four copies
+  // of one piece at 0.30 and another piece at 0.60 are ONE piece reduced, not a copy of the sheet
+  const scale = Math.round(med * 1000) / 1000;
+  const inCluster = hits.filter((h) => Math.abs(h.s / med - 1) <= REDUCED_COPY.clusterTol);
+  const clustered = overview
+    .filter((o) => o.areaMm2 >= Math.min(pieceMm2, Infinity))
+    .every((o) => inCluster.some((h) => h.o === o));
+  // the matched tile shapes grouped by shape: copies of one piece drawn twice are one piece
+  const kinds: number[][] = [];
+  for (const { t } of inCluster)
+    if (
+      !kinds.some((h) => h.every((v, k) => Math.abs(v - tiles[t].hu[k]) <= REDUCED_COPY.sameShape))
+    )
+      kinds.push(tiles[t].hu);
+  return {
+    matches: agree.length,
+    of: overview.length,
+    scale,
+    pieces: kinds.length,
+    clustered,
+  };
 }

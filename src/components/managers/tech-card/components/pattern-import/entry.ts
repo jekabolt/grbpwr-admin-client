@@ -48,6 +48,9 @@ export function buildCardContext(args: {
     manifest?: ConversionManifest | null;
   }[];
   styleLabel: string;
+  /** A10: the card's name and style number (the autopilot's model / sheet match). */
+  cardName?: string;
+  styleNumber?: string;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
     // The card's own reader of the dictionary name (xs_44ta_m → xs, 44): the worker's size map
@@ -105,5 +108,7 @@ export function buildCardContext(args: {
         : [],
     ),
     styleLabel: args.styleLabel,
+    cardName: args.cardName ?? '',
+    styleNumber: args.styleNumber ?? '',
   };
 }

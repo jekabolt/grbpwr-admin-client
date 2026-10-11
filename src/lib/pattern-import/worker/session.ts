@@ -77,10 +77,13 @@ import {
   mergeScale,
   srcKey,
 } from '../clean';
-import { renderSom } from '../ai/som';
+import { renderPagePng, renderSom } from '../ai/som';
+import { pageChains } from '../clean/page-chains';
+import { marksOn, pageStats } from '../clean/page-roles';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
-import { gradeView } from '../chains/face-role';
+import { layerLoopAsides } from '../chains/layer-role';
+import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
 import {
@@ -92,10 +95,12 @@ import {
 } from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
+import { fileSizeLabel } from '../sizes/recover';
 import {
   applyPieceEdits,
   applyWallEdits,
   isWallEdit,
+  pageLabels,
   proposeSeeds,
   startSession,
   variantLabels,
@@ -243,6 +248,8 @@ function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
 
 /** A8b: tile chrome — a cut line on it, or around it, is traced chrome (G19). */
 const CHROME_KINDS = new Set<BackgroundKind>(['tile-frame', 'regmark', 'tile-label']);
+/** P2: DXF dialects whose numbered layers are AAMA/ASTM layers (adapters/dxf detectDialect). */
+const AAMA_DIALECTS = new Set(['grbpwr', 'clo-r2000', 'clo-aama-r12', 'clo-aama-gerber', 'aama']);
 
 const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   const { paths: _p, texts: _t, rasters: _r, styles: _s, ...rest } = s;
@@ -289,6 +296,8 @@ export class Session {
   // clean (A8)
   /** The page masks of the last clean run (re-applied whenever the docs are read again). */
   private masks: PageMask[] | null = null;
+  /** A9: the tile chrome per file the last clean run found (the page stats test a page against). */
+  private tileMarks: NonNullable<StageIO['clean']['out']['tileMarks']> = [];
   private cleanEdits: PageMaskEdit[] = [];
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
@@ -315,6 +324,8 @@ export class Session {
   /** `docTexts` with the file each was printed in (A6: only the selected sheet's files count). */
   private docTextSrc: { file: FileId; page: PageIndex; text: string }[] = [];
   private fileNames = new Map<string, string>();
+  /** P2: a file of the sheet is an AAMA/CLO DXF (its numbered layers are AAMA layers). */
+  private aamaLayers = false;
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
@@ -468,6 +479,8 @@ export class Session {
           return this.semanticsStage(input as StageIO['semantics']['in'], ctx);
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
+        case 'render-pages':
+          return this.renderPagesStage(input as StageIO['render-pages']['in'], ctx);
         case 'write':
           return this.write(input as StageIO['write']['in'], ctx);
         case 'fabrics':
@@ -641,6 +654,19 @@ export class Session {
         ),
       ),
     ];
+    // A10: what each page prints that tells the sheets apart (models, a sheet letter) — the
+    // autopilot matches the card against it before a sheet is assembled
+    if (multiPage.length) {
+      const textOf = new Map(
+        multiPage.flatMap((d) =>
+          d.pages.map((p) => [`${d.file.id}:${p.page}`, p.texts.map((t) => t.text)] as const),
+        ),
+      );
+      this.pages = this.pages.map((c) => {
+        const l = pageLabels(textOf.get(`${c.file}:${c.page}`) ?? []);
+        return l.models || l.sheets ? { ...c, labels: l } : c;
+      });
+    }
     if (this.dxfSet)
       this.pages = this.setSizes.map(
         (s): PageClassification => ({
@@ -819,6 +845,7 @@ export class Session {
     });
     applyMasks(docs, out.pages);
     this.masks = out.pages;
+    this.tileMarks = out.tileMarks ?? [];
     this.offeredSrc = new Set<string>();
     this.chromeSrc = new Map<string, BackgroundKind>();
     for (const m of out.pages) {
@@ -892,6 +919,8 @@ export class Session {
       );
       this.docTexts = this.docTextSrc.map((t) => t.text);
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
+      // P2: numbered DXF layers are AAMA layers only when the reader proved the dialect
+      this.aamaLayers = docs.some((d) => AAMA_DIALECTS.has(d.file.dxf?.dialect ?? ''));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
       }).sheet;
@@ -954,10 +983,26 @@ export class Session {
           .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
           .map((p) => p.id),
       );
+      // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
+      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
+      const countFeed = {
+        texts: feed.texts,
+        files: feed.files,
+        models: variantLabels(feed.texts.map((t) => t.text)).length,
+        // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
+        // graded look against it is asked, never held silently
+        sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
+      };
       set = buildChainsDetailed(
         sheet,
         { ...input.opts },
-        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths },
+        {
+          extraTexts: this.docTexts,
+          fileNames: this.fileNames,
+          offeredPaths,
+          countFeed,
+          aamaLayers: this.aamaLayers,
+        },
         (d, t, n) => {
           ctx.checkCancel();
           ctx.progress(d, t, n);
@@ -1018,7 +1063,13 @@ export class Session {
   private countEv: { key: string; set: ChainSet; v: ReturnType<typeof countEvidence> } | null =
     null;
   private countAsk(read: SizeRun): SizeCountAsk | null {
-    if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
+    // gb2: a file name's one size against lines that look graded (chains/face-role sourceClash) is
+    // no settled count: the step asks it
+    if (
+      expectedSizes(read, null, this.chains ?? undefined)?.from === 'source' &&
+      !(this.chains && sourceClash(this.chains))
+    )
+      return null;
     if (
       this.fast &&
       !this.fast.families.some((f) => f.candidates.some((c) => (c as DxfPieceCandidate).oneSize))
@@ -1034,7 +1085,18 @@ export class Session {
     const sheet = this.sheet;
     const key = `${sheet.id}`;
     if (this.countEv?.set !== set || this.countEv.key !== key) {
-      const faces = this.facesOf(set, read, PATIMPORT.fillCellMm);
+      // the geometry as the size checks read it (gradeView: the face pass's candidate size lines
+      // are walls) — on the canonical set a graded sheet's held sizes are no walls and its outlines
+      // would read one line deep
+      const view = gradeView(set);
+      const faces =
+        view === set
+          ? this.facesOf(set, read, PATIMPORT.fillCellMm)
+          : {
+              map: faceMap(sheet, view, read, (this.textSeeds ??= proposeSeeds(sheet, set)), {
+                cellMm: PATIMPORT.fillCellMm,
+              }),
+            };
       const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
       const cands = new Set(shapeCandidates(faces.map.blobs).map((b) => b.id));
       this.countEv = {
@@ -1046,7 +1108,7 @@ export class Session {
           shapes: blobShapes(faces.map, cands),
           files: feed.files,
           // the models it names are read as the pieces stage reads them (its model choice)
-          models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+          models: variantLabels(sheet.texts.map((t) => t.text)).length,
         }),
       };
     }
@@ -1078,7 +1140,9 @@ export class Session {
     const text = (this.textSeeds ??= proposeSeeds(sheet, base));
     const map = faceMap(sheet, base, run, text, { cellMm });
     const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
-    const { held, asides } = asidesOf(map, text);
+    const { held, asides: a0 } = asidesOf(map, text);
+    // P2: a loop on the internal layer inside a cut piece is positive evidence of no piece
+    const asides = layerLoopAsides(base, a0);
     const entry = { set: base, key, map, seeds: faceSeedsOf(map, first), held, asides };
     this.faces = entry;
     this.sizeFaces = entry;
@@ -1249,7 +1313,9 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
-    const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
+    // A10 (Codex #1): the models THIS sheet prints — never the text of every page (another
+    // sheet's tiles, an instruction or overview page naming every model of the magazine)
+    const variants = variantLabels(sheet.texts.map((t) => t.text));
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
@@ -1336,6 +1402,51 @@ export class Session {
     });
     this.blobs.set('som:sheet', out.sheetPng);
     return out;
+  }
+
+  // ── render-pages (A9) ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * The thumbnails of the AI page-role call: each page after the clean stage's mask (the grid and
+   * the chrome it masked are not shown), with its stats. A side stage: invalidates nothing.
+   */
+  private async renderPagesStage(
+    input: StageIO['render-pages']['in'],
+    ctx: StageCtx,
+  ): Promise<StageIO['render-pages']['out']> {
+    if (!this.docs || !this.masks)
+      throw new ImportError('out-of-order', 'clean the pages first', 'render-pages');
+    // stats and pictures in page millimetres (a scale applied since is undone for the numbers)
+    const f = this.docsFactor || 1;
+    const marksOf = new Map(this.tileMarks.map((m) => [m.file, m]));
+    const out: StageIO['render-pages']['out']['pages'] = [];
+    let n = 0;
+    for (const want of input.pages) {
+      ctx.checkCancel();
+      const pg = this.docs
+        .find((d) => d.file.id === want.file)
+        ?.pages.find((p) => p.page === want.page);
+      if (!pg) continue;
+      // the line work as the mask leaves it; the tile chrome is looked for on the whole page (a
+      // tile's own chrome is masked)
+      const marks = f === 1 ? marksOf.get(pg.file) : undefined;
+      const st = pageStats(pg, pageChains(pg), marks);
+      if (marks && st.hasTileMarks === false && pg.paths.some((p) => p.background)) {
+        const whole = { ...pg, paths: pg.paths.map((p) => ({ ...p, background: undefined })) };
+        st.hasTileMarks = marksOn(pageChains(whole), marks.sigs) > 0;
+      }
+      const png =
+        input.pictures === false ? null : await renderPagePng(pg, Math.max(64, input.maxPx));
+      out.push({
+        ...st,
+        widthMm: pg.widthMm / f,
+        heightMm: pg.heightMm / f,
+        lineLengthM: Math.round((st.lineLengthM / f) * 100) / 100,
+        png,
+      });
+      ctx.progress(++n, input.pages.length, `page ${pg.page + 1}`);
+    }
+    return { pages: out };
   }
 
   // ── fabrics (F7) ──────────────────────────────────────────────────────────────────────────

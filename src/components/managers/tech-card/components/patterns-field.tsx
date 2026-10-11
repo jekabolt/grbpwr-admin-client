@@ -312,6 +312,7 @@ export function PatternsField({
     fusingMode?: string;
   }>;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
+  const cardName = (useWatch({ control, name: 'name' }) ?? '') as string;
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
@@ -1678,6 +1679,8 @@ export function PatternsField({
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
             })),
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
+            cardName,
+            styleNumber,
           })}
           // F7: upload every file, then ONE batch into this form, then the card's own save.
           applyDraft={followUpApply(

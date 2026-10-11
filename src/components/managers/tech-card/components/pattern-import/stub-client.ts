@@ -63,6 +63,7 @@ const LATENCY: Record<StageName, number> = {
   semantics: 600,
   fabrics: 300,
   'render-som': 500,
+  'render-pages': 400,
   write: 1200,
 };
 
@@ -184,6 +185,9 @@ export function createStubClient(): ImportClient {
               marks: fixtureMarks(s.families),
             };
           }
+          // A9: the stub has no pages to draw (the fixture wizard asks no AI page roles)
+          case 'render-pages':
+            return { pages: [] };
           case 'semantics': {
             const i = input as StageIO['semantics']['in'];
             const o = fixtureSemantics({

@@ -95,6 +95,8 @@ if (process.argv[2] === 'cmp') {
 const FLAGS = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const CLICKS = FLAGS.has('--clicks') || FLAGS.has('--write-baseline');
+// A9: `--page-roles` = the AI page roles from the recorded fixture (fixtures/page-roles.json)
+if (FLAGS.has('--page-roles')) process.env.E2E_PAGE_ROLES = '1';
 const ids = ARGS.length
   ? ARGS
   : JSON.parse(

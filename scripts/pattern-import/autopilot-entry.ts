@@ -19,6 +19,7 @@ import { toWireError } from 'lib/pattern-import/worker/errors';
 import type {
   CardSize,
   DraftScopeTarget,
+  PageClassification,
   PieceFamily,
   Seed,
   SeedId,
@@ -34,6 +35,7 @@ import { stubBuildDraft } from 'components/managers/tech-card/components/pattern
 import {
   exportedRanks,
   useImportSession,
+  variantsOf,
   type ImportSessionApi,
 } from 'components/managers/tech-card/components/pattern-import/use-import-session';
 import {
@@ -45,7 +47,9 @@ import {
   resolverFor,
   fallbackGrain,
   longestStraight,
+  modelFromCard,
   principalAxis,
+  sheetFromCard,
   type Assumption,
   type AutopilotAnswer,
   type AutopilotSnapshot,
@@ -58,8 +62,547 @@ import {
   newDriveState,
 } from 'components/managers/tech-card/components/pattern-import/auto-drive';
 import { splitSize } from './worker-entry';
+import { fixturePageRoleDeps } from './page-roles-fixture';
 
-type Case = (typeof CASES)[number];
+type Case = (typeof CASES)[number] & {
+  /** A10 card controls: the run must stop ON this question, never pick (unreached = FAIL). */
+  expectStop?: 'sheet' | 'pieces';
+  /** The stop must be the card question (not another one of the step). */
+  expectReason?: RegExp;
+  /**
+   * The control's harness answers the files step's page-role question the way TRUTH reads those
+   * pages (instructions / overview: they stay aside) — the question this control is not about,
+   * which today stops the run before the sheet (A9's lane).
+   */
+  operatorPages?: boolean;
+  /** Rename during the run: once the model is picked the card's name becomes this. */
+  renameTo?: string;
+  /** The model the run must end on (the rename control: the choice is made again). */
+  expectVariant?: RegExp;
+  /** Operator bypass: on the sheet question, "next" must not import the default sheet. */
+  bypass?: boolean;
+  /** The uploaded files' names, as given (a misleading file name). */
+  renameFiles?: string[];
+};
+
+const MODEL_Q = /models? \(.*\) and /;
+const SHEET_Q = /tile sheets and /;
+/**
+ * A10 controls of the card match (Codex review of 48068988): a card that names nothing, a model
+ * not on the sheet, two models (written apart and as a compact list), a misleading file name, two
+ * sheets, a model spread over the sheets with an explicit sheet, a bare number on the card, a
+ * rename during the run, the operator's "next" past the sheet question. Each must STOP on its
+ * question (never pick); one that does not reach the question FAILS. Not counted in "reached
+ * apply". `--mutate=card` injects a pick at each control's question: every one must be caught.
+ */
+const fromCase = (id: string, over: Partial<Case> & { id: string }): Case[] => {
+  const base = CASES.find((c) => c.id === id);
+  return base ? [{ ...base, ...over }] : [];
+};
+const CONTROLS: Case[] = [
+  ...(
+    [
+      ['none', 'Phoebe Jumpsuit', []],
+      ['foreign', 'Phoebe Jumpsuit · Style C', []],
+      ['two', 'Phoebe Jumpsuit · Style A / Style B', []],
+      ['compact', 'Phoebe Jumpsuit · Style A/B', []],
+      ['file-against', 'Phoebe Jumpsuit · Style B', ['phoebe_style_A.pdf']],
+      ['file-only', 'Phoebe Jumpsuit', ['phoebe_style_B.pdf']],
+    ] as const
+  ).flatMap(([k, name, files]) =>
+    fromCase('kombinezon-B', {
+      id: `control:kombinezon-card-${k}`,
+      cardName: name,
+      ...(files.length ? { renameFiles: [...files] } : {}),
+      expectStop: 'pieces',
+      expectReason: MODEL_Q,
+    }),
+  ),
+  ...fromCase('kombinezon-B', {
+    id: 'control:kombinezon-card-rename',
+    cardName: 'Phoebe Jumpsuit · Style B',
+    renameTo: 'Phoebe Jumpsuit · Style A',
+    expectVariant: /Style A/,
+    // after the rename the card IS Style A: scored as kombinezon-A
+    variant: /A/,
+    truth: { id: 'kombinezon', variant: 0 },
+  }),
+  ...(
+    [
+      ['none', 'Mantel & Jacke 44-54'],
+      ['two', 'Mantel & Jacke · Bogen A + Bogen B'],
+      ['compact', 'Mantel & Jacke · Bogen A/B'],
+      ['spread', 'Mantel & Jacke Mod. 7142 · Bogen B'],
+      ['bare', 'Mantel & Jacke 7142'],
+    ] as const
+  ).flatMap(([k, name]) =>
+    fromCase('polupalto-sheetB', {
+      id: `control:polupalto-card-${k}`,
+      cardName: name,
+      expectStop: 'sheet',
+      expectReason: SHEET_Q,
+      operatorPages: true,
+    }),
+  ),
+  ...fromCase('polupalto-sheetB', {
+    id: 'control:polupalto-operator-next',
+    cardName: 'Mantel & Jacke',
+    expectStop: 'sheet',
+    expectReason: SHEET_Q,
+    operatorPages: true,
+    bypass: true,
+  }),
+];
+const ALL: Case[] = [...CASES, ...CONTROLS];
+
+// ── the card match on its own: adversarial rows, each with a twin that must flip ────────────────
+// Every row expects no pick (or a suggestion the autopilot stops on); its twin — the same input
+// with the one fact the guard is about put right — must give the strong pick, so a row cannot pass
+// for an unrelated reason (the row's mutation).
+type Expect = 'none' | 'weak' | `strong:${string}`;
+type Row = {
+  id: string;
+  name?: string;
+  style?: string;
+  files?: string[];
+  labels?: string[];
+  pages?: PageClassification[];
+  expect: Expect;
+  twin: {
+    name?: string;
+    style?: string;
+    files?: string[];
+    pages?: PageClassification[];
+    expect: Expect;
+  };
+};
+const pg = (
+  cls: PageClassification['cls'],
+  sheet: number | undefined,
+  models?: string[],
+  sheets?: string[],
+): PageClassification => ({
+  file: '0',
+  page: 0,
+  cls,
+  ...(sheet != null ? { sheet } : {}),
+  confidence: 1,
+  why: '',
+  ...(models || sheets
+    ? { labels: { ...(models ? { models } : {}), ...(sheets ? { sheets } : {}) } }
+    : {}),
+});
+const M3 = ['Mod. 112', 'Mod. 113', 'Mod. 2026'];
+const AB = ['Style A', 'Style B'];
+const ROWS: Row[] = [
+  // an article / SKU / ref number in any spelling is never a model token (style field and name)
+  {
+    id: 'article-style-1',
+    style: 'Art.-Nr. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-1',
+    name: 'Coat Art.-Nr. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-2',
+    style: 'Article No. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-2',
+    name: 'Coat Article No. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-3',
+    style: 'Art-Nr 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-3',
+    name: 'Coat Art-Nr 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-4',
+    style: 'Artikelnummer 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-4',
+    name: 'Coat Artikelnummer 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-5',
+    style: 'SKU 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-5',
+    name: 'Coat SKU 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-6',
+    style: 'Ref. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-6',
+    name: 'Coat Ref. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-7',
+    style: 'артикул 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-name-7',
+    name: 'Coat артикул 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  // a style-number field with more than the bare value: a suggestion only
+  {
+    id: 'style-field-not-bare',
+    style: 'FW26 112',
+    labels: M3,
+    expect: 'weak',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+
+  // Codex re-check #2: an article number is another namespace; prefixes match within their family
+  {
+    id: 'article-explicit',
+    name: 'Coat Art. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-field',
+    style: 'Artikel 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'family-mod-vs-style',
+    name: 'Phoebe Model A',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Style A', expect: 'strong:Style A' },
+  },
+  {
+    id: 'family-style-vs-mod',
+    name: 'Coat Style 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Modell 112', expect: 'strong:Mod. 112' },
+  },
+  // Codex re-check #1: a tile-local legend listing several models proves no ownership
+  {
+    id: 'tile-legend-mixed',
+    name: 'Coat Mod. 112',
+    pages: [pg('tile', 0, ['Mod. 112', 'Mod. 114']), pg('tile', 1, ['Mod. 114'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112',
+      pages: [
+        pg('tile', 0, ['Mod. 112', 'Mod. 114']),
+        pg('tile', 0, ['Mod. 112']),
+        pg('tile', 1, ['Mod. 114']),
+      ],
+      expect: 'strong:0',
+    },
+  },
+  {
+    id: 'tile-legend-every-sheet',
+    name: 'Coat Mod. 114',
+    pages: [pg('tile', 0, ['Mod. 112', 'Mod. 114']), pg('tile', 1, ['Mod. 114'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 114',
+      pages: [pg('tile', 0, ['Mod. 112']), pg('tile', 1, ['Mod. 114'])],
+      expect: 'strong:1',
+    },
+  },
+
+  {
+    id: 'dimension',
+    name: 'Coat 112 cm',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'season',
+    name: 'Coat FW 2026',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 2026', expect: 'strong:Mod. 2026' },
+  },
+  {
+    id: 'article-bare',
+    name: 'Coat 112',
+    labels: M3,
+    expect: 'weak',
+    twin: { name: 'Coat', style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'serial-zero',
+    style: 'FW26-012',
+    labels: ['Mod. 12', 'Mod. 13'],
+    expect: 'none',
+    twin: { style: 'Mod. 012', expect: 'strong:Mod. 12' },
+  },
+  {
+    id: 'file-dimension',
+    name: 'Coat',
+    files: ['page_112_cm.pdf'],
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', files: ['page_112_cm.pdf'], expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'file-against-card',
+    name: 'Phoebe Style A',
+    files: ['phoebe_style_B.pdf'],
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Style A', files: ['phoebe_style_A.pdf'], expect: 'strong:Style A' },
+  },
+  {
+    id: 'file-only',
+    name: 'Phoebe',
+    files: ['phoebe_style_B.pdf'],
+    labels: AB,
+    expect: 'weak',
+    twin: { name: 'Phoebe Style B', files: ['phoebe_style_B.pdf'], expect: 'strong:Style B' },
+  },
+  {
+    id: 'compact-slash',
+    name: 'Phoebe Style A/B',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Style B', expect: 'strong:Style B' },
+  },
+  {
+    id: 'compact-and',
+    name: 'Phoebe Styles A & B',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Styles B', expect: 'strong:Style B' },
+  },
+  {
+    id: 'foreign',
+    name: 'Phoebe Style C',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Style A', expect: 'strong:Style A' },
+  },
+  {
+    id: 'a-line',
+    name: 'Style A-line dress',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Style A dress', expect: 'strong:Style A' },
+  },
+  // sheets
+  {
+    id: 'instructions-contamination',
+    name: 'Coat Mod. 112',
+    pages: [
+      pg('instructions', undefined, ['Mod. 112', 'Mod. 114']),
+      pg('tile', 0),
+      pg('tile', 1, ['Mod. 114']),
+    ],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112',
+      pages: [
+        pg('instructions', undefined, ['Mod. 112', 'Mod. 114']),
+        pg('tile', 0, ['Mod. 112']),
+        pg('tile', 1, ['Mod. 114']),
+      ],
+      expect: 'strong:0',
+    },
+  },
+  {
+    id: 'overview-contamination',
+    name: 'Coat Mod. 112',
+    pages: [
+      pg('overview', 0, ['Mod. 112', 'Mod. 114']),
+      pg('tile', 0),
+      pg('tile', 1, ['Mod. 114']),
+    ],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112',
+      pages: [
+        pg('overview', 0, ['Mod. 112', 'Mod. 114']),
+        pg('tile', 0, ['Mod. 112']),
+        pg('tile', 1, ['Mod. 114']),
+      ],
+      expect: 'strong:0',
+    },
+  },
+  {
+    id: 'spread-with-sheet',
+    name: 'Coat Mod. 112 · Bogen B',
+    pages: [
+      pg('overview', 0, undefined, ['A']),
+      pg('tile', 0, ['Mod. 112']),
+      pg('overview', 1, undefined, ['B']),
+      pg('tile', 1, ['Mod. 112']),
+    ],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112 · Bogen B',
+      pages: [
+        pg('overview', 0, undefined, ['A']),
+        pg('tile', 0),
+        pg('overview', 1, undefined, ['B']),
+        pg('tile', 1, ['Mod. 112']),
+      ],
+      expect: 'strong:1',
+    },
+  },
+  {
+    id: 'sheet-by-order',
+    name: 'Coat · sheet 2',
+    pages: [pg('tile', 0), pg('tile', 1)],
+    expect: 'weak',
+    twin: {
+      name: 'Coat · Bogen B',
+      pages: [pg('tile', 0, undefined, ['A']), pg('tile', 1, undefined, ['B'])],
+      expect: 'strong:1',
+    },
+  },
+  {
+    id: 'sheet-file-against',
+    name: 'Coat · Bogen A',
+    files: ['coat_bogen_B.pdf'],
+    pages: [pg('tile', 0, undefined, ['A']), pg('tile', 1, undefined, ['B'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat · Bogen A',
+      files: ['coat_bogen_A.pdf'],
+      pages: [pg('tile', 0, undefined, ['A']), pg('tile', 1, undefined, ['B'])],
+      expect: 'strong:0',
+    },
+  },
+  {
+    id: 'sheet-compact',
+    name: 'Coat · Bogen A/B',
+    pages: [pg('tile', 0, undefined, ['A']), pg('tile', 1, undefined, ['B'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat · Bogen B',
+      pages: [pg('tile', 0, undefined, ['A']), pg('tile', 1, undefined, ['B'])],
+      expect: 'strong:1',
+    },
+  },
+  {
+    id: 'sheet-unsheeted-pages',
+    name: 'Coat Mod. 112',
+    pages: [
+      pg('cover', undefined, ['Mod. 112']),
+      pg('unknown', undefined, ['Mod. 112']),
+      pg('tile', 0),
+      pg('tile', 1),
+    ],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112',
+      pages: [pg('cover', undefined, ['Mod. 112']), pg('tile', 0, ['Mod. 112']), pg('tile', 1)],
+      expect: 'strong:0',
+    },
+  },
+];
+function cardMatchTable(): Record<string, unknown> {
+  const sizes = cardSizes(['44', '46', '48', 'S', 'M']);
+  const run = (
+    r: { name?: string; style?: string; files?: string[]; pages?: PageClassification[] },
+    labels?: string[],
+  ) => {
+    const cc: CardContext = {
+      techCardId: CARD_ID,
+      sizes,
+      scopes: SCOPES,
+      existingPieces: [],
+      styleLabel: '',
+      cardName: r.name ?? '',
+      styleNumber: r.style ?? '',
+    };
+    const p = r.pages
+      ? sheetFromCard(r.pages, cc, r.files ?? [])
+      : modelFromCard(labels ?? [], cc, r.files ?? []);
+    return p.pick == null
+      ? { got: 'none' as Expect, why: p.why }
+      : { got: (p.strong ? `strong:${p.pick}` : 'weak') as Expect, why: p.evidence.join(' · ') };
+  };
+  const rows = ROWS.map((r) => {
+    const a = run(r, r.labels);
+    const t = run({ ...r, ...r.twin }, r.labels);
+    return {
+      id: r.id,
+      ok: a.got === r.expect,
+      got: a.got,
+      why: a.why,
+      twinOk: t.got === r.twin.expect,
+      twin: t.got,
+    };
+  });
+  const bad = rows.filter((x) => !x.ok || !x.twinOk);
+  return {
+    id: 'control:card-match-table',
+    group: 'control',
+    verdict: 'stopped',
+    rows,
+    control: {
+      expect: 'table',
+      reached: true,
+      picked: false,
+      ok: !bad.length,
+      failed: bad.map((x) => `${x.id}: ${x.got}${x.twinOk ? '' : ` (twin ${x.twin})`}`),
+    },
+    assumptions: { total: 0, strong: 0 },
+    wrong: { total: 0 },
+  };
+}
 
 /** Labelled points inside the truth pieces (sheet mm), from the click fixture of the truth id. */
 function truthPoints(c: Case): { label: string; at: { x: number; y: number } }[] {
@@ -181,6 +724,13 @@ function sessionClient() {
       if (!s) throw new Error('no session');
       // headless: the SoM render is for the AI namer only, and there is no AI here
       if (stage === 'render-som') return { sheetPng: new Blob([]), crops: [], marks: [] } as never;
+      // A9: no canvas here — the page stats only (the recorded answers need no picture)
+      if (stage === 'render-pages')
+        return (await s.runStage(
+          stage,
+          { ...(input as StageIO['render-pages']['in']), pictures: false },
+          ctx,
+        )) as never;
       const out = await s.runStage(stage, input as never, ctx);
       outs[stage] = out;
       return out as never;
@@ -232,20 +782,32 @@ type Wrong = { kind: string; subject: string; got: string; want: string; assumed
 
 export async function runCase(c: Case, mutate: string | null) {
   const T0 = Date.now();
-  const rec: Record<string, unknown> = { id: c.id, group: c.group };
-  const card: CardContext = {
+  const rec: Record<string, unknown> = {
+    id: c.id,
+    group: c.expectStop || c.renameTo ? 'control' : c.group,
+  };
+  // `let`: the rename control gives the hook a renamed card mid-run (a new object, as a form does)
+  let card: CardContext = {
     techCardId: CARD_ID,
     sizes: cardSizes(c.card),
     scopes: SCOPES,
     existingPieces: [],
     styleLabel: 'autopilot',
+    ...(c.cardName ? { cardName: c.cardName } : {}),
   };
   const { client, outs } = sessionClient();
+  // A9: `--page-roles` = the recorded AI page roles (fixtures/page-roles.json, never a paid call);
+  // `--mutate=page-role` = with a real tile answered "instructions" 0.99 in every call
+  const roles =
+    process.env.AUTOPILOT_PAGE_ROLES || mutate === 'page-role'
+      ? fixturePageRoleDeps(mutate === 'page-role' ? 'tile-instructions' : null)
+      : null;
   let api!: ImportSessionApi;
   mountHook(() => {
     api = useImportSession({
       client,
       card,
+      ...(roles ? { pageRoles: roles.deps } : {}),
       namer: async () => [],
       buildDraft: stubBuildDraft,
       applyDraft: async () => ({ ok: true, uploaded: [] }),
@@ -264,13 +826,50 @@ export async function runCase(c: Case, mutate: string | null) {
     const mine = JSON.stringify(answersNowOf(snap.session, snap.inputs));
     if (mine !== JSON.stringify(api.answersNow)) fingerprintDrift++;
     const a = autopilotAnswer(snap);
-    return mutate ? mutateAnswer(mutate, snap, a, mutated, c) : a;
+    // the control's operator: the page-role question of the files step, answered as TRUTH reads
+    // those pages (they stay aside) — the question the control is not about
+    if (
+      c.operatorPages &&
+      a.stop &&
+      a.reason?.step === 'files' &&
+      /is it a pattern page\?/.test(a.reason.reason)
+    ) {
+      operatorAnswers++;
+      return { proceed: true, assumptions: [] };
+    }
+    // --mutate=card: a pick injected at the control's own question — the control must catch it
+    if (
+      mutate === 'card' &&
+      c.expectStop &&
+      a.stop &&
+      a.reason?.step === c.expectStop &&
+      !mutated.length
+    ) {
+      const v = variantsOf(
+        snap.session.pieces?.seeds ?? [],
+        snap.baseSeeds ?? null,
+        snap.session.pieces?.variants,
+      );
+      if (c.expectStop === 'pieces' && v.length) {
+        mutated.push(`picked model ${v[0]}`);
+        return { events: [{ type: 'variant', variant: v[0] }], assumptions: [] };
+      }
+      if (c.expectStop === 'sheet') {
+        mutated.push('picked sheet 1');
+        return { events: [{ type: 'sheet', sheet: 0 }], assumptions: [] };
+      }
+    }
+    return mutate && mutate !== 'card' ? mutateAnswer(mutate, snap, a, mutated, c) : a;
   };
+  let operatorAnswers = 0;
   let fingerprintDrift = 0;
+  let renamed: { before: string; stale: string | null } | null = null;
+  let bypassed: boolean | null = null;
   const trace: string[] = [];
   let files: { name: string; bytes: ArrayBuffer }[] = [];
   try {
     files = filesOf(c);
+    if (c.renameFiles) files = files.map((f, k) => ({ ...f, name: c.renameFiles![k] ?? f.name }));
   } catch (e) {
     rec.verdict = 'crashed';
     rec.error = String(e);
@@ -288,7 +887,8 @@ export async function runCase(c: Case, mutate: string | null) {
     const answer = (snap: Parameters<typeof resolve>[0]) => {
       const x = {
         ...snap,
-        card,
+        // the run's snapshot of the card, as the wizard's resolver reads it (Codex #5)
+        card: api.runCard,
         baseSeeds: api.baseSeeds,
         presegmented: !!api.extracted.presegmented,
       };
@@ -305,7 +905,24 @@ export async function runCase(c: Case, mutate: string | null) {
       trace.push(
         `${step}:${r.kind === 'answered' ? 'answer' : r.kind === 'moved' ? 'next' : r.kind}`,
       );
+      // rename during the run: once the model is picked the card's name changes — apply must
+      // refuse, and going back chooses the model again against the new name
+      if (c.renameTo && !renamed && api.session.variant) {
+        renamed = { before: api.session.variant, stale: null };
+        card = { ...card, cardName: c.renameTo };
+        await settle();
+        renamed.stale = api.cardStale();
+        await api.dispatch({ type: 'back', to: 'sizes' });
+        await settle();
+        continue;
+      }
       if (r.kind !== 'stopped') continue;
+      // operator bypass: "next" on the sheet question must not import the default sheet
+      if (c.bypass && r.step === 'sheet' && api.session.step === 'sheet') {
+        await api.next();
+        await settle();
+        bypassed = api.session.step !== 'sheet' || api.inputs.sheetPicked != null;
+      }
       if (r.why === 'auto-stop' && api.session.step === 'check') {
         const o = await autopilotApply(() => api, card, settle);
         trace.push(o.ok ? 'apply:done' : `${o.step}:stop`);
@@ -321,6 +938,27 @@ export async function runCase(c: Case, mutate: string | null) {
   }
   const s = api.session;
   rec.trace = compress(trace);
+  if (roles) {
+    rec.pageRoles = {
+      calls: roles.log.calls.map(
+        (k) =>
+          `${k.file}: sent ${k.sent.length}, answered ${k.answered.length}${k.missing.length ? `, NOT RECORDED ${k.missing.join(',')}` : ''}`,
+      ),
+      aiAside: (s.clean?.dropped ?? []).filter((d) => d.aiAside).map((d) => `p${d.page + 1}`),
+      note: api.pageRoleNote,
+    };
+    // the control: a real tile the AI called instructions stays in the tile grid
+    if (mutate === 'page-role')
+      for (const m of roles.log.mutated) {
+        const f = s.files.find((x) => x.name === m.file)?.id;
+        const kept =
+          s.clean?.classes.find((c) => c.file === f && c.page === m.pageNo - 1)?.cls === 'tile' &&
+          !s.clean?.dropped.some((d) => d.file === f && d.page === m.pageNo - 1);
+        mutated.push(
+          `${m.file} p${m.pageNo} → instructions 0.99: ${kept ? 'kept as a tile' : 'SET ASIDE'}`,
+        );
+      }
+  }
   // the pages clean set aside "to check", with the facts the policy reads (A10 r4)
   rec.pagesAside = (s.clean?.dropped ?? [])
     .filter((d) => d.status === 'suggest')
@@ -349,6 +987,68 @@ export async function runCase(c: Case, mutate: string | null) {
   if (done && !done.ok) rec.stop = done.stop;
   else if (!done) rec.stop = { step: s.step, reason: 'tick budget spent' };
   if (rec.verdict === 'stopped' && c.group === 'refusal') rec.expectedStop = true;
+  // A10 card match, dry: what the card names against the pages' own labels (models, sheet
+  // letters) as read at extraction — scored even when the run stopped before the question
+  const fileNames = s.files.map((f) => f.name);
+  const tileIds = new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0));
+  const pageModels = [...new Set(s.pages.flatMap((p) => p.labels?.models ?? []))].sort();
+  const dry: {
+    sheet?: number | null;
+    model?: string | null;
+    sheetStrong?: boolean;
+    modelStrong?: boolean;
+    why: string[];
+    wrong: string[];
+  } = { why: [], wrong: [] };
+  if (tileIds.size > 1) {
+    const r = sheetFromCard(s.pages, card, fileNames);
+    dry.sheet = r.pick;
+    dry.sheetStrong = !!r.strong;
+    dry.why.push(...(r.evidence ?? (r.why ? [r.why] : [])));
+    if (r.pick != null && c.sheet != null && r.pick !== c.sheet)
+      dry.wrong.push(`sheet ${r.pick} ≠ ${c.sheet}`);
+  }
+  if (pageModels.length > 1) {
+    const r = modelFromCard(pageModels, card, fileNames);
+    dry.model = r.pick;
+    dry.modelStrong = !!r.strong;
+    dry.why.push(...(r.evidence ?? (r.why ? [r.why] : [])));
+    const want = c.variant ?? c.cardModel;
+    if (r.pick != null && want && !want.test(r.pick)) dry.wrong.push(`model ${r.pick} ≠ ${want}`);
+  }
+  rec.cardMatch = dry;
+  rec.operatorAnswers = operatorAnswers || undefined;
+  if (c.expectStop || c.renameTo) {
+    const st = rec.stop as { step: string; reason: string } | undefined;
+    // picked = the run chose, or the card match would let the autopilot choose (a suggestion
+    // the autopilot stops on is not a pick)
+    const picked =
+      c.expectStop === 'pieces'
+        ? s.variant != null || (dry.model != null && !!dry.modelStrong)
+        : c.expectStop === 'sheet'
+          ? api.inputs.sheetPicked != null || (dry.sheet != null && !!dry.sheetStrong)
+          : false;
+    // reached = stopped ON the card question (the step and its wording); unreached FAILS
+    const reached = c.expectStop
+      ? rec.verdict === 'stopped' &&
+        st?.step === c.expectStop &&
+        (!c.expectReason || c.expectReason.test(st.reason))
+      : true;
+    const renameOk = c.renameTo
+      ? !!renamed?.stale &&
+        /name \/ style number/.test(renamed.stale) &&
+        !!s.variant &&
+        !!c.expectVariant?.test(s.variant)
+      : true;
+    rec.control = {
+      expect: c.expectStop ?? 'rename',
+      reached,
+      picked,
+      ...(renamed ? { renamed: { ...renamed, after: s.variant } } : {}),
+      ...(bypassed != null ? { bypassed } : {}),
+      ok: reached && !picked && renameOk && bypassed !== true,
+    };
+  }
   rec.fingerprintDrift = fingerprintDrift;
   // the run's assumptions as the wizard keeps them (merged into its inputs, one per question)
   const as = api.inputs.autopilot;
@@ -593,15 +1293,17 @@ export async function runCase(c: Case, mutate: string | null) {
     }
   }
   // the model / the sheet
-  if (c.variant && s.variant && !c.variant.test(s.variant))
+  const wantModel = c.variant ?? c.cardModel;
+  if (wantModel && s.variant && !wantModel.test(s.variant))
     wrong.push({
       kind: 'model',
       subject: 'the sheet',
       got: s.variant,
-      want: String(c.variant),
+      want: String(wantModel),
       assumed: assumedOn(null, ['model']),
     });
-  if (c.sheet && c.sheet !== api.inputs.sheetIndex)
+  // the sheet is scored once one was picked (a run stopped before the question picked none)
+  if (c.sheet != null && api.inputs.sheetPicked != null && c.sheet !== api.inputs.sheetIndex)
     wrong.push({
       kind: 'sheet',
       subject: 'the file',
@@ -798,11 +1500,13 @@ function compress(xs: string[]): string[] {
 
 export async function main(args: string[]): Promise<number> {
   if (args[0] === 'list') {
-    console.log(JSON.stringify(CASES.map((c) => c.id)));
+    console.log(JSON.stringify([...ALL.map((c) => c.id), 'control:card-match-table']));
     return 0;
   }
+  if (!args.length || args.includes('control:card-match-table'))
+    console.log(`@@RESULT ${JSON.stringify(cardMatchTable())}`);
   const mutate = process.env.AUTOPILOT_MUTATE || null;
-  const want = args.length ? CASES.filter((c) => args.includes(c.id)) : CASES;
+  const want = args.length ? ALL.filter((c) => args.includes(c.id)) : ALL;
   for (const c of want) {
     let r: Record<string, unknown>;
     try {

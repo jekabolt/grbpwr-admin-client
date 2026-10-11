@@ -17,6 +17,7 @@ import type {
   AllowanceDecision,
   AutopilotValue,
   BackgroundKind,
+  ClassEvidence,
   FabricAssignment,
   ImportSession,
   NameDecision,
@@ -33,6 +34,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
+import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { anisotropyOf, squareSidesOf } from '../formats';
@@ -51,7 +53,9 @@ import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
+import { modelFromCard, sheetFromCard, weakReason } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
+import { aiAsideAssumptions } from './ai-pages';
 
 /** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
 export type AutopilotSnapshot = {
@@ -237,7 +241,11 @@ const snapOf = (x: AutopilotSnapshot): Snap => ({
  */
 export function autopilotAnswer(x: AutopilotSnapshot): AutopilotAnswer {
   const snap = snapOf(x);
-  const d0 = decideSnap(snap);
+  const d1 = decideSnap(snap);
+  // A9: the pages the AI + geometry set aside by themselves are strong assumptions of the run
+  // (no question asked them): recorded with the first answer the autopilot gives
+  const standing = aiAsideAssumptions(x.session, x.inputs.autopilot ?? []);
+  const d0 = standing.length ? { ...d1, assumptions: [...standing, ...d1.assumptions] } : d1;
   // every answer carries its replayable value (kind + subject + value), not only its words
   const d = {
     ...d0,
@@ -613,15 +621,30 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
   // a page set aside that holds line work stays aside only on positive evidence it is not
   // pattern (Codex re-check #5): else the page-role question
   const check = s.clean.dropped.filter((d) => d.status === 'suggest');
+  // A9: the AI reads a page set aside as pattern — never passed over: the question, with "read it
+  // as a tile" pre-filled
+  const back = check.find(
+    (d) => d.ai && PATTERN_ROLES.has(d.ai.role) && d.ai.confidence >= AI_PAGES.patternMin,
+  );
+  if (back)
+    return stopAt(
+      'files',
+      `${pageSubject(s, back.file, back.page)} was set aside as ${back.cls} but the AI reads it as a pattern page (${aiWords(back.ai!)}) — read it as a tile? (pre-filled: read as tile)`,
+    );
   const blind = check.find((d) => !notPatternEvidence(d, s.pages));
   if (blind) {
     const c = s.pages.find((p) => p.file === blind.file && p.page === blind.page);
     const ink = c?.ink
       ? `; ${c.ink.strokeM} m of line, ${c.ink.texts} text items${c.ink.raster ? `, pictures ${Math.round(c.ink.raster * 100)} %` : ''}`
       : '';
+    // A9: the AI alone (below 0.85, or no geometry agrees) — the stop carries its answer pre-filled
+    const ai =
+      blind.ai && blind.ai.role !== 'other'
+        ? ` The AI reads it as ${aiWords(blind.ai)}${blind.geo?.length ? ` (geometry suggests the same: ${blind.geo[0]})` : ''}, but nothing in its geometry excludes a piece — pre-filled: keep it aside (one click).`
+        : '';
     return stopAt(
       'files',
-      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?`,
+      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?${ai}`,
     );
   }
   const roleSet = new Set(
@@ -641,7 +664,11 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
           pageSubject(s, d.file, d.page),
           `set aside (${d.cls})`,
           'a page the reader set aside stays aside on evidence it is not pattern',
-          [notPatternEvidence(d, s.pages)!, d.why.slice(0, 120)],
+          [
+            notPatternEvidence(d, s.pages)!,
+            d.why.slice(0, 120),
+            ...(d.ai ? [`AI: ${aiWords(d.ai)}`] : []),
+          ],
           0.6,
           // an overview set aside holds pattern-like line work: a strong assumption
           d.cls === 'overview',
@@ -668,72 +695,10 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
 }
 
 // ── which sheet, which model: only on evidence (Codex #2, #4) ─────────────────────────────────
+// card-match.ts: the card's name / style number / file names against the models and sheets the
+// file prints — a UNIQUE token-exact match, else the stop names why.
 
-/** Words and numbers of a label ("Mod. 123" → mod, 123; "Style A" → style, a). */
-const tokensOf = (x: string) =>
-  x
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
-
-/** What the card says it is: its style label and the file names it was given. */
-function cardWords(s: ImportSession, card: CardContext): Set<string> {
-  return new Set([
-    ...tokensOf(card.styleLabel ?? ''),
-    ...s.files.flatMap((f) => tokensOf(f.name.replace(/\.[^.]+$/, ''))),
-  ]);
-}
-
-/**
- * The distinctive part of a model label: a number of 2+ digits ("123"), or the letter after
- * model / style / mod / модель ("Style A" → "a"). Generic words never match.
- */
-function distinctive(label: string): string[] {
-  const t = tokensOf(label);
-  const out = t.filter((w) => /^\d{2,}$/.test(w));
-  t.forEach((w, k) => {
-    if (/^(model|style|mod|модель|мод|variant|view|ansicht)$/.test(w) && t[k + 1]?.length === 1)
-      out.push(t[k + 1]);
-  });
-  return out;
-}
-
-/** The one model whose label the card (or the file name) names; null = none or several. */
-function modelByEvidence(
-  variants: readonly string[],
-  s: ImportSession,
-  card: CardContext,
-): { variant: string; evidence: string[] } | null {
-  const words = cardWords(s, card);
-  const hits = variants.filter((v) => distinctive(v).some((w) => words.has(w)));
-  if (hits.length !== 1) return null;
-  return {
-    variant: hits[0],
-    evidence: [
-      `"${hits[0]}" is named by «${card.styleLabel}» / ${s.files.map((f) => f.name).join(', ')}`,
-    ],
-  };
-}
-
-/**
- * The tile sheet the card names. The pages carry no model labels before a sheet is assembled, so
- * today only a file name naming the sheet counts ("…_sheet_B.pdf"); none = the operator picks.
- */
-function sheetByEvidence(
-  s: ImportSession,
-  card: CardContext,
-): { sheet: number; evidence: string[] } | null {
-  const words = cardWords(s, card);
-  const sheets = [
-    ...new Set(s.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0)),
-  ].sort((a, b) => a - b);
-  const named = sheets.filter((k) => words.has(String.fromCharCode(97 + k)) && words.has('sheet'));
-  if (named.length !== 1) return null;
-  return {
-    sheet: named[0],
-    evidence: [`the file name names sheet ${String.fromCharCode(65 + named[0])}`],
-  };
-}
+const fileNamesOf = (s: ImportSession) => s.files.map((f) => f.name);
 
 // ── scale ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -793,21 +758,27 @@ function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
   // Codex #2: which of several tile sheets is a question — answered only on evidence
   const n = tileSheets(s.pages);
   if (n > 1 && i.sheetPicked === null) {
-    const pick = sheetByEvidence(s, card);
-    if (!pick)
+    const pick = sheetFromCard(s.pages, card, fileNamesOf(s));
+    if (pick.pick == null)
       return stopAt(
         'sheet',
-        `the file carries ${n} tile sheets and nothing on the card names one — pick the sheet to import`,
+        `the file carries ${n} tile sheets and ${pick.why ?? 'nothing on the card names one'} — pick the sheet to import`,
+      );
+    // a suggestion (a file name, the order in the file, a bare number) is the operator's click
+    if (!pick.strong)
+      return stopAt(
+        'sheet',
+        `the file carries ${n} tile sheets and ${weakReason(`sheet ${pick.pick + 1}`, pick)} — pick the sheet to import`,
       );
     return {
-      actions: [{ kind: 'sheet', sheet: pick.sheet }],
+      actions: [{ kind: 'sheet', sheet: pick.pick }],
       assumptions: [
         A(
           'sheet',
           'sheet-choice',
           'the file',
-          `tile sheet ${pick.sheet + 1} of ${n}`,
-          'the sheet whose labels match the card',
+          `tile sheet ${pick.pick + 1} of ${n}`,
+          'the one sheet the card names (a unique token-exact match)',
           pick.evidence,
           0.6,
           true,
@@ -938,9 +909,38 @@ function sizesStep(snap: Snap): AutopilotDecision {
       ],
     };
   }
-  // legend rows below 0.6
+  // gb2: the file name says one size while the lines look graded (chains/face-role sourceClash):
+  // the count is the operator's — stop with it, pre-filled from the graded look (A6 over the size
+  // checks' geometry), never from the file name; the clash row is never confirmed by the autopilot
+  const clash = (c: { evidence: readonly ClassEvidence[] }) =>
+    c.evidence.some((e) => e.kind === 'face-graded' && !!e.sourceOne);
+  const clashRow = (s.chains?.classes ?? []).find(
+    (c) => clash(c) && c.confidence < 0.9 && !i.legendConfirmed.includes(legendKey(c)),
+  );
+  if (clashRow && sz.expected?.from !== 'operator') {
+    const n = sz.countAsk?.auto?.n;
+    const look = n != null && n > 1 ? n : null;
+    const why = clashRow.evidence.find((e) => e.kind === 'face-graded');
+    return stopAt(
+      'sizes',
+      `these lines look like other sizes, but the file name says one size — how many sizes does the sheet draw?${look ? ` (the lines suggest ${look})` : ''}`,
+      [
+        A(
+          'sizes',
+          'drawn-sizes',
+          'the sheet',
+          look ? `${look} sizes drawn?` : 'several sizes drawn?',
+          'a file name naming one size against lines that look graded: asked, never taken',
+          [why && why.kind === 'face-graded' ? why.why : 'face-graded'],
+          0.3,
+          true,
+        ),
+      ],
+    );
+  }
+  // legend rows below 0.6 (a clash row never: answered by the count, or by the operator)
   const pending = (s.chains?.classes ?? []).filter(
-    (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)),
+    (c) => c.confidence < 0.6 && !i.legendConfirmed.includes(legendKey(c)) && !clash(c),
   );
   if (pending.length) {
     const confirm = [...i.legendConfirmed, ...pending.map(legendKey)];
@@ -1109,21 +1109,26 @@ function piecesStep(snap: Snap): AutopilotDecision {
   const variants = variantsOf(seeds, baseSeeds, s.pieces?.variants);
   if (variants.length > 1 && !s.variant) {
     // Codex #4: the model the card names — never "the one with the most pieces"
-    const pick = modelByEvidence(variants, s, snap.card);
-    if (!pick)
+    const pick = modelFromCard(variants, snap.card, fileNamesOf(s));
+    if (pick.pick == null)
       return stopAt(
         'pieces',
-        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and nothing on the card names one — pick the model`,
+        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and ${pick.why ?? 'nothing on the card names one'} — pick the model`,
+      );
+    if (!pick.strong)
+      return stopAt(
+        'pieces',
+        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and ${weakReason(`"${pick.pick}"`, pick)} — pick the model`,
       );
     return {
-      actions: [{ kind: 'variant', variant: pick.variant }],
+      actions: [{ kind: 'variant', variant: pick.pick }],
       assumptions: [
         A(
           'pieces',
           'model',
           'the sheet',
-          `model "${pick.variant}"`,
-          'the model whose label the card names',
+          `model "${pick.pick}"`,
+          'the one model the card names (a unique token-exact match)',
           pick.evidence,
           0.6,
           true,
@@ -1200,6 +1205,8 @@ function piecesStep(snap: Snap): AutopilotDecision {
       ),
     );
   const why = weak.map((a) => {
+    // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
+    if (a.layerLoop) return { a, ev: a.layerLoop };
     if (a.reason === 'other-pen')
       return { a, ev: 'drawn inside a seeded piece in another pen or short strokes (a mark)' };
     const h = host(a.box);

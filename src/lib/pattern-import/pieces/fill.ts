@@ -48,6 +48,7 @@ import { gradeView } from 'lib/pattern-import/chains/face-role';
 
 import { type Bridge, wallBridges } from './bridges';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
+import { seedFaces, type SeedFaceDiag } from './seed-face';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
 import { variantKnives } from './variants';
@@ -92,6 +93,8 @@ export type FillDiag = {
   split?: number;
   /** File-per-size: seed placements moved to the matching region of another size's file. */
   moved?: number;
+  /** P3 file-per-size: click seeds carried to another size's file by their face (pieces/seed-face). */
+  faced?: SeedFaceDiag[];
   /** pieces/grade (H1): the alike-drawn-sizes hook, when it ran. */
   grade?: GradeHook;
   /** D4: the sub-fill of a mixed sheet's guarded seeds (on the solver's walls). */
@@ -501,6 +504,20 @@ export function fillPiecesDetailed(
     ].filter((it) => !excl.has(it.chain));
   };
 
+  // P3: a click carried to the other size files by its face, not by its coordinate
+  const faced =
+    model.mode === 'file' && !solved && !(typeof process !== 'undefined' && process.env?.P3_NOFACE)
+      ? seedFaces(
+          nRanks,
+          use,
+          (r) => buildRank(box, cell, baseItems(r, userExcl)),
+          (c, p) => seedPixel(c.g, c.wall, c.ext, p).k,
+          shift,
+        )
+      : null;
+  if (faced?.diag.length) diag.faced = faced.diag;
+  const carry = (s: Seed, r: number) => faced?.at.get(key(s.id, r)) ?? shift(s.at, r);
+
   /** One rank, every seed; returns the candidates and the frame chains found around merges. */
   const rankPass = (
     r: number,
@@ -514,7 +531,7 @@ export function fillPiecesDetailed(
     // trims any region that crosses one
     const keep = (it: WallItem) => !excl.has(it.chain);
     const base = buildRank(box, cell, baseItems(r, excl));
-    const pts = use.map((s) => override?.get(s.id) ?? shift(s.at, r));
+    const pts = use.map((s) => override?.get(s.id) ?? carry(s, r));
     const px = pts.map((p) => seedPixel(base.g, base.wall, base.ext, p));
     // passes after A, built lazily once per rank
     const later: { from: RankFrom; build: () => RankCtx }[] =
@@ -870,7 +887,7 @@ export function fillPiecesDetailed(
       if (!comps.length) continue;
       const pairs: { sid: number; ci: number; d: number }[] = [];
       for (const [sid, { cand, home }] of refs) {
-        if (home === r) continue;
+        if (home === r || faced?.at.has(key(sid, r))) continue;
         const hb = boxes[home]!;
         comps.forEach((cp, ci) =>
           pairs.push({
@@ -894,7 +911,7 @@ export function fillPiecesDetailed(
         takenS.add(p.sid);
         takenC.add(p.ci);
         const s = use.find((x) => x.id === p.sid)!;
-        const now = seedPixel(ctx.g, ctx.wall, ctx.ext, shift(s.at, r));
+        const now = seedPixel(ctx.g, ctx.wall, ctx.ext, carry(s, r));
         const cp = comps[p.ci];
         if (ctx.ext[now.k] || labelAt(now.k) !== cp.id) {
           const y = (cp.k / ctx.g.W) | 0;

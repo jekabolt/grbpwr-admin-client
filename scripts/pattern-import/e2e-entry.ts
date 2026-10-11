@@ -18,6 +18,7 @@ import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
+  AiPageHint,
   CardSize,
   DraftScopeTarget,
   IRText,
@@ -46,6 +47,8 @@ import { synthDrawables, synthTruth } from './raster-entry';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 import { splitSize } from './worker-entry';
+import { fixturePageRoleDeps } from './page-roles-fixture';
+import { classifyFilePages, pagesForCall } from 'lib/pattern-import/ai/pages';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -101,6 +104,14 @@ type Case = {
   outlinesAreSize?: boolean;
   /** The operator maps the source sizes, in rank order, to these card tokens (smoke: 38 → M). */
   mapTo?: string[];
+  /**
+   * A10: the card's name — set ONLY where corpus/TRUTH.md says which model / sheet the card is
+   * (the autopilot matches it against the models and sheets the file prints). Absent = a card
+   * that names nothing (the synthetic "autopilot" card).
+   */
+  cardName?: string;
+  /** The model the card is per TRUTH, scored by the autopilot metric when `variant` is absent. */
+  cardModel?: RegExp;
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -117,6 +128,8 @@ export const CASES: Case[] = [
     files: ['pdf/palto.pdf'],
     card: NUM(72, 88, 4),
     variant: /125/,
+    // TRUTH: "в файле только Mod. 125" (123/124 are other models' lines)
+    cardName: 'burda Пальто Mod. 125',
     truth: { id: 'palto', expect: 7, note: '9 listed, 2 are "trace from 21" (no own outline)' },
   },
   {
@@ -125,6 +138,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /A/,
+    // TRUTH: variant 0 = Style A (high waisted)
+    cardName: 'Phoebe Jumpsuit · Style A',
     truth: { id: 'kombinezon', variant: 0 },
   },
   {
@@ -133,6 +148,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /B/,
+    // TRUTH: variant 1 = Style B (low waisted)
+    cardName: 'Phoebe Jumpsuit · Style B',
     truth: { id: 'kombinezon', variant: 1 },
   },
   {
@@ -154,6 +171,9 @@ export const CASES: Case[] = [
     group: 'pdf',
     files: ['pdf/zhaket.pdf'],
     card: NUM(36, 44),
+    // TRUTH: Mod. 126 ("Mod. 125" lines belong to another model)
+    cardName: 'burda Жакет Mod. 126',
+    cardModel: /126/,
     truth: { id: 'zhaket' },
   },
   {
@@ -256,6 +276,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 0,
     variant: /A/,
+    // TRUTH grid: sheet 1 = "Bogen A" (p6–55)
+    cardName: 'Mantel & Jacke · Bogen A',
     truth: { id: 'polupalto' },
   },
   {
@@ -265,6 +287,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 1,
     variant: /B/,
+    // TRUTH grid: sheet 2 = "Bogen B" (p57–91)
+    cardName: 'Mantel & Jacke · Bogen B',
     truth: { id: 'polupalto' },
   },
   // DXF (CLO, lekalo, Gerber) — fast path
@@ -590,7 +614,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 1 · files
     const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
     // A8: the input pages cleaned before anything is parsed (no operator edit on the e2e pass)
-    const cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    let cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    // A9 (`--page-roles`): the recorded AI page roles, asked as the wizard asks them, read by clean
+    if (process.env.E2E_PAGE_ROLES) {
+      const hints = await recordedPageRoles(s, cl, ex.files);
+      if (hints.length)
+        cl = await run('clean', { edits: hooks.cleanEdits ?? [], aiHints: { pages: hints } });
+      rec.pageRolesAside = cl.dropped
+        .filter((d) => d.aiAside)
+        .map((d) => `${d.file}:p${d.page + 1}`);
+    }
     const pageCls: Record<string, number> = {};
     for (const p of cl.classes) pageCls[p.cls] = (pageCls[p.cls] ?? 0) + 1;
     rec.clean = {
@@ -2116,4 +2149,36 @@ function insidePoly(p: PtMm, poly: readonly PtMm[]): boolean {
     if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
   }
   return c;
+}
+
+/** A9: the wizard's page-role call (use-import-session.ts askPageRoles) over the recorded answers. */
+async function recordedPageRoles(
+  s: Session,
+  cl: StageIO['clean']['out'],
+  files: StageIO['extract']['out']['files'],
+): Promise<AiPageHint[]> {
+  const { deps } = fixturePageRoleDeps();
+  const out: AiPageHint[] = [];
+  const files_ = new Set(cl.dropped.filter((d) => d.status === 'suggest').map((d) => d.file));
+  for (const file of files_) {
+    const asked = new Set(
+      cl.dropped.filter((d) => d.status === 'suggest' && d.file === file).map((d) => d.page),
+    );
+    const { pages, left } = pagesForCall(
+      cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page),
+      asked,
+    );
+    const thumbs = await s.runStage(
+      'render-pages',
+      { pages: pages.map((p) => ({ file, page: p.page })), maxPx: 1024, pictures: false },
+      { checkCancel: () => {}, progress: () => {} },
+    );
+    const name = files.find((f) => f.id === file)?.name ?? '';
+    const r = await classifyFilePages(
+      { key: `e2e:${name}`, file, fileName: name, thumbs: thumbs.pages, left },
+      deps,
+    );
+    out.push(...r.hints);
+  }
+  return out;
 }

@@ -4,6 +4,7 @@
 // re-enters a step with its previous inputs; outputs after it are dropped").
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AiPageHint,
   AllowanceDecision,
   ApplyResult,
   AutopilotRecord,
@@ -31,6 +32,12 @@ import type {
 } from 'lib/pattern-import/types';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import {
+  classifyFilePages,
+  pagesForCall,
+  thumbPxFor,
+  type PageRoleDeps,
+} from 'lib/pattern-import/ai/pages';
+import {
   nameOriginOf,
   overridesFromNames as namesToOverrides,
   planNaming,
@@ -48,10 +55,11 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
-import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
+import { scaleUncertain, stepOffer, tileSheets, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
-import { autopilotRecordOf, type Assumption } from './autopilot/types';
+import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
+import { aiAsideAssumptions } from './autopilot/ai-pages';
 import type {
   ApplyDraftFn,
   ApplyProgress,
@@ -277,8 +285,16 @@ export function cardFingerprint(c: CardContext): string {
     c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
     (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
     (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+    cardIdentity(c),
   ]);
 }
+
+/**
+ * A10 (Codex #5): what the card says it is — the strings the model / sheet choice is matched
+ * against (autopilot/card-match.ts). A change means the choice was made against another card.
+ */
+export const cardIdentity = (c: CardContext) =>
+  JSON.stringify([c.cardName ?? '', c.styleNumber ?? '', c.styleLabel ?? '']);
 
 export function useImportSession(deps: {
   client: ImportClient;
@@ -286,6 +302,11 @@ export function useImportSession(deps: {
   namer: NameSuggester;
   buildDraft: DraftBuilder;
   applyDraft: ApplyDraftFn;
+  /**
+   * A9: the AI page-role call (ai-page-roles.ts on the real worker; the recorded fixture in the
+   * probes). Absent = no call: the pages are judged by their geometry alone, as before.
+   */
+  pageRoles?: PageRoleDeps;
 }) {
   const { client, namer, buildDraft, applyDraft } = deps;
   /** The LIVE card as the latest render sees it (only the freshness check reads it). */
@@ -330,6 +351,14 @@ export function useImportSession(deps: {
    * be reached (not logged in, offline): the pieces are named by hand instead.
    */
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * A9: the AI's page roles of this run (evidence the clean stage reads on every run of it), and
+   * what the call did in words — a note on the files step, never a stop.
+   */
+  const pageHints = useRef<AiPageHint[]>([]);
+  /** A9 (Codex #4): per file, what its answers were asked against (`basisOf`). */
+  const pageBasis = useRef(new Map<string, string>());
+  const [pageRoleNote, setPageRoleNote] = useState<string | null>(null);
   const exRef = useRef(extracted);
   exRef.current = extracted;
   /**
@@ -569,7 +598,10 @@ export function useImportSession(deps: {
           });
           // A8: the pages are cleaned before anything is parsed — furniture masked, the pages
           // that are not pattern set aside, a test square drawn as lines offered as the scale
-          const cl = await run('clean', { edits: [] });
+          const cl0 = await run('clean', { edits: [] });
+          // A9: the AI's page roles (one call per file with a page set aside that holds line work),
+          // read by the clean stage as the evidence it lacked
+          const cl = (await askPageRoles(cl0, out.files)) ?? cl0;
           // The best candidate is preselected; the operator confirms on the scale step.
           const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best });
@@ -599,7 +631,10 @@ export function useImportSession(deps: {
           const decision = sRef.current.scale.decision;
           patchInputs({ cleanEdits: ev.edits });
           iRef.current = { ...iRef.current, cleanEdits: ev.edits };
-          const cl = await run('clean', { edits: ev.edits });
+          let cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
+          // A9 (Codex #4): an edit that changed a file's render or its tile reference set makes
+          // that file's AI answers stale — they only suggest until asked again
+          if (staleAfter(cl)) cl = await run('clean', { edits: ev.edits, ...aiHintsNow() });
           const best = bestScale(cl.scale);
           patchInputs({ scaleIndex: best, scaleConfirmed: false });
           iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
@@ -842,8 +877,18 @@ export function useImportSession(deps: {
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
             techCardId: rc().techCardId,
-            // A10: an autopilot run's assumptions ride in every written manifest
-            ...autopilotOf(ev.autopilot, iRef.current.autopilot, sem.pieces),
+            // A10: an autopilot run's assumptions ride in every written manifest (A9: with the
+            // pages the AI + geometry set aside, when the autopilot asked nothing to record them)
+            ...autopilotOf(
+              ev.autopilot,
+              drive.current?.resolve || iRef.current.autopilot.length
+                ? mergeAssumptions(
+                    iRef.current.autopilot,
+                    aiAsideAssumptions(sRef.current, iRef.current.autopilot),
+                  )
+                : iRef.current.autopilot,
+              sem.pieces,
+            ),
           });
           const draft = buildDraft(out, { card: rc(), semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
@@ -925,12 +970,32 @@ export function useImportSession(deps: {
         case 'back': {
           // back to sizes or before: the stages run again — against the card as it is now
           const changed = stepIndex(ev.to) <= stepIndex('sizes') && !!cardStale();
+          // A10 (Codex #5): the card's name / style number changed — the model and the sheet it
+          // named are chosen again (from the sheet step when the file has several)
+          const renamed =
+            stepIndex(ev.to) <= stepIndex('sizes') &&
+            runCard.current != null &&
+            cardIdentity(runCard.current) !== cardIdentity(cardRef.current);
+          if (renamed) {
+            const cleared = {
+              sheetPicked: null,
+              variant: null,
+              autopilot: iRef.current.autopilot.filter(
+                (a) => a.kind !== 'model' && a.kind !== 'sheet-choice',
+              ),
+            };
+            iRef.current = { ...iRef.current, ...cleared };
+            patchInputs(cleared);
+            if (tileSheets(sRef.current.pages) > 1 && stepIndex(ev.to) > stepIndex('sheet'))
+              ev = { ...ev, to: 'sheet' };
+          }
           if (stepIndex(ev.to) <= stepIndex('sizes')) takeCard();
           if (sRef.current.names.length) heldNames.current = sRef.current.names;
           setApply({ phase: 'idle' });
           setNotice(null);
           setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
+          if (renamed) patch({ variant: null });
           // the card's size run changed under the map: the map is read again from the new run
           if (changed && ev.to === 'sizes' && sRef.current.sizes) {
             iRef.current = { ...iRef.current, sizeMap: null };
@@ -943,9 +1008,34 @@ export function useImportSession(deps: {
           }
           return;
         }
+        case 'page-roles': {
+          // A9: "ask the AI again" — fresh answers for the pages as they are now (edits kept)
+          const now = sRef.current.clean;
+          if (!now) return;
+          const cl = await askPageRoles(now, sRef.current.files, iRef.current.cleanEdits);
+          if (!cl) return;
+          const best = bestScale(cl.scale);
+          patchInputs({ scaleIndex: best, scaleConfirmed: false });
+          iRef.current = { ...iRef.current, scaleIndex: best, scaleConfirmed: false };
+          patch(
+            dropAfter(
+              {
+                ...sRef.current,
+                clean: cl,
+                pages: cl.classes,
+                scale: { candidates: cl.scale, decision: null },
+              },
+              'files',
+            ),
+          );
+          return;
+        }
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
+          pageHints.current = [];
+          pageBasis.current = new Map();
+          setPageRoleNote(null);
           baseSeeds.current = null;
           heldNames.current = [];
           setSom(null);
@@ -961,6 +1051,121 @@ export function useImportSession(deps: {
     } catch (e) {
       fail(e);
     }
+  }
+
+  /** A9: the AI page roles of this run as the clean stage's input (none = absent). */
+  const aiHintsNow = () =>
+    pageHints.current.length ? { aiHints: { pages: pageHints.current } } : {};
+
+  /**
+   * A9: render → upload → ClassifyPatternPages, one call per file that has a page set aside
+   * holding line work (plan question 10: the call is conditional — a file whose pages the
+   * geometry settles costs nothing). The answer re-runs clean with the hints; any failure leaves
+   * the run as it was (a note, never a stop). Null = clean need not run again.
+   */
+  /**
+   * A9 (Codex #4): what a file's AI answers depend on — the mask its thumbnails were drawn with
+   * (file-neutral item ids) and its tile reference set. A change of either makes them stale.
+   */
+  const basisOf = (cl: StageIO['clean']['out'], file: string) =>
+    `${maskRevOf(
+      cl.pages
+        .filter((p) => p.file === file)
+        .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
+      [],
+    )}|${cl.classes
+      .filter((c) => c.file === file && c.cls === 'tile')
+      .map((c) => c.page)
+      .join(',')}`;
+
+  /** Marks the answers of every file whose basis moved stale; true = clean must run again. */
+  const staleAfter = (cl: StageIO['clean']['out']) => {
+    let moved = false;
+    pageHints.current = pageHints.current.map((h) => {
+      if (h.stale || basisOf(cl, h.file) === pageBasis.current.get(h.file)) return h;
+      moved = true;
+      return { ...h, stale: true };
+    });
+    if (moved)
+      setPageRoleNote(
+        'AI page roles: asked before your edits — they only suggest now; ask the AI again to use them',
+      );
+    return moved;
+  };
+
+  async function askPageRoles(
+    cl: StageIO['clean']['out'],
+    files: StageIO['extract']['out']['files'],
+    edits: PageMaskEdit[] = [],
+  ): Promise<StageIO['clean']['out'] | null> {
+    pageHints.current = [];
+    pageBasis.current = new Map();
+    setPageRoleNote(null);
+    const roles = deps.pageRoles;
+    if (!roles) return null;
+    const asked = new Map<string, Set<number>>();
+    // the pages in question: set aside holding line work (also those the AI set aside before)
+    for (const d of cl.dropped)
+      if (d.status === 'suggest' || d.aiAside) {
+        const set = asked.get(d.file) ?? new Set<number>();
+        set.add(d.page);
+        asked.set(d.file, set);
+      }
+    if (!asked.size) return null;
+    const hints: AiPageHint[] = [];
+    const notes: string[] = [];
+    for (const [file, pagesAsked] of asked) {
+      const info = files.find((f) => f.id === file);
+      const all = cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page);
+      const { pages, left } = pagesForCall(all, pagesAsked);
+      // the thumbnails show the page after the mask: the answer is cached per file + mask
+      // file-neutral (Codex #3): the item ids without the file's index (`${file}:…`)
+      const rev = maskRevOf(
+        cl.pages
+          .filter((p) => p.file === file)
+          .flatMap((p) => p.items.filter((m) => m.applied).map((m) => m.id.slice(file.length + 1))),
+        [],
+      );
+      let thumbs: StageIO['render-pages']['out'];
+      try {
+        thumbs = await run('render-pages', {
+          pages: pages.map((p) => ({ file, page: p.page })),
+          // ≤ 1024 px each, ≤ 32 Mpx a call (the server's rules)
+          maxPx: thumbPxFor(pages.length),
+          pictures: roles.pictures !== false,
+        });
+      } catch (e) {
+        notes.push(
+          `AI page roles: the pages could not be drawn (${e instanceof Error ? e.message : String(e)})`,
+        );
+        continue;
+      }
+      patch({
+        busy: { stage: 'render-pages', done: 1, total: 2, note: 'asking the AI what each page is' },
+      });
+      try {
+        const r = await classifyFilePages(
+          {
+            key: `${info?.sha256 || info?.name || file}:${rev}`,
+            file,
+            fileName: info?.name ?? `file ${Number(file) + 1}`,
+            techCardId: rc().techCardId,
+            thumbs: thumbs.pages,
+            left,
+          },
+          roles,
+        );
+        hints.push(...r.hints);
+        if (r.note) notes.push(`${files.length > 1 ? `${info?.name}: ` : ''}${r.note}`);
+      } finally {
+        patch({ busy: null });
+      }
+    }
+    pageHints.current = hints;
+    setPageRoleNote(notes.join(' · ') || null);
+    for (const file of asked.keys()) pageBasis.current.set(file, basisOf(cl, file));
+    if (!hints.length) return edits.length ? await run('clean', { edits }) : null;
+    return await run('clean', { edits, aiHints: { pages: hints } });
   }
 
   /**
@@ -1096,6 +1301,9 @@ export function useImportSession(deps: {
           return;
         }
         case 'sheet':
+          // A10 (Codex #6): "next" never imports the default of several tile sheets — only a
+          // sheet pick answers which one (the blocker says so; this guards every caller)
+          if (tileSheets(s.pages) > 1 && iRef.current.sheetPicked === null) return;
           await toSizes();
           return;
         case 'sizes': {
@@ -1167,6 +1375,11 @@ export function useImportSession(deps: {
         return null;
       }
       case 'sheet': {
+        // A10 (Codex #6): which of several tile sheets is a question — only a sheet pick answers
+        // it; "next" never imports the default sheet
+        const n = tileSheets(s.pages);
+        if (n > 1 && inputs.sheetPicked === null)
+          return `the file carries ${n} tile sheets — pick the one this card is`;
         const miss = s.sheet?.sheet.missing.length ?? 0;
         if (miss) return `${miss} pages are missing — set the grid by hand`;
         const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
@@ -1179,7 +1392,15 @@ export function useImportSession(deps: {
         if (s.sizes?.countAsk && !s.sizes.expected)
           return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
-          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(legendKey(c)),
+          (c) =>
+            c.confidence < 0.6 &&
+            !inputs.legendConfirmed.includes(legendKey(c)) &&
+            // gb2: the file name's one size against a graded look — answering the sizes drawn
+            // settles it as well as confirming the row
+            !(
+              s.sizes?.expected?.from === 'operator' &&
+              c.evidence.some((x) => x.kind === 'face-graded' && x.sourceOne)
+            ),
         );
         if (pending.length)
           return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
@@ -1617,6 +1838,8 @@ export function useImportSession(deps: {
   /** Why the card is no longer the one this run read (null = the same card). */
   function cardStale(): string | null {
     if (cardAt.current == null) return null;
+    if (runCard.current && cardIdentity(runCard.current) !== cardIdentity(cardRef.current))
+      return "the card's name / style number changed since this run read it — the model and the sheet were chosen against the old one: nothing was uploaded, go back to sizes to choose them again";
     return cardFingerprint(cardRef.current) === cardAt.current
       ? null
       : 'the card changed since this run read it (sizes, BOM fabrics or its pieces / patterns) — nothing was uploaded: go back to sizes to run against the card as it is now';
@@ -1641,6 +1864,10 @@ export function useImportSession(deps: {
     extracted,
     errorCode,
     notice,
+    /** A9: what the AI page-role call did (answered, unavailable, timed out) — a note, not a stop. */
+    pageRoleNote,
+    /** A9 (Codex #4): some AI answers were asked before an edit — "ask the AI again" refreshes them. */
+    pageRolesStale: pageHints.current.some((h) => h.stale),
     som,
     clientKind: client.kind,
     blocker,

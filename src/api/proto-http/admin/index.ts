@@ -13512,6 +13512,47 @@ export type SuggestPatternPiecesResponse = {
   cached: boolean | undefined;
 };
 
+// PatternPageEvidence is one page of the pattern file: its picture and what the client measured on it.
+export type PatternPageEvidence = {
+  pageNo: number | undefined;
+  mediaId: number | undefined;
+  widthMm: number | undefined;
+  heightMm: number | undefined;
+  textExcerpt: string | undefined;
+  lineLengthM: number | undefined;
+  pieceSizedOutlines: number | undefined;
+  hasTileMarks: boolean | undefined;
+  textChars: number | undefined;
+};
+
+export type ClassifyPatternPagesRequest = {
+  techCardId: number | undefined;
+  fileName: string | undefined;
+  pages: PatternPageEvidence[] | undefined;
+  languageHint: string | undefined;
+  force: boolean | undefined;
+};
+
+// PatternPageRole is the model's reading of one page, validated by the server.
+export type PatternPageRole = {
+  pageNo: number | undefined;
+  // role — pattern_tile, pattern_sheet, overview, instructions, cutting_layout, cover, table or
+  // other. A page the model gave a role outside this list is not in the answer at all.
+  role: string | undefined;
+  confidence: number | undefined;
+  evidence: string[] | undefined;
+};
+
+export type ClassifyPatternPagesResponse = {
+  pages: PatternPageRole[] | undefined;
+  model: string | undefined;
+  promptTokens: number | undefined;
+  completionTokens: number | undefined;
+  costUsd: string | undefined;
+  warnings: string[] | undefined;
+  cached: boolean | undefined;
+};
+
 // AssemblySkeletonPiece is one cut piece of the garment as the skeleton read it.
 export type AssemblySkeletonPiece = {
   key: string | undefined;
@@ -19899,8 +19940,29 @@ export interface AdminService {
   // tail or an unknown modifier. Nothing is stored; an identical request within an hour is answered
   // from process memory (cached) unless force. tech_card_id is optional (0 = no card yet).
   // InvalidArgument: no overview, 0 or more than 80 pieces, more than 12 crops, a duplicate mark, a
-  // crop of a mark not in pieces. FailedPrecondition: an image is not a picture.
+  // crop of a mark not in pieces. FailedPrecondition: a picture not uploaded within the last 2 hours,
+  // a picture off this store's storage, an image is not a picture.
   SuggestPatternPieces(request: SuggestPatternPiecesRequest): Promise<SuggestPatternPiecesResponse>;
+  // ClassifyPatternPages (pattern import, A9) — ONE sync vision+JSON call (chat.pattern_pages) that
+  // says WHAT each page of an imported pattern PDF is, from a small picture of the page (media_id, a
+  // PNG of ≤ 1024 px on its long side) and the client's own page statistics (size, line length,
+  // piece-sized outlines, tile marks, amount of text, a text excerpt). One call per file, so the
+  // model sees the neighbouring pages. role is one of: pattern_tile (a 1:1 part of an assembled
+  // sheet), pattern_sheet (a whole 1:1 sheet), overview (a reduced layout of the pieces),
+  // instructions (sewing steps, diagrams), cutting_layout (the pieces laid on the fabric), cover,
+  // table (sizes, consumption), other. The server validates the answer: unknown pages are dropped, a
+  // page whose role is outside the list is asked once more and then LEFT OUT of pages (a warning
+  // says so; never turned into "other"), the confidence is clamped to 0..1, the evidence is kept to
+  // 3 quotes of ≤ 120 runes. The model never moves geometry: the client decides, the answer is one
+  // piece of evidence. Nothing is stored; an identical request within an hour is answered from
+  // process memory (cached) unless force. tech_card_id is optional (0 = no card yet). Every paid
+  // attempt (a retry, a provider fallback) spends one call of the hourly per-admin window.
+  // InvalidArgument: 0 or more than 40 pages, a page_no outside 1..999 or listed twice, a page
+  // without media_id, a media_id sent twice, an excerpt over 600 runes, a picture over 1024 px on
+  // its long side (or of unknown size), more than 32 M pixels of pictures in one call.
+  // FailedPrecondition: a picture not uploaded within the last 2 hours, a picture off this store's
+  // storage, a file that is not a picture.
+  ClassifyPatternPages(request: ClassifyPatternPagesRequest): Promise<ClassifyPatternPagesResponse>;
   // SuggestAssemblySkeleton (assembly skeleton, lane E) — ONE sync JSON call (chat.assembly_skeleton)
   // that gives a SECOND OPINION on the assembly skeleton the client read off the pattern. The client
   // builds the skeleton itself (pieces → seams → units → order, deterministic) and sends it here as
@@ -26375,6 +26437,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SuggestPatternPieces",
       }) as Promise<SuggestPatternPiecesResponse>;
+    },
+    ClassifyPatternPages(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/pattern-import/pages:classify`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ClassifyPatternPages",
+      }) as Promise<ClassifyPatternPagesResponse>;
     },
     SuggestAssemblySkeleton(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/assembly-skeleton:suggest`; // eslint-disable-line quotes

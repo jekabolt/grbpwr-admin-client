@@ -23,6 +23,7 @@ import {
   type ImportClient,
   type NameSuggester,
 } from './client';
+import { apiPageRoleDeps } from './ai-page-roles';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
@@ -57,6 +58,7 @@ const STAGE_WORD: Record<string, string> = {
   sizes: 'reading sizes',
   pieces: 'finding pieces',
   'render-som': 'naming pieces',
+  'render-pages': 'drawing the pages for the AI',
   semantics: 'building pieces',
   fabrics: 'proposing fabrics',
   write: 'writing DXF + gate',
@@ -172,7 +174,16 @@ function WizardBody({
           : noNames),
     [namerProp, client, kit],
   );
-  const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
+  // A9: the AI page roles ride with the real worker and the real namer (its renders are real);
+  // VITE_PATTERN_IMPORT_AI=stub turns them off with the names
+  const pageRoles = useMemo(
+    () =>
+      client.kind === 'worker' && import.meta.env.VITE_PATTERN_IMPORT_AI !== 'stub'
+        ? apiPageRoleDeps
+        : undefined,
+    [client],
+  );
+  const api = useImportSession({ client, card, namer, buildDraft, applyDraft, pageRoles });
   latest.current = api.session;
   const { session, blocker } = api;
 
@@ -266,11 +277,19 @@ function WizardBody({
         return <ScaleStep api={api} />;
       case 'sheet':
         // Keyed by sheet: the hand-grid form starts from THIS sheet's tiles.
-        return <SheetStep key={session.sheet?.sheet.id ?? -1} api={api} />;
+        // A10: the card's choice is read off the run's snapshot of the card (Codex #5)
+        return <SheetStep key={session.sheet?.sheet.id ?? -1} api={api} card={api.runCard} />;
       case 'sizes':
         return <SizesStep api={api} card={card} />;
       case 'pieces':
-        return <PiecesStep api={api} focus={focus} onDismissFocus={() => setFocus(null)} />;
+        return (
+          <PiecesStep
+            api={api}
+            card={api.runCard}
+            focus={focus}
+            onDismissFocus={() => setFocus(null)}
+          />
+        );
       case 'meaning':
         return <DetailsStep api={api} card={card} onFixInPieces={fixInPieces} />;
       case 'fabrics':

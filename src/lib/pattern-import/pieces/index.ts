@@ -25,7 +25,7 @@ export {
   type WallPieceEdit,
 } from './operator';
 export { proposeVariants, variantKnives, type VariantOption } from './variants';
-export { labelOf, seedLabel, textSeeds, variantLabels } from './seeds';
+export { labelOf, pageLabels, seedLabel, textSeeds, variantLabels } from './seeds';
 export { wallModel, type WallModel } from './walls';
 
 /** Seeds from the sheet's text (piece numbers / names). Clicks and AI marks are added by the wizard. */
