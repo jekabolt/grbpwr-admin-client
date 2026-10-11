@@ -2,5 +2,12 @@
 // and talks to worker/client.ts; node probes import this file directly.
 export { solveDoll } from './doll';
 export { liftMeasureLine, liftPoint } from './lift';
-export { completeFromJoins, joinsFromOps, type DeclaredJoin, type DeclaredOp } from './joins';
+export {
+  completeFromJoins,
+  hardwareFromOps,
+  joinsFromOps,
+  type DeclaredHardware,
+  type DeclaredJoin,
+  type DeclaredOp,
+} from './joins';
 export type * from './types';

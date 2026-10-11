@@ -34,4 +34,12 @@ export {
 } from './match';
 export { drillPoints, seamLoopOf, seamPieceOf, segmentPiece } from './segment';
 export { handOf, handStem, shapeRelation, twinKind, twins, unprovenCopies } from './twins';
-export { boundaryRuns, compositeSeams, type CompositeOptions } from './composite';
+export {
+  boundaryRuns,
+  compositeSeams,
+  gluedRuns,
+  type CompositeOptions,
+  type GluedRun,
+} from './composite';
+export { crotchPair, legPanels, sameLeg, type LegPanel } from './legs';
+export { orderUnits, type OrderJoin, type UnitsResult } from './units';

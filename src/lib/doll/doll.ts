@@ -3,7 +3,8 @@
 // sleeves / collar / cuffs / bands on those loops → phase 2 (everything) → release seams that can only
 // close by tearing the paper → report in words.
 
-import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
+import { edgeIdsOf, orderUnits } from 'lib/assembly-skeleton/geometry';
+import { legPanels, sameLeg } from 'lib/assembly-skeleton/geometry/legs';
 import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
 import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { grainDegOf } from 'lib/seams/frame';
@@ -23,13 +24,20 @@ import {
   type CollarCtx,
   type NeckPath,
 } from './collar';
-import { groupPieces, type GroupedPiece, type GroupedSeam } from './groups';
+import {
+  groupPieces,
+  roleOfPiece,
+  unitSkipKeys,
+  type GroupedPiece,
+  type GroupedSeam,
+} from './groups';
 import { instanceMirrored } from './instance';
 import { completeFromJoins } from './joins';
 import { liningByName } from 'lib/assembly-skeleton/names';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
+import { surfaceFit, surfaceHosts } from './surface';
 import {
   anchoredRows,
   pass,
@@ -111,6 +119,12 @@ type Work = {
   overlap?: DollClosureReport;
   /** Not reported as a seam: replaced by its mirror-twin reading, or refused (said in notSewn). */
   hidden?: boolean;
+  /**
+   * The crotch: a seam between the left and the right leg (the rise — legs meet nowhere else). The
+   * paper doll cannot fold paper into the saddle under the body without straining it, so the
+   * crotch is never released as «tearing the paper», and never read as crossing the doll.
+   */
+  crotch?: boolean;
 };
 
 /**
@@ -378,9 +392,29 @@ export function solveDoll(input: DollInput): DollReport {
     warnings.push(
       'every piece is cut from the lining fabric — no shell to solve without it: the lining pieces are drawn as the shell',
     );
-  const suspect0 = suspectsIn(groupPieces(inst.graph, facts, { lining, dropSeams: opt.dropSeams }));
+  // The order's hardware (an elastic): listed, never a panel or a seam.
+  const hardwareOf = new Map<string, string>();
+  for (const h of opt.hardware ?? []) for (const k of h.pieces) hardwareOf.set(k, h.label);
+  const suspect0 = suspectsIn(
+    groupPieces(inst.graph, facts, { lining, dropSeams: opt.dropSeams, hardware: hardwareOf }),
+  );
   // Declared joins (the technologist's order) complete the graph where it has no seam.
   let graph = inst.graph;
+  // Units the order sews first (two yoke halves → one unit → onto the back leg): laid flat, their
+  // joint edge sewn onto the next piece; leg seams run on across them (units.ts).
+  const unitNotes = new Map<string, string>();
+  const unitDropped: NonNullable<DollReport['notSewn']> = [];
+  // (trousers only for now: a shirt's order is read by the free-loop proposals as before)
+  const legsCat0 =
+    facts.category === 'trousers' || facts.category === 'jumpsuit' || facts.category === 'bottom';
+  if (legsCat0 && (opt.joins?.length || hardwareOf.size)) {
+    const skipK = unitSkipKeys(graph, facts, lining, hardwareOf);
+    const u = orderUnits(graph, opt.joins ?? [], skipK, hardwareOf);
+    graph = u.graph;
+    for (const x of u.added) unitNotes.set(`${x.seam.a}~${x.seam.b}`, x.note);
+    unitDropped.push(...u.dropped);
+    warnings.push(...u.words, ...u.dropped.map((x) => `${x.id}: ${x.note}`));
+  }
   const orderNote = new Map<string, string>();
   const orderJoins: DollReport['orderJoins'] = [];
   const orderSurface: DollReport['orderSurface'] = [];
@@ -425,8 +459,83 @@ export function solveDoll(input: DollInput): DollReport {
         `technologist's order «${x.join}»: ${x.part.join('+')} is sewn onto a panel's face (a flap / welt / patch), not edge to edge — not drawn as a seam`,
       );
   }
-  const G = groupPieces(graph, facts, { lining, dropSeams: opt.dropSeams });
+  const G = groupPieces(graph, facts, { lining, dropSeams: opt.dropSeams, hardware: hardwareOf });
   warnings.push(...G.warnings);
+  // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
+  // outseam, with whatever is sewn on top of them (a yoke unit, a pocket bag): the pieces joined by
+  // seams that are not the crotch (left ↔ right panel) and not between mirror twins. Which leg is
+  // the left one is read from the front's drawing — pieces lie face up, the left front seen from
+  // the front has its crotch curve on its left — never from a name (SS26-011's «Back_Top_L_R» is a
+  // left-yoke piece whose name ends in R).
+  if (facts.category === 'trousers' || facts.category === 'jumpsuit') {
+    const legsD = legPanels(G.pieces.map((P) => P.geom));
+    const gp = new Map(G.pieces.map((P) => [P.key, P]));
+    const legLike = (k: string) => {
+      const g = gp.get(k)?.group;
+      return g === 'LEG_L' || g === 'LEG_R' || g === 'BODY';
+    };
+    if (legsD.size >= 2) {
+      const parent = new Map<string, string>();
+      const find = (k: string): string => {
+        if (!parent.has(k)) parent.set(k, k);
+        let r = k;
+        while (parent.get(r) !== r) r = parent.get(r)!;
+        parent.set(k, r);
+        return r;
+      };
+      const twins = (x: string, y: string) =>
+        !!gp.get(x)?.geom.twinOf.some((t) => t.key === y && t.kind === 'mirror');
+      // The crotch (rise to rise — running on up a yoke or not) joins the two legs: no link.
+      const riseIds = new Set([...legsD.values()].map((L) => L.rise.id));
+      for (const sm of G.seams) {
+        if (sm.a.some((id) => riseIds.has(id)) && sm.b.some((id) => riseIds.has(id))) continue;
+        const ka = [...new Set(sm.a.map(pk))].filter(legLike);
+        const kb = [...new Set(sm.b.map(pk))].filter(legLike);
+        for (const x of ka)
+          for (const y of kb) {
+            if (x === y || twins(x, y)) continue;
+            const Lx = legsD.get(x);
+            const Ly = legsD.get(y);
+            if (Lx && Ly && !sameLeg(Lx, Ly)) continue;
+            parent.set(find(x), find(y));
+          }
+      }
+      const comps = new Map<string, string[]>();
+      for (const P of G.pieces)
+        if (legLike(P.key) && parent.has(P.key))
+          comps.set(find(P.key), [...(comps.get(find(P.key)) ?? []), P.key]);
+      const sideOf = (keys: string[]): DollGroupId | null => {
+        const Ls = keys.map((k) => legsD.get(k)).filter((x): x is NonNullable<typeof x> => !!x);
+        const front = Ls.find((L) => L.part === 'front');
+        const back = Ls.find((L) => L.part === 'back');
+        if (front) return front.crotchSide < 0 ? 'LEG_L' : 'LEG_R';
+        if (back) return back.crotchSide > 0 ? 'LEG_L' : 'LEG_R';
+        return null;
+      };
+      const legsOf = [...comps.values()]
+        .filter((ks) => ks.some((k) => legsD.has(k)))
+        .map((ks) => ({ ks, side: sideOf(ks) }));
+      const sides = legsOf.map((x) => x.side);
+      if (legsOf.length === 2 && sides[0] && sides[1] && sides[0] !== sides[1]) {
+        for (const { ks, side } of legsOf)
+          for (const k of ks) {
+            const P = gp.get(k)!;
+            if (P.group === side) continue;
+            const was = P.group;
+            P.group = side!;
+            const hand = P.geom.hand;
+            if (hand && (hand === 'L') !== (side === 'LEG_L'))
+              warnings.push(
+                `${P.geom.name}: its name reads ${hand === 'L' ? 'left' : 'right'}, its seams sew it into the ${side === 'LEG_L' ? 'left' : 'right'} leg (read from the drawing) — placed there`,
+              );
+            else if (was === 'BODY')
+              warnings.push(
+                `${P.geom.name}: sewn into the ${side === 'LEG_L' ? 'left' : 'right'} leg (read from the drawing)`,
+              );
+          }
+      }
+    }
+  }
   // NOT A GARMENT (bags, covers, flat accessories): the card names no garment and no piece reads as
   // a sleeve, cuff, collar, stand, leg or hem band. The doll's model — a torso wrapped by panels,
   // with tubes and rings sewn on its loops — has nothing to hold on to: the pieces are laid out flat,
@@ -454,6 +563,114 @@ export function solveDoll(input: DollInput): DollReport {
       : undefined;
   if (notGarment) for (const p of G.pieces) p.group = 'FLOAT';
 
+  // WAISTBAND HALVES (11.10 corpus: SS26-011's WST_L / WST_R, 80 mm apart, floated). Two halves
+  // of one band — mirror twins, or a left and a right strip — no seam joins: they are sewn at the
+  // centre back, end to end, into ONE ring over the waist. Which ends: those from which the notches
+  // of their long edges stand at the same distance (the side / yoke marks); the longer half's extra
+  // length is the fly extension at the centre front — overlapped, not sewn (cut off the ring's
+  // run below). Proposed by the doll, said in words.
+  const dollNote = new Map<string, string>();
+  const bandExt: { key: string; mm: number } | null = (() => {
+    const band = G.pieces.filter((P) => P.group === 'WAISTBAND');
+    if (band.length !== 2) return null;
+    const [A, B] = band;
+    if (
+      G.seams.some(
+        (sm) =>
+          [...sm.a, ...sm.b].some((id) => pk(id) === A.key) &&
+          [...sm.a, ...sm.b].some((id) => pk(id) === B.key),
+      )
+    )
+      return null;
+    const halves =
+      A.geom.twinOf.some((t) => t.key === B.key && t.kind === 'mirror') ||
+      (!!A.geom.hand && !!B.geom.hand && A.geom.hand !== B.geom.hand);
+    if (!halves) return null;
+    /** A strip's two short ends (the edges at its long axis' extremes) and its long edges. */
+    const ends = (P: GroupedPiece) => {
+      const xs = P.geom.rs.map((q) => q[0]);
+      const ys = P.geom.rs.map((q) => q[1]);
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      const ax = w >= h ? 0 : 1;
+      const lo = Math.min(...(ax ? ys : xs));
+      const hi = Math.max(...(ax ? ys : xs));
+      const span = hi - lo;
+      const mid = (e: Edge) => e.pts.reduce((t, q) => t + q[ax], 0) / e.pts.length;
+      const short = P.geom.edges.filter((e) => e.lenMm < 0.3 * span);
+      const loE = short.filter((e) => mid(e) < lo + 0.15 * span);
+      const hiE = short.filter((e) => mid(e) > hi - 0.15 * span);
+      if (loE.length !== 1 || hiE.length !== 1) return null;
+      const long = P.geom.edges.filter((e) => e.lenMm >= 0.6 * span);
+      // Notches of the long edges, as distances from each end.
+      const from = (end: Edge) =>
+        long.flatMap((e) => {
+          const s0 = e.pts[0];
+          const near = Math.min(...end.pts.map((q) => Math.hypot(q[0] - s0[0], q[1] - s0[1]))) < 5;
+          return e.notchesMm.map((d) => (near ? d : e.lenMm - d));
+        });
+      return {
+        ends: [
+          { e: loE[0], notches: from(loE[0]) },
+          { e: hiE[0], notches: from(hiE[0]) },
+        ],
+        len: Math.max(0, ...long.map((e) => e.lenMm)),
+      };
+    };
+    const ea = ends(A);
+    const eb = ends(B);
+    if (!ea || !eb) return null;
+    let best: { x: (typeof ea.ends)[number]; y: (typeof eb.ends)[number]; why: string } | null =
+      null;
+    let bestErr = Infinity;
+    for (const x of ea.ends)
+      for (const y of eb.ends) {
+        if (!x.notches.length || !y.notches.length) continue;
+        const err = Math.min(...x.notches.flatMap((d) => y.notches.map((q) => Math.abs(d - q))));
+        if (err < bestErr) {
+          bestErr = err;
+          best = {
+            x,
+            y,
+            why: `their notches stand ${Math.round(Math.min(...x.notches))} mm from those ends on both halves`,
+          };
+        }
+      }
+    if (!best || bestErr > 5) {
+      // No notch to read: the ends of matching length; the far ends then are the front.
+      const pairs = ea.ends.flatMap((x) => eb.ends.map((y) => ({ x, y })));
+      pairs.sort(
+        (p, q) => Math.abs(p.x.e.lenMm - p.y.e.lenMm) - Math.abs(q.x.e.lenMm - q.y.e.lenMm),
+      );
+      best = { ...pairs[0], why: 'no notch tells — the ends of matching length' };
+    }
+    const ext = Math.abs(ea.len - eb.len);
+    const longer = ea.len >= eb.len ? A : B;
+    const id = `${best.x.e.id}~${best.y.e.id}`;
+    const note = `proposed by the doll · waistband: ${A.geom.name} + ${B.geom.name} joined end to end at the centre back (${best.why}) — one ring over the waist${ext >= 10 ? ` · ${longer.geom.name} is ${Math.round(ext)} mm longer: the fly extension at the centre front, overlapped, not sewn` : ''} · not in the pattern`;
+    const seam: SeamCandidate = {
+      a: best.x.e.id,
+      b: best.y.e.id,
+      score: 0.7,
+      kind: 'edge',
+      evidence: {
+        dLenMm: Math.abs(best.x.e.lenMm - best.y.e.lenMm),
+        relLen: 0,
+        notchScore: null,
+        curvature: 'flat',
+        hand: 'cross',
+        twin: 'mirror',
+        self: false,
+        rule: note,
+        aLenMm: best.x.e.lenMm,
+        bLenMm: best.y.e.lenMm,
+      },
+    };
+    G.seams.push({ seam, a: [best.x.e.id], b: [best.y.e.id] });
+    dollNote.set(id, note);
+    warnings.push(note);
+    return ext >= 10 ? { key: longer.key, mm: ext } : null;
+  })();
   const suspectNote = new Map<string, string>();
   const suspects: { s: GroupedSeam; note: string }[] = [];
   {
@@ -619,6 +836,7 @@ export function solveDoll(input: DollInput): DollReport {
       40,
       Math.max(9, Math.sqrt((2 * area) / (Math.sqrt(3) * (opt.targetVertices ?? 2200)))),
     );
+  const gridH = h;
   const panels: Panel[] = [];
   let N = 0;
   for (const p of G.pieces) {
@@ -820,10 +1038,15 @@ export function solveDoll(input: DollInput): DollReport {
     // part along its stretch of the single edge. Which end of the edge the stored walk starts at is
     // not in the row: each composite is laid both ways and keeps the one whose parts land on their
     // stretches in the chart (one fixed way twisted card6's placket or opened card11's left leg).
+    // The same for a composite the order's units gave a leg (units.ts: the yoke's joint edge onto
+    // the back leg, the back's outseam running on up the yoke): its parts are in boundary order
+    // with the run's start on the single edge's END (face up) — laid against the edge.
     const comps: { parts: ChartSeam[]; flip: ChartSeam[]; fixed: boolean | null }[] = [];
-    if (l4)
+    const unitLeg = (g: GroupedSeam) =>
+      (gid === 'LEG_L' || gid === 'LEG_R') && unitNotes.has(`${g.seam.a}~${g.seam.b}`);
+    if (l4 || unitNotes.size)
       for (const g of G.seams) {
-        if (!isConf(g.seam)) continue;
+        if (!(l4 && isConf(g.seam)) && !unitLeg(g)) continue;
         for (const [one, many, oneIsA] of [
           [g.a, g.b, true],
           [g.b, g.a, false],
@@ -860,7 +1083,7 @@ export function solveDoll(input: DollInput): DollReport {
           // Pieces lie upright in the chart, so height says which part comes first along a
           // vertical edge: the first part sits above the second when the seam joining their pieces
           // lies below it on its own piece. Along a level edge the chart's fit decides.
-          let fixed: boolean | null = null;
+          let fixed: boolean | null = unitLeg(g) ? true : null;
           const k0 = pk(many[0]);
           const k1 = pk(many[1]);
           const join = G.seams.find(
@@ -870,7 +1093,7 @@ export function solveDoll(input: DollInput): DollReport {
           );
           const my = (pts: readonly Pt2[]) =>
             pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
-          if (join) {
+          if (join && fixed === null) {
             const jIds = [...join.a, ...join.b].filter((id) => pk(id) === k0);
             const jy = my(jIds.flatMap((id) => edgeById.get(id)?.pts ?? []));
             const py = my(parts[0]!.pts);
@@ -1068,9 +1291,8 @@ export function solveDoll(input: DollInput): DollReport {
         );
       }
     }
-    if (l4)
-      for (const id of [...chart.used])
-        if (id.includes('@')) chart.used.add(id.slice(0, id.lastIndexOf('@')));
+    for (const id of [...chart.used])
+      if (id.includes('@')) chart.used.add(id.slice(0, id.lastIndexOf('@')));
     charts.set(gid, chart);
     for (const P of list) {
       const pl = chart.place.get(P.key)!;
@@ -1247,6 +1469,7 @@ export function solveDoll(input: DollInput): DollReport {
   };
 
   // ── BODY / LEGS placement ───────────────────────────────────────────────────────────────
+  const legPanelsOf = legPanels(G.pieces.map((P) => P.geom));
   const body = groups.get('BODY') ?? [];
   const bodyChart = charts.get('BODY');
   let vArm = 0;
@@ -1623,6 +1846,8 @@ export function solveDoll(input: DollInput): DollReport {
     }
   }
 
+  /** Vertices of the crotch seams (both sides): held on the body's mid-plane x = 0. */
+  const midPlane = new Set<number>();
   // Legs: two tubes under the hip, inseam inward.
   const legInfo: { gid: DollGroupId; s: number; x: number; R: number }[] = [];
   for (const gid of ['LEG_L', 'LEG_R'] as DollGroupId[]) {
@@ -1633,13 +1858,27 @@ export function solveDoll(input: DollInput): DollReport {
     const main = ch.components[0].keys.map((k) => panelByKey.get(k)!);
     const [lo, hi] = vRange(main);
     const H = hi - lo;
-    const vCr = hi - 0.27 * H;
+    // The crotch level: the crotch points of the leg panels (the rises' low ends, legs.ts) as laid
+    // in the chart; a guess at 27 % of the height below the top only when no panel reads as a leg.
+    const crotchVs = main.flatMap((P) => {
+      const L = legPanelsOf.get(P.key);
+      const pl = ch.place.get(P.key);
+      if (!L || !pl) return [];
+      const [a0, a1] = [L.rise.pts[0], L.rise.pts[L.rise.pts.length - 1]];
+      return [toChart(pl, a0[1] < a1[1] ? a0 : a1)[1]];
+    });
+    const vCr = crotchVs.length
+      ? crotchVs.reduce((t, x) => t + x, 0) / crotchVs.length
+      : hi - 0.27 * H;
     const W = widthTable(main, lo, hi, 300);
     const Rcr = (W(vCr - 40) * (1 - EPS_WRAP)) / TAU;
     const xAxis = s * (Rcr + 12);
     // Inseam: the chart seam between the first two pieces.
     let uRef = 0;
-    const used = [...ch.used][0];
+    // (a composite laid part by part is used as `id@k`: its seam is the id)
+    const used = [...ch.used].map((id) =>
+      id.includes('@') ? id.slice(0, id.lastIndexOf('@')) : id,
+    )[0];
     const us = used ? G.seams.find((x) => `${x.seam.a}~${x.seam.b}` === used) : undefined;
     const up = us ? pathOf(us.a) : null;
     const eEnds = extent(crossings(main, vCr - 40));
@@ -1655,7 +1894,13 @@ export function solveDoll(input: DollInput): DollReport {
         const ga = panelByKey.get(pk(sm.a[0]))?.group;
         const gb = panelByKey.get(pk(sm.b[0]))?.group;
         if (!((ga === 'LEG_L' && gb === 'LEG_R') || (ga === 'LEG_R' && gb === 'LEG_L'))) continue;
-        for (const side of [sm.a, sm.b])
+        // Only the rises themselves (the crotch running on up a yoke starts nowhere near it).
+        // (a composite crotch — the rise running on up a yoke — counts by its rise edge)
+        const riseOf = (ids: EdgeId[]) =>
+          ids.find((id) => legPanelsOf.get(pk(id))?.rise.id === id) ?? null;
+        if (legPanelsOf.size && !(riseOf(sm.a) && riseOf(sm.b))) continue;
+        for (const side0 of [sm.a, sm.b]) {
+          const side = legPanelsOf.size ? [riseOf(side0)!] : side0;
           if (keys.has(pk(side[0]))) {
             const P0 = pathOf(side);
             if (P0) {
@@ -1665,6 +1910,7 @@ export function solveDoll(input: DollInput): DollReport {
               riseU.push(cuv[2 * low]);
             }
           }
+        }
       }
       if (riseU.length && eEnds) {
         let vote = 0;
@@ -1692,8 +1938,33 @@ export function solveDoll(input: DollInput): DollReport {
       const b = (2 * half) / (2 * k);
       return { a: 1.25 * b, b };
     };
+    // The crotch points (each leg panel's rise low end): they rest on the body's crotch, under
+    // it — between the front and the back, on the mid-plane — not wherever the shorter rise drags
+    // them (SS26-007's front rise pulled the crotch forward, the back's crotch extension bulged).
+    const crotchPts = new Set<number>();
+    for (const P of list) {
+      const L = legPanelsOf.get(P.key);
+      if (!L) continue;
+      const [r0, r1] = [L.rise.pts[0], L.rise.pts[L.rise.pts.length - 1]];
+      const low = r0[1] < r1[1] ? r0 : r1;
+      let best = -1;
+      let bd = Infinity;
+      for (let r = 0; r < P.nb; r++) {
+        const v = P.offset + r;
+        const d = Math.hypot(uv[2 * v] - low[0], uv[2 * v + 1] - low[1]);
+        if (d < bd) [best, bd] = [v, d];
+      }
+      if (best >= 0 && bd < 15) crotchPts.add(best);
+    }
     const legProxy: Proxy = {
       push(p, i) {
+        if (crotchPts.has(i)) {
+          p[3 * i] *= 0.95;
+          p[3 * i + 2] *= 0.95;
+        }
+        // The crotch seam lies on the body's mid-plane (the centre front / back of a garment
+        // symmetric left to right): its two sides are not let buckle sideways apart.
+        if (midPlane.has(i)) p[3 * i] = 0;
         const y = p[3 * i + 1] - lo;
         if (y > vCr - lo + 30 && y <= H + 10) {
           // Own half of the pelvis: never past the mid-plane, never inside the ellipse.
@@ -1701,7 +1972,12 @@ export function solveDoll(input: DollInput): DollReport {
           const { a, b } = pelvis(y);
           const x = p[3 * i];
           const z = p[3 * i + 2];
-          const q = (x / (a * 0.8)) ** 2 + (z / (b * 0.8)) ** 2; // darts take in the waist: a looser guide
+          // Darts take in the waist: a looser guide (0.8). Just above the crotch the body is a
+          // saddle the front and the back rise curve under to meet: the guide there is a thin one,
+          // growing to full over the rises' curved part (~90 mm) — not a body's depth to cross.
+          const up = Math.max(0, Math.min(1, (y - (vCr - lo) - 30) / 90));
+          const g = 0.8 * (0.35 + 0.65 * up * up * (3 - 2 * up));
+          const q = (x / (a * g)) ** 2 + (z / (b * g)) ** 2;
           if (q >= 1 || q < 1e-9) return;
           const f = 1 / Math.sqrt(q);
           p[3 * i] = x * f;
@@ -1754,8 +2030,11 @@ export function solveDoll(input: DollInput): DollReport {
         // When the strip's ends meet on the inside, each height wraps its own extent end to end
         // (the rise runs beyond the crotch-level ends).
         const ext = endsInside && inMain ? extAt(y) : null;
+        // (clamped: a crotch point a hair outside this height's extent must not wrap round to
+        // the other end — the front crotch point landed at the back, the back one at the front)
         const th = ext
-          ? (TAU * (u - ext[0])) / Math.max(1, ext[1] - ext[0])
+          ? (TAU * Math.max(0, Math.min(ext[1] - ext[0], u - ext[0]))) /
+            Math.max(1, ext[1] - ext[0])
           : (TAU * (u - uRef)) / Wv;
         const leg: Vec3 = [xAxis - s * R * Math.cos(th), y - lo, s * R * Math.sin(th)];
         // Above the crotch: the leg's arc becomes this side's half of the pelvis — the inseam end
@@ -1764,7 +2043,8 @@ export function solveDoll(input: DollInput): DollReport {
         const t = Math.max(0, Math.min(1, (yy - (vCr - lo)) / 60));
         if (t > 0) {
           const { a, b } = pelvis(yy);
-          const thn = ((th % TAU) + TAU) % TAU;
+          // (an extent read end to end is already 0…2π: its far end must stay 2π, not wrap to 0)
+          const thn = ext ? th : ((th % TAU) + TAU) % TAU;
           const phi = Math.PI / 2 - thn / 2;
           const pel: Vec3 = [s * a * Math.cos(phi), yy, s * b * Math.sin(phi)];
           setPos(v, [leg[0] + (pel[0] - leg[0]) * t, yy, leg[2] + (pel[2] - leg[2]) * t]);
@@ -1776,21 +2056,6 @@ export function solveDoll(input: DollInput): DollReport {
     legInfo.push({ gid, s, x: xAxis, R: Rcr });
     vLo = 0;
   }
-  if (opt.debug && legInfo.length === 2)
-    for (const sm of G.seams) {
-      const ga = panelByKey.get(pk(sm.a[0]))?.group;
-      const gb = panelByKey.get(pk(sm.b[0]))?.group;
-      if (!((ga === 'LEG_L' && gb === 'LEG_R') || (ga === 'LEG_R' && gb === 'LEG_L'))) continue;
-      const c = (ids: EdgeId[]) => {
-        const P0 = pathOf(ids);
-        if (!P0) return '-';
-        const q = [0, 1, 2].map(
-          (k) => [...P0.v].reduce((t, v) => t + pos[3 * v + k], 0) / P0.v.length,
-        );
-        return q.map((x) => x.toFixed(0)).join(',');
-      };
-      warnings.push(`debug: rise ${sm.seam.a}~${sm.seam.b} placed at ${c(sm.a)} / ${c(sm.b)}`);
-    }
 
   // ── constraints (distances) ─────────────────────────────────────────────────────────────
   const di: number[] = [];
@@ -1976,7 +2241,14 @@ export function solveDoll(input: DollInput): DollReport {
       let ws = 0;
       let worstSp = 0;
       for (const w of works) {
-        if (w.released || w.origin !== 'graph' || w.closure || !w.solver.active || w.confirmed)
+        if (
+          w.released ||
+          w.origin !== 'graph' ||
+          w.closure ||
+          !w.solver.active ||
+          w.confirmed ||
+          w.crotch
+        )
           continue;
         if (!w.A.v.every((v) => moving[v]) && !w.B.v.every((v) => moving[v])) continue;
         const m = measure(w);
@@ -2007,6 +2279,12 @@ export function solveDoll(input: DollInput): DollReport {
     });
   const edgeUsed = (id: EdgeId) =>
     works.some((w) => !w.released && (w.a.includes(id) || w.b.includes(id)));
+  /** A seam between the left and the right leg: the crotch (legs meet nowhere else). */
+  const crotchOf = (s: GroupedSeam) => {
+    const ga = panelByKey.get(pk(s.a[0]))?.group;
+    const gb = panelByKey.get(pk(s.b[0]))?.group;
+    return (ga === 'LEG_L' && gb === 'LEG_R') || (ga === 'LEG_R' && gb === 'LEG_L');
+  };
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
     const A = conf ? sidePath(s, 'a') : pathOf(s.a);
@@ -2032,15 +2310,17 @@ export function solveDoll(input: DollInput): DollReport {
         id: `${s.seam.a}~${s.seam.b}`,
         a: s.a,
         b: s.b,
-        kind: s.seam.kind,
-        origin: 'graph',
+        kind: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'proposed-composite' : s.seam.kind,
+        origin: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'doll-proposed' : 'graph',
         A,
         B,
         target: closure ? 0.5 : 1,
         note: closure
           ? suspectNote.get(`${s.seam.a}~${s.seam.b}`) ??
             'closure (buttons / zip) — drawn closed with a small gap'
-          : orderNote.get(`${s.seam.a}~${s.seam.b}`) ?? '',
+          : orderNote.get(`${s.seam.a}~${s.seam.b}`) ??
+            dollNote.get(`${s.seam.a}~${s.seam.b}`) ??
+            '',
         fromOrder: orderNote.has(`${s.seam.a}~${s.seam.b}`),
         closure,
         // A confirmed seam is sewn as stored (whole, or its stored stretch) — never re-guessed.
@@ -2058,11 +2338,17 @@ export function solveDoll(input: DollInput): DollReport {
       born,
       closure
         ? 60
-        : charts.get(panelByKey.get(pk(s.a[0]))!.group)?.used.has(`${s.seam.a}~${s.seam.b}`)
+        : charts.get(panelByKey.get(pk(s.a[0]))!.group)?.used.has(`${s.seam.a}~${s.seam.b}`) ||
+            crotchOf(s)
           ? 40
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (crotchOf(s)) {
+      w0.crotch = true;
+      for (const v of w0.A.v) midPlane.add(v);
+      for (const v of w0.B.v) midPlane.add(v);
+    }
     if (conf && multi && opt.debug)
       for (const [side, P] of [
         ['A', A],
@@ -2315,7 +2601,8 @@ export function solveDoll(input: DollInput): DollReport {
     const w = graphWork(s, 0);
     if (!w || !groups.has('BODY')) continue;
     // A confirmed seam is sewn as a person said, however it lies now (an open end = contradiction).
-    if (w.confirmed) continue;
+    // The crotch joins the left leg to the right one by design: it crosses the doll's middle.
+    if (w.confirmed || w.crotch) continue;
     // A seam that crosses the doll from its left to its right (the back's left shoulder onto the
     // right front) cannot close without tearing paper: released, and the mirror reading proposed.
     const cx = (P: Path) => [...P.v].reduce((t, v) => t + pos[3 * v], 0) / P.v.length;
@@ -2963,6 +3250,8 @@ export function solveDoll(input: DollInput): DollReport {
     cutAt: 'lowest' | 'front' | 'nearest',
     gid: DollGroupId,
     maxEase = 0.25,
+    /** Pull of the proposal (a band on the legs' top holds on, never drags the crotch round). */
+    stiff = 0.7,
   ) => {
     const cutIdx = (L: { verts: number[] }, ref?: Vec3) => {
       let best = 0;
@@ -3022,7 +3311,7 @@ export function solveDoll(input: DollInput): DollReport {
         origin: 'doll-proposed',
         A,
         B,
-        target: 0.7,
+        target: stiff,
         note: `proposed by the doll · ${label} · ${words} · not in the pattern`,
       },
       passes,
@@ -4285,6 +4574,9 @@ export function solveDoll(input: DollInput): DollReport {
     const target = gid === 'WAISTBAND' ? host[0]?.l : hemLoop ?? host[0]?.l;
     const c = target ? centroid(target.verts) : ([0, 0, 0] as Vec3);
     const F: Frame = { c, up: [0, 1, 0], e0: [0, 0, 1], e90: [1, 0, 0] };
+    // The band's own seams first (the halves joined at the centre back): its ring is their loop.
+    for (const sm of G.seams)
+      if (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set([gid]))) graphWork(sm, passes);
     const runs = placeRing(
       gid,
       F,
@@ -4295,17 +4587,68 @@ export function solveDoll(input: DollInput): DollReport {
       2,
     );
     for (const P of groups.get(gid)!) buildPanel(P);
-    for (const sm of G.seams)
-      if (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set([gid]))) graphWork(sm, passes);
-    if (runs && target && opt.proposeComposite !== false)
+    if (runs && target && opt.proposeComposite !== false) {
+      let run = gid === 'WAISTBAND' ? runs.bottom : runs.top;
+      // Halves joined end to end: the run is their long edges, not the short ends it turns into.
+      if (gid === 'WAISTBAND' && dollNote.size) {
+        const endIds = new Set<string>();
+        for (const P of groups.get(gid)!) {
+          const longest = Math.max(...P.geom.edges.map((e) => e.lenMm));
+          for (const e of P.geom.edges) if (e.lenMm < 0.3 * longest) endIds.add(e.id);
+        }
+        const onEnd = (v: number) => {
+          const Pn = panels[panelOf[v]];
+          const r = ringOf[v];
+          if (r < 0) return false;
+          const rsI = Pn.mesh.bRs[r];
+          const n = Pn.geom.rs.length;
+          return Pn.geom.edges.some((e) => {
+            if (!endIds.has(e.id)) return false;
+            const span = (((e.e - e.s) % n) + n) % n;
+            const off = (((rsI - e.s) % n) + n) % n;
+            return off > 0 && off < span;
+          });
+        };
+        let i0 = 0;
+        let i1 = run.length - 1;
+        // (a corner vertex followed by one on the end edge is the end's far corner: trimmed too)
+        while (i0 < i1 && (onEnd(run[i0]) || onEnd(run[i0 + 1]))) i0++;
+        while (i1 > i0 && (onEnd(run[i1]) || onEnd(run[i1 - 1]))) i1--;
+        if (i1 - i0 >= 2) run = run.slice(i0, i1 + 1);
+      }
+      // The fly extension (the longer half's extra at the centre front) is not sewn to the top.
+      const ext = gid === 'WAISTBAND' ? bandExt : null;
+      const Pl = ext ? panelByKey.get(ext.key) : undefined;
+      if (ext && Pl && run.length > 2) {
+        const atStart = panelOf[run[0]] === Pl.idx;
+        const atEnd = panelOf[run[run.length - 1]] === Pl.idx;
+        if (atStart !== atEnd) {
+          const seq = atStart ? run : [...run].reverse();
+          let acc = 0;
+          let k = 0;
+          while (k + 1 < seq.length && acc < ext.mm) {
+            const p = seq[k];
+            const q = seq[k + 1];
+            acc +=
+              panelOf[p] === panelOf[q]
+                ? Math.hypot(uv[2 * q] - uv[2 * p], uv[2 * q + 1] - uv[2 * p + 1])
+                : 0;
+            k++;
+          }
+          const kept = seq.slice(k);
+          run = atStart ? kept : kept.reverse();
+        }
+      }
       propose(
         gid === 'WAISTBAND' ? 'waistband ↔ top of the body' : 'hem band ↔ hem',
-        { verts: gid === 'WAISTBAND' ? runs.bottom : runs.top, closed: false },
+        { verts: run, closed: false },
         { verts: target.verts, closed: target.closed },
         'front',
         gid,
         0.25,
+        legInfo.length ? 0.3 : 0.7,
       );
+    }
   }
   // Graph seams between groups (whatever the graph found across them).
   for (const sm of G.seams) {
@@ -4570,7 +4913,8 @@ export function solveDoll(input: DollInput): DollReport {
     else if (twisted) state = 'twisted';
     // Open = a stretch of the seam stays apart (p95), not one corner point that lags.
     else if (m.p95 > 4 || m.max > 15) state = 'open';
-    else if (sp > 3 && !(easeOf(w) > 0.03 && sp <= easeOf(w) * 100 + 2)) state = 'stretched';
+    else if (sp > 3 && !(easeOf(w) > 0.03 && sp <= easeOf(w) * 100 + 2) && !w.crotch)
+      state = 'stretched';
     else if (easeOf(w) > 0.015) state = 'eased';
     else state = 'closed';
     let note = w.note;
@@ -4589,6 +4933,9 @@ export function solveDoll(input: DollInput): DollReport {
       else note = `twisted — ends crossed; sewn the other way round?`;
       if (w.kind === 'partial' && state !== 'closed')
         note += ` · partial (${Math.min(lenA, lenB).toFixed(0)} onto ${Math.max(lenA, lenB).toFixed(0)} mm)`;
+      // The crotch is a saddle under the body: paper strains there however right the seam is.
+      if (w.crotch && (state === 'closed' || state === 'eased') && sp > 3)
+        note += ` · the crotch: the paper strains ${sp.toFixed(0)} % in the saddle under the body (a doubly curved spot paper cannot take) — not a wrong seam`;
     } else if (w.origin === 'doll-proposed' || w.fromOrder)
       note += ` · gap after solving ${m.max.toFixed(0)} mm`;
     if (w.overlap) {
@@ -4679,6 +5026,7 @@ export function solveDoll(input: DollInput): DollReport {
       note,
     })),
     ...refusedMirror,
+    ...unitDropped,
   ];
   // Free edges facing each other (a seam the pattern has not got): reported open, never solved.
   const freeAll = panels
@@ -4799,9 +5147,140 @@ export function solveDoll(input: DollInput): DollReport {
     });
 
   for (const p of proposals) if (!p.ok) void p;
-  const positions = new Float32Array(3 * N);
+  // ── SURFACE PIECES on their host panel (surface.ts): laid on the solved panel, not solved ──
+  const surfaceRep: NonNullable<DollReport['surface']> = [];
+  const surfacePanels: DollReport['panels'] = [];
+  const surfacePos: number[] = [];
+  {
+    // (trousers for now: a top's pockets / facings stay listed as before)
+    const surf = legsCat0 ? G.skipped.filter((x) => x.surface).map((x) => x.pieceKey) : [];
+    // Hosts are the garment's panels (a leg, the body) — never a band, a collar or a cuff.
+    const drawnArea = new Map(
+      panels
+        .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
+        .map((P) => [P.key, Math.abs(P.geom.areaMm2)]),
+    );
+    const hosts = surfaceHosts(surf, opt.joins ?? [], drawnArea);
+    const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
+    const stack = new Map<string, number>();
+    let M = N;
+    for (const k of surf) {
+      const S = geomOfKey.get(k);
+      const hk = hosts.get(k);
+      const H = hk ? panelByKey.get(hk.host) : undefined;
+      if (!S || !hk || !H) {
+        surfaceRep.push({
+          pieceKey: k,
+          host: null,
+          join: null,
+          placed: false,
+          note: opt.joins?.length
+            ? 'no join of the order sews it to a drawn panel — not placed'
+            : "no technologist's order to say which panel carries it — not placed",
+        });
+        continue;
+      }
+      const fit = surfaceFit(S, H.geom);
+      if (!fit) {
+        surfaceRep.push({
+          pieceKey: k,
+          host: H.key,
+          join: hk.join,
+          placed: false,
+          note: `sewn onto ${H.key} (order «${hk.join}»), but no mark on that panel and no corner of it takes the piece face up — not placed`,
+        });
+        continue;
+      }
+      const mesh = meshPiece(S.rs, [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners], gridH);
+      const flipH = H.mirrored !== faceFlip.has(H.idx);
+      // Host vertex normals, out of the garment (the report's winding).
+      const nrm = new Float64Array(3 * H.count);
+      const T = H.mesh.tris;
+      for (let t = 0; t < T.length; t += 3) {
+        const a = T[t];
+        const b = flipH ? T[t + 2] : T[t + 1];
+        const c = flipH ? T[t + 1] : T[t + 2];
+        const A = getPos(H.offset + a);
+        const n = cross(sub(getPos(H.offset + b), A), sub(getPos(H.offset + c), A));
+        for (const v of [a, b, c]) for (let d = 0; d < 3; d++) nrm[3 * v + d] += n[d];
+      }
+      const lift = 2 + 2 * (stack.get(H.key) ?? 0);
+      stack.set(H.key, (stack.get(H.key) ?? 0) + 1);
+      const hp = H.mesh.pts;
+      for (const q of mesh.pts) {
+        const p = fit.map(q);
+        // The host triangle under p (or the nearest one, the point clamped onto it).
+        let bt = 0;
+        let bw: [number, number, number] = [1, 0, 0];
+        let bd = Infinity;
+        for (let t = 0; t < T.length; t += 3) {
+          const A = hp[T[t]];
+          const B = hp[T[t + 1]];
+          const C = hp[T[t + 2]];
+          const det = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+          if (Math.abs(det) < 1e-9) continue;
+          let u = ((B[1] - C[1]) * (p[0] - C[0]) + (C[0] - B[0]) * (p[1] - C[1])) / det;
+          let v = ((C[1] - A[1]) * (p[0] - C[0]) + (A[0] - C[0]) * (p[1] - C[1])) / det;
+          let w = 1 - u - v;
+          const out = Math.max(0, -u) + Math.max(0, -v) + Math.max(0, -w);
+          if (out < bd) {
+            u = Math.max(0, u);
+            v = Math.max(0, v);
+            w = Math.max(0, w);
+            const sw = u + v + w || 1;
+            bd = out;
+            bt = t;
+            bw = [u / sw, v / sw, w / sw];
+            if (out === 0) break;
+          }
+        }
+        const X: Vec3 = [0, 0, 0];
+        const Nn: Vec3 = [0, 0, 0];
+        for (let j = 0; j < 3; j++) {
+          const v = T[bt + j];
+          const P3 = getPos(H.offset + v);
+          for (let d = 0; d < 3; d++) {
+            X[d] += bw[j] * P3[d];
+            Nn[d] += bw[j] * nrm[3 * v + d];
+          }
+        }
+        const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
+        // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
+        // to (a patch pocket would lie over it — the drawing does not tell which).
+        for (let d = 0; d < 3; d++) surfacePos.push(X[d] - (lift * Nn[d]) / nl);
+      }
+      const flip = flipH !== fit.flip;
+      const tris = new Uint32Array(mesh.tris.length);
+      for (let t = 0; t < tris.length; t += 3) {
+        tris[t] = mesh.tris[t];
+        tris[t + 1] = flip ? mesh.tris[t + 2] : mesh.tris[t + 1];
+        tris[t + 2] = flip ? mesh.tris[t + 1] : mesh.tris[t + 2];
+      }
+      surfacePanels.push({
+        pieceKey: k,
+        instance: 0,
+        mirrored: H.mirrored,
+        group: H.group,
+        offset: M,
+        count: mesh.pts.length,
+        tris,
+        uv: Float32Array.from(mesh.pts.flat()),
+        boundary: Uint32Array.from(mesh.bVert),
+        layers: [],
+      });
+      M += mesh.pts.length;
+      const note = `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
+      surfaceRep.push({ pieceKey: k, host: H.key, join: hk.join, placed: true, note });
+      warnings.push(`surface piece ${k}: ${note}`);
+    }
+  }
+  const placedSurface = new Set(surfaceRep.filter((x) => x.placed).map((x) => x.pieceKey));
+  const NV = N + surfacePos.length / 3;
+  const positions = new Float32Array(3 * NV);
   for (let i = 0; i < 3 * N; i++) positions[i] = Number.isFinite(pos[i]) ? pos[i] : 0;
-  const outPanels = panels.map((P) => {
+  for (let i = 0; i < surfacePos.length; i++)
+    positions[3 * N + i] = Number.isFinite(surfacePos[i]) ? surfacePos[i] : 0;
+  const outPanels: DollReport['panels'] = panels.map((P) => {
     const tris = new Uint32Array(P.mesh.tris.length);
     for (let t = 0; t < tris.length; t += 3) {
       tris[t] = P.mesh.tris[t];
@@ -4824,6 +5303,7 @@ export function solveDoll(input: DollInput): DollReport {
       layers: P.layers,
     };
   });
+  outPanels.push(...surfacePanels);
   // Pieces that end up in no closed/proposed seam at all are floating too.
   for (const P of panels) {
     if (P.group === 'FLOAT') continue;
@@ -4926,10 +5406,16 @@ export function solveDoll(input: DollInput): DollReport {
     seams,
     loops: loopsOut,
     floating,
-    skipped: G.skipped,
+    skipped: G.skipped
+      .filter((x) => !placedSurface.has(x.pieceKey))
+      .map((x) => {
+        const why = surfaceRep.find((r) => r.pieceKey === x.pieceKey);
+        return { pieceKey: x.pieceKey, reason: why ? `${x.reason} · ${why.note}` : x.reason };
+      }),
+    ...(surfaceRep.length ? { surface: surfaceRep } : {}),
     proxies: proxyReport,
     stats: {
-      vertices: N,
+      vertices: NV,
       triangles: tris,
       passes,
       ms: now() - t0,

@@ -134,6 +134,14 @@ export function reportRows(
       ),
       check: false,
     });
+  for (const x of r.surface ?? [])
+    rows.push({
+      kind: 'words',
+      key: `p:${x.pieceKey}`,
+      label: x.placed ? 'on a panel' : 'not placed',
+      text: `${(names.get(x.pieceKey) ?? geoms.get(x.pieceKey)?.name ?? x.pieceKey).replace(/_/g, ' ')} · ${say(x.note)}`,
+      check: !x.placed,
+    });
   // Laid out flat (not a garment): every piece is «floating» by construction — not a defect.
   if (!r.notGarment)
     for (const f of r.floating)

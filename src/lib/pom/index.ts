@@ -9,7 +9,8 @@
 //
 // Pure TS, worker-safe. Design: tmp/plans/assembly-3d-doll/01-DESIGN-L0.md §5.
 
-import { drillPoints } from 'lib/assembly-skeleton/geometry';
+import { drillPoints, orderUnits, type OrderJoin } from 'lib/assembly-skeleton/geometry';
+import { unitSkipKeys } from 'lib/doll/groups';
 import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
 import type {
   PieceGeom,
@@ -61,6 +62,13 @@ export type PomInput = {
    * the engine's graph, exactly as before.
    */
   seams?: { rows: readonly StoredSeam[]; sizes?: readonly SizePieces[] };
+  /**
+   * The technologist's order (lib/doll/joins): trousers read the units it sews first (two yoke
+   * halves onto the back leg) and its hardware (an elastic: never a seam), so the rise / outseam
+   * run on across the unit as the doll sews them (geometry/units.ts).
+   */
+  joins?: readonly OrderJoin[];
+  hardware?: readonly { label: string; pieces: string[] }[];
 };
 
 /** The base size's model with edge roles read. */
@@ -132,6 +140,18 @@ function assumeFolds(m: Model) {
   }
 }
 
+const LEG_CATEGORIES = new Set(['trousers', 'jumpsuit', 'bottom']);
+
+/** Trousers with an order: the graph with the order's units sewn (the doll's own reading). */
+function withOrderUnits(graph: SeamGraph, input: PomInput): SeamGraph {
+  if (!LEG_CATEGORIES.has(input.facts.category ?? '')) return graph;
+  if (!input.joins?.length && !input.hardware?.length) return graph;
+  const hardware = new Map<string, string>();
+  for (const h of input.hardware ?? []) for (const k of h.pieces) hardware.set(k, h.label);
+  const skip = unitSkipKeys(graph, input.facts, false, hardware);
+  return orderUnits(graph, input.joins ?? [], skip, hardware).graph;
+}
+
 export function measurePattern(input: PomInput): PomReport {
   const convention = input.convention ?? 'half';
   const rows = input.seams?.rows ?? [];
@@ -148,7 +168,7 @@ export function measurePattern(input: PomInput): PomReport {
           ]).get(input.baseSize)!,
       )
     : input.graph ?? readSeamGraph(input.facts);
-  const base = baseModel(input.facts, graph, input.baseSize);
+  const base = baseModel(input.facts, withOrderUnits(graph, input), input.baseSize);
   const sizes: SizePoms[] = [];
   const order = input.sizes?.length
     ? input.sizes

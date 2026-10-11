@@ -41,7 +41,8 @@ export type Grouping = {
   closures: GroupedSeam[];
   /** Layer seams (closed by stacking) and duplicates, for the report. */
   layerSeams: SeamCandidate[];
-  skipped: { pieceKey: string; reason: string }[];
+  /** `surface`: a pocket / loop sewn onto a panel's face — the doll may lay it on its host. */
+  skipped: { pieceKey: string; reason: string; surface?: true }[];
   warnings: string[];
 };
 
@@ -73,6 +74,33 @@ export function roleOfPiece(g: PieceGeom, graph?: SeamGraph): string | null {
   }
   return max !== undefined && Math.abs(g.areaMm2) > 0.33 * max ? null : r;
 }
+/**
+ * Pieces the order's units never sew as shell (geometry/units.ts): surface pieces (pocket / loop),
+ * interfacing, lining unless it is drawn, and the order's hardware.
+ */
+export function unitSkipKeys(
+  graph: SeamGraph,
+  facts: SkeletonFacts,
+  lining: boolean,
+  hardware: ReadonlyMap<string, string>,
+): Set<string> {
+  return new Set(
+    graph.pieces
+      .filter((g) => {
+        const f = facts.pieces.find((p) => p.pieceKey === g.pieceKey);
+        const cloth = f?.cloth ?? g.cloth ?? (liningByName(g.name) ? 'lining' : null);
+        const r = roleOfPiece(g, graph);
+        return (
+          r === 'pocket' ||
+          r === 'loop' ||
+          cloth === 'interfacing' ||
+          (cloth === 'lining' && !lining) ||
+          hardware.has(g.pieceKey)
+        );
+      })
+      .map((g) => g.pieceKey),
+  );
+}
 const areaOf = (g: PieceGeom) => Math.abs(g.areaMm2);
 const dims = (g: PieceGeom) => {
   let x0 = Infinity;
@@ -91,7 +119,7 @@ const dims = (g: PieceGeom) => {
 export function groupPieces(
   graph: SeamGraph,
   facts: SkeletonFacts,
-  opts: { lining?: boolean; dropSeams?: string[] } = {},
+  opts: { lining?: boolean; dropSeams?: string[]; hardware?: ReadonlyMap<string, string> } = {},
 ): Grouping {
   const warnings: string[] = [];
   const skipped: Grouping['skipped'] = [];
@@ -121,6 +149,14 @@ export function groupPieces(
       });
       continue;
     }
+    const hw = opts.hardware?.get(g.pieceKey);
+    if (hw) {
+      skipped.push({
+        pieceKey: g.pieceKey,
+        reason: `hardware in the order («${hw}»: an elastic / tape inside the garment) — listed, not drawn as a panel`,
+      });
+      continue;
+    }
     if (cloth === 'interfacing') {
       skipped.push({ pieceKey: g.pieceKey, reason: 'interfacing — never drawn' });
       continue;
@@ -144,6 +180,7 @@ export function groupPieces(
       skipped.push({
         pieceKey: g.pieceKey,
         reason: `${r} — a surface piece; not placed without a placement mark`,
+        surface: true,
       });
       continue;
     } else if (r && BODY_ROLES.has(r))

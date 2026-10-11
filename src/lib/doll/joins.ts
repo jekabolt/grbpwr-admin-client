@@ -52,6 +52,33 @@ export function joinsFromOps(
   return out;
 }
 
+/** Pieces the order sets as hardware (an elastic, a tape): never a shell seam. */
+export type DeclaredHardware = { label: string; pieces: string[] };
+
+/**
+ * HARDWARE_SET operations → their pieces (inputs that are pieces, or earlier units' leaf pieces).
+ * SS26-011: «BLT + BLT_1 → rubber» — the elastic strips inside the waistband, not panels.
+ */
+export function hardwareFromOps(
+  ops: DeclaredOp[],
+  pieceOf: (key: string) => string | null,
+): DeclaredHardware[] {
+  const units = new Map<string, string[]>();
+  const leaves = (k: string): string[] => {
+    const p = pieceOf(k);
+    return p ? [p] : units.get(k) ?? [];
+  };
+  const out: DeclaredHardware[] = [];
+  for (const op of ops) {
+    if (!op.output) continue;
+    const pieces = [...new Set(op.inputs.flatMap(leaves))];
+    if (op.type === 'MACHINE')
+      units.set(op.output, [...new Set([...(units.get(op.output) ?? []), ...pieces])]);
+    else if (op.type === 'HARDWARE_SET' && pieces.length) out.push({ label: op.output, pieces });
+  }
+  return out;
+}
+
 /** Coarse wrap class of a piece from its name's role (roles.json). */
 const classOf = (
   g: PieceGeom,

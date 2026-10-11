@@ -20,7 +20,12 @@
 
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
 import type { SkeletonFacts, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
-import { joinsFromOps, type DeclaredJoin } from 'lib/doll/joins';
+import {
+  hardwareFromOps,
+  joinsFromOps,
+  type DeclaredHardware,
+  type DeclaredJoin,
+} from 'lib/doll/joins';
 import type { StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -48,6 +53,8 @@ export type DollCard = {
   rows: StoredSeam[];
   rowsSig: string;
   joins: DeclaredJoin[];
+  /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
+  hardware: DeclaredHardware[];
   gender: 'MALE' | 'FEMALE' | null;
   /** Identity of the provider's read: a decision or a pattern edit makes a new one. */
   readId: number;
@@ -165,17 +172,16 @@ export function useDollCard(): DollCard | null {
     return { bySize, base, sizes, oneSize };
   }, [facts, index, refs, sizeById, cardSizes]);
 
-  const joins = useMemo(() => {
-    if (!facts) return [];
+  const [joins, hardware] = useMemo((): [DeclaredJoin[], DeclaredHardware[]] => {
+    if (!facts) return [[], []];
     const keys = new Set(facts.pieces.map((p) => p.pieceKey));
-    return joinsFromOps(
-      operations.map((o) => ({
-        inputs: (o.inputKeys ?? []).filter(Boolean),
-        output: (o.outputUnitKey ?? '').trim(),
-        type: (o.operationType ?? '').replace('TECH_CARD_OPERATION_TYPE_', ''),
-      })),
-      (k) => (keys.has(k) ? k : null),
-    );
+    const ops = operations.map((o) => ({
+      inputs: (o.inputKeys ?? []).filter(Boolean),
+      output: (o.outputUnitKey ?? '').trim(),
+      type: (o.operationType ?? '').replace('TECH_CARD_OPERATION_TYPE_', ''),
+    }));
+    const pieceOf = (k: string) => (keys.has(k) ? k : null);
+    return [joinsFromOps(ops, pieceOf), hardwareFromOps(ops, pieceOf)];
   }, [facts, operations]);
 
   return useMemo(() => {
@@ -228,12 +234,13 @@ export function useDollCard(): DollCard | null {
       rows,
       rowsSig: sig,
       joins,
+      hardware,
       gender:
         gender === 'GENDER_ENUM_FEMALE' ? 'FEMALE' : gender === 'GENDER_ENUM_MALE' ? 'MALE' : null,
       readId: idOf(facts),
-      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}`,
+      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
     };
-  }, [facts, sized, rows, sig, joins, gender, cardId, cardSizes]);
+  }, [facts, sized, rows, sig, joins, hardware, gender, cardId, cardSizes]);
 }
 
 /** The key a solve is cached under: the read, the size, the rows, lining. */
@@ -256,6 +263,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       lining,
       oneSize: c.sizes.length === 1,
       joins: c.joins,
+      ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
       ...(c.rows.length ? { seams: { rows: c.rows, size } } : {}),
     },
@@ -277,10 +285,13 @@ export function pomRequest(c: DollCard) {
       .map((s) => ({ size: s, pieces: c.factsOf(s)?.pieces ?? [] }))
       .filter((s) => s.pieces.length > 0),
     ...(c.rows.length ? { seams: { rows: c.rows } } : {}),
+    ...(c.joins.length ? { joins: c.joins } : {}),
+    ...(c.hardware.length ? { hardware: c.hardware } : {}),
     anchors: anchorSizes
       .map((s) => ({ size: s, facts: c.factsOf(s) }))
       .filter((a): a is { size: string; facts: SkeletonFacts } => !!a.facts),
   };
 }
 
-export const pomKey = (c: DollCard) => `${c.readId}|${c.sizes.join(',')}|${c.rowsSig}`;
+export const pomKey = (c: DollCard) =>
+  `${c.readId}|${c.sizes.join(',')}|${c.rowsSig}|${c.inputSig}`;
