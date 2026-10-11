@@ -556,7 +556,12 @@ export function fillPiecesDetailed(
     // P1: continuity walls — a graded rank closed only through lines the source draws between its
     // own dangling ends (never on the solver's walls, never in the derived-bridge pass, whose
     // closures are judged by the area trend instead)
-    const continuity = model.mode === 'graded' && !graded?.walls && !bridgeFor && !contOff();
+    const continuity =
+      model.mode === 'graded' &&
+      !graded?.walls &&
+      !bridgeFor &&
+      !model.emptyRanks.includes(r) &&
+      !contOff();
     let contWalls: ContinuityWall[] = [];
     // knives stay walls where they are this rank's lines: the variant's cutting line is the
     // piece's edge (taken out, kombinezon's 4XL front leaked through it); the cut below still
@@ -1153,26 +1158,9 @@ export function fillPiecesDetailed(
       c!.leakAt = leakMouth(ctx.g, ctx.wall, k, ref) ?? at;
     }
   }
-  // a size the run lists but no line draws (viola's 34: every bundle has 7 lines for 8 sizes — the
-  // smallest is drawn on the next one's line): at the end of the run, that rank's piece IS its
-  // neighbour's contour. Copied, flagged 'shared-rank' so the operator sees it is not drawn.
-  if (model.mode === 'graded' && model.n > 2)
-    for (const r of model.emptyRanks) {
-      const from = r === 0 ? 1 : r === model.n - 1 ? model.n - 2 : -1;
-      if (from < 0 || model.emptyRanks.includes(from)) continue;
-      for (const s of use) {
-        const list = cands.get(s.id);
-        const src = list?.find((x) => x.rank === from && x.outcome === 'closed');
-        const i = list?.findIndex((x) => x.rank === r) ?? -1;
-        if (!list || !src || i < 0 || list[i].outcome === 'closed') continue;
-        list[i] = {
-          ...src,
-          rank: r,
-          derived: [...(src.derived ?? []), { kind: 'shared-rank', pts: [] }],
-        };
-        diag.sharedRank = (diag.sharedRank ?? 0) + 1;
-      }
-    }
+  // a size the run lists but no line draws (viola's 34: every bundle has 7 lines for 8 sizes) is
+  // NOT filled from its neighbour: it is not drawn on this sheet — the sizes step leaves it out of
+  // the export (sizes/map markNotDrawn) and its candidates stay as the fill found them
   // an UNGRADED piece is drawn identically in every size layer (kombinezon's piece 8: eight equal
   // rectangles, F3 keeps one as common and marks the rest duplicates). Equal areas are right
   // there — only when every wall of its outline has a copy at the same place in ≥ n − 1 layers.

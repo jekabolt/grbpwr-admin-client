@@ -91,7 +91,12 @@ import {
   sheetFeed,
 } from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
-import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
+import {
+  applyOperatorMap,
+  createProposeSizeMap,
+  defaultTokensOf,
+  markNotDrawn,
+} from '../sizes/map';
 import {
   applyPieceEdits,
   applyWallEdits,
@@ -106,6 +111,7 @@ import {
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { exceptNested } from '../pieces/fill';
+import { wallModel } from '../pieces/walls';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -1004,6 +1010,10 @@ export class Session {
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
+    // a size the sheet lists but draws no line of its own for is not drawn here: never written,
+    // never filled from its neighbour (cause E, viola's 34)
+    if (!this.fast && run.encoding !== 'single' && run.sizes.length > 1)
+      map = markNotDrawn(map, wallModel(this.chains, run, this.sheet.texts).emptyRanks, input.card);
     this.run = run;
     this.sizeMap = map;
     return { run, map, expected, countAsk };

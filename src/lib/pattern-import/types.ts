@@ -547,6 +547,12 @@ export type SizeMapEntry = {
   confidence?: number;
   /** Why this card size (or why none) — shown next to the row. */
   evidence?: string[];
+  /**
+   * The sheet lists this size but draws no line of its own for it (viola's 34: 7 lines for 8
+   * sizes). It is NOT filled from a neighbour and never written, whatever the map says; `wouldMap`
+   * is the card size it would have taken (that card size gets no pattern from this sheet).
+   */
+  notDrawn?: { wouldMap: CardSize | null };
 };
 
 export type SizeMap = {

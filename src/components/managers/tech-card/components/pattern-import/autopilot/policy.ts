@@ -33,6 +33,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
+import { notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { anisotropyOf, squareSidesOf } from '../formats';
@@ -1062,23 +1063,60 @@ function sizesStep(snap: Snap): AutopilotDecision {
       }),
     };
   }
+  // a size the sheet lists but draws no line of its own for is left out of the export (never filled
+  // from a neighbour): a strong assumption naming it — and a stop when the card has that size,
+  // which would then get no pattern from this sheet
+  const undrawn = entries.filter((e) => e.notDrawn);
+  const dropped = undrawn.map((e) => {
+    const would = e.notDrawn?.wouldMap ?? null;
+    return A(
+      'sizes',
+      'size-dropped',
+      sizeSubject(e),
+      'not written (not drawn on this sheet)',
+      'a size the sheet lists but draws no line of its own for is left out, never copied from a neighbour',
+      [
+        notDrawnLine(e.source.label),
+        would
+          ? `the card's ${would.token} gets no pattern from this sheet`
+          : 'no card size takes it',
+      ],
+      1,
+      true,
+      undefined,
+      sizeRef(e),
+    );
+  });
+  const needed = undrawn.flatMap((e) => {
+    const w = e.notDrawn?.wouldMap;
+    return w && card.sizes.some((c) => c.sizeId === w.sizeId) ? [w.token] : [];
+  });
+  if (needed.length)
+    return stopAt(
+      'sizes',
+      `${undrawn.map((e) => notDrawnLine(e.source.label)).join('; ')} — the card's ${needed.join(', ')} would get no pattern`,
+      dropped,
+    );
   // the offer: flags the reader could not settle — gone on with, each a strong assumption
   const flags = sizeFlags(s.chains?.ambiguities, sz.expected?.n);
-  if (!flags.length) return NONE;
+  if (!flags.length && !dropped.length) return NONE;
   return {
     actions: [{ kind: 'proceed' }],
-    assumptions: flags.map((f, k) =>
-      A(
-        'sizes',
-        'size-flag',
-        `flag ${k + 1} · ${f.kind}`,
-        'gone on as read',
-        'a reader flag on the sizes step is left as the reader settled it',
-        [JSON.stringify(f).slice(0, 160)],
-        0.4,
-        true,
+    assumptions: [
+      ...dropped,
+      ...flags.map((f, k) =>
+        A(
+          'sizes',
+          'size-flag',
+          `flag ${k + 1} · ${f.kind}`,
+          'gone on as read',
+          'a reader flag on the sizes step is left as the reader settled it',
+          [JSON.stringify(f).slice(0, 160)],
+          0.4,
+          true,
+        ),
       ),
-    ),
+    ],
   };
 }
 

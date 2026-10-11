@@ -229,3 +229,28 @@ export function applyOperatorMap(
 /** Rows the operator must look at: auto rows below 0.9, and every unmapped source size. */
 export const needsConfirmation = (map: SizeMap) =>
   map.entries.filter((e) => e.origin === 'auto' && (e.card == null || (e.confidence ?? 0) < 0.9));
+
+/** The one line the sizes and pieces steps show for a size the sheet does not draw. */
+export const notDrawnLine = (label: string) =>
+  `size ${label || '(no label)'} isn't drawn on this sheet — it will not be written`;
+
+/**
+ * Source sizes the sheet lists but draws no line of its own for (`WallModel.emptyRanks`) are left
+ * out of the export: card null, `notDrawn` with the card size they would have taken. Applied after
+ * the operator's answers too — an undrawn size is never filled from a neighbour's outline.
+ */
+export function markNotDrawn(map: SizeMap, ranks: readonly number[], card: CardSize[]): SizeMap {
+  if (!ranks.length) return map;
+  const out = new Set(ranks);
+  const entries = map.entries.map((e): SizeMapEntry => {
+    if (!out.has(e.source.rank)) return e;
+    return {
+      ...e,
+      card: null,
+      notDrawn: { wouldMap: e.notDrawn?.wouldMap ?? e.card },
+      evidence: [notDrawnLine(e.source.label)],
+    };
+  });
+  const used = new Set(entries.flatMap((e) => (e.card ? [e.card.sizeId] : [])));
+  return { entries, unmapped: card.filter((c) => !used.has(c.sizeId)) };
+}
