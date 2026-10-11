@@ -1334,7 +1334,8 @@ export function buildPieceSpecsDetailed(
     // whole piece per garment unless the sheet prints otherwise
     const qtyProven =
       pp.proven ||
-      mode === 'drawn' ||
+      // a drawn L/R twin proves the pair, not a count the list gave by title only or split
+      (mode === 'drawn' && !listAsk && !split) ||
       ov.pairHand !== undefined ||
       ov.piecesPerGarment != null ||
       (ov.unfoldedFold === true && anyFold);
@@ -1472,6 +1473,24 @@ export function buildPieceSpecsDetailed(
 
   // ── unique identities (the card's alias index is case-insensitive) ─────────────────────
   const seen = new Map<string, SeedId>();
+  // Codex N3: the two sides of a drawn pair must agree on the count (a left ×2 / right ×1 export
+  // would cut a garment wrong silently) — else both are asked
+  for (const [a, b] of twinOf) {
+    if (a > b) continue;
+    const pa = pieces.find((p) => p.seed === a);
+    const pb = pieces.find((p) => p.seed === b);
+    if (!pa || !pb || pa.piecesPerGarment === pb.piecesPerGarment) continue;
+    if (pieceOverrides[a]?.piecesPerGarment != null && pieceOverrides[b]?.piecesPerGarment != null)
+      continue;
+    for (const p of [pa, pb])
+      if (!unproven.some((u) => u.seed === p.seed && u.kind === 'quantity'))
+        unproven.push({
+          seed: p.seed,
+          kind: 'quantity',
+          shown: `×${p.piecesPerGarment}`,
+          detail: `the drawn pair disagrees: ${pa.identity} ×${pa.piecesPerGarment}, ${pb.identity} ×${pb.piecesPerGarment}`,
+        });
+  }
   const unique: PieceSpec[] = [];
   const dupSeeds = new Set<SeedId>();
   for (const s of pieces) {

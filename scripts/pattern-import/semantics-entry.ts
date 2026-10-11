@@ -1418,6 +1418,23 @@ export async function main(): Promise<number> {
       'Codex N3: a disconnected 100 mm line at the same gap stays an internal line (the run of 2 is the seam)',
       JSON.stringify({ got2, internal: int2.length }),
     );
+    // Codex N3: two disconnected runs (34 % + a 20 % inner line on the right, 140 mm apart) never
+    // add up to the 50 % — only ONE chain joined end to end counts
+    const right = F.chain(
+      [
+        { x: 293, y: 100 },
+        { x: 293, y: 380 },
+      ],
+      false,
+      row,
+    );
+    const cand4: PieceCandidate = { ...cand, inside: [seam[0], right, hem, dart] };
+    const int4 = classifyFeatures(cand4, set).filter((f) => f.kind === 'internal');
+    ck(
+      !drawnSeam(cand4, set) && !measuredAllowance(cand4, set) && int4.length === 4,
+      'Codex N3: 34 % + a disconnected 20 % run → no seam, nothing measured, all 4 stay on layer 8',
+      JSON.stringify({ seam: drawnSeam(cand4, set)?.ids, internal: int4.length }),
+    );
     // one result for both: a run covering < 50 % neither measures nor leaves layer 8
     const cand3: PieceCandidate = { ...cand, inside: [seam[0], hem, dart] };
     const int3 = classifyFeatures(cand3, set).filter((f) => f.kind === 'internal');
@@ -1458,6 +1475,8 @@ export async function main(): Promise<number> {
     const ids = (o: ReturnType<typeof build>) =>
       o.pieces.map((p) => `${p.identity}×${p.piecesPerGarment}`).join(' ');
     const a = build([
+      'Klippevejledning:',
+      'Mønsteret er inkl. 3 cm opsøm forneden i kjolen.',
       '67.',
       'Forstykke, 1 gang mod fold',
       '69.',
@@ -1470,6 +1489,26 @@ export async function main(): Promise<number> {
       ids(a) === 'SL_L×2 SL_R×2' && !qOf(a),
       'bound by its printed number: «69. Ærme, 4 gange» → 2 pairs (4), no question',
       `${ids(a)} ${JSON.stringify(qOf(a))}`,
+    );
+    // Codex N3: three numbered steps with counts in a row, no cutting header → no section
+    const run3 = build(['67. Forstykke, 1 gang', '68. Bagstykke, 2 gange', '69. Ærme, 4 gange']);
+    ck(
+      qOf(run3)?.shown === 'pair×2' && /not in a cutting list/.test(qOf(run3)?.detail ?? ''),
+      'Codex N3: a run of 3 numbered lines with counts but no cutting header → shown ×4, asked',
+      JSON.stringify(qOf(run3)),
+    );
+    // …and a header further up ends at the next header (a sewing section with its own title)
+    const later = build([
+      'Klippevejledning:',
+      'Alle dele klippes med 1 cm sømrum.',
+      'Syning:',
+      'a',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(later),
+      'Codex N3: a list line after another header than the cutting one → asked',
+      JSON.stringify(qOf(later)),
     );
     const none = build([]);
     ck(
@@ -2350,6 +2389,41 @@ export async function main(): Promise<number> {
         'FP_L~FP_R,FP_R~FP_L' && g.report.passed,
       'with a grain click both hands pass (G12)',
       gateLine(g.report),
+    );
+  }
+
+  head('D6c Codex N3: the two sides of a drawn pair agree on the count, or both are asked');
+  {
+    const F = fx();
+    const g = (dx: number) => [
+      { pts: grainLine(120 + dx, 100, 450), closed: false, role: 'grain' as const },
+    ];
+    const mirrorBodice = (k: number) =>
+      bodice(k)
+        .map((q) => ({ x: -q.x, y: q.y }))
+        .reverse();
+    addFamily(F, 1, bodice, 0, g(0), ['Cut 4']);
+    addFamily(
+      F,
+      2,
+      mirrorBodice,
+      900,
+      [{ pts: grainLine(-120, 100, 450), closed: false, role: 'grain' }],
+      ['Cut 2'],
+    );
+    const d = buildPieceSpecsDetailed(
+      input(F, CUT10, {
+        pieceOverrides: { 1: { code: 'FP', mods: ['L'] }, 2: { code: 'FP', mods: ['R'] } },
+      }),
+    );
+    const qs = d.output.unproven.filter((u) => u.kind === 'quantity');
+    ck(
+      qs.length === 2 && qs.every((u) => /drawn pair disagrees/.test(u.detail)),
+      'FP_L ×2 / FP_R ×1 (cut 4 vs cut 2) → both sides asked, not exported silently',
+      JSON.stringify({
+        pieces: d.output.pieces.map((p) => `${p.identity}×${p.piecesPerGarment}`),
+        qs,
+      }),
     );
   }
 
