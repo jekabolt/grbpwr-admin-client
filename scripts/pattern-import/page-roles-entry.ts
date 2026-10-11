@@ -19,7 +19,14 @@ import {
   type PageRoleDeps,
 } from 'lib/pattern-import/ai/pages';
 import { AI_PAGES } from 'lib/pattern-import/clean/page-roles';
-import type { AiPageHint, StageIO } from 'lib/pattern-import/types';
+import type {
+  AiPageHint,
+  IRPage,
+  PageClassification,
+  SourceDoc,
+  StageIO,
+} from 'lib/pattern-import/types';
+import { applyMasks, cleanPages } from 'lib/pattern-import/clean';
 // the e2e entry installs pdf.js' legacy build (setPdfjsLoader)
 import './e2e-entry';
 import { fixturePageRoleDeps } from './page-roles-fixture';
@@ -182,6 +189,20 @@ async function oneFile(f: string) {
       { before: tiles(base).length, after: tiles(withAi).length },
     );
     const aside = withAi.dropped.filter((d) => d.aiAside).map((d) => d.page + 1);
+    // Codex #6: scored against the INDEPENDENT truth — no ground-truth pattern page set aside
+    // (by the reader or the AI), every page the AI set aside is truly not pattern
+    check(
+      name,
+      'truth: no ground-truth pattern page is set aside',
+      withAi.dropped.every((d) => truthOf(name, d.page + 1) !== 'pattern'),
+      withAi.dropped.filter((d) => truthOf(name, d.page + 1) === 'pattern').map((d) => d.page + 1),
+    );
+    check(
+      name,
+      'truth: every page set aside by AI + geometry is truly not pattern',
+      aside.every((n) => truthOf(name, n) === 'not'),
+      aside.map((n) => [n, truthOf(name, n)]),
+    );
     const still = withAi.dropped.filter((d) => d.status === 'suggest');
     // every page set aside by AI + geometry: AI ≥ 0.85, a non-pattern role, an EXCLUSIONARY fact
     check(
@@ -426,7 +447,220 @@ async function discardSection() {
   }
 }
 
+// ── Codex #6: independent page truth (fixtures/page-truth.json) ──────────────────────────────
+
+type Truth = { pattern: string[]; not: Record<string, string> };
+let TRUTH: Record<string, Truth> | null = null;
+const inRange = (k: string, n: number) => {
+  const m = /^(\d+)(?:-(\d+))?$/.exec(k);
+  return !!m && n >= +m[1] && n <= +(m[2] ?? m[1]);
+};
+/** 'pattern' / 'not' / null (not looked at) for a 1-based page. */
+function truthOf(file: string, pageNo: number): 'pattern' | 'not' | null {
+  TRUTH ??= (
+    JSON.parse(
+      readFileSync(
+        resolve(
+          process.env.PATIMPORT_REPO ?? process.cwd(),
+          'scripts/pattern-import/fixtures/page-truth.json',
+        ),
+        'utf8',
+      ),
+    ) as { files: Record<string, Truth> }
+  ).files;
+  const t = TRUTH[file];
+  if (!t) return null;
+  if (t.pattern.some((k) => inRange(k, pageNo))) return 'pattern';
+  if (Object.keys(t.not).some((k) => inRange(k, pageNo))) return 'not';
+  return null;
+}
+
+/** The session's docs and the classifier's pages after one clean run (probe access). */
+async function docsOf(rel: string) {
+  const s = open(rel);
+  await s.runStage('extract', { opts: { sagittaMm: 0.05, keepFills: true } }, ctx);
+  const base = await s.runStage('clean', { edits: [] }, ctx);
+  const inner = s as unknown as { docs: SourceDoc[]; extractPages: PageClassification[] };
+  applyMasks(inner.docs, []);
+  return { s, docs: inner.docs, classes: inner.extractPages, base };
+}
+
+const clonePage = (pg: IRPage, over: Partial<IRPage> = {}): IRPage => ({
+  ...pg,
+  paths: pg.paths.map((p) => ({ ...p, pts: p.pts.map((q) => ({ ...q })) })),
+  texts: pg.texts.map((t) => ({ ...t })),
+  ...over,
+});
+
+/**
+ * MUTATIONS "the AI was wrong": a GROUND-TRUTH pattern page the deterministic reader set aside, the
+ * AI answering instructions / overview 0.99 — it must stay a question (status 'suggest', never set
+ * aside by itself): a full-size sheet on another format, a text-heavy pattern sheet, a sheet
+ * without the tile chrome, a file of one page (no tile grid), a smaller-size sheet (the tiles'
+ * pieces at 0.85).
+ */
+async function mutationsSection() {
+  const run = (
+    label: string,
+    docs: SourceDoc[],
+    classes: PageClassification[],
+    target: { file: string; page: number },
+    role: 'instructions' | 'overview',
+  ) => {
+    const cls = classes.map((c) =>
+      c.file === target.file && c.page === target.page
+        ? {
+            file: c.file,
+            page: c.page,
+            cls: 'instructions' as const,
+            confidence: 0.8,
+            why: 'MUTATION: set aside by the reader',
+          }
+        : c,
+    );
+    const out = cleanPages(docs, cls, {
+      edits: [],
+      aiHints: { pages: [{ ...target, role, confidence: 0.99, evidence: ['MUTATION'] }] },
+    });
+    const d = out.dropped.find((x) => x.file === target.file && x.page === target.page);
+    check(
+      'mutation',
+      `${label}: AI ${role} 0.99 on a real pattern page → still a question`,
+      !!d && d.status === 'suggest' && !d.aiAside,
+      d
+        ? { status: d.status, aiAside: d.aiAside, exclusion: d.exclusion, geo: d.geo }
+        : 'not dropped',
+    );
+  };
+  // robe: tiles 170×257; p20 is a real tile (page-truth)
+  {
+    const { s, docs, classes } = await docsOf('pdf/robe.pdf');
+    const doc = docs[0];
+    const i = doc.pages.findIndex((p) => p.page === 19);
+    check(
+      'mutation',
+      'robe p20 is a ground-truth pattern page',
+      truthOf('robe.pdf', 20) === 'pattern',
+      '',
+    );
+    const real = doc.pages[i];
+    // 1 · a full-size sheet on another format (A3 paper, the same 1:1 line work)
+    doc.pages[i] = clonePage(real, { widthMm: 420, heightMm: 297 });
+    run(
+      'a full-size sheet on another format',
+      docs,
+      classes,
+      { file: '0', page: 19 },
+      'instructions',
+    );
+    // 2 · a text-heavy pattern sheet: the instruction page's words printed on the tile
+    const words = doc.pages.find((p) => p.page === 3)!.texts;
+    doc.pages[i] = clonePage(real, {
+      texts: [...real.texts, ...words.map((t, k) => ({ ...t, id: 900000 + k }))],
+    });
+    run('a text-heavy pattern sheet', docs, classes, { file: '0', page: 19 }, 'instructions');
+    // the same two out of reach of the registration guard: alone in a second file (no tiles)
+    const alone: [string, IRPage][] = [
+      [
+        'a full-size sheet on another format, alone in its file',
+        clonePage(real, { file: '1', page: 0, widthMm: 420, heightMm: 297 }),
+      ],
+      [
+        'a text-heavy pattern sheet, alone in its file',
+        clonePage(real, {
+          file: '1',
+          page: 0,
+          texts: words.map((t, k) => ({ ...t, id: 900000 + k })),
+        }),
+      ],
+    ];
+    for (const [label, pg] of alone)
+      run(
+        label,
+        [...docs, { ...doc, file: { ...doc.file, id: '1' }, pages: [pg] }],
+        [...classes, { file: '1', page: 0, cls: 'tile', confidence: 0.9, why: 'single page' }],
+        { file: '1', page: 0 },
+        'instructions',
+      );
+    doc.pages[i] = real;
+    s.close();
+  }
+  // reef: tiles carry chrome (corner marks, frame); p10 is a real tile — its chrome removed
+  {
+    const { s, docs, classes, base } = await docsOf('pdf/reef.pdf');
+    const doc = docs[0];
+    const i = doc.pages.findIndex((p) => p.page === 9);
+    check(
+      'mutation',
+      'reef p10 is a ground-truth pattern page',
+      truthOf('reef.pdf', 10) === 'pattern',
+      '',
+    );
+    const chrome = new Set(
+      (base.pages.find((p) => p.page === 9)?.items ?? [])
+        .filter((it) => ['tile-frame', 'regmark', 'tile-label'].includes(it.kind))
+        .flatMap((it) => it.paths),
+    );
+    check('mutation', 'reef p10 carries tile chrome to remove', chrome.size > 0, chrome.size);
+    doc.pages[i] = clonePage(doc.pages[i], {
+      paths: doc.pages[i].paths.filter((p) => !chrome.has(p.id)),
+    });
+    run('a sheet without the tile chrome', docs, classes, { file: '0', page: 9 }, 'instructions');
+    s.close();
+  }
+  // blazer: real tiles with whole pieces on them (p12: 3 piece-sized outlines)
+  {
+    const { s, docs, classes } = await docsOf('pdf/blazer.pdf');
+    const doc = docs[0];
+    const real = doc.pages.find((p) => p.page === 11)!;
+    check(
+      'mutation',
+      'blazer p12 is a ground-truth pattern page',
+      truthOf('blazer.pdf', 12) === 'pattern',
+      '',
+    );
+    // 4 · a file of ONE page (no tile grid): the real sheet alone
+    run(
+      'a one-page file (no tile grid)',
+      [{ ...doc, pages: [clonePage(real, { page: 0 })] }],
+      [{ file: '0', page: 0, cls: 'tile', confidence: 0.9, why: 'single page' }],
+      { file: '0', page: 0 },
+      'overview',
+    );
+    // 5 · a smaller-size sheet: the same pieces at 0.85 (a smaller garment size, not a reduced copy)
+    const k = 0.85;
+    const i = doc.pages.findIndex((p) => p.page === 11);
+    doc.pages[i] = clonePage(real, {
+      paths: real.paths.map((p) => ({ ...p, pts: p.pts.map((q) => ({ x: q.x * k, y: q.y * k })) })),
+    });
+    run(
+      'a smaller-size sheet (pieces at 0.85)',
+      docs,
+      classes,
+      { file: '0', page: 11 },
+      'overview',
+    );
+    // 0.6: inside what a reduced copy may match (≤ 0.7), above the rule's 0.5 — the bound keeps it
+    const k2 = 0.6;
+    doc.pages[i] = clonePage(real, {
+      paths: real.paths.map((p) => ({
+        ...p,
+        pts: p.pts.map((q) => ({ x: q.x * k2, y: q.y * k2 })),
+      })),
+    });
+    run('a smaller-size sheet (pieces at 0.6)', docs, classes, { file: '0', page: 11 }, 'overview');
+    doc.pages[i] = real;
+    s.close();
+  }
+}
+
 export async function main(args: string[]): Promise<number> {
+  if (args[0] === 'mutations') {
+    await mutationsSection();
+    for (const c of checks)
+      console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.file} · ${c.check} · ${c.got.slice(0, 300)}`);
+    return checks.every((c) => c.ok) ? 0 : 1;
+  }
   if (args[0] === 'stale') {
     await staleSection(args[1] ?? 'robe.pdf');
     for (const c of checks)
@@ -445,6 +679,7 @@ export async function main(args: string[]): Promise<number> {
   const rows = [];
   if (!args.length) await staleSection('robe.pdf');
   await discardSection();
+  if (!args.length) await mutationsSection();
   for (const f of files) {
     const t = Date.now();
     try {

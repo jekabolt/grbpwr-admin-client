@@ -202,7 +202,9 @@ if (MUTATE) {
     MUTATE === 'drop' || MUTATE === 'page-role' ? injected : injected.filter((r) => r.write);
   const caught = seen.filter((r) =>
     MUTATE === 'page-role'
-      ? r.mutated.every((m) => / kept as a tile$/.test(m))
+      ? // kept as a tile, and an export that was written has its whole piece set (Codex #6)
+        r.mutated.every((m) => / kept as a tile$/.test(m)) &&
+        !(r.wrong?.items ?? []).some((x) => x.startsWith('piece-set'))
       : (r.wrong?.items ?? []).some((x) =>
           MUTATE === 'drop'
             ? x.startsWith('piece-set') && /missing/.test(x)
