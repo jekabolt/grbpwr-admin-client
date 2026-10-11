@@ -182,14 +182,19 @@ if (summary.fingerprintDrift)
 let bad = summary.manifestProblems.length > 0 || summary.fingerprintDrift > 0;
 if (MUTATE) {
   // the control: every injected wrong answer must be counted wrong, attributed to an assumption
-  const seen = results.filter((r) => r.mutated?.length);
+  // only a case that wrote its export can show the wrong answer (a stop before the write is not
+  // a miss of the control — it is reported apart)
+  const injected = results.filter((r) => r.mutated?.length);
+  const seen = injected.filter((r) => r.write);
   const caught = seen.filter((r) =>
     (r.wrong?.items ?? []).some(
       (x) =>
         x.startsWith(MUTATE === 'qty' ? 'quantity' : 'size') && /\[(quantity|size-guess)\]/.test(x),
     ),
   );
-  console.log(`mutation ${MUTATE}: injected in ${seen.length} case(s), caught in ${caught.length}`);
+  console.log(
+    `mutation ${MUTATE}: injected in ${injected.length} case(s), ${seen.length} reached the export, caught in ${caught.length}`,
+  );
   if (!seen.length || caught.length !== seen.length) bad = true;
 }
 process.exit(bad ? 1 : 0);
