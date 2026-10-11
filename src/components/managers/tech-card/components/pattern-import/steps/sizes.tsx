@@ -138,6 +138,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `inside the outlines`;
           case 'face-stray':
             return `not an outline: ${e.why}`;
+          case 'face-graded':
+            return `outside the outlines — another size's lines? left to the size checks (${e.why})`;
         }
       })
       .join(' · ');

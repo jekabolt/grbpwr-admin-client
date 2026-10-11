@@ -407,7 +407,13 @@ export type ClassEvidence =
    * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
    * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
    */
-  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] }
+  /**
+   * gb2: lines the face pass would call strays on a sheet NOT proven one size (another size's line,
+   * an edge drawn once for every size): an 'internal' row the size checks read, not asked. `why` =
+   * the evidence that the sheet may draw several sizes.
+   */
+  | { kind: 'face-graded'; why: string };
 
 export type LineClass = {
   id: ClassId;

@@ -46,6 +46,7 @@ await esbuild({
 /** The A2 sheets, the smoke SVG, and the negative controls. */
 const CASES = [
   'synthetic',
+  'redcafe-44-gate',
   'wm-M',
   'syn:inkscape-smoke-SML',
   'syn:inkscape-pieces-mm.svg',
@@ -85,7 +86,9 @@ for (const id of ids) {
       ? ['m2']
       : id === 'synthetic'
         ? ['synth']
-        : ['case', id, ...(MUTATE.has(id) ? ['--mutate'] : [])],
+        : id === 'redcafe-44-gate'
+          ? ['gate']
+          : ['case', id, ...(MUTATE.has(id) ? ['--mutate'] : [])],
   );
   if (process.env.FACES_DEBUG)
     process.stdout.write((r.stdout ?? '').replace(/^@@RESULT .*$/m, '') + (r.stderr ?? ''));
