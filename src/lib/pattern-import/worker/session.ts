@@ -1408,7 +1408,12 @@ export class Session {
       ? {
           ...detail.output,
           passport: this.passportBound,
-          unproven: outlineWordQuestions(detail.output, this.passportBound),
+          // an operator's file-level answer closes it (a measured pair may still override it per
+          // piece in build.ts — the question was seen, it is not asked again: Codex P1 re-check)
+          unproven:
+            input.fileAllowance.origin === 'operator'
+              ? detail.output.unproven
+              : outlineWordQuestions(detail.output, this.passportBound),
         }
       : detail.output;
     this.semantics = output;
