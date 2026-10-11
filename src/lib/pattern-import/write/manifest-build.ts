@@ -5,6 +5,7 @@ import type {
   AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
+  ManifestContinuity,
   ManifestPiece,
   PieceSpec,
   WriteJob,
@@ -78,14 +79,37 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
   };
 }
 
-/** The manifest's continuity entry of a size: rules in edge order, chains sorted, anchors. */
-export function continuityOfBlock(
-  c: NonNullable<PlannedBlock['size']['continuity']>,
-): NonNullable<ManifestBlock['continuity']> {
+/**
+ * The manifest's continuity audit of a size, canonical (fixed key order, copies): every edge with
+ * its rule, chains, roles, bracket and own-class flag, and the D3 verdict with every check. The
+ * write and G21 both build it here, so the gate compares like with like.
+ */
+export function continuityOfBlock(c: ManifestContinuity): ManifestContinuity {
   return {
-    rules: c.edges.map((e) => e.rule),
-    chains: [...new Set(c.edges.flatMap((e) => e.chains))].sort((a, b) => a - b),
-    anchors: [...(c.verdict?.anchors ?? [])],
+    edges: c.edges.map((e) => ({
+      rule: e.rule,
+      chains: [...e.chains],
+      roles: [...e.roles],
+      ...(e.bracket ? { bracket: true } : {}),
+      ownRank: !!e.ownRank,
+    })),
+    verdict: c.verdict
+      ? {
+          anchors: [...c.verdict.anchors],
+          checks: c.verdict.checks.map((k) => ({
+            vs: k.vs,
+            steps: k.steps,
+            hMm: k.hMm,
+            hAllowMm: k.hAllowMm,
+            hu: k.hu,
+            huAllow: k.huAllow,
+            growth: k.growth,
+            band: [k.band[0], k.band[1]] as [number, number],
+            dk: k.dk,
+            kMax: k.kMax,
+          })),
+        }
+      : null,
   };
 }
 

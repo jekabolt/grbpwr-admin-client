@@ -33,7 +33,7 @@ import {
   reflection,
   sampleAlong,
 } from '../write/geom';
-import { LAYERS } from '../write/manifest-build';
+import { LAYERS, continuityOfBlock } from '../write/manifest-build';
 import {
   GRAIN_BARB_BACK_MM,
   GRAIN_BARB_SIDE_MM,
@@ -1620,20 +1620,16 @@ export function g21(ctx: GateCtx): GateCheck {
       );
       continue;
     }
-    const want = {
-      rules: rec.edges.map((e) => e.rule),
-      chains: [...new Set(rec.edges.flatMap((e) => e.chains))].sort((x, y) => x - y),
-      anchors: [...(rec.verdict?.anchors ?? [])],
-    };
-    if (JSON.stringify(want) !== JSON.stringify(mc)) {
+    if (JSON.stringify(continuityOfBlock(rec)) !== JSON.stringify(continuityOfBlock(mc))) {
       bad('the manifest entry does not match the run');
       continue;
     }
-    if (!rec.edges.length) {
+    // from here on the DURABLE record (the manifest's) is what is checked
+    if (!mc.edges.length) {
       bad('closed through continuity walls but names none');
       continue;
     }
-    const v = rec.verdict;
+    const v = mc.verdict;
     if (!v || v.anchors.length < 2 || !v.checks.length) {
       bad('no D3 verdict on ≥ 2 anchor ranks');
       continue;
@@ -1650,11 +1646,11 @@ export function g21(ctx: GateCtx): GateCheck {
       continue;
     }
     const geo = ctx.expect.continuityByBlock?.[b.block];
-    if (!geo || geo.edges.length !== rec.edges.length) {
+    if (!geo || geo.edges.length !== mc.edges.length) {
       bad('its continuity stretches cannot be checked (no geometry)');
       continue;
     }
-    rec.edges.forEach((e, k) => {
+    mc.edges.forEach((e, k) => {
       const what = `${e.rule} on chain ${e.chains.join('+')}`;
       if (e.roles.some((r) => (e.rule === 'R0' ? CONT_NOT_EDGE : CONT_NOT_SPAN).has(r)))
         bad(`${what}: lies on a ${e.roles.join('/')} line`);

@@ -1093,6 +1093,9 @@ export type ContinuityRecord = {
   verdict: ContinuityVerdict | null;
 };
 
+/** P1: the manifest's continuity audit of a size (ManifestBlock.continuity): the record minus rank. */
+export type ManifestContinuity = Pick<ContinuityRecord, 'edges' | 'verdict'>;
+
 /** P1: per continuity edge (same order as the record), its stretch and its chains, written frame. */
 export type ContinuityGeometry = { edges: { pts: PtMm[][]; chainLines: PtMm[][] }[] };
 
@@ -1526,10 +1529,11 @@ export type ManifestBlock = {
   contour?: ContourSignature;
   /**
    * P1: this size closed through continuity walls (drawn lines of another class or size between
-   * its own ends): the rules, the chains, and the anchor ranks the D3 verdict stood on. G21 checks
-   * it against the run; absent = closed on its own lines.
+   * its own ends) — the durable audit: per edge its rule, the chains it lies on with their roles as
+   * read, `bracket`, `ownRank`; the D3 verdict (anchor ranks, every measured check and what it
+   * allowed). G21 checks it against the run and checks its rules; absent = closed on its own lines.
    */
-  continuity?: { rules: ContinuityEdge['rule'][]; chains: ChainId[]; anchors: number[] };
+  continuity?: ManifestContinuity;
 };
 
 /**

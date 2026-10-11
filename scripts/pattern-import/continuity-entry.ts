@@ -18,6 +18,7 @@ import type { WallItem } from 'lib/pattern-import/pieces/snap';
 import { markNotDrawn } from 'lib/pattern-import/sizes/map';
 import { g21, type GateCtx } from 'lib/pattern-import/gate/checks';
 import { continuityOfBlock } from 'lib/pattern-import/write/manifest-build';
+import { continuityOk } from 'lib/pattern-import/manifest';
 import {
   driveTick,
   newDriveState,
@@ -509,8 +510,33 @@ export async function main(args: string[] = []): Promise<number> {
         contours: new Map([['B', new Map([['1', line]])]]),
       }) as unknown as GateCtx;
     check('5 · G21: a recorded, holding closure passes', g21(ctxOf(rec)).ok, g21(ctxOf(rec)).note);
-    let c = g21(ctxOf(rec, geo, { rules: ['R1'], chains: [8], anchors: [0, 1] }));
+    let c = g21(
+      ctxOf(rec, geo, continuityOfBlock({ ...rec, edges: [{ ...rec.edges[0], chains: [8] }] })),
+    );
     check('5 · G21: manifest entry ≠ the run → blocks', !c.ok, c.note);
+    c = g21(ctxOf(rec, geo, continuityOfBlock({ ...rec, verdict: null })));
+    check('5 · G21: a manifest entry without the D3 verdict → blocks', !c.ok, c.note);
+    {
+      // the manifest's audit survives its own validation unchanged (written = read back)
+      const mc = continuityOfBlock(rec);
+      const rt = JSON.parse(JSON.stringify(mc));
+      check(
+        '5 · the continuity audit (edges, roles, verdict, checks) is valid manifest data and round-trips',
+        continuityOk(rt) &&
+          JSON.stringify(continuityOfBlock(rt)) === JSON.stringify(mc) &&
+          mc.edges[0].roles.length === 1 &&
+          mc.verdict?.checks.length === 1,
+      );
+      check(
+        '5 · a manifest continuity entry without roles / with a bad rule / a bad check is rejected',
+        !continuityOk({ ...rt, edges: [{ ...rt.edges[0], roles: [] }] }) &&
+          !continuityOk({ ...rt, edges: [{ ...rt.edges[0], rule: 'R9' }] }) &&
+          !continuityOk({
+            ...rt,
+            verdict: { ...rt.verdict, checks: [{ ...rt.verdict.checks[0], hMm: 'x' }] },
+          }),
+      );
+    }
     c = g21(
       ctxOf({
         ...rec,
