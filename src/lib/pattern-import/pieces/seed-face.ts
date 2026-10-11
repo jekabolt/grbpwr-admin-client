@@ -14,7 +14,9 @@
 //               shape matches (Hu moments 1–3, log distance ≤ 0.5);
 //   hand        a left piece is not its right twin (Hu 1–3 do not see a mirror): the two outlines,
 //               centred and scaled to their own size, overlap ≥ 80 % (IoU), and no better mirrored
-//               (left–right or top–bottom);
+//               (left–right or top–bottom); a symmetric silhouette (a mirror overlaps as well, ±0.02)
+//               is told only by its internal marks (notches, drill holes, internal lines), which must
+//               sit closer as drawn than mirrored — no marks, or marks that do not tell: not sure;
 //   match       the best of them by (centroid distance / side + |log area ratio| + Hu distance), only
 //               when sure: unique (no second candidate within twice its score), within an absolute
 //               score bound (0.3 per size step), and RECIPROCAL — walked one size step at a time from
@@ -31,7 +33,7 @@ export type FaceCtx = { g: Grid; wall: Uint8Array; ext: Uint8Array };
 
 /** Probe switches (mutation): the whole pass, the shape test, the uniqueness test. */
 export type SeedFaceOpts = {
-  off?: ReadonlySet<'all' | 'shape' | 'unique' | 'hand' | 'bound' | 'reciprocal'>;
+  off?: ReadonlySet<'all' | 'shape' | 'unique' | 'hand' | 'marks' | 'bound' | 'reciprocal'>;
 };
 
 const GRADE_STEP = 0.12;
@@ -45,9 +47,15 @@ const SCORE_MAX = 0.3;
 /** Outline overlap (centred, scaled to its own size) of a match, and how much better than mirrored. */
 const IOU_MIN = 0.8;
 const HAND_EPS = 0.02;
-/** The overlap raster: OCC × OCC cells over the centroid ± OCC_SPAN · side. */
+/** Internal marks break a symmetric silhouette's tie: this much closer as drawn than mirrored. */
+const MARK_EPS = 0.1;
+/** Fewest inner wall pixels that count as marks. */
+const MARK_MIN = 10;
+/** Wall pixels this close to the outside are the outline's own rim, not marks. */
+const RIM_PX = 3;
+/** The overlap raster: OCC × OCC cells over the centroid ± OCC_SPAN · its standard deviation (per axis). */
 const OCC = 24;
-const OCC_SPAN = 1.25;
+const OCC_SPAN = 2.2;
 
 type Region = {
   label: number;
@@ -56,8 +64,15 @@ type Region = {
   c: PtMm;
   box: BoxMm;
   hu: [number, number, number];
+  /** Standard deviation of its pixels along x and y, mm (the overlap raster's scale). */
+  sd: { x: number; y: number };
   /** Occupancy of the region on an OCC × OCC raster centred on its centroid, scaled by its side. */
   occ: Uint8Array;
+  /**
+   * Its internal marks (notches, drill holes, internal lines: wall pixels inside it, not on its
+   * outer rim) as a distribution on the same raster; null when it has fewer than MARK_MIN.
+   */
+  marks: Float32Array | null;
 };
 
 export type SeedFaceDiag = {
@@ -169,29 +184,110 @@ function regionsOf(c: FaceCtx, minCount: number): { lab: Int32Array; regions: Re
       },
       box: { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y },
       hu: [h1, h2, h3],
+      sd: { x: Math.sqrt(m[0] / n) * g.cell, y: Math.sqrt(m[2] / n) * g.cell },
       occ: new Uint8Array(0),
+      marks: null,
     };
   });
-  for (const r of regions) r.occ = occOf(c, lab, r);
+  for (const r of regions) {
+    r.occ = occOf(c, lab, r);
+    r.marks = marksOf(c, lab, r);
+  }
   return { lab, regions };
 }
 
-/** The region's occupancy raster (see OCC): its outline centred and scaled to its own size. */
+/**
+ * The occupancy raster's half extents about the centroid, per axis, from the region's spread (its
+ * standard deviation — a notch stub sticking out does not rescale it, as a bounding box would).
+ */
+function halvesOf(r: Region) {
+  return { hx: OCC_SPAN * Math.max(r.sd.x, 0.5), hy: OCC_SPAN * Math.max(r.sd.y, 0.5) };
+}
+
+/** The region's occupancy raster (see OCC): its outline centred and scaled to its own extent. */
 function occOf(c: FaceCtx, lab: Int32Array, r: Region): Uint8Array {
   const { g } = c;
   const out = new Uint8Array(OCC * OCC);
-  const half = OCC_SPAN * Math.sqrt(r.areaMm2);
+  const { hx, hy } = halvesOf(r);
   for (let j = 0; j < OCC; j++)
     for (let i = 0; i < OCC; i++) {
-      const x = g.ix(r.c.x - half + ((i + 0.5) / OCC) * 2 * half);
-      const y = g.iy(r.c.y + half - ((j + 0.5) / OCC) * 2 * half);
+      const x = g.ix(r.c.x - hx + ((i + 0.5) / OCC) * 2 * hx);
+      const y = g.iy(r.c.y + hy - ((j + 0.5) / OCC) * 2 * hy);
       if (g.inside(x, y) && lab[y * g.W + x] === r.label) out[j * OCC + i] = 1;
     }
   return out;
 }
 
+/** The region's internal marks on the occupancy raster (see Region.marks). */
+function marksOf(c: FaceCtx, lab: Int32Array, r: Region): Float32Array | null {
+  const { g, wall, ext } = c;
+  const W = g.W;
+  const { hx, hy } = halvesOf(r);
+  const out = new Float32Array(OCC * OCC);
+  let n = 0;
+  const i0 = Math.max(1, g.ix(r.box.minX));
+  const i1 = Math.min(W - 2, g.ix(r.box.maxX));
+  const j0 = Math.max(1, g.iy(r.box.maxY));
+  const j1 = Math.min(g.H - 2, g.iy(r.box.minY));
+  for (let y = j0; y <= j1; y++)
+    for (let x = i0; x <= i1; x++) {
+      const k = y * W + x;
+      if (!wall[k] || lab[k] !== r.label) continue;
+      // the outer rim (a wall drawn 3 px thick) lies within RIM_PX of the outside: not a mark
+      let rim = false;
+      for (let d = 1; d <= RIM_PX && !rim; d++)
+        rim =
+          (x - d >= 0 && !!ext[k - d]) ||
+          (x + d < W && !!ext[k + d]) ||
+          (y - d >= 0 && !!ext[k - d * W]) ||
+          (y + d < g.H && !!ext[k + d * W]);
+      if (rim) continue;
+      const p = g.centre(x, y);
+      const i = Math.floor(((p.x - (r.c.x - hx)) / (2 * hx)) * OCC);
+      const j = Math.floor(((r.c.y + hy - p.y) / (2 * hy)) * OCC);
+      if (i < 0 || j < 0 || i >= OCC || j >= OCC) continue;
+      out[j * OCC + i]++;
+      n++;
+    }
+  if (n < MARK_MIN) return null;
+  for (let q = 0; q < out.length; q++) out[q] /= n;
+  return out;
+}
+
+/** L1 distance of two mark distributions, b as drawn / mirrored left–right / top–bottom. */
+function marksDist(a: Float32Array, b: Float32Array) {
+  const d = (f: (i: number, j: number) => number) => {
+    let s = 0;
+    for (let j = 0; j < OCC; j++)
+      for (let i = 0; i < OCC; i++) s += Math.abs(a[j * OCC + i] - b[f(i, j)]);
+    return s;
+  };
+  return {
+    direct: d((i, j) => j * OCC + i),
+    mx: d((i, j) => j * OCC + (OCC - 1 - i)),
+    my: d((i, j) => (OCC - 1 - j) * OCC + i),
+  };
+}
+
+/**
+ * Handedness: the outlines overlap as drawn (IoU ≥ IOU_MIN), no mirror overlaps better, and where a
+ * mirror overlaps as well (a symmetric silhouette — a left and a right piece told apart only by
+ * their marks) the internal marks must sit closer as drawn than mirrored; otherwise not sure.
+ */
+function sameHand(a: Region, b: Region, marks: boolean): boolean {
+  const ov = overlap(a.occ, b.occ);
+  if (ov.iou < IOU_MIN) return false;
+  if (Math.max(ov.mx, ov.my) > ov.iou + HAND_EPS) return false;
+  const tied = [ov.mx >= ov.iou - HAND_EPS, ov.my >= ov.iou - HAND_EPS];
+  if (!tied[0] && !tied[1]) return true;
+  if (!marks) return true;
+  if (!a.marks || !b.marks) return false;
+  const m = marksDist(a.marks, b.marks);
+  return (!tied[0] || m.direct + MARK_EPS < m.mx) && (!tied[1] || m.direct + MARK_EPS < m.my);
+}
+
 /** IoU of two occupancy rasters, b as drawn, mirrored left–right, mirrored top–bottom. */
-function overlap(a: Uint8Array, b: Uint8Array): { iou: number; mirrored: number } {
+function overlap(a: Uint8Array, b: Uint8Array): { iou: number; mx: number; my: number } {
   const iou = (f: (i: number, j: number) => number) => {
     let and = 0;
     let or = 0;
@@ -206,10 +302,8 @@ function overlap(a: Uint8Array, b: Uint8Array): { iou: number; mirrored: number 
   };
   return {
     iou: iou((i, j) => j * OCC + i),
-    mirrored: Math.max(
-      iou((i, j) => j * OCC + (OCC - 1 - i)),
-      iou((i, j) => (OCC - 1 - j) * OCC + i),
-    ),
+    mx: iou((i, j) => j * OCC + (OCC - 1 - i)),
+    my: iou((i, j) => (OCC - 1 - j) * OCC + i),
   };
 }
 
@@ -320,11 +414,8 @@ export function seedFaces(
       if (Math.abs(ratio) > Math.log(1 + GRADE_STEP) + Math.log(1 + AREA_SLACK)) continue;
       const hu = off.has('shape') ? 0 : huDist(ref.hu, x.hu);
       if (hu > HU_MAX) continue;
-      if (!off.has('hand')) {
-        // a left piece is not its right twin: the outlines overlap as drawn, not better mirrored
-        const ov = overlap(ref.occ, x.occ);
-        if (ov.iou < IOU_MIN || ov.mirrored > ov.iou + HAND_EPS) continue;
-      }
+      // a left piece is not its right twin (see sameHand)
+      if (!off.has('hand') && !sameHand(ref, x, !off.has('marks'))) continue;
       scored.push({ region: x, score: dist / side + Math.abs(ratio) + hu });
     }
     return scored.sort((a, b) => a.score - b.score);
