@@ -193,6 +193,9 @@ export function editChains(e: PieceEdit): number[] {
 export const nameString = (p: { code: string; mods: readonly string[]; displayName: string }) =>
   `${p.code}|${p.mods.join('_')}|${p.displayName}`;
 
+/** A piece edit's JSON is written in parts of this many characters (under REPLAY_VALUE_MAX). */
+export const EDIT_PART = 8000;
+
 /** Which autopilot kinds answer which record kind (who answered: the operator or the autopilot). */
 const AUTO_KINDS: Record<string, string[]> = {
   'clean-edits': ['clean-accept'],
@@ -326,6 +329,8 @@ export function answerRecordOf(
   }
   // the drawing every later answer was given on: the tile sheet, its grid, the model
   push('sheet', 'scope', 'the drawing', {
+    // how many piece edits the run ended with: a record that lost them all is told apart
+    edits: i.edits.length,
     sheet: i.sheetIndex,
     grid: gridPrint(i.gridOverride),
     variant: s.variant ?? null,
@@ -427,13 +432,18 @@ export function answerRecordOf(
       }
       const ch: Record<string, ReturnType<typeof chainPrint>> = {};
       for (const id of editChains(e)) ch[id] = chainPrint(preview, id);
-      push('pieces', 'piece-edit', `piece edit ${k + 1} of ${i.edits.length} (${e.kind})`, {
-        n: i.edits.length,
-        k,
-        edit: e,
-        seeds: sd,
-        chains: ch,
-      });
+      // the edit as JSON text in bounded parts (a split's lasso can run to thousands of points)
+      const text = JSON.stringify(e);
+      const parts = Math.max(1, Math.ceil(text.length / EDIT_PART));
+      for (let j = 0; j < parts; j++)
+        push('pieces', 'piece-edit', `piece edit ${k + 1} of ${i.edits.length} (${e.kind})`, {
+          n: i.edits.length,
+          k,
+          part: j,
+          parts,
+          text: text.slice(j * EDIT_PART, (j + 1) * EDIT_PART),
+          ...(j === 0 ? { seeds: sd, chains: ch } : {}),
+        });
     });
   }
   const weak = weakAsides(s.pieces?.setAside);

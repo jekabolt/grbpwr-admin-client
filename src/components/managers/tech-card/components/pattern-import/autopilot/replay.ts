@@ -755,7 +755,7 @@ function sheetStep(c: Ctx): Out | null {
   const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
   if (worst > PATIMPORT.registrationMaxResidualMm && !i.residualsAccepted) {
     const e = c.get('residuals');
-    if (!e) return null;
+    if (!e || !c.fresh('residuals', e)) return null;
     const was = (e.value as { worstMm?: number }).worstMm ?? c.prior.residualMm;
     if (was == null || worst > was + 0.005) {
       c.miss(
@@ -1062,33 +1062,51 @@ function sizesStep(c: Ctx): Out | null {
  */
 function editsOf(c: Ctx): ReplayAnswer | undefined {
   const parts = c.prior.answers.filter((a) => a.kind === 'piece-edit');
-  if (!parts.length) return undefined;
-  const vs = parts.map(
-    (a) =>
-      a.value as unknown as {
-        n: number;
-        k: number;
-        edit: PieceEdit;
-        seeds: Record<string, { at: PtMm; click: boolean }>;
-        chains: Record<string, number[] | null>;
-      },
-  );
-  const n = vs[0].n;
-  const byK = new Map(vs.map((v) => [v.k, v] as const));
-  if (byK.size !== n || vs.some((v) => v.n !== n) || [...byK.keys()].some((k) => k < 0 || k >= n)) {
-    c.miss('piece-edits', `the record holds ${byK.size} of the ${n} piece edits — none is reused`);
+  const want = (c.get('scope')?.value as { edits?: number } | undefined)?.edits ?? 0;
+  if (!parts.length) {
+    if (want > 0) c.miss('piece-edits', `the record lost the ${want} piece edits — none is reused`);
     return undefined;
   }
-  const ordered = [...byK.values()].sort((a, b) => a.k - b.k);
+  type Part = {
+    n: number;
+    k: number;
+    part: number;
+    parts: number;
+    text: string;
+    seeds?: Record<string, { at: PtMm; click: boolean }>;
+    chains?: Record<string, number[] | null>;
+  };
+  const vs = parts.map((a) => a.value as unknown as Part);
+  const n = vs[0].n;
+  const edits: PieceEdit[] = [];
+  const seeds: Record<string, { at: PtMm; click: boolean }> = {};
+  const chains: Record<string, number[] | null> = {};
+  let whole = vs.every((v) => v.n === n) && (!want || want === n);
+  for (let k = 0; whole && k < n; k++) {
+    const mine = vs.filter((v) => v.k === k).sort((a, b) => a.part - b.part);
+    const count = mine[0]?.parts ?? 0;
+    if (!count || mine.length !== count || mine.some((v, j) => v.part !== j || v.parts !== count)) {
+      whole = false;
+      break;
+    }
+    try {
+      edits.push(JSON.parse(mine.map((v) => v.text).join('')) as PieceEdit);
+    } catch {
+      whole = false;
+      break;
+    }
+    Object.assign(seeds, mine[0].seeds ?? {});
+    Object.assign(chains, mine[0].chains ?? {});
+  }
+  if (!whole) {
+    c.miss('piece-edits', `the record does not hold all ${n} piece edits whole — none is reused`);
+    return undefined;
+  }
   return {
     step: 'pieces',
     kind: 'piece-edits',
     subject: `${n} piece edits`,
-    value: {
-      edits: ordered.map((v) => v.edit),
-      seeds: Object.assign({}, ...ordered.map((v) => v.seeds)),
-      chains: Object.assign({}, ...ordered.map((v) => v.chains)),
-    } as unknown as ReplayAnswer['value'],
+    value: { edits, seeds, chains } as unknown as ReplayAnswer['value'],
     ...(parts.some((a) => a.strong) ? { strong: true } : {}),
     ...(parts.some((a) => a.auto) ? { auto: true } : {}),
   };
