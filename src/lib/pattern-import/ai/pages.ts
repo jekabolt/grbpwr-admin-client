@@ -49,7 +49,8 @@ export type ClassifyPatternPagesResponseWire = {
   model?: string;
   promptTokens?: number;
   completionTokens?: number;
-  costUsd?: number;
+  /** decimal string as the server sends it ("" = not reported) */
+  costUsd?: string;
   warnings?: string[];
   cached?: boolean;
 };
@@ -87,7 +88,7 @@ export type PageRoleResult = {
   /** For the files step: what happened, in words (never a stop). */
   note: string | null;
   cached?: boolean;
-  costUsd?: number;
+  costUsd?: string;
   model?: string;
 };
 
@@ -250,7 +251,7 @@ function resultOf(c: CachedCall, file: FileId, hit: boolean): PageRoleResult {
     hints,
     note: `AI page roles: ${hints.length} of ${c.sent.length} pages read${c.more}${hit ? ' (cached)' : ''}`,
     cached: hit || !!c.res.cached,
-    ...(c.res.costUsd != null ? { costUsd: c.res.costUsd } : {}),
+    ...(c.res.costUsd ? { costUsd: c.res.costUsd } : {}),
     ...(c.res.model ? { model: c.res.model } : {}),
   };
 }

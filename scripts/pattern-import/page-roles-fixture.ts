@@ -87,7 +87,7 @@ export function fixturePageRoleDeps(mutate: 'tile-instructions' | null = null): 
         pages.push({ pageNo: n, role: row[0], confidence: row[1], evidence: [row[2]] });
       }
       log.calls.push({ file, sent, answered: pages.map((p) => p.pageNo ?? 0), missing });
-      return { pages, model: 'fixture', costUsd: 0, cached: false, warnings: [] };
+      return { pages, model: 'fixture', costUsd: '0', cached: false, warnings: [] };
     },
   };
   return { deps, log };
