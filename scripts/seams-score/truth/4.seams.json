@@ -1,0 +1,2362 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "4",
+ "size": "M",
+ "summary": "SS26-004 short-sleeve shirt: yoke BP (+ ply BP_2), back BP_1 with a CB box pleat, fronts FP_L / FP_R with grown-on button stands (drills 13 mm in), one-piece collar CLR (+ ply CLR_4; the prod-data DXF names it CLR_3 — the live card reads CLR), short sleeves.",
+ "rows": [
+  {
+   "derivation": "technologist's order «BP + BP_1 → Upper back detail» · yoke 475 onto the back top 525 — the CB box pleat between the notches 237 / 288 (51 mm) takes the difference",
+   "confidence": "sure",
+   "cls": "yoke ↔ back",
+   "bucket": "main",
+   "anyOf": "yoke-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "XRN4F2S13S9D7XPG7BQRY5PQBP",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.024,
+        0
+       ],
+       [
+        0.262,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.738,
+        0
+       ],
+       [
+        0.976,
+        0
+       ]
+      ],
+      "perimShare": 0.3883,
+      "lenMm": 474.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#5",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        0.91,
+        0.96
+       ],
+       [
+        0.707,
+        0.992
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.293,
+        0.991
+       ],
+       [
+        0.089,
+        0.961
+       ]
+      ],
+      "perimShare": 0.2256,
+      "lenMm": 524.9,
+      "notches": 3,
+      "turnDeg": 80.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#2",
+      "contourSig": "164e345798846375"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «BP + BP_1 → Upper back detail» · yoke 475 onto the back top 525 — the CB box pleat between the notches 237 / 288 (51 mm) takes the difference",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «BP_2 + BP+BP_1 → Upper back detail» · the yoke ply on the back top in the same seam (sandwich)",
+   "confidence": "likely",
+   "cls": "yoke ↔ back",
+   "bucket": "ply",
+   "anyOf": "yoke-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "WQACABKY4EZJZ1ZYKX4JNBE74B",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M004FXCR8T1NECQDPTV8A629",
+      "samples": [
+       [
+        0.024,
+        0
+       ],
+       [
+        0.262,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.738,
+        0
+       ],
+       [
+        0.976,
+        0
+       ]
+      ],
+      "perimShare": 0.3883,
+      "lenMm": 474.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCR8T1NECQDPTV8A629#5",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        0.91,
+        0.96
+       ],
+       [
+        0.707,
+        0.992
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.293,
+        0.991
+       ],
+       [
+        0.089,
+        0.961
+       ]
+      ],
+      "perimShare": 0.2256,
+      "lenMm": 524.9,
+      "notches": 3,
+      "turnDeg": 80.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#2",
+      "contourSig": "164e345798846375"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «BP_2 + BP+BP_1 → Upper back detail» · the yoke ply on the back top in the same seam (sandwich)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the two yoke plies’ bottoms 475 = 475 are one seam with the back top — the sandwich read from the plies",
+   "confidence": "likely",
+   "cls": "yoke ↔ back",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "0FATDBZACBR5PTSYWEDEKRHYD6",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.024,
+        0
+       ],
+       [
+        0.262,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.738,
+        0
+       ],
+       [
+        0.976,
+        0
+       ]
+      ],
+      "perimShare": 0.3883,
+      "lenMm": 474.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#5",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M004FXCR8T1NECQDPTV8A629",
+      "samples": [
+       [
+        0.024,
+        0
+       ],
+       [
+        0.262,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.738,
+        0
+       ],
+       [
+        0.976,
+        0
+       ]
+      ],
+      "perimShare": 0.3883,
+      "lenMm": 474.9,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCR8T1NECQDPTV8A629#5",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the two yoke plies’ bottoms 475 = 475 are one seam with the back top — the sandwich read from the plies",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «FP_R + FP_L + Upper back detail → Back with side panels» · left shoulder 170 = 170 (face-up yoke; the engine crosses it)",
+   "confidence": "sure",
+   "cls": "shoulder",
+   "bucket": "main",
+   "anyOf": "shoulder-L",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "QBHWGZWT83XTZCPPF08YF12995",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.317,
+        1
+       ],
+       [
+        0.238,
+        0.904
+       ],
+       [
+        0.159,
+        0.808
+       ],
+       [
+        0.079,
+        0.713
+       ],
+       [
+        0,
+        0.617
+       ]
+      ],
+      "perimShare": 0.139,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#3",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.832,
+        0.921
+       ],
+       [
+        0.7,
+        0.941
+       ],
+       [
+        0.567,
+        0.961
+       ],
+       [
+        0.434,
+        0.98
+       ],
+       [
+        0.301,
+        1
+       ]
+      ],
+      "perimShare": 0.0873,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#1",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «FP_R + FP_L + Upper back detail → Back with side panels» · left shoulder 170 = 170 (face-up yoke; the engine crosses it)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the front is sewn between the yoke and its ply at the shoulder (the ply’s left shoulder 170)",
+   "confidence": "likely",
+   "cls": "shoulder",
+   "bucket": "ply",
+   "anyOf": "shoulder-L",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "MFPD8F9FH7YNGM5KTJTHRGS9M1",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M004FXCR8T1NECQDPTV8A629",
+      "samples": [
+       [
+        0.317,
+        1
+       ],
+       [
+        0.238,
+        0.904
+       ],
+       [
+        0.159,
+        0.808
+       ],
+       [
+        0.079,
+        0.713
+       ],
+       [
+        0,
+        0.617
+       ]
+      ],
+      "perimShare": 0.139,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCR8T1NECQDPTV8A629#3",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.832,
+        0.921
+       ],
+       [
+        0.7,
+        0.941
+       ],
+       [
+        0.567,
+        0.961
+       ],
+       [
+        0.434,
+        0.98
+       ],
+       [
+        0.301,
+        1
+       ]
+      ],
+      "perimShare": 0.0873,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#1",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the front is sewn between the yoke and its ply at the shoulder (the ply’s left shoulder 170)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back with side panels» · right shoulder 170 = 170",
+   "confidence": "sure",
+   "cls": "shoulder",
+   "bucket": "main",
+   "anyOf": "shoulder-R",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "BXB09YWY5HY196VCK7ZZBX6M59",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        1,
+        0.617
+       ],
+       [
+        0.921,
+        0.713
+       ],
+       [
+        0.841,
+        0.808
+       ],
+       [
+        0.762,
+        0.904
+       ],
+       [
+        0.683,
+        1
+       ]
+      ],
+      "perimShare": 0.139,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#1",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        0.699,
+        1
+       ],
+       [
+        0.566,
+        0.98
+       ],
+       [
+        0.433,
+        0.961
+       ],
+       [
+        0.3,
+        0.941
+       ],
+       [
+        0.168,
+        0.921
+       ]
+      ],
+      "perimShare": 0.0873,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#2",
+      "contourSig": "da418f33e41a1529"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Back with side panels» · right shoulder 170 = 170",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the yoke ply’s right shoulder in the same seam",
+   "confidence": "likely",
+   "cls": "shoulder",
+   "bucket": "ply",
+   "anyOf": "shoulder-R",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "YK4XGXE5Z5KNNG5NE3V8Y1HZXT",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M004FXCR8T1NECQDPTV8A629",
+      "samples": [
+       [
+        1,
+        0.617
+       ],
+       [
+        0.921,
+        0.713
+       ],
+       [
+        0.841,
+        0.808
+       ],
+       [
+        0.762,
+        0.904
+       ],
+       [
+        0.683,
+        1
+       ]
+      ],
+      "perimShare": 0.139,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCR8T1NECQDPTV8A629#1",
+      "contourSig": "ec1bd78a08012934"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        0.699,
+        1
+       ],
+       [
+        0.566,
+        0.98
+       ],
+       [
+        0.433,
+        0.961
+       ],
+       [
+        0.3,
+        0.941
+       ],
+       [
+        0.168,
+        0.921
+       ]
+      ],
+      "perimShare": 0.0873,
+      "lenMm": 170,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#2",
+      "contourSig": "da418f33e41a1529"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the yoke ply’s right shoulder in the same seam",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back with side panels» · left side 470 = 470",
+   "confidence": "sure",
+   "cls": "side seam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "W9MXMM8R27VXCHFRXR86NHM4TV",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        0,
+        0.743
+       ],
+       [
+        0.02,
+        0.558
+       ],
+       [
+        0.041,
+        0.372
+       ],
+       [
+        0.061,
+        0.186
+       ],
+       [
+        0.082,
+        0.001
+       ]
+      ],
+      "perimShare": 0.2018,
+      "lenMm": 469.6,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#4",
+      "contourSig": "164e345798846375"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.892,
+        0
+       ],
+       [
+        0.919,
+        0.162
+       ],
+       [
+        0.946,
+        0.325
+       ],
+       [
+        0.973,
+        0.487
+       ],
+       [
+        1,
+        0.649
+       ]
+      ],
+      "perimShare": 0.241,
+      "lenMm": 469.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#5",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Back with side panels» · left side 470 = 470",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Back with side panels» · right side 470 = 470",
+   "confidence": "sure",
+   "cls": "side seam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "B6R4RSZHZ9KABZCXWG89K9MAE6",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        0.919,
+        0
+       ],
+       [
+        0.939,
+        0.186
+       ],
+       [
+        0.959,
+        0.371
+       ],
+       [
+        0.98,
+        0.557
+       ],
+       [
+        1,
+        0.743
+       ]
+      ],
+      "perimShare": 0.2018,
+      "lenMm": 469.6,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#0",
+      "contourSig": "164e345798846375"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        0,
+        0.649
+       ],
+       [
+        0.027,
+        0.487
+       ],
+       [
+        0.054,
+        0.325
+       ],
+       [
+        0.081,
+        0.162
+       ],
+       [
+        0.108,
+        0
+       ]
+      ],
+      "perimShare": 0.241,
+      "lenMm": 469.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#4",
+      "contourSig": "da418f33e41a1529"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Back with side panels» · right side 470 = 470",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the front opening 653 = 653, six drills 13 mm in on both fronts — a closure",
+   "confidence": "sure",
+   "cls": "CF closure",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "closure",
+   "row": {
+    "seamKey": "MT5VNTNPV6NCT121RNPGVJH67A",
+    "status": "confirmed",
+    "kind": "closure",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0,
+        0.906
+       ],
+       [
+        0,
+        0.68
+       ],
+       [
+        0,
+        0.453
+       ],
+       [
+        0,
+        0.227
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.3354,
+      "lenMm": 653.4,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#3",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.227
+       ],
+       [
+        1,
+        0.453
+       ],
+       [
+        1,
+        0.68
+       ],
+       [
+        1,
+        0.906
+       ]
+      ],
+      "perimShare": 0.3354,
+      "lenMm": 653.4,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#0",
+      "contourSig": "da418f33e41a1529"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the front opening 653 = 653, six drills 13 mm in on both fronts — a closure",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «SL_R + SL_L + Back with side panels → Base with sleeves» · cap 524 onto the left armhole front 258 + yoke 101 + back 166 = 525",
+   "confidence": "sure",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "F0G75MYGA4ZGEZTPMAMSQC4C47",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918WR3F64EF873TQAWH",
+      "samples": [
+       [
+        1,
+        0.622
+       ],
+       [
+        0.751,
+        0.823
+       ],
+       [
+        0.5,
+        0.999
+       ],
+       [
+        0.231,
+        0.867
+       ],
+       [
+        0,
+        0.622
+       ]
+      ],
+      "perimShare": 0.3997,
+      "lenMm": 524.5,
+      "notches": 3,
+      "turnDeg": 150.7,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918WR3F64EF873TQAWH#0",
+      "contourSig": "a15b3e6dd5a4cc73"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        1,
+        0.649
+       ],
+       [
+        0.797,
+        0.674
+       ],
+       [
+        0.71,
+        0.752
+       ],
+       [
+        0.749,
+        0.839
+       ],
+       [
+        0.832,
+        0.921
+       ]
+      ],
+      "perimShare": 0.1325,
+      "lenMm": 258.1,
+      "notches": 1,
+      "turnDeg": -324.7,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#0",
+      "contourSig": "ca51a6fab6c74888"
+     },
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0,
+        0.617
+       ],
+       [
+        0.008,
+        0.463
+       ],
+       [
+        0.014,
+        0.309
+       ],
+       [
+        0.019,
+        0.155
+       ],
+       [
+        0.024,
+        0
+       ]
+      ],
+      "perimShare": 0.0823,
+      "lenMm": 100.7,
+      "notches": 0,
+      "turnDeg": -10.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#4",
+      "contourSig": "ec1bd78a08012934"
+     },
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        0.089,
+        0.961
+       ],
+       [
+        0.095,
+        0.895
+       ],
+       [
+        0.088,
+        0.83
+       ],
+       [
+        0.057,
+        0.773
+       ],
+       [
+        0,
+        0.743
+       ]
+      ],
+      "perimShare": 0.0712,
+      "lenMm": 165.7,
+      "notches": 0,
+      "turnDeg": -246.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#3",
+      "contourSig": "164e345798846375"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «SL_R + SL_L + Back with side panels → Base with sleeves» · cap 524 onto the left armhole front 258 + yoke 101 + back 166 = 525",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · cap 524 onto the right armhole 166 + 101 + 258 = 525",
+   "confidence": "sure",
+   "cls": "armhole (composite)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "AV0564BQRKKG0GHDYCZ7A8PXA3",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918CWFJTV7M44MVW8QG",
+      "samples": [
+       [
+        1,
+        0.622
+       ],
+       [
+        0.769,
+        0.867
+       ],
+       [
+        0.5,
+        0.999
+       ],
+       [
+        0.249,
+        0.823
+       ],
+       [
+        0,
+        0.622
+       ]
+      ],
+      "perimShare": 0.3997,
+      "lenMm": 524.5,
+      "notches": 3,
+      "turnDeg": 150.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918CWFJTV7M44MVW8QG#1",
+      "contourSig": "d26fdf49fcae555b"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N91889NF3PW3DFRB5HFF",
+      "samples": [
+       [
+        1,
+        0.743
+       ],
+       [
+        0.943,
+        0.772
+       ],
+       [
+        0.911,
+        0.829
+       ],
+       [
+        0.904,
+        0.894
+       ],
+       [
+        0.91,
+        0.96
+       ]
+      ],
+      "perimShare": 0.0712,
+      "lenMm": 165.8,
+      "notches": 0,
+      "turnDeg": -248.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N91889NF3PW3DFRB5HFF#1",
+      "contourSig": "164e345798846375"
+     },
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.976,
+        0
+       ],
+       [
+        0.981,
+        0.155
+       ],
+       [
+        0.986,
+        0.309
+       ],
+       [
+        0.992,
+        0.463
+       ],
+       [
+        1,
+        0.617
+       ]
+      ],
+      "perimShare": 0.0823,
+      "lenMm": 100.7,
+      "notches": 0,
+      "turnDeg": -10.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#0",
+      "contourSig": "ec1bd78a08012934"
+     },
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        0.168,
+        0.921
+       ],
+       [
+        0.251,
+        0.839
+       ],
+       [
+        0.29,
+        0.752
+       ],
+       [
+        0.203,
+        0.674
+       ],
+       [
+        0,
+        0.649
+       ]
+      ],
+      "perimShare": 0.1325,
+      "lenMm": 258.1,
+      "notches": 1,
+      "turnDeg": -324.7,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#3",
+      "contourSig": "da418f33e41a1529"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Base with sleeves» · cap 524 onto the right armhole 166 + 101 + 258 = 525",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · left underarm 200 = 200",
+   "confidence": "sure",
+   "cls": "underarm",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "0NS4JQWHFPYGP2RW9Y8E1EGAAZ",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918WR3F64EF873TQAWH",
+      "samples": [
+       [
+        0,
+        0.622
+       ],
+       [
+        0.019,
+        0.467
+       ],
+       [
+        0.038,
+        0.311
+       ],
+       [
+        0.058,
+        0.156
+       ],
+       [
+        0.077,
+        0.001
+       ]
+      ],
+      "perimShare": 0.1524,
+      "lenMm": 200,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918WR3F64EF873TQAWH#1",
+      "contourSig": "a15b3e6dd5a4cc73"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918WR3F64EF873TQAWH",
+      "samples": [
+       [
+        0.928,
+        0
+       ],
+       [
+        0.946,
+        0.155
+       ],
+       [
+        0.964,
+        0.311
+       ],
+       [
+        0.982,
+        0.466
+       ],
+       [
+        1,
+        0.622
+       ]
+      ],
+      "perimShare": 0.1524,
+      "lenMm": 200,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918WR3F64EF873TQAWH#3",
+      "contourSig": "a15b3e6dd5a4cc73"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Base with sleeves» · left underarm 200 = 200",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves» · right underarm 200 = 200",
+   "confidence": "sure",
+   "cls": "underarm",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "M4SDCFG3JH2HAPZ9KBXG3YB2B1",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918CWFJTV7M44MVW8QG",
+      "samples": [
+       [
+        0.923,
+        0.001
+       ],
+       [
+        0.942,
+        0.156
+       ],
+       [
+        0.962,
+        0.311
+       ],
+       [
+        0.981,
+        0.467
+       ],
+       [
+        1,
+        0.622
+       ]
+      ],
+      "perimShare": 0.1524,
+      "lenMm": 200,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918CWFJTV7M44MVW8QG#0",
+      "contourSig": "d26fdf49fcae555b"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N918CWFJTV7M44MVW8QG",
+      "samples": [
+       [
+        0,
+        0.622
+       ],
+       [
+        0.018,
+        0.466
+       ],
+       [
+        0.036,
+        0.311
+       ],
+       [
+        0.054,
+        0.155
+       ],
+       [
+        0.072,
+        0
+       ]
+      ],
+      "perimShare": 0.1524,
+      "lenMm": 200,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918CWFJTV7M44MVW8QG#2",
+      "contourSig": "d26fdf49fcae555b"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Base with sleeves» · right underarm 200 = 200",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base with sleeves + Collar → base with collar» · collar neck edge 483 (CF notches 36 / 447, SNP 140 / 343, CB 241) onto the neckline 128 + 207 + 128 = 463 (CF notches on the fronts 24 mm from the edge)",
+   "confidence": "sure",
+   "cls": "collar ↔ neckline",
+   "bucket": "main",
+   "anyOf": "collar-neck",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "2NRCBJNVV2PWA9P3ZAJWF0BV5T",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        0.031,
+        0
+       ],
+       [
+        0.265,
+        0.131
+       ],
+       [
+        0.5,
+        0.224
+       ],
+       [
+        0.735,
+        0.131
+       ],
+       [
+        0.969,
+        0
+       ]
+      ],
+      "perimShare": 0.4095,
+      "lenMm": 482.7,
+      "notches": 5,
+      "turnDeg": -29.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#2",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        1,
+        0.906
+       ],
+       [
+        0.894,
+        0.907
+       ],
+       [
+        0.797,
+        0.924
+       ],
+       [
+        0.73,
+        0.958
+       ],
+       [
+        0.699,
+        1
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.3,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#1",
+      "contourSig": "da418f33e41a1529"
+     },
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.683,
+        1
+       ],
+       [
+        0.603,
+        0.815
+       ],
+       [
+        0.5,
+        0.779
+       ],
+       [
+        0.397,
+        0.815
+       ],
+       [
+        0.317,
+        1
+       ]
+      ],
+      "perimShare": 0.169,
+      "lenMm": 206.7,
+      "notches": 0,
+      "turnDeg": -346.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#2",
+      "contourSig": "ec1bd78a08012934"
+     },
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.301,
+        1
+       ],
+       [
+        0.27,
+        0.958
+       ],
+       [
+        0.203,
+        0.924
+       ],
+       [
+        0.106,
+        0.907
+       ],
+       [
+        0,
+        0.906
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#2",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «Base with sleeves + Collar → base with collar» · collar neck edge 483 (CF notches 36 / 447, SNP 140 / 343, CB 241) onto the neckline 128 + 207 + 128 = 463 (CF notches on the fronts 24 mm from the edge)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the collar ply’s neck edge on the same neckline (sandwich)",
+   "confidence": "likely",
+   "cls": "collar ↔ neckline",
+   "bucket": "ply",
+   "anyOf": "collar-neck",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "15W142AM2JSGS9VXRG80TYS242",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M004FXCRJKMDP6DVW6E680GN",
+      "samples": [
+       [
+        0.031,
+        0
+       ],
+       [
+        0.265,
+        0.131
+       ],
+       [
+        0.5,
+        0.224
+       ],
+       [
+        0.735,
+        0.131
+       ],
+       [
+        0.969,
+        0
+       ]
+      ],
+      "perimShare": 0.4095,
+      "lenMm": 482.7,
+      "notches": 5,
+      "turnDeg": -29.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCRJKMDP6DVW6E680GN#2",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        1,
+        0.906
+       ],
+       [
+        0.894,
+        0.907
+       ],
+       [
+        0.797,
+        0.924
+       ],
+       [
+        0.73,
+        0.958
+       ],
+       [
+        0.699,
+        1
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.3,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#1",
+      "contourSig": "da418f33e41a1529"
+     },
+     {
+      "piece": "01KZV8N918XAE0AN80VBTD1XVA",
+      "samples": [
+       [
+        0.683,
+        1
+       ],
+       [
+        0.603,
+        0.815
+       ],
+       [
+        0.5,
+        0.779
+       ],
+       [
+        0.397,
+        0.815
+       ],
+       [
+        0.317,
+        1
+       ]
+      ],
+      "perimShare": 0.169,
+      "lenMm": 206.7,
+      "notches": 0,
+      "turnDeg": -346.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918XAE0AN80VBTD1XVA#2",
+      "contourSig": "ec1bd78a08012934"
+     },
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.301,
+        1
+       ],
+       [
+        0.27,
+        0.958
+       ],
+       [
+        0.203,
+        0.924
+       ],
+       [
+        0.106,
+        0.907
+       ],
+       [
+        0,
+        0.906
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#2",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the collar ply’s neck edge on the same neckline (sandwich)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same neckline read through the yoke ply’s neck (both yoke plies are in the collar seam)",
+   "confidence": "likely",
+   "cls": "collar ↔ neckline",
+   "bucket": "ply",
+   "anyOf": "collar-neck",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "V9T80YWED1VBMFGX7DF3KSQKV8",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        0.031,
+        0
+       ],
+       [
+        0.265,
+        0.131
+       ],
+       [
+        0.5,
+        0.224
+       ],
+       [
+        0.735,
+        0.131
+       ],
+       [
+        0.969,
+        0
+       ]
+      ],
+      "perimShare": 0.4095,
+      "lenMm": 482.7,
+      "notches": 5,
+      "turnDeg": -29.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#2",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZV8N9189TPJQHXMKT3TQQ94",
+      "samples": [
+       [
+        1,
+        0.906
+       ],
+       [
+        0.894,
+        0.907
+       ],
+       [
+        0.797,
+        0.924
+       ],
+       [
+        0.73,
+        0.958
+       ],
+       [
+        0.699,
+        1
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.3,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N9189TPJQHXMKT3TQQ94#1",
+      "contourSig": "da418f33e41a1529"
+     },
+     {
+      "piece": "01M004FXCR8T1NECQDPTV8A629",
+      "samples": [
+       [
+        0.683,
+        1
+       ],
+       [
+        0.603,
+        0.815
+       ],
+       [
+        0.5,
+        0.779
+       ],
+       [
+        0.397,
+        0.815
+       ],
+       [
+        0.317,
+        1
+       ]
+      ],
+      "perimShare": 0.169,
+      "lenMm": 206.7,
+      "notches": 0,
+      "turnDeg": -346.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCR8T1NECQDPTV8A629#2",
+      "contourSig": "ec1bd78a08012934"
+     },
+     {
+      "piece": "01KZV8N918NW8SPGPTRC6AVTNK",
+      "samples": [
+       [
+        0.301,
+        1
+       ],
+       [
+        0.27,
+        0.958
+       ],
+       [
+        0.203,
+        0.924
+       ],
+       [
+        0.106,
+        0.907
+       ],
+       [
+        0,
+        0.906
+       ]
+      ],
+      "perimShare": 0.0657,
+      "lenMm": 127.9,
+      "notches": 1,
+      "turnDeg": -230.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918NW8SPGPTRC6AVTNK#2",
+      "contourSig": "ca51a6fab6c74888"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the same neckline read through the yoke ply’s neck (both yoke plies are in the collar seam)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the two collar plies’ neck edges 483 = 483 are one seam with the neckline",
+   "confidence": "likely",
+   "cls": "collar ↔ neckline",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "JGFK9FX55SV85H4TS1HD7590CG",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        0.031,
+        0
+       ],
+       [
+        0.265,
+        0.131
+       ],
+       [
+        0.5,
+        0.224
+       ],
+       [
+        0.735,
+        0.131
+       ],
+       [
+        0.969,
+        0
+       ]
+      ],
+      "perimShare": 0.4095,
+      "lenMm": 482.7,
+      "notches": 5,
+      "turnDeg": -29.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#2",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M004FXCRJKMDP6DVW6E680GN",
+      "samples": [
+       [
+        0.031,
+        0
+       ],
+       [
+        0.265,
+        0.131
+       ],
+       [
+        0.5,
+        0.224
+       ],
+       [
+        0.735,
+        0.131
+       ],
+       [
+        0.969,
+        0
+       ]
+      ],
+      "perimShare": 0.4095,
+      "lenMm": 482.7,
+      "notches": 5,
+      "turnDeg": -29.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCRJKMDP6DVW6E680GN#2",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the two collar plies’ neck edges 483 = 483 are one seam with the neckline",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «CLR_4 + CLR → Collar» · outer edge 514 = 514",
+   "confidence": "likely",
+   "cls": "ply bagging (collar)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "XZNCJ5N2GZKX4E3VR8EHFT64J8",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        1,
+        0.767
+       ],
+       [
+        0.75,
+        0.906
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        0.906
+       ],
+       [
+        0,
+        0.767
+       ]
+      ],
+      "perimShare": 0.436,
+      "lenMm": 514,
+      "notches": 0,
+      "turnDeg": 29.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#0",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M004FXCRJKMDP6DVW6E680GN",
+      "samples": [
+       [
+        1,
+        0.767
+       ],
+       [
+        0.75,
+        0.906
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        0.906
+       ],
+       [
+        0,
+        0.767
+       ]
+      ],
+      "perimShare": 0.436,
+      "lenMm": 514,
+      "notches": 0,
+      "turnDeg": 29.4,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCRJKMDP6DVW6E680GN#0",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «CLR_4 + CLR → Collar» · outer edge 514 = 514",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "collar plies, end 91 = 91",
+   "confidence": "likely",
+   "cls": "ply bagging (collar)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "49AZ3TA3XP6H85FQTRBAC6E7AK",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        0,
+        0.767
+       ],
+       [
+        0.012,
+        0.578
+       ],
+       [
+        0.025,
+        0.389
+       ],
+       [
+        0.031,
+        0.196
+       ],
+       [
+        0.031,
+        0
+       ]
+      ],
+      "perimShare": 0.0773,
+      "lenMm": 91.1,
+      "notches": 0,
+      "turnDeg": -48.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#1",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M004FXCRJKMDP6DVW6E680GN",
+      "samples": [
+       [
+        0,
+        0.767
+       ],
+       [
+        0.012,
+        0.578
+       ],
+       [
+        0.025,
+        0.389
+       ],
+       [
+        0.031,
+        0.196
+       ],
+       [
+        0.031,
+        0
+       ]
+      ],
+      "perimShare": 0.0773,
+      "lenMm": 91.1,
+      "notches": 0,
+      "turnDeg": -48.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCRJKMDP6DVW6E680GN#1",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "collar plies, end 91 = 91",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "collar plies, end 91 = 91",
+   "confidence": "likely",
+   "cls": "ply bagging (collar)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "HXEQQY2N39YRRQJ1YXA5XVQ04D",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZV8N918K804VSGK2NG6Q9NY",
+      "samples": [
+       [
+        0.969,
+        0
+       ],
+       [
+        0.969,
+        0.196
+       ],
+       [
+        0.975,
+        0.389
+       ],
+       [
+        0.988,
+        0.578
+       ],
+       [
+        1,
+        0.767
+       ]
+      ],
+      "perimShare": 0.0773,
+      "lenMm": 91.1,
+      "notches": 0,
+      "turnDeg": -48.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZV8N918K804VSGK2NG6Q9NY#3",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M004FXCRJKMDP6DVW6E680GN",
+      "samples": [
+       [
+        0.969,
+        0
+       ],
+       [
+        0.969,
+        0.196
+       ],
+       [
+        0.975,
+        0.389
+       ],
+       [
+        0.988,
+        0.578
+       ],
+       [
+        1,
+        0.767
+       ]
+      ],
+      "perimShare": 0.0773,
+      "lenMm": 91.1,
+      "notches": 0,
+      "turnDeg": -48.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M004FXCRJKMDP6DVW6E680GN#3",
+      "contourSig": "6e01c0059341a303"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "collar plies, end 91 = 91",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}
