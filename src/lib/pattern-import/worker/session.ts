@@ -80,6 +80,7 @@ import {
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
+import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
@@ -244,6 +245,8 @@ function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
 
 /** A8b: tile chrome — a cut line on it, or around it, is traced chrome (G19). */
 const CHROME_KINDS = new Set<BackgroundKind>(['tile-frame', 'regmark', 'tile-label']);
+/** P2: DXF dialects whose numbered layers are AAMA/ASTM layers (adapters/dxf detectDialect). */
+const AAMA_DIALECTS = new Set(['grbpwr', 'clo-r2000', 'clo-aama-r12', 'clo-aama-gerber', 'aama']);
 
 const sheetOnly = (s: Sheet): StageIO['assemble']['out']['sheet'] => {
   const { paths: _p, texts: _t, rasters: _r, styles: _s, ...rest } = s;
@@ -316,6 +319,8 @@ export class Session {
   /** `docTexts` with the file each was printed in (A6: only the selected sheet's files count). */
   private docTextSrc: { file: FileId; page: PageIndex; text: string }[] = [];
   private fileNames = new Map<string, string>();
+  /** P2: a file of the sheet is an AAMA/CLO DXF (its numbered layers are AAMA layers). */
+  private aamaLayers = false;
   // chains (legend applied) → sizes → pieces → semantics
   /** The legend's chain set (operator legend applied, same-label size rows merged). */
   private chains: ChainSet | null = null;
@@ -893,6 +898,8 @@ export class Session {
       );
       this.docTexts = this.docTextSrc.map((t) => t.text);
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
+      // P2: numbered DXF layers are AAMA layers only when the reader proved the dialect
+      this.aamaLayers = docs.some((d) => AAMA_DIALECTS.has(d.file.dxf?.dialect ?? ''));
       sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
         ctx.progress(d, t, n);
       }).sheet;
@@ -968,7 +975,13 @@ export class Session {
       set = buildChainsDetailed(
         sheet,
         { ...input.opts },
-        { extraTexts: this.docTexts, fileNames: this.fileNames, offeredPaths, countFeed },
+        {
+          extraTexts: this.docTexts,
+          fileNames: this.fileNames,
+          offeredPaths,
+          countFeed,
+          aamaLayers: this.aamaLayers,
+        },
         (d, t, n) => {
           ctx.checkCancel();
           ctx.progress(d, t, n);
@@ -1106,7 +1119,9 @@ export class Session {
     const text = (this.textSeeds ??= proposeSeeds(sheet, base));
     const map = faceMap(sheet, base, run, text, { cellMm });
     const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
-    const { held, asides } = asidesOf(map, text);
+    const { held, asides: a0 } = asidesOf(map, text);
+    // P2: a loop on the internal layer inside a cut piece is positive evidence of no piece
+    const asides = layerLoopAsides(base, a0);
     const entry = { set: base, key, map, seeds: faceSeedsOf(map, first), held, asides };
     this.faces = entry;
     this.sizeFaces = entry;

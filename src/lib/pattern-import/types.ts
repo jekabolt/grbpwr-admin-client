@@ -419,7 +419,9 @@ export type ClassEvidence =
       why: string;
       /** The one size the source names (its file name) against the graded look: the row is asked. */
       sourceOne?: string;
-    };
+    }
+  /** P2: the AAMA/ASTM meaning of the line's layer (chains/layer-role.ts). */
+  | { kind: 'layer'; layer: string; meaning: string };
 
 export type LineClass = {
   id: ClassId;
@@ -637,6 +639,11 @@ export type SetAside = {
   reason: Exclude<FaceJunk, 'small'>;
   /** The text seed held back. */
   seed?: Seed;
+  /**
+   * P2: positive evidence it is no piece — a closed loop on the internal layer inside a cut piece,
+   * on a file whose layers proved their AAMA/ASTM meaning (chains/layer-role layerLoopAsides).
+   */
+  layerLoop?: string;
 };
 
 export type FillOutcome =

@@ -142,6 +142,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return e.sourceOne
               ? `${e.why} — confirm if the sheet draws only ${e.sourceOne}, else answer the sizes drawn`
               : `outside the outlines — another size's lines? left to the size checks (${e.why})`;
+          case 'layer':
+            return `layer “${e.layer}”: ${e.meaning}`;
         }
       })
       .join(' · ');

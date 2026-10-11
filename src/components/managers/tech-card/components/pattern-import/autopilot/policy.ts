@@ -1230,6 +1230,8 @@ function piecesStep(snap: Snap): AutopilotDecision {
       ),
     );
   const why = weak.map((a) => {
+    // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
+    if (a.layerLoop) return { a, ev: a.layerLoop };
     if (a.reason === 'other-pen')
       return { a, ev: 'drawn inside a seeded piece in another pen or short strokes (a mark)' };
     const h = host(a.box);

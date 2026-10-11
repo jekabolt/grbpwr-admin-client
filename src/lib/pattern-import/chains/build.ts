@@ -22,6 +22,7 @@ import { PATIMPORT } from 'lib/pattern-import/types';
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
 import { furniture, GREY_COLOUR_ONLY, overprintLines } from './classify';
 import { rolesByFaces, type FaceRoleOpts, type FaceSizeCtx } from './face-role';
+import { rolesByLayer } from './layer-role';
 import { overlaidFiles } from './link';
 import { makeChains } from './make';
 import { seamPens, type SeamPen } from './seam';
@@ -42,6 +43,8 @@ export type BuildExtras = {
   countFeed?: FaceSizeCtx;
   /** Probe switches of the face pass (mutation; the worker never sets them). */
   faceOpts?: FaceRoleOpts;
+  /** P2: the reader proved an AAMA/CLO DXF dialect — numbered layers are AAMA layers. */
+  aamaLayers?: boolean;
 };
 
 /** Full pipeline with its diagnostics (the probe and the worker stage use this). */
@@ -79,13 +82,19 @@ export function buildChainsDetailed(
   });
   progress?.(2, 3, 'legend');
   // A0.3: where no row carries the outlines, the faces they close (and the layer name) decide
-  const set = rolesByFaces(
-    sheet,
-    toChainSet(rec, mk.stats, seamPens(rec, styles), styles),
+  // P2: where the file names its layers the AAMA/ASTM way, the layer is the role (the cut line is
+  // the outline, the pleat lines on the internal layer are not)
+  const set = rolesByLayer(
+    rolesByFaces(
+      sheet,
+      toChainSet(rec, mk.stats, seamPens(rec, styles), styles),
+      styles,
+      extras.offeredPaths,
+      extras.faceOpts,
+      extras.countFeed,
+    ),
     styles,
-    extras.offeredPaths,
-    extras.faceOpts,
-    extras.countFeed,
+    { aama: extras.aamaLayers },
   );
   progress?.(3, 3);
   return { set, recover: rec };
