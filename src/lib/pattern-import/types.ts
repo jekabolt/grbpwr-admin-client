@@ -627,6 +627,11 @@ export type SetAside = {
   reason: Exclude<FaceJunk, 'small'>;
   /** The text seed held back. */
   seed?: Seed;
+  /**
+   * P2: positive evidence it is no piece — a closed loop on the internal layer inside a cut piece,
+   * on a file whose layers proved their AAMA/ASTM meaning (chains/layer-role layerLoopAsides).
+   */
+  layerLoop?: string;
 };
 
 export type FillOutcome =

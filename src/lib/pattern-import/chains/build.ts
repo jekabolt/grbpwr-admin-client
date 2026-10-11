@@ -39,6 +39,8 @@ export type BuildExtras = {
   fileNames?: Map<string, string>;
   /** A0.3: sheet path ids the clean stage offered as background and the operator did not take. */
   offeredPaths?: ReadonlySet<PathId>;
+  /** P2: the reader proved an AAMA/CLO DXF dialect — numbered layers are AAMA layers. */
+  aamaLayers?: boolean;
 };
 
 /** Full pipeline with its diagnostics (the probe and the worker stage use this). */
@@ -86,6 +88,7 @@ export function buildChainsDetailed(
       extras.offeredPaths,
     ),
     styles,
+    { aama: extras.aamaLayers },
   );
   progress?.(3, 3);
   return { set, recover: rec };
