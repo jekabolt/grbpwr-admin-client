@@ -131,6 +131,7 @@
     "vector:strokes": "node scripts/vector-strokes-probe.mjs",
     "ai:providers": "node scripts/ai-providers-probe.mjs",
     "patimport:faces": "node scripts/pattern-import/faces.mjs",
+    "patimport:continuity": "node scripts/pattern-import/continuity.mjs",
     "patimport:count": "node scripts/pattern-import/count-evidence.mjs"
   },
   "devDependencies": {
