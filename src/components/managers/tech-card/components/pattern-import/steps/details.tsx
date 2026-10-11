@@ -41,6 +41,7 @@ import { PendingDetails } from './details-pending';
 import {
   ConfirmStrip,
   OutlineQuestion,
+  PassportNote,
   RowQuestions,
   nameNote,
   qtyOpen,
@@ -380,6 +381,7 @@ export function DetailsStep({
             </div>
             <OutlineQuestion api={api} current={fileAllowance} />
             <ConfirmStrip api={api} />
+            <PassportNote api={api} />
 
             {proposals.length > 0 && (
               <div className='mt-2 flex flex-wrap items-center gap-2'>

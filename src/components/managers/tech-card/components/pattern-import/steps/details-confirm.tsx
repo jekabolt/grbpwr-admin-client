@@ -2,7 +2,9 @@
 //
 //   · OutlineQuestion: no allowance text, no second drawn line, no DXF layer. The file gets ONE
 //     explicit answer, cut line or seam line + N mm (decision 7: N = 10), with no preselected
-//     side. The per-piece line/allowance controls in the table still override it.
+//     side — unless the file names the layer every outline lies on (PASSPORT (c): "Cut lines",
+//     `CUT_x5F_LINE`): then that answer is pre-filled, still one click. The per-piece line/allowance
+//     controls in the table still override it.
 //   · ConfirmStrip: quantities nobody printed, names read off construction notes, AI names below
 //     the threshold. One deliberate click confirms them all as shown; each row has its own.
 import { useState } from 'react';
@@ -15,6 +17,7 @@ import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import { NumberField } from '../ui-bits';
+import { outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
 export function useOpenQuestions(api: ImportSessionApi) {
@@ -34,6 +37,9 @@ export function OutlineQuestion({
   );
   if (!open.length || current.origin === 'operator') return null;
   const busy = !!api.session.busy;
+  // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
+  const word = outlineByLayerWord(api.session);
+  const prefill = word?.kind === 'cut' ? 'cut' : null;
   return (
     <CalloutBox
       tone='warning'
@@ -45,10 +51,13 @@ export function OutlineQuestion({
           ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
           : 'the sheet has no allowance note and no second line'}{' '}
         ({open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
+        {word?.kind === 'cut' &&
+          ` the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled.`}
+        {word?.kind === 'stop' && ` ${word.reason}`}
       </Text>
       <span className='flex flex-wrap items-center gap-1.5'>
         <Button
-          variant='secondary'
+          variant={prefill === 'cut' ? 'main' : 'secondary'}
           size='xs'
           disabled={busy}
           title='the allowance is already in the drawing: the outline is cut as drawn'
@@ -179,4 +188,38 @@ export function qtyOpen(open: ReturnType<typeof openQuestions>, seed: SeedId) {
 /** The sheet note a row's name was read from, while unconfirmed. */
 export function nameNote(open: ReturnType<typeof openQuestions>, seed: SeedId) {
   return open.name.find((u) => u.seed === seed) ?? null;
+}
+
+/**
+ * PASSPORT (d), Ф1: the document's own cutting list against the pieces found — a NOTE, never a
+ * stop (the list may name other models, other sheets, pieces cut by dimensions or traced from
+ * another). Shown only when the list was read from the text layer (our grammar, a cutting section).
+ */
+export function PassportNote({ api }: { api: ImportSessionApi }) {
+  const p = api.session.semantics?.passport;
+  if (!p || !p.pieces.length) return null;
+  const bound = p.pieces.filter((e) => e.binding);
+  const missing = p.pieces.filter((e) => !e.binding);
+  const tag = (e: (typeof p.pieces)[number]) =>
+    `${e.label?.value ?? '?'} «${e.name.value}»${e.qty ? ` ×${e.qty.value.n}${e.qty.value.mode === 'fold' ? ' on fold' : ''}` : ''}`;
+  return (
+    <Text
+      size='micro'
+      component='p'
+      className={`mt-2 ${missing.length ? 'text-warning' : 'text-textInactiveColor'}`}
+    >
+      the document&apos;s cutting list names {p.pieces.length}{' '}
+      {p.pieces.length === 1 ? 'piece' : 'pieces'}; {bound.length} found on this sheet by the
+      printed number
+      {missing.length > 0 &&
+        ` — not found here: ${missing
+          .slice(0, 6)
+          .map(tag)
+          .join(
+            ', ',
+          )}${missing.length > 6 ? ` +${missing.length - 6}` : ''} (another model or sheet, cut by dimensions, or lost — check)`}
+      {(p.extra?.length ?? 0) > 0 &&
+        ` · on the sheet but not in the list: ${(p.extra ?? []).slice(0, 6).join(', ')}`}
+    </Text>
+  );
 }
