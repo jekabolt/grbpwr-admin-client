@@ -51,7 +51,7 @@ import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
-import { modelFromCard, sheetFromCard } from './card-match';
+import { modelFromCard, sheetFromCard, weakReason } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 
 /** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
@@ -738,6 +738,12 @@ function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
         'sheet',
         `the file carries ${n} tile sheets and ${pick.why ?? 'nothing on the card names one'} — pick the sheet to import`,
       );
+    // a suggestion (a file name, the order in the file, a bare number) is the operator's click
+    if (!pick.strong)
+      return stopAt(
+        'sheet',
+        `the file carries ${n} tile sheets and ${weakReason(`sheet ${pick.pick + 1}`, pick)} — pick the sheet to import`,
+      );
     return {
       actions: [{ kind: 'sheet', sheet: pick.pick }],
       assumptions: [
@@ -1053,6 +1059,11 @@ function piecesStep(snap: Snap): AutopilotDecision {
       return stopAt(
         'pieces',
         `the sheet carries ${variants.length} models (${variants.join(' | ')}) and ${pick.why ?? 'nothing on the card names one'} — pick the model`,
+      );
+    if (!pick.strong)
+      return stopAt(
+        'pieces',
+        `the sheet carries ${variants.length} models (${variants.join(' | ')}) and ${weakReason(`"${pick.pick}"`, pick)} — pick the model`,
       );
     return {
       actions: [{ kind: 'variant', variant: pick.pick }],

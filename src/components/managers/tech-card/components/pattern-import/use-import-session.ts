@@ -48,7 +48,7 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
-import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
+import { scaleUncertain, stepOffer, tileSheets, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, type Assumption } from './autopilot/types';
@@ -277,8 +277,16 @@ export function cardFingerprint(c: CardContext): string {
     c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
     (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
     (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+    cardIdentity(c),
   ]);
 }
+
+/**
+ * A10 (Codex #5): what the card says it is — the strings the model / sheet choice is matched
+ * against (autopilot/card-match.ts). A change means the choice was made against another card.
+ */
+export const cardIdentity = (c: CardContext) =>
+  JSON.stringify([c.cardName ?? '', c.styleNumber ?? '', c.styleLabel ?? '']);
 
 export function useImportSession(deps: {
   client: ImportClient;
@@ -925,12 +933,32 @@ export function useImportSession(deps: {
         case 'back': {
           // back to sizes or before: the stages run again — against the card as it is now
           const changed = stepIndex(ev.to) <= stepIndex('sizes') && !!cardStale();
+          // A10 (Codex #5): the card's name / style number changed — the model and the sheet it
+          // named are chosen again (from the sheet step when the file has several)
+          const renamed =
+            stepIndex(ev.to) <= stepIndex('sizes') &&
+            runCard.current != null &&
+            cardIdentity(runCard.current) !== cardIdentity(cardRef.current);
+          if (renamed) {
+            const cleared = {
+              sheetPicked: null,
+              variant: null,
+              autopilot: iRef.current.autopilot.filter(
+                (a) => a.kind !== 'model' && a.kind !== 'sheet-choice',
+              ),
+            };
+            iRef.current = { ...iRef.current, ...cleared };
+            patchInputs(cleared);
+            if (tileSheets(sRef.current.pages) > 1 && stepIndex(ev.to) > stepIndex('sheet'))
+              ev = { ...ev, to: 'sheet' };
+          }
           if (stepIndex(ev.to) <= stepIndex('sizes')) takeCard();
           if (sRef.current.names.length) heldNames.current = sRef.current.names;
           setApply({ phase: 'idle' });
           setNotice(null);
           setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
+          if (renamed) patch({ variant: null });
           // the card's size run changed under the map: the map is read again from the new run
           if (changed && ev.to === 'sizes' && sRef.current.sizes) {
             iRef.current = { ...iRef.current, sizeMap: null };
@@ -1096,6 +1124,9 @@ export function useImportSession(deps: {
           return;
         }
         case 'sheet':
+          // A10 (Codex #6): "next" never imports the default of several tile sheets — only a
+          // sheet pick answers which one (the blocker says so; this guards every caller)
+          if (tileSheets(s.pages) > 1 && iRef.current.sheetPicked === null) return;
           await toSizes();
           return;
         case 'sizes': {
@@ -1167,6 +1198,11 @@ export function useImportSession(deps: {
         return null;
       }
       case 'sheet': {
+        // A10 (Codex #6): which of several tile sheets is a question — only a sheet pick answers
+        // it; "next" never imports the default sheet
+        const n = tileSheets(s.pages);
+        if (n > 1 && inputs.sheetPicked === null)
+          return `the file carries ${n} tile sheets — pick the one this card is`;
         const miss = s.sheet?.sheet.missing.length ?? 0;
         if (miss) return `${miss} pages are missing — set the grid by hand`;
         const worst = Math.max(0, ...(s.sheet?.sheet.poses.map((p) => p.residualMm) ?? [0]));
@@ -1617,6 +1653,8 @@ export function useImportSession(deps: {
   /** Why the card is no longer the one this run read (null = the same card). */
   function cardStale(): string | null {
     if (cardAt.current == null) return null;
+    if (runCard.current && cardIdentity(runCard.current) !== cardIdentity(cardRef.current))
+      return "the card's name / style number changed since this run read it — the model and the sheet were chosen against the old one: nothing was uploaded, go back to sizes to choose them again";
     return cardFingerprint(cardRef.current) === cardAt.current
       ? null
       : 'the card changed since this run read it (sizes, BOM fabrics or its pieces / patterns) — nothing was uploaded: go back to sizes to run against the card as it is now';

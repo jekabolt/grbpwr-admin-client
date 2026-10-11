@@ -814,7 +814,7 @@ export function PiecesStep({
                 disabled={!!session.busy}
                 onClick={() => void api.dispatch({ type: 'variant', variant: named.pick })}
               >
-                use {named.pick} · the card names it
+                use {named.pick} · {named.strong ? 'the card names it' : 'suggested by the card'}
               </Button>
               <Text size='micro' variant='label' component='p' className='mt-1'>
                 {named.evidence.join(' · ')}

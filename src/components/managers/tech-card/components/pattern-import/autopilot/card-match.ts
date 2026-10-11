@@ -1,39 +1,49 @@
 // A10 · the card names the model / the tile sheet (rule D5, Codex #2/#4: never "the one with the
 // most pieces"). The card's identifying strings (its name, style number, the uploaded file names)
 // are matched against the model labels the sheet prints ("Style A", "Mod. 112") and the tile
-// sheets' own labels (a sheet letter "Bogen B", the models printed on each sheet's pages).
+// sheets' own labels (a sheet letter "Bogen B", the models printed on each sheet's TILES).
 //
 // A match counts only when it is UNIQUE and token-exact after normalisation (case, separators,
-// leading zeros):
-//   * a number: "112" on the card ↔ "Mod. 112"; a bare number counts only with 3+ digits and no
-//     leading zero ("FW26-012" is the card's own serial), else the card must say "mod 12";
-//   * a letter: "Style A" ↔ "A" only when the card says "style a" / "model a" (or "sheet b" for a
-//     sheet) — a lone letter, an "A-line", a "styles" never count;
-//   * size tokens of the card never match, nor generic words (they carry no key at all).
-// Several hits, a hit the sheet does not carry, or none → null with the reason (the stop).
+// leading zeros). What the autopilot may act on (`strong`) — Codex review of 48068988:
+//   * an explicit prefix on BOTH sides: Mod./Model/Modell/Style/Art. + value on the card ↔ the
+//     sheet's "Mod. 112" / "Style B"; Bogen/Sheet + letter ↔ the letter the sheet prints;
+//   * or a bare number in the card's dedicated style-number field ("112" ↔ "Mod. 112").
+// A bare number in the card name or a file name (3+ digits, no leading zero, not a year, no unit
+// after it), a file name alone, a sheet by its order in the file: a SUGGESTION — the operator's one
+// click, the autopilot stops on it. Card fields outrank file names: a file name only confirms.
+// Every explicit mention must match: one that names nothing on the sheet, several picks, a file
+// name against the card, a model spread over several sheets → no pick, the stop says why.
+// Size tokens of the card never match; generic words carry no key at all.
 import type { PageClassification } from 'lib/pattern-import/types';
 import type { CardContext } from '../client';
 
-export type CardString = { field: string; text: string };
+/** Where a string comes from: the card's name, its dedicated style-number field, a file name. */
+export type CardSource = 'card' | 'style' | 'file';
+export type CardString = { field: string; text: string; source: CardSource };
 type Key = { kind: 'num' | 'letter'; v: string };
 type Mention = Key & { explicit: boolean; said: string; from: CardString };
 
 /** A choice the card makes, or why it makes none (`why` null = the card names nothing). */
 export type CardPick<T> =
-  | { pick: T; evidence: string[]; why?: undefined }
-  | { pick: null; evidence?: undefined; why: string | null };
+  | { pick: T; evidence: string[]; strong: boolean; why?: undefined }
+  | { pick: null; evidence?: undefined; strong?: undefined; why: string | null };
 
-const MODEL_WORD = String.raw`(?:modell?|mod[eè]le|modelo|mod|style|view|version|variante?|ansicht|модель|мод|вариант|фасон)`;
-const SHEET_WORD = String.raw`(?:schnitt)?(?:bogen|sheet|лист|arkusz|feuille|planche|hoja|foglio)`;
-/** word · separators · value; a letter needs a separator ("styles" is not "style s"). */
+const MODEL_WORD = String.raw`(?:modell?s?|mod[eè]les?|modelos?|mod|styles?|views?|version|variante?n?|ansicht|art(?:ikel|icle)?|модел[ьи]|мод|вариант|фасон)`;
+const SHEET_WORD = String.raw`(?:schnitt)?(?:bogen|sheets?|лист|arkusz|feuille|planche|hoja|foglio)`;
+/** What a number may not be followed by: a fraction / date, a unit, a year word. */
+const NOT_A_ID = String.raw`(?![\p{L}\p{N}]|[/.,]\d|[\s_\-]*(?:cm|mm|m|см|мм|м|in|inch|"|%|kg|g|г|yrs?|years?|jahre|лет|года?)(?![\p{L}\p{N}]))`;
+const VALUE = String.raw`(?:(\d{1,4})${NOT_A_ID}|(\p{L})(?![\p{L}\p{N}]|-\p{L}))`;
+/** word · separators · value; a letter needs a separator ("stylex" is not "style x"). */
 const said = (word: string) =>
   new RegExp(
-    String.raw`(?<![\p{L}\p{N}])${word}\.?(?:[\s_#№:.\-]*(\d{1,4})(?![\p{L}\p{N}]|[/.]\d)|[\s_#№:.\-]+(\p{L})(?![\p{L}\p{N}]|-\p{L}))`,
+    String.raw`(?<![\p{L}\p{N}])${word}\.?(?:[\s_#№:.\-]*(\d{1,4})${NOT_A_ID}|[\s_#№:.\-]+(\p{L})(?![\p{L}\p{N}]|-\p{L}))`,
     'giu',
   );
 const MODEL_SAID = said(MODEL_WORD);
 const SHEET_SAID = said(SHEET_WORD);
-const BARE_NUMBER = /(?<![\p{L}\p{N}/.])([1-9]\d{2,3})(?![\p{L}\p{N}]|[/.]\d)/gu;
+/** A compact list after a mention: "Style A/B", "Bogen A & B", "Mod. 112, 113 und 114". */
+const MORE = new RegExp(String.raw`^\s*(?:[/,&+]|and|und|или|и|or|oder|et|y)\s*${VALUE}`, 'iu');
+const BARE_NUMBER = new RegExp(String.raw`(?<![\p{L}\p{N}/.])([1-9]\d{2,3})${NOT_A_ID}`, 'gu');
 
 const normNum = (d: string) => d.replace(/^0+(?=\d)/, '');
 const keyOf = (num: string | undefined, letter: string | undefined): Key | null =>
@@ -43,17 +53,23 @@ const keyOf = (num: string | undefined, letter: string | undefined): Key | null 
       ? { kind: 'letter', v: letter.toLowerCase() }
       : null;
 const same = (a: Key, b: Key) => a.kind === b.kind && a.v === b.v;
+const isYear = (v: string) => /^(19|20)\d\d$/.test(v);
 
 /**
- * What the card says it is: its name and style number (the season only when no style number is
- * given apart — `styleLabel` is "season · style number"), and the uploaded files' names.
+ * What the card says it is: its name, its style number (the dedicated field), and the uploaded
+ * files' names. `styleLabel` ("season · style number") stands in for an older caller that gives
+ * neither field — read as the card name, never as the dedicated field.
  */
 export function cardStrings(card: CardContext, fileNames: readonly string[]): CardString[] {
   const out: CardString[] = [];
-  if (card.cardName?.trim()) out.push({ field: 'card name', text: card.cardName.trim() });
-  if (card.styleNumber?.trim()) out.push({ field: 'style number', text: card.styleNumber.trim() });
-  else if (card.styleLabel?.trim()) out.push({ field: 'style', text: card.styleLabel.trim() });
-  for (const f of fileNames) out.push({ field: 'file', text: f.replace(/\.[^.]+$/, '') });
+  if (card.cardName?.trim())
+    out.push({ field: 'card name', text: card.cardName.trim(), source: 'card' });
+  if (card.styleNumber?.trim())
+    out.push({ field: 'style number', text: card.styleNumber.trim(), source: 'style' });
+  else if (!card.cardName?.trim() && card.styleLabel?.trim())
+    out.push({ field: 'style', text: card.styleLabel.trim(), source: 'card' });
+  for (const f of fileNames)
+    out.push({ field: 'file', text: f.replace(/\.[^.]+$/, ''), source: 'file' });
   return out;
 }
 
@@ -72,14 +88,30 @@ function sizeTokens(card: CardContext): Set<string> {
 function mentions(strings: readonly CardString[], re: RegExp, sizes: Set<string>, bare: boolean) {
   const out: Mention[] = [];
   for (const from of strings) {
+    const taken: [number, number][] = [];
     for (const m of from.text.matchAll(re)) {
-      const k = keyOf(m[1], m[2]);
-      if (k && !sizes.has(k.v)) out.push({ ...k, explicit: true, said: m[0].trim(), from });
+      const at = m.index ?? 0;
+      const push = (num: string | undefined, letter: string | undefined, text: string) => {
+        const k = keyOf(num, letter);
+        if (k && !sizes.has(k.v)) out.push({ ...k, explicit: true, said: text.trim(), from });
+      };
+      push(m[1], m[2], m[0]);
+      // the compact list that follows ("Style A/B" names A AND B)
+      let end = at + m[0].length;
+      for (;;) {
+        const n = from.text.slice(end).match(MORE);
+        if (!n) break;
+        push(n[1], n[2], `${m[0].trim()}…${n[0].trim()}`);
+        end += n[0].length;
+      }
+      taken.push([at, end]);
     }
     if (!bare) continue;
     for (const m of from.text.matchAll(BARE_NUMBER)) {
+      const at = m.index ?? 0;
+      if (taken.some(([a, b]) => at >= a && at < b)) continue;
       const k = keyOf(m[1], undefined)!;
-      if (!sizes.has(k.v)) out.push({ ...k, explicit: false, said: m[0], from });
+      if (!sizes.has(k.v) && !isYear(k.v)) out.push({ ...k, explicit: false, said: m[0], from });
     }
   }
   return out;
@@ -95,6 +127,9 @@ export function modelKey(label: string): Key | null {
 
 /** A model label matches a mention: an explicit one always; a bare number only for 3+ digits. */
 const matches = (k: Key, m: Mention) => same(k, m) && (m.explicit || k.v.length >= 3);
+/** The autopilot acts on: an explicit prefix in a card field, or the style-number field itself. */
+const proves = (m: Mention) =>
+  m.from.source !== 'file' && (m.explicit || m.from.source === 'style');
 
 const quote = (m: Mention) => `${m.from.field} «${m.from.text}» says "${m.said}"`;
 
@@ -106,44 +141,81 @@ export function modelFromCard(
 ): CardPick<string> {
   const ms = mentions(cardStrings(card, fileNames), MODEL_SAID, sizeTokens(card), true);
   if (!ms.length) return { pick: null, why: null };
-  const hits = labels.flatMap((l) => {
+  const keyed = labels.flatMap((l) => {
     const k = modelKey(l);
-    const by = k ? ms.filter((m) => matches(k, m)) : [];
-    return by.length ? [{ label: l, by }] : [];
+    return k ? [{ l, k }] : [];
   });
-  if (hits.length === 1)
-    return {
-      pick: hits[0].label,
-      evidence: [`${quote(hits[0].by[0])} ↔ model "${hits[0].label}" on the sheet`],
-    };
-  if (hits.length > 1)
+  const hitsOf = (m: Mention) => keyed.filter((x) => matches(x.k, m)).map((x) => x.l);
+  // every explicit mention names a model of this sheet (a card that says "Style C" is not about it)
+  const stray = ms.filter((m) => m.explicit && !hitsOf(m).length);
+  if (stray.length)
     return {
       pick: null,
-      why: `the card names several of them (${hits.map((h) => `"${h.label}" ← ${h.by[0].said}`).join(', ')})`,
+      why: `the ${stray[0].from.field} names ${stray.map((m) => `"${m.said}"`).join(', ')}, which is not a model on this sheet`,
     };
-  const explicit = ms.filter((m) => m.explicit);
-  return {
-    pick: null,
-    why: explicit.length
-      ? `the card names ${explicit.map((m) => `"${m.said}"`).join(', ')}, which is not a model on this sheet`
-      : null,
-  };
+  const fromCard = ms.filter((m) => m.from.source !== 'file' && hitsOf(m).length);
+  const fromFile = ms.filter((m) => m.from.source === 'file' && hitsOf(m).length);
+  const cardHits = [...new Set(fromCard.flatMap(hitsOf))];
+  const fileHits = [...new Set(fromFile.flatMap(hitsOf))];
+  if (cardHits.length > 1 || (!cardHits.length && fileHits.length > 1)) {
+    const by = cardHits.length ? fromCard : fromFile;
+    return {
+      pick: null,
+      why: `the card names several of them (${by.map((m) => `"${hitsOf(m)[0]}" ← ${m.said}`).join(', ')})`,
+    };
+  }
+  if (cardHits.length === 1) {
+    const pick = cardHits[0];
+    // a file name only confirms: one naming another model is a conflict
+    const against = fromFile.filter((m) => !hitsOf(m).includes(pick));
+    if (against.length)
+      return {
+        pick: null,
+        why: `the card names "${pick}" but the ${against[0].from.field} «${against[0].from.text}» says "${against[0].said}"`,
+      };
+    const by = fromCard.filter((m) => hitsOf(m).includes(pick));
+    const sure = by.filter(proves);
+    return {
+      pick,
+      strong: sure.length > 0,
+      evidence: [
+        `${quote((sure[0] ?? by[0])!)} ↔ model "${pick}" on the sheet`,
+        ...fromFile.map((m) => `confirmed by ${quote(m)}`),
+      ],
+    };
+  }
+  if (fileHits.length === 1)
+    return {
+      pick: fileHits[0],
+      strong: false,
+      evidence: [`${quote(fromFile[0])} ↔ model "${fileHits[0]}" on the sheet (a file name only)`],
+    };
+  return { pick: null, why: null };
 }
 
-/** The tile sheets of a file: their index, the letter they print, the models their pages name. */
+/**
+ * The tile sheets of a file: their index, the letter they print, the models their TILES print.
+ * Only pages the reader put on a sheet count (instructions / cover / unknown pages carry no
+ * sheet); a model is a sheet's only by its tiles — an overview or an instruction page that names
+ * models never proves which sheet carries one (Codex #1). A letter may come from the sheet's
+ * overview (Burda prints "Bogen A" there only), and only when it is the one letter that sheet
+ * prints and no other sheet prints it.
+ */
 export function sheetsOf(pages: readonly PageClassification[]) {
   const ids = [...new Set(pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0))].sort(
     (a, b) => a - b,
   );
-  const on = (k: number) => pages.filter((p) => (p.sheet ?? 0) === k && p.cls !== 'blank');
-  const letters = ids.map((k) => new Set(on(k).flatMap((p) => p.labels?.sheets ?? [])));
+  const tiles = (k: number) => pages.filter((p) => p.cls === 'tile' && (p.sheet ?? 0) === k);
+  const own = (k: number) => pages.filter((p) => p.cls === 'overview' && p.sheet === k);
+  const letters = ids.map(
+    (k) => new Set([...tiles(k), ...own(k)].flatMap((p) => p.labels?.sheets ?? [])),
+  );
   return ids.map((k, i) => {
-    // a letter is the sheet's name only when it is the one letter it prints and no other sheet does
-    const own = [...letters[i]].filter((l) => letters.every((o, j) => j === i || !o.has(l)));
+    const only = [...letters[i]].filter((l) => letters.every((o, j) => j === i || !o.has(l)));
     return {
       sheet: k,
-      name: letters[i].size === 1 && own.length === 1 ? own[0] : null,
-      models: new Set(on(k).flatMap((p) => p.labels?.models ?? [])),
+      name: letters[i].size === 1 && only.length === 1 ? only[0] : null,
+      models: new Set(tiles(k).flatMap((p) => p.labels?.models ?? [])),
     };
   });
 }
@@ -152,10 +224,10 @@ const sheetWord = (s: { sheet: number; name: string | null }) =>
   s.name ? `sheet ${s.name} (${s.sheet + 1})` : `sheet ${s.sheet + 1}`;
 
 /**
- * The tile sheet the card names: by the sheet's own letter ("Bogen B" ↔ the card's "sheet b"), by
- * order when the file names no sheet ("sheet 2" / "sheet b" = the second), or by the model the
- * card names when only that sheet prints it. The model's sheets several → a stop that says so
- * (one run imports one sheet).
+ * The tile sheet the card names: by the sheet's own letter ("Bogen B" ↔ the card's "Bogen B"),
+ * or by the model the card names when only that sheet's tiles print it. By order in the file (the
+ * file names no sheet) or by a file name alone: a suggestion only. A model spread over several
+ * sheets stops, also when a sheet is named (Codex #4: one run imports one sheet).
  */
 export function sheetFromCard(
   pages: readonly PageClassification[],
@@ -164,58 +236,76 @@ export function sheetFromCard(
 ): CardPick<number> {
   const sheets = sheetsOf(pages);
   if (sheets.length < 2) return { pick: null, why: null };
-  const strings = cardStrings(card, fileNames);
-  // by name
-  const said = mentions(strings, SHEET_SAID, new Set(), false);
+  const said = mentions(cardStrings(card, fileNames), SHEET_SAID, new Set(), false);
   const named = sheets.some((s) => s.name);
-  const byName = sheets.flatMap((s, i) => {
-    const by = said.filter((m) =>
+  const hitsOf = (m: Mention) =>
+    sheets.filter((s, i) =>
       named
         ? m.kind === 'letter' && s.name?.toLowerCase() === m.v
         : m.kind === 'letter'
           ? m.v.charCodeAt(0) - 97 === i
           : Number(m.v) - 1 === i,
     );
-    return by.length ? [{ s, by }] : [];
-  });
-  if (byName.length > 1)
+  const stray = said.filter((m) => !hitsOf(m).length);
+  if (stray.length)
     return {
       pick: null,
-      why: `the card names several sheets (${byName.map((h) => h.by[0].said).join(', ')})`,
+      why: `the ${stray[0].from.field} names ${stray.map((m) => `"${m.said}"`).join(', ')}, which is not a sheet of this file`,
     };
-  // by model
+  const fromCard = said.filter((m) => m.from.source !== 'file');
+  const fromFile = said.filter((m) => m.from.source === 'file');
+  const cardHits = [...new Set(fromCard.flatMap(hitsOf))];
+  const fileHits = [...new Set(fromFile.flatMap(hitsOf))];
+  if (cardHits.length > 1 || (!cardHits.length && fileHits.length > 1))
+    return {
+      pick: null,
+      why: `the card names several sheets (${(cardHits.length ? fromCard : fromFile).map((m) => m.said).join(', ')})`,
+    };
+  if (cardHits.length === 1 && fileHits.some((s) => s !== cardHits[0]))
+    return {
+      pick: null,
+      why: `the card names ${sheetWord(cardHits[0])} but the file name says ${sheetWord(fileHits.find((s) => s !== cardHits[0])!)}`,
+    };
+  // the model the card names, by the sheets whose tiles print it
   const labels = [...new Set(sheets.flatMap((s) => [...s.models]))];
   const model = labels.length ? modelFromCard(labels, card, fileNames) : null;
+  if (model && model.pick == null && model.why) return { pick: null, why: model.why };
   const carry = model?.pick ? sheets.filter((s) => s.models.has(model.pick!)) : [];
-  if (byName.length === 1) {
-    const { s, by } = byName[0];
-    if (model?.pick && carry.length && !carry.includes(s))
+  if (carry.length > 1)
+    return {
+      pick: null,
+      why: `the card names model "${model!.pick}", whose pieces are spread over ${carry.map(sheetWord).join(' and ')} — one run imports one sheet: import each in its own run`,
+    };
+  const s = cardHits[0] ?? fileHits[0];
+  if (s) {
+    if (carry.length === 1 && carry[0] !== s)
       return {
         pick: null,
-        why: `the card names ${sheetWord(s)} but model "${model.pick}" it names is printed on ${carry.map(sheetWord).join(', ')}`,
+        why: `the card names ${sheetWord(s)} but model "${model!.pick}" it names is printed on ${sheetWord(carry[0])}`,
       };
+    const by = (cardHits.length ? fromCard : fromFile).find((m) => hitsOf(m).includes(s))!;
     return {
       pick: s.sheet,
+      // the sheet's own printed letter on a card field; by order or by a file name: a suggestion
+      strong: !!cardHits.length && named && (!model?.pick || model.strong),
       evidence: [
-        `${quote(by[0])} ↔ ${named ? `«${s.name}» printed on the sheet` : 'the sheet by order (the file names none)'}`,
-        ...(model?.pick && carry.includes(s) ? model.evidence! : []),
+        `${quote(by)} ↔ ${named ? `«${s.name}» printed on the sheet` : 'the sheet by its order in the file (the file names none)'}`,
+        ...(model?.pick ? model.evidence : []),
       ],
     };
   }
   if (model?.pick && carry.length === 1)
     return {
       pick: carry[0].sheet,
-      evidence: [...model.evidence!, `only ${sheetWord(carry[0])} prints "${model.pick}"`],
+      strong: model.strong,
+      evidence: [
+        ...model.evidence,
+        `only the tiles of ${sheetWord(carry[0])} print "${model.pick}"`,
+      ],
     };
-  if (model?.pick && carry.length > 1)
-    return {
-      pick: null,
-      why: `the card names model "${model.pick}", whose pieces are spread over ${carry.map(sheetWord).join(' and ')} — one run imports one sheet: import each in its own run`,
-    };
-  return {
-    pick: null,
-    why: said.length
-      ? `the card names ${said.map((m) => `"${m.said}"`).join(', ')}, which is not a sheet of this file`
-      : model?.why ?? null,
-  };
+  return { pick: null, why: null };
 }
+
+/** The stop reason for a pick the autopilot may not act on (a suggestion for the operator). */
+export const weakReason = (what: string, p: { evidence: string[] }) =>
+  `the card suggests ${what} (${p.evidence[0]}) but without a model / sheet prefix on a card field — confirm it`;

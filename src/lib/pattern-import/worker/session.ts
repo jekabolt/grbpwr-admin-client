@@ -1060,7 +1060,7 @@ export class Session {
           shapes: blobShapes(faces.map, cands),
           files: feed.files,
           // the models it names are read as the pieces stage reads them (its model choice)
-          models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+          models: variantLabels(sheet.texts.map((t) => t.text)).length,
         }),
       };
     }
@@ -1263,7 +1263,9 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
-    const variants = variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]);
+    // A10 (Codex #1): the models THIS sheet prints — never the text of every page (another
+    // sheet's tiles, an instruction or overview page naming every model of the magazine)
+    const variants = variantLabels(sheet.texts.map((t) => t.text));
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];

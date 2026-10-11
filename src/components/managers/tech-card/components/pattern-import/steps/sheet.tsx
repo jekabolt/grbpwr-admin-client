@@ -229,7 +229,8 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
                       })
                     }
                   >
-                    import sheet {named.pick + 1} · the card names it
+                    import sheet {named.pick + 1} ·{' '}
+                    {named.strong ? 'the card names it' : 'suggested by the card'}
                   </Button>
                   <Text size='micro' variant='label' component='p' className='mt-1'>
                     {named.evidence.join(' · ')}

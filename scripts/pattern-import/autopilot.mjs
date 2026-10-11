@@ -107,10 +107,13 @@ const top = (o, n = 12) =>
 const real = results.filter((r) => r.group !== 'refusal' && r.group !== 'control');
 // A10 card controls: a card that names nothing / a model not on the sheet / two — must stop
 const controls = results.filter((r) => r.group === 'control');
-const controlsFailed = controls.filter((r) => !r.control?.ok).map((r) => r.id);
-const controlsNotReached = controls
-  .filter((r) => r.control?.ok && !r.control?.reached)
-  .map((r) => `${r.id} (${r.stop?.step})`);
+// a control that picked, did not reach its question (Codex #7: unreached FAILS) or crashed
+const controlsFailed = controls
+  .filter((r) => !r.control?.ok)
+  .map(
+    (r) =>
+      `${r.id} (${!r.control ? r.verdict : r.control.picked ? 'picked' : !r.control.reached ? `not reached: ${r.stop?.step}` : r.control.bypassed ? 'next imported a sheet' : (r.control.failed ?? []).join('; ') || 'rename not re-chosen'})`,
+  );
 // the dry card match (the pages' labels at extraction) on the truth cases that name a model/sheet
 const cardMatched = real.filter((r) => r.cardMatch?.sheet != null || r.cardMatch?.model != null);
 const cardWrong = real.flatMap((r) => (r.cardMatch?.wrong ?? []).map((w) => `${r.id}: ${w}`));
@@ -157,7 +160,6 @@ const summary = {
   fingerprintDrift: sum((r) => r.fingerprintDrift),
   controls: controls.length,
   controlsFailed,
-  controlsNotReached,
   cardMatch: cardMatched.map(
     (r) =>
       `${r.id}: ${r.cardMatch.sheet != null ? `sheet ${r.cardMatch.sheet}` : ''}${r.cardMatch.model != null ? ` model ${r.cardMatch.model}` : ''}`,
@@ -186,8 +188,8 @@ if (summary.manifestProblems.length)
 if (controls.length)
   console.log(
     controlsFailed.length
-      ? `✗ card controls that picked (must stop): ${controlsFailed.join(', ')}`
-      : `✓ card controls picked nothing ${controls.length}/${controls.length}${controlsNotReached.length ? ` · stopped before the question: ${controlsNotReached.join(', ')}` : ''}`,
+      ? `✗ card controls failed${MUTATE === 'card' ? ' (expected under --mutate=card)' : ''}: ${controlsFailed.join(', ')}`
+      : `✓ card controls: every one stopped on its question, picked nothing ${controls.length}/${controls.length}`,
   );
 console.log(
   `card match (dry, pages' labels): ${summary.cardMatch.join(' · ') || 'none'} · wrong ${cardWrong.length}${cardWrong.length ? ` ✗ ${cardWrong.join(', ')}` : ''}`,
@@ -208,9 +210,17 @@ if (summary.fingerprintDrift)
 let bad =
   summary.manifestProblems.length > 0 ||
   summary.fingerprintDrift > 0 ||
-  controlsFailed.length > 0 ||
+  (MUTATE !== 'card' && controlsFailed.length > 0) ||
   cardWrong.length > 0;
-if (MUTATE) {
+if (MUTATE === 'card') {
+  // the control: a pick injected at each control's question must make that control fail
+  const injected = controls.filter((r) => r.mutated?.length);
+  const caught = injected.filter((r) => !r.control?.ok);
+  console.log(
+    `mutation card: injected in ${injected.length} control(s), caught in ${caught.length}`,
+  );
+  if (!injected.length || caught.length !== injected.length) bad = true;
+} else if (MUTATE) {
   // the control: every injected wrong answer must be counted wrong, attributed to an assumption
   // only a case that wrote its export can show the wrong answer (a stop before the write is not
   // a miss of the control — it is reported apart)
