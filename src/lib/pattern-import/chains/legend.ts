@@ -54,6 +54,24 @@ export const applyLegend: ApplyLegendFn = (set, edits) => {
 };
 
 /**
+ * The operator's "confirm" on a row as proposed (the sizes step's chip; keys as `legendConfirmed`:
+ * the row's sig, or `#id` for a row without one). An answer like a role edit — confidence 1, the
+ * row's questions dropped — in a NEW set, so what is keyed by the set (gradeView, the solver's cache)
+ * sees it. `applyLegend` alone keeps a same-role edit at its proposed confidence (T3: a row sent
+ * back as built is no answer); this is the explicit one. Rows nobody touched stay as built.
+ */
+export function confirmRows(set: ChainSet, keys: readonly string[]): ChainSet {
+  const want = new Set(keys);
+  const classes = set.classes.map((c) =>
+    want.has(c.sig ?? `#${c.id}`) && c.confidence < 1 ? { ...c, confidence: 1 } : c,
+  );
+  const edited = new Set(classes.filter((c, k) => c !== set.classes[k]).map((c) => c.id));
+  if (!edited.size) return set;
+  const ambiguities = set.ambiguities?.filter((a) => !a.classes.some((c) => edited.has(c)));
+  return { ...set, classes, ...(ambiguities ? { ambiguities } : {}) };
+}
+
+/**
  * Same size label on two size rows = one size (a size drawn in two looks, F3 `class-split`): the
  * chains join the lower-ranked row. Run after `applyLegend` (the operator's labels).
  */

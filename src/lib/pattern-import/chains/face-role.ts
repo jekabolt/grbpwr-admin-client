@@ -60,7 +60,18 @@ const sameStyle = (a: Style | undefined, b: Style | undefined) =>
 /** Probe switches (mutation): a cue or a stray rule off. */
 export type FaceRoleOpts = {
   off?: ReadonlySet<
-    'layer' | 'ring' | 'pen' | 'text' | 'outside' | 'junk' | 'offered' | 'square' | 'inside' | 'all'
+    | 'layer'
+    | 'ring'
+    | 'pen'
+    | 'text'
+    | 'outside'
+    | 'junk'
+    | 'offered'
+    | 'square'
+    | 'inside'
+    | 'runs'
+    | 'lettering'
+    | 'all'
   >;
 };
 
@@ -158,6 +169,26 @@ export function rolesByFaces(
       allIds.filter((id) => verdict.get(id)?.kind === 'internal'),
     ))
       verdict.set(id, { kind: 'stray', why: 'part of a line set aside' });
+    // N3 (wm M): the rest of a hand-drawn line the watermark's letters cut into runs, and a long
+    // straight line that runs from free space into lettering set aside (a tile label)
+    const strayIds = () => allIds.filter((id) => verdict.get(id)?.kind === 'stray');
+    const internalIds = () => allIds.filter((id) => verdict.get(id)?.kind === 'internal');
+    if (!off.has('runs'))
+      for (const [id, why] of handDrawnRuns(
+        set.chains,
+        piece0,
+        allIds.filter((id) => HAND_DRAWN.has(verdict.get(id)?.why ?? '')),
+        internalIds(),
+      ))
+        verdict.set(id, { kind: 'stray', why });
+    if (!off.has('lettering'))
+      for (const [id, why] of intoLettering(
+        set.chains,
+        piece0,
+        [...strayIds(), ...set.classes.filter((c) => c.role === 'ignore').flatMap((c) => c.chains)],
+        internalIds(),
+      ))
+        verdict.set(id, { kind: 'stray', why });
   }
   const piece = allIds.filter((id) => verdict.get(id)?.kind === 'piece');
   if (!piece.length) return set;
@@ -225,10 +256,10 @@ export function rolesByFaces(
     });
   }
   if (stray.length) {
-    const whys = new Map<string, number>();
+    const whys = new Map<string, ChainId[]>();
     for (const id of stray) {
       const w = verdict.get(id)!.why;
-      whys.set(w, (whys.get(w) ?? 0) + 1);
+      whys.set(w, [...(whys.get(w) ?? []), id]);
     }
     push({
       role: 'ignore',
@@ -239,9 +270,10 @@ export function rolesByFaces(
         {
           kind: 'face-stray',
           why: [...whys]
-            .sort((a, b) => b[1] - a[1])
-            .map(([w, n]) => `${n} ${w}`)
+            .sort((a, b) => b[1].length - a[1].length)
+            .map(([w, ids]) => `${ids.length} ${w}`)
             .join(', '),
+          byWhy: [...whys].map(([why, chains]) => ({ why, chains })),
         },
       ],
       confidence: 0.4,
@@ -260,6 +292,83 @@ export function rolesByFaces(
       `A0.3: ${piece.length} lines close ${kept.size} outlines (${cues.join('; ')}) → ${auto ? 'outline row' : 'outline row to confirm'}; ${internal.length} inside; ${stray.length} stray (to confirm)`,
     ],
   };
+}
+
+const gradeViews = new WeakMap<ChainSet, ChainSet>();
+
+/** Strays that are never line work of a size (per-chain `byWhy`): left out of the size checks. */
+const NEVER_A_SIZE = new Set(['the test square', 'offered as background by the clean step']);
+
+/** Probe switch (mutation): hand back every stray, whatever its reason. */
+export type GradeViewOpts = { off?: ReadonlySet<'why'> };
+
+/**
+ * What the size checks (pieces/grade: the hook, the drawn-size inference) may read of the face
+ * pass. Its stray row rests on "a sheet with no size row is one size": a line sticking outside
+ * every outline is a stray. On a sheet drawing several sizes in one pen that is every larger size's
+ * line (the stripped bench: kombinezon lost a whole size, the solver counted 7 bands for 8 and a
+ * 7-size control closed 6 wrong contours; palto 21 closed wrong). So, per chain, an unconfirmed stray
+ * is handed back as F3's unconfirmed 'internal' — size evidence and a wall, what it was before the
+ * face pass — unless its own reason says it is no line work (the drawn test square, what the clean
+ * step offered as background).
+ *
+ * Every other stray comes back, with lanes or without: a line no other line runs beside is either a
+ * positioning / grid line across the nest or an edge drawn once for every size (a fold, a CF), and
+ * nothing here tells the two apart — the bench's laneless strays hold 1.3–2.7 m of shared edges per
+ * sheet. Leaving them out took those walls from every size (palto L1 closed a wrong contour,
+ * kombinezon L2 fell 33 → 23 correct); a line across the nest as a wall of every size is what the
+ * solver had before the face pass, and its checks hold there (faces probe: «grade view»).
+ *
+ * A row the operator answered (confidence 1: its role changed, or confirmed as proposed —
+ * chains/legend confirmRows) is the operator's. Cached per set: the solver's cache is keyed by it.
+ */
+export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
+  const off = o.off ?? new Set();
+  const unsure = (c: LineClass) =>
+    c.role === 'ignore' && c.confidence < 0.9 && c.evidence.some((e) => e.kind === 'face-stray');
+  if (!set.classes.some(unsure)) return set;
+  const cached = !o.off && gradeViews.get(set);
+  if (cached) return cached;
+  const whyOf = new Map<ChainId, string>();
+  for (const c of set.classes)
+    if (unsure(c))
+      for (const e of c.evidence)
+        if (e.kind === 'face-stray')
+          for (const g of e.byWhy ?? []) for (const id of g.chains) whyOf.set(id, g.why);
+  const classes: LineClass[] = [];
+  const back: ChainId[] = [];
+  for (const c of set.classes) {
+    if (!unsure(c)) {
+      classes.push(c);
+      continue;
+    }
+    const out = c.chains.filter((id) => !off.has('why') && NEVER_A_SIZE.has(whyOf.get(id) ?? ''));
+    const keep = new Set(out);
+    back.push(...c.chains.filter((id) => !keep.has(id)));
+    if (out.length)
+      classes.push({
+        ...c,
+        chains: out,
+        totalLengthMm: out.reduce((a, id) => a + set.chains[id].lengthMm, 0),
+      });
+  }
+  let v = set;
+  if (back.length) {
+    classes.push({
+      id: Math.max(-1, ...set.classes.map((c) => c.id)) + 1,
+      role: 'internal',
+      sizeLabel: null,
+      chains: back,
+      totalLengthMm: back.reduce((a, id) => a + set.chains[id].lengthMm, 0),
+      evidence: [
+        { kind: 'face-stray', why: `${back.length} strays handed back to the size checks` },
+      ],
+      confidence: Math.min(...set.classes.filter(unsure).map((c) => c.confidence)),
+    });
+    v = { ...set, classes };
+  }
+  if (!o.off) gradeViews.set(set, v);
+  return v;
 }
 
 /** Per wall line: piece wall, stray or internal (see the header). */
@@ -587,6 +696,178 @@ function strayPieces(
       moved = true;
     }
     if (!moved) break;
+  }
+  return out;
+}
+
+/** The strays a hand drew (a map, a scribble): their pieces continue them. */
+const HAND_DRAWN = new Set(['wiggle (no pattern line)', 'part of a line set aside']);
+/** N3: a run end this close to a hand-drawn stray's end continues it (a letter cut the gap), mm. */
+const HAND_GAP_MM = 10;
+
+const onOutlineAt = (chains: readonly Chain[], wall: SegGrid, q: PtMm, d = 1.5) => {
+  let hit = false;
+  wall.near(q, d + 0.5, (o, si) => {
+    if (hit) return;
+    const c = chains[o];
+    const r = c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts;
+    if (segNearest(q, r[si], r[si + 1]).d <= d) hit = true;
+  });
+  return hit;
+};
+
+const wallGrid = (chains: readonly Chain[], outline: readonly ChainId[]) => {
+  const wall = new SegGrid(8);
+  for (const id of outline) {
+    const c = chains[id];
+    wall.addPolyline(id, c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  return wall;
+};
+
+/**
+ * N3 (wm M front): a hand-drawn line crossed by the watermark's letters breaks into runs the
+ * end-to-end rule cannot reach (a letter took the piece between). A run of short curved internal
+ * pieces (each < 80 mm, joined end to end ≤ 3 mm, no end on an outline, the run turning or not
+ * straight) whose run end lies ≤ 10 mm from the end of a hand-drawn stray continues it — the same
+ * suggestion (the stray row, asked), to a fixpoint.
+ */
+function handDrawnRuns(
+  chains: readonly Chain[],
+  outline: readonly ChainId[],
+  handDrawn: readonly ChainId[],
+  cand: readonly ChainId[],
+): Map<ChainId, string> {
+  const out = new Map<ChainId, string>();
+  if (!handDrawn.length) return out;
+  const wall = wallGrid(chains, outline);
+  const endsOf = (id: ChainId) => {
+    const p = chains[id].pts;
+    return [p[0], p[p.length - 1]];
+  };
+  const left = cand.filter(
+    (id) =>
+      chains[id].pts.length >= 2 &&
+      chains[id].lengthMm < 80 &&
+      !endsOf(id).some((e) => onOutlineAt(chains, wall, e)),
+  );
+  // runs: pieces joined end to end
+  const parent = new Map<ChainId, ChainId>(left.map((id) => [id, id]));
+  const find = (i: ChainId): ChainId => {
+    while (parent.get(i) !== i) i = parent.get(i)!;
+    return i;
+  };
+  const ends = new SegGrid(4);
+  left.forEach((id) => endsOf(id).forEach((e, k) => ends.addSeg(id, k, e, e)));
+  for (const id of left)
+    for (const e of endsOf(id))
+      ends.near(e, WIGGLE_JOIN_MM, (o, k) => {
+        if (o === id) return;
+        const f = endsOf(o)[k];
+        if (Math.hypot(f.x - e.x, f.y - e.y) <= WIGGLE_JOIN_MM) parent.set(find(o), find(id));
+      });
+  const runs = new Map<ChainId, ChainId[]>();
+  for (const id of left) runs.set(find(id), [...(runs.get(find(id)) ?? []), id]);
+  // a run end = a piece end no other piece of the run meets
+  const runEnds = (ids: ChainId[]) =>
+    ids.flatMap((id) =>
+      endsOf(id).filter(
+        (e) =>
+          !ids.some(
+            (o) =>
+              o !== id && endsOf(o).some((f) => Math.hypot(f.x - e.x, f.y - e.y) <= WIGGLE_JOIN_MM),
+          ),
+      ),
+    );
+  const curved = (ids: ChainId[]) => {
+    const L = ids.reduce((a, i) => a + chains[i].lengthMm, 0);
+    const T = ids.reduce((a, i) => a + turnOf(chains[i].pts), 0);
+    const e = runEnds(ids);
+    const chord = e.length === 2 ? Math.hypot(e[1].x - e[0].x, e[1].y - e[0].y) : 0;
+    return T >= 0.25 * Math.PI || ids.length >= 2 || chord < 0.95 * L;
+  };
+  const hand = new SegGrid(8);
+  const addHand = (id: ChainId) => endsOf(id).forEach((e, k) => hand.addSeg(id, k, e, e));
+  handDrawn.forEach(addHand);
+  const done = new Set<ChainId>();
+  for (let round = 0; round < 12; round++) {
+    let moved = false;
+    for (const [r, ids] of runs) {
+      if (done.has(r) || !curved(ids)) continue;
+      const meets = runEnds(ids).some((e) => {
+        let hit = false;
+        hand.near(e, HAND_GAP_MM, (o, k) => {
+          if (hit || ids.includes(o)) return;
+          const f = endsOf(o)[k];
+          if (Math.hypot(f.x - e.x, f.y - e.y) <= HAND_GAP_MM) hit = true;
+        });
+        return hit;
+      });
+      if (!meets) continue;
+      done.add(r);
+      for (const id of ids) {
+        out.set(id, 'part of a line set aside');
+        addHand(id);
+      }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return out;
+}
+
+/** N3: strokes this short at a line's end, this close to it, at least this many = lettering. */
+const LETTER_STROKE_MM = 15;
+const LETTER_END_MM = 2.5;
+const LETTER_MIN_STROKES = 3;
+
+/**
+ * N3 (wm M back): a long straight line (≥ 60 mm) inside an outline, touching it at neither end,
+ * that runs from free space (nothing within 2 mm of one end) into lettering set aside (≥ 3 short
+ * strokes the clean step or the legend set aside within 2.5 mm of the other end — a tile label's
+ * «KOLUMNA 5»). No pattern line ends inside a tile label: the stray row (asked, D3).
+ */
+function intoLettering(
+  chains: readonly Chain[],
+  outline: readonly ChainId[],
+  strays: readonly ChainId[],
+  cand: readonly ChainId[],
+): Map<ChainId, string> {
+  const out = new Map<ChainId, string>();
+  const wall = wallGrid(chains, outline);
+  const pts = (c: Chain) => (c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts);
+  const short = new SegGrid(4);
+  for (const id of new Set(strays)) {
+    const c = chains[id];
+    if (c && c.lengthMm <= LETTER_STROKE_MM && c.pts.length >= 2) short.addPolyline(id, pts(c));
+  }
+  const any = new SegGrid(8);
+  for (const c of chains) if (c.pts.length >= 2) any.addPolyline(c.id, pts(c));
+  const near = (g: SegGrid, q: PtMm, d: number, skip: ChainId) => {
+    const hit = new Set<ChainId>();
+    g.near(q, d + 0.5, (o, si) => {
+      if (o === skip || hit.has(o)) return;
+      const r = pts(chains[o]);
+      if (segNearest(q, r[si], r[si + 1]).d <= d) hit.add(o);
+    });
+    return hit;
+  };
+  for (const id of cand) {
+    const c = chains[id];
+    if (c.closed || c.pts.length < 2 || c.lengthMm < 60) continue;
+    const a = c.pts[0];
+    const b = c.pts[c.pts.length - 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 0.95 * c.lengthMm) continue;
+    if (onOutlineAt(chains, wall, a) || onOutlineAt(chains, wall, b)) continue;
+    for (const [e, f] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      if (near(short, e, LETTER_END_MM, id).size < LETTER_MIN_STROKES) continue;
+      if (near(any, f, 2, id).size) continue;
+      out.set(id, 'runs into lettering set aside');
+      break;
+    }
   }
   return out;
 }

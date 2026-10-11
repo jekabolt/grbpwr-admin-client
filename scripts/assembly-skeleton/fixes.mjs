@@ -166,8 +166,26 @@ console.log('\n1 · category and lining');
     [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R', 'NECKBAND'], false, null, 'tee'],
     [['BACK', 'FRONT', 'SLEEVE_L', 'SLEEVE_R'], false, null, 'generic'], // collarless dress
     [['BACK', 'FRONT', 'SLEEVE', 'HOOD_L', 'HOOD_R'], false, null, 'hoodie'],
-    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'generic'],
-    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'generic'], // panelled skirt
+    // 07 §4.7: a waistband on left AND right fronts and backs, no sleeve or collar — a bottom;
+    // trousers or a panelled skirt, so the panel method in words both share (never trousers: no
+    // inseam or crotch is claimed). A fly or a crotch / leg / rise piece makes it trousers; a strap
+    // or a handle a bag (generic).
+    [['Back_L', 'Back_R', 'FRONT_L', 'FRONT_R', 'BLT', 'PCK_L', 'PCK_R'], false, null, 'bottom'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'bottom'], // panelled skirt?
+    [['SKT_FRONT_L', 'SKT_FRONT_R', 'BACK_L', 'BACK_R', 'WB'], false, null, 'skirt'],
+    [
+      ['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'STRAP_L', 'STRAP_R'],
+      false,
+      null,
+      'generic',
+    ],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'BLT', 'HANDLE'], false, null, 'generic'], // bag
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'FLY'], false, null, 'trousers'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'RISE_EXT'], false, null, 'trousers'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'SLV_L', 'SLV_R'], false, null, 'generic'],
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R', 'WB', 'CLR'], false, null, 'generic'],
+    [['BACK', 'FRONT_L', 'FRONT_R', 'WB'], false, null, 'generic'], // one back: no evidence
+    [['BACK_L', 'BACK_R', 'FRONT_L', 'FRONT_R'], false, null, 'generic'], // no waistband
     [['FRONT', 'BACK', 'FLY', 'WB'], false, null, 'trousers'],
     [['FRONT_L', 'FRONT_R', 'BACK_L', 'BACK_R', 'WB', 'GUSSET'], false, null, 'trousers'],
     [['BP', 'LP_1', 'RP_1', 'plank', 'CLR'], false, null, 'generic'],
@@ -212,6 +230,28 @@ console.log('\n1 · category and lining');
     ].join('; '),
   );
   const pieces = [{ name: 'FRONT' }, { name: 'BACK' }];
+  const MAIN_LINE = {
+    lineKey: 'M1',
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+  };
+  const LINING_LINE = {
+    lineKey: 'L1',
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose: 'TECH_CARD_BOM_PURPOSE_LINING',
+  };
+  /** A found contour, the least the facts read: a 100 × 100 mm square on no layer. */
+  const SHAPE = {
+    name: 'X',
+    layer: '',
+    areaCm2: 100,
+    points: [
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+    ],
+  };
   const lined = [
     ['no signal', { cloth: null, pieces }, false],
     ['colourway cloth', { cloth: new Map([['a', { state: 'lining' }]]), pieces }, true],
@@ -245,12 +285,74 @@ console.log('\n1 · category and lining');
       { cloth: null, pieces: [...pieces, { name: 'подклад спинки' }] },
       true,
     ],
+    // 07 §4.5: a piece linked to the main file AND the lining file is the shell's (a pocket bag
+    // cut in both); a card whose only fabric line is lining has no lining at all.
+    [
+      'NOT lined: a piece linked to the main and the lining file',
+      {
+        cloth: null,
+        pieces,
+        aliases: [
+          { pieceLineKey: 'x', bomLineKey: 'M1' },
+          { pieceLineKey: 'x', bomLineKey: 'L1' },
+        ],
+        bomLines: [MAIN_LINE, LINING_LINE],
+      },
+      false,
+    ],
+    [
+      'NOT lined: the one fabric line is lining (colourway and links say lining)',
+      {
+        cloth: new Map([['x', { state: 'lining' }]]),
+        pieces,
+        aliases: [{ pieceLineKey: 'x', bomLineKey: 'L1' }],
+        bomLines: [LINING_LINE],
+      },
+      false,
+    ],
+    [
+      'lined: a main and a lining fabric, a piece linked to the lining only',
+      {
+        cloth: null,
+        pieces,
+        aliases: [{ pieceLineKey: 'x', bomLineKey: 'L1' }],
+        bomLines: [MAIN_LINE, LINING_LINE],
+      },
+      true,
+    ],
   ];
   const badL = lined.filter(([, a, want]) => E.skeletonLined(a) !== want);
   gate(
-    'skeletonLined: cloth, links, files and names all say «lined»',
+    'skeletonLined: cloth, links, files and names all say «lined»; both-file pieces and a lining-only card do not',
     badL.length === 0,
     badL.map(([w]) => w).join('; '),
+  );
+
+  // The facts agree: on the lining-only card no piece is lining (colourway slot included); with a
+  // main fabric, a piece linked to both files is shell and one linked to lining only is lining.
+  const facts = (bomLines, cloth = null) =>
+    E.buildSkeletonFacts({
+      pieces: [
+        { lineKey: 'BOTH', name: 'PCK_L' },
+        { lineKey: 'LIN', name: 'BP' },
+      ],
+      shapes: new Map(['both', 'lin'].map((k) => [k, { piece: SHAPE, layers: [] }])),
+      cloth,
+      bomLines,
+      category: 'generic',
+      defaultMachineType: null,
+      aliases: [
+        { pieceLineKey: 'BOTH', bomLineKey: 'M1' },
+        { pieceLineKey: 'BOTH', bomLineKey: 'L1' },
+        { pieceLineKey: 'LIN', bomLineKey: 'L1' },
+      ],
+    }).facts.pieces.map((x) => `${x.pieceKey}:${x.cloth}`);
+  const mixed = facts([MAIN_LINE, LINING_LINE]).join(' ');
+  const only = facts([LINING_LINE], new Map([['LIN', { state: 'lining' }]])).join(' ');
+  gate(
+    'facts: both-file piece is shell, lining-only link is lining; nothing is lining on a lining-only card',
+    mixed === 'BOTH:null LIN:lining' && only === 'BOTH:null LIN:null',
+    `${mixed} / ${only}`,
   );
 }
 

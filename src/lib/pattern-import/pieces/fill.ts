@@ -44,6 +44,7 @@ import {
   traceOuter,
 } from './raster';
 import { pageMarginIds } from 'lib/pattern-import/chains/classify';
+import { gradeView } from 'lib/pattern-import/chains/face-role';
 
 import { type Bridge, wallBridges } from './bridges';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
@@ -414,7 +415,9 @@ export function fillPiecesDetailed(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );
   // H1: sizes drawn alike — the solver's per-rank walls, or refusals (null = F4 as before)
-  const graded = solved ?? gradeHook(sheet, set, run, use, model, opts, progress, edits.exclude);
+  // (the face pass's unconfirmed strays are lines to the size checks: chains/face-role gradeView)
+  const graded =
+    solved ?? gradeHook(sheet, gradeView(set), run, use, model, opts, progress, edits.exclude);
   const nRanks = graded?.n ?? model.n;
   const knives = opts.variant ? variantKnives(sheet, set, opts.variant) : [];
   const knifeItems = itemsOf(set, knives);

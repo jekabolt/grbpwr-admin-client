@@ -42,8 +42,8 @@ const QTY_RULES: { re: RegExp; times?: number; pairGroup?: number }[] = [
   { re: /(?<!\d)(\d{1,2})\s*[x×х](?!\s*\d)(?![a-wyz])/iu },
   // "DELANTERO X2", "x 2"
   { re: new RegExp(`(?<!\\d[\\s.]*)(?<![${L}\\d])[x×х]\\s*(\\d{1,2})(?![\\d${L}])`, 'iu') },
-  // "2 mal / fois / razy / keer / veces / gange"
-  { re: /(\d{1,2})\s*(?:mal|fois|razy|keer|veces|gange)(?!\p{L})/iu },
+  // "2 mal / fois / razy / keer / veces", DK / NO / SE "1 gang", "4 gange", "2 ganger", "2 gånger", "2 ggr"
+  { re: /(\d{1,2})\s*(?:mal|fois|razy|keer|veces|gang(?:e|er)?|gånger|ggr)(?!\p{L})/iu },
   { re: /(?:wytnij|wyciąć|couper|coupez|knip|cortar|zuschneiden)\s*(\d{1,2})/iu },
 ];
 const PAIR_ONLY = /\bpaarig\b|\b(?:1|ein|one)\s*(?:paar|pair)\b/iu;

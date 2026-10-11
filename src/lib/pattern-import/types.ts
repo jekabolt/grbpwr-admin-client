@@ -398,8 +398,11 @@ export type ClassEvidence =
   | { kind: 'faces'; pieces: number; cues: string[]; auto: boolean }
   /** A0.3: lines inside the closed outlines (grain, darts, placement). */
   | { kind: 'inside-faces'; pieces: number }
-  /** A0.3: lines that are no outline — outside them, in a junk face, offered as background. */
-  | { kind: 'face-stray'; why: string };
+  /**
+   * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
+   * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
+   */
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
 
 export type LineClass = {
   id: ClassId;
@@ -648,9 +651,9 @@ export type GradeRefusal =
 export type ExpectedSizes = {
   n: number;
   /**
-   * AUTO A6 (later phase): 'inferred' = two or more independent sheet evidences agree on n (legend
-   * text, nest depth, file count, AI). The size stage treats it like 'operator' (n known, ranks
-   * still proven). Not produced yet.
+   * AUTO A6: 'inferred' = two or more independent sheet evidences agree on n (size text, nest
+   * depth, file count, AI — `sizes/count-evidence.ts`). The size stage treats it like 'operator'
+   * (n known, ranks still proven); the sizes step shows it as AUTO, one click takes it back.
    */
   from: 'source' | 'operator' | 'inferred';
 };
@@ -661,7 +664,49 @@ export type ExpectedSizes = {
  * while `expected` is null. `inferred` = what the lines alone show, offered first as a suggestion,
  * never applied.
  */
-export type SizeCountAsk = { inferred: { n: number; why: string } | null };
+export type SizeCountAsk = {
+  inferred: { n: number; why: string } | null;
+  /**
+   * A6: what the sheet's independent evidences say about the count (every one found, agreeing or
+   * not), and `n` when two or more agree and none disagrees. `applied` = it is the sizes stage's
+   * `expected` (from 'inferred'); false when the operator took it back (`drawnSizes: 0`) or
+   * answered himself.
+   */
+  auto?: {
+    n: number | null;
+    evidence: CountEvidence[];
+    applied: boolean;
+    /** Why AUTO is off whatever the evidences say ("2 models on this sheet"). */
+    blocked?: string;
+  };
+};
+
+/** A6: one evidence of how many sizes a sheet draws (`sizes/count-evidence.ts`). */
+export type CountEvidence = {
+  /**
+   * 'label' = one size named in text ("SIZE 38", "Gr. 40"); 'text-run' = a size run in text
+   * ("36–46", a legend); 'nests' = the rings around the largest closed outlines (A2 faces);
+   * 'files' = one file per size; 'ai' = the AI read the count off the sheet (A3).
+   */
+  kind: 'label' | 'text-run' | 'nests' | 'files' | 'ai';
+  /** The counts it allows (a range "36–46" reads as 6 at step 2 or 11 at step 1; [] = none). */
+  n: number[];
+  /**
+   * Independence group: two evidences of one group are one fact (a size printed on each file and
+   * the file's own name; the sheet's text; the geometry; the AI). AUTO needs two groups.
+   */
+  group: 'text' | 'files' | 'geometry' | 'ai';
+  /**
+   * It counts toward AUTO. False = shown as a suggestion only: a lone "SIZE 38" the geometry does
+   * not back (a sample-size title sits on side-by-side graded sheets too), rings not proven to be
+   * sizes, one outline drawn at two scales.
+   */
+  counts: boolean;
+  /** Human-readable: "SIZE 38", "one line around each of 2 outlines, no scaled copies". */
+  detail: string;
+  /** 'label': the size token it names ("38", "M"). */
+  label?: string;
+};
 
 /** One closed contour for one seed at one size rank, snapped to vector chains. */
 export type PieceCandidate = {
@@ -1088,8 +1133,10 @@ export type SemanticsOutput = {
    */
   unproven: Unproven[];
   /**
-   * A1: per seed blocked 'no-grain', the grainline the drawing or the outline proposes (absent =
-   * none). Never applied without the operator's click ("accept N proposed grainlines", D3).
+   * A1: per seed blocked 'no-grain' — and (N3) per seed still blocked 'grammar' (no name yet) whose
+   * drawing proves no grain — the grainline the drawing or the outline proposes (absent = none), so
+   * one review covers every piece. Never applied without the operator's click ("accept N proposed
+   * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
 };
@@ -1805,7 +1852,15 @@ export type StageIO = {
     };
   };
   chains: {
-    in: { opts: ChainOpts; legend?: Parameters<ApplyLegendFn>[1] };
+    in: {
+      opts: ChainOpts;
+      legend?: Parameters<ApplyLegendFn>[1];
+      /**
+       * Rows the operator confirmed as proposed (keys: the row's sig, or `#id`): confidence 1 in the
+       * built set (chains/legend confirmRows). Absent = no row confirmed.
+       */
+      confirmed?: string[];
+    };
     out: {
       classes: LineClass[];
       bundles: Bundle[];
@@ -1821,7 +1876,10 @@ export type StageIO = {
     in: {
       card: CardSize[];
       operatorMap?: SizeMapEntry[];
-      /** pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet". */
+      /**
+       * pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet".
+       * 0 = he took the count the sheet's evidences agree on (A6 AUTO) back: asked as without it.
+       */
       drawnSizes?: number;
     };
     out: {
@@ -1983,6 +2041,8 @@ export type WizardEvent =
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
+  /** A low-confidence legend row confirmed as proposed (its key: sig, or `#id`). */
+  | { type: 'legend-confirm'; key: string }
   | { type: 'size-map'; entries: SizeMapEntry[] }
   /** pieces/grade (H1): the operator's "sizes drawn on this sheet" (null = the card's run). */
   | { type: 'drawn-sizes'; n: number | null }

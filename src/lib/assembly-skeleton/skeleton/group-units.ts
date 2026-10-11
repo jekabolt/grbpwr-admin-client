@@ -130,6 +130,9 @@ export type Grouping = {
 
 const listNames = (es: Entity[]) => es.map((e) => e.name).join(', ');
 
+/** E3: an orphan this large against a host (by area) is not a part of it. */
+const ORPHAN_HOST_AREA = 0.9;
+
 /** F4: this many nameless pieces of one shape are a repeat (a ring), read by name, not by seams. */
 const REPEAT_MIN = 6;
 
@@ -147,6 +150,10 @@ function decide(
   id: string,
   readings: Reading[],
   live: (e: Entity) => boolean,
+  /** Reading 0 won only on the name / key tie-breaker: why, in words (absent = by evidence). */
+  tie?: string,
+  /** Decisions a person settled: only these lose their tie (a kept pin settles nothing). */
+  resolved: ReadonlySet<string> = new Set(),
 ): { chosen: number; decision?: SkeletonDecision; others: SkeletonUnit['alternatives'] } {
   const want = pins[id] ?? 0;
   // A pin that no longer fits (the reading vanished, or one of its inputs is already sewn
@@ -155,7 +162,9 @@ function decide(
   if (readings.length < 2) return { chosen, others: undefined };
   return {
     chosen,
-    decision: { id, chosen },
+    // A tie stands until a person settles it — a pin that only kept the reading through a rebuild
+    // (every decision is pinned so) settles nothing.
+    decision: { id, chosen, ...(tie && !resolved.has(id) ? { tie } : {}) },
     others: readings
       .filter((_, i) => i !== chosen)
       .map((r) => ({ inputs: r.inputs.map((e) => e.key), seams: [], reason: r.reason })),
@@ -168,6 +177,17 @@ const leafId = (es: Entity[]) =>
     .sort()
     .join('+');
 
+const cmpText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/**
+ * THE LAST WORD where evidence ties: the name, then the piece keys — never where a piece stands on
+ * the card. Hosts ranked by it come out the same whatever order the card lists its
+ * pieces in (07 review: twin panels of a bag swapped their belt when the pieces were reversed).
+ */
+const byNameThenKey = (a: Entity, b: Entity) =>
+  cmpText(a.name, b.name) || cmpText(leafId([a]), leafId([b]));
+/** Two areas a pattern cannot tell apart (twins cut from one block differ by rounding). */
+const sameArea = (a: number, b: number) => Math.abs(a - b) <= 0.02 * Math.max(a, b, 1);
+
 /** B1 with the state `buildSkeleton` continues from. */
 export function groupDetailed(
   graph: SeamGraph,
@@ -175,7 +195,10 @@ export function groupDetailed(
   template: SkeletonTemplate = orderTemplate(facts.category),
   pins: SkeletonPins = {},
   hints: readonly SkeletonUnitHint[] = [],
+  /** Decision ids a person settled (SkeletonOptions.resolved). */
+  resolved: readonly string[] = [],
 ): Grouping {
+  const settled = new Set(resolved);
   const pieces = readPieces(graph, facts);
   // Surface joins (P2 lane S) are not edge evidence: a pocket laid on a front links nothing along
   // their edges. They are read by step S alone; every other step sees the edge seams only.
@@ -226,9 +249,33 @@ export function groupDetailed(
   const units: SkeletonUnit[] = [];
   const warnings: string[] = [];
   const mergeHands = new Set(template.mergeHands);
+  const areaOf = (e: Entity) => e.leaves.reduce((a, k) => a + (byKey.get(k)?.areaMm2 ?? 0), 0);
+  /** Pieces E3 placed with no role and no seam: parts of their host from then on. */
+  const orphaned = new Set<string>();
+  /** Parts already sewn onto a thing (a front with two pockets: 2); a flap is not a part of its own. */
+  const partCount = (e: Entity) =>
+    e.leaves.filter((k) => {
+      const p = byKey.get(k);
+      if (orphaned.has(k)) return true;
+      return roleDef(p?.role ?? null)?.level === 'sub' && !isFlap(p?.name ?? '');
+    }).length;
+  /** A flap, or a unit of flap layers only. */
+  const flapEntity = (e: Entity) => e.leaves.every((k) => isFlap(byKey.get(k)?.name ?? ''));
+  /** A thing's own panel pieces — not the pockets or plackets already sewn on it. */
+  const panelLeaves = (t: Entity) =>
+    t.leaves.filter((k) => roleDef(byKey.get(k)?.role ?? null)?.level !== 'sub');
+  /** The best seam from `e` to the panel pieces of `t`. */
+  const panelScore = (e: Entity, t: Entity) =>
+    seams.between(e.leaves, panelLeaves(t))[0]?.score ?? 0;
 
-  // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them).
-  for (const w of graph.warnings) if (w.includes('have the same shape')) warnings.push(w);
+  // Same shape, not proven layers: said, never joined silently (lane A matched no seam between them)
+  // — once per pair of name families, not per pair of pieces.
+  warnings.push(
+    ...sameShapeByFamily(
+      graph.warnings.filter((w) => w.includes(SAME_SHAPE)),
+      graph.pieces.map((p) => p.name),
+    ),
+  );
   for (const p of graph.pieces) {
     if (!byKey.has(p.pieceKey))
       warnings.push(`piece ${p.name} is in the pattern but not on the card — left out`);
@@ -312,6 +359,10 @@ export function groupDetailed(
   }
   const identical = (a: Entity, b: Entity) =>
     !a.unit && !b.unit && (twinsOf.get(a.key)?.has(b.key) ?? false);
+  const geomOf = new Map(graph.pieces.map((p) => [p.pieceKey, p]));
+  /** Two lone pieces lane A calls twins of either kind (mirror or identical). */
+  const twinned = (a: Entity, b: Entity) =>
+    !a.unit && !b.unit && (geomOf.get(a.key)?.twinOf.some((t) => t.key === b.key) ?? false);
   function layerPairs(group: Entity[]): LayerPair[] {
     const out: LayerPair[] = [];
     const used = new Set<string>();
@@ -359,6 +410,9 @@ export function groupDetailed(
         const [a, b] = [group[i], group[j]];
         const adj = Math.abs(idx(a) - idx(b)) === 1;
         if (!identical(a, b) && !(sub && adj)) continue;
+        // Two halves of a pocket bag named for different panels (PCK_B_L for the back, PCK_L for
+        // the front) are copies going two ways, not layers of one thing: each is placed alone.
+        if (sub && panelHint(a.name) !== panelHint(b.name)) continue;
         const s = bestScore(seams, a.leaves, b);
         if (s <= 0) continue;
         cands.push({
@@ -382,7 +436,9 @@ export function groupDetailed(
             Number(y.stem) - Number(x.stem) ||
             Number(y.adj) - Number(x.adj) ||
             Number(y.numbered) - Number(x.numbered) ||
-            y.s - x.s,
+            y.s - x.s ||
+            byNameThenKey(x.a, y.a) ||
+            byNameThenKey(x.b, y.b),
         );
       const [best] = tied;
       const head = best.a;
@@ -419,7 +475,7 @@ export function groupDetailed(
         .sort(
           (x, y) =>
             Math.abs((byKey.get(x.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)) -
-            Math.abs((byKey.get(y.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)),
+              Math.abs((byKey.get(y.key)?.areaMm2 ?? 0) - (p.areaMm2 ?? 0)) || byNameThenKey(x, y),
         )[0];
     const self: Entity = {
       key: p.key,
@@ -626,7 +682,7 @@ export function groupDetailed(
   // ── E. onto its panel first: a pocket (or, on a garment with no body, a belt) whose seam says
   // which piece it goes onto is sewn there while that piece is still flat — before the piece
   // meets the rest of its family, before any panel seam (F2, 05-PROD-DIAGNOSIS §4 P2: 10/10
-  // cards). A part laid by a placement mark is step S's; a part with no seam waits for step 5.
+  // cards). A part laid by a placement mark is step S's; a part with no seam to any panel is E2's.
   {
     const bodyless = !pieces.some((p) => p.role === 'front' || p.role === 'back');
     const toBody = new Set(
@@ -640,44 +696,193 @@ export function groupDetailed(
       if (def.attachEarly) return true;
       return bodyless && def.level === 'sub' && toBody.has(def.id);
     };
+    const host = (attachTo: string[], t: Entity) => {
+      const tdef = roleDef(t.roles[0] ?? null);
+      if (!tdef) return true; // a nameless piece: the geometry pass names nothing anyway
+      if (tdef.attachTo?.length || tdef.wraps || early(t)) return false;
+      return t.roles.some((r) => attachTo.includes(r)) || (bodyless && tdef.level === 'panel');
+    };
     for (const e of table.list().filter(early)) {
       if (!isLive(e)) continue;
       const def = roleDef(e.roles[0])!;
       const attachTo = def.attachTo ?? [];
-      const host = (t: Entity) => {
-        const tdef = roleDef(t.roles[0] ?? null);
-        if (!tdef) return true; // a nameless piece: the geometry pass names nothing anyway
-        if (tdef.attachTo?.length || tdef.wraps || early(t)) return false;
-        return t.roles.some((r) => attachTo.includes(r)) || (bodyless && tdef.level === 'panel');
-      };
       const cands = table
         .list(e.tree)
-        .filter((t) => t !== e && host(t))
+        .filter((t) => t !== e && host(attachTo, t))
         // A seam read before any panel is assembled is only trusted between pieces of one hand:
         // a left pocket «matching» a centre-back yoke is the rectangles' noise, not its host.
         .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand)
-        .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
+        // To the panel itself: a seam to a pocket already on it says nothing about this one.
+        .map((t) => ({ t, score: panelScore(e, t) }))
         .filter((x) => x.score >= SKELETON.accept)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
       if (!cands.length) continue;
       // ONE host: a seam the part could equally make with another piece (a rival within
       // SKELETON.ambiguity, here or in lane A's own reading) is no host yet — step 5 decides.
+      // A rival that is itself one of the tied hosts is that tie, not a stranger.
       const { t, score } = cands[0];
-      const own = seams.between(e.leaves, t.leaves)[0];
-      const rivalled = (own?.ambiguousWith ?? []).some((q) =>
-        [q.a, q.b].some((k) => e.leaves.includes(pieceOf(k))),
-      );
-      if (rivalled || cands.some((x) => x !== cands[0] && x.score >= score - SKELETON.ambiguity))
-        continue;
-      const made = record([e, t], {
-        name: withPart(display(t), def.name.toLowerCase()),
-        // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
-        roles: t.roles.length ? mergeRoles(t.roles, [def.id]) : [],
-        kind: 'attach',
-        hand: t.hand,
-        why: `${roleName(def.id, e.hand)} goes onto ${display(t)} while it is still flat`,
+      const tied = cands.filter((x) => x.score >= score - SKELETON.ambiguity);
+      const tiedLeaves = new Set(tied.flatMap((x) => x.t.leaves));
+      const own = seams.between(e.leaves, panelLeaves(t))[0];
+      const rivalled = (own?.ambiguousWith ?? []).some((q) => {
+        const ends = [pieceOf(q.a), pieceOf(q.b)];
+        return (
+          ends.some((k) => e.leaves.includes(k)) &&
+          ends.some((k) => !e.leaves.includes(k) && !tiedLeaves.has(k))
+        );
       });
-      made.family = t.family;
+      // Tied hosts that are twins (two mirrored fronts; the inner and outer of a bag) — or any tie
+      // on a garment with no body — fit the part alike: it goes onto ONE of them now, the one with
+      // the fewest parts on it, as a decision, rather than onto whatever the twins become later.
+      const twinTie = tied.every((x) => x.t === t || twinned(x.t, t));
+      if (rivalled || (tied.length > 1 && !twinTie && !bodyless)) continue;
+      const ordered = [...tied].sort(
+        (x, y) => partCount(x.t) - partCount(y.t) || byNameThenKey(x.t, y.t),
+      );
+      // As many parts on the next host too: only the name put the first one first — a tie.
+      const tie =
+        ordered.length > 1 && partCount(ordered[0].t) === partCount(ordered[1].t)
+          ? `${roleName(def.id, e.hand)} fits ${apart(ordered[0].t, ordered[1].t).join(' and ')} alike, with as many parts on each — nothing tells them apart`
+          : undefined;
+      const d = decide(
+        pins,
+        `place:${leafId([e])}`,
+        ordered.slice(0, 3).map((o, i) => ({
+          inputs: [e, o.t],
+          reason:
+            i === 0
+              ? `or onto ${display(o.t)} — the same seam, ${tie ? 'first by name' : 'the fewest parts on it'}`
+              : `or onto ${display(o.t)} — the same seam`,
+        })),
+        isLive,
+        tie,
+        settled,
+      );
+      const pick = (ordered[d.chosen] ?? ordered[0]).t;
+      const made = record([e, pick], {
+        name: withPart(display(pick), def.name.toLowerCase()),
+        // A front with a pocket is still a front; a nameless piece stays nameless for step 4.
+        roles: pick.roles.length ? mergeRoles(pick.roles, [def.id]) : [],
+        kind: 'attach',
+        hand: pick.hand,
+        why: `${roleName(def.id, e.hand)} goes onto ${display(pick)} while it is still flat`,
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        ...(tied.length > 1
+          ? {
+              judgement: {
+                confidence: 0.55,
+                source: 'geometry' as const,
+                reason: `${roleName(def.id, e.hand)} fits ${tied.map((x) => display(x.t)).join(' and ')} alike — onto ${display(pick)} ${d.chosen ? 'by your reading' : tie ? 'first by name: a tie, pick one' : 'with the fewest parts on it'}, check`,
+              },
+            }
+          : {}),
+      });
+      made.family = pick.family;
+    }
+
+    // ── E2. a part the pattern gives no seam to any panel for (a patch pocket with no placement
+    // mark, a pocket bag half): still sewn onto a panel while it is flat, never left for the end
+    // of the order. Which panel is said by names, not geometry (a seam would have been step E's):
+    //   a. the panel its own name points at (PCK_BACK_L → the back);
+    //   b. the position word in both names (a BOTTOM pocket onto the lower strip, not the upper);
+    //   c. between panels of different roles, a bag onto the one with the fewest parts so far and
+    //      a flap onto the one with the most (it covers a pocket) — strips of one panel are told
+    //      apart by position and size only;
+    //   d. the order of the role's `attachTo` (front before back), then the larger panel.
+    // Always a decision with the next panels beside it, and said as a guess.
+    for (const e of table.list().filter(early)) {
+      if (!isLive(e)) continue;
+      const def = roleDef(e.roles[0])!;
+      const attachTo = def.attachTo ?? [];
+      const hosts = table
+        .list(e.tree)
+        // A named panel only: a nameless piece may be anything, the geometry pass reads it.
+        .filter((t) => t !== e && !!t.roles.length && host(attachTo, t))
+        .filter((t) => !(def.sameHand && e.hand) || t.hand === e.hand);
+      if (!hosts.length) continue;
+      // A seam to a panel itself is step E's — placed there, or held back for step 5 as rivalled.
+      if (hosts.some((t) => panelScore(e, t) >= SKELETON.accept)) continue;
+      const oneRole = new Set(hosts.map((t) => t.roles[0])).size === 1;
+      const pos = positionOf(e.name);
+      const flap = flapEntity(e);
+      // A half of a pocket bag (a lone piece with a twin) may name its panel by a bare B / F.
+      const half =
+        !e.unit && (geomOf.get(e.key)?.twinOf.length ?? 0) > 0 ? panelHint(e.name) : null;
+      const ranked = hosts
+        .map((t) => {
+          const at = positionOf(t.name);
+          return {
+            t,
+            hint: hintsAt(e, t, attachTo) || (!!half && t.roles.includes(half)) ? 0 : 1,
+            position: pos === null || at === null ? 1 : at === pos ? 0 : 2,
+            parts: oneRole ? 0 : flap ? -partCount(t) : partCount(t),
+            rank: Math.min(
+              ...t.roles.map((r) => (attachTo.includes(r) ? attachTo.indexOf(r) : 99)),
+            ),
+            area: areaOf(t),
+          };
+        })
+        .sort(
+          (a, b) =>
+            a.hint - b.hint ||
+            a.position - b.position ||
+            a.parts - b.parts ||
+            a.rank - b.rank ||
+            b.area - a.area ||
+            byNameThenKey(a.t, b.t),
+        );
+      // The next host ties on every rule (its size within a rounding): only the name decided.
+      const [r0, r1] = ranked;
+      const tie =
+        r1 &&
+        r0.hint === r1.hint &&
+        r0.position === r1.position &&
+        r0.parts === r1.parts &&
+        r0.rank === r1.rank &&
+        sameArea(r0.area, r1.area)
+          ? `${roleName(def.id, e.hand)} could go onto ${apart(r0.t, r1.t).join(' or ')} alike — no seam, name, position or size tells them apart`
+          : undefined;
+      const because = (o: (typeof ranked)[number]) =>
+        o.hint === 0
+          ? 'its name points there'
+          : o.position === 0
+            ? 'the position word in both names'
+            : oneRole
+              ? 'the larger strip'
+              : flap
+                ? 'the panel with the most parts on it'
+                : 'the panel with the fewest parts on it';
+      const d = decide(
+        pins,
+        `place:${leafId([e])}`,
+        ranked.slice(0, 3).map((o, i) => ({
+          inputs: [e, o.t],
+          reason:
+            i === 0
+              ? `or onto ${display(o.t)} — ${tie ? 'first by name' : because(o)}`
+              : `or onto ${display(o.t)}`,
+        })),
+        isLive,
+        tie,
+        settled,
+      );
+      const top = ranked[d.chosen] ?? ranked[0];
+      const made = record([e, top.t], {
+        name: withPart(display(top.t), def.name.toLowerCase()),
+        roles: mergeRoles(top.t.roles, [def.id]),
+        kind: 'attach',
+        hand: top.t.hand,
+        why: '',
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        judgement: {
+          confidence: top.hint === 0 || top.position === 0 ? 0.55 : 0.45,
+          source: 'template',
+          reason: `${roleName(def.id, e.hand)}: the pattern gives no seam to a panel — onto ${display(top.t)} by ${d.chosen ? 'your reading' : tie ? 'name only (a tie, pick one)' : because(top)}, while it is flat; check`,
+        },
+      });
+      made.family = top.t.family;
     }
   }
 
@@ -825,7 +1030,8 @@ export function groupDetailed(
             a.hint - b.hint ||
             a.rank - b.rank ||
             a.handMatch - b.handMatch ||
-            b.t.leaves.length - a.t.leaves.length,
+            b.t.leaves.length - a.t.leaves.length ||
+            byNameThenKey(a.t, b.t),
         );
       if (!cands.length) {
         // No panel of those roles (a bag, names that say nothing): its best seam names the host
@@ -835,7 +1041,7 @@ export function groupDetailed(
           .filter((t) => t !== e && !roleDef(t.roles[0] ?? null)?.wraps)
           .map((t) => ({ t, score: bestScore(seams, e.leaves, t) }))
           .filter((x) => x.score > 0)
-          .sort((a, b) => b.score - a.score);
+          .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
         if (!partner.length) {
           warnings.push(`${e.name}: no ${attachTo.join(' or ')} to sew it onto — left for the end`);
           continue;
@@ -931,7 +1137,10 @@ export function groupDetailed(
       const target = table
         .list(tree)
         .filter((e) => e.roles[0] === def.wraps)
-        .sort((x, y) => bestScore(seams, leaves, y) - bestScore(seams, leaves, x))[0];
+        .sort(
+          (x, y) =>
+            bestScore(seams, leaves, y) - bestScore(seams, leaves, x) || byNameThenKey(x, y),
+        )[0];
       if (!target) {
         if (layers.length >= 2) {
           record(layers, {
@@ -993,6 +1202,12 @@ export function groupDetailed(
       }
     }
   }
+
+  // ── E3. a piece with no role in its name and no seam at all (a border strip, a sleeve placket
+  // whose edges match nothing): not dropped to «what is left» but placed — onto a panel of its
+  // hand, or on a garment with no named panels onto any piece — as a guess (orphans below).
+  // Before the geometry pass, so it lands on a piece rather than on whatever that pass glues.
+  placeOrphans((e) => !e.unit);
 
   // ── 4. pieces whose names say nothing: geometry alone ─────────────────────────────────────────
   // Tiered, not one component: notch-confirmed seams first, then length-only, then the rest —
@@ -1078,7 +1293,7 @@ export function groupDetailed(
         .filter((t) => t !== u && t.roles.length > 0)
         .map((t) => ({ t, score: bestScore(seams, u.leaves, t) }))
         .filter((x) => x.score > 0)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.score - a.score || byNameThenKey(a.t, b.t));
       if (!targets.length) continue;
       if (!best || targets[0].score > best.score) {
         best = {
@@ -1123,6 +1338,86 @@ export function groupDetailed(
     });
   }
 
+  // A nameless group the geometry pass made that has no seam outward (two placket pieces sewn
+  // only to each other): placed the same way.
+  placeOrphans((e) => e.unit);
+
+  /**
+   * E3: a thing with no role and no usable seam to anything else on its table goes onto the host
+   * with the fewest parts on it, then the largest, then the first on the card — among the panels
+   * (front, back, sleeve …) of its own hand when it has one, or, on a garment with no named panel,
+   * among every piece and unit. A decision with the next hosts beside it, at 0.4: a guess said as
+   * one is still better than a piece outside every unit.
+   */
+  function placeOrphans(which: (e: Entity) => boolean) {
+    const panels = table.list().some((x) => roleDef(x.roles[0] ?? null)?.level === 'panel');
+    for (const e of table.list().filter((x) => x.roles.length === 0 && which(x))) {
+      if (!isLive(e)) continue;
+      // A bare number («7», «30») says nothing to go by — no word, no hand: the geometry pass and
+      // «what is left» keep it. A name with a word in it (BRDR, FLP_L) is placed.
+      if (!e.leaves.some((k) => byKey.get(k)?.family)) continue;
+      const others = table.list(e.tree).filter((t) => t !== e);
+      if (others.some((t) => bestScore(seams, e.leaves, t) > 0)) continue;
+      let hosts = others.filter((t) => {
+        // A part is smaller than what it is sewn onto: a piece as large as its host is a copy,
+        // a layer or the lining of it — lane A asks about those in words, it is not placed.
+        if (areaOf(t) > 0 && areaOf(e) >= ORPHAN_HOST_AREA * areaOf(t)) return false;
+        const d = roleDef(t.roles[0] ?? null);
+        if (panels) return d?.level === 'panel' && !d.wraps;
+        return t.unit || !(d?.attachTo?.length || d?.wraps);
+      });
+      if (e.hand && hosts.some((t) => t.hand === e.hand))
+        hosts = hosts.filter((t) => t.hand === e.hand);
+      if (!hosts.length) continue;
+      const ranked = [...hosts].sort(
+        (a, b) => partCount(a) - partCount(b) || areaOf(b) - areaOf(a) || byNameThenKey(a, b),
+      );
+      // As many parts and the same size on the next host: only the name decided — a tie.
+      const tie =
+        ranked.length > 1 &&
+        partCount(ranked[0]) === partCount(ranked[1]) &&
+        sameArea(areaOf(ranked[0]), areaOf(ranked[1]))
+          ? `${e.name} could go onto ${apart(ranked[0], ranked[1]).join(' or ')} alike — as many parts and the same size on each`
+          : undefined;
+      const d = decide(
+        pins,
+        `orphan:${leafId([e])}`,
+        ranked.slice(0, 3).map((t, i) => ({
+          inputs: [t, e],
+          reason:
+            i === 0
+              ? `or onto ${display(t)} — ${tie ? 'first by name' : 'the fewest parts on it'}`
+              : `or onto ${display(t)}`,
+        })),
+        isLive,
+        tie,
+        settled,
+      );
+      const top = ranked[d.chosen] ?? ranked[0];
+      e.leaves.forEach((k) => orphaned.add(k));
+      record([top, e], {
+        name: `${display(top)} + ${e.name}`,
+        roles: top.roles,
+        kind: 'attach',
+        hand: top.hand,
+        why: '',
+        alternatives: withSeams(d.others),
+        decision: d.decision,
+        judgement: {
+          confidence: 0.4,
+          source: 'template',
+          reason: `${e.name}: no role in its name and no seam found — onto ${display(top)} ${
+            d.chosen
+              ? 'by your reading'
+              : tie
+                ? '(first by name: a tie, pick one)'
+                : `(${e.hand ? 'same hand, ' : ''}the fewest parts on it)`
+          } as a guess, check`,
+        },
+      });
+    }
+  }
+
   return { units, table, pieces, seams, warnings, replay, existing };
 }
 
@@ -1148,6 +1443,121 @@ function hintsAt(e: Entity, t: Entity, attachTo: string[]): boolean {
   return attachTo.some(
     (r) => t.roles.includes(r) && (roleDef(r)?.tokens ?? []).some((x) => own.has(x)),
   );
+}
+
+/** A name's tokens without the numbers glued to them: PCK_BACK_1L → pck, back, l. */
+const bareTokens = (name: string) => nameTokens(name).map((x) => x.replace(/^\d+|\d+$/g, ''));
+
+const POSITION_TOP = new Set([
+  'top',
+  'upper',
+  'up',
+  'u',
+  'верх',
+  'верхний',
+  'верхняя',
+  'górny',
+  'gorny',
+  'górna',
+  'gorna',
+]);
+const POSITION_BOTTOM = new Set([
+  'bottom',
+  'bttm',
+  'btm',
+  'lower',
+  'low',
+  'down',
+  'dn',
+  'низ',
+  'нижний',
+  'нижняя',
+  'dolny',
+  'dolna',
+]);
+/** The position word in a name: P_R_U → top, PCK_R_BTTM → bottom, none → null. */
+function positionOf(name: string): 'top' | 'bottom' | null {
+  const t = bareTokens(name);
+  if (t.some((x) => POSITION_TOP.has(x))) return 'top';
+  if (t.some((x) => POSITION_BOTTOM.has(x))) return 'bottom';
+  return null;
+}
+
+/**
+ * The panel a part's own name points at, for telling two halves of one pocket bag apart: the
+ * roles' tokens plus the bare B / F, which only mean back / front next to such a twin.
+ */
+const BACK_HINT = new Set([...(roleDef('back')?.tokens ?? []), 'b']);
+const FRONT_HINT = new Set([...(roleDef('front')?.tokens ?? []), 'f']);
+function panelHint(name: string): 'back' | 'front' | null {
+  const t = bareTokens(name);
+  if (t.some((x) => BACK_HINT.has(x))) return 'back';
+  if (t.some((x) => FRONT_HINT.has(x))) return 'front';
+  return null;
+}
+
+/** A pocket flap by its name (the pocket role reads flaps and bags alike). */
+const FLAP_TOKENS = new Set(['fl', 'flp', 'flap', 'клапан', 'patka']);
+function isFlap(name: string): boolean {
+  return bareTokens(name).some((x) => FLAP_TOKENS.has(x));
+}
+
+const SAME_SHAPE = ' have the same shape';
+
+/**
+ * Lane A says «A and B have the same shape — …» for every such pair: eight inner and eight outer
+ * panels of one shape are 64 lines of one question. Pairs are grouped by the name stems of both
+ * sides (layerStem: inner_trapezoid_3 → inner_trapezoid) and each group is said once —
+ * «inner_trapezoid ×8 and outer_trapezoid ×8 have the same shape — …». A group of one pair keeps
+ * lane A's own words. The names are split where both halves are piece names (a name may hold «and»).
+ */
+function sameShapeByFamily(lines: string[], names: string[]): string[] {
+  const known = new Set(names);
+  const stemOf = (n: string) => layerStem(n) || n;
+  type Group = { stems: string[]; pieces: Map<string, Set<string>>; lines: string[]; tail: string };
+  const groups = new Map<string, Group>();
+  const out: string[] = [];
+  const splitPair = (head: string): [string, string] | null => {
+    for (let i = head.indexOf(' and '); i >= 0; i = head.indexOf(' and ', i + 1)) {
+      const [a, b] = [head.slice(0, i), head.slice(i + 5)];
+      if (known.has(a) && known.has(b)) return [a, b];
+    }
+    return null;
+  };
+  for (const line of lines) {
+    const at = line.indexOf(SAME_SHAPE);
+    const pair = splitPair(line.slice(0, at));
+    if (!pair) {
+      out.push(line);
+      continue;
+    }
+    const stems = [...new Set(pair.map(stemOf))].sort();
+    const key = stems.join('\u0000');
+    const g: Group = groups.get(key) ?? {
+      stems,
+      pieces: new Map(),
+      lines: [],
+      tail: line.slice(at),
+    };
+    for (const n of pair) {
+      const st = stemOf(n);
+      g.pieces.set(st, (g.pieces.get(st) ?? new Set()).add(n));
+    }
+    g.lines.push(line);
+    groups.set(key, g);
+  }
+  for (const g of groups.values()) {
+    if (g.lines.length === 1) {
+      out.push(g.lines[0]);
+      continue;
+    }
+    const side = (st: string) => {
+      const ps = [...(g.pieces.get(st) ?? [])];
+      return ps.length === 1 ? ps[0] : `${st} ×${ps.length}`;
+    };
+    out.push(`${g.stems.map(side).join(' and ')}${g.tail}`);
+  }
+  return out;
 }
 
 /** The number a layer carries in its name (BLT_3_M → 3, CLR_MAIN → 0): the last number token. */
@@ -1201,6 +1611,12 @@ export function withPart(name: string, part: string): string {
 }
 
 /** How a thing is called in a unit name: a unit by its name, a lone piece by its role (Left front). */
+/** Two hosts in words that tell them apart: their piece names where both read the same. */
+function apart(a: Entity, b: Entity): [string, string] {
+  const [x, y] = [display(a), display(b)];
+  return x === y ? [a.name, b.name] : [x, y];
+}
+
 export function display(e: Entity): string {
   return e.unit || !e.roles[0] ? e.name : roleName(e.roles[0], e.hand);
 }

@@ -36,6 +36,8 @@ export type SkeletonAIAnswer = {
   answer: SuggestAssemblySkeletonResponse;
   /** Signatures of the steps the request carried: s1 = sent[0] … (lib/assembly-skeleton/ai.ts). */
   sent: string[];
+  /** The request this answer belongs to: its picks hold only where a decision still reads so. */
+  request: SuggestAssemblySkeletonRequest;
   /** Answered from this session's memory or the server's hour cache: nothing was charged. */
   free: boolean;
 };
@@ -105,7 +107,7 @@ export function useSkeletonAI(): {
       const key = sessionKey(req);
       const kept = again ? undefined : sessionAnswers.get(key);
       if (kept) {
-        setState({ status: 'ready', result: { answer: kept, sent, free: true } });
+        setState({ status: 'ready', result: { answer: kept, sent, request: req, free: true } });
         return;
       }
       setState({ status: 'asking' });
@@ -113,7 +115,10 @@ export function useSkeletonAI(): {
         .then((answer) => {
           sessionAnswers.set(key, answer);
           if (gen.current === my)
-            setState({ status: 'ready', result: { answer, sent, free: !!answer.cached } });
+            setState({
+              status: 'ready',
+              result: { answer, sent, request: req, free: !!answer.cached },
+            });
         })
         .catch((e: unknown) => {
           if (gen.current === my)
@@ -177,7 +182,14 @@ export function SkeletonAIBar({
   onAsk: () => void;
   onAskAgain: () => void;
   /** The readings door: how many picks differ, whether it is locked and why, and the press. */
-  readings: { changed: number; total: number; locked: string; onUse: () => void };
+  readings: {
+    changed: number;
+    total: number;
+    locked: string;
+    onUse: () => void;
+    /** Picks whose decision reads differently since the AI answered: dropped, said so. */
+    stale?: number;
+  };
   /** The order door: how many steps the AI moves, why it cannot apply, and the press. */
   order: { moved: number; blocked: string; inUse: boolean; onUse: () => void };
   /**
@@ -340,6 +352,17 @@ export function SkeletonAIBar({
                   ? 'AI agrees on the joins'
                   : `use AI readings (${readings.changed} of ${readings.total})`}
               </Button>
+            )}
+            {(readings.stale ?? 0) > 0 && (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                data-skeleton-ai-stale={readings.stale}
+              >
+                {readings.stale} {readings.stale === 1 ? 'reading' : 'readings'} changed since the
+                AI answered — not used; ask again
+              </Text>
             )}
             <Button
               type='button'
