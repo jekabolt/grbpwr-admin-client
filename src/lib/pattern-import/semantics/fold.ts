@@ -632,6 +632,15 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
   const cutHeader = new Set<number>();
   for (let i = 0; i < texts.length; i++) {
     let t = normFoldLine(texts[i]);
+    // Codex: a section title at the START of a line («Syning: 69. Pres sømmen 4 gange») ends the
+    // cutting section as hard as one on its own line; nothing on that line counts
+    const lead = /^(\p{L}[\p{L}\s/-]{0,40}):\s*\S/u.exec(t);
+    if (lead && lead[1].trim().split(/\s+/).length <= 3) {
+      scope++;
+      headerAt.push(i);
+      if (CUT_HEADER.test(lead[1])) cutHeader.add(i);
+      continue;
+    }
     // "69." + "Ærme, 4 gange": a number item right before the line is its number
     const prev = i > 0 ? normFoldLine(texts[i - 1]) : '';
     if (!LIST_LINE.test(t) && prev && LIST_NO_ONLY.test(prev)) t = `${prev} ${t}`;
@@ -669,7 +678,13 @@ export function quantityListEntries(texts: readonly string[]): QtyListEntry[] {
   const inSection = new Set<Raw>();
   for (let k = 0; k < raws.length; ) {
     let e = k;
-    while (e + 1 < raws.length && raws[e + 1].at - raws[e].at <= 2) e++;
+    // a header between two list lines ends the run hard (Codex: «…4 gange» / «Syning:» / «69. …»)
+    while (
+      e + 1 < raws.length &&
+      raws[e + 1].at - raws[e].at <= 2 &&
+      !headerAt.some((h) => h > raws[e].at && h < raws[e + 1].at)
+    )
+      e++;
     const run = raws.slice(k, e + 1);
     // Codex: only an explicit cutting header opens a section (a run of numbered steps with counts
     // does not); the section is the list run right under it and ends at the next header

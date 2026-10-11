@@ -1510,6 +1510,39 @@ export async function main(): Promise<number> {
       'Codex N3: a list line after another header than the cutting one → asked',
       JSON.stringify(qOf(later)),
     );
+    // Codex N3: a section title ends the cutting run hard — on its own line, or leading a line
+    const ownLine = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning:',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(ownLine) && /not in a cutting list/.test(qOf(ownLine)?.detail ?? ''),
+      'Codex N3: «Syning:» between two list lines → the line after it is asked',
+      JSON.stringify(qOf(ownLine)),
+    );
+    const leading = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning: 69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(leading) && !/cutting list/.test(qOf(leading)?.detail ?? ''),
+      'Codex N3: «Syning: 69. Ærme, 4 gange» (title leading the line) → no count taken, asked',
+      JSON.stringify(qOf(leading)),
+    );
+    const leadNext = build([
+      'Klippevejledning:',
+      '67. Forstykke, 1 gang',
+      'Syning: brug tråd',
+      '69. Ærme, 4 gange',
+    ]);
+    ck(
+      !!qOf(leadNext) && /not in a cutting list/.test(qOf(leadNext)?.detail ?? ''),
+      'Codex N3: «Syning: brug tråd» (title leading a line) ends the section → the next list line is asked',
+      JSON.stringify(qOf(leadNext)),
+    );
     const none = build([]);
     ck(
       ids(none) === 'SL_L×1 SL_R×1' && qOf(none)?.shown === 'pair×1',
