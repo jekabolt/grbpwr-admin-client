@@ -649,6 +649,20 @@ async function mutationsSection() {
       })),
     });
     run('a smaller-size sheet (pieces at 0.6)', docs, classes, { file: '0', page: 11 }, 'overview');
+    // Codex re-check #1: a real pattern sheet at 1:2, its pieces uniformly reduced — a question
+    doc.pages[i] = clonePage(real, {
+      paths: real.paths.map((p) => ({
+        ...p,
+        pts: p.pts.map((q) => ({ x: q.x * 0.5, y: q.y * 0.5 })),
+      })),
+    });
+    run(
+      'a pattern sheet at 0.5 (pieces uniformly reduced)',
+      docs,
+      classes,
+      { file: '0', page: 11 },
+      'overview',
+    );
     doc.pages[i] = real;
     s.close();
   }

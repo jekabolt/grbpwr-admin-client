@@ -150,7 +150,13 @@ export function shapesOf(chains: readonly Chain[], minMm2: number): Shape[] {
   return out;
 }
 
-export type ReducedCopy = { matches: number; of: number; scale: number };
+export type ReducedCopy = {
+  matches: number;
+  of: number;
+  scale: number;
+  /** A9 (Codex re-check #1): how many DIFFERENT tile pieces the matches are (Hu-distinct). */
+  pieces?: number;
+};
 
 /**
  * The overview's outlines that are a whole tile piece at a smaller scale: each overview outline
@@ -166,6 +172,7 @@ export function reducedCopy(
 ): ReducedCopy | null {
   const used = new Set<number>();
   const scales: number[] = [];
+  const hits: number[] = [];
   const matched = new Set<Shape>();
   for (const o of overview) {
     let best = -1;
@@ -182,6 +189,7 @@ export function reducedCopy(
     }
     if (best >= 0) {
       used.add(best);
+      hits.push(best);
       matched.add(o);
       scales.push(Math.sqrt(o.areaMm2 / tiles[best].areaMm2));
     }
@@ -198,5 +206,17 @@ export function reducedCopy(
   if (agree.length < REDUCED_COPY.minMatches) return null;
   // … and nearly all the page's outlines are such reduced pieces
   if (agree.length < REDUCED_COPY.minShare * overview.length) return null;
-  return { matches: agree.length, of: overview.length, scale: Math.round(med * 1000) / 1000 };
+  // the matched tile shapes grouped by shape: copies of one piece drawn twice are one piece
+  const kinds: number[][] = [];
+  for (const t of hits)
+    if (
+      !kinds.some((h) => h.every((v, k) => Math.abs(v - tiles[t].hu[k]) <= REDUCED_COPY.sameShape))
+    )
+      kinds.push(tiles[t].hu);
+  return {
+    matches: agree.length,
+    of: overview.length,
+    scale: Math.round(med * 1000) / 1000,
+    pieces: kinds.length,
+  };
 }

@@ -4,7 +4,7 @@
 // is №2, in two strengths:
 //
 //   EXCLUSIONARY (with the AI ≥ 0.85 in a non-pattern role → set aside by itself, "AI + geometry"):
-//     (a) every piece-sized closed outline on the page is a reduced copy (scale ≤ 0.5) of the
+//     (a) every piece-sized closed outline on the page is a reduced copy (scale ≤ 0.35, ≥ 2 different pieces) of the
 //         pieces of this file's own 1:1 tile sheet — ≥ 80 % of its outlines matched, none of piece
 //         size unexplained (clean/reduced-copy.ts);
 //     (b) the page draws no piece-sized outline and no line longer than 100 mm, and it is not part
@@ -42,8 +42,13 @@ export const AI_PAGES = {
   gridCover: 0.6,
   /** Thumbnail long side, px. */
   thumbPx: 1024,
-  /** (a): a reduced copy draws the pieces at most at this scale. */
-  copyMaxScale: 0.5,
+  /**
+   * (a): a reduced copy draws the pieces at most at this scale (Codex re-check #1: instruction and
+   * overview diagrams are 1:4–1:10 — robe 1:6; a sheet at 1:2 may be a real smaller pattern) …
+   */
+  copyMaxScale: 0.35,
+  /** … and matches at least this many DIFFERENT tile pieces (the tile sheet's piece set). */
+  copyMinPieces: 2,
   /** (b): no line longer than this (mm) — the classifier's "pattern-like" line. */
   longLineMm: 100,
 };
@@ -301,12 +306,12 @@ export function geoEvidence(
 export function exclusionOf(
   pc: PageChains,
   st: PageStats,
-  copy: { matches: number; of: number; scale: number } | null,
+  copy: { matches: number; of: number; scale: number; pieces?: number } | null,
   grid: 'registers' | 'apart' | null,
 ): string | null {
   if (grid === 'registers') return null;
-  if (copy && copy.scale <= AI_PAGES.copyMaxScale)
-    return `its outlines are the file's tile pieces at 1:${Math.round(1 / copy.scale)} (${copy.matches} of ${copy.of} matched, none of piece size unexplained) — a reduced copy`;
+  if (copy && copy.scale <= AI_PAGES.copyMaxScale && (copy.pieces ?? 0) >= AI_PAGES.copyMinPieces)
+    return `its outlines are the file's tile pieces at 1:${Math.round(1 / copy.scale)} (${copy.matches} of ${copy.of} matched, ${copy.pieces} different pieces, none of piece size unexplained) — a reduced copy`;
   // (b): a rectangle of piece size counts as a piece here (a waistband, a pocket bag is one)
   const longest = pc.chains.reduce((a, c) => Math.max(a, c.lengthMm), 0);
   if (closedPieceSized(pc) === 0 && longest <= AI_PAGES.longLineMm && st.hasTileMarks !== true)
