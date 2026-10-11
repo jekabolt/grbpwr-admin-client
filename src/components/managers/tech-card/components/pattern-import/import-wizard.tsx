@@ -43,7 +43,9 @@ import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { autopilotApply, resolverFor } from './autopilot/run';
-import { readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+import { ReplayLine, readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
+import { isReplayed } from './autopilot/replay-record';
 
 /** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
 const nextFrames = () =>
@@ -193,6 +195,35 @@ function WizardBody({
   const apiRef = useRef(api);
   apiRef.current = api;
   const resolve = useMemo(() => resolverFor(card, () => apiRef.current), [card]);
+  // ── AP-replay: a re-import of the same files reuses the previous import's answers (on by
+  // default when every file matches by sha256), in both modes — the autopilot's questions go to
+  // the replay first, and the operator's "next" carries it (the hook's standing drive)
+  const prior = useMemo(
+    () => priorOf(card, session.files),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [card.techCardId, card.existingPatterns, session.files],
+  );
+  const [replayPick, setReplayPick] = useState<Record<string, boolean>>({});
+  const replayOn = !!prior && (replayPick[prior.key] ?? prior.exact);
+  const priorRef = useRef<Prior | null>(null);
+  priorRef.current = replayOn ? prior : null;
+  const [misses, setMisses] = useState<ReplayMiss[]>([]);
+  useEffect(() => setMisses([]), [session.sessionId]);
+  const replay = useMemo(() => {
+    const src = () => ({
+      prior: priorRef.current,
+      card: apiRef.current.runCard,
+      baseSeeds: apiRef.current.baseSeeds,
+      presegmented: !!apiRef.current.extracted.presegmented,
+    });
+    const log = {
+      miss: (m: ReplayMiss) =>
+        setMisses((xs) => (xs.some((x) => x.key === m.key) ? xs : [...xs, m])),
+    };
+    return { manual: replayDrive(src, undefined, log), auto: replayDrive(src, resolve, log) };
+  }, [resolve]);
+  api.setStanding(replay.manual);
+  const replayed = api.inputs.autopilot.filter(isReplayed).length;
   const started = useRef<number | null>(null);
   const applying = useRef<number | null>(null);
   const [apStop, setApStop] = useState<string | null>(null);
@@ -202,7 +233,7 @@ function WizardBody({
     if (!session.scale.candidates.length || started.current === session.sessionId) return;
     started.current = session.sessionId;
     setApStop(null);
-    api.advance({ resolve });
+    api.advance(replay.auto);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autopilot, session.busy, session.error, session.sessionId, session.scale.candidates.length]);
   useEffect(() => {
@@ -224,7 +255,25 @@ function WizardBody({
   const resumeAutopilot = () => {
     setApStop(null);
     applying.current = null;
-    api.advance({ resolve });
+    api.advance(replay.auto);
+  };
+  /** AP-replay: turn the previous import's answers on — they answer from where the run stands. */
+  const reuse = () => {
+    if (!prior) return;
+    setReplayPick((p) => ({ ...p, [prior.key]: true }));
+    priorRef.current = prior;
+    if (autopilot) resumeAutopilot();
+    else api.advance(replay.manual);
+  };
+  /** AP-replay: the way out — answers already reused are undone by reading the files again. */
+  const dontReuse = () => {
+    if (!prior) return;
+    setReplayPick((p) => ({ ...p, [prior.key]: false }));
+    priorRef.current = null;
+    if (!replayed) return;
+    started.current = null;
+    applying.current = null;
+    void api.dispatch({ type: 'files', files: api.inputs.fileList });
   };
   const [askClose, setAskClose] = useState(false);
   // "fix in pieces" from check / details: the piece and size to show, and why (M1, M5). It lives
@@ -489,6 +538,19 @@ function WizardBody({
                       resume autopilot
                     </Button>
                   </span>
+                )}
+                {prior && !applied && (
+                  <ReplayLine
+                    label={prior.label}
+                    exact={prior.exact}
+                    matched={prior.matched}
+                    of={prior.of}
+                    on={replayOn}
+                    replayed={replayed}
+                    misses={misses}
+                    onReuse={reuse}
+                    onDontReuse={dontReuse}
+                  />
                 )}
                 {session.error ? (
                   <StageMessage
