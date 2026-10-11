@@ -564,6 +564,9 @@ const NOT_PATTERN_WORDS =
  * instructions / cover role at 0.7 or more, or a word on the page that names it. (A text-only page
  * is never "to check": clean sets it aside by itself.) Null = none (the page-role question).
  */
+/** A cover / instructions page with this much line work (m) or more is not text- or image-led. */
+const INK_LINES_MAX_M = 1;
+
 /** An overview's tile grid at most this share of the tile size reads as a reduced drawing. */
 const OVERVIEW_REDUCED_MAX = 0.7;
 
@@ -572,8 +575,15 @@ function notPatternEvidence(
   pages: ImportSession['pages'],
 ): string | null {
   const c = pages.find((p) => p.file === d.file && p.page === d.page);
-  if (c && (c.cls === 'instructions' || c.cls === 'cover') && c.confidence >= 0.7)
-    return `${c.cls} ${c.confidence.toFixed(2)}`;
+  // a cover / instructions page: only when text or pictures lead (little line work) and it
+  // draws no closed outline of piece size — a line-heavy "cover" may be a pattern page
+  if (c && (c.cls === 'instructions' || c.cls === 'cover') && c.confidence >= 0.7) {
+    const k = c.ink;
+    const led =
+      k && k.strokeM < INK_LINES_MAX_M && (k.raster >= 0.3 || k.texts >= 10 || k.chars >= 500);
+    if (led && !d.face)
+      return `${c.cls} ${c.confidence.toFixed(2)} + ${k.raster >= 0.3 ? `pictures ${Math.round(k.raster * 100)} %` : `${k.texts} text items`}, ${k.strokeM} m of line, no piece-sized outline`;
+  }
   // an overview: the classifier AND a second, independent fact — the tile grid it draws is at a
   // reduced scale, or its page format is not the tiles' (it cannot sit in their grid)
   if (c && c.cls === 'overview' && c.confidence >= 0.7) {
@@ -585,7 +595,7 @@ function notPatternEvidence(
           : null;
     if (second) return `overview ${c.confidence.toFixed(2)} + ${second}`;
   }
-  const w = NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
+  const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;
 }

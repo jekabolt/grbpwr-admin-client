@@ -278,6 +278,8 @@ export type PageClassification = {
   sheet?: number;
   /** For 'overview': the tile grid it draws, as a share of the tile size (0.2 = 1:5). */
   reduced?: number;
+  /** For 'cover' / 'instructions': line length (m), text items, characters, raster share. */
+  ink?: { strokeM: number; texts: number; chars: number; raster: number };
   confidence: number;
   why: string;
 };
@@ -2145,6 +2147,8 @@ export type CleanOutput = {
      */
     status: MaskStatus;
     drawing?: string;
+    /** A10: the page draws a closed outline of piece size (it may be a piece). */
+    face?: boolean;
   }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];

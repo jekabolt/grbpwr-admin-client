@@ -188,6 +188,7 @@ export function cleanPages(
         why: c.why,
         status: art ? ('suggest' as const) : ('auto' as const),
         ...(art ? { drawing: art } : {}),
+        ...(art && pg && pieceFace(pg) ? { face: true } : {}),
       };
     });
   const droppedOf = new Map(dropped.map((d) => [pageKey(d.file, d.page), d]));
@@ -613,6 +614,19 @@ function demote(f: Found, why: string) {
  * What on a page could be pattern line work: a line ≥ 100 mm or a closed contour of a piece's
  * size (`minPieceAreaMm2`). Null = nothing (a text page, a cover with a photo) — safe to set aside.
  */
+/** A10: a closed outline of piece size anywhere on the page. */
+function pieceFace(pg: IRPage): boolean {
+  for (const c of pageChains(pg).chains) {
+    if (!c.closed) continue;
+    let a = 0;
+    const q = c.pts;
+    for (let k = 0, j = q.length - 1; k < q.length; j = k++)
+      a += (q[j].x + q[k].x) * (q[j].y - q[k].y);
+    if (Math.abs(a) / 2 >= PATIMPORT.minPieceAreaMm2) return true;
+  }
+  return false;
+}
+
 function patternLike(pg: IRPage): string | null {
   if (!pg.paths.length) return null;
   const { chains } = pageChains(pg);
