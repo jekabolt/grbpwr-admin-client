@@ -57,6 +57,7 @@ import {
   fmtPct,
 } from '../ui-bits';
 import { PIECES_REASONS, focusFromBlocked, type PieceFocus } from '../piece-focus';
+import { bulkNames, codeBlocked } from '../bulk-names';
 
 const MEANING: { value: LineMeaning; label: string }[] = [
   { value: 'seam', label: 'seam line' },
@@ -160,6 +161,30 @@ export function DetailsStep({
     };
   })();
   const mark = (seed: SeedId) => families.findIndex((f) => f.seed === seed) + 1;
+  // CODE lane: every piece without a usable code, named in one click (bulk-names.ts) — the
+  // autopilot's codes in sheet order, the source's own words kept as names, each still editable
+  const unnamed = codeBlocked(sem.blocked);
+  const bulk = unnamed.length
+    ? bulkNames(
+        sem.blocked,
+        (sd) => {
+          const c = families.find((f) => f.seed === sd)?.candidates;
+          return c?.length ? c[c.length - 1].bbox : null;
+        },
+        // written identities, and the codes other pieces already hold while blocked for another
+        // reason (a grainline still to draw): neither is given out again
+        [
+          ...sem.pieces.map((p) => p.identity),
+          ...session.names
+            .filter((n) => n.code && !unnamed.some((b) => b.seed === n.seed))
+            .map((n) => n.code),
+        ],
+        card.sizes.map((c) => c.token),
+        (sd) => session.pieces?.seeds.find((x) => x.id === sd)?.text?.text ?? null,
+      )
+    : new Map<SeedId, never>();
+  const bulkCodes = [...new Set([...bulk.values()].map((n) => n.code))].sort();
+  const nameAll = () => void api.editNames(bulk);
 
   /** Re-run semantics with a patch to the operator's answers. */
   const rerun = (
@@ -390,6 +415,21 @@ export function DetailsStep({
                 </Text>
                 <Chip onClick={() => setReviewing(true)}>
                   review {proposals.length} proposed grainline{proposals.length === 1 ? '' : 's'}
+                </Chip>
+              </div>
+            )}
+
+            {bulk.size > 0 && (
+              <div className='mt-2 flex flex-wrap items-center gap-2'>
+                <Text size='micro' component='p' className='min-w-0 flex-1 text-warning'>
+                  ! {unnamed.length} piece{unnamed.length === 1 ? ' has' : 's have'} no code the
+                  export can use — nothing names {unnamed.length === 1 ? 'it' : 'them'}, or two
+                  pieces read the same code. Codes in sheet order; the sheet&apos;s own names stay
+                  as names, a drawn L/R pair keeps one code; every code stays editable below
+                </Text>
+                <Chip onClick={nameAll}>
+                  name {bulk.size} piece{bulk.size === 1 ? '' : 's'} {bulkCodes[0]}
+                  {bulkCodes.length > 1 ? `…${bulkCodes[bulkCodes.length - 1]}` : ''}
                 </Chip>
               </div>
             )}
