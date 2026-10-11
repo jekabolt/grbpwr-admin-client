@@ -58,6 +58,7 @@ import {
   newDriveState,
 } from 'components/managers/tech-card/components/pattern-import/auto-drive';
 import { splitSize } from './worker-entry';
+import { fixturePageRoleDeps } from './page-roles-fixture';
 
 type Case = (typeof CASES)[number];
 
@@ -181,6 +182,13 @@ function sessionClient() {
       if (!s) throw new Error('no session');
       // headless: the SoM render is for the AI namer only, and there is no AI here
       if (stage === 'render-som') return { sheetPng: new Blob([]), crops: [], marks: [] } as never;
+      // A9: no canvas here — the page stats only (the recorded answers need no picture)
+      if (stage === 'render-pages')
+        return (await s.runStage(
+          stage,
+          { ...(input as StageIO['render-pages']['in']), pictures: false },
+          ctx,
+        )) as never;
       const out = await s.runStage(stage, input as never, ctx);
       outs[stage] = out;
       return out as never;
@@ -241,11 +249,18 @@ export async function runCase(c: Case, mutate: string | null) {
     styleLabel: 'autopilot',
   };
   const { client, outs } = sessionClient();
+  // A9: `--page-roles` = the recorded AI page roles (fixtures/page-roles.json, never a paid call);
+  // `--mutate=page-role` = with a real tile answered "instructions" 0.99 in every call
+  const roles =
+    process.env.AUTOPILOT_PAGE_ROLES || mutate === 'page-role'
+      ? fixturePageRoleDeps(mutate === 'page-role' ? 'tile-instructions' : null)
+      : null;
   let api!: ImportSessionApi;
   mountHook(() => {
     api = useImportSession({
       client,
       card,
+      ...(roles ? { pageRoles: roles.deps } : {}),
       namer: async () => [],
       buildDraft: stubBuildDraft,
       applyDraft: async () => ({ ok: true, uploaded: [] }),
@@ -321,6 +336,27 @@ export async function runCase(c: Case, mutate: string | null) {
   }
   const s = api.session;
   rec.trace = compress(trace);
+  if (roles) {
+    rec.pageRoles = {
+      calls: roles.log.calls.map(
+        (k) =>
+          `${k.file}: sent ${k.sent.length}, answered ${k.answered.length}${k.missing.length ? `, NOT RECORDED ${k.missing.join(',')}` : ''}`,
+      ),
+      aiAside: (s.clean?.dropped ?? []).filter((d) => d.aiAside).map((d) => `p${d.page + 1}`),
+      note: api.pageRoleNote,
+    };
+    // the control: a real tile the AI called instructions stays in the tile grid
+    if (mutate === 'page-role')
+      for (const m of roles.log.mutated) {
+        const f = s.files.find((x) => x.name === m.file)?.id;
+        const kept =
+          s.clean?.classes.find((c) => c.file === f && c.page === m.pageNo - 1)?.cls === 'tile' &&
+          !s.clean?.dropped.some((d) => d.file === f && d.page === m.pageNo - 1);
+        mutated.push(
+          `${m.file} p${m.pageNo} → instructions 0.99: ${kept ? 'kept as a tile' : 'SET ASIDE'}`,
+        );
+      }
+  }
   // the pages clean set aside "to check", with the facts the policy reads (A10 r4)
   rec.pagesAside = (s.clean?.dropped ?? [])
     .filter((d) => d.status === 'suggest')

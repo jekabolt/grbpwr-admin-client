@@ -3,7 +3,9 @@
 // the one-component shim, so the REAL wizard hook runs), then every case in its own node process,
 // and writes reports/AUTOPILOT-<date>.json with a table: reached apply / stopped, the top stop
 // reasons, wrong exports by kind and by the assumption that gave them.
-//   node scripts/pattern-import/autopilot.mjs [case…] [--mutate=qty|size]
+//   node scripts/pattern-import/autopilot.mjs [case…] [--mutate=qty|size|drop|page-role] [--page-roles]
+//   (--page-roles: the AI page roles from the recorded fixture; --mutate=page-role: a real tile
+//   answered "instructions" 0.99 must stay a tile)
 //   yarn patimport:autopilot · yarn patimport:e2e --autopilot
 //   env PATIMPORT_CORPUS, PATIMPORT_REPORTS, AUTOPILOT_REPORT (file name)
 // Exit 1 when a mutation run does not see its injected wrong answer, or a written manifest does
@@ -49,13 +51,21 @@ await esbuild({
 const FLAGS = process.argv.slice(2).filter((a) => a.startsWith('--'));
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const MUTATE = FLAGS.find((f) => f.startsWith('--mutate='))?.slice(9) ?? '';
+// A9: the recorded AI page roles (fixtures/page-roles.json) — never a paid call
+const PAGE_ROLES = FLAGS.includes('--page-roles') ? '1' : process.env.AUTOPILOT_PAGE_ROLES ?? '';
 
 const child = (args) => {
   const r = spawnSync(
     process.execPath,
     ['--expose-gc', '--max-old-space-size=8192', fileURLToPath(import.meta.url), ...args],
     {
-      env: { ...process.env, AP_CHILD: bundle, PATIMPORT_REPO: REPO, AUTOPILOT_MUTATE: MUTATE },
+      env: {
+        ...process.env,
+        AP_CHILD: bundle,
+        PATIMPORT_REPO: REPO,
+        AUTOPILOT_MUTATE: MUTATE,
+        AUTOPILOT_PAGE_ROLES: PAGE_ROLES,
+      },
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
       timeout: 30 * 60 * 1000,
@@ -147,6 +157,7 @@ const summary = {
   // the policy's own "now" against the wizard's on every question (must be 0)
   fingerprintDrift: sum((r) => r.fingerprintDrift),
   mutate: MUTATE || null,
+  pageRoles: !!PAGE_ROLES || MUTATE === 'page-role',
   mutated: results.flatMap((r) => (r.mutated ?? []).map((m) => `${r.id}: ${m}`)),
 };
 console.log(
@@ -186,14 +197,18 @@ if (MUTATE) {
   // a miss of the control — it is reported apart)
   const injected = results.filter((r) => r.mutated?.length);
   // 'drop' tests the truth matcher itself: every case it was injected in counts
-  const seen = MUTATE === 'drop' ? injected : injected.filter((r) => r.write);
+  // 'page-role' (A9): the injected wrong AI answer must change nothing — every mutated tile kept
+  const seen =
+    MUTATE === 'drop' || MUTATE === 'page-role' ? injected : injected.filter((r) => r.write);
   const caught = seen.filter((r) =>
-    (r.wrong?.items ?? []).some((x) =>
-      MUTATE === 'drop'
-        ? x.startsWith('piece-set') && /missing/.test(x)
-        : x.startsWith(MUTATE === 'qty' ? 'quantity' : 'size') &&
-          /\[(quantity|size-guess)\]/.test(x),
-    ),
+    MUTATE === 'page-role'
+      ? r.mutated.every((m) => / kept as a tile$/.test(m))
+      : (r.wrong?.items ?? []).some((x) =>
+          MUTATE === 'drop'
+            ? x.startsWith('piece-set') && /missing/.test(x)
+            : x.startsWith(MUTATE === 'qty' ? 'quantity' : 'size') &&
+              /\[(quantity|size-guess)\]/.test(x),
+        ),
   );
   console.log(
     `mutation ${MUTATE}: injected in ${injected.length} case(s), ${seen.length} reached the export, caught in ${caught.length}`,

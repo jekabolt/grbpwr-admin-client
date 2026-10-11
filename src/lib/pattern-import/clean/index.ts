@@ -53,6 +53,16 @@ import {
   type Found,
 } from './detect';
 import { pageChains, type PageChains } from './page-chains';
+import {
+  AI_PAGES,
+  NOT_PATTERN_ROLES,
+  aiAsides,
+  aiWords,
+  geoEvidence,
+  pageStats,
+  tileGrid,
+  tileMarkSigs,
+} from './page-roles';
 import { REDUCED_COPY, reducedCopy, shapesOf } from './reduced-copy';
 import { SegGrid } from '../chains/geom';
 import { DEFAULT_CHAIN_OPTS } from '../chains/build';
@@ -177,11 +187,20 @@ export function cleanPages(
   const docPage = new Map(
     docs.flatMap((d) => d.pages.map((pg) => [pageKey(d.file.id, pg.page), pg] as const)),
   );
+  // the line work of a page set aside, linked once (patternLike, pieceFace, the overview's shapes
+  // and the A9 stats all read it)
+  const pcMemo = new Map<string, PageChains>();
+  const pcOf = (pg: IRPage) => {
+    const k = pageKey(pg.file, pg.page);
+    let pc = pcMemo.get(k);
+    if (!pc) pcMemo.set(k, (pc = pageChains(pg)));
+    return pc;
+  };
   const dropped: CleanOutput['dropped'] = roles
     .filter((c) => c.cls !== 'tile')
     .map((c) => {
       const pg = docPage.get(pageKey(c.file, c.page));
-      const art = pg && !edited.has(pageKey(c.file, c.page)) ? patternLike(pg) : null;
+      const art = pg && !edited.has(pageKey(c.file, c.page)) ? patternLike(pg, pcOf) : null;
       return {
         file: c.file,
         page: c.page,
@@ -189,7 +208,7 @@ export function cleanPages(
         why: c.why,
         status: art ? ('suggest' as const) : ('auto' as const),
         ...(art ? { drawing: art } : {}),
-        ...(art && pg && pieceFace(pg) ? { face: true } : {}),
+        ...(art && pg && pieceFace(pcOf(pg)) ? { face: true } : {}),
       };
     });
   // A10 (Codex final #5): an overview page is a reduced copy when its outlines are the tiles'
@@ -205,7 +224,7 @@ export function cleanPages(
       const pg = docPage.get(pageKey(d.file, d.page));
       if (!pg || !tileShapes.length) continue;
       const rc = reducedCopy(
-        shapesOf(pageChains(pg).chains, REDUCED_COPY.minOverviewMm2),
+        shapesOf(pcOf(pg).chains, REDUCED_COPY.minOverviewMm2),
         tileShapes,
         PATIMPORT.minPieceAreaMm2,
       );
@@ -217,6 +236,7 @@ export function cleanPages(
   const pages: PageMask[] = [];
   const curveTexts: CurveText[] = [];
   const scaleHints: ScaleCandidate[] = [];
+  const tileMarks: NonNullable<CleanOutput['tileMarks']> = [];
   const total = docs.reduce((a, d) => a + d.pages.length, 0);
   let done = 0;
   for (const doc of docs) {
@@ -256,6 +276,22 @@ export function cleanPages(
             `${doc.file.name}: ${f.kind} — garment lines end on it on some tile, offered, not applied`,
           );
         }
+    // A9: the file's tile chrome (what a page set aside is tested against) and its tile format
+    if (tiles.length) {
+      const fmts = new Map<string, { widthMm: number; heightMm: number; n: number }>();
+      for (const t of tiles) {
+        const key = `${Math.round(t.widthMm)}x${Math.round(t.heightMm)}`;
+        const e = fmts.get(key);
+        if (e) e.n++;
+        else fmts.set(key, { widthMm: t.widthMm, heightMm: t.heightMm, n: 1 });
+      }
+      const top = [...fmts.values()].sort((a, b) => b.n - a.n)[0];
+      tileMarks.push({
+        file: doc.file.id,
+        tile: { widthMm: top.widthMm, heightMm: top.heightMm },
+        sigs: tileMarkSigs(pcs, rep, foundOf),
+      });
+    }
     for (let k = 0; k < pcs.length; k++) {
       o.checkCancel?.();
       const pc = pcs[k];
@@ -315,8 +351,7 @@ export function cleanPages(
         });
     }
   }
-  if (input.aiHints?.pages?.length)
-    notes.push(`AI page roles given: ${input.aiHints.pages.length}`);
+  aiPass(dropped, pages, roles, input, edited, docPage, pcOf, tileMarks, notes);
   pages.sort((a, b) => Number(a.file) - Number(b.file) || a.page - b.page);
   const { summary, offered } = countsOf(pages.flatMap((p) => p.items));
   return {
@@ -328,7 +363,71 @@ export function cleanPages(
     scaleHints,
     curveTexts,
     notes: [...new Set(notes)],
+    ...(tileMarks.length ? { tileMarks } : {}),
   };
+}
+
+/**
+ * A9 (clean/page-roles.ts): the geometric evidence on every page set aside that holds line work,
+ * the AI's reading where the call answered, and the rule — AI ≥ 0.85 in a non-pattern role AND
+ * geometry → set aside by itself; less → stays a suggestion. A page in the tile grid is never
+ * touched (the AI's word on a tile is a note). The operator's role edits are their own answer.
+ */
+function aiPass(
+  dropped: CleanOutput['dropped'],
+  pages: PageMask[],
+  roles: PageClassification[],
+  input: CleanInput,
+  edited: ReadonlySet<string>,
+  docPage: ReadonlyMap<string, IRPage>,
+  pcOf: (pg: IRPage) => PageChains,
+  tileMarks: NonNullable<CleanOutput['tileMarks']>,
+  notes: string[],
+) {
+  const hints = new Map(
+    (input.aiHints?.pages ?? []).map((h) => [pageKey(h.file, h.page), h] as const),
+  );
+  if (hints.size) notes.push(`AI page roles given: ${hints.size}`);
+  for (const c of roles) {
+    const h = hints.get(pageKey(c.file, c.page));
+    if (c.cls === 'tile' && h && NOT_PATTERN_ROLES.has(h.role) && h.confidence >= AI_PAGES.autoMin)
+      notes.push(
+        `page ${c.page + 1}: the AI reads it as ${aiWords(h)} — kept: the page is in the tile grid`,
+      );
+  }
+  const marksOf = new Map(tileMarks.map((m) => [m.file, m]));
+  for (const d of dropped) {
+    const k = pageKey(d.file, d.page);
+    if (edited.has(k)) continue;
+    const h = hints.get(k);
+    if (h)
+      d.ai = {
+        role: h.role,
+        confidence: h.confidence,
+        evidence: (h.evidence ?? []).slice(0, 3).map((e) => [...e].slice(0, 120).join('')),
+      };
+    if (d.status !== 'suggest') continue;
+    const pg = docPage.get(k);
+    if (!pg) continue;
+    const marks = marksOf.get(d.file) ?? null;
+    const tiles = roles
+      .filter((c) => c.cls === 'tile' && c.file === d.file)
+      .map((c) => docPage.get(pageKey(c.file, c.page)))
+      .filter((p): p is IRPage => !!p);
+    const grid = tileGrid(pg, tiles);
+    if (grid === 'registers') {
+      // it shares line work with a tile: it may be one — a question whatever the AI says
+      d.geo = ['registers with a tile by shared line work — it may be one'];
+      continue;
+    }
+    const geo = geoEvidence(pageStats(pg, pcOf(pg), marks), marks, d.reducedCopy, grid);
+    if (geo.length) d.geo = geo;
+    if (!aiAsides(d, h, geo)) continue;
+    d.status = 'auto';
+    d.aiAside = true;
+    const m = pages.find((p) => p.file === d.file && p.page === d.page);
+    if (m) m.status = 'auto';
+  }
 }
 
 /** The detectors of one tile page, in priority order (a line goes to the first that takes it). */
@@ -639,13 +738,13 @@ function demote(f: Found, why: string) {
  * A10: a closed outline of piece size anywhere on the page — not a rectangle (a text box, a page
  * frame, a table: `shapesOf` leaves those out).
  */
-function pieceFace(pg: IRPage): boolean {
-  return shapesOf(pageChains(pg).chains, PATIMPORT.minPieceAreaMm2).length > 0;
+function pieceFace(pc: PageChains): boolean {
+  return shapesOf(pc.chains, PATIMPORT.minPieceAreaMm2).length > 0;
 }
 
-function patternLike(pg: IRPage): string | null {
+function patternLike(pg: IRPage, pcOf: (pg: IRPage) => PageChains): string | null {
   if (!pg.paths.length) return null;
-  const { chains } = pageChains(pg);
+  const { chains } = pcOf(pg);
   const long = chains.reduce((a, c) => Math.max(a, c.lengthMm), 0);
   if (long >= 100) return `a line ${Math.round(long)} mm long`;
   for (const c of chains) {

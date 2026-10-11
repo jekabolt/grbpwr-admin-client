@@ -77,7 +77,9 @@ import {
   mergeScale,
   srcKey,
 } from '../clean';
-import { renderSom } from '../ai/som';
+import { renderPagePng, renderSom } from '../ai/som';
+import { pageChains } from '../clean/page-chains';
+import { marksOn, pageStats } from '../clean/page-roles';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
 import { gradeView } from '../chains/face-role';
@@ -289,6 +291,8 @@ export class Session {
   // clean (A8)
   /** The page masks of the last clean run (re-applied whenever the docs are read again). */
   private masks: PageMask[] | null = null;
+  /** A9: the tile chrome per file the last clean run found (the page stats test a page against). */
+  private tileMarks: NonNullable<StageIO['clean']['out']['tileMarks']> = [];
   private cleanEdits: PageMaskEdit[] = [];
   /** Sources (`srcKey`) of the paths page items offer but do not apply (8b does not offer them twice). */
   private offeredSrc = new Set<string>();
@@ -468,6 +472,8 @@ export class Session {
           return this.semanticsStage(input as StageIO['semantics']['in'], ctx);
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
+        case 'render-pages':
+          return this.renderPagesStage(input as StageIO['render-pages']['in'], ctx);
         case 'write':
           return this.write(input as StageIO['write']['in'], ctx);
         case 'fabrics':
@@ -819,6 +825,7 @@ export class Session {
     });
     applyMasks(docs, out.pages);
     this.masks = out.pages;
+    this.tileMarks = out.tileMarks ?? [];
     this.offeredSrc = new Set<string>();
     this.chromeSrc = new Map<string, BackgroundKind>();
     for (const m of out.pages) {
@@ -1336,6 +1343,51 @@ export class Session {
     });
     this.blobs.set('som:sheet', out.sheetPng);
     return out;
+  }
+
+  // ── render-pages (A9) ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * The thumbnails of the AI page-role call: each page after the clean stage's mask (the grid and
+   * the chrome it masked are not shown), with its stats. A side stage: invalidates nothing.
+   */
+  private async renderPagesStage(
+    input: StageIO['render-pages']['in'],
+    ctx: StageCtx,
+  ): Promise<StageIO['render-pages']['out']> {
+    if (!this.docs || !this.masks)
+      throw new ImportError('out-of-order', 'clean the pages first', 'render-pages');
+    // stats and pictures in page millimetres (a scale applied since is undone for the numbers)
+    const f = this.docsFactor || 1;
+    const marksOf = new Map(this.tileMarks.map((m) => [m.file, m]));
+    const out: StageIO['render-pages']['out']['pages'] = [];
+    let n = 0;
+    for (const want of input.pages) {
+      ctx.checkCancel();
+      const pg = this.docs
+        .find((d) => d.file.id === want.file)
+        ?.pages.find((p) => p.page === want.page);
+      if (!pg) continue;
+      // the line work as the mask leaves it; the tile chrome is looked for on the whole page (a
+      // tile's own chrome is masked)
+      const marks = f === 1 ? marksOf.get(pg.file) : undefined;
+      const st = pageStats(pg, pageChains(pg), marks);
+      if (marks && st.hasTileMarks === false && pg.paths.some((p) => p.background)) {
+        const whole = { ...pg, paths: pg.paths.map((p) => ({ ...p, background: undefined })) };
+        st.hasTileMarks = marksOn(pageChains(whole), marks.sigs) > 0;
+      }
+      const png =
+        input.pictures === false ? null : await renderPagePng(pg, Math.max(64, input.maxPx));
+      out.push({
+        ...st,
+        widthMm: pg.widthMm / f,
+        heightMm: pg.heightMm / f,
+        lineLengthM: Math.round((st.lineLengthM / f) * 100) / 100,
+        png,
+      });
+      ctx.progress(++n, input.pages.length, `page ${pg.page + 1}`);
+    }
+    return { pages: out };
   }
 
   // ── fabrics (F7) ──────────────────────────────────────────────────────────────────────────

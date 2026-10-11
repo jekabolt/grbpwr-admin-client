@@ -33,6 +33,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
+import { AI_PAGES, PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { nameOriginOf } from 'lib/pattern-import/ai/dxf-names';
 import { planScopes } from 'lib/pattern-import/fabrics/scope';
 import { anisotropyOf, squareSidesOf } from '../formats';
@@ -52,6 +53,7 @@ import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { seedPoints } from './seeds';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
+import { aiAsideAssumptions } from './ai-pages';
 
 /** What the policy reads — N1's `AutoSnapshot` plus the card (the resolver closes over it). */
 export type AutopilotSnapshot = {
@@ -237,7 +239,11 @@ const snapOf = (x: AutopilotSnapshot): Snap => ({
  */
 export function autopilotAnswer(x: AutopilotSnapshot): AutopilotAnswer {
   const snap = snapOf(x);
-  const d0 = decideSnap(snap);
+  const d1 = decideSnap(snap);
+  // A9: the pages the AI + geometry set aside by themselves are strong assumptions of the run
+  // (no question asked them): recorded with the first answer the autopilot gives
+  const standing = aiAsideAssumptions(x.session, x.inputs.autopilot ?? []);
+  const d0 = standing.length ? { ...d1, assumptions: [...standing, ...d1.assumptions] } : d1;
   // every answer carries its replayable value (kind + subject + value), not only its words
   const d = {
     ...d0,
@@ -613,15 +619,30 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
   // a page set aside that holds line work stays aside only on positive evidence it is not
   // pattern (Codex re-check #5): else the page-role question
   const check = s.clean.dropped.filter((d) => d.status === 'suggest');
+  // A9: the AI reads a page set aside as pattern — never passed over: the question, with "read it
+  // as a tile" pre-filled
+  const back = check.find(
+    (d) => d.ai && PATTERN_ROLES.has(d.ai.role) && d.ai.confidence >= AI_PAGES.patternMin,
+  );
+  if (back)
+    return stopAt(
+      'files',
+      `${pageSubject(s, back.file, back.page)} was set aside as ${back.cls} but the AI reads it as a pattern page (${aiWords(back.ai!)}) — read it as a tile? (pre-filled: read as tile)`,
+    );
   const blind = check.find((d) => !notPatternEvidence(d, s.pages));
   if (blind) {
     const c = s.pages.find((p) => p.file === blind.file && p.page === blind.page);
     const ink = c?.ink
       ? `; ${c.ink.strokeM} m of line, ${c.ink.texts} text items${c.ink.raster ? `, pictures ${Math.round(c.ink.raster * 100)} %` : ''}`
       : '';
+    // A9: the AI alone (below 0.85, or no geometry agrees) — the stop carries its answer pre-filled
+    const ai =
+      blind.ai && blind.ai.role !== 'other'
+        ? ` The AI reads it as ${aiWords(blind.ai)}${blind.geo?.length ? '' : ' and nothing in its geometry agrees'} — pre-filled: keep it aside.`
+        : '';
     return stopAt(
       'files',
-      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?`,
+      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?${ai}`,
     );
   }
   const roleSet = new Set(
@@ -641,7 +662,11 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
           pageSubject(s, d.file, d.page),
           `set aside (${d.cls})`,
           'a page the reader set aside stays aside on evidence it is not pattern',
-          [notPatternEvidence(d, s.pages)!, d.why.slice(0, 120)],
+          [
+            notPatternEvidence(d, s.pages)!,
+            d.why.slice(0, 120),
+            ...(d.ai ? [`AI: ${aiWords(d.ai)}`] : []),
+          ],
           0.6,
           // an overview set aside holds pattern-like line work: a strong assumption
           d.cls === 'overview',
