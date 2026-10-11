@@ -564,11 +564,8 @@ const NOT_PATTERN_WORDS =
  * instructions / cover role at 0.7 or more, or a word on the page that names it. (A text-only page
  * is never "to check": clean sets it aside by itself.) Null = none (the page-role question).
  */
-/** A cover / instructions page with this much line work (m) or more is not text- or image-led. */
+/** Line work (m) a picture-led page stays under; a text-led one gets this per 100 text items. */
 const INK_LINES_MAX_M = 1;
-
-/** An overview's tile grid at most this share of the tile size reads as a reduced drawing. */
-const OVERVIEW_REDUCED_MAX = 0.7;
 
 function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
@@ -579,22 +576,19 @@ function notPatternEvidence(
   // draws no closed outline of piece size — a line-heavy "cover" may be a pattern page
   if (c && (c.cls === 'instructions' || c.cls === 'cover') && c.confidence >= 0.7) {
     const k = c.ink;
+    // led by pictures (≥ 30 % raster, < 1 m of line) or by text (≥ 10 items, at most 1 m of
+    // line per 100 text items)
     const led =
-      k && k.strokeM < INK_LINES_MAX_M && (k.raster >= 0.3 || k.texts >= 10 || k.chars >= 500);
+      !!k &&
+      ((k.raster >= 0.3 && k.strokeM < INK_LINES_MAX_M) ||
+        (k.texts >= 10 && k.strokeM <= Math.max(INK_LINES_MAX_M, k.texts / 100)));
     if (led && !d.face)
       return `${c.cls} ${c.confidence.toFixed(2)} + ${k.raster >= 0.3 ? `pictures ${Math.round(k.raster * 100)} %` : `${k.texts} text items`}, ${k.strokeM} m of line, no piece-sized outline`;
   }
-  // an overview: the classifier AND a second, independent fact — the tile grid it draws is at a
-  // reduced scale, or its page format is not the tiles' (it cannot sit in their grid)
-  if (c && c.cls === 'overview' && c.confidence >= 0.7) {
-    const second =
-      c.reduced != null && c.reduced <= OVERVIEW_REDUCED_MAX
-        ? `its tile grid is drawn at ${c.reduced.toFixed(2)} of the tile size (1:${Math.round(1 / c.reduced)})`
-        : /other page format/.test(c.why)
-          ? "its page format is not the tiles' (it cannot sit in their grid)"
-          : null;
-    if (second) return `overview ${c.confidence.toFixed(2)} + ${second}`;
-  }
+  // an overview: the classifier AND a second, independent fact — its outlines are the tiles'
+  // whole pieces at a smaller scale (a shape match, not the classifier's lattice; Codex final #5)
+  if (c && c.cls === 'overview' && c.confidence >= 0.7 && d.reducedCopy)
+    return `overview ${c.confidence.toFixed(2)} + ${d.reducedCopy.matches} outlines are tile pieces at 1:${Math.round(1 / d.reducedCopy.scale)} (shape match)`;
   const w = d.face ? null : NOT_PATTERN_WORDS.exec(`${d.why} ${c?.why ?? ''}`);
   if (w) return `the page says «${w[0]}»`;
   return null;
@@ -612,11 +606,16 @@ function filesStep({ session: s, inputs: i, presegmented, blocker }: Snap): Auto
   // pattern (Codex re-check #5): else the page-role question
   const check = s.clean.dropped.filter((d) => d.status === 'suggest');
   const blind = check.find((d) => !notPatternEvidence(d, s.pages));
-  if (blind)
+  if (blind) {
+    const c = s.pages.find((p) => p.file === blind.file && p.page === blind.page);
+    const ink = c?.ink
+      ? `; ${c.ink.strokeM} m of line, ${c.ink.texts} text items${c.ink.raster ? `, pictures ${Math.round(c.ink.raster * 100)} %` : ''}`
+      : '';
     return stopAt(
       'files',
-      `file ${blind.file} page ${blind.page + 1} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing})` : ''} — is it a pattern page?`,
+      `${pageSubject(s, blind.file, blind.page)} was set aside as ${blind.cls} but holds line work${blind.drawing ? ` (${blind.drawing}${blind.face ? ', a piece-sized outline' : ''}${ink})` : ''} — is it a pattern page?`,
     );
+  }
   const roleSet = new Set(
     i.cleanEdits.flatMap((e) => ('role' in e ? [`${e.file}:${e.page}`] : [])),
   );

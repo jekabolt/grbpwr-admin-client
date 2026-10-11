@@ -100,13 +100,6 @@ function overviewLattice(p: IRPage, tileAspect: number): boolean {
   return len >= 4 * (lat.sx + lat.sy);
 }
 
-/** An overview's tile grid: one lattice cell ÷ the tile's short side (0.2 = drawn at 1:5). */
-function reducedOf(p: IRPage, tileShortMm: number): { reduced?: number } {
-  const lat = detectLattice(p);
-  if (!lat || !(tileShortMm > 0)) return {};
-  return { reduced: Math.round((Math.min(lat.sx, lat.sy) / tileShortMm) * 1000) / 1000 };
-}
-
 /** A10: what a cover / instructions page is made of (the autopilot asks text- or image-led). */
 const inkOf = (f: PageFeatures) => ({
   ink: {
@@ -334,8 +327,6 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
           cls: 'overview',
           confidence: 0.85,
           why: `reduced drawing with the tile grid${isTileFmt(f) ? '' : ' (other page format)'}`,
-          // A10: the scale the tile grid is drawn at (its cell ÷ the tile format)
-          ...reducedOf(p, tileDims[0]),
         });
       else if (f.strokeLenM < 0.2 && f.texts <= 3 && f.rasterCover < 0.2)
         cls.set(p.page, { ...base, cls: 'blank', confidence: 0.9, why: 'nothing drawn, no text' });

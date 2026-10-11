@@ -53,6 +53,7 @@ import {
   type Found,
 } from './detect';
 import { pageChains, type PageChains } from './page-chains';
+import { REDUCED_COPY, reducedCopy, shapesOf } from './reduced-copy';
 import { SegGrid } from '../chains/geom';
 import { DEFAULT_CHAIN_OPTS } from '../chains/build';
 import { makeChains } from '../chains/make';
@@ -191,6 +192,25 @@ export function cleanPages(
         ...(art && pg && pieceFace(pg) ? { face: true } : {}),
       };
     });
+  // A10 (Codex final #5): an overview page is a reduced copy when its outlines are the tiles'
+  // whole pieces at a smaller scale (shape match, not the classifier's lattice)
+  const overviews = dropped.filter((d) => d.cls === 'overview' && d.status === 'suggest');
+  if (overviews.length) {
+    const tileShapes = docs.flatMap((doc) =>
+      doc.pages
+        .filter((p) => roleOf.get(pageKey(doc.file.id, p.page))?.cls === 'tile')
+        .flatMap((p) => shapesOf(pageChains(p).chains, PATIMPORT.minPieceAreaMm2)),
+    );
+    for (const d of overviews) {
+      const pg = docPage.get(pageKey(d.file, d.page));
+      if (!pg || !tileShapes.length) continue;
+      const rc = reducedCopy(
+        shapesOf(pageChains(pg).chains, REDUCED_COPY.minOverviewMm2),
+        tileShapes,
+      );
+      if (rc) d.reducedCopy = rc;
+    }
+  }
   const droppedOf = new Map(dropped.map((d) => [pageKey(d.file, d.page), d]));
   const notes: string[] = [];
   const pages: PageMask[] = [];
@@ -614,17 +634,12 @@ function demote(f: Found, why: string) {
  * What on a page could be pattern line work: a line ≥ 100 mm or a closed contour of a piece's
  * size (`minPieceAreaMm2`). Null = nothing (a text page, a cover with a photo) — safe to set aside.
  */
-/** A10: a closed outline of piece size anywhere on the page. */
+/**
+ * A10: a closed outline of piece size anywhere on the page — not a rectangle (a text box, a page
+ * frame, a table: `shapesOf` leaves those out).
+ */
 function pieceFace(pg: IRPage): boolean {
-  for (const c of pageChains(pg).chains) {
-    if (!c.closed) continue;
-    let a = 0;
-    const q = c.pts;
-    for (let k = 0, j = q.length - 1; k < q.length; j = k++)
-      a += (q[j].x + q[k].x) * (q[j].y - q[k].y);
-    if (Math.abs(a) / 2 >= PATIMPORT.minPieceAreaMm2) return true;
-  }
-  return false;
+  return shapesOf(pageChains(pg).chains, PATIMPORT.minPieceAreaMm2).length > 0;
 }
 
 function patternLike(pg: IRPage): string | null {

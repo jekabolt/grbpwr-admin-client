@@ -252,6 +252,13 @@ export async function runCase(c: Case, mutate: string | null) {
   }
   const s = api.session;
   rec.trace = compress(trace);
+  // the pages clean set aside "to check", with the facts the policy reads (A10 r4)
+  rec.pagesAside = (s.clean?.dropped ?? [])
+    .filter((d) => d.status === 'suggest')
+    .map((d) => {
+      const c = s.pages.find((p) => p.file === d.file && p.page === d.page);
+      return `${d.cls} p${d.page + 1}${d.face ? ' face' : ''}${d.reducedCopy ? ` copy ${d.reducedCopy.matches}@${d.reducedCopy.scale}` : ''}${c?.ink ? ` ink ${c.ink.strokeM}m/${c.ink.texts}t` : ''}`;
+    });
   rec.setAside = (s.pieces?.setAside ?? []).map(
     (a) => `${a.reason} ${Math.round(a.areaMm2 / 100)}cm² ${a.seed?.text?.text ?? ''}`,
   );

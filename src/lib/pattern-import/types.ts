@@ -276,8 +276,6 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
-  /** For 'overview': the tile grid it draws, as a share of the tile size (0.2 = 1:5). */
-  reduced?: number;
   /** For 'cover' / 'instructions': line length (m), text items, characters, raster share. */
   ink?: { strokeM: number; texts: number; chars: number; raster: number };
   confidence: number;
@@ -2149,6 +2147,11 @@ export type CleanOutput = {
     drawing?: string;
     /** A10: the page draws a closed outline of piece size (it may be a piece). */
     face?: boolean;
+    /**
+     * A10: an overview whose outlines are the tile pages' whole pieces at a smaller scale (Hu shape
+     * match): how many matched, at what scale (clean/reduced-copy.ts).
+     */
+    reducedCopy?: { matches: number; scale: number };
   }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
