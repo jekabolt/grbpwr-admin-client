@@ -84,6 +84,7 @@ export function writeScopes(
     generator: string;
     dialect: WriteJob['dialect'];
     autopilot?: WriteJob['autopilot'];
+    replay?: WriteJob['replay'];
   },
   opts: WriteOptions = {},
 ): { scope: DraftScopeTarget; job: WriteJob; detail: WriteDetail }[] {
@@ -101,6 +102,7 @@ export function writeScopes(
       generator: input.generator,
       dialect: input.dialect,
       ...(input.autopilot ? { autopilot: input.autopilot } : {}),
+      ...(input.replay ? { replay: input.replay } : {}),
     };
     out.push({ scope, job, detail: writeDxfDetailed(job, opts) });
   }

@@ -1578,6 +1578,7 @@ export class Session {
           generator: input.generator,
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
+          ...(input.replay ? { replay: input.replay } : {}),
         },
         {
           rules: cardRules,
