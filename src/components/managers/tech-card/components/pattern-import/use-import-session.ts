@@ -263,6 +263,23 @@ export type ApplyState =
   | { phase: 'running'; progress: Record<string, ApplyProgress['state']> }
   | { phase: 'done'; result: ApplyResult; progress: Record<string, ApplyProgress['state']> };
 
+/**
+ * What a run reads off the card, as one string: the size run, the BOM fabric scopes, the pieces,
+ * patterns and block links it already holds (the draft binds to them). Not the manifests (read
+ * late, asynchronously) nor the style label (file names only).
+ */
+export function cardFingerprint(c: CardContext): string {
+  return JSON.stringify([
+    c.techCardId,
+    !!c.downloadOnly,
+    c.sizes.map((x) => [x.sizeId, x.token, x.rank]),
+    c.scopes.map((x) => [x.scopeKey, x.bomLineKey, x.fabricPurpose, x.isInterlining]),
+    c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
+    (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
+    (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+  ]);
+}
+
 export function useImportSession(deps: {
   client: ImportClient;
   card: CardContext;
@@ -271,6 +288,15 @@ export function useImportSession(deps: {
   applyDraft: ApplyDraftFn;
 }) {
   const { client, card, namer, buildDraft, applyDraft } = deps;
+  /** The card as the latest render sees it (an apply reads it, not the closure's). */
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  /**
+   * Codex re-check #1: the card this run read (sizes, BOM scopes, the pieces / patterns / links it
+   * holds), fingerprinted when the sizes stage reads it; an apply against a card that changed since
+   * uploads nothing.
+   */
+  const cardAt = useRef<string | null>(null);
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
@@ -359,6 +385,8 @@ export function useImportSession(deps: {
   async function run<S extends StageName>(stage: S, input: StageIO[S]['in']) {
     const id = sRef.current.sessionId;
     if (id == null) throw new Error('no session — read the files first');
+    // the stage that reads the card's run: what everything after it was built against
+    if (stage === 'sizes' || stage === 'extract') cardAt.current = cardFingerprint(cardRef.current);
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
     failureRef.current = null;
@@ -792,6 +820,16 @@ export function useImportSession(deps: {
             )
           )
             return;
+          // Codex re-check #1: the card changed since the run read it — nothing goes up
+          const stale = cardStale();
+          if (stale) {
+            setApply({
+              phase: 'done',
+              result: { ok: false, failedScope: '', message: stale, uploaded: [] },
+              progress: {},
+            });
+            return;
+          }
           // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
           const draft = {
             ...built,
@@ -1472,10 +1510,20 @@ export function useImportSession(deps: {
     await dispatch({ type: 'semantics', input: semanticsInput(next) });
   }
 
+  /** Why the card is no longer the one this run read (null = the same card). */
+  function cardStale(): string | null {
+    if (cardAt.current == null) return null;
+    return cardFingerprint(cardRef.current) === cardAt.current
+      ? null
+      : 'the card changed since this run read it (sizes, BOM fabrics or its pieces / patterns) — nothing was uploaded: go back to sizes to run against the card as it is now';
+  }
+
   return {
     session,
     inputs,
     apply,
+    /** Codex re-check #1: the card changed since the run read it (the reason), else null. */
+    cardStale,
     sheetModes,
     setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
       operatorActs();

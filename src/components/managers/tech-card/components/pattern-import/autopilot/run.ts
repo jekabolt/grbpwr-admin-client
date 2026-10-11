@@ -37,6 +37,8 @@ export async function autopilotApply(
 ): Promise<ApplyOutcome> {
   const step = (): WizardStep => get().session.step;
   if (step() !== 'check') return { ok: false, step: 'check', reason: `not on check (${step()})` };
+  const stale = get().cardStale();
+  if (stale) return { ok: false, step: 'check', reason: stale };
   const blocks = gateBlocks(get());
   if (blocks.length)
     return { ok: false, step: 'check', reason: `the gate blocks: ${blocks.join(', ')}` };
