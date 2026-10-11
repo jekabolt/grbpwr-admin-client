@@ -60,6 +60,58 @@ import { splitSize } from './worker-entry';
 
 type Case = (typeof CASES)[number];
 
+/** Labelled points inside the truth pieces (sheet mm), from the click fixture of the truth id. */
+function truthPoints(c: Case): { label: string; at: { x: number; y: number } }[] {
+  const tid = c.truth?.id;
+  const key =
+    c.clicks ?? (tid ? CASES.find((x) => x.truth?.id === tid && x.clicks)?.clicks : undefined);
+  if (!key) return [];
+  try {
+    const fx = JSON.parse(
+      readFileSync(
+        resolve(
+          process.env.PATIMPORT_REPO ?? process.cwd(),
+          'scripts/pattern-import/fixtures/pieces-clicks.json',
+        ),
+        'utf8',
+      ),
+    ) as Record<string, { clicks?: { label: string; at: [number, number] }[] }>;
+    return (fx[key]?.clicks ?? []).map((k) => ({ label: k.label, at: { x: k.at[0], y: k.at[1] } }));
+  } catch {
+    return [];
+  }
+}
+
+/** A truth point this close (mm) to an exported outline it is not inside still names it. */
+const GEO_NEAR_MM = 40;
+
+/** Distance (mm) from a point to a closed polygon's edges. */
+function distToPoly(p: { x: number; y: number }, q: readonly { x: number; y: number }[]): number {
+  let best = Infinity;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const a = q[j];
+    const b = q[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
+    best = Math.min(best, Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)));
+  }
+  return best;
+}
+
+/** Even-odd point in polygon. */
+function insidePoly(p: { x: number; y: number }, q: readonly { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++)
+    if (
+      q[i].y > p.y !== q[j].y > p.y &&
+      p.x < ((q[j].x - q[i].x) * (p.y - q[i].y)) / (q[j].y - q[i].y) + q[i].x
+    )
+      inside = !inside;
+  return inside;
+}
+
 const CORPUS =
   process.env.PATIMPORT_CORPUS ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
@@ -330,11 +382,68 @@ export async function runCase(c: Case, mutate: string | null) {
   const reached = rec.verdict === 'apply';
   if (truth && sem) {
     const tps = truth.variants[c.truth?.variant ?? 0]?.pieces ?? [];
-    const match = (sd: SeedId) => {
+    const byLabel = (sd: SeedId) => {
       const l = labelOf(sd);
       if (!l) return null;
       const n = norm(l);
       return tps.find((x) => norm(x.label) === n || norm(x.label.split(' / ')[0]) === n) ?? null;
+    };
+    // geometry first (A10 r4): a truth point (a labelled click inside each truth piece, sheet mm —
+    // fixtures/pieces-clicks.json, by the case's truth id) inside the exported piece's outline; a
+    // label decides only a tie (several points in one outline) or where no truth point exists
+    const pts = truthPoints(c);
+    const outerOf = (sd: SeedId) => {
+      const fam = s.pieces?.families.find((f) => f.seed === sd);
+      const best = fam?.candidates
+        .filter((x) => x.outcome === 'closed' && x.outer.length > 2)
+        .sort((x, y) => y.areaMm2 - x.areaMm2)[0];
+      return best ? { outer: best.outer, area: best.areaMm2 } : null;
+    };
+    // one truth point per exported piece: a point inside several outlines (a piece drawn inside
+    // another — wm's collar on the back) goes to the smallest; a piece with no point inside takes
+    // the nearest free point within GEO_NEAR_MM of its outline (a fixture point clicked on a
+    // larger size of the nest); a label breaks a tie only
+    const geo = new Map<SeedId, string>();
+    const nearBy = new Map<SeedId, number>();
+    if (pts.length) {
+      const seedsAll = [...new Set(sem.pieces.map((p) => p.seed))];
+      const outs = new Map(seedsAll.map((sd) => [sd, outerOf(sd)] as const));
+      const free = new Set(pts.map((p) => p.label));
+      for (const p of pts) {
+        const owners = seedsAll
+          .filter((sd) => {
+            const o = outs.get(sd);
+            return !!o && !geo.has(sd) && insidePoly(p.at, o.outer);
+          })
+          .sort((x, y) => outs.get(x)!.area - outs.get(y)!.area);
+        const lab = owners.find((sd) => byLabel(sd) && norm(byLabel(sd)!.label) === norm(p.label));
+        const sd = lab ?? owners[0];
+        if (sd == null) continue;
+        geo.set(sd, p.label);
+        free.delete(p.label);
+      }
+      for (const sd of seedsAll) {
+        const o = outs.get(sd);
+        if (geo.has(sd) || !o) continue;
+        const near = pts
+          .filter((p) => free.has(p.label))
+          .map((p) => ({ p, d: distToPoly(p.at, o.outer) }))
+          .sort((x, y) => x.d - y.d)[0];
+        if (near && near.d <= GEO_NEAR_MM) {
+          nearBy.set(sd, Math.round(near.d));
+          geo.set(sd, near.p.label);
+          free.delete(near.p.label);
+        }
+      }
+      rec.geo = seedsAll.map(
+        (sd) =>
+          `seed ${sd} → ${geo.get(sd) ?? '—'}${nearBy.has(sd) ? ` (near, ${nearBy.get(sd)} mm off)` : ''}`,
+      );
+    }
+    const match = (sd: SeedId) => {
+      if (!pts.length) return byLabel(sd);
+      const l = geo.get(sd);
+      return l ? tps.find((x) => norm(x.label) === norm(l)) ?? null : null;
     };
     const bySeed = new Map<SeedId, typeof sem.pieces>();
     for (const p of sem.pieces) bySeed.set(p.seed, [...(bySeed.get(p.seed) ?? []), p]);
