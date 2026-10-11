@@ -80,7 +80,7 @@ import {
 import { renderSom } from '../ai/som';
 import { writeAndGate } from '../gate';
 import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
-import { gradeView } from '../chains/face-role';
+import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
 import { detectSizeRun } from '../sizes';
 import {
@@ -92,6 +92,7 @@ import {
 } from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
 import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
+import { fileSizeLabel } from '../sizes/recover';
 import {
   applyPieceEdits,
   applyWallEdits,
@@ -959,7 +960,10 @@ export class Session {
       const countFeed = {
         texts: feed.texts,
         files: feed.files,
-        models: variantLabels([...sheet.texts.map((t) => t.text), ...this.docTexts]).length,
+        models: variantLabels(feed.texts.map((t) => t.text)).length,
+        // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
+        // graded look against it is asked, never held silently
+        sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
       };
       set = buildChainsDetailed(
         sheet,
@@ -1025,7 +1029,13 @@ export class Session {
   private countEv: { key: string; set: ChainSet; v: ReturnType<typeof countEvidence> } | null =
     null;
   private countAsk(read: SizeRun): SizeCountAsk | null {
-    if (expectedSizes(read, null, this.chains ?? undefined)?.from === 'source') return null;
+    // gb2: a file name's one size against lines that look graded (chains/face-role sourceClash) is
+    // no settled count: the step asks it
+    if (
+      expectedSizes(read, null, this.chains ?? undefined)?.from === 'source' &&
+      !(this.chains && sourceClash(this.chains))
+    )
+      return null;
     if (
       this.fast &&
       !this.fast.families.some((f) => f.candidates.some((c) => (c as DxfPieceCandidate).oneSize))
@@ -1041,7 +1051,18 @@ export class Session {
     const sheet = this.sheet;
     const key = `${sheet.id}`;
     if (this.countEv?.set !== set || this.countEv.key !== key) {
-      const faces = this.facesOf(set, read, PATIMPORT.fillCellMm);
+      // the geometry as the size checks read it (gradeView: the face pass's candidate size lines
+      // are walls) — on the canonical set a graded sheet's held sizes are no walls and its outlines
+      // would read one line deep
+      const view = gradeView(set);
+      const faces =
+        view === set
+          ? this.facesOf(set, read, PATIMPORT.fillCellMm)
+          : {
+              map: faceMap(sheet, view, read, (this.textSeeds ??= proposeSeeds(sheet, set)), {
+                cellMm: PATIMPORT.fillCellMm,
+              }),
+            };
       const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
       const cands = new Set(shapeCandidates(faces.map.blobs).map((b) => b.id));
       this.countEv = {

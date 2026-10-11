@@ -90,6 +90,8 @@ export type FaceRoleOpts = {
     | 'proof'
     | 'lanes'
     | 'gate'
+    // the file name's one size against a graded look: held silently, not asked
+    | 'clash'
   >;
 };
 
@@ -102,6 +104,12 @@ export type FaceSizeCtx = {
   files?: readonly { id: string; name: string }[];
   /** Models the sheet names (more than one → the count is never inferred). */
   models?: number;
+  /**
+   * The size the source itself reads as its only one (sizes/detect: one uploaded file, a size in
+   * its name — the solver takes it as 'source', one size). Not a proof here: where the lines look
+   * graded the two contradict, and the held row is asked instead of held silently.
+   */
+  sourceOne?: string | null;
 };
 
 /**
@@ -327,6 +335,10 @@ export function rolesByFaces(
       confidence: 0.4,
     });
   }
+  // the source reads itself as one size (a size in its one file's name) while the lines look graded:
+  // a contradiction — the solver would stand down (one size) with these lines no walls, so the row
+  // is asked, not held silently (gradeView still hands it to the size checks until answered)
+  const clash = sizeLines.length && !off.has('clash') ? sizes.sourceOne ?? null : null;
   if (sizeLines.length)
     // candidate size lines: no wall for the fill, no feature for semantics (role 'ignore'), not
     // asked (≥ 0.6); gradeView hands them to the size checks as unconfirmed lines of some size
@@ -335,8 +347,16 @@ export function rolesByFaces(
       sizeLabel: null,
       chains: sizeLines,
       totalLengthMm: len(sizeLines),
-      evidence: [{ kind: 'face-graded', why: gateWhy! }],
-      confidence: 0.6,
+      evidence: [
+        {
+          kind: 'face-graded',
+          why: clash
+            ? `these lines look like other sizes (${gateWhy}); the file name says one size, ${clash}`
+            : gateWhy!,
+          ...(clash ? { sourceOne: clash } : {}),
+        },
+      ],
+      confidence: clash ? 0.4 : 0.6,
     });
   for (const c of others) push({ ...c });
   const pieceSet = new Set(piece);
@@ -352,6 +372,18 @@ export function rolesByFaces(
     ],
   };
 }
+
+/**
+ * gb2: the unanswered candidate row whose lines look like other sizes while the source names one
+ * size (its file name) — the sizes step asks the count, and the row stays a question until the
+ * operator answers either.
+ */
+export const sourceClash = (set: ChainSet): string | null => {
+  for (const c of set.classes)
+    if (c.confidence < 0.9)
+      for (const e of c.evidence) if (e.kind === 'face-graded' && e.sourceOne) return e.sourceOne;
+  return null;
+};
 
 const gradeViews = new WeakMap<ChainSet, ChainSet>();
 

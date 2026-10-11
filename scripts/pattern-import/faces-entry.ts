@@ -23,6 +23,7 @@ import {
   gradeView,
   rolesByFaces,
   STRAY_LANES,
+  sourceClash,
   strayLanes,
   type FaceRoleOpts,
   type FaceSizeCtx,
@@ -31,7 +32,12 @@ import { confirmRows, withClassSigs } from 'lib/pattern-import/chains/legend';
 import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
-import { sheetFeed } from 'lib/pattern-import/sizes/count-evidence';
+import {
+  blobShapes,
+  countEvidence,
+  shapeCandidates,
+  sheetFeed,
+} from 'lib/pattern-import/sizes/count-evidence';
 import { readRawDxf } from 'lib/pattern-import/gate';
 import { srcKey } from 'lib/pattern-import/clean';
 import { nestedPieces } from 'lib/pattern-import/gate/checks';
@@ -944,8 +950,9 @@ function synthRoles() {
 const GV = { n: 3, W: 240, H: 300, d: 6, e: 5, lineY: 100, ext: 100 };
 /** gb2: the face pass's stray gate off — A0.3's stray row, what gradeView guards behind the gate. */
 const GATE_OFF: FaceRoleOpts = { off: new Set(['gate']) };
-function gradeViewSheet(faceOpts?: FaceRoleOpts) {
-  const { n, W, H, d, e, lineY, ext } = GV;
+function gradeViewSheet(faceOpts?: FaceRoleOpts, countFeed?: FaceSizeCtx, nSizes = GV.n) {
+  const { W, H, d, e, lineY, ext } = GV;
+  const n = nSizes;
   const draws: { tag: string; pts: PtMm[] }[] = [
     {
       tag: 'fold',
@@ -988,7 +995,7 @@ function gradeViewSheet(faceOpts?: FaceRoleOpts) {
       joinAngleDeg: PATIMPORT.joinAngleDeg,
       joinLateralMm: PATIMPORT.joinLateralMm,
     },
-    { extraTexts: [], faceOpts },
+    { extraTexts: [], faceOpts, countFeed },
   );
   const set = withClassSigs(built, styles);
   const tagOf = (id: number) => draws[set.chains[id].ranges[0].path].tag;
@@ -1362,20 +1369,22 @@ async function synthStrayGate() {
         `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x},${y} ${x + 1},${y}"/>`,
     )
     .join('')}</svg>`;
-  const bytes = new TextEncoder().encode(svg);
-  const ses = new Session(1, [
-    { name: 'fixture.svg', bytes: bytes.buffer.slice(0) as ArrayBuffer },
-  ]);
-  const run1 = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
-    ses.runStage(st, input, ctx());
-  await run1('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
-  const cl = await run1('clean', { edits: [] });
-  const best = cl.scale[0];
-  if (best)
-    await run1('scale', {
-      decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
-    });
-  await run1('assemble', { sheet: 0 });
+  const svgSession = async (name: string) => {
+    const bytes = new TextEncoder().encode(svg);
+    const ses = new Session(1, [{ name, bytes: bytes.buffer.slice(0) as ArrayBuffer }]);
+    const run1 = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
+      ses.runStage(st, input, ctx());
+    await run1('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    const cl = await run1('clean', { edits: [] });
+    const best = cl.scale[0];
+    if (best)
+      await run1('scale', {
+        decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
+      });
+    await run1('assemble', { sheet: 0 });
+    return { ses, run1 };
+  };
+  const { ses, run1 } = await svgSession('fixture.svg');
   const opts = {
     joinGapMm: PATIMPORT.joinGapMm,
     joinAngleDeg: PATIMPORT.joinAngleDeg,
@@ -1452,6 +1461,118 @@ async function synthStrayGate() {
     'worker: 3 sizes answered, a click in the piece → 3 contours closed, no size refusal',
     sz.expected?.n === GV.n && wf.closed === GV.n && !wf.refusals.length,
     wf,
+  );
+
+  // the file name says one size (the solver would read 'pattern_38.svg' as one size, source) while
+  // the lines look graded: a contradiction — the held row is asked, still handed to the size checks
+  const clashRow = (v: ChainSet) =>
+    v.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const cf = gradeViewSheet(undefined, { sourceOne: '38' });
+  const cr = clashRow(cf.set);
+  check(
+    S,
+    'file name 38 against a graded look: the held row is asked (< 0.6, names the clash), gradeView still hands it back',
+    !!cr &&
+      cr.confidence < 0.6 &&
+      cr.evidence.some((x) => x.kind === 'face-graded' && x.sourceOne === '38') &&
+      sourceClash(cf.set) === '38' &&
+      sizeTags.every((t) => roleIn(gradeView(cf.set), t) === 'internal'),
+    { conf: cr?.confidence, why: cr?.evidence },
+  );
+  const cm = gradeViewSheet({ off: new Set(['clash']) }, { sourceOne: '38' });
+  check(
+    S,
+    'clash off: held silently (0.6, not asked) (mutation)',
+    (clashRow(cm.set)?.confidence ?? 0) >= 0.6 && !sourceClash(cm.set),
+    clashRow(cm.set)?.confidence,
+  );
+  const w2 = await svgSession('pattern_38.svg');
+  const c0 = await w2.run1('chains', { opts });
+  const cRow = c0.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const s0 = await w2.run1('sizes', { card: CARD3 });
+  check(
+    S,
+    'worker, pattern_38.svg: the held row asked, the source reads one size, and the sizes step asks the count',
+    !!cRow &&
+      cRow.confidence < 0.6 &&
+      s0.expected?.from === 'source' &&
+      s0.expected.n === 1 &&
+      s0.countAsk != null,
+    { row: cRow?.confidence, expected: s0.expected, ask: s0.countAsk != null },
+  );
+  const s1 = await w2.run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const p1 = await w2.run1('pieces', {
+    seeds: [{ id: 0, at, origin: 'click', variant: null }],
+    edits: [],
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+  });
+  const c1 = p1.families.flatMap((f) => f.candidates);
+  const w2f = {
+    expected: s1.expected,
+    closed: c1.filter((c) => c.outcome === 'closed').length,
+    refusals: [...new Set(c1.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+  };
+  check(
+    S,
+    'worker, pattern_38.svg: 3 sizes answered → the held lines are size walls, 3 contours close',
+    s1.expected?.from === 'operator' && w2f.closed === GV.n && !w2f.refusals.length,
+    w2f,
+  );
+
+  // A6's geometry is the size checks' (gradeView): two pieces drawn in 3 sizes, the face pass held
+  // the two outer sizes (the candidate row), one sample label "SIZE: M" — on the canonical set each
+  // outline reads one line deep and A6 would infer one size (its walls lost); on gradeView it does not
+  const sixRects = [0, 600].flatMap((x0) =>
+    [0, 1, 2].map((r) => rect(x0 - 6 * r, -5 * r, x0 + 240 + 6 * r, 300 + 5 * r)),
+  );
+  const a6Chains = sixRects.map((q, k) => chainOf(k, q, true));
+  const a6Set: ChainSet = {
+    chains: a6Chains,
+    classes: [
+      {
+        id: 0,
+        role: 'common',
+        sizeLabel: null,
+        chains: [0, 3],
+        totalLengthMm: a6Chains[0].lengthMm * 2,
+        evidence: [],
+        confidence: 0.5,
+      },
+      {
+        id: 1,
+        role: 'ignore',
+        sizeLabel: null,
+        chains: [1, 2, 4, 5],
+        totalLengthMm: [1, 2, 4, 5].reduce((a, k) => a + a6Chains[k].lengthMm, 0),
+        evidence: [{ kind: 'face-graded', why: 'probe' }],
+        confidence: 0.6,
+      },
+    ],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const a6Sheet = sheetOf({ minX: -40, minY: -40, maxX: 900, maxY: 340 }, [], [], [STYLE(0, null)]);
+  const a6 = (v: ChainSet) => {
+    const read2 = detectSizeRun(a6Sheet, v, [
+      { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+    ]);
+    const map = faceMap(a6Sheet, v, read2, [], { cellMm: PATIMPORT.fillCellMm });
+    const cands = new Set(shapeCandidates(map.blobs).map((b) => b.id));
+    return countEvidence({
+      texts: [{ text: 'SIZE: M', file: null }],
+      blobs: map.blobs,
+      shapes: blobShapes(map, cands),
+      files: [],
+    }).n;
+  };
+  const nView = a6(gradeView(a6Set));
+  const nCanon = a6(a6Set);
+  check(
+    S,
+    'A6 on gradeView: the held sizes are walls, one size is not inferred (on the canonical set it would be: mutation)',
+    nView !== 1 && nCanon === 1,
+    { nView, nCanon },
   );
 }
 

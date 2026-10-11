@@ -414,7 +414,12 @@ export type ClassEvidence =
    * feature), not asked; chains/face-role gradeView hands them to the size checks. `why` = the
    * evidence that the sheet may draw several sizes.
    */
-  | { kind: 'face-graded'; why: string };
+  | {
+      kind: 'face-graded';
+      why: string;
+      /** The one size the source names (its file name) against the graded look: the row is asked. */
+      sourceOne?: string;
+    };
 
 export type LineClass = {
   id: ClassId;

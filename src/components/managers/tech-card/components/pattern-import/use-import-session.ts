@@ -1179,7 +1179,15 @@ export function useImportSession(deps: {
         if (s.sizes?.countAsk && !s.sizes.expected)
           return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
-          (c) => c.confidence < 0.6 && !inputs.legendConfirmed.includes(legendKey(c)),
+          (c) =>
+            c.confidence < 0.6 &&
+            !inputs.legendConfirmed.includes(legendKey(c)) &&
+            // gb2: the file name's one size against a graded look — answering the sizes drawn
+            // settles it as well as confirming the row
+            !(
+              s.sizes?.expected?.from === 'operator' &&
+              c.evidence.some((x) => x.kind === 'face-graded' && x.sourceOne)
+            ),
         );
         if (pending.length)
           return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
