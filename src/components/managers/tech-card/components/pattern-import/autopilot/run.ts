@@ -109,7 +109,7 @@ export function hookDriveCtx(
 /** The autopilot's resolver with the hook's extras (the first run's seeds, the DXF fast path). */
 export const resolverFor = (
   card: CardContext,
-  get: () => Pick<ImportSessionApi, 'baseSeeds' | 'extracted'>,
+  get: () => Pick<ImportSessionApi, 'baseSeeds' | 'extracted' | 'runCard'>,
   onStop?: (stop: AutopilotStop) => void,
 ) =>
   autopilotResolver(card, {
@@ -117,5 +117,6 @@ export const resolverFor = (
     extra: () => ({
       baseSeeds: get().baseSeeds,
       presegmented: !!get().extracted.presegmented,
+      card: get().runCard,
     }),
   });

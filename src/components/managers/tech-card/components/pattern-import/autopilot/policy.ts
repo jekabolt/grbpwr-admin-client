@@ -267,7 +267,8 @@ export function autopilotResolver(
   card: CardContext,
   opts: {
     onStop?: (stop: AutopilotStop) => void;
-    extra?: () => Pick<AutopilotSnapshot, 'baseSeeds' | 'presegmented'>;
+    /** Per question: the hook's extras, and the card snapshot the run reads (else `card`). */
+    extra?: () => Pick<AutopilotSnapshot, 'baseSeeds' | 'presegmented'> & { card?: CardContext };
   } = {},
 ) {
   return (snap: {

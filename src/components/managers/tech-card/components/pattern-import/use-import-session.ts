@@ -287,16 +287,22 @@ export function useImportSession(deps: {
   buildDraft: DraftBuilder;
   applyDraft: ApplyDraftFn;
 }) {
-  const { client, card, namer, buildDraft, applyDraft } = deps;
-  /** The card as the latest render sees it (an apply reads it, not the closure's). */
-  const cardRef = useRef(card);
-  cardRef.current = card;
+  const { client, namer, buildDraft, applyDraft } = deps;
+  /** The LIVE card as the latest render sees it (only the freshness check reads it). */
+  const cardRef = useRef(deps.card);
+  cardRef.current = deps.card;
   /**
-   * Codex re-check #1: the card this run read (sizes, BOM scopes, the pieces / patterns / links it
-   * holds), fingerprinted when the sizes stage reads it; an apply against a card that changed since
-   * uploads nothing.
+   * Codex re-check #1 (r4): the card snapshot THIS run reads — taken once when the files are read
+   * (refreshed when the operator goes back to sizes or earlier); every stage, blocker and the draft
+   * read it through `rc()`, and its fingerprint is what the live card is compared with before apply.
    */
+  const runCard = useRef<CardContext | null>(null);
+  const rc = (): CardContext => runCard.current ?? cardRef.current;
   const cardAt = useRef<string | null>(null);
+  const takeCard = () => {
+    runCard.current = cardRef.current;
+    cardAt.current = cardFingerprint(runCard.current);
+  };
   /**
    * Codex re-check #2: one apply per draft. Taken synchronously — by the autopilot before its
    * check → apply move (`lockApply`), by the apply itself otherwise — and never handed twice: a
@@ -400,7 +406,6 @@ export function useImportSession(deps: {
     const id = sRef.current.sessionId;
     if (id == null) throw new Error('no session — read the files first');
     // the stage that reads the card's run: what everything after it was built against
-    if (stage === 'sizes' || stage === 'extract') cardAt.current = cardFingerprint(cardRef.current);
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
     failureRef.current = null;
@@ -542,6 +547,7 @@ export function useImportSession(deps: {
     try {
       switch (ev.type) {
         case 'files': {
+          takeCard();
           patchInputs({ ...EMPTY_INPUTS, fileList: ev.files });
           baseSeeds.current = null;
           heldNames.current = [];
@@ -682,7 +688,7 @@ export function useImportSession(deps: {
             legend: ev.edits,
           });
           const sizes = await run('sizes', {
-            card: card.sizes,
+            card: rc().sizes,
             drawnSizes: drawnNow() ?? undefined,
           });
           patchInputs({ sizeMap: null });
@@ -692,7 +698,7 @@ export function useImportSession(deps: {
         case 'size-map': {
           patchInputs({ sizeMap: ev.entries });
           const sizes = await run('sizes', {
-            card: card.sizes,
+            card: rc().sizes,
             operatorMap: ev.entries,
             drawnSizes: drawnNow() ?? undefined,
           });
@@ -704,7 +710,7 @@ export function useImportSession(deps: {
           const drawnSizesAt = ev.n == null ? null : drawnSizesKey(iRef.current);
           patchInputs({ drawnSizes: ev.n, drawnSizesAt, sizeMap: null });
           iRef.current = { ...iRef.current, drawnSizes: ev.n, drawnSizesAt, sizeMap: null };
-          const sizes = await run('sizes', { card: card.sizes, drawnSizes: ev.n ?? undefined });
+          const sizes = await run('sizes', { card: rc().sizes, drawnSizes: ev.n ?? undefined });
           patch({ sizes });
           return;
         }
@@ -723,7 +729,7 @@ export function useImportSession(deps: {
             const cleared = { drawnSizes: null, drawnSizesAt: null, sizeMap: null };
             iRef.current = { ...i0, ...cleared, variant: ev.variant };
             patchInputs(cleared);
-            const sizes = await run('sizes', { card: card.sizes });
+            const sizes = await run('sizes', { card: rc().sizes });
             patch(dropAfter({ ...sRef.current, sizes }, 'sizes'));
             return;
           }
@@ -781,7 +787,7 @@ export function useImportSession(deps: {
           // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
           // but is a PieceSpec field: hand it to semantics as an override, so the manifest, the
           // draft and the card read the same flag.
-          const fused = fusedSeeds(a, card.scopes);
+          const fused = fusedSeeds(a, rc().scopes);
           if (sem.pieces.some((p) => p.fused !== fused.has(p.seed))) {
             const overrides = { ...iRef.current.overrides };
             for (const sd of new Set(sem.pieces.map((p) => p.seed)))
@@ -798,7 +804,7 @@ export function useImportSession(deps: {
           const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
           if (open.length) throw new UnansweredQuestionsError(open);
           const out = await run('write', {
-            scopes: card.scopes,
+            scopes: rc().scopes,
             assignment: a,
             sizes: sizes.map.entries.flatMap((e) =>
               e.card
@@ -815,11 +821,11 @@ export function useImportSession(deps: {
             ),
             dialect: 'r12',
             generator: `grbpwr-admin pattern-import (${client.kind})`,
-            techCardId: card.techCardId,
+            techCardId: rc().techCardId,
             // A10: an autopilot run's assumptions ride in every written manifest
             ...autopilotOf(ev.autopilot, iRef.current.autopilot, sem.pieces),
           });
-          const draft = buildDraft(out, { card, semantics: sem });
+          const draft = buildDraft(out, { card: rc(), semantics: sem });
           patch({ draft, gate: out.gate, step: 'check' });
           return;
         }
@@ -827,7 +833,7 @@ export function useImportSession(deps: {
           const built = sRef.current.draft;
           // a download-only run has no BOM line to bind a file to: nothing is applied; and only
           // from the apply step, past a gate that blocks nothing (never on the way there)
-          if (!built || card.downloadOnly || sRef.current.step !== 'apply') return;
+          if (!built || rc().downloadOnly || sRef.current.step !== 'apply') return;
           if (
             Object.values(sRef.current.gate).some((g) =>
               g.checks.some((c) => !c.ok && c.severity === 'block'),
@@ -883,13 +889,27 @@ export function useImportSession(deps: {
           for (const d of sRef.current.draft?.downloads ?? []) downloadText(d.filename, d.dxfText);
           return;
         }
-        case 'back':
+        case 'back': {
+          // back to sizes or before: the stages run again — against the card as it is now
+          const changed = stepIndex(ev.to) <= stepIndex('sizes') && !!cardStale();
+          if (stepIndex(ev.to) <= stepIndex('sizes')) takeCard();
           if (sRef.current.names.length) heldNames.current = sRef.current.names;
           setApply({ phase: 'idle' });
           setNotice(null);
           setErrorCode(null);
           patch(dropAfter(sRef.current, ev.to));
+          // the card's size run changed under the map: the map is read again from the new run
+          if (changed && ev.to === 'sizes' && sRef.current.sizes) {
+            iRef.current = { ...iRef.current, sizeMap: null };
+            patchInputs({ sizeMap: null });
+            const sizes = await run('sizes', {
+              card: rc().sizes,
+              drawnSizes: drawnNow() ?? undefined,
+            });
+            patch({ sizes });
+          }
           return;
+        }
         case 'reset': {
           const old = sRef.current.sessionId;
           if (old != null) await client.close(old);
@@ -921,7 +941,7 @@ export function useImportSession(deps: {
     // outrank it; only unnamed / numeric / placeholder blocks are asked. Nothing to ask = no call.
     const plan = planNaming(
       fams,
-      card.sizes.map((c) => c.token),
+      rc().sizes.map((c) => c.token),
     );
     let names: NameDecision[] = [];
     let namerError: string | null = null;
@@ -930,7 +950,7 @@ export function useImportSession(deps: {
       setSom(out);
       patch({ busy: { stage: 'render-som', done: 1, total: 2, note: 'asking the AI for names' } });
       try {
-        names = await namer(out, { card, threshold: AI_AUTO_ACCEPT_T });
+        names = await namer(out, { card: rc(), threshold: AI_AUTO_ACCEPT_T });
       } catch (e) {
         namerError = `AI names unavailable (${e instanceof Error ? e.message : String(e)}) — type the codes by hand`;
       }
@@ -959,7 +979,7 @@ export function useImportSession(deps: {
     // The DXF knows its sizes (block names); they are mapped to the card's run here, before any
     // block name is written (owner decision 6). Going back to "sizes" edits this map.
     const sizes = await run('sizes', {
-      card: card.sizes,
+      card: rc().sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
       drawnSizes: drawnNow() ?? undefined,
     });
@@ -982,7 +1002,7 @@ export function useImportSession(deps: {
   async function toSizes() {
     const chains = await run('chains', { opts: chainOpts(), legend: iRef.current.legend });
     const sizes = await run('sizes', {
-      card: card.sizes,
+      card: rc().sizes,
       operatorMap: iRef.current.sizeMap ?? undefined,
       drawnSizes: drawnNow() ?? undefined,
     });
@@ -1061,7 +1081,7 @@ export function useImportSession(deps: {
           // The AI's fabric calls ride along; the worker uses them only where the sheet is silent,
           // only for names auto-accepted at T and never for a name the operator typed (C7).
           const aiHints = aiFabricHintsOf(s.names, iRef.current.editedNames);
-          const out = await run('fabrics', { bom: card.scopes, aiHints });
+          const out = await run('fabrics', { bom: rc().scopes, aiHints });
           // An assignment the operator already edited survives a round trip through `back`.
           const a = iRef.current.assignment ?? out;
           patch({ fabrics: a, step: 'fabrics' });
@@ -1082,8 +1102,8 @@ export function useImportSession(deps: {
   }
 
   const sizeTokens = useMemo(
-    () => new Set(card.sizes.map((c) => c.token.toLowerCase())),
-    [card.sizes],
+    () => new Set(rc().sizes.map((c) => c.token.toLowerCase())),
+    [deps.card, session.sessionId],
   );
 
   // ── what blocks "next" — said in words, in the footer, before the click ─────────────────
@@ -1118,7 +1138,7 @@ export function useImportSession(deps: {
         return null;
       }
       case 'sizes': {
-        if (!card.sizes.length) return 'the card has no size range — set it on the card first';
+        if (!rc().sizes.length) return 'the card has no size range — set it on the card first';
         if (s.sizes?.countAsk && !s.sizes.expected)
           return 'answer how many sizes are drawn on this sheet';
         const pending = (s.chains?.classes ?? []).filter(
@@ -1218,13 +1238,13 @@ export function useImportSession(deps: {
       case 'fabrics': {
         const a = s.fabrics;
         if (!a) return 'fabrics are not proposed yet';
-        if (!card.scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
+        if (!rc().scopes.length) return 'the BOM has no fabric lines — add them on the BOM tab';
         // C7: a cloth other than main on the AI's word alone is the operator's call
         const ai = (a.aiOnly ?? []).filter((x) => x.needsConfirm).length;
         if (ai)
           return `${ai} ${ai === 1 ? 'piece is' : 'pieces are'} cut from lining, interlining or another cloth on the AI's word alone — confirm or change the ticks`;
         // The same planner the write stage cuts the files with: what blocks here blocks there.
-        const problem = planScopes(s.semantics?.pieces ?? [], a, card.scopes).problems[0];
+        const problem = planScopes(s.semantics?.pieces ?? [], a, rc().scopes).problems[0];
         return problem ? problem.message : null;
       }
       case 'check': {
@@ -1240,7 +1260,7 @@ export function useImportSession(deps: {
     }
     // exportedSeed/sizeTokens are derived from session/card on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, inputs, card, extracted]);
+  }, [session, inputs, deps.card, extracted]);
 
   /** N1: what the step offers without blocking on it (a suggestion waiting for accept). */
   const offer = session.busy
@@ -1249,7 +1269,7 @@ export function useImportSession(deps: {
         ...session,
         presegmented: !!extracted.presegmented,
         cleanEdits: inputs.cleanEdits,
-        scopes: card.scopes.length,
+        scopes: rc().scopes.length,
         fabricsEdited: inputs.assignment != null,
         sheetPicked: inputs.sheetPicked,
       });
@@ -1569,6 +1589,8 @@ export function useImportSession(deps: {
     session,
     inputs,
     apply,
+    /** Codex re-check #1 (r4): the card snapshot this run reads (the autopilot reads it too). */
+    runCard: rc(),
     /** Codex re-check #1: the card changed since the run read it (the reason), else null. */
     cardStale,
     /** Codex re-check #2: take the apply lock of this draft (null = held already). */
