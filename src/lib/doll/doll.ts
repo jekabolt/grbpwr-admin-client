@@ -204,10 +204,15 @@ export function solveDoll(input: DollInput): DollReport {
   warnings.push(...inst.notes);
   // A card with no garment named whose pattern carries trouser legs (by shape) is read as trousers:
   // the legs are wrapped as legs, not left floating beside a torso (11.10 corpus: SS26-011).
-  const legsByShape = inst.facts.category === 'generic' ? trouserLegs(inst.graph.pieces) : null;
+  // (a «bottom» — a waistband on paired panels read from the names — may be a skirt or trousers:
+  // the leg shape decides)
+  const legsByShape =
+    inst.facts.category === 'generic' || inst.facts.category === 'bottom'
+      ? trouserLegs(inst.graph.pieces)
+      : null;
   if (legsByShape)
     warnings.push(
-      `the card names no garment — read as trousers from the pattern: ${legsByShape} carry a crotch curve under a straight waist (leg panels)`,
+      `the card names no trousers — read as trousers from the pattern: ${legsByShape} carry a crotch curve under a straight waist (leg panels)`,
     );
   const facts = legsByShape ? { ...inst.facts, category: 'trousers' as const } : inst.facts;
   // Suspect graph seams: joins that make the wrap topology impossible are not sewn as drawn.
@@ -2333,9 +2338,16 @@ export function solveDoll(input: DollInput): DollReport {
       const q = e.pts[e.pts.length - 1];
       return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= Math.PI / 6;
     };
+    // (The crotch: the left and the right leg meet at the rise — a real seam, kept, released.)
+    const legPair =
+      !!Pa &&
+      !!Pb &&
+      new Set([Pa.group, Pb.group]).size === 2 &&
+      [Pa.group, Pb.group].every((g) => g === 'LEG_L' || g === 'LEG_R');
     if (
       Pa &&
       Pb &&
+      !legPair &&
       (Pa.key === Pb.key ||
         (Pa.geom.twinOf.some((t) => t.key === Pb.key && t.kind === 'mirror') &&
           ![...s.a, ...s.b].every(upEdge)))
