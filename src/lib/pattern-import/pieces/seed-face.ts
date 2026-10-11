@@ -12,10 +12,16 @@
 //               reference's after the per-file alignment (10 mm + 12 % of the piece's side per size
 //               step), whose area is within the grade spread (12 % per size step, + 5 %), and whose
 //               shape matches (Hu moments 1–3, log distance ≤ 0.5);
+//   hand        a left piece is not its right twin (Hu 1–3 do not see a mirror): the two outlines,
+//               centred and scaled to their own size, overlap ≥ 80 % (IoU), and no better mirrored
+//               (left–right or top–bottom);
 //   match       the best of them by (centroid distance / side + |log area ratio| + Hu distance), only
-//               when unique — no second candidate within twice its score;
+//               when sure: unique (no second candidate within twice its score), within an absolute
+//               score bound (0.3 per size step), and RECIPROCAL — walked one size step at a time from
+//               the reference, each step's match must find the previous step's region as its own
+//               best match back;
 //   seed        the match's interior point (the free pixel farthest from its walls).
-// No unique match: the carried coordinate stays (today's behaviour, and its stop).
+// Not sure: the carried coordinate stays (today's behaviour, and its stop).
 import type { BoxMm, PtMm, Seed } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
@@ -24,7 +30,9 @@ import type { Grid } from './raster';
 export type FaceCtx = { g: Grid; wall: Uint8Array; ext: Uint8Array };
 
 /** Probe switches (mutation): the whole pass, the shape test, the uniqueness test. */
-export type SeedFaceOpts = { off?: ReadonlySet<'all' | 'shape' | 'unique'> };
+export type SeedFaceOpts = {
+  off?: ReadonlySet<'all' | 'shape' | 'unique' | 'hand' | 'bound' | 'reciprocal'>;
+};
 
 const GRADE_STEP = 0.12;
 const AREA_SLACK = 0.05;
@@ -32,6 +40,14 @@ const NEAR_MM = 10;
 const NEAR_STEP = 0.12;
 const HU_MAX = 0.5;
 const UNIQUE = 2;
+/** Absolute bound on one size step's score. */
+const SCORE_MAX = 0.3;
+/** Outline overlap (centred, scaled to its own size) of a match, and how much better than mirrored. */
+const IOU_MIN = 0.8;
+const HAND_EPS = 0.02;
+/** The overlap raster: OCC × OCC cells over the centroid ± OCC_SPAN · side. */
+const OCC = 24;
+const OCC_SPAN = 1.25;
 
 type Region = {
   label: number;
@@ -40,13 +56,15 @@ type Region = {
   c: PtMm;
   box: BoxMm;
   hu: [number, number, number];
+  /** Occupancy of the region on an OCC × OCC raster centred on its centroid, scaled by its side. */
+  occ: Uint8Array;
 };
 
 export type SeedFaceDiag = {
   seed: number;
   rank: number;
   from: number;
-  verdict: 'moved' | 'no-match' | 'not-unique';
+  verdict: 'moved' | 'no-match' | 'not-unique' | 'weak' | 'not-reciprocal';
   at?: PtMm;
   score?: number;
   second?: number;
@@ -151,9 +169,48 @@ function regionsOf(c: FaceCtx, minCount: number): { lab: Int32Array; regions: Re
       },
       box: { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y },
       hu: [h1, h2, h3],
+      occ: new Uint8Array(0),
     };
   });
+  for (const r of regions) r.occ = occOf(c, lab, r);
   return { lab, regions };
+}
+
+/** The region's occupancy raster (see OCC): its outline centred and scaled to its own size. */
+function occOf(c: FaceCtx, lab: Int32Array, r: Region): Uint8Array {
+  const { g } = c;
+  const out = new Uint8Array(OCC * OCC);
+  const half = OCC_SPAN * Math.sqrt(r.areaMm2);
+  for (let j = 0; j < OCC; j++)
+    for (let i = 0; i < OCC; i++) {
+      const x = g.ix(r.c.x - half + ((i + 0.5) / OCC) * 2 * half);
+      const y = g.iy(r.c.y + half - ((j + 0.5) / OCC) * 2 * half);
+      if (g.inside(x, y) && lab[y * g.W + x] === r.label) out[j * OCC + i] = 1;
+    }
+  return out;
+}
+
+/** IoU of two occupancy rasters, b as drawn, mirrored left–right, mirrored top–bottom. */
+function overlap(a: Uint8Array, b: Uint8Array): { iou: number; mirrored: number } {
+  const iou = (f: (i: number, j: number) => number) => {
+    let and = 0;
+    let or = 0;
+    for (let j = 0; j < OCC; j++)
+      for (let i = 0; i < OCC; i++) {
+        const p = a[j * OCC + i];
+        const q = b[f(i, j)];
+        and += p & q;
+        or += p | q;
+      }
+    return or ? and / or : 0;
+  };
+  return {
+    iou: iou((i, j) => j * OCC + i),
+    mirrored: Math.max(
+      iou((i, j) => j * OCC + (OCC - 1 - i)),
+      iou((i, j) => (OCC - 1 - j) * OCC + i),
+    ),
+  };
 }
 
 /** Log distance of Hu invariants 1–3 (scale/rotation/mirror free; graded sizes ≈ 0). */
@@ -251,7 +308,27 @@ export function seedFaces(
       mine[i][r] = c.ext[k] ? null : byLabel.get(lab[k]) ?? null;
     });
   }
-  // the matches
+  // one size step: the candidates of rank `to` for a region of rank `from`, best first
+  const step = (ref: Region, to: number) => {
+    const side = Math.sqrt(ref.areaMm2);
+    const p = shift(ref.c, to);
+    const scored: { region: Region; score: number }[] = [];
+    for (const x of regs[to]) {
+      const dist = Math.hypot(x.c.x - p.x, x.c.y - p.y);
+      if (dist > NEAR_MM + NEAR_STEP * side) continue;
+      const ratio = Math.log(x.areaMm2 / ref.areaMm2);
+      if (Math.abs(ratio) > Math.log(1 + GRADE_STEP) + Math.log(1 + AREA_SLACK)) continue;
+      const hu = off.has('shape') ? 0 : huDist(ref.hu, x.hu);
+      if (hu > HU_MAX) continue;
+      if (!off.has('hand')) {
+        // a left piece is not its right twin: the outlines overlap as drawn, not better mirrored
+        const ov = overlap(ref.occ, x.occ);
+        if (ov.iou < IOU_MIN || ov.mirrored > ov.iou + HAND_EPS) continue;
+      }
+      scored.push({ region: x, score: dist / side + Math.abs(ratio) + hu });
+    }
+    return scored.sort((a, b) => a.score - b.score);
+  };
   const want = new Map<number, { i: number; region: Region }[]>();
   clicks.forEach((s, i) => {
     const closed = mine[i].map((x, r) => (x ? r : -1)).filter((r) => r >= 0);
@@ -259,48 +336,46 @@ export function seedFaces(
     for (let r = 0; r < n; r++) {
       if (mine[i][r]) continue;
       const h = closed.reduce((a, b) => (Math.abs(b - r) < Math.abs(a - r) ? b : a));
-      const ref = mine[i][h]!;
-      const steps = Math.abs(r - h);
-      const side = Math.sqrt(ref.areaMm2);
-      const p = shift(ref.c, r);
-      const scored: { region: Region; score: number }[] = [];
-      for (const x of regs[r]) {
-        const dist = Math.hypot(x.c.x - p.x, x.c.y - p.y);
-        if (dist > NEAR_MM + NEAR_STEP * side * steps) continue;
-        const ratio = Math.log(x.areaMm2 / ref.areaMm2);
-        if (Math.abs(ratio) > steps * Math.log(1 + GRADE_STEP) + Math.log(1 + AREA_SLACK)) continue;
-        const hu = off.has('shape') ? 0 : huDist(ref.hu, x.hu);
-        if (hu > HU_MAX) continue;
-        scored.push({ region: x, score: dist / side + Math.abs(ratio) + hu });
+      // walk one size step at a time from the reference: every rank between h and r has the click
+      // in no closed region either (h is the nearest that has)
+      const dir = r > h ? 1 : -1;
+      let cur = mine[i][h]!;
+      let ok = true;
+      let last: { score: number; second?: number } = { score: 0 };
+      for (let q = h + dir; ok; q += dir) {
+        const scored = step(cur, q);
+        const [best, second] = scored;
+        const why = ((): SeedFaceDiag['verdict'] | null => {
+          if (!best) return 'no-match';
+          if (!off.has('unique') && second && second.score < UNIQUE * Math.max(best.score, 1e-3))
+            return 'not-unique';
+          if (!off.has('bound') && best.score > SCORE_MAX) return 'weak';
+          // reciprocal: from the match, the previous step's region is its best match back
+          if (!off.has('reciprocal') && step(best.region, q - dir)[0]?.region !== cur)
+            return 'not-reciprocal';
+          return null;
+        })();
+        if (why) {
+          diag.push({
+            seed: s.id,
+            rank: r,
+            from: h,
+            verdict: why,
+            score: best?.score,
+            second: second?.score,
+          });
+          ok = false;
+          break;
+        }
+        cur = best.region;
+        last = { score: best.score, second: second?.score };
+        if (q === r) break;
       }
-      scored.sort((a, b) => a.score - b.score);
-      const [best, second] = scored;
-      if (!best) {
-        diag.push({ seed: s.id, rank: r, from: h, verdict: 'no-match' });
-        continue;
-      }
-      if (!off.has('unique') && second && second.score < UNIQUE * Math.max(best.score, 1e-3)) {
-        diag.push({
-          seed: s.id,
-          rank: r,
-          from: h,
-          verdict: 'not-unique',
-          score: best.score,
-          second: second.score,
-        });
-        continue;
-      }
+      if (!ok) continue;
       const list = want.get(r) ?? [];
-      list.push({ i, region: best.region });
+      list.push({ i, region: cur });
       want.set(r, list);
-      diag.push({
-        seed: s.id,
-        rank: r,
-        from: h,
-        verdict: 'moved',
-        score: best.score,
-        second: second?.score,
-      });
+      diag.push({ seed: s.id, rank: r, from: h, verdict: 'moved', ...last });
     }
   });
   // pass 2: the matches' interior points (the raster again, only for the ranks that need one)
