@@ -65,7 +65,8 @@ export function AssumptionList({
                 </Pill>
               )}
               <Text size='micro' component='span' title={`${a.rule} — ${a.evidence.join(' · ')}`}>
-                {STEP_WORD[a.step] ?? a.step} · {a.subject} → {a.answer}
+                {STEP_WORD[a.step] ?? a.step} · {a.subject} {a.answer.startsWith('→') ? '' : '→ '}
+                {a.answer}
               </Text>
             </span>
           }
