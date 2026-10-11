@@ -194,6 +194,63 @@ const pg = (
 const M3 = ['Mod. 112', 'Mod. 113', 'Mod. 2026'];
 const AB = ['Style A', 'Style B'];
 const ROWS: Row[] = [
+  // Codex re-check #2: an article number is another namespace; prefixes match within their family
+  {
+    id: 'article-explicit',
+    name: 'Coat Art. 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Mod. 112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'article-style-field',
+    style: 'Artikel 112',
+    labels: M3,
+    expect: 'none',
+    twin: { style: '112', expect: 'strong:Mod. 112' },
+  },
+  {
+    id: 'family-mod-vs-style',
+    name: 'Phoebe Model A',
+    labels: AB,
+    expect: 'none',
+    twin: { name: 'Phoebe Style A', expect: 'strong:Style A' },
+  },
+  {
+    id: 'family-style-vs-mod',
+    name: 'Coat Style 112',
+    labels: M3,
+    expect: 'none',
+    twin: { name: 'Coat Modell 112', expect: 'strong:Mod. 112' },
+  },
+  // Codex re-check #1: a tile-local legend listing several models proves no ownership
+  {
+    id: 'tile-legend-mixed',
+    name: 'Coat Mod. 112',
+    pages: [pg('tile', 0, ['Mod. 112', 'Mod. 114']), pg('tile', 1, ['Mod. 114'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 112',
+      pages: [
+        pg('tile', 0, ['Mod. 112', 'Mod. 114']),
+        pg('tile', 0, ['Mod. 112']),
+        pg('tile', 1, ['Mod. 114']),
+      ],
+      expect: 'strong:0',
+    },
+  },
+  {
+    id: 'tile-legend-every-sheet',
+    name: 'Coat Mod. 114',
+    pages: [pg('tile', 0, ['Mod. 112', 'Mod. 114']), pg('tile', 1, ['Mod. 114'])],
+    expect: 'none',
+    twin: {
+      name: 'Coat Mod. 114',
+      pages: [pg('tile', 0, ['Mod. 112']), pg('tile', 1, ['Mod. 114'])],
+      expect: 'strong:1',
+    },
+  },
+
   {
     id: 'dimension',
     name: 'Coat 112 cm',

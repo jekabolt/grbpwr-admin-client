@@ -20,7 +20,9 @@ import type { CardContext } from '../client';
 /** Where a string comes from: the card's name, its dedicated style-number field, a file name. */
 export type CardSource = 'card' | 'style' | 'file';
 export type CardString = { field: string; text: string; source: CardSource };
-type Key = { kind: 'num' | 'letter'; v: string };
+/** A model's namespace: "Mod. 112" (mod / model / modell) and "Style B" (style / view …) never cross. */
+type Family = 'mod' | 'style';
+type Key = { kind: 'num' | 'letter'; v: string; family?: Family };
 type Mention = Key & { explicit: boolean; said: string; from: CardString };
 
 /** A choice the card makes, or why it makes none (`why` null = the card names nothing). */
@@ -28,7 +30,14 @@ export type CardPick<T> =
   | { pick: T; evidence: string[]; strong: boolean; why?: undefined }
   | { pick: null; evidence?: undefined; strong?: undefined; why: string | null };
 
-const MODEL_WORD = String.raw`(?:modell?s?|mod[eè]les?|modelos?|mod|styles?|views?|version|variante?n?|ansicht|art(?:ikel|icle)?|модел[ьи]|мод|вариант|фасон)`;
+// Codex re-check #2: prefixes count within their family only; an article number ("Art. 112",
+// "Artikel", "Article") is another namespace — never a model
+const MOD_WORD = String.raw`(?:modell?s?|mod[eè]les?|modelos?|mod|модел[ьи]|мод)`;
+const STYLE_WORD = String.raw`(?:styles?|views?|version|variante?n?|ansicht|вариант|фасон)`;
+const ART_WORD = String.raw`(?:art(?:ikel|icle)?|арт(?:икул)?)`;
+const MODEL_WORD = String.raw`(?:${MOD_WORD}|${STYLE_WORD})`;
+const familyOf = (word: string): Family =>
+  new RegExp(String.raw`^${MOD_WORD}\.?$`, 'iu').test(word.trim()) ? 'mod' : 'style';
 const SHEET_WORD = String.raw`(?:schnitt)?(?:bogen|sheets?|лист|arkusz|feuille|planche|hoja|foglio)`;
 /** What a number may not be followed by: a fraction / date, a unit, a year word. */
 const NOT_A_ID = String.raw`(?![\p{L}\p{N}]|[/.,]\d|[\s_\-]*(?:cm|mm|m|см|мм|м|in|inch|"|%|kg|g|г|yrs?|years?|jahre|лет|года?)(?![\p{L}\p{N}]))`;
@@ -40,6 +49,7 @@ const said = (word: string) =>
     'giu',
   );
 const MODEL_SAID = said(MODEL_WORD);
+const ART_SAID = said(ART_WORD);
 const SHEET_SAID = said(SHEET_WORD);
 /** A compact list after a mention: "Style A/B", "Bogen A & B", "Mod. 112, 113 und 114". */
 const MORE = new RegExp(String.raw`^\s*(?:[/,&+]|and|und|или|и|or|oder|et|y)\s*${VALUE}`, 'iu');
@@ -89,11 +99,24 @@ function mentions(strings: readonly CardString[], re: RegExp, sizes: Set<string>
   const out: Mention[] = [];
   for (const from of strings) {
     const taken: [number, number][] = [];
+    // an article number is not a bare model number either: its span is taken, nothing said
+    if (bare)
+      for (const m of from.text.matchAll(ART_SAID))
+        taken.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
     for (const m of from.text.matchAll(re)) {
       const at = m.index ?? 0;
+      const word = m[0].match(/^[\p{L}]+/u)?.[0] ?? '';
+      const family = re === MODEL_SAID ? familyOf(word) : undefined;
       const push = (num: string | undefined, letter: string | undefined, text: string) => {
         const k = keyOf(num, letter);
-        if (k && !sizes.has(k.v)) out.push({ ...k, explicit: true, said: text.trim(), from });
+        if (k && !sizes.has(k.v))
+          out.push({
+            ...k,
+            ...(family ? { family } : {}),
+            explicit: true,
+            said: text.trim(),
+            from,
+          });
       };
       push(m[1], m[2], m[0]);
       // the compact list that follows ("Style A/B" names A AND B)
@@ -121,12 +144,14 @@ function mentions(strings: readonly CardString[], re: RegExp, sizes: Set<string>
 export function modelKey(label: string): Key | null {
   const m = label
     .trim()
-    .match(/^(?:style|view|version|variante?|mod(?:ell?|el)?)\.?\s*(?:(\d{1,4})|(\p{L}))$/iu);
-  return m ? keyOf(m[1], m[2]) : null;
+    .match(/^(style|view|version|variante?|mod(?:ell?|el)?)\.?\s*(?:(\d{1,4})|(\p{L}))$/iu);
+  const k = m ? keyOf(m[2], m[3]) : null;
+  return k ? { ...k, family: /^mod/i.test(m![1]) ? 'mod' : 'style' } : null;
 }
 
 /** A model label matches a mention: an explicit one always; a bare number only for 3+ digits. */
-const matches = (k: Key, m: Mention) => same(k, m) && (m.explicit || k.v.length >= 3);
+const matches = (k: Key, m: Mention) =>
+  same(k, m) && (m.explicit ? m.family === k.family : k.v.length >= 3);
 /** The autopilot acts on: an explicit prefix in a card field, or the style-number field itself. */
 const proves = (m: Mention) =>
   m.from.source !== 'file' && (m.explicit || m.from.source === 'style');
@@ -215,7 +240,16 @@ export function sheetsOf(pages: readonly PageClassification[]) {
     return {
       sheet: k,
       name: letters[i].size === 1 && only.length === 1 ? only[0] : null,
+      /** Every model a tile of this sheet prints (a legend too). */
       models: new Set(tiles(k).flatMap((p) => p.labels?.models ?? [])),
+      /**
+       * Codex re-check #1: the models this sheet's pieces carry — a tile that prints ONE model
+       * only (its pieces' label). A tile listing several (a legend "Mod. 112, 113", mixed pieces)
+       * proves no ownership.
+       */
+      owns: new Set(
+        tiles(k).flatMap((p) => (p.labels?.models?.length === 1 ? p.labels.models : [])),
+      ),
     };
   });
 }
@@ -270,7 +304,13 @@ export function sheetFromCard(
   const labels = [...new Set(sheets.flatMap((s) => [...s.models]))];
   const model = labels.length ? modelFromCard(labels, card, fileNames) : null;
   if (model && model.pick == null && model.why) return { pick: null, why: model.why };
+  // owned by one sheet's pieces and printed on no other sheet's tiles; printed elsewhere = spread
   const carry = model?.pick ? sheets.filter((s) => s.models.has(model.pick!)) : [];
+  if (model?.pick && carry.length === 1 && !carry[0].owns.has(model.pick))
+    return {
+      pick: null,
+      why: `the card names model "${model.pick}", but no tile ties it to pieces — ${sheetWord(carry[0])} prints it only next to other models (a legend)`,
+    };
   if (carry.length > 1)
     return {
       pick: null,
