@@ -432,8 +432,6 @@ export function innerSeamLines(c: PieceCandidate, set?: ChainSet): PtMm[][] {
 const SEAM_JOIN_MM = 12;
 /** …turning at most this much more than the outline turns there, degrees. */
 const SEAM_JOIN_TURN_DEG = 25;
-/** A connected run of seam fragments counts from this share of the outline's perimeter. */
-const SEAM_RUN_SHARE = 0.15;
 
 /** The drawn seam line of one candidate, qualified once (Codex N3): its chains and its gap. */
 export type DrawnSeam = { ids: number[]; lines: PtMm[][]; gap: MeasuredGap };
@@ -446,8 +444,8 @@ const memo = new WeakMap<PieceCandidate, WeakMap<ChainSet, DrawnSeam | null>>();
  * 'internal'. A fragment inside this outline, in the outline's pen, at a constant distance to it
  * (3–30 mm, spread ≤ 1.5 mm; an 'internal' one ≥ 40 mm, spread ≤ 0.5 mm, within 0.3 mm of the
  * median) is part of the drawn seam ONLY inside a connected, coherent parallel contour: fragments
- * joined end to end across short breaks (≤ 12 mm, the direction carried on) into runs, a run
- * counting from 15 % of the perimeter. The qualified runs together must pass `isSeamGap` — the
+ * joined end to end across short breaks (≤ 12 mm, the direction carried on) into ONE chain — the
+ * longest such run; a disconnected run adds nothing. That run alone must pass `isSeamGap` — the
  * SAME test (and 50 % coverage) the measured allowance uses; that one result both measures the
  * allowance and keeps those chains off layer 8. A disconnected pocket placement, topstitch or hem
  * fold at the same gap stays an internal line.
@@ -505,8 +503,6 @@ function qualifySeam(c: PieceCandidate, set: ChainSet): DrawnSeam | null {
       { p: p[n - 1], d: out(p[n - 1], p[Math.max(0, n - 2)]) },
     ];
   };
-  const closedLoop = (x: Cand) =>
-    Math.hypot(x.pts[0].x - x.pts[x.pts.length - 1].x, x.pts[0].y - x.pts[x.pts.length - 1].y) < 1;
   const cos = Math.cos((SEAM_JOIN_TURN_DEG * Math.PI) / 180);
   const joins = (a: Cand, b: Cand) =>
     ends(a).some((ea) =>
@@ -529,14 +525,10 @@ function qualifySeam(c: PieceCandidate, set: ChainSet): DrawnSeam | null {
       if (joins(kept[i], kept[j])) parent[find(i)] = find(j);
   const runs = new Map<number, Cand[]>();
   kept.forEach((x, i) => runs.set(find(i), [...(runs.get(find(i)) ?? []), x]));
-  const per = perimeter(c.outer);
-  const qualified = [...runs.values()]
-    .filter(
-      (r) =>
-        r.reduce((a, x) => a + x.len, 0) >= SEAM_RUN_SHARE * per ||
-        (r.length === 1 && closedLoop(r[0])),
-    )
-    .flat();
+  // Codex: coverage counts ONE connected seam chain — the longest run of fragments joined end to
+  // end; a disconnected hem / topstitch / inner run adds nothing, however long
+  const runLen = (r: Cand[]) => r.reduce((a, x) => a + x.len, 0);
+  const qualified = [...runs.values()].sort((x, y) => runLen(y) - runLen(x))[0] ?? [];
   if (!qualified.length) return null;
   const lines = qualified.map((x) => x.pts);
   const gap = measureGap(c.outer, lines);
