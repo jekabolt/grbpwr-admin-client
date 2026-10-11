@@ -17,7 +17,7 @@ import Text from 'ui/components/text';
 import type { ImportSessionApi } from '../use-import-session';
 import { countWords, openQuestions } from '../use-import-session';
 import { NumberField } from '../ui-bits';
-import { outlineByLayerWord } from '../autopilot/outline-word';
+import { layerWordConflict, outlineByLayerWord } from '../autopilot/outline-word';
 
 /** The open questions of the step, as the footer counts them (live answers only, S3). */
 export function useOpenQuestions(api: ImportSessionApi) {
@@ -39,7 +39,12 @@ export function OutlineQuestion({
   const busy = !!api.session.busy;
   // PASSPORT (c): the file's own word for the outline layer pre-fills the answer (one evidence)
   const word = outlineByLayerWord(api.session);
-  const prefill = word?.kind === 'cut' ? 'cut' : null;
+  // …unless the sheet's text / second line says the other line: then both are quoted, nothing pre-filled
+  const clash = layerWordConflict(
+    api.session,
+    current.origin === 'text' || current.origin === 'measured' ? current : null,
+  );
+  const prefill = word?.kind === 'cut' && !clash ? 'cut' : null;
   return (
     <CalloutBox
       tone='warning'
@@ -51,7 +56,9 @@ export function OutlineQuestion({
           ? 'the sheet gives allowances only for some pieces or edges, none for the whole file'
           : 'the sheet has no allowance note and no second line'}{' '}
         ({open.length} {open.length === 1 ? 'piece' : 'pieces'}). answer once for the file.
-        {word?.kind === 'cut' &&
+        {clash && ` ${clash}`}
+        {!clash &&
+          word?.kind === 'cut' &&
           ` the file names the layer of every outline ${word.layers.map((l) => `«${l}»`).join(', ')}: cut line is pre-filled.`}
         {word?.kind === 'stop' && ` ${word.reason}`}
       </Text>

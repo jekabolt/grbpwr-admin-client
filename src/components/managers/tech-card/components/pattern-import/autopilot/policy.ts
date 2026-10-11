@@ -1469,14 +1469,16 @@ function meaningStep(snap: Snap): AutopilotDecision {
   // PASSPORT Ф1 (c): the file's own layer word against what the sheet says — never one silently
   const clash = layerWordConflict(s, sheetSaid);
   if (clash) return stopAt('meaning', clash);
+  const word = outlineByLayerWord(s);
   if (open.allowance.length) {
+    // layers that disagree are a question even where the sheet's text says something (Codex P1 #3)
+    if (word?.kind === 'stop' && word.conflict) return stopAt('meaning', word.reason);
     const said = sheetSaid;
     if (!said) {
       // the source's own prior: a production / pattern-CAD export draws the cut line (its pieces
       // carry their allowance), and so does a file that names the layer of every outline "cut
       // line" (PASSPORT (c)); a printed home-sewing sheet (tiles, an overview page) does not say —
       // a question. Text or a drawn seam line (above) always wins over both.
-      const word = outlineByLayerWord(s);
       if (word?.kind === 'stop') return stopAt('meaning', word.reason);
       const cad = cadExport(s);
       if (!cad && !word)

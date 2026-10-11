@@ -10,7 +10,7 @@ import type { AllowanceDecision, ImportSession, OutlineMeaning } from 'lib/patte
 
 export type OutlineWord =
   | { kind: 'cut'; evidence: string[]; layers: string[] }
-  | { kind: 'stop'; reason: string };
+  | { kind: 'stop'; reason: string; conflict?: true };
 
 /** The bound layer word, when the worker found one (status 'read' or 'conflict'). */
 export function layerWordOf(s: ImportSession) {
@@ -38,6 +38,7 @@ export function outlineByLayerWord(s: ImportSession): OutlineWord | null {
   if (o.status === 'conflict')
     return {
       kind: 'stop',
+      conflict: true,
       reason: `the file's layer names disagree about the drawn outline (${o.note ?? said(ls)}) — the cut line (allowance included) or the seam line?`,
     };
   if (o.status !== 'read') return null;

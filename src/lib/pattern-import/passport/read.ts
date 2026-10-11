@@ -289,6 +289,9 @@ export function outlineOfPieces(
 ): Fact<OutlineMeaning> | null {
   const exported = pieces.filter((p) => p.identities.length);
   if (!exported.length) return null;
+  // Codex P1 #1: only a layer the READER took as a word — an SVG / DXF layer of the files — counts;
+  // a PDF's OCG ("Cut lines" as a print layer) or a name of another format says nothing here
+  const known = new Map(words.map((w) => [w.layer, w.word] as const));
   const seen = new Map<string, 'cut' | 'seam'>();
   let silent = false;
   const kinds = new Set<'cut' | 'seam'>();
@@ -298,7 +301,7 @@ export function outlineOfPieces(
       continue;
     }
     for (const l of p.wallLayers) {
-      const w = l ? layerOutlineWord(l) : null;
+      const w = l ? known.get(clip(l, 80)) ?? null : null;
       if (!w) {
         silent = true;
         continue;

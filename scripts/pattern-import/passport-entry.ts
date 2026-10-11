@@ -260,6 +260,9 @@ function controlsBind() {
     seam?.value === 'seam' && seam.status === 'read',
     seam,
   );
+  // Codex P1 #1: a wall layer the reader did not take as a word (a PDF OCG "Cut lines") says nothing
+  const ocg = outlineOfPieces([P(1, ['Cut lines'])], []);
+  check('bind: a layer outside the SVG/DXF words (PDF OCG) → no fact', ocg === null, ocg);
   const unexported = outlineOfPieces([{ ...P(1, ['Cut lines']), identities: [] }], words);
   check('bind: no exported piece → no fact', unexported === null, unexported);
 }
@@ -584,7 +587,7 @@ async function controlsEndToEnd() {
     };
     return {
       verdict: r.verdict,
-      stop: r.stop ? `${r.stop.step}: ${r.stop.reason.slice(0, 140)}` : null,
+      stop: r.stop ? `${r.stop.step}: ${r.stop.reason.slice(0, 400)}` : null,
       outline: (r.assumptions?.list ?? []).filter((a) => /outline/.test(a)),
     };
   };
@@ -614,6 +617,19 @@ async function controlsEndToEnd() {
     neutral.verdict !== 'apply' &&
       /nothing on the sheet says what the drawn outline is/.test(neutral.stop ?? ''),
     neutral,
+  );
+  // Codex P1 #2: the sheet's text says the other line — a question, never the text silently
+  const textSeam = await run(
+    'text-seam',
+    src.replace(
+      'id="text2">GRAIN</text>',
+      'id="text2">GRAIN</text><text x="600" y="60" style="font-size:5px">All patterns are without seam allowances</text>',
+    ),
+  );
+  check(
+    'e2e: «Cut lines» + text «without seam allowances» → a question quoting both, no export',
+    textSeam.verdict !== 'apply' && /file's layer/.test(textSeam.stop ?? ''),
+    textSeam,
   );
   const old = await run(
     'old',

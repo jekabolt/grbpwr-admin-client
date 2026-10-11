@@ -1405,7 +1405,11 @@ export class Session {
       ? bindPassport(this.passport, this.bindPieces(detail.output, set, sheet))
       : null;
     const output = this.passportBound
-      ? { ...detail.output, passport: this.passportBound }
+      ? {
+          ...detail.output,
+          passport: this.passportBound,
+          unproven: outlineWordQuestions(detail.output, this.passportBound),
+        }
       : detail.output;
     this.semantics = output;
     this.wallsOf = detail.wallsOf;
@@ -1723,3 +1727,38 @@ function rasterCandidates(calibs: Calib[]): ScaleCandidate[] {
 }
 
 export { cancelled };
+
+/**
+ * PASSPORT (c), Codex P1 #2/#3: the file's layer word may never lose silently to what the sheet
+ * says. Where the outline layers disagree among themselves, or the bound word says the other line
+ * than the sheet's text / measured second line, every exported piece whose outline the SHEET
+ * decided (origin text / measured — never an operator's answer) gets the outline question back.
+ */
+function outlineWordQuestions(
+  out: SemanticsOutput,
+  p: GarmentPassport,
+): SemanticsOutput['unproven'] {
+  const o = p.outline;
+  if (!o || !o.classes.includes('structure')) return out.unproven;
+  const asked = new Set(out.unproven.filter((u) => u.kind === 'allowance').map((u) => u.seed));
+  const extra: SemanticsOutput['unproven'] = [];
+  for (const piece of out.pieces) {
+    const a = piece.allowance;
+    if (asked.has(piece.seed) || (a.origin !== 'text' && a.origin !== 'measured')) continue;
+    const clash =
+      o.status === 'conflict' ||
+      (o.status === 'read' && (a.meaning === 'seam') !== (o.value === 'seam'));
+    if (!clash) continue;
+    asked.add(piece.seed);
+    extra.push({
+      seed: piece.seed,
+      kind: 'allowance',
+      shown: `${a.meaning}+${a.allowanceMm}`,
+      detail:
+        o.status === 'conflict'
+          ? `${o.note ?? "the file's outline layers disagree"}: is the outline the cut or the seam line?`
+          : `the sheet says ${a.meaning === 'seam' ? 'seam line' : 'cut line'} (${(a.evidence[0] ?? a.origin).slice(0, 80)}) but the file's layer says ${o.value} line: which is it?`,
+    });
+  }
+  return extra.length ? [...out.unproven, ...extra] : out.unproven;
+}
