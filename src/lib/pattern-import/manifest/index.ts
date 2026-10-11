@@ -37,6 +37,9 @@ import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
   PATIMPORT,
+  type AutopilotAssumption,
+  type AutopilotRecord,
+  type AutopilotValue,
   type ContourSignature,
   type ConversionManifest,
   type EmbedManifestFn,
@@ -432,6 +435,59 @@ function validateGate(x: unknown): GateReport | null {
 }
 
 /**
+ * A10: the autopilot's assumptions (optional). Shape-tolerant like the gate ids: a list that is not
+ * a bounded list reads as absent, and an entry that does not validate is left out — never the
+ * sheet. What is kept is rebuilt from validated fields only (Codex C8).
+ */
+function validateAutopilot(x: unknown): AutopilotRecord | undefined {
+  if (!isObj(x) || x.v !== 1 || !Array.isArray(x.assumptions) || x.assumptions.length > MAX_LIST)
+    return undefined;
+  const KIND = /^[a-z][a-z0-9-]{0,47}$/;
+  const assumptions: AutopilotAssumption[] = [];
+  for (const a of x.assumptions) {
+    if (
+      !isObj(a) ||
+      !isBoundedStr(a.step, 32) ||
+      !isBoundedStr(a.kind, 48) ||
+      !KIND.test(a.kind) ||
+      !isBoundedStr(a.subject, 512) ||
+      !isBoundedStr(a.answer, 512) ||
+      !isBoundedStr(a.rule, 1024) ||
+      !Array.isArray(a.evidence) ||
+      a.evidence.length > 16 ||
+      !a.evidence.every((e) => isBoundedStr(e, 1024)) ||
+      !isNum(a.confidence) ||
+      a.confidence < 0 ||
+      a.confidence > 1 ||
+      !isBool(a.strong)
+    )
+      continue;
+    // the replayable value: plain JSON, bounded; anything else is left out (the entry stays)
+    let value: AutopilotValue | undefined;
+    if (a.value !== undefined) {
+      try {
+        const text = JSON.stringify(a.value);
+        if (text !== undefined && text.length <= 2048) value = JSON.parse(text) as AutopilotValue;
+      } catch {
+        value = undefined;
+      }
+    }
+    assumptions.push({
+      step: a.step,
+      kind: a.kind,
+      subject: a.subject,
+      answer: a.answer,
+      rule: a.rule,
+      evidence: [...(a.evidence as string[])],
+      confidence: a.confidence,
+      strong: a.strong,
+      ...(value !== undefined ? { value } : {}),
+    });
+  }
+  return { v: 1, assumptions };
+}
+
+/**
  * Throws `ManifestError` unless `x` is a complete, self-consistent v1 manifest. Exported for the writer
  * (embedding an invalid manifest is a writer bug and must fail loudly) and for tests.
  */
@@ -625,6 +681,7 @@ export function validateManifest(x: unknown): ConversionManifest {
   // only, never the input object cast to the type.
   const source = validateSource(x.source);
   const gate = validateGate(x.gate);
+  const autopilot = validateAutopilot(x.autopilot);
   return {
     v: MANIFEST_VERSION,
     generator: x.generator,
@@ -640,6 +697,7 @@ export function validateManifest(x: unknown): ConversionManifest {
     blocks,
     source,
     gate,
+    ...(autopilot ? { autopilot } : {}),
   };
 }
 

@@ -40,6 +40,13 @@ import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 import { STEPS, stepIndex, useImportSession } from './use-import-session';
 import type { PieceFocus } from './piece-focus';
 import { DroppedLabels } from './steps/not-in-file';
+import { ToggleSwitch } from 'ui/components/toggle-switch';
+import { autopilotApply, resolverFor } from './autopilot/run';
+import { readAutopilotPref, writeAutopilotPref } from './autopilot/view';
+
+/** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
+const nextFrames = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 const STAGE_WORD: Record<string, string> = {
   extract: 'reading files',
@@ -168,6 +175,46 @@ function WizardBody({
   const api = useImportSession({ client, card, namer, buildDraft, applyDraft });
   latest.current = api.session;
   const { session, blocker } = api;
+
+  // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
+  // explicit gated apply. A stop says why in the footer, with "resume autopilot".
+  const [autopilot, setAutopilot] = useState(readAutopilotPref);
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const resolve = useMemo(() => resolverFor(card, () => apiRef.current), [card]);
+  const started = useRef<number | null>(null);
+  const applying = useRef<number | null>(null);
+  const [apStop, setApStop] = useState<string | null>(null);
+  useEffect(() => {
+    // a new run (files read) starts the autopilot once
+    if (!autopilot || session.busy || session.error || session.sessionId == null) return;
+    if (!session.scale.candidates.length || started.current === session.sessionId) return;
+    started.current = session.sessionId;
+    setApStop(null);
+    api.advance({ resolve });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot, session.busy, session.error, session.sessionId, session.scale.candidates.length]);
+  useEffect(() => {
+    // the drive stops on check: a green gate goes to the card by the explicit gated path
+    const d = api.driveStop;
+    if (!autopilot || !d || d.why !== 'auto-stop' || session.step !== 'check' || session.busy)
+      return;
+    if (applying.current === session.sessionId) return;
+    applying.current = session.sessionId;
+    void autopilotApply(() => apiRef.current, card, nextFrames).then((o) => {
+      if (!o.ok) setApStop(o.reason);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
+  const autopilotStop =
+    autopilot && started.current === session.sessionId
+      ? apStop ?? (api.driveStop && api.driveStop.why !== 'auto-stop' ? api.driveStop.reason : null)
+      : null;
+  const resumeAutopilot = () => {
+    setApStop(null);
+    applying.current = null;
+    api.advance({ resolve });
+  };
   const [askClose, setAskClose] = useState(false);
   // "fix in pieces" from check / details: the piece and size to show, and why (M1, M5). It lives
   // while the pieces step is open and is dropped when the operator leaves it.
@@ -413,6 +460,17 @@ function WizardBody({
                     </Text>
                   </CalloutBox>
                 )}
+                {autopilotStop && !session.busy && (
+                  // A10: where the autopilot stopped and why — the operator answers, then resumes
+                  <span className='flex flex-wrap items-center gap-2' data-autopilot-stop=''>
+                    <Text size='micro' component='span' className='text-warning'>
+                      autopilot stopped · {autopilotStop}
+                    </Text>
+                    <Button variant='secondary' size='sm' onClick={resumeAutopilot}>
+                      resume autopilot
+                    </Button>
+                  </span>
+                )}
                 {session.error ? (
                   <StageMessage
                     code={api.errorCode}
@@ -429,6 +487,17 @@ function WizardBody({
                     {api.offer}
                   </Text>
                 ) : null}
+                {session.step === 'files' && (
+                  // A10: the autopilot switch — on by default, remembered per viewer
+                  <ToggleSwitch
+                    checked={autopilot}
+                    label='autopilot'
+                    onCheckedChange={(on) => {
+                      setAutopilot(on);
+                      writeAutopilotPref(on);
+                    }}
+                  />
+                )}
                 {/* A8: what the clean stage set aside, seen before the run goes on */}
                 {session.step === 'files' && session.clean && !api.extracted.presegmented && (
                   <Text size='micro' variant='label' component='p'>

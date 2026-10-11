@@ -125,7 +125,13 @@ export type OfferCtx = Pick<
   scopes: number;
   /** The operator changed the fabrics assignment (inputs.assignment). */
   fabricsEdited: boolean;
+  /** A10: the tile sheet picked on the sheet step (inputs.sheetPicked); absent = not asked. */
+  sheetPicked?: number | null;
 };
+
+/** The tile sheets a file carries (a Burda file: several; most files: one). */
+export const tileSheets = (pages: readonly Pick<PageClassification, 'cls' | 'sheet'>[]) =>
+  new Set(pages.filter((p) => p.cls === 'tile').map((p) => p.sheet ?? 0)).size;
 
 /**
  * What a step OFFERS without blocking "next" on it, worded — null when there is nothing. The
@@ -143,10 +149,15 @@ export function stepOffer(s: OfferCtx): string | null {
         return `${w.uncertain} ${w.uncertain === 1 ? 'page' : 'pages'} read without certainty — check the role, or go on`;
       return null;
     }
-    case 'sheet':
+    case 'sheet': {
+      // A10 (Codex #2): which of several tile sheets is never passed silently
+      const n = tileSheets(s.pages);
+      if (n > 1 && s.sheetPicked === null)
+        return `the file carries ${n} tile sheets — pick the one this card is`;
       return waitingItems(s.sheet?.clean?.items ?? [])
         ? 'suggested to set aside on the sheet — accept, or go on with the lines kept'
         : null;
+    }
     case 'sizes': {
       const n = sizeFlags(s.chains?.ambiguities, s.sizes?.expected?.n).length;
       return n
@@ -206,8 +217,23 @@ export const ANSWERS: Record<
   scale: { events: [], inputs: ['scaleIndex', 'manualMeasuredMm', 'scaleConfirmed'] },
   sheet: { events: ['sheet', 'clean'], inputs: ['residualsAccepted'] },
   sizes: { events: ['legend', 'size-map', 'drawn-sizes'], inputs: ['legendConfirmed'] },
-  pieces: { events: ['variant', 'piece-edits'], inputs: [] },
-  meaning: { events: ['names', 'semantics'], inputs: ['confirmedNames', 'confirmedQuantities'] },
+  // A10: a click seed is the pieces step's own answer (`addSeed`: clickSeeds + the fill again)
+  pieces: { events: ['variant', 'piece-edits'], inputs: ['clickSeeds'] },
+  // A10: the details controls answer through these fields (the grain's two clicks, the fold edge,
+  // "not a fold", the outline, the cutting list, a typed name), then semantics runs again
+  meaning: {
+    events: ['names', 'semantics'],
+    inputs: [
+      'confirmedNames',
+      'confirmedQuantities',
+      'editedNames',
+      'overrides',
+      'operatorGrain',
+      'operatorFold',
+      'fileAllowance',
+      'foldListChecked',
+    ],
+  },
   fabrics: { events: ['fabrics'], inputs: [] },
   check: { events: [], inputs: [] },
   apply: { events: [], inputs: [] },
@@ -219,7 +245,8 @@ export function answerProblem<I>(step: WizardStep, a: AutoAnswer<I>): string | n
   const bad = [
     ...(a.events ?? []).filter((e) => !ok.events.includes(e.type)).map((e) => `event ${e.type}`),
     ...Object.keys(a.patch ?? {})
-      .filter((k) => !ok.inputs.includes(k))
+      // A10: the autopilot's record of what it assumed rides with any answer (it answers nothing)
+      .filter((k) => k !== 'autopilot' && !ok.inputs.includes(k))
       .map((k) => `input ${k}`),
   ];
   return bad.length ? `not an answer on ${step}: ${bad.join(', ')}` : null;

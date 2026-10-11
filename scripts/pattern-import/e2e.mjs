@@ -21,6 +21,17 @@ const REPORTS =
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/reports/';
 const bundle = resolve(tmpdir(), `patimport-e2e-${process.pid}.mjs`);
 
+// A10: `--autopilot` = the autopilot metric over the same cases (autopilot.mjs: 0 clicks, the
+// policy answers, the export scored against TRUTH)
+if (!process.env.E2E_CHILD && process.argv.includes('--autopilot')) {
+  const r = spawnSync(
+    process.execPath,
+    [resolve(HERE, 'autopilot.mjs'), ...process.argv.slice(2).filter((a) => a !== '--autopilot')],
+    { stdio: 'inherit', env: process.env },
+  );
+  process.exit(r.status ?? 1);
+}
+
 if (process.env.E2E_CHILD) {
   process.env.PATIMPORT_REPO = REPO;
   const m = await import(pathToFileURL(process.env.E2E_CHILD).href);

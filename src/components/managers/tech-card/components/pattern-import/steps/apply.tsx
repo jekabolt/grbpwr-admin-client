@@ -23,6 +23,7 @@ import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { Panel, fmtBytes } from '../ui-bits';
 import { NotInFile } from './not-in-file';
+import { AssumptionList } from '../autopilot/view';
 
 const CUT_SYMMETRY_WORD: Record<string, string> = {
   TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'identical',
@@ -293,6 +294,16 @@ export function ApplyStep({
         <GroupLabel>block → piece links</GroupLabel>
         <Row label='aliases written' value={draft.aliases.length} />
         <Row label='in scopes' value={[...new Set(draft.aliases.map((a) => a.scopeKey))].length} />
+        {/* A10: what the autopilot assumed — strong first, each a door back to its step */}
+        <AssumptionList
+          assumptions={api.inputs.autopilot}
+          flush={false}
+          onDoor={
+            done?.ok || running
+              ? undefined
+              : (step) => void api.dispatch({ type: 'back', to: step })
+          }
+        />
       </Panel>
 
       <Panel title='apply'>

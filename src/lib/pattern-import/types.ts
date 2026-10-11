@@ -276,6 +276,8 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
+  /** For 'overview': the tile grid it draws, as a share of the tile size (0.2 = 1:5). */
+  reduced?: number;
   confidence: number;
   why: string;
 };
@@ -1545,7 +1547,52 @@ export type ConversionManifest = {
   blocks: ManifestBlock[];
   source: ManifestSource;
   gate: GateReport | null;
+  /**
+   * A10 (D5): what the autopilot answered instead of the operator — every answer the drawing did
+   * not prove, with its rule, evidence and confidence. Absent = a run the operator answered.
+   * Optional and shape-tolerant on read (an entry that does not validate is left out, never the
+   * sheet), so a manifest written before or after this field reads the same.
+   */
+  autopilot?: AutopilotRecord;
 };
+
+/**
+ * A10 (D5): one answer the autopilot gave in the operator's place. `strong` = a dangerous default
+ * the drawing gives no evidence for (grain from the piece's axis, the outline taken as the cut
+ * line, 1:1 without a square, sizes mapped by order): the card shows these first.
+ */
+export type AutopilotAssumption = {
+  /** The wizard step the question was on ('scale', 'sizes', 'meaning', …). */
+  step: string;
+  /** What kind of question (kebab-case: 'grain-axis', 'size-ordinal', 'outline', 'quantity' …). */
+  kind: string;
+  /** What it is about: a piece ('seed 12 · 21'), a size ('source 38'), the file, a page … */
+  subject: string;
+  /** The answer given, in words ('cut line', '×2', '38 → M', '90°'). */
+  answer: string;
+  /** The policy rule that gave it (one line). */
+  rule: string;
+  /** What it rests on (short lines). */
+  evidence: string[];
+  /** 0..1, the policy's own confidence in the answer. */
+  confidence: number;
+  strong: boolean;
+  /**
+   * The answer itself, replayable: the value the wizard input took (a factor, a size map entry, a
+   * grain's two ends, a code …), keyed by `kind` + `subject`. Plain JSON, ≤ 2 KB written.
+   */
+  value?: AutopilotValue;
+};
+
+export type AutopilotValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AutopilotValue[]
+  | { [k: string]: AutopilotValue };
+
+export type AutopilotRecord = { v: 1; assumptions: AutopilotAssumption[] };
 
 export type WriteJob = {
   techCardId: number;
@@ -1556,6 +1603,8 @@ export type WriteJob = {
   generator: string;
   /** Which CLO dialect to emit (K2 decides the default; both must read back through our parser). */
   dialect: 'r12' | 'r2000';
+  /** A10: the autopilot's assumptions, carried into the manifest as they are. */
+  autopilot?: AutopilotRecord;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -1901,6 +1950,8 @@ export type StageIO = {
       sizes: ManifestSize[];
       dialect: WriteJob['dialect'];
       generator: string;
+      /** A10: the autopilot's assumptions (absent = the operator answered) → every manifest. */
+      autopilot?: AutopilotRecord;
     };
     out: { scopes: DraftScope[]; gate: Record<string, GateReport> };
   };
@@ -2000,8 +2051,10 @@ export type WizardEvent =
   | { type: 'names'; decisions: NameDecision[] }
   | { type: 'semantics'; input: StageIO['semantics']['in'] }
   | { type: 'fabrics'; assignment: FabricAssignment }
-  | { type: 'write' }
-  | { type: 'apply' }
+  /** A10: an autopilot run hands its assumptions to the written manifests. */
+  | { type: 'write'; autopilot?: AutopilotRecord }
+  /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
+  | { type: 'apply'; token?: number }
   | { type: 'download' }
   | { type: 'back'; to: WizardStep }
   | { type: 'reset' };

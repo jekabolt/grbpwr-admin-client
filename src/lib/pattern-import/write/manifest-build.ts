@@ -2,6 +2,7 @@
 // the text, so the gate can compare the two.
 
 import type {
+  AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
   ManifestPiece,
@@ -111,5 +112,35 @@ export function buildManifest(
     blocks: blocks.map((b) => manifestBlock(b, contourSigCap(blocks.length))),
     source: job.source,
     gate: null,
+    ...(job.autopilot ? { autopilot: autopilotForManifest(job.autopilot) } : {}),
   };
 }
+
+/**
+ * A10: the autopilot record as the manifest carries it — bounded (the 999 prologue stays small,
+ * G14), every string clipped, the list capped. The full list stays with the wizard session.
+ */
+export function autopilotForManifest(r: AutopilotRecord): AutopilotRecord {
+  const clip = (x: string, n: number) => (x.length > n ? `${x.slice(0, n - 1)}…` : x);
+  return {
+    v: 1,
+    assumptions: r.assumptions.slice(0, AUTOPILOT_MAX).map((a) => ({
+      step: clip(a.step, 32),
+      kind: clip(a.kind, 48),
+      subject: clip(a.subject, 120),
+      answer: clip(a.answer, 160),
+      rule: clip(a.rule, 200),
+      evidence: a.evidence.slice(0, 4).map((e) => clip(e, 160)),
+      confidence: Math.max(0, Math.min(1, Math.round(a.confidence * 100) / 100)),
+      strong: a.strong,
+      ...(a.value !== undefined && JSON.stringify(a.value).length <= AUTOPILOT_VALUE_MAX
+        ? { value: a.value }
+        : {}),
+    })),
+  };
+}
+
+/** A10: at most this many assumptions are written into one manifest. */
+export const AUTOPILOT_MAX = 400;
+/** A10: an assumption's replayable value is written up to this many JSON characters. */
+export const AUTOPILOT_VALUE_MAX = 2048;
