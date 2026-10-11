@@ -757,7 +757,9 @@ export type PieceCandidate = {
    * family stayed consistent (areas monotone, outline within the grade spread of its neighbouring
    * ranks, same shape); `pts` is the stretch used, `chains` the drawn chains it lies on.
    */
-  continuity?: { rule: 'R0' | 'R1' | 'R2'; chains: ChainId[]; pts: PtMm[] }[];
+  continuity?: ContinuityEdge[];
+  /** P1 · D3: why the continuity closure was kept — its anchor ranks and the measured checks. */
+  continuityVerdict?: ContinuityVerdict;
   /**
    * pieces/grade (H1): why this candidate is 'refused' (set only with that outcome).
    */
@@ -775,6 +777,37 @@ export type PieceCandidate = {
    * source provenance and the ONLY chains that may carry it in G15 (F14e/S1, Codex round 3).
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
+};
+
+/**
+ * P1: one continuity wall a closed outline runs along. `chains` are the drawn chains it lies on
+ * (R0: the path's chains, in order), `pts` the stretch used (sheet mm); `bracket`: the path runs on
+ * an ignore / unclassified line, so the closure needs native anchor ranks on both sides.
+ */
+export type ContinuityEdge = {
+  rule: 'R0' | 'R1' | 'R2';
+  chains: ChainId[];
+  pts: PtMm[];
+  bracket?: boolean;
+};
+/** P1 · D3: the verdict that kept a continuity closure (recorded, re-checked by gate G21). */
+export type ContinuityVerdict = {
+  /** The natively closed ranks (own lines only) the family's rate and spread came from. */
+  anchors: number[];
+  /** Per neighbouring rank judged: the measured value and what was allowed. */
+  checks: {
+    vs: number;
+    steps: number;
+    hMm: number;
+    hAllowMm: number;
+    hu: number;
+    huAllow: number;
+    /** ln(area ratio) per size step, and the band the anchors allow. */
+    growth: number;
+    band: [number, number];
+    dk: number;
+    kMax: number;
+  }[];
 };
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */

@@ -19,6 +19,7 @@ import type {
   BoxMm,
   ChainId,
   ChainSet,
+  ContinuityVerdict,
   FillOpts,
   FillPiecesFn,
   PieceCandidate,
@@ -605,7 +606,12 @@ export function fillPiecesDetailed(
                     from: 'continuity' as RankFrom,
                     build: () => {
                       const plugged = built[0] ?? (built[0] = later[0].build());
-                      contWalls = continuityWalls(set, model, r, plugged.items, contSkip(excl));
+                      // the hard beside test runs against every effective wall of r: the lines
+                      // reranked to r and the operator's are walls too
+                      const reranked = itemsOf(set, rerank().model.byRank[r] ?? []);
+                      contWalls = continuityWalls(set, model, r, plugged.items, contSkip(excl), {
+                        beside: reranked,
+                      });
                       return contWalls.length
                         ? buildRank(box, cell, [...plugged.items, ...contWalls])
                         : plugged;
@@ -850,9 +856,15 @@ export function fillPiecesDetailed(
       ];
       if (der.length) cand.derived = der;
       if (rankFrom === 'continuity') {
-        // provenance: the continuity walls the outline runs along (half their length within 1 mm)
-        const used = contWalls.filter((w) => alongShare(w.pts, outer, 1) >= 0.5);
-        cand.continuity = used.map((w) => ({ rule: w.rule, chains: [...w.chains], pts: w.pts }));
+        // provenance: the continuity walls the outline runs along (≥ 90 % of them within 1 mm —
+        // gate G21 re-checks that the written line follows each one)
+        const used = contWalls.filter((w) => alongShare(w.pts, outer, 1) >= 0.9);
+        cand.continuity = used.map((w) => ({
+          rule: w.rule,
+          chains: [...w.chains],
+          pts: w.pts,
+          ...(w.bracket ? { bracket: true } : {}),
+        }));
       }
       cand.areaMm2 = Math.abs(signedArea(outer));
       cand.bbox = bboxOf(outer);
@@ -1057,16 +1069,15 @@ export function fillPiecesDetailed(
 
   const excl = new Set<ChainId>(userExcl);
   /**
-   * D3: per family, every candidate closed through continuity walls is checked against its
-   * neighbouring closed ranks (areas monotone, outline within the grade spread, same shape). One
-   * that fails — the worst first, then the family again — goes back to the leak it was: a stop,
-   * never a wrong closed piece.
+   * D3: per family, every candidate closed through continuity walls is checked against the
+   * family's anchor ranks (`continuityVerdicts`). One that fails goes back to the leak it was: a
+   * stop, never a wrong closed piece; one that stands carries its verdict.
    */
   const continuityPass = () => {
     for (const s of use) {
       const list = cands.get(s.id);
       if (!list?.some((c) => c.rankFrom === 'continuity')) continue;
-      const refused = continuityVerdicts(list);
+      const { refused, kept } = continuityVerdicts(list);
       for (let i = 0; i < list.length; i++) {
         const c = list[i];
         if (c.rankFrom !== 'continuity') continue;
@@ -1074,6 +1085,7 @@ export function fillPiecesDetailed(
         diag.continuity ??= { kept: 0, refused: [] };
         if (!why) {
           diag.continuity.kept++;
+          list[i] = { ...c, continuityVerdict: kept.get(c.rank) };
           continue;
         }
         diag.continuity.refused.push({
@@ -1415,11 +1427,11 @@ export function huDistance(a: readonly PtMm[], b: readonly PtMm[]): number {
 }
 
 /**
- * D3 per-step allowances when the family has no two natively closed ranks that grade cleanly
- * (measured on the corpus' native neighbours, viola / leonie / synth: Hausdorff ≤ 24 mm per step,
- * Hu distance ≤ 0.4 per step, compactness ≤ 0.07 apart).
+ * D3 caps on the per-step spread a family's anchors may claim (a family whose anchors themselves
+ * jump would otherwise license anything): Hausdorff mm and Hu distance per size step. Corpus native
+ * neighbours (viola / leonie / synth): Hausdorff ≤ 24 mm per step (viola's widest grade), Hu ≤ 0.4.
  */
-export const CONT_FALLBACK = { hMm: 10, hu: 0.3 };
+export const CONT_CAP = { hMm: 25, hu: 0.45 };
 /** D3: the most two neighbouring ranks' compactness (perimeter / √area) may differ, |ln ratio|. */
 export const CONT_K_MAX = 0.08;
 
@@ -1429,23 +1441,39 @@ function perimeterOf(o: readonly PtMm[]): number {
   return L;
 }
 
+/** An ANCHOR: a rank closed on its own class lines alone — no plug, no rerank, no derived edge. */
+export const isAnchor = (c: PieceCandidate) =>
+  c.outcome === 'closed' &&
+  c.outer.length > 2 &&
+  (c.rankFrom === 'class' || c.rankFrom === undefined) &&
+  !c.derived?.length;
+
+export type ContinuityJudgement = {
+  refused: Map<number, string>;
+  kept: Map<number, ContinuityVerdict>;
+};
+
 /**
- * P1 · D3: the ranks of a family whose continuity closure is refused, with why. A closure stands
- * only beside closed neighbouring ranks (the nearest below and above): its area between theirs
- * (strictly growing, ≤ 25 % per step — `isMonotone`'s rule), its outline within the grade spread
- * of theirs (Hausdorff and Hu shape distance per step, measured between the family's own natively
- * closed ranks that grade cleanly, else `CONT_FALLBACK`), and as compact as they are (a closure
- * that runs into teeth or slivers grows its perimeter, not its area: `CONT_K_MAX`). First against
- * the native ranks alone; then the survivors together — the worst violator refused first and the
- * family judged again.
+ * P1 · D3: which continuity closures of a family stand. The family must have ≥ 2 ANCHOR ranks
+ * (closed on their own lines only) whose neighbouring pairs grade cleanly (area growing, ≤ 25 % a
+ * step); they give the family's growth band (ln area ratio per step, between their slowest and
+ * fastest pair, with slack) and its LOCAL spread (the anchor pair around — else nearest to — the
+ * rank: Hausdorff and Hu distance per step, ×1.5 and capped by `CONT_CAP`). Fewer anchors: no
+ * continuity closure at all — the leak stays. A closure is then judged against its nearest anchors
+ * (below and above): growth inside the band, outline within the local spread, the same shape, as
+ * compact (`CONT_K_MAX`: a closure into teeth or slivers grows its perimeter, not its area); a
+ * closure through an ignore / unclassified path needs anchors on BOTH sides. Then the survivors
+ * together, the worst violator refused first. Kept closures carry their verdict and metrics.
  */
-export function continuityVerdicts(list: readonly PieceCandidate[]): Map<number, string> {
+export function continuityVerdicts(list: readonly PieceCandidate[]): ContinuityJudgement {
   const refused = new Map<number, string>();
-  if (typeof process !== 'undefined' && process.env?.P1_NOCHECK) return refused; // mutation (1)
+  const kept = new Map<number, ContinuityVerdict>();
   const conts = list.filter((c) => c.rankFrom === 'continuity');
   for (const c of conts)
     if (c.outcome !== 'closed' || c.outer.length < 3)
       refused.set(c.rank, `not closed (${c.outcome})`);
+    else if (!c.continuity?.length)
+      refused.set(c.rank, 'the outline runs along none of its continuity walls');
   const hd = new Map<string, number>();
   const H = (a: PieceCandidate, b: PieceCandidate) => {
     const k = a.rank < b.rank ? `${a.rank}:${b.rank}` : `${b.rank}:${a.rank}`;
@@ -1454,41 +1482,59 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): Map<number,
     return v;
   };
   const kOf = (c: PieceCandidate) => perimeterOf(c.outer) / Math.sqrt(Math.max(1, c.areaMm2));
-  const ok = (x: PieceCandidate) =>
-    x.outcome === 'closed' &&
-    x.outer.length > 2 &&
-    !refused.has(x.rank) &&
-    !x.derived?.some((d) => d.kind === 'shared-rank');
-  const natives = list
-    .filter((x) => x.rankFrom !== 'continuity' && ok(x))
-    .sort((a, b) => a.rank - b.rank);
-  // the family's own grade spread, from neighbouring native ranks that grade cleanly
-  let hStep = 0;
-  let huStep = 0;
-  let pairs = 0;
-  let growth = 0;
-  for (let i = 1; i < natives.length; i++) {
-    const a = natives[i - 1];
-    const b = natives[i];
+  const anchors = list.filter(isAnchor).sort((a, b) => a.rank - b.rank);
+  type Pair = { lo: number; hi: number; h: number; hu: number; g: number };
+  const pairs: Pair[] = [];
+  for (let i = 1; i < anchors.length; i++) {
+    const a = anchors[i - 1];
+    const b = anchors[i];
     const st = b.rank - a.rank;
     const ratio = b.areaMm2 / Math.max(1, a.areaMm2);
     if (ratio <= 1.0005 || ratio > 1 + 0.25 * st) continue;
-    hStep = Math.max(hStep, H(a, b) / st);
-    huStep = Math.max(huStep, huDistance(a.outer, b.outer) / st);
-    growth += Math.log(ratio) / st;
-    pairs++;
+    pairs.push({
+      lo: a.rank,
+      hi: b.rank,
+      h: H(a, b) / st,
+      hu: huDistance(a.outer, b.outer) / st,
+      g: Math.log(ratio) / st,
+    });
   }
-  // a size step grows the piece: at least a quarter of the family's own native growth per step
-  // (0.5 % without a clean native pair) — a closure that comes out the size of its neighbour
-  // closed the neighbour's region
-  const minGrowth = pairs ? 0.25 * (growth / pairs) : Math.log(1.005);
-  const allowH = pairs ? 1.5 * hStep + 1 : CONT_FALLBACK.hMm;
-  const allowHu = pairs ? 1.5 * huStep + 0.05 : CONT_FALLBACK.hu;
-  /** how badly c fails against neighbour n (> 1 fails), and why */
-  const judge = (c: PieceCandidate, n: PieceCandidate): [number, string] => {
+  const clean = new Set(pairs.flatMap((p) => [p.lo, p.hi]));
+  if (clean.size < 2) {
+    for (const c of conts)
+      if (!refused.has(c.rank))
+        refused.set(
+          c.rank,
+          `fewer than 2 ranks of this piece close cleanly on their own lines (${clean.size}) — nothing anchors a continuity closure`,
+        );
+    return { refused, kept };
+  }
+  const gs = pairs.map((p) => p.g);
+  const band: [number, number] = [0.5 * Math.min(...gs), 1.5 * Math.max(...gs) + 0.003];
+  /** the anchor pair around rank r, else the nearest */
+  const localOf = (r: number) =>
+    pairs.find((p) => p.lo <= r && r <= p.hi) ??
+    [...pairs].sort(
+      (a, b) =>
+        Math.min(Math.abs(a.lo - r), Math.abs(a.hi - r)) -
+        Math.min(Math.abs(b.lo - r), Math.abs(b.hi - r)),
+    )[0];
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  /** how badly c fails against neighbour n (> 1 fails), why, and the measured check */
+  const judge = (
+    c: PieceCandidate,
+    n: PieceCandidate,
+  ): [number, string, ContinuityVerdict['checks'][number]] => {
     const steps = Math.abs(c.rank - n.rank);
     const [lo, hi] = n.rank < c.rank ? [n, c] : [c, n];
     const ratio = hi.areaMm2 / Math.max(1, lo.areaMm2);
+    const g = ratio > 0 ? Math.log(ratio) / steps : -Infinity;
+    const loc = localOf(c.rank);
+    const hAllow = Math.min(CONT_CAP.hMm, 1.5 * loc.h + 1) * steps + 2;
+    const huAllow = Math.min(CONT_CAP.hu, 1.5 * loc.hu + 0.05) * steps + 0.1;
+    const h = H(c, n);
+    const hu = huDistance(c.outer, n.outer);
+    const dk = Math.abs(Math.log(kOf(c) / kOf(n)));
     let score = 0;
     let why = '';
     const fail = (v: number, w: string) => {
@@ -1498,70 +1544,84 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): Map<number,
       }
     };
     const a = (x: PieceCandidate) => `rank ${x.rank} ${(x.areaMm2 / 100).toFixed(0)} cm²`;
-    if (ratio <= 1.0005) fail(2 + 100 * (1.0005 - ratio), `area not growing: ${a(lo)} ≥ ${a(hi)}`);
-    else if (Math.log(ratio) < minGrowth * steps)
+    if (g < band[0] || g > band[1])
       fail(
-        2 + (minGrowth * steps - Math.log(ratio)) * 100,
-        `area grows ×${ratio.toFixed(3)} over ${steps} size(s): ${a(lo)} → ${a(hi)} (the family grows ≥ ×${Math.exp(minGrowth * steps).toFixed(3)})`,
+        2 + 100 * Math.max(band[0] - g, g - band[1]),
+        `growth ${a(lo)} → ${a(hi)} is ${(Math.exp(g) * 100 - 100).toFixed(1)} % a size, the anchors grow ${(Math.exp(band[0]) * 100 - 100).toFixed(1)}–${(Math.exp(band[1]) * 100 - 100).toFixed(1)} %`,
       );
-    else if (ratio > 1 + 0.25 * steps)
+    if (h > hAllow)
       fail(
-        2 + 10 * (ratio - 1 - 0.25 * steps),
-        `area jumps ×${ratio.toFixed(2)}: ${a(lo)} → ${a(hi)}`,
+        h / hAllow,
+        `outline ${h.toFixed(1)} mm from rank ${n.rank} (spread ${hAllow.toFixed(1)} mm)`,
       );
-    const h = H(c, n);
-    const ah = allowH * steps + 2;
-    if (h > ah)
-      fail(h / ah, `outline ${h.toFixed(1)} mm from rank ${n.rank} (spread ${ah.toFixed(1)} mm)`);
-    const hu = huDistance(c.outer, n.outer);
-    const au = allowHu * steps + 0.1;
-    if (hu > au)
-      fail(hu / au, `shape unlike rank ${n.rank} (Hu ${hu.toFixed(3)} > ${au.toFixed(3)})`);
-    const dk = Math.abs(Math.log(kOf(c) / kOf(n)));
+    if (hu > huAllow)
+      fail(
+        hu / huAllow,
+        `shape unlike rank ${n.rank} (Hu ${hu.toFixed(3)} > ${huAllow.toFixed(3)})`,
+      );
     if (dk > CONT_K_MAX)
       fail(
         dk / CONT_K_MAX,
         `perimeter / √area ${dk.toFixed(3)} off rank ${n.rank} (teeth or slivers)`,
       );
-    return [score, why];
+    return [
+      score,
+      why,
+      {
+        vs: n.rank,
+        steps,
+        hMm: r3(h),
+        hAllowMm: r3(hAllow),
+        hu: r3(hu),
+        huAllow: r3(huAllow),
+        growth: r3(g),
+        band: [r3(band[0]), r3(band[1])],
+        dk: r3(dk),
+        kMax: CONT_K_MAX,
+      },
+    ];
   };
   const nearest = (c: PieceCandidate, pool: PieceCandidate[]) => {
     const below = pool.filter((x) => x.rank < c.rank).pop();
     const above = pool.find((x) => x.rank > c.rank);
     return [below, above].filter(Boolean) as PieceCandidate[];
   };
-  // no natively closed rank in the family: nothing anchors it — every guess could share one error
-  if (!natives.length) {
-    for (const c of conts)
-      if (!refused.has(c.rank))
-        refused.set(c.rank, 'no rank of this piece closes on its own lines');
-    return refused;
-  }
-  // 1) against the native ranks
-  if (natives.length)
-    for (const c of conts) {
-      if (refused.has(c.rank)) continue;
-      for (const n of nearest(c, natives)) {
-        const [score, why] = judge(c, n);
-        if (score > 1) {
-          refused.set(c.rank, why);
-          break;
-        }
+  const anchorPool = anchors.filter((x) => clean.has(x.rank));
+  // 1) against the anchors; an ignore / unclassified path needs them on both sides
+  for (const c of conts) {
+    if (refused.has(c.rank)) continue;
+    const nb = nearest(c, anchorPool);
+    if (c.continuity?.some((e) => e.bracket) && nb.length < 2) {
+      refused.set(
+        c.rank,
+        'closed through an unclassified / ignore line without anchor ranks on both sides',
+      );
+      continue;
+    }
+    for (const n of nb) {
+      const [score, why] = judge(c, n);
+      if (score > 1) {
+        refused.set(c.rank, why);
+        break;
       }
     }
+  }
   // 2) the survivors together, worst first
+  const ok = (x: PieceCandidate) =>
+    !refused.has(x.rank) && (clean.has(x.rank) ? isAnchor(x) : x.rankFrom === 'continuity');
   for (let round = 0; round <= conts.length; round++) {
-    const live = list.filter((x) => ok(x)).sort((a, b) => a.rank - b.rank);
+    const live = list
+      .filter((x) => x.outcome === 'closed' && ok(x))
+      .sort((a, b) => a.rank - b.rank);
     let worst: { rank: number; score: number; why: string } | null = null;
     for (const c of live) {
       if (c.rankFrom !== 'continuity') continue;
-      const nb = nearest(
+      let score = 0;
+      let why = '';
+      for (const n of nearest(
         c,
         live.filter((x) => x !== c),
-      );
-      let score = nb.length ? 0 : 100;
-      let why = 'no closed neighbouring rank to compare with';
-      for (const n of nb) {
+      )) {
         const [s2, w2] = judge(c, n);
         if (s2 > score) [score, why] = [s2, w2];
       }
@@ -1570,5 +1630,12 @@ export function continuityVerdicts(list: readonly PieceCandidate[]): Map<number,
     if (!worst) break;
     refused.set(worst.rank, worst.why);
   }
-  return refused;
+  for (const c of conts) {
+    if (refused.has(c.rank)) continue;
+    kept.set(c.rank, {
+      anchors: anchorPool.map((x) => x.rank),
+      checks: nearest(c, anchorPool).map((n) => judge(c, n)[2]),
+    });
+  }
+  return { refused, kept };
 }
