@@ -44,7 +44,7 @@ import { liningByName } from 'lib/assembly-skeleton/names';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
-import { ringsFromJoins } from './rings';
+import { type Ring, ringsFromJoins } from './rings';
 import { surfaceFit, surfaceHosts } from './surface';
 import {
   anchoredRows,
@@ -1718,12 +1718,97 @@ export function solveDoll(input: DollInput): DollReport {
     let b: number;
     let c: number;
     let shapeWords: string;
+    // RINGS (rings.ts): panels sewn side to side into a ring, a lid on its tops, two rings base to
+    // base — a shape of revolution round the lens axis (z, toward the viewer). The base polygon's
+    // circumradius is the shape's radius (the panels' corners reach it), the panels' height from
+    // base to top the meridian, the lid's polygon the pole; two flat octagons (a panel's height =
+    // the drop from the base polygon's inradius to the lid's) make a flat pouch a few per cent of
+    // its radius thick, a taller panel a lens. The panels are placed round the axis by the ring's
+    // order, not walked — a walk on a ball of the cloth's area crushed them into each other.
+    const bodyKey = (k: string) => panelByKey.get(k)?.group === 'BODY';
+    const mid2Of = (id: EdgeId): Pt2 | null => {
+      const p = pathOf([id]);
+      if (!p) return null;
+      let x = 0;
+      let y = 0;
+      for (const v of p.v) {
+        x += uv[2 * v];
+        y += uv[2 * v + 1];
+      }
+      return [x / p.v.length, y / p.v.length];
+    };
+    const edgeLen = (id: EdgeId) => edgeById.get(id)?.lenMm ?? 0;
+    const ringsHere = (ringsR?.rings ?? []).filter(
+      (r) => r.pieces.length >= 3 && r.pieces.every(bodyKey),
+    );
+    /** A ring panel's base edge (the partner ring's, else the longest non-side) and top (the lid's, else the shortest). */
+    const ringEdges = (r: Ring, k: string) => {
+      const g = panelByKey.get(k)!.geom;
+      const sides = new Set(r.sides.get(k) ?? []);
+      const others = g.edges
+        .filter((e) => e.kind === 'edge' && !sides.has(e.id))
+        .sort((x, y) => y.lenMm - x.lenMm);
+      const base = r.base.get(k) ?? others[0]?.id;
+      const top = r.top.get(k) ?? (others.length > 1 ? others[others.length - 1].id : undefined);
+      return { base, top: top === base ? undefined : top };
+    };
+    const ringDims = (r: Ring) => {
+      let baseP = 0;
+      let topP = 0;
+      let hSum = 0;
+      let n = 0;
+      for (const k of r.pieces) {
+        const { base, top } = ringEdges(r, k);
+        if (!base) continue;
+        baseP += edgeLen(base);
+        if (top) topP += edgeLen(top);
+        const mb = mid2Of(base);
+        const mt = top ? mid2Of(top) : null;
+        if (!mb) continue;
+        if (mt) hSum += Math.hypot(mt[0] - mb[0], mt[1] - mb[1]);
+        else {
+          const P = panelByKey.get(k)!;
+          let far = 0;
+          for (let i = 0; i < P.nb; i++) {
+            const v = P.offset + i;
+            far = Math.max(far, Math.hypot(uv[2 * v] - mb[0], uv[2 * v + 1] - mb[1]));
+          }
+          hSum += far;
+        }
+        n++;
+      }
+      return { n: r.pieces.length, baseP, topP, h: n ? hSum / n : 0 };
+    };
+    const ringA = ringsHere.find((r) => r.mate && ringsHere.includes(r.mate.ring)) ?? ringsHere[0];
+    const ringB = ringA?.mate && ringsHere.includes(ringA.mate.ring) ? ringA.mate.ring : null;
+    const ringLays = ringA ? (ringB ? [ringA, ringB] : [ringA]) : [];
+    const ringDimsAll = ringLays.map(ringDims);
+    const useRings = ringDimsAll.length > 0 && ringDimsAll.every((d) => d.baseP > 0 && d.h > 0);
     // Two faces of about one size that carry most of the cloth: a pouch, a cover.
     const twoFaces =
       !!second &&
       areaOfP(second) >= 0.4 * areaOfP(big) &&
       areaOfP(big) + areaOfP(second) > 0.55 * total;
-    if (twoFaces) {
+    if (useRings) {
+      const circum = (perim: number, n: number) => perim / n / (2 * Math.sin(Math.PI / n));
+      const inr = (perim: number, n: number) => perim / n / (2 * Math.tan(Math.PI / n));
+      const R = ringDimsAll.reduce((t, d) => t + circum(d.baseP, d.n), 0) / ringDimsAll.length;
+      a = Math.max(1, R);
+      b = a;
+      let cc = 0;
+      for (const d of ringDimsAll) {
+        const rTop = d.topP > 0 ? inr(d.topP, d.n) : 0;
+        const drop = Math.max(0, inr(d.baseP, d.n) - rTop);
+        const z = Math.sqrt(Math.max(0, d.h * d.h - drop * drop));
+        cc = Math.max(cc, rTop < R ? z / Math.sqrt(1 - (rTop / R) ** 2) : d.h);
+      }
+      c = Math.max(0.06 * a, Math.min(a, cc));
+      const n = ringDimsAll[0].n;
+      shapeWords =
+        ringLays.length === 2
+          ? `${cc < 0.1 * a ? 'a flat pouch' : 'a lens'} ${(2 * a).toFixed(0)} mm across, ${(2 * c).toFixed(0)} mm thick (two rings of ${n} panels base to base${ringA.lid ? ', a lid at each pole' : ''})`
+          : `a round shape ${(2 * a).toFixed(0)} mm across, ${c.toFixed(0)} mm deep (a ring of ${n} panels${ringA.lid ? ' closed by a lid' : ''})`;
+    } else if (twoFaces) {
       const { w: w0, h: h0 } = bounds2(big);
       a = Math.max(1, w0 / 2);
       b = Math.max(1, h0 / 2);
@@ -1840,8 +1925,111 @@ export function solveDoll(input: DollInput): DollReport {
       }
       P.mirrored = mirror;
     };
-    // The biggest panel on the front, upright, face out.
-    lay(big, centroid2(ringVs(big)), [0, 0, c], [1, 0, 0], [0, 1, 0], [1, 0], false);
+    const wrapA = (x: number) => Math.atan2(Math.sin(x), Math.cos(x));
+    const azOf = (id: EdgeId): number | null => {
+      const p = pathOf([id]);
+      if (!p) return null;
+      const m = centroid3(p.v);
+      return Math.atan2(m[1], m[0]);
+    };
+    const unit2 = (p: Pt2, q: Pt2): Pt2 => {
+      const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      return l > 1e-6 ? [(q[0] - p[0]) / l, (q[1] - p[1]) / l] : [0, 1];
+    };
+    /**
+     * A ring's panel at azimuth th, its base on the equator, its top toward the pole on side s;
+     * face out or face down so that its second side lies on the chain's way round (dir).
+     */
+    /** The side edge of ring panel i sewn to panel i + d (d = ±1), from the seams as grouped. */
+    const sideToward = (r: Ring, i: number, d: 1 | -1): EdgeId | null => {
+      const n = r.pieces.length;
+      const k = r.pieces[i];
+      const kn = r.pieces[(((i + d) % n) + n) % n];
+      const mine = new Set(r.sides.get(k) ?? []);
+      const theirs = new Set(r.sides.get(kn) ?? []);
+      for (const sm of G.seams) {
+        if (sm.a.length !== 1 || sm.b.length !== 1) continue;
+        if (mine.has(sm.a[0]) && theirs.has(sm.b[0])) return sm.a[0];
+        if (mine.has(sm.b[0]) && theirs.has(sm.a[0])) return sm.b[0];
+      }
+      return null;
+    };
+    const layRingPanel = (r: Ring, i: number, th: number, s: 1 | -1, dir: 1 | -1) => {
+      const k = r.pieces[i];
+      const P = panelByKey.get(k)!;
+      const { base } = ringEdges(r, k);
+      const cen = centroid2(ringVs(P));
+      const q0 = (base ? mid2Of(base) : null) ?? cen;
+      const ux = unit2(q0, cen);
+      const c3: Vec3 = [a * Math.cos(th), b * Math.sin(th), 0];
+      const U: Vec3 = [0, 0, s];
+      const Vv = V3.cross([Math.cos(th), Math.sin(th), 0], U);
+      lay(P, q0, c3, U, Vv, ux, false);
+      // Face out or face down: the side sewn to the next panel lies on the chain's way round.
+      const next = sideToward(r, i, 1);
+      const prev = sideToward(r, i, -1);
+      const an = next ? azOf(next) : null;
+      const ap = prev ? azOf(prev) : null;
+      const wrong =
+        an !== null && ap !== null
+          ? wrapA(an - ap) * dir < 0
+          : an !== null
+            ? wrapA(an - th) * dir < 0
+            : ap !== null
+              ? wrapA(ap - th) * dir > 0
+              : false;
+      if (wrong) lay(P, q0, c3, U, Vv, ux, true);
+    };
+    /** A ring's lid flat at its pole, its edge for the ring's first panel toward that panel. */
+    const layLid = (r: Ring, s: 1 | -1, thetaOf: ReadonlyMap<string, number>) => {
+      const lid = r.lid;
+      const P = lid ? panelByKey.get(lid.key) : undefined;
+      if (!lid || !P || !bodyKey(lid.key) || placed[P.offset]) return;
+      const cen = centroid2(ringVs(P));
+      const p0 = r.pieces.find((k) => lid.edgeFor.has(k) && thetaOf.has(k));
+      const e0 = p0 ? lid.edgeFor.get(p0) : undefined;
+      const m0 = e0 ? mid2Of(e0) : null;
+      if (!p0 || !m0) return;
+      const th0 = thetaOf.get(p0)!;
+      const U: Vec3 = [Math.cos(th0), Math.sin(th0), 0];
+      const Vv = V3.cross([0, 0, s], U);
+      const c3: Vec3 = [0, 0, s * c];
+      // Face out or face down: whichever lays every lid edge toward the panel it is sewn to.
+      const miss = (mirror: boolean) => {
+        lay(P, cen, c3, U, Vv, unit2(cen, m0), mirror);
+        let t = 0;
+        for (const [k, e] of lid.edgeFor) {
+          const az = thetaOf.has(k) ? azOf(e) : null;
+          if (az !== null) t += Math.abs(wrapA(az - thetaOf.get(k)!));
+        }
+        return t;
+      };
+      const m0f = miss(false);
+      const m0t = miss(true);
+      if (m0f <= m0t) lay(P, cen, c3, U, Vv, unit2(cen, m0), false);
+    };
+    if (useRings) {
+      const thetaA = new Map<string, number>();
+      const nA = ringA.pieces.length;
+      ringA.pieces.forEach((k, i) => thetaA.set(k, (TAU * (i + 0.5)) / nA));
+      ringA.pieces.forEach((k, i) => layRingPanel(ringA, i, thetaA.get(k)!, 1, 1));
+      layLid(ringA, 1, thetaA);
+      if (ringB) {
+        const thetaB = new Map<string, number>();
+        ringB.pieces.forEach((k, i) => {
+          const mate = ringB.mate?.panel.get(k);
+          const th = mate !== undefined ? thetaA.get(mate) : undefined;
+          thetaB.set(k, th ?? (TAU * (i + 0.5)) / ringB.pieces.length);
+        });
+        const d01 = wrapA(thetaB.get(ringB.pieces[1])! - thetaB.get(ringB.pieces[0])!);
+        const dir: 1 | -1 = d01 < 0 ? -1 : 1;
+        ringB.pieces.forEach((k, i) => layRingPanel(ringB, i, thetaB.get(k)!, -1, dir));
+        layLid(ringB, -1, thetaB);
+      }
+    } else {
+      // The biggest panel on the front, upright, face out.
+      lay(big, centroid2(ringVs(big)), [0, 0, c], [1, 0, 0], [0, 1, 0], [1, 0], false);
+    }
     const isBody = (P: Panel | undefined): P is Panel => !!P && P.group === 'BODY';
     const onePiece = (ids: EdgeId[]) => new Set(ids.map(pk)).size === 1;
     const links = G.seams.filter(
@@ -1919,7 +2107,7 @@ export function solveDoll(input: DollInput): DollReport {
     }
     const placedN = body.filter(isPlaced).length;
     warnings.push(
-      `not a garment: ${placedN} of ${body.length} panels wrapped round ${shapeWords}, placed by their seams from ${big.key}${placedN < body.length ? ` · ${body.length - placedN} no seam reaches, laid flat beside` : ''}`,
+      `not a garment: ${placedN} of ${body.length} panels wrapped round ${shapeWords}, placed ${useRings ? "round the axis by the rings' order" : `by their seams from ${big.key}`}${placedN < body.length ? ` · ${body.length - placedN} no seam reaches, laid flat beside` : ''}`,
     );
   }
 

@@ -1126,6 +1126,23 @@ for (const c of spec.cards) {
         `  op ${o.id} «${o.label.slice(0, 50)}»: ${o.inputs} inputs · ${o.seams} seams · ${o.connected ? 'joined' : 'APART'} · ${o.exact ? 'exact' : 'budget'} · ${o.nodes} nodes · ${o.ms} ms`,
       );
     console.log('--- doll seams:');
+    // (DOLL_WARN=1: the doll's own words — the shape it chose, what it placed where)
+    if (process.env.DOLL_WARN) {
+      for (const w of report.warnings ?? []) console.log(`  warn ${String(w).slice(0, 300)}`);
+      const P = report.positions;
+      for (const pn of report.panels) {
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let v = pn.offset; v < pn.offset + pn.count; v++)
+          for (let k = 0; k < 3; k++) {
+            lo[k] = Math.min(lo[k], P[3 * v + k]);
+            hi[k] = Math.max(hi[k], P[3 * v + k]);
+          }
+        console.log(
+          `  panel ${N.nameOf(pn.pieceKey)} ${pn.group} x ${lo[0].toFixed(0)}..${hi[0].toFixed(0)} y ${lo[1].toFixed(0)}..${hi[1].toFixed(0)} z ${lo[2].toFixed(0)}..${hi[2].toFixed(0)}`,
+        );
+      }
+    }
     for (const s of [...dollSeams, ...dollLayer])
       console.log(
         `  ${(s.state ?? '').padEnd(9)} ${String(s.kind).padEnd(18)} ${s.origin.padEnd(13)} ${dollSewn(s, G, N).words} · ${s.note.slice(0, 100)}`,
