@@ -406,7 +406,7 @@ export async function main(): Promise<number> {
       ...draft,
       scopes: [{ ...sc, manifest: { ...sc.manifest, source: src } }],
     } as unknown as CardDraft;
-    const prior = (sha: string) => ({
+    const prior = (sha: string, name = 'old.dxf') => ({
       existingPieces: [{ lineKey: 'k7', name: 'P02' }],
       existingAliases: [{ scopeKey: 'LINING', blockName: 'P02', pieceLineKey: 'k7' }],
       existingPatterns: [
@@ -415,7 +415,7 @@ export async function main(): Promise<number> {
           filename: 'x.dxf',
           url: 'mem://x',
           manifest: {
-            source: { files: [{ sha256: sha }] },
+            source: { files: [{ sha256: sha, name }] },
             blocks: [],
             pieces: [{ identity: 'P02' }],
           },
@@ -435,6 +435,12 @@ export async function main(): Promise<number> {
         (x) => x.kind === 'beside-vanished',
       ),
       'another import’s sheet (other source files) is not ours: not listed',
+    );
+    ck(
+      generatedReuse(withSrc, sem, all, prior('bb', 'A.dxf') as never).some(
+        (x) => x.kind === 'beside-vanished' && x.existing === 'P02',
+      ),
+      'the same source file edited since (another sha256, same file name) is ours: listed',
     );
   }
 

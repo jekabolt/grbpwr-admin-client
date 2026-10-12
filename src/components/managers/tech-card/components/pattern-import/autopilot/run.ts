@@ -111,13 +111,17 @@ export function generatedReuse(
   );
   const written = new Set(draft.scopes.map((sc) => sc.target.scopeKey));
   const nameOf = new Map((card?.existingPieces ?? []).map((p) => [p.lineKey, p.name] as const));
-  // (only a sheet made from one of THIS import's source files: another import's sheet is not ours)
-  const shas = new Set(
-    draft.scopes.flatMap((sc) => (sc.manifest.source?.files ?? []).map((f) => f.sha256)),
-  );
+  // (only a sheet made from one of THIS import's source files — by sha256, or by file name: a
+  // file edited since, a piece moved, has another sha256 but is still the same source; another
+  // import's sheet is not ours)
+  const own = draft.scopes.flatMap((sc) => sc.manifest.source?.files ?? []);
+  const shas = new Set(own.map((f) => f.sha256).filter(Boolean));
+  const fileNames = new Set(own.map((f) => f.name.trim().toLowerCase()).filter(Boolean));
+  const ours = (f: { sha256?: string; name?: string }) =>
+    (!!f.sha256 && shas.has(f.sha256)) || (!!f.name && fileNames.has(f.name.trim().toLowerCase()));
   for (const row of card?.existingPatterns ?? []) {
     if (!row.manifest || written.has(row.scopeKey)) continue;
-    if (!(row.manifest.source?.files ?? []).some((f) => f.sha256 && shas.has(f.sha256))) continue;
+    if (!(row.manifest.source?.files ?? []).some(ours)) continue;
     const drawn = new Set(
       [...aliasNames(row.manifest).values()].map((b) => aliasKey(row.scopeKey, b)),
     );
