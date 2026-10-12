@@ -1635,6 +1635,138 @@ export function solveDoll(input: DollInput): DollReport {
     return item;
   };
 
+  // ── notches and fold evidence (shared by the legs' waist, the bands and the collar) ────
+  const notchRs = new Map<number, Set<number>>();
+  for (const P of panels) {
+    const n = P.geom.rs.length;
+    notchRs.set(P.idx, new Set(P.geom.notchIdx.map((i) => ((i % n) + n) % n)));
+  }
+  const cctx: CollarCtx = {
+    pos,
+    uv,
+    cuv,
+    panelOf,
+    ringOf,
+    nbOf: (p) => panels[p].nb,
+    isNotch: (v) => {
+      const r = ringOf[v];
+      if (r < 0) return false;
+      const P = panels[panelOf[v]];
+      return notchRs.get(P.idx)!.has(P.mesh.bRs[r]);
+    },
+  };
+  /** Edge of the panel's geometry a boundary segment (two ring vertices) lies on. */
+  const edgeOfSeg = (a: number, b: number): Edge | null => {
+    if (panelOf[a] !== panelOf[b] || ringOf[a] < 0 || ringOf[b] < 0) return null;
+    const P = panels[panelOf[a]];
+    const n = P.geom.rs.length;
+    const ia = P.mesh.bRs[ringOf[a]];
+    const ib = P.mesh.bRs[ringOf[b]];
+    const inE = (e: Edge, i: number) => (((i - e.s) % n) + n) % n <= (((e.e - e.s) % n) + n) % n;
+    return P.geom.edges.find((e) => inE(e, ia) && inE(e, ib)) ?? null;
+  };
+  /**
+   * Intake marks ON a path (04-COLLAR K2 + intake), as arc ranges to fold closed before a unit or
+   * a band is fitted: notch pairs 15–80 mm apart on one piece (a pleat, a dart's two legs), and
+   * runs of short edges (< 35 mm, two or more: a stepped tuck or a dart slit drawn in the outline).
+   */
+  const foldsOnPath = (P: Path) => {
+    const notchK: number[] = [];
+    for (let k = 0; k < P.v.length; k++)
+      if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
+        notchK.push(k);
+    const pairs: [number, number][] = [];
+    /** The panel each pair lies on (aligned with `pairs`). */
+    const pairPanel: number[] = [];
+    for (let i = 0; i + 1 < notchK.length; i++) {
+      const a = notchK[i];
+      const b = notchK[i + 1];
+      const d = P.s[b] - P.s[a];
+      if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
+        pairs.push([P.s[a], P.s[b]]);
+        pairPanel.push(panelOf[P.v[a]]);
+        i++;
+      }
+    }
+    const stairs: [number, number][] = [];
+    /** The first and last vertex of each run (aligned with `stairs`). */
+    const stairV: [number, number][] = [];
+    let run: { s0: number; s1: number; v0: number; v1: number; edges: Set<string> } | null = null;
+    const flush = () => {
+      if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) {
+        stairs.push([run.s0, run.s1]);
+        stairV.push([run.v0, run.v1]);
+      }
+      run = null;
+    };
+    for (let k = 1; k < P.v.length; k++) {
+      const e = edgeOfSeg(P.v[k - 1], P.v[k]);
+      if (e && e.lenMm < 35) {
+        if (!run)
+          run = { s0: P.s[k - 1], s1: P.s[k], v0: P.v[k - 1], v1: P.v[k], edges: new Set([e.id]) };
+        else {
+          run.s1 = P.s[k];
+          run.v1 = P.v[k];
+          run.edges.add(e.id);
+        }
+      } else flush();
+    }
+    flush();
+    /** Notch arcs on the path with their panel. */
+    const notches = notchK.map((k) => ({ s: P.s[k], panel: panelOf[P.v[k]] }));
+    return { pairs, pairPanel, stairs, stairV, notches };
+  };
+  /**
+   * Intake on a path read from EVIDENCE alone, never from how a band happens to fit (11.10
+   * review: six balance-notch pairs 75 mm apart would otherwise have let a wrong 700 mm band pass
+   * on a 1000 mm waist): pleats = two or more notch pairs of one width (± 3 mm or 15 %) on one
+   * piece — a lone pair is a balance mark and never folds; darts = a run of short edges that
+   * converges (its chord under half its length: a slit, a V), spanning the notches within 15 mm
+   * either side when the piece carries them (the dart's legs). Overlaps merged.
+   */
+  const foldEvidence = (B: Path): { folds: [number, number][]; Le: number } | null => {
+    const f = foldsOnPath(B);
+    const out: [number, number][] = [];
+    const byPanel = new Map<number, [number, number][]>();
+    f.pairs.forEach((p, i) => {
+      const list = byPanel.get(f.pairPanel[i]) ?? [];
+      list.push(p);
+      byPanel.set(f.pairPanel[i], list);
+    });
+    for (const list of byPanel.values()) {
+      if (list.length < 2) continue;
+      for (const p of list) {
+        const w = p[1] - p[0];
+        const alike = list.filter((q) => Math.abs(q[1] - q[0] - w) <= Math.max(3, 0.15 * w));
+        if (alike.length >= 2) out.push(p);
+      }
+    }
+    f.stairs.forEach((st, i) => {
+      const [v0, v1] = f.stairV[i];
+      if (panelOf[v0] !== panelOf[v1]) return;
+      const chord = Math.hypot(uv[2 * v1] - uv[2 * v0], uv[2 * v1 + 1] - uv[2 * v0 + 1]);
+      if (chord > 0.5 * (st[1] - st[0])) return;
+      const pn = panelOf[v0];
+      let lo = st[0];
+      let hi = st[1];
+      for (const n of f.notches) {
+        if (n.panel !== pn) continue;
+        if (n.s < st[0] && st[0] - n.s <= 15) lo = Math.min(lo, n.s);
+        if (n.s > st[1] && n.s - st[1] <= 15) hi = Math.max(hi, n.s);
+      }
+      out.push([lo, hi]);
+    });
+    if (!out.length) return null;
+    const folds: [number, number][] = [];
+    for (const x of [...out].sort((p, q) => p[0] - q[0])) {
+      const last = folds[folds.length - 1];
+      if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
+      else folds.push([x[0], x[1]]);
+    }
+    const Le = B.len - folds.reduce((t, x) => t + x[1] - x[0], 0);
+    return Le > 0 ? { folds, Le } : null;
+  };
+
   // ── BODY / LEGS placement ───────────────────────────────────────────────────────────────
   const legPanelsOf = legPanels(G.pieces.map((P) => P.geom));
   const body = groups.get('BODY') ?? [];
@@ -4653,25 +4785,6 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── collar (04-COLLAR.md): neck path (K1) · stand on it by landmarks (K2) · fall on the stand
   //    top, turned down (K3) · collar units joined by the order stacked on one base (K4) ─────────
-  const notchRs = new Map<number, Set<number>>();
-  for (const P of panels) {
-    const n = P.geom.rs.length;
-    notchRs.set(P.idx, new Set(P.geom.notchIdx.map((i) => ((i % n) + n) % n)));
-  }
-  const cctx: CollarCtx = {
-    pos,
-    uv,
-    cuv,
-    panelOf,
-    ringOf,
-    nbOf: (p) => panels[p].nb,
-    isNotch: (v) => {
-      const r = ringOf[v];
-      if (r < 0) return false;
-      const P = panels[panelOf[v]];
-      return notchRs.get(P.idx)!.has(P.mesh.bRs[r]);
-    },
-  };
   const collarRep: DollCollarReport = { neck: null, units: [], notes: [] };
   type CollarPlan = {
     rep: DollCollarUnit;
@@ -5130,117 +5243,6 @@ export function solveDoll(input: DollInput): DollReport {
     }) - 1;
   let standTop: number[] | null = null;
   let standList: Panel[] | null = null;
-  /** Edge of the panel's geometry a boundary segment (two ring vertices) lies on. */
-  const edgeOfSeg = (a: number, b: number): Edge | null => {
-    if (panelOf[a] !== panelOf[b] || ringOf[a] < 0 || ringOf[b] < 0) return null;
-    const P = panels[panelOf[a]];
-    const n = P.geom.rs.length;
-    const ia = P.mesh.bRs[ringOf[a]];
-    const ib = P.mesh.bRs[ringOf[b]];
-    const inE = (e: Edge, i: number) => (((i - e.s) % n) + n) % n <= (((e.e - e.s) % n) + n) % n;
-    return P.geom.edges.find((e) => inE(e, ia) && inE(e, ib)) ?? null;
-  };
-  /**
-   * Intake marks ON a path (04-COLLAR K2 + intake), as arc ranges to fold closed before a unit or
-   * a band is fitted: notch pairs 15–80 mm apart on one piece (a pleat, a dart's two legs), and
-   * runs of short edges (< 35 mm, two or more: a stepped tuck or a dart slit drawn in the outline).
-   */
-  const foldsOnPath = (P: Path) => {
-    const notchK: number[] = [];
-    for (let k = 0; k < P.v.length; k++)
-      if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
-        notchK.push(k);
-    const pairs: [number, number][] = [];
-    /** The panel each pair lies on (aligned with `pairs`). */
-    const pairPanel: number[] = [];
-    for (let i = 0; i + 1 < notchK.length; i++) {
-      const a = notchK[i];
-      const b = notchK[i + 1];
-      const d = P.s[b] - P.s[a];
-      if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
-        pairs.push([P.s[a], P.s[b]]);
-        pairPanel.push(panelOf[P.v[a]]);
-        i++;
-      }
-    }
-    const stairs: [number, number][] = [];
-    /** The first and last vertex of each run (aligned with `stairs`). */
-    const stairV: [number, number][] = [];
-    let run: { s0: number; s1: number; v0: number; v1: number; edges: Set<string> } | null = null;
-    const flush = () => {
-      if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) {
-        stairs.push([run.s0, run.s1]);
-        stairV.push([run.v0, run.v1]);
-      }
-      run = null;
-    };
-    for (let k = 1; k < P.v.length; k++) {
-      const e = edgeOfSeg(P.v[k - 1], P.v[k]);
-      if (e && e.lenMm < 35) {
-        if (!run)
-          run = { s0: P.s[k - 1], s1: P.s[k], v0: P.v[k - 1], v1: P.v[k], edges: new Set([e.id]) };
-        else {
-          run.s1 = P.s[k];
-          run.v1 = P.v[k];
-          run.edges.add(e.id);
-        }
-      } else flush();
-    }
-    flush();
-    /** Notch arcs on the path with their panel. */
-    const notches = notchK.map((k) => ({ s: P.s[k], panel: panelOf[P.v[k]] }));
-    return { pairs, pairPanel, stairs, stairV, notches };
-  };
-  /**
-   * Intake on a path read from EVIDENCE alone, never from how a band happens to fit (11.10
-   * review: six balance-notch pairs 75 mm apart would otherwise have let a wrong 700 mm band pass
-   * on a 1000 mm waist): pleats = two or more notch pairs of one width (± 3 mm or 15 %) on one
-   * piece — a lone pair is a balance mark and never folds; darts = a run of short edges that
-   * converges (its chord under half its length: a slit, a V), spanning the notches within 15 mm
-   * either side when the piece carries them (the dart's legs). Overlaps merged.
-   */
-  const foldEvidence = (B: Path): { folds: [number, number][]; Le: number } | null => {
-    const f = foldsOnPath(B);
-    const out: [number, number][] = [];
-    const byPanel = new Map<number, [number, number][]>();
-    f.pairs.forEach((p, i) => {
-      const list = byPanel.get(f.pairPanel[i]) ?? [];
-      list.push(p);
-      byPanel.set(f.pairPanel[i], list);
-    });
-    for (const list of byPanel.values()) {
-      if (list.length < 2) continue;
-      for (const p of list) {
-        const w = p[1] - p[0];
-        const alike = list.filter((q) => Math.abs(q[1] - q[0] - w) <= Math.max(3, 0.15 * w));
-        if (alike.length >= 2) out.push(p);
-      }
-    }
-    f.stairs.forEach((st, i) => {
-      const [v0, v1] = f.stairV[i];
-      if (panelOf[v0] !== panelOf[v1]) return;
-      const chord = Math.hypot(uv[2 * v1] - uv[2 * v0], uv[2 * v1 + 1] - uv[2 * v0 + 1]);
-      if (chord > 0.5 * (st[1] - st[0])) return;
-      const pn = panelOf[v0];
-      let lo = st[0];
-      let hi = st[1];
-      for (const n of f.notches) {
-        if (n.panel !== pn) continue;
-        if (n.s < st[0] && st[0] - n.s <= 15) lo = Math.min(lo, n.s);
-        if (n.s > st[1] && n.s - st[1] <= 15) hi = Math.max(hi, n.s);
-      }
-      out.push([lo, hi]);
-    });
-    if (!out.length) return null;
-    const folds: [number, number][] = [];
-    for (const x of [...out].sort((p, q) => p[0] - q[0])) {
-      const last = folds[folds.length - 1];
-      if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
-      else folds.push([x[0], x[1]]);
-    }
-    const Le = B.len - folds.reduce((t, x) => t + x[1] - x[0], 0);
-    return Le > 0 ? { folds, Le } : null;
-  };
   /**
    * L4 (04-COLLAR K2 + intake): tucks and pleats ON the neck path folded closed before the unit is
    * mapped. WHICH folds is the path's own evidence (foldEvidence: pleat pairs, dart runs — the one
@@ -6171,6 +6173,7 @@ export function solveDoll(input: DollInput): DollReport {
       pathA: Uint32Array.from(w.A.v),
       pathB: Uint32Array.from(w.B.v),
       ...(w.partRange ? { partRange: w.partRange } : {}),
+      ...(w.foldedMm ? { foldedMm: w.foldedMm } : {}),
       ...(l4
         ? {
             decidedBy: w.confirmed
@@ -6501,7 +6504,14 @@ export function solveDoll(input: DollInput): DollReport {
       });
       M += mesh.pts.length;
       const note = `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
-      surfaceRep.push({ pieceKey: k, host: H.key, join: hk.join, placed: true, note });
+      surfaceRep.push({
+        pieceKey: k,
+        host: H.key,
+        join: hk.join,
+        placed: true,
+        note,
+        pastEdgePct: Math.round(100 * (1 - fit.cover)),
+      });
       warnings.push(`surface piece ${k}: ${note}`);
     }
   }

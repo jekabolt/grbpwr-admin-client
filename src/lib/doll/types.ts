@@ -161,6 +161,8 @@ export type DollSeamReport = {
    * the sewn stretch of each such edge, mm along that edge from its start. Edges not named: whole.
    */
   partRange?: Record<EdgeId, [number, number]>;
+  /** Intake on side B folded closed before the lengths were compared (pleats, darts), mm. */
+  foldedMm?: number;
 };
 
 export type DollLoop = {
@@ -223,6 +225,8 @@ export type DollReport = {
     join: string | null;
     placed: boolean;
     note: string;
+    /** Share of the piece lying past its host panel's edge as drawn, % (0 when wholly on it). */
+    pastEdgePct?: number;
   }[];
   /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
   collar?: DollCollarReport;
