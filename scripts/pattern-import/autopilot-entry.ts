@@ -1062,6 +1062,20 @@ export async function runCase(c: Case, mutate: string | null) {
     list: as.map((a) => `${a.strong ? '!' : ' '}${a.kind} · ${a.subject} → ${a.answer}`),
   };
   if (mutated.length) rec.mutated = mutated;
+  // AP-tail: the pieces as named at the end, and the autopilot's own codes (code probe §6)
+  rec.named = {
+    pieces: (s.semantics?.pieces ?? []).map((p) => ({
+      seed: p.seed,
+      identity: p.identity,
+      code: p.code,
+      mods: p.mods,
+      pairHand: p.pairHand,
+      pairOf: p.pairOf,
+    })),
+    codes: as
+      .filter((a) => a.kind === 'name-code' && a.seed != null)
+      .map((a) => ({ seed: a.seed!, answer: a.answer, value: a.value ?? null })),
+  };
 
   // the written files: gate, manifest round trip (the assumptions ride in every manifest)
   const wr = outs.write as StageIO['write']['out'] | undefined;
