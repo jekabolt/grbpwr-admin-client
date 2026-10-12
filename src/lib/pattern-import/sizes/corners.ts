@@ -370,7 +370,10 @@ export function closeCorners(
       if (x.a > CORNER.stubMaxMm || x.b > CORNER.stubMaxMm) return;
       vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
       if (!free(k0) || !free(k1)) return;
-      if (dist(A.p, B.p) > CORNER.extendMaxMm || x.a > CORNER.extendMaxMm) return;
+      // ends already touching (≤ 0.5 mm) are closed as drawn: a vertex off them is a spike
+      const gap = dist(A.p, B.p);
+      if (gap > CORNER.extendMaxMm || gap <= 0.5 || x.a > CORNER.extendMaxMm) return;
+      if (x.a < 0 || x.b < 0) return;
       if (x.b > CORNER.extendMaxMm) return;
       pairs.push({ k0, k1, x: x.x, cost: x.a + x.b, r: A.rank });
     });
