@@ -361,8 +361,10 @@ export function completeFromJoins(
   const plyFollows: EdgeId[] = [];
   if (opts.multi) {
     const opIdx = (x: string, y: string) => {
-      const i = joins.findIndex(
-        (J) => J.parts.some((X) => X.includes(x)) && J.parts.some((Y) => Y.includes(y)),
+      const i = joins.findIndex((J) =>
+        J.parts.some(
+          (X, xi) => X.includes(x) && J.parts.some((Y, yi) => yi !== xi && Y.includes(y)),
+        ),
       );
       return i < 0 ? Infinity : i;
     };
@@ -399,7 +401,10 @@ export function completeFromJoins(
         const sb = seamOnEdge(eb);
         const pa = sa ? otherPiece(sa, ea) : null;
         const pb = sb ? otherPiece(sb, eb) : null;
-        if (sa && sb && pa !== pb && pa !== kb && pb !== ka) {
+        const ida = sa ? (sa.a === ea.id ? sa.b : sa.a) : null;
+        const idb = sb ? (sb.a === eb.id ? sb.b : sb.a) : null;
+        // (two different edges — of two pieces, or of one — cannot both be the one bound edge)
+        if (sa && sb && ida !== idb && pa !== kb && pb !== ka) {
           const ia = opIdx(ka, pa!);
           const ib = opIdx(kb, pb!);
           const weak = ia !== ib ? (ia > ib ? sa : sb) : sa.score < sb.score ? sa : sb;
@@ -573,7 +578,7 @@ export function completeFromJoins(
         else if (!corners) break;
         // An item without a body: a run round corners may take its first / last edge only from /
         // up to a notch (a strip round a panel's lower U; the flap above the notch stays free).
-        if (!corners || L < 2) continue;
+        if (!corners || L < 2 || !cornersAt.length) continue;
         const first = es[0];
         const last = es[L - 1];
         const heads: ([number, number] | null)[] = [
@@ -622,7 +627,11 @@ export function completeFromJoins(
   const cornersMarked = (A: Run, B: Run) => {
     if (!A.cornersAt.length) return true;
     const marks = marksOf(B);
-    return A.cornersAt.every((c) => nearMark(marks, B.len, c));
+    // (one way round for every corner — not one corner read forward and the next reversed)
+    return (
+      A.cornersAt.every((c) => marks.some((m) => Math.abs(m - c) <= 12)) ||
+      A.cornersAt.every((c) => marks.some((m) => Math.abs(B.len - m - c) <= 12))
+    );
   };
   /** How many notches of the straight run S find no corner and no notch on the run R round corners. */
   const unmatchedNotches = (S: Run, R: Run) => {
@@ -636,6 +645,7 @@ export function completeFromJoins(
   // graph pairing of the strip's edge by length alone (a partial onto one edge) yields to the fit;
   // a single-edge pairing of another piece on the fit's edges is refused (the strip goes there; a
   // channel strip then finds the opening edge, two panels do not meet where the strip runs).
+  const ids_ = ids;
   const fitsOf = (S: Run, p: PieceGeom, anyUse: boolean): Run[] =>
     runsOf(p, anyUse)
       .filter(
@@ -667,8 +677,21 @@ export function completeFromJoins(
                 const R = S ? fitsOf(S, p, true)[0] : undefined;
                 if (!S || !R) continue;
                 const where = `${p.pieceKey}'s ${R.edges.map((x) => x.k).join('+')} (${S.len.toFixed(0)} = ${R.len.toFixed(0)} mm, its notches at the corners)`;
+                const fitIds = new Set([e.id, ...R.edges.map((x) => x.id)]);
                 for (const s of graph.chosen) {
-                  if (ignore.has(key(s)) || !single(s)) continue;
+                  if (ignore.has(key(s))) continue;
+                  if (!single(s)) {
+                    // (a composite over these edges that is not this very fit)
+                    const ids = sides(s).flatMap((id) => ids_(id));
+                    const over = ids.some((id) => fitIds.has(id));
+                    const isFit = over && ids.every((id) => fitIds.has(id)) && ids.includes(e.id);
+                    if (over && !isFit)
+                      refuse(
+                        s,
+                        `not sewn — ${s.a} ↔ ${s.b}: the strip ${g.pieceKey}'s edge ${e.k} fits round ${where}; the order «${J.label}» sews it there`,
+                      );
+                    continue;
+                  }
                   if (s.a === e.id || s.b === e.id)
                     refuse(
                       s,
@@ -811,7 +834,11 @@ export function completeFromJoins(
     const out = new Map<EdgeId, string>();
     if (!opts.multi || stripLongEdges(g)) return out;
     const together = (a: string, b: string) =>
-      joins.some((J) => J.parts.some((X) => X.includes(a)) && J.parts.some((Y) => Y.includes(b)));
+      joins.some((J) =>
+        J.parts.some(
+          (X, xi) => X.includes(a) && J.parts.some((Y, yi) => yi !== xi && Y.includes(b)),
+        ),
+      );
     for (const s of graph.pieces) {
       const L = stripLongEdges(s);
       if (!L || !together(s.pieceKey, g.pieceKey)) continue;
@@ -1023,20 +1050,21 @@ export function completeFromJoins(
                 }
                 const strays = (x: number, want: number) =>
                   offCentre(x) && offCentre(want) && Math.abs(x - want) > 0.5;
+                // (unknown yet: mirrored preferred, nothing refused — the first pair fixes it)
                 if (sa) {
-                  const c = chirality(sa.piece, kb) ?? -1;
-                  const want = c > 0 ? sa.x : 1 - sa.x;
-                  if (strays(B.xMid, want)) continue;
+                  const c = chirality(sa.piece, kb);
+                  const want = (c ?? -1) > 0 ? sa.x : 1 - sa.x;
+                  if (c && strays(B.xMid, want)) continue;
                   score += 0.05 * Math.abs(B.xMid - want);
                 } else if (sb) {
-                  const c = chirality(sb.piece, ka) ?? -1;
-                  const want = c > 0 ? sb.x : 1 - sb.x;
-                  if (strays(A.xMid, want)) continue;
+                  const c = chirality(sb.piece, ka);
+                  const want = (c ?? -1) > 0 ? sb.x : 1 - sb.x;
+                  if (c && strays(A.xMid, want)) continue;
                   score += 0.05 * Math.abs(A.xMid - want);
                 } else if (!stripA && !stripB) {
-                  const c = chirality(ka, kb) ?? -1;
-                  const want = c > 0 ? B.xMid : 1 - B.xMid;
-                  if (strays(A.xMid, want)) continue;
+                  const c = chirality(ka, kb);
+                  const want = (c ?? -1) > 0 ? B.xMid : 1 - B.xMid;
+                  if (c && strays(A.xMid, want)) continue;
                   score += 0.05 * Math.abs(A.xMid - want);
                 }
               }

@@ -1748,8 +1748,12 @@ export function solveDoll(input: DollInput): DollReport {
       const others = g.edges
         .filter((e) => e.kind === 'edge' && !sides.has(e.id))
         .sort((x, y) => y.lenMm - x.lenMm);
-      const base = r.base.get(k) ?? others[0]?.id;
-      const top = r.top.get(k) ?? (others.length > 1 ? others[others.length - 1].id : undefined);
+      const knownTop = r.top.get(k);
+      const knownBase = r.base.get(k);
+      const base = knownBase ?? others.find((e) => e.id !== knownTop)?.id;
+      const top =
+        knownTop ??
+        (others.length > 1 ? [...others].reverse().find((e) => e.id !== base)?.id : undefined);
       return { base, top: top === base ? undefined : top };
     };
     const ringDims = (r: Ring) => {
@@ -1783,7 +1787,9 @@ export function solveDoll(input: DollInput): DollReport {
     const ringB = ringA?.mate && ringsHere.includes(ringA.mate.ring) ? ringA.mate.ring : null;
     const ringLays = ringA ? (ringB ? [ringA, ringB] : [ringA]) : [];
     const ringDimsAll = ringLays.map(ringDims);
-    const useRings = ringDimsAll.length > 0 && ringDimsAll.every((d) => d.baseP > 0 && d.h > 0);
+    const useRings =
+      ringDimsAll.length > 0 &&
+      ringDimsAll.every((d) => d.baseP > 0 && d.h > 0 && d.topP < 0.95 * d.baseP);
     // Two faces of about one size that carry most of the cloth: a pouch, a cover.
     const twoFaces =
       !!second &&
@@ -1800,9 +1806,9 @@ export function solveDoll(input: DollInput): DollReport {
         const rTop = d.topP > 0 ? inr(d.topP, d.n) : 0;
         const drop = Math.max(0, inr(d.baseP, d.n) - rTop);
         const z = Math.sqrt(Math.max(0, d.h * d.h - drop * drop));
-        cc = Math.max(cc, rTop < R ? z / Math.sqrt(1 - (rTop / R) ** 2) : d.h);
+        cc = Math.max(cc, z / Math.sqrt(1 - (rTop / R) ** 2));
       }
-      c = Math.max(0.06 * a, Math.min(a, cc));
+      c = Math.max(0.06 * a, Math.min(3 * a, cc));
       const n = ringDimsAll[0].n;
       shapeWords =
         ringLays.length === 2
@@ -2939,7 +2945,21 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
-    if (s.seam.partRange) w0.partRange = s.seam.partRange;
+    if (s.seam.partRange) {
+      // (keys on the side's original edge ids → the grouped side's ids, position for position)
+      const pr: Record<string, [number, number]> = {};
+      for (const side of ['a', 'b'] as const) {
+        const orig = (
+          side === 'a' ? s.seam.aParts ?? edgeIdsOf(s.seam.a) : s.seam.bParts ?? edgeIdsOf(s.seam.b)
+        ).flatMap((x) => edgeIdsOf(x));
+        const ids = side === 'a' ? s.a : s.b;
+        orig.forEach((o, i) => {
+          const r = s.seam.partRange![o];
+          if (r) pr[ids[i] ?? o] = r;
+        });
+      }
+      w0.partRange = pr;
+    }
     if (crotchOf(s)) {
       w0.crotch = true;
       for (const v of w0.A.v) midPlane.add(v);
