@@ -220,8 +220,8 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
       const partners = new Map<number, Set<number>>();
       const linked = c.length > 1 ? linkedPages(c, partners) : new Set<number>();
       // A labelled run (most tiles print their cell, A1…L8): a page before the first labelled
-      // tile or after the last one, without a label of its own, is a tile only when it links with
-      // a LABELLED tile. Alghero's draping-guide pages 4–8 link with each other (the same logo,
+      // tile or after the last one, without a label of its own, is a tile only when its links
+      // reach a LABELLED tile (directly or through other pages). Alghero's draping-guide pages 4–8 link with each other (the same logo,
       // the same frame) and nothing else — on a label grid they have no cell to go to.
       const labelledIdx = c.flatMap((p, i) => (F(p).cellLabel ? [i] : []));
       const linkedCount = c.filter((p) => linked.has(p.page) || F(p).cellLabel).length;
@@ -229,12 +229,19 @@ export function classifyPages(docs: SourceDoc[]): PageClassification[] {
         labelledIdx.length >= 3 &&
         2 * labelledIdx.length > linkedCount &&
         new Set(labelledIdx.map((i) => F(c[i]).cellLabel)).size === labelledIdx.length;
-      const labelledPages = new Set(labelledIdx.map((i) => c[i].page));
+      // the pages whose links reach a labelled tile, however many links away
+      const reachesLabel = new Set(labelledIdx.map((i) => c[i].page));
+      for (const q = [...reachesLabel]; q.length; )
+        for (const n of partners.get(q.shift() as number) ?? [])
+          if (!reachesLabel.has(n)) {
+            reachesLabel.add(n);
+            q.push(n);
+          }
       const offGrid = (p: IRPage, i: number) =>
         labelGrid &&
         !F(p).cellLabel &&
         (i < labelledIdx[0] || i > labelledIdx[labelledIdx.length - 1]) &&
-        ![...(partners.get(p.page) ?? [])].some((q) => labelledPages.has(q));
+        !reachesLabel.has(p.page);
       // Traced raster pages register poorly in the quick check (resampled vertices): every
       // drawing page of a traced run counts as a tile.
       const tracedRun = c.every((p) => F(p).traced);

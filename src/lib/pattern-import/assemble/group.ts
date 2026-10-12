@@ -228,22 +228,17 @@ export function seamBreak(
       15,
       (rel === 'right' ? pg.widthMm - Math.abs(off.dx) : pg.heightMm - Math.abs(off.dy)) + 3,
     );
-  const pa = edgeCrossings(a, sa, furniture, marginOf(a));
-  const pb = edgeCrossings(b, sb, furniture, marginOf(b));
+  // Lines only: a dash mark (a tiny shape) has no direction to follow across the seam — a
+  // diagonal dashed line's next mark sits off both axes — so marks never decide a break.
+  const pa = edgeCrossings(a, sa, furniture, marginOf(a)).filter((v) => !v.mark);
+  const pb = edgeCrossings(b, sb, furniture, marginOf(b)).filter((v) => !v.mark);
   let goesOn = 0;
-  // A line goes on through the same point; a dash mark goes on as another mark of its row —
-  // the next tile prints its own marks at their own phase: anywhere within 8 mm across the seam,
-  // still within 0.6 mm sideways.
-  const goes = (pg: IRPage, q: { x: number; y: number }, mark: boolean) => {
-    if (!mark) return drawsThrough(pg, q, furniture, 0.6);
-    for (let d = -8; d <= 8; d += 0.5) {
-      const p = rel === 'right' ? { x: q.x + d, y: q.y } : { x: q.x, y: q.y + d };
-      if (drawsThrough(pg, p, furniture, 0.6)) return true;
-    }
-    return false;
-  };
-  for (const v of pa) if (goes(b, { x: v.x - off.dx, y: v.y - off.dy }, v.mark)) goesOn++;
-  for (const v of pb) if (goes(a, { x: v.x + off.dx, y: v.y + off.dy }, v.mark)) goesOn++;
+  // A line goes on through the same point in the neighbour (its print of the overlap strip, or
+  // its own line starting at the shared edge).
+  for (const v of pa)
+    if (drawsThrough(b, { x: v.x - off.dx, y: v.y - off.dy }, furniture, 0.6)) goesOn++;
+  for (const v of pb)
+    if (drawsThrough(a, { x: v.x + off.dx, y: v.y + off.dy }, furniture, 0.6)) goesOn++;
   return { meets: pa.length + pb.length, goesOn };
 }
 
@@ -316,10 +311,11 @@ export function assembleGroup(
       if (n > bestN) [best, bestN] = [r, n];
     }
     if (best !== null) turnChoice.set(pageKey(p.file, p.page), best);
+    // D3: a tile left out is drawing gone from the export — asked, never a warning only
     else
-      warnings.push(
+      refused.push(
         `page ${p.page + 1}: orientation differs from its sheet and no recurrence placed it — ` +
-          `left out (place it with a grid override)`,
+          `left off the sheet (set it aside on the files step if not pattern, or place it with a grid override)`,
       );
   }
   const keepTurned = (r: RegPage) => r.rot === 0 || turnChoice.get(r.key) === r.rot;

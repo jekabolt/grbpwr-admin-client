@@ -2,9 +2,8 @@
 // PATTERN-IMPORT · REG probe — tile registration on a printed label grid (Alghero + controls).
 // Bundles reg-entry.ts with esbuild (types stripped; tsc covers scripts/) and runs it in node
 // with pdf.js' legacy build.
-//   node scripts/pattern-import/assemble.mjs [all|corpus|controls|perf] [sample-id…]
-//   env PATIMPORT_CORPUS (default tmp/plans/pdf-to-dxf/corpus/), PATIMPORT_REPORTS
-// Writes reports/F2-<yyyymmdd>.json, reports/F2.md and one PNG per sheet in reports/F2-sheets/.
+//   node scripts/pattern-import/reg.mjs [pdf]   (yarn patimport:reg)
+//   env PATIMPORT_ALGHERO (the PDF), REG_OUT (PNG dir)
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';

@@ -285,6 +285,16 @@ export function assembleSheetDetailed(
       );
       // The hand grid fills cells in reading order: on a printed label grid (sparse ones above
       // all) that is a strip or a shuffle — held to the labels like any other layout.
+      // every tile of the file gets a cell, or the grid is refused: a page past rows × cols (or
+      // before the origin) would leave the export without saying so
+      const placedPages = new Set(m.poses.map((p) => p.page));
+      const dropped = pages.filter((p) => !placedPages.has(p.page)).map((p) => p.page + 1);
+      if (dropped.length)
+        refused.push(
+          `${byFile.size > 1 ? `file ${file}: ` : ''}the hand grid ${override.rows}×${override.cols} ` +
+            `leaves page${dropped.length > 1 ? 's' : ''} ${dropped.slice(0, 12).join(', ')}` +
+            `${dropped.length > 12 ? ', …' : ''} without a cell — widen the grid or set ${dropped.length > 1 ? 'them' : 'it'} aside`,
+        );
       const grid = labelGridOf(pages);
       const cellOf = new Map(m.poses.map((p) => [p.page, p]));
       const contra = labelConflicts(

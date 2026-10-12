@@ -20,7 +20,8 @@
 //       e · L4 dropped (lines run into its cell): missing L4;
 //       f · labels read on 12 pages only (below half): seam layout, held to those 12 labels —
 //           refused, or every labelled page on its label (never a silent contradiction);
-//       g · a dense label grid of 4 tiles where one page prints no label: that page refused.
+//       g · a dense label grid of 4 tiles where one page prints no label: that page refused;
+//       h · a hand grid smaller than the tile count: refused (pages without a cell).
 //
 //   node scripts/pattern-import/reg.mjs [pdf]   (yarn patimport:reg)
 //   env PATIMPORT_ALGHERO (the PDF), REG_OUT (PNG dir, default tmp/plans/pdf-to-dxf/auto/reg)
@@ -349,7 +350,7 @@ export async function main(args: string[]): Promise<number> {
     );
   }
   {
-    // g · a dense 2 × 2 label grid (A1 A2 / B1? no — K1 K2 / L1 L2) where L2 prints no label
+    // g · a dense 2 × 2 label grid (K1 K2 / L1 L2) where L2 prints no label
     const d = cloneDoc(doc);
     setLabel(d.pages[43], 'L2', null);
     const r = assembleSheetDetailed([d], tileClasses(d, [35, 36, 43, 44]), 0);
@@ -358,6 +359,23 @@ export async function main(args: string[]): Promise<number> {
       r.sheet.poses.length === 3 &&
         !!r.sheet.refused?.some((x) => /page 44 prints no tile label/.test(x)),
       `${r.sheet.poses.length} placed; ${brief(r.sheet)}`,
+    );
+  }
+  {
+    // h · a hand grid too small for the tiles (5 × 5 of 42): the pages past it are not dropped
+    const o: GridOverride = {
+      rows: 5,
+      cols: 5,
+      stepXMm: 196.85,
+      stepYMm: 266.7,
+      order: 'row-major',
+      originPage: { file: '0', page: 8 },
+    };
+    const r = assembleSheetDetailed([doc], tileClasses(doc, tiles), 0, o);
+    check(
+      'control h · hand grid 5 × 5 for 42 tiles: refused (17 pages without a cell)',
+      !!r.sheet.refused?.some((x) => /leaves pages .* without a cell/.test(x)),
+      brief(r.sheet),
     );
   }
   console.log(fails ? `REG: ${fails} FAIL` : 'REG: all PASS');
