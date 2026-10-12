@@ -187,11 +187,19 @@ export function manifestGeometryProblems(
     const k = r.blockName.trim().toLowerCase();
     byBlock.set(k, [...(byBlock.get(k) ?? []), r]);
   }
+  const ppgOf = new Map(m.pieces.map((p) => [p.identity.trim().toLowerCase(), p.piecesPerGarment]));
   for (const b of m.blocks) {
     if (out.length >= 4) break;
     const inst = byBlock.get(b.block.trim().toLowerCase()) ?? [];
     if (inst.length === 0) {
       out.push(`${b.block}: no contour on layer ${m.layers.cut}`);
+      continue;
+    }
+    // W1: the instances read (INSERTs, or the QUANTITY label's copies — dxf/transform.ts
+    // labelCopies) are the piece's × per garment; a label edited after conversion is not trusted
+    const ppg = Math.max(1, Math.floor(ppgOf.get(b.identity.trim().toLowerCase()) ?? 1));
+    if (inst.length !== ppg) {
+      out.push(`${b.block}: cut ×${inst.length} in the drawing, declared ×${ppg}`);
       continue;
     }
     const [x0, y0, x1, y1] = b.bboxMm;

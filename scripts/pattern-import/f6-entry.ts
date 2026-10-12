@@ -1230,6 +1230,15 @@ export async function main(opts: { plans: string }): Promise<number> {
         `${dialect}: an old file (N inserts + QUANTITY N) still reads ×N on the card`,
         wrongOld.map((b) => `${b.name} ${gotOld.get(b.name)}≠${ppg.get(b.identity)}`).join(' '),
       );
+      // a QUANTITY label edited after conversion: the card does not trust the manifest any more
+      const edited = w.dxfText.replace(/(QUANTITY: )4\r\n/i, '$19\r\n');
+      const rtEd = await roundTrip(edited);
+      ck(
+        edited !== w.dxfText &&
+          rtEd.warnings.some((x) => /not trusted.*cut ×9 in the drawing, declared ×4/.test(x)),
+        `${dialect}: a QUANTITY label edited after conversion → the manifest is not trusted`,
+        rtEd.warnings.join(' | ').slice(0, 200),
+      );
       // our own DXF reader (re-import): the cut count reaches semantics as drawn copies
       for (const [label, t] of [
         ['new', w.dxfText],
