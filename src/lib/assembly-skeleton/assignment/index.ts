@@ -21,6 +21,7 @@ import { graphOf, sameAs } from './adapt';
 import { operationOf, variableOf, variablesOf } from './candidates';
 import { MARGIN_BUDGET, NODE_BUDGET, type Variable } from './model';
 import { buildOperations, surfacePieces } from './operations';
+import { partialCandidates } from './partials';
 import { Board, solveCard } from './solve';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -142,8 +143,10 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     warnings.push(`${c.u.id} ↔ ${c.v.id} is a closure, not a seam (${c.evidence.rule})`);
   }
 
-  void surface;
-  const vars = variablesOf(P, ops, board, forcedSame, skip);
+  // Partial seams the pair pool cannot see (a short edge onto part of a long one), where the order
+  // sews two pieces no acceptable pair joins.
+  const partials = partialCandidates(P, ops, new Set([...skip, ...surface]));
+  const vars = variablesOf(P, ops, board, forcedSame, skip, partials);
   const sol = solveCard(vars, ops, board, nodeBudget, marginBudget, fixed, now);
   // ASSIGN_DEBUG=<edge name substring> (node probes): every pool candidate touching it, its fate
   // and the board's answer after the solve.
@@ -156,7 +159,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
       const g = P.pieces.find((p) => p.pieceKey === id.slice(0, at));
       return `${g?.name ?? id.slice(0, at)}${id.slice(at)}`;
     };
-    for (const c of P.all) {
+    for (const c of [...P.all, ...partials]) {
       if (!nm(c.u.id).includes(dbg) && !nm(c.v.id).includes(dbg)) continue;
       const v = byId.get([c.u.id, c.v.id].sort().join('~'));
       warnings.push(
@@ -181,7 +184,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     conflicts,
     words: [
       ...words,
-      `${vars.length} candidate seams over ${ops.length} operations · ${sol.nodes} nodes${sol.exact ? '' : ' (budget hit — the best found stands)'} · ${Math.round(sol.ms)} ms`,
+      `${vars.length} candidate seams (${partials.length} partial) over ${ops.length} operations · ${sol.nodes} nodes${sol.exact ? '' : ' (budget hit — the best found stands)'} · ${Math.round(sol.ms)} ms`,
       ...sol.perOp.flatMap((s) => s.words),
     ],
     ms: Math.round((now() - t0) * 10) / 10,

@@ -118,10 +118,12 @@ export function variablesOf(
   forcedSame: ReadonlySet<PoolCand>,
   /** Pieces never sewn as shell (hardware, interfacing). */
   skip: ReadonlySet<string>,
+  /** Candidates read for the solver alone (partials.ts), after the pool's. */
+  extra: readonly PoolCand[] = [],
 ): Variable[] {
   const opOf = operationOf(ops);
   const out: Variable[] = [];
-  for (const c0 of P.all) {
+  for (const c0 of [...P.all, ...extra]) {
     if (c0.kind === 'closure-not-seam' || forcedSame.has(c0)) continue;
     const tube = tubeSelfOf(c0, ops);
     if (c0.dropped && !tube) continue;
