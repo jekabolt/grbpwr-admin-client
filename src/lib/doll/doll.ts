@@ -1160,6 +1160,25 @@ export function solveDoll(input: DollInput): DollReport {
     }
     return { v: Int32Array.from(v), s: Float64Array.from(sv), len: base };
   };
+  /**
+   * A seam's side AS SEWN — the one path every reading of a seam goes by (12.10 review: the
+   * sleeve's azimuth, the far-apart check and the solve each walked a side their own way). A side
+   * whose stretches are known (a stored row, or the engine's partRange) has its parts walked in
+   * order and cut to them (sidePath); a side the doll itself proposed from free loops is already
+   * in walk order and keeps its ids' own run (re-walking it by where its parts lie now turned
+   * card 9's underarms and card 16's placket). A one-piece side the row sews over a range is cut
+   * to that range too; `crop = false` keeps the whole edges with the range left to the constraint
+   * (the solve wants the whole side under its fractions).
+   */
+  const sewnSide = (g: GroupedSeam, side: 'a' | 'b', crop = true): Path | null => {
+    const P =
+      isConf(g.seam) || g.seam.partRange ? sidePath(g, side) : pathOf(side === 'a' ? g.a : g.b);
+    if (!P || !crop) return P;
+    const rg = g.seam.range;
+    if (!rg || g.a.length !== 1 || g.b.length !== 1) return P;
+    const r = side === 'a' ? rg.a : rg.b;
+    return r && r[1] - r[0] > 1 && r[1] - r[0] < P.len - 1 ? cropPath(P, r) : P;
+  };
 
   // ── charts ───────────────────────────────────────────────────────────────────────────────
   const groups = new Map<DollGroupId, Panel[]>();
@@ -2128,7 +2147,7 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const full = boxOf(big);
         const beyond = Math.max(full.h - F.h, full.w - F.w);
-        const note = `its seams hold ${F.w.toFixed(0)} × ${F.h.toFixed(0)} mm of it; the ${beyond.toFixed(0)} mm beyond them, sewn along no edge of its own, hinges where the seams end and folds over the other face as a flap — drawn lying on it, not solved as a face`;
+        const note = `its seams hold ${F.w.toFixed(0)} × ${F.h.toFixed(0)} mm of it; the ${beyond.toFixed(0)} mm beyond them, sewn along no edge of its own, hinges where the seams end and folds over the other face as a flap — drawn lying on it, not solved as a face: a reading of where its seams end, not a seam`;
         bagSurfaceRows.push({
           pieceKey: big.key,
           host: second?.key ?? null,
@@ -2324,6 +2343,9 @@ export function solveDoll(input: DollInput): DollReport {
       const short = Math.min(bx.w, bx.h);
       if (long < 3 * short) continue;
       const keys = new Set([P.key, ...P.layers]);
+      // Every placed panel the order joins the strip to (across all its joins): the biggest hosts
+      // it; all of them are checked for a seam the graph may have missed.
+      const hosts: Panel[] = [];
       let host = null as Panel | null;
       let join = '';
       for (const J of opt.joins ?? []) {
@@ -2333,48 +2355,65 @@ export function solveDoll(input: DollInput): DollReport {
           if (i === mine) continue;
           for (const k of X) {
             const H = panelByKey.get(k);
-            if (H && H !== P && isBody(H) && isPlaced(H) && (!host || areaOfP(H) > areaOfP(host)))
+            if (!H || H === P || !isBody(H) || !isPlaced(H)) continue;
+            if (!hosts.includes(H)) hosts.push(H);
+            if (!host || areaOfP(H) > areaOfP(host)) {
               host = H;
+              join = J.label;
+            }
           }
-        }
-        if (host) {
-          join = J.label;
-          break;
         }
       }
       if (!host) continue;
-      // «No edge of it matches an edge of the host» — checked, not assumed: the strip's long edges
-      // against every run of the host's FREE edges (edges no seam took, contiguous along its
-      // boundary). A run within 10 % of a long edge is a plausible seam the graph missed: the
-      // strip then stays floating, said so, rather than being laid as a strap.
-      const H1 = host;
+      // «No edge of it matches an edge of the host» — checked, not assumed: every run of the
+      // strip's FREE edges (edges no seam took, contiguous along its boundary; its long edges and
+      // the free runs of 60 % of its length or more) against every free run of EVERY panel the
+      // order joins it to. A pair within 10 % is a plausible seam the graph missed (12.10 review:
+      // a composite boundary over a second host as much as one edge of the first): the strip then
+      // stays floating, said so, rather than being laid as a strap.
       const taken = new Set(
         G.seams.flatMap((s) => [...s.a, ...s.b].flatMap((id) => edgeIdsOf(id))),
       );
-      const hEdges = H1.geom.edges.filter((e) => e.kind === 'edge');
-      const free = hEdges.map((e) => !taken.has(e.id));
-      const longEdges = P.geom.edges.filter((e) => e.kind === 'edge' && e.lenMm >= 0.6 * long);
-      let match: { run: string; mm: number; edge: Edge } | null = null;
-      const nE = hEdges.length;
-      for (let s0 = 0; s0 < nE && !match; s0++) {
-        if (!free[s0] || (nE > 1 && free[(s0 - 1 + nE) % nE] && s0 !== 0)) continue;
-        let sum = 0;
-        const ks: number[] = [];
-        for (let k = 0; k < nE; k++) {
-          const i = (s0 + k) % nE;
-          if (!free[i] || (k > 0 && i === s0)) break;
-          sum += hEdges[i].lenMm;
-          ks.push(hEdges[i].k);
-          const hit = longEdges.find((e) => Math.abs(sum - e.lenMm) <= 0.1 * e.lenMm);
-          if (hit) {
-            match = { run: ks.map((x) => `edge ${x + 1}`).join('+'), mm: sum, edge: hit };
+      /** Every contiguous run of a panel's free edges (one or more edges), with its length. */
+      const freeRuns = (X: Panel, minMm: number) => {
+        const E = X.geom.edges.filter((e) => e.kind === 'edge');
+        const nE = E.length;
+        const out: { run: string; mm: number }[] = [];
+        for (let s0 = 0; s0 < nE; s0++) {
+          if (taken.has(E[s0].id)) continue;
+          let sum = 0;
+          const ks: number[] = [];
+          for (let k = 0; k < nE; k++) {
+            const i = (s0 + k) % nE;
+            if (taken.has(E[i].id) || (k > 0 && i === s0)) break;
+            sum += E[i].lenMm;
+            ks.push(E[i].k);
+            if (sum >= minMm) out.push({ run: ks.map((x) => `edge ${x + 1}`).join('+'), mm: sum });
+          }
+        }
+        return out;
+      };
+      const mineRuns = [
+        ...P.geom.edges
+          .filter((e) => e.kind === 'edge' && e.lenMm >= 0.6 * long)
+          .map((e) => ({ run: `edge ${e.k + 1}`, mm: e.lenMm })),
+        ...freeRuns(P, 0.6 * long),
+      ];
+      let match: { host: Panel; run: string; mm: number; mine: string; mineMm: number } | null =
+        null;
+      for (const H of hosts) {
+        if (match) break;
+        for (const h of freeRuns(H, 0)) {
+          const m = mineRuns.find((r) => Math.abs(h.mm - r.mm) <= 0.1 * r.mm);
+          if (m) {
+            match = { host: H, run: h.run, mm: h.mm, mine: m.run, mineMm: m.mm };
             break;
           }
         }
       }
       if (match) {
         warnings.push(
-          `${P.key}: a strip ${Math.round(long)} × ${Math.round(short)} mm the order sews onto ${H1.key} («${join}») — its ${Math.round(match.edge.lenMm)} mm edge could meet the panel's free ${match.run} (${Math.round(match.mm)} mm): a seam the graph has not got, not a strap; left apart`,
+          `${P.key}: a strip ${Math.round(long)} × ${Math.round(short)} mm the order sews onto ${host.key} («${join}») — its ${match.mine} (${Math.round(match.mineMm)} mm) could meet ${match.host.key}'s free ${match.run} (${Math.round(match.mm)} mm): a seam the graph has not got, not a strap; left apart`,
         );
         continue;
       }
@@ -3233,15 +3272,14 @@ export function solveDoll(input: DollInput): DollReport {
     return rise(s.a) && rise(s.b);
   };
   /** Tube groups set onto the body by the graph's own seams (no free loop): their composite seams
-   *  take their direction by the gap and are judged by gapSide. */
+   *  take their direction by the gap, not the mirrored flags. */
   const graphPlaced = new Set<DollGroupId>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
-    // (a proposed composite whose end parts are sewn over a stretch — a strip round a panel's
-    // lower U — is cut to its stretches like a stored one)
-    const cut = conf || !!s.seam.partRange;
-    const A = cut ? sidePath(s, 'a') : pathOf(s.a);
-    const B = cut ? sidePath(s, 'b') : pathOf(s.b);
+    // Each side as sewn (sewnSide: parts walked in order, cut to their stretches) — the same path
+    // the placement judged the seam by; the range of a one-piece partial stays a constraint.
+    const A = sewnSide(s, 'a', false);
+    const B = sewnSide(s, 'b', false);
     if (!A || !B) return null;
     const lenA = A.len;
     const lenB = B.len;
@@ -4378,30 +4416,22 @@ export function solveDoll(input: DollInput): DollReport {
   // each other once placed; one that spans the doll (a sleeve's underarm onto the yoke) is a wrong
   // pairing and is released at once instead of crumpling the sleeve on its way across.
   const FAR = 150;
-  const gapNow = (sm: GroupedSeam) => {
-    const A = pathOf(sm.a);
-    const B = pathOf(sm.b);
-    if (!A || !B) return Infinity;
-    return Math.min(meanDist(A, B, true, [0, 1], [0, 1]), meanDist(A, B, false, [0, 1], [0, 1]));
-  };
   /**
-   * The same gap with each composite side walked in order (sidePath: parts turned to meet where
-   * they lie, cut to their sewn stretches) — a side of several parts concatenated in their own ring
+   * The gap between a seam.s two sides as sewn (sewnSide: parts walked in order, cut to their
+   * stretches and the row.s range) — a side of several parts concatenated in their own ring
    * directions zigzags, and its mean distance says nothing about the seam.
    */
-  const gapSide = (sm: GroupedSeam) => {
-    const A = sidePath(sm, 'a');
-    const B = sidePath(sm, 'b');
+  const gapOf = (sm: GroupedSeam) => {
+    const A = sewnSide(sm, 'a');
+    const B = sewnSide(sm, 'b');
     if (!A || !B) return Infinity;
     return Math.min(meanDist(A, B, true, [0, 1], [0, 1]), meanDist(A, B, false, [0, 1], [0, 1]));
   };
-  const gapOf = (sm: GroupedSeam, ga?: DollGroupId, gb?: DollGroupId) =>
-    (ga && graphPlaced.has(ga)) || (gb && graphPlaced.has(gb)) ? gapSide(sm) : gapNow(sm);
   const sewnNear = (g1: DollGroupId, g2: DollGroupId) =>
     G.seams.some((sm) => {
       const ga = panelByKey.get(pk(sm.a[0]))?.group;
       const gb = panelByKey.get(pk(sm.b[0]))?.group;
-      return ((ga === g1 && gb === g2) || (gb === g1 && ga === g2)) && gapOf(sm, ga, gb) < FAR;
+      return ((ga === g1 && gb === g2) || (gb === g1 && ga === g2)) && gapOf(sm) < FAR;
     });
   const a = (Math.PI / 180) * ARM_DEG;
   const sleeveFrames: Partial<Record<'L' | 'R', Frame>> = {};
@@ -4467,12 +4497,12 @@ export function solveDoll(input: DollInput): DollReport {
       for (const sm of G.seams) {
         const bodySide = inGroups(sm.a, new Set([gid]))
           ? inGroups(sm.b, new Set(['BODY']))
-            ? sm.b
+            ? ('b' as const)
             : null
           : inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))
-            ? sm.a
+            ? ('a' as const)
             : null;
-        const B = bodySide ? pathOf(bodySide) : null;
+        const B = bodySide ? sewnSide(sm, bodySide) : null;
         if (B) graphArm.push(...B.v);
       }
     if (!armLoop[side] && graphArm.length)
@@ -4545,10 +4575,10 @@ export function solveDoll(input: DollInput): DollReport {
       );
       graphPlaced.add(gid);
       let bestTh = 0;
-      let bestD = comps.reduce((t, sm) => t + gapSide(sm), 0);
+      let bestD = comps.reduce((t, sm) => t + gapOf(sm), 0);
       for (let k = 1; k < 24; k++) {
         placeAt((TAU * k) / 24);
-        const d = comps.reduce((t, sm) => t + gapSide(sm), 0);
+        const d = comps.reduce((t, sm) => t + gapOf(sm), 0);
         if (d < bestD - 1e-6) [bestTh, bestD] = [(TAU * k) / 24, d];
       }
       placeAt(bestTh);
@@ -4556,8 +4586,8 @@ export function solveDoll(input: DollInput): DollReport {
       let n = 0;
       for (const sm of comps) {
         const sleeveSide = inGroups(sm.a, new Set([gid])) ? 'a' : 'b';
-        const A = sidePath(sm, sleeveSide);
-        const B = sidePath(sm, sleeveSide === 'a' ? 'b' : 'a');
+        const A = sewnSide(sm, sleeveSide);
+        const B = sewnSide(sm, sleeveSide === 'a' ? 'b' : 'a');
         if (!A || !B) continue;
         const d = sub(centroid([...B.v]), centroid([...A.v]));
         for (let q = 0; q < 3; q++) shift[q] += d[q];
@@ -5213,13 +5243,14 @@ export function solveDoll(input: DollInput): DollReport {
   };
   /**
    * L4 (04-COLLAR K2 + intake): tucks and pleats ON the neck path folded closed before the unit is
-   * mapped (foldsOnPath). Which folds, whether the path is cut at its CF notches and which notch
-   * pair of the unit is sewn: the reading whose length ratio is nearest 1 within 0.90–1.15. None →
-   * the mismatch is reported, never crammed.
+   * mapped. WHICH folds is the path's own evidence (foldEvidence: pleat pairs, dart runs — the one
+   * rule for every band; 12.10 review: no subset of its notches picked by how the unit then fits).
+   * Whether the path is cut at its CF notches and which notch pair of the unit is sewn: the
+   * reading whose length ratio is nearest 1 within 0.90–1.15. None → the mismatch is reported,
+   * never crammed.
    */
   const foldedPlan = (U: Unit, cn: NonNullable<typeof confNeck>) => {
     const m = runMarks(cctx, U.attach);
-    const foldsOf = (N: NeckPath) => foldsOnPath(N.path);
     type Opt = {
       N: NeckPath;
       folds: [number, number][];
@@ -5235,11 +5266,9 @@ export function solveDoll(input: DollInput): DollReport {
       [cn.N0, false],
       [cn.N1, true],
     ] as const) {
-      const f = foldsOf(N);
-      const sets: [number, number][][] = [[], f.pairs, f.stairs, [...f.pairs, ...f.stairs]];
+      const ev = foldEvidence(N.path);
+      const sets: [number, number][][] = ev ? [[], ev.folds] : [[]];
       sets.forEach((F, si) => {
-        if (si > 0 && !F.length) return;
-        if (si === 3 && (!f.pairs.length || !f.stairs.length)) return;
         const Fs = [...F].sort((x, y) => x[0] - y[0]);
         const Le = N.path.len - Fs.reduce((t, x) => t + x[1] - x[0], 0);
         const spans: [number, number][] = [[0, m.path.len]];
@@ -5843,7 +5872,7 @@ export function solveDoll(input: DollInput): DollReport {
     const gb = panelByKey.get(pk(sm.b[0]))?.group;
     if (!ga || !gb || ga === gb || ga === 'FLOAT' || gb === 'FLOAT') continue;
     if (bodyLike.has(ga) && bodyLike.has(gb)) continue;
-    const far = gapOf(sm, ga, gb);
+    const far = gapOf(sm);
     const w = graphWork(sm, passes);
     if (w && far >= FAR && !w.confirmed) {
       w.released = true;
