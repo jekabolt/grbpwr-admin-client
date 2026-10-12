@@ -1681,6 +1681,8 @@ export function solveDoll(input: DollInput): DollReport {
   // biggest panel is laid on the front; every other panel is walked onto the shape from the panel
   // it is sewn to, across their seam (longest seams first), its face out; the seams then close in
   // the solve, the shape pushing the paper out so it does not collapse.
+  /** A bag's flap and straps: drawn on a face by a reading, said as surface rows of the report. */
+  const bagSurfaceRows: NonNullable<DollReport['surface']> = [];
   if (bag && body.length) {
     const V3 = {
       add: (p: Vec3, q: Vec3, k = 1): Vec3 => [p[0] + q[0] * k, p[1] + q[1] * k, p[2] + q[2] * k],
@@ -1728,6 +1730,57 @@ export function solveDoll(input: DollInput): DollReport {
     // its radius thick, a taller panel a lens. The panels are placed round the axis by the ring's
     // order, not walked — a walk on a ball of the cloth's area crushed them into each other.
     const bodyKey = (k: string) => panelByKey.get(k)?.group === 'BODY';
+    const boxOf = (P: Panel) => {
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      for (let r = 0; r < P.nb; r++) {
+        const v = P.offset + r;
+        x0 = Math.min(x0, uv[2 * v]);
+        x1 = Math.max(x1, uv[2 * v]);
+        y0 = Math.min(y0, uv[2 * v + 1]);
+        y1 = Math.max(y1, uv[2 * v + 1]);
+      }
+      return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+    };
+    /**
+     * The stretch of a panel's boundary the other panels' seams hold (a partial cropped to its
+     * sewn run — sidePath): its box in the panel's frame. Null when no seam reaches the panel.
+     */
+    const sewnBoxOf = (P: Panel) => {
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      let n = 0;
+      for (const sm of G.seams) {
+        const side = sm.a.every((id) => pk(id) === P.key)
+          ? ('a' as const)
+          : sm.b.every((id) => pk(id) === P.key)
+            ? ('b' as const)
+            : null;
+        if (!side) continue;
+        const other = side === 'a' ? sm.b : sm.a;
+        if (!other.every((id) => pk(id) !== P.key && bodyKey(pk(id)))) continue;
+        const p = sidePath(sm, side);
+        if (!p) continue;
+        for (const v of p.v) {
+          x0 = Math.min(x0, uv[2 * v]);
+          x1 = Math.max(x1, uv[2 * v]);
+          y0 = Math.min(y0, uv[2 * v + 1]);
+          y1 = Math.max(y1, uv[2 * v + 1]);
+          n++;
+        }
+      }
+      return n ? { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 } : null;
+    };
+    /**
+     * A FLAP: the biggest panel's seams hold only part of it (a dust bag's outer panel runs on
+     * past the gusset to fold over the mouth). The shape is the sewn part's size; the rest, sewn
+     * along no edge of its own, hinges where the seams end and folds over the other face.
+     */
+    let flap: ReturnType<typeof sewnBoxOf> = null;
     const mid2Of = (id: EdgeId): Pt2 | null => {
       const p = pathOf([id]);
       if (!p) return null;
@@ -1817,7 +1870,10 @@ export function solveDoll(input: DollInput): DollReport {
           ? `${cc < 0.1 * a ? 'a flat pouch' : 'a lens'} ${(2 * a).toFixed(0)} mm across, ${(2 * c).toFixed(0)} mm thick (two rings of ${n} panels base to base${ringA.lid ? ', a lid at each pole' : ''})`
           : `a round shape ${(2 * a).toFixed(0)} mm across, ${c.toFixed(0)} mm deep (a ring of ${n} panels${ringA.lid ? ' closed by a lid' : ''})`;
     } else if (twoFaces) {
-      const { w: w0, h: h0 } = bounds2(big);
+      const full = boxOf(big);
+      const sb = sewnBoxOf(big);
+      flap = sb && (sb.h < 0.8 * full.h || sb.w < 0.8 * full.w) ? sb : null;
+      const { w: w0, h: h0 } = flap ?? full;
       a = Math.max(1, w0 / 2);
       b = Math.max(1, h0 / 2);
       const widths = body
@@ -1826,7 +1882,7 @@ export function solveDoll(input: DollInput): DollReport {
         .sort((x, y) => x - y);
       const med = widths.length ? widths[Math.floor(widths.length / 2)] : 0;
       c = Math.max(12, Math.min(0.5 * Math.min(a, b), med ? med / 2 : 0.08 * Math.min(a, b)));
-      shapeWords = `a flat shape ${(2 * a).toFixed(0)} × ${(2 * b).toFixed(0)} mm, ${(2 * c).toFixed(0)} mm deep (the biggest panel's size; the strips' width between the two faces)`;
+      shapeWords = `a flat shape ${(2 * a).toFixed(0)} × ${(2 * b).toFixed(0)} mm, ${(2 * c).toFixed(0)} mm deep (${flap ? 'the sewn part of the biggest panel' : "the biggest panel's size"}; the strips' width between the two faces)`;
     } else {
       const R = Math.max(1, Math.sqrt((0.9 * total) / (4 * Math.PI)));
       a = R;
@@ -1864,12 +1920,13 @@ export function solveDoll(input: DollInput): DollReport {
       return { p, dir };
     };
     const K = PROXY_K;
-    const bagProxy: Proxy = {
+    /** The shape grown by `g` mm: a flap or a strap lies that much outside the face under it. */
+    const ellProxy = (g: number): Proxy => ({
       push(p, i) {
         const x = p[3 * i];
         const y = p[3 * i + 1];
         const z = p[3 * i + 2];
-        const q = (x / (a * K)) ** 2 + (y / (b * K)) ** 2 + (z / (c * K)) ** 2;
+        const q = (x / ((a + g) * K)) ** 2 + (y / ((b + g) * K)) ** 2 + (z / ((c + g) * K)) ** 2;
         if (q >= 1 || q < 1e-9) return;
         const f = 1 / Math.sqrt(q);
         p[3 * i] = x * f;
@@ -1880,15 +1937,16 @@ export function solveDoll(input: DollInput): DollReport {
         const x = p[3 * i];
         const y = p[3 * i + 1];
         const z = p[3 * i + 2];
-        const q = (x / (a + CLEAR)) ** 2 + (y / (b + CLEAR)) ** 2 + (z / (c + CLEAR)) ** 2;
+        const q =
+          (x / (a + g + CLEAR)) ** 2 + (y / (b + g + CLEAR)) ** 2 + (z / (c + g + CLEAR)) ** 2;
         if (q <= 1) return;
         const f = 1 / Math.sqrt(q);
         p[3 * i] += (x * f - x) * k;
         p[3 * i + 1] += (y * f - y) * k;
         p[3 * i + 2] += (z * f - z) * k;
       },
-    };
-    const bagIdx = proxies.push(bagProxy) - 1;
+    });
+    const bagIdx = proxies.push(ellProxy(0)) - 1;
     proxyReport.push({ group: 'BODY', kind: 'torso', profile: [[0, a, c]], origin: [0, 0, 0] });
     const centroid2 = (vs: ArrayLike<number>): Pt2 => {
       let x = 0;
@@ -2035,8 +2093,88 @@ export function solveDoll(input: DollInput): DollReport {
         layLid(ringB, -1, thetaB);
       }
     } else {
-      // The biggest panel on the front, upright, face out.
-      lay(big, centroid2(ringVs(big)), [0, 0, c], [1, 0, 0], [0, 1, 0], [1, 0], false);
+      // The biggest panel on the front, upright, face out — its sewn part centred when it runs on
+      // into a flap: the walk over the shape then carries the flap over the rim onto the other face.
+      const q0: Pt2 = flap
+        ? [(flap.x0 + flap.x1) / 2, (flap.y0 + flap.y1) / 2]
+        : centroid2(ringVs(big));
+      lay(big, q0, [0, 0, c], [1, 0, 0], [0, 1, 0], [1, 0], false);
+      if (flap) {
+        const F = flap;
+        const flapIdx = proxies.push(ellProxy(4)) - 1;
+        for (let i = 0; i < big.count; i++) {
+          const v = big.offset + i;
+          const x = uv[2 * v];
+          const y = uv[2 * v + 1];
+          if (x < F.x0 - 5 || x > F.x1 + 5 || y < F.y0 - 5 || y > F.y1 + 5) proxyOf[v] = flapIdx;
+        }
+        const full = boxOf(big);
+        const beyond = Math.max(full.h - F.h, full.w - F.w);
+        const note = `its seams hold ${F.w.toFixed(0)} × ${F.h.toFixed(0)} mm of it; the ${beyond.toFixed(0)} mm beyond them, sewn along no edge of its own, hinges where the seams end and folds over the other face as a flap — drawn lying on it, not solved as a face`;
+        bagSurfaceRows.push({
+          pieceKey: big.key,
+          host: second?.key ?? null,
+          join: null,
+          placed: true,
+          note,
+        });
+        warnings.push(`${big.key}: ${note}`);
+      }
+      // The other face of a two-faced shape goes straight onto the back, centred: a walk from the
+      // first face across a U-shaped seam starts at that seam's centroid, a point inside the
+      // shape, and on a short pouch landed the face over the top rim. Only the strips are walked.
+      // Face out (its x runs the other way seen from the front) or its drawn face inward: the way
+      // its own seams to the front meet end to end (a symmetric panel's seams say which).
+      if (twoFaces && second) {
+        const S2 = second;
+        const q2 = centroid2(ringVs(S2));
+        const direct = G.seams
+          .map((sm) => {
+            const A = new Set(sm.a.map(pk));
+            const B = new Set(sm.b.map(pk));
+            if (A.size !== 1 || B.size !== 1) return null;
+            if (A.has(big.key) && B.has(S2.key)) return { sm, bigSide: 'a' as const };
+            if (B.has(big.key) && A.has(S2.key)) return { sm, bigSide: 'b' as const };
+            return null;
+          })
+          .filter((x): x is NonNullable<typeof x> => !!x);
+        const d3 = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        const costOf = (U: Vec3) => {
+          lay(S2, q2, [0, 0, -c], U, [0, 1, 0], [1, 0], false);
+          // Drawn face inward: its edges run the FRONT's way round the rim — sewn as a face-down
+          // piece (graphWork reads the seam direction from this flag).
+          S2.mirrored = U[0] > 0;
+          let t = 0;
+          for (const { sm, bigSide } of direct) {
+            const A = sidePath(sm, bigSide);
+            const B = sidePath(sm, bigSide === 'a' ? 'b' : 'a');
+            if (!A || !B) continue;
+            const a0 = getPos(A.v[0]);
+            const a1 = getPos(A.v[A.v.length - 1]);
+            const b0 = getPos(B.v[0]);
+            const b1 = getPos(B.v[B.v.length - 1]);
+            t += Math.min(d3(a0, b0) + d3(a1, b1), d3(a0, b1) + d3(a1, b0));
+          }
+          return t;
+        };
+        const cOut = costOf([-1, 0, 0]);
+        const cIn = costOf([1, 0, 0]);
+        if (cOut <= cIn) costOf([-1, 0, 0]);
+        if (opt.debug) {
+          const bb = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
+          for (let i = 0; i < S2.count; i++)
+            for (let k = 0; k < 3; k++) {
+              bb[2 * k] = Math.min(bb[2 * k], pos[3 * (S2.offset + i) + k]);
+              bb[2 * k + 1] = Math.max(bb[2 * k + 1], pos[3 * (S2.offset + i) + k]);
+            }
+          warnings.push(
+            `debug: bag back face ${S2.key} laid at ${bb.map((x) => x.toFixed(0)).join(' ')} · cost out ${cOut.toFixed(0)} in ${cIn.toFixed(0)} · shape ${a.toFixed(0)} ${b.toFixed(0)} ${c.toFixed(0)}`,
+          );
+        }
+        warnings.push(
+          `${S2.key}: the other face, on the back, ${cOut <= cIn ? 'face out' : 'its drawn face inward'}${direct.length ? ` (its ${direct.length} seam${direct.length > 1 ? 's' : ''} to ${big.key} meet end to end that way)` : ' (no seam to the front says otherwise)'}`,
+        );
+      }
     }
     const isBody = (P: Panel | undefined): P is Panel => !!P && P.group === 'BODY';
     const onePiece = (ids: EdgeId[]) => new Set(ids.map(pk)).size === 1;
@@ -2068,14 +2206,28 @@ export function solveDoll(input: DollInput): DollReport {
       }
       if (!pick) break;
       const { P, Q, sp, sq } = pick;
-      const A = pathOf(sp);
-      const B = pathOf(sq);
+      // The seam's SEWN stretch (a strip round the lower U of a panel that runs on into a flap:
+      // sidePath crops a partial to its range), and the placed panel's sewn part — never the flap,
+      // folded over the other face by now.
+      const A = sidePath(pick.s, sp === pick.s.a ? 'a' : 'b') ?? pathOf(sp);
+      const B = sidePath(pick.s, sq === pick.s.a ? 'a' : 'b') ?? pathOf(sq);
       if (!A || !B) {
         links.splice(links.indexOf(pick.s), 1);
         continue;
       }
       const mid3 = centroid3(A.v);
-      const cP3 = centroid3(ringVs(P));
+      const F = P === big ? flap : null;
+      const cP3 = centroid3(
+        F
+          ? ringVs(P).filter(
+              (v) =>
+                uv[2 * v] >= F.x0 - 5 &&
+                uv[2 * v] <= F.x1 + 5 &&
+                uv[2 * v + 1] >= F.y0 - 5 &&
+                uv[2 * v + 1] <= F.y1 + 5,
+            )
+          : ringVs(P),
+      );
       const out =
         tangentAt(V3.sub(mid3, cP3), mid3) ??
         tangentAt([0, 1, 0], mid3) ??
@@ -2112,6 +2264,107 @@ export function solveDoll(input: DollInput): DollReport {
         );
       };
       lay(Q, cQ2, cQ3, U, Vv, ux, endsCost(true) < endsCost(false));
+      if (opt.debug)
+        warnings.push(
+          `debug: bag walk ${Q.key} from ${P.key} · seam mid ${mid3.map((x) => x.toFixed(0)).join(',')} · ${d2.toFixed(0)} mm out → ${cQ3.map((x) => x.toFixed(0)).join(',')} · U ${U.map((x) => x.toFixed(2)).join(',')} · ux ${ux.map((x) => x.toFixed(2)).join(',')} · mirrored ${Q.mirrored}`,
+        );
+    }
+    // A STRIP the order sews onto a panel with no edge of it matching an edge of that panel (a
+    // handle, a strap — 11.10 corpus: SS26-015's 30 × 976 straps on 580 × 980 panels, laid flat
+    // beside the bag): laid along the host's side of matching extent, on the host's face, 3 mm
+    // out, held by the shape — a reading of the order, said in words; no seam is drawn.
+    const strapIdx = proxies.push(ellProxy(3)) - 1;
+    const sidesTaken = new Map<string, number>();
+    for (const P of body) {
+      if (isPlaced(P)) continue;
+      const bx = boxOf(P);
+      const long = Math.max(bx.w, bx.h);
+      const short = Math.min(bx.w, bx.h);
+      if (long < 3 * short) continue;
+      const keys = new Set([P.key, ...P.layers]);
+      let host = null as Panel | null;
+      let join = '';
+      for (const J of opt.joins ?? []) {
+        const mine = J.parts.findIndex((X) => X.some((k) => keys.has(k)));
+        if (mine < 0) continue;
+        for (const [i, X] of J.parts.entries()) {
+          if (i === mine) continue;
+          for (const k of X) {
+            const H = panelByKey.get(k);
+            if (H && H !== P && isBody(H) && isPlaced(H) && (!host || areaOfP(H) > areaOfP(host)))
+              host = H;
+          }
+        }
+        if (host) {
+          join = J.label;
+          break;
+        }
+      }
+      if (!host) continue;
+      const hb = boxOf(host);
+      const vertical = Math.abs(long - hb.h) <= Math.abs(long - hb.w);
+      const n = sidesTaken.get(host.key) ?? 0;
+      sidesTaken.set(host.key, n + 1);
+      const first = n % 2 === 0;
+      // The strip's frame → the host's: its long axis along the side, 5 mm in from it, centred.
+      const inset = 5 + short / 2;
+      const cx = vertical ? (first ? hb.x0 + inset : hb.x1 - inset) : (hb.x0 + hb.x1) / 2;
+      const cy = vertical ? (hb.y0 + hb.y1) / 2 : first ? hb.y0 + inset : hb.y1 - inset;
+      const sx = (bx.x0 + bx.x1) / 2;
+      const sy = (bx.y0 + bx.y1) / 2;
+      const rot = vertical !== bx.h >= bx.w;
+      const toHost = (x: number, y: number): Pt2 => {
+        const dx = x - sx;
+        const dy = y - sy;
+        return rot ? [cx - dy, cy + dx] : [cx + dx, cy + dy];
+      };
+      // Onto the host's solved face: the host triangle under the point (the nearest when it lies
+      // outside), barycentric, then 3 mm out along the shape's normal.
+      const T = host.mesh.tris;
+      const H0 = host;
+      const hv = (t: number, j: number) => H0.offset + T[t + j];
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        const p = toHost(uv[2 * v], uv[2 * v + 1]);
+        let bt = 0;
+        let bw: [number, number, number] = [1, 0, 0];
+        let bd = Infinity;
+        for (let t = 0; t < T.length; t += 3) {
+          const A = [uv[2 * hv(t, 0)], uv[2 * hv(t, 0) + 1]];
+          const B = [uv[2 * hv(t, 1)], uv[2 * hv(t, 1) + 1]];
+          const C = [uv[2 * hv(t, 2)], uv[2 * hv(t, 2) + 1]];
+          const det = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+          if (Math.abs(det) < 1e-9) continue;
+          let u = ((B[1] - C[1]) * (p[0] - C[0]) + (C[0] - B[0]) * (p[1] - C[1])) / det;
+          let w = ((C[1] - A[1]) * (p[0] - C[0]) + (A[0] - C[0]) * (p[1] - C[1])) / det;
+          let z = 1 - u - w;
+          const out = Math.max(0, -u) + Math.max(0, -w) + Math.max(0, -z);
+          if (out < bd) {
+            u = Math.max(0, u);
+            w = Math.max(0, w);
+            z = Math.max(0, z);
+            const s = u + w + z || 1;
+            bd = out;
+            bt = t;
+            bw = [u / s, w / s, z / s];
+            if (out === 0) break;
+          }
+        }
+        const X: Vec3 = [0, 0, 0];
+        for (let j = 0; j < 3; j++) {
+          const q = getPos(hv(bt, j));
+          for (let d = 0; d < 3; d++) X[d] += bw[j] * q[d];
+        }
+        const nn = nrmAt(X);
+        setPos(v, [X[0] + 3 * nn[0], X[1] + 3 * nn[1], X[2] + 3 * nn[2]]);
+        proxyOf[v] = strapIdx;
+        placed[v] = 1;
+      }
+      P.mirrored = false;
+      const side = vertical ? (first ? 'left' : 'right') : first ? 'lower' : 'upper';
+      const note = `a strip ${Math.round(long)} × ${Math.round(short)} mm${P.layers.length ? ` (${P.layers.length + 1} plies)` : ''} the order sews onto ${host.key} («${join}») with no edge of it matching an edge of the panel — laid along the panel's ${side} side on its face (a strap, a handle): a reading of the order, not a seam`;
+      bagSurfaceRows.push({ pieceKey: P.key, host: host.key, join, placed: true, note });
+      warnings.push(`${P.key}: ${note}`);
     }
     const placedN = body.filter(isPlaced).length;
     warnings.push(
@@ -5888,7 +6141,7 @@ export function solveDoll(input: DollInput): DollReport {
 
   for (const p of proposals) if (!p.ok) void p;
   // ── SURFACE PIECES on their host panel (surface.ts): laid on the solved panel, not solved ──
-  const surfaceRep: NonNullable<DollReport['surface']> = [];
+  const surfaceRep: NonNullable<DollReport['surface']> = [...bagSurfaceRows];
   const surfacePanels: DollReport['panels'] = [];
   const surfacePos: number[] = [];
   {
@@ -6048,9 +6301,11 @@ export function solveDoll(input: DollInput): DollReport {
     };
   });
   outPanels.push(...surfacePanels);
-  // Pieces that end up in no closed/proposed seam at all are floating too.
+  // Pieces that end up in no closed/proposed seam at all are floating too (a bag's strap laid on
+  // its panel by a reading of the order is said as a surface row instead).
+  const onBag = new Set(bagSurfaceRows.map((x) => x.pieceKey));
   for (const P of panels) {
-    if (P.group === 'FLOAT') continue;
+    if (P.group === 'FLOAT' || onBag.has(P.key)) continue;
     const any = seams.some(
       (s) =>
         s.state !== 'open' &&
