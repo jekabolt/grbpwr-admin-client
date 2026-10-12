@@ -132,6 +132,9 @@ export function furniture(
     }
     if (centres.length >= 3) for (const i of a) out[i] = 'tile frame';
   }
+  // the furniture known before the repetition rule (the overlay test below must not depend on the
+  // order the length buckets are visited in)
+  const pre = out.slice();
   // straight rules of one length: tile frames and cut marks repeat per PAGE, far apart; a ladder of
   // equal-length lines 1–3 mm apart is a graded edge (r4454's pocket sides: every size 208 mm long,
   // graded only in width) — a member with a twin ≤ 15 mm across it is line work
@@ -152,9 +155,71 @@ export function furniture(
         return Math.abs(q.v - p.v) <= 15 && Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) > 0;
       });
     });
-    if (lone.length >= 3) for (const i of lone) out[i] = 'tile frame / cut mark';
+    if (lone.length < 3) continue;
+    // R9 (MOOD-F4): the repetition is counted on every lone member, but a member drawn by a garment
+    // pen and overlaid per size — line-work chains of at least TWO other garment pens (or files, when
+    // the files are the sizes) of any length running along it ≤ 15 mm across, each over half its
+    // length (Marostica's band: every size draws the same side, 386, 399, 428, 454 mm) — is a
+    // graded edge, never furniture. One neighbouring contour is not that evidence, and neither is
+    // one coincidence: the overlay must hold for ≥ 2 members and at least half of the lone ones (a
+    // bucket of real frames, one per page, is overlaid nowhere) — otherwise every member keeps the
+    // label.
+    const ov = lone.map(
+      (i) => curvedPens.has(pen(styles.get(chains[i].style))) && overlaid(i, at(i), ax),
+    );
+    const n = ov.filter(Boolean).length;
+    const corroborated = n >= 2 && 2 * n >= lone.length;
+    lone.forEach((i, k) => {
+      if (!(corroborated && ov[k])) out[i] = 'tile frame / cut mark';
+    });
   }
   return out;
+
+  /** ≥ 2 other identities (pen, or source file) of line-work garment-pen chains each cover at
+   * least half of `i` along its axis, ≤ 15 mm across (coverage = union of parallel segments). */
+  function overlaid(i: number, p: { v: number; lo: number; hi: number }, ax: 'x' | 'y'): boolean {
+    const need = 0.5 * (p.hi - p.lo);
+    const tan = Math.tan((2 * Math.PI) / 180);
+    const own = pen(styles.get(chains[i].style));
+    const ownFile = fileOf?.(i);
+    const ids = new Set<string>();
+    for (let j = 0; j < chains.length; j++) {
+      if (j === i || pre[j] !== null) continue;
+      const c = chains[j];
+      const pj = pen(styles.get(c.style));
+      const file = fileOf?.(j);
+      const id =
+        pj !== own ? `pen ${pj}` : file !== undefined && file !== ownFile ? `file ${file}` : null;
+      if (id === null || ids.has(id)) continue;
+      if (c.lengthMm < need || !curvedPens.has(pj)) continue;
+      const bb = bboxOf(c.pts);
+      const [vLo, vHi] = ax === 'x' ? [bb.minY, bb.maxY] : [bb.minX, bb.maxX];
+      const [uLo, uHi] = ax === 'x' ? [bb.minX, bb.maxX] : [bb.minY, bb.maxY];
+      if (vLo > p.v + 15 || vHi < p.v - 15 || uLo > p.hi || uHi < p.lo) continue;
+      const spans: [number, number][] = [];
+      for (let s = 0; s + 1 < c.pts.length; s++) {
+        const a0 = c.pts[s];
+        const a1 = c.pts[s + 1];
+        const [u0, v0, u1, v1] = ax === 'x' ? [a0.x, a0.y, a1.x, a1.y] : [a0.y, a0.x, a1.y, a1.x];
+        if (Math.abs(v1 - v0) > Math.abs(u1 - u0) * tan) continue;
+        if (Math.abs(v0 - p.v) > 15 || Math.abs(v1 - p.v) > 15) continue;
+        const lo = Math.max(p.lo, Math.min(u0, u1));
+        const hi = Math.min(p.hi, Math.max(u0, u1));
+        if (hi > lo) spans.push([lo, hi]);
+      }
+      spans.sort((x, y) => x[0] - y[0]);
+      let cover = 0;
+      let end = -Infinity;
+      for (const [lo, hi] of spans) {
+        if (hi <= end) continue;
+        cover += hi - Math.max(lo, end);
+        end = hi;
+      }
+      if (cover >= need) ids.add(id);
+      if (ids.size >= 2) return true;
+    }
+    return false;
+  }
 }
 
 /** A glyph cluster: polylines that touch (an end within `touchMm` of another's segment). */
