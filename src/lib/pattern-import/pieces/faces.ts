@@ -64,7 +64,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classify';
 
-import { faceCapBox, partAt } from '../assemble/composite';
+import { chainView, faceCapBox, partAt, sheetView } from '../assemble/composite';
 import { drawPolyline, exterior, Grid } from './raster';
 import type { WallItem } from './snap';
 import { itemsOf, lonePortions, rescuedIgnored, sheetModule, wallModel } from './walls';
@@ -146,6 +146,11 @@ export type FaceMap = {
   g: Grid;
   blobAt: Int32Array;
   blobs: FaceBlob[];
+  /**
+   * D6: a drawing of several tile sheets is read one sheet at a time — each sheet's raster (blob
+   * ids already global); `g` / `blobAt` above are the first one's. Read through `blobOf`.
+   */
+  subs?: { g: Grid; blobAt: Int32Array }[];
 };
 
 const SQUARE_TOL_MM = 2;
@@ -1369,6 +1374,31 @@ export function faceMap(
   textSeeds: readonly Seed[],
   o: FaceOpts = {},
 ): FaceMap {
+  // D6: every tile sheet read on its own (its walls, its labels, its box), as it was alone
+  const parts = sheet.parts;
+  if (parts && parts.length > 1) {
+    const blobs: FaceBlob[] = [];
+    const subs: { g: Grid; blobAt: Int32Array }[] = [];
+    let off = 0;
+    for (const part of parts) {
+      const mine = textSeeds.filter((t) => partAt(parts, t.at)?.sheet === part.sheet);
+      const m = faceMap(sheetView(sheet, part), chainView(set, parts, part.sheet), run, mine, o);
+      const at = m.blobAt.map((v) => (v >= 0 ? v + off : v));
+      subs.push({ g: m.g, blobAt: at });
+      let top = -1;
+      for (const b of m.blobs) {
+        top = Math.max(top, b.id);
+        blobs.push({
+          ...b,
+          id: b.id + off,
+          ...(b.inside != null ? { inside: b.inside + off } : {}),
+        });
+      }
+      for (let k = 0; k < m.blobAt.length; k++) top = Math.max(top, m.blobAt[k]);
+      off += top + 1;
+    }
+    return { g: subs[0].g, blobAt: subs[0].blobAt, blobs, subs };
+  }
   const { items, weak, model } = faceWalls(sheet, set, run);
   const fr = faceRaster(
     sheet.bbox,
@@ -1499,7 +1529,15 @@ export function faceSeedsOf(map: Pick<FaceMap, 'blobs'>, firstId: number): Seed[
 }
 
 /** The blob id holding a point (−1 outside every outline). */
-export function blobOf(map: Pick<FaceMap, 'g' | 'blobAt'>, p: PtMm): number {
+export function blobOf(map: Pick<FaceMap, 'g' | 'blobAt' | 'subs'>, p: PtMm): number {
+  if (map.subs) {
+    for (const s of map.subs) {
+      const x = s.g.ix(p.x);
+      const y = s.g.iy(p.y);
+      if (s.g.inside(x, y)) return s.blobAt[y * s.g.W + x];
+    }
+    return -1;
+  }
   const x = map.g.ix(p.x);
   const y = map.g.iy(p.y);
   return map.g.inside(x, y) ? map.blobAt[y * map.g.W + x] : -1;

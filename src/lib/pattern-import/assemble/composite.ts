@@ -13,6 +13,11 @@
 
 import type {
   BoxMm,
+  Chain,
+  ChainAmbiguity,
+  ChainSet,
+  ClassEvidence,
+  LineClass,
   GridOverride,
   IRPath,
   IRText,
@@ -229,4 +234,160 @@ export function partAt(parts: readonly SheetPart[] | undefined, p: { x: number; 
     }
   }
   return best;
+}
+
+/** A point is on this part (its box, half the gap around it). */
+const onPart = (part: SheetPart, p: { x: number }) =>
+  p.x >= part.box.minX - SHEET_GAP_MM / 2 && p.x <= part.box.maxX + SHEET_GAP_MM / 2;
+
+/**
+ * D6: one tile sheet of a composite drawing as a drawing of its own — its paths, texts, rasters,
+ * tiles and box (the box it had alone: the same raster grids), no parts. For the passes that must
+ * read one sheet at a time (pieces/fill: the grade model, the wall model, frames).
+ */
+export function sheetView(sheet: Sheet, part: SheetPart): Sheet {
+  const pages = new Set(part.pages.map((p) => `${p.file}:${p.page}`));
+  return {
+    ...sheet,
+    id: part.sheet,
+    bbox: part.draw ?? part.box,
+    poses: sheet.poses.filter((p) => pages.has(`${p.file}:${p.page}`)),
+    pairs: sheet.pairs.filter(
+      (p) => pages.has(`${p.from.file}:${p.from.page}`) && pages.has(`${p.to.file}:${p.to.page}`),
+    ),
+    missing: sheet.missing.filter((m) => m.sheet == null || m.sheet === part.sheet),
+    overview: undefined,
+    paths: sheet.paths.filter((p) => p.pts.length > 0 && onPart(part, p.pts[0])),
+    texts: sheet.texts.filter((t) => onPart(part, t.anchor)),
+    rasters: sheet.rasters.filter((r) => onPart(part, { x: r.bbox.minX })),
+    parts: undefined,
+  };
+}
+
+/**
+ * D6: the chain set as one tile sheet sees it — the chains of the other sheets keep their ids (the
+ * families and walls refer to chains by id) but carry no points, and leave every class, bundle and
+ * list. Masked chains are skipped by every pass that needs two points.
+ */
+export function chainView(set: ChainSet, parts: readonly SheetPart[], sheet: number): ChainSet {
+  const part = parts.find((p) => p.sheet === sheet);
+  if (!part) return set;
+  const keep = new Set<number>();
+  const chains: Chain[] = set.chains.map((c) => {
+    if (c.pts.length && partAt(parts, c.pts[0])?.sheet === sheet) {
+      keep.add(c.id);
+      return c;
+    }
+    return { ...c, pts: [], closed: false, ranges: [], lengthMm: 0 };
+  });
+  return {
+    ...set,
+    chains,
+    classes: set.classes.map((k) => {
+      const ids = k.chains.filter((id) => keep.has(id));
+      return {
+        ...k,
+        chains: ids,
+        totalLengthMm: ids.reduce((s, id) => s + (set.chains[id]?.lengthMm ?? 0), 0),
+      };
+    }),
+    bundles: set.bundles.filter((b) => b.chains.every((id) => keep.has(id))),
+    orphans: set.orphans.filter((id) => keep.has(id)),
+    ...(set.ambiguities
+      ? { ambiguities: set.ambiguities.filter((a) => a.chains.every((id) => keep.has(id))) }
+      : {}),
+  };
+}
+
+/**
+ * D6: the chain sets of the tile sheets, each read on its own sheet (`sheetView`: its pens, its
+ * legend, its texts — as the sheet imported alone), joined into one set for the composite. Chain,
+ * bundle and class ids are renumbered. Size rows are one row across the sheets when they carry the
+ * same size label, or — no label read (a declared-dash run) — the same pen (colour, width, dash,
+ * layer) at the same nesting rank: one size drawn on two sheets. Every other row stays the sheet's
+ * own; size rows that do not pair up are caught by the per-sheet legend check (pieces/sheets
+ * `sheetLegend`), never merged here on a guess.
+ */
+export function joinSheetChains(
+  sets: readonly { sheet: number; set: ChainSet }[],
+  styles: readonly Style[],
+): ChainSet {
+  if (sets.length === 1) return sets[0].set;
+  const chains: Chain[] = [];
+  const classes: LineClass[] = [];
+  const bundles: ChainSet['bundles'] = [];
+  const orphans: number[] = [];
+  const ambiguities: ChainAmbiguity[] = [];
+  const warnings: string[] = [];
+  const sizeRow = new Map<string, number>();
+  for (const { sheet, set } of sets) {
+    const off = chains.length;
+    const ch = (id: number) => id + off;
+    for (const c of set.chains) chains.push({ ...c, id: ch(c.id) });
+    const clsMap = new Map<number, number>();
+    for (const k of set.classes) {
+      const ids = k.chains.map(ch);
+      const evidence: ClassEvidence[] = k.evidence.map((e) =>
+        e.kind === 'face-stray' && e.byWhy
+          ? { ...e, byWhy: e.byWhy.map((b) => ({ ...b, chains: b.chains.map(ch) })) }
+          : e,
+      );
+      const label = k.role === 'size' ? sizeRowKey(k, set, styles) : '';
+      const at = label ? sizeRow.get(label) : undefined;
+      if (at != null) {
+        const h = classes[at];
+        classes[at] = {
+          ...h,
+          chains: [...h.chains, ...ids],
+          totalLengthMm: h.totalLengthMm + k.totalLengthMm,
+          evidence: [...h.evidence, ...evidence.filter((e) => e.kind !== 'nesting-order')],
+          confidence: Math.min(h.confidence, k.confidence),
+        };
+        clsMap.set(k.id, at);
+        continue;
+      }
+      const id = classes.length;
+      classes.push({ ...k, id, chains: ids, evidence });
+      clsMap.set(k.id, id);
+      if (label) sizeRow.set(label, id);
+    }
+    for (const b of set.bundles)
+      bundles.push({
+        ...b,
+        id: bundles.length,
+        chains: b.chains.map(ch),
+        endsOn: [
+          b.endsOn[0] == null ? null : ch(b.endsOn[0]),
+          b.endsOn[1] == null ? null : ch(b.endsOn[1]),
+        ],
+      });
+    orphans.push(...set.orphans.map(ch));
+    for (const a of set.ambiguities ?? [])
+      ambiguities.push({
+        ...a,
+        message: `sheet ${sheet + 1}: ${a.message}`,
+        classes: [...new Set(a.classes.map((c) => clsMap.get(c) ?? c))],
+        chains: a.chains.map(ch),
+      });
+    warnings.push(...set.warnings.map((w) => `sheet ${sheet + 1}: ${w}`));
+  }
+  return { chains, classes, bundles, orphans, ambiguities, warnings };
+}
+
+/** A size row's identity across tile sheets: its label, else its pen and nesting rank. */
+function sizeRowKey(k: LineClass, set: ChainSet, styles: readonly Style[]): string {
+  const label = k.sizeLabel?.trim().toLowerCase();
+  if (label) return `label:${label}`;
+  const len = new Map<number, number>();
+  for (const id of k.chains) {
+    const ch = set.chains[id];
+    if (ch) len.set(ch.style, (len.get(ch.style) ?? 0) + ch.lengthMm);
+  }
+  const top = [...len].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const st = top != null ? styles.find((x) => x.id === top) : undefined;
+  if (!st) return '';
+  let rank: number | null = null;
+  for (const e of k.evidence) if (e.kind === 'nesting-order') rank = e.rank;
+  const pen = `${st.strokeRgb ? st.strokeRgb.join(',') : '-'}|${st.widthMm.toFixed(2)}|${st.dash ? st.dash.map((v) => v.toFixed(2)).join(',') : '-'}|${st.layer ?? '-'}`;
+  return `pen:${pen}|rank:${rank ?? '-'}`;
 }

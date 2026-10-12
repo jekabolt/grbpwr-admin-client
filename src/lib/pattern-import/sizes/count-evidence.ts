@@ -389,34 +389,45 @@ export function labelSingleRun(run: SizeRun, label: string | null): SizeRun {
  * blob's pixels (its walls included) — the same piece drawn at another size has the same shape.
  */
 export function blobShapes(
-  map: { g: { W: number; H: number }; blobAt: Int32Array },
+  map: {
+    g: { W: number; H: number };
+    blobAt: Int32Array;
+    /** D6: one raster per tile sheet (blob ids global) — a blob lies on one of them. */
+    subs?: { g: { W: number; H: number }; blobAt: Int32Array }[];
+  },
   ids: ReadonlySet<number>,
 ): Map<number, BlobShape> {
-  const { W } = map.g;
   const acc = new Map<number, number[]>();
   for (const id of ids) acc.set(id, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-  const at = map.blobAt;
-  for (let k = 0; k < at.length; k++) {
-    const a = acc.get(at[k]);
-    if (!a) continue;
-    a[0]++;
-    a[1] += k % W;
-    a[2] += Math.floor(k / W);
+  for (const r of map.subs ?? [map]) {
+    const { W } = r.g;
+    const at = r.blobAt;
+    for (let k = 0; k < at.length; k++) {
+      const a = acc.get(at[k]);
+      if (!a) continue;
+      a[0]++;
+      a[1] += k % W;
+      a[2] += Math.floor(k / W);
+    }
   }
   for (const a of acc.values()) if (a[0]) (a[1] /= a[0]), (a[2] /= a[0]);
   // central moments: 3 mu20, 4 mu11, 5 mu02, 6 mu30, 7 mu21, 8 mu12, 9 mu03
-  for (let k = 0; k < at.length; k++) {
-    const a = acc.get(at[k]);
-    if (!a) continue;
-    const x = (k % W) - a[1];
-    const y = Math.floor(k / W) - a[2];
-    a[3] += x * x;
-    a[4] += x * y;
-    a[5] += y * y;
-    a[6] += x * x * x;
-    a[7] += x * x * y;
-    a[8] += x * y * y;
-    a[9] += y * y * y;
+  for (const r of map.subs ?? [map]) {
+    const { W } = r.g;
+    const at = r.blobAt;
+    for (let k = 0; k < at.length; k++) {
+      const a = acc.get(at[k]);
+      if (!a) continue;
+      const x = (k % W) - a[1];
+      const y = Math.floor(k / W) - a[2];
+      a[3] += x * x;
+      a[4] += x * y;
+      a[5] += y * y;
+      a[6] += x * x * x;
+      a[7] += x * x * y;
+      a[8] += x * y * y;
+      a[9] += y * y * y;
+    }
   }
   const out = new Map<number, BlobShape>();
   for (const [id, a] of acc) {

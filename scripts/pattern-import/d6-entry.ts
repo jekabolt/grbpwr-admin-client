@@ -28,6 +28,16 @@ import {
   type SheetPieces,
 } from 'lib/pattern-import/pieces/sheets';
 import { g23 } from 'lib/pattern-import/gate/checks';
+import { readManifest } from 'lib/pattern-import/manifest';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { anchorOf } from 'components/managers/tech-card/components/pattern-import/autopilot/replay-record';
+import { CASES, runCase } from './e2e-entry';
+
+const PROBES = resolve(
+  process.env.PATIMPORT_PLANS ?? '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf',
+  'probes',
+);
 import {
   movePoints,
   placedAnswers,
@@ -440,7 +450,74 @@ const read = (ps: P[], parts: SheetPart[] = PARTS): SheetPieces | null => {
   );
 }
 
+// ── 5 · the owner's Ulmus record (before D6: sheet 2 alone) onto the D6 drawing ─────────────────
+// The owner's export of 12.10 (ss26-…-4dfbd71e.dxf, a copy in pdf-to-dxf/probes) carries the replay
+// record of an import of tile sheet 2 alone. On the D6 drawing every piece answer of it must land
+// on a piece of the same outline (sheet 2 is the anchor there); the mutation "it was sheet 1"
+// moves them onto nothing.
+async function ownerRecord() {
+  const dxf = resolve(PROBES, 'ulmus-owner-export-4dfbd71e.dxf');
+  const c = CASES.find((x) => x.id === 'ulmus');
+  if (!existsSync(dxf) || !c) {
+    console.log('SKIP  5 the owner record (file or case missing)');
+    return;
+  }
+  const m = readManifest(readFileSync(dxf, 'latin1'));
+  const answers = m?.replay?.answers ?? [];
+  check(
+    '5 the owner export carries a replay record of sheet 2',
+    answers.some((a) => a.kind === 'sheet-choice'),
+  );
+  let fams: PieceFamily[] = [];
+  let parts: SheetPart[] = [];
+  await runCase(c, {
+    onPieces: (s) => {
+      const x = s as unknown as { families: PieceFamily[]; sheet: { parts: SheetPart[] } };
+      fams = x.families ?? [];
+      parts = x.sheet?.parts ?? [];
+    },
+  });
+  const entries =
+    (answers.find((a) => a.kind === 'size-map')?.value as { entries?: { r: number; c: unknown }[] })
+      ?.entries ?? [];
+  const mapped = new Set(entries.filter((e) => e.c).map((e) => e.r));
+  const anchors = fams.flatMap((f) => {
+    const a = anchorOf(f, mapped.size ? mapped : null);
+    return a ? [a] : [];
+  });
+  const lands = (pc: { a: number; x: number; y: number }) =>
+    anchors.some(
+      (n) =>
+        Math.abs(n.a - pc.a) <= Math.max(5, 0.005 * pc.a) &&
+        Math.hypot(n.x - pc.x, n.y - pc.y) <= 1.5,
+    );
+  const count = (as: ReplayAnswer[]) =>
+    as.filter(
+      (a) =>
+        a.kind === 'piece' && lands((a.value as { pc: { a: number; x: number; y: number } }).pc),
+    ).length;
+  const sess = { sheet: { sheet: { parts } } } as never;
+  const pieces = answers.filter((a) => a.kind === 'piece').length;
+  const placed = placedAnswers(answers, sess, () => '0');
+  const got = count(placed.answers);
+  check(
+    `5 the owner's piece answers land on the D6 drawing (${got} of ${pieces})`,
+    pieces > 0 && got === pieces,
+    `sheets ${parts.map((p) => `${p.sheet + 1}@${Math.round(p.dx)}`).join(', ')}`,
+  );
+  const wrong = placedAnswers(
+    answers.map((a) => (a.kind === 'sheet-choice' ? { ...a, value: { sheet: 0 } as never } : a)),
+    sess,
+    () => '0',
+  );
+  check(
+    '5 mutation: the record said sheet 1 → its answers land on nothing',
+    count(wrong.answers) === 0,
+  );
+}
+
 export async function main(): Promise<number> {
+  await ownerRecord();
   console.log(fails ? `\n${fails} FAIL` : '\nall PASS');
   return fails;
 }

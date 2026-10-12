@@ -249,7 +249,7 @@ async function vectorCase(
     ch.classes.length > 0,
     `${ch.classes.length} classes, ${ch.chainPreview.length} chains, ${ch.ambiguities?.length ?? 0} flags, ${Date.now() - t3} ms`,
   );
-  // A second sheet / a hand grid re-reads the dropped docs.
+  // A hand grid (D6: on the second sheet) re-reads the dropped docs.
   if (sheets.size > 1) {
     const t2 = Date.now();
     const as2 = await run('assemble', { sheet: [...sheets][1]! });
@@ -334,7 +334,8 @@ export async function main(): Promise<number> {
     }),
   );
   perf.push(await vectorCase('pdf-compatible ai', ['synthetic/pdf-compatible.ai'], { kind: 'ai' }));
-  perf.push(await vectorCase('polupalto', ['pdf/polupalto.pdf'], { tiles: 50, sheets: 2 }));
+  // D6: both tile sheets in one drawing (Bogen A 50 tiles + Bogen B 35)
+  perf.push(await vectorCase('polupalto', ['pdf/polupalto.pdf'], { tiles: 85, sheets: 2 }));
 
   if (process.env.PI_ONLY) return 0;
   // DXF fast path

@@ -378,6 +378,8 @@ export const CASES: Case[] = [
             id: `${id}@sheet${k}`,
             probeSheets: [k],
             mustExport: undefined,
+            // the click fixture was recorded on its own sheets: another sheet alone takes none
+            ...(base.clicksSheets && !base.clicksSheets.includes(k) ? { clicks: undefined } : {}),
           }),
         );
       })

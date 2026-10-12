@@ -7,6 +7,7 @@
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
 import type {
+  AllowanceDecision,
   BackgroundKind,
   ChainAmbiguity,
   ChromeLine,
@@ -131,6 +132,7 @@ import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
 import { tileSheetIds } from '../assemble';
+import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -1031,31 +1033,48 @@ export class Session {
           .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
           .map((p) => p.id),
       );
-      // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
-      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
-      const countFeed = {
-        texts: feed.texts,
-        files: feed.files,
-        models: variantLabels(feed.texts.map((t) => t.text)).length,
-        // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
-        // graded look against it is asked, never held silently
-        sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
+      const build = (one: Sheet, sub: Progress) => {
+        // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
+        const feed = sheetFeed(one, this.files, this.docTextSrc, this.pages);
+        const countFeed = {
+          texts: feed.texts,
+          files: feed.files,
+          models: variantLabels(feed.texts.map((t) => t.text)).length,
+          // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
+          // graded look against it is asked, never held silently
+          sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
+        };
+        return buildChainsDetailed(
+          one,
+          { ...input.opts },
+          {
+            extraTexts: this.docTexts,
+            fileNames: this.fileNames,
+            offeredPaths,
+            countFeed,
+            aamaLayers: this.aamaLayers,
+          },
+          (d, t, n) => {
+            ctx.checkCancel();
+            sub(d, t, n);
+          },
+        ).set;
       };
-      set = buildChainsDetailed(
-        sheet,
-        { ...input.opts },
-        {
-          extraTexts: this.docTexts,
-          fileNames: this.fileNames,
-          offeredPaths,
-          countFeed,
-          aamaLayers: this.aamaLayers,
-        },
-        (d, t, n) => {
-          ctx.checkCancel();
-          ctx.progress(d, t, n);
-        },
-      ).set;
+      // D6: every tile sheet's lines are read on that sheet alone (its pens, its legend, its size
+      // labels — what it was alone), then joined: the same size label is one size row
+      const parts = sheet.parts;
+      set =
+        parts && parts.length > 1
+          ? joinSheetChains(
+              parts.map((part, i) => ({
+                sheet: part.sheet,
+                set: build(sheetView(sheet, part), (d, t, n) =>
+                  ctx.progress(i + d / Math.max(1, t), parts.length, n),
+                ),
+              })),
+              sheet.styles,
+            )
+          : build(sheet, (d, t, n) => ctx.progress(d, t, n));
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
       set = withClassSigs(set, sheet.styles);
@@ -1421,6 +1440,65 @@ export class Session {
 
   // ── semantics (F5) ────────────────────────────────────────────────────────────────────────
 
+  /**
+   * D6: the allowance each tile sheet states or measures, read as that sheet alone read it (its
+   * texts, its pieces, its lines; else the instruction pages' statement). Null when the drawing is
+   * one sheet or no sheet reads one (the file-level path then asks). The file decision is the
+   * sheet with the most pieces; every piece of a sheet that reads otherwise carries its own
+   * sheet's decision, and the disagreement is written into every such decision's evidence.
+   */
+  private sheetAllowances(
+    sheet: Sheet,
+    set: ChainSet,
+  ): { file: AllowanceDecision; bySeed: Record<number, AllowanceDecision> } | null {
+    const parts = sheet.parts;
+    if (!parts || parts.length < 2 || !this.families) return null;
+    const at = new Map((this.seeds ?? []).map((sd) => [sd.id, sd.at]));
+    const silent: number[] = [];
+    const reads = parts.flatMap((part) => {
+      const fams = this.families!.filter((f) => {
+        const p = at.get(f.seed);
+        return !!p && partAt(parts, p)?.sheet === part.sheet;
+      });
+      if (!fams.length) return [];
+      const own = detectAllowance(sheetView(sheet, part), fams, chainView(set, parts, part.sheet));
+      // the statement is often on an instruction page, not on the sheet itself
+      const d = own.origin !== 'default' ? own : allowanceFromTexts(this.docTexts).decision;
+      if (!d) silent.push(part.sheet + 1);
+      return d ? [{ part, fams, d }] : [];
+    });
+    if (!reads.length) return null;
+    // a sheet that states nothing takes the file decision — said, never silent
+    const quiet = silent.length
+      ? [`tile sheet ${silent.join(', ')} states no allowance: its pieces take this one`]
+      : [];
+    const key = (d: AllowanceDecision) => `${d.meaning}/${d.allowanceMm}`;
+    if (new Set(reads.map((r) => key(r.d))).size < 2) {
+      const main = [...reads].sort((a, b) => b.fams.length - a.fams.length)[0];
+      return { file: { ...main.d, evidence: [...main.d.evidence, ...quiet] }, bySeed: {} };
+    }
+    const said = reads
+      .map((r) => `sheet ${r.part.sheet + 1}: ${r.d.meaning} ${r.d.allowanceMm} mm`)
+      .join(', ');
+    const main = [...reads].sort((a, b) => b.fams.length - a.fams.length)[0];
+    const note = `the tile sheets read different allowances (${said}) — each sheet's pieces take their own sheet's`;
+    const bySeed: Record<number, AllowanceDecision> = {};
+    for (const r of reads)
+      if (r !== main)
+        for (const f of r.fams)
+          bySeed[f.seed] = {
+            ...r.d,
+            evidence: [`tile sheet ${r.part.sheet + 1}`, ...r.d.evidence, note],
+          };
+    return {
+      file: {
+        ...main.d,
+        evidence: [`tile sheet ${main.part.sheet + 1}`, ...main.d.evidence, note, ...quiet],
+      },
+      bySeed,
+    };
+  }
+
   private semanticsStage(
     input: StageIO['semantics']['in'],
     ctx: StageCtx,
@@ -1433,8 +1511,14 @@ export class Session {
       throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
     // Nobody decided the file's allowance yet: what the sheet says (text in 9 languages, or the gap
     // between two nested loops) beats the owner default. The decision rides on every spec.
-    const fileAllowance =
-      input.fileAllowance.origin === 'default'
+    // D6: a drawing of several tile sheets — each sheet states (or measures) its own allowance; where
+    // they disagree, each sheet's pieces take their own sheet's (as each sheet imported alone did),
+    // written into every such piece's evidence — never one sheet's value over the other's pieces
+    const perSheet =
+      input.fileAllowance.origin === 'default' ? this.sheetAllowances(sheet, set) : null;
+    const fileAllowance = perSheet
+      ? perSheet.file
+      : input.fileAllowance.origin === 'default'
         ? (() => {
             const found = detectAllowance(sheet, this.families!, set);
             if (found.origin !== 'default') return found;
@@ -1449,6 +1533,18 @@ export class Session {
             return ctx.length ? { ...input.fileAllowance, evidence: ctx } : input.fileAllowance;
           })()
         : input.fileAllowance;
+    const pieceOverrides = perSheet
+      ? Object.fromEntries(
+          [
+            ...Object.keys(perSheet.bySeed).map(Number),
+            ...Object.keys(input.pieceOverrides).map(Number),
+          ].map((seed) => {
+            const ov = input.pieceOverrides[seed] ?? {};
+            const own = perSheet.bySeed[seed];
+            return [seed, ov.allowance || !own ? ov : { ...ov, allowance: own }];
+          }),
+        )
+      : input.pieceOverrides;
     const detail = buildPieceSpecsDetailed(
       {
         sheet,
@@ -1457,6 +1553,7 @@ export class Session {
         sizeMap: this.sizeMap,
         families: this.families,
         ...input,
+        pieceOverrides,
         fileAllowance,
         traced: this.traced(),
         docTexts: this.docTexts,
