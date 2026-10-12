@@ -32,6 +32,7 @@ import { dist, endTangent, PtGrid, resample, SegGrid, segNearest } from '../chai
 import { cosine, describeSig, type Signature } from '../chains/motif';
 import { type Group } from './align';
 import { ranksFromCoords, seriate } from './seriate';
+import { closeCorners } from './corners';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
@@ -1586,10 +1587,35 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   // ── shared stretches of size lines → common ─────────────────────────────────────────────────
   const sharedFrom = new Map<number, number>();
   const joined = bridgeSameRank(chains, rankOf);
+  let cornerEnds: ReadonlySet<string> = new Set();
+  // MOOD Ф2: corners closed by the size's own stub / ramps / extended edges (sizes/corners.ts) —
+  // only where a chain's own look names its rank (declared dashes, the drawing's key)
+  if ((encoding === 'declared-dash' || legendId) && !debugFlag('MOOD_F2_OFF')) {
+    const ownLook = (c: number) =>
+      c < N0 && unit[c] >= 0 && unitRank[unit[c]] >= 0 && rankOf.get(c) === unitRank[unit[c]];
+    const cc = closeCorners(
+      chains,
+      rankOf,
+      styles,
+      (c) => ownLook(c) && !joined.has(c),
+      (c) => c < N0 && !furniture[c] && !joined.has(c) && !ownLook(c),
+      n,
+    );
+    for (const [c, host] of cc.joined) joined.set(c, joined.get(host) ?? host);
+    cornerEnds = cc.reached;
+    diag.corners = {
+      stubs: cc.stubs,
+      ramps: cc.ramps,
+      extended: cc.extended,
+      loops: cc.closedLoops.length,
+      refused: cc.refused,
+    };
+  }
   const landings = landEnds(
     chains,
     rankOf,
     chains.map((_, i) => i < N0 && !furniture[i] && !joined.has(i) && chains[i].lengthMm >= 3),
+    cornerEnds,
   );
   const sectioned = new Set<number>();
   for (const x of xsB)

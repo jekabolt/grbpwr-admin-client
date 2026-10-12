@@ -11,6 +11,7 @@
 // (6) is `wrongPassing` — must be 0. `closed` = closed candidates / family × size candidates.
 //   node scripts/pattern-import/mood.mjs [id…]   env PATIMPORT_MOOD_DIR (default: the archive),
 //   PATIMPORT_REPORTS (reports go there only), MOOD_PAR (parallel children), MOOD_CAP_S (per file)
+import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type {
@@ -367,7 +368,15 @@ const KINK_RUN_MM = 2;
  * corner closed by its own stub, ramp or extended edges lies on them; a step onto a neighbouring
  * size's line does not). Count of such stretches per outline.
  */
-function kinksOf(outer: PtMm[], set: ChainSet, styles: Map<number, Style>, look: Look): number {
+function kinksOf(
+  outer: PtMm[],
+  set: ChainSet,
+  styles: Map<number, Style>,
+  look: Look,
+  /** Where each kink is ("x,y/length"), when given. */
+  at?: string[],
+): number {
+  const at0: string[] = [];
   const b = bboxOf(outer);
   const pad = KINK_EXT_MM + 2;
   const segs: [PtMm, PtMm][] = [];
@@ -424,6 +433,7 @@ function kinksOf(outer: PtMm[], set: ChainSet, styles: Map<number, Style>, look:
         if (!on && segNearest(x, segs[s][0], segs[s][1]).d <= KINK_OFF_MM) on = true;
       });
       off.push(!on);
+      at0.push(`${x.x.toFixed(0)},${x.y.toFixed(0)}`);
     }
   }
   const n = off.length;
@@ -434,7 +444,10 @@ function kinksOf(outer: PtMm[], set: ChainSet, styles: Map<number, Style>, look:
   for (let k = 1; k <= n; k++) {
     if (off[(first + k) % n]) run++;
     else {
-      if (run * STEP > KINK_RUN_MM) kinks++;
+      if (run * STEP > KINK_RUN_MM) {
+        kinks++;
+        at?.push(`${at0[(first + k - Math.ceil(run / 2)) % n]}/${(run * STEP).toFixed(1)}`);
+      }
       run = 0;
     }
   }
@@ -525,19 +538,67 @@ function autoKinks(sm: Sample, s: Session, families: PieceFamily[]): Partial<Fil
   let kinks = 0;
   let outlines = 0;
   const per: string[] = [];
+  const at: string[] = [];
   for (const f of families)
     for (const c of f.candidates) {
       if (c.outcome !== 'closed' || c.outer.length < 3) continue;
       const label = canon(S.run?.sizes[c.rank]?.label ?? '');
       const row = key.find((r) => r.label === label && r.look);
       if (!row?.look) continue;
-      const k = kinksOf(c.outer, set, styles, row.look);
+      const where: string[] = [];
+      const k = kinksOf(c.outer, set, styles, row.look, where);
       judged++;
       kinks += k;
       if (k) outlines++;
       per.push(`${f.seed}:${label}:${k}`);
+      if (k) at.push(`${f.seed}:${label}:r${c.rank} ${where.join(' ')}`);
     }
-  return { autoKinkJudged: judged, autoKinks: kinks, autoKinkOutlines: outlines, autoKinkPer: per };
+  // MOOD_DUMP=<dir>: the first automatic pieces run as the diagnosis scripts read it
+  const dump = process.env.MOOD_DUMP;
+  if (dump) {
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const P = (p: PtMm) => [r2(p.x), r2(p.y)];
+    const w = (k: string, v: unknown) =>
+      writeFileSync(resolve(dump, `${sm.id}-${k}.json`), JSON.stringify(v));
+    w('rawchains', {
+      styles: S.sheet.styles,
+      texts: [],
+      chains: set.chains.map((c) => ({
+        style: c.style,
+        len: r2(c.lengthMm),
+        closed: c.closed,
+        pts: c.pts.map(P),
+      })),
+    });
+    w('chains', {
+      classes: set.classes.map((k) => ({
+        id: k.id,
+        role: k.role,
+        sizeLabel: k.sizeLabel,
+        chains: k.chains,
+      })),
+    });
+    w('rec', { sizes2: { labels: (S.run?.sizes ?? []).map((z, r) => `${z.label}:r${r}`) } });
+    w(
+      'pieces',
+      families.map((f) => ({
+        seed: f.seed,
+        cands: f.candidates.map((c) => ({
+          rank: c.rank,
+          outcome: c.outcome,
+          outer: c.outer.map(P),
+          walls: c.walls,
+        })),
+      })),
+    );
+  }
+  return {
+    autoKinkJudged: judged,
+    autoKinks: kinks,
+    autoKinkOutlines: outlines,
+    autoKinkPer: per,
+    autoKinkAt: at,
+  };
 }
 
 function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<FileRec> {

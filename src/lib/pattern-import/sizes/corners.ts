@@ -1,0 +1,550 @@
+// sizes/ — MOOD Ф2: closing a size line's CORNERS with its own pieces, never a neighbour's line.
+//
+// Mood (Illustrator, "align dashes to corners") cuts each size's outline at every corner into the
+// main dashed path, short RAMPS (a sub-rhythm of the same pen: [0.35 1.04] out of
+// [10.1 1.08 0.36 1.08 0.36 1.08]) and a SOLID L-STUB (same colour and width, no dash, 3–15 mm,
+// its vertex = the piece's corner). Stub and ramps are shorter than the size-line floor (8 mm), so
+// without this pass every corner of every size is a 3–15 mm hole and the fill closes it on a
+// neighbouring size's line (a step / zigzag at the corner) or leaks.
+//
+// Rules (D3: auto only with ≥ 2 independent evidences, else the corner stays open — a leak, never
+// a borrowed line). An OWN end = an end of a chain whose own look (unit) is its rank's.
+//   RAMP     a dashed path ≤ 15 mm whose dash is a cyclic sub-array of the pen of the own line it
+//            continues (evidence 1), lying on that line's continuation: end ≤ 1.5 mm from the own
+//            end, tangent ≤ 15°, ≤ 0.35 mm off its line (evidence 2). Two ranks qualifying → none.
+//   STUB     a solid path ≤ 15 mm, the own lines' colour and width, its two ends ≤ 1.5 mm from two
+//            own ends of ONE rank (a), and its vertex ≤ 0.5 mm from the crossing of those two
+//            edges' tangents (b). Touching ends of several ranks (a dense corner bundle): only the
+//            rank with (a)+(b), and only when exactly one rank has them — never by proximity.
+//   EXTEND   no stub (a phase shift): two own ends of one rank whose tangents cross ≤ 8 mm ahead of
+//            both (≤ 8 mm apart, ≥ 20° apart) are carried to the crossing (evidence 1) when that
+//            vertex lies in the trend of the neighbouring ranks' same corner (evidence 2: monotone
+//            corner grading) and the two new segments cross no line of the rank.
+// A closed corner JOINS the chains through it (stub / ramp points, or the vertex) into one chain of
+// the rank, as `bridgeSameRank` does across a label gap.
+import type { Chain, PtMm, Style } from 'lib/pattern-import/types';
+
+import { dist, SegGrid, segNearest } from '../chains/geom';
+
+export const CORNER = {
+  touchMm: 1.5,
+  stubMaxMm: 15,
+  rampMaxMm: 15,
+  vertexMm: 0.5,
+  rampAngleDeg: 15,
+  rampLateralMm: 0.35,
+  extendMaxMm: 8,
+  minTurnDeg: 20,
+  /** A neighbouring rank's same corner is searched this far from the vertex. */
+  trendReachMm: 25,
+};
+
+type End = {
+  /** Chain id. */
+  c: number;
+  end: 0 | 1;
+  p: PtMm;
+  /** Outward unit tangent. */
+  t: PtMm;
+  rank: number;
+};
+
+export type CornerLink = {
+  a: { c: number; end: 0 | 1 };
+  b: { c: number; end: 0 | 1 };
+  /** Points between the two ends (stub points, or the vertex). */
+  via: PtMm[];
+  rule: 'stub' | 'ramp' | 'extend';
+  rank: number;
+  /** The stub chain absorbed by a 'stub' link. */
+  stub?: number;
+};
+
+export type CornerOut = {
+  /** Absorbed chain → host chain (ramps, stubs, the second chain of each joined pair). */
+  joined: Map<number, number>;
+  /** Chains closed into a loop by a corner. */
+  closedLoops: number[];
+  /** Ends ("chain:end") a corner closed — nothing lands from them. */
+  reached: Set<string>;
+  stubs: number;
+  ramps: number;
+  extended: number;
+  /** Corners left open for want of a second evidence (per rule). */
+  refused: Record<string, number>;
+};
+
+/** Outward unit tangent at one end, from ~2 mm back. */
+function outward(pts: readonly PtMm[], end: 0 | 1): PtMm | null {
+  const n = pts.length;
+  if (n < 2) return null;
+  const p = end ? pts[n - 1] : pts[0];
+  let k = end ? n - 1 : 0;
+  const step = end ? -1 : 1;
+  let acc = 0;
+  while (k + step >= 0 && k + step < n && acc < 2) {
+    acc += dist(pts[k], pts[k + step]);
+    k += step;
+  }
+  const q = pts[k];
+  const L = dist(p, q);
+  return L < 1e-6 ? null : { x: (p.x - q.x) / L, y: (p.y - q.y) / L };
+}
+
+/** Crossing of two rays p + a·t, q + b·u: a, b and the point (null when parallel). */
+function rayCross(p: PtMm, t: PtMm, q: PtMm, u: PtMm) {
+  const den = t.x * u.y - t.y * u.x;
+  if (Math.abs(den) < 1e-9) return null;
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const a = (dx * u.y - dy * u.x) / den;
+  const b = (dx * t.y - dy * t.x) / den;
+  return { a, b, x: { x: p.x + a * t.x, y: p.y + a * t.y } };
+}
+
+/** The dash period with an exact repeat folded ([a b a b] → [a b]); odd arrays doubled. */
+function period(d: readonly number[]): number[] {
+  const a = d.filter((_, i) => i < 64).slice();
+  if (a.length % 2 === 1) a.push(...a);
+  for (let p = 2; p < a.length; p += 2) {
+    if (a.length % p) continue;
+    let ok = true;
+    for (let i = p; i < a.length && ok; i++)
+      if (Math.abs(a[i] - a[i - p]) > 0.03 * Math.max(a[i], a[i - p]) + 0.01) ok = false;
+    if (ok) return a.slice(0, p);
+  }
+  return a;
+}
+
+/** `sub` is a cyclic window of `pen` starting on a dash (both periods, ≤ 15 % + 0.03 mm apart). */
+export function cyclicSubDash(sub: readonly number[], pen: readonly number[]): boolean {
+  const s = period(sub);
+  const p = period(pen);
+  if (!s.length || !p.length || s.length > p.length) return false;
+  if (!s.some((v) => v > 0.01)) return false;
+  for (let k = 0; k < p.length; k += 2) {
+    let ok = true;
+    for (let j = 0; j < s.length && ok; j++) {
+      const v = p[(k + j) % p.length];
+      if (Math.abs(s[j] - v) > 0.15 * Math.max(s[j], v) + 0.03) ok = false;
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+/** The interior point of a polyline farthest from its chord, with the turn there (degrees). */
+function vertexOf(pts: readonly PtMm[]): { v: PtMm; turn: number } | null {
+  if (pts.length < 3) return null;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  let best = -1;
+  let bi = -1;
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const d = segNearest(pts[i], a, b).d;
+    if (d > best) {
+      best = d;
+      bi = i;
+    }
+  }
+  if (bi < 0) return null;
+  const v = pts[bi];
+  const la = dist(a, v);
+  const lb = dist(v, b);
+  if (la < 1e-6 || lb < 1e-6) return null;
+  const cos = ((v.x - a.x) * (b.x - v.x) + (v.y - a.y) * (b.y - v.y)) / (la * lb);
+  return { v, turn: (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI };
+}
+
+const angleCos = (deg: number) => Math.cos((deg * Math.PI) / 180);
+
+/**
+ * Close the corners of every rank (see the head of the file). `own(c)` = chain c is a line of its
+ * rank by its own look; `cand(c)` = chain c may be a ramp / stub (not furniture, not ranked by its
+ * look). Mutates `chains` (joined chains carry the corner points) and `rankOf` (absorbed chains
+ * leave it).
+ */
+export function closeCorners(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  styles: ReadonlyMap<number, Style>,
+  own: (c: number) => boolean,
+  cand: (c: number) => boolean,
+  n: number,
+): CornerOut {
+  const refused: Record<string, number> = {};
+  const refuse = (k: string) => (refused[k] = (refused[k] ?? 0) + 1);
+  const T = CORNER.touchMm;
+  // ── own ends ──
+  const ends: End[] = [];
+  const endGrid = new SegGrid(4);
+  const addEnd = (e: End) => {
+    endGrid.addSeg(ends.length, 0, e.p, e.p);
+    ends.push(e);
+  };
+  for (const [c, r] of rankOf) {
+    const ch = chains[c];
+    if (!own(c) || ch.closed || ch.pts.length < 2) continue;
+    for (const end of [0, 1] as const) {
+      const t = outward(ch.pts, end);
+      if (t) addEnd({ c, end, p: end ? ch.pts[ch.pts.length - 1] : ch.pts[0], t, rank: r });
+    }
+  }
+  const endsNear = (p: PtMm, r: number, visit: (k: number) => void) =>
+    endGrid.near(p, r, (k) => {
+      if (dist(ends[k].p, p) <= r) visit(k);
+    });
+  const links: CornerLink[] = [];
+  const usedEnd = new Set<string>();
+  const ek = (c: number, end: 0 | 1) => `${c}:${end}`;
+  const styleOf = (c: number) => styles.get(chains[c].style);
+  const sameInk = (c: number, o: number) => {
+    const s = styleOf(c);
+    const so = styleOf(o);
+    if (!s || !so || !s.strokeRgb || !so.strokeRgb) return false;
+    const [r1, g1, b1] = s.strokeRgb;
+    const [r2, g2, b2] = so.strokeRgb;
+    return Math.hypot(r1 - r2, g1 - g2, b1 - b2) <= 30;
+  };
+  // ── RAMPS ──
+  let ramps = 0;
+  const rampOf = new Map<number, number>();
+  for (let round = 0; round < 2; round++) {
+    const added: End[] = [];
+    for (let c = 0; c < chains.length; c++) {
+      if (rampOf.has(c) || !cand(c)) continue;
+      const ch = chains[c];
+      const st = styleOf(c);
+      if (ch.closed || ch.pts.length < 2 || ch.lengthMm > CORNER.rampMaxMm) continue;
+      if (!st || st.fill || !st.dash || !st.dash.some((v) => v > 0.01)) continue;
+      const hits: { k: number; end: 0 | 1 }[] = [];
+      for (const end of [0, 1] as const) {
+        const p = end ? ch.pts[ch.pts.length - 1] : ch.pts[0];
+        const inward = outward(ch.pts, end);
+        if (!inward) continue;
+        endsNear(p, T, (k) => {
+          const E = ends[k];
+          if (E.c === c || usedEnd.has(ek(E.c, E.end))) return;
+          // the ramp runs on along E's tangent: its direction into the ramp = E's outward tangent
+          if (-(inward.x * E.t.x + inward.y * E.t.y) < angleCos(CORNER.rampAngleDeg)) return;
+          const lat = Math.abs((p.x - E.p.x) * E.t.y - (p.y - E.p.y) * E.t.x);
+          if (lat > CORNER.rampLateralMm) return;
+          const pen = styleOf(E.c)?.dash;
+          if (!pen || !sameInk(c, E.c) || !cyclicSubDash(st.dash!, pen)) return;
+          if (Math.abs((styleOf(E.c)?.widthMm ?? 0) - st.widthMm) > 0.03) return;
+          hits.push({ k, end });
+        });
+      }
+      const ranks = new Set(hits.map((h) => ends[h.k].rank));
+      if (!hits.length) continue;
+      if (ranks.size > 1) {
+        refuse('ramp: two ranks');
+        continue;
+      }
+      // one own end per ramp end; a ramp between two own ends of its rank joins both
+      const byEnd = new Map<0 | 1, number>();
+      const tip = (end: 0 | 1) => (end ? ch.pts[ch.pts.length - 1] : ch.pts[0]);
+      for (const h of hits) {
+        const prev = byEnd.get(h.end);
+        if (prev === undefined || dist(ends[h.k].p, tip(h.end)) < dist(ends[prev].p, tip(h.end)))
+          byEnd.set(h.end, h.k);
+      }
+      // two ramp ends on one own end (a ramp folded back): not a continuation
+      if (byEnd.size === 2 && byEnd.get(0) === byEnd.get(1)) continue;
+      const r = [...ranks][0];
+      rampOf.set(c, r);
+      ramps++;
+      for (const [end, k] of byEnd) {
+        const E = ends[k];
+        usedEnd.add(ek(E.c, E.end));
+        usedEnd.add(ek(c, end));
+        links.push({ a: { c: E.c, end: E.end }, b: { c, end }, via: [], rule: 'ramp', rank: r });
+      }
+      // the ramp's free end is an own end of r from now on
+      for (const end of [0, 1] as const) {
+        if (byEnd.has(end)) continue;
+        const t = outward(ch.pts, end);
+        if (t) added.push({ c, end, p: end ? ch.pts[ch.pts.length - 1] : ch.pts[0], t, rank: r });
+      }
+    }
+    if (!added.length) break;
+    for (const e of added) addEnd(e);
+  }
+  const ownLike = (c: number) => own(c) || rampOf.has(c);
+  // ── STUBS ──
+  let stubs = 0;
+  for (let c = 0; c < chains.length; c++) {
+    if (rampOf.has(c) || !cand(c)) continue;
+    const ch = chains[c];
+    const st = styleOf(c);
+    if (ch.closed || ch.pts.length < 3 || ch.lengthMm > CORNER.stubMaxMm) continue;
+    if (!st || st.fill || (st.dash && st.dash.some((v) => v > 0.01)) || !(st.widthMm > 0)) continue;
+    const vx = vertexOf(ch.pts);
+    if (!vx || vx.turn < CORNER.minTurnDeg) continue;
+    const s0 = ch.pts[0];
+    const s1 = ch.pts[ch.pts.length - 1];
+    const near0: number[] = [];
+    const near1: number[] = [];
+    endsNear(s0, T, (k) => !usedEnd.has(ek(ends[k].c, ends[k].end)) && near0.push(k));
+    endsNear(s1, T, (k) => !usedEnd.has(ek(ends[k].c, ends[k].end)) && near1.push(k));
+    if (!near0.length && !near1.length) continue;
+    const ok: { k0: number; k1: number; r: number; d: number }[] = [];
+    for (const k0 of near0)
+      for (const k1 of near1) {
+        const A = ends[k0];
+        const B = ends[k1];
+        if (A.rank !== B.rank || (A.c === B.c && A.end === B.end)) continue;
+        // (a) both own ends of one rank, drawn in the stub's ink and width
+        if (!ownLike(A.c) || !ownLike(B.c)) continue;
+        if (!sameInk(c, A.c) || !sameInk(c, B.c)) continue;
+        const wA = styleOf(A.c)?.widthMm ?? 0;
+        if (wA > 0 && Math.abs(wA - st.widthMm) > 0.03) continue;
+        // (b) the stub's vertex is the crossing of the two edges' tangents
+        const x = rayCross(A.p, A.t, B.p, B.t);
+        if (!x || x.a < -0.5 || x.b < -0.5) continue;
+        const d = dist(x.x, vx.v);
+        if (d > CORNER.vertexMm) continue;
+        ok.push({ k0, k1, r: A.rank, d });
+      }
+    if (!ok.length) {
+      if (near0.length && near1.length) refuse('stub: no (a)+(b)');
+      continue;
+    }
+    if (new Set(ok.map((o) => o.r)).size > 1) {
+      refuse('stub: two ranks');
+      continue;
+    }
+    const best = ok.sort((a, b) => a.d - b.d)[0];
+    const A = ends[best.k0];
+    const B = ends[best.k1];
+    usedEnd.add(ek(A.c, A.end));
+    usedEnd.add(ek(B.c, B.end));
+    stubs++;
+    links.push({
+      a: { c: A.c, end: A.end },
+      b: { c: B.c, end: B.end },
+      via: ch.pts.slice(),
+      rule: 'stub',
+      rank: best.r,
+      stub: c,
+    });
+  }
+  // ── EXTEND (no stub) ──
+  type Pair = { k0: number; k1: number; x: PtMm; cost: number; r: number };
+  const pairs: Pair[] = [];
+  /** every corner of every rank (open pairs, stubbed corners, sharp vertices) for the trend */
+  const vertices: { r: number; v: PtMm; t0: PtMm; t1: PtMm }[] = [];
+  const free = (k: number) => !usedEnd.has(ek(ends[k].c, ends[k].end));
+  const cosTurn = angleCos(CORNER.minTurnDeg);
+  ends.forEach((A, k0) => {
+    endsNear(A.p, 2 * CORNER.extendMaxMm, (k1) => {
+      if (k1 <= k0) return;
+      const B = ends[k1];
+      if (B.rank !== A.rank || (B.c === A.c && B.end === A.end)) return;
+      if (-(A.t.x * B.t.x + A.t.y * B.t.y) > cosTurn) return; // collinear: a mid-line gap
+      const x = rayCross(A.p, A.t, B.p, B.t);
+      if (!x || x.a < -0.3 || x.b < -0.3) return;
+      if (x.a > CORNER.stubMaxMm || x.b > CORNER.stubMaxMm) return;
+      vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
+      if (!free(k0) || !free(k1)) return;
+      if (dist(A.p, B.p) > CORNER.extendMaxMm || x.a > CORNER.extendMaxMm) return;
+      if (x.b > CORNER.extendMaxMm) return;
+      pairs.push({ k0, k1, x: x.x, cost: x.a + x.b, r: A.rank });
+    });
+  });
+  // sharp vertices drawn continuously (a corner that has no gap in that size)
+  for (const [c, r] of rankOf) {
+    if (!own(c)) continue;
+    const p = chains[c].pts;
+    for (let i = 1; i + 1 < p.length; i++) {
+      const a = p[i - 1];
+      const v = p[i];
+      const b = p[i + 1];
+      const la = dist(a, v);
+      const lb = dist(v, b);
+      if (la < 0.3 || lb < 0.3) continue;
+      const t0 = { x: (v.x - a.x) / la, y: (v.y - a.y) / la };
+      const t1 = { x: (v.x - b.x) / lb, y: (v.y - b.y) / lb };
+      if (-(t0.x * t1.x + t0.y * t1.y) > cosTurn) continue;
+      vertices.push({ r, v, t0, t1 });
+    }
+  }
+  const vGrid = new SegGrid(8);
+  vertices.forEach((w, i) => vGrid.addSeg(i, 0, w.v, w.v));
+  const sameDir = (u: PtMm, w: PtMm) => u.x * w.x + u.y * w.y >= angleCos(15);
+  /** the same corner (both edge directions) in rank k nearest to `x` */
+  const cornerOf = (k: number, x: PtMm, t0: PtMm, t1: PtMm): PtMm | null => {
+    let best: PtMm | null = null;
+    let bd = Infinity;
+    vGrid.near(x, CORNER.trendReachMm, (i) => {
+      const w = vertices[i];
+      if (w.r !== k) return;
+      const match =
+        (sameDir(w.t0, t0) && sameDir(w.t1, t1)) || (sameDir(w.t0, t1) && sameDir(w.t1, t0));
+      if (!match) return;
+      const d = dist(w.v, x);
+      if (d <= CORNER.trendReachMm && d < bd) {
+        bd = d;
+        best = w.v;
+      }
+    });
+    return best;
+  };
+  /** evidence 2: the vertex lies in the trend of the neighbouring ranks' same corner */
+  const inTrend = (r: number, x: PtMm, t0: PtMm, t1: PtMm): boolean => {
+    const lo = r > 0 ? cornerOf(r - 1, x, t0, t1) : null;
+    const hi = r + 1 < n ? cornerOf(r + 1, x, t0, t1) : null;
+    if (lo && hi) {
+      const L = dist(lo, hi);
+      if (L < 0.3) return dist(x, lo) <= 0.5;
+      const h = segNearest(x, lo, hi);
+      const u = ((x.x - lo.x) * (hi.x - lo.x) + (x.y - lo.y) * (hi.y - lo.y)) / (L * L);
+      return u >= -0.05 && u <= 1.05 && h.d <= Math.max(0.5, 0.25 * L);
+    }
+    // an end of the run: two neighbours on one side, the step continued
+    const [n1, n2] =
+      !lo && hi
+        ? [hi, r + 2 < n ? cornerOf(r + 2, x, t0, t1) : null]
+        : lo && !hi
+          ? [lo, r > 1 ? cornerOf(r - 2, x, t0, t1) : null]
+          : [null, null];
+    if (!n1 || !n2) return false;
+    const d1 = { x: n1.x - n2.x, y: n1.y - n2.y };
+    const d0 = { x: x.x - n1.x, y: x.y - n1.y };
+    const l1 = Math.hypot(d1.x, d1.y);
+    const l0 = Math.hypot(d0.x, d0.y);
+    if (l1 < 0.3) return l0 <= 0.5;
+    if (l0 < 0.05) return false;
+    const cos = (d0.x * d1.x + d0.y * d1.y) / (l0 * l1);
+    return cos >= 0.7 && l0 / l1 >= 1 / 3 && l0 / l1 <= 3;
+  };
+  // the rank's lines, for "the new segments cross no line of the rank"
+  const rankGrid = new SegGrid(4);
+  for (const [c] of rankOf) if (chains[c].pts.length >= 2) rankGrid.addPolyline(c, chains[c].pts);
+  const crossesRank = (a: PtMm, b: PtMm, r: number, skip: Set<number>) => {
+    let hit = false;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    rankGrid.near(mid, dist(a, b) / 2 + 0.5, (c, s) => {
+      if (hit || skip.has(c) || rankOf.get(c) !== r) return;
+      const p = chains[c].pts;
+      const q0 = p[s];
+      const q1 = p[s + 1];
+      if (!q0 || !q1) return;
+      const den = (b.x - a.x) * (q1.y - q0.y) - (b.y - a.y) * (q1.x - q0.x);
+      if (Math.abs(den) < 1e-12) return;
+      const t = ((q0.x - a.x) * (q1.y - q0.y) - (q0.y - a.y) * (q1.x - q0.x)) / den;
+      const u = ((q0.x - a.x) * (b.y - a.y) - (q0.y - a.y) * (b.x - a.x)) / den;
+      if (t > 0.02 && t < 0.98 && u >= 0 && u <= 1) hit = true;
+    });
+    return hit;
+  };
+  let extended = 0;
+  pairs.sort((p, q) => p.cost - q.cost);
+  for (const pr of pairs) {
+    if (!free(pr.k0) || !free(pr.k1)) continue;
+    const A = ends[pr.k0];
+    const B = ends[pr.k1];
+    if (!ownLike(A.c) || !ownLike(B.c)) continue;
+    if (!inTrend(pr.r, pr.x, A.t, B.t)) {
+      refuse('extend: off the trend');
+      continue;
+    }
+    const skip = new Set([A.c, B.c]);
+    if (crossesRank(A.p, pr.x, pr.r, skip) || crossesRank(pr.x, B.p, pr.r, skip)) {
+      refuse('extend: crosses its rank');
+      continue;
+    }
+    usedEnd.add(ek(A.c, A.end));
+    usedEnd.add(ek(B.c, B.end));
+    extended++;
+    links.push({
+      a: { c: A.c, end: A.end },
+      b: { c: B.c, end: B.end },
+      via: [pr.x],
+      rule: 'extend',
+      rank: pr.r,
+    });
+  }
+  const res = joinLinks(chains, rankOf, links);
+  return { ...res, stubs, ramps, extended, refused };
+}
+
+/**
+ * Apply the links. A RAMP is absorbed into the own line it continues (it is short: no long
+ * duplicate is left behind as an "ignored" line). A STUB or EXTEND link carries one own line on to
+ * the other: line A gets the link's points and B's end point appended, so the two lines meet; the
+ * stub is absorbed. Two ends of one line → a closed loop. Main lines are never merged (a merged
+ * line would leave its whole length behind as a duplicate the face pass reads as a rescued line).
+ */
+function joinLinks(
+  chains: Chain[],
+  rankOf: Map<number, number>,
+  links: CornerLink[],
+): { joined: Map<number, number>; closedLoops: number[]; reached: Set<string> } {
+  const joined = new Map<number, number>();
+  const closedLoops: number[] = [];
+  /** ends a link closed: "chain:end" — no landing from them afterwards */
+  const reached = new Set<string>();
+  const key = (c: number, end: 0 | 1) => `${c}:${end}`;
+  /** where a ramp's end lives now: absorbed ramp end → (host chain, host end) */
+  const moved = new Map<string, { c: number; end: 0 | 1 }>();
+  const resolve = (x: { c: number; end: 0 | 1 }) => moved.get(key(x.c, x.end)) ?? x;
+  const tipOf = (c: number, end: 0 | 1) =>
+    end ? chains[c].pts[chains[c].pts.length - 1] : chains[c].pts[0];
+  /** append `add` (ordered outward from the end) at one end of chain c */
+  const extend = (c: number, end: 0 | 1, add: PtMm[]) => {
+    const ch = chains[c];
+    const pts = end ? [...ch.pts, ...add] : [...add.slice().reverse(), ...ch.pts];
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += dist(pts[i - 1], pts[i]);
+    chains[c] = { ...ch, pts, lengthMm: L };
+  };
+  const reach: CornerLink[] = [];
+  for (const l of links) {
+    if (l.rule !== 'ramp') {
+      reach.push(l);
+      continue;
+    }
+    // a = the own end, b = the ramp's end
+    const A = resolve(l.a);
+    const R = l.b;
+    if (joined.has(R.c)) {
+      // the ramp is already absorbed (it continued another line): carry this line onto it
+      reach.push({ ...l, b: R });
+      continue;
+    }
+    const q = chains[R.c].pts;
+    const out = R.end === 0 ? q : q.slice().reverse();
+    extend(A.c, A.end, out);
+    chains[A.c] = { ...chains[A.c], ranges: [...chains[A.c].ranges, ...chains[R.c].ranges] };
+    joined.set(R.c, A.c);
+    rankOf.delete(R.c);
+    moved.set(key(R.c, (1 - R.end) as 0 | 1), A);
+    reached.add(key(A.c, A.end));
+  }
+  for (const l of reach) {
+    const A = resolve(l.a);
+    const B = resolve(l.b);
+    if (A.c === B.c && A.end === B.end) continue;
+    const pa = tipOf(A.c, A.end);
+    const v = l.via;
+    const via =
+      v.length >= 2 && dist(v[0], pa) > dist(v[v.length - 1], pa) ? v.slice().reverse() : v;
+    if (A.c === B.c) {
+      // both ends of one line: the corner closes the loop
+      extend(A.c, A.end, via);
+      chains[A.c] = { ...chains[A.c], closed: true };
+      closedLoops.push(A.c);
+    } else extend(A.c, A.end, [...via, tipOf(B.c, B.end)]);
+    reached.add(key(A.c, A.end));
+    reached.add(key(B.c, B.end));
+    if (l.stub !== undefined) {
+      joined.set(l.stub, A.c);
+      rankOf.delete(l.stub);
+      chains[A.c] = { ...chains[A.c], ranges: [...chains[A.c].ranges, ...chains[l.stub].ranges] };
+    }
+  }
+  // a host that is itself absorbed (never: hosts are own lines) — keep the map flat
+  for (const [c, h] of joined) if (joined.has(h)) joined.set(c, joined.get(h)!);
+  return { joined, closedLoops, reached };
+}

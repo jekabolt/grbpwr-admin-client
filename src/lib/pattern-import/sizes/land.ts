@@ -88,6 +88,8 @@ export function landEnds(
   chains: Chain[],
   rankOf: Map<number, number>,
   targets: boolean[],
+  /** Ends ("chain:end") already closed (MOOD Ф2 corners): they land nowhere. */
+  skip: ReadonlySet<string> = new Set(),
 ): Landing[] {
   const grid = new SegGrid(6);
   const poly = chains.map((c) => c.pts);
@@ -99,6 +101,7 @@ export function landEnds(
     const ch = chains[c];
     if (ch.closed || ch.lengthMm < 5) continue;
     for (const end of [0, 1] as const) {
+      if (skip.has(`${c}:${end}`)) continue;
       const pts = chains[c].pts;
       const t = endTangent(pts, end, 3);
       if (!t) continue;
