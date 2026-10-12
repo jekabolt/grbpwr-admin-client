@@ -258,7 +258,10 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
   const anchors = anchorSizes
     .map((s) => ({ size: s, facts: c.factsOf(s) }))
     .filter((a): a is { size: string; facts: SkeletonFacts } => !!a.facts);
-  const assignment = inputFor(c.joins, c.hardware);
+  // An accessory (no garment category, drawn in one size) keeps the greedy reading: the bag rings
+  // are read from it (12.10 score: the garment bag 11/11 greedy, 9/11 global).
+  const accessory = facts.category === 'generic' && c.sizes.length === 1;
+  const assignment = accessory ? undefined : inputFor(c.joins, c.hardware);
   return {
     facts,
     options: {
