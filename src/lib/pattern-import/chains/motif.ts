@@ -27,7 +27,90 @@ export type Signature = {
   reliable: boolean;
   motif: Mm[] | null;
   backbone: Style | null;
+  /**
+   * R7: diameters of the line's beads (dots, rings, filled marks), share per 0.1 mm bin over
+   * 0…3 mm; null = no bead. Mood draws S and L (and 2 / 6) in one rhythm of triangles and dots —
+   * only the dots' size tells them apart. Not part of `vec`: a tie-break between key samples.
+   */
+  beadHist: number[] | null;
+  /** R7: the order of elements in one period, rotation-canonical (= dash · t tick · d dot · o ring,
+   * upper case = the larger of two bead sizes): «dtdtt» vs «DDttd»; null = no clear period. */
+  period: string | null;
 };
+
+const BEAD_BIN = 0.1;
+const BEAD_NB = 30;
+
+/** Bead diameter (mm) as drawn, null when unknown (a 1-mm stroke tick has its length only). */
+function beadSize(it: { kind: string; bead?: string; size?: number; len: number }): number | null {
+  if (it.kind !== 'bead') return null;
+  if (it.size != null) return it.size;
+  return it.bead === 'tick' && it.len > 0 ? it.len : null;
+}
+/** Round beads only (dots, rings) go into the histogram: ticks and triangles are one size on
+ * every Mood line and would drown the dots that tell S from L. */
+const round = (it: { kind: string; bead?: string }) =>
+  it.kind === 'bead' && (it.bead === 'dot' || it.bead === 'ring');
+
+/** Share of beads per diameter bin (smoothed over ±1 bin), or null without beads. */
+function beadHistOf(sizes: number[]): number[] | null {
+  if (!sizes.length) return null;
+  const h = new Array(BEAD_NB).fill(0);
+  for (const d of sizes) {
+    const k = Math.min(BEAD_NB - 1, Math.max(0, Math.round(d / BEAD_BIN)));
+    h[k] += 0.5;
+    if (k > 0) h[k - 1] += 0.25;
+    if (k < BEAD_NB - 1) h[k + 1] += 0.25;
+  }
+  const t = h.reduce((a, b) => a + b, 0);
+  return h.map((v) => v / t);
+}
+
+/**
+ * How differently two lines size their beads: 0 = alike … 1 = no bead size in common. A key prints
+ * its samples at its own scale (Mood: 0.85 of the sheet): one histogram may sit up to 0.3 mm off
+ * the other — the best shift counts; the SHAPE (one dot size or two) is what tells lines apart.
+ */
+export function beadContrast(a: number[] | null, b: number[] | null): number {
+  if (!a || !b) return 0;
+  let best = 1;
+  for (let sh = -3; sh <= 3; sh++) {
+    let d = 0;
+    for (let i = 0; i < BEAD_NB; i++) d += Math.abs(a[i] - (b[i + sh] ?? 0));
+    // what fell off the end of b by the shift is a difference too
+    for (let i = 0; i < BEAD_NB; i++) if (i - sh < 0 || i - sh >= BEAD_NB) d += b[i] ?? 0;
+    best = Math.min(best, d / 2);
+  }
+  return best;
+}
+
+/** The element order of one period of a sequence of symbols, canonical over rotation and
+ * direction. */
+function periodOf(sym: string[]): string | null {
+  const n = sym.length;
+  if (n < 6) return null;
+  for (let p = 1; p <= 8 && 2 * p <= n; p++) {
+    let ok = 0;
+    for (let i = p; i < n; i++) if (sym[i] === sym[i - p]) ok++;
+    if (ok < 0.85 * (n - p)) continue;
+    // the most frequent symbol per phase, then the smallest rotation
+    const per: string[] = [];
+    for (let k = 0; k < p; k++) {
+      const cnt = new Map<string, number>();
+      for (let i = k; i < n; i += p) cnt.set(sym[i], (cnt.get(sym[i]) ?? 0) + 1);
+      per.push([...cnt].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))[0][0]);
+    }
+    // a line is read in either direction: the smallest rotation of the period or of its reverse
+    let best = per.join('');
+    for (const seq of [per, per.slice().reverse()])
+      for (let r = 0; r < p; r++) {
+        const rot = [...seq.slice(r), ...seq.slice(0, r)].join('');
+        if (rot < best) best = rot;
+      }
+    return best;
+  }
+  return null;
+}
 
 const q = (v: number) => Math.round(v / PATIMPORT.motifQuantMm) * PATIMPORT.motifQuantMm;
 
@@ -139,6 +222,46 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
   for (const l of items) if (l.it.kind === 'bead') decorPer10[kindOf(l.it)] += 1;
   for (const k of DECOR_KINDS) decorPer10[k] = lengthMm > 0 ? (10 * decorPer10[k]) / lengthMm : 0;
 
+  // R7: bead diameters (items and decoration) and the element order along the chain
+  const sizes: number[] = [];
+  for (const d of ch.decor) {
+    const v = beadSize(d);
+    if (v != null && round(d)) sizes.push(v);
+  }
+  const seq: { k: string; size: number | null }[] = [];
+  for (const l of items) {
+    const it = l.it;
+    const v = beadSize(it);
+    if (v != null && round(it)) sizes.push(v);
+    // '=' a dash (a stroke, a filled dash, a dash-mark of a row of marks)
+    if (it.kind !== 'bead') seq.push({ k: it.len > 1.5 ? '=' : 't', size: null });
+    else if (it.bead === 'tick' && it.size == null && it.len > 1.5)
+      seq.push({ k: '=', size: null });
+    else seq.push({ k: it.bead === 'ring' ? 'o' : it.bead === 'tick' ? 't' : 'd', size: v });
+  }
+  // two bead sizes of one kind on one line (Mood L: «▲▲●●» small and large dots): upper case = large
+  const sym = seq.map((e) => e.k);
+  for (const k of ['d', 'o', 't']) {
+    const vs = seq
+      .filter((e) => e.k === k && e.size != null)
+      .map((e) => e.size!)
+      .sort((a, b) => a - b);
+    if (vs.length < 4) continue;
+    // two sizes only when the sizes fall apart in two real groups (a clear gap, each ≥ 20 %):
+    // one dot size printed a little bigger on some tiles is still one size
+    let gi = 0;
+    for (let i = 1; i + 1 < vs.length; i++) if (vs[i + 1] - vs[i] > vs[gi + 1] - vs[gi]) gi = i;
+    const nLo = gi + 1;
+    if (nLo < 0.2 * vs.length || vs.length - nLo < 0.2 * vs.length) continue;
+    if (vs[gi + 1] < 1.25 * vs[gi]) continue;
+    const cut = (vs[gi] + vs[gi + 1]) / 2;
+    seq.forEach((e, i) => {
+      if (e.k === k && e.size != null && e.size > cut) sym[i] = k.toUpperCase();
+    });
+  }
+  const beadHist = beadHistOf(sizes);
+  const period = periodOf(sym);
+
   const V = vecOf({ declared, innerPieces, gaps, solid, decorPer10, backbone });
   const reliable =
     !!declared || (solid ? lengthMm >= 15 : innerPieces.length >= 3 && lengthMm >= 12);
@@ -157,6 +280,8 @@ export function signatureOf(ch: WChain, styles: Map<number, Style>, lengthMm: nu
     reliable,
     motif,
     backbone,
+    beadHist,
+    period,
   };
 }
 

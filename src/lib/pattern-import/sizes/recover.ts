@@ -257,6 +257,16 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     if (stated) legendRun = new Set(stated.labels.map((l) => spelling.get(keyOf(l)) ?? l));
   }
   const legendHits = legendHits0.filter((h) => legendRun.has(h.label));
+  // the key as read: one sample per label (probe / legend UI: where it is, how far from its label)
+  diag.legendSamples = legendHits.map((h) => ({
+    label: h.label,
+    chain: h.chain,
+    d: +h.d.toFixed(2),
+    at: h.text.anchor,
+    look: sigs[h.chain] ? describeSig(sigs[h.chain]) : '?',
+    period: sigs[h.chain]?.period ?? null,
+    beads: beadModes(sigs[h.chain]?.beadHist ?? null),
+  }));
   const hitLabels = new Map<string, number>();
   for (const h of hits) hitLabels.set(h.label, (hitLabels.get(h.label) ?? 0) + 1);
 
@@ -540,6 +550,28 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
           ev.push({ kind: 'recovered-motif', motif: sigs[ch].motif! });
         return ev;
       });
+      // R7: keys whose samples agree in rhythm, element order AND dot size: only nesting tells
+      // their lines apart — one evidence, so the operator is asked (D3)
+      const askedPair = new Set<string>();
+      lid.perKey.forEach((pk, k) => {
+        if (!pk.nestingOnly || !lid.matched[k].length) return;
+        for (const t of pk.alike) {
+          const pair = [Math.min(k, t), Math.max(k, t)].join(',');
+          if (askedPair.has(pair)) continue;
+          askedPair.add(pair);
+          const [a, b] = [Math.min(k, t), Math.max(k, t)];
+          ambiguities.push({
+            kind: 'class-merge',
+            message: `${legendKey[a]} and ${legendKey[b]} are drawn alike in the key (same rhythm, same element order and dot size): their lines are told apart by nesting only — check which is which`,
+            classes: [],
+            chains: chains
+              .map((_, i) => i)
+              .filter((i) => lid.label[i] === a || lid.label[i] === b)
+              .slice(0, 200),
+            at: legendHits.find((x) => x.label === legendKey[a])?.text.anchor ?? null,
+          });
+        }
+      });
       for (const k of lid.absent)
         ambiguities.push({
           kind: 'size-empty',
@@ -745,6 +777,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
 
   // ── positions ───────────────────────────────────────────────────────────────────────────────
   const rankOf = new Map<number, number>();
+  /** Ranks that took chains by nesting against their look (identityAgainstNesting): asked. */
+  let movedByNesting = new Set<number>();
   const unitRank = new Array(nUnits).fill(-1);
   const unitPurity = new Array(nUnits).fill(0);
   const hitByChain = new Map<number, string[]>();
@@ -764,6 +798,27 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         distanceMm: medianDist(legendHits, l!),
       }),
     );
+    // where the key's sample is, how far from its label and how the lines match it (the legend
+    // shows it) — by rank: also for a size whose own pen no line of the sheet draws
+    const lid = legendId;
+    legendKey.forEach((l, k) => {
+      const h = legendHits.find((x) => x.label === l);
+      if (!h) return;
+      const sp = chains[h.chain].pts;
+      const pk = lid.perKey[k];
+      labelEvidence[k].push({
+        kind: 'legend-sample',
+        label: l,
+        chain: h.chain,
+        at: sp[sp.length >> 1],
+        textAt: h.text.anchor,
+        distanceMm: +h.d.toFixed(2),
+        score: pk.score,
+        second: pk.second,
+        alike: pk.alike.map((a) => legendKey[a]),
+        nestingOnly: pk.nestingOnly,
+      });
+    });
   }
   // votes[chain] = weight per rank
   const votes = new Map<number, number[]>();
@@ -1093,6 +1148,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         vote(i, unitRank[u], encoding === 'color' ? 1 : 4);
     });
     settle(0.45);
+    if (legendId) movedByNesting = identityAgainstNesting();
     for (let u = 0; u < nUnits; u++)
       if (!identityUnits && ser.support[u] >= 10 && unitPurity[u] < 0.8)
         ambiguities.push({
@@ -1176,6 +1232,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       }
       if (up && down) {
         broken++;
+        if (debugFlag('F3_ORDER') && broken % 200 === 1)
+          console.log(
+            `order broken at ${chains[g.x.from].pts[0].x.toFixed(0)},${chains[g.x.from].pts[0].y.toFixed(0)}: ${rs.map((r) => legendKey[r] ?? r).join(' ')}`,
+          );
         if (bad.length < 50) bad.push(g.x.from);
       } else mono++;
     }
@@ -1422,6 +1482,91 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       });
   }
 
+  /**
+   * A line in the look of key k that runs where ANOTHER size runs (Paris: the size-10 line drawn
+   * with the 24 pen — 24's look between 8 and 12): identity and nesting disagree for that line. In
+   * the cross-sections it crosses, its nearest identified neighbours bracket another rank, again
+   * and again: it is not k. Ranked by the gap it fills when its neighbours agree on one (one
+   * evidence: the row is asked), else left without a rank. Never kept silently in k.
+   */
+  function identityAgainstNesting(): Set<number> {
+    const per = new Map<number, { agree: number; against: number; to: Map<number, number> }>();
+    const known = (u: number) => (u >= 0 && unitRank[u] >= 0 ? unitRank[u] : -1);
+    for (const g of groups) {
+      const r = g.group.units.map(known);
+      // the lanes in order are the longest monotone run of the identified ones; a lane outside it
+      // stands where its look does not belong (one wrong lane must not make its neighbours wrong)
+      const keep = longestMonotone(r);
+      if (keep.size < 2) continue;
+      for (let idx = 0; idx < r.length; idx++) {
+        const me = r[idx];
+        if (me < 0) continue;
+        let a = -1;
+        let b = -1;
+        for (let j = idx - 1; j >= 0 && a < 0; j--) if (keep.has(j)) a = j;
+        for (let j = idx + 1; j < r.length && b < 0; j++) if (keep.has(j)) b = j;
+        const fits = keep.has(idx);
+        // a second lane of a neighbour's size (an overprint): no evidence either way
+        if (!fits && ((a >= 0 && r[a] === me) || (b >= 0 && r[b] === me))) continue;
+        // the kept neighbours bracket exactly the lanes between them: the rank this lane stands in
+        const implied =
+          !fits && a >= 0 && b >= 0 && Math.abs(r[b] - r[a]) === b - a
+            ? r[a] + Math.sign(r[b] - r[a]) * (idx - a)
+            : -1;
+        for (const c of g.x.lanes[g.lanes[idx]]) {
+          if (unit[c] < 0 || unitRank[unit[c]] !== me) continue;
+          const e = per.get(c) ?? { agree: 0, against: 0, to: new Map<number, number>() };
+          if (fits) e.agree++;
+          else {
+            e.against++;
+            if (implied >= 0) e.to.set(implied, (e.to.get(implied) ?? 0) + 1);
+          }
+          per.set(c, e);
+        }
+      }
+    }
+    const moved = new Map<string, { n: number; len: number; ids: number[] }>();
+    const into = new Set<number>();
+    for (const [c, e] of per) {
+      if (e.against < 3 || e.against < 2 * e.agree || !rankOf.has(c)) continue;
+      const from = rankOf.get(c)!;
+      const top = [...e.to].sort((x, y) => y[1] - x[1])[0];
+      // a fragment (< 15 mm) is not worth a question on a whole row: it only loses its rank
+      const to = top && top[1] >= 0.7 * e.against && chains[c].lengthMm >= 15 ? top[0] : -1;
+      if (to >= 0) {
+        rankOf.set(c, to);
+        into.add(to);
+        // a key whose own look the sheet never draws (Paris 10) is drawn after all — in another pen
+        noVote.delete(to);
+      } else rankOf.delete(c);
+      const k = `${from}|${to}`;
+      const m = moved.get(k) ?? { n: 0, len: 0, ids: [] };
+      m.n++;
+      m.len += chains[c].lengthMm;
+      if (m.ids.length < 50) m.ids.push(c);
+      moved.set(k, m);
+    }
+    for (const [k, m] of moved) {
+      // every move is asked, however short: its size comes from nesting alone (D3)
+      const [from, to] = k.split('|').map(Number);
+      const name = (r: number) => labels[r] ?? `rank ${r}`;
+      ambiguities.push({
+        kind: 'class-split',
+        message:
+          to >= 0
+            ? `${m.n} lines (${(m.len / 1000).toFixed(1)} m) drawn in ${name(from)}'s look run where ${name(to)} runs: ranked ${name(to)} by nesting only — confirm`
+            : `${m.n} lines (${(m.len / 1000).toFixed(1)} m) drawn in ${name(from)}'s look run where another size runs: left without a size`,
+        classes: [],
+        chains: m.ids,
+        at: chains[m.ids[0]].pts[0],
+      });
+    }
+    diag.identityAgainstNesting = [...moved].map(
+      ([k, m]) => `${k}:${m.n}/${(m.len / 1000).toFixed(1)}m`,
+    );
+    return into;
+  }
+
   // OCG: a line repeated in every size layer is common (Pattern Union prints shared lines per layer)
   const ocgCommon: number[] = [];
   const ocgDropped: { id: number; why: string }[] = [];
@@ -1593,6 +1738,10 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       conf = (encoding === 'declared-dash' ? 0.6 : 0.45) + 0.35 * p;
     }
     if (!labels[r]) conf *= 0.85;
+    // R7: a key told apart from another only by nesting — one evidence: the legend asks; so does a
+    // rank whose lines are mostly ones moved there by nesting against their look
+    if (legendId?.perKey[r]?.nestingOnly) conf = Math.min(conf, 0.5);
+    if (movedByNesting.has(r)) conf = Math.min(conf, 0.5);
     sizes.push({
       rank: r,
       label: labels[r] ?? null,
@@ -1841,6 +1990,11 @@ function legendEndHits(texts: IRText[], chains: Chain[], ok: boolean[]) {
 /**
  * A key is a column (or row) of labels: keep the aligned set with the most distinct labels, one hit
  * per label. Size numbers in a measurement table next to it (viola p29) end table rules too.
+ *
+ * A key printed in several PARALLEL columns (Mood 2024: «00 … 14 | 16 … 32») is one key: a column
+ * on the same axis beside the best one joins it when every label it adds is new (a repeated label
+ * is a table or another key, not more of this one), it stands beside the key (its rows overlap the
+ * key's rows, ≤ 150 mm away) and the union is still ONE size run — every label of the union in it.
  */
 function alignedLegend<
   T extends { text: IRText; label: string; value: number; d: number; chain: number },
@@ -1848,31 +2002,131 @@ function alignedLegend<
   if (hits.length < 3) return hits;
   let best: T[] = [];
   let bestRun = 0;
+  let bestAxis: 'x' | 'y' = 'x';
+  const dedupe = (set: T[]) => {
+    const byLabel = new Map<string, T>();
+    for (const o of set) {
+      const prev = byLabel.get(o.label);
+      if (!prev || o.d < prev.d) byLabel.set(o.label, o);
+    }
+    return [...byLabel.values()];
+  };
   for (const axis of ['x', 'y'] as const) {
     for (const h of hits) {
       const v = h.text.anchor[axis];
-      const set = hits.filter((o) => Math.abs(o.text.anchor[axis] - v) <= 2);
-      const byLabel = new Map<string, T>();
-      for (const o of set) {
-        const prev = byLabel.get(o.label);
-        if (!prev || o.d < prev.d) byLabel.set(o.label, o);
-      }
+      const set = dedupe(hits.filter((o) => Math.abs(o.text.anchor[axis] - v) <= 2));
       // a ruler row has more distinct numbers than a key; the key's numbers form a size run
-      const run = labelRun([...byLabel.values()], 1, 2).size;
-      if (run > bestRun || (run === bestRun && byLabel.size > best.length)) {
-        best = [...byLabel.values()];
+      const run = labelRun(set, 1, 2).size;
+      if (run > bestRun || (run === bestRun && set.length > best.length)) {
+        best = set;
         bestRun = run;
+        bestAxis = axis;
       }
     }
   }
   if (bestRun < 3) return hits;
   // a key draws its samples alike long: a table rule or an outline ending near a number is not one
-  const lens = best.map((h) => chains[h.chain].lengthMm).sort((a, b) => a - b);
-  const med = lens[lens.length >> 1];
-  return best.filter((h) => {
-    const L = chains[h.chain].lengthMm;
-    return L >= 0.6 * med && L <= 1.6 * med;
+  // (per column: one column's samples may be printed shorter than the other's). A sample's length
+  // is the span of its whole drawn row — Mood's «22» sample is 4 paths (a 15 mm dash run between
+  // short lead-ins), only one of them the chain the label took
+  const span = new Map<number, number>();
+  const spanOf = (c: number) => {
+    let v = span.get(c);
+    if (v === undefined) span.set(c, (v = sampleSpan(chains, c)));
+    return v;
+  };
+  const alike = (col: T[]) => {
+    const lens = col.map((h) => spanOf(h.chain)).sort((a, b) => a - b);
+    const med = lens[lens.length >> 1];
+    return col.filter((h) => {
+      const L = spanOf(h.chain);
+      return L >= 0.6 * med && L <= 1.6 * med;
+    });
+  };
+  let out = alike(best);
+  const axis = bestAxis;
+  const along = axis === 'x' ? 'y' : 'x';
+  const at = (h: T) => h.text.anchor[axis];
+  const pos = (h: T) => h.text.anchor[along];
+  const v0 = at(best[0]);
+  const lo = Math.min(...best.map(pos));
+  const hi = Math.max(...best.map(pos));
+  // the other columns on this axis, nearest first
+  const rest = hits.filter((h) => Math.abs(at(h) - v0) > 2).sort((a, b) => at(a) - at(b));
+  const cols: T[][] = [];
+  for (const h of rest) {
+    const c = cols[cols.length - 1];
+    if (c && Math.abs(at(h) - at(c[0])) <= 2) c.push(h);
+    else cols.push([h]);
+  }
+  cols.sort((a, b) => Math.abs(at(a[0]) - v0) - Math.abs(at(b[0]) - v0));
+  let run = labelRun(out, 1, 2).size;
+  // a key column draws a different pen per label; leaders of a table are one rule repeated —
+  // only a key joins a key (the base column as much as the one added)
+  const penful = (col: T[]) =>
+    new Set(col.map((h) => `${chains[h.chain].style}|${chains[h.chain].motif?.join('/') ?? '-'}`))
+      .size >= Math.min(3, col.length);
+  for (const col0 of penful(out) ? cols : []) {
+    if (Math.abs(at(col0[0]) - v0) > 150) break;
+    const col = alike(dedupe(col0));
+    const have = new Set(out.map((h) => h.label));
+    if (col.length < 3 || col.some((h) => have.has(h.label))) continue;
+    const cl = Math.min(...col.map(pos));
+    const ch = Math.max(...col.map(pos));
+    if (Math.min(hi, ch) - Math.max(lo, cl) < 0.5 * Math.min(hi - lo, ch - cl)) continue;
+    if (!penful(col)) continue;
+    // the column continues the key as one BLOCK of its run (00 … 14 | 16 … 32), never interleaved
+    // with it (a key 34 38 42 46 beside table numbers 36 40 44 48 is no run of eight)
+    const cMin = Math.min(...col.map((h) => h.value));
+    const cMax = Math.max(...col.map((h) => h.value));
+    if (out.some((h) => h.value >= cMin && h.value <= cMax)) continue;
+    const union = [...out, ...col];
+    const ur = labelRun(union, 1, 2);
+    if (ur.size <= run || union.some((h) => !ur.has(h.label))) continue;
+    out = union;
+    run = ur.size;
+  }
+  return out;
+}
+
+/**
+ * Length of a key sample's drawn row: the straight chain plus every chain collinear with it
+ * (≤ 0.5 mm off its line) that continues it with gaps ≤ 4 mm. A curved chain is its own length.
+ */
+function sampleSpan(chains: Chain[], c: number): number {
+  const pts = chains[c].pts;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const L = dist(a, b);
+  if (L < 0.9 * chains[c].lengthMm || L < 1) return chains[c].lengthMm;
+  const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+  const proj = (p: PtMm) => (p.x - a.x) * u.x + (p.y - a.y) * u.y;
+  const off = (p: PtMm) => Math.abs((p.x - a.x) * u.y - (p.y - a.y) * u.x);
+  const reach = L + 60;
+  const iv: [number, number][] = [];
+  chains.forEach((o, i) => {
+    if (i === c) return;
+    const q = o.pts;
+    if (dist(q[0], a) > reach && dist(q[0], b) > reach) return;
+    if (!q.every((p) => off(p) <= 0.5)) return;
+    const ts = q.map(proj);
+    iv.push([Math.min(...ts), Math.max(...ts)]);
   });
+  iv.sort((x, y) => x[0] - y[0]);
+  let lo = 0;
+  let hi = L;
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [x0, x1] of iv)
+      if (x1 > hi && x0 <= hi + 4) {
+        hi = x1;
+        grew = true;
+      } else if (x0 < lo && x1 >= lo - 4) {
+        lo = x0;
+        grew = true;
+      }
+  }
+  return hi - lo;
 }
 
 /**
@@ -1887,7 +2141,12 @@ function labelRun(
 ): Set<string> {
   const cnt = new Map<string, { value: number; n: number; letter: boolean }>();
   for (const h of hits) {
-    const e = cnt.get(h.label) ?? { value: h.value, n: 0, letter: !/^\d+$/.test(h.label) };
+    // a paired size («28/30», «00-0») is numeric too
+    const e = cnt.get(h.label) ?? {
+      value: h.value,
+      n: 0,
+      letter: !/^\d+(?:[/\-–]\d+)?$/.test(h.label),
+    };
     e.n++;
     cnt.set(h.label, e);
   }
@@ -1905,7 +2164,10 @@ function labelRun(
           if (vals[j][1].value === last + step) run.push(vals[j]);
           else if (!letter && holed < holes && vals[j][1].value === last + 2 * step) {
             // a key entry whose sample is not a chain (viola 44: dashes broken by «x» marks)
-            run.push([String(last + step), { value: last + step, n: vals[j][1].n, letter }]);
+            run.push([
+              holeLabel(last + step, vals[j][0]),
+              { value: last + step, n: vals[j][1].n, letter },
+            ]);
             run.push(vals[j]);
             holed++;
           }
@@ -1922,6 +2184,23 @@ function labelRun(
       }
   }
   return new Set(best);
+}
+
+/** The bead diameters a bead histogram peaks at (mm), for reading. */
+function beadModes(h: number[] | null): number[] {
+  if (!h) return [];
+  const out: number[] = [];
+  for (let i = 0; i < h.length; i++)
+    if (h[i] >= 0.12 && h[i] >= (h[i - 1] ?? 0) && h[i] > (h[i + 1] ?? 0))
+      out.push(+(i * 0.1).toFixed(1));
+  return out;
+}
+
+/** A hole in a numeric key spelled like its neighbour: «00» below «0», «6-8» between pairs. */
+function holeLabel(v: number, like: string): string {
+  const one = (x: number) => (x < 0 ? '0'.repeat(1 - x / 2) : String(x));
+  const pair = /^\d+([/\-–])\d+$/.exec(like);
+  return pair ? `${one(v)}${pair[1]}${one(v + 2)}` : one(v);
 }
 
 /** Lane indices of the longest strictly monotone (either direction) run of known ranks (≥ 0). */

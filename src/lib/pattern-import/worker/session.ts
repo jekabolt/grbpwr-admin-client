@@ -89,7 +89,7 @@ import { renderPagePng, renderSom } from '../ai/som';
 import { pageChains } from '../clean/page-chains';
 import { marksOn, pageStats } from '../clean/page-roles';
 import { writeAndGate } from '../gate';
-import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize } from '../chains';
+import { applyLegend, buildChainsDetailed, confirmRows, mergeSameSize, splitRows } from '../chains';
 import { layerLoopAsides } from '../chains/layer-role';
 import { gradeView, sourceClash } from '../chains/face-role';
 import { withClassSigs } from '../chains/legend';
@@ -137,6 +137,7 @@ import { planScopes, proposeFabricsDetailed, purposeWord } from '../fabrics';
 import { cardRules } from './card-rules';
 import { ImportError, cancelled, stageUnavailable } from './errors';
 import { chainPreviewOf, previewOf } from './preview';
+import { legendSwatches } from '../chains/swatch';
 import { wallsUsedBy } from './walls-used';
 import { checkInputSet, imagePixelsRefusal } from './limits';
 import { assertFiniteDoc, WorkBudget } from '../adapters/budget';
@@ -1044,7 +1045,10 @@ export class Session {
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
       set = withClassSigs(set, sheet.styles);
-      if (input.legend?.length) set = mergeSameSize(applyLegend(set, input.legend));
+      // MOOD-F1: a row the operator split goes into two rows first (the new row's answers are
+      // bound to its own sig)
+      if (input.legend?.length)
+        set = mergeSameSize(applyLegend(splitRows(set, input.legend), input.legend));
       // rows confirmed as proposed are answered (confidence 1): the size checks read the answer
       if (input.confirmed?.length) set = confirmRows(set, input.confirmed);
     }
@@ -1056,6 +1060,7 @@ export class Session {
       chainPreview: chainPreviewOf(set.chains, this.extentOf(sheet)),
       warnings: set.warnings,
       ambiguities: set.ambiguities ?? [],
+      ...(this.fast ? {} : legendSwatches(sheet, set)),
     };
   }
 

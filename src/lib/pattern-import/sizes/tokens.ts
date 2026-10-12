@@ -15,6 +15,15 @@ const LETTER_ALIAS: Record<string, string> = {
 
 export type SizeToken = { label: string; kind: 'num' | 'letter'; value: number };
 
+/**
+ * Value of a numeric size as printed. US misses' «00» is one step (2) below «0», «000» two: the
+ * key «00 · 0 · 2 · … · 32» is one run of step 2 and «00» never collides with «0».
+ */
+function numValue(t: string): number {
+  if (/^0{2,}$/.test(t)) return -2 * (t.length - 1);
+  return Number(t);
+}
+
 /** Parse one size token; null when the text is not one. `strict` refuses prefixes/suffixes. */
 export function parseSizeToken(raw: string, strict = false): SizeToken | null {
   let t = raw.trim().replace(/\s+/g, ' ');
@@ -23,9 +32,20 @@ export function parseSizeToken(raw: string, strict = false): SizeToken | null {
       .replace(/^(size|sizes|gr\.?|größe|taille|р\.?|размер|eu|de|fr|uk|us)\s*/i, '')
       .replace(/[.,:;)]+$/, '');
   if (/^\d{1,3}$/.test(t)) {
-    const v = Number(t);
-    if (v < 0 || v > 200) return null;
+    const v = numValue(t);
+    if (v > 200) return null;
     return { label: t, kind: 'num', value: v };
+  }
+  // a paired size — Mood's old keys «SIZE 28/30», the paired key «00-0 · 2-4 · … · 30-32», the
+  // European «48/50»: one size line for two neighbouring sizes. The label stays as printed, the
+  // value is the lower size. Only a pair one even step apart (the lower even, or «00»): an inch
+  // fraction («1/2", 3/4, 5/8») never is one, a range («36-46») is a run, not one size.
+  const pair = /^(\d{1,3})\s*[/\-–]\s*(\d{1,3})$/.exec(t);
+  if (pair) {
+    const a = numValue(pair[1]);
+    const b = numValue(pair[2]);
+    if (b - a === 2 && (a % 2 === 0 || /^0{2,}$/.test(pair[1])) && b <= 200)
+      return { label: t.replace(/\s+/g, ''), kind: 'num', value: a };
   }
   const u = t.toUpperCase();
   const canon = LETTER_ALIAS[u] ?? u;

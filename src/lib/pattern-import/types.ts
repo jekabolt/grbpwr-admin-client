@@ -445,7 +445,26 @@ export type ClassEvidence =
       sourceOne?: string;
     }
   /** P2: the AAMA/ASTM meaning of the line's layer (chains/layer-role.ts). */
-  | { kind: 'layer'; layer: string; meaning: string };
+  | { kind: 'layer'; layer: string; meaning: string }
+  /**
+   * MOOD-F1: the drawing's own key names this row (sizes/legend-id.ts). `chain` is the key's
+   * sample, `at` its middle and `textAt` its label; `score` how well the row's lines match the
+   * sample (length-weighted), `second` the share of them that also agree on element order / dot
+   * size (R7; a declared dash = 1); `alike` the key labels drawn like it and `nestingOnly` = those
+   * are told apart by nesting alone — one evidence, a question (D3).
+   */
+  | {
+      kind: 'legend-sample';
+      label: string;
+      chain: ChainId;
+      at: PtMm;
+      textAt: PtMm;
+      distanceMm: Mm;
+      score: number;
+      second: number;
+      alike: string[];
+      nestingOnly: boolean;
+    };
 
 export type LineClass = {
   id: ClassId;
@@ -509,6 +528,27 @@ export type ChainSet = {
   warnings: string[];
 };
 
+/**
+ * MOOD-F1: a legend row's real look — ≈ 40 mm of its own drawing (chains/swatch.ts) in the
+ * stretch's frame: x along it 0 … lengthMm, y across it (−halfMm … +halfMm), mm, 1:1. Shapes are
+ * drawn as the source draws them: a stroked run with its declared dash from `dashOffset`, or a
+ * filled / closed mark (`pts` flat x,y pairs).
+ */
+export type LineSwatch = {
+  lengthMm: Mm;
+  halfMm: Mm;
+  /** The chain the stretch was cut from. */
+  chain: ChainId;
+  shapes: {
+    pts: number[];
+    closed: boolean;
+    fill: boolean;
+    widthMm: Mm;
+    dash: Mm[] | null;
+    dashOffset: Mm;
+  }[];
+};
+
 export type ChainOpts = {
   /** Max gap bridged when joining dashes, mm. Default 3. */
   joinGapMm: Mm;
@@ -524,7 +564,17 @@ export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress)
 /** Operator edits to the legend: class → role/size. Returns a new ChainSet with roles applied. */
 export type ApplyLegendFn = (
   set: ChainSet,
-  edits: { classId: ClassId; role: ChainRole; sizeLabel: string | null; sig?: string }[],
+  edits: {
+    classId: ClassId;
+    role: ChainRole;
+    sizeLabel: string | null;
+    sig?: string;
+    /**
+     * MOOD-F1: the operator split this row in two — by look (dash / motif of its lines) or by
+     * local nesting (which sizes its lines run between). chains/legend.ts `splitRows`.
+     */
+    split?: 'look' | 'nesting';
+  }[],
 ) => ChainSet;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -2109,6 +2159,10 @@ export type StageIO = {
       warnings: string[];
       /** What the legend could not decide alone (F3 `ChainSet.ambiguities`), shown as flags. */
       ambiguities?: ChainAmbiguity[];
+      /** MOOD-F1: each row's real look by class id (absent = no drawing to cut one from). */
+      swatches?: Record<ClassId, LineSwatch>;
+      /** MOOD-F1: the key's own samples by their chain id (`legend-sample` evidence `chain`). */
+      keySwatches?: Record<ChainId, LineSwatch>;
     };
   };
   sizes: {

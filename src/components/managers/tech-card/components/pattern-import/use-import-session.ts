@@ -109,6 +109,8 @@ export type LegendEdit = {
   sizeLabel: string | null;
   /** The row's signature (LineClass.sig) the answer was given to. */
   sig?: string;
+  /** MOOD-F1: split the row in two — by the look of its lines or by the sizes they run between. */
+  split?: 'look' | 'nesting';
 };
 
 /** The key a legend answer is bound to: the row's signature, else its number (older rows). */

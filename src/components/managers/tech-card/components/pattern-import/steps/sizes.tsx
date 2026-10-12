@@ -8,7 +8,10 @@ import type {
   BoxMm,
   ChainRole,
   ChainAmbiguity,
+  ClassEvidence,
   ExpectedSizes,
+  LineClass,
+  LineSwatch,
   SizeCountAsk,
   SizeMapEntry,
 } from 'lib/pattern-import/types';
@@ -26,7 +29,8 @@ import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
 import type { ImportSessionApi, LegendEdit } from '../use-import-session';
 import { legendKey } from '../use-import-session';
 import { guessedSizes } from '../use-import-session';
-import { DashSample, NativeSelect, Panel, STICKY_END, SplitStage, fmtPct } from '../ui-bits';
+import { NativeSelect, Panel, STICKY_END, SplitStage, fmtPct } from '../ui-bits';
+import { LineSwatchView } from '../line-swatch';
 
 const ROLES: { value: ChainRole; label: string }[] = [
   { value: 'size', label: 'size line' },
@@ -66,6 +70,9 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
   const sizes = session.sizes;
   const [hover, setHover] = useState<number | null>(null);
   const [flag, setFlag] = useState<number | null>(null);
+  // MOOD-F1: the row clicked open — its lines lit, its key sample marked, its detail below
+  const [picked, setPicked] = useState<number | null>(null);
+  const [toKey, setToKey] = useState(false);
   if (!chains || !sizes || !session.sheet) return null;
 
   // One size drawn (the operator's answer): nothing to merge, so "two sizes alike" is no question
@@ -94,11 +101,23 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
     void api.setSize(e.source.rank, card.sizes.find((c) => String(c.sizeId) === sizeId) ?? null);
 
   const flagged = flag != null ? flags[flag] : null;
+  const pickedRow = picked != null ? chains.classes.find((c) => c.id === picked) ?? null : null;
+  const sample = pickedRow ? keySampleOf(pickedRow) : null;
+  const hotRow = hover ?? pickedRow?.id ?? null;
   const hot =
-    hover != null
-      ? new Set(chains.classes.find((c) => c.id === hover)?.chains ?? [])
+    hotRow != null
+      ? new Set(chains.classes.find((c) => c.id === hotRow)?.chains ?? [])
       : flagged
         ? new Set(flagged.chains.length ? flagged.chains : flaggedClassChains(flagged))
+        : null;
+  const focusBox =
+    toKey && sample
+      ? around(
+          { x: (sample.at.x + sample.textAt.x) / 2, y: (sample.at.y + sample.textAt.y) / 2 },
+          40,
+        )
+      : flagged?.at
+        ? around(flagged.at)
         : null;
   function flaggedClassChains(a: ChainAmbiguity) {
     return chains!.classes.filter((c) => a.classes.includes(c.id)).flatMap((c) => c.chains);
@@ -145,6 +164,8 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               : `outside the outlines — another size's lines? left to the size checks (${e.why})`;
           case 'layer':
             return `layer “${e.layer}”: ${e.meaning}`;
+          case 'legend-sample':
+            return `key sample “${e.label}” ${e.distanceMm} mm from its label, match ${e.score.toFixed(2)}`;
         }
       })
       .join(' · ');
@@ -172,15 +193,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
           title='lines by class'
           aside={
             <Text size='micro' variant='label' component='span'>
-              hover a legend row or show a flag to see its lines
+              hover or click a legend row, or show a flag, to see its lines
             </Text>
           }
           bodyClassName='p-0'
         >
-          <SheetViewport
-            bbox={session.sheet.sheet.bbox}
-            focus={flagged?.at ? around(flagged.at) : null}
-          >
+          <SheetViewport bbox={session.sheet.sheet.bbox} focus={focusBox}>
             {({ unit }) => (
               <>
                 <g fill='none' pointerEvents='none'>
@@ -205,6 +223,36 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                     strokeWidth={unit * 1.6}
                     pointerEvents='none'
                   />
+                )}
+                {sample && (
+                  // the key's sample of the picked row and the leader to its label
+                  <g pointerEvents='none'>
+                    {(chains.chainPreview[sample.chain]?.length ?? 0) >= 4 && (
+                      <polyline
+                        points={f32Attr(chains.chainPreview[sample.chain])}
+                        fill='none'
+                        stroke={SHEET_INK.blue}
+                        strokeWidth={unit * 2.4}
+                      />
+                    )}
+                    <line
+                      x1={sample.at.x}
+                      y1={vy(sample.at.y)}
+                      x2={sample.textAt.x}
+                      y2={vy(sample.textAt.y)}
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={unit}
+                      strokeDasharray={`${unit * 4} ${unit * 3}`}
+                    />
+                    <circle
+                      cx={sample.at.x}
+                      cy={vy(sample.at.y)}
+                      r={unit * 14}
+                      fill='none'
+                      stroke={SHEET_INK.blue}
+                      strokeWidth={unit * 1.6}
+                    />
+                  </g>
                 )}
               </>
             )}
@@ -278,17 +326,32 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                     key={c.id}
                     onMouseEnter={() => setHover(c.id)}
                     onMouseLeave={() => setHover(null)}
-                    className={hover === c.id ? 'bg-bgZebra' : undefined}
+                    className={cn(
+                      hover === c.id || picked === c.id ? 'bg-bgZebra' : undefined,
+                      'cursor-pointer',
+                    )}
+                    aria-selected={picked === c.id}
+                    onClick={(ev) => {
+                      // the row's own controls answer; a click elsewhere on it opens its detail
+                      if ((ev.target as HTMLElement).closest('select,input,button')) return;
+                      setPicked(picked === c.id ? null : c.id);
+                      setToKey(false);
+                    }}
                   >
                     <td data-align='left' title={evidenceText(c.id)}>
-                      <DashSample dash={motifOf(c.id)} width={48} />
+                      <LineSwatchView
+                        swatch={chains.swatches?.[c.id]}
+                        widthMm={24}
+                        fallbackDash={motifOf(c.id)}
+                        title={`${c.sizeLabel ?? c.role} as drawn on the sheet`}
+                      />
                       <Text
                         size='nano'
                         variant='label'
                         component='span'
                         className='block max-w-24 truncate'
                       >
-                        {evidenceText(c.id) || `${c.chains.length} lines`}
+                        {identityLine(c) || evidenceText(c.id) || `${c.chains.length} lines`}
                       </Text>
                     </td>
                     <td data-align='left'>
@@ -383,6 +446,20 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
               ? '! two size rows carry one label — they are read as one size when you next change the legend'
               : 'two size rows with the same label are one size: type the label of the other row to merge them.'}
           </Text>
+          {pickedRow && (
+            <RowDetail
+              row={pickedRow}
+              swatch={chains.swatches?.[pickedRow.id]}
+              keySwatch={sample ? chains.keySwatches?.[sample.chain] : undefined}
+              others={chains.classes.filter(
+                (c) => c.role === 'size' && c.id !== pickedRow.id && !!c.sizeLabel,
+              )}
+              toKey={toKey}
+              onToKey={() => setToKey(!toKey)}
+              onSplit={(by) => edit(pickedRow.id, { split: by })}
+              onMerge={(label) => edit(pickedRow.id, { role: 'size', sizeLabel: label })}
+            />
+          )}
           {chains.warnings.map((w) => (
             <Text key={w} size='micro' variant='label' component='p'>
               {w}
@@ -650,5 +727,179 @@ function SizeConfirm({ e, onConfirm }: { e: SizeMapEntry; onConfirm: () => void 
     <Chip tone='attention' onClick={onConfirm} title={e.evidence?.join(' · ')}>
       ! {fmtPct(e.confidence ?? 0, 0)} · confirm
     </Chip>
+  );
+}
+
+type KeySample = Extract<ClassEvidence, { kind: 'legend-sample' }>;
+
+/** The key sample a row was named by (MOOD-F1), if the drawing's own key named it. */
+function keySampleOf(c: LineClass): KeySample | null {
+  for (const e of c.evidence) if (e.kind === 'legend-sample') return e;
+  return null;
+}
+
+/** Where the row's identity comes from, in one line: the key sample and the second evidence. */
+function identityLine(c: LineClass): string {
+  const k = keySampleOf(c);
+  if (!k) return '';
+  if (!k.score) return 'key read · no line like it';
+  if (k.nestingOnly) return `key ${k.score.toFixed(2)} · nesting only`;
+  return `key ${k.score.toFixed(2)}${k.second >= 0.5 ? ' · 2nd ✓' : ''}`;
+}
+
+/**
+ * The clicked row (MOOD-F1): its look on the sheet against its sample in the key, where the
+ * sample is and how far from its label, where its identity comes from — and the two answers a
+ * wrong row needs: split it (two sizes drawn alike went into one row) or merge it into another.
+ * Controls in one line share one size (22 px tall, w-28).
+ */
+function RowDetail({
+  row,
+  swatch,
+  keySwatch,
+  others,
+  toKey,
+  onToKey,
+  onSplit,
+  onMerge,
+}: {
+  row: LineClass;
+  swatch: LineSwatch | undefined;
+  keySwatch: LineSwatch | undefined;
+  others: LineClass[];
+  toKey: boolean;
+  onToKey: () => void;
+  onSplit: (by: 'look' | 'nesting') => void;
+  onMerge: (label: string) => void;
+}) {
+  const k = keySampleOf(row);
+  const m = (row.totalLengthMm / 1000).toFixed(1);
+  return (
+    <div className='mt-2'>
+      <GroupLabel>
+        row · {row.role === 'size' ? `size ${row.sizeLabel ?? '(no label)'}` : row.role}
+      </GroupLabel>
+      <dl className='grid grid-cols-[88px_1fr] items-center gap-x-2 gap-y-1.5'>
+        <dt>
+          <Text size='micro' variant='label' component='span'>
+            on the sheet
+          </Text>
+        </dt>
+        <dd className='flex min-w-0 items-center gap-2'>
+          <LineSwatchView swatch={swatch} title='the row as drawn on the sheet, 1:1' />
+          <Text size='micro' variant='label' component='span'>
+            {row.chains.length} lines · {m} m
+          </Text>
+        </dd>
+        <dt>
+          <Text size='micro' variant='label' component='span'>
+            in the key
+          </Text>
+        </dt>
+        <dd className='flex min-w-0 flex-wrap items-center gap-2'>
+          {k ? (
+            <>
+              <LineSwatchView swatch={keySwatch} title='the key sample, 1:1' />
+              <Text size='micro' component='span'>
+                “{k.label}” · {k.distanceMm} mm from its label
+              </Text>
+              <Chip
+                quiet
+                className='h-[22px]'
+                selected={toKey}
+                pressed={toKey}
+                onClick={onToKey}
+                title='zoom the sheet to the key sample and its label'
+              >
+                {toKey ? 'shown' : 'show in key'}
+              </Chip>
+            </>
+          ) : (
+            <Text size='micro' variant='label' component='span'>
+              — not named by the key
+            </Text>
+          )}
+        </dd>
+        <dt>
+          <Text size='micro' variant='label' component='span'>
+            identity
+          </Text>
+        </dt>
+        <dd className='flex min-w-0 flex-wrap items-center gap-1.5'>
+          {k ? (
+            <>
+              {k.score ? (
+                <Pill tone='ink'>key sample {k.score.toFixed(2)}</Pill>
+              ) : (
+                <Pill
+                  tone='attention'
+                  title='no line of the sheet is drawn like this sample: the lines this row holds were ranked by nesting'
+                >
+                  ! no line like the sample
+                </Pill>
+              )}
+              {!k.score ? null : k.nestingOnly ? (
+                <Pill
+                  tone='attention'
+                  title={`drawn like ${k.alike.join(', ')} in the key: only the nesting tells them apart`}
+                >
+                  ! nesting only — confirm
+                </Pill>
+              ) : k.second >= 0.5 ? (
+                <Pill tone='ink' title='element order and dot size agree with the sample'>
+                  2nd evidence {fmtPct(k.second, 0)}
+                </Pill>
+              ) : (
+                <Pill tone='mut'>no 2nd evidence</Pill>
+              )}
+              {k.alike.length > 0 && !k.nestingOnly && (
+                <Text size='micro' variant='label' component='span'>
+                  key drawn like {k.alike.join(', ')} — told apart by order / dot size
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text size='micro' variant='label' component='span'>
+              {fmtPct(row.confidence, 0)} sure · {row.evidence.map((e) => e.kind).join(', ') || '—'}
+            </Text>
+          )}
+        </dd>
+        {row.role === 'size' && (
+          <>
+            <dt>
+              <Text size='micro' variant='label' component='span'>
+                answer
+              </Text>
+            </dt>
+            <dd className='flex min-w-0 flex-wrap items-center gap-1.5'>
+              <Chip
+                className='h-[22px] w-28 justify-center'
+                onClick={() => onSplit('look')}
+                title='two looks went into this row: give the lines of the second look a row of their own'
+              >
+                split by look
+              </Chip>
+              <Chip
+                className='h-[22px] w-28 justify-center'
+                onClick={() => onSplit('nesting')}
+                title='two sizes drawn alike went into this row: split its lines by the sizes they run between'
+              >
+                split by nesting
+              </Chip>
+              <NativeSelect
+                value=''
+                onChange={(v) => v && onMerge(v)}
+                aria-label={`merge row ${row.sizeLabel ?? row.id} into another size`}
+                className='w-28'
+                options={[
+                  { value: '', label: 'merge into…' },
+                  ...others.map((o) => ({ value: o.sizeLabel!, label: `size ${o.sizeLabel}` })),
+                ]}
+              />
+            </dd>
+          </>
+        )}
+      </dl>
+    </div>
   );
 }

@@ -37,6 +37,9 @@ export const LINK = {
   minDots: 6,
   /** A lone stroke up to this long may be one mark of a row of marks («—ooo—ooo»). */
   markStrokeMm: 5,
+  /** A lone FILLED dash up to this long may be one mark of a row of marks too (Mood 2024 «18»
+   * «●▲━━●▲━━», «24» «●━●●●━»: capsules of 3.5–6.2 mm between groups of dots and triangles). */
+  markFillMm: 7,
 };
 
 /** Visual identity of a style for joining: colour (coarse), width (0.05), fill, layer, dash. */
@@ -372,8 +375,8 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
   const isShortLone = (ch: WChain) =>
     !isTiny(ch) &&
     ch.items.length === 1 &&
-    ch.items[0].it.kind === 'stroke' &&
-    ch.items[0].it.len <= LINK.markStrokeMm;
+    ((ch.items[0].it.kind === 'stroke' && ch.items[0].it.len <= LINK.markStrokeMm) ||
+      (ch.items[0].it.kind === 'fill-dash' && ch.items[0].it.len <= LINK.markFillMm));
   const hosts = chains.filter((c) => !c.dead && !isTiny(c));
   const hostIdx = new Map(hosts.map((h, k) => [h, k]));
   const grid = new SegGrid(4);

@@ -3,7 +3,10 @@
 // Edits change the class row only; chains, bundles and ambiguities stay as built. A class moved
 // out of role 'size' loses its size label; ambiguities naming an edited class are dropped (the
 // operator answered them). Orphans are recomputed: size-line chains no class claims as size/common.
-import type { ApplyLegendFn, ChainSet, LineClass, Style } from 'lib/pattern-import/types';
+import type { ApplyLegendFn, ChainSet, LineClass, PtMm, Style } from 'lib/pattern-import/types';
+
+import { resample, SegGrid, segNearest } from './geom';
+import { normDash } from './link';
 
 /**
  * Every row's signature (LineClass.sig): the dominant pen of its lines (colour, width, dash,
@@ -24,7 +27,11 @@ export function withClassSigs(set: ChainSet, styles: readonly Style[]): ChainSet
     const pen = st
       ? `${st.strokeRgb ? st.strokeRgb.join(',') : '-'}|${st.widthMm.toFixed(2)}|${st.dash ? st.dash.join(',') : '-'}|${st.layer ?? '-'}`
       : '-';
-    const how = [...new Set(c.evidence.map((e) => e.kind))].sort().join(',');
+    // the key sample is where the row was read, not what it is: a rebuild that reads the key
+    // better (or worse) keeps the operator's answers on the row
+    const how = [...new Set(c.evidence.map((e) => e.kind).filter((k) => k !== 'legend-sample'))]
+      .sort()
+      .join(',');
     const base = `${pen}|${how}|${c.sizeLabel ?? ''}`;
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
@@ -116,4 +123,154 @@ export function mergeSameSize(set: ChainSet): ChainSet {
       `${gone.size} size ${gone.size === 1 ? 'row' : 'rows'} merged by label (one size drawn in two looks)`,
     ],
   };
+}
+
+/**
+ * MOOD-F1: the operator's "split row" (an edit with `split`): the row's lines go into two rows —
+ *   look     by the pen of each line (declared dash shape, recovered motif, width): a row that took
+ *            two looks the reader could not tell apart (one look cluster, two sizes);
+ *   nesting  by the sizes each line runs between (its nearest size line on either side): Mood S
+ *            and L drawn alike, one runs between XS and M, the other between M and XL.
+ * The larger part keeps the row (its label, its answers); the other becomes a new size row with
+ * no label (the operator names it — or types the label of a row to merge into). Run on a set with
+ * sigs (withClassSigs) BEFORE applyLegend: the new row's sig `<row sig>/split-<by>` is what the
+ * operator's label for it is bound to. A row that does not divide is left as is, with a warning.
+ */
+export function splitRows(set: ChainSet, edits: Parameters<ApplyLegendFn>[1]): ChainSet {
+  const asks = edits.filter((e) => e.split);
+  if (!asks.length) return set;
+  let classes = set.classes.slice();
+  const warnings = [...set.warnings];
+  for (const e of asks) {
+    const row = classes.find((c) => (e.sig ? c.sig === e.sig : c.id === e.classId));
+    if (!row || row.chains.length < 2) continue;
+    const parts = e.split === 'look' ? splitByLook(set, row) : splitByNesting(set, row, classes);
+    if (!parts) {
+      warnings.push(
+        `row ${row.sizeLabel ?? row.id} not split: its lines are all ${e.split === 'look' ? 'drawn alike' : 'between the same sizes'}`,
+      );
+      continue;
+    }
+    const total = (ids: number[]) => ids.reduce((a, i) => a + (set.chains[i]?.lengthMm ?? 0), 0);
+    const [keep, away] = parts;
+    const id = Math.max(...classes.map((c) => c.id)) + 1;
+    classes = classes.map((c) =>
+      c === row ? { ...c, chains: keep, totalLengthMm: total(keep) } : c,
+    );
+    classes.push({
+      id,
+      role: row.role,
+      sizeLabel: null,
+      chains: away,
+      totalLengthMm: total(away),
+      evidence: row.evidence.filter((x) => x.kind !== 'legend-sample' && x.kind !== 'text-label'),
+      confidence: 0.4,
+      sig: `${row.sig ?? `#${row.id}`}/split-${e.split}`,
+    });
+    warnings.push(
+      `row ${row.sizeLabel ?? row.id} split by ${e.split}: ${away.length} lines in a new row — name it`,
+    );
+  }
+  return { ...set, classes, warnings };
+}
+
+function splitByLook(set: ChainSet, row: LineClass): [number[], number[]] | null {
+  const look = new Map<string, number[]>();
+  for (const i of row.chains) {
+    const c = set.chains[i];
+    if (!c) continue;
+    const k = c.motif
+      ? normDash(c.motif)
+          .map((v) => v.toFixed(1))
+          .join('/')
+      : 'solid';
+    const a = look.get(k);
+    if (a) a.push(i);
+    else look.set(k, [i]);
+  }
+  return twoBiggest(set, [...look.values()], row.chains);
+}
+
+function splitByNesting(
+  set: ChainSet,
+  row: LineClass,
+  classes: LineClass[],
+): [number[], number[]] | null {
+  // other size rows' lines, with their nesting rank: where does each line of this row stand among
+  // them — the mean rank of the size lines next to it on either side (S between XS and M ≈ 2, L
+  // between M and XL ≈ 4); the row's lines fall in two groups when the row holds two sizes
+  const rankOfRow = (c: LineClass) => {
+    for (const e of c.evidence) if (e.kind === 'nesting-order') return e.rank;
+    return null;
+  };
+  const rankOf = new Map<number, number>();
+  for (const c of classes) {
+    const r = rankOfRow(c);
+    if (c.role === 'size' && c !== row && r != null) for (const i of c.chains) rankOf.set(i, r);
+  }
+  const grid = new SegGrid(8);
+  for (const i of rankOf.keys()) if (set.chains[i]) grid.addPolyline(i, set.chains[i].pts);
+  const at: { i: number; v: number; len: number }[] = [];
+  for (const i of row.chains) {
+    const ch = set.chains[i];
+    if (!ch || ch.lengthMm < 10) continue;
+    const vs: number[] = [];
+    for (const sm of resample(ch.pts, 5)) {
+      const best = [Infinity, Infinity];
+      const side = [-1, -1];
+      grid.near(sm.p, 25, (j, si) => {
+        const q = set.chains[j].pts;
+        const r = segNearest(sm.p, q[si], q[si + 1]);
+        if (r.d > 25 || r.d < 0.05) return;
+        const a = q[si];
+        const b = q[si + 1];
+        const v: PtMm = {
+          x: a.x + (b.x - a.x) * r.u - sm.p.x,
+          y: a.y + (b.y - a.y) * r.u - sm.p.y,
+        };
+        // which side of the line's direction the neighbour is on
+        const k = sm.t.x * v.y - sm.t.y * v.x > 0 ? 0 : 1;
+        if (r.d < best[k]) {
+          best[k] = r.d;
+          side[k] = rankOf.get(j)!;
+        }
+      });
+      if (side[0] >= 0 && side[1] >= 0) vs.push((side[0] + side[1]) / 2);
+    }
+    if (vs.length < 2) continue;
+    vs.sort((x, y) => x - y);
+    at.push({ i, v: vs[vs.length >> 1], len: ch.lengthMm });
+  }
+  if (at.length < 2) return null;
+  // two groups along the rank axis: the cut with the widest gap, both sides ≥ 10 % of the length
+  at.sort((x, y) => x.v - y.v);
+  const total = at.reduce((t, e) => t + e.len, 0);
+  let cut = -1;
+  let gap = 0;
+  let acc = 0;
+  for (let k = 0; k + 1 < at.length; k++) {
+    acc += at[k].len;
+    const g = at[k + 1].v - at[k].v;
+    if (g > gap && acc >= 0.1 * total && total - acc >= 0.1 * total) {
+      gap = g;
+      cut = k;
+    }
+  }
+  // the two groups stand at least one size apart
+  if (cut < 0 || gap < 1) return null;
+  const lo = new Set(at.slice(0, cut + 1).map((e) => e.i));
+  const hi = new Set(at.slice(cut + 1).map((e) => e.i));
+  const L = (ids: Set<number>) => [...ids].reduce((t, i) => t + set.chains[i].lengthMm, 0);
+  const [a, b] = L(lo) >= L(hi) ? [lo, hi] : [hi, lo];
+  // lines too short to place stay with the larger part
+  return [row.chains.filter((i) => !b.has(i)), [...b]];
+}
+
+/** The two largest groups by length; the rest go with the larger. Null when < 2 groups. */
+function twoBiggest(set: ChainSet, groups: number[][], all: number[]): [number[], number[]] | null {
+  if (groups.length < 2) return null;
+  const len = (ids: number[]) => ids.reduce((a, i) => a + (set.chains[i]?.lengthMm ?? 0), 0);
+  const sorted = groups.slice().sort((a, b) => len(b) - len(a));
+  const away = new Set(sorted[1]);
+  return [all.filter((i) => !away.has(i)), sorted[1]];
 }
