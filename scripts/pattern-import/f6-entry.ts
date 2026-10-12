@@ -71,6 +71,7 @@ import {
   sameManifest,
 } from 'lib/pattern-import/gate/checks';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { readDxf, segmentDxf } from 'lib/pattern-import/adapters/dxf';
 import * as fx from 'components/managers/tech-card/components/pattern-import/fixture';
 
 const rules: CardBlockRules = blockCode;
@@ -943,6 +944,131 @@ export async function main(opts: { plans: string }): Promise<number> {
       refused = true;
     }
     ck(refused, 'mergeDxfSheets refuses R12 (expected — card path is R2000)');
+  }
+
+  // W1 ─────────────────────────────────────────────────────────────────────────────────────
+  head(
+    'W1 · one INSERT per block; × per garment only as the AAMA QUANTITY label (old files: N, not N×N)',
+  );
+  {
+    const fac: PieceSpec = { ...slSpec('FAC'), piecesPerGarment: 4 };
+    const specs = [...mainSpecs, fac];
+    const ppg = new Map(specs.map((p) => [p.identity, p.piecesPerGarment]));
+    ppg.set('FP_R', ppg.get('FP_L')!);
+    const cutCount = (pieces: { blockName?: string; layer?: string }[]) => {
+      const m = new Map<string, number>();
+      for (const p of pieces)
+        if (p.layer === '1' && p.blockName) m.set(p.blockName, (m.get(p.blockName) ?? 0) + 1);
+      return m;
+    };
+    /** The pre-W1 writer's ENTITIES: every block inserted × per garment (copy columns at x = k·5000). */
+    const oldStyle = (text: string, blockQty: (b: string) => number) => {
+      const P = pairsOf(text);
+      const out: Pair[] = [];
+      let inEnt = false;
+      let extra: Pair[] = [];
+      let h = 0xf0000;
+      for (let i = 0; i < P.length; i++) {
+        const [c, v] = P[i];
+        if (c.trim() === '2' && i > 0 && P[i - 1][0].trim() === '0' && P[i - 1][1] === 'SECTION')
+          inEnt = v === 'ENTITIES';
+        if (inEnt && c.trim() === '0' && v === 'INSERT') {
+          let j = i + 1;
+          while (j < P.length && P[j][0].trim() !== '0') j++;
+          const ins = P.slice(i, j);
+          const name = ins.find((q) => q[0].trim() === '2')![1];
+          for (let k = 1; k < blockQty(name); k++)
+            extra.push(
+              ...ins.map(
+                ([cc, vv]): Pair =>
+                  cc.trim() === '10'
+                    ? [cc, (k * 5000).toFixed(6)]
+                    : cc.trim() === '5'
+                      ? [cc, (h++).toString(16).toUpperCase()]
+                      : [cc, vv],
+              ),
+            );
+        }
+        if (inEnt && c.trim() === '0' && v === 'ENDSEC') {
+          out.push(...extra);
+          extra = [];
+          inEnt = false;
+        }
+        out.push([c, v]);
+      }
+      return textOf(out);
+    };
+    for (const dialect of ['r2000', 'r12'] as const) {
+      const w = keep(
+        `W1 ${dialect}`,
+        await writeAndGate(job(MAIN, specs, dialect), gateCtx(specs)),
+      );
+      ck(
+        w.report.passed,
+        `${dialect}: gate passes (G1 reads × per garment back)`,
+        summary(w.report),
+      );
+      const raw = readRawDxf(w.dxfText);
+      const blocks = w.detail.plan.blocks;
+      ck(
+        raw.inserts.length === blocks.length && new Set(raw.inserts).size === raw.inserts.length,
+        `${dialect}: exactly one INSERT per block`,
+        `${raw.inserts.length} inserts, ${blocks.length} blocks`,
+      );
+      const qtyOk = blocks.every((b) =>
+        (raw.blocks.get(b.name) ?? []).some(
+          (e) =>
+            e.type === 'TEXT' &&
+            new RegExp(`^quantity: ${ppg.get(b.identity)}$`, 'i').test(e.text ?? ''),
+        ),
+      );
+      ck(qtyOk, `${dialect}: every block labels its × per garment as QUANTITY`);
+      const rt = await roundTrip(w.dxfText);
+      const got = cutCount(rt.pieces);
+      const wrong = blocks.filter((b) => got.get(b.name) !== ppg.get(b.identity));
+      ck(
+        wrong.length === 0,
+        `${dialect}: the card reads × per garment per block (FAC ×4, SL ×2, PCK ×2, FP_L/FP_R ×${ppg.get('FP_L')}, BP ×${ppg.get('BP')})`,
+        wrong.map((b) => `${b.name} ${got.get(b.name)}≠${ppg.get(b.identity)}`).join(' '),
+      );
+      // an OLD file of ours: N inserts + QUANTITY N → N, never N×N
+      const old = oldStyle(w.dxfText, (n) => ppg.get(blocks.find((b) => b.name === n)!.identity)!);
+      const rtOld = await roundTrip(old);
+      const gotOld = cutCount(rtOld.pieces);
+      const wrongOld = blocks.filter((b) => gotOld.get(b.name) !== ppg.get(b.identity));
+      ck(
+        readRawDxf(old).inserts.length > blocks.length && wrongOld.length === 0,
+        `${dialect}: an old file (N inserts + QUANTITY N) still reads ×N on the card`,
+        wrongOld.map((b) => `${b.name} ${gotOld.get(b.name)}≠${ppg.get(b.identity)}`).join(' '),
+      );
+      // our own DXF reader (re-import): the cut count reaches semantics as drawn copies
+      for (const [label, t] of [
+        ['new', w.dxfText],
+        ['old', old],
+      ] as const) {
+        const bytes = new TextEncoder().encode(t);
+        const read = await readDxf(
+          { id: '0', name: `w1-${label}.dxf`, bytes: bytes.buffer.slice(0) as ArrayBuffer },
+          { sagittaMm: 0.05, keepFills: true },
+        );
+        const seg = segmentDxf(read);
+        const bad = seg.pieces.filter((p) => (p.instances ?? 1) !== ppg.get(p.identity));
+        ck(
+          seg.pieces.length === blocks.length && bad.length === 0,
+          `${dialect}: our DXF reader takes × per garment from a ${label} file (instances = ppg)`,
+          `${seg.pieces.length} pieces; ${bad.map((p) => `${p.block} ${p.instances ?? 1}`).join(' ')}`,
+        );
+      }
+    }
+    // control: a foreign file (no manifest, no AUTHOR: GRBPWR) is read as before — its labels are
+    // another CAD's statement, the inserts count
+    const bare = writeDxfDetailed(job(MAIN, specs, 'r2000'), { embed: null, now: NOW });
+    const rtBare = await roundTrip(bare.bareText);
+    const gotBare = cutCount(rtBare.pieces);
+    ck(
+      bare.plan.blocks.every((b) => gotBare.get(b.name) === 1),
+      'control: a foreign R2000 file (no manifest) — inserts count, labels not trusted (×1 each)',
+    );
   }
 
   // T6 ─────────────────────────────────────────────────────────────────────────────────────

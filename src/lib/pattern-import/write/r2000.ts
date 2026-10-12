@@ -43,34 +43,17 @@ export function labelLines(b: PlannedBlock): string[] {
   return lines;
 }
 
-/** Gap between the drawing and its next copy column (mm). */
-export const COPY_GAP_MM = 100;
-
 /**
- * F14 MAJOR 3 — ONE INSERT PER CUT PIECE. The card counts a piece by its INSERT instances: the
- * marker places every instance once per garment (piece-selection `unitsOfPieces`, × per garment is
- * never consulted), the piece-match modal recounts × per garment from them (`perGarmentFromBlocks`)
- * and the backend lay checks count placements against × per garment. So a contour cut `quantity`
- * times per garment ("cut 2" of a symmetric piece, 2 pairs) is inserted `quantity` times (F6b §4:
- * "a contour that is cut ×2 is drawn as two INSERTs"). Every block's first instance sits at the
- * origin, in the order of `blocks` (the gate reads that one); copy k ≥ 1 is shifted right by k
- * drawing widths + COPY_GAP_MM, so no copy overlaps any piece.
+ * W1 (ULMUS-DIAG §3, AAMA/ASTM D6673) — ONE INSERT PER BLOCK, at the origin, in the order of
+ * `blocks`. The cut quantity travels ONLY as the block's `QUANTITY:` text (and the manifest's
+ * `piecesPerGarment`): an AAMA importer multiplies every INSERT by its block's quantity, so the old
+ * "insert a block × per garment times" (F14 MAJOR 3) read as N×N pieces and drew copy columns
+ * across the sheet. The card and our own DXF reader take the count from the label for files we
+ * wrote (lib/nesting/dxf/transform.ts `labelCopies`, adapters/dxf/segment.ts `collapseCopies`), and
+ * keep reading old files (N inserts + `QUANTITY: N`) as N, never N×N.
  */
 export function insertsOf(blocks: readonly PlannedBlock[]): { name: string; x: number }[] {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  for (const b of blocks)
-    for (const p of [...b.cut, ...(b.seam ?? [])]) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-    }
-  const step = Number.isFinite(maxX - minX) ? maxX - minX + COPY_GAP_MM : COPY_GAP_MM;
-  const out = blocks.map((b) => ({ name: b.name, x: 0 }));
-  const most = Math.max(1, ...blocks.map((b) => Math.floor(b.quantity) || 1));
-  for (let k = 1; k < most; k++)
-    for (const b of blocks)
-      if ((Math.floor(b.quantity) || 1) > k) out.push({ name: b.name, x: k * step });
-  return out;
+  return blocks.map((b) => ({ name: b.name, x: 0 }));
 }
 
 export function labelAnchor(b: PlannedBlock): PtMm {
@@ -357,7 +340,7 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
   });
   E(0, 'ENDSEC');
 
-  // ENTITIES — one INSERT per cut piece (`insertsOf`), no scale/rotation/extrusion.
+  // ENTITIES — one INSERT per block (`insertsOf`), no scale/rotation/extrusion.
   E(0, 'SECTION');
   E(2, 'ENTITIES');
   for (const ins of insertsOf(blocks)) {

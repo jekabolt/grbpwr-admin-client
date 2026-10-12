@@ -1386,8 +1386,8 @@ export function segmentDxf(read: DxfRead): DxfSegmentation {
 }
 
 /**
- * F14 R5 — INSERT copies are one piece drawn n times, not n size candidates. Our writer inserts a
- * block once per cut piece (write/r2000 `insertsOf`), CLO and other CADs may do the same. Copies =
+ * F14 R5 — INSERT copies are one piece drawn n times, not n size candidates. Our writer inserted a
+ * block once per cut piece until W1 (now: once, with `QUANTITY: n`), CLO and other CADs may do so. Copies =
  * the same block, the same labels (an ATTRIB can make two INSERTs of one block different pieces)
  * and the same linear part of the INSERT transform — they differ by translation only, so their
  * geometry is identical. The first instance is kept (the writer puts it at the origin, where the
@@ -1421,6 +1421,18 @@ function collapseCopies(work: BlockWork[], read: DxfRead, warnings: string[]): B
     first.piece.instances = (first.piece.instances ?? 1) + 1;
     for (const id of groups[w.piece.group].paths) first.piece.roles[id] = 'qv-copy';
   }
+  // W1: our converter writes ONE insert per block and the cut count only as the AAMA `QUANTITY:`
+  // label (an old file of ours: N inserts + `QUANTITY: N`). For a file we wrote, the label is that
+  // count — max(inserts, label), never their product. Foreign labels keep their meaning for
+  // semantics (`labels.quantity` → planPair: "cut 2" of an asymmetric piece may be a pair).
+  const ours =
+    read.meta.dialect === 'grbpwr' ||
+    read.meta.modelLabels.some((l) => l.key === 'author' && /^\s*grbpwr\b/i.test(l.value));
+  if (ours)
+    for (const k of kept) {
+      const q = k.piece.labels.quantity;
+      if (q != null && q >= 2 && q > (k.piece.instances ?? 1)) k.piece.instances = q;
+    }
   for (const k of kept) {
     const n = k.piece.instances;
     const q = k.piece.labels.quantity;

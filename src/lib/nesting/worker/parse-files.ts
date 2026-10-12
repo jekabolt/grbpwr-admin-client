@@ -12,6 +12,9 @@ export function parseFiles(
   buf: ArrayBuffer,
   opts: ParseOpts,
   warnings: string[],
+  // The file carries our converter's manifest: its AAMA `QUANTITY:` labels are the cut count
+  // (dxf/transform.ts `labelCopies`, W1).
+  converter = false,
 ): {
   raws: RawPiece[];
   unit: Exclude<Unit, 'auto'>;
@@ -33,6 +36,7 @@ export function parseFiles(
     parsed.cmPerUnit,
     opts.tol,
     warnings,
+    { converter },
   );
   const raws: RawPiece[] = [];
   for (const g of groups) {
@@ -270,7 +274,7 @@ export async function parseSheets(
         unitGuessed,
         skippedBlocks: skipped,
         blockNames: seen,
-      } = parseFiles(buf, opts, warnings);
+      } = parseFiles(buf, opts, warnings, manifest != null);
       const named = manifest
         ? manifestFactsByBlock(
             manifest,

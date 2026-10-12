@@ -171,11 +171,20 @@ export function g1(ctx: GateCtx): GateCheck {
   if (missing.length) notes.push(`not in file: ${missing.join(', ')}`);
   if (extra.length) notes.push(`not in manifest: ${extra.join(', ')}`);
   failed.push(...missing, ...extra);
+  const ppgOf = new Map(ctx.m.pieces.map((p) => [ci(p.identity), p.piecesPerGarment]));
   for (const { block, mb } of ctx.blocks) {
     const layers = ctx.contours.get(block);
     if (!layers?.has(LAYERS.cut)) {
       failed.push(block);
       notes.push(`${block}: no closed contour on layer 1`);
+    }
+    // W1: the card counts a piece by its cut-layer contours (one per instance). One INSERT per block
+    // + the AAMA `QUANTITY:` label must read back as exactly × per garment — not 1, not N×N.
+    const ppg = Math.max(1, Math.floor(ppgOf.get(ci(mb.identity)) ?? 1));
+    const read = (ctx.rtByBlock.get(block) ?? []).filter((p) => p.layer === LAYERS.cut).length;
+    if (layers?.has(LAYERS.cut) && read !== ppg) {
+      failed.push(block);
+      notes.push(`${block}: the card reads ×${read}, the piece is cut ×${ppg} per garment`);
     }
     // K1 obligation 13: layers 14 and 1 always as a pair (no seam = the card adds allowance again).
     if (!mb.hasSeam) {
