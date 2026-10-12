@@ -929,29 +929,7 @@ function sizesStep(c: Ctx): Out | null {
           ),
         ],
       };
-    const asked = pending
-      .filter((k) => (lcv.asked ?? []).includes(legendKeyOf(k)))
-      .map(legendKeyOf);
-    if (asked.length)
-      return {
-        patch: { legendConfirmed: [...i.legendConfirmed, ...asked] },
-        as: [
-          R(
-            c,
-            lc,
-            'legend-row',
-            `${asked.length} rows confirmed as read`,
-            [sameFiles(c), 'the same rows (signature)'],
-            { ref: 'legend-asked' },
-          ),
-        ],
-      };
   }
-  for (const k of pending)
-    c.miss(
-      `legend-row|${legendKeyOf(k)}`,
-      `legend row ${k.role}${k.sizeLabel ? ` ${k.sizeLabel}` : ''} was not confirmed last time`,
-    );
   // 3 · how many sizes the sheet draws
   const de = c.get('drawn-sizes');
   if (de) {
@@ -1026,6 +1004,32 @@ function sizesStep(c: Ctx): Out | null {
         ),
       };
   }
+  // 2b · rows only asked (an inputs-only answer, last: it leaves the stage outputs as they were,
+  //      and the drive must not take the same question over the same outputs for a loop)
+  if (pending.length && lc) {
+    const asked = pending
+      .filter((k) => (lcv.asked ?? []).includes(legendKeyOf(k)))
+      .map(legendKeyOf);
+    if (asked.length)
+      return {
+        patch: { legendConfirmed: [...i.legendConfirmed, ...asked] },
+        as: [
+          R(
+            c,
+            lc,
+            'legend-row',
+            `${asked.length} rows confirmed as read`,
+            [sameFiles(c), 'the same rows (signature)'],
+            { ref: 'legend-asked' },
+          ),
+        ],
+      };
+  }
+  for (const k of pending)
+    c.miss(
+      `legend-row|${legendKeyOf(k)}`,
+      `legend row ${k.role}${k.sizeLabel ? ` ${k.sizeLabel}` : ''} was not confirmed last time`,
+    );
   // 5 · the reader's flags, gone on past as before
   if (!c.question) return null;
   const flags = sizeFlags(s.chains.ambiguities, s.sizes.expected?.n);

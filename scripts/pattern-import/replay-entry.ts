@@ -480,16 +480,30 @@ export async function runCase(c: Case) {
     if (r.kept === false)
       failures.push(`${mode}: the replay overwrote the operator's later answer`);
   }
-  // 3 · a mutated file: another sha256, nothing replayed
-  const mutated = files.map((f, k) =>
-    k === 0
-      ? { ...f, bytes: concat(f.bytes, c.files[0]?.endsWith('.pdf') ? '\n%replay\n' : '\n') }
-      : f,
-  );
+  // 3 · mutated files (every file one byte longer): another sha256, nothing replayed
+  const mutated = files.map((f, k) => ({
+    ...f,
+    bytes: concat(f.bytes, c.files[k]?.endsWith('.pdf') ? '\n%replay\n' : '\n'),
+  }));
   const mu = await runImport(c, card2, 'manual', mutated);
   out.mutated = { prior: mu.prior, answered: mu.answered, replayed: mu.replayed };
   if (mu.prior || mu.answered || mu.replayed)
     failures.push(`mutated: replayed (${mu.answered} answers)`);
+  // 3b · one of several files changed: a partial match — only the unchanged files' pages answers
+  if (files.length > 1) {
+    const one = files.map((f, k) =>
+      k === 0
+        ? { ...f, bytes: concat(f.bytes, c.files[0]?.endsWith('.pdf') ? '\n%replay\n' : '\n') }
+        : f,
+    );
+    const pa = await runImport(c, card2, 'manual', one);
+    const beyond = pa.list.filter(
+      (l) => l.startsWith('R') && !/clean-accept|pages-as-read/.test(l),
+    );
+    out.partial = { prior: pa.prior, answered: pa.answered, beyond: beyond.slice(0, 4) };
+    if (!pa.prior || pa.prior.exact) failures.push('partial: no partial previous import found');
+    if (beyond.length) failures.push(`partial: replayed beyond the pages (${beyond[0]})`);
+  }
   // 4 · a moved piece: a piece whose count was confirmed reads 50 mm elsewhere in the record
   // a piece with an answer to a question: a confirmed count, else a grainline, else a confirmed name
   const answered = (f: string) =>
