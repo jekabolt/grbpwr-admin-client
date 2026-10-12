@@ -132,6 +132,9 @@ export function furniture(
     }
     if (centres.length >= 3) for (const i of a) out[i] = 'tile frame';
   }
+  // the furniture known before the repetition rule (the overlay test below must not depend on the
+  // order the length buckets are visited in)
+  const pre = out.slice();
   // straight rules of one length: tile frames and cut marks repeat per PAGE, far apart; a ladder of
   // equal-length lines 1–3 mm apart is a graded edge (r4454's pocket sides: every size 208 mm long,
   // graded only in width) — a member with a twin ≤ 15 mm across it is line work
@@ -152,9 +155,43 @@ export function furniture(
         return Math.abs(q.v - p.v) <= 15 && Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) > 0;
       });
     });
-    if (lone.length >= 3) for (const i of lone) out[i] = 'tile frame / cut mark';
+    if (lone.length < 3) continue;
+    // R9 (MOOD-F4): the repetition is counted on every lone member, but a member drawn by a garment
+    // pen with a per-size overlay — another garment-pen line of ANY length running alongside it
+    // ≤ 15 mm across for half its length (Marostica's band: each size draws the same side, 386,
+    // 399, 428, 454 mm) — is a graded edge, never furniture. Real frames keep the label.
+    for (const i of lone)
+      if (!(curvedPens.has(pen(styles.get(chains[i].style))) && overlaid(i, at(i), ax)))
+        out[i] = 'tile frame / cut mark';
   }
   return out;
+
+  /** Another line-work chain of a garment pen runs along `i` (same axis, ≤ 15 mm across) over at
+   * least half of `i`'s length. */
+  function overlaid(i: number, p: { v: number; lo: number; hi: number }, ax: 'x' | 'y'): boolean {
+    const need = 0.5 * (p.hi - p.lo);
+    const tan = Math.tan((2 * Math.PI) / 180);
+    for (let j = 0; j < chains.length; j++) {
+      if (j === i || pre[j] !== null) continue;
+      const c = chains[j];
+      if (c.lengthMm < need || !curvedPens.has(pen(styles.get(c.style)))) continue;
+      const bb = bboxOf(c.pts);
+      const [vLo, vHi] = ax === 'x' ? [bb.minY, bb.maxY] : [bb.minX, bb.maxX];
+      const [uLo, uHi] = ax === 'x' ? [bb.minX, bb.maxX] : [bb.minY, bb.maxY];
+      if (vLo > p.v + 15 || vHi < p.v - 15 || uLo > p.hi || uHi < p.lo) continue;
+      let cover = 0;
+      for (let s = 0; s + 1 < c.pts.length; s++) {
+        const a0 = c.pts[s];
+        const a1 = c.pts[s + 1];
+        const [u0, v0, u1, v1] = ax === 'x' ? [a0.x, a0.y, a1.x, a1.y] : [a0.y, a0.x, a1.y, a1.x];
+        if (Math.abs(v1 - v0) > Math.abs(u1 - u0) * tan) continue;
+        if (Math.abs(v0 - p.v) > 15 || Math.abs(v1 - p.v) > 15) continue;
+        cover += Math.max(0, Math.min(p.hi, Math.max(u0, u1)) - Math.max(p.lo, Math.min(u0, u1)));
+      }
+      if (cover >= need) return true;
+    }
+    return false;
+  }
 }
 
 /** A glyph cluster: polylines that touch (an end within `touchMm` of another's segment). */
