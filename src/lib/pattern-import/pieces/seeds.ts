@@ -336,11 +336,16 @@ export function codeTextSeeds(
         grew = true;
       }
     }
-    // its own parts (a joined "015" = "0" + "1" + "5", or the text itself) lie inside its box
+    // digits BESIDE it, not its own: its parts (a joined "015" = "0" + "1" + "5") and copies of
+    // it (an OCG per size prints the label again, at or near its spot) overlap its box, and a
+    // copy of its text is never its string, wherever it sits
+    const label = t.text.trim();
     const outside = [...run].filter(
       (x) =>
         x.d.id !== t.id &&
-        (o.off?.has('parts') || x.s[1] > own[1] + 0.25 * fs || x.s[0] < own[0] - 0.25 * fs),
+        (o.off?.has('parts') ||
+          ((x.s[0] >= own[1] - 0.25 * fs || x.s[1] <= own[0] + 0.25 * fs) &&
+            x.d.text.trim() !== label)),
     );
     const reads = [...run]
       .sort((p, q) => p.s[0] - q.s[0])

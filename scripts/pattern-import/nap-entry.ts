@@ -141,6 +141,14 @@ function rule() {
       '1 parts · a number over its own copy ("15"+"15" in one box): not held',
       held(all, [...L, a]).size === 0,
     );
+    // the copy shifted along the line, partly over it and wholly beside it ("15 15" reads 1515)
+    for (const dx of [0.3 * 11.1, 0.6 * 11.1 * 2 + 0.3 * 11.1]) {
+      const c2 = txt('15', 600 + dx, 900, 11.1);
+      check(
+        `1 parts · its copy shifted ${dx.toFixed(1)} mm along the line: not held`,
+        held([...L, a, c2], [...L, a]).size === 0,
+      );
+    }
     check(
       '1 parts · …mutation (its own box counts as the string): it is held → the guard is real',
       held(all, [...L, a], new Set(['parts'])).has('15'),
