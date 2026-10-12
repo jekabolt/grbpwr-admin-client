@@ -115,10 +115,14 @@ const summary = {
   lineageApplied: cases.filter((r) => r.lineage?.applied?.ok && !r.lineage.created?.length).length,
   lineageGated: cases.filter((r) => /^the gate blocks/.test(r.lineage?.applied?.reason ?? ''))
     .length,
-  movedNamedReached: cases.filter((r) => r.movedNamed?.reached && r.movedNamed.generated).length,
+  movedNamedReached: cases.filter(
+    (r) => r.movedNamed?.reached && !/^the gate blocks/.test(r.movedNamed.applied?.reason ?? ''),
+  ).length,
   movedNamedOwnName: cases.filter((r) => r.movedNamed?.reached && !r.movedNamed.generated).length,
   movedNamedRefused: cases.filter(
-    (r) => r.movedNamed?.reached && /generated code/.test(r.movedNamed.applied?.reason ?? ''),
+    (r) =>
+      r.movedNamed?.reached &&
+      /generated code|no longer drawn/.test(r.movedNamed.applied?.reason ?? ''),
   ).length,
 };
 console.log(
@@ -131,7 +135,7 @@ console.log(
   `mutated file: replayed ${summary.mutatedReplayed} · moved piece: asked again ${summary.movedAsked}/${summary.movedCases}`,
 );
 console.log(
-  `card lineage: honest re-import applied with no new card piece ${summary.lineageApplied}/${summary.lineageCases} (gate blocks the apply: ${summary.lineageGated}) · moved autopilot-named piece re-coded → refused ${summary.movedNamedRefused}/${summary.movedNamedReached} (reached check; ${summary.movedNamedOwnName} read their own file name back instead)`,
+  `card lineage: honest re-import applied with no new card piece ${summary.lineageApplied}/${summary.lineageCases} (gate blocks the apply: ${summary.lineageGated}) · moved autopilot-named piece refused ${summary.movedNamedRefused}/${summary.movedNamedReached} (reached check, gate green; ${summary.movedNamedOwnName} read their own file name back)`,
 );
 if (summary.failed.length) console.log(`✗ failed: ${summary.failed.join(' | ')}`);
 if (summary.crashed.length) console.log(`✗ crashed: ${summary.crashed.join(', ')}`);

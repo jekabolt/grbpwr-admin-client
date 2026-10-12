@@ -395,9 +395,19 @@ export async function main(): Promise<number> {
       'a generated new piece beside a card piece the previous import no longer draws is listed',
       v,
     );
+    // a NEW piece named by the file itself (no autopilot code) beside the vanished «P04» is the
+    // same doubt (kombinezon-A: a moved piece read «FP» back while «P01» lost its drawing)
+    const fileNamed = generatedReuse(gone, sem, [gen(1, 'P01')]).filter(
+      (x) => x.kind === 'beside-vanished',
+    );
     ck(
-      !generatedReuse(gone, sem, [gen(1, 'P01')]).some((x) => x.kind === 'beside-vanished'),
-      'a new piece named by the file (not generated) beside a vanished link is not listed',
+      fileNamed.length === 1 && fileNamed[0].identity === 'P03' && fileNamed[0].existing === 'P04',
+      'a new piece named by the FILE beside a card piece the previous import no longer draws is listed too',
+      fileNamed,
+    );
+    ck(
+      !generatedReuse(gone, sem, []).some((x) => x.kind === 'reuse'),
+      'without an autopilot code nothing is listed as a reuse (a file name may reuse its card piece)',
     );
     // Codex AP-tail #1: the previous import of THESE files drew «P02» in another scope that this
     // draft does not write at all — a generated new piece may be it, moved to another fabric

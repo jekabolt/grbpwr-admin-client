@@ -37,33 +37,38 @@ export type ApplyOutcome =
   | { ok: false; reason: string; step: 'check' | 'apply' };
 
 /**
- * What a code the autopilot GENERATED in this run (P01 … in reading order, `name-code`, not
- * replayed) would do to the card without proof. A generated code says nothing about which piece it
- * is: a re-import where an unnamed piece moved or was added shifts the codes, so
- *   · 'reuse' — P01 would silently UPDATE a card piece (by name or block link) that is another piece;
- *   · 'beside-vanished' — P12 would ADD a new card piece while a previous import's card piece is
- *     no longer drawn («P13», in any scope — or its scope not written at all): the same piece under
- *     a shifted code would be cut twice.
+ * What the autopilot's apply would do to the card without proof:
+ *   · 'reuse' — a code the autopilot GENERATED in this run (P01 … in reading order, `name-code`, not
+ *     replayed) would UPDATE a card piece (by name or block link). A generated code says nothing
+ *     about which piece it is: on a re-import where an unnamed piece moved or was added the codes
+ *     shift, and P01 would silently rewrite another piece.
+ *   · 'beside-vanished' — ANY new card piece (a generated code or a name from the file) while a card
+ *     piece a previous import of THESE files drew (same sha256 or file name, any scope) is no longer
+ *     drawn: «FP» added beside «P01» may be the same piece under another name — cut twice.
  * Only lineage proves a reuse — AP-replay matched the piece by its outline to the import that wrote
- * that card piece; the name is then the replay's (isReplayed) and never listed here. A name from
- * the file itself, or one the operator typed over, is not listed either.
+ * that card piece; the name is then the replay's (isReplayed) and never listed here; an honest
+ * unchanged re-import draws every piece it drew before, so nothing is gone and nothing is new.
  */
 export type GeneratedRisk = {
   kind: 'reuse' | 'beside-vanished';
+  /** The piece of this import (its identity / card name). */
   identity: string;
   /** The card piece: the one reused, or the one the previous import drew and this one does not. */
   existing: string;
-  seed: SeedId;
+  seed?: SeedId;
 };
 
 export function generatedReuse(
   draft: Pick<CardDraft, 'scopes' | 'pieces' | 'aliases'> | null | undefined,
   sem: Pick<NonNullable<ImportSession['semantics']>, 'pieces'> | null | undefined,
   autopilot: readonly Assumption[],
-  /** The card as read: a previous import's links in a scope this draft does not write (below). */
+  /** The card as read (its previous imports' sheets, links and pieces). */
   card?: Pick<CardContext, 'existingPatterns' | 'existingAliases' | 'existingPieces'> | null,
 ): GeneratedRisk[] {
   if (!draft || !sem) return [];
+  const out = new Map<string, GeneratedRisk>();
+
+  // ── reuse: a generated code bound to an existing card piece ──
   // seed → the code the autopilot generated for it (the latest answer about the seed's name)
   const gen = new Map<SeedId, string>();
   for (const a of autopilot) {
@@ -77,7 +82,6 @@ export function generatedReuse(
       gen.set(a.seed, code.split('_')[0].toUpperCase());
     } else gen.delete(a.seed);
   }
-  if (!gen.size) return [];
   // the identities written under a generated code (the name still the generated one)
   const ids = new Map<string, SeedId>();
   for (const p of sem.pieces) {
@@ -87,7 +91,6 @@ export function generatedReuse(
       ids.set(liningIdentity(p.identity).toUpperCase(), p.seed);
     }
   }
-  if (!ids.size) return [];
   // their blocks as the draft binds them (scope + block, the card's alias key)
   const blocks = new Map<string, { identity: string; seed: SeedId }>();
   for (const sc of draft.scopes) {
@@ -102,54 +105,71 @@ export function generatedReuse(
     }
   }
   const byKey = new Map(draft.pieces.map((p) => [p.lineKey, p] as const));
-  // every card piece a previous import drew and this one no longer does, in ANY scope (Codex
-  // AP-tail #1: a piece can move to another fabric scope under a shifted code) — the draft's
-  // `vanished`, plus the links of a sheet imported from these files in a scope this draft does not
-  // write at all
-  const gone: { pieceLineKey: string; pieceName: string }[] = draft.scopes.flatMap(
-    (sc) => sc.vanished ?? [],
-  );
-  const written = new Set(draft.scopes.map((sc) => sc.target.scopeKey));
-  const nameOf = new Map((card?.existingPieces ?? []).map((p) => [p.lineKey, p.name] as const));
+  for (const a of draft.aliases) {
+    const hit = blocks.get(aliasKey(a.scopeKey, a.blockName));
+    const piece = byKey.get(a.pieceLineKey);
+    if (hit && piece?.existingLineKey)
+      out.set(`reuse|${hit.identity}|${piece.existingLineKey}`, {
+        kind: 'reuse',
+        ...hit,
+        existing: piece.name,
+      });
+  }
+
+  // ── beside-vanished: a new card piece while a piece of the previous import is not drawn ──
   // (only a sheet made from one of THIS import's source files — by sha256, or by file name: a
   // file edited since, a piece moved, has another sha256 but is still the same source; another
-  // import's sheet is not ours)
+  // import's sheet is not ours). Any scope: a piece can move to another fabric under a new name.
   const own = draft.scopes.flatMap((sc) => sc.manifest.source?.files ?? []);
   const shas = new Set(own.map((f) => f.sha256).filter(Boolean));
   const fileNames = new Set(own.map((f) => f.name.trim().toLowerCase()).filter(Boolean));
   const ours = (f: { sha256?: string; name?: string }) =>
     (!!f.sha256 && shas.has(f.sha256)) || (!!f.name && fileNames.has(f.name.trim().toLowerCase()));
+  // what this import draws, per scope (the card's alias keys)
+  const drawnNow = new Set(
+    draft.scopes.flatMap((sc) =>
+      [...aliasNames(sc.manifest).values()].map((b) => aliasKey(sc.target.scopeKey, b)),
+    ),
+  );
+  // a card piece this draft still binds (reused through another block or its name) is not gone
+  const kept = new Set(draft.pieces.flatMap((p) => (p.existingLineKey ? [p.existingLineKey] : [])));
+  const nameOf = new Map((card?.existingPieces ?? []).map((p) => [p.lineKey, p.name] as const));
+  const gone = new Map<string, string>();
+  const note = (lineKey: string, name: string) => {
+    if (!kept.has(lineKey)) gone.set(lineKey, name);
+  };
+  // the draft's own reading (its replace target), then every sheet of these files on the card
+  for (const sc of draft.scopes)
+    for (const v of sc.vanished ?? []) note(v.pieceLineKey, v.pieceName);
   for (const row of card?.existingPatterns ?? []) {
-    if (!row.manifest || written.has(row.scopeKey)) continue;
-    if (!(row.manifest.source?.files ?? []).some(ours)) continue;
-    const drawn = new Set(
+    if (!row.manifest || !(row.manifest.source?.files ?? []).some(ours)) continue;
+    const drawnThen = new Set(
       [...aliasNames(row.manifest).values()].map((b) => aliasKey(row.scopeKey, b)),
     );
-    for (const a of card?.existingAliases ?? [])
-      if (a.scopeKey === row.scopeKey && drawn.has(aliasKey(a.scopeKey, a.blockName)))
-        gone.push({
-          pieceLineKey: a.pieceLineKey,
-          pieceName: nameOf.get(a.pieceLineKey) ?? a.pieceLineKey,
-        });
+    for (const a of card?.existingAliases ?? []) {
+      const k = aliasKey(a.scopeKey, a.blockName);
+      if (a.scopeKey === row.scopeKey && drawnThen.has(k) && !drawnNow.has(k))
+        note(a.pieceLineKey, nameOf.get(a.pieceLineKey) ?? a.pieceLineKey);
+    }
   }
-  const out = new Map<string, GeneratedRisk>();
-  for (const a of draft.aliases) {
-    const hit = blocks.get(aliasKey(a.scopeKey, a.blockName));
-    const piece = byKey.get(a.pieceLineKey);
-    if (!hit || !piece) continue;
-    if (piece.existingLineKey)
-      out.set(`${hit.identity}|${piece.existingLineKey}`, {
-        kind: 'reuse',
-        ...hit,
-        existing: piece.name,
-      });
-    else
-      for (const v of gone)
-        out.set(`${hit.identity}|${v.pieceLineKey}`, {
+  if (gone.size) {
+    const seedOf = new Map<string, SeedId>();
+    for (const p of sem.pieces) {
+      seedOf.set(p.identity.toUpperCase(), p.seed);
+      seedOf.set(liningIdentity(p.identity).toUpperCase(), p.seed);
+    }
+    for (const piece of draft.pieces) {
+      if (piece.existingLineKey) continue;
+      const block = draft.aliases.find((a) => a.pieceLineKey === piece.lineKey)?.blockName;
+      const seed = block != null ? seedOf.get(block.toUpperCase()) : undefined;
+      for (const [lineKey, name] of gone)
+        out.set(`new|${piece.lineKey}|${lineKey}`, {
           kind: 'beside-vanished',
-          ...hit,
-          existing: v.pieceName,
+          identity: piece.name,
+          existing: name,
+          ...(seed != null ? { seed } : {}),
         });
+    }
   }
   return [...out.values()];
 }
@@ -177,7 +197,8 @@ export async function autopilotApply(
       return { ok: false, step: 'check', reason: get().session.error ?? 'did not reach apply' };
     return { ok: true, downloadOnly: true };
   }
-  // a generated code never updates a card piece on its own: only lineage (AP-replay) proves it
+  // a card piece is never updated through a generated code, nor a new one added beside a piece
+  // the previous import drew and this one does not, without proof: only lineage (AP-replay)
   const reuse = generatedReuse(
     get().session.draft,
     get().session.semantics,
@@ -193,11 +214,11 @@ export async function autopilotApply(
         .map((r) =>
           r.kind === 'reuse'
             ? `generated code ${r.identity} would update the card's existing piece «${r.existing}»`
-            : `generated code ${r.identity} would add a new card piece while «${r.existing}» of the previous import is no longer drawn`,
+            : `a new card piece «${r.identity}» would be added while «${r.existing}» of the previous import of these files is no longer drawn`,
         )
         .join(
           '; ',
-        )}${reuse.length > 3 ? ` (+${reuse.length - 3} more)` : ''} — nothing ties a generated code to a card piece: confirm on the apply step`,
+        )}${reuse.length > 3 ? ` (+${reuse.length - 3} more)` : ''} — nothing proves which card piece is which: confirm on the apply step`,
     };
   // the lock first (synchronous): an apply already running or done for this draft refuses this one
   const token = get().lockApply();

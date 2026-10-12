@@ -24,8 +24,8 @@
 //         b · a piece the autopilot NAMED on #1 (P01 …) moved: its name does not replay, the code
 //             the autopilot gives it again matches a card piece nothing ties it to → the autopilot
 //             refuses the apply with the reason (never a silent update of that card piece). When
-//             the piece reads a name of its own from the file instead, it is listed, not failed
-//             (the generated-code rule does not cover it).
+//             the piece reads a name of its own from the file instead (kombinezon-A: «FP»), the
+//             new card piece beside the card's piece that is no longer drawn («P01») is refused too.
 //   node scripts/pattern-import/replay.mjs [case…]   (yarn patimport:replay)
 import { readManifest } from 'lib/pattern-import/manifest';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -634,21 +634,28 @@ export async function runCase(c: Case) {
           .flatMap((sc) => sc.vanished ?? [])
           .map((v) => v.pieceName),
       };
-      // the property is about GENERATED codes: when the moved piece reads a name of its own from
-      // the file again (no autopilot code), the guard is not concerned — listed, not failed
+      // the moved piece is not proven the card's piece any more, whatever it is named now — a code
+      // the autopilot gives it again (P05 over the card's P05) or its own name read back from the
+      // file («FP» beside the card's «P01», which loses its drawing): never applied on its own
       const generated = m.list.some((l) => /^A.name-code/.test(l));
       (out.movedNamed as Record<string, unknown>).generated = generated;
-      if (generated && m.reached && m.applied?.ok)
+      const why = m.applied?.reason ?? '';
+      if (m.reached && m.applied?.ok)
         failures.push(
-          `moved named piece: applied — a generated code reached the card without lineage`,
+          `moved named piece: applied — ${generated ? 'a generated code' : 'its own file name'} reached the card without lineage`,
         );
-      else if (
-        generated &&
+      else if (m.reached && !gated(m.applied) && !/generated code|no longer drawn/.test(why))
+        failures.push(`moved named piece: refused for another reason (${why})`);
+      // kombinezon-A (failing before AP-tail 3): the moved P01 reads «FP» back — a new card piece
+      // «FP» beside the card's «P01» that is no longer drawn: refused, both pieces named
+      if (
+        c.id === 'kombinezon-A' &&
         m.reached &&
-        !gated(m.applied) &&
-        !/generated code/.test(m.applied?.reason ?? '')
+        !/«FP».*no longer drawn|«P01».*no longer/.test(why)
       )
-        failures.push(`moved named piece: refused for another reason (${m.applied?.reason})`);
+        failures.push(
+          `kombinezon-A moved piece: not refused as «FP» beside «P01» (${why || 'applied'})`,
+        );
     } else out.movedNamed = null;
   }
   return {
