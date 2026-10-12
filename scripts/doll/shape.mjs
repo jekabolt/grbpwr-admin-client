@@ -194,17 +194,25 @@ const fail = (id, msg) => {
   console.log(`FAIL ${id}: ${msg}`);
 };
 for (const r of results) {
-  if (r.skipped || !r.garment) continue;
-  const past = (x) => (x.pastEdge.length ? Math.max(...x.pastEdge.map((p) => p.pct)) : 0);
   const b = base.get(String(r.id));
+  // Missing evidence fails, never passes: a card the base solved as a garment must still be one.
+  if (r.skipped || !r.garment) {
+    if (b && b.garment && !b.skipped) fail(r.id, `no garment solved (was a garment in ${BASE})`);
+    continue;
+  }
+  const past = (x) => (x.pastEdge.length ? Math.max(...x.pastEdge.map((p) => p.pct)) : 0);
   if (r.ms > 2000) fail(r.id, `solve ${(r.ms / 1000).toFixed(1)} s > 2 s`);
+  if (!r.band && (b?.band || r.legs))
+    fail(r.id, `no waistband seam read${b?.band ? ` (${BASE} had one)` : ' on trousers'}`);
   if (r.band) {
-    if (!(r.band.gapP95Mm <= 4 || r.band.easePct <= 5))
+    const openBand = r.band.state === 'open' || r.band.state === 'twisted';
+    if (openBand || r.band.gapP95Mm > 4 || r.band.easePct > 5)
       fail(
         r.id,
-        `band gap p95 ${r.band.gapP95Mm} mm and ease ${r.band.easePct} % (closed ≤ 4 mm or eased ≤ 5 %)`,
+        `band ${r.band.state} · gap p95 ${r.band.gapP95Mm} mm · ease ${r.band.easePct} % (not open, gap ≤ 4 mm, ease ≤ 5 %)`,
       );
-    if (r.ring && r.ring.diffPct !== null && Math.abs(r.ring.diffPct) > 5)
+    if (!r.ring || r.ring.diffPct === null) fail(r.id, 'no waist ring measured');
+    else if (Math.abs(r.ring.diffPct) > 5)
       fail(
         r.id,
         `waist ring ${r.ring.ringMm} vs band ${r.ring.bandMm} mm: ${r.ring.diffPct} % (≤ 5 %)`,
@@ -212,10 +220,12 @@ for (const r of results) {
     if (r.creases.waistPct >= 10) fail(r.id, `waist creases ${r.creases.waistPct} % (< 10 %)`);
     if (r.crumple.waistPct >= 10) fail(r.id, `waist crumple ${r.crumple.waistPct} % (< 10 %)`);
     if (past(r) > 15) fail(r.id, `a surface piece ${past(r)} % past its host edge (≤ 15 %)`);
-    if (r.legs && r.widensSeatToHem === false)
+    if (r.legs && r.widensSeatToHem !== true)
       fail(
         r.id,
-        `the silhouette does not widen seat → hem (${r.widths.seat} → ${r.widths.hem} mm)`,
+        r.widensSeatToHem === null
+          ? 'no seat / hem levels read on trousers'
+          : `the silhouette does not widen seat → hem (${r.widths.seat} → ${r.widths.hem} mm)`,
       );
   } else if (b) {
     if (r.creases.waistPct > b.creases.waistPct + 1)
@@ -227,11 +237,28 @@ for (const r of results) {
         fail(r.id, `width at ${k} ${b.widths?.[k]} → ${r.widths[k]} mm (differs from ${BASE})`);
     if (past(r) > past(b)) fail(r.id, `past edge ${past(b)} → ${past(r)} % (worse than ${BASE})`);
   }
-  if (b && (r.seams.open > b.seams.open || r.seams.floating > b.seams.floating))
-    fail(
-      r.id,
-      `${r.seams.open} open · ${r.seams.floating} floating (was ${b.seams.open} · ${b.seams.floating})`,
-    );
+  // No NEW open seam, floating piece or contradiction: by id against the base, not by count
+  // (a base written before the ids were kept: by count).
+  if (b && !b.openIds) {
+    if (r.seams.open > b.seams.open || r.seams.floating > b.seams.floating)
+      fail(
+        r.id,
+        `${r.seams.open} open · ${r.seams.floating} floating (was ${b.seams.open} · ${b.seams.floating})`,
+      );
+  } else if (b) {
+    const fresh = (now, was, what) => {
+      const old = new Set(was ?? []);
+      const n = (now ?? []).filter((x) => !old.has(x));
+      if (n.length)
+        fail(
+          r.id,
+          `new ${what}: ${n.slice(0, 3).join(' · ')}${n.length > 3 ? ` (+${n.length - 3})` : ''}`,
+        );
+    };
+    fresh(r.openIds, b.openIds, 'open seams');
+    fresh(r.floatingIds, b.floatingIds, 'floating pieces');
+    fresh(r.contradictions, b.contradictions, 'contradictions');
+  }
 }
 console.log(fails ? `${fails} FAIL` : 'shape gate: all green');
 if (fails) process.exit(1);

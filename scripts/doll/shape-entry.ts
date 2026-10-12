@@ -74,6 +74,10 @@ type Shape = {
   ms: number;
   converged: boolean;
   seams: { closed: number; stretched: number; proposed: number; open: number; floating: number };
+  /** Ids of the seams drawn open / twisted, of the floating pieces, and the contradictions. */
+  openIds: string[];
+  floatingIds: string[];
+  contradictions: string[];
   /** The waistband ↔ waist seam, when the garment has one. */
   band: {
     id: string;
@@ -130,6 +134,12 @@ const empty = (): Shape => ({
   ms: report.stats.ms,
   converged: report.stats.converged,
   seams: { closed: 0, stretched: 0, proposed: 0, open: 0, floating: report.floating.length },
+  openIds: report.seams
+    .filter((x) => x.origin !== 'layer' && (x.state === 'open' || x.state === 'twisted'))
+    .map((x) => x.id)
+    .sort(),
+  floatingIds: report.floating.map((x) => x.pieceKey).sort(),
+  contradictions: [...(report.contradictions ?? [])].sort(),
   band: null,
   ring: null,
   crumple: { waistPct: 0, worst: null, perPiece: {} },
