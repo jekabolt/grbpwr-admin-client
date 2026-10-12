@@ -8,7 +8,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { setPdfjsLoader, type PdfjsModule } from 'lib/pattern-import/adapters/pdf';
+import {
+  DEFAULT_EXTRACT_OPTS,
+  extractPdf,
+  setPdfjsLoader,
+  type PdfjsModule,
+} from 'lib/pattern-import/adapters/pdf';
 import {
   extractRasterImageDetailed,
   setRasterPdfjsLoader,
@@ -291,6 +296,12 @@ export async function main(): Promise<number> {
     console.log(`\n${rows.length - failed}/${rows.length} PASS`);
     return failed ? 1 : 0;
   }
+  if (process.env.PI_R10_ONLY) {
+    await pathSemanticsCase();
+    const failed = rows.filter((r) => !r.ok).length;
+    console.log(`\n${rows.length - failed}/${rows.length} PASS`);
+    return failed ? 1 : 0;
+  }
   if (process.env.PI_SET_ONLY) {
     await dxfSetCase();
     const failed = rows.filter((r) => !r.ok).length;
@@ -312,6 +323,7 @@ export async function main(): Promise<number> {
     await operatorBridgeGateCase();
   }
   await guardsCase();
+  await pathSemanticsCase();
   if (process.env.PI_E2E_ONLY) return report([]);
   perf.push(await vectorCase('kombinezon', ['pdf/kombinezon.pdf'], { tiles: 44 }));
   perf.push(await vectorCase('palto', ['pdf/palto.pdf'], { tiles: 35 }));
@@ -2741,4 +2753,149 @@ async function tracedOutlineCase() {
     );
   }
   s.close();
+}
+
+/** A one-page PDF (595 × 842 pt) with `content` as its only content stream. */
+function pdfOfContent(content: string): ArrayBuffer {
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 4 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}endstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs) pdf += `${String(o).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b = Buffer.from(pdf, 'latin1');
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+}
+
+/**
+ * R10 (MOOD-F4): PDF path semantics in the walker. A subpath that does not open with `m` starts
+ * at the CURRENT POINT, which lives until the path is painted — pdf.js splits one long path into
+ * several constructPath ops (operator-list chunks; path operators inside BT/ET), and starting the
+ * next chunk at the page origin drew phantom lines from every tile corner (Mood: Marostica's 9
+ * phantom walls). No current point (a PDF error) → that segment is dropped. `h`/`re` leave the
+ * current point at the subpath start; `s` closes only the current subpath.
+ */
+async function pathSemanticsCase() {
+  const C = 'R10 path semantics';
+  const mm = (v: number) => Math.round(((v * 25.4) / 72) * 1000) / 1000;
+  const run = async (content: string) => {
+    const doc = await extractPdf(
+      { id: '0', name: 'r10.pdf', bytes: pdfOfContent(content) },
+      DEFAULT_EXTRACT_OPTS,
+    );
+    return doc.pages[0].paths.map((p) => ({
+      closed: p.closed,
+      pts: p.pts.map((q) => [Math.round(q.x * 1000) / 1000, Math.round(q.y * 1000) / 1000]),
+    }));
+  };
+  const atOrigin = (ps: { pts: number[][] }[]) =>
+    ps.some((p) => p.pts.some(([x, y]) => Math.abs(x) < 0.01 && Math.abs(y) < 0.01));
+  const sameP = (a: number[], b: number[]) =>
+    Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01;
+  const P = (x: number, y: number) => [mm(x), mm(y)];
+
+  // (a) 1500 small paths of 3 operators each (`w`, the path, `S`): pdf.js flushes its operator
+  // list every 1000 operators, and where a flush lands right after a path's constructPath the rest
+  // of that path arrives as a NEW constructPath opening with `l` / `c` — exactly Mood's phantoms.
+  // Every path must keep its own start and stay in its own box.
+  {
+    let body = '';
+    for (let k = 0; k < 1500; k++) {
+      const x = 100 + (k % 30) * 15;
+      const y = 100 + Math.floor(k / 30) * 12;
+      body += `1 w ${x} ${y} m ${x + 5} ${y} l ${x + 5} ${y + 3} ${x + 8} ${y + 3} ${x + 8} ${y + 6} c ${x + 10} ${y + 6} l S\n`;
+    }
+    const ps = await run(body);
+    const bad = ps.filter((p) => {
+      const [x0, y0] = p.pts[0];
+      return p.pts.some(
+        ([x, y]) => x < x0 - 0.01 || x > x0 + mm(10.01) || y < y0 - 0.01 || y > y0 + mm(6.01),
+      );
+    }).length;
+    check(
+      C,
+      'paths split by pdf.js operator-list chunks: each continues from its current point',
+      ps.length === 1500 && !atOrigin(ps) && bad === 0,
+      `${ps.length} path(s), origin ${atOrigin(ps)}, ${bad} leave their box`,
+    );
+  }
+  // (b) path operators inside a text object: pdf.js wraps each in q … Q as its own constructPath
+  {
+    const ps = await run('BT 100 100 m 200 100 l 200 200 l S ET\n');
+    check(
+      C,
+      'path inside BT/ET: (100,100)→(200,100)→(200,200), nothing from the origin',
+      ps.length === 1 &&
+        ps[0].pts.length === 3 &&
+        sameP(ps[0].pts[0], P(100, 100)) &&
+        sameP(ps[0].pts[2], P(200, 200)),
+      ps,
+    );
+  }
+  // (c) `h` then `l`: the new subpath starts at the closed subpath's START
+  {
+    const ps = await run('100 100 m 200 100 l 200 200 l h 300 300 l S\n');
+    check(
+      C,
+      '`h` then `l`: closed triangle + (100,100)→(300,300)',
+      ps.length === 2 &&
+        ps[0].closed &&
+        !ps[1].closed &&
+        sameP(ps[1].pts[0], P(100, 100)) &&
+        sameP(ps[1].pts[1], P(300, 300)),
+      ps,
+    );
+  }
+  // (d) `re` then `l`: the current point is the rectangle's first corner
+  {
+    const ps = await run('100 100 50 50 re 300 300 l S\n');
+    check(
+      C,
+      '`re` then `l`: closed rectangle + (100,100)→(300,300)',
+      ps.length === 2 &&
+        ps[0].closed &&
+        ps[0].pts.length === 4 &&
+        sameP(ps[1].pts[0], P(100, 100)) &&
+        sameP(ps[1].pts[1], P(300, 300)),
+      ps,
+    );
+  }
+  // (e) no current point (a PDF error): the orphan segment is dropped, never drawn from (0,0)
+  {
+    const ps = await run('200 200 l 300 300 l S\n150 150 250 250 350 150 c S\n400 400 l 0.1 w S\n');
+    check(
+      C,
+      'segment without a current point: dropped, nothing from the origin',
+      !atOrigin(ps) &&
+        ps.length === 1 &&
+        sameP(ps[0].pts[0], P(200, 200)) &&
+        sameP(ps[0].pts[1], P(300, 300)),
+      ps,
+    );
+  }
+  // (f) the current point dies with the paint op: an `l` right after `S` has none
+  {
+    const ps = await run('100 100 m 200 100 l S 300 300 l S\n');
+    check(C, 'current point does not outlive `S`', ps.length === 1 && !atOrigin(ps), ps);
+  }
+  // (g) `s` = `h S`: only the CURRENT subpath closes, an earlier open one stays open
+  {
+    const ps = await run('100 100 m 200 100 l 200 200 l 300 100 m 400 100 l 400 200 l s\n');
+    check(
+      C,
+      '`s` closes only the current subpath',
+      ps.length === 2 && !ps[0].closed && ps[1].closed,
+      ps.map((p) => p.closed),
+    );
+  }
 }

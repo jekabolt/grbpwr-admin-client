@@ -151,6 +151,13 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
 
   // Pending path between constructPath and its paint op: flattened subpaths in page mm.
   let pending: { pts: PtMm[]; closed: boolean }[] = [];
+  // R10: the open subpath and the CURRENT POINT live as long as the path does (until its paint op
+  // or `n`), not per constructPath — pdf.js splits one PDF path into several constructPath ops when
+  // its operator list is flushed in chunks (and around path operators inside a text object), and the
+  // next chunk then opens with `l`/`c` and no `m`. Starting that segment at the page origin drew
+  // phantom lines from every tile corner. No current point (null) = the PDF never set one.
+  let cur: { pts: PtMm[]; closed: boolean } | null = null;
+  let cp: PtMm | null = null;
   let pendingClip = false;
   let groupBbox: unknown = null;
 
@@ -166,8 +173,16 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
     out.clipCount++;
   };
 
-  const emit = (op: number, stroked: boolean, filled: boolean, closeFirst: boolean) => {
-    if (closeFirst) for (const s of pending) if (s.pts.length > 2) s.closed = true;
+  /** `close`: 'current' = `s` (= `h S`, only the open subpath); 'all' = a fill closes every one. */
+  const emit = (
+    op: number,
+    stroked: boolean,
+    filled: boolean,
+    close: 'none' | 'current' | 'all',
+  ) => {
+    if (close === 'all') {
+      for (const s of pending) if (s.pts.length > 2) s.closed = true;
+    } else if (close === 'current' && cur && cur.pts.length > 2) cur.closed = true;
     if (!stroked && filled && !o.keepFills) {
       out.droppedFills++;
       return;
@@ -197,25 +212,29 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
   const build = (pathOps: ArrayLike<number>, args: ArrayLike<number>) => {
     const m = st.ctm;
     let j = 0;
-    let cur: { pts: PtMm[]; closed: boolean } | null = null;
-    let start: PtMm | null = null;
-    const last = (): PtMm =>
-      cur && cur.pts.length ? cur.pts[cur.pts.length - 1] : start ?? { x: 0, y: 0 };
-    const ensure = () => {
+    /** A subpath to extend from the current point; after `h`/`re` a new one starts there. */
+    const open = (from: PtMm) => {
       if (!cur) {
-        // lineTo/curveTo after closePath (or without moveTo) starts a new subpath at the last start.
-        cur = { pts: [start ?? { x: 0, y: 0 }], closed: false };
+        cur = { pts: [from], closed: false };
         pending.push(cur);
       }
       return cur;
     };
+    /** A segment with no current point is dropped (a PDF error; pdf.js' canvas treats it as a
+     * moveTo): its end point starts a new subpath, nothing is drawn to it. */
+    const moveTo = (p: PtMm) => {
+      cur = { pts: [p], closed: false };
+      pending.push(cur);
+      cp = p;
+    };
     // C4: one constructPath can hold a million curves of up to 4096 points each — paid as made.
     let made = 0;
-    const curve = (fl: (out: PtMm[]) => void) => {
-      const out = ensure().pts;
+    const curve = (from: PtMm, fl: (out: PtMm[]) => void) => {
+      const out = open(from).pts;
       const n0 = out.length;
       fl(out);
       made += out.length - n0;
+      cp = out[out.length - 1];
     };
     for (let k = 0; k < pathOps.length; k++) {
       const op = pathOps[k];
@@ -224,52 +243,63 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         made = 0;
       }
       if (op === OPS.moveTo) {
-        start = apply(m, args[j], args[j + 1]);
-        cur = { pts: [start], closed: false };
-        pending.push(cur);
+        moveTo(apply(m, args[j], args[j + 1]));
         made++;
         j += 2;
       } else if (op === OPS.lineTo) {
-        ensure().pts.push(apply(m, args[j], args[j + 1]));
+        const p = apply(m, args[j], args[j + 1]);
+        if (cp) {
+          open(cp).pts.push(p);
+          cp = p;
+        } else moveTo(p);
         made++;
         j += 2;
       } else if (op === OPS.curveTo) {
-        const p0 = last();
-        curve((out) =>
-          flattenCubic(
-            p0,
-            apply(m, args[j], args[j + 1]),
-            apply(m, args[j + 2], args[j + 3]),
-            apply(m, args[j + 4], args[j + 5]),
-            o.sagittaMm,
-            out,
-          ),
-        );
+        const p0 = cp;
+        if (!p0) moveTo(apply(m, args[j + 4], args[j + 5]));
+        else
+          curve(p0, (out) =>
+            flattenCubic(
+              p0,
+              apply(m, args[j], args[j + 1]),
+              apply(m, args[j + 2], args[j + 3]),
+              apply(m, args[j + 4], args[j + 5]),
+              o.sagittaMm,
+              out,
+            ),
+          );
         j += 6;
       } else if (op === OPS.curveTo2) {
         // `v`: first control point = current point.
-        const p0 = last();
-        curve((out) =>
-          flattenCubic(
-            p0,
-            p0,
-            apply(m, args[j], args[j + 1]),
-            apply(m, args[j + 2], args[j + 3]),
-            o.sagittaMm,
-            out,
-          ),
-        );
+        const p0 = cp;
+        if (!p0) moveTo(apply(m, args[j + 2], args[j + 3]));
+        else
+          curve(p0, (out) =>
+            flattenCubic(
+              p0,
+              p0,
+              apply(m, args[j], args[j + 1]),
+              apply(m, args[j + 2], args[j + 3]),
+              o.sagittaMm,
+              out,
+            ),
+          );
         j += 4;
       } else if (op === OPS.curveTo3) {
         // `y`: second control point = end point.
-        const p0 = last();
+        const p0 = cp;
         const p3 = apply(m, args[j + 2], args[j + 3]);
-        curve((out) => flattenCubic(p0, apply(m, args[j], args[j + 1]), p3, p3, o.sagittaMm, out));
+        if (!p0) moveTo(p3);
+        else
+          curve(p0, (out) =>
+            flattenCubic(p0, apply(m, args[j], args[j + 1]), p3, p3, o.sagittaMm, out),
+          );
         j += 4;
       } else if (op === OPS.closePath) {
+        // `h`: the current point returns to the subpath's start; the next `l` opens a new one there.
         if (cur) {
           cur.closed = true;
-          start = cur.pts[0];
+          cp = cur.pts[0];
         }
         cur = null;
       } else if (op === OPS.rectangle) {
@@ -282,7 +312,8 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
           closed: true,
         };
         pending.push(r);
-        start = r.pts[0];
+        // `re` = `m l l l h`: the current point is its first corner, the subpath is complete.
+        cp = r.pts[0];
         cur = null;
         made += 4;
         j += 4;
@@ -382,22 +413,22 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         pendingClip = true;
         break;
       case OPS.stroke:
-        emit(i, true, false, false);
+        emit(i, true, false, 'none');
         break;
       case OPS.closeStroke:
-        emit(i, true, false, true);
+        emit(i, true, false, 'current');
         break;
       case OPS.fill:
       case OPS.eoFill:
-        emit(i, false, true, true);
+        emit(i, false, true, 'all');
         break;
       case OPS.fillStroke:
       case OPS.eoFillStroke:
-        emit(i, true, true, true);
+        emit(i, true, true, 'all');
         break;
       case OPS.closeFillStroke:
       case OPS.closeEOFillStroke:
-        emit(i, true, true, true);
+        emit(i, true, true, 'all');
         break;
       case OPS.endPath:
         break;
@@ -468,6 +499,8 @@ export function walkOperatorList(ol: OpList, o: WalkOpts): WalkOut {
         pendingClip = false;
       }
       pending = [];
+      cur = null;
+      cp = null;
     }
   }
   return out;
