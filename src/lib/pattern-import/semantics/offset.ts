@@ -297,7 +297,8 @@ export function parallelDeviation(
   const ad = Math.abs(d);
   const idx = new SegIndex([{ pts: src, closed: true }], 5);
   const reach = opts.join === 'round' ? [] : joinWedges(src, d, limit, !!opts.lenient);
-  const cell = Math.max(5, ad * limit);
+  // every wedge within ±1 cell of any point it covers: the cell is at least the largest reach
+  const cell = Math.max(5, ad * limit, ...reach.map((v) => v.r + 1));
   const grid = new Map<string, { p: PtMm; r: number; poly: PtMm[] }[]>();
   for (const v of reach) {
     const key = `${Math.floor(v.p.x / cell)},${Math.floor(v.p.y / cell)}`;
