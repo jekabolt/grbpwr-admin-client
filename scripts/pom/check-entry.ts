@@ -127,6 +127,36 @@ export function runSwapped(l: Loaded, a: EdgeRole, b: EdgeRole): PomValue[] {
   return measureModel(m, 'half');
 }
 
+/**
+ * G7: the same file with its waistband piece listed TWICE (a second ply, a band of another block
+ * listed with this one — SS26-007's card carries WS and WS_1_XS): the waist must read ONE band,
+ * never the sum. Returns the waist value of the base size with the doubled band.
+ */
+export function runWithBandDoubled(l: Loaded): PomValue | undefined {
+  const graph = readSeamGraph(l.facts);
+  const m = baseModel(l.facts, graph, l.baseSize);
+  const band = [...m.info].find(([, i]) => i.kind === 'waistband')?.[0];
+  if (!band) return undefined;
+  const src = l.facts.pieces.find((p) => p.pieceKey === band);
+  if (!src) return undefined;
+  // A band 9 % shorter (as a smaller block's band would be) — an identical copy would be read as a
+  // second ply of the same band, which is another rule.
+  const piece = {
+    ...src.piece,
+    poly: src.piece.poly.map((q) => ({ ...q, x: q.x * 0.91 })),
+    inner: (src.piece.inner ?? []).map((l) => ({
+      ...l,
+      pts: l.pts.map((q) => ({ ...q, x: q.x * 0.91 })),
+    })),
+  };
+  const facts = {
+    ...l.facts,
+    pieces: [...l.facts.pieces, { ...src, pieceKey: `${band}_2`, name: `${src.name}_2`, piece }],
+  };
+  const report = measurePattern({ facts, baseSize: l.baseSize });
+  return report.sizes.find((s) => s.size === l.baseSize)?.values.find((v) => v.code === 'waist');
+}
+
 /** Role coverage of the base size: share of edges with confidence ≥ 0.6. */
 export function coverage(report: PomReport) {
   const rs = Object.values(report.roles);

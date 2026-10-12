@@ -78,7 +78,7 @@ for (const s of [...report.seams]
   .sort((a, b) => rank[a.state] - rank[b.state])) {
   if (!verbose && (s.state === 'closed' || s.state === 'eased')) continue;
   console.log(
-    `   ${s.state.padEnd(9)} ${String(s.kind).padEnd(18)} ${s.origin.padEnd(13)} ${s.a.map(nm).join('+') || 'free loop'} ↔ ${s.b.map(nm).join('+') || 'free loop'} · max ${Math.round(s.residualMaxMm)} p95 ${Math.round(s.residualP95Mm)} mm · ${Math.round(s.lenA)}/${Math.round(s.lenB)}${s.note ? ` · ${s.note.slice(0, 90)}` : ''}`,
+    `   ${s.state.padEnd(9)} ${String(s.kind).padEnd(18)} ${s.origin.padEnd(13)} ${s.a.map(nm).join('+') || 'free loop'} ↔ ${s.b.map(nm).join('+') || 'free loop'} · max ${Math.round(s.residualMaxMm)} p95 ${Math.round(s.residualP95Mm)} mm · ${Math.round(s.lenA)}/${Math.round(s.lenB)}${s.note ? ` · ${s.note.slice(0, verbose ? 2000 : 90)}` : ''}`,
   );
 }
 if (process.env.DOLL_PATHS)

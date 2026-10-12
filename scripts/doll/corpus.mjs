@@ -345,3 +345,11 @@ console.log(
   `\nrequests routed to the stub: ${leaked.length}${leaked.length ? ` (${[...new Set(leaked)].slice(0, 5).join(', ')})` : ''}`,
 );
 console.log(`shots + corpus.json → ${SHOTS}`);
+
+// The shape gate (shape.mjs): the captured requests solved again in node and measured by shape,
+// plus FRONT / LEFT / BACK renders at 1600 px — into the same tag. CORPUS_SHAPE=0 skips it.
+if (process.env.CORPUS_SHAPE !== '0')
+  execFileSync(process.execPath, [resolve(HERE, 'shape.mjs')], {
+    stdio: 'inherit',
+    env: { ...process.env, CORPUS_TAG: TAG, CORPUS_REQ: TAG },
+  });

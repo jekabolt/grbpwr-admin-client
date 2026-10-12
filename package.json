@@ -140,7 +140,8 @@
     "patimport:p23": "node scripts/pattern-import/p23.mjs",
     "patimport:page-roles": "node scripts/pattern-import/page-roles.mjs",
     "patimport:passport": "node scripts/pattern-import/passport.mjs",
-    "seams:score": "node scripts/seams-score/score.mjs"
+    "seams:score": "node scripts/seams-score/score.mjs",
+    "doll:shape": "node scripts/doll/shape.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",
