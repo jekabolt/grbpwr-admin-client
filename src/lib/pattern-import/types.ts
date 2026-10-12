@@ -1162,7 +1162,7 @@ export type FoldAsk = {
 export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
-  blocked: { seed: SeedId; reason: BlockReason; detail: string }[];
+  blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
   /** Open fold questions, one per seed blocked 'fold-question' (absent = none). */
   folds?: FoldAsk[];
@@ -1187,6 +1187,21 @@ export type SemanticsOutput = {
    * a policy weighs, never geometry (absent = the reader found nothing / an old worker).
    */
   passport?: GarmentPassport;
+};
+
+/**
+ * CODE lane: what the namer knew about a piece blocked 'grammar' / 'duplicate-identity' — so the
+ * wizard's "name N pieces" (and the autopilot) can give it a code without losing what the source
+ * said: its own name (kept as the display name) and, for a DRAWN pair (FP_L beside FP_R), the hand
+ * and the twin, so both hands get ONE new code and stay a pair (a twin renamed apart is two singles,
+ * each re-read as a pair of its own — a doubled cut).
+ */
+export type BlockedName = {
+  /** The source's own words for the piece: the title read, the DXF block name; null = none. */
+  source: string | null;
+  /** The drawn hand of a pair whose other hand is `twin` (both blocked together); else null. */
+  hand: PairHand | null;
+  twin: SeedId | null;
 };
 
 /**

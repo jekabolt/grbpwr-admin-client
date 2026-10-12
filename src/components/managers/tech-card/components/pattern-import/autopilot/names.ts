@@ -29,7 +29,14 @@ export function deterministicCodes(
   taken: Iterable<string>,
   cardTokens: readonly string[],
 ): Map<SeedId, string> {
-  const used = new Set([...taken].map((t) => t.toUpperCase()));
+  // a written pair P01_L / P01_R takes the code P01 too (CODE lane: zhaket «6.» was given P01 next
+  // to piece 3's P01_L/P01_R and blocked as a duplicate again, pass after pass)
+  const used = new Set(
+    [...taken].flatMap((t) => {
+      const w = t.toUpperCase().split('_');
+      return w.map((_, i) => w.slice(0, i + 1).join('_'));
+    }),
+  );
   const isSizeToken = sizeTokenTest(cardTokens);
   const out = new Map<SeedId, string>();
   let n = 1;
