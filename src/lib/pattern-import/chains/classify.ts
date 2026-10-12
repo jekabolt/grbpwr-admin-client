@@ -157,38 +157,66 @@ export function furniture(
     });
     if (lone.length < 3) continue;
     // R9 (MOOD-F4): the repetition is counted on every lone member, but a member drawn by a garment
-    // pen with a per-size overlay — another garment-pen line of ANY length running alongside it
-    // ≤ 15 mm across for half its length (Marostica's band: each size draws the same side, 386,
-    // 399, 428, 454 mm) — is a graded edge, never furniture. Real frames keep the label.
-    for (const i of lone)
-      if (!(curvedPens.has(pen(styles.get(chains[i].style))) && overlaid(i, at(i), ax)))
-        out[i] = 'tile frame / cut mark';
+    // pen and overlaid per size — line-work chains of at least TWO other garment pens (or files, when
+    // the files are the sizes) of any length running along it ≤ 15 mm across, each over half its
+    // length (Marostica's band: every size draws the same side, 386, 399, 428, 454 mm) — is a
+    // graded edge, never furniture. One neighbouring contour is not that evidence, and neither is
+    // one coincidence: the overlay must hold for ≥ 2 members and at least half of the lone ones (a
+    // bucket of real frames, one per page, is overlaid nowhere) — otherwise every member keeps the
+    // label.
+    const ov = lone.map(
+      (i) => curvedPens.has(pen(styles.get(chains[i].style))) && overlaid(i, at(i), ax),
+    );
+    const n = ov.filter(Boolean).length;
+    const corroborated = n >= 2 && 2 * n >= lone.length;
+    lone.forEach((i, k) => {
+      if (!(corroborated && ov[k])) out[i] = 'tile frame / cut mark';
+    });
   }
   return out;
 
-  /** Another line-work chain of a garment pen runs along `i` (same axis, ≤ 15 mm across) over at
-   * least half of `i`'s length. */
+  /** ≥ 2 other identities (pen, or source file) of line-work garment-pen chains each cover at
+   * least half of `i` along its axis, ≤ 15 mm across (coverage = union of parallel segments). */
   function overlaid(i: number, p: { v: number; lo: number; hi: number }, ax: 'x' | 'y'): boolean {
     const need = 0.5 * (p.hi - p.lo);
     const tan = Math.tan((2 * Math.PI) / 180);
+    const own = pen(styles.get(chains[i].style));
+    const ownFile = fileOf?.(i);
+    const ids = new Set<string>();
     for (let j = 0; j < chains.length; j++) {
       if (j === i || pre[j] !== null) continue;
       const c = chains[j];
-      if (c.lengthMm < need || !curvedPens.has(pen(styles.get(c.style)))) continue;
+      const pj = pen(styles.get(c.style));
+      const file = fileOf?.(j);
+      const id =
+        pj !== own ? `pen ${pj}` : file !== undefined && file !== ownFile ? `file ${file}` : null;
+      if (id === null || ids.has(id)) continue;
+      if (c.lengthMm < need || !curvedPens.has(pj)) continue;
       const bb = bboxOf(c.pts);
       const [vLo, vHi] = ax === 'x' ? [bb.minY, bb.maxY] : [bb.minX, bb.maxX];
       const [uLo, uHi] = ax === 'x' ? [bb.minX, bb.maxX] : [bb.minY, bb.maxY];
       if (vLo > p.v + 15 || vHi < p.v - 15 || uLo > p.hi || uHi < p.lo) continue;
-      let cover = 0;
+      const spans: [number, number][] = [];
       for (let s = 0; s + 1 < c.pts.length; s++) {
         const a0 = c.pts[s];
         const a1 = c.pts[s + 1];
         const [u0, v0, u1, v1] = ax === 'x' ? [a0.x, a0.y, a1.x, a1.y] : [a0.y, a0.x, a1.y, a1.x];
         if (Math.abs(v1 - v0) > Math.abs(u1 - u0) * tan) continue;
         if (Math.abs(v0 - p.v) > 15 || Math.abs(v1 - p.v) > 15) continue;
-        cover += Math.max(0, Math.min(p.hi, Math.max(u0, u1)) - Math.max(p.lo, Math.min(u0, u1)));
+        const lo = Math.max(p.lo, Math.min(u0, u1));
+        const hi = Math.min(p.hi, Math.max(u0, u1));
+        if (hi > lo) spans.push([lo, hi]);
       }
-      if (cover >= need) return true;
+      spans.sort((x, y) => x[0] - y[0]);
+      let cover = 0;
+      let end = -Infinity;
+      for (const [lo, hi] of spans) {
+        if (hi <= end) continue;
+        cover += hi - Math.max(lo, end);
+        end = hi;
+      }
+      if (cover >= need) ids.add(id);
+      if (ids.size >= 2) return true;
     }
     return false;
   }
