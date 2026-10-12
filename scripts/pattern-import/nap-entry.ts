@@ -334,14 +334,13 @@ const CORPUS_CASES: { id: string; truth: string }[] = [
   { id: 'reef', truth: 'reef' },
   { id: 'kombinezon-A', truth: 'kombinezon' },
   { id: 'blazer', truth: 'blazer' },
-  { id: 'polupalto-sheetA', truth: 'polupalto' },
-  { id: 'polupalto-sheetB', truth: 'polupalto' },
+  // D6: both tile sheets in one case
+  { id: 'polupalto', truth: 'polupalto' },
 ];
 /** Holds reviewed by eye (TRUTH.md + the sheet): anything else on the corpus FAILS until reviewed. */
 const REVIEWED: Record<string, string[]> = {
   // the burda article strip beside "7142" and "fashion", 11.1 mm against 17.4 mm piece numbers
-  'polupalto-sheetA': ['0', '015'],
-  'polupalto-sheetB': ['15', '00'],
+  polupalto: ['0', '015', '15', '00'],
 };
 
 async function corpus(only: string[]) {

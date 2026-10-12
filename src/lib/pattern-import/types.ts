@@ -15,6 +15,8 @@
 
 import type { PieceDTO } from 'lib/nesting/types';
 import type { GarmentPassport, PassportDigest } from './passport/types';
+import type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
+export type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
 
 // The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
 export type {
@@ -341,8 +343,8 @@ export type Sheet = {
   poses: PagePose[];
   pairs: PairTransform[];
   bbox: BoxMm;
-  /** Pages the grid says exist but no file provides. */
-  missing: { row: number; col: number }[];
+  /** Pages the grid says exist but no file provides (`sheet`: the tile sheet of the cell, D6). */
+  missing: { row: number; col: number; sheet?: number }[];
   /**
    * D3: why this placement must not be used as it stands (the placement contradicts the printed
    * cell labels, tile pages left off a label grid, two pages naming one cell). Non-empty blocks
@@ -357,6 +359,32 @@ export type Sheet = {
   rasters: IRRaster[];
   styles: Style[];
   warnings: string[];
+  /**
+   * D6 (one PDF = one garment): the tile sheets this drawing is made of, each registered on its
+   * own and laid side by side (sheet 0 at the origin). Absent = one sheet in its own frame (the
+   * DXF / one-page fast path, an older sheet).
+   */
+  parts?: SheetPart[];
+};
+
+/** D6: one tile sheet inside the assembled drawing. */
+export type SheetPart = {
+  /** Tile-sheet index (PageClassification.sheet). */
+  sheet: number;
+  /** Its tile pages, file order. */
+  pages: { file: FileId; page: PageIndex }[];
+  /** Where the sheet's own frame (tile area lower-left at 0,0) sits in the drawing, mm. */
+  dx: Mm;
+  dy: Mm;
+  /** Its tile area in the drawing's frame. */
+  box: BoxMm;
+  /** Its drawing (the path box it had alone), in the drawing's frame. */
+  draw?: BoxMm;
+  /** The largest sheet: laid first and unshifted, the drawing's raster grids are its own. */
+  anchor?: boolean;
+  maxResidualMm: Mm;
+  /** Missing tile cells of this sheet. */
+  missing: number;
 };
 
 export type GridOverride = {
@@ -1693,7 +1721,10 @@ export type ContourSignature = { dev: number; pts: number[] };
 export type ManifestSource = {
   files: { name: string; sha256: string; bytes: number; kind: SourceKind; pages: number }[];
   scale: { method: ScaleMethod; factor: number; measuredMm: Mm | null; declaredMm: Mm | null };
+  /** The whole drawing (D6: every tile sheet): pages placed, first registration method, worst residual. */
   sheet: { pages: number; method: RegistrationMethod | 'single'; maxResidualMm: Mm };
+  /** D6: the tile sheets the drawing is made of, when there are several (absent = one). */
+  sheets?: { sheet: number; pages: number; maxResidualMm: Mm }[];
   sizeEncoding: SizeEncoding;
   variant: string | null;
 };
@@ -1737,7 +1768,13 @@ export type GateCheckId =
    * lies on the chains it names, the written line runs along it, the rule's constraints hold, and
    * the verdict's checks are within what it allowed (block on any mismatch).
    */
-  | 'G21-continuity';
+  | 'G21-continuity'
+  /**
+   * D6: every tile sheet of the file is in the drawing, every sheet that holds pieces exports one,
+   * and no piece is in the export twice from two sheets (a copy / an alternative rendering not
+   * answered), nor a piece split between sheets exported as halves (block).
+   */
+  | 'G23-sheets';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1931,6 +1968,21 @@ export type GateExpectation = {
   hausdorffP95Mm: Mm;
   /** Open fold questions of the run (E1a): G6 blocks the whole file while any is unanswered. */
   openFolds?: readonly string[];
+  /** D6 (G23): the tile sheets of the whole garment (every fabric scope), as the run read them. */
+  sheets?: SheetCover;
+};
+
+/** D6 (G23): what the run made of the file's tile sheets — over the whole garment, not one scope. */
+export type SheetCover = {
+  /** Tile sheets the page classes carry. */
+  tileSheets: number[];
+  /** Per sheet in the drawing: its pieces (families after the edits) and how many are exported. */
+  parts: { sheet: number; pieces: number; exported: number }[];
+  /** Cross-sheet questions not answered so a piece may be in the export twice or in halves. */
+  open: string[];
+  /** The passport's expected pieces no exported piece is bound to (an expectation: noted only). */
+  expectedMissing?: string[];
+  expected?: number;
 };
 
 export type RunGateFn = (dxfText: string, expect: GateExpectation) => Promise<GateReport>;
@@ -2129,7 +2181,16 @@ export type StageIO = {
   clean: { in: CleanInput; out: CleanOutput };
   scale: { in: { decision: ScaleDecision }; out: { applied: ScaleDecision } };
   assemble: {
-    in: { sheet: number; override?: GridOverride };
+    /**
+     * D6: EVERY tile sheet of the files is assembled (one file = one garment); `sheet` names the
+     * sheet the operator's `override` grid is set on (ignored without one).
+     */
+    in: {
+      sheet: number;
+      override?: GridOverride;
+      /** Probes only (D6 merged-vs-parts comparisons): assemble just these tile sheets. */
+      probeSheets?: number[];
+    };
     out: {
       sheet: Omit<Sheet, 'paths' | 'texts' | 'rasters' | 'styles'>;
       previewPaths: Float32Array[];
@@ -2185,13 +2246,27 @@ export type StageIO = {
       expected: ExpectedSizes | null;
       /** D1: the step asks the count (null = the source states it, or it does not matter). */
       countAsk: SizeCountAsk | null;
+      /** D6: the size lines each tile sheet draws (null = one sheet). */
+      sheetLegend?: SheetLegend | null;
     };
   };
   pieces: {
-    in: { seeds?: Seed[]; edits: PieceEdit[]; opts: FillOpts };
+    in: {
+      seeds?: Seed[];
+      edits: PieceEdit[];
+      opts: FillOpts;
+      /**
+       * D6: the operator's (or autopilot's) answers to the cross-sheet questions, by key
+       * (pieces/sheets.ts): 'both' / 'union' / 'separate' keep both, 'halves' blocks (G23). A
+       * "copy" / "keep" answer is sent as "not a piece" edits on the copies.
+       */
+      sheetAnswers?: Record<string, SheetAnswer>;
+    };
     out: {
       seeds: Seed[];
       families: PieceFamily[];
+      /** D6: the pieces read across the tile sheets (copies, alternatives, splits); null = one sheet. */
+      sheets?: SheetPieces | null;
       /**
        * Models the sheet names ("Style A", "Mod. 125": F4 `variantLabels` over the sheet and the
        * instruction pages), also when no seed carries one — the wizard offers them as the model
@@ -2353,6 +2428,8 @@ export type WizardEvent =
   | { type: 'drawn-sizes'; n: number | null }
   | { type: 'variant'; variant: string | null }
   | { type: 'piece-edits'; edits: PieceEdit[] }
+  /** D6: a cross-sheet answer (pieces/sheets.ts); `edits` = the "not a piece" edits it stands for. */
+  | { type: 'sheet-answer'; key: string; answer: SheetAnswer; edits: PieceEdit[] }
   | { type: 'names'; decisions: NameDecision[] }
   | { type: 'semantics'; input: StageIO['semantics']['in'] }
   | { type: 'fabrics'; assignment: FabricAssignment }

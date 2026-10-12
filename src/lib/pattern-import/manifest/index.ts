@@ -301,6 +301,7 @@ const GATE_CHECK_IDS = new Set([
   'G20-nested-piece',
   // P1: a size closed through continuity walls keeps its provenance and verdict
   'G21-continuity',
+  'G23-sheets',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
@@ -386,6 +387,22 @@ function validateSource(x: unknown): ManifestSource {
     !isNum(sh.maxResidualMm)
   )
     fail('source.sheet', 'needs pages, method, maxResidualMm');
+  // D6: the tile sheets of the drawing — optional, shape-checked; one that does not validate is
+  // left out (never the manifest)
+  const sheets = Array.isArray(x.sheets)
+    ? x.sheets
+        .slice(0, 64)
+        .flatMap((y: unknown) =>
+          isObj(y) &&
+          isInt(y.sheet) &&
+          y.sheet >= 0 &&
+          isInt(y.pages) &&
+          y.pages >= 0 &&
+          isNum(y.maxResidualMm)
+            ? [{ sheet: y.sheet, pages: y.pages, maxResidualMm: y.maxResidualMm }]
+            : [],
+        )
+    : [];
   if (!isStr(x.sizeEncoding) || !SIZE_ENCODINGS.has(x.sizeEncoding))
     fail('source.sizeEncoding', 'unknown encoding');
   if (!(x.variant === null || isBoundedStr(x.variant, 1024)))
@@ -403,6 +420,7 @@ function validateSource(x: unknown): ManifestSource {
       method: sh.method as ManifestSource['sheet']['method'],
       maxResidualMm: sh.maxResidualMm,
     },
+    ...(sheets.length ? { sheets } : {}),
     sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
     variant: x.variant,
   };

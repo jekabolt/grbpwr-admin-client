@@ -38,6 +38,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
+import { faceCapBox } from '../assemble/composite';
 import { faceRaster, judgeBlobs, type FaceBlob, type FaceRaster } from '../pieces/faces';
 import { sameLook } from '../pieces/grade/guard';
 import { resampleT } from '../pieces/grade/vec';
@@ -150,7 +151,7 @@ export function rolesByFaces(
   });
   // a coarse raster (walls ~4.5 mm thick): a seam line broken at its notches still closes its
   // ring, a stroke glyph closes no face of its own
-  const fr = faceRaster(sheet.bbox, items, [], ROLE_CELL_MM);
+  const fr = faceRaster(sheet.bbox, items, [], ROLE_CELL_MM, faceCapBox(sheet));
   const blobs = judgeBlobs(fr, sheet, set.chains, items, [], { off: new Set(['nested', 'units']) });
   const kept = new Set(blobs.filter((b) => !b.junk).map((b) => b.id));
   if (!kept.size) return set;

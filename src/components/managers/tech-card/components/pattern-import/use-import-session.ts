@@ -30,6 +30,7 @@ import type {
   StageName,
   WizardEvent,
   WizardStep,
+  SheetAnswer,
 } from 'lib/pattern-import/types';
 import { AI_AUTO_ACCEPT_T } from 'lib/pattern-import/ai/threshold';
 import {
@@ -46,6 +47,7 @@ import {
 } from 'lib/pattern-import/ai/dxf-names';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import { sheetLegendQuestion, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import {
   buildErrorReport,
   checkFilesBeforeReading,
@@ -56,7 +58,7 @@ import {
   type ImportLogEvent,
 } from 'lib/pattern-import/worker/client';
 import { anisotropyOf, squareSidesOf } from './formats';
-import { scaleUncertain, stepOffer, tileSheets, type AutoResolver } from './auto-advance';
+import { scaleUncertain, stepOffer, type AutoResolver } from './auto-advance';
 import { singlePageSheet } from './sheet-skip';
 import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './auto-drive';
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
@@ -127,15 +129,20 @@ export type Inputs = {
   manualMeasuredMm: number | null;
   scaleConfirmed: boolean;
   gridOverride: GridOverride | undefined;
-  /** The tile sheet being assembled (a Burda file carries several). */
-  sheetIndex: number;
   /**
-   * A10 (Codex #2): the tile sheet was PICKED (the sheet step's own control, or the autopilot on
-   * evidence) — a file with several tile sheets asks which one until then; null = not picked.
+   * D6 (one file = one garment): every tile sheet is assembled into one drawing — nothing is
+   * picked. This is the sheet the operator's hand grid (`gridOverride`) is set on (0 = none set).
    */
-  sheetPicked: number | null;
+  sheetIndex: number;
   /** Loop-closure residuals over the limit, looked at and accepted by the operator. */
   residualsAccepted: boolean;
+  /**
+   * D6: answers to the cross-sheet questions of the pieces step, by geometric key
+   * (pieces/sheets.ts): a copy / an alternative rendering kept or not, a split piece.
+   */
+  sheetAnswers: Record<string, SheetAnswer>;
+  /** D6: the per-sheet size-line reading the operator confirmed (`SheetLegend.sig`); null = none. */
+  sheetLegendOk: string | null;
   legend: LegendEdit[];
   /** Low-confidence legend rows the operator has looked at and accepted (`legendKey`). */
   legendConfirmed: string[];
@@ -188,8 +195,9 @@ const EMPTY_INPUTS: Inputs = {
   scaleConfirmed: false,
   gridOverride: undefined,
   sheetIndex: 0,
-  sheetPicked: null,
   residualsAccepted: false,
+  sheetAnswers: {},
+  sheetLegendOk: null,
   legend: [],
   legendConfirmed: [],
   sizeMap: null,
@@ -523,6 +531,7 @@ export function useImportSession(deps: {
         ? [...baseSeeds.current, ...i.clickSeeds]
         : undefined,
     edits: i.edits,
+    sheetAnswers: i.sheetAnswers,
     opts: {
       cellMm: PATIMPORT.fillCellMm,
       snapMm: PATIMPORT.snapMm,
@@ -697,39 +706,19 @@ export function useImportSession(deps: {
           return;
         }
         case 'sheet': {
-          // S3: another sheet of the file is another drawing — its legend, size map, model, seeds
-          // and piece edits are asked again; the first pieces run shows every model on it again.
-          // (Answers on the pieces are settled against the new sheet after its pieces run.)
-          const other = ev.sheet !== iRef.current.sheetIndex;
-          const sheetInputs: Partial<Inputs> = other
-            ? {
-                legend: [],
-                legendConfirmed: [],
-                sizeMap: null,
-                drawnSizes: null,
-                drawnSizesAt: null,
-                variant: null,
-                clickSeeds: [],
-                edits: [],
-              }
-            : {};
-          if (other) {
-            baseSeeds.current = null;
-            heldNames.current = [];
-          }
+          // D6: every tile sheet is in the drawing whatever this says — the event sets (or takes
+          // back) the hand grid of ONE sheet and re-assembles. The answers given on the pieces are
+          // settled against the new drawing after its pieces run (S3: the grid is in the print).
+          const sheetIndex = ev.override ? ev.sheet : 0;
           patchInputs({
             gridOverride: ev.override,
-            sheetIndex: ev.sheet,
-            sheetPicked: ev.sheet,
+            sheetIndex,
             residualsAccepted: false,
-            ...sheetInputs,
           });
           iRef.current = {
             ...iRef.current,
             gridOverride: ev.override,
-            sheetIndex: ev.sheet,
-            sheetPicked: ev.sheet,
-            ...sheetInputs,
+            sheetIndex,
           };
           const out = await run('assemble', { sheet: ev.sheet, override: ev.override });
           patch(dropAfter({ ...sRef.current, sheet: out }, 'sheet'));
@@ -810,6 +799,25 @@ export function useImportSession(deps: {
           iRef.current = { ...iRef.current, variant: ev.variant };
           const out = await run('pieces', piecesInput(iRef.current));
           patch({ pieces: out, variant: ev.variant });
+          settleToPieces();
+          return;
+        }
+        case 'sheet-answer': {
+          // D6: "copy" / "keep" travel as "not a piece" on the copies (the record replays them as
+          // piece edits); every answer is kept by its key for the gate (G23)
+          const sheetAnswers = { ...iRef.current.sheetAnswers, [ev.key]: ev.answer };
+          const seen = new Set(
+            iRef.current.edits.flatMap((e) => (e.kind === 'not-a-piece' ? [e.seed] : [])),
+          );
+          const edits = [
+            ...iRef.current.edits,
+            ...ev.edits.filter((e) => e.kind !== 'not-a-piece' || !seen.has(e.seed)),
+          ];
+          const next = { ...iRef.current, sheetAnswers, edits };
+          iRef.current = next;
+          patchInputs({ sheetAnswers, edits });
+          const out = await run('pieces', piecesInput(next));
+          patch({ pieces: out });
           settleToPieces();
           return;
         }
@@ -992,24 +1000,19 @@ export function useImportSession(deps: {
         case 'back': {
           // back to sizes or before: the stages run again — against the card as it is now
           const changed = stepIndex(ev.to) <= stepIndex('sizes') && !!cardStale();
-          // A10 (Codex #5): the card's name / style number changed — the model and the sheet it
-          // named are chosen again (from the sheet step when the file has several)
+          // A10 (Codex #5): the card's name / style number changed — the model it named is chosen
+          // again (D6: no sheet is ever chosen — every one is in the drawing)
           const renamed =
             stepIndex(ev.to) <= stepIndex('sizes') &&
             runCard.current != null &&
             cardIdentity(runCard.current) !== cardIdentity(cardRef.current);
           if (renamed) {
             const cleared = {
-              sheetPicked: null,
               variant: null,
-              autopilot: iRef.current.autopilot.filter(
-                (a) => a.kind !== 'model' && a.kind !== 'sheet-choice',
-              ),
+              autopilot: iRef.current.autopilot.filter((a) => a.kind !== 'model'),
             };
             iRef.current = { ...iRef.current, ...cleared };
             patchInputs(cleared);
-            if (tileSheets(sRef.current.pages) > 1 && stepIndex(ev.to) > stepIndex('sheet'))
-              ev = { ...ev, to: 'sheet' };
           }
           if (stepIndex(ev.to) <= stepIndex('sizes')) takeCard();
           if (sRef.current.names.length) heldNames.current = sRef.current.names;
@@ -1339,9 +1342,6 @@ export function useImportSession(deps: {
           return;
         }
         case 'sheet':
-          // A10 (Codex #6): "next" never imports the default of several tile sheets — only a
-          // sheet pick answers which one (the blocker says so; this guards every caller)
-          if (tileSheets(s.pages) > 1 && iRef.current.sheetPicked === null) return;
           await toSizes();
           return;
         case 'sizes': {
@@ -1413,11 +1413,7 @@ export function useImportSession(deps: {
         return null;
       }
       case 'sheet': {
-        // A10 (Codex #6): which of several tile sheets is a question — only a sheet pick answers
-        // it; "next" never imports the default sheet
-        const n = tileSheets(s.pages);
-        if (n > 1 && inputs.sheetPicked === null)
-          return `the file carries ${n} tile sheets — pick the one this card is`;
+        // D6: several tile sheets are not a question — every one is in the drawing
         // D3: a placement the printed labels contradict (or pages left off their grid) has no
         // "accept" — the pages or the grid change first
         const refused = s.sheet?.sheet.refused ?? [];
@@ -1446,6 +1442,9 @@ export function useImportSession(deps: {
         );
         if (pending.length)
           return `${pending.length} legend ${pending.length === 1 ? 'row' : 'rows'} to confirm`;
+        // D6: one legend for the document — every sheet draws the same size pens
+        const lq = sheetLegendQuestion(s.sizes?.sheetLegend, inputs.sheetLegendOk);
+        if (lq) return lq;
         const entries = s.sizes?.map.entries ?? [];
         if (!entries.some((e) => e.card)) return 'map at least one size to the card';
         const ids = entries.flatMap((e) => (e.card ? [e.card.sizeId] : []));
@@ -1483,6 +1482,9 @@ export function useImportSession(deps: {
         }
         if (open.length)
           return `${open.length} ${open.length === 1 ? 'region needs' : 'regions need'} a fix — close the gap, split, or mark "not a piece"`;
+        // D6: a piece in the export twice (a copy, a sheet drawn again) or in halves is asked
+        const sq = sheetQuestion(s.pieces?.sheets, inputs.sheetAnswers);
+        if (sq) return sq.text;
         return null;
       }
       case 'meaning': {
@@ -1571,7 +1573,6 @@ export function useImportSession(deps: {
         cleanEdits: inputs.cleanEdits,
         scopes: rc().scopes.length,
         fabricsEdited: inputs.assignment != null,
-        sheetPicked: inputs.sheetPicked,
       });
 
   // ── N1 auto-advance: forward through every step that asks nothing ─────────────────────

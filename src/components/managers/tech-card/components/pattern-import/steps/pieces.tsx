@@ -17,6 +17,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
+import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
@@ -290,6 +291,8 @@ export function PiecesStep({
       ? zoomCand.bbox
       : null;
   const asides = out.setAside ?? [];
+  // D6: a piece (or a whole tile sheet) drawn twice, or one cut between two sheets — asked here
+  const sheetQ = sheetQuestion(out.sheets, api.inputs.sheetAnswers);
   const asideKey = (a: SetAside) => (a.seed ? `label:${a.reason}` : a.reason);
   const asideGroups = [...new Set(asides.map(asideKey))].map((k) => ({
     key: k,
@@ -823,6 +826,57 @@ export function PiecesStep({
                 {named.evidence.join(' · ')}
               </Text>
             </div>
+          )}
+          {sheetQ && (
+            <CalloutBox tone='warning' className='mb-2 flex flex-col gap-1.5 py-1.5'>
+              <Text size='micro' component='p'>
+                ! {sheetQ.text}
+              </Text>
+              <Text size='micro' variant='label' component='p'>
+                {(
+                  out.sheets?.alternatives.find((x) => x.key === sheetQ.key)?.evidence ??
+                  out.sheets?.copies.find((x) => x.key === sheetQ.key)?.evidence ??
+                  out.sheets?.splits.find((x) => x.key === sheetQ.key)?.evidence ??
+                  []
+                ).join(' · ')}
+              </Text>
+              <div className='flex flex-wrap gap-2'>
+                {(sheetQ.kind === 'alternative'
+                  ? ([
+                      ['keep', 'keep one sheet'],
+                      ['union', 'different pieces — keep both'],
+                    ] as const)
+                  : sheetQ.kind === 'copy'
+                    ? ([
+                        ['copy', 'one piece drawn twice — keep one'],
+                        ['both', 'two pieces'],
+                      ] as const)
+                    : sheetQ.kind === 'empty'
+                      ? ([['empty', 'no piece on this sheet']] as const)
+                      : ([
+                          ['separate', 'separate pieces'],
+                          ['halves', 'one piece cut between the sheets'],
+                        ] as const)
+                ).map(([answer, label]) => (
+                  <Button
+                    key={answer}
+                    variant='secondary'
+                    size='sm'
+                    disabled={!!session.busy}
+                    onClick={() =>
+                      void api.dispatch({
+                        type: 'sheet-answer',
+                        key: sheetQ.key,
+                        answer,
+                        edits: sheetAnswerEdits(out.sheets, sheetQ.key, answer),
+                      })
+                    }
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </CalloutBox>
           )}
           {(out.grade?.ambiguities ?? []).map((a, i) => (
             <Text key={i} size='micro' component='p' className='mb-2 text-warning'>

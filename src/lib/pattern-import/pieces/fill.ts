@@ -45,6 +45,7 @@ import {
   traceOuter,
 } from './raster';
 import { pageMarginIds } from 'lib/pattern-import/chains/classify';
+import { chainView, partAt, sheetView } from 'lib/pattern-import/assemble/composite';
 import { gradeView } from 'lib/pattern-import/chains/face-role';
 
 import { type Bridge, wallBridges } from './bridges';
@@ -449,6 +450,13 @@ function alongShare(pts: readonly PtMm[], outer: readonly PtMm[], tol: number): 
   return n ? hit / n : 0;
 }
 
+/**
+ * D6 (one PDF = one garment, every tile sheet in one drawing): the pieces of each tile sheet are
+ * filled on THAT sheet alone — its lines, texts and tiles (`sheetView`), the other sheets' chains
+ * masked (`chainView`). Nothing the fill measures across a sheet (the grade model's lane step, the
+ * wall model's label ranks, frames, lone portions) can then mix two sheets: every sheet's pieces
+ * come out as they did when the sheet was imported alone. One sheet = the fill as before.
+ */
 export function fillPiecesDetailed(
   sheet: Sheet,
   set: ChainSet,
@@ -458,6 +466,67 @@ export function fillPiecesDetailed(
   progress?: (done: number, total: number, note?: string) => void,
   edits: WallEdits = {},
   /** D4: a sub-fill of a mixed sheet's guarded seeds, on the solver's walls only */
+  solved?: GradeHook,
+): { families: PieceFamily[]; diag: FillDiag } {
+  const parts = sheet.parts;
+  if (!parts || parts.length < 2)
+    return fillOneSheet(sheet, set, run, seeds, opts, progress, edits, solved);
+  const t0 = Date.now();
+  const families: PieceFamily[] = [];
+  let diag: FillDiag | null = null;
+  const amb: NonNullable<GradeHook['ambiguities']> = [];
+  parts.forEach((part, k) => {
+    const mine = seeds.filter((s) => partAt(parts, s.at)?.sheet === part.sheet);
+    if (!mine.length) return;
+    if (opts.only && !mine.some((s) => opts.only!.has(s.id))) return;
+    const sub = progress
+      ? (d: number, t: number, n?: string) =>
+          progress(k * 100 + (d / Math.max(1, t)) * 100, parts.length * 100, n)
+      : undefined;
+    const r = fillOneSheet(
+      sheetView(sheet, part),
+      chainView(set, parts, part.sheet),
+      run,
+      mine,
+      opts,
+      sub,
+      edits,
+      solved,
+    );
+    families.push(...r.families);
+    amb.push(...(r.diag.grade?.ambiguities ?? []));
+    diag = !diag
+      ? r.diag
+      : {
+          ...diag,
+          duplicates: [...diag.duplicates, ...r.diag.duplicates],
+          cand: new Map([...diag.cand, ...r.diag.cand]),
+          frames: [...diag.frames, ...r.diag.frames],
+          rescued: diag.rescued + r.diag.rescued,
+          grade: diag.grade ?? r.diag.grade,
+        };
+  });
+  const d: FillDiag = diag ?? {
+    model: { mode: 'single', n: 0, emptyRanks: [] },
+    duplicates: [],
+    cand: new Map(),
+    frames: [],
+    rescued: 0,
+    ms: 0,
+  };
+  if (d.grade) d.grade = { ...d.grade, ambiguities: amb };
+  d.ms = Date.now() - t0;
+  return { families, diag: d };
+}
+
+function fillOneSheet(
+  sheet: Sheet,
+  set: ChainSet,
+  run: SizeRun,
+  seeds: Seed[],
+  opts: FillOpts & { splitTouching?: boolean; only?: ReadonlySet<number> },
+  progress?: (done: number, total: number, note?: string) => void,
+  edits: WallEdits = {},
   solved?: GradeHook,
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();

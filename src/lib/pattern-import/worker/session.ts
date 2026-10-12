@@ -7,6 +7,7 @@
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
 import type {
+  AllowanceDecision,
   BackgroundKind,
   ChainAmbiguity,
   ChromeLine,
@@ -41,6 +42,9 @@ import type {
   SizeRun,
   SourceDoc,
   SheetClean,
+  SheetAnswer,
+  SheetCover,
+  SheetPieces,
   SourceFileInfo,
   StageIO,
   StageName,
@@ -75,7 +79,7 @@ import {
   UnsupportedFormat,
   type ExtractorRegistry,
 } from '../adapters/sniff';
-import { assembleSheetDetailed, classifyPages } from '../assemble';
+import { assembleAllSheets, classifyPages } from '../assemble';
 import {
   applyMasks,
   cleanPages,
@@ -126,6 +130,9 @@ import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
+import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
+import { tileSheetIds } from '../assemble';
+import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -321,6 +328,9 @@ export class Session {
   private chromeSrc = new Map<string, BackgroundKind>();
   /** A0.3: sheet path ids the sheet pass (8b) offers and the operator did not take. */
   private sheetOffered = new Set<number>();
+  /** D6: the last pieces run's cross-sheet reading and the answers it was given (G23). */
+  private sheetRead: SheetPieces | null = null;
+  private sheetAnswers: Record<string, SheetAnswer> = {};
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -466,6 +476,8 @@ export class Session {
       this.wallSet = null;
       this.pieceSession = null;
       this.pieceWallEdits = [];
+      this.sheetRead = null;
+      this.sheetAnswers = {};
       this.pieceKey = '';
     }
     if (at < ORDER.indexOf('semantics')) {
@@ -934,11 +946,12 @@ export class Session {
     } else {
       await this.ensureDocs(ctx);
       const docs = this.docs!;
-      const tiles = this.pages.filter((p) => p.cls === 'tile' && p.sheet === input.sheet);
+      // D6: one file is one garment — every tile sheet goes into the drawing, side by side
+      const tiles = this.pages.filter((p) => p.cls === 'tile');
       if (!tiles.length)
         throw new ImportError(
           'out-of-order',
-          `no pattern tiles for sheet ${input.sheet + 1} — the pages were read as cover / instructions only`,
+          'no pattern tiles — the pages were read as cover / instructions only',
           'assemble',
         );
       ctx.checkCancel();
@@ -955,9 +968,13 @@ export class Session {
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       // P2: numbered DXF layers are AAMA layers only when the reader proved the dialect
       this.aamaLayers = docs.some((d) => AAMA_DIALECTS.has(d.file.dxf?.dialect ?? ''));
-      sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
-        ctx.progress(d, t, n);
-      }).sheet;
+      sheet = assembleAllSheets(
+        docs,
+        this.pages,
+        input.override,
+        (d, t, n) => ctx.progress(d, t, n),
+        input.probeSheets,
+      ).sheet;
       // Page geometry is no longer needed once the sheet exists (memory hygiene, see the header).
       this.docs = null;
     }
@@ -1017,31 +1034,48 @@ export class Session {
           .filter((p) => this.sheetOffered.has(p.id) || this.offeredSrc.has(srcKey(p.src)))
           .map((p) => p.id),
       );
-      // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
-      const feed = sheetFeed(sheet, this.files, this.docTextSrc, this.pages);
-      const countFeed = {
-        texts: feed.texts,
-        files: feed.files,
-        models: variantLabels(feed.texts.map((t) => t.text)).length,
-        // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
-        // graded look against it is asked, never held silently
-        sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
+      const build = (one: Sheet, sub: Progress) => {
+        // gb2: the face pass's size count reads only what feeds this sheet (A6 sheetFeed)
+        const feed = sheetFeed(one, this.files, this.docTextSrc, this.pages);
+        const countFeed = {
+          texts: feed.texts,
+          files: feed.files,
+          models: variantLabels(feed.texts.map((t) => t.text)).length,
+          // the source's own one-size reading (sizes/detect: one file, a size in its name) — a
+          // graded look against it is asked, never held silently
+          sourceOne: this.files.length === 1 ? fileSizeLabel(this.files[0].name) : null,
+        };
+        return buildChainsDetailed(
+          one,
+          { ...input.opts },
+          {
+            extraTexts: this.docTexts,
+            fileNames: this.fileNames,
+            offeredPaths,
+            countFeed,
+            aamaLayers: this.aamaLayers,
+          },
+          (d, t, n) => {
+            ctx.checkCancel();
+            sub(d, t, n);
+          },
+        ).set;
       };
-      set = buildChainsDetailed(
-        sheet,
-        { ...input.opts },
-        {
-          extraTexts: this.docTexts,
-          fileNames: this.fileNames,
-          offeredPaths,
-          countFeed,
-          aamaLayers: this.aamaLayers,
-        },
-        (d, t, n) => {
-          ctx.checkCancel();
-          ctx.progress(d, t, n);
-        },
-      ).set;
+      // D6: every tile sheet's lines are read on that sheet alone (its pens, its legend, its size
+      // labels — what it was alone), then joined: the same size label is one size row
+      const parts = sheet.parts;
+      set =
+        parts && parts.length > 1
+          ? joinSheetChains(
+              parts.map((part, i) => ({
+                sheet: part.sheet,
+                set: build(sheetView(sheet, part), (d, t, n) =>
+                  ctx.progress(i + d / Math.max(1, t), parts.length, n),
+                ),
+              })),
+              sheet.styles,
+            )
+          : build(sheet, (d, t, n) => ctx.progress(d, t, n));
       // The operator's legend: role / size label per class; two size rows given one label are one
       // size (a size drawn in two looks).
       set = withClassSigs(set, sheet.styles);
@@ -1097,7 +1131,11 @@ export class Session {
       );
     this.run = run;
     this.sizeMap = map;
-    return { run, map, expected, countAsk };
+    // D6: one legend for the document — the sheets must draw the same size pens
+    const sheetLeg = this.fast
+      ? null
+      : sheetLegend(this.sheet.parts, this.chains.classes, this.chains.chains);
+    return { run, map, expected, countAsk, ...(sheetLeg ? { sheetLegend: sheetLeg } : {}) };
   }
 
   /**
@@ -1385,8 +1423,11 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
-    // A10 (Codex #1): the models THIS sheet prints — never the text of every page (another
-    // sheet's tiles, an instruction or overview page naming every model of the magazine)
+    // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
+    this.sheetAnswers = input.sheetAnswers ?? {};
+    this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
+    // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
+    // of an instruction or overview page naming every model of the magazine
     const variants = variantLabels(sheet.texts.map((t) => t.text));
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
@@ -1395,6 +1436,7 @@ export class Session {
     return {
       seeds: shown,
       families,
+      sheets: this.sheetRead,
       variants,
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
@@ -1402,6 +1444,65 @@ export class Session {
   }
 
   // ── semantics (F5) ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * D6: the allowance each tile sheet states or measures, read as that sheet alone read it (its
+   * texts, its pieces, its lines; else the instruction pages' statement). Null when the drawing is
+   * one sheet or no sheet reads one (the file-level path then asks). The file decision is the
+   * sheet with the most pieces; every piece of a sheet that reads otherwise carries its own
+   * sheet's decision, and the disagreement is written into every such decision's evidence.
+   */
+  private sheetAllowances(
+    sheet: Sheet,
+    set: ChainSet,
+  ): { file: AllowanceDecision; bySeed: Record<number, AllowanceDecision> } | null {
+    const parts = sheet.parts;
+    if (!parts || parts.length < 2 || !this.families) return null;
+    const at = new Map((this.seeds ?? []).map((sd) => [sd.id, sd.at]));
+    const silent: number[] = [];
+    const reads = parts.flatMap((part) => {
+      const fams = this.families!.filter((f) => {
+        const p = at.get(f.seed);
+        return !!p && partAt(parts, p)?.sheet === part.sheet;
+      });
+      if (!fams.length) return [];
+      const own = detectAllowance(sheetView(sheet, part), fams, chainView(set, parts, part.sheet));
+      // the statement is often on an instruction page, not on the sheet itself
+      const d = own.origin !== 'default' ? own : allowanceFromTexts(this.docTexts).decision;
+      if (!d) silent.push(part.sheet + 1);
+      return d ? [{ part, fams, d }] : [];
+    });
+    if (!reads.length) return null;
+    // a sheet that states nothing takes the file decision — said, never silent
+    const quiet = silent.length
+      ? [`tile sheet ${silent.join(', ')} states no allowance: its pieces take this one`]
+      : [];
+    const key = (d: AllowanceDecision) => `${d.meaning}/${d.allowanceMm}`;
+    if (new Set(reads.map((r) => key(r.d))).size < 2) {
+      const main = [...reads].sort((a, b) => b.fams.length - a.fams.length)[0];
+      return { file: { ...main.d, evidence: [...main.d.evidence, ...quiet] }, bySeed: {} };
+    }
+    const said = reads
+      .map((r) => `sheet ${r.part.sheet + 1}: ${r.d.meaning} ${r.d.allowanceMm} mm`)
+      .join(', ');
+    const main = [...reads].sort((a, b) => b.fams.length - a.fams.length)[0];
+    const note = `the tile sheets read different allowances (${said}) — each sheet's pieces take their own sheet's`;
+    const bySeed: Record<number, AllowanceDecision> = {};
+    for (const r of reads)
+      if (r !== main)
+        for (const f of r.fams)
+          bySeed[f.seed] = {
+            ...r.d,
+            evidence: [`tile sheet ${r.part.sheet + 1}`, ...r.d.evidence, note],
+          };
+    return {
+      file: {
+        ...main.d,
+        evidence: [`tile sheet ${main.part.sheet + 1}`, ...main.d.evidence, note, ...quiet],
+      },
+      bySeed,
+    };
+  }
 
   private semanticsStage(
     input: StageIO['semantics']['in'],
@@ -1415,8 +1516,14 @@ export class Session {
       throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
     // Nobody decided the file's allowance yet: what the sheet says (text in 9 languages, or the gap
     // between two nested loops) beats the owner default. The decision rides on every spec.
-    const fileAllowance =
-      input.fileAllowance.origin === 'default'
+    // D6: a drawing of several tile sheets — each sheet states (or measures) its own allowance; where
+    // they disagree, each sheet's pieces take their own sheet's (as each sheet imported alone did),
+    // written into every such piece's evidence — never one sheet's value over the other's pieces
+    const perSheet =
+      input.fileAllowance.origin === 'default' ? this.sheetAllowances(sheet, set) : null;
+    const fileAllowance = perSheet
+      ? perSheet.file
+      : input.fileAllowance.origin === 'default'
         ? (() => {
             const found = detectAllowance(sheet, this.families!, set);
             if (found.origin !== 'default') return found;
@@ -1431,6 +1538,18 @@ export class Session {
             return ctx.length ? { ...input.fileAllowance, evidence: ctx } : input.fileAllowance;
           })()
         : input.fileAllowance;
+    const pieceOverrides = perSheet
+      ? Object.fromEntries(
+          [
+            ...Object.keys(perSheet.bySeed).map(Number),
+            ...Object.keys(input.pieceOverrides).map(Number),
+          ].map((seed) => {
+            const ov = input.pieceOverrides[seed] ?? {};
+            const own = perSheet.bySeed[seed];
+            return [seed, ov.allowance || !own ? ov : { ...ov, allowance: own }];
+          }),
+        )
+      : input.pieceOverrides;
     const detail = buildPieceSpecsDetailed(
       {
         sheet,
@@ -1439,6 +1558,7 @@ export class Session {
         sizeMap: this.sizeMap,
         families: this.families,
         ...input,
+        pieceOverrides,
         fileAllowance,
         traced: this.traced(),
         docTexts: this.docTexts,
@@ -1477,6 +1597,29 @@ export class Session {
    * PASSPORT Ф1: each piece as the passport binds it — its exported identities, the layer of every
    * wall chain of its outline (every size), the printed label it was seeded from.
    */
+  /**
+   * D6 (G23): the garment's tile sheets as this run read them — over the whole garment (every
+   * fabric scope gets the same verdict); null = one sheet (nothing to check).
+   */
+  private sheetCover(exportedSeeds: readonly SeedId[]): SheetCover | null {
+    const parts = this.sheet?.parts;
+    if (this.fast || !parts || parts.length < 2) return null;
+    const expected = (this.passportBound?.pieces ?? []).filter(
+      (e) => e.drawn?.value !== 'by-dimensions' && e.drawn?.value !== 'trace-from',
+    );
+    return sheetCoverOf({
+      parts,
+      tileSheets: tileSheetIds(this.pages),
+      read: this.sheetRead,
+      answers: this.sheetAnswers,
+      exported: exportedSeeds,
+      expected: expected.map((e) => ({
+        name: e.label?.value ?? e.name.value,
+        bound: !!e.binding,
+      })),
+    });
+  }
+
   private bindPieces(out: SemanticsOutput, set: ChainSet, sheet: Sheet): BindPiece[] {
     const chainById = new Map(set.chains.map((c) => [c.id, c]));
     const layerOf = new Map(sheet.styles.map((st) => [st.id, st.layer]));
@@ -1608,6 +1751,16 @@ export class Session {
             : this.sheet?.pairs[0]?.method ?? 'single',
         maxResidualMm: Math.max(0, ...(this.sheet?.poses.map((p) => p.residualMm) ?? [0])),
       },
+      // D6: every tile sheet the drawing is made of
+      ...((this.sheet?.parts?.length ?? 0) > 1
+        ? {
+            sheets: this.sheet!.parts!.map((p) => ({
+              sheet: p.sheet,
+              pages: p.pages.length,
+              maxResidualMm: p.maxResidualMm,
+            })),
+          }
+        : {}),
       sizeEncoding: this.run?.encoding ?? 'single',
       variant: sem.pieces.find((p) => p.variant)?.variant ?? null,
     };
@@ -1674,6 +1827,7 @@ export class Session {
           pts: p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts,
         });
       }
+    const sheets = this.sheetCover(sem.pieces.map((p) => p.seed));
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -1705,6 +1859,7 @@ export class Session {
             : undefined,
           chrome,
           openFolds,
+          ...(sheets ? { sheets } : {}),
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );

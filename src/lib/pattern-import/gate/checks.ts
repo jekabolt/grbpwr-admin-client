@@ -1702,3 +1702,43 @@ export function g21(ctx: GateCtx): GateCheck {
         : 'no block closed through continuity walls',
   );
 }
+
+// ── G23 (D6): every tile sheet in the export, no piece twice or in halves ─────────────────────
+
+/**
+ * G23 (D6, one PDF = one garment): every tile sheet the pages carry is in the drawing; every sheet
+ * that holds pieces exports at least one (none dropped silently); and no cross-sheet question that
+ * would put a piece in the export twice (a copy, an alternative rendering of the whole pattern) or
+ * in halves (a piece split between sheets) is left open. The passport's expected pieces (when it
+ * lists them) are compared in the note — an expectation, never a block.
+ */
+export function g23(ctx: GateCtx): GateCheck {
+  const sc = ctx.expect.sheets;
+  if (!sc) return check('G23-sheets', [], 'block', 'one tile sheet (nothing to check)');
+  const problems: string[] = [];
+  const inDrawing = new Set(sc.parts.map((p) => p.sheet));
+  const gone = sc.tileSheets.filter((k) => !inDrawing.has(k));
+  if (gone.length)
+    problems.push(`tile sheet ${gone.map((k) => k + 1).join(', ')} is not in the drawing`);
+  for (const p of sc.parts)
+    if (p.pieces > 0 && p.exported === 0)
+      problems.push(
+        `sheet ${p.sheet + 1} holds ${p.pieces} ${p.pieces === 1 ? 'piece' : 'pieces'}, none is in the export`,
+      );
+  problems.push(...sc.open);
+  const found = sc.parts.map((p) => `sheet ${p.sheet + 1}: ${p.exported}/${p.pieces}`).join(', ');
+  const passport =
+    sc.expected != null
+      ? `; passport expects ${sc.expected} pieces${sc.expectedMissing?.length ? `, not found: ${sc.expectedMissing.slice(0, 6).join(', ')}` : ''}`
+      : '';
+  return check(
+    'G23-sheets',
+    problems.length ? ['*'] : [],
+    'block',
+    problems.length
+      ? `${problems.join('; ')} (exported per sheet ${found})${passport}`
+      : `every tile sheet is in the export (${found})${passport}`,
+    `${sc.parts.length} sheets`,
+    'every sheet with pieces exports; no piece twice or in halves',
+  );
+}

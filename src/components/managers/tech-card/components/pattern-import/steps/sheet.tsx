@@ -11,7 +11,6 @@ import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
-import { sheetFromCard } from '../autopilot/card-match';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, vy } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
@@ -19,6 +18,19 @@ import { Field, NativeSelect, NumberField, Panel, SplitStage, fmtMm } from '../u
 import { SheetCleanRows } from './files-clean';
 
 const keyOf = (p: { file: string; page: number }) => `${p.file}:${p.page}`;
+
+/** "p3–17" (pages are 0-based; several files: "2/p3–17 …"). */
+function pageSpan(pages: readonly { file: string; page: number }[]): string {
+  const byFile = new Map<string, number[]>();
+  for (const p of pages) byFile.set(p.file, [...(byFile.get(p.file) ?? []), p.page + 1]);
+  return [...byFile]
+    .map(([f, ps]) => {
+      const lo = Math.min(...ps);
+      const hi = Math.max(...ps);
+      return `${byFile.size > 1 ? `${Number(f) + 1}/` : ''}p${lo}${hi > lo ? `–${hi}` : ''}`;
+    })
+    .join(' ');
+}
 
 /** One SVG path for the whole preview: thousands of <polyline>s would make pan and zoom crawl. */
 function pathData(arrays: readonly Float32Array[]): string {
@@ -32,30 +44,22 @@ function pathData(arrays: readonly Float32Array[]): string {
   return parts.join('');
 }
 
-export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardContext }) {
+export function SheetStep({ api }: { api: ImportSessionApi; card?: CardContext }) {
   const { session, inputs, patchInputs } = api;
-  // A10: the sheet the card names (its name / style number / the file names) — a suggestion,
-  // one click to import it; nothing is picked silently
-  const named = useMemo(
-    () =>
-      card && inputs.sheetPicked === null
-        ? sheetFromCard(
-            session.pages,
-            card,
-            session.files.map((f) => f.name),
-          )
-        : null,
-    [card, inputs.sheetPicked, session.pages, session.files],
-  );
   const out = session.sheet;
   const [picked, setPicked] = useState<string | null>(null);
   const multiFile = new Set(out?.sheet.poses.map((p) => p.file) ?? []).size > 1;
   const fileName = (id: string) => session.files.find((f) => f.id === id)?.name ?? `file ${id}`;
   /** A1, B3 … in the tile grid; with a file-per-size set the file says which drawing. */
+  // D6: several tile sheets each number their tiles from A1 — the sheet says which
+  const partOf = (p: PagePose) =>
+    (out?.sheet.parts?.length ?? 0) > 1
+      ? out?.sheet.parts?.find((q) => q.pages.some((x) => x.file === p.file && x.page === p.page))
+      : undefined;
   const tileName = (p?: PagePose) =>
     !p
       ? '?'
-      : `${multiFile ? `${Number(p.file) + 1}/` : ''}${
+      : `${partOf(p) ? `s${partOf(p)!.sheet + 1}·` : ''}${multiFile ? `${Number(p.file) + 1}/` : ''}${
           p.row == null || p.col == null
             ? `p${p.page + 1}`
             : `${String.fromCharCode(65 + p.row)}${p.col + 1}`
@@ -77,7 +81,9 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
     () => (out?.clean ? pathData(out.clean.masked.flatMap((m) => m.lines)) : ''),
     [out],
   );
-  // Tile sheets of the files (a Burda file carries two; r4454 a main sheet + interfacing).
+  // Tile sheets of the files (a Burda file carries two; r4454 a main sheet + interfacing) — D6:
+  // every one is in the drawing; the hand grid is set on one of them.
+  const [gridSheet, setGridSheet] = useState<number>(inputs.sheetIndex);
   const sheets = useMemo(
     () =>
       [
@@ -201,65 +207,40 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
       side={
         <Panel title='registration'>
           {sheets.length > 1 && (
-            <Field label='sheet' className='mb-2'>
-              <NativeSelect
-                value={String(sheet.id)}
-                disabled={!!session.busy}
-                onChange={(v) =>
-                  void api.dispatch({ type: 'sheet', sheet: Number(v), override: undefined })
-                }
-                options={sheets.map((n) => ({
-                  value: String(n),
-                  label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
-                }))}
-              />
-              {/* A10: a file with several sheets asks which one — this one is one click */}
-              {named?.pick != null && (
-                <>
-                  <Button
-                    variant='secondary'
-                    size='sm'
-                    className='mt-1'
-                    disabled={!!session.busy}
-                    onClick={() =>
-                      void api.dispatch({
-                        type: 'sheet',
-                        sheet: named.pick,
-                        override: named.pick === sheet.id ? inputs.gridOverride : undefined,
-                      })
-                    }
-                  >
-                    import sheet {named.pick + 1} ·{' '}
-                    {named.strong ? 'the card names it' : 'suggested by the card'}
-                  </Button>
-                  <Text size='micro' variant='label' component='p' className='mt-1'>
-                    {named.evidence.join(' · ')}
-                  </Text>
-                </>
-              )}
-              {named?.pick == null && named?.why && (
-                <Text size='micro' component='p' className='mt-1 text-warning'>
-                  ! {named.why}
-                </Text>
-              )}
-              {inputs.sheetPicked === null && named?.pick !== sheet.id && (
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  className='mt-1'
-                  disabled={!!session.busy}
-                  onClick={() =>
-                    void api.dispatch({
-                      type: 'sheet',
-                      sheet: sheet.id,
-                      override: inputs.gridOverride,
-                    })
-                  }
-                >
-                  import sheet {sheet.id + 1}
-                </Button>
-              )}
-            </Field>
+            <>
+              <Text size='micro' variant='label' component='p' className='mb-1'>
+                {sheets.length} tile sheets — one garment: every sheet is imported, side by side
+              </Text>
+              <DataTable>
+                <thead>
+                  <tr>
+                    <th data-align='left'>sheet</th>
+                    <th>tiles</th>
+                    <th>pages</th>
+                    <th>worst</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(sheet.parts ?? []).map((p) => (
+                    <tr key={p.sheet}>
+                      <td data-align='left'>sheet {p.sheet + 1}</td>
+                      <td>{p.pages.length}</td>
+                      <td>{pageSpan(p.pages)}</td>
+                      <td
+                        className={
+                          p.maxResidualMm > PATIMPORT.registrationMaxResidualMm || p.missing
+                            ? 'text-error'
+                            : undefined
+                        }
+                      >
+                        {fmtMm(p.maxResidualMm)}
+                        {p.missing ? ` · ${p.missing} missing` : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </>
           )}
           <Row label='tiles placed' value={sheet.poses.length} />
           <Row
@@ -373,6 +354,18 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
             printed.
           </Text>
           <div className='grid grid-cols-2 gap-2'>
+            {sheets.length > 1 && (
+              <Field label='grid of sheet' className='col-span-2'>
+                <NativeSelect
+                  value={String(gridSheet)}
+                  onChange={(v) => setGridSheet(Number(v))}
+                  options={sheets.map((n) => ({
+                    value: String(n),
+                    label: `sheet ${n + 1} · ${tilesIn(n)} tiles`,
+                  }))}
+                />
+              </Field>
+            )}
             <Field label='rows'>
               <NumberField
                 value={grid.rows}
@@ -422,12 +415,14 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
               onClick={() =>
                 void api.dispatch({
                   type: 'sheet',
-                  sheet: sheet.id,
+                  sheet: gridSheet,
                   override: {
                     ...grid,
-                    // The hand grid starts at the first tile page of THIS sheet, in file order.
+                    // The hand grid starts at the first tile page of THAT sheet, in file order.
                     originPage: (() => {
-                      const t = session.pages.find((p) => p.cls === 'tile' && p.sheet === sheet.id);
+                      const t = session.pages.find(
+                        (p) => p.cls === 'tile' && (p.sheet ?? 0) === gridSheet,
+                      );
                       return {
                         file: t?.file ?? first?.file ?? '0',
                         page: t?.page ?? first?.page ?? 0,
@@ -444,7 +439,7 @@ export function SheetStep({ api, card }: { api: ImportSessionApi; card?: CardCon
                 variant='underline'
                 size='xs'
                 className='text-labelColor hover:text-textColor'
-                onClick={() => void api.dispatch({ type: 'sheet', sheet: sheet.id })}
+                onClick={() => void api.dispatch({ type: 'sheet', sheet: 0 })}
               >
                 back to detected
               </Button>

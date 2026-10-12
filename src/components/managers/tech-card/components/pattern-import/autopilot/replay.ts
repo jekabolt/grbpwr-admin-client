@@ -29,6 +29,7 @@ import type {
   ReplayAnswer,
   Seed,
   SeedId,
+  SheetAnswer,
   SizeMapEntry,
   SourceFileInfo,
   WizardEvent,
@@ -42,7 +43,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import type { CardContext } from '../client';
 import type { Inputs, LegendEdit } from '../use-import-session';
-import { PAGE_SURE, sizeFlags, tileSheets, weakAsides, type AutoResolver } from '../auto-advance';
+import { PAGE_SURE, sizeFlags, weakAsides, type AutoResolver } from '../auto-advance';
 import { PREFILL_QUESTION } from '../auto-drive';
 import { answersNowOf, liveAnswers, liveDrawnSizes, openQuestions, questionKey } from '../answers';
 import { assumptionKey, mergeAssumptions, type Assumption, type AssumptionKind } from './types';
@@ -67,6 +68,12 @@ import {
   type Anchor,
   type EncEdit,
 } from './replay-record';
+import { movePoints, placedAnswers, wasLayout } from './replay-sheets';
+import {
+  sheetAnswerEdits,
+  sheetLegendQuestion,
+  sheetQuestion,
+} from 'lib/pattern-import/pieces/sheets';
 
 // ── which previous import ───────────────────────────────────────────────────────────────────────
 
@@ -338,6 +345,8 @@ type Ctx = ReplaySnapshot & {
    * list) is never given again — the operator may have changed it since, and that stands.
    */
   fresh: (kind: AssumptionKind, o: { seed?: SeedId; ref?: string; subject?: string }) => boolean;
+  /** D6: a point of the record → the drawing now (its sheet's shift; far away = not here). */
+  move: (p: PtMm) => PtMm;
 };
 
 const near = (a: PtMm, b: PtMm, tol: number) => Math.hypot(a.x - b.x, a.y - b.y) <= tol;
@@ -352,12 +361,16 @@ const landsOn = (now: Anchor, was: Anchor) =>
 export function replayAnswer(x: ReplaySnapshot, prior: Prior): ReplayResult {
   const misses: ReplayMiss[] = [];
   const done = new Set(x.inputs.autopilot.filter(isReplayed).map(assumptionKey));
+  // D6: the record's points in the drawing now (every tile sheet side by side)
+  const placed = placedAnswers(prior.answers, x.session, (k) => prior.files.get(k) ?? null);
+  prior = { ...prior, answers: placed.answers };
   const c: Ctx = {
     ...x,
     s: x.session,
     i: x.inputs,
     prior,
     misses,
+    move: placed.move,
     get: (kind) => prior.answers.find((a) => a.kind === kind),
     fileOf: (k) => prior.files.get(k) ?? null,
     miss: (key, why) => {
@@ -707,31 +720,22 @@ function gridOf(c: Ctx): { grid: GridOverride; e: ReplayAnswer } | null {
 function sheetStep(c: Ctx): Out | null {
   const { s, i } = c;
   const grid = gridOf(c);
-  const n = tileSheets(s.pages);
-  if (n > 1 && i.sheetPicked === null) {
-    const e = c.get('sheet-choice');
-    if (!e || !c.fresh('sheet-choice', e)) return null;
-    const sheet = (e.value as { sheet: number }).sheet;
-    const valid =
-      s.pages.some((p) => p.cls === 'tile' && (p.sheet ?? 0) === sheet) ||
-      (sheet >= 0 && sheet < n);
-    if (!valid) {
-      c.miss('sheet-choice', `tile sheet ${sheet + 1} is not in the file now`);
-      return null;
-    }
-    return {
-      events: [{ type: 'sheet', sheet, override: grid?.grid ?? i.gridOverride }],
-      as: [
-        R(c, e, 'sheet-choice', `tile sheet ${sheet + 1} of ${n}`, [sameFiles(c)]),
-        ...(grid
-          ? [R(c, grid.e, 'sheet-grid', 'the tile grid as set by hand', [sameFiles(c)])]
-          : []),
-      ],
-    };
-  }
+  // D6: no sheet is picked (every one is in the drawing); a hand grid is set on its own sheet
   if (grid && !i.gridOverride && c.fresh('sheet-grid', grid.e))
     return {
-      events: [{ type: 'sheet', sheet: i.sheetIndex, override: grid.grid }],
+      events: [
+        {
+          type: 'sheet',
+          sheet:
+            s.pages.find(
+              (p) =>
+                p.cls === 'tile' &&
+                p.file === grid.grid.originPage.file &&
+                p.page === grid.grid.originPage.page,
+            )?.sheet ?? 0,
+          override: grid.grid,
+        },
+      ],
       as: [
         R(c, grid.e, 'sheet-grid', `${grid.grid.rows}×${grid.grid.cols} tiles, as set by hand`, [
           sameFiles(c),
@@ -811,11 +815,12 @@ function offScope(c: Ctx, model: boolean): string | null {
     grid: ReturnType<typeof gridPrint>;
     variant: string | null;
   } | null;
-  const sheet = v
-    ? v.sheet
-    : (c.get('sheet-choice')?.value as { sheet?: number } | undefined)?.sheet ?? 0;
-  if (sheet !== c.i.sheetIndex)
-    return `the previous answers were given on tile sheet ${sheet + 1}, this run is on sheet ${c.i.sheetIndex + 1}`;
+  // D6: the drawing is every tile sheet; the previous answers stand on the sheets they were given
+  // on, as long as those are in the drawing now
+  const now = new Set((c.s.sheet?.sheet.parts ?? [{ sheet: 0 }]).map((p) => p.sheet));
+  const gone = wasLayout(c.prior.answers).parts.filter((w) => !now.has(w.k));
+  if (gone.length)
+    return `the previous answers were given on tile sheet ${gone[0].k + 1}, which is not in the drawing now`;
   if (v) {
     const now = gridPrint(c.i.gridOverride);
     const was = v.grid ? { ...v.grid, f: c.fileOf(v.grid.f) } : null;
@@ -830,6 +835,17 @@ function offScope(c: Ctx, model: boolean): string | null {
       return `the previous answers were given for ${variant ? `model "${variant}"` : 'every model'}, this run is on ${c.s.variant ? `model "${c.s.variant}"` : 'every model'}`;
   }
   return null;
+}
+
+/**
+ * D6: a record from before D6 that imported ONE tile sheet, replayed on a drawing of several: its
+ * size answers (the count, the size map by rank) were read on that sheet's lines alone — the ranks
+ * of the whole drawing may differ, so they are asked again. Null = not such a record.
+ */
+function aloneBefore(c: Ctx): string | null {
+  const parts = c.s.sheet?.sheet.parts ?? [];
+  const { parts: was, legacy } = wasLayout(c.prior.answers);
+  return legacy && parts.length > 1 ? `tile sheet ${was[0].k + 1} alone (before D6)` : null;
 }
 
 /** Off scope: said once (on a question), nothing replayed. */
@@ -930,12 +946,41 @@ function sizesStep(c: Ctx): Out | null {
         ],
       };
   }
+  // 2b · D6: the tile sheets draw different size rows — confirmed last time for the SAME rows on
+  // the same sheets (the signature), else asked again
+  const sl = c.get('sheet-legend');
+  const leg = s.sizes.sheetLegend;
+  if (sl && leg && sheetLegendQuestion(leg, i.sheetLegendOk)) {
+    const sig = (sl.value as { sig?: string }).sig;
+    if (sig !== leg.sig)
+      c.miss('sheet-legend', 'the tile sheets draw other size rows than when they were confirmed');
+    else if (c.fresh('sheet-legend', { ref: 'sheet-legend' }))
+      return {
+        patch: { sheetLegendOk: sig },
+        as: [
+          R(
+            c,
+            sl,
+            'sheet-legend',
+            'the tile sheets share the legend as read',
+            [sameFiles(c), 'the same size rows on the same sheets (signature)'],
+            { ref: 'sheet-legend' },
+          ),
+        ],
+      };
+  }
   // 3 · how many sizes the sheet draws
   const de = c.get('drawn-sizes');
   if (de) {
     const v = de.value as { n: number; sheet: number };
-    if (v.sheet !== i.sheetIndex)
-      c.miss('drawn-sizes', `the size count was answered for tile sheet ${v.sheet + 1}`);
+    // D6: the size count is the document's — one answered on a tile sheet alone (a record from
+    // before D6) is asked again when the drawing now has more sheets
+    const alone = aloneBefore(c);
+    if (alone)
+      c.miss(
+        'drawn-sizes',
+        `the size count was answered on ${alone} — the drawing now has every sheet`,
+      );
     else if (liveDrawnSizes(i, i) == null && c.fresh('drawn-sizes', de))
       return {
         events: [{ type: 'drawn-sizes', n: v.n }],
@@ -946,7 +991,10 @@ function sizesStep(c: Ctx): Out | null {
   }
   // 4 · the size map: a source size of the same rank AND label to a card size that still exists
   const me = c.get('size-map');
-  if (me) {
+  const alone = aloneBefore(c);
+  if (me && alone)
+    c.miss('size-map', `the size map was answered on ${alone} — the drawing now has every sheet`);
+  else if (me) {
     const prior =
       (me.value as { entries?: { r: number; l: string; c: { id: number; t: string } | null }[] })
         .entries ?? [];
@@ -1094,7 +1142,7 @@ function editsOf(c: Ctx): ReplayAnswer | undefined {
       break;
     }
     try {
-      edits.push(JSON.parse(mine.map((v) => v.text).join('')) as PieceEdit);
+      edits.push(movePoints(JSON.parse(mine.map((v) => v.text).join('')), c.move) as PieceEdit);
     } catch {
       whole = false;
       break;
@@ -1286,6 +1334,32 @@ function piecesStep(c: Ctx): Out | null {
   // the outlines kept aside on a guess, gone on past as before
   if (!c.question) return null;
   const weak = weakAsides(s.pieces.setAside);
+  // D6: the cross-sheet answers kept by key ("copy" / "keep" came back as the piece edits above)
+  const sq = sheetQuestion(s.pieces.sheets, i.sheetAnswers);
+  const se = c.get('sheet-pieces');
+  if (sq && se) {
+    const was = (se.value as { answers?: [string, SheetAnswer][] }).answers ?? [];
+    const hit = was.find(([k]) => k === sq.key);
+    const kind = sq.kind === 'alternative' ? 'sheet-alternative' : 'sheet-copy';
+    if (hit && c.fresh(kind, { ref: sq.key }))
+      return {
+        events: [
+          {
+            type: 'sheet-answer',
+            key: sq.key,
+            answer: hit[1],
+            edits: sheetAnswerEdits(s.pieces.sheets, sq.key, hit[1]),
+          },
+        ],
+        as: [
+          R(c, se, kind, hit[1], [sameFiles(c), 'the same pieces on the same sheets'], {
+            ref: sq.key,
+          }),
+        ],
+      };
+    if (!hit)
+      c.miss(`sheet-pieces|${sq.key}`, `pieces: not answered on the previous import — ${sq.text}`);
+  }
   const ae = c.get('asides-passed');
   if (!weak.length || !ae) return null;
   const was = (ae.value as { asides?: { id: number; at: PtMm; a: number }[] }).asides ?? [];

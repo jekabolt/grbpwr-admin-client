@@ -53,7 +53,7 @@ const CORPUS = [
   'dxf:POCKETS',
   'dxf:RC28-RC28-001-test-2',
   'kombinezon-A',
-  'polupalto-sheetA',
+  'polupalto',
 ];
 
 export async function main(): Promise<number> {
