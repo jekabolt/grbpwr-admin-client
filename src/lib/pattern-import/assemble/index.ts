@@ -10,6 +10,7 @@ import { accepted, stitchFree } from './stitch';
 export { classifyPages, pageFeatures } from './classify';
 export type { PageFeatures } from './classify';
 export { assembleSheet, assembleSheetDetailed, manualPoses } from './sheet';
+export { assembleAllSheets, partAt, SHEET_GAP_MM, tileSheetIds } from './composite';
 export type { SheetReport } from './sheet';
 export { solvePoses, solvePosesDetailed } from './solve';
 export type { SolveResult } from './solve';

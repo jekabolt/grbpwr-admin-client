@@ -27,11 +27,17 @@ import type {
   PtMm,
   Seed,
   SeedId,
+  SheetAnswer,
   SizeMapEntry,
   WizardEvent,
   WizardStep,
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
+import {
+  sheetAnswerEdits,
+  sheetLegendQuestion,
+  sheetQuestion,
+} from 'lib/pattern-import/pieces/sheets';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
 import { isKnownCode } from 'lib/pattern-import/dictionary/codes';
 import { notDrawnLine } from 'lib/pattern-import/sizes/map';
@@ -50,12 +56,12 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '../auto-advance';
+import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
 import { bulkNames, codeBlocked } from '../bulk-names';
 import { seedPoints } from './seeds';
-import { modelFromCard, sheetFromCard, weakReason } from './card-match';
+import { modelFromCard, weakReason } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
 import { aiAsideAssumptions } from './ai-pages';
 import { layerWordConflict, outlineByLayerWord } from './outline-word';
@@ -99,6 +105,8 @@ export type AutopilotAction =
   | { kind: 'seeds'; seeds: Seed[] }
   /** The tile sheet to import (sheet step). */
   | { kind: 'sheet'; sheet: number }
+  /** D6: a cross-sheet answer with the "not a piece" edits it stands for. */
+  | { kind: 'sheet-answer'; key: string; answer: SheetAnswer; edits: PieceEdit[] }
   /** Go on past an offer the run leaves as it is (pages set aside to check). */
   | { kind: 'proceed' }
   | { kind: 'drawn-sizes'; n: number }
@@ -325,6 +333,13 @@ function toWizard(
       return { proceed: true };
     case 'sheet':
       return { events: [{ type: 'sheet', sheet: a.sheet, override: i.gridOverride }] };
+    case 'sheet-answer':
+      return {
+        events: [
+          ...(s.step !== 'pieces' ? [{ type: 'back', to: 'pieces' } as WizardEvent] : []),
+          { type: 'sheet-answer', key: a.key, answer: a.answer, edits: a.edits },
+        ],
+      };
     case 'seeds':
       // `addSeed()` of the hook: the clicks join the first run's seeds, the fill runs again
       return {
@@ -499,6 +514,9 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
       return { seed: sd ?? null, name: a.answer };
     case 'fabric':
       return { seed: sd ?? null, fabrics: a.answer };
+    case 'sheet-copy':
+    case 'sheet-alternative':
+      return act?.kind === 'sheet-answer' ? { key: act.key, answer: act.answer } : null;
     default:
       return null;
   }
@@ -787,39 +805,9 @@ function scaleStep({ session: s, inputs: i, blocker }: Snap): AutopilotDecision 
 
 // ── sheet ───────────────────────────────────────────────────────────────────────────────────────
 
-function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
+function sheetStep({ session: s, inputs: i }: Snap): AutopilotDecision {
   const info: Assumption[] = [];
-  // Codex #2: which of several tile sheets is a question — answered only on evidence
-  const n = tileSheets(s.pages);
-  if (n > 1 && i.sheetPicked === null) {
-    const pick = sheetFromCard(s.pages, card, fileNamesOf(s));
-    if (pick.pick == null)
-      return stopAt(
-        'sheet',
-        `the file carries ${n} tile sheets and ${pick.why ?? 'nothing on the card names one'} — pick the sheet to import`,
-      );
-    // a suggestion (a file name, the order in the file, a bare number) is the operator's click
-    if (!pick.strong)
-      return stopAt(
-        'sheet',
-        `the file carries ${n} tile sheets and ${weakReason(`sheet ${pick.pick + 1}`, pick)} — pick the sheet to import`,
-      );
-    return {
-      actions: [{ kind: 'sheet', sheet: pick.pick }],
-      assumptions: [
-        A(
-          'sheet',
-          'sheet-choice',
-          'the file',
-          `tile sheet ${pick.pick + 1} of ${n}`,
-          'the one sheet the card names (a unique token-exact match)',
-          pick.evidence,
-          0.6,
-          true,
-        ),
-      ],
-    };
-  }
+  // D6 (one file = one garment): several tile sheets are one drawing — nothing is picked
   const waiting = waitingKinds(s.sheet?.clean?.items ?? []);
   if (waiting.size) {
     const d = acceptWaiting('sheet', waiting, i);
@@ -910,6 +898,9 @@ function sizesStep(snap: Snap): AutopilotDecision {
   if (!card.sizes.length) return stopAt('sizes', 'the card has no size range');
   const sz = s.sizes;
   if (!sz || !blocker) return NONE;
+  // D6: the sheets draw different size pens — which pen is which size is not proven: a stop
+  const lq = sheetLegendQuestion(sz.sheetLegend, i.sheetLegendOk);
+  if (lq && blocker === lq) return stopAt('sizes', lq);
   // H1: how many sizes the sheet draws
   if (sz.countAsk && !sz.expected) {
     const inf = sz.countAsk.inferred;
@@ -1255,6 +1246,38 @@ function piecesStep(snap: Snap): AutopilotDecision {
       'pieces',
       `${open.length} ${open.length === 1 ? 'region does' : 'regions do'} not close or ${open.length === 1 ? 'has' : 'have'} sizes held back — ${what}`,
     );
+  }
+  // D6: a piece (or a whole tile sheet) drawn twice is kept once only on two evidences (the same
+  // outline AND the same label) — one evidence, or a piece split between sheets, is a stop
+  const sq = sheetQuestion(s.pieces?.sheets, i.sheetAnswers);
+  if (sq) {
+    if (sq.kind === 'split' || !sq.strong) return stopAt('pieces', sq.text);
+    const read = s.pieces!.sheets!;
+    const answer = sq.kind === 'alternative' ? 'keep' : 'copy';
+    const edits = sheetAnswerEdits(read, sq.key, answer);
+    const alt = read.alternatives.find((x) => x.key === sq.key);
+    const cp = read.copies.find((x) => x.key === sq.key);
+    return {
+      actions: [{ kind: 'sheet-answer', key: sq.key, answer, edits }],
+      assumptions: [
+        A(
+          'pieces',
+          alt ? 'sheet-alternative' : 'sheet-copy',
+          alt
+            ? `tile sheets ${alt.keep + 1} and ${alt.drop + 1}`
+            : `the piece on sheets ${cp!.keep.sheet + 1} and ${cp!.copy.sheet + 1} («${cp!.keep.label}»)`,
+          alt
+            ? `sheet ${alt.drop + 1} is sheet ${alt.keep + 1} drawn again — its ${alt.ofDrop} pieces are not exported`
+            : `one piece drawn twice — the copy on sheet ${cp!.copy.sheet + 1} is not exported`,
+          'one file is one garment: a piece drawn on two sheets is kept once, on the same outline AND label',
+          (alt ?? cp)!.evidence,
+          0.8,
+          true,
+          undefined,
+          sq.key,
+        ),
+      ],
+    };
   }
   // the offer: piece-sized outlines set aside on a guess — kept aside only on positive evidence
   const weak = weakAsides(s.pieces?.setAside);

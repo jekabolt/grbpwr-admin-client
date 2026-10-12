@@ -66,7 +66,7 @@ import { fixturePageRoleDeps } from './page-roles-fixture';
 
 type Case = (typeof CASES)[number] & {
   /** A10 card controls: the run must stop ON this question, never pick (unreached = FAIL). */
-  expectStop?: 'sheet' | 'pieces';
+  expectStop?: 'pieces';
   /** The stop must be the card question (not another one of the step). */
   expectReason?: RegExp;
   /**
@@ -81,12 +81,16 @@ type Case = (typeof CASES)[number] & {
   expectVariant?: RegExp;
   /** Operator bypass: on the sheet question, "next" must not import the default sheet. */
   bypass?: boolean;
+  /**
+   * D6 control: the drawing must hold this many tile sheets and the run must never stop on the
+   * sheet step (no sheet is ever picked). Unreached (stopped before the sheet step) FAILS.
+   */
+  expectSheets?: number;
   /** The uploaded files' names, as given (a misleading file name). */
   renameFiles?: string[];
 };
 
 const MODEL_Q = /models? \(.*\) and /;
-const SHEET_Q = /tile sheets and /;
 /**
  * A10 controls of the card match (Codex review of 48068988): a card that names nothing, a model
  * not on the sheet, two models (written apart and as a compact list), a misleading file name, two
@@ -127,30 +131,27 @@ const CONTROLS: Case[] = [
     variant: /A/,
     truth: { id: 'kombinezon', variant: 0 },
   }),
+  // D6 (one PDF = one garment): a file of several tile sheets is never a sheet question — whatever
+  // the card names (a sheet letter, nothing, a model spread over both), the run imports EVERY sheet
+  // and never stops on the sheet step. (Replaces the A10 "pick the sheet" controls of 11.10.)
   ...(
     [
       ['none', 'Mantel & Jacke 44-54'],
-      ['two', 'Mantel & Jacke · Bogen A + Bogen B'],
-      ['compact', 'Mantel & Jacke · Bogen A/B'],
+      ['sheetB', 'Mantel & Jacke · Bogen B'],
       ['spread', 'Mantel & Jacke Mod. 7142 · Bogen B'],
-      ['bare', 'Mantel & Jacke 7142'],
     ] as const
   ).flatMap(([k, name]) =>
-    fromCase('polupalto-sheetB', {
-      id: `control:polupalto-card-${k}`,
+    fromCase('polupalto', {
+      id: `control:polupalto-d6-${k}`,
       cardName: name,
-      expectStop: 'sheet',
-      expectReason: SHEET_Q,
+      expectSheets: 2,
       operatorPages: true,
     }),
   ),
-  ...fromCase('polupalto-sheetB', {
-    id: 'control:polupalto-operator-next',
-    cardName: 'Mantel & Jacke',
-    expectStop: 'sheet',
-    expectReason: SHEET_Q,
+  ...fromCase('r4454', {
+    id: 'control:r4454-d6',
+    expectSheets: 2,
     operatorPages: true,
-    bypass: true,
   }),
 ];
 const ALL: Case[] = [...CASES, ...CONTROLS];
@@ -784,7 +785,7 @@ export async function runCase(c: Case, mutate: string | null) {
   const T0 = Date.now();
   const rec: Record<string, unknown> = {
     id: c.id,
-    group: c.expectStop || c.renameTo ? 'control' : c.group,
+    group: c.expectStop || c.renameTo || c.expectSheets ? 'control' : c.group,
   };
   // `let`: the rename control gives the hook a renamed card mid-run (a new object, as a form does)
   let card: CardContext = {
@@ -856,10 +857,6 @@ export async function runCase(c: Case, mutate: string | null) {
         mutated.push(`picked model ${v[0]}`);
         return { events: [{ type: 'variant', variant: v[0] }], assumptions: [] };
       }
-      if (c.expectStop === 'sheet') {
-        mutated.push('picked sheet 1');
-        return { events: [{ type: 'sheet', sheet: 0 }], assumptions: [] };
-      }
     }
     return mutate && mutate !== 'card' ? mutateAnswer(mutate, snap, a, mutated, c) : a;
   };
@@ -919,12 +916,6 @@ export async function runCase(c: Case, mutate: string | null) {
         continue;
       }
       if (r.kind !== 'stopped') continue;
-      // operator bypass: "next" on the sheet question must not import the default sheet
-      if (c.bypass && r.step === 'sheet' && api.session.step === 'sheet') {
-        await api.next();
-        await settle();
-        bypassed = api.session.step !== 'sheet' || api.inputs.sheetPicked != null;
-      }
       if (r.why === 'auto-stop' && api.session.step === 'check') {
         const o = await autopilotApply(() => api, card, settle);
         trace.push(o.ok ? 'apply:done' : `${o.step}:stop`);
@@ -1002,14 +993,6 @@ export async function runCase(c: Case, mutate: string | null) {
     why: string[];
     wrong: string[];
   } = { why: [], wrong: [] };
-  if (tileIds.size > 1) {
-    const r = sheetFromCard(s.pages, card, fileNames);
-    dry.sheet = r.pick;
-    dry.sheetStrong = !!r.strong;
-    dry.why.push(...(r.evidence ?? (r.why ? [r.why] : [])));
-    if (r.pick != null && c.sheet != null && r.pick !== c.sheet)
-      dry.wrong.push(`sheet ${r.pick} ≠ ${c.sheet}`);
-  }
   if (pageModels.length > 1) {
     const r = modelFromCard(pageModels, card, fileNames);
     dry.model = r.pick;
@@ -1027,9 +1010,7 @@ export async function runCase(c: Case, mutate: string | null) {
     const picked =
       c.expectStop === 'pieces'
         ? s.variant != null || (dry.model != null && !!dry.modelStrong)
-        : c.expectStop === 'sheet'
-          ? api.inputs.sheetPicked != null || (dry.sheet != null && !!dry.sheetStrong)
-          : false;
+        : false;
     // reached = stopped ON the card question (the step and its wording); unreached FAILS
     const reached = c.expectStop
       ? rec.verdict === 'stopped' &&
@@ -1049,6 +1030,17 @@ export async function runCase(c: Case, mutate: string | null) {
       ...(renamed ? { renamed: { ...renamed, after: s.variant } } : {}),
       ...(bypassed != null ? { bypassed } : {}),
       ok: reached && !picked && renameOk && bypassed !== true,
+    };
+  }
+  if (c.expectSheets) {
+    const st = rec.stop as { step: string; reason: string } | undefined;
+    const parts = s.sheet?.sheet.parts?.length ?? 0;
+    rec.control = {
+      expect: `${c.expectSheets} sheets`,
+      reached: !!s.sheet,
+      picked: st?.step === 'sheet' && /tile sheets/.test(st.reason),
+      sheets: parts,
+      ok: !!s.sheet && parts === c.expectSheets && st?.step !== 'sheet',
     };
   }
   rec.fingerprintDrift = fingerprintDrift;
@@ -1318,14 +1310,15 @@ export async function runCase(c: Case, mutate: string | null) {
       want: String(wantModel),
       assumed: assumedOn(null, ['model']),
     });
-  // the sheet is scored once one was picked (a run stopped before the question picked none)
-  if (c.sheet != null && api.inputs.sheetPicked != null && c.sheet !== api.inputs.sheetIndex)
+  // D6: a run that assembled the drawing has EVERY tile sheet of the file in it (none dropped)
+  const inDrawing = s.sheet?.sheet.parts?.map((p) => p.sheet) ?? (s.sheet ? [0] : null);
+  if (inDrawing && tileIds.size > inDrawing.length)
     wrong.push({
       kind: 'sheet',
       subject: 'the file',
-      got: String(api.inputs.sheetIndex),
-      want: String(c.sheet),
-      assumed: assumedOn(null, ['sheet-choice']),
+      got: `${inDrawing.length} tile sheets in the drawing`,
+      want: `${tileIds.size}`,
+      assumed: null,
     });
   rec.wrong = {
     total: wrong.length,

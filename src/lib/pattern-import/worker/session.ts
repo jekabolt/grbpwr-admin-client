@@ -41,6 +41,9 @@ import type {
   SizeRun,
   SourceDoc,
   SheetClean,
+  SheetAnswer,
+  SheetCover,
+  SheetPieces,
   SourceFileInfo,
   StageIO,
   StageName,
@@ -75,7 +78,7 @@ import {
   UnsupportedFormat,
   type ExtractorRegistry,
 } from '../adapters/sniff';
-import { assembleSheetDetailed, classifyPages } from '../assemble';
+import { assembleAllSheets, classifyPages } from '../assemble';
 import {
   applyMasks,
   cleanPages,
@@ -126,6 +129,8 @@ import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/
 import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
+import { sheetCoverOf, sheetLegend, sheetPieces } from '../pieces/sheets';
+import { tileSheetIds } from '../assemble';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -320,6 +325,9 @@ export class Session {
   private chromeSrc = new Map<string, BackgroundKind>();
   /** A0.3: sheet path ids the sheet pass (8b) offers and the operator did not take. */
   private sheetOffered = new Set<number>();
+  /** D6: the last pieces run's cross-sheet reading and the answers it was given (G23). */
+  private sheetRead: SheetPieces | null = null;
+  private sheetAnswers: Record<string, SheetAnswer> = {};
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
@@ -465,6 +473,8 @@ export class Session {
       this.wallSet = null;
       this.pieceSession = null;
       this.pieceWallEdits = [];
+      this.sheetRead = null;
+      this.sheetAnswers = {};
       this.pieceKey = '';
     }
     if (at < ORDER.indexOf('semantics')) {
@@ -933,11 +943,12 @@ export class Session {
     } else {
       await this.ensureDocs(ctx);
       const docs = this.docs!;
-      const tiles = this.pages.filter((p) => p.cls === 'tile' && p.sheet === input.sheet);
+      // D6: one file is one garment — every tile sheet goes into the drawing, side by side
+      const tiles = this.pages.filter((p) => p.cls === 'tile');
       if (!tiles.length)
         throw new ImportError(
           'out-of-order',
-          `no pattern tiles for sheet ${input.sheet + 1} — the pages were read as cover / instructions only`,
+          'no pattern tiles — the pages were read as cover / instructions only',
           'assemble',
         );
       ctx.checkCancel();
@@ -954,9 +965,13 @@ export class Session {
       this.fileNames = new Map(docs.map((d) => [d.file.id, d.file.name]));
       // P2: numbered DXF layers are AAMA layers only when the reader proved the dialect
       this.aamaLayers = docs.some((d) => AAMA_DIALECTS.has(d.file.dxf?.dialect ?? ''));
-      sheet = assembleSheetDetailed(docs, this.pages, input.sheet, input.override, (d, t, n) => {
-        ctx.progress(d, t, n);
-      }).sheet;
+      sheet = assembleAllSheets(
+        docs,
+        this.pages,
+        input.override,
+        (d, t, n) => ctx.progress(d, t, n),
+        input.probeSheets,
+      ).sheet;
       // Page geometry is no longer needed once the sheet exists (memory hygiene, see the header).
       this.docs = null;
     }
@@ -1092,7 +1107,11 @@ export class Session {
       );
     this.run = run;
     this.sizeMap = map;
-    return { run, map, expected, countAsk };
+    // D6: one legend for the document — the sheets must draw the same size pens
+    const sheetLeg = this.fast
+      ? null
+      : sheetLegend(this.sheet.parts, this.chains.classes, this.chains.chains);
+    return { run, map, expected, countAsk, ...(sheetLeg ? { sheetLegend: sheetLeg } : {}) };
   }
 
   /**
@@ -1380,8 +1399,11 @@ export class Session {
     this.wallSet = set;
     this.seeds = shown;
     this.families = families;
-    // A10 (Codex #1): the models THIS sheet prints — never the text of every page (another
-    // sheet's tiles, an instruction or overview page naming every model of the magazine)
+    // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
+    this.sheetAnswers = input.sheetAnswers ?? {};
+    this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
+    // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
+    // of an instruction or overview page naming every model of the magazine
     const variants = variantLabels(sheet.texts.map((t) => t.text));
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
@@ -1390,6 +1412,7 @@ export class Session {
     return {
       seeds: shown,
       families,
+      sheets: this.sheetRead,
       variants,
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
@@ -1472,6 +1495,29 @@ export class Session {
    * PASSPORT Ф1: each piece as the passport binds it — its exported identities, the layer of every
    * wall chain of its outline (every size), the printed label it was seeded from.
    */
+  /**
+   * D6 (G23): the garment's tile sheets as this run read them — over the whole garment (every
+   * fabric scope gets the same verdict); null = one sheet (nothing to check).
+   */
+  private sheetCover(exportedSeeds: readonly SeedId[]): SheetCover | null {
+    const parts = this.sheet?.parts;
+    if (this.fast || !parts || parts.length < 2) return null;
+    const expected = (this.passportBound?.pieces ?? []).filter(
+      (e) => e.drawn?.value !== 'by-dimensions' && e.drawn?.value !== 'trace-from',
+    );
+    return sheetCoverOf({
+      parts,
+      tileSheets: tileSheetIds(this.pages),
+      read: this.sheetRead,
+      answers: this.sheetAnswers,
+      exported: exportedSeeds,
+      expected: expected.map((e) => ({
+        name: e.label?.value ?? e.name.value,
+        bound: !!e.binding,
+      })),
+    });
+  }
+
   private bindPieces(out: SemanticsOutput, set: ChainSet, sheet: Sheet): BindPiece[] {
     const chainById = new Map(set.chains.map((c) => [c.id, c]));
     const layerOf = new Map(sheet.styles.map((st) => [st.id, st.layer]));
@@ -1603,6 +1649,16 @@ export class Session {
             : this.sheet?.pairs[0]?.method ?? 'single',
         maxResidualMm: Math.max(0, ...(this.sheet?.poses.map((p) => p.residualMm) ?? [0])),
       },
+      // D6: every tile sheet the drawing is made of
+      ...((this.sheet?.parts?.length ?? 0) > 1
+        ? {
+            sheets: this.sheet!.parts!.map((p) => ({
+              sheet: p.sheet,
+              pages: p.pages.length,
+              maxResidualMm: p.maxResidualMm,
+            })),
+          }
+        : {}),
       sizeEncoding: this.run?.encoding ?? 'single',
       variant: sem.pieces.find((p) => p.variant)?.variant ?? null,
     };
@@ -1669,6 +1725,7 @@ export class Session {
           pts: p.closed && p.pts.length > 2 ? [...p.pts, p.pts[0]] : p.pts,
         });
       }
+    const sheets = this.sheetCover(sem.pieces.map((p) => p.seed));
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -1700,6 +1757,7 @@ export class Session {
             : undefined,
           chrome,
           openFolds,
+          ...(sheets ? { sheets } : {}),
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
         },
       );

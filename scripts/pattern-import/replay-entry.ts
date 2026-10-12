@@ -152,14 +152,9 @@ async function operate(
       await settle();
       return get().session.step !== from;
     }
-    case 'sheet': {
-      if (api.inputs.sheetPicked === null && /tile sheets/.test(t.reason ?? t.question ?? '')) {
-        say(`sheet ${c.sheet ?? 0}`);
-        await api.dispatch({ type: 'sheet', sheet: c.sheet ?? 0 });
-        return true;
-      }
+    case 'sheet':
+      // D6: no sheet is picked — every tile sheet is in the drawing
       return false;
-    }
     case 'sizes': {
       const sz = s.sizes;
       if (sz && ((sz.countAsk && !sz.expected) || /how many sizes/.test(t.reason ?? ''))) {

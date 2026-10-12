@@ -77,7 +77,6 @@ type Case = {
   card: string[];
   /** The model the operator picks when the sheet offers several (regex on the variant label). */
   variant?: RegExp;
-  sheet?: number;
   truth?: TruthRef;
   /** F4 click fixture id (scripts/pattern-import/fixtures/pieces-clicks.json) for the operator pass. */
   clicks?: string;
@@ -116,6 +115,15 @@ type Case = {
   cardName?: string;
   /** The model the card is per TRUTH, scored by the autopilot metric when `variant` is absent. */
   cardModel?: RegExp;
+  /**
+   * D6 probe: a piece whose seed text matches each pattern must be in the written files (Ulmus:
+   * FRONT UPPER SKIRT, on the tile sheet the import used to drop). A miss fails the case.
+   */
+  mustExport?: RegExp[];
+  /** D6 probes only: assemble just these tile sheets (the parts a merged case is compared to). */
+  probeSheets?: number[];
+  /** D6: the tile sheets the click fixture was recorded on (absent = every sheet). */
+  clicksSheets?: number[];
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -123,7 +131,7 @@ const NUM = (a: number, b: number, step = 2) =>
 const LETTERS = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL'];
 const W = (s: string) => `pdf/wm_kka_15_01_${s}_wykroj.pdf`;
 
-export const CASES: Case[] = [
+const BASE_CASES: Case[] = [
   // vector / raster PDF
   { id: 'robe', group: 'pdf', files: ['pdf/robe.pdf'], card: NUM(36, 46), truth: { id: 'robe' } },
   {
@@ -245,6 +253,8 @@ export const CASES: Case[] = [
       note: '11 main (9, 11 cut by measurement, no outline) + 4 interfacing',
     },
     clicks: 'r4454',
+    // D6: the F4 click fixture was recorded on the main sheet only (before D6)
+    clicksSheets: [0],
   },
   {
     id: 'redcafe',
@@ -273,27 +283,26 @@ export const CASES: Case[] = [
     truth: { id: 'wm_kka_15_01' },
     outline: 'cut',
   },
+  // D6 (one PDF = one garment): both tile sheets ("Bogen A" p6–55, "Bogen B" p57–91) in ONE run;
+  // the truth is the union of the sheets (merged 12.10 from polupalto-sheetA + polupalto-sheetB)
   {
-    id: 'polupalto-sheetA',
+    id: 'polupalto',
     group: 'pdf',
     files: ['pdf/polupalto.pdf'],
     card: NUM(44, 54),
-    sheet: 0,
-    variant: /A/,
-    // TRUTH grid: sheet 1 = "Bogen A" (p6–55)
-    cardName: 'Mantel & Jacke · Bogen A',
+    cardName: 'Mantel & Jacke',
     truth: { id: 'polupalto' },
   },
+  // D6: MDF065 Ulmus Dress (Mood) — tile sheet A (p3–17) carries only FRONT UPPER SKIRT, sheet B
+  // (p18–67) the other nine pieces; before D6 the import kept sheet B and lost the front. A copy of
+  // the owner's file (sha256 43552d05…a0bb61), never modified.
   {
-    id: 'polupalto-sheetB',
+    id: 'ulmus',
     group: 'pdf',
-    files: ['pdf/polupalto.pdf'],
-    card: NUM(44, 54),
-    sheet: 1,
-    variant: /B/,
-    // TRUTH grid: sheet 2 = "Bogen B" (p57–91)
-    cardName: 'Mantel & Jacke · Bogen B',
-    truth: { id: 'polupalto' },
+    files: ['../probes/ulmus-mdf065.pdf'],
+    card: ['XS', 'S', 'M', 'L', 'XL'],
+    cardName: 'Ulmus Dress',
+    mustExport: [/(?=.*\bFRONT\b)(?=.*\bUPPER\b)(?=.*\bSKIRT\b)/i],
   },
   // DXF (CLO, lekalo, Gerber) — fast path
   ...[
@@ -354,6 +363,25 @@ export const CASES: Case[] = [
   ...['binary-garbage.plt', 'not-really.svg', 'postscript-only.eps', 'dos-binary-header.eps'].map(
     (f): Case => ({ id: `syn:${f}`, group: 'refusal', files: [`synthetic/${f}`], card: ['M'] }),
   ),
+];
+
+// D6 parts (E2E_D6_PARTS=1): each tile sheet of a merged case alone, as the import read it before
+// D6 (the same case otherwise) — what the merged case is compared to
+export const CASES: Case[] = [
+  ...BASE_CASES,
+  ...(process.env.E2E_D6_PARTS
+    ? (['ulmus', 'polupalto', 'r4454'] as const).flatMap((id) => {
+        const base = BASE_CASES.find((c) => c.id === id)!;
+        return [0, 1].map(
+          (k): Case => ({
+            ...base,
+            id: `${id}@sheet${k}`,
+            probeSheets: [k],
+            mustExport: undefined,
+          }),
+        );
+      })
+    : []),
 ];
 
 // ── A7 click metric ─────────────────────────────────────────────────────────────────────
@@ -677,7 +705,11 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 3 · sheet — the DXF fast path never shows it (use-import-session)
     at('sheet');
     if (ex.presegmented) passed.add('sheet');
-    const as = await run('assemble', { sheet: c.sheet ?? 0 });
+    // D6: every tile sheet of the files is in the drawing
+    const as = await run('assemble', {
+      sheet: 0,
+      ...(c.probeSheets ? { probeSheets: c.probeSheets } : {}),
+    });
     if (as.clean) (rec.clean as Record<string, unknown>).sheet = as.clean.summary;
     // A0.2: the wizard passes over a one-page sheet (sheet-skip.ts, the same rule)
     if (!ex.presegmented && singlePageSheet(ex.pages, as)) passed.add('sheet');
@@ -687,6 +719,8 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     }
     const worst = Math.max(0, ...as.sheet.poses.map((p) => p.residualMm));
     rec.sheet = {
+      // D6: the tile sheets in the drawing (index · tiles)
+      sheets: (as.sheet.parts ?? []).map((p) => `${p.sheet}·${p.pages.length}`),
       tiles: as.sheet.poses.length,
       missing: as.sheet.missing.length,
       worstResidualMm: +worst.toFixed(3),
@@ -983,7 +1017,19 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
           .filter((fs) => !covered.has(fs.id) && clicksLeft.some((k) => inBox(fs, k)))
           .map((fs) => fs.id),
       );
-      const junkFaces = faceSeeds.filter((fs) => !covered.has(fs.id) && !superseded.has(fs.id));
+      // D6: the click fixture knows the tile sheets it was recorded on (`clicksSheets`); a face
+      // seed on another sheet is not judged by it — the operator has no truth there and keeps it
+      const parts = as.sheet.parts ?? [];
+      const unjudged = (fs: Seed) =>
+        !!c.clicksSheets &&
+        parts.length > 1 &&
+        !c.clicksSheets.includes(
+          parts.find((q) => fs.at.x >= q.box.minX - 150 && fs.at.x <= q.box.maxX + 150)?.sheet ??
+            -1,
+        );
+      const junkFaces = faceSeeds.filter(
+        (fs) => !covered.has(fs.id) && !superseded.has(fs.id) && !unjudged(fs),
+      );
       rec.faceSeeds = {
         offered: faceSeeds.length,
         took: covered.size,
@@ -1003,7 +1049,11 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         src: { file: 'click', page: -1, op: -1, sub: 0 },
       });
       const keptFaces: Seed[] = faceSeeds.flatMap((fs, i) =>
-        covered.has(fs.id) ? [{ ...fs, text: pseudo(covered.get(fs.id)!, fs.at, 1000 + i) }] : [],
+        covered.has(fs.id)
+          ? [{ ...fs, text: pseudo(covered.get(fs.id)!, fs.at, 1000 + i) }]
+          : unjudged(fs) && !superseded.has(fs.id)
+            ? [fs]
+            : [],
       );
       const base = Math.max(0, ...pc.seeds.map((x) => x.id)) + 1;
       const clickSeeds: Seed[] = clickList.map((k, i) => ({
@@ -1095,6 +1145,30 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       return rec;
     }
     hooks.onPieces?.(s);
+    // D6: the cross-sheet reading (per sheet: pieces, outlines set aside by reason; questions)
+    if (pc.sheets) {
+      const parts = as.sheet.parts ?? [];
+      const sheetOf = (p: PtMm) =>
+        parts.find((q) => p.x >= q.box.minX - 150 && p.x <= q.box.maxX + 150)?.sheet ?? -1;
+      rec.d6 = {
+        parts: pc.sheets.parts.map((p) => ({
+          ...p,
+          asideReasons: Object.fromEntries(
+            [
+              ...new Set(
+                (pc.setAside ?? []).filter((a) => sheetOf(a.at) === p.sheet).map((a) => a.reason),
+              ),
+            ].map((r) => [
+              r,
+              (pc.setAside ?? []).filter((a) => sheetOf(a.at) === p.sheet && a.reason === r).length,
+            ]),
+          ),
+        })),
+        copies: pc.sheets.copies.map((c) => ({ strong: c.strong, ev: c.evidence })),
+        alternatives: pc.sheets.alternatives.map((a) => a.evidence),
+        splits: pc.sheets.splits.map((x) => x.evidence),
+      };
+    }
     {
       // N1: piece-sized outlines set aside on a guess stop the run on the pieces step
       const offer = offerOn('pieces', { pieces: pc });
@@ -1669,8 +1743,48 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
               .map((t) => t.pts)
           : undefined,
       );
+    // D6 probe: the pieces the case names (by the text printed inside them) are written
+    const mustMiss: string[] = [];
+    if (c.mustExport?.length) {
+      const texts = (s as unknown as { sheet: { texts: IRText[] } }).sheet?.texts ?? [];
+      const written = new Set(wr.scopes.flatMap((x) => x.identities));
+      const seedsOut = new Set(
+        sem.pieces.filter((p) => written.has(p.identity)).map((p) => p.seed),
+      );
+      const rings = pc.families
+        .filter((f) => seedsOut.has(f.seed))
+        .flatMap((f) => {
+          const o = [...f.candidates]
+            .filter((k) => k.outcome === 'closed' && k.outer.length > 2)
+            .sort((a, b) => b.areaMm2 - a.areaMm2)[0]?.outer;
+          return o ? [o] : [];
+        });
+      const inRing = (p: PtMm, r: PtMm[]) => {
+        let k = false;
+        for (let i = 0, j = r.length - 1; i < r.length; j = i++)
+          if (
+            r[i].y > p.y !== r[j].y > p.y &&
+            p.x < ((r[j].x - r[i].x) * (p.y - r[i].y)) / (r[j].y - r[i].y) + r[i].x
+          )
+            k = !k;
+        return k;
+      };
+      const said = rings.map((r) =>
+        texts
+          .filter((t) =>
+            inRing({ x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 }, r),
+          )
+          .map((t) => t.text)
+          .join(' '),
+      );
+      for (const re of c.mustExport) if (!said.some((x) => re.test(x))) mustMiss.push(String(re));
+      rec.mustExport = { missing: mustMiss, pieces: said.map((x) => x.slice(0, 60)) };
+    }
     const allPassed =
-      scopes.length > 0 && scopes.every((x) => x.passed) && manifestProblems.length === 0;
+      scopes.length > 0 &&
+      scopes.every((x) => x.passed) &&
+      manifestProblems.length === 0 &&
+      !mustMiss.length;
     const hard = rec.ops.filter((o) => o.kind === 'blocker');
     rec.verdict = !allPassed
       ? 'fails'
@@ -1679,7 +1793,9 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
         : hard.length
           ? 'fails'
           : 'needs operator';
-    if (manifestProblems.length) rec.reason = `manifest round trip: ${manifestProblems.join('; ')}`;
+    if (mustMiss.length) rec.reason = `not exported: ${mustMiss.join(', ')}`;
+    else if (manifestProblems.length)
+      rec.reason = `manifest round trip: ${manifestProblems.join('; ')}`;
     else if (!allPassed)
       rec.reason = `gate blocks: ${scopes.flatMap((x) => x.blocking.map((b) => b.split('[')[0])).join(',')}`;
   } catch (e) {

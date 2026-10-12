@@ -29,7 +29,8 @@ import type {
 } from 'lib/pattern-import/types';
 import type { Inputs } from '../use-import-session';
 import { answersNowOf, liveAnswers, liveDrawnSizes, REV_SEP } from '../answers';
-import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '../auto-advance';
+import { PAGE_SURE, defaultedFabrics, sizeFlags, weakAsides } from '../auto-advance';
+import { SHEET_LAYOUT, layoutValue } from './replay-sheets';
 import type { Assumption } from './types';
 
 /** The rule every replayed assumption carries first ("replay of <sheet> · <date>"). */
@@ -213,6 +214,7 @@ const AUTO_KINDS: Record<string, string[]> = {
   model: ['model'],
   'seed-clicks': ['seed-click'],
   'piece-edit': ['piece-edits'],
+  'sheet-pieces': ['sheet-copy', 'sheet-alternative'],
   'asides-passed': ['set-aside'],
   outline: ['outline'],
   'fold-list': ['cutting-list'],
@@ -313,8 +315,11 @@ export function answerRecordOf(
     });
 
   // ── sheet ──
-  if (i.sheetPicked != null && tileSheets(s.pages) > 1)
-    push('sheet', 'sheet-choice', 'the file', { sheet: i.sheetPicked });
+  // D6: the drawing is every tile sheet, side by side — where each sat (by index + its pages), so a
+  // replay puts every point back on its own sheet (replay-sheets.ts); nothing is picked
+  const parts = s.sheet?.sheet.parts ?? [];
+  if (parts.length > 1)
+    push('sheet', SHEET_LAYOUT, `${parts.length} tile sheets`, layoutValue(parts));
   if (i.gridOverride) {
     const g = i.gridOverride;
     push('sheet', 'sheet-grid', 'the tile grid', {
@@ -446,6 +451,10 @@ export function answerRecordOf(
         });
     });
   }
+  // D6: the cross-sheet answers (a copy / an alternative / a split), by their geometric key
+  const sa = Object.entries(i.sheetAnswers ?? {});
+  if (sa.length)
+    push('pieces', 'sheet-pieces', `${sa.length} cross-sheet answers`, { answers: sa });
   const weak = weakAsides(s.pieces?.setAside);
   if (weak.length)
     push('pieces', 'asides-passed', `${weak.length} outlines kept aside`, {

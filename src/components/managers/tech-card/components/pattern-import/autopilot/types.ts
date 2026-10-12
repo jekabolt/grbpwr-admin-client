@@ -10,6 +10,9 @@ export type AssumptionKind =
   | 'scale-1to1'
   | 'scale-anisotropic'
   | 'sheet-choice'
+  // D6: a piece / a whole tile sheet drawn twice, kept once (pieces/sheets.ts)
+  | 'sheet-copy'
+  | 'sheet-alternative'
   | 'residuals'
   | 'drawn-sizes'
   | 'legend-row'

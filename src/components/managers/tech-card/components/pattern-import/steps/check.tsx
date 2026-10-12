@@ -53,6 +53,10 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
     what: 'a size closed through another line keeps its proof (the line, the rule, the check)',
     fix: 'pieces',
   },
+  'G23-sheets': {
+    what: 'every tile sheet of the file is in the export — no piece left out, twice or in halves',
+    fix: 'pieces',
+  },
 };
 
 /**

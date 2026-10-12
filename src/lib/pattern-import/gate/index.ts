@@ -48,6 +48,7 @@ import {
   g19,
   g20,
   g21,
+  g23,
   g2From,
   g3g4,
   g5,
@@ -215,6 +216,7 @@ export function createRunGate(
       g19(ctx),
       g20(ctx),
       g21(ctx),
+      ...(expect.sheets ? [g23(ctx)] : []),
     ];
     return {
       passed: passedOf(checks),
@@ -341,6 +343,8 @@ export type WriteAndGateCtx = {
   openFolds?: readonly string[];
   /** Vector 0.3 (default) / raster 0.5. */
   hausdorffP95Mm?: number;
+  /** D6 (G23): the garment's tile sheets as the run read them (absent = one sheet). */
+  sheets?: GateExpectation['sheets'];
   embed?: EmbedManifestFn;
   read?: ReadManifestFn;
   now?: () => Date;
@@ -376,6 +380,7 @@ export async function writeAndGate(
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
     ...(ctx.openFolds?.length ? { openFolds: ctx.openFolds } : {}),
+    ...(ctx.sheets ? { sheets: ctx.sheets } : {}),
   };
   const report = await createRunGate(ctx.rules, { read })(text0, expect);
   let m1 = { ...m0, gate: report };

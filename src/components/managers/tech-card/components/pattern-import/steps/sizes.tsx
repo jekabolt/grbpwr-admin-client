@@ -12,6 +12,8 @@ import type {
   SizeCountAsk,
   SizeMapEntry,
 } from 'lib/pattern-import/types';
+import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
@@ -20,6 +22,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { evidenceKinds } from 'lib/pattern-import/sizes/count-evidence';
 import { notDrawnLine } from 'lib/pattern-import/sizes/map';
+import { sheetLegendQuestion } from 'lib/pattern-import/pieces/sheets';
 import { cn } from 'lib/utility';
 import type { CardContext } from '../client';
 import { SHEET_INK, SheetViewport, f32Attr, vy } from '../sheet-viewport';
@@ -61,9 +64,11 @@ const around = (p: { x: number; y: number }, r = 60): BoxMm => ({
 });
 
 export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardContext }) {
-  const { session, inputs } = api;
+  const { session, inputs, patchInputs } = api;
   const chains = session.chains;
   const sizes = session.sizes;
+  // D6: the tile sheets must draw the same size pens (one legend for the document)
+  const legendQ = sheetLegendQuestion(sizes?.sheetLegend, inputs.sheetLegendOk);
   const [hover, setHover] = useState<number | null>(null);
   const [flag, setFlag] = useState<number | null>(null);
   if (!chains || !sizes || !session.sheet) return null;
@@ -213,6 +218,23 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
       }
       side={
         <Panel title='legend and sizes'>
+          {legendQ && sizes.sheetLegend && (
+            <CalloutBox tone='warning' className='mb-2 flex flex-col gap-1.5 py-1.5'>
+              <Text size='micro' component='p'>
+                ! {legendQ}
+              </Text>
+              <div>
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  disabled={!!session.busy}
+                  onClick={() => patchInputs({ sheetLegendOk: sizes.sheetLegend!.sig })}
+                >
+                  the sheets share the legend as read
+                </Button>
+              </div>
+            </CalloutBox>
+          )}
           {sizes.countAsk && (
             <DrawnSizes
               ask={sizes.countAsk}

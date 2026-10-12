@@ -64,6 +64,7 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { pageMarginIds, testSquareBoxes } from 'lib/pattern-import/chains/classify';
 
+import { faceCapBox, partAt } from '../assemble/composite';
 import { drawPolyline, exterior, Grid } from './raster';
 import type { WallItem } from './snap';
 import { itemsOf, lonePortions, rescuedIgnored, sheetModule, wallModel } from './walls';
@@ -301,8 +302,10 @@ export function faceRaster(
   items: readonly WallItem[],
   weakItems: readonly WallItem[],
   cellMm: number,
+  /** D6: the box the cell is capped by (the largest tile sheet of a composite); default `sheetBox`. */
+  capBox: BoxMm = sheetBox,
 ): FaceRaster {
-  const cell = faceCell(sheetBox, cellMm);
+  const cell = faceCell(capBox, cellMm);
   const g = new Grid(
     {
       minX: sheetBox.minX - 15,
@@ -1367,7 +1370,13 @@ export function faceMap(
   o: FaceOpts = {},
 ): FaceMap {
   const { items, weak, model } = faceWalls(sheet, set, run);
-  const fr = faceRaster(sheet.bbox, items, weak, o.cellMm || PATIMPORT.fillCellMm);
+  const fr = faceRaster(
+    sheet.bbox,
+    items,
+    weak,
+    o.cellMm || PATIMPORT.fillCellMm,
+    faceCapBox(sheet),
+  );
   const classOf = new Map<ChainId, number>();
   const roleOf = new Map<ChainId, ChainRole>();
   for (const c of set.classes)
@@ -1385,8 +1394,18 @@ export function faceMap(
   const off = o.off ?? new Set();
   // a sheet that labels its pieces in text (≥ 2 text seeds) labels every piece: an outline it
   // does not label is a legend box, an overview, a label frame — not seeded (the operator clicks)
-  if (textSeeds.length >= 2 && !off.has('unlabelled'))
-    for (const b of blobs) if (!b.junk && b.textSeed == null) b.junk = 'unlabelled';
+  // D6: per tile sheet — a sheet that labels nothing (r4454's interfacing sheet beside a labelled
+  // main sheet) is not held to another sheet's labels
+  if (!off.has('unlabelled')) {
+    const parts = sheet.parts && sheet.parts.length > 1 ? sheet.parts : null;
+    const labelsOn = (p: PtMm) => {
+      if (!parts) return textSeeds.length;
+      const k = partAt(parts, p)?.sheet;
+      return textSeeds.filter((t) => partAt(parts, t.at)?.sheet === k).length;
+    };
+    for (const b of blobs)
+      if (!b.junk && b.textSeed == null && labelsOn(b.at) >= 2) b.junk = 'unlabelled';
+  }
   // file-per-size drawn side by side: the fill carries a seed on the first size's drawing to the
   // others (fileShift); a seed on another size's drawing would be the same piece twice
   if (model.mode === 'file' && !off.has('other-size')) {
