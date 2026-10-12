@@ -17,6 +17,7 @@ import type {
   WizardEvent,
   WizardStep,
 } from 'lib/pattern-import/types';
+import { notDrawnLine } from 'lib/pattern-import/sizes/map';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { anisotropyOf, squareSidesOf } from './formats';
 
@@ -159,10 +160,15 @@ export function stepOffer(s: OfferCtx): string | null {
         : null;
     }
     case 'sizes': {
+      // a size the sheet lists but does not draw is left out of the export: said, never silent
+      const undrawn = (s.sizes?.map.entries ?? [])
+        .filter((e) => e.notDrawn)
+        .map((e) => notDrawnLine(e.source.label));
       const n = sizeFlags(s.chains?.ambiguities, s.sizes?.expected?.n).length;
-      return n
+      const flags = n
         ? `${n} ${n === 1 ? 'question' : 'questions'} the reader could not settle — look at the flags, or go on`
         : null;
+      return [...undrawn, ...(flags ? [flags] : [])].join(' · ') || null;
     }
     case 'pieces': {
       const n = weakAsides(s.pieces?.setAside).length;

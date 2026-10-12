@@ -14,6 +14,19 @@
 // cm; the gate converts at its boundary and nowhere else.
 
 import type { PieceDTO } from 'lib/nesting/types';
+import type { GarmentPassport, PassportDigest } from './passport/types';
+
+// The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
+export type {
+  CutQty,
+  EvidenceClass,
+  ExpectedPiece,
+  Fact,
+  GarmentPassport,
+  OutlineMeaning,
+  PassportDigest,
+  SourceRef,
+} from './passport/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 0. Scalars and identifiers
@@ -566,6 +579,18 @@ export type SizeMapEntry = {
   confidence?: number;
   /** Why this card size (or why none) — shown next to the row. */
   evidence?: string[];
+  /**
+   * The sheet lists this size but draws no line of its own for it (viola's 34: 7 lines for 8
+   * sizes). It is NOT filled from a neighbour and never written, whatever the map says; `wouldMap`
+   * is the card size it would have taken (that card size gets no pattern from this sheet).
+   */
+  notDrawn?: { wouldMap: CardSize | null };
+  /**
+   * The operator's override of `notDrawn`: "this size is drawn — use the common outline". The rank
+   * is mapped and filled on its walls as they are (the common lines); a piece it does not close
+   * stays open — nothing is copied from a neighbour.
+   */
+  drawnAnyway?: true;
 };
 
 export type SizeMap = {
@@ -763,9 +788,21 @@ export type PieceCandidate = {
    * How this rank's walls were chosen (F4): 'class' = the F3 size class of this rank + common;
    * 'innerPlug' = + the smaller ranks' lines (this rank coincides with one where it is not drawn);
    * 'bundleRank' = ranked locally by nesting inside the seed's region (F3 had no usable class);
-   * 'single' = one-size source, every line a wall. Absent on DXF fast-path candidates.
+   * 'single' = one-size source, every line a wall; 'continuity' (P1) = + continuity walls: lines
+   * the source draws that join this rank's own dangling ends (see `continuity`). Absent on DXF
+   * fast-path candidates.
    */
-  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade';
+  rankFrom?: 'class' | 'innerPlug' | 'bundleRank' | 'single' | 'grade' | 'continuity';
+  /**
+   * P1 provenance: the continuity walls this closed outline runs along — drawn lines of another
+   * class or size that close this rank between its own dangling ends (R0 a chain path, R1 the
+   * stretch of one line both ends lie on, R2 a spine several sizes end on). Kept only when the
+   * family stayed consistent (areas monotone, outline within the grade spread of its neighbouring
+   * ranks, same shape); `pts` is the stretch used, `chains` the drawn chains it lies on.
+   */
+  continuity?: ContinuityEdge[];
+  /** P1 · D3: why the continuity closure was kept — its anchor ranks and the measured checks. */
+  continuityVerdict?: ContinuityVerdict;
   /**
    * pieces/grade (H1): why this candidate is 'refused' (set only with that outcome).
    */
@@ -783,6 +820,37 @@ export type PieceCandidate = {
    * source provenance and the ONLY chains that may carry it in G15 (F14e/S1, Codex round 3).
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
+};
+
+/**
+ * P1: one continuity wall a closed outline runs along. `chains` are the drawn chains it lies on
+ * (R0: the path's chains, in order), `pts` the stretch used (sheet mm); `bracket`: the path runs on
+ * an ignore / unclassified line, so the closure needs native anchor ranks on both sides.
+ */
+export type ContinuityEdge = {
+  rule: 'R0' | 'R1' | 'R2';
+  chains: ChainId[];
+  pts: PtMm[];
+  bracket?: boolean;
+};
+/** P1 · D3: the verdict that kept a continuity closure (recorded, re-checked by gate G21). */
+export type ContinuityVerdict = {
+  /** The natively closed ranks (own lines only) the family's rate and spread came from. */
+  anchors: number[];
+  /** Per neighbouring rank judged: the measured value and what was allowed. */
+  checks: {
+    vs: number;
+    steps: number;
+    hMm: number;
+    hAllowMm: number;
+    hu: number;
+    huAllow: number;
+    /** ln(area ratio) per size step, and the band the anchors allow. */
+    growth: number;
+    band: [number, number];
+    dk: number;
+    kMax: number;
+  }[];
 };
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
@@ -1040,7 +1108,33 @@ export type PieceSizeSpec = {
   walls: ChainId[];
   bbox: BoxMm;
   areaMm2: Mm2;
+  /** P1: this size closed through continuity walls — what, and the D3 verdict (gate G21). */
+  continuity?: ContinuityRecord;
 };
+
+/**
+ * P1 provenance of a continuity closure, without geometry (the geometry rides in the gate's
+ * `continuityByBlock`, written frame). Per edge: its rule, the drawn chains it lies on with their
+ * roles as read, `ownRank` = one of them is a line of this size's own class as read (the wall model
+ * gave it to another rank; recorded for the audit — it is the size's own drawn line).
+ */
+export type ContinuityRecord = {
+  rank: number;
+  edges: {
+    rule: ContinuityEdge['rule'];
+    chains: ChainId[];
+    roles: string[];
+    bracket?: boolean;
+    ownRank: boolean;
+  }[];
+  verdict: ContinuityVerdict | null;
+};
+
+/** P1: the manifest's continuity audit of a size (ManifestBlock.continuity): the record minus rank. */
+export type ManifestContinuity = Pick<ContinuityRecord, 'edges' | 'verdict'>;
+
+/** P1: per continuity edge (same order as the record), its stretch and its chains, written frame. */
+export type ContinuityGeometry = { edges: { pts: PtMm[][]; chainLines: PtMm[][] }[] };
 
 export type SemanticsInput = {
   sheet: Sheet;
@@ -1149,7 +1243,7 @@ export type FoldAsk = {
 export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
-  blocked: { seed: SeedId; reason: BlockReason; detail: string }[];
+  blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
   /** Open fold questions, one per seed blocked 'fold-question' (absent = none). */
   folds?: FoldAsk[];
@@ -1168,6 +1262,27 @@ export type SemanticsOutput = {
    * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
+  /**
+   * PASSPORT Ф1: what the document says (text layer, layer names), bound to these pieces — the
+   * outline word of the pieces' own wall layers, the cutting list bound by printed label. Evidence
+   * a policy weighs, never geometry (absent = the reader found nothing / an old worker).
+   */
+  passport?: GarmentPassport;
+};
+
+/**
+ * CODE lane: what the namer knew about a piece blocked 'grammar' / 'duplicate-identity' — so the
+ * wizard's "name N pieces" (and the autopilot) can give it a code without losing what the source
+ * said: its own name (kept as the display name) and, for a DRAWN pair (FP_L beside FP_R), the hand
+ * and the twin, so both hands get ONE new code and stay a pair (a twin renamed apart is two singles,
+ * each re-read as a pair of its own — a doubled cut).
+ */
+export type BlockedName = {
+  /** The source's own words for the piece: the title read, the DXF block name; null = none. */
+  source: string | null;
+  /** The drawn hand of a pair whose other hand is `twin` (both blocked together); else null. */
+  hand: PairHand | null;
+  twin: SeedId | null;
 };
 
 /**
@@ -1470,6 +1585,13 @@ export type ManifestBlock = {
    * whole manifest as untrusted (legacy parse), never as matched.
    */
   contour?: ContourSignature;
+  /**
+   * P1: this size closed through continuity walls (drawn lines of another class or size between
+   * its own ends) — the durable audit: per edge its rule, the chains it lies on with their roles as
+   * read, `bracket`, `ownRank`; the D3 verdict (anchor ranks, every measured check and what it
+   * allowed). G21 checks it against the run and checks its rules; absent = closed on its own lines.
+   */
+  continuity?: ManifestContinuity;
 };
 
 /**
@@ -1520,7 +1642,13 @@ export type GateCheckId =
    * A8b: the cut / seam line traced around tile chrome — a hairpin round a 1 mm bar (a corner
    * bracket), or a stretch ≥ 5 mm ON a masked / offered chrome line (block).
    */
-  | 'G19-chrome';
+  | 'G19-chrome'
+  /**
+   * P1: a size closed through continuity walls carries its provenance and D3 verdict; the stretch
+   * lies on the chains it names, the written line runs along it, the rule's constraints hold, and
+   * the verdict's checks are within what it allowed (block on any mismatch).
+   */
+  | 'G21-continuity';
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1583,6 +1711,11 @@ export type ConversionManifest = {
    * sheet), so a manifest written before or after this field reads the same.
    */
   autopilot?: AutopilotRecord;
+  /**
+   * PASSPORT Ф1: what the document said about the garment (≤ 2 KB digest). Optional and
+   * shape-tolerant on read like `autopilot`.
+   */
+  passport?: PassportDigest;
 };
 
 /**
@@ -1634,6 +1767,8 @@ export type WriteJob = {
   dialect: 'r12' | 'r2000';
   /** A10: the autopilot's assumptions, carried into the manifest as they are. */
   autopilot?: AutopilotRecord;
+  /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */
+  passport?: PassportDigest;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -1665,6 +1800,8 @@ export type GateExpectation = {
    * them against `wallsByBlock`, and G4 leaves out only the written stretch on an edge G15 passed.
    */
   derivedByBlock?: Record<string, DerivedEdge[]>;
+  /** P1 (G21): per block closed through continuity walls, the used stretches and their chains. */
+  continuityByBlock?: Record<string, ContinuityGeometry>;
   /**
    * A8b (G19): tile chrome near each block, written frame — the clean stage's masked frames,
    * marks and tile labels and the chrome it only offered. A cut / seam line on it is traced chrome.
@@ -1865,6 +2002,8 @@ export type StageIO = {
       presegmented?: boolean;
       /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
+      /** PASSPORT Ф1: what the document says, as read before any piece (absent = nothing read). */
+      passport?: GarmentPassport;
     };
   };
   /** A8: the input pages cleaned before anything is parsed (masks, dropped pages, scale hints). */

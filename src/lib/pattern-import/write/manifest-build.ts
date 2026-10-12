@@ -5,6 +5,7 @@ import type {
   AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
+  ManifestContinuity,
   ManifestPiece,
   PieceSpec,
   WriteJob,
@@ -73,6 +74,42 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
       : {}),
     // F14f (Codex R2): binds this entry to the written cut ring (manifest/contour-sig.ts)
     ...(contour ? { contour } : {}),
+    // P1: closed through continuity walls — the rules, chains and anchors (G21 checks them)
+    ...(b.size.continuity ? { continuity: continuityOfBlock(b.size.continuity) } : {}),
+  };
+}
+
+/**
+ * The manifest's continuity audit of a size, canonical (fixed key order, copies): every edge with
+ * its rule, chains, roles, bracket and own-class flag, and the D3 verdict with every check. The
+ * write and G21 both build it here, so the gate compares like with like.
+ */
+export function continuityOfBlock(c: ManifestContinuity): ManifestContinuity {
+  return {
+    edges: c.edges.map((e) => ({
+      rule: e.rule,
+      chains: [...e.chains],
+      roles: [...e.roles],
+      ...(e.bracket ? { bracket: true } : {}),
+      ownRank: !!e.ownRank,
+    })),
+    verdict: c.verdict
+      ? {
+          anchors: [...c.verdict.anchors],
+          checks: c.verdict.checks.map((k) => ({
+            vs: k.vs,
+            steps: k.steps,
+            hMm: k.hMm,
+            hAllowMm: k.hAllowMm,
+            hu: k.hu,
+            huAllow: k.huAllow,
+            growth: k.growth,
+            band: [k.band[0], k.band[1]] as [number, number],
+            dk: k.dk,
+            kMax: k.kMax,
+          })),
+        }
+      : null,
   };
 }
 
@@ -113,6 +150,7 @@ export function buildManifest(
     source: job.source,
     gate: null,
     ...(job.autopilot ? { autopilot: autopilotForManifest(job.autopilot) } : {}),
+    ...(job.passport ? { passport: job.passport } : {}),
   };
 }
 

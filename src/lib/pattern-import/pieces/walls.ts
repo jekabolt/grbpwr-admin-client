@@ -246,6 +246,74 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
   };
 }
 
+/**
+ * Cause E: the ranks a sheet lists but does NOT draw — from the ORIGINAL source evidence only. A
+ * rank is not drawn when its own size class carried no chain as read (before continuity, labels
+ * or bundles moved any line to it), it is still empty after them, other ranks are drawn, and no
+ * verified family covers it: a piece drawn once for every size (a closed common outline, piece
+ * sized — ≥ `minAreaMm2`, 50 cm²: a collar, a pocket, not a buttonhole, a label or a mark — and not
+ * a page frame) or drawn identically in every drawn size layer. A rank that originally carried
+ * chains is never "not drawn".
+ */
+export function undrawnRanks(
+  set: ChainSet,
+  run: SizeRun,
+  texts: readonly IRText[] = [],
+  module: number[] = [],
+  minAreaMm2 = 5000,
+): number[] {
+  if (run.encoding === 'single' || run.sizes.length < 2) return [];
+  const byId = new Map(set.classes.map((c) => [c.id, c]));
+  const origDrawn = run.sizes.map((s) => {
+    const c = s.classId != null ? byId.get(s.classId) : undefined;
+    return !!c && c.role === 'size' && c.chains.length > 0;
+  });
+  const drawnN = origDrawn.filter(Boolean).length;
+  if (!drawnN) return [];
+  const empty = new Set(wallModel(set, run, texts).emptyRanks);
+  const cand = run.sizes.map((_, r) => r).filter((r) => !origDrawn[r] && empty.has(r));
+  if (!cand.length) return [];
+  // a verified family covering every size: a closed common outline, or a loop drawn alike in
+  // every drawn size layer
+  const role = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) role.set(id, k.role);
+  const loops = set.chains.filter(
+    (c) =>
+      c.pts.length > 3 &&
+      (c.closed || dist(c.pts[0], c.pts[c.pts.length - 1]) <= 0.5) &&
+      Math.abs(polyArea(c.pts)) >= minAreaMm2 &&
+      !frameLike(c.pts, 60, module),
+  );
+  if (loops.some((c) => role.get(c.id) === 'common')) return [];
+  const sized = loops.filter((c) => role.get(c.id) === 'size');
+  for (const c of sized) {
+    const b = bboxOf(c.pts);
+    let copies = 0;
+    for (const o of sized) {
+      if (Math.abs(o.lengthMm - c.lengthMm) > 0.2) continue;
+      const q = bboxOf(o.pts);
+      if (
+        Math.abs(q.minX - b.minX) < 0.2 &&
+        Math.abs(q.minY - b.minY) < 0.2 &&
+        Math.abs(q.maxX - b.maxX) < 0.2 &&
+        Math.abs(q.maxY - b.maxY) < 0.2
+      )
+        copies++;
+    }
+    if (copies >= drawnN) return [];
+  }
+  return cand;
+}
+
+function polyArea(p: readonly PtMm[]): number {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[(i + 1) % p.length];
+    a += p[i].x * q.y - q.x * p[i].y;
+  }
+  return a / 2;
+}
+
 export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
   const out: WallItem[] = [];
   for (const id of ids) {
@@ -594,6 +662,554 @@ export function frameLike(pts: readonly PtMm[], minRunMm = 60, module: number[] 
   }
   flush();
   return total >= minRunMm && framed >= 0.9 * total;
+}
+
+/** One continuity wall of a rank (P1): an already drawn line closing two of its dangling ends. */
+export type ContinuityWall = WallItem & {
+  /** R0 a chain path joining two ends; R1 the stretch of one line both ends lie on; R2 a spine. */
+  rule: 'R0' | 'R1' | 'R2';
+  /** The drawn chains the wall runs along (R0: every chain of the path). */
+  chains: ChainId[];
+  /** R0 through an ignore / unclassified line: the closure needs anchor ranks on both sides. */
+  bracket?: boolean;
+};
+
+export type ContinuityOpts = {
+  /** An end touches a line / two lines join: ≤ this, mm. */
+  junctionMm?: number;
+  /** R0: tangent continuity at every junction, degrees. */
+  angleDeg?: number;
+  /** R1 / R2: the longest stretch of a foreign line taken, mm. */
+  maxStretchMm?: number;
+  /** R0: the most chains one path joins, and its longest length, mm. */
+  maxPathChains?: number;
+  maxPathMm?: number;
+  /**
+   * HARD: a continuity wall never runs where an effective wall of rank r lies beside it (within
+   * `sideMm`, roughly parallel, the foot inside that wall — more than one 2 mm sample of it): where
+   * r draws an edge a few mm away, the foreign line is another size's edge, not r's.
+   */
+  sideMm?: number;
+  /** Further effective walls of r for that test (lines reranked to r, the operator's lines). */
+  beside?: readonly WallItem[];
+};
+
+/**
+ * Roles an R0 path may never run on: inside a piece, not its edge — and a notch, whose whole
+ * interior a path would take (a V or U mark is a tooth).
+ */
+export const NOT_EDGE_ROLES = new Set(['notch', 'internal', 'grain', 'seam']);
+/**
+ * Roles an R1 stretch / R2 spine may never run on. A notch-class line may carry one: the stretch is
+ * only the part between the rank's own feet on it, smooth (no tooth) — the tile-seam trims a sheet
+ * classes as notch marks (palto's 25) are pieces of an edge.
+ */
+export const NOT_SPAN_ROLES = new Set(['internal', 'grain', 'seam']);
+
+type End = { item: number; at: PtMm; t: PtMm; arc: number };
+
+/** Arc positions along a polyline. */
+function cumOf(pts: readonly PtMm[]): number[] {
+  const c = [0];
+  for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + dist(pts[i - 1], pts[i]));
+  return c;
+}
+
+/** Unit direction leaving a polyline at one end (from ~2 mm back along it to the end point). */
+function endTangent(pts: readonly PtMm[], end: 0 | 1, backMm = 2): PtMm {
+  const n = pts.length;
+  const p = end ? pts[n - 1] : pts[0];
+  let k = end ? n - 1 : 0;
+  const step = end ? -1 : 1;
+  let acc = 0;
+  while (k + step >= 0 && k + step < n && acc < backMm) {
+    acc += dist(pts[k], pts[k + step]);
+    k += step;
+  }
+  const q = pts[k];
+  const L = dist(p, q) || 1;
+  return { x: (p.x - q.x) / L, y: (p.y - q.y) / L };
+}
+
+/**
+ * CONTINUITY WALLS of rank r (P1): the rank closes only through lines the source already draws,
+ * between its OWN dangling ends — nothing is drawn in empty space. Where every size's line ends on
+ * one edge drawn once (leonie's pocket bag: each size's top line stops on the shared side drawn in
+ * the largest size's pen; the lone-portion test drops that side wherever other sizes' lines run
+ * beside it), rank r's walls stop short of each other on that edge.
+ *   R0  a chain path joins two dangling ends of r: every junction ≤ `junctionMm`, tangent within
+ *       `angleDeg` at both ends and at each join; never a notch / internal / grain / seam line; the
+ *       path stays by the chord between the two ends (≤ 1 mm + 2 % of it off, ≤ 2 % + 1 mm longer:
+ *       no excursion, no tooth); through an ignore / unclassified line it is `bracket`ed;
+ *   R1  two dangling ends of r lie on the same foreign line L (≤ `junctionMm`): the stretch of L
+ *       between them (the shorter way round a loop), smooth (no tooth) — refused when it crosses
+ *       r's walls; never on an internal / grain / seam line (a notch-class line may carry it);
+ *   R2  a SPINE: from r's end along a foreign line L to r's nearest wall (the shorter way) — only
+ *       when L is a proven boundary there (`sharedFolds`' tests): ≥ 2 other ranks END on it across
+ *       (T-landings), all from ONE side, r too; no rank line crosses or continues through it; L is
+ *       no grain / internal / seam line.
+ * No wall runs beside an effective wall of r (`sideMm`, hard). `items` are rank r's walls as the
+ * fill draws them; `skip` chains are never walls (frames, the operator's exclusions). A dangling
+ * end = an end of an open wall item with no other wall reaching within `junctionMm` and leaving it
+ * within 3 mm. Per-rank additions, never a reclassification; the fill keeps a closure through them
+ * only when the family's anchors agree (fill.ts `continuityVerdicts`).
+ */
+export function continuityWalls(
+  set: ChainSet,
+  m: WallModel,
+  r: number,
+  items: readonly WallItem[],
+  skip: ReadonlySet<ChainId> = new Set(),
+  o: ContinuityOpts = {},
+): ContinuityWall[] {
+  if (m.mode !== 'graded') return [];
+  const J = o.junctionMm ?? 1;
+  const cosA = Math.cos(((o.angleDeg ?? 15) * Math.PI) / 180);
+  const maxStretch = o.maxStretchMm ?? 600;
+  const maxPath = o.maxPathChains ?? 8;
+  const maxPathMm = o.maxPathMm ?? 600;
+  const roleOf = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  const wg = new SegGrid(4);
+  const cums: number[][] = [];
+  items.forEach((it, i) => {
+    wg.addPolyline(i, it.pts, it.closed);
+    cums.push(cumOf(it.pts));
+  });
+  const segOf = (i: number, s: number): [PtMm, PtMm] => {
+    const p = items[i].pts;
+    return [p[s], s + 1 < p.length ? p[s + 1] : p[0]];
+  };
+  const dItem = (q: PtMm, i: number) => {
+    let d = Infinity;
+    const p = items[i].pts;
+    for (let s = 0; s + 1 < p.length; s++) d = Math.min(d, segNearest(q, p[s], p[s + 1]).d);
+    return d;
+  };
+  // ── dangling ends ──
+  const ends: End[] = [];
+  items.forEach((it, i) => {
+    if (it.closed || it.pts.length < 2) return;
+    const cum = cums[i];
+    const L = cum[cum.length - 1];
+    if (L < 1) return;
+    for (const e of [0, 1] as const) {
+      const p = e ? it.pts[it.pts.length - 1] : it.pts[0];
+      const arc = e ? L : 0;
+      let touch = false;
+      wg.near(p, 3, (j, s) => {
+        if (touch) return;
+        const [a, b] = segOf(j, s);
+        const h = segNearest(p, a, b);
+        if (h.d > 3) return;
+        if (j === i) {
+          // the item's own far part (a loop that does not quite close) counts as another wall
+          const at = (cums[j][s] ?? 0) + h.u * dist(a, b);
+          if (Math.abs(at - arc) < 5 || h.d > J) return;
+          touch = true;
+          return;
+        }
+        // another wall reaches the end AND leaves the item within 3 mm (a duplicate of the item
+        // lying on it — a lone stretch of the same line — is no junction)
+        let near = false;
+        let off = false;
+        const n = Math.max(1, Math.ceil(dist(a, b) / 0.5));
+        for (let k = 0; k <= n && !(near && off); k++) {
+          const q = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n };
+          const dq = dist(q, p);
+          if (dq > 3) continue;
+          if (dq <= J) near = true;
+          if (dItem(q, i) > 0.6) off = true;
+        }
+        if ((h.d <= J || near) && off) touch = true;
+      });
+      if (!touch) ends.push({ item: i, at: p, t: endTangent(it.pts, e), arc });
+    }
+  });
+  if (!ends.length) return [];
+  // ── foreign lines: every chain that is not already one of r's whole walls ──
+  const whole = new Set<ChainId>();
+  for (const it of items) {
+    const c = set.chains[it.chain];
+    if (c && it.pts === c.pts) whole.add(c.id);
+  }
+  const fg = new SegGrid(4);
+  const foreign: ChainId[] = [];
+  for (const c of set.chains) {
+    if (!c || c.pts.length < 2 || whole.has(c.id) || skip.has(c.id)) continue;
+    foreign.push(c.id);
+    fg.addPolyline(c.id, c.pts, c.closed);
+  }
+  const fcum = new Map<ChainId, number[]>();
+  const cumF = (id: ChainId) => {
+    let v = fcum.get(id);
+    if (!v) {
+      const c = set.chains[id];
+      v = cumOf(c.closed ? [...c.pts, c.pts[0]] : c.pts);
+      fcum.set(id, v);
+    }
+    return v;
+  };
+  const ptsF = (id: ChainId) => {
+    const c = set.chains[id];
+    return c.closed ? [...c.pts, c.pts[0]] : c.pts;
+  };
+  // ── HARD beside test: every effective wall of r (incl. reranked and operator lines) ──
+  const sideMm = o.sideMm ?? 20;
+  const bw: WallItem[] = [...items, ...(o.beside ?? [])];
+  const bg = new SegGrid(8);
+  bw.forEach((it, k) => bg.addPolyline(k, it.pts, it.closed));
+  const bcum = bw.map((it) => cumOf(it.pts));
+  /**
+   * length of `pts` with one of r's walls beside it, mm: a wall of another chain than the stretch's
+   * own (`self`), roughly parallel, its perpendicular foot inside it (not a corner it converges on),
+   * more than `junctionMm` off (closer is the same edge drawn twice, not a neighbouring one)
+   */
+  const besideMm = (pts: readonly PtMm[], self: ReadonlySet<ChainId>) => {
+    let acc = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const l = dist(a, b);
+      if (l < 1e-6) continue;
+      const tx = (b.x - a.x) / l;
+      const ty = (b.y - a.y) / l;
+      const n = Math.max(1, Math.ceil(l / 2));
+      for (let k = 0; k < n; k++) {
+        const p = {
+          x: a.x + (b.x - a.x) * ((k + 0.5) / n),
+          y: a.y + (b.y - a.y) * ((k + 0.5) / n),
+        };
+        let beside = false;
+        bg.near(p, sideMm, (w, sIdx) => {
+          if (beside || self.has(bw[w].chain)) return;
+          const q = bw[w].pts;
+          const q1 = sIdx + 1 < q.length ? q[sIdx + 1] : q[0];
+          const h = segNearest(p, q[sIdx], q1);
+          if (h.d > sideMm || h.d <= J) return;
+          const ql = dist(q[sIdx], q1) || 1;
+          const along =
+            ((p.x - q[sIdx].x) * (q1.x - q[sIdx].x) + (p.y - q[sIdx].y) * (q1.y - q[sIdx].y)) / ql;
+          if (along < -0.5 || along > ql + 0.5) return; // a corner it converges on, not beside
+          if (Math.abs((tx * (q1.x - q[sIdx].x) + ty * (q1.y - q[sIdx].y)) / ql) < 0.8) return;
+          const cum = bcum[w];
+          const at = (cum[sIdx] ?? 0) + h.u * ql;
+          if (!bw[w].closed && (at < 3 || cum[cum.length - 1] - at < 3)) return;
+          beside = true;
+        });
+        if (beside) acc += l / n;
+      }
+    }
+    return acc;
+  };
+  /** nothing of r's beside it, beyond one 2 mm sample (sampling epsilon only) */
+  const lonely = (pts: readonly PtMm[], self: Iterable<ChainId>) =>
+    besideMm(pts, new Set(self)) <= 2.01;
+  /**
+   * No tooth or excursion: over every 10 mm of the stretch the line is at most 15 % longer than
+   * its chord there (a curve stays well under; a zigzag link or a tooth does not)
+   */
+  const smooth = (pts: readonly PtMm[]) => {
+    const cum = cumOf(pts);
+    const L = cum[cum.length - 1];
+    if (L < 4) return true;
+    const win = Math.min(10, L);
+    for (let a = 0; a + win <= L + 1e-9; a += 1) {
+      const s0 = sub(pts as PtMm[], cum, a, a + win);
+      const chord = dist(s0[0], s0[s0.length - 1]);
+      if (win > 1.15 * chord + 0.5) return false;
+    }
+    return true;
+  };
+  const out: ContinuityWall[] = [];
+  const used = new Set<number>();
+  // ── R0: chain paths joining two dangling ends ──
+  const endGrid = new SegGrid(2);
+  ends.forEach((e, k) => endGrid.addSeg(k, 0, e.at, e.at));
+  const chainEnds = new SegGrid(2);
+  for (const id of foreign) {
+    const c = set.chains[id];
+    if (c.closed || NOT_EDGE_ROLES.has(roleOf.get(id) ?? '')) continue;
+    chainEnds.addSeg(id, 0, c.pts[0], c.pts[0]);
+    chainEnds.addSeg(id, 1, c.pts[c.pts.length - 1], c.pts[c.pts.length - 1]);
+  }
+  const starts = (p: PtMm, t: PtMm, not: ReadonlySet<ChainId>) => {
+    const res: [ChainId, 0 | 1][] = [];
+    chainEnds.near(p, J, (id, e) => {
+      if (not.has(id) || res.some(([x, y]) => x === id && y === e)) return;
+      const c = set.chains[id];
+      const q = e ? c.pts[c.pts.length - 1] : c.pts[0];
+      if (dist(q, p) > J) return;
+      const ot = endTangent(c.pts, e as 0 | 1);
+      if (-(ot.x * t.x + ot.y * t.y) >= cosA) res.push([id, e as 0 | 1]);
+    });
+    return res;
+  };
+  /** the path (as one polyline, oriented from `a`) stays by the chord a→b: no excursion, no tooth */
+  const byChord = (a: PtMm, b: PtMm, path: { id: ChainId; rev: boolean }[]) => {
+    const poly: PtMm[] = [a];
+    for (const { id, rev } of path) {
+      const q = set.chains[id].pts;
+      poly.push(...(rev ? q.slice().reverse() : q));
+    }
+    poly.push(b);
+    const chord = dist(a, b);
+    let len = 0;
+    let dev = 0;
+    for (let i = 0; i < poly.length; i++) {
+      if (i) len += dist(poly[i - 1], poly[i]);
+      dev = Math.max(dev, segNearest(poly[i], a, b).d);
+    }
+    return dev <= 1 + 0.02 * chord && len <= 1.02 * chord + 1;
+  };
+  ends.forEach((e0, k0) => {
+    if (used.has(k0)) return;
+    type Node = { path: { id: ChainId; rev: boolean }[]; at: PtMm; t: PtMm; len: number };
+    const stack: Node[] = [{ path: [], at: e0.at, t: e0.t, len: 0 }];
+    let found: { path: Node['path']; k: number } | null = null;
+    while (stack.length && !found) {
+      const nd = stack.pop()!;
+      if (nd.path.length >= maxPath) continue;
+      for (const [id, e] of starts(nd.at, nd.t, new Set(nd.path.map((x) => x.id)))) {
+        const c = set.chains[id];
+        const far = e ? c.pts[0] : c.pts[c.pts.length - 1];
+        const ft = endTangent(c.pts, e ? 0 : 1);
+        const len = nd.len + c.lengthMm;
+        if (len > maxPathMm) continue;
+        const path = [...nd.path, { id, rev: e === 1 }];
+        let hit = -1;
+        endGrid.near(far, J, (k) => {
+          if (hit >= 0 || k === k0 || used.has(k)) return;
+          const e2 = ends[k];
+          if (dist(e2.at, far) > J) return;
+          if (-(ft.x * e2.t.x + ft.y * e2.t.y) >= cosA) hit = k;
+        });
+        if (hit >= 0 && byChord(e0.at, ends[hit].at, path)) {
+          found = { path, k: hit };
+          break;
+        }
+        stack.push({ path, at: far, t: ft, len });
+      }
+    }
+    if (!found) return;
+    const ids = found.path.map((x) => x.id);
+    if (!ids.every((id) => lonely(set.chains[id].pts, ids))) return;
+    used.add(k0);
+    used.add(found.k);
+    // through an ignore / unclassified line: the closure needs anchors on both sides
+    const bracket = ids.some((id) => {
+      const role = roleOf.get(id);
+      return role === undefined || role === 'ignore';
+    });
+    for (const id of ids)
+      out.push({
+        chain: id,
+        pts: set.chains[id].pts,
+        rule: 'R0',
+        chains: [...ids],
+        ...(bracket ? { bracket } : {}),
+      });
+  });
+  // ── feet of the remaining ends on foreign lines ──
+  type Foot = { k: number; id: ChainId; s: number; q: PtMm };
+  const feet: Foot[] = [];
+  ends.forEach((e, k) => {
+    if (used.has(k)) return;
+    const best = new Map<ChainId, { d: number; s: number; q: PtMm }>();
+    fg.near(e.at, J, (id, s) => {
+      const p = ptsF(id);
+      if (s + 1 >= p.length) return;
+      const h = segNearest(e.at, p[s], p[s + 1]);
+      if (h.d > J) return;
+      const b = best.get(id);
+      if (!b || h.d < b.d)
+        best.set(id, { d: h.d, s: cumF(id)[s] + h.u * dist(p[s], p[s + 1]), q: h.q });
+    });
+    for (const [id, b] of best)
+      if (!NOT_SPAN_ROLES.has(roleOf.get(id) ?? '')) feet.push({ k, id, s: b.s, q: b.q });
+  });
+  const stretch = (id: ChainId, a: number, b: number) => sub(ptsF(id), cumF(id), a, b);
+  /** a stretch crosses r's walls (a proper crossing ≥ 20°, away from its two ends) */
+  const crosses = (pts: PtMm[]) => {
+    const cum = cumOf(pts);
+    const L = cum[cum.length - 1];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      let hit = false;
+      wg.near(mid, dist(a, b) / 2 + 0.01, (j, s) => {
+        if (hit) return;
+        const [c, d] = segOf(j, s);
+        const x = segIntersect(a, b, c, d);
+        if (!x) return;
+        const at = cum[i] + x.t * dist(a, b);
+        if (at < 1.5 || at > L - 1.5) return;
+        const l1 = dist(a, b) || 1;
+        const l2 = dist(c, d) || 1;
+        const sin = Math.abs((b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x)) / (l1 * l2);
+        if (sin >= Math.sin((20 * Math.PI) / 180)) hit = true;
+      });
+      if (hit) return true;
+    }
+    return false;
+  };
+  // ── R1: two ends on one line, the shortest stretches first ──
+  const byLine = new Map<ChainId, Foot[]>();
+  for (const f of feet) {
+    const a = byLine.get(f.id);
+    if (a) a.push(f);
+    else byLine.set(f.id, [f]);
+  }
+  type Pair = { a: Foot; b: Foot; pts: PtMm[]; len: number };
+  const pairs: Pair[] = [];
+  for (const [id, fs] of byLine) {
+    if (fs.length < 2) continue;
+    const c = set.chains[id];
+    const per = cumF(id)[cumF(id).length - 1];
+    for (let i = 0; i < fs.length; i++)
+      for (let j = i + 1; j < fs.length; j++) {
+        const [a, b] = fs[i].s <= fs[j].s ? [fs[i], fs[j]] : [fs[j], fs[i]];
+        if (a.k === b.k) continue;
+        let pts = stretch(id, a.s, b.s);
+        let len = b.s - a.s;
+        if (c.closed && per - len < len) {
+          pts = [...stretch(id, b.s, per), ...stretch(id, 0, a.s).slice(1)];
+          len = per - len;
+        }
+        if (len > maxStretch || len < 0.3) continue;
+        pairs.push({ a, b, pts, len });
+      }
+  }
+  pairs.sort((x, y) => x.len - y.len);
+  for (const p of pairs) {
+    if (used.has(p.a.k) || used.has(p.b.k)) continue;
+    if (crosses(p.pts) || !smooth(p.pts) || !lonely(p.pts, [p.a.id])) continue;
+    used.add(p.a.k);
+    used.add(p.b.k);
+    const ea = ends[p.a.k].at;
+    const eb = ends[p.b.k].at;
+    const first = dist(ea, p.pts[0]) <= dist(eb, p.pts[0]) ? ea : eb;
+    const last = first === ea ? eb : ea;
+    out.push({ chain: p.a.id, pts: [first, ...p.pts, last], rule: 'R1', chains: [p.a.id] });
+  }
+  // ── R2: spines — a proven boundary several sizes end on ──
+  const rest = feet.filter((f) => !used.has(f.k));
+  if (!rest.length) return out;
+  const rankOfChain = new Map<ChainId, number>();
+  m.byRank.forEach((ids, k) => ids.forEach((id) => rankOfChain.set(id, k)));
+  const ranked = [...rankOfChain.keys()].filter((id) => set.chains[id]?.pts.length >= 2);
+  const rg = new SegGrid(4);
+  for (const id of ranked) rg.addPolyline(id, set.chains[id].pts, set.chains[id].closed);
+  const contact = (q: PtMm, self: End) => {
+    let hit = false;
+    wg.near(q, J, (j, s) => {
+      if (hit) return;
+      const [a, b] = segOf(j, s);
+      const h = segNearest(q, a, b);
+      if (h.d > J) return;
+      if (j === self.item) {
+        const at = (cums[j][s] ?? 0) + h.u * dist(a, b);
+        if (Math.abs(at - self.arc) < 5) return;
+      }
+      hit = true;
+    });
+    return hit;
+  };
+  /**
+   * `sharedFolds`' boundary tests on the used stretch of L (±20 mm): ranked lines T-land on it (a
+   * foot inside L, ≥ 30° across), ≥ 2 ranks other than r, every one from ONE side (r included);
+   * and no ranked line crosses it away from its own ends.
+   */
+  const boundary = (id: ChainId, lo: number, hi: number) => {
+    const pts = ptsF(id);
+    const cum = cumF(id);
+    const per = cum[cum.length - 1];
+    const sides = new Map<number, Set<number>>([
+      [1, new Set()],
+      [-1, new Set()],
+    ]);
+    const seen = new Set<ChainId>();
+    for (const cid of ranked) {
+      if (cid === id) continue;
+      const c = set.chains[cid];
+      if (c.closed) continue;
+      const k = rankOfChain.get(cid)!;
+      for (const e of [0, 1] as const) {
+        const p = e ? c.pts[c.pts.length - 1] : c.pts[0];
+        const t = endTangent(c.pts, e);
+        let best: { d: number; s: number; i: number } | null = null;
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const h = segNearest(p, pts[i], pts[i + 1]);
+          if (h.d <= J && (!best || h.d < best.d))
+            best = { d: h.d, s: cum[i] + h.u * dist(pts[i], pts[i + 1]), i };
+        }
+        if (!best || best.s < lo - 20 || best.s > hi + 20) continue;
+        if (!c.closed && !set.chains[id].closed && (best.s < 2 || per - best.s < 2)) continue;
+        const a = pts[best.i];
+        const b = pts[best.i + 1];
+        const L = dist(a, b) || 1;
+        const cross = ((b.x - a.x) * t.y - (b.y - a.y) * t.x) / L;
+        if (Math.abs(cross) < 0.5) continue; // along L, not across it
+        // the line comes FROM the side opposite to where its end points
+        sides.get(cross > 0 ? -1 : 1)!.add(k);
+      }
+      // a ranked line crossing the stretch away from its own ends
+      if (seen.has(cid)) continue;
+      const q = c.pts;
+      for (let i = 0; i + 1 < pts.length && !seen.has(cid); i++) {
+        if (cum[i + 1] < lo - 20 || cum[i] > hi + 20) continue;
+        for (let j = 0; j + 1 < q.length; j++) {
+          const x = segIntersect(pts[i], pts[i + 1], q[j], q[j + 1]);
+          if (!x) continue;
+          if (dist(x.p, q[0]) >= 2 && dist(x.p, q[q.length - 1]) >= 2) {
+            seen.add(cid);
+            break;
+          }
+        }
+      }
+    }
+    if (seen.size) return false;
+    const pos = sides.get(1)!;
+    const neg = sides.get(-1)!;
+    if (pos.size && neg.size) return false;
+    const one = pos.size ? pos : neg;
+    one.delete(r);
+    return one.size >= 2;
+  };
+  for (const f of rest) {
+    if (used.has(f.k)) continue;
+    const e = ends[f.k];
+    const pts = ptsF(f.id);
+    const cum = cumF(f.id);
+    const per = cum[cum.length - 1];
+    const closed = set.chains[f.id].closed;
+    let best: { a: number; b: number; len: number } | null = null;
+    for (const dir of [1, -1]) {
+      for (let w = 1.5; w <= maxStretch; w += 0.5) {
+        let s2 = f.s + dir * w;
+        if (closed) s2 = ((s2 % per) + per) % per;
+        else if (s2 < 0 || s2 > per) break;
+        const q = sub(pts, cum, s2, s2)[0];
+        if (dist(q, e.at) < 1.5) continue;
+        if (contact(q, e)) {
+          if (!best || w < best.len) best = { a: f.s, b: f.s + dir * w, len: w };
+          break;
+        }
+      }
+    }
+    if (!best) continue;
+    const lo = Math.min(best.a, best.b);
+    const hi = Math.max(best.a, best.b);
+    if (closed && (lo < 0 || hi > per)) continue; // across a loop's seam: not proven here
+    if (!boundary(f.id, lo, hi)) continue;
+    let st = stretch(f.id, lo, hi);
+    if (best.b < best.a) st = st.slice().reverse();
+    if (!smooth(st) || !lonely(st, [f.id])) continue;
+    used.add(f.k);
+    out.push({ chain: f.id, pts: [e.at, ...st], rule: 'R2', chains: [f.id] });
+  }
+  return out;
 }
 
 /** Arc length from the start of a polyline to (segment i, parameter u). */

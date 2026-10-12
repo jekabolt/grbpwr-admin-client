@@ -49,6 +49,10 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
     fix: 'files',
   },
   'G20-nested-piece': { what: 'no piece drawn inside another piece', fix: 'pieces' },
+  'G21-continuity': {
+    what: 'a size closed through another line keeps its proof (the line, the rule, the check)',
+    fix: 'pieces',
+  },
 };
 
 /**

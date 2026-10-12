@@ -25,11 +25,14 @@ import type {
   Affine,
   AllowanceDecision,
   BlockReason,
+  BlockedName,
   BoxMm,
   BuildPieceSpecsFn,
   CardSize,
   Chain,
   ChainId,
+  ContinuityGeometry,
+  ContinuityRecord,
   ChainSet,
   DerivedEdge,
   DrillFeature,
@@ -136,6 +139,8 @@ export type SemanticsDetail = {
    * walls (F14b, Codex C1): the write stage passes this as `derivedOf` to `writeAndGate` (G15).
    */
   derivedOf: (identity: string, rank: number) => DerivedEdge[] | undefined;
+  /** P1 (G21): the continuity stretches of a size closed through them, and their chains. */
+  continuityOf: (identity: string, rank: number) => ContinuityGeometry | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -156,6 +161,20 @@ const sameLine = (g: { a: PtMm; b: PtMm }, h: { a: PtMm; b: PtMm }) => {
 
 const blockOffset = (r: OffsetReport): BlockReason =>
   r.loops !== 1 ? 'offset-topology' : r.selfIntersects ? 'offset-self-intersection' : 'offset-hull';
+
+/**
+ * CODE lane: the source's own words for a piece whose name is refused — the DXF block name as the
+ * file spells it when the name came from the block, else the name read (a printed title, the
+ * operator's or the AI's display name).
+ */
+function sourceNameOf(
+  name: { displayName: string; nameOrigin: PieceSpec['nameOrigin']; notes: string[] },
+  c: (PieceCandidate & DxfExtra) | undefined,
+): string | null {
+  const dxf = c?.dxf?.identity?.trim();
+  const fromBlock = name.notes.some((n) => n.startsWith('name from the DXF block'));
+  return (fromBlock && dxf ? dxf : name.displayName.trim()) || null;
+}
 
 function textsOf(c: PieceCandidate, byId: Map<number, IRText>): string[] {
   const out: string[] = [];
@@ -558,8 +577,8 @@ export function buildPieceSpecsDetailed(
     ungraded: boolean;
   };
   const preps: Prep[] = [];
-  const block = (seed: SeedId, reason: BlockReason, detail: string) => {
-    blocked.push({ seed, reason, detail });
+  const block = (seed: SeedId, reason: BlockReason, detail: string, name?: BlockedName) => {
+    blocked.push({ seed, reason, detail, ...(name ? { name } : {}) });
   };
 
   for (const fam of families) {
@@ -612,6 +631,8 @@ export function buildPieceSpecsDetailed(
         seed,
         'grammar',
         'no name: neither the operator, the AI, the DXF block nor the printed text gives a code',
+        // CODE lane: the DXF block's own name ("3", "PIECE 12") is kept as the display name
+        { source: sorted[0].dxf?.identity?.trim() || null, hand: null, twin: null },
       );
       // N3 (SVG smoke): its grainline is proposed NOW, beside the named pieces' — one "review N
       // proposed grainlines" covers every piece, not a second round after a code is typed. Only
@@ -796,6 +817,25 @@ export function buildPieceSpecsDetailed(
       });
     }
   }
+
+  // P1 (G21): a continuity closure's provenance — roles as read, never a line of its own size
+  const roleOfChain = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) roleOfChain.set(id, k.role);
+  const continuityRecord = (c: PieceCandidate): ContinuityRecord => {
+    const cls = set.classes.find((k) => k.id === run.sizes[c.rank]?.classId);
+    const own = new Set(cls?.role === 'size' ? cls.chains : []);
+    return {
+      rank: c.rank,
+      edges: (c.continuity ?? []).map((e) => ({
+        rule: e.rule,
+        chains: [...e.chains],
+        roles: e.chains.map((id) => roleOfChain.get(id) ?? 'unclassified'),
+        ...(e.bracket ? { bracket: true } : {}),
+        ownRank: e.chains.some((id) => own.has(id)),
+      })),
+      verdict: c.continuityVerdict ?? null,
+    };
+  };
 
   // ── pass 2: geometry per family ─────────────────────────────────────────────────────────
   const pieces: PieceSpec[] = [];
@@ -1194,6 +1234,7 @@ export function buildPieceSpecsDetailed(
         walls: c.walls,
         bbox: bboxOf(cut),
         areaMm2: areaOf(cut),
+        ...(c.rankFrom === 'continuity' ? { continuity: continuityRecord(c) } : {}),
       });
       wallMaps.push({
         seed,
@@ -1466,7 +1507,12 @@ export function buildPieceSpecsDetailed(
       if (why) gram = `${s.identity}: ${why}`;
     }
     if (gram) {
-      block(seed, 'grammar', gram);
+      block(seed, 'grammar', gram, {
+        source: sourceNameOf(name, p.cands[0]?.c),
+        // a drawn pair keeps its hand: the twin is blocked with it ("its other hand is blocked")
+        hand: mode === 'drawn' && twin != null ? hand : null,
+        twin: mode === 'drawn' && twin != null ? twin : null,
+      });
       for (const s of out) walls.delete(s.identity);
       continue;
     }
@@ -1498,6 +1544,16 @@ export function buildPieceSpecsDetailed(
           detail: `the drawn pair disagrees: ${pa.identity} ×${pa.piecesPerGarment}, ${pb.identity} ×${pb.piecesPerGarment}`,
         });
   }
+  /** CODE lane: what a blocked written piece was called, its drawn hand and twin (BlockedName). */
+  const blockedNameOf = (sp: PieceSpec): BlockedName => {
+    const pr = preps.find((x) => x.seed === sp.seed);
+    const twin = twinOf.get(sp.seed) ?? null;
+    return {
+      source: pr ? sourceNameOf(pr.name, pr.cands[0]?.c) : sp.displayName || null,
+      hand: twin != null ? sp.pairHand : null,
+      twin,
+    };
+  };
   const unique: PieceSpec[] = [];
   const dupSeeds = new Set<SeedId>();
   for (const s of pieces) {
@@ -1509,6 +1565,7 @@ export function buildPieceSpecsDetailed(
         s.seed,
         'duplicate-identity',
         `${s.identity} is already the name of another piece — rename one`,
+        blockedNameOf(s),
       );
       continue;
     }
@@ -1527,6 +1584,7 @@ export function buildPieceSpecsDetailed(
         s.seed,
         why?.reason ?? 'grammar',
         `its other hand ${s.pairOf} is blocked${why ? `: ${why.detail}` : ''}`,
+        blockedNameOf(s),
       );
       unique.splice(i, 1);
       changed = true;
@@ -1569,6 +1627,24 @@ export function buildPieceSpecsDetailed(
     // pipeline itself drew. They go to the gate separately (`derivedOf` → G15).
     if (!lines.length) return undefined;
     return toFrame(src.w, lines);
+  };
+  /** P1 (G21): the continuity stretches of an identity × rank and their chains, its own frame. */
+  const continuityOf = (identity: string, rank: number): ContinuityGeometry | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || src.cand.rankFrom !== 'continuity' || !src.cand.continuity?.length)
+      return undefined;
+    return {
+      edges: src.cand.continuity.map((e) => ({
+        pts: toFrame(src.w, [e.pts]).filter((l) => l.length > 1),
+        chainLines: toFrame(
+          src.w,
+          e.chains
+            .map((id) => set.chains[id])
+            .filter((ch) => !!ch && ch.pts.length > 1)
+            .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts)),
+        ),
+      })),
+    };
   };
   const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
@@ -1616,6 +1692,7 @@ export function buildPieceSpecsDetailed(
     },
     wallsOf,
     derivedOf,
+    continuityOf,
     notes,
   };
 }

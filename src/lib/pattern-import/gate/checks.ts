@@ -33,7 +33,7 @@ import {
   reflection,
   sampleAlong,
 } from '../write/geom';
-import { LAYERS } from '../write/manifest-build';
+import { LAYERS, continuityOfBlock } from '../write/manifest-build';
 import {
   GRAIN_BARB_BACK_MM,
   GRAIN_BARB_SIDE_MM,
@@ -1576,5 +1576,129 @@ export function g19(ctx: GateCtx): GateCheck {
       : 'no cut or seam line traced around tile chrome',
     n,
     'no hairpin ≤ 2 mm wide, 3–25 mm long within 1 mm of tile chrome; no stretch ≥ 5 mm on a mark (block); on frames > 100 mm per block blocks, less warns',
+  );
+}
+
+// ── G21 (P1): continuity provenance ────────────────────────────────────────────────────────────
+
+/** G21: a stretch lies on the chains it names: share of it (ends' junction hops left out). */
+export const CONTINUITY_ON_CHAIN_SHARE = 0.98;
+/** G21: the written line runs along the used stretch: share of it within reach of the line. */
+export const CONTINUITY_COVER_SHARE = 0.9;
+/** Roles an R0 path may never lie on (pieces/walls.ts NOT_EDGE_ROLES). */
+const CONT_NOT_EDGE = new Set(['notch', 'internal', 'grain', 'seam']);
+/** Roles an R1 / R2 stretch may never lie on (pieces/walls.ts NOT_SPAN_ROLES). */
+const CONT_NOT_SPAN = new Set(['internal', 'grain', 'seam']);
+
+/**
+ * G21 (P1): a size closed through continuity walls must carry its proof, and the proof must hold —
+ * the manifest entry matches the run's record (rules, chains, anchors); every edge's rule holds
+ * (R0 never on a notch / internal / grain / seam line, R1 / R2 never on an internal / grain / seam
+ * line and on one line, a bracketed path between anchors on both sides); the stretch lies on the chains it
+ * names (ownership) and the written line runs along it (coverage); the D3 verdict is recorded, on
+ * ≥ 2 anchor ranks, and every measured check is within what it allowed. Any mismatch blocks.
+ */
+export function g21(ctx: GateCtx): GateCheck {
+  const failed: string[] = [];
+  const notes: string[] = [];
+  let n = 0;
+  const reach = Math.max(PATIMPORT.snapMm, 0.5);
+  for (const b of ctx.blocks) {
+    const rec = b.size?.continuity;
+    const mc = b.mb.continuity;
+    if (!rec && !mc) continue;
+    n++;
+    const bad = (why: string) => {
+      failed.push(b.block);
+      notes.push(`${b.block}: ${why}`);
+    };
+    if (!rec || !mc) {
+      bad(
+        rec
+          ? 'the manifest does not record its continuity closure'
+          : 'a continuity entry with no closure behind it',
+      );
+      continue;
+    }
+    if (JSON.stringify(continuityOfBlock(rec)) !== JSON.stringify(continuityOfBlock(mc))) {
+      bad('the manifest entry does not match the run');
+      continue;
+    }
+    // from here on the DURABLE record (the manifest's) is what is checked
+    if (!mc.edges.length) {
+      bad('closed through continuity walls but names none');
+      continue;
+    }
+    const v = mc.verdict;
+    if (!v || v.anchors.length < 2 || !v.checks.length) {
+      bad('no D3 verdict on ≥ 2 anchor ranks');
+      continue;
+    }
+    const off = v.checks.find(
+      (c) =>
+        !(c.hMm <= c.hAllowMm) ||
+        !(c.hu <= c.huAllow) ||
+        !(c.growth >= c.band[0] && c.growth <= c.band[1]) ||
+        !(c.dk <= c.kMax),
+    );
+    if (off) {
+      bad(`the recorded verdict against rank ${off.vs} is outside what it allowed`);
+      continue;
+    }
+    const geo = ctx.expect.continuityByBlock?.[b.block];
+    if (!geo || geo.edges.length !== mc.edges.length) {
+      bad('its continuity stretches cannot be checked (no geometry)');
+      continue;
+    }
+    mc.edges.forEach((e, k) => {
+      const what = `${e.rule} on chain ${e.chains.join('+')}`;
+      if (e.roles.some((r) => (e.rule === 'R0' ? CONT_NOT_EDGE : CONT_NOT_SPAN).has(r)))
+        bad(`${what}: lies on a ${e.roles.join('/')} line`);
+      else if (e.rule !== 'R0' && e.chains.length !== 1) bad(`${what}: ${e.rule} names one line`);
+      else if (
+        e.bracket &&
+        !(v.anchors.some((a) => a < rec.rank) && v.anchors.some((a) => a > rec.rank))
+      )
+        bad(`${what}: through an unclassified line without anchors on both sides`);
+      const g = geo.edges[k];
+      const chainIdx = new SegmentIndex(
+        g.chainLines.map((l) => ({ pts: l, closed: false })),
+        5,
+      );
+      const { line } = linesFor(ctx, b);
+      const lineIdx = line ? new SegmentIndex([{ pts: line, closed: true }], 5) : null;
+      let tot = 0;
+      let onChain = 0;
+      let covered = 0;
+      for (const pl of g.pts) {
+        const s = sampleAlong(pl, false, 0.25);
+        const L = polylineLength(pl, false);
+        let arc = 0;
+        for (let i = 0; i < s.length; i++) {
+          if (i) arc += dist(s[i - 1], s[i]);
+          if (arc < 1.2 || L - arc < 1.2) continue; // the junction hops onto the line
+          tot++;
+          if (chainIdx.nearest(s[i], 2) <= 0.35) onChain++;
+          if (lineIdx && lineIdx.nearest(s[i], 2) <= reach) covered++;
+        }
+      }
+      if (!tot) return;
+      if (onChain / tot < CONTINUITY_ON_CHAIN_SHARE)
+        bad(
+          `${what}: ${((onChain / tot) * 100).toFixed(1)} % of the stretch lies on the chains it names`,
+        );
+      else if (covered / tot < CONTINUITY_COVER_SHARE)
+        bad(`${what}: the written line runs along ${((covered / tot) * 100).toFixed(1)} % of it`);
+    });
+  }
+  return check(
+    'G21-continuity',
+    failed,
+    'block',
+    notes.length
+      ? notes.slice(0, 6).join('; ')
+      : n
+        ? `${n} block(s) closed through continuity walls: provenance and verdict hold`
+        : 'no block closed through continuity walls',
   );
 }

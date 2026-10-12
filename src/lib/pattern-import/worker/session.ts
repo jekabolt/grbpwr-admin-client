@@ -46,6 +46,14 @@ import type {
   StageName,
 } from '../types';
 import { PATIMPORT } from '../types';
+import type { GarmentPassport } from '../passport/types';
+import {
+  bindPassport,
+  passportDigest,
+  passportSourceDigest,
+  readPassport,
+  type BindPiece,
+} from '../passport';
 import { applyScale, detectScale, detectScaleSet, extractPdfWith } from '../adapters/pdf';
 import {
   dxfFastPath,
@@ -94,7 +102,12 @@ import {
   sheetFeed,
 } from '../sizes/count-evidence';
 import { expectedSizes, inferDrawnSizes, runForExpected } from '../pieces/grade/expected';
-import { applyOperatorMap, createProposeSizeMap, defaultTokensOf } from '../sizes/map';
+import {
+  applyOperatorMap,
+  createProposeSizeMap,
+  defaultTokensOf,
+  markNotDrawn,
+} from '../sizes/map';
 import { fileSizeLabel } from '../sizes/recover';
 import {
   applyPieceEdits,
@@ -111,6 +124,7 @@ import {
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
 import { exceptNested } from '../pieces/fill';
+import { sheetModule, undrawnRanks } from '../pieces/walls';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -356,10 +370,14 @@ export class Session {
   private seeds: Seed[] | null = null;
   private families: PieceFamily[] | null = null;
   private semantics: SemanticsOutput | null = null;
+  /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
+  private passport: GarmentPassport | null = null;
+  private passportBound: GarmentPassport | null = null;
   /** Source walls per written identity × rank (F5) — what the gate measures the cut line against. */
   private wallsOf: SemanticsDetail['wallsOf'] | null = null;
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
+  private continuityOf: SemanticsDetail['continuityOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -450,6 +468,7 @@ export class Session {
       this.semantics = null;
       this.wallsOf = null;
       this.derivedOf = null;
+      this.continuityOf = null;
     }
   }
 
@@ -727,6 +746,16 @@ export class Session {
     this.pageTexts = docs.flatMap((d) =>
       d.pages.filter((p) => !tilePage.has(`${d.file.id}:${p.page}`)).flatMap((p) => p.texts),
     );
+    // PASSPORT Ф1: one pass over every page and layer name — evidence, never a failure of the read
+    this.passport = null;
+    this.passportBound = null;
+    try {
+      this.passport = readPassport(docs, {
+        sourceDigest: await passportSourceDigest(this.files.map((f) => f.sha256)),
+      });
+    } catch (e) {
+      warnings.push(`the document's passport could not be read: ${String(e).slice(0, 120)}`);
+    }
     return {
       files: this.files,
       pages: this.pages,
@@ -734,6 +763,7 @@ export class Session {
       warnings,
       presegmented: !!this.dxf,
       calibrations: this.calibrations.length ? this.calibrations : undefined,
+      ...(this.passport ? { passport: this.passport } : {}),
     };
   }
 
@@ -1049,6 +1079,14 @@ export class Session {
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
+    // a size the sheet lists but draws no line of its own for is not drawn here: never written,
+    // never filled from its neighbour (cause E, viola's 34)
+    if (!this.fast && run.encoding !== 'single' && run.sizes.length > 1)
+      map = markNotDrawn(
+        map,
+        undrawnRanks(this.chains, run, this.sheet.texts, sheetModule(this.sheet)),
+        input.card,
+      );
     this.run = run;
     this.sizeMap = map;
     return { run, map, expected, countAsk };
@@ -1379,10 +1417,50 @@ export class Session {
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
-    this.semantics = detail.output;
+    this.passportBound = this.passport
+      ? bindPassport(this.passport, this.bindPieces(detail.output, set, sheet))
+      : null;
+    const output = this.passportBound
+      ? {
+          ...detail.output,
+          passport: this.passportBound,
+          // an operator's file-level answer closes it (a measured pair may still override it per
+          // piece in build.ts — the question was seen, it is not asked again: Codex P1 re-check)
+          unproven:
+            input.fileAllowance.origin === 'operator'
+              ? detail.output.unproven
+              : outlineWordQuestions(detail.output, this.passportBound),
+        }
+      : detail.output;
+    this.semantics = output;
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
-    return detail.output;
+    this.continuityOf = detail.continuityOf;
+    return output;
+  }
+
+  /**
+   * PASSPORT Ф1: each piece as the passport binds it — its exported identities, the layer of every
+   * wall chain of its outline (every size), the printed label it was seeded from.
+   */
+  private bindPieces(out: SemanticsOutput, set: ChainSet, sheet: Sheet): BindPiece[] {
+    const chainById = new Map(set.chains.map((c) => [c.id, c]));
+    const layerOf = new Map(sheet.styles.map((st) => [st.id, st.layer]));
+    const label = new Map(
+      (this.seeds ?? []).flatMap((sd) =>
+        sd.origin === 'text' && sd.text ? [[sd.id, sd.text.text.trim()] as const] : [],
+      ),
+    );
+    return (this.families ?? []).map((f) => {
+      const identities = out.pieces.filter((p) => p.seed === f.seed).map((p) => p.identity);
+      const wallLayers = f.candidates.flatMap((c) =>
+        c.walls.map((id) => {
+          const ch = chainById.get(id);
+          return ch ? layerOf.get(ch.style) ?? null : null;
+        }),
+      );
+      return { seed: f.seed, identities, wallLayers, label: label.get(f.seed) ?? null };
+    });
   }
 
   /** Traced pages in the run (F11): their outlines are cleaned before any offset (E3). */
@@ -1513,6 +1591,7 @@ export class Session {
     // own blocks.
     const rawWalls = this.wallsOf;
     const derived = this.derivedOf;
+    const continuity = this.continuityOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -1578,6 +1657,7 @@ export class Session {
           generator: input.generator,
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
+          ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
         },
         {
           rules: cardRules,
@@ -1585,6 +1665,9 @@ export class Session {
           wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
           wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
           derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+          continuityOf: continuity
+            ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
+            : undefined,
           chrome,
           openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
@@ -1670,3 +1753,38 @@ function rasterCandidates(calibs: Calib[]): ScaleCandidate[] {
 }
 
 export { cancelled };
+
+/**
+ * PASSPORT (c), Codex P1 #2/#3: the file's layer word may never lose silently to what the sheet
+ * says. Where the outline layers disagree among themselves, or the bound word says the other line
+ * than the sheet's text / measured second line, every exported piece whose outline the SHEET
+ * decided (origin text / measured — never an operator's answer) gets the outline question back.
+ */
+function outlineWordQuestions(
+  out: SemanticsOutput,
+  p: GarmentPassport,
+): SemanticsOutput['unproven'] {
+  const o = p.outline;
+  if (!o || !o.classes.includes('structure')) return out.unproven;
+  const asked = new Set(out.unproven.filter((u) => u.kind === 'allowance').map((u) => u.seed));
+  const extra: SemanticsOutput['unproven'] = [];
+  for (const piece of out.pieces) {
+    const a = piece.allowance;
+    if (asked.has(piece.seed) || (a.origin !== 'text' && a.origin !== 'measured')) continue;
+    const clash =
+      o.status === 'conflict' ||
+      (o.status === 'read' && (a.meaning === 'seam') !== (o.value === 'seam'));
+    if (!clash) continue;
+    asked.add(piece.seed);
+    extra.push({
+      seed: piece.seed,
+      kind: 'allowance',
+      shown: `${a.meaning}+${a.allowanceMm}`,
+      detail:
+        o.status === 'conflict'
+          ? `${o.note ?? "the file's outline layers disagree"}: is the outline the cut or the seam line?`
+          : `the sheet says ${a.meaning === 'seam' ? 'seam line' : 'cut line'} (${(a.evidence[0] ?? a.origin).slice(0, 80)}) but the file's layer says ${o.value} line: which is it?`,
+    });
+  }
+  return extra.length ? [...out.unproven, ...extra] : out.unproven;
+}

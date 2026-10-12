@@ -48,6 +48,7 @@ import {
   type GrainFeature,
   type GateReport,
   type ManifestBlock,
+  type ManifestContinuity,
   type ManifestPiece,
   type ManifestSize,
   type ManifestSource,
@@ -56,6 +57,7 @@ import {
   type DerivedEdgeAudit,
   type DerivedEdgeKind,
 } from '../types';
+import { readPassportDigest } from '../passport/digest';
 
 export { MANIFEST_TAG, MANIFEST_VERSION };
 export {
@@ -69,6 +71,7 @@ export {
   type IdentityRules,
 } from './identity';
 import { contourSigShapeProblem } from './contour-sig';
+import { continuityOfBlock } from '../write/manifest-build';
 export {
   CONTOUR_SIG_MAX_PTS,
   CONTOUR_SIG_Q_MM,
@@ -292,6 +295,8 @@ const GATE_CHECK_IDS = new Set([
   'G19-chrome',
   // A2: a piece drawn inside another written as its internal line
   'G20-nested-piece',
+  // P1: a size closed through continuity walls keeps its provenance and verdict
+  'G21-continuity',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
@@ -302,6 +307,41 @@ const DERIVED_KINDS = new Set<string>([
 const isPair = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every(isNum);
 const numOrNull = (x: unknown): x is number | null => x === null || isNum(x);
+const nonNegInts = (x: unknown, max: number) =>
+  Array.isArray(x) && x.length <= max && x.every((v) => isInt(v) && v >= 0);
+/** P1: a ManifestBlock.continuity as written (write/manifest-build continuityOfBlock), bounded. */
+export function continuityOk(c: unknown): boolean {
+  if (!isObj(c) || !Array.isArray(c.edges) || !c.edges.length || c.edges.length > 64) return false;
+  const edgeOk = (e: unknown) =>
+    isObj(e) &&
+    (e.rule === 'R0' || e.rule === 'R1' || e.rule === 'R2') &&
+    nonNegInts(e.chains, 64) &&
+    (e.chains as unknown[]).length > 0 &&
+    Array.isArray(e.roles) &&
+    e.roles.length === (e.chains as unknown[]).length &&
+    e.roles.every((r) => isBoundedStr(r, 32)) &&
+    (e.bracket === undefined || e.bracket === true) &&
+    typeof e.ownRank === 'boolean';
+  if (!c.edges.every(edgeOk)) return false;
+  const v = c.verdict;
+  if (v === null) return true;
+  return (
+    isObj(v) &&
+    nonNegInts(v.anchors, 64) &&
+    Array.isArray(v.checks) &&
+    v.checks.length <= 16 &&
+    v.checks.every(
+      (k) =>
+        isObj(k) &&
+        isInt(k.vs) &&
+        isInt(k.steps) &&
+        ['hMm', 'hAllowMm', 'hu', 'huAllow', 'growth', 'dk', 'kMax'].every((f) => isNum(k[f])) &&
+        Array.isArray(k.band) &&
+        k.band.length === 2 &&
+        k.band.every(isNum),
+    )
+  );
+}
 
 function validateSource(x: unknown): ManifestSource {
   if (!isObj(x)) fail('source', 'not an object');
@@ -635,6 +675,13 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.grain`, 'needs origin and a short evidence list');
+    // P1: optional continuity audit — per edge rule / chains / roles / flags, the D3 verdict; bounded
+    const cont = b.continuity;
+    if (cont !== undefined && !continuityOk(cont))
+      fail(
+        `${p}.continuity`,
+        'needs edges (rule R0–R2, chain ids, roles) and a D3 verdict or null',
+      );
     const ci = b.block.trim().toLowerCase();
     if (blockNames.has(ci)) fail(`${p}.block`, `duplicate "${b.block}"`);
     blockNames.add(ci);
@@ -674,6 +721,9 @@ export function validateManifest(x: unknown): ConversionManifest {
             },
           }
         : {}),
+      ...(isObj(cont)
+        ? { continuity: continuityOfBlock(cont as unknown as ManifestContinuity) }
+        : {}),
     };
   });
 
@@ -682,6 +732,7 @@ export function validateManifest(x: unknown): ConversionManifest {
   const source = validateSource(x.source);
   const gate = validateGate(x.gate);
   const autopilot = validateAutopilot(x.autopilot);
+  const passport = readPassportDigest(x.passport);
   return {
     v: MANIFEST_VERSION,
     generator: x.generator,
@@ -698,6 +749,7 @@ export function validateManifest(x: unknown): ConversionManifest {
     source,
     gate,
     ...(autopilot ? { autopilot } : {}),
+    ...(passport ? { passport } : {}),
   };
 }
 

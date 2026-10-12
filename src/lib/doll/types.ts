@@ -156,6 +156,11 @@ export type DollSeamReport = {
   /** Global vertex ids of side A / side B polylines (for drawing). */
   pathA: Uint32Array;
   pathB: Uint32Array;
+  /**
+   * A composite whose end parts are sewn over a stretch only (a strip round a panel's lower U):
+   * the sewn stretch of each such edge, mm along that edge from its start. Edges not named: whole.
+   */
+  partRange?: Record<EdgeId, [number, number]>;
 };
 
 export type DollLoop = {
