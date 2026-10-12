@@ -399,6 +399,43 @@ export async function main(): Promise<number> {
       !generatedReuse(gone, sem, [gen(1, 'P01')]).some((x) => x.kind === 'beside-vanished'),
       'a new piece named by the file (not generated) beside a vanished link is not listed',
     );
+    // Codex AP-tail #1: the previous import of THESE files drew «P02» in another scope that this
+    // draft does not write at all — a generated new piece may be it, moved to another fabric
+    const src = { files: [{ name: 'a.dxf', sha256: 'aa', bytes: 1, kind: 'dxf', pages: 1 }] };
+    const withSrc = {
+      ...draft,
+      scopes: [{ ...sc, manifest: { ...sc.manifest, source: src } }],
+    } as unknown as CardDraft;
+    const prior = (sha: string) => ({
+      existingPieces: [{ lineKey: 'k7', name: 'P02' }],
+      existingAliases: [{ scopeKey: 'LINING', blockName: 'P02', pieceLineKey: 'k7' }],
+      existingPatterns: [
+        {
+          scopeKey: 'LINING',
+          filename: 'x.dxf',
+          url: 'mem://x',
+          manifest: {
+            source: { files: [{ sha256: sha }] },
+            blocks: [],
+            pieces: [{ identity: 'P02' }],
+          },
+        },
+      ],
+    });
+    const cross = generatedReuse(withSrc, sem, all, prior('aa') as never).filter(
+      (x) => x.kind === 'beside-vanished',
+    );
+    ck(
+      cross.some((x) => x.identity === 'P03' && x.existing === 'P02'),
+      'a generated new piece while these files’ sheet in an unwritten scope still links «P02» is listed',
+      cross,
+    );
+    ck(
+      !generatedReuse(withSrc, sem, all, prior('bb') as never).some(
+        (x) => x.kind === 'beside-vanished',
+      ),
+      'another import’s sheet (other source files) is not ours: not listed',
+    );
   }
 
   // ── 3 · corpus, twice ───────────────────────────────────────────────────────────────────────

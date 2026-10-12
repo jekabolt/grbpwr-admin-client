@@ -41,9 +41,9 @@ export type ApplyOutcome =
  * replayed) would do to the card without proof. A generated code says nothing about which piece it
  * is: a re-import where an unnamed piece moved or was added shifts the codes, so
  *   · 'reuse' — P01 would silently UPDATE a card piece (by name or block link) that is another piece;
- *   · 'beside-vanished' — P12 would ADD a new card piece while the same scope's previous import
- *     loses its link to a card piece («P13» no longer drawn): the same piece under a shifted code
- *     would be cut twice.
+ *   · 'beside-vanished' — P12 would ADD a new card piece while a previous import's card piece is
+ *     no longer drawn («P13», in any scope — or its scope not written at all): the same piece under
+ *     a shifted code would be cut twice.
  * Only lineage proves a reuse — AP-replay matched the piece by its outline to the import that wrote
  * that card piece; the name is then the replay's (isReplayed) and never listed here. A name from
  * the file itself, or one the operator typed over, is not listed either.
@@ -60,6 +60,8 @@ export function generatedReuse(
   draft: Pick<CardDraft, 'scopes' | 'pieces' | 'aliases'> | null | undefined,
   sem: Pick<NonNullable<ImportSession['semantics']>, 'pieces'> | null | undefined,
   autopilot: readonly Assumption[],
+  /** The card as read: a previous import's links in a scope this draft does not write (below). */
+  card?: Pick<CardContext, 'existingPatterns' | 'existingAliases' | 'existingPieces'> | null,
 ): GeneratedRisk[] {
   if (!draft || !sem) return [];
   // seed → the code the autopilot generated for it (the latest answer about the seed's name)
@@ -100,7 +102,32 @@ export function generatedReuse(
     }
   }
   const byKey = new Map(draft.pieces.map((p) => [p.lineKey, p] as const));
-  const gone = new Map(draft.scopes.map((sc) => [sc.target.scopeKey, sc.vanished ?? []] as const));
+  // every card piece a previous import drew and this one no longer does, in ANY scope (Codex
+  // AP-tail #1: a piece can move to another fabric scope under a shifted code) — the draft's
+  // `vanished`, plus the links of a sheet imported from these files in a scope this draft does not
+  // write at all
+  const gone: { pieceLineKey: string; pieceName: string }[] = draft.scopes.flatMap(
+    (sc) => sc.vanished ?? [],
+  );
+  const written = new Set(draft.scopes.map((sc) => sc.target.scopeKey));
+  const nameOf = new Map((card?.existingPieces ?? []).map((p) => [p.lineKey, p.name] as const));
+  // (only a sheet made from one of THIS import's source files: another import's sheet is not ours)
+  const shas = new Set(
+    draft.scopes.flatMap((sc) => (sc.manifest.source?.files ?? []).map((f) => f.sha256)),
+  );
+  for (const row of card?.existingPatterns ?? []) {
+    if (!row.manifest || written.has(row.scopeKey)) continue;
+    if (!(row.manifest.source?.files ?? []).some((f) => f.sha256 && shas.has(f.sha256))) continue;
+    const drawn = new Set(
+      [...aliasNames(row.manifest).values()].map((b) => aliasKey(row.scopeKey, b)),
+    );
+    for (const a of card?.existingAliases ?? [])
+      if (a.scopeKey === row.scopeKey && drawn.has(aliasKey(a.scopeKey, a.blockName)))
+        gone.push({
+          pieceLineKey: a.pieceLineKey,
+          pieceName: nameOf.get(a.pieceLineKey) ?? a.pieceLineKey,
+        });
+  }
   const out = new Map<string, GeneratedRisk>();
   for (const a of draft.aliases) {
     const hit = blocks.get(aliasKey(a.scopeKey, a.blockName));
@@ -113,7 +140,7 @@ export function generatedReuse(
         existing: piece.name,
       });
     else
-      for (const v of gone.get(a.scopeKey) ?? [])
+      for (const v of gone)
         out.set(`${hit.identity}|${v.pieceLineKey}`, {
           kind: 'beside-vanished',
           ...hit,
@@ -151,6 +178,7 @@ export async function autopilotApply(
     get().session.draft,
     get().session.semantics,
     get().inputs.autopilot ?? [],
+    get().runCard ?? card,
   );
   if (reuse.length)
     return {
