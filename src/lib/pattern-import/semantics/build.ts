@@ -1734,8 +1734,12 @@ export function buildPieceSpecsDetailed(
     if (!src || src.cand.rank >= idLooks.looks.length) return undefined;
     const look = looksOn(src.cand.bbox)[src.cand.rank] ?? [];
     const common = commonOf();
-    const excused = toFrame(src.w, linesOfIds(src.cand.walls.filter((id) => common.has(id))));
-    if (idLooks.absent[src.cand.rank]) return { pen: null, own: [], excused };
+    if (idLooks.absent[src.cand.rank])
+      return {
+        pen: null,
+        own: [],
+        excused: toFrame(src.w, linesOfIds(src.cand.walls.filter((id) => common.has(id)))),
+      };
     const cls = set.classes.find((c) => c.id === run.sizes[src.cand.rank]?.classId);
     const others = new Set(
       run.sizes.flatMap((z, r) =>
@@ -1751,7 +1755,13 @@ export function buildPieceSpecsDetailed(
       others,
     );
     const ownSet = new Set(own);
-    const walls = src.cand.walls.filter((id) => !common.has(id) && !ownSet.has(id));
+    // a line drawn in another size's exact pen is provably that size's (penLines' `foreign`), even
+    // where F3 put it in a common class by nesting order (chamonix: a stretch of 18-20's dash read
+    // as common): never an edge every size uses — at most an edge this size shares (≤ half, below)
+    const foreignSet = new Set(foreign);
+    const isCommon = (id: ChainId) => common.has(id) && !foreignSet.has(id);
+    const excused = toFrame(src.w, linesOfIds(src.cand.walls.filter(isCommon)));
+    const walls = src.cand.walls.filter((id) => !isCommon(id) && !ownSet.has(id));
     // an edge this size shares with another size of the same piece — drawn once (viola, zhaket:
     // one line where two sizes coincide) or landed on (robe: the sizes end on 46's line). The gate
     // excuses at most half the written line this way: an outline that IS another size's (Mood
