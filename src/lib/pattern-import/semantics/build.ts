@@ -64,7 +64,7 @@ import type {
 } from '../types';
 import { PATIMPORT } from '../types';
 import {
-  describeLook,
+  describePen,
   onePieceProblems,
   penLines,
   rankLooks,
@@ -1710,14 +1710,14 @@ export function buildPieceSpecsDetailed(
         for (const id of c2.walls) coincident.add(id);
     const shared = [
       ...new Set([
-        ...sharedEdges(set, walls, own, look, styles),
+        ...sharedEdges(set, walls, own, look, styles, others),
         ...walls.filter((id) => coincident.has(id)),
       ]),
     ];
     const map = (ids: ChainId[]) => toFrame(src.w, linesOfIds(ids));
     return {
       // keyed by the drawing but no one look: the rank's own lines as F3 read them
-      pen: look ? describeLook(look) : 'its own size lines',
+      pen: look.length ? describePen(look) : 'its own size lines',
       own: map(own),
       excused,
       ...(shared.length ? { shared: map(shared) } : {}),

@@ -279,6 +279,8 @@ const looseSame = (a: Look, b: Look): boolean => {
   const sa = ma.reduce((x, y) => x + y, 0);
   const sb = mb.reduce((x, y) => x + y, 0);
   if (!sa || !sb) return false;
+  // one pen at about one scale (a [2, 1] and a [6, 3] rhythm are two pens)
+  if (sa / sb < 0.6 || sb / sa < 0.6) return false;
   return ma.every(
     (v, i) => Math.abs(v / sa - mb[i] / sb) <= Math.max(0.03, 0.15 * Math.max(v / sa, mb[i] / sb)),
   );

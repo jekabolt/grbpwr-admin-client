@@ -1763,7 +1763,9 @@ export function identityShare(
     counted++;
     if (near(forIdx, p)) off++;
   }
-  if (!s.length || counted < IDENTITY_OWN_FLOOR * s.length)
+  // the line runs on edges every size uses almost everywhere: no pen claim — unless what is left
+  // lies mostly on another size's line (the one stretch that tells the sizes apart is foreign)
+  if (!s.length || !counted || (counted < IDENTITY_OWN_FLOOR * s.length && off <= 0.5 * counted))
     return { share: null, ownAll: 1, foreignAll: 0, samples: s.length };
   return {
     share: on + off ? on / (on + off) : 0,
@@ -1827,6 +1829,8 @@ export function g22(ctx: GateCtx): GateCheck {
 export const ONE_PIECE_JUMP = 1.25;
 /** G23: the jump's excess over the neighbours' step, in median grade steps of the identity. */
 export const ONE_PIECE_EXCESS = 2;
+/** G23: …and at least this share of the smaller size's area. */
+export const ONE_PIECE_SHARE = 0.1;
 
 /**
  * G23 (MOOD Ф0): one outline holds one piece. The pieces stage names faces that hold another
@@ -1874,7 +1878,12 @@ export function g23(ctx: GateCtx): GateCheck {
       worst = Math.max(worst, ratio);
       // …and the excess is a piece, not a grade break: ≥ 2 median steps over the neighbours'
       // (leonie's 44 → 46 grows ×2 its neighbours' step on a real grade change, +1 median step)
-      if (ratio > ONE_PIECE_JUMP && step[i] - Math.max(...nb) >= ONE_PIECE_EXCESS * median) {
+      // …and a piece's worth: ≥ 10 % of the smaller outline (a grade breakpoint adds a few %)
+      if (
+        ratio > ONE_PIECE_JUMP &&
+        step[i] - Math.max(...nb) >= ONE_PIECE_EXCESS * median &&
+        step[i] - Math.max(...nb) >= ONE_PIECE_SHARE * rows[i - 1].area
+      ) {
         failed.push(rows[i].block);
         notes.push(
           `${identity}: ${rows[i - 1].block} → ${rows[i].block} grows ${(step[i] / 100).toFixed(1)} cm² per size, ×${ratio.toFixed(2)} its neighbours' step`,
@@ -1888,6 +1897,6 @@ export function g23(ctx: GateCtx): GateCheck {
     'block',
     notes.join('; ') || 'every outline holds one piece',
     fmt(worst),
-    `no other piece's header or same-size overlap > 5 %; area step ≤ ×${ONE_PIECE_JUMP} its neighbours' or < ${ONE_PIECE_EXCESS} median steps over them`,
+    `no other piece's header or same-size overlap > 5 %; area step ≤ ×${ONE_PIECE_JUMP} its neighbours' or < ${ONE_PIECE_EXCESS} median steps / ${ONE_PIECE_SHARE * 100} % of the area over them`,
   );
 }

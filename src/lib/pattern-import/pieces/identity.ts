@@ -38,6 +38,8 @@ export type Look =
   | { kind: 'solid'; w: number };
 
 const Q = 0.25;
+/** Two recovered motifs of one pen keep their period within this ratio (viola: 5.5 vs 7.0 mm). */
+const MOTIF_SCALE = 0.7;
 const q = (v: number) => Math.round(v / Q) * Q;
 
 export function describeLook(l: Look | null): string {
@@ -76,16 +78,25 @@ function lookOf(c: Chain, styles: ReadonlyMap<number, Style>): Look | null {
   return null;
 }
 
-/** The pen a size class is identified by (its declared dash / recovered motif evidence). */
-export function classLook(c: LineClass | undefined): Look | null {
-  if (!c) return null;
-  for (const e of c.evidence) {
+/**
+ * The pens a size class is identified by (its declared dash / recovered motif evidence) — every
+ * one: a size drawn in two looks is one class with both (`mergeSameSize`). [] = none.
+ */
+export function classLooks(c: LineClass | undefined): Look[] {
+  const out: Look[] = [];
+  for (const e of c?.evidence ?? []) {
     if (e.kind === 'declared-dash' && e.dash.some((v) => v > 0.01))
-      return { kind: 'dash', d: normDash(e.dash) };
-    if (e.kind === 'recovered-motif' && e.motif.length >= 2) return { kind: 'motif', m: e.motif };
+      out.push({ kind: 'dash', d: normDash(e.dash) });
+    if (e.kind === 'recovered-motif' && e.motif.length >= 2)
+      out.push({ kind: 'motif', m: e.motif });
   }
-  return null;
+  return out;
 }
+
+/** A pen = the looks one size is drawn with ([] = not known). */
+export type Pen = Look[];
+export const onPen = (l: Look, pen: Pen) => pen.some((p) => sameLook(l, p));
+export const describePen = (pen: Pen) => pen.map(describeLook).join(' + ');
 
 const closeArr = (a: number[], b: number[], tol: (x: number, y: number) => number) =>
   a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= tol(v, b[i]));
@@ -95,7 +106,8 @@ const closeArr = (a: number[], b: number[], tol: (x: number, y: number) => numbe
  * little to land dashes in corners) at nearly the same scale — exact evidence. Recovered motifs are
  * measured off the drawing (a rhythm of dashes and beads, noisy per chain: viola's size 40 reads
  * 4.25/1.25 on one line and 5.00/2.00 on the next), so two motifs are the same pen unless their
- * periods differ in length or their shares of the period differ by more than a quarter.
+ * periods differ in length or scale (> 1/0.7) or their shares of the period differ by more than a
+ * quarter.
  */
 export function sameLook(a: Look, b: Look): boolean {
   if (a.kind === 'solid' || b.kind === 'solid')
@@ -107,6 +119,8 @@ export function sameLook(a: Look, b: Look): boolean {
   const sa = ma.reduce((x, y) => x + y, 0);
   const sb = mb.reduce((x, y) => x + y, 0);
   if (sa <= 0 || sb <= 0) return closeArr(ma, mb, () => Q + 0.01);
+  // the same pen at nearly the same scale (a [2, 1] and a [6, 3] rhythm are two pens)
+  if (sa / sb < MOTIF_SCALE || sb / sa < MOTIF_SCALE) return false;
   return ma.every((v, i) => {
     const x = v / sa;
     const y = mb[i] / sb;
@@ -146,17 +160,17 @@ export function rankLooks(
   set: ChainSet,
   run: SizeRun,
   styles: ReadonlyMap<number, Style>,
-): { identity: boolean; looks: (Look | null)[]; absent: boolean[] } {
+): { identity: boolean; looks: Pen[]; absent: boolean[] } {
   const none = {
     identity: false,
-    looks: run.sizes.map(() => null),
+    looks: run.sizes.map((): Pen => []),
     absent: run.sizes.map(() => false),
   };
   if (run.sizes.length < 2) return none;
   const byId = new Map(set.classes.map((c) => [c.id, c]));
   const classes = run.sizes.map((z) => (z.classId != null ? byId.get(z.classId) : undefined));
   const keyed = legendRun(set);
-  const evidenced = classes.filter((c) => classLook(c)).length;
+  const evidenced = classes.filter((c) => classLooks(c).length).length;
   const identity =
     run.encoding === 'declared-dash' ||
     ((run.encoding === 'subpath-dash' || run.encoding === 'separate-dash') &&
@@ -164,9 +178,10 @@ export function rankLooks(
   if (!identity) return none;
   const gone = keyed ? keyAbsent(set) : new Set<string>();
   const absent = run.sizes.map((z) => gone.has(z.label.trim().toUpperCase()));
-  const looks = classes.map((c, r) => {
-    const l = classLook(c);
-    if (l || absent[r] || !c || c.role !== 'size') return absent[r] ? null : l;
+  const looks = classes.map((c, r): Pen => {
+    const l = classLooks(c);
+    if (absent[r]) return [];
+    if (l.length || !c || c.role !== 'size') return l;
     // one look carried by ≥ 75 % of the class's length
     const groups: { l: Look; len: number }[] = [];
     let total = 0;
@@ -181,7 +196,7 @@ export function rankLooks(
       else groups.push({ l: cl, len: ch.lengthMm });
     }
     const best = groups.sort((a, b) => b.len - a.len)[0];
-    return best && best.len >= 0.75 * total ? best.l : null;
+    return best && best.len >= 0.75 * total ? [best.l] : [];
   });
   return { identity: true, looks, absent };
 }
@@ -214,7 +229,7 @@ export function rankGuard(
     ok: (id, r) => {
       const rl = looks[r];
       const cl = lookOf(id);
-      return !rl || !cl || sameLook(cl, rl);
+      return !rl?.length || !cl || onPen(cl, rl);
     },
   };
 }
@@ -235,7 +250,7 @@ const STUB_TOUCH_MM = 1.5;
  */
 export function penLines(
   set: ChainSet,
-  look: Look | null,
+  look: Pen,
   styles: ReadonlyMap<number, Style>,
   box: { minX: number; minY: number; maxX: number; maxY: number },
   classChains: ReadonlySet<ChainId>,
@@ -258,17 +273,17 @@ export function penLines(
   for (const c of set.chains) {
     if (c.pts.length < 2 || !inBox(c)) continue;
     const cl = chainLook(c, styles);
-    const same = !!cl && !!look && sameLook(cl, look);
+    const same = !!cl && onPen(cl, look);
     // the rank's own class line counts unless its look is EXACT (a declared dash, a plain stroke)
     // and another pen's — a recovered rhythm is measured, not declared, and may read off
-    const exactOther = !!cl && !!look && cl.kind !== 'motif' && !same;
+    const exactOther = !!cl && look.length > 0 && cl.kind !== 'motif' && !same;
     if (same || (classChains.has(c.id) && !exactOther)) {
       own.push(c);
       continue;
     }
     if (cl?.kind === 'solid' && c.lengthMm <= STUB_MAX_MM) stubs.push(c);
     const sized = otherSizeChains.has(c.id) || orphans.has(c.id);
-    if ((cl?.kind === 'dash' && exactOther) || (sized && !(cl && look && same))) foreign.push(c);
+    if ((cl?.kind === 'dash' && exactOther) || (sized && !same)) foreign.push(c);
   }
   const ends = own.flatMap((c) => [c.pts[0], c.pts[c.pts.length - 1]]);
   const touching = new Set(
@@ -397,8 +412,8 @@ export function onePieceProblems(
 }
 
 /**
- * G22: the walls of an outline drawn with ANOTHER pen that are an edge this rank shares — a line
- * on whose interior (≥ 2 mm from its ends, ≤ 1 mm off) a line of this rank's own pen ends (robe:
+ * G22: the walls of an outline drawn with ANOTHER size's pen (a line of another size's class, of
+ * known look) that are an edge this rank shares — a line on whose interior (≥ 2 mm from its ends, ≤ 1 mm off) a line of this rank's own pen ends (robe:
  * the sizes 36–44 land on size 46's solid line where every size runs along it, drawn once). The
  * gate excuses at most half the outline this way.
  */
@@ -406,8 +421,10 @@ export function sharedEdges(
   set: ChainSet,
   walls: readonly ChainId[],
   ownIds: readonly ChainId[],
-  look: Look | null,
+  look: Pen,
   styles: ReadonlyMap<number, Style>,
+  /** Lines of the other sizes' classes: only another SIZE's line is an edge sizes share. */
+  otherSizeChains: ReadonlySet<ChainId>,
 ): ChainId[] {
   const ownSet = new Set(ownIds);
   const ends: PtMm[] = [];
@@ -422,7 +439,7 @@ export function sharedEdges(
     const c = set.chains[id];
     if (!c || c.pts.length < 2) continue;
     const cl = chainLook(c, styles);
-    if (cl && look && sameLook(cl, look)) continue;
+    if (!otherSizeChains.has(id) || !cl || onPen(cl, look)) continue;
     const a = c.pts[0];
     const b = c.pts[c.pts.length - 1];
     const lands = ends.some((e) => {
