@@ -52,8 +52,6 @@ export type WallModel = {
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
   /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges — walls of `rank`. */
   corners?: { rank: number; pts: PtMm[]; chains: ChainId[] }[];
-  /** Ends ("chain:end") of size lines such a corner continues: no ends (lonePortions). */
-  cornerEnds?: Set<string>;
 };
 
 /**
@@ -66,14 +64,13 @@ function cornerWalls(
   run: SizeRun,
   ranks: ChainId[][],
   styles: ReadonlyMap<number, Style> | undefined,
-): Pick<WallModel, 'corners' | 'cornerEnds'> {
+): Pick<WallModel, 'corners'> {
   if (!set.cornerWalls?.length || !styles || probeOff('MOOD_F2_OFF')) return {};
   const { identity, looks } = rankLooks(set, run, styles);
   if (!identity) return {};
   const rankOfChain = new Map<ChainId, number>();
   ranks.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
   const corners: NonNullable<WallModel['corners']> = [];
-  const cornerEnds = new Set<string>();
   for (const w of set.cornerWalls) {
     const rs = new Set(w.own.map((id) => rankOfChain.get(id)));
     if (rs.size !== 1) continue;
@@ -86,9 +83,13 @@ function cornerWalls(
     });
     if (!onOwnPen) continue;
     corners.push({ rank: r, pts: w.pts, chains: w.chains });
-    for (const e of w.ends) cornerEnds.add(e);
   }
-  return corners.length ? { corners, cornerEnds } : {};
+  return corners.length ? { corners } : {};
+}
+
+/** MOOD Ф2: the stub / ramp chains a validated corner wall stands for — no rescue, no foreign line. */
+export function cornerSources(m: WallModel): Set<ChainId> {
+  return new Set((m.corners ?? []).flatMap((k) => k.chains));
 }
 
 /**
@@ -286,17 +287,26 @@ export function wallModel(
   const kept = [...kept0, ...[...band.edges].filter((id) => !kept0.includes(id))];
   const folds =
     mode === 'graded' && !probeOff('F4_NOFOLDS') ? sharedFolds(set, ranks, new Set(kept)) : [];
+  // MOOD Ф2: a stub or ramp read as rank r's corner is r's alone — never a common wall nor
+  // another rank's line (Codex r2: another size closing on r's stub)
+  const cw = mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {};
+  const owner = new Map<ChainId, number>();
+  for (const k of cw.corners ?? []) for (const id of k.chains) owner.set(id, k.rank);
+  const commonF = [...kept, ...folds].filter((id) => !owner.has(id));
+  const ranksF = owner.size
+    ? ranks.map((ids, r) => ids.filter((id) => (owner.get(id) ?? r) === r))
+    : ranks;
   return {
     mode,
     n,
-    common: [...kept, ...folds],
+    common: commonF,
     folds,
     relinked: cr
       ? { moved: cr.moved, conflicts: cr.conflicts, labelled: labelled.size }
       : undefined,
-    byRank: ranks,
-    ...(mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {}),
-    emptyRanks: ranks.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
+    byRank: ranksF,
+    ...cw,
+    emptyRanks: ranksF.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
     // chains ranked here (continuity, labels, nesting) are size lines too
     graded: [...new Set([...graded, ...ranks.flat()])],
     loopFamily: new Set([...(cr?.loopFamily ?? []), ...bands.keys()]),
@@ -406,9 +416,6 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const ids = m.graded.filter((id) => set.chains[id] && set.chains[id].pts.length >= 2);
   const grid = new SegGrid(8);
   for (const id of ids) grid.addPolyline(id, set.chains[id].pts);
-  // an end a corner carried on onto its next edge (MOOD Ф2, sizes/corners.ts) is no end: that
-  // size's line runs on through it
-  const runsOn = (id: ChainId, end: 0 | 1) => !!m.cornerEnds?.has(`${id}:${end}`);
   const out: WallItem[] = [];
   const step = 2;
   for (const id of ids) {
@@ -453,10 +460,8 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         const op = set.chains[o].pts;
         // the foot within 3 mm (along the line) of its end counts as the end: chains often finish
         // with a short hook (a zigzag's last tooth) that would otherwise look "beside"
-        const toStart = arcTo(op, b.i, b.u);
-        const toEnd = arcFrom(op, b.i, b.u);
-        if (toStart < 3 && !runsOn(o, 0)) continue;
-        if (toEnd < 3 && !runsOn(o, 1)) continue;
+        const fromEnd = Math.min(arcTo(op, b.i, b.u), arcFrom(op, b.i, b.u));
+        if (fromEnd < 3) continue;
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;

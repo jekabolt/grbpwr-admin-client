@@ -63,6 +63,7 @@ import {
   landingPlugs,
   lonePortions,
   rescuedIgnored,
+  cornerSources,
   sheetModule,
   wallModel,
   type WallModel,
@@ -570,9 +571,12 @@ function fillOneSheet(
   const lone = lonePortions(set, model);
   const module = sheetModule(sheet);
   const margins = pageMarginIds(set.chains, sheet.poses);
-  const rescued = rescuedIgnored(set, model, 1.5, 15, module, margins);
-  /** P1: chains never continuity walls — page margins and every chain the fill excludes. */
-  const contSkip = (excl: ReadonlySet<ChainId>) => new Set<ChainId>([...margins, ...excl]);
+  const corners = cornerSources(model);
+  const rescued = rescuedIgnored(set, model, 1.5, 15, module, new Set([...margins, ...corners]));
+  /** P1: chains never continuity walls — page margins, every chain the fill excludes, and the
+   *  stubs / ramps a size's corner wall already stands for (MOOD Ф2). */
+  const contSkip = (excl: ReadonlySet<ChainId>) =>
+    new Set<ChainId>([...margins, ...excl, ...corners]);
   diag.rescued = rescued.length;
   const textCentres = sheet.texts.map((t) => ({
     id: t.id,
@@ -970,8 +974,10 @@ function fillOneSheet(
           : 'closed';
       if (merged && rankFrom !== 'continuity')
         // a region holding several pieces bounded by frame-like lines: tile frames / a border
+        // synthetic walls (bridges, band cuts, MOOD Ф2 corners) carry negative ids: no chain
         for (const id of sn.walls)
-          if (!userExcl.has(id) && frameLike(set.chains[id].pts, 60, module)) frames.add(id);
+          if (id >= 0 && !userExcl.has(id) && frameLike(set.chains[id].pts, 60, module))
+            frames.add(id);
       // a label frame: the text seed sits in a small closed loop drawn around it (an oval round
       // "Piece 8 / cut x1 pair") — a decoration, not the piece; fill again without it
       if (
