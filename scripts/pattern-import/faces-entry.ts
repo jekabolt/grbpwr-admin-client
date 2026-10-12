@@ -19,12 +19,27 @@ import {
   type FaceSwitch,
 } from 'lib/pattern-import/pieces/faces';
 import { buildChainsDetailed } from 'lib/pattern-import/chains/build';
-import { gradeView, rolesByFaces, type FaceRoleOpts } from 'lib/pattern-import/chains/face-role';
+import {
+  gradeView,
+  rolesByFaces,
+  STRAY_LANES,
+  sourceClash,
+  strayLanes,
+  type FaceRoleOpts,
+  type FaceSizeCtx,
+} from 'lib/pattern-import/chains/face-role';
 import { confirmRows, withClassSigs } from 'lib/pattern-import/chains/legend';
 import { fillPiecesDetailed, hausdorffP95 } from 'lib/pattern-import/pieces';
 import { expectedSizes, runForExpected } from 'lib/pattern-import/pieces/grade/expected';
 import { detectSizeRun } from 'lib/pattern-import/sizes/detect';
+import {
+  blobShapes,
+  countEvidence,
+  shapeCandidates,
+  sheetFeed,
+} from 'lib/pattern-import/sizes/count-evidence';
 import { readRawDxf } from 'lib/pattern-import/gate';
+import { srcKey } from 'lib/pattern-import/clean';
 import { nestedPieces } from 'lib/pattern-import/gate/checks';
 import type {
   BoxMm,
@@ -45,6 +60,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
+import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
 
 import { CASES, runCase } from './e2e-entry';
 import { renderPng, type Label, type Stroke } from './sizes-render';
@@ -926,15 +942,18 @@ function synthRoles() {
  * The face pass's strays as the size checks see them (chains/face-role gradeView), on a sheet that
  * draws 3 sizes in one pen: a fold drawn once, each size's outline bottom → right → top (6 mm wider,
  * 5 mm taller per size), a positioning line straight across the nest, 100 mm out on both sides, and
- * a drawn test square. The face pass files the largest size, the positioning line and the square as
- * strays. Per chain: the size line and the positioning line are handed back (a laneless line may as
+ * a drawn test square. With the gb2 gate off (the guard behind it), the face pass files the largest
+ * size, the positioning line and the square as strays. Per chain: the size line and the positioning line are handed back (a laneless line may as
  * well be an edge drawn once for every size — the bench needs those as walls), the square stays out
  * by its reason. The solver makes the positioning line a wall of every size, and its checks still
  * close the true outlines only.
  */
 const GV = { n: 3, W: 240, H: 300, d: 6, e: 5, lineY: 100, ext: 100 };
-function gradeViewSheet() {
-  const { n, W, H, d, e, lineY, ext } = GV;
+/** gb2: the face pass's stray gate off — A0.3's stray row, what gradeView guards behind the gate. */
+const GATE_OFF: FaceRoleOpts = { off: new Set(['gate']) };
+function gradeViewSheet(faceOpts?: FaceRoleOpts, countFeed?: FaceSizeCtx, nSizes = GV.n) {
+  const { W, H, d, e, lineY, ext } = GV;
+  const n = nSizes;
   const draws: { tag: string; pts: PtMm[] }[] = [
     {
       tag: 'fold',
@@ -977,7 +996,7 @@ function gradeViewSheet() {
       joinAngleDeg: PATIMPORT.joinAngleDeg,
       joinLateralMm: PATIMPORT.joinLateralMm,
     },
-    { extraTexts: [] },
+    { extraTexts: [], faceOpts, countFeed },
   );
   const set = withClassSigs(built, styles);
   const tagOf = (id: number) => draws[set.chains[id].ranges[0].path].tag;
@@ -987,12 +1006,13 @@ function gradeViewSheet() {
 
 function synthGradeView() {
   const S = 'grade view';
-  const { sheet, set, truth, tagOf, chainOfTag } = gradeViewSheet();
+  // the guard behind the gb2 gate: A0.3's stray row as it was proposed (the gate off)
+  const { sheet, set, truth, tagOf, chainOfTag } = gradeViewSheet(GATE_OFF);
   const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'));
   const strayTags = (stray?.chains ?? []).map(tagOf).sort();
   check(
     S,
-    'premise: the face pass files the largest size, the positioning line and the square as strays',
+    'premise (gate off): the face pass files the largest size, the positioning line and the square as strays',
     ['position', 'square', `size${GV.n - 1}`].every((t) => strayTags.includes(t)),
     strayTags,
   );
@@ -1084,9 +1104,9 @@ function synthGradeView() {
  * the chains stage contract (`confirmed`) the row comes back at confidence 1 in a new set, and the
  * size checks leave it alone. Rows nobody touched stay as built (the restore keeps working).
  */
-async function synthConfirm() {
+function synthConfirm() {
   const S = 'legend confirm';
-  const { set, chainOfTag, draws } = gradeViewSheet();
+  const { set, chainOfTag } = gradeViewSheet(GATE_OFF);
   const largest = chainOfTag(`size${GV.n - 1}`);
   const stray = set.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'))!;
   const key = stray.sig ?? `#${stray.id}`;
@@ -1118,68 +1138,597 @@ async function synthConfirm() {
     roleOfLargest(gradeView(confirmRows(set, []))) === 'internal',
     roleOfLargest(gradeView(set)),
   );
-  // the worker's chains stage: the same sheet as an SVG in mm, chains with and without `confirmed`
-  const box = { x: -GV.ext - 20, y: -40, w: GV.W + GV.n * GV.d + 2 * GV.ext + 40, h: GV.H + 80 };
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${box.w}mm" height="${box.h}mm" viewBox="${box.x} ${box.y} ${box.w} ${box.h}">${draws
+}
+
+/**
+ * gb2: the face pass does not offer a size's lines as strays. The GV sheet (3 sizes in one pen, a
+ * positioning line across the nest, a drawn test square) proves no size count, and the lines it
+ * would call strays run beside the outlines like graded copies: the largest size and the positioning
+ * line are an 'internal' row of size lines (not asked), only the square is a stray. The operator
+ * confirming every row asked keeps the walls: 3 sizes close true. Mutations: the gate off (A0.3's
+ * row: confirmed → the size refused), the lane check off (offered again); a one-size proof (the file
+ * the solver reads as one size by its name) offers them, a size run in text withholds them.
+ */
+async function synthStrayGate() {
+  const S = 'stray gate';
+  const asked = (v: ChainSet) => v.classes.filter((c) => c.confidence < 0.6);
+  const strayRows = (v: ChainSet) =>
+    v.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const g = gradeViewSheet();
+  const tagsIn = (v: ChainSet, cs: { chains: number[] }[]) =>
+    [...new Set(cs.flatMap((c) => c.chains.map(g.tagOf)))].sort();
+  const sizeTags = [`size${GV.n - 1}`, 'position'];
+  const graded = g.set.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const roleIn = (v: ChainSet, t: string) =>
+    [...new Set(v.classes.filter((c) => c.chains.includes(g.chainOfTag(t))).map((c) => c.role))]
+      .sort()
+      .join('+');
+  check(
+    S,
+    'graded one-pen sheet: the largest size and the positioning line are candidate size lines (ignore, not asked), only the square a stray',
+    tagsIn(g.set, strayRows(g.set)).join() === 'square' &&
+      graded.length === 1 &&
+      graded[0].role === 'ignore' &&
+      graded[0].confidence >= 0.6 &&
+      sizeTags.every((t) => tagsIn(g.set, graded).includes(t)),
+    {
+      stray: tagsIn(g.set, strayRows(g.set)),
+      graded: tagsIn(g.set, graded),
+      why: graded[0]?.evidence,
+    },
+  );
+  check(
+    S,
+    'no question about a size line; no wall in the canonical set, a line of some size only in gradeView',
+    !tagsIn(g.set, asked(g.set)).some((t) => t.startsWith('size') || t === 'position') &&
+      sizeTags.every(
+        (t) => roleIn(g.set, t) === 'ignore' && roleIn(gradeView(g.set), t) === 'internal',
+      ),
+    {
+      asked: tagsIn(g.set, asked(g.set)),
+      canonical: sizeTags.map((t) => roleIn(g.set, t)),
+      view: sizeTags.map((t) => roleIn(gradeView(g.set), t)),
+    },
+  );
+  // the operator confirms every row asked, as proposed: the walls stay, 3 sizes close true
+  const read = detectSizeRun(g.sheet, g.set, [
+    { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+  ]);
+  const fillAll = (ss: ChainSet) => {
+    const expected = expectedSizes(read, GV.n, ss)!;
+    const { families } = fillPiecesDetailed(
+      g.sheet,
+      ss,
+      runForExpected(read, expected),
+      [{ id: 0, at: { x: GV.W / 2, y: GV.H / 2 + 50 }, origin: 'click', variant: null }],
+      {
+        cellMm: PATIMPORT.fillCellMm,
+        snapMm: PATIMPORT.snapMm,
+        variant: null,
+        expectedSizes: expected,
+      },
+    );
+    const cs = families.flatMap((f) => f.candidates);
+    return {
+      closed: cs.filter((c) => c.outcome === 'closed').length,
+      wrong: cs.filter((c) => c.outcome === 'closed' && hausdorffP95(c.outer, g.truth[c.rank]) > 1)
+        .length,
+      refusals: [...new Set(cs.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+    };
+  };
+  const confirmAll = (v: ChainSet) =>
+    confirmRows(
+      v,
+      asked(v).map((c) => c.sig ?? `#${c.id}`),
+    );
+  const ok = fillAll(confirmAll(g.set));
+  check(
+    S,
+    'every asked row confirmed, 3 sizes answered: every size closes true, none refused',
+    ok.closed === GV.n && !ok.wrong && !ok.refusals.length,
+    ok,
+  );
+  // mutation: the gate off — A0.3's stray row is asked; confirmed, the largest size is lost
+  const m = gradeViewSheet(GATE_OFF);
+  const mFill = fillAll(confirmAll(m.set));
+  check(
+    S,
+    'gate off: the size line is asked as a stray; confirmed → refused, nothing closes (mutation)',
+    tagsIn(m.set, asked(m.set)).includes(`size${GV.n - 1}`) && mFill.closed === 0,
+    { asked: tagsIn(m.set, asked(m.set)), fill: mFill },
+  );
+  // mutation: the lane check off (the count unknown) — offered as strays again
+  const nl = gradeViewSheet({ off: new Set(['lanes']) });
+  check(
+    S,
+    'lane check off: the size line is a stray again (mutation)',
+    tagsIn(nl.set, strayRows(nl.set)).includes(`size${GV.n - 1}`),
+    tagsIn(nl.set, strayRows(nl.set)),
+  );
+  // the candidate row confirmed by the operator (confidence 1) is his: not handed back, the size lost
+  const gr = graded[0];
+  const held = fillAll(confirmRows(confirmAll(g.set), gr ? [gr.sig ?? `#${gr.id}`] : []));
+  check(
+    S,
+    'the candidate row confirmed as ignore: gradeView leaves it out → refused (mutation: only gradeView promotes)',
+    held.closed === 0,
+    held,
+  );
+  // the count (A6 over what feeds the sheet, two groups agreeing): a size in a file name and a lone
+  // size run in text prove nothing; a run in text and the files agreeing say 6 → withheld
+  const roles = (o: FaceRoleOpts | undefined, countFeed: FaceSizeCtx) => {
+    const { set } = buildChainsDetailed(
+      g.sheet,
+      {
+        joinGapMm: PATIMPORT.joinGapMm,
+        joinAngleDeg: PATIMPORT.joinAngleDeg,
+        joinLateralMm: PATIMPORT.joinLateralMm,
+      },
+      { extraTexts: [], faceOpts: o, countFeed },
+    );
+    return tagsIn(set, strayRows(set));
+  };
+  const big = `size${GV.n - 1}`;
+  const named = roles(undefined, { texts: [], files: [{ id: 'syn', name: 'robe_44.svg' }] });
+  check(
+    S,
+    'a size in the file name ("robe_44.svg") is a label, not one size: still withheld',
+    !named.includes(big),
+    named,
+  );
+  const lone = roles(
+    { off: new Set(['lanes']) },
+    { texts: [{ text: 'SIZES 36-46', file: 'syn' }], files: [{ id: 'syn', name: 'robe.svg' }] },
+  );
+  check(
+    S,
+    'a lone size run in text (one group, A6 n unknown), the lane check off: offered as before',
+    lone.includes(big),
+    lone,
+  );
+  const sixFiles = ['36', '38', '40', '42', '44', '46'].map((z, k) => ({
+    id: `f${k}`,
+    name: `robe_${z}.pdf`,
+  }));
+  const agree: FaceSizeCtx = {
+    texts: [{ text: 'SIZES 36-46', file: 'f0' }],
+    files: sixFiles,
+  };
+  const many = roles({ off: new Set(['lanes']) }, agree);
+  check(
+    S,
+    'a size run in text and six size files agree (A6 n = 6), the lane check off: withheld by the count',
+    !many.includes(big),
+    many,
+  );
+  const manyOff = roles({ off: new Set(['lanes', 'proof']) }, agree);
+  check(S, 'the count off too: offered (mutation)', manyOff.includes(big), manyOff);
+
+  // per chain: a line partly beside an outline counts its parallel part; lines beside nothing add
+  // nothing and dilute nothing
+  const outl = rect(0, 0, 300, 400);
+  const ch = [
+    chainOf(0, [...outl, outl[0]], false),
+    // 400 mm straight, 100 mm of it 5 mm outside the bottom edge, the rest leaves at 45°
+    chainOf(
+      1,
+      [
+        { x: 100, y: -5 },
+        { x: 200, y: -5 },
+        { x: 412, y: -217 },
+      ],
+      false,
+    ),
+    // a 3 m hatching far away (lines beside each other, beside no outline)
+    ...Array.from({ length: 10 }, (_, k) =>
+      chainOf(
+        2 + k,
+        [
+          { x: 1000, y: k * 6 },
+          { x: 1300, y: k * 6 },
+        ],
+        false,
+      ),
+    ),
+  ];
+  const st = new Map<number, Style>([[0, STYLE(0, null)]]);
+  const one = strayLanes(ch, [0], [], [1], st);
+  const diluted = strayLanes(
+    ch,
+    [0],
+    [],
+    ch.slice(1).map((c) => c.id),
+    st,
+  );
+  check(
+    S,
+    'per chain: a line partly beside the outline counts ~100 mm, not its 400 mm; the hatching joins nothing and changes nothing',
+    Math.abs(one.laneMm - 100) <= 12 &&
+      one.inLane.join() === '1' &&
+      diluted.laneMm === one.laneMm &&
+      diluted.inLane.join() === '1',
+    { one: [one.laneMm, one.inLane], diluted: [diluted.laneMm, diluted.inLane] },
+  );
+
+  // the worker: the same sheet as an SVG in mm (its page = the sheet's box) — chains → the asked
+  // rows confirmed → 3 sizes answered → a click in the piece: the pieces close, no size refusal
+  const bb = g.sheet.bbox;
+  const box = { x: bb.minX, y: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${box.w}mm" height="${box.h}mm" viewBox="${box.x} ${box.y} ${box.w} ${box.h}">${g.draws
     .map(
       (x) =>
         `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x.pts.map((q) => `${q.x},${q.y}`).join(' ')}"/>`,
     )
+    .join('')}${[
+    [bb.minX, bb.minY],
+    [bb.maxX - 1, bb.maxY],
+  ]
+    .map(
+      // 1 mm ticks at the box's corners: the worker's sheet box is its content's, so the face
+      // raster lies on the same cells as the sheet above
+      ([x, y]) =>
+        `<polyline fill="none" stroke="#000" stroke-width="0.3" points="${x},${y} ${x + 1},${y}"/>`,
+    )
     .join('')}</svg>`;
-  const chainsVia = async (confirmed?: (cs: StageIO['chains']['out']) => string[]) => {
+  const svgSession = async (name: string) => {
     const bytes = new TextEncoder().encode(svg);
-    const s = new Session(1, [
-      { name: 'fixture.svg', bytes: bytes.buffer.slice(0) as ArrayBuffer },
-    ]);
-    const run = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
-      s.runStage(st, input, ctx());
-    await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
-    const cl = await run('clean', { edits: [] });
+    const ses = new Session(1, [{ name, bytes: bytes.buffer.slice(0) as ArrayBuffer }]);
+    const run1 = <St extends StageName>(st: St, input: StageIO[St]['in']) =>
+      ses.runStage(st, input, ctx());
+    await run1('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+    const cl = await run1('clean', { edits: [] });
     const best = cl.scale[0];
     if (best)
-      await run('scale', {
+      await run1('scale', {
         decision: { factor: best.factor, method: best.method, operatorConfirmed: true },
       });
-    await run('assemble', { sheet: 0 });
-    const opts = {
-      joinGapMm: PATIMPORT.joinGapMm,
-      joinAngleDeg: PATIMPORT.joinAngleDeg,
-      joinLateralMm: PATIMPORT.joinLateralMm,
-    };
-    let out = await run('chains', { opts });
-    if (confirmed) out = await run('chains', { opts, confirmed: confirmed(out) });
-    const inn = inner(s);
-    const st = out.classes.find((c) => c.evidence.some((x) => x.kind === 'face-stray'));
-    const v = gradeView(inn.chains);
-    const backs = v.classes
-      .filter((c) => c.role === 'internal' && c.evidence.some((x) => x.kind === 'face-stray'))
-      .flatMap((c) => c.chains).length;
-    return { strayConf: st?.confidence ?? null, handedBack: backs };
+    await run1('assemble', { sheet: 0 });
+    return { ses, run1 };
   };
-  const keyOf = (cs: StageIO['chains']['out']) =>
-    cs.classes
-      .filter((c) => c.evidence.some((x) => x.kind === 'face-stray'))
-      .map((c) => c.sig ?? `#${c.id}`);
-  const untouched = await chainsVia();
-  const confirmed = await chainsVia(keyOf);
+  const { ses, run1 } = await svgSession('fixture.svg');
+  const opts = {
+    joinGapMm: PATIMPORT.joinGapMm,
+    joinAngleDeg: PATIMPORT.joinAngleDeg,
+    joinLateralMm: PATIMPORT.joinLateralMm,
+  };
+  const ch0 = await run1('chains', { opts });
+  const stray0 = ch0.classes.filter((c) => c.evidence.some((x) => x.kind === 'face-stray'));
+  const strayLen = stray0.reduce((a, c) => a + c.totalLengthMm, 0);
   check(
     S,
-    'worker, confirmation omitted: the row stays proposed and is handed back (mutation)',
-    untouched.strayConf != null && untouched.strayConf < 0.9 && untouched.handedBack > 0,
-    untouched,
+    'worker: the stray row holds the test square only (400 mm), the size lines a row not asked',
+    stray0.length <= 1 &&
+      Math.abs(strayLen - 400) < 5 &&
+      ch0.classes.some(
+        (c) => c.evidence.some((x) => x.kind === 'face-graded') && c.confidence >= 0.6,
+      ),
+    { strayLen, rows: ch0.classes.map((c) => `${c.role}@${c.confidence}`) },
+  );
+  const keys = ch0.classes.filter((c) => c.confidence < 0.6).map((c) => c.sig ?? `#${c.id}`);
+  const ch1 = await run1('chains', { opts, confirmed: keys });
+  check(
+    S,
+    'worker: the rows confirmed through the chains stage come back at confidence 1',
+    ch1.classes.filter((c) => c.confidence < 0.6).length === 0 &&
+      ch1.classes
+        .filter((c) => keys.includes(c.sig ?? `#${c.id}`))
+        .every((c) => c.confidence === 1),
+    ch1.classes.map((c) => `${c.role}@${c.confidence}`),
+  );
+  const ign = await run1('chains', { opts, confirmed: [...keys, 'no-such-row'] });
+  check(
+    S,
+    'worker: a key of no row changes nothing',
+    JSON.stringify(ign.classes.map((c) => c.confidence)) ===
+      JSON.stringify(ch1.classes.map((c) => c.confidence)),
+    ign.classes.map((c) => c.confidence),
+  );
+  // the worker's sheet is the SVG moved to its corner and turned y-up: the click goes where the
+  // piece is in it (read off the positioning line, the one horizontal line)
+  const box2 = (v: ChainSet) => {
+    const ps = v.chains.flatMap((c) => c.pts);
+    return {
+      x0: Math.min(...ps.map((q) => q.x)),
+      y0: Math.min(...ps.map((q) => q.y)),
+      y1: Math.max(...ps.map((q) => q.y)),
+    };
+  };
+  const wB = box2(inner(ses).chains);
+  const fB = box2(g.set);
+  const pos = g.chainOfTag('position');
+  const posW = inner(ses).chains.chains[pos]?.pts[0].y ?? NaN;
+  const up = Math.abs(posW - (wB.y0 + fB.y1 - GV.lineY)) < 1;
+  const toW = (q: PtMm) => ({
+    x: q.x + wB.x0 - fB.x0,
+    y: up ? wB.y0 + fB.y1 - q.y : q.y + wB.y0 - fB.y0,
+  });
+  const at = toW({ x: GV.W / 2, y: GV.H / 2 + 50 });
+  const CARD3 = ['S', 'M', 'L'].map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i }));
+  const sz = await run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const pc = await run1('pieces', {
+    seeds: [{ id: 0, at, origin: 'click', variant: null }],
+    edits: [],
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+  });
+  const cs = pc.families.flatMap((f) => f.candidates);
+  const wf = {
+    expected: sz.expected,
+    closed: cs.filter((c) => c.outcome === 'closed').length,
+    refusals: [...new Set(cs.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+    sizeAsk: (pc.grade?.ambiguities ?? []).map((a) => a.kind),
+  };
+  check(
+    S,
+    'worker: 3 sizes answered, a click in the piece → 3 contours closed, no size refusal',
+    sz.expected?.n === GV.n && wf.closed === GV.n && !wf.refusals.length,
+    wf,
+  );
+
+  // the file name says one size (the solver would read 'pattern_38.svg' as one size, source) while
+  // the lines look graded: a contradiction — the held row is asked, still handed to the size checks
+  const clashRow = (v: ChainSet) =>
+    v.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const cf = gradeViewSheet(undefined, { sourceOne: '38' });
+  const cr = clashRow(cf.set);
+  check(
+    S,
+    'file name 38 against a graded look: the held row is asked (< 0.6, names the clash), gradeView still hands it back',
+    !!cr &&
+      cr.confidence < 0.6 &&
+      cr.evidence.some((x) => x.kind === 'face-graded' && x.sourceOne === '38') &&
+      sourceClash(cf.set) === '38' &&
+      sizeTags.every((t) => roleIn(gradeView(cf.set), t) === 'internal'),
+    { conf: cr?.confidence, why: cr?.evidence },
+  );
+  const cm = gradeViewSheet({ off: new Set(['clash']) }, { sourceOne: '38' });
+  check(
+    S,
+    'clash off: held silently (0.6, not asked) (mutation)',
+    (clashRow(cm.set)?.confidence ?? 0) >= 0.6 && !sourceClash(cm.set),
+    clashRow(cm.set)?.confidence,
+  );
+  const w2 = await svgSession('pattern_38.svg');
+  const c0 = await w2.run1('chains', { opts });
+  const cRow = c0.classes.find((c) => c.evidence.some((x) => x.kind === 'face-graded'));
+  const s0 = await w2.run1('sizes', { card: CARD3 });
+  check(
+    S,
+    'worker, pattern_38.svg: the held row asked, the source reads one size, and the sizes step asks the count',
+    !!cRow &&
+      cRow.confidence < 0.6 &&
+      s0.expected?.from === 'source' &&
+      s0.expected.n === 1 &&
+      s0.countAsk != null,
+    { row: cRow?.confidence, expected: s0.expected, ask: s0.countAsk != null },
+  );
+  // the autopilot on that sizes step: it stops with the count (never takes the file name's one
+  // size, never confirms the clash row); answered 3, it does not confirm the clash row either
+  const apOn = (
+    sizes: StageIO['sizes']['out'],
+    chains: StageIO['chains']['out'],
+    confirmed: string[],
+  ) =>
+    decide({
+      session: {
+        step: 'sizes',
+        busy: null,
+        error: null,
+        files: [],
+        variant: null,
+        chains,
+        sizes,
+      } as never,
+      inputs: {
+        sheetIndex: 0,
+        gridOverride: null,
+        cleanEdits: [],
+        legend: [],
+        legendConfirmed: confirmed,
+      } as never,
+      card: { sizes: CARD3 } as never,
+      question: 'the sizes step',
+    });
+  const clashKey = cRow ? cRow.sig ?? `#${cRow.id}` : '';
+  const confirmsClash = (d: ReturnType<typeof decide>) =>
+    d.actions.some(
+      (a) =>
+        (a.kind === 'inputs' && (a.patch.legendConfirmed ?? []).includes(clashKey)) ||
+        (a.kind === 'legend' && (a.confirm ?? []).includes(clashKey)),
+    );
+  const ap0 = apOn(s0, c0, []);
+  check(
+    S,
+    'autopilot, pattern_38.svg: stops on the size count (pre-filled from the look, not 1), never confirms the clash row',
+    ap0.stop?.step === 'sizes' &&
+      !confirmsClash(ap0) &&
+      !ap0.actions.some((a) => a.kind === 'drawn-sizes' && a.n === 1),
+    {
+      stop: ap0.stop,
+      actions: ap0.actions.map((a) => a.kind),
+      assume: ap0.assumptions.map((a) => a.answer),
+    },
+  );
+  // mutation: the clash row read as an ordinary low row — the autopilot would confirm it
+  const plain = {
+    ...c0,
+    classes: c0.classes.map((c) => ({
+      ...c,
+      evidence: c.evidence.map((e) =>
+        e.kind === 'face-graded' ? { kind: 'face-graded' as const, why: e.why } : e,
+      ),
+    })),
+  };
+  check(
+    S,
+    'clash mark off: the autopilot confirms the row as ignore (mutation)',
+    confirmsClash(apOn(s0, plain, [])),
+    apOn(s0, plain, []).actions.map((a) => a.kind),
+  );
+  const s1 = await w2.run1('sizes', { card: CARD3, drawnSizes: GV.n });
+  const ap1 = apOn(s1, c0, []);
+  check(
+    S,
+    'autopilot, 3 sizes answered: the clash row is still not confirmed',
+    !confirmsClash(ap1) && ap1.stop?.reason?.includes('file name') !== true,
+    { stop: ap1.stop, actions: ap1.actions.map((a) => a.kind) },
+  );
+  const p1 = await w2.run1('pieces', {
+    seeds: [{ id: 0, at, origin: 'click', variant: null }],
+    edits: [],
+    opts: { cellMm: PATIMPORT.fillCellMm, snapMm: PATIMPORT.snapMm, variant: null },
+  });
+  const c1 = p1.families.flatMap((f) => f.candidates);
+  const w2f = {
+    expected: s1.expected,
+    closed: c1.filter((c) => c.outcome === 'closed').length,
+    refusals: [...new Set(c1.map((c) => c.gradeRefusal ?? ''))].filter(Boolean),
+  };
+  check(
+    S,
+    'worker, pattern_38.svg: 3 sizes answered → the held lines are size walls, 3 contours close',
+    s1.expected?.from === 'operator' && w2f.closed === GV.n && !w2f.refusals.length,
+    w2f,
+  );
+
+  // A6's geometry is the size checks' (gradeView): two pieces drawn in 3 sizes, the face pass held
+  // the two outer sizes (the candidate row), one sample label "SIZE: M" — on the canonical set each
+  // outline reads one line deep and A6 would infer one size (its walls lost); on gradeView it does not
+  const sixRects = [0, 600].flatMap((x0) =>
+    [0, 1, 2].map((r) => rect(x0 - 6 * r, -5 * r, x0 + 240 + 6 * r, 300 + 5 * r)),
+  );
+  const a6Chains = sixRects.map((q, k) => chainOf(k, q, true));
+  const a6Set: ChainSet = {
+    chains: a6Chains,
+    classes: [
+      {
+        id: 0,
+        role: 'common',
+        sizeLabel: null,
+        chains: [0, 3],
+        totalLengthMm: a6Chains[0].lengthMm * 2,
+        evidence: [],
+        confidence: 0.5,
+      },
+      {
+        id: 1,
+        role: 'ignore',
+        sizeLabel: null,
+        chains: [1, 2, 4, 5],
+        totalLengthMm: [1, 2, 4, 5].reduce((a, k) => a + a6Chains[k].lengthMm, 0),
+        evidence: [{ kind: 'face-graded', why: 'probe' }],
+        confidence: 0.6,
+      },
+    ],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  };
+  const a6Sheet = sheetOf({ minX: -40, minY: -40, maxX: 900, maxY: 340 }, [], [], [STYLE(0, null)]);
+  const a6 = (v: ChainSet) => {
+    const read2 = detectSizeRun(a6Sheet, v, [
+      { id: 'syn', name: 'fixture.pdf', kind: 'pdf', pages: 1, bytes: 0 } as never,
+    ]);
+    const map = faceMap(a6Sheet, v, read2, [], { cellMm: PATIMPORT.fillCellMm });
+    const cands = new Set(shapeCandidates(map.blobs).map((b) => b.id));
+    return countEvidence({
+      texts: [{ text: 'SIZE: M', file: null }],
+      blobs: map.blobs,
+      shapes: blobShapes(map, cands),
+      files: [],
+    }).n;
+  };
+  const nView = a6(gradeView(a6Set));
+  const nCanon = a6(a6Set);
+  check(
+    S,
+    'A6 on gradeView: the held sizes are walls, one size is not inferred (on the canonical set it would be: mutation)',
+    nView !== 1 && nCanon === 1,
+    { nView, nCanon },
+  );
+}
+
+/**
+ * gb2: Redcafe 44 alone (one size; its file name is a label, not a proof) — its strays do not run
+ * beside the outlines like graded copies, so the face pass still offers them; with the lane
+ * thresholds at zero (every stray "graded") they would be held as candidate size lines (mutation).
+ */
+async function redcafeGate() {
+  const S = 'stray gate · Redcafe 44';
+  const base = CASES.find((x) => x.id === 'redcafe')!;
+  let got: { set: ChainSet; mut: ChainSet } | null = null;
+  await runCase(
+    { ...base, id: 'redcafe-44-gate', files: ['pdf/44.pdf'], card: ['44'] },
+    {
+      onAutoPieces: (s) => {
+        const w = s as unknown as {
+          sheet: Sheet;
+          docTexts: string[];
+          docTextSrc: { file: string; page: number; text: string }[];
+          fileNames: Map<string, string>;
+          files: { id: string; name: string }[];
+          pages: Parameters<typeof sheetFeed>[3];
+          sheetOffered: Set<number>;
+          offeredSrc: Set<string>;
+        };
+        const sheet = w.sheet;
+        const offeredPaths = new Set(
+          sheet.paths
+            .filter((p) => w.sheetOffered.has(p.id) || w.offeredSrc.has(srcKey(p.src)))
+            .map((p) => p.id),
+        );
+        const opts = {
+          joinGapMm: PATIMPORT.joinGapMm,
+          joinAngleDeg: PATIMPORT.joinAngleDeg,
+          joinLateralMm: PATIMPORT.joinLateralMm,
+        };
+        const feed = sheetFeed(sheet, w.files, w.docTextSrc, w.pages);
+        const ex = {
+          extraTexts: w.docTexts,
+          fileNames: w.fileNames,
+          offeredPaths,
+          countFeed: { texts: feed.texts, files: feed.files },
+        };
+        const saved = { ...STRAY_LANES };
+        const set = buildChainsDetailed(sheet, opts, ex).set;
+        // every stray "graded": the lane thresholds at zero
+        Object.assign(STRAY_LANES, { minMm: 0, share: 0, joinMm: 0 });
+        try {
+          got = { set, mut: buildChainsDetailed(sheet, opts, ex).set };
+        } finally {
+          Object.assign(STRAY_LANES, saved);
+        }
+      },
+    },
+  );
+  const g = got as { set: ChainSet; mut: ChainSet } | null;
+  const strayMm = (v: ChainSet | undefined) =>
+    Math.round(
+      (v?.classes ?? [])
+        .filter((c) => c.role === 'ignore' && c.evidence.some((x) => x.kind === 'face-stray'))
+        .reduce((a, c) => a + c.totalLengthMm, 0),
+    );
+  const gradedMm = (v: ChainSet | undefined) =>
+    Math.round(
+      (v?.classes ?? [])
+        .filter((c) => c.evidence.some((x) => x.kind === 'face-graded'))
+        .reduce((a, c) => a + c.totalLengthMm, 0),
+    );
+  const row = (v: ChainSet | undefined) => ({
+    stray: strayMm(v),
+    graded: gradedMm(v),
+    warn: v?.warnings.find((w) => w.startsWith('A0.3')) ?? null,
+  });
+  check(
+    S,
+    'single size (44.pdf): strays offered, none held as candidate size lines',
+    !!g && strayMm(g.set) > 0 && gradedMm(g.set) === 0,
+    row(g?.set),
   );
   check(
     S,
-    'worker, the row confirmed through the chains stage: confidence 1, not handed back',
-    confirmed.strayConf === 1 && confirmed.handedBack === 0,
-    confirmed,
-  );
-  const ignored = await chainsVia(() => ['no-such-row']);
-  check(
-    S,
-    'worker, a key of no row changes nothing',
-    ignored.strayConf === untouched.strayConf && ignored.handedBack === untouched.handedBack,
-    ignored,
+    'every stray made "graded" (lane thresholds 0): held as candidate size lines (mutation)',
+    !!g && gradedMm(g.mut) > 0 && strayMm(g.mut) < strayMm(g.set),
+    row(g?.mut),
   );
 }
 
@@ -1191,8 +1740,14 @@ export async function main(args: string[]): Promise<number> {
     synthUnits();
     synthRoles();
     synthGradeView();
-    await synthConfirm();
+    synthConfirm();
+    await synthStrayGate();
     console.log(`@@RESULT ${JSON.stringify({ id: 'synthetic', checks })}`);
+    return 0;
+  }
+  if (mode === 'gate') {
+    await redcafeGate();
+    console.log(`@@RESULT ${JSON.stringify({ id: 'redcafe-44-gate', checks })}`);
     return 0;
   }
   if (mode === 'm2') {
@@ -1255,7 +1810,8 @@ export async function main(args: string[]): Promise<number> {
       );
     })();
     const by = new Map(rows.map((r) => [r.id as string, r]));
-    for (const c of (by.get('synthetic')?.checks as Check[] | undefined) ?? []) checks.push(c);
+    for (const id of ['synthetic', 'redcafe-44-gate'])
+      for (const c of (by.get(id)?.checks as Check[] | undefined) ?? []) checks.push(c);
     const A = (r: Record<string, unknown> | undefined) => r?.auto as Auto | undefined;
     // wm M: 4 face seeds, 0 seed clicks; outline row apart from the junk
     const wm = by.get('wm-M');

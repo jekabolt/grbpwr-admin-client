@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "skeleton:seams": "node scripts/assembly-skeleton/seams.mjs",
     "doll:check": "node scripts/doll/check.mjs",
+    "doll:corpus": "node scripts/doll/corpus.mjs",
     "nest:probe": "node scripts/nest-probe.mjs",
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
     "patimport:dxf": "node scripts/pattern-import/dxf.mjs",
@@ -101,6 +102,7 @@
     "patimport:semantics": "node scripts/pattern-import/semantics.mjs",
     "patimport:fabrics": "node scripts/pattern-import/fabrics.mjs",
     "patimport:hygiene": "node scripts/pattern-import/hygiene.mjs",
+    "patimport:code": "node scripts/pattern-import/code.mjs",
     "patimport:grade": "node scripts/pattern-import/grade.mjs all",
     "patimport:dxf-nested": "node scripts/pattern-import/dxf-nested.mjs",
     "patimport:answers": "node scripts/pattern-import/answers.mjs",
@@ -132,7 +134,9 @@
     "ai:providers": "node scripts/ai-providers-probe.mjs",
     "patimport:faces": "node scripts/pattern-import/faces.mjs",
     "patimport:continuity": "node scripts/pattern-import/continuity.mjs",
-    "patimport:count": "node scripts/pattern-import/count-evidence.mjs"
+    "patimport:count": "node scripts/pattern-import/count-evidence.mjs",
+    "patimport:p23": "node scripts/pattern-import/p23.mjs",
+    "patimport:page-roles": "node scripts/pattern-import/page-roles.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

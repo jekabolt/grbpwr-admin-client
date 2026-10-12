@@ -14,6 +14,19 @@
 // cm; the gate converts at its boundary and nowhere else.
 
 import type { PieceDTO } from 'lib/nesting/types';
+import type { GarmentPassport, PassportDigest } from './passport/types';
+
+// The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
+export type {
+  CutQty,
+  EvidenceClass,
+  ExpectedPiece,
+  Fact,
+  GarmentPassport,
+  OutlineMeaning,
+  PassportDigest,
+  SourceRef,
+} from './passport/types';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 0. Scalars and identifiers
@@ -281,6 +294,11 @@ export type PageClassification = {
   cls: PageClass;
   /** For 'tile': which sheet (a 91-page Burda file carries several). */
   sheet?: number;
+  /**
+   * A10: what the page prints that tells the sheets apart — the models it names ("Mod. 125",
+   * "Style B") and a sheet letter ("Bogen A"); absent = none. Read by the autopilot's card match.
+   */
+  labels?: { models?: string[]; sheets?: string[] };
   /** For 'cover' / 'instructions': line length (m), text items, characters, raster share. */
   ink?: { strokeM: number; texts: number; chars: number; raster: number };
   confidence: number;
@@ -407,7 +425,21 @@ export type ClassEvidence =
    * A0.3: lines that are no outline — outside them, in a junk face, offered as background.
    * `byWhy`: each chain's own reason (per-chain provenance; the size checks read it, gradeView).
    */
-  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] };
+  | { kind: 'face-stray'; why: string; byWhy?: { why: string; chains: ChainId[] }[] }
+  /**
+   * gb2: lines the face pass would call strays on a sheet NOT proven one size (another size's line,
+   * an edge drawn once for every size): candidate size lines — an 'ignore' row (no wall, no
+   * feature), not asked; chains/face-role gradeView hands them to the size checks. `why` = the
+   * evidence that the sheet may draw several sizes.
+   */
+  | {
+      kind: 'face-graded';
+      why: string;
+      /** The one size the source names (its file name) against the graded look: the row is asked. */
+      sourceOne?: string;
+    }
+  /** P2: the AAMA/ASTM meaning of the line's layer (chains/layer-role.ts). */
+  | { kind: 'layer'; layer: string; meaning: string };
 
 export type LineClass = {
   id: ClassId;
@@ -637,6 +669,11 @@ export type SetAside = {
   reason: Exclude<FaceJunk, 'small'>;
   /** The text seed held back. */
   seed?: Seed;
+  /**
+   * P2: positive evidence it is no piece — a closed loop on the internal layer inside a cut piece,
+   * on a file whose layers proved their AAMA/ASTM meaning (chains/layer-role layerLoopAsides).
+   */
+  layerLoop?: string;
 };
 
 export type FillOutcome =
@@ -1206,7 +1243,7 @@ export type FoldAsk = {
 export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
-  blocked: { seed: SeedId; reason: BlockReason; detail: string }[];
+  blocked: { seed: SeedId; reason: BlockReason; detail: string; name?: BlockedName }[];
   warnings: string[];
   /** Open fold questions, one per seed blocked 'fold-question' (absent = none). */
   folds?: FoldAsk[];
@@ -1225,6 +1262,27 @@ export type SemanticsOutput = {
    * grainlines", D3).
    */
   grainProposals?: SeedGrainProposal[];
+  /**
+   * PASSPORT Ф1: what the document says (text layer, layer names), bound to these pieces — the
+   * outline word of the pieces' own wall layers, the cutting list bound by printed label. Evidence
+   * a policy weighs, never geometry (absent = the reader found nothing / an old worker).
+   */
+  passport?: GarmentPassport;
+};
+
+/**
+ * CODE lane: what the namer knew about a piece blocked 'grammar' / 'duplicate-identity' — so the
+ * wizard's "name N pieces" (and the autopilot) can give it a code without losing what the source
+ * said: its own name (kept as the display name) and, for a DRAWN pair (FP_L beside FP_R), the hand
+ * and the twin, so both hands get ONE new code and stay a pair (a twin renamed apart is two singles,
+ * each re-read as a pair of its own — a doubled cut).
+ */
+export type BlockedName = {
+  /** The source's own words for the piece: the title read, the DXF block name; null = none. */
+  source: string | null;
+  /** The drawn hand of a pair whose other hand is `twin` (both blocked together); else null. */
+  hand: PairHand | null;
+  twin: SeedId | null;
 };
 
 /**
@@ -1653,6 +1711,11 @@ export type ConversionManifest = {
    * sheet), so a manifest written before or after this field reads the same.
    */
   autopilot?: AutopilotRecord;
+  /**
+   * PASSPORT Ф1: what the document said about the garment (≤ 2 KB digest). Optional and
+   * shape-tolerant on read like `autopilot`.
+   */
+  passport?: PassportDigest;
 };
 
 /**
@@ -1704,6 +1767,8 @@ export type WriteJob = {
   dialect: 'r12' | 'r2000';
   /** A10: the autopilot's assumptions, carried into the manifest as they are. */
   autopilot?: AutopilotRecord;
+  /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */
+  passport?: PassportDigest;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -1916,6 +1981,8 @@ export type StageName =
   | 'semantics'
   | 'fabrics'
   | 'render-som'
+  /** A9 side stage: page thumbnails + stats for the AI page-role call (invalidates nothing). */
+  | 'render-pages'
   | 'write';
 
 /** Input/output of each stage as the worker sees them (session-held artifacts by id). */
@@ -1935,6 +2002,8 @@ export type StageIO = {
       presegmented?: boolean;
       /** Traced raster pages (F11): the correction each page already carries (`IRPage.calibration`). */
       calibrations?: { file: FileId; page: PageIndex; calibration: RasterCalibration }[];
+      /** PASSPORT Ф1: what the document says, as read before any piece (absent = nothing read). */
+      passport?: GarmentPassport;
     };
   };
   /** A8: the input pages cleaned before anything is parsed (masks, dropped pages, scale hints). */
@@ -2042,6 +2111,14 @@ export type StageIO = {
       context?: { instructionsExcerpt: string; languageHint: string };
     };
   };
+  /**
+   * A9: the pages the AI page-role call sends — each drawn after the clean stage's mask (PNG, long
+   * side ≤ `maxPx`) with its stats. `pictures: false` = stats only (the probes: no canvas, no AI).
+   */
+  'render-pages': {
+    in: { pages: { file: FileId; page: PageIndex }[]; maxPx: number; pictures?: boolean };
+    out: { pages: (PageStats & { png: Blob | null })[] };
+  };
   write: {
     in: {
       /** The card the manifest is written for: the card trusts a manifest only with its own id. */
@@ -2139,6 +2216,8 @@ export type WizardEvent =
   | { type: 'files'; files: File[] }
   /** A8: the operator's mask edits (undo a kind, accept a suggestion, re-include a page). */
   | { type: 'clean'; edits: PageMaskEdit[] }
+  /** A9: ask the AI the page roles again (fresh answers for the pages as they are now). */
+  | { type: 'page-roles' }
   | { type: 'scale'; decision: ScaleDecision }
   | { type: 'sheet'; sheet: number; override?: GridOverride }
   | { type: 'legend'; edits: Parameters<ApplyLegendFn>[1] }
@@ -2269,9 +2348,60 @@ export type CurveText = {
   heightMm: Mm;
 };
 
-/** A9 hook (the early AI page call, later phase): one evidence each where it is given. Empty today. */
+/**
+ * A9: what the AI reads a page as (ClassifyPatternPages, one call per file over its thumbnails).
+ * `pattern_tile` — a part of a tiled sheet at 1:1; `pattern_sheet` — a whole sheet at 1:1;
+ * `overview` — a reduced layout; `instructions` — sewing steps, diagrams; `cutting_layout` — the
+ * layout on the fabric; `cover`; `table` — sizes / yardage; `other`.
+ */
+export type AiPageRole =
+  | 'pattern_tile'
+  | 'pattern_sheet'
+  | 'overview'
+  | 'instructions'
+  | 'cutting_layout'
+  | 'cover'
+  | 'table'
+  | 'other';
+
+/** A9: one page's AI answer as the clean stage reads it (evidence №1; geometry is №2). */
+export type AiPageHint = {
+  file: FileId;
+  page: PageIndex;
+  role: AiPageRole;
+  confidence: number;
+  /** The model's own words (≤ 3 × 120 runes). */
+  evidence?: string[];
+  /**
+   * A9 (Codex #4): asked before an edit that changed the page's render or the tile reference set —
+   * it only suggests until asked again.
+   */
+  stale?: boolean;
+};
+
+/** A9 (clean/page-roles.ts): a chain of the tile chrome at one page place, as `repetition` reads it. */
+export type TileMarkSig = { cx: Mm; cy: Mm; w: Mm; h: Mm; len: Mm };
+
+/** A9: what a page is made of, sent with its thumbnail (PatternPageEvidence) and read by the rule. */
+export type PageStats = {
+  file: FileId;
+  page: PageIndex;
+  widthMm: Mm;
+  heightMm: Mm;
+  /** Line work on the page after the mask, m. */
+  lineLengthM: number;
+  /** Closed outlines of piece size that are not rectangles (`shapesOf`). */
+  pieceSizedOutlines: number;
+  /** The file's tile chrome at its page place on this page; undefined = unknown (no chrome on the tiles, other orientation). */
+  hasTileMarks?: boolean;
+  textChars: number;
+  /** The page's words in reading order, ≤ 600 runes. */
+  textExcerpt: string;
+};
+
+/** A9: the early AI page call (one evidence each where it is given). */
 export type CleanAiHints = {
-  pages?: { file: FileId; page: PageIndex; role: PageClass; confidence: number }[];
+  pages?: AiPageHint[];
   /** Junk boxes on a page, page frame, with what the AI read there ("WWW.PAPAVERO.PL"). */
   junk?: { file: FileId; page: PageIndex; bbox: BoxMm; kind: BackgroundKind; text?: string }[];
 };
@@ -2313,7 +2443,30 @@ export type CleanOutput = {
      * match): how many matched, at what scale (clean/reduced-copy.ts).
      */
     reducedCopy?: { matches: number; of: number; scale: number };
+    /**
+     * A9: the AI's reading of the page (evidence №1), when the call answered for it — on a page
+     * holding line work: not pattern = the pre-filled "keep it aside", `pattern_*` = "read it as a
+     * tile" offered.
+     */
+    ai?: { role: AiPageRole; confidence: number; evidence: string[]; stale?: boolean };
+    /**
+     * A9: SUGGESTIVE geometric facts that the page is not pattern (another format, no tile chrome,
+     * text-dominant, no registration) — never enough to set it aside, even with the AI.
+     */
+    geo?: string[];
+    /**
+     * A9: the EXCLUSIONARY geometric fact (clean/page-roles.ts `exclusionOf`: a reduced copy of the
+     * file's tile pieces, or no piece-sized outline / long line and not in the tile grid).
+     */
+    exclusion?: string;
+    /**
+     * A9: set aside by the AI (≥ 0.85, a non-pattern role) AND the exclusionary fact although it
+     * holds line work — status 'auto', shown "set aside · AI + geometry", undone with "read as tile".
+     */
+    aiAside?: boolean;
   }[];
+  /** A9: per file, the tile chrome the page stats test a page against (`PageStats.hasTileMarks`). */
+  tileMarks?: { file: FileId; tile: { widthMm: Mm; heightMm: Mm }; sigs: TileMarkSig[] }[];
   /** Page classification after the operator's role edits — what assembly reads. */
   classes: PageClassification[];
   /** Lines masked per kind (applied items only) — the "removed: …" line. */

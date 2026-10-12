@@ -139,6 +139,12 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
             return `inside the outlines`;
           case 'face-stray':
             return `not an outline: ${e.why}`;
+          case 'face-graded':
+            return e.sourceOne
+              ? `${e.why} — confirm if the sheet draws only ${e.sourceOne}, else answer the sizes drawn`
+              : `outside the outlines — another size's lines? left to the size checks (${e.why})`;
+          case 'layer':
+            return `layer “${e.layer}”: ${e.meaning}`;
         }
       })
       .join(' · ');
@@ -347,13 +353,15 @@ export function SizesStep({ api, card }: { api: ImportSessionApi; card: CardCont
                               void api.dispatch({ type: 'legend-confirm', key: legendKey(c) })
                             }
                             title={
-                              c.evidence.some((x) => x.kind === 'colour-only')
-                                ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
-                                : c.evidence.some((x) => x.kind === 'face-stray')
-                                  ? `${fmtPct(c.confidence, 0)} sure — these lines close no outline (strays, lettering, a watermark); set aside unless one is a piece line`
-                                  : c.evidence.some((x) => x.kind === 'faces')
-                                    ? `${fmtPct(c.confidence, 0)} sure — these lines close the outlines, but only that says so; confirm they are the cut lines`
-                                    : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
+                              c.evidence.some((x) => x.kind === 'face-graded')
+                                ? `${fmtPct(c.confidence, 0)} sure — these lines look like other sizes, but the file name says one size; confirm to set them aside if the sheet draws only that size`
+                                : c.evidence.some((x) => x.kind === 'colour-only')
+                                  ? `${fmtPct(c.confidence, 0)} sure — set aside for its grey colour only; make it a line role if it is the cut line`
+                                  : c.evidence.some((x) => x.kind === 'face-stray')
+                                    ? `${fmtPct(c.confidence, 0)} sure — these lines close no outline (strays, lettering, a watermark); set aside unless one is a piece line`
+                                    : c.evidence.some((x) => x.kind === 'faces')
+                                      ? `${fmtPct(c.confidence, 0)} sure — these lines close the outlines, but only that says so; confirm they are the cut lines`
+                                      : `${fmtPct(c.confidence, 0)} sure — recognised from a recovered motif only`
                             }
                           >
                             ! confirm

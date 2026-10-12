@@ -18,6 +18,7 @@ import { isTitleLabel } from 'lib/pattern-import/semantics/names';
 import { contourMm, roundTrip } from 'lib/pattern-import/gate/roundtrip';
 import { readManifest } from 'lib/pattern-import/manifest';
 import type {
+  AiPageHint,
   CardSize,
   DraftScopeTarget,
   IRText,
@@ -37,6 +38,10 @@ import { wallsUsedBy } from 'lib/pattern-import/worker/walls-used';
 
 import { singlePageSheet } from 'components/managers/tech-card/components/pattern-import/sheet-skip';
 import {
+  bulkNames,
+  codeBlocked,
+} from 'components/managers/tech-card/components/pattern-import/bulk-names';
+import {
   scaleUncertain,
   stepOffer,
   type OfferCtx,
@@ -46,6 +51,8 @@ import { synthDrawables, synthTruth } from './raster-entry';
 
 import { PALETTE, renderPng, type Label, type Stroke } from './sizes-render';
 import { splitSize } from './worker-entry';
+import { fixturePageRoleDeps } from './page-roles-fixture';
+import { classifyFilePages, pagesForCall } from 'lib/pattern-import/ai/pages';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -101,6 +108,14 @@ type Case = {
   outlinesAreSize?: boolean;
   /** The operator maps the source sizes, in rank order, to these card tokens (smoke: 38 → M). */
   mapTo?: string[];
+  /**
+   * A10: the card's name — set ONLY where corpus/TRUTH.md says which model / sheet the card is
+   * (the autopilot matches it against the models and sheets the file prints). Absent = a card
+   * that names nothing (the synthetic "autopilot" card).
+   */
+  cardName?: string;
+  /** The model the card is per TRUTH, scored by the autopilot metric when `variant` is absent. */
+  cardModel?: RegExp;
 };
 
 const NUM = (a: number, b: number, step = 2) =>
@@ -117,6 +132,8 @@ export const CASES: Case[] = [
     files: ['pdf/palto.pdf'],
     card: NUM(72, 88, 4),
     variant: /125/,
+    // TRUTH: "в файле только Mod. 125" (123/124 are other models' lines)
+    cardName: 'burda Пальто Mod. 125',
     truth: { id: 'palto', expect: 7, note: '9 listed, 2 are "trace from 21" (no own outline)' },
   },
   {
@@ -125,6 +142,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /A/,
+    // TRUTH: variant 0 = Style A (high waisted)
+    cardName: 'Phoebe Jumpsuit · Style A',
     truth: { id: 'kombinezon', variant: 0 },
   },
   {
@@ -133,6 +152,8 @@ export const CASES: Case[] = [
     files: ['pdf/kombinezon.pdf'],
     card: NUM(6, 20),
     variant: /B/,
+    // TRUTH: variant 1 = Style B (low waisted)
+    cardName: 'Phoebe Jumpsuit · Style B',
     truth: { id: 'kombinezon', variant: 1 },
   },
   {
@@ -154,6 +175,9 @@ export const CASES: Case[] = [
     group: 'pdf',
     files: ['pdf/zhaket.pdf'],
     card: NUM(36, 44),
+    // TRUTH: Mod. 126 ("Mod. 125" lines belong to another model)
+    cardName: 'burda Жакет Mod. 126',
+    cardModel: /126/,
     truth: { id: 'zhaket' },
   },
   {
@@ -256,6 +280,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 0,
     variant: /A/,
+    // TRUTH grid: sheet 1 = "Bogen A" (p6–55)
+    cardName: 'Mantel & Jacke · Bogen A',
     truth: { id: 'polupalto' },
   },
   {
@@ -265,6 +291,8 @@ export const CASES: Case[] = [
     card: NUM(44, 54),
     sheet: 1,
     variant: /B/,
+    // TRUTH grid: sheet 2 = "Bogen B" (p57–91)
+    cardName: 'Mantel & Jacke · Bogen B',
     truth: { id: 'polupalto' },
   },
   // DXF (CLO, lekalo, Gerber) — fast path
@@ -349,6 +377,8 @@ export const CLICKS = {
   'use-line': 2,
   'not-a-piece': 2,
   code: 2,
+  // CODE lane: "name N pieces P01…" on the details step (bulk-names.ts) — one click for all
+  'code-bulk': 1,
   grain: 3,
   // A1: "review N proposed grainlines" + "accept these N" in the overview that shows them all
   'grain-accept': 2,
@@ -590,7 +620,16 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     // 1 · files
     const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
     // A8: the input pages cleaned before anything is parsed (no operator edit on the e2e pass)
-    const cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    let cl = await run('clean', { edits: hooks.cleanEdits ?? [] });
+    // A9 (`--page-roles`): the recorded AI page roles, asked as the wizard asks them, read by clean
+    if (process.env.E2E_PAGE_ROLES) {
+      const hints = await recordedPageRoles(s, cl, ex.files);
+      if (hints.length)
+        cl = await run('clean', { edits: hooks.cleanEdits ?? [], aiHints: { pages: hints } });
+      rec.pageRolesAside = cl.dropped
+        .filter((d) => d.aiAside)
+        .map((d) => `${d.file}:p${d.page + 1}`);
+    }
     const pageCls: Record<string, number> = {};
     for (const p of cl.classes) pageCls[p.cls] = (pageCls[p.cls] ?? 0) + 1;
     rec.clean = {
@@ -1149,6 +1188,9 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     };
     const fams = pc.families;
     const dropped: string[] = [];
+    /** CODE lane: what "name N pieces" gave each piece, per pass (the code probe reads it). */
+    const codeBulk: { seed: number; pass: number; label: string; code: string; mods: string[] }[] =
+      [];
     const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
     for (let pass = 0; pass < 5 && (sem.blocked.length || sem.foldList); pass++) {
       const byReason = new Map<string, number[]>();
@@ -1179,21 +1221,65 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       }
       if (drawn.length)
         op('grain', `draw grain on ${drawn.length} pieces (row + 2 ends each)`, drawn.length);
-      const named = [
-        ...(byReason.get('grammar') ?? []),
-        ...(byReason.get('duplicate-identity') ?? []),
-      ];
-      named.forEach((sd, i) => {
+      // CODE lane: the details step's one "name N pieces P01…" click (bulk-names.ts, the same call
+      // the step makes): every piece without a usable code gets one in sheet order. The seed's own
+      // text is the step's too — a harness click seed's label is TRUTH, not the sheet's, so it is not
+      // passed. A piece the bulk cannot name (no outline box) is typed by hand: 2 clicks each.
+      // Codex CODE-3: the step re-reads the pieces after a grainline answer, and the chip is computed
+      // on THAT reading (a hand freed by its grainline shows up with its twin) — so does the harness
+      if ((proposals.length || drawn.length) && codeBlocked(sem.blocked).length)
+        sem = await run('semantics', {
+          fileAllowance: c.meaning ? fileAllowance : found ?? fileAllowance,
+          pieceOverrides: overrides,
+          operatorGrain: grain,
+          operatorFold: foldPick,
+          foldListChecked,
+        });
+      const unnamedNow = codeBlocked(sem.blocked);
+      const bulk = bulkNames(
+        sem.blocked,
+        (sd) => {
+          const cs = fams.find((x) => x.seed === sd)?.candidates;
+          return cs?.length ? cs[cs.length - 1].bbox : null;
+        },
+        [
+          ...sem.pieces.map((p) => p.identity),
+          ...Object.entries(overrides).flatMap(([sd, o]) =>
+            o?.code && !unnamedNow.some((b) => b.seed === Number(sd)) ? [o.code] : [],
+          ),
+        ],
+        c.card,
+        (sd) => {
+          const t = seedsNow.find((x) => x.id === sd)?.text;
+          return t && t.src.file !== 'click' ? t.text : null;
+        },
+      );
+      for (const [sd, n] of bulk)
         overrides[sd] = {
           ...(overrides[sd] ?? {}),
-          code: 'BP',
-          mods: [String(50 + pass * 20 + i)],
+          code: n.code,
+          mods: n.mods,
+          displayName: n.displayName,
+          nameOrigin: 'operator',
+        };
+      if (bulk.size) {
+        op('code-bulk', `name ${bulk.size} pieces automatically (grammar/duplicate)`);
+        codeBulk.push(
+          ...[...bulk].map(([sd, n]) => ({ seed: sd, pass, label: labelOf(seedsNow)(sd), ...n })),
+        );
+      }
+      const typed = unnamedNow.filter((b) => !bulk.has(b.seed)).map((b) => b.seed);
+      typed.forEach((sd, i) => {
+        overrides[sd] = {
+          ...(overrides[sd] ?? {}),
+          code: `T${String(pass * 20 + i + 1).padStart(2, '0')}X`,
+          mods: [],
           displayName: `piece ${sd}`,
           nameOrigin: 'operator',
         };
       });
-      if (named.length)
-        op('code', `type a code for ${named.length} pieces (grammar/duplicate)`, named.length);
+      if (typed.length)
+        op('code', `type a code for ${typed.length} pieces (grammar/duplicate)`, typed.length);
       // E1a fold question: a fold piece (truth) takes the suggested edge, anything else "not a fold"
       const asks = sem.folds ?? [];
       for (const q of asks) {
@@ -1254,6 +1340,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       });
     }
     rec.droppedAtMeaning = dropped;
+    if (codeBulk.length) rec.codeBulk = codeBulk;
     // D3: what the drawing does not prove — the wizard stops on it (footer) until answered.
     // Allowance: one explicit answer for the file ("cut line" / "seam line + N mm"); quantities and
     // sheet-note names: one bulk "confirm all as shown" (per-piece corrections are the operator's).
@@ -2116,4 +2203,36 @@ function insidePoly(p: PtMm, poly: readonly PtMm[]): boolean {
     if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
   }
   return c;
+}
+
+/** A9: the wizard's page-role call (use-import-session.ts askPageRoles) over the recorded answers. */
+async function recordedPageRoles(
+  s: Session,
+  cl: StageIO['clean']['out'],
+  files: StageIO['extract']['out']['files'],
+): Promise<AiPageHint[]> {
+  const { deps } = fixturePageRoleDeps();
+  const out: AiPageHint[] = [];
+  const files_ = new Set(cl.dropped.filter((d) => d.status === 'suggest').map((d) => d.file));
+  for (const file of files_) {
+    const asked = new Set(
+      cl.dropped.filter((d) => d.status === 'suggest' && d.file === file).map((d) => d.page),
+    );
+    const { pages, left } = pagesForCall(
+      cl.classes.filter((c) => c.file === file).sort((a, b) => a.page - b.page),
+      asked,
+    );
+    const thumbs = await s.runStage(
+      'render-pages',
+      { pages: pages.map((p) => ({ file, page: p.page })), maxPx: 1024, pictures: false },
+      { checkCancel: () => {}, progress: () => {} },
+    );
+    const name = files.find((f) => f.id === file)?.name ?? '';
+    const r = await classifyFilePages(
+      { key: `e2e:${name}`, file, fileName: name, thumbs: thumbs.pages, left },
+      deps,
+    );
+    out.push(...r.hints);
+  }
+  return out;
 }

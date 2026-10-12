@@ -9,7 +9,7 @@ import { adminService } from 'api/api';
 import { suggestNames, type NamerDeps } from 'lib/pattern-import/ai/name';
 import type { CardContext, NameSuggester } from './client';
 
-const asDataUrl = (blob: Blob) =>
+export const asDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result));
@@ -29,7 +29,19 @@ export const apiNamerDeps: NamerDeps = {
     return id;
   },
   suggest: (req) => adminService.SuggestPatternPieces(req),
+  discard: discardMedia,
 };
+
+/**
+ * Codex (A9 #5): the renders sent to an AI call are not kept — deleted from the media library once
+ * the call is over (DeleteFromBucket; a media another row references is refused by the FK and is
+ * reported back as not deleted).
+ */
+export async function discardMedia(ids: number[]): Promise<number[]> {
+  const r = await Promise.allSettled(ids.map((id) => adminService.DeleteFromBucket({ id })));
+  // the ids it could NOT delete: retried once, then logged for the sweep (lib/…/ai/discard.ts)
+  return ids.filter((_, k) => r[k].status === 'rejected');
+}
 
 /** The card facts the namer sends — sizes, BOM purposes, pieces already on the card. */
 export const cardFacts = (card: CardContext) => ({

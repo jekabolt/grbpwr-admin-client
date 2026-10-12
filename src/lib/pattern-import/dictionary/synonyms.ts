@@ -296,6 +296,18 @@ function sideOf(t: string): PieceTextReading['side'] {
   return front && !back ? 'F' : back && !front ? 'B' : null;
 }
 
+/** A segment that is nothing but one side word («FRONT», «vorne», «спинка» is a noun: not this). */
+function bareSideOf(seg: string): 'F' | 'B' | null {
+  const words = normaliseText(seg).trim().split(' ').filter(Boolean);
+  if (words.length !== 1) return null;
+  const w = ` ${words[0]} `;
+  // a body noun («перед», «спинка», «espalda») names a piece of its own, not a side
+  if (BODY.some((r) => r.stems.some((s) => hasStem(w, s)))) return null;
+  const f = FRONT.some((s) => hasStem(w, s));
+  const b = BACK.some((s) => hasStem(w, s));
+  return f && !b ? 'F' : b && !f ? 'B' : null;
+}
+
 /**
  * Read one printed text. A label is often bilingual («Riegel / ПОГОН,ХЛЯСТИК», «Vorderteil
  * (Futter)»): the first segment that names a piece decides, the fabric is read from the whole label.
@@ -303,7 +315,13 @@ function sideOf(t: string): PieceTextReading['side'] {
 export function readPieceText(text: string): PieceTextReading {
   const whole = normaliseText(text);
   const fabric = FABRIC.find((f) => f.stems.some((s) => hasStem(whole, s)))?.fabric ?? null;
-  for (const seg of text.split(/[/,;()[\]|]+/)) {
+  const segs = text.split(/[/,;()[\]|]+/);
+  // CODE lane (reef «J - SKIRT HEM BAND (FRONT)» beside «I - … (BACK)»): a segment that is ONLY a
+  // side word qualifies the piece the label names — its side when the noun's own segment has none.
+  // Only a bare side: «(back neck)», «(attach to back)» say where, not which piece.
+  const bareSides = new Set(segs.flatMap((seg) => bareSideOf(seg) ?? []));
+  const bareSide = bareSides.size === 1 ? [...bareSides][0] : null;
+  for (const seg of segs) {
     const t = normaliseText(seg);
     if (t.trim() === '') continue;
     const hits: { code: string; pos: number; len: number; stem: string }[] = [];
@@ -317,7 +335,7 @@ export function readPieceText(text: string): PieceTextReading {
         ? Math.min(...hits.map((h) => h.pos))
         : Math.max(...hits.map((h) => h.pos));
       const best = hits.filter((h) => h.pos === head).sort((a, b) => b.len - a.len)[0];
-      return { code: best.code, side: sideOf(t), fabric, matched: best.stem };
+      return { code: best.code, side: sideOf(t) ?? bareSide, fabric, matched: best.stem };
     }
     for (const row of BODY) {
       const st = row.stems.find((s) => hasStem(t, s));

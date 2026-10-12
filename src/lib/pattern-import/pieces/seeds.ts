@@ -221,6 +221,23 @@ export function variantLabels(texts: readonly string[]): string[] {
   return [...out].sort();
 }
 
+/**
+ * A10 · the labels a page prints that tell one tile sheet from another: the models it names
+ * (`variantLabels`, the same spelling the pieces step offers) and a sheet letter ("Bogen A",
+ * "Sheet B", "Лист Б"). Letters only — "Sheet 3" is a tile number on most files.
+ */
+export function pageLabels(texts: readonly string[]): { models?: string[]; sheets?: string[] } {
+  const models = variantLabels(texts);
+  const sheets = new Set<string>();
+  for (const raw of texts) for (const m of raw.matchAll(SHEET_NAME)) sheets.add(m[1].toUpperCase());
+  return {
+    ...(models.length ? { models } : {}),
+    ...(sheets.size ? { sheets: [...sheets].sort() } : {}),
+  };
+}
+const SHEET_NAME =
+  /(?<![\p{L}\p{N}])(?:schnitt)?(?:bogen|sheet|лист|arkusz|feuille|planche|hoja|foglio)[\s_#№:.-]+(\p{L})(?![\p{L}\p{N}])/giu;
+
 /** A variant label printed near a seed (not a "Cutting line …" label): the seed is that variant's. */
 export function variantNear(sheet: Sheet, at: PtMm, reachMm = 45): string | null {
   for (const t of sheet.texts) {

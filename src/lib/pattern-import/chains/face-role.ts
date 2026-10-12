@@ -16,6 +16,16 @@
 // other lines are not, OR the sheet prints a key naming the cut line. Otherwise the row is
 // pre-filled and asked (confidence < 0.6). The strays are an 'ignore' row,
 // always asked (D3: a suggestion one click away); 'internal' is sure only for lines inside faces.
+//
+// "No size row = one size" holds only where the sheet is one size. On a sheet drawing every size in
+// one pen the strays are the larger sizes' lines and the edges drawn once for all of them (the
+// stripped bench), and the operator confirming that row would take the size checks' walls away.
+// So the stray row is proposed only when the sheet's A6 count evidence (what feeds the sheet, two
+// groups agreeing) says one size or, with the count unknown, when the strays do not run beside the
+// outlines like graded copies (strayLanes) and the outlines are not drawn three or more lines deep
+// (nestedWalls). Otherwise those lines are candidate size lines: an 'ignore' row (no wall for the
+// fill, no feature) that is not asked, and that gradeView alone hands to the size checks. The drawn
+// test square and what the clean step offered stay strays (they are never a size's line).
 import type {
   Chain,
   ChainId,
@@ -29,6 +39,9 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { faceRaster, judgeBlobs, type FaceBlob, type FaceRaster } from '../pieces/faces';
+import { sameLook } from '../pieces/grade/guard';
+import { resampleT } from '../pieces/grade/vec';
+import { countEvidence, type TextObs } from '../sizes/count-evidence';
 import { testSquareBoxes, turnOf } from './classify';
 import { resample, SegGrid, segNearest } from './geom';
 import type { WallItem } from '../pieces/snap';
@@ -72,7 +85,31 @@ export type FaceRoleOpts = {
     | 'runs'
     | 'lettering'
     | 'all'
+    // gb2: the one-size proofs (the count is unknown), the graded-copy look (never graded), the
+    // whole gate (the stray row as A0.3 proposed it)
+    | 'proof'
+    | 'lanes'
+    | 'gate'
+    // the file name's one size against a graded look: held silently, not asked
+    | 'clash'
   >;
+};
+
+/**
+ * What feeds the selected sheet (sizes/count-evidence sheetFeed: its own texts, the instruction /
+ * cover texts of ITS files, its files) — the A6 count evidence reads nothing else.
+ */
+export type FaceSizeCtx = {
+  texts?: readonly TextObs[];
+  files?: readonly { id: string; name: string }[];
+  /** Models the sheet names (more than one → the count is never inferred). */
+  models?: number;
+  /**
+   * The size the source itself reads as its only one (sizes/detect: one uploaded file, a size in
+   * its name — the solver takes it as 'source', one size). Not a proof here: where the lines look
+   * graded the two contradict, and the held row is asked instead of held silently.
+   */
+  sourceOne?: string | null;
 };
 
 /**
@@ -85,6 +122,7 @@ export function rolesByFaces(
   styles: ReadonlyMap<number, Style>,
   offered: ReadonlySet<PathId> = new Set(),
   o: FaceRoleOpts = {},
+  sizes: FaceSizeCtx = {},
 ): ChainSet {
   const off = o.off ?? new Set();
   if (off.has('all')) return set;
@@ -232,7 +270,25 @@ export function rolesByFaces(
   const auto = independent.length >= 1;
   // the rows: piece outlines, the lines inside them, the strays
   const internal = rest.filter((id) => verdict.get(id)?.kind === 'internal');
-  const stray = rest.filter((id) => verdict.get(id)?.kind === 'stray');
+  let stray = rest.filter((id) => verdict.get(id)?.kind === 'stray');
+  // gb2: a stray is proposed only where the sheet is one size (see the header); elsewhere the lines
+  // a size may draw stay size lines for the size checks, unasked
+  const maybeSize = stray.filter((id) => !NEVER_A_SIZE.has(verdict.get(id)!.why));
+  let sizeLines: ChainId[] = [];
+  let gateWhy: string | null = null;
+  if (!off.has('gate') && maybeSize.length) {
+    const count = off.has('proof') ? { one: null, many: null } : sizeCountAtFaces(sheet, sizes);
+    if (!count.one && !count.many && !off.has('lanes')) {
+      const lanes = strayLanes(set.chains, piece, internal, maybeSize, styles);
+      const walls = lanes.graded ? null : nestedWalls(set.chains, piece, styles);
+      gateWhy = lanes.graded ? lanes.why : walls?.graded ? walls.why : null;
+    } else if (!count.one) gateWhy = count.many;
+    if (gateWhy) {
+      const keep = new Set(maybeSize);
+      sizeLines = maybeSize;
+      stray = stray.filter((id) => !keep.has(id));
+    }
+  }
   const others = set.classes.filter((c) => c.role === 'ignore' || c.role === 'notch');
   const classes: LineClass[] = [];
   const push = (c: Omit<LineClass, 'id'>) => classes.push({ ...c, id: classes.length });
@@ -279,6 +335,29 @@ export function rolesByFaces(
       confidence: 0.4,
     });
   }
+  // the source reads itself as one size (a size in its one file's name) while the lines look graded:
+  // a contradiction — the solver would stand down (one size) with these lines no walls, so the row
+  // is asked, not held silently (gradeView still hands it to the size checks until answered)
+  const clash = sizeLines.length && !off.has('clash') ? sizes.sourceOne ?? null : null;
+  if (sizeLines.length)
+    // candidate size lines: no wall for the fill, no feature for semantics (role 'ignore'), not
+    // asked (≥ 0.6); gradeView hands them to the size checks as unconfirmed lines of some size
+    push({
+      role: 'ignore',
+      sizeLabel: null,
+      chains: sizeLines,
+      totalLengthMm: len(sizeLines),
+      evidence: [
+        {
+          kind: 'face-graded',
+          why: clash
+            ? `these lines look like other sizes (${gateWhy}); the file name says one size, ${clash}`
+            : gateWhy!,
+          ...(clash ? { sourceOne: clash } : {}),
+        },
+      ],
+      confidence: clash ? 0.4 : 0.6,
+    });
   for (const c of others) push({ ...c });
   const pieceSet = new Set(piece);
   return {
@@ -289,10 +368,22 @@ export function rolesByFaces(
     ambiguities: (set.ambiguities ?? []).filter((a) => !a.classes.length),
     warnings: [
       ...set.warnings,
-      `A0.3: ${piece.length} lines close ${kept.size} outlines (${cues.join('; ')}) → ${auto ? 'outline row' : 'outline row to confirm'}; ${internal.length} inside; ${stray.length} stray (to confirm)`,
+      `A0.3: ${piece.length} lines close ${kept.size} outlines (${cues.join('; ')}) → ${auto ? 'outline row' : 'outline row to confirm'}; ${internal.length} inside; ${stray.length} stray (to confirm)${sizeLines.length ? `; ${sizeLines.length} outside left to the size checks (${gateWhy})` : ''}`,
     ],
   };
 }
+
+/**
+ * gb2: the unanswered candidate row whose lines look like other sizes while the source names one
+ * size (its file name) — the sizes step asks the count, and the row stays a question until the
+ * operator answers either.
+ */
+export const sourceClash = (set: ChainSet): string | null => {
+  for (const c of set.classes)
+    if (c.confidence < 0.9)
+      for (const e of c.evidence) if (e.kind === 'face-graded' && e.sourceOne) return e.sourceOne;
+  return null;
+};
 
 const gradeViews = new WeakMap<ChainSet, ChainSet>();
 
@@ -304,10 +395,13 @@ export type GradeViewOpts = { off?: ReadonlySet<'why'> };
 
 /**
  * What the size checks (pieces/grade: the hook, the drawn-size inference) may read of the face
- * pass. Its stray row rests on "a sheet with no size row is one size": a line sticking outside
- * every outline is a stray. On a sheet drawing several sizes in one pen that is every larger size's
- * line (the stripped bench: kombinezon lost a whole size, the solver counted 7 bands for 8 and a
- * 7-size control closed 6 wrong contours; palto 21 closed wrong). So, per chain, an unconfirmed stray
+ * pass. Since gb2 the face pass offers a stray row only on a sheet proven one size or not looking
+ * graded (rolesByFaces: sizeCountAtFaces, strayLanes, nestedWalls); elsewhere its candidate size
+ * row ('face-graded', not asked) is handed back here and nowhere else. The stray row rests on
+ * "a sheet with no size row is one size": a line sticking outside every outline is a stray. On a
+ * sheet drawing several sizes in one pen that is every larger size's line (the stripped bench:
+ * kombinezon lost a whole size, the solver counted 7 bands for 8 and a 7-size control closed 6 wrong
+ * contours; palto 21 closed wrong). So, per chain, an unconfirmed stray
  * is handed back as F3's unconfirmed 'internal' — size evidence and a wall, what it was before the
  * face pass — unless its own reason says it is no line work (the drawn test square, what the clean
  * step offered as background).
@@ -325,7 +419,9 @@ export type GradeViewOpts = { off?: ReadonlySet<'why'> };
 export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
   const off = o.off ?? new Set();
   const unsure = (c: LineClass) =>
-    c.role === 'ignore' && c.confidence < 0.9 && c.evidence.some((e) => e.kind === 'face-stray');
+    c.role === 'ignore' &&
+    c.confidence < 0.9 &&
+    c.evidence.some((e) => e.kind === 'face-stray' || e.kind === 'face-graded');
   if (!set.classes.some(unsure)) return set;
   const cached = !o.off && gradeViews.get(set);
   if (cached) return cached;
@@ -369,6 +465,154 @@ export function gradeView(set: ChainSet, o: GradeViewOpts = {}): ChainSet {
   }
   if (!o.off) gradeViews.set(set, v);
   return v;
+}
+
+/**
+ * gb2: the sheet's size count as A6 infers it (sizes/count-evidence) from what feeds the selected
+ * sheet: `one` / `many` only where counting evidences of two or more groups agree (ev.n) — a lone
+ * size run in text, a size in a file name ("pattern_38.pdf" may draw 36–46: a label, not a count)
+ * prove nothing. Not its faces: the nest evidence needs the fill's faces (another size's copy told
+ * from a seam line); on this pass's coarse raster nested sizes merge into one thick wall and would
+ * read "one line round each outline" on a graded sheet. The card's size run is the garment's, not
+ * the sheet's (H1c-4): not read here.
+ */
+export function sizeCountAtFaces(
+  sheet: Sheet,
+  ctx: FaceSizeCtx,
+): { one: string | null; many: string | null } {
+  const ev = countEvidence({
+    texts: ctx.texts ?? sheet.texts.map((t) => ({ text: t.text, file: t.src?.file ?? null })),
+    blobs: null,
+    files: ctx.files ?? [],
+    models: ctx.models,
+  });
+  if (ev.n == null) return { one: null, many: null };
+  const why = `${ev.n} by ${ev.evidence
+    .filter((e) => e.counts)
+    .map((e) => e.detail)
+    .join('; ')}`;
+  return ev.n === 1 ? { one: why, many: null } : { one: null, many: why };
+}
+
+/**
+ * gb2: strays that run beside the outlines like graded copies — another size's line. Per chain, per
+ * sample (every 4 mm): a sample is in lane when a line already joined runs beside it (same look,
+ * 1–15 mm away, within 20°) — any joined line, so an outline broken into pieces covers as one. A
+ * stray joins when ≥ STRAY_LANES.joinMm of it is in lane (the outline and inside lines are joined
+ * first, then the strays joined, to a fixpoint: a nest of sizes outside the outline joins size by
+ * size). The lane length is the in-lane samples of the joined strays only (a line partly beside an
+ * outline counts that part); graded from STRAY_LANES.minMm AND STRAY_LANES.share of the outline and
+ * inside lines' length — strays that run beside nothing (a watermark, a grid, a table, a bracket, a
+ * line across the nest) add nothing and dilute nothing.
+ */
+export const STRAY_LANES = {
+  minMm: 150,
+  share: 0.2,
+  joinMm: 20,
+  reachMm: 15,
+  gapMm: 1,
+  angleDeg: 20,
+};
+
+/** A line's samples (every 4 mm): how many, how many with ≥ 2 lines beside, the lines beside each. */
+type Lanes = { n: number; multi: number; hits: ChainId[][] };
+
+/** Per line of `of`: the samples (every 4 mm) running beside lines of `among`. */
+function lanesBeside(
+  chains: readonly Chain[],
+  of: readonly ChainId[],
+  among: readonly ChainId[],
+  styles: ReadonlyMap<number, Style>,
+): Map<ChainId, Lanes> {
+  const L = STRAY_LANES;
+  const pts = (c: Chain) => (c.closed && c.pts.length > 2 ? [...c.pts, c.pts[0]] : c.pts);
+  const grid = new SegGrid(8);
+  for (const id of new Set([...of, ...among]))
+    if (chains[id].pts.length >= 2) grid.addPolyline(id, pts(chains[id]));
+  const amongSet = new Set(among);
+  const cosMin = Math.cos((L.angleDeg * Math.PI) / 180);
+  const out = new Map<ChainId, Lanes>();
+  for (const id of of) {
+    const c = chains[id];
+    const r: Lanes = { n: 0, multi: 0, hits: [] };
+    out.set(id, r);
+    if (c.lengthMm < 10 || c.pts.length < 2) continue;
+    for (const smp of resampleT(pts(c), 4)) {
+      r.n++;
+      const hit = new Set<ChainId>();
+      grid.near(smp.p, L.reachMm, (o, si) => {
+        if (o === id || hit.has(o) || !amongSet.has(o) || !sameLook(c, chains[o], styles)) return;
+        const q = pts(chains[o]);
+        const a = q[si];
+        const b = q[si + 1];
+        const d = segNearest(smp.p, a, b).d;
+        if (d < L.gapMm || d > L.reachMm) return;
+        const sl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        if (Math.abs(((b.x - a.x) * smp.t.x + (b.y - a.y) * smp.t.y) / sl) < cosMin) return;
+        hit.add(o);
+      });
+      if (hit.size) r.hits.push([...hit]);
+      if (hit.size >= 2) r.multi++;
+    }
+  }
+  return out;
+}
+
+/**
+ * gb2: the outline lines themselves drawn as a nest of three or more (a size line on each side of
+ * another, 1–15 mm apart, same look): the face pass took every size as a wall (sizes closer than its
+ * walls are thick). A cut line with its seam line is two lanes, not three.
+ */
+export const WALL_NEST = { minMm: 150, share: 0.1 };
+export function nestedWalls(
+  chains: readonly Chain[],
+  piece: readonly ChainId[],
+  styles: ReadonlyMap<number, Style>,
+): { graded: boolean; nestMm: number; pieceMm: number; why: string } {
+  const lanes = lanesBeside(chains, piece, piece, styles);
+  const nestMm = [...lanes.values()].reduce((a, r) => a + 4 * r.multi, 0);
+  const pieceMm = piece.reduce((a, id) => a + chains[id].lengthMm, 0);
+  return {
+    graded: nestMm >= WALL_NEST.minMm && nestMm >= WALL_NEST.share * pieceMm,
+    nestMm,
+    pieceMm,
+    why: `${Math.round(nestMm)} of ${Math.round(pieceMm)} mm of outline drawn three or more lines deep`,
+  };
+}
+
+export function strayLanes(
+  chains: readonly Chain[],
+  piece: readonly ChainId[],
+  internal: readonly ChainId[],
+  strays: readonly ChainId[],
+  styles: ReadonlyMap<number, Style>,
+): { graded: boolean; laneMm: number; baseMm: number; inLane: ChainId[]; why: string } {
+  const L = STRAY_LANES;
+  const lanes = lanesBeside(chains, strays, [...piece, ...internal, ...strays], styles);
+  const joined = new Set<ChainId>([...piece, ...internal]);
+  const inLaneMm = (id: ChainId) =>
+    4 * (lanes.get(id)?.hits ?? []).filter((h) => h.some((o) => joined.has(o))).length;
+  const left = new Set(strays);
+  for (let moved = true; moved; ) {
+    moved = false;
+    for (const id of left) {
+      if (inLaneMm(id) < L.joinMm) continue;
+      joined.add(id);
+      left.delete(id);
+      moved = true;
+    }
+  }
+  const inLane = strays.filter((id) => joined.has(id));
+  const laneMm = inLane.reduce((a, id) => a + inLaneMm(id), 0);
+  const baseMm = [...piece, ...internal].reduce((a, id) => a + chains[id].lengthMm, 0);
+  const graded = laneMm >= L.minMm && laneMm >= L.share * baseMm;
+  return {
+    graded,
+    laneMm,
+    baseMm,
+    inLane,
+    why: `${inLane.length} strays run ${Math.round(laneMm)} mm beside the outlines like graded copies (outlines and inside lines ${Math.round(baseMm)} mm)`,
+  };
 }
 
 /** Per wall line: piece wall, stray or internal (see the header). */

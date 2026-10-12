@@ -57,6 +57,7 @@ import {
   type DerivedEdgeAudit,
   type DerivedEdgeKind,
 } from '../types';
+import { readPassportDigest } from '../passport/digest';
 
 export { MANIFEST_TAG, MANIFEST_VERSION };
 export {
@@ -731,6 +732,7 @@ export function validateManifest(x: unknown): ConversionManifest {
   const source = validateSource(x.source);
   const gate = validateGate(x.gate);
   const autopilot = validateAutopilot(x.autopilot);
+  const passport = readPassportDigest(x.passport);
   return {
     v: MANIFEST_VERSION,
     generator: x.generator,
@@ -747,6 +749,7 @@ export function validateManifest(x: unknown): ConversionManifest {
     source,
     gate,
     ...(autopilot ? { autopilot } : {}),
+    ...(passport ? { passport } : {}),
   };
 }
 

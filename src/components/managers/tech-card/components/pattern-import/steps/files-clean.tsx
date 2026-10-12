@@ -17,6 +17,7 @@ import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
 import { SHEET_INK, SheetViewport } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 
@@ -301,6 +302,19 @@ function PageView({ p, hover }: { p: CleanPreview; hover: BackgroundKind | null 
   );
 }
 
+/**
+ * A9: what the AI and the geometry say of a page set aside, in words (the thumbnail's title):
+ * "AI: instructions 0.92 («step 3 …») · geometry: another page format …".
+ */
+export function asideEvidence(d: StageIO['clean']['out']['dropped'][number]): string {
+  const ai = d.ai
+    ? `AI: ${aiWords(d.ai)}${d.ai.evidence.length ? ` («${d.ai.evidence[0]}»)` : ''}`
+    : '';
+  const ex = d.exclusion ? `geometry: ${d.exclusion}` : '';
+  const geo = d.geo?.length ? `geometry suggests: ${d.geo.join('; ')}` : '';
+  return [ai, ex, geo].filter(Boolean).join(' · ');
+}
+
 /** A set-aside page as a thumbnail: its lines, its role, a flag when it holds pattern-like work. */
 function AsideThumb({
   p,
@@ -308,20 +322,27 @@ function AsideThumb({
   busy,
   files,
   onRead,
+  onKeep,
 }: {
   p: CleanPreview | undefined;
   d: StageIO['clean']['out']['dropped'][number];
   busy: boolean;
   files: number;
   onRead: () => void;
+  /** A9: "keep it aside" — the operator's answer to a page to check (the AI's, pre-filled). */
+  onKeep: () => void;
 }) {
   const live = useMemo(() => (p ? pathData(p.live) : ''), [p]);
   const W = p?.widthMm ?? 210;
   const H = p?.heightMm ?? 297;
+  // A9: the AI's reading pre-fills the answer the operator gives with one click
+  const aiPattern = !!d.ai && PATTERN_ROLES.has(d.ai.role);
+  const aiAside = !!d.ai && !aiPattern && d.ai.role !== 'other';
+  const ev = asideEvidence(d);
   return (
     <figure
       className='flex w-24 flex-col gap-0.5'
-      title={`${d.why}${d.drawing ? ` — holds ${d.drawing}: check it is not a pattern page` : ''}`}
+      title={`${d.why}${d.drawing ? ` — holds ${d.drawing}: check it is not a pattern page` : ''}${ev ? ` — ${ev}` : ''}`}
     >
       <svg
         viewBox={`0 ${-H} ${W} ${H}`}
@@ -350,8 +371,33 @@ function AsideThumb({
         <Pill tone={d.status === 'suggest' ? 'attention' : 'mut'}>
           {d.status === 'suggest' ? 'check' : d.cls}
         </Pill>
-        <Button variant='underline' size='xs' disabled={busy} onClick={onRead}>
-          read as tile
+        {d.aiAside && (
+          <Text size='micro' component='span' className='w-full' title={ev}>
+            set aside · AI + geometry
+          </Text>
+        )}
+        {d.status === 'suggest' && d.ai && (
+          <Text size='micro' component='span' className='w-full' title={ev}>
+            AI{d.ai.stale ? ' (before your edits)' : ''}: {aiWords(d.ai)}
+          </Text>
+        )}
+        {d.status === 'suggest' && (
+          <Button
+            variant={aiAside ? 'main' : 'underline'}
+            size='xs'
+            disabled={busy}
+            onClick={onKeep}
+          >
+            keep aside
+          </Button>
+        )}
+        <Button
+          variant={aiPattern && d.status === 'suggest' ? 'main' : 'underline'}
+          size='xs'
+          disabled={busy}
+          onClick={onRead}
+        >
+          {d.aiAside ? 'undo · read as tile' : 'read as tile'}
         </Button>
       </figcaption>
     </figure>
@@ -403,6 +449,24 @@ export function CleanBlock({
           <Text size='micro' variant='label' component='p' className='mb-0.5'>
             pages set aside — framed: it holds line work that could be pattern, check it
           </Text>
+          {api.pageRoleNote && (
+            <Text size='micro' component='p' className='mb-0.5'>
+              {api.pageRoleNote}
+              {api.pageRolesStale && (
+                <>
+                  {' '}
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    disabled={!!session.busy}
+                    onClick={() => void api.dispatch({ type: 'page-roles' })}
+                  >
+                    ask the AI again
+                  </Button>
+                </>
+              )}
+            </Text>
+          )}
           <div className='flex flex-wrap gap-2'>
             {[...clean.dropped]
               .sort((a, b) => (a.status === b.status ? 0 : a.status === 'suggest' ? -1 : 1))
@@ -417,6 +481,12 @@ export function CleanBlock({
                     void api.dispatch({
                       type: 'clean',
                       edits: roleEdit(inputs.cleanEdits, d.file, d.page, 'tile'),
+                    })
+                  }
+                  onKeep={() =>
+                    void api.dispatch({
+                      type: 'clean',
+                      edits: roleEdit(inputs.cleanEdits, d.file, d.page, d.cls),
                     })
                   }
                 />

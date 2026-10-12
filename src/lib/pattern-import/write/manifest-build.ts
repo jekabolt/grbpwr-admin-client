@@ -150,6 +150,7 @@ export function buildManifest(
     source: job.source,
     gate: null,
     ...(job.autopilot ? { autopilot: autopilotForManifest(job.autopilot) } : {}),
+    ...(job.passport ? { passport: job.passport } : {}),
   };
 }
 

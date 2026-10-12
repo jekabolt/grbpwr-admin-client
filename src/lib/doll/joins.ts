@@ -343,6 +343,16 @@ export function completeFromJoins(
               // …and the rise is in the upper half of both pieces (never two hems).
               if (lr && legs && (A.yMid < 0.5 || B.yMid < 0.5)) continue;
               if (lr && !legs && fronts && Math.max(A.len, B.len) > 300) continue;
+              // Mirror halves (left / right, or mirror twins) meet only on their centre line,
+              // which runs UP the pieces (a centre back, a rise, a waistband's centre-back end) —
+              // never across them: two waists, two hems, a waistband's two long edges (11.10
+              // corpus: SS26-007's back waists, SS26-011's waistband halves along their length).
+              const mirrorHalves = lr || ga.twinOf.some((t) => t.key === kb && t.kind === 'mirror');
+              if (mirrorHalves && (A.dx > A.dy || B.dx > B.dy)) continue;
+              // …and off the legs that line is straight (a centre back, a placket's end): two
+              // armholes or two necklines of mirror halves run up the pieces too, curved.
+              const straight = (r: Run) => Math.hypot(r.dx, r.dy) / r.len >= 0.95;
+              if (mirrorHalves && !legs && (!straight(A) || !straight(B))) continue;
               // A pleated edge onto a plain one (a back gathered into a yoke by box pleats): the
               // longer edge carries the pleat notches, the shorter none — its extra length is the
               // pleats' intake, not a mismatch.

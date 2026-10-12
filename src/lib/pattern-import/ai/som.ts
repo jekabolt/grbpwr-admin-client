@@ -319,3 +319,30 @@ export async function renderSom(
     });
   return { sheetPng, crops, marks: built.marks, context: built.context };
 }
+
+/**
+ * A9: one INPUT page drawn the way the overview draws the sheet — the source in grey, filled curves
+ * filled (labels drawn as curves stay readable), the page's text, what the clean stage masked left
+ * out — long side ≤ `maxPx`, under the same byte cap. What the AI page-role call looks at.
+ */
+export async function renderPagePng(
+  page: Pick<Sheet, 'paths' | 'texts' | 'styles'> & { widthMm: number; heightMm: number },
+  maxPx: number,
+  options: Partial<Pick<SomOptions, 'canvas' | 'maxBytes'>> = {},
+): Promise<Blob> {
+  const canvas = options.canvas ?? ((w: number, h: number) => new OffscreenCanvas(w, h));
+  const box: BoxMm = { minX: 0, minY: 0, maxX: page.widthMm, maxY: page.heightMm };
+  const v = viewOf(box, maxPx / Math.max(1, page.widthMm, page.heightMm));
+  const plan: SomPlan = { overview: v, markAt: [], markRadiusPx: [], crops: [] };
+  const pathBoxes = page.paths.map(pathBox);
+  return encodeCapped((scale) => {
+    const cv = canvas(
+      Math.max(1, Math.round(v.widthPx * scale)),
+      Math.max(1, Math.round(v.heightPx * scale)),
+    );
+    const ctx = cv.getContext('2d') as Ctx | null;
+    if (!ctx) throw new Error('render-pages: no 2d context');
+    drawView(ctx, v, scale, page, pathBoxes, [], plan, null);
+    return cv;
+  }, options.maxBytes ?? SOM_DEFAULTS.maxBytes);
+}
