@@ -132,3 +132,87 @@ export function indexLabels(pages: IRPage[]): (number | null)[] | null {
   if (steps < 2 || good < 0.8 * steps) return null;
   return vals;
 }
+
+/** A cell name as the operator reads it on the page ("B1"; r:c labels print as "2:1"). */
+export const cellName = (c: { row: number; col: number }, rowCol = false) =>
+  !rowCol && c.row >= 0 && c.row < 26 && c.col >= 0
+    ? `${String.fromCharCode(65 + c.row)}${c.col + 1}`
+    : `${c.row + 1}:${c.col + 1}`;
+
+export type LabelGrid = {
+  /** The labels place the group: most pages carry one and no two name the same cell. */
+  use: boolean;
+  /** Per page (same order as the input): its label, null where none was read. */
+  labels: (CellLabel | null)[];
+  labelled: number;
+  /** Cells named by two or more pages (page indices into the input). */
+  duplicates: { cell: string; pages: number[] }[];
+};
+
+/**
+ * Do the printed cell labels lay out this group? Yes when every page carries one, or when at
+ * least three pages and at least half of them do — and no two name one cell. A SPARSE grid is
+ * fine: Mood prints only the tiles that carry drawing (Alghero: A1–A8, B1, B8 … J1, J8, K1–L8 of
+ * a 12 × 8 grid) and the labels say where each one goes; reading order cannot.
+ */
+export function labelGridOf(pages: IRPage[]): LabelGrid {
+  const labels = pages.map(cellLabelOf);
+  const byCell = new Map<string, number[]>();
+  labels.forEach((l, i) => {
+    if (!l) return;
+    const k = `${l.row},${l.col}`;
+    byCell.set(k, [...(byCell.get(k) ?? []), i]);
+  });
+  const labelled = labels.filter(Boolean).length;
+  const duplicates = [...byCell.entries()]
+    .filter(([, v]) => v.length > 1)
+    .map(([k, v]) => {
+      const [row, col] = k.split(',').map(Number);
+      return { cell: labels[v[0]]?.text.trim() ?? cellName({ row, col }), pages: v };
+    });
+  const enough =
+    labelled > 0 && (labelled === pages.length || (labelled >= 3 && 2 * labelled >= pages.length));
+  return { use: enough && !duplicates.length, labels, labelled, duplicates };
+}
+
+/**
+ * Placed cells against the printed labels. The cells may sit anywhere on the sheet (a layout's
+ * origin is its own), so the labels and the cells must differ by ONE translation: the commonest
+ * label − cell offset is the frame, and every labelled page off it is a contradiction. Returns one
+ * line per contradicting page (empty = the placement agrees with every label it can be held to).
+ */
+export function labelConflicts(
+  rows: { page: number; label: CellLabel | null; cell: { row: number; col: number } | null }[],
+): string[] {
+  const held = rows.filter(
+    (r): r is { page: number; label: CellLabel; cell: { row: number; col: number } } =>
+      !!r.label && !!r.cell,
+  );
+  if (held.length < 2) return [];
+  const votes = new Map<string, number>();
+  for (const r of held) {
+    const k = `${r.label.row - r.cell.row},${r.label.col - r.cell.col}`;
+    votes.set(k, (votes.get(k) ?? 0) + 1);
+  }
+  let best = '';
+  let bestN = 0;
+  for (const [k, n] of votes) if (n > bestN) [best, bestN] = [k, n];
+  // No frame most pages agree on: every labelled page is held against the first one's.
+  const [dr, dc] = (
+    2 * bestN > held.length
+      ? best
+      : `${held[0].label.row - held[0].cell.row},${held[0].label.col - held[0].cell.col}`
+  )
+    .split(',')
+    .map(Number);
+  const out: string[] = [];
+  for (const r of held) {
+    const at = { row: r.cell.row + dr, col: r.cell.col + dc };
+    if (at.row === r.label.row && at.col === r.label.col) continue;
+    out.push(
+      `page ${r.page + 1} prints "${r.label.text.trim()}" but is placed at ` +
+        cellName(at, r.label.how === 'row:col label'),
+    );
+  }
+  return out;
+}

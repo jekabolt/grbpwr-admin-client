@@ -825,6 +825,9 @@ function sheetStep({ session: s, inputs: i, card }: Snap): AutopilotDecision {
     const d = acceptWaiting('sheet', waiting, i);
     return { ...d, assumptions: [...info, ...d.assumptions] };
   }
+  const refused = s.sheet?.sheet.refused ?? [];
+  if (refused.length)
+    return stopAt('sheet', `the tile placement is refused — ${refused.join(' · ')}`, info);
   const miss = s.sheet?.sheet.missing.length ?? 0;
   if (miss)
     return stopAt(

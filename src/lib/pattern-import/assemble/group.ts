@@ -15,10 +15,18 @@
 import type { IRPage, PagePose, PairTransform } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
-import { cellLabelOf } from './labels';
+import { cellLabelOf, labelConflicts, labelGridOf } from './labels';
 import { bestLayout, type Flow, type Layout, type Order } from './layout';
 import { median, recurrenceLinks, type RawLink } from './recurrence';
-import { buildRegPage, furnitureOf, pageKey, type RegPage, type Rot } from './regpage';
+import {
+  buildRegPage,
+  drawsThrough,
+  edgeCrossings,
+  furnitureOf,
+  pageKey,
+  type RegPage,
+  type Rot,
+} from './regpage';
 import { solvePosesDetailed } from './solve';
 import {
   DEFAULT_STITCH,
@@ -55,6 +63,17 @@ export type GroupResult = {
   windowed: boolean;
   /** Pages placed by the grid alone (no geometric seam evidence). */
   unverified: number[];
+  /**
+   * Pages of the group left off the sheet: they print no cell label while the labels lay out the
+   * rest (reading order cannot put a page on a label grid).
+   */
+  leftOut: number[];
+  /**
+   * D3: what makes this placement unusable until the operator answers — the placement
+   * contradicts the printed labels, pages left off a label grid, two pages naming one cell.
+   * Never empty when the sheet would come out silently wrong.
+   */
+  refused: string[];
   warnings: string[];
   ms: number;
 };
@@ -185,6 +204,43 @@ export function estimatePitch(
 }
 
 const ROTS: Rot[] = [90, 270];
+/** Lines meeting a seam that make it "broken" when fewer than half of them go on across it. */
+const BROKEN_SEAM_ENDS = 3;
+
+/**
+ * Does the drawing go on across a layout seam? Every point where a's drawing meets its facing
+ * edge (cut there or crossing it) must lie on b's drawing at the seam offset, and b's on a's. A
+ * tile put in the wrong cell (a misread label, a reading-order guess on a sparse grid) breaks
+ * its seams: lines stop dead or carry on as other lines.
+ */
+export function seamBreak(
+  a: IRPage,
+  b: IRPage,
+  rel: Rel,
+  off: Vec,
+  furniture: Set<string>,
+): { meets: number; goesOn: number } {
+  const [sa, sb] = rel === 'right' ? (['R', 'L'] as const) : (['B', 'T'] as const);
+  // The ends of the edge are the overlap corners (registration targets): skip the overlap (page −
+  // |offset| across the seam; tiles overlap alike both ways) plus 3 mm, at least 15 mm.
+  const marginOf = (pg: IRPage) =>
+    Math.max(
+      15,
+      (rel === 'right' ? pg.widthMm - Math.abs(off.dx) : pg.heightMm - Math.abs(off.dy)) + 3,
+    );
+  // Lines only: a dash mark (a tiny shape) has no direction to follow across the seam — a
+  // diagonal dashed line's next mark sits off both axes — so marks never decide a break.
+  const pa = edgeCrossings(a, sa, furniture, marginOf(a)).filter((v) => !v.mark);
+  const pb = edgeCrossings(b, sb, furniture, marginOf(b)).filter((v) => !v.mark);
+  let goesOn = 0;
+  // A line goes on through the same point in the neighbour (its print of the overlap strip, or
+  // its own line starting at the shared edge).
+  for (const v of pa)
+    if (drawsThrough(b, { x: v.x - off.dx, y: v.y - off.dy }, furniture, 0.6)) goesOn++;
+  for (const v of pb)
+    if (drawsThrough(a, { x: v.x + off.dx, y: v.y + off.dy }, furniture, 0.6)) goesOn++;
+  return { meets: pa.length + pb.length, goesOn };
+}
 
 export function assembleGroup(
   pages: IRPage[],
@@ -198,8 +254,40 @@ export function assembleGroup(
   const portrait = (p: IRPage) => p.heightMm >= p.widthMm;
   const nPortrait = pages.filter(portrait).length;
   const majorityPortrait = nPortrait * 2 >= pages.length;
-  const main = pages.filter((p) => portrait(p) === majorityPortrait);
+  let main = pages.filter((p) => portrait(p) === majorityPortrait);
   const turned = pages.filter((p) => portrait(p) !== majorityPortrait);
+  // 1b. Printed cell labels. When they lay the group out, a page without one cannot be placed
+  // (reading order means nothing on a sparse label grid): it stays off the sheet and is asked
+  // about. Two pages naming one cell: the labels do not describe ONE grid — asked too.
+  const refused: string[] = [];
+  const grid = labelGridOf(main);
+  const listPages = (ps: number[]) =>
+    ps.length > 8
+      ? `${ps
+          .slice(0, 8)
+          .map((p) => p + 1)
+          .join(', ')}, … (${ps.length})`
+      : ps.map((p) => p + 1).join(', ');
+  if (grid.duplicates.length && 2 * grid.labelled >= main.length)
+    refused.push(
+      grid.duplicates
+        .slice(0, 3)
+        .map((d) => `pages ${listPages(d.pages.map((i) => main[i].page))} all print "${d.cell}"`)
+        .join('; ') +
+        ' — the cell labels do not name one tile grid (two sheets in one run, or a misread label)',
+    );
+  let leftOut: number[] = [];
+  if (grid.use && grid.labelled < main.length) {
+    leftOut = main.filter((_, i) => !grid.labels[i]).map((p) => p.page);
+    const named = grid.labels.filter((l): l is NonNullable<typeof l> => !!l);
+    refused.push(
+      `page${leftOut.length > 1 ? 's' : ''} ${listPages(leftOut)} print${leftOut.length > 1 ? '' : 's'} ` +
+        `no tile label while ${named.length} tiles of this sheet do (${named[0].text.trim()} … ` +
+        `${named[named.length - 1].text.trim()}) — left off the sheet: set ${leftOut.length > 1 ? 'them' : 'it'} ` +
+        `aside on the files step if not pattern (a page the labels do not name cannot be placed on their grid)`,
+    );
+    main = main.filter((_, i) => !!grid.labels[i]);
+  }
   const furniture = furnitureOf(main);
   const regs = main.map((p, i) => buildRegPage(p, i, 0, furniture));
   const turnedRegs = turned.flatMap((p) =>
@@ -223,10 +311,11 @@ export function assembleGroup(
       if (n > bestN) [best, bestN] = [r, n];
     }
     if (best !== null) turnChoice.set(pageKey(p.file, p.page), best);
+    // D3: a tile left out is drawing gone from the export — asked, never a warning only
     else
-      warnings.push(
+      refused.push(
         `page ${p.page + 1}: orientation differs from its sheet and no recurrence placed it — ` +
-          `left out (place it with a grid override)`,
+          `left off the sheet (set it aside on the files step if not pattern; a hand grid places tiles upright, so it cannot place this one)`,
       );
   }
   const keepTurned = (r: RegPage) => r.rot === 0 || turnChoice.get(r.key) === r.rot;
@@ -363,6 +452,13 @@ export function assembleGroup(
     if (l.b.rot === 0) evidence.add(l.b.idx);
   }
   const weakSeams: string[] = [];
+  // Seams the drawing breaks at: lines end on the shared edge and do not go on in the neighbour
+  // (a tile misplaced, or a misread label). Windowed tiles carry their drawing past the edge.
+  const brokenSeams: string[] = [];
+  const cellText = (i: number) => {
+    const l = labels[i];
+    return l ? `"${l.text.trim()}" (p${regs[i].page + 1})` : `p${regs[i].page + 1}`;
+  };
   layout.cells.forEach((c, i) => {
     for (const rel of ['right', 'below'] as Rel[]) {
       const j = cellIdx.get(rel === 'right' ? `${c.row},${c.col + 1}` : `${c.row + 1},${c.col}`);
@@ -383,6 +479,15 @@ export function assembleGroup(
         if (a2.n >= 4) m = a2;
       }
       if (!geometric) weakSeams.push(`${regs[i].page + 1}→${regs[j].page + 1}`);
+      // Windowed tiles (blazer, Burda) carry unclipped subpaths whose crossings are not the
+      // seam's; traced pages resample their lines. Both register by recurrence / their frame.
+      if (!traced && !windowed) {
+        const b = seamBreak(regs[i].src, regs[j].src, rel, m.n ? m : e, furniture);
+        if (b.meets >= BROKEN_SEAM_ENDS && 2 * b.goesOn < b.meets)
+          brokenSeams.push(
+            `${cellText(i)} → ${cellText(j)}: ${b.meets} lines meet the seam, ${b.goesOn} go on`,
+          );
+      }
       pairs.push({
         from: { file: regs[i].file, page: regs[i].page },
         to: { file: regs[j].file, page: regs[j].page },
@@ -406,6 +511,12 @@ export function assembleGroup(
         ': ' +
         weakSeams.slice(0, 12).join(', ') +
         (weakSeams.length > 12 ? ', …' : ''),
+    );
+  if (brokenSeams.length)
+    refused.push(
+      `the drawing breaks at ${brokenSeams.length} seam${brokenSeams.length > 1 ? 's' : ''} of the ` +
+        `${layoutFrom === 'labels' ? 'printed label grid' : 'tile layout'} (a tile misplaced or a ` +
+        `label misread): ${brokenSeams.slice(0, 4).join('; ')}${brokenSeams.length > 4 ? '; …' : ''}`,
     );
   // A page with no pair at all (an island cell) gets a grid prior to page 0.
   const touched = new Set<number>();
@@ -437,6 +548,38 @@ export function assembleGroup(
         secondBestRatio: 0,
       });
     }
+  // Pieces of the pair graph that no seam joins to page 0's (a sparse label grid whose printed
+  // tiles fall apart into islands) hang on the grid prior too — else each would sit at the origin.
+  {
+    const parent = regs.map((_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    for (const p of pairs) {
+      const a = idxOfPage.get(p.from.page);
+      const b = idxOfPage.get(p.to.page);
+      if (a !== undefined && b !== undefined && p.from.file === file && p.to.file === file)
+        parent[find(a)] = find(b);
+    }
+    const bridged = new Set([find(0)]);
+    for (let i = 1; i < regs.length; i++) {
+      if (bridged.has(find(i))) continue;
+      bridged.add(find(i));
+      const e = lattice(i);
+      pairs.push({
+        from: { file: regs[0].file, page: regs[0].page },
+        to: { file: regs[i].file, page: regs[i].page },
+        dxMm: e.dx,
+        dyMm: e.dy,
+        rotDeg: 0,
+        method: 'grid-label',
+        score: 0,
+        secondBestRatio: 0,
+      });
+      warnings.push(
+        `pages from ${regs[i].page + 1} share no seam with page ${regs[0].page + 1}'s tiles — ` +
+          `placed by the ${layoutFrom === 'labels' ? 'printed cell labels' : 'tile grid'} alone`,
+      );
+    }
+  }
   // 6. Solve.
   const solved = solvePosesDetailed(
     pairs,
@@ -493,6 +636,45 @@ export function assembleGroup(
         .map((p) => p + 1)
         .join(', ')}`,
     );
+  // 8. The placement against the printed labels (D3: a layout the labels contradict is refused,
+  // never assembled — Alghero laid out in reading order came out a 47-tile strip). Both the
+  // layout's cells and the solved poses (nearest lattice cell) are held to the labels.
+  {
+    const det = pitch.right.dx * pitch.below.dy - pitch.right.dy * pitch.below.dx;
+    const p0 = poseOf.get(regs[0]?.key ?? '');
+    const poseCell = (r: RegPage) => {
+      const pose = poseOf.get(r.key);
+      if (!pose || !p0 || !det) return null;
+      const dx = pose.toSheet.e - p0.toSheet.e;
+      const dy = pose.toSheet.f - p0.toSheet.f;
+      return {
+        row: Math.round((pitch.right.dx * dy - pitch.right.dy * dx) / det),
+        col: Math.round((dx * pitch.below.dy - dy * pitch.below.dx) / det),
+      };
+    };
+    const seen = new Set<string>();
+    const contra: string[] = [];
+    for (const rows of [
+      regs.map((r, i) => ({ page: r.page, label: labels[i], cell: layout.cells[i] ?? null })),
+      regs.map((r, i) => ({ page: r.page, label: labels[i], cell: poseCell(r) })),
+    ])
+      for (const c of labelConflicts(rows)) {
+        const k = c.split(' prints ')[0];
+        if (seen.has(k)) continue;
+        seen.add(k);
+        contra.push(c);
+      }
+    if (contra.length) {
+      const rows = new Set(labels.filter(Boolean).map((l) => l?.row)).size;
+      const cols = new Set(labels.filter(Boolean).map((l) => l?.col)).size;
+      refused.push(
+        `the tile placement contradicts the printed labels (${rows} × ${cols} label grid, ` +
+          `layout from ${layoutFrom}): ${contra.slice(0, 4).join('; ')}` +
+          (contra.length > 4 ? `; … ${contra.length} pages in all` : ''),
+      );
+    }
+  }
+  for (const r of refused) warnings.unshift(`REFUSED: ${r}`);
   const included = new Set([...regs.map((r) => r.key), ...turnChoice.keys()]);
   return {
     file,
@@ -508,6 +690,8 @@ export function assembleGroup(
     latticeMaxMm: latticeMax,
     windowed,
     unverified,
+    leftOut,
+    refused,
     warnings,
     ms: Date.now() - t0,
   };

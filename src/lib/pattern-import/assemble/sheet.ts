@@ -21,9 +21,10 @@ import type {
 import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { assembleGroup, type GroupResult } from './group';
+import { labelConflicts, labelGridOf } from './labels';
 import { drawingBox, detectLattice } from './overview';
 import { apply, placePages } from './place';
-import { furnitureOf, pageKey } from './regpage';
+import { edgeCrossings, furnitureOf, pageKey } from './regpage';
 
 export type SheetReport = {
   groups: GroupResult[];
@@ -194,8 +195,7 @@ function missingCells(
   const byKey = new Map(pages.map((p) => [pageKey(p.file, p.page), p]));
   // Frame, rulers and corner targets end on every page edge — they are not drawing.
   const furniture = furnitureOf(pages);
-  const isFurniture = (v: { x: number; y: number }) =>
-    furniture.has(`${Math.round(v.x * 10)},${Math.round(v.y * 10)}`);
+
   for (let r = Math.min(...rows); r <= Math.max(...rows); r++)
     for (let c = Math.min(...cols); c <= Math.max(...cols); c++) {
       if (cells.has(`${r},${c}`)) continue;
@@ -210,28 +210,13 @@ function missingCells(
         if (!nb) continue;
         const pg = byKey.get(pageKey(nb.file, nb.page));
         if (!pg) continue;
-        // Endpoints of open paths within 1 mm of the page edge that faces the empty cell.
-        for (const path of pg.paths) {
-          if (path.closed || path.pts.length < 2) continue;
-          const st = pg.styles[path.style];
-          if (st?.fill && !st.widthMm) continue;
-          if (path.pts.length === 2) {
-            const [a, b] = path.pts;
-            if (Math.abs(a.x - b.x) < 0.05 || Math.abs(a.y - b.y) < 0.05) continue; // ruling
-          }
-          for (const v of [path.pts[0], path.pts[path.pts.length - 1]]) {
-            if (isFurniture(v)) continue;
-            const near =
-              side === 'R'
-                ? Math.abs(v.x - pg.widthMm) < 1
-                : side === 'L'
-                  ? Math.abs(v.x) < 1
-                  : side === 'B'
-                    ? Math.abs(v.y) < 1
-                    : Math.abs(v.y - pg.heightMm) < 1;
-            if (near) evidence++;
-          }
-        }
+        // Drawing that meets the page edge facing the empty cell (cut there, or crossing it),
+        // the overlap corners and furniture aside.
+        const along = side === 'L' || side === 'R';
+        const overlap = along
+          ? pg.heightMm - Math.abs(g.pitch.below.dy)
+          : pg.widthMm - Math.abs(g.pitch.right.dx);
+        evidence += edgeCrossings(pg, side, furniture, Math.max(0, overlap) + 3).length;
       }
       // Windowed tiles: their out-of-page drawing reaching INTO the empty cell is the evidence.
       const nb0 = [...cells.values()][0];
@@ -284,6 +269,7 @@ export function assembleSheetDetailed(
   const allPoses = new Map<string, PagePose>();
   const allPairs: PairTransform[] = [];
   const missing: Sheet['missing'] = [];
+  const refused: string[] = [];
   let done = 0;
   const total = byFile.size + 1;
   const fileOffsets = new Map<string, { dx: number; dy: number }>();
@@ -297,6 +283,39 @@ export function assembleSheetDetailed(
       warnings.push(
         `file ${file}: placed by the operator's grid (${override.rows}×${override.cols})`,
       );
+      // The hand grid fills cells in reading order: on a printed label grid (sparse ones above
+      // all) that is a strip or a shuffle — held to the labels like any other layout.
+      // every tile of the file gets a cell, or the grid is refused: a page past rows × cols (or
+      // before the origin) would leave the export without saying so
+      const placedPages = new Set(m.poses.map((p) => p.page));
+      const dropped = pages.filter((p) => !placedPages.has(p.page)).map((p) => p.page + 1);
+      if (dropped.length)
+        refused.push(
+          `${byFile.size > 1 ? `file ${file}: ` : ''}the hand grid ${override.rows}×${override.cols} ` +
+            `leaves page${dropped.length > 1 ? 's' : ''} ${dropped.slice(0, 12).join(', ')}` +
+            `${dropped.length > 12 ? ', …' : ''} without a cell — widen the grid or set ${dropped.length > 1 ? 'them' : 'it'} aside`,
+        );
+      const grid = labelGridOf(pages);
+      const cellOf = new Map(m.poses.map((p) => [p.page, p]));
+      const contra = labelConflicts(
+        pages.map((p, i) => {
+          const pose = cellOf.get(p.page);
+          return {
+            page: p.page,
+            label: grid.labels[i],
+            cell:
+              pose && pose.row !== undefined && pose.col !== undefined
+                ? { row: pose.row, col: pose.col }
+                : null,
+          };
+        }),
+      );
+      if (contra.length)
+        refused.push(
+          `${byFile.size > 1 ? `file ${file}: ` : ''}the hand grid contradicts the printed labels: ` +
+            `${contra.slice(0, 4).join('; ')}${contra.length > 4 ? `; … ${contra.length} pages in all` : ''}` +
+            ' — clear the hand grid: the labels place the tiles',
+        );
     } else if (pages.length === 1) {
       const p = pages[0];
       allPoses.set(pageKey(p.file, p.page), {
@@ -315,6 +334,7 @@ export function assembleSheetDetailed(
       for (const p of g.poses) allPoses.set(pageKey(p.file, p.page), p);
       allPairs.push(...g.pairs);
       warnings.push(...g.warnings.map((w) => (byFile.size > 1 ? `file ${file}: ${w}` : w)));
+      refused.push(...g.refused.map((w) => (byFile.size > 1 ? `file ${file}: ${w}` : w)));
       for (const m of missingCells(g, pages, allPoses)) {
         missing.push({ row: m.row, col: m.col });
         warnings.push(
@@ -451,6 +471,7 @@ export function assembleSheetDetailed(
     pairs: allPairs,
     bbox: pl.bbox,
     missing,
+    ...(refused.length ? { refused } : {}),
     overview,
     paths: pl.paths,
     texts: pl.texts,
