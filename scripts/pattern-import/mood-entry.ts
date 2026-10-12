@@ -537,6 +537,7 @@ export async function probeOne(sm: Sample): Promise<FileRec> {
     gen: sm.gen,
     verdict: rec.verdict,
     reason: rec.reason ?? (rec.error as string | undefined)?.split('\n')[0],
+    ...(rec.error ? { error: rec.error } : {}),
     encoding: (rec.sizes as { encoding?: string } | undefined)?.encoding,
     found: ((rec.sizes as { found?: string[] } | undefined)?.found ?? []).length,
     keyN: sm.key.length,
