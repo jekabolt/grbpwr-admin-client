@@ -12,16 +12,20 @@
 //   RAMP     a dashed path ≤ 15 mm whose dash is a cyclic sub-array of the pen of the own line it
 //            continues (evidence 1), lying on that line's continuation: end ≤ 1.5 mm from the own
 //            end, tangent ≤ 15°, ≤ 0.35 mm off its line (evidence 2). Two ranks qualifying → none.
-//   STUB     a solid path ≤ 15 mm, the own lines' colour and width, its two ends ≤ 1.5 mm from two
-//            own ends of ONE rank (a), and its vertex ≤ 0.5 mm from the crossing of those two
+//   STUB     a solid path ≤ 15 mm with a turn, the own lines' colour and width, its two ends at two
+//            own ends of ONE rank (a) — ≤ 1.5 mm, or the pen's gap + dot + gap when its dot is too
+//            small to be a chain (≤ 3 mm) — and its vertex ≤ 0.5 mm from the crossing of those two
 //            edges' tangents (b). Touching ends of several ranks (a dense corner bundle): only the
 //            rank with (a)+(b), and only when exactly one rank has them — never by proximity.
-//   EXTEND   no stub (a phase shift): two own ends of one rank whose tangents cross ≤ 8 mm ahead of
-//            both (≤ 8 mm apart, ≥ 20° apart) are carried to the crossing (evidence 1) when that
-//            vertex lies in the trend of the neighbouring ranks' same corner (evidence 2: monotone
-//            corner grading) and the two new segments cross no line of the rank.
-// A closed corner JOINS the chains through it (stub / ramp points, or the vertex) into one chain of
-// the rank, as `bridgeSameRank` does across a label gap.
+//   EXTEND   no stub (a phase shift): two own ends of one rank, 0.5–8 mm apart, ≥ 20° apart, whose
+//            tangents cross ahead of both within 8 mm, are carried to the crossing (evidence 1)
+//            when that vertex lies where the grading of the nearest ranks drawing the same corner
+//            puts it (evidence 2: ≤ 35 % of one grade step off; nearest rank each side ≤ 3 away,
+//            or the step of two on one side continued) and the new segments cross no line of the
+//            rank.
+// A closed corner never merges two main lines (the absorbed one would stay behind as a long
+// "ignored" duplicate): a ramp is absorbed into the line it continues; a stub / extension carries
+// line A on (stub points or the vertex) to B's end point, so A and B meet exactly there.
 import type { Chain, PtMm, Style } from 'lib/pattern-import/types';
 
 import { dist, SegGrid, segNearest } from '../chains/geom';
@@ -34,6 +38,8 @@ export const CORNER = {
   stubMaxMm: 15,
   rampMaxMm: 15,
   vertexMm: 0.5,
+  /** Every point of a stub lies this close to the two edges' tangents. */
+  armMm: 0.4,
   rampAngleDeg: 15,
   rampLateralMm: 0.35,
   extendMaxMm: 8,
@@ -291,6 +297,8 @@ export function closeCorners(
   };
   // ── STUBS ──
   let stubs = 0;
+  /** accepted stubs' vertices: corners the grading trend may lean on */
+  const stubVerts: { r: number; v: PtMm; t0: PtMm; t1: PtMm }[] = [];
   for (let c = 0; c < chains.length; c++) {
     if (rampOf.has(c) || !cand(c)) continue;
     const ch = chains[c];
@@ -321,12 +329,21 @@ export function closeCorners(
         if (!ownLike(A.c) || !ownLike(B.c)) continue;
         if (!sameInk(c, A.c) || !sameInk(c, B.c)) continue;
         const wA = styleOf(A.c)?.widthMm ?? 0;
+        const wB = styleOf(B.c)?.widthMm ?? 0;
         if (wA > 0 && Math.abs(wA - st.widthMm) > 0.03) continue;
+        if (wB > 0 && Math.abs(wB - st.widthMm) > 0.03) continue;
         // (b) the stub's vertex is the crossing of the two edges' tangents
         const x = rayCross(A.p, A.t, B.p, B.t);
         if (!x || x.a < -0.5 || x.b < -0.5) continue;
         const d = dist(x.x, vx.v);
         if (d > CORNER.vertexMm) continue;
+        // …and the whole stub is the two arms along those tangents (no bend of its own)
+        const armA = { x: A.p.x - A.t.x * CORNER.touchMaxMm, y: A.p.y - A.t.y * CORNER.touchMaxMm };
+        const armB = { x: B.p.x - B.t.x * CORNER.touchMaxMm, y: B.p.y - B.t.y * CORNER.touchMaxMm };
+        const onArms = ch.pts.every(
+          (q) => Math.min(segNearest(q, x.x, armA).d, segNearest(q, x.x, armB).d) <= CORNER.armMm,
+        );
+        if (!onArms) continue;
         ok.push({ k0, k1, r: A.rank, d });
       }
     if (!ok.length) {
@@ -343,6 +360,7 @@ export function closeCorners(
     usedEnd.add(ek(A.c, A.end));
     usedEnd.add(ek(B.c, B.end));
     stubs++;
+    stubVerts.push({ r: best.r, v: vx.v, t0: A.t, t1: B.t });
     links.push({
       a: { c: A.c, end: A.end },
       b: { c: B.c, end: B.end },
@@ -355,8 +373,13 @@ export function closeCorners(
   // ── EXTEND (no stub) ──
   type Pair = { k0: number; k1: number; x: PtMm; cost: number; r: number };
   const pairs: Pair[] = [];
-  /** every corner of every rank (open pairs, stubbed corners, sharp vertices) for the trend */
-  const vertices: { r: number; v: PtMm; t0: PtMm; t1: PtMm }[] = [];
+  /**
+   * the corners the trend may lean on: stubbed corners, corners drawn closed (two ends ≤ 0.5 mm
+   * apart, or a sharp vertex of a line), and open corners that themselves qualify to be extended
+   */
+  const vertices: { r: number; v: PtMm; t0: PtMm; t1: PtMm }[] = [...stubVerts];
+  /** ends of an own corner left open (refused): they land on no other line */
+  const held = new Set<string>();
   const free = (k: number) => !usedEnd.has(ek(ends[k].c, ends[k].end));
   const cosTurn = angleCos(CORNER.minTurnDeg);
   ends.forEach((A, k0) => {
@@ -368,13 +391,21 @@ export function closeCorners(
       const x = rayCross(A.p, A.t, B.p, B.t);
       if (!x || x.a < -0.3 || x.b < -0.3) return;
       if (x.a > CORNER.stubMaxMm || x.b > CORNER.stubMaxMm) return;
-      vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
-      if (!free(k0) || !free(k1)) return;
       // ends already touching (≤ 0.5 mm) are closed as drawn: a vertex off them is a spike
       const gap = dist(A.p, B.p);
-      if (gap > CORNER.extendMaxMm || gap <= 0.5 || x.a > CORNER.extendMaxMm) return;
-      if (x.a < 0 || x.b < 0) return;
-      if (x.b > CORNER.extendMaxMm) return;
+      if (gap <= 0.5) {
+        vertices.push({
+          r: A.rank,
+          v: { x: (A.p.x + B.p.x) / 2, y: (A.p.y + B.p.y) / 2 },
+          t0: A.t,
+          t1: B.t,
+        });
+        return;
+      }
+      if (gap > CORNER.extendMaxMm || x.a < 0 || x.b < 0) return;
+      if (x.a > CORNER.extendMaxMm || x.b > CORNER.extendMaxMm) return;
+      vertices.push({ r: A.rank, v: x.x, t0: A.t, t1: B.t });
+      if (!free(k0) || !free(k1)) return;
       pairs.push({ k0, k1, x: x.x, cost: x.a + x.b, r: A.rank });
     });
   });
@@ -486,11 +517,15 @@ export function closeCorners(
         console.log(`F2T r${pr.r} at ${pr.x.x.toFixed(1)},${pr.x.y.toFixed(1)} nb ${nb.join(' ')}`);
       }
       refuse('extend: off the trend');
+      held.add(ek(A.c, A.end));
+      held.add(ek(B.c, B.end));
       continue;
     }
     const skip = new Set([A.c, B.c]);
     if (crossesRank(A.p, pr.x, pr.r, skip) || crossesRank(pr.x, B.p, pr.r, skip)) {
       refuse('extend: crosses its rank');
+      held.add(ek(A.c, A.end));
+      held.add(ek(B.c, B.end));
       continue;
     }
     usedEnd.add(ek(A.c, A.end));
@@ -509,7 +544,13 @@ export function closeCorners(
       console.log(
         `F2 ${l.rule} r${l.rank} ${l.a.c}:${l.a.end} ${l.b.c}:${l.b.end} at ${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).x.toFixed(1)},${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).y.toFixed(1)} via ${l.via.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}${l.stub !== undefined ? ` stub ${l.stub}` : ''}`,
       );
-  const res = joinLinks(chains, rankOf, links);
+  // an open own corner's ends land nowhere (a landing there is on a neighbouring size's line)
+  const res = joinLinks(
+    chains,
+    rankOf,
+    links,
+    [...held].filter((k) => !usedEnd.has(k)),
+  );
   return { ...res, stubs, ramps, extended, refused };
 }
 
@@ -524,6 +565,8 @@ function joinLinks(
   chains: Chain[],
   rankOf: Map<number, number>,
   links: CornerLink[],
+  /** Open corners' ends ("chain:end"; a ramp's end resolves to its host). */
+  held: string[] = [],
 ): { joined: Map<number, number>; closedLoops: number[]; reached: Set<string> } {
   const joined = new Map<number, number>();
   const closedLoops: number[] = [];
@@ -587,6 +630,11 @@ function joinLinks(
       rankOf.delete(l.stub);
       chains[A.c] = { ...chains[A.c], ranges: [...chains[A.c].ranges, ...chains[l.stub].ranges] };
     }
+  }
+  for (const h of held) {
+    const [c, e] = h.split(':').map(Number);
+    const x = resolve({ c, end: e as 0 | 1 });
+    reached.add(key(x.c, x.end));
   }
   // a host that is itself absorbed (never: hosts are own lines) — keep the map flat
   for (const [c, h] of joined) if (joined.has(h)) joined.set(c, joined.get(h)!);

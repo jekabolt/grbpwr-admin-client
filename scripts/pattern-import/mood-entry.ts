@@ -34,6 +34,8 @@ import {
   signedArea,
 } from 'lib/pattern-import/pieces/geom';
 import type { Session } from 'lib/pattern-import/worker/session';
+import { buildChainsDetailed } from 'lib/pattern-import/chains';
+import { PATIMPORT } from 'lib/pattern-import/types';
 
 import { runCase } from './e2e-entry';
 
@@ -357,6 +359,35 @@ function sharesOn(outer: PtMm[], set: ChainSet, styles: Map<number, Style>, key:
   return share;
 }
 
+/**
+ * The kink reference: the sheet's chains as drawn, read again with the Ф2 corner pass off — the
+ * points a corner pass adds to a size's line (stub, ramp, vertex) must not vouch for themselves.
+ */
+const refMemo = new WeakMap<object, ChainSet>();
+function drawnChains(s: Session): ChainSet {
+  const S = s as unknown as { sheet: Sheet; docTexts: string[]; fileNames: Map<string, string> };
+  const hit = refMemo.get(S.sheet);
+  if (hit) return hit;
+  const prev = process.env.MOOD_F2_OFF;
+  process.env.MOOD_F2_OFF = '1';
+  try {
+    const set = buildChainsDetailed(
+      S.sheet,
+      {
+        joinGapMm: PATIMPORT.joinGapMm,
+        joinAngleDeg: PATIMPORT.joinAngleDeg,
+        joinLateralMm: PATIMPORT.joinLateralMm,
+      },
+      { extraTexts: S.docTexts, fileNames: S.fileNames },
+    ).set;
+    refMemo.set(S.sheet, set);
+    return set;
+  } finally {
+    if (prev === undefined) delete process.env.MOOD_F2_OFF;
+    else process.env.MOOD_F2_OFF = prev;
+  }
+}
+
 /** A corner's own closure (stub, ramp, extended edge) lies on its edges' tangents within this. */
 const KINK_EXT_MM = 12;
 const KINK_OFF_MM = 0.5;
@@ -546,7 +577,7 @@ function autoKinks(sm: Sample, s: Session, families: PieceFamily[]): Partial<Fil
       const row = key.find((r) => r.label === label && r.look);
       if (!row?.look) continue;
       const where: string[] = [];
-      const k = kinksOf(c.outer, set, styles, row.look, where);
+      const k = kinksOf(c.outer, drawnChains(s), styles, row.look, where);
       judged++;
       kinks += k;
       if (k) outlines++;
@@ -673,7 +704,7 @@ function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): Partial<
         by: [...new Set(blocking.get(`${sc.target.scopeKey}|${mb.block}`) ?? ['?'])],
         areaCm2: Math.round(Math.abs(signedArea(cand.outer)) / 100),
         pen: { own: own == null ? null : +own.toFixed(2), best, bestShare: +bestShare.toFixed(2) },
-        kinks: ownRow?.look ? kinksOf(cand.outer, set, styles, ownRow.look) : null,
+        kinks: ownRow?.look ? kinksOf(cand.outer, drawnChains(s), styles, ownRow.look) : null,
         wrong: [],
       };
       if (uni) t.unverified = 'one-size piece';
