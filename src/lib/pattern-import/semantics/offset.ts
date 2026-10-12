@@ -5,14 +5,23 @@
 // Why not `ClipperOffset` itself: clipper2-js 1.2.4 ports `OffsetPoint(group, path, j, ref k)` with
 // `k` by VALUE, so every vertex is joined against the LAST edge's normal. Measured on a 100 mm
 // square, +10 mm: Miter gives bbox x ∈ [−10, 100] (one side never moves), Round loses 15 % of the
-// area. So the raw offset is built here, exactly as Clipper builds it (edge shifted by d, convex
-// corner = round arc whose chords stay within `arcTolMm` of the circle, concave corner =
+// area. So the raw offset is built here (edge shifted by d, a join at every vertex, concave corner =
 // "perp, vertex, perp" so the reversal is a closed sliver), and Clipper's own cleanup does the
 // rest: Union with FillRule.Positive on 1 µm integers — the part of clipper2-js that works.
 //
-// The result is the d-level set of the distance to the source, so EVERY point of it is |d| from
-// the source (minus at most the arc chord sagitta). That is what the report measures; a hull
-// collapse, a bitten bay or a lost lobe all show as a deviation, a second loop or a hole.
+// W2 (ULMUS-DIAG §4b/§4c) — the allowance corner is MITRED, as a pattern maker cuts it: the two sides
+// are extended to their intersection, so the corner point of the cut line is where the seam corner
+// is, shifted by the allowance along both sides (a round join drew every corner as an r = allowance
+// arc: "drops" on sharp tips, extra crossings between sizes, a 1.3 mm jog of the seam line became a
+// ~5 mm hump). A corner whose mitre would reach further than MITER_LIMIT × allowance from the seam
+// corner (a sharp tip) is square-cut there, perpendicular to the bisector. Along curves the vertices
+// turn by a few degrees and the mitre is the parallel (10 mm at 10° → 0.04 mm out).
+// The morphological opening of traced outlines (below) keeps the round join: it is a disk, not a cut.
+//
+// The result is the d-level set of the distance to the source along the sides; at a convex corner it
+// reaches as far as that corner's mitre (or cut). That is what the report measures
+// (`parallelDeviation`): a hull collapse, a bitten bay or a lost lobe all show as a deviation, a
+// second loop or a hole.
 
 import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import type { OffsetReport, PtMm } from '../types';
@@ -42,6 +51,12 @@ export const HULL_RATIO_MAX = 0.995;
  */
 export const HULL_SOURCE_CONCAVE_MAX = 0.99;
 export const MAX_DEVIATION_MM = 0.2;
+/**
+ * W2: a mitred allowance corner reaches at most this many × the allowance from the seam corner;
+ * a sharper corner is square-cut at that distance, perpendicular to the corner's bisector.
+ */
+export const MITER_LIMIT = 4;
+export type OffsetJoin = 'round' | 'miter';
 
 const toPath = (pts: readonly PtMm[]): Path64 => {
   const p = new Path64();
@@ -55,10 +70,13 @@ const fromPath = (p: Path64): PtMm[] => {
   return out;
 };
 
-/** Raw (self-overlapping) offset of a CCW loop by signed d (d > 0 = outward). */
-function rawOffset(src: readonly PtMm[], d: number, arcTol: number): PtMm[] {
+type Vec = { x: number; y: number };
+const dot = (a: Vec, b: Vec) => a.x * b.x + a.y * b.y;
+
+/** Outward unit normal of every edge i (src[i] → src[i+1]) of a CCW loop; zero for a null edge. */
+function edgeNormals(src: readonly PtMm[]): Vec[] {
   const n = src.length;
-  const nrm: PtMm[] = new Array(n);
+  const nrm: Vec[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const a = src[i];
     const b = src[(i + 1) % n];
@@ -66,14 +84,129 @@ function rawOffset(src: readonly PtMm[], d: number, arcTol: number): PtMm[] {
     // CCW: the interior is on the left → outward normal on the right.
     nrm[i] = L > 0 ? { x: (b.y - a.y) / L, y: -(b.x - a.x) / L } : { x: 0, y: 0 };
   }
+  return nrm;
+}
+
+/**
+ * The mitre join at P between the shifted edges k (into P) and j (out of P): the intersection of
+ * the two shifted sides, or — past `limit·|d|` from P — the square cut perpendicular to the
+ * bisector at that distance (two points). Null when the corner is degenerate (no extension).
+ */
+function miterJoin(P: PtMm, nk: Vec, nj: Vec, d: number, limit: number): PtMm[] | null {
+  const ad = Math.abs(d);
+  const vk = { x: d * nk.x, y: d * nk.y };
+  const vj = { x: d * nj.x, y: d * nj.y };
+  const sx = vk.x + vj.x;
+  const sy = vk.y + vj.y;
+  const sl = Math.hypot(sx, sy);
+  const cosHalf = sl / (2 * ad);
+  const lim = limit * ad;
+  if (cosHalf > 1e-9 && ad / cosHalf <= lim) {
+    const r = ad / cosHalf / sl;
+    return [{ x: P.x + sx * r, y: P.y + sy * r }];
+  }
+  // edge directions: k runs into P, j out of P
+  const ek = { x: -nk.y, y: nk.x };
+  const ej = { x: -nj.y, y: nj.x };
+  // a full reversal has no bisector: the tip points along the incoming edge
+  const u = sl > 1e-9 ? { x: sx / sl, y: sy / sl } : ek;
+  const ck = dot(ek, u);
+  const cj = dot(ej, u);
+  if (Math.abs(ck) < 1e-9 || Math.abs(cj) < 1e-9) return null;
+  const tk = (lim - dot(vk, u)) / ck;
+  const tj = (lim - dot(vj, u)) / cj;
+  return [
+    { x: P.x + vk.x + tk * ek.x, y: P.y + vk.y + tk * ek.y },
+    { x: P.x + vj.x + tj * ej.x, y: P.y + vj.y + tj * ej.y },
+  ];
+}
+
+/** W2: a vertex is an allowance CORNER when its side directions differ by at least this much. */
+export const CORNER_MIN_TURN_DEG = 15;
+/** …and at most this much: a sharper reversal is a needle (a fill artefact), never extended. */
+export const CORNER_MAX_TURN_DEG = 175;
+
+/**
+ * W2: the vertices whose allowance corner is MITRED, with their join points (the mitre point, or
+ * the two ends of the square cut). A corner is a vertex convex w.r.t. the offset, turning by
+ * CORNER_MIN_TURN_DEG…CORNER_MAX_TURN_DEG, with no concave turn of that size within |d| along the
+ * line on either side: a step, jog or notch smaller than the allowance (a convex and a concave turn
+ * close together) is not a corner — mitring it would push a spike of up to (√2 − 1)·d past the
+ * neighbouring sides (a 1–3 mm jog of a fill became a 4–6 mm bump on Ulmus), so it keeps the
+ * exact parallel (round). Curves (turns under the minimum) keep the exact parallel too: the cut
+ * line changes at corners only.
+ */
+function cornerJoins(
+  src: readonly PtMm[],
+  d: number,
+  limit: number,
+  /** Every convex turn in range may be mitred (no step rule): the gate's lenient reading. */
+  anyConvex = false,
+): Map<number, PtMm[]> {
+  const n = src.length;
+  const nrm = edgeNormals(src);
+  const ad = Math.abs(d);
+  const minT = (CORNER_MIN_TURN_DEG * Math.PI) / 180;
+  const maxT = (CORNER_MAX_TURN_DEG * Math.PI) / 180;
+  const turn: number[] = new Array(n);
+  for (let j = 0; j < n; j++) {
+    const nk = nrm[(j - 1 + n) % n];
+    const nj = nrm[j];
+    // signed by the offset: > 0 = convex w.r.t. the offset direction
+    turn[j] = Math.atan2(nk.x * nj.y - nk.y * nj.x, nk.x * nj.x + nk.y * nj.y) * Math.sign(d);
+  }
+  const edgeLen = (i: number) => {
+    const a = src[i];
+    const c = src[(i + 1) % n];
+    return Math.hypot(c.x - a.x, c.y - a.y);
+  };
+  /** A concave turn ≥ the minimum within |d| of vertex j, walking `dir` (+1 / −1). */
+  const concaveNear = (j: number, dir: 1 | -1) => {
+    let run = 0;
+    for (let step = 1; step < n; step++) {
+      const prev = (j + (step - 1) * dir + n * step) % n;
+      run += edgeLen(dir === 1 ? prev : (prev - 1 + n) % n);
+      if (run >= ad) return false;
+      const k = (j + step * dir + n * step) % n;
+      if (turn[k] <= -minT) return true;
+    }
+    return false;
+  };
+  const out = new Map<number, PtMm[]>();
+  for (let j = 0; j < n; j++) {
+    const t = turn[j];
+    if (t < minT || t > maxT) continue;
+    if (!anyConvex && (concaveNear(j, 1) || concaveNear(j, -1))) continue;
+    const m = miterJoin(src[j], nrm[(j - 1 + n) % n], nrm[j], d, limit);
+    if (m) out.set(j, m);
+  }
+  return out;
+}
+
+/** Raw (self-overlapping) offset of a CCW loop by signed d (d > 0 = outward). */
+function rawOffset(
+  src: readonly PtMm[],
+  d: number,
+  arcTol: number,
+  join: OffsetJoin = 'round',
+  limit = MITER_LIMIT,
+): PtMm[] {
+  const n = src.length;
+  const nrm = edgeNormals(src);
   const ad = Math.abs(d);
   const stepAng = 2 * Math.acos(Math.max(-1, 1 - Math.min(arcTol, ad) / ad));
+  const corners = join === 'miter' ? cornerJoins(src, d, limit) : new Map<number, PtMm[]>();
   const out: PtMm[] = [];
   for (let j = 0; j < n; j++) {
     const k = (j - 1 + n) % n;
     const nk = nrm[k];
     const nj = nrm[j];
     const P = src[j];
+    const corner = corners.get(j);
+    if (corner) {
+      out.push(...corner);
+      continue;
+    }
     const sinA = nk.x * nj.y - nk.y * nj.x;
     const cosA = nk.x * nj.x + nk.y * nj.y;
     if (cosA > -0.99 && sinA * d < 0) {
@@ -100,20 +233,73 @@ function rawOffset(src: readonly PtMm[], d: number, arcTol: number): PtMm[] {
 }
 
 /**
- * Max |distance(result → source) − |d||, sampled every 0.5 mm along the result. A true parallel
- * curve is 0 (+ chord sagitta). A hull collapse, a bitten bay or a stray lobe is not.
+ * How far each mitred corner's join reaches from its vertex (mm): the mitre point, or the far end
+ * of the square cut. Every other vertex is joined round — its reach is |d|.
+ */
+function joinReach(
+  src: readonly PtMm[],
+  d: number,
+  limit: number,
+  anyConvex: boolean,
+): { p: PtMm; r: number }[] {
+  const out: { p: PtMm; r: number }[] = [];
+  for (const [j, m] of cornerJoins(src, d, limit, anyConvex)) {
+    const P = src[j];
+    out.push({ p: P, r: Math.max(...m.map((q) => Math.hypot(q.x - P.x, q.y - P.y))) });
+  }
+  return out;
+}
+
+/**
+ * Max deviation of `result` from the d-offset of `src` with mitred corners (`cornerJoins`),
+ * sampled every 0.5 mm along the result: a point is never closer than |d| to the source (a bitten
+ * bay, a bevelled corner, a hull collapse across a neck), and never further than |d| unless it lies
+ * within a mitred corner's reach (the mitre, or the square cut past MITER_LIMIT). A stray lobe, a
+ * mitre on a step or a lost side shows as a deviation. `join: 'round'` allows no reach past |d|;
+ * `lenient` lets every convex turn in range be a corner (the gate reads a file whose writer decided).
  */
 export function parallelDeviation(
   result: readonly PtMm[],
   src: readonly PtMm[],
   d: number,
+  opts: { limit?: number; join?: OffsetJoin; lenient?: boolean } = {},
 ): number {
+  const limit = opts.limit ?? MITER_LIMIT;
   const ad = Math.abs(d);
   const idx = new SegIndex([{ pts: src, closed: true }], 5);
+  const reach = opts.join === 'round' ? [] : joinReach(src, d, limit, !!opts.lenient);
+  const cell = Math.max(5, ad * limit);
+  const grid = new Map<string, { p: PtMm; r: number }[]>();
+  for (const v of reach) {
+    const key = `${Math.floor(v.p.x / cell)},${Math.floor(v.p.y / cell)}`;
+    const a = grid.get(key);
+    if (a) a.push(v);
+    else grid.set(key, [v]);
+  }
+  /** Distance past the reach of the nearest-fitting convex corner join (0 = inside one). */
+  const pastJoins = (q: PtMm, e: number): number => {
+    const cx = Math.floor(q.x / cell);
+    const cy = Math.floor(q.y / cell);
+    let best = e - ad;
+    for (let x = cx - 1; x <= cx + 1; x++)
+      for (let y = cy - 1; y <= cy + 1; y++)
+        for (const v of grid.get(`${x},${y}`) ?? []) {
+          const over = Math.hypot(q.x - v.p.x, q.y - v.p.y) - v.r;
+          if (over < best) best = over;
+          if (best <= 0) return 0;
+        }
+    return Math.max(0, best);
+  };
+  const far = ad * limit * 1.5 + 10;
   let dev = 0;
-  for (const p of sampleAlong(result, true, 0.5)) {
-    const e = idx.nearest(p, ad * 3 + 10);
-    dev = Math.max(dev, Number.isFinite(e) ? Math.abs(e - ad) : ad * 3 + 10);
+  for (const q of sampleAlong(result, true, 0.5)) {
+    const e = idx.nearest(q, far);
+    if (!Number.isFinite(e)) {
+      dev = Math.max(dev, far);
+      continue;
+    }
+    if (e < ad) dev = Math.max(dev, ad - e);
+    else if (e > ad) dev = Math.max(dev, pastJoins(q, e));
   }
   return dev;
 }
@@ -127,8 +313,10 @@ export type OffsetResult = { pts: PtMm[]; report: OffsetReport; sourceHullRatio:
 export function offsetContour(
   pts: readonly PtMm[],
   mm: number,
-  opts: { arcTolMm?: number } = {},
+  opts: { arcTolMm?: number; join?: OffsetJoin; miterLimit?: number } = {},
 ): OffsetResult {
+  const join = opts.join ?? 'miter';
+  const limit = opts.miterLimit ?? MITER_LIMIT;
   const src = ccw(dedupe(pts, true, 1e-4));
   const srcHull = hullRatio(src);
   if (src.length < 3 || areaOf(src) <= 0) {
@@ -158,7 +346,7 @@ export function offsetContour(
       },
     };
   }
-  const raw = rawOffset(src, mm, opts.arcTolMm ?? ARC_TOL_MM);
+  const raw = rawOffset(src, mm, opts.arcTolMm ?? ARC_TOL_MM, join, limit);
   const solution: Paths64 = Clipper.Union([toPath(raw)], undefined, FillRule.Positive);
   const loops: PtMm[][] = [];
   let holes = 0;
@@ -180,7 +368,7 @@ export function offsetContour(
   const hull = srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX;
   if (hull)
     reasons.push(`collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`);
-  const dev = best.length ? parallelDeviation(best, src, mm) : Infinity;
+  const dev = best.length ? parallelDeviation(best, src, mm, { limit, join }) : Infinity;
   if (!(dev <= MAX_DEVIATION_MM))
     reasons.push(`deviation ${dev.toFixed(3)} mm from a true parallel`);
   return {

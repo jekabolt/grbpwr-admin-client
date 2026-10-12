@@ -43,6 +43,7 @@ import {
 } from '../write/plan';
 import { identityProblem } from '../manifest/identity';
 import { foldShapeProblem } from '../semantics/fold';
+import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
@@ -791,19 +792,18 @@ export function g6(ctx: GateCtx): GateCheck {
         `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`,
       );
     }
-    // Independent parallel-curve check on the FILE: every point of the DERIVED line sits exactly
-    // `allowance` from the line it came from. Upper bound only where the nearest foot is inside a
-    // base edge — at base vertices the join style (round / miter / square) legitimately decides how
-    // far the corner reaches; the lower bound holds everywhere (closer than the allowance = wrong).
+    // Independent check on the FILE (W2): the DERIVED line, read back, is the mitred allowance
+    // offset of the line it came from — never closer than the allowance anywhere (a bitten bay, a
+    // bevelled corner, a hull collapse across a neck), never further except inside a convex corner's
+    // mitre (sides extended to their intersection) or, past MITER_LIMIT × allowance, its square cut.
+    // A round join's arc stays inside the mitre and passes; a lobe or a corner overshoot does not.
     const allowance = spec.allowance.allowanceMm;
-    const idx = new SegmentIndex([{ pts: baseLine, closed: true }], 5);
-    let dev = 0;
-    for (const p of sampleAlong(derivedLine, true, 1)) {
-      const f = idx.nearestFoot(p, allowance * 3 + 5);
-      const interior = f.t > 1e-6 && f.t < 1 - 1e-6;
-      const e = interior ? Math.abs(f.d - allowance) : Math.max(0, allowance - f.d);
-      dev = Math.max(dev, e);
-    }
+    const dev = parallelDeviation(
+      derivedLine,
+      baseLine,
+      spec.allowance.meaning === 'seam' ? allowance : -allowance,
+      { lenient: true },
+    );
     worstDev = Math.max(worstDev, dev);
     if (dev > OFFSET_MAX_DEV_MM)
       bad(`derived line deviates ${dev.toFixed(3)} mm from a ${allowance} mm parallel`);
@@ -812,9 +812,10 @@ export function g6(ctx: GateCtx): GateCheck {
     'G6-offset',
     failed,
     'block',
-    notes.join('; ') || 'derived lines are true parallel curves (1 loop, no hull collapse)',
+    notes.join('; ') ||
+      'derived lines are mitred allowance offsets (1 loop, no hull collapse, sides parallel, corners = mitre or square cut)',
     fmt(worstDev),
-    `1 loop, no self-intersection, hull < ${OFFSET_HULL_RATIO}, dev ≤ ${OFFSET_MAX_DEV_MM} mm`,
+    `1 loop, no self-intersection, hull < ${OFFSET_HULL_RATIO}, dev ≤ ${OFFSET_MAX_DEV_MM} mm from the mitred offset (limit ${MITER_LIMIT} × allowance)`,
   );
 }
 

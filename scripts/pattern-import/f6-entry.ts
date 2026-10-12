@@ -37,6 +37,7 @@ import type {
   WriteJob,
 } from 'lib/pattern-import/types';
 import { bandCutSupport, slitNotches } from 'lib/pattern-import/semantics/build';
+import { offsetContour } from 'lib/pattern-import/semantics/offset';
 import { findSpikes, stripSpikes } from 'lib/pattern-import/spikes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { writeDxfDetailed, writeScopes } from 'lib/pattern-import/write';
@@ -1412,6 +1413,47 @@ export async function main(opts: { plans: string }): Promise<number> {
       'G6-offset',
       (await writeAndGate(job(MAIN, [sl2]), gateCtx([sl2]))).report,
     );
+    // W2: G6 reads the FILE's cut line against the mitred offset of its seam line
+    const withCut = (f: (seam: PtMm[]) => PtMm[]) => {
+      const x = slSpec();
+      x.sizes = x.sizes.map((s) => ({ ...s, cut: f(s.seam!) }));
+      return x;
+    };
+    const bevel = withCut((seam) => offsetContour(seam, 10, { miterLimit: 0.5 }).pts);
+    await neg(
+      'W2 cut corners bevelled inside the allowance (report lies)',
+      'G6-offset',
+      (await writeAndGate(job(MAIN, [bevel]), gateCtx([bevel]))).report,
+    );
+    const over = withCut((seam) => {
+      const c = offsetContour(seam, 10).pts;
+      // push the cut line's farthest corner 5 mm further out along its own direction
+      let k = 0;
+      for (let i = 1; i < c.length; i++) if (c[i].y > c[k].y) k = i;
+      return c.map((p, i) => (i === k ? { x: p.x, y: p.y + 5 } : p));
+    });
+    await neg(
+      'W2 a cut corner overshoots its mitre by 5 mm (report lies)',
+      'G6-offset',
+      (await writeAndGate(job(MAIN, [over]), gateCtx([over]))).report,
+    );
+    for (const [what, sp] of [
+      [
+        'W2 mitred cut (the writer’s own) passes G6',
+        withCut((seam) => offsetContour(seam, 10).pts),
+      ],
+      [
+        'W2 an old round-join cut still passes G6 (inside the mitre, never closer)',
+        withCut((seam) => offsetContour(seam, 10, { join: 'round' }).pts),
+      ],
+    ] as const) {
+      const rep = (await writeAndGate(job(MAIN, [sp]), gateCtx([sp]))).report;
+      ck(
+        rep.checks.some((c) => c.id === 'G6-offset' && c.ok),
+        what,
+        rep.checks.find((c) => c.id === 'G6-offset')?.note ?? '',
+      );
+    }
   }
   {
     const bp = bpSpec();
