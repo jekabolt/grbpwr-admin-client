@@ -10,7 +10,14 @@
 import type { Chain, Style } from 'lib/pattern-import/types';
 
 import { normDash } from '../chains/link';
-import { sameDashShape, sameStroke, scaledVecs, shapeCosineBest, type Signature } from '../chains/motif';
+import {
+  beadContrast,
+  sameDashShape,
+  sameStroke,
+  scaledVecs,
+  shapeCosineBest,
+  type Signature,
+} from '../chains/motif';
 
 export type LegendHit = { label: string; chain: number };
 
@@ -23,6 +30,12 @@ export type LegendIdentity = {
   unmatched: { group: string; lengthMm: number; best: string; score: number }[];
   /** Key indices with a sample stroke that no group of the sheet resembles. */
   absent: number[];
+  /**
+   * Per key index: the sample's match score (length-weighted), the share of its lines that also
+   * agree on the second evidence (R7: element order / dot size; a declared dash = 1), the keys whose
+   * samples look alike, and whether those are told apart by nesting only (a question).
+   */
+  perKey: { score: number; second: number; alike: number[]; nestingOnly: boolean }[];
 };
 
 export const LEGEND_ID = { minScore: 0.86, minMargin: 0.04, minGroupMm: 150 };
@@ -124,7 +137,8 @@ export function legendIdentity(
   const label = new Array(chains.length).fill(-1);
   const matched: LegendIdentity['matched'] = key.map(() => []);
   const unmatched: LegendIdentity['unmatched'] = [];
-  const decide = (scores: (g: number) => number) => {
+  type Decision = { k: number; s: number; ok: boolean; ranked: [number, number][] };
+  const decide = (scores: (g: number) => number): Decision => {
     // best key index by its best sample; null when weak or not clearly ahead of the runner-up
     const per = new Map<number, number>();
     for (const h of samples) {
@@ -138,8 +152,71 @@ export function legendIdentity(
       k: bk,
       s: bs,
       ok: bk >= 0 && bs >= LEGEND_ID.minScore && bs - second >= LEGEND_ID.minMargin,
+      ranked,
     };
   };
+
+  // ── R7: the second evidence of a motif sample — element order and bead sizes ───────────────────
+  // Two keys whose SAMPLES look alike (Mood S «▲●▲●» and L «▲▲●●»: one rhythm of triangles and
+  // dots) are told apart only by what the rhythm vector does not hold: the order of the elements
+  // in one period and the size of the dots. Keys alike in that too are told apart by nesting only.
+  const keySig = new Map<number, Signature>();
+  for (const h of samples) {
+    const k = idxOf.get(h.label)!;
+    if (!keySig.has(k) && !declOf(h.chain)) keySig.set(k, sigs[h.chain]);
+  }
+  const alike: number[][] = key.map(() => []);
+  for (const [a, sa] of keySig)
+    for (const [b, sb] of keySig) {
+      if (a >= b) continue;
+      const c = Math.max(
+        shapeCosineBest(scaledVecs(sa), sb.vec),
+        shapeCosineBest(scaledVecs(sb), sa.vec),
+      );
+      if (c >= LEGEND_ID.minScore) {
+        alike[a].push(b);
+        alike[b].push(a);
+      }
+    }
+  /** Does `sig` agree with key k's sample beyond the rhythm: 1 yes, -1 no, 0 cannot tell. */
+  const secondOf = (k: number, sig: Signature): -1 | 0 | 1 => {
+    const s = keySig.get(k);
+    if (!s) return 0;
+    const p = s.period && sig.period ? (s.period === sig.period ? 1 : -1) : 0;
+    const bc = s.beadHist && sig.beadHist ? beadContrast(s.beadHist, sig.beadHist) : null;
+    const b = bc == null ? 0 : bc <= 0.3 ? 1 : bc >= 0.5 ? -1 : 0;
+    // one says yes, nothing says no — yes; both say no — no; they disagree — cannot tell
+    if ((p === 1 && b >= 0) || (b === 1 && p >= 0)) return 1;
+    if (p === -1 && b === -1) return -1;
+    return p + b < 0 && p * b === 0 ? -1 : 0;
+  };
+  /** Two alike keys whose samples differ in element order or dot size: separable. */
+  const separable = (a: number, b: number) => {
+    const sa = keySig.get(a);
+    const sb = keySig.get(b);
+    if (!sa || !sb) return true;
+    if (sa.period && sb.period && sa.period !== sb.period) return true;
+    return !!sa.beadHist && !!sb.beadHist && beadContrast(sa.beadHist, sb.beadHist) >= 0.3;
+  };
+  const nestingOnly = key.map((_, k) => alike[k].some((t) => !separable(k, t)));
+  /**
+   * A chain's decision checked against the second evidence: among the keys that score as well as
+   * the best (alike samples, or a margin too thin to call), the ONE whose element order / dot size
+   * the chain shares takes it; none or several — no identity (the neighbours rank it).
+   */
+  const refine = (d: Decision, sig: Signature | null): Decision => {
+    if (d.k < 0 || d.s < LEGEND_ID.minScore) return d;
+    const near = d.ranked.filter(
+      ([k, sc]) =>
+        sc >= LEGEND_ID.minScore &&
+        (k === d.k || alike[d.k].includes(k) || d.s - sc < LEGEND_ID.minMargin),
+    );
+    if (near.length < 2) return d;
+    const agree = sig ? near.filter(([k]) => secondOf(k, sig) === 1) : [];
+    if (agree.length === 1) return { ...d, k: agree[0][0], s: agree[0][1], ok: true };
+    return { ...d, ok: false };
+  };
+  const per2 = key.map(() => ({ len: 0, second: 0 }));
   const tally = new Map<string, { idx: number; group: string; lengthMm: number; score: number }>();
   for (const g of groups) {
     if (g.len < LEGEND_ID.minGroupMm) continue;
@@ -165,18 +242,46 @@ export function legendIdentity(
     // a look may hold two sizes drawn alike enough to cluster (reef: zigzag with small dots = M,
     // with small AND large dots = XL): each long-enough chain is matched on its own first
     let left = 0;
+    const own = new Map<number, Decision>();
+    for (const i of g.members) {
+      if (!(sigs[i].reliable && chains[i].lengthMm >= 20)) continue;
+      const one = { ...g, vec: sigs[i].vec, dash: null, decor: sigs[i].decorPer10 };
+      own.set(
+        i,
+        refine(
+          decide((si) => score(samples[si], one)),
+          sigs[i],
+        ),
+      );
+    }
+    // a look whose own chains name two or more keys holds several sizes: a chain too short to be
+    // read on its own takes no key from the look's average (a coin between those sizes) — its
+    // neighbours rank it
+    const keysOfLook = new Set([...own.values()].filter((d) => d.ok).map((d) => d.k));
+    const groupPick = gd.ok && keysOfLook.size <= 1 ? refine(gd, null) : null;
     for (const i of g.members) {
       const one = { ...g, vec: sigs[i].vec, dash: null, decor: sigs[i].decorPer10 };
-      const cd =
-        sigs[i].reliable && chains[i].lengthMm >= 20
-          ? decide((si) => score(samples[si], one))
-          : null;
-      const pick = cd?.ok ? cd : gd.ok ? gd : null;
+      const cd = own.get(i) ?? null;
+      const pick = cd?.ok ? cd : groupPick?.ok && !own.has(i) ? groupPick : null;
+      if (typeof process !== 'undefined' && process.env?.F3_LEGEND_CH && chains[i].lengthMm >= 20)
+        console.log(
+          `legend-ch c${i} ${chains[i].lengthMm.toFixed(0)}mm ${g.name} → ${pick ? key[pick.k] : '-'} cd=${cd ? `${key[cd.k]}:${cd.s.toFixed(3)}${cd.ok ? '' : '?'}` : '-'} per=${sigs[i].period} beads=${(
+            sigs[i].beadHist ?? []
+          )
+            .map((v, k) => (v >= 0.1 ? `${(k / 10).toFixed(1)}:${v.toFixed(2)}` : ''))
+            .filter(Boolean)
+            .join(',')} ${samples
+            .map((h) => `${h.label}=${score(h, one).toFixed(3)}`)
+            .filter((x) => +x.split('=')[1] > 0.8)
+            .join(' ')} at=${chains[i].pts[0].x.toFixed(0)},${chains[i].pts[0].y.toFixed(0)}`,
+        );
       if (!pick) {
         left += chains[i].lengthMm;
         continue;
       }
       label[i] = pick.k;
+      per2[pick.k].len += chains[i].lengthMm;
+      if (secondOf(pick.k, sigs[i]) === 1) per2[pick.k].second += chains[i].lengthMm;
       const t = tally.get(`${pick.k}|${g.name}`) ?? {
         idx: pick.k,
         group: g.name,
@@ -202,5 +307,17 @@ export function legendIdentity(
   const absent = key
     .map((_, k) => k)
     .filter((k) => samples.some((h) => idxOf.get(h.label) === k) && !matched[k].length);
-  return { label, matched, unmatched, absent };
+  const perKey = key.map((_, k) => {
+    const L = matched[k].reduce((a, m) => a + m.lengthMm, 0);
+    const sc = L ? matched[k].reduce((a, m) => a + m.score * m.lengthMm, 0) / L : 0;
+    const declared = matched[k].length > 0 && !keySig.has(k);
+    return {
+      score: +sc.toFixed(3),
+      // a declared dash matched by shape is its own second evidence (dash count and ratios)
+      second: declared ? 1 : per2[k].len ? +(per2[k].second / per2[k].len).toFixed(2) : 0,
+      alike: alike[k].slice(),
+      nestingOnly: nestingOnly[k],
+    };
+  });
+  return { label, matched, unmatched, absent, perKey };
 }
