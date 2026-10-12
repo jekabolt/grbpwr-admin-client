@@ -1212,6 +1212,8 @@ export type SemanticsInput = {
   seedLabels?: Partial<Record<SeedId, string>>;
   /** MOOD Ф0 (G23): the text (TextId) each text-seeded piece was seeded from — its header. */
   seedTexts?: Partial<Record<SeedId, number>>;
+  /** MOOD Ф0 (G23): every seed's point (text, click, face, AI). */
+  seedAts?: Partial<Record<SeedId, PtMm>>;
   /** Text of the document's other pages (instructions, cutting list); the session fills it. */
   docTexts?: string[];
 };
@@ -2166,6 +2168,7 @@ export type StageIO = {
       | 'docTexts'
       | 'seedLabels'
       | 'seedTexts'
+      | 'seedAts'
     >;
     out: SemanticsOutput;
   };

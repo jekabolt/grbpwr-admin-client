@@ -1733,6 +1733,9 @@ export function buildPieceSpecsDetailed(
       Object.fromEntries(
         Object.entries(input.seedTexts ?? {}).filter((e): e is [string, number] => e[1] != null),
       ),
+      Object.fromEntries(
+        Object.entries(input.seedAts ?? {}).filter((e): e is [string, PtMm] => !!e[1]),
+      ),
     );
     return onePiece.get(`${src.cand.seed}:${src.cand.rank}`);
   };

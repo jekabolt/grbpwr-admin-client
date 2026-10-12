@@ -1460,6 +1460,7 @@ export class Session {
             sd.origin === 'text' && sd.text ? [[sd.id, sd.text.id]] : [],
           ),
         ),
+        seedAts: Object.fromEntries((this.seeds ?? []).map((sd) => [sd.id, sd.at])),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );

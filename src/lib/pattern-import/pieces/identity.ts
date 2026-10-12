@@ -79,18 +79,38 @@ function lookOf(c: Chain, styles: ReadonlyMap<number, Style>): Look | null {
 }
 
 /**
- * The pens a size class is identified by (its declared dash / recovered motif evidence) — every
- * one: a size drawn in two looks is one class with both (`mergeSameSize`). [] = none.
+ * The pens a size class is identified by: its dominant declared-dash / recovered-motif evidence,
+ * plus a further look only when it is the size's own second look — the operator merged or
+ * confirmed the row (confidence 1: `mergeSameSize`, `confirmRows`) or it carries ≥ 35 % of the
+ * class's length. recover lists up to three looks per rank by length (≥ 5 %): a minor one may be
+ * another size's lines ranked into it, never a pen. [] = none.
  */
-export function classLooks(c: LineClass | undefined): Look[] {
-  const out: Look[] = [];
+export function classLooks(
+  c: LineClass | undefined,
+  set?: ChainSet,
+  styles?: ReadonlyMap<number, Style>,
+): Look[] {
+  const all: Look[] = [];
   for (const e of c?.evidence ?? []) {
     if (e.kind === 'declared-dash' && e.dash.some((v) => v > 0.01))
-      out.push({ kind: 'dash', d: normDash(e.dash) });
+      all.push({ kind: 'dash', d: normDash(e.dash) });
     if (e.kind === 'recovered-motif' && e.motif.length >= 2)
-      out.push({ kind: 'motif', m: e.motif });
+      all.push({ kind: 'motif', m: e.motif });
   }
-  return out;
+  if (all.length <= 1 || !c || c.confidence >= 1) return all;
+  if (!set || !styles) return all.slice(0, 1);
+  let total = 0;
+  const len = all.map(() => 0);
+  for (const id of c.chains) {
+    const ch = set.chains[id];
+    if (!ch) continue;
+    total += ch.lengthMm;
+    const cl = chainLook(ch, styles);
+    if (!cl) continue;
+    const k = all.findIndex((l) => sameLook(cl, l));
+    if (k >= 0) len[k] += ch.lengthMm;
+  }
+  return all.filter((_, k) => k === 0 || (total > 0 && len[k] >= 0.35 * total));
 }
 
 /** A pen = the looks one size is drawn with ([] = not known). */
@@ -179,7 +199,7 @@ export function rankLooks(
   const gone = keyed ? keyAbsent(set) : new Set<string>();
   const absent = run.sizes.map((z) => gone.has(z.label.trim().toUpperCase()));
   const looks = classes.map((c, r): Pen => {
-    const l = classLooks(c);
+    const l = classLooks(c, set, styles);
     if (absent[r]) return [];
     if (l.length || !c || c.role !== 'size') return l;
     // one look carried by ≥ 75 % of the class's length
@@ -341,8 +361,8 @@ export const ONE_PIECE_OVERLAP = 0.05;
 
 /**
  * G23 evidence per (seed, rank) of a closed candidate: "the outline runs across two pieces" —
- * (a) the face holds the header (seed text) of another piece whose own outline of that size did
- * not close (its fill ran into this face), or (b) it overlaps another family's closed outline of
+ * (a) the face holds the header (seed text) — or the outline the seed point — of another piece
+ * whose own outline of that size did not close (its fill ran into this face), or (b) it overlaps another family's closed outline of
  * the same rank by > 5 % of the smaller one, unless that one lies wholly inside it (a pocket drawn
  * on the front is G20's business). Mood Margaux: a hole at a corner of size r merged its face with
  * the touching piece's face of the same size. Two live seeds in one face are 'merged' already.
@@ -350,6 +370,8 @@ export const ONE_PIECE_OVERLAP = 0.05;
 export function onePieceProblems(
   families: readonly PieceFamily[],
   seedTexts: Readonly<Record<number, number>>,
+  /** Every seed's point (text, click, face): a piece without a header is a piece too. */
+  seedAts: Readonly<Record<number, PtMm>> = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
   const key = (seed: number, rank: number) => `${seed}:${rank}`;
@@ -362,22 +384,30 @@ export function onePieceProblems(
   const closedAt = new Map<string, boolean>();
   for (const f of families)
     for (const c of f.candidates) closedAt.set(key(f.seed, c.rank), c.outcome === 'closed');
+  const famSeeds = families.map((f) => f.seed);
   const byRank = new Map<number, { seed: number; outer: PtMm[]; area: number }[]>();
   for (const f of families)
     for (const c of f.candidates) {
       if (c.outcome !== 'closed' || c.outer.length < 3) continue;
-      // (a) another piece's header inside this face, that piece not closed at this size
+      // (a) another piece's header or seed inside this face, that piece not closed at this size
+      let other: number | undefined;
       for (const tid of c.textsInside) {
-        const other = seedOfText.get(tid);
-        if (other === undefined || other === f.seed) continue;
-        if (closedAt.get(key(other, c.rank))) continue;
-        add(
-          f.seed,
-          c.rank,
-          `its face holds the header of piece ${other}, whose outline of this size is open`,
-        );
-        break;
+        const o = seedOfText.get(tid);
+        if (o !== undefined && o !== f.seed && !closedAt.get(key(o, c.rank))) other = o;
       }
+      if (other === undefined)
+        for (const o of famSeeds) {
+          const at = seedAts[o];
+          if (o === f.seed || !at || closedAt.get(key(o, c.rank))) continue;
+          const b = c.bbox;
+          if (at.x < b.minX || at.x > b.maxX || at.y < b.minY || at.y > b.maxY) continue;
+          if (pointInPoly(at, c.outer)) {
+            other = o;
+            break;
+          }
+        }
+      if (other !== undefined)
+        add(f.seed, c.rank, `its outline holds piece ${other}, which does not close at this size`);
       const a = byRank.get(c.rank) ?? [];
       a.push({ seed: f.seed, outer: c.outer, area: c.areaMm2 });
       byRank.set(c.rank, a);
