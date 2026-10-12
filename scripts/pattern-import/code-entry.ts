@@ -8,6 +8,13 @@
 //   3 · corpus (the real pipeline through the e2e harness, run TWICE): no two different pieces share
 //       an identity, every bulk code is written on its own seed(s) only, a pair code on exactly the
 //       two hands of one drawn pair, and both runs give every piece the same code
+//   4 · AP-tail: the AUTOPILOT names alike (policy → bulkNames): a crafted drawn pair gets ONE code
+//       with both hands, as the "name N pieces" button gives, each answer a recorded assumption
+//   5 · AP-tail: a generated code never updates an existing card piece without lineage
+//       (`generatedReuse`, run.ts) — crafted drafts: generated → listed; replayed (lineage), from
+//       the file, typed over, a new piece → not listed
+//   6 · AP-tail: the autopilot over the corpus cases (autopilot.mjs): every autopilot code with a
+//       hand has its twin under the same code with the other hand, no identity on two pieces
 //
 //   node scripts/pattern-import/code.mjs            (yarn patimport:code)
 //   PATIMPORT_REPORTS / E2E_OUT / PATIMPORT_E2E_OUT = where the two e2e runs write (scratch)
@@ -22,6 +29,13 @@ import {
   bulkNames,
   codeBlocked,
 } from 'components/managers/tech-card/components/pattern-import/bulk-names';
+import {
+  autopilotAnswer,
+  generatedReuse,
+  REPLAY_RULE,
+  type Assumption,
+} from 'components/managers/tech-card/components/pattern-import/autopilot';
+import type { CardDraft, ImportSession, NameDecision } from 'lib/pattern-import/types';
 
 type Blocked = SemanticsOutput['blocked'][number];
 
@@ -196,6 +210,250 @@ export async function main(): Promise<number> {
   const c = bulkNames(blocked, (sd) => (sd === 5 ? null : boxOf(sd)), taken, card);
   ck(!c.has(3) && !c.has(5), 'a pair with one hand unplaced is left to the operator', show(c));
 
+  // ── 4 · the autopilot names like the button (AP-tail fix 1) ────────────────────────────────
+  console.log('— autopilot: crafted drawn pair');
+  {
+    const fam = (seed: number) => ({
+      seed,
+      candidates: [{ rank: 0, outcome: 'closed', outer: [], areaMm2: 1, bbox: boxes[seed] }],
+    });
+    const session = {
+      sessionId: 1,
+      step: 'meaning',
+      files: [],
+      pages: [],
+      clean: null,
+      scale: { candidates: [], decision: null },
+      sheet: null,
+      chains: null,
+      sizes: null,
+      pieces: { families: [1, 2, 3, 4, 5, 6].map(fam), seeds: [] },
+      names: [] as NameDecision[],
+      // the identities already written (the bulk check's `taken`)
+      semantics: {
+        pieces: taken.map((identity, k) => ({ seed: 20 + k, identity, code: identity })),
+        blocked,
+        grainProposals: [],
+        folds: [],
+      },
+      fabrics: null,
+      variant: null,
+      draft: null,
+      gate: {},
+      busy: null,
+      error: null,
+    } as unknown as ImportSession;
+    const inputs = {
+      overrides: {},
+      operatorGrain: {},
+      operatorFold: {},
+      editedNames: [],
+      confirmedNames: [],
+      autopilot: [],
+      assignment: null,
+      scaleIndex: 0,
+      sheetIndex: 0,
+      gridOverride: null,
+      cleanEdits: [],
+      legend: [],
+      legendConfirmed: [],
+    };
+    const ans = autopilotAnswer({
+      session,
+      inputs: inputs as never,
+      card: { sizes: card.map((token, k) => ({ sizeId: k + 1, token })) } as never,
+      question: '6 pieces need a name',
+      step: 'meaning',
+    });
+    const ev = ans.events?.find((e) => e.type === 'names');
+    const dec = ev && ev.type === 'names' ? ev.decisions : [];
+    const by = new Map(dec.map((d) => [d.seed, d] as const));
+    const nm = (sd: number) => {
+      const d = by.get(sd);
+      return d ? [d.code, ...d.mods].join('_') : '—';
+    };
+    console.log(`  ${[1, 2, 3, 4, 5, 6].map((sd) => `${sd}:${nm(sd)}`).join(' · ')}`);
+    ck(!ans.stop, 'the autopilot answers the code questions', ans.reason);
+    ck(
+      by.get(3)?.code === by.get(5)?.code &&
+        by.get(3)?.mods.join() === 'L' &&
+        by.get(5)?.mods.join() === 'R',
+      'autopilot: a drawn pair gets ONE code with both hands (never two codes, no hands)',
+      [nm(3), nm(5)],
+    );
+    ck(
+      [1, 2, 3, 4, 5, 6].every((sd) => by.get(sd)?.code === a.get(sd)?.code) &&
+        [1, 2, 3, 4, 5, 6].every((sd) => by.get(sd)?.mods.join() === a.get(sd)?.mods.join()),
+      'autopilot codes = the "name N pieces" codes',
+      [1, 2, 3, 4, 5, 6].map(nm),
+    );
+    const named = (ans.assumptions ?? []).filter((x) => x.kind === 'name-code');
+    ck(
+      named.length === 6 && named.every((x) => x.seed != null && x.value !== undefined),
+      'every autopilot name is a recorded assumption (seed + replayable value)',
+      named.map((x) => `${x.seed}:${x.answer}`),
+    );
+    ck(
+      (ans.patch?.editedNames ?? []).length === 6,
+      'the names are typed through the names table (as the button does)',
+      ans.patch?.editedNames,
+    );
+  }
+
+  // ── 5 · generated code × existing card piece (AP-tail fix 2) ───────────────────────────────
+  console.log('— autopilot: a generated code against the card');
+  {
+    const sc = {
+      target: { scopeKey: 'MAIN', fabricPurpose: 'MAIN', bomLineKey: 'b1', label: 'main' },
+      dxfText: '',
+      manifest: {
+        blocks: [],
+        pieces: [
+          { identity: 'P01', code: 'P01', mods: [], pairHand: null },
+          { identity: 'P02_L', code: 'P02', mods: ['L'], pairHand: 'L' },
+          { identity: 'P02_R', code: 'P02', mods: ['R'], pairHand: 'R' },
+          { identity: 'FP', code: 'FP', mods: [], pairHand: null },
+          { identity: 'P03', code: 'P03', mods: [], pairHand: null },
+        ],
+      },
+    };
+    const draft = {
+      scopes: [sc],
+      pieces: [
+        { lineKey: 'k1', name: 'P01', existingLineKey: 'k1', basis: 'name' },
+        { lineKey: 'k2', name: 'Sleeve', existingLineKey: 'k2', basis: 'alias' },
+        { lineKey: 'k3', name: 'FP', existingLineKey: 'k3', basis: 'name' },
+        { lineKey: 'n4', name: 'P03', existingLineKey: null, basis: 'new' },
+      ],
+      aliases: [
+        { scopeKey: 'MAIN', blockName: 'P01', pieceLineKey: 'k1' },
+        { scopeKey: 'MAIN', blockName: 'P02_L', pieceLineKey: 'k2' },
+        { scopeKey: 'MAIN', blockName: 'P02_R', pieceLineKey: 'k2' },
+        { scopeKey: 'MAIN', blockName: 'FP', pieceLineKey: 'k3' },
+        { scopeKey: 'MAIN', blockName: 'P03', pieceLineKey: 'n4' },
+      ],
+    } as unknown as CardDraft;
+    const sem = {
+      pieces: [
+        { seed: 1, identity: 'P01', code: 'P01' },
+        { seed: 2, identity: 'P02_L', code: 'P02' },
+        { seed: 3, identity: 'P02_R', code: 'P02' },
+        { seed: 4, identity: 'FP', code: 'FP' },
+        { seed: 5, identity: 'P03', code: 'P03' },
+      ],
+    } as never;
+    const gen = (seed: number, answer: string, rule = 'a deterministic code'): Assumption => ({
+      step: 'meaning',
+      kind: 'name-code',
+      subject: `seed ${seed}`,
+      answer,
+      rule,
+      evidence: [],
+      confidence: 0.5,
+      strong: false,
+      seed,
+    });
+    const all = [gen(1, 'P01'), gen(2, 'P02_L'), gen(3, 'P02_R'), gen(5, 'P03')];
+    const r = generatedReuse(draft, sem, all);
+    const show2 = (xs: typeof r) => xs.map((x) => `${x.identity}→«${x.existing}»`).sort();
+    console.log(`  ${show2(r).join(' · ')}`);
+    ck(
+      JSON.stringify(show2(r)) ===
+        JSON.stringify(['P01→«P01»', 'P02_L→«Sleeve»', 'P02_R→«Sleeve»']),
+      'a generated code that reuses a card piece (by name, by alias) is listed; a new piece is not',
+      show2(r),
+    );
+    ck(
+      !r.some((x) => x.identity === 'FP'),
+      'a name from the file (no autopilot code) is never listed, though it reuses «FP»',
+    );
+    const replayed = [
+      gen(1, 'P01'),
+      { ...gen(1, 'P01', `${REPLAY_RULE} front.dxf · 2026-10-11 21:40`) },
+    ];
+    ck(
+      !generatedReuse(draft, sem, replayed).length,
+      'lineage: the replay named the piece (its outline matched the import that wrote it) → reused',
+    );
+    const typedOver = {
+      pieces: [{ seed: 1, identity: 'ZZ', code: 'ZZ' }],
+    } as never;
+    ck(
+      !generatedReuse(draft, typedOver, [gen(1, 'P01')]).length,
+      'a generated code typed over by the operator is not the autopilot’s any more',
+    );
+    ck(!generatedReuse(null, sem, all).length, 'no draft → nothing listed');
+    // the previous import drew «P04» and this one does not: a generated NEW piece beside it could
+    // be the same piece under a shifted code (a doubled cut)
+    const gone = {
+      ...draft,
+      scopes: [{ ...sc, vanished: [{ blockName: 'P04', pieceLineKey: 'k9', pieceName: 'P04' }] }],
+    } as unknown as CardDraft;
+    const v = generatedReuse(gone, sem, all).filter((x) => x.kind === 'beside-vanished');
+    ck(
+      v.length === 1 && v[0].identity === 'P03' && v[0].existing === 'P04',
+      'a generated new piece beside a card piece the previous import no longer draws is listed',
+      v,
+    );
+    // a NEW piece named by the file itself (no autopilot code) beside the vanished «P04» is the
+    // same doubt (kombinezon-A: a moved piece read «FP» back while «P01» lost its drawing)
+    const fileNamed = generatedReuse(gone, sem, [gen(1, 'P01')]).filter(
+      (x) => x.kind === 'beside-vanished',
+    );
+    ck(
+      fileNamed.length === 1 && fileNamed[0].identity === 'P03' && fileNamed[0].existing === 'P04',
+      'a new piece named by the FILE beside a card piece the previous import no longer draws is listed too',
+      fileNamed,
+    );
+    ck(
+      !generatedReuse(gone, sem, []).some((x) => x.kind === 'reuse'),
+      'without an autopilot code nothing is listed as a reuse (a file name may reuse its card piece)',
+    );
+    // Codex AP-tail #1: the previous import of THESE files drew «P02» in another scope that this
+    // draft does not write at all — a generated new piece may be it, moved to another fabric
+    const src = { files: [{ name: 'a.dxf', sha256: 'aa', bytes: 1, kind: 'dxf', pages: 1 }] };
+    const withSrc = {
+      ...draft,
+      scopes: [{ ...sc, manifest: { ...sc.manifest, source: src } }],
+    } as unknown as CardDraft;
+    const prior = (sha: string, name = 'old.dxf') => ({
+      existingPieces: [{ lineKey: 'k7', name: 'P02' }],
+      existingAliases: [{ scopeKey: 'LINING', blockName: 'P02', pieceLineKey: 'k7' }],
+      existingPatterns: [
+        {
+          scopeKey: 'LINING',
+          filename: 'x.dxf',
+          url: 'mem://x',
+          manifest: {
+            source: { files: [{ sha256: sha, name }] },
+            blocks: [],
+            pieces: [{ identity: 'P02' }],
+          },
+        },
+      ],
+    });
+    const cross = generatedReuse(withSrc, sem, all, prior('aa') as never).filter(
+      (x) => x.kind === 'beside-vanished',
+    );
+    ck(
+      cross.some((x) => x.identity === 'P03' && x.existing === 'P02'),
+      'a generated new piece while these files’ sheet in an unwritten scope still links «P02» is listed',
+      cross,
+    );
+    ck(
+      !generatedReuse(withSrc, sem, all, prior('bb') as never).some(
+        (x) => x.kind === 'beside-vanished',
+      ),
+      'another import’s sheet (other source files) is not ours: not listed',
+    );
+    ck(
+      generatedReuse(withSrc, sem, all, prior('bb', 'A.dxf') as never).some(
+        (x) => x.kind === 'beside-vanished' && x.existing === 'P02',
+      ),
+      'the same source file edited since (another sha256, same file name) is ours: listed',
+    );
+  }
+
   // ── 3 · corpus, twice ───────────────────────────────────────────────────────────────────────
   console.log('— corpus: the e2e harness twice');
   const base = process.env.PATIMPORT_REPORTS ?? resolve(tmpdir(), 'patimport-code-probe');
@@ -289,9 +547,87 @@ export async function main(): Promise<number> {
         )}${bulk.length > 6 ? ` … +${bulk.length - 6}` : ''} · clicks ${r1.clicks?.total} (code ${r1.clicks?.byKind?.code ?? 0}, bulk ${r1.clicks?.byKind?.['code-bulk'] ?? 0})`,
     );
   }
+  // ── 6 · the autopilot over the corpus cases (AP-tail fix 1) ────────────────────────────────
+  console.log('— corpus: the autopilot names');
+  {
+    const dir = resolve(base, 'code-probe-autopilot');
+    mkdirSync(dir, { recursive: true });
+    const r = spawnSync(
+      process.execPath,
+      [resolve(process.cwd(), 'scripts/pattern-import/autopilot.mjs'), ...CORPUS],
+      {
+        env: { ...process.env, PATIMPORT_REPORTS: dir, AUTOPILOT_REPORT: 'CODE-AP.json' },
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
+    const file = resolve(dir, 'CODE-AP.json');
+    if (r.status !== 0 || !existsSync(file)) {
+      ck(false, 'autopilot run', (r.stderr || r.stdout).slice(-600));
+      return 1;
+    }
+    const recs = (JSON.parse(readFileSync(file, 'utf8')) as { results: ApRec[] }).results;
+    let pairs = 0;
+    for (const id of CORPUS) {
+      const x = recs.find((y) => y.id === id);
+      if (!x?.named) {
+        ck(false, `${id}: autopilot ran`, x?.error ?? x?.verdict);
+        continue;
+      }
+      const { pieces, codes } = x.named;
+      const bySeeds = new Map<string, Set<number>>();
+      for (const p of pieces) {
+        const k = p.identity.toLowerCase();
+        bySeeds.set(k, new Set([...(bySeeds.get(k) ?? []), p.seed]));
+      }
+      const shared = [...bySeeds].filter(([, ss]) => ss.size > 1).map(([k]) => k);
+      ck(!shared.length, `${id}: no identity written by two pieces (autopilot)`, shared);
+      const val = (c: ApCode) =>
+        c.value && typeof c.value === 'object' && 'code' in c.value
+          ? { code: String(c.value.code), mods: (c.value.mods as string[] | undefined) ?? [] }
+          : { code: c.answer.split('_')[0], mods: c.answer.split('_').slice(1) };
+      const handed = codes.map((c) => ({ seed: c.seed, ...val(c) })).filter((c) => c.mods.length);
+      const orphan = handed.filter(
+        (c) =>
+          !handed.some(
+            (t) =>
+              t.seed !== c.seed &&
+              t.code === c.code &&
+              t.mods.join() === (c.mods.join() === 'L' ? 'R' : 'L'),
+          ),
+      );
+      pairs += handed.length / 2;
+      ck(
+        !orphan.length,
+        `${id}: ${codes.length} autopilot codes, ${handed.length / 2} drawn pairs — every hand has its twin under the same code`,
+        orphan,
+      );
+      const lost = codes.filter((c) => {
+        const v = val(c);
+        const ps = pieces.filter((p) => p.seed === c.seed);
+        return ps.length > 0 && !ps.some((p) => p.code === v.code);
+      });
+      ck(!lost.length, `${id}: every autopilot code is written on its seed`, lost.slice(0, 4));
+    }
+    console.log(
+      `  drawn pairs named by the autopilot on the corpus: ${pairs}${pairs ? '' : ' (none reach naming — the crafted pair (§4) is the proof)'}`,
+    );
+  }
+
   console.log(bad ? `✗ ${bad} check(s) failed` : '✓ code probe passed');
   return bad ? 1 : 0;
 }
+
+type ApRec = {
+  id: string;
+  verdict?: string;
+  error?: string;
+  named?: {
+    pieces: { seed: number; identity: string; code: string; mods: string[] }[];
+    codes: ApCode[];
+  };
+};
+type ApCode = { seed: number; answer: string; value: Record<string, unknown> | string | null };
 
 type CaseRec = {
   id: string;

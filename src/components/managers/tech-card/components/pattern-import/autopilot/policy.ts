@@ -53,6 +53,7 @@ import {
 import { PAGE_SURE, defaultedFabrics, sizeFlags, tileSheets, weakAsides } from '../auto-advance';
 import { fallbackGrain } from './grain';
 import { deterministicCodes } from './names';
+import { bulkNames, codeBlocked } from '../bulk-names';
 import { seedPoints } from './seeds';
 import { modelFromCard, sheetFromCard, weakReason } from './card-match';
 import { mergeAssumptions, type Assumption, type AssumptionKind } from './types';
@@ -119,6 +120,11 @@ export type AutopilotAction =
   | { kind: 'confirm-shown' }
   /** A name typed over an AI / DXF name the identity rule refuses. */
   | { kind: 'edit-name'; seed: SeedId; code: string; mods: string[]; displayName: string }
+  /** "name N pieces" (bulk-names.ts): several names typed in one answer (`editNames()`). */
+  | {
+      kind: 'edit-names';
+      edits: { seed: SeedId; code: string; mods: string[]; displayName: string }[];
+    }
   | { kind: 'fabrics'; assignment: FabricAssignment };
 
 export type AutopilotStop = { step: WizardStep; reason: string };
@@ -385,6 +391,28 @@ function toWizard(
         events: [{ type: 'names', decisions }],
       };
     }
+    case 'edit-names': {
+      // `editNames()` of the hook ("name N pieces"): every name typed at once, same as edit-name
+      const edits = new Map(
+        a.edits.map((e) => [e.seed, { code: e.code, mods: e.mods, displayName: e.displayName }]),
+      );
+      const staleFabric = !!i.assignment?.aiOnly?.some((x) => edits.has(x.seed));
+      const known = new Set(s.names.map((n) => n.seed));
+      const decisions: NameDecision[] = [
+        ...s.names.map((n) => (edits.has(n.seed) ? { ...n, ...edits.get(n.seed)! } : n)),
+        ...[...edits]
+          .filter(([sd]) => !known.has(sd))
+          .map(([sd, p]) => ({ ...textNameOf(sd, s.semantics, i.overrides[sd]), ...p })),
+      ];
+      return {
+        patch: {
+          editedNames: [...new Set([...i.editedNames, ...edits.keys()])],
+          confirmedNames: [...new Set([...i.confirmedNames, ...edits.keys()])],
+          ...(staleFabric ? { assignment: null } : {}),
+        },
+        events: [{ type: 'names', decisions }],
+      };
+    }
     case 'fabrics':
       return { events: [{ type: 'fabrics', assignment: a.assignment }] };
   }
@@ -444,8 +472,12 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     }
     case 'set-aside':
       return { aside: +(a.ref?.match(/^aside:(\d+)/)?.[1] ?? -1), keepAside: true };
-    case 'name-code':
-      return { seed: sd ?? null, code: a.answer };
+    case 'name-code': {
+      const e = act?.kind === 'edit-names' ? act.edits.find((x) => x.seed === sd) : undefined;
+      return e
+        ? { seed: e.seed, code: e.code, mods: [...e.mods] }
+        : { seed: sd ?? null, code: a.answer };
+    }
     case 'grain-proposal':
     case 'grain-axis': {
       const g = act?.kind === 'semantics' && sd != null ? act.patch.operatorGrain?.[sd] : undefined;
@@ -1335,75 +1367,57 @@ function meaningStep(snap: Snap): AutopilotDecision {
   const operatorFold = { ...i.operatorFold };
   const out: Assumption[] = [];
   let touched = false;
-  const unnamed = sem.blocked.filter(
-    (b) => b.reason === 'grammar' || b.reason === 'duplicate-identity',
-  );
+  // CODE lane: the wizard's own "name N pieces" (bulk-names.ts) — the same codes, the same taken
+  // set, and a DRAWN pair (FP_L beside FP_R) gets ONE code with its hands: renamed apart, each hand
+  // would be re-read as a pair of its own (a doubled cut). One answer for all, as the button gives.
+  const unnamed = codeBlocked(sem.blocked);
   if (unnamed.length) {
-    const named = new Set(s.names.map((n) => n.seed));
-    const codes = deterministicCodes(
-      unnamed.flatMap((b) => {
-        const f = famOf(b.seed);
-        const c = f?.candidates[f.candidates.length - 1];
-        return c ? [{ seed: b.seed, box: c.bbox }] : [];
-      }),
-      sem.pieces.map((p) => p.identity),
+    const asked = new Set(unnamed.map((b) => b.seed));
+    const bulk = bulkNames(
+      sem.blocked,
+      (sd) => {
+        const f = famOf(sd);
+        return f?.candidates[f.candidates.length - 1]?.bbox ?? null;
+      },
+      [
+        ...sem.pieces.map((p) => p.identity),
+        ...s.names.filter((n) => n.code && !asked.has(n.seed)).map((n) => n.code),
+      ],
       card.sizes.map((c) => c.token),
+      (sd) => seeds.find((x) => x.id === sd)?.text?.text ?? null,
     );
-    // a seed with a name decision (AI / DXF) is renamed through the names table: one per tick
-    const viaNames = unnamed.find((b) => named.has(b.seed) && codes.has(b.seed));
-    if (viaNames) {
-      const code = codes.get(viaNames.seed)!;
+    if (bulk.size) {
+      const why = new Map(unnamed.map((b) => [b.seed, b] as const));
       return {
         actions: [
           {
-            kind: 'edit-name',
-            seed: viaNames.seed,
-            code,
-            mods: [],
-            displayName: `piece ${code.slice(1)}`,
+            kind: 'edit-names',
+            edits: [...bulk].map(([seed, n]) => ({ seed, ...n })),
           },
         ],
-        assumptions: [
-          A(
+        assumptions: [...bulk].map(([seed, n]) => {
+          const b = why.get(seed);
+          const pair = n.mods.length > 0;
+          return A(
             'meaning',
             'name-code',
-            subj(viaNames.seed),
-            code,
-            'the name the run had is refused by the identity rule: a deterministic code in reading order',
-            [viaNames.detail.slice(0, 140)],
+            subj(seed),
+            [n.code, ...n.mods].join('_'),
+            (pair
+              ? 'a drawn pair: both hands one deterministic code in reading order, each keeps its hand — '
+              : '') +
+              (b?.reason === 'duplicate-identity'
+                ? 'a name another piece already has: a deterministic code in reading order'
+                : b?.reason === 'grammar'
+                  ? 'nothing names the piece usably (no AI, no DXF block, no title on the sheet, or a name the identity rule refuses): a deterministic code in reading order'
+                  : 'the other hand of a drawn pair renamed with its twin: one code, both hands'),
+            [(b?.detail ?? '').slice(0, 140), `display name «${n.displayName}»`].filter(Boolean),
             0.5,
             false,
-            viaNames.seed,
-          ),
-        ],
+            seed,
+          );
+        }),
       };
-    }
-    for (const b of unnamed) {
-      const code = codes.get(b.seed);
-      if (!code) continue;
-      overrides[b.seed] = {
-        ...(overrides[b.seed] ?? {}),
-        code,
-        mods: [],
-        displayName: `piece ${code.slice(1)}`,
-        nameOrigin: 'operator',
-      };
-      touched = true;
-      out.push(
-        A(
-          'meaning',
-          'name-code',
-          subj(b.seed),
-          code,
-          b.reason === 'duplicate-identity'
-            ? 'a name another piece already has: a deterministic code in reading order'
-            : 'nothing names the piece (no AI, no DXF block, no title on the sheet): a deterministic code in reading order',
-          [b.detail.slice(0, 140)],
-          0.5,
-          false,
-          b.seed,
-        ),
-      );
     }
   }
   for (const b of sem.blocked.filter((x) => x.reason === 'no-grain')) {
