@@ -74,7 +74,7 @@ export type CornerOut = {
   joined: Map<number, number>;
   /** Chains closed into a loop by a corner. */
   closedLoops: number[];
-  /** Ends ("chain:end") a corner closed — nothing lands from them. */
+  /** Ends ("chain:end") a corner closed, or of an own corner left open — nothing lands from them. */
   reached: Set<string>;
   stubs: number;
   ramps: number;
