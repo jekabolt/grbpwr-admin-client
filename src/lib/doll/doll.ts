@@ -6697,6 +6697,8 @@ export function solveDoll(input: DollInput): DollReport {
       const hp = H.mesh.pts;
       for (const q of mesh.pts) {
         const p = fit.map(q);
+        // The part folded under the host's edge lies a layer deeper than the rest.
+        const liftQ = fit.under?.(q) ? lift + 2 : lift;
         // The host triangle under p (or the nearest one, the point clamped onto it).
         let bt = 0;
         let bw: [number, number, number] = [1, 0, 0];
@@ -6735,7 +6737,7 @@ export function solveDoll(input: DollInput): DollReport {
         const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
         // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
         // to (a patch pocket would lie over it — the drawing does not tell which).
-        for (let d = 0; d < 3; d++) surfacePos.push(X[d] - (lift * Nn[d]) / nl);
+        for (let d = 0; d < 3; d++) surfacePos.push(X[d] - (liftQ * Nn[d]) / nl);
       }
       const flip = flipH !== fit.flip;
       const tris = new Uint32Array(mesh.tris.length);
@@ -6764,7 +6766,7 @@ export function solveDoll(input: DollInput): DollReport {
         join: hk.join,
         placed: true,
         note,
-        pastEdgePct: Math.round(100 * (1 - fit.cover)),
+        pastEdgePct: Math.round(100 * Math.max(0, 1 - fit.cover)),
       });
       warnings.push(`surface piece ${k}: ${note}`);
     }

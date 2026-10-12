@@ -42,15 +42,47 @@ export function surfaceHosts(
 }
 
 export type SurfaceFit = {
-  /** Piece frame → host frame. */
+  /** Piece frame → host frame (a point past the host's edge comes back folded under it). */
   map: (p: Pt2) => Pt2;
   /** The piece lies face down (mirrored) on the host. */
   flip: boolean;
-  /** Share of the piece's contour on the host panel. */
+  /** Share of the piece's contour on the host panel, as drawn (after the fold). */
   cover: number;
+  /** Share of the piece that reached past the host's edge before the fold, 0..1. */
+  past: number;
+  /** The point (piece frame) lies on the part folded under the host's edge. */
+  under?: (p: Pt2) => boolean;
   /** How the place was read, in words. */
   how: string;
 };
+
+/**
+ * A point past the host's edge folded back under the host: reflected across the nearest edge
+ * segment's line — the fold line IS the panel's edge (a fly shield turned to the inside, a facing
+ * pressed round the edge). A point on the host is returned as it is.
+ */
+function foldUnder(q: Pt2, ring: readonly Pt2[], H: PolyIndex): Pt2 {
+  if (H.covers(q)) return q;
+  let best: [Pt2, Pt2] | null = null;
+  let bd = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const d = segD(q, ring[j], ring[i]);
+    if (d < bd) {
+      bd = d;
+      best = [ring[j], ring[i]];
+    }
+  }
+  if (!best) return q;
+  const [a, b] = best;
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  if (l2 < 1e-9) return q;
+  const t = ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2;
+  const px = a[0] + t * dx;
+  const py = a[1] + t * dy;
+  return [2 * px - q[0], 2 * py - q[1]];
+}
 
 const box = (pts: readonly Pt2[]) => {
   let x0 = Infinity;
@@ -264,15 +296,23 @@ export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
           : mark.x1 - sb.x1
         : cx - (sb.x0 + sb.x1) / 2;
     const dy = mark.cy - (sb.y0 + sb.y1) / 2;
-    const map = (p: Pt2): Pt2 => [p[0] + tx, p[1] + dy];
-    const cover = coverOf(S.rs.map(map), HI);
-    if (cover >= (wide ? 0.45 : 0.6))
+    const raw = (p: Pt2): Pt2 => [p[0] + tx, p[1] + dy];
+    const coverRaw = coverOf(S.rs.map(raw), HI);
+    if (coverRaw >= (wide ? 0.45 : 0.6)) {
+      // What reaches past the panel's edge is folded under it (a shield turned to the inside):
+      // never left standing off the panel.
+      const map = (p: Pt2): Pt2 => foldUnder(raw(p), H.rs, HI);
+      const cover = coverOf(S.rs.map(map), HI);
+      const past = 1 - coverRaw;
       return {
         map,
         flip: false,
         cover,
-        how: `on the ${mark.kind === 'vee' ? 'stitch line' : 'placement mark'} drawn on it (piece ${Math.round(sb.w)}×${Math.round(sb.h)} mm, mark ${Math.round(mark.w)} mm wide, heights within ${Math.round(100 * mark.e)} %)${wide && cover < 0.95 ? ` — ${Math.round(100 * (1 - cover))} % of it reaches past the panel's edge (a shield folded under the other side) and is drawn pressed onto that edge` : ''}`,
+        past,
+        ...(past > 0.02 ? { under: (p: Pt2) => !HI.covers(raw(p)) } : {}),
+        how: `on the ${mark.kind === 'vee' ? 'stitch line' : 'placement mark'} drawn on it (piece ${Math.round(sb.w)}×${Math.round(sb.h)} mm, mark ${Math.round(mark.w)} mm wide, heights within ${Math.round(100 * mark.e)} %)${past > 0.02 ? ` — ${Math.round(100 * past)} % of it reaches past the panel's edge: folded under the panel along that edge (a shield turned to the inside)${cover < 0.95 ? `, ${Math.round(100 * (1 - cover))} % still past it` : ''}` : ''}`,
       };
+    }
   }
   // 2. The corner of the host the piece fits: a corner of the piece with its two edges along the
   //    two edges of a host corner, face up (or face down — penalised), wholly on the panel.
@@ -318,6 +358,7 @@ export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
               map,
               flip,
               cover,
+              past: 1 - cover,
               score,
               how: `no placement mark on it — laid into the panel corner it fits (${Math.round((angB / DEG + 360) % 360)}° corner at ${top > 0.66 ? 'the top' : top < 0.33 ? 'the bottom' : 'mid-height'} of the panel${flip ? ', face down' : ''}): a reading of the shapes, not a drawn position`,
             };
@@ -325,5 +366,7 @@ export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
         }
       }
   }
-  return best ? { map: best.map, flip: best.flip, cover: best.cover, how: best.how } : null;
+  return best
+    ? { map: best.map, flip: best.flip, cover: best.cover, past: best.past, how: best.how }
+    : null;
 }
