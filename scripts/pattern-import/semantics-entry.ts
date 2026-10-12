@@ -557,6 +557,28 @@ export async function main(): Promise<number> {
       'negative control: a bevelled corner deviates (closer than the allowance at the corner)',
       `${bevDev.toFixed(3)} mm`,
     );
+    // Codex R2: a lobe that stays within the mitre's RADIUS but outside the mitre (r = 12 around
+    // the corner, past both shifted sides) is still a deviation
+    const arc12: PtMm[] = [];
+    for (let k = 0; k <= 20; k++) {
+      const t = (-Math.PI / 2) * (1 - k / 20);
+      arc12.push({ x: 100 + 12 * Math.cos(t), y: 12 * Math.sin(t) });
+    }
+    const round12 = [
+      { x: 0, y: -10 },
+      { x: 100, y: -10 },
+      ...arc12,
+      { x: 110, y: 0 },
+      { x: 110, y: 110 },
+      { x: -10, y: 110 },
+      { x: -10, y: 0 },
+    ];
+    const r12Dev = parallelDeviation(round12, sq, 10);
+    ck(
+      r12Dev > 1,
+      'negative control: an r = 12 lobe inside the mitre radius but past the shifted sides deviates',
+      `${r12Dev.toFixed(3)} mm`,
+    );
     const lobe = [...r.pts.slice(0, 2), { x: 140, y: 50 }, ...r.pts.slice(2)];
     const lobeDev = parallelDeviation(lobe, sq, 10);
     ck(

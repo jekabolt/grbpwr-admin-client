@@ -18,7 +18,8 @@
 //   13  drill holes: POINT at the centre
 //   14  sew line
 //   15  annotation text: the piece's human name, "CUT ON FOLD"
-// TABLES declare every layer (LTYPE CONTINUOUS + DASHED for the sew line, STYLE STANDARD); text is
+// TABLES declare every layer (LTYPE BYBLOCK/BYLAYER/CONTINUOUS + DASHED for the sew line, STYLE
+// STANDARD); POLYLINEs carry no header point (as CLO-AAMA writes them, and our readers expect); text is
 // ASCII by transliteration (`asciiText`), never `\U+` escapes (R2000+ only).
 
 import type { PtMm } from '../types';
@@ -90,7 +91,16 @@ export function writeR12(
   E(2, 'TABLES');
   E(0, 'TABLE');
   E(2, 'LTYPE');
-  E(70, '2');
+  E(70, '4');
+  for (const reserved of ['BYBLOCK', 'BYLAYER']) {
+    E(0, 'LTYPE');
+    E(2, reserved);
+    E(70, '0');
+    E(3, '');
+    E(72, '65');
+    E(73, '0');
+    E(40, num(0));
+  }
   E(0, 'LTYPE');
   E(2, 'CONTINUOUS');
   E(70, '0');

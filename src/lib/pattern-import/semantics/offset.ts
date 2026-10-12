@@ -233,28 +233,57 @@ function rawOffset(
 }
 
 /**
- * How far each mitred corner's join reaches from its vertex (mm): the mitre point, or the far end
- * of the square cut. Every other vertex is joined round — its reach is |d|.
+ * Each mitred corner's JOIN REGION: the polygon vertex → shifted side end → mitre point (or the two
+ * ends of the square cut) → other shifted side end. Every other vertex is joined round — nothing of
+ * the offset may lie further than |d| from the source there.
  */
-function joinReach(
+function joinWedges(
   src: readonly PtMm[],
   d: number,
   limit: number,
   anyConvex: boolean,
-): { p: PtMm; r: number }[] {
-  const out: { p: PtMm; r: number }[] = [];
+): { p: PtMm; r: number; poly: PtMm[] }[] {
+  const n = src.length;
+  const nrm = edgeNormals(src);
+  const out: { p: PtMm; r: number; poly: PtMm[] }[] = [];
   for (const [j, m] of cornerJoins(src, d, limit, anyConvex)) {
     const P = src[j];
-    out.push({ p: P, r: Math.max(...m.map((q) => Math.hypot(q.x - P.x, q.y - P.y))) });
+    const nk = nrm[(j - 1 + n) % n];
+    const nj = nrm[j];
+    const poly = [
+      P,
+      { x: P.x + d * nk.x, y: P.y + d * nk.y },
+      ...m,
+      { x: P.x + d * nj.x, y: P.y + d * nj.y },
+    ];
+    out.push({ p: P, r: Math.max(...poly.map((q) => Math.hypot(q.x - P.x, q.y - P.y))), poly });
   }
   return out;
+}
+
+/** How far q lies outside the polygon (0 inside or on it). */
+function outsideOf(q: PtMm, poly: readonly PtMm[]): number {
+  let inside = false;
+  let best = Infinity;
+  for (let i = 0, k = poly.length - 1; i < poly.length; k = i++) {
+    const a = poly[k];
+    const b = poly[i];
+    if (a.y > q.y !== b.y > q.y && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x)
+      inside = !inside;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2)) : 0;
+    best = Math.min(best, Math.hypot(q.x - a.x - t * dx, q.y - a.y - t * dy));
+  }
+  return inside ? 0 : best;
 }
 
 /**
  * Max deviation of `result` from the d-offset of `src` with mitred corners (`cornerJoins`),
  * sampled every 0.5 mm along the result: a point is never closer than |d| to the source (a bitten
  * bay, a bevelled corner, a hull collapse across a neck), and never further than |d| unless it lies
- * within a mitred corner's reach (the mitre, or the square cut past MITER_LIMIT). A stray lobe, a
+ * inside a mitred corner's join region (the mitre, or the square cut past MITER_LIMIT). A stray lobe, a
  * mitre on a step or a lost side shows as a deviation. `join: 'round'` allows no reach past |d|;
  * `lenient` lets every convex turn in range be a corner (the gate reads a file whose writer decided).
  */
@@ -267,16 +296,16 @@ export function parallelDeviation(
   const limit = opts.limit ?? MITER_LIMIT;
   const ad = Math.abs(d);
   const idx = new SegIndex([{ pts: src, closed: true }], 5);
-  const reach = opts.join === 'round' ? [] : joinReach(src, d, limit, !!opts.lenient);
+  const reach = opts.join === 'round' ? [] : joinWedges(src, d, limit, !!opts.lenient);
   const cell = Math.max(5, ad * limit);
-  const grid = new Map<string, { p: PtMm; r: number }[]>();
+  const grid = new Map<string, { p: PtMm; r: number; poly: PtMm[] }[]>();
   for (const v of reach) {
     const key = `${Math.floor(v.p.x / cell)},${Math.floor(v.p.y / cell)}`;
     const a = grid.get(key);
     if (a) a.push(v);
     else grid.set(key, [v]);
   }
-  /** Distance past the reach of the nearest-fitting convex corner join (0 = inside one). */
+  /** Distance outside the nearest mitred corner's join region (0 = inside one). */
   const pastJoins = (q: PtMm, e: number): number => {
     const cx = Math.floor(q.x / cell);
     const cy = Math.floor(q.y / cell);
@@ -284,7 +313,8 @@ export function parallelDeviation(
     for (let x = cx - 1; x <= cx + 1; x++)
       for (let y = cy - 1; y <= cy + 1; y++)
         for (const v of grid.get(`${x},${y}`) ?? []) {
-          const over = Math.hypot(q.x - v.p.x, q.y - v.p.y) - v.r;
+          if (Math.hypot(q.x - v.p.x, q.y - v.p.y) > v.r + best) continue;
+          const over = outsideOf(q, v.poly);
           if (over < best) best = over;
           if (best <= 0) return 0;
         }
