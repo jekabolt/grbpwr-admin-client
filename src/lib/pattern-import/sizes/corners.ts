@@ -319,7 +319,7 @@ export function closeCorners(
     free0(s0, near0);
     free0(s1, near1);
     if (!near0.length && !near1.length) continue;
-    const ok: { k0: number; k1: number; r: number; d: number }[] = [];
+    const ok: { k0: number; k1: number; r: number; d: number; x: PtMm }[] = [];
     for (const k0 of near0)
       for (const k1 of near1) {
         const A = ends[k0];
@@ -344,7 +344,7 @@ export function closeCorners(
           (q) => Math.min(segNearest(q, x.x, armA).d, segNearest(q, x.x, armB).d) <= CORNER.armMm,
         );
         if (!onArms) continue;
-        ok.push({ k0, k1, r: A.rank, d });
+        ok.push({ k0, k1, r: A.rank, d, x: x.x });
       }
     if (!ok.length) {
       if (near0.length && near1.length) refuse('stub: no (a)+(b)');
@@ -364,7 +364,8 @@ export function closeCorners(
     links.push({
       a: { c: A.c, end: A.end },
       b: { c: B.c, end: B.end },
-      via: ch.pts.slice(),
+      // the stub as its two clean arms: end → the edges' crossing → end (no stray bend of its own)
+      via: [s0, best.x, s1],
       rule: 'stub',
       rank: best.r,
       stub: c,
