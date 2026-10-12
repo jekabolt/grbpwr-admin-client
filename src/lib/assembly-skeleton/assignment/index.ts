@@ -9,7 +9,7 @@
 // solver's rides along on `graph.shadow` for comparison (yarn seams:score scores both); global =
 // the solver's graph is the one drawn.
 
-import { edgeIdsOf, type CandidatePool, type PoolCand } from '../geometry/match';
+import { edgeIdsOf, isTubePair, type CandidatePool, type PoolCand } from '../geometry/match';
 import type {
   SeamAssignmentInput,
   SeamAssignmentSummary,
@@ -74,7 +74,13 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
       .filter((p) => p.cloth === 'lining' || (!p.cloth && liningByName(p.name)))
       .map((p) => p.pieceKey),
   );
-  const { ops, words } = buildOperations(P.pieces, input.joins, skip, surface, lining);
+  // Pieces the drawing reads as a tube (a self pair along two equal lengthwise edges — a sleeve's
+  // underarm), for inputs whose names read no role.
+  const tubeLike = new Set<string>();
+  for (const c of P.all)
+    if (c.evidence.self && c.kind === 'edge' && isTubePair(c.u, c.v))
+      tubeLike.add(c.u.piece.pieceKey);
+  const { ops, words } = buildOperations(P.pieces, input.joins, skip, surface, lining, tubeLike);
   warnings.push(...words);
   const board = new Board(P, ops);
 

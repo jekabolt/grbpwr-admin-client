@@ -70,7 +70,10 @@ export function graphOf(
 ): SeamGraph {
   const { pieces, decisions, rules } = P;
   const chosenC = new Set<PoolCand>();
-  for (const v of sol.chosen) chosenC.add(v.cand);
+  for (const v of sol.chosen) {
+    chosenC.add(v.cand);
+    if (v.origin) chosenC.add(v.origin);
+  }
   const byId = new Map(P.all.map((c) => [candId(c), c]));
   const assigned: SeamCandidate[] = [];
   for (const s of sol.perOp)

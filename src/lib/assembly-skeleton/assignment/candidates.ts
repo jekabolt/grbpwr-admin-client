@@ -5,10 +5,16 @@
 // variable at all — that is the order's word. Phase 2 reads the pool's pair candidates (an edge or a
 // two-edge chain on each side); the composite / partial / sandwich candidates of phase 3 land here.
 
-import { candId, type CandidatePool, type PoolCand } from '../geometry/match';
+import { candId, isTubePair, type CandidatePool, type PoolCand } from '../geometry/match';
 import { SKELETON, type EdgeId } from '../types';
 import { benefitOf, FORCE_FLOOR, roleVeto } from './costs';
-import type { Operation, Variable } from './model';
+import {
+  TUBE_CLASSES,
+  TUBE_PAIR_PENALTY,
+  TUBE_SELF_PENALTY,
+  type Operation,
+  type Variable,
+} from './model';
 import type { Board } from './solve';
 
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
@@ -66,7 +72,42 @@ export function variableOf(
   v.benefit -= board.annotate(v);
   // A third piece onto a ply pair: both plies take it; reported on the first-named ply.
   if (!v.ply && !self && board.isSecondPly(pa) !== board.isSecondPly(pb)) v.benefit -= 1;
+  // A pair between a tube input and another input of its operation: the tube meets the body along
+  // a composite edge — a single pair there is a coincidence more often than a seam (model.ts).
+  const classes = ops[at.op].classes;
+  if (!self && TUBE_CLASSES.has(classes[at.ia]) !== TUBE_CLASSES.has(classes[at.ib]))
+    v.benefit -= TUBE_PAIR_PENALTY;
   return v;
+}
+
+/**
+ * The pool drops a self seam that loses to a regular candidate on one of its edges (match.ts
+ * `weak`) and prices every fold alike. A TUBE seam of a piece in a tube input (a sleeve's underarm)
+ * is re-read for the solver: kept as a variable with the tube's own self penalty, so it competes
+ * with the coincidental pair on its edge instead of yielding to it. Returns the re-priced copy
+ * (the pool itself is not touched — the greedy reads it too), or null.
+ */
+export function tubeSelfOf(c: PoolCand, ops: readonly Operation[]): PoolCand | null {
+  if (!c.evidence.self || c.kind !== 'edge') return null;
+  if (c.dropped && !/self seam loses to a regular candidate/.test(c.dropped)) return null;
+  if (!isTubePair(c.u, c.v)) return null;
+  // Only a SLEEVE input: a collar's or a cuff's two ends are a tube pair by the drawing too, and
+  // they are never sewn to each other (12.10 corpus: three collars closed into rings).
+  const k = c.u.piece.pieceKey;
+  const tube = ops.some((op) =>
+    op.inputs.some((X, i) => X.includes(k) && op.classes[i] === 'sleeve'),
+  );
+  if (!tube) return null;
+  const score = c.score + SKELETON.selfPenalty - TUBE_SELF_PENALTY;
+  return {
+    ...c,
+    score,
+    dropped: undefined,
+    evidence: {
+      ...c.evidence,
+      rule: `tube seam: the piece's two lengthwise edges, equal, on opposite sides (a sleeve's underarm) — a tube onto the body is sewn to itself first${c.dropped ? ' (the pool had it losing to a pair on this edge)' : ''}`,
+    },
+  };
 }
 
 export function variablesOf(
@@ -80,8 +121,11 @@ export function variablesOf(
 ): Variable[] {
   const opOf = operationOf(ops);
   const out: Variable[] = [];
-  for (const c of P.all) {
-    if (c.dropped || c.kind === 'closure-not-seam' || forcedSame.has(c)) continue;
+  for (const c0 of P.all) {
+    if (c0.kind === 'closure-not-seam' || forcedSame.has(c0)) continue;
+    const tube = tubeSelfOf(c0, ops);
+    if (c0.dropped && !tube) continue;
+    const c = tube ?? c0;
     const pa = c.u.piece.pieceKey;
     const pb = c.v.piece.pieceKey;
     if (skip.has(pa) || skip.has(pb)) continue;
@@ -90,6 +134,7 @@ export function variablesOf(
     if (pa !== pb && roleVeto(c.u.piece, c.v.piece)) continue;
     const v = variableOf(c, ops, board, opOf);
     if (!v) continue;
+    if (tube) v.origin = c0;
     const floor = ops[v.op].slack > 0 ? FORCE_FLOOR : SKELETON.accept;
     if (c.score < floor - 1e-9) continue;
     if (!board.free(v)) continue;

@@ -12,6 +12,10 @@
 import type { EdgeId, SeamAssignmentSummary, SeamCandidate } from '../types';
 import type { PoolCand } from '../geometry/match';
 
+/** Coarse class of an operation's input by its pieces (operations.ts). */
+export type InputClass = 'body' | 'sleeve' | 'neck' | 'cuff' | 'band' | 'other';
+export const TUBE_CLASSES: ReadonlySet<InputClass> = new Set(['sleeve', 'neck', 'cuff', 'band']);
+
 /** One operation of the order as the solver sees it: its inputs as sets of shell piece keys. */
 export type Operation = {
   /** `op:<i>` for the order's operations; `op:whole` (no order); `op:residual` (pieces left out). */
@@ -21,6 +25,12 @@ export type Operation = {
   /** Shell piece keys per input (pieces the order sews into this operation, by unit). */
   inputs: string[][];
   kind: 'order' | 'whole' | 'residual';
+  /**
+   * Coarse class of each input (operations.ts classOfInput): a tube or ring (a sleeve, a collar, a
+   * cuff, a band) meets the body along a COMPOSITE edge, so a plain pair between a tube input and
+   * another input of the operation is a coincidence more often than a seam (candidates.ts).
+   */
+  classes: InputClass[];
   /**
    * The order says these inputs ARE joined: the objective pays `slack` for every input left apart,
    * so a sub-accept seam that joins them is taken. 0 for the whole-card / residual operations and
@@ -34,6 +44,8 @@ export type Variable = {
   /** The pool candidate's identity (edge ids sorted). */
   id: string;
   cand: PoolCand;
+  /** The pool's own candidate when `cand` is a re-priced copy of it (a tube self seam). */
+  origin?: PoolCand;
   /** Edge ids of each run. */
   ea: EdgeId[];
   eb: EdgeId[];
@@ -111,3 +123,18 @@ export const MARGIN_NODE_BUDGET = 4_000;
 export const MARGIN_BUDGET = 120_000;
 /** Cost of one face-up layout rule broken (solve.ts layoutPenalty): a notch band's worth. */
 export const LAYOUT_PENALTY = 40;
+/**
+ * A PAIR between a tube / ring input (a sleeve, a collar, a cuff, a band) and another input of its
+ * operation: the tube meets the body along a composite edge (an armhole is half front, half back),
+ * so a single edge pair there is a length coincidence more often than a seam (12.10 corpus, card 9:
+ * the sleeves' underarm edges 211 onto the body's side edges 210 / 207 — the side seams lost, the
+ * sleeves never closed). Above the length term (8) and most ends / shape terms; below a notch band
+ * (14) plus the length term — a notched pair still wins.
+ */
+export const TUBE_PAIR_PENALTY = 25;
+/**
+ * The self penalty of a TUBE seam (a sleeve's underarm: the piece's two lengthwise edges, equal,
+ * on opposite sides — match.ts isTubePair) of a piece in a tube input, in score units: the pool's
+ * SKELETON.selfPenalty (0.2) is for any fold; a classified tube is what a sleeve is.
+ */
+export const TUBE_SELF_PENALTY = 0.05;
