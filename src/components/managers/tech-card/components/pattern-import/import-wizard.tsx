@@ -6,7 +6,7 @@
 // door back (contract: `back{to}` keeps that step's inputs, drops the outputs after it).
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ImportSession } from 'lib/pattern-import/types';
+import type { ImportSession, SeedId } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
@@ -29,7 +29,7 @@ import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
 import type { FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import { CheckStep } from './steps/check';
-import { DetailsStep } from './steps/details';
+import { DetailsStep, firstBlockedSeed } from './steps/details';
 import { FabricsStep } from './steps/fabrics';
 import { FilesStep } from './steps/files';
 import { cleanLine } from './steps/files-clean';
@@ -279,6 +279,12 @@ function WizardBody({
   // "fix in pieces" from check / details: the piece and size to show, and why (M1, M5). It lives
   // while the pieces step is open and is dropped when the operator leaves it.
   const [focus, setFocus] = useState<PieceFocus | null>(null);
+  // the footer's "N pieces are blocked" → the details step selects the first blocked row
+  const [detailsJump, setDetailsJump] = useState<{ seed: SeedId; n: number } | null>(null);
+  const jumpSeed =
+    session.step === 'meaning'
+      ? firstBlockedSeed(session.semantics, session.pieces?.families ?? [])
+      : null;
   useEffect(() => {
     if (session.step !== 'pieces') setFocus(null);
   }, [session.step]);
@@ -340,7 +346,7 @@ function WizardBody({
           />
         );
       case 'meaning':
-        return <DetailsStep api={api} card={card} onFixInPieces={fixInPieces} />;
+        return <DetailsStep api={api} card={card} onFixInPieces={fixInPieces} jump={detailsJump} />;
       case 'fabrics':
         return <FabricsStep api={api} card={card} />;
       case 'check':
@@ -558,6 +564,21 @@ function WizardBody({
                     message={session.error}
                     onReport={api.downloadReport}
                   />
+                ) : blocker && jumpSeed != null ? (
+                  // a blocked piece: the sentence is the way to it (its row selected, its actions
+                  // focused in the side panel)
+                  <Text size='micro' component='p' className='text-warning'>
+                    <button
+                      type='button'
+                      className='cursor-pointer text-left underline'
+                      title='select the first blocked piece and show what to do'
+                      onClick={() =>
+                        setDetailsJump((j) => ({ seed: jumpSeed, n: (j?.n ?? 0) + 1 }))
+                      }
+                    >
+                      ! {blocker}
+                    </button>
+                  </Text>
                 ) : blocker ? (
                   <Text size='micro' component='p' className='text-warning'>
                     ! {blocker}

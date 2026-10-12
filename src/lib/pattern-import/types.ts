@@ -1247,6 +1247,30 @@ export type FoldAsk = {
   why: string;
 };
 
+/**
+ * A fold that was answered but does not hold in every size ('fold-unresolved'): the operator's
+ * picked edge (or the source's own fold line) has no matching straight edge in `size`, or
+ * unfolding across it there fails. Carries what the details step needs to ask again — the edges
+ * of the size the pick lies on — never an answer (D3: the fold is never answered for the operator).
+ */
+export type FoldMiss = {
+  seed: SeedId;
+  /** Source rank `edges` and `picked` lie on (the largest exported size, where the pick was made). */
+  rank: number;
+  /** That size's token. */
+  refSize: string;
+  /** The first size the fold does not hold in (sizes are checked in order; the check stops there). */
+  size: string;
+  /** no-edge: no straight edge there matches (the loose match was tried); unfold: the unfold fails. */
+  kind: 'no-edge' | 'unfold';
+  /** unfold: why the unfold is not a believable piece. */
+  problem: string | null;
+  /** The operator's pick; null = the fold line is drawn in the source (a pick does not replace it). */
+  picked: { a: PtMm; b: PtMm } | null;
+  /** Straight outline edges of the reference size a half could be unfolded across, longest first. */
+  edges: FoldAsk['edges'];
+};
+
 export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** Seeds that cannot be exported yet and why (no grain, offset failed, grammar). */
@@ -1254,6 +1278,8 @@ export type SemanticsOutput = {
   warnings: string[];
   /** Open fold questions, one per seed blocked 'fold-question' (absent = none). */
   folds?: FoldAsk[];
+  /** One per seed blocked 'fold-unresolved': which size the answered fold fails in (absent = none). */
+  foldMisses?: FoldMiss[];
   /** The cutting list's fold pieces are not all unfolded and not yet checked (absent = fine). */
   foldList?: FoldListCheck;
   /**
