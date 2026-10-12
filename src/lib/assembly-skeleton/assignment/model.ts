@@ -101,8 +101,13 @@ export const SLACK = 20;
 /** Margin (objective units) at which an assigned seam is called sure / likely; below = ambiguous. */
 export const MARGIN_SURE = 15;
 export const MARGIN_LIKELY = 5;
-/** Default exact-search node budget for the card, and per margin re-solve. */
-export const NODE_BUDGET = 60_000;
+/**
+ * Default exact-search node budget for the card (all components together), the budget of one margin
+ * re-solve and of all of them. Nodes, never a clock: the same card reads the same on every machine
+ * (a confirmed seam is stored against this reading).
+ */
+export const NODE_BUDGET = 80_000;
 export const MARGIN_NODE_BUDGET = 4_000;
-/** Default time budget for one card (ms); past it, remaining operations take the greedy incumbent. */
-export const MS_BUDGET = 600;
+export const MARGIN_BUDGET = 120_000;
+/** Cost of one face-up layout rule broken (solve.ts layoutPenalty): a notch band's worth. */
+export const LAYOUT_PENALTY = 40;

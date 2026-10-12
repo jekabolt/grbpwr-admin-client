@@ -18,8 +18,8 @@ import type {
 } from '../types';
 import { liningByName } from '../names';
 import { graphOf, sameAs } from './adapt';
-import { variablesOf } from './candidates';
-import { MS_BUDGET, NODE_BUDGET } from './model';
+import { operationOf, variableOf, variablesOf } from './candidates';
+import { MARGIN_BUDGET, NODE_BUDGET, type Variable } from './model';
 import { buildOperations, surfacePieces } from './operations';
 import { Board, solveCard } from './solve';
 
@@ -62,7 +62,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   const warnings = [...P.warnings];
   const conflicts: string[] = [];
   const nodeBudget = input.nodeBudget ?? NODE_BUDGET;
-  const msBudget = input.msBudget ?? MS_BUDGET;
+  const marginBudget = input.marginBudget ?? MARGIN_BUDGET;
 
   // Operations.
   const skip = new Set<string>();
@@ -78,7 +78,10 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   warnings.push(...words);
   const board = new Board(P, ops);
 
-  // Stored decisions first: a confirmed seam never competes, a stored closure blocks its edges.
+  // Stored decisions first: a confirmed seam never competes, a stored closure blocks its edges. A
+  // confirmed seam the pool scored too is a FIXED variable: it joins its operation's inputs, sets
+  // the parity and the ply mates like any seam (never searched over); one the pool did not score (a
+  // stored composite / partial) occupies its edges only.
   const decisions = P.decisions;
   const idsOf = (c: SeamCandidate, s: 'a' | 'b') =>
     s === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b);
@@ -86,18 +89,30 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   const decidedClosures = decisions?.closures ?? [];
   const forcedSame = new Set<PoolCand>();
   const forced: SeamCandidate[] = [];
+  const fixed: Variable[] = [];
+  const opOf = operationOf(ops);
   for (const c of [...forcedIn, ...decidedClosures]) {
     const A = idsOf(c, 'a');
     const B = idsOf(c, 'b');
+    const same = c.kind === 'closure-not-seam' ? undefined : sameAs(P, c);
+    const v = same ? variableOf(same, ops, board, opOf) : null;
     const taken = [...A, ...B].filter((e) => (board.uses.get(e) ?? []).length);
-    if (taken.length)
+    if (taken.length || (v && !board.feasible(v)))
       conflicts.push(
-        `${c.kind === 'closure-not-seam' ? 'stored closure' : 'confirmed seam'} ${c.a} ↔ ${c.b}: ${taken.join(', ')} already sewn by another stored decision — both kept, one of them cannot close`,
+        `${c.kind === 'closure-not-seam' ? 'stored closure' : 'confirmed seam'} ${c.a} ↔ ${c.b}: ${
+          taken.length
+            ? `${taken.join(', ')} already sewn by another stored decision`
+            : "contradicts another stored decision (left against right, or the piece's other side)"
+        } — both kept, one of them cannot close`,
       );
-    board.occupy(A, B);
-    board.occupy(B, A);
+    if (v) {
+      board.apply(v);
+      fixed.push(v);
+    } else {
+      board.occupy(A, B);
+      board.occupy(B, A);
+    }
     if (c.kind === 'closure-not-seam') continue;
-    const same = sameAs(P, c);
     if (same) forcedSame.add(same);
     forced.push(
       same && !c.aParts && !c.bParts
@@ -121,8 +136,9 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     warnings.push(`${c.u.id} ↔ ${c.v.id} is a closure, not a seam (${c.evidence.rule})`);
   }
 
-  const vars = variablesOf(P, ops, board, forcedSame, skip, surface);
-  const sol = solveCard(vars, ops, board, nodeBudget, () => now() - t0 < msBudget, now);
+  void surface;
+  const vars = variablesOf(P, ops, board, forcedSame, skip);
+  const sol = solveCard(vars, ops, board, nodeBudget, marginBudget, fixed, now);
   // ASSIGN_DEBUG=<edge name substring> (node probes): every pool candidate touching it, its fate
   // and the board's answer after the solve.
   const dbg = typeof process !== 'undefined' ? process.env?.ASSIGN_DEBUG : undefined;

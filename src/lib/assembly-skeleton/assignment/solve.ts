@@ -19,8 +19,10 @@
 //     too (the third piece is caught between both plies), and the plies' own seam joins
 //     corresponding edges;
 //   · joins only between distinct inputs of the operation (candidates.ts);
-//   · face-up layout: two pieces sewn along edges running UP their drawings meet from OPPOSITE
-//     sides of their drawings; a long straight level edge is never sewn onto a long upright one;
+//   · (as COSTS, a notch band each — a facing traced like its shell, a bagged lining hem or a
+//     dress's waist seam break them legitimately) face-up layout: two pieces sewn along edges
+//     running UP their drawings meet from OPPOSITE sides of their drawings; a long straight level
+//     edge onto a long upright one; two hems; a tall piece's hem onto another tall piece's top;
 //   · left never meets right: a parity over pieces that have a hand or a mirror twin — a seam puts
 //     its two pieces on one side (mirror twins meeting on their centre line are exempt) — and a
 //     symmetric piece (a back, a yoke, a collar) has one orientation: the pieces sewn on its two
@@ -30,6 +32,7 @@ import { xSideOf, yMidOf } from '../geometry/plies';
 import { isStraight, type CandidatePool } from '../geometry/match';
 import type { Edge, EdgeId, PieceGeom } from '../types';
 import {
+  LAYOUT_PENALTY,
   MARGIN_NODE_BUDGET,
   type OpSolution,
   type Operation,
@@ -103,6 +106,8 @@ export class Board {
   readonly useCount: Int32Array;
   /** Edges that may carry a ply seam AND one single-layer piece: straight, designated, on a ply. */
   private readonly sandwichable = new Set<EdgeId>();
+  /** Per edge index: 2 when the edge may be sewn twice (a sandwich, a ×2 block), else 1. */
+  readonly capacity: Uint8Array;
 
   constructor(
     private readonly P: CandidatePool,
@@ -117,6 +122,11 @@ export class Board {
       if (r.chain || !P.designated.has(r.id) || !isStraight(r)) continue;
       if (r.piece.twinOf.some((t) => t.kind === 'identical')) this.sandwichable.add(r.id);
     }
+    this.capacity = new Uint8Array(this.edgeIndex.size).fill(1);
+    for (const p of P.pieces)
+      for (const e of p.edges)
+        if (this.sandwichable.has(e.id) || P.bothHands.has(p.pieceKey))
+          this.capacity[this.edgeIndex.get(e.id)!] = 2;
     const L = '\u0000L';
     const R = '\u0000R';
     this.link(L, R, 1);
@@ -132,13 +142,14 @@ export class Board {
         this.inPlay.add(t.key);
       }
     }
-    // Ply pairs: exactly one identical twin each, and the order puts the two together (distinct
-    // inputs of one operation, or one input of any) — a ring of identical bag panels is not one.
+    // Ply pairs: exactly one identical twin each, and the order SEWS the two to each other (distinct
+    // inputs of one operation) — a ring of identical bag panels is not one, nor two identical halves
+    // that merely end up in one unit.
     const together = (a: string, b: string) =>
       ops.some((op) => {
         const ia = op.inputs.findIndex((X) => X.includes(a));
         const ib = op.inputs.findIndex((X) => X.includes(b));
-        return ia >= 0 && ib >= 0;
+        return ia >= 0 && ib >= 0 && ia !== ib;
       });
     for (const p of P.pieces) {
       const ids = p.twinOf.filter((t) => t.kind === 'identical');
@@ -237,14 +248,13 @@ export class Board {
 
   /**
    * The static facts of a variable, once: the edges each side occupies and the parity links it
-   * asks for. False when the face-up layout refuses the pair (then it is no variable at all).
+   * asks for. Returns the face-up layout penalty (0 = every rule kept) for the caller's benefit.
    */
-  annotate(v: Variable): boolean {
-    if (!this.layoutOk(v)) return false;
+  annotate(v: Variable): number {
     v.occA = this.occupied(v.ea, v);
     v.occB = this.occupied(v.eb, v);
     v.links = this.links(v);
-    return true;
+    return this.layoutPenalty(v);
   }
 
   /** Can the variable's edges still be sewn (edge once, with the exceptions)? */
@@ -290,41 +300,42 @@ export class Board {
    * a reflected copy: both exempt. A level edge (a yoke bottom, a hem) is never sewn onto an upright
    * one (a side seam) when both are long and straight.
    */
-  private layoutOk(v: Variable): boolean {
-    if (v.self || v.ply) return true;
-    if (this.P.bothHands.has(v.pa) || this.P.bothHands.has(v.pb)) return true;
-    if (this.P.mirroredCut.has(v.pa) || this.P.mirroredCut.has(v.pb)) return true;
+  private layoutPenalty(v: Variable): number {
+    if (v.self || v.ply) return 0;
+    if (this.P.bothHands.has(v.pa) || this.P.bothHands.has(v.pb)) return 0;
+    if (this.P.mirroredCut.has(v.pa) || this.P.mirroredCut.has(v.pb)) return 0;
     const a = this.geom.get(v.pa);
     const b = this.geom.get(v.pb);
     const ea = this.mainEdge(v.ea);
     const eb = this.mainEdge(v.eb);
-    if (!a || !b || !ea || !eb) return true;
+    if (!a || !b || !ea || !eb) return 0;
+    let broken = 0;
     const ua = upright(ea);
     const ub = upright(eb);
     if (ua && ub) {
       const sa = xSideOf(a, ea);
       const sb = xSideOf(b, eb);
-      if (sa !== 0 && sb !== 0 && sa === sb) return false;
+      if (sa !== 0 && sb !== 0 && sa === sb) broken++;
     }
     const long = (e: Edge) => e.lenMm >= 150 && e.chordMm / e.lenMm >= 0.95;
-    if (long(ea) && long(eb) && ((ua && level(eb)) || (ub && level(ea)))) return false;
-    // Hems. Two level edges at the BOTTOM of their pieces are two hems — never sewn to each other
-    // (face up, two pieces stacked meet top to bottom; only a shoulder meets top to top, folded).
-    // And the bottom edge of a TALL piece (a front, a back panel) is its hem: sewn to a band or a
-    // facing, never to the top of another tall piece (a panel seam runs between a short upper piece
-    // and the panel below it).
+    if (long(ea) && long(eb) && ((ua && level(eb)) || (ub && level(ea)))) broken++;
+    // Hems. Two level edges at the BOTTOM of their pieces are two hems — not sewn to each other
+    // (face up, two pieces stacked meet top to bottom; only a shoulder meets top to top, folded;
+    // a bagged lining hem is the exception, paid for). And the bottom edge of a TALL piece (a
+    // front, a back panel) is its hem: sewn to a band or a facing, not to the top of another tall
+    // piece (a panel seam runs between a short upper piece and the panel below it; a dress's waist
+    // seam between two tall pieces pays).
     if (level(ea) && level(eb)) {
       const la = yMidOf(a, ea);
       const lb = yMidOf(b, eb);
-      if (la < 0.25 && lb < 0.25) return false;
+      if (la < 0.25 && lb < 0.25) broken++;
       const tall = (p: PieceGeom) => {
         const bx = boxOf(p);
         return bx.h >= 500 && bx.h >= 1.5 * bx.w;
       };
-      if (la < 0.25 && lb > 0.75 && tall(a) && tall(b)) return false;
-      if (lb < 0.25 && la > 0.75 && tall(a) && tall(b)) return false;
+      if (((la < 0.25 && lb > 0.75) || (lb < 0.25 && la > 0.75)) && tall(a) && tall(b)) broken++;
     }
-    return true;
+    return broken * LAYOUT_PENALTY;
   }
 
   /**
@@ -452,10 +463,6 @@ type Search = {
   aborted: boolean;
 };
 
-/** Wall-clock cap of one search (ms): the node budget is the determinism guard, this the latency one. */
-const SEARCH_MS = 250;
-const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
 /**
  * Exact branch-and-bound over all variables (sorted best first): include / exclude, bound = value
  * so far + the positive benefits still ahead + the slack that joining the operations' remaining
@@ -477,40 +484,49 @@ function search(
   // over the edges still free at this node (the sandwich / ×2 exceptions are rare and small: the
   // bound stays a bound in practice; the incumbent, not the bound, is what the answer rests on when
   // it does not). Also: a variable both of whose sides are taken adds nothing.
+  // An edge of capacity 2 (a sandwich, a ×2 block) may take two variables: it contributes its two
+  // best; an edge already holding one seam has one place left.
   const E = board.useCount.length;
+  const cap = board.capacity;
   const idx = (ids: readonly EdgeId[]) =>
     Int32Array.from(ids.map((e) => board.edgeIndex.get(e) ?? -1).filter((x) => x >= 0));
   const ia = vars.map((v) => idx(v.ea));
   const ib = vars.map((v) => idx(v.eb));
-  const maxOn = new Float64Array(E);
+  const max1 = new Float64Array(E);
+  const max2 = new Float64Array(E);
   const touched = new Int32Array(E);
   let positives = 0;
   while (positives < n && vars[positives].benefit > 0) positives++;
   const suffixBound = (i: number): number => {
     const uc = board.useCount;
     let nt = 0;
-    let sum = 0;
     for (let j = i; j < positives; j++) {
       const b = vars[j].benefit;
       const A = ia[j];
       const B = ib[j];
       let fa = false;
-      for (let k = 0; k < A.length && !fa; k++) fa = uc[A[k]] === 0;
+      for (let k = 0; k < A.length && !fa; k++) fa = uc[A[k]] < cap[A[k]];
       let fb = false;
-      for (let k = 0; k < B.length && !fb; k++) fb = uc[B[k]] === 0;
+      for (let k = 0; k < B.length && !fb; k++) fb = uc[B[k]] < cap[B[k]];
       if (!fa || !fb) continue;
       for (const arr of [A, B])
         for (let k = 0; k < arr.length; k++) {
           const e = arr[k];
-          if (uc[e] !== 0) continue;
-          if (maxOn[e] === 0) touched[nt++] = e;
-          if (b > maxOn[e]) {
-            sum += b - maxOn[e];
-            maxOn[e] = b;
-          }
+          if (uc[e] >= cap[e]) continue;
+          if (max1[e] === 0) touched[nt++] = e;
+          if (b > max1[e]) {
+            max2[e] = max1[e];
+            max1[e] = b;
+          } else if (b > max2[e]) max2[e] = b;
         }
     }
-    for (let k = 0; k < nt; k++) maxOn[touched[k]] = 0;
+    let sum = 0;
+    for (let k = 0; k < nt; k++) {
+      const e = touched[k];
+      sum += max1[e] + (cap[e] - uc[e] >= 2 ? max2[e] : 0);
+      max1[e] = 0;
+      max2[e] = 0;
+    }
     return sum / 2;
   };
   // …and the slack an operation can still save: one component per remaining variable of it.
@@ -577,10 +593,9 @@ function search(
   inputs.forEach((u, o) => u.undo(im0[o]));
 
   const chosen: Variable[] = [];
-  const t0 = now();
   const dfs = (i: number, value: number) => {
     if (S.aborted) return;
-    if (++S.nodes > S.budget || (S.nodes % 512 === 0 && now() - t0 > SEARCH_MS)) {
+    if (++S.nodes > S.budget) {
       S.aborted = true;
       return;
     }
@@ -660,26 +675,35 @@ export function solveCard(
   vars: readonly Variable[],
   ops: readonly Operation[],
   board: Board,
+  /** Node budget for the card's search, and for all the margin re-solves (deterministic). */
   budget: number,
-  /** Compute re-solve margins while this says the card has time left. */
-  inTime: () => boolean,
+  marginBudget: number,
+  /** Seams a person confirmed, already on the board: they join their operation's inputs. */
+  fixed: readonly Variable[],
   clock: () => number,
 ): Solution {
   const t0 = clock();
   const inputs = ops.map((op) => new Inputs(op.inputs.length));
+  for (const v of fixed) if (!v.self) inputs[v.op].union(v.ia, v.ib);
   const chosen: Variable[] = [];
   const margin = new Map<Variable, number>();
   let objective = 0;
   let nodes = 0;
   let exact = true;
+  let left = budget;
+  let marginLeft = marginBudget;
   for (const comp of componentsOf(vars)) {
-    const S = search(comp, ops, board, inputs, budget);
+    const S = search(comp, ops, board, inputs, Math.max(1, left));
     nodes += S.nodes;
+    left -= S.nodes;
     exact &&= !S.aborted;
+    // A margin is published only when both searches are exact: an aborted re-solve would call a
+    // seam sure for want of nodes.
     for (const v of S.best.chosen) {
-      if (!inTime()) break;
+      if (S.aborted || marginLeft < MARGIN_NODE_BUDGET) break;
       const S2 = search(comp, ops, board, inputs, MARGIN_NODE_BUDGET, v);
-      margin.set(v, S.best.objective - S2.best.objective);
+      marginLeft -= S2.nodes;
+      if (!S2.aborted) margin.set(v, S.best.objective - S2.best.objective);
     }
     // Commit the component's seams (no undo past here).
     for (const v of S.best.chosen) {

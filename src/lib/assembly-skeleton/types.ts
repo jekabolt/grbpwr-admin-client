@@ -508,10 +508,10 @@ export type SeamAssignmentInput = {
   joins?: readonly { label: string; parts: readonly (readonly string[])[] }[];
   /** Pieces the order sets as hardware (an elastic, a tape): never a shell seam. */
   hardware?: readonly { label: string; pieces: readonly string[] }[];
-  /** Node budget of the exact search per operation (default 40 000). */
+  /** Node budget of the exact search for the whole card (default 80 000; deterministic — no clock). */
   nodeBudget?: number;
-  /** Time budget (ms) for the whole assignment; past it the remaining operations are solved greedily. */
-  msBudget?: number;
+  /** Node budget for the re-solves that give each seam its margin (default 120 000). */
+  marginBudget?: number;
 };
 
 /** One unit of an outside structural reading: its pieces (card piece keys) and its name. */
