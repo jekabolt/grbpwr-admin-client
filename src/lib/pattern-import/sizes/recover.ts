@@ -2061,7 +2061,12 @@ function alignedLegend<
   }
   cols.sort((a, b) => Math.abs(at(a[0]) - v0) - Math.abs(at(b[0]) - v0));
   let run = labelRun(out, 1, 2).size;
-  for (const col0 of cols) {
+  // a key column draws a different pen per label; leaders of a table are one rule repeated —
+  // only a key joins a key (the base column as much as the one added)
+  const penful = (col: T[]) =>
+    new Set(col.map((h) => `${chains[h.chain].style}|${chains[h.chain].motif?.join('/') ?? '-'}`))
+      .size >= Math.min(3, col.length);
+  for (const col0 of penful(out) ? cols : []) {
     if (Math.abs(at(col0[0]) - v0) > 150) break;
     const col = alike(dedupe(col0));
     const have = new Set(out.map((h) => h.label));
@@ -2069,11 +2074,7 @@ function alignedLegend<
     const cl = Math.min(...col.map(pos));
     const ch = Math.max(...col.map(pos));
     if (Math.min(hi, ch) - Math.max(lo, cl) < 0.5 * Math.min(hi - lo, ch - cl)) continue;
-    // a key column draws a different pen per label; leaders of a table are one rule repeated
-    const pens = new Set(
-      col.map((h) => `${chains[h.chain].style}|${chains[h.chain].motif?.join('/') ?? '-'}`),
-    );
-    if (pens.size < Math.min(3, col.length)) continue;
+    if (!penful(col)) continue;
     // the column continues the key as one BLOCK of its run (00 … 14 | 16 … 32), never interleaved
     // with it (a key 34 38 42 46 beside table numbers 36 40 44 48 is no run of eight)
     const cMin = Math.min(...col.map((h) => h.value));

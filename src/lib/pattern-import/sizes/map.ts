@@ -65,18 +65,29 @@ function bestHit(
   const take = (h: Hit) => {
     if (!best || h.confidence > best.confidence) best = h;
   };
+  // owner rule (MOOD-DIAG Ф6): a numeric sheet size of the US misses' range (00 … 32, paired)
+  // onto a LETTER card size is never automatic, whatever spelling the card carries — the sheet
+  // does not say which letter its number is
+  const usNum = usRun || (src?.kind === 'num' && src.value <= 32);
   for (const c of card) {
     const toks = tokensOf(c);
+    const letterCard = parseSizeToken(c.token, true)?.kind === 'letter';
     for (const t of toks) {
       if (bare(t) === bare(label))
         take(
           bare(t) === bare(c.token)
             ? { card: c, confidence: 1, why: `same token ${c.token}` }
-            : {
-                card: c,
-                confidence: 0.9,
-                why: `${label} is how the card's ${c.token} is also written (${t})`,
-              },
+            : usNum && letterCard
+              ? {
+                  card: c,
+                  confidence: 0.6,
+                  why: `${label} is written ${t} on the card's ${c.token}: a US size onto a letter size — confirm`,
+                }
+              : {
+                  card: c,
+                  confidence: 0.9,
+                  why: `${label} is how the card's ${c.token} is also written (${t})`,
+                },
         );
       const ct = parseSizeToken(t, true);
       if (!src || !ct) continue;
@@ -90,14 +101,13 @@ function bestHit(
         // a paired size (28/30) is not its lower half (28)
         paired(label) === paired(t)
       ) {
-        // a US run (00 … 32, paired sizes) onto a LETTER card size: the sheet does not say
+        // a US size (00 … 32, paired sizes) onto a LETTER card size: the sheet does not say
         // which letter its numbers are (MOOD-DIAG Ф6) — a suggestion, never taken silently
-        const letterCard = parseSizeToken(c.token, true)?.kind === 'letter';
         take({
           card: c,
-          confidence: usRun && letterCard ? 0.6 : 0.9,
+          confidence: usNum && letterCard ? 0.6 : 0.9,
           why:
-            usRun && letterCard
+            usNum && letterCard
               ? `${label} is written ${t} on the card's ${c.token}: a US size onto a letter size — confirm`
               : `${label} is the numeric equivalent of ${c.token} (${t})`,
         });
