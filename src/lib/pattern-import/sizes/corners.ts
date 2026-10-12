@@ -26,7 +26,9 @@
 // A closed corner never merges two main lines (the absorbed one would stay behind as a long
 // "ignored" duplicate): a ramp is absorbed into the line it continues; a stub / extension carries
 // line A on (stub points or the vertex) to B's end point, so A and B meet exactly there.
-import type { Chain, PtMm, Style } from 'lib/pattern-import/types';
+import type { Chain, CornerWall, PtMm, Style } from 'lib/pattern-import/types';
+
+export type { CornerWall };
 
 import { dist, SegGrid, segNearest } from '../chains/geom';
 
@@ -70,12 +72,8 @@ export type CornerLink = {
 };
 
 export type CornerOut = {
-  /** Absorbed chain → host chain (ramps, stubs, the second chain of each joined pair). */
-  joined: Map<number, number>;
-  /** Chains closed into a loop by a corner. */
-  closedLoops: number[];
-  /** Ends ("chain:end") a corner closed, or of an own corner left open — nothing lands from them. */
-  reached: Set<string>;
+  /** One derived wall per closed corner (stub arms, ramp, extended edges): see `CornerWall`. */
+  walls: CornerWall[];
   stubs: number;
   ramps: number;
   extended: number;
@@ -170,8 +168,7 @@ const angleCos = (deg: number) => Math.cos((deg * Math.PI) / 180);
 /**
  * Close the corners of every rank (see the head of the file). `own(c)` = chain c is a line of its
  * rank by its own look; `cand(c)` = chain c may be a ramp / stub (not furniture, not ranked by its
- * look). Mutates `chains` (joined chains carry the corner points) and `rankOf` (absorbed chains
- * leave it).
+ * look). Nothing is mutated: the closures come back as derived walls.
  */
 export function closeCorners(
   chains: Chain[],
@@ -218,6 +215,8 @@ export function closeCorners(
   // ── RAMPS ──
   let ramps = 0;
   const rampOf = new Map<number, number>();
+  /** ramp → the own end it continues (through other ramps) */
+  const rampHost = new Map<number, { c: number; end: 0 | 1 }>();
   for (let round = 0; round < 2; round++) {
     const added: End[] = [];
     for (let c = 0; c < chains.length; c++) {
@@ -262,6 +261,8 @@ export function closeCorners(
       if (byEnd.size === 2 && byEnd.get(0) === byEnd.get(1)) continue;
       const r = [...ranks][0];
       rampOf.set(c, r);
+      const host = ends[[...byEnd.values()][0]];
+      rampHost.set(c, rampHost.get(host.c) ?? { c: host.c, end: host.end });
       ramps++;
       for (const [end, k] of byEnd) {
         const E = ends[k];
@@ -379,8 +380,6 @@ export function closeCorners(
    * apart, or a sharp vertex of a line), and open corners that themselves qualify to be extended
    */
   const vertices: { r: number; v: PtMm; t0: PtMm; t1: PtMm }[] = [...stubVerts];
-  /** ends of an own corner left open (refused): they land on no other line */
-  const held = new Set<string>();
   const free = (k: number) => !usedEnd.has(ek(ends[k].c, ends[k].end));
   const cosTurn = angleCos(CORNER.minTurnDeg);
   ends.forEach((A, k0) => {
@@ -518,15 +517,11 @@ export function closeCorners(
         console.log(`F2T r${pr.r} at ${pr.x.x.toFixed(1)},${pr.x.y.toFixed(1)} nb ${nb.join(' ')}`);
       }
       refuse('extend: off the trend');
-      held.add(ek(A.c, A.end));
-      held.add(ek(B.c, B.end));
       continue;
     }
     const skip = new Set([A.c, B.c]);
     if (crossesRank(A.p, pr.x, pr.r, skip) || crossesRank(pr.x, B.p, pr.r, skip)) {
       refuse('extend: crosses its rank');
-      held.add(ek(A.c, A.end));
-      held.add(ek(B.c, B.end));
       continue;
     }
     usedEnd.add(ek(A.c, A.end));
@@ -545,99 +540,54 @@ export function closeCorners(
       console.log(
         `F2 ${l.rule} r${l.rank} ${l.a.c}:${l.a.end} ${l.b.c}:${l.b.end} at ${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).x.toFixed(1)},${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).y.toFixed(1)} via ${l.via.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}${l.stub !== undefined ? ` stub ${l.stub}` : ''}`,
       );
-  // an open own corner's ends land nowhere (a landing there is on a neighbouring size's line)
-  const res = joinLinks(
-    chains,
-    rankOf,
-    links,
-    [...held].filter((k) => !usedEnd.has(k)),
-  );
+  const res = { walls: wallsOf(chains, links, rampHost) };
   return { ...res, stubs, ramps, extended, refused };
 }
 
 /**
- * Apply the links. A RAMP is absorbed into the own line it continues (it is short: no long
- * duplicate is left behind as an "ignored" line). A STUB or EXTEND link carries one own line on to
- * the other: line A gets the link's points and B's end point appended, so the two lines meet; the
- * stub is absorbed. Two ends of one line → a closed loop. Main lines are never merged (a merged
- * line would leave its whole length behind as a duplicate the face pass reads as a rescued line).
+ * The links as derived walls. The chains are never touched: a closed corner is a wall item of its
+ * rank, drawn by the fill beside the rank's lines (a merged or extended line would change how the
+ * rest of the sizes step reads them). Each item names the own lines it hangs on (`own`: the rank
+ * is re-checked on them where the walls are built) and the ends it closes (`ends`).
  */
-function joinLinks(
+function wallsOf(
   chains: Chain[],
-  rankOf: Map<number, number>,
   links: CornerLink[],
-  /** Open corners' ends ("chain:end"; a ramp's end resolves to its host). */
-  held: string[] = [],
-): { joined: Map<number, number>; closedLoops: number[]; reached: Set<string> } {
-  const joined = new Map<number, number>();
-  const closedLoops: number[] = [];
-  /** ends a link closed: "chain:end" — no landing from them afterwards */
-  const reached = new Set<string>();
-  const key = (c: number, end: 0 | 1) => `${c}:${end}`;
-  /** where a ramp's end lives now: absorbed ramp end → (host chain, host end) */
-  const moved = new Map<string, { c: number; end: 0 | 1 }>();
-  const resolve = (x: { c: number; end: 0 | 1 }) => moved.get(key(x.c, x.end)) ?? x;
-  const tipOf = (c: number, end: 0 | 1) =>
-    end ? chains[c].pts[chains[c].pts.length - 1] : chains[c].pts[0];
-  /** append `add` (ordered outward from the end) at one end of chain c */
-  const extend = (c: number, end: 0 | 1, add: PtMm[]) => {
-    const ch = chains[c];
-    const pts = end ? [...ch.pts, ...add] : [...add.slice().reverse(), ...ch.pts];
-    let L = 0;
-    for (let i = 1; i < pts.length; i++) L += dist(pts[i - 1], pts[i]);
-    chains[c] = { ...ch, pts, lengthMm: L };
-  };
-  const reach: CornerLink[] = [];
+  rampHost: ReadonlyMap<number, { c: number; end: 0 | 1 }>,
+): CornerWall[] {
+  const tip = (x: { c: number; end: 0 | 1 }) =>
+    x.end ? chains[x.c].pts[chains[x.c].pts.length - 1] : chains[x.c].pts[0];
+  /** a ramp's end → the own end its ramp continues */
+  const anchor = (x: { c: number; end: 0 | 1 }) => rampHost.get(x.c) ?? x;
+  const out: CornerWall[] = [];
   for (const l of links) {
-    if (l.rule !== 'ramp') {
-      reach.push(l);
+    if (l.rule === 'ramp') {
+      // own end → the ramp, along it to its far end
+      const q = chains[l.b.c].pts;
+      const along = l.b.end === 0 ? q : q.slice().reverse();
+      const A = anchor(l.a);
+      out.push({
+        rule: 'ramp',
+        pts: [tip(l.a), ...along],
+        own: [A.c],
+        ends: [`${A.c}:${A.end}`],
+        chains: [l.b.c],
+      });
       continue;
     }
-    // a = the own end, b = the ramp's end
-    const A = resolve(l.a);
-    const R = l.b;
-    if (joined.has(R.c)) {
-      // the ramp is already absorbed (it continued another line): carry this line onto it
-      reach.push({ ...l, b: R });
-      continue;
-    }
-    const q = chains[R.c].pts;
-    const out = R.end === 0 ? q : q.slice().reverse();
-    extend(A.c, A.end, out);
-    chains[A.c] = { ...chains[A.c], ranges: [...chains[A.c].ranges, ...chains[R.c].ranges] };
-    joined.set(R.c, A.c);
-    rankOf.delete(R.c);
-    moved.set(key(R.c, (1 - R.end) as 0 | 1), A);
-    reached.add(key(A.c, A.end));
-  }
-  for (const l of reach) {
-    const A = resolve(l.a);
-    const B = resolve(l.b);
-    if (A.c === B.c && A.end === B.end) continue;
-    const pa = tipOf(A.c, A.end);
+    const pa = tip(l.a);
     const v = l.via;
     const via =
       v.length >= 2 && dist(v[0], pa) > dist(v[v.length - 1], pa) ? v.slice().reverse() : v;
-    if (A.c === B.c) {
-      // both ends of one line: the corner closes the loop
-      extend(A.c, A.end, via);
-      chains[A.c] = { ...chains[A.c], closed: true };
-      closedLoops.push(A.c);
-    } else extend(A.c, A.end, [...via, tipOf(B.c, B.end)]);
-    reached.add(key(A.c, A.end));
-    reached.add(key(B.c, B.end));
-    if (l.stub !== undefined) {
-      joined.set(l.stub, A.c);
-      rankOf.delete(l.stub);
-      chains[A.c] = { ...chains[A.c], ranges: [...chains[A.c].ranges, ...chains[l.stub].ranges] };
-    }
+    const A = anchor(l.a);
+    const B = anchor(l.b);
+    out.push({
+      rule: l.rule,
+      pts: [pa, ...via, tip(l.b)],
+      own: [A.c, B.c],
+      ends: [`${A.c}:${A.end}`, `${B.c}:${B.end}`],
+      chains: l.stub !== undefined ? [l.stub] : [],
+    });
   }
-  for (const h of held) {
-    const [c, e] = h.split(':').map(Number);
-    const x = resolve({ c, end: e as 0 | 1 });
-    reached.add(key(x.c, x.end));
-  }
-  // a host that is itself absorbed (never: hosts are own lines) — keep the map flat
-  for (const [c, h] of joined) if (joined.has(h)) joined.set(c, joined.get(h)!);
-  return { joined, closedLoops, reached };
+  return out;
 }

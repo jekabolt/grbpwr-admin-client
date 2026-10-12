@@ -542,8 +542,24 @@ export type ChainAmbiguity = {
   at: PtMm | null;
 };
 
+/**
+ * MOOD Ф2 (sizes/corners.ts): a corner closed by a size's own pieces, as a wall of its rank: `pts`
+ * from one own end (or a ramp's far end) round the corner to the other; `own` = the size lines it
+ * hangs on (one rank, one pen — re-checked where the walls are built); `ends` = their ends it
+ * closes ("chain:end"); `chains` = the stub / ramp drawn there.
+ */
+export type CornerWall = {
+  rule: 'stub' | 'ramp' | 'extend';
+  pts: PtMm[];
+  own: ChainId[];
+  ends: string[];
+  chains: ChainId[];
+};
+
 export type ChainSet = {
   chains: Chain[];
+  /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
+  cornerWalls?: CornerWall[];
   classes: LineClass[];
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */

@@ -20,7 +20,7 @@ import type {
 } from 'lib/pattern-import/types';
 
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
-import { rankGuard, type RankGuard } from './identity';
+import { chainLook, onPen, rankGuard, rankLooks, type RankGuard } from './identity';
 import type { WallItem } from './snap';
 
 export type WallMode = 'graded' | 'single' | 'file';
@@ -50,7 +50,46 @@ export type WallModel = {
   bandCuts?: { rank: number; from: PtMm; to: PtMm; ticks: ChainId[] }[];
   /** Rank by continuity: chains moved to their outline's rank, and undecided components. */
   relinked?: { moved: number; conflicts: ChainId[]; labelled?: number };
+  /** MOOD Ф2: corners closed by a size's own stub / ramps / extended edges — walls of `rank`. */
+  corners?: { rank: number; pts: PtMm[]; chains: ChainId[] }[];
+  /** Ends ("chain:end") of size lines such a corner continues: no ends (lonePortions). */
+  cornerEnds?: Set<string>;
 };
+
+/**
+ * MOOD Ф2: the corner walls recover found (sizes/corners.ts), kept only where they still hang on
+ * lines of ONE rank of the final model drawn with that rank's pen (the legend step may have moved
+ * a line since): the rank's identity, re-checked.
+ */
+function cornerWalls(
+  set: ChainSet,
+  run: SizeRun,
+  ranks: ChainId[][],
+  styles: ReadonlyMap<number, Style> | undefined,
+): Pick<WallModel, 'corners' | 'cornerEnds'> {
+  if (!set.cornerWalls?.length || !styles || probeOff('MOOD_F2_OFF')) return {};
+  const { identity, looks } = rankLooks(set, run, styles);
+  if (!identity) return {};
+  const rankOfChain = new Map<ChainId, number>();
+  ranks.forEach((ids, r) => ids.forEach((id) => rankOfChain.set(id, r)));
+  const corners: NonNullable<WallModel['corners']> = [];
+  const cornerEnds = new Set<string>();
+  for (const w of set.cornerWalls) {
+    const rs = new Set(w.own.map((id) => rankOfChain.get(id)));
+    if (rs.size !== 1) continue;
+    const r = [...rs][0];
+    if (r === undefined || !looks[r]?.length) continue;
+    const onOwnPen = w.own.every((id) => {
+      const c = set.chains[id];
+      const l = c ? chainLook(c, styles) : null;
+      return !!l && onPen(l, looks[r]);
+    });
+    if (!onOwnPen) continue;
+    corners.push({ rank: r, pts: w.pts, chains: w.chains });
+    for (const e of w.ends) cornerEnds.add(e);
+  }
+  return corners.length ? { corners, cornerEnds } : {};
+}
 
 /**
  * FOLD EDGES and other shared straight edges: a straight line (≥ 40 mm, ≤ 0.5 mm off its chord) on
@@ -256,6 +295,7 @@ export function wallModel(
       ? { moved: cr.moved, conflicts: cr.conflicts, labelled: labelled.size }
       : undefined,
     byRank: ranks,
+    ...(mode === 'graded' ? cornerWalls(set, run, ranks, styles) : {}),
     emptyRanks: ranks.map((b, r) => (b.length ? -1 : r)).filter((r) => r >= 0),
     // chains ranked here (continuity, labels, nesting) are size lines too
     graded: [...new Set([...graded, ...ranks.flat()])],
@@ -366,25 +406,9 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const ids = m.graded.filter((id) => set.chains[id] && set.chains[id].pts.length >= 2);
   const grid = new SegGrid(8);
   for (const id of ids) grid.addPolyline(id, set.chains[id].pts);
-  // an end that meets an end of another line of its rank exactly (MOOD Ф2 carries a size's line
-  // round its corner onto its next edge) is no end: that size's line runs on through it
-  const endKey = (p: PtMm) => `${Math.round(p.x * 20)},${Math.round(p.y * 20)}`;
-  const endsAt = new Map<string, { id: ChainId; r: number }[]>();
-  for (const id of ids) {
-    const r = rank.get(id);
-    const c = set.chains[id];
-    if (r === undefined || c.closed) continue;
-    for (const p of [c.pts[0], c.pts[c.pts.length - 1]]) {
-      const k = endKey(p);
-      const a = endsAt.get(k);
-      if (a) a.push({ id, r });
-      else endsAt.set(k, [{ id, r }]);
-    }
-  }
-  const runsOn = (id: ChainId, p: PtMm) => {
-    const r = rank.get(id);
-    return r !== undefined && !!endsAt.get(endKey(p))?.some((e) => e.id !== id && e.r === r);
-  };
+  // an end a corner carried on onto its next edge (MOOD Ф2, sizes/corners.ts) is no end: that
+  // size's line runs on through it
+  const runsOn = (id: ChainId, end: 0 | 1) => !!m.cornerEnds?.has(`${id}:${end}`);
   const out: WallItem[] = [];
   const step = 2;
   for (const id of ids) {
@@ -431,8 +455,8 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         // with a short hook (a zigzag's last tooth) that would otherwise look "beside"
         const toStart = arcTo(op, b.i, b.u);
         const toEnd = arcFrom(op, b.i, b.u);
-        if (toStart < 3 && !runsOn(o, op[0])) continue;
-        if (toEnd < 3 && !runsOn(o, op[op.length - 1])) continue;
+        if (toStart < 3 && !runsOn(o, 0)) continue;
+        if (toEnd < 3 && !runsOn(o, 1)) continue;
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;

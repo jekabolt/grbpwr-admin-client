@@ -606,6 +606,9 @@ function fillOneSheet(
     (edits.include ?? []).filter((x) => x.rank === r || x.rank === null).flatMap((x) => x.ids);
   const opBridges = (r: number) => (edits.bridges ?? []).filter((b) => b.rank === r);
   const bandCuts = (r: number) => (model.bandCuts ?? []).filter((b) => b.rank === r);
+  /** MOOD Ф2: rank r's corners closed by its own stub / ramps / extended edges (derived walls). */
+  const cornerItems = (r: number): WallItem[] =>
+    (model.corners ?? []).filter((c) => c.rank === r).map((c) => ({ chain: -4, pts: c.pts }));
 
   /** Pass A walls of one rank: common + own + rescued + the operator's + lone stretches. */
   const baseItems = (r: number, excl: Set<ChainId>) => {
@@ -617,6 +620,7 @@ function fillOneSheet(
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
       ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
+      ...(graded?.walls ? [] : cornerItems(r)),
     ].filter((it) => !excl.has(it.chain));
   };
 
@@ -683,6 +687,7 @@ function fillOneSheet(
                     ...extraOf(r),
                   ]),
                   ...rr.lone,
+                  ...cornerItems(r),
                 ];
                 const plugs = landingPlugs(set, rr.model, r, rr.lone);
                 return buildRank(box, cell, [...items, ...plugs].filter(keep));
