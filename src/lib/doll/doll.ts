@@ -1872,7 +1872,25 @@ export function solveDoll(input: DollInput): DollReport {
     } else if (twoFaces) {
       const full = boxOf(big);
       const sb = sewnBoxOf(big);
-      flap = sb && (sb.h < 0.8 * full.h || sb.w < 0.8 * full.w) ? sb : null;
+      // A flap only on clear evidence (11.10 review: a seam the graph lacks must not turn the rest
+      // of a face into a flap): the free part lies beyond exactly ONE side of the sewn box, and
+      // the sewn box keeps at least 30 % of the panel both ways. Otherwise the whole panel is the
+      // face and the free part is said open.
+      if (sb && (sb.h < 0.8 * full.h || sb.w < 0.8 * full.w)) {
+        const sides = [
+          sb.x0 - full.x0 > 10,
+          full.x1 - sb.x1 > 10,
+          sb.y0 - full.y0 > 10,
+          full.y1 - sb.y1 > 10,
+        ].filter(Boolean).length;
+        const kept = sb.w >= 0.3 * full.w && sb.h >= 0.3 * full.h;
+        if (sides === 1 && kept) flap = sb;
+        else {
+          const note = `its seams hold ${sb.w.toFixed(0)} × ${sb.h.toFixed(0)} mm of its ${full.w.toFixed(0)} × ${full.h.toFixed(0)}, ${sides === 1 ? 'less than 30 % of it' : sides === 0 ? 'the free part all round the rim' : `the free part past ${sides} of its sides`} — not read as a flap (a seam the graph lacks?); drawn as the whole face, the free part left open`;
+          bagSurfaceRows.push({ pieceKey: big.key, host: null, join: null, placed: false, note });
+          warnings.push(`${big.key}: ${note}`);
+        }
+      }
       const { w: w0, h: h0 } = flap ?? full;
       a = Math.max(1, w0 / 2);
       b = Math.max(1, h0 / 2);
@@ -2120,61 +2138,6 @@ export function solveDoll(input: DollInput): DollReport {
         });
         warnings.push(`${big.key}: ${note}`);
       }
-      // The other face of a two-faced shape goes straight onto the back, centred: a walk from the
-      // first face across a U-shaped seam starts at that seam's centroid, a point inside the
-      // shape, and on a short pouch landed the face over the top rim. Only the strips are walked.
-      // Face out (its x runs the other way seen from the front) or its drawn face inward: the way
-      // its own seams to the front meet end to end (a symmetric panel's seams say which).
-      if (twoFaces && second) {
-        const S2 = second;
-        const q2 = centroid2(ringVs(S2));
-        const direct = G.seams
-          .map((sm) => {
-            const A = new Set(sm.a.map(pk));
-            const B = new Set(sm.b.map(pk));
-            if (A.size !== 1 || B.size !== 1) return null;
-            if (A.has(big.key) && B.has(S2.key)) return { sm, bigSide: 'a' as const };
-            if (B.has(big.key) && A.has(S2.key)) return { sm, bigSide: 'b' as const };
-            return null;
-          })
-          .filter((x): x is NonNullable<typeof x> => !!x);
-        const d3 = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
-        const costOf = (U: Vec3) => {
-          lay(S2, q2, [0, 0, -c], U, [0, 1, 0], [1, 0], false);
-          // Drawn face inward: its edges run the FRONT's way round the rim — sewn as a face-down
-          // piece (graphWork reads the seam direction from this flag).
-          S2.mirrored = U[0] > 0;
-          let t = 0;
-          for (const { sm, bigSide } of direct) {
-            const A = sidePath(sm, bigSide);
-            const B = sidePath(sm, bigSide === 'a' ? 'b' : 'a');
-            if (!A || !B) continue;
-            const a0 = getPos(A.v[0]);
-            const a1 = getPos(A.v[A.v.length - 1]);
-            const b0 = getPos(B.v[0]);
-            const b1 = getPos(B.v[B.v.length - 1]);
-            t += Math.min(d3(a0, b0) + d3(a1, b1), d3(a0, b1) + d3(a1, b0));
-          }
-          return t;
-        };
-        const cOut = costOf([-1, 0, 0]);
-        const cIn = costOf([1, 0, 0]);
-        if (cOut <= cIn) costOf([-1, 0, 0]);
-        if (opt.debug) {
-          const bb = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
-          for (let i = 0; i < S2.count; i++)
-            for (let k = 0; k < 3; k++) {
-              bb[2 * k] = Math.min(bb[2 * k], pos[3 * (S2.offset + i) + k]);
-              bb[2 * k + 1] = Math.max(bb[2 * k + 1], pos[3 * (S2.offset + i) + k]);
-            }
-          warnings.push(
-            `debug: bag back face ${S2.key} laid at ${bb.map((x) => x.toFixed(0)).join(' ')} · cost out ${cOut.toFixed(0)} in ${cIn.toFixed(0)} · shape ${a.toFixed(0)} ${b.toFixed(0)} ${c.toFixed(0)}`,
-          );
-        }
-        warnings.push(
-          `${S2.key}: the other face, on the back, ${cOut <= cIn ? 'face out' : 'its drawn face inward'}${direct.length ? ` (its ${direct.length} seam${direct.length > 1 ? 's' : ''} to ${big.key} meet end to end that way)` : ' (no seam to the front says otherwise)'}`,
-        );
-      }
     }
     const isBody = (P: Panel | undefined): P is Panel => !!P && P.group === 'BODY';
     const onePiece = (ids: EdgeId[]) => new Set(ids.map(pk)).size === 1;
@@ -2189,84 +2152,163 @@ export function solveDoll(input: DollInput): DollReport {
     const lenOfSide = (ids: EdgeId[]) =>
       ids.reduce((t, id) => t + (edgeById.get(id)?.lenMm ?? 0), 0);
     const isPlaced = (P: Panel) => !!placed[P.offset];
-    for (let guard = 0; guard < body.length; guard++) {
-      let pick: { s: GroupedSeam; P: Panel; Q: Panel; sp: EdgeId[]; sq: EdgeId[] } | null = null;
-      let best = -1;
-      for (const s of links) {
-        const Pa = panelByKey.get(pk(s.a[0]))!;
-        const Pb = panelByKey.get(pk(s.b[0]))!;
-        if (isPlaced(Pa) === isPlaced(Pb)) continue;
-        const L = Math.max(lenOfSide(s.a), lenOfSide(s.b));
-        if (L > best) {
-          best = L;
-          pick = isPlaced(Pa)
-            ? { s, P: Pa, Q: Pb, sp: s.a, sq: s.b }
-            : { s, P: Pb, Q: Pa, sp: s.b, sq: s.a };
+    /** Walk every reachable unplaced panel onto the shape across its longest seam (`hold`: not yet). */
+    const walkAll = (hold: Panel | null) => {
+      for (let guard = 0; guard < body.length; guard++) {
+        let pick: { s: GroupedSeam; P: Panel; Q: Panel; sp: EdgeId[]; sq: EdgeId[] } | null = null;
+        let best = -1;
+        for (const s of links) {
+          const Pa = panelByKey.get(pk(s.a[0]))!;
+          const Pb = panelByKey.get(pk(s.b[0]))!;
+          if (Pa === hold || Pb === hold) continue;
+          if (isPlaced(Pa) === isPlaced(Pb)) continue;
+          const L = Math.max(lenOfSide(s.a), lenOfSide(s.b));
+          if (L > best) {
+            best = L;
+            pick = isPlaced(Pa)
+              ? { s, P: Pa, Q: Pb, sp: s.a, sq: s.b }
+              : { s, P: Pb, Q: Pa, sp: s.b, sq: s.a };
+          }
         }
-      }
-      if (!pick) break;
-      const { P, Q, sp, sq } = pick;
-      // The seam's SEWN stretch (a strip round the lower U of a panel that runs on into a flap:
-      // sidePath crops a partial to its range), and the placed panel's sewn part — never the flap,
-      // folded over the other face by now.
-      const A = sidePath(pick.s, sp === pick.s.a ? 'a' : 'b') ?? pathOf(sp);
-      const B = sidePath(pick.s, sq === pick.s.a ? 'a' : 'b') ?? pathOf(sq);
-      if (!A || !B) {
-        links.splice(links.indexOf(pick.s), 1);
-        continue;
-      }
-      const mid3 = centroid3(A.v);
-      const F = P === big ? flap : null;
-      const cP3 = centroid3(
-        F
-          ? ringVs(P).filter(
-              (v) =>
-                uv[2 * v] >= F.x0 - 5 &&
-                uv[2 * v] <= F.x1 + 5 &&
-                uv[2 * v + 1] >= F.y0 - 5 &&
-                uv[2 * v + 1] <= F.y1 + 5,
-            )
-          : ringVs(P),
-      );
-      const out =
-        tangentAt(V3.sub(mid3, cP3), mid3) ??
-        tangentAt([0, 1, 0], mid3) ??
-        tangentAt([1, 0, 0], mid3) ??
-        ([1, 0, 0] as Vec3);
-      const mid2 = centroid2(B.v);
-      const cQ2 = centroid2(ringVs(Q));
-      const d2 = Math.max(1, Math.hypot(cQ2[0] - mid2[0], cQ2[1] - mid2[1]));
-      const w = walk(mid3, out, d2);
-      const cQ3 = w.p;
-      const back: Vec3 = [-w.dir[0], -w.dir[1], -w.dir[2]];
-      const n2 = nrmAt(cQ3);
-      const U = tangentAt(back, cQ3) ?? back;
-      const Vv = V3.cross(n2, U);
-      const ux = ((): Pt2 => {
-        const l = Math.hypot(mid2[0] - cQ2[0], mid2[1] - cQ2[1]);
-        return l > 1e-6 ? [(mid2[0] - cQ2[0]) / l, (mid2[1] - cQ2[1]) / l] : [1, 0];
-      })();
-      // Face out or face down: whichever lays the seam's two ends on the partner's ends.
-      const a0 = getPos(A.v[0]);
-      const a1 = getPos(A.v[A.v.length - 1]);
-      const endsCost = (mirror: boolean) => {
-        const uy: Pt2 = mirror ? [ux[1], -ux[0]] : [-ux[1], ux[0]];
-        const at = (v: number) => {
-          const dx = uv[2 * v] - cQ2[0];
-          const dy = uv[2 * v + 1] - cQ2[1];
-          return landing(cQ3, U, Vv, dx * ux[0] + dy * ux[1], dx * uy[0] + dy * uy[1]);
-        };
-        const b0 = at(B.v[0]);
-        const b1 = at(B.v[B.v.length - 1]);
-        return Math.min(
-          V3.len(V3.sub(b0, a0)) + V3.len(V3.sub(b1, a1)),
-          V3.len(V3.sub(b0, a1)) + V3.len(V3.sub(b1, a0)),
+        if (!pick) break;
+        const { P, Q, sp, sq } = pick;
+        // The seam's SEWN stretch (a strip round the lower U of a panel that runs on into a flap:
+        // sidePath crops a partial to its range), and the placed panel's sewn part — never the flap,
+        // folded over the other face by now.
+        const A = sidePath(pick.s, sp === pick.s.a ? 'a' : 'b') ?? pathOf(sp);
+        const B = sidePath(pick.s, sq === pick.s.a ? 'a' : 'b') ?? pathOf(sq);
+        if (!A || !B) {
+          links.splice(links.indexOf(pick.s), 1);
+          continue;
+        }
+        const mid3 = centroid3(A.v);
+        const F = P === big ? flap : null;
+        const cP3 = centroid3(
+          F
+            ? ringVs(P).filter(
+                (v) =>
+                  uv[2 * v] >= F.x0 - 5 &&
+                  uv[2 * v] <= F.x1 + 5 &&
+                  uv[2 * v + 1] >= F.y0 - 5 &&
+                  uv[2 * v + 1] <= F.y1 + 5,
+              )
+            : ringVs(P),
         );
+        const out =
+          tangentAt(V3.sub(mid3, cP3), mid3) ??
+          tangentAt([0, 1, 0], mid3) ??
+          tangentAt([1, 0, 0], mid3) ??
+          ([1, 0, 0] as Vec3);
+        const mid2 = centroid2(B.v);
+        const cQ2 = centroid2(ringVs(Q));
+        const d2 = Math.max(1, Math.hypot(cQ2[0] - mid2[0], cQ2[1] - mid2[1]));
+        const w = walk(mid3, out, d2);
+        const cQ3 = w.p;
+        const back: Vec3 = [-w.dir[0], -w.dir[1], -w.dir[2]];
+        const n2 = nrmAt(cQ3);
+        const U = tangentAt(back, cQ3) ?? back;
+        const Vv = V3.cross(n2, U);
+        const ux = ((): Pt2 => {
+          const l = Math.hypot(mid2[0] - cQ2[0], mid2[1] - cQ2[1]);
+          return l > 1e-6 ? [(mid2[0] - cQ2[0]) / l, (mid2[1] - cQ2[1]) / l] : [1, 0];
+        })();
+        // Face out or face down: whichever lays the seam's two ends on the partner's ends.
+        const a0 = getPos(A.v[0]);
+        const a1 = getPos(A.v[A.v.length - 1]);
+        const endsCost = (mirror: boolean) => {
+          const uy: Pt2 = mirror ? [ux[1], -ux[0]] : [-ux[1], ux[0]];
+          const at = (v: number) => {
+            const dx = uv[2 * v] - cQ2[0];
+            const dy = uv[2 * v + 1] - cQ2[1];
+            return landing(cQ3, U, Vv, dx * ux[0] + dy * ux[1], dx * uy[0] + dy * uy[1]);
+          };
+          const b0 = at(B.v[0]);
+          const b1 = at(B.v[B.v.length - 1]);
+          return Math.min(
+            V3.len(V3.sub(b0, a0)) + V3.len(V3.sub(b1, a1)),
+            V3.len(V3.sub(b0, a1)) + V3.len(V3.sub(b1, a0)),
+          );
+        };
+        lay(Q, cQ2, cQ3, U, Vv, ux, endsCost(true) < endsCost(false));
+        if (opt.debug)
+          warnings.push(
+            `debug: bag walk ${Q.key} from ${P.key} · seam mid ${mid3.map((x) => x.toFixed(0)).join(',')} · ${d2.toFixed(0)} mm out → ${cQ3.map((x) => x.toFixed(0)).join(',')} · U ${U.map((x) => x.toFixed(2)).join(',')} · ux ${ux.map((x) => x.toFixed(2)).join(',')} · mirrored ${Q.mirrored}`,
+          );
+      }
+    };
+    // The other face of a two-faced shape (a pouch, a cover) goes straight onto the back, centred,
+    // once the strips have been walked from the front: a walk across a U-shaped seam starts at
+    // that seam's centroid, a point inside the shape, and on a short pouch landed the face over
+    // the top rim. Face out or its drawn face inward — the parity whose seam directions, the ones
+    // graphWork will enforce from the mirrored flags (single-piece sides: face-up pieces run
+    // opposite ways; composite sides: by the smaller gap), put the seam ends nearest over ALL its
+    // seams to panels already placed. No such seam: nothing to decide — left to the walk.
+    const backFace = twoFaces && !useRings && second ? second : null;
+    walkAll(backFace);
+    if (backFace && !isPlaced(backFace)) {
+      const S2 = backFace;
+      const q2 = centroid2(ringVs(S2));
+      const incident = G.seams
+        .map((sm) => {
+          const A = [...new Set(sm.a.map(pk))];
+          const B = [...new Set(sm.b.map(pk))];
+          const mineA = A.length === 1 && A[0] === S2.key;
+          const mineB = B.length === 1 && B[0] === S2.key;
+          if (mineA === mineB) return null;
+          const other = mineA ? B : A;
+          if (other.includes(S2.key) || !other.every((k) => isPlaced(panelByKey.get(k)!)))
+            return null;
+          return { sm, mine: mineA ? ('a' as const) : ('b' as const), single: other.length === 1 };
+        })
+        .filter((x): x is NonNullable<typeof x> => !!x);
+      const d3 = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      const costOf = (faceIn: boolean) => {
+        lay(S2, q2, [0, 0, -c], [faceIn ? 1 : -1, 0, 0], [0, 1, 0], [1, 0], false);
+        // Drawn face inward: its edges run the FRONT's way round the rim — sewn as a face-down
+        // piece (graphWork reads the seam direction from this flag).
+        S2.mirrored = faceIn;
+        let t = 0;
+        for (const { sm, mine, single } of incident) {
+          const A = sidePath(sm, mine);
+          const B = sidePath(sm, mine === 'a' ? 'b' : 'a');
+          if (!A || !B) continue;
+          const a0 = getPos(A.v[0]);
+          const a1 = getPos(A.v[A.v.length - 1]);
+          const b0 = getPos(B.v[0]);
+          const b1 = getPos(B.v[B.v.length - 1]);
+          const straight = d3(a0, b0) + d3(a1, b1);
+          const crossed = d3(a0, b1) + d3(a1, b0);
+          if (!single) {
+            t += Math.min(straight, crossed);
+            continue;
+          }
+          const otherM = panelByKey.get(pk((mine === 'a' ? sm.b : sm.a)[0]))?.mirrored ?? false;
+          t += otherM !== faceIn ? straight : crossed;
+        }
+        return t;
       };
-      lay(Q, cQ2, cQ3, U, Vv, ux, endsCost(true) < endsCost(false));
-      if (opt.debug)
+      if (incident.length) {
+        const cOut = costOf(false);
+        const cIn = costOf(true);
+        if (cOut <= cIn) costOf(false);
         warnings.push(
-          `debug: bag walk ${Q.key} from ${P.key} · seam mid ${mid3.map((x) => x.toFixed(0)).join(',')} · ${d2.toFixed(0)} mm out → ${cQ3.map((x) => x.toFixed(0)).join(',')} · U ${U.map((x) => x.toFixed(2)).join(',')} · ux ${ux.map((x) => x.toFixed(2)).join(',')} · mirrored ${Q.mirrored}`,
+          `${S2.key}: the other face, on the back, ${cOut <= cIn ? 'face out' : 'its drawn face inward'} — its ${incident.length} seam${incident.length > 1 ? 's' : ''} to the placed panels meet end to end that way (${cOut.toFixed(0)} vs ${cIn.toFixed(0)} mm the other way)`,
+        );
+        if (opt.debug) {
+          const bb = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
+          for (let i = 0; i < S2.count; i++)
+            for (let k = 0; k < 3; k++) {
+              bb[2 * k] = Math.min(bb[2 * k], pos[3 * (S2.offset + i) + k]);
+              bb[2 * k + 1] = Math.max(bb[2 * k + 1], pos[3 * (S2.offset + i) + k]);
+            }
+          warnings.push(
+            `debug: bag back face ${S2.key} laid at ${bb.map((x) => x.toFixed(0)).join(' ')} · shape ${a.toFixed(0)} ${b.toFixed(0)} ${c.toFixed(0)}`,
+          );
+        }
+        walkAll(null);
+      } else
+        warnings.push(
+          `${S2.key}: the other face — no seam to a placed panel says which way it faces; not laid on the back, left to the walk`,
         );
     }
     // A STRIP the order sews onto a panel with no edge of it matching an edge of that panel (a
@@ -2301,6 +2343,41 @@ export function solveDoll(input: DollInput): DollReport {
         }
       }
       if (!host) continue;
+      // «No edge of it matches an edge of the host» — checked, not assumed: the strip's long edges
+      // against every run of the host's FREE edges (edges no seam took, contiguous along its
+      // boundary). A run within 10 % of a long edge is a plausible seam the graph missed: the
+      // strip then stays floating, said so, rather than being laid as a strap.
+      const H1 = host;
+      const taken = new Set(
+        G.seams.flatMap((s) => [...s.a, ...s.b].flatMap((id) => edgeIdsOf(id))),
+      );
+      const hEdges = H1.geom.edges.filter((e) => e.kind === 'edge');
+      const free = hEdges.map((e) => !taken.has(e.id));
+      const longEdges = P.geom.edges.filter((e) => e.kind === 'edge' && e.lenMm >= 0.6 * long);
+      let match: { run: string; mm: number; edge: Edge } | null = null;
+      const nE = hEdges.length;
+      for (let s0 = 0; s0 < nE && !match; s0++) {
+        if (!free[s0] || (nE > 1 && free[(s0 - 1 + nE) % nE] && s0 !== 0)) continue;
+        let sum = 0;
+        const ks: number[] = [];
+        for (let k = 0; k < nE; k++) {
+          const i = (s0 + k) % nE;
+          if (!free[i] || (k > 0 && i === s0)) break;
+          sum += hEdges[i].lenMm;
+          ks.push(hEdges[i].k);
+          const hit = longEdges.find((e) => Math.abs(sum - e.lenMm) <= 0.1 * e.lenMm);
+          if (hit) {
+            match = { run: ks.map((x) => `edge ${x + 1}`).join('+'), mm: sum, edge: hit };
+            break;
+          }
+        }
+      }
+      if (match) {
+        warnings.push(
+          `${P.key}: a strip ${Math.round(long)} × ${Math.round(short)} mm the order sews onto ${H1.key} («${join}») — its ${Math.round(match.edge.lenMm)} mm edge could meet the panel's free ${match.run} (${Math.round(match.mm)} mm): a seam the graph has not got, not a strap; left apart`,
+        );
+        continue;
+      }
       const hb = boxOf(host);
       const vertical = Math.abs(long - hb.h) <= Math.abs(long - hb.w);
       const n = sidesTaken.get(host.key) ?? 0;
@@ -2323,13 +2400,16 @@ export function solveDoll(input: DollInput): DollReport {
       const T = host.mesh.tris;
       const H0 = host;
       const hv = (t: number, j: number) => H0.offset + T[t + j];
-      for (let i = 0; i < P.count; i++) {
+      // Every vertex must find a non-degenerate host triangle (no mesh → no place, said so).
+      const landed: Vec3[] = [];
+      let lost = false;
+      for (let i = 0; i < P.count && !lost; i++) {
         const v = P.offset + i;
         const p = toHost(uv[2 * v], uv[2 * v + 1]);
         let bt = 0;
         let bw: [number, number, number] = [1, 0, 0];
         let bd = Infinity;
-        for (let t = 0; t < T.length; t += 3) {
+        for (let t = 0; t + 2 < T.length; t += 3) {
           const A = [uv[2 * hv(t, 0)], uv[2 * hv(t, 0) + 1]];
           const B = [uv[2 * hv(t, 1)], uv[2 * hv(t, 1) + 1]];
           const C = [uv[2 * hv(t, 2)], uv[2 * hv(t, 2) + 1]];
@@ -2350,13 +2430,27 @@ export function solveDoll(input: DollInput): DollReport {
             if (out === 0) break;
           }
         }
+        if (!Number.isFinite(bd)) {
+          lost = true;
+          break;
+        }
         const X: Vec3 = [0, 0, 0];
         for (let j = 0; j < 3; j++) {
           const q = getPos(hv(bt, j));
           for (let d = 0; d < 3; d++) X[d] += bw[j] * q[d];
         }
         const nn = nrmAt(X);
-        setPos(v, [X[0] + 3 * nn[0], X[1] + 3 * nn[1], X[2] + 3 * nn[2]]);
+        landed.push([X[0] + 3 * nn[0], X[1] + 3 * nn[1], X[2] + 3 * nn[2]]);
+      }
+      if (lost || landed.length !== P.count) {
+        const note = `a strip the order sews onto ${host.key} («${join}»), but the panel's mesh has no triangle to carry it — not placed`;
+        bagSurfaceRows.push({ pieceKey: P.key, host: host.key, join, placed: false, note });
+        warnings.push(`${P.key}: ${note}`);
+        continue;
+      }
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, landed[i]);
         proxyOf[v] = strapIdx;
         placed[v] = 1;
       }
@@ -4172,15 +4266,18 @@ export function solveDoll(input: DollInput): DollReport {
       A = loopPath(A0.verts, uv, panelOf, 0, false, ringInfo);
       B = loopPath(B0.verts, uv, panelOf, 0, false, ringInfo);
     }
-    const plan = foldB ? foldPlanFor(A.len, B) : null;
+    // The raw lengths decide whether the pairing is proposed at all; folds (evidence on B: pleat
+    // pairs, darts) only re-read the ease of a pairing already accepted — never rescue one.
+    const rawEase = 1 - Math.min(A.len, B.len) / Math.max(A.len, B.len, 1e-9);
+    const plan = foldB && rawEase <= maxEase ? foldEvidence(B) : null;
     const Le = plan ? plan.Le : B.len;
     const ratio = Math.min(A.len, Le) / Math.max(A.len, Le, 1e-9);
-    const ease = 1 - ratio;
+    const ease = plan ? 1 - ratio : rawEase;
     const foldWords = plan
       ? ` − ${(B.len - plan.Le).toFixed(0)} mm folded closed (${plan.folds.length} pleat${plan.folds.length > 1 ? 's' : ''} / dart${plan.folds.length > 1 ? 's' : ''} marked on it: ${plan.folds.map((f) => (f[1] - f[0]).toFixed(0)).join(' + ')} mm) = ${plan.Le.toFixed(0)}`
       : '';
-    const words = `${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)}${foldWords} mm, ${ease < 0.015 ? 'equal' : `eased ${(ease * 100).toFixed(0)} %`}`;
-    if (ease > maxEase) {
+    const words = `${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)}${foldWords} mm, ${ease < 0.015 ? 'equal' : `${A.len > Le && plan ? 'the band longer, ' : ''}eased ${(ease * 100).toFixed(0)} %`}`;
+    if (rawEase > maxEase) {
       proposals.push({
         gid,
         label,
@@ -4940,71 +5037,95 @@ export function solveDoll(input: DollInput): DollReport {
       if (cctx.isNotch(P.v[k]) && (!notchK.length || P.s[k] - P.s[notchK[notchK.length - 1]] > 2))
         notchK.push(k);
     const pairs: [number, number][] = [];
+    /** The panel each pair lies on (aligned with `pairs`). */
+    const pairPanel: number[] = [];
     for (let i = 0; i + 1 < notchK.length; i++) {
       const a = notchK[i];
       const b = notchK[i + 1];
       const d = P.s[b] - P.s[a];
       if (d >= 15 && d <= 80 && panelOf[P.v[a]] === panelOf[P.v[b]]) {
         pairs.push([P.s[a], P.s[b]]);
+        pairPanel.push(panelOf[P.v[a]]);
         i++;
       }
     }
     const stairs: [number, number][] = [];
-    let run: { s0: number; s1: number; edges: Set<string> } | null = null;
+    /** The first and last vertex of each run (aligned with `stairs`). */
+    const stairV: [number, number][] = [];
+    let run: { s0: number; s1: number; v0: number; v1: number; edges: Set<string> } | null = null;
     const flush = () => {
-      if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) stairs.push([run.s0, run.s1]);
+      if (run && run.edges.size >= 2 && run.s1 - run.s0 <= 130) {
+        stairs.push([run.s0, run.s1]);
+        stairV.push([run.v0, run.v1]);
+      }
       run = null;
     };
     for (let k = 1; k < P.v.length; k++) {
       const e = edgeOfSeg(P.v[k - 1], P.v[k]);
       if (e && e.lenMm < 35) {
-        if (!run) run = { s0: P.s[k - 1], s1: P.s[k], edges: new Set([e.id]) };
+        if (!run)
+          run = { s0: P.s[k - 1], s1: P.s[k], v0: P.v[k - 1], v1: P.v[k], edges: new Set([e.id]) };
         else {
           run.s1 = P.s[k];
+          run.v1 = P.v[k];
           run.edges.add(e.id);
         }
       } else flush();
     }
     flush();
-    return { pairs, stairs };
+    /** Notch arcs on the path with their panel. */
+    const notches = notchK.map((k) => ({ s: P.s[k], panel: panelOf[P.v[k]] }));
+    return { pairs, pairPanel, stairs, stairV, notches };
   };
   /**
-   * The reading of a path's intake that fits a run of `lenA` mm best (a waistband onto the top of
-   * pleated / darted legs — 11.10 corpus: SS26-007, the band 877 mm onto a flat waist of 1077): the
-   * path as drawn, its notch pairs folded, its short-edge runs folded, or both (overlapping ranges
-   * merged: a dart's slit lies between its two notches), the length ratio nearest 1 within
-   * 0.90–1.15. Null when the path as drawn reads best — or nothing folded brings it in.
+   * Intake on a path read from EVIDENCE alone, never from how a band happens to fit (11.10
+   * review: six balance-notch pairs 75 mm apart would otherwise have let a wrong 700 mm band pass
+   * on a 1000 mm waist): pleats = two or more notch pairs of one width (± 3 mm or 15 %) on one
+   * piece — a lone pair is a balance mark and never folds; darts = a run of short edges that
+   * converges (its chord under half its length: a slit, a V), spanning the notches within 15 mm
+   * either side when the piece carries them (the dart's legs). Overlaps merged.
    */
-  const foldPlanFor = (lenA: number, B: Path): { folds: [number, number][]; Le: number } | null => {
+  const foldEvidence = (B: Path): { folds: [number, number][]; Le: number } | null => {
     const f = foldsOnPath(B);
-    if (!f.pairs.length && !f.stairs.length) return null;
-    const merged = (F: [number, number][]) => {
-      const out: [number, number][] = [];
-      for (const x of [...F].sort((p, q) => p[0] - q[0])) {
-        const last = out[out.length - 1];
-        if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
-        else out.push([x[0], x[1]]);
-      }
-      return out;
-    };
-    const r0 = lenA / Math.max(1, B.len);
-    let best: { si: number; folds: [number, number][]; Le: number; score: number } = {
-      si: 0,
-      folds: [],
-      Le: B.len,
-      score: r0 >= 0.9 && r0 <= 1.15 ? Math.abs(Math.log(r0)) : Infinity,
-    };
-    [f.pairs, f.stairs, [...f.pairs, ...f.stairs]].forEach((F, k) => {
-      const si = k + 1;
-      if (!F.length || (si === 3 && (!f.pairs.length || !f.stairs.length))) return;
-      const Fs = merged(F);
-      const Le = B.len - Fs.reduce((t, x) => t + x[1] - x[0], 0);
-      const r = lenA / Math.max(1, Le);
-      if (r < 0.9 || r > 1.15) return;
-      const score = Math.abs(Math.log(r)) + 0.003 * si;
-      if (score < best.score) best = { si, folds: Fs, Le, score };
+    const out: [number, number][] = [];
+    const byPanel = new Map<number, [number, number][]>();
+    f.pairs.forEach((p, i) => {
+      const list = byPanel.get(f.pairPanel[i]) ?? [];
+      list.push(p);
+      byPanel.set(f.pairPanel[i], list);
     });
-    return best.folds.length ? { folds: best.folds, Le: best.Le } : null;
+    for (const list of byPanel.values()) {
+      if (list.length < 2) continue;
+      for (const p of list) {
+        const w = p[1] - p[0];
+        const alike = list.filter((q) => Math.abs(q[1] - q[0] - w) <= Math.max(3, 0.15 * w));
+        if (alike.length >= 2) out.push(p);
+      }
+    }
+    f.stairs.forEach((st, i) => {
+      const [v0, v1] = f.stairV[i];
+      if (panelOf[v0] !== panelOf[v1]) return;
+      const chord = Math.hypot(uv[2 * v1] - uv[2 * v0], uv[2 * v1 + 1] - uv[2 * v0 + 1]);
+      if (chord > 0.5 * (st[1] - st[0])) return;
+      const pn = panelOf[v0];
+      let lo = st[0];
+      let hi = st[1];
+      for (const n of f.notches) {
+        if (n.panel !== pn) continue;
+        if (n.s < st[0] && st[0] - n.s <= 15) lo = Math.min(lo, n.s);
+        if (n.s > st[1] && n.s - st[1] <= 15) hi = Math.max(hi, n.s);
+      }
+      out.push([lo, hi]);
+    });
+    if (!out.length) return null;
+    const folds: [number, number][] = [];
+    for (const x of [...out].sort((p, q) => p[0] - q[0])) {
+      const last = folds[folds.length - 1];
+      if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
+      else folds.push([x[0], x[1]]);
+    }
+    const Le = B.len - folds.reduce((t, x) => t + x[1] - x[0], 0);
+    return Le > 0 ? { folds, Le } : null;
   };
   /**
    * L4 (04-COLLAR K2 + intake): tucks and pleats ON the neck path folded closed before the unit is
@@ -6303,7 +6424,7 @@ export function solveDoll(input: DollInput): DollReport {
   outPanels.push(...surfacePanels);
   // Pieces that end up in no closed/proposed seam at all are floating too (a bag's strap laid on
   // its panel by a reading of the order is said as a surface row instead).
-  const onBag = new Set(bagSurfaceRows.map((x) => x.pieceKey));
+  const onBag = new Set(bagSurfaceRows.filter((x) => x.placed).map((x) => x.pieceKey));
   for (const P of panels) {
     if (P.group === 'FLOAT' || onBag.has(P.key)) continue;
     const any = seams.some(
