@@ -3,6 +3,7 @@
 // there makes the POM `not-found`, never a guess.
 
 import type { Edge, EdgeId, Pt2 } from 'lib/assembly-skeleton/types';
+import { foldedMm, foldWords, waistFolds } from './folds';
 import { bboxOf, dist, first, hIntervals, last, mirrorErrorMm, vIntervals } from './geom';
 import { partnersOf, pieceOf, type Model } from './model';
 import { BODY_TOP, LEG } from './pieces';
@@ -1462,38 +1463,81 @@ function measureBottom(ctx: Ctx) {
   const handNullMult = legs.some((k) => !m.info.get(k)!.hand && m.info.get(k)!.girthMult === 1);
 
   // Waist (whole garment): the waistband's length when there is one (the finished waist — the legs
-  // may be pleated or gathered into it), else the legs' waist seam.
+  // are pleated, darted or gathered into it), else the legs' waist seam with its folds taken in.
   const wEdges = legs.flatMap((k) => edgesOf(m, k, 'waist').map((e) => ({ k, e })));
   const legWaist = wEdges.reduce((s, { k, e }) => s + e.lenMm * multOf(k), 0);
+  // The intake marked on the legs' waist (pleat pairs, dart slits — lib/pom/folds, the rule the
+  // doll folds by): sewn away in the waist seam.
+  const legFolds = legs.map((k) => ({
+    k,
+    folds: waistFolds(
+      m.geoms.get(k)!,
+      wEdges.filter((x) => x.k === k).map((x) => x.e),
+    ),
+  }));
+  const foldFull = legFolds.reduce((s, { k, folds }) => s + foldedMm(folds) * multOf(k), 0);
+  const legWaistFolded = legWaist - foldFull;
+  const foldLine = foldFull
+    ? `legs' waist seam ${legWaist.toFixed(0)} mm laid flat − ${foldFull.toFixed(0)} mm folded (${legFolds
+        .filter((x) => x.folds.length)
+        .map((x) => `${x.k}: ${foldWords(x.folds)}`)
+        .join('; ')}) = ${legWaistFolded.toFixed(0)} mm sewn`
+    : null;
   const bandsAll = keys.filter((k) => m.info.get(k)!.kind === 'waistband');
   const longest = (k: string) => Math.max(...m.geoms.get(k)!.edges.map((e) => e.lenMm));
   const bandMax = Math.max(0, ...bandsAll.map(longest));
   // A «belt» piece a fraction of the band's length is a belt loop, not the band.
-  const bands = bandsAll.filter((k) => longest(k) >= 0.3 * bandMax);
+  const bands0 = bandsAll.filter((k) => longest(k) >= 0.3 * bandMax);
   // The waist sits at the band's TOP edge: of its two long edges the shorter one (a contoured band
   // is longer where it is sewn on; a straight band has two equal edges).
-  const bandEdge = (k: string) =>
-    [...m.geoms.get(k)!.edges]
-      .sort((a, b) => b.lenMm - a.lenMm)
-      .slice(0, 2)
-      .sort((a, b) => a.lenMm - b.lenMm)[0];
+  const longTwo = (k: string) =>
+    [...m.geoms.get(k)!.edges].sort((a, b) => b.lenMm - a.lenMm).slice(0, 2);
+  const bandEdge = (k: string) => [...longTwo(k)].sort((a, b) => a.lenMm - b.lenMm)[0];
+  const sewnEdge = (k: string) => longTwo(k)[0];
+  // Several band pieces without hands are not halves of one ring (a second ply, a band of another
+  // block listed with this one): ONE band is the waist — the one whose sewn edge is nearest the
+  // legs' folded waist — and the rest are said, never summed (12.10: two bands summed read a waist
+  // of 149 cm on SS26-007).
+  const halvesOfBand = bands0.length === 2 && bands0.every((k) => m.info.get(k)!.hand);
+  let bands = bands0;
+  let leftOut: string[] = [];
+  if (bands0.length > 1 && !halvesOfBand && wEdges.length) {
+    const near = (k: string) =>
+      Math.abs(sewnEdge(k).lenMm * (m.info.get(k)!.girthMult ?? 1) - legWaistFolded);
+    const best = [...bands0].sort((a, b) => near(a) - near(b))[0];
+    bands = [best];
+    leftOut = bands0.filter((k) => k !== best);
+  }
   if (bands.length && !missing) {
     const es = bands.map((k) => ({ k, e: bandEdge(k) })).filter((x) => !!x.e);
     const full = es.reduce((s, { k, e }) => s + e.lenMm * (m.info.get(k)!.girthMult ?? 1), 0);
-    const halvesOfBand = bands.length === 2 && bands.every((k) => m.info.get(k)!.hand);
+    const sewn = bands.reduce((s, k) => s + sewnEdge(k).lenMm * (m.info.get(k)!.girthMult ?? 1), 0);
     const diff = halvesOfBand ? Math.abs(es[0].e.lenMm - es[1].e.lenMm) : 0;
+    const reasons = [
+      diff > 10
+        ? `waistband halves differ by ${diff.toFixed(0)} mm (fly extension / overlap included)`
+        : null,
+      leftOut.length
+        ? `${bands0.length} band pieces without hands — ${bands[0]} taken (its sewn edge ${sewn.toFixed(0)} mm is nearest the legs' folded waist ${legWaistFolded.toFixed(0)}), ${leftOut.join(', ')} left out`
+        : null,
+      foldFull ? `the legs' pleats / darts are read from their marks` : null,
+    ].filter((x): x is string => !!x);
     out.set('waist', {
       ...girth(full, conv),
-      exactness: diff > 10 ? 'approx' : 'exact',
+      exactness: reasons.length ? 'approx' : 'exact',
       reason:
-        diff > 10
-          ? `waistband halves differ by ${diff.toFixed(0)} mm (fly extension / overlap included)`
-          : `top edge of the waistband ${bands.join(' + ')} (finished waist)`,
-      detail: wEdges.length
-        ? [
-            `legs' waist seam ${legWaist.toFixed(0)} mm full${Math.abs(legWaist - full) > 20 ? ` — ${(legWaist - full).toFixed(0)} mm eased, pleated or gathered into the band` : ''}`,
-          ]
-        : [],
+        reasons.join('; ') || `top edge of the waistband ${bands.join(' + ')} (finished waist)`,
+      detail: [
+        ...(reasons.length
+          ? [`top edge of the waistband ${bands.join(' + ')} (finished waist)`]
+          : []),
+        ...(foldLine ? [foldLine] : []),
+        ...(wEdges.length
+          ? [
+              `band sewn edge ${sewn.toFixed(0)} mm vs legs' waist seam ${legWaistFolded.toFixed(0)} mm${Math.abs(legWaistFolded - sewn) > 20 ? ` — ${(legWaistFolded - sewn).toFixed(0)} mm eased or gathered into the band` : ''}`,
+            ]
+          : []),
+      ],
       path: {
         landmarks: [],
         edges: es.map((x) => x.e.id),
@@ -1502,10 +1546,13 @@ function measureBottom(ctx: Ctx) {
     });
   } else if (!wEdges.length) out.set('waist', notFound('no waist edge read on the legs'));
   else {
-    const full = wEdges.reduce((s, { k, e }) => s + e.lenMm * multOf(k), 0);
+    const full = legWaistFolded;
     const reasons = [
       missing,
       handNullMult ? 'a leg piece without a hand counted twice (cut as a pair assumed)' : null,
+      foldFull
+        ? `${foldFull.toFixed(0)} mm of pleats / darts folded out of the legs' waist edges (read from their marks)`
+        : null,
     ].filter(Boolean) as string[];
     out.set(
       'waist',
@@ -1515,6 +1562,7 @@ function measureBottom(ctx: Ctx) {
             ...girth(full, conv),
             exactness: reasons.length ? 'approx' : 'exact',
             reason: reasons.join('; ') || 'at the waist seam (waistband not added)',
+            detail: foldLine ? [foldLine] : [],
             path: {
               landmarks: [],
               edges: wEdges.map((x) => x.e.id),

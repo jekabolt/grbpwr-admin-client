@@ -611,6 +611,28 @@ for (const id of Object.keys(results)) {
     );
 }
 
+// G7: trousers with a waistband — the waist is the band (top edge), the legs' pleats / darts are
+// read from their marks and said, and a second band piece listed with the first is never summed
+// (SS26-007's card lists WS and WS_1_XS: the live rail read 74.4 cm half).
+if (results.card7) {
+  const { report, loaded } = results.card7;
+  const w = report.sizes
+    .find((s) => s.size === report.baseSize)
+    ?.values.find((v) => v.code === 'waist');
+  const words = `${w?.reason ?? ''} ${(w?.detail ?? []).join(' ')}`;
+  const okVal = !!w && w.valueMm >= 370 && w.valueMm <= 450;
+  const okWords = /waistband/.test(words) && /pleat|dart/.test(words) && /folded/.test(words);
+  gate(
+    okVal && w.exactness === 'approx' && okWords,
+    `G7 card7 waist half ${cm(w?.valueMm)} cm, ${w?.exactness ?? '—'} — the band's top edge, the legs' folds said${okWords ? '' : ' (words lack band / pleat / folded)'}`,
+  );
+  const d = await quiet(() => mod.runWithBandDoubled(loaded));
+  gate(
+    !!d && !!w && Math.abs(d.valueMm - w.valueMm) <= 1 && /left out/.test(d.reason ?? ''),
+    `G7 card7 with its band listed twice: waist half ${cm(d?.valueMm)} cm (one band taken, the other said left out)`,
+  );
+}
+
 // G4: unnamed blazer says «not found» everywhere.
 if (results.blazer) {
   const vals = results.blazer.report.sizes[0].values;
