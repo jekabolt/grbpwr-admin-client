@@ -947,14 +947,23 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       // takes the click's label (the name the operator gives it); a face seed no click falls in
       // is junk → "not a piece"
       const faceSeeds = pc.seeds.filter((x) => x.origin === 'face');
-      const holder = (at: PtMm) =>
-        faceSeeds.find((fs) =>
-          pc.families
-            .find((f) => f.seed === fs.id)
-            ?.candidates.some(
-              (cd) => cd.outcome === 'closed' && cd.outer.length > 2 && insidePoly(at, cd.outer),
-            ),
+      const closedOf = (fs: Seed) =>
+        (pc.families.find((f) => f.seed === fs.id)?.candidates ?? []).filter(
+          (cd) => cd.outcome === 'closed' && cd.outer.length > 2,
         );
+      // NAP: a fixture click recorded ON the line of a closed outline seed (r4454 "10": 1.8 mm
+      // outside the closed outline of piece 10, the next outline 109 mm away) means that piece —
+      // the operator sees the outline closed there and does not click it. Only when the click is
+      // inside no closed outline, and exactly one outline passes within ON_LINE_MM.
+      const ON_LINE_MM = 3;
+      const holder = (at: PtMm) =>
+        faceSeeds.find((fs) => closedOf(fs).some((cd) => insidePoly(at, cd.outer))) ??
+        (() => {
+          const near = faceSeeds.filter((fs) =>
+            closedOf(fs).some((cd) => polyDist(at, cd.outer) <= ON_LINE_MM),
+          );
+          return near.length === 1 ? near[0] : undefined;
+        })();
       const covered = new Map<number, string>();
       const clicksLeft: typeof clickList = [];
       for (const k of clickList) {
@@ -2192,6 +2201,21 @@ export async function cmpDxf(src: string, out: string) {
     rows.push(`${k.padEnd(24)} out ${JSON.stringify(v)}  src ${JSON.stringify(s ?? null)}`);
   }
   return rows;
+}
+
+/** Distance from a point to a closed polygon's outline, mm (NAP: a fixture click on the line). */
+function polyDist(p: PtMm, poly: readonly PtMm[]): number {
+  let d = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+    d = Math.min(d, Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y));
+  }
+  return d;
 }
 
 /** Even-odd point in polygon (A2: does a fixture click fall in a face seed's closed outline). */
