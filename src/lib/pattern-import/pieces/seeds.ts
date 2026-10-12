@@ -347,9 +347,20 @@ export function codeTextSeeds(
           ((x.s[0] >= own[1] - 0.25 * fs || x.s[1] <= own[0] + 0.25 * fs) &&
             x.d.text.trim() !== label)),
     );
-    const reads = [...run]
+    // what the line reads: one print per place — the seed itself, then each digit run that
+    // overlaps no print kept so far by more than a quarter type (its parts, an OCG copy over it
+    // or over a neighbour are the same print), in order along the line
+    const kept: { s: [number, number]; text: string }[] = [{ s: own, text: label }];
+    for (const x of [...run].sort((p, q) => p.s[0] - q.s[0]))
+      if (
+        x.d.id !== t.id &&
+        (!!o.off?.has('parts') ||
+          kept.every((k) => Math.min(k.s[1], x.s[1]) - Math.max(k.s[0], x.s[0]) <= 0.25 * fs))
+      )
+        kept.push({ s: x.s, text: x.d.text.trim() });
+    const reads = kept
       .sort((p, q) => p.s[0] - q.s[0])
-      .map((x) => x.d.text.trim())
+      .map((k) => k.text)
       .join('');
     // longer than any piece number (PIECE_NO_SRC: ≤ 3 digits) — a split "1" + "5" stays a label
     const string = outside.length > 0 && (reads.length >= 4 || !!o.off?.has('long'));

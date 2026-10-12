@@ -141,6 +141,14 @@ function rule() {
       '1 parts · a number over its own copy ("15"+"15" in one box): not held',
       held(all, [...L, a]).size === 0,
     );
+    // its copy over it and a cut count "2" beside: the line reads "152", not "15152"
+    {
+      const two = txt('2', 600 + 0.6 * 11.1 + 0.3 * 11.1 + 0.3 * 11.1, 900, 11.1);
+      check(
+        '1 parts · its copy over it + a "2" beside (reads 152, ≤ 3 digits): not held',
+        held([...L, a, copy, two], [...L, a]).size === 0,
+      );
+    }
     // the copy shifted along the line, partly over it and wholly beside it ("15 15" reads 1515)
     for (const dx of [0.3 * 11.1, 0.6 * 11.1 * 2 + 0.3 * 11.1]) {
       const c2 = txt('15', 600 + dx, 900, 11.1);
