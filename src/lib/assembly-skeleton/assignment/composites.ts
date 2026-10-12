@@ -16,6 +16,7 @@
 // second seam between inputs already joined.
 
 import { gluedRuns } from '../geometry/composite';
+import { edgeIdsOf } from '../geometry/match';
 import { yMidOf } from '../geometry/plies';
 import { cornerTurn, type CandidatePool } from '../geometry/match';
 import {
@@ -48,6 +49,8 @@ const TUBE_JOIN_BONUS = 0.1;
 const COMPOSITE_TUBE_ACCEPT = 0.55;
 /** The shortest edge a tube / ring meets the body along (a child's armhole is longer). */
 const TUBE_MIN_MM = 250;
+/** Sides of two inputs compared at most (a boundary of 150 small pieces is not walked pairwise). */
+const MAX_PAIRS = 250_000;
 
 type Side = {
   id: string;
@@ -314,8 +317,10 @@ export function compositeSeams(
   /** Pieces never sewn as shell here (hardware, interfacing, surface pieces). */
   skip: ReadonlySet<string>,
   lining: ReadonlySet<string>,
-): { seams: SeamCandidate[]; words: string[] } {
+): { seams: SeamCandidate[]; words: string[]; joinedOps: Set<string> } {
   const geom = new Map(P.pieces.map((p) => [p.pieceKey, p]));
+  /** Operations whose inputs are all one after the composites (pairs, forced seams and these). */
+  const joinedOps = new Set<string>();
   const debug = typeof process !== 'undefined' && !!process.env?.ASSIGN_DEBUG;
   const all: SeamCandidate[] = [...seams];
   const added: SeamCandidate[] = [];
@@ -326,16 +331,25 @@ export function compositeSeams(
   // the boundary; the second ply's edges are never free edges of their own).
   const onFirstPly = (c: SeamCandidate): SeamCandidate => {
     const map = (id: EdgeId) => (board.isSecondPly(pkOf(id)) ? board.plyMateOf(id) ?? id : id);
-    const A = sideIds(c, 'a').map(map);
-    const B = sideIds(c, 'b').map(map);
-    if (A.every((x, i) => x === sideIds(c, 'a')[i]) && B.every((x, i) => x === sideIds(c, 'b')[i]))
-      return c;
+    // Atomic edges (a chain `P#3+4` is two): remapped one by one; a side on the second ply becomes
+    // a parts list on the first (the longest part named as the anchor).
+    const side = (s: 'a' | 'b') => {
+      const ids = sideIds(c, s).flatMap(edgeIdsOf);
+      const mapped = ids.map(map);
+      const moved = mapped.some((x, i) => x !== ids[i]);
+      return { ids, mapped, moved };
+    };
+    const A = side('a');
+    const B = side('b');
+    if (!A.moved && !B.moved) return c;
+    const lenOf = (id: EdgeId) => geom.get(pkOf(id))?.edges.find((e) => e.id === id)?.lenMm ?? 0;
+    const longest = (ids: EdgeId[]) => ids.reduce((m, x) => (lenOf(x) > lenOf(m) ? x : m));
     return {
       ...c,
-      a: map(c.a),
-      b: map(c.b),
-      ...(c.aParts ? { aParts: A } : {}),
-      ...(c.bParts ? { bParts: B } : {}),
+      a: A.moved ? longest(A.mapped) : c.a,
+      b: B.moved ? longest(B.mapped) : c.b,
+      ...(A.moved && A.mapped.length > 1 ? { aParts: A.mapped } : {}),
+      ...(B.moved && B.mapped.length > 1 ? { bParts: B.mapped } : {}),
     };
   };
   const sideIds = (c: SeamCandidate, s: 'a' | 'b') =>
@@ -404,9 +418,34 @@ export function compositeSeams(
         const p = geom.get(e.pieceKey);
         return !p || yMidOf(p, e) >= 0.45;
       });
+    // The operation's inputs as the pair solve (and the forced seams) left them: a composite joins
+    // two inputs still APART — never a second seam between inputs already joined.
+    const root = op.inputs.map((_, i) => i);
+    const find = (i: number): number => {
+      while (root[i] !== i) i = root[i];
+      return i;
+    };
+    const inputOf = new Map<string, number>();
+    op.inputs.forEach((X, i) => X.forEach((k) => inputOf.set(k, i)));
+    for (const c of all) {
+      if (c.kind === 'closure-not-seam') continue;
+      const ins = [
+        ...new Set([...sideIds(c, 'a'), ...sideIds(c, 'b')].map((id) => inputOf.get(pkOf(id)))),
+      ];
+      if (ins.length === 2 && ins[0] !== undefined && ins[1] !== undefined)
+        root[find(ins[0])] = find(ins[1]);
+    }
     const cands: Comp[] = [];
     for (let i = 0; i < sides.length; i++)
       for (let j = i + 1; j < sides.length; j++) {
+        if (find(i) === find(j)) continue;
+        // (a boundary of many small pieces: the sides' cross product is bounded, said in words)
+        if (sides[i].length * sides[j].length > MAX_PAIRS) {
+          words.push(
+            `«${op.label}»: ${sides[i].length} × ${sides[j].length} composite sides between inputs ${i} and ${j} — too many to compare, left to the doll`,
+          );
+          continue;
+        }
         // A tube input meets the body along ONE composite edge: its own side is a single edge or a
         // closed cap, never a stretch of several of its edges.
         const tubeI = TUBE_CLASSES.has(op.classes[i]);
@@ -464,11 +503,9 @@ export function compositeSeams(
           .map((c) => `${c.a.id} ↔ ${c.b.id} ${c.score.toFixed(3)}`)
           .join('; ')}`,
       );
-    const joined = new Set<string>();
     for (const c of cands) {
       if (c.score < accept) break;
-      const key = `${c.ia}|${c.ib}`;
-      if (joined.has(key)) continue;
+      if (find(c.ia) === find(c.ib)) continue;
       if (![...c.a.parts, ...c.b.parts].every((e) => free(e.id))) continue;
       // A near rival for the same side is said; the best stands (as the pool's alternatives).
       const rival = cands.find(
@@ -499,11 +536,12 @@ export function compositeSeams(
         },
       };
       for (const e of [...c.a.parts, ...c.b.parts]) taken.add(e.id);
-      joined.add(key);
+      root[find(c.ia)] = find(c.ib);
       all.push(seam);
       added.push(seam);
       words.push(`«${op.label}»: ${seam.a} ↔ ${seam.b} read as a composite (${c.evidence.rule})`);
     }
+    if (new Set(op.inputs.map((_, i) => find(i))).size === 1) joinedOps.add(op.id);
   }
-  return { seams: added, words };
+  return { seams: added, words, joinedOps };
 }

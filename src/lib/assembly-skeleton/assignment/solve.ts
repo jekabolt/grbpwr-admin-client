@@ -101,6 +101,8 @@ export class Board {
   private readonly plyMate = new Map<EdgeId, EdgeId>();
   /** The second ply of each pair (CLR_1 to CLR): a tie between the plies goes to the first. */
   private readonly secondPly = new Set<string>();
+  /** Every piece of a validated ply pair. */
+  private readonly plyPieces = new Set<string>();
   /** Every edge of the card by index, and how many seams hold it (the search bound reads these). */
   readonly edgeIndex = new Map<EdgeId, number>();
   readonly useCount: Int32Array;
@@ -172,6 +174,8 @@ export class Board {
       const m = plyCorrespondence(p, q);
       if (!m) continue;
       for (const [k, v] of m) this.plyMate.set(k, v);
+      this.plyPieces.add(p.pieceKey);
+      this.plyPieces.add(q.pieceKey);
       // One piece: the plies share their orientation.
       this.link(`\u0000O:${p.pieceKey}`, `\u0000O:${q.pieceKey}`, 0);
       // Both plies take every seam onto the pair; the seam is REPORTED on the ply the card names
@@ -410,6 +414,10 @@ export class Board {
     for (const [a, b, rel] of v.links) this.link(a, b, rel);
   }
 
+  /** The piece is one ply of a validated pair. */
+  isPly(k: string): boolean {
+    return this.plyPieces.has(k);
+  }
   /** The second ply of a pair (a tie between the plies goes to the first). */
   isSecondPly(k: string): boolean {
     return this.secondPly.has(k);

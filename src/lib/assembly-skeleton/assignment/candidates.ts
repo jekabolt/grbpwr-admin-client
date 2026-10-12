@@ -58,7 +58,8 @@ export function variableOf(
     pa,
     pb,
     benefit: benefitOf(c),
-    ply: c.evidence.twin === 'identical',
+    // (identical twins the board did not pair as plies — two identical sleeves — are two pieces)
+    ply: c.evidence.twin === 'identical' && board.isPly(pa) && board.isPly(pb),
     self,
     mirror: c.evidence.twin === 'mirror',
     op: at.op,

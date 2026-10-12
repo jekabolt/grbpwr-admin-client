@@ -202,7 +202,9 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     lining,
   );
   warnings.push(...composites.words);
-  const closedByComposite = new Set(composites.seams.map((c) => c.operationId));
+  const closedByComposite = new Set(
+    composites.seams.map((c) => c.operationId).filter((id) => id && composites.joinedOps.has(id)),
+  );
   for (const s of sol.perOp) if (!closedByComposite.has(s.op.id)) warnings.push(...s.words);
 
   const summary: SeamAssignmentSummary = {
