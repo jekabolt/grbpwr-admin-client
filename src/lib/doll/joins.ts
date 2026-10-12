@@ -113,6 +113,11 @@ type Run = {
   xMid: number;
   /** Arc positions (mm from the run's start) where the run turns a sharp corner (multi mode). */
   cornersAt: number[];
+  /**
+   * Multi mode: a run whose first / last edge is taken only in part — cut at a notch (a strip round
+   * a panel's lower U, the flap above the notch left free). The sewn stretch, mm along that EDGE.
+   */
+  partRange?: Record<EdgeId, [number, number]>;
 };
 
 /**
@@ -234,8 +239,11 @@ export function completeFromJoins(
   left: string[];
   byLoops: JoinPart[];
   surface: JoinPart[];
-  /** Graph seams this reading refuses (a strip sewn by both long edges to one piece). */
-  refused: SeamCandidate[];
+  /**
+   * Graph seams this reading refuses, each with why: a strip sewn by both long edges to one piece;
+   * a ply of a two-ply strip sewn to a second piece; a pairing on edges a notched strip fits round.
+   */
+  refused: { seam: SeamCandidate; note: string }[];
 } {
   const geom0 = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
   const classOf_ = (g: PieceGeom) => classOf(g, graph);
@@ -316,12 +324,18 @@ export function completeFromJoins(
   // GUSSET STRIPS: a strip's two long edges go to two different pieces. Where the graph sews both
   // to one piece (SS26-015's gusset by both edges onto the front), the weaker pairing is refused;
   // the order's search then sews that edge onto the other panel.
-  const refused: SeamCandidate[] = [];
+  const refused: { seam: SeamCandidate; note: string }[] = [];
+  const refuse = (s: SeamCandidate, note: string) => {
+    if (ignore.has(`${s.a}~${s.b}`)) return;
+    refused.push({ seam: s, note });
+    ignore.add(`${s.a}~${s.b}`);
+  };
   const single = (s: SeamCandidate) => !s.aParts && !s.bParts;
   const seamOnEdge = (e: Edge) =>
     graph.chosen.find(
       (s) => single(s) && !ignore.has(`${s.a}~${s.b}`) && (s.a === e.id || s.b === e.id),
     );
+  const otherPiece = (s: SeamCandidate, e: Edge) => pk(s.a === e.id ? s.b : s.a);
   // (an item without a body only: on a garment a strip-shaped piece may well take two seams from
   // one piece — a two-piece sleeve's halves, a folded band — and the graph's reading stands)
   for (const g of opts.multi ? graph.pieces : []) {
@@ -330,11 +344,82 @@ export function completeFromJoins(
     const s1 = seamOnEdge(L[0]);
     const s2 = seamOnEdge(L[1]);
     if (!s1 || !s2 || s1 === s2) continue;
-    const other = (s: SeamCandidate, e: Edge) => pk(s.a === e.id ? s.b : s.a);
-    if (other(s1, L[0]) !== other(s2, L[1]) || other(s1, L[0]) === g.pieceKey) continue;
+    if (otherPiece(s1, L[0]) !== otherPiece(s2, L[1]) || otherPiece(s1, L[0]) === g.pieceKey)
+      continue;
     const weak = s2.score < s1.score ? s2 : s1.score < s2.score ? s1 : s2;
-    refused.push(weak);
-    ignore.add(`${weak.a}~${weak.b}`);
+    refuse(
+      weak,
+      `not sewn — the graph sews both long edges of the strip ${g.pieceKey} to the same piece; a strip (a gusset, a binding) runs between two pieces: this weaker pairing is refused, the order places the edge`,
+    );
+  }
+  // TWO-PLY STRIPS (an item without a body): two identical strips the order sews to each other in
+  // an operation of their own (two belt strips → a channel, a strap's two plies) are one strip for
+  // the rest of the item — their matching long edges go onto ONE edge of ONE piece (a binding
+  // sandwiches it; a channel lies on it). Where the graph sews a ply's edge to one piece and the
+  // other ply's matching edge to another, the pairing the order makes later is refused; the free
+  // matching edge then follows its mate (used, no second partner).
+  const plyFollows: EdgeId[] = [];
+  if (opts.multi) {
+    const opIdx = (x: string, y: string) => {
+      const i = joins.findIndex((J) =>
+        J.parts.some(
+          (X, xi) => X.includes(x) && J.parts.some((Y, yi) => yi !== xi && Y.includes(y)),
+        ),
+      );
+      return i < 0 ? Infinity : i;
+    };
+    for (const J of joins) {
+      if (J.parts.length !== 2 || J.parts[0].length !== 1 || J.parts[1].length !== 1) continue;
+      const [ka, kb] = [J.parts[0][0], J.parts[1][0]];
+      const ga = geomOf.get(ka);
+      const gb = geomOf.get(kb);
+      if (!ga || !gb || !ga.twinOf.some((t) => t.key === kb && t.kind === 'identical')) continue;
+      const La = stripLongEdges(ga);
+      const Lb = stripLongEdges(gb);
+      if (!La || !Lb) continue;
+      const onLong = (s: SeamCandidate, L: [Edge, Edge]) =>
+        L.some((e) => e.id === s.a || e.id === s.b);
+      const ply = graph.chosen.find(
+        (s) =>
+          single(s) &&
+          ((pk(s.a) === ka && pk(s.b) === kb) || (pk(s.a) === kb && pk(s.b) === ka)) &&
+          onLong(s, La) &&
+          onLong(s, Lb),
+      );
+      // The matching long edges: beyond the ply seam the OTHER long edges match; without one, the
+      // edges in the same position.
+      const corr: [Edge, Edge][] = ply
+        ? [
+            [
+              La[1 - La.findIndex((e) => e.id === ply.a || e.id === ply.b)],
+              Lb[1 - Lb.findIndex((e) => e.id === ply.a || e.id === ply.b)],
+            ],
+          ]
+        : La.map((e, i) => [e, Lb.find((x) => x.k === e.k) ?? Lb[i]]);
+      for (const [ea, eb] of corr) {
+        const sa = seamOnEdge(ea);
+        const sb = seamOnEdge(eb);
+        const pa = sa ? otherPiece(sa, ea) : null;
+        const pb = sb ? otherPiece(sb, eb) : null;
+        const ida = sa ? (sa.a === ea.id ? sa.b : sa.a) : null;
+        const idb = sb ? (sb.a === eb.id ? sb.b : sb.a) : null;
+        // (two different edges — of two pieces, or of one — cannot both be the one bound edge)
+        if (sa && sb && ida !== idb && pa !== kb && pb !== ka) {
+          const ia = opIdx(ka, pa!);
+          const ib = opIdx(kb, pb!);
+          const weak = ia !== ib ? (ia > ib ? sa : sb) : sa.score < sb.score ? sa : sb;
+          const keep = weak === sa ? sb : sa;
+          refuse(
+            weak,
+            `not sewn — ${weak.a} ↔ ${weak.b}: ${ka} and ${kb} are two plies of one strip (the order sews them to each other in «${J.label}»); their matching edges go onto one edge of one piece, and ${keep.a} ↔ ${keep.b} has it (the order's earlier join) — this ply follows it`,
+          );
+        }
+        const keptA = sa && !ignore.has(`${sa.a}~${sa.b}`);
+        const keptB = sb && !ignore.has(`${sb.a}~${sb.b}`);
+        if (keptA && !keptB) plyFollows.push(eb.id);
+        if (keptB && !keptA) plyFollows.push(ea.id);
+      }
+    }
   }
   /** The x-position of an edge's middle across its piece (0 = the drawing's left, 1 = right). */
   const edgeXMid = (g: PieceGeom, e: Edge) => {
@@ -372,36 +457,48 @@ export function completeFromJoins(
   // (a seam on a ring's panel or a lid — identical twins, but panels: its edges are used up)
   const touchesFixed = (s: SeamCandidate) =>
     !!opts.fixed && sides(s).some((id) => opts.fixed!.has(pk(id)));
-  for (const s of [...graph.chosen, ...graph.rejected.filter((x) => x.kind === 'closure-not-seam')])
-    if ((!twins(s) || touchesFixed(s)) && !ignore.has(`${s.a}~${s.b}`))
-      for (const id of sides(s)) markUsed(id);
-  /** Parts read as surface pieces (laid on a panel's face): searched no further. */
-  const surfaced = new Set<string>();
-  const linked = new Set<string>();
-  const link = (a: string, b: string) => {
-    linked.add(`${a}|${b}`);
-    linked.add(`${b}|${a}`);
+  /** A ply seam between two strips (a channel's two plies sewn along one edge): the edge is taken. */
+  const stripPly = (s: SeamCandidate) => {
+    if (!opts.multi || !single(s)) return false;
+    const a = geomOf.get(pk(s.a));
+    const b = geomOf.get(pk(s.b));
+    return !!a && !!b && a !== b && !!stripLongEdges(a) && !!stripLongEdges(b);
   };
-  for (const s of graph.chosen)
-    if (!ignore.has(`${s.a}~${s.b}`))
-      for (const a of (s.aParts ?? [s.a]).map(pk))
-        for (const b of (s.bParts ?? [s.b]).map(pk)) link(a, b);
-
-  const freeFrac = (g: PieceGeom, e: Edge) => {
-    const set = used.get(g.pieceKey);
-    if (!set) return 1;
+  /** The sewn samples of an edge, or of its stretch [r0, r1] mm from its start. */
+  const samplesOf = (g: PieceGeom, e: Edge, r?: [number, number] | null) => {
     const n = g.rs.length;
-    let tot = 0;
-    let free = 0;
+    const out: number[] = [];
+    let cnt = 0;
     for (let i = e.s; ; i++) {
       const q = ((i % n) + n) % n;
-      tot++;
-      if (!set.has(q)) free++;
+      out.push(q);
+      cnt++;
       if (q === ((e.e % n) + n) % n) break;
+      if (cnt > n) break;
     }
-    return free / Math.max(1, tot);
+    if (!r) return out;
+    const step = e.lenMm / Math.max(1, out.length - 1);
+    return out.filter((_, k) => k * step >= r[0] - 1 && k * step <= r[1] + 1);
   };
-  const runsOf = (g: PieceGeom): Run[] => {
+  const markUsedR = (id: EdgeId, r: [number, number]) => {
+    const g = geomOf.get(pk(id));
+    const e = g?.edges.find((x) => x.id === id);
+    if (!g || !e) return;
+    if (!used.has(g.pieceKey)) used.set(g.pieceKey, new Set());
+    const set = used.get(g.pieceKey)!;
+    for (const q of samplesOf(g, e, r)) set.add(q);
+  };
+  const freeFrac = (g: PieceGeom, e: Edge, r?: [number, number] | null) => {
+    const set = used.get(g.pieceKey);
+    if (!set) return 1;
+    const qs = samplesOf(g, e, r);
+    const free = qs.filter((q) => !set.has(q)).length;
+    return free / Math.max(1, qs.length);
+  };
+  /** The point of an edge at d mm from its start. */
+  const ptAt = (e: Edge, d: number) =>
+    e.pts[Math.max(0, Math.min(e.pts.length - 1, Math.round((d / e.lenMm) * (e.pts.length - 1))))];
+  const runsOf = (g: PieceGeom, anyUse = false): Run[] => {
     const plain = g.edges.filter((e) => e.kind === 'edge').sort((a, b) => a.k - b.k);
     const m = plain.length;
     const [y0, y1] = g.rs.reduce(
@@ -413,11 +510,52 @@ export function completeFromJoins(
       [Infinity, -Infinity],
     );
     const out: Run[] = [];
+    const isFree = (e: Edge, r?: [number, number] | null) => anyUse || freeFrac(g, e, r) >= 0.9;
+    // (a strip's run never goes round its short end: corners are a panel's)
+    const corners = opts.multi && !stripLongEdges(g);
+    /** One run: `head` = the sewn stretch of the first edge, `tail` = of the last (null = whole). */
+    const emit = (
+      es: Edge[],
+      corners: number[],
+      head: [number, number] | null,
+      tail: [number, number] | null,
+    ) => {
+      const L = es.length;
+      const first = es[0];
+      const last = es[L - 1];
+      const cut0 = head ? head[0] : 0;
+      const cut1 = tail ? last.lenMm - tail[1] : 0;
+      const len = es.reduce((t, e) => t + e.lenMm, 0) - cut0 - cut1;
+      if (len < 50) return;
+      const a = head ? ptAt(first, head[0]) : first.pts[0];
+      const b = tail ? ptAt(last, tail[1]) : last.pts[last.pts.length - 1];
+      const mid = es[Math.floor(L / 2)].pts[Math.floor(es[Math.floor(L / 2)].pts.length / 2)];
+      const within = (e: Edge, d: number) =>
+        (e !== first || !head || d >= head[0] + 1) && (e !== last || !tail || d <= tail[1] - 1);
+      const partRange: Record<EdgeId, [number, number]> = {};
+      if (head) partRange[first.id] = head;
+      if (tail) partRange[last.id] = tail;
+      out.push({
+        piece: g,
+        edges: es,
+        id: `${g.pieceKey}#${es.map((e) => e.k).join('+')}`,
+        len,
+        notches: es.reduce((t, e) => t + e.notchesMm.filter((d) => within(e, d)).length, 0),
+        turn: es.reduce((t, e) => t + e.turnDeg, 0),
+        dx: Math.abs(b[0] - a[0]),
+        dy: Math.abs(b[1] - a[1]),
+        yMid: y1 > y0 ? (mid[1] - y0) / (y1 - y0) : 0.5,
+        xMid: x1 > x0 ? (mid[0] - x0) / (x1 - x0) : 0.5,
+        cornersAt: corners.map((c) => c - cut0),
+        ...(head || tail ? { partRange } : {}),
+      });
+    };
     for (let i = 0; i < m; i++) {
       const cornersAt: number[] = [];
       for (let L = 1; L <= Math.min(3, m - 1); L++) {
         const es = Array.from({ length: L }, (_, j) => plain[(i + j) % m]);
-        if (es.some((e) => freeFrac(g, e) < 0.9)) break;
+        // (an inner edge of a longer run is taken: no run through it)
+        if (es.slice(1, -1).some((e) => !isFree(e))) break;
         // A run follows one line of the contour: it never turns a sharp corner (> 35°) between
         // two of its edges (a waistband's long edge does not continue round its short end) — except
         // on an item without a body, where a strip runs round a panel's corners: such a corner is
@@ -432,51 +570,287 @@ export function completeFromJoins(
           let d = Math.abs(dir(next, false) - dir(prev, true));
           if (d > Math.PI) d = 2 * Math.PI - d;
           if (d > (35 * Math.PI) / 180) {
-            if (!opts.multi) break;
+            if (!corners) break;
             cornersAt.push(es.slice(0, L - 1).reduce((t, e) => t + e.lenMm, 0));
           }
         }
-        const len = es.reduce((t, e) => t + e.lenMm, 0);
-        if (len < 50) continue;
-        const a = es[0].pts[0];
-        const last = es[L - 1].pts;
-        const b = last[last.length - 1];
-        const mid = es[Math.floor(L / 2)].pts[Math.floor(es[Math.floor(L / 2)].pts.length / 2)];
-        out.push({
-          piece: g,
-          edges: es,
-          id: `${g.pieceKey}#${es.map((e) => e.k).join('+')}`,
-          len,
-          notches: es.reduce((t, e) => t + e.notchesMm.length, 0),
-          turn: es.reduce((t, e) => t + e.turnDeg, 0),
-          dx: Math.abs(b[0] - a[0]),
-          dy: Math.abs(b[1] - a[1]),
-          yMid: y1 > y0 ? (mid[1] - y0) / (y1 - y0) : 0.5,
-          xMid: x1 > x0 ? (mid[0] - x0) / (x1 - x0) : 0.5,
-          cornersAt: [...cornersAt],
-        });
+        if (es.every((e) => isFree(e))) emit(es, cornersAt, null, null);
+        else if (!corners) break;
+        // An item without a body: a run round corners may take its first / last edge only from /
+        // up to a notch (a strip round a panel's lower U; the flap above the notch stays free).
+        if (!corners || L < 2 || !cornersAt.length) continue;
+        const first = es[0];
+        const last = es[L - 1];
+        const heads: ([number, number] | null)[] = [
+          null,
+          ...first.notchesMm
+            .filter((d) => d >= 30 && first.lenMm - d >= 30)
+            .map((d) => [d, first.lenMm] as [number, number]),
+        ];
+        const tails: ([number, number] | null)[] = [
+          null,
+          ...last.notchesMm
+            .filter((d) => d >= 30 && last.lenMm - d >= 30)
+            .map((d) => [0, d] as [number, number]),
+        ];
+        for (const head of heads)
+          for (const tail of tails) {
+            if (!head && !tail) continue;
+            if (!isFree(first, head) || !isFree(last, tail)) continue;
+            emit(es, cornersAt, head, tail);
+          }
       }
     }
     return out;
   };
+  /** Notch positions along a run, mm from its start (within the sewn stretches). */
+  const marksOf = (B: Run): number[] => {
+    const marks: number[] = [];
+    let base = 0;
+    const L = B.edges.length;
+    B.edges.forEach((e, i) => {
+      const r = B.partRange?.[e.id];
+      const lo = r ? r[0] : 0;
+      const hi = r ? r[1] : e.lenMm;
+      for (const d of e.notchesMm) if (d > lo + 1 && d < hi - 1) marks.push(base + d - lo);
+      base += hi - lo;
+      if (i === L - 1) return;
+    });
+    return marks;
+  };
+  const nearMark = (marks: number[], len: number, c: number) =>
+    marks.some((m) => Math.abs(m - c) <= 12 || Math.abs(len - m - c) <= 12);
   /**
    * A run that turns corners (multi mode) fits its partner only when the partner carries a notch at
    * every corner — read from either end of the partner (which way round it is sewn is unknown).
    */
   const cornersMarked = (A: Run, B: Run) => {
     if (!A.cornersAt.length) return true;
-    const marks: number[] = [];
-    let base = 0;
-    for (const e of B.edges) {
-      for (const d of e.notchesMm) marks.push(base + d);
-      base += e.lenMm;
-    }
-    return A.cornersAt.every((c) =>
-      marks.some((m) => Math.abs(m - c) <= 12 || Math.abs(B.len - m - c) <= 12),
+    const marks = marksOf(B);
+    // (one way round for every corner — not one corner read forward and the next reversed)
+    return (
+      A.cornersAt.every((c) => marks.some((m) => Math.abs(m - c) <= 12)) ||
+      A.cornersAt.every((c) => marks.some((m) => Math.abs(B.len - m - c) <= 12))
     );
   };
+  /** How many notches of the straight run S find no corner and no notch on the run R round corners. */
+  const unmatchedNotches = (S: Run, R: Run) => {
+    const marks = [...R.cornersAt, ...marksOf(R)];
+    return marksOf(S).filter((c) => !nearMark(marks, R.len, c)).length;
+  };
+  // A NOTCHED STRIP ROUND A PANEL'S CORNERS (an item without a body): a strip's long edge whose
+  // notches sit at the corners of a run of the panel's edges, the lengths equal, FITS that run — the
+  // order joining the two. Of several such runs the strip takes the LOWER one in the drawing (the
+  // bag's bottom; a panel is drawn upright), then the one whose marks meet more of its notches. A
+  // graph pairing of the strip's edge by length alone (a partial onto one edge) yields to the fit;
+  // a single-edge pairing of another piece on the fit's edges is refused (the strip goes there; a
+  // channel strip then finds the opening edge, two panels do not meet where the strip runs).
+  const ids_ = ids;
+  const fitsOf = (S: Run, p: PieceGeom, anyUse: boolean): Run[] =>
+    runsOf(p, anyUse)
+      .filter(
+        (R) =>
+          R.edges.length >= 2 &&
+          R.cornersAt.length > 0 &&
+          Math.min(R.len, S.len) / Math.max(R.len, S.len) >= 0.97 &&
+          cornersMarked(R, S),
+      )
+      .sort((x, y) => x.yMid - y.yMid || unmatchedNotches(S, x) - unmatchedNotches(S, y));
+  const stripEdgeRun = (g: PieceGeom, e: Edge, anyUse: boolean) =>
+    runsOf(g, anyUse).find((r) => r.edges.length === 1 && r.edges[0].id === e.id);
+  if (opts.multi) {
+    const key = (s: SeamCandidate) => `${s.a}~${s.b}`;
+    for (const J of joins)
+      for (let i = 0; i < J.parts.length; i++)
+        for (const gk of J.parts[i]) {
+          const g = geomOf.get(gk);
+          const L = g ? stripLongEdges(g) : null;
+          if (!g || !L) continue;
+          for (let j = 0; j < J.parts.length; j++) {
+            if (j === i) continue;
+            for (const pkk of J.parts[j]) {
+              const p = geomOf.get(pkk);
+              if (!p || stripLongEdges(p)) continue;
+              for (const e of L) {
+                if (!e.notchesMm.length) continue;
+                const S = stripEdgeRun(g, e, true);
+                const R = S ? fitsOf(S, p, true)[0] : undefined;
+                if (!S || !R) continue;
+                const where = `${p.pieceKey}'s ${R.edges.map((x) => x.k).join('+')} (${S.len.toFixed(0)} = ${R.len.toFixed(0)} mm, its notches at the corners)`;
+                const fitIds = new Set([e.id, ...R.edges.map((x) => x.id)]);
+                for (const s of graph.chosen) {
+                  if (ignore.has(key(s))) continue;
+                  if (!single(s)) {
+                    // (a composite over these edges that is not this very fit)
+                    const ids = sides(s).flatMap((id) => ids_(id));
+                    const over = ids.some((id) => fitIds.has(id));
+                    const isFit = over && ids.every((id) => fitIds.has(id)) && ids.includes(e.id);
+                    if (over && !isFit)
+                      refuse(
+                        s,
+                        `not sewn — ${s.a} ↔ ${s.b}: the strip ${g.pieceKey}'s edge ${e.k} fits round ${where}; the order «${J.label}» sews it there`,
+                      );
+                    continue;
+                  }
+                  if (s.a === e.id || s.b === e.id)
+                    refuse(
+                      s,
+                      `not sewn — ${s.a} ↔ ${s.b}: the strip ${g.pieceKey}'s edge ${e.k} fits round ${where}; the order «${J.label}» sews it there`,
+                    );
+                  else if (
+                    pk(s.a) !== g.pieceKey &&
+                    pk(s.b) !== g.pieceKey &&
+                    R.edges.some((x) => x.id === s.a || x.id === s.b)
+                  )
+                    refuse(
+                      s,
+                      `not sewn — ${s.a} ↔ ${s.b}: the strip ${g.pieceKey} fits round ${where}; nothing else meets ${p.pieceKey} where the strip runs (the order «${J.label}»)`,
+                    );
+                }
+              }
+            }
+          }
+        }
+  }
+  for (const s of [...graph.chosen, ...graph.rejected.filter((x) => x.kind === 'closure-not-seam')])
+    if ((!twins(s) || touchesFixed(s) || stripPly(s)) && !ignore.has(`${s.a}~${s.b}`))
+      for (const id of sides(s)) markUsed(id);
+  for (const id of plyFollows) markUsed(id);
+  /** Parts read as surface pieces (laid on a panel's face): searched no further. */
+  const surfaced = new Set<string>();
+  const linked = new Set<string>();
+  const link = (a: string, b: string) => {
+    linked.add(`${a}|${b}`);
+    linked.add(`${b}|${a}`);
+  };
+  for (const s of graph.chosen)
+    if (!ignore.has(`${s.a}~${s.b}`))
+      for (const a of (s.aParts ?? [s.a]).map(pk))
+        for (const b of (s.bParts ?? [s.b]).map(pk)) link(a, b);
 
   const added: JoinProposal[] = [];
+  // WHICH WAY ROUND TWO PANELS FACE (an item without a body). Two faces of a bag are sewn to each
+  // other along several edges and through strips between them; all those pairings read ONE way:
+  // either the drawing's same side meets (x ↔ x) or the faces mirror (x ↔ 1 − x, the pieces sewn
+  // face to face). The reading is fixed by the first off-centre pair between the two pieces, or
+  // before that by the strips already sewn to one of them by one long edge: the reading under which
+  // their free long edge finds a free edge of its length on the other piece where it would land.
+  const chir = new Map<string, 1 | -1>();
+  const ck = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const offCentre = (x: number) => Math.abs(x - 0.5) >= 0.2;
+  const chirOf = (xa: number, xb: number): 1 | -1 | null =>
+    offCentre(xa) && offCentre(xb) ? (Math.abs(xa - xb) < Math.abs(xa - (1 - xb)) ? 1 : -1) : null;
+  const addedOn = (e: Edge) =>
+    added.map((x) => x.seam).find((x) => single(x) && (x.a === e.id || x.b === e.id));
+  const chirality = (ka: string, kb: string): 1 | -1 | null => {
+    const k = ck(ka, kb);
+    if (chir.has(k)) return chir.get(k)!;
+    const ga = geomOf.get(ka);
+    const gb = geomOf.get(kb);
+    if (!ga || !gb) return null;
+    for (const s of [
+      ...graph.chosen.filter((x) => !ignore.has(`${x.a}~${x.b}`)),
+      ...added.map((x) => x.seam),
+    ]) {
+      if (!single(s)) continue;
+      const [ia, ib] =
+        pk(s.a) === ka && pk(s.b) === kb
+          ? [s.a, s.b]
+          : pk(s.a) === kb && pk(s.b) === ka
+            ? [s.b, s.a]
+            : [null, null];
+      if (!ia || !ib) continue;
+      const ea = ga.edges.find((e) => e.id === ia);
+      const eb = gb.edges.find((e) => e.id === ib);
+      const c = ea && eb ? chirOf(edgeXMid(ga, ea), edgeXMid(gb, eb)) : null;
+      if (c) {
+        chir.set(k, c);
+        return c;
+      }
+    }
+    let same = 0;
+    let mirror = 0;
+    for (const [P, Q] of [
+      [ga, gb],
+      [gb, ga],
+    ])
+      for (const g of graph.pieces) {
+        const L = stripLongEdges(g);
+        if (!L || g === P || g === Q) continue;
+        for (let i = 0; i < 2; i++) {
+          const s = seamOnEdge(L[i]) ?? addedOn(L[i]);
+          if (!s) continue;
+          const pid = s.a === L[i].id ? s.b : s.a;
+          if (pk(pid) !== P.pieceKey) continue;
+          const pe = P.edges.find((e) => e.id === pid);
+          if (!pe) continue;
+          const x = edgeXMid(P, pe);
+          const other = L[1 - i];
+          if (!offCentre(x) || freeFrac(g, other) < 0.9) continue;
+          const cands = Q.edges.filter(
+            (e) =>
+              e.kind === 'edge' &&
+              freeFrac(Q, e) >= 0.9 &&
+              Math.abs(e.lenMm - other.lenMm) <= 0.03 * other.lenMm,
+          );
+          if (cands.some((e) => Math.abs(edgeXMid(Q, e) - x) < 0.25)) same++;
+          if (cands.some((e) => Math.abs(edgeXMid(Q, e) - (1 - x)) < 0.25)) mirror++;
+        }
+      }
+    if (same === mirror) return null;
+    const c: 1 | -1 = same > mirror ? 1 : -1;
+    chir.set(k, c);
+    return c;
+  };
+  /**
+   * An edge stepped off the contour's line between two short steps (a short step in or out, the
+   * edge, a short step back): the bottom of a hanger slot, the top of a hanger tab, a hand hole —
+   * an opening or a fitting, not a sewn edge where both panels carry it (multi mode).
+   */
+  const stepped = (g: PieceGeom, e: Edge) => {
+    const plain = g.edges.filter((x) => x.kind === 'edge').sort((a, b) => a.k - b.k);
+    const i = plain.findIndex((x) => x.id === e.id);
+    if (i < 0 || plain.length < 4) return false;
+    const prev = plain[(i - 1 + plain.length) % plain.length];
+    const next = plain[(i + 1) % plain.length];
+    const short = (x: Edge) => x.lenMm <= 60 && x.lenMm <= 0.5 * e.lenMm;
+    if (!short(prev) || !short(next)) return false;
+    const c = g.rs.reduce(([x, y], p) => [x + p[0] / g.rs.length, y + p[1] / g.rs.length], [0, 0]);
+    const mid = e.pts[Math.floor(e.pts.length / 2)];
+    const o1 = prev.pts[0];
+    const o2 = next.pts[next.pts.length - 1];
+    const om = [(o1[0] + o2[0]) / 2, (o1[1] + o2[1]) / 2];
+    return (
+      Math.abs(Math.hypot(mid[0] - c[0], mid[1] - c[1]) - Math.hypot(om[0] - c[0], om[1] - c[1])) >
+      0.5 * Math.min(prev.lenMm, next.lenMm)
+    );
+  };
+  /**
+   * Edges of a panel a notched strip of the item claims, by the strip: a strip's free long edge
+   * with notches and its preferred free fit round the panel's corners (fitsOf) — the order joining
+   * the two. No other piece meets the panel on those edges: the strip goes there.
+   */
+  const stripClaims = (g: PieceGeom): Map<EdgeId, string> => {
+    const out = new Map<EdgeId, string>();
+    if (!opts.multi || stripLongEdges(g)) return out;
+    const together = (a: string, b: string) =>
+      joins.some((J) =>
+        J.parts.some(
+          (X, xi) => X.includes(a) && J.parts.some((Y, yi) => yi !== xi && Y.includes(b)),
+        ),
+      );
+    for (const s of graph.pieces) {
+      const L = stripLongEdges(s);
+      if (!L || !together(s.pieceKey, g.pieceKey)) continue;
+      for (const e of L) {
+        if (!e.notchesMm.length || freeFrac(s, e) < 0.9) continue;
+        const S = stripEdgeRun(s, e, false);
+        const R = S ? fitsOf(S, g, false)[0] : undefined;
+        if (R) for (const x of R.edges) out.set(x.id, s.pieceKey);
+      }
+    }
+    return out;
+  };
   const left: string[] = [];
   const byLoops: JoinPart[] = [];
   const surface: JoinPart[] = [...surfaceOnly];
@@ -566,6 +940,8 @@ export function completeFromJoins(
           const ha = handOf(ka);
           const hb = handOf(kb);
           const lr = !!ha && !!hb && ha !== hb;
+          const claimsA = stripClaims(ga);
+          const claimsB = stripClaims(gb);
           const fronts =
             ['front', 'placket'].includes(readName(ga.name).role ?? '') &&
             ['front', 'placket'].includes(readName(gb.name).role ?? '');
@@ -580,6 +956,22 @@ export function completeFromJoins(
                 continue;
               // Two strip ends are never sewn end to end.
               if (stripEnd(A) && stripEnd(B)) continue;
+              // The same shallow notch cut into both panels (a hanger slot): an opening, not a seam.
+              if (
+                opts.multi &&
+                A.edges.length === 1 &&
+                B.edges.length === 1 &&
+                stepped(ga, A.edges[0]) &&
+                stepped(gb, B.edges[0])
+              )
+                continue;
+              // Nothing but the strip meets a panel on the edges a notched strip fits round.
+              if (
+                opts.multi &&
+                (A.edges.some((e) => claimsA.has(e.id) && claimsA.get(e.id) !== kb) ||
+                  B.edges.some((e) => claimsB.has(e.id) && claimsB.get(e.id) !== ka))
+              )
+                continue;
               // A strongly curved edge onto a straight one (a chest piece's D-curve onto the centre
               // back): the curvatures neither match nor complement — not a seam.
               if (Math.abs(A.turn + B.turn) > 400) continue;
@@ -628,7 +1020,8 @@ export function completeFromJoins(
                 lo.notches >= 2 &&
                 sh.notches === 0;
               let score = (1 - ratio) * (pleated ? 0.5 : 1.5);
-              if (A.notches && B.notches)
+              // (a run round corners meets a strip's notches with its corners: counted below)
+              if (A.notches && B.notches && !A.cornersAt.length && !B.cornersAt.length)
                 score += A.notches === B.notches ? -0.05 : 0.04 * Math.abs(A.notches - B.notches);
               score += Math.min(0.15, 0.003 * Math.abs(A.turn + B.turn));
               score += 0.03 * (A.edges.length + B.edges.length - 2);
@@ -639,15 +1032,41 @@ export function completeFromJoins(
               // A vertical edge onto a horizontal one is unlikely.
               if (horiz(A) !== horiz(B) && Math.max(A.dx, A.dy) > 120 && Math.max(B.dx, B.dy) > 120)
                 score += 0.1;
-              // An item without a body: among equal edges, the pair at the same height and — the
-              // pieces sewn face to face — mirrored across (the front's right side meets the back's
-              // left; across a strip, the panel beyond mirrors the panel before).
+              // An item without a body: among equal edges, two panels' pair at the same height (a
+              // strip's long edge has no height of its own); a run round corners — the bag's bottom —
+              // the lower of two alike; a notched strip's edge on the run whose corners and marks
+              // meet all its notches (an exact fit), penalised per notch left unmet; and the two
+              // panels facing ONE way round (chirality — see above): the pair that contradicts the
+              // reading already fixed is no seam, the rest weighed by how far it strays.
               if (opts.multi) {
-                score += 0.1 * Math.abs(A.yMid - B.yMid);
-                if (sa) score += 0.05 * Math.abs(B.xMid - (1 - sa.x));
-                else if (sb) score += 0.05 * Math.abs(A.xMid - (1 - sb.x));
-                else if (!stripLongEdges(ga) && !stripLongEdges(gb))
-                  score += 0.05 * Math.abs(A.xMid - (1 - B.xMid));
+                const stripA = !!stripLongEdges(ga);
+                const stripB = !!stripLongEdges(gb);
+                if (!stripA && !stripB) score += 0.1 * Math.abs(A.yMid - B.yMid);
+                if (A.cornersAt.length) score += 0.05 * A.yMid;
+                if (B.cornersAt.length) score += 0.05 * B.yMid;
+                if (A.cornersAt.length !== B.cornersAt.length) {
+                  const [R, S] = A.cornersAt.length ? [A, B] : [B, A];
+                  score += 0.02 * unmatchedNotches(S, R);
+                }
+                const strays = (x: number, want: number) =>
+                  offCentre(x) && offCentre(want) && Math.abs(x - want) > 0.5;
+                // (unknown yet: mirrored preferred, nothing refused — the first pair fixes it)
+                if (sa) {
+                  const c = chirality(sa.piece, kb);
+                  const want = (c ?? -1) > 0 ? sa.x : 1 - sa.x;
+                  if (c && strays(B.xMid, want)) continue;
+                  score += 0.05 * Math.abs(B.xMid - want);
+                } else if (sb) {
+                  const c = chirality(sb.piece, ka);
+                  const want = (c ?? -1) > 0 ? sb.x : 1 - sb.x;
+                  if (c && strays(A.xMid, want)) continue;
+                  score += 0.05 * Math.abs(A.xMid - want);
+                } else if (!stripA && !stripB) {
+                  const c = chirality(ka, kb);
+                  const want = (c ?? -1) > 0 ? B.xMid : 1 - B.xMid;
+                  if (c && strays(A.xMid, want)) continue;
+                  score += 0.05 * Math.abs(A.xMid - want);
+                }
               }
               if (!best || score < best.score - 1e-9) best = { A, B, score, ratio, pleated };
             }
@@ -694,10 +1113,27 @@ export function completeFromJoins(
       },
       ...(A.edges.length > 1 ? { aParts: A.edges.map((e) => e.id) } : {}),
       ...(B.edges.length > 1 ? { bParts: B.edges.map((e) => e.id) } : {}),
+      ...(A.partRange || B.partRange ? { partRange: { ...A.partRange, ...B.partRange } } : {}),
     };
-    markUsed(A.id);
-    markUsed(B.id);
+    for (const R of [A, B])
+      for (const e of R.edges) {
+        const r = R.partRange?.[e.id];
+        if (r) markUsedR(e.id, r);
+        else markUsed(e.id);
+      }
     link(A.piece.pieceKey, B.piece.pieceKey);
+    // Two panels' first off-centre pair fixes which way round they face (see `chirality`).
+    if (
+      opts.multi &&
+      A.edges.length === 1 &&
+      B.edges.length === 1 &&
+      !stripLongEdges(A.piece) &&
+      !stripLongEdges(B.piece)
+    ) {
+      const k = ck(A.piece.pieceKey, B.piece.pieceKey);
+      const c = chirOf(A.xMid, B.xMid);
+      if (c && !chir.has(k)) chir.set(k, c);
+    }
     added.push({
       seam,
       join: J.label,
@@ -742,10 +1178,16 @@ export function completeFromJoins(
       // panel's face — not an edge-to-edge seam the doll can draw.
       const big = Math.max(...others.map(areaOf));
       const small = Math.min(areaOf(X), big);
+      const stripOf = (K: string[]) =>
+        opts.multi && K.some((k) => !!stripLongEdges(geomOf.get(k)!));
       const surf = (Y: string[]) =>
-        areaOf(Y) < 0.2 * areaOf(X) && !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
+        areaOf(Y) < 0.2 * areaOf(X) &&
+        !stripOf(Y) &&
+        !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
       if (
-        (small < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
+        (small < 0.2 * big &&
+          !stripOf(X) &&
+          !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
         others.every(surf)
       ) {
         surface.push({ join: J.label, part: X });
@@ -760,8 +1202,10 @@ export function completeFromJoins(
     // edges truly match; a near miss is the piece laid on the panel's face — a surface piece.
     if (!ply) {
       const big = Math.max(...others.map(areaOf));
+      // (on an item without a body a strip — a binding, a bottom strip — is never laid on a face)
+      const strip = opts.multi && X.some((k) => !!stripLongEdges(geomOf.get(k)!));
       const small =
-        areaOf(X) < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band']);
+        areaOf(X) < 0.2 * big && !strip && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band']);
       if (small && (best.ratio < 0.97 || best.score > 0.1)) {
         surface.push({ join: J.label, part: X });
         for (const k of X) surfaced.add(k);

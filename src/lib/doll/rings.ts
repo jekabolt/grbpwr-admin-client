@@ -29,6 +29,14 @@ export type Ring = {
   sides: Map<string, [EdgeId, EdgeId]>;
   /** Edges of the panels that no ring, lid or base seam took (the free ends). */
   free: Map<string, EdgeId[]>;
+  /** The edge of each panel a lid is sewn to (the ring's top), by piece key. */
+  top: Map<string, EdgeId>;
+  /** The edge of each panel sewn to the partner ring's panel (the ring's base), by piece key. */
+  base: Map<string, EdgeId>;
+  /** The lid closing this ring: its key and, per panel, the lid edge sewn to that panel. */
+  lid?: { key: string; edgeFor: Map<string, EdgeId> };
+  /** The ring this one meets base to base, and which of its panels each panel meets. */
+  mate?: { ring: Ring; panel: Map<string, string> };
 };
 
 export type RingsReading = {
@@ -232,6 +240,8 @@ export function ringsFromJoins(
         pieces: order,
         sides: new Map([...sidesOf].map(([k, [a, b]]) => [k, [a.id, b.id] as [EdgeId, EdgeId]])),
         free: new Map(),
+        top: new Map(),
+        base: new Map(),
       };
       for (const k of members) {
         ringOfPiece.set(k, ring);
@@ -352,11 +362,14 @@ export function ringsFromJoins(
       if (!ring) return;
       takenRing.add(ring);
       panels.add(lid.key);
+      ring.lid = { key: lid.key, edgeFor: new Map() };
       ring.pieces.forEach((p, j) => {
         const top = freeOfLen(p, len)!;
         const le = lid.edges[j % lid.edges.length];
         take(top);
         take(le);
+        ring.top.set(p, top.id);
+        ring.lid!.edgeFor.set(p, le.id);
         const seam = seamOf(
           le,
           top,
@@ -391,12 +404,18 @@ export function ringsFromJoins(
             const len = cand.sort((x, y) => y.lenMm - x.lenMm)[0].lenMm;
             takenRing.add(A);
             takenRing.add(B);
+            A.mate = { ring: B, panel: new Map() };
+            B.mate = { ring: A, panel: new Map() };
             A.pieces.forEach((p, k) => {
               const ea = freeOfLen(p, len);
               const eb = freeOfLen(B.pieces[k], len);
               if (!ea || !eb) return;
               take(ea);
               take(eb);
+              A.base.set(p, ea.id);
+              B.base.set(B.pieces[k], eb.id);
+              A.mate!.panel.set(p, B.pieces[k]);
+              B.mate!.panel.set(B.pieces[k], p);
               const seam = seamOf(
                 ea,
                 eb,

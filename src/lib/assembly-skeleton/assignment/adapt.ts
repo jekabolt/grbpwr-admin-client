@@ -21,6 +21,7 @@ import {
   type SeamGraph,
 } from '../types';
 import { MARGIN_LIKELY, MARGIN_SURE, type Solution, type Variable } from './model';
+import { withRange } from './partials';
 
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
 
@@ -67,10 +68,15 @@ export function graphOf(
   summary: SeamAssignmentSummary,
   /** The corresponding edge on the other ply of a pair (solve.ts Board.plyMateOf). */
   plyMateOf: (e: EdgeId) => EdgeId | undefined = () => undefined,
+  /** Composite seams read after the pair solve (composites.ts), appended to `chosen`. */
+  composites: readonly SeamCandidate[] = [],
 ): SeamGraph {
   const { pieces, decisions, rules } = P;
   const chosenC = new Set<PoolCand>();
-  for (const v of sol.chosen) chosenC.add(v.cand);
+  for (const v of sol.chosen) {
+    chosenC.add(v.cand);
+    if (v.origin) chosenC.add(v.origin);
+  }
   const byId = new Map(P.all.map((c) => [candId(c), c]));
   const assigned: SeamCandidate[] = [];
   for (const s of sol.perOp)
@@ -105,7 +111,7 @@ export function graphOf(
       }
       const margin = sol.margin.get(v);
       const alts = alternativesOf(P, v.cand, chosenC).map((q) => toCandidate(q));
-      const c = toCandidate(v.cand, alts);
+      const c = withRange(toCandidate(v.cand, alts), v.cand);
       const words = `assigned in «${s.op.label}»${
         margin === undefined
           ? ''
@@ -127,7 +133,7 @@ export function graphOf(
         },
       });
     }
-  const chosen = [...forced, ...assigned];
+  const chosen = [...forced, ...assigned, ...composites];
 
   const decidedClosures = decisions?.closures ?? [];
   const rejected: SeamCandidate[] = [

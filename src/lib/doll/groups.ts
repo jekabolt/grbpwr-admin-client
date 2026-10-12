@@ -211,15 +211,41 @@ export function groupPieces(
     for (const [k, gr] of group) {
       if (gr) continue;
       const votes = new Map<DollGroupId, number>();
+      const bodyLike = (g: DollGroupId | null | undefined) =>
+        g === 'BODY' || g === 'LEG_L' || g === 'LEG_R';
       for (const s of live) {
-        const a = pk(s.a);
-        const b = pk(s.b);
-        const other = a === k ? b : b === k ? a : null;
-        if (!other || other === k) continue;
-        const og = group.get(other);
-        if (!og) continue;
+        // Each side of the seam by its pieces (a composite side runs over several).
+        const aP = [...new Set((s.aParts ?? [s.a]).flatMap(edgeIdsOf).map(pk))];
+        const bP = [...new Set((s.bParts ?? [s.b]).flatMap(edgeIdsOf).map(pk))];
+        const onA = aP.includes(k);
+        const onB = bP.includes(k);
+        if (onA === onB) continue;
+        const mine = onA ? aP : bP;
+        const theirs = onA ? bP : aP;
         const len = Math.max(s.evidence.aLenMm ?? 0, s.evidence.bLenMm ?? 0, 100);
-        votes.set(og, (votes.get(og) ?? 0) + len);
+        const vote = (g: DollGroupId) => votes.set(g, (votes.get(g) ?? 0) + len);
+        // Pieces sewn as ONE run along a composite side share its group (a roleless cuff or
+        // placket whose edge runs on from a sleeve's).
+        for (const o of mine) {
+          const og = o === k ? null : group.get(o);
+          if (og) vote(og);
+        }
+        // Across the seam: a composite onto the body (a sleeve cap over several body pieces) never
+        // recruits a body piece into the tube / ring group, nor the tube's own piece into the
+        // body — only when k's side is already classified the other way; a side with no group
+        // yet takes the vote (12.10 review: the earlier guard refused every tube vote through a
+        // composite, so a roleless sleeve or cuff panel stayed FLOAT).
+        const composite =
+          s.kind === 'composite' || (s.aParts?.length ?? 1) > 1 || (s.bParts?.length ?? 1) > 1;
+        const mineBody = mine.some((o) => o !== k && bodyLike(group.get(o)));
+        const mineTube = mine.some((o) => o !== k && !!group.get(o) && !bodyLike(group.get(o)));
+        for (const o of theirs) {
+          const og = group.get(o);
+          if (!og) continue;
+          if (composite && !bodyLike(og) && mineBody) continue;
+          if (composite && bodyLike(og) && mineTube) continue;
+          vote(og);
+        }
       }
       let best: DollGroupId | null = null;
       let bv = 0;

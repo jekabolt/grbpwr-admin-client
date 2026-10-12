@@ -25,7 +25,14 @@ const warn = console.warn;
 console.log = () => {};
 console.warn = () => {};
 const t0 = performance.now();
-const graph = readSeamGraph(input.facts);
+const graph = readSeamGraph(
+  input.facts,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  input.options?.assignment,
+);
 const t1 = performance.now();
 const anchors = (input.anchors ?? []).map((a: { size: string; facts: never }) => ({
   size: a.size,

@@ -49,8 +49,8 @@ const chordAngle = (e: Edge) => {
   return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1]));
 };
 /** Chord within 25° of the drawing's vertical / horizontal. */
-const upright = (e: Edge) => chordAngle(e) <= (25 * Math.PI) / 180;
-const level = (e: Edge) => chordAngle(e) >= (65 * Math.PI) / 180;
+export const upright = (e: Edge) => chordAngle(e) <= (25 * Math.PI) / 180;
+export const level = (e: Edge) => chordAngle(e) >= (65 * Math.PI) / 180;
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
 const boxOf = (p: PieceGeom) => {
   let x0 = Infinity;
@@ -101,6 +101,8 @@ export class Board {
   private readonly plyMate = new Map<EdgeId, EdgeId>();
   /** The second ply of each pair (CLR_1 to CLR): a tie between the plies goes to the first. */
   private readonly secondPly = new Set<string>();
+  /** Every piece of a validated ply pair. */
+  private readonly plyPieces = new Set<string>();
   /** Every edge of the card by index, and how many seams hold it (the search bound reads these). */
   readonly edgeIndex = new Map<EdgeId, number>();
   readonly useCount: Int32Array;
@@ -142,14 +144,26 @@ export class Board {
         this.inPlay.add(t.key);
       }
     }
-    // Ply pairs: exactly one identical twin each, and the order SEWS the two to each other (distinct
-    // inputs of one operation) — a ring of identical bag panels is not one, nor two identical halves
-    // that merely end up in one unit.
+    // Ply pairs: exactly one identical twin each, and the order SEWS the two to each other — each
+    // alone an input of one operation (a yoke and its facing, two collar plies). A ring of identical
+    // bag panels is not one, nor two identical halves that merely end up in one unit, nor two
+    // identical plackets sewn first to the two fronts and only then met as parts of larger units
+    // (12.10 corpus, card 9: read as plies, the right placket's seam was moved onto the left one).
     const together = (a: string, b: string) =>
       ops.some((op) => {
         const ia = op.inputs.findIndex((X) => X.includes(a));
         const ib = op.inputs.findIndex((X) => X.includes(b));
-        return ia >= 0 && ib >= 0 && ia !== ib;
+        return (
+          ia >= 0 &&
+          ib >= 0 &&
+          ia !== ib &&
+          op.inputs[ia].length === 1 &&
+          op.inputs[ib].length === 1 &&
+          // (two identical sleeves set onto the body in one step are the left and the right
+          // sleeve, not two plies — card 9, names unreadable)
+          op.classes[ia] !== 'sleeve' &&
+          op.classes[ib] !== 'sleeve'
+        );
       });
     for (const p of P.pieces) {
       const ids = p.twinOf.filter((t) => t.kind === 'identical');
@@ -160,6 +174,8 @@ export class Board {
       const m = plyCorrespondence(p, q);
       if (!m) continue;
       for (const [k, v] of m) this.plyMate.set(k, v);
+      this.plyPieces.add(p.pieceKey);
+      this.plyPieces.add(q.pieceKey);
       // One piece: the plies share their orientation.
       this.link(`\u0000O:${p.pieceKey}`, `\u0000O:${q.pieceKey}`, 0);
       // Both plies take every seam onto the pair; the seam is REPORTED on the ply the card names
@@ -398,6 +414,10 @@ export class Board {
     for (const [a, b, rel] of v.links) this.link(a, b, rel);
   }
 
+  /** The piece is one ply of a validated pair. */
+  isPly(k: string): boolean {
+    return this.plyPieces.has(k);
+  }
   /** The second ply of a pair (a tie between the plies goes to the first). */
   isSecondPly(k: string): boolean {
     return this.secondPly.has(k);
@@ -405,6 +425,19 @@ export class Board {
   /** The corresponding edge on the other ply of a pair, if the edge is on one. */
   plyMateOf(e: EdgeId): EdgeId | undefined {
     return this.plyMate.get(e);
+  }
+  /**
+   * The edge can still take ONE single-layer piece: nothing on it, or only the plies' own seam on a
+   * straight designated ply edge (the sandwich — a stand's neck edge carries its ply seam and the
+   * neckline).
+   */
+  sandwichFree(e: EdgeId, curvedOk = false): boolean {
+    const uses = this.uses.get(e) ?? [];
+    if (uses.length === 0) return true;
+    if (uses.length !== 1 || !uses[0].ply) return false;
+    // (a composite onto a ply pair — the neckline between the two plies of a stand — sits on the
+    // designated ply edge whether it is straight or not)
+    return this.sandwichable.has(e) || (curvedOk && this.P.designated.has(e));
   }
 
   /** Mark edges used by a seam outside the search (a forced seam, a closure). */
@@ -627,10 +660,13 @@ function search(
 }
 
 /**
- * Components of variables that share an edge (ply mates included). Solved one after another,
- * biggest evidence first: what a component decides (edges, parity, an operation's components) is
- * on the board when the next one is searched. Exact within a component; across components the
- * coupling is only through the board — a tie in one is never broken by a far corner of the card.
+ * Components of variables that share an edge (ply mates included) or a PARITY node (a piece in
+ * play, a symmetric piece's orientation): a seam's hand is decided together with the seams that
+ * decide it (12.10 corpus, card 9: the shoulders alone are a tie between the back's two sides —
+ * solved apart, the tie fell by id, crossed, and the side seams that say which way were then
+ * infeasible). Solved one after another, biggest evidence first: what a component decides (edges,
+ * parity, an operation's components) is on the board when the next one is searched. Exact within
+ * a component; across components the coupling is only through the board.
  */
 function componentsOf(vars: readonly Variable[]): Variable[][] {
   const parent = vars.map((_, i) => i);
@@ -638,11 +674,16 @@ function componentsOf(vars: readonly Variable[]): Variable[][] {
     while (parent[i] !== i) i = parent[i];
     return i;
   };
-  const byEdge = new Map<EdgeId, number>();
+  const byKey = new Map<string, number>();
   vars.forEach((v, i) => {
-    for (const e of [...v.occA, ...v.occB]) {
-      const j = byEdge.get(e);
-      if (j === undefined) byEdge.set(e, i);
+    const keys = [
+      ...v.occA,
+      ...v.occB,
+      ...v.links.flatMap(([a, b]) => [`\u0000P${a}`, `\u0000P${b}`]),
+    ];
+    for (const e of keys) {
+      const j = byKey.get(e);
+      if (j === undefined) byKey.set(e, i);
       else parent[find(i)] = find(j);
     }
   });

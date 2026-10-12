@@ -10,7 +10,6 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
 import type { DeclaredJoin } from './joins';
-import { pointInPolygon } from './mesh';
 
 export type SurfaceHost = { host: string; join: string };
 
@@ -81,10 +80,97 @@ const ringD = (p: Pt2, ring: readonly Pt2[]) => {
   return d;
 };
 
-/** Share of `pts` on the polygon `ring` (inside, or within 3 mm of its line). */
-function coverOf(pts: readonly Pt2[], ring: readonly Pt2[]): number {
+const ROW = 8;
+const CELL = 8;
+/**
+ * A host contour indexed for the cover test — exactly `pointInPolygon(p, ring) || ringD(p, ring)
+ * <= 3`, without walking the whole contour for every point: the even–odd crossing test runs over
+ * the segments whose y-span holds the point (rows of ROW mm), the 3 mm line test over the segments
+ * within one cell of it (a grid of CELL mm). 11.10 corpus: SS26-011's pocket bags against a
+ * 2 700-point leg panel, tried in every corner both ways round, took 2 s of a 3.4 s solve here.
+ */
+class PolyIndex {
+  private readonly x0: number;
+  private readonly y0: number;
+  private readonly x1: number;
+  private readonly y1: number;
+  private readonly rows: number[][] = [];
+  private readonly cells = new Map<number, number[]>();
+  private readonly nx: number;
+  constructor(private readonly ring: readonly Pt2[]) {
+    const b = box(ring);
+    this.x0 = b.x0;
+    this.y0 = b.y0;
+    this.x1 = b.x1;
+    this.y1 = b.y1;
+    this.nx = Math.floor(b.w / CELL) + 1;
+    const n = ring.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const a = ring[i];
+      const c = ring[j];
+      // Rows: a segment straddles only a y inside [min, max).
+      const r0 = Math.floor((Math.min(a[1], c[1]) - this.y0) / ROW);
+      const r1 = Math.floor((Math.max(a[1], c[1]) - this.y0) / ROW);
+      for (let r = r0; r <= r1; r++) (this.rows[r] ??= []).push(i);
+      // Cells: every cell the segment's box touches.
+      const cx0 = Math.floor((Math.min(a[0], c[0]) - this.x0) / CELL);
+      const cx1 = Math.floor((Math.max(a[0], c[0]) - this.x0) / CELL);
+      const cy0 = Math.floor((Math.min(a[1], c[1]) - this.y0) / CELL);
+      const cy1 = Math.floor((Math.max(a[1], c[1]) - this.y0) / CELL);
+      for (let cy = cy0; cy <= cy1; cy++)
+        for (let cx = cx0; cx <= cx1; cx++) {
+          const key = cy * this.nx + cx;
+          const list = this.cells.get(key);
+          if (list) list.push(i);
+          else this.cells.set(key, [i]);
+        }
+    }
+  }
+  /** Inside, or within 3 mm of the line. */
+  covers(p: Pt2): boolean {
+    if (p[0] < this.x0 - 3 || p[0] > this.x1 + 3 || p[1] < this.y0 - 3 || p[1] > this.y1 + 3)
+      return false;
+    const ring = this.ring;
+    const n = ring.length;
+    const row = this.rows[Math.floor((p[1] - this.y0) / ROW)];
+    let inside = false;
+    if (row)
+      for (const i of row) {
+        const a = ring[i];
+        const b = ring[(i + n - 1) % n];
+        if (a[1] > p[1] !== b[1] > p[1]) {
+          const x = ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0];
+          if (p[0] < x) inside = !inside;
+        }
+      }
+    if (inside) return true;
+    const cx0 = Math.max(0, Math.floor((p[0] - 3 - this.x0) / CELL));
+    const cx1 = Math.min(this.nx - 1, Math.floor((p[0] + 3 - this.x0) / CELL));
+    const cy0 = Math.max(0, Math.floor((p[1] - 3 - this.y0) / CELL));
+    const cy1 = Math.floor((p[1] + 3 - this.y0) / CELL);
+    for (let cy = cy0; cy <= cy1; cy++)
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const list = this.cells.get(cy * this.nx + cx);
+        if (!list) continue;
+        for (const i of list) if (segD(p, ring[(i + n - 1) % n], ring[i]) <= 3) return true;
+      }
+    return false;
+  }
+}
+
+/**
+ * Share of `pts` on the host polygon (inside, or within 3 mm of its line). With `need`, the count
+ * stops once the share can no longer reach it (the value returned is then only «below need»).
+ */
+function coverOf(pts: readonly Pt2[], H: PolyIndex, need = 0): number {
   let n = 0;
-  for (const p of pts) if (pointInPolygon(p, ring) || ringD(p, ring) <= 3) n++;
+  let miss = 0;
+  // Misses the share can still take (an integer: the verdict must be the one a full count gives).
+  const allow = Math.floor((1 - need) * pts.length + 1e-6);
+  for (const p of pts) {
+    if (H.covers(p)) n++;
+    else if (++miss > allow) break;
+  }
   return pts.length ? n / pts.length : 0;
 }
 
@@ -144,6 +230,7 @@ function cornersOf(ring: readonly Pt2[], idx: readonly number[]): Corner[] {
 export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
   const sb = box(S.rs);
   const hb = box(H.rs);
+  const HI = new PolyIndex(H.rs);
   // 1. A mark inside the host the piece's height: its own outline; its stitch line (a fly's J
   //    sews the fly on along its inner edge — the fly, a shield folded double, reaches from there to
   //    the centre front: up to twice the stitch line's width); or a pocket's placement outline the
@@ -178,7 +265,7 @@ export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
         : cx - (sb.x0 + sb.x1) / 2;
     const dy = mark.cy - (sb.y0 + sb.y1) / 2;
     const map = (p: Pt2): Pt2 => [p[0] + tx, p[1] + dy];
-    const cover = coverOf(S.rs.map(map), H.rs);
+    const cover = coverOf(S.rs.map(map), HI);
     if (cover >= (wide ? 0.45 : 0.6))
       return {
         map,
@@ -214,7 +301,7 @@ export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
             const y = p[1] - a.p[1];
             return [b.p[0] + c * x - s * y, b.p[1] + s * x + c * y];
           };
-          const cover = coverOf(ring.map(map0), H.rs);
+          const cover = coverOf(ring.map(map0), HI, 0.9);
           if (cover < 0.9) continue;
           // Ties (a rectangle fits every square corner): the corner nearer the waist / top wins —
           // pockets and flies open at the top of a panel.
