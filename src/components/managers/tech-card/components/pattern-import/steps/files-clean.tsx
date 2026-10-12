@@ -12,12 +12,19 @@ import type {
   StageIO,
 } from 'lib/pattern-import/types';
 import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
+import CheckboxCommon from 'ui/components/checkbox';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { PATTERN_ROLES, aiWords } from 'lib/pattern-import/clean/page-roles';
+import { cn } from 'lib/utility';
+import {
+  AI_PAGES,
+  NOT_PATTERN_ROLES,
+  PATTERN_ROLES,
+  aiWords,
+} from 'lib/pattern-import/clean/page-roles';
 import { SHEET_INK, SheetViewport } from '../sheet-viewport';
 import type { ImportSessionApi } from '../use-import-session';
 
@@ -323,6 +330,8 @@ function AsideThumb({
   files,
   onRead,
   onKeep,
+  selected,
+  onToggle,
 }: {
   p: CleanPreview | undefined;
   d: StageIO['clean']['out']['dropped'][number];
@@ -331,6 +340,9 @@ function AsideThumb({
   onRead: () => void;
   /** A9: "keep it aside" — the operator's answer to a page to check (the AI's, pre-filled). */
   onKeep: () => void;
+  /** Owner 12.10: picked for a bulk answer (absent = no checkbox: a single page). */
+  selected?: boolean;
+  onToggle?: () => void;
 }) {
   const live = useMemo(() => (p ? pathData(p.live) : ''), [p]);
   const W = p?.widthMm ?? 210;
@@ -339,31 +351,51 @@ function AsideThumb({
   const aiPattern = !!d.ai && PATTERN_ROLES.has(d.ai.role);
   const aiAside = !!d.ai && !aiPattern && d.ai.role !== 'other';
   const ev = asideEvidence(d);
+  const box = cn(
+    'h-32 w-24 border',
+    d.status === 'suggest' ? 'border-textColor' : 'border-borderColor',
+    selected && 'outline outline-2 outline-offset-1 outline-textColor',
+  );
+  const pick = onToggle ? pickId(d) : undefined;
+  const thumb = (
+    <svg
+      viewBox={`0 ${-H} ${W} ${H}`}
+      className={box}
+      preserveAspectRatio='xMidYMid meet'
+      aria-label={`page ${d.page + 1}, set aside as ${d.cls}`}
+    >
+      <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
+      <path
+        d={live}
+        fill='none'
+        stroke={SHEET_INK.ink}
+        strokeWidth={0.6}
+        vectorEffect='non-scaling-stroke'
+      />
+    </svg>
+  );
   return (
     <figure
       className='flex w-24 flex-col gap-0.5'
       title={`${d.why}${d.drawing ? ` — holds ${d.drawing}: check it is not a pattern page` : ''}${ev ? ` — ${ev}` : ''}`}
     >
-      <svg
-        viewBox={`0 ${-H} ${W} ${H}`}
-        className={
-          d.status === 'suggest'
-            ? 'h-32 w-24 border border-textColor'
-            : 'h-32 w-24 border border-borderColor'
-        }
-        preserveAspectRatio='xMidYMid meet'
-        aria-label={`page ${d.page + 1}, set aside as ${d.cls}`}
-      >
-        <rect x={0} y={-H} width={W} height={H} fill='#ffffff' />
-        <path
-          d={live}
-          fill='none'
-          stroke={SHEET_INK.ink}
-          strokeWidth={0.6}
-          vectorEffect='non-scaling-stroke'
-        />
-      </svg>
+      {/* the whole thumbnail is the checkbox's label: a click on the page picks it */}
+      {pick ? (
+        <label htmlFor={pick} className='cursor-pointer'>
+          {thumb}
+        </label>
+      ) : (
+        thumb
+      )}
       <figcaption className='flex flex-wrap items-center gap-1'>
+        {pick && (
+          <CheckboxCommon
+            name={pick}
+            checked={!!selected}
+            onChange={() => onToggle?.()}
+            aria-label={`pick page ${d.page + 1}${files > 1 ? ` of file ${Number(d.file) + 1}` : ''}`}
+          />
+        )}
         <Text size='micro' component='span' className='tabular-nums'>
           p{d.page + 1}
           {files > 1 ? `·f${Number(d.file) + 1}` : ''}
@@ -416,8 +448,29 @@ export function CleanBlock({
   const { session, inputs } = api;
   const clean = session.clean;
   const [hover, setHover] = useState<BackgroundKind | null>(null);
+  // owner 12.10: the set-aside pages picked for one bulk answer — nothing picked by default (D3)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const rows = useMemo(() => kindRows(clean?.pages.flatMap((p) => p.items) ?? []), [clean]);
   if (!clean) return null;
+  const dropped = clean.dropped;
+  const keys = dropped.map(pageKey);
+  // a pick of a page no longer set aside (read as a tile by now) is not a pick
+  const sel = new Set(keys.filter((k) => picked.has(k)));
+  const selectable = dropped.length > 1;
+  const toggle = (k: string) =>
+    setPicked((prev) => {
+      const n = new Set(prev);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  const keepPicked = bulkKeep(dropped, sel);
+  const readPicked = bulkRead(dropped, sel);
+  const aiPicks = dropped.filter(aiKeepSuggested).map(pageKey);
+  const applyBulk = (pages: readonly PageRole[]) => {
+    setPicked(new Set());
+    void api.dispatch({ type: 'clean', edits: rolesEdit(inputs.cleanEdits, pages) });
+  };
   const tilePreviews = clean.previews.filter((p) =>
     clean.pages.some((m) => m.file === p.file && m.page === p.page && m.role === 'tile'),
   );
@@ -467,6 +520,52 @@ export function CleanBlock({
               )}
             </Text>
           )}
+          {selectable && (
+            <ChipRow className='mb-1 gap-2'>
+              <span className='inline-flex items-center gap-1'>
+                <CheckboxCommon
+                  name='pi-aside-all'
+                  checked={sel.size === dropped.length}
+                  onChange={(on) => setPicked(on ? new Set(keys) : new Set())}
+                />
+                <label htmlFor='pi-aside-all' className='cursor-pointer'>
+                  <Text size='micro' variant='label' component='span'>
+                    select all
+                  </Text>
+                </label>
+              </span>
+              <Text size='micro' component='span' className='tabular-nums'>
+                · {sel.size} selected
+              </Text>
+              {aiPicks.length > 0 && (
+                <Chip
+                  tone='attention'
+                  onClick={() => setPicked(new Set(aiPicks))}
+                  title={`pick the pages to check that the AI reads as not pattern at ${AI_PAGES.autoMin} or more — nothing is set aside until you press "keep aside"`}
+                >
+                  select AI suggestions ({aiPicks.length})
+                </Chip>
+              )}
+              <Chip
+                disabled={!!session.busy || !keepPicked.length}
+                onClick={() => applyBulk(keepPicked)}
+                title={
+                  readPicked.length > keepPicked.length
+                    ? 'only the pages to check take this answer — a page already set aside stays as it is'
+                    : 'keep the picked pages aside (the run reads again once)'
+                }
+              >
+                keep {keepPicked.length} aside
+              </Chip>
+              <Chip
+                disabled={!!session.busy || !readPicked.length}
+                onClick={() => applyBulk(readPicked)}
+                title='read the picked pages as tiles (the run reads again once)'
+              >
+                read {readPicked.length} as {readPicked.length === 1 ? 'tile' : 'tiles'}
+              </Chip>
+            </ChipRow>
+          )}
           <div className='flex flex-wrap gap-2'>
             {[...clean.dropped]
               .sort((a, b) => (a.status === b.status ? 0 : a.status === 'suggest' ? -1 : 1))
@@ -477,6 +576,8 @@ export function CleanBlock({
                   p={clean.previews.find((x) => x.file === d.file && x.page === d.page)}
                   busy={!!session.busy}
                   files={session.files.length}
+                  selected={selectable ? sel.has(pageKey(d)) : undefined}
+                  onToggle={selectable ? () => toggle(pageKey(d)) : undefined}
                   onRead={() =>
                     void api.dispatch({
                       type: 'clean',
@@ -519,6 +620,53 @@ export function roleEdit(
     ...edits.filter((e) => !('role' in e && e.file === file && e.page === page)),
     { file, page, role },
   ];
+}
+
+type Dropped = StageIO['clean']['out']['dropped'][number];
+/** One page's role answer (`roleEdit`'s arguments). */
+export type PageRole = { file: string; page: number; role: PageClass };
+
+/** A set-aside page's key (`file:page`) — the bulk pick's identity. */
+export const pageKey = (d: Pick<Dropped, 'file' | 'page'>) => `${d.file}:${d.page}`;
+/** The DOM id of a page's pick checkbox (its thumbnail is the label). */
+const pickId = (d: Pick<Dropped, 'file' | 'page'>) => `pi-aside-${d.file}-${d.page}`;
+
+/**
+ * Owner 12.10: several pages' roles in ONE edit list — one dispatch, one rerun of the session —
+ * per page exactly the `{ file, page, role }` edit its own tile button writes (so the replay
+ * record's `clean-edits` is the same page by page as N separate clicks).
+ */
+export function rolesEdit(edits: PageMaskEdit[], pages: readonly PageRole[]): PageMaskEdit[] {
+  return pages.reduce((e, p) => roleEdit(e, p.file, p.page, p.role), edits);
+}
+
+/** "keep N aside": the picked pages TO CHECK (only they carry the tile's "keep aside"), each as its class. */
+export function bulkKeep(dropped: readonly Dropped[], picked: ReadonlySet<string>): PageRole[] {
+  return dropped
+    .filter((d) => d.status === 'suggest' && picked.has(pageKey(d)))
+    .map((d) => ({ file: d.file, page: d.page, role: d.cls }));
+}
+
+/** "read N as tiles": every picked page (the tile's "read as tile" is on each). */
+export function bulkRead(dropped: readonly Dropped[], picked: ReadonlySet<string>): PageRole[] {
+  return dropped
+    .filter((d) => picked.has(pageKey(d)))
+    .map((d) => ({ file: d.file, page: d.page, role: 'tile' as PageClass }));
+}
+
+/**
+ * "select AI suggestions": a page to check the AI reads as not pattern at the confidence of the
+ * set-aside rule (≥ AI_PAGES.autoMin, a NOT_PATTERN role, asked after the last edit). A PICK only —
+ * never applied without the operator's "keep aside" (D3: a page set aside wrongly = missing pieces).
+ */
+export function aiKeepSuggested(d: Dropped): boolean {
+  return (
+    d.status === 'suggest' &&
+    !!d.ai &&
+    !d.ai.stale &&
+    NOT_PATTERN_ROLES.has(d.ai.role) &&
+    d.ai.confidence >= AI_PAGES.autoMin
+  );
 }
 
 /** The sheet pass (8b) on the sheet step: the watermark and stroke text no page could prove. */
