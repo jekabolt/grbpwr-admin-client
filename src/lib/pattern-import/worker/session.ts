@@ -1800,7 +1800,10 @@ export class Session {
     const derived = this.derivedOf;
     const continuity = this.continuityOf;
     const identity = this.identityOf;
-    const onePiece = this.onePieceOf;
+    // G24's face evidence (another piece's header in the face, two outlines of one size overlapping)
+    // reads a FILL's faces: a DXF's pieces are its blocks, each drawn in its own frame — they are
+    // not faces of one drawing, and blocks laid over each other are no outline across two pieces
+    const onePiece = this.fast ? null : this.onePieceOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
