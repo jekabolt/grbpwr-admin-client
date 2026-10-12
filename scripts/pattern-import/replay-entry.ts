@@ -592,8 +592,11 @@ export async function runCase(c: Case) {
       pieces: h.draft?.pieces.length ?? 0,
       created: fresh,
     };
+    // a gate block refuses any apply (the export would be known wrong): not this check's concern
+    const gated = (o?: { reason?: string }) => /^the gate blocks/.test(o?.reason ?? '');
     if (!h.reached) failures.push(`lineage: did not reach check (${h.stop})`);
-    else if (!h.applied?.ok) failures.push(`lineage: apply refused (${h.applied?.reason})`);
+    else if (!h.applied?.ok && !gated(h.applied))
+      failures.push(`lineage: apply refused (${h.applied?.reason})`);
     if (fresh.length) failures.push(`lineage: ${fresh.length} new card pieces (${fresh[0]})`);
     // b · a piece named by the autopilot on #1 moved: its code is not proven any more
     const named = record.find((a) => {
@@ -639,7 +642,12 @@ export async function runCase(c: Case) {
         failures.push(
           `moved named piece: applied — a generated code reached the card without lineage`,
         );
-      else if (generated && m.reached && !/generated code/.test(m.applied?.reason ?? ''))
+      else if (
+        generated &&
+        m.reached &&
+        !gated(m.applied) &&
+        !/generated code/.test(m.applied?.reason ?? '')
+      )
         failures.push(`moved named piece: refused for another reason (${m.applied?.reason})`);
     } else out.movedNamed = null;
   }
