@@ -17,6 +17,13 @@
 //   4 · moved piece (the record's outline of a piece with a confirmed count — else a grainline, a
 //       confirmed name — shifted 50 mm, as if the piece read elsewhere): its answers do not land — listed "not replayed" — and the
 //       question is asked (the manual replay stops on the details step).
+//   5 · AP-tail (generated codes × the card): the card holds what import #1 applied (its pieces and
+//       block links, the real draft builder):
+//         a · the honest re-import (auto, replay first) applies through `autopilotApply` and creates
+//             NO new card piece — every piece reuses its own, proven by the replay (lineage);
+//         b · a piece the autopilot NAMED on #1 (P01 …) moved: its name does not replay, the code
+//             the autopilot gives it again matches a card piece nothing ties it to → the autopilot
+//             refuses the apply with the reason (never a silent update of that card piece).
 //   node scripts/pattern-import/replay.mjs [case…]   (yarn patimport:replay)
 import { readManifest } from 'lib/pattern-import/manifest';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -30,7 +37,10 @@ import {
   variantsOf,
   type ImportSessionApi,
 } from 'components/managers/tech-card/components/pattern-import/use-import-session';
+import { buildDraft } from 'lib/pattern-import/fabrics/draft';
+import type { CardDraft } from 'lib/pattern-import/types';
 import {
+  autopilotApply,
   hookDriveCtx,
   isReplayed,
   priorOf,
@@ -75,6 +85,10 @@ type ImportRun = {
   list: string[];
   ticks: number;
   error?: string;
+  /** The draft the card would receive (the builder the run was given). */
+  draft?: CardDraft | null;
+  /** `autopilotApply` on check (opts.apply). */
+  applied?: { ok: boolean; reason?: string };
 };
 
 const settle = async () => {
@@ -238,7 +252,15 @@ async function runImport(
   card: CardContext,
   mode: Mode,
   files: Files,
-  opts: { typedName?: boolean; retype?: boolean; tweak?: (p: Prior) => Prior } = {},
+  opts: {
+    typedName?: boolean;
+    retype?: boolean;
+    tweak?: (p: Prior) => Prior;
+    /** The real draft builder (lib/fabrics/draft.ts) instead of the stub. */
+    realDraft?: boolean;
+    /** On check: the autopilot's gated apply (`autopilotApply`). */
+    apply?: boolean;
+  } = {},
 ): Promise<ImportRun> {
   const { client, outs } = sessionClient();
   let api!: ImportSessionApi;
@@ -247,7 +269,7 @@ async function runImport(
       client,
       card,
       namer: async () => [],
-      buildDraft: stubBuildDraft,
+      buildDraft: opts.realDraft ? (write, ctx) => buildDraft(write, ctx.card) : stubBuildDraft,
       applyDraft: async () => ({ ok: true, uploaded: [] }),
     });
   });
@@ -348,6 +370,11 @@ async function runImport(
           !!api.session.semantics?.pieces.some((x) => x.seed === p.seed && x.code === 'YY');
       }
     }
+    rec.draft = api.session.draft;
+    if (rec.reached && opts.apply) {
+      const o = await autopilotApply(() => api, card, settle);
+      rec.applied = o.ok ? { ok: true } : { ok: false, reason: o.reason };
+    }
     rec.replayed = api.inputs.autopilot.filter(isReplayed).length;
     rec.list = api.inputs.autopilot.map(
       (a) =>
@@ -431,7 +458,7 @@ export async function runCase(c: Case) {
     return { ...rec, verdict: 'crashed', error: String(e) };
   }
   // 1 · import #1 (autopilot + the stand-in operator), then a name typed over
-  const first = await runImport(c, cardOf(c), 'first', files, { typedName: true });
+  const first = await runImport(c, cardOf(c), 'first', files, { typedName: true, realDraft: true });
   rec.first = {
     reached: first.reached,
     stop: first.stop,
@@ -534,6 +561,76 @@ export async function runCase(c: Case) {
     if (!missed) failures.push('moved: the moved piece was not listed as not replayed');
     if (!asked) failures.push('moved: no question asked for the moved piece');
   } else out.moved = null;
+  // 5 · AP-tail: the card holds what import #1 applied (pieces + block links, real draft)
+  const d1 = first.draft;
+  if (d1) {
+    const card3: CardContext = {
+      ...card2,
+      existingPieces: d1.pieces.map((p) => ({
+        lineKey: p.lineKey,
+        name: p.name,
+        cutSymmetry: p.cutSymmetry,
+        piecesPerGarment: p.piecesPerGarment,
+        fused: p.fused,
+        fusingMode: p.fusingMode,
+      })),
+      existingAliases: d1.aliases.map((a) => ({
+        scopeKey: a.scopeKey,
+        blockName: a.blockName,
+        pieceLineKey: a.pieceLineKey,
+      })),
+    };
+    // a · the honest re-import: applied, every piece its own card piece (lineage), none new
+    const h = await runImport(c, card3, 'auto', files, { realDraft: true, apply: true });
+    const fresh = (h.draft?.pieces ?? []).filter((p) => !p.existingLineKey).map((p) => p.name);
+    out.lineage = {
+      reached: h.reached,
+      stop: h.stop,
+      applied: h.applied,
+      pieces: h.draft?.pieces.length ?? 0,
+      created: fresh,
+    };
+    if (!h.reached) failures.push(`lineage: did not reach check (${h.stop})`);
+    else if (!h.applied?.ok) failures.push(`lineage: apply refused (${h.applied?.reason})`);
+    if (fresh.length) failures.push(`lineage: ${fresh.length} new card pieces (${fresh[0]})`);
+    // b · a piece named by the autopilot on #1 moved: its code is not proven any more
+    const named = record.find((a) => {
+      const v = a.value as { name?: { code?: string }; auto?: string[] } | null;
+      return (
+        a.kind === 'piece' &&
+        !!v?.name?.code &&
+        /^P\d+$/.test(v.name.code) &&
+        !!v.auto?.includes('name')
+      );
+    });
+    if (named) {
+      const pc = (named.value as { pc: { a: number; x: number; y: number } }).pc;
+      const tweak = (p: Prior): Prior => ({
+        ...p,
+        answers: p.answers.map((a) =>
+          a.kind === 'piece' &&
+          JSON.stringify((a.value as { pc: unknown }).pc) === JSON.stringify(pc)
+            ? { ...a, value: { ...(a.value as object), pc: { ...pc, x: pc.x + 50 } } }
+            : a,
+        ),
+      });
+      const m = await runImport(c, card3, 'auto', files, { realDraft: true, apply: true, tweak });
+      out.movedNamed = {
+        piece: named.subject,
+        reached: m.reached,
+        stop: m.stop,
+        applied: m.applied,
+        misses: m.misses.slice(0, 3),
+        named: m.list.filter((l) => /^A.name-code/.test(l)).slice(0, 4),
+      };
+      if (m.reached && m.applied?.ok)
+        failures.push(
+          `moved named piece: applied — the generated code updated a card piece without lineage`,
+        );
+      else if (m.reached && !/generated code/.test(m.applied?.reason ?? ''))
+        failures.push(`moved named piece: refused for another reason (${m.applied?.reason})`);
+    } else out.movedNamed = null;
+  }
   return {
     ...rec,
     ...out,

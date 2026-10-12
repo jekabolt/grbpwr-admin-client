@@ -6,12 +6,22 @@
 //   · `hookDriveCtx`: the drive tick's context (auto-drive.ts) over the wizard API, for a caller
 //     that drives the hook from outside (the e2e probe over the React shim) — the wizard's own
 //     effect builds the same context over its refs.
-import type { WizardEvent, WizardStep } from 'lib/pattern-import/types';
+import type {
+  CardDraft,
+  ImportSession,
+  SeedId,
+  WizardEvent,
+  WizardStep,
+} from 'lib/pattern-import/types';
+import { aliasKey, aliasNames } from 'lib/pattern-import/fabrics/draft';
+import { liningIdentity } from 'lib/pattern-import/fabrics/scope';
 import type { DriveCtx } from '../auto-drive';
 import type { AutoResolver } from '../auto-advance';
 import type { CardContext } from '../client';
 import type { ImportSessionApi, Inputs } from '../use-import-session';
 import { autopilotResolver, type AutopilotStop } from './policy';
+import { isReplayed } from './replay-record';
+import type { Assumption } from './types';
 
 /** The gate's blocking checks on the check step ("main G3-coverage"), empty = green. */
 export function gateBlocks(api: Pick<ImportSessionApi, 'session'>): string[] {
@@ -25,6 +35,93 @@ export function gateBlocks(api: Pick<ImportSessionApi, 'session'>): string[] {
 export type ApplyOutcome =
   | { ok: true; downloadOnly: boolean }
   | { ok: false; reason: string; step: 'check' | 'apply' };
+
+/**
+ * What a code the autopilot GENERATED in this run (P01 … in reading order, `name-code`, not
+ * replayed) would do to the card without proof. A generated code says nothing about which piece it
+ * is: a re-import where an unnamed piece moved or was added shifts the codes, so
+ *   · 'reuse' — P01 would silently UPDATE a card piece (by name or block link) that is another piece;
+ *   · 'beside-vanished' — P12 would ADD a new card piece while the same scope's previous import
+ *     loses its link to a card piece («P13» no longer drawn): the same piece under a shifted code
+ *     would be cut twice.
+ * Only lineage proves a reuse — AP-replay matched the piece by its outline to the import that wrote
+ * that card piece; the name is then the replay's (isReplayed) and never listed here. A name from
+ * the file itself, or one the operator typed over, is not listed either.
+ */
+export type GeneratedRisk = {
+  kind: 'reuse' | 'beside-vanished';
+  identity: string;
+  /** The card piece: the one reused, or the one the previous import drew and this one does not. */
+  existing: string;
+  seed: SeedId;
+};
+
+export function generatedReuse(
+  draft: Pick<CardDraft, 'scopes' | 'pieces' | 'aliases'> | null | undefined,
+  sem: Pick<NonNullable<ImportSession['semantics']>, 'pieces'> | null | undefined,
+  autopilot: readonly Assumption[],
+): GeneratedRisk[] {
+  if (!draft || !sem) return [];
+  // seed → the code the autopilot generated for it (the latest answer about the seed's name)
+  const gen = new Map<SeedId, string>();
+  for (const a of autopilot) {
+    if (a.seed == null || (a.kind !== 'name-code' && a.kind !== 'name-typed')) continue;
+    if (a.kind === 'name-code' && !isReplayed(a)) {
+      const v = a.value;
+      const code =
+        v && typeof v === 'object' && !Array.isArray(v) && typeof v.code === 'string'
+          ? v.code
+          : a.answer;
+      gen.set(a.seed, code.split('_')[0].toUpperCase());
+    } else gen.delete(a.seed);
+  }
+  if (!gen.size) return [];
+  // the identities written under a generated code (the name still the generated one)
+  const ids = new Map<string, SeedId>();
+  for (const p of sem.pieces) {
+    const c = gen.get(p.seed);
+    if (c && p.code.toUpperCase() === c) {
+      ids.set(p.identity.toUpperCase(), p.seed);
+      ids.set(liningIdentity(p.identity).toUpperCase(), p.seed);
+    }
+  }
+  if (!ids.size) return [];
+  // their blocks as the draft binds them (scope + block, the card's alias key)
+  const blocks = new Map<string, { identity: string; seed: SeedId }>();
+  for (const sc of draft.scopes) {
+    const names = aliasNames(sc.manifest);
+    for (const mp of sc.manifest.pieces) {
+      const sd = ids.get(mp.identity.toUpperCase());
+      if (sd == null) continue;
+      blocks.set(aliasKey(sc.target.scopeKey, names.get(mp.identity) ?? mp.identity), {
+        identity: mp.identity,
+        seed: sd,
+      });
+    }
+  }
+  const byKey = new Map(draft.pieces.map((p) => [p.lineKey, p] as const));
+  const gone = new Map(draft.scopes.map((sc) => [sc.target.scopeKey, sc.vanished ?? []] as const));
+  const out = new Map<string, GeneratedRisk>();
+  for (const a of draft.aliases) {
+    const hit = blocks.get(aliasKey(a.scopeKey, a.blockName));
+    const piece = byKey.get(a.pieceLineKey);
+    if (!hit || !piece) continue;
+    if (piece.existingLineKey)
+      out.set(`${hit.identity}|${piece.existingLineKey}`, {
+        kind: 'reuse',
+        ...hit,
+        existing: piece.name,
+      });
+    else
+      for (const v of gone.get(a.scopeKey) ?? [])
+        out.set(`${hit.identity}|${v.pieceLineKey}`, {
+          kind: 'beside-vanished',
+          ...hit,
+          existing: v.pieceName,
+        });
+  }
+  return [...out.values()];
+}
 
 /**
  * check → apply → the card, on a green gate only (a gate block is never answered: the export would
@@ -49,6 +146,27 @@ export async function autopilotApply(
       return { ok: false, step: 'check', reason: get().session.error ?? 'did not reach apply' };
     return { ok: true, downloadOnly: true };
   }
+  // a generated code never updates a card piece on its own: only lineage (AP-replay) proves it
+  const reuse = generatedReuse(
+    get().session.draft,
+    get().session.semantics,
+    get().inputs.autopilot ?? [],
+  );
+  if (reuse.length)
+    return {
+      ok: false,
+      step: 'check',
+      reason: `${reuse
+        .slice(0, 3)
+        .map((r) =>
+          r.kind === 'reuse'
+            ? `generated code ${r.identity} would update the card's existing piece «${r.existing}»`
+            : `generated code ${r.identity} would add a new card piece while «${r.existing}» of the previous import is no longer drawn`,
+        )
+        .join(
+          '; ',
+        )}${reuse.length > 3 ? ` (+${reuse.length - 3} more)` : ''} — nothing ties a generated code to a card piece: confirm on the apply step`,
+    };
   // the lock first (synchronous): an apply already running or done for this draft refuses this one
   const token = get().lockApply();
   if (token == null)

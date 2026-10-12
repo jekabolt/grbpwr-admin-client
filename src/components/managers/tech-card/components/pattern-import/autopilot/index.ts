@@ -7,7 +7,7 @@ export type {
   AutopilotSnapshot,
   AutopilotStop,
 } from './policy';
-export { autopilotApply, gateBlocks, hookDriveCtx, resolverFor } from './run';
+export { autopilotApply, gateBlocks, generatedReuse, hookDriveCtx, resolverFor } from './run';
 export type { ApplyOutcome } from './run';
 export { fallbackGrain, angleDiff180, longestStraight, principalAxis } from './grain';
 export { deterministicCodes } from './names';
