@@ -29,7 +29,7 @@ import { compositeSeams } from './composites';
 import { roleOf } from './costs';
 import { MARGIN_BUDGET, NODE_BUDGET, type Variable } from './model';
 import { buildOperations, surfacePieces } from './operations';
-import { partialCandidates } from './partials';
+import { partialCandidates, withRange } from './partials';
 import { Board, solveCard } from './solve';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -164,7 +164,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
   // Partial seams the pair pool cannot see (a short edge onto part of a long one), where the order
   // sews two pieces no acceptable pair joins.
   const partials = partialCandidates(P, ops, new Set([...skip, ...surface]));
-  const vars = variablesOf(P, ops, board, forcedSame, skip, partials, surface);
+  const vars = variablesOf(P, ops, board, forcedSame, skip, partials, surface, lining);
   const sol = solveCard(vars, ops, board, nodeBudget, marginBudget, fixed, now);
   // ASSIGN_DEBUG=<edge name substring> (node probes): every pool candidate touching it, its fate
   // and the board's answer after the solve.
@@ -194,7 +194,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     [
       ...forced,
       ...decidedClosures,
-      ...sol.chosen.map((v) => toCandidate(v.cand)),
+      ...sol.chosen.map((v) => withRange(toCandidate(v.cand), v.cand)),
       ...engineClosures.map((c) => toCandidate(c)),
     ],
     board,

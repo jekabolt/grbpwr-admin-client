@@ -15,6 +15,7 @@ import {
   type Operation,
   type Variable,
 } from './model';
+import { aspectOf, STRIP_ASPECT } from './composites';
 import type { Board } from './solve';
 
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
@@ -123,9 +124,13 @@ export function variablesOf(
   extra: readonly PoolCand[] = [],
   /** Surface pieces (pockets, loops: operations.ts surfacePieces). */
   surface: ReadonlySet<string> = new Set(),
+  /** Lining pieces (by cloth, else by name — index.ts). */
+  lining: ReadonlySet<string> = new Set(),
 ): Variable[] {
   const opOf = operationOf(ops);
   const out: Variable[] = [];
+  // An input of more than one piece: an assembled unit.
+  const unit = ops.map((op) => op.inputs.map((X) => X.length >= 2));
   for (const c0 of [...P.all, ...extra]) {
     if (c0.kind === 'closure-not-seam' || forcedSame.has(c0)) continue;
     const tube = tubeSelfOf(c0, ops);
@@ -142,6 +147,23 @@ export function variablesOf(
     if (pa !== pb && roleVeto(c.u.piece, c.v.piece)) continue;
     const v = variableOf(c, ops, board, opOf);
     if (!v) continue;
+    // A lining piece onto a shell piece where the order joins two assembled UNITS (the bagged body
+    // lining onto the assembled shell): the lining is traced from the shell, so its edges equal the
+    // shell's everywhere, and the two layers meet along facings and hems — not along the shell's
+    // construction edges (12.10 corpus, card 8: the side panel's armhole 142 onto its lining's
+    // 142, the cap onto the lining cap; the armholes were then held and the sleeves never set). A
+    // facing onto its single piece (a waistband's) stays; plies (identical twins) stay.
+    if (
+      !v.self &&
+      c.evidence.twin !== 'identical' &&
+      lining.has(pa) !== lining.has(pb) &&
+      unit[v.op][v.ia] &&
+      unit[v.op][v.ib] &&
+      // (a facing — a strip piece — is where the lining meets the shell: kept)
+      aspectOf(c.u.piece) < STRIP_ASPECT &&
+      aspectOf(c.v.piece) < STRIP_ASPECT
+    )
+      continue;
     if (tube) v.origin = c0;
     const floor = ops[v.op].slack > 0 ? FORCE_FLOOR : SKELETON.accept;
     if (c.score < floor - 1e-9) continue;

@@ -49,8 +49,8 @@ const chordAngle = (e: Edge) => {
   return Math.atan2(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1]));
 };
 /** Chord within 25° of the drawing's vertical / horizontal. */
-const upright = (e: Edge) => chordAngle(e) <= (25 * Math.PI) / 180;
-const level = (e: Edge) => chordAngle(e) >= (65 * Math.PI) / 180;
+export const upright = (e: Edge) => chordAngle(e) <= (25 * Math.PI) / 180;
+export const level = (e: Edge) => chordAngle(e) >= (65 * Math.PI) / 180;
 const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
 const boxOf = (p: PieceGeom) => {
   let x0 = Infinity;

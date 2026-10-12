@@ -14,7 +14,7 @@
 // acceptable pair between them — a partial is never a second seam between two pieces the pool joins.
 
 import { candId, cornerTurn, type CandidatePool, type PoolCand, type Run } from '../geometry/match';
-import { SKELETON, type Edge, type PieceGeom } from '../types';
+import { SKELETON, type Edge, type PieceGeom, type SeamCandidate } from '../types';
 import { roleOf } from './costs';
 import type { Operation } from './model';
 
@@ -83,6 +83,18 @@ export function notchedPartial(u: Edge, v: Edge, pu: PieceGeom, pv: PieceGeom): 
   return best;
 }
 
+/**
+ * The sewn stretch of each side of a partial read here (mm along the edge from its start): the whole
+ * short edge, and of the long edge the `span` from its aligned end — the rest of the long edge is
+ * free (an armhole runs over the free top of a side-back seam). Keyed by the pool candidate the
+ * solver's variable carries; `withRange` puts it on the SeamCandidate made from it.
+ */
+const rangeOf = new WeakMap<PoolCand, NonNullable<SeamCandidate['range']>>();
+export const withRange = (c: SeamCandidate, cand: PoolCand): SeamCandidate => {
+  const r = rangeOf.get(cand);
+  return r ? { ...c, range: r } : c;
+};
+
 /** A partial as the pool would hold it: `u` is the side whose START sits on `v`'s END (A4's `a`). */
 function partialCand(p: Partial, runOf: Map<string, Run>, label: string): PoolCand | null {
   const [a, b] = p.aligned === 'us' ? [p.u, p.v] : [p.v, p.u];
@@ -94,7 +106,13 @@ function partialCand(p: Partial, runOf: Map<string, Run>, label: string): PoolCa
   const relLen = dLenMm / l.lenMm;
   const hu = u.piece.hand;
   const hv = v.piece.hand;
-  return {
+  // a's START sits on b's END: a is sewn over [0, span], b over its last `span`.
+  const span = s.lenMm;
+  const range: NonNullable<SeamCandidate['range']> = {
+    a: [0, span],
+    b: [b.lenMm - span, b.lenMm],
+  };
+  const cand: PoolCand = {
     u,
     v,
     score: p.score,
@@ -121,6 +139,8 @@ function partialCand(p: Partial, runOf: Map<string, Run>, label: string): PoolCa
       notchesMatched: p.notchesMatched,
     },
   };
+  rangeOf.set(cand, range);
+  return cand;
 }
 
 /**
