@@ -315,7 +315,7 @@ export function assembleGroup(
     else
       refused.push(
         `page ${p.page + 1}: orientation differs from its sheet and no recurrence placed it — ` +
-          `left off the sheet (set it aside on the files step if not pattern, or place it with a grid override)`,
+          `left off the sheet (set it aside on the files step if not pattern; a hand grid places tiles upright, so it cannot place this one)`,
       );
   }
   const keepTurned = (r: RegPage) => r.rot === 0 || turnChoice.get(r.key) === r.rot;

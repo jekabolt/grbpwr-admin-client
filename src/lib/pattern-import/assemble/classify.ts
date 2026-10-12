@@ -132,7 +132,11 @@ function linkedPages(run: IRPage[], partners?: Map<number, Set<number>>): Set<nu
   };
   for (const l of recurrenceLinks(regs)) pair(l.a.page, l.b.page);
   for (let i = 0; i + 1 < regs.length; i++) {
-    if (linked.has(regs[i].page) && linked.has(regs[i + 1].page)) continue;
+    // both linked already: skipped — unless the caller wants who links with whom and these two
+    // are not yet partners (a labelled run's boundary seam must not go missing)
+    const a = regs[i].page;
+    const b = regs[i + 1].page;
+    if (linked.has(a) && linked.has(b) && (!partners || partners.get(a)?.has(b))) continue;
     for (const rel of ['right', 'below'] as const) {
       const st = run[i].calibration ? TRACED_STITCH : DEFAULT_STITCH;
       const l = stitchFree(regs[i], regs[i + 1], rel, st);
