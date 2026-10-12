@@ -139,9 +139,19 @@ export function runWithBandDoubled(l: Loaded): PomValue | undefined {
   if (!band) return undefined;
   const src = l.facts.pieces.find((p) => p.pieceKey === band);
   if (!src) return undefined;
+  // A band 9 % shorter (as a smaller block's band would be) — an identical copy would be read as a
+  // second ply of the same band, which is another rule.
+  const piece = {
+    ...src.piece,
+    poly: src.piece.poly.map((q) => ({ ...q, x: q.x * 0.91 })),
+    inner: (src.piece.inner ?? []).map((l) => ({
+      ...l,
+      pts: l.pts.map((q) => ({ ...q, x: q.x * 0.91 })),
+    })),
+  };
   const facts = {
     ...l.facts,
-    pieces: [...l.facts.pieces, { ...src, pieceKey: `${band}_2`, name: `${src.name}_2` }],
+    pieces: [...l.facts.pieces, { ...src, pieceKey: `${band}_2`, name: `${src.name}_2`, piece }],
   };
   const report = measurePattern({ facts, baseSize: l.baseSize });
   return report.sizes.find((s) => s.size === l.baseSize)?.values.find((v) => v.code === 'waist');

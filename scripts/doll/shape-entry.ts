@@ -86,8 +86,19 @@ type Shape = {
     /** |band − (waist − folded)| / max, %. */
     easePct: number;
   } | null;
-  /** Tape round the waist seam (3D) vs the band's sewn edge (rest), mm; diff in %. */
-  ring: { ringMm: number; bandMm: number | null; diffPct: number | null; how: string } | null;
+  /**
+   * Tape round the waist seam (3D): the band's sewn edge as drawn (its hull on the floor plane)
+   * vs that edge at rest, mm, diff in % — a crumpled band reads short, a stretched one long. Without
+   * a band seam: the highest free loop of the body. `legsMm`: the same tape round the legs' side
+   * of the seam (the fold points stand a little proud of the band).
+   */
+  ring: {
+    ringMm: number;
+    bandMm: number | null;
+    diffPct: number | null;
+    legsMm: number | null;
+    how: string;
+  } | null;
   crumple: {
     waistPct: number;
     worst: { piece: string; pct: number } | null;
@@ -236,9 +247,9 @@ if (garment) {
     out.widensSeatToHem =
       out.widths.hem > out.widths.seat && out.widths.hem > out.widths.knee * 0.98;
 
-  // ── waist ring: convex hull perimeter of the waist path on the floor plane ──
-  if (waistPath.length >= 3) {
-    const pts = waistPath.map((v) => [P[3 * v], P[3 * v + 2]] as [number, number]);
+  // ── waist ring: convex hull perimeter of a path on the floor plane ──
+  const hullMm = (path: number[]) => {
+    const pts = path.map((v) => [P[3 * v], P[3 * v + 2]] as [number, number]);
     pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const cross = (o: number[], a: number[], b: number[]) =>
       (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -261,13 +272,20 @@ if (garment) {
       const b = hull[(i + 1) % hull.length];
       ring += Math.hypot(b[0] - a[0], b[1] - a[1]);
     }
+    return ring;
+  };
+  if (waistPath.length >= 3) {
+    const bandPath = bandSeam ? Array.from(bandOnA ? bandSeam.pathA : bandSeam.pathB) : null;
     const bandMm = bandSeam ? (bandOnA ? bandSeam.lenA : bandSeam.lenB) : null;
+    const legsRing = hullMm(waistPath);
+    const ring = bandPath && bandPath.length >= 3 ? hullMm(bandPath) : legsRing;
     out.ring = {
       ringMm: r1(ring),
       bandMm: bandMm === null ? null : r1(bandMm),
       diffPct: bandMm ? r1((100 * (ring - bandMm)) / bandMm) : null,
+      legsMm: bandSeam ? r1(legsRing) : null,
       how: bandSeam
-        ? `tape round the body side of ${bandSeam.id} (convex hull) vs the band's sewn edge at rest`
+        ? `tape round the band's sewn edge of ${bandSeam.id} as drawn (convex hull) vs that edge at rest; legsMm = the same round the legs' side`
         : 'tape round the highest free loop of the body (no band seam)',
     };
   }

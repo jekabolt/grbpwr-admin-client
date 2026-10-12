@@ -1501,9 +1501,12 @@ function measureBottom(ctx: Ctx) {
   const halvesOfBand = bands0.length === 2 && bands0.every((k) => m.info.get(k)!.hand);
   let bands = bands0;
   let leftOut: string[] = [];
-  if (bands0.length > 1 && !halvesOfBand && wEdges.length) {
+  if (bands0.length > 1 && !halvesOfBand) {
+    // (no waist edge read on the legs: the longest band — one band, never a sum)
     const near = (k: string) =>
-      Math.abs(sewnEdge(k).lenMm * (m.info.get(k)!.girthMult ?? 1) - legWaistFolded);
+      wEdges.length
+        ? Math.abs(sewnEdge(k).lenMm * (m.info.get(k)!.girthMult ?? 1) - legWaistFolded)
+        : -sewnEdge(k).lenMm * (m.info.get(k)!.girthMult ?? 1);
     const best = [...bands0].sort((a, b) => near(a) - near(b))[0];
     bands = [best];
     leftOut = bands0.filter((k) => k !== best);
@@ -1518,7 +1521,7 @@ function measureBottom(ctx: Ctx) {
         ? `waistband halves differ by ${diff.toFixed(0)} mm (fly extension / overlap included)`
         : null,
       leftOut.length
-        ? `${bands0.length} band pieces without hands — ${bands[0]} taken (its sewn edge ${sewn.toFixed(0)} mm is nearest the legs' folded waist ${legWaistFolded.toFixed(0)}), ${leftOut.join(', ')} left out`
+        ? `${bands0.length} band pieces without hands — ${bands[0]} taken (${wEdges.length ? `its sewn edge ${sewn.toFixed(0)} mm is nearest the legs' folded waist ${legWaistFolded.toFixed(0)}` : `the longest, ${sewn.toFixed(0)} mm; no waist edge read on the legs to choose by`}), ${leftOut.join(', ')} left out`
         : null,
       foldFull ? `the legs' pleats / darts are read from their marks` : null,
     ].filter((x): x is string => !!x);

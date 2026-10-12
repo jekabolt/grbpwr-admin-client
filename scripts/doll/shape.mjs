@@ -181,3 +181,57 @@ for (const r of results) {
   );
 }
 console.log(`shape.json + renders → ${outDir}`);
+
+// ── the gate: targets (06-TROUSERS-SHAPE.md) — a FAIL line each, exit 1 when any fails ──
+//   trousers (a band seam read): the band closes (gap p95 ≤ 4 mm) or is eased ≤ 5 %; the ring
+//   within 5 % of the band; waist creases < 10 % (and the crumple index < 10 %); no surface piece
+//   > 15 % past its host edge; the silhouette widens seat → hem; ≤ 2 s;
+//   every other garment, against the base tag: creases / crumple not worse by over 1 pp, widths
+//   within 2 mm, seam counts (open, floating) not worse, past edge not worse.
+let fails = 0;
+const fail = (id, msg) => {
+  fails++;
+  console.log(`FAIL ${id}: ${msg}`);
+};
+for (const r of results) {
+  if (r.skipped || !r.garment) continue;
+  const past = (x) => (x.pastEdge.length ? Math.max(...x.pastEdge.map((p) => p.pct)) : 0);
+  const b = base.get(String(r.id));
+  if (r.ms > 2000) fail(r.id, `solve ${(r.ms / 1000).toFixed(1)} s > 2 s`);
+  if (r.band) {
+    if (!(r.band.gapP95Mm <= 4 || r.band.easePct <= 5))
+      fail(
+        r.id,
+        `band gap p95 ${r.band.gapP95Mm} mm and ease ${r.band.easePct} % (closed ≤ 4 mm or eased ≤ 5 %)`,
+      );
+    if (r.ring && r.ring.diffPct !== null && Math.abs(r.ring.diffPct) > 5)
+      fail(
+        r.id,
+        `waist ring ${r.ring.ringMm} vs band ${r.ring.bandMm} mm: ${r.ring.diffPct} % (≤ 5 %)`,
+      );
+    if (r.creases.waistPct >= 10) fail(r.id, `waist creases ${r.creases.waistPct} % (< 10 %)`);
+    if (r.crumple.waistPct >= 10) fail(r.id, `waist crumple ${r.crumple.waistPct} % (< 10 %)`);
+    if (past(r) > 15) fail(r.id, `a surface piece ${past(r)} % past its host edge (≤ 15 %)`);
+    if (r.legs && r.widensSeatToHem === false)
+      fail(
+        r.id,
+        `the silhouette does not widen seat → hem (${r.widths.seat} → ${r.widths.hem} mm)`,
+      );
+  } else if (b) {
+    if (r.creases.waistPct > b.creases.waistPct + 1)
+      fail(r.id, `creases ${b.creases.waistPct} → ${r.creases.waistPct} % (worse than ${BASE})`);
+    if (r.crumple.waistPct > b.crumple.waistPct + 1)
+      fail(r.id, `crumple ${b.crumple.waistPct} → ${r.crumple.waistPct} % (worse than ${BASE})`);
+    for (const k of Object.keys(r.widths))
+      if (Math.abs((r.widths[k] ?? 0) - (b.widths?.[k] ?? 0)) > 2)
+        fail(r.id, `width at ${k} ${b.widths?.[k]} → ${r.widths[k]} mm (differs from ${BASE})`);
+    if (past(r) > past(b)) fail(r.id, `past edge ${past(b)} → ${past(r)} % (worse than ${BASE})`);
+  }
+  if (b && (r.seams.open > b.seams.open || r.seams.floating > b.seams.floating))
+    fail(
+      r.id,
+      `${r.seams.open} open · ${r.seams.floating} floating (was ${b.seams.open} · ${b.seams.floating})`,
+    );
+}
+console.log(fails ? `${fails} FAIL` : 'shape gate: all green');
+if (fails) process.exit(1);
