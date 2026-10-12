@@ -42,6 +42,7 @@ import {
   blockNameOf,
 } from '../write/plan';
 import { identityProblem } from '../manifest/identity';
+import { f0Off } from '../pieces/identity';
 import { foldShapeProblem } from '../semantics/fold';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
@@ -1700,5 +1701,193 @@ export function g21(ctx: GateCtx): GateCheck {
       : n
         ? `${n} block(s) closed through continuity walls: provenance and verdict hold`
         : 'no block closed through continuity walls',
+  );
+}
+
+// ── G22 / G23 (MOOD Ф0) ───────────────────────────────────────────────────────────────────
+
+/** G22: share of the written line that must lie on the rank's own pen (off the common edges). */
+export const IDENTITY_SHARE_MIN = 0.85;
+/** G22: a written sample lies on a source line within this distance, mm. */
+export const IDENTITY_REACH_MM = 0.5;
+/** G22: below this share of the line off the common edges the size claims no pen (a band). */
+const IDENTITY_OWN_FLOOR = 0.2;
+
+/** G22: at least this share of the line (off the common edges) on the size's own pen at all. */
+export const IDENTITY_OWN_MIN = 0.5;
+
+/**
+ * G22 measure on a written closed line: per 0.5 mm sample, on the size's own pen (`own`), on an
+ * edge every size uses (`excused`: common lines; `shared`: another pen's line this size lands on,
+ * at most half the line), on a line provably another size's (`foreign`), or on nothing known.
+ * `share` = own / (own + foreign) — the pen it lies on; `ownAll` = own / everything not excused.
+ * `share` null: the line runs on the excused edges almost everywhere (no pen claim to check).
+ */
+export function identityShare(
+  line: readonly PtMm[],
+  g: {
+    own: readonly PtMm[][];
+    excused: readonly PtMm[][];
+    shared?: readonly PtMm[][];
+    foreign?: readonly PtMm[][];
+  },
+  reachMm = IDENTITY_REACH_MM,
+): { share: number | null; ownAll: number; foreignAll: number; samples: number } {
+  const s = sampleAlong(line, true, 0.5);
+  const idx = (ls: readonly PtMm[][] = []) =>
+    new SegmentIndex(
+      ls.map((pts) => ({ pts, closed: false })),
+      5,
+    );
+  const ownIdx = idx(g.own);
+  const excIdx = idx(g.excused);
+  const shIdx = idx(g.shared);
+  const forIdx = idx(g.foreign);
+  const near = (ix: SegmentIndex, p: PtMm) => !ix.empty && ix.nearest(p, reachMm) <= reachMm;
+  let on = 0;
+  let off = 0;
+  let counted = 0;
+  let sharedN = 0;
+  for (const p of s) {
+    if (near(ownIdx, p)) {
+      on++;
+      counted++;
+      continue;
+    }
+    if (near(excIdx, p)) continue;
+    // an edge drawn once by another pen that this size lands on: excused up to half the line
+    if (sharedN < 0.5 * s.length && near(shIdx, p)) {
+      sharedN++;
+      continue;
+    }
+    counted++;
+    if (near(forIdx, p)) off++;
+  }
+  if (!s.length || counted < IDENTITY_OWN_FLOOR * s.length)
+    return { share: null, ownAll: 1, foreignAll: 0, samples: s.length };
+  return {
+    share: on + off ? on / (on + off) : 0,
+    ownAll: on / counted,
+    foreignAll: off / counted,
+    samples: s.length,
+  };
+}
+
+/**
+ * G22 (MOOD Ф0, R12): a size block of an identity-encoded run lies on its rank's pen. The source
+ * says which pen draws each size (declared dash, recovered motif, its key); a written size whose
+ * line runs on another pen is another size under this one's label (Mood Paris: "16" = 00's line,
+ * monotone, closed, every other check green). A rank whose pen is unknown proves nothing.
+ */
+export function g22(ctx: GateCtx): GateCheck {
+  const by = ctx.expect.identityByBlock;
+  if (!by || f0Off())
+    return check('G22-identity', [], 'block', 'no identity-encoded size run — not evaluated');
+  const failed: string[] = [];
+  const notes: string[] = [];
+  let worst = 1;
+  let measured = 0;
+  for (const b of ctx.blocks) {
+    const g = by[b.block];
+    if (!g) continue;
+    if (!g.pen) {
+      failed.push(b.block);
+      notes.push(`${b.block}: the size's own line is not known (no key sample matches it)`);
+      continue;
+    }
+    const { line, layer } = linesFor(ctx, b);
+    if (!line) {
+      failed.push(b.block);
+      notes.push(`${b.block}: no written line on layer ${layer}`);
+      continue;
+    }
+    const { share, ownAll, foreignAll } = identityShare(line, g);
+    if (share == null) continue;
+    measured++;
+    worst = Math.min(worst, share);
+    if (share < IDENTITY_SHARE_MIN || ownAll < IDENTITY_OWN_MIN) {
+      failed.push(b.block);
+      notes.push(
+        `${b.block}: ${(ownAll * 100).toFixed(0)} % on its own line (${g.pen}), ${(foreignAll * 100).toFixed(0)} % on another size's`,
+      );
+    }
+  }
+  return check(
+    'G22-identity',
+    failed,
+    'block',
+    notes.join('; ') ||
+      `every size lies on its own line (${measured} measured, worst ${(worst * 100).toFixed(0)} %)`,
+    fmt(worst),
+    `≥ ${IDENTITY_SHARE_MIN} of own + another size's line on its own pen, ≥ ${IDENTITY_OWN_MIN} of the line`,
+  );
+}
+
+/** G23: an area step bigger than this × its neighbours' grade step is a face across two pieces. */
+export const ONE_PIECE_JUMP = 1.25;
+/** G23: the jump's excess over the neighbours' step, in median grade steps of the identity. */
+export const ONE_PIECE_EXCESS = 2;
+
+/**
+ * G23 (MOOD Ф0): one outline holds one piece. The pieces stage names faces that hold another
+ * piece's header or overlap another piece's outline of the same size (`onePieceByBlock`); here, per
+ * identity over its written sizes, an area step larger than ×1.25 the steps on both sides of it (a
+ * face that grew by a neighbouring piece — Mood Margaux's collar joining the front's neckline).
+ */
+export function g23(ctx: GateCtx): GateCheck {
+  if (f0Off()) return check('G23-one-piece', [], 'block', 'probe switch: not evaluated');
+  const failed: string[] = [];
+  const notes: string[] = [];
+  for (const [block, why] of Object.entries(ctx.expect.onePieceByBlock ?? {}))
+    if (ctx.blocks.some((b) => b.block === block)) {
+      failed.push(block);
+      notes.push(`${block}: ${why}`);
+    }
+  const rankOf = new Map(ctx.m.sizes.map((s) => [s.token, s.rank]));
+  const byId = new Map<string, { block: string; rank: number; area: number }[]>();
+  for (const b of ctx.blocks) {
+    if (b.mb.sizeToken === UNI_TOKEN) continue;
+    const c = ctx.contours.get(b.block)?.get(LAYERS.cut);
+    if (!c) continue;
+    const list = byId.get(b.mb.identity) ?? [];
+    list.push({
+      block: b.block,
+      rank: rankOf.get(b.mb.sizeToken) ?? b.size?.rank ?? 0,
+      area: areaOf(c),
+    });
+    byId.set(b.mb.identity, list);
+  }
+  let worst = 0;
+  for (const [identity, rows0] of byId) {
+    const rows = rows0.sort((x, y) => x.rank - y.rank);
+    if (rows.length < 3) continue;
+    // per-rank step between written neighbours (a skipped rank spreads the step)
+    const step = rows.map((r, i) =>
+      i ? (r.area - rows[i - 1].area) / Math.max(1, r.rank - rows[i - 1].rank) : NaN,
+    );
+    const pos = step.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+    const median = pos.length ? pos[pos.length >> 1] : 0;
+    for (let i = 1; i < rows.length; i++) {
+      const nb = [step[i - 1], step[i + 1]].filter((v) => Number.isFinite(v) && v > 0);
+      if (!nb.length || !(step[i] > 0)) continue;
+      const ratio = step[i] / Math.max(...nb);
+      worst = Math.max(worst, ratio);
+      // …and the excess is a piece, not a grade break: ≥ 2 median steps over the neighbours'
+      // (leonie's 44 → 46 grows ×2 its neighbours' step on a real grade change, +1 median step)
+      if (ratio > ONE_PIECE_JUMP && step[i] - Math.max(...nb) >= ONE_PIECE_EXCESS * median) {
+        failed.push(rows[i].block);
+        notes.push(
+          `${identity}: ${rows[i - 1].block} → ${rows[i].block} grows ${(step[i] / 100).toFixed(1)} cm² per size, ×${ratio.toFixed(2)} its neighbours' step`,
+        );
+      }
+    }
+  }
+  return check(
+    'G23-one-piece',
+    failed,
+    'block',
+    notes.join('; ') || 'every outline holds one piece',
+    fmt(worst),
+    `no other piece's header or same-size overlap > 5 %; area step ≤ ×${ONE_PIECE_JUMP} its neighbours' or < ${ONE_PIECE_EXCESS} median steps over them`,
   );
 }

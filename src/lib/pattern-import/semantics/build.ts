@@ -40,6 +40,7 @@ import type {
   FoldAsk,
   FoldFeature,
   GrainFeature,
+  IdentityGeometry,
   InternalFeature,
   IRText,
   LineClass,
@@ -62,6 +63,14 @@ import type {
   Unproven,
 } from '../types';
 import { PATIMPORT } from '../types';
+import {
+  describeLook,
+  onePieceProblems,
+  penLines,
+  rankLooks,
+  sharedEdges,
+} from '../pieces/identity';
+import { wallModel } from '../pieces/walls';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { classifyFeatures } from './features';
@@ -141,6 +150,13 @@ export type SemanticsDetail = {
   derivedOf: (identity: string, rank: number) => DerivedEdge[] | undefined;
   /** P1 (G21): the continuity stretches of a size closed through them, and their chains. */
   continuityOf: (identity: string, rank: number) => ContinuityGeometry | undefined;
+  /**
+   * MOOD Ф0 (G22): on an identity-encoded run, the lines of the rank's own pen near the piece and
+   * the common edges its outline may run on, in the identity's frame. undefined = no identity run.
+   */
+  identityOf: (identity: string, rank: number) => IdentityGeometry | undefined;
+  /** MOOD Ф0 (G23): why this identity × rank's outline may hold two pieces (else undefined). */
+  onePieceOf: (identity: string, rank: number) => string | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -1646,6 +1662,80 @@ export function buildPieceSpecsDetailed(
       })),
     };
   };
+  // MOOD Ф0 (G22): the pen each rank is drawn with, and the common edges every rank may use
+  const styles = new Map(sheet.styles.map((st) => [st.id, st]));
+  const idLooks = rankLooks(set, run, styles);
+  let commonIds: Set<ChainId> | null = null;
+  const commonOf = () =>
+    (commonIds ??= new Set([
+      ...wallModel(set, run, sheet.texts, styles).common,
+      ...set.classes.filter((c) => c.role === 'common').flatMap((c) => c.chains),
+    ]));
+  const linesOfIds = (ids: Iterable<ChainId>) =>
+    [...ids]
+      .map((id) => set.chains[id])
+      .filter((ch) => !!ch && ch.pts.length > 1)
+      .map((ch) => (ch.closed ? [...ch.pts, ch.pts[0]] : ch.pts));
+  const identityOf = (identity: string, rank: number): IdentityGeometry | undefined => {
+    if (!idLooks.identity) return undefined;
+    const src = sourceOf(identity, rank);
+    if (!src || src.cand.rank >= idLooks.looks.length) return undefined;
+    const look = idLooks.looks[src.cand.rank];
+    const common = commonOf();
+    const excused = toFrame(src.w, linesOfIds(src.cand.walls.filter((id) => common.has(id))));
+    if (idLooks.absent[src.cand.rank]) return { pen: null, own: [], excused };
+    const cls = set.classes.find((c) => c.id === run.sizes[src.cand.rank]?.classId);
+    const others = new Set(
+      run.sizes.flatMap((z, r) =>
+        r === src.cand.rank ? [] : set.classes.find((c) => c.id === z.classId)?.chains ?? [],
+      ),
+    );
+    const { own, foreign } = penLines(
+      set,
+      look,
+      styles,
+      src.cand.bbox,
+      new Set(cls?.chains ?? []),
+      others,
+    );
+    const ownSet = new Set(own);
+    const walls = src.cand.walls.filter((id) => !common.has(id) && !ownSet.has(id));
+    // an edge this size shares with another size of the same piece — drawn once (viola, zhaket:
+    // one line where two sizes coincide) or landed on (robe: the sizes end on 46's line). The gate
+    // excuses at most half the written line this way: an outline that IS another size's (Mood
+    // Paris "26" = 20's line) stays mostly on lines provably another size's.
+    const coincident = new Set<ChainId>();
+    for (const c2 of famBySeed.get(src.cand.seed)?.candidates ?? [])
+      if (c2.rank !== src.cand.rank && c2.outcome === 'closed')
+        for (const id of c2.walls) coincident.add(id);
+    const shared = [
+      ...new Set([
+        ...sharedEdges(set, walls, own, look, styles),
+        ...walls.filter((id) => coincident.has(id)),
+      ]),
+    ];
+    const map = (ids: ChainId[]) => toFrame(src.w, linesOfIds(ids));
+    return {
+      // keyed by the drawing but no one look: the rank's own lines as F3 read them
+      pen: look ? describeLook(look) : 'its own size lines',
+      own: map(own),
+      excused,
+      ...(shared.length ? { shared: map(shared) } : {}),
+      ...(foreign.length ? { foreign: map(foreign) } : {}),
+    };
+  };
+  let onePiece: Map<string, string> | null = null;
+  const onePieceOf = (identity: string, rank: number): string | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src) return undefined;
+    onePiece ??= onePieceProblems(
+      families,
+      Object.fromEntries(
+        Object.entries(input.seedTexts ?? {}).filter((e): e is [string, number] => e[1] != null),
+      ),
+    );
+    return onePiece.get(`${src.cand.seed}:${src.cand.rank}`);
+  };
   const alongOf = bandCutSupport(set, run);
   const derivedOf = (identity: string, rank: number): DerivedEdge[] | undefined => {
     const src = sourceOf(identity, rank);
@@ -1693,6 +1783,8 @@ export function buildPieceSpecsDetailed(
     wallsOf,
     derivedOf,
     continuityOf,
+    identityOf,
+    onePieceOf,
     notes,
   };
 }

@@ -9,9 +9,18 @@
 //   single   one size (BLAZER M, or no class carries a chain): every line that is not page
 //            furniture or a notch is a wall; the outer fill takes the outermost (the cut line).
 //   file     file-per-size: rank r = the chains of file r (+ common); seeds move with the file.
-import type { ChainId, ChainSet, IRText, LineClass, PtMm, SizeRun } from 'lib/pattern-import/types';
+import type {
+  ChainId,
+  ChainSet,
+  IRText,
+  LineClass,
+  PtMm,
+  SizeRun,
+  Style,
+} from 'lib/pattern-import/types';
 
 import { bboxOf, dist, SegGrid, segIntersect, segNearest } from './geom';
+import { rankGuard, type RankGuard } from './identity';
 import type { WallItem } from './snap';
 
 export type WallMode = 'graded' | 'single' | 'file';
@@ -150,7 +159,16 @@ export function rankOf(c: LineClass): number | null {
   return null;
 }
 
-export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] = []): WallModel {
+/**
+ * `styles` (the sheet's): under an identity encoding continuity ranking moves a chain only into a
+ * rank drawn with its own pen (MOOD Ф0 R3, `pieces/identity.ts`). Absent = no pen check.
+ */
+export function wallModel(
+  set: ChainSet,
+  run: SizeRun,
+  texts: readonly IRText[] = [],
+  styles?: ReadonlyMap<number, Style>,
+): WallModel {
   const byId = new Map(set.classes.map((c) => [c.id, c]));
   const sizeClasses = set.classes.filter((c) => c.role === 'size');
   const common = set.classes.filter((c) => c.role === 'common').flatMap((c) => c.chains);
@@ -197,7 +215,10 @@ export function wallModel(set: ChainSet, run: SizeRun, texts: readonly IRText[] 
       ? labelRanks(set, run, texts)
       : new Map<ChainId, number>();
   for (const [id, r] of labelled) byRank[r].push(id);
-  const cr = mode === 'graded' && !probeOff('F4_NOCONNECT') ? connectRanks(set, base) : null;
+  const cr =
+    mode === 'graded' && !probeOff('F4_NOCONNECT')
+      ? connectRanks(set, base, 0.5, probeOff('F4_NOLOOK') ? null : rankGuard(set, run, styles))
+      : null;
   const ranks = cr ? cr.byRank : byRank;
   // band ladders: their ticks are size ends (rank by order), never shared walls
   const notchIds = new Set(
@@ -261,6 +282,7 @@ export function undrawnRanks(
   texts: readonly IRText[] = [],
   module: number[] = [],
   minAreaMm2 = 5000,
+  styles?: ReadonlyMap<number, Style>,
 ): number[] {
   if (run.encoding === 'single' || run.sizes.length < 2) return [];
   const byId = new Map(set.classes.map((c) => [c.id, c]));
@@ -270,7 +292,7 @@ export function undrawnRanks(
   });
   const drawnN = origDrawn.filter(Boolean).length;
   if (!drawnN) return [];
-  const empty = new Set(wallModel(set, run, texts).emptyRanks);
+  const empty = new Set(wallModel(set, run, texts, styles).emptyRanks);
   const cand = run.sizes.map((_, r) => r).filter((r) => !origDrawn[r] && empty.has(r));
   if (!cand.length) return [];
   // a verified family covering every size: a closed common outline, or a loop drawn alike in
@@ -1255,11 +1277,18 @@ export function sheetModule(sheet: {
  * another rank (r4454's back neck "54" continuing the 44 shoulder) moves to the component's rank
  * when ≥ 60 % of the ranked length agrees. Orphans in a decided component get its rank. Components
  * without such a majority are left alone and returned as conflicts (the operator sees them).
+ *
+ * `guard` (MOOD Ф0 R3, identity encodings): ends meeting is ONE evidence, the pen is the other. A
+ * chain drawn with another pen than the rank's never moves into it — by the vote or by size order:
+ * it stays where F3 put it, an orphan stays unranked, and the chain is returned as a conflict. A
+ * pen not known on either side proves nothing (gate G22 holds such a rank). Mood Paris: the strap's
+ * narrow end, where the lines of all 18 sizes meet, linked 00's lines to 16's: "16" was size 00.
  */
 export function connectRanks(
   set: ChainSet,
   m: WallModel,
   tolMm = 0.5,
+  guard: RankGuard | null = null,
 ): {
   byRank: ChainId[][];
   moved: number;
@@ -1343,6 +1372,10 @@ export function connectRanks(
     for (const id of members) {
       const r = rankOf.get(id);
       if (r === best) continue;
+      if (guard && !guard.ok(id, best)) {
+        conflicts.push(id);
+        continue;
+      }
       if (r !== undefined) byRank[r] = byRank[r].filter((x) => x !== id);
       byRank[best].push(id);
       moved++;
@@ -1419,10 +1452,16 @@ export function connectRanks(
       if (chain.length !== m.n) return;
       chain.forEach((u, r) => {
         usedU.add(u.i);
-        for (const id of u.ms) if (loopIds.has(id)) loopFamily.push(id);
         for (const id of u.ms) {
           const cur = rankOf.get(id);
+          // R3: a loop drawn with another pen than rank r's is not rank r's loop
+          const held = cur !== r && !!guard && !guard.ok(id, r);
+          if (loopIds.has(id) && !held) loopFamily.push(id);
           if (cur === r) continue;
+          if (held) {
+            conflicts.push(id);
+            continue;
+          }
           if (commonIds.has(id)) uncommon.push(id);
           if (cur !== undefined) byRank[cur] = byRank[cur].filter((x) => x !== id);
           byRank[r].push(id);

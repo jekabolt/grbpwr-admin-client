@@ -381,6 +381,8 @@ export class Session {
   /** The outlines' derived edges per written identity × rank (F14b): gate G15, never walls. */
   private derivedOf: SemanticsDetail['derivedOf'] | null = null;
   private continuityOf: SemanticsDetail['continuityOf'] | null = null;
+  private identityOf: SemanticsDetail['identityOf'] | null = null;
+  private onePieceOf: SemanticsDetail['onePieceOf'] | null = null;
   /** Text of the pages that are not pattern tiles (instructions, cover, overview): cut layouts (F7). */
   private pageTexts: IRText[] = [];
 
@@ -472,6 +474,8 @@ export class Session {
       this.wallsOf = null;
       this.derivedOf = null;
       this.continuityOf = null;
+      this.identityOf = null;
+      this.onePieceOf = null;
     }
   }
 
@@ -1087,7 +1091,14 @@ export class Session {
     if (!this.fast && run.encoding !== 'single' && run.sizes.length > 1)
       map = markNotDrawn(
         map,
-        undrawnRanks(this.chains, run, this.sheet.texts, sheetModule(this.sheet)),
+        undrawnRanks(
+          this.chains,
+          run,
+          this.sheet.texts,
+          sheetModule(this.sheet),
+          undefined,
+          new Map(this.sheet.styles.map((s) => [s.id, s])),
+        ),
         input.card,
       );
     this.run = run;
@@ -1443,6 +1454,12 @@ export class Session {
             sd.origin === 'text' && sd.text ? [[sd.id, sd.text.text.trim()]] : [],
           ),
         ),
+        // MOOD Ф0 (G23): the header text of each text seed
+        seedTexts: Object.fromEntries(
+          (this.seeds ?? []).flatMap((sd) =>
+            sd.origin === 'text' && sd.text ? [[sd.id, sd.text.id]] : [],
+          ),
+        ),
       },
       (d, t, n) => ctx.progress(d, t, n),
     );
@@ -1465,6 +1482,8 @@ export class Session {
     this.wallsOf = detail.wallsOf;
     this.derivedOf = detail.derivedOf;
     this.continuityOf = detail.continuityOf;
+    this.identityOf = detail.identityOf;
+    this.onePieceOf = detail.onePieceOf;
     return output;
   }
 
@@ -1621,6 +1640,8 @@ export class Session {
     const rawWalls = this.wallsOf;
     const derived = this.derivedOf;
     const continuity = this.continuityOf;
+    const identity = this.identityOf;
+    const onePiece = this.onePieceOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.
@@ -1698,6 +1719,8 @@ export class Session {
           continuityOf: continuity
             ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
             : undefined,
+          identityOf: identity ? (id, rank) => identity(sp.sourceOf[id] ?? id, rank) : undefined,
+          onePieceOf: onePiece ? (id, rank) => onePiece(sp.sourceOf[id] ?? id, rank) : undefined,
           chrome,
           openFolds,
           hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,

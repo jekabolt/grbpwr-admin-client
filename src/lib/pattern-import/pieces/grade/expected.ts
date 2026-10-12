@@ -9,6 +9,7 @@
 // the sizes step requires the answer, and the fill refuses every piece until it is given.
 import type { ChainSet, ExpectedSizes, Sheet, SizeRun } from 'lib/pattern-import/types';
 
+import { f0Off } from '../identity';
 import { gradingEvidence, GUARD_OPTS } from './guard';
 import { PAIR_GUARD } from './hook';
 
@@ -28,12 +29,36 @@ export function expectedSizes(
           (set.classes.find((c) => c.id === z.classId)?.chains.length ?? 0) > 0,
       ).length
     : run.sizes.length;
-  if (run.encoding !== 'single' && run.sizes.length > 1 && carried >= 2)
-    return { n: run.sizes.length, from: 'source' };
+  if (run.encoding !== 'single' && run.sizes.length > 1 && carried >= 2) {
+    // MOOD Ф0 R2: the text or the key names MORE sizes than the drawing encodes (Mood's key 00–32
+    // in two columns, 9 of 18 read): the encoded count is not proven — the sizes step asks
+    if (!namesMore(run, set)) return { n: run.sizes.length, from: 'source' };
+    if (drawnSizes != null && drawnSizes >= 1)
+      return { n: Math.round(drawnSizes), from: 'operator' };
+    return null;
+  }
   if (drawnSizes != null && drawnSizes >= 1) return { n: Math.round(drawnSizes), from: 'operator' };
   if (run.encoding === 'single' && run.sizes.length === 1 && run.sizes[0].label.trim())
     return { n: 1, from: 'source' };
   return null;
+}
+
+/**
+ * MOOD Ф0 R2: a 'size-count' question of the chain set whose numbers name more sizes than the run
+ * encodes ("9 sizes found in the drawing, the text names 18", "geometry says 9 sizes, text runs say
+ * 18"). A count the message does not spell out is taken as more (asked, never assumed).
+ */
+export function namesMore(run: SizeRun, set?: ChainSet): boolean {
+  const n = run.sizes.length;
+  if (f0Off()) return false;
+  for (const a of set?.ambiguities ?? []) {
+    if (a.kind !== 'size-count') continue;
+    const named = [
+      ...(a.message.match(/text (?:names|runs say) ([\d/ or]+)/)?.[1] ?? '').matchAll(/\d+/g),
+    ].map((m) => Number(m[0]));
+    if (!named.length || named.some((k) => k > n)) return true;
+  }
+  return false;
 }
 
 /**
@@ -44,6 +69,13 @@ export function expectedSizes(
  */
 export function runForExpected(run: SizeRun, expected: ExpectedSizes | null): SizeRun {
   if (!expected || expected.from === 'source' || expected.n <= 1) return run;
+  // R2: the operator (or two evidences) confirmed the count the drawing encodes — its run stands
+  if (
+    run.encoding !== 'single' &&
+    run.sizes.length === expected.n &&
+    run.sizes.some((z) => z.classId != null)
+  )
+    return run;
   return {
     encoding: 'single',
     sizes: Array.from({ length: expected.n }, (_, r) => ({

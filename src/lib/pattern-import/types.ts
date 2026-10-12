@@ -1210,6 +1210,8 @@ export type SemanticsInput = {
   foldListChecked?: boolean | string[];
   /** The text label of each text-seeded piece ("22", "Piece 7"), for binding the cutting list. */
   seedLabels?: Partial<Record<SeedId, string>>;
+  /** MOOD Ф0 (G23): the text (TextId) each text-seeded piece was seeded from — its header. */
+  seedTexts?: Partial<Record<SeedId, number>>;
   /** Text of the document's other pages (instructions, cutting list); the session fills it. */
   docTexts?: string[];
 };
@@ -1655,7 +1657,33 @@ export type GateCheckId =
    * lies on the chains it names, the written line runs along it, the rule's constraints hold, and
    * the verdict's checks are within what it allowed (block on any mismatch).
    */
-  | 'G21-continuity';
+  | 'G21-continuity'
+  /**
+   * MOOD Ф0 (R12): a size block of a rank identified by its pen (declared dash, recovered motif,
+   * the drawing's key) lies on that pen's lines (± its corner stubs) — ≥ 0.85 of the written line
+   * off the common edges; a rank of such a run whose pen is unknown proves nothing (block).
+   */
+  | 'G22-identity'
+  /**
+   * MOOD Ф0: one outline, one piece — the face holds another piece's header, or overlaps another
+   * piece's outline of the same size > 5 %, or the area jumps past its neighbours' grade step.
+   */
+  | 'G23-one-piece';
+
+/**
+ * MOOD Ф0 (G22): per written size block, the lines of its rank's pen near it and the common edges
+ * every size uses (excused), in the written frame. `pen` null = an identity run whose rank has no
+ * known pen. Absent for a block = no identity claim (the run is not identity encoded).
+ */
+export type IdentityGeometry = {
+  pen: string | null;
+  own: PtMm[][];
+  excused: PtMm[][];
+  /** Lines of another pen this rank's own lines land on (an edge drawn once): ≤ half excused. */
+  shared?: PtMm[][];
+  /** Lines provably another size's (another pen, another size's class, an orphan of another look). */
+  foreign?: PtMm[][];
+};
 
 export type GateCheck = {
   id: GateCheckId;
@@ -1844,6 +1872,10 @@ export type GateExpectation = {
    * marks and tile labels and the chrome it only offered. A cut / seam line on it is traced chrome.
    */
   chromeByBlock?: Record<string, ChromeLine[]>;
+  /** MOOD Ф0 (G22): the block's rank pen lines and the common edges, written frame. */
+  identityByBlock?: Record<string, IdentityGeometry>;
+  /** MOOD Ф0 (G23): per block, why its outline may hold two pieces (pieces-stage evidence). */
+  onePieceByBlock?: Record<string, string>;
   overview?: Record<PieceKey, BoxMm>;
   /** Vector sources use 0.3; raster 0.5 (mm). */
   hausdorffP95Mm: Mm;
@@ -2125,7 +2157,15 @@ export type StageIO = {
   semantics: {
     in: Omit<
       SemanticsInput,
-      'sheet' | 'set' | 'run' | 'sizeMap' | 'families' | 'traced' | 'docTexts' | 'seedLabels'
+      | 'sheet'
+      | 'set'
+      | 'run'
+      | 'sizeMap'
+      | 'families'
+      | 'traced'
+      | 'docTexts'
+      | 'seedLabels'
+      | 'seedTexts'
     >;
     out: SemanticsOutput;
   };

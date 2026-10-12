@@ -15,6 +15,7 @@
 import type {
   ChromeLine,
   ContinuityGeometry,
+  IdentityGeometry,
   DerivedEdge,
   EmbedManifestFn,
   GateCheck,
@@ -48,6 +49,8 @@ import {
   g19,
   g20,
   g21,
+  g22,
+  g23,
   g2From,
   g3g4,
   g5,
@@ -215,6 +218,8 @@ export function createRunGate(
       g19(ctx),
       g20(ctx),
       g21(ctx),
+      g22(ctx),
+      g23(ctx),
     ];
     return {
       passed: passedOf(checks),
@@ -281,6 +286,41 @@ export function continuityByBlockFor(
   return out;
 }
 
+/** MOOD Ф0 (G22): the rank's pen lines and common edges (source frame) → written frame, per block. */
+export function identityByBlockFor(
+  detail: WriteDetail,
+  identityOf: (sourceIdentity: string, rank: number) => IdentityGeometry | undefined,
+): Record<string, IdentityGeometry> {
+  const out: Record<string, IdentityGeometry> = {};
+  for (const b of detail.plan.blocks) {
+    const g = identityOf(b.derivedFrom ?? b.identity, b.rank);
+    if (!g) continue;
+    const T = detail.transforms[b.name];
+    const map = (ls: PtMm[][]) => ls.map((l) => l.map((p) => applyAffine(T, p)));
+    out[b.name] = {
+      pen: g.pen,
+      own: map(g.own),
+      excused: map(g.excused),
+      ...(g.shared?.length ? { shared: map(g.shared) } : {}),
+      ...(g.foreign?.length ? { foreign: map(g.foreign) } : {}),
+    };
+  }
+  return out;
+}
+
+/** MOOD Ф0 (G23): the pieces stage's "two pieces in one outline" evidence, per written block. */
+export function onePieceByBlockFor(
+  detail: WriteDetail,
+  onePieceOf: (sourceIdentity: string, rank: number) => string | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const b of detail.plan.blocks) {
+    const why = onePieceOf(b.derivedFrom ?? b.identity, b.rank);
+    if (why) out[b.name] = why;
+  }
+  return out;
+}
+
 /**
  * Tile chrome (sheet frame) near each block → `chromeByBlock` in the written frame (G19): the
  * lines within 5 mm of the box of the block's source walls.
@@ -332,6 +372,10 @@ export type WriteAndGateCtx = {
   continuityOf?: (sourceIdentity: string, rank: number) => ContinuityGeometry | undefined;
   /** A8b (G19): the tile chrome of the sheet (same frame as `wallsOf`), masked or offered. */
   chrome?: readonly ChromeLine[];
+  /** MOOD Ф0 (G22): the rank's pen lines and the common edges (same frame as `wallsOf`). */
+  identityOf?: (sourceIdentity: string, rank: number) => IdentityGeometry | undefined;
+  /** MOOD Ф0 (G23): why an identity × rank's outline may hold two pieces. */
+  onePieceOf?: (sourceIdentity: string, rank: number) => string | undefined;
   overview?: GateExpectation['overview'];
   /**
    * Fold questions still open in this run (E1a, D3): a piece the sheet says is cut on fold, with no
@@ -373,6 +417,8 @@ export async function writeAndGate(
       ctx.chrome?.length && ctx.wallsOf
         ? chromeByBlockFor(detail, ctx.wallsOf, ctx.chrome)
         : undefined,
+    identityByBlock: ctx.identityOf ? identityByBlockFor(detail, ctx.identityOf) : undefined,
+    onePieceByBlock: ctx.onePieceOf ? onePieceByBlockFor(detail, ctx.onePieceOf) : undefined,
     overview: ctx.overview,
     hausdorffP95Mm: ctx.hausdorffP95Mm ?? PATIMPORT.hausdorffP95VectorMm,
     ...(ctx.openFolds?.length ? { openFolds: ctx.openFolds } : {}),

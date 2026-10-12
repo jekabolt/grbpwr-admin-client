@@ -301,6 +301,9 @@ const GATE_CHECK_IDS = new Set([
   'G20-nested-piece',
   // P1: a size closed through continuity walls keeps its provenance and verdict
   'G21-continuity',
+  // MOOD Ф0: a size lies on its own pen; one outline holds one piece
+  'G22-identity',
+  'G23-one-piece',
 ]);
 // F14b `GateReport.derived[].kind` (DerivedEdgeKind); 'auto-bridge' is the same edge's other name
 const DERIVED_KINDS = new Set<string>([
