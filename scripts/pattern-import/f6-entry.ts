@@ -37,9 +37,11 @@ import type {
   WriteJob,
 } from 'lib/pattern-import/types';
 import { bandCutSupport, slitNotches } from 'lib/pattern-import/semantics/build';
+import { offsetContour } from 'lib/pattern-import/semantics/offset';
 import { findSpikes, stripSpikes } from 'lib/pattern-import/spikes';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { writeDxfDetailed, writeScopes } from 'lib/pattern-import/write';
+import { isAsciiDxf } from 'lib/pattern-import/write/format';
 import {
   areaOf,
   bboxOf,
@@ -71,6 +73,7 @@ import {
   sameManifest,
 } from 'lib/pattern-import/gate/checks';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { readDxf, segmentDxf } from 'lib/pattern-import/adapters/dxf';
 import * as fx from 'components/managers/tech-card/components/pattern-import/fixture';
 
 const rules: CardBlockRules = blockCode;
@@ -704,6 +707,66 @@ function compareGolden(
   return problems;
 }
 
+/** W3: an R12 file against K2's CLO-AAMA golden, by meaning (see T1). */
+function compareGoldenR12(
+  mine: string,
+  golden: string,
+  offsets: Record<string, { dx: number; dy: number }>,
+  idOf: (block: string) => string,
+) {
+  const A = readRawDxf(mine);
+  const G = readRawDxf(golden);
+  const problems: string[] = [];
+  const near = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y) <= 1e-4;
+  const attrs = (ents: { type: string; layer: string; text?: string }[]) =>
+    new Map(
+      ents
+        .filter((e) => e.type === 'TEXT' && e.layer === '1')
+        .map((e) => /^\s*([A-Za-z ]+?)\s*:\s*(.*)$/.exec(e.text ?? ''))
+        .filter((m): m is RegExpExecArray => !!m)
+        .map((m) => [m[1].toLowerCase(), m[2].trim()]),
+    );
+  if ([...A.blocks.keys()].join(' ') !== [...G.blocks.keys()].join(' '))
+    problems.push(`blocks ${[...A.blocks.keys()].join(' ')} vs ${[...G.blocks.keys()].join(' ')}`);
+  for (const [name, g] of G.blocks) {
+    const a = A.blocks.get(name);
+    if (!a) continue;
+    const off = offsets[idOf(name)];
+    const sh = (p: PtMm) => ({ x: p.x + off.dx, y: p.y + off.dy });
+    for (const layer of ['1', '14', '7', '8']) {
+      const gl = g.filter((e) => e.layer === layer && e.type !== 'TEXT');
+      const al = a.filter((e) => e.layer === layer && e.type !== 'TEXT');
+      const same =
+        gl.length === al.length &&
+        gl.every(
+          (e, i) =>
+            e.pts.length === al[i].pts.length && e.pts.every((p, k) => near(sh(p), al[i].pts[k])),
+        );
+      if (!same) problems.push(`${name} L${layer}: ${al.length} entities vs golden ${gl.length}`);
+    }
+    // golden POINT (position, 50 inward angle, 30 depth) = our LINE (start, direction, length)
+    const gn = g.filter((e) => e.layer === '4');
+    const an = a.filter((e) => e.layer === '4');
+    const notchOk =
+      gn.length === an.length &&
+      gn.every((e, i) => {
+        const l = an[i];
+        if (l.type !== 'LINE' || l.pts.length !== 2) return false;
+        const [p, q] = l.pts;
+        const depth = Math.hypot(q.x - p.x, q.y - p.y);
+        const ang = (Math.atan2(q.y - p.y, q.x - p.x) * 180) / Math.PI;
+        const dAng = Math.abs(((((ang - (e.angleDeg ?? 0)) % 360) + 540) % 360) - 180);
+        return near(sh(e.pts[0]), p) && Math.abs(depth - (e.z ?? 0)) < 1e-4 && dAng < 1e-3;
+      });
+    if (!notchOk) problems.push(`${name} notches differ (${an.length} vs golden ${gn.length})`);
+    const ga = attrs(g);
+    const aa = attrs(a);
+    for (const k of ['piece name', 'size', 'quantity', 'material'])
+      if (ga.get(k) !== aa.get(k)) problems.push(`${name} ${k}: "${aa.get(k)}" vs "${ga.get(k)}"`);
+  }
+  return problems.slice(0, 10);
+}
+
 // ── main ───────────────────────────────────────────────────────────────────────────────────
 
 export async function main(opts: { plans: string }): Promise<number> {
@@ -774,12 +837,14 @@ export async function main(opts: { plans: string }): Promise<number> {
       { embed: null, now: NOW },
     );
     const golden12 = fs.readFileSync(path.join(opts.plans, 'k2-work/golden-min-r12.dxf'), 'latin1');
-    const p12 = compareGolden(d12.bareText, golden12, d12.plan.offsets, idOf, '15', (v) =>
-      v.startsWith('STYLE NAME:'),
-    );
+    // W3: the R12 skeleton is now AAMA-complete (TABLES, LINE notches, mixed-case attributes, layer
+    // 13 drills, layer 15 annotation), so K2's CLO-AAMA golden is compared by MEANING: the same
+    // blocks, the same cut / seam / grain / internal geometry, notches at the same place pointing
+    // the same way with the same depth, the same attribute values.
+    const p12 = compareGoldenR12(d12.bareText, golden12, d12.plan.offsets, idOf);
     ck(
       p12.length === 0,
-      'R12: tag-by-tag equal to golden-min-r12.dxf (STYLE NAME aside)',
+      'R12: same blocks, geometry, notches and attribute values as golden-min-r12.dxf',
       p12.join(' | '),
     );
   }
@@ -943,6 +1008,265 @@ export async function main(opts: { plans: string }): Promise<number> {
       refused = true;
     }
     ck(refused, 'mergeDxfSheets refuses R12 (expected — card path is R2000)');
+
+    // W3 — AAMA completeness of the R12 the wizard writes
+    const scope: DraftScopeTarget = {
+      ...MAIN,
+      label: 'main fabric · Лоден «Альпы» 450 g/m² · Größe',
+    };
+    const w3Specs = mainSpecs.map((p) =>
+      p.identity === 'SL' ? { ...p, displayName: 'sleeve' } : p,
+    );
+    const w3 = await writeAndGate(job(scope, w3Specs, 'r12'), gateCtx(w3Specs));
+    fs.writeFileSync(path.join(sampleDir, 'main-r12-aama.dxf'), w3.dxfText, 'latin1');
+    ck(w3.report.passed, 'W3 R12 with a Cyrillic fabric label: gate passes', summary(w3.report));
+    const P = pairsOf(w3.detail.bareText);
+    const declared = new Set<string>();
+    const used = new Set<string>();
+    let sec = '';
+    let ent = '';
+    for (let i = 0; i < P.length; i++) {
+      const [c, v] = P[i];
+      const code = Number(c);
+      if (code === 0) ent = v;
+      if (code === 2 && ent === 'SECTION') sec = v;
+      if (sec === 'TABLES' && ent === 'LAYER' && code === 2) declared.add(v);
+      if ((sec === 'BLOCKS' || sec === 'ENTITIES') && code === 8) used.add(v);
+    }
+    ck(
+      [...used].every((l) => declared.has(l)) &&
+        ['1', '4', '6', '7', '8', '13', '14', '15'].every((l) => declared.has(l)) &&
+        /\r\n  0\r\nTABLE\r\n  2\r\nLTYPE\r\n/.test(w3.detail.bareText) &&
+        /\r\n  0\r\nTABLE\r\n  2\r\nSTYLE\r\n/.test(w3.detail.bareText),
+      'W3 TABLES: LTYPE, STYLE and every layer an entity names (AAMA 1 4 6 7 8 13 14 15)',
+      `declared ${[...declared].join(',')} · used ${[...used].sort().join(',')}`,
+    );
+    ck(
+      !w3.detail.bareText.includes('\\U+') && isAsciiDxf(w3.detail.bareText),
+      'W3 R12 text is ASCII by transliteration — no \\U+ escapes',
+    );
+    const raw3 = readRawDxf(w3.dxfText);
+    const bpM = raw3.blocks.get('BP_M')!;
+    const txt = (layer: string) =>
+      bpM.filter((e) => e.type === 'TEXT' && e.layer === layer).map((e) => e.text ?? '');
+    ck(
+      JSON.stringify(txt('1')) ===
+        JSON.stringify([
+          'Piece Name: BP',
+          'Size: M',
+          'Quantity: 1',
+          'Material: Loden "Alpy" 450 g/m2 - Grosse',
+          'Category: main fabric',
+          'Annotation: UNFOLDED',
+        ]),
+      'W3 layer 1 text = the AAMA piece attributes (readable material, category, annotation)',
+      JSON.stringify(txt('1')),
+    );
+    ck(
+      bpM.filter((e) => e.layer === '1' && e.type !== 'TEXT').length === 1 &&
+        bpM.filter((e) => e.layer === '1' && e.type !== 'TEXT')[0].closed,
+      'W3 layer 1 geometry is the boundary only (one closed POLYLINE)',
+    );
+    const slM = raw3.blocks.get('SL_M')!;
+    ck(
+      JSON.stringify(slM.filter((e) => e.layer === '15').map((e) => e.text)) === '["sleeve"]' &&
+        slM.filter((e) => e.layer === '4').every((e) => e.type === 'LINE') &&
+        slM.filter((e) => e.layer === '4').length === 3,
+      'W3 layer 15 = the human name; notches = LINEs on layer 4',
+      JSON.stringify(slM.filter((e) => e.layer === '15').map((e) => e.text)),
+    );
+    ck(
+      bpM.filter((e) => e.layer === '13' && e.type === 'POINT').length === 1 &&
+        bpM.filter((e) => e.layer === '6').length === 0,
+      'W3 drill = POINT on layer 13 (+ CLO square on 8); an unfolded piece has no mirror line',
+    );
+    // the card reads the R12 exactly as the R2000 of the same pieces (pieces, sizes, grain, notches)
+    const r2 = await roundTrip(main.dxfText);
+    const r1 = await roundTrip(w3.dxfText);
+    const sig = (pp: typeof r1.pieces) =>
+      pp
+        .map(
+          (q) =>
+            `${q.blockName}|${q.layer}|${Math.round((q.areaCm2 ?? 0) * 100)}|${(q.grain ?? [])
+              .map((g) => `${g.layer}:${Math.round(g.angleDeg)}`)
+              .join(',')}|${
+              (q.inner ?? []).filter((x) => x.layer === '4').length
+            }|${(q.inner ?? []).filter((x) => x.layer === '8').length}`,
+        )
+        .sort()
+        .join('\n');
+    ck(
+      sig(r1.pieces) === sig(r2.pieces) && r1.blockNames.length === r2.blockNames.length,
+      'W3 the card reads the R12 like the R2000: same pieces, areas, grain, notches, internal lines',
+      sig(r1.pieces) === sig(r2.pieces) ? `${r1.pieces.length} pieces` : 'differs',
+    );
+    // …and our own DXF reader (re-import) reads it like the R2000: identity, size, quantity, cut,
+    // seam, grain, notches, drills (the square and its layer-13 POINT are ONE drill), annotation
+    const segOf = async (t: string) => {
+      const bytes = new TextEncoder().encode(t);
+      const read = await readDxf(
+        { id: '0', name: 'w3.dxf', bytes: bytes.buffer.slice(0) as ArrayBuffer },
+        { sagittaMm: 0.05, keepFills: true },
+      );
+      return segmentDxf(read).pieces.map(
+        (q) =>
+          `${q.block}|${q.identity}|${q.size}|${q.labels.quantity}|${Math.round(q.cut?.areaMm2 ?? 0)}|${Math.round(q.seam?.areaMm2 ?? 0)}|${q.grain ? 'g' : '-'}|${q.notches.length}|${q.drills.length}`,
+      );
+    };
+    const s12 = await segOf(w3.dxfText);
+    const s20 = await segOf(main.dxfText);
+    ck(
+      s12.join(';') === s20.join(';') && s12.length > 0,
+      'W3 our DXF reader reads the R12 like the R2000 (identity, size, qty, cut, seam, grain, notches, ONE drill per hole)',
+      s12.join(';') === s20.join(';')
+        ? `${s12.length} blocks`
+        : `${s12.slice(0, 2).join(' ')} vs ${s20.slice(0, 2).join(' ')}`,
+    );
+    // a fold piece written as its HALF: the fold line is the AAMA mirror line (layer 6) + CUT ON FOLD
+    const half = { ...bpSpec(), unfoldedFold: false };
+    const wh = writeDxfDetailed(job(MAIN, [half], 'r12'), { embed: null, now: NOW });
+    const hM = readRawDxf(wh.bareText).blocks.get('BP_M')!;
+    ck(
+      hM.filter((e) => e.layer === '6').length === 1 &&
+        hM.filter((e) => e.layer === '6')[0].pts.length === 3 &&
+        hM.some((e) => e.layer === '15' && e.text === 'CUT ON FOLD') &&
+        hM.filter((e) => e.layer === '8' && !e.closed).length === 1,
+      'W3 a half (not unfolded): fold line on layer 6 (3 points: never a grain candidate) + CUT ON FOLD',
+    );
+  }
+
+  // W1 ─────────────────────────────────────────────────────────────────────────────────────
+  head(
+    'W1 · one INSERT per block; × per garment only as the AAMA QUANTITY label (old files: N, not N×N)',
+  );
+  {
+    const fac: PieceSpec = { ...slSpec('FAC'), piecesPerGarment: 4 };
+    const specs = [...mainSpecs, fac];
+    const ppg = new Map(specs.map((p) => [p.identity, p.piecesPerGarment]));
+    ppg.set('FP_R', ppg.get('FP_L')!);
+    const cutCount = (pieces: { blockName?: string; layer?: string }[]) => {
+      const m = new Map<string, number>();
+      for (const p of pieces)
+        if (p.layer === '1' && p.blockName) m.set(p.blockName, (m.get(p.blockName) ?? 0) + 1);
+      return m;
+    };
+    /** The pre-W1 writer's ENTITIES: every block inserted × per garment (copy columns at x = k·5000). */
+    const oldStyle = (text: string, blockQty: (b: string) => number) => {
+      const P = pairsOf(text);
+      const out: Pair[] = [];
+      let inEnt = false;
+      let extra: Pair[] = [];
+      let h = 0xf0000;
+      for (let i = 0; i < P.length; i++) {
+        const [c, v] = P[i];
+        if (c.trim() === '2' && i > 0 && P[i - 1][0].trim() === '0' && P[i - 1][1] === 'SECTION')
+          inEnt = v === 'ENTITIES';
+        if (inEnt && c.trim() === '0' && v === 'INSERT') {
+          let j = i + 1;
+          while (j < P.length && P[j][0].trim() !== '0') j++;
+          const ins = P.slice(i, j);
+          const name = ins.find((q) => q[0].trim() === '2')![1];
+          for (let k = 1; k < blockQty(name); k++)
+            extra.push(
+              ...ins.map(
+                ([cc, vv]): Pair =>
+                  cc.trim() === '10'
+                    ? [cc, (k * 5000).toFixed(6)]
+                    : cc.trim() === '5'
+                      ? [cc, (h++).toString(16).toUpperCase()]
+                      : [cc, vv],
+              ),
+            );
+        }
+        if (inEnt && c.trim() === '0' && v === 'ENDSEC') {
+          out.push(...extra);
+          extra = [];
+          inEnt = false;
+        }
+        out.push([c, v]);
+      }
+      return textOf(out);
+    };
+    for (const dialect of ['r2000', 'r12'] as const) {
+      const w = keep(
+        `W1 ${dialect}`,
+        await writeAndGate(job(MAIN, specs, dialect), gateCtx(specs)),
+      );
+      ck(
+        w.report.passed,
+        `${dialect}: gate passes (G1 reads × per garment back)`,
+        summary(w.report),
+      );
+      const raw = readRawDxf(w.dxfText);
+      const blocks = w.detail.plan.blocks;
+      ck(
+        raw.inserts.length === blocks.length && new Set(raw.inserts).size === raw.inserts.length,
+        `${dialect}: exactly one INSERT per block`,
+        `${raw.inserts.length} inserts, ${blocks.length} blocks`,
+      );
+      const qtyOk = blocks.every((b) =>
+        (raw.blocks.get(b.name) ?? []).some(
+          (e) =>
+            e.type === 'TEXT' &&
+            new RegExp(`^quantity: ${ppg.get(b.identity)}$`, 'i').test(e.text ?? ''),
+        ),
+      );
+      ck(qtyOk, `${dialect}: every block labels its × per garment as QUANTITY`);
+      const rt = await roundTrip(w.dxfText);
+      const got = cutCount(rt.pieces);
+      const wrong = blocks.filter((b) => got.get(b.name) !== ppg.get(b.identity));
+      ck(
+        wrong.length === 0,
+        `${dialect}: the card reads × per garment per block (FAC ×4, SL ×2, PCK ×2, FP_L/FP_R ×${ppg.get('FP_L')}, BP ×${ppg.get('BP')})`,
+        wrong.map((b) => `${b.name} ${got.get(b.name)}≠${ppg.get(b.identity)}`).join(' '),
+      );
+      // an OLD file of ours: N inserts + QUANTITY N → N, never N×N
+      const old = oldStyle(w.dxfText, (n) => ppg.get(blocks.find((b) => b.name === n)!.identity)!);
+      const rtOld = await roundTrip(old);
+      const gotOld = cutCount(rtOld.pieces);
+      const wrongOld = blocks.filter((b) => gotOld.get(b.name) !== ppg.get(b.identity));
+      ck(
+        readRawDxf(old).inserts.length > blocks.length && wrongOld.length === 0,
+        `${dialect}: an old file (N inserts + QUANTITY N) still reads ×N on the card`,
+        wrongOld.map((b) => `${b.name} ${gotOld.get(b.name)}≠${ppg.get(b.identity)}`).join(' '),
+      );
+      // a QUANTITY label edited after conversion: the card does not trust the manifest any more
+      const edited = w.dxfText.replace(/(QUANTITY: )4\r\n/i, '$19\r\n');
+      const rtEd = await roundTrip(edited);
+      ck(
+        edited !== w.dxfText &&
+          rtEd.warnings.some((x) => /not trusted.*cut ×9 in the drawing, declared ×4/.test(x)),
+        `${dialect}: a QUANTITY label edited after conversion → the manifest is not trusted`,
+        rtEd.warnings.join(' | ').slice(0, 200),
+      );
+      // our own DXF reader (re-import): the cut count reaches semantics as drawn copies
+      for (const [label, t] of [
+        ['new', w.dxfText],
+        ['old', old],
+      ] as const) {
+        const bytes = new TextEncoder().encode(t);
+        const read = await readDxf(
+          { id: '0', name: `w1-${label}.dxf`, bytes: bytes.buffer.slice(0) as ArrayBuffer },
+          { sagittaMm: 0.05, keepFills: true },
+        );
+        const seg = segmentDxf(read);
+        const bad = seg.pieces.filter((p) => (p.instances ?? 1) !== ppg.get(p.identity));
+        ck(
+          seg.pieces.length === blocks.length && bad.length === 0,
+          `${dialect}: our DXF reader takes × per garment from a ${label} file (instances = ppg)`,
+          `${seg.pieces.length} pieces; ${bad.map((p) => `${p.block} ${p.instances ?? 1}`).join(' ')}`,
+        );
+      }
+    }
+    // control: a foreign file (no manifest, no AUTHOR: GRBPWR) is read as before — its labels are
+    // another CAD's statement, the inserts count
+    const bare = writeDxfDetailed(job(MAIN, specs, 'r2000'), { embed: null, now: NOW });
+    const rtBare = await roundTrip(bare.bareText);
+    const gotBare = cutCount(rtBare.pieces);
+    ck(
+      bare.plan.blocks.every((b) => gotBare.get(b.name) === 1),
+      'control: a foreign R2000 file (no manifest) — inserts count, labels not trusted (×1 each)',
+    );
   }
 
   // T6 ─────────────────────────────────────────────────────────────────────────────────────
@@ -1286,6 +1610,47 @@ export async function main(opts: { plans: string }): Promise<number> {
       'G6-offset',
       (await writeAndGate(job(MAIN, [sl2]), gateCtx([sl2]))).report,
     );
+    // W2: G6 reads the FILE's cut line against the mitred offset of its seam line
+    const withCut = (f: (seam: PtMm[]) => PtMm[]) => {
+      const x = slSpec();
+      x.sizes = x.sizes.map((s) => ({ ...s, cut: f(s.seam!) }));
+      return x;
+    };
+    const bevel = withCut((seam) => offsetContour(seam, 10, { miterLimit: 0.5 }).pts);
+    await neg(
+      'W2 cut corners bevelled inside the allowance (report lies)',
+      'G6-offset',
+      (await writeAndGate(job(MAIN, [bevel]), gateCtx([bevel]))).report,
+    );
+    const over = withCut((seam) => {
+      const c = offsetContour(seam, 10).pts;
+      // push the cut line's farthest corner 5 mm further out along its own direction
+      let k = 0;
+      for (let i = 1; i < c.length; i++) if (c[i].y > c[k].y) k = i;
+      return c.map((p, i) => (i === k ? { x: p.x, y: p.y + 5 } : p));
+    });
+    await neg(
+      'W2 a cut corner overshoots its mitre by 5 mm (report lies)',
+      'G6-offset',
+      (await writeAndGate(job(MAIN, [over]), gateCtx([over]))).report,
+    );
+    for (const [what, sp] of [
+      [
+        'W2 mitred cut (the writer’s own) passes G6',
+        withCut((seam) => offsetContour(seam, 10).pts),
+      ],
+      [
+        'W2 an old round-join cut still passes G6 (inside the mitre, never closer)',
+        withCut((seam) => offsetContour(seam, 10, { join: 'round' }).pts),
+      ],
+    ] as const) {
+      const rep = (await writeAndGate(job(MAIN, [sp]), gateCtx([sp]))).report;
+      ck(
+        rep.checks.some((c) => c.id === 'G6-offset' && c.ok),
+        what,
+        rep.checks.find((c) => c.id === 'G6-offset')?.note ?? '',
+      );
+    }
   }
   {
     const bp = bpSpec();

@@ -106,8 +106,9 @@ export function bareOf(dxfText: string, createdAt: string): string {
     }
     out.push(lines[i]);
   }
-  // the R12 (AAMA) header prints the creation time again, as «CREATION DATE: dd-mm-yyyy» / «… TIME:»
-  const text = out.map((l) => l.replace(/^(CREATION (?:DATE|TIME):).*$/, '$1')).join('\n');
+  // the R12 (AAMA) header prints the creation time again, as «Creation Date: dd-mm-yyyy» / «… Time:»
+  // (upper case in files written before W3 — either spelling)
+  const text = out.map((l) => l.replace(/^(CREATION (?:DATE|TIME):).*$/i, '$1')).join('\n');
   return createdAt ? text.split(createdAt).join('') : text;
 }
 

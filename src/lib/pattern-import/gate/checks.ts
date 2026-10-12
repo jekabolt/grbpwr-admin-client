@@ -44,6 +44,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { foldShapeProblem } from '../semantics/fold';
+import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
@@ -172,11 +173,20 @@ export function g1(ctx: GateCtx): GateCheck {
   if (missing.length) notes.push(`not in file: ${missing.join(', ')}`);
   if (extra.length) notes.push(`not in manifest: ${extra.join(', ')}`);
   failed.push(...missing, ...extra);
+  const ppgOf = new Map(ctx.m.pieces.map((p) => [ci(p.identity), p.piecesPerGarment]));
   for (const { block, mb } of ctx.blocks) {
     const layers = ctx.contours.get(block);
     if (!layers?.has(LAYERS.cut)) {
       failed.push(block);
       notes.push(`${block}: no closed contour on layer 1`);
+    }
+    // W1: the card counts a piece by its cut-layer contours (one per instance). One INSERT per block
+    // + the AAMA `QUANTITY:` label must read back as exactly × per garment — not 1, not N×N.
+    const ppg = Math.max(1, Math.floor(ppgOf.get(ci(mb.identity)) ?? 1));
+    const read = (ctx.rtByBlock.get(block) ?? []).filter((p) => p.layer === LAYERS.cut).length;
+    if (layers?.has(LAYERS.cut) && read !== ppg) {
+      failed.push(block);
+      notes.push(`${block}: the card reads ×${read}, the piece is cut ×${ppg} per garment`);
     }
     // K1 obligation 13: layers 14 and 1 always as a pair (no seam = the card adds allowance again).
     if (!mb.hasSeam) {
@@ -591,6 +601,10 @@ export function g15(ctx: GateCtx): DerivedVerdict {
 
 // ── G5 ─────────────────────────────────────────────────────────────────────────────────────
 
+/** W3: AAMA layers the R12 writer adds (write/r12.ts). */
+const AAMA_MIRROR_LAYER = '6';
+const AAMA_DRILL_LAYER = '13';
+
 export function g5(ctx: GateCtx): GateCheck {
   const failed: string[] = [];
   const notes: string[] = [];
@@ -608,10 +622,10 @@ export function g5(ctx: GateCtx): GateCheck {
       continue;
     }
     const cut = rawCut(ctx, b.block);
-    // notches
-    const notches = onLayer(ents, LAYERS.notch).filter((e) =>
-      r12 ? e.type === 'POINT' : e.type === 'LINE',
-    );
+    // notches: one LINE from the cut line inward in both dialects (W3: AAMA layer 4 slit notch)
+    const notches = onLayer(ents, LAYERS.notch).filter((e) => e.type === 'LINE');
+    if (onLayer(ents, LAYERS.notch).length !== notches.length)
+      bad('layer 4 carries something other than notch LINEs');
     if (notches.length !== s.notches.length)
       bad(`notches ${notches.length} ≠ source ${s.notches.length}`);
     if (b.mb.notches !== notches.length)
@@ -621,7 +635,7 @@ export function g5(ctx: GateCtx): GateCheck {
         const d = closestOnPolyline(n.pts[0], cut, true).d;
         if (d > PATIMPORT.snapMm) bad(`notch ${d.toFixed(2)} mm off the cut line`);
       }
-      const depth = r12 ? n.z ?? 0 : n.pts.length === 2 ? dist(n.pts[0], n.pts[1]) : 0;
+      const depth = n.pts.length === 2 ? dist(n.pts[0], n.pts[1]) : 0;
       if (!(depth > 0 && depth < 10)) bad(`notch depth ${depth.toFixed(2)} mm (must be < 1 cm)`);
     }
     // grain: exactly one L7 entity; R2000 = CLO 3-vertex arrow, R12 = 2-point LINE, 180 mm shaft
@@ -663,7 +677,26 @@ export function g5(ctx: GateCtx): GateCheck {
     // drills / internal (layer 8)
     const l8 = onLayer(ents, LAYERS.internal).filter(isPoly);
     const drills = l8.filter(isDrill);
-    const internal = l8.filter((e) => !isDrill(e));
+    // W3 (R12): a half's fold line is the AAMA mirror line on layer 6 — still one of the piece's
+    // internal lines for the manifest; every drill square has its AAMA drill POINT on layer 13
+    const mirror = onLayer(ents, AAMA_MIRROR_LAYER).filter(isPoly);
+    const internal = [...l8.filter((e) => !isDrill(e)), ...mirror];
+    if (r12) {
+      const holes = onLayer(ents, AAMA_DRILL_LAYER).filter((e) => e.type === 'POINT');
+      const unmatched = drills.filter((q) => {
+        const xs = q.pts.map((p) => p.x);
+        const ys = q.pts.map((p) => p.y);
+        const c = {
+          x: (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+        return !holes.some((h) => h.pts[0] && dist(h.pts[0], c) <= 0.01);
+      });
+      if (holes.length !== drills.length || unmatched.length)
+        bad(`drill POINTs on layer 13: ${holes.length}, drill squares: ${drills.length}`);
+      if (mirror.length !== (s.fold && !b.spec.unfoldedFold ? 1 : 0))
+        bad(`${mirror.length} mirror line(s) on layer 6 (a half's fold line only)`);
+    }
     if (drills.length !== s.drills.length)
       bad(`drills ${drills.length} ≠ source ${s.drills.length}`);
     const wantInternal = s.internal.length + (s.fold ? 1 : 0);
@@ -783,19 +816,18 @@ export function g6(ctx: GateCtx): GateCheck {
         `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`,
       );
     }
-    // Independent parallel-curve check on the FILE: every point of the DERIVED line sits exactly
-    // `allowance` from the line it came from. Upper bound only where the nearest foot is inside a
-    // base edge — at base vertices the join style (round / miter / square) legitimately decides how
-    // far the corner reaches; the lower bound holds everywhere (closer than the allowance = wrong).
+    // Independent check on the FILE (W2): the DERIVED line, read back, is the mitred allowance
+    // offset of the line it came from — never closer than the allowance anywhere (a bitten bay, a
+    // bevelled corner, a hull collapse across a neck), never further except inside a convex corner's
+    // mitre (sides extended to their intersection) or, past MITER_LIMIT × allowance, its square cut.
+    // A round join's arc stays inside the mitre and passes; a lobe or a corner overshoot does not.
     const allowance = spec.allowance.allowanceMm;
-    const idx = new SegmentIndex([{ pts: baseLine, closed: true }], 5);
-    let dev = 0;
-    for (const p of sampleAlong(derivedLine, true, 1)) {
-      const f = idx.nearestFoot(p, allowance * 3 + 5);
-      const interior = f.t > 1e-6 && f.t < 1 - 1e-6;
-      const e = interior ? Math.abs(f.d - allowance) : Math.max(0, allowance - f.d);
-      dev = Math.max(dev, e);
-    }
+    const dev = parallelDeviation(
+      derivedLine,
+      baseLine,
+      spec.allowance.meaning === 'seam' ? allowance : -allowance,
+      { lenient: true },
+    );
     worstDev = Math.max(worstDev, dev);
     if (dev > OFFSET_MAX_DEV_MM)
       bad(`derived line deviates ${dev.toFixed(3)} mm from a ${allowance} mm parallel`);
@@ -804,9 +836,10 @@ export function g6(ctx: GateCtx): GateCheck {
     'G6-offset',
     failed,
     'block',
-    notes.join('; ') || 'derived lines are true parallel curves (1 loop, no hull collapse)',
+    notes.join('; ') ||
+      'derived lines are mitred allowance offsets (1 loop, no hull collapse, sides parallel, corners = mitre or square cut)',
     fmt(worstDev),
-    `1 loop, no self-intersection, hull < ${OFFSET_HULL_RATIO}, dev ≤ ${OFFSET_MAX_DEV_MM} mm`,
+    `1 loop, no self-intersection, hull < ${OFFSET_HULL_RATIO}, dev ≤ ${OFFSET_MAX_DEV_MM} mm from the mitred offset (limit ${MITER_LIMIT} × allowance)`,
   );
 }
 

@@ -71,7 +71,12 @@ export type PlannedBlock = {
   sizeId: number;
   rank: number;
   quantity: number;
+  /** W3: the fabric as people read it (scope label, e.g. "Loden 450"), never a BOM line ULID. */
   material: string;
+  /** W3: the fabric's role ("main fabric", "lining") — AAMA `Category:`; '' when unknown. */
+  category: string;
+  /** The piece's human name ("front neckline facing") — AAMA annotation text (layer 15). */
+  displayName: string;
   annotation: string[];
   cut: PtMm[];
   seam: PtMm[] | null;
@@ -79,6 +84,12 @@ export type PlannedBlock = {
   internal: { pts: PtMm[]; closed: boolean }[];
   /** How many of `internal` are the fold line (0/1) — the manifest counts both as internal. */
   foldLines: number;
+  /**
+   * W3: the fold line is a MIRROR line — the piece is written as the half (not unfolded): AAMA
+   * layer 6, the importer mirrors the half across it. False for an unfolded piece, whose fold line
+   * is only a reference (layer 8): a mirror line there would double the piece.
+   */
+  foldIsMirror: boolean;
   drills: PtMm[];
   grain: PlannedGrain | null;
   notches: PlannedNotch[];
@@ -230,6 +241,30 @@ function densifyOpen2(pts: PtMm[]): PtMm[] {
   return [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b];
 }
 
+/**
+ * W3 (ULMUS-DIAG §5.7, A9): what the cutter reads as `Material:` and `Category:`. The scope label is
+ * "<role> · <fabric names>" (nesting/scope-label.ts: "main fabric · Loden 450", "lining · Cupro"):
+ * the names are the material, the role the category. A label without names is both. The BOM
+ * line key / purpose enum is the last resort, never the first (a ULID means nothing on the floor).
+ */
+export function fabricWords(scope: DraftScopeTarget): { material: string; category: string } {
+  const label = (scope.label ?? '').trim();
+  const purpose = (scope.fabricPurpose ?? '').replace(/^TECH_CARD_BOM_PURPOSE_/, '');
+  const section = (scope.sections ?? [])
+    .map((x) => x.replace(/^TECH_CARD_BOM_SECTION_/, ''))
+    .find(Boolean);
+  const words = (x: string) => x.toLowerCase().replace(/_/g, ' ').trim();
+  const cut = label.indexOf(' · ');
+  if (cut > 0)
+    return { material: label.slice(cut + 3).trim(), category: label.slice(0, cut).trim() };
+  if (label) return { material: label, category: label };
+  const role = purpose ? words(purpose) : section ? words(section) : '';
+  return {
+    material: role || scope.bomLineKey || scope.scopeKey,
+    category: role,
+  };
+}
+
 // ── the plan ───────────────────────────────────────────────────────────────────────────────
 
 export function planBlocks(
@@ -303,7 +338,7 @@ export function planBlocks(
   // 5. blocks
   const blocks: PlannedBlock[] = [];
   const specs: PieceSpec[] = [];
-  const material = scope.fabricPurpose || scope.bomLineKey || scope.scopeKey;
+  const { material, category } = fabricWords(scope);
   for (const w of written) {
     const off = offsets[w.spec.identity];
     if (!off) continue;
@@ -350,16 +385,20 @@ export function planBlocks(
       let foldLines = 0;
       if (s.fold) {
         if (!w.spec.unfoldedFold)
-          warnings.push(`${who}: fold line on a piece that is not unfolded`);
+          warnings.push(
+            `${who}: fold line on a piece that is not unfolded — written as a mirror line`,
+          );
         internal.push({ pts: densifyOpen2([s.fold.a, s.fold.b]), closed: false });
         foldLines = 1;
       }
+      const foldIsMirror = foldLines === 1 && !w.spec.unfoldedFold;
       const grain = s.grain ? grainArrow(s.grain) : null;
       if (!grain) warnings.push(`${who}: no grain line`);
       const notches = sNotches.map((n) => plannedNotch(cut, n, warnings, who));
       const annotation: string[] = [];
       if (w.spec.fused) annotation.push('FUSED');
       if (w.spec.unfoldedFold) annotation.push('UNFOLDED');
+      if (foldIsMirror) annotation.push('CUT ON FOLD');
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,
@@ -379,11 +418,14 @@ export function planBlocks(
         rank: s.rank,
         quantity: w.spec.piecesPerGarment,
         material,
+        category,
+        displayName: w.spec.displayName,
         annotation,
         cut,
         seam,
         internal,
         foldLines,
+        foldIsMirror,
         drills: s.drills.map((d) => d.at),
         grain,
         notches,

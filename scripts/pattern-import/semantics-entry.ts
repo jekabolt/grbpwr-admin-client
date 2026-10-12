@@ -20,6 +20,7 @@ import {
   buildPieceSpecsDetailed,
   detectAllowance,
   offsetContour,
+  parallelDeviation,
   readAllowanceText,
   unfoldAreaError,
 } from 'lib/pattern-import/semantics';
@@ -438,14 +439,152 @@ export async function main(): Promise<number> {
       { x: 0, y: 100 },
     ];
     const r = offsetContour(sq, 10);
-    const want = 100 * 100 + 4 * 100 * 10 + Math.PI * 100;
     const b = bboxOf(r.pts);
     ck(
-      Math.abs(areaOf(r.pts) - want) / want < 1e-3 &&
+      Math.abs(areaOf(r.pts) - 120 * 120) < 0.01 &&
+        r.pts.length === 4 &&
         Math.abs(b.minX + 10) < 1e-3 &&
-        Math.abs(b.maxX - 110) < 1e-3,
-      'square +10 mm: area & bbox analytic',
-      `${areaOf(r.pts).toFixed(2)} vs ${want.toFixed(2)} mm², bbox ${b.minX}..${b.maxX}`,
+        Math.abs(b.maxX - 110) < 1e-3 &&
+        r.report.ok &&
+        r.report.maxDeviationMm <= 0.01,
+      'W2 square +10 mm: mitred corners — exactly 120 × 120, 4 vertices, no arc',
+      `${areaOf(r.pts).toFixed(2)} mm², ${r.pts.length} vertices, bbox ${b.minX}..${b.maxX}, dev ${r.report.maxDeviationMm.toFixed(4)}`,
+    );
+    // W2: an L (reflex corner) both ways — every corner sharp, areas analytic
+    const Lsh = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 50 },
+      { x: 50, y: 50 },
+      { x: 50, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const lo = offsetContour(Lsh, 10);
+    const li = offsetContour(Lsh, -10);
+    ck(
+      Math.abs(areaOf(lo.pts) - 11900) < 0.01 &&
+        lo.pts.length === 6 &&
+        Math.abs(areaOf(li.pts) - 3900) < 0.01 &&
+        li.pts.length === 6 &&
+        lo.report.ok &&
+        li.report.ok,
+      'W2 L-shape ±10: reflex corner mitred inward, convex corners outward (11900 / 3900 mm², 6 vertices)',
+      `${areaOf(lo.pts).toFixed(2)} (${lo.pts.length}) / ${areaOf(li.pts).toFixed(2)} (${li.pts.length})`,
+    );
+    // W2: a 20° tip — the mitre would reach 10 / sin 10° = 57.6 mm: square-cut at 4 × 10 mm,
+    // perpendicular to the bisector
+    const tip = [
+      { x: 0, y: -200 * Math.tan((10 * Math.PI) / 180) },
+      { x: 200, y: 0 },
+      { x: 0, y: 200 * Math.tan((10 * Math.PI) / 180) },
+    ];
+    const rt = offsetContour(tip, 10);
+    const reachX = Math.max(...rt.pts.map((p) => p.x));
+    const atCut = rt.pts.filter((p) => Math.abs(p.x - 240) < 1e-6);
+    ck(
+      rt.report.ok &&
+        Math.abs(reachX - 240) < 1e-6 &&
+        atCut.length === 2 &&
+        rt.report.maxDeviationMm <= 0.01,
+      'W2 20° tip +10: square cut at 4 × allowance (x = 240), perpendicular to the bisector',
+      `reach ${reachX.toFixed(3)}, ${atCut.length} points on the cut, dev ${rt.report.maxDeviationMm.toFixed(4)}`,
+    );
+    // W2: a 1.3 mm jog of the seam line (< allowance) is not a corner: no mitre spike, the cut line
+    // climbs the 1.3 mm once and never overshoots it
+    const jog = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 101.3 },
+      { x: 100, y: 101.3 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const rj = offsetContour(jog, 10);
+    const top = rj.pts.filter((p) => p.y > 50 && p.x > -5 && p.x < 205).sort((p, q) => p.x - q.x);
+    const monotone = top.every((p, i) => i === 0 || p.y >= top[i - 1].y - 1e-6);
+    const bb = bboxOf(rj.pts);
+    ck(
+      rj.report.ok &&
+        bb.maxY <= 111.3 + 1e-6 &&
+        monotone &&
+        Math.abs(bb.minX + 10) < 1e-6 &&
+        Math.abs(bb.maxX - 210) < 1e-6,
+      'W2 1.3 mm jog +10: no bump — the cut climbs 1.3 mm once (monotone, top ≤ 111.3), outer corners mitred',
+      `top ${bb.maxY.toFixed(3)}, monotone ${monotone}, bbox x ${bb.minX}..${bb.maxX}`,
+    );
+    // W2: the Ulmus jog (BP_L S) — a ≈ 20° side with a 3 mm flat and a 1 mm riser in it (a fill
+    // artefact). A mitre on the flat/riser corner pushed a ~4 mm spike outward past both sides'
+    // parallels; the cut must stay within the riser's height of them.
+    const sl0 = 0.36;
+    const slanted = [
+      { x: 0, y: 0 },
+      { x: 100, y: 100 * sl0 },
+      { x: 103, y: 100 * sl0 },
+      { x: 103, y: 100 * sl0 + 1 },
+      { x: 300, y: 300 * sl0 + 1 },
+      { x: 300, y: 400 },
+      { x: 0, y: 400 },
+    ];
+    const rs2 = offsetContour(slanted, 10);
+    const nrmL = Math.hypot(1, sl0);
+    const parA = (x: number) => sl0 * x - 10 * nrmL;
+    const parB = (x: number) => sl0 * (x - 103) + 100 * sl0 + 1 - 10 * nrmL;
+    const out2 = Math.max(
+      ...rs2.pts
+        .filter((p) => p.x > 20 && p.x < 280 && p.y < 200)
+        .map((p) => Math.min(parA(p.x), parB(p.x)) - p.y),
+    );
+    ck(
+      rs2.report.ok && out2 <= 1.2,
+      'W2 Ulmus-style jog on a 20° side: the cut stays within the 1 mm riser of the sides’ parallels (no mitre spike)',
+      `max ${out2.toFixed(3)} mm outside both parallels`,
+    );
+    // negative control for the deviation metric: a bevelled corner (chord P+vk → P+vj) sits inside
+    // the allowance at the corner — the mitre-aware check must still see it
+    const bevel = [
+      { x: 0, y: -10 },
+      { x: 100, y: -10 },
+      { x: 110, y: 0 },
+      { x: 110, y: 100 },
+      { x: 100, y: 110 },
+      { x: 0, y: 110 },
+      { x: -10, y: 100 },
+      { x: -10, y: 0 },
+    ];
+    const bevDev = parallelDeviation(bevel, sq, 10);
+    ck(
+      bevDev > 2.5,
+      'negative control: a bevelled corner deviates (closer than the allowance at the corner)',
+      `${bevDev.toFixed(3)} mm`,
+    );
+    // Codex R2: a lobe that stays within the mitre's RADIUS but outside the mitre (r = 12 around
+    // the corner, past both shifted sides) is still a deviation
+    const arc12: PtMm[] = [];
+    for (let k = 0; k <= 20; k++) {
+      const t = (-Math.PI / 2) * (1 - k / 20);
+      arc12.push({ x: 100 + 12 * Math.cos(t), y: 12 * Math.sin(t) });
+    }
+    const round12 = [
+      { x: 0, y: -10 },
+      { x: 100, y: -10 },
+      ...arc12,
+      { x: 110, y: 0 },
+      { x: 110, y: 110 },
+      { x: -10, y: 110 },
+      { x: -10, y: 0 },
+    ];
+    const r12Dev = parallelDeviation(round12, sq, 10);
+    ck(
+      r12Dev > 1,
+      'negative control: an r = 12 lobe inside the mitre radius but past the shifted sides deviates',
+      `${r12Dev.toFixed(3)} mm`,
+    );
+    const lobe = [...r.pts.slice(0, 2), { x: 140, y: 50 }, ...r.pts.slice(2)];
+    const lobeDev = parallelDeviation(lobe, sq, 10);
+    ck(
+      lobeDev > 5,
+      'negative control: a lobe past the mitre reach deviates',
+      `${lobeDev.toFixed(3)} mm`,
     );
     const ri = offsetContour(sq, -10);
     ck(
