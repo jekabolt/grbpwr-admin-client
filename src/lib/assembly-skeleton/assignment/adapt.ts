@@ -67,6 +67,8 @@ export function graphOf(
   summary: SeamAssignmentSummary,
   /** The corresponding edge on the other ply of a pair (solve.ts Board.plyMateOf). */
   plyMateOf: (e: EdgeId) => EdgeId | undefined = () => undefined,
+  /** Composite seams read after the pair solve (composites.ts), appended to `chosen`. */
+  composites: readonly SeamCandidate[] = [],
 ): SeamGraph {
   const { pieces, decisions, rules } = P;
   const chosenC = new Set<PoolCand>();
@@ -130,7 +132,7 @@ export function graphOf(
         },
       });
     }
-  const chosen = [...forced, ...assigned];
+  const chosen = [...forced, ...assigned, ...composites];
 
   const decidedClosures = decisions?.closures ?? [];
   const rejected: SeamCandidate[] = [

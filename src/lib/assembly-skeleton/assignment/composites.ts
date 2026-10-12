@@ -1,0 +1,509 @@
+// COMPOSITE candidates per operation (05-ASSIGNMENT-DESIGN phase 3): what the pair pool cannot see
+// because one side of the seam runs over SEVERAL pieces of a unit the order built earlier — an
+// armhole (front + back), a neckline (front + yoke + front), one placket onto the two pieces of a
+// front (12.10 corpus, card 6: placket 668 onto 124 + 544). Read AFTER the pair solve, operation by
+// operation in the order's sequence: each input's glued boundary (geometry/composite.ts gluedRuns —
+// the free edges walked across the seams chosen inside that input, soft junctions only) gives runs;
+// every contiguous sub-run of parts is a candidate side (the stand's 425 sits on three of the five
+// edges the neckline runs over — the plackets' tops are not under it), a single edge with notches
+// near both ends also as its INNER stretch between two such notches (a stand sewn between its CF
+// notches: 25 … 450 of 475). Sides of two distinct inputs are scored by length (exact, or eased up
+// to SKELETON.lenRelEased), notches read face up (A from its start, B from its end), ends that true
+// up (open runs), and taken best first per operation, each edge once, onto the solver's board.
+//
+// What a composite may claim is bounded by the ORDER: only between inputs of one operation the
+// pair solve left apart (or an operation whose inputs are a tube / ring and the body), never a
+// second seam between inputs already joined.
+
+import { gluedRuns } from '../geometry/composite';
+import { yMidOf } from '../geometry/plies';
+import { cornerTurn, type CandidatePool } from '../geometry/match';
+import {
+  SKELETON,
+  type Edge,
+  type EdgeId,
+  type PieceGeom,
+  type SeamCandidate,
+  type SeamEvidence,
+} from '../types';
+import { roleOf } from './costs';
+import { TUBE_CLASSES, type OpSolution, type Operation } from './model';
+import type { Board } from './solve';
+
+/** A notch this close to an edge's end is an allowance mark: the edge is sewn from it inward. */
+const END_NOTCH_MM = 40;
+/** Longest run (parts) a sub-run is enumerated over (a neckline over nine small back edges). */
+const MAX_PARTS = 14;
+/** Composite ends: summed end error (deg) at which the ends term is 0. */
+const ENDS_SCALE_DEG = 60;
+/** A composite side over several parts pays the pool's chain penalty once. */
+const CHAIN = SKELETON.chainPenalty;
+/**
+ * A tube / ring onto the body (a cap into an armhole, a collar onto a neckline): the order itself
+ * says the two inputs meet along one edge each, so a composite that joins them is worth this on top
+ * of its evidence — and such operations accept down to COMPOSITE_TUBE_ACCEPT (a cap and an armhole
+ * rarely carry agreeing notches).
+ */
+const TUBE_JOIN_BONUS = 0.1;
+const COMPOSITE_TUBE_ACCEPT = 0.55;
+/** The shortest edge a tube / ring meets the body along (a child's armhole is longer). */
+const TUBE_MIN_MM = 250;
+
+type Side = {
+  id: string;
+  parts: Edge[];
+  pieces: Set<string>;
+  lenMm: number;
+  /** Notches, mm from the side's start (over the sewn stretch). */
+  notchesMm: number[];
+  closed: boolean;
+  turnStart: number;
+  turnEnd: number;
+  hand: PieceGeom['hand'];
+  /** Inner stretch of a single edge (mm from the edge's start), when not the whole edge. */
+  range?: [number, number];
+};
+
+type Comp = { a: Side; b: Side; score: number; evidence: SeamEvidence; ia: number; ib: number };
+
+const pkOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
+const ladder = (err: number): 0 | 0.3 | 0.7 | 1 =>
+  err <= SKELETON.notchTolMm ? 1 : err <= 8 ? 0.7 : err <= 15 ? 0.3 : 0;
+
+/** Sides of one input: the glued runs' sub-runs and the free single edges (with inner stretches). */
+function sidesOf(
+  pieces: readonly PieceGeom[],
+  seams: readonly SeamCandidate[],
+  free: (id: EdgeId) => boolean,
+  secondPly: (k: string) => boolean,
+): Side[] {
+  const geom = new Map(pieces.map((p) => [p.pieceKey, p]));
+  const out: Side[] = [];
+  const handOf = (parts: Edge[]) => {
+    const hs = new Set(parts.map((e) => geom.get(e.pieceKey)?.hand ?? null));
+    hs.delete(null);
+    return hs.size === 1 ? [...hs][0] : null;
+  };
+  const emit = (parts: Edge[], closed: boolean, turnStart: number, turnEnd: number) => {
+    if (parts.some((e) => !free(e.id))) return;
+    const notchesMm: number[] = [];
+    let at = 0;
+    for (const e of parts) {
+      for (const d of e.notchesMm) notchesMm.push(at + d);
+      at += e.lenMm;
+    }
+    if (at < SKELETON.minSeamMm) return;
+    out.push({
+      id: parts.map((e) => e.id).join('|'),
+      parts,
+      pieces: new Set(parts.map((e) => e.pieceKey)),
+      lenMm: at,
+      notchesMm,
+      closed,
+      turnStart,
+      turnEnd,
+      hand: handOf(parts),
+    });
+  };
+  const turnAt = (e: Edge, end: 's' | 'e') => {
+    const p = geom.get(e.pieceKey);
+    return p ? cornerTurn(p, end === 's' ? e.s : e.e) : 0;
+  };
+  // Glued runs and every contiguous sub-run of their parts (closed runs wrap).
+  for (const r of gluedRuns(pieces, seams)) {
+    const n = Math.min(r.parts.length, MAX_PARTS);
+    if (r.closed) emit(r.parts, true, 0, 0);
+    for (let i = 0; i < r.parts.length; i++)
+      for (let len = 1; len <= n; len++) {
+        if (!r.closed && i + len > r.parts.length) break;
+        if (r.closed && len >= r.parts.length) break;
+        const parts = Array.from({ length: len }, (_, k) => r.parts[(i + k) % r.parts.length]);
+        // The run's own ends are junctions we know; a sub-run's cut end is a seam's end — the
+        // boundary turn there is the piece's corner.
+        emit(parts, false, turnAt(parts[0], 's'), turnAt(parts[parts.length - 1], 'e'));
+      }
+  }
+  const seen = new Set(out.map((s) => s.id));
+  // A single edge whose two neighbours are sewn to each other (the sleeve's underarm, a self seam)
+  // is a closed loop — the cap; it meets the armhole loop.
+  const selfSeams = seams.filter((c) => pkOf(c.a) === pkOf(c.b) && !c.aParts && !c.bParts);
+  const cappedBy = (p: PieceGeom, e: Edge) =>
+    selfSeams.some((c) => {
+      if (pkOf(c.a) !== p.pieceKey) return false;
+      const ea = p.edges.find((x) => x.id === c.a);
+      const eb = p.edges.find((x) => x.id === c.b);
+      if (!ea || !eb) return false;
+      const touches = (x: Edge) => x.e === e.s || x.s === e.e;
+      return touches(ea) && touches(eb);
+    });
+  // Single free edges (also those of a one-piece input and inside no run), and their inner
+  // stretches between a notch near each end.
+  for (const p of pieces) {
+    if (secondPly(p.pieceKey)) continue;
+    // A placket's sewing edge is the one its drills (buttons, buttonholes) are measured from; its
+    // other long edge, unmarked, is the fold.
+    const marked = new Set(
+      (p.marks ?? [])
+        .filter((m) => (m.kind === 'drill' || m.kind === 'buttonhole') && m.nearEdge)
+        .map((m) => m.nearEdge!.edge),
+    );
+    const isPlacket = roleOf(p) === 'placket';
+    for (const e of p.edges) {
+      if (e.kind !== 'edge' || !free(e.id)) continue;
+      if (
+        isPlacket &&
+        !marked.has(e.id) &&
+        p.edges.some(
+          (x) => x !== e && marked.has(x.id) && Math.abs(x.lenMm - e.lenMm) <= 0.02 * e.lenMm,
+        )
+      )
+        continue;
+      if (!seen.has(e.id)) {
+        const capped = cappedBy(p, e);
+        emit([e], capped, capped ? 0 : cornerTurn(p, e.s), capped ? 0 : cornerTurn(p, e.e));
+      }
+      const heads = e.notchesMm.filter((d) => d <= END_NOTCH_MM);
+      const tails = e.notchesMm.filter((d) => d >= e.lenMm - END_NOTCH_MM);
+      for (const h of heads)
+        for (const t of tails) {
+          if (t - h < SKELETON.minSeamMm) continue;
+          out.push({
+            id: `${e.id}@${Math.round(h)}-${Math.round(t)}`,
+            parts: [e],
+            pieces: new Set([p.pieceKey]),
+            lenMm: t - h,
+            notchesMm: e.notchesMm.filter((d) => d > h && d < t).map((d) => d - h),
+            closed: false,
+            turnStart: 0,
+            turnEnd: 0,
+            hand: p.hand,
+            range: [h, t],
+          });
+        }
+    }
+  }
+  return out;
+}
+
+/** Notch agreement of two open sides read face up (b from its end): 1 / 0.7 / 0.3 / 0; 0.5 = none. */
+function notches(
+  a: Side,
+  b: Side,
+): { ns: number; matched: number; said: 0 | 0.3 | 0.7 | 1 | null } {
+  const na = a.notchesMm;
+  const nb = b.notchesMm.map((d) => b.lenMm - d).reverse();
+  if (na.length === 0 && nb.length === 0) return { ns: 0.5, matched: 0, said: null };
+  if (na.length === 0 || nb.length === 0) return { ns: 0.4, matched: 0, said: 0 };
+  // Scale b onto a (an eased side): positions as shares, errors in a's mm.
+  const scale = a.lenMm / b.lenMm;
+  const hit = (d: number) => nb.some((x) => Math.abs(x * scale - d) <= 8);
+  const matched = na.filter(hit).length;
+  if (na.length === nb.length) {
+    const err = Math.max(...na.map((d, i) => Math.abs(d - nb[i] * scale)));
+    const l = ladder(err);
+    if (l >= 0.7) return { ns: l, matched: na.length, said: l };
+  }
+  // The end notches agree (ease spread over the middle).
+  const ends = ladder(
+    Math.max(
+      Math.abs(na[0] - nb[0] * scale),
+      Math.abs(a.lenMm - na[na.length - 1] - (b.lenMm - b.notchesMm[0]) * scale),
+    ),
+  );
+  if (ends >= 0.7) return { ns: 0.7, matched: Math.max(matched, 2), said: 0.7 };
+  const share = matched / Math.max(na.length, nb.length);
+  const said: 0 | 0.3 | 0.7 | 1 = share >= 0.66 ? 0.7 : share > 0 ? 0.3 : 0;
+  return { ns: said, matched, said };
+}
+
+function scoreSides(
+  a: Side,
+  b: Side,
+  tube: boolean,
+  label: string,
+  geom: ReadonlyMap<string, PieceGeom>,
+): Comp | null {
+  if (a.closed !== b.closed) return null;
+  for (const k of a.pieces) if (b.pieces.has(k)) return null;
+  if (a.hand && b.hand && a.hand !== b.hand) return null;
+  // Twins (the two plies of a stand, the left and the right front) meet as the pool's pairs, never
+  // as a composite; an inner stretch (a stand between its CF notches) only onto a run over pieces.
+  for (const k of a.pieces) if (geom.get(k)?.twinOf.some((t) => b.pieces.has(t.key))) return null;
+  if (a.range && b.range) return null;
+  if ((a.range && b.parts.length < 2) || (b.range && a.parts.length < 2)) return null;
+  const dLenMm = Math.abs(a.lenMm - b.lenMm);
+  const relLen = dLenMm / Math.max(a.lenMm, b.lenMm);
+  if (relLen > SKELETON.lenRelEased) return null;
+  const exact = dLenMm <= SKELETON.lenAbsMm || relLen <= SKELETON.lenRel;
+  const lenScore = exact ? 1 : 0.5;
+  let ns: number;
+  let said: SeamEvidence['notchScore'];
+  let matched = 0;
+  let endsTerm = 1;
+  if (a.closed) {
+    // A loop has no start to read notches from: equal counts are all a loop can say — and a cap's
+    // extra marks (shoulder point, front / back) are no evidence against its armhole.
+    said =
+      a.notchesMm.length + b.notchesMm.length === 0
+        ? null
+        : a.notchesMm.length === b.notchesMm.length
+          ? 0.7
+          : 0.3;
+    ns = said === 0.3 && tube ? 0.5 : said ?? 0.5;
+  } else {
+    const n = notches(a, b);
+    ns = n.ns;
+    said = n.said;
+    matched = n.matched;
+    if (!a.range && !b.range) {
+      const ia0 = 180 - a.turnStart;
+      const ia1 = 180 - a.turnEnd;
+      const ib0 = 180 - b.turnStart;
+      const ib1 = 180 - b.turnEnd;
+      const err = Math.abs(ia0 + ib1 - 180) + Math.abs(ia1 + ib0 - 180);
+      endsTerm = Math.max(0, 1 - err / ENDS_SCALE_DEG);
+    }
+  }
+  // An eased pair without agreeing notches is a length coincidence — unless the order says a tube
+  // meets the body here (a cap is eased into its armhole, its notches only partly met).
+  if (!exact && ns < 0.7 && !tube) return null;
+  // A tube onto the body: both sides carry notches and at least one agrees (a stand's SNP notches
+  // on the yoke's; a cap's on the armhole's), or both are closed loops — a stand's 412 fits a run
+  // over the back's hem by length alone (12.10 corpus, card 5).
+  if (tube && !a.closed && (said === null || said === 0)) return null;
+  const chain = (a.parts.length > 1 ? CHAIN : 0) + (b.parts.length > 1 ? CHAIN : 0);
+  const score = 0.45 * lenScore + 0.45 * ns + 0.1 * endsTerm - chain + (tube ? TUBE_JOIN_BONUS : 0);
+  const sideWords = (s: Side) =>
+    `${s.parts.length} part${s.parts.length > 1 ? 's' : ''}${s.range ? ` (${Math.round(s.range[0])} … ${Math.round(s.range[1])} of ${Math.round(s.parts[0].lenMm)})` : ''}`;
+  return {
+    a,
+    b,
+    score,
+    ia: -1,
+    ib: -1,
+    evidence: {
+      dLenMm,
+      relLen,
+      notchScore: said,
+      curvature: 'flat',
+      hand: a.hand && b.hand ? 'same' : 'neutral',
+      twin: 'none',
+      self: false,
+      rule: `composite ${a.closed ? 'loop' : 'edge'} of «${label}»: ${sideWords(a)} ↔ ${sideWords(b)}, ${Math.round(a.lenMm)} ${exact ? '=' : 'vs'} ${Math.round(b.lenMm)} mm${exact ? '' : ' (eased)'}${matched ? `, ${matched} notch${matched > 1 ? 'es' : ''} agree` : ''}${tube ? ' — a tube / ring onto the body' : ''}`,
+      aLenMm: a.lenMm,
+      bLenMm: b.lenMm,
+      notchesMatched: matched,
+    },
+  };
+}
+
+const longest = (s: Side) => s.parts.reduce((m, e) => (e.lenMm > m.lenMm ? e : m)).id;
+
+/**
+ * Composite seams for the operations the pair solve left apart (and tube-onto-body operations),
+ * in the order's sequence, each taken onto the board. Returns them as SeamCandidates with the
+ * operation they close, and words for the report.
+ */
+export function compositeSeams(
+  P: CandidatePool,
+  ops: readonly Operation[],
+  perOp: readonly OpSolution[],
+  /** Every seam on the board so far: forced, chosen, closures (edges they hold are not free). */
+  seams: readonly SeamCandidate[],
+  board: Board,
+  /** Pieces never sewn as shell here (hardware, interfacing, surface pieces). */
+  skip: ReadonlySet<string>,
+  lining: ReadonlySet<string>,
+): { seams: SeamCandidate[]; words: string[] } {
+  const geom = new Map(P.pieces.map((p) => [p.pieceKey, p]));
+  const debug = typeof process !== 'undefined' && !!process.env?.ASSIGN_DEBUG;
+  const all: SeamCandidate[] = [...seams];
+  const added: SeamCandidate[] = [];
+  const words: string[] = [];
+  const taken = new Set<EdgeId>();
+  const free = (id: EdgeId) => !taken.has(id) && board.sandwichFree(id, true);
+  // A seam reported on the second ply of a pair is read on the first (the plies are one piece for
+  // the boundary; the second ply's edges are never free edges of their own).
+  const onFirstPly = (c: SeamCandidate): SeamCandidate => {
+    const map = (id: EdgeId) => (board.isSecondPly(pkOf(id)) ? board.plyMateOf(id) ?? id : id);
+    const A = sideIds(c, 'a').map(map);
+    const B = sideIds(c, 'b').map(map);
+    if (A.every((x, i) => x === sideIds(c, 'a')[i]) && B.every((x, i) => x === sideIds(c, 'b')[i]))
+      return c;
+    return {
+      ...c,
+      a: map(c.a),
+      b: map(c.b),
+      ...(c.aParts ? { aParts: A } : {}),
+      ...(c.bParts ? { bParts: B } : {}),
+    };
+  };
+  const sideIds = (c: SeamCandidate, s: 'a' | 'b') =>
+    s === 'a' ? c.aParts ?? [c.a] : c.bParts ?? [c.b];
+  void ops;
+  for (const S of perOp) {
+    const op = S.op;
+    const tube =
+      op.classes.some((c) => TUBE_CLASSES.has(c)) && op.classes.some((c) => !TUBE_CLASSES.has(c));
+    if (S.components <= 1 && !tube) continue;
+    if (op.kind !== 'order') continue;
+    // The lining onto the shell: its edges meet the facings, not the shell's boundary.
+    const isLining = op.inputs.map((X) => X.length > 0 && X.every((k) => lining.has(k)));
+    if (isLining.some(Boolean) && isLining.some((x) => !x)) continue;
+    // Sides per input: the input's pieces glued by the seams inside it.
+    const sides: Side[][] = op.inputs.map((X) => {
+      const keys = new Set(X.filter((k) => !skip.has(k)));
+      const pieces = [...keys].map((k) => geom.get(k)).filter((p): p is PieceGeom => !!p);
+      if (!pieces.length) return [];
+      // (a closure holds its edges but glues nothing: the neckline does not run on over the
+      // front opening — the stand sits on the fronts and the yoke, not on the plackets' tops)
+      const inside = all
+        .filter((c) => c.kind !== 'closure-not-seam')
+        // (nor over a placket: the front opening is sewn as the plackets' seams, and a neckline
+        // run that crossed them would read the collar onto the two fronts' CF ends — card 16)
+        .filter((c) => ![c.a, c.b].some((id) => roleOf(geom.get(pkOf(id))!) === 'placket'))
+        .map(onFirstPly)
+        .filter((c) => [...sideIds(c, 'a'), ...sideIds(c, 'b')].every((id) => keys.has(pkOf(id))));
+      return sidesOf(pieces, inside, free, (k) => board.isSecondPly(k));
+    });
+    const nm = (id: string) => {
+      const at = id.lastIndexOf('#');
+      return `${geom.get(id.slice(0, at))?.name ?? id.slice(0, at)}${id.slice(at)}`;
+    };
+    if (debug)
+      words.push(
+        `debug composites «${op.label}» inside: ${op.inputs
+          .map((X, i) => {
+            const keys = new Set(X);
+            return `${i}: ${all
+              .filter((c) => c.kind !== 'closure-not-seam')
+              .map(onFirstPly)
+              .filter((c) =>
+                [...sideIds(c, 'a'), ...sideIds(c, 'b')].every((id) => keys.has(pkOf(id))),
+              )
+              .map((c) => `${nm(c.a)}~${nm(c.b)}`)
+              .join(' ')}`;
+          })
+          .join(' | ')}`,
+      );
+    if (debug)
+      words.push(
+        `debug composites «${op.label}»: ${sides
+          .map(
+            (S, i) =>
+              `input ${i} (${op.classes[i]}): ${
+                S.filter((x) => x.parts.length > 1 || x.closed)
+                  .map((x) => `${x.id} ${Math.round(x.lenMm)}${x.closed ? ' loop' : ''}`)
+                  .join('; ') || 'no run'
+              }`,
+          )
+          .join(' | ')}`,
+      );
+    const upper = (x: Side) =>
+      x.parts.every((e) => {
+        const p = geom.get(e.pieceKey);
+        return !p || yMidOf(p, e) >= 0.45;
+      });
+    const cands: Comp[] = [];
+    for (let i = 0; i < sides.length; i++)
+      for (let j = i + 1; j < sides.length; j++) {
+        // A tube input meets the body along ONE composite edge: its own side is a single edge or a
+        // closed cap, never a stretch of several of its edges.
+        const tubeI = TUBE_CLASSES.has(op.classes[i]);
+        const tubeJ = TUBE_CLASSES.has(op.classes[j]);
+        // …and that edge is the longest free edge of ITS PIECE (a cap, a stand's neck edge) or an
+        // inner stretch of it — a wrist, a collar end are not where a tube meets the body.
+        const longestFree = (S: Side[]) => {
+          const m = new Map<string, number>();
+          for (const x of S)
+            if (x.parts.length === 1 && !x.range)
+              m.set(x.parts[0].pieceKey, Math.max(m.get(x.parts[0].pieceKey) ?? 0, x.lenMm));
+          return m;
+        };
+        const tubeEdge = (x: Side, L: Map<string, number>) =>
+          x.parts.length === 1 && x.parts[0].lenMm >= 0.999 * (L.get(x.parts[0].pieceKey) ?? 0);
+        const Li = longestFree(sides[i]);
+        const Lj = longestFree(sides[j]);
+        for (const a of sides[i])
+          for (const b of sides[j]) {
+            if (
+              (tubeI && a.parts.length > 1 && !a.closed) ||
+              (tubeJ && b.parts.length > 1 && !b.closed)
+            )
+              continue;
+            if ((tubeI && !tubeJ && !tubeEdge(a, Li)) || (tubeJ && !tubeI && !tubeEdge(b, Lj)))
+              continue;
+            // A tube meets the body along a long edge (an armhole, a neckline) — not along the
+            // ends of two small pieces glued into a ring — and at the TOP of the body's pieces
+            // (pieces are drawn upright: an armhole, a neckline, a waist sit in the upper half; a
+            // hem does not).
+            if (tube && tubeI !== tubeJ && Math.min(a.lenMm, b.lenMm) < TUBE_MIN_MM) continue;
+            if (tube && tubeI !== tubeJ && !upper(tubeI ? b : a)) continue;
+            // A pair of single whole edges is the pool's business, not a composite.
+            if (a.parts.length === 1 && b.parts.length === 1 && !a.range && !b.range) continue;
+            const c = scoreSides(a, b, tube && tubeI !== tubeJ, op.label, geom);
+            if (!c) continue;
+            c.ia = i;
+            c.ib = j;
+            cands.push(c);
+          }
+      }
+    const accept = tube ? COMPOSITE_TUBE_ACCEPT : SKELETON.accept;
+    cands.sort((x, y) => y.score - x.score || (x.a.id + x.b.id < y.a.id + y.b.id ? -1 : 1));
+    if (debug)
+      words.push(
+        `debug composites «${op.label}»: singles ${sides
+          .map(
+            (S, i) =>
+              `${i}: ${S.filter((x) => x.parts.length === 1 && !x.closed)
+                .map((x) => `${x.id} ${Math.round(x.lenMm)}`)
+                .join(', ')}`,
+          )
+          .join(' | ')} · top ${cands
+          .slice(0, 6)
+          .map((c) => `${c.a.id} ↔ ${c.b.id} ${c.score.toFixed(3)}`)
+          .join('; ')}`,
+      );
+    const joined = new Set<string>();
+    for (const c of cands) {
+      if (c.score < accept) break;
+      const key = `${c.ia}|${c.ib}`;
+      if (joined.has(key)) continue;
+      if (![...c.a.parts, ...c.b.parts].every((e) => free(e.id))) continue;
+      // A near rival for the same side is said; the best stands (as the pool's alternatives).
+      const rival = cands.find(
+        (q) =>
+          q !== c &&
+          Math.abs(q.score - c.score) <= SKELETON.ambiguity &&
+          (q.a.id === c.a.id || q.b.id === c.b.id || q.a.id === c.b.id || q.b.id === c.a.id) &&
+          [...q.a.parts, ...q.b.parts].every((e) => free(e.id)),
+      );
+      const seam: SeamCandidate = {
+        a: longest(c.a),
+        b: longest(c.b),
+        ...(c.a.parts.length > 1 ? { aParts: c.a.parts.map((e) => e.id) } : {}),
+        ...(c.b.parts.length > 1 ? { bParts: c.b.parts.map((e) => e.id) } : {}),
+        ...(c.a.range || c.b.range
+          ? { range: { a: c.a.range ?? [0, c.a.lenMm], b: c.b.range ?? [0, c.b.lenMm] } }
+          : {}),
+        score: Math.round(c.score * 1000) / 1000,
+        kind: 'composite',
+        evidence: {
+          ...c.evidence,
+          rule: `${c.evidence.rule}${rival ? ` · a near reading: ${rival.a.id} ↔ ${rival.b.id} (${rival.score.toFixed(2)})` : ''}`,
+        },
+        operationId: op.id,
+        assignment: {
+          margin: rival ? 0 : Math.round(100 * (c.score - accept)),
+          confidence: rival ? 'ambiguous' : c.score - accept >= 0.15 ? 'sure' : 'likely',
+        },
+      };
+      for (const e of [...c.a.parts, ...c.b.parts]) taken.add(e.id);
+      joined.add(key);
+      all.push(seam);
+      added.push(seam);
+      words.push(`«${op.label}»: ${seam.a} ↔ ${seam.b} read as a composite (${c.evidence.rule})`);
+    }
+  }
+  return { seams: added, words };
+}

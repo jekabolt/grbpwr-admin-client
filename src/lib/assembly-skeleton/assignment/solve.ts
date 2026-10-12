@@ -414,6 +414,19 @@ export class Board {
   plyMateOf(e: EdgeId): EdgeId | undefined {
     return this.plyMate.get(e);
   }
+  /**
+   * The edge can still take ONE single-layer piece: nothing on it, or only the plies' own seam on a
+   * straight designated ply edge (the sandwich — a stand's neck edge carries its ply seam and the
+   * neckline).
+   */
+  sandwichFree(e: EdgeId, curvedOk = false): boolean {
+    const uses = this.uses.get(e) ?? [];
+    if (uses.length === 0) return true;
+    if (uses.length !== 1 || !uses[0].ply) return false;
+    // (a composite onto a ply pair — the neckline between the two plies of a stand — sits on the
+    // designated ply edge whether it is straight or not)
+    return this.sandwichable.has(e) || (curvedOk && this.P.designated.has(e));
+  }
 
   /** Mark edges used by a seam outside the search (a forced seam, a closure). */
   occupy(ids: readonly EdgeId[], other: readonly EdgeId[], ply = false) {

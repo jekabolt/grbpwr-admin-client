@@ -120,6 +120,8 @@ export function variablesOf(
   skip: ReadonlySet<string>,
   /** Candidates read for the solver alone (partials.ts), after the pool's. */
   extra: readonly PoolCand[] = [],
+  /** Surface pieces (pockets, loops: operations.ts surfacePieces). */
+  surface: ReadonlySet<string> = new Set(),
 ): Variable[] {
   const opOf = operationOf(ops);
   const out: Variable[] = [];
@@ -131,8 +133,11 @@ export function variablesOf(
     const pa = c.u.piece.pieceKey;
     const pb = c.v.piece.pieceKey;
     if (skip.has(pa) || skip.has(pb)) continue;
-    // (a pocket piece onto a panel is allowed as EVIDENCE — the bag's edge caught in a seam — but
-    // never forced: operations.ts gives such a step no slack)
+    // A surface piece (a pocket, a loop) lies on a panel's FACE: an edge pair between it and a panel
+    // is a coincidence that takes the panel's edge away from its real seam (12.10 corpus, card 6:
+    // the fronts' neck edges 105 went to the chest pockets' 105, and the neckline was gone). Two
+    // surface pieces (a bag's halves) are sewn edge to edge.
+    if (pa !== pb && surface.has(pa) !== surface.has(pb)) continue;
     if (pa !== pb && roleVeto(c.u.piece, c.v.piece)) continue;
     const v = variableOf(c, ops, board, opOf);
     if (!v) continue;
