@@ -2,6 +2,7 @@
 // the text, so the gate can compare the two.
 
 import type {
+  ReplayRecord,
   AutopilotRecord,
   ConversionManifest,
   ManifestBlock,
@@ -10,7 +11,7 @@ import type {
   PieceSpec,
   WriteJob,
 } from '../types';
-import { MANIFEST_VERSION } from '../types';
+import { MANIFEST_VERSION, REPLAY_MAX, REPLAY_VALUE_MAX } from '../types';
 import type { PlannedBlock } from './plan';
 import { contourSigCap, contourSignature } from '../manifest/contour-sig';
 
@@ -151,7 +152,34 @@ export function buildManifest(
     gate: null,
     ...(job.autopilot ? { autopilot: autopilotForManifest(job.autopilot) } : {}),
     ...(job.passport ? { passport: job.passport } : {}),
+    ...(job.replay ? { replay: replayForManifest(job.replay) } : {}),
   };
+}
+
+/**
+ * AP-replay: the run's answers as the manifest carries them — bounded like the reader
+ * (manifest/index.ts `validateReplay`): a kind that is not kebab-case or a value over
+ * `REPLAY_VALUE_MAX` JSON characters is left out (it is not replayed), every subject clipped.
+ */
+export function replayForManifest(r: ReplayRecord): ReplayRecord {
+  const clip = (x: string, n: number) => (x.length > n ? `${x.slice(0, n - 1)}…` : x);
+  const KIND = /^[a-z][a-z0-9-]{0,47}$/;
+  const answers: ReplayRecord['answers'] = [];
+  for (const a of r.answers) {
+    if (answers.length >= REPLAY_MAX) break;
+    if (!KIND.test(a.kind) || a.value === undefined) continue;
+    const text = JSON.stringify(a.value);
+    if (text === undefined || text.length > REPLAY_VALUE_MAX) continue;
+    answers.push({
+      step: clip(a.step, 32),
+      kind: a.kind,
+      subject: clip(a.subject, 160),
+      value: JSON.parse(text),
+      ...(a.strong ? { strong: true } : {}),
+      ...(a.auto ? { auto: true } : {}),
+    });
+  }
+  return { v: 1, answers };
 }
 
 /**

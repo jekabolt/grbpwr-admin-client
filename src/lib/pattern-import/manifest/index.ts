@@ -37,6 +37,8 @@ import {
   MANIFEST_TAG,
   MANIFEST_VERSION,
   PATIMPORT,
+  REPLAY_MAX,
+  REPLAY_VALUE_MAX,
   type AutopilotAssumption,
   type AutopilotRecord,
   type AutopilotValue,
@@ -49,6 +51,8 @@ import {
   type GateReport,
   type ManifestBlock,
   type ManifestContinuity,
+  type ReplayAnswer,
+  type ReplayRecord,
   type ManifestPiece,
   type ManifestSize,
   type ManifestSource,
@@ -528,6 +532,47 @@ function validateAutopilot(x: unknown): AutopilotRecord | undefined {
 }
 
 /**
+ * AP-replay: the run's answers (`replay`), rebuilt from validated fields only — the same bounds the
+ * writer clips to (write/manifest-build.ts `replayForManifest`), so a written record reads back
+ * equal (G13). An entry that does not validate is left out, never the sheet.
+ */
+function validateReplay(x: unknown): ReplayRecord | undefined {
+  if (!isObj(x) || x.v !== 1 || !Array.isArray(x.answers) || x.answers.length > REPLAY_MAX)
+    return undefined;
+  const KIND = /^[a-z][a-z0-9-]{0,47}$/;
+  const answers: ReplayAnswer[] = [];
+  for (const a of x.answers) {
+    if (
+      !isObj(a) ||
+      !isBoundedStr(a.step, 32) ||
+      !isBoundedStr(a.kind, 48) ||
+      !KIND.test(a.kind) ||
+      !isBoundedStr(a.subject, 160) ||
+      a.value === undefined
+    )
+      continue;
+    let value: AutopilotValue | undefined;
+    try {
+      const text = JSON.stringify(a.value);
+      if (text !== undefined && text.length <= REPLAY_VALUE_MAX)
+        value = JSON.parse(text) as AutopilotValue;
+    } catch {
+      value = undefined;
+    }
+    if (value === undefined) continue;
+    answers.push({
+      step: a.step,
+      kind: a.kind,
+      subject: a.subject,
+      value,
+      ...(a.strong === true ? { strong: true } : {}),
+      ...(a.auto === true ? { auto: true } : {}),
+    });
+  }
+  return { v: 1, answers };
+}
+
+/**
  * Throws `ManifestError` unless `x` is a complete, self-consistent v1 manifest. Exported for the writer
  * (embedding an invalid manifest is a writer bug and must fail loudly) and for tests.
  */
@@ -733,6 +778,7 @@ export function validateManifest(x: unknown): ConversionManifest {
   const gate = validateGate(x.gate);
   const autopilot = validateAutopilot(x.autopilot);
   const passport = readPassportDigest(x.passport);
+  const replay = validateReplay(x.replay);
   return {
     v: MANIFEST_VERSION,
     generator: x.generator,
@@ -750,6 +796,7 @@ export function validateManifest(x: unknown): ConversionManifest {
     gate,
     ...(autopilot ? { autopilot } : {}),
     ...(passport ? { passport } : {}),
+    ...(replay ? { replay } : {}),
   };
 }
 

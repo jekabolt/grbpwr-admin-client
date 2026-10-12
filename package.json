@@ -35,6 +35,7 @@
     "patimport:worker": "node --expose-gc scripts/pattern-import/worker.mjs",
     "patimport:e2e": "node scripts/pattern-import/e2e.mjs",
     "patimport:autopilot": "node scripts/pattern-import/autopilot.mjs",
+    "patimport:replay": "node scripts/pattern-import/replay.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:ask": "node scripts/flat-ask-probe.mjs",
     "flat:pictures": "node scripts/flat-input-pictures-probe.mjs",

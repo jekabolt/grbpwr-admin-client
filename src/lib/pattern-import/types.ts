@@ -1716,7 +1716,35 @@ export type ConversionManifest = {
    * shape-tolerant on read like `autopilot`.
    */
   passport?: PassportDigest;
+  /**
+   * AP-replay: every answer this sheet's run ended with — the operator's and the autopilot's alike —
+   * in a reproducible form (kind + value; the subject is for people), so a re-import of the same
+   * source files into the same card reuses them where they still land (autopilot/replay.ts).
+   * Optional and shape-tolerant on read, like `autopilot`.
+   */
+  replay?: ReplayRecord;
 };
+
+/**
+ * AP-replay: one answer of a run, as a re-import reuses it. `kind` says which question family
+ * ('scale', 'size-map', 'piece' …), `value` is the answer itself (file references by their index
+ * in `source.files`, pieces by their outline's area and centroid), `subject` is for people only.
+ * `strong`: the answer was a strong autopilot assumption (a replay of it stays strong).
+ */
+export type ReplayAnswer = {
+  step: string;
+  kind: string;
+  subject: string;
+  value: AutopilotValue;
+  strong?: boolean;
+  /** The answer was the autopilot's (absent = the operator's). */
+  auto?: boolean;
+};
+
+export type ReplayRecord = { v: 1; answers: ReplayAnswer[] };
+/** AP-replay: at most this many answers per manifest; a value up to this many JSON characters. */
+export const REPLAY_MAX = 400;
+export const REPLAY_VALUE_MAX = 16384;
 
 /**
  * A10 (D5): one answer the autopilot gave in the operator's place. `strong` = a dangerous default
@@ -1769,6 +1797,8 @@ export type WriteJob = {
   autopilot?: AutopilotRecord;
   /** PASSPORT Ф1: the document's digest, carried into the manifest as it is. */
   passport?: PassportDigest;
+  /** AP-replay: the run's answers, reproducible (manifest `replay`). */
+  replay?: ReplayRecord;
 };
 
 export type WriteResult = { dxfText: string; manifest: ConversionManifest; warnings: string[] };
@@ -2130,6 +2160,8 @@ export type StageIO = {
       generator: string;
       /** A10: the autopilot's assumptions (absent = the operator answered) → every manifest. */
       autopilot?: AutopilotRecord;
+      /** AP-replay: the run's answers in a reproducible form → every manifest. */
+      replay?: ReplayRecord;
     };
     out: { scopes: DraftScope[]; gate: Record<string, GateReport> };
   };

@@ -76,6 +76,8 @@ export function hookDriveCtx(
   get: () => ImportSessionApi,
   settle: () => Promise<void>,
   resolve: AutoResolver<Inputs>,
+  /** AP-replay: the previous import's unasked answers (replay.ts `replayDrive().prefill`). */
+  prefill?: AutoResolver<Inputs>,
 ): DriveCtx<Inputs> {
   const api = get();
   return {
@@ -86,6 +88,7 @@ export function hookDriveCtx(
     notice: api.notice,
     busy: false,
     resolve,
+    ...(prefill ? { prefill } : {}),
     current: () => ({ session: get().session, inputs: get().inputs }),
     forward: async () => {
       const from = get().session.step;

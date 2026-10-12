@@ -136,3 +136,85 @@ export function writeAutopilotPref(on: boolean) {
     /* private window, blocked storage: the switch still works for this run */
   }
 }
+
+/**
+ * AP-replay: the footer line of a re-import — "replayed N answers from the previous import" with
+ * the one-click way out ("don't reuse": the import starts again without them) and what was not
+ * replayed and why; or, while off (a partial match, or turned off), the offer to reuse them.
+ */
+export function ReplayLine({
+  label,
+  exact,
+  matched,
+  of,
+  on,
+  replayed,
+  misses,
+  onReuse,
+  onDontReuse,
+}: {
+  label: string;
+  exact: boolean;
+  matched: number;
+  of: number;
+  on: boolean;
+  replayed: number;
+  misses: readonly { key: string; why: string }[];
+  onReuse: () => void;
+  onDontReuse: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!on)
+    return (
+      <span className='flex flex-wrap items-center gap-2' data-replay='off'>
+        <Text size='micro' variant='label' component='span'>
+          {exact
+            ? 'these files were imported into this card before'
+            : `${matched} of ${of} files were imported into this card before`}{' '}
+          ({label})
+        </Text>
+        <Button type='button' variant='underline' size='xs' onClick={onReuse}>
+          reuse those answers
+        </Button>
+      </span>
+    );
+  return (
+    <span className='flex flex-col gap-1' data-replay='on'>
+      <span className='flex flex-wrap items-center gap-2'>
+        <Pill tone='mut' title='answers reused from the previous import of the same files'>
+          replay
+        </Pill>
+        <Text size='micro' component='span'>
+          replayed {replayed} {replayed === 1 ? 'answer' : 'answers'} from the previous import (
+          {label})
+        </Text>
+        {misses.length > 0 && (
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {misses.length} not replayed
+          </Button>
+        )}
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          onClick={onDontReuse}
+          title='read the files again and answer without the previous import'
+        >
+          don&apos;t reuse
+        </Button>
+      </span>
+      {open &&
+        misses.map((m) => (
+          <Text key={m.key} size='micro' variant='label' component='p'>
+            not replayed · {m.why}
+          </Text>
+        ))}
+    </span>
+  );
+}

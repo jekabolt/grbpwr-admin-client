@@ -1658,6 +1658,7 @@ export class Session {
           dialect: input.dialect,
           ...(input.autopilot ? { autopilot: input.autopilot } : {}),
           ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
+          ...(input.replay ? { replay: input.replay } : {}),
         },
         {
           rules: cardRules,
