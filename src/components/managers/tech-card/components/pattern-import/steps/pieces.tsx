@@ -129,6 +129,7 @@ const ASIDE_WORD: Record<SetAside['reason'], string> = {
   joined: 'drawn against a piece already seeded',
   'inner-line': 'split off a seeded piece by an inner line',
   'other-pen': 'inside a piece, in another pen (a label box, a mark)',
+  'code-text': 'part of a printed code',
 };
 
 /** H1: why the sizes of a piece were held back (the candidate's `gradeRefusal`). */
@@ -295,9 +296,11 @@ export function PiecesStep({
     list: asides.filter((a) => asideKey(a) === k),
   }));
   const asideWords = (a: SetAside) =>
-    a.seed
-      ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
-      : ASIDE_WORD[a.reason];
+    a.reason === 'code-text'
+      ? 'a number read as part of a printed code (smaller than the piece numbers, digits beside it) — held back as a seed'
+      : a.seed
+        ? `a piece label in ${ASIDE_WORD[a.reason]} — held back as a seed`
+        : ASIDE_WORD[a.reason];
   const counts = families.reduce<Record<FillOutcome, number>>(
     (m, f) => ({ ...m, [outcomeOf(f)]: m[outcomeOf(f)] + 1 }),
     { closed: 0, leak: 0, merged: 0, tiny: 0, refused: 0 },
@@ -919,9 +922,20 @@ export function PiecesStep({
                               )}
                             >
                               <Text size='micro' component='span' className='tabular-nums'>
-                                {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}” · ` : ''}
-                                {(a.areaMm2 / 100).toFixed(0)} cm²
+                                {a.seed?.text ? `“${a.seed.text.text.slice(0, 16)}”` : ''}
+                                {a.seed?.text && a.areaMm2 > 0 ? ' · ' : ''}
+                                {a.areaMm2 > 0 ? `${(a.areaMm2 / 100).toFixed(0)} cm²` : ''}
                               </Text>
+                              {a.why && (
+                                <Text
+                                  size='nano'
+                                  variant='label'
+                                  component='span'
+                                  className='block'
+                                >
+                                  {a.why}
+                                </Text>
+                              )}
                             </button>
                             <Button
                               variant='underline'

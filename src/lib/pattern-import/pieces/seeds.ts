@@ -263,6 +263,76 @@ export const proposeSeedsFrom = (sheet: Sheet, set?: ChainSet): Seed[] => {
   }));
 };
 
+/**
+ * NAP · a bare-number seed that is a fragment of a printed CODE, not a piece label — the article
+ * strip of a Burda sheet prints "00 15" / "0 015" beside "7142" and "fashion" in a smaller type,
+ * and each fragment passed the number filter (≥ 60 % of the largest number) as its own seed. Two
+ * independent evidences, both required (D3):
+ *   type    the sheet prints its piece numbers in one type (the print size most number seeds share,
+ *           ≥ 3 of them), and this one is clearly smaller (≤ 80 % of it);
+ *   string  another run of digits in its own type sits on its baseline, close enough to read as
+ *           one number with it ("00" + "15" = "0015"), and is not one of its own parts (a
+ *           joined "015" holds its "1") — a piece number stands alone.
+ * Explicit labels ("Piece 3", "A - TOP BACK") are never codes. The result is a reason per seed
+ * id; the session holds such a seed back as a set-aside (D3: listed, one click from a piece), and
+ * the outline it sits in, if any, is seeded as an outline of its own.
+ */
+/** Probe switches (mutation): drop one evidence, or count a joined number's own digits. */
+export type CodeTextSwitch = 'type' | 'string' | 'parts';
+export function codeTextSeeds(
+  sheet: Pick<Sheet, 'texts'>,
+  seeds: readonly Seed[],
+  o: { off?: ReadonlySet<CodeTextSwitch> } = {},
+): Map<number, string> {
+  const out = new Map<number, string>();
+  const nums = seeds.filter(
+    (s) => s.origin === 'text' && s.text && NUMBER.test(s.text.text.trim()),
+  );
+  if (nums.length < 2) return out;
+  // the piece-label type: the print size (0.5 mm bins) most number seeds share
+  const bins = new Map<number, number>();
+  for (const s of nums) {
+    const k = Math.round(s.text!.fontSizeMm * 2);
+    bins.set(k, (bins.get(k) ?? 0) + 1);
+  }
+  const [labelBin, labelCount] = [...bins].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+  const labelMm = labelBin / 2;
+  const digits = sheet.texts.filter((t) => /^\d+$/.test(t.text.trim()));
+  for (const s of nums) {
+    const t = s.text!;
+    const fs = t.fontSizeMm;
+    const small = labelCount >= 3 && fs <= 0.8 * labelMm;
+    if (!small && !o.off?.has('type')) continue;
+    // a run of digits on its baseline, in its type, within half a type height of its box (the
+    // burda strip: 0.25; a cut count "15 X 2" sits a whole type height and more away)
+    const r = (t.rotationDeg * Math.PI) / 180;
+    const u = { x: Math.cos(r), y: Math.sin(r) };
+    const c = centre(t);
+    const half = (b: IRText['bbox']) =>
+      (Math.abs(u.x) * (b.maxX - b.minX) + Math.abs(u.y) * (b.maxY - b.minY)) / 2;
+    const beside = digits.find((d) => {
+      if (d.id === t.id || Math.abs(d.fontSizeMm - fs) > 0.05 * fs) return false;
+      if (Math.abs(d.rotationDeg - t.rotationDeg) > 2) return false;
+      const dc = centre(d);
+      const along = (dc.x - c.x) * u.x + (dc.y - c.y) * u.y;
+      const across = -(dc.x - c.x) * u.y + (dc.y - c.y) * u.x;
+      const gap = Math.abs(along) - half(t.bbox) - half(d.bbox);
+      // a digit inside its own box is one of its own parts (a joined "015" = "0" + "1" + "5")
+      return (
+        Math.abs(across) <= 0.3 * fs &&
+        (gap > -0.25 * fs || !!o.off?.has('parts')) &&
+        gap <= 0.5 * fs
+      );
+    });
+    if (!beside && !o.off?.has('string')) continue;
+    out.set(
+      s.id,
+      `“${t.text.trim()}” in ${fs.toFixed(1)} mm type (the piece numbers: ${labelMm.toFixed(1)} mm)${beside ? `, beside “${beside.text.trim()}” on one line` : ''}`,
+    );
+  }
+  return out;
+}
+
 /** The label a seed carries (piece number / letter), for the names table and the probe. */
 export function labelOf(text: string): string | null {
   const s = text.trim();

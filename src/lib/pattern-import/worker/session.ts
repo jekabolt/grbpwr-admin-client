@@ -123,6 +123,7 @@ import {
 } from '../pieces';
 import { pointInPoly } from '../pieces/geom';
 import { asidesOf, blobOf, faceMap, faceSeedsOf, type FaceMap } from '../pieces/faces';
+import { codeTextSeeds } from '../pieces/seeds';
 import { exceptNested } from '../pieces/fill';
 import { sheetModule, undrawnRanks } from '../pieces/walls';
 import {
@@ -360,6 +361,8 @@ export class Session {
   private gradeAmbiguities: ChainAmbiguity[] = [];
   /** Text seeds proposed once per chain set (clicks are appended by the wizard). */
   private textSeeds: Seed[] | null = null;
+  /** NAP: the text seeds that read as fragments of a printed code (seeds.ts codeTextSeeds). */
+  private codeHeld: { seeds: Seed[]; v: Map<SeedId, string> } | null = null;
   /** A2: the sheet's closed faces for this chain set and size run (face seeds, click placement). */
   private faces: FacesEntry | null = null;
   /**
@@ -1131,7 +1134,7 @@ export class Session {
         view === set
           ? this.facesOf(set, read, PATIMPORT.fillCellMm)
           : {
-              map: faceMap(sheet, view, read, (this.textSeeds ??= proposeSeeds(sheet, set)), {
+              map: faceMap(sheet, view, read, this.labelSeeds(sheet, set), {
                 cellMm: PATIMPORT.fillCellMm,
               }),
             };
@@ -1164,6 +1167,15 @@ export class Session {
     };
   }
 
+  /** The text seeds that are piece labels: proposed, less the fragments of a printed code (NAP). */
+  private labelSeeds(sheet: Sheet, set: ChainSet): Seed[] {
+    const text = (this.textSeeds ??= proposeSeeds(sheet, set));
+    if (this.codeHeld?.seeds !== text)
+      this.codeHeld = { seeds: text, v: codeTextSeeds(sheet, text) };
+    const code = this.codeHeld.v;
+    return code.size ? text.filter((t) => !code.has(t.id)) : text;
+  }
+
   /**
    * A2 faces of a chain set for a size run (seeds, set-asides, click placement) — computed once:
    * the sizes stage reads its nest evidence off them (A6), the pieces stage seeds from them. Labels
@@ -1176,9 +1188,26 @@ export class Session {
       return (this.faces = this.sizeFaces);
     const sheet = this.sheet!;
     const text = (this.textSeeds ??= proposeSeeds(sheet, base));
-    const map = faceMap(sheet, base, run, text, { cellMm });
+    // NAP: a number that is part of a printed code is no label — the outline it sits in is read
+    // as unlabelled by the face pass (seeded, or set aside as such), the number is held back
+    const labels = this.labelSeeds(sheet, base);
+    const map = faceMap(sheet, base, run, labels, { cellMm });
     const first = Math.max(-1, ...text.map((x) => x.id)) + 1;
-    const { held, asides: a0 } = asidesOf(map, text);
+    const { held, asides: a0 } = asidesOf(map, labels);
+    for (const t of text) {
+      const why = this.codeHeld?.v.get(t.id);
+      if (why == null || !t.text) continue;
+      held.add(t.id);
+      a0.push({
+        id: -1 - t.id,
+        at: t.at,
+        box: t.text.bbox,
+        areaMm2: 0,
+        reason: 'code-text',
+        seed: t,
+        why,
+      });
+    }
     // P2: a loop on the internal layer inside a cut piece is positive evidence of no piece
     const asides = layerLoopAsides(base, a0);
     const entry = { set: base, key, map, seeds: faceSeedsOf(map, first), held, asides };

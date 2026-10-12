@@ -666,9 +666,16 @@ export type SetAside = {
   at: PtMm;
   box: BoxMm;
   areaMm2: number;
-  reason: Exclude<FaceJunk, 'small'>;
+  /**
+   * NAP 'code-text': a bare number held back as a fragment of a printed code (smaller than the
+   * sheet's piece numbers, another run of digits beside it on one line — pieces/seeds.ts
+   * codeTextSeeds); no outline of its own (area 0), `why` says what was measured.
+   */
+  reason: Exclude<FaceJunk, 'small'> | 'code-text';
   /** The text seed held back. */
   seed?: Seed;
+  /** NAP: the measured evidence, in words (a 'code-text' hold). */
+  why?: string;
   /**
    * P2: positive evidence it is no piece — a closed loop on the internal layer inside a cut piece,
    * on a file whose layers proved their AAMA/ASTM meaning (chains/layer-role layerLoopAsides).
