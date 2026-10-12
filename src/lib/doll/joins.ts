@@ -96,6 +96,9 @@ const classOf = (
   return null;
 };
 
+/** A surface piece (a pocket, a loop): sewn onto a panel's face, never a panel of the wrap. */
+export const isSurfacePiece = (g: PieceGeom, graph?: SeamGraph) => classOf(g, graph) === 'skip';
+
 type Run = {
   piece: PieceGeom;
   edges: Edge[];
@@ -106,11 +109,106 @@ type Run = {
   dx: number;
   dy: number;
   yMid: number;
+  /** Where across its piece the run's middle lies (0 = the drawing's left, 1 = right). */
+  xMid: number;
+  /** Arc positions (mm from the run's start) where the run turns a sharp corner (multi mode). */
+  cornersAt: number[];
+};
+
+/**
+ * A straight strip (a gusset, a binding): at least four times as long as wide, its two long edges
+ * straight. Its two long edges go to two DIFFERENT pieces — a strip sewn by both long edges to one
+ * piece would be a tube on it.
+ */
+export const stripLongEdges = (g: PieceGeom): [Edge, Edge] | null => {
+  const { w, h } = bboxOf(g);
+  const long = Math.max(w, h);
+  const short = Math.min(w, h);
+  if (short <= 0 || long < 4 * short) return null;
+  const straight = (e: Edge) => {
+    const p = e.pts[0];
+    const q = e.pts[e.pts.length - 1];
+    return Math.hypot(q[0] - p[0], q[1] - p[1]) / Math.max(1, e.lenMm) >= 0.95;
+  };
+  const longs = g.edges.filter((e) => e.kind === 'edge' && e.lenMm >= 0.8 * long && straight(e));
+  return longs.length === 2 ? [longs[0], longs[1]] : null;
 };
 
 export type JoinProposal = { seam: SeamCandidate; join: string; note: string };
 /** A part of a declared join, by the join's label and the part's pieces. */
 export type JoinPart = { join: string; part: string[] };
+
+/**
+ * Two parts of one operation that are mirror units of each other: the same number of pieces, each
+ * piece of X with a twin (mirror or identical) in Y, or a left and a right piece of one shape. Left
+ * and right units are sewn to each other only on their centre line — in a two-part operation; in
+ * an operation with a third part they are both sewn onto that part, never to each other (SS26-009's
+ * two plackets end to end, SS26-008's left chest piece onto the right one).
+ */
+export function twinUnits(
+  X: readonly string[],
+  Y: readonly string[],
+  geomOf: ReadonlyMap<string, PieceGeom>,
+): boolean {
+  if (X.length !== Y.length || !X.length) return false;
+  const handOf = (g: PieceGeom) => g.hand ?? readName(g.name).hand;
+  const taken = new Set<string>();
+  for (const a of X) {
+    const ga = geomOf.get(a);
+    if (!ga) return false;
+    const mate = Y.find((b) => {
+      if (taken.has(b) || b === a) return false;
+      const gb = geomOf.get(b);
+      if (!gb) return false;
+      if (ga.twinOf.some((t) => t.key === b)) return true;
+      const ha = handOf(ga);
+      const hb = handOf(gb);
+      return (
+        !!ha &&
+        !!hb &&
+        ha !== hb &&
+        Math.abs(ga.perimMm - gb.perimMm) < 0.03 * ga.perimMm &&
+        Math.abs(Math.abs(ga.areaMm2) - Math.abs(gb.areaMm2)) < 0.05 * Math.abs(ga.areaMm2)
+      );
+    });
+    if (!mate) return false;
+    taken.add(mate);
+  }
+  return true;
+}
+
+const bboxOf = (g: PieceGeom) => {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of g.rs) {
+    if (x < x0) x0 = x;
+    if (y < y0) y0 = y;
+    if (x > x1) x1 = x;
+    if (y > y1) y1 = y;
+  }
+  return { w: x1 - x0, h: y1 - y0 };
+};
+/**
+ * The short end of a strip (a placket, a belt, a band): a single edge across a piece at least
+ * three times as long as wide, no longer than the strip's width. Two strip ends are never sewn end
+ * to end by the order's search (a waistband's halves are the doll's own proposal, by their notches).
+ */
+export const isStripEnd = (g: PieceGeom, e: Edge) => {
+  const { w, h } = bboxOf(g);
+  const long = Math.max(w, h);
+  const short = Math.min(w, h);
+  if (short <= 0 || long < 3 * short) return false;
+  const p = e.pts[0];
+  const q = e.pts[e.pts.length - 1];
+  const dx = Math.abs(q[0] - p[0]);
+  const dy = Math.abs(q[1] - p[1]);
+  // The end runs across the strip: its chord along the short axis.
+  const across = w >= h ? dy > dx : dx > dy;
+  return across && e.lenMm <= 1.25 * short;
+};
+const stripEnd = (r: Run) => r.edges.length === 1 && isStripEnd(r.piece, r.edges[0]);
 
 export function completeFromJoins(
   graph: SeamGraph,
@@ -121,7 +219,24 @@ export function completeFromJoins(
   ignore: Set<string> = new Set(),
   /** Trousers: each leg is joined on its own (left front to left back), legs meet only at the rise. */
   legs = false,
-): { added: JoinProposal[]; left: string[]; byLoops: JoinPart[]; surface: JoinPart[] } {
+  opts: {
+    /**
+     * An item without a body (a bag): every pair of matching free edges between two parts of an
+     * operation is a seam (a front and a back meet along the bottom AND both sides), and a run may
+     * turn a corner where the partner edge carries a notch (a strip round a panel's three sides).
+     */
+    multi?: boolean;
+    /** Pieces whose joins another reading settled (a ring's panels): no n:n continuation on them. */
+    fixed?: ReadonlySet<string>;
+  } = {},
+): {
+  added: JoinProposal[];
+  left: string[];
+  byLoops: JoinPart[];
+  surface: JoinPart[];
+  /** Graph seams this reading refuses (a strip sewn by both long edges to one piece). */
+  refused: SeamCandidate[];
+} {
   const geom0 = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
   const classOf_ = (g: PieceGeom) => classOf(g, graph);
   // Pockets and loops are surface pieces: they never stand for their unit in an edge search (a
@@ -198,8 +313,70 @@ export function completeFromJoins(
     if (a.pieceKey === b.pieceKey) return false; // a dart uses its legs up
     return s.evidence.twin !== 'none' || a.twinOf.some((t) => t.key === b.pieceKey) || same;
   };
+  // GUSSET STRIPS: a strip's two long edges go to two different pieces. Where the graph sews both
+  // to one piece (SS26-015's gusset by both edges onto the front), the weaker pairing is refused;
+  // the order's search then sews that edge onto the other panel.
+  const refused: SeamCandidate[] = [];
+  const single = (s: SeamCandidate) => !s.aParts && !s.bParts;
+  const seamOnEdge = (e: Edge) =>
+    graph.chosen.find(
+      (s) => single(s) && !ignore.has(`${s.a}~${s.b}`) && (s.a === e.id || s.b === e.id),
+    );
+  // (an item without a body only: on a garment a strip-shaped piece may well take two seams from
+  // one piece — a two-piece sleeve's halves, a folded band — and the graph's reading stands)
+  for (const g of opts.multi ? graph.pieces : []) {
+    const L = stripLongEdges(g);
+    if (!L) continue;
+    const s1 = seamOnEdge(L[0]);
+    const s2 = seamOnEdge(L[1]);
+    if (!s1 || !s2 || s1 === s2) continue;
+    const other = (s: SeamCandidate, e: Edge) => pk(s.a === e.id ? s.b : s.a);
+    if (other(s1, L[0]) !== other(s2, L[1]) || other(s1, L[0]) === g.pieceKey) continue;
+    const weak = s2.score < s1.score ? s2 : s1.score < s2.score ? s1 : s2;
+    refused.push(weak);
+    ignore.add(`${weak.a}~${weak.b}`);
+  }
+  /** The x-position of an edge's middle across its piece (0 = the drawing's left, 1 = right). */
+  const edgeXMid = (g: PieceGeom, e: Edge) => {
+    const { w } = bboxOf(g);
+    const x0 = Math.min(...g.rs.map((p) => p[0]));
+    const mid = e.pts[Math.floor(e.pts.length / 2)];
+    return w > 0 ? (mid[0] - x0) / w : 0.5;
+  };
+  /**
+   * A run that is one long edge of a strip whose OTHER long edge a seam already sews: the piece that
+   * seam goes to and where across it (the strip's second edge goes elsewhere, mirrored across).
+   */
+  const stripSide = (r: Run): { piece: string; x: number } | null => {
+    if (r.edges.length !== 1) return null;
+    const L = stripLongEdges(r.piece);
+    if (!L) return null;
+    const mine = L.find((e) => e.id === r.edges[0].id);
+    if (!mine) return null;
+    const otherE = L[0] === mine ? L[1] : L[0];
+    const s =
+      seamOnEdge(otherE) ??
+      added.map((x) => x.seam).find((x) => single(x) && (x.a === otherE.id || x.b === otherE.id));
+    if (!s) return null;
+    const pid = s.a === otherE.id ? s.b : s.a;
+    const pg = geomOf.get(pk(pid));
+    const pe = pg?.edges.find((e) => e.id === pid);
+    return pg && pe ? { piece: pg.pieceKey, x: edgeXMid(pg, pe) } : null;
+  };
+  /** A strip somewhere in the item still has a free long edge of about this length. */
+  const stripWants = (len: number) =>
+    graph.pieces.some((g) => {
+      const L = stripLongEdges(g);
+      return !!L && L.some((e) => freeFrac(g, e) >= 0.9 && Math.abs(e.lenMm - len) <= 0.03 * len);
+    });
+  // (a seam on a ring's panel or a lid — identical twins, but panels: its edges are used up)
+  const touchesFixed = (s: SeamCandidate) =>
+    !!opts.fixed && sides(s).some((id) => opts.fixed!.has(pk(id)));
   for (const s of [...graph.chosen, ...graph.rejected.filter((x) => x.kind === 'closure-not-seam')])
-    if (!twins(s) && !ignore.has(`${s.a}~${s.b}`)) for (const id of sides(s)) markUsed(id);
+    if ((!twins(s) || touchesFixed(s)) && !ignore.has(`${s.a}~${s.b}`))
+      for (const id of sides(s)) markUsed(id);
+  /** Parts read as surface pieces (laid on a panel's face): searched no further. */
+  const surfaced = new Set<string>();
   const linked = new Set<string>();
   const link = (a: string, b: string) => {
     linked.add(`${a}|${b}`);
@@ -231,13 +408,20 @@ export function completeFromJoins(
       ([lo, hi], p) => [Math.min(lo, p[1]), Math.max(hi, p[1])],
       [Infinity, -Infinity],
     );
+    const [x0, x1] = g.rs.reduce(
+      ([lo, hi], p) => [Math.min(lo, p[0]), Math.max(hi, p[0])],
+      [Infinity, -Infinity],
+    );
     const out: Run[] = [];
-    for (let i = 0; i < m; i++)
+    for (let i = 0; i < m; i++) {
+      const cornersAt: number[] = [];
       for (let L = 1; L <= Math.min(3, m - 1); L++) {
         const es = Array.from({ length: L }, (_, j) => plain[(i + j) % m]);
         if (es.some((e) => freeFrac(g, e) < 0.9)) break;
         // A run follows one line of the contour: it never turns a sharp corner (> 35°) between
-        // two of its edges (a waistband's long edge does not continue round its short end).
+        // two of its edges (a waistband's long edge does not continue round its short end) — except
+        // on an item without a body, where a strip runs round a panel's corners: such a corner is
+        // kept and must meet a notch on the partner edge (checked where the pair is scored).
         if (L > 1) {
           const dir = (p: number[][], end: boolean) => {
             const q = end ? p.slice(-6) : p.slice(0, 6);
@@ -247,7 +431,10 @@ export function completeFromJoins(
           const next = es[L - 1].pts;
           let d = Math.abs(dir(next, false) - dir(prev, true));
           if (d > Math.PI) d = 2 * Math.PI - d;
-          if (d > (35 * Math.PI) / 180) break;
+          if (d > (35 * Math.PI) / 180) {
+            if (!opts.multi) break;
+            cornersAt.push(es.slice(0, L - 1).reduce((t, e) => t + e.lenMm, 0));
+          }
         }
         const len = es.reduce((t, e) => t + e.lenMm, 0);
         if (len < 50) continue;
@@ -265,9 +452,28 @@ export function completeFromJoins(
           dx: Math.abs(b[0] - a[0]),
           dy: Math.abs(b[1] - a[1]),
           yMid: y1 > y0 ? (mid[1] - y0) / (y1 - y0) : 0.5,
+          xMid: x1 > x0 ? (mid[0] - x0) / (x1 - x0) : 0.5,
+          cornersAt: [...cornersAt],
         });
       }
+    }
     return out;
+  };
+  /**
+   * A run that turns corners (multi mode) fits its partner only when the partner carries a notch at
+   * every corner — read from either end of the partner (which way round it is sewn is unknown).
+   */
+  const cornersMarked = (A: Run, B: Run) => {
+    if (!A.cornersAt.length) return true;
+    const marks: number[] = [];
+    let base = 0;
+    for (const e of B.edges) {
+      for (const d of e.notchesMm) marks.push(base + d);
+      base += e.lenMm;
+    }
+    return A.cornersAt.every((c) =>
+      marks.some((m) => Math.abs(m - c) <= 12 || Math.abs(B.len - m - c) <= 12),
+    );
   };
 
   const added: JoinProposal[] = [];
@@ -286,24 +492,26 @@ export function completeFromJoins(
    * close enough. `ply` (a ply pair of another part, see below) narrows the search onto that pair's
    * canonical ply with a stricter length band, and nothing is said when no pair is found.
    */
-  const searchPart = (
-    J: DeclaredJoin,
+  type Best = { A: Run; B: Run; score: number; ratio: number; pleated: boolean };
+  /**
+   * The best free edge pair between X and the parts `others` — or why none was looked for. `strict`
+   * (the n:n continuation of multi mode) takes only an exact pair: lengths within 3 %, no penalty
+   * beyond the slightest.
+   */
+  const bestPair = (
     X: string[],
     others: string[][],
-    ply?: { keys: Set<string>; lead: string; sideOk?: (B: Run) => boolean },
-  ) => {
-    // Already joined to another part of this operation (by the graph or an earlier proposal)? With
-    // `ply`: already joined to the ply pair itself.
-    if (ply) {
-      if (X.some((a) => [...ply.keys].some((b) => linked.has(`${a}|${b}`)))) return;
-    } else if (others.some((Y) => X.some((a) => Y.some((b) => linked.has(`${a}|${b}`))))) return;
+    ply: { keys: Set<string>; lead: string; sideOk?: (B: Run) => boolean } | undefined,
+    strict: boolean,
+  ): { best: Best | null; skippedTube: number; skippedTwin: number } => {
     const cx = new Set(
       X.map((k) => geomOf.get(k))
         .filter(Boolean)
         .map((g) => classOf_(g!)),
     );
-    let best: { A: Run; B: Run; score: number; ratio: number; pleated: boolean } | null = null;
+    let best: Best | null = null;
     let skippedTube = 0;
+    let skippedTwin = 0;
     for (const Y of others) {
       const cy = new Set(
         Y.map((k) => geomOf.get(k))
@@ -342,6 +550,12 @@ export function completeFromJoins(
         skippedTube++;
         continue;
       }
+      // Left and right units in an operation with a third part: both go onto that part, never onto
+      // each other (two plackets end to end, a left chest piece onto the right one).
+      if (others.length >= 2 && !ply && twinUnits(X, Y, geomOf)) {
+        skippedTwin++;
+        continue;
+      }
       for (const ka of X) {
         const ga = geomOf.get(ka);
         if (!ga || classOf_(ga) === 'skip') continue;
@@ -358,11 +572,34 @@ export function completeFromJoins(
           for (const A of runsOf(ga))
             for (const B of runsOf(gb)) {
               const ratio = Math.min(A.len, B.len) / Math.max(A.len, B.len);
-              if (ratio < (ply ? 0.97 : 0.82)) continue;
+              if (ratio < (ply || strict ? 0.97 : 0.82)) continue;
               if (ply?.sideOk && !ply.sideOk(B)) continue;
               // Through a ply pair only a plain, clear seam (a shoulder): no short bits (an
               // armhole end of the yoke, a placket's end), no notch disagreement.
               if (ply && (Math.min(A.len, B.len) < 120 || Math.abs(A.notches - B.notches) > 1))
+                continue;
+              // Two strip ends are never sewn end to end.
+              if (stripEnd(A) && stripEnd(B)) continue;
+              // A strongly curved edge onto a straight one (a chest piece's D-curve onto the centre
+              // back): the curvatures neither match nor complement — not a seam.
+              if (Math.abs(A.turn + B.turn) > 400) continue;
+              // A run round a corner fits only a partner notched at that corner.
+              if (!cornersMarked(A, B) || !cornersMarked(B, A)) continue;
+              // A strip's two long edges go to two different pieces (a gusset between the front and
+              // the back): the piece its other long edge is sewn to takes no second seam.
+              const sa = stripSide(A);
+              const sb = stripSide(B);
+              if (sa?.piece === kb || sb?.piece === ka) continue;
+              // Two panels do not meet directly along a length a strip's free long edge still
+              // wants (the gusset goes between them): the n:n continuation leaves it to the strip.
+              if (
+                strict &&
+                !sa &&
+                !sb &&
+                !stripLongEdges(ga) &&
+                !stripLongEdges(gb) &&
+                stripWants(A.len)
+              )
                 continue;
               // Left leg onto right leg only at the rise; left front onto right front only as the
               // front opening (a closure, not a seam).
@@ -396,40 +633,36 @@ export function completeFromJoins(
               score += Math.min(0.15, 0.003 * Math.abs(A.turn + B.turn));
               score += 0.03 * (A.edges.length + B.edges.length - 2);
               const horiz = (r: Run) => r.dx > r.dy;
-              // Two hems are never sewn to each other.
-              if (horiz(A) && horiz(B) && A.yMid < 0.4 && B.yMid < 0.4) score += 0.15;
+              // Two hems are never sewn to each other (a garment's; a bag's bottoms are).
+              if (!opts.multi && horiz(A) && horiz(B) && A.yMid < 0.4 && B.yMid < 0.4)
+                score += 0.15;
               // A vertical edge onto a horizontal one is unlikely.
               if (horiz(A) !== horiz(B) && Math.max(A.dx, A.dy) > 120 && Math.max(B.dx, B.dy) > 120)
                 score += 0.1;
+              // An item without a body: among equal edges, the pair at the same height and — the
+              // pieces sewn face to face — mirrored across (the front's right side meets the back's
+              // left; across a strip, the panel beyond mirrors the panel before).
+              if (opts.multi) {
+                score += 0.1 * Math.abs(A.yMid - B.yMid);
+                if (sa) score += 0.05 * Math.abs(B.xMid - (1 - sa.x));
+                else if (sb) score += 0.05 * Math.abs(A.xMid - (1 - sb.x));
+                else if (!stripLongEdges(ga) && !stripLongEdges(gb))
+                  score += 0.05 * Math.abs(A.xMid - (1 - B.xMid));
+              }
               if (!best || score < best.score - 1e-9) best = { A, B, score, ratio, pleated };
             }
         }
       }
     }
-    if (!best || best.score > 0.25) {
-      if (ply) return;
-      if (skippedTube === others.length) {
-        byLoops.push({ join: J.label, part: X });
-        return;
-      }
-      // A small piece onto a big one with no edge to match: a flap, welt or patch sewn onto the
-      // panel's face — not an edge-to-edge seam the doll can draw.
-      const big = Math.max(...others.map(areaOf));
-      const small = Math.min(areaOf(X), big);
-      const surf = (Y: string[]) =>
-        areaOf(Y) < 0.2 * areaOf(X) && !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
-      if (
-        (small < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
-        others.every(surf)
-      ) {
-        surface.push({ join: J.label, part: X });
-        return;
-      }
-      left.push(
-        `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides${best ? ` (closest: ${best.A.id} ↔ ${best.B.id}, ${best.A.len.toFixed(0)} vs ${best.B.len.toFixed(0)} mm, score ${best.score.toFixed(2)})` : ''}`,
-      );
-      return;
-    }
+    return { best, skippedTube, skippedTwin };
+  };
+  /** Take a pair: mark its edges used, link the pieces, list the proposal. */
+  const accept = (
+    J: DeclaredJoin,
+    best: Best,
+    ply: { keys: Set<string> } | undefined,
+    extra = '',
+  ) => {
     const { A, B, ratio, pleated } = best;
     const plyWords = ply
       ? ` · sewn between the two plies ${[...ply.keys].join(' + ')} (one seam through both)`
@@ -455,7 +688,7 @@ export function completeFromJoins(
         hand: 'neutral',
         twin: 'none',
         self: false,
-        rule: `from the technologist's order «${J.label}»${plyWords}${pleatWords}`,
+        rule: `from the technologist's order «${J.label}»${plyWords}${pleatWords}${extra}`,
         aLenMm: A.len,
         bLenMm: B.len,
       },
@@ -468,8 +701,88 @@ export function completeFromJoins(
     added.push({
       seam,
       join: J.label,
-      note: `proposed (from the technologist's order «${J.label}») · ${A.id} ↔ ${B.id} · ${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)} mm${A.notches || B.notches ? ` · notches ${A.notches}/${B.notches}` : ''}${pleatWords}${plyWords}`,
+      note: `proposed (from the technologist's order «${J.label}») · ${A.id} ↔ ${B.id} · ${A.len.toFixed(0)} ≈ ${B.len.toFixed(0)} mm${A.notches || B.notches ? ` · notches ${A.notches}/${B.notches}` : ''}${pleatWords}${plyWords}${extra}`,
     });
+  };
+  /**
+   * Search one part X of join J against the other parts: the best free edge pair, proposed when it is
+   * close enough. `ply` (a ply pair of another part, see below) narrows the search onto that pair's
+   * canonical ply with a stricter length band, and nothing is said when no pair is found. In multi
+   * mode the search goes on between X and the part it was sewn to while exact pairs remain (a front
+   * and a back meet along the bottom and both sides).
+   */
+  const searchPart = (
+    J: DeclaredJoin,
+    X: string[],
+    others: string[][],
+    ply?: { keys: Set<string>; lead: string; sideOk?: (B: Run) => boolean },
+  ) => {
+    // Already joined to another part of this operation (by the graph or an earlier proposal)? With
+    // `ply`: already joined to the ply pair itself.
+    // A part already read as a surface piece (laid on a face) is searched no further, either way.
+    if (X.every((k) => surfaced.has(k))) return;
+    others = others.filter((Y) => !Y.every((k) => surfaced.has(k)));
+    if (!others.length) return;
+    const joinedTo = (Y: string[]) => X.some((a) => Y.some((b) => linked.has(`${a}|${b}`)));
+    if (ply) {
+      if (X.some((a) => [...ply.keys].some((b) => linked.has(`${a}|${b}`)))) return;
+    } else if (others.some(joinedTo)) {
+      // Multi mode: a part already sewn to another may still have exact pairs left with it.
+      if (opts.multi) for (const Y of others.filter(joinedTo)) more(J, X, Y);
+      return;
+    }
+    const { best, skippedTube, skippedTwin } = bestPair(X, others, ply, false);
+    if (!best || best.score > 0.25) {
+      if (ply) return;
+      if (skippedTube + skippedTwin === others.length) {
+        if (skippedTube) byLoops.push({ join: J.label, part: X });
+        return;
+      }
+      // A small piece onto a big one with no edge to match: a flap, welt or patch sewn onto the
+      // panel's face — not an edge-to-edge seam the doll can draw.
+      const big = Math.max(...others.map(areaOf));
+      const small = Math.min(areaOf(X), big);
+      const surf = (Y: string[]) =>
+        areaOf(Y) < 0.2 * areaOf(X) && !hasRole(Y, ['body', 'sleeve', 'neck', 'cuff', 'band']);
+      if (
+        (small < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band'])) ||
+        others.every(surf)
+      ) {
+        surface.push({ join: J.label, part: X });
+        return;
+      }
+      left.push(
+        `${J.label}: ${X.join('+')} — no free edge pair of matching length between the declared sides${best ? ` (closest: ${best.A.id} ↔ ${best.B.id}, ${best.A.len.toFixed(0)} vs ${best.B.len.toFixed(0)} mm, score ${best.score.toFixed(2)})` : ''}`,
+      );
+      return;
+    }
+    // A small roleless part (a chest piece, a tab) onto a big one takes an edge seam only when the
+    // edges truly match; a near miss is the piece laid on the panel's face — a surface piece.
+    if (!ply) {
+      const big = Math.max(...others.map(areaOf));
+      const small =
+        areaOf(X) < 0.2 * big && !hasRole(X, ['body', 'sleeve', 'neck', 'cuff', 'band']);
+      if (small && (best.ratio < 0.97 || best.score > 0.1)) {
+        surface.push({ join: J.label, part: X });
+        for (const k of X) surfaced.add(k);
+        return;
+      }
+    }
+    accept(J, best, ply);
+    if (opts.multi && !ply) {
+      const Y = others.find((Y) => Y.includes(best.B.piece.pieceKey));
+      if (Y) more(J, X, Y);
+    }
+  };
+  /** Multi mode: every further exact free pair between X and Y (each edge sewn once). */
+  const more = (J: DeclaredJoin, X: string[], Y: string[]) => {
+    const fixed = opts.fixed;
+    if (fixed && [...X, ...Y].some((k) => fixed.has(k))) return;
+    for (let guard = 0; guard < 24; guard++) {
+      const { best } = bestPair(X, [Y], undefined, true);
+      if (!best || best.score > 0.1) return;
+      accept(J, best, undefined, ' · one of several seams between these two parts');
+    }
   };
   for (const J of joins)
     for (let i = 0; i < J.parts.length; i++)
@@ -558,5 +871,149 @@ export function completeFromJoins(
         }
       }
   }
-  return { added, left, byLoops, surface };
+  return { added, left, byLoops, surface, refused };
+}
+
+/**
+ * POCKET BAGS. Two pocket pieces the order puts on different sides of one operation, both bag-sized
+ * (100 mm or more each way — a bag, not a welt or a binding strip), with an edge pair of equal
+ * length (within 3 %, the same notch count), are sewn to each other round the bag: when the
+ * operation is just the two of them, when they are identical twins (a slant pocket's two halves,
+ * joined only when the front meets the back), or when the equal edges are both curved (an in-seam
+ * pocket's bag halves, 314 = 314 round 270°). Never across left and right (hands, mirror twins,
+ * or the left and the right unit of the garment); one bag seam per pocket piece. The pieces are
+ * surface pieces — the seam is reported, drawn on the panel they are sewn onto, not solved.
+ */
+export function pocketBagJoins(
+  graph: SeamGraph,
+  joins: readonly DeclaredJoin[],
+  /** Pieces never sewn (lining at level 0, interfacing). */
+  exclude: ReadonlySet<string> = new Set(),
+): JoinProposal[] {
+  const geomOf = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
+  const isSurface = (k: string) => {
+    const g = geomOf.get(k);
+    return !!g && classOf(g, graph) === 'skip';
+  };
+  const handOf = (k: string) => {
+    const g = geomOf.get(k);
+    return g ? g.hand ?? readName(g.name).hand : null;
+  };
+  const pk = (id: string) => id.slice(0, id.lastIndexOf('#'));
+  const ids = (id: string) => {
+    const at = id.lastIndexOf('#');
+    return id
+      .slice(at + 1)
+      .split('+')
+      .map((k) => `${id.slice(0, at)}#${k}`);
+  };
+  const used = new Set<EdgeId>();
+  // (a surface placement — the pocket laid on the panel's face along an edge — is not a seam on
+  // that edge: the bag's edge stays free for its other half)
+  // (a graph seam between two pocket pieces is the bag seam itself — the graph finds many of them
+  // by length and curvature, but drops them with the pieces it does not draw: read again here)
+  const pkOf = (id: string) => id.slice(0, id.lastIndexOf('#'));
+  for (const s of graph.chosen)
+    if (s.kind !== 'surface' && !(isSurface(pkOf(s.a)) && isSurface(pkOf(s.b))))
+      for (const id of [...(s.aParts ?? [s.a]), ...(s.bParts ?? [s.b])])
+        for (const one of ids(id)) used.add(one);
+  const bagOf = new Map<string, string>();
+  const out: JoinProposal[] = [];
+  /** The one hand of a unit (its handed pieces all left, or all right), else null. */
+  const unitHand = (X: readonly string[]) => {
+    const hs = new Set(X.map(handOf).filter(Boolean));
+    return hs.size === 1 ? [...hs][0] : null;
+  };
+  const bagSized = (g: PieceGeom) => {
+    const { w, h } = bboxOf(g);
+    return Math.min(w, h) >= 100;
+  };
+  for (const J of joins) {
+    const parts = J.parts.map((X) => X.filter((k) => !exclude.has(k))).filter((X) => X.length);
+    // (an operation of exactly two pocket pieces: the one sews the other — not a pocket piece onto
+    // a unit of welts and bags, whose edges match by chance)
+    const twoPockets = parts.length === 2 && parts.every((X) => X.length === 1 && isSurface(X[0]));
+    for (let i = 0; i < parts.length; i++)
+      for (let j = i + 1; j < parts.length; j++) {
+        const X = parts[i];
+        const Y = parts[j];
+        // The left and the right unit: their pockets are never sewn to each other.
+        const hx = unitHand(X);
+        const hy = unitHand(Y);
+        // (mirror units: hands apart, or a mirror twin across — identical twins across are the
+        // bag halves themselves)
+        const mirrorUnits =
+          twinUnits(X, Y, geomOf) &&
+          X.some((a) =>
+            geomOf.get(a)?.twinOf.some((t) => t.kind === 'mirror' && Y.includes(t.key)),
+          );
+        if ((hx && hy && hx !== hy) || mirrorUnits) continue;
+        for (const a of X) {
+          if (!isSurface(a) || bagOf.has(a)) continue;
+          const ga = geomOf.get(a);
+          if (!ga || !bagSized(ga)) continue;
+          for (const b of Y) {
+            if (!isSurface(b) || bagOf.has(b) || bagOf.has(a) || a === b) continue;
+            const gb = geomOf.get(b);
+            if (!gb || !bagSized(gb)) continue;
+            const ha = handOf(a);
+            const hb = handOf(b);
+            if (ha && hb && ha !== hb) continue;
+            if (ga.twinOf.some((t) => t.key === b && t.kind === 'mirror')) continue;
+            const identical = ga.twinOf.some((t) => t.key === b && t.kind === 'identical');
+            let best: { ea: Edge; eb: Edge; score: number; curved: boolean } | null = null;
+            for (const ea of ga.edges) {
+              if (ea.kind !== 'edge' || used.has(ea.id)) continue;
+              for (const eb of gb.edges) {
+                if (eb.kind !== 'edge' || used.has(eb.id)) continue;
+                const ratio = Math.min(ea.lenMm, eb.lenMm) / Math.max(ea.lenMm, eb.lenMm);
+                if (ratio < 0.97 || ea.notchesMm.length !== eb.notchesMm.length) continue;
+                if (Math.min(ea.lenMm, eb.lenMm) < 80) continue;
+                const curved = Math.abs(ea.turnDeg) >= 90 && Math.abs(eb.turnDeg) >= 90;
+                if (!(twoPockets || identical || curved)) continue;
+                const score =
+                  1 - ratio + (curved ? 0 : 0.02) - 0.0001 * Math.min(ea.lenMm, eb.lenMm);
+                if (!best || score < best.score) best = { ea, eb, score, curved };
+              }
+            }
+            if (!best) continue;
+            const { ea, eb, curved } = best;
+            const why = twoPockets
+              ? 'the operation sews just these two pocket pieces'
+              : identical
+                ? 'two identical bag halves'
+                : 'both edges curved — the bag halves sewn round';
+            const note = `pocket bag (from the technologist's order «${J.label}»): ${a} + ${b} sewn to each other round the bag · ${ea.lenMm.toFixed(0)} = ${eb.lenMm.toFixed(0)} mm${curved ? ` round ${Math.abs(ea.turnDeg).toFixed(0)}°` : ''} · ${why} · drawn on the panel they are sewn onto, not solved`;
+            out.push({
+              join: J.label,
+              note,
+              seam: {
+                a: ea.id,
+                b: eb.id,
+                score: 0.75,
+                kind: 'edge',
+                evidence: {
+                  dLenMm: Math.abs(ea.lenMm - eb.lenMm),
+                  relLen: Math.min(ea.lenMm, eb.lenMm) / Math.max(ea.lenMm, eb.lenMm),
+                  notchScore: null,
+                  curvature: curved ? 'both-convex' : 'flat',
+                  hand: 'neutral',
+                  twin: identical ? 'identical' : 'none',
+                  self: false,
+                  rule: note,
+                  aLenMm: ea.lenMm,
+                  bLenMm: eb.lenMm,
+                },
+              },
+            });
+            used.add(ea.id);
+            used.add(eb.id);
+            bagOf.set(a, b);
+            bagOf.set(b, a);
+            void pk;
+          }
+        }
+      }
+  }
+  return out;
 }

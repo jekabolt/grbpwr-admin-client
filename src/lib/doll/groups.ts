@@ -119,7 +119,18 @@ const dims = (g: PieceGeom) => {
 export function groupPieces(
   graph: SeamGraph,
   facts: SkeletonFacts,
-  opts: { lining?: boolean; dropSeams?: string[]; hardware?: ReadonlyMap<string, string> } = {},
+  opts: {
+    lining?: boolean;
+    dropSeams?: string[];
+    hardware?: ReadonlyMap<string, string>;
+    /**
+     * Identical twins that are PANELS side by side, never plies of one piece: the order lists them
+     * as separate parts of one operation with three or more parts (a bag's eight triangles sewn into
+     * a ring, its two octagon lids each onto a ring). A twin pair the order sews alone (a collar and
+     * its facing, two belt strips into a strap) still stacks.
+     */
+    panels?: ReadonlySet<string>;
+  } = {},
 ): Grouping {
   const warnings: string[] = [];
   const skipped: Grouping['skipped'] = [];
@@ -256,10 +267,12 @@ export function groupPieces(
     const [L, F] = areaOf(ga) >= areaOf(gb) ? [la, lb] : [lb, la];
     leaderOf.set(F, L);
   };
+  const noStack = opts.panels ?? new Set<string>();
   for (const s of live) {
     const a = pk(s.a);
     const b = pk(s.b);
     if (a === b || group.get(a) !== group.get(b)) continue;
+    if (noStack.has(a) || noStack.has(b)) continue;
     const ga = geomOf.get(a)!;
     if (
       s.evidence.twin === 'identical' ||
@@ -275,6 +288,7 @@ export function groupPieces(
       const b = keys[j];
       const g = group.get(a)!;
       if (g !== group.get(b) || !RING_GROUPS.has(g) || role.get(a) !== role.get(b)) continue;
+      if (noStack.has(a) || noStack.has(b)) continue;
       const [wa, ha] = dims(geomOf.get(a)!);
       const [wb, hb] = dims(geomOf.get(b)!);
       if (Math.abs(wa - wb) / Math.max(wa, wb) < 0.15 && Math.abs(ha - hb) / Math.max(ha, hb) < 0.2)
