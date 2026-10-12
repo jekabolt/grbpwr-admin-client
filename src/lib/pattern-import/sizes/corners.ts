@@ -17,15 +17,15 @@
 //            small to be a chain (≤ 3 mm) — and its vertex ≤ 0.5 mm from the crossing of those two
 //            edges' tangents (b). Touching ends of several ranks (a dense corner bundle): only the
 //            rank with (a)+(b), and only when exactly one rank has them — never by proximity.
-//   EXTEND   no stub (a phase shift): two own ends of one rank, 0.5–8 mm apart, ≥ 20° apart, whose
-//            tangents cross ahead of both within 8 mm, are carried to the crossing (evidence 1)
-//            when that vertex lies where the grading of the nearest ranks drawing the same corner
-//            puts it (evidence 2: ≤ 35 % of one grade step off; nearest rank each side ≤ 3 away,
-//            or the step of two on one side continued) and the new segments cross no line of the
-//            rank.
-// A closed corner never merges two main lines (the absorbed one would stay behind as a long
-// "ignored" duplicate): a ramp is absorbed into the line it continues; a stub / extension carries
-// line A on (stub points or the vertex) to B's end point, so A and B meet exactly there.
+//   EXTEND   no stub (a phase shift), on a sheet that shows the convention (≥ 10 stubs + ramps):
+//            two own ends of one rank, 0.5–8 mm apart, ≥ 20° apart, whose tangents cross ahead of
+//            both within 8 mm, are carried to the crossing (evidence 1) when that vertex lies where
+//            the grading of the nearest ranks drawing the same corner puts it (evidence 2: ≤ 35 %
+//            of one grade step off; nearest rank each side ≤ 3 away, or the step of two on one
+//            side continued) and the new segments cross no line of the rank.
+// Nothing is merged, extended or re-classed here: every closed corner is a DERIVED WALL of its
+// rank (`CornerWall`, on the chain set), hung on its own lines; the wall model re-checks the rank
+// and pen on the final lines and the fill draws it beside them (pieces/walls.ts, fill.ts).
 import type { Chain, CornerWall, PtMm, Style } from 'lib/pattern-import/types';
 
 export type { CornerWall };
@@ -45,6 +45,8 @@ export const CORNER = {
   rampAngleDeg: 15,
   rampLateralMm: 0.35,
   extendMaxMm: 8,
+  /** Stubs + ramps a sheet must show before an open corner is extended (the convention). */
+  conventionMin: 10,
   minTurnDeg: 20,
   /** A neighbouring rank's same corner is searched this far from the vertex. */
   trendReachMm: 25,
@@ -502,6 +504,13 @@ export function closeCorners(
   };
   let extended = 0;
   pairs.sort((p, q) => p.cost - q.cost);
+  // the phase-shift rule only where the sheet proves the convention: its corners are cut into
+  // stubs and ramps (Mood/Illustrator "align dashes to corners") — a sheet without any is not
+  // drawn that way, and its open corners are another matter (continuity, the operator)
+  if (stubs + ramps < CORNER.conventionMin) {
+    if (pairs.length) refused['extend: no stub/ramp convention on this sheet'] = pairs.length;
+    pairs.length = 0;
+  }
   for (const pr of pairs) {
     if (!free(pr.k0) || !free(pr.k1)) continue;
     const A = ends[pr.k0];
