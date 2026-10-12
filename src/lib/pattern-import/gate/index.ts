@@ -303,6 +303,7 @@ export function identityByBlockFor(
       excused: map(g.excused),
       ...(g.shared?.length ? { shared: map(g.shared) } : {}),
       ...(g.foreign?.length ? { foreign: map(g.foreign) } : {}),
+      ...(g.exact ? { exact: true } : {}),
     };
   }
   return out;

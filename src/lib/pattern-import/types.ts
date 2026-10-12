@@ -1685,6 +1685,11 @@ export type IdentityGeometry = {
   shared?: PtMm[][];
   /** Lines provably another size's (another pen, another size's class, an orphan of another look). */
   foreign?: PtMm[][];
+  /**
+   * The pen is declared (a dash pattern, a plain stroke) — not a rhythm measured off the drawing or
+   * the class's own lines: the stricter share applies.
+   */
+  exact?: boolean;
 };
 
 export type GateCheck = {

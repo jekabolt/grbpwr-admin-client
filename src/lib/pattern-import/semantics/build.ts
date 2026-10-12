@@ -1718,6 +1718,7 @@ export function buildPieceSpecsDetailed(
     return {
       // keyed by the drawing but no one look: the rank's own lines as F3 read them
       pen: look.length ? describePen(look) : 'its own size lines',
+      ...(look.length && look.every((l) => l.kind !== 'motif') ? { exact: true } : {}),
       own: map(own),
       excused,
       ...(shared.length ? { shared: map(shared) } : {}),

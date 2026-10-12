@@ -1713,6 +1713,12 @@ export const IDENTITY_REACH_MM = 0.5;
 /** G22: below this share of the line off the common edges the size claims no pen (a band). */
 const IDENTITY_OWN_FLOOR = 0.2;
 
+/**
+ * G22: a pen measured off the drawing (a recovered rhythm; the class's own lines) reads off by
+ * more — a size drawn in such a rhythm passes at this share (palto's sleeve: 80 % own, 20 % on a
+ * line the neighbour size was ranked with where the two coincide).
+ */
+export const IDENTITY_SHARE_MIN_MEASURED = 0.75;
 /** G22: at least this share of the line (off the common edges) on the size's own pen at all. */
 export const IDENTITY_OWN_MIN = 0.5;
 
@@ -1807,7 +1813,8 @@ export function g22(ctx: GateCtx): GateCheck {
     if (share == null) continue;
     measured++;
     worst = Math.min(worst, share);
-    if (share < IDENTITY_SHARE_MIN || ownAll < IDENTITY_OWN_MIN) {
+    const min = g.exact ? IDENTITY_SHARE_MIN : IDENTITY_SHARE_MIN_MEASURED;
+    if (share < min || ownAll < IDENTITY_OWN_MIN) {
       failed.push(b.block);
       notes.push(
         `${b.block}: ${(ownAll * 100).toFixed(0)} % on its own line (${g.pen}), ${(foreignAll * 100).toFixed(0)} % on another size's`,
@@ -1821,7 +1828,7 @@ export function g22(ctx: GateCtx): GateCheck {
     notes.join('; ') ||
       `every size lies on its own line (${measured} measured, worst ${(worst * 100).toFixed(0)} %)`,
     fmt(worst),
-    `≥ ${IDENTITY_SHARE_MIN} of own + another size's line on its own pen, ≥ ${IDENTITY_OWN_MIN} of the line`,
+    `≥ ${IDENTITY_SHARE_MIN} (declared pen) / ${IDENTITY_SHARE_MIN_MEASURED} (measured) of own + another size's line on its own pen, ≥ ${IDENTITY_OWN_MIN} of the line`,
   );
 }
 
