@@ -139,7 +139,7 @@ const SOFT_CORNER_DEG = 60;
 /** A seam this sure (and notch-backed, and unrivalled) carries a side from piece to piece. */
 const SIDE_CONFIDENT = 0.9;
 /** Rejected list keeps candidates down to this score. */
-const REJECTED_FLOOR = 0.4;
+export const REJECTED_FLOOR = 0.4;
 
 // ── runs ────────────────────────────────────────────────────────────────────────────────────
 
@@ -401,7 +401,7 @@ export type ScoreParts = {
   meeting: 'join' | 'fold' | 'stack' | 'any';
 };
 
-type Cand = {
+export type Cand = {
   u: Run;
   v: Run;
   score: number;
@@ -416,7 +416,7 @@ type Cand = {
   legRole?: 'rise' | 'inseam' | 'outseam';
 };
 
-const isStraight = (r: Run) => r.chordMm / r.lenMm >= STRAIGHT;
+export const isStraight = (r: Run) => r.chordMm / r.lenMm >= STRAIGHT;
 const isCentreLong = (r: Run) =>
   r.lenMm >= CENTRE_MIN_SHARE * Math.max(...r.piece.edges.map((e) => e.lenMm));
 /** A centre / tube edge runs UP the piece: its chord within this of the drawing's vertical. */
@@ -444,7 +444,7 @@ const yBox = (p: PieceGeom) => {
  * wrist, a waist, a shoulder are not (11.10 corpus: FW26-001's two fronts were paired at the hem,
  * its two sleeves at the wrist — straight, long, mirror twins, every other rule passed).
  */
-const isLengthwise = (r: Run) => {
+export const isLengthwise = (r: Run) => {
   const a = r.pts[0];
   const b = r.pts[r.pts.length - 1];
   return (
@@ -462,7 +462,7 @@ const isTubeRun = (r: Run) => {
   const b = r.pts[r.pts.length - 1];
   return Math.atan2(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) <= (TUBE_DEG * Math.PI) / 180;
 };
-const isTubePair = (u: Run, v: Run) => {
+export const isTubePair = (u: Run, v: Run) => {
   if (u.piece !== v.piece) return false;
   const b = yBox(u.piece);
   const h = b.y1 - b.y0;
@@ -488,7 +488,7 @@ const isTubePair = (u: Run, v: Run) => {
   );
 };
 
-function twinKindOf(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' | null {
+export function twinKindOf(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' | null {
   return a.twinOf.find((t) => t.key === b.pieceKey)?.kind ?? null;
 }
 
@@ -892,11 +892,11 @@ type LegCandRole = 'rise' | 'inseam' | 'outseam';
 
 // ── A3 ──────────────────────────────────────────────────────────────────────────────────────
 
-const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+export const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** A candidate's identity regardless of which side was read first. */
-const candId = (c: Cand) => [c.u.id, c.v.id].sort(cmp).join('~');
+export const candId = (c: Cand) => [c.u.id, c.v.id].sort(cmp).join('~');
 
-const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate => ({
+export const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate => ({
   a: c.u.id,
   b: c.v.id,
   score: Math.round(c.score * 1000) / 1000,
@@ -906,12 +906,50 @@ const toCandidate = (c: Cand, ambiguousWith?: SeamCandidate[]): SeamCandidate =>
   ...(ambiguousWith && ambiguousWith.length ? { ambiguousWith } : {}),
 });
 
+/** A scored pair as the pool keeps it (the greedy's and the global solver's common input). */
+export type PoolCand = Cand;
+
+/**
+ * Everything A3 knows BEFORE any assignment: the runs, every scored pair with the rule that dropped
+ * it (if one did), closures told apart, stored decisions applied. The greedy (`greedyAssign`) and
+ * the operation-driven global solver (assignment/) both start from here, so they differ only in
+ * WHO gets WHICH edge — never in the evidence.
+ */
+export type CandidatePool = {
+  pieces: readonly PieceGeom[];
+  facts: SkeletonFacts;
+  rules: MatchRules;
+  decisions: SeamDecisions | undefined;
+  /** Pieces in canonical order (by key). */
+  byKey: PieceGeom[];
+  runs: Run[];
+  /** Edges designated for the one identical-layer seam of their piece. */
+  designated: Set<EdgeId>;
+  mirroredCut: Set<string>;
+  /** Mirrored blocks cut twice (×2 MIRRORED): one key, both hands. */
+  bothHands: Set<string>;
+  /** Every scored pair, best first (closures carry kind 'closure-not-seam', dropped ones `dropped`). */
+  all: Cand[];
+  /** Candidates a stored «not this seam» dropped (listed in `rejected` with the person's words). */
+  excluded: Set<Cand>;
+  warnings: string[];
+};
+
 export function matchSeams(
   pieces: readonly PieceGeom[],
   facts: SkeletonFacts,
   rules: MatchRules = ALL_RULES,
   decisionsIn?: SeamDecisionsInput,
 ): SeamGraph {
+  return greedyAssign(candidatePool(pieces, facts, rules, decisionsIn));
+}
+
+export function candidatePool(
+  pieces: readonly PieceGeom[],
+  facts: SkeletonFacts,
+  rules: MatchRules = ALL_RULES,
+  decisionsIn?: SeamDecisionsInput,
+): CandidatePool {
   const warnings: string[] = [];
   // Seams stored on the card (lib/seams). Absent = the engine alone, exactly as before.
   const decisions: SeamDecisions | undefined =
@@ -1060,6 +1098,71 @@ export function matchSeams(
     }
   }
 
+  return {
+    pieces,
+    facts,
+    rules,
+    decisions,
+    byKey,
+    runs,
+    designated,
+    mirroredCut,
+    bothHands,
+    all,
+    excluded: excludedSet,
+    warnings,
+  };
+}
+
+/**
+ * Surface joins (P2 lane S) over the pool's pieces, with the stored decisions applied: a rejected
+ * surface join goes to `rejected` with the person's words, a confirmed one carries who said so, a
+ * confirmed one not found on today's marks is said in `warnings`. Takes no edge.
+ */
+export function surfaceLayer(
+  P: CandidatePool,
+  rejected: SeamCandidate[],
+  warnings: string[],
+): SeamCandidate[] {
+  const { facts, byKey, decisions } = P;
+  const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
+  const s = surfaceSeams(byKey, copies);
+  let surfaceChosen = s.chosen;
+  if (decisions) {
+    const forcedSurface = (decisions.forced ?? []).filter((c) => c.kind === 'surface');
+    const noSurface = (decisions.excluded ?? []).filter((x) => x.surface);
+    const out: SeamCandidate[] = [];
+    for (const c of surfaceChosen) {
+      const x = noSurface.find(
+        (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+      );
+      if (x) rejected.push({ ...c, evidence: { ...c.evidence, rule: x.rule } });
+      else out.push(c);
+    }
+    surfaceChosen = out.map((c) => {
+      const f = forcedSurface.find(
+        (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
+      );
+      return f?.provenance ? { ...c, provenance: f.provenance } : c;
+    });
+    for (const f of forcedSurface)
+      if (
+        !surfaceChosen.some(
+          (c) => c.surface?.host === f.surface?.host && c.surface?.part === f.surface?.part,
+        )
+      )
+        warnings.push(
+          `confirmed surface join ${f.surface?.part} on ${f.surface?.host} is not found on today's marks — not drawn`,
+        );
+  }
+  warnings.push(...s.warnings);
+  return surfaceChosen;
+}
+
+/** Greedy assignment over the pool — the engine as it ran before the global solver (A3 as shipped). */
+export function greedyAssign(P: CandidatePool): SeamGraph {
+  const { pieces, facts, rules, decisions, byKey, all, designated, bothHands, warnings } = P;
+  const excludedSet = P.excluded;
   // Greedy: closures first (they take their edges out of play), then seams. Each edge is sewn
   // once — except an edge of a mirrored block cut twice (×2 MIRRORED): its reflected copy is the
   // other hand, so it may meet a SECOND edge of the same single piece it already meets (FRONT_L's
@@ -1098,7 +1201,6 @@ export function matchSeams(
   const idsOfSide = (c: SeamCandidate, side: 'a' | 'b') =>
     side === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b);
   const forcedIn = (decisions?.forced ?? []).filter((c) => c.kind !== 'surface');
-  const forcedSurface = (decisions?.forced ?? []).filter((c) => c.kind === 'surface');
   const decidedClosures = decisions?.closures ?? [];
   const candById = new Map(all.map((c) => [candId(c), c]));
   const forcedSame = new Set<Cand>();
@@ -1408,41 +1510,7 @@ export function matchSeams(
 
   // Surface joins (P2 lane S) — outside all-pairs and the greedy: they take no edge, so the host's
   // edges stay free for its ordinary seams; added on top of them.
-  if (rules.surface) {
-    const copies = new Map(facts.pieces.map((p) => [p.pieceKey, pieceMultiplicity(p)]));
-    const s = surfaceSeams(byKey, copies);
-    let surfaceChosen = s.chosen;
-    if (decisions) {
-      // A rejected surface join is not drawn; a confirmed one carries who said so (the part's
-      // placement is the engine's — a surface join takes no edge to force).
-      const noSurface = (decisions.excluded ?? []).filter((x) => x.surface);
-      const out: SeamCandidate[] = [];
-      for (const c of surfaceChosen) {
-        const x = noSurface.find(
-          (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
-        );
-        if (x) rejected.push({ ...c, evidence: { ...c.evidence, rule: x.rule } });
-        else out.push(c);
-      }
-      surfaceChosen = out.map((c) => {
-        const f = forcedSurface.find(
-          (q) => q.surface?.host === c.surface?.host && q.surface?.part === c.surface?.part,
-        );
-        return f?.provenance ? { ...c, provenance: f.provenance } : c;
-      });
-      for (const f of forcedSurface)
-        if (
-          !surfaceChosen.some(
-            (c) => c.surface?.host === f.surface?.host && c.surface?.part === f.surface?.part,
-          )
-        )
-          warnings.push(
-            `confirmed surface join ${f.surface?.part} on ${f.surface?.host} is not found on today's marks — not drawn`,
-          );
-    }
-    chosen.push(...surfaceChosen);
-    warnings.push(...s.warnings);
-  }
+  if (rules.surface) chosen.push(...surfaceLayer(P, rejected, warnings));
 
   // Connected components over seams (closures do not join pieces; surface joins do).
   const parent = new Map(pieces.map((p) => [p.pieceKey, p.pieceKey]));

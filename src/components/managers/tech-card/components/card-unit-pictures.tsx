@@ -18,6 +18,7 @@
 // (2) подпись отстаивается (набор имени детали не читает граф на каждую букву); (3) сам расчёт —
 // в простое браузера, вне кадра набора; (4) больше CAP_PIECES деталей — пиктограмм нет, молча.
 // Правка шагов пересчитывает одни раскладки узлов, граф не трогает.
+import { assignmentMode } from 'lib/assembly-skeleton/assignment';
 import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
 import type { SeamGraph, SkeletonProposal } from 'lib/assembly-skeleton/types';
 import { unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
@@ -25,6 +26,7 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
 
+import { seamAssignmentInputOf } from './assembly-seams/seam-assignment';
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
 import {
   buildSkeletonFacts,
@@ -139,14 +141,25 @@ export function CardUnitPicturesProvider({
   ].join('~');
   const catSig = [...(categoryNames ?? []), purpose ?? ''].join('|');
   const seamsSig = useCardSeamsSig(); // SEAMS Need A: a decision re-reads the graph
+  // The order's steps assign the edges (VITE_SEAM_ASSIGNMENT): a step edited re-reads the graph.
+  const opsSig =
+    assignmentMode() === 'greedy'
+      ? ''
+      : operations
+          .map(
+            (o) =>
+              `${(o.outputUnitKey ?? '').trim()}<${(o.inputKeys ?? []).join(',')}:${o.operationType ?? ''}`,
+          )
+          .join('~');
   const factsSig =
     hasUnits && shapes && contoured > 0 && contoured <= CAP_PIECES
-      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}#${seamsSig}`
+      ? `${pieceSig}#${bomSig}#${catSig}#${linkSig}#${seamsSig}#${opsSig}`
       : '';
 
   // (в) Подпись отстаивается, граф читается в простое — вне кадра, в котором набирают.
   const [graph, setGraph] = useState<{ sig: string; graph: SeamGraph | null } | null>(null);
   const live = useLatest({
+    operations,
     pieces,
     bomItems,
     shapes,
@@ -194,7 +207,14 @@ export function CardUnitPicturesProvider({
         let g: SeamGraph | null = null;
         if (facts.pieces.length > 0) {
           try {
-            g = readSeamGraph(facts, undefined, {}, cardSeamDecisions(facts));
+            g = readSeamGraph(
+              facts,
+              undefined,
+              {},
+              cardSeamDecisions(facts),
+              undefined,
+              seamAssignmentInputOf(v.operations, new Set(facts.pieces.map((p) => p.pieceKey))),
+            );
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.
             g = null;
