@@ -366,6 +366,25 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const ids = m.graded.filter((id) => set.chains[id] && set.chains[id].pts.length >= 2);
   const grid = new SegGrid(8);
   for (const id of ids) grid.addPolyline(id, set.chains[id].pts);
+  // an end that meets an end of another line of its rank exactly (MOOD Ф2 carries a size's line
+  // round its corner onto its next edge) is no end: that size's line runs on through it
+  const endKey = (p: PtMm) => `${Math.round(p.x * 20)},${Math.round(p.y * 20)}`;
+  const endsAt = new Map<string, { id: ChainId; r: number }[]>();
+  for (const id of ids) {
+    const r = rank.get(id);
+    const c = set.chains[id];
+    if (r === undefined || c.closed) continue;
+    for (const p of [c.pts[0], c.pts[c.pts.length - 1]]) {
+      const k = endKey(p);
+      const a = endsAt.get(k);
+      if (a) a.push({ id, r });
+      else endsAt.set(k, [{ id, r }]);
+    }
+  }
+  const runsOn = (id: ChainId, p: PtMm) => {
+    const r = rank.get(id);
+    return r !== undefined && !!endsAt.get(endKey(p))?.some((e) => e.id !== id && e.r === r);
+  };
   const out: WallItem[] = [];
   const step = 2;
   for (const id of ids) {
@@ -410,8 +429,10 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         const op = set.chains[o].pts;
         // the foot within 3 mm (along the line) of its end counts as the end: chains often finish
         // with a short hook (a zigzag's last tooth) that would otherwise look "beside"
-        const fromEnd = Math.min(arcTo(op, b.i, b.u), arcFrom(op, b.i, b.u));
-        if (fromEnd < 3) continue;
+        const toStart = arcTo(op, b.i, b.u);
+        const toEnd = arcFrom(op, b.i, b.u);
+        if (toStart < 3 && !runsOn(o, op[0])) continue;
+        if (toEnd < 3 && !runsOn(o, op[op.length - 1])) continue;
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;

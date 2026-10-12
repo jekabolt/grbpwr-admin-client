@@ -28,6 +28,9 @@ import { dist, SegGrid, segNearest } from '../chains/geom';
 
 export const CORNER = {
   touchMm: 1.5,
+  /** A stub's end may stand off an own end by the pen's gap + dot + gap (the dot is too small to
+   * be a chain): at most this. */
+  touchMaxMm: 3,
   stubMaxMm: 15,
   rampMaxMm: 15,
   vertexMm: 0.5,
@@ -271,6 +274,21 @@ export function closeCorners(
     for (const e of added) addEnd(e);
   }
   const ownLike = (c: number) => own(c) || rampOf.has(c);
+  /**
+   * How far a stub's end may stand off an end of line c: 1.5 mm, or the pen's longest blank run
+   * (a gap, a dot < 0.6 mm too small to be a chain, a gap) + 0.3 mm, ≤ 3 mm.
+   */
+  const touchOf = (c: number) => {
+    const d = styleOf(c)?.dash;
+    if (!d || !d.some((v) => v > 0.01)) return T;
+    const p = period(d);
+    let run = 0;
+    for (let i = 1; i < p.length; i += 2) {
+      const dot = p[(i + 1) % p.length];
+      run = Math.max(run, p[i] + (dot < 0.6 ? dot + p[(i + 2) % p.length] : 0));
+    }
+    return Math.min(CORNER.touchMaxMm, Math.max(T, run + 0.3));
+  };
   // ── STUBS ──
   let stubs = 0;
   for (let c = 0; c < chains.length; c++) {
@@ -285,8 +303,13 @@ export function closeCorners(
     const s1 = ch.pts[ch.pts.length - 1];
     const near0: number[] = [];
     const near1: number[] = [];
-    endsNear(s0, T, (k) => !usedEnd.has(ek(ends[k].c, ends[k].end)) && near0.push(k));
-    endsNear(s1, T, (k) => !usedEnd.has(ek(ends[k].c, ends[k].end)) && near1.push(k));
+    const free0 = (q: PtMm, into: number[]) =>
+      endsNear(q, CORNER.touchMaxMm, (k) => {
+        const E = ends[k];
+        if (!usedEnd.has(ek(E.c, E.end)) && dist(E.p, q) <= touchOf(E.c)) into.push(k);
+      });
+    free0(s0, near0);
+    free0(s1, near1);
     if (!near0.length && !near1.length) continue;
     const ok: { k0: number; k1: number; r: number; d: number }[] = [];
     for (const k0 of near0)
@@ -373,50 +396,55 @@ export function closeCorners(
   vertices.forEach((w, i) => vGrid.addSeg(i, 0, w.v, w.v));
   const sameDir = (u: PtMm, w: PtMm) => u.x * w.x + u.y * w.y >= angleCos(15);
   /** the same corner (both edge directions) in rank k nearest to `x` */
-  const cornerOf = (k: number, x: PtMm, t0: PtMm, t1: PtMm): PtMm | null => {
+  const cornerOf = (k: number, x: PtMm, t0: PtMm, t1: PtMm, reach: number): PtMm | null => {
     let best: PtMm | null = null;
     let bd = Infinity;
-    vGrid.near(x, CORNER.trendReachMm, (i) => {
+    vGrid.near(x, reach, (i) => {
       const w = vertices[i];
       if (w.r !== k) return;
       const match =
         (sameDir(w.t0, t0) && sameDir(w.t1, t1)) || (sameDir(w.t0, t1) && sameDir(w.t1, t0));
       if (!match) return;
       const d = dist(w.v, x);
-      if (d <= CORNER.trendReachMm && d < bd) {
+      if (d <= reach && d < bd) {
         bd = d;
         best = w.v;
       }
     });
     return best;
   };
-  /** evidence 2: the vertex lies in the trend of the neighbouring ranks' same corner */
+  /**
+   * evidence 2: the vertex lies in the trend of the neighbouring ranks' same corner — the nearest
+   * rank on each side that draws it (≤ 3 ranks away: a neighbour drawn in beads may not show it),
+   * the vertex where the grading between them puts rank r (≤ 35 % of one step off, ≥ 0.5 mm);
+   * at an end of the run, the step of the two nearest ranks on the one side continued.
+   */
   const inTrend = (r: number, x: PtMm, t0: PtMm, t1: PtMm): boolean => {
-    const lo = r > 0 ? cornerOf(r - 1, x, t0, t1) : null;
-    const hi = r + 1 < n ? cornerOf(r + 1, x, t0, t1) : null;
-    if (lo && hi) {
-      const L = dist(lo, hi);
-      if (L < 0.3) return dist(x, lo) <= 0.5;
-      const h = segNearest(x, lo, hi);
-      const u = ((x.x - lo.x) * (hi.x - lo.x) + (x.y - lo.y) * (hi.y - lo.y)) / (L * L);
-      return u >= -0.05 && u <= 1.05 && h.d <= Math.max(0.5, 0.25 * L);
-    }
-    // an end of the run: two neighbours on one side, the step continued
-    const [n1, n2] =
-      !lo && hi
-        ? [hi, r + 2 < n ? cornerOf(r + 2, x, t0, t1) : null]
-        : lo && !hi
-          ? [lo, r > 1 ? cornerOf(r - 2, x, t0, t1) : null]
-          : [null, null];
-    if (!n1 || !n2) return false;
-    const d1 = { x: n1.x - n2.x, y: n1.y - n2.y };
-    const d0 = { x: x.x - n1.x, y: x.y - n1.y };
-    const l1 = Math.hypot(d1.x, d1.y);
-    const l0 = Math.hypot(d0.x, d0.y);
-    if (l1 < 0.3) return l0 <= 0.5;
-    if (l0 < 0.05) return false;
-    const cos = (d0.x * d1.x + d0.y * d1.y) / (l0 * l1);
-    return cos >= 0.7 && l0 / l1 >= 1 / 3 && l0 / l1 <= 3;
+    const found = (dir: 1 | -1) => {
+      const out: { k: number; v: PtMm }[] = [];
+      for (let d = 1; d <= 3 && out.length < 2; d++) {
+        const k = r + dir * d;
+        if (k < 0 || k >= n) break;
+        const v = cornerOf(k, x, t0, t1, CORNER.trendReachMm * d);
+        if (v) out.push({ k, v });
+      }
+      return out;
+    };
+    const lo = found(-1);
+    const hi = found(1);
+    let a: { k: number; v: PtMm };
+    let b: { k: number; v: PtMm };
+    if (lo.length && hi.length) {
+      a = lo[0];
+      b = hi[0];
+    } else if (lo.length >= 2 || hi.length >= 2) {
+      [a, b] = lo.length >= 2 ? [lo[1], lo[0]] : [hi[1], hi[0]];
+    } else return false;
+    // the grading line through a (rank a.k) and b (rank b.k), at rank r
+    const f = (r - a.k) / (b.k - a.k);
+    const e = { x: a.v.x + (b.v.x - a.v.x) * f, y: a.v.y + (b.v.y - a.v.y) * f };
+    const step = dist(a.v, b.v) / Math.abs(b.k - a.k);
+    return dist(x, e) <= Math.max(0.5, 0.35 * step);
   };
   // the rank's lines, for "the new segments cross no line of the rank"
   const rankGrid = new SegGrid(4);
@@ -446,6 +474,14 @@ export function closeCorners(
     const B = ends[pr.k1];
     if (!ownLike(A.c) || !ownLike(B.c)) continue;
     if (!inTrend(pr.r, pr.x, A.t, B.t)) {
+      if (typeof process !== 'undefined' && process.env?.MOOD_F2_DEBUG) {
+        const nb = [-2, -1, 1, 2].map((d) => {
+          const k = pr.r + d;
+          const v = k >= 0 && k < n ? cornerOf(k, pr.x, A.t, B.t, 25 * Math.abs(d)) : null;
+          return v ? `${d}:${v.x.toFixed(1)},${v.y.toFixed(1)}` : `${d}:-`;
+        });
+        console.log(`F2T r${pr.r} at ${pr.x.x.toFixed(1)},${pr.x.y.toFixed(1)} nb ${nb.join(' ')}`);
+      }
       refuse('extend: off the trend');
       continue;
     }
@@ -465,6 +501,11 @@ export function closeCorners(
       rank: pr.r,
     });
   }
+  if (typeof process !== 'undefined' && process.env?.MOOD_F2_DEBUG)
+    for (const l of links)
+      console.log(
+        `F2 ${l.rule} r${l.rank} ${l.a.c}:${l.a.end} ${l.b.c}:${l.b.end} at ${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).x.toFixed(1)},${(l.a.end ? chains[l.a.c].pts[chains[l.a.c].pts.length - 1] : chains[l.a.c].pts[0]).y.toFixed(1)} via ${l.via.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}${l.stub !== undefined ? ` stub ${l.stub}` : ''}`,
+      );
   const res = joinLinks(chains, rankOf, links);
   return { ...res, stubs, ramps, extended, refused };
 }
