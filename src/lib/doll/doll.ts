@@ -3089,6 +3089,19 @@ export function solveDoll(input: DollInput): DollReport {
       : hi - 0.27 * H;
     const W = widthTable(main, lo, hi, 300);
     const Rcr = (W(vCr - 40) * (1 - EPS_WRAP)) / TAU;
+    /**
+     * The leg tube's cross-section at chart level y: its girth is the cloth's width there (W), its
+     * shape an ellipse that is round under the crotch and flattens side-to-side toward the hem
+     * (a/b → 1.5) — no gravity here, so this stands in for the fall of a wide leg: the cloth hangs
+     * flat, not as a pipe, and the silhouette reads as the pattern widens.
+     */
+    const legAxes = (y: number) => {
+      const per = (W(Math.max(lo, Math.min(vCr, y))) * (1 - EPS_WRAP)) / 1;
+      const f0 = vCr > lo ? Math.max(0, Math.min(1, (vCr - y) / (vCr - lo))) : 0;
+      const A = 1 + 0.5 * f0 * f0 * (3 - 2 * f0);
+      const b = per / (Math.PI * (3 * (A + 1) - Math.sqrt((3 * A + 1) * (A + 3))));
+      return { a: A * b, b };
+    };
     const xAxis = s * (Rcr + 12);
     // Inseam: the chart seam between the first two pieces.
     let uRef = 0;
@@ -3310,24 +3323,27 @@ export function solveDoll(input: DollInput): DollReport {
           p[3 * i + 2] = z * f;
           return;
         }
+        if (y > H + 10) return;
         const dx = p[3 * i] - xAxis;
         const dz = p[3 * i + 2];
-        const d = Math.hypot(dx, dz);
-        const R = (y < vCr - lo ? (W(y + lo) * (1 - EPS_WRAP)) / TAU : Rcr) * PROXY_K;
-        if (y > H + 10 || d >= R || d < 1e-9) return;
-        p[3 * i] = xAxis + (dx / d) * R;
-        p[3 * i + 2] = (dz / d) * R;
+        const { a, b } = legAxes(y + lo);
+        const q = (dx / (a * PROXY_K)) ** 2 + (dz / (b * PROXY_K)) ** 2;
+        if (q >= 1 || q < 1e-9) return;
+        const f = 1 / Math.sqrt(q);
+        p[3 * i] = xAxis + dx * f;
+        p[3 * i + 2] = dz * f;
       },
       pull(p, i, k) {
         const y = p[3 * i + 1] - lo;
         if (y > vCr - lo) return;
         const dx = p[3 * i] - xAxis;
         const dz = p[3 * i + 2];
-        const d = Math.hypot(dx, dz);
-        const R = (W(y + lo) * (1 - EPS_WRAP)) / TAU + CLEAR;
-        if (d <= R) return;
-        p[3 * i] -= (dx / d) * (d - R) * k;
-        p[3 * i + 2] -= (dz / d) * (d - R) * k;
+        const { a, b } = legAxes(y + lo);
+        const q = (dx / (a + CLEAR)) ** 2 + (dz / (b + CLEAR)) ** 2;
+        if (q <= 1 || q < 1e-9) return;
+        const f = 1 - (1 - 1 / Math.sqrt(q)) * k;
+        p[3 * i] = xAxis + dx * f;
+        p[3 * i + 2] = dz * f;
       },
     };
     const pi = proxies.push(legProxy) - 1;
@@ -3352,7 +3368,9 @@ export function solveDoll(input: DollInput): DollReport {
         const u = cuv[2 * v];
         const y = cuv[2 * v + 1];
         const Wv = W(y);
-        const R = (Wv * (1 - EPS_WRAP)) / TAU + CLEAR + (inMain ? 0 : 3);
+        const ax = legAxes(y);
+        const Ra = ax.a + CLEAR + (inMain ? 0 : 3);
+        const Rb = ax.b + CLEAR + (inMain ? 0 : 3);
         // When the strip's ends meet on the inside, each height wraps its own extent end to end
         // (the rise runs beyond the crotch-level ends).
         const ext = endsInside && inMain ? extAt(y) : null;
@@ -3362,7 +3380,7 @@ export function solveDoll(input: DollInput): DollReport {
           ? (TAU * Math.max(0, Math.min(ext[1] - ext[0], u - ext[0]))) /
             Math.max(1, ext[1] - ext[0])
           : (TAU * (u - uRef)) / Wv;
-        const leg: Vec3 = [xAxis - s * R * Math.cos(th), y - lo, s * R * Math.sin(th)];
+        const leg: Vec3 = [xAxis - s * Ra * Math.cos(th), y - lo, s * Rb * Math.sin(th)];
         // Above the crotch: the leg's arc becomes this side's half of the pelvis — the inseam end
         // splits into the front rise (x = 0, z > 0) and the back rise; blended over 60 mm.
         const yy = y - lo;
