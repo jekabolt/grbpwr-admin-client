@@ -23,7 +23,9 @@
 //             NO new card piece — every piece reuses its own, proven by the replay (lineage);
 //         b · a piece the autopilot NAMED on #1 (P01 …) moved: its name does not replay, the code
 //             the autopilot gives it again matches a card piece nothing ties it to → the autopilot
-//             refuses the apply with the reason (never a silent update of that card piece).
+//             refuses the apply with the reason (never a silent update of that card piece). When
+//             the piece reads a name of its own from the file instead, it is listed, not failed
+//             (the generated-code rule does not cover it).
 //   node scripts/pattern-import/replay.mjs [case…]   (yarn patimport:replay)
 import { readManifest } from 'lib/pattern-import/manifest';
 import { PATIMPORT } from 'lib/pattern-import/types';
@@ -622,12 +624,22 @@ export async function runCase(c: Case) {
         applied: m.applied,
         misses: m.misses.slice(0, 3),
         named: m.list.filter((l) => /^A.name-code/.test(l)).slice(0, 4),
+        card: (m.draft?.pieces ?? []).map(
+          (p) => `${p.name}${p.existingLineKey ? '' : ' (new)'} ×${p.piecesPerGarment}`,
+        ),
+        vanished: (m.draft?.scopes ?? [])
+          .flatMap((sc) => sc.vanished ?? [])
+          .map((v) => v.pieceName),
       };
-      if (m.reached && m.applied?.ok)
+      // the property is about GENERATED codes: when the moved piece reads a name of its own from
+      // the file again (no autopilot code), the guard is not concerned — listed, not failed
+      const generated = m.list.some((l) => /^A.name-code/.test(l));
+      (out.movedNamed as Record<string, unknown>).generated = generated;
+      if (generated && m.reached && m.applied?.ok)
         failures.push(
-          `moved named piece: applied — the generated code updated a card piece without lineage`,
+          `moved named piece: applied — a generated code reached the card without lineage`,
         );
-      else if (m.reached && !/generated code/.test(m.applied?.reason ?? ''))
+      else if (generated && m.reached && !/generated code/.test(m.applied?.reason ?? ''))
         failures.push(`moved named piece: refused for another reason (${m.applied?.reason})`);
     } else out.movedNamed = null;
   }

@@ -113,7 +113,8 @@ const summary = {
   operatorAnswersFirst: sum((r) => r.first?.ops?.length),
   lineageCases: cases.filter((r) => r.lineage).length,
   lineageApplied: cases.filter((r) => r.lineage?.applied?.ok && !r.lineage.created?.length).length,
-  movedNamedReached: cases.filter((r) => r.movedNamed?.reached).length,
+  movedNamedReached: cases.filter((r) => r.movedNamed?.reached && r.movedNamed.generated).length,
+  movedNamedOwnName: cases.filter((r) => r.movedNamed?.reached && !r.movedNamed.generated).length,
   movedNamedRefused: cases.filter(
     (r) => r.movedNamed?.reached && /generated code/.test(r.movedNamed.applied?.reason ?? ''),
   ).length,
@@ -128,7 +129,7 @@ console.log(
   `mutated file: replayed ${summary.mutatedReplayed} · moved piece: asked again ${summary.movedAsked}/${summary.movedCases}`,
 );
 console.log(
-  `card lineage: honest re-import applied with no new card piece ${summary.lineageApplied}/${summary.lineageCases} · moved autopilot-named piece refused ${summary.movedNamedRefused}/${summary.movedNamedReached} (reached check)`,
+  `card lineage: honest re-import applied with no new card piece ${summary.lineageApplied}/${summary.lineageCases} · moved autopilot-named piece re-coded → refused ${summary.movedNamedRefused}/${summary.movedNamedReached} (reached check; ${summary.movedNamedOwnName} read their own file name back instead)`,
 );
 if (summary.failed.length) console.log(`✗ failed: ${summary.failed.join(' | ')}`);
 if (summary.crashed.length) console.log(`✗ crashed: ${summary.crashed.join(', ')}`);
