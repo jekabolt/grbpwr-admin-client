@@ -188,13 +188,18 @@ export function legendIdentity(
     // one says yes, nothing says no — yes; both say no — no; they disagree — cannot tell
     if ((p === 1 && b >= 0) || (b === 1 && p >= 0)) return 1;
     if (p === -1 && b === -1) return -1;
-    return p + b < 0 && p * b === 0 ? -1 : 0;
+    if (p + b < 0 && p * b === 0) return -1;
+    // neither order nor dots to compare: the pen (fill vs a thin stroke, viola 36 / 38) — only as a
+    // yes (the key may print a size in another pen than the sheet)
+    return p === 0 && b === 0 && sameStroke(s.vec, sig.vec) ? 1 : 0;
   };
   /** Two alike keys whose samples differ in element order or dot size: separable. */
   const separable = (a: number, b: number) => {
     const sa = keySig.get(a);
     const sb = keySig.get(b);
     if (!sa || !sb) return true;
+    // the key draws them in different pens (viola: 36 filled dashes, 38 a thin stroke with ticks)
+    if (!sameStroke(sa.vec, sb.vec)) return true;
     if (sa.period && sb.period && sa.period !== sb.period) return true;
     return !!sa.beadHist && !!sb.beadHist && beadContrast(sa.beadHist, sb.beadHist) >= 0.3;
   };
