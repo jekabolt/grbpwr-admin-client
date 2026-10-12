@@ -69,7 +69,11 @@ import {
   type EncEdit,
 } from './replay-record';
 import { movePoints, placedAnswers, wasLayout } from './replay-sheets';
-import { sheetAnswerEdits, sheetQuestion } from 'lib/pattern-import/pieces/sheets';
+import {
+  sheetAnswerEdits,
+  sheetLegendQuestion,
+  sheetQuestion,
+} from 'lib/pattern-import/pieces/sheets';
 
 // ── which previous import ───────────────────────────────────────────────────────────────────────
 
@@ -938,6 +942,29 @@ function sizesStep(c: Ctx): Out | null {
             `${rebuilt.length} rows confirmed as read`,
             [sameFiles(c), 'the same rows (signature)'],
             { ref: 'legend-rebuilt' },
+          ),
+        ],
+      };
+  }
+  // 2b · D6: the tile sheets draw different size rows — confirmed last time for the SAME rows on
+  // the same sheets (the signature), else asked again
+  const sl = c.get('sheet-legend');
+  const leg = s.sizes.sheetLegend;
+  if (sl && leg && sheetLegendQuestion(leg, i.sheetLegendOk)) {
+    const sig = (sl.value as { sig?: string }).sig;
+    if (sig !== leg.sig)
+      c.miss('sheet-legend', 'the tile sheets draw other size rows than when they were confirmed');
+    else if (c.fresh('sheet-legend', { ref: 'sheet-legend' }))
+      return {
+        patch: { sheetLegendOk: sig },
+        as: [
+          R(
+            c,
+            sl,
+            'sheet-legend',
+            'the tile sheets share the legend as read',
+            [sameFiles(c), 'the same size rows on the same sheets (signature)'],
+            { ref: 'sheet-legend' },
           ),
         ],
       };

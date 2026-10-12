@@ -209,6 +209,7 @@ const AUTO_KINDS: Record<string, string[]> = {
   legend: ['legend-outline'],
   'legend-confirmed': ['legend-row'],
   'drawn-sizes': ['drawn-sizes'],
+  'sheet-legend': ['sheet-legend'],
   'size-map': ['size-guess', 'size-ordinal', 'size-dropped'],
   'size-flags': ['size-flag'],
   model: ['model'],
@@ -386,6 +387,11 @@ export function answerRecordOf(
         asked,
       });
   }
+  // D6: the tile sheets' different size rows, confirmed as read (bound to what each sheet drew)
+  if (i.sheetLegendOk && s.sizes?.sheetLegend?.sig === i.sheetLegendOk)
+    push('sizes', 'sheet-legend', 'the tile sheets share the legend as read', {
+      sig: i.sheetLegendOk,
+    });
   const drawn = liveDrawnSizes(i, i);
   if (drawn != null) push('sizes', 'drawn-sizes', 'the sheet', { n: drawn, sheet: i.sheetIndex });
   const own = (s.sizes?.map.entries ?? []).filter((e) => e.origin === 'operator');

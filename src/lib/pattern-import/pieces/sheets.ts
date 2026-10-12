@@ -263,8 +263,34 @@ function partOf(parts: readonly SheetPart[], p: PtMm): number {
 }
 
 const r0 = (v: number, q: number) => Math.round(v / q);
-const refKey = (r: SheetPieceRef) =>
-  `${r.sheet}:${r0(r.areaMm2, 100)}:${r0(r.at.x, 10)},${r0(r.at.y, 10)}`;
+
+/**
+ * A sheet's identity in an answer key: its number and its page set (a short hash of the page
+ * numbers) — a sheet whose pages changed is another sheet, and its answers do not land.
+ */
+function sheetSig(part: SheetPart | undefined, k: number): string {
+  if (!part) return `${k}`;
+  let h = 0x811c9dc5;
+  for (const c of part.pages
+    .map((q) => q.page)
+    .sort((a, b) => a - b)
+    .join('.')) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${k}@${part.pages.length}.${h.toString(36)}`;
+}
+
+/**
+ * A piece's identity in an answer key: its sheet, its area and its centroid IN ITS SHEET'S OWN
+ * FRAME (the composite shift taken off) — the key survives the sheets being laid out otherwise.
+ */
+const refKey = (r: SheetPieceRef, parts: readonly SheetPart[]) => {
+  const part = parts.find((q) => q.sheet === r.sheet);
+  const x = r.at.x - (part?.dx ?? 0);
+  const y = r.at.y - (part?.dy ?? 0);
+  return `${sheetSig(part, r.sheet)}:${r0(r.areaMm2, 100)}:${r0(x, 10)},${r0(y, 10)}`;
+};
 
 /**
  * The cross-sheet reading of a drawing's pieces (null = one sheet, nothing to read). `families`
@@ -340,7 +366,7 @@ export function sheetPieces(
         const keep = ref(lo);
         const copy = ref(hi);
         copies.push({
-          key: `copy|${refKey(keep)}|${refKey(copy)}`,
+          key: `copy|${refKey(keep, parts)}|${refKey(copy, parts)}`,
           keep,
           copy,
           strong: sameLabel,
@@ -348,7 +374,7 @@ export function sheetPieces(
         });
       } else if (sameLabel)
         splits.push({
-          key: `split|${refKey(ref(lo))}|${refKey(ref(hi))}`,
+          key: `split|${refKey(ref(lo), parts)}|${refKey(ref(hi), parts)}`,
           a: ref(lo),
           b: ref(hi),
           evidence: [
@@ -370,27 +396,37 @@ export function sheetPieces(
           (c.keep.sheet === sheets[i] && c.copy.sheet === sheets[j]) ||
           (c.keep.sheet === sheets[j] && c.copy.sheet === sheets[i]),
       );
-      const inA = new Set(
-        pair.flatMap((c) => [c.keep.seed, c.copy.seed]).filter((s) => A.some((p) => p.seed === s)),
-      );
-      const inB = new Set(
-        pair.flatMap((c) => [c.keep.seed, c.copy.seed]).filter((s) => B.some((p) => p.seed === s)),
-      );
-      const matched = Math.min(inA.size, inB.size);
+      // a one-to-one pairing (labelled pairs first): a piece of one sheet answers for ONE piece
+      // of the other — two identical pockets against one never count twice
+      const used = new Set<number>();
+      const one = [...pair]
+        .sort((x, y) => Number(y.strong) - Number(x.strong))
+        .filter((c) => {
+          if (used.has(c.keep.seed) || used.has(c.copy.seed)) return false;
+          used.add(c.keep.seed);
+          used.add(c.copy.seed);
+          return true;
+        });
+      const matched = one.length;
       const small = Math.min(A.length, B.length);
       if (matched < SHEET_COPY.altMin || matched < SHEET_COPY.altShare * small) continue;
       // keep the sheet with more pieces (the more complete rendering), else the lower number
       const [keep, drop] = A.length >= B.length ? [sheets[i], sheets[j]] : [sheets[j], sheets[i]];
       const dropPs = keep === sheets[i] ? B : A;
-      const labelled = pair.filter((c) => c.strong).length;
+      const labelled = one.filter((c) => c.strong).length;
+      const sig = (k: number) =>
+        sheetSig(
+          parts.find((q) => q.sheet === k),
+          k,
+        );
       alternatives.push({
-        key: `alt|${keep}:${(keep === sheets[i] ? A : B).length}|${drop}:${dropPs.length}|${matched}`,
+        key: `alt|${sig(keep)}:${(keep === sheets[i] ? A : B).length}|${sig(drop)}:${dropPs.length}|${matched}`,
         keep,
         drop,
         matched,
         ofDrop: dropPs.length,
         ofKeep: (keep === sheets[i] ? A : B).length,
-        strong: labelled * 2 > matched,
+        strong: labelled * 2 > matched && labelled >= SHEET_COPY.altMin,
         evidence: [
           `${matched} of the ${dropPs.length} pieces of sheet ${drop + 1} are the outlines of pieces of sheet ${keep + 1}`,
           ...(labelled ? [`${labelled} of them carry the same label`] : []),

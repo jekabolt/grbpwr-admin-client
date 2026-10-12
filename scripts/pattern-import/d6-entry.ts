@@ -28,6 +28,8 @@ import {
   type SheetPieces,
 } from 'lib/pattern-import/pieces/sheets';
 import { g23 } from 'lib/pattern-import/gate/checks';
+import { joinSheetChains } from 'lib/pattern-import/assemble/composite';
+import type { ChainSet, LineClass, Style } from 'lib/pattern-import/types';
 import { readManifest } from 'lib/pattern-import/manifest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -285,6 +287,124 @@ const read = (ps: P[], parts: SheetPart[] = PARTS): SheetPieces | null => {
     !!r && !r.splits.length,
     JSON.stringify(r?.splits.map((s) => s.a.label)),
   );
+}
+
+{
+  // Codex D6 #2: two identical pockets on one sheet against ONE pocket on the other pair one to
+  // one — never two matches, never a strong alternative that drops the unique piece
+  const r = read([
+    { seed: 1, ring: rect(100, 100, 150, 150), label: 'POCKET' },
+    { seed: 2, ring: rect(400, 100, 150, 150), label: 'POCKET' },
+    { seed: 3, ring: rect(100, 500, 600, 80), label: 'WAISTBAND' },
+    { seed: 11, ring: rect(1400, 100, 150, 150), label: 'POCKET' },
+    { seed: 12, ring: rect(1700, 100, 150, 150), label: 'FLAP' },
+    { seed: 13, ring: ell(1500, 600), label: 'FRONT' },
+    { seed: 14, ring: rect(1900, 500, 220, 300), label: 'BACK' },
+    { seed: 15, ring: ell(2100, 200, 0.6), label: 'YOKE' },
+  ]);
+  const a = r?.alternatives[0];
+  check(
+    '1f two identical pockets vs one: no STRONG alternative (one-to-one pairing)',
+    !a || !a.strong,
+    JSON.stringify(a ? { matched: a.matched, ev: a.evidence } : null),
+  );
+}
+{
+  // Codex D6 #3: an answer key is the piece in its own sheet's frame and the sheet's page set
+  const ps = [
+    { seed: 1, ring: ell(100, 100), label: 'COLLAR' },
+    { seed: 2, ring: ell(1500, 300), label: 'COLLAR' },
+  ];
+  const k0 = read(ps)?.copies[0]?.key;
+  const shifted = [part(0, 0), { ...part(1, 1330), dx: 1330 }];
+  const k1 = read(
+    ps.map((p) => (p.seed === 2 ? { ...p, ring: ell(1530, 300) } : p)),
+    shifted,
+  )?.copies[0]?.key;
+  check(
+    '4f a copy answer key survives its sheet laid 30 mm further',
+    !!k0 && k0 === k1,
+    `${k0} / ${k1}`,
+  );
+  const repaged = [
+    part(0, 0),
+    {
+      ...part(1, 1300),
+      pages: [
+        { file: '0', page: 10 },
+        { file: '0', page: 11 },
+      ],
+    },
+  ];
+  const k2 = read(ps, repaged)?.copies[0]?.key;
+  check(
+    '4f mutation: the sheet has other pages → another key (the answer does not land)',
+    !!k2 && k2 !== k0,
+  );
+}
+{
+  // Codex D6 #1: unlabelled size rows merge across sheets only by pen AND nesting rank
+  const styles = [
+    { id: 0, strokeRgb: [0, 0, 0], widthMm: 0.4, dash: null, layer: null } as unknown as Style,
+  ];
+  const chain = (id: number) => ({
+    id,
+    pts: [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    ],
+    closed: false,
+    ranges: [],
+    motif: null,
+    style: 0,
+    lengthMm: 10,
+  });
+  const row = (rank: number | null): LineClass => ({
+    id: 0,
+    role: 'size',
+    sizeLabel: null,
+    chains: [0],
+    totalLengthMm: 10,
+    evidence: rank == null ? [] : [{ kind: 'nesting-order', rank }],
+    confidence: 0.8,
+  });
+  const set = (rank: number | null): ChainSet => ({
+    chains: [chain(0)],
+    classes: [row(rank)],
+    bundles: [],
+    orphans: [],
+    warnings: [],
+  });
+  const ranked = joinSheetChains(
+    [
+      { sheet: 0, set: set(0) },
+      { sheet: 1, set: set(0) },
+    ],
+    styles,
+  );
+  check(
+    '2c the same pen at the same rank on two sheets is one size row',
+    ranked.classes.length === 1,
+  );
+  const unranked = joinSheetChains(
+    [
+      { sheet: 0, set: set(null) },
+      { sheet: 1, set: set(null) },
+    ],
+    styles,
+  );
+  check(
+    '2c mutation: the same pen, no rank → two rows (the legend check asks)',
+    unranked.classes.length === 2,
+  );
+  const otherRank = joinSheetChains(
+    [
+      { sheet: 0, set: set(0) },
+      { sheet: 1, set: set(1) },
+    ],
+    styles,
+  );
+  check('2c mutation: the same pen, another rank → two rows', otherRank.classes.length === 2);
 }
 
 // ── 2 · the per-sheet legend ──────────────────────────────────────────────────────────────────

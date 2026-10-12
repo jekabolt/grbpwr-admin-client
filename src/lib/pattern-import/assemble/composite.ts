@@ -388,6 +388,9 @@ function sizeRowKey(k: LineClass, set: ChainSet, styles: readonly Style[]): stri
   if (!st) return '';
   let rank: number | null = null;
   for (const e of k.evidence) if (e.kind === 'nesting-order') rank = e.rank;
+  // no label and no rank: nothing proves the two rows are one size — kept apart (the per-sheet
+  // legend check then asks)
+  if (rank == null) return '';
   const pen = `${st.strokeRgb ? st.strokeRgb.join(',') : '-'}|${st.widthMm.toFixed(2)}|${st.dash ? st.dash.map((v) => v.toFixed(2)).join(',') : '-'}|${st.layer ?? '-'}`;
-  return `pen:${pen}|rank:${rank ?? '-'}`;
+  return `pen:${pen}|rank:${rank}`;
 }
