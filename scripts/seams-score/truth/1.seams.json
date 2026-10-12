@@ -1,0 +1,2209 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "1",
+ "size": "OS",
+ "summary": "SS26-015 garment bag (one size): two identical panels FP_OS / BP_OS 580 × 980 (full width 580 for 90 mm at the top and the bottom, 30 mm narrower over the middle 780 where the 60 mm gussets LP_OS / RP_OS sit; a hanger slot 80 mm wide at the top), two straps of two strips each. The panels’ orientation is not told by the files (both face up), so the gusset ↔ back rows accept either side of the back.",
+ "rows": [
+  {
+   "derivation": "technologist's order «FP_OS + BP_OS → Front panel with back» · the bottoms 580 = 580 (the full-width part)",
+   "confidence": "sure",
+   "cls": "bag bottom",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "NKB48JEG2BT04Z0Z5TJ7CGWRXB",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.179,
+      "lenMm": 580,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#14",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.179,
+      "lenMm": 580,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#15",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «FP_OS + BP_OS → Front panel with back» · the bottoms 580 = 580 (the full-width part)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «RP_OS + LP_OS + FP_OS+BP_OS → Base» · the right gusset’s 780 on the front panel’s right side 780 (its drawing-right, x = 0.95)",
+   "confidence": "sure",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "59F5WFDG0BKD2TCJB0CG1NESFW",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTF658Q3Y4E18H2MNQ5",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTF658Q3Y4E18H2MNQ5#1",
+      "contourSig": "adda880698ddca88"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0.948,
+        0.092
+       ],
+       [
+        0.948,
+        0.291
+       ],
+       [
+        0.948,
+        0.49
+       ],
+       [
+        0.948,
+        0.689
+       ],
+       [
+        0.948,
+        0.888
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#1",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «RP_OS + LP_OS + FP_OS+BP_OS → Base» · the right gusset’s 780 on the front panel’s right side 780 (its drawing-right, x = 0.95)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base» · the left gusset on the front panel’s left side 780",
+   "confidence": "sure",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "DD3VQQ22B6F0H0W1SQ0PCVXHND",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFZX1P1ZMZMXBMDQGH",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFZX1P1ZMZMXBMDQGH#2",
+      "contourSig": "4e2a6542f64ddaec"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0.052,
+        0.888
+       ],
+       [
+        0.052,
+        0.689
+       ],
+       [
+        0.052,
+        0.49
+       ],
+       [
+        0.052,
+        0.291
+       ],
+       [
+        0.052,
+        0.092
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#11",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «Base» · the left gusset on the front panel’s left side 780",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base» · the right gusset’s other edge on the back: with both panels face up the front’s right side meets the back’s drawing-LEFT side (780)",
+   "confidence": "likely",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "anyOf": "gusset-R-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "0058WF3GH0DA4149JRTEPZ2N9K",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTF658Q3Y4E18H2MNQ5",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTF658Q3Y4E18H2MNQ5#3",
+      "contourSig": "adda880698ddca88"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.052,
+        0.888
+       ],
+       [
+        0.052,
+        0.689
+       ],
+       [
+        0.052,
+        0.49
+       ],
+       [
+        0.052,
+        0.291
+       ],
+       [
+        0.052,
+        0.092
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#12",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «Base» · the right gusset’s other edge on the back: with both panels face up the front’s right side meets the back’s drawing-LEFT side (780)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same gusset if the back is drawn as a mirror (its drawing-right side)",
+   "confidence": "likely",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "anyOf": "gusset-R-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "56GW1MHV704HJBRP1JWGZ3VVE9",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTF658Q3Y4E18H2MNQ5",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTF658Q3Y4E18H2MNQ5#3",
+      "contourSig": "adda880698ddca88"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.948,
+        0.092
+       ],
+       [
+        0.948,
+        0.291
+       ],
+       [
+        0.948,
+        0.49
+       ],
+       [
+        0.948,
+        0.689
+       ],
+       [
+        0.948,
+        0.888
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#2",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same gusset if the back is drawn as a mirror (its drawing-right side)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «Base» · the left gusset’s other edge on the back’s drawing-right side 780",
+   "confidence": "likely",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "anyOf": "gusset-L-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "DX13FWAGZP3K460AE2ADP3A1V4",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFZX1P1ZMZMXBMDQGH",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFZX1P1ZMZMXBMDQGH#0",
+      "contourSig": "4e2a6542f64ddaec"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.948,
+        0.092
+       ],
+       [
+        0.948,
+        0.291
+       ],
+       [
+        0.948,
+        0.49
+       ],
+       [
+        0.948,
+        0.689
+       ],
+       [
+        0.948,
+        0.888
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#2",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «Base» · the left gusset’s other edge on the back’s drawing-right side 780",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same gusset if the back is drawn as a mirror",
+   "confidence": "likely",
+   "cls": "bag gusset ↔ panel",
+   "bucket": "main",
+   "anyOf": "gusset-L-back",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "MEQ0JVZBKKSAQZSYYEDT7JJWRH",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFZX1P1ZMZMXBMDQGH",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4643,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFZX1P1ZMZMXBMDQGH#0",
+      "contourSig": "4e2a6542f64ddaec"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.052,
+        0.888
+       ],
+       [
+        0.052,
+        0.689
+       ],
+       [
+        0.052,
+        0.49
+       ],
+       [
+        0.052,
+        0.291
+       ],
+       [
+        0.052,
+        0.092
+       ]
+      ],
+      "perimShare": 0.2407,
+      "lenMm": 780,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#12",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same gusset if the back is drawn as a mirror",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "below the gusset the panels are full width: the 90 mm side pieces are sewn to each other (front left ↔ back, either side by orientation)",
+   "confidence": "likely",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "bottom-90-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "PASP247QF8NTMJ58R3YR081RYD",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0,
+        0.092
+       ],
+       [
+        0,
+        0.069
+       ],
+       [
+        0,
+        0.046
+       ],
+       [
+        0,
+        0.023
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#13",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0,
+        0.092
+       ],
+       [
+        0,
+        0.069
+       ],
+       [
+        0,
+        0.046
+       ],
+       [
+        0,
+        0.023
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#14",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "below the gusset the panels are full width: the 90 mm side pieces are sewn to each other (front left ↔ back, either side by orientation)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same 90 with the back mirrored",
+   "confidence": "likely",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "bottom-90-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "1ABAERP4VJCSW8Z1RESGKE9T3Y",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0,
+        0.092
+       ],
+       [
+        0,
+        0.069
+       ],
+       [
+        0,
+        0.046
+       ],
+       [
+        0,
+        0.023
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#13",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.023
+       ],
+       [
+        1,
+        0.046
+       ],
+       [
+        1,
+        0.069
+       ],
+       [
+        1,
+        0.092
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#0",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same 90 with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other bottom 90",
+   "confidence": "likely",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "bottom-90-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "K1ZX3HPATRENQ06QXGZ25GH4KY",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.023
+       ],
+       [
+        1,
+        0.046
+       ],
+       [
+        1,
+        0.069
+       ],
+       [
+        1,
+        0.092
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#15",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.023
+       ],
+       [
+        1,
+        0.046
+       ],
+       [
+        1,
+        0.069
+       ],
+       [
+        1,
+        0.092
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#0",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the other bottom 90",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same 90 with the back mirrored",
+   "confidence": "likely",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "bottom-90-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "CN21A679EV4ZETVF63NAAEMFA6",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.023
+       ],
+       [
+        1,
+        0.046
+       ],
+       [
+        1,
+        0.069
+       ],
+       [
+        1,
+        0.092
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#15",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0,
+        0.092
+       ],
+       [
+        0,
+        0.069
+       ],
+       [
+        0,
+        0.046
+       ],
+       [
+        0,
+        0.023
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#14",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same 90 with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "above the gusset the panels are full width again: the top 90 mm sides — sewn if the bag closes at the top round the hanger slot (unsure: the top may be the opening)",
+   "confidence": "unsure",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "top-90-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "8NY4ZG4A5BKXEHS3086G95MMR6",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0.888
+       ],
+       [
+        1,
+        0.911
+       ],
+       [
+        1,
+        0.934
+       ],
+       [
+        1,
+        0.957
+       ],
+       [
+        1,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#3",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0.888
+       ],
+       [
+        1,
+        0.911
+       ],
+       [
+        1,
+        0.934
+       ],
+       [
+        1,
+        0.957
+       ],
+       [
+        1,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#4",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "above the gusset the panels are full width again: the top 90 mm sides — sewn if the bag closes at the top round the hanger slot (unsure: the top may be the opening)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the back mirrored",
+   "confidence": "unsure",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "top-90-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "KJ2XWPXY15EPZWKJDXQE7W6PMY",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0.888
+       ],
+       [
+        1,
+        0.911
+       ],
+       [
+        1,
+        0.934
+       ],
+       [
+        1,
+        0.957
+       ],
+       [
+        1,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#3",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0,
+        0.98
+       ],
+       [
+        0,
+        0.957
+       ],
+       [
+        0,
+        0.934
+       ],
+       [
+        0,
+        0.911
+       ],
+       [
+        0,
+        0.888
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#10",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other top 90",
+   "confidence": "unsure",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "top-90-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "CDJEPXGC9YPPD6F8NYGJSX2NSY",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0,
+        0.98
+       ],
+       [
+        0,
+        0.957
+       ],
+       [
+        0,
+        0.934
+       ],
+       [
+        0,
+        0.911
+       ],
+       [
+        0,
+        0.888
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#9",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0,
+        0.98
+       ],
+       [
+        0,
+        0.957
+       ],
+       [
+        0,
+        0.934
+       ],
+       [
+        0,
+        0.911
+       ],
+       [
+        0,
+        0.888
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#10",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the other top 90",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the back mirrored",
+   "confidence": "unsure",
+   "cls": "bag side (below / above the gusset)",
+   "bucket": "main",
+   "anyOf": "top-90-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "6E65JQHE9XDZ8DNCP382H0ADHK",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0,
+        0.98
+       ],
+       [
+        0,
+        0.957
+       ],
+       [
+        0,
+        0.934
+       ],
+       [
+        0,
+        0.911
+       ],
+       [
+        0,
+        0.888
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#9",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0.888
+       ],
+       [
+        1,
+        0.911
+       ],
+       [
+        1,
+        0.934
+       ],
+       [
+        1,
+        0.957
+       ],
+       [
+        1,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0278,
+      "lenMm": 90,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#4",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the top edges either side of the hanger slot 250 = 250 — sewn if the bag closes at the top",
+   "confidence": "unsure",
+   "cls": "bag top (round the hanger slot)",
+   "bucket": "main",
+   "anyOf": "top-250-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "Y56EXMAJVQY5K3M68WA0FQCF7H",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0.98
+       ],
+       [
+        0.892,
+        0.98
+       ],
+       [
+        0.784,
+        0.98
+       ],
+       [
+        0.677,
+        0.98
+       ],
+       [
+        0.569,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#4",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0.98
+       ],
+       [
+        0.892,
+        0.98
+       ],
+       [
+        0.784,
+        0.98
+       ],
+       [
+        0.677,
+        0.98
+       ],
+       [
+        0.569,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#5",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the top edges either side of the hanger slot 250 = 250 — sewn if the bag closes at the top",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the back mirrored",
+   "confidence": "unsure",
+   "cls": "bag top (round the hanger slot)",
+   "bucket": "main",
+   "anyOf": "top-250-a",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "H2ZZGFWMCYKK3DQW7W1MRG8J19",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        1,
+        0.98
+       ],
+       [
+        0.892,
+        0.98
+       ],
+       [
+        0.784,
+        0.98
+       ],
+       [
+        0.677,
+        0.98
+       ],
+       [
+        0.569,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#4",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.431,
+        0.98
+       ],
+       [
+        0.323,
+        0.98
+       ],
+       [
+        0.216,
+        0.98
+       ],
+       [
+        0.108,
+        0.98
+       ],
+       [
+        0,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#9",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other top 250",
+   "confidence": "unsure",
+   "cls": "bag top (round the hanger slot)",
+   "bucket": "main",
+   "anyOf": "top-250-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "RCSE2FME1SSX4D4AQ33ME6JZT9",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0.431,
+        0.98
+       ],
+       [
+        0.323,
+        0.98
+       ],
+       [
+        0.216,
+        0.98
+       ],
+       [
+        0.108,
+        0.98
+       ],
+       [
+        0,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#8",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        0.431,
+        0.98
+       ],
+       [
+        0.323,
+        0.98
+       ],
+       [
+        0.216,
+        0.98
+       ],
+       [
+        0.108,
+        0.98
+       ],
+       [
+        0,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#9",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the other top 250",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the back mirrored",
+   "confidence": "unsure",
+   "cls": "bag top (round the hanger slot)",
+   "bucket": "main",
+   "anyOf": "top-250-b",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "42G3G7R8JE81CWWX6TN06QMWNA",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFAJCZPW4MDDAQQRK8",
+      "samples": [
+       [
+        0.431,
+        0.98
+       ],
+       [
+        0.323,
+        0.98
+       ],
+       [
+        0.216,
+        0.98
+       ],
+       [
+        0.108,
+        0.98
+       ],
+       [
+        0,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFAJCZPW4MDDAQQRK8#8",
+      "contourSig": "ee9512186c6a4a46"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J8GPTFF6QDJQ1V6FFR2PWF",
+      "samples": [
+       [
+        1,
+        0.98
+       ],
+       [
+        0.892,
+        0.98
+       ],
+       [
+        0.784,
+        0.98
+       ],
+       [
+        0.677,
+        0.98
+       ],
+       [
+        0.569,
+        0.98
+       ]
+      ],
+      "perimShare": 0.0772,
+      "lenMm": 250,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFF6QDJQ1V6FFR2PWF#5",
+      "contourSig": "acc2c400417e667e"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the same with the back mirrored",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «BLT_L_OS + BLT_L_1_OS → belt left detail» · two 30 × 976 strips sewn along both long edges into a strap",
+   "confidence": "likely",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "9NTNV0MRZFK927SPZAFHZQ9HT4",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFWK9ZX7E0QQJTH8EG",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFWK9ZX7E0QQJTH8EG#0",
+      "contourSig": "bc0d40bd60f3c863"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J95H2228H2865SYB1HHQYS",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J95H2228H2865SYB1HHQYS#0",
+      "contourSig": "bc0d40bd60f3c863"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «BLT_L_OS + BLT_L_1_OS → belt left detail» · two 30 × 976 strips sewn along both long edges into a strap",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the left strap’s other long edge",
+   "confidence": "likely",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "D506GRB3YX4S8NYNJSGCHQ5D6E",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFWK9ZX7E0QQJTH8EG",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFWK9ZX7E0QQJTH8EG#2",
+      "contourSig": "bc0d40bd60f3c863"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J95H2228H2865SYB1HHQYS",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J95H2228H2865SYB1HHQYS#2",
+      "contourSig": "bc0d40bd60f3c863"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the left strap’s other long edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «BLT_R_OS + BLT_R_1_OS → belt right detail» · 975 = 975",
+   "confidence": "likely",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "2ZAPX4SDDRSNGZCCBNSJH0YY46",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFPG7J77C77MTDJ1GG",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFPG7J77C77MTDJ1GG#1",
+      "contourSig": "5b232d0780917c45"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J95H229S5RXGSWEBHB7B7E",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J95H229S5RXGSWEBHB7B7E#1",
+      "contourSig": "5b232d0780917c45"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "technologist's order «BLT_R_OS + BLT_R_1_OS → belt right detail» · 975 = 975",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the right strap’s other long edge",
+   "confidence": "likely",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "0EBH15ZYTTZJ8Q2QPARXRGCX1B",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M0J8GPTFPG7J77C77MTDJ1GG",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J8GPTFPG7J77C77MTDJ1GG#3",
+      "contourSig": "5b232d0780917c45"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M0J95H229S5RXGSWEBHB7B7E",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.4851,
+      "lenMm": 975.5,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M0J95H229S5RXGSWEBHB7B7E#3",
+      "contourSig": "5b232d0780917c45"
+     }
+    ],
+    "anchoredSize": "OS",
+    "note": "the right strap’s other long edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}

@@ -13,6 +13,7 @@ import { buildSkeleton, groupUnits, orderTemplate, type SkeletonTemplate } from 
 import {
   SKELETON,
   type PieceGeom,
+  type SeamAssignmentInput,
   type SeamCandidate,
   type SeamDecisions,
   type SeamDecisionsInput,
@@ -59,23 +60,46 @@ export function readSeamGraph(
   pins: SkeletonPins = {},
   decisions?: SeamDecisionsInput,
   hints?: readonly SkeletonUnitHint[],
+  /** Who assigns edges (assignment/): absent = the greedy as shipped. */
+  assign?: SeamAssignmentInput,
 ): SeamGraph {
   const refused = skeletonRefusal(facts);
   if (refused) return EMPTY_GRAPH([refused]);
   if (!decisions) {
-    const first = buildSeamGraph(facts);
-    return compositeSeams(first, groupUnits(first, facts, template, pins, hints));
+    const first = buildSeamGraph(facts, ALL_RULES, undefined, assign);
+    return keepAssignment(
+      first,
+      compositeSeams(first, groupUnits(first, facts, template, pins, hints)),
+    );
   }
   let resolved: SeamDecisions | undefined;
-  const first = buildSeamGraph(facts, ALL_RULES, (pieces) => {
-    resolved = typeof decisions === 'function' ? decisions(pieces) : decisions;
-    return resolved;
-  });
-  return dropRejectedA4(
-    compositeSeams(first, groupUnits(first, facts, template, pins, hints)),
-    resolved,
+  const first = buildSeamGraph(
+    facts,
+    ALL_RULES,
+    (pieces) => {
+      resolved = typeof decisions === 'function' ? decisions(pieces) : decisions;
+      return resolved;
+    },
+    assign,
+  );
+  return keepAssignment(
+    first,
+    dropRejectedA4(
+      compositeSeams(first, groupUnits(first, facts, template, pins, hints)),
+      resolved,
+    ),
   );
 }
+
+/** A4 returns a new graph object: the assignment summary / shadow reading of A3 ride along. */
+const keepAssignment = (first: SeamGraph, after: SeamGraph): SeamGraph =>
+  after === first || (!first.assignment && !first.shadow)
+    ? after
+    : {
+        ...after,
+        ...(first.assignment ? { assignment: first.assignment } : {}),
+        ...(first.shadow ? { shadow: first.shadow } : {}),
+      };
 
 /**
  * A partial / composite seam the second pass (A4) found again although a person rejected it: out
@@ -141,7 +165,14 @@ export function proposeSkeleton(
       graph: EMPTY_GRAPH([refused]),
     };
   }
-  const graph = readSeamGraph(facts, template, options.pins, options.decisions, options.units);
+  const graph = readSeamGraph(
+    facts,
+    template,
+    options.pins,
+    options.decisions,
+    options.units,
+    options.assignment,
+  );
   const built = buildSkeleton(graph, facts, template, deps, options);
   const structure = {
     ...(options.category ? { category: options.category } : {}),

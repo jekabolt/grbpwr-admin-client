@@ -308,34 +308,51 @@ export default function DollOverlay({
               className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
             >
               <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
-                <GroupLabel flush>
-                  {`${pom?.report?.convention === 'full' ? 'full' : 'half'} girths · ±1.0 cm ${pom?.report?.conventionSource ?? 'default'}`}
-                </GroupLabel>
-                {!pom || pom.status === 'reading' ? (
-                  <Text size='micro' variant='label' component='p' className='py-2'>
-                    measuring the pattern…
-                  </Text>
-                ) : pom.status === 'error' ? (
-                  <Text size='micro' variant='label' component='p' className='py-2'>
-                    the measures could not be read: {pom.error}
+                {/* Not a garment (a bag, a cover): the standard POMs are a garment's — a bag has no
+                    chest, no inseam. Said in words; the rail is not shown. */}
+                {report?.notGarment ? (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='p'
+                    className='py-2'
+                    data-doll-no-measures=''
+                  >
+                    no garment measures for this item — the card names no garment and the pieces
+                    read as none; the standard measures (a chest, an inseam) do not apply
                   </Text>
                 ) : (
-                  <PomRail
-                    values={values}
-                    garment={pom.report!.garment}
-                    comparisons={comparisons}
-                    hover={hoverPom}
-                    drawn={drawn}
-                    names={names}
-                  />
+                  <>
+                    <GroupLabel flush>
+                      {`${pom?.report?.convention === 'full' ? 'full' : 'half'} girths · ±1.0 cm ${pom?.report?.conventionSource ?? 'default'}`}
+                    </GroupLabel>
+                    {!pom || pom.status === 'reading' ? (
+                      <Text size='micro' variant='label' component='p' className='py-2'>
+                        measuring the pattern…
+                      </Text>
+                    ) : pom.status === 'error' ? (
+                      <Text size='micro' variant='label' component='p' className='py-2'>
+                        the measures could not be read: {pom.error}
+                      </Text>
+                    ) : (
+                      <PomRail
+                        values={values}
+                        garment={pom.report!.garment}
+                        comparisons={comparisons}
+                        hover={hoverPom}
+                        drawn={drawn}
+                        names={names}
+                      />
+                    )}
+                    <Text size='micro' variant='label' component='p' className='pt-2'>
+                      {chart.isLoading
+                        ? 'reading the size chart…'
+                        : chartCells === 0
+                          ? 'the size chart is empty: no spec to compare against'
+                          : 'spec from the size chart · Δ = pattern − spec'}
+                    </Text>
+                  </>
                 )}
-                <Text size='micro' variant='label' component='p' className='pt-2'>
-                  {chart.isLoading
-                    ? 'reading the size chart…'
-                    : chartCells === 0
-                      ? 'the size chart is empty: no spec to compare against'
-                      : 'spec from the size chart · Δ = pattern − spec'}
-                </Text>
               </div>
             </Section>
           </div>

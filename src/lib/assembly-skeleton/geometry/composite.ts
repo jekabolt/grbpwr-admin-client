@@ -821,3 +821,46 @@ export function boundaryRuns(
     pieces: [...r.pieces],
   }));
 }
+
+/** An open or closed run of free edges along the boundary of pieces glued by `seams`. */
+export type GluedRun = {
+  parts: Edge[];
+  pieces: string[];
+  lenMm: number;
+  notchesMm: number[];
+  closed: boolean;
+  /** Corner turn (deg, + convex) at the run's two ends (open runs). */
+  turnStart: number;
+  turnEnd: number;
+  /** Where along the run (mm from its start) one part ends and the next begins: the seams' ends. */
+  joints: number[];
+};
+
+/**
+ * The composite runs of a set of pieces glued along the given seams only (the doll asks it of a
+ * unit the order sews first: two yoke halves glued by one seam, then their joint edge).
+ */
+export function gluedRuns(
+  pieces: readonly PieceGeom[],
+  seams: readonly SeamCandidate[],
+): GluedRun[] {
+  const board = boardOf(pieces, seams, []);
+  return buildRuns(pieces, board.rings, board.glueOf, board.blocked).map((r) => {
+    const joints: number[] = [];
+    let at = 0;
+    for (let i = 0; i < r.parts.length - 1; i++) {
+      at += r.parts[i].lenMm;
+      joints.push(at);
+    }
+    return {
+      parts: r.parts,
+      pieces: [...r.pieces],
+      lenMm: r.lenMm,
+      notchesMm: r.notchesMm,
+      closed: r.closed,
+      turnStart: r.turnStart,
+      turnEnd: r.turnEnd,
+      joints,
+    };
+  });
+}

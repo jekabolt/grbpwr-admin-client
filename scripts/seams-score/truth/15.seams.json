@@ -1,0 +1,1440 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "15",
+ "size": "S",
+ "summary": "SS26-016 dust bag S: an inner panel 300 × 160, an outer panel 300 × 350 (lower 160 bag, 30 border width, upper 160 flap — notches 160 / 190), a border strip 620 × 30 (notches 160 / 310 / 460) round the inner panel’s three sides and the outer panel’s lower U, two 300 × 30 belt strips on the inner panel’s top.",
+ "rows": [
+  {
+   "derivation": "technologist's order «brdr_S+out_S + blt+inn_S → dust bag s» · the border 620 (notches 160 / 310 / 460) round the inner panel’s side 160 + bottom 300 + side 160 = 620 (either long edge)",
+   "confidence": "likely",
+   "cls": "bag bottom strip ↔ panel (composite)",
+   "bucket": "main",
+   "anyOf": "border-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "QBRXY3DVJG919ESBZ0KQD796YS",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7FBQHQBC66Z4W62K",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4769,
+      "lenMm": 620,
+      "notches": 3,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7FBQHQBC66Z4W62K#2",
+      "contourSig": "1378b55c704625d6"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.1739,
+      "lenMm": 160,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#1",
+      "contourSig": "bfff01392baa6db3"
+     },
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#2",
+      "contourSig": "bfff01392baa6db3"
+     },
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.1739,
+      "lenMm": 160,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#3",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "technologist's order «brdr_S+out_S + blt+inn_S → dust bag s» · the border 620 (notches 160 / 310 / 460) round the inner panel’s side 160 + bottom 300 + side 160 = 620 (either long edge)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the border’s other long edge",
+   "confidence": "likely",
+   "cls": "bag bottom strip ↔ panel (composite)",
+   "bucket": "main",
+   "anyOf": "border-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "QZ1M3J0665AF2ZMSJ4BFS80W5F",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7FBQHQBC66Z4W62K",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4769,
+      "lenMm": 620,
+      "notches": 3,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7FBQHQBC66Z4W62K#0",
+      "contourSig": "1378b55c704625d6"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.1739,
+      "lenMm": 160,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#1",
+      "contourSig": "bfff01392baa6db3"
+     },
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#2",
+      "contourSig": "bfff01392baa6db3"
+     },
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.1739,
+      "lenMm": 160,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#3",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the same with the border’s other long edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «brdr_S + out_S → outer with boarder» · the border round the outer panel’s lower 160 of each side (notches 160 / 190) + bottom 300 = 620",
+   "confidence": "likely",
+   "cls": "bag bottom strip ↔ panel (composite)",
+   "bucket": "main",
+   "anyOf": "border-outer",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "4GSNY0J1Z825NA2SNQQ9SK8P6S",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7FBQHQBC66Z4W62K",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4769,
+      "lenMm": 620,
+      "notches": 3,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7FBQHQBC66Z4W62K#0",
+      "contourSig": "1378b55c704625d6"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.2692,
+      "lenMm": 350,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0.5429,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#1",
+      "contourSig": "96b5b4a4dccb4c36"
+     },
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.2308,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#2",
+      "contourSig": "96b5b4a4dccb4c36"
+     },
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.2692,
+      "lenMm": 350,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       0.4571
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#3",
+      "contourSig": "96b5b4a4dccb4c36"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "technologist's order «brdr_S + out_S → outer with boarder» · the border round the outer panel’s lower 160 of each side (notches 160 / 190) + bottom 300 = 620",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the border’s other long edge",
+   "confidence": "likely",
+   "cls": "bag bottom strip ↔ panel (composite)",
+   "bucket": "main",
+   "anyOf": "border-outer",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "BCM6B8JD08WGM2STBD15CPF0TB",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7FBQHQBC66Z4W62K",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4769,
+      "lenMm": 620,
+      "notches": 3,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7FBQHQBC66Z4W62K#2",
+      "contourSig": "1378b55c704625d6"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        0,
+        1
+       ],
+       [
+        0,
+        0.75
+       ],
+       [
+        0,
+        0.5
+       ],
+       [
+        0,
+        0.25
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      "perimShare": 0.2692,
+      "lenMm": 350,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0.5429,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#1",
+      "contourSig": "96b5b4a4dccb4c36"
+     },
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.2308,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#2",
+      "contourSig": "96b5b4a4dccb4c36"
+     },
+     {
+      "piece": "01M1VQH6HSMQM8437GJS2Y024G",
+      "samples": [
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        0.25
+       ],
+       [
+        1,
+        0.5
+       ],
+       [
+        1,
+        0.75
+       ],
+       [
+        1,
+        1
+       ]
+      ],
+      "perimShare": 0.2692,
+      "lenMm": 350,
+      "notches": 2,
+      "turnDeg": 0,
+      "range": [
+       0,
+       0.4571
+      ],
+      "edgeHint": "01M1VQH6HSMQM8437GJS2Y024G#3",
+      "contourSig": "96b5b4a4dccb4c36"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the same with the border’s other long edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «blt_1_S+blt_S + inn_S → inner piece with belt» · a 300 belt strip on the inner panel’s top 300 (centre notch 150), any strip, any edge",
+   "confidence": "likely",
+   "cls": "bag binding / channel ↔ panel",
+   "bucket": "main",
+   "anyOf": "belt-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "FK82478BS2N1TERBM6JPCYEQBR",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#0",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "technologist's order «blt_1_S+blt_S + inn_S → inner piece with belt» · a 300 belt strip on the inner panel’s top 300 (centre notch 150), any strip, any edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the strip’s other edge",
+   "confidence": "likely",
+   "cls": "bag binding / channel ↔ panel",
+   "bucket": "main",
+   "anyOf": "belt-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "MNP43NNJMH7RAK022G72DADKRG",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#0",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the same with the strip’s other edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the other strip",
+   "confidence": "likely",
+   "cls": "bag binding / channel ↔ panel",
+   "bucket": "main",
+   "anyOf": "belt-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "TT8PFM1FMRH66F0NK340Y603RS",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#0",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the same with the other strip",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the same with the other strip’s other edge",
+   "confidence": "likely",
+   "cls": "bag binding / channel ↔ panel",
+   "bucket": "main",
+   "anyOf": "belt-inner",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "W8JHYATPJG2MB0SQ8MFXD1N5C8",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HSYZERV2G4XX86Y8NJ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.3261,
+      "lenMm": 300,
+      "notches": 1,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSYZERV2G4XX86Y8NJ#0",
+      "contourSig": "bfff01392baa6db3"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the same with the other strip’s other edge",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «blt_1_S + blt_S → belt» · the two belt strips sewn to each other along a long edge, either",
+   "confidence": "unsure",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "anyOf": "belt-plies",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "EA8QC0NRR1HYSHAS94YTWP1VCG",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "technologist's order «blt_1_S + blt_S → belt» · the two belt strips sewn to each other along a long edge, either",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the other long edges",
+   "confidence": "unsure",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "anyOf": "belt-plies",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "GN91XZK9H05P64R7TB96Z84V2S",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "the other long edges",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "mixed edges",
+   "confidence": "unsure",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "anyOf": "belt-plies",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "4YPZ8XAH6952JVNJNAZ8E88FE5",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "mixed edges",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "mixed edges",
+   "confidence": "unsure",
+   "cls": "strap plies",
+   "bucket": "ply",
+   "anyOf": "belt-plies",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "Q92JVXHXQQKGJGZZ5GSHY7081D",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01M1VQH6HSNM0ANC40ZQFJ57CQ",
+      "samples": [
+       [
+        1,
+        1
+       ],
+       [
+        0.75,
+        1
+       ],
+       [
+        0.5,
+        1
+       ],
+       [
+        0.25,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HSNM0ANC40ZQFJ57CQ#0",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VQH6HS7R2VJ3652SRGHEQZ",
+      "samples": [
+       [
+        0,
+        0
+       ],
+       [
+        0.25,
+        0
+       ],
+       [
+        0.5,
+        0
+       ],
+       [
+        0.75,
+        0
+       ],
+       [
+        1,
+        0
+       ]
+      ],
+      "perimShare": 0.4545,
+      "lenMm": 300,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VQH6HS7R2VJ3652SRGHEQZ#2",
+      "contourSig": "7c51c9f0b0de2efa"
+     }
+    ],
+    "anchoredSize": "S",
+    "note": "mixed edges",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}

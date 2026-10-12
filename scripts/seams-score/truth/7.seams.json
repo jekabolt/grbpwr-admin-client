@@ -1,0 +1,2083 @@
+{
+ "_note": "TRUTH seam list for the seam-inference MEASUREMENT (yarn seams:score) — TEST DATA, not product data. Every seam physically sewn on this card at the size the live app reads, as StoredSeam rows (lib/seams anchors; resolvable on a new segmentation) or as patterns over interchangeable identical panels; rejected rows = pairs the engine tends to sew that are NOT sewn; closures = openings. `derivation` says how each row was found (the technologist’s order + the geometry + the notches), `confidence` sure / likely / unsure, `cls` the seam class the error tables are grouped by, `bucket` main / ply / lining, `anyOf` groups alternative readings of one seam. Built by `yarn seams:score build` from scripts/seams-score/truth/specs.ts; checked by eye on <metrics>/truth/<id>-flat-edges.png.",
+ "card": "7",
+ "size": "M",
+ "summary": "SS26-007 «fan out»: front with waist pleats and a button fly (FL facing on the right, FL_1 + FL_2 shield on the left), back with a small waist dart, curved one-piece waistband WS with a facing WS_1_XS (an XS block), front pocket bags PCK_*_XS, back welt pockets in two pieces.",
+ "rows": [
+  {
+   "derivation": "technologist's order «back + front → pants base» · left inseam 862 onto 891 (back eased 3 %) — the engine sewed the two FRONT inseams together",
+   "confidence": "sure",
+   "cls": "inseam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "PK6T595XM5Q0TNFW2VBWDF4K54",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0,
+        0.81
+       ],
+       [
+        0.065,
+        0.608
+       ],
+       [
+        0.071,
+        0.406
+       ],
+       [
+        0.072,
+        0.203
+       ],
+       [
+        0.075,
+        0
+       ]
+      ],
+      "perimShare": 0.3143,
+      "lenMm": 861.5,
+      "notches": 1,
+      "turnDeg": -25.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#3",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.803,
+        0
+       ],
+       [
+        0.811,
+        0.2
+       ],
+       [
+        0.818,
+        0.399
+       ],
+       [
+        0.834,
+        0.598
+       ],
+       [
+        1,
+        0.787
+       ]
+      ],
+      "perimShare": 0.3126,
+      "lenMm": 891.1,
+      "notches": 1,
+      "turnDeg": -89,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#7",
+      "contourSig": "245ec2d82169178a"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «back + front → pants base» · left inseam 862 onto 891 (back eased 3 %) — the engine sewed the two FRONT inseams together",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «pants base» · right inseam 862 onto 891",
+   "confidence": "sure",
+   "cls": "inseam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "9HXDYZBHM0S3P8E2SW2Y6CSKRM",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        0.925,
+        0
+       ],
+       [
+        0.928,
+        0.203
+       ],
+       [
+        0.929,
+        0.406
+       ],
+       [
+        0.935,
+        0.608
+       ],
+       [
+        1,
+        0.81
+       ]
+      ],
+      "perimShare": 0.3143,
+      "lenMm": 861.5,
+      "notches": 1,
+      "turnDeg": -25.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#4",
+      "contourSig": "ee2da9b480bcf3ba"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0,
+        0.787
+       ],
+       [
+        0.166,
+        0.598
+       ],
+       [
+        0.182,
+        0.399
+       ],
+       [
+        0.189,
+        0.2
+       ],
+       [
+        0.197,
+        0
+       ]
+      ],
+      "perimShare": 0.3126,
+      "lenMm": 891.1,
+      "notches": 1,
+      "turnDeg": -89,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#6",
+      "contourSig": "1bd63a64e6e5b52e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «pants base» · right inseam 862 onto 891",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «pants base» · left outseam 1066 onto 1099 — the engine sewed the two front outseams together",
+   "confidence": "sure",
+   "cls": "outseam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "1NWFRJFZ305FR4MF3ZWBMMKAJ7",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0.956,
+        0.001
+       ],
+       [
+        0.968,
+        0.252
+       ],
+       [
+        0.981,
+        0.502
+       ],
+       [
+        0.994,
+        0.753
+       ],
+       [
+        0.904,
+        1
+       ]
+      ],
+      "perimShare": 0.3889,
+      "lenMm": 1066,
+      "notches": 1,
+      "turnDeg": 47.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#0",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.075,
+        0.985
+       ],
+       [
+        0.011,
+        0.742
+       ],
+       [
+        0.032,
+        0.496
+       ],
+       [
+        0.038,
+        0.25
+       ],
+       [
+        0.043,
+        0.004
+       ]
+      ],
+      "perimShare": 0.3854,
+      "lenMm": 1098.9,
+      "notches": 1,
+      "turnDeg": 48.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#5",
+      "contourSig": "245ec2d82169178a"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «pants base» · left outseam 1066 onto 1099 — the engine sewed the two front outseams together",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «pants base» · right outseam 1066 onto 1099",
+   "confidence": "sure",
+   "cls": "outseam",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "7541Y1TCW7ZYC4JB3141ZZNYGB",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        0.096,
+        1
+       ],
+       [
+        0.006,
+        0.753
+       ],
+       [
+        0.019,
+        0.502
+       ],
+       [
+        0.032,
+        0.252
+       ],
+       [
+        0.044,
+        0.001
+       ]
+      ],
+      "perimShare": 0.3889,
+      "lenMm": 1066,
+      "notches": 1,
+      "turnDeg": 47.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#2",
+      "contourSig": "ee2da9b480bcf3ba"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.957,
+        0.004
+       ],
+       [
+        0.962,
+        0.25
+       ],
+       [
+        0.968,
+        0.496
+       ],
+       [
+        0.989,
+        0.742
+       ],
+       [
+        0.925,
+        0.985
+       ]
+      ],
+      "perimShare": 0.3854,
+      "lenMm": 1098.9,
+      "notches": 1,
+      "turnDeg": 48.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#0",
+      "contourSig": "1bd63a64e6e5b52e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «pants base» · right outseam 1066 onto 1099",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «right front panel with flap piece + left front panel with flap piece → front» · the rise 208 is sewn below the fly only: fly 142 mm (vee), notches at 135 (FP_L#2, from the waist) and 73 (FP_R#0, from the crotch) mark its bottom — crotch seam 73 = 73",
+   "confidence": "sure",
+   "cls": "front rise (below the fly)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "YCT7RXZWRQ3MXZQVP2MAGTXQCZ",
+    "status": "confirmed",
+    "kind": "partial",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0.118,
+        0.997
+       ],
+       [
+        0.106,
+        0.948
+       ],
+       [
+        0.093,
+        0.899
+       ],
+       [
+        0.075,
+        0.851
+       ],
+       [
+        0,
+        0.81
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0.6501,
+       1.0016
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#2",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        1,
+        0.81
+       ],
+       [
+        0.925,
+        0.851
+       ],
+       [
+        0.907,
+        0.899
+       ],
+       [
+        0.894,
+        0.948
+       ],
+       [
+        0.882,
+        0.997
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0,
+       0.3515
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#0",
+      "contourSig": "ee2da9b480bcf3ba"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «right front panel with flap piece + left front panel with flap piece → front» · the rise 208 is sewn below the fly only: fly 142 mm (vee), notches at 135 (FP_L#2, from the waist) and 73 (FP_R#0, from the crotch) mark its bottom — crotch seam 73 = 73",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the fly: the upper 135 mm of each rise edge, buttoned over the facing (FL, 3 drills) — a closure",
+   "confidence": "sure",
+   "cls": "fly closure",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "closure",
+   "row": {
+    "seamKey": "0PR0W4ERF33YPTQ5N363S5PTMC",
+    "status": "confirmed",
+    "kind": "closure",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0.118,
+        0.997
+       ],
+       [
+        0.106,
+        0.948
+       ],
+       [
+        0.093,
+        0.899
+       ],
+       [
+        0.075,
+        0.851
+       ],
+       [
+        0,
+        0.81
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0,
+       0.65
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#2",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        1,
+        0.81
+       ],
+       [
+        0.925,
+        0.851
+       ],
+       [
+        0.907,
+        0.899
+       ],
+       [
+        0.894,
+        0.948
+       ],
+       [
+        0.882,
+        0.997
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0.3515,
+       1.0014
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#0",
+      "contourSig": "ee2da9b480bcf3ba"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the fly: the upper 135 mm of each rise edge, buttoned over the facing (FL, 3 drills) — a closure",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «FL + PCK_R_XS+FP_R → right front panel with flap piece» · the fly facing (82 × 139, buttons 20 mm in on its free edge #2) on the right fly edge: 139 ≈ 135",
+   "confidence": "likely",
+   "cls": "fly facing / shield",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "YV3Y94J74SBT7RHPEVWSQYXX81",
+    "status": "confirmed",
+    "kind": "partial",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZP2N4CEA6BW938F76",
+      "samples": [
+       [
+        0.859,
+        0
+       ],
+       [
+        0.903,
+        0.236
+       ],
+       [
+        0.937,
+        0.474
+       ],
+       [
+        0.969,
+        0.711
+       ],
+       [
+        1,
+        0.948
+       ]
+      ],
+      "perimShare": 0.3167,
+      "lenMm": 138.9,
+      "notches": 0,
+      "turnDeg": 11.2,
+      "range": [
+       0,
+       1.0004
+      ],
+      "edgeHint": "01KZVA252ZP2N4CEA6BW938F76#0",
+      "contourSig": "9f468f88cc002d36"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        1,
+        0.81
+       ],
+       [
+        0.925,
+        0.851
+       ],
+       [
+        0.907,
+        0.899
+       ],
+       [
+        0.894,
+        0.948
+       ],
+       [
+        0.882,
+        0.997
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0.3515,
+       1.0016
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#0",
+      "contourSig": "ee2da9b480bcf3ba"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «FL + PCK_R_XS+FP_R → right front panel with flap piece» · the fly facing (82 × 139, buttons 20 mm in on its free edge #2) on the right fly edge: 139 ≈ 135",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «FL_1+FL_2 + PCK_L_XS+FP_L → left front panel with flap piece» · the two-ply shield on the left fly edge 135 = 135 (which shield edge: unknown)",
+   "confidence": "unsure",
+   "cls": "fly facing / shield",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "5YP5YZ2HTTT2Y0VJHSQQG090S6",
+    "status": "confirmed",
+    "kind": "partial",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252Z7SA9PCMT2GNX9BSA",
+      "samples": [
+       [
+        1,
+        0.053
+       ],
+       [
+        0.957,
+        0.289
+       ],
+       [
+        0.924,
+        0.526
+       ],
+       [
+        0.893,
+        0.763
+       ],
+       [
+        0.863,
+        1
+       ]
+      ],
+      "perimShare": 0.3133,
+      "lenMm": 135,
+      "notches": 0,
+      "turnDeg": -9.9,
+      "range": [
+       0,
+       1.0003
+      ],
+      "edgeHint": "01KZVA252Z7SA9PCMT2GNX9BSA#0",
+      "contourSig": "645085ce02322b34"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0.118,
+        0.997
+       ],
+       [
+        0.106,
+        0.948
+       ],
+       [
+        0.093,
+        0.899
+       ],
+       [
+        0.075,
+        0.851
+       ],
+       [
+        0,
+        0.81
+       ]
+      ],
+      "perimShare": 0.0758,
+      "lenMm": 207.7,
+      "notches": 1,
+      "turnDeg": -119.3,
+      "range": [
+       0,
+       0.6501
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#2",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «FL_1+FL_2 + PCK_L_XS+FP_L → left front panel with flap piece» · the two-ply shield on the left fly edge 135 = 135 (which shield edge: unknown)",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «FL_1 + FL_2 → left side flap» · the shield’s two plies along 135 = 135",
+   "confidence": "likely",
+   "cls": "ply bagging (fly shield)",
+   "bucket": "ply",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "72454R8D8XZGXHTKVXMDRMJNXT",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252Z961N0HM5WN3S5JZQ",
+      "samples": [
+       [
+        0.24,
+        1
+       ],
+       [
+        0.188,
+        0.761
+       ],
+       [
+        0.134,
+        0.523
+       ],
+       [
+        0.076,
+        0.285
+       ],
+       [
+        0,
+        0.047
+       ]
+      ],
+      "perimShare": 0.3809,
+      "lenMm": 135,
+      "notches": 0,
+      "turnDeg": -9.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z961N0HM5WN3S5JZQ#1",
+      "contourSig": "502659055a15d993"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252Z7SA9PCMT2GNX9BSA",
+      "samples": [
+       [
+        0,
+        0.946
+       ],
+       [
+        0.039,
+        0.71
+       ],
+       [
+        0.077,
+        0.474
+       ],
+       [
+        0.113,
+        0.237
+       ],
+       [
+        0.139,
+        0
+       ]
+      ],
+      "perimShare": 0.3133,
+      "lenMm": 135,
+      "notches": 0,
+      "turnDeg": -9.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z7SA9PCMT2GNX9BSA#2",
+      "contourSig": "645085ce02322b34"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «FL_1 + FL_2 → left side flap» · the shield’s two plies along 135 = 135",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «left back + right back → back» · back rise 303 = 303",
+   "confidence": "sure",
+   "cls": "back rise",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "97C0RQKS59ZF6NF361V16PQYSG",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        1,
+        0.787
+       ],
+       [
+        0.815,
+        0.804
+       ],
+       [
+        0.744,
+        0.866
+       ],
+       [
+        0.718,
+        0.933
+       ],
+       [
+        0.696,
+        1
+       ]
+      ],
+      "perimShare": 0.1062,
+      "lenMm": 302.7,
+      "notches": 0,
+      "turnDeg": -231.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#0",
+      "contourSig": "245ec2d82169178a"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.304,
+        1
+       ],
+       [
+        0.282,
+        0.933
+       ],
+       [
+        0.256,
+        0.866
+       ],
+       [
+        0.185,
+        0.804
+       ],
+       [
+        0,
+        0.787
+       ]
+      ],
+      "perimShare": 0.1062,
+      "lenMm": 302.7,
+      "notches": 0,
+      "turnDeg": -231.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#5",
+      "contourSig": "1bd63a64e6e5b52e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «left back + right back → back» · back rise 303 = 303",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «waistband + pants base → Pants» · band 877 onto the top CF → CF 286 + 139 + 122 + 122 + 139 + 286 = 1094 — the front waist pleats (notches 25 mm apart) do not account for all 217 mm: eased 20 %",
+   "confidence": "unsure",
+   "cls": "waistband ↔ waist (composite)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "DH7AFF99H81CGF48Z023G910Q6",
+    "status": "confirmed",
+    "kind": "composite",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZAQ5ARKVD63H30694",
+      "samples": [
+       [
+        0,
+        0.794
+       ],
+       [
+        0.218,
+        0.131
+       ],
+       [
+        0.522,
+        0
+       ],
+       [
+        0.82,
+        0.21
+       ],
+       [
+        1,
+        0.971
+       ]
+      ],
+      "perimShare": 0.5075,
+      "lenMm": 877.4,
+      "notches": 10,
+      "turnDeg": 447,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZAQ5ARKVD63H30694#3",
+      "contourSig": "d9a00330a9b1984e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZDEDVVT7ET1T6RCKQ",
+      "samples": [
+       [
+        0.882,
+        0.997
+       ],
+       [
+        0.686,
+        0.994
+       ],
+       [
+        0.489,
+        0.994
+       ],
+       [
+        0.292,
+        0.995
+       ],
+       [
+        0.096,
+        1
+       ]
+      ],
+      "perimShare": 0.1042,
+      "lenMm": 285.7,
+      "notches": 5,
+      "turnDeg": -26.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZDEDVVT7ET1T6RCKQ#1",
+      "contourSig": "ee2da9b480bcf3ba"
+     },
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.925,
+        0.985
+       ],
+       [
+        0.836,
+        0.984
+       ],
+       [
+        0.747,
+        0.984
+       ],
+       [
+        0.658,
+        0.986
+       ],
+       [
+        0.613,
+        0.987
+       ]
+      ],
+      "perimShare": 0.0488,
+      "lenMm": 139.1,
+      "notches": 1,
+      "turnDeg": -18.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#1+2+3",
+      "contourSig": "1bd63a64e6e5b52e"
+     },
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.613,
+        0.987
+       ],
+       [
+        0.535,
+        0.989
+       ],
+       [
+        0.458,
+        0.992
+       ],
+       [
+        0.381,
+        0.996
+       ],
+       [
+        0.304,
+        1
+       ]
+      ],
+      "perimShare": 0.0428,
+      "lenMm": 122,
+      "notches": 1,
+      "turnDeg": -15.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#4",
+      "contourSig": "1bd63a64e6e5b52e"
+     },
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.696,
+        1
+       ],
+       [
+        0.619,
+        0.996
+       ],
+       [
+        0.542,
+        0.992
+       ],
+       [
+        0.465,
+        0.989
+       ],
+       [
+        0.387,
+        0.987
+       ]
+      ],
+      "perimShare": 0.0428,
+      "lenMm": 122,
+      "notches": 1,
+      "turnDeg": -15.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#1",
+      "contourSig": "245ec2d82169178a"
+     },
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.387,
+        0.987
+       ],
+       [
+        0.342,
+        0.986
+       ],
+       [
+        0.253,
+        0.984
+       ],
+       [
+        0.164,
+        0.984
+       ],
+       [
+        0.075,
+        0.985
+       ]
+      ],
+      "perimShare": 0.0488,
+      "lenMm": 139.1,
+      "notches": 1,
+      "turnDeg": -18.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#2+3+4",
+      "contourSig": "245ec2d82169178a"
+     },
+     {
+      "piece": "01KZVA252ZQPPPE7JWQZN9KR2H",
+      "samples": [
+       [
+        0.904,
+        1
+       ],
+       [
+        0.708,
+        0.995
+       ],
+       [
+        0.511,
+        0.994
+       ],
+       [
+        0.314,
+        0.994
+       ],
+       [
+        0.118,
+        0.997
+       ]
+      ],
+      "perimShare": 0.1042,
+      "lenMm": 285.7,
+      "notches": 5,
+      "turnDeg": -26.6,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZQPPPE7JWQZN9KR2H#1",
+      "contourSig": "89d264f8634e937e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «waistband + pants base → Pants» · band 877 onto the top CF → CF 286 + 139 + 122 + 122 + 139 + 286 = 1094 — the front waist pleats (notches 25 mm apart) do not account for all 217 mm: eased 20 %",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the band's ends 35 = 35 at the CF, drills near one end — a closure",
+   "confidence": "unsure",
+   "cls": "waistband closure (CF)",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "closure",
+   "row": {
+    "seamKey": "PRFJBKZXN8DQ3JHSA8M9MZ8EP3",
+    "status": "confirmed",
+    "kind": "closure",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZAQ5ARKVD63H30694",
+      "samples": [
+       [
+        1,
+        0.971
+       ],
+       [
+        0.988,
+        0.979
+       ],
+       [
+        0.976,
+        0.986
+       ],
+       [
+        0.964,
+        0.993
+       ],
+       [
+        0.952,
+        1
+       ]
+      ],
+      "perimShare": 0.0202,
+      "lenMm": 35,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZAQ5ARKVD63H30694#0",
+      "contourSig": "d9a00330a9b1984e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZAQ5ARKVD63H30694",
+      "samples": [
+       [
+        0.047,
+        0.838
+       ],
+       [
+        0.036,
+        0.827
+       ],
+       [
+        0.024,
+        0.816
+       ],
+       [
+        0.012,
+        0.805
+       ],
+       [
+        0,
+        0.794
+       ]
+      ],
+      "perimShare": 0.0203,
+      "lenMm": 35.1,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZAQ5ARKVD63H30694#2",
+      "contourSig": "d9a00330a9b1984e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the band's ends 35 = 35 at the CF, drills near one end — a closure",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «WS + WS_1_XS → waistband» · the facing on the band’s outer edge — 781 vs 707: the facing block is the XS size, so the lengths do not match",
+   "confidence": "unsure",
+   "cls": "waistband facing",
+   "bucket": "lining",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "8DQZCC5G326XSNGPMK1733298Z",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZAQ5ARKVD63H30694",
+      "samples": [
+       [
+        0.952,
+        1
+       ],
+       [
+        0.786,
+        0.342
+       ],
+       [
+        0.519,
+        0.168
+       ],
+       [
+        0.248,
+        0.275
+       ],
+       [
+        0.047,
+        0.838
+       ]
+      ],
+      "perimShare": 0.4519,
+      "lenMm": 781.3,
+      "notches": 0,
+      "turnDeg": -443.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZAQ5ARKVD63H30694#1",
+      "contourSig": "d9a00330a9b1984e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VE7F9WNWKJ15KPKSCXMPVN",
+      "samples": [
+       [
+        0.948,
+        1
+       ],
+       [
+        0.782,
+        0.329
+       ],
+       [
+        0.521,
+        0.173
+       ],
+       [
+        0.256,
+        0.26
+       ],
+       [
+        0.051,
+        0.813
+       ]
+      ],
+      "perimShare": 0.4492,
+      "lenMm": 707.2,
+      "notches": 0,
+      "turnDeg": -434.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VE7F9WNWKJ15KPKSCXMPVN#1",
+      "contourSig": "d693236fcb7f62b9"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «WS + WS_1_XS → waistband» · the facing on the band’s outer edge — 781 vs 707: the facing block is the XS size, so the lengths do not match",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «PCK_L_#_1_XS + PCK_L_#_2 → left pocket piece» · the back welt pocket’s bag onto its facing 189 = 189",
+   "confidence": "likely",
+   "cls": "pocket bag",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "TBYA1XSPQK5R5TN933JK92FE7S",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252Z09PNB2PPCKHNKR4M",
+      "samples": [
+       [
+        0,
+        0.941
+       ],
+       [
+        0.243,
+        0.706
+       ],
+       [
+        0.486,
+        0.471
+       ],
+       [
+        0.728,
+        0.235
+       ],
+       [
+        0.971,
+        0
+       ]
+      ],
+      "perimShare": 0.4104,
+      "lenMm": 188.8,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z09PNB2PPCKHNKR4M#1",
+      "contourSig": "7f675f6e14d61170"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VE7F9WW26SRS3S1973TGER",
+      "samples": [
+       [
+        1,
+        0.507
+       ],
+       [
+        0.753,
+        0.63
+       ],
+       [
+        0.507,
+        0.753
+       ],
+       [
+        0.26,
+        0.877
+       ],
+       [
+        0.013,
+        1
+       ]
+      ],
+      "perimShare": 0.2707,
+      "lenMm": 188.8,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VE7F9WW26SRS3S1973TGER#0",
+      "contourSig": "fe8f29a682918b88"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «PCK_L_#_1_XS + PCK_L_#_2 → left pocket piece» · the back welt pocket’s bag onto its facing 189 = 189",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "technologist's order «PCK_R_#_1 + PCK_R_#_2_XS → right pocket piece» · 189 = 189",
+   "confidence": "likely",
+   "cls": "pocket bag",
+   "bucket": "main",
+   "status": "confirmed",
+   "kind": "seam",
+   "row": {
+    "seamKey": "B2RFEVTX7JYNMKG7VX5SZPYV16",
+    "status": "confirmed",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZT82EAVWPW6PSSGDV",
+      "samples": [
+       [
+        0.029,
+        0
+       ],
+       [
+        0.272,
+        0.235
+       ],
+       [
+        0.514,
+        0.471
+       ],
+       [
+        0.757,
+        0.706
+       ],
+       [
+        1,
+        0.941
+       ]
+      ],
+      "perimShare": 0.4104,
+      "lenMm": 188.8,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZT82EAVWPW6PSSGDV#2",
+      "contourSig": "d746277f8a0bf8c1"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01M1VE7F9WR4SX6J5VGMRBM72X",
+      "samples": [
+       [
+        0.987,
+        1
+       ],
+       [
+        0.74,
+        0.877
+       ],
+       [
+        0.493,
+        0.753
+       ],
+       [
+        0.247,
+        0.63
+       ],
+       [
+        0,
+        0.507
+       ]
+      ],
+      "perimShare": 0.2707,
+      "lenMm": 188.8,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01M1VE7F9WR4SX6J5VGMRBM72X#0",
+      "contourSig": "ce44d84ed46aa068"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "technologist's order «PCK_R_#_1 + PCK_R_#_2_XS → right pocket piece» · 189 = 189",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the two halves of the left back waist either side of the dart — not a seam",
+   "confidence": "sure",
+   "cls": "dart sides (self)",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "BAEMGJYBWR11HTTADECMJWABRX",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.696,
+        1
+       ],
+       [
+        0.619,
+        0.996
+       ],
+       [
+        0.542,
+        0.992
+       ],
+       [
+        0.465,
+        0.989
+       ],
+       [
+        0.387,
+        0.987
+       ]
+      ],
+      "perimShare": 0.0428,
+      "lenMm": 122,
+      "notches": 1,
+      "turnDeg": -15.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#1",
+      "contourSig": "245ec2d82169178a"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252YRDX4626G1JWSHRE2",
+      "samples": [
+       [
+        0.383,
+        0.987
+       ],
+       [
+        0.306,
+        0.985
+       ],
+       [
+        0.229,
+        0.984
+       ],
+       [
+        0.152,
+        0.984
+       ],
+       [
+        0.075,
+        0.985
+       ]
+      ],
+      "perimShare": 0.0423,
+      "lenMm": 120.7,
+      "notches": 1,
+      "turnDeg": -18.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252YRDX4626G1JWSHRE2#4",
+      "contourSig": "245ec2d82169178a"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the two halves of the left back waist either side of the dart — not a seam",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the two halves of the right back waist — not a seam",
+   "confidence": "sure",
+   "cls": "dart sides (self)",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "PKB7BXDFPMXE652YB18960CT93",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.925,
+        0.985
+       ],
+       [
+        0.848,
+        0.984
+       ],
+       [
+        0.771,
+        0.984
+       ],
+       [
+        0.694,
+        0.985
+       ],
+       [
+        0.617,
+        0.987
+       ]
+      ],
+      "perimShare": 0.0423,
+      "lenMm": 120.7,
+      "notches": 1,
+      "turnDeg": -18.2,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#1",
+      "contourSig": "1bd63a64e6e5b52e"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZJDYCFX8H2PVDGMBH",
+      "samples": [
+       [
+        0.613,
+        0.987
+       ],
+       [
+        0.535,
+        0.989
+       ],
+       [
+        0.458,
+        0.992
+       ],
+       [
+        0.381,
+        0.996
+       ],
+       [
+        0.304,
+        1
+       ]
+      ],
+      "perimShare": 0.0428,
+      "lenMm": 122,
+      "notches": 1,
+      "turnDeg": -15.1,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZJDYCFX8H2PVDGMBH#4",
+      "contourSig": "1bd63a64e6e5b52e"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the two halves of the right back waist — not a seam",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the left pocket piece onto the right one — two pockets",
+   "confidence": "sure",
+   "cls": "two pockets L↔R",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "S396E6YWJRW6DX8E95FE77EDNB",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252Z09PNB2PPCKHNKR4M",
+      "samples": [
+       [
+        0.929,
+        1
+       ],
+       [
+        0.697,
+        0.986
+       ],
+       [
+        0.465,
+        0.972
+       ],
+       [
+        0.232,
+        0.954
+       ],
+       [
+        0,
+        0.941
+       ]
+      ],
+      "perimShare": 0.2861,
+      "lenMm": 131.6,
+      "notches": 2,
+      "turnDeg": -6.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z09PNB2PPCKHNKR4M#0",
+      "contourSig": "7f675f6e14d61170"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZT82EAVWPW6PSSGDV",
+      "samples": [
+       [
+        1,
+        0.941
+       ],
+       [
+        0.768,
+        0.954
+       ],
+       [
+        0.535,
+        0.972
+       ],
+       [
+        0.303,
+        0.986
+       ],
+       [
+        0.071,
+        1
+       ]
+      ],
+      "perimShare": 0.2861,
+      "lenMm": 131.6,
+      "notches": 2,
+      "turnDeg": -6.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZT82EAVWPW6PSSGDV#0",
+      "contourSig": "d746277f8a0bf8c1"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the left pocket piece onto the right one — two pockets",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "the left pocket piece onto the right one — two pockets",
+   "confidence": "sure",
+   "cls": "two pockets L↔R",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "5SH3BAKNGAY7QPF2J78P23KBBQ",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252Z09PNB2PPCKHNKR4M",
+      "samples": [
+       [
+        0.971,
+        0
+       ],
+       [
+        0.997,
+        0.244
+       ],
+       [
+        0.99,
+        0.497
+       ],
+       [
+        0.963,
+        0.749
+       ],
+       [
+        0.929,
+        1
+       ]
+      ],
+      "perimShare": 0.3035,
+      "lenMm": 139.6,
+      "notches": 2,
+      "turnDeg": 58.8,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z09PNB2PPCKHNKR4M#2",
+      "contourSig": "7f675f6e14d61170"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252ZT82EAVWPW6PSSGDV",
+      "samples": [
+       [
+        0.071,
+        1
+       ],
+       [
+        0.037,
+        0.749
+       ],
+       [
+        0.01,
+        0.497
+       ],
+       [
+        0.003,
+        0.244
+       ],
+       [
+        0.029,
+        0
+       ]
+      ],
+      "perimShare": 0.3035,
+      "lenMm": 139.6,
+      "notches": 2,
+      "turnDeg": 58.7,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZT82EAVWPW6PSSGDV#1",
+      "contourSig": "d746277f8a0bf8c1"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "the left pocket piece onto the right one — two pockets",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  },
+  {
+   "derivation": "a back pocket piece onto the fly shield",
+   "confidence": "sure",
+   "cls": "pocket ↔ fly shield",
+   "bucket": "main",
+   "status": "rejected",
+   "kind": "seam",
+   "row": {
+    "seamKey": "6PVYP5MMJ8AKFWVN0WPNNHV89R",
+    "status": "rejected",
+    "kind": "edge",
+    "direction": "reversed",
+    "source": "manual",
+    "sideA": [
+     {
+      "piece": "01KZVA252ZT82EAVWPW6PSSGDV",
+      "samples": [
+       [
+        0.029,
+        0
+       ],
+       [
+        0.272,
+        0.235
+       ],
+       [
+        0.514,
+        0.471
+       ],
+       [
+        0.757,
+        0.706
+       ],
+       [
+        1,
+        0.941
+       ]
+      ],
+      "perimShare": 0.4104,
+      "lenMm": 188.8,
+      "notches": 0,
+      "turnDeg": 0,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252ZT82EAVWPW6PSSGDV#2",
+      "contourSig": "d746277f8a0bf8c1"
+     }
+    ],
+    "sideB": [
+     {
+      "piece": "01KZVA252Z7SA9PCMT2GNX9BSA",
+      "samples": [
+       [
+        1,
+        0.053
+       ],
+       [
+        0.957,
+        0.289
+       ],
+       [
+        0.924,
+        0.526
+       ],
+       [
+        0.893,
+        0.763
+       ],
+       [
+        0.863,
+        1
+       ]
+      ],
+      "perimShare": 0.3133,
+      "lenMm": 135,
+      "notches": 0,
+      "turnDeg": -9.9,
+      "range": [
+       0,
+       1
+      ],
+      "edgeHint": "01KZVA252Z7SA9PCMT2GNX9BSA#0",
+      "contourSig": "645085ce02322b34"
+     }
+    ],
+    "anchoredSize": "M",
+    "note": "a back pocket piece onto the fly shield",
+    "createdBy": "truth fixture (metrics)",
+    "updatedBy": "truth fixture (metrics)",
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z"
+   }
+  }
+ ]
+}

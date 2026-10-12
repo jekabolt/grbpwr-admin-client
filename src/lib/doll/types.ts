@@ -9,7 +9,13 @@
 // Pure TS, no DOM, no React: the solver runs in a worker (worker/doll.worker.ts) and in node probes
 // (scripts/doll/*). The main thread imports ONLY this file.
 
-import type { EdgeId, SeamCandidate, SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
+import type {
+  EdgeId,
+  SeamAssignmentInput,
+  SeamCandidate,
+  SeamGraph,
+  SkeletonFacts,
+} from 'lib/assembly-skeleton/types';
 import type { SizePieces } from 'lib/seams/transfer';
 import type { StoredSeam } from 'lib/seams/types';
 
@@ -42,6 +48,11 @@ export type DollOptions = {
    * proposed «from the technologist's order». See joins.ts (joinsFromOps).
    */
   joins?: DeclaredJoin[];
+  /**
+   * Pieces the order sets as hardware (HARDWARE_SET: an elastic, a tape — joins.ts
+   * hardwareFromOps): listed, never drawn as a panel or sewn as a seam.
+   */
+  hardware?: { label: string; pieces: string[] }[];
   /** Call every ~20 passes with the current positions (the worker posts frames from it). */
   onFrame?: (positions: Float32Array, pass: number) => void;
   /**
@@ -61,6 +72,11 @@ export type DollOptions = {
   seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
+  /**
+   * Who assigned the graph's edges (lib/assembly-skeleton/assignment): handed to readSeamGraph when
+   * the doll re-reads the graph itself (L4, stored rows), so the re-read matches `input.graph`.
+   */
+  assignment?: SeamAssignmentInput;
 };
 
 export type DollInput = {
@@ -191,6 +207,18 @@ export type DollReport = {
   orderJoins: { join: string; seam: string; note: string }[];
   /** Declared join parts sewn onto a panel's face (flap, welt, patch): no edge seam to draw. */
   orderSurface: { join: string; part: string[] }[];
+  /**
+   * Surface pieces (a fly, a pocket bag, a flap): the panel the order sews each onto, and where on
+   * it the doll laid it — or why it did not. Laid ones are panels of their host's group, drawn under
+   * its face, never solved.
+   */
+  surface?: {
+    pieceKey: string;
+    host: string | null;
+    join: string | null;
+    placed: boolean;
+    note: string;
+  }[];
   /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
   collar?: DollCollarReport;
   /** The honesty line every view carries. */

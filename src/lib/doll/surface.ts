@@ -1,0 +1,242 @@
+// SURFACE PIECES — a fly, a pocket bag, a flap sewn onto a panel's face, not edge to edge.
+//
+// Which panel carries one is read from the technologist's order (the first join that sews it to a
+// drawn panel); where on that panel from the drawing: a mark inside the panel the piece's size (a
+// fly's J-stitch, a pocket's placement line), else the panel corner the piece fits — its two edges
+// along the panel's two edges, the piece kept face up (grain within 20°), wholly on the panel. The
+// piece is then lifted onto the solved panel (barycentric, a couple of mm under its face — inside the garment): it is
+// drawn where it is sewn, not solved, and its place is a reading, said in words.
+
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+
+import type { DeclaredJoin } from './joins';
+import { pointInPolygon } from './mesh';
+
+export type SurfaceHost = { host: string; join: string };
+
+/**
+ * The panel each surface piece is sewn onto, from the order: the first join (in the order's
+ * sequence) whose other side holds a drawn panel — the largest of them when it holds several.
+ */
+export function surfaceHosts(
+  surface: readonly string[],
+  joins: readonly DeclaredJoin[],
+  drawnArea: ReadonlyMap<string, number>,
+): Map<string, SurfaceHost> {
+  const out = new Map<string, SurfaceHost>();
+  for (const k of surface)
+    for (const J of joins) {
+      const mine = J.parts.findIndex((X) => X.includes(k));
+      if (mine < 0) continue;
+      let best: string | null = null;
+      for (const [i, X] of J.parts.entries()) {
+        if (i === mine) continue;
+        for (const o of X)
+          if (drawnArea.has(o) && (!best || drawnArea.get(o)! > drawnArea.get(best)!)) best = o;
+      }
+      if (best) {
+        out.set(k, { host: best, join: J.label });
+        break;
+      }
+    }
+  return out;
+}
+
+export type SurfaceFit = {
+  /** Piece frame → host frame. */
+  map: (p: Pt2) => Pt2;
+  /** The piece lies face down (mirrored) on the host. */
+  flip: boolean;
+  /** Share of the piece's contour on the host panel. */
+  cover: number;
+  /** How the place was read, in words. */
+  how: string;
+};
+
+const box = (pts: readonly Pt2[]) => {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of pts) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+};
+
+const segD = (p: Pt2, a: Pt2, b: Pt2) => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]);
+};
+const ringD = (p: Pt2, ring: readonly Pt2[]) => {
+  let d = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++)
+    d = Math.min(d, segD(p, ring[j], ring[i]));
+  return d;
+};
+
+/** Share of `pts` on the polygon `ring` (inside, or within 3 mm of its line). */
+function coverOf(pts: readonly Pt2[], ring: readonly Pt2[]): number {
+  let n = 0;
+  for (const p of pts) if (pointInPolygon(p, ring) || ringD(p, ring) <= 3) n++;
+  return pts.length ? n / pts.length : 0;
+}
+
+const wrap = (a: number) => {
+  let x = a;
+  while (x > Math.PI) x -= 2 * Math.PI;
+  while (x < -Math.PI) x += 2 * Math.PI;
+  return x;
+};
+const DEG = Math.PI / 180;
+
+/** Point `d` mm along the ring from index i, forward (+1) or back (−1), stopping at index `stop`. */
+function along(ring: readonly Pt2[], i: number, dir: 1 | -1, d: number, stop: number): Pt2 {
+  const n = ring.length;
+  let at = i;
+  let left = d;
+  for (let guard = 0; guard < n; guard++) {
+    const nx = (at + dir + n) % n;
+    const a = ring[at];
+    const b = ring[nx];
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (l >= left) {
+      const t = left / Math.max(1e-9, l);
+      return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    }
+    left -= l;
+    at = nx;
+    if (at === stop) return ring[at];
+  }
+  return ring[at];
+}
+
+type Corner = { p: Pt2; out: number; in: number; y: number };
+
+/** Corners (edge starts) of a CCW ring: the directions of the edge leaving and the edge arriving. */
+function cornersOf(ring: readonly Pt2[], idx: readonly number[]): Corner[] {
+  const s = [...new Set(idx)].sort((a, b) => a - b);
+  return s.map((i, k) => {
+    const next = s[(k + 1) % s.length];
+    const prev = s[(k - 1 + s.length) % s.length];
+    const p = ring[i];
+    const o = along(ring, i, 1, 25, next);
+    const b = along(ring, i, -1, 25, prev);
+    return {
+      p,
+      out: Math.atan2(o[1] - p[1], o[0] - p[0]),
+      in: Math.atan2(b[1] - p[1], b[0] - p[0]),
+      y: p[1],
+    };
+  });
+}
+
+/**
+ * Where the surface piece `S` lies on its host `H`, in H's frame: by a mark of the piece's size
+ * inside H, else by the corner of H it fits. Null when neither puts it on the panel.
+ */
+export function surfaceFit(S: PieceGeom, H: PieceGeom): SurfaceFit | null {
+  const sb = box(S.rs);
+  const hb = box(H.rs);
+  // 1. A mark inside the host the piece's height: its own outline; its stitch line (a fly's J
+  //    sews the fly on along its inner edge — the fly, a shield folded double, reaches from there to
+  //    the centre front: up to twice the stitch line's width); or a pocket's placement outline the
+  //    pocket bag fills from the panel's edge (half the outline's width or more).
+  let mark: { x0: number; x1: number; cy: number; w: number; e: number; kind: string } | null =
+    null;
+  for (const m of H.marks ?? []) {
+    if (m.kind !== 'vee' && m.kind !== 'placement' && m.kind !== 'other') continue;
+    const { w, h, cx, cy } = m.bbox;
+    if (w < 30 || h < 30 || w > 0.8 * hb.w || h > 0.8 * hb.h) continue;
+    const eh = Math.abs(h - sb.h) / sb.h;
+    const r = sb.w / w;
+    if (eh > 0.08 || r < 0.5 || r > 2.1) continue;
+    const e = eh + 0.1 * Math.abs(Math.log(r));
+    if (!mark || e < mark.e) mark = { x0: cx - w / 2, x1: cx + w / 2, cy, w, e, kind: m.kind };
+  }
+  if (mark) {
+    // A piece of the mark's width sits on it; a wider or a narrower one reaches the panel's edge
+    // nearer the mark (wider: from the mark's far side; narrower: from its near side).
+    const cx = (mark.x0 + mark.x1) / 2;
+    const leftNear = ringD([mark.x0, mark.cy], H.rs) <= ringD([mark.x1, mark.cy], H.rs);
+    const wide = sb.w > 1.1 * mark.w;
+    const narrow = sb.w < 0.9 * mark.w;
+    const tx = wide
+      ? leftNear
+        ? mark.x1 - sb.x1
+        : mark.x0 - sb.x0
+      : narrow
+        ? leftNear
+          ? mark.x0 - sb.x0
+          : mark.x1 - sb.x1
+        : cx - (sb.x0 + sb.x1) / 2;
+    const dy = mark.cy - (sb.y0 + sb.y1) / 2;
+    const map = (p: Pt2): Pt2 => [p[0] + tx, p[1] + dy];
+    const cover = coverOf(S.rs.map(map), H.rs);
+    if (cover >= (wide ? 0.45 : 0.6))
+      return {
+        map,
+        flip: false,
+        cover,
+        how: `on the ${mark.kind === 'vee' ? 'stitch line' : 'placement mark'} drawn on it (piece ${Math.round(sb.w)}×${Math.round(sb.h)} mm, mark ${Math.round(mark.w)} mm wide, heights within ${Math.round(100 * mark.e)} %)${wide && cover < 0.95 ? ` — ${Math.round(100 * (1 - cover))} % of it reaches past the panel's edge (a shield folded under the other side) and is drawn pressed onto that edge` : ''}`,
+      };
+  }
+  // 2. The corner of the host the piece fits: a corner of the piece with its two edges along the
+  //    two edges of a host corner, face up (or face down — penalised), wholly on the panel.
+  const hc = cornersOf(
+    H.rs,
+    H.edges.map((e) => e.s),
+  );
+  let best: (SurfaceFit & { score: number }) | null = null;
+  for (const flip of [false, true]) {
+    const ring: Pt2[] = flip ? S.rs.map(([x, y]) => [-x, y] as Pt2).reverse() : S.rs.slice();
+    const n = S.rs.length;
+    const idx = S.edges.map((e) => (flip ? (n - 1 - e.s + n) % n : e.s));
+    const sc = cornersOf(ring, idx);
+    for (const a of sc)
+      for (const b of hc) {
+        const angA = wrap(a.in - a.out);
+        const angB = wrap(b.in - b.out);
+        const mismatch = Math.abs(wrap(angA - angB));
+        if (mismatch > 25 * DEG) continue;
+        for (const th of [wrap(b.out - a.out), wrap(b.in - a.in)]) {
+          if (Math.abs(th) > 20 * DEG) continue;
+          const c = Math.cos(th);
+          const s = Math.sin(th);
+          const map0 = (p: Pt2): Pt2 => {
+            const x = p[0] - a.p[0];
+            const y = p[1] - a.p[1];
+            return [b.p[0] + c * x - s * y, b.p[1] + s * x + c * y];
+          };
+          const cover = coverOf(ring.map(map0), H.rs);
+          if (cover < 0.9) continue;
+          // Ties (a rectangle fits every square corner): the corner nearer the waist / top wins —
+          // pockets and flies open at the top of a panel.
+          const top = (b.y - hb.y0) / Math.max(1, hb.h);
+          const score =
+            cover -
+            mismatch / (90 * DEG) -
+            Math.abs(th) / (60 * DEG) +
+            0.1 * top -
+            (flip ? 0.15 : 0);
+          if (!best || score > best.score + 1e-9) {
+            const map = flip ? (p: Pt2): Pt2 => map0([-p[0], p[1]]) : map0;
+            best = {
+              map,
+              flip,
+              cover,
+              score,
+              how: `no placement mark on it — laid into the panel corner it fits (${Math.round((angB / DEG + 360) % 360)}° corner at ${top > 0.66 ? 'the top' : top < 0.33 ? 'the bottom' : 'mid-height'} of the panel${flip ? ', face down' : ''}): a reading of the shapes, not a drawn position`,
+            };
+          }
+        }
+      }
+  }
+  return best ? { map: best.map, flip: best.flip, cover: best.cover, how: best.how } : null;
+}

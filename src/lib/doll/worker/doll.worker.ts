@@ -97,7 +97,16 @@ self.onmessage = async (ev: MessageEvent<DollWorkerRequest>) => {
     }
     const { input } = req;
     const t0 = now();
-    const graph = input.graph ?? readSeamGraph(input.facts);
+    const graph =
+      input.graph ??
+      readSeamGraph(
+        input.facts,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        input.options?.assignment,
+      );
     const graphMs = now() - t0;
     const seams = input.options?.seams;
     const report = solveDoll({
