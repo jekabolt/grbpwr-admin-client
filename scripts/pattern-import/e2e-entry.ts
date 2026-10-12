@@ -585,6 +585,8 @@ export type CaseHooks = {
   onPieces?: (s: Session) => void;
   /** A2 probe: the automatic pieces run (text + face seeds, no operator answer yet). */
   onAutoPieces?: (s: Session, out: StageIO['pieces']['out']) => void;
+  /** MOOD probe: the session and the write stage's output once every scope is written and gated. */
+  onWrite?: (s: Session, out: StageIO['write']['out']) => void;
 };
 
 export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
@@ -1725,6 +1727,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       });
     }
     rec.write = scopes;
+    hooks.onWrite?.(s, wr);
     const tc = truthCheckOf(c, (rec.semFinal as { pieceInfo: PieceInfo[] }).pieceInfo);
     if (tc) {
       rec.truthCheck = tc;

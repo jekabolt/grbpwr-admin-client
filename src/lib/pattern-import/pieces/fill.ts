@@ -531,7 +531,9 @@ function fillOneSheet(
 ): { families: PieceFamily[]; diag: FillDiag } {
   const t0 = Date.now();
   const cell = opts.cellMm || PATIMPORT.fillCellMm;
-  const model = solved ? SOLVER_MODEL : wallModel(set, run, sheet.texts);
+  const model = solved
+    ? SOLVER_MODEL
+    : wallModel(set, run, sheet.texts, new Map(sheet.styles.map((s) => [s.id, s])));
   const use = seeds.filter(
     (s) => opts.variant == null || s.variant == null || s.variant === opts.variant,
   );

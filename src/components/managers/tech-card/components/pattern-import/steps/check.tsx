@@ -53,6 +53,8 @@ const CHECK: Record<GateCheckId, { what: string; fix: WizardStep | null }> = {
     what: 'a size closed through another line keeps its proof (the line, the rule, the check)',
     fix: 'pieces',
   },
+  'G22-identity': { what: "each size lies on its own size line (the key's pen)", fix: 'sizes' },
+  'G24-one-piece': { what: 'one outline holds one piece', fix: 'pieces' },
   'G23-sheets': {
     what: 'every tile sheet of the file is in the export — no piece left out, twice or in halves',
     fix: 'pieces',

@@ -180,7 +180,7 @@ export function faceWalls(
   set: ChainSet,
   run: SizeRun,
 ): { items: WallItem[]; weak: WallItem[]; model: ReturnType<typeof wallModel> } {
-  const model = wallModel(set, run, sheet.texts);
+  const model = wallModel(set, run, sheet.texts, new Map(sheet.styles.map((s) => [s.id, s])));
   const rescued = rescuedIgnored(
     set,
     model,
